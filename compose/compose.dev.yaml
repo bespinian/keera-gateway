@@ -1,0 +1,24 @@
+# Publishes the ports a host-run gateway has to reach. Used by `make dev`,
+# which is the intended entry point:
+#
+#   podman compose -f compose.yaml -f compose.cpu.yaml -f compose.dev.yaml \
+#     up -d keera-db keera-engine
+#
+# The target names only those two services on purpose. Under this file the
+# gateway is the thing being edited - it runs on the host under air - so the
+# containerised one would just fight it for :8080.
+#
+# Both ports are bound to loopback, and both are closed in every other file
+# here. Port 8000 especially: the deployment files leave it unpublished because
+# neither vLLM's nor llama.cpp's OpenAI server has any authentication, so
+# whatever can reach it has bypassed the gateway's keys, budgets and audit
+# entirely. On a development machine, reachable only from loopback, that is a
+# reasonable trade. It is not one to copy into a deployment.
+services:
+  keera-db:
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  keera-engine:
+    ports:
+      - "127.0.0.1:8000:8000"

@@ -1,0 +1,30 @@
+# Weekly, and grouped per ecosystem, so updates arrive as a few pull requests
+# rather than one per dependency. Security updates are not grouped and still
+# arrive as soon as an advisory is published.
+version: 2
+
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      go:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # The gateway's build stage and the sandbox base image.
+  - package-ecosystem: docker
+    directories: ["/", "/sandbox"]
+    schedule:
+      interval: weekly
+    groups:
+      images:
+        patterns: ["*"]

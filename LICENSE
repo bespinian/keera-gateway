@@ -1,0 +1,276 @@
+# Keera Community Licence v1.0
+
+Copyright © 2026 bespinian GmbH
+
+This licence governs your use of the Keera software and its source code (the **“Software”**).
+
+It makes Keera’s source code available for inspection, modification, Community Use, and redistribution under the conditions below, while reserving production use by for-profit and public sector organisations, and Hosted Services, for Keera’s commercial offerings.
+
+By using, copying, modifying, or distributing the Software, you agree to this licence.
+
+## 1. Definitions
+
+**“Licensor”** means bespinian GmbH.
+
+**“You”** means the individual or legal entity exercising rights under this licence.
+
+**“Production Use”** means use of the Software in an ongoing real-world operation, product, service, infrastructure, or business process.
+
+Production Use includes, for example, processing operational data, serving employees or customers, or protecting, routing, auditing, monitoring, or controlling production AI workloads.
+
+Development, testing, evaluation, demonstrations, proofs of concept, education, and research are not Production Use unless the Software is also relied upon for ongoing production operations.
+
+**“Non-Commercial Use”** means use that is not primarily intended to obtain a commercial advantage, generate revenue, support the commercial operations of a for-profit organisation, or provide paid products or services to third parties.
+
+Internal Production Use by a for-profit organisation is commercial use even if access to the Software is not sold or separately charged for.
+
+Production Use by a Public Sector Organisation is not Non-Commercial Use, even where it generates no revenue or serves a public interest.
+
+**“Non-Profit Organisation”** means an organisation that:
+
+1. is organised and operated on a not-for-profit basis;
+2. does not distribute profits or surplus income to owners, shareholders, or members;
+3. is not controlled primarily for the commercial benefit of a for-profit organisation; and
+4. is not a Public Sector Organisation.
+
+A Public Sector Organisation is not a Non-Profit Organisation for the purposes of this licence, even where it operates on a not-for-profit basis.
+
+**“Public Sector Organisation”** means an entity that:
+
+1. is a government, public authority, agency, ministry, or public administration at any supranational, international, national, federal, cantonal, regional, or municipal level;
+2. is established, governed, or incorporated under public law; or
+3. is owned or controlled, directly or indirectly, by one or more entities described above.
+
+Public universities, universities of applied sciences, public research institutes, public hospitals and schools, public utilities and transport operators, state-owned enterprises, and intergovernmental or international organisations are Public Sector Organisations.
+
+An organisation established under private law does not become a Public Sector Organisation merely because it receives public funding, grants, subsidies, or contracts.
+
+**“Licensed Production Use”** means Production Use by a for-profit organisation or by a Public Sector Organisation.
+
+Licensed Production Use requires a commercial agreement with the Licensor under Section 3.
+
+**“Hosted Service”** means a hosted, managed, SaaS, cloud, platform, outsourcing, bureau, or similar service whose purpose or material value includes providing a third party with:
+
+1. access to the Software itself;
+2. access to its administrative, operational, gateway, or platform functionality; or
+3. functionality substantially equivalent to the Software as a product or service,
+
+including where the Software is operated on behalf of that third party.
+
+Use of the Software as an internal component of a materially distinct application, product, or service does not by itself constitute a Hosted Service merely because third parties use or receive the output of that application, product, or service.
+
+A wrapper, API, integration, embedding, rebranding, or bundling does not make a service materially distinct where its purpose or material value is to provide access to the Software or substantially the same functionality.
+
+**“Corresponding Source”** means the source code for the Software and any modifications distributed with it, together with the files reasonably necessary to build, install, and modify that version of the Software. It does not include generally available system software or third-party dependencies normally obtained separately.
+
+## 2. Community Licence Grant
+
+Subject to this licence, the Licensor grants you a worldwide, royalty-free, non-exclusive licence to:
+
+* access and inspect the source code;
+* copy the Software;
+* modify the Software and create derivative works;
+* run the Software for the uses permitted below; and
+* redistribute the Software or your modifications as permitted by Section 4.
+
+You may use the Software without a commercial agreement for the following purposes.
+
+### Personal Non-Commercial Use
+
+An individual may use the Software for personal purposes, including Production Use, provided that the use is Non-Commercial Use.
+
+Personal use does not include use for or on behalf of a business, employer, customer, client, or other organisation where that use would otherwise constitute Licensed Production Use.
+
+### Development, Testing, and Evaluation
+
+You may use the Software for development, integration, automated testing, interoperability testing, proofs of concept, demonstrations, and evaluation.
+
+A for-profit organisation or a Public Sector Organisation may use the Software for these purposes provided that the Software is not relied upon for Production Use.
+
+### Education and Research
+
+You may use the Software for teaching, learning, academic or scientific research, workshops, training, demonstrations, and similar non-commercial activities.
+
+A Public Sector Organisation, including a public university or research institute, may use the Software for these purposes provided that the Software is not relied upon for Production Use.
+
+Operating the Software as shared or institutional infrastructure, for example as a gateway, platform, or service used across an organisation’s staff, students, patients, or operations, is Production Use and requires a commercial agreement under Section 3 where the organisation is a Public Sector Organisation.
+
+### Non-Profit Organisations
+
+A Non-Profit Organisation may use the Software, including for Production Use, for activities that further its non-profit purpose.
+
+This permission does not extend to Public Sector Organisations.
+
+These permissions are collectively referred to as **“Community Use.”**
+
+All Community Use remains subject to the Hosted Service restriction in Section 3.
+
+## 3. Licensed Production Use and Hosted Services
+
+### Production Use Requiring a Commercial Agreement
+
+Licensed Production Use is not permitted under this licence.
+
+Such use is permitted only while covered by:
+
+* an active **Keera Enterprise subscription**, which includes the applicable commercial licence and support; or
+* another written commercial agreement with the Licensor that expressly authorises the use.
+
+The organisation’s size, revenue, funding model, legal form, public-interest or statutory purpose, deployment size, number of users, or method of deployment does not change this requirement unless the Licensor agrees otherwise in writing.
+
+### Hosted and Managed Services
+
+You may not provide a Hosted Service without a separate written commercial agreement with the Licensor that expressly authorises it.
+
+In particular, you may not, without such an agreement:
+
+* offer the Software itself as a hosted or managed service;
+* give third parties access to the Software or a substantial part of its functionality as a service;
+* operate the Software for customers as a generally available managed service;
+* white-label or rebrand the Software as a hosted service; or
+* expose the Software’s functionality through another product, API, wrapper, integration, or service where doing so provides substantially the same functionality to third parties.
+
+This restriction applies whether the Hosted Service is paid or unpaid and whether the Software is offered separately or bundled with other products or services.
+
+For clarity, using the Software internally to support a materially distinct product or service does not by itself constitute a Hosted Service merely because customers or other third parties use that product or service.
+
+### Contractors and Service Providers
+
+A contractor, consultant, cloud provider, or other service provider may operate the Software solely on behalf of a customer that already has the right to use the Software.
+
+Where the customer’s use is Licensed Production Use, the customer must have an active Keera Enterprise subscription or another applicable commercial agreement.
+
+This permission does not allow the service provider to offer Keera as its own generally available Hosted Service.
+
+You may not structure your use through affiliates, contractors, separate deployments, accounts, entities, or other arrangements primarily to circumvent the restrictions of this licence.
+
+## 4. Modification and Distribution
+
+You may modify the Software for Community Use.
+
+Modification does not remove or reduce the restrictions of this licence. A modified, forked, translated, renamed, rebranded, embedded, or otherwise altered version remains subject to this licence to the extent that it contains or is derived from the Software.
+
+You may redistribute the Software or your modifications only if you:
+
+1. include a complete copy of this licence;
+2. preserve applicable copyright, licence, and attribution notices;
+3. clearly state that the Software is licensed under the Keera Community Licence;
+4. clearly identify material modifications you have made;
+5. grant recipients the rights under this licence necessary to use your modifications as part of the modified Software; and
+6. do not impose terms that restrict or purport to replace the rights and restrictions of this licence with respect to the Software.
+
+If you distribute the Software or a modified version in executable, object-code, container-image, or other non-source form, you must also make its Corresponding Source available to the recipients at no additional licence fee.
+
+The Corresponding Source may be provided with the distribution or through a reasonably accessible download location.
+
+You are not required to publish or disclose modifications that you do not distribute.
+
+Redistribution does not give a recipient permission for Licensed Production Use or Hosted Services.
+
+You may not sell, sublicense, or commercially distribute the Software itself as a standalone product without the Licensor’s written permission.
+
+You may charge for installation, integration, development, consulting, training, or other professional services where the underlying use of the Software is otherwise permitted by this licence or an applicable commercial agreement.
+
+## 5. Intellectual Property and Contributions
+
+### Ownership
+
+The Software is licensed, not sold.
+
+The Licensor and its contributors retain all rights, title, and interest in the Software except for the rights expressly granted under this licence.
+
+You retain ownership of your original modifications and contributions, subject to the Licensor’s rights in the underlying Software and the conditions of this licence.
+
+### Contributions
+
+If you intentionally submit source code, documentation, or another work to the Licensor for inclusion in the Software, including through a pull request or similar contribution process, you grant the Licensor a perpetual, worldwide, irrevocable, royalty-free, non-exclusive, transferable, and sublicensable licence to:
+
+* use, reproduce, modify, prepare derivative works from, distribute, and publicly display the contribution;
+* include the contribution in the Software;
+* license or sublicense the contribution under this licence, a commercial licence, or other licence terms; and
+* exercise any other copyright rights necessary to use and distribute the contribution as part of the Software.
+
+You also grant the Licensor a perpetual, worldwide, royalty-free, transferable, and sublicensable licence under any patent claims that you have the right to license and that are necessarily infringed by the contribution or its inclusion in the Software.
+
+You represent that you have the right to grant these permissions for contributions you submit.
+
+Submitting a contribution does not transfer ownership of your contribution to the Licensor unless you separately agree to such a transfer in writing.
+
+### Patent Licence
+
+Subject to the conditions of this licence, the Licensor grants you a worldwide, royalty-free, non-exclusive licence under any patent claims that the Licensor has the right to license and that are necessarily infringed by your permitted use of the Software.
+
+This patent licence grants no rights beyond the uses otherwise permitted by this licence.
+
+If you initiate patent litigation alleging that the Software infringes a patent, the patent rights granted to you under this section terminate when that litigation is filed.
+
+### Trademarks
+
+This licence does not grant rights to the Keera name, trademarks, service marks, logos, branding, or trade dress of the Licensor.
+
+You may truthfully state that software is based on, compatible with, integrates with, or is derived from Keera where applicable.
+
+You may not use Keera branding in a way that suggests endorsement, certification, sponsorship, official status, or affiliation without the Licensor’s written permission.
+
+### Separately Licensed and Third-Party Components
+
+Files or components that expressly state that they are governed by another licence are governed by that licence instead of this licence to the extent stated.
+
+The Software may also contain third-party software, libraries, assets, models, data, or other components governed by separate licences.
+
+Those components remain subject to their respective licence terms. Nothing in this licence restricts additional rights granted to you directly under a separate or third-party licence.
+
+## 6. Termination
+
+Your rights under this licence terminate automatically if you materially violate its terms.
+
+If the violation can be cured, your rights will be reinstated if you stop and remedy the violation within 30 days after receiving written notice from the Licensor.
+
+The Licensor may require an applicable commercial agreement for continued use where the violation involved Licensed Production Use, a Hosted Service, or another use requiring commercial permission.
+
+Termination does not affect obligations, liabilities, or claims arising from conduct before termination.
+
+Sections concerning intellectual property, contributions, warranty, liability, governing law, and prior violations survive termination.
+
+## 7. Warranty and Liability
+
+THE SOFTWARE IS PROVIDED **“AS IS”** AND **“AS AVAILABLE”**, WITHOUT WARRANTIES OF ANY KIND TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW.
+
+THE LICENSOR DISCLAIMS ALL EXPRESS, IMPLIED, AND STATUTORY WARRANTIES, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT, ACCURACY, RELIABILITY, SECURITY, AND AVAILABILITY.
+
+You are responsible for determining whether the Software is suitable for your purposes and for implementing appropriate security, backup, monitoring, and operational measures.
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE LICENSOR AND CONTRIBUTORS WILL NOT BE LIABLE FOR INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, EXEMPLARY, OR PUNITIVE DAMAGES, OR FOR LOSS OF PROFITS, REVENUE, DATA, GOODWILL, BUSINESS, BUSINESS OPPORTUNITIES, OR EXPECTED SAVINGS ARISING FROM OR RELATED TO THE SOFTWARE OR THIS LICENCE.
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE LICENSOR’S TOTAL LIABILITY ARISING FROM OR RELATED TO THIS LICENCE WILL NOT EXCEED THE AMOUNT YOU PAID TO THE LICENSOR FOR THE SOFTWARE UNDER THIS LICENCE DURING THE TWELVE MONTHS BEFORE THE EVENT GIVING RISE TO THE CLAIM.
+
+Nothing in this licence excludes or limits liability for intentional misconduct, gross negligence, or any other liability that cannot lawfully be excluded or limited.
+
+## 8. Commercial Agreements and Governing Law
+
+If you enter into a separate written commercial agreement with the Licensor covering the Software, that agreement takes precedence over this licence to the extent of any conflict.
+
+Rights granted under a commercial agreement apply only for its stated scope and duration.
+
+This licence is governed by the laws of Switzerland, excluding its conflict-of-law rules.
+
+The United Nations Convention on Contracts for the International Sale of Goods does not apply.
+
+The courts of Bern, Switzerland have exclusive jurisdiction over disputes arising from or related to this licence, to the extent permitted by applicable law.
+
+## 9. Licence Version and General Terms
+
+This document is the **Keera Community Licence v1.0**.
+
+The Licensor may publish new versions of this licence for future releases of the Software.
+
+A release of the Software remains governed by the licence version under which that release was originally provided unless you and the Licensor agree otherwise in writing. A new licence version does not automatically change the terms applicable to an earlier release.
+
+This licence constitutes the complete terms governing use of the Software under the Keera Community Licence unless a separate written agreement with the Licensor applies.
+
+If any provision of this licence is invalid or unenforceable, the remaining provisions remain in effect to the maximum extent permitted by law.
+
+A failure by the Licensor to enforce a provision of this licence does not waive the right to enforce that provision or any other provision later.
+
+No rights are granted except those expressly stated in this licence.
+

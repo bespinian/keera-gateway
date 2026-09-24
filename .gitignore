@@ -1,0 +1,11 @@
+# Build output: the binaries, the SBOM, and what air writes
+/build
+
+# Nix
+result
+
+# Compose
+compose/.env
+
+# Go
+/vendor

@@ -1,0 +1,30 @@
+# The catalogue for `make dev`, where the gateway runs on the host.
+#
+# The only thing that differs from models.yaml is the backend address:
+# `keera-engine` is a container DNS name that resolves inside the compose
+# network and nowhere else, so a gateway running on the host has to be pointed
+# at the published loopback port instead. Everything above the backend - the alias
+# clients ask for, the model id the backend is asked for - is unchanged, which
+# is the point of keeping those three names separate.
+#
+# max_context stays at 16384 even when GATEWAY_DEV_TIER=gpu has vLLM serving a
+# 32k window. Capping below the backend is the safe direction: the gateway
+# refuses an over-long prompt itself, with a message naming the limit, instead
+# of forwarding it for the backend to answer with a 400. Raise it to 32768 here
+# if the wider window is what you are working on.
+models:
+  - alias: keera-speed
+    kind: chat
+    backends:
+      - http://127.0.0.1:8000/v1
+    backend_model: keera-speed
+    max_context: 16384
+    # What this model is for, in a sentence. Clients see it on /v1/models, and
+    # it is what a router is told about this model when it is deciding which
+    # model should answer a request - so write it for that decision. See
+    # docs/routers.md.
+    description: >-
+      Fast and served inside this cluster. Short edits, syntax questions,
+      renames, commit messages and everyday work.
+    input_micros_per_mtok: 0
+    output_micros_per_mtok: 0

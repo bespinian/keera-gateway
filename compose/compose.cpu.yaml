@@ -1,0 +1,105 @@
+# The laptop tier: llama.cpp in place of vLLM. Chat only - read the warning.
+#
+#   podman compose -f compose.yaml -f compose.cpu.yaml up -d --build
+#
+# vLLM's CPU build is an afterthought - the project targets datacenter GPUs and
+# its CPU wheel shows it. llama.cpp is the opposite: CPU inference is the reason
+# it exists, and on the same model on a laptop it is markedly faster. Nothing
+# above the backend notices the swap, because models.yaml names a URL and the
+# gateway has no idea what is behind it.
+#
+# TOOL CALLING DOES NOT WORK ON THIS TIER, as measured on image build
+# b10853-9dcf84e5a in September 2026: nine attempts across Qwen2.5-Coder-1.5B
+# and 7B GGUFs produced zero OpenAI-shaped `tool_calls`. Every one came back as
+# prose in `content` - a fenced JSON block, or <xml> tags - which is precisely
+# the ToolCallAsText failure internal/gateway/probe.go was written to name. It
+# was not the prompt and not the catalogue:
+#
+#   * /apply-template renders the full "# Tools" block and the <tool_call>
+#     instruction, so the model is being told correctly.
+#   * chat_template_caps on /props reports supports_tools and
+#     supports_tool_calls both true.
+#   * Qwen's own GGUF ships a corrupted template - `{{"name"` where the
+#     original repo has `{"name"` - and one 7B reply did echo the doubled
+#     brace. Substituting the correct template with --chat-template-file did
+#     not change the outcome.
+#   * `tool_choice: "required"`, which should grammar-constrain the reply into a
+#     tool call, is accepted with HTTP 200 and then silently ignored. That one
+#     is a server-side gap whatever the model does.
+#
+# So this tier is for exercising the gateway - keys, budgets, streaming, usage
+# accounting, the panel - on a machine with no GPU. It is NOT for demonstrating
+# a coding agent: OpenCode and Claude Code will produce prose where they should
+# produce edits. For that, use compose.gpu.yaml, where vLLM's explicit
+# --tool-call-parser hermes does the job. Re-check with
+# `keera model check keera-speed` before trusting any of this on a newer build.
+#
+# Two things from the base file ride along and are harmless: the hf-cache mount,
+# which llama.cpp does not use, and shm_size, which only vLLM needed. Neither
+# can be removed from an override without `!reset`, which podman-compose 1.6
+# does not understand.
+#
+# The GPU tier is compose.gpu.yaml and stays on vLLM; that file says why.
+
+services:
+  keera-engine:
+    image: ${KEERA_LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}
+    # The image's entrypoint is /app/llama-server, so this is arguments only -
+    # the same shape as the vLLM service it replaces.
+    command:
+      # -hf downloads from Hugging Face on first start and caches it. The tag
+      # after the colon picks the quantisation; Q4_K_M is what llama.cpp would
+      # default to anyway, and is named so the file states what it runs.
+      - -hf
+      - ${KEERA_LLAMA_MODEL:-Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF:Q4_K_M}
+      # llama.cpp's equivalent of vLLM's --served-model-name: the id it reports
+      # on /v1/models and in every response. It has to match backend_model in
+      # models.yaml, and that it can is why this swap needs no catalogue edit.
+      - --alias
+      - keera-speed
+      # llama.cpp defaults to 8080. The catalogue and the base file's
+      # healthcheck both say 8000.
+      - --port
+      - "8000"
+      # Kept in step with max_context in models.yaml: the gateway refuses
+      # anything larger in internal/gateway/filter.go before it ever reaches the
+      # backend, so a mismatch here is invisible until a long prompt is refused.
+      - -c
+      - "16384"
+      # One slot, so the whole unified KV pool is available to a single request
+      # - which is what a one-developer demo wants. A second request queues
+      # rather than halving the window.
+      - -np
+      - "1"
+      # Without this llama.cpp answers any request carrying tools with "tools
+      # param requires --jinja flag" and a 500. It is the default in recent
+      # builds and is passed anyway, because it is the flag that decides whether
+      # coding agents work at all. Some chat templates also fail to render under
+      # it, so confirm with `keera model check keera-speed` rather than by eye.
+      - --jinja
+      # llama.cpp serves a chat UI on /. Port 8000 is not published so it is
+      # unreachable regardless, but the backend of a gateway that owns
+      # authentication should not also be a second, unauthenticated front end.
+      - --no-webui
+    environment:
+      # Where -hf puts what it downloads. Without it the weights land on the
+      # container filesystem and are fetched again on every recreate.
+      LLAMA_CACHE: /models
+      # Every flag has a LLAMA_ARG_* form. The image already presets this one,
+      # and passing --host as well makes llama.cpp log that the variable "will
+      # be overwritten by command line argument" on every start - so say it
+      # here, where it is still explicit and does not fight the image.
+      LLAMA_ARG_HOST: 0.0.0.0
+    volumes:
+      - llama-cache:/models
+    healthcheck:
+      # `test` is deliberately not overridden. llama.cpp's /health answers on
+      # the same port and path vLLM's does, so the base file's check already
+      # fits - and podman-compose 1.6 concatenates an overridden `test` onto the
+      # one it replaces, which yields ["CMD","python3",...,"CMD","curl",...] and
+      # runs neither. The scalar below is safe, and a 1.1 GB download needs far
+      # less grace than the base file's 30 GB one.
+      start_period: 120s
+
+volumes:
+  llama-cache:

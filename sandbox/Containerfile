@@ -1,0 +1,117 @@
+# The Keera sandbox image.
+#
+# A sandbox is a machine somebody works in, so this image carries the toolchain
+# already installed rather than fetching it on start. That is not only about
+# waiting: an air-gapped customer's cluster cannot reach a package index at all,
+# so a sandbox that installs its own toolchain is a sandbox that never becomes
+# ready there.
+#
+# It is a base rather than the answer. A deployment builds its own on top of
+# this with the languages, the language servers and the internal certificates
+# its engineers actually need, and declares that image in sandboxes.yaml. What
+# this layer owns is the part the gateway depends on: the user, the home
+# directory, sshd, the coding agent, and the entrypoint that turns a container
+# into a workstation.
+#
+#   make sandbox-image
+#   podman build -f sandbox/Containerfile -t registry.internal/keera/sandbox-base:1 .
+
+FROM docker.io/library/alpine:3.24
+
+# The sandbox user.
+#
+# Fixed at 1000 rather than taken from the base image, because the home volume
+# is provisioned with this as its fsGroup - a uid that moved between image
+# versions would be a sandbox that could not write to its own home after an
+# upgrade. The gateway's Kubernetes driver hard-codes the same number for the
+# same reason; the two have to agree.
+ARG KEERA_UID=1000
+ARG KEERA_USER=keera
+
+# No locale package and no LANG beyond this: musl is UTF-8 throughout and has no
+# locale system to configure, which is one of the things that makes this base
+# smaller than the Debian one it replaced.
+ENV LANG=C.UTF-8 \
+    HOME=/home/keera
+
+# nodejs is here for the coding agent below. Alpine 3.24 carries 24.18, which is
+# comfortably past what Pi requires (>= 22.19) - Debian trixie's 20.19 was not,
+# and needing a third-party Node was half the reason this base is Alpine now.
+RUN apk add --no-cache \
+      bash \
+      ca-certificates \
+      curl \
+      git \
+      git-lfs \
+      gnupg \
+      jq \
+      less \
+      nodejs \
+      npm \
+      openssh-server \
+      openssh-client \
+      openssh-sftp-server \
+      procps-ng \
+      ripgrep \
+      rsync \
+      shadow \
+      tini \
+      tmux \
+      unzip \
+      vim \
+      zsh
+
+# The Pi coding agent, pinned.
+#
+# Pinned because a sandbox image is a thing a deployment builds once and runs
+# for months: an unpinned agent would mean two sandboxes from the same catalogue
+# entry running different software, which is the property a class name exists to
+# prevent. --ignore-scripts is upstream's own documented install line.
+#
+# The package moved scope - @mariozechner/pi-coding-agent is deprecated and
+# points here - so a deployment copying an older install line gets a warning
+# rather than a wrong agent.
+ARG PI_VERSION=0.85.1
+RUN npm install -g --ignore-scripts "@earendil-works/pi-coding-agent@${PI_VERSION}" \
+ && npm cache clean --force \
+ && pi --version
+
+RUN addgroup -g "${KEERA_UID}" "${KEERA_USER}" \
+ && adduser -u "${KEERA_UID}" -G "${KEERA_USER}" -h "${HOME}" -s /bin/bash -D -H "${KEERA_USER}" \
+ # The home directory exists in the image so that it is a mount point with the
+ # right owner before anything is mounted over it. Without it the volume arrives
+ # owned by root and the entrypoint cannot write the one file that makes the
+ # sandbox reachable.
+ && mkdir -p "${HOME}" \
+ && chown "${KEERA_UID}:${KEERA_UID}" "${HOME}"
+
+# sshd needs somewhere to write its runtime state, and a host key.
+#
+# The host key is generated at build time and is therefore the same for every
+# sandbox from this image, which would be alarming anywhere else and is correct
+# here: the connection to a sandbox never crosses a network a stranger can see.
+# It goes through the gateway's attach surface, which is TLS to an
+# already-authenticated caller, and out the other side to a container IP the
+# gateway dialled. A per-sandbox host key would mean every developer answering
+# an unknown-host prompt on every new sandbox, and a prompt people are trained
+# to accept is worse than no prompt at all.
+RUN mkdir -p /run/sshd /etc/ssh/keera \
+ && ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/keera/ssh_host_ed25519_key \
+ && chown -R "${KEERA_UID}:${KEERA_UID}" /run/sshd /etc/ssh/keera
+
+COPY sandbox/sshd_config /etc/ssh/keera/sshd_config
+COPY sandbox/entrypoint.sh /usr/local/bin/keera-sandbox
+COPY sandbox/agent.sh /usr/local/bin/keera-agent
+COPY sandbox/git-credential-keera /usr/local/bin/git-credential-keera
+RUN chmod 0755 /usr/local/bin/keera-sandbox /usr/local/bin/keera-agent \
+      /usr/local/bin/git-credential-keera \
+ && chmod 0644 /etc/ssh/keera/sshd_config
+
+USER ${KEERA_UID}
+WORKDIR ${HOME}
+
+# tini, because a sandbox is a machine: somebody will start a background
+# process, an agent will spawn a test runner, and PID 1 has to reap what they
+# leave behind. Without it a long-lived sandbox accumulates zombies until it
+# cannot fork.
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/keera-sandbox"]

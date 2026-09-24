@@ -1,0 +1,12 @@
+# The build context is the repository root, so everything large and irrelevant
+# has to be named here - a 10 GB VM image otherwise gets shipped to the builder
+# before the first instruction runs.
+result
+.git
+.github
+docs
+/build
+# The compose credentials. The build stage copies the whole context, so they
+# would otherwise sit in its layers and the build cache.
+compose/.env
+compose/.env.tmp

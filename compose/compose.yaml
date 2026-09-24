@@ -1,0 +1,160 @@
+name: keera
+
+services:
+  keera-gateway:
+    build:
+      context: ..
+      dockerfile: Containerfile
+    image: localhost/keera-gateway:latest
+    restart: unless-stopped
+    ports:
+      # One port carries all three surfaces, told apart by path: the control
+      # panel at /, the inference API under /api, the control API under
+      # /control. Open http://127.0.0.1:8080 to reach the panel.
+      #
+      # Bound to loopback until a real operator key is set. Publishing this more
+      # widely publishes the control API with it - there is no port to firewall
+      # them apart any more - so what governs the editors is only ever an
+      # operator key and a session cookie away from whatever can reach it. Put a
+      # proxy in front of anything beyond a development machine.
+      - "${KEERA_BIND:-127.0.0.1}:8080:8080"
+    volumes:
+      # ",z" relabels for SELinux hosts; harmless elsewhere.
+      - ./models.yaml:/etc/keera/models.yaml:ro,z
+    environment:
+      KEERA_DATABASE_URL: postgres://keera:keera@keera-db:5432/keera?sslmode=disable
+      KEERA_OPERATOR_KEY: ${KEERA_OPERATOR_KEY:?set KEERA_OPERATOR_KEY in .env - see .env.example}
+      KEERA_ADDR: ":8080"
+      KEERA_MODELS_FILE: /etc/keera/models.yaml
+      KEERA_LOG_FORMAT: ${KEERA_LOG_FORMAT:-text}
+      KEERA_LOG_LEVEL: ${KEERA_LOG_LEVEL:-info}
+      # Encrypts the API keys operators type into the control panel. Asked for
+      # rather than defaulted, because the gateway starts happily without one
+      # and the operator then discovers the consequence in the one place it
+      # bites: a disabled field, at the moment they are adding a hosted model
+      # and holding its key. See docs/providers.md.
+      KEERA_SECRET_KEY: ${KEERA_SECRET_KEY:?set KEERA_SECRET_KEY in .env - see .env.example}
+      # The other way to give a hosted model its credential: name this variable
+      # in models.yaml as api_key_env, which `provider: anthropic` does for you.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # The same, for `provider: infomaniak`. Its product id is not a secret and
+      # goes in models.yaml, not here.
+      INFOMANIAK_API_KEY: ${INFOMANIAK_API_KEY:-}
+      # The same, for `provider: stepping-stone`.
+      STEPPING_STONE_API_KEY: ${STEPPING_STONE_API_KEY:-}
+      # Reads /metrics and nothing else, so a scrape configuration does not
+      # have to hold the operator key. Empty leaves the route to operators.
+      KEERA_METRICS_TOKEN: ${KEERA_METRICS_TOKEN:-}
+      # How long the two tables that grow with traffic are kept. Empty is for
+      # ever, which is the deliberate default for billing and audit data.
+      KEERA_USAGE_RETENTION: ${KEERA_USAGE_RETENTION:-}
+      KEERA_AUDIT_RETENTION: ${KEERA_AUDIT_RETENTION:-}
+      # How long an agent conversation may go quiet before the next request on
+      # it is read as a new task. Empty is half an hour. It is a reporting
+      # threshold and nothing is stored per session, so changing it re-cuts
+      # what has already been recorded.
+      KEERA_SESSION_GAP: ${KEERA_SESSION_GAP:-}
+      # Single sign-on. Empty means the panel accepts only the operator key.
+      # These three configure one directory, which is what a deployment with a
+      # single customer has; KEERA_OIDC_PROVIDERS below is for several.
+      KEERA_OIDC_ISSUER: ${KEERA_OIDC_ISSUER:-}
+      KEERA_OIDC_CLIENT_ID: ${KEERA_OIDC_CLIENT_ID:-}
+      KEERA_OIDC_CLIENT_SECRET: ${KEERA_OIDC_CLIENT_SECRET:-}
+      # One callback serves every provider: a sign-in is recognised by the
+      # state it was handed, not by the address it came back to.
+      KEERA_OIDC_REDIRECT_URL: ${KEERA_OIDC_REDIRECT_URL:-}
+      # Several directories at once - a button per name on the sign-in screen.
+      # Compose cannot pass through variables it does not name, so the two
+      # blocks below are the ones this file ships with; another name means
+      # another block here, spelled KEERA_OIDC_<NAME>_*. See docs/sso.md.
+      KEERA_OIDC_PROVIDERS: ${KEERA_OIDC_PROVIDERS:-}
+      KEERA_OIDC_GOOGLE_ISSUER: ${KEERA_OIDC_GOOGLE_ISSUER:-}
+      KEERA_OIDC_GOOGLE_CLIENT_ID: ${KEERA_OIDC_GOOGLE_CLIENT_ID:-}
+      KEERA_OIDC_GOOGLE_CLIENT_SECRET: ${KEERA_OIDC_GOOGLE_CLIENT_SECRET:-}
+      KEERA_OIDC_GOOGLE_LABEL: ${KEERA_OIDC_GOOGLE_LABEL:-}
+      KEERA_OIDC_ENTRA_ISSUER: ${KEERA_OIDC_ENTRA_ISSUER:-}
+      KEERA_OIDC_ENTRA_CLIENT_ID: ${KEERA_OIDC_ENTRA_CLIENT_ID:-}
+      KEERA_OIDC_ENTRA_CLIENT_SECRET: ${KEERA_OIDC_ENTRA_CLIENT_SECRET:-}
+      KEERA_OIDC_ENTRA_LABEL: ${KEERA_OIDC_ENTRA_LABEL:-}
+      KEERA_OIDC_ENTRA_GROUPS_CLAIM: ${KEERA_OIDC_ENTRA_GROUPS_CLAIM:-}
+      KEERA_OIDC_ENTRA_ADMIN_GROUPS: ${KEERA_OIDC_ENTRA_ADMIN_GROUPS:-}
+      KEERA_OIDC_ENTRA_OPERATOR_GROUPS: ${KEERA_OIDC_ENTRA_OPERATOR_GROUPS:-}
+      # Lets a sign-in take over a person already bound to another provider's
+      # subject. Off unless you are moving an organisation between providers.
+      KEERA_OIDC_ADOPT_BY_EMAIL: ${KEERA_OIDC_ADOPT_BY_EMAIL:-}
+      # Setting this hands the administrator role to the directory for the
+      # whole gateway, and the panel stops offering to change roles. Unset,
+      # administrators are made with `keera user role`. See docs/sso.md.
+      KEERA_OIDC_ADMIN_GROUPS: ${KEERA_OIDC_ADMIN_GROUPS:-}
+      KEERA_OIDC_OPERATOR_GROUPS: ${KEERA_OIDC_OPERATOR_GROUPS:-}
+      # Where the groups claim lives, and what a person who matches nothing
+      # gets. Both matter most on a provider that issues no groups at all -
+      # Google is one - where the default role is the only role most people
+      # will ever have.
+      KEERA_OIDC_GROUPS_CLAIM: ${KEERA_OIDC_GROUPS_CLAIM:-}
+      KEERA_OIDC_DEFAULT_ROLE: ${KEERA_OIDC_DEFAULT_ROLE:-}
+      KEERA_OIDC_SCOPES: ${KEERA_OIDC_SCOPES:-}
+      KEERA_OPERATORS: ${KEERA_OPERATORS:-}
+      # The gateway as a browser sees it. It is also what the panel's "Connect
+      # a client" page tells a developer to point their editor at, with /api on
+      # the end. Empty leaves both to the Host header.
+      KEERA_PUBLIC_URL: ${KEERA_PUBLIC_URL:-}
+    healthcheck:
+      # A scratch image has no shell and no curl, so the binary checks itself.
+      test: ["CMD", "/keera-gateway", "version"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    depends_on:
+      keera-db:
+        condition: service_healthy
+
+  keera-engine:
+    image: ${KEERA_ENGINE_IMAGE:-docker.io/vllm/vllm-openai-cpu:latest-x86_64}
+    restart: unless-stopped
+    command:
+      - ${KEERA_MODEL:-Qwen/Qwen2.5-Coder-1.5B-Instruct}
+      - --served-model-name
+      # This must match backend_model in models.yaml. It is the only name the
+      # gateway knows the backend by; the alias clients use is separate.
+      - keera-speed
+      - --gpu-memory-utilization
+      - "0.4" # on CPU this is the fraction of system RAM
+      - --max-model-len
+      - "16384"
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - hermes
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    shm_size: ${KEERA_SHM_SIZE:-2gb}
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://localhost:8000/health")
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 600s
+
+  keera-db:
+    image: docker.io/library/postgres:latest
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: keera
+      POSTGRES_PASSWORD: keera
+      POSTGRES_DB: keera
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keera"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  hf-cache:
+  pgdata:

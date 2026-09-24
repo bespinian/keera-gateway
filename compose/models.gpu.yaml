@@ -1,0 +1,23 @@
+# The GPU tier's catalogue, mounted over models.yaml by compose.gpu.yaml.
+#
+# It is a near-copy of models.yaml on purpose. The file is the deployment's
+# contract rather than a template, so the tier that serves a 32k window states
+# that window itself instead of inheriting a number chosen for a 1.5B model on a
+# laptop. max_context has to match --max-model-len on the backend: the gateway
+# enforces it in internal/gateway/filter.go before dispatching, so setting it
+# too low caps the deployment silently and setting it too high turns a long
+# prompt into a 400 from vLLM instead of a clear refusal from the gateway.
+models:
+  - alias: keera-speed
+    kind: chat
+    backends:
+      - http://keera-engine:8000/v1
+    # What vLLM was started with as --served-model-name. Getting this wrong is
+    # the mistake that makes every request come back 404.
+    backend_model: keera-speed
+    max_context: 32768
+    # Micro-units of KEERA_CURRENCY per million tokens. 0 means the model is not
+    # billed, which is what a dedicated or on-premises deployment wants - there
+    # the numbers are for showback, not for an invoice.
+    input_micros_per_mtok: 0
+    output_micros_per_mtok: 0

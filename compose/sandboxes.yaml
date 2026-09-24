@@ -1,0 +1,61 @@
+# The sandbox catalogue, for a single-host deployment.
+#
+# A class name is a contract: it is typed on a command line and written into
+# repositories' own configuration, so the operator can change the image behind
+# it, move it to a stronger isolation tier or give it more memory without
+# anybody editing anything. This file is applied on every start and is
+# idempotent - the same file plus an empty database gives the same deployment -
+# and what it declares it owns: the panel and the API refuse to change a class
+# that is in here.
+#
+# Nothing uses it unless KEERA_SANDBOX_DRIVER is set. On this shape that is the
+# podman driver, which cannot run from inside the gateway's own container - see
+# the note in README.md. It is what `make dev` points at, since that is the
+# local shape where the gateway is a host process and can run podman:
+#
+#   make sandbox-image
+#   echo 'KEERA_SANDBOX_DRIVER=podman' >> compose/.env
+#   make dev
+#
+# It is also the worked example the Helm chart's values mirror.
+#
+# No class here declares an egress list, and that is deliberate: nothing reads
+# one, and on this driver a sandbox has unrestricted outbound network access -
+# the internet, the host and the LAN. The single-host shape is for development
+# and for a host the deployment already trusts. See docs/sandboxes.md, "What is
+# actually enforced".
+
+sandboxes:
+  - name: standard
+    description: A general-purpose workstation - the repo toolchain, an editor server, an agent.
+    # No image is published for this. Build the base and put your own on top:
+    #   podman build -f sandbox/Containerfile -t localhost/keera-sandbox:dev .
+    image: localhost/keera-sandbox:dev
+    # On a single host this is whatever OCI runtime KEERA_SANDBOX_RUNTIME_*
+    # names. Most hosts have only runc or crun, so "standard" is the honest
+    # declaration; a host with runsc installed can move this to "isolated" and
+    # set KEERA_SANDBOX_RUNTIME_ISOLATED=runsc.
+    isolation: standard
+    cpu: "4"
+    memory: 8Gi
+    disk: 20Gi
+    default_ttl: 8h
+    max_ttl: 24h
+    # Warm pools are a cluster feature: they need the agent-sandbox warm-pool
+    # extension, which a single host has no controller for. Asking for them
+    # here does nothing.
+    warm: 0
+    purposes: [engineer]
+
+  - name: agent
+    description: One task's machine for a coding agent. Terminated when the task ends.
+    image: localhost/keera-sandbox:dev
+    isolation: standard
+    cpu: "2"
+    memory: 4Gi
+    # No volume. An agent sandbox exists for one task and pushes a branch at the
+    # end of it, so there is nothing worth keeping - and it is never suspended.
+    disk: ""
+    default_ttl: 1h
+    max_ttl: 4h
+    purposes: [agent]

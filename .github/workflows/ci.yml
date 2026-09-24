@@ -1,0 +1,145 @@
+# What has to be true of every commit: it is formatted, it passes the linters,
+# it builds, and both halves of the test suite pass.
+#
+# The two halves are separate jobs on purpose. The unit tests need nothing, so
+# they answer in under a minute and are what tells you a change is broken. The
+# integration tests need a Postgres and a Redis, because what they cover is the
+# part no fake does - the schema and the queries written against it, the
+# notification a write sends and a listener picks up on the other side of
+# Postgres, and the Lua the Redis server runs. Those skip silently when the two
+# KEERA_TEST_* variables are unset, which is exactly why they get a job that
+# sets them: a suite that skips looks the same as a suite that passes.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+# A second push to the same branch makes the first one's answer irrelevant.
+# main is left alone, so every commit there keeps its own result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  # The gateway builds with no CGO and ships in a scratch image, so the tests
+  # run the way the binary does. The race detector needs it back on, which is
+  # set on those steps rather than here.
+  CGO_ENABLED: "0"
+
+jobs:
+  check:
+    name: Format, lint and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      # Before the linters, because "not gofmt-clean" is a one-command fix and
+      # there is no point reading a lint report about a file that is about to
+      # be reformatted.
+      - name: Check formatting
+        run: make fmt-check
+
+      - name: Vet
+        run: make vet
+
+      # Pinned rather than floating: a linter release must not be able to turn
+      # an untouched commit red on its own.
+      - name: Lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.13
+
+      # A build is not a test, but it is the one thing every other job assumes
+      # and the fastest place to find out that a platform-specific file does
+      # not compile.
+      - name: Build
+        run: make build
+
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      # The whole tree, with the race detector. The packages that need a
+      # service skip themselves here and are covered by the job below.
+      - name: Test
+        run: make test
+        env:
+          CGO_ENABLED: "1"
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+
+    # The versions the Makefile pulls for a developer are the images' latest,
+    # and these are the same thing pinned to a major: a database that changed
+    # under CI overnight would look like a change in this repository broke it.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: keera
+          POSTGRES_PASSWORD: keera
+          POSTGRES_DB: keera_test
+        ports:
+          - 5432:5432
+        # Without this the first test connects before Postgres is listening,
+        # and the job fails with a refused connection about once in three runs.
+        options: >-
+          --health-cmd "pg_isready -U keera -d keera_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+      redis:
+        image: redis:8
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      # The same target a developer runs against the containers the Makefile
+      # starts, pointed at the services above instead. It starts nothing and
+      # removes nothing, so the two paths share the one list of packages.
+      - name: Test
+        run: make test-integration-only
+        env:
+          CGO_ENABLED: "1"
+          KEERA_TEST_DATABASE_URL: postgres://keera:keera@127.0.0.1:5432/keera_test?sslmode=disable
+          KEERA_TEST_REDIS_URL: redis://127.0.0.1:6379/0
+
+      # These tests skip themselves without the two variables above, so a typo
+      # in either would be a green job that ran nothing at all. This is the
+      # check that the job did what its name says.
+      - name: Confirm the integration tests actually ran
+        run: |
+          if go test -count=1 -run TestMigrateIsIdempotentAndSafeInParallel -v ./internal/store/ 2>&1 | grep -q SKIP; then
+            echo "the integration tests skipped: the database was not reachable" >&2
+            exit 1
+          fi
+        env:
+          CGO_ENABLED: "1"
+          KEERA_TEST_DATABASE_URL: postgres://keera:keera@127.0.0.1:5432/keera_test?sslmode=disable

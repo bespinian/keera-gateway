@@ -1,0 +1,73 @@
+# The GPU tier: vLLM with the host's NVIDIA device passed through.
+#
+#   sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml   # once, on the host
+#   podman compose -f compose.yaml -f compose.gpu.yaml up -d --build
+#
+# vLLM stays here rather than llama.cpp because this is the tier that has to
+# serve a team. PagedAttention keeps one shared KV pool that any session draws
+# blocks from on demand, so a developer holding a 30k context reserves nothing
+# from the others; and prefill throughput on a datacenter card is well ahead of
+# llama.cpp's CUDA path, which is what a coding agent leans on when it resends a
+# large context every turn.
+
+services:
+  # The catalogue belongs to the gateway, not to the backend, so the tier that
+  # widens the context window has to say so on this service. max_context is
+  # enforced in internal/gateway/filter.go before a request is dispatched:
+  # leaving it at the base file's 16384 would silently cap a 32k-capable
+  # deployment at half, with nothing in the logs to say why.
+  keera-gateway:
+    volumes:
+      - ./models.gpu.yaml:/etc/keera/models.yaml:ro,z
+
+  keera-engine:
+    image: ${KEERA_VLLM_IMAGE:-docker.io/vllm/vllm-openai:latest}
+    # CDI is how podman hands an NVIDIA device to a container. Generate the spec
+    # on the host first - see the header - or this fails at create time with an
+    # unresolvable device rather than at run time with a missing GPU.
+    devices:
+      - nvidia.com/gpu=all
+    # The container writes to the device nodes; an SELinux host denies that
+    # without this, and it is inert everywhere else.
+    security_opt:
+      - label=disable
+    # vLLM wants far more than podman's 64 MB /dev/shm, and dies at startup with
+    # "Insufficient space in /dev/shm" when it does not get it. 8 GB is the
+    # floor for one card; raise it again for tensor parallelism across several.
+    #
+    # Its own variable rather than the base file's KEERA_SHM_SIZE, because
+    # .env.example ships that one set to 2gb - so `${KEERA_SHM_SIZE:-8gb}` would
+    # resolve to 2gb here and the default would never apply.
+    shm_size: ${KEERA_GPU_SHM_SIZE:-8gb}
+    command:
+      # Qwen2.5-Coder-7B-Instruct-AWQ is ~5.6 GB of weights: 3.4 GB of 4-bit
+      # tensors plus 2.2 GB of fp16 embeddings, which AWQ leaves unquantised and
+      # which are a third of the footprint. At 56 KiB/token of KV cache (28
+      # layers, 4 KV heads) that leaves room for roughly eight 32k sessions on a
+      # 24 GB L4.
+      #
+      # On an Ada card - L4, L40S - `--quantization fp8` over the unquantised
+      # checkpoint is the better trade: ~8.7 GB, W8A8 instead of W4A16, and the
+      # card has the tensor cores for it. No --quantization flag is set here
+      # because vLLM reads it off the checkpoint, which keeps this file correct
+      # whichever model KEERA_GPU_MODEL names.
+      - ${KEERA_GPU_MODEL:-Qwen/Qwen2.5-Coder-7B-Instruct-AWQ}
+      - --served-model-name
+      - keera-speed
+      # A fraction of VRAM here - unlike the base file, where the CPU build
+      # reads the same flag as a fraction of system RAM.
+      - --gpu-memory-utilization
+      - "0.90"
+      # Kept in step with max_context in models.gpu.yaml. 32768 is also where
+      # Qwen2.5-Coder's max_position_embeddings sits: the 131k the model card
+      # advertises needs a static YaRN rope_scaling block, which vLLM then
+      # applies to short prompts too and measurably degrades them.
+      - --max-model-len
+      - "32768"
+      # The parser has to match the model's tool-call syntax. When it does not,
+      # the call comes back as prose in `content` with `tool_calls` empty, which
+      # logs no error and reads to developers as a bad model - the failure
+      # internal/gateway/probe.go exists to name. hermes is Qwen2.5's.
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - hermes

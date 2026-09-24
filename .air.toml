@@ -1,0 +1,53 @@
+# Live reload for the gateway during development: `make dev`.
+#
+# The gateway runs on the host here rather than in a container, which is the
+# whole point - a save rebuilds and restarts it in about a second, while
+# Postgres and the inference backend stay up in containers behind it.
+
+root = "."
+# Under the one directory every other build target writes to, so air's binary
+# and its build log are not two more things in the repository root.
+tmp_dir = "build/air"
+# Left empty deliberately. The development environment - the operator key, the
+# database URL, the catalogue - is assembled by the dev target, so there is one
+# place that describes it rather than two that can drift apart.
+env_files = []
+
+[build]
+  cmd = "go build -mod=vendor -trimpath -o ./build/air/keera-gateway ./cmd/keera-gateway"
+  bin = "./build/air/keera-gateway"
+  args_bin = ["serve"]
+
+  # The panel is plain ES modules and CSS with no build step, embedded into the
+  # binary with go:embed - so editing a .js or .css file needs a Go rebuild
+  # before a browser can see any of it, and the same goes for the .sql
+  # migrations. Without these extensions on the list, a panel change looks
+  # exactly like a change that did nothing.
+  include_ext = ["go", "js", "css", "html", "svg", "sql", "yaml"]
+
+  # vendor/ is a few thousand files that only ever change on purpose; watching
+  # it costs a slow start for nothing.
+  exclude_dir = ["vendor", "build", "testdata", "docs", ".git"]
+  exclude_regex = ["_test\\.go"]
+
+  # SIGINT lets the binary shut its listener down and release :8080 - killing
+  # it outright leaves the next build dying on "address already in use".
+  # cmd/keera-gateway/main.go installs the handler.
+  send_interrupt = true
+  kill_delay = "2s"
+
+  # A build failure takes the gateway down instead of leaving the previous
+  # binary serving. Stale code that looks live is precisely the kind of silent
+  # failure this codebase works hard to avoid everywhere else.
+  stop_on_error = true
+
+  delay = 200
+  # Written inside tmp_dir, not at the root.
+  log = "build-errors.log"
+
+[misc]
+  clean_on_exit = true
+
+[screen]
+  clear_on_rebuild = false
+  keep_scroll = true

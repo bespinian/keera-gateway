@@ -1,0 +1,70 @@
+# The model catalogue: the gateway's API contract with every client.
+#
+# It is applied on every start and is idempotent, so this file - not whoever
+# last called the control API - is what the deployment is. Clients ask for
+# `alias` and never for a model id or an inference URL, which is what lets the
+# backend behind a model be swapped, or repointed at a remote sovereign
+# endpoint, without a single developer changing anything.
+models:
+  - alias: keera-speed
+    kind: chat
+    backends:
+      - http://keera-engine:8000/v1
+    # What vLLM was started with as --served-model-name. Getting this wrong is
+    # the mistake that makes every request come back 404.
+    backend_model: keera-speed
+    max_context: 16384
+    # What this model is for, in a sentence. Clients see it on /v1/models, and
+    # it is what a router is told about this model when it is deciding which
+    # model should answer a request - so write it for that decision. See
+    # docs/routers.md.
+    description: >-
+      Fast and served inside this cluster. Short edits, syntax questions,
+      renames, commit messages and everyday work.
+    # Micro-units of KEERA_CURRENCY per million tokens. 0 means the model is not
+    # billed, which is what a dedicated or on-premises deployment wants - there
+    # the numbers are for showback, not for an invoice.
+    input_micros_per_mtok: 0
+    output_micros_per_mtok: 0
+
+# A hosted model, for the work a small local model cannot do - or for evaluating
+# one before there are GPUs to run anything on. `provider` fills in the endpoint,
+# the credential variable, the context window, the list price and a description;
+# run `keera model providers` to see what it knows. Uncomment, then put your key
+# in .env as ANTHROPIC_API_KEY.
+#
+# Prompts sent to this model leave your infrastructure, which is the opposite of
+# why Keera exists - read docs/providers.md before offering one to developers, and
+# put a budget on the teams that may use it.
+#  - alias: keera-frontier
+#    provider: anthropic
+#    backend_model: claude-opus-5
+#    # Left out, this would be the provider's own sentence about claude-opus-5,
+#    # which is enough for a router to choose on. Written here because what the
+#    # model is is Anthropic's fact and what the alias is for is yours.
+#    description: >-
+#      Hosted outside this cluster and expensive. Design, multi-step reasoning
+#      and whole-system questions. Must not be sent client data.
+
+# The same thing without leaving Switzerland: Infomaniak serves open-weight
+# models from its own data centres. Its address carries the product id of your
+# AI Service, so an entry needs that as well as a key - both are in the
+# Infomaniak console under AI Tools. Put the key in .env as INFOMANIAK_API_KEY.
+#  - alias: keera-swiss
+#    provider: infomaniak
+#    product_id: "100234"
+#    backend_model: swiss-ai/Apertus-v1.5-70B
+#    description: >-
+#      Hosted in Switzerland, open weights and open training data. Reasoning and
+#      whole-system questions where the prompt may leave this cluster but not
+#      the country.
+
+# With two models of different capability and cost, the choice between them
+# stops being a client's to make well - see docs/routers.md. A router reads each
+# request and picks, and what it is told about the candidates is the
+# `description` above:
+#
+#   keera router add auto --model keera-speed \
+#     --destinations keera-speed,keera-frontier \
+#     --prompt @route.txt --fallback keera-speed
+#   keera connect opencode --model auto

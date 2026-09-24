@@ -1,0 +1,63 @@
+# sshd inside a Keera sandbox.
+#
+# It runs as the sandbox user on 2222 with no privilege separation directory of
+# its own, which is possible because there is exactly one account here and
+# nothing to separate from.
+#
+# 2222 rather than 22 because this process is an ordinary user with every
+# capability dropped, and such a process cannot bind a privileged port - sshd
+# would fail with "Bind to port 22 failed: Permission denied" and the sandbox
+# would exit. The number is never typed by anybody: the gateway dials it, and a
+# developer reaches it through 'keera sandbox ssh'.
+#
+# Authentication is by key, and the key is the one the gateway put in
+# authorized_keys when the sandbox was created. Passwords are off and there is
+# no password to guess: the account has none.
+
+Port 2222
+AddressFamily inet
+ListenAddress 0.0.0.0
+
+HostKey /etc/ssh/keera/ssh_host_ed25519_key
+PidFile /run/sshd/sshd.pid
+
+# What the gateway set, handed to every session.
+#
+# An ssh session does not inherit the container's environment, so without this a
+# developer who opens a shell finds none of it - no gateway address, no API key -
+# and their agent has no idea where anything is. Relying on the shell's own
+# startup files does not work: a non-interactive `ssh host cmd`, which is what
+# scp and every editor's remote server use, reads ~/.bashrc only on some builds
+# of bash and not on Alpine's.
+#
+# So sshd injects it, for any shell and any kind of session. The usual caution
+# about this option is that a user could set LD_PRELOAD for a privileged login;
+# here the only account is the sandbox's owner, on their own machine, and the
+# file is written by the entrypoint before sshd starts.
+PermitUserEnvironment yes
+
+# The only way in.
+PubkeyAuthentication yes
+AuthorizedKeysFile /home/keera/.ssh/authorized_keys
+PasswordAuthentication no
+PermitEmptyPasswords no
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+PermitRootLogin no
+UsePAM no
+
+# What a developer actually needs from this: a shell, an editor's remote
+# server, scp, and ports forwarded back to their laptop.
+AllowTcpForwarding yes
+PermitTunnel no
+X11Forwarding no
+Subsystem sftp internal-sftp
+
+# The gateway's attach surface has its own idle watchdog measured in hours; this
+# is the finer one, so that a sandbox whose client vanished releases the pty
+# rather than holding it until the connection times out.
+ClientAliveInterval 60
+ClientAliveCountMax 10
+
+AcceptEnv LANG LC_* TERM
+PrintMotd no
