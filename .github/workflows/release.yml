@@ -24,6 +24,7 @@ permissions:
   packages: write # ghcr.io
   id-token: write # the OIDC token the attestation is signed against
   attestations: write # the attestation itself
+  artifact-metadata: write # the storage record for the pushed image
 
 jobs:
   image:
