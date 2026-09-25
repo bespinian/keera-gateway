@@ -182,8 +182,13 @@ arm64, one `.tar.gz` per platform. Each archive also has the `LICENSE` and
 
 ```sh
 sha256sum --check --ignore-missing SHA256SUMS
-gh attestation verify keera_v0.1.0_linux_amd64.tar.gz --repo bespinian/keera-gateway
+gh attestation verify keera_v0.1.0_linux_amd64.tar.gz --repo bespinian/keera-gateway \
+  --signer-workflow bespinian/keera-gateway/.github/workflows/release-build.yml
 ```
+
+`--signer-workflow` checks that the release workflow signed the file, not some
+other workflow in the repository. The image is verified the same way, with
+`oci://ghcr.io/bespinian/keera-gateway:<tag>` in place of the file.
 
 `make build` builds it from source. `make dist` builds the release archives
 into `build/dist`.

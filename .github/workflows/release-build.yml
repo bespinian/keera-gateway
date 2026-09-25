@@ -1,0 +1,177 @@
+# How a release is built and attested. release.yml calls this on a `v*` tag;
+# it has no trigger of its own.
+#
+# This is laid out for SLSA Build L3, which asks that the build cannot forge
+# its own provenance. Two things give that:
+#
+# - The jobs that build run our code (make, go, podman) and get no id-token
+#   permission, so nothing they run can ask for a signing token. Only the
+#   provenance jobs get one, and those check out nothing and run only GitHub's
+#   own actions. They are handed the image digest and the archives, and sign
+#   those.
+# - This is a reusable workflow, so the signature names this file rather than
+#   the caller. `gh attestation verify --signer-workflow` checks for it.
+name: Release build
+
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  image:
+    name: Image and SBOM
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # ghcr.io
+    outputs:
+      name: ${{ steps.image.outputs.name }}
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      # Containerfile builds with -mod=vendor and the vendor tree is gitignored,
+      # so a clean checkout has to write it before the build can copy it in.
+      # This is also what keeps the build itself offline.
+      - name: Vendor dependencies
+        run: go mod vendor
+
+      # The image is named after the binary it runs, not after the repository,
+      # so only the owner comes from the environment. ghcr.io takes a lowercase
+      # path and an owner's name need not be one.
+      - name: Name the image
+        id: image
+        run: |
+          owner=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          echo "name=ghcr.io/$owner/keera-gateway" >> "$GITHUB_OUTPUT"
+          echo "ref=ghcr.io/$owner/keera-gateway:${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      # One target for both: `sbom` depends on `image`, so what it
+      # describes is the image this job is about to push rather than whatever
+      # was tagged last. VERSION is what `keera version` will report, since the
+      # build context carries no .git for the toolchain to stamp from.
+      - name: Build the image and its SBOM
+        run: make sbom GATEWAY_IMAGE='${{ steps.image.outputs.ref }}' VERSION="$GITHUB_REF_NAME"
+
+      # --digestfile, because the attestation's subject has to be the digest and
+      # not the tag: a tag can be moved afterwards and a digest cannot.
+      - name: Push
+        id: push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GITHUB_TOKEN" | podman login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          podman push '${{ steps.image.outputs.ref }}' --digestfile=digest.txt
+          echo "digest=$(cat digest.txt)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sbom
+          path: build/sbom/keera-gateway.cdx.json
+          if-no-files-found: error
+
+  image-provenance:
+    name: Image provenance
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write # to push the attestation next to the image
+      id-token: write # the OIDC token the attestation is signed against
+      attestations: write # the attestation itself
+      artifact-metadata: write # the storage record for the pushed image
+    steps:
+      # The attestation step reads docker's credentials to reach the registry.
+      - name: Log in to ghcr.io
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
+      - name: Attest the build
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ needs.image.outputs.name }}
+          subject-digest: ${{ needs.image.outputs.digest }}
+          # Stored next to the image in the registry as well as in this
+          # repository, so `gh attestation verify` and cosign find it from the
+          # image alone - which is all a customer has.
+          push-to-registry: true
+
+  cli:
+    name: CLI archives
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      # The notices file is read from the vendor tree, like the image's.
+      - name: Vendor dependencies
+        run: go mod vendor
+
+      - name: Build the archives
+        run: make dist VERSION="$GITHUB_REF_NAME"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: build/dist/
+          if-no-files-found: error
+
+  cli-provenance:
+    name: CLI provenance
+    needs: cli
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # the OIDC token the attestation is signed against
+      attestations: write # the attestation itself
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: build/dist
+
+      # Each archive is its own subject, so `gh attestation verify` works on
+      # the one file somebody downloaded.
+      - name: Attest the build
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: build/dist/*.tar.gz
+
+  # Last, so a release never shows files that have no provenance yet.
+  publish:
+    name: Publish the release
+    needs: [image-provenance, cli-provenance]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the release and its files
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: sbom
+          path: build/sbom
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: build/dist
+
+      # The tag may or may not already have a release behind it: one pushed from
+      # a workstation has none, one cut from the web interface does.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes \
+            build/sbom/keera-gateway.cdx.json build/dist/* \
+          || gh release upload "$GITHUB_REF_NAME" --clobber \
+            build/sbom/keera-gateway.cdx.json build/dist/*
