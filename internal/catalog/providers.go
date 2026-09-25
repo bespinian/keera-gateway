@@ -388,14 +388,8 @@ var providers = []Provider{{
 		Description: "document parsing: turns images of pages into text, tables " +
 			"and formulas - not for chat or code",
 	}},
-	Note: "Prompts leave your infrastructure, but stay in Switzerland: " +
-		"stepping stone serves these models from its own cloud. It issues one " +
-		"API key per model, so give each model its own key: store it on the " +
-		"model, or name a different api_key_env for each. " +
-		"The cached-input rates are stepping stone's published ones, but it " +
-		"only starts to bill them at about the end of October 2026. Until then " +
-		"it charges the full input price, and the gateway charges less than " +
-		"the invoice for any prompt the endpoint reports as cached. " +
+	Note: "Prompts leave your infrastructure, but stay in Switzerland. " +
+		"stepping stone serves these models from its own stoney cloud. " +
 		"The prices are in CHF.",
 }}
 
