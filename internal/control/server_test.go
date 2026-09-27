@@ -210,8 +210,9 @@ func TestThePlaygroundSaysSoWhenThereIsNoGateway(t *testing.T) {
 }
 
 // The panel's "add a hosted model" list comes from the same table the
-// catalogue file is parsed against, and only an operator can add a model.
-func TestProvidersAreServedToOperatorsWithoutSecrets(t *testing.T) {
+// catalogue file is parsed against. Everyone may read it, but only an operator
+// sees the endpoints and credential variables.
+func TestProvidersAreServedWithoutSecrets(t *testing.T) {
 	s := newServer()
 
 	r := httptest.NewRequest(http.MethodGet, httpx.ControlPrefix+"/v1/providers", nil)
@@ -229,12 +230,21 @@ func TestProvidersAreServedToOperatorsWithoutSecrets(t *testing.T) {
 		}
 	}
 
-	// A member may read the catalogue, but not what could be added to it.
+	// A member sees the models and prices, but not how they are reached.
 	member := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleMember, OrgID: "org_1"}
 	w = httptest.NewRecorder()
 	s.listProviders(w, r, member)
-	if w.Code != http.StatusForbidden {
-		t.Errorf("status = %d for a member, want 403", w.Code)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d for a member, want 200: %s", w.Code, w.Body)
+	}
+	body = w.Body.String()
+	if !strings.Contains(body, "anthropic") {
+		t.Errorf("a member does not see the providers: %s", body)
+	}
+	for _, hidden := range []string{"api.anthropic.com", "ANTHROPIC_API_KEY"} {
+		if strings.Contains(body, hidden) {
+			t.Errorf("a member sees %q: %s", hidden, body)
+		}
 	}
 }
 

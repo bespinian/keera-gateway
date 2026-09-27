@@ -253,8 +253,9 @@ code,
 
 /* The hamburger in the topbar and the scrim behind the drawer are the narrow
    layout's, and nothing else ever draws them: the media query at the end of
-   this file is what brings them out. */
-.nav-toggle,
+   this file is what brings them out. The toggle is a .btn, and .btn comes
+   later in the file, so both rules name the two classes to win over it. */
+.btn.nav-toggle,
 .nav-scrim {
   display: none;
 }
@@ -996,6 +997,9 @@ th.num .th-sort {
 .toolbar-search {
   width: auto;
   flex: 0 1 260px;
+}
+.toolbar-select {
+  width: auto;
 }
 .toolbar label {
   font-size: 12.5px;
@@ -2187,7 +2191,7 @@ a.pill-button:hover {
     opacity: 1;
     pointer-events: auto;
   }
-  .nav-toggle {
+  .btn.nav-toggle {
     display: inline-flex;
     flex: none;
   }

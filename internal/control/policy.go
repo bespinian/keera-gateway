@@ -373,14 +373,18 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request, p *authn.Pri
 // hosted model in the panel needs only a model id. It is the same table the
 // catalogue file is read against.
 //
-// Only an operator can add a model, so only an operator sees it. Credentials
-// are named here, never returned.
+// Anyone signed in may read it, for the panel's model catalog. As with
+// listModels, only an operator sees where a model is reached and which
+// variable holds its credential. Credentials are named here, never returned.
 func (s *Server) listProviders(w http.ResponseWriter, _ *http.Request, p *authn.Principal) {
+	providers := catalog.Providers()
 	if !p.CanAdminCatalogue() {
-		s.forbid(w, "only an operator can add a model")
-		return
+		for i := range providers {
+			providers[i].Endpoint = ""
+			providers[i].APIKeyEnv = ""
+		}
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"data": catalog.Providers()})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"data": providers})
 }
 
 func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Principal) {

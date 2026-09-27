@@ -42,6 +42,23 @@ export async function modelsView(ctx) {
         "backend can change without any client changes.",
     ),
     h("div", { style: { flex: 1 } }),
+    // Everyone can browse it. Only an operator's page has fetched the
+    // providers, so only there can an empty list hide it.
+    !canEdit || providers.length
+      ? h(
+          "a",
+          {
+            class: "btn",
+            href: "/model-catalog",
+            title: "Every model the hosted providers offer",
+            onClick: (e) => {
+              e.preventDefault();
+              ctx.navigate("/model-catalog");
+            },
+          },
+          "Model catalog",
+        )
+      : null,
     canEdit
       ? h(
           "button",
@@ -248,6 +265,192 @@ export async function modelsView(ctx) {
   );
 
   return h("div", {}, head, rows);
+}
+
+// modelCatalogView lists every model the hosted providers offer, with what it
+// costs and whether this catalogue already serves it. Everyone can read it; an
+// operator can also add a model from it, which opens the usual form with the
+// provider and the model already picked.
+export async function modelCatalogView(ctx) {
+  const canEdit = ctx.state.me.can_edit_catalogue;
+  const [providers, models] = await Promise.all([
+    presets(),
+    api.models().then((r) => r.data || []),
+  ]);
+
+  const rows = providers.flatMap((p) =>
+    (p.models || []).map((m) => ({
+      p,
+      m,
+      // The aliases that already serve this model, so it is not added twice
+      // by accident.
+      aliases: models
+        .filter((x) => x.provider === p.name && x.backend_model === m.id)
+        .map((x) => x.alias),
+    })),
+  );
+  ctx.setSubtitle(
+    `${rows.length} model${rows.length === 1 ? "" : "s"} from ` +
+      `${providers.length} provider${providers.length === 1 ? "" : "s"}`,
+  );
+
+  // Prices are in the provider's own currency, which is not always this
+  // deployment's.
+  const price = (v, p) =>
+    v ? h("span", { class: "nowrap" }, money(v, p.currency)) : dash();
+
+  const head = h(
+    "div",
+    { class: "detail-head" },
+    h(
+      "a",
+      {
+        class: "crumb",
+        href: "/models",
+        onClick: (e) => {
+          e.preventDefault();
+          ctx.navigate("/models");
+        },
+      },
+      icon(icons.back),
+      "Models",
+    ),
+    h(
+      "div",
+      { class: "muted", style: { marginBottom: "16px" } },
+      "The models the hosted providers offer. Prices are list prices per " +
+        "million tokens, in the provider's currency. With a hosted " +
+        "provider, prompts leave your infrastructure.",
+    ),
+  );
+
+  const list = table(
+    [
+      {
+        label: "Model",
+        sortKey: (r) => r.m.id,
+        cell: (r) =>
+          h(
+            "div",
+            { class: "stack" },
+            h("span", { class: "mono" }, r.m.id),
+            r.m.description
+              ? h(
+                  "span",
+                  { class: "faint", style: { fontSize: "11.5px" } },
+                  r.m.description,
+                )
+              : null,
+          ),
+      },
+      {
+        label: "Provider",
+        shrink: true,
+        sortKey: (r) => r.p.name,
+        cell: (r) => pill([providerMark(r.p.name), r.p.name]),
+      },
+      {
+        label: "Context",
+        num: true,
+        shrink: true,
+        sortKey: (r) => r.m.max_context || null,
+        sortDir: "desc",
+        cell: (r) => (r.m.max_context ? compact(r.m.max_context) : dash()),
+      },
+      {
+        label: "Input",
+        num: true,
+        shrink: true,
+        sortKey: (r) => r.m.input_micros_per_mtok || null,
+        cell: (r) => price(r.m.input_micros_per_mtok, r.p),
+      },
+      {
+        label: "Cached input",
+        num: true,
+        shrink: true,
+        sortKey: (r) => r.m.cached_input_micros_per_mtok || null,
+        cell: (r) => price(r.m.cached_input_micros_per_mtok, r.p),
+      },
+      {
+        label: "Output",
+        num: true,
+        shrink: true,
+        sortKey: (r) => r.m.output_micros_per_mtok || null,
+        cell: (r) => price(r.m.output_micros_per_mtok, r.p),
+      },
+      {
+        label: "In use as",
+        shrink: true,
+        sortKey: (r) => r.aliases[0] || null,
+        cell: (r) =>
+          r.aliases.length
+            ? h(
+                "div",
+                { class: "stack" },
+                r.aliases.map((a) =>
+                  h(
+                    "span",
+                    { class: "mono" },
+                    rowLink(ctx, "/models/" + encodeURIComponent(a), a),
+                  ),
+                ),
+              )
+            : dash(),
+      },
+      canEdit
+        ? {
+            label: "",
+            shrink: true,
+            cell: (r) =>
+              h(
+                "button",
+                {
+                  class: "btn btn-sm",
+                  title: "Add this model to the catalogue",
+                  onClick: () =>
+                    editModel(ctx, null, providers, { p: r.p, m: r.m }),
+                },
+                icon(icons.plus),
+                "Add",
+              ),
+          }
+        : null,
+    ].filter(Boolean),
+    rows,
+    {
+      emptyTitle: "No hosted models",
+      emptyBody: "This build knows no hosted providers.",
+      search: (r) => [r.m.id, r.m.description, r.p.name].join(" "),
+      searchLabel: "models",
+      choices: [
+        {
+          label: "Providers",
+          options: providers.map((p) => ({ value: p.name, label: p.name })),
+          test: (r, v) => r.p.name === v,
+        },
+        {
+          label: "Kinds",
+          options: KINDS.filter((k) =>
+            providers.some((p) => (p.kinds || []).includes(k)),
+          ).map((k) => ({ value: k, label: k })),
+          test: (r, v) => (r.p.kinds || []).includes(v),
+        },
+        // A dropdown with one choice filters nothing.
+      ].filter((c) => c.options.length > 1),
+      toggles: [
+        {
+          label: "Only models not in use",
+          test: (r) => !r.aliases.length,
+        },
+      ],
+    },
+  );
+
+  return h("div", {}, head, list);
+}
+
+function dash() {
+  return h("span", { class: "faint" }, "-");
 }
 
 
@@ -636,7 +839,9 @@ const PRESET_FIELDS = [
   },
 ];
 
-function editModel(ctx, existing, providers) {
+// pick is a provider and one of its models to start from, as the model
+// catalog offers them. It only applies to a new model.
+function editModel(ctx, existing, providers, pick) {
   const m = existing || { kind: "chat", enabled: true, backends: [] };
   const err = h("div");
   // A model the catalogue file declares belongs to the file: the control plane
@@ -1094,6 +1299,7 @@ function editModel(ctx, existing, providers) {
     saveButton.hidden = false;
     saveButton.disabled = false;
   };
+  if (hosted && pick && !existing) hosted.pick(pick.p, pick.m);
   // Held back only where there is a choice to make: a managed entry has no
   // tiles, nor has a build that knows no providers, and a model that already
   // exists has answered.
@@ -1608,7 +1814,7 @@ function hostedFields(ctx, providers, form) {
     paint(state.place);
   }
 
-  return h(
+  const el = h(
     "div",
     { class: "field" },
     h("label", {}, "Where the model runs"),
@@ -1617,6 +1823,18 @@ function hostedFields(ctx, providers, form) {
     caution,
     block,
   );
+  // pick presses a provider's tile and selects one of its models, as if
+  // somebody had clicked both.
+  el.pick = (p, mm) => {
+    const place = places.find((x) => x.p && x.p.name === p.name);
+    if (!place) return;
+    choose(place);
+    const i = place.p.models.findIndex((x) => x.id === mm.id);
+    if (i < 0) return;
+    model.value = String(i);
+    applyModel();
+  };
+  return el;
 }
 
 // paintPresets keeps the line under each filled-in field true: which provider

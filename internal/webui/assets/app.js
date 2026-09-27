@@ -6,7 +6,7 @@ import { signIn } from "./views/signin.js";
 import { overviewView } from "./views/overview.js";
 import { teamsView } from "./views/teams.js";
 import { keysView } from "./views/keys.js";
-import { modelsView } from "./views/models.js";
+import { modelsView, modelCatalogView } from "./views/models.js";
 import { filtersView, filterDetailView } from "./views/filters.js";
 import { routersView, routerDetailView } from "./views/routers.js";
 import { sandboxesView } from "./views/sandboxes.js";
@@ -109,6 +109,16 @@ const routes = [
     icon: "models",
     view: modelsView,
     detail: { label: "Model", view: modelDetailView },
+  },
+  // Every model the hosted providers offer, to pick one to add. It is opened
+  // from Models rather than the sidebar, so `under` lights up Models instead.
+  {
+    path: "/model-catalog",
+    group: "Organisation",
+    label: "Model catalog",
+    icon: "models",
+    view: modelCatalogView,
+    under: "/models",
   },
   // Filters sit next to the catalogue because that is what they are made of -
   // a model and an instruction - and next to the guardrails they belong to,
@@ -509,7 +519,7 @@ function renderShell() {
       brandMark(22),
       h("span", { class: "nav-text" }, "Keera Gateway"),
     ),
-    navGroups(visibleRoutes()).map(({ group, items }) =>
+    navGroups(visibleRoutes().filter((r) => !r.under)).map(({ group, items }) =>
       h(
         "div",
         { class: "nav-group" },
@@ -695,7 +705,7 @@ async function renderRoute() {
   // A detail screen lights up the list it belongs to: somebody reading one team
   // is still under Teams, and a sidebar with nothing marked reads as a screen
   // that fell out of the panel.
-  const current = (route.parent || route).path;
+  const current = route.under || (route.parent || route).path;
   for (const el of document.querySelectorAll(".nav-item")) {
     el.toggleAttribute("aria-current", el.dataset.path === current);
     if (el.dataset.path === current) el.setAttribute("aria-current", "page");

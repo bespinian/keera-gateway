@@ -533,6 +533,9 @@ function toggleBox(t, checked, onChange) {
  *                 is for the toggle whose rows are not here to filter: the
  *                 caller asks the control plane for a different list, and gets
  *                 the box in the toolbar with every other one.
+ *    choices      [{ label, options: [{ value, label }], test }] - a dropdown
+ *                 that keeps only the rows test(row, value) accepts. Its first
+ *                 option is "All", which keeps every row.
  *    sortBy       the label of the column to sort by before anybody asks
  *    sortDir      "asc" (the default) or "desc"
  *    rowClass     (row) => string - a class for that row's <tr>, for a table
@@ -553,6 +556,7 @@ function toggleBox(t, checked, onChange) {
  */
 export function table(columns, rows, opts = {}) {
   const toggles = opts.toggles || [];
+  const choices = opts.choices || [];
 
   if (!rows.length) {
     const card = h(
@@ -581,6 +585,7 @@ export function table(columns, rows, opts = {}) {
   const view = {
     q: "",
     on: toggles.map((t) => !!t.on),
+    picked: choices.map(() => ""),
     sort: columns.find((c) => c.sortKey && c.label === opts.sortBy) || null,
     dir: opts.sortDir === "desc" ? -1 : 1,
   };
@@ -641,6 +646,10 @@ export function table(columns, rows, opts = {}) {
         out = out.filter((r) => !t.hidden(r));
       }
     });
+    choices.forEach((c, i) => {
+      const v = view.picked[i];
+      if (v) out = out.filter((r) => c.test(r, v));
+    });
     if (view.sort) out = out.slice().sort(order(view.sort.sortKey, view.dir));
     return out;
   }
@@ -684,7 +693,7 @@ export function table(columns, rows, opts = {}) {
   }
 
   let toolbar = null;
-  if (opts.search || toggles.length) {
+  if (opts.search || toggles.length || choices.length) {
     const label = opts.searchLabel ? `Search ${opts.searchLabel}` : "Search";
     toolbar = h(
       "div",
@@ -703,6 +712,21 @@ export function table(columns, rows, opts = {}) {
             },
           })
         : null,
+      choices.map((c, i) =>
+        h(
+          "select",
+          {
+            class: "select toolbar-select",
+            "aria-label": c.label,
+            onChange: (e) => {
+              view.picked[i] = e.target.value;
+              draw();
+            },
+          },
+          h("option", { value: "" }, `All ${c.label.toLowerCase()}`),
+          c.options.map((o) => h("option", { value: o.value }, o.label)),
+        ),
+      ),
       toggles.map((t, i) =>
         toggleBox(t, view.on[i], (v) => {
           view.on[i] = v;
