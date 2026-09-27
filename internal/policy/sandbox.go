@@ -213,8 +213,8 @@ func (s SandboxState) Final() bool {
 	return s == SandboxTerminated || s == SandboxFailed
 }
 
-// SandboxLimits is the part of Limits about sandboxes: four ceilings and an
-// allow-list. They combine like every other limit: minimum for a ceiling,
+// SandboxLimits is the part of Limits about sandboxes: four ceilings and two
+// allow-lists. They combine like every other limit: minimum for a ceiling,
 // intersection for a list.
 type SandboxLimits struct {
 	// MaxSandboxes is how many live sandboxes this scope may hold at once.
@@ -230,6 +230,12 @@ type SandboxLimits struct {
 	// and mebibytes. A class above the cap is refused, not shrunk.
 	MaxSandboxCPU    *int `json:"max_sandbox_cpu_millis,omitempty"`
 	MaxSandboxMemory *int `json:"max_sandbox_memory_mib,omitempty"`
+	// AllowedRepos is which repositories a sandbox may check out, by their
+	// path on the forge: "bankb/core" for one, "bankb" for all under it, or
+	// "*" for any. Nil inherits. Unlike the other lists, a scope where no level
+	// sets it may check out nothing: one forge credential can reach every
+	// tenant's repositories, so someone has to say which are whose.
+	AllowedRepos []string `json:"allowed_repos,omitempty"`
 }
 
 // ResolvedSandbox is the sandbox half of Resolved, with every level's limits
@@ -241,6 +247,8 @@ type ResolvedSandbox struct {
 	SandboxClasses       []string `json:"sandbox_classes,omitempty"`
 	MaxSandboxCPU        int      `json:"max_sandbox_cpu_millis"`
 	MaxSandboxMemory     int      `json:"max_sandbox_memory_mib"`
+	// AllowedRepos nil means no repository, not every one.
+	AllowedRepos []string `json:"allowed_repos,omitempty"`
 }
 
 // AllowsClass reports whether name is inside the resolved allow-list.
@@ -272,6 +280,82 @@ func (r ResolvedSandbox) Admits(c SandboxClass) error {
 	return nil
 }
 
+// AnyRepo in AllowedRepos allows every repository the forge credential reaches.
+const AnyRepo = "*"
+
+// AdmitsRepo reports whether a sandbox here may check out the repository at
+// path on the forge, and why not when it may not.
+func (r ResolvedSandbox) AdmitsRepo(path string) error {
+	if r.AllowedRepos == nil {
+		return fmt.Errorf("no repository is allowed for sandboxes here; an operator sets " +
+			"'allowed_repos' on the organisation's guardrail")
+	}
+	for _, p := range r.AllowedRepos {
+		if repoCovers(p, path) {
+			return nil
+		}
+	}
+	if len(r.AllowedRepos) == 0 {
+		return fmt.Errorf("no repository is allowed for sandboxes in this scope")
+	}
+	return fmt.Errorf("%s is not allowed here; this scope may check out %s",
+		path, strings.Join(r.AllowedRepos, ", "))
+}
+
+// ValidRepoPattern reports whether s can be an AllowedRepos entry.
+func ValidRepoPattern(s string) bool {
+	if s == AnyRepo {
+		return true
+	}
+	parts := strings.Split(s, "/")
+	for _, p := range parts {
+		if p == "" || p == "." || p == ".." || strings.Trim(p, "abcdefghijklmnopqrstuvwxyz"+
+			"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-") != "" {
+			return false
+		}
+	}
+	return true
+}
+
+// repoCovers reports whether pattern allows path: the same path, a path under
+// it, or anything for "*". Forges ignore case in paths, so this does too.
+func repoCovers(pattern, path string) bool {
+	if pattern == AnyRepo {
+		return true
+	}
+	pattern, path = strings.ToLower(pattern), strings.ToLower(path)
+	return path == pattern || strings.HasPrefix(path, pattern+"/")
+}
+
+// narrowRepos combines two levels' repository lists. What is left is what
+// both allow: of two entries where one covers the other, the narrower.
+func narrowRepos(cur, next []string) []string {
+	switch {
+	case next == nil:
+		return cur
+	case cur == nil:
+		return slices.Clone(next)
+	}
+	out := []string{}
+	for _, a := range cur {
+		for _, b := range next {
+			var keep string
+			switch {
+			case repoCovers(a, b):
+				keep = b
+			case repoCovers(b, a):
+				keep = a
+			default:
+				continue
+			}
+			if !slices.Contains(out, keep) {
+				out = append(out, keep)
+			}
+		}
+	}
+	return out
+}
+
 // millis renders millicores as cores.
 func millis(m int) string {
 	if m%1000 == 0 {
@@ -295,4 +379,5 @@ func (r *ResolvedSandbox) narrow(lim *Limits) {
 	r.MaxSandboxCPU = minPositive(r.MaxSandboxCPU, deref(lim.MaxSandboxCPU))
 	r.MaxSandboxMemory = minPositive(r.MaxSandboxMemory, deref(lim.MaxSandboxMemory))
 	r.SandboxClasses = intersect(r.SandboxClasses, lim.SandboxClasses)
+	r.AllowedRepos = narrowRepos(r.AllowedRepos, lim.AllowedRepos)
 }

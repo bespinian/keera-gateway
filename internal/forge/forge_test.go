@@ -157,6 +157,7 @@ func TestGitHubMint(t *testing.T) {
 	host := strings.TrimPrefix(srv.URL, "http://")
 	cred, err := gh.Mint(context.Background(), sandbox.GitRequest{
 		Repo: "git@" + strings.Split(host, ":")[0] + ":acme/app.git", Until: time.Now().Add(8 * time.Hour),
+		Allow: allowAll,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -178,7 +179,7 @@ func TestGitHubMint(t *testing.T) {
 		t.Errorf("permissions = %v", asked["permissions"])
 	}
 
-	_, err = gh.Mint(context.Background(), sandbox.GitRequest{Repo: srv.URL + "/acme/missing"})
+	_, err = gh.Mint(context.Background(), sandbox.GitRequest{Repo: srv.URL + "/acme/missing", Allow: allowAll})
 	var refused *sandbox.ErrRefused
 	if !errors.As(err, &refused) || !strings.Contains(refused.Reason, "not installed") {
 		t.Errorf("a repository without the App = %v, want a refusal saying so", err)
@@ -220,7 +221,7 @@ func TestGitLabMintAndRevoke(t *testing.T) {
 	}
 	until := time.Date(2026, 9, 24, 17, 30, 0, 0, time.UTC)
 	cred, err := gl.Mint(context.Background(), sandbox.GitRequest{
-		Repo: srv.URL + "/group/sub/app.git", Until: until, Sandbox: "fix-login",
+		Repo: srv.URL + "/group/sub/app.git", Until: until, Sandbox: "fix-login", Allow: allowAll,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -236,7 +237,8 @@ func TestGitLabMintAndRevoke(t *testing.T) {
 		t.Errorf("token asked for = %v", created)
 	}
 
-	_, err = gl.Mint(context.Background(), sandbox.GitRequest{Repo: srv.URL + "/group/denied", Until: until})
+	_, err = gl.Mint(context.Background(), sandbox.GitRequest{Repo: srv.URL + "/group/denied", Until: until,
+		Allow: allowAll})
 	var refused *sandbox.ErrRefused
 	if !errors.As(err, &refused) || !strings.Contains(refused.Reason, "Maintainer") {
 		t.Errorf("a project the token may not use = %v, want a refusal saying why", err)
@@ -264,5 +266,48 @@ func TestDayAfter(t *testing.T) {
 		if got := dayAfter(in).Format(time.DateOnly); got != want {
 			t.Errorf("dayAfter(%s) = %s, want %s", in, got, want)
 		}
+	}
+}
+
+func allowAll(string) error { return nil }
+
+// One forge credential reaches every tenant's repositories, so a forge mints
+// nothing the caller's guardrail has not allowed, and asks the forge nothing.
+func TestMintAsksTheGuardrailBeforeTheForge(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		http.Error(w, "not expected", http.StatusTeapot)
+	}))
+	defer srv.Close()
+
+	gl, err := NewGitLab(GitLabOptions{URL: srv.URL, Token: "glpat-admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var asked string
+	_, err = gl.Mint(context.Background(), sandbox.GitRequest{
+		Repo: srv.URL + "/bankb/core.git", Until: time.Now().Add(time.Hour),
+		Allow: func(path string) error {
+			asked = path
+			return &sandbox.ErrRefused{Reason: "not yours"}
+		},
+	})
+	var refused *sandbox.ErrRefused
+	if !errors.As(err, &refused) {
+		t.Fatalf("Mint = %v, want the guardrail's refusal", err)
+	}
+	if asked != "bankb/core" {
+		t.Errorf("the guardrail was asked about %q, want the path on the forge", asked)
+	}
+
+	// Without a guardrail nothing is allowed.
+	if _, err := gl.Mint(context.Background(), sandbox.GitRequest{
+		Repo: srv.URL + "/bankb/core.git", Until: time.Now().Add(time.Hour),
+	}); !errors.As(err, &refused) {
+		t.Errorf("Mint with no guardrail = %v, want a refusal", err)
+	}
+	if calls != 0 {
+		t.Errorf("the forge was called %d times, want none", calls)
 	}
 }

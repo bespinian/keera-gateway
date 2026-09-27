@@ -344,7 +344,7 @@ var commands = []command{
 				flags: []string{"models", "rpm", "tpm", "max-output-tokens", "budget", "period",
 					"system-prompt", "no-system-prompt", "filters", "no-filters", "tools",
 					"block-hosted-tools", "allow-hosted-tools", "max-sandboxes",
-					"max-sandbox-ttl", "sandbox-classes", "max-sandbox-cpu", "max-sandbox-memory", "json"},
+					"max-sandbox-ttl", "sandbox-classes", "max-sandbox-cpu", "max-sandbox-memory", "repos", "json"},
 				examples: []string{
 					"keera guardrail set team team_1 --models keera-speed --rpm 120 \\\n" +
 						"    --budget 500 --period month",

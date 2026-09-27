@@ -122,6 +122,11 @@ CREATE TABLE guardrails (
     sandbox_classes         text[],
     max_sandbox_cpu_millis  integer,
     max_sandbox_memory_mib  integer,
+    -- Which repositories a scope's sandboxes may check out, by their path on
+    -- the forge. It narrows like the other lists, but a scope where no level
+    -- sets it may check out nothing: the deployment's one forge credential
+    -- reaches every tenant's repositories.
+    allowed_repos           text[],
 
     -- Which tools a scope may call, and whether a hosted provider's own tools
     -- are taken out of its requests.

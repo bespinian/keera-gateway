@@ -245,3 +245,48 @@ func TestSandboxStateGroupings(t *testing.T) {
 		t.Error("an expired engineer's sandbox can still be resumed")
 	}
 }
+
+// One forge credential reaches every tenant's repositories, so a scope with no
+// list may check out nothing, and a level can only narrow what it inherits.
+func TestAllowedReposNarrowAndDefaultToNothing(t *testing.T) {
+	if err := (ResolvedSandbox{}).AdmitsRepo("acme/app"); err == nil {
+		t.Error("a scope with no list checked out a repository")
+	}
+
+	for _, tc := range []struct {
+		org, team []string
+		path      string
+		ok        bool
+	}{
+		{[]string{"acme"}, nil, "acme/app", true},
+		{[]string{"acme"}, nil, "ACME/App", true},
+		{[]string{"acme"}, nil, "acme-evil/app", false},
+		{[]string{"acme"}, nil, "acmeapp", false},
+		{[]string{"group/sub"}, nil, "group/sub/deep/app", true},
+		{[]string{AnyRepo}, nil, "anyone/anything", true},
+		// A team can narrow the organisation's list, never widen it.
+		{[]string{"acme"}, []string{"acme/app"}, "acme/app", true},
+		{[]string{"acme"}, []string{"acme/app"}, "acme/other", false},
+		{[]string{"acme"}, []string{AnyRepo}, "bankb/core", false},
+		{[]string{"acme"}, []string{"bankb"}, "bankb/core", false},
+		{[]string{AnyRepo}, []string{"acme"}, "bankb/core", false},
+	} {
+		org := &Limits{SandboxLimits: SandboxLimits{AllowedRepos: tc.org}}
+		team := &Limits{SandboxLimits: SandboxLimits{AllowedRepos: tc.team}}
+		r := Resolve(Key{OrgID: "o", TeamID: "t"}, org, team, nil).Sandbox
+		if err := r.AdmitsRepo(tc.path); (err == nil) != tc.ok {
+			t.Errorf("org %v, team %v, %s: err = %v, want allowed=%v", tc.org, tc.team, tc.path, err, tc.ok)
+		}
+	}
+}
+
+func TestValidRepoPattern(t *testing.T) {
+	for s, want := range map[string]bool{
+		"acme": true, "acme/app": true, "group/sub/app": true, "*": true, "my_org.x-1": true,
+		"": false, "acme/": false, "../x": false, "acme/*": false, "a b": false,
+	} {
+		if got := ValidRepoPattern(s); got != want {
+			t.Errorf("ValidRepoPattern(%q) = %v, want %v", s, got, want)
+		}
+	}
+}

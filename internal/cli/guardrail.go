@@ -43,6 +43,7 @@ type guardrailFlags struct {
 	sandboxClasses   string
 	maxSandboxCPU    float64
 	maxSandboxMemory int
+	repos            string
 	asJSON           bool
 }
 
@@ -76,6 +77,9 @@ func registerGuardrailFlags(fs *flag.FlagSet) *guardrailFlags {
 		"largest sandbox this scope may run, in cores (0 for unlimited)")
 	fs.IntVar(&f.maxSandboxMemory, "max-sandbox-memory", -1,
 		"largest sandbox this scope may run, in mebibytes (0 for unlimited)")
+	fs.StringVar(&f.repos, "repos", "",
+		"comma-separated repositories sandboxes may check out: owner, owner/name, or '*' "+
+			"for all ('any' to clear); on an organisation, operators only")
 	fs.BoolVar(&f.asJSON, "json", false, jsonUsage)
 	return f
 }
@@ -130,6 +134,7 @@ func (f *guardrailFlags) apply(lim *policy.Limits) error {
 		setInt(&lim.MaxSandboxTTLSeconds, int(f.maxSandboxTTL.Seconds()))
 	}
 	setList(&lim.SandboxClasses, f.sandboxClasses)
+	setList(&lim.AllowedRepos, f.repos)
 	return nil
 }
 
@@ -484,6 +489,12 @@ func printEffectiveSandboxes(w *table, eff control.Effective) {
 		showFrom(w, "sandbox classes", strings.Join(sb.SandboxClasses, ","),
 			narrowedBy(eff, func(l policy.Limits) bool { return l.SandboxClasses != nil }))
 	}
+	if sb.AllowedRepos == nil {
+		showFrom(w, "repositories", "(none)", "")
+	} else {
+		showFrom(w, "repositories", strings.Join(sb.AllowedRepos, ","),
+			narrowedBy(eff, func(l policy.Limits) bool { return l.AllowedRepos != nil }))
+	}
 	if sb.MaxSandboxes == 0 {
 		showFrom(w, "max sandboxes", "(unlimited)", "")
 	} else {
@@ -588,6 +599,7 @@ func printLimits(w *table, lim policy.Limits) {
 		show(w, "system prompt", firstLine(*lim.SystemPrompt))
 	}
 	show(w, "sandbox classes", joinedOr(lim.SandboxClasses, "(all)"))
+	show(w, "repositories", joinedOr(lim.AllowedRepos, "(inherited)"))
 	show(w, "max sandboxes", orUnlimited(lim.MaxSandboxes))
 	if lim.MaxSandboxTTLSeconds == nil {
 		show(w, "max sandbox lifetime", "(unlimited)")

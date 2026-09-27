@@ -82,11 +82,8 @@ func githubWeb(api *url.URL) *url.URL {
 
 // Mint implements sandbox.GitMinter.
 func (g *GitHub) Mint(ctx context.Context, req sandbox.GitRequest) (sandbox.GitCredential, error) {
-	r, err := parseRepo(req.Repo)
+	r, err := target(req, g.web)
 	if err != nil {
-		return sandbox.GitCredential{}, err
-	}
-	if r, err = r.on(g.web); err != nil {
 		return sandbox.GitCredential{}, err
 	}
 	owner, name, _ := strings.Cut(r.path, "/")

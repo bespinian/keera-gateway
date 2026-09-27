@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -92,7 +93,8 @@ func (d *recordingDriver) Status(_ context.Context, ref sandbox.Ref) (sandbox.St
 	return sandbox.Status{Ref: ref, State: policy.SandboxReady}, nil
 }
 
-// fakeForge numbers its tokens and remembers which were revoked.
+// fakeForge numbers its tokens and remembers which were revoked. Like the real
+// forges, it asks the guardrail about the repository's path first.
 type fakeForge struct {
 	mu      sync.Mutex
 	minted  int
@@ -102,6 +104,14 @@ type fakeForge struct {
 func (f *fakeForge) Mint(_ context.Context, req sandbox.GitRequest) (sandbox.GitCredential, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	path := strings.TrimSuffix(req.Repo[strings.LastIndexAny(req.Repo, ":")+1:], ".git")
+	path = strings.TrimPrefix(strings.TrimPrefix(path, "//git.example.ch"), "/")
+	if req.Allow == nil {
+		return sandbox.GitCredential{}, &sandbox.ErrRefused{Reason: "no guardrail"}
+	}
+	if err := req.Allow(path); err != nil {
+		return sandbox.GitCredential{}, err
+	}
 	if strings.Contains(req.Repo, "forbidden") {
 		return sandbox.GitCredential{}, &sandbox.ErrRefused{Reason: "the forge says no"}
 	}
@@ -128,6 +138,11 @@ func TestASandboxRefreshesItsRepositoryCredentialWithItsOwnKey(t *testing.T) {
 		PublicURL: "http://gateway.internal:8080", Git: git,
 	})
 	ts := sandboxServer(t, st, m)
+	if err := st.PutPolicy(t.Context(), policy.ScopeOrg, "org_1", policy.Limits{
+		SandboxLimits: policy.SandboxLimits{AllowedRepos: []string{"acme"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	var sb store.Sandbox
 	if code := call(t, ts, http.MethodPost, httpx.ControlPrefix+"/v1/sandboxes", map[string]any{
@@ -234,5 +249,102 @@ func TestOffboardStopsAPersonsSandboxes(t *testing.T) {
 	}
 	if live, _ := st.ListSandboxes(ctx, store.SandboxQuery{UserID: user.ID}); len(live) != 0 {
 		t.Errorf("%d sandboxes still live", len(live))
+	}
+}
+
+// One forge credential reaches every tenant's repositories. A sandbox may only
+// check out what its organisation's guardrail allows, and taking a repository
+// off the list stops the next refresh too.
+func TestASandboxOnlyGetsTheRepositoriesItsGuardrailAllows(t *testing.T) {
+	st, ctx := sandboxStore(t)
+	driver := &recordingDriver{}
+	m := sandbox.NewManager(st, driver, sandbox.ManagerOptions{
+		PublicURL: "http://gateway.internal:8080", Git: &fakeForge{},
+	})
+	ts := sandboxServer(t, st, m)
+	create := func(name, repo string) (int, string) {
+		var out struct {
+			Error struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		code := call(t, ts, http.MethodPost, httpx.ControlPrefix+"/v1/sandboxes", map[string]any{
+			"org_id": "org_1", "name": name, "class": "standard", "purpose": "agent", "repo": repo,
+		}, &out)
+		return code, out.Error.Message
+	}
+
+	// Nothing set: no repository at all.
+	if code, msg := create("none", "https://git.example.ch/acme/app"); code != http.StatusConflict ||
+		!strings.Contains(msg, "allowed_repos") {
+		t.Errorf("with no list = %d %q, want a refusal naming the setting", code, msg)
+	}
+
+	put := func(repos ...string) {
+		t.Helper()
+		if err := st.PutPolicy(ctx, policy.ScopeOrg, "org_1", policy.Limits{
+			SandboxLimits: policy.SandboxLimits{AllowedRepos: repos},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put("acme")
+	if code, msg := create("theirs", "https://git.example.ch/bankb/core"); code != http.StatusConflict ||
+		!strings.Contains(msg, "bankb/core") {
+		t.Errorf("another tenant's repository = %d %q, want a refusal", code, msg)
+	}
+	if code, msg := create("ours", "https://git.example.ch/acme/app"); code != http.StatusCreated {
+		t.Fatalf("an allowed repository = %d %q", code, msg)
+	}
+
+	put("acme/other")
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost,
+		ts.URL+httpx.SandboxPrefix+sandbox.GitCredentialPath, nil)
+	req.Header.Set("Authorization", "Bearer "+driver.env["ours"]["KEERA_API_KEY"])
+	res, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusConflict {
+		t.Errorf("refreshing after the repository left the list = %d, want 409", res.StatusCode)
+	}
+}
+
+// Only an operator decides which repositories an organisation reaches. Its
+// administrator may still change the rest of its guardrail without losing
+// that list.
+func TestOnlyAnOperatorSetsAnOrganisationsRepositories(t *testing.T) {
+	tn := twoTenants(t)
+	admin := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleAdmin, OrgID: "org_a"}
+	operator := &authn.Principal{Via: authn.MethodOperatorKey}
+	put := func(p *authn.Principal, body string) int {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPut, httpx.ControlPrefix+"/v1/guardrails/org/org_a",
+			strings.NewReader(body)).WithContext(tn.ctx)
+		r.SetPathValue("scope", "org")
+		r.SetPathValue("id", "org_a")
+		tn.srv.putGuardrails(w, r, p)
+		return w.Code
+	}
+
+	if code := put(operator, `{"allowed_repos":["acme"]}`); code != http.StatusOK {
+		t.Fatalf("an operator setting the list = %d", code)
+	}
+	if code := put(admin, `{"allowed_repos":["*"]}`); code != http.StatusForbidden {
+		t.Errorf("an administrator widening it = %d, want 403", code)
+	}
+	if code := put(admin, `{"rpm":60}`); code != http.StatusOK {
+		t.Fatalf("an administrator setting a rate limit = %d", code)
+	}
+	lim, err := tn.srv.st.GetPolicy(tn.ctx, policy.ScopeOrg, "org_a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lim.AllowedRepos) != 1 || lim.AllowedRepos[0] != "acme" || lim.RPM == nil {
+		t.Errorf("guardrail = repos %v, rpm %v; want the operator's list kept", lim.AllowedRepos, lim.RPM)
+	}
+	if code := put(operator, `{"allowed_repos":["acme/../x"]}`); code != http.StatusBadRequest {
+		t.Errorf("a malformed entry = %d, want 400", code)
 	}
 }

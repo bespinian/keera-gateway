@@ -34,7 +34,12 @@ func (s *Server) gitCredential(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	cred, err := s.opts.Sandboxes.RefreshGit(r.Context(), sb)
+	limits, err := s.sandboxLimits(r.Context(), sb.OrgID, sb.TeamID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	cred, err := s.opts.Sandboxes.RefreshGit(r.Context(), sb, limits)
 	if err != nil {
 		s.failSandbox(w, err)
 		return

@@ -12,7 +12,8 @@ import (
 const limitColumns = `p.allowed_models, p.max_output_tokens, p.rpm, p.tpm,
 	p.budget_micros, p.budget_period, p.system_prompt, p.filters,
 	p.max_sandboxes, p.max_sandbox_ttl_seconds, p.sandbox_classes,
-	p.max_sandbox_cpu_millis, p.max_sandbox_memory_mib, p.allowed_tools, p.block_hosted_tools`
+	p.max_sandbox_cpu_millis, p.max_sandbox_memory_mib, p.allowed_tools, p.block_hosted_tools,
+	p.allowed_repos`
 
 // limitTargets points at the fields limitColumns fills. The budget period is
 // nullable text, so it is scanned into period and converted afterwards.
@@ -20,7 +21,8 @@ func limitTargets(lim *policy.Limits, period **string) []any {
 	return []any{&lim.AllowedModels, &lim.MaxOutputTokens, &lim.RPM, &lim.TPM,
 		&lim.BudgetMicros, period, &lim.SystemPrompt, &lim.Filters,
 		&lim.MaxSandboxes, &lim.MaxSandboxTTLSeconds, &lim.SandboxClasses,
-		&lim.MaxSandboxCPU, &lim.MaxSandboxMemory, &lim.AllowedTools, &lim.BlockHostedTools}
+		&lim.MaxSandboxCPU, &lim.MaxSandboxMemory, &lim.AllowedTools, &lim.BlockHostedTools,
+		&lim.AllowedRepos}
 }
 
 // GetPolicy reads the limits attached to one scope.
@@ -46,8 +48,8 @@ func (s *Store) PutPolicy(ctx context.Context, scopeType policy.ScopeType, scope
 		(scope_type, scope_id, allowed_models, max_output_tokens, rpm, tpm, budget_micros,
 		 budget_period, system_prompt, filters, max_sandboxes, max_sandbox_ttl_seconds,
 		 sandbox_classes, max_sandbox_cpu_millis, max_sandbox_memory_mib, allowed_tools,
-		 block_hosted_tools, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17, now())
+		 block_hosted_tools, allowed_repos, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18, now())
 		ON CONFLICT (scope_type, scope_id) DO UPDATE SET
 			allowed_models = EXCLUDED.allowed_models, max_output_tokens = EXCLUDED.max_output_tokens,
 			rpm = EXCLUDED.rpm, tpm = EXCLUDED.tpm, budget_micros = EXCLUDED.budget_micros,
@@ -58,11 +60,13 @@ func (s *Store) PutPolicy(ctx context.Context, scopeType policy.ScopeType, scope
 			max_sandbox_cpu_millis = EXCLUDED.max_sandbox_cpu_millis,
 			max_sandbox_memory_mib = EXCLUDED.max_sandbox_memory_mib,
 			allowed_tools = EXCLUDED.allowed_tools,
-			block_hosted_tools = EXCLUDED.block_hosted_tools, updated_at = now()`,
+			block_hosted_tools = EXCLUDED.block_hosted_tools,
+			allowed_repos = EXCLUDED.allowed_repos, updated_at = now()`,
 		string(scopeType), scopeID, lim.AllowedModels, lim.MaxOutputTokens, lim.RPM, lim.TPM,
 		lim.BudgetMicros, periodStr(lim.BudgetPeriod), lim.SystemPrompt, lim.Filters,
 		lim.MaxSandboxes, lim.MaxSandboxTTLSeconds, lim.SandboxClasses,
-		lim.MaxSandboxCPU, lim.MaxSandboxMemory, lim.AllowedTools, lim.BlockHostedTools)
+		lim.MaxSandboxCPU, lim.MaxSandboxMemory, lim.AllowedTools, lim.BlockHostedTools,
+		lim.AllowedRepos)
 	return err
 }
 

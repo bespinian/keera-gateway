@@ -92,6 +92,26 @@ func (r repo) on(web *url.URL) (repo, error) {
 	return r, nil
 }
 
+// target reads the repository a request is for, as a path on this forge, and
+// checks the caller's guardrail allows it. Both forges start here, so neither
+// can mint for a repository the guardrail has not allowed.
+func target(req sandbox.GitRequest, web *url.URL) (repo, error) {
+	r, err := parseRepo(req.Repo)
+	if err != nil {
+		return repo{}, err
+	}
+	if r, err = r.on(web); err != nil {
+		return repo{}, err
+	}
+	if req.Allow == nil {
+		return repo{}, &sandbox.ErrRefused{Reason: "no repository is allowed for this sandbox"}
+	}
+	if err := req.Allow(r.path); err != nil {
+		return repo{}, err
+	}
+	return r, nil
+}
+
 // cloneURL is the https address a token works with, whatever address was
 // asked for.
 func (r repo) cloneURL(web *url.URL) string {

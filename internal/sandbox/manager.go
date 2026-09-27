@@ -85,6 +85,10 @@ type GitRequest struct {
 	// Sandbox names the sandbox, so the forge's list of tokens says what each
 	// one is for.
 	Sandbox string
+	// Allow checks the repository's path on the forge against the caller's
+	// guardrail, and says why not. Only the forge can read the path, so it
+	// calls this. Nil allows nothing.
+	Allow func(path string) error
 }
 
 // GitCredential is what a sandbox checks out with.
@@ -239,7 +243,8 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (store.Sandbox,
 
 	env := m.environment(ctx, req, row, secret, expires)
 	if req.Repo != "" {
-		git, err = m.mintGit(ctx, GitRequest{Repo: req.Repo, Until: expires, Sandbox: req.Name})
+		git, err = m.mintGit(ctx, GitRequest{Repo: req.Repo, Until: expires, Sandbox: req.Name,
+			Allow: allowRepo(req.Limits)})
 		if err != nil {
 			rollback()
 			return store.Sandbox{}, err
@@ -544,9 +549,24 @@ func (m *Manager) repoEnv(env map[string]string, cred GitCredential, branch stri
 // under httpx.SandboxPrefix.
 const GitCredentialPath = "/v1/git-credential"
 
+// allowRepo checks a repository against a scope's allowed_repos.
+func allowRepo(limits policy.ResolvedSandbox) func(string) error {
+	return func(path string) error {
+		if err := limits.AdmitsRepo(path); err != nil {
+			return &ErrRefused{Reason: err.Error()}
+		}
+		return nil
+	}
+}
+
 // RefreshGit mints a fresh repository credential for a live sandbox and
 // revokes the one it replaces. The sandbox asks for it with its own key.
-func (m *Manager) RefreshGit(ctx context.Context, sb store.Sandbox) (GitCredential, error) {
+//
+// limits is the sandbox's guardrail as it is now, not as it was at creation,
+// so taking a repository off the list stops the next refresh.
+func (m *Manager) RefreshGit(ctx context.Context, sb store.Sandbox,
+	limits policy.ResolvedSandbox,
+) (GitCredential, error) {
 	switch {
 	case sb.Repo == "":
 		return GitCredential{}, refuse("sandbox %s was created without a repository, so it "+
@@ -559,7 +579,8 @@ func (m *Manager) RefreshGit(ctx context.Context, sb store.Sandbox) (GitCredenti
 	case sb.ExpiresAt == nil || !sb.ExpiresAt.After(time.Now()):
 		return GitCredential{}, refuse("sandbox %s has run out of time", sb.Name)
 	}
-	cred, err := m.mintGit(ctx, GitRequest{Repo: sb.Repo, Until: *sb.ExpiresAt, Sandbox: sb.Name})
+	cred, err := m.mintGit(ctx, GitRequest{Repo: sb.Repo, Until: *sb.ExpiresAt, Sandbox: sb.Name,
+		Allow: allowRepo(limits)})
 	if err != nil {
 		return GitCredential{}, err
 	}

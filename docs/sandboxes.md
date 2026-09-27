@@ -291,6 +291,23 @@ reason, instead of failing inside the sandbox.
 all accepted and cloned over HTTPS, because tokens only work there. A repository
 on a different host than the forge's is refused.
 
+**Only the repositories the guardrail allows.** The deployment's forge
+credential can reach every repository it is installed on, including other
+tenants'. So a sandbox gets a token only for a repository in `allowed_repos`,
+and a scope where no level sets it gets none:
+
+```sh
+keera guardrail set org <org-id> --repos acme            # everything under acme/
+keera guardrail set team <team-id> --repos acme/service  # narrows it for one team
+keera guardrail set org <org-id> --repos '*'             # any repository, for one tenant
+```
+
+An entry is a path on the forge: an owner or group for everything under it, or
+one repository. Case does not matter. On an organisation, only an operator can
+set it; an administrator can narrow it for a team. It is checked again on every
+token refresh, so taking a repository off the list stops running sandboxes
+getting a new token.
+
 **Tokens are refreshed.** A GitHub token lasts an hour; an engineer's sandbox
 lasts a working day. Git in the sandbox asks `git-credential-keera`, which keeps
 the current token. When it has five minutes left, the helper gets a new one from

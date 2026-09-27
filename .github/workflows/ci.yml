@@ -55,7 +55,7 @@ jobs:
       - name: Lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.13
+          version: v2.14
 
       # A build is not a test, but it is the one thing every other job assumes
       # and the fastest place to find out that a platform-specific file does

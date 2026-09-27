@@ -57,11 +57,8 @@ func NewGitLab(o GitLabOptions) (*GitLab, error) {
 
 // Mint implements sandbox.GitMinter.
 func (g *GitLab) Mint(ctx context.Context, req sandbox.GitRequest) (sandbox.GitCredential, error) {
-	r, err := parseRepo(req.Repo)
+	r, err := target(req, g.web)
 	if err != nil {
-		return sandbox.GitCredential{}, err
-	}
-	if r, err = r.on(g.web); err != nil {
 		return sandbox.GitCredential{}, err
 	}
 	expires := dayAfter(req.Until)

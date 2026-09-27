@@ -1,8 +1,9 @@
 package connect
 
-import "strings"
-
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestIdentifyReadsTheAgentOffTheWire(t *testing.T) {
 	tests := []struct {

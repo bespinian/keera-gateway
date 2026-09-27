@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -75,6 +76,41 @@ func (s *Server) storedLimits(ctx context.Context, scope policy.ScopeType, id st
 		return policy.Limits{}, nil
 	}
 	return lim, err
+}
+
+// checkAllowedRepos cleans up allowed_repos and checks who may change it.
+//
+// On an organisation, only an operator may: one forge credential reaches
+// every tenant's repositories, and this list keeps a tenant to its own. An
+// administrator's write keeps what the operator set. Teams and keys only
+// narrow it, so their administrators may set theirs.
+func (s *Server) checkAllowedRepos(w http.ResponseWriter, r *http.Request, p *authn.Principal,
+	scope policy.ScopeType, scopeID string, lim *policy.Limits,
+) bool {
+	for i, e := range lim.AllowedRepos {
+		e = strings.Trim(strings.TrimSpace(e), "/")
+		if !policy.ValidRepoPattern(e) {
+			badRequest(w, fmt.Sprintf("'allowed_repos' has %q; use an owner or group such as "+
+				"'bankb', a repository such as 'bankb/core', or '*' for all", e))
+			return false
+		}
+		lim.AllowedRepos[i] = e
+	}
+	if scope != policy.ScopeOrg || p.Unrestricted() {
+		return true
+	}
+	stored, err := s.storedLimits(r.Context(), scope, scopeID)
+	if err != nil {
+		s.fail(w, err)
+		return false
+	}
+	if lim.AllowedRepos != nil && !slices.Equal(lim.AllowedRepos, stored.AllowedRepos) {
+		s.forbid(w, "only an operator can change which repositories an organisation's "+
+			"sandboxes may check out; leave 'allowed_repos' out to keep it")
+		return false
+	}
+	lim.AllowedRepos = stored.AllowedRepos
+	return true
 }
 
 // maxSystemPromptBytes bounds a scope's standing instruction. It is added to
@@ -281,7 +317,7 @@ func (s *Server) putGuardrails(w http.ResponseWriter, r *http.Request, p *authn.
 		return
 	}
 	if !s.checkGuardrailFilters(w, r, owner, &lim) || !s.checkAllowList(w, r, scope, owner, &lim) ||
-		!s.checkAllowedTools(w, r, &lim) {
+		!s.checkAllowedTools(w, r, &lim) || !s.checkAllowedRepos(w, r, p, scope, scopeID, &lim) {
 		return
 	}
 	if lim.BudgetMicros != nil && lim.BudgetPeriod == nil {
