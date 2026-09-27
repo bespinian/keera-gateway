@@ -686,7 +686,9 @@ func (s *Server) finish(ev store.Event, model policy.Model, res *policy.Resolved
 		for _, sc := range res.Scopes {
 			reqs = append(reqs, ratelimit.Requirement{Key: bucketKey(sc, "tpm"), PerMinute: sc.TPM})
 		}
-		s.limiter.ChargeAll(reqs, tokens, now)
+		// Charged as of now, not the start: a stream can run for minutes, and
+		// a bucket told it is minutes younger than it is refills too much.
+		s.limiter.ChargeAll(reqs, tokens, time.Now())
 	}
 	s.sink.Record(ev)
 	s.metrics.Observe(ev.Alias, ev.OrgID, ev.Status, ev.Latency.Seconds(),

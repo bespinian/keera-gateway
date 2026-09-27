@@ -288,6 +288,33 @@ func TestRedisChargeCanOverdrawSoOneHugeRequestIsPaidForLater(t *testing.T) {
 	}
 }
 
+func TestRedisAnEarlierClockDoesNotRefillTheBucket(t *testing.T) {
+	// A long stream is charged minutes after the bucket was last touched, and
+	// replicas' clocks differ. If an earlier time were stored, the next
+	// request would refill from it and the debt would vanish.
+	rdb, prefix := redisFor(t)
+	r := replica(t, rdb, prefix)
+	now := time.Now()
+	tpm := []Requirement{{Key: "org|tpm", PerMinute: 1000}}
+
+	if r.Admit(tpm, now) != -1 {
+		t.Fatal("a fresh bucket should admit a request")
+	}
+	r.Charge("org|tpm", 1000, 5000, now.Add(-5*time.Minute))
+	if r.Admit(tpm, now) == -1 {
+		t.Error("a charge stamped five minutes back erased five minutes of debt")
+	}
+
+	rpm := []Requirement{{Key: "org|rpm", PerMinute: 1, Take: true}}
+	if r.Admit(rpm, now) != -1 {
+		t.Fatal("a fresh bucket should admit a request")
+	}
+	r.Admit(rpm, now.Add(-time.Minute))
+	if r.Admit(rpm, now) == -1 {
+		t.Error("a request stamped a minute back refilled the bucket for the next one")
+	}
+}
+
 func TestRedisChargeAllChargesEveryBucketLikeMemory(t *testing.T) {
 	// One round trip charges every scope's bucket, and must leave each as the
 	// in-memory limiter would.

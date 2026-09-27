@@ -110,11 +110,13 @@ func orDefault(s, fallback string) string {
 //
 // The clock comes from the caller, not Redis TIME, so the arithmetic matches
 // the in-memory limiter and stays testable. A negative elapsed time is ignored,
-// so clock skew can cost some refill but never mint tokens.
+// and the stored time never moves back, so an earlier clock - another
+// replica's, or a long request charged late - can cost some refill but never
+// mint tokens.
 const admitSource = `
 local now = tonumber(ARGV[1])
 local n = #KEYS
-local live, order, ttl = {}, {}, {}
+local live, order, ttl, ts = {}, {}, {}, {}
 local tokens = {}
 
 for i = 1, n do
@@ -125,10 +127,11 @@ for i = 1, n do
   if t == nil then
     order[#order + 1] = key
     local h = redis.call('HMGET', key, 't', 'ts')
+    ts[key] = now
     if h[1] then
       t = tonumber(h[1])
       local elapsed = (now - tonumber(h[2])) / 1000
-      if elapsed > 0 then t = t + elapsed * perSec end
+      if elapsed > 0 then t = t + elapsed * perSec else ts[key] = tonumber(h[2]) end
     else
       t = burst
     end
@@ -162,7 +165,7 @@ end
 local out = {failed}
 for i = 1, #order do
   local key = order[i]
-  redis.call('HSET', key, 't', live[key], 'ts', now)
+  redis.call('HSET', key, 't', live[key], 'ts', ts[key])
   if ttl[key] then redis.call('PEXPIRE', key, ttl[key]) end
 end
 for i = 1, n do
@@ -183,18 +186,19 @@ for i = 1, #KEYS do
   local perSec = tonumber(ARGV[2 * i + 1])
   local burst = tonumber(ARGV[2 * i + 2])
   local t
+  local ts = now
   local h = redis.call('HMGET', KEYS[i], 't', 'ts')
   if h[1] then
     t = tonumber(h[1])
     local elapsed = (now - tonumber(h[2])) / 1000
-    if elapsed > 0 then t = t + elapsed * perSec end
+    if elapsed > 0 then t = t + elapsed * perSec else ts = tonumber(h[2]) end
   else
     t = burst
   end
   if t > burst then t = burst end
   t = t - n
 
-  redis.call('HSET', KEYS[i], 't', t, 'ts', now)
+  redis.call('HSET', KEYS[i], 't', t, 'ts', ts)
   if perSec > 0 then
     redis.call('PEXPIRE', KEYS[i], math.ceil(burst / perSec * 1000) + 60000)
   end
