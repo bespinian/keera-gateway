@@ -486,3 +486,55 @@ func TestTheUnprefixedSettingsStillConfigureOneProvider(t *testing.T) {
 		t.Errorf("default role = %q, want member", c.OIDC[0].Mapping.Default)
 	}
 }
+
+// With several directories, each customer's admin can give their users any
+// address - another customer's, or an operator's. So every provider has to
+// say which domains it may vouch for.
+func TestSeveralProvidersMustNameTheirDomains(t *testing.T) {
+	env := valid(map[string]string{
+		"KEERA_OIDC_PROVIDERS":            "google,entra",
+		"KEERA_OIDC_REDIRECT_URL":         "https://keera.example.ch/control/auth/callback",
+		"KEERA_OIDC_GOOGLE_ISSUER":        "https://accounts.google.com",
+		"KEERA_OIDC_GOOGLE_CLIENT_ID":     "google-client",
+		"KEERA_OIDC_GOOGLE_CLIENT_SECRET": "google-secret",
+		"KEERA_OIDC_ENTRA_ISSUER":         "https://login.microsoftonline.com/tenant/v2.0",
+		"KEERA_OIDC_ENTRA_CLIENT_ID":      "entra-client",
+		"KEERA_OIDC_ENTRA_CLIENT_SECRET":  "entra-secret",
+		"KEERA_OIDC_GOOGLE_DOMAINS":       "*",
+	})
+	_, err := loadWith(t, env)
+	if err == nil {
+		t.Fatal("a provider with no domains was accepted next to another")
+	}
+	if !strings.Contains(err.Error(), "KEERA_OIDC_ENTRA_DOMAINS") {
+		t.Errorf("error = %q, want it to name the setting to add", err)
+	}
+
+	env["KEERA_OIDC_ENTRA_DOMAINS"] = "bank-a.ch"
+	c, err := loadWith(t, env)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := c.OIDC[1].Domains; len(got) != 1 || got[0] != "bank-a.ch" {
+		t.Errorf("entra domains = %v, want its own", got)
+	}
+}
+
+// A customer's directory admin can create a group of any name. A shared
+// operator group would let every customer make operators.
+func TestNamedProvidersDoNotInheritOperatorGroups(t *testing.T) {
+	t.Setenv("KEERA_OIDC_PROVIDERS", "google,entra")
+	t.Setenv("KEERA_OIDC_OPERATOR_GROUPS", "keera-operators")
+	t.Setenv("KEERA_OIDC_ENTRA_OPERATOR_GROUPS", "keera-ops")
+
+	got := oidcProviders()
+	if len(got) != 2 {
+		t.Fatalf("got %d providers, want 2", len(got))
+	}
+	if g := got[0].Mapping.OperatorGroups; len(g) != 0 {
+		t.Errorf("google operator groups = %v, want none inherited", g)
+	}
+	if g := got[1].Mapping.OperatorGroups; len(g) != 1 || g[0] != "keera-ops" {
+		t.Errorf("entra operator groups = %v, want its own", g)
+	}
+}

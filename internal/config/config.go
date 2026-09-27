@@ -231,6 +231,13 @@ func (c Config) validateOIDC() error {
 			return fmt.Errorf("the default role for the %s identity provider "+
 				"must be operator, admin or member", p.Name)
 		}
+		// With several directories, one customer's could otherwise give its
+		// users another customer's addresses, or an operator's.
+		if len(c.OIDC) > 1 && p.Configured() && len(p.Domains) == 0 {
+			return fmt.Errorf("set KEERA_OIDC_%s_DOMAINS to the email domains the %s "+
+				"identity provider may vouch for, or to %q for one that proves every "+
+				"address itself, such as Google", envSegment(p.Name), p.Name, authn.AnyDomain)
+		}
 	}
 	return nil
 }
@@ -293,15 +300,19 @@ func providerFrom(prefix, name string) authn.OIDCConfig {
 		Scopes:       sharedList("SCOPES"),
 		GroupsClaim:  shared("GROUPS_CLAIM", "groups"),
 		Mapping: authn.RoleMapping{
-			// Group names usually differ per directory, but may be shared so a
-			// deployment using the same names everywhere need not repeat them.
-			OperatorGroups: sharedList("OPERATOR_GROUPS"),
+			// Operator groups are never shared. A customer's directory admin
+			// can create any group, so a shared name would let every customer
+			// make operators. Admin groups may be shared: an administrator
+			// only reaches the tenant their domain places them in.
+			OperatorGroups: envList(prefix + "OPERATOR_GROUPS"),
 			AdminGroups:    sharedList("ADMIN_GROUPS"),
 			// An address is the same whichever directory vouched for it, so
 			// there is one operator list for the deployment.
 			OperatorEmails: envList("KEERA_OPERATORS"),
 			Default:        authn.Role(shared("DEFAULT_ROLE", string(authn.RoleMember))),
 		},
+		// Never shared: each directory vouches for its own domains.
+		Domains: envList(prefix + "DOMAINS"),
 	}
 }
 

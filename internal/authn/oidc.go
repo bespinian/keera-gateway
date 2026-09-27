@@ -35,6 +35,29 @@ type OIDCConfig struct {
 	// "groups" and sometimes "roles".
 	GroupsClaim string
 	Mapping     RoleMapping
+	// Domains are the email domains this provider may vouch for. The domain
+	// picks the tenant and can name an operator, and a customer's directory
+	// admin can give anyone any address. "*" allows any domain, for a provider
+	// that proves the address itself, such as Google. Empty allows any too;
+	// the configuration refuses that when there are several providers.
+	Domains []string
+}
+
+// AnyDomain in Domains lets a provider vouch for every address.
+const AnyDomain = "*"
+
+// vouchesFor reports whether this provider may place someone with an address
+// at domain.
+func (c OIDCConfig) vouchesFor(domain string) bool {
+	if len(c.Domains) == 0 {
+		return true
+	}
+	for _, d := range c.Domains {
+		if d == AnyDomain || strings.EqualFold(strings.TrimPrefix(strings.TrimSpace(d), "@"), domain) {
+			return true
+		}
+	}
+	return false
 }
 
 // nameRE is what a provider name may be. The name ends up in a URL and in a
@@ -326,6 +349,12 @@ func (o *OIDC) checkIdentity(id Identity, claims map[string]any, groupsClaim str
 	if id.Email == "" {
 		return errors.New("the identity provider returned no email claim; " +
 			"add the 'email' scope, or map an email claim for this client")
+	}
+	// A customer's directory can hand out any address, so each provider is
+	// only trusted for its own domains.
+	if !o.cfg.vouchesFor(id.Domain()) {
+		return fmt.Errorf("%s cannot be used with %s sign-in, which is only for "+
+			"addresses at %s", id.Email, o.cfg.Label(), strings.Join(o.cfg.Domains, ", "))
 	}
 	// The email picks the tenant and can name an operator, so it must not be
 	// one the directory calls unverified. A missing claim is trusted: most

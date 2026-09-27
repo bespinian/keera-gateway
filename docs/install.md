@@ -115,9 +115,11 @@ on-premises deployment has. For several, set `KEERA_OIDC_PROVIDERS` to a
 comma-separated list of names. Each name `N` takes `KEERA_OIDC_<N>_ISSUER`,
 `KEERA_OIDC_<N>_CLIENT_ID`, `KEERA_OIDC_<N>_CLIENT_SECRET` and, to override
 anything above, `KEERA_OIDC_<N>_LABEL`, `KEERA_OIDC_<N>_GROUPS_CLAIM`,
-`KEERA_OIDC_<N>_ADMIN_GROUPS`, `KEERA_OIDC_<N>_OPERATOR_GROUPS`,
-`KEERA_OIDC_<N>_DEFAULT_ROLE`, `KEERA_OIDC_<N>_SCOPES` and
-`KEERA_OIDC_<N>_REDIRECT_URL`. `KEERA_OIDC_ADOPT_BY_EMAIL` is off by default and
+`KEERA_OIDC_<N>_ADMIN_GROUPS`, `KEERA_OIDC_<N>_DEFAULT_ROLE`,
+`KEERA_OIDC_<N>_SCOPES` and `KEERA_OIDC_<N>_REDIRECT_URL`. Two are only read
+per provider: `KEERA_OIDC_<N>_OPERATOR_GROUPS`, and `KEERA_OIDC_<N>_DOMAINS`,
+the email domains that provider may sign people in with (`*` for any). With
+several providers, each needs its domains. See [sso.md](sso.md). `KEERA_OIDC_ADOPT_BY_EMAIL` is off by default and
 is only for a one-time migration.
 
 Discovery runs at start-up, so a wrong issuer URL stops the gateway with the URL

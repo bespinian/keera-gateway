@@ -335,6 +335,45 @@ func TestExchangeAcceptsAVerifiedOrUnstatedEmail(t *testing.T) {
 	}
 }
 
+// On a hosted deployment a customer's directory admin can give anyone any
+// address. A provider is only trusted for its own domains, so that address
+// cannot place its user in another tenant or make them an operator.
+func TestExchangeRefusesAnAddressOutsideTheProvidersDomains(t *testing.T) {
+	idp := newFakeIDP(t)
+	for _, tc := range []struct {
+		domains []string
+		ok      bool
+	}{
+		{[]string{"bank-a.ch"}, false},
+		{[]string{"bank-a.ch", "EXAMPLE.ch"}, true},
+		{[]string{"@example.ch"}, true},
+		{[]string{AnyDomain}, true},
+		{nil, true},
+	} {
+		o, err := NewOIDC(context.Background(), OIDCConfig{
+			Name:         "entra-a",
+			IssuerURL:    idp.URL,
+			ClientID:     "keera",
+			ClientSecret: "secret",
+			RedirectURL:  "https://keera.example.ch/auth/callback",
+			Mapping:      RoleMapping{OperatorEmails: []string{"ada@example.ch"}, Default: RoleMember},
+			Domains:      tc.domains,
+		}, idp.Client())
+		if err != nil {
+			t.Fatalf("NewOIDC: %v", err)
+		}
+		flow, _ := NewFlow()
+		idp.claims = func(m map[string]any) { m["nonce"] = flow.Nonce }
+		_, err = o.Exchange(context.Background(), "the-code", flow)
+		if tc.ok && err != nil {
+			t.Errorf("domains %v: %v", tc.domains, err)
+		}
+		if !tc.ok && (err == nil || !strings.Contains(err.Error(), "bank-a.ch")) {
+			t.Errorf("domains %v: error = %v, want a refusal naming the allowed domains", tc.domains, err)
+		}
+	}
+}
+
 func TestExchangeReadsAGroupsClaimUnderAnotherName(t *testing.T) {
 	idp := newFakeIDP(t)
 	o, err := NewOIDC(context.Background(), OIDCConfig{

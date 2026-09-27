@@ -72,6 +72,9 @@ services:
       KEERA_OIDC_GOOGLE_CLIENT_ID: ${KEERA_OIDC_GOOGLE_CLIENT_ID:-}
       KEERA_OIDC_GOOGLE_CLIENT_SECRET: ${KEERA_OIDC_GOOGLE_CLIENT_SECRET:-}
       KEERA_OIDC_GOOGLE_LABEL: ${KEERA_OIDC_GOOGLE_LABEL:-}
+      # The email domains each provider may vouch for, required with several.
+      # "*" is for a provider that proves every address itself, like Google.
+      KEERA_OIDC_GOOGLE_DOMAINS: ${KEERA_OIDC_GOOGLE_DOMAINS:-}
       KEERA_OIDC_ENTRA_ISSUER: ${KEERA_OIDC_ENTRA_ISSUER:-}
       KEERA_OIDC_ENTRA_CLIENT_ID: ${KEERA_OIDC_ENTRA_CLIENT_ID:-}
       KEERA_OIDC_ENTRA_CLIENT_SECRET: ${KEERA_OIDC_ENTRA_CLIENT_SECRET:-}
@@ -79,6 +82,7 @@ services:
       KEERA_OIDC_ENTRA_GROUPS_CLAIM: ${KEERA_OIDC_ENTRA_GROUPS_CLAIM:-}
       KEERA_OIDC_ENTRA_ADMIN_GROUPS: ${KEERA_OIDC_ENTRA_ADMIN_GROUPS:-}
       KEERA_OIDC_ENTRA_OPERATOR_GROUPS: ${KEERA_OIDC_ENTRA_OPERATOR_GROUPS:-}
+      KEERA_OIDC_ENTRA_DOMAINS: ${KEERA_OIDC_ENTRA_DOMAINS:-}
       # Lets a sign-in take over a person already bound to another provider's
       # subject. Off unless you are moving an organisation between providers.
       KEERA_OIDC_ADOPT_BY_EMAIL: ${KEERA_OIDC_ADOPT_BY_EMAIL:-}

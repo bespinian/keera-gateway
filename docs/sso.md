@@ -27,8 +27,8 @@ With several, the panel shows one named button per directory. See
 
 ### The operator role comes from the environment, always
 
-An address in `KEERA_OPERATORS`, or a group in `KEERA_OIDC_OPERATOR_GROUPS`,
-grants it. Nothing else does: the panel does not offer it, `keera user role`
+An address in `KEERA_OPERATORS`, or a group in `KEERA_OIDC_OPERATOR_GROUPS`
+(`KEERA_OIDC_<NAME>_OPERATOR_GROUPS` with several providers), grants it. Nothing else does: the panel does not offer it, `keera user role`
 refuses it, and `PATCH /control/v1/users/{id}` answers 403, even to an operator.
 
 The operator role spans organisations and owns the model catalogue, so you can
@@ -196,12 +196,14 @@ KEERA_OIDC_PROVIDERS=google,entra
 KEERA_OIDC_GOOGLE_ISSUER=https://accounts.google.com
 KEERA_OIDC_GOOGLE_CLIENT_ID=<from the Google console>
 KEERA_OIDC_GOOGLE_CLIENT_SECRET=<from the Google console>
+KEERA_OIDC_GOOGLE_DOMAINS=*
 
 KEERA_OIDC_ENTRA_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0
 KEERA_OIDC_ENTRA_CLIENT_ID=<from the Entra admin centre>
 KEERA_OIDC_ENTRA_CLIENT_SECRET=<from the Entra admin centre>
 KEERA_OIDC_ENTRA_GROUPS_CLAIM=roles
 KEERA_OIDC_ENTRA_ADMIN_GROUPS=keera-admins
+KEERA_OIDC_ENTRA_DOMAINS=anotherbank.ch
 
 # Shared by every provider above.
 KEERA_OIDC_REDIRECT_URL=https://keera.example.ch/control/auth/callback
@@ -209,11 +211,25 @@ KEERA_OIDC_DEFAULT_ROLE=member
 KEERA_OPERATORS=you@example.ch
 ```
 
-Every setting except the issuer, client ID and client secret falls back to its
-unprefixed name. To override one for a provider, use
-`KEERA_OIDC_<NAME>_<SETTING>`. The issuer and client are never inherited: two
-providers sharing a client would sign people in against the wrong directory
-instead of failing.
+Most settings fall back to their unprefixed name. To override one for a
+provider, use `KEERA_OIDC_<NAME>_<SETTING>`. Four are never inherited:
+
+- The issuer and client: two providers sharing a client would sign people in
+  against the wrong directory instead of failing.
+- `_OPERATOR_GROUPS`: a customer's directory admin can create a group of any
+  name, so a shared one would let every customer make operators.
+- `_DOMAINS`: see below.
+
+**Each provider says which email domains it may vouch for.** The domain picks
+the tenant, and an address can name an operator. A customer's directory admin
+can give any user any address, including another customer's or yours. So
+`KEERA_OIDC_<NAME>_DOMAINS` lists the domains that provider may sign people in
+with, and the gateway refuses to start with several providers if one has none.
+A sign-in with an address outside the list is refused.
+
+`*` allows every domain. Use it only for a provider that proves each address
+itself, such as Google. Never use it for Entra, where the tenant admin sets the
+address.
 
 `KEERA_OIDC_ENTRA_ADMIN_GROUPS` is set per provider, but it applies to the
 **whole gateway**, Google users included. Google sends no groups, so nobody
@@ -249,7 +265,8 @@ an organisation from one provider to another, then turn it off again.
 `orgFor` in `internal/control/auth.go` checks in this order:
 
 1. A user already linked to that provider's subject.
-2. An organisation whose `email_domain` matches the address's domain.
+2. An organisation whose `email_domain` matches the address's domain. With
+   several providers, only a provider allowed that domain gets this far.
 3. The only organisation, if there is exactly one.
 4. Otherwise refuse.
 
