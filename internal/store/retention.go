@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"time"
+
+	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
 // purgeBatch bounds one DELETE. Every replica writes to the usage log all the
@@ -33,9 +35,14 @@ func (s *Store) PurgeUsage(ctx context.Context, before time.Time) (int64, error)
 	if err != nil {
 		return events, err
 	}
-	// A window that began before the cutoff is closed, because the cutoff is
-	// in the past.
-	tag, err := s.pool.Exec(ctx, "DELETE FROM spend WHERE period_start < $1", before)
+	// Only windows that ended before the cutoff go. A month that began before
+	// it may still be open: with seven days' retention, the current month
+	// started before the cutoff from the 8th on, and deleting it would reset
+	// every monthly budget.
+	tag, err := s.pool.Exec(ctx, `DELETE FROM spend
+		WHERE (period = 'day' AND period_start < $1)
+		   OR (period = 'month' AND period_start < $2)`,
+		policy.PeriodDay.Start(before), policy.PeriodMonth.Start(before))
 	if err != nil {
 		return events, err
 	}

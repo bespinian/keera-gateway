@@ -110,3 +110,56 @@ func TestRetentionWorksInMoreThanOneBatch(t *testing.T) {
 		t.Errorf("%d events survived, want 0", left)
 	}
 }
+
+// A short retention must not take the open month with it: on the 20th with
+// seven days kept, the month began before the cutoff but has not ended.
+func TestRetentionKeepsTheOpenMonthWhenItBeganBeforeTheCutoff(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	now := time.Date(2026, 3, 20, 12, 0, 0, 0, time.UTC)
+
+	for _, ts := range []time.Time{
+		time.Date(2026, 2, 27, 9, 0, 0, 0, time.UTC), // last month: closed
+		time.Date(2026, 3, 2, 9, 0, 0, 0, time.UTC),  // this month, before the cutoff
+		now,
+	} {
+		if err := st.WriteEvents(ctx, []Event{{TS: ts, OrgID: f.orgID, Alias: "keera-code",
+			CostMicros: 100, Status: 200,
+			Scopes: []policy.Scope{
+				{Type: policy.ScopeOrg, ID: f.orgID, Period: policy.PeriodMonth},
+				{Type: policy.ScopeTeam, ID: "team_1", Period: policy.PeriodDay},
+			},
+		}}); err != nil {
+			t.Fatalf("WriteEvents: %v", err)
+		}
+	}
+
+	if _, err := st.PurgeUsage(ctx, now.AddDate(0, 0, -7)); err != nil {
+		t.Fatalf("PurgeUsage: %v", err)
+	}
+	rows, err := st.LoadSpend(ctx, now)
+	if err != nil {
+		t.Fatalf("LoadSpend: %v", err)
+	}
+	var month, day int64
+	for _, r := range rows {
+		switch r.Period {
+		case policy.PeriodMonth:
+			month = r.Micros
+		case policy.PeriodDay:
+			day = r.Micros
+		}
+	}
+	// Both of March's events count, although one is past the cutoff.
+	if month != 200 || day != 100 {
+		t.Errorf("open windows = month %d, day %d; want 200 and 100", month, day)
+	}
+	var windows int
+	if err := st.pool.QueryRow(ctx, "SELECT count(*) FROM spend").Scan(&windows); err != nil {
+		t.Fatal(err)
+	}
+	// March's month and today's day survive; February and the 2nd go.
+	if windows != 2 {
+		t.Errorf("%d spend windows left, want 2", windows)
+	}
+}
