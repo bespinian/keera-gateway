@@ -165,7 +165,7 @@ func TestOperatorRoleCannotBeGrantedThroughTheAPI(t *testing.T) {
 		r := httptest.NewRequest(http.MethodPost, httpx.ControlPrefix+"/v1/users",
 			strings.NewReader(`{"org_id":"org_1","email":"a@example.ch","role":"operator"}`))
 
-		s.upsertUser(w, r, operator)
+		s.addUser(w, r, operator)
 
 		if w.Code != http.StatusForbidden {
 			t.Fatalf("status = %d, want 403", w.Code)
@@ -192,4 +192,24 @@ func TestOperatorRoleCannotBeGrantedThroughTheAPI(t *testing.T) {
 			t.Errorf("body = %q, want it to name what does grant it", w.Body.String())
 		}
 	})
+}
+
+// A subject decides whose sign-in becomes a person. An organisation's own
+// administrator could name somebody from another tenant's directory and pull
+// their first sign-in into this one, so only an operator may set it. The store
+// is nil, so this also pins that the refusal comes before the row is written.
+func TestOnlyAnOperatorLinksAPersonToASubject(t *testing.T) {
+	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, httpx.ControlPrefix+"/v1/users",
+		strings.NewReader(`{"org_id":"org_1","email":"a@example.ch","external_id":"entra:victim"}`))
+
+	s.addUser(w, r, &authn.Principal{Via: authn.MethodSession, Role: authn.RoleAdmin, OrgID: "org_1"})
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "first sign-in") {
+		t.Errorf("body = %q, want it to say how the link is made instead", w.Body.String())
+	}
 }

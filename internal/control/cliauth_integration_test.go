@@ -34,7 +34,7 @@ func signedInAtATerminal(t *testing.T, verifier string) (*httptest.Server, strin
 	if _, err := st.CreateOrg(ctx, "org_1", "Example Bank"); err != nil {
 		t.Fatalf("creating the organisation: %v", err)
 	}
-	user, err := st.UpsertUser(ctx, "user_1", "org_1", "alice@example.ch", "sso:alice", "member")
+	user, err := st.AddUser(ctx, "user_1", "org_1", "alice@example.ch", "sso:alice", "member")
 	if err != nil {
 		t.Fatalf("creating the person: %v", err)
 	}

@@ -745,8 +745,8 @@ func TestRequestFiltersOfferOnlyWhatOccurred(t *testing.T) {
 	f := newFixture(t, st, ctx)
 	now := time.Now().UTC().Truncate(time.Second)
 
-	if _, err := st.UpsertUser(ctx, "user_1", f.orgID, "dev@example.ch", "", "member"); err != nil {
-		t.Fatalf("UpsertUser: %v", err)
+	if _, err := st.AddUser(ctx, "user_1", f.orgID, "dev@example.ch", "", "member"); err != nil {
+		t.Fatalf("AddUser: %v", err)
 	}
 	if err := st.WriteEvents(ctx, []Event{
 		{TS: now.Add(-time.Hour), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,

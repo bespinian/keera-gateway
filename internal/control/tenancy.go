@@ -293,7 +293,7 @@ func keyCount(n int) string {
 
 // ------------------------------------------------------------------- users
 
-func (s *Server) upsertUser(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
+func (s *Server) addUser(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	var in struct {
 		OrgID      string `json:"org_id"`
 		Email      string `json:"email"`
@@ -310,6 +310,14 @@ func (s *Server) upsertUser(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	if !ok || !s.requireOrgAdmin(w, p, orgID) {
 		return
 	}
+	// A subject decides whose sign-in becomes this person. An organisation's
+	// administrator could name someone from another tenant's directory, so
+	// only an operator may. Everyone else is linked on their first sign-in.
+	if in.ExternalID != "" && !p.Unrestricted() {
+		s.forbid(w, "only an operator can set 'external_id'; leave it out, and the "+
+			"person is linked to their identity on their first sign-in")
+		return
+	}
 	role := authn.Role(in.Role)
 	if in.Role == "" {
 		role = authn.RoleMember
@@ -324,16 +332,23 @@ func (s *Server) upsertUser(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	if role != authn.RoleMember && !s.mayGrant(w, role) {
 		return
 	}
-	user, err := s.st.UpsertUser(r.Context(), id.New("user"), orgID,
+	user, err := s.st.AddUser(r.Context(), id.New("user"), orgID,
 		email, in.ExternalID, string(role))
-	if err != nil {
+	switch {
+	case errors.Is(err, store.ErrUserExists):
+		// Adding never changes someone who is already here: a role change has
+		// its own checks, and a subject is only ever set by a sign-in.
+		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "user_exists",
+			email+" is already in this organisation; change their role with "+
+				"PATCH /control/v1/users/{id} or keera user role")
+		return
+	case errors.Is(err, store.ErrExternalIDTaken):
+		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "external_id_taken",
+			"another person already has that 'external_id'")
+		return
+	case err != nil:
 		s.fail(w, err)
 		return
-	}
-	// This may change the role of someone who already exists. A role only
-	// applies from the next request, so their sessions are ended.
-	if err := s.st.DeleteUserSessions(r.Context(), user.ID); err != nil {
-		s.log.Warn("signing out a user after an upsert failed", "error", err, "user", user.ID)
 	}
 	s.auditf(r, p, orgID, "user.put", "user", user.ID, user)
 	httpx.WriteJSON(w, http.StatusOK, user)

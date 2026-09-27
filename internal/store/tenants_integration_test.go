@@ -14,9 +14,9 @@ func TestDeleteOrgTakesItsTenancyAndKeepsItsHistory(t *testing.T) {
 	f := newFixture(t, st, ctx)
 	now := time.Now().UTC()
 
-	user, err := st.UpsertUser(ctx, "user_1", f.orgID, "dev@example.ch", "", "member")
+	user, err := st.AddUser(ctx, "user_1", f.orgID, "dev@example.ch", "", "member")
 	if err != nil {
-		t.Fatalf("UpsertUser: %v", err)
+		t.Fatalf("AddUser: %v", err)
 	}
 	hash := []byte("session-hash-000000000000000001!")
 	if err := st.CreateSession(ctx, hash, user.ID, "csrf", now.Add(time.Hour), "ua", "10.0.0.1"); err != nil {
@@ -117,9 +117,9 @@ func TestTenancyLookupsUsedForAuthorisation(t *testing.T) {
 	if org, user, err := st.KeyOwner(ctx, f.keyID); err != nil || org != f.orgID || user != "" {
 		t.Errorf("KeyOwner = %q, %q, %v; want the org and nobody", org, user, err)
 	}
-	person, err := st.UpsertUser(ctx, "user_1", f.orgID, "dev@example.ch", "", "member")
+	person, err := st.AddUser(ctx, "user_1", f.orgID, "dev@example.ch", "", "member")
 	if err != nil {
-		t.Fatalf("UpsertUser: %v", err)
+		t.Fatalf("AddUser: %v", err)
 	}
 	if _, err := st.CreateKey(ctx, KeyInfo{
 		ID: "key_2", OrgID: f.orgID, UserID: person.ID,
@@ -285,7 +285,7 @@ func TestSetupStateCountsWhatAFirstRunHasToCreate(t *testing.T) {
 	}
 
 	f := newFixture(t, st, ctx)
-	if _, err := st.UpsertUser(ctx, "user_1", f.orgID, "dev@example.ch", "", "member"); err != nil {
+	if _, err := st.AddUser(ctx, "user_1", f.orgID, "dev@example.ch", "", "member"); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.UpsertModel(ctx, policy.Model{Alias: "keera-code", Kind: policy.KindChat,
@@ -310,5 +310,32 @@ func TestSetupStateCountsWhatAFirstRunHasToCreate(t *testing.T) {
 	want := Setup{Orgs: 1, Teams: 1, Keys: 1, Models: 1, People: 1, Requests: 1}
 	if got != want {
 		t.Errorf("SetupState = %+v, want %+v", got, want)
+	}
+}
+
+// Adding someone never changes a person who is already there. Otherwise an
+// administrator could rebind a member's subject to an identity of their own
+// and sign in as them, or re-role them past the checks a role change has.
+func TestAddUserLeavesAnExistingPersonAlone(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+
+	first, err := st.AddUser(ctx, "user_1", f.orgID, "dev@example.ch", "sso:dev", "admin")
+	if err != nil {
+		t.Fatalf("AddUser: %v", err)
+	}
+	if _, err := st.AddUser(ctx, "user_2", f.orgID, "dev@example.ch", "sso:attacker", "member"); !errors.Is(err, ErrUserExists) {
+		t.Fatalf("adding the same address again gave %v, want ErrUserExists", err)
+	}
+	got, err := st.UserByID(ctx, first.ID)
+	if err != nil {
+		t.Fatalf("UserByID: %v", err)
+	}
+	if got.ExternalID != "sso:dev" || got.Role != "admin" {
+		t.Errorf("the person became %q as %s, want them untouched", got.ExternalID, got.Role)
+	}
+
+	if _, err := st.AddUser(ctx, "user_3", f.orgID, "other@example.ch", "sso:dev", "member"); !errors.Is(err, ErrExternalIDTaken) {
+		t.Errorf("reusing another person's subject gave %v, want ErrExternalIDTaken", err)
 	}
 }

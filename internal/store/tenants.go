@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -267,24 +268,27 @@ func (s *Store) DeleteTeam(ctx context.Context, teamID string) (DeletedTeam, err
 	return gone, tx.Commit(ctx)
 }
 
-// UpsertUser creates a user, or updates the one with this org and email. The
-// OIDC callback uses it, and must not care whether it has seen the user before.
-func (s *Store) UpsertUser(ctx context.Context, newID, orgID, email, externalID, role string) (User, error) {
-	u := User{OrgID: orgID, Email: email, ExternalID: externalID, Role: role}
-	var ext *string
-	if externalID != "" {
-		ext = &externalID
-	}
-	err := s.pool.QueryRow(ctx, `INSERT INTO users (id, org_id, email, external_id, role)
+// ErrUserExists is returned when the organisation already has someone with
+// that address. Adding must not quietly change who they are: their role
+// changes through SetUserRole, and their subject only at sign-in.
+var ErrUserExists = errors.New("store: that address is already in the organisation")
+
+// ErrExternalIDTaken is returned when another person already has the subject.
+var ErrExternalIDTaken = errors.New("store: that subject already belongs to another person")
+
+// AddUser creates a person, so they are placed in the right organisation
+// before their first sign-in. It never touches someone who already exists.
+func (s *Store) AddUser(ctx context.Context, newID, orgID, email, externalID, role string) (User, error) {
+	u, err := scanUser(s.pool.QueryRow(ctx, `INSERT INTO users (id, org_id, email, external_id, role)
 		VALUES ($1,$2,$3,$4,$5)
-		ON CONFLICT (org_id, email) DO UPDATE SET
-			external_id = COALESCE(EXCLUDED.external_id, users.external_id),
-			role = EXCLUDED.role
-		RETURNING id, external_id, created_at`,
-		newID, orgID, email, ext, role,
-	).Scan(&u.ID, &ext, &u.CreatedAt)
-	if ext != nil {
-		u.ExternalID = *ext
+		ON CONFLICT (org_id, email) DO NOTHING
+		RETURNING `+userColumns,
+		newID, orgID, email, nullable(externalID), role))
+	switch {
+	case errors.Is(notFound(err), ErrNotFound):
+		return User{}, ErrUserExists
+	case isUnique(err):
+		return User{}, ErrExternalIDTaken
 	}
 	return u, err
 }

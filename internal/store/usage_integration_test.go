@@ -162,9 +162,9 @@ func TestLoadSpendReadsOnlyTheOpenWindows(t *testing.T) {
 func TestUsageGroupsByEveryDimensionThePanelOffers(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
-	user, err := st.UpsertUser(ctx, "user_1", f.orgID, "dev@example.ch", "", "member")
+	user, err := st.AddUser(ctx, "user_1", f.orgID, "dev@example.ch", "", "member")
 	if err != nil {
-		t.Fatalf("UpsertUser: %v", err)
+		t.Fatalf("AddUser: %v", err)
 	}
 	day := time.Date(2026, 9, 7, 10, 0, 0, 0, time.UTC)
 

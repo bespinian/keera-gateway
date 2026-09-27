@@ -168,7 +168,7 @@ func (s *Server) Handler() http.Handler {
 	route("PATCH /v1/teams/{id}", s.updateTeam)
 	route("DELETE /v1/teams/{id}", s.deleteTeam)
 
-	route("POST /v1/users", s.upsertUser)
+	route("POST /v1/users", s.addUser)
 	route("GET /v1/users", s.listUsers)
 	route("PATCH /v1/users/{id}", s.updateUser)
 	route("POST /v1/users/{id}/disable", s.disableUser)

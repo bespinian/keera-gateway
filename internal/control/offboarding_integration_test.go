@@ -208,7 +208,7 @@ func TestOffboardStopsAPersonsSandboxes(t *testing.T) {
 	st, ctx := sandboxStore(t)
 	git := &fakeForge{}
 	m := sandbox.NewManager(st, &recordingDriver{}, sandbox.ManagerOptions{Git: git})
-	user, err := st.UpsertUser(ctx, "usr_1", "org_1", "leaver@example.ch", "", "member")
+	user, err := st.AddUser(ctx, "usr_1", "org_1", "leaver@example.ch", "", "member")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -18,7 +18,7 @@ func signedInUser(t *testing.T, st *Store, ctx context.Context) string {
 	if _, err := st.CreateOrg(ctx, "org_1", "Example Bank"); err != nil {
 		t.Fatalf("creating the organisation: %v", err)
 	}
-	u, err := st.UpsertUser(ctx, "user_1", "org_1", "alice@example.ch", "sso:alice", "member")
+	u, err := st.AddUser(ctx, "user_1", "org_1", "alice@example.ch", "sso:alice", "member")
 	if err != nil {
 		t.Fatalf("creating the person: %v", err)
 	}

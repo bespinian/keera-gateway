@@ -11,9 +11,9 @@ func TestSessionsExpireAndAreTouchedAtMostOnceAMinute(t *testing.T) {
 	f := newFixture(t, st, ctx)
 	now := time.Now().UTC()
 
-	user, err := st.UpsertUser(ctx, "user_1", f.orgID, "dev@example.ch", "sub-1", "admin")
+	user, err := st.AddUser(ctx, "user_1", f.orgID, "dev@example.ch", "sub-1", "admin")
 	if err != nil {
-		t.Fatalf("UpsertUser: %v", err)
+		t.Fatalf("AddUser: %v", err)
 	}
 	live := []byte("session-hash-000000000000000001!")
 	dead := []byte("session-hash-000000000000000002!")
@@ -135,9 +135,9 @@ func TestLinkUserAdoptsAPersonInsteadOfDuplicatingThem(t *testing.T) {
 
 	// An organisation that pre-creates its people, before anybody has signed
 	// in and so before any subject claim exists.
-	pre, err := st.UpsertUser(ctx, "user_pre", f.orgID, "dev@example.ch", "", "member")
+	pre, err := st.AddUser(ctx, "user_pre", f.orgID, "dev@example.ch", "", "member")
 	if err != nil {
-		t.Fatalf("UpsertUser: %v", err)
+		t.Fatalf("AddUser: %v", err)
 	}
 
 	// The first sign-in matches on email and adopts the row, writing the

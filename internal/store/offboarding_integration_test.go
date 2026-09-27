@@ -11,11 +11,11 @@ import (
 func TestDisableUserRevokesKeysAndSessions(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
-	user, err := st.UpsertUser(ctx, "user_1", f.orgID, "ada@example.ch", "", "member")
+	user, err := st.AddUser(ctx, "user_1", f.orgID, "ada@example.ch", "", "member")
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := st.UpsertUser(ctx, "user_2", f.orgID, "bob@example.ch", "", "member")
+	other, err := st.AddUser(ctx, "user_2", f.orgID, "bob@example.ch", "", "member")
 	if err != nil {
 		t.Fatal(err)
 	}

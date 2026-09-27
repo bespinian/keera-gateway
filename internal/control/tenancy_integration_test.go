@@ -57,8 +57,8 @@ func twoTenants(t *testing.T) tenants {
 		{"user_dave", "org_b", "dave@another.example.ch", "member"},
 	}
 	for _, p := range people {
-		if _, err := st.UpsertUser(ctx, p.id, p.org, p.email, "sso:"+p.id, p.role); err != nil {
-			t.Fatalf("UpsertUser %s: %v", p.id, err)
+		if _, err := st.AddUser(ctx, p.id, p.org, p.email, "sso:"+p.id, p.role); err != nil {
+			t.Fatalf("AddUser %s: %v", p.id, err)
 		}
 	}
 	keys := []store.KeyInfo{

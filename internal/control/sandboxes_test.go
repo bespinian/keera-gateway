@@ -346,13 +346,13 @@ func TestSandboxVisibilityAndAttachRules(t *testing.T) {
 	st, ctx := sandboxStore(t)
 
 	// Two people in one organisation, each with a sandbox.
-	mine, err := st.UpsertUser(ctx, "usr_1", "org_1", "mine@example.ch", "", "member")
+	mine, err := st.AddUser(ctx, "usr_1", "org_1", "mine@example.ch", "", "member")
 	if err != nil {
-		t.Fatalf("UpsertUser: %v", err)
+		t.Fatalf("AddUser: %v", err)
 	}
-	theirs, err := st.UpsertUser(ctx, "usr_2", "org_1", "theirs@example.ch", "", "member")
+	theirs, err := st.AddUser(ctx, "usr_2", "org_1", "theirs@example.ch", "", "member")
 	if err != nil {
-		t.Fatalf("UpsertUser: %v", err)
+		t.Fatalf("AddUser: %v", err)
 	}
 	for _, u := range []struct {
 		id, name, user string

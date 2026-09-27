@@ -84,8 +84,8 @@ func (r *userRun) add(ctx context.Context) error {
 		return err
 	}
 	email := strings.TrimSpace(r.fs.Arg(0))
-	// The endpoint upserts, so "add" would quietly re-role somebody already
-	// here without signing them out. That is `keera user role`'s job.
+	// The endpoint refuses somebody already here too. Asking first names
+	// their current role and the command that changes it.
 	switch existing, err := findUser(ctx, r.c, orgID, email); {
 	case err == nil:
 		return fmt.Errorf("%s is already in %s as %s; change that with: keera user role %s <role>",
