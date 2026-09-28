@@ -371,12 +371,14 @@ function chat(ctx, models) {
         const choice = (chunk.choices || [])[0];
         const delta = choice && choice.delta;
         if (delta) {
-          if (!reply.ttft && (delta.content || delta.reasoning_content)) {
+          // Newer vLLM servers name the field "reasoning", older ones and
+          // llama.cpp "reasoning_content".
+          const thought = delta.reasoning || delta.reasoning_content;
+          if (!reply.ttft && (delta.content || thought)) {
             reply.ttft = performance.now() - reply.started;
           }
           if (delta.content) reply.content += delta.content;
-          if (delta.reasoning_content)
-            reply.reasoning += delta.reasoning_content;
+          if (thought) reply.reasoning += thought;
         }
         if (choice && choice.finish_reason) reply.finish = choice.finish_reason;
         if (!queued) {
