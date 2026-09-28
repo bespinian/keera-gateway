@@ -110,10 +110,6 @@ func contentTypeFor(p string) string {
 		return "text/javascript; charset=utf-8"
 	case ".svg":
 		return "image/svg+xml"
-	case ".json":
-		return "application/json"
-	case ".woff2":
-		return "font/woff2"
 	default:
 		return "application/octet-stream"
 	}

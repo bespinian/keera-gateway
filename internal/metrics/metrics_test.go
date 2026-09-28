@@ -194,7 +194,7 @@ func TestEveryFamilyDeclaresItselfBeforeItsSamples(t *testing.T) {
 	r.Overhead("gpt-oss", "org_1", 0.002)
 	r.FilterRun("pii", "org_1", "rewrote", false, 0.4, 1200)
 	r.RouterRun("cheap-first", "org_1", "decided", "gpt-oss", 0.1, 90)
-	r.UpstreamError("gpt-oss")
+	r.UpstreamError("gpt-oss", "org_1")
 	r.RateLimitFallback()
 	r.InflightAdd(2)
 
@@ -320,8 +320,8 @@ func TestEachCounterLandsUnderItsOwnLabels(t *testing.T) {
 	// between them is how a deployment sees refusals.
 	r.Observe("gpt-oss", "org_1", 429, 0.01, 0)
 	r.Observe("gpt-oss", "org_2", 200, 0.3, 5)
-	r.UpstreamError("gpt-oss")
-	r.UpstreamError("gpt-oss")
+	r.UpstreamError("gpt-oss", "org_1")
+	r.UpstreamError("gpt-oss", "org_1")
 	r.RateLimitFallback()
 	r.InflightAdd(3)
 	r.InflightAdd(-1)
@@ -336,7 +336,7 @@ func TestEachCounterLandsUnderItsOwnLabels(t *testing.T) {
 		{"keera_requests_total", `model="gpt-oss",org="org_2",status="200"`, 1},
 		{"keera_tokens_total", `model="gpt-oss",org="org_1",status="200"`, 200},
 		{"keera_tokens_total", `model="gpt-oss",org="org_2",status="200"`, 5},
-		{"keera_upstream_errors_total", `model="gpt-oss"`, 2},
+		{"keera_upstream_errors_total", `model="gpt-oss",org="org_1"`, 2},
 		{"keera_ratelimit_fallback_total", "", 1},
 		// A gauge, so it goes down again. The number that matters is what is
 		// open now, not how many were ever opened.

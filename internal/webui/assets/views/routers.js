@@ -23,7 +23,6 @@ import {
   pill,
   stat,
   rowLink,
-  go,
   compact,
   num,
   money,
@@ -34,9 +33,12 @@ import {
   showError,
   currentRange,
   rangePicker,
+  crumb,
+  isAdmin,
+  checkButton,
 } from "../ui.js";
 import { barList } from "../chart.js";
-import { chooseOrg } from "./orgs.js";
+import { chooseOrg, orgNameOf } from "./orgs.js";
 import { facts } from "./detail.js";
 
 export async function routersView(ctx) {
@@ -47,13 +49,13 @@ export async function routersView(ctx) {
   const since = currentRange();
   const [res, models] = await Promise.all([
     api.routers(ctx.orgID, { stats: true, since }),
-    api.models().then((r) => r.data || []),
+    api.models(ctx.orgID).then((r) => r.data || []),
   ]);
   const routers = res.data || [];
   const stats = res.stats || {};
   const currency = res.currency || ctx.currency;
   const chatModels = models.filter((m) => m.kind === "chat");
-  const canEdit = ctx.state.me.can_admin_org || ctx.state.me.unrestricted;
+  const canEdit = isAdmin(ctx);
   ctx.setSubtitle(`${routers.length} router${routers.length === 1 ? "" : "s"}`);
 
   const head = h(
@@ -110,14 +112,13 @@ export async function routersView(ctx) {
         shrink: true,
         cell: (rt) => modeCell(rt, known),
       },
-      // How many places this router may send a prompt. The list itself is on
-      // the router's own screen: a table of routers is read to find the one
-      // row worth opening, and a column of chips that wraps to three lines
-      // per row is what stops it being readable enough to do that.
+      // Where this router may send a prompt. Only the first few are named,
+      // so a long list does not wrap the row; the full list is on the
+      // router's own screen.
       {
         label: "Destinations",
         shrink: true,
-        cell: (rt) => destinationCount(rt, known),
+        cell: (rt) => destinationsCell(rt, known),
       },
       // Where it has actually been sending traffic. Without this a row says
       // what a router is meant to do and nothing about whether it does it.
@@ -166,9 +167,10 @@ export async function routersView(ctx) {
                   confirm({
                     title: `Remove ${rt.alias}?`,
                     body:
-                      "Clients still using this alias will be told the " +
-                      "model does not exist. The panel cannot see editor " +
-                      "settings, so check who has the alias first.",
+                      "A router named in an allow-list cannot be removed. " +
+                      "Take it off those allow-lists first; the error lists " +
+                      "them. Clients still using the alias will be told the " +
+                      "model does not exist.",
                     confirmLabel: "Remove router",
                     danger: true,
                     onConfirm: async () => {
@@ -294,31 +296,26 @@ function modeCell(rt, known) {
   );
 }
 
-// destinationCount is how many models this router may send a request to, with
-// the ones the catalogue can no longer serve called out.
-//
-// The names are on the router's own screen. What the table owes a reader is
-// the size of the choice: one destination is not a router, and eight is a
-// deployment nobody is holding in their head.
-//
-// The missing count stays here even though the names do not. A destination
-// that cannot be reached is quietly left out, so a router listed as choosing
-// between four models and actually choosing between two looks exactly like one
-// that works.
-function destinationCount(rt, known) {
+// destinationsCell names where this router may send a request, and counts
+// the ones the organisation can no longer serve. A destination that cannot be
+// reached is quietly left out of the choice, so the count keeps a broken
+// router from looking like one that works.
+function destinationsCell(rt, known) {
   const destinations = rt.destinations || [];
   if (destinations.length === 0) {
     return h("span", { class: "faint" }, "-");
   }
+  const shown = destinations.slice(0, 3);
+  const more = destinations.length - shown.length;
   const missing = destinations.filter((alias) => !known.has(alias)).length;
   return h(
     "div",
     { class: "row-tight" },
     h(
       "span",
-      { class: "nowrap" },
-      destinations.length,
-      destinations.length === 1 ? " model" : " models",
+      { class: "mono nowrap", title: destinations.join(", ") },
+      shown.join(", "),
+      more > 0 ? h("span", { class: "faint" }, ` +${more}`) : null,
     ),
     missing > 0 ? pill(`${missing} missing`, "bad") : null,
   );
@@ -372,7 +369,7 @@ function trafficCell(st, currency) {
       "div",
       { class: "faint nowrap", style: { fontSize: "11.5px" } },
       money(st.cost_micros, currency),
-      " on the destinations",
+      " spent, deciding and filters included",
     ),
   );
 }
@@ -384,38 +381,11 @@ function trafficCell(st, currency) {
 // router is a small model following prose, and where it sent a sample ten
 // minutes ago is not a claim worth showing beside what it will do next.
 function checkCell(ctx, rt) {
-  const slot = h("span");
-  const run = h(
-    "button",
-    {
-      class: "btn btn-sm btn-quiet",
-      title: "Test this router with sample prompts",
-      onClick: async () => {
-        run.disabled = true;
-        slot.replaceChildren(
-          h(
-            "span",
-            { class: "faint nowrap" },
-            h("span", { class: "blip" }),
-            " checking…",
-          ),
-        );
-        try {
-          const probe = await api.checkRouter(ctx.orgID, rt.alias);
-          slot.replaceChildren(verdict(ctx, probe));
-        } catch (ex) {
-          slot.replaceChildren(
-            h("span", { class: "pill pill-bad" }, "check failed"),
-          );
-          toast(ex.message, "bad");
-        } finally {
-          run.disabled = false;
-        }
-      },
-    },
-    "Check",
+  return checkButton(
+    "Test this router with sample prompts",
+    () => api.checkRouter(ctx.orgID, rt.alias),
+    (probe) => verdict(ctx, probe),
   );
-  return h("div", { class: "row-tight" }, run, slot);
 }
 
 function verdict(ctx, probe) {
@@ -424,7 +394,7 @@ function verdict(ctx, probe) {
   const label = !probe.ok
     ? "Not usable"
     : warned
-      ? "Ran, with notes"
+      ? "Working, with notes"
       : "Working";
   return h(
     "button",
@@ -483,7 +453,11 @@ function report(ctx, probe) {
           : null,
         ranked || banded ? ["In the order of", ordersByMode(probe.mode)] : null,
         [
-          banded ? "Places between" : chained ? "Would try, in order" : "Offered",
+          banded
+            ? "Places between"
+            : chained
+              ? "Would try, in order"
+              : "Offered",
           h(
             "div",
             { class: "wrap-chips" },
@@ -632,10 +606,10 @@ export async function routerDetailView(ctx) {
   const rep = res.report || {};
   const rt = res.router || null;
   const currency = res.currency || ctx.currency;
-  const canEdit = ctx.state.me.can_admin_org || ctx.state.me.unrestricted;
+  const canEdit = isAdmin(ctx);
   const placed = rep.total ? rep.total.requests || 0 : 0;
 
-  ctx.setTitle(ctx.param, rt ? identity(rt) : "no longer in this organisation");
+  ctx.setTitle(ctx.param, rt ? identity(rt) : `no longer in ${orgNameOf(ctx)}`);
 
   const wrap = h(
     "div",
@@ -643,12 +617,7 @@ export async function routerDetailView(ctx) {
     h(
       "div",
       { class: "detail-head" },
-      h(
-        "a",
-        { class: "crumb", href: "/routers", onClick: go(ctx, "/routers") },
-        icon(icons.back),
-        "Routers",
-      ),
+      crumb(ctx, "/routers", "Routers"),
       h(
         "div",
         { class: "row", style: { flexWrap: "wrap" } },
@@ -671,7 +640,7 @@ export async function routerDetailView(ctx) {
                 ),
                 fallbackPill(rt),
               ]
-            : [pill("Removed from this organisation", "warn")],
+            : [pill(`Removed from ${orgNameOf(ctx)}`, "warn")],
         ),
         h("div", { style: { flex: 1 } }),
         rangePicker(ctx, since),
@@ -702,7 +671,7 @@ export async function routerDetailView(ctx) {
               {
                 class: "btn",
                 onClick: () =>
-                  api.models().then((r) =>
+                  api.models(ctx.orgID).then((r) =>
                     editRouter(
                       ctx,
                       rt,
@@ -1023,15 +992,15 @@ function detailBanners(rep, rt, placed) {
               "size was meant for. Each one waited for it to fail and was " +
               "served by a larger one. Check the destinations."
           : ranked
-          ? "The destination this router ranked first never answered in this " +
+            ? "The destination this router ranked first never answered in this " +
               "window. Each request waited for it to fail and was served " +
               "further down. The ranking is not working."
-          : chained
-            ? "The first destination never answered in this window. Each " +
-              "request waited for it to fail and was served further down. " +
-              "Check it."
-            : "This router made no decision in this window. It still costs a " +
-              "generation per request. Check it and the model it decides with.",
+            : chained
+              ? "The first destination never answered in this window. Each " +
+                "request waited for it to fail and was served further down. " +
+                "Check it."
+              : "This router made no decision in this window. It still costs a " +
+                "generation per request. Check it and the model it decides with.",
       ),
     );
   } else if (rep.fell_back > 0 && rep.fell_back / placed >= 0.1) {
@@ -1044,14 +1013,14 @@ function detailBanners(rep, rt, placed) {
               "larger destination after the one for their size failed. Not an " +
               "error, but it costs more and is reported nowhere else."
           : ranked
-          ? `${pct(rep.fell_back, placed)} of these requests were not served ` +
+            ? `${pct(rep.fell_back, placed)} of these requests were not served ` +
               "by the destination ranked first. Each waited for it to fail " +
               "first: this is the cost of a wrong ranking."
-          : chained
-            ? `${pct(rep.fell_back, placed)} of these requests were served ` +
-              "further down the chain, after the ones before failed."
-            : `${pct(rep.fell_back, placed)} of these requests were placed ` +
-              "without a decision, but still paid for the attempt.",
+            : chained
+              ? `${pct(rep.fell_back, placed)} of these requests were served ` +
+                "further down the chain, after the ones before failed."
+              : `${pct(rep.fell_back, placed)} of these requests were placed ` +
+                "without a decision, but still paid for the attempt.",
       ),
     );
   }
@@ -1066,7 +1035,7 @@ function detailBanners(rep, rt, placed) {
               "one's answer."
           : `${num(rep.errored)} request${rep.errored === 1 ? " was" : "s were"} refused ` +
               "because this router could not place them and has no fallback. " +
-              "The clients were only told that a guardrail refused them.",
+              "The clients got a 503 saying the router could not choose.",
       ),
     );
   }

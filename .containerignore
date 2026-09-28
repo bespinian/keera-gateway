@@ -1,6 +1,6 @@
 # The build context is the repository root, so everything large and irrelevant
-# has to be named here - a 10 GB VM image otherwise gets shipped to the builder
-# before the first instruction runs.
+# has to be named here, or it is shipped to the builder before the first
+# instruction runs. `result` is what `nix build` leaves behind.
 result
 .git
 .github

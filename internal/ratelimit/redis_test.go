@@ -24,6 +24,13 @@ type deadScripter struct {
 	calls int
 }
 
+// charge takes n units from one bucket.
+func charge(c interface {
+	ChargeAll([]Requirement, float64, time.Time)
+}, key string, perMinute int, n float64, now time.Time) {
+	c.ChargeAll([]Requirement{{Key: key, PerMinute: perMinute}}, n, now)
+}
+
 func (d *deadScripter) cmd(ctx context.Context) *redis.Cmd {
 	d.calls++
 	c := redis.NewCmd(ctx)
@@ -125,7 +132,7 @@ func TestRedisFallsBackForChargeAndTheHeadersFollow(t *testing.T) {
 	r := NewRedis(&deadScripter{err: errors.New("i/o timeout")}, New(), RedisOptions{}, nil)
 	now := time.Now()
 
-	r.Charge("org|tpm", 1000, 5000, now)
+	charge(r, "org|tpm", 1000, 5000, now)
 	if got := r.Remaining("org|tpm", 1000, now); got != 0 {
 		t.Errorf("Remaining = %d, want 0: the bucket is overdrawn locally", got)
 	}
@@ -276,7 +283,7 @@ func TestRedisChargeCanOverdrawSoOneHugeRequestIsPaidForLater(t *testing.T) {
 	if !inCredit(now) {
 		t.Fatal("a fresh bucket should admit a request")
 	}
-	r.Charge("org|tpm", 1000, 5000, now)
+	charge(r, "org|tpm", 1000, 5000, now)
 	if inCredit(now) {
 		t.Error("the bucket is overdrawn and should refuse")
 	}
@@ -300,7 +307,7 @@ func TestRedisAnEarlierClockDoesNotRefillTheBucket(t *testing.T) {
 	if r.Admit(tpm, now) != -1 {
 		t.Fatal("a fresh bucket should admit a request")
 	}
-	r.Charge("org|tpm", 1000, 5000, now.Add(-5*time.Minute))
+	charge(r, "org|tpm", 1000, 5000, now.Add(-5*time.Minute))
 	if r.Admit(tpm, now) == -1 {
 		t.Error("a charge stamped five minutes back erased five minutes of debt")
 	}
@@ -353,7 +360,7 @@ func TestRedisChargeFromOneReplicaBindsTheOther(t *testing.T) {
 	a, b := replica(t, rdb, prefix), replica(t, rdb, prefix)
 	now := time.Now()
 
-	a.Charge("org|tpm", 1000, 5000, now)
+	charge(a, "org|tpm", 1000, 5000, now)
 	if got := b.Admit([]Requirement{{Key: "org|tpm", PerMinute: 1000}}, now); got != 0 {
 		t.Errorf("Admit = %d, want 0: the other replica did not see the charge", got)
 	}
@@ -442,8 +449,8 @@ func TestRedisAgreesWithTheInMemoryLimiter(t *testing.T) {
 			t.Fatalf("request %d at %v: Redis said %d, memory said %d", i, at.Sub(now), got, want)
 		}
 		if want == -1 {
-			l.Charge("org|tpm", 2000, 150, at)
-			r.Charge("org|tpm", 2000, 150, at)
+			charge(l, "org|tpm", 2000, 150, at)
+			charge(r, "org|tpm", 2000, 150, at)
 		}
 		if a, b := r.Remaining("org|rpm", 30, at), l.Remaining("org|rpm", 30, at); a != b {
 			t.Fatalf("request %d: Redis has %d left, memory has %d", i, a, b)
@@ -548,7 +555,7 @@ func TestRedisSweepKeepsAViewTheHeadersAreStillReading(t *testing.T) {
 	// the same number and nothing could be told apart.
 	r := NewRedis(&liveScripter{tokens: 3000}, New(), RedisOptions{}, nil)
 	now := time.Now()
-	r.Charge("org|tpm", 600, 1, now)
+	charge(r, "org|tpm", 600, 1, now)
 
 	// Ten seconds on, the view says three tokens refilled at ten a second. The
 	// local buckets, which have seen nothing, would say 600.

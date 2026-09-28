@@ -73,10 +73,6 @@ type warmPool struct {
 	Kind       string       `json:"kind,omitempty"`
 	Metadata   kubeMeta     `json:"metadata"`
 	Spec       warmPoolSpec `json:"spec"`
-	Status     struct {
-		Replicas      int32 `json:"replicas,omitempty"`
-		ReadyReplicas int32 `json:"readyReplicas,omitempty"`
-	} `json:"status"`
 }
 
 type warmPoolSpec struct {
@@ -147,29 +143,38 @@ func (k *Kubernetes) warmCollection(resource string) string {
 	return warmAPIPath + "/namespaces/" + url.PathEscape(k.opts.Namespace) + "/" + resource
 }
 
-func (k *Kubernetes) templatePath(class string) string {
-	return k.warmCollection("sandboxtemplates") + "/" + url.PathEscape(warmName(class))
+func (k *Kubernetes) templatePath(org, class string) string {
+	return k.warmCollection("sandboxtemplates") + "/" + url.PathEscape(warmName(org, class))
 }
 
-func (k *Kubernetes) poolPath(class string) string {
-	return k.warmCollection("sandboxwarmpools") + "/" + url.PathEscape(warmName(class))
+func (k *Kubernetes) poolPath(org, class string) string {
+	return k.warmCollection("sandboxwarmpools") + "/" + url.PathEscape(warmName(org, class))
 }
 
 func (k *Kubernetes) claimPath(ref Ref) string {
 	return k.warmCollection("sandboxclaims") + "/" + url.PathEscape(objectName(ref))
 }
 
+// PoolKey names one organisation's class among every organisation's warm
+// pools. Two organisations can each have a class of the same name.
+func PoolKey(org, class string) string { return org + "/" + class }
+
 // warmName is the name of a class's template and pool. The prefix avoids
-// clashing with other objects in the namespace.
-func warmName(class string) string { return "keera-" + class }
+// clashing with other objects in the namespace, and the tail of the
+// organisation's id keeps two organisations' classes apart while the name
+// stays readable.
+func warmName(org, class string) string {
+	return "keera-" + shortID(org) + "-" + class
+}
 
 // poolMeta is the metadata on a class's template and pool.
-func (k *Kubernetes) poolMeta(class string) kubeMeta {
+func (k *Kubernetes) poolMeta(org, class string) kubeMeta {
 	return kubeMeta{
-		Name:      warmName(class),
+		Name:      warmName(org, class),
 		Namespace: k.opts.Namespace,
 		Labels: map[string]string{
 			labelManagedBy: "keera",
+			labelOrg:       org,
 			labelClass:     class,
 		},
 	}
@@ -183,7 +188,7 @@ func (k *Kubernetes) poolMeta(class string) kubeMeta {
 // an empty pool looks like a feature in use and holds nothing.
 func (k *Kubernetes) EnsurePool(ctx context.Context, class policy.SandboxClass) error {
 	if class.Warm <= 0 {
-		return k.removePool(ctx, class.Name)
+		return k.removePool(ctx, class.OrgID, class.Name)
 	}
 	runtime, err := k.runtimeFor(class)
 	if err != nil {
@@ -194,16 +199,17 @@ func (k *Kubernetes) EnsurePool(ctx context.Context, class policy.SandboxClass) 
 	// owner or expiry), so warm and cold sandboxes stay the same machine.
 	blueprint := k.build(Spec{
 		Ref:   Ref{ID: "pool_" + class.Name, Name: class.Name},
+		Org:   class.OrgID,
 		Class: class,
-		// A pool member has no purpose until claimed. Engineer is the shape
-		// with the volume, which cannot be added later.
+		// Only an engineer's sandbox is claimed from a pool (backingFor), so
+		// pool members are engineer sandboxes: ready once sshd answers.
 		Purpose: policy.PurposeEngineer,
 	}, runtime)
 
 	tmpl := &warmTemplate{
 		APIVersion: warmAPIGroup + "/" + warmAPIVersion,
 		Kind:       "SandboxTemplate",
-		Metadata:   k.poolMeta(class.Name),
+		Metadata:   k.poolMeta(class.OrgID, class.Name),
 		Spec: warmTemplateSpec{
 			PodTemplate:                blueprint.Spec.PodTemplate,
 			VolumeClaims:               blueprint.Spec.VolumeClaims,
@@ -213,28 +219,28 @@ func (k *Kubernetes) EnsurePool(ctx context.Context, class policy.SandboxClass) 
 			NetworkPolicyManagement:    "Unmanaged",
 		},
 	}
-	if err := k.apply(ctx, k.templatePath(class.Name), tmpl); err != nil {
+	if err := k.apply(ctx, k.templatePath(class.OrgID, class.Name), tmpl); err != nil {
 		return fmt.Errorf("sandbox template for class %s: %w", class.Name, err)
 	}
 
 	pool := &warmPool{
 		APIVersion: warmAPIGroup + "/" + warmAPIVersion,
 		Kind:       "SandboxWarmPool",
-		Metadata:   k.poolMeta(class.Name),
+		Metadata:   k.poolMeta(class.OrgID, class.Name),
 		Spec: warmPoolSpec{
 			Replicas:       new(int32(class.Warm)),
-			TemplateRef:    warmTemplateRef{Name: warmName(class.Name)},
+			TemplateRef:    warmTemplateRef{Name: warmName(class.OrgID, class.Name)},
 			UpdateStrategy: &warmUpdateStrategy{Type: "OnReplenish"},
 		},
 	}
-	if err := k.apply(ctx, k.poolPath(class.Name), pool); err != nil {
+	if err := k.apply(ctx, k.poolPath(class.OrgID, class.Name), pool); err != nil {
 		return fmt.Errorf("warm pool for class %s: %w", class.Name, err)
 	}
 	return nil
 }
 
-func (k *Kubernetes) removePool(ctx context.Context, class string) error {
-	for _, path := range []string{k.poolPath(class), k.templatePath(class)} {
+func (k *Kubernetes) removePool(ctx context.Context, org, class string) error {
+	for _, path := range []string{k.poolPath(org, class), k.templatePath(org, class)} {
 		if err := k.c.delete(ctx, path); err != nil && !isNotFound(err) {
 			return err
 		}
@@ -242,30 +248,34 @@ func (k *Kubernetes) removePool(ctx context.Context, class string) error {
 	return nil
 }
 
-// PrunePools deletes the template and pool of every class not in keep.
-// EnsurePool never visits a class that left the catalogue, and its warm
-// sandboxes would hold their CPU and memory for ever.
+// PrunePools deletes the template and pool of every class not in keep, which
+// is keyed by PoolKey. EnsurePool never visits a class that left the
+// catalogue, and its warm sandboxes would hold their CPU and memory for ever.
+//
+// Each object is deleted by the name it has, not the name it would get now,
+// so a pool named some other way is still found.
 func (k *Kubernetes) PrunePools(ctx context.Context, keep map[string]bool) error {
 	selector := "?labelSelector=" + url.QueryEscape(labelManagedBy+"=keera")
-	orphans := map[string]bool{}
+	// Pools first, so no pool is left pointing at a deleted template.
 	for _, resource := range []string{"sandboxwarmpools", "sandboxtemplates"} {
 		var list struct {
 			Items []struct {
 				Metadata kubeMeta `json:"metadata"`
 			} `json:"items"`
 		}
-		if err := k.c.get(ctx, k.warmCollection(resource)+selector, &list); err != nil {
+		collection := k.warmCollection(resource)
+		if err := k.c.get(ctx, collection+selector, &list); err != nil {
 			return err
 		}
 		for _, it := range list.Items {
-			if class := it.Metadata.Labels[labelClass]; class != "" && !keep[class] {
-				orphans[class] = true
+			org, class := it.Metadata.Labels[labelOrg], it.Metadata.Labels[labelClass]
+			if class == "" || keep[PoolKey(org, class)] {
+				continue
 			}
-		}
-	}
-	for class := range orphans {
-		if err := k.removePool(ctx, class); err != nil {
-			return fmt.Errorf("removing the warm pool of class %s: %w", class, err)
+			err := k.c.delete(ctx, collection+"/"+url.PathEscape(it.Metadata.Name))
+			if err != nil && !isNotFound(err) {
+				return fmt.Errorf("removing the warm pool of class %s: %w", class, err)
+			}
 		}
 	}
 	return nil
@@ -303,7 +313,7 @@ func (k *Kubernetes) createClaimed(ctx context.Context, spec Spec) (Status, erro
 			Annotations: k.annotationsFor(spec),
 		},
 		Spec: sandboxClaimSpec{
-			WarmPoolRef:           warmPoolRef{Name: warmName(spec.Class.Name)},
+			WarmPoolRef:           warmPoolRef{Name: warmName(spec.Class.OrgID, spec.Class.Name)},
 			AdditionalPodMetadata: kubeMeta{Labels: labels},
 			Env:                   claimEnvList(spec.Env),
 		},
@@ -329,13 +339,34 @@ func (k *Kubernetes) createClaimed(ctx context.Context, spec Spec) (Status, erro
 	return statusOfClaim(spec.Ref, &created), nil
 }
 
-// claimStatus reads one claim back.
+// claimStatus reads one claim back, and the Sandbox it is bound to.
+//
+// The claim's conditions say whether it is bound, ready or expired, but not
+// whether the pod died, exited or was suspended: only the bound Sandbox says
+// that. So once bound, the Sandbox decides, as it does for a cold sandbox.
 func (k *Kubernetes) claimStatus(ctx context.Context, ref Ref) (Status, error) {
 	var c sandboxClaim
 	if err := k.c.get(ctx, k.claimPath(ref), &c); err != nil {
 		return Status{}, kubeNotFound(err)
 	}
-	return statusOfClaim(ref, &c), nil
+	st := statusOfClaim(ref, &c)
+	if c.Status.Sandbox.Name == "" || st.State == policy.SandboxExpired {
+		return st, nil
+	}
+	var obj kubeSandbox
+	err := k.c.get(ctx, k.collection()+"/"+url.PathEscape(c.Status.Sandbox.Name), &obj)
+	if isNotFound(err) {
+		// The claim can name its Sandbox a moment before the Sandbox exists.
+		return st, nil
+	}
+	if err != nil {
+		return Status{}, err
+	}
+	bound := k.statusOf(ref, &obj)
+	if bound.Address == "" {
+		bound.Address = st.Address
+	}
+	return bound, nil
 }
 
 // statusOfClaim collapses a claim's conditions like statusOf does a
@@ -348,9 +379,6 @@ func statusOfClaim(ref Ref, c *sandboxClaim) Status {
 	st := Status{
 		Ref:     ref,
 		Address: firstAddress(c.Status.Sandbox.PodIPs, c.Status.Sandbox.ServiceFQDN),
-	}
-	if c.Spec.Lifecycle != nil {
-		st.Expires = parseExpiry(c.Spec.Lifecycle.ShutdownTime)
 	}
 
 	ready, hasReady := conditionOf(c.Status.Conditions, "Ready")

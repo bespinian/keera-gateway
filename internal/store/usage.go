@@ -197,7 +197,11 @@ func (s *Store) LoadSpend(ctx context.Context, now time.Time) ([]SpendRow, error
 
 // UsageBucket is one row of an aggregated usage report.
 type UsageBucket struct {
-	Group        string `json:"group"`
+	Group string `json:"group"`
+	// OrgID is set only when a report across every organisation groups by
+	// model: two organisations can each have a model of the same alias, and
+	// they are two rows, not one.
+	OrgID        string `json:"org_id,omitempty"`
 	Requests     int64  `json:"requests"`
 	InputTokens  int64  `json:"input_tokens"`
 	OutputTokens int64  `json:"output_tokens"`
@@ -207,8 +211,8 @@ type UsageBucket struct {
 // Scope narrows a report to one team, key, person or model inside the
 // organisation. The zero value is the whole tenant.
 //
-// One type for every report, so the totals, the chart and the request log of
-// an entity's screen are narrowed the same way.
+// One type for the usage reports and the request log, so the totals, the
+// chart and the log of an entity's screen are narrowed the same way.
 type Scope struct {
 	TeamID string
 	KeyID  string
@@ -293,19 +297,29 @@ func (s *Store) Usage(ctx context.Context, q UsageQuery) ([]UsageBucket, error) 
 	if !ok {
 		col = groupColumns["model"]
 	}
-	sql := `SELECT ` + col + ` AS grp, count(*), COALESCE(sum(input_tokens),0),
+	org, group := "''", "grp"
+	if q.OrgID == "" && col == groupColumns["model"] {
+		org, group = "org_id", "grp, org_id"
+	}
+	// Days read as a timeline; every other grouping is ranked by cost.
+	order := "6 DESC"
+	if q.GroupBy == "day" {
+		order = "grp"
+	}
+	sql := `SELECT ` + col + ` AS grp, ` + org + `, count(*), COALESCE(sum(input_tokens),0),
 		COALESCE(sum(output_tokens),0), COALESCE(sum(cost_micros),0)
 		FROM usage_events
 		WHERE ts >= $1 AND ts < $2 AND ($3 = '' OR org_id = $3) AND status < 400` +
 		q.narrow("", 3) + `
-		GROUP BY grp ORDER BY 5 DESC`
+		GROUP BY ` + group + ` ORDER BY ` + order
 	rows, err := s.pool.Query(ctx, sql, append([]any{q.From, q.To, q.OrgID}, q.args()...)...)
 	if err != nil {
 		return nil, err
 	}
 	return collect(rows, func(r row) (UsageBucket, error) {
 		var b UsageBucket
-		err := r.Scan(&b.Group, &b.Requests, &b.InputTokens, &b.OutputTokens, &b.CostMicros)
+		err := r.Scan(&b.Group, &b.OrgID, &b.Requests, &b.InputTokens, &b.OutputTokens,
+			&b.CostMicros)
 		return b, err
 	})
 }
@@ -314,8 +328,7 @@ func (s *Store) Usage(ctx context.Context, q UsageQuery) ([]UsageBucket, error) 
 // does not write here; its record is the usage event.
 //
 // orgID is the tenant the action happened in, so no tenant can read another's
-// history. It is empty only for actions outside any tenant, such as a change
-// to the shared catalogue.
+// history.
 func (s *Store) Audit(ctx context.Context, actor, orgID, action, targetType, targetID string, detail any) error {
 	var raw []byte
 	if detail != nil {
@@ -327,7 +340,7 @@ func (s *Store) Audit(ctx context.Context, actor, orgID, action, targetType, tar
 	_, err := s.pool.Exec(ctx, `INSERT INTO audit_log
 		(actor, org_id, action, target_type, target_id, detail)
 		VALUES ($1,$2,$3,$4,$5,$6)`,
-		actor, nullable(orgID), action, nullable(targetType), nullable(targetID), raw)
+		actor, orgID, action, nullable(targetType), nullable(targetID), raw)
 	return err
 }
 
@@ -359,7 +372,7 @@ type AuditQuery struct {
 // ListAudit returns audit entries matching q, newest first.
 //
 // An empty OrgID means every tenant, which only an operator asks for. Anyone
-// else sees only their own organisation's entries, not the unscoped ones.
+// else sees only their own organisation's entries.
 func (s *Store) ListAudit(ctx context.Context, q AuditQuery) ([]AuditEntry, error) {
 	if q.Limit <= 0 || q.Limit > 5000 {
 		q.Limit = 100

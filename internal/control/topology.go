@@ -37,9 +37,8 @@ type mapModel struct {
 	Kind    string `json:"kind"`
 	Enabled bool   `json:"enabled"`
 	Hosting string `json:"hosting"`
-	// Endpoint is the host serving it. An external one is the provider's
-	// public address and is shown to everyone; an internal one is private
-	// layout and shown only to an operator, as on the Models screen.
+	// Endpoint is the host serving it. The map is for administrators, who see
+	// it on the Models screen as well.
 	Endpoint string `json:"endpoint,omitempty"`
 	// Retired marks traffic to an alias the catalogue no longer has. The
 	// traffic was real, so it is drawn, but where it went is unknown.
@@ -50,12 +49,15 @@ type mapModel struct {
 // trafficMap serves the map: the catalogue as nodes, the window as numbers on
 // them, and the traffic between them as edges.
 func (s *Server) trafficMap(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if !p.CanAdminOrg(p.OrgID) {
-		s.forbid(w, "only an administrator can read the deployment map")
+	if !s.requireOrgAdmin(w, p, p.OrgID) {
 		return
 	}
 	orgID, from, to, ok := s.reportScope(w, r, p)
 	if !ok {
+		return
+	}
+	if orgID == "" {
+		needOrg(w, orgRequired)
 		return
 	}
 	ctx := r.Context()
@@ -64,7 +66,7 @@ func (s *Server) trafficMap(w http.ResponseWriter, r *http.Request, p *authn.Pri
 		s.fail(w, err)
 		return
 	}
-	models, err := s.st.LoadModels(ctx)
+	models, err := s.st.ListModels(ctx, orgID)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -76,7 +78,7 @@ func (s *Server) trafficMap(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	seen := make(map[string]bool, len(models))
 	for _, m := range models {
 		seen[m.Alias] = true
-		out = append(out, modelNode(m, rep.Models[m.Alias], p))
+		out = append(out, modelNode(m, rep.Models[m.Alias]))
 	}
 	for alias, cell := range rep.Models {
 		if seen[alias] {
@@ -122,17 +124,13 @@ func (s *Server) trafficMap(w http.ResponseWriter, r *http.Request, p *authn.Pri
 }
 
 // modelNode is one catalogue entry as the map draws it.
-func modelNode(m policy.Model, cell store.Cell, p *authn.Principal) mapModel {
-	hosting := m.Hosting()
-	node := mapModel{
-		Alias:   m.Alias,
-		Kind:    string(m.Kind),
-		Enabled: m.Enabled,
-		Hosting: string(hosting),
-		Cell:    cell,
+func modelNode(m policy.Model, cell store.Cell) mapModel {
+	return mapModel{
+		Alias:    m.Alias,
+		Kind:     string(m.Kind),
+		Enabled:  m.Enabled,
+		Hosting:  string(m.Hosting()),
+		Endpoint: m.Endpoint(),
+		Cell:     cell,
 	}
-	if hosting == policy.HostedExternal || p.CanAdminCatalogue() {
-		node.Endpoint = m.Endpoint()
-	}
-	return node
 }

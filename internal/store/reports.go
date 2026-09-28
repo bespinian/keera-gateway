@@ -24,9 +24,7 @@ type TeamSummary struct {
 // in one query to avoid N+1. An empty orgID means every organisation.
 func (s *Store) TeamSummaries(ctx context.Context, orgID string, now time.Time) ([]TeamSummary, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT t.id, t.org_id, t.name, t.created_at,
-		       p.allowed_models, p.max_output_tokens, p.rpm, p.tpm,
-		       p.budget_micros, COALESCE(p.budget_period, 'month'), p.system_prompt, p.filters,
+		SELECT t.id, t.org_id, t.name, t.created_at, `+limitColumns+`,
 		       (SELECT count(*) FROM api_keys k
 		         WHERE k.team_id = t.id AND k.revoked_at IS NULL),
 		       COALESCE(sp.micros, 0)
@@ -48,18 +46,22 @@ func (s *Store) TeamSummaries(ctx context.Context, orgID string, now time.Time) 
 func scanTeamSummary(r row) (TeamSummary, error) {
 	var (
 		t      TeamSummary
-		period string
+		period *string
 		keys   int64
 	)
-	if err := r.Scan(&t.ID, &t.OrgID, &t.Name, &t.CreatedAt,
-		&t.Limits.AllowedModels, &t.Limits.MaxOutputTokens, &t.Limits.RPM, &t.Limits.TPM,
-		&t.Limits.BudgetMicros, &period, &t.Limits.SystemPrompt, &t.Limits.Filters,
-		&keys, &t.SpendMicros); err != nil {
+	dest := append([]any{&t.ID, &t.OrgID, &t.Name, &t.CreatedAt},
+		limitTargets(&t.Limits, &period)...)
+	if err := r.Scan(append(dest, &keys, &t.SpendMicros)...); err != nil {
 		return TeamSummary{}, err
 	}
 	t.ActiveKeys = int(keys)
-	t.Period = policy.Period(period)
-	t.Limits.BudgetPeriod = periodPtr(&period)
+	// A budget with no period resets monthly, as the spend join above assumes.
+	if period == nil {
+		month := string(policy.PeriodMonth)
+		period = &month
+	}
+	t.Period = policy.Period(*period)
+	t.Limits.BudgetPeriod = periodPtr(period)
 	if t.Limits.BudgetMicros != nil {
 		t.BudgetMicros = *t.Limits.BudgetMicros
 	}
@@ -118,7 +120,7 @@ func (s *Store) Overview(ctx context.Context, orgID string, from, to time.Time,
 		SELECT count(*),
 		       COALESCE(sum(input_tokens), 0), COALESCE(sum(output_tokens), 0),
 		       COALESCE(sum(cost_micros), 0),
-		       count(*) FILTER (WHERE status IN (402, 403, 404, 429)),
+		       count(*) FILTER (WHERE status BETWEEN 400 AND 499),
 		       count(*) FILTER (WHERE status >= 500),
 		       COALESCE(round(percentile_cont(0.5) WITHIN GROUP (ORDER BY ttft_ms)
 		                      FILTER (WHERE ttft_ms > 0)), 0)::bigint,
@@ -209,16 +211,6 @@ func (s *Store) TeamOrg(ctx context.Context, teamID string) (string, error) {
 	return orgID, nil
 }
 
-// KeyOrg returns which organisation a key belongs to.
-func (s *Store) KeyOrg(ctx context.Context, keyID string) (string, error) {
-	var orgID string
-	err := s.pool.QueryRow(ctx, "SELECT org_id FROM api_keys WHERE id = $1", keyID).Scan(&orgID)
-	if err != nil {
-		return "", notFound(err)
-	}
-	return orgID, nil
-}
-
 // KeyOwner returns which organisation a key belongs to and which user it is
 // for, empty for a key issued for nobody in particular.
 //
@@ -235,21 +227,20 @@ func (s *Store) KeyOwner(ctx context.Context, keyID string) (string, string, err
 	return orgID, userID, nil
 }
 
-// KeyScope is where a key sits in the hierarchy: its organisation, its team
-// (empty for none) and its alias. Walking the guardrail chain needs these.
-func (s *Store) KeyScope(ctx context.Context, keyID string) (orgID, teamID, alias string, err error) {
+// KeyScope is where a key sits in the hierarchy: its organisation and its
+// team (empty for none).
+func (s *Store) KeyScope(ctx context.Context, keyID string) (orgID, teamID string, err error) {
 	err = s.pool.QueryRow(ctx,
-		"SELECT org_id, COALESCE(team_id,''), alias FROM api_keys WHERE id = $1", keyID,
-	).Scan(&orgID, &teamID, &alias)
+		"SELECT org_id, COALESCE(team_id,'') FROM api_keys WHERE id = $1", keyID,
+	).Scan(&orgID, &teamID)
 	if err != nil {
-		return "", "", "", notFound(err)
+		return "", "", notFound(err)
 	}
-	return orgID, teamID, alias, nil
+	return orgID, teamID, nil
 }
 
 // ScopeName is what one org, team or key is called, for a report that names
-// the level a limit came from. A key with no alias gives an empty name, not an
-// error: the caller already has the id.
+// the level a limit came from.
 func (s *Store) ScopeName(ctx context.Context, scope policy.ScopeType, id string) (string, error) {
 	var query string
 	switch scope {
@@ -340,8 +331,7 @@ func (s *Store) KeySummaries(ctx context.Context, q KeyQuery) ([]KeySummary, err
 	rows, err := s.pool.Query(ctx, `
 		SELECT k.id, k.org_id, COALESCE(k.team_id,''), COALESCE(k.user_id,''),
 		       k.alias, k.prefix, k.created_at, k.expires_at, k.revoked_at,
-		       p.allowed_models, p.max_output_tokens, p.rpm, p.tpm,
-		       p.budget_micros, p.budget_period, p.system_prompt, p.filters,
+		       `+limitColumns+`,
 		       u.last_used_at, COALESCE(u.requests, 0), COALESCE(u.micros, 0)
 		FROM api_keys k
 		LEFT JOIN guardrails p ON p.scope_type = 'key' AND p.scope_id = k.id
@@ -364,11 +354,11 @@ func scanKeySummary(r row) (KeySummary, error) {
 		k      KeySummary
 		period *string
 	)
-	if err := r.Scan(&k.ID, &k.OrgID, &k.TeamID, &k.UserID, &k.Alias, &k.Prefix,
-		&k.CreatedAt, &k.ExpiresAt, &k.RevokedAt,
-		&k.Limits.AllowedModels, &k.Limits.MaxOutputTokens, &k.Limits.RPM, &k.Limits.TPM,
-		&k.Limits.BudgetMicros, &period, &k.Limits.SystemPrompt, &k.Limits.Filters,
-		&k.LastUsedAt, &k.Requests, &k.SpendMicros); err != nil {
+	dest := []any{&k.ID, &k.OrgID, &k.TeamID, &k.UserID, &k.Alias, &k.Prefix,
+		&k.CreatedAt, &k.ExpiresAt, &k.RevokedAt}
+	dest = append(dest, limitTargets(&k.Limits, &period)...)
+	dest = append(dest, &k.LastUsedAt, &k.Requests, &k.SpendMicros)
+	if err := r.Scan(dest...); err != nil {
 		return KeySummary{}, err
 	}
 	k.Limits.BudgetPeriod = periodPtr(period)
@@ -376,8 +366,7 @@ func scanKeySummary(r row) (KeySummary, error) {
 }
 
 // Setup counts what a deployment has, so the panel can tell a new operator
-// which step they are on. Everything except the catalogue is scoped to one
-// organisation.
+// which step they are on.
 type Setup struct {
 	Orgs     int64 `json:"orgs"`
 	Teams    int64 `json:"teams"`
@@ -401,14 +390,14 @@ func (s *Store) SetupState(ctx context.Context, orgID string) (Setup, error) {
 		(SELECT count(*) FROM orgs),
 		(SELECT count(*) FROM teams  WHERE $1 = '' OR org_id = $1),
 		(SELECT count(*) FROM api_keys WHERE ($1 = '' OR org_id = $1) AND revoked_at IS NULL),
-		(SELECT count(*) FROM models WHERE enabled),
+		(SELECT count(*) FROM models WHERE enabled AND ($1 = '' OR org_id = $1)),
 		(SELECT count(*) FROM users  WHERE $1 = '' OR org_id = $1),
 		(SELECT count(*) FROM usage_events WHERE $1 = '' OR org_id = $1),
 		(SELECT count(*) FROM filters WHERE $1 = '' OR org_id = $1),
 		(SELECT count(*) FROM routers WHERE $1 = '' OR org_id = $1),
 		-- Classes, not running machines, so the screen stays when none is up.
-		(SELECT count(*) FROM sandbox_classes),
-		(SELECT count(*) FROM mcp_servers)`, orgID,
+		(SELECT count(*) FROM sandbox_classes WHERE $1 = '' OR org_id = $1),
+		(SELECT count(*) FROM mcp_servers WHERE $1 = '' OR org_id = $1)`, orgID,
 	).Scan(&st.Orgs, &st.Teams, &st.Keys, &st.Models, &st.People, &st.Requests,
 		&st.Filters, &st.Routers, &st.Sandboxes, &st.MCPServers)
 	return st, err

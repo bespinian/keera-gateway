@@ -8,8 +8,8 @@
 //
 // It replaces the dashboard only until the first request has been served.
 
-import { api } from "../api.js";
-import { h, icon, icons, modal, toast, pill, showError } from "../ui.js";
+import { h, icon, icons, pill } from "../ui.js";
+import { newOrg } from "./orgs.js";
 
 export function firstRun(ctx, setup) {
   const operator = ctx.state.me.unrestricted;
@@ -26,24 +26,30 @@ export function firstRun(ctx, setup) {
       // Only an operator can create one. An administrator arrives at a
       // deployment that already has theirs, so for them this is already done.
       action: operator
-        ? { label: "New organisation", run: () => newOrg(ctx) }
+        ? {
+            label: "New organisation",
+            run: () => newOrg(ctx, { switchTo: true }),
+          }
         : null,
       skipped: !operator,
+      by: "An operator",
     },
     {
       title: "Add a model",
       done: setup.models > 0,
       body:
         "Clients ask for a model by its alias. Until an enabled model " +
-        "exists, every request is refused.",
-      action: ctx.state.me.can_edit_catalogue
+        "exists, every request is refused. A new organisation starts with " +
+        "the models in the catalogue file, if the deployment has one.",
+      action: ctx.state.me.can_admin_org
         ? { label: "Go to Models", run: () => ctx.navigate("/models") }
         : null,
-      note: ctx.state.me.can_edit_catalogue
+      note: ctx.state.me.can_admin_org
         ? "Then run its check. It catches a backend that answers with text " +
           "instead of a tool call, which breaks coding agents."
         : null,
-      skipped: !ctx.state.me.can_edit_catalogue,
+      skipped: !ctx.state.me.can_admin_org,
+      by: "An administrator",
     },
     {
       title: "Create a team and set its guardrails",
@@ -52,9 +58,11 @@ export function firstRun(ctx, setup) {
         "Usually one per department, so budgets and reports match how the " +
         "organisation works. Its guardrails apply to every key in it.",
       action:
-        setup.orgs > 0
+        setup.orgs > 0 && ctx.state.me.can_admin_org
           ? { label: "Go to Teams", run: () => ctx.navigate("/teams") }
           : null,
+      skipped: !ctx.state.me.can_admin_org,
+      by: "An administrator",
     },
     {
       title: "Issue a key and connect a client",
@@ -112,7 +120,7 @@ export function firstRun(ctx, setup) {
               )
             : null,
           !s.done && !s.action && s.skipped
-            ? h("p", { class: "hint" }, "An operator does this one.")
+            ? h("p", { class: "hint" }, s.by + " does this one.")
             : null,
         ),
       );
@@ -146,70 +154,4 @@ export function firstRun(ctx, setup) {
       ".",
     ),
   );
-}
-
-// newOrg is here rather than only on the Organisations screen because the whole
-// point of this one is that somebody arriving at an empty deployment should not
-// have to find the screen that unblocks every other screen.
-function newOrg(ctx) {
-  const name = h("input", {
-    class: "input",
-    placeholder: "Example Bank",
-    autofocus: true,
-  });
-  const domain = h("input", { class: "input", placeholder: "example.ch" });
-  const err = h("div");
-  modal({
-    title: "New organisation",
-    body: h(
-      "form",
-      {},
-      err,
-      h("div", { class: "field" }, h("label", {}, "Name"), name),
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "Email domain"),
-        domain,
-        h(
-          "div",
-          { class: "hint" },
-          "Optional. New users who sign in from this domain join here.",
-        ),
-      ),
-    ),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Cancel"),
-      h(
-        "button",
-        {
-          class: "btn btn-primary",
-          onClick: async (e) => {
-            if (!name.value.trim()) return name.focus();
-            const button = e.currentTarget;
-            button.disabled = true;
-            try {
-              const org = await api.createOrg(
-                name.value.trim(),
-                domain.value.trim(),
-              );
-              close();
-              toast("Organisation created", "good");
-              // Switch to it straight away: a checklist whose next step still
-              // says "pick an organisation" has not moved anybody forward.
-              ctx.state.orgs =
-                (await api.orgs().catch(() => ({ data: [] }))).data || [];
-              ctx.state.orgID = org.id;
-              localStorage.setItem("keera.org", org.id);
-              ctx.reload();
-            } catch (ex) {
-              showError(err, ex.message);
-              button.disabled = false;
-            }
-          },
-        },
-        "Create",
-      ),
-    ],
-  });
 }

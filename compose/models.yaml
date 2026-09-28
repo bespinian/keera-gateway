@@ -1,10 +1,12 @@
-# The model catalogue: the gateway's API contract with every client.
+# The models each new organisation starts with.
 #
-# It is applied on every start and is idempotent, so this file - not whoever
-# last called the control API - is what the deployment is. Clients ask for
-# `alias` and never for a model id or an inference URL, which is what lets the
-# backend behind a model be swapped, or repointed at a remote sovereign
-# endpoint, without a single developer changing anything.
+# The gateway reads this file on every start. When an organisation is created,
+# it gets a copy of every model here, and the copies are its own to change. An
+# organisation that already exists is not changed; `keera model apply` adds the
+# models to one. Clients ask for `alias` and never for a model id or an
+# inference URL, which is what lets the backend behind a model be swapped, or
+# repointed at a remote sovereign endpoint, without a single developer changing
+# anything.
 models:
   - alias: keera-speed
     kind: chat
@@ -29,9 +31,12 @@ models:
 
 # A hosted model, for the work a small local model cannot do - or for evaluating
 # one before there are GPUs to run anything on. `provider` fills in the endpoint,
-# the credential variable, the context window, the list price and a description;
-# run `keera model providers` to see what it knows. Uncomment, then put your key
-# in .env as ANTHROPIC_API_KEY.
+# the context window, the list prices, a description, the release date and the
+# location; run `keera model providers` to see what it knows. Uncomment and
+# restart. Each new organisation then gets the model, and its administrator
+# stores the key:
+#
+#   keera model set keera-frontier --api-key @-
 #
 # Prompts sent to this model leave your infrastructure, which is the opposite of
 # why Keera exists - read docs/providers.md before offering one to developers, and
@@ -49,7 +54,7 @@ models:
 # The same thing without leaving Switzerland: Infomaniak serves open-weight
 # models from its own data centres. Its address carries the product id of your
 # AI Service, so an entry needs that as well as a key - both are in the
-# Infomaniak console under AI Tools. Put the key in .env as INFOMANIAK_API_KEY.
+# Infomaniak console under AI Tools. Store the key as above.
 #  - alias: keera-swiss
 #    provider: infomaniak
 #    product_id: "100234"

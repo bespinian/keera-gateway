@@ -127,9 +127,6 @@ type AgentSession struct {
 // Duration is how long the session ran.
 func (a AgentSession) Duration() time.Duration { return a.EndedAt.Sub(a.StartedAt) }
 
-// Unhappy reports whether anything in the session did not deliver.
-func (a AgentSession) Unhappy() bool { return a.Failed+a.Refused+a.Interrupted > 0 }
-
 // AgentSessionSort is the order a list of sessions is read in.
 type AgentSessionSort string
 
@@ -212,7 +209,8 @@ func (q *AgentSessionQuery) setDefaults() {
 //
 // The window starts one gap early, and sessions that ended inside that margin
 // are dropped in the HAVING. Without it, a task already running when the
-// window opened would show only its last part.
+// window opened would show only its last part. A task running for longer than
+// the margin is still cut; AgentSessionAt walks back to its real start.
 //
 // Rows are ordered by (ts, id), so ties always cut the same way. `SELECT *` in
 // `ev` avoids a second column list to keep in step with requestColumns.

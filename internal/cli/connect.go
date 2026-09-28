@@ -22,8 +22,8 @@ func connectCmd(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("connect", flag.ExitOnError)
 	model := fs.String("model", "",
 		"the model or router to configure (default: the first enabled chat model)")
-	// Only needed for routers, which belong to an organisation.
-	org := fs.String("org", "", "organisation whose routers to offer (defaults to the only one)")
+	org := fs.String("org", "", "organisation whose models and routers to offer "+
+		"(default: your own; an operator's only one)")
 	asJSON := fs.Bool("json", false, jsonUsage)
 	fs.Usage = func() { _ = printHelp(fs, "connect", "") }
 	if want, ok := wantsHelp(args); ok {
@@ -55,7 +55,7 @@ func connectCmd(ctx context.Context, args []string) error {
 		})
 	}
 
-	client, found := lookupClient(cat.Data, sub)
+	client, found := connect.Find(cat.Data, sub)
 	if !found {
 		keys := make([]string, 0, len(cat.Data))
 		for _, cl := range cat.Data {
@@ -94,11 +94,15 @@ func connectCmd(ctx context.Context, args []string) error {
 // and the organisation's routers, which a client names in the same field.
 //
 // Routers cost a second round trip, so they are read only for the listing or
-// for a --model that is not a model. Failing to read them is not an error: an
-// operator with several organisations still gets the models.
+// for a --model that is not a model. Failing to read them is not an error:
+// the models are still worth offering.
 func connectModels(ctx context.Context, c *client, listing bool, model, org string,
 ) ([]policy.Model, error) {
-	models, err := catalogue(ctx, c)
+	org, err := resolveOrg(ctx, c, org)
+	if err != nil {
+		return nil, err
+	}
+	models, err := catalogue(ctx, c, org)
 	if err != nil {
 		return nil, err
 	}
@@ -126,8 +130,8 @@ func connectModels(ctx context.Context, c *client, listing bool, model, org stri
 // is returned because its context window goes into the configuration.
 func chooseConnectModel(chat []policy.Model, model string) (policy.Model, error) {
 	if len(chat) == 0 {
-		return policy.Model{}, fmt.Errorf("a coding agent needs a chat model and the catalogue has none " +
-			"that is enabled; add one with: keera model add <alias> --backend <url> " +
+		return policy.Model{}, fmt.Errorf("a coding agent needs a chat model and this organisation has no " +
+			"enabled one; add one with: keera model add <alias> --backend <url> " +
 			"--backend-model <name>")
 	}
 	if model == "" {
@@ -135,7 +139,7 @@ func chooseConnectModel(chat []policy.Model, model string) (policy.Model, error)
 	}
 	named, found := findModel(chat, model)
 	if !found {
-		return policy.Model{}, fmt.Errorf("no enabled chat model or router %s; this deployment "+
+		return policy.Model{}, fmt.Errorf("no enabled chat model or router %s; this organisation "+
 			"serves: %s", model, strings.Join(aliasesOf(chat), ", "))
 	}
 	return named, nil
@@ -147,15 +151,6 @@ func aliasesOf(models []policy.Model) []string {
 		names = append(names, m.Alias)
 	}
 	return names
-}
-
-func lookupClient(clients []connect.Client, key string) (connect.Client, bool) {
-	for _, c := range clients {
-		if c.Key == key {
-			return c, true
-		}
-	}
-	return connect.Client{}, false
 }
 
 func listConnect(w *table, clients []connect.Client,
@@ -212,7 +207,7 @@ func printConnect(c connect.Client, m policy.Model, base string) {
 	fmt.Fprintln(os.Stderr)
 	fmt.Println(c.Render(base, alias, m.MaxContext))
 	if c.Note != "" {
-		fmt.Fprintf(os.Stderr, "\n   %s\n", styleErr.muted(wrap(c.Note, 76, "   ")))
+		fmt.Fprintf(os.Stderr, "\n   %s\n", styleErr.muted(wrap(c.NoteText(), 76, "   ")))
 	}
 
 	fmt.Fprintf(os.Stderr, "\n%s %s\n", styleErr.head("3."), wrap(c.RunText(alias), 76, "   "))

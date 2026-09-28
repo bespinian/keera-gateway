@@ -8,7 +8,8 @@ import (
 )
 
 // The context window check: a request too long for every model it may go to
-// is refused before anything is spent on it, in the words clients recognise.
+// is refused before it is filtered or forwarded, in the words clients
+// recognise.
 //
 // Counting tokens exactly needs each model's tokeniser, which the gateway does
 // not have. So it counts the least a request can be: its text at a generous

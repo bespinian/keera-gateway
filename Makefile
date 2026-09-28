@@ -5,8 +5,8 @@ GO ?= go
 BUILD_DIR ?= build
 
 # The integration tests need a Postgres. test-integration starts a throwaway one
-# in a container and removes it again; KEERA_TEST_DATABASE_URL points them at a
-# database of your own instead.
+# in a container and removes it again, unless KEERA_TEST_DATABASE_URL and
+# KEERA_TEST_REDIS_URL point at services of your own.
 PODMAN ?= podman
 COMPOSE ?= podman compose
 PG_IMAGE ?= docker.io/library/postgres:latest
@@ -43,19 +43,19 @@ test:
 # test drops its schema to prove a migration runs from nothing. Listed once
 # here, so this target and CI cannot disagree.
 INTEGRATION_PKGS := ./internal/store/... ./internal/control/... ./internal/ratelimit/...
+INTEGRATION_TEST := $(GO) test -race -count=1 -p 1 $(INTEGRATION_PKGS)
 
 .PHONY: test-integration
+# With both KEERA_TEST_* variables set, as in CI, it starts and removes nothing.
+ifneq ($(and $(KEERA_TEST_DATABASE_URL),$(KEERA_TEST_REDIS_URL)),)
+test-integration:
+	@$(INTEGRATION_TEST)
+else
 test-integration: pg-up redis-up
 	@KEERA_TEST_DATABASE_URL='$(PG_DSN)' KEERA_TEST_REDIS_URL='$(REDIS_URL)' \
-		$(MAKE) --no-print-directory test-integration-only ; \
+		$(INTEGRATION_TEST) ; \
 		status=$$?; $(MAKE) --no-print-directory pg-down redis-down; exit $$status
-
-# The same tests against services that are already running: the containers
-# above, a Postgres of your own, or CI's. It starts and removes nothing, and
-# reads the two KEERA_TEST_* variables from its environment.
-.PHONY: test-integration-only
-test-integration-only:
-	@$(GO) test -race -count=1 -p 1 $(INTEGRATION_PKGS)
+endif
 
 .PHONY: check-all
 check-all: check test-integration
@@ -109,7 +109,8 @@ GOLANGCI_LINT ?= golangci-lint
 lint:
 	@command -v $(GOLANGCI_LINT) >/dev/null 2>&1 || { \
 		echo "golangci-lint is not on PATH. Install it with:"; \
-		echo "  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest"; \
+		echo "  go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0"; \
+		echo "CI pins v2.14, so a newer one may report what CI does not."; \
 		exit 1; }
 	@$(GOLANGCI_LINT) run ./...
 
@@ -122,41 +123,21 @@ fmt-check:
 clean:
 	@rm -rf $(BUILD_DIR)
 
-# The whole platform in containers, the gateway included: the shape compose/
-# describes, and the wrong one for a development loop, because every change is
-# an image build.
-#
-# The tier is named the same way `dev` names it, and for the same reason it
-# cannot be left out. The base file on its own is vLLM on CPU, which
-# no documented path uses, and a `down` that forgets the override takes away a
-# different keera-engine than the `up` started.
-COMPOSE_TIER ?= cpu
-TIER_COMPOSE := -f compose/compose.yaml \
-	-f compose/compose.$(COMPOSE_TIER).yaml
-
-.PHONY: compose-up
-compose-up:
-	@$(COMPOSE) $(TIER_COMPOSE) up -d --build
-
-.PHONY: compose-down
-compose-down:
-	@$(COMPOSE) $(TIER_COMPOSE) down
-
-# What is inside the image we ship, in a format an auditor or a vulnerability
-# scanner can read. The image is FROM scratch, so this is the two Go binaries
-# and the module graph compiled into them, which syft reads out of the build
-# info the toolchain stamps on them.
-#
-# The image is rebuilt first rather than taken as found: an SBOM of whatever
-# happened to be tagged last is worse than none, and the rebuild is cached.
 GATEWAY_IMAGE ?= localhost/keera-gateway:latest
 
-# What the binaries inside the image report as their version. .git is not in the
-# build context, so the toolchain cannot stamp them itself. A local build leaves
+# What the binary inside the image reports as its version. .git is not in the
+# build context, so the toolchain cannot stamp it itself. A local build leaves
 # VERSION empty and the binary says "devel"; the release workflow passes the tag.
 VERSION ?=
 REVISION ?= $(shell git rev-parse HEAD 2>/dev/null)
 
+# What is inside the image we ship, in a format an auditor or a vulnerability
+# scanner can read. The image is FROM scratch, so this is the Go binary
+# and the module graph compiled into it, which syft reads out of the build
+# info the toolchain stamps on them.
+#
+# The image is rebuilt first rather than taken as found: an SBOM of whatever
+# happened to be tagged last is worse than none, and the rebuild is cached.
 SYFT ?= syft
 SYFT_IMAGE ?= docker.io/anchore/syft:latest
 SBOM_DIR ?= $(BUILD_DIR)/sbom
@@ -244,13 +225,13 @@ dist: notices
 AIR ?= air
 DEV_ENV := compose/.env
 
-# Which inference backend the loop brings up. cpu is llama.cpp and needs no GPU;
-# gpu is vLLM and does. Tool calls do not work on the cpu tier - see
-# compose/README.md - so use gpu when working on anything that reads tool_calls.
-GATEWAY_DEV_TIER ?= cpu
+# Which inference backend `make dev` brings up. cpu is
+# llama.cpp and needs no GPU; gpu is vLLM and does. Tool calls do not work on
+# the cpu tier - see compose/README.md - so use gpu when working on anything
+# that reads tool_calls.
+TIER ?= cpu
 DEV_COMPOSE := -f compose/compose.yaml \
-	-f compose/compose.$(GATEWAY_DEV_TIER).yaml \
-	-f compose/compose.dev.yaml
+	$(if $(filter gpu,$(TIER)),-f compose/compose.gpu.yaml) -f compose/compose.dev.yaml
 
 .PHONY: dev
 dev: dev-env dev-backends
@@ -265,13 +246,13 @@ dev: dev-env dev-backends
 	@echo
 	@echo "^C stops the gateway and leaves the containers up."
 	@echo
-	@# The two sandbox settings are defaulted only when a driver is named: a
-	@# catalogue applied for a feature that is switched off puts classes in the
-	@# database that nothing can create a machine from.
+	@# The sandbox address is defaulted only when a driver is named. The class
+	@# file always is, so the first organisation has classes to start from
+	@# once a driver is switched on.
 	@set -a; . ./$(DEV_ENV); set +a; \
 		KEERA_DATABASE_URL='postgres://keera:keera@127.0.0.1:5432/keera?sslmode=disable' \
 		KEERA_MODELS_FILE=compose/models.dev.yaml \
-		KEERA_SANDBOXES_FILE="$${KEERA_SANDBOX_DRIVER:+$${KEERA_SANDBOXES_FILE:-compose/sandboxes.yaml}}" \
+		KEERA_SANDBOXES_FILE="$${KEERA_SANDBOXES_FILE:-compose/sandboxes.yaml}" \
 		KEERA_SANDBOX_PUBLIC_URL="$${KEERA_SANDBOX_DRIVER:+$${KEERA_SANDBOX_PUBLIC_URL:-http://host.containers.internal:8080}}" \
 		KEERA_LOG_FORMAT=text KEERA_LOG_LEVEL=debug \
 		$(AIR)
@@ -324,7 +305,7 @@ dev-env:
 .PHONY: dev-backends
 dev-backends:
 	@$(COMPOSE) $(DEV_COMPOSE) up -d keera-db keera-engine
-	@# A containerised gateway from an earlier `make compose-up` would still be
+	@# A containerised gateway from an earlier `podman compose up` would still be
 	@# holding :8080, which air is about to want.
 	@$(COMPOSE) $(DEV_COMPOSE) stop keera-gateway >/dev/null 2>&1 || true
 	@# store.Open pings Postgres and fails fast rather than retrying, so air's

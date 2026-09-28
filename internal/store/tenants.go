@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -72,13 +73,50 @@ type KeyInfo struct {
 	RevokedAt *time.Time `json:"revoked_at,omitempty"`
 }
 
-// CreateOrg inserts an organisation.
-func (s *Store) CreateOrg(ctx context.Context, id, name string) (Org, error) {
-	o := Org{ID: id, Name: name}
-	err := s.pool.QueryRow(ctx,
-		"INSERT INTO orgs (id, name) VALUES ($1,$2) RETURNING created_at", id, name,
-	).Scan(&o.CreatedAt)
-	return o, err
+// OrgTemplate is what a new organisation starts with: a copy of each model
+// and sandbox class, from the catalogue files.
+type OrgTemplate struct {
+	Models         []policy.Model
+	SandboxClasses []policy.SandboxClass
+}
+
+// CreateOrg inserts an organisation, with its email domain if o has one, and
+// what it starts with. It is one transaction, so an organisation never exists
+// without its template.
+func (s *Store) CreateOrg(ctx context.Context, o Org, tmpl OrgTemplate) (Org, error) {
+	id := o.ID
+	o.EmailDomain = strings.TrimSpace(o.EmailDomain)
+	domain := nullable(o.EmailDomain)
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return o, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	// The domain is set in the same insert, so a taken one creates nothing.
+	// Setting it afterwards left an organisation behind that a retry then
+	// created a second time.
+	if err := tx.QueryRow(ctx,
+		"INSERT INTO orgs (id, name, email_domain) VALUES ($1,$2,$3) RETURNING created_at",
+		id, o.Name, domain,
+	).Scan(&o.CreatedAt); err != nil {
+		if domain != nil && isUnique(err) {
+			return o, ErrDomainTaken
+		}
+		return o, err
+	}
+	for _, m := range tmpl.Models {
+		m.OrgID = id
+		if err := upsertModel(ctx, tx, m); err != nil {
+			return o, err
+		}
+	}
+	for _, c := range tmpl.SandboxClasses {
+		c.OrgID = id
+		if err := upsertSandboxClass(ctx, tx, &c); err != nil {
+			return o, err
+		}
+	}
+	return o, tx.Commit(ctx)
 }
 
 // DeletedOrg is what a deletion took with it. The counts are read in the same
@@ -89,13 +127,19 @@ type DeletedOrg struct {
 	Teams int    `json:"teams"`
 	Users int    `json:"users"`
 	Keys  int    `json:"keys"`
+	// LiveSandboxes is set only when the delete was refused for them.
+	LiveSandboxes int `json:"live_sandboxes,omitempty"`
 }
+
+// ErrOrgHasSandboxes refuses to delete an organisation whose sandboxes still
+// hold machines. Deleting their rows would leave the machines running with
+// nothing left to stop them.
+var ErrOrgHasSandboxes = errors.New("store: the organisation still has live sandboxes")
 
 // DeleteOrg removes an organisation and everything scoped to it.
 //
-// Teams, users, keys and sessions go through the foreign keys. Guardrails and
-// spend are cleared first, while the team and key ids that name them still
-// exist.
+// Everything else goes through the foreign keys. Guardrails and spend are
+// cleared first, while the team and key ids that name them still exist.
 //
 // Usage events and the audit log stay: finance invoices from them, and the
 // audit log must keep the record of this deletion.
@@ -117,6 +161,16 @@ func (s *Store) DeleteOrg(ctx context.Context, orgID string) (DeletedOrg, error)
 		return gone, notFound(err)
 	}
 	gone.ID = orgID
+
+	// The row lock above holds off a sandbox being created meanwhile: its
+	// insert has to lock the same row.
+	if err := tx.QueryRow(ctx, "SELECT count(*) FROM sandboxes WHERE org_id = $1 AND "+liveSandbox,
+		orgID).Scan(&gone.LiveSandboxes); err != nil {
+		return gone, err
+	}
+	if gone.LiveSandboxes > 0 {
+		return gone, ErrOrgHasSandboxes
+	}
 
 	// An organisation spans three scopes, and each is named explicitly.
 	const scoped = `(scope_type = 'org'  AND scope_id = $1)
@@ -165,7 +219,7 @@ func (s *Store) CreateTeam(ctx context.Context, id, orgID, name string) (Team, e
 		id, orgID, name,
 	).Scan(&t.CreatedAt)
 	if isUnique(err) {
-		return t, fmt.Errorf("team %q already exists in %s", name, orgID)
+		return t, ErrTeamNameTaken
 	}
 	return t, err
 }
@@ -257,6 +311,7 @@ func (s *Store) DeleteTeam(ctx context.Context, teamID string) (DeletedTeam, err
 	if err := deleteScoped(ctx, tx, "scope_type = 'team' AND scope_id = $1", teamID); err != nil {
 		return gone, err
 	}
+	// The foreign key would detach them too; this is here for the count.
 	tag, err := tx.Exec(ctx, "UPDATE api_keys SET team_id = NULL WHERE team_id = $1", teamID)
 	if err != nil {
 		return gone, err
@@ -359,6 +414,72 @@ func (s *Store) CreateKey(ctx context.Context, k KeyInfo, hash []byte) (KeyInfo,
 func (s *Store) RevokeKey(ctx context.Context, id string) error {
 	return s.execOne(ctx,
 		"UPDATE api_keys SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL", id)
+}
+
+// ErrKeyRevoked is a key that was already revoked, so there is nothing to
+// rotate.
+var ErrKeyRevoked = errors.New("store: the key was already revoked")
+
+// RotateKey replaces the key oldID with next, in one transaction: next gets
+// the old key's organisation, team, person and own guardrails, and the old key
+// is revoked. An empty next.Alias keeps the old alias. A nil next.ExpiresAt
+// gives the new key the old key's lifetime, counted from now.
+//
+// Doing it in steps can leave both keys live, or a new key without the old
+// one's limits, which quietly loosens a guardrail.
+func (s *Store) RotateKey(ctx context.Context, oldID string, next KeyInfo, hash []byte) (KeyInfo, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return KeyInfo{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var old KeyInfo
+	err = tx.QueryRow(ctx, `SELECT org_id, COALESCE(team_id,''), COALESCE(user_id,''), alias,
+		created_at, expires_at, revoked_at FROM api_keys WHERE id = $1 FOR UPDATE`, oldID,
+	).Scan(&old.OrgID, &old.TeamID, &old.UserID, &old.Alias, &old.CreatedAt, &old.ExpiresAt, &old.RevokedAt)
+	if err != nil {
+		return KeyInfo{}, notFound(err)
+	}
+	if old.RevokedAt != nil {
+		return KeyInfo{}, ErrKeyRevoked
+	}
+	next.OrgID, next.TeamID, next.UserID = old.OrgID, old.TeamID, old.UserID
+	if next.Alias == "" {
+		next.Alias = old.Alias
+	}
+	// The lifetime, not the date: a key rotated a week before it lapses should
+	// not be replaced by one that lapses in a week.
+	if next.ExpiresAt == nil && old.ExpiresAt != nil {
+		t := time.Now().Add(max(old.ExpiresAt.Sub(old.CreatedAt).Round(time.Hour), time.Hour))
+		next.ExpiresAt = &t
+	}
+
+	if err := tx.QueryRow(ctx, `INSERT INTO api_keys
+		(id, org_id, team_id, user_id, alias, key_hash, prefix, expires_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING created_at`,
+		next.ID, next.OrgID, nullable(next.TeamID), nullable(next.UserID), next.Alias, hash,
+		next.Prefix, next.ExpiresAt,
+	).Scan(&next.CreatedAt); err != nil {
+		return KeyInfo{}, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO guardrails
+		(scope_type, scope_id, allowed_models, max_output_tokens, rpm, tpm, budget_micros,
+		 budget_period, system_prompt, filters, max_sandboxes, max_sandbox_ttl_seconds,
+		 sandbox_classes, max_sandbox_cpu_millis, max_sandbox_memory_mib, allowed_tools,
+		 block_hosted_tools, allowed_repos, updated_at)
+		SELECT scope_type, $2, allowed_models, max_output_tokens, rpm, tpm, budget_micros,
+		 budget_period, system_prompt, filters, max_sandboxes, max_sandbox_ttl_seconds,
+		 sandbox_classes, max_sandbox_cpu_millis, max_sandbox_memory_mib, allowed_tools,
+		 block_hosted_tools, allowed_repos, now()
+		FROM guardrails WHERE scope_type = 'key' AND scope_id = $1`, oldID, next.ID); err != nil {
+		return KeyInfo{}, err
+	}
+	if _, err := tx.Exec(ctx,
+		"UPDATE api_keys SET revoked_at = now() WHERE id = $1", oldID); err != nil {
+		return KeyInfo{}, err
+	}
+	return next, tx.Commit(ctx)
 }
 
 // LookupKey finds a key by the hash of what the client presented, with the

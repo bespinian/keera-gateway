@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/bespinian/keera-gateway/internal/authn"
 	"github.com/bespinian/keera-gateway/internal/httpx"
+	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/registry"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
@@ -46,7 +48,7 @@ func twoTenants(t *testing.T) tenants {
 	for _, org := range []struct{ id, name string }{
 		{"org_a", "Example Bank"}, {"org_b", "Another Customer"},
 	} {
-		if _, err := st.CreateOrg(ctx, org.id, org.name); err != nil {
+		if _, err := st.CreateOrg(ctx, store.Org{ID: org.id, Name: org.name}, store.OrgTemplate{}); err != nil {
 			t.Fatalf("CreateOrg %s: %v", org.id, err)
 		}
 	}
@@ -144,6 +146,61 @@ func TestAnAdministratorRevokesAnyKeyInTheirOwnOrganisation(t *testing.T) {
 		if w := tn.revoke(carol, keyID); w.Code != http.StatusOK {
 			t.Errorf("status = %d revoking %s, want 200: %s", w.Code, keyID, w.Body)
 		}
+	}
+}
+
+// Whoever may revoke a key may rotate it, so a member replaces their own
+// leaked key. The new key keeps the old one's person and own guardrails, and
+// the old one stops working in the same step.
+func TestAMemberRotatesTheirOwnKeyAndItKeepsItsLimits(t *testing.T) {
+	tn := twoTenants(t)
+	alice := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleMember, OrgID: "org_a", UserID: "user_alice",
+	}
+	dave := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleMember, OrgID: "org_b", UserID: "user_dave",
+	}
+	rpm := 120
+	if err := tn.srv.st.PutPolicy(tn.ctx, policy.ScopeKey, "key_alice", policy.Limits{RPM: &rpm}); err != nil {
+		t.Fatal(err)
+	}
+	rotate := func(p *authn.Principal, keyID string) *httptest.ResponseRecorder {
+		return tn.call(tn.srv.rotateKey, p, http.MethodPost, "/v1/keys/"+keyID+"/rotate", `{}`,
+			map[string]string{"id": keyID})
+	}
+
+	if w := rotate(dave, "key_alice"); w.Code != http.StatusNotFound {
+		t.Errorf("another tenant rotating her key = %d, want 404", w.Code)
+	}
+	if w := rotate(alice, "key_bob"); w.Code != http.StatusForbidden {
+		t.Errorf("rotating a colleague's key = %d, want 403", w.Code)
+	}
+
+	w := rotate(alice, "key_alice")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("rotating her own key = %d, want 201: %s", w.Code, w.Body)
+	}
+	var created struct {
+		store.KeyInfo
+		Key      string `json:"key"`
+		Replaced string `json:"replaced"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Key == "" || created.Replaced != "key_alice" || created.UserID != "user_alice" ||
+		created.Alias != "alice's laptop" {
+		t.Errorf("the new key is %+v", created)
+	}
+	lim, err := tn.srv.st.GetPolicy(tn.ctx, policy.ScopeKey, created.ID)
+	if err != nil || lim.RPM == nil || *lim.RPM != 120 {
+		t.Errorf("the new key's own guardrail = %+v, %v; want rpm 120", lim, err)
+	}
+	if _, err := tn.srv.st.LookupKey(tn.ctx, []byte("hash-of-key_alice")); !errors.Is(err, policy.ErrKeyRevoked) {
+		t.Errorf("the old key = %v, want revoked", err)
+	}
+	if w := rotate(alice, "key_alice"); w.Code != http.StatusConflict {
+		t.Errorf("rotating a revoked key = %d, want 409", w.Code)
 	}
 }
 

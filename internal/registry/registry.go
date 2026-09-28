@@ -1,16 +1,20 @@
 // Package registry is the gateway's read-through view of the control plane.
 //
-// Nothing on the inference path may block on Postgres. The registry keeps the
-// catalogue and recently used keys in memory, refreshes them on a timer, and
-// drops them on LISTEN/NOTIFY. So a revoked key stops working within a round
-// trip, and a database outage leaves already-known keys working.
+// The inference path reads Postgres only to check a key it has not seen
+// recently. The registry keeps every organisation's models, filters, routers
+// and MCP servers, and recently used keys, in memory. It refreshes them on a
+// timer and drops them on LISTEN/NOTIFY, so a revoked key stops working within
+// a round trip. In a database outage the models and the rest stay as last
+// loaded, and a key works only until its cache entry expires (the TTL,
+// 30 seconds by default). Failures are not cached, so after that each request
+// with the key is refused as control_plane_unavailable.
 package registry
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -29,29 +33,35 @@ type Options struct {
 	// NegativeTTL is the same for keys that did not resolve. It is short but
 	// not zero, so a flood of invalid keys is not a flood of queries.
 	NegativeTTL time.Duration
-	// ModelRefresh is how often the catalogue is reloaded even without a notify.
-	ModelRefresh time.Duration
 	// SpendRefresh is how often cached spend is reconciled with the database.
 	SpendRefresh time.Duration
-	// Secrets opens credentials stored against a model. Nil, when no
-	// encryption key is configured, leaves those models on api_key_env.
+	// Secrets opens the credentials stored against models and MCP servers.
+	// It is required.
 	Secrets *secret.Box
 }
 
+// The defaults of the settings behind Options. internal/config reads them
+// from here, so the environment and a zero Options mean the same.
+const (
+	DefaultTTL          = 30 * time.Second
+	DefaultSpendRefresh = 10 * time.Second
+)
+
 func (o *Options) setDefaults() {
 	if o.TTL <= 0 {
-		o.TTL = 30 * time.Second
+		o.TTL = DefaultTTL
 	}
 	if o.NegativeTTL <= 0 {
 		o.NegativeTTL = 5 * time.Second
 	}
-	if o.ModelRefresh <= 0 {
-		o.ModelRefresh = time.Minute
-	}
 	if o.SpendRefresh <= 0 {
-		o.SpendRefresh = 10 * time.Second
+		o.SpendRefresh = DefaultSpendRefresh
 	}
 }
+
+// refreshEvery is how often everything but spend is reloaded even without a
+// notify, in case one was missed.
+const refreshEvery = time.Minute
 
 // Source is what the registry reads through. It is an interface so the cache
 // behaviour can be tested without Postgres.
@@ -78,13 +88,13 @@ type Registry struct {
 	opts  Options
 	log   *slog.Logger
 
-	models atomic.Pointer[map[string]policy.Model]
-	mcp    atomic.Pointer[map[string]policy.MCPServer]
-	// filters and routers are keyed by org, then by alias. Both are read on
-	// the inference path.
+	// mcp is keyed by org, then by alias, like models.
+	mcp atomic.Pointer[map[string]map[string]policy.MCPServer]
+	// models, filters and routers are keyed by org, then by alias. All three
+	// are read on the inference path.
+	models  atomic.Pointer[map[string]map[string]policy.Model]
 	filters atomic.Pointer[map[string]map[string]policy.Filter]
 	routers atomic.Pointer[map[string]map[string]policy.Router]
-	secrets *secret.Box
 
 	mu   sync.RWMutex
 	keys map[string]entry
@@ -98,7 +108,7 @@ type Registry struct {
 	budgets *Budgets
 }
 
-// New builds a registry and loads the catalogue once, so a gateway that starts
+// New builds a registry and loads everything once, so a gateway that starts
 // successfully is a gateway that can serve.
 func New(ctx context.Context, st Source, opts Options, log *slog.Logger) (*Registry, error) {
 	opts.setDefaults()
@@ -106,11 +116,10 @@ func New(ctx context.Context, st Source, opts Options, log *slog.Logger) (*Regis
 		store:   st,
 		opts:    opts,
 		log:     log,
-		secrets: opts.Secrets,
 		keys:    make(map[string]entry),
 		budgets: newBudgets(),
 	}
-	if err := r.refreshCatalogue(ctx); err != nil {
+	if err := r.refreshAll(ctx); err != nil {
 		return nil, err
 	}
 	if err := r.refreshSpend(ctx); err != nil {
@@ -123,7 +132,7 @@ func New(ctx context.Context, st Source, opts Options, log *slog.Logger) (*Regis
 func (r *Registry) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 	wg.Add(3)
-	go func() { defer wg.Done(); r.loop(ctx, r.opts.ModelRefresh, r.refreshCatalogue) }()
+	go func() { defer wg.Done(); r.loop(ctx, refreshEvery, r.refreshAll) }()
 	go func() { defer wg.Done(); r.loop(ctx, r.opts.SpendRefresh, r.refreshSpend) }()
 	go func() { defer wg.Done(); r.listen(ctx) }()
 	wg.Wait()
@@ -162,8 +171,8 @@ func (r *Registry) listen(ctx context.Context) {
 func (r *Registry) listenOnce(ctx context.Context) error {
 	return r.store.Listen(ctx, store.NotifyChannel, func() {
 		r.Invalidate()
-		if err := r.refreshCatalogue(ctx); err != nil {
-			r.log.Warn("catalogue refresh after notify failed", "error", err)
+		if err := r.refreshAll(ctx); err != nil {
+			r.log.Warn("refresh after notify failed", "error", err)
 		}
 	})
 }
@@ -172,10 +181,10 @@ func (r *Registry) listenOnce(ctx context.Context) error {
 // control plane when both listeners live in the same process.
 func (r *Registry) Invalidate() { r.gen.Add(1) }
 
-// refreshCatalogue reloads models, filters and routers together. They name each
+// refreshAll reloads models, filters and routers together. They name each
 // other, so renewing only part of the chain could refuse a request for a link
-// that already exists. MCP servers come along, being catalogue too.
-func (r *Registry) refreshCatalogue(ctx context.Context) error {
+// that already exists. MCP servers come along, so one refresh renews all.
+func (r *Registry) refreshAll(ctx context.Context) error {
 	if err := r.refreshModels(ctx); err != nil {
 		return err
 	}
@@ -235,12 +244,16 @@ func (r *Registry) Router(orgID, alias string) (policy.Router, bool) {
 
 // Routers implements policy.Source.
 func (r *Registry) Routers(orgID string) []policy.Router {
-	byAlias := (*r.routers.Load())[orgID]
-	out := make([]policy.Router, 0, len(byAlias))
-	for _, rt := range byAlias {
-		out = append(out, rt)
+	return sortedValues((*r.routers.Load())[orgID])
+}
+
+// sortedValues lists one organisation's things in alias order.
+func sortedValues[T any](byAlias map[string]T) []T {
+	aliases := slices.Sorted(maps.Keys(byAlias))
+	out := make([]T, 0, len(aliases))
+	for _, a := range aliases {
+		out = append(out, byAlias[a])
 	}
-	slices.SortFunc(out, func(a, b policy.Router) int { return cmp.Compare(a.Alias, b.Alias) })
 	return out
 }
 
@@ -249,11 +262,13 @@ func (r *Registry) refreshModels(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	m := make(map[string]policy.Model, len(list))
-	for _, mod := range list {
-		m[mod.Alias] = r.decrypt(mod)
+	for i, m := range list {
+		if len(m.APIKeyCiphertext) > 0 {
+			list[i].APIKey = r.open(ModelSecretName(m.OrgID, m.Alias), m.APIKeyCiphertext)
+		}
 	}
-	r.models.Store(&m)
+	byOrg := groupByOrg(list, func(m policy.Model) (string, string) { return m.OrgID, m.Alias })
+	r.models.Store(&byOrg)
 	return nil
 }
 
@@ -262,54 +277,43 @@ func (r *Registry) refreshMCP(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	m := make(map[string]policy.MCPServer, len(list))
-	for _, srv := range list {
+	for i, srv := range list {
 		if len(srv.APIKeyCiphertext) > 0 {
-			srv.APIKey = r.open(MCPSecretName(srv.Alias), srv.APIKeyCiphertext)
+			list[i].APIKey = r.open(MCPSecretName(srv.OrgID, srv.Alias), srv.APIKeyCiphertext)
 		}
-		m[srv.Alias] = srv
 	}
-	r.mcp.Store(&m)
+	byOrg := groupByOrg(list, func(m policy.MCPServer) (string, string) { return m.OrgID, m.Alias })
+	r.mcp.Store(&byOrg)
 	return nil
 }
 
-// MCPSecretName is what an MCP server's credential is sealed against. It is
-// not the bare alias, so a server's sealed credential can never be opened as
-// the credential of a model with the same alias.
-func MCPSecretName(alias string) string { return "mcp:" + alias }
+// MCPSecretName is what an MCP server's credential is sealed against. It
+// carries the organisation, so it can never be opened as another tenant's,
+// and its own prefix, so never as a model's of the same alias.
+func MCPSecretName(orgID, alias string) string { return "mcp:" + orgID + ":" + alias }
 
 // MCPServer implements policy.Source.
-func (r *Registry) MCPServer(alias string) (policy.MCPServer, bool) {
-	m, ok := (*r.mcp.Load())[alias]
+func (r *Registry) MCPServer(orgID, alias string) (policy.MCPServer, bool) {
+	m, ok := (*r.mcp.Load())[orgID][alias]
 	return m, ok
 }
 
-// decrypt opens a model's stored credential, once per refresh rather than once
-// per request.
-//
-// A credential that cannot be opened is dropped, not fatal. The model can still
-// use api_key_env, and a gateway whose KEERA_SECRET_KEY changed still starts,
-// so an operator can sign in and set the key again. It is logged every refresh.
-func (r *Registry) decrypt(m policy.Model) policy.Model {
-	if len(m.APIKeyCiphertext) == 0 {
-		return m
-	}
-	m.APIKey = r.open(m.Alias, m.APIKeyCiphertext)
-	return m
-}
+// ModelSecretName is what a model's credential is sealed against. It carries
+// the organisation, so a sealed credential can never be opened as another
+// tenant's, and its own prefix, so never as an MCP server's of the same alias.
+func ModelSecretName(orgID, alias string) string { return "model:" + orgID + ":" + alias }
 
-// open decrypts one stored credential, or logs why it cannot and returns
-// nothing.
+// open decrypts one stored credential, once per refresh rather than once per
+// request, or logs why it cannot and returns nothing.
+//
+// A credential that cannot be opened is dropped, not fatal. A gateway whose
+// KEERA_SECRET_KEY changed still starts, so the organisation's administrators
+// can sign in and set the credential again. It is logged every refresh.
 func (r *Registry) open(name string, ciphertext []byte) string {
-	if !r.secrets.Enabled() {
-		r.log.Error("a stored credential cannot be read because no encryption key is "+
-			"configured; set KEERA_SECRET_KEY", "alias", name)
-		return ""
-	}
-	plaintext, err := r.secrets.Open(name, ciphertext)
+	plaintext, err := r.opts.Secrets.Open(name, ciphertext)
 	if err != nil {
-		r.log.Error("a stored credential cannot be decrypted; set it again in the panel",
-			"alias", name, "error", err)
+		r.log.Error("a stored credential cannot be decrypted; set it again in the panel or the CLI",
+			"credential", name, "error", err)
 		return ""
 	}
 	return plaintext
@@ -325,19 +329,14 @@ func (r *Registry) refreshSpend(ctx context.Context) error {
 }
 
 // Model implements policy.Source.
-func (r *Registry) Model(alias string) (policy.Model, bool) {
-	m, ok := (*r.models.Load())[alias]
+func (r *Registry) Model(orgID, alias string) (policy.Model, bool) {
+	m, ok := (*r.models.Load())[orgID][alias]
 	return m, ok
 }
 
 // Models implements policy.Source.
-func (r *Registry) Models() []policy.Model {
-	m := *r.models.Load()
-	out := make([]policy.Model, 0, len(m))
-	for _, mod := range m {
-		out = append(out, mod)
-	}
-	return out
+func (r *Registry) Models(orgID string) []policy.Model {
+	return sortedValues((*r.models.Load())[orgID])
 }
 
 type call struct {

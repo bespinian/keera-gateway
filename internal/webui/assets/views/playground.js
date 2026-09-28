@@ -6,7 +6,7 @@
 // rate limits, same budget, same usage row - so an answer here means the path a
 // developer will use works, not that a second path does.
 
-import { api, ApiError } from "../api.js";
+import { api, ApiError, chatTargets } from "../api.js";
 import {
   h,
   icon,
@@ -18,6 +18,7 @@ import {
   ms,
   empty,
 } from "../ui.js";
+import { chooseOrg, orgNameOf } from "./orgs.js";
 
 /** session outlives a route change, so stepping over to Usage to look at what a
  *  message cost and stepping back does not throw the conversation away. It does
@@ -32,42 +33,14 @@ const session = {
 };
 
 export async function playgroundView(ctx) {
-  const catalogue = ((await api.models()).data || []).filter(
-    (m) => m.enabled && m.kind === "chat",
-  );
-  // The organisation's routers, offered where its chat models are. It is worth
-  // having here for a reason the models are not: a router's whole behaviour is
-  // a judgement about a prompt, and this is the one screen in the panel where
-  // somebody can type a prompt and see which model it reached. The check does
-  // that with three fixed samples; this does it with the question actually
-  // being argued about.
-  if (ctx.orgID) {
-    const routers = await api
-      .routers(ctx.orgID)
-      .then((r) => r.data || [])
-      .catch(() => []);
-    for (const rt of routers) {
-      catalogue.push({
-        alias: rt.alias,
-        kind: "chat",
-        enabled: true,
-        router: true,
-        description: rt.description,
-      });
-    }
-  }
-  const models = await usable(ctx, catalogue);
+  // Only an operator can be looking at every organisation at once. There is
+  // no sensible default for whose budget a message comes out of.
+  if (!ctx.orgID) return chooseOrg(ctx, "Messages sent here");
+  // Routers are offered where the chat models are: this is the one screen in
+  // the panel where somebody can type a prompt and see which model a router
+  // sent it to.
+  const models = await usable(ctx, await chatTargets(ctx.orgID));
 
-  if (!ctx.orgID) {
-    // Only an operator can be looking at every organisation at once. There is
-    // no sensible default for whose budget a message comes out of.
-    return h(
-      "div",
-      { class: "banner banner-info" },
-      "Pick an organisation in the header first. Messages sent here are " +
-        "rate-limited and charged to it, like any other request.",
-    );
-  }
   if (!models.length) {
     return h(
       "div",
@@ -75,9 +48,9 @@ export async function playgroundView(ctx) {
       empty(
         catalogue.length
           ? "No chat model is available to you"
-          : "The catalogue has no chat model",
+          : `${orgNameOf(ctx, null, { start: true })} has no chat model`,
         catalogue.length
-          ? "This organisation's guardrails allow no model that serves chat."
+          ? `${orgNameOf(ctx, null, { start: true })}'s guardrails allow no model that serves chat.`
           : "Add a chat model under Models.",
       ),
     );
@@ -94,8 +67,9 @@ async function usable(ctx, catalogue) {
   if (!ctx.orgID) return catalogue;
   try {
     const limits = await api.guardrails("org", ctx.orgID);
+    // Null inherits and allows every model; an empty list allows none.
     const allowed = limits && limits.allowed_models;
-    if (!allowed || !allowed.length) return catalogue;
+    if (!Array.isArray(allowed)) return catalogue;
     return catalogue.filter((m) => allowed.includes(m.alias));
   } catch {
     // Not being able to read the guardrails is not a reason to show nothing;
@@ -244,7 +218,7 @@ function chat(ctx, models) {
         "div",
         { class: "composer-hint" },
         "Enter sends · Shift+Enter breaks the line · charged to ",
-        h("strong", {}, ctx.state.me.org_name || "this organisation"),
+        h("strong", {}, orgNameOf(ctx)),
       ),
     ),
   );
@@ -641,14 +615,19 @@ function footer(msg, ctx, byAlias) {
       model &&
       (model.input_micros_per_mtok || model.output_micros_per_mtok)
     ) {
-      const cost =
-        Math.round(
-          ((msg.usage.prompt_tokens || 0) * model.input_micros_per_mtok) / 1e6,
-        ) +
-        Math.round(
-          ((msg.usage.completion_tokens || 0) * model.output_micros_per_mtok) /
-            1e6,
-        );
+      // The same sum as policy.Model.Cost: cached tokens are part of the
+      // prompt, at the cached rate, or the input rate when none is set.
+      const input = msg.usage.prompt_tokens || 0;
+      const details = msg.usage.prompt_tokens_details || {};
+      const cached = Math.min(Math.max(details.cached_tokens || 0, 0), input);
+      const cachedRate =
+        model.cached_input_micros_per_mtok || model.input_micros_per_mtok;
+      const cost = Math.floor(
+        ((input - cached) * model.input_micros_per_mtok +
+          cached * cachedRate +
+          (msg.usage.completion_tokens || 0) * model.output_micros_per_mtok) /
+          1e6,
+      );
       bits.push(money(cost, ctx.currency));
     }
   }

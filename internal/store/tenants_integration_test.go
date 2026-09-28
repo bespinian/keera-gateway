@@ -19,7 +19,7 @@ func TestDeleteOrgTakesItsTenancyAndKeepsItsHistory(t *testing.T) {
 		t.Fatalf("AddUser: %v", err)
 	}
 	hash := []byte("session-hash-000000000000000001!")
-	if err := st.CreateSession(ctx, hash, user.ID, "csrf", now.Add(time.Hour), "ua", "10.0.0.1"); err != nil {
+	if err := st.CreateSession(ctx, hash, user.ID, "csrf", now.Add(time.Hour)); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 	for _, sc := range []struct {
@@ -104,11 +104,11 @@ func TestTenancyLookupsUsedForAuthorisation(t *testing.T) {
 	if _, err := st.TeamOrg(ctx, "nobody"); err != ErrNotFound {
 		t.Errorf("TeamOrg for a missing team gave %v, want ErrNotFound", err)
 	}
-	if org, err := st.KeyOrg(ctx, f.keyID); err != nil || org != f.orgID {
-		t.Errorf("KeyOrg = %q, %v", org, err)
+	if org, team, err := st.KeyScope(ctx, f.keyID); err != nil || org != f.orgID || team != f.teamID {
+		t.Errorf("KeyScope = %q, %q, %v", org, team, err)
 	}
-	if _, err := st.KeyOrg(ctx, "nobody"); err != ErrNotFound {
-		t.Errorf("KeyOrg for a missing key gave %v, want ErrNotFound", err)
+	if _, _, err := st.KeyScope(ctx, "nobody"); err != ErrNotFound {
+		t.Errorf("KeyScope for a missing key gave %v, want ErrNotFound", err)
 	}
 
 	// KeyOwner decides whether a member may revoke a key, so the attribution
@@ -154,7 +154,7 @@ func TestTenancyLookupsUsedForAuthorisation(t *testing.T) {
 		t.Error("a duplicate team name was accepted")
 	}
 	// The same name in another tenant is a different team.
-	if _, err := st.CreateOrg(ctx, "org_2", "Another Bank"); err != nil {
+	if _, err := st.CreateOrg(ctx, Org{ID: "org_2", Name: "Another Bank"}, OrgTemplate{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.CreateTeam(ctx, "team_3", "org_2", "Payments Platform"); err != nil {
@@ -288,13 +288,13 @@ func TestSetupStateCountsWhatAFirstRunHasToCreate(t *testing.T) {
 	if _, err := st.AddUser(ctx, "user_1", f.orgID, "dev@example.ch", "", "member"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.UpsertModel(ctx, policy.Model{Alias: "keera-code", Kind: policy.KindChat,
+	if err := st.UpsertModel(ctx, policy.Model{OrgID: f.orgID, Alias: "keera-code", Kind: policy.KindChat,
 		Backends: []string{"http://vllm:8000/v1"}, BackendModel: "served", Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	// A disabled model is not one a client can reach, so it is not a step
 	// somebody has completed.
-	if err := st.UpsertModel(ctx, policy.Model{Alias: "keera-off", Kind: policy.KindChat,
+	if err := st.UpsertModel(ctx, policy.Model{OrgID: f.orgID, Alias: "keera-off", Kind: policy.KindChat,
 		Backends: []string{"http://vllm:8000/v1"}, BackendModel: "served", Enabled: false}); err != nil {
 		t.Fatal(err)
 	}
@@ -337,5 +337,27 @@ func TestAddUserLeavesAnExistingPersonAlone(t *testing.T) {
 
 	if _, err := st.AddUser(ctx, "user_3", f.orgID, "other@example.ch", "sso:dev", "member"); !errors.Is(err, ErrExternalIDTaken) {
 		t.Errorf("reusing another person's subject gave %v, want ErrExternalIDTaken", err)
+	}
+}
+
+// A taken email domain refuses the whole create. An organisation created
+// before the domain was refused would be made a second time on the retry.
+func TestCreateOrgWithATakenDomainCreatesNothing(t *testing.T) {
+	st, ctx := db(t)
+	if _, err := st.CreateOrg(ctx, Org{ID: "org_1", Name: "Example Bank",
+		EmailDomain: "example.ch"}, OrgTemplate{}); err != nil {
+		t.Fatalf("CreateOrg: %v", err)
+	}
+	_, err := st.CreateOrg(ctx, Org{ID: "org_2", Name: "Another Bank",
+		EmailDomain: "Example.ch"}, OrgTemplate{})
+	if !errors.Is(err, ErrDomainTaken) {
+		t.Fatalf("CreateOrg with a taken domain = %v, want ErrDomainTaken", err)
+	}
+	orgs, err := st.ListOrgs(ctx)
+	if err != nil {
+		t.Fatalf("ListOrgs: %v", err)
+	}
+	if len(orgs) != 1 || orgs[0].EmailDomain != "example.ch" {
+		t.Errorf("ListOrgs = %+v, want only the first organisation", orgs)
 	}
 }

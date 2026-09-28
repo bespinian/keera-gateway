@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"net/url"
@@ -10,7 +11,6 @@ import (
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/id"
-	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
@@ -19,6 +19,7 @@ type keyRun struct {
 	c       *client
 	fs      *flag.FlagSet
 	args    []string
+	sub     string
 	org     string
 	team    string
 	user    string
@@ -36,7 +37,7 @@ type createdKey struct {
 func keyCmd(ctx context.Context, args []string) error {
 	sub, rest := split(args)
 	fs := flag.NewFlagSet("key "+sub, flag.ExitOnError)
-	r := &keyRun{c: newClient(), fs: fs, args: rest}
+	r := &keyRun{c: newClient(), fs: fs, args: rest, sub: sub}
 	fs.StringVar(&r.org, "org", "", orgUsage)
 	fs.StringVar(&r.team, "team", "", "team id")
 	fs.StringVar(&r.user, "user", "", "the person this key belongs to, by email or id")
@@ -64,8 +65,20 @@ func keyCmd(ctx context.Context, args []string) error {
 	}
 }
 
-func (r *keyRun) create(ctx context.Context) error {
+// parse reads the verb's flags and refuses another verb's. n is how many
+// arguments it takes, or -1 for any.
+func (r *keyRun) parse(n int, usage string) error {
 	if err := parse(r.fs, r.args); err != nil {
+		return err
+	}
+	if n >= 0 && r.fs.NArg() != n {
+		return errors.New(usage)
+	}
+	return verbFlags(r.fs, "key", r.sub)
+}
+
+func (r *keyRun) create(ctx context.Context) error {
+	if err := r.parse(-1, ""); err != nil {
 		return err
 	}
 	orgID, err := resolveOrg(ctx, r.c, r.org)
@@ -101,7 +114,7 @@ func (r *keyRun) create(ctx context.Context) error {
 }
 
 func (r *keyRun) list(ctx context.Context) error {
-	if err := parse(r.fs, r.args); err != nil {
+	if err := r.parse(-1, ""); err != nil {
 		return err
 	}
 	orgID, err := resolveOrg(ctx, r.c, r.org)
@@ -143,7 +156,7 @@ func keyState(k store.KeySummary) string {
 
 func (r *keyRun) revoke(ctx context.Context) error {
 	yes := r.fs.Bool("yes", false, yesUsage)
-	if err := parseArgs(r.fs, r.args, 1, "usage: keera key revoke <alias> [--yes]"); err != nil {
+	if err := r.parse(1, "usage: keera key revoke <alias> [--yes]"); err != nil {
 		return err
 	}
 	// An id names a key outright, so --yes with an id needs no lookup. An
@@ -179,7 +192,7 @@ func (r *keyRun) revoke(ctx context.Context) error {
 }
 
 func (r *keyRun) rotate(ctx context.Context) error {
-	if err := parseArgs(r.fs, r.args, 1,
+	if err := r.parse(1,
 		"usage: keera key rotate <alias> [--alias <new-alias>] [--expires 720h]"); err != nil {
 		return err
 	}
@@ -212,11 +225,8 @@ func confirmKeyRevoke(k store.KeySummary) error {
 }
 
 // rotateKey replaces a key with one carrying the same team, owner, alias and
-// guardrails, then revokes the old one.
-//
-// Done by hand, a rotation easily drops the team or the key's own limits,
-// which quietly loosens a guardrail. The new key is issued first, so an
-// interruption leaves a working key rather than none.
+// guardrails, then revokes the old one. The control plane does it in one
+// transaction, so it never leaves both keys live or drops the key's limits.
 func rotateKey(ctx context.Context, c *client, orgID, who, newAlias, expires string,
 	asJSON bool,
 ) error {
@@ -230,87 +240,28 @@ func rotateKey(ctx context.Context, c *client, orgID, who, newAlias, expires str
 			old.ID, old.RevokedAt.Format(time.DateOnly), old.TeamID, old.Alias)
 	}
 
-	created, err := issueReplacement(ctx, c, orgID, old, newAlias, expires)
-	if err != nil {
+	var created struct {
+		createdKey
+		Replaced string `json:"replaced"`
+	}
+	req := map[string]string{"alias": newAlias, "expires_in": expires}
+	if err := c.do(ctx, "POST", "/v1/keys/"+url.PathEscape(old.ID)+"/rotate", req, &created); err != nil {
 		return err
 	}
 
-	// Copy the key's own guardrails before revoking the old one. If that
-	// fails, stop with both keys live rather than finish with the limits gone.
-	if hasLimits(old.Limits) {
-		if err := c.do(ctx, "PUT", guardrailPath("key", created.ID),
-			old.Limits, nil); err != nil {
-			return fmt.Errorf("the new key %s was issued but its guardrails could not be "+
-				"copied from %s: %w\nBoth keys are live. Revoke the new one with "+
-				"'keera key revoke %s' and try again",
-				created.ID, old.ID, err, created.ID)
-		}
-	}
-
-	if err := c.do(ctx, "DELETE", "/v1/keys/"+url.PathEscape(old.ID), nil, nil); err != nil {
-		return fmt.Errorf("the new key %s is ready, but %s could not be revoked: %w\n"+
-			"Both keys are live. Revoke the old one with 'keera key revoke %s'",
-			created.ID, old.ID, err, old.ID)
-	}
-
 	if asJSON {
-		return out(true, struct {
-			store.KeyInfo
-			Key      string `json:"key"`
-			Replaced string `json:"replaced"`
-		}{KeyInfo: created.KeyInfo, Key: created.Key, Replaced: old.ID}, nil)
+		return out(true, created, nil)
 	}
 	// The secret alone on stdout, so `KEY=$(keera key rotate …)` captures it.
 	fmt.Println(created.Key)
 	fmt.Fprintf(os.Stderr, "\nkey %s replaces %s (%s). %s\n",
 		created.ID, old.ID, old.Alias, styleErr.warn("This is the only time it is shown."))
-	if hasLimits(old.Limits) {
+	if !old.Limits.IsZero() {
 		fmt.Fprintln(os.Stderr, "Its guardrails were copied from the key it replaces.")
 	}
 	fmt.Fprintf(os.Stderr, "%s\n", styleErr.warn(fmt.Sprintf(
 		"%s is revoked: every client still using it is already failing.", old.ID)))
 	return nil
-}
-
-// issueReplacement issues the key that replaces old.
-func issueReplacement(ctx context.Context, c *client, orgID string, old store.KeySummary,
-	newAlias, expires string,
-) (createdKey, error) {
-	req := map[string]string{
-		"org_id": orgID, "team_id": old.TeamID, "user_id": old.UserID, "alias": old.Alias,
-	}
-	if newAlias != "" {
-		req["alias"] = newAlias
-	}
-	// The old key's lifetime, not its expiry date: a key rotated a week before
-	// it lapses should not be replaced by one that lapses in a week.
-	lifetime := expires
-	if lifetime == "" {
-		lifetime = keyLifetime(old)
-	}
-	if lifetime != "" {
-		req["expires_in"] = lifetime
-	}
-	var created createdKey
-	err := c.do(ctx, "POST", "/v1/keys", req, &created)
-	return created, err
-}
-
-// keyLifetime is how long a key was issued for, as a duration the control API
-// accepts. Empty for a key that never expires.
-func keyLifetime(k store.KeySummary) string {
-	if k.ExpiresAt == nil {
-		return ""
-	}
-	d := max(k.ExpiresAt.Sub(k.CreatedAt).Round(time.Hour), time.Hour)
-	return d.String()
-}
-
-// hasLimits reports whether a scope sets any guardrail of its own.
-func hasLimits(l policy.Limits) bool {
-	return len(l.AllowedModels) > 0 || l.MaxOutputTokens != nil || l.RPM != nil ||
-		l.TPM != nil || l.BudgetMicros != nil || l.BudgetPeriod != nil ||
-		l.SystemPrompt != nil || len(l.Filters) > 0
 }
 
 // findKey resolves an id or an alias to a key.

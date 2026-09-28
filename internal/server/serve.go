@@ -53,11 +53,15 @@ func serve(ctx context.Context) error {
 	}
 	defer st.Close()
 
-	if err := prepareStore(ctx, st, cfg, log); err != nil {
+	if err := prepareStore(ctx, st, log); err != nil {
+		return err
+	}
+	template, err := loadTemplate(cfg, log)
+	if err != nil {
 		return err
 	}
 
-	secrets, err := buildSecrets(cfg, log)
+	secrets, err := buildSecrets(cfg)
 	if err != nil {
 		return err
 	}
@@ -80,7 +84,6 @@ func serve(ctx context.Context) error {
 		MaxBodyBytes:          cfg.MaxBodyBytes,
 		MaxResponseBytes:      cfg.MaxResponseBytes,
 		UpstreamHeaderTimeout: cfg.UpstreamHeaderTimeout,
-		APIKeys:               config.APIKey,
 		Currency:              cfg.Currency,
 		// Where a refusal points the developer. Empty unless the deployment
 		// declares a panel a browser can reach.
@@ -100,13 +103,12 @@ func serve(ctx context.Context) error {
 	ctl := control.New(st, reg, mreg, recorder, control.Options{
 		OperatorKey: cfg.OperatorKey,
 		// Only reads /metrics, so a scrape config does not need the operator key.
-		MetricsToken:     cfg.MetricsToken,
-		Secrets:          secrets,
-		Currency:         cfg.Currency,
-		Providers:        providers,
-		OIDCAdoptByEmail: cfg.OIDCAdoptByEmail,
-		ServeUI:          cfg.UI,
-		SecureCookies:    cfg.SecureCookies,
+		MetricsToken:  cfg.MetricsToken,
+		Secrets:       secrets,
+		Currency:      cfg.Currency,
+		Providers:     providers,
+		ServeUI:       cfg.UI,
+		SecureCookies: cfg.SecureCookies,
 		// The browser's origin. Editors send inference to the same origin.
 		PublicURL: cfg.PublicURL,
 		// The playground uses the real data plane, so it tests the real path.
@@ -116,6 +118,8 @@ func serve(ctx context.Context) error {
 		SessionGap: cfg.SessionGap,
 		// Nil when the deployment lends out no sandboxes.
 		Sandboxes: sandboxes,
+		// What each new organisation starts with.
+		Template: template,
 	}, log)
 
 	// The background context outlives the signal, so a request being served is
@@ -169,8 +173,8 @@ func serve(ctx context.Context) error {
 	return nil
 }
 
-// prepareStore applies the migrations and the catalogue files.
-func prepareStore(ctx context.Context, st *store.Store, cfg config.Config, log *slog.Logger) error {
+// prepareStore applies the migrations.
+func prepareStore(ctx context.Context, st *store.Store, log *slog.Logger) error {
 	applied, err := st.Migrate(ctx)
 	if err != nil {
 		return fmt.Errorf("migrate: %w", err)
@@ -178,80 +182,65 @@ func prepareStore(ctx context.Context, st *store.Store, cfg config.Config, log *
 	if len(applied) > 0 {
 		log.Info("applied migrations", "versions", applied)
 	}
-
-	if cfg.Sandbox.File != "" {
-		if err := applySandboxCatalogue(ctx, st, cfg, log); err != nil {
-			return err
-		}
-	}
-
-	if cfg.ModelsFile != "" {
-		c, err := catalog.Apply(ctx, st, cfg.ModelsFile)
-		if err != nil {
-			return err
-		}
-		names := make([]string, 0, len(c.Models))
-		for _, m := range c.Models {
-			names = append(names, m.Alias)
-		}
-		servers := make([]string, 0, len(c.MCPServers))
-		for _, m := range c.MCPServers {
-			servers = append(servers, m.Alias)
-		}
-		log.Info("applied model catalogue", "file", cfg.ModelsFile, "models", names,
-			"mcp_servers", servers)
-	}
 	return nil
 }
 
-// applySandboxCatalogue applies the sandbox classes and warns about settings
-// that look like they work but do not.
-func applySandboxCatalogue(ctx context.Context, st *store.Store, cfg config.Config,
-	log *slog.Logger,
-) error {
-	classes, err := catalog.ApplySandboxes(ctx, st, cfg.Sandbox.File)
+// loadTemplate reads what every new organisation starts with: the models and
+// the sandbox classes in the catalogue files.
+func loadTemplate(cfg config.Config, log *slog.Logger) (store.OrgTemplate, error) {
+	var t store.OrgTemplate
+	if cfg.ModelsFile == "" {
+		log.Warn("KEERA_MODELS_FILE is not set, so a new organisation starts with no models")
+	} else {
+		models, err := catalog.LoadModels(cfg.ModelsFile)
+		if err != nil {
+			return t, err
+		}
+		names := make([]string, 0, len(models))
+		for _, m := range models {
+			names = append(names, m.Alias)
+		}
+		log.Info("read model template", "file", cfg.ModelsFile, "models", names)
+		t.Models = models
+	}
+	if cfg.Sandbox.File != "" {
+		classes, err := loadSandboxTemplate(cfg, log)
+		if err != nil {
+			return t, err
+		}
+		t.SandboxClasses = classes
+	}
+	return t, nil
+}
+
+// loadSandboxTemplate reads the sandbox classes and says what they will not do.
+func loadSandboxTemplate(cfg config.Config, log *slog.Logger) ([]policy.SandboxClass, error) {
+	classes, err := catalog.LoadSandboxes(cfg.Sandbox.File)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	names := make([]string, 0, len(classes))
 	for _, c := range classes {
 		names = append(names, c.Name)
 	}
-	log.Info("applied sandbox catalogue", "file", cfg.Sandbox.File, "classes", names)
+	log.Info("read sandbox template", "file", cfg.Sandbox.File, "classes", names)
 
-	// Without a driver the classes show on the panel and none can start, which
-	// looks broken rather than unconfigured.
 	if !cfg.Sandbox.Enabled() {
-		log.Warn("a sandbox catalogue is declared but no driver is configured, so these "+
-			"classes are listed and none of them can be started; set "+
-			"KEERA_SANDBOX_DRIVER to 'kubernetes' or 'podman'",
+		log.Info("no sandbox driver is configured, so new organisations get these "+
+			"classes but none can start until KEERA_SANDBOX_DRIVER is set to "+
+			"'kubernetes' or 'podman'",
 			"file", cfg.Sandbox.File, "classes", len(classes))
 	}
-	// Nothing applies per-class egress, and from the outside that is invisible,
-	// so it is said on every start.
-	for _, c := range classes {
-		if len(c.Egress) > 0 {
-			log.Warn("a sandbox class declares egress, and no driver applies per-class "+
-				"egress rules; what constrains a sandbox's network is this deployment's "+
-				"own NetworkPolicy over the sandbox namespace - and on the podman driver, "+
-				"nothing does",
-				"class", c.Name, "egress", c.Egress)
-		}
-	}
-	return nil
+	return classes, nil
 }
 
-// buildSecrets builds the key that decrypts hosted-provider credentials. It is
+// buildSecrets builds the key that decrypts stored credentials: hosted
+// providers' and MCP servers'. It is
 // built early, so a bad value fails the start rather than the first request.
-func buildSecrets(cfg config.Config, log *slog.Logger) (*secret.Box, error) {
+func buildSecrets(cfg config.Config) (*secret.Box, error) {
 	secrets, err := secret.New(cfg.SecretKey)
 	if err != nil {
 		return nil, fmt.Errorf("KEERA_SECRET_KEY: %w", err)
-	}
-	if !secrets.Enabled() {
-		log.Info("no credential encryption key is configured; hosted models take their " +
-			"credentials from the environment and none can be set in the panel " +
-			"(set KEERA_SECRET_KEY to change that)")
 	}
 	return secrets, nil
 }
@@ -267,9 +256,6 @@ func buildRegistry(ctx context.Context, st *store.Store, cfg config.Config,
 	}, log)
 	if err != nil {
 		return nil, fmt.Errorf("load control-plane state: %w", err)
-	}
-	if len(reg.Models()) == 0 {
-		log.Warn("the model catalogue is empty; every request will be refused until a model exists")
 	}
 	return reg, nil
 }
@@ -304,15 +290,16 @@ func warnGoogleGroups(p *authn.OIDC, log *slog.Logger) {
 	if !isGoogle(p.Issuer()) {
 		return
 	}
+	setting := "KEERA_OIDC_" + strings.ToUpper(strings.ReplaceAll(p.Name(), "-", "_"))
 	switch {
 	case p.Mapping().DecidesAdmin():
-		log.Warn("KEERA_OIDC_ADMIN_GROUPS is set for a Google Workspace provider, "+
+		log.Warn(setting+"_ADMIN_GROUPS is set for a Google Workspace provider, "+
 			"which issues no groups claim; it will match nobody, and setting it "+
 			"stops roles being assigned in the panel, the CLI and the API - "+
 			"unset it and make administrators with `keera user role`",
 			"provider", p.Name())
 	case p.Mapping().UsesGroups():
-		log.Warn("KEERA_OIDC_OPERATOR_GROUPS is set for a Google Workspace "+
+		log.Warn(setting+"_OPERATOR_GROUPS is set for a Google Workspace "+
 			"provider, which issues no groups claim; it will match nobody - "+
 			"name operators in KEERA_OPERATORS instead",
 			"provider", p.Name())
@@ -334,9 +321,10 @@ func serveUntilDone(ctx context.Context, srv *http.Server, addr string, log *slo
 	}
 }
 
-// routes is the listener's routing table: the panel at the root, inference
-// under httpx.InferencePrefix and the control API under httpx.ControlPrefix,
-// so a deployment publishes one port.
+// routes is the listener's routing table: inference and MCP under
+// httpx.InferencePrefix, and everything else - the panel, the control API
+// and the sandbox attach surface - under the control handler, so a
+// deployment publishes one port.
 //
 // The control handler owns / and the probes. Each handler carries its own
 // middleware, so nothing is wrapped again here.
@@ -349,7 +337,8 @@ func routes(gw *gateway.Server, ctl *control.Server) http.Handler {
 
 func listen(srv *http.Server, addr string, log *slog.Logger) error {
 	log.Info("listening", "addr", addr, "panel", "/",
-		"inference", httpx.InferencePrefix, "control", httpx.ControlPrefix)
+		"inference", httpx.InferencePrefix, "control", httpx.ControlPrefix,
+		"sandbox", httpx.SandboxPrefix)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("listener: %w", err)
 	}
@@ -532,7 +521,7 @@ func buildSandboxes(ctx context.Context, st *store.Store, reg *registry.Registry
 
 	caps := driver.Capabilities()
 	log.Info("sandboxes enabled", "driver", driver.Name(),
-		"isolation", caps.Isolation, "suspend", caps.Suspend, "warm", caps.Warm,
+		"isolation", caps.Isolation, "warm", caps.Warm,
 		"namespace", cfg.Sandbox.Namespace, "idle_suspend", cfg.Sandbox.IdleSuspend)
 	// Without a RuntimeClass, sandboxes get the same isolation as every other
 	// pod on the node, which is weak for running a model's output.
@@ -555,10 +544,9 @@ func buildSandboxes(ctx context.Context, st *store.Store, reg *registry.Registry
 	}
 
 	return sandbox.NewManager(st, driver, sandbox.ManagerOptions{
-		PublicURL:    base,
-		DefaultModel: cfg.Sandbox.Model,
-		IdleSuspend:  cfg.Sandbox.IdleSuspend,
-		Git:          git,
+		PublicURL:   base,
+		IdleSuspend: cfg.Sandbox.IdleSuspend,
+		Git:         git,
 		// A new sandbox key must work on every replica at once, and a revoked
 		// one must stop at once, not a cache lifetime later.
 		OnChange: func() {
@@ -596,12 +584,6 @@ func buildSandboxDriver(ctx context.Context, cfg config.Config, log *slog.Logger
 	switch cfg.Sandbox.Driver {
 	case "kubernetes":
 		return sandbox.NewKubernetes(ctx, sandbox.KubernetesOptions{
-			Kube: sandbox.KubeConfig{
-				Server:    cfg.Sandbox.KubeServer,
-				TokenPath: cfg.Sandbox.KubeTokenFile,
-				CAFile:    cfg.Sandbox.KubeCAFile,
-				Insecure:  cfg.Sandbox.KubeInsecure,
-			},
 			Namespace:        cfg.Sandbox.Namespace,
 			Runtimes:         cfg.Sandbox.Runtimes,
 			StorageClass:     cfg.Sandbox.StorageClass,
@@ -618,7 +600,9 @@ func buildSandboxDriver(ctx context.Context, cfg config.Config, log *slog.Logger
 			Log:      log,
 		})
 	}
-	return nil, nil
+	// config refuses an unknown driver, so this is only reached by a new one
+	// added there and not here.
+	return nil, fmt.Errorf("no driver called %q", cfg.Sandbox.Driver)
 }
 
 // sandboxSweepInterval is how often the sandbox sweep runs. A minute is the

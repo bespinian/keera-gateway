@@ -10,13 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/bespinian/keera-gateway/internal/catalog"
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/id"
 	"github.com/bespinian/keera-gateway/internal/policy"
-	"github.com/bespinian/keera-gateway/internal/store"
 )
 
 // recorded is one request the fake control plane saw.
@@ -40,6 +38,11 @@ type fakeControl struct {
 
 func newFakeControl(t *testing.T, handlers map[string]any) *fakeControl {
 	t.Helper()
+	// Who is calling, for the commands that ask before choosing a default.
+	// An administrator, so no default is chosen unless a test says otherwise.
+	if _, set := handlers["GET /v1/me"]; !set {
+		handlers["GET /v1/me"] = map[string]any{"role": "admin", "org_id": "org_1"}
+	}
 	f := &fakeControl{t: t, handlers: handlers}
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
@@ -286,22 +289,6 @@ func TestOrgSetRefusesSomethingThatIsNotADomain(t *testing.T) {
 	}
 }
 
-func TestCleanDomainTakesWhatPeopleType(t *testing.T) {
-	for given, want := range map[string]string{
-		"example.ch":     "example.ch",
-		"@example.ch":    "example.ch",
-		"Example.CH":     "example.ch",
-		" example.ch. ":  "example.ch",
-		"sub.example.ch": "sub.example.ch",
-		"":               "",
-	} {
-		got, err := cleanDomain(given)
-		if err != nil || got != want {
-			t.Errorf("cleanDomain(%q) = %q, %v; want %q", given, got, err, want)
-		}
-	}
-}
-
 // Creating the second organisation is what turns "everyone lands here" into
 // "placed by domain or refused", and it does that to the organisation that was
 // already there rather than to the one being created.
@@ -456,79 +443,29 @@ var liveKey = map[string]any{
 	}},
 }
 
-func TestKeyRotateCarriesTheAttributionAndTheLifetime(t *testing.T) {
+// The control plane copies the team, the person, the lifetime and the key's
+// own guardrails in one transaction. The CLI only names the key and passes on
+// what was asked to change.
+func TestKeyRotateAsksTheControlPlane(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs":                   oneOrg,
-		"GET /v1/keys":                   liveKey,
-		"POST /v1/keys":                  map[string]any{"id": "key_new", "key": "keera_sk_new"},
-		"PUT /v1/guardrails/key/key_new": map[string]any{},
-		"DELETE /v1/keys/key_old":        map[string]any{},
-	})
-
-	if err := keyCmd(context.Background(), []string{"rotate", "key_old"}); err != nil {
-		t.Fatal(err)
-	}
-	issued := f.request("POST", "/v1/keys").body
-	for field, want := range map[string]any{
-		"team_id": "team_1", "user_id": "user_1", "alias": "a developer's laptop",
-		// 90 days from the old key's own lifetime, not the two months it had left.
-		"expires_in": "2160h0m0s",
-	} {
-		if got := issued[field]; got != want {
-			t.Errorf("%s sent = %v, want %v", field, got, want)
-		}
-	}
-	if !f.called("DELETE", "/v1/keys/key_old") {
-		t.Error("the key it replaced was not revoked")
-	}
-}
-
-func TestKeyRotateCopiesTheKeysOwnGuardrails(t *testing.T) {
-	quiet(t)
-	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs":                   oneOrg,
-		"GET /v1/keys":                   liveKey,
-		"POST /v1/keys":                  map[string]any{"id": "key_new", "key": "keera_sk_new"},
-		"PUT /v1/guardrails/key/key_new": map[string]any{},
-		"DELETE /v1/keys/key_old":        map[string]any{},
-	})
-
-	if err := keyCmd(context.Background(), []string{"rotate", "key_old"}); err != nil {
-		t.Fatal(err)
-	}
-	copied := f.request("PUT", "/v1/guardrails/key/key_new").body
-	if got := copied["rpm"]; got != float64(120) {
-		t.Errorf("rpm copied = %v, want 120", got)
-	}
-	models, _ := copied["allowed_models"].([]any)
-	if len(models) != 1 || models[0] != "keera-speed" {
-		t.Errorf("allowed_models copied = %v, want [keera-speed]", copied["allowed_models"])
-	}
-}
-
-// A rotation that lost the key's own limits would hand the same person a key
-// allowed more than the one it replaced, so it stops rather than finishing.
-func TestKeyRotateKeepsTheOldKeyWhenTheGuardrailsCannotBeCopied(t *testing.T) {
-	quiet(t)
-	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs":  oneOrg,
-		"GET /v1/keys":  liveKey,
-		"POST /v1/keys": map[string]any{"id": "key_new", "key": "keera_sk_new"},
-		"PUT /v1/guardrails/key/key_new": failure{
-			status: http.StatusInternalServerError, message: "the database went away",
+		"GET /v1/orgs": oneOrg,
+		"GET /v1/keys": liveKey,
+		"POST /v1/keys/key_old/rotate": map[string]any{
+			"id": "key_new", "key": "keera_sk_new", "replaced": "key_old",
 		},
 	})
 
-	err := keyCmd(context.Background(), []string{"rotate", "key_old"})
-	if err == nil {
-		t.Fatal("rotate reported success after failing to copy the guardrails")
+	if err := keyCmd(context.Background(),
+		[]string{"rotate", "a developer's laptop", "--alias", "new laptop"}); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "keera key revoke key_new") {
-		t.Errorf("the error does not say how to undo the half-done rotation: %v", err)
+	sent := f.request("POST", "/v1/keys/key_old/rotate").body
+	if sent["alias"] != "new laptop" || sent["expires_in"] != "" {
+		t.Errorf("sent %v, want the new alias and no expiry", sent)
 	}
-	if f.called("DELETE", "/v1/keys/key_old") {
-		t.Error("the old key was revoked even though the new one has no guardrails")
+	if f.called("POST", "/v1/keys") || f.called("DELETE", "/v1/keys/key_old") {
+		t.Errorf("the CLI rotated by hand: %v", f.seen)
 	}
 }
 
@@ -561,14 +498,13 @@ func TestKeyRotateResolvesAnAliasAmongTheKeysThatStillWork(t *testing.T) {
 			},
 			{"id": "key_live", "org_id": "org_1", "alias": "laptop", "created_at": "2026-02-01T00:00:00Z"},
 		}},
-		"POST /v1/keys":            map[string]any{"id": "key_new", "key": "keera_sk_new"},
-		"DELETE /v1/keys/key_live": map[string]any{},
+		"POST /v1/keys/key_live/rotate": map[string]any{"id": "key_new", "key": "keera_sk_new"},
 	})
 
 	if err := keyCmd(context.Background(), []string{"rotate", "laptop"}); err != nil {
 		t.Fatal(err)
 	}
-	if !f.called("DELETE", "/v1/keys/key_live") {
+	if !f.called("POST", "/v1/keys/key_live/rotate") {
 		t.Error("rotate did not pick the key that still works")
 	}
 }
@@ -680,40 +616,12 @@ func TestKeyRevokeAsksBeforeItRevokes(t *testing.T) {
 	}
 }
 
-func TestKeyLifetimeIsWhatTheKeyWasIssuedFor(t *testing.T) {
-	created := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	expires := created.Add(720 * time.Hour)
-	tests := []struct {
-		name string
-		key  store.KeySummary
-		want string
-	}{
-		{
-			name: "a key that never expires stays one",
-			key:  store.KeySummary{KeyInfo: store.KeyInfo{CreatedAt: created}},
-		},
-		{
-			name: "the original lifetime, not what is left of it",
-			key: store.KeySummary{
-				KeyInfo: store.KeyInfo{CreatedAt: created, ExpiresAt: &expires},
-			},
-			want: "720h0m0s",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := keyLifetime(tt.key); got != tt.want {
-				t.Errorf("keyLifetime = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 // ------------------------------------------------------------------ models
 
 func TestModelAddFillsInTheProviderDefaults(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
+		"GET /v1/orgs":                  oneOrg,
 		"GET /v1/models":                map[string]any{"data": []map[string]any{}},
 		"PUT /v1/models/keera-frontier": map[string]any{"alias": "keera-frontier"},
 	})
@@ -727,9 +635,6 @@ func TestModelAddFillsInTheProviderDefaults(t *testing.T) {
 	body := f.request("PUT", "/v1/models/keera-frontier").body
 	if got := body["backends"].([]any); len(got) != 1 || got[0] != "https://api.anthropic.com/v1" {
 		t.Errorf("backends = %v", got)
-	}
-	if body["api_key_env"] != "ANTHROPIC_API_KEY" {
-		t.Errorf("api_key_env = %v", body["api_key_env"])
 	}
 	if body["input_micros_per_mtok"] != float64(5_000_000) {
 		t.Errorf("input price = %v, want the provider's", body["input_micros_per_mtok"])
@@ -745,6 +650,7 @@ func TestModelAddFillsInTheProviderDefaults(t *testing.T) {
 func TestModelAddRefusesAModelThatExists(t *testing.T) {
 	quiet(t)
 	newFakeControl(t, map[string]any{
+		"GET /v1/orgs": oneOrg,
 		"GET /v1/models": map[string]any{"data": []map[string]any{
 			{"alias": "keera-speed", "backends": []string{"http://vllm:8000/v1"}, "backend_model": "qwen"},
 		}},
@@ -759,12 +665,13 @@ func TestModelAddRefusesAModelThatExists(t *testing.T) {
 func TestModelSetKeepsWhatItWasNotGiven(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
+		"GET /v1/orgs": oneOrg,
 		"GET /v1/models": map[string]any{"data": []map[string]any{{
 			"alias": "keera-speed", "kind": "chat",
 			"backends":      []string{"http://vllm-a:8000/v1", "http://vllm-b:8000/v1"},
 			"backend_model": "qwen3-8b", "max_context": 32768,
 			"input_micros_per_mtok": 100_000, "output_micros_per_mtok": 300_000,
-			"api_key_env": "VLLM_API_KEY", "enabled": true,
+			"enabled": true,
 		}}},
 		"PUT /v1/models/keera-speed": map[string]any{"alias": "keera-speed"},
 	})
@@ -784,7 +691,7 @@ func TestModelSetKeepsWhatItWasNotGiven(t *testing.T) {
 		t.Errorf("backends = %v, want both left alone", body["backends"])
 	}
 	if body["backend_model"] != "qwen3-8b" || body["max_context"] != float64(32768) ||
-		body["api_key_env"] != "VLLM_API_KEY" || body["enabled"] != true {
+		body["enabled"] != true {
 		t.Errorf("set changed a field it was not given: %v", body)
 	}
 }
@@ -792,6 +699,7 @@ func TestModelSetKeepsWhatItWasNotGiven(t *testing.T) {
 func TestModelDisableKeepsTheEntryAndOnlyStopsServingIt(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
+		"GET /v1/orgs": oneOrg,
 		"GET /v1/models": map[string]any{"data": []map[string]any{{
 			"alias": "keera-speed", "kind": "chat", "backends": []string{"http://vllm:8000/v1"},
 			"backend_model": "qwen3-8b", "enabled": true,
@@ -808,73 +716,15 @@ func TestModelDisableKeepsTheEntryAndOnlyStopsServingIt(t *testing.T) {
 	}
 }
 
-// A model the catalogue file declares is applied again on every start, so the
-// CLI says no here rather than writing a change that disappears at the next one.
-func TestModelSetRefusesAModelTheCatalogueFileDeclares(t *testing.T) {
+// Setting a key sends the model as it is, so nothing else about it changes.
+func TestModelSetStoresACredentialAndKeepsTheRest(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/models": map[string]any{"data": []map[string]any{{
-			"alias": "keera-speed", "kind": "chat", "backends": []string{"http://vllm:8000/v1"},
-			"backend_model": "qwen3-8b", "enabled": true, "managed": true,
-		}}},
-	})
-
-	err := modelCmd(context.Background(), []string{"set", "keera-speed", "--price-out", "0.5"})
-	if err == nil || !strings.Contains(err.Error(), "catalogue file") {
-		t.Fatalf("error = %v, want it to name the catalogue file", err)
-	}
-	for _, r := range f.seen {
-		if r.method == "PUT" {
-			t.Fatal("the CLI wrote the change anyway")
-		}
-	}
-}
-
-func TestModelDisableRefusesAModelTheCatalogueFileDeclares(t *testing.T) {
-	quiet(t)
-	newFakeControl(t, map[string]any{
-		"GET /v1/models": map[string]any{"data": []map[string]any{{
-			"alias": "keera-speed", "kind": "chat", "backends": []string{"http://vllm:8000/v1"},
-			"backend_model": "qwen3-8b", "enabled": true, "managed": true,
-		}}},
-	})
-
-	err := modelCmd(context.Background(), []string{"disable", "keera-speed"})
-	if err == nil || !strings.Contains(err.Error(), "catalogue file") {
-		t.Fatalf("error = %v, want it to name the catalogue file", err)
-	}
-}
-
-func TestModelDeleteRefusesAModelTheCatalogueFileDeclares(t *testing.T) {
-	quiet(t)
-	f := newFakeControl(t, map[string]any{
-		"GET /v1/models": map[string]any{"data": []map[string]any{{
-			"alias": "keera-speed", "kind": "chat", "backends": []string{"http://vllm:8000/v1"},
-			"backend_model": "qwen3-8b", "enabled": true, "managed": true,
-		}}},
-	})
-
-	// --yes, so what stops it is the rule and not the confirmation prompt.
-	err := modelCmd(context.Background(), []string{"delete", "keera-speed", "--yes"})
-	if err == nil || !strings.Contains(err.Error(), "catalogue file") {
-		t.Fatalf("error = %v, want it to name the catalogue file", err)
-	}
-	for _, r := range f.seen {
-		if r.method == "DELETE" {
-			t.Fatal("the model was deleted anyway")
-		}
-	}
-}
-
-// The credential is the one field no catalogue file carries, so it is the one
-// change a declared alias still takes.
-func TestModelSetStoresACredentialOnADeclaredModel(t *testing.T) {
-	quiet(t)
-	f := newFakeControl(t, map[string]any{
+		"GET /v1/orgs": oneOrg,
 		"GET /v1/models": map[string]any{"data": []map[string]any{{
 			"alias": "keera-frontier", "kind": "chat",
 			"backends":      []string{"https://api.anthropic.com/v1"},
-			"backend_model": "claude-opus-5", "enabled": true, "managed": true,
+			"backend_model": "claude-opus-5", "location": "usa", "enabled": true,
 		}}},
 		"PUT /v1/models/keera-frontier": map[string]any{"alias": "keera-frontier"},
 	})
@@ -889,14 +739,13 @@ func TestModelSetStoresACredentialOnADeclaredModel(t *testing.T) {
 	if body["backend_model"] != "claude-opus-5" || body["enabled"] != true {
 		t.Errorf("the declaration changed: %v", body)
 	}
-	if body["from_catalogue"] == true {
-		t.Error("a credential change claimed to be the catalogue being applied")
-	}
 }
 
 func TestModelCheckFailsWhenTheProbeDoes(t *testing.T) {
 	quiet(t)
 	newFakeControl(t, map[string]any{
+		"GET /v1/orgs":   oneOrg,
+		"GET /v1/models": map[string]any{"data": []map[string]any{{"alias": "keera-speed"}}},
 		"POST /v1/models/keera-speed/check": map[string]any{
 			"alias": "keera-speed", "reachable": true, "status": 200,
 			"tool_call_as_text": true, "ok": false,
@@ -910,24 +759,10 @@ func TestModelCheckFailsWhenTheProbeDoes(t *testing.T) {
 	}
 }
 
-func TestModelCheckPointsAFileAtValidate(t *testing.T) {
-	quiet(t)
-	newFakeControl(t, map[string]any{})
-	path := filepath.Join(t.TempDir(), "models.yaml")
-	if err := os.WriteFile(path, []byte("models: []"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	// `keera model check <file>` is what this command used to mean.
-	err := modelCmd(context.Background(), []string{"check", path})
-	if err == nil || !strings.Contains(err.Error(), "keera model validate") {
-		t.Fatalf("error = %v, want the new name for validating a file", err)
-	}
-}
-
 func TestModelApplyUpsertsEveryModelInTheFile(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
+		"GET /v1/orgs":                  oneOrg,
 		"PUT /v1/models/keera-speed":    map[string]any{"alias": "keera-speed"},
 		"PUT /v1/models/keera-frontier": map[string]any{"alias": "keera-frontier"},
 	})
@@ -946,10 +781,8 @@ func TestModelApplyUpsertsEveryModelInTheFile(t *testing.T) {
 	if err := modelCmd(context.Background(), []string{"apply", path}); err != nil {
 		t.Fatal(err)
 	}
-	// Applying the file is the one write that may touch a model the file
-	// declares, so it says that is what it is.
-	if got := f.request("PUT", "/v1/models/keera-speed").body["from_catalogue"]; got != true {
-		t.Errorf("from_catalogue = %v, want the write to declare itself the catalogue", got)
+	if got := f.request("PUT", "/v1/models/keera-speed").body["backend_model"]; got != "qwen3-8b" {
+		t.Errorf("backend_model = %v, want the file's", got)
 	}
 	if got := f.request("PUT", "/v1/models/keera-frontier").body["input_micros_per_mtok"]; got != float64(5_000_000) {
 		t.Errorf("the provider's price was not applied: %v", got)
@@ -986,7 +819,7 @@ func TestApplyModelFlagsLeavesUngivenFieldsAlone(t *testing.T) {
 		Alias: "keera-speed", Kind: policy.KindChat,
 		Backends: []string{"http://vllm:8000/v1"}, BackendModel: "qwen3-8b",
 		InputMicrosPerMTok: 100_000, OutputMicrosPerMTok: 300_000,
-		MaxContext: 32768, APIKeyEnv: "VLLM_API_KEY", Enabled: true,
+		MaxContext: 32768, Enabled: true,
 	})
 	f := &modelFlags{maxContext: -1, priceIn: -1, priceOut: 0, priceCached: -1}
 
@@ -1022,11 +855,6 @@ func TestProductIDFlagRebuildsTheAddress(t *testing.T) {
 	const want = "https://api.infomaniak.com/2/ai/999888/openai/v1"
 	if len(got.Backends) != 1 || got.Backends[0] != want {
 		t.Errorf("Backends = %v, want [%s]", got.Backends, want)
-	}
-	// It is a declared field like any other, so it is not "only the credential"
-	// and a model the catalogue file owns still refuses it.
-	if onlyCredential(f) {
-		t.Error("--product-id counted as a credential-only change")
 	}
 }
 
@@ -1084,6 +912,66 @@ func TestProviderFlagBringsItsOwnLocation(t *testing.T) {
 	}
 }
 
+// The old provider's address and prices would send the requests to the wrong
+// place and bill them at the wrong rate.
+func TestProviderFlagBringsItsOwnAddressAndPrices(t *testing.T) {
+	current := declared(policy.Model{
+		Alias: "keera-coder", Kind: policy.KindChat, Provider: "anthropic",
+		Backends: []string{"https://api.anthropic.com/v1"}, BackendModel: "claude-opus-5",
+		InputMicrosPerMTok: 5_000_000, OutputMicrosPerMTok: 25_000_000,
+		MaxContext: 1_000_000, Enabled: true,
+	})
+	f := &modelFlags{
+		provider: "stepping-stone", backendModel: "Qwen/Qwen3-Coder-Next",
+		maxContext: -1, priceIn: -1, priceOut: -1, priceCached: -1,
+	}
+	got, err := catalog.ParseModel(applyModelFlags(current, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Backends) != 1 || got.Backends[0] == "https://api.anthropic.com/v1" {
+		t.Errorf("Backends = %v, want stepping stone's", got.Backends)
+	}
+	if got.InputMicrosPerMTok == 5_000_000 || got.MaxContext == 1_000_000 {
+		t.Errorf("the old provider's price or context window was kept: %+v", got)
+	}
+}
+
+// Another model of the same provider has its own prices, context window,
+// description and release date. Keeping the old model's would bill it wrong.
+func TestBackendModelFlagBringsTheNewModelsValues(t *testing.T) {
+	current := declared(policy.Model{
+		Alias: "keera-coder", Kind: policy.KindChat, Provider: "stepping-stone",
+		Backends: []string{"https://llm.stoney-cloud.com/v1"}, BackendModel: "Qwen/Qwen3-Coder-Next",
+		Description: "made for code", InputMicrosPerMTok: 340_000, OutputMicrosPerMTok: 1_700_000,
+		CachedInputMicrosPerMTok: 51_000, MaxContext: 256_000, ReleaseDate: "2026-02-03",
+		Location: "ch", Enabled: true,
+	})
+	f := &modelFlags{
+		backendModel: "openai/gpt-oss-120b",
+		maxContext:   -1, priceIn: -1, priceOut: -1, priceCached: -1,
+	}
+	got, err := catalog.ParseModel(applyModelFlags(current, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.InputMicrosPerMTok != 400_000 || got.OutputMicrosPerMTok != 1_600_000 ||
+		got.CachedInputMicrosPerMTok != 60_000 || got.MaxContext != 128_000 ||
+		got.ReleaseDate != "2025-08-05" || got.Description == "made for code" {
+		t.Errorf("the old model's values were kept: %+v", got)
+	}
+
+	// A value given on the same command wins.
+	f.priceIn = 1
+	got, err = catalog.ParseModel(applyModelFlags(current, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.InputMicrosPerMTok != 1_000_000 {
+		t.Errorf("input price = %d, want the one given", got.InputMicrosPerMTok)
+	}
+}
+
 func TestStringListTakesRepeatsAndCommas(t *testing.T) {
 	var l stringList
 	if err := l.Set("http://a:8000/v1, http://b:8000/v1"); err != nil {
@@ -1121,40 +1009,18 @@ func TestTextOrFileReadsAFile(t *testing.T) {
 	}
 }
 
-func TestCredentialSourceSaysWhereTheKeyComesFrom(t *testing.T) {
+func TestCredentialSourceSaysWhetherAKeyIsStored(t *testing.T) {
 	cases := []struct {
 		model policy.Model
 		want  string
 	}{
 		{policy.Model{}, "(none)"},
-		{policy.Model{APIKeyEnv: "ANTHROPIC_API_KEY"}, "$ANTHROPIC_API_KEY"},
 		{policy.Model{HasAPIKey: true}, "stored"},
-		{policy.Model{HasAPIKey: true, APIKeyEnv: "ANTHROPIC_API_KEY"}, "stored (overrides ANTHROPIC_API_KEY)"},
 	}
 	for _, c := range cases {
 		if got := credentialSource(c.model); got != c.want {
 			t.Errorf("credentialSource(%+v) = %q, want %q", c.model, got, c.want)
 		}
-	}
-}
-
-func TestLooksLikeCatalogueFileIgnoresAModelThatShareAName(t *testing.T) {
-	t.Chdir(t.TempDir())
-	for _, name := range []string{"keera-speed", "models.yaml"} {
-		if err := os.WriteFile(name, []byte("models: []"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// A model is checked against the live backend even when something of that
-	// name is sitting in the working directory.
-	if looksLikeCatalogueFile("keera-speed") {
-		t.Error("a model was taken for a catalogue file")
-	}
-	if !looksLikeCatalogueFile("models.yaml") {
-		t.Error("a catalogue file was taken for a model")
-	}
-	if looksLikeCatalogueFile("gone.yaml") {
-		t.Error("a file that is not there was taken for a catalogue")
 	}
 }
 
@@ -1208,6 +1074,46 @@ func TestFilterSetChangesOneFieldAndKeepsTheRest(t *testing.T) {
 	if req.body["description"] != "the original" {
 		t.Errorf("description = %v; it was not mentioned and must be kept",
 			req.body["description"])
+	}
+}
+
+// edit and update are other names for set, so they keep what is not given too.
+func TestFilterAndRouterEditAndUpdateKeepTheRest(t *testing.T) {
+	for _, verb := range []string{"edit", "update"} {
+		t.Run(verb, func(t *testing.T) {
+			quiet(t)
+			f := newFakeControl(t, map[string]any{
+				"GET /v1/orgs": oneOrg,
+				"GET /v1/filters": map[string]any{"data": []map[string]any{{
+					"alias": "redact-secrets", "model": "keera-guard",
+					"prompt": "Remove credentials.", "description": "the original",
+				}}},
+				"PUT /v1/filters/redact-secrets": map[string]any{"alias": "redact-secrets"},
+				"GET /v1/routers": map[string]any{"data": []map[string]any{{
+					"alias": "auto", "model": "keera-speed", "destinations": []string{"a", "b"},
+					"prompt": "Pick one.", "description": "the original",
+				}}},
+				"PUT /v1/routers/auto": map[string]any{"alias": "auto"},
+			})
+
+			if err := Run(context.Background(), []string{"filter", verb, "redact-secrets",
+				"--model", "keera-guard-2"}); err != nil {
+				t.Fatalf("filter %s: %v", verb, err)
+			}
+			if req := f.request("PUT", "/v1/filters/redact-secrets"); req.body["prompt"] != "Remove credentials." ||
+				req.body["description"] != "the original" {
+				t.Errorf("filter %s dropped what was not given: %v", verb, req.body)
+			}
+
+			if err := Run(context.Background(), []string{"router", verb, "auto",
+				"--description", "changed"}); err != nil {
+				t.Fatalf("router %s: %v", verb, err)
+			}
+			if req := f.request("PUT", "/v1/routers/auto"); req.body["prompt"] != "Pick one." ||
+				req.body["model"] != "keera-speed" {
+				t.Errorf("router %s dropped what was not given: %v", verb, req.body)
+			}
+		})
 	}
 }
 
@@ -1374,13 +1280,14 @@ func TestPolicySetClearsFiltersOnlyWithItsOwnFlag(t *testing.T) {
 func TestModelSetTakesTheCachedInputPrice(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
+		"GET /v1/orgs": oneOrg,
 		"GET /v1/models": map[string]any{"data": []map[string]any{{
 			"alias": "keera-frontier", "kind": "chat",
 			"backends":      []string{"https://api.openai.com/v1"},
 			"backend_model": "gpt-5.1", "max_context": 400_000,
 			"input_micros_per_mtok": 1_250_000, "output_micros_per_mtok": 10_000_000,
 			"cached_input_micros_per_mtok": 125_000,
-			"enabled":                      true,
+			"location":                     "usa", "enabled": true,
 		}}},
 		"PUT /v1/models/keera-frontier": map[string]any{"alias": "keera-frontier"},
 	})
@@ -1405,13 +1312,14 @@ func TestModelSetTakesTheCachedInputPrice(t *testing.T) {
 func TestModelSetKeepsTheCachedInputPriceItWasNotGiven(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
+		"GET /v1/orgs": oneOrg,
 		"GET /v1/models": map[string]any{"data": []map[string]any{{
 			"alias": "keera-frontier", "kind": "chat",
 			"backends":      []string{"https://api.openai.com/v1"},
 			"backend_model": "gpt-5.1", "max_context": 400_000,
 			"input_micros_per_mtok": 1_250_000, "output_micros_per_mtok": 10_000_000,
 			"cached_input_micros_per_mtok": 125_000,
-			"enabled":                      true,
+			"location":                     "usa", "enabled": true,
 		}}},
 		"PUT /v1/models/keera-frontier": map[string]any{"alias": "keera-frontier"},
 	})
@@ -1427,5 +1335,141 @@ func TestModelSetKeepsTheCachedInputPriceItWasNotGiven(t *testing.T) {
 	}
 	if body["input_micros_per_mtok"] != float64(1_000_000) {
 		t.Errorf("input price = %v, want the new 1000000", body["input_micros_per_mtok"])
+	}
+}
+
+// An operator's model goes to an organisation: the only one when --org is
+// left out. A change to an existing model goes to the organisation it
+// belongs to.
+func TestAnOperatorsModelGoesToTheOnlyOrganisation(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/me":   map[string]any{"role": "operator"},
+		"GET /v1/orgs": map[string]any{"data": []map[string]any{{"id": "org_1", "name": "Bank"}}},
+		"GET /v1/models": map[string]any{"data": []map[string]any{{
+			"alias": "keera-frontier", "kind": "chat", "backend_model": "gpt-5.1",
+			"backends": []string{"https://api.openai.com/v1"}, "location": "usa",
+			"enabled": true, "org_id": "org_1",
+		}}},
+		"PUT /v1/models/mine":           map[string]any{"alias": "mine"},
+		"PUT /v1/models/keera-frontier": map[string]any{"alias": "keera-frontier"},
+	})
+
+	if err := modelCmd(context.Background(), []string{"add", "mine",
+		"--backend", "http://vllm:8000/v1", "--backend-model", "qwen"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.request("PUT", "/v1/models/mine").query; got != "org_id=org_1" {
+		t.Errorf("the new model went to %q, want org_id=org_1", got)
+	}
+	if got := f.request("GET", "/v1/models").query; got != "org_id=org_1" {
+		t.Errorf("the models were listed for %q, want org_id=org_1", got)
+	}
+
+	if err := modelCmd(context.Background(), []string{"set", "keera-frontier",
+		"--api-key", "sk-test"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.request("PUT", "/v1/models/keera-frontier").query; got != "org_id=org_1" {
+		t.Errorf("the key went to %q, want org_id=org_1", got)
+	}
+}
+
+// Someone in one organisation never names it: a guardrail on "org" is theirs.
+func TestAnOrganisationsGuardrailNeedsNoID(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/orgs":                 oneOrg,
+		"GET /v1/guardrails/org/org_1": map[string]any{},
+		"PUT /v1/guardrails/org/org_1": map[string]any{"allowed_models": []string{"keera-speed"}},
+	})
+
+	if err := guardrailCmd(context.Background(),
+		[]string{"set", "org", "--models", "keera-speed"}); err != nil {
+		t.Fatal(err)
+	}
+	if !f.called("PUT", "/v1/guardrails/org/org_1") {
+		t.Errorf("the guardrail was not written to the caller's organisation: %v", f.seen)
+	}
+	// A team or a key still has to be named.
+	if err := guardrailCmd(context.Background(), []string{"get", "team"}); err == nil {
+		t.Error("a team guardrail was read without naming the team")
+	}
+}
+
+// With several organisations, --org names one, whichever verb it follows.
+func TestModelOrgFlagPicksOneOfSeveralOrganisations(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/me": map[string]any{"role": "operator"},
+		"GET /v1/orgs": map[string]any{"data": []map[string]any{
+			{"id": "org_a", "name": "Bank"}, {"id": "org_b", "name": "Insurer"},
+		}},
+		"GET /v1/models": map[string]any{"data": []map[string]any{}},
+	})
+
+	if err := modelCmd(context.Background(), []string{"list", "--org", "org_b"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.request("GET", "/v1/models").query; got != "org_id=org_b" {
+		t.Errorf("the models were listed for %q, want org_id=org_b", got)
+	}
+}
+
+// A flag that belongs to another verb is refused, not silently dropped.
+func TestModelRefusesAnotherVerbsFlag(t *testing.T) {
+	quiet(t)
+	newFakeControl(t, map[string]any{})
+
+	err := modelCmd(context.Background(), []string{"enable", "keera-speed", "--provider", "openai"})
+	if err == nil || !strings.Contains(err.Error(), "does not take --provider") {
+		t.Fatalf("err = %v, want --provider refused", err)
+	}
+}
+
+// Deleting a model does not stop the filters and routers that name it, so the
+// confirmation lists them.
+func TestModelUsersNamesTheFiltersAndRoutersOnIt(t *testing.T) {
+	quiet(t)
+	newFakeControl(t, map[string]any{
+		"GET /v1/filters": map[string]any{"data": []map[string]any{
+			{"alias": "redact", "model": "keera-guard"},
+			{"alias": "other", "model": "keera-speed"},
+		}},
+		"GET /v1/routers": map[string]any{"data": []map[string]any{
+			{"alias": "auto", "model": "keera-speed", "destinations": []string{"keera-guard", "big"}},
+			{"alias": "decide", "model": "keera-guard", "destinations": []string{"big"}},
+			{"alias": "elsewhere", "model": "keera-speed", "destinations": []string{"big"}},
+		}},
+	})
+
+	filters, routers, err := modelUsers(context.Background(), newClient(), "org_1", "keera-guard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(filters, ",") != "redact" {
+		t.Errorf("filters = %v, want [redact]", filters)
+	}
+	if strings.Join(routers, ",") != "auto,decide" {
+		t.Errorf("routers = %v, want [auto decide]", routers)
+	}
+}
+
+// An administrator's models are their organisation's, which is the only one
+// they can see: nothing asks them for --org.
+func TestAnAdministratorsModelNeedsNoOrg(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/orgs":        oneOrg,
+		"GET /v1/models":      map[string]any{"data": []map[string]any{}},
+		"PUT /v1/models/mine": map[string]any{"alias": "mine", "org_id": "org_1"},
+	})
+
+	if err := modelCmd(context.Background(), []string{"add", "mine",
+		"--backend", "http://vllm:8000/v1", "--backend-model", "qwen"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.request("PUT", "/v1/models/mine").query; got != "org_id=org_1" {
+		t.Errorf("the model was sent with %q, want the only organisation", got)
 	}
 }

@@ -5,13 +5,14 @@ grows. Three tables grow with traffic.
 
 ## What grows
 
-| Table           | One row per                           | Grows with        |
-| --------------- | ------------------------------------- | ----------------- |
-| `usage_events`  | inference request                     | traffic           |
-| `filter_runs`   | filter run, per request               | traffic × filters |
-| `tool_calls`    | MCP tool call                         | traffic           |
-| `audit_log`     | administrative action                 | people, slowly    |
-| everything else | org, team, key, model, filter, router | customers         |
+| Table           | One row per                                                      | Grows with        |
+| --------------- | ---------------------------------------------------------------- | ----------------- |
+| `usage_events`  | inference request                                                | traffic           |
+| `filter_runs`   | filter run, per request                                          | traffic × filters |
+| `tool_calls`    | MCP tool call                                                    | traffic           |
+| `audit_log`     | administrative action                                            | people, slowly    |
+| `sandboxes`     | sandbox lent out                                                 | agent tasks       |
+| everything else | org, team, key, model, filter, router, MCP server, sandbox class | customers         |
 
 `usage_events` is the busiest table. It is the request log, the report source,
 the session report and the billing record. Every completed request writes one
@@ -54,6 +55,10 @@ What `KEERA_USAGE_RETENTION` covers:
 - Closed `spend` windows. Nothing reads them: budgets check the open day and
   month, and reports aggregate the events directly.
 
+Retention never deletes `sandboxes`. A row stays after its sandbox ends,
+because what it cost and whose it was still matter. Agent sandboxes add one
+row per task.
+
 Keep in mind:
 
 - **The request log, the session report and every per-team, per-key and
@@ -67,9 +72,15 @@ replicas that write to the usage log. Each pass logs how many rows it deleted.
 
 ## Read cost
 
-Reports aggregate `usage_events` by time and organisation, using these
-indexes: `(ts)`, `(org_id, ts)`, `(team_id, ts)`, and a partial
-`(org_id, session_key, ts)` over the rows with a session key.
+Reports aggregate `usage_events` by time and organisation. The table has ten
+indexes, and each one adds to the size on disk:
+
+- `(ts)`, `(org_id, ts)`, `(team_id, ts)`, `(key_id, ts)`, `(alias, ts)` and
+  `(user_id, ts)`, for the reports
+- `(org_id, id DESC)`, for the live request log, and the same over failed rows
+  only
+- `(org_id, router, ts DESC)` over the rows a router placed
+- `(org_id, session_key, ts)` over the rows with a session key
 
 One measurement, from the session report, the most expensive read:
 
@@ -100,13 +111,16 @@ counts follow _tasks × calls per task_, not the number of developers.
 
 ## Sizing the gateway
 
-The gateway keeps an in-memory view of the control plane (`internal/registry`),
-refreshed every `KEERA_CACHE_TTL`. Its size depends on the number of orgs,
-teams, keys, models, filters and routers, not on traffic.
+The gateway keeps an in-memory view of the control plane (`internal/registry`).
+Its size depends on the number of orgs, teams, recently used keys, models, MCP
+servers, filters and routers, not on traffic.
 
-Per request, it holds the request body, up to `KEERA_MAX_BODY_BYTES` (32 MB by
-default). For a non-streamed answer it also holds the response body, up to
-`KEERA_MAX_RESPONSE_BYTES`. Streamed answers are forwarded as they arrive.
+Per request, it holds the request body, up to `KEERA_MAX_BODY_BYTES`. For a
+non-streamed answer it also holds the response body, up to
+`KEERA_MAX_RESPONSE_BYTES`. Streamed answers are forwarded as they arrive, one event
+at a time. A rewrite filter's answer is held whole, up to 32 MiB. Both settings
+take a plain number of bytes: the defaults are `33554432` (32 MiB) and
+`67108864` (64 MiB).
 
 `KEERA_MAX_DB_CONNS` is 16 per replica by default. Size Postgres for replicas ×
 that.
@@ -114,10 +128,11 @@ that.
 Rate limits multiply too: the token buckets are per process, so N replicas
 admit up to N times the per-minute limit. `KEERA_REDIS_URL` moves them to a
 shared store; see [gateway.md](gateway.md). Budgets are already reconciled in
-Postgres and need nothing.
+Postgres and need nothing; see [gateway.md](gateway.md) for how far they can be
+overshot.
 
-Redis holds two small fields per active bucket, keyed by scope. They expire one
-refill after last use, so Redis size depends on how many organisations, teams
+Redis holds two small fields per active bucket, keyed by scope. They expire a
+minute after one refill past last use, so Redis size depends on how many organisations, teams
 and keys send traffic at once.
 
 ## Sizing the inference side

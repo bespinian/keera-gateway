@@ -27,33 +27,10 @@ import {
   empty,
   confirm,
   toast,
+  go,
 } from "../ui.js";
+import { oneLine, statusMeaning } from "../status.js";
 import { canRevoke, revokeBody } from "./keys.js";
-
-// REASONS turns the status a request was refused with into the sentence the
-// person it happened to would use. The status is the record; this is what it
-// meant to them.
-const REASONS = {
-  400: ["Malformed request", "The gateway could not read the request."],
-  402: [
-    "Budget spent",
-    "A budget that covers this key is used up for this period.",
-  ],
-  403: ["Not permitted", "A guardrail refused the key."],
-  404: [
-    "Model not available",
-    "This key may not use this model, or no backend serves it.",
-  ],
-  413: ["Request too large", "The prompt is over the gateway's size limit."],
-  429: ["Rate limit", "Over one of the per-minute limits above."],
-  503: ["No backend", "The model exists but nothing serves it."],
-};
-
-function reason(status) {
-  if (REASONS[status]) return REASONS[status];
-  if (status >= 500) return ["Backend error", "The backend did not answer."];
-  return ["Refused", "The gateway did not forward this request."];
-}
 
 // Each level of the hierarchy as the person held by it would name it. They know
 // they are in an organisation and a team; the ids are for quoting to whoever
@@ -72,12 +49,14 @@ export async function accessView(ctx) {
   const a = await api.access();
   const currency = a.currency || ctx.currency;
 
+  // anonymous is the operator key sent as a header. In the panel it signs in
+  // as a stand-in user instead, which the server marks as operator_key.
   if (a.anonymous) {
     return h(
       "div",
       { class: "card" },
       empty(
-        "You are signed in with the operator key",
+        "This is the operator key",
         "The operator key is not a person, so it has no keys, team or " +
           "budget. Sign in with your identity provider to see yours.",
       ),
@@ -91,8 +70,8 @@ export async function accessView(ctx) {
 
   const wrap = h("div", {});
 
-  // A refusal in the last day is the reason somebody opens this screen, so it
-  // is the first thing on it rather than a table further down.
+  // A refusal or failure in the last day is the reason somebody opens this
+  // screen, so it is the first thing on it rather than a table further down.
   const recent = refusals.filter(
     (f) => Date.now() - new Date(f.ts).getTime() < 86400000,
   );
@@ -101,15 +80,27 @@ export async function accessView(ctx) {
       h(
         "div",
         { class: "banner banner-warn", style: { marginBottom: "16px" } },
-        `${num(recent.length)} request${recent.length === 1 ? " was" : "s were"} refused in the ` +
-          `last 24 hours: ${reason(recent[0].status)[0].toLowerCase()}` +
+        `${num(recent.length)} request${recent.length === 1 ? " was" : "s were"} refused or failed in the ` +
+          `last 24 hours: ${statusMeaning(recent[0].status)[0].toLowerCase()}` +
           `${recent.some((f) => f.status !== recent[0].status) ? ", among others" : ""}. ` +
           "Details are at the bottom of this screen.",
       ),
     );
   }
 
-  if (!keys.length) {
+  if (a.operator_key && !keys.length) {
+    wrap.append(
+      h(
+        "div",
+        { class: "card" },
+        empty(
+          "You signed in with the operator key",
+          "It is not a person, so it has no team or budget of its own. Sign " +
+            "in with your identity provider to see your own access.",
+        ),
+      ),
+    );
+  } else if (!keys.length) {
     // The way out of this state depends on whether the reader can issue one
     // themselves. Telling somebody to go and ask an administrator when there
     // is a button two screens away would be the worse of the two answers.
@@ -119,7 +110,7 @@ export async function accessView(ctx) {
         { class: "card" },
         empty(
           "No key is linked to you",
-          ctx.state.me.can_issue_own_key
+          ctx.state.me.can_manage_own_keys
             ? h(
                 "span",
                 {},
@@ -128,10 +119,7 @@ export async function accessView(ctx) {
                   "a",
                   {
                     href: "/keys",
-                    onClick: (e) => {
-                      e.preventDefault();
-                      ctx.navigate("/keys");
-                    },
+                    onClick: go(ctx, "/keys"),
                   },
                   "API keys",
                 ),
@@ -219,10 +207,7 @@ export async function accessView(ctx) {
         "a",
         {
           href: "/connect",
-          onClick: (e) => {
-            e.preventDefault();
-            ctx.navigate("/connect");
-          },
+          onClick: go(ctx, "/connect"),
         },
         "Connect a client",
       ),
@@ -556,7 +541,7 @@ function refusalsCard(refusals, keys) {
   const head = h(
     "div",
     { class: "row", style: { margin: "24px 0 12px" } },
-    h("h2", {}, "Recent refusals"),
+    h("h2", {}, "Recent refusals and failures"),
     h("div", { style: { flex: 1 } }),
     h("span", { class: "muted", style: { fontSize: "11.5px" } }, "last 7 days"),
   );
@@ -576,7 +561,7 @@ function refusalsCard(refusals, keys) {
       {
         label: "Reason",
         cell: (f) => {
-          const [label, why] = reason(f.status);
+          const [label, why] = statusMeaning(f.status);
           // The gateway's own sentence when there is one, because it names the
           // limit that bound and the number behind it - "your team is over its
           // rate limit of 60 requests per minute" is a different morning from
@@ -620,9 +605,8 @@ function refusalsCard(refusals, keys) {
     ],
     refusals,
     {
-      emptyTitle: "Nothing has been refused",
-      emptyBody:
-        "Every request your keys have made in the last week was forwarded.",
+      emptyTitle: "Nothing refused or failed",
+      emptyBody: "Every request your keys made in the last week was answered.",
     },
   );
 
@@ -638,12 +622,4 @@ function refusalsCard(refusals, keys) {
         "use, or one with no backend, ask an administrator.",
     ),
   );
-}
-
-// oneLine folds a gateway or backend message onto one row of a table. Both can
-// run to several sentences, and a cell holding all of them is a table nobody
-// can scan; the whole of it is on the row's title.
-function oneLine(text, max) {
-  const flat = text.replace(/\s+/g, " ").trim();
-  return flat.length > max ? flat.slice(0, max - 1) + "\u2026" : flat;
 }

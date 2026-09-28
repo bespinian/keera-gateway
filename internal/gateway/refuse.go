@@ -49,27 +49,31 @@ func (s *Server) refuse(c *call, ref refusal) {
 	// The step the request was stopped in is closed and named by the code.
 	ev.Spans = c.tr.steps(ref.code)
 	s.sink.Record(ev)
-	s.metrics.Observe(metricModel(s.src, ev.Alias), ev.OrgID, ev.Status, ev.Latency.Seconds(), 0)
+	s.metrics.Observe(metricModel(s.src, ev.OrgID, ev.Alias), ev.OrgID, ev.Status, ev.Latency.Seconds(), 0)
 }
 
 // unknownModel is the model label a refusal carries when the model it names is
-// not one the catalogue holds.
+// not one of the organisation's models or routers.
 const unknownModel = "unknown"
 
-// metricModel bounds the model label to the catalogue.
+// metricModel bounds the model label to the organisation's models and
+// routers.
 //
 // Metric series are never cleaned up, and a refused request's model is
 // whatever the client sent. Without this, a client sending a new name on
 // every request would grow the registry until the process ran out of memory.
-// Forwarded requests have already been matched against the catalogue.
-func metricModel(src policy.Source, alias string) string {
+// Forwarded requests have already been matched against them.
+func metricModel(src policy.Source, orgID, alias string) string {
 	if alias == "" {
 		return ""
 	}
-	if _, found := src.Model(alias); !found {
-		return unknownModel
+	if _, found := src.Model(orgID, alias); found {
+		return alias
 	}
-	return alias
+	if _, found := src.Router(orgID, alias); found {
+		return alias
+	}
+	return unknownModel
 }
 
 // advise appends where to go and look. From inside an editor the message is
@@ -102,7 +106,7 @@ func (s *Server) checkRates(res *policy.Resolved, now time.Time) (refusal, bool)
 	for _, sc := range res.Scopes {
 		reqs = append(reqs,
 			ratelimit.Requirement{Key: bucketKey(sc, "rpm"), PerMinute: sc.RPM, Take: true},
-			ratelimit.Requirement{Key: bucketKey(sc, "tpm"), PerMinute: sc.TPM})
+			tpmBucket(sc))
 		checks = append(checks,
 			check{scope: sc, limit: sc.RPM, unit: "requests", code: "rate_limit_exceeded"},
 			check{scope: sc, limit: sc.TPM, unit: "tokens", code: "token_rate_limit_exceeded"})
@@ -122,6 +126,12 @@ func (s *Server) checkRates(res *policy.Resolved, now time.Time) (refusal, bool)
 	}, false
 }
 
+// tpmBucket is a scope's token bucket, which a request is checked against
+// before it is sent and charged to once its tokens are counted.
+func tpmBucket(sc policy.Scope) ratelimit.Requirement {
+	return ratelimit.Requirement{Key: bucketKey(sc, "tpm"), PerMinute: sc.TPM}
+}
+
 // rateMessage names the limit that bound and its number, for the developer
 // whose agent just stopped.
 func rateMessage(sc policy.Scope, limit int, unit string) string {
@@ -135,9 +145,6 @@ func rateMessage(sc policy.Scope, limit int, unit string) string {
 // Only the tightest scope is reported, so the client does not have to work out
 // which one binds.
 func (s *Server) limitHeaders(w http.ResponseWriter, res *policy.Resolved, now time.Time) {
-	if res == nil {
-		return
-	}
 	s.budgetHeaders(w.Header(), res, now)
 	s.rateHeaders(w.Header(), res, now)
 }

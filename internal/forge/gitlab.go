@@ -36,8 +36,7 @@ type GitLabOptions struct {
 	// Token may create project access tokens on the projects sandboxes use:
 	// a personal, group or service account token with the api scope, held by
 	// a Maintainer of those projects.
-	Token  string
-	Client *http.Client
+	Token string
 }
 
 // NewGitLab builds the minter.
@@ -52,7 +51,7 @@ func NewGitLab(o GitLabOptions) (*GitLab, error) {
 	if strings.TrimSpace(o.Token) == "" {
 		return nil, errors.New("a GitLab token is required")
 	}
-	return &GitLab{web: web, token: strings.TrimSpace(o.Token), client: httpClient(o.Client)}, nil
+	return &GitLab{web: web, token: strings.TrimSpace(o.Token), client: &http.Client{Timeout: requestTimeout}}, nil
 }
 
 // Mint implements sandbox.GitMinter.

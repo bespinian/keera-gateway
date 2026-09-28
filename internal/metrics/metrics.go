@@ -29,6 +29,7 @@ var OverheadBuckets = []float64{
 var (
 	requestLabels  = []string{"model", "org", "status"}
 	overheadLabels = []string{"model", "org"}
+	upstreamLabels = []string{"model", "org"}
 	filterLabels   = []string{"filter", "org", "outcome", "shadow"}
 	routerLabels   = []string{"router", "org", "outcome", "destination"}
 	// A tool's name is not a label: a client can send any name, and series are
@@ -60,7 +61,7 @@ type Registry struct {
 	// rlFallback counts rate-limit decisions made locally because Redis was
 	// unreachable. Anything but zero means the limits bind per replica.
 	rlFallback   atomic.Int64
-	upstreamErrs map[string]*atomic.Int64 // by model
+	upstreamErrs map[string]*series
 	overhead     map[string]*series
 	// A filter's cost and refusals hide inside the request's series, so it has
 	// its own families to alert on.
@@ -75,7 +76,7 @@ type Registry struct {
 func New() *Registry {
 	return &Registry{
 		requests:     make(map[string]*series),
-		upstreamErrs: make(map[string]*atomic.Int64),
+		upstreamErrs: make(map[string]*series),
 		overhead:     make(map[string]*series),
 		filters:      make(map[string]*series),
 		routers:      make(map[string]*series),
@@ -83,8 +84,10 @@ func New() *Registry {
 	}
 }
 
-// getOrCreate takes the write lock only the first time a label set appears.
-func getOrCreate[T any](r *Registry, m map[string]*T, key string, create func() *T) *T {
+// seriesIn finds the series for one label set, and takes the write lock only
+// the first time that set appears.
+func (r *Registry) seriesIn(m map[string]*series, buckets []float64, values ...string) *series {
+	key := strings.Join(values, "\x00")
 	r.mu.RLock()
 	v, ok := m[key]
 	r.mu.RUnlock()
@@ -96,15 +99,9 @@ func getOrCreate[T any](r *Registry, m map[string]*T, key string, create func() 
 	if v, ok = m[key]; ok {
 		return v
 	}
-	v = create()
+	v = &series{buckets: buckets, hist: make([]atomic.Int64, len(buckets)+1)}
 	m[key] = v
 	return v
-}
-
-func (r *Registry) seriesIn(m map[string]*series, buckets []float64, values ...string) *series {
-	return getOrCreate(r, m, strings.Join(values, "\x00"), func() *series {
-		return &series{buckets: buckets, hist: make([]atomic.Int64, len(buckets)+1)}
-	})
 }
 
 // Observe records one finished request.
@@ -118,8 +115,8 @@ func (r *Registry) Observe(model, org string, status int, seconds float64, token
 // gateway getting slower.
 //
 // The window runs from the body being read to the upstream call. Filter
-// generation is subtracted, because it has its own metric and would otherwise
-// make a new guardrail look like a slow gateway. Refusals are not recorded:
+// generation and the router's decision are subtracted, because each has its
+// own metric and would otherwise make a new guardrail look like a slow gateway. Refusals are not recorded:
 // they never made an upstream call.
 func (r *Registry) Overhead(model, org string, seconds float64) {
 	r.seriesIn(r.overhead, OverheadBuckets, model, org).
@@ -149,9 +146,11 @@ func (r *Registry) ToolCall(server, org, outcome string, seconds float64) {
 	r.seriesIn(r.tools, Buckets, server, org, outcome).observe(seconds, 0)
 }
 
-// UpstreamError records a failure reaching the inference plane.
-func (r *Registry) UpstreamError(model string) {
-	getOrCreate(r, r.upstreamErrs, model, func() *atomic.Int64 { return new(atomic.Int64) }).Add(1)
+// UpstreamError records one failed attempt at a model: a backend that could not
+// be reached or did not start answering in time, or a 5xx a router moved past.
+// The org is a label because an alias is only unique inside one organisation.
+func (r *Registry) UpstreamError(model, org string) {
+	r.seriesIn(r.upstreamErrs, nil, model, org).count.Add(1)
 }
 
 // RateLimitFallback records a rate-limit decision that Redis could not answer.
@@ -173,10 +172,10 @@ func (r *Registry) Write(w io.Writer) {
 		func(s *series) int64 { return s.sum.Load() })
 	requests.histogram("keera_request_duration_seconds", "Wall time of an inference request.", false)
 
-	header(w, "keera_upstream_errors_total", "Failures reaching the inference plane.", "counter")
-	for _, model := range slices.Sorted(maps.Keys(r.upstreamErrs)) {
-		_, _ = fmt.Fprintf(w, "keera_upstream_errors_total{model=%q} %d\n", model, r.upstreamErrs[model].Load())
-	}
+	upstream := keyed{w: w, labels: upstreamLabels, m: r.upstreamErrs}
+	upstream.counter("keera_upstream_errors_total",
+		"Failed attempts at a model: a backend not reached or too slow to answer, or a 5xx a router moved past.",
+		func(s *series) int64 { return s.count.Load() })
 
 	header(w, "keera_ratelimit_fallback_total",
 		"Rate-limit decisions made locally because Redis was unreachable.", "counter")
@@ -184,7 +183,7 @@ func (r *Registry) Write(w io.Writer) {
 
 	overhead := keyed{w: w, labels: overheadLabels, m: r.overhead}
 	overhead.histogram("keera_gateway_overhead_seconds",
-		"Time the gateway added ahead of the inference plane, excluding filter generation.", true)
+		"Time the gateway added ahead of the inference plane, excluding filters and routers.", true)
 
 	filters := keyed{w: w, labels: filterLabels, m: r.filters}
 	filters.counter("keera_filter_runs_total", "Filter runs, by what the filter did.",

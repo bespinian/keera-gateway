@@ -3,7 +3,9 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -26,8 +28,8 @@ type forwarded struct {
 	// encoded for its own destination, because the 'model' field carries the
 	// backend's name for the model, not the alias.
 	payload []byte
-	// err is set when the last destination could not be reached at all, which
-	// is the one case with no response to serve.
+	// err is set when the last destination could not be reached or did not
+	// start answering in time, which is the one case with no response to serve.
 	err error
 	// at is how far down the chain the answer came from. Zero is the
 	// destination the router meant to use.
@@ -78,18 +80,18 @@ func appendNote(text, note string) string {
 // It is one model unless a trying router produced a chain. A model the client
 // or a deciding router chose has been decided on, and if it fails, that is
 // its failure, not a reason to ask another one.
-func (s *Server) destinations(model policy.Model, d routeDecision) []policy.Model {
+func (s *Server) destinations(orgID string, model policy.Model, d routeDecision) []policy.Model {
 	if len(d.chain) < 2 {
 		return []policy.Model{model}
 	}
 	out := make([]policy.Model, 0, len(d.chain))
 	for _, alias := range d.chain {
-		if m, ok := s.serveable(alias); ok {
+		if m, ok := s.serveable(orgID, alias); ok {
 			out = append(out, m)
 		}
 	}
 	if len(out) == 0 {
-		// The catalogue changed under the decision. One attempt at what was
+		// The organisation's models changed under the decision. One attempt at what was
 		// chosen is better than none.
 		return []policy.Model{model}
 	}
@@ -133,7 +135,7 @@ func (s *Server) forward(ctx context.Context, chain []policy.Model,
 		// destination's and lasts until the last token, which is why its
 		// release is returned for answer to defer. See loads.begin.
 		s.metrics.InflightAdd(1)
-		release := s.load.begin(m.Alias)
+		release := s.load.begin(m.Key())
 		resp, err := s.send(ctx, m, out)
 		s.metrics.InflightAdd(-1)
 		f.resp, f.err = resp, err
@@ -146,7 +148,7 @@ func (s *Server) forward(ctx context.Context, chain []policy.Model,
 			// Recorded even on the last attempt, so a measured router ranks it
 			// last for a while. Stamped now, not at the start, so a long dial
 			// timeout does not shorten the penalty. See loadPenalty.
-			s.load.fail(m.Alias, time.Now())
+			s.load.fail(m.Key(), time.Now())
 		}
 		switch {
 		case i == len(chain)-1 || ctx.Err() != nil:
@@ -160,7 +162,7 @@ func (s *Server) forward(ctx context.Context, chain []policy.Model,
 			release()
 			// Counted here because the request may succeed elsewhere, and then
 			// nothing else would show this model is down.
-			s.metrics.UpstreamError(m.Alias)
+			s.metrics.UpstreamError(m.Alias, m.OrgID)
 			f.failures = append(f.failures,
 				m.Alias+" answered "+strconv.Itoa(resp.StatusCode))
 			_ = resp.Body.Close()
@@ -179,10 +181,14 @@ func (s *Server) dispatch(ctx context.Context, model policy.Model, path string, 
 }
 
 // send sends the request to one of a model's backends, moving to the next one
-// only if a backend cannot be reached at all. It never retries a request a
-// backend answered: generation is not free, and a 500 from vLLM is an answer.
+// only if a backend cannot be connected to. It never resends a request a
+// backend may have received: generation is not free, a 500 from vLLM is an
+// answer, and a backend that did not answer in time may still be working on it.
+//
+// Each failure is counted here once, whoever sent the request: a client, a
+// filter, a router or a model check.
 func (s *Server) send(ctx context.Context, model policy.Model, out outbound) (*http.Response, error) {
-	counter, _ := s.rr.LoadOrStore(model.Alias, new(atomic.Uint64))
+	counter, _ := s.rr.LoadOrStore(model.Key(), new(atomic.Uint64))
 	offset := counter.(*atomic.Uint64).Add(1) - 1
 	// Filters, routers and model checks come through here too, so they get the
 	// same fixes as a client's request.
@@ -191,8 +197,8 @@ func (s *Server) send(ctx context.Context, model policy.Model, out outbound) (*h
 	var lastErr error
 	for i := range model.Backends {
 		base := model.Backends[(int(offset)+i)%len(model.Backends)]
-		// A bytes.Reader body can be replayed, which lets this loop move to
-		// the next backend after a connection failure.
+		// A fresh reader per attempt lets this loop move to the next backend
+		// after a connection failure.
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 			strings.TrimRight(base, "/")+out.path, io.NopCloser(bytes.NewReader(payload)))
 		if err != nil {
@@ -203,12 +209,11 @@ func (s *Server) send(ctx context.Context, model policy.Model, out outbound) (*h
 		req.Header.Set("Accept", "text/event-stream, application/json")
 		// A model with no credential is sent unauthenticated, and the
 		// endpoint's own 401 is the clearest thing to show a developer.
-		credential := model.Credential(s.opts.APIKeys)
 		switch {
 		case out.auth != nil:
-			out.auth(req.Header, credential)
-		case credential != "":
-			req.Header.Set("Authorization", "Bearer "+credential)
+			out.auth(req.Header, model.APIKey)
+		case model.APIKey != "":
+			req.Header.Set("Authorization", "Bearer "+model.APIKey)
 		}
 		resp, err := s.client.Do(req)
 		if err == nil {
@@ -217,10 +222,20 @@ func (s *Server) send(ctx context.Context, model policy.Model, out outbound) (*h
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
+		s.metrics.UpstreamError(model.Alias, model.OrgID)
+		if !undelivered(err) {
+			return nil, err
+		}
 		lastErr = err
-		s.metrics.UpstreamError(model.Alias)
 	}
 	return nil, lastErr
+}
+
+// undelivered reports whether a failed request never reached the backend,
+// because no connection to it was made.
+func undelivered(err error) bool {
+	var op *net.OpError
+	return errors.As(err, &op) && (op.Op == "dial" || op.Op == "proxyconnect")
 }
 
 // copyResponseHeaders forwards what the client needs and adds what an SSE

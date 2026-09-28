@@ -14,7 +14,6 @@ shell.
 
 On start, the gateway applies its own schema under a Postgres advisory lock, so
 several replicas can start at once and no migration job is needed.
-`keera-gateway migrate` runs the migrations as a separate step if you want one.
 
 ## One listener, four surfaces
 
@@ -37,7 +36,8 @@ separate them, put a proxy in front that publishes `/api` and nothing else.
 
 `/healthz` checks only the process. `/readyz` also pings Postgres, so a replica
 that has lost the database leaves the inference Service instead of being
-restarted.
+restarted. `keera-gateway health` asks the gateway's own `/readyz`, for a
+container healthcheck in an image that has no curl.
 
 ## The alias is the API contract
 
@@ -45,10 +45,9 @@ A client names an alias such as `keera-speed`, never a model id or a vLLM URL.
 So you can swap the model behind an alias, change quantization, or point it at a
 remote endpoint without any developer changing anything.
 
-- The catalogue can be a file (`KEERA_MODELS_FILE`). It is applied on every
-  start and is idempotent: the same file and an empty database give the same
-  gateway. A model declared in the file belongs to the file, and the control API
-  refuses to change or delete it.
+- A catalogue file (`KEERA_MODELS_FILE`) is a template. Each new organisation
+  starts with a copy of every model it declares. See
+  [Models belong to an organisation](#models-belong-to-an-organisation).
 - `backend_model` is the name the backend serves the model under - vLLM's
   `--served-model-name`, llama.cpp's `--alias`. If it is wrong, every request
   returns 404.
@@ -57,11 +56,47 @@ remote endpoint without any developer changing anything.
   [Requests too long for the model](#requests-too-long-for-the-model).
 - `location` says where the model runs, and so where prompts go: `ch` or `usa`
   for a hosted provider, `onprem` for your own inference plane. A provider fills
-  it in, and a model without one is `onprem`. Clients see it on `/v1/models`.
+  it in. Without one, a backend inside your network is `onprem`, and a backend
+  on the internet must say where it is. Clients see it on `/v1/models`.
 - `release_date` is the day the model came out, as `YYYY-MM-DD`. A provider
   fills it in for the models it knows. `/v1/models` gives it as `created`.
 - An alias is lowercase letters, digits and interior hyphens, because it appears
   in the client configurations `keera connect` prints.
+
+## Models belong to an organisation
+
+Every model belongs to one organisation. Only that organisation can call it,
+and its administrators add, change and remove it. The backend can be any URL:
+your own inference plane, or a provider reached with the organisation's own
+key.
+
+An administrator adds one in the panel (**Models → New model**) or with
+`keera model add <alias>`. The CLI uses their own organisation, so they never
+pass `--org`. An operator picks the organisation in the panel, or passes
+`--org <id>` when there is more than one.
+
+A new organisation starts with a copy of each model in the catalogue file
+(`KEERA_MODELS_FILE`). The copies are the organisation's own: its
+administrators change, disable or remove them like any other model. Changing
+the file later does not touch organisations that already exist. To add the
+file's models to one, run `keera model apply <file> --org <id>`.
+
+The file holds no API keys. After a new organisation is created, its
+administrator stores the key for each hosted model.
+
+Each organisation has its own aliases, so two organisations can each have a
+`fast`. The gateway looks up the `model` field in the organisation's models
+first, then in its routers. A model and a router in the same organisation
+cannot share an alias.
+
+To stop a team or a key using a model, leave it out of that guardrail:
+`keera guardrail set team <id> --models a,b`. To stop the whole organisation
+using it, disable the model in its edit dialog.
+
+Deleting a model does not change the filters and routers that use it. A filter
+whose model is gone refuses every request it covers. A router leaves the model
+out of its choice, or falls back or refuses when it was the model that decides.
+The delete confirmation lists them first.
 
 ## Three request shapes
 
@@ -93,23 +128,34 @@ translation.
   other model refuses it with a 400.
 
 The hosted providers in `internal/catalog/providers.go` are **not** adapters.
-They are a table of defaults - endpoint, credential variable, context window,
-prices, description - so that pointing a model at Anthropic or OpenAI takes
+They are a table of defaults - endpoint, context window, prices,
+description - so that pointing a model at Anthropic or OpenAI takes
 three lines instead of six. The provider's name also decides the exception
 above.
+
+## Which client sent a request
+
+Every request is recorded with the client that sent it, such as Claude Code,
+Codex or curl. The gateway reads it from the `User-Agent`. A client can name
+itself instead in `X-Keera-Client`, which wins, so a tool built on a common
+HTTP library is not filed under that library. The name is what the client
+says, so it tells what is connected, not who may connect.
+
+`keera usage --by client` adds up usage by client.
 
 ## The tenancy model
 
 Three levels: organisation, team, key. A guardrail can attach at any of them.
 
 The combining rule is **restrict-only**. A level can narrow what it inherits but
-never widen it. Allow-lists intersect; numeric ceilings take the minimum.
+never widen it. Allow-lists intersect; the output-token ceiling takes the
+minimum.
 
 Two exceptions:
 
-- **Budgets are kept per level and checked separately**, not merged. An
-  organisation cap of 10,000 and a team cap of 1,000 are two limits that must
-  both hold.
+- **Rate limits and budgets are kept per level and checked separately**, not
+  merged. An organisation cap of 10,000 and a team cap of 1,000 are two limits
+  that must both hold, and each level's `rpm` and `tpm` has its own bucket.
 - **System prompts and filters accumulate**, outermost first. A level may add to
   what it inherits but may not drop it.
 
@@ -117,8 +163,9 @@ Budgets reset on UTC boundaries in every deployment.
 
 A level that sets nothing is not unlimited: it gets whatever it inherits. To see
 the combined result, run `keera guardrail effective <scope> <id>` (or
-`GET /control/v1/guardrails/{scope}/{id}/effective`). It returns every level's
-guardrails, the combined answer, and the level that decided each value.
+`GET /control/v1/guardrails/{scope}/{id}/effective`). The endpoint returns every
+level's guardrails and the combined answer; the command also shows which level
+decided each value.
 
 ## What happens to one request
 
@@ -138,7 +185,7 @@ Why this order:
   Once a redaction filter has removed a client's name, the prompt looks safe for
   any model, and a router placed after it would send it outside the cluster.
 - The context check (4) runs before the filters, so a request that cannot
-  succeed costs nothing.
+  succeed costs nothing more than the router's decision.
 - The system prompt (6) is added after the filters, so an administrator's own
   wording is never handed to a small model that is allowed to edit it.
 - Router and filters both run after the budget check, because both spend money.
@@ -146,7 +193,8 @@ Why this order:
 ## Requests too long for the model
 
 A request that cannot fit in the `max_context` of any model it may go to is
-refused with a 400 before anything is spent on it.
+refused with a 400 before it is filtered or forwarded. Only an instruction
+router's decision has been paid for by then.
 
 The gateway has no tokeniser, so it counts the fewest tokens a request could
 be: its text at five bytes per token. Real text uses fewer bytes per token, so
@@ -179,18 +227,26 @@ timeout longer than the longest completion. Most controllers buffer by default.
 ## Caching
 
 The gateway keeps an in-memory view of the control plane (`internal/registry`),
-refreshed every `KEERA_CACHE_TTL` (30 seconds). Spend is refreshed separately
-and more often (`KEERA_SPEND_REFRESH`, 10 seconds).
+so a request waits on the database only to check a key it has not seen
+recently. A change made through the control API is pushed to every replica at
+once, over Postgres LISTEN/NOTIFY, so a revoked key stops working right away. In
+case a notification is lost, a checked key is reused for at most
+`KEERA_CACHE_TTL` (30 seconds), and models, filters, routers and MCP servers are
+reloaded every minute. Spend is refreshed separately (`KEERA_SPEND_REFRESH`, 10
+seconds).
 
-So a revoked key can keep working, and a new guardrail may not apply yet, for up
-to one TTL. In return, no request waits on a database round trip.
+If Postgres is down, the models and the rest stay as last loaded, and a key
+keeps working until its `KEERA_CACHE_TTL` runs out. After that, every request
+with it gets 503 `control_plane_unavailable` until the database is back.
 
 ## Rate limits across replicas
 
 The token buckets behind `rpm` and `tpm` live in each process. With N replicas
 behind a load balancer, a limit of 600 requests per minute is 600 per replica,
 and up to 600N in total. Spend is reconciled through Postgres, so a budget means
-the same thing however many gateways are running.
+the same thing however many gateways are running. Each replica reads spend again
+every `KEERA_SPEND_REFRESH` (10 s), so a budget can be overshot by about that
+much traffic.
 
 Set `KEERA_REDIS_URL` to keep the buckets in Redis. One script then decides all
 of a request's levels atomically, and every replica spends the same allowance -
@@ -207,10 +263,27 @@ see `internal/ratelimit/redis.go`.
 
 The control plane's sign-in throttle stays per replica.
 
-Every answer carries what is left of the allowance - `X-Keera-Budget-Remaining`,
-`X-Keera-Budget-Reset` and the `X-RateLimit-*` headers - so a client can see a
-limit coming. When a limit is hit, the message says which limit, its value, and
-when it lifts.
+Answers say what is left of the allowance, so a client can see a limit coming.
+The budget headers are sent when some level has a budget, and the request
+headers when some level has an `rpm`. They describe only the tightest level:
+
+| Header                           | What it holds                       |
+| -------------------------------- | ----------------------------------- |
+| `X-Keera-Budget-Remaining`       | what is left to spend               |
+| `X-Keera-Budget-Limit`           | the budget                          |
+| `X-Keera-Budget-Reset`           | when it resets, in RFC 3339         |
+| `X-Keera-Budget-Scope`           | the level: `org`, `team` or `key`   |
+| `X-Keera-Budget-Currency`        | the currency, from `KEERA_CURRENCY` |
+| `X-RateLimit-Limit-Requests`     | the `rpm`                           |
+| `X-RateLimit-Remaining-Requests` | requests left in the bucket         |
+| `X-Keera-RateLimit-Scope`        | the level: `org`, `team` or `key`   |
+
+A `tpm` limit has no header. When a limit is hit, the message says which limit
+and its value. A rate limit answers 429 with `Retry-After`. A budget answers
+402, and its message gives the day it resets.
+
+Every forwarded answer also carries `X-Keera-Model`: the alias that answered.
+Behind a router, that is the destination it chose.
 
 ## What it deliberately does not do
 
@@ -221,11 +294,14 @@ when it lifts.
   `internal/store/spans.go` has no sampling, no collector and no propagation,
   and every step it records happens inside one handler.
 - **It does not translate request parameters between providers**, with one
-  exception: OpenAI's reasoning models refuse `max_tokens` and a temperature, so
-  the gateway sends `max_completion_tokens` and drops the temperature. Any other
-  field a hosted provider rejects is an error the client sees.
-- **It does not retry.** A router moves an unanswered request to its next
-  destination, but nothing sends the same request to the same model twice.
+  exception for OpenAI: it sends `max_completion_tokens` instead of `max_tokens`
+  to every OpenAI chat model, and drops `temperature` and `top_p` for its
+  reasoning models, which refuse them. Any other field a hosted provider
+  rejects is an error the client sees.
+- **It does not retry.** A model with several backends moves to the next one
+  only when it cannot connect to one, so a request reaches at most one. A
+  router moves an unanswered request to its next destination, but nothing sends
+  the same request to the same model twice.
 
 ## Failure modes worth knowing
 

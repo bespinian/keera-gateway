@@ -108,7 +108,7 @@ func (s *Store) FilterStats(ctx context.Context, orgID string, from, to time.Tim
 	map[string]FilterStat, error) {
 	rows, err := s.pool.Query(ctx, `SELECT filter, `+filterStatColumns+`
 		FROM filter_runs
-		WHERE ts >= $1 AND ts < $2 AND ($3 = '' OR org_id = $3)
+		WHERE ts >= $1 AND ts < $2 AND org_id = $3
 		GROUP BY filter`, from, to, orgID)
 	if err != nil {
 		return nil, err
@@ -176,7 +176,7 @@ func (s *Store) FilterReportFor(ctx context.Context, orgID, alias string,
 
 	err := s.pool.QueryRow(ctx, `SELECT `+filterStatColumns+`
 		FROM filter_runs
-		WHERE ts >= $1 AND ts < $2 AND ($3 = '' OR org_id = $3) AND filter = $4`,
+		WHERE ts >= $1 AND ts < $2 AND org_id = $3 AND filter = $4`,
 		from, to, orgID, alias).Scan(filterStatTargets(&rep.FilterStat)...)
 	if err != nil {
 		return rep, err
@@ -188,7 +188,7 @@ func (s *Store) FilterReportFor(ctx context.Context, orgID, alias string,
 		return rep, err
 	}
 	err = s.pool.QueryRow(ctx, `SELECT count(*), COALESCE(sum(cost_micros), 0)
-		FROM usage_events WHERE ts >= $1 AND ts < $2 AND ($3 = '' OR org_id = $3)`,
+		FROM usage_events WHERE ts >= $1 AND ts < $2 AND org_id = $3`,
 		from, to, orgID).Scan(&rep.Requests, &rep.OrgCostMicros)
 	return rep, err
 }
@@ -213,7 +213,7 @@ func (s *Store) filterSeries(ctx context.Context, orgID, alias string,
 		LEFT JOIN filter_runs f
 		     ON date_trunc($5, f.ts) = b.at
 		    AND f.ts >= $1 AND f.ts < $2
-		    AND ($3 = '' OR f.org_id = $3) AND f.filter = $4
+		    AND f.org_id = $3 AND f.filter = $4
 		GROUP BY b.at ORDER BY b.at`, from, to, orgID, alias, bucket)
 	if err != nil {
 		return nil, err
@@ -235,7 +235,7 @@ func (s *Store) filterTeams(ctx context.Context, orgID, alias string,
 		       count(*) FILTER (WHERE outcome = 'error'),
 		       COALESCE(sum(cost_micros), 0)
 		FROM filter_runs
-		WHERE ts >= $1 AND ts < $2 AND ($3 = '' OR org_id = $3) AND filter = $4
+		WHERE ts >= $1 AND ts < $2 AND org_id = $3 AND filter = $4
 		GROUP BY 1
 		ORDER BY 3 DESC, 2 DESC`, from, to, orgID, alias)
 	if err != nil {

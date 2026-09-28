@@ -28,7 +28,7 @@ const (
 	// VerdictOK is set up and working as far as this can tell.
 	VerdictOK Verdict = "ok"
 	// VerdictWarn is a deployment that runs, but lacks something it will
-	// want: an identity provider, a metrics token, an enforced egress list.
+	// want: an identity provider, a metrics token.
 	VerdictWarn Verdict = "warn"
 	// VerdictFail is something that stops requests being served now.
 	VerdictFail Verdict = "fail"
@@ -78,18 +78,26 @@ func (s *Server) diagnostics(w http.ResponseWriter, r *http.Request, p *authn.Pr
 	if !ok {
 		return
 	}
+	// A probe calls one organisation's models, as `keera model check` does,
+	// so it is for the same people: that organisation's administrators.
 	probe := httpx.Flag(r.URL.Query(), "probe")
-	if probe && !p.CanAdminCatalogue() {
-		s.forbid(w, "a probe reaches the inference plane directly; only an operator can run one")
+	if probe && orgID == "" {
+		badRequest(w, "a probe calls one organisation's models: pass org_id, or --org on the "+
+			"command line")
+		return
+	}
+	if probe && !p.CanAdminOrg(orgID) {
+		s.forbid(w, "a probe calls this organisation's models and puts load on them; only "+
+			"its administrators can run one")
 		return
 	}
 
 	d := &Diagnosis{Probed: probe}
 	s.checkDeployment(r.Context(), d, p)
-	s.checkCatalogue(r.Context(), d, probe)
+	s.checkCatalogue(r.Context(), d, orgID, p, probe)
 	s.checkTenancy(r.Context(), d, orgID, p)
-	s.checkHooks(r.Context(), d, orgID)
-	s.checkSandboxes(r.Context(), d)
+	s.checkHooks(r.Context(), d, orgID, p)
+	s.checkSandboxes(r.Context(), d, orgID)
 	httpx.WriteJSON(w, http.StatusOK, d)
 }
 
@@ -97,18 +105,9 @@ func (s *Server) diagnostics(w http.ResponseWriter, r *http.Request, p *authn.Pr
 func (s *Server) checkDeployment(ctx context.Context, d *Diagnosis, p *authn.Principal) {
 	const area = "Deployment"
 
-	if s.opts.Gateway == nil {
-		d.add(area, "Inference plane", VerdictFail,
-			"no inference listener: this process serves the panel and the control API "+
-				"and nothing else",
-			"run the gateway binary rather than a control plane on its own")
-	} else {
-		d.add(area, "Inference plane", VerdictOK, "this process serves /api", "")
-	}
-
-	// The rest is the deployment's configuration, which a tenant's
-	// administrator is not told about.
-	if !p.CanAdminCatalogue() {
+	// The deployment's configuration, which a tenant's administrator is not
+	// told about.
+	if !p.Unrestricted() {
 		return
 	}
 
@@ -119,15 +118,6 @@ func (s *Server) checkDeployment(ctx context.Context, d *Diagnosis, p *authn.Pri
 			"set KEERA_PUBLIC_URL to this gateway as a browser reaches it")
 	} else {
 		d.add(area, "Public URL", VerdictOK, s.opts.PublicURL, "")
-	}
-
-	if s.opts.Secrets == nil {
-		d.add(area, "Secret key", VerdictWarn,
-			"not set, so a hosted model's credential cannot be stored and the panel's "+
-				"field for it is disabled",
-			"set KEERA_SECRET_KEY to 32 random bytes: openssl rand -hex 32")
-	} else {
-		d.add(area, "Secret key", VerdictOK, "hosted-model credentials can be stored", "")
 	}
 
 	s.checkIdentity(d)
@@ -159,27 +149,33 @@ func (s *Server) checkIdentity(d *Diagnosis) {
 			names = append(names, provider.Name())
 		}
 		d.add(area, "Identity", VerdictOK, strings.Join(names, ", "), "")
-	case s.hasOperatorKey:
+	default:
 		d.add(area, "Identity", VerdictWarn,
 			"none, so the operator key is the only way in and no audit entry can name "+
 				"a person",
-			"set KEERA_OIDC_ISSUER, KEERA_OIDC_CLIENT_ID and KEERA_OIDC_CLIENT_SECRET; "+
-				"see docs/sso.md")
-	default:
-		d.add(area, "Identity", VerdictFail,
-			"no identity provider and no operator key: nothing can authenticate",
-			"set KEERA_OPERATOR_KEY, or configure an identity provider")
+			"name a provider in KEERA_OIDC_PROVIDERS and set its "+
+				"KEERA_OIDC_<NAME>_ISSUER, _CLIENT_ID and _CLIENT_SECRET; see docs/sso.md")
 	}
 }
 
 // checkCatalogue checks the models, which is where a deployment that serves
-// nothing is usually broken.
-func (s *Server) checkCatalogue(ctx context.Context, d *Diagnosis, probe bool) {
+// nothing is usually broken. They are one organisation's.
+func (s *Server) checkCatalogue(ctx context.Context, d *Diagnosis, orgID string,
+	p *authn.Principal, probe bool,
+) {
+	if orgID == "" {
+		return // an operator looking at every organisation at once
+	}
 	const area = "Models"
+	// Only an operator names the organisation. Anyone else's is their own.
+	org := ""
+	if p.Unrestricted() {
+		org = " --org " + orgID
+	}
 
-	models, err := s.st.LoadModels(ctx)
+	models, err := s.st.ListModels(ctx, orgID)
 	if err != nil {
-		d.add(area, "Catalogue", VerdictFail, "the catalogue could not be read", "")
+		d.add(area, "Catalogue", VerdictFail, "the models could not be read", "")
 		return
 	}
 	var enabled, chat []policy.Model
@@ -196,12 +192,12 @@ func (s *Server) checkCatalogue(ctx context.Context, d *Diagnosis, probe bool) {
 		d.add(area, "Catalogue", VerdictFail,
 			fmt.Sprintf("%d declared, none enabled: every inference request is refused",
 				len(models)),
-			"add one with 'keera model add', or enable one with 'keera model enable'")
+			"add one with 'keera model add <alias>"+org+"'")
 	case len(chat) == 0:
 		d.add(area, "Catalogue", VerdictWarn,
 			fmt.Sprintf("%d enabled, none of them chat: no coding agent can use this "+
 				"deployment", len(enabled)),
-			"add a chat model with 'keera model add <alias> --kind chat'")
+			"add a chat model with 'keera model add <alias> --kind chat"+org+"'")
 	default:
 		d.add(area, "Catalogue", VerdictOK,
 			fmt.Sprintf("%d enabled, %d of them chat", len(enabled), len(chat)), "")
@@ -211,14 +207,14 @@ func (s *Server) checkCatalogue(ctx context.Context, d *Diagnosis, probe bool) {
 		if len(m.Backends) == 0 {
 			d.add(area, m.Alias, VerdictFail,
 				"enabled with no backend, so a request naming it gets a 503",
-				"give it one with 'keera model set "+m.Alias+" --backend <url>'")
+				modelFix(m, "--backend <url>", p))
 		}
 		// A router is told nothing about a destination but its description.
 		if m.Description == "" {
 			d.add(area, m.Alias, VerdictWarn,
 				"no description, so a router choosing between destinations sees a bare "+
 					"alias, and so does a client on /v1/models",
-				"set one with 'keera model set "+m.Alias+" --description \"...\"'")
+				modelFix(m, "--description \"...\"", p))
 		}
 	}
 
@@ -227,14 +223,23 @@ func (s *Server) checkCatalogue(ctx context.Context, d *Diagnosis, probe bool) {
 	}
 }
 
+// modelFix says how to change a model. Only an operator names the
+// organisation; anyone else's is their own.
+func modelFix(m policy.Model, flags string, p *authn.Principal) string {
+	if p.Unrestricted() {
+		flags += " --org " + m.OrgID
+	}
+	return "'keera model set " + m.Alias + " " + flags + "'"
+}
+
 // probeModels calls each enabled model. It catches a vLLM parser that does
 // not match its model: a 200 with prose instead of a tool call, which leaves
 // every coding agent useless.
 func (s *Server) probeModels(ctx context.Context, d *Diagnosis, enabled []policy.Model) {
 	const area = "Models"
 	for _, m := range enabled {
-		live, found := s.reg.Model(m.Alias)
-		if !found || s.opts.Gateway == nil {
+		live, found := s.reg.Model(m.OrgID, m.Alias)
+		if !found {
 			continue
 		}
 		result := s.opts.Gateway.CheckModel(ctx, live)
@@ -280,7 +285,7 @@ func (s *Server) checkTenancy(ctx context.Context, d *Diagnosis, orgID string, p
 		d.add(area, "API keys", VerdictOK, fmt.Sprintf("%d active", setup.Keys), "")
 	}
 
-	if !p.CanAdminCatalogue() {
+	if !p.Unrestricted() {
 		return
 	}
 	// The trap: with one organisation no domain is needed. With two, a
@@ -311,11 +316,11 @@ func (s *Server) checkTenancy(ctx context.Context, d *Diagnosis, orgID string, p
 
 // checkHooks checks the filters and routers: the two things in front of a
 // request that can name a model that is not there.
-func (s *Server) checkHooks(ctx context.Context, d *Diagnosis, orgID string) {
+func (s *Server) checkHooks(ctx context.Context, d *Diagnosis, orgID string, p *authn.Principal) {
 	if orgID == "" {
 		return // an operator looking at every organisation at once
 	}
-	models, err := s.st.LoadModels(ctx)
+	models, err := s.st.ListModels(ctx, orgID)
 	if err != nil {
 		return
 	}
@@ -325,11 +330,16 @@ func (s *Server) checkHooks(ctx context.Context, d *Diagnosis, orgID string) {
 			enabled[m.Alias] = true
 		}
 	}
-	s.checkFilters(ctx, d, orgID, enabled)
-	s.checkRouters(ctx, d, orgID, enabled)
+	// Only an operator names the organisation. Anyone else's is their own.
+	org := ""
+	if p.Unrestricted() {
+		org = " --org " + orgID
+	}
+	s.checkFilters(ctx, d, orgID, org, enabled)
+	s.checkRouters(ctx, d, orgID, org, enabled)
 }
 
-func (s *Server) checkFilters(ctx context.Context, d *Diagnosis, orgID string, enabled map[string]bool) {
+func (s *Server) checkFilters(ctx context.Context, d *Diagnosis, orgID, org string, enabled map[string]bool) {
 	filters, err := s.st.ListFilters(ctx, orgID)
 	if err != nil {
 		return
@@ -342,18 +352,18 @@ func (s *Server) checkFilters(ctx context.Context, d *Diagnosis, orgID string, e
 				"runs on '"+f.Model+"', which is not enabled; a filter that cannot run "+
 					"refuses every request it covers",
 				"point it at an enabled model with 'keera filter set "+f.Alias+
-					" --model <alias>'")
+					" --model <alias>"+org+"'")
 		case f.Shadow:
 			d.add("Filters", f.Alias, VerdictWarn,
 				"in shadow: it runs, it costs what it costs, and it enforces nothing",
-				"turn it on with 'keera filter set "+f.Alias+" --enforce'")
+				"turn it on with 'keera filter set "+f.Alias+" --enforce"+org+"'")
 		default:
 			d.add("Filters", f.Alias, VerdictOK, string(f.Mode)+", enforcing", "")
 		}
 	}
 }
 
-func (s *Server) checkRouters(ctx context.Context, d *Diagnosis, orgID string, enabled map[string]bool) {
+func (s *Server) checkRouters(ctx context.Context, d *Diagnosis, orgID, org string, enabled map[string]bool) {
 	routers, err := s.st.ListRouters(ctx, orgID)
 	if err != nil {
 		return
@@ -370,7 +380,7 @@ func (s *Server) checkRouters(ctx context.Context, d *Diagnosis, orgID string, e
 			d.add("Routers", rt.Alias, VerdictFail,
 				"none of its destinations is an enabled model: "+strings.Join(dead, ", "),
 				"point it at enabled models with 'keera router set "+rt.Alias+
-					" --destinations <a,b>'")
+					" --destinations <a,b>"+org+"'")
 		case len(dead) > 0:
 			// Not fatal, since the router uses what is left. Still worth
 			// saying, because a router's failures are silent.
@@ -380,52 +390,37 @@ func (s *Server) checkRouters(ctx context.Context, d *Diagnosis, orgID string, e
 		case rt.Decides() && !enabled[rt.Model]:
 			d.add("Routers", rt.Alias, VerdictFail,
 				"reads requests with '"+rt.Model+"', which is not an enabled model",
-				"point it at one with 'keera router set "+rt.Alias+" --model <alias>'")
+				"point it at one with 'keera router set "+rt.Alias+" --model <alias>"+org+"'")
 		default:
 			d.add("Routers", rt.Alias, VerdictOK,
-				fmt.Sprintf("%s, %d destinations", modeName(rt.Mode), len(rt.Destinations)), "")
+				fmt.Sprintf("%s, %d destinations", rt.Mode, len(rt.Destinations)), "")
 		}
 	}
 }
 
-// checkSandboxes checks the machines, including the one promise this
-// repository knows it does not enforce.
-func (s *Server) checkSandboxes(ctx context.Context, d *Diagnosis) {
+// checkSandboxes checks the machines.
+func (s *Server) checkSandboxes(ctx context.Context, d *Diagnosis, orgID string) {
 	const area = "Sandboxes"
 
-	classes, err := s.st.ListSandboxClasses(ctx)
+	if orgID == "" {
+		return // an operator looking at every organisation at once
+	}
+	classes, err := s.st.ListSandboxClasses(ctx, orgID)
 	if err != nil {
 		return
 	}
 	if s.opts.Sandboxes == nil {
+		// Not a warning: every new organisation gets the template's classes,
+		// driver or not, so they are there once one is set.
 		if len(classes) > 0 {
-			d.add(area, "Driver", VerdictWarn,
-				fmt.Sprintf("%d classes declared and no driver, so no sandbox can be "+
-					"created", len(classes)),
-				"set KEERA_SANDBOX_DRIVER, or remove the catalogue")
+			d.add(area, "Driver", VerdictOK,
+				fmt.Sprintf("sandboxes are off; set KEERA_SANDBOX_DRIVER to lend "+
+					"out the %d classes", len(classes)),
+				"")
 		}
 		return
 	}
 	d.add(area, "Driver", VerdictOK, fmt.Sprintf("%d classes", len(classes)), "")
-
-	// Declared but not enforced. The gateway warns at start-up, but nobody
-	// may have been watching then.
-	for _, c := range classes {
-		if len(c.Egress) > 0 {
-			d.add(area, c.Name, VerdictWarn,
-				"declares an egress list that nothing reads: a sandbox's network is "+
-					"constrained by one NetworkPolicy, the same for every class",
-				"see docs/sandboxes.md for what is actually enforced")
-		}
-	}
-}
-
-// modeName names a router's mode. An empty mode means instruction.
-func modeName(m policy.RouterMode) string {
-	if m == "" {
-		return string(policy.RouterModeInstruction)
-	}
-	return string(m)
 }
 
 // plural completes "has" or "have" after "ha".

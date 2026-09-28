@@ -36,8 +36,7 @@ var sessionSorts = map[string]store.AgentSessionSort{
 func (s *Server) sessionQuery(w http.ResponseWriter, r *http.Request,
 	p *authn.Principal) (store.AgentSessionQuery, bool) {
 	var q store.AgentSessionQuery
-	if !p.CanAdminOrg(p.OrgID) {
-		s.forbid(w, "only an administrator can read the session log")
+	if !s.requireOrgAdmin(w, p, p.OrgID) {
 		return q, false
 	}
 	orgID, from, to, ok := s.reportScope(w, r, p)
@@ -64,7 +63,7 @@ func (s *Server) sessionQuery(w http.ResponseWriter, r *http.Request,
 		Unhappy: httpx.Flag(v, "unhappy"),
 		From:    from,
 		To:      to,
-		Gap:     s.sessionGap(),
+		Gap:     s.opts.SessionGap,
 		Sort:    sort,
 	}
 	q.Limit, _ = strconv.Atoi(v.Get("limit"))
@@ -72,14 +71,6 @@ func (s *Server) sessionQuery(w http.ResponseWriter, r *http.Request,
 		q.Before, _ = strconv.ParseInt(v.Get("before"), 10, 64)
 	}
 	return q, true
-}
-
-// sessionGap is the idle time after which the next request starts a new task.
-func (s *Server) sessionGap() time.Duration {
-	if s.opts.SessionGap > 0 {
-		return s.opts.SessionGap
-	}
-	return store.DefaultSessionGap
 }
 
 // sessions lists the tasks in one window, with totals for the whole window.
@@ -138,8 +129,7 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request, p *authn.Princ
 // The id in the path may be any request in the session, because readers come
 // from a row in the request log.
 func (s *Server) session(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if !p.CanAdminOrg(p.OrgID) {
-		s.forbid(w, "only an administrator can read the session log")
+	if !s.requireOrgAdmin(w, p, p.OrgID) {
 		return
 	}
 	orgID, ok := s.scopeOrg(w, p, r.URL.Query().Get("org_id"))
@@ -151,8 +141,7 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request, p *authn.Princi
 		badRequest(w, "the session is named by the id of one of its requests")
 		return
 	}
-	gap := s.sessionGap()
-	session, requests, err := s.st.AgentSessionAt(r.Context(), orgID, id, gap)
+	session, requests, err := s.st.AgentSessionAt(r.Context(), orgID, id, s.opts.SessionGap)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -176,7 +165,7 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request, p *authn.Princi
 		"requests":    requests,
 		"tool_calls":  tools,
 		"currency":    s.opts.Currency,
-		"gap_seconds": int64(gap.Seconds()),
+		"gap_seconds": int64(s.opts.SessionGap.Seconds()),
 	}
 	names.addTo(out)
 	httpx.WriteJSON(w, http.StatusOK, out)

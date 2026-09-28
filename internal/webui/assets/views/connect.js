@@ -7,73 +7,17 @@
 // developer picked already substituted in - so the thing they copy is the thing
 // that works, not a template they have to fill in and get wrong once.
 
-import { api } from "../api.js";
-import { h, icon, icons, copyText, empty } from "../ui.js";
+import { api, chatTargets } from "../api.js";
+import { h, icon, icons, copyText, empty, go } from "../ui.js";
+import { chooseOrg } from "./orgs.js";
 
 // The configuration blocks come from the control plane at /control/v1/connect
 // - the same catalogue `keera connect` reads, so the panel and the command
 // line cannot hand a developer two versions of the same file. See
 // internal/connect.
 //
-// PROSE is what this panel adds around one: the sentence saying what to run,
-// and sometimes a `note`. It is here rather than served with the template
-// because it is marked up, and a paragraph of links and code spans does not
-// survive being a JSON string.
-//
-// A client the catalogue gains without an entry here still works: the plain
-// prose the catalogue carries is used instead.
-const PROSE = {
-  pi: {
-    run: (m) => [
-      h("code", {}, "pi"),
-      " in your project, then ",
-      h("code", {}, "/model"),
-      " and pick ",
-      h("strong", {}, title(m.alias)),
-      ".",
-    ],
-  },
-  opencode: {
-    run: (m) => [
-      h("code", {}, "opencode"),
-      " in your project, then ",
-      h("code", {}, "/models"),
-      " and pick ",
-      h("strong", {}, `Keera · ${title(m.alias)}`),
-      ".",
-    ],
-  },
-  "claude-code": {
-    note: () => [
-      "To make this permanent, and for background sessions that do not " +
-        "read your shell, put the same variables in the ",
-      h("code", {}, "env"),
-      " block of ",
-      h("code", {}, "~/.claude/settings.json"),
-      ". Use the key itself there, because that file does not expand shell " +
-        "variables. To fetch the key from a vault, use the ",
-      h("code", {}, "apiKeyHelper"),
-      " setting instead. Do not put it in a project's ",
-      h("code", {}, ".claude/settings.json"),
-      ", which is committed.",
-    ],
-    run: () => [
-      h("code", {}, "claude"),
-      " in your project. It already uses the model above. ",
-      h("code", {}, "/status"),
-      " shows which gateway and key it uses.",
-    ],
-  },
-  openai: {
-    run: (m) => [
-      "anything that reads ",
-      h("code", {}, "OPENAI_BASE_URL"),
-      " (the official SDKs, Aider, your own scripts) with ",
-      h("strong", {}, m.alias),
-      " as the model.",
-    ],
-  },
-};
+// The prose around a block comes with it. A span in backticks is something to
+// type or a name to find, and is shown as code.
 
 // The limits every block states, which connect.Limits on the server decides
 // the same way. A config that named a window the gateway does not give is a
@@ -125,10 +69,8 @@ export function loadClients() {
           ...c,
           path: c.path || null,
           config: (base, m) => fill(c.template, base, m.alias, m.max_context),
-          // The catalogue's own plain prose, which an entry in PROSE replaces.
-          run: (m) => [fill(c.run, "", m.alias)],
-          note: c.note ? () => [c.note] : null,
-          ...PROSE[c.key],
+          run: (m) => prose(fill(c.run, "", m.alias)),
+          note: c.note ? () => prose(c.note) : null,
         })),
       (err) => {
         // A failure is not cached: the panel's Reload button, and the next
@@ -142,11 +84,17 @@ export function loadClients() {
 }
 
 export async function connectView(ctx) {
-  const [clients, modelsRes] = await Promise.all([loadClients(), api.models()]);
-  const models = (modelsRes.data || []).filter(
-    (m) => m.enabled !== false && m.kind === "chat",
+  if (!ctx.orgID && ctx.state.me.unrestricted)
+    return chooseOrg(ctx, "Connect a client");
+
+  const [clients, models] = await Promise.all([
+    loadClients(),
+    chatTargets(ctx.orgID),
+  ]);
+  ctx.setSubtitle(
+    "Pi, OpenCode, Claude Code or any OpenAI-compatible client, pointed at " +
+      "this gateway",
   );
-  ctx.setSubtitle("Pi, OpenCode and Claude Code, pointed at this gateway");
 
   if (!models.length) {
     return h(
@@ -203,9 +151,11 @@ export async function connectView(ctx) {
       h(
         "option",
         { value: m.alias, selected: m.alias === state.model.alias },
-        m.max_context
-          ? `${m.alias} - ${compactContext(m.max_context)} context`
-          : m.alias,
+        m.router
+          ? `${m.alias} - router`
+          : m.max_context
+            ? `${m.alias} - ${compactContext(m.max_context)} context`
+            : m.alias,
       ),
     ),
   );
@@ -215,8 +165,8 @@ export async function connectView(ctx) {
   // not a decision, so a control for it - even one that refuses the keystroke -
   // only invites a developer to look for the way to change it. It is already
   // in the block below, which is where they need to read it, and an operator
-  // whose inference plane is published under another name declares it with
-  // KEERA_GATEWAY_PUBLIC_URL so that every panel and `keera connect` agree.
+  // whose panel is published under another name declares it with
+  // KEERA_PUBLIC_URL so that every panel and `keera connect` agree.
   const picker = h(
     "div",
     { class: "card card-body", style: { marginBottom: "16px" } },
@@ -306,10 +256,7 @@ function instructions(ctx, state) {
             "a",
             {
               href: "/keys",
-              onClick: (e) => {
-                e.preventDefault();
-                ctx.navigate("/keys");
-              },
+              onClick: go(ctx, "/keys"),
             },
             "API keys",
           ),
@@ -343,7 +290,7 @@ function instructions(ctx, state) {
       ),
     ),
 
-    step(3, "Run it", h("p", { class: "muted" }, "Start ", client.run(model))),
+    step(3, "Run it", h("p", { class: "muted" }, client.run(model))),
   );
 }
 
@@ -393,13 +340,11 @@ export function defaultBase(ctx) {
   return location.origin + "/api";
 }
 
-// An earlier panel let a developer correct the gateway URL and remembered the
-// correction here. It is cleared rather than left behind: the address is the
-// deployment's to declare now, and a stale key would sit in a browser for good.
-try {
-  localStorage.removeItem("keera.connect.base");
-} catch {
-  // A browser that refuses storage never had one to clear.
+/** prose renders the catalogue's prose, with each span in backticks as code. */
+function prose(text) {
+  return String(text || "")
+    .split("`")
+    .map((part, i) => (i % 2 ? h("code", {}, part) : part));
 }
 
 /** title turns an alias into the label a model picker shows: keera-speed → Keera Speed. */

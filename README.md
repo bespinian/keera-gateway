@@ -75,7 +75,7 @@ cd compose
 cp .env.example .env    # then set KEERA_OPERATOR_KEY and KEERA_SECRET_KEY
 
 # A laptop or any host without a GPU (llama.cpp; no tool calls):
-podman compose -f compose.yaml -f compose.cpu.yaml up -d --build
+podman compose up -d --build
 
 # A GPU host (vLLM):
 podman compose -f compose.yaml -f compose.gpu.yaml up -d --build
@@ -90,6 +90,7 @@ Then issue a key and use it:
 
 ```sh
 export KEERA_OPERATOR_KEY=…              # the same value as in .env
+export KEERA_CONTROL_URL=http://127.0.0.1:8080
 keera org create "Example Bank"
 keera team create "Payments Platform"
 KEY=$(keera key create --team <team-id> --alias "a developer's laptop")
@@ -104,9 +105,9 @@ operator key. **Overview** shows a first-run checklist.
 [docs/install.md](docs/install.md) covers every setting, the first run and
 troubleshooting.
 
-`keera doctor` checks the deployment's configuration and catalogue. It lists
-what is missing and what is declared but not enforced, and what to do about
-each. With `--probe`, it also checks that every enabled model answers with a
+`keera doctor` checks the deployment's configuration and an organisation's
+catalogue. It lists what is missing and what is declared but not enforced, and
+what to do about each. With `--probe`, it also checks that every enabled model answers with a
 tool call rather than prose.
 
 A developer signs in with one command. `keera login --url` also makes that
@@ -169,9 +170,10 @@ watch the split between its destinations.
 [docs/routers.md](docs/routers.md)
 
 **Sandboxes** are developer machines inside the cluster. Each has the toolchain
-installed, a home directory that survives suspend, its own API key that is
-never written to disk, enforceable egress, and an expiry. `--purpose agent`
-creates a machine for one task, and a branch is the only thing that leaves it.
+installed, a home directory that can survive a suspend, its own API key that
+is revoked when it ends, and an expiry. On Kubernetes a network policy can limit
+its egress; the podman driver has no egress control. `--purpose agent` creates
+a machine for one task, and a branch is the only thing that leaves it.
 [docs/sandboxes.md](docs/sandboxes.md)
 
 **MCP servers** get the same controls as models. An agent calls a server's
@@ -188,8 +190,8 @@ keera mcp calls --summary
 ```
 
 **Hosted models** get the same allow-lists, budgets, rate limits and audit as
-any other model. Add them on the panel's **Models** screen or in the catalogue
-file. Prompts sent to them leave your infrastructure, so put a guardrail on
+any other model. Add them on the panel's **Models** screen, or in the catalogue
+file that new organisations start from. Prompts sent to them leave your infrastructure, so put a guardrail on
 them. [docs/providers.md](docs/providers.md)
 
 **The panel** has these screens:
@@ -200,8 +202,9 @@ them. [docs/providers.md](docs/providers.md)
 - **My access** - the developer's own view.
 
 Every team, key, model, filter and router has its own screen with the same four
-numbers. `keera usage`, `keera failures`, `keera sessions` and
-`keera <thing> report` show the same reports in a terminal.
+numbers. `keera usage`, `keera failures`, `keera sessions`,
+`keera filter report` and `keera router report` show the same reports in a
+terminal.
 
 ## Documentation
 

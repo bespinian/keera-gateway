@@ -1,8 +1,7 @@
 # Publishes the ports a host-run gateway has to reach. Used by `make dev`,
 # which is the intended entry point:
 #
-#   podman compose -f compose.yaml -f compose.cpu.yaml -f compose.dev.yaml \
-#     up -d keera-db keera-engine
+#   podman compose -f compose.yaml -f compose.dev.yaml up -d keera-db keera-engine
 #
 # The target names only those two services on purpose. Under this file the
 # gateway is the thing being edited - it runs on the host under air - so the

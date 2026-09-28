@@ -149,23 +149,31 @@ func TestCheckModelWarnsWhenTheBackendServesAnotherModel(t *testing.T) {
 // A refusal from the inference plane has to arrive as what the inference plane
 // said, not as "check failed".
 func TestCheckModelSurfacesTheBackendsOwnError(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = io.WriteString(w, `{"error":{"message":"The model does not exist."}}`)
-	}))
-	defer upstream.Close()
-
-	p := probeServer(t).CheckModel(context.Background(), chatAlias(upstream.URL))
-	switch {
-	case p.OK:
-		t.Fatal("a 404 from the backend must not pass")
-	case !p.Reachable:
-		t.Error("reachable = false; the backend answered, it just refused")
-	case p.Status != http.StatusNotFound:
-		t.Errorf("status = %d, want 404", p.Status)
-	case !strings.Contains(p.Error, "The model does not exist."):
-		t.Errorf("error = %q, want the backend's own message", p.Error)
+	for _, kind := range []policy.Kind{policy.KindChat, policy.KindCompletion, policy.KindEmbedding} {
+		for _, body := range []string{
+			`{"error":{"message":"The model does not exist."}}`,
+			`{"detail":"The model does not exist."}`,
+		} {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = io.WriteString(w, body)
+			}))
+			m := chatAlias(upstream.URL)
+			m.Kind = kind
+			p := probeServer(t).CheckModel(context.Background(), m)
+			upstream.Close()
+			switch {
+			case p.OK:
+				t.Fatalf("%s: a 404 from the backend must not pass", kind)
+			case !p.Reachable:
+				t.Errorf("%s: reachable = false; the backend answered, it just refused", kind)
+			case p.Status != http.StatusNotFound:
+				t.Errorf("%s: status = %d, want 404", kind, p.Status)
+			case !strings.Contains(p.Error, "The model does not exist."):
+				t.Errorf("%s, %s: error = %q, want the backend's own message", kind, body, p.Error)
+			}
+		}
 	}
 }
 
@@ -218,6 +226,10 @@ func TestCheckModelChecksAnEmbeddingModelOnItsOwnTerms(t *testing.T) {
 	if p.Sample != "3 dimensions" {
 		t.Errorf("sample = %q, want the vector's size", p.Sample)
 	}
+	// The check asks for no stream, so a missing one is not worth a warning.
+	if len(p.Warnings) != 0 {
+		t.Errorf("unexpected warnings: %v", p.Warnings)
+	}
 }
 
 func TestCheckModelFailsAnEmbeddingModelThatReturnsNoVector(t *testing.T) {
@@ -247,10 +259,9 @@ func TestCheckModelPresentsTheModelCredential(t *testing.T) {
 	defer upstream.Close()
 
 	m := chatAlias(upstream.URL)
-	m.APIKeyEnv = "ANTHROPIC_API_KEY"
+	m.APIKey = "sk-ant-upstream"
 	srv := New(&fakeSource{}, &fakeBudgets{}, ratelimit.New(), &fakeSink{}, metrics.New(),
-		Options{APIKeys: func(string) string { return "sk-ant-upstream" }},
-		slog.New(slog.DiscardHandler))
+		Options{}, slog.New(slog.DiscardHandler))
 
 	if p := srv.CheckModel(context.Background(), m); !p.OK {
 		t.Fatalf("check failed: %s", p.Error)

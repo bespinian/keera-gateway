@@ -38,10 +38,8 @@ func (s *Store) TakeCLICode(ctx context.Context, hash []byte) (CLICode, error) {
 
 // CLIToken is one signed-in machine.
 type CLIToken struct {
-	UserID     string
-	Label      string
-	ExpiresAt  time.Time
-	LastSeenAt time.Time
+	UserID    string
+	ExpiresAt time.Time
 }
 
 // CLITokenUser is a token joined to the person it belongs to. Like
@@ -52,13 +50,10 @@ type CLITokenUser struct {
 }
 
 // CreateCLIToken stores a token under its hash.
-func (s *Store) CreateCLIToken(ctx context.Context, hash []byte, userID, label string,
+func (s *Store) CreateCLIToken(ctx context.Context, hash []byte, userID string,
 	expires time.Time) error {
-	// The label is whatever the machine calls itself, so it is bounded. It is
-	// cut on a rune boundary because a text column refuses half a character.
-	label = truncate(label, 200)
-	_, err := s.pool.Exec(ctx, `INSERT INTO cli_tokens (id, user_id, label, expires_at)
-		VALUES ($1,$2,$3,$4)`, hash, userID, label, expires)
+	_, err := s.pool.Exec(ctx, `INSERT INTO cli_tokens (id, user_id, expires_at)
+		VALUES ($1,$2,$3)`, hash, userID, expires)
 	return err
 }
 
@@ -66,23 +61,14 @@ func (s *Store) CreateCLIToken(ctx context.Context, hash []byte, userID, label s
 // disabled person, is reported as missing, so no caller has to check either.
 func (s *Store) LookupCLIToken(ctx context.Context, hash []byte) (CLITokenUser, error) {
 	var tu CLITokenUser
-	err := s.pool.QueryRow(ctx, `SELECT t.user_id, t.label, t.expires_at, t.last_seen_at,
+	err := s.pool.QueryRow(ctx, `SELECT t.user_id, t.expires_at,
 		u.id, u.org_id, u.email, COALESCE(u.external_id,''), u.role, u.created_at
 		FROM cli_tokens t JOIN users u ON u.id = t.user_id
 		WHERE t.id = $1 AND t.expires_at > now() AND u.disabled_at IS NULL`, hash,
-	).Scan(&tu.Token.UserID, &tu.Token.Label, &tu.Token.ExpiresAt, &tu.Token.LastSeenAt,
+	).Scan(&tu.Token.UserID, &tu.Token.ExpiresAt,
 		&tu.User.ID, &tu.User.OrgID, &tu.User.Email, &tu.User.ExternalID, &tu.User.Role,
 		&tu.User.CreatedAt)
 	return tu, notFound(err)
-}
-
-// TouchCLIToken records that a token was used, at most once a minute, like
-// TouchSession.
-func (s *Store) TouchCLIToken(ctx context.Context, hash []byte) error {
-	_, err := s.pool.Exec(ctx,
-		`UPDATE cli_tokens SET last_seen_at = now()
-		 WHERE id = $1 AND last_seen_at < now() - interval '1 minute'`, hash)
-	return err
 }
 
 // DeleteCLIToken signs one machine out.

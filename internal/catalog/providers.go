@@ -9,7 +9,8 @@ import (
 )
 
 // Provider is a hosted OpenAI-compatible endpoint Keera Gateway knows by name,
-// so a model needs only an alias, a model id and an API key to use it.
+// so a model needs only an alias, a model id and an API key to use it (and,
+// for Infomaniak, a product id).
 //
 // A provider is a table of defaults, not an adapter: these endpoints already
 // speak the API the gateway forwards. Anthropic and OpenAI are also sent their
@@ -24,9 +25,6 @@ type Provider struct {
 	// Infomaniak. An entry then states `product_id` or writes its own
 	// `backends`.
 	NeedsProductID bool `json:"needs_product_id,omitempty"`
-	// APIKeyEnv is the environment variable holding the credential. The
-	// secret never enters the catalogue or the database.
-	APIKeyEnv string `json:"api_key_env"`
 	// CachedInput says the provider publishes a discounted rate for tokens
 	// served from its prompt cache.
 	CachedInput bool `json:"cached_input"`
@@ -42,8 +40,9 @@ type Provider struct {
 	// Summary is the provider in one line, for the panel's provider tile.
 	// Caveats belong in Note.
 	Summary string `json:"summary"`
-	// Note is what an operator needs to know before using it, shown by
-	// `keera model providers` and in the control panel.
+	// Note is what an administrator needs to know before using it, shown by
+	// `keera model providers` and in the control panel. It gives each rough
+	// edge in a sentence; docs/providers.md has the long form.
 	Note string `json:"note"`
 }
 
@@ -91,7 +90,6 @@ var providers = []Provider{{
 	// Messages clients are sent, and the OpenAI-compatible /v1/chat/completions,
 	// which every other client is.
 	Endpoint:    "https://api.anthropic.com/v1",
-	APIKeyEnv:   "ANTHROPIC_API_KEY",
 	CachedInput: true,
 	Location:    "usa",
 	Currency:    "USD",
@@ -139,21 +137,20 @@ var providers = []Provider{{
 		CachedInputMicrosPerMTok: 300_000,
 		Description:              "previous generation's middle option - capable and mid-priced",
 	}},
-	Note: "Prompts leave your infrastructure. A client that speaks the " +
-		"Messages API, such as Claude Code, is forwarded to Anthropic's own " +
-		"API, where prompt caching and thinking work and cached input is " +
-		"charged at the cached rate. A cache write is charged at the input " +
-		"price, a quarter under what Anthropic charges. Every other client goes " +
-		"through Anthropic's OpenAI-compatible surface, which Anthropic calls a " +
-		"layer for evaluating models: prompt caching does not work there, so an " +
-		"agent on it pays full price for every resent context.",
+	Note: "Prompts leave your infrastructure. " +
+		"Messages clients such as Claude Code reach Anthropic's own API, where " +
+		"prompt caching and thinking work. Every other client goes through the " +
+		"OpenAI-compatible layer, where caching does not, so it pays full price " +
+		"for every resent context. " +
+		"A cache write is charged at the input price; Anthropic charges 25% more. " +
+		"Server tools such as web search run at Anthropic, out of sight of " +
+		"filters; a guardrail that blocks hosted tools removes them.",
 }, {
 	Name:    "openai",
 	Summary: "OpenAI's own GPT models, on the API they are released on.",
 	// OpenAI's own API. The Note says where it differs from what the gateway
 	// sends.
 	Endpoint:    "https://api.openai.com/v1",
-	APIKeyEnv:   "OPENAI_API_KEY",
 	CachedInput: true,
 	Location:    "usa",
 	Currency:    "USD",
@@ -237,28 +234,24 @@ var providers = []Provider{{
 		CachedInputMicrosPerMTok: 75_000,
 		Description:              "fast, cheap and light - short, simple work",
 	}},
-	Note: "Prompts leave your infrastructure. Prompt caching does work here, " +
-		"and the gateway reads what it discounted off the response and charges " +
-		"the cached-input rate for it. Reasoning tokens are billed as output, " +
-		"which is what the gateway charges them as: a reasoning model costs more " +
-		"than its output price and the prompt suggest, and the row's cost is " +
-		"right even though nothing separates them out. " +
-		"A client that speaks the Responses API, such as Codex, is forwarded " +
-		"to it untranslated. The gpt-5 and gpt-6 models refuse max_tokens and " +
-		"any temperature but their default, so the gateway sends " +
-		"max_completion_tokens instead and drops the temperature and top_p. " +
-		"Two prices here are one rate where OpenAI charges two. gpt-5.5 and " +
-		"gpt-5.4 cost about twice as much per token once a request passes " +
-		"272k input tokens, and the rates above are the cheaper ones, so a long " +
-		"request against those two is billed low. gpt-5.6-sol is on a " +
-		"promotional price until 21 November 2026.",
+	Note: "Prompts leave your infrastructure. " +
+		"Prompt caching works, and cached input is charged at the cached rate. " +
+		"Responses clients such as Codex reach OpenAI's Responses API. " +
+		"Reasoning tokens are billed as output, and the request log cannot " +
+		"show them apart. " +
+		"Every chat model gets max_completion_tokens instead of max_tokens, and " +
+		"the reasoning models (all but gpt-4 and older) get no temperature or top_p. " +
+		"Built-in tools such as web search run at OpenAI, out of sight of " +
+		"filters; a guardrail that blocks hosted tools removes them. " +
+		"gpt-5.5 and gpt-5.4 cost about twice as much above 272k input tokens, " +
+		"and the table has the lower price. " +
+		"gpt-5.6-sol is on a promotional price until 21 November 2026.",
 }, {
 	Name:    "infomaniak",
 	Summary: "Open-weight models, served in Switzerland.",
 	// The address carries the product id of your AI Service.
 	Endpoint:       "https://api.infomaniak.com/2/ai/{product_id}/openai/v1",
 	NeedsProductID: true,
-	APIKeyEnv:      "INFOMANIAK_API_KEY",
 	Location:       "ch",
 	Currency:       "CHF",
 	Kinds:          []policy.Kind{policy.KindChat},
@@ -304,19 +297,19 @@ var providers = []Provider{{
 		Description: "small, quick and cheap - chatbots, short edits and " +
 			"everyday questions",
 	}},
-	Note: "Prompts leave your infrastructure, but stay in Switzerland: " +
-		"Infomaniak serves these models from its own data centres. The endpoint " +
-		"is per customer, so a model needs your AI Service's product id as well " +
-		"as a key - both are in the Infomaniak console under AI Tools. " +
-		"Infomaniak publishes no discount for a prompt it has already read, so " +
-		"there is no cached-input rate to fill in and every input token is " +
-		"charged at the input price. The prices are in CHF, so a deployment " +
-		"accounting in CHF needs no conversion.",
+	Note: "Prompts leave your infrastructure, but stay in Switzerland. " +
+		"The endpoint is per customer: a model needs your AI Service's product " +
+		"id as well as a key, both in the Infomaniak console under AI Tools. " +
+		"Model ids are the upstream names, with capitals. " +
+		"No cached-input rate is published, so every input token costs the " +
+		"input price. " +
+		"Only chat models are listed: declare an embedding model with no " +
+		"provider, its full address, its location and its prices. " +
+		"Prices are in CHF.",
 }, {
 	Name:        "stepping-stone",
 	Summary:     "Open-weight models, served in Switzerland.",
 	Endpoint:    "https://llm.stoney-cloud.com/v1",
-	APIKeyEnv:   "STEPPING_STONE_API_KEY",
 	CachedInput: true,
 	Location:    "ch",
 	Currency:    "CHF",
@@ -402,8 +395,14 @@ var providers = []Provider{{
 			"and formulas - not for chat or code",
 	}},
 	Note: "Prompts leave your infrastructure, but stay in Switzerland. " +
-		"stepping stone serves these models from its own stoney cloud. " +
-		"The prices are in CHF.",
+		"Each model has its own API key. " +
+		"The cached-input rates are listed, but stepping stone bills them only " +
+		"from about the end of October 2026; until then a cached prompt costs " +
+		"more on the invoice than in Keera. " +
+		"Model ids are the upstream names, with capitals. " +
+		"Only chat and OCR models are listed: declare an embedding model with " +
+		"no provider, its address, its location and its prices. " +
+		"Prices are in CHF.",
 }}
 
 // Providers returns a copy of the built-in table, so a caller cannot edit the
@@ -541,9 +540,6 @@ func applyProvider(m Model) (Model, error) {
 		return m, err
 	}
 	m.Backends = backends
-	if m.APIKeyEnv == "" {
-		m.APIKeyEnv = p.APIKeyEnv
-	}
 	if m.Location == "" {
 		m.Location = p.Location
 	}

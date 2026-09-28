@@ -6,7 +6,7 @@ import { signIn } from "./views/signin.js";
 import { overviewView } from "./views/overview.js";
 import { teamsView } from "./views/teams.js";
 import { keysView } from "./views/keys.js";
-import { modelsView, modelCatalogView } from "./views/models.js";
+import { modelsView, providerModelsView } from "./views/models.js";
 import { filtersView, filterDetailView } from "./views/filters.js";
 import { routersView, routerDetailView } from "./views/routers.js";
 import { sandboxesView } from "./views/sandboxes.js";
@@ -33,9 +33,9 @@ const root = document.getElementById("root");
 export const state = {
   me: null,
   orgs: [],
-  /** setup is what this deployment has: the counts the first-run checklist
-   *  reads, and the three that decide whether Filters, Routers and Sandboxes
-   *  are on the sidebar at all. */
+  /** setup is what this organisation has: the counts the first-run checklist
+   *  reads, and the four that decide whether Filters, Routers, MCP and
+   *  Sandboxes are on the sidebar at all. */
   setup: {},
   /** orgID is which organisation the panel is looking at. For anyone bound to
    *  one it is theirs; an operator can switch. */
@@ -113,11 +113,11 @@ const routes = [
   // Every model the hosted providers offer, to pick one to add. It is opened
   // from Models rather than the sidebar, so `under` lights up Models instead.
   {
-    path: "/model-catalog",
+    path: "/provider-models",
     group: "Organisation",
-    label: "Model catalog",
+    label: "Model catalogue",
     icon: "models",
-    view: modelCatalogView,
+    view: providerModelsView,
     under: "/models",
   },
   // Filters sit next to the catalogue because that is what they are made of -
@@ -129,7 +129,7 @@ const routes = [
     label: "Filters",
     icon: "filters",
     view: filtersView,
-    // Folded away until this deployment has one. See advancedHidden: a first
+    // Folded away until this deployment has one. See advancedShown: a first
     // deployment has sixteen screens and needs nine, and a filter is not a
     // thing anybody sets up before they have a reason to.
     advanced: "filters",
@@ -159,8 +159,7 @@ const routes = [
     detail: { label: "Router", view: routerDetailView },
   },
   // MCP servers sit after the two hooks: like them they are something a
-  // request passes through on its way out, and like the models they are a
-  // catalogue every tenant shares.
+  // request passes through on its way out.
   {
     path: "/mcp",
     group: "Organisation",
@@ -170,9 +169,9 @@ const routes = [
     advanced: "mcp_servers",
     about: "Tools for agents, behind the same keys and guardrails.",
   },
-  // Sandboxes sit after the guardrails and before the report: the classes are
-  // a catalogue like the models, the quota is a guardrail like the rest, and
-  // what the machines cost shows up in the usage screen below.
+  // Sandboxes sit after the guardrails: the classes are a catalogue like the
+  // models, and the quota is a guardrail like the rest. What the machines cost
+  // is in `keera sandbox usage`, not the usage screen.
   //
   // Not under "You", despite being a thing a developer asks for. A member sees
   // their own and an administrator sees all of them, so splitting it in two
@@ -303,12 +302,16 @@ function visibleRoutes() {
   return routes.filter((r) => {
     if (!offered(r)) return false;
     if (r.operator && !state.me.unrestricted) return false;
-    if (r.admin && !(state.me.unrestricted || state.me.role === "admin"))
-      return false;
+    if (r.admin && !state.me.can_admin_org) return false;
     // A link somebody was sent, or a page they bookmarked, opens whatever the
     // sidebar is showing - otherwise matchRoute would fall back to Overview
     // and the address bar would quietly rewrite itself.
-    if (r.advanced && !advancedShown() && !inUse(r) && location.pathname !== r.path)
+    if (
+      r.advanced &&
+      !advancedShown() &&
+      !inUse(r) &&
+      location.pathname !== r.path
+    )
       return false;
     return true;
   });
@@ -325,8 +328,7 @@ function foldedAway() {
  *
  *  A detail path is the list path plus one segment, and that segment is what
  *  the screen is given: /teams/team_1, /models/keera-code. It is decoded here
- *  rather than by the view, because a model alias is written by an operator and
- *  can contain anything a URL would otherwise read as structure.
+ *  rather than by the view, so a segment cannot be read as more of the path.
  *
  *  Anything that matches nothing falls back to the first screen the reader may
  *  see. */
@@ -558,7 +560,11 @@ function renderShell() {
         h(
           "div",
           { class: "account-id" },
-          h("div", { class: "account-email" }, state.me.email || "Operator key"),
+          h(
+            "div",
+            { class: "account-email" },
+            state.me.email || "Operator key",
+          ),
           h("div", { class: "account-role" }, state.me.role),
         ),
         h(
@@ -636,9 +642,8 @@ function topbar() {
         class: "select",
         style: { width: "auto" },
         "aria-label": "Organisation",
-        onChange: (e) => {
-          state.orgID = e.target.value;
-          localStorage.setItem("keera.org", state.orgID);
+        onChange: async (e) => {
+          await setOrg(e.target.value);
           renderRoute();
         },
       },
@@ -731,6 +736,7 @@ async function renderRoute() {
     currency: state.me.currency || "",
     reload: renderRoute,
     navigate,
+    setOrg,
     /** param is the one path segment a detail screen was opened with: the team
      *  id, the key id, the model alias. It is empty on every other screen. */
     param,
@@ -832,20 +838,33 @@ async function boot() {
       state.orgID = state.orgs[0].id;
   }
 
-  // What this deployment has. Read before the shell is drawn, because the
-  // sidebar is built from it - a nav that appeared and then grew three
-  // entries a moment later would be worse than one screen too many.
-  //
-  // A failure here leaves the counts at zero, which folds the three optional
-  // screens away rather than breaking the panel. They are one click back.
+  // Read before the shell is drawn, because the sidebar is built from it - a
+  // nav that appeared and then grew three entries a moment later would be
+  // worse than one screen too many.
+  await loadSetup();
+  renderShell();
+  await renderRoute();
+}
+
+/** loadSetup reads what the chosen organisation has set up, which decides the
+ *  optional screens in the sidebar. A failure leaves the counts at zero, which
+ *  folds those screens away rather than breaking the panel. */
+async function loadSetup() {
   try {
     state.setup = await api.setup(state.orgID);
   } catch {
     state.setup = {};
   }
+}
 
+/** setOrg changes which organisation every screen is about, and redraws the
+ *  sidebar for it. The caller then draws the screen. */
+async function setOrg(id) {
+  state.orgID = id;
+  if (id) localStorage.setItem("keera.org", id);
+  else localStorage.removeItem("keera.org");
+  await loadSetup();
   renderShell();
-  await renderRoute();
 }
 
 boot();

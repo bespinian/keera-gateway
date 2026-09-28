@@ -16,6 +16,7 @@ import {
   rowLink,
   go,
   showError,
+  isAdmin,
 } from "../ui.js";
 import {
   openGuardrails,
@@ -23,26 +24,23 @@ import {
   modelsCell,
   summarise,
 } from "./guardrails.js";
-import { chooseOrg } from "./orgs.js";
+import { chooseOrg, orgNameOf } from "./orgs.js";
 
 export async function teamsView(ctx) {
+  if (!ctx.orgID && ctx.state.me.unrestricted) return chooseOrg(ctx, "Teams");
+
   const [teamsRes, modelsRes] = await Promise.all([
     api.teams(ctx.orgID),
-    api.models(),
+    api.models(ctx.orgID),
   ]);
   const teams = teamsRes.data || [];
   const models = (modelsRes.data || []).filter((m) => m.enabled);
-  const canEdit = ctx.state.me.unrestricted || ctx.state.me.role === "admin";
+  const canEdit = isAdmin(ctx);
 
   ctx.setSubtitle(`${teams.length} team${teams.length === 1 ? "" : "s"}`);
 
-  if (!ctx.orgID && ctx.state.me.unrestricted) return chooseOrg(ctx, "Teams");
-
   const orgID = ctx.orgID || ctx.state.me.org_id;
-  const orgName =
-    ctx.state.me.org_name ||
-    (ctx.state.orgs.find((o) => o.id === orgID) || {}).name ||
-    "this organisation";
+  const orgName = orgNameOf(ctx, orgID);
 
   const head = h(
     "div",
@@ -64,7 +62,7 @@ export async function teamsView(ctx) {
       "button",
       {
         class: "btn",
-        title: "Limits that apply to every team",
+        title: "Guardrails that apply to every team",
         onClick: () =>
           openGuardrails(ctx, {
             scope: "org",
@@ -330,10 +328,11 @@ function renameTeam(ctx, team) {
 
 // deleteTeam removes a team once nothing live is bound to it.
 //
-// The control plane refuses while any key in the team still works, and the row
-// already knows how many that is - so a team with live keys is not offered the
-// button at all. Being told why, next to the screen that fixes it, is more use
-// than a red button that comes back with the same sentence as an error.
+// The control plane refuses while any key in the team is not revoked, expired
+// ones included, and the row already knows how many that is - so such a team
+// is not offered the button at all. Being told why, next to the screen that
+// fixes it, is more use than a red button that comes back with the same
+// sentence as an error.
 //
 // Where it can go ahead, the guardrails are the part worth naming: they are the
 // only thing in a team that is not recoverable from somewhere else.
@@ -346,7 +345,7 @@ function deleteTeam(ctx, team) {
         "div",
         { class: "muted" },
         `${live} key${live === 1 ? "" : "s"} in this team ${live === 1 ? "is" : "are"} ` +
-          "still active. Deleting the team would take " +
+          "not revoked. Deleting the team would take " +
           `${live === 1 ? "it" : "them"} with it, and clients using ` +
           `${live === 1 ? "it" : "them"} would be refused. Revoke ` +
           `${live === 1 ? "it" : "them"} first.`,
@@ -391,7 +390,7 @@ function deleteTeam(ctx, team) {
 // what it says to the model on their behalf is what they are working inside;
 // the numbers are the answer to "why was I refused", and refusing to show them
 // only turns that into a message to an administrator.
-async function openTeam(ctx, team, models, orgID, orgName, canEdit) {
+export async function openTeam(ctx, team, models, orgID, orgName, canEdit) {
   const ceilings = await ceilingsFor("team", { orgID, orgName });
   await openGuardrails(ctx, {
     scope: "team",

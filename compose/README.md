@@ -8,26 +8,25 @@ no ingress. Port 8080 is bound to loopback until you change `KEERA_BIND`.
 
 ## Run it
 
-Pick a tier. The override file picks the backend, so `.env` does not change
-between tiers.
+Pick a tier. `compose.yaml` on its own is the CPU tier; `compose.gpu.yaml`
+switches the backend to vLLM, so `.env` does not change between tiers.
 
 ```sh
 cp .env.example .env      # then set KEERA_OPERATOR_KEY and KEERA_SECRET_KEY
 
 # A laptop, or any host without a GPU: llama.cpp, Qwen2.5-Coder-1.5B at Q4_K_M.
 # Chat only - tool calling does not work on this tier. See the warning below.
-podman compose -f compose.yaml -f compose.cpu.yaml up -d --build
+podman compose up -d --build
+podman compose logs -f keera-engine
 
 # A GPU host: vLLM, Qwen2.5-Coder-7B-Instruct-AWQ at a 32k window.
 sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml   # once, on the host
 podman compose -f compose.yaml -f compose.gpu.yaml up -d --build
-
-podman compose -f compose.yaml -f compose.cpu.yaml logs -f keera-engine
 ```
 
-Pass the same `-f` flags to every later `podman compose` call (`logs`, `exec`,
-`down`). Without them, compose reads only the base file and acts on a different
-`keera-engine` than the one running.
+On the GPU tier, pass the same `-f` flags to every later `podman compose` call
+(`logs`, `exec`, `down`). Without them, compose acts on llama.cpp rather than
+the vLLM that is running.
 
 ### The CPU tier cannot do tool calls
 
@@ -62,19 +61,18 @@ calls.
 On either tier, `keera model check keera-speed` is the acceptance test. Re-run
 it on a newer llama.cpp build before trusting the above.
 
-On the first start the weights download into the `hf-cache` volume, and the
-inference container stays unready for minutes. Watch the logs; do not restart
-it. Wait for `Application startup complete`.
+On the first start the weights download into the `llama-cache` volume
+(`hf-cache` on the GPU tier), and the inference container stays unready for
+minutes. Watch the logs; do not restart it.
 
-The gateway is up at once. It applies its schema and model catalogue on start
-and waits only for `keera-db`.
+The gateway is up at once. It applies its schema on start and waits only for
+`keera-db`.
 
 ## Use it
 
 Administration uses the `keera` binary, which is separate from the
-`keera-gateway` server. Build it with `make build` from the repository root, or
-run it from the container, which has both:
-`podman compose -f compose.yaml -f compose.cpu.yaml exec keera-gateway /keera`.
+`keera-gateway` server and not in its image. Build it with `make build` from
+the repository root.
 
 ```sh
 export KEERA_OPERATOR_KEY=…                    # the value from .env
@@ -112,17 +110,19 @@ keera usage --by team
 keera usage --by day --since 168h
 ```
 
-Stop with `podman compose -f compose.yaml -f compose.cpu.yaml down`, using the
-same `-f` flags you started with. Add `-v` to also delete the Postgres and
-Hugging Face volumes; the weights then download again next time.
+Stop with `podman compose down`, using the same `-f` flags you started with.
+Add `-v` to also delete the Postgres and model volumes; the weights then
+download again next time.
 
 ## Notes
 
-- **`models.yaml` defines the deployment**, not the control API. It is applied
-  on every start and is idempotent, so the same file and an empty database give
-  the same gateway. `backend_model` must match the name the backend serves the
-  model under (vLLM's `--served-model-name`, llama.cpp's `--alias`). If it does
-  not, every request returns 404.
+- **`models.yaml` is what each new organisation starts with.** Every new
+  organisation gets a copy of every model in the file, whether it comes from
+  `keera org create`, the panel, or signing in to the panel with the operator
+  key while no organisation exists yet (that one is called "Keera"). After
+  that, the models are the organisation's own. `backend_model` must match the
+  name the backend serves the model under (vLLM's `--served-model-name`,
+  llama.cpp's `--alias`). If it does not, every request returns 404.
 - **The backends use the model's own chat template.** Qwen's adds "You are
   Qwen, created by Alibaba Cloud..." when a request has no system message. For
   a standing system prompt, set one on a guardrail:
@@ -138,27 +138,34 @@ Hugging Face volumes; the weights then download again next time.
   OpenAI server has authentication, so reaching one directly skips the
   gateway's keys, budgets and audit. For the same reason the llama.cpp tier
   runs with `--no-webui`.
+- **`.env` reaches the gateway only through `compose.yaml`.** Compose passes
+  on only the variables the file names. It passes every setting in
+  [docs/install.md](../docs/install.md) except the sandbox ones, and single
+  sign-on only for providers named `google` and `entra`. The database, the
+  listener and the catalogue files are fixed in the file.
 - The gateway image is `FROM scratch`: one static binary, no shell. So its
-  healthcheck runs the binary instead of `curl`.
+  healthcheck is `keera-gateway health`, which asks the running server's
+  `/readyz` instead of `curl`.
 - **`KEERA_SHM_SIZE`**: podman gives a container 64 MB of `/dev/shm`, and vLLM
   needs far more. It fails at startup with `Insufficient space in /dev/shm`.
-  The usual fix is `--ipc=host`, but podman-compose 1.6 ignores `ipc:`, so this
-  deployment sets the `/dev/shm` size instead. The GPU tier has its own
-  `KEERA_GPU_SHM_SIZE`: `.env.example` sets `KEERA_SHM_SIZE=2gb`, so a
-  `${KEERA_SHM_SIZE:-8gb}` in the override would resolve to `2gb`.
+  The usual fix is `--ipc=host`, but podman-compose 1.6 ignores `ipc:`, so the
+  GPU tier sets the `/dev/shm` size instead, 8 GB by default.
 - **`max_context` must match the backend's window.** Clients read it from
   `/v1/models`, and filter and router models are sized against it. A wrong
-  value misleads every client and mis-sizes every hook. That is why the GPU
-  tier has its own `models.gpu.yaml`: 32768 there, 16384 in the base file.
+  value misleads every client and mis-sizes every hook. `models.yaml` says
+  16384, which is safe on both tiers. On the GPU tier, raise it on each
+  organisation's model with `keera model set keera-speed --max-context 32768`.
 - **Do not override `healthcheck.test`** on podman-compose 1.6. It appends the
-  new command to the old one and runs neither. Neither tier overrides it; this
-  works because llama.cpp's `/health` uses the same port and path as vLLM's.
-  Only the scalar keys (`start_period` and similar) are safe to override.
+  new command to the old one and runs neither. The GPU tier does not override
+  it; this works because vLLM's `/health` uses the same port and path as
+  llama.cpp's. Only the scalar keys (`start_period` and similar) are safe to
+  override.
 
 ## Sandboxes do not work in this shape
 
 `sandboxes.yaml` is here but `KEERA_SANDBOX_DRIVER` is not set. This is on
-purpose.
+purpose. The gateway still reads the file, so each new organisation starts with
+its classes, ready for when the gateway runs with a driver.
 
 The single-host sandbox driver creates containers by running `podman`. Here the
 gateway _is_ a container, so it would need podman's socket mounted into a
@@ -174,7 +181,8 @@ echo 'KEERA_SANDBOX_DRIVER=podman' >> compose/.env
 make dev
 ```
 
-`.env.example` documents the other settings. Note `KEERA_SANDBOX_PUBLIC_URL`: a
+`.env.example` documents the other sandbox settings. Only `make dev` reads
+them: `compose.yaml` does not pass them on. Note `KEERA_SANDBOX_PUBLIC_URL`: a
 sandbox reaches the gateway at `host.containers.internal`, not `127.0.0.1`
 (inside a container, that is the container itself). `make dev` sets it
 correctly.
@@ -189,9 +197,9 @@ See [docs/sandboxes.md](../docs/sandboxes.md).
 - **The gateway is a container here.** On NixOS it is a systemd unit running
   the binary, with native Postgres and peer authentication over the local
   socket. Only the inference backend is a container there.
-- **The NixOS host still runs vLLM on CPU.** The two override files exist only
-  for compose.
-- **Named volumes** (`hf-cache`, `pgdata`) instead of paths under
+- **The NixOS host runs vLLM on CPU.** Compose runs llama.cpp on CPU, which is
+  faster on the same hardware, and vLLM only on a GPU.
+- **Named volumes** (`llama-cache`, `hf-cache`, `pgdata`) instead of paths under
   `/var/lib/keera`. Podman will not create a missing bind-mount source, so bind
   mounts would need `tmpfiles` rules. Named volumes avoid that.
 - **The operator key comes from `.env`.** The NixOS variant generates one into

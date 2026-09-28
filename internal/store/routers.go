@@ -70,6 +70,7 @@ func (s *Store) Router(ctx context.Context, orgID, alias string) (policy.Router,
 
 // UpsertRouter creates or replaces one router.
 func (s *Store) UpsertRouter(ctx context.Context, rt policy.Router) (policy.Router, error) {
+	// The one place a missing mode gets its default.
 	if rt.Mode == "" {
 		rt.Mode = policy.RouterModeInstruction
 	}
@@ -106,8 +107,8 @@ func (s *Store) DeleteRouter(ctx context.Context, orgID, alias string) error {
 // RouterUsers lists the guardrails inside one organisation whose allow-list
 // names a router. It is read before a deletion, as FilterUsers is: those
 // scopes could reach nothing once the router is gone.
-func (s *Store) RouterUsers(ctx context.Context, orgID, alias string) ([]FilterScope, error) {
-	return s.scopesNaming(ctx, "allowed_models", orgID, alias)
+func (s *Store) RouterUsers(ctx context.Context, orgID, alias string) ([]GuardrailRef, error) {
+	return s.scopesNaming(ctx, "$2 = ANY (p.allowed_models)", orgID, alias)
 }
 
 // RouterOutcome is what one routing decision came to: the request went where

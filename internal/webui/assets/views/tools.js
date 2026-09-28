@@ -1,5 +1,5 @@
 // Tool calls: what an agent did through the MCP servers the gateway stands in
-// front of. Shared by a session's own screen and the Models screen.
+// front of. Shared by a session's own screen and the MCP servers screen.
 //
 // Nothing about a call's content is kept, so a row says which tool, what came
 // of it, how long it took and how much went each way - which is enough to see
@@ -16,7 +16,7 @@ const OUTCOMES = {
   refused: ["refused by a filter", "warn"],
 };
 
-export function toolOutcome(outcome) {
+function toolOutcome(outcome) {
   const [label, tone] = OUTCOMES[outcome] || [outcome, ""];
   return pill(label, tone);
 }

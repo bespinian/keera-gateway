@@ -16,7 +16,9 @@ import {
   compact,
   pill,
   showError,
+  readRow,
 } from "../ui.js";
+import { orgNameOf } from "./orgs.js";
 
 // One word for the thing at every level. The dialog used to call itself
 // "Organisation guardrails", "Guardrails" and "Limits" depending on which
@@ -125,6 +127,8 @@ export async function openGuardrails(
     filters,
     ceilings,
     limits,
+    orgID,
+    orgName: orgNameOf(ctx, orgID, { start: true }),
   };
   if (canEdit) render(ctx, args);
   else renderReadOnly(ctx, args);
@@ -181,7 +185,10 @@ const OWNED_HERE = new Set([
   "block_hosted_tools",
 ]);
 
-function render(ctx, { scope, id, name, models, filters, ceilings, limits }) {
+function render(
+  ctx,
+  { scope, id, name, models, filters, ceilings, limits, orgID, orgName },
+) {
   const meta = SCOPES[scope] || SCOPES.team;
   const lim = limits || {};
   const err = h("div");
@@ -230,7 +237,7 @@ function render(ctx, { scope, id, name, models, filters, ceilings, limits }) {
     },
     boxes.length
       ? boxes
-      : h("span", { class: "faint" }, "The catalogue is empty."),
+      : h("span", { class: "faint" }, `${orgName} has no models.`),
   );
 
   // MCP tools are typed rather than ticked: the gateway does not list every
@@ -313,7 +320,7 @@ function render(ctx, { scope, id, name, models, filters, ceilings, limits }) {
           h("span", { class: "mono" }, alias),
           // The mode again, because it is what this list is ordered by: a gate
           // is worth putting ahead of the rewrites its refusals would
-          // otherwise have made the deployment pay for.
+          // otherwise have made the organisation pay for.
           h(
             "span",
             { class: f.mode === "gate" ? "pill pill-accent" : "pill" },
@@ -435,7 +442,7 @@ function render(ctx, { scope, id, name, models, filters, ceilings, limits }) {
           "label",
           { class: "row-tight" },
           allowAll,
-          "Every model in the catalogue",
+          `Every model of ${orgNameOf(ctx, orgID)}`,
         ),
         modelList,
         h(
@@ -456,7 +463,7 @@ function render(ctx, { scope, id, name, models, filters, ceilings, limits }) {
           h(
             "div",
             { class: "hint" },
-            "Per gateway replica.",
+            "Per gateway replica, unless the replicas share a Redis.",
             ceilingNote(ceilings, "rpm", num),
           ),
         ),
@@ -522,7 +529,7 @@ function render(ctx, { scope, id, name, models, filters, ceilings, limits }) {
           : h(
               "div",
               { class: "muted" },
-              "This organisation has no filters. Add one under Filters.",
+              `${orgName} has no filters. Add one under Filters.`,
             ),
         h(
           "div",
@@ -538,7 +545,12 @@ function render(ctx, { scope, id, name, models, filters, ceilings, limits }) {
         "div",
         { class: "field" },
         h("label", {}, "MCP tools"),
-        h("label", { class: "row-tight" }, allTools, "Every tool of every MCP server"),
+        h(
+          "label",
+          { class: "row-tight" },
+          allTools,
+          "Every tool of every MCP server",
+        ),
         toolList,
         h(
           "div",
@@ -583,9 +595,15 @@ function render(ctx, { scope, id, name, models, filters, ceilings, limits }) {
               if (!OWNED_HERE.has(k)) out[k] = v;
             }
             if (!allowAll.checked) {
-              out.allowed_models = boxes
-                .filter((b) => b.querySelector("input").checked)
-                .map((b) => b.querySelector("input").value);
+              // An alias the dialog has no box for, such as a disabled model,
+              // is kept. Nobody unticked it.
+              const shown = new Set(models.map((m) => m.alias));
+              out.allowed_models = [
+                ...boxes
+                  .filter((b) => b.querySelector("input").checked)
+                  .map((b) => b.querySelector("input").value),
+                ...(lim.allowed_models || []).filter((a) => !shown.has(a)),
+              ];
             }
             const put = (key, el) => {
               const v = parseInt(el.value, 10);
@@ -638,7 +656,7 @@ function render(ctx, { scope, id, name, models, filters, ceilings, limits }) {
  *  with the level that decided it named beside it. */
 function renderReadOnly(
   ctx,
-  { scope, name, models, filters, ceilings, limits },
+  { scope, name, models, filters, ceilings, limits, orgName },
 ) {
   const meta = SCOPES[scope] || SCOPES.team;
   // Outermost first with this scope last, which is the order limits combine in
@@ -659,14 +677,18 @@ function renderReadOnly(
         { class: "muted", style: { marginTop: 0 } },
         meta.readLead || meta.lead,
       ),
-      readRow("Models", modelsValue(levels, models), narrowedBy(levels)),
+      readRow(
+        "Models",
+        modelsValue(levels, models, orgName),
+        narrowedBy(levels),
+      ),
       h(
         "div",
         { class: "field-row" },
         readRow(
           "Requests per minute",
           tightest(levels, "rpm", num),
-          "Per gateway replica.",
+          "Per gateway replica, unless the replicas share a Redis.",
         ),
         readRow(
           "Tokens per minute",
@@ -694,7 +716,7 @@ function renderReadOnly(
         "Filters",
         filtersValue(levels, filters),
         "Run in this order before your requests are forwarded. If one " +
-          "cannot run, the request is refused.",
+          "cannot run, the request is refused, unless it is in shadow.",
       ),
       readRow(
         "MCP tools",
@@ -748,16 +770,6 @@ function hostedValue(levels) {
   return h("span", {}, `Taken out, by ${by.label}`);
 }
 
-function readRow(label, value, hint) {
-  return h(
-    "div",
-    { class: "field" },
-    h("label", {}, label),
-    h("div", {}, value),
-    hint ? h("div", { class: "hint" }, hint) : null,
-  );
-}
-
 /** effectiveModels is the allow-list every level has agreed on. Allow-lists
  *  intersect, so a level can drop a model and never add one; a level that
  *  names none has not restricted anything. */
@@ -775,7 +787,7 @@ function effectiveModels(levels, models) {
     : catalogue.filter((a) => allowed.includes(a));
 }
 
-function modelsValue(levels, models) {
+function modelsValue(levels, models, orgName) {
   const allowed = effectiveModels(levels, models);
   if (allowed.length) {
     return h(
@@ -789,16 +801,16 @@ function modelsValue(levels, models) {
     { class: "muted" },
     models.length
       ? "None. No model will be served."
-      : "The catalogue is empty.",
+      : `${orgName} has no models.`,
   );
 }
 
 /** narrowedBy names the levels that took something out of the catalogue, so a
- *  short list of models reads as a decision somebody made rather than as the
- *  whole of what this deployment serves. */
+ *  short list of models reads as a decision somebody made rather than as
+ *  every model the organisation has. */
 function narrowedBy(levels) {
   const said = levels.filter((lv) => lv.limits && lv.limits.allowed_models);
-  if (!said.length) return "Every model in the catalogue.";
+  if (!said.length) return "Every model the organisation has.";
   return `Narrowed by ${said.map((lv) => lv.label).join(", then ")}.`;
 }
 

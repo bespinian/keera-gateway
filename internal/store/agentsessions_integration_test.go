@@ -83,7 +83,7 @@ func TestSessionsGroupRequestsIntoTheTasksTheyWereMadeFor(t *testing.T) {
 		t.Errorf("how it ended = %d %q, want the refusal the last call was given",
 			task.LastStatus, task.LastError)
 	}
-	if !task.Unhappy() {
+	if task.Failed+task.Refused+task.Interrupted == 0 {
 		t.Error("a task that ended on a refusal does not read as unhappy")
 	}
 	if len(task.Models) != 1 || task.Models[0] != "keera-code" {

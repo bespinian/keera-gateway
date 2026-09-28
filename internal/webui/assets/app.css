@@ -425,6 +425,8 @@ code,
 }
 .btn:hover:not(:disabled) {
   background: var(--surface-3);
+  /* A link can look like a button, and links underline on hover. */
+  text-decoration: none;
 }
 .btn:disabled {
   opacity: 0.5;
@@ -496,8 +498,7 @@ code,
   cursor: pointer;
 }
 
-/* A field whose value is somebody else's to set - one a model's catalogue
-   file declares, or a key a deployment with no KEERA_SECRET_KEY cannot store.
+/* A field whose value cannot be set here.
    Being disabled is the whole explanation the form gives, so it has to look
    disabled rather than only refuse the keystroke. */
 .input:disabled,

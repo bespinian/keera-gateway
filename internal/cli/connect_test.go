@@ -72,6 +72,7 @@ func captured(t *testing.T, run func() error) string {
 // file the command names, so nothing else may be on that stream.
 func TestConnectPutsOnlyTheBlockOnStdout(t *testing.T) {
 	newFakeControl(t, map[string]any{
+		"GET /v1/orgs":    oneOrg,
 		"GET /v1/connect": catalogueOf("https://keera.example.ch/api"),
 		"GET /v1/models":  chatAlias,
 	})
@@ -79,7 +80,7 @@ func TestConnectPutsOnlyTheBlockOnStdout(t *testing.T) {
 	got := captured(t, func() error {
 		return connectCmd(context.Background(), []string{"opencode"})
 	})
-	client, _ := connect.Lookup("opencode")
+	client, _ := connect.Find(connect.Clients(), "opencode")
 	want := client.Render("https://keera.example.ch/api", "keera-code", 0) + "\n"
 	if got != want {
 		t.Errorf("stdout =\n%s\nwant\n%s", got, want)
@@ -90,6 +91,7 @@ func TestConnectPutsOnlyTheBlockOnStdout(t *testing.T) {
 // or a disabled one would configure an editor that is refused on first use.
 func TestConnectDefaultsToAnEnabledChatModel(t *testing.T) {
 	newFakeControl(t, map[string]any{
+		"GET /v1/orgs":    oneOrg,
 		"GET /v1/connect": catalogueOf("https://keera.example.ch/api"),
 		"GET /v1/models": map[string]any{"data": []map[string]any{
 			{"alias": "keera-embed", "kind": "embedding", "enabled": true},
@@ -134,6 +136,7 @@ func TestConnectRefusesAModelTheDeploymentDoesNotServe(t *testing.T) {
 func TestConnectRefusesAClientItDoesNotKnow(t *testing.T) {
 	quiet(t)
 	newFakeControl(t, map[string]any{
+		"GET /v1/orgs":    oneOrg,
 		"GET /v1/connect": catalogueOf("https://keera.example.ch/api"),
 		"GET /v1/models":  chatAlias,
 	})
@@ -149,6 +152,7 @@ func TestConnectRefusesAClientItDoesNotKnow(t *testing.T) {
 func TestConnectUsesTheGatewayThatAnswered(t *testing.T) {
 	quiet(t)
 	newFakeControl(t, map[string]any{
+		"GET /v1/orgs":    oneOrg,
 		"GET /v1/connect": catalogueOf("https://keera.example.ch/api/"),
 		"GET /v1/models":  chatAlias,
 	})
@@ -167,6 +171,7 @@ func TestConnectUsesTheGatewayThatAnswered(t *testing.T) {
 func TestConnectSaysSoWhenNoGatewayAddressIsKnown(t *testing.T) {
 	quiet(t)
 	newFakeControl(t, map[string]any{
+		"GET /v1/orgs":    oneOrg,
 		"GET /v1/connect": catalogueOf(""),
 		"GET /v1/models":  chatAlias,
 	})
@@ -205,6 +210,7 @@ func TestConnectWithNoClientListsThem(t *testing.T) {
 func TestConnectRefusesWhenNothingChatIsServed(t *testing.T) {
 	quiet(t)
 	newFakeControl(t, map[string]any{
+		"GET /v1/orgs":    oneOrg,
 		"GET /v1/connect": catalogueOf("https://keera.example.ch/api"),
 		"GET /v1/models": map[string]any{"data": []map[string]any{
 			{"alias": "keera-embed", "kind": "embedding", "enabled": true},

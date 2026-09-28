@@ -37,6 +37,7 @@ import {
   RANGES,
   currentRange,
   rangePicker,
+  crumb,
 } from "../ui.js";
 import { outcomeMeaning, outcomeOf, oneLine } from "../status.js";
 import { requestTable, showRequest } from "./requestlog.js";
@@ -52,8 +53,8 @@ const SORTS = [
   { key: "cost", label: "Cost", long: "The tasks that cost the most" },
   {
     key: "requests",
-    label: "Calls",
-    long: "The tasks that made the most calls",
+    label: "Requests",
+    long: "The tasks that made the most requests",
   },
   { key: "duration", label: "Time", long: "The tasks that ran the longest" },
 ];
@@ -92,49 +93,10 @@ export async function sessionsView(ctx) {
       "div",
       { class: "row", style: { marginBottom: "16px", flexWrap: "wrap" } },
       rangePicker(ctx, since),
-      h(
-        "div",
-        { class: "seg" },
-        SORTS.map((sc) =>
-          h(
-            "button",
-            {
-              "aria-pressed": String(sc.key === sort),
-              title: sc.long,
-              onClick: () => {
-                sessionStorage.setItem(SORT_KEY, sc.key);
-                ctx.reload();
-              },
-            },
-            sc.label,
-          ),
-        ),
-      ),
+      sortSeg(ctx, sort),
       h("div", { style: { flex: 1 } }),
-      h(
-        "button",
-        {
-          class: "btn btn-sm",
-          "aria-pressed": String(unhappy),
-          title:
-            "Only tasks with a failure, a refusal or an interrupted answer",
-          onClick: () => {
-            sessionStorage.setItem(UNHAPPY_KEY, unhappy ? "0" : "1");
-            ctx.reload();
-          },
-        },
-        "Hit trouble",
-      ),
-      h(
-        "button",
-        {
-          class: "btn btn-sm",
-          title: "Download all matching tasks as CSV, one row per task",
-          onClick: () => api.download("/v1/sessions", params),
-        },
-        icon(icons.download),
-        "CSV",
-      ),
+      troubleButton(ctx, unhappy),
+      csvButton(params),
     ),
   );
 
@@ -177,50 +139,195 @@ export async function sessionsView(ctx) {
   // another order, and "page two of the most expensive tasks" is not a question
   // anybody asks - whoever sorted by cost wanted the top of that list.
   if (rows.length === PAGE && sort === "") {
-    let before = res.next_before;
-    const more = h(
-      "button",
-      {
-        class: "btn",
-        onClick: async () => {
-          more.disabled = true;
-          more.textContent = "Loading…";
-          try {
-            const next = await api.sessions({ ...params, before });
-            const page = next.data || [];
-            wrap.insertBefore(
-              sessionTable(ctx, page, names, currency),
-              moreWrap,
-            );
-            before = next.next_before;
-            if (page.length < PAGE) {
-              moreWrap.replaceChildren(
-                h("div", { class: "hint" }, "That is the whole window."),
-              );
-              return;
-            }
-          } catch (ex) {
-            moreWrap.append(
-              h("div", { class: "banner banner-bad" }, ex.message),
-            );
-          } finally {
-            more.disabled = false;
-            more.textContent = `Load ${PAGE} more`;
-          }
-        },
-      },
-      `Load ${PAGE} more`,
+    wrap.append(
+      pager(params, res, (page) => sessionTable(ctx, page, names, currency)),
     );
-    const moreWrap = h(
-      "div",
-      { style: { marginTop: "12px", textAlign: "center" } },
-      more,
-    );
-    wrap.append(moreWrap);
   }
 
   wrap.append(hint(res.gap_seconds));
   return wrap;
+}
+
+/** sessionLog is the session list for one team, key or model, drawn below
+ *  that thing's charts. The range comes from the screen it sits on. */
+export async function sessionLog(ctx, { scope = {}, since, hide = {} }) {
+  const sort = sessionStorage.getItem(SORT_KEY) || "";
+  const unhappy = sessionStorage.getItem(UNHAPPY_KEY) === "1";
+  const params = {
+    org_id: ctx.orgID,
+    since,
+    limit: PAGE,
+    sort,
+    unhappy: unhappy ? "1" : "",
+    ...scope,
+  };
+
+  let res;
+  try {
+    res = await api.sessions(params);
+  } catch (err) {
+    // A log that will not load must not take the charts above it with it.
+    return h(
+      "div",
+      { style: { marginTop: "24px" } },
+      h(
+        "div",
+        { class: "banner banner-bad" },
+        err.message || "The sessions could not be read.",
+      ),
+    );
+  }
+
+  const rows = res.data || [];
+  const currency = res.currency || ctx.currency;
+  const names = {
+    keys: res.key_aliases || {},
+    teams: res.team_names || {},
+    users: res.user_names || {},
+  };
+
+  const wrap = h(
+    "div",
+    { style: { marginTop: "24px" } },
+    h(
+      "div",
+      { class: "section-head" },
+      h("h2", {}, "Sessions"),
+      h("div", { style: { flex: 1 } }),
+      sortSeg(ctx, sort),
+      troubleButton(ctx, unhappy),
+      csvButton(params),
+    ),
+  );
+
+  if (!rows.length) {
+    wrap.append(
+      h(
+        "div",
+        { class: "card", style: { marginTop: "12px" } },
+        unhappy
+          ? empty(
+              "Nothing hit trouble in this window",
+              "Turn off Hit trouble to see every task.",
+            )
+          : empty(
+              "No sessions in this window",
+              "Requests without a conversation, such as embeddings, are not " +
+                "grouped into sessions. Try a wider range.",
+            ),
+      ),
+    );
+    return wrap;
+  }
+
+  wrap.append(
+    h(
+      "div",
+      { style: { marginTop: "12px" } },
+      sessionTable(ctx, rows, names, currency, hide),
+    ),
+  );
+  if (rows.length === PAGE && sort === "") {
+    wrap.append(
+      pager(params, res, (page) =>
+        sessionTable(ctx, page, names, currency, hide),
+      ),
+    );
+  }
+  return wrap;
+}
+
+/** setUnhappy narrows the session lists to the tasks that hit trouble. */
+export function setUnhappy(on) {
+  sessionStorage.setItem(UNHAPPY_KEY, on ? "1" : "0");
+}
+
+function sortSeg(ctx, sort) {
+  return h(
+    "div",
+    { class: "seg" },
+    SORTS.map((sc) =>
+      h(
+        "button",
+        {
+          "aria-pressed": String(sc.key === sort),
+          title: sc.long,
+          onClick: () => {
+            sessionStorage.setItem(SORT_KEY, sc.key);
+            ctx.reload();
+          },
+        },
+        sc.label,
+      ),
+    ),
+  );
+}
+
+function troubleButton(ctx, unhappy) {
+  return h(
+    "button",
+    {
+      class: "btn btn-sm",
+      "aria-pressed": String(unhappy),
+      title: "Only tasks with a failure, a refusal or an interrupted answer",
+      onClick: () => {
+        setUnhappy(!unhappy);
+        ctx.reload();
+      },
+    },
+    "Hit trouble",
+  );
+}
+
+function csvButton(params) {
+  return h(
+    "button",
+    {
+      class: "btn btn-sm",
+      title: "Download all matching tasks as CSV, one row per task",
+      onClick: () => api.download("/v1/sessions", params),
+    },
+    icon(icons.download),
+    "CSV",
+  );
+}
+
+// pager loads the next page and draws it above itself.
+function pager(params, res, render) {
+  let before = res.next_before;
+  const moreWrap = h("div", {
+    style: { marginTop: "12px", textAlign: "center" },
+  });
+  const more = h(
+    "button",
+    {
+      class: "btn",
+      onClick: async () => {
+        more.disabled = true;
+        more.textContent = "Loading…";
+        try {
+          const next = await api.sessions({ ...params, before });
+          const page = next.data || [];
+          moreWrap.before(render(page));
+          before = next.next_before;
+          if (page.length < PAGE) {
+            moreWrap.replaceChildren(
+              h("div", { class: "hint" }, "That is the whole window."),
+            );
+            return;
+          }
+        } catch (ex) {
+          moreWrap.append(h("div", { class: "banner banner-bad" }, ex.message));
+        } finally {
+          more.disabled = false;
+          more.textContent = `Load ${PAGE} more`;
+        }
+      },
+    },
+    `Load ${PAGE} more`,
+  );
+  moreWrap.append(more);
+  return moreWrap;
 }
 
 // totalTiles is what the window amounts to, per task.
@@ -248,7 +355,7 @@ function totalTiles(t, currency) {
       tasks ? `${money(t.median_cost_micros, "")} median per task` : null,
     ),
     stat(
-      "Calls per task",
+      "Requests per task",
       num(t.median_requests),
       null,
       tasks
@@ -266,7 +373,7 @@ function totalTiles(t, currency) {
   );
 }
 
-function sessionTable(ctx, rows, names, currency) {
+function sessionTable(ctx, rows, names, currency, hide = {}) {
   const columns = [
     {
       // The conversation, as the gateway hashed it. It is the only name a
@@ -305,7 +412,7 @@ function sessionTable(ctx, rows, names, currency) {
           ),
         ),
     },
-    {
+    !hide.who && {
       // Whose task it was. The person where the key was attributed to one, and
       // the key itself where it was not - which is the shared key issued for a
       // pipeline, and is the answer either way. "Which developer's task cost
@@ -357,7 +464,7 @@ function sessionTable(ctx, rows, names, currency) {
         ),
     },
     {
-      label: "Calls",
+      label: "Requests",
       num: true,
       shrink: true,
       sortKey: (a) => a.requests,
@@ -403,7 +510,7 @@ function sessionTable(ctx, rows, names, currency) {
           "button",
           {
             class: "btn btn-sm",
-            title: "All calls in this task, in order",
+            title: "All requests in this task, in order",
             onClick: () =>
               ctx.navigate("/sessions/" + encodeURIComponent(a.id)),
           },
@@ -412,7 +519,7 @@ function sessionTable(ctx, rows, names, currency) {
     },
   ];
 
-  return table(columns, rows, {
+  return table(columns.filter(Boolean), rows, {
     search: (a) =>
       `${a.key} ${(a.models || []).join(" ")} ${a.last_error || ""} ` +
       `${names.users[a.user_id] || ""} ${names.keys[a.key_id] || a.key_id || ""} ` +
@@ -501,12 +608,7 @@ export async function sessionDetailView(ctx) {
   const head = h(
     "div",
     { class: "detail-head" },
-    h(
-      "a",
-      { class: "crumb", href: "/sessions", onClick: go(ctx, "/sessions") },
-      icon(icons.back),
-      "Sessions",
-    ),
+    crumb(ctx, "/sessions", "Sessions"),
     h(
       "div",
       { class: "row", style: { flexWrap: "wrap" } },
@@ -570,7 +672,7 @@ export async function sessionDetailView(ctx) {
       "div",
       { class: "grid grid-4" },
       stat(
-        "Calls",
+        "Requests",
         num(s.requests),
         null,
         s.ok === s.requests ? "all served" : `${num(s.ok)} served`,
@@ -580,8 +682,8 @@ export async function sessionDetailView(ctx) {
         duration(ran),
         null,
         s.requests > 1
-          ? `${duration(ran / Math.max(1, s.requests - 1))} between calls on average`
-          : "one call",
+          ? `${duration(ran / Math.max(1, s.requests - 1))} between requests on average`
+          : "one request",
       ),
       stat(
         "Tokens",
@@ -593,7 +695,7 @@ export async function sessionDetailView(ctx) {
         "Cost",
         money(s.cost_micros, ""),
         currency,
-        `${money(Math.round(s.cost_micros / Math.max(1, s.requests)), "")} a call`,
+        `${money(Math.round(s.cost_micros / Math.max(1, s.requests)), "")} a request`,
       ),
     ),
   );
@@ -613,7 +715,7 @@ export async function sessionDetailView(ctx) {
           h(
             "span",
             { class: "faint", style: { fontSize: "11.5px" } },
-            "each bar is one call, by what it cost",
+            "each bar is one request, by what it cost",
           ),
         ),
         h(
@@ -648,7 +750,7 @@ export async function sessionDetailView(ctx) {
       h(
         "div",
         { class: "section-head" },
-        h("h2", {}, "Calls"),
+        h("h2", {}, "Requests"),
         h("div", { style: { flex: 1 } }),
         h("span", { class: "faint" }, "oldest first"),
       ),
@@ -724,10 +826,10 @@ function turnStrip(ctx, requests, names, currency) {
         dataset: { tone: tone || "", ...(q.cost_micros ? {} : { empty: "1" }) },
         style: { height: Math.max(6, Math.round(share * 60)) + "px" },
         title:
-          `Call ${i + 1} of ${requests.length} · ${q.alias || "no model"} · ` +
+          `Request ${i + 1} of ${requests.length} · ${q.alias || "no model"} · ` +
           `${outcomeMeaning(q)[0]} · ${money(q.cost_micros, currency)} · ` +
           `${ms(q.ttft_ms)} to the first token`,
-        "aria-label": `Call ${i + 1}, ${outcomeOf(q)}`,
+        "aria-label": `Request ${i + 1}, ${outcomeOf(q)}`,
         onClick: () => showRequest(ctx, q, names, currency),
       });
     }),
@@ -741,16 +843,7 @@ function gone(ctx, title, body) {
   return h(
     "div",
     {},
-    h(
-      "div",
-      { class: "detail-head" },
-      h(
-        "a",
-        { class: "crumb", href: "/sessions", onClick: go(ctx, "/sessions") },
-        icon(icons.back),
-        "Sessions",
-      ),
-    ),
+    h("div", { class: "detail-head" }, crumb(ctx, "/sessions", "Sessions")),
     h("div", { class: "card" }, empty(title, body)),
   );
 }
@@ -761,7 +854,7 @@ function gone(ctx, title, body) {
 function hint(gapSeconds, detail) {
   const gap = duration((gapSeconds || 0) * 1000);
   const how =
-    `Calls belong to one task when they share a conversation and are less than ` +
+    `Requests belong to one task when they share a conversation and are less than ` +
     `${gap} apart. `;
   return h(
     "div",

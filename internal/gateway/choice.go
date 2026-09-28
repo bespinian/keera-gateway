@@ -23,7 +23,8 @@ import (
 //
 // It needs a backend that returns logprobs. vLLM and llama.cpp do; most hosted
 // providers do not, so the written answer is still read where there is no
-// distribution. See decide and parseGateReply.
+// distribution. A backend that rejects the fields is remembered and not asked
+// for them again. See decide, runFilter and parseGateReply.
 
 const (
 	// routerLabels are the letters destinations are offered under. A letter

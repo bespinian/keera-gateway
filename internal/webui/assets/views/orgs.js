@@ -76,7 +76,7 @@ export async function orgsView(ctx) {
               "button",
               {
                 class: "btn btn-sm",
-                title: "This organisation's settings",
+                title: `${o.name}'s settings`,
                 onClick: () => orgSettings(ctx, o),
               },
               "Edit",
@@ -87,10 +87,9 @@ export async function orgsView(ctx) {
               "button",
               {
                 class: "btn btn-sm",
-                title: "Show this organisation on the other screens",
-                onClick: () => {
-                  ctx.state.orgID = o.id;
-                  localStorage.setItem("keera.org", o.id);
+                title: `Show ${o.name} on the other screens`,
+                onClick: async () => {
+                  await ctx.setOrg(o.id);
                   ctx.navigate("/");
                 },
               },
@@ -106,8 +105,9 @@ export async function orgsView(ctx) {
                     class: "btn btn-sm btn-danger",
                     disabled: true,
                     title:
-                      "You are signed in to this organisation. " +
-                      "Delete it from another operator's account, or with the operator key.",
+                      `You are signed in to ${o.name}. ` +
+                      "Delete it as an operator in another organisation, or " +
+                      "run keera org delete with KEERA_OPERATOR_KEY set.",
                   },
                   "Delete",
                 )
@@ -132,7 +132,9 @@ export async function orgsView(ctx) {
   return h("div", {}, head, rows);
 }
 
-function newOrg(ctx) {
+// newOrg asks for a new organisation. switchTo moves the panel to it, for the
+// first-run checklist, whose next step would otherwise still say "pick one".
+export function newOrg(ctx, { switchTo = false } = {}) {
   const name = h("input", {
     class: "input",
     placeholder: "Example Bank",
@@ -167,7 +169,8 @@ function newOrg(ctx) {
           class: "btn btn-primary",
           onClick: async (e) => {
             if (!name.value.trim()) return name.focus();
-            e.target.disabled = true;
+            const button = e.currentTarget;
+            button.disabled = true;
             try {
               const org = await api.createOrg(
                 name.value.trim(),
@@ -178,12 +181,13 @@ function newOrg(ctx) {
               // it. Appended rather than re-read: the list is ordered by
               // creation, so this one belongs at the end.
               (ctx.state.orgs = ctx.state.orgs || []).push(org);
+              if (switchTo) await ctx.setOrg(org.id);
               close();
               toast("Organisation created", "good");
               ctx.reload();
             } catch (ex) {
               showError(err, ex.message);
-              e.target.disabled = false;
+              button.disabled = false;
             }
           },
         },
@@ -276,10 +280,7 @@ function deleteOrg(ctx, org) {
             (o) => o.id !== org.id,
           );
           if (ctx.state.orgID === org.id) {
-            const next = ctx.state.orgs[0];
-            ctx.state.orgID = next ? next.id : "";
-            if (next) localStorage.setItem("keera.org", next.id);
-            else localStorage.removeItem("keera.org");
+            await ctx.setOrg(ctx.state.orgs[0]?.id || "");
           }
           close();
           toast(`${gone.name || org.name} deleted`, "good");
@@ -346,11 +347,18 @@ function deleteOrg(ctx, org) {
           ),
         ),
         h("li", {}, "its guardrails and its budget counters"),
+        h(
+          "li",
+          {},
+          "its models and their stored provider keys, MCP servers, filters, " +
+            "routers, sandbox classes and the record of its finished sandboxes",
+        ),
       ),
       h(
         "div",
         { class: "hint", style: { marginTop: "8px" } },
-        "Everyone in it is signed out, and every key stops working at once.",
+        "Everyone in it is signed out, and every key stops working at once. " +
+          "Usage history and the audit log are kept.",
       ),
     );
     name.disabled = false;
@@ -358,13 +366,26 @@ function deleteOrg(ctx, org) {
   });
 }
 
-/** chooseOrg is the wall four screens hit when an operator has the switcher on
+/** orgNameOf is the name to show for an organisation: orgID's, or else the
+ *  one the panel is looking at. Hints say the name rather than "this
+ *  organisation". The fallback is for a name the panel does not have; start
+ *  says it opens a sentence. */
+export function orgNameOf(ctx, orgID, { start = false } = {}) {
+  const id = orgID || ctx.orgID || ctx.state.me.org_id;
+  const name =
+    (id === ctx.state.me.org_id && ctx.state.me.org_name) ||
+    ((ctx.state.orgs || []).find((o) => o.id === id) || {}).name;
+  if (name) return name;
+  return start ? "This organisation" : "this organisation";
+}
+
+/** chooseOrg is the wall a screen hits when an operator has the switcher on
  *  every organisation at once.
  *
- *  Teams, keys, people and filters each belong to one organisation, so those
- *  screens have nothing to show. The fix is the switcher in the topbar, and a
- *  screen that only names it leaves the reader hunting for it - so the picker
- *  is here, where the wall is.
+ *  Everything on those screens belongs to one organisation, so they have
+ *  nothing to show. The fix is the switcher in the topbar, and a screen that
+ *  only names it leaves the reader hunting for it - so the picker is here,
+ *  where the wall is.
  *
  *  what is the plural of whatever the screen holds, for the sentence. */
 export function chooseOrg(ctx, what) {
@@ -380,9 +401,8 @@ export function chooseOrg(ctx, what) {
     );
   }
 
-  const open = (id) => {
-    ctx.state.orgID = id;
-    localStorage.setItem("keera.org", id);
+  const open = async (id) => {
+    await ctx.setOrg(id);
     ctx.reload();
   };
 

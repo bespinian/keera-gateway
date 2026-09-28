@@ -1,7 +1,6 @@
 package catalog
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"slices"
@@ -9,16 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/bespinian/keera-gateway/internal/policy"
-	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// The sandbox catalogue works like the model catalogue. A class name is an API
-// contract, typed on command lines and written into repositories, so the
-// operator declares classes in a file and can change what is behind a name
-// without anybody else editing anything.
+// The sandbox catalogue works like the model catalogue: the file is a template,
+// and each new organisation gets its own copy of every class in it.
 
 // SandboxFile is the on-disk shape.
 type SandboxFile struct {
@@ -28,39 +22,35 @@ type SandboxFile struct {
 // Sandbox is one declared class.
 //
 // The resource fields are strings, so a file can say "4" and "16Gi" as
-// Kubernetes files do. They are parsed and checked here, once.
-//
-// The JSON tags match the YAML tags because the control API accepts this struct
-// directly, so a class typed into the panel means the same as one in the file.
+// Kubernetes files do. They are parsed and checked here, once. The control
+// API takes the parsed policy.SandboxClass, the same shape it returns.
 type Sandbox struct {
-	Name        string `yaml:"name" json:"name"`
-	Description string `yaml:"description" json:"description"`
-	Image       string `yaml:"image" json:"image"`
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
+	Image       string `yaml:"image"`
 	// Isolation is standard, isolated or vm (see policy.Isolation). It
 	// defaults to isolated.
-	Isolation string `yaml:"isolation" json:"isolation"`
-	// RuntimeClass overrides the deployment's own mapping for this class,
-	// which makes the class specific to one cluster.
-	RuntimeClass string `yaml:"runtime_class" json:"runtime_class"`
+	Isolation string `yaml:"isolation"`
 	// CPU is a core count or a millicore quantity: "4" or "4000m".
-	CPU string `yaml:"cpu" json:"cpu"`
+	CPU string `yaml:"cpu"`
 	// Memory and Disk are byte quantities: "16Gi", "512Mi". A bare number is
 	// read as mebibytes.
-	Memory     string   `yaml:"memory" json:"memory"`
-	Disk       string   `yaml:"disk" json:"disk"`
-	DefaultTTL string   `yaml:"default_ttl" json:"default_ttl"`
-	MaxTTL     string   `yaml:"max_ttl" json:"max_ttl"`
-	Warm       int      `yaml:"warm" json:"warm"`
-	Egress     []string `yaml:"egress" json:"egress"`
-	Purposes   []string `yaml:"purposes" json:"purposes"`
+	Memory     string   `yaml:"memory"`
+	Disk       string   `yaml:"disk"`
+	DefaultTTL string   `yaml:"default_ttl"`
+	MaxTTL     string   `yaml:"max_ttl"`
+	Warm       int      `yaml:"warm"`
+	Purposes   []string `yaml:"purposes"`
 }
 
 // Defaults for what an entry does not say. Each one guards against a mistake:
 // a class with no lifetime or ceiling is a machine somebody must remember to
 // stop.
 const (
-	defaultSandboxTTL       = 4 * time.Hour
-	defaultSandboxMaxTTL    = 24 * time.Hour
+	// DefaultSandboxTTL and DefaultSandboxMaxTTL also give a sandbox whose
+	// class was deleted its lifetimes.
+	DefaultSandboxTTL       = 4 * time.Hour
+	DefaultSandboxMaxTTL    = 24 * time.Hour
 	defaultSandboxCPUMillis = 2000
 	defaultSandboxMemoryMiB = 4096
 	// minSandboxTTL is the floor. A shorter sandbox could expire while its
@@ -74,22 +64,16 @@ const (
 	maxWarm = 32
 )
 
-// ParseSandboxes reads and validates a sandbox catalogue file.
-func ParseSandboxes(raw []byte) ([]policy.SandboxClass, error) {
+func parseSandboxFile(raw []byte) ([]policy.SandboxClass, error) {
 	var f SandboxFile
-	if err := yaml.Unmarshal(raw, &f); err != nil {
+	if err := decodeStrict(raw, &f); err != nil {
 		return nil, fmt.Errorf("parse sandbox catalogue: %w", err)
 	}
 	if len(f.Sandboxes) == 0 {
 		return nil, fmt.Errorf("catalogue declares no sandbox classes")
 	}
 	name := func(s Sandbox) string { return s.Name }
-	return parseEntries(f.Sandboxes, "sandboxes", "name", name, func(s Sandbox) (policy.SandboxClass, error) {
-		parsed, err := ParseSandbox(s)
-		// The file owns what it declares, so only another apply may change it.
-		parsed.Managed = true
-		return parsed, err
-	})
+	return parseEntries(f.Sandboxes, "sandboxes", "name", name, ParseSandbox)
 }
 
 // ParseSandbox validates and expands a single declared class, so an entry on
@@ -98,7 +82,7 @@ func ParseSandbox(s Sandbox) (policy.SandboxClass, error) {
 	switch {
 	case s.Name == "":
 		return policy.SandboxClass{}, fmt.Errorf("name is required")
-	case !policy.ValidSandboxClass(s.Name):
+	case !policy.ValidAlias(s.Name):
 		return policy.SandboxClass{}, fmt.Errorf("name %q must be lowercase letters, digits and "+
 			"interior hyphens: it is typed on a command line and written into repositories' own "+
 			"configuration, neither of which quotes it", s.Name)
@@ -110,11 +94,10 @@ func ParseSandbox(s Sandbox) (policy.SandboxClass, error) {
 	}
 
 	c := policy.SandboxClass{
-		Name:         s.Name,
-		Description:  strings.TrimSpace(s.Description),
-		Image:        strings.TrimSpace(s.Image),
-		RuntimeClass: strings.TrimSpace(s.RuntimeClass),
-		Warm:         s.Warm,
+		Name:        s.Name,
+		Description: strings.TrimSpace(s.Description),
+		Image:       strings.TrimSpace(s.Image),
+		Warm:        s.Warm,
 	}
 	if err := parseIsolation(s, &c); err != nil {
 		return policy.SandboxClass{}, err
@@ -130,13 +113,41 @@ func ParseSandbox(s Sandbox) (policy.SandboxClass, error) {
 			"warm is %d; it is between 0 and %d, and every one of them holds this class's "+
 				"whole CPU and memory allocation with nobody using it", c.Warm, maxWarm)
 	}
-	c.Egress = parseEgress(s.Egress)
 	purposes, err := parsePurposes(s.Purposes)
 	if err != nil {
 		return policy.SandboxClass{}, err
 	}
 	c.Purposes = purposes
 	return c, nil
+}
+
+// CheckSandboxClass holds a class sent to the control API to the rules a
+// file's entry is held to, and fills in the same defaults for what is zero.
+func CheckSandboxClass(c policy.SandboxClass) (policy.SandboxClass, error) {
+	s := Sandbox{
+		Name: c.Name, Description: c.Description, Image: c.Image,
+		Isolation: string(c.Isolation), Warm: c.Warm,
+	}
+	// Zero is "not given", as an empty string is in a file.
+	if c.CPU != 0 {
+		s.CPU = strconv.Itoa(c.CPU) + "m"
+	}
+	if c.Memory != 0 {
+		s.Memory = strconv.Itoa(c.Memory)
+	}
+	if c.Disk != 0 {
+		s.Disk = strconv.Itoa(c.Disk)
+	}
+	if c.DefaultTTL != 0 {
+		s.DefaultTTL = c.DefaultTTL.String()
+	}
+	if c.MaxTTL != 0 {
+		s.MaxTTL = c.MaxTTL.String()
+	}
+	for _, p := range c.Purposes {
+		s.Purposes = append(s.Purposes, string(p))
+	}
+	return ParseSandbox(s)
 }
 
 func parseIsolation(s Sandbox, c *policy.SandboxClass) error {
@@ -171,10 +182,10 @@ func parseResources(s Sandbox, c *policy.SandboxClass) error {
 
 func parseLifetimes(s Sandbox, c *policy.SandboxClass) error {
 	var err error
-	if c.DefaultTTL, err = parseTTL(s.DefaultTTL, defaultSandboxTTL); err != nil {
+	if c.DefaultTTL, err = parseTTL(s.DefaultTTL, DefaultSandboxTTL); err != nil {
 		return fmt.Errorf("default_ttl: %w", err)
 	}
-	if c.MaxTTL, err = parseTTL(s.MaxTTL, defaultSandboxMaxTTL); err != nil {
+	if c.MaxTTL, err = parseTTL(s.MaxTTL, DefaultSandboxMaxTTL); err != nil {
 		return fmt.Errorf("max_ttl: %w", err)
 	}
 	if c.MaxTTL < c.DefaultTTL {
@@ -183,17 +194,6 @@ func parseLifetimes(s Sandbox, c *policy.SandboxClass) error {
 				"be created already past its ceiling", c.MaxTTL, c.DefaultTTL)
 	}
 	return nil
-}
-
-// parseEgress lowercases the egress list and drops blanks and repeats.
-func parseEgress(raw []string) []string {
-	var out []string
-	for _, e := range raw {
-		if e = strings.ToLower(strings.TrimSpace(e)); e != "" && !slices.Contains(out, e) {
-			out = append(out, e)
-		}
-	}
-	return out
 }
 
 // parsePurposes checks the purposes list and drops blanks and repeats.
@@ -290,27 +290,17 @@ func parseTTL(raw string, def time.Duration) (time.Duration, error) {
 	return d, nil
 }
 
-// ApplySandboxes writes a declared sandbox catalogue to the database. As with
-// models, classes the file does not mention are kept, and declared ones are
-// marked as managed so only another apply may change them.
-func ApplySandboxes(ctx context.Context, st *store.Store, path string) ([]policy.SandboxClass, error) {
+// LoadSandboxes reads and validates a sandbox catalogue file. Like the model
+// file it is a template: each new organisation starts with a copy of every
+// class it declares.
+func LoadSandboxes(path string) ([]policy.SandboxClass, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	classes, err := ParseSandboxes(raw)
+	classes, err := parseSandboxFile(raw)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	declared := make([]string, 0, len(classes))
-	for i := range classes {
-		if err := st.UpsertSandboxClass(ctx, &classes[i]); err != nil {
-			return nil, fmt.Errorf("apply %s: %w", classes[i].Name, err)
-		}
-		declared = append(declared, classes[i].Name)
-	}
-	if err := st.UnmanageSandboxClasses(ctx, declared); err != nil {
-		return nil, fmt.Errorf("release sandbox classes the catalogue no longer declares: %w", err)
 	}
 	return classes, nil
 }

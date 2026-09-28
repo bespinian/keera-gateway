@@ -13,23 +13,23 @@ import {
   icons,
   showError,
 } from "../ui.js";
-import { chooseOrg } from "./orgs.js";
+import { chooseOrg, orgNameOf } from "./orgs.js";
 
 const ROLES = [
   {
     key: "member",
     label: "Member",
-    note: "Sees their organisation's usage. Changes nothing.",
+    note: "Sees their organisation's usage and manages their own keys.",
   },
   {
     key: "admin",
     label: "Administrator",
-    note: "Manages the organisation: teams, guardrails, keys, people.",
+    note: "Manages the organisation: people, teams, keys, guardrails, models, MCP servers, filters, routers and sandbox classes.",
   },
   {
     key: "operator",
     label: "Operator",
-    note: "Works across organisations and manages the model catalogue.",
+    note: "Creates organisations and works in any of them.",
   },
 ];
 
@@ -43,18 +43,16 @@ const ASSIGNABLE = ROLES.filter((r) => r.key !== "operator");
 const TONE = { operator: "accent", admin: "good", member: "" };
 
 export async function peopleView(ctx) {
+  const canOperate = ctx.state.me.unrestricted;
+  if (!ctx.orgID && canOperate) return chooseOrg(ctx, "Users");
+
   const users = (await api.users(ctx.orgID)).data || [];
   // Whether a role can be changed here at all. It cannot when a group decides
   // the administrator role: the directory reapplies its answer on the next
   // sign-in, so the screen says where roles come from rather than offering a
   // control that does not keep.
   const canAssign = !ctx.state.me.roles_from_directory;
-  const canOperate = ctx.state.me.unrestricted;
-  ctx.setSubtitle(
-    `${users.length} ${users.length === 1 ? "person" : "people"}`,
-  );
-
-  if (!ctx.orgID && canOperate) return chooseOrg(ctx, "Users");
+  ctx.setSubtitle(`${users.length} user${users.length === 1 ? "" : "s"}`);
 
   const head = h(
     "div",
@@ -76,7 +74,7 @@ export async function peopleView(ctx) {
       "button",
       { class: "btn btn-primary", onClick: () => addPerson(ctx) },
       icon(icons.plus),
-      "Add person",
+      "Add user",
     ),
   );
 
@@ -236,10 +234,10 @@ function addPerson(ctx) {
   const err = h("div");
 
   modal({
-    title: "Add a person",
+    title: "Add a user",
     subtitle: canAssign
       ? "This reserves their role. They still sign in through the identity provider."
-      : "This adds them to this organisation before they first sign in. " +
+      : `This adds them to ${orgNameOf(ctx)} before they first sign in. ` +
         "Their role comes from the directory.",
     body: h(
       "form",
@@ -278,7 +276,7 @@ function addPerson(ctx) {
                 role.value,
               );
               close();
-              toast("Person added", "good");
+              toast("User added", "good");
               ctx.reload();
             } catch (ex) {
               showError(err, ex.message);

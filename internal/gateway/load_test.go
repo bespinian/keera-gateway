@@ -17,7 +17,7 @@ func TestLeastBusyPrefersTheEmptiestDestination(t *testing.T) {
 	stop := []func(){l.begin("a"), l.begin("a"), l.begin("b")}
 
 	got := []string{"a", "b", "c"}
-	l.order(policy.RouterModeLeastBusy, got)
+	l.order(policy.RouterModeLeastBusy, got, byAlias)
 	if want := []string{"c", "b", "a"}; !slices.Equal(got, want) {
 		t.Errorf("order = %v, want %v - two in flight, one in flight, none", got, want)
 	}
@@ -28,7 +28,7 @@ func TestLeastBusyPrefersTheEmptiestDestination(t *testing.T) {
 	// Everything is back to nothing in flight, so nothing tells the three
 	// apart and what is left is the order the administrator wrote.
 	got = []string{"a", "b", "c"}
-	l.order(policy.RouterModeLeastBusy, got)
+	l.order(policy.RouterModeLeastBusy, got, byAlias)
 	if want := []string{"a", "b", "c"}; !slices.Equal(got, want) {
 		t.Errorf("order = %v, want %v - a tie is broken by what was written", got, want)
 	}
@@ -54,7 +54,7 @@ func TestLatencyPrefersTheDestinationAnsweringFastest(t *testing.T) {
 	l.observe("middling", 300*time.Millisecond, now)
 
 	got := []string{"slow", "middling", "quick"}
-	l.order(policy.RouterModeLatency, got)
+	l.order(policy.RouterModeLatency, got, byAlias)
 	if want := []string{"quick", "middling", "slow"}; !slices.Equal(got, want) {
 		t.Errorf("order = %v, want %v", got, want)
 	}
@@ -66,7 +66,7 @@ func TestLatencyTriesADestinationItHasNotMeasured(t *testing.T) {
 	l.observe("measured", 50*time.Millisecond, now)
 
 	got := []string{"measured", "fresh"}
-	l.order(policy.RouterModeLatency, got)
+	l.order(policy.RouterModeLatency, got, byAlias)
 	if want := []string{"fresh", "measured"}; !slices.Equal(got, want) {
 		t.Errorf("order = %v, want %v - a destination with no recent reading is worth "+
 			"one request to find out about, or the first model to post a good number "+
@@ -89,7 +89,7 @@ func TestAnOldReadingStopsBeingAReading(t *testing.T) {
 		t.Errorf("a reading %s old is still being treated as one", loadStale)
 	}
 	got := []string{"recent", "stale"}
-	l.order(policy.RouterModeLatency, got)
+	l.order(policy.RouterModeLatency, got, byAlias)
 	if want := []string{"stale", "recent"}; !slices.Equal(got, want) {
 		t.Errorf("order = %v, want %v", got, want)
 	}
@@ -127,7 +127,7 @@ func TestAFailedDestinationIsRankedLastInBothModes(t *testing.T) {
 		policy.RouterModeLatency, policy.RouterModeLeastBusy,
 	} {
 		got := []string{"down", "up"}
-		l.order(mode, got)
+		l.order(mode, got, byAlias)
 		if want := []string{"up", "down"}; !slices.Equal(got, want) {
 			t.Errorf("%s: order = %v, want %v", mode, got, want)
 		}
@@ -154,7 +154,7 @@ func TestAnUnmeasuredModeIsLeftAlone(t *testing.T) {
 	// A fallback router's order is the administrator's statement about which
 	// destination is wanted, and nothing measured here may reorder it.
 	got := []string{"a", "b"}
-	l.order(policy.RouterModeFallback, got)
+	l.order(policy.RouterModeFallback, got, byAlias)
 	if want := []string{"a", "b"}; !slices.Equal(got, want) {
 		t.Errorf("order = %v, want %v - a fallback router's order is written, not "+
 			"measured", got, want)
@@ -172,3 +172,7 @@ func TestDescribeSaysNothingAboutAModeThatMeasuresNothing(t *testing.T) {
 			"of the column is answering why this one is first")
 	}
 }
+
+// byAlias keeps each destination's numbers under its alias. The tests have one
+// organisation, so the alias is as unique as a model key.
+func byAlias(alias string) string { return alias }

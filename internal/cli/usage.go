@@ -28,15 +28,10 @@ func usageCmd(ctx context.Context, args []string) error {
 		return err
 	}
 
-	path := fmt.Sprintf("/v1/usage?group_by=%s&from=%s", *groupBy, sinceParam(*since))
-	if *org != "" {
-		path += "&org_id=" + *org
-	}
-	var res struct {
-		Currency string              `json:"currency"`
-		Data     []store.UsageBucket `json:"data"`
-	}
-	if err := c.do(ctx, "GET", path, nil, &res); err != nil {
+	q := url.Values{"group_by": {*groupBy}, "from": {sinceParam(*since)}}
+	setIfGiven(q, map[string]string{"org_id": *org})
+	var res usageResponse
+	if err := c.do(ctx, "GET", "/v1/usage?"+q.Encode(), nil, &res); err != nil {
 		return err
 	}
 	return out(*asJSON, res, func(w *table) {
@@ -44,9 +39,9 @@ func usageCmd(ctx context.Context, args []string) error {
 			strings.ToUpper(*groupBy), res.Currency))
 		var totalCost int64
 		for _, b := range res.Data {
-			group := b.Group
-			if group == "" {
-				group = "(none)"
+			group := res.label(*groupBy, b.Group)
+			if b.OrgID != "" {
+				group += " (" + b.OrgID + ")"
 			}
 			_, _ = fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%s\n", group, b.Requests,
 				b.InputTokens, b.OutputTokens, policy.FormatMicros(b.CostMicros))
@@ -56,7 +51,30 @@ func usageCmd(ctx context.Context, args []string) error {
 	})
 }
 
-// failuresCmd is the panel's Failures screen, in a terminal.
+type usageResponse struct {
+	Currency    string              `json:"currency"`
+	Data        []store.UsageBucket `json:"data"`
+	TeamNames   map[string]string   `json:"team_names"`
+	KeyAliases  map[string]string   `json:"key_aliases"`
+	UserNames   map[string]string   `json:"user_names"`
+	ClientNames map[string]string   `json:"client_names"`
+}
+
+// label is what a group is called: a team's name, a key's alias, a person's
+// email, rather than the id the rows are grouped by.
+func (res usageResponse) label(groupBy, group string) string {
+	if group == "" {
+		return "(none)"
+	}
+	names := map[string]map[string]string{
+		"team": res.TeamNames, "key": res.KeyAliases,
+		"user": res.UserNames, "client": res.ClientNames,
+	}[groupBy]
+	return labelled(names, group)
+}
+
+// failuresCmd lists the calls that did not deliver: the failed, refused and
+// interrupted requests of the panel's request log, in a terminal.
 //
 // The backend's message is printed beside the model and the key, because only
 // its wording says whose problem a failure is.
@@ -79,12 +97,15 @@ func failuresCmd(ctx context.Context, args []string) error {
 	if err := parse(fs, args); err != nil {
 		return err
 	}
+	// 'all' is every request that did not deliver, which the request log
+	// calls unhappy.
 	if *kind == "all" {
-		*kind = ""
+		*kind = string(store.OutcomeUnhappy)
 	}
 
 	q := url.Values{}
-	q.Set("kind", *kind)
+	q.Set("outcome", *kind)
+	q.Set("facets", "1")
 	q.Set("limit", strconv.Itoa(*limit))
 	q.Set("from", sinceParam(*since))
 	setIfGiven(q, map[string]string{
@@ -95,10 +116,10 @@ func failuresCmd(ctx context.Context, args []string) error {
 	}
 
 	var res failuresResponse
-	if err := c.do(ctx, "GET", "/v1/failures?"+q.Encode(), nil, &res); err != nil {
+	if err := c.do(ctx, "GET", "/v1/requests?"+q.Encode(), nil, &res); err != nil {
 		return err
 	}
-	return out(*asJSON, res, func(w *table) { printFailures(w, res, *since) })
+	return out(*asJSON, res, func(w *table) { printFailures(w, res, store.Outcome(*kind), *since) })
 }
 
 // setIfGiven sets each query parameter that has a value.
@@ -111,30 +132,44 @@ func setIfGiven(q url.Values, params map[string]string) {
 }
 
 type failuresResponse struct {
-	Data       []store.Failure     `json:"data"`
-	Filters    store.FailureFacets `json:"filters"`
-	KeyAliases map[string]string   `json:"key_aliases"`
+	Data       []store.Request       `json:"data"`
+	Outcomes   store.RequestOutcomes `json:"outcomes"`
+	Filters    store.RequestFacets   `json:"filters"`
+	KeyAliases map[string]string     `json:"key_aliases"`
 }
 
-func printFailures(w *table, res failuresResponse, since time.Duration) {
+// matched is how many requests of the outcome asked for are in the window.
+func (r failuresResponse) matched(o store.Outcome) int64 {
+	switch o {
+	case store.OutcomeFailed:
+		return r.Outcomes.Failed
+	case store.OutcomeRefused:
+		return r.Outcomes.Refused
+	case store.OutcomeInterrupted:
+		return r.Outcomes.Interrupted
+	}
+	return r.Outcomes.Failed + r.Outcomes.Refused + r.Outcomes.Interrupted
+}
+
+func printFailures(w *table, res failuresResponse, o store.Outcome, since time.Duration) {
 	if len(res.Data) == 0 {
 		_, _ = fmt.Fprintf(w, "nothing matched in the last %s\n", since)
 		return
 	}
-	w.header("WHEN\tMODEL\tSTATUS\tKEY\tMESSAGE")
+	// The request id opens the whole task: keera session <id>.
+	w.header("REQUEST\tWHEN\tMODEL\tSTATUS\tKEY\tMESSAGE")
 	for _, f := range res.Data {
 		key := f.KeyID
 		if alias, ok := res.KeyAliases[f.KeyID]; ok && alias != "" {
 			key = alias
 		}
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			f.TS.Local().Format("2006-01-02 15:04:05"), dash(f.Alias),
+		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\n",
+			f.ID, f.TS.Local().Format("2006-01-02 15:04:05"), dash(f.Alias),
 			httpStatus(f.Status), dash(key), oneLine(f.Error))
 	}
 	// The counts cover the whole window, not just the page printed.
-	if res.Filters.Total > int64(len(res.Data)) {
-		_, _ = fmt.Fprintf(w, "\n%d in the last %s; showing %d\n",
-			res.Filters.Total, since, len(res.Data))
+	if total := res.matched(o); total > int64(len(res.Data)) {
+		_, _ = fmt.Fprintf(w, "\n%d in the last %s; showing %d\n", total, since, len(res.Data))
 	}
 	if len(res.Filters.Models) > 1 {
 		parts := make([]string, 0, len(res.Filters.Models))

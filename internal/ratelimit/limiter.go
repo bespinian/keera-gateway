@@ -113,19 +113,9 @@ func (l *Limiter) Admit(reqs []Requirement, now time.Time) int {
 	return -1
 }
 
-// Charge takes n units from key's bucket, allowing it to go negative so that
-// one very large request is paid for by the requests that follow it.
-func (l *Limiter) Charge(key string, perMinute int, n float64, now time.Time) {
-	if perMinute <= 0 || n == 0 {
-		return
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.get(key, perMinute, now).tokens -= n
-}
-
-// ChargeAll takes n units from the bucket of every requirement. Take is not
-// used.
+// ChargeAll takes n units from the bucket of every requirement, allowing it to
+// go negative so that one very large request is paid for by the requests that
+// follow it. Take is not used.
 func (l *Limiter) ChargeAll(reqs []Requirement, n float64, now time.Time) {
 	if n == 0 {
 		return
@@ -175,7 +165,7 @@ func (l *Limiter) Sweep(idle time.Duration, now time.Time) {
 }
 
 // holds reports whether a bucket with tokens left satisfies a requirement. A
-// Take needs a whole unit. Otherwise any credit will do: Charge puts the bucket
+// Take needs a whole unit. Otherwise any credit will do: ChargeAll puts the bucket
 // into debt, and the next request pays for it.
 func holds(take bool, tokens float64) bool {
 	if take {
@@ -184,7 +174,7 @@ func holds(take bool, tokens float64) bool {
 	return tokens > 0
 }
 
-// remaining is what a client is told is left. A bucket in debt from Charge
+// remaining is what a client is told is left. A bucket in debt from ChargeAll
 // still has "none left".
 func remaining(tokens float64) int {
 	if tokens > 0 {

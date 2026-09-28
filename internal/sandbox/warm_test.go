@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +20,7 @@ func TestEnsurePoolWritesTemplateAndPool(t *testing.T) {
 	})
 
 	class := policy.SandboxClass{
-		Name: "standard", Image: "example/sandbox:1",
+		OrgID: "org_06c1k2rt", Name: "standard", Image: "example/sandbox:1",
 		Isolation: policy.IsolationIsolated, CPU: 4000, Memory: 16384, Disk: 51200,
 		Warm: 2,
 	}
@@ -70,7 +71,7 @@ func TestEnsurePoolRemovesAZeroPool(t *testing.T) {
 	f := newFakeAPI(t)
 	k := f.driver(t, KubernetesOptions{Warm: true})
 	if err := k.EnsurePool(context.Background(),
-		policy.SandboxClass{Name: "cold", Image: "i", Warm: 0}); err != nil {
+		policy.SandboxClass{OrgID: "org_06c1k2rt", Name: "cold", Image: "i", Warm: 0}); err != nil {
 		t.Fatalf("ensure pool: %v", err)
 	}
 	var deletes int
@@ -95,10 +96,10 @@ func TestCreateClaimCarriesTheCredentials(t *testing.T) {
 	_, err := k.Create(context.Background(), Spec{
 		Ref: Ref{ID: "sbx_warm01", Name: "warm", Backing: BackingClaim},
 		Class: policy.SandboxClass{
-			Name: "standard", Image: "i", Isolation: policy.IsolationStandard,
+			OrgID: "org_1", Name: "standard", Image: "i", Isolation: policy.IsolationStandard,
 			CPU: 2000, Memory: 4096, Warm: 2,
 		},
-		Purpose: policy.PurposeAgent,
+		Purpose: policy.PurposeEngineer,
 		Org:     "org_1",
 		Owner:   "dev@example.ch",
 		Env:     map[string]string{"KEERA_API_KEY": "keera_sk_x"},
@@ -119,12 +120,13 @@ func TestCreateClaimCarriesTheCredentials(t *testing.T) {
 		t.Fatal("no claim was created")
 	}
 	for _, want := range []string{
-		`"warmPoolRef":{"name":"keera-standard"}`,
+		// The organisation's own pool, not another's "standard".
+		`"warmPoolRef":{"name":"keera-1-standard"}`,
 		`"KEERA_API_KEY"`,
 		// Named, so a sidecar never gets this sandbox's API key.
 		`"containerName":"sandbox"`,
-		// An agent's sandbox is terminated when its time runs out.
-		`"shutdownPolicy":"Delete"`,
+		// An engineer's sandbox keeps its volume when its time runs out.
+		`"shutdownPolicy":"Retain"`,
 		`"keera.dev/org":"org_1"`,
 	} {
 		if !strings.Contains(claim, want) {
@@ -172,8 +174,43 @@ func TestClaimedStatusReady(t *testing.T) {
 	if st.Address != "10.1.2.9" {
 		t.Errorf("address = %q; the attach surface dials this", st.Address)
 	}
-	if st.Expires.IsZero() {
-		t.Error("the claim's own lifetime should be read back")
+}
+
+func TestClaimedStatusFollowsTheBoundSandbox(t *testing.T) {
+	// The claim stays Ready when its pod dies; only the bound Sandbox says so,
+	// and a sandbox that stays pending is never finished or reported.
+	cases := []struct {
+		name, sandbox string
+		want          policy.SandboxState
+		exited        bool
+	}{
+		{"failed", `{"status":{"conditions":[{"type":"Finished","status":"True","reason":"PodFailed"}]}}`,
+			policy.SandboxFailed, false},
+		{"exited", `{"status":{"conditions":[{"type":"Finished","status":"True","reason":"PodSucceeded"}]}}`,
+			policy.SandboxFailed, true},
+		{"suspended", `{"spec":{"operatingMode":"Suspended"}}`, policy.SandboxSuspended, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeAPI(t)
+			k := f.driver(t, KubernetesOptions{Warm: true})
+			ref := Ref{ID: "sbx_warm05", Name: "bound", Backing: BackingClaim}
+			f.put(claimsPath+objectName(ref),
+				`{"status":{"sandbox":{"name":"pool-abc","podIPs":["10.1.2.9"]},
+				  "conditions":[{"type":"Ready","status":"True"}]}}`)
+			f.put(sandboxesPath+"pool-abc", tc.sandbox)
+
+			st, err := k.Status(context.Background(), ref)
+			if err != nil {
+				t.Fatalf("status: %v", err)
+			}
+			if st.State != tc.want || st.Exited != tc.exited {
+				t.Errorf("state = %s, exited = %v; want %s, %v", st.State, st.Exited, tc.want, tc.exited)
+			}
+			if st.Ref != ref {
+				t.Errorf("ref = %+v; the manager finds the row by the claim's ref", st.Ref)
+			}
+		})
 	}
 }
 
@@ -216,17 +253,23 @@ func TestTerminatingAClaimDeletesTheClaim(t *testing.T) {
 
 func TestPrunePoolsRemovesThePoolsOfDeletedClasses(t *testing.T) {
 	// EnsurePool never visits a deleted class, so without this its warm
-	// sandboxes would hold their CPU and memory for ever.
+	// sandboxes would hold their CPU and memory for ever. Two organisations
+	// can each have a "standard".
 	f := newFakeAPI(t)
 	k := f.driver(t, KubernetesOptions{Warm: true})
 	const warm = "/apis/extensions.agents.x-k8s.io/v1beta1/namespaces/sandboxes/"
 	items := `{"items":[
-		{"metadata":{"name":"keera-standard","labels":{"keera.dev/class":"standard"}}},
-		{"metadata":{"name":"keera-large","labels":{"keera.dev/class":"large"}}}]}`
+		{"metadata":{"name":"keera-aaaaaaaa-standard",
+			"labels":{"keera.dev/org":"org_aaaaaaaa","keera.dev/class":"standard"}}},
+		{"metadata":{"name":"keera-bbbbbbbb-standard",
+			"labels":{"keera.dev/org":"org_bbbbbbbb","keera.dev/class":"standard"}}},
+		{"metadata":{"name":"keera-aaaaaaaa-large",
+			"labels":{"keera.dev/org":"org_aaaaaaaa","keera.dev/class":"large"}}}]}`
 	f.put(warm+"sandboxwarmpools", items)
 	f.put(warm+"sandboxtemplates", items)
 
-	if err := k.PrunePools(context.Background(), map[string]bool{"standard": true}); err != nil {
+	keep := map[string]bool{PoolKey("org_aaaaaaaa", "standard"): true}
+	if err := k.PrunePools(context.Background(), keep); err != nil {
 		t.Fatalf("prune pools: %v", err)
 	}
 	var deleted []string
@@ -235,8 +278,13 @@ func TestPrunePoolsRemovesThePoolsOfDeletedClasses(t *testing.T) {
 			deleted = append(deleted, r.Path)
 		}
 	}
-	want := []string{warm + "sandboxwarmpools/keera-large", warm + "sandboxtemplates/keera-large"}
+	slices.Sort(deleted)
+	want := []string{
+		warm + "sandboxtemplates/keera-aaaaaaaa-large", warm + "sandboxtemplates/keera-bbbbbbbb-standard",
+		warm + "sandboxwarmpools/keera-aaaaaaaa-large", warm + "sandboxwarmpools/keera-bbbbbbbb-standard",
+	}
 	if strings.Join(deleted, " ") != strings.Join(want, " ") {
-		t.Errorf("deleted %v, want only the pool and template of the deleted class %v", deleted, want)
+		t.Errorf("deleted %v, want only the pools and templates of the classes not kept %v",
+			deleted, want)
 	}
 }

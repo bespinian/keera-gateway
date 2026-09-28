@@ -87,7 +87,8 @@ func (b *Budgets) reconcile(rows []store.SpendRow) {
 	b.mu.Unlock()
 }
 
-// Spent returns the current view of one window, for the control API.
+// Spent returns the current view of one window, for the control API and the
+// budget headers.
 func (b *Budgets) Spent(t policy.ScopeType, id string, p policy.Period, now time.Time) int64 {
 	b.mu.RLock()
 	defer b.mu.RUnlock()

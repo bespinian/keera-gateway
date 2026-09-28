@@ -13,8 +13,8 @@ import (
 // Filters and routers are the two hooks an organisation puts in front of a
 // request. Their routes share the helpers here.
 
-// writeHookList answers a filter or router list. With ?stats it adds what each
-// one did in the window. Only the panel asks for that, so the CLI and the
+// writeHookList answers a filter, router or model list. With ?stats it adds
+// what each one did in the window. Only the panel asks for that, so the CLI and the
 // gateway do not pay for an aggregate over the log.
 func (s *Server) writeHookList(w http.ResponseWriter, r *http.Request, data any,
 	stats func(from, to time.Time) (any, error),
@@ -36,9 +36,9 @@ func (s *Server) writeHookList(w http.ResponseWriter, r *http.Request, data any,
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-// scopeList names the guardrails that still use a filter or router, for the
-// refusal to delete it.
-func scopeList(users []store.FilterScope) string {
+// scopeList names the guardrails that still use a filter, router or MCP
+// server, for the refusal to delete it.
+func scopeList(users []store.GuardrailRef) string {
 	labels := make([]string, 0, len(users))
 	for _, u := range users {
 		labels = append(labels, string(u.ScopeType)+" "+u.Name)
@@ -46,9 +46,8 @@ func scopeList(users []store.FilterScope) string {
 	return strings.Join(labels, ", ")
 }
 
-// deleted finishes the delete of a filter, router or model: it writes the
-// audit entry, tells the gateways and answers. kind is "filter", "router" or
-// "model".
+// deleted finishes the delete of a filter, router, model or MCP server: it
+// writes the audit entry, tells the gateways and answers. kind names which.
 func (s *Server) deleted(w http.ResponseWriter, r *http.Request, p *authn.Principal,
 	orgID, kind, alias string,
 ) {

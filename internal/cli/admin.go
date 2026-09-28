@@ -18,7 +18,7 @@ import (
 
 // Flag descriptions that several commands share word for word.
 const (
-	orgUsage  = "organisation id (defaults to the only one, if there is only one)"
+	orgUsage  = "organisation id (default: your own; an operator's only one)"
 	jsonUsage = "print raw JSON"
 	yesUsage  = "do not ask for confirmation"
 )
@@ -65,6 +65,24 @@ func list[T any](ctx context.Context, c *client, path string) ([]T, error) {
 	}
 	err := c.do(ctx, "GET", path, nil, &res)
 	return res.Data, err
+}
+
+// findAlias reads the entry called alias from the list at path. noun names
+// the kind of entry, for the error and the command that lists them.
+func findAlias[T any](ctx context.Context, c *client, path, alias, noun string,
+	aliasOf func(T) string,
+) (T, error) {
+	var zero T
+	entries, err := list[T](ctx, c, path)
+	if err != nil {
+		return zero, err
+	}
+	for _, e := range entries {
+		if aliasOf(e) == alias {
+			return e, nil
+		}
+	}
+	return zero, fmt.Errorf("no %s %s (see: keera %s list)", noun, alias, noun)
 }
 
 // inOrg scopes a control API path to one organisation.

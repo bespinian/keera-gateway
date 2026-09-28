@@ -65,8 +65,8 @@ router can send a prompt. The instruction only affects which one it picks.
 
 Also:
 
-- A destination the catalogue cannot serve - missing, disabled, not a chat
-  model, no backend - is **left out of the choice**. `keera router check`
+- A destination the organisation cannot serve - no such model, disabled, not a
+  chat model, no backend - is **left out of the choice**. `keera router check`
   reports what was and was not offered.
 - The **fallback must be one of the destinations**.
 
@@ -97,10 +97,11 @@ Before the filters:
 
 1. authenticate, rate-limit, budget
 2. **the router**, choosing the destination
-3. the filters, in the order the hierarchy gives them
-4. the standing system prompt is prepended
-5. the output ceiling is clamped
-6. forward
+3. refuse the request if it cannot fit in the destination's context
+4. the filters, in the order the hierarchy gives them
+5. the standing system prompt is prepended
+6. the output ceiling is clamped
+7. forward
 
 The router reads what the client sent, before any redaction. So **the deciding
 model must be served locally**, just like a filter's.
@@ -252,7 +253,7 @@ request goes to the destination with the smallest ceiling it fits under.
 It is the only mode that checks whether a request fits. A destination whose
 `max_context` cannot hold the request is ranked **behind every destination that
 can**, whatever the ceilings say. Otherwise a long conversation could reach the
-small model and be truncated or get a 413.
+small model and be refused with a 400 `context_length_exceeded`.
 
 The three tiers, in the order they are tried:
 
@@ -329,7 +330,7 @@ So the timeout that matters is `KEERA_UPSTREAM_HEADER_TIMEOUT`, on the response
 headers. Lower it if two minutes is too long to wait before the next destination
 is tried.
 
-A destination the catalogue cannot serve is skipped. Only when _none_ can be
+A destination the organisation cannot serve is skipped. Only when _none_ can be
 served is the request refused, with `router_destination_unavailable`.
 
 ### What a request costs
@@ -350,13 +351,16 @@ generation.
 | `error`    | it could not place the request | every destination failed       |
 
 When every destination fails, the client gets the last destination's own
-response.
+response. If that one could not be reached at all, or did not answer in time,
+the client gets the gateway's 502 `upstream_unavailable` instead.
 
-Answers carry the same header, and `(fallback)` means the same thing:
+Answers carry the same header, and `(fallback)` means the same thing. When
+every destination failed, the header says so:
 
 ```
 X-Keera-Router: ha -> keera-local
 X-Keera-Router: ha -> hosted-frontier (fallback)
+X-Keera-Router: ha -> hosted-frontier (every destination failed)
 ```
 
 The failed attempts are stored on the request's row, even when a later
@@ -420,10 +424,11 @@ started, and there is no deciding model, instruction or fallback destination.
 - **A destination that just failed is ranked last** for the next half minute.
   Otherwise both modes would keep picking a down destination: nothing answers,
   so nothing is measured, and nothing is in flight.
-- **A destination with no recent measurement is ranked first.** After five
-  minutes without traffic, its reading is dropped and it moves to the front.
-  This costs one request and is the only way the router notices that a
-  destination got faster.
+- **On a latency router, a destination with no recent measurement is ranked
+  first.** After five minutes without traffic, its reading is dropped and it
+  moves to the front. This costs one request and is the only way the router
+  notices that a destination got faster. A least-busy router only counts
+  requests in flight.
 - **Ties go to the written order**, so a new router behaves like a fallback
   router until it has measured something.
 
@@ -541,32 +546,33 @@ X-Keera-Router: auto -> keera-speed (fallback)
 
 ## Who owns what
 
-The model catalogue is shared by all tenants, and only an operator changes it. A
-router belongs to one organisation, and its administrators write it. Two
-organisations can each have a router with the same name; they are different
+A router belongs to one organisation, and its administrators write it. It can
+send to the organisation's models.
+Two organisations can each have a router with the same name; they are different
 routers.
 
-Router aliases share one namespace with catalogue aliases, because clients use
-both in the same field. **The catalogue wins.** Creating a router over an
-existing alias is refused. If a model is later added under a router's name, the
-model serves that name and the router's screen shows it placing nothing.
+Router aliases share one namespace with model aliases, because clients use both
+in the same field, so the two cannot share an alias. Creating a router over the
+alias of one of the organisation's models is refused, and so is adding a model
+under a router's alias.
 
 The alias is the router's identity: lowercase letters, digits and interior
 hyphens. It cannot change. To rename, create a new router and move the clients.
 
 Members cannot create or change routers, but they can read them, instruction
-included. The Routers screen, each router's screen, `GET /v1/routers` and
-`GET /v1/routers/{alias}/report` are open to anyone signed in to the
+included. The Routers screen, each router's screen, `GET /control/v1/routers`
+and `GET /control/v1/routers/{alias}/report` are open to anyone signed in to the
 organisation.
 
 ## Where a router is not
 
 - **Only on the chat endpoints**: `/api/v1/chat/completions`, `/api/v1/messages`
-  and `/api/v1/responses`. `/v1/completions` and `/v1/embeddings` do not know
-  router names.
+  and `/api/v1/responses`. `/api/v1/completions` and `/api/v1/embeddings` do not
+  know router names.
 - **Not on a request with no text**, for a router that decides. A chat that is
-  all images has nothing to read, so the fallback places it. A fallback router
-  is unaffected, and a size router counts such a request as small.
+  all images has nothing to read, so the fallback places it, or it is refused
+  with `router_undecided` if there is no fallback. A fallback router is
+  unaffected, and a size router counts such a request as small.
 - **Not a retry.** A fallback router moves an unanswered request to the next
   destination. It never sends the same request to the same model twice.
 - **Not a guardrail.** A router picks between models an administrator listed. To

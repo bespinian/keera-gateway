@@ -8,9 +8,9 @@
 //
 // Everything is behind Driver, with two implementations. The Kubernetes driver
 // writes Sandbox objects for the agent-sandbox controller
-// (sigs.k8s.io/agent-sandbox). The podman driver runs local containers for the
-// single-host compose and NixOS setups; it has weaker isolation and no warm
-// pool.
+// (sigs.k8s.io/agent-sandbox). The podman driver runs local containers for a
+// gateway that runs as a process on a single host, such as `make dev` or a
+// NixOS service; it has weaker isolation and no warm pool.
 //
 // # No client-go
 //
@@ -39,9 +39,6 @@ var (
 	// attach to a suspended one. The control plane turns it into "resume it
 	// first".
 	ErrNotReady = errors.New("sandbox: not ready")
-	// ErrUnsupported means the driver does not do this at all, so the control
-	// plane can say "not in this deployment" instead of "it broke".
-	ErrUnsupported = errors.New("sandbox: not supported by this driver")
 )
 
 // Ref names one sandbox to a driver.
@@ -52,8 +49,8 @@ var (
 type Ref struct {
 	// ID is the sandbox id, "sbx_...".
 	ID string
-	// Name is what the developer called it. Drivers use it for the hostname,
-	// because that is what shows in the shell prompt.
+	// Name is what the developer called it. Drivers put it in the object's
+	// name, so it shows in kubectl and podman ps.
 	Name string
 	// Backing says whether the sandbox is a driver-made object or a claim on
 	// a warm pool. Empty means BackingSandbox.
@@ -77,8 +74,9 @@ type Spec struct {
 	Class policy.SandboxClass
 	// Purpose decides the lifecycle. See policy.Purpose.
 	Purpose policy.Purpose
-	// Owner, Org and Team are stamped onto the object, so a platform team can
-	// see whose sandbox is on a node without asking the gateway.
+	// Owner, Org and Team are stamped onto a Kubernetes object, so a platform
+	// team can see whose sandbox is on a node without asking the gateway.
+	// Podman labels only the owner.
 	//
 	// Owner is an email address where known. It is the only personal data this
 	// package puts into the cluster.
@@ -92,13 +90,10 @@ type Spec struct {
 	// lifetime anyway. So anybody who can read pods in the sandbox namespace
 	// can read it, which is why that namespace is kept to itself.
 	Env map[string]string
-	// Expires is when the driver should tear the sandbox down by itself. It
-	// is absolute because the Kubernetes controller enforces it too, so
-	// nothing is left behind if the gateway never comes back.
+	// Expires is when the driver should tear the sandbox down by itself. The
+	// Kubernetes controller enforces it too, so nothing is left behind if the
+	// gateway never comes back. Podman has no controller and ignores it.
 	Expires time.Time
-	// Ports are what the sandbox listens on, for drivers that must declare
-	// them. PortSSH is always included.
-	Ports []int
 }
 
 // Status is what a driver knows about one sandbox right now.
@@ -114,9 +109,9 @@ type Status struct {
 	Address string
 	// Node is where it is scheduled.
 	Node string
-	// Expires is when the driver will tear it down. It is read back, so a
-	// failed extension shows up as a mismatch with the row.
-	Expires time.Time
+	// Exited says the process ended by itself, with success. For an agent's
+	// sandbox that is the task done, and the manager terminates it.
+	Exited bool
 }
 
 // Driver is what one deployment shape can do with sandboxes.
@@ -141,6 +136,10 @@ type Driver interface {
 	// Both are no-ops on a sandbox already in that state.
 	Suspend(ctx context.Context, ref Ref) error
 	Resume(ctx context.Context, ref Ref) error
+	// Revive starts an expired sandbox again on the volume it kept, with the
+	// environment and end in spec. Its old key and repository credential
+	// were revoked at expiry, so it needs new ones.
+	Revive(ctx context.Context, spec Spec) error
 	// Extend moves when the driver will tear the sandbox down.
 	Extend(ctx context.Context, ref Ref, until time.Time) error
 	// Terminate removes the sandbox and everything it held, including the
@@ -153,16 +152,14 @@ type Driver interface {
 
 // Capabilities is what a driver can do.
 type Capabilities struct {
-	// Suspend is whether a sandbox can be stopped and started again with its
-	// volume intact.
-	Suspend bool
-	// Isolation is the strongest tier this driver can deliver. A class asking
-	// for more is refused rather than silently run with less.
+	// Isolation is the strongest tier this driver can deliver.
 	Isolation policy.Isolation
+	// Tiers is every tier it can deliver: standard, and each one with a
+	// runtime mapped. A class asking for another is refused rather than
+	// silently run with less.
+	Tiers []policy.Isolation
 	// Warm is whether this driver keeps a pool of started sandboxes.
 	Warm bool
-	// Persistence is whether a volume survives a suspend.
-	Persistence bool
 }
 
 // The ports a sandbox serves. Only PortSSH is opened by the drivers; the range
@@ -221,13 +218,21 @@ func strongestIsolation(runtimes map[policy.Isolation]string) policy.Isolation {
 	return best
 }
 
+// mappedTiers is every tier runtimes can deliver, weakest first.
+func mappedTiers(runtimes map[policy.Isolation]string) []policy.Isolation {
+	tiers := []policy.Isolation{policy.IsolationStandard}
+	for _, tier := range policy.Isolations {
+		if tier != policy.IsolationStandard && runtimes[tier] != "" {
+			tiers = append(tiers, tier)
+		}
+	}
+	return tiers
+}
+
 // mappedRuntime is the runtime a class runs on. ok is false when the class
 // needs a tier that has no runtime mapped; the caller words the refusal. The
 // standard tier never needs one: empty means the platform's default.
 func mappedRuntime(c policy.SandboxClass, runtimes map[policy.Isolation]string) (name string, ok bool) {
-	if c.RuntimeClass != "" {
-		return c.RuntimeClass, true
-	}
 	if c.Isolation == policy.IsolationStandard {
 		return runtimes[policy.IsolationStandard], true
 	}
@@ -235,17 +240,7 @@ func mappedRuntime(c policy.SandboxClass, runtimes map[policy.Isolation]string) 
 	return name, name != ""
 }
 
-// formatExpiry renders an expiry the way both drivers store it.
+// formatExpiry renders an expiry the way the Kubernetes objects hold it.
 func formatExpiry(t time.Time) string {
 	return t.UTC().Format(time.RFC3339)
-}
-
-// parseExpiry reads back what formatExpiry wrote. Anything unreadable is the
-// zero time.
-func parseExpiry(raw string) time.Time {
-	t, err := time.Parse(time.RFC3339, raw)
-	if err != nil {
-		return time.Time{}
-	}
-	return t
 }

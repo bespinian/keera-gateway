@@ -68,10 +68,6 @@ type Options struct {
 	UpstreamHeaderTimeout time.Duration
 	// DialTimeout bounds establishing a connection to a backend.
 	DialTimeout time.Duration
-	// APIKeys resolves a model's api_key_env to a secret, for credentials that
-	// come from the deployment (a Kubernetes Secret, a vault) rather than from
-	// the control plane.
-	APIKeys func(env string) string
 	// Currency labels the budget headers. All money is integer micro-units of
 	// it.
 	Currency string
@@ -81,21 +77,26 @@ type Options struct {
 	PanelURL string
 }
 
+// The defaults of the settings behind Options. internal/config reads them
+// from here, so the environment and a zero Options mean the same.
+const (
+	DefaultMaxBodyBytes          = 32 << 20
+	DefaultMaxResponseBytes      = 64 << 20
+	DefaultUpstreamHeaderTimeout = 2 * time.Minute
+)
+
 func (o *Options) setDefaults() {
 	if o.MaxBodyBytes <= 0 {
-		o.MaxBodyBytes = 32 << 20
+		o.MaxBodyBytes = DefaultMaxBodyBytes
 	}
 	if o.MaxResponseBytes <= 0 {
-		o.MaxResponseBytes = 64 << 20
+		o.MaxResponseBytes = DefaultMaxResponseBytes
 	}
 	if o.UpstreamHeaderTimeout <= 0 {
-		o.UpstreamHeaderTimeout = 2 * time.Minute
+		o.UpstreamHeaderTimeout = DefaultUpstreamHeaderTimeout
 	}
 	if o.DialTimeout <= 0 {
 		o.DialTimeout = 5 * time.Second
-	}
-	if o.APIKeys == nil {
-		o.APIKeys = func(string) string { return "" }
 	}
 }
 
@@ -110,17 +111,18 @@ type Server struct {
 	log     *slog.Logger
 	opts    Options
 
-	rr sync.Map // alias -> *atomic.Uint64, for round-robin over backends
+	rr sync.Map // model key -> *atomic.Uint64, for round-robin over backends
 	// load is what this process has seen of each destination, for the
 	// latency and least-busy routers. See load.go.
 	load *loads
 	// patterns caches compiled pattern filter rules. See pattern.go.
 	patterns patternCache
 	// noLogprobs names the models whose backend turned out not to serve
-	// logprobs, so routers ask them for a name instead. Every model starts
-	// out absent: a self-hosted plane serves logprobs, and finding out
-	// otherwise costs one wasted decision per process. See choice.go.
-	noLogprobs sync.Map // model alias -> struct{}
+	// logprobs, so routers ask them for a name instead and gates read only
+	// the words. Every model starts out absent: a self-hosted plane serves
+	// logprobs, and finding out otherwise costs one wasted request per
+	// process. See choice.go.
+	noLogprobs sync.Map // model key -> struct{}
 }
 
 // New builds a gateway.

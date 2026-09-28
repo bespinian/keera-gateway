@@ -2,6 +2,7 @@ package control
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -32,20 +33,16 @@ func (s *Server) createOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		badRequest(w, "a non-empty 'name' is required")
 		return
 	}
-	org, err := s.st.CreateOrg(r.Context(), id.New("org"), name)
+	domain, err := policy.CleanEmailDomain(in.EmailDomain)
 	if err != nil {
-		s.fail(w, err)
+		badRequest(w, err.Error())
 		return
 	}
-	if domain := strings.TrimSpace(in.EmailDomain); domain != "" {
-		// The organisation exists by now, so only the domain is reported as
-		// failed. Failing the whole call would make the operator create the
-		// organisation a second time.
-		if err := s.st.SetOrgEmailDomain(r.Context(), org.ID, domain); err != nil {
-			s.failDomain(w, err)
-			return
-		}
-		org.EmailDomain = domain
+	org, err := s.st.CreateOrg(r.Context(),
+		store.Org{ID: id.New("org"), Name: name, EmailDomain: domain}, s.opts.Template)
+	if err != nil {
+		s.failDomain(w, err)
+		return
 	}
 	s.auditf(r, p, org.ID, "org.create", "org", org.ID, org)
 	httpx.WriteJSON(w, http.StatusCreated, org)
@@ -83,13 +80,18 @@ func (s *Server) updateOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		badRequest(w, "'email_domain' is required; send an empty string to clear it")
 		return
 	}
+	domain, err := policy.CleanEmailDomain(*in.EmailDomain)
+	if err != nil {
+		badRequest(w, err.Error())
+		return
+	}
 	orgID := r.PathValue("id")
-	if err := s.st.SetOrgEmailDomain(r.Context(), orgID, *in.EmailDomain); err != nil {
+	if err := s.st.SetOrgEmailDomain(r.Context(), orgID, domain); err != nil {
 		s.failDomain(w, err)
 		return
 	}
-	s.auditf(r, p, orgID, "org.update", "org", orgID, in)
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"id": orgID, "email_domain": *in.EmailDomain})
+	s.auditf(r, p, orgID, "org.update", "org", orgID, map[string]string{"email_domain": domain})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"id": orgID, "email_domain": domain})
 }
 
 // failDomain answers a domain another organisation already holds with a
@@ -119,6 +121,13 @@ func (s *Server) deleteOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		return
 	}
 	gone, err := s.st.DeleteOrg(r.Context(), orgID)
+	if errors.Is(err, store.ErrOrgHasSandboxes) {
+		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "org_has_sandboxes",
+			fmt.Sprintf("%s still has %d live sandbox(es); terminate them first "+
+				"(keera sandbox list --org %s), so none keeps running after its "+
+				"organisation is gone", gone.Name, gone.LiveSandboxes, orgID))
+		return
+	}
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -145,18 +154,15 @@ func (s *Server) createTeam(w http.ResponseWriter, r *http.Request, p *authn.Pri
 		badRequest(w, "a non-empty 'name' is required")
 		return
 	}
-	orgID, ok := s.scopeOrg(w, p, in.OrgID)
-	if !ok {
-		return
-	}
-	if orgID == "" {
-		badRequest(w, "'org_id' is required")
-		return
-	}
-	if !s.requireOrgAdmin(w, p, orgID) {
+	orgID, ok := s.requireOrg(w, p, in.OrgID, orgRequired)
+	if !ok || !s.requireOrgAdmin(w, p, orgID) {
 		return
 	}
 	team, err := s.st.CreateTeam(r.Context(), id.New("team"), orgID, name)
+	if errors.Is(err, store.ErrTeamNameTaken) {
+		teamNameTaken(w, name)
+		return
+	}
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -237,9 +243,7 @@ func (s *Server) updateTeam(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	}
 	team, err := s.st.RenameTeam(r.Context(), teamID, name)
 	if errors.Is(err, store.ErrTeamNameTaken) {
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "team_name_taken",
-			"another team in this organisation is already called '"+name+"'; "+
-				"two teams of one name make every report ambiguous, so the name is held to one")
+		teamNameTaken(w, name)
 		return
 	}
 	if err != nil {
@@ -248,6 +252,13 @@ func (s *Server) updateTeam(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	}
 	s.auditf(r, p, orgID, "team.update", "team", teamID, team)
 	httpx.WriteJSON(w, http.StatusOK, team)
+}
+
+// teamNameTaken refuses a second team of one name. Two would make every
+// report that names a team ambiguous.
+func teamNameTaken(w http.ResponseWriter, name string) {
+	httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "team_name_taken",
+		"another team in this organisation is already called '"+name+"'")
 }
 
 // deleteTeam removes a team once no live key is bound to it.
@@ -267,7 +278,8 @@ func (s *Server) deleteTeam(w http.ResponseWriter, r *http.Request, p *authn.Pri
 			"'"+inUse.Team+"' still holds "+keyCount(len(inUse.Aliases))+" that have not been "+
 				"revoked ("+strings.Join(inUse.Aliases, ", ")+"). Deleting the team would take "+
 				"them with it and whatever uses them would start answering 401, so revoke them "+
-				"or move them to another team first")
+				"first. A key cannot change team: issue a new one in another team for anything "+
+				"that still needs one")
 		return
 	}
 	if err != nil {
@@ -306,7 +318,7 @@ func (s *Server) addUser(w http.ResponseWriter, r *http.Request, p *authn.Princi
 		badRequest(w, "'email' is required")
 		return
 	}
-	orgID, ok := s.scopeOrg(w, p, in.OrgID)
+	orgID, ok := s.requireOrg(w, p, in.OrgID, orgRequired)
 	if !ok || !s.requireOrgAdmin(w, p, orgID) {
 		return
 	}
@@ -350,8 +362,8 @@ func (s *Server) addUser(w http.ResponseWriter, r *http.Request, p *authn.Princi
 		s.fail(w, err)
 		return
 	}
-	s.auditf(r, p, orgID, "user.put", "user", user.ID, user)
-	httpx.WriteJSON(w, http.StatusOK, user)
+	s.auditf(r, p, orgID, "user.create", "user", user.ID, user)
+	httpx.WriteJSON(w, http.StatusCreated, user)
 }
 
 func (s *Server) listUsers(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
@@ -397,9 +409,7 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	if target.Role == string(authn.RoleOperator) {
 		// The operator role comes from configuration, and the next sign-in
 		// would restore it.
-		s.forbid(w, target.Email+" is an operator through the gateway's configuration; "+
-			"remove the address from KEERA_OPERATORS, or the person from a group in "+
-			"KEERA_OIDC_OPERATOR_GROUPS")
+		s.forbidOperator(w, target.Email)
 		return
 	}
 	if target.ID == p.UserID && role != p.Role {
@@ -498,12 +508,18 @@ func (s *Server) userToSwitch(w http.ResponseWriter, r *http.Request, p *authn.P
 	if target.Role == string(authn.RoleOperator) {
 		// Operators come from configuration, and an administrator must not be
 		// able to lock them out.
-		s.forbid(w, target.Email+" is an operator through the gateway's configuration; "+
-			"remove the address from KEERA_OPERATORS, or the person from a group in "+
-			"KEERA_OIDC_OPERATOR_GROUPS")
+		s.forbidOperator(w, target.Email)
 		return target, false
 	}
 	return target, true
+}
+
+// forbidOperator refuses a change to an operator, whose role comes from the
+// gateway's configuration and not from here.
+func (s *Server) forbidOperator(w http.ResponseWriter, email string) {
+	s.forbid(w, email+" is an operator through the gateway's configuration; "+
+		"remove the address from KEERA_OPERATORS, or the person from a group in "+
+		"KEERA_OIDC_<NAME>_OPERATOR_GROUPS")
 }
 
 // mayGrant reports whether a role may be granted through the API at all.
@@ -515,13 +531,13 @@ func (s *Server) userToSwitch(w http.ResponseWriter, r *http.Request, p *authn.P
 func (s *Server) mayGrant(w http.ResponseWriter, role authn.Role) bool {
 	if !role.Assignable() {
 		s.forbid(w, "the operator role is granted by KEERA_OPERATORS or a group in "+
-			"KEERA_OIDC_OPERATOR_GROUPS, and cannot be assigned here")
+			"KEERA_OIDC_<NAME>_OPERATOR_GROUPS, and cannot be assigned here")
 		return false
 	}
 	if s.opts.Providers.AdminFromDirectory() {
 		s.forbid(w, "roles come from the identity provider on this deployment: "+
 			"change this person's group membership in the directory, or unset "+
-			"KEERA_OIDC_ADMIN_GROUPS to assign roles here")
+			"KEERA_OIDC_<NAME>_ADMIN_GROUPS to assign roles here")
 		return false
 	}
 	return true
@@ -541,12 +557,8 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		badRequest(w, err.Error())
 		return
 	}
-	orgID, ok := s.scopeOrg(w, p, in.OrgID)
+	orgID, ok := s.requireOrg(w, p, in.OrgID, orgRequired)
 	if !ok {
-		return
-	}
-	if orgID == "" {
-		badRequest(w, "'org_id' is required")
 		return
 	}
 	// A member may only issue keys for themselves, so leaving out the person
@@ -554,7 +566,7 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	if in.UserID == "" && !p.CanAdminOrg(orgID) {
 		in.UserID = p.UserID
 	}
-	if !p.CanIssueKeyFor(orgID, in.UserID) {
+	if !p.CanManageKeyFor(orgID, in.UserID) {
 		s.forbid(w, "a member can only issue a key attributed to themselves; "+
 			"issuing one for somebody else is for an administrator of this organisation")
 		return
@@ -633,9 +645,78 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	}{KeyInfo: info, Key: secret})
 }
 
+// rotateKey replaces a key with a new one that keeps its team, person and own
+// guardrails, and revokes the old one. Whoever may revoke a key may rotate
+// it, so a member can replace their own leaked key.
+func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
+	var in struct {
+		Alias     string `json:"alias"`
+		ExpiresIn string `json:"expires_in"`
+	}
+	if err := httpx.ReadJSON(r, &in); err != nil {
+		badRequest(w, err.Error())
+		return
+	}
+	oldID := r.PathValue("id")
+	// Another tenant's key answers 404, not 403, so ids cannot be probed.
+	owner, holder, err := s.st.KeyOwner(r.Context(), oldID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if !p.CanReadOrg(owner) {
+		s.fail(w, store.ErrNotFound)
+		return
+	}
+	if !p.CanManageKeyFor(owner, holder) {
+		s.forbid(w, "a member can only rotate a key attributed to themselves; "+
+			"somebody else's, or one attributed to nobody, is for an "+
+			"administrator of this organisation")
+		return
+	}
+	next := store.KeyInfo{ID: id.New("key"), Alias: in.Alias}
+	if in.ExpiresIn != "" {
+		d, err := time.ParseDuration(in.ExpiresIn)
+		if err != nil || d <= 0 {
+			badRequest(w, "'expires_in' must be a positive duration such as 720h")
+			return
+		}
+		t := time.Now().Add(d)
+		next.ExpiresAt = &t
+	}
+	secret, hash, prefix, err := auth.Generate()
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	next.Prefix = prefix
+	info, err := s.st.RotateKey(r.Context(), oldID, next, hash)
+	if errors.Is(err, store.ErrKeyRevoked) {
+		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "key_revoked",
+			"that key was already revoked, so there is nothing to rotate; issue a new one")
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.auditf(r, p, owner, "key.rotate", "key", info.ID, map[string]any{
+		"replaced": oldID, "team_id": info.TeamID, "user_id": info.UserID,
+		"alias": info.Alias, "prefix": info.Prefix,
+	})
+	s.changed(r)
+
+	// The secret is returned exactly once, as on create.
+	httpx.WriteJSON(w, http.StatusCreated, struct {
+		store.KeyInfo
+		Key      string `json:"key"`
+		Replaced string `json:"replaced"`
+	}{KeyInfo: info, Key: secret, Replaced: oldID})
+}
+
 func (s *Server) listKeys(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	q := r.URL.Query()
-	orgID, ok := s.scopeOrg(w, p, q.Get("org_id"))
+	orgID, ok := s.requireOrg(w, p, q.Get("org_id"), orgRequired)
 	if !ok {
 		return
 	}
@@ -667,7 +748,7 @@ func (s *Server) revokeKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	}
 	// Inside their organisation a member can already see every key, so they
 	// are told whose key it is rather than "not found".
-	if !p.CanRevokeKeyFor(owner, holder) {
+	if !p.CanManageKeyFor(owner, holder) {
 		s.forbid(w, "a member can only revoke a key attributed to themselves; "+
 			"somebody else's, or one attributed to nobody, is for an "+
 			"administrator of this organisation")

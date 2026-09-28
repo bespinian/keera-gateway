@@ -2,7 +2,6 @@ package secret
 
 import (
 	"bytes"
-	"errors"
 	"strings"
 	"testing"
 )
@@ -76,22 +75,6 @@ func TestOpenRefusesWhatItShould(t *testing.T) {
 
 	if _, err := b.Open("keera-frontier", []byte("short")); err == nil {
 		t.Error("a truncated ciphertext opened")
-	}
-}
-
-func TestNoKeyMeansTheFeatureIsOffRatherThanInsecure(t *testing.T) {
-	b, err := New("")
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	if b.Enabled() {
-		t.Fatal("a deployment with no key reports the feature as available")
-	}
-	if _, err := b.Seal("keera-frontier", "sk-ant-credential"); !errors.Is(err, ErrDisabled) {
-		t.Errorf("Seal error = %v, want ErrDisabled - never a plaintext fallback", err)
-	}
-	if _, err := b.Open("keera-frontier", []byte("anything")); !errors.Is(err, ErrDisabled) {
-		t.Errorf("Open error = %v, want ErrDisabled", err)
 	}
 }
 

@@ -226,7 +226,7 @@ func TestTheOpeningPromptIsFoundInWhateverShapeItArrives(t *testing.T) {
 // cost of labelling a request does not follow a field the client controls.
 func TestAnEnormousOpeningPromptIsHashedToABound(t *testing.T) {
 	body := `{"model":"keera-code","messages":[{"role":"user","content":"` +
-		strings.Repeat("a", maxSessionInput+1000) + `"}]}`
+		strings.Repeat("a", store.MaxSessionInput+1000) + `"}]}`
 	if got := keyFor(t, "key_1", body, policy.KindChat); got == "" {
 		t.Fatal("a very long opening prompt got no session key")
 	}

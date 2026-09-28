@@ -69,10 +69,13 @@ func routerCmd(ctx context.Context, args []string) error {
 	if err := parse(fs, rest); err != nil {
 		return err
 	}
+	if err := verbFlags(fs, "router", sub); err != nil {
+		return err
+	}
 	if r.fallback != "" && r.noFallback {
 		return errors.New("--fallback and --no-fallback are opposites; pass one of them")
 	}
-	if !policy.ValidRouterMode(policy.RouterMode(r.mode)) {
+	if !policy.RouterMode(r.mode).Valid() {
 		return fmt.Errorf("--mode is %q; it is 'instruction' (a model reads each request and "+
 			"names the destination), 'size' (the request goes to the smallest destination "+
 			"its size was meant for), or one of the three that read nothing and try the "+
@@ -90,7 +93,11 @@ func routerCmd(ctx context.Context, args []string) error {
 	switch sub {
 	case "list", "ls", "":
 		return r.list(ctx)
-	case "add", "create", "new", "set", "edit", "update":
+	case "add", "create", "new":
+		return r.put(ctx)
+	case "set", "edit", "update":
+		// put tells a change from an addition by the verb.
+		r.sub = "set"
 		return r.put(ctx)
 	case "check", "probe", "test":
 		return r.check(ctx)
@@ -131,9 +138,7 @@ func (r *routerRun) path(alias, suffix string) string {
 
 func (r *routerRun) put(ctx context.Context) error {
 	if r.fs.NArg() != 1 {
-		return fmt.Errorf(
-			"usage: keera router %s <alias> --model <alias> --destinations a,b --prompt <text>",
-			r.sub)
+		return errors.New(routerUsage(r.sub, policy.RouterMode(r.mode)))
 	}
 	alias := r.fs.Arg(0)
 	// 'set' starts from the stored router, so what is not given is kept. 'add'
@@ -150,6 +155,21 @@ func (r *routerRun) put(ctx context.Context) error {
 		return err
 	}
 	return putRouter(ctx, r.c, r.orgID, rt, r.asJSON)
+}
+
+// routerUsage is the usage line for 'add' or 'set'. It names only the flags
+// the mode takes: a fallback router has no deciding model to name.
+func routerUsage(sub string, mode policy.RouterMode) string {
+	switch {
+	case sub == "set":
+		return "usage: keera router set <alias> [flags]"
+	case mode.Decides():
+		return "usage: keera router add <alias> --model <alias> --destinations a,b --prompt <text>"
+	case mode.Sizes():
+		return "usage: keera router add <alias> --mode size --destinations small:4k,big"
+	default:
+		return "usage: keera router add <alias> --mode " + string(mode) + " --destinations a,b"
+	}
 }
 
 // apply writes the given flags into rt.
@@ -241,22 +261,14 @@ func (r *routerRun) report(ctx context.Context) error {
 
 // requireRouter reads one router from the list, as requireFilter does.
 func requireRouter(ctx context.Context, c *client, orgID, alias string) (policy.Router, error) {
-	routers, err := list[policy.Router](ctx, c, inOrg("/v1/routers", orgID))
-	if err != nil {
-		return policy.Router{}, err
-	}
-	for _, rt := range routers {
-		if rt.Alias == alias {
-			return rt, nil
-		}
-	}
-	return policy.Router{}, fmt.Errorf("no router %s (see: keera router list)", alias)
+	return findAlias(ctx, c, inOrg("/v1/routers", orgID), alias, "router",
+		func(rt policy.Router) string { return rt.Alias })
 }
 
 func putRouter(ctx context.Context, c *client, orgID string, rt policy.Router, asJSON bool) error {
 	var saved policy.Router
 	if err := c.do(ctx, "PUT",
-		"/v1/routers/"+url.PathEscape(rt.Alias)+"?org_id="+url.QueryEscape(orgID),
+		inOrg("/v1/routers/"+url.PathEscape(rt.Alias), orgID),
 		map[string]any{
 			"mode": rt.Mode, "model": rt.Model, "prompt": rt.Prompt,
 			"destinations": rt.Destinations, "ceilings": rt.Ceilings,
@@ -285,17 +297,9 @@ func printRouters(w *table, routers []policy.Router) {
 			decidesWith = "-"
 		}
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			rt.Alias, modeLabel(rt), decidesWith, destinationsLabel(rt), fallbackLabel(rt),
+			rt.Alias, rt.Mode, decidesWith, destinationsLabel(rt), fallbackLabel(rt),
 			rt.Description)
 	}
-}
-
-// modeLabel is the router's mode, including one stored before there were modes.
-func modeLabel(rt policy.Router) string {
-	if rt.Mode == "" {
-		return string(policy.RouterModeInstruction)
-	}
-	return string(rt.Mode)
 }
 
 // cliOrdersBy says, as a clause, where a router that reads nothing gets its

@@ -2,11 +2,10 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -32,7 +31,6 @@ type modelFlags struct {
 	priceIn      float64
 	priceOut     float64
 	priceCached  float64
-	apiKeyEnv    string
 	apiKey       string
 	noAPIKey     bool
 	disabled     bool
@@ -41,8 +39,8 @@ type modelFlags struct {
 func registerModelFlags(fs *flag.FlagSet) *modelFlags {
 	f := &modelFlags{}
 	fs.StringVar(&f.provider, "provider", "",
-		"hosted provider filling in the endpoint, credential variable, context window, "+
-			"prices and description")
+		"hosted provider filling in the endpoint, context window, prices, description, "+
+			"release date and location")
 	fs.Var(&f.backends, "backend", "an OpenAI-compatible base URL; repeat it for several")
 	fs.StringVar(&f.productID, "product-id", "",
 		"for a provider that serves each customer at their own address, the id its endpoint "+
@@ -57,15 +55,14 @@ func registerModelFlags(fs *flag.FlagSet) *modelFlags {
 	fs.StringVar(&f.releaseDate, "release-date", "",
 		"the day the model came out, as YYYY-MM-DD (a --provider model starts with that provider's own)")
 	fs.StringVar(&f.location, "location", "",
-		"where the model runs, such as ch or usa (default: the provider's, or onprem without one)")
+		"where the model runs, such as ch, usa or onprem (default: the provider's; "+
+			"without one, onprem for a backend inside your network)")
 	fs.Float64Var(&f.priceIn, "price-in", -1,
 		"input price per million tokens, in whole currency units (0 for unbilled)")
 	fs.Float64Var(&f.priceOut, "price-out", -1, "output price per million tokens")
 	fs.Float64Var(&f.priceCached, "price-cached", -1,
 		"price per million input tokens the provider served from its own prompt cache "+
 			"(left out, they are charged at --price-in)")
-	fs.StringVar(&f.apiKeyEnv, "api-key-env", "",
-		"environment variable the gateway reads this backend's credential from")
 	fs.StringVar(&f.apiKey, "api-key", "",
 		"credential to store encrypted; @path reads a file and @- reads stdin")
 	fs.BoolVar(&f.noAPIKey, "no-api-key", false, "remove the stored credential")
@@ -75,11 +72,13 @@ func registerModelFlags(fs *flag.FlagSet) *modelFlags {
 // applyModelFlags folds one invocation's flags into a declared catalogue entry.
 func applyModelFlags(m catalog.Model, f *modelFlags) catalog.Model {
 	if f.provider != "" {
-		// Where the model runs belongs to the provider, so a new provider
-		// brings its own location. A --location given too wins.
+		// Where the model runs and its address belong to the provider, so a
+		// new provider brings its own, and its own values for the model. The
+		// same flags given too win.
 		if !strings.EqualFold(f.provider, m.Provider) {
 			m.Location = ""
-			m.ReleaseDate = ""
+			m.Backends = nil
+			m = clearModelValues(m)
 		}
 		m.Provider = f.provider
 	}
@@ -95,10 +94,15 @@ func applyModelFlags(m catalog.Model, f *modelFlags) catalog.Model {
 		}
 	}
 	if f.backendModel != "" {
-		// Another model came out on another day. The provider fills in the
-		// new one's date, if it knows it.
+		// Another model has its own release date, and with a provider its own
+		// prices, context window and description, which the provider fills in
+		// again. Without a provider only the date goes: nothing would refill
+		// the prices, and a model with none is billed at nothing.
 		if f.backendModel != m.BackendModel {
 			m.ReleaseDate = ""
+			if m.Provider != "" {
+				m = clearModelValues(m)
+			}
 		}
 		m.BackendModel = f.backendModel
 	}
@@ -121,12 +125,21 @@ func applyModelFlags(m catalog.Model, f *modelFlags) catalog.Model {
 	setPrice(&m.InputMicrosPerMTok, f.priceIn)
 	setPrice(&m.OutputMicrosPerMTok, f.priceOut)
 	setPrice(&m.CachedInputMicrosPerMTok, f.priceCached)
-	if f.apiKeyEnv != "" {
-		m.APIKeyEnv = f.apiKeyEnv
-	}
 	if f.disabled {
 		m.Disabled = true
 	}
+	return m
+}
+
+// clearModelValues empties what a provider's table fills in for one model, so
+// the table fills it in again for another.
+func clearModelValues(m catalog.Model) catalog.Model {
+	m.Description = ""
+	m.ReleaseDate = ""
+	m.InputMicrosPerMTok = nil
+	m.OutputMicrosPerMTok = nil
+	m.CachedInputMicrosPerMTok = nil
+	m.MaxContext = nil
 	return m
 }
 
@@ -137,29 +150,6 @@ func setPrice(dst **int64, units float64) {
 		micros := int64(units * 1_000_000)
 		*dst = &micros
 	}
-}
-
-// onlyCredential reports whether this invocation touches nothing but the
-// stored credential, the one field no catalogue file declares.
-func onlyCredential(f *modelFlags) bool {
-	declared := f.provider != "" || len(f.backends) > 0 || f.productID != "" ||
-		f.backendModel != "" || f.kind != "" || f.description != "" || f.maxContext >= 0 ||
-		f.releaseDate != "" || f.location != "" || f.priceIn >= 0 || f.priceOut >= 0 || f.priceCached >= 0 || f.apiKeyEnv != "" ||
-		f.disabled
-	return !declared && (f.apiKey != "" || f.noAPIKey)
-}
-
-// errManaged says why a model the catalogue file declares cannot be changed
-// here: the file is applied on every start and would undo the change.
-func errManaged(alias, verb string) error {
-	const preamble = "the model %s is declared in this deployment's catalogue file, which is " +
-		"applied on every start; "
-	if verb == "remove" {
-		return fmt.Errorf(preamble+"remove it from the file instead, or leave it there and "+
-			"disable it in the file", alias)
-	}
-	return fmt.Errorf(preamble+"%s it there and run 'keera model apply <file>', or remove it "+
-		"from the file to take it over here", alias, verb)
 }
 
 // credential resolves the credential flags to what the request carries: nil
@@ -205,7 +195,6 @@ func declared(m policy.Model) catalog.Model {
 		MaxContext:               &maxContext,
 		ReleaseDate:              m.ReleaseDate,
 		Location:                 m.Location,
-		APIKeyEnv:                m.APIKeyEnv,
 		Disabled:                 !m.Enabled,
 	}
 }
@@ -216,9 +205,6 @@ func declared(m policy.Model) catalog.Model {
 type modelPut struct {
 	policy.Model
 	APIKey *string `json:"api_key,omitempty"`
-	// FromCatalogue marks a write from `keera model apply`, which is what
-	// lets it change an entry the catalogue file declares.
-	FromCatalogue bool `json:"from_catalogue,omitempty"`
 }
 
 // modelRun is one 'keera model' invocation.
@@ -226,24 +212,36 @@ type modelRun struct {
 	c      *client
 	fs     *flag.FlagSet
 	sub    string
-	args   []string
+	f      *modelFlags
+	yes    bool
 	asJSON bool
+	// org is the organisation whose models to use.
+	org string
+}
+
+// modelPath is a control API path for a model of orgID.
+func modelPath(orgID, alias, suffix string) string {
+	return inOrg("/v1/models/"+url.PathEscape(alias)+suffix, orgID)
 }
 
 func modelCmd(ctx context.Context, args []string) error {
 	sub, rest := split(args)
 	fs := flag.NewFlagSet("model "+sub, flag.ExitOnError)
-	r := &modelRun{fs: fs, sub: sub, args: rest}
+	r := &modelRun{fs: fs, sub: sub, f: registerModelFlags(fs)}
+	fs.BoolVar(&r.f.disabled, "disabled", false, disabledUsage)
+	fs.BoolVar(&r.yes, "yes", false, yesUsage)
 	fs.BoolVar(&r.asJSON, "json", false, jsonUsage)
+	fs.StringVar(&r.org, "org", "", orgUsage)
 
 	fs.Usage = func() { _ = printHelp(fs, "model", sub) }
 	if want, ok := wantsHelp(args); ok {
-		// 'add', 'set' and 'delete' declare these themselves; help needs them
-		// on the set too.
-		registerModelFlags(fs)
-		fs.Bool("disabled", false, disabledUsage)
-		fs.Bool("yes", false, yesUsage)
 		return printHelp(fs, "model", want)
+	}
+	if err := parse(fs, rest); err != nil {
+		return err
+	}
+	if err := verbFlags(fs, "model", sub); err != nil {
+		return err
 	}
 
 	// These two need no server, so a catalogue can be checked in CI.
@@ -255,6 +253,13 @@ func modelCmd(ctx context.Context, args []string) error {
 	}
 
 	r.c = newClient()
+	// apply picks the organisation once the file has been read, so a bad file
+	// fails without calling the control plane.
+	if sub != "apply" {
+		if err := r.resolveOrg(ctx); err != nil {
+			return err
+		}
+	}
 	switch sub {
 	case "list", "ls", "":
 		return r.list(ctx)
@@ -276,10 +281,10 @@ func modelCmd(ctx context.Context, args []string) error {
 }
 
 func (r *modelRun) validate() error {
-	if err := parseArgs(r.fs, r.args, 1, "usage: keera model validate <catalogue.yaml>"); err != nil {
+	if err := r.args(1, "usage: keera model validate <catalogue.yaml>"); err != nil {
 		return err
 	}
-	models, err := parseCatalogue(r.fs.Arg(0))
+	models, err := catalog.LoadModels(r.fs.Arg(0))
 	if err != nil {
 		return err
 	}
@@ -287,17 +292,11 @@ func (r *modelRun) validate() error {
 }
 
 func (r *modelRun) providers() error {
-	if err := parse(r.fs, r.args); err != nil {
-		return err
-	}
 	return out(r.asJSON, catalog.Providers(), printProviders)
 }
 
 func (r *modelRun) list(ctx context.Context) error {
-	if err := parse(r.fs, r.args); err != nil {
-		return err
-	}
-	models, err := catalogue(ctx, r.c)
+	models, err := r.catalogue(ctx)
 	if err != nil {
 		return err
 	}
@@ -305,81 +304,70 @@ func (r *modelRun) list(ctx context.Context) error {
 }
 
 func (r *modelRun) add(ctx context.Context) error {
-	f := registerModelFlags(r.fs)
-	r.fs.BoolVar(&f.disabled, "disabled", false, disabledUsage)
-	if err := parseArgs(r.fs, r.args, 1, "usage: keera model add <alias> [flags]"); err != nil {
+	if err := r.args(1, "usage: keera model add <alias> [flags]"); err != nil {
 		return err
 	}
 	alias := r.fs.Arg(0)
-	models, err := catalogue(ctx, r.c)
+	models, err := r.catalogue(ctx)
 	if err != nil {
 		return err
 	}
 	if _, found := findModel(models, alias); found {
 		return fmt.Errorf("the model %s already exists; change it with: keera model set %s", alias, alias)
 	}
-	return r.save(ctx, alias, catalog.Model{Alias: alias}, f)
+	return r.save(ctx, r.org, alias, catalog.Model{Alias: alias})
 }
 
 func (r *modelRun) set(ctx context.Context) error {
-	f := registerModelFlags(r.fs)
-	if err := parseArgs(r.fs, r.args, 1, "usage: keera model set <alias> [flags]"); err != nil {
+	if err := r.args(1, "usage: keera model set <alias> [flags]"); err != nil {
 		return err
 	}
 	// The endpoint replaces the entry, so read it first to keep what was not
 	// given.
-	current, err := requireModel(ctx, r.c, r.fs.Arg(0))
+	current, err := r.requireModel(ctx, r.fs.Arg(0))
 	if err != nil {
 		return err
 	}
-	// No catalogue file carries a credential, so that is the one thing a
-	// declared model still accepts here.
-	if current.Managed && !onlyCredential(f) {
-		return errManaged(current.Alias, "change")
-	}
-	return r.save(ctx, current.Alias, declared(current), f)
+	return r.save(ctx, current.OrgID, current.Alias, declared(current))
 }
 
-// save applies the flags to m, validates it and writes it.
-func (r *modelRun) save(ctx context.Context, alias string, m catalog.Model, f *modelFlags) error {
-	parsed, err := catalog.ParseModel(applyModelFlags(m, f))
+// save applies the flags to m, validates it and writes it to orgID's models.
+func (r *modelRun) save(ctx context.Context, orgID, alias string, m catalog.Model) error {
+	parsed, err := catalog.ParseModel(applyModelFlags(m, r.f))
 	if err != nil {
 		return fmt.Errorf("%s: %w", alias, err)
 	}
-	cred, err := credential(f)
+	parsed.OrgID = orgID
+	cred, err := credential(r.f)
 	if err != nil {
 		return err
 	}
-	return putModel(ctx, r.c, parsed, cred, r.asJSON)
+	return r.putModel(ctx, parsed, cred)
 }
 
 func (r *modelRun) toggle(ctx context.Context) error {
-	if err := parseArgs(r.fs, r.args, 1, fmt.Sprintf("usage: keera model %s <alias>", r.sub)); err != nil {
+	if err := r.args(1, fmt.Sprintf("usage: keera model %s <alias>", r.sub)); err != nil {
 		return err
 	}
-	m, err := requireModel(ctx, r.c, r.fs.Arg(0))
+	m, err := r.requireModel(ctx, r.fs.Arg(0))
 	if err != nil {
 		return err
 	}
-	if m.Managed {
-		return errManaged(m.Alias, r.sub)
-	}
 	m.Enabled = r.sub == "enable"
-	return putModel(ctx, r.c, m, nil, r.asJSON)
+	return r.putModel(ctx, m, nil)
 }
 
 func (r *modelRun) check(ctx context.Context) error {
-	if err := parseArgs(r.fs, r.args, 1, "usage: keera model check <alias>"); err != nil {
+	if err := r.args(1, "usage: keera model check <alias>"); err != nil {
 		return err
 	}
 	alias := r.fs.Arg(0)
-	// `check` used to take a catalogue file; point the old habit at validate.
-	if looksLikeCatalogueFile(alias) {
-		return fmt.Errorf("keera model check now probes a live model; "+
-			"to validate a catalogue file use: keera model validate %s", alias)
+	m, err := r.requireModel(ctx, alias)
+	if err != nil {
+		return err
 	}
 	var probe gateway.Probe
-	if err := r.c.do(ctx, "POST", "/v1/models/"+url.PathEscape(alias)+"/check", nil, &probe); err != nil {
+	if err := r.c.do(ctx, "POST", modelPath(m.OrgID, alias, "/check"), nil, &probe); err != nil {
 		return err
 	}
 	if err := out(r.asJSON, probe, func(w *table) { printProbe(w, probe) }); err != nil {
@@ -393,19 +381,22 @@ func (r *modelRun) check(ctx context.Context) error {
 }
 
 func (r *modelRun) apply(ctx context.Context) error {
-	if err := parseArgs(r.fs, r.args, 1, "usage: keera model apply <catalogue.yaml>"); err != nil {
+	if err := r.args(1, "usage: keera model apply <catalogue.yaml>"); err != nil {
 		return err
 	}
-	models, err := parseCatalogue(r.fs.Arg(0))
+	models, err := catalog.LoadModels(r.fs.Arg(0))
 	if err != nil {
+		return err
+	}
+	if err := r.resolveOrg(ctx); err != nil {
 		return err
 	}
 	// One model at a time, as the endpoint takes them. The file is validated
 	// first, so a stop halfway is the control plane going away, and a re-run
 	// is safe.
-	for _, m := range models {
-		put := modelPut{Model: m, FromCatalogue: true}
-		if err := r.c.do(ctx, "PUT", "/v1/models/"+url.PathEscape(m.Alias), put, nil); err != nil {
+	for i, m := range models {
+		m.OrgID = r.org
+		if err := r.c.do(ctx, "PUT", modelPath(r.org, m.Alias, ""), modelPut{Model: m}, &models[i]); err != nil {
 			return fmt.Errorf("applying %s: %w", m.Alias, err)
 		}
 	}
@@ -417,64 +408,47 @@ func (r *modelRun) apply(ctx context.Context) error {
 }
 
 func (r *modelRun) delete(ctx context.Context) error {
-	yes := r.fs.Bool("yes", false, yesUsage)
-	if err := parseArgs(r.fs, r.args, 1, "usage: keera model delete <alias> [--yes]"); err != nil {
+	if err := r.args(1, "usage: keera model delete <alias> [--yes]"); err != nil {
 		return err
 	}
-	m, err := requireModel(ctx, r.c, r.fs.Arg(0))
+	m, err := r.requireModel(ctx, r.fs.Arg(0))
 	if err != nil {
 		return err
 	}
-	if m.Managed {
-		return errManaged(m.Alias, "remove")
-	}
-	if !*yes {
-		if err := confirmModelDelete(m); err != nil {
+	if !r.yes {
+		filters, routers, err := modelUsers(ctx, r.c, m.OrgID, m.Alias)
+		if err != nil {
+			return err
+		}
+		if err := confirmModelDelete(m, filters, routers); err != nil {
 			return err
 		}
 	}
-	var gone struct {
-		Alias   string `json:"alias"`
-		Deleted bool   `json:"deleted"`
-	}
-	if err := r.c.do(ctx, "DELETE", "/v1/models/"+url.PathEscape(m.Alias), nil, &gone); err != nil {
-		return err
-	}
-	return out(r.asJSON, gone, func(w *table) {
-		_, _ = fmt.Fprintf(w, "deleted %s\n", gone.Alias)
-	})
+	return deleteAlias(ctx, r.c, modelPath(m.OrgID, m.Alias, ""), m.Alias, r.asJSON)
 }
 
-// looksLikeCatalogueFile spots the argument to the old `keera model check
-// <file>`. It needs both a path-like name and an existing file, so a model is
-// not mistaken for one because a file of that name happens to exist.
-func looksLikeCatalogueFile(arg string) bool {
-	switch strings.ToLower(filepath.Ext(arg)) {
-	case ".yaml", ".yml", ".json":
-	default:
-		if !strings.ContainsRune(arg, filepath.Separator) {
-			return false
-		}
+// args checks the number of positional arguments.
+func (r *modelRun) args(n int, usage string) error {
+	if r.fs.NArg() != n {
+		return errors.New(usage)
 	}
-	_, err := os.Stat(arg)
-	return err == nil
+	return nil
 }
 
-// parseCatalogue reads and validates a catalogue file, without a server.
-func parseCatalogue(path string) ([]policy.Model, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	models, err := catalog.Parse(raw)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	return models, nil
+// resolveOrg fills in the organisation, as every command does.
+func (r *modelRun) resolveOrg(ctx context.Context) (err error) {
+	r.org, err = resolveOrg(ctx, r.c, r.org)
+	return err
 }
 
-func catalogue(ctx context.Context, c *client) ([]policy.Model, error) {
-	return list[policy.Model](ctx, c, "/v1/models")
+func (r *modelRun) catalogue(ctx context.Context) ([]policy.Model, error) {
+	return catalogue(ctx, r.c, r.org)
+}
+
+// catalogue lists an organisation's models. An empty orgID leaves the
+// organisation to the control plane.
+func catalogue(ctx context.Context, c *client, orgID string) ([]policy.Model, error) {
+	return list[policy.Model](ctx, c, inOrg("/v1/models", orgID))
 }
 
 func findModel(models []policy.Model, alias string) (policy.Model, bool) {
@@ -486,35 +460,59 @@ func findModel(models []policy.Model, alias string) (policy.Model, bool) {
 	return policy.Model{}, false
 }
 
-// requireModel reads one model from the catalogue. There is no endpoint for a
-// single model; the list is small.
-func requireModel(ctx context.Context, c *client, alias string) (policy.Model, error) {
-	models, err := catalogue(ctx, c)
-	if err != nil {
-		return policy.Model{}, err
-	}
-	m, found := findModel(models, alias)
-	if !found {
-		return policy.Model{}, fmt.Errorf("no model %s (see: keera model list)", alias)
-	}
-	return m, nil
+// requireModel reads one of the organisation's models. There is no endpoint
+// for a single model; the list is small.
+func (r *modelRun) requireModel(ctx context.Context, alias string) (policy.Model, error) {
+	return findAlias(ctx, r.c, inOrg("/v1/models", r.org), alias, "model",
+		func(m policy.Model) string { return m.Alias })
 }
 
-func putModel(ctx context.Context, c *client, m policy.Model, cred *string, asJSON bool) error {
+func (r *modelRun) putModel(ctx context.Context, m policy.Model, cred *string) error {
 	var saved policy.Model
-	if err := c.do(ctx, "PUT", "/v1/models/"+url.PathEscape(m.Alias),
+	if err := r.c.do(ctx, "PUT", modelPath(m.OrgID, m.Alias, ""),
 		modelPut{Model: m, APIKey: cred}, &saved); err != nil {
 		return err
 	}
-	return out(asJSON, saved, func(w *table) { printModel(w, saved) })
+	return out(r.asJSON, saved, func(w *table) { printModel(w, saved) })
 }
 
-// confirmModelDelete makes the operator type the alias back. Clients name
+// modelUsers lists the filters and routers that name a model. Deleting it
+// does not stop them, so the confirmation names them.
+func modelUsers(ctx context.Context, c *client, orgID, alias string) (filters, routers []string, err error) {
+	fs, err := list[policy.Filter](ctx, c, inOrg("/v1/filters", orgID))
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, f := range fs {
+		if f.Model == alias {
+			filters = append(filters, f.Alias)
+		}
+	}
+	rs, err := list[policy.Router](ctx, c, inOrg("/v1/routers", orgID))
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, rt := range rs {
+		if rt.Model == alias || rt.Offers(alias) {
+			routers = append(routers, rt.Alias)
+		}
+	}
+	return filters, routers, nil
+}
+
+// confirmModelDelete makes the caller type the alias back. Clients name
 // models, so removing one breaks every client that still names it.
-func confirmModelDelete(m policy.Model) error {
-	fmt.Printf("Deleting the model %s:\n", m.Alias)
+func confirmModelDelete(m policy.Model, filters, routers []string) error {
+	fmt.Printf("%s\n", style.head("Deleting the model "+m.Alias+":"))
 	fmt.Printf("  every client that names it starts being refused\n")
 	fmt.Printf("  guardrails that allow only %s stop allowing anything\n", m.Alias)
+	if len(filters) > 0 {
+		fmt.Printf("  the filters that run on it refuse every request they cover: %s\n",
+			strings.Join(filters, ", "))
+	}
+	if len(routers) > 0 {
+		fmt.Printf("  the routers that name it lose it: %s\n", strings.Join(routers, ", "))
+	}
 	if m.HasAPIKey {
 		fmt.Println("  its stored credential is removed")
 	}
@@ -531,8 +529,7 @@ func printProviders(w *table) {
 		if p.Summary != "" {
 			_, _ = fmt.Fprintf(w, "  %s\n", p.Summary)
 		}
-		_, _ = fmt.Fprintf(w, "  runs in %s, reads the key from %s, serves %s\n",
-			p.Location, p.APIKeyEnv, kindNames(p.Kinds))
+		_, _ = fmt.Fprintf(w, "  runs in %s, serves %s\n", p.Location, kindNames(p.Kinds))
 		if p.NeedsProductID {
 			_, _ = fmt.Fprintf(w, "  its address is per customer, so a model "+
 				"here also needs --product-id\n")
@@ -557,14 +554,14 @@ func printProviders(w *table) {
 
 func printModels(w *table, models []policy.Model) {
 	w.header("ALIAS\tKIND\tBACKEND MODEL\tPROVIDER\tLOCATION\tRELEASED\tBACKENDS\t" +
-		"IN/MTOK\tCACHED/MTOK\tOUT/MTOK\tCREDENTIAL\tSOURCE\tENABLED")
+		"IN/MTOK\tCACHED/MTOK\tOUT/MTOK\tCREDENTIAL\tENABLED")
 	for _, m := range models {
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			m.Alias, m.Kind, m.BackendModel, dash(m.Provider), dash(m.Location),
 			dash(m.ReleaseDate), strings.Join(m.Backends, ","),
 			policy.FormatMicros(m.InputMicrosPerMTok), cachedPrice(m.CachedInputMicrosPerMTok),
 			policy.FormatMicros(m.OutputMicrosPerMTok),
-			credentialSource(m), modelSource(m), statusWord(strconv.FormatBool(m.Enabled)))
+			credentialSource(m), statusWord(strconv.FormatBool(m.Enabled)))
 	}
 }
 
@@ -611,32 +608,16 @@ func printModel(w *table, m policy.Model) {
 		show(w, "cached in/mtok", "(not stated - charged at the input price)")
 	}
 	show(w, "credential", credentialSource(m))
-	show(w, "source", modelSource(m))
 	show(w, "enabled", m.Enabled)
 }
 
-// modelSource says who owns this model. A model the catalogue file declares
-// is changed in the file, not with this command.
-func modelSource(m policy.Model) string {
-	if m.Managed {
-		return "catalogue file"
-	}
-	return "control plane"
-}
-
-// credentialSource says where the backend credential comes from, which is
-// what an operator debugging a 401 wants to know.
+// credentialSource says whether a backend credential is stored, which is what
+// an operator debugging a 401 wants to know.
 func credentialSource(m policy.Model) string {
-	switch {
-	case m.HasAPIKey && m.APIKeyEnv != "":
-		return "stored (overrides " + m.APIKeyEnv + ")"
-	case m.HasAPIKey:
+	if m.HasAPIKey {
 		return "stored"
-	case m.APIKeyEnv != "":
-		return "$" + m.APIKeyEnv
-	default:
-		return "(none)"
 	}
+	return "(none)"
 }
 
 func printProbe(w *table, p gateway.Probe) {

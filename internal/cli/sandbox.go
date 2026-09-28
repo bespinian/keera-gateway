@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bespinian/keera-gateway/internal/catalog"
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/sandbox"
@@ -84,10 +85,17 @@ func sandboxCmd(ctx context.Context, args []string) error {
 	if err := parse(fs, rest); err != nil {
 		return err
 	}
+	if err := verbFlags(fs, "sandbox", sub); err != nil {
+		return err
+	}
 
 	switch sub {
 	case "classes":
 		return r.classes(ctx)
+	case "apply":
+		return r.apply(ctx)
+	case "delete-class", "remove-class", "rm-class":
+		return r.deleteClass(ctx)
 	case "list", "ls", "":
 		return r.list(ctx)
 	case "create", "add", "up", "new":
@@ -117,7 +125,7 @@ func sandboxCmd(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		return writeSSHConfig(orgID)
+		return writeSSHConfig(r.c.base, orgID)
 	case "usage":
 		return r.usage(ctx)
 	default:
@@ -152,7 +160,7 @@ func (r *sandboxRun) create(ctx context.Context) error {
 	}
 	if r.class == "" {
 		return errors.New("--class is required; `keera sandbox classes` lists what this " +
-			"deployment offers")
+			"organisation offers")
 	}
 	task, err := textOrFile(r.task)
 	if err != nil {
@@ -193,13 +201,15 @@ func (r *sandboxRun) agent(ctx context.Context) error {
 
 // agentFlags rebuilds the flags `keera sandbox agent` passes on to `up`.
 // Going back through the parser means `agent` gains whatever `up` gains.
+// Each goes as --name=value, because a bool flag does not take the next
+// argument: "--json true" would make "true" a second name.
 func agentFlags(fs *flag.FlagSet) []string {
 	var out []string
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "purpose" {
 			return
 		}
-		out = append(out, "--"+f.Name, f.Value.String())
+		out = append(out, "--"+f.Name+"="+f.Value.String())
 	})
 	return out
 }
@@ -300,6 +310,73 @@ func (r *sandboxRun) usage(ctx context.Context) error {
 	})
 }
 
+func (r *sandboxRun) apply(ctx context.Context) error {
+	if r.fs.NArg() != 1 {
+		return errors.New("usage: keera sandbox apply <sandboxes.yaml> [--org <id>]")
+	}
+	entries, err := catalog.LoadSandboxes(r.fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	orgID, err := resolveOrg(ctx, r.c, r.org)
+	if err != nil {
+		return err
+	}
+	// One class at a time, as the endpoint takes them. The file is checked
+	// first, so a stop halfway is the control plane going away, and a re-run
+	// is safe.
+	q := url.Values{"org_id": {orgID}}
+	classes := make([]policy.SandboxClass, len(entries))
+	for i, e := range entries {
+		path := "/v1/sandbox-classes/" + url.PathEscape(e.Name) + "?" + q.Encode()
+		if err := r.c.do(ctx, "PUT", path, e, &classes[i]); err != nil {
+			return fmt.Errorf("applying %s: %w", e.Name, err)
+		}
+	}
+	return out(r.asJSON, classes, func(w *table) {
+		for _, c := range classes {
+			_, _ = fmt.Fprintf(w, "applied\t%s\n", c.Name)
+		}
+		_, _ = fmt.Fprintln(w, "\nA class the file does not name is left alone.")
+	})
+}
+
+// deleteClass removes one of the organisation's classes. Sandboxes already
+// running on it keep their own copy of it, so they are not affected.
+func (r *sandboxRun) deleteClass(ctx context.Context) error {
+	if r.fs.NArg() != 1 {
+		return errors.New("usage: keera sandbox delete-class <name> [--yes]")
+	}
+	name := r.fs.Arg(0)
+	orgID, err := resolveOrg(ctx, r.c, r.org)
+	if err != nil {
+		return err
+	}
+	if !r.yes {
+		fmt.Printf("%s\n", style.head("Deleting the sandbox class "+name+":"))
+		fmt.Println("  nobody can start a new sandbox of this class")
+		fmt.Println("  sandboxes already running on it keep working")
+		if err := confirmTyping("class name", name, "nothing was deleted"); err != nil {
+			return err
+		}
+	}
+	q := url.Values{"org_id": {orgID}}
+	var res struct {
+		Name          string `json:"name"`
+		LiveSandboxes int    `json:"live_sandboxes"`
+	}
+	path := "/v1/sandbox-classes/" + url.PathEscape(name) + "?" + q.Encode()
+	if err := r.c.do(ctx, "DELETE", path, nil, &res); err != nil {
+		return err
+	}
+	return out(r.asJSON, res, func(w *table) {
+		_, _ = fmt.Fprintf(w, "deleted\t%s\n", res.Name)
+		if res.LiveSandboxes > 0 {
+			_, _ = fmt.Fprintf(w, "\n%d sandbox(es) still run on it.\n", res.LiveSandboxes)
+		}
+	})
+}
+
 func (r *sandboxRun) classes(ctx context.Context) error {
 	// The organisation is required: the answer carries the caller's own
 	// guardrail, and without it the list would offer classes they may not use.
@@ -357,9 +434,8 @@ func sshInto(ctx context.Context, c *client, org, name string, rest []string) er
 	if err != nil {
 		return err
 	}
-	proxy := fmt.Sprintf("%s sandbox proxy %s --org %s", self, sb.ID, sb.OrgID)
 	args := append([]string{
-		"-o", "ProxyCommand=" + proxy,
+		"-o", "ProxyCommand=" + proxyCommand(self, c.base, sb.ID, sb.OrgID),
 		// No host key is worth pinning: it belongs to the image, so every
 		// sandbox from that image shares it. The gateway has already
 		// authenticated and encrypted the connection.
@@ -384,6 +460,13 @@ func sshInto(ctx context.Context, c *client, org, name string, rest []string) er
 	return nil
 }
 
+// proxyCommand is the ProxyCommand that reaches one sandbox through the
+// gateway at base. It names that gateway, so the proxy cannot end up at
+// another one: ssh runs it without this invocation's --url.
+func proxyCommand(self, base, target, orgID string) string {
+	return fmt.Sprintf("%s --url %s sandbox proxy %s --org %s", self, base, target, orgID)
+}
+
 // sandboxUser is who a sandbox is entered as. It matches the uid the drivers
 // run the container under.
 const sandboxUser = "keera"
@@ -402,10 +485,6 @@ func sandboxRef(s string) string { return strings.TrimPrefix(s, sshHostPrefix) }
 func proxyTo(ctx context.Context, c *client, org, ref string, port int,
 	in io.Reader, outw io.Writer,
 ) error {
-	if c.key == "" {
-		return errors.New("KEERA_OPERATOR_KEY is not set; it is the credential for the " +
-			"control API, and attaching to a sandbox goes through it")
-	}
 	ref = sandboxRef(ref)
 	query := ""
 	if !strings.HasPrefix(ref, "sbx_") {
@@ -446,11 +525,15 @@ func dialUpgrade(ctx context.Context, c *client, endpoint string) (net.Conn, err
 	if err != nil {
 		return nil, err
 	}
+	cred, err := c.credential()
+	if err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.key)
+	req.Header.Set("Authorization", "Bearer "+cred)
 	req.Header.Set("Connection", "Upgrade")
 	req.Header.Set("Upgrade", upgradeProtocol)
 
@@ -557,7 +640,7 @@ func (b *bufferedConn) Read(p []byte) (int, error) { return b.r.Read(p) }
 // printed rather than written, as `keera connect` does: editing somebody's own
 // ssh config would eventually break it. The block is on stdout and the rest on
 // stderr, so it can be appended straight to the file.
-func writeSSHConfig(orgID string) error {
+func writeSSHConfig(base, orgID string) error {
 	self, err := os.Executable()
 	if err != nil {
 		return err
@@ -568,14 +651,13 @@ func writeSSHConfig(orgID string) error {
 		"transport and nothing else.\n\n", path, sshHostPrefix)
 	fmt.Printf("Host %s*\n", sshHostPrefix)
 	fmt.Printf("  User %s\n", sandboxUser)
-	fmt.Printf("  ProxyCommand %s sandbox proxy %%n --org %s\n", self, orgID)
+	fmt.Printf("  ProxyCommand %s\n", proxyCommand(self, base, "%n", orgID))
 	fmt.Printf("  StrictHostKeyChecking no\n")
 	fmt.Printf("  UserKnownHostsFile /dev/null\n")
 	fmt.Printf("  LogLevel ERROR\n")
 	fmt.Fprintf(os.Stderr, "\nThe ProxyCommand carries the connection over this gateway's own "+
-		"port, so there is no second address to publish and no jump host. It reads "+
-		"KEERA_CONTROL_URL and KEERA_OPERATOR_KEY from your environment, as every other "+
-		"keera command does.\n")
+		"port, so there is no second address to publish and no jump host. It signs in "+
+		"the way every other keera command does.\n")
 	fmt.Fprintf(os.Stderr, "\nHost-key checking is off because there is no host identity "+
 		"worth pinning: a sandbox's host key belongs to its image, so every sandbox built "+
 		"from the same one presents it. What proves who you are talking to is the gateway, "+
@@ -656,7 +738,7 @@ func printSandboxClasses(w *table, classes []policy.SandboxClass,
 	limits policy.ResolvedSandbox,
 ) {
 	if len(classes) == 0 {
-		_, _ = fmt.Fprintln(w, "This deployment declares no sandbox classes.")
+		_, _ = fmt.Fprintln(w, "This organisation has no sandbox classes.")
 		return
 	}
 	w.header("CLASS\tISOLATION\tSIZE\tDISK\tDEFAULT\tMAX\tWARM\tFOR\tYOURS\tWHAT IT IS")
@@ -682,17 +764,20 @@ func printSandboxUsage(w *table, by string, since time.Duration,
 	}
 	w.header(strings.ToUpper(by) + "\tSANDBOXES\tLIVE\tRAN\tCORE-SECONDS")
 	for _, r := range rows {
+		key := dash(r.Key)
+		if r.OrgID != "" {
+			key += " (" + r.OrgID + ")"
+		}
 		_, _ = fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%d\n",
-			dash(r.Key), r.Count, r.Live, ranFor(r.Running), r.CoreSeconds)
+			key, r.Count, r.Live, ranFor(r.Running), r.CoreSeconds)
 	}
 }
 
 func confirmSandboxTerminate(sb store.Sandbox) error {
 	fmt.Printf("%s\n", style.head("Terminating the sandbox "+sb.Name+":"))
-	if sb.Disk > 0 {
-		fmt.Printf("  its volume goes with it - anything in %s that is not pushed is lost\n",
-			"/home/"+sandboxUser)
-	}
+	// Said for every class: a home with no disk behind it is lost too.
+	fmt.Printf("  its home volume goes with it - anything in %s that is not pushed is lost\n",
+		"/home/"+sandboxUser)
 	fmt.Println("  its API key is revoked")
 	fmt.Println("What it cost and who it belonged to are kept.")
 	return confirmTyping("name", sb.Name, "nothing was terminated")

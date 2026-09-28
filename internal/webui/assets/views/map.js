@@ -21,6 +21,7 @@
 // not an animation of an average.
 
 import { api } from "../api.js";
+import { chooseOrg, orgNameOf } from "./orgs.js";
 import {
   h,
   compact,
@@ -32,6 +33,7 @@ import {
   RANGES,
   currentRange,
   rangePicker,
+  go,
 } from "../ui.js";
 
 // How the boxes are sized. Fixed rather than measured: a map whose boxes are as
@@ -79,6 +81,7 @@ const MAX_SPAWN = 48;
 const MAX_PACKETS = 400;
 
 export async function mapView(ctx) {
+  if (!ctx.orgID) return chooseOrg(ctx, "Traffic maps");
   const since = currentRange();
   const range = RANGES.find((r) => r.since === since) || RANGES[0];
   ctx.setSubtitle(range.long);
@@ -670,7 +673,7 @@ function paint(ctx, canvas, tip, scene, currency) {
     hover = found;
     dirty = true;
     canvas.style.cursor = found && target(found) ? "pointer" : "default";
-    if (found) showTip(tip, canvas, found, currency);
+    if (found) showTip(tip, canvas, found, currency, orgNameOf(ctx));
     else tip.hidden = true;
   };
   const onLeave = () => {
@@ -1121,13 +1124,13 @@ function fit(g, text, max) {
 
 /* ---------------------------------------------------------------- tooltip */
 
-function showTip(tip, canvas, n, currency) {
+function showTip(tip, canvas, n, currency, orgName) {
   const rows = [];
   if (n.kind === "model") {
     rows.push([
       "Runs at",
       n.endpoint ||
-        (n.retired ? "no longer in the catalogue" : "not shown to your role"),
+        (n.retired ? `no longer one of ${orgName}'s models` : "no backend"),
     ]);
     rows.push([
       "Prompts",
@@ -1148,8 +1151,7 @@ function showTip(tip, canvas, n, currency) {
   rows.push(["Spend", money(n.cell.cost_micros, currency)]);
   if (n.cell.ttft_median_ms)
     rows.push(["Median first token", ms(n.cell.ttft_median_ms)]);
-  if (n.cell.refused)
-    rows.push(["Refused by a guardrail", num(n.cell.refused)]);
+  if (n.cell.refused) rows.push(["Refused", num(n.cell.refused)]);
   if (n.cell.failed) rows.push(["Failed upstream", num(n.cell.failed)]);
   if (target(n)) rows.push(["", "Click to open"]);
 
@@ -1238,15 +1240,16 @@ function watch(ctx, { since, scene, painter, live }) {
   else live.state("paused");
 }
 
-// The four statuses a guardrail refuses with: over budget, not allowed, no such
-// model for this key, too many requests. They are the same four the dashboard
-// counts as refusals, so the map and the dashboard cannot disagree about what
-// one is.
-const REFUSALS = [402, 403, 404, 429];
+// A refusal is any 4xx, and a failure any 5xx. The dashboard and the request
+// log count the same way, so the map and they cannot disagree about what one
+// is.
+function refused(row) {
+  return row.status >= 400 && row.status < 500;
+}
 
 function outcomeOf(row) {
-  if (REFUSALS.includes(row.status)) return "refused";
-  if (row.status >= 500 || (row.status >= 400 && row.error)) return "failed";
+  if (refused(row)) return "refused";
+  if (row.status >= 500) return "failed";
   return "ok";
 }
 
@@ -1261,7 +1264,7 @@ function count(scene, client, model, row) {
     cell.input_tokens += row.input_tokens || 0;
     cell.output_tokens += row.output_tokens || 0;
     cell.cost_micros += row.cost_micros || 0;
-    if (REFUSALS.includes(row.status)) cell.refused += 1;
+    if (refused(row)) cell.refused += 1;
     if (row.status >= 500) cell.failed += 1;
   }
 }
@@ -1429,7 +1432,7 @@ function modelReport(ctx, scene, currency) {
         "div",
         { class: "card" },
         empty(
-          "No models in the catalogue",
+          `${orgNameOf(ctx)} has no models`,
           "Add one under Models to see it here.",
         ),
       ),
@@ -1450,10 +1453,7 @@ function modelReport(ctx, scene, currency) {
               {
                 class: "row-link",
                 href: "/models/" + encodeURIComponent(m.key),
-                onClick: (e) => {
-                  e.preventDefault();
-                  ctx.navigate("/models/" + encodeURIComponent(m.key));
-                },
+                onClick: go(ctx, "/models/" + encodeURIComponent(m.key)),
               },
               m.label,
             ),

@@ -33,10 +33,6 @@ const SessionHeader = "X-Keera-Session"
 // generic X-Session-Id, and Helicone-Session-Id.
 var sessionHeaders = []string{SessionHeader, "X-Session-Id", "Helicone-Session-Id"}
 
-// maxSessionInput bounds how much of the opening prompt is hashed. The store
-// owns the derivation, so it owns the constant.
-const maxSessionInput = store.MaxSessionInput
-
 // sessionKey derives the session key for one request, or returns empty for a
 // request that is not part of a conversation.
 //
@@ -62,7 +58,9 @@ func sessionKey(r *http.Request, keyID string, b *body, kind policy.Kind) string
 	if !ok {
 		return ""
 	}
-	return store.DerivedSessionKey(hashSession(keyID, "opening", opening))
+	// The hash lives in the store because sandboxes compute the same key, and
+	// two copies would silently drift apart.
+	return store.DerivedSessionKey(store.SessionHash(keyID, "opening", opening))
 }
 
 // statedSession is the session the client named, or empty if it named none.
@@ -74,11 +72,4 @@ func statedSession(r *http.Request) string {
 		}
 	}
 	return ""
-}
-
-// hashSession hashes one derivation to the short string that goes on the row.
-// It lives in the store because sandboxes compute the same key, and two
-// copies would silently drift apart. See store.SessionHash.
-func hashSession(keyID, kind string, payload []byte) string {
-	return store.SessionHash(keyID, kind, payload)
 }

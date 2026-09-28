@@ -113,11 +113,6 @@ func loginCmd(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	// Keep the address too, so whoami can answer without a round trip.
-	cred.Email = me.Email
-	if err := saveSignIn(c.base, cred); err != nil {
-		return fmt.Errorf("storing the sign-in: %w", err)
-	}
 
 	fmt.Printf("Signed in to %s as %s.\n", c.base, describe(me))
 	// saveSignIn made this the default gateway.
@@ -261,7 +256,6 @@ func chooseProvider(ctx context.Context, c *client, named string) (string, error
 			Name  string `json:"name"`
 			Label string `json:"label"`
 		} `json:"providers"`
-		OperatorKey bool `json:"operator_key"`
 	}
 	if err := c.anon(ctx, "GET", "/auth/config", nil, &cfg); err != nil {
 		return "", err

@@ -98,3 +98,27 @@ func TestFormatMicrosKeepsSmallAmountsVisible(t *testing.T) {
 		}
 	}
 }
+
+// Every sandbox verb shares one FlagSet, so without this 'resume --ttl 8h'
+// would parse and the lifetime would be dropped without a word.
+func TestVerbFlagsRefusesAnotherVerbsFlag(t *testing.T) {
+	for _, tc := range []struct {
+		sub  string
+		args []string
+		ok   bool
+	}{
+		{"extend", []string{"box", "--ttl", "8h"}, true},
+		{"resume", []string{"box", "--ttl", "8h"}, false},
+		{"resume", []string{"box", "--json"}, true},
+	} {
+		fs := flag.NewFlagSet("sandbox "+tc.sub, flag.ContinueOnError)
+		fs.Duration("ttl", 0, "")
+		fs.Bool("json", false, "")
+		if err := parse(fs, tc.args); err != nil {
+			t.Fatal(err)
+		}
+		if err := verbFlags(fs, "sandbox", tc.sub); (err == nil) != tc.ok {
+			t.Errorf("sandbox %s %v: err = %v, want ok=%v", tc.sub, tc.args, err, tc.ok)
+		}
+	}
+}

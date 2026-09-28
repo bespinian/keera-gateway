@@ -9,10 +9,10 @@ import (
 	"unicode/utf8"
 )
 
-// The failure log is what the dashboard's count is opened up into, so what it
-// has to carry is the three things the count cannot say: which model, whose
+// The unhappy requests are what the dashboard's count is opened up into, so
+// what they have to carry is the three things the count cannot say: which model, whose
 // key, and what the client was told.
-func TestFailuresCarryWhatTheClientWasTold(t *testing.T) {
+func TestUnhappyRequestsCarryWhatTheClientWasTold(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
 	now := time.Now().UTC().Truncate(time.Second)
@@ -32,9 +32,9 @@ func TestFailuresCarryWhatTheClientWasTold(t *testing.T) {
 		t.Fatalf("WriteEvents: %v", err)
 	}
 
-	failed, err := st.Failures(ctx, FailureQuery{OrgID: f.orgID, Kind: KindFailed})
+	failed, err := st.Requests(ctx, RequestQuery{OrgID: f.orgID, Outcome: OutcomeFailed})
 	if err != nil {
-		t.Fatalf("Failures: %v", err)
+		t.Fatalf("Requests: %v", err)
 	}
 	if len(failed) != 1 {
 		t.Fatalf("%d failures, want only the backend error", len(failed))
@@ -50,25 +50,25 @@ func TestFailuresCarryWhatTheClientWasTold(t *testing.T) {
 		t.Errorf("row = %+v, want how long it took and that it was a stream", got)
 	}
 
-	refused, err := st.Failures(ctx, FailureQuery{OrgID: f.orgID, Kind: KindRefused})
+	refused, err := st.Requests(ctx, RequestQuery{OrgID: f.orgID, Outcome: OutcomeRefused})
 	if err != nil {
-		t.Fatalf("Failures: %v", err)
+		t.Fatalf("Requests: %v", err)
 	}
 	if len(refused) != 1 || refused[0].Status != 429 {
 		t.Errorf("refusals = %+v, want only the rate limit", refused)
 	}
 
-	cut, err := st.Failures(ctx, FailureQuery{OrgID: f.orgID, Kind: KindInterrupted})
+	cut, err := st.Requests(ctx, RequestQuery{OrgID: f.orgID, Outcome: OutcomeInterrupted})
 	if err != nil {
-		t.Fatalf("Failures: %v", err)
+		t.Fatalf("Requests: %v", err)
 	}
 	if len(cut) != 1 || cut[0].Status != 200 {
 		t.Errorf("interrupted = %+v, want the stream that stopped, still carrying its 200", cut)
 	}
 
-	all, err := st.Failures(ctx, FailureQuery{OrgID: f.orgID})
+	all, err := st.Requests(ctx, RequestQuery{OrgID: f.orgID, Outcome: OutcomeUnhappy})
 	if err != nil {
-		t.Fatalf("Failures: %v", err)
+		t.Fatalf("Requests: %v", err)
 	}
 	if len(all) != 3 {
 		t.Errorf("%d rows, want the three that did not deliver and not the one that did", len(all))
@@ -81,10 +81,10 @@ func TestFailuresCarryWhatTheClientWasTold(t *testing.T) {
 
 // Narrowing is how a reader gets from "something is failing" to one model or
 // one key, and a window with none of it must not report another tenant's.
-func TestFailuresNarrowAndStayInsideOneTenant(t *testing.T) {
+func TestUnhappyRequestsNarrowAndStayInsideOneTenant(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
-	if _, err := st.CreateOrg(ctx, "org_2", "Another Bank"); err != nil {
+	if _, err := st.CreateOrg(ctx, Org{ID: "org_2", Name: "Another Bank"}, OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
@@ -103,13 +103,14 @@ func TestFailuresNarrowAndStayInsideOneTenant(t *testing.T) {
 		t.Fatalf("WriteEvents: %v", err)
 	}
 
-	window := FailureQuery{OrgID: f.orgID, From: now.AddDate(0, 0, -7), To: now.Add(time.Minute)}
+	window := RequestQuery{OrgID: f.orgID, Outcome: OutcomeUnhappy, From: now.AddDate(0, 0, -7),
+		To: now.Add(time.Minute)}
 
 	byAlias := window
 	byAlias.Alias = "keera-code"
-	rows, err := st.Failures(ctx, byAlias)
+	rows, err := st.Requests(ctx, byAlias)
 	if err != nil {
-		t.Fatalf("Failures: %v", err)
+		t.Fatalf("Requests: %v", err)
 	}
 	if len(rows) != 1 || rows[0].Error != "connection refused" {
 		t.Errorf("rows = %+v, want this tenant's keera-code failure inside the window", rows)
@@ -117,8 +118,8 @@ func TestFailuresNarrowAndStayInsideOneTenant(t *testing.T) {
 
 	byKey := window
 	byKey.KeyID = "key_2"
-	if rows, err = st.Failures(ctx, byKey); err != nil {
-		t.Fatalf("Failures: %v", err)
+	if rows, err = st.Requests(ctx, byKey); err != nil {
+		t.Fatalf("Requests: %v", err)
 	}
 	if len(rows) != 1 || rows[0].Alias != "keera-fast" {
 		t.Errorf("rows = %+v, want only what key_2 did", rows)
@@ -126,8 +127,8 @@ func TestFailuresNarrowAndStayInsideOneTenant(t *testing.T) {
 
 	byStatus := window
 	byStatus.Status = 502
-	if rows, err = st.Failures(ctx, byStatus); err != nil {
-		t.Fatalf("Failures: %v", err)
+	if rows, err = st.Requests(ctx, byStatus); err != nil {
+		t.Fatalf("Requests: %v", err)
 	}
 	if len(rows) != 1 || rows[0].Status != 502 {
 		t.Errorf("rows = %+v, want only the 502", rows)
@@ -135,73 +136,20 @@ func TestFailuresNarrowAndStayInsideOneTenant(t *testing.T) {
 
 	// Paging backwards on the id cursor, which is stable while the log is still
 	// being written to.
-	page, err := st.Failures(ctx, FailureQuery{OrgID: f.orgID, Limit: 1})
+	page, err := st.Requests(ctx, RequestQuery{OrgID: f.orgID, Outcome: OutcomeUnhappy, Limit: 1})
 	if err != nil {
-		t.Fatalf("Failures: %v", err)
+		t.Fatalf("Requests: %v", err)
 	}
 	if len(page) != 1 {
 		t.Fatalf("%d rows, want the one asked for", len(page))
 	}
-	next, err := st.Failures(ctx, FailureQuery{OrgID: f.orgID, Limit: 1, Before: page[0].ID})
+	next, err := st.Requests(ctx, RequestQuery{OrgID: f.orgID, Outcome: OutcomeUnhappy, Limit: 1,
+		Before: page[0].ID})
 	if err != nil {
-		t.Fatalf("Failures: %v", err)
+		t.Fatalf("Requests: %v", err)
 	}
 	if len(next) != 1 || next[0].ID >= page[0].ID {
 		t.Errorf("the cursor did not move backwards: %+v then %+v", page, next)
-	}
-}
-
-// The facets are what the screen offers to narrow by, and the counts are what
-// make them worth offering: one model failing four hundred times and four
-// hundred models failing once are the same number on the dashboard.
-func TestFailureFiltersCountTheWholeWindow(t *testing.T) {
-	st, ctx := db(t)
-	f := newFixture(t, st, ctx)
-	now := time.Now().UTC().Truncate(time.Second)
-
-	events := []Event{
-		{TS: now, OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code", Status: 500, Error: "boom"},
-		{TS: now, OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code", Status: 500, Error: "boom"},
-		{TS: now, OrgID: f.orgID, KeyID: "key_2", Alias: "keera-fast", Status: 502, Error: "gone"},
-		// A refusal, which the failed kind must not count.
-		{TS: now, OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code", Status: 429, Error: "slow down"},
-		// Served, which no kind counts.
-		{TS: now, OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code", Status: 200},
-	}
-	if err := st.WriteEvents(ctx, events); err != nil {
-		t.Fatalf("WriteEvents: %v", err)
-	}
-
-	facets, err := st.FailureFilters(ctx, FailureQuery{OrgID: f.orgID, Kind: KindFailed})
-	if err != nil {
-		t.Fatalf("FailureFilters: %v", err)
-	}
-	if facets.Total != 3 {
-		t.Errorf("Total = %d, want the three failures and neither the refusal nor the "+
-			"request that was served", facets.Total)
-	}
-	// Ordered by how much of the trouble each one is: the worst offender first.
-	if len(facets.Models) != 2 || facets.Models[0].Value != "keera-code" ||
-		facets.Models[0].Count != 2 {
-		t.Errorf("Models = %+v, want keera-code with two, first", facets.Models)
-	}
-	if len(facets.Keys) != 2 || facets.Keys[0].Value != f.keyID || facets.Keys[0].Count != 2 {
-		t.Errorf("Keys = %+v, want the key that produced most of them, first", facets.Keys)
-	}
-	if len(facets.Statuses) != 2 {
-		t.Errorf("Statuses = %+v, want the 500 and the 502", facets.Statuses)
-	}
-
-	// The facets describe the window and the kind, not the narrowing already
-	// applied: a screen showing only what it is already filtered to offers no
-	// way back out.
-	narrowed, err := st.FailureFilters(ctx,
-		FailureQuery{OrgID: f.orgID, Kind: KindFailed, Alias: "keera-fast"})
-	if err != nil {
-		t.Fatalf("FailureFilters: %v", err)
-	}
-	if narrowed.Total != facets.Total || len(narrowed.Models) != len(facets.Models) {
-		t.Errorf("facets = %+v, want them unchanged by the alias narrowing", narrowed)
 	}
 }
 
@@ -218,9 +166,9 @@ func TestAnEnormousBackendMessageIsBounded(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
-	rows, err := st.Failures(ctx, FailureQuery{OrgID: f.orgID})
+	rows, err := st.Requests(ctx, RequestQuery{OrgID: f.orgID, Outcome: OutcomeUnhappy})
 	if err != nil {
-		t.Fatalf("Failures: %v", err)
+		t.Fatalf("Requests: %v", err)
 	}
 	if len(rows) != 1 {
 		t.Fatalf("%d rows, want 1", len(rows))

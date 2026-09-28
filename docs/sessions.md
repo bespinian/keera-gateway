@@ -1,11 +1,11 @@
 # Sessions
 
-A session is the calls one coding agent made working on one task.
+A session is the requests one coding agent made working on one task.
 
 Other reports count requests. But one instruction from a developer becomes
 thirty or forty requests as the agent reads files, calls tools and answers
-again. "Four rappen a call" is not something anybody can act on. "One franc
-twenty a task, eleven minutes, forty-one calls" is the number for a budget
+again. "Four rappen a request" is not something anybody can act on. "One
+franc twenty a task, eleven minutes, forty-one requests" is the number for a budget
 conversation.
 
 ## What defines a session
@@ -30,11 +30,11 @@ In order of preference.
 
 A request with any of these headers is in the session that header names.
 
-| Header                | Why it is read                                                                  |
-| --------------------- | ------------------------------------------------------------------------------- |
-| `X-Keera-Session`     | This gateway's own. It wins if more than one is sent.                           |
-| `X-Session-Id`        | The generic convention.                                                         |
-| `Helicone-Session-Id` | Helicone's proxy groups calls by it, so clients written for such a gateway fit. |
+| Header                | Why it is read                                                                     |
+| --------------------- | ---------------------------------------------------------------------------------- |
+| `X-Keera-Session`     | This gateway's own. It wins if more than one is sent.                              |
+| `X-Session-Id`        | The generic convention.                                                            |
+| `Helicone-Session-Id` | Helicone's proxy groups requests by it, so clients written for such a gateway fit. |
 
 ```sh
 curl http://127.0.0.1:8080/api/v1/chat/completions \
@@ -53,7 +53,7 @@ the three headers carries it makes no difference to the key.
   `metadata.user_id` - and grouping by person would put every task a developer
   ever ran into one session.
 - W3C Trace Context has the wrong shape. `traceparent` names a trace, and tools
-  that give each completion its own trace would make every call its own task.
+  that give each completion its own trace would make every request its own task.
 - OpenTelemetry's GenAI conventions name the concept, `gen_ai.conversation.id`,
   but only as a span attribute, not on the wire.
 - The OpenAI Responses API's `conversation` and `previous_response_id` name a
@@ -64,13 +64,13 @@ the three headers carries it makes no difference to the key.
 **The client must compute a stated id per conversation.** A constant in a static
 configuration - the same `X-Session-Id` on every request - merges that key's
 whole history into one session. The panel marks a stated session as _named by
-the client_, so a single session of nine thousand calls is easy to spot.
+the client_, so a single session of nine thousand requests is easy to spot.
 
 ### Otherwise, the prompt that opened the task
 
 Without a header, the gateway hashes **the first message with role `user`** in
 the request, together with the id of the API key that sent it. That message is
-the same, byte for byte, on the first call of a task and on its fortieth.
+the same, byte for byte, on the first request of a task and on its fortieth.
 
 **The system prompt is left out on purpose.** Agents put the date, the working
 directory and the git branch there. Including it would split a task at midnight
@@ -85,7 +85,7 @@ other is matched by key and time. See [mcp.md](mcp.md#the-tool-call-log).
 
 **Only the chat surfaces get a session.** `/api/v1/chat/completions`,
 `/api/v1/messages` and `/api/v1/responses` carry a conversation.
-`/api/v1/completions` carries a bare prompt that is different on every call, and
+`/api/v1/completions` carries a bare prompt that is different on every request, and
 `/api/v1/embeddings` has no conversation at all. Requests to those two belong to
 no session.
 
@@ -121,7 +121,9 @@ The stated headers exist for both cases. The panel shows whether a session was
 stated or inferred.
 
 An agent sandbox avoids the problem: it is exactly one task, so it sends its own
-id in `X-Keera-Session`. See [sandboxes.md](sandboxes.md).
+id in `X-Keera-Session`. The gateway configures Pi and Claude Code to do so; an
+image that adds another agent has to configure it. See
+[sandboxes.md](sandboxes.md).
 
 ## How the grouping is computed
 
@@ -144,10 +146,15 @@ enough to open the whole task.
 
 ### The window edge
 
-A session already under way when the report's window opens is reported whole.
-The walk starts one gap before the window and drops the sessions that ended in
-that extra span. Otherwise a task that had run for ten minutes would show only
-what its last two minutes cost.
+The walk starts one gap before the window opens, and drops the sessions that
+ended in that extra span. So a session already under way when the window opens
+keeps up to one gap of what came before. Without this, a task that had run for
+ten minutes would show only what its last two minutes cost.
+
+A task that ran for longer than one gap before the window opens is still cut:
+the list shows only its part from one gap before the window. Opening the
+session shows it whole, because that walks its own conversation back to where
+it started.
 
 ## Reading the report
 
@@ -157,17 +164,17 @@ what its last two minutes cost.
 the request log, because the rows name other people's keys.
 
 The screen starts with per-task figures for the window. Each is a median, with
-the maximum below it. Then come the rankings by **Cost**, **Calls** and
+the maximum below it. Then come the rankings by **Cost**, **Requests** and
 **Time**, which are the point of the screen. The row worth reading is rarely the
 latest one.
 
-Opening a session shows its four numbers, every call in order, and a strip with
-one bar per call, sized by cost and coloured by outcome. Forty even bars is an
+Opening a session shows its four numbers, every request in order, and a strip
+with one bar per request, sized by cost and coloured by outcome. Forty even bars is an
 agent working. A long tail of identical small bars is an agent looping. A red
-bar two thirds along is where the task went wrong; click it to open that call.
+bar two thirds along is where the task went wrong; click it to open that request.
 
-Each row also shows how the task **ended**: the outcome of its last call and the
-message its client got. A task of forty calls that stopped on a spent budget did
+Each row also shows how the task **ended**: the outcome of its last request and the
+message its client got. A task of forty requests that stopped on a spent budget did
 not finish.
 
 ### The command line
@@ -178,21 +185,24 @@ keera sessions --sort requests        # the tasks that would not stop
 keera sessions --unhappy              # only the ones that hit trouble
 keera sessions --model keera-frontier # the tasks that reached the hosted model
 keera sessions --team <team-id> --since 720h
+keera sessions --user ada@example.ch  # one person, by email or id
 keera session <request-id>            # one task, from beginning to end
 ```
 
-`keera sessions` ranks by cost, not by recency. `keera session` takes the id of
-**any** request in the task, which is what `keera failures` and the request log
-show.
+`keera sessions` ranks by cost, not by recency. Its first column is the id of
+each task's first request. `keera session` takes the id of **any** request in
+the task: that column, the first column of `keera failures`, or the
+`REQUEST` column of `keera session` itself.
 
 ### The API
 
 ```
-GET /v1/sessions      ?org_id&from&to&since&sort&unhappy&alias&team_id&key_id&user_id&limit&before
-GET /v1/sessions/{id}  where {id} is any request in the session
+GET /control/v1/sessions      ?org_id&from&to&since&sort&unhappy&alias&team_id&key_id&user_id&key&limit&before
+GET /control/v1/sessions/{id}  where {id} is any request in the session
 ```
 
-Both return `gap_seconds`, the threshold used for the grouping. `format=csv` on
+`key` is a session key, as the list returns it: it narrows the list to one
+conversation. Both return `gap_seconds`, the threshold used for the grouping. `format=csv` on
 the list exports the whole filtered window, one row per task.
 
 Paging with `before` works only with the default order. Under a ranking the
@@ -234,7 +244,7 @@ millisecond, however much traffic the deployment has.
 | ------------------- | ------- | ------------------------------------------------------------------------------------------------------------ |
 | `KEERA_SESSION_GAP` | `30m`   | How long a conversation may go quiet before the next request on it starts a new session. Refused below `1m`. |
 
-Thirty minutes fits how a coding agent is used. Within a task, calls are seconds
+Thirty minutes fits how a coding agent is used. Within a task, requests are seconds
 or a minute or two apart. Between tasks there is a meeting, a lunch or a night.
 Much under ten minutes starts splitting one task into several. Much over an hour
 starts joining an afternoon's tasks into one.

@@ -27,6 +27,11 @@ const maxClientName = 32
 // client is called the same on every screen. The rest are clients Keera does
 // not configure but can recognise. An unknown client falls back to its own
 // product token.
+//
+// The catalogue's fourth entry, openai, is not here on purpose. It is a setup
+// that any OpenAI-compatible tool reads, not one client, so its requests are
+// filed under the tool that sends them: Aider, the OpenAI SDK, curl. A client
+// that states "openai" is the OpenAI SDK, like the SDK's own User-Agent.
 var agents = []struct {
 	key   string
 	label string

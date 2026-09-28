@@ -51,17 +51,17 @@ func TestPermissions(t *testing.T) {
 	member := &Principal{Via: MethodSession, Role: RoleMember, OrgID: "org_a"}
 
 	tests := []struct {
-		name                      string
-		p                         *Principal
-		org                       string
-		read, adminOrg, catalogue bool
+		name           string
+		p              *Principal
+		org            string
+		read, adminOrg bool
 	}{
-		{"operator sees any organisation", operator, "org_b", true, true, true},
-		{"admin sees their own", admin, "org_a", true, true, false},
-		{"admin sees no other", admin, "org_b", false, false, false},
-		{"member reads their own", member, "org_a", true, false, false},
-		{"member administers nothing", member, "org_a", true, false, false},
-		{"member sees no other", member, "org_b", false, false, false},
+		{"operator sees any organisation", operator, "org_b", true, true},
+		{"admin sees their own", admin, "org_a", true, true},
+		{"admin sees no other", admin, "org_b", false, false},
+		{"member reads their own", member, "org_a", true, false},
+		{"member administers nothing", member, "org_a", true, false},
+		{"member sees no other", member, "org_b", false, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -71,14 +71,11 @@ func TestPermissions(t *testing.T) {
 			if got := tc.p.CanAdminOrg(tc.org); got != tc.adminOrg {
 				t.Errorf("CanAdminOrg(%s) = %v, want %v", tc.org, got, tc.adminOrg)
 			}
-			if got := tc.p.CanAdminCatalogue(); got != tc.catalogue {
-				t.Errorf("CanAdminCatalogue() = %v, want %v", got, tc.catalogue)
-			}
 		})
 	}
 }
 
-func TestCanIssueKeyForIsSelfOnlyForAMember(t *testing.T) {
+func TestCanManageKeyForIsSelfOnlyForAMember(t *testing.T) {
 	operatorKey := &Principal{Via: MethodOperatorKey, Role: RoleOperator}
 	admin := &Principal{Via: MethodSession, Role: RoleAdmin, OrgID: "org_a", UserID: "user_admin"}
 	member := &Principal{Via: MethodSession, Role: RoleMember, OrgID: "org_a", UserID: "user_1"}
@@ -104,8 +101,8 @@ func TestCanIssueKeyForIsSelfOnlyForAMember(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.p.CanIssueKeyFor(tc.org, tc.user); got != tc.want {
-				t.Errorf("CanIssueKeyFor(%q, %q) = %v, want %v", tc.org, tc.user, got, tc.want)
+			if got := tc.p.CanManageKeyFor(tc.org, tc.user); got != tc.want {
+				t.Errorf("CanManageKeyFor(%q, %q) = %v, want %v", tc.org, tc.user, got, tc.want)
 			}
 		})
 	}
@@ -114,53 +111,10 @@ func TestCanIssueKeyForIsSelfOnlyForAMember(t *testing.T) {
 // A member whose session carries no user row has nobody to attribute a key to,
 // so "issue your own" has no meaning for them. It must not collapse into
 // "issue one attributed to nobody", which is an administrator's key.
-func TestCanIssueKeyForNeedsAUser(t *testing.T) {
+func TestCanManageKeyForNeedsAUser(t *testing.T) {
 	orphan := &Principal{Via: MethodSession, Role: RoleMember, OrgID: "org_a"}
-	if orphan.CanIssueKeyFor("org_a", "") {
+	if orphan.CanManageKeyFor("org_a", "") {
 		t.Error("a member with no user id was allowed to issue a key")
-	}
-}
-
-// Revoking is scoped the same way as issuing, with one deliberate difference:
-// there is no "attributed to nobody means me" anywhere near it. Such a key is
-// the shared one an administrator issued for a pipeline, and a member who could
-// revoke it could stop work that was never theirs.
-func TestCanRevokeKeyForIsSelfOnlyForAMember(t *testing.T) {
-	operatorKey := &Principal{Via: MethodOperatorKey, Role: RoleOperator}
-	admin := &Principal{Via: MethodSession, Role: RoleAdmin, OrgID: "org_a", UserID: "user_admin"}
-	member := &Principal{Via: MethodSession, Role: RoleMember, OrgID: "org_a", UserID: "user_1"}
-
-	tests := []struct {
-		name string
-		p    *Principal
-		org  string
-		user string
-		want bool
-	}{
-		{"member revokes their own", member, "org_a", "user_1", true},
-		{"member cannot revoke a colleague's", member, "org_a", "user_2", false},
-		{"member cannot revoke an unattributed key", member, "org_a", "", false},
-		{"member cannot reach into another organisation", member, "org_b", "user_1", false},
-		{"admin revokes anybody's in their own", admin, "org_a", "user_1", true},
-		{"admin revokes an unattributed key", admin, "org_a", "", true},
-		{"admin cannot reach into another organisation", admin, "org_b", "user_1", false},
-		{"the operator key revokes anywhere", operatorKey, "org_a", "user_1", true},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.p.CanRevokeKeyFor(tc.org, tc.user); got != tc.want {
-				t.Errorf("CanRevokeKeyFor(%q, %q) = %v, want %v", tc.org, tc.user, got, tc.want)
-			}
-		})
-	}
-}
-
-// A member with no user row of their own has no key attributed to them, so
-// "revoke your own" must not collapse into revoking an unattributed one.
-func TestCanRevokeKeyForNeedsAUser(t *testing.T) {
-	orphan := &Principal{Via: MethodSession, Role: RoleMember, OrgID: "org_a"}
-	if orphan.CanRevokeKeyFor("org_a", "") {
-		t.Error("a member with no user id was allowed to revoke an unattributed key")
 	}
 }
 
@@ -206,6 +160,7 @@ func TestRoleForPrefersTheDirectory(t *testing.T) {
 		{"configured names are trimmed", "x@example.ch", []string{"ai-platform-admins"}, RoleAdmin},
 		{"the bootstrap email", "operator@example.ch", nil, RoleOperator},
 		{"the email check is case-insensitive", "Operator@Example.ch", nil, RoleOperator},
+		{"the bootstrap email beats an admin group", "operator@example.ch", []string{"keera-admins"}, RoleOperator},
 		{"anybody else", "x@example.ch", []string{"engineering"}, RoleMember},
 		{"no groups at all", "x@example.ch", nil, RoleMember},
 	}

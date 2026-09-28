@@ -103,7 +103,7 @@ func (s *Server) mcpBegin(w http.ResponseWriter, r *http.Request) (*mcpExchange,
 		return nil, false
 	}
 	alias := r.PathValue("alias")
-	srv, found := s.src.MCPServer(alias)
+	srv, found := s.src.MCPServer(res.Key.OrgID, alias)
 	if !found || !srv.Enabled || !res.AllowsServer(alias) {
 		httpx.WriteError(w, http.StatusNotFound, "invalid_request_error", "mcp_server_not_found",
 			s.advise("the MCP server '"+alias+"' does not exist or this key may not use it"))
@@ -184,11 +184,11 @@ func (s *Server) mcpSend(ctx context.Context, srv policy.MCPServer, method strin
 	if payload != nil && req.Header.Get("Content-Type") == "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if credential := srv.Credential(s.opts.APIKeys); credential != "" {
+	if srv.APIKey != "" {
 		if srv.AuthHeader == "" {
-			req.Header.Set("Authorization", "Bearer "+credential)
+			req.Header.Set("Authorization", "Bearer "+srv.APIKey)
 		} else {
-			req.Header.Set(srv.AuthHeader, credential)
+			req.Header.Set(srv.AuthHeader, srv.APIKey)
 		}
 	}
 	return s.client.Do(req)
@@ -410,7 +410,8 @@ func (x *mcpExchange) relay(resp *http.Response) {
 	// signing in to the server itself.
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
 		msg := "the MCP server '" + x.srv.Alias + "' refused the gateway's credential for it " +
-			"(it answered " + http.StatusText(status) + "); an operator has to set it again"
+			"(it answered " + http.StatusText(status) + "); an administrator has to " +
+			"set it again"
 		x.failPending(msg)
 		httpx.WriteError(x.w, http.StatusBadGateway, "server_error", "mcp_credential_refused", msg)
 		return

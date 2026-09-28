@@ -26,7 +26,7 @@ models:
     backend_model: old
     disabled: true
 `
-	models, err := Parse([]byte(in))
+	models, err := parseModelFile([]byte(in))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestParseRejectsWhatWouldFailSilentlyAtRuntime(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Parse([]byte(tc.in))
+			_, err := parseModelFile([]byte(tc.in))
 			if err == nil {
 				t.Fatal("Parse accepted a catalogue that would fail at runtime")
 			}
@@ -122,5 +122,32 @@ func TestParseRejectsWhatWouldFailSilentlyAtRuntime(t *testing.T) {
 				t.Errorf("error = %q, want it to mention %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+// A field the file shape does not have is refused, so a setting left over from
+// an older file does not quietly stop doing anything.
+func TestAnUnknownFieldIsRefused(t *testing.T) {
+	_, err := parseModelFile([]byte(`
+models:
+  - alias: fast
+    backends: [http://vllm:8000/v1]
+    backend_model: served
+    api_key_env: FAST_KEY
+`))
+	if err == nil || !strings.Contains(err.Error(), "api_key_env") {
+		t.Errorf("a model with an unknown field: err = %v, want it named", err)
+	}
+	_, err = parseSandboxFile([]byte(`
+sandboxes:
+  - name: standard
+    image: example/sandbox:1
+    egress: [github.com]
+`))
+	if err == nil || !strings.Contains(err.Error(), "egress") {
+		t.Errorf("a class with an unknown field: err = %v, want it named", err)
+	}
+	if _, err := parseModelFile([]byte("")); err == nil || !strings.Contains(err.Error(), "no models") {
+		t.Errorf("an empty file: err = %v, want 'declares no models'", err)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -48,13 +49,13 @@ func sandboxStore(t *testing.T) (*store.Store, context.Context) {
 		api_keys, users, teams, orgs RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
-	if _, err := st.CreateOrg(ctx, "org_1", "Example Bank"); err != nil {
+	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_1", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
 	class := policy.SandboxClass{
-		Name: "standard", Description: "the usual machine", Image: "example/sandbox:1",
+		OrgID: "org_1", Name: "standard", Description: "the usual machine", Image: "example/sandbox:1",
 		Isolation: policy.IsolationIsolated, CPU: 4000, Memory: 16384, Disk: 51200,
-		DefaultTTL: 4 * time.Hour, MaxTTL: 24 * time.Hour, Managed: true,
+		DefaultTTL: 4 * time.Hour, MaxTTL: 24 * time.Hour,
 	}
 	if err := st.UpsertSandboxClass(ctx, &class); err != nil {
 		t.Fatalf("UpsertSandboxClass: %v", err)
@@ -112,7 +113,7 @@ func TestSandboxCatalogueIsReadableWithNoDriver(t *testing.T) {
 		Data   []policy.SandboxClass `json:"data"`
 		Driver map[string]any        `json:"driver"`
 	}
-	if code := getJSON(t, ts, httpx.ControlPrefix+"/v1/sandbox-classes", &res); code != 200 {
+	if code := getJSON(t, ts, httpx.ControlPrefix+"/v1/sandbox-classes?org_id=org_1", &res); code != 200 {
 		t.Fatalf("status = %d", code)
 	}
 	if len(res.Data) != 1 || res.Data[0].Name != "standard" {
@@ -156,49 +157,59 @@ func TestSandboxRoutesRefuseClearlyWithNoDriver(t *testing.T) {
 	}
 }
 
-func TestSandboxClassIsOperatorOwned(t *testing.T) {
+// A class belongs to one organisation, so a change names it.
+func TestSandboxClassBelongsToAnOrganisation(t *testing.T) {
 	st, ctx := sandboxStore(t)
 	ts := sandboxServer(t, st, nil)
 
-	// A class declared by the catalogue file belongs to the file: this is
-	// applied again on the next restart, so an edit made here would last until
-	// then and no longer.
 	var envelope struct {
 		Error struct {
 			Code    string `json:"code"`
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	code := call(t, ts, http.MethodPut, httpx.ControlPrefix+"/v1/sandbox-classes/standard",
-		map[string]any{"image": "other:1"}, &envelope)
-	if code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409", code)
-	}
-	if envelope.Error.Code != "managed" {
-		t.Errorf("code = %q", envelope.Error.Code)
+	code := call(t, ts, http.MethodPut, httpx.ControlPrefix+"/v1/sandbox-classes/scratch",
+		map[string]any{"image": "example/sandbox:2"}, &envelope)
+	if code != http.StatusBadRequest || !strings.Contains(envelope.Error.Message, "organisation") {
+		t.Fatalf("a class of no organisation = %d %q, want 400 asking for one",
+			code, envelope.Error.Message)
 	}
 
-	// One that is not the file's can be changed, and is validated the same way
-	// the file is.
-	code = call(t, ts, http.MethodPut, httpx.ControlPrefix+"/v1/sandbox-classes/scratch",
+	// Validated the same way the file is.
+	const path = "/v1/sandbox-classes/scratch?org_id=org_1"
+	code = call(t, ts, http.MethodPut, httpx.ControlPrefix+path,
 		map[string]any{"image": "example/sandbox:2", "isolation": "kata"}, &envelope)
 	if code != http.StatusBadRequest {
 		t.Fatalf("an unknown isolation tier should be refused, got %d", code)
 	}
 	var saved policy.SandboxClass
-	code = call(t, ts, http.MethodPut, httpx.ControlPrefix+"/v1/sandbox-classes/scratch",
-		map[string]any{"image": "example/sandbox:2", "cpu": "2", "memory": "4Gi"}, &saved)
+	code = call(t, ts, http.MethodPut, httpx.ControlPrefix+path,
+		map[string]any{"image": "example/sandbox:2", "cpu_millis": 2000, "memory_mib": 4096}, &saved)
 	if code != http.StatusOK {
 		t.Fatalf("status = %d", code)
 	}
-	if saved.CPU != 2000 || saved.Memory != 4096 {
+	if saved.CPU != 2000 || saved.Memory != 4096 || saved.OrgID != "org_1" {
 		t.Errorf("saved %+v", saved)
 	}
-	if saved.Managed {
-		t.Error("a class created through the API is not the file's")
+	// What is left out gets the file's defaults.
+	if saved.DefaultTTL != 4*time.Hour || saved.Isolation != policy.IsolationIsolated {
+		t.Errorf("defaults not filled in: %+v", saved)
 	}
-	if _, err := st.SandboxClass(ctx, "scratch"); err != nil {
+	// What the list returns can be written back unchanged.
+	again := saved
+	code = call(t, ts, http.MethodPut, httpx.ControlPrefix+path, saved, &again)
+	if code != http.StatusOK || again.CPU != saved.CPU || again.MaxTTL != saved.MaxTTL {
+		t.Errorf("writing back what was read = %d %+v", code, again)
+	}
+	if _, err := st.SandboxClass(ctx, "org_1", "scratch"); err != nil {
 		t.Errorf("SandboxClass: %v", err)
+	}
+
+	// A class that came from the template is the organisation's to change.
+	code = call(t, ts, http.MethodPut, httpx.ControlPrefix+"/v1/sandbox-classes/standard?org_id=org_1",
+		map[string]any{"image": "other:1"}, &saved)
+	if code != http.StatusOK || saved.Image != "other:1" {
+		t.Errorf("changing the organisation's class = %d %+v", code, saved)
 	}
 }
 
@@ -209,7 +220,7 @@ func TestSandboxClassIsOperatorOwned(t *testing.T) {
 // says only that the team exists somewhere.
 func TestSandboxRefusesAnotherOrgsTeam(t *testing.T) {
 	st, ctx := sandboxStore(t)
-	if _, err := st.CreateOrg(ctx, "org_2", "Other Bank"); err != nil {
+	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_2", Name: "Other Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
 	if _, err := st.CreateTeam(ctx, "team_other", "org_2", "Their Platform"); err != nil {
@@ -369,7 +380,7 @@ func TestSandboxVisibilityAndAttachRules(t *testing.T) {
 
 	// An administrator may see both, because the quota and the bill are theirs.
 	admin := &authnPrincipalAdmin
-	if !canChangeSandbox(admin, store.Sandbox{OrgID: "org_1", UserID: theirs.ID}) {
+	if !mayHandleSandbox(admin, store.Sandbox{OrgID: "org_1", UserID: theirs.ID}) {
 		t.Error("an administrator should be able to terminate a sandbox in their organisation")
 	}
 	// And may not get inside one. A sandbox holds a working copy of somebody's
@@ -503,9 +514,7 @@ type stubDriver struct{}
 
 func (stubDriver) Name() string { return "stub" }
 func (stubDriver) Capabilities() sandbox.Capabilities {
-	return sandbox.Capabilities{
-		Suspend: true, Persistence: true, Isolation: policy.IsolationVM,
-	}
+	return sandbox.Capabilities{Isolation: policy.IsolationVM, Tiers: policy.Isolations}
 }
 func (stubDriver) Create(_ context.Context, spec sandbox.Spec) (sandbox.Status, error) {
 	return sandbox.Status{Ref: spec.Ref, State: policy.SandboxReady, Address: "10.0.0.1"}, nil
@@ -513,10 +522,11 @@ func (stubDriver) Create(_ context.Context, spec sandbox.Spec) (sandbox.Status, 
 func (stubDriver) Status(context.Context, sandbox.Ref) (sandbox.Status, error) {
 	return sandbox.Status{}, sandbox.ErrNotFound
 }
-func (stubDriver) Suspend(context.Context, sandbox.Ref) error { return sandbox.ErrUnsupported }
-func (stubDriver) Resume(context.Context, sandbox.Ref) error  { return sandbox.ErrUnsupported }
+func (stubDriver) Suspend(context.Context, sandbox.Ref) error { return errors.ErrUnsupported }
+func (stubDriver) Resume(context.Context, sandbox.Ref) error  { return errors.ErrUnsupported }
+func (stubDriver) Revive(context.Context, sandbox.Spec) error { return nil }
 func (stubDriver) Extend(context.Context, sandbox.Ref, time.Time) error {
-	return sandbox.ErrUnsupported
+	return errors.ErrUnsupported
 }
 func (stubDriver) Terminate(context.Context, sandbox.Ref) error { return nil }
 func (stubDriver) Dial(context.Context, sandbox.Ref, int) (net.Conn, error) {

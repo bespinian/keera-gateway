@@ -274,9 +274,11 @@ func (s *Server) countTokens(w http.ResponseWriter, r *http.Request) {
 	}
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, s.opts.MaxBodyBytes))
 	if err != nil {
-		sh.writeError(w, http.StatusRequestEntityTooLarge, "", "",
-			"the request body exceeds the gateway's limit")
-		return
+		if tooLarge := (*http.MaxBytesError)(nil); errors.As(err, &tooLarge) {
+			sh.writeError(w, http.StatusRequestEntityTooLarge, "", "",
+				"the request body exceeds the gateway's limit")
+		}
+		return // otherwise the client went away mid-upload
 	}
 	b, err := parseBody(raw)
 	if err != nil {
@@ -308,7 +310,7 @@ func (s *Server) mayCall(res *policy.Resolved, alias string) bool {
 	if alias == "" || !res.AllowsModel(alias) {
 		return false
 	}
-	if m, found := s.src.Model(alias); found {
+	if m, found := s.src.Model(res.Key.OrgID, alias); found {
 		return m.Enabled && m.Kind == policy.KindChat
 	}
 	_, routed := s.src.Router(res.Key.OrgID, alias)

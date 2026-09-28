@@ -12,36 +12,27 @@ services:
       # panel at /, the inference API under /api, the control API under
       # /control. Open http://127.0.0.1:8080 to reach the panel.
       #
-      # Bound to loopback until a real operator key is set. Publishing this more
-      # widely publishes the control API with it - there is no port to firewall
-      # them apart any more - so what governs the editors is only ever an
-      # operator key and a session cookie away from whatever can reach it. Put a
-      # proxy in front of anything beyond a development machine.
+      # Bound to loopback until a real operator key is set. Publishing this port
+      # publishes the control API with it, so put a TLS proxy in front of
+      # anything beyond a development machine.
       - "${KEERA_BIND:-127.0.0.1}:8080:8080"
     volumes:
       # ",z" relabels for SELinux hosts; harmless elsewhere.
       - ./models.yaml:/etc/keera/models.yaml:ro,z
+      - ./sandboxes.yaml:/etc/keera/sandboxes.yaml:ro,z
     environment:
       KEERA_DATABASE_URL: postgres://keera:keera@keera-db:5432/keera?sslmode=disable
       KEERA_OPERATOR_KEY: ${KEERA_OPERATOR_KEY:?set KEERA_OPERATOR_KEY in .env - see .env.example}
       KEERA_ADDR: ":8080"
       KEERA_MODELS_FILE: /etc/keera/models.yaml
+      # Read even with no sandbox driver, so each new organisation has the
+      # classes once one is switched on. See README.md.
+      KEERA_SANDBOXES_FILE: /etc/keera/sandboxes.yaml
       KEERA_LOG_FORMAT: ${KEERA_LOG_FORMAT:-text}
       KEERA_LOG_LEVEL: ${KEERA_LOG_LEVEL:-info}
-      # Encrypts the API keys operators type into the control panel. Asked for
-      # rather than defaulted, because the gateway starts happily without one
-      # and the operator then discovers the consequence in the one place it
-      # bites: a disabled field, at the moment they are adding a hosted model
-      # and holding its key. See docs/providers.md.
+      # Encrypts the API keys administrators type into the control panel. Required:
+      # the gateway does not start without it. See docs/providers.md.
       KEERA_SECRET_KEY: ${KEERA_SECRET_KEY:?set KEERA_SECRET_KEY in .env - see .env.example}
-      # The other way to give a hosted model its credential: name this variable
-      # in models.yaml as api_key_env, which `provider: anthropic` does for you.
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      # The same, for `provider: infomaniak`. Its product id is not a secret and
-      # goes in models.yaml, not here.
-      INFOMANIAK_API_KEY: ${INFOMANIAK_API_KEY:-}
-      # The same, for `provider: stepping-stone`.
-      STEPPING_STONE_API_KEY: ${STEPPING_STONE_API_KEY:-}
       # Reads /metrics and nothing else, so a scrape configuration does not
       # have to hold the operator key. Empty leaves the route to operators.
       KEERA_METRICS_TOKEN: ${KEERA_METRICS_TOKEN:-}
@@ -54,24 +45,36 @@ services:
       # threshold and nothing is stored per session, so changing it re-cuts
       # what has already been recorded.
       KEERA_SESSION_GAP: ${KEERA_SESSION_GAP:-}
+      # Compose passes on only the variables this file names, so every other
+      # setting in docs/install.md is listed here. Empty keeps the default.
+      # The sandbox settings are left out: the podman driver cannot run inside
+      # this container, so only `make dev` reads them. See .env.example.
+      KEERA_CURRENCY: ${KEERA_CURRENCY:-}
+      KEERA_REDIS_URL: ${KEERA_REDIS_URL:-}
+      KEERA_REDIS_PREFIX: ${KEERA_REDIS_PREFIX:-}
+      KEERA_UI: ${KEERA_UI:-}
+      KEERA_SECURE_COOKIES: ${KEERA_SECURE_COOKIES:-}
+      KEERA_CACHE_TTL: ${KEERA_CACHE_TTL:-}
+      KEERA_SPEND_REFRESH: ${KEERA_SPEND_REFRESH:-}
+      KEERA_UPSTREAM_HEADER_TIMEOUT: ${KEERA_UPSTREAM_HEADER_TIMEOUT:-}
+      KEERA_MAX_BODY_BYTES: ${KEERA_MAX_BODY_BYTES:-}
+      KEERA_MAX_RESPONSE_BYTES: ${KEERA_MAX_RESPONSE_BYTES:-}
+      KEERA_MAX_DB_CONNS: ${KEERA_MAX_DB_CONNS:-}
       # Single sign-on. Empty means the panel accepts only the operator key.
-      # These three configure one directory, which is what a deployment with a
-      # single customer has; KEERA_OIDC_PROVIDERS below is for several.
-      KEERA_OIDC_ISSUER: ${KEERA_OIDC_ISSUER:-}
-      KEERA_OIDC_CLIENT_ID: ${KEERA_OIDC_CLIENT_ID:-}
-      KEERA_OIDC_CLIENT_SECRET: ${KEERA_OIDC_CLIENT_SECRET:-}
-      # One callback serves every provider: a sign-in is recognised by the
-      # state it was handed, not by the address it came back to.
-      KEERA_OIDC_REDIRECT_URL: ${KEERA_OIDC_REDIRECT_URL:-}
-      # Several directories at once - a button per name on the sign-in screen.
-      # Compose cannot pass through variables it does not name, so the two
-      # blocks below are the ones this file ships with; another name means
-      # another block here, spelled KEERA_OIDC_<NAME>_*. See docs/sso.md.
+      # A button per name on the sign-in screen, each configured under
+      # KEERA_OIDC_<NAME>_*. Compose cannot pass through variables it does not
+      # name, so the two blocks below are the ones this file ships with;
+      # another name means another block here. See docs/sso.md.
       KEERA_OIDC_PROVIDERS: ${KEERA_OIDC_PROVIDERS:-}
       KEERA_OIDC_GOOGLE_ISSUER: ${KEERA_OIDC_GOOGLE_ISSUER:-}
       KEERA_OIDC_GOOGLE_CLIENT_ID: ${KEERA_OIDC_GOOGLE_CLIENT_ID:-}
       KEERA_OIDC_GOOGLE_CLIENT_SECRET: ${KEERA_OIDC_GOOGLE_CLIENT_SECRET:-}
       KEERA_OIDC_GOOGLE_LABEL: ${KEERA_OIDC_GOOGLE_LABEL:-}
+      KEERA_OIDC_GOOGLE_DEFAULT_ROLE: ${KEERA_OIDC_GOOGLE_DEFAULT_ROLE:-}
+      KEERA_OIDC_GOOGLE_SCOPES: ${KEERA_OIDC_GOOGLE_SCOPES:-}
+      KEERA_OIDC_GOOGLE_GROUPS_CLAIM: ${KEERA_OIDC_GOOGLE_GROUPS_CLAIM:-}
+      KEERA_OIDC_GOOGLE_ADMIN_GROUPS: ${KEERA_OIDC_GOOGLE_ADMIN_GROUPS:-}
+      KEERA_OIDC_GOOGLE_OPERATOR_GROUPS: ${KEERA_OIDC_GOOGLE_OPERATOR_GROUPS:-}
       # The email domains each provider may vouch for, required with several.
       # "*" is for a provider that proves every address itself, like Google.
       KEERA_OIDC_GOOGLE_DOMAINS: ${KEERA_OIDC_GOOGLE_DOMAINS:-}
@@ -79,33 +82,24 @@ services:
       KEERA_OIDC_ENTRA_CLIENT_ID: ${KEERA_OIDC_ENTRA_CLIENT_ID:-}
       KEERA_OIDC_ENTRA_CLIENT_SECRET: ${KEERA_OIDC_ENTRA_CLIENT_SECRET:-}
       KEERA_OIDC_ENTRA_LABEL: ${KEERA_OIDC_ENTRA_LABEL:-}
+      KEERA_OIDC_ENTRA_DEFAULT_ROLE: ${KEERA_OIDC_ENTRA_DEFAULT_ROLE:-}
+      KEERA_OIDC_ENTRA_SCOPES: ${KEERA_OIDC_ENTRA_SCOPES:-}
       KEERA_OIDC_ENTRA_GROUPS_CLAIM: ${KEERA_OIDC_ENTRA_GROUPS_CLAIM:-}
-      KEERA_OIDC_ENTRA_ADMIN_GROUPS: ${KEERA_OIDC_ENTRA_ADMIN_GROUPS:-}
-      KEERA_OIDC_ENTRA_OPERATOR_GROUPS: ${KEERA_OIDC_ENTRA_OPERATOR_GROUPS:-}
-      KEERA_OIDC_ENTRA_DOMAINS: ${KEERA_OIDC_ENTRA_DOMAINS:-}
-      # Lets a sign-in take over a person already bound to another provider's
-      # subject. Off unless you are moving an organisation between providers.
-      KEERA_OIDC_ADOPT_BY_EMAIL: ${KEERA_OIDC_ADOPT_BY_EMAIL:-}
       # Setting this hands the administrator role to the directory for the
       # whole gateway, and the panel stops offering to change roles. Unset,
       # administrators are made with `keera user role`. See docs/sso.md.
-      KEERA_OIDC_ADMIN_GROUPS: ${KEERA_OIDC_ADMIN_GROUPS:-}
-      KEERA_OIDC_OPERATOR_GROUPS: ${KEERA_OIDC_OPERATOR_GROUPS:-}
-      # Where the groups claim lives, and what a person who matches nothing
-      # gets. Both matter most on a provider that issues no groups at all -
-      # Google is one - where the default role is the only role most people
-      # will ever have.
-      KEERA_OIDC_GROUPS_CLAIM: ${KEERA_OIDC_GROUPS_CLAIM:-}
-      KEERA_OIDC_DEFAULT_ROLE: ${KEERA_OIDC_DEFAULT_ROLE:-}
-      KEERA_OIDC_SCOPES: ${KEERA_OIDC_SCOPES:-}
+      KEERA_OIDC_ENTRA_ADMIN_GROUPS: ${KEERA_OIDC_ENTRA_ADMIN_GROUPS:-}
+      KEERA_OIDC_ENTRA_OPERATOR_GROUPS: ${KEERA_OIDC_ENTRA_OPERATOR_GROUPS:-}
+      KEERA_OIDC_ENTRA_DOMAINS: ${KEERA_OIDC_ENTRA_DOMAINS:-}
       KEERA_OPERATORS: ${KEERA_OPERATORS:-}
       # The gateway as a browser sees it. It is also what the panel's "Connect
       # a client" page tells a developer to point their editor at, with /api on
       # the end. Empty leaves both to the Host header.
       KEERA_PUBLIC_URL: ${KEERA_PUBLIC_URL:-}
     healthcheck:
-      # A scratch image has no shell and no curl, so the binary checks itself.
-      test: ["CMD", "/keera-gateway", "version"]
+      # A scratch image has no shell and no curl, so the binary asks the
+      # running server's /readyz itself.
+      test: ["CMD", "/keera-gateway", "health"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -114,26 +108,71 @@ services:
       keera-db:
         condition: service_healthy
 
+  # The inference backend: llama.cpp on CPU, so this file runs on a laptop
+  # with no GPU. compose.gpu.yaml replaces it with vLLM on a GPU host.
+  #
+  # TOOL CALLING DOES NOT WORK ON THIS BACKEND, as measured on image build
+  # b10853-9dcf84e5a in September 2026: nine attempts across Qwen2.5-Coder-1.5B
+  # and 7B GGUFs produced zero OpenAI-shaped `tool_calls`. Every one came back
+  # as prose in `content` - the ToolCallAsText failure internal/gateway/probe.go
+  # names. See compose/README.md. So this is for exercising the gateway - keys,
+  # budgets, streaming, usage accounting, the panel - and not for demonstrating
+  # a coding agent. Re-check with `keera model check keera-speed` on a newer
+  # build.
   keera-engine:
-    image: ${KEERA_ENGINE_IMAGE:-docker.io/vllm/vllm-openai-cpu:latest-x86_64}
+    image: ${KEERA_LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}
     restart: unless-stopped
+    # The image's entrypoint is /app/llama-server, so this is arguments only.
     command:
-      - ${KEERA_MODEL:-Qwen/Qwen2.5-Coder-1.5B-Instruct}
-      - --served-model-name
-      # This must match backend_model in models.yaml. It is the only name the
-      # gateway knows the backend by; the alias clients use is separate.
+      # -hf downloads from Hugging Face on first start and caches it. The tag
+      # after the colon picks the quantisation; Q4_K_M is what llama.cpp would
+      # default to anyway, and is named so the file states what it runs.
+      - -hf
+      - ${KEERA_LLAMA_MODEL:-Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF:Q4_K_M}
+      # llama.cpp's equivalent of vLLM's --served-model-name: the id it reports
+      # on /v1/models and in every response. It has to match backend_model in
+      # models.yaml, and that it can is why this swap needs no catalogue edit.
+      - --alias
       - keera-speed
-      - --gpu-memory-utilization
-      - "0.4" # on CPU this is the fraction of system RAM
-      - --max-model-len
+      # llama.cpp defaults to 8080. The catalogue and the healthcheck both say
+      # 8000, and so does vLLM on the GPU tier.
+      - --port
+      - "8000"
+      # Kept in step with max_context in models.yaml: the gateway refuses
+      # anything larger (`fits` in internal/gateway/window.go) before it reaches the
+      # backend, so a mismatch here is invisible until a long prompt is refused.
+      - -c
       - "16384"
-      - --enable-auto-tool-choice
-      - --tool-call-parser
-      - hermes
+      # One slot, so the whole unified KV pool is available to a single request
+      # - which is what a one-developer demo wants. A second request queues
+      # rather than halving the window.
+      - -np
+      - "1"
+      # Without this llama.cpp answers any request carrying tools with "tools
+      # param requires --jinja flag" and a 500. It is the default in recent
+      # builds and is passed anyway, because it is the flag that decides whether
+      # coding agents work at all. Some chat templates also fail to render under
+      # it, so confirm with `keera model check keera-speed` rather than by eye.
+      - --jinja
+      # llama.cpp serves a chat UI on /. Port 8000 is not published so it is
+      # unreachable regardless, but the backend of a gateway that owns
+      # authentication should not also be a second, unauthenticated front end.
+      - --no-webui
+    environment:
+      # Where -hf puts what it downloads. Without it the weights land on the
+      # container filesystem and are fetched again on every recreate.
+      LLAMA_CACHE: /models
+      # Every flag has a LLAMA_ARG_* form. The image already presets this one,
+      # and passing --host as well makes llama.cpp log that the variable "will
+      # be overwritten by command line argument" on every start - so say it
+      # here, where it is still explicit and does not fight the image.
+      LLAMA_ARG_HOST: 0.0.0.0
     volumes:
-      - hf-cache:/root/.cache/huggingface
-    shm_size: ${KEERA_SHM_SIZE:-2gb}
+      - llama-cache:/models
     healthcheck:
+      # llama.cpp and vLLM both answer /health on 8000, so one check fits both
+      # tiers. compose.gpu.yaml cannot replace `test`: podman-compose 1.6
+      # appends an overridden `test` to the one it replaces and runs neither.
       test:
         - CMD
         - python3
@@ -142,7 +181,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 6
-      start_period: 600s
+      start_period: 120s
 
   keera-db:
     image: docker.io/library/postgres:latest
@@ -160,5 +199,5 @@ services:
       retries: 10
 
 volumes:
-  hf-cache:
+  llama-cache:
   pgdata:

@@ -1,8 +1,8 @@
 // What a status meant, in the words of whoever has to act on it.
 //
-// This lives on its own because two screens read the same event log and have to
-// call the same thing by the same name. The failure log says "Budget spent" for
-// a 402; a team's own request log showing "402" next to it, or worse a
+// This lives on its own because several screens read the same event log and
+// have to call the same thing by the same name. The request log says "Budget
+// spent" for a 402; a team's own screen showing "402" next to it, or worse a
 // different sentence, would be the same row described two ways in one panel.
 //
 // The number is the record. These are the sentence next to it.
@@ -13,7 +13,7 @@ const STATUS = {
     "Budget spent",
     "A budget that covers the key is used up for this period.",
   ],
-  403: ["Not permitted", "A guardrail refused the key."],
+  403: ["Refused by a filter", "A filter on the key refused the request."],
   404: [
     "Model unavailable",
     "The key may not use this model, or no backend serves it.",
@@ -49,15 +49,13 @@ export function statusLabel(status) {
   return status < 400 ? "Served" : statusMeaning(status)[0];
 }
 
-export function statusTone(status) {
+function statusTone(status) {
   if (status >= 500) return "bad";
   if (status >= 400) return "warn";
   return "";
 }
 
-/** outcomeOf is what happened to one row, as the request log groups them. A
- *  served request is the case the failure log has no name for, because it never
- *  holds one. */
+/** outcomeOf is what happened to one row, as the request log groups them. */
 export function outcomeOf(q) {
   if (q.status >= 500) return "failed";
   if (q.status >= 400) return "refused";

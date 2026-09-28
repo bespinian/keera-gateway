@@ -70,8 +70,8 @@ func (s *Store) PutPolicy(ctx context.Context, scopeType policy.ScopeType, scope
 	return err
 }
 
-// FilterScope is one guardrail that names a filter or a router.
-type FilterScope struct {
+// GuardrailRef is one guardrail that names a filter, a router or an MCP server.
+type GuardrailRef struct {
 	ScopeType policy.ScopeType `json:"scope_type"`
 	ScopeID   string           `json:"scope_id"`
 	// Name is what that scope is called, so a refusal can name the team rather
@@ -79,26 +79,37 @@ type FilterScope struct {
 	Name string `json:"name"`
 }
 
-// scopesNaming lists the guardrails inside one organisation whose column
-// contains alias. column is always a constant from this package.
-func (s *Store) scopesNaming(ctx context.Context, column, orgID, alias string) ([]FilterScope, error) {
+// scopesNaming lists the guardrails inside one organisation that name alias.
+// match is the SQL condition, with alias as $2; it is always a constant from
+// this package.
+func (s *Store) scopesNaming(ctx context.Context, match, orgID, alias string) ([]GuardrailRef, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT p.scope_type, p.scope_id, COALESCE(o.name, t.name, k.alias, p.scope_id)
 		FROM guardrails p
 		LEFT JOIN orgs     o ON p.scope_type = 'org'  AND o.id = p.scope_id AND o.id = $1
 		LEFT JOIN teams    t ON p.scope_type = 'team' AND t.id = p.scope_id AND t.org_id = $1
 		LEFT JOIN api_keys k ON p.scope_type = 'key'  AND k.id = p.scope_id AND k.org_id = $1
-		WHERE $2 = ANY (p.`+column+`)
+		WHERE `+match+`
 		  AND (o.id IS NOT NULL OR t.id IS NOT NULL OR k.id IS NOT NULL)
 		ORDER BY p.scope_type, p.scope_id`, orgID, alias)
 	if err != nil {
 		return nil, err
 	}
-	return collect(rows, func(r row) (FilterScope, error) {
-		var fs FilterScope
+	return collect(rows, func(r row) (GuardrailRef, error) {
+		var fs GuardrailRef
 		err := r.Scan(&fs.ScopeType, &fs.ScopeID, &fs.Name)
 		return fs, err
 	})
+}
+
+// MCPServerUsers lists the guardrails inside one organisation whose tool
+// allow-list names an MCP server, for all its tools or one of them. It is read
+// before a deletion, as FilterUsers is: a guardrail naming a missing server
+// cannot be saved again.
+func (s *Store) MCPServerUsers(ctx context.Context, orgID, alias string) ([]GuardrailRef, error) {
+	return s.scopesNaming(ctx,
+		"EXISTS (SELECT 1 FROM unnest(p.allowed_tools) e WHERE split_part(e, '/', 1) = $2)",
+		orgID, alias)
 }
 
 const filterColumns = `SELECT org_id, alias, model, mode, shadow, prompt, rules, description,
@@ -147,6 +158,7 @@ func (s *Store) Filter(ctx context.Context, orgID, alias string) (policy.Filter,
 
 // UpsertFilter creates or replaces one filter.
 func (s *Store) UpsertFilter(ctx context.Context, f policy.Filter) (policy.Filter, error) {
+	// The one place a missing mode gets its default.
 	if f.Mode == "" {
 		f.Mode = policy.FilterModeRewrite
 	}
@@ -182,6 +194,6 @@ func (s *Store) DeleteFilter(ctx context.Context, orgID, alias string) error {
 //
 // It is read before a deletion. A guardrail that names a missing filter
 // refuses every request, so removing a filter in use would break a team.
-func (s *Store) FilterUsers(ctx context.Context, orgID, alias string) ([]FilterScope, error) {
-	return s.scopesNaming(ctx, "filters", orgID, alias)
+func (s *Store) FilterUsers(ctx context.Context, orgID, alias string) ([]GuardrailRef, error) {
+	return s.scopesNaming(ctx, "$2 = ANY (p.filters)", orgID, alias)
 }

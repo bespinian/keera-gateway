@@ -27,7 +27,7 @@ func TestTitleIsTheLabelAModelPickerShows(t *testing.T) {
 // A trailing slash on the base URL is what a person correcting the field in the
 // panel leaves behind, and it would otherwise reach a config as "…//v1".
 func TestRenderTrimsATrailingSlashFromTheBase(t *testing.T) {
-	c, _ := Lookup("openai")
+	c, _ := Find(Clients(), "openai")
 	got := c.Render("https://keera.example.ch///", "keera-code", 0)
 	if !strings.Contains(got, "export OPENAI_BASE_URL=https://keera.example.ch/v1") {
 		t.Errorf("base URL not normalised:\n%s", got)
@@ -42,7 +42,7 @@ func TestNoTemplateLeavesAPlaceholderBehind(t *testing.T) {
 		for _, text := range map[string]string{
 			"config": c.Render("https://keera.example.ch", "keera-code", 0),
 			"run":    c.RunText("keera-code"),
-			"note":   c.Note,
+			"note":   c.NoteText(),
 		} {
 			if strings.Contains(text, "{{") {
 				t.Errorf("%s left a placeholder in:\n%s", c.Key, text)
@@ -80,7 +80,7 @@ func TestEveryClientIsCompleteEnoughToRender(t *testing.T) {
 	}
 	// The OpenAI-compatible entry is the one that answers for a client nobody
 	// wrote an entry for, so its absence is a regression rather than a choice.
-	if _, found := Lookup("openai"); !found {
+	if _, found := Find(Clients(), "openai"); !found {
 		t.Error("the catalogue has no OpenAI-compatible entry")
 	}
 }
@@ -116,7 +116,7 @@ func TestConfigsReadTheKeyFromTheEnvironment(t *testing.T) {
 // environment says nothing rather than guessing at a shell profile.
 func TestAFileClientNamesItsFile(t *testing.T) {
 	for _, key := range []string{"opencode", "pi"} {
-		c, found := Lookup(key)
+		c, found := Find(Clients(), key)
 		if !found {
 			t.Fatalf("no client %s", key)
 		}
@@ -125,7 +125,7 @@ func TestAFileClientNamesItsFile(t *testing.T) {
 		}
 	}
 	for _, key := range []string{"claude-code", "openai"} {
-		c, _ := Lookup(key)
+		c, _ := Find(Clients(), key)
 		if c.Path != "" {
 			t.Errorf("%s names the file %q, but it is configured by environment variables",
 				key, c.Path)
@@ -137,7 +137,7 @@ func TestAFileClientNamesItsFile(t *testing.T) {
 // than its /v1: it appends the path itself, and a base carrying /v1 sends it to
 // /v1/v1/messages.
 func TestClaudeCodeTakesTheGatewayRoot(t *testing.T) {
-	c, _ := Lookup("claude-code")
+	c, _ := Find(Clients(), "claude-code")
 	rendered := c.Render("https://keera.example.ch", "keera-code", 0)
 	if !strings.Contains(rendered, "export ANTHROPIC_BASE_URL=https://keera.example.ch\n") {
 		t.Errorf("the base URL is not the gateway root:\n%s", rendered)
@@ -152,7 +152,7 @@ func TestFileClientsStateTheSameWindow(t *testing.T) {
 	const maxContext = 200_000
 	window, output := Limits(maxContext)
 
-	opencode, _ := Lookup("opencode")
+	opencode, _ := Find(Clients(), "opencode")
 	var oc struct {
 		Provider struct {
 			Keera struct {
@@ -181,7 +181,7 @@ func TestFileClientsStateTheSameWindow(t *testing.T) {
 		t.Errorf("opencode declares output %d, want %d", model.Limit.Output, output)
 	}
 
-	pi, _ := Lookup("pi")
+	pi, _ := Find(Clients(), "pi")
 	var p struct {
 		Providers struct {
 			Keera struct {

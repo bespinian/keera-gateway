@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -72,16 +73,20 @@ func (k Kind) Valid() bool {
 	return k == KindChat || k == KindCompletion || k == KindEmbedding
 }
 
-// Model is one entry in the model catalogue. Clients only ever name the Alias,
+// Model is one of an organisation's models. Clients only ever name the Alias,
 // so the model behind it can change without any client changing.
 type Model struct {
-	Alias        string   `json:"alias"`
+	Alias string `json:"alias"`
+	// OrgID is the organisation the model belongs to. Only that organisation
+	// can call it, so two organisations can each have a 'fast'.
+	OrgID        string   `json:"org_id"`
 	Kind         Kind     `json:"kind"`
 	Backends     []string `json:"backends"`
 	BackendModel string   `json:"backend_model"`
 	// Provider is the hosted provider this entry was declared from, or empty
-	// for a model you serve yourself. The inference path never reads it; it
-	// lets an edit screen show the provider's values.
+	// for a model you serve yourself. The gateway reads it to send a client
+	// that provider's own API untranslated, and to fix the few fields OpenAI
+	// refuses. An edit screen reads it to show the provider's values.
 	Provider string `json:"provider,omitempty"`
 	// Description says what the model is for. Clients see it on /v1/models,
 	// and a Router reads it when choosing.
@@ -106,53 +111,25 @@ type Model struct {
 	// such as ch or usa, or onprem for an inference plane of the deployment's
 	// own.
 	Location string `json:"location"`
-	// APIKeyEnv names the environment variable holding the backend's
-	// credential. The secret stays out of the catalogue, so it can come from a
-	// Kubernetes Secret or a vault, and several models can share it.
-	APIKeyEnv string `json:"api_key_env,omitempty"`
 	// APIKeyCiphertext is a credential set through the control plane, sealed
 	// with a key only the gateway's environment holds.
 	APIKeyCiphertext []byte `json:"-"`
-	// APIKey is that credential decrypted when the catalogue loads. It lives
+	// APIKey is that credential decrypted when the registry loads it. It lives
 	// only in memory.
 	APIKey string `json:"-"`
 	// HasAPIKey tells the control panel a credential is stored, and nothing
 	// more about it.
 	HasAPIKey bool `json:"has_api_key,omitempty"`
 	Enabled   bool `json:"enabled"`
-	// Managed means the catalogue file declares this model. Only applying the
-	// file may change it, since the next restart would undo any other edit.
-	// It is derived from what is stored, never set by a caller.
-	Managed bool `json:"managed"`
 }
 
-// SameDeclaration reports whether two entries match in every field a catalogue
-// file can state. The credential is not one of them, so setting one is the only
-// change a file-managed model accepts.
-func (m Model) SameDeclaration(other Model) bool {
-	return m.Alias == other.Alias && m.Kind == other.Kind &&
-		slices.Equal(m.Backends, other.Backends) && m.BackendModel == other.BackendModel &&
-		m.Provider == other.Provider &&
-		m.InputMicrosPerMTok == other.InputMicrosPerMTok &&
-		m.OutputMicrosPerMTok == other.OutputMicrosPerMTok &&
-		m.CachedInputMicrosPerMTok == other.CachedInputMicrosPerMTok &&
-		m.MaxContext == other.MaxContext && m.APIKeyEnv == other.APIKeyEnv &&
-		m.Description == other.Description && m.Enabled == other.Enabled &&
-		m.ReleaseDate == other.ReleaseDate && m.Location == other.Location
-}
+// Key names the model across every tenant: its organisation and its alias.
+// State kept per model, such as what a backend has been measured at, is kept
+// under it.
+func (m Model) Key() string { return ModelKey(m.OrgID, m.Alias) }
 
-// Credential returns the secret to present to this backend. A key typed into
-// the control panel wins over one from the environment, because the operator
-// meant it to be used.
-func (m Model) Credential(fromEnv func(string) string) string {
-	if m.APIKey != "" {
-		return m.APIKey
-	}
-	if m.APIKeyEnv != "" && fromEnv != nil {
-		return fromEnv(m.APIKeyEnv)
-	}
-	return ""
-}
+// ModelKey is Key for a model known only by its organisation and alias.
+func ModelKey(orgID, alias string) string { return orgID + "/" + alias }
 
 // Cost returns what the given token counts cost, in micro-units.
 // cachedInputTokens is part of inputTokens, not added to it: that is how
@@ -172,10 +149,8 @@ func (m Model) Cost(inputTokens, cachedInputTokens, outputTokens int) int64 {
 // cachedInputMicros is the rate for one cached input token: the stated rate, or
 // the full input rate when none is stated.
 //
-// Here zero means "not stated", not "free". Models declared before this field
-// existed have a zero in it, and treating that as free would suddenly drop most
-// of every prompt out of every budget. The input rate errs high, as the gateway
-// did before.
+// Here zero means "not stated", not "free": a forgotten price should err high
+// rather than drop most of every prompt out of every budget.
 func (m Model) cachedInputMicros() int64 {
 	if m.CachedInputMicrosPerMTok == 0 {
 		return m.InputMicrosPerMTok
@@ -236,18 +211,20 @@ const (
 	FilterModePattern FilterMode = "pattern"
 )
 
-// FilterModes is every mode a filter may run in.
-var FilterModes = []FilterMode{FilterModeRewrite, FilterModeGate, FilterModePattern}
+// filterModes is every mode a filter may run in.
+var filterModes = []FilterMode{FilterModeRewrite, FilterModeGate, FilterModePattern}
 
-// ValidFilterMode reports whether s names a mode. The empty string does: it
-// means rewrite.
-func ValidFilterMode(s FilterMode) bool {
-	return s == "" || slices.Contains(FilterModes, s)
-}
+// Valid reports whether m names a mode. The empty string does: it means
+// rewrite.
+func (m FilterMode) Valid() bool { return m == "" || slices.Contains(filterModes, m) }
+
+// Gates reports whether this filter only judges the request, letting it go
+// untouched or refusing it.
+func (m FilterMode) Gates() bool { return m == FilterModeGate }
 
 // Rewrites reports whether this filter edits the request rather than only
 // judging it. A pattern filter counts, whatever its rules say.
-func (m FilterMode) Rewrites() bool { return m != FilterModeGate }
+func (m FilterMode) Rewrites() bool { return !m.Gates() }
 
 // UsesModel reports whether this filter runs a model. Only a pattern filter
 // does not.
@@ -423,17 +400,15 @@ const (
 	RouterModeSize RouterMode = "size"
 )
 
-// RouterModes is every mode a router may run in.
-var RouterModes = []RouterMode{
+// routerModes is every mode a router may run in.
+var routerModes = []RouterMode{
 	RouterModeInstruction, RouterModeFallback, RouterModeLatency, RouterModeLeastBusy,
 	RouterModeSize,
 }
 
-// ValidRouterMode reports whether s names a mode. The empty string does: it
-// means instruction.
-func ValidRouterMode(s RouterMode) bool {
-	return s == "" || slices.Contains(RouterModes, s)
-}
+// Valid reports whether m names a mode. The empty string does: it means
+// instruction.
+func (m RouterMode) Valid() bool { return m == "" || slices.Contains(routerModes, m) }
 
 // Decides reports whether this mode asks a model to choose. Only an
 // instruction router does, and only it has Model, Prompt and Fallback.
@@ -488,14 +463,10 @@ const maxAliasLen = 64
 // between too many picks poorly.
 const MaxDestinations = 16
 
-// ValidFilterAlias reports whether s is an alias a filter may have.
-func ValidFilterAlias(s string) bool { return validName(s, maxAliasLen) }
-
-// ValidRouterAlias reports whether s is an alias a router may have. It has a
-// model alias's shape, because clients name both in the same field.
-func ValidRouterAlias(s string) bool { return validName(s, maxAliasLen) }
-
-// ValidAlias reports whether s is a name a model may be called by.
+// ValidAlias reports whether s can name a model, a router, a filter, an MCP
+// server or a sandbox class. They share one shape: clients type models and
+// routers into the same field, an MCP server's alias is part of a URL, and a
+// class is written unquoted into command lines.
 func ValidAlias(s string) bool { return validName(s, maxAliasLen) }
 
 // LocationOnPrem is the location of a model the deployment serves itself.
@@ -531,8 +502,11 @@ func validName(s string, maxLen int) bool {
 
 // Limits is one row of the guardrails table. A nil field means "inherit from
 // the level above".
+//
+// The allow-lists have no omitempty: an empty list allows nothing, and JSON
+// must keep it apart from null, which inherits.
 type Limits struct {
-	AllowedModels []string `json:"allowed_models,omitempty"`
+	AllowedModels []string `json:"allowed_models"`
 	// MaxOutputTokens caps what one request may generate. The gateway cannot
 	// count prompt tokens without the tokeniser, but it can cap the output.
 	MaxOutputTokens *int    `json:"max_output_tokens,omitempty"`
@@ -550,7 +524,7 @@ type Limits struct {
 	// AllowedTools is the MCP tools this scope may call through the gateway:
 	// a server's alias for all of its tools, or 'alias/tool' for one. Nil
 	// inherits; see Resolved.AllowsTool.
-	AllowedTools []string `json:"allowed_tools,omitempty"`
+	AllowedTools []string `json:"allowed_tools"`
 	// BlockHostedTools takes out of a request the tools a hosted provider runs
 	// on its own servers, such as web search or a remote MCP server, which
 	// reach the outside world where no guardrail can see. Once a level sets
@@ -560,6 +534,10 @@ type Limits struct {
 	// SQL and on the command line.
 	SandboxLimits
 }
+
+// IsZero reports whether l sets nothing at all. It compares with the zero
+// value, so a field added later is counted without changing this.
+func (l Limits) IsZero() bool { return reflect.DeepEqual(l, Limits{}) }
 
 // Scope is one level of the hierarchy with its own limits, carried on a
 // resolved key so the gateway can enforce each level separately.
@@ -585,7 +563,7 @@ type Key struct {
 // never walks the hierarchy on the hot path.
 type Resolved struct {
 	Key Key
-	// AllowedModels nil means every enabled model in the catalogue.
+	// AllowedModels nil means every enabled model of the organisation.
 	AllowedModels   []string
 	MaxOutputTokens int
 	// SystemPrompt is every level's prompt joined, outermost first. Empty
@@ -595,7 +573,7 @@ type Resolved struct {
 	// repeats. They are aliases so a filter's definition is read per request
 	// rather than frozen into a cached key.
 	Filters []string
-	// AllowedTools nil means every tool of every MCP server in the catalogue.
+	// AllowedTools nil means every tool of every MCP server of the organisation.
 	AllowedTools []string
 	// BlockHostedTools says a request's hosted tools are taken out.
 	BlockHostedTools bool
@@ -614,11 +592,14 @@ func (r *Resolved) AllowsModel(alias string) bool {
 // Resolve combines the guardrails of a key's org, team and the key itself.
 //
 // A level can narrow what it inherits but never widen it: allow-lists
-// intersect and ceilings take the minimum. Two exceptions:
+// intersect and ceilings take the minimum. The exceptions:
 //
-//   - Budgets are kept per level and checked separately. An org cap of 10,000
-//     and a team cap of 1,000 must both hold.
+//   - Budgets and rate limits are kept per level and checked separately. An
+//     org cap of 10,000 and a team cap of 1,000 must both hold.
 //   - System prompts concatenate outermost first, because text does not narrow.
+//   - Filters add up level by level, and hosted tools stay blocked once any
+//     level blocks them.
+//   - Only the organisation grants repositories; the levels below narrow them.
 func Resolve(key Key, org, team, own *Limits) *Resolved {
 	r := &Resolved{Key: key}
 
@@ -636,7 +617,7 @@ func Resolve(key Key, org, team, own *Limits) *Resolved {
 	for _, lv := range levels {
 		s := Scope{Type: lv.typ, ID: lv.id, Period: PeriodMonth}
 		if lv.lim != nil {
-			r.narrow(lv.lim)
+			r.narrow(lv.lim, lv.typ == ScopeOrg)
 			s.RPM = deref(lv.lim.RPM)
 			s.TPM = deref(lv.lim.TPM)
 			s.BudgetMicros = deref(lv.lim.BudgetMicros)
@@ -649,15 +630,16 @@ func Resolve(key Key, org, team, own *Limits) *Resolved {
 	return r
 }
 
-// narrow applies one level's limits to what the levels above it allowed.
-func (r *Resolved) narrow(lim *Limits) {
+// narrow applies one level's limits to what the levels above it allowed. top
+// is the organisation's level, the only one that grants repositories.
+func (r *Resolved) narrow(lim *Limits, top bool) {
 	r.AllowedModels = intersect(r.AllowedModels, lim.AllowedModels)
 	r.MaxOutputTokens = minPositive(r.MaxOutputTokens, deref(lim.MaxOutputTokens))
 	r.SystemPrompt = joinPrompts(r.SystemPrompt, deref(lim.SystemPrompt))
 	r.Filters = appendFilters(r.Filters, lim.Filters)
 	r.AllowedTools = intersectTools(r.AllowedTools, lim.AllowedTools)
 	r.BlockHostedTools = r.BlockHostedTools || deref(lim.BlockHostedTools)
-	r.Sandbox.narrow(lim)
+	r.Sandbox.narrow(lim, top)
 }
 
 // ResolveOrg combines an organisation's limits for a caller without an API
@@ -798,9 +780,10 @@ type Source interface {
 	// Resolve maps a presented key to its combined policy. It runs on every
 	// inference request, so implementations should cache.
 	Resolve(ctx context.Context, presented string) (*Resolved, error)
-	Model(alias string) (Model, bool)
-	// Models lists the catalogue, for /v1/models.
-	Models() []Model
+	// Model looks up one of an organisation's models.
+	Model(orgID, alias string) (Model, bool)
+	// Models lists an organisation's models, for /v1/models.
+	Models(orgID string) []Model
 	// Filter looks up an organisation's filter. An unknown alias refuses the
 	// request rather than skipping the filter.
 	Filter(orgID, alias string) (Filter, bool)
@@ -810,6 +793,6 @@ type Source interface {
 	Router(orgID, alias string) (Router, bool)
 	// Routers lists an organisation's routers, for /v1/models.
 	Routers(orgID string) []Router
-	// MCPServer looks up an MCP server in the catalogue.
-	MCPServer(alias string) (MCPServer, bool)
+	// MCPServer looks up one of an organisation's MCP servers.
+	MCPServer(orgID, alias string) (MCPServer, bool)
 }

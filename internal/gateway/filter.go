@@ -31,12 +31,13 @@ import (
 // An enforcing filter fails closed: if it cannot run, the request is refused,
 // because a control you can switch off by breaking it is not a control. It
 // runs before the system prompt is added, so it only sees what the client
-// sent. And it costs a second generation on every request it covers.
+// sent. A model filter costs a second generation on every request it covers;
+// a pattern filter costs nothing.
 //
 // A filter in shadow enforces nothing. It runs and is recorded, and the
 // request goes on unchanged, even when the filter could not run. It is for
-// trying out an instruction on real traffic first. The generation still
-// happens, so shadow is not cheaper.
+// trying out an instruction on real traffic first. It still runs, so shadow is
+// not cheaper.
 //
 // Every run is recorded as its own row (what it did, how long, what it cost),
 // but never the text. See internal/store/filterruns.go.
@@ -56,10 +57,6 @@ const (
 	// sentence, however long the conversation. That fixed cost is why gates
 	// exist.
 	gateOutputTokens = 192
-	// maxRefusalReasonBytes bounds a refusal's sentence. It is written by a
-	// small model that just read the client's prompt, and it ends up in an
-	// error body and a usage row, so a prompt must not be able to make it long.
-	maxRefusalReasonBytes = 240
 	// bytesPerToken sizes a filter's output allowance and checks a request
 	// against a model's context. It is pessimistic on purpose, since both uses
 	// want to over-estimate.
@@ -145,20 +142,15 @@ type filterRun struct {
 //
 // It is called on every outcome, failures included: a filter whose model is
 // gone refuses everything, and that has to be counted somewhere.
-func (s *Server) noteFilter(run *filterRun, f policy.Filter, orgID string,
-	outcome store.FilterOutcome, took time.Duration, micros int64, segments, changed int,
+func (s *Server) noteFilter(run *filterRun, f policy.Filter, outcome store.FilterOutcome, took time.Duration, micros int64, segments, changed int,
 	tr *trace,
 ) {
-	mode := f.Mode
-	if mode == "" {
-		mode = policy.FilterModeRewrite
-	}
 	run.runs = append(run.runs, store.FilterRun{
-		Filter: f.Alias, Mode: mode, Shadow: f.Shadow, Outcome: outcome,
+		Filter: f.Alias, Mode: f.Mode, Shadow: f.Shadow, Outcome: outcome,
 		LatencyMS: took.Milliseconds(), CostMicros: micros,
 		Segments: segments, Changed: changed,
 	})
-	s.metrics.FilterRun(f.Alias, orgID, string(outcome), f.Shadow, took.Seconds(), micros)
+	s.metrics.FilterRun(f.Alias, f.OrgID, string(outcome), f.Shadow, took.Seconds(), micros)
 	// Drawn even when it took no time: an empty "could not run" bar shows
 	// where a refusal came from.
 	tr.took(store.SpanFilter, f.Alias, took, filterNote(f, outcome))
@@ -214,13 +206,8 @@ func (s *Server) applyFilters(ctx context.Context, res *policy.Resolved, b *body
 	// redactions, and a gate judges what would actually be sent.
 	doc, err := extract(b)
 	if err != nil {
-		return run, &refusal{
-			status: http.StatusBadRequest,
-			typ:    "invalid_request_error", code: "invalid_body",
-			msg: "a guardrail on this key filters every request before it is " +
-				"forwarded, and this request could not be read: " + err.Error(),
-			advise: true,
-		}
+		return run, unreadableBody("a guardrail on this key filters every request before it is "+
+			"forwarded", err)
 	}
 	texts := doc.texts()
 	if len(texts) == 0 {
@@ -244,13 +231,7 @@ func (s *Server) applyFilters(ctx context.Context, res *policy.Resolved, b *body
 		return run, nil
 	}
 	if err := doc.apply(b, texts); err != nil {
-		return run, &refusal{
-			status: http.StatusBadGateway,
-			typ:    "server_error", code: "filter_failed",
-			msg: "the filtered request could not be rebuilt, so nothing was sent " +
-				"to the model: " + err.Error(),
-			advise: true,
-		}
+		return run, notRebuilt(err)
 	}
 	run.rewrote = true
 	return run, nil
@@ -278,7 +259,7 @@ func (s *Server) chainFilter(ctx context.Context, run *filterRun, orgID, alias s
 	if broken != "" {
 		// Recorded for shadow filters too: a broken shadow filter measures
 		// nothing, and nothing else would show it.
-		s.noteFilter(run, f, orgID, store.FilterError, 0, 0, len(texts), 0, tr)
+		s.noteFilter(run, f, store.FilterError, 0, 0, len(texts), 0, tr)
 		if f.Enforces() {
 			return nil, s.filterUnavailable(alias, broken), true
 		}
@@ -299,13 +280,13 @@ func (s *Server) chainFilter(ctx context.Context, run *filterRun, orgID, alias s
 		// client retries the second forever.
 		var refused *filterRefusedError
 		if errors.As(err, &refused) {
-			s.noteFilter(run, f, orgID, store.FilterRefuse, took, cost.micros, len(texts), 0, tr)
+			s.noteFilter(run, f, store.FilterRefuse, took, cost.micros, len(texts), 0, tr)
 			if !f.Enforces() {
 				return nil, nil, false
 			}
 			return nil, s.filterRefused(f, refused.reason), true
 		}
-		s.noteFilter(run, f, orgID, store.FilterError, took, cost.micros, len(texts), 0, tr)
+		s.noteFilter(run, f, store.FilterError, took, cost.micros, len(texts), 0, tr)
 		// A shadow filter that cannot run lets the request through: a
 		// measurement must never take a department offline.
 		if !f.Enforces() {
@@ -319,7 +300,7 @@ func (s *Server) chainFilter(ctx context.Context, run *filterRun, orgID, alias s
 	if changed > 0 {
 		outcome = store.FilterRewrite
 	}
-	s.noteFilter(run, f, orgID, outcome, took, cost.micros, len(texts), changed, tr)
+	s.noteFilter(run, f, outcome, took, cost.micros, len(texts), changed, tr)
 	if !f.Enforces() {
 		// A shadow rewrite did not happen, so later filters see the old text.
 		return nil, nil, false
@@ -334,16 +315,9 @@ func (s *Server) filterModel(f policy.Filter) (policy.Model, string) {
 	if !f.UsesModel() {
 		return policy.Model{}, ""
 	}
-	m, ok := s.src.Model(f.Model)
-	switch {
-	case !ok:
-		return m, "it runs on the model '" + f.Model + "', which the catalogue no longer holds"
-	case !m.Enabled:
-		return m, "the model it runs on, '" + f.Model + "', is disabled"
-	case m.Kind != policy.KindChat:
-		return m, "the model it runs on, '" + f.Model + "', is not a chat model"
-	case len(m.Backends) == 0:
-		return m, "the model it runs on, '" + f.Model + "', has no backend"
+	m, ok := s.src.Model(f.OrgID, f.Model)
+	if why := chatProblem(m, ok); why != "" {
+		return m, "the model it runs on, '" + f.Model + "', " + why
 	}
 	return m, ""
 }
@@ -373,7 +347,7 @@ func filterFailed(f policy.Filter, err error) *refusal {
 	}
 	what := "could not rewrite this request"
 	switch {
-	case !f.Mode.Rewrites():
+	case f.Mode.Gates():
 		what = "could not judge this request"
 	case !f.UsesModel():
 		// A pattern filter only fails on rules that do not compile: an
@@ -414,7 +388,7 @@ func (s *Server) filterRefused(f policy.Filter, reason string) *refusal {
 	msg := fmt.Sprintf("a guardrail on this key filters every request through %q "+
 		"before it is forwarded, and that filter refused this one", f.Alias)
 	switch {
-	case !f.Mode.Rewrites():
+	case f.Mode.Gates():
 		msg = fmt.Sprintf("a guardrail on this key checks every request against %q "+
 			"before it is forwarded, and it refused this one", f.Alias)
 	case !f.UsesModel():
@@ -471,7 +445,7 @@ func (s *Server) runFilter(ctx context.Context, f policy.Filter, m policy.Model,
 		return nil, filterCost{}, err
 	}
 
-	gate := !f.Mode.Rewrites()
+	gate := f.Mode.Gates()
 	protocol, outputTokens := rewriteProtocol, rewriteAllowance(input, texts)
 	if gate {
 		protocol, outputTokens = gateProtocol, gateOutputTokens
@@ -490,31 +464,19 @@ func (s *Server) runFilter(ctx context.Context, f policy.Filter, m policy.Model,
 
 	// A gate asks for logprobs: its first token is the verdict, whatever the
 	// model wraps it in. The reason after it is still read from the text.
-	payload, err := guardRequest(m, instruction, input, outputTokens, gate)
+	logprobs := gate && s.readsLogprobs(m)
+	raw, status, err := s.askFilter(ctx, m, instruction, input, outputTokens, logprobs)
+	if err == nil && logprobs && rejectsLogprobs(status) {
+		// As a router does: remember it, and ask again for the words only.
+		s.dropLogprobs(m)
+		raw, status, err = s.askFilter(ctx, m, instruction, input, outputTokens, false)
+	}
 	if err != nil {
 		return nil, filterCost{}, err
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, filterTimeout)
-	defer cancel()
-
-	resp, err := s.dispatch(ctx, m, "/chat/completions", payload)
-	if err != nil {
-		if ctx.Err() != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, filterCost{}, fmt.Errorf("the filter's model did not answer within %s",
-				filterTimeout)
-		}
-		return nil, filterCost{}, fmt.Errorf("the filter's model could not be reached: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxFilterResponseBytes))
-	if err != nil {
-		return nil, filterCost{}, fmt.Errorf("reading the filter's answer failed: %w", err)
-	}
-	if resp.StatusCode >= 300 {
+	if status >= 300 {
 		return nil, filterCost{}, errors.New("its model answered " +
-			upstreamComplaint(raw, resp.StatusCode))
+			upstreamComplaint(raw, status))
 	}
 
 	// The cost is read before the answer is judged: an unusable answer still
@@ -533,6 +495,44 @@ func (s *Server) runFilter(ctx context.Context, f policy.Filter, m policy.Model,
 		return nil, cost, err
 	}
 	return out, cost, nil
+}
+
+// askFilter sends a filter's model one request and reads back the whole answer,
+// whatever its status.
+func (s *Server) askFilter(ctx context.Context, m policy.Model, instruction string,
+	input []byte, outputTokens int, logprobs bool,
+) ([]byte, int, error) {
+	payload, err := guardRequest(m, instruction, input, outputTokens, logprobs)
+	if err != nil {
+		return nil, 0, err
+	}
+	return s.askOwnModel(ctx, m, payload, filterTimeout, maxFilterResponseBytes,
+		"the filter's model")
+}
+
+// askOwnModel sends the request a filter or a router puts to its own model,
+// and reads back the whole answer, whatever its status. subject names that
+// model in an error.
+func (s *Server) askOwnModel(ctx context.Context, m policy.Model, payload []byte,
+	timeout time.Duration, limit int64, subject string,
+) ([]byte, int, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	resp, err := s.dispatch(ctx, m, "/chat/completions", payload)
+	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, 0, fmt.Errorf("%s did not answer within %s", subject, timeout)
+		}
+		return nil, 0, fmt.Errorf("%s could not be reached: %w", subject, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, limit))
+	if err != nil {
+		return nil, 0, fmt.Errorf("reading the answer of %s failed: %w", subject, err)
+	}
+	return raw, resp.StatusCode, nil
 }
 
 // guardRequest builds the chat request a filter or a router sends its own
@@ -575,7 +575,7 @@ func rewriteAllowance(input []byte, texts []string) int {
 // A rewrite needs room for the request twice and a gate only once, which is
 // worth telling someone reading a 413.
 func filterTooLargeMessage(f policy.Filter, m policy.Model, inputTokens int) string {
-	if !f.Mode.Rewrites() {
+	if f.Mode.Gates() {
 		return fmt.Sprintf("this request is about %d tokens of text, and the gate %q has to "+
 			"read all of it through '%s', whose context is %d. Send less in one request, or "+
 			"give the gate a model with a larger context",

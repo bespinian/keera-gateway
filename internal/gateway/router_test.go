@@ -90,12 +90,12 @@ func routerHarness(t *testing.T, decide func(segments []string) string,
 	}
 	models := map[string]policy.Model{
 		"keera-small": {
-			Alias: "keera-small", Kind: policy.KindChat, BackendModel: "small-served",
+			OrgID: "org_1", Alias: "keera-small", Kind: policy.KindChat, BackendModel: "small-served",
 			Description:        "a fast local model for short edits",
 			InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 1_000_000, Enabled: true,
 		},
 		"keera-large": {
-			Alias: "keera-large", Kind: policy.KindChat, BackendModel: "large-served",
+			OrgID: "org_1", Alias: "keera-large", Kind: policy.KindChat, BackendModel: "large-served",
 			Description:        "a hosted model for work that needs reasoning",
 			InputMicrosPerMTok: 9_000_000, OutputMicrosPerMTok: 9_000_000, Enabled: true,
 		},
@@ -319,7 +319,7 @@ func TestRouterFallsBackWhenItsModelIsGone(t *testing.T) {
 	if ev.Alias != "keera-small" || ev.RouterOutcome != store.RouterFellBack {
 		t.Errorf("alias/outcome = %q/%q, want keera-small/fallback", ev.Alias, ev.RouterOutcome)
 	}
-	if !strings.Contains(ev.Error, "catalogue no longer holds") {
+	if !strings.Contains(ev.Error, "is not one of this organisation's models") {
 		t.Errorf("error = %q, want it to say why the decision could not be made", ev.Error)
 	}
 	if ev.RouterMS < 0 {
@@ -372,8 +372,8 @@ func TestRouterIsNotAModelOnTheEmbeddingSurface(t *testing.T) {
 	}
 }
 
-// The catalogue is shared by every tenant, so an alias must not be able to mean
-// something else in one organisation.
+// A model is looked up before a router, so a router cannot take over a
+// model's alias.
 func TestAModelAliasWinsOverARouterOfTheSameName(t *testing.T) {
 	rt := autoRouter()
 	rt.Alias = "keera-small"
@@ -564,15 +564,15 @@ func chainHarness(t *testing.T, rt policy.Router, down map[string]int) *harness 
 
 	models := map[string]policy.Model{
 		"keera-small": {
-			Alias: "keera-small", Kind: policy.KindChat, BackendModel: "small-served",
+			OrgID: "org_1", Alias: "keera-small", Kind: policy.KindChat, BackendModel: "small-served",
 			InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 1_000_000, Enabled: true,
 		},
 		"keera-large": {
-			Alias: "keera-large", Kind: policy.KindChat, BackendModel: "large-served",
+			OrgID: "org_1", Alias: "keera-large", Kind: policy.KindChat, BackendModel: "large-served",
 			InputMicrosPerMTok: 9_000_000, OutputMicrosPerMTok: 9_000_000, Enabled: true,
 		},
 		"keera-spare": {
-			Alias: "keera-spare", Kind: policy.KindChat, BackendModel: "spare-served",
+			OrgID: "org_1", Alias: "keera-spare", Kind: policy.KindChat, BackendModel: "spare-served",
 			InputMicrosPerMTok: 5_000_000, OutputMicrosPerMTok: 5_000_000, Enabled: true,
 		},
 	}
@@ -688,6 +688,11 @@ func TestFallbackRouterServesTheLastFailureWhenNothingAnswers(t *testing.T) {
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500 - what the last destination said", resp.StatusCode)
 	}
+	// Not "(fallback)": that says a later destination answered, and none did.
+	want := "ha -> keera-large (every destination failed)"
+	if got := resp.Header.Get("X-Keera-Router"); got != want {
+		t.Errorf("X-Keera-Router = %q, want %q", got, want)
+	}
 	ev := h.sink.last(t)
 	if ev.RouterOutcome != store.RouterError {
 		t.Errorf("outcome = %q, want %q - the router ran out of destinations",
@@ -793,8 +798,8 @@ func TestLatencyRouterPlacesTheRequestOnTheFasterDestination(t *testing.T) {
 	// What the last few minutes looked like: the first destination, which a
 	// fallback router would use for everything, is the slow one.
 	now := time.Now()
-	h.srv.load.observe("keera-small", 2*time.Second, now)
-	h.srv.load.observe("keera-large", 90*time.Millisecond, now)
+	h.srv.load.observe("org_1/keera-small", 2*time.Second, now)
+	h.srv.load.observe("org_1/keera-large", 90*time.Millisecond, now)
 
 	resp := h.post(t, "/v1/chat/completions",
 		`{"model":"pool","messages":[{"role":"user","content":"hello"}]}`)
@@ -829,8 +834,8 @@ func TestLeastBusyRouterPlacesTheRequestWhereThereIsRoom(t *testing.T) {
 
 	// Two requests already outstanding against the destination a fallback
 	// router would send everything to.
-	defer h.srv.load.begin("keera-small")()
-	defer h.srv.load.begin("keera-small")()
+	defer h.srv.load.begin("org_1/keera-small")()
+	defer h.srv.load.begin("org_1/keera-small")()
 
 	resp := h.post(t, "/v1/chat/completions",
 		`{"model":"pool","messages":[{"role":"user","content":"hello"}]}`)
@@ -853,8 +858,8 @@ func TestAMeasuredRouterStillFailsOverToWhatItRankedSecond(t *testing.T) {
 		measuredRouter(policy.RouterModeLatency, "keera-small", "keera-large"),
 		map[string]int{"large-served": 503})
 	now := time.Now()
-	h.srv.load.observe("keera-small", 2*time.Second, now)
-	h.srv.load.observe("keera-large", 90*time.Millisecond, now)
+	h.srv.load.observe("org_1/keera-small", 2*time.Second, now)
+	h.srv.load.observe("org_1/keera-large", 90*time.Millisecond, now)
 
 	resp := h.post(t, "/v1/chat/completions",
 		`{"model":"pool","messages":[{"role":"user","content":"hello"}]}`)
@@ -877,7 +882,7 @@ func TestAMeasuredRouterStillFailsOverToWhatItRankedSecond(t *testing.T) {
 	}
 	// And the destination that failed is ranked last for a while, so the next
 	// request does not walk into it again on the strength of the same reading.
-	if !h.srv.load.read("keera-large", time.Now()).failing {
+	if !h.srv.load.read("org_1/keera-large", time.Now()).failing {
 		t.Error("a destination that answered 503 is still being ranked on its latency; " +
 			"the next request would be sent to it too")
 	}

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"cmp"
 	"encoding/json"
 	"net/http"
 	"slices"
@@ -62,7 +63,7 @@ func stripTools(b *body, client []string) []string {
 			kept = append(kept, t)
 			continue
 		}
-		removed = append(removed, cmpOr(tool.Name, tool.Type))
+		removed = append(removed, cmp.Or(tool.Name, tool.Type))
 	}
 	if len(removed) == 0 {
 		return nil
@@ -95,13 +96,6 @@ var choiceKinds = []string{"auto", "any", "none", "required", "tool", "function"
 // {"type": "web_search_preview"} does on the Responses API.
 func hostedChoice(typ string, client []string) bool {
 	return typ != "" && !slices.Contains(choiceKinds, typ) && !keepsTool(typ, client)
-}
-
-func cmpOr(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
 }
 
 // stripHostedTools on the Messages API also drops mcp_servers, which asks

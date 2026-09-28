@@ -213,7 +213,7 @@ func TestUsageGroupsByEveryDimensionThePanelOffers(t *testing.T) {
 	}
 
 	// Another tenant's traffic is never in the answer.
-	if _, err := st.CreateOrg(ctx, "org_2", "Another Bank"); err != nil {
+	if _, err := st.CreateOrg(ctx, Org{ID: "org_2", Name: "Another Bank"}, OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
 	if err := st.WriteEvents(ctx, []Event{{TS: day, OrgID: "org_2", Alias: "keera-code",
@@ -226,6 +226,28 @@ func TestUsageGroupsByEveryDimensionThePanelOffers(t *testing.T) {
 	}
 	if len(buckets) != 1 || buckets[0].Group != f.orgID {
 		t.Errorf("Usage = %+v, want only the requested organisation", buckets)
+	}
+
+	// Across every organisation, the two "keera-code" models are two rows.
+	// Added up, an operator would read one model's traffic as twice what it is.
+	buckets, err = st.Usage(ctx, UsageQuery{From: from, To: to, GroupBy: "model"})
+	if err != nil {
+		t.Fatalf("Usage: %v", err)
+	}
+	got := map[string]int64{}
+	for _, b := range buckets {
+		got[b.OrgID+"/"+b.Group] = b.CostMicros
+	}
+	want := map[string]int64{
+		f.orgID + "/keera-code": 100, f.orgID + "/keera-speed": 50, "org_2/keera-code": 9999,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("Usage across orgs = %v, want %v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("group %q = %d, want %d", k, got[k], v)
+		}
 	}
 }
 
@@ -240,6 +262,8 @@ func TestOverviewPlotsEveryBucketInTheWindow(t *testing.T) {
 		{TS: now, OrgID: f.orgID, Alias: "keera-code", InputTokens: 10, OutputTokens: 5,
 			CostMicros: 100, Status: 200, TTFT: 300 * time.Millisecond},
 		{TS: now, OrgID: f.orgID, Alias: "keera-code", Status: 429},
+		// A 413 is a refusal too, as the request log counts it.
+		{TS: now, OrgID: f.orgID, Alias: "keera-code", Status: 413},
 		{TS: now, OrgID: f.orgID, Alias: "keera-code", Status: 502},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
@@ -253,11 +277,11 @@ func TestOverviewPlotsEveryBucketInTheWindow(t *testing.T) {
 	if o.Bucket != "hour" {
 		t.Errorf("Bucket = %q, want hour for a six-hour window", o.Bucket)
 	}
-	if o.Requests != 4 {
-		t.Errorf("Requests = %d, want 4 - every attempt, served or not", o.Requests)
+	if o.Requests != 5 {
+		t.Errorf("Requests = %d, want 5 - every attempt, served or not", o.Requests)
 	}
-	if o.Refused != 1 {
-		t.Errorf("Refused = %d, want 1", o.Refused)
+	if o.Refused != 2 {
+		t.Errorf("Refused = %d, want 2", o.Refused)
 	}
 	if o.Failed != 1 {
 		t.Errorf("Failed = %d, want 1", o.Failed)
@@ -278,8 +302,8 @@ func TestOverviewPlotsEveryBucketInTheWindow(t *testing.T) {
 	for _, p := range o.Series {
 		plotted += p.Requests
 	}
-	if plotted != 4 {
-		t.Errorf("the series holds %d requests, want 4", plotted)
+	if plotted != 5 {
+		t.Errorf("the series holds %d requests, want 5", plotted)
 	}
 
 	// Four days, so daily buckets.
@@ -289,6 +313,37 @@ func TestOverviewPlotsEveryBucketInTheWindow(t *testing.T) {
 	}
 	if daily.Bucket != "day" {
 		t.Errorf("Bucket = %q, want day for a four-day window", daily.Bucket)
+	}
+}
+
+func TestModelStatsReadsEachModelsFirstToken(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
+
+	if err := st.WriteEvents(ctx, []Event{
+		{TS: now, OrgID: f.orgID, Alias: "keera-code", Status: 200, TTFT: 100 * time.Millisecond},
+		{TS: now, OrgID: f.orgID, Alias: "keera-code", Status: 200, TTFT: 300 * time.Millisecond},
+		// A refusal waited for no token, so it is not in the median.
+		{TS: now, OrgID: f.orgID, Alias: "keera-code", Status: 429},
+		{TS: now, OrgID: f.orgID, Alias: "keera-large", Status: 200, TTFT: time.Second},
+		{TS: now, OrgID: f.orgID, Alias: "keera-idle", Status: 502},
+	}); err != nil {
+		t.Fatalf("WriteEvents: %v", err)
+	}
+
+	stats, err := st.ModelStats(ctx, f.orgID, now.Add(-time.Hour), now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("ModelStats: %v", err)
+	}
+	if got := stats["keera-code"].TTFTMedianMS; got != 200 {
+		t.Errorf("keera-code median = %d, want 200", got)
+	}
+	if got := stats["keera-large"]; got.TTFTMedianMS != 1000 || got.TTFTP95MS != 1000 {
+		t.Errorf("keera-large = %+v, want 1000 for both", got)
+	}
+	if _, ok := stats["keera-idle"]; ok {
+		t.Error("a model with no first token has a row")
 	}
 }
 

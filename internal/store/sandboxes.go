@@ -7,20 +7,23 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// The sandbox tables: a catalogue of classes that works like the model
-// catalogue, and a log of the machines actually lent out.
+// The sandbox tables: each organisation's classes, which work like its
+// models, and a log of the machines actually lent out.
 //
 // A sandbox row is kept after the machine is gone, because its cost, owner and
-// repository still matter later. So the log grows, and it has the same
-// retention as the usage log.
+// repository still matter later. So the log grows: retention does not delete
+// it.
 
 // liveSandbox is the condition for a sandbox that still holds resources. It
-// matches policy.SandboxState.Live.
-const liveSandbox = "state IN ('pending','ready','suspended')"
+// matches Sandbox.Live. An expired sandbox is one: it keeps its volume until
+// it is resumed or terminated. So is a failed engineer sandbox, which keeps
+// its volume until it is terminated.
+const liveSandbox = "(state IN ('pending','ready','suspended','expired') " +
+	"OR (state = 'failed' AND purpose = 'engineer'))"
 
-const sandboxClassColumns = `SELECT name, description, image, isolation, runtime_class,
+const sandboxClassColumns = `SELECT org_id, name, description, image, isolation,
 	cpu_millis, memory_mib, disk_mib, default_ttl_seconds, max_ttl_seconds, warm,
-	egress, purposes, managed, created_at, updated_at`
+	purposes, created_at, updated_at`
 
 func scanSandboxClass(r row) (policy.SandboxClass, error) {
 	var (
@@ -28,9 +31,9 @@ func scanSandboxClass(r row) (policy.SandboxClass, error) {
 		defTTL, maxTTL int
 		purposes       []string
 	)
-	if err := r.Scan(&c.Name, &c.Description, &c.Image, &c.Isolation, &c.RuntimeClass,
+	if err := r.Scan(&c.OrgID, &c.Name, &c.Description, &c.Image, &c.Isolation,
 		&c.CPU, &c.Memory, &c.Disk, &defTTL, &maxTTL, &c.Warm,
-		&c.Egress, &purposes, &c.Managed, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		&purposes, &c.CreatedAt, &c.UpdatedAt); err != nil {
 		return policy.SandboxClass{}, err
 	}
 	c.DefaultTTL = time.Duration(defTTL) * time.Second
@@ -41,82 +44,84 @@ func scanSandboxClass(r row) (policy.SandboxClass, error) {
 	return c, nil
 }
 
-// ListSandboxClasses reads the whole catalogue. Unlike models it is not cached,
-// because only the control API reads it, and that already talks to Postgres.
-func (s *Store) ListSandboxClasses(ctx context.Context) ([]policy.SandboxClass, error) {
-	rows, err := s.pool.Query(ctx, sandboxClassColumns+" FROM sandbox_classes ORDER BY name")
+// LoadSandboxClasses reads every organisation's classes, for the warm pools.
+// Unlike models they are not cached, because only the control API and the
+// sandbox manager read them, and both already talk to Postgres.
+func (s *Store) LoadSandboxClasses(ctx context.Context) ([]policy.SandboxClass, error) {
+	rows, err := s.pool.Query(ctx, sandboxClassColumns+" FROM sandbox_classes ORDER BY org_id, name")
 	if err != nil {
 		return nil, err
 	}
 	return collect(rows, scanSandboxClass)
 }
 
-// SandboxClass reads one entry, or ErrNotFound.
-func (s *Store) SandboxClass(ctx context.Context, name string) (policy.SandboxClass, error) {
+// ListSandboxClasses reads one organisation's classes.
+func (s *Store) ListSandboxClasses(ctx context.Context, orgID string) ([]policy.SandboxClass, error) {
+	rows, err := s.pool.Query(ctx,
+		sandboxClassColumns+" FROM sandbox_classes WHERE org_id = $1 ORDER BY name", orgID)
+	if err != nil {
+		return nil, err
+	}
+	return collect(rows, scanSandboxClass)
+}
+
+// SandboxClass reads one of an organisation's classes, or ErrNotFound.
+func (s *Store) SandboxClass(ctx context.Context, orgID, name string) (policy.SandboxClass, error) {
 	c, err := scanSandboxClass(s.pool.QueryRow(ctx,
-		sandboxClassColumns+" FROM sandbox_classes WHERE name = $1", name))
+		sandboxClassColumns+" FROM sandbox_classes WHERE org_id = $1 AND name = $2", orgID, name))
 	if err != nil {
 		return policy.SandboxClass{}, notFound(err)
 	}
 	return c, nil
 }
 
-// UpsertSandboxClass creates or replaces one entry. It writes the saved
-// timestamps back onto c, so the control plane can answer a PUT with what was
-// stored.
+// UpsertSandboxClass creates or replaces one of an organisation's classes. It
+// writes the saved timestamps back onto c, so the control plane can answer a
+// PUT with what was stored.
 func (s *Store) UpsertSandboxClass(ctx context.Context, c *policy.SandboxClass) error {
+	return upsertSandboxClass(ctx, s.pool, c)
+}
+
+func upsertSandboxClass(ctx context.Context, db querier, c *policy.SandboxClass) error {
 	purposes := make([]string, 0, len(c.Purposes))
 	for _, p := range c.Purposes {
 		purposes = append(purposes, string(p))
 	}
-	egress := c.Egress
-	if egress == nil {
-		egress = []string{}
-	}
-	return s.pool.QueryRow(ctx, `INSERT INTO sandbox_classes
-		(name, description, image, isolation, runtime_class, cpu_millis, memory_mib, disk_mib,
-		 default_ttl_seconds, max_ttl_seconds, warm, egress, purposes, managed, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now())
-		ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description,
+	return db.QueryRow(ctx, `INSERT INTO sandbox_classes
+		(org_id, name, description, image, isolation, cpu_millis, memory_mib,
+		 disk_mib, default_ttl_seconds, max_ttl_seconds, warm, purposes, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now())
+		ON CONFLICT (org_id, name) DO UPDATE SET description = EXCLUDED.description,
 			image = EXCLUDED.image, isolation = EXCLUDED.isolation,
-			runtime_class = EXCLUDED.runtime_class, cpu_millis = EXCLUDED.cpu_millis,
+			cpu_millis = EXCLUDED.cpu_millis,
 			memory_mib = EXCLUDED.memory_mib, disk_mib = EXCLUDED.disk_mib,
 			default_ttl_seconds = EXCLUDED.default_ttl_seconds,
 			max_ttl_seconds = EXCLUDED.max_ttl_seconds, warm = EXCLUDED.warm,
-			egress = EXCLUDED.egress, purposes = EXCLUDED.purposes,
-			managed = EXCLUDED.managed, updated_at = now()
+			purposes = EXCLUDED.purposes, updated_at = now()
 		RETURNING created_at, updated_at`,
-		c.Name, c.Description, c.Image, string(c.Isolation), c.RuntimeClass,
+		c.OrgID, c.Name, c.Description, c.Image, string(c.Isolation),
 		c.CPU, c.Memory, c.Disk,
 		int(c.DefaultTTL/time.Second), int(c.MaxTTL/time.Second), c.Warm,
-		egress, purposes, c.Managed,
+		purposes,
 	).Scan(&c.CreatedAt, &c.UpdatedAt)
 }
 
-// UnmanageSandboxClasses hands back every class the catalogue file no longer
-// names, as UnmanageModels does. The row is kept, because repository
-// configurations may still name the class.
-func (s *Store) UnmanageSandboxClasses(ctx context.Context, except []string) error {
-	_, err := s.pool.Exec(ctx,
-		"UPDATE sandbox_classes SET managed = false, updated_at = now() "+
-			"WHERE managed AND name <> ALL($1)", except)
-	return err
+// DeleteSandboxClass removes one of an organisation's classes.
+func (s *Store) DeleteSandboxClass(ctx context.Context, orgID, name string) error {
+	return s.execOne(ctx, "DELETE FROM sandbox_classes WHERE org_id = $1 AND name = $2", orgID, name)
 }
 
-// DeleteSandboxClass removes one entry.
-func (s *Store) DeleteSandboxClass(ctx context.Context, name string) error {
-	return s.execOne(ctx, "DELETE FROM sandbox_classes WHERE name = $1", name)
-}
-
-// SandboxClassInUse counts the live sandboxes of one class.
+// SandboxClassInUse counts the live sandboxes of one of an organisation's
+// classes.
 //
 // It is read before a deletion. Running sandboxes keep their own copy of the
 // class's settings, so deleting it breaks nothing: the control plane warns
 // with the count rather than refusing.
-func (s *Store) SandboxClassInUse(ctx context.Context, name string) (int, error) {
+func (s *Store) SandboxClassInUse(ctx context.Context, orgID, name string) (int, error) {
 	var n int
 	err := s.pool.QueryRow(ctx,
-		"SELECT count(*) FROM sandboxes WHERE class = $1 AND "+liveSandbox, name).Scan(&n)
+		"SELECT count(*) FROM sandboxes WHERE org_id = $1 AND class = $2 AND "+liveSandbox,
+		orgID, name).Scan(&n)
 	return n, err
 }
 
@@ -162,8 +167,11 @@ type Sandbox struct {
 	// created, or a claim on a warm pool. See sandbox.Backing.
 	Backing string `json:"backing,omitempty"`
 
-	CreatedAt    time.Time  `json:"created_at"`
-	ReadyAt      *time.Time `json:"ready_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	ReadyAt   *time.Time `json:"ready_at,omitempty"`
+	// ActiveAt is when somebody last had a connection open to it, or when it
+	// last came back to ready. Idle suspension counts from here.
+	ActiveAt     *time.Time `json:"active_at,omitempty"`
 	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
 	SuspendedAt  *time.Time `json:"suspended_at,omitempty"`
 	TerminatedAt *time.Time `json:"terminated_at,omitempty"`
@@ -174,8 +182,11 @@ type Sandbox struct {
 	AccountedAt    *time.Time `json:"-"`
 }
 
-// Live reports whether this sandbox still holds resources.
-func (s Sandbox) Live() bool { return s.State.Live() }
+// Live reports whether this sandbox still holds resources. A failed engineer
+// sandbox does, because its volume is kept in case it holds work.
+func (s Sandbox) Live() bool {
+	return s.State.Live() || (s.State == policy.SandboxFailed && s.Purpose == policy.PurposeEngineer)
+}
 
 // CoreSeconds is running time weighted by the machine's size, which is what a
 // chargeback needs.
@@ -186,7 +197,7 @@ func (s Sandbox) CoreSeconds() int64 {
 const sandboxColumns = `SELECT id, org_id, COALESCE(team_id,''), COALESCE(user_id,''), owner,
 	name, class, purpose, state, detail, image, isolation, cpu_millis, memory_mib, disk_mib,
 	COALESCE(key_id,''), COALESCE(session_key,''), repo, branch, git_credential_id,
-	node, address, backing, created_at, ready_at, expires_at, suspended_at, terminated_at, running_seconds, accounted_at`
+	node, address, backing, created_at, ready_at, active_at, expires_at, suspended_at, terminated_at, running_seconds, accounted_at`
 
 func scanSandbox(r row) (Sandbox, error) {
 	var sb Sandbox
@@ -195,7 +206,7 @@ func scanSandbox(r row) (Sandbox, error) {
 		&sb.Image, &sb.Isolation, &sb.CPU, &sb.Memory, &sb.Disk,
 		&sb.KeyID, &sb.SessionKey, &sb.Repo, &sb.Branch, &sb.GitCredentialID,
 		&sb.Node, &sb.Address, &sb.Backing,
-		&sb.CreatedAt, &sb.ReadyAt, &sb.ExpiresAt, &sb.SuspendedAt, &sb.TerminatedAt,
+		&sb.CreatedAt, &sb.ReadyAt, &sb.ActiveAt, &sb.ExpiresAt, &sb.SuspendedAt, &sb.TerminatedAt,
 		&sb.RunningSeconds, &sb.AccountedAt)
 	return sb, err
 }
@@ -235,7 +246,7 @@ func (s *Store) CreateSandbox(ctx context.Context, sb Sandbox) (Sandbox, error) 
 		sb.Name, sb.Class, string(sb.Purpose), string(sb.State), sb.Detail,
 		sb.Image, string(sb.Isolation), sb.CPU, sb.Memory, sb.Disk,
 		nullable(sb.KeyID), nullable(sb.SessionKey), sb.Repo, sb.Branch, sb.GitCredentialID,
-		defaultBacking(sb.Backing), sb.ExpiresAt,
+		sb.Backing, sb.ExpiresAt,
 	).Scan(&sb.CreatedAt, &sb.AccountedAt)
 	if isUnique(err) {
 		return sb, ErrSandboxNameTaken
@@ -243,7 +254,7 @@ func (s *Store) CreateSandbox(ctx context.Context, sb Sandbox) (Sandbox, error) 
 	return sb, err
 }
 
-// ErrSandboxNameTaken means a live sandbox in the organisation already has the
+// ErrSandboxNameTaken means a live sandbox of the same person already has the
 // name. The control plane turns it into a 409; the name is free again once
 // that sandbox is gone.
 var ErrSandboxNameTaken = errSandboxNameTaken{}
@@ -251,7 +262,7 @@ var ErrSandboxNameTaken = errSandboxNameTaken{}
 type errSandboxNameTaken struct{}
 
 func (errSandboxNameTaken) Error() string {
-	return "store: a live sandbox of that name already exists in this organisation"
+	return "store: this person already has a live sandbox of that name"
 }
 
 // Sandbox reads one row by id.
@@ -259,11 +270,13 @@ func (s *Store) Sandbox(ctx context.Context, id string) (Sandbox, error) {
 	return s.sandboxWhere(ctx, "WHERE id = $1", id)
 }
 
-// LiveSandboxByName finds the live sandbox of that name in an organisation,
-// which is how `keera sandbox ssh <name>` resolves a name. A name used only by
-// finished sandboxes is ErrNotFound.
-func (s *Store) LiveSandboxByName(ctx context.Context, orgID, name string) (Sandbox, error) {
-	return s.sandboxWhere(ctx, "WHERE org_id = $1 AND name = $2 AND "+liveSandbox, orgID, name)
+// LiveSandboxesByName finds the live sandboxes of that name in an
+// organisation, which is how `keera sandbox ssh <name>` resolves a name. A
+// name is unique per person, so there can be one for each. A name used only
+// by finished sandboxes finds none.
+func (s *Store) LiveSandboxesByName(ctx context.Context, orgID, name string) ([]Sandbox, error) {
+	return s.sandboxesWhere(ctx, "WHERE org_id = $1 AND name = $2 AND "+liveSandbox+
+		" ORDER BY created_at", orgID, name)
 }
 
 // LiveSandboxByKey finds the live sandbox a presented key was minted for, if
@@ -284,9 +297,10 @@ func (s *Store) SetSandboxGitCredential(ctx context.Context, id, credentialID st
 		id, credentialID)
 }
 
-// SandboxQuery narrows the list. The zero value is one organisation's live
-// sandboxes, newest first.
+// SandboxQuery narrows the list. The zero value is every live sandbox, newest
+// first.
 type SandboxQuery struct {
+	// OrgID empty lists every organisation's, for an operator.
 	OrgID  string
 	TeamID string
 	UserID string
@@ -299,7 +313,8 @@ type SandboxQuery struct {
 	Limit int
 }
 
-// ListSandboxes reads one organisation's sandboxes.
+// ListSandboxes reads sandboxes: one organisation's, or every one's when
+// q.OrgID is empty.
 func (s *Store) ListSandboxes(ctx context.Context, q SandboxQuery) ([]Sandbox, error) {
 	limit := q.Limit
 	if limit <= 0 || limit > 500 {
@@ -321,21 +336,22 @@ func (s *Store) ListSandboxes(ctx context.Context, q SandboxQuery) ([]Sandbox, e
 //
 // It is applied all at once, because a partial update could leave a row that
 // disagrees with itself, such as a ready sandbox with no address.
+//
+// It has no expiry: the row owns that. Create, Extend and a resume write it,
+// and a driver only ever holds a copy.
 type SandboxObservation struct {
 	State   policy.SandboxState
 	Detail  string
 	Address string
 	Node    string
-	// Expires is the expiry the driver reports, so an extension that never
-	// reached the cluster shows up as wrong. Zero leaves the stored value.
-	Expires time.Time
 }
 
 // ObserveSandbox writes back what the driver saw.
 //
 // ready_at is set the first time a sandbox is ready and never again: a resume
-// is not when the machine became usable. suspended_at is reset on each
-// suspend, because it means "idle since".
+// is not when the machine became usable. active_at is set each time it comes
+// back to ready, so a resumed sandbox is not idle from before it was
+// suspended. suspended_at is reset on each suspend.
 //
 // A row that is gone or already terminated is left alone without an error.
 // Usually somebody ended the sandbox after the sweep read it.
@@ -345,34 +361,72 @@ func (s *Store) ObserveSandbox(ctx context.Context, id string, obs SandboxObserv
 			detail = $3,
 			address = $4,
 			node = $5,
-			expires_at = COALESCE($6, expires_at),
 			ready_at = CASE WHEN ready_at IS NULL AND $2 = 'ready' THEN now() ELSE ready_at END,
+			active_at = CASE WHEN $2 = 'ready' AND state <> 'ready' THEN now() ELSE active_at END,
 			suspended_at = CASE WHEN $2 = 'suspended' THEN COALESCE(suspended_at, now())
 			                    ELSE NULL END,
 			terminated_at = CASE WHEN $2 = 'terminated' THEN COALESCE(terminated_at, now())
-			                     ELSE terminated_at END
+			                     ELSE terminated_at END,
+			-- Coming back to compute starts the clock from now, so the time it
+			-- spent suspended or expired is not charged.
+			accounted_at = CASE WHEN $2 IN ('pending','ready') AND state NOT IN ('pending','ready')
+			                    THEN now() ELSE accounted_at END
 		WHERE id = $1 AND state <> 'terminated'`,
-		id, string(obs.State), obs.Detail, obs.Address, obs.Node, nullableTime(obs.Expires))
+		id, string(obs.State), obs.Detail, obs.Address, obs.Node)
 	return err
 }
 
-// SetSandboxExpiry moves when a sandbox ends.
-func (s *Store) SetSandboxExpiry(ctx context.Context, id string, at time.Time) error {
-	return s.execOne(ctx,
-		"UPDATE sandboxes SET expires_at = $2 WHERE id = $1 AND state <> 'terminated'", id, at)
+// ReviveSandbox gives an expired sandbox what it needs to start again: a new
+// key, a new repository credential and a new end. It is ErrNotFound unless
+// the sandbox is still expired, so two resumes cannot both win.
+func (s *Store) ReviveSandbox(ctx context.Context, id, keyID, gitCredentialID string,
+	expires time.Time,
+) error {
+	return s.execOne(ctx, `UPDATE sandboxes SET
+			key_id = $2, git_credential_id = $3, expires_at = $4,
+			state = 'pending', detail = 'resuming after it expired',
+			suspended_at = NULL, accounted_at = now()
+		WHERE id = $1 AND state = 'expired'`,
+		id, keyID, gitCredentialID, expires)
 }
 
-// CountLiveSandboxes counts what one scope is holding, for the quota.
-//
-// scopeType is org, team or key. At key level it counts by the key minted for
-// the sandbox, which makes a per-key quota a per-sandbox quota. Nothing offers
-// one; the level exists so the three stay symmetrical.
+// TouchSandbox records that somebody is connected to a sandbox, so idle
+// suspension leaves it running.
+func (s *Store) TouchSandbox(ctx context.Context, id string) error {
+	_, err := s.pool.Exec(ctx,
+		"UPDATE sandboxes SET active_at = now() WHERE id = $1 AND state = 'ready'", id)
+	return err
+}
+
+// SetSandboxExpiry moves when a sandbox ends, and its key with it: the key
+// expires with the sandbox, so an extension that left it behind would cut
+// the sandbox off from inference at the old time.
+func (s *Store) SetSandboxExpiry(ctx context.Context, id string, at time.Time) error {
+	var n int
+	err := s.pool.QueryRow(ctx, `
+		WITH sb AS (
+			UPDATE sandboxes SET expires_at = $2
+			WHERE id = $1 AND state <> 'terminated'
+			RETURNING key_id
+		), k AS (
+			UPDATE api_keys SET expires_at = $2
+			WHERE id = (SELECT key_id FROM sb) AND revoked_at IS NULL
+		)
+		SELECT count(*) FROM sb`, id, at).Scan(&n)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// CountLiveSandboxes counts what an organisation or a team is holding, for
+// the quota. A key has no sandbox quota: a sandbox's key is minted for it.
 func (s *Store) CountLiveSandboxes(ctx context.Context, scopeType policy.ScopeType, scopeID string) (int, error) {
-	column := "key_id"
-	switch scopeType {
-	case policy.ScopeOrg:
-		column = "org_id"
-	case policy.ScopeTeam:
+	column := "org_id"
+	if scopeType == policy.ScopeTeam {
 		column = "team_id"
 	}
 	var n int
@@ -382,13 +436,15 @@ func (s *Store) CountLiveSandboxes(ctx context.Context, scopeType policy.ScopeTy
 }
 
 // SandboxesPastExpiry reads the live sandboxes whose time is up, for the sweep.
+// The expired ones are already ended. The states are spelled out to match the
+// partial index.
 func (s *Store) SandboxesPastExpiry(ctx context.Context, now time.Time, limit int) ([]Sandbox, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 	return s.sandboxesWhere(ctx, `
 		WHERE expires_at IS NOT NULL AND expires_at <= $1
-		  AND `+liveSandbox+`
+		  AND state IN ('pending','ready','suspended')
 		ORDER BY expires_at
 		LIMIT $2`, now, limit)
 }
@@ -438,6 +494,9 @@ type SandboxUsage struct {
 	// caller grouped by.
 	Key   string `json:"key"`
 	Label string `json:"label,omitempty"`
+	// OrgID is set only when a report across every organisation groups by
+	// class: two organisations can each have a class of the same name.
+	OrgID string `json:"org_id,omitempty"`
 	// Count is how many sandboxes, Running the seconds they held compute, and
 	// CoreSeconds the same weighted by machine size. Each tells a different
 	// story, so all three are shown.
@@ -481,42 +540,26 @@ func (s *Store) SandboxUsageBy(ctx context.Context, orgID, groupBy string, from,
 	if !ok {
 		group = sandboxGroupColumns["class"]
 	}
+	org, by := "''", "1"
+	if orgID == "" && group == sandboxGroupColumns["class"] {
+		org, by = "s.org_id", "1, 2"
+	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT `+group+` AS k,
+		SELECT `+group+` AS k, `+org+`,
 		       count(*),
 		       COALESCE(sum(s.running_seconds), 0),
 		       COALESCE(sum(s.running_seconds * s.cpu_millis / 1000), 0),
-		       count(*) FILTER (WHERE s.`+liveSandbox+`)
+		       count(*) FILTER (WHERE `+liveSandbox+`)
 		FROM sandboxes s
 		WHERE s.created_at >= $1 AND s.created_at < $2 AND ($3 = '' OR s.org_id = $3)
-		GROUP BY 1
-		ORDER BY 3 DESC`, from, to, orgID)
+		GROUP BY `+by+`
+		ORDER BY 4 DESC`, from, to, orgID)
 	if err != nil {
 		return nil, err
 	}
 	return collect(rows, func(r row) (SandboxUsage, error) {
 		var u SandboxUsage
-		err := r.Scan(&u.Key, &u.Count, &u.Running, &u.CoreSeconds, &u.Live)
+		err := r.Scan(&u.Key, &u.OrgID, &u.Count, &u.Running, &u.CoreSeconds, &u.Live)
 		return u, err
 	})
-}
-
-// SandboxForSession finds the sandbox a task ran in, if any.
-//
-// A session key is a hash and cannot be reversed. But an agent sandbox states
-// its own session id, and the key it hashes to is stored at creation, so this
-// is a plain lookup on that column.
-func (s *Store) SandboxForSession(ctx context.Context, orgID, sessionKey string) (Sandbox, error) {
-	return s.sandboxWhere(ctx,
-		"WHERE org_id = $1 AND session_key = $2 ORDER BY created_at DESC LIMIT 1",
-		orgID, sessionKey)
-}
-
-// defaultBacking fills in "sandbox" for a caller that did not say. That is what
-// every sandbox was before warm pools, and what the podman driver always uses.
-func defaultBacking(b string) string {
-	if b == "" {
-		return "sandbox"
-	}
-	return b
 }

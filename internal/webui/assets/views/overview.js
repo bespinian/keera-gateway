@@ -12,10 +12,12 @@ import {
   RANGES,
   currentRange,
   rangePicker,
+  isAdmin,
 } from "../ui.js";
 import { areaChart, barList } from "../chart.js";
 import { firstRun } from "./firstrun.js";
 import { openFailed } from "./requestlog.js";
+import { orgNameOf } from "./orgs.js";
 
 export async function overviewView(ctx) {
   const since = currentRange();
@@ -53,7 +55,7 @@ export async function overviewView(ctx) {
       "Requests",
       compact(o.requests),
       null,
-      o.refused ? `${num(o.refused)} refused by a guardrail` : "none refused",
+      o.refused ? `${num(o.refused)} refused` : "none refused",
     ),
     stat(
       "Tokens",
@@ -136,7 +138,10 @@ export async function overviewView(ctx) {
         "div",
         { class: "card-body" },
         barList(o.top_models, {
-          label: (r) => r.group,
+          // Across every organisation, two of them can each have a model of
+          // the same alias, so the row names whose it is.
+          label: (r) =>
+            r.org_id ? `${r.group} · ${orgNameOf(ctx, r.org_id)}` : r.group,
           value: (r) => r.input_tokens + r.output_tokens,
           colorIndex: 1,
         }),
@@ -196,15 +201,6 @@ function failureLink(ctx, ...content) {
     },
     ...content,
   );
-}
-
-// isAdmin is whoever can act on the first-run checklist and read the request
-// log. A member gets the ordinary empty dashboard instead of the checklist -
-// telling them to create an organisation would be telling them to do something
-// the control plane will refuse - and the numbers without a way through to the
-// rows behind them, which name other people's keys.
-function isAdmin(ctx) {
-  return ctx.state.me.unrestricted || ctx.state.me.role === "admin";
 }
 
 function rangeLabel(since) {

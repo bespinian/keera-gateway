@@ -19,24 +19,11 @@ import (
 // the destination list, and it has less to say.
 const maxRouterPromptBytes = 4 << 10
 
-// routerOrg resolves which organisation a router request is about. Like a
-// filter, a router belongs to one organisation.
-func (s *Server) routerOrg(w http.ResponseWriter, r *http.Request, p *authn.Principal) (string, bool) {
-	return s.requireOrg(w, p, r.URL.Query().Get("org_id"),
-		"choose an organisation first; a router belongs to one")
-}
-
-// routerAdmin is routerOrg for a request that changes a router.
-func (s *Server) routerAdmin(w http.ResponseWriter, r *http.Request, p *authn.Principal) (string, bool) {
-	orgID, ok := s.routerOrg(w, r, p)
-	return orgID, ok && s.requireOrgAdmin(w, p, orgID)
-}
-
 // listRouters is readable by every member of the organisation. A router is an
 // alias developers type into their editor, so they need to find it, and to
 // see why a request went where it did.
 func (s *Server) listRouters(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	orgID, ok := s.routerOrg(w, r, p)
+	orgID, ok := s.queryOrg(w, r, p)
 	if !ok {
 		return
 	}
@@ -54,7 +41,7 @@ func (s *Server) listRouters(w http.ResponseWriter, r *http.Request, p *authn.Pr
 // and so whether it is worth having. A router's failures are quiet, because
 // every request it places still gets an answer.
 func (s *Server) routerReport(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	orgID, ok := s.routerOrg(w, r, p)
+	orgID, ok := s.queryOrg(w, r, p)
 	if !ok {
 		return
 	}
@@ -133,10 +120,6 @@ func (in routerInput) router(orgID, alias string) policy.Router {
 		Prompt:      strings.TrimSpace(in.Prompt),
 		Description: strings.TrimSpace(in.Description),
 	}
-	// A missing mode means instruction, the only mode older clients know.
-	if rt.Mode == "" {
-		rt.Mode = policy.RouterModeInstruction
-	}
 	if in.Fallback != nil {
 		rt.Fallback = strings.TrimSpace(*in.Fallback)
 	}
@@ -160,7 +143,7 @@ func (in routerInput) router(orgID, alias string) policy.Router {
 }
 
 func (s *Server) putRouter(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	orgID, ok := s.routerAdmin(w, r, p)
+	orgID, ok := s.adminOrg(w, r, p)
 	if !ok {
 		return
 	}
@@ -174,10 +157,10 @@ func (s *Server) putRouter(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		badRequest(w, msg)
 		return
 	}
-	if !s.checkRouterAlias(w, r, rt.Alias) {
+	if !s.checkRouterAlias(w, r, orgID, rt.Alias) {
 		return
 	}
-	if rt.Decides() && !s.checkRouterModel(w, r, rt.Model) {
+	if rt.Decides() && !s.checkRouterModel(w, r, orgID, rt.Model) {
 		return
 	}
 	if rt.Sizes() && !checkCeilings(w, rt) {
@@ -201,11 +184,11 @@ func (s *Server) putRouter(w http.ResponseWriter, r *http.Request, p *authn.Prin
 // nothing is. It reads nothing from the store.
 func routerProblem(rt policy.Router) string {
 	switch {
-	case !policy.ValidRouterAlias(rt.Alias):
+	case !policy.ValidAlias(rt.Alias):
 		return "a router's alias goes where a model's alias goes - into a developer's own client " +
 			"configuration - so it is lowercase letters, digits and inner hyphens: " +
 			"'auto', not '" + rt.Alias + "'"
-	case !policy.ValidRouterMode(rt.Mode):
+	case !rt.Mode.Valid():
 		return "'mode' is '" + string(rt.Mode) + "'; a router either reads each request with a model " +
 			"and sends it where that model says ('instruction'), places it by how much " +
 			"text is in it ('size'), or tries its destinations until one answers - in " +
@@ -288,23 +271,14 @@ func destinationCountProblem(rt policy.Router) string {
 	return ""
 }
 
-// checkRouterAlias refuses a router named like a catalogue model. A client
-// names both in the same field and the catalogue wins, so such a router would
-// never be reached.
-func (s *Server) checkRouterAlias(w http.ResponseWriter, r *http.Request, alias string) bool {
-	_, err := s.st.Model(r.Context(), alias)
-	switch {
-	case err == nil:
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "alias_in_use",
-			"'"+alias+"' is already a model in this deployment's catalogue. A client names a "+
-				"router in the same field it names a model, and the catalogue wins there, so "+
-				"this router would never be reached - give it a different alias")
-		return false
-	case !errors.Is(err, store.ErrNotFound):
-		s.fail(w, err)
-		return false
-	}
-	return true
+// checkRouterAlias refuses a router named like a model the organisation can
+// call. A client names both in the same field and the model wins, so such a
+// router would never be reached.
+func (s *Server) checkRouterAlias(w http.ResponseWriter, r *http.Request, orgID, alias string) bool {
+	_, err := s.st.Model(r.Context(), orgID, alias)
+	return !s.aliasTaken(w, err, "'"+alias+"' is already a model this organisation can call. "+
+		"A client names a router in the same field it names a model, and the model wins "+
+		"there, so this router would never be reached - give it a different alias")
 }
 
 // checkCeilings refuses a size router that could not place every request.
@@ -340,18 +314,18 @@ func checkCeilings(w http.ResponseWriter, rt policy.Router) bool {
 }
 
 // checkRouterModel refuses a model that cannot make a decision.
-func (s *Server) checkRouterModel(w http.ResponseWriter, r *http.Request, alias string) bool {
+func (s *Server) checkRouterModel(w http.ResponseWriter, r *http.Request, orgID, alias string) bool {
 	if alias == "" {
 		badRequest(w, "'model' is required; it names the model that makes the decision, which should be "+
 			"a fast one served locally - its generation is added to every request that "+
 			"names this router")
 		return false
 	}
-	m, err := s.st.Model(r.Context(), alias)
+	m, err := s.st.Model(r.Context(), orgID, alias)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		httpx.WriteError(w, http.StatusBadRequest, "invalid_request_error", "model_not_found",
-			"no model '"+alias+"' exists; a router decides with a model from the catalogue")
+			"this organisation has no model '"+alias+"'; a router decides with one of its models")
 		return false
 	case err != nil:
 		s.fail(w, err)
@@ -374,12 +348,12 @@ func (s *Server) checkDestinations(w http.ResponseWriter, r *http.Request,
 	rt *policy.Router,
 ) bool {
 	for _, alias := range rt.Destinations {
-		m, err := s.st.Model(r.Context(), alias)
+		m, err := s.st.Model(r.Context(), rt.OrgID, alias)
 		switch {
 		case errors.Is(err, store.ErrNotFound):
 			httpx.WriteError(w, http.StatusBadRequest, "invalid_request_error", "model_not_found",
-				"no model '"+alias+"' exists; a router's destinations are models from the "+
-					"catalogue")
+				"this organisation has no model '"+alias+"'; a router's destinations are its "+
+					"models")
 			return false
 		case err != nil:
 			s.fail(w, err)
@@ -400,7 +374,7 @@ func (s *Server) checkDestinations(w http.ResponseWriter, r *http.Request,
 }
 
 func (s *Server) deleteRouter(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	orgID, ok := s.routerAdmin(w, r, p)
+	orgID, ok := s.adminOrg(w, r, p)
 	if !ok {
 		return
 	}
@@ -435,8 +409,8 @@ func (s *Server) deleteRouter(w http.ResponseWriter, r *http.Request, p *authn.P
 // likeliest mistake is an instruction that always picks the same destination,
 // which costs a generation per request and routes nothing.
 func (s *Server) checkRouter(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	orgID, ok := s.routerAdmin(w, r, p)
-	if !ok || !s.requireGateway(w) {
+	orgID, ok := s.adminOrg(w, r, p)
+	if !ok {
 		return
 	}
 	rt, err := s.st.Router(r.Context(), orgID, r.PathValue("alias"))

@@ -103,30 +103,25 @@ var checkSecrets = []string{"wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY", "CH93 0076
 // Like CheckModel, this is not a tenant's request: no rate limit, budget,
 // billing or usage event. Its cost is reported, since every guarded request
 // will pay the same.
-func (s *Server) CheckFilter(ctx context.Context, f policy.Filter, m policy.Model) FilterProbe {
+func (s *Server) CheckFilter(ctx context.Context, f policy.Filter) FilterProbe {
 	p := FilterProbe{Alias: f.Alias, Mode: f.Mode, Model: f.Model, Shadow: f.Shadow}
-	if p.Mode == "" {
-		p.Mode = policy.FilterModeRewrite
-	}
 	// A pattern filter needs no backend, and its result is exactly what
 	// production will do.
 	if !f.UsesModel() {
 		return s.checkPattern(f, p)
 	}
-	switch {
-	case !m.Enabled:
-		p.Error = "the model '" + f.Model + "' is disabled, so this filter would refuse " +
-			"every request it covers"
-		return p
-	case m.Kind != policy.KindChat:
-		p.Error = "the model '" + f.Model + "' is a " + string(m.Kind) + " model; a filter " +
-			"reads text and answers in words, which only a chat model does"
-		return p
-	case len(m.Backends) == 0:
-		p.Error = "the model '" + f.Model + "' has no backend configured"
+	m, why := s.filterModel(f)
+	if why != "" {
+		// A filter in shadow that cannot run refuses nothing, so saying it
+		// would refuse everything sends its administrator the wrong way.
+		if f.Shadow {
+			p.Error = why + ", so this filter cannot run; it is in shadow, so requests go on as sent"
+		} else {
+			p.Error = why + ", so this filter would refuse every request it covers"
+		}
 		return p
 	}
-	if !f.Mode.Rewrites() {
+	if f.Mode.Gates() {
 		return s.checkGate(ctx, f, m, p)
 	}
 

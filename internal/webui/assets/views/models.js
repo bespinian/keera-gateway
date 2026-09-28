@@ -1,10 +1,11 @@
-// The model catalogue.
+// The organisation's models.
 //
-// A model is an API contract shared by every tenant, so only an operator can
-// change one; everybody else reads it, because a developer needs to know what
-// the models are.
+// Every model belongs to one organisation, and its administrators manage it.
+// Everybody else reads the list, because a developer needs to know what the
+// models are.
 
 import { api } from "../api.js";
+import { chooseOrg, orgNameOf } from "./orgs.js";
 import {
   h,
   table,
@@ -24,14 +25,56 @@ import {
   showError,
   locationName,
   releaseDay,
+  readRow,
+  go,
+  crumb,
+  checkButton,
+  currentRange,
+  rangePicker,
 } from "../ui.js";
 
+// canEditModels reports whether the reader may change the models they see:
+// they are their organisation's administrators'.
+export function canEditModels(ctx) {
+  return !!ctx.state.me.can_admin_org;
+}
+
+// usersOfModel names the filters and routers that use a model, for the
+// removal warning. Removing it does not stop them.
+async function usersOfModel(m) {
+  const [filters, routers] = await Promise.all([
+    api.filters(m.org_id).then((r) => r.data || []),
+    api.routers(m.org_id).then((r) => r.data || []),
+  ]);
+  const f = filters.filter((x) => x.model === m.alias).map((x) => x.alias);
+  const r = routers
+    .filter(
+      (x) => x.model === m.alias || (x.destinations || []).includes(m.alias),
+    )
+    .map((x) => x.alias);
+  let text = "";
+  if (f.length)
+    text += ` The filters ${f.join(", ")} run on it and will refuse every request they cover.`;
+  if (r.length) text += ` The routers ${r.join(", ")} will lose it.`;
+  return text;
+}
+
+// canAddModel reports whether the reader may add a model to the organisation
+// in view.
+function canAddModel(ctx) {
+  return !!ctx.state.me.can_admin_org && !!ctx.orgID;
+}
+
 export async function modelsView(ctx) {
-  const models = (await api.models()).data || [];
-  const canEdit = ctx.state.me.can_edit_catalogue;
+  if (!ctx.orgID) return chooseOrg(ctx, "Models");
+  const since = currentRange();
+  const res = await api.models(ctx.orgID, { stats: true, since });
+  const models = res.data || [];
+  const stats = res.stats || {};
+  const canAdd = canAddModel(ctx);
   // The hosted endpoints this binary knows. They only fill in a form, so a
   // deployment that cannot reach them still gets a working catalogue screen.
-  const providers = canEdit ? await presets() : [];
+  const providers = canAdd ? await presets() : [];
   ctx.setSubtitle(`${models.length} model${models.length === 1 ? "" : "s"}`);
 
   const head = h(
@@ -41,27 +84,26 @@ export async function modelsView(ctx) {
       "div",
       { class: "muted" },
       "Clients use a model's alias, not the backend model id or URL. So the " +
-        "backend can change without any client changes.",
+        "backend can change without any client changes. Each model belongs " +
+        "to one organisation.",
     ),
     h("div", { style: { flex: 1 } }),
-    // Everyone can browse it. Only an operator's page has fetched the
-    // providers, so only there can an empty list hide it.
-    !canEdit || providers.length
+    rangePicker(ctx, since),
+    // Everyone can browse it. Only a page that can add a model has fetched
+    // the providers, so only there can an empty list hide it.
+    !canAdd || providers.length
       ? h(
           "a",
           {
             class: "btn",
-            href: "/model-catalog",
+            href: "/provider-models",
             title: "Every model the hosted providers offer",
-            onClick: (e) => {
-              e.preventDefault();
-              ctx.navigate("/model-catalog");
-            },
+            onClick: go(ctx, "/provider-models"),
           },
-          "Model catalog",
+          "Model catalogue",
         )
       : null,
-    canEdit
+    canAdd
       ? h(
           "button",
           {
@@ -78,8 +120,8 @@ export async function modelsView(ctx) {
     [
       {
         // The alias opens the model's own screen: whether it is being used, by
-        // whom, how fast it is answering and what it has been failing with. None
-        // of that is configuration, which is what the rest of this row is.
+        // whom, how fast it is answering and what it has been failing with.
+        // None of that is configuration, which is what the rest of this row is.
         label: "Alias",
         sortKey: (m) => m.alias,
         cell: (m) =>
@@ -102,12 +144,6 @@ export async function modelsView(ctx) {
               "serves " + m.backend_model,
             ),
           ),
-      },
-      {
-        label: "Kind",
-        shrink: true,
-        sortKey: (m) => m.kind,
-        cell: (m) => pill(m.kind),
       },
       {
         // The provider rather than the addresses it explains. What a row is
@@ -165,6 +201,14 @@ export async function modelsView(ctx) {
             : h("span", { class: "faint" }, "-"),
       },
       {
+        // The same median as on the model's own screen, over the same window.
+        label: "First token",
+        num: true,
+        shrink: true,
+        sortKey: (m) => stats[m.alias]?.ttft_median_ms || null,
+        cell: (m) => ttftCell(stats[m.alias]),
+      },
+      {
         label: "Price / Mtok",
         num: true,
         shrink: true,
@@ -181,10 +225,10 @@ export async function modelsView(ctx) {
             : h("span", { class: "faint" }, "not billed"),
       },
       {
-        // Enabled says an operator turned it on. Health says the inference plane
-        // actually answers, and - the one that matters - that a tool call comes
-        // back as a tool call. They are not the same claim and the panel used to
-        // only make the first.
+        // Enabled says an administrator turned it on. Health says the inference
+        // plane actually answers, and - the one that matters - that a tool call
+        // comes back as a tool call. They are not the same claim and the panel
+        // used to only make the first.
         label: "Status",
         shrink: true,
         sortKey: (m) => (m.enabled ? 1 : 0),
@@ -193,7 +237,7 @@ export async function modelsView(ctx) {
             "div",
             { class: "stack" },
             m.enabled ? pill("Enabled", "good") : pill("Disabled", "warn"),
-            canEdit ? healthCell(m) : null,
+            canEditModels(ctx) ? healthCell(m) : null,
           ),
       },
       {
@@ -202,9 +246,10 @@ export async function modelsView(ctx) {
         cell: (m) => {
           // A member gets the same row opened for reading. What a model is
           // configured to do is what their requests to it will meet, so the
-          // answer to "why does this one cost that much" or "how large a request
-          // may I send" is here rather than in a message to an operator.
-          if (!canEdit) {
+          // answer to "why does this one cost that much" or "how large a
+          // request may I send" is here rather than in a message to an
+          // administrator.
+          if (!canEditModels(ctx)) {
             return h(
               "button",
               {
@@ -227,38 +272,35 @@ export async function modelsView(ctx) {
               },
               "Edit",
             ),
-            // A model the catalogue file declares is applied again on every
-            // start, so removing it here would last until the next one.
-            m.managed
-              ? null
-              : h(
-                  "button",
-                  {
-                    class: "btn btn-sm btn-danger",
-                    onClick: () =>
-                      confirm({
-                        title: `Remove ${m.alias}?`,
-                        body:
-                          "Clients that still use this model will get 404s. " +
-                          "Disable it instead to keep its reports.",
-                        confirmLabel: "Remove model",
-                        danger: true,
-                        onConfirm: async () => {
-                          await api.deleteModel(m.alias);
-                          toast("Model removed", "good");
-                          ctx.reload();
-                        },
-                      }),
-                  },
-                  "Remove",
-                ),
+            h(
+              "button",
+              {
+                class: "btn btn-sm btn-danger",
+                onClick: async () =>
+                  confirm({
+                    title: `Remove ${m.alias}?`,
+                    body:
+                      "Clients that still use this model will get 404s. " +
+                      "Disable it instead to keep its reports." +
+                      (await usersOfModel(m)),
+                    confirmLabel: "Remove model",
+                    danger: true,
+                    onConfirm: async () => {
+                      await api.deleteModel(m.alias, m.org_id);
+                      toast("Model removed", "good");
+                      ctx.reload();
+                    },
+                  }),
+              },
+              "Remove",
+            ),
           );
         },
       },
-    ],
+    ].filter(Boolean),
     models,
     {
-      emptyTitle: "The catalogue is empty",
+      emptyTitle: "No models yet",
       emptyBody:
         "Every inference request is refused until a model exists. Add " +
         "one and check it before handing out keys.",
@@ -284,15 +326,15 @@ export async function modelsView(ctx) {
   return h("div", {}, head, rows);
 }
 
-// modelCatalogView lists every model the hosted providers offer, with what it
-// costs and whether this catalogue already serves it. Everyone can read it; an
-// operator can also add a model from it, which opens the usual form with the
-// provider and the model already picked.
-export async function modelCatalogView(ctx) {
-  const canEdit = ctx.state.me.can_edit_catalogue;
+// providerModelsView lists every model the hosted providers offer, with what
+// it costs and whether this organisation already serves it. Everyone can read it; an
+// administrator can also add a model from it, which opens the usual form with
+// the provider and the model already picked.
+export async function providerModelsView(ctx) {
+  const canEdit = canAddModel(ctx);
   const [providers, models] = await Promise.all([
     presets(),
-    api.models().then((r) => r.data || []),
+    ctx.orgID ? api.models(ctx.orgID).then((r) => r.data || []) : [],
   ]);
 
   const rows = providers.flatMap((p) =>
@@ -319,19 +361,7 @@ export async function modelCatalogView(ctx) {
   const head = h(
     "div",
     { class: "detail-head" },
-    h(
-      "a",
-      {
-        class: "crumb",
-        href: "/models",
-        onClick: (e) => {
-          e.preventDefault();
-          ctx.navigate("/models");
-        },
-      },
-      icon(icons.back),
-      "Models",
-    ),
+    crumb(ctx, "/models", "Models"),
     h(
       "div",
       { class: "muted", style: { marginBottom: "16px" } },
@@ -436,7 +466,7 @@ export async function modelCatalogView(ctx) {
                 "button",
                 {
                   class: "btn btn-sm",
-                  title: "Add this model to the catalogue",
+                  title: `Add this model to ${orgNameOf(ctx)}`,
                   onClick: () =>
                     editModel(ctx, null, providers, { p: r.p, m: r.m }),
                 },
@@ -510,12 +540,28 @@ function releasedCell(day) {
   return day ? h("span", { class: "nowrap" }, releaseDay(day)) : dash();
 }
 
+// ttftCell is the median wait for the first token, and the p95 under it.
+// A model with no answered request in the window gets a dash.
+function ttftCell(st) {
+  if (!st?.ttft_median_ms) return dash();
+  return h(
+    "div",
+    { class: "stack nowrap" },
+    h("span", {}, ms(st.ttft_median_ms)),
+    h(
+      "span",
+      { class: "faint", style: { fontSize: "11.5px" } },
+      `p95 ${ms(st.ttft_p95_ms)}`,
+    ),
+  );
+}
+
 // openModel is this model's dialog opened from somewhere other than the
 // catalogue - the model's own screen, which links here rather than growing a
 // second copy of the same form. Which of the two dialogs it is depends on the
 // reader, exactly as it does on the row.
 export async function openModel(ctx, m) {
-  if (!ctx.state.me.can_edit_catalogue) return viewModel(ctx, m);
+  if (!canEditModels(ctx)) return viewModel(ctx, m);
   return editModel(ctx, m, await presets());
 }
 
@@ -524,10 +570,10 @@ export async function openModel(ctx, m) {
 //
 // It is not the edit form with its fields disabled. Half of that form is where
 // the model points - the endpoints and the credential - and the control plane
-// sends neither to anybody but an operator, so a disabled form would mostly be
-// empty boxes with no explanation for being empty. What is left is what a
-// member is actually held to, and it reads better as an answer than as a field
-// they cannot fill in.
+// sends neither to anybody but an administrator, so a disabled form would
+// mostly be empty boxes with no explanation for being empty. What is left is
+// what a member is actually held to, and it reads better as an answer than as a
+// field they cannot fill in.
 function viewModel(ctx, m) {
   modal({
     title: `Model - ${m.alias}`,
@@ -618,16 +664,6 @@ function viewModel(ctx, m) {
   });
 }
 
-function readRow(label, value, hint) {
-  return h(
-    "div",
-    { class: "field" },
-    h("label", {}, label),
-    h("div", {}, value),
-    hint ? h("div", { class: "hint" }, hint) : null,
-  );
-}
-
 // surfaceOf names the endpoint a kind answers on. "chat" is the kind; the thing
 // a developer has to get right is the path their client posts to.
 function surfaceOf(kind) {
@@ -647,52 +683,20 @@ function surfaceOf(kind) {
 }
 
 // healthCell is the check button and, once it has run, its verdict in place.
-// The result is deliberately not cached anywhere: a check is a statement about
-// the inference plane right now, and a stale green pill is worse than none.
 function healthCell(m) {
-  const slot = h("span");
-  const run = h(
-    "button",
-    {
-      class: "btn btn-sm btn-quiet",
-      title: "Send a test request to this model's backend",
-      onClick: async () => {
-        run.disabled = true;
-        slot.replaceChildren(
-          h(
-            "span",
-            { class: "faint nowrap" },
-            h("span", { class: "blip" }),
-            " checking…",
-          ),
-        );
-        try {
-          const probe = await api.checkModel(m.alias);
-          slot.replaceChildren(verdict(probe));
-        } catch (ex) {
-          slot.replaceChildren(
-            h("span", { class: "pill pill-bad" }, "check failed"),
-          );
-          toast(ex.message, "bad");
-        } finally {
-          run.disabled = false;
-        }
-      },
-    },
-    "Check",
+  const cell = checkButton(
+    "Send a test request to this model's backend",
+    () => api.checkModel(m.alias, m.org_id),
+    (probe) => verdict(probe, m.kind),
   );
-  return h(
-    "div",
-    { class: "row-tight", style: { marginTop: "4px" } },
-    run,
-    slot,
-  );
+  cell.style.marginTop = "4px";
+  return cell;
 }
 
 // verdict is the pill, and the whole report behind it. The pill has to be
 // readable at a glance and the report has to be complete, so they are not the
 // same thing.
-function verdict(probe) {
+function verdict(probe, kind) {
   const tone = probe.ok
     ? (probe.warnings || []).length
       ? "warn"
@@ -700,8 +704,8 @@ function verdict(probe) {
     : "bad";
   const label = probe.ok
     ? (probe.warnings || []).length
-      ? "OK, with notes"
-      : "Healthy"
+      ? "Working, with notes"
+      : "Working"
     : probe.tool_call_as_text
       ? "Tool calls broken"
       : probe.reachable
@@ -712,20 +716,27 @@ function verdict(probe) {
     {
       class: "pill pill-" + tone + " pill-button",
       title: "The full report",
-      onClick: () => report(probe),
+      onClick: () => report(probe, kind),
     },
     h("span", { class: "dot" }),
     label,
   );
 }
 
-function report(probe) {
+// Only a chat check streams and asks for a tool call. A completion or
+// embedding check sends one plain request, so the report leaves those out.
+function report(probe, kind) {
+  const chat = !kind || kind === "chat";
   const lines = [
     ["Backend", probe.backend || "-"],
     ["Reachable", probe.reachable ? "yes" : "no"],
     ["HTTP status", probe.status || "-"],
-    ["Streamed", probe.streamed ? "yes" : "no"],
-    ["Tool call in `tool_calls`", probe.tool_calls ? "yes" : "no"],
+    ...(chat
+      ? [
+          ["Streamed", probe.streamed ? "yes" : "no"],
+          ["Tool call in `tool_calls`", probe.tool_calls ? "yes" : "no"],
+        ]
+      : []),
     ["Model the backend served", probe.served_model || "-"],
     ["First token", probe.ttft_ms ? ms(probe.ttft_ms) : "-"],
     ["Total", probe.total_ms ? ms(probe.total_ms) : "-"],
@@ -735,8 +746,12 @@ function report(probe) {
     wide: true,
     title: `Check - ${probe.alias}`,
     subtitle: probe.ok
-      ? "The model answered and produced a usable tool call."
-      : "A coding agent cannot use this model as it is.",
+      ? chat
+        ? "The model answered and produced a usable tool call."
+        : "The model answered."
+      : chat
+        ? "A coding agent cannot use this model as it is."
+        : "Clients cannot use this model as it is.",
     body: h(
       "div",
       {},
@@ -745,8 +760,10 @@ function report(probe) {
         : h(
             "div",
             { class: "banner banner-good" },
-            "Reachable, streaming, and the tool call came back in a form " +
-              "clients can use.",
+            chat
+              ? "Reachable, streaming, and the tool call came back in a form " +
+                  "clients can use."
+              : "Reachable, and the answer came back in a form clients can use.",
           ),
       (probe.warnings || []).map((wmsg) =>
         h("div", { class: "banner banner-warn" }, wmsg),
@@ -807,12 +824,12 @@ function report(probe) {
 const KINDS = ["chat", "completion", "embedding"];
 
 // What a per-customer endpoint carries in place of the part only the
-// deployment knows. It is the same text internal/catalog/providers.go writes.
+// organisation knows. It is the same text internal/catalog/providers.go writes.
 const PRODUCT_ID = "{product_id}";
 
 // endpointOf is the address a provider's model is actually reached at: its
 // endpoint for the providers that serve everybody at one, and that endpoint
-// with the deployment's own product id written in for the ones that do not.
+// with the organisation's own product id written in for the ones that do not.
 //
 // Null while such a provider has no product id yet - there is no address to
 // show, and nothing to call a default.
@@ -826,10 +843,12 @@ function endpointOf(p, state) {
 // rendered into the client configurations `keera connect` prints, which quote
 // none of it, so it is lowercase letters, digits and interior hyphens - and a
 // model id is none of those things: it may carry the publisher's name, capital
-// letters and dots. This is a suggestion the operator types over, so the job
-// is only to offer something the form will accept.
+// letters and dots. This is a suggestion the administrator types over, so the
+// job is only to offer something the form will accept.
 function aliasFor(id) {
-  const name = String(id || "").split("/").pop();
+  const name = String(id || "")
+    .split("/")
+    .pop();
   return name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -839,11 +858,13 @@ function aliasFor(id) {
 // productIDOf reads a product id back out of a stored model's address, because
 // that is the only place it is kept: it is part of a URL, not a field of a
 // model. An address that does not match the provider's template is the
-// operator's own, and gives none back.
+// administrator's own, and gives none back.
 function productIDOf(p, backends) {
   if (!p || !p.needs_product_id) return "";
   const [head, tail] = p.endpoint.split(PRODUCT_ID);
-  const url = String(backends || "").split("\n")[0].trim();
+  const url = String(backends || "")
+    .split("\n")[0]
+    .trim();
   if (!url.startsWith(head) || !url.endsWith(tail)) return "";
   const id = url.slice(head.length, url.length - tail.length);
   return /^[A-Za-z0-9_-]+$/.test(id) ? id : "";
@@ -867,8 +888,8 @@ const PRESET_FIELDS = [
     // The one default that is prose. Two things follow from that: the line
     // under the field cannot quote what an edit replaced, the way it quotes a
     // price - and the field is never disabled, because a provider's sentence
-    // says what the model is and only this deployment knows what its alias is
-    // for. It is a starting point, and the point of it is being edited.
+    // says what the model is and only this organisation knows what its alias
+    // is for. It is a starting point, and the point of it is being edited.
     prose: true,
     of: (p, m) => (m && m.description ? m.description : null),
   },
@@ -884,7 +905,6 @@ const PRESET_FIELDS = [
     numeric: true,
     of: (p, m) => (m && m.max_context ? String(m.max_context) : null),
   },
-  { key: "apiKeyEnv", label: "credential variable", of: (p) => p.api_key_env },
   {
     key: "releaseDate",
     label: "release date",
@@ -918,16 +938,14 @@ const PRESET_FIELDS = [
   },
 ];
 
-// pick is a provider and one of its models to start from, as the model
-// catalog offers them. It only applies to a new model.
+// pick is a provider and one of its models to start from, as the provider
+// models screen offers them. It only applies to a new model.
 function editModel(ctx, existing, providers, pick) {
   const m = existing || { kind: "chat", enabled: true, backends: [] };
   const err = h("div");
-  // A model the catalogue file declares belongs to the file: the control plane
-  // refuses to change one, because the next start would apply the file over any
-  // change made here. The form still shows it, and still takes a credential -
-  // that is the one field no catalogue file carries.
-  const locked = !!(existing && existing.managed);
+  // Whose model this is: an existing one keeps its owner, and a new one is the
+  // organisation's in view.
+  const orgID = existing ? existing.org_id : ctx.orgID;
 
   const alias = h("input", {
     class: "input",
@@ -935,17 +953,15 @@ function editModel(ctx, existing, providers, pick) {
     placeholder: "keera-code",
     disabled: !!existing,
   });
-  const kind = h("select", { class: "select", disabled: locked });
+  const kind = h("select", { class: "select" });
   const backendModel = h("input", {
     class: "input",
     value: m.backend_model || "",
     placeholder: "keera-code",
-    disabled: locked,
   });
   const backends = h("textarea", {
     class: "input",
     rows: "3",
-    disabled: locked,
     placeholder: "http://keera-engine:8000/v1",
   });
   backends.value = (m.backends || []).join("\n");
@@ -955,44 +971,34 @@ function editModel(ctx, existing, providers, pick) {
     min: "0",
     value: m.max_context || "",
     placeholder: "0",
-    disabled: locked,
   });
   const description = h("input", {
     class: "input",
     value: m.description || "",
     placeholder: "A fast local model for short edits and everyday questions",
-    disabled: locked,
-  });
-  const apiKeyEnv = h("input", {
-    class: "input",
-    value: m.api_key_env || "",
-    placeholder: "KEERA_UPSTREAM_KEY",
-    disabled: locked,
   });
   const releaseDate = h("input", {
     class: "input",
     type: "date",
     value: m.release_date || "",
-    disabled: locked,
   });
   const location = h("input", {
     class: "input",
     value: m.location || "",
     placeholder: "onprem",
     list: "model-locations",
-    disabled: locked,
   });
-  const priceIn = priceInput(m.input_micros_per_mtok, locked);
-  const priceOut = priceInput(m.output_micros_per_mtok, locked);
-  const priceCached = priceInput(m.cached_input_micros_per_mtok, locked);
-  // The fields a provider can fill in, by the names PRESET_FIELDS knows them by.
+  const priceIn = priceInput(m.input_micros_per_mtok);
+  const priceOut = priceInput(m.output_micros_per_mtok);
+  const priceCached = priceInput(m.cached_input_micros_per_mtok);
+  // The fields a provider can fill in, by the names PRESET_FIELDS knows them
+  // by.
   const fields = {
     kind,
     backendModel,
     description,
     backends,
     maxContext,
-    apiKeyEnv,
     releaseDate,
     location,
     priceIn,
@@ -1005,32 +1011,24 @@ function editModel(ctx, existing, providers, pick) {
   // plane never sends one back, so an empty field means "leave it as it is"
   // rather than "there is none", and the placeholder is the only status the
   // panel can show.
-  const canStore = ctx.state.me.can_store_credentials;
   const apiKey = h("input", {
     class: "input",
     type: "password",
     autocomplete: "off",
     value: "",
-    placeholder: canStore
-      ? m.has_api_key
-        ? "•••••••• stored - type to replace"
-        : "sk-…"
-      : "set KEERA_SECRET_KEY to store a key here",
-    disabled: !canStore,
+    placeholder: m.has_api_key ? "•••••••• stored - type to replace" : "sk-…",
   });
-  const clearKey =
-    m.has_api_key && canStore ? h("input", { type: "checkbox" }) : null;
+  const clearKey = m.has_api_key ? h("input", { type: "checkbox" }) : null;
   const enabled = h("input", {
     type: "checkbox",
     checked: m.enabled !== false,
-    disabled: locked,
   });
 
   // What the form is doing, for the parts of it that have to agree: which
-  // provider's defaults are in the fields, whether a hosted endpoint was
-  // chosen at all, whether the operator has named the alias themselves, and
-  // which of the provider's answers this entry had already written over before
-  // the dialog opened - those stay the operator's to edit.
+  // provider's defaults are in the fields, whether a hosted endpoint was chosen
+  // at all, whether the administrator has named the alias themselves, and which
+  // of the provider's answers this entry had already written over before the
+  // dialog opened - those stay the administrator's to edit.
   const state = {
     // Which tile is pressed: an inference plane of your own, one of the
     // providers, or none at all on a new model - which is what holds the rest
@@ -1069,22 +1067,6 @@ function editModel(ctx, existing, providers, pick) {
   // somebody pointing a model at Anthropic is not deciding what a backend URL
   // is, and being asked to look at one is what made that job feel harder than
   // it is.
-  const envField = h(
-    "div",
-    { class: "field" },
-    h("label", {}, "Upstream key variable"),
-    apiKeyEnv,
-    h(
-      "div",
-      { class: "hint" },
-      canStore
-        ? "Read from the gateway's environment instead. A key stored above " +
-            "takes priority."
-        : "The name of a variable, not the secret, e.g. ANTHROPIC_API_KEY. " +
-            "It is read at startup, so changes need a restart.",
-    ),
-    marks.apiKeyEnv,
-  );
   const machinery = h(
     "div",
     {},
@@ -1201,11 +1183,6 @@ function editModel(ctx, existing, providers, pick) {
         marks.priceCached,
       ),
     ),
-    // Where the credential comes from is only a detail while the field above
-    // can take one. Without KEERA_SECRET_KEY it is the whole answer to "where
-    // does my key go", so it does not belong behind a fold - it is put next to
-    // the disabled field instead.
-    canStore ? envField : null,
   );
   // Where that group sits: inline while the model points at an inference plane
   // of your own, gone once a provider has filled it in.
@@ -1214,26 +1191,24 @@ function editModel(ctx, existing, providers, pick) {
   // above the API key, which is the other half of the same answer.
   const productSlot = h("div", {});
 
-  const hosted = locked
-    ? null
-    : hostedFields(ctx, providers, {
-        fields,
-        marks,
-        state,
-        slot,
-        productSlot,
-        machinery,
-        alias,
-        // An entry that already exists has answered the question, even when
-        // the answer is "an inference plane of my own": its tile is the one
-        // pressed, and the form below it is filled in.
-        existing: !!existing,
-        // Whether this is already a hosted model, which is a thing the entry
-        // says rather than a thing to guess from its backend URL.
-        initial: existing ? presetOf(providers, existing) : null,
-        // A tile has been clicked, so there is a form to fill in now.
-        onPick: () => reveal(),
-      });
+  const hosted = hostedFields(ctx, providers, {
+    fields,
+    marks,
+    state,
+    slot,
+    productSlot,
+    machinery,
+    alias,
+    // An entry that already exists has answered the question, even when
+    // the answer is "an inference plane of my own": its tile is the one
+    // pressed, and the form below it is filled in.
+    existing: !!existing,
+    // Whether this is already a hosted model, which is a thing the entry
+    // says rather than a thing to guess from its backend URL.
+    initial: existing ? presetOf(providers, existing) : null,
+    // A tile has been clicked, so there is a form to fill in now.
+    onPick: () => reveal(),
+  });
 
   // Everything the tiles govern, in one wrapper the dialog can hold back until
   // one of them is clicked. On a new model that is most of the form: where it
@@ -1250,7 +1225,8 @@ function editModel(ctx, existing, providers, pick) {
       h(
         "div",
         { class: "hint" },
-        "The name clients use. Changing it breaks them.",
+        "The name clients use. Changing it breaks them." +
+          ` Only ${orgNameOf(ctx)} can use this model.`,
       ),
     ),
     // Under the alias, and outside the machinery below, for two reasons. It
@@ -1284,13 +1260,9 @@ function editModel(ctx, existing, providers, pick) {
       h(
         "div",
         { class: "hint" },
-        canStore
-          ? "The key the gateway sends to the backend. Stored encrypted " +
-              "and never shown again. Leave empty to keep the stored key."
-          : "KEERA_SECRET_KEY is not set, so a key cannot be stored here. " +
-              "Set it and restart the gateway, or name a variable below.",
+        "The key the gateway sends to the backend. Stored encrypted " +
+          "and never shown again. Leave empty to keep the stored key.",
       ),
-      canStore ? null : command("openssl rand -hex 32"),
       clearKey
         ? h(
             "label",
@@ -1300,7 +1272,6 @@ function editModel(ctx, existing, providers, pick) {
           )
         : null,
     ),
-    canStore ? null : envField,
     slot,
     h(
       "div",
@@ -1326,12 +1297,10 @@ function editModel(ctx, existing, providers, pick) {
     {
       class: "btn btn-primary",
       onClick: async (e) => {
-        const list = locked
-          ? m.backends || []
-          : backends.value
-              .split("\n")
-              .map((s) => s.trim())
-              .filter(Boolean);
+        const list = backends.value
+          .split("\n")
+          .map((s) => s.trim())
+          .filter(Boolean);
         // Said on its own, because for this provider an empty backend is
         // not a field left blank - it is the one question the form asked
         // instead of showing a URL.
@@ -1364,58 +1333,48 @@ function editModel(ctx, existing, providers, pick) {
         }
         e.target.disabled = true;
         try {
-          // Absent unless the operator typed one or asked for the stored
+          // Absent unless the administrator typed one or asked for the stored
           // one to go: sending "" on every save would wipe it.
           let credential;
           if (clearKey && clearKey.checked) credential = "";
           else if (apiKey.value) credential = apiKey.value;
 
-          const declaration = locked
-            ? {
-                alias: m.alias,
-                kind: m.kind,
-                backends: list,
-                backend_model: m.backend_model,
-                provider: m.provider || "",
-                max_context: m.max_context || 0,
-                description: m.description || "",
-                release_date: m.release_date || "",
-                location: m.location || "",
-                api_key_env: m.api_key_env || "",
-                input_micros_per_mtok: m.input_micros_per_mtok || 0,
-                output_micros_per_mtok: m.output_micros_per_mtok || 0,
-                cached_input_micros_per_mtok:
-                  m.cached_input_micros_per_mtok || 0,
-                enabled: m.enabled !== false,
-              }
-            : {
-                alias: alias.value.trim(),
-                kind: kind.value,
-                backends: list,
-                backend_model: backendModel.value.trim(),
-                // What the fields below are: this provider's answers, or
-                // nobody's but the operator's. Saving it is what lets the
-                // next edit of this model tell the two apart.
-                provider:
-                  state.hosted && state.preset ? state.preset.p.name : "",
-                max_context: parseInt(maxContext.value, 10) || 0,
-                description: description.value.trim(),
-                release_date: releaseDate.value,
-                // Left empty, the control plane fills in the provider's, or
-                // onprem.
-                location: location.value.trim().toLowerCase(),
-                api_key_env: apiKeyEnv.value.trim(),
-                input_micros_per_mtok: micros(priceIn.value),
-                output_micros_per_mtok: micros(priceOut.value),
-                cached_input_micros_per_mtok: micros(priceCached.value),
-                enabled: enabled.checked,
-              };
-          await api.putModel(declaration.alias, {
-            ...declaration,
-            ...(credential === undefined ? {} : { api_key: credential }),
-          });
+          const declaration = {
+            alias: alias.value.trim(),
+            kind: kind.value,
+            backends: list,
+            backend_model: backendModel.value.trim(),
+            // What the fields below are: this provider's answers, or
+            // nobody's but the administrator's. Saving it is what lets the
+            // next edit of this model tell the two apart.
+            provider: state.hosted && state.preset ? state.preset.p.name : "",
+            max_context: parseInt(maxContext.value, 10) || 0,
+            description: description.value.trim(),
+            release_date: releaseDate.value,
+            // Left empty, the control plane fills in the provider's, or
+            // onprem.
+            location: location.value.trim().toLowerCase(),
+            input_micros_per_mtok: micros(priceIn.value),
+            output_micros_per_mtok: micros(priceOut.value),
+            cached_input_micros_per_mtok: micros(priceCached.value),
+            enabled: enabled.checked,
+          };
+          await api.putModel(
+            declaration.alias,
+            {
+              ...declaration,
+              ...(credential === undefined ? {} : { api_key: credential }),
+            },
+            orgID,
+          );
           close();
-          toast("Catalogue updated", "good");
+          toast("Model saved", "good");
+          if (!existing)
+            await allowNewModel(
+              orgID,
+              orgNameOf(ctx, orgID),
+              declaration.alias,
+            );
           ctx.reload();
         } catch (ex) {
           showError(err, ex.message);
@@ -1423,7 +1382,7 @@ function editModel(ctx, existing, providers, pick) {
         }
       },
     },
-    !existing ? "Create model" : locked ? "Save key" : "Save model",
+    !existing ? "Create model" : "Save model",
   );
 
   const reveal = () => {
@@ -1432,9 +1391,8 @@ function editModel(ctx, existing, providers, pick) {
     saveButton.disabled = false;
   };
   if (hosted && pick && !existing) hosted.pick(pick.p, pick.m);
-  // Held back only where there is a choice to make: a managed entry has no
-  // tiles, nor has a build that knows no providers, and a model that already
-  // exists has answered.
+  // Held back only where there is a choice to make: a build that knows no
+  // providers has no tiles, and a model that already exists has answered.
   const waiting = !!hosted && !state.place;
   rest.hidden = waiting;
   saveButton.hidden = waiting;
@@ -1442,7 +1400,7 @@ function editModel(ctx, existing, providers, pick) {
 
   close = modal({
     wide: true,
-    title: existing ? `${locked ? "" : "Edit "}${m.alias}` : "New model",
+    title: existing ? `Edit ${m.alias}` : "New model",
     subtitle: waiting
       ? "Start with where it runs. A hosted provider fills in the " +
         "endpoint, context window and prices. For self-hosted, you enter " +
@@ -1459,6 +1417,26 @@ function editModel(ctx, existing, providers, pick) {
   // somebody can type in - finds nothing on a new model, because until a tile
   // is clicked there is nothing below them to type in.
   if (waiting) hosted.querySelector("button.tile").focus();
+}
+
+// allowNewModel adds a model an organisation just added to its own allow
+// list, if it keeps one. Adding a model means wanting to use it, and without
+// this it would start switched off.
+async function allowNewModel(orgID, orgName, alias) {
+  try {
+    const limits = await api.guardrails("org", orgID);
+    const list = limits && limits.allowed_models;
+    if (!list || list.includes(alias)) return;
+    await api.putGuardrails("org", orgID, {
+      ...limits,
+      allowed_models: [...list, alias],
+    });
+  } catch {
+    toast(
+      `${alias} is not in ${orgName}'s guardrail. Add it there to use it.`,
+      "bad",
+    );
+  }
 }
 
 // presets reads the hosted endpoints this build knows. It is a convenience, so
@@ -1483,7 +1461,8 @@ function setKinds(select, kinds, selected) {
 // presetOf says which provider's row of the table a stored model sits on, and
 // which of that provider's models it serves. A model naming no provider, or one
 // naming a provider this build has since dropped, sits on none: its fields are
-// then nobody's but the operator's, which is exactly how the form treats them.
+// then nobody's but the administrator's, which is exactly how the form treats
+// them.
 function presetOf(providers, m) {
   const p = (providers || []).find((x) => x.name === m.provider);
   if (!p) return null;
@@ -1494,8 +1473,9 @@ function presetOf(providers, m) {
 }
 
 // providerAnswers says which of the fields below the chosen provider answers
-// for. Those are not the operator's to edit: the value they typed would be the
-// one that stops matching the provider they named, and nothing would say so.
+// for. Those are not the administrator's to edit: the value they typed would be
+// the one that stops matching the provider they named, and nothing would say
+// so.
 //
 // The rest are nobody else's to fill. A model this build has no entry for has
 // no context window and no prices in the table, so it has none to show; and a
@@ -1504,13 +1484,12 @@ function presetOf(providers, m) {
 function providerAnswers(p, known, currency) {
   return {
     backends: true,
-    apiKeyEnv: true,
     location: true,
     releaseDate: !!known && !!known.release_date,
     // The description is deliberately not here. The table fills it in like
-    // everything else, and then it is the operator's: a provider's sentence
-    // says what the model is, and what this deployment means by the alias is
-    // the part a router actually needs and only they can write.
+    // everything else, and then it is the administrator's: a provider's
+    // sentence says what the model is, and what this organisation means by the
+    // alias is the part a router actually needs and only they can write.
     //
     // A provider serving one surface leaves nothing to choose. One serving
     // several does, and which of them a model is has to be somebody's answer.
@@ -1550,7 +1529,7 @@ function providerAnswers(p, known, currency) {
 // What the table does not answer stays live inside the fold - see
 // providerAnswers - and the banner above names it, because a field somebody
 // has to fill in is now behind a fold they have to open. An entry that had
-// already written over one of the answers keeps it live too: a catalogue file
+// already written over one of the answers keeps it live too: an entry
 // pointing `provider: anthropic` at an egress proxy is not this form's to take
 // back.
 function hostedFields(ctx, providers, form) {
@@ -1663,8 +1642,8 @@ function hostedFields(ctx, providers, form) {
           "div",
           { class: "banner banner-info" },
           "This build does not know that model. Enter its context window " +
-            "and prices under Advanced options. Zero means free; blank means " +
-            "unpriced. A blank cached-input price means the input price.",
+            "and prices under Advanced options. Blank or zero means no price. " +
+            "A cached-input price of zero means the input price.",
         ),
       );
     }
@@ -1673,7 +1652,7 @@ function hostedFields(ctx, providers, form) {
 
   // The address is built from the product id rather than typed, so it is kept
   // in step with it. An entry that wrote its own address keeps it: that one is
-  // the operator's, and a product id cannot be read out of it.
+  // the administrator's, and a product id cannot be read out of it.
   const syncEndpoint = () => {
     const p = chosen();
     if (!p || !p.needs_product_id || state.overridden.has("backends")) return;
@@ -1687,7 +1666,7 @@ function hostedFields(ctx, providers, form) {
 
   // Which fields the provider is answering for right now, or null while the
   // model points at an inference plane of your own - where every one of them is
-  // the operator's.
+  // the administrator's.
   const answered = () => {
     const { p, m } = state.preset || {};
     if (!state.hosted || !p) return null;
@@ -1714,8 +1693,8 @@ function hostedFields(ctx, providers, form) {
   // there is nothing to read or fill in.
   //
   // `open` is true or false to state the fold, undefined to leave it as the
-  // operator left it, and "auto" for a fold appearing: start closed, and leave
-  // one already on the screen as it was.
+  // administrator left it, and "auto" for a fold appearing: start closed, and
+  // leave one already on the screen as it was.
   const paintMachinery = (open) => {
     const fixed = paintLocks();
     if (state.hosted && !state.preset) {
@@ -1852,9 +1831,9 @@ function hostedFields(ctx, providers, form) {
   // choose is a tile being clicked, which is more than painting it: where the
   // model runs has changed, so the model list is rebuilt and nothing is filled
   // in again until a model is named. The values already in the fields stay -
-  // they are the operator's now, and clearing a form somebody has filled in is
-  // never the helpful reading. With the provider goes the reason any of them
-  // was disabled.
+  // they are the administrator's now, and clearing a form somebody has filled
+  // in is never the helpful reading. With the provider goes the reason any of
+  // them was disabled.
   const choose = (place) => {
     // The tile that is already pressed is the way back from the tiles and
     // nothing more. Rebuilding the list under it would throw away the model
@@ -1918,8 +1897,8 @@ function hostedFields(ctx, providers, form) {
       }
     }
     // An address that gave no product id back is not this provider's template
-    // at all - an egress proxy, say - so it stays the operator's to edit, the
-    // way any other value they wrote over the table's does.
+    // at all - an egress proxy, say - so it stays the administrator's to edit,
+    // the way any other value they wrote over the table's does.
     if (initial.p.needs_product_id && !state.productID) {
       state.overridden.add("backends");
     }
@@ -2005,27 +1984,6 @@ function paintPresets(preset, fields, marks, state) {
 function sameValue(f, now, def) {
   now = String(now).trim();
   return f.numeric ? Number(now) === Number(def) : now === def;
-}
-
-// command is a line somebody has to run somewhere this panel cannot reach. It
-// carries a copy button because the alternative is retyping 64 hex characters
-// of somebody's own generated key by hand.
-function command(text) {
-  return h(
-    "div",
-    { class: "code", style: { marginTop: "6px" } },
-    h(
-      "button",
-      {
-        class: "btn btn-sm code-copy",
-        title: "Copy",
-        "aria-label": "Copy",
-        onClick: () => copyText(text),
-      },
-      icon(icons.copy),
-    ),
-    h("pre", {}, h("code", {}, text)),
-  );
 }
 
 function priceInput(v, disabled) {

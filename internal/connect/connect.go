@@ -26,7 +26,8 @@ type Client struct {
 	// two limits, {{context}} and {{output}}, for Render to fill in.
 	Template string `json:"template"`
 	// Run is what to type once it is configured, and Note a caveat, both in
-	// plain prose.
+	// prose. A span in backticks is something to type or a name to find;
+	// the panel shows it as code, and RunText and NoteText as quoted.
 	Run  string `json:"run"`
 	Note string `json:"note,omitempty"`
 }
@@ -72,8 +73,15 @@ func (c Client) Render(base, alias string, maxContext int) string {
 	return fill(c.Template, base, alias, maxContext)
 }
 
-// RunText is Run with the alias filled in.
-func (c Client) RunText(alias string) string { return fill(c.Run, "", alias, 0) }
+// RunText is Run with the alias filled in, for a terminal.
+func (c Client) RunText(alias string) string { return plain(fill(c.Run, "", alias, 0)) }
+
+// NoteText is Note for a terminal.
+func (c Client) NoteText() string { return plain(c.Note) }
+
+// plain quotes the backtick spans of catalogue prose, which a terminal does
+// not render.
+func plain(s string) string { return strings.ReplaceAll(s, "`", "'") }
 
 func fill(text, base, alias string, maxContext int) string {
 	window, output := Limits(maxContext)
@@ -104,8 +112,9 @@ func Title(alias string) string {
 	return strings.Join(words, " ")
 }
 
-// Lookup finds a client by key.
-func Lookup(key string) (Client, bool) {
+// Find finds a client by key in clients: this catalogue, or the one a
+// deployment sent.
+func Find(clients []Client, key string) (Client, bool) {
 	for _, c := range clients {
 		if c.Key == key {
 			return c, true
@@ -141,7 +150,7 @@ var clients = []Client{
     }
   }
 }`,
-		Run: "Run 'pi' in your project, then '/model', and pick {{name}}.",
+		Run: "Run `pi` in your project, then `/model`, and pick {{name}}.",
 	},
 	{
 		Key:   "opencode",
@@ -171,7 +180,7 @@ var clients = []Client{
     }
   }
 }`,
-		Run: "Run 'opencode' in your project, then '/models', and pick Keera · {{name}}.",
+		Run: "Run `opencode` in your project, then `/models`, and pick Keera · {{name}}.",
 	},
 	{
 		Key:   "claude-code",
@@ -196,11 +205,11 @@ curl "$ANTHROPIC_BASE_URL/v1/messages" \
   -H 'Content-Type: application/json' \
   -d '{"model":"{{alias}}","max_tokens":16,"messages":[{"role":"user","content":"Hello"}]}'`,
 		Note: "To make this permanent, and for background sessions that do not read your " +
-			"shell, put the same variables in the 'env' block of ~/.claude/settings.json. " +
+			"shell, put the same variables in the `env` block of `~/.claude/settings.json`. " +
 			"Use the key itself there, because that file does not expand shell variables. " +
-			"To fetch the key from a vault, use the apiKeyHelper setting instead. Do not " +
-			"put it in a project's .claude/settings.json, which is committed.",
-		Run: "Run 'claude' in your project. It already uses the model above. '/status' " +
+			"To fetch the key from a vault, use the `apiKeyHelper` setting instead. Do not " +
+			"put it in a project's `.claude/settings.json`, which is committed.",
+		Run: "Run `claude` in your project. It already uses the model above. `/status` " +
 			"shows which gateway and key it uses.",
 	},
 	{
@@ -218,7 +227,7 @@ curl "$OPENAI_BASE_URL/chat/completions" \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"model":"{{alias}}","messages":[{"role":"user","content":"Hello"}]}'`,
-		Run: "Start anything that reads OPENAI_BASE_URL (the official SDKs, Aider, your " +
-			"own scripts) with {{alias}} as the model.",
+		Run: "Start anything that reads `OPENAI_BASE_URL` (the official SDKs, Aider, your " +
+			"own scripts) with `{{alias}}` as the model.",
 	},
 }

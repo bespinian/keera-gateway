@@ -2,6 +2,7 @@ package control
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -28,7 +29,7 @@ import (
 // stops.
 //
 // The far end is a plain ssh server, so VS Code Remote-SSH and JetBrains
-// Gateway work unchanged, with `keera sandbox ssh` as the ProxyCommand.
+// Gateway work unchanged, with `keera sandbox proxy` as the ProxyCommand.
 
 // upgradeProtocol is the token both ends send. It is versioned because the
 // developer's `keera` binary may be older than the gateway.
@@ -75,7 +76,7 @@ func (s *Server) attach(w http.ResponseWriter, r *http.Request, p *authn.Princip
 	}
 
 	sb, ok := s.resolveSandbox(w, r, p)
-	if !ok {
+	if !ok || !s.canSeeSandbox(w, p, sb) {
 		return
 	}
 	// Seeing a sandbox is not enough to open a shell in it. See canAttach.
@@ -114,20 +115,27 @@ func (s *Server) attach(w http.ResponseWriter, r *http.Request, p *authn.Princip
 			"Connection: Upgrade\r\n\r\n")); err != nil {
 		return
 	}
-	pipe(client, conn, attachIdleTimeout)
+	// An open connection keeps the sandbox from being suspended as idle. The
+	// row is touched once a minute rather than per byte; the shortest idle
+	// suspension is five minutes.
+	touch := func() {
+		if err := s.st.TouchSandbox(context.WithoutCancel(r.Context()), sb.ID); err != nil {
+			s.log.Warn("sandbox attach could not record activity", "sandbox", sb.ID, "error", err)
+		}
+	}
+	touch()
+	pipe(client, conn, attachIdleTimeout, touch)
 }
 
 // resolveSandbox finds the sandbox a request names, by id or by name.
 //
 // Names are accepted so `keera sandbox ssh` needs no extra round trip before
-// ssh gets its bytes. A name is unique only inside one organisation.
+// ssh gets its bytes. A name is unique only for one person in one
+// organisation.
 func (s *Server) resolveSandbox(w http.ResponseWriter, r *http.Request, p *authn.Principal) (
 	store.Sandbox, bool,
 ) {
 	ref := r.PathValue("ref")
-	if ref == "" {
-		ref = r.PathValue("id")
-	}
 	var (
 		sb  store.Sandbox
 		err error
@@ -137,11 +145,19 @@ func (s *Server) resolveSandbox(w http.ResponseWriter, r *http.Request, p *authn
 	} else {
 		orgID, ok := s.requireOrg(w, p, r.URL.Query().Get("org_id"),
 			"name an organisation, or name the sandbox by its id; a sandbox name is only "+
-				"unique inside one organisation")
+				"unique for one person in one organisation")
 		if !ok {
 			return store.Sandbox{}, false
 		}
-		sb, err = s.st.LiveSandboxByName(r.Context(), orgID, ref)
+		var named []store.Sandbox
+		if named, err = s.st.LiveSandboxesByName(r.Context(), orgID, ref); err == nil {
+			if sb, err = pickSandbox(p, named); errors.Is(err, errSandboxAmbiguous) {
+				httpx.WriteError(w, http.StatusConflict, "invalid_request_error",
+					"sandbox_ambiguous", fmt.Sprintf("more than one person has a live "+
+						"sandbox called %q; name it by its id (sbx_...)", ref))
+				return store.Sandbox{}, false
+			}
+		}
 	}
 	if err != nil {
 		s.fail(w, err)
@@ -154,6 +170,32 @@ func (s *Server) resolveSandbox(w http.ResponseWriter, r *http.Request, p *authn
 		return store.Sandbox{}, false
 	}
 	return sb, true
+}
+
+// errSandboxAmbiguous is pickSandbox finding more than one sandbox the caller
+// may handle.
+var errSandboxAmbiguous = errors.New("more than one sandbox of that name")
+
+// pickSandbox chooses among the live sandboxes of one name, one per person.
+// The caller's own wins. Otherwise only those the caller may handle count, so
+// a member never learns that a colleague used the name.
+func pickSandbox(p *authn.Principal, named []store.Sandbox) (store.Sandbox, error) {
+	var mine []store.Sandbox
+	for _, sb := range named {
+		if p.UserID != "" && sb.UserID == p.UserID {
+			return sb, nil
+		}
+		if mayHandleSandbox(p, sb) {
+			mine = append(mine, sb)
+		}
+	}
+	switch len(mine) {
+	case 0:
+		return store.Sandbox{}, store.ErrNotFound
+	case 1:
+		return mine[0], nil
+	}
+	return store.Sandbox{}, errSandboxAmbiguous
 }
 
 // canAttach reports whether this principal may open a connection into a
@@ -211,12 +253,13 @@ func hijack(w http.ResponseWriter) (*hijacked, error) {
 }
 
 // pipe copies bytes both ways until either end stops, or until neither has
-// sent anything for idle.
+// sent anything for idle. tick, if set, is called once a minute while the
+// connection is open.
 //
 // Either copy ending closes both sides: a client that leaves should not keep
 // the sandbox side open, and a sandbox whose sshd exits should end the
 // client's session.
-func pipe(client io.ReadWriteCloser, remote net.Conn, idle time.Duration) {
+func pipe(client io.ReadWriteCloser, remote net.Conn, idle time.Duration, tick func()) {
 	var (
 		once sync.Once
 		done = make(chan struct{})
@@ -243,10 +286,6 @@ func pipe(client io.ReadWriteCloser, remote net.Conn, idle time.Duration) {
 		_, _ = io.Copy(&noticing{w: client, seen: &activity}, remote)
 	}()
 
-	if idle <= 0 {
-		<-done
-		return
-	}
 	// A coarse tick is enough: noticing an abandoned connection a minute late
 	// costs nothing.
 	t := time.NewTicker(time.Minute)
@@ -256,9 +295,12 @@ func pipe(client io.ReadWriteCloser, remote net.Conn, idle time.Duration) {
 		case <-done:
 			return
 		case now := <-t.C:
-			if now.UnixNano()-activity.get() > int64(idle) {
+			if idle > 0 && now.UnixNano()-activity.get() > int64(idle) {
 				stop()
 				return
+			}
+			if tick != nil {
+				tick()
 			}
 		}
 	}
@@ -291,9 +333,6 @@ func (s *Server) failSandbox(w http.ResponseWriter, err error) {
 			"that sandbox is no longer in the cluster")
 	case errors.Is(err, sandbox.ErrNotReady):
 		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "sandbox_not_ready",
-			err.Error())
-	case errors.Is(err, sandbox.ErrUnsupported):
-		httpx.WriteError(w, http.StatusNotImplemented, "invalid_request_error", "unsupported",
 			err.Error())
 	default:
 		s.fail(w, err)

@@ -60,6 +60,11 @@ func (c OIDCConfig) vouchesFor(domain string) bool {
 	return false
 }
 
+// ReservedProvider is the provider name the gateway uses for sign-ins of its
+// own, such as the operator key's. No identity provider may be called it, so
+// none can issue a subject that matches one of them.
+const ReservedProvider = "keera"
+
 // nameRE is what a provider name may be. The name ends up in a URL and in a
 // stored external ID, so it keeps to characters that are safe in both.
 var nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -88,6 +93,9 @@ func (c OIDCConfig) Validate() error {
 	case !nameRE.MatchString(c.Name):
 		return fmt.Errorf("%q is not a usable provider name; use lower-case "+
 			"letters, digits and hyphens", c.Name)
+	case c.Name == ReservedProvider:
+		return fmt.Errorf("%q is reserved for the gateway's own sign-ins; give the "+
+			"identity provider another name", c.Name)
 	case c.ClientSecret == "":
 		return fmt.Errorf("the client secret is required for the %s identity provider", c.Name)
 	case c.RedirectURL == "":
@@ -105,7 +113,6 @@ type Identity struct {
 	Provider string
 	Subject  string
 	Email    string
-	Name     string
 	Groups   []string
 }
 
@@ -297,14 +304,10 @@ func (o *OIDC) Exchange(ctx context.Context, code string, f Flow) (Identity, err
 		Provider: o.cfg.Name,
 		Subject:  idToken.Subject,
 		Email:    strings.ToLower(strings.TrimSpace(stringClaim(claims, "email"))),
-		Name:     stringClaim(claims, "name"),
 		Groups:   stringsClaim(claims, groupsClaim),
 	}
 	if err := o.checkIdentity(id, claims, groupsClaim); err != nil {
 		return id, err
-	}
-	if id.Name == "" {
-		id.Name = id.Email
 	}
 	return id, nil
 }

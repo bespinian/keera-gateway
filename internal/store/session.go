@@ -9,23 +9,16 @@ import (
 
 // Session is one signed-in browser.
 type Session struct {
-	UserID     string
-	CSRF       string
-	ExpiresAt  time.Time
-	LastSeenAt time.Time
+	UserID    string
+	CSRF      string
+	ExpiresAt time.Time
 }
 
 // CreateSession stores a session under the hash of its cookie value.
 func (s *Store) CreateSession(ctx context.Context, hash []byte, userID, csrf string,
-	expires time.Time, userAgent, ip string) error {
-	// The user agent comes from the client, and is only read by a person
-	// checking their own sessions, so it is cut short.
-	if len(userAgent) > 400 {
-		userAgent = userAgent[:400]
-	}
-	_, err := s.pool.Exec(ctx, `INSERT INTO sessions
-		(id, user_id, csrf, expires_at, user_agent, ip) VALUES ($1,$2,$3,$4,$5,$6)`,
-		hash, userID, csrf, expires, userAgent, ip)
+	expires time.Time) error {
+	_, err := s.pool.Exec(ctx, `INSERT INTO sessions (id, user_id, csrf, expires_at)
+		VALUES ($1,$2,$3,$4)`, hash, userID, csrf, expires)
 	return err
 }
 
@@ -40,23 +33,14 @@ type SessionUser struct {
 // disabled person, is reported as missing, so no caller has to check either.
 func (s *Store) LookupSession(ctx context.Context, hash []byte) (SessionUser, error) {
 	var su SessionUser
-	err := s.pool.QueryRow(ctx, `SELECT s.user_id, s.csrf, s.expires_at, s.last_seen_at,
+	err := s.pool.QueryRow(ctx, `SELECT s.user_id, s.csrf, s.expires_at,
 		u.id, u.org_id, u.email, COALESCE(u.external_id,''), u.role, u.created_at
 		FROM sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.id = $1 AND s.expires_at > now() AND u.disabled_at IS NULL`, hash,
-	).Scan(&su.Session.UserID, &su.Session.CSRF, &su.Session.ExpiresAt, &su.Session.LastSeenAt,
+	).Scan(&su.Session.UserID, &su.Session.CSRF, &su.Session.ExpiresAt,
 		&su.User.ID, &su.User.OrgID, &su.User.Email, &su.User.ExternalID, &su.User.Role,
 		&su.User.CreatedAt)
 	return su, notFound(err)
-}
-
-// TouchSession records that a session was used, at most once a minute, so the
-// read path does not write on every request.
-func (s *Store) TouchSession(ctx context.Context, hash []byte) error {
-	_, err := s.pool.Exec(ctx,
-		`UPDATE sessions SET last_seen_at = now()
-		 WHERE id = $1 AND last_seen_at < now() - interval '1 minute'`, hash)
-	return err
 }
 
 // DeleteSession signs one browser out.
@@ -207,24 +191,21 @@ type Link struct {
 	// spells it.
 	ExternalID string
 	Role       string
-	// AdoptByEmail lets this sign-in take over a row that already has a
-	// different provider's subject. It is off by default: with several
-	// providers, matching on email alone would let one directory's user take
-	// over another's account and role. Turn it on only to move an
-	// organisation from one provider to another.
-	AdoptByEmail bool
 }
 
 // ErrEmailTaken is returned when a sign-in would have to take over a person who
-// is already bound to a different provider's subject.
-var ErrEmailTaken = errors.New("store: that address already belongs to an identity from another provider")
+// is already bound to a different subject, from another provider or the same
+// one.
+var ErrEmailTaken = errors.New("store: that address already belongs to a different identity")
 
 // LinkUser creates or updates the person behind an identity, matching first on
 // the provider's subject and then on the email address.
 //
 // The email match lets an organisation create its people in advance: the
 // first sign-in adopts the row instead of adding a duplicate. A row that
-// already has another subject needs Link.AdoptByEmail.
+// already has another subject is refused: matching on email alone would let
+// another directory's user, or a reused address, take over the account and
+// its role.
 func (s *Store) LinkUser(ctx context.Context, newID string, l Link) (User, error) {
 	if u, err := s.UserByExternalID(ctx, l.ExternalID); err == nil {
 		if !strings.EqualFold(u.Email, l.Email) {
@@ -240,14 +221,10 @@ func (s *Store) LinkUser(ctx context.Context, newID string, l Link) (User, error
 
 	// The guard is in the conflict clause, not a separate read, so two
 	// sign-ins racing on one address cannot both pass it.
-	adopt := "AND (users.external_id IS NULL OR users.external_id = '')"
-	if l.AdoptByEmail {
-		adopt = ""
-	}
 	u, err := scanUser(s.pool.QueryRow(ctx, `INSERT INTO users (id, org_id, email, external_id, role)
 		VALUES ($1,$2,$3,$4,$5)
 		ON CONFLICT (org_id, email) DO UPDATE SET external_id = EXCLUDED.external_id
-		WHERE true `+adopt+`
+		WHERE users.external_id IS NULL OR users.external_id = ''
 		RETURNING `+userColumns,
 		newID, l.OrgID, l.Email, l.ExternalID, l.Role))
 	// When the guard filters out the update, no row comes back.

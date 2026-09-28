@@ -1,8 +1,7 @@
 // Package config reads Keera Gateway's settings from the environment.
 //
-// Every setting is an environment variable. The model and sandbox catalogues
-// can also be given as files, so a NixOS or GitOps deployment can declare them
-// with the rest of the system.
+// Every setting is an environment variable. The model and sandbox catalogue
+// files are templates: each new organisation starts with a copy of them.
 package config
 
 import (
@@ -14,7 +13,13 @@ import (
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/authn"
+	"github.com/bespinian/keera-gateway/internal/gateway"
+	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/policy"
+	"github.com/bespinian/keera-gateway/internal/ratelimit"
+	"github.com/bespinian/keera-gateway/internal/registry"
+	"github.com/bespinian/keera-gateway/internal/store"
+	"github.com/redis/go-redis/v9"
 )
 
 // Config is the whole of Keera Gateway's configuration.
@@ -22,8 +27,9 @@ type Config struct {
 	DatabaseURL string
 	MaxDBConns  int32
 
-	// Addr is the one listener. The panel is served at /, inference under
-	// /api and the control API under /control.
+	// Addr is the one listener. The panel is served at /, inference and MCP
+	// under /api, the control API under /control and the sandbox attach
+	// surface under /sandbox.
 	Addr string
 
 	// OperatorKey authenticates the control API. It is the one credential not
@@ -31,8 +37,7 @@ type Config struct {
 	OperatorKey string
 
 	// SecretKey encrypts credentials stored through the control plane, such as
-	// a hosted model's API key. Empty turns that off, and models take their
-	// credentials from the environment instead.
+	// a hosted model's API key.
 	SecretKey string
 
 	// MetricsToken reads /metrics and nothing else, so a scrape configuration
@@ -40,8 +45,7 @@ type Config struct {
 	// operators and the operator key.
 	MetricsToken string
 
-	// ModelsFile declares the model catalogue. It is applied on every start
-	// and is idempotent, so the deployment owns it rather than the API.
+	// ModelsFile declares the models each new organisation starts with.
 	ModelsFile string
 
 	LogLevel  string
@@ -60,9 +64,8 @@ type Config struct {
 	AuditRetention time.Duration
 
 	// SessionGap is how long an agent conversation may go quiet before the
-	// next request counts as a new task. Zero leaves the store's default of
-	// half an hour. Nothing is stored per session, so changing it re-cuts past
-	// sessions too. See docs/sessions.md.
+	// next request counts as a new task. Nothing is stored per session, so
+	// changing it re-cuts past sessions too. See docs/sessions.md.
 	SessionGap time.Duration
 
 	// Currency is a label carried into reports. All money is stored as integer
@@ -79,11 +82,12 @@ type Config struct {
 	// UI serves the control panel from the listener's root.
 	UI bool
 	// PublicURL is the gateway's origin as a browser sees it. It is used for
-	// the redirect after sign-out and for the address under "Connect a
-	// client". Empty uses the request's Host header.
+	// the redirect after sign-out, the address under "Connect a client" and
+	// the panel link in a refusal. Empty uses the request's Host header for
+	// the first two and leaves the link out.
 	PublicURL string
 	// SecureCookies marks the session cookie Secure. It defaults to on when
-	// the public or redirect URL is https; turning it off lets a plain-http
+	// the public URL is https; turning it off lets a plain-http
 	// demo on localhost sign in.
 	SecureCookies bool
 
@@ -93,9 +97,6 @@ type Config struct {
 	// OIDC is every identity provider, in the order the sign-in screen shows
 	// them. Empty leaves the operator key as the only way in.
 	OIDC []authn.OIDCConfig
-	// OIDCAdoptByEmail lets a sign-in take over a person already bound to a
-	// different provider's subject. See store.Link.
-	OIDCAdoptByEmail bool
 }
 
 // Load reads the environment.
@@ -103,46 +104,37 @@ func Load() (Config, error) {
 	c := Config{
 		DatabaseURL:           env("KEERA_DATABASE_URL", ""),
 		MaxDBConns:            int32(envInt("KEERA_MAX_DB_CONNS", 16)),
-		Addr:                  env("KEERA_ADDR", ":8080"),
+		Addr:                  Addr(),
 		OperatorKey:           env("KEERA_OPERATOR_KEY", ""),
 		SecretKey:             env("KEERA_SECRET_KEY", ""),
 		MetricsToken:          env("KEERA_METRICS_TOKEN", ""),
 		ModelsFile:            env("KEERA_MODELS_FILE", ""),
 		LogLevel:              env("KEERA_LOG_LEVEL", "info"),
 		LogFormat:             env("KEERA_LOG_FORMAT", "text"),
-		MaxBodyBytes:          int64(envInt("KEERA_MAX_BODY_BYTES", 32<<20)),
-		MaxResponseBytes:      int64(envInt("KEERA_MAX_RESPONSE_BYTES", 64<<20)),
-		UpstreamHeaderTimeout: envDuration("KEERA_UPSTREAM_HEADER_TIMEOUT", 2*time.Minute),
-		CacheTTL:              envDuration("KEERA_CACHE_TTL", 30*time.Second),
-		SpendRefresh:          envDuration("KEERA_SPEND_REFRESH", 10*time.Second),
+		MaxBodyBytes:          int64(envInt("KEERA_MAX_BODY_BYTES", gateway.DefaultMaxBodyBytes)),
+		MaxResponseBytes:      int64(envInt("KEERA_MAX_RESPONSE_BYTES", gateway.DefaultMaxResponseBytes)),
+		UpstreamHeaderTimeout: envDuration("KEERA_UPSTREAM_HEADER_TIMEOUT", gateway.DefaultUpstreamHeaderTimeout),
+		CacheTTL:              envDuration("KEERA_CACHE_TTL", registry.DefaultTTL),
+		SpendRefresh:          envDuration("KEERA_SPEND_REFRESH", registry.DefaultSpendRefresh),
 		UsageRetention:        envDuration("KEERA_USAGE_RETENTION", 0),
 		AuditRetention:        envDuration("KEERA_AUDIT_RETENTION", 0),
-		SessionGap:            envDuration("KEERA_SESSION_GAP", 0),
+		SessionGap:            envDuration("KEERA_SESSION_GAP", store.DefaultSessionGap),
 		Currency:              env("KEERA_CURRENCY", "CHF"),
 		RedisURL:              env("KEERA_REDIS_URL", ""),
-		RedisPrefix:           env("KEERA_REDIS_PREFIX", "keera"),
+		RedisPrefix:           env("KEERA_REDIS_PREFIX", ratelimit.DefaultRedisPrefix),
 		Sandbox:               sandboxConfig(),
 		UI:                    envBool("KEERA_UI", true),
 		PublicURL:             strings.TrimRight(env("KEERA_PUBLIC_URL", ""), "/"),
-		OIDC:                  oidcProviders(),
-		OIDCAdoptByEmail:      envBool("KEERA_OIDC_ADOPT_BY_EMAIL", false),
 	}
+	c.OIDC = oidcProviders(c.PublicURL)
 	c.SecureCookies = envBool("KEERA_SECURE_COOKIES", c.servedOverHTTPS())
 	return c, c.validate()
 }
 
-// servedOverHTTPS reports whether the public URL or any sign-in redirect is
-// https, which is when cookies should be Secure by default.
+// servedOverHTTPS reports whether the public URL is https, which is when
+// cookies should be Secure by default.
 func (c Config) servedOverHTTPS() bool {
-	if strings.HasPrefix(c.PublicURL, "https://") {
-		return true
-	}
-	for _, p := range c.OIDC {
-		if strings.HasPrefix(p.RedirectURL, "https://") {
-			return true
-		}
-	}
-	return false
+	return strings.HasPrefix(c.PublicURL, "https://")
 }
 
 func (c Config) validate() error {
@@ -170,6 +162,19 @@ func (c Config) validateCredentials() error {
 	}
 	if len(c.OperatorKey) < 16 {
 		return errors.New("KEERA_OPERATOR_KEY is too short to be a credential")
+	}
+	if c.SecretKey == "" {
+		return errors.New("KEERA_SECRET_KEY is required; generate one with: openssl rand -hex 32")
+	}
+	if len(c.SecretKey) < 16 {
+		return errors.New("KEERA_SECRET_KEY is too short to be a key; generate one with: openssl rand -hex 32")
+	}
+	// Parsed here, and again where it is used, so a typo stops the start
+	// before the database is touched.
+	if c.RedisURL != "" {
+		if _, err := redis.ParseURL(c.RedisURL); err != nil {
+			return fmt.Errorf("KEERA_REDIS_URL: %w", err)
+		}
 	}
 	if c.MetricsToken == "" {
 		return nil
@@ -207,10 +212,7 @@ func (c Config) validateRetention() error {
 // validateSessionGap sets a floor of a minute. Below that every request would
 // be its own session, which is just the request log.
 func (c Config) validateSessionGap() error {
-	if c.SessionGap < 0 {
-		return errors.New("KEERA_SESSION_GAP cannot be negative")
-	}
-	if c.SessionGap > 0 && c.SessionGap < time.Minute {
+	if c.SessionGap < time.Minute {
 		return fmt.Errorf("KEERA_SESSION_GAP is %s; below a minute every request "+
 			"is its own session, which is the request log", c.SessionGap)
 	}
@@ -218,6 +220,12 @@ func (c Config) validateSessionGap() error {
 }
 
 func (c Config) validateOIDC() error {
+	// The identity provider sends the browser back to the callback under this
+	// address, so without it there is nowhere to send it.
+	if len(c.OIDC) > 0 && c.PublicURL == "" {
+		return errors.New("set KEERA_PUBLIC_URL to the address a browser reaches the " +
+			"panel on; single sign-on returns to its /control/auth/callback")
+	}
 	seen := map[string]bool{}
 	for _, p := range c.OIDC {
 		if err := p.Validate(); err != nil {
@@ -227,9 +235,11 @@ func (c Config) validateOIDC() error {
 			return fmt.Errorf("KEERA_OIDC_PROVIDERS names %q twice", p.Name)
 		}
 		seen[p.Name] = true
-		if !p.Mapping.Default.Valid() {
+		// Not operator: that role comes only from KEERA_OPERATORS or an
+		// operator group, so reading those shows everyone who holds it.
+		if !p.Mapping.Default.Assignable() {
 			return fmt.Errorf("the default role for the %s identity provider "+
-				"must be operator, admin or member", p.Name)
+				"must be admin or member", p.Name)
 		}
 		// With several directories, one customer's could otherwise give its
 		// users another customer's addresses, or an operator's.
@@ -242,76 +252,46 @@ func (c Config) validateOIDC() error {
 	return nil
 }
 
-// singleProviderName is the name of the provider the unprefixed KEERA_OIDC_*
-// settings configure. A deployment with one directory need not name it, but
-// every external ID stores a name; migration 0024 gave the existing ones this.
-const singleProviderName = "sso"
-
-// oidcPrefix is where the unprefixed provider's settings live, and where every
-// named provider falls back to.
-const oidcPrefix = "KEERA_OIDC_"
-
-// oidcProviders reads however many identity providers are configured.
+// oidcProviders reads the identity providers KEERA_OIDC_PROVIDERS names.
+// Provider N reads KEERA_OIDC_<N>_*, and nothing is shared between them.
 //
-// KEERA_OIDC_PROVIDERS lists the names. Provider N reads KEERA_OIDC_<N>_* and
-// falls back to the unprefixed setting where sharing one makes sense, such as
-// the redirect URL. With no list, the unprefixed settings configure a single
-// provider.
-func oidcProviders() []authn.OIDCConfig {
-	names := envList("KEERA_OIDC_PROVIDERS")
-	if len(names) == 0 {
-		if env(oidcPrefix+"ISSUER", "") == "" && env(oidcPrefix+"CLIENT_ID", "") == "" {
-			return nil
-		}
-		return []authn.OIDCConfig{providerFrom(oidcPrefix, singleProviderName)}
+// One callback serves every provider, because a sign-in is recognised by its
+// state and not by the address it comes back to.
+func oidcProviders(publicURL string) []authn.OIDCConfig {
+	redirect := ""
+	if publicURL != "" {
+		redirect = publicURL + httpx.ControlPrefix + "/auth/callback"
 	}
-	out := make([]authn.OIDCConfig, 0, len(names))
-	for _, name := range names {
+	var out []authn.OIDCConfig
+	for _, name := range envList("KEERA_OIDC_PROVIDERS") {
 		name = strings.ToLower(strings.TrimSpace(name))
 		if name == "" {
 			continue
 		}
-		out = append(out, providerFrom(oidcPrefix+envSegment(name)+"_", name))
+		out = append(out, providerFrom("KEERA_OIDC_"+envSegment(name)+"_", name, redirect))
 	}
 	return out
 }
 
-// providerFrom reads one provider's settings from prefix, falling back to the
-// unprefixed ones where noted.
-func providerFrom(prefix, name string) authn.OIDCConfig {
-	shared := func(key, def string) string {
-		return env(prefix+key, env(oidcPrefix+key, def))
-	}
-	sharedList := func(key string) []string {
-		if v := envList(prefix + key); len(v) > 0 {
-			return v
-		}
-		return envList(oidcPrefix + key)
-	}
+// providerFrom reads one provider's settings from prefix.
+func providerFrom(prefix, name, redirect string) authn.OIDCConfig {
 	return authn.OIDCConfig{
-		Name:        name,
-		DisplayName: shared("LABEL", providerLabel(name)),
-		// The issuer and client are never shared: two providers on one client
-		// would sign people in to the wrong directory instead of failing.
+		Name:         name,
+		DisplayName:  env(prefix+"LABEL", providerLabel(name)),
 		IssuerURL:    env(prefix+"ISSUER", ""),
 		ClientID:     env(prefix+"CLIENT_ID", ""),
 		ClientSecret: env(prefix+"CLIENT_SECRET", ""),
-		RedirectURL:  shared("REDIRECT_URL", ""),
-		Scopes:       sharedList("SCOPES"),
-		GroupsClaim:  shared("GROUPS_CLAIM", "groups"),
+		RedirectURL:  redirect,
+		Scopes:       envList(prefix + "SCOPES"),
+		GroupsClaim:  env(prefix+"GROUPS_CLAIM", "groups"),
 		Mapping: authn.RoleMapping{
-			// Operator groups are never shared. A customer's directory admin
-			// can create any group, so a shared name would let every customer
-			// make operators. Admin groups may be shared: an administrator
-			// only reaches the tenant their domain places them in.
 			OperatorGroups: envList(prefix + "OPERATOR_GROUPS"),
-			AdminGroups:    sharedList("ADMIN_GROUPS"),
+			AdminGroups:    envList(prefix + "ADMIN_GROUPS"),
 			// An address is the same whichever directory vouched for it, so
 			// there is one operator list for the deployment.
 			OperatorEmails: envList("KEERA_OPERATORS"),
-			Default:        authn.Role(shared("DEFAULT_ROLE", string(authn.RoleMember))),
+			Default:        authn.Role(env(prefix+"DEFAULT_ROLE", string(authn.RoleMember))),
 		},
-		// Never shared: each directory vouches for its own domains.
 		Domains: envList(prefix + "DOMAINS"),
 	}
 }
@@ -334,20 +314,20 @@ func providerLabel(name string) string {
 		return "Okta"
 	case "keycloak":
 		return "Keycloak"
-	case singleProviderName:
-		return "single sign-on"
 	}
 	return strings.ToUpper(name[:1]) + name[1:]
 }
 
+// envBool reads a switch. A value it cannot read is ignored, as for numbers:
+// a typo must not turn a safety setting off.
 func envBool(key string, def bool) bool {
 	switch strings.ToLower(env(key, "")) {
-	case "":
-		return def
 	case "1", "true", "yes", "on":
 		return true
-	default:
+	case "0", "false", "no", "off":
 		return false
+	default:
+		return def
 	}
 }
 
@@ -366,6 +346,10 @@ func envList(key string) []string {
 	}
 	return out
 }
+
+// Addr is KEERA_ADDR on its own, for `keera-gateway health`, which must not
+// need the settings only the server does.
+func Addr() string { return env("KEERA_ADDR", ":8080") }
 
 func env(key, def string) string {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
@@ -390,9 +374,6 @@ func envDuration(key string, def time.Duration) time.Duration {
 	return d
 }
 
-// APIKey resolves a model's api_key_env against the process environment.
-func APIKey(name string) string { return os.Getenv(name) }
-
 /* ------------------------------------------------------------------ sandboxes */
 
 // SandboxConfig holds the sandbox settings, off by default.
@@ -404,8 +385,8 @@ func APIKey(name string) string { return os.Getenv(name) }
 type SandboxConfig struct {
 	// Driver is "kubernetes", "podman", or empty for no sandboxes.
 	Driver string
-	// File declares the sandbox catalogue, applied on every start like the
-	// model catalogue.
+	// File declares the sandbox classes each new organisation starts with,
+	// like the model file.
 	File string
 	// Namespace is where the Kubernetes driver creates sandboxes. It should
 	// not be the gateway's own: a sandbox's API key is in its pod spec, so
@@ -424,19 +405,10 @@ type SandboxConfig struct {
 	// Service rather than the ingress. Empty falls back to the deployment's
 	// PublicURL, which suits a single host.
 	PublicURL string
-	// Model is the alias a sandbox's agent is pointed at.
-	Model string
 	// IdleSuspend is how long a sandbox may sit with nobody attached before it
 	// is suspended: the volume kept, the compute released. Zero leaves it
 	// running until it expires.
 	IdleSuspend time.Duration
-
-	// The Kube settings override the in-cluster defaults, which the Helm
-	// chart's install does not need.
-	KubeServer    string
-	KubeTokenFile string
-	KubeCAFile    string
-	KubeInsecure  bool
 
 	// Warm switches warm pools on: a few sandboxes of each class kept started
 	// so asking for one is instant. It is a separate switch because it needs
@@ -482,12 +454,7 @@ func sandboxConfig() SandboxConfig {
 		ServiceAccount:   env("KEERA_SANDBOX_SERVICE_ACCOUNT", ""),
 		ImagePullSecrets: envList("KEERA_SANDBOX_IMAGE_PULL_SECRETS"),
 		PublicURL:        strings.TrimRight(env("KEERA_SANDBOX_PUBLIC_URL", ""), "/"),
-		Model:            env("KEERA_SANDBOX_MODEL", ""),
 		IdleSuspend:      envDuration("KEERA_SANDBOX_IDLE_SUSPEND", 0),
-		KubeServer:       env("KEERA_SANDBOX_KUBE_SERVER", ""),
-		KubeTokenFile:    env("KEERA_SANDBOX_KUBE_TOKEN_FILE", ""),
-		KubeCAFile:       env("KEERA_SANDBOX_KUBE_CA_FILE", ""),
-		KubeInsecure:     envBool("KEERA_SANDBOX_KUBE_INSECURE", false),
 		Warm:             envBool("KEERA_SANDBOX_WARM", false),
 		PodmanBinary:     env("KEERA_SANDBOX_PODMAN_BINARY", "podman"),
 		PodmanNetwork:    env("KEERA_SANDBOX_PODMAN_NETWORK", ""),
@@ -521,19 +488,22 @@ func (s SandboxConfig) validate() error {
 			"for a deployment that lends out no sandboxes", s.Driver)
 	}
 	// The rest configures a driver. A stray setting with sandboxes off does
-	// nothing, so it must not stop the gateway from starting.
+	// nothing, so it must not stop the gateway from starting. The classes
+	// file is not one of them: it is read either way, as the template for new
+	// organisations.
 	if !s.Enabled() {
 		return nil
 	}
 	if s.IdleSuspend < 0 {
 		return errors.New("KEERA_SANDBOX_IDLE_SUSPEND cannot be negative")
 	}
-	// A floor of five minutes: an attached editor sends nothing while its user
-	// reads, and suspending a sandbox in use is the worst thing this can do.
+	// A floor of five minutes: an open connection is only recorded once a
+	// minute, and suspending a sandbox in use is the worst thing this can do.
+	// A short timer would also catch a laptop that is just reconnecting.
 	if s.IdleSuspend > 0 && s.IdleSuspend < 5*time.Minute {
-		return fmt.Errorf("KEERA_SANDBOX_IDLE_SUSPEND is %s; below five minutes it would "+
-			"suspend a sandbox somebody is still working in, because an attached editor "+
-			"sends nothing while its user is reading", s.IdleSuspend)
+		return fmt.Errorf("KEERA_SANDBOX_IDLE_SUSPEND is %s; below five minutes it could "+
+			"suspend a sandbox somebody is still connected to, because an open connection "+
+			"is only recorded once a minute", s.IdleSuspend)
 	}
 	return s.Git.validate()
 }

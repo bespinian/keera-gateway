@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -39,7 +40,19 @@ func (f *fakeSource) Resolve(_ context.Context, presented string) (*policy.Resol
 	return nil, policy.ErrUnknownKey
 }
 
-func (f *fakeSource) Model(alias string) (policy.Model, bool) {
+// testOrg is the organisation a model or server keyed by its alias alone
+// belongs to, which keeps the many tests with one organisation short. Any
+// other organisation does not see it, as in the real registry.
+const testOrg = "org_1"
+
+// Model reads a model keyed "org/alias", or by its alias alone for testOrg.
+func (f *fakeSource) Model(orgID, alias string) (policy.Model, bool) {
+	if m, ok := f.models[orgID+"/"+alias]; ok {
+		return m, true
+	}
+	if orgID != testOrg {
+		return policy.Model{}, false
+	}
 	m, ok := f.models[alias]
 	return m, ok
 }
@@ -54,7 +67,15 @@ func (f *fakeSource) Router(orgID, alias string) (policy.Router, bool) {
 	return rt, ok
 }
 
-func (f *fakeSource) MCPServer(alias string) (policy.MCPServer, bool) {
+// MCPServer reads a server keyed "org/alias", or by its alias alone for
+// testOrg, as Model does.
+func (f *fakeSource) MCPServer(orgID, alias string) (policy.MCPServer, bool) {
+	if m, ok := f.mcp[orgID+"/"+alias]; ok {
+		return m, true
+	}
+	if orgID != testOrg {
+		return policy.MCPServer{}, false
+	}
 	m, ok := f.mcp[alias]
 	return m, ok
 }
@@ -70,9 +91,16 @@ func (f *fakeSource) Routers(orgID string) []policy.Router {
 	return out
 }
 
-func (f *fakeSource) Models() []policy.Model {
+func (f *fakeSource) Models(orgID string) []policy.Model {
 	out := make([]policy.Model, 0, len(f.models))
-	for _, m := range f.models {
+	for key, m := range f.models {
+		org, _, own := strings.Cut(key, "/")
+		if own && org != orgID || !own && orgID != testOrg {
+			continue
+		}
+		if _, shadowed := f.models[orgID+"/"+key]; !own && shadowed {
+			continue
+		}
 		out = append(out, m)
 	}
 	return out
@@ -542,7 +570,7 @@ func TestUpstreamUnreachableIsRecorded(t *testing.T) {
 		"keera-code": {
 			Alias: "keera-code", Kind: policy.KindChat, BackendModel: "served",
 			// A port nothing listens on.
-			Backends: []string{"http://127.0.0.1:1/v1"}, Enabled: true,
+			Backends: []string{"http://127.0.0.1:1/v1"}, Enabled: true, OrgID: testOrg,
 		},
 	}
 	h := newHarness(t, jsonBackend(`{}`), models, nil)
@@ -552,6 +580,12 @@ func TestUpstreamUnreachableIsRecorded(t *testing.T) {
 	}
 	if ev := h.sink.last(t); ev.Status != http.StatusBadGateway {
 		t.Errorf("the failure was not recorded: %+v", ev)
+	}
+	var out strings.Builder
+	h.metrics.Write(&out)
+	if !strings.Contains(out.String(),
+		`keera_upstream_errors_total{model="keera-code",org="org_1"} 1`) {
+		t.Errorf("the failure was not counted exactly once:\n%s", out.String())
 	}
 }
 
@@ -570,6 +604,48 @@ func TestDispatchFailsOverToTheNextBackend(t *testing.T) {
 	resp := h.post(t, "/v1/chat/completions", `{"model":"keera-code","messages":[]}`)
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200 - a dead replica must not fail the request", resp.StatusCode)
+	}
+}
+
+// A backend that received the request may still be generating, so a late one
+// is not a reason to send the same request to the next backend.
+func TestASlowBackendIsNotFollowedByTheNextOne(t *testing.T) {
+	release := make(chan struct{})
+	var slowHits, nextHits atomic.Int32
+	slow := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		slowHits.Add(1)
+		<-release
+	}))
+	t.Cleanup(slow.Close)
+	t.Cleanup(func() { close(release) })
+	next := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextHits.Add(1)
+		jsonBackend(`{}`)(w, r)
+	}))
+	t.Cleanup(next.Close)
+
+	models := map[string]policy.Model{
+		"keera-code": {
+			Alias: "keera-code", OrgID: testOrg, Kind: policy.KindChat, BackendModel: "served",
+			Backends: []string{slow.URL + "/v1", next.URL + "/v1"}, Enabled: true,
+		},
+	}
+	h := newHarnessWith(t, jsonBackend(`{}`), models, nil,
+		Options{UpstreamHeaderTimeout: 50 * time.Millisecond})
+
+	resp := h.post(t, "/v1/chat/completions", `{"model":"keera-code","messages":[]}`)
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", resp.StatusCode)
+	}
+	if slowHits.Load() != 1 || nextHits.Load() != 0 {
+		t.Errorf("slow backend hit %d times, next %d; want 1 and 0",
+			slowHits.Load(), nextHits.Load())
+	}
+	var out strings.Builder
+	h.metrics.Write(&out)
+	if !strings.Contains(out.String(),
+		`keera_upstream_errors_total{model="keera-code",org="org_1"} 1`) {
+		t.Errorf("the failure was not counted exactly once:\n%s", out.String())
 	}
 }
 
@@ -609,6 +685,79 @@ func TestOutputCeilingIsAppliedToTheForwardedRequest(t *testing.T) {
 	}
 	if sent.MaxTokens != 256 {
 		t.Errorf("max_tokens reached the backend as %d, want the guardrail ceiling of 256", sent.MaxTokens)
+	}
+}
+
+// A key reaches its organisation's models, and never another organisation's,
+// even where both use an alias.
+func TestAKeyReachesItsOrganisationsOwnModelsAndNoOtherTenants(t *testing.T) {
+	chat := func(alias, served string, org string) policy.Model {
+		return policy.Model{OrgID: org, Alias: alias, Kind: policy.KindChat, BackendModel: served,
+			Enabled: true}
+	}
+	models := map[string]policy.Model{
+		"org_1/fast":  chat("fast", "own-fast", "org_1"),
+		"org_2/fast":  chat("fast", "their-fast", "org_2"),
+		"org_1/mine":  chat("mine", "own-mine", "org_1"),
+		"org_2/other": chat("other", "their-model", "org_2"),
+	}
+	h := newHarness(t, jsonBackend(`{"id":"1","choices":[{"message":{"content":"hi"}}]}`),
+		models, nil)
+
+	for alias, want := range map[string]string{"fast": "own-fast", "mine": "own-mine"} {
+		resp := h.post(t, "/v1/chat/completions", `{"model":"`+alias+`","messages":[]}`)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s: status = %d, want 200", alias, resp.StatusCode)
+		}
+		var sent struct {
+			Model string `json:"model"`
+		}
+		if err := json.Unmarshal(<-h.upstreamBodies, &sent); err != nil {
+			t.Fatal(err)
+		}
+		if sent.Model != want {
+			t.Errorf("%s reached the backend as %q, want %q", alias, sent.Model, want)
+		}
+	}
+	if resp := h.post(t, "/v1/chat/completions", `{"model":"other","messages":[]}`); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("another tenant's model answered with %d, want 404", resp.StatusCode)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, h.url("/v1/models"), nil)
+	req.Header.Set("Authorization", "Bearer "+testKey)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var out struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	var listed []string
+	for _, m := range out.Data {
+		listed = append(listed, m.ID)
+	}
+	slices.Sort(listed)
+	// One fast, not two: org_2's is not this key's.
+	if want := []string{"fast", "mine"}; !slices.Equal(listed, want) {
+		t.Errorf("/v1/models lists %v, want %v", listed, want)
+	}
+}
+
+// The harness's default models are testOrg's, so a key of another
+// organisation must not reach them.
+func TestAKeyOfAnotherOrganisationDoesNotReachTheDefaultModels(t *testing.T) {
+	other := policy.Resolve(policy.Key{ID: "key_2", OrgID: "org_2"}, nil, nil, nil)
+	h := newHarness(t, jsonBackend(`{"id":"1","choices":[{"message":{"content":"hi"}}]}`),
+		nil, other)
+	resp := h.post(t, "/v1/chat/completions", `{"model":"keera-code","messages":[]}`)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("another organisation's model answered with %d, want 404", resp.StatusCode)
 	}
 }
 
@@ -855,7 +1004,7 @@ func TestHostedModelSendsTheEndpointsOwnCredential(t *testing.T) {
 	models := map[string]policy.Model{"keera-frontier": {
 		Alias: "keera-frontier", Kind: policy.KindChat,
 		Backends: []string{upstream.URL + "/v1"}, BackendModel: "claude-opus-5",
-		APIKeyEnv: "ANTHROPIC_API_KEY", Enabled: true,
+		APIKey: "sk-ant-upstream", Enabled: true,
 	}}
 	src := &fakeSource{
 		resolved: map[string]*policy.Resolved{testKey: policy.Resolve(
@@ -863,10 +1012,8 @@ func TestHostedModelSendsTheEndpointsOwnCredential(t *testing.T) {
 		models: models,
 	}
 
-	env := map[string]string{"ANTHROPIC_API_KEY": "sk-ant-upstream"}
 	srv := New(src, &fakeBudgets{}, ratelimit.New(), &fakeSink{}, metrics.New(),
-		Options{APIKeys: func(name string) string { return env[name] }},
-		slog.New(slog.DiscardHandler))
+		Options{}, slog.New(slog.DiscardHandler))
 	gw := httptest.NewServer(srv.Handler())
 	defer gw.Close()
 
@@ -891,13 +1038,15 @@ func TestHostedModelSendsTheEndpointsOwnCredential(t *testing.T) {
 
 	post(t)
 	if got := <-seen; got != "Bearer sk-ant-upstream" {
-		t.Errorf("upstream saw %q, want the credential from the named variable", got)
+		t.Errorf("upstream saw %q, want the model's stored credential", got)
 	}
 
-	// With the variable unset the request still goes, without a credential, so
-	// the endpoint's own 401 is what surfaces rather than a Keera-shaped error
+	// With no key stored the request still goes, without a credential, so the
+	// endpoint's own 401 is what surfaces rather than a Keera-shaped error
 	// about configuration the developer cannot see.
-	delete(env, "ANTHROPIC_API_KEY")
+	m := models["keera-frontier"]
+	m.APIKey = ""
+	models["keera-frontier"] = m
 	post(t)
 	if got := <-seen; got != "" {
 		t.Errorf("upstream saw %q, want no credential at all", got)
@@ -1375,10 +1524,8 @@ func TestChatCompletionChargesTheCachedPartOfThePromptAtItsOwnRate(t *testing.T)
 	}
 }
 
-// A model with no cached rate charges those tokens at the input price, which
-// is what the gateway did before the rate existed. Every model already in a
-// deployment's catalogue is one of these, so this is the behaviour an upgrade
-// must not change.
+// A model with no cached rate charges those tokens at the input price, so a
+// forgotten rate errs high.
 func TestChatCompletionChargesCachedTokensAtTheInputRateWhenNoneIsStated(t *testing.T) {
 	h := newHarness(t, jsonBackend(`{"id":"1","choices":[{"message":{"content":"hi"}}],`+
 		`"usage":{"prompt_tokens":1000,"completion_tokens":500,`+

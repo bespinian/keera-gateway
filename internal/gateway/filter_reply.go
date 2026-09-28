@@ -7,6 +7,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
 // parseFilterReply reads a rewrite filter's answer: the segments rewritten, or
@@ -238,7 +240,7 @@ func sanitizeReason(s string) string {
 		if gap {
 			n++
 		}
-		if b.Len()+n > maxRefusalReasonBytes {
+		if b.Len()+n > policy.MaxRefusalReasonBytes {
 			truncated = true
 			break
 		}

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"slices"
 	"strings"
@@ -59,7 +58,7 @@ const (
 
 // routerProtocol is added after the administrator's instruction, so the
 // instruction is never the last word on the format. The destinations are part
-// of it, because the catalogue already says what each model is for.
+// of it, because each model's description already says what it is for.
 const routerProtocol = `
 --- how to answer ---
 You are choosing which model will answer a request. The user message is a JSON
@@ -151,13 +150,8 @@ func (s *Server) route(ctx context.Context, rt policy.Router, b *body, kind poli
 	// a request's text is.
 	doc, err := extractText(b, kind)
 	if err != nil {
-		return d, &refusal{
-			status: http.StatusBadRequest,
-			typ:    "invalid_request_error", code: "invalid_body",
-			msg: "'" + rt.Alias + "' is a router: it reads the request to choose which model " +
-				"answers it, and this request could not be read: " + err.Error(),
-			advise: true,
-		}
+		return d, unreadableBody("'"+rt.Alias+"' is a router: it reads the request to choose "+
+			"which model answers it", err)
 	}
 	texts := routerWindow(doc.texts())
 
@@ -186,20 +180,14 @@ func (s *Server) route(ctx context.Context, rt policy.Router, b *body, kind poli
 // deciderModel finds the model an instruction router decides with, and says
 // why it cannot decide on these texts if it cannot.
 func (s *Server) deciderModel(rt policy.Router, texts []string) (policy.Model, string) {
-	m, ok := s.src.Model(rt.Model)
-	switch {
-	case len(texts) == 0:
+	m, ok := s.src.Model(rt.OrgID, rt.Model)
+	if len(texts) == 0 {
 		// Nothing to read, such as a chat of only images. Asking the model
 		// anyway would spend a generation on a guess.
 		return m, "the request carried no text to read"
-	case !ok:
-		return m, "it decides with the model '" + rt.Model + "', which the catalogue no longer holds"
-	case !m.Enabled:
-		return m, "the model it decides with, '" + rt.Model + "', is disabled"
-	case m.Kind != policy.KindChat:
-		return m, "the model it decides with, '" + rt.Model + "', is not a chat model"
-	case len(m.Backends) == 0:
-		return m, "the model it decides with, '" + rt.Model + "', has no backend"
+	}
+	if why := chatProblem(m, ok); why != "" {
+		return m, "the model it decides with, '" + rt.Model + "', " + why
 	}
 	return m, ""
 }
@@ -214,31 +202,43 @@ func (s *Server) deciderModel(rt policy.Router, texts []string) (policy.Model, s
 func (s *Server) chain(rt policy.Router) (routeDecision, *refusal) {
 	d := routeDecision{outcome: store.RouterChose}
 	d.chain = s.offeredDestinations(rt)
-	s.load.order(rt.Mode, d.chain)
+	s.orderByLoad(rt, d.chain)
 	if len(d.chain) == 0 {
 		// Nowhere to try: none of the destinations exists, is enabled, is a
 		// chat model and has a backend.
 		d.outcome = store.RouterError
-		return d, &refusal{
-			status: http.StatusServiceUnavailable,
-			typ:    "server_error", code: "router_destination_unavailable",
-			msg: fmt.Sprintf("'%s' is a router: it sends each request to the first of its "+
-				"destinations that can answer it, and none of them can - every one is "+
-				"missing, disabled, of another kind, or has no backend. Nothing was sent "+
-				"to a model", rt.Alias),
-			advise: true,
-		}
+		return d, noDestination(fmt.Sprintf("'%s' is a router: it sends each request to the "+
+			"first of its destinations that can answer it, and none of them can - every one "+
+			"is missing, disabled, of another kind, or has no backend", rt.Alias))
 	}
 	d.alias = d.chain[0]
 	return d, nil
 }
 
-// serveable reads a destination out of the catalogue and reports whether it
-// could answer a chat request now. It is the single definition used for what
-// is offered, what is tried and what a check reports as dropped.
-func (s *Server) serveable(alias string) (policy.Model, bool) {
-	m, ok := s.src.Model(alias)
-	return m, ok && m.Enabled && m.Kind == policy.KindChat && len(m.Backends) > 0
+// serveable reads one of the organisation's models and reports whether it
+// could answer a chat request now.
+func (s *Server) serveable(orgID, alias string) (policy.Model, bool) {
+	m, ok := s.src.Model(orgID, alias)
+	return m, chatProblem(m, ok) == ""
+}
+
+// chatProblem says why a model cannot answer a chat request now, in words that
+// follow its name, or returns "" when it can. found is whether the
+// organisation has it at all. It is the one definition behind what a router
+// offers and tries, what a filter or router decides with, and what a check
+// reports.
+func chatProblem(m policy.Model, found bool) string {
+	switch {
+	case !found:
+		return "is not one of this organisation's models"
+	case !m.Enabled:
+		return "is disabled"
+	case m.Kind != policy.KindChat:
+		return "is a " + string(m.Kind) + " model, and only a chat model reads text and answers in words"
+	case len(m.Backends) == 0:
+		return "has no backend"
+	}
+	return ""
 }
 
 // settle records what a trying router's attempts came to, once they are over.
@@ -307,7 +307,7 @@ func routerWindow(texts []string) []string {
 // decision is what one call to the router's model came back with.
 type decision struct {
 	// alias is the destination that was chosen, and is always one the
-	// catalogue can serve.
+	// organisation can serve.
 	alias string
 	// confidence is the share of probability the chosen letter took among
 	// the letters offered: 1 when certain, near 1/n when guessing. Zero means
@@ -354,7 +354,7 @@ func (s *Server) decide(ctx context.Context, rt policy.Router, m policy.Model, t
 	if err != nil && errors.As(err, &unread) {
 		// No usable answer to the lettered question: remember that and ask
 		// for a name instead.
-		s.noLogprobs.Store(m.Alias, struct{}{})
+		s.dropLogprobs(m)
 		retry, retryErr := s.decideOnce(ctx, rt, m, offered, texts, false)
 		retry.micros += d.micros
 		return retry, retryErr
@@ -362,7 +362,7 @@ func (s *Server) decide(ctx context.Context, rt policy.Router, m policy.Model, t
 	if err == nil && d.confidence == 0 {
 		// It wrote the letter but sent no distribution. That worked by luck,
 		// so the next request asks for a name, with room to write it.
-		s.noLogprobs.Store(m.Alias, struct{}{})
+		s.dropLogprobs(m)
 	}
 	return d, err
 }
@@ -381,7 +381,7 @@ func (s *Server) decideOnce(ctx context.Context, rt policy.Router, m policy.Mode
 		protocol, outputTokens = routerLabelProtocol, 1
 	}
 	instruction := strings.TrimSpace(rt.Prompt) +
-		"\n" + fmt.Sprintf(protocol, s.destinationList(offered, byLetter))
+		"\n" + fmt.Sprintf(protocol, s.destinationList(rt.OrgID, offered, byLetter))
 
 	if m.MaxContext > 0 {
 		inputTokens := promptTokens(input, instruction)
@@ -395,30 +395,14 @@ func (s *Server) decideOnce(ctx context.Context, rt policy.Router, m policy.Mode
 	if err != nil {
 		return decision{}, err
 	}
-
-	ctx, cancel := context.WithTimeout(ctx, routerTimeout)
-	defer cancel()
-
-	resp, err := s.dispatch(ctx, m, "/chat/completions", payload)
+	raw, status, err := s.askOwnModel(ctx, m, payload, routerTimeout, maxRouterResponseBytes,
+		"the model it decides with")
 	if err != nil {
-		if ctx.Err() != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return decision{}, fmt.Errorf("the model it decides with did not answer within %s",
-				routerTimeout)
-		}
-		return decision{}, fmt.Errorf("the model it decides with could not be reached: %w", err)
+		return decision{}, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxRouterResponseBytes))
-	if err != nil {
-		return decision{}, fmt.Errorf("reading its decision failed: %w", err)
-	}
-	if resp.StatusCode >= 300 {
-		err := errors.New("the model it decides with answered " +
-			upstreamComplaint(raw, resp.StatusCode))
-		// A 4xx most likely rejects the logprobs fields, so it is worth asking
-		// again without them. A 5xx would fail either way.
-		if resp.StatusCode < 500 {
+	if status >= 300 {
+		err := errors.New("the model it decides with answered " + upstreamComplaint(raw, status))
+		if rejectsLogprobs(status) {
 			return decision{}, &unreadable{err: err}
 		}
 		return decision{}, err
@@ -468,11 +452,20 @@ func readDecision(raw []byte, offered []string, byLetter bool) (string, float64,
 }
 
 // readsLogprobs reports whether this model's backend is still believed to
-// answer with a distribution.
+// answer with a distribution. Routers and gates share what is learned.
 func (s *Server) readsLogprobs(m policy.Model) bool {
-	_, found := s.noLogprobs.Load(m.Alias)
+	_, found := s.noLogprobs.Load(m.Key())
 	return !found
 }
+
+// dropLogprobs remembers that this model's backend serves no logprobs, so
+// routers and gates stop asking it for them.
+func (s *Server) dropLogprobs(m policy.Model) { s.noLogprobs.Store(m.Key(), struct{}{}) }
+
+// rejectsLogprobs reports whether a status, answering a request that asked for
+// logprobs, most likely refused those fields. That makes it worth asking again
+// without them. A 5xx would fail either way.
+func rejectsLogprobs(status int) bool { return status >= 400 && status < 500 }
 
 // offeredDestinations is this router's serveable destinations, in its own
 // order.
@@ -483,7 +476,7 @@ func (s *Server) readsLogprobs(m policy.Model) bool {
 func (s *Server) offeredDestinations(rt policy.Router) []string {
 	out := make([]string, 0, len(rt.Destinations))
 	for _, alias := range rt.Destinations {
-		if _, ok := s.serveable(alias); ok {
+		if _, ok := s.serveable(rt.OrgID, alias); ok {
 			out = append(out, alias)
 		}
 	}
@@ -491,12 +484,12 @@ func (s *Server) offeredDestinations(rt policy.Router) []string {
 }
 
 // destinationList renders the choice the router's model is given: each
-// destination and its catalogue description, lettered when the answer is to
+// destination and its model's description, lettered when the answer is to
 // be a letter. A destination without a description is listed by alias alone.
-func (s *Server) destinationList(offered []string, byLetter bool) string {
+func (s *Server) destinationList(orgID string, offered []string, byLetter bool) string {
 	var b strings.Builder
 	for i, alias := range offered {
-		m, ok := s.serveable(alias)
+		m, ok := s.serveable(orgID, alias)
 		if !ok {
 			continue
 		}
@@ -568,13 +561,16 @@ func isAliasByte(s string, i int) bool {
 
 // routerHeader tells a client which router placed its request, and where. It
 // helps a developer who named one model and got an answer from another.
+//
+// "(fallback)" means a later choice answered. When nothing did, the header
+// says so instead, since the error in the body is the last destination's.
 func routerHeader(w http.ResponseWriter, d routeDecision, router string) {
-	if router == "" {
-		return
-	}
 	value := router + " -> " + d.alias
-	if d.outcome != store.RouterChose {
+	switch d.outcome {
+	case store.RouterFellBack:
 		value += " (fallback)"
+	case store.RouterError:
+		value += " (every destination failed)"
 	}
 	w.Header().Set("X-Keera-Router", value)
 }

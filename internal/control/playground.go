@@ -6,7 +6,6 @@ import (
 
 	"github.com/bespinian/keera-gateway/internal/authn"
 	"github.com/bespinian/keera-gateway/internal/connect"
-	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
@@ -16,12 +15,6 @@ import (
 // here means a key will get one too. The caller has no API key, so the
 // organisation's own guardrails apply: the panel is no way around a budget.
 func (s *Server) playgroundChat(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if s.opts.Gateway == nil {
-		httpx.WriteError(w, http.StatusNotImplemented, "invalid_request_error",
-			"playground_unavailable",
-			"this control plane is not attached to an inference gateway")
-		return
-	}
 	// An operator looking at every organisation has not said whose budget to
 	// charge.
 	orgID, ok := s.requireOrg(w, p, r.URL.Query().Get("org_id"),

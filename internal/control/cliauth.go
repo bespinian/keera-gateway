@@ -141,8 +141,8 @@ func (s *Server) cliToken(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Code     string `json:"code"`
 		Verifier string `json:"verifier"`
-		// Label is how the machine describes itself, so a person can tell
-		// their sign-ins apart. It decides nothing.
+		// Label is how the machine describes itself. It goes into the audit
+		// log and decides nothing.
 		Label string `json:"label"`
 	}
 	if err := httpx.ReadJSON(r, &in); err != nil || in.Code == "" || in.Verifier == "" {
@@ -178,7 +178,7 @@ func (s *Server) cliToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	expires := time.Now().Add(authn.CLITokenTTL)
-	if err := s.st.CreateCLIToken(r.Context(), hash, user.ID, in.Label, expires); err != nil {
+	if err := s.st.CreateCLIToken(r.Context(), hash, user.ID, expires); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -201,9 +201,6 @@ func (s *Server) cliPrincipal(r *http.Request, token string) (*authn.Principal, 
 	tu, err := s.st.LookupCLIToken(r.Context(), hash)
 	if err != nil {
 		return nil, authn.ErrUnauthenticated
-	}
-	if err := s.st.TouchCLIToken(r.Context(), hash); err != nil {
-		s.log.Warn("recording command-line activity failed", "error", err)
 	}
 	return &authn.Principal{
 		Via:    authn.MethodCLI,

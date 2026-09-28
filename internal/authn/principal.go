@@ -16,9 +16,11 @@ import (
 type Role string
 
 const (
-	// RoleOperator crosses organisations and owns the model catalogue.
+	// RoleOperator runs the deployment: it creates organisations and works in any
+	// of them.
 	RoleOperator Role = "operator"
-	// RoleAdmin runs one organisation: its teams, guardrails, keys and people.
+	// RoleAdmin runs one organisation: its teams, guardrails, keys and people,
+	// and its models, MCP servers, filters, routers and sandbox classes.
 	RoleAdmin Role = "admin"
 	// RoleMember sees their organisation's usage, manages their own keys and
 	// changes no policy.
@@ -62,8 +64,8 @@ type Principal struct {
 	UserID string `json:"user_id,omitempty"`
 	Email  string `json:"email,omitempty"`
 	Role   Role   `json:"role"`
-	// OrgID empty means every organisation: true of operators and the
-	// operator key.
+	// OrgID empty means no organisation: true only of the operator key.
+	// Unrestricted, not an empty OrgID, is what lets a caller see them all.
 	OrgID string `json:"org_id,omitempty"`
 	// CSRF is the double-submit token for a session. It is empty for the
 	// operator key and the command line, which no browser sends by itself.
@@ -96,34 +98,22 @@ func (p *Principal) CanReadOrg(orgID string) bool {
 }
 
 // CanAdminOrg reports whether the principal may change an organisation's teams,
-// guardrails, keys and people.
+// guardrails, keys and people, and its models, MCP servers, filters, routers
+// and sandbox classes.
 func (p *Principal) CanAdminOrg(orgID string) bool {
 	return p.Unrestricted() || (p.Role == RoleAdmin && p.inOrg(orgID))
 }
 
-// CanIssueKeyFor reports whether the principal may issue a key in an
-// organisation, attributed to userID (empty means nobody in particular).
+// CanManageKeyFor reports whether the principal may issue or revoke a key in
+// an organisation, attributed to userID (empty means nobody in particular).
 //
-// A member may issue keys only for themselves. Otherwise they could put their
-// spend under a colleague's name, or under nobody's.
-func (p *Principal) CanIssueKeyFor(orgID, userID string) bool {
+// A member may do so only for their own keys. Otherwise they could put their
+// spend under a colleague's name, or under nobody's. Revoking their own lets a
+// member stop a leaked key without waiting for an administrator. A key
+// attributed to nobody, such as a pipeline's, stays an administrator's.
+func (p *Principal) CanManageKeyFor(orgID, userID string) bool {
 	return p.CanAdminOrg(orgID) || p.isMemberFor(orgID, userID)
 }
-
-// CanRevokeKeyFor reports whether the principal may revoke a key in an
-// organisation, given who the key is attributed to (empty means nobody in
-// particular).
-//
-// The rule is the same as for issuing. It adds no privilege, and it lets a
-// member revoke a leaked key without waiting for an administrator. A key
-// attributed to nobody, such as a pipeline's, stays an administrator's.
-func (p *Principal) CanRevokeKeyFor(orgID, keyUserID string) bool {
-	return p.CanAdminOrg(orgID) || p.isMemberFor(orgID, keyUserID)
-}
-
-// CanAdminCatalogue reports whether the principal may change the model
-// catalogue. Every tenant shares it, so only an operator may.
-func (p *Principal) CanAdminCatalogue() bool { return p.Unrestricted() }
 
 func (p *Principal) inOrg(orgID string) bool {
 	return orgID != "" && orgID == p.OrgID
@@ -155,9 +145,9 @@ func (p *Principal) ScopeOrg(requested string) (string, error) {
 
 // RoleMapping maps an identity provider's claims onto a Keera Gateway role.
 //
-// Groups are checked before the operator list, and the operator list before
-// the default, so a directory that manages access through groups gets exactly
-// what it says.
+// The operator groups and KEERA_OPERATORS are checked first, then the admin
+// groups, then the default. So a directory that manages access through groups
+// gets exactly what it says, and an address named as an operator stays one.
 type RoleMapping struct {
 	OperatorGroups []string
 	AdminGroups    []string
@@ -195,15 +185,17 @@ func (m RoleMapping) RoleFor(email string, groups []string) Role {
 	if containsFold(groups, m.OperatorGroups) {
 		return RoleOperator
 	}
-	if containsFold(groups, m.AdminGroups) {
-		return RoleAdmin
-	}
+	// Before the admin groups: an address named in KEERA_OPERATORS is an
+	// operator, whatever else the directory says about it.
 	for _, e := range m.OperatorEmails {
 		if strings.EqualFold(strings.TrimSpace(e), email) {
 			return RoleOperator
 		}
 	}
-	if m.Default.Valid() {
+	if containsFold(groups, m.AdminGroups) {
+		return RoleAdmin
+	}
+	if m.Default.Assignable() {
 		return m.Default
 	}
 	return RoleMember

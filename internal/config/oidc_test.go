@@ -6,36 +6,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/authn"
 )
 
-// A deployment with one directory names nothing: the unprefixed settings are
-// the whole configuration, which is the dedicated and on-premises shape.
-func TestOneProviderNeedsNoList(t *testing.T) {
-	t.Setenv("KEERA_OIDC_ISSUER", "https://accounts.google.com")
-	t.Setenv("KEERA_OIDC_CLIENT_ID", "client")
-	t.Setenv("KEERA_OIDC_CLIENT_SECRET", "secret")
-	t.Setenv("KEERA_OIDC_REDIRECT_URL", "https://keera.example.ch/control/auth/callback")
-	t.Setenv("KEERA_OPERATORS", "ada@example.ch")
-
-	got := oidcProviders()
-	if len(got) != 1 {
-		t.Fatalf("got %d providers, want 1", len(got))
-	}
-	p := got[0]
-	if p.Name != singleProviderName {
-		t.Errorf("name = %q, want %q", p.Name, singleProviderName)
-	}
-	if p.IssuerURL != "https://accounts.google.com" || p.ClientSecret != "secret" {
-		t.Errorf("provider = %+v, want the unprefixed settings", p)
-	}
-	if p.Mapping.Default != authn.RoleMember {
-		t.Errorf("default role = %q, want member", p.Mapping.Default)
-	}
-	if len(p.Mapping.OperatorEmails) != 1 {
-		t.Errorf("operator emails = %v, want the one address", p.Mapping.OperatorEmails)
-	}
-}
-
 func TestNoProviderIsNotAnError(t *testing.T) {
-	if got := oidcProviders(); got != nil {
+	if got := oidcProviders("https://keera.example.ch"); got != nil {
 		t.Errorf("oidcProviders = %+v, want none", got)
 	}
 }
@@ -43,10 +15,8 @@ func TestNoProviderIsNotAnError(t *testing.T) {
 // The hosted deployment: two directories, one callback, and group names that
 // are per-directory because the same role is a name on Google and an object
 // GUID on Entra.
-func TestProvidersInheritWhatIsWorthSharing(t *testing.T) {
+func TestEachProviderReadsItsOwnSettings(t *testing.T) {
 	t.Setenv("KEERA_OIDC_PROVIDERS", "google,entra")
-	t.Setenv("KEERA_OIDC_REDIRECT_URL", "https://keera.example.ch/control/auth/callback")
-	t.Setenv("KEERA_OIDC_DEFAULT_ROLE", "member")
 	t.Setenv("KEERA_OPERATORS", "ada@example.ch")
 
 	t.Setenv("KEERA_OIDC_GOOGLE_ISSUER", "https://accounts.google.com")
@@ -60,16 +30,14 @@ func TestProvidersInheritWhatIsWorthSharing(t *testing.T) {
 	t.Setenv("KEERA_OIDC_ENTRA_GROUPS_CLAIM", "roles")
 	t.Setenv("KEERA_OIDC_ENTRA_DEFAULT_ROLE", "admin")
 
-	got := oidcProviders()
+	got := oidcProviders("https://keera.example.ch")
 	if len(got) != 2 {
 		t.Fatalf("got %d providers, want 2", len(got))
 	}
 	google, entra := got[0], got[1]
 
 	// The callback is shared. It can be, because the callback recognises a
-	// flow by its state rather than by the address it came back to - and a
-	// deployment that had to register a second one would be registering a
-	// second thing that can go wrong.
+	// flow by its state rather than by the address it came back to.
 	for _, p := range got {
 		if p.RedirectURL != "https://keera.example.ch/control/auth/callback" {
 			t.Errorf("%s redirect = %q, want the shared one", p.Name, p.RedirectURL)
@@ -88,13 +56,12 @@ func TestProvidersInheritWhatIsWorthSharing(t *testing.T) {
 		t.Errorf("google issuer = %q", google.IssuerURL)
 	}
 
-	// Per-provider settings override the shared ones.
 	if entra.GroupsClaim != "roles" || google.GroupsClaim != "groups" {
 		t.Errorf("groups claims = %q and %q, want the override and the default",
 			entra.GroupsClaim, google.GroupsClaim)
 	}
 	if entra.Mapping.Default != authn.RoleAdmin || google.Mapping.Default != authn.RoleMember {
-		t.Errorf("default roles = %q and %q, want the override and the shared one",
+		t.Errorf("default roles = %q and %q, want Entra's own and the default",
 			entra.Mapping.Default, google.Mapping.Default)
 	}
 	if len(entra.Mapping.AdminGroups) != 1 || len(google.Mapping.AdminGroups) != 0 {
@@ -114,7 +81,7 @@ func TestProviderLabelCanBeSet(t *testing.T) {
 	t.Setenv("KEERA_OIDC_ACME_AD_CLIENT_ID", "client")
 	t.Setenv("KEERA_OIDC_ACME_AD_LABEL", "your Acme account")
 
-	got := oidcProviders()
+	got := oidcProviders("https://keera.example.ch")
 	if len(got) != 1 {
 		t.Fatalf("got %d providers, want 1", len(got))
 	}

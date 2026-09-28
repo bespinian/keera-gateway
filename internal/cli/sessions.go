@@ -26,7 +26,7 @@ func sessionsCmd(ctx context.Context, args []string) error {
 	alias := fs.String("model", "", "restrict to the tasks that used one model")
 	teamID := fs.String("team", "", "restrict to one team id")
 	keyID := fs.String("key", "", "restrict to one key id")
-	userID := fs.String("user", "", "restrict to one person's id")
+	user := fs.String("user", "", "restrict to one person, by email or id")
 	unhappy := fs.Bool("unhappy", false, "only the tasks that hit trouble")
 	since := fs.Duration("since", 7*24*time.Hour, "how far back to look")
 	limit := fs.Int("limit", 25, "how many to print")
@@ -38,6 +38,19 @@ func sessionsCmd(ctx context.Context, args []string) error {
 	if err := parse(fs, args); err != nil {
 		return err
 	}
+	// The same person `keera key create --user` takes, by email or id.
+	userID := ""
+	if *user != "" {
+		orgID, err := resolveOrg(ctx, c, *org)
+		if err != nil {
+			return err
+		}
+		u, err := findUser(ctx, c, orgID, *user)
+		if err != nil {
+			return err
+		}
+		userID = u.ID
+	}
 
 	q := url.Values{}
 	q.Set("sort", *sort)
@@ -48,7 +61,7 @@ func sessionsCmd(ctx context.Context, args []string) error {
 	}
 	setIfGiven(q, map[string]string{
 		"org_id": *org, "alias": *alias, "team_id": *teamID,
-		"key_id": *keyID, "user_id": *userID,
+		"key_id": *keyID, "user_id": userID,
 	})
 
 	var res sessionsResponse
@@ -72,15 +85,16 @@ func printSessions(w *table, res sessionsResponse, since time.Duration) {
 		_, _ = fmt.Fprintf(w, "no sessions in the last %s\n", since)
 		return
 	}
-	w.header(fmt.Sprintf("SESSION\tSTARTED\tTOOK\tCALLS\tMODELS\tWHO\tCOST (%s)\tENDED",
+	w.header(fmt.Sprintf("SESSION\tSTARTED\tTOOK\tREQUESTS\tMODELS\tWHO\tCOST (%s)\tENDED",
 		res.Currency))
 	for _, s := range res.Data {
 		who := res.UserNames[s.UserID]
 		if who == "" {
 			who = res.KeyAliases[s.KeyID]
 		}
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\n",
-			s.Key, s.StartedAt.Local().Format("2006-01-02 15:04"),
+		// The id, not the conversation hash: it is what `keera session` takes.
+		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%d\t%s\t%s\t%s\t%s\n",
+			s.ID, s.StartedAt.Local().Format("2006-01-02 15:04"),
 			shortDuration(s.Duration()), s.Requests,
 			dash(strings.Join(s.Models, ",")), dash(who),
 			policy.FormatMicros(s.CostMicros), endedAs(s))
@@ -88,12 +102,12 @@ func printSessions(w *table, res sessionsResponse, since time.Duration) {
 	// Per task, and the middle task rather than the mean: one runaway task
 	// makes an average that describes none of the others.
 	t := res.Totals
-	_, _ = fmt.Fprintf(w, "\n%d sessions over %d calls in the last %s; showing %d\n",
+	_, _ = fmt.Fprintf(w, "\n%d sessions over %d requests in the last %s; showing %d\n",
 		t.Sessions, t.Requests, since, len(res.Data))
-	_, _ = fmt.Fprintf(w, "middle task: %d calls, %s, %s %s\n",
+	_, _ = fmt.Fprintf(w, "middle task: %d requests, %s, %s %s\n",
 		t.MedianRequests, shortDuration(time.Duration(t.MedianDurationMS)*time.Millisecond),
 		policy.FormatMicros(t.MedianCostMicros), res.Currency)
-	_, _ = fmt.Fprintf(w, "worst task: %d calls, %s %s; %d of %d hit trouble\n",
+	_, _ = fmt.Fprintf(w, "worst task: %d requests, %s %s; %d of %d hit trouble\n",
 		t.LongestRequests, policy.FormatMicros(t.CostliestMicros), res.Currency,
 		t.Unhappy, t.Sessions)
 	_, _ = fmt.Fprintf(w, "grouped by conversation, cut after %s idle\n",
@@ -140,10 +154,10 @@ type sessionResponse struct {
 
 func printSession(w *table, res sessionResponse) {
 	s := res.Session
-	show(w, "session", s.Key)
+	show(w, "session", strconv.FormatInt(s.ID, 10))
 	show(w, "grouping", groupedBy(s))
 	show(w, "started", s.StartedAt.Local().Format(time.RFC3339))
-	_, _ = fmt.Fprintf(w, "took\t%s over %d calls\n", shortDuration(s.Duration()), s.Requests)
+	_, _ = fmt.Fprintf(w, "took\t%s over %d requests\n", shortDuration(s.Duration()), s.Requests)
 	show(w, "models", dash(strings.Join(s.Models, ", ")))
 	show(w, "key", dash(labelled(res.KeyAliases, s.KeyID)))
 	show(w, "team", dash(labelled(res.TeamNames, s.TeamID)))
@@ -156,11 +170,11 @@ func printSession(w *table, res sessionResponse) {
 	}
 
 	// Oldest first: a task that went wrong is read from its beginning.
-	_, _ = fmt.Fprintf(w, "\nCALL\tWHEN\tMODEL\tSTATUS\tCOST (%s)\tFIRST TOKEN\tMESSAGE\n",
+	_, _ = fmt.Fprintf(w, "\nREQUEST\tWHEN\tMODEL\tSTATUS\tCOST (%s)\tFIRST TOKEN\tMESSAGE\n",
 		res.Currency)
-	for i, r := range res.Requests {
+	for _, r := range res.Requests {
 		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%d\t%s\t%dms\t%s\n",
-			i+1, r.TS.Local().Format("15:04:05"), dash(r.Alias), r.Status,
+			r.ID, r.TS.Local().Format("15:04:05"), dash(r.Alias), r.Status,
 			policy.FormatMicros(r.CostMicros), r.TTFTMS, oneLine(r.Error))
 	}
 }

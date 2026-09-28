@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"maps"
 	"net"
 	"net/url"
 	"sort"
@@ -28,7 +27,8 @@ import (
 //	status.conditions    Ready, PodScheduled, Suspended, Finished
 //
 // Because the controller owns the expiry, a gateway that crashes for good
-// leaves no sandboxes behind.
+// leaves no sandboxes running. An engineer's keeps its object and volume, as
+// it does at any expiry (see shutdownPolicy).
 
 const (
 	sandboxAPIGroup   = "agents.x-k8s.io"
@@ -73,10 +73,7 @@ type KubernetesOptions struct {
 	// extension (extensions.agents.x-k8s.io/v1beta1), so it is its own
 	// setting: without the extension, every pool reconcile would fail.
 	Warm bool
-	// ExtraLabels are stamped on every object, for a cluster's policy engine
-	// or cost allocation.
-	ExtraLabels map[string]string
-	Log         *slog.Logger
+	Log  *slog.Logger
 }
 
 // Kubernetes is the driver.
@@ -116,10 +113,6 @@ func NewKubernetes(ctx context.Context, opts KubernetesOptions) (*Kubernetes, er
 		}
 		return nil, fmt.Errorf("reaching the Sandbox API in namespace %s: %w", opts.Namespace, err)
 	}
-	if opts.Kube.Insecure {
-		k.log.Warn("sandbox: the Kubernetes API server's certificate is not being verified " +
-			"(KEERA_SANDBOX_KUBE_INSECURE); this is for a development cluster and nothing else")
-	}
 	return k, nil
 }
 
@@ -130,8 +123,8 @@ func (k *Kubernetes) Name() string { return "kubernetes" }
 // the runtime mapping, so the driver cannot claim a tier it cannot deliver.
 func (k *Kubernetes) Capabilities() Capabilities {
 	return Capabilities{
-		Suspend: true, Isolation: strongestIsolation(k.opts.Runtimes),
-		Warm: k.opts.Warm, Persistence: true,
+		Isolation: strongestIsolation(k.opts.Runtimes), Tiers: mappedTiers(k.opts.Runtimes),
+		Warm: k.opts.Warm,
 	}
 }
 
@@ -156,14 +149,19 @@ func objectName(ref Ref) string {
 	if name == "" {
 		name = "sandbox"
 	}
-	suffix := ref.ID
-	if i := strings.IndexByte(suffix, '_'); i >= 0 {
-		suffix = suffix[i+1:]
+	return name + "-" + shortID(ref.ID)
+}
+
+// shortID is the end of an id without its prefix, which is enough to tell
+// objects apart in a name the cluster limits in length.
+func shortID(id string) string {
+	if i := strings.IndexByte(id, '_'); i >= 0 {
+		id = id[i+1:]
 	}
-	if len(suffix) > 8 {
-		suffix = suffix[len(suffix)-8:]
+	if len(id) > 8 {
+		id = id[len(id)-8:]
 	}
-	return name + "-" + suffix
+	return id
 }
 
 /* --------------------------------------------------------------- the object */
@@ -200,14 +198,13 @@ type kubePodTmpl struct {
 }
 
 type kubePod struct {
-	RuntimeClassName             *string           `json:"runtimeClassName,omitempty"`
-	ServiceAccountName           string            `json:"serviceAccountName,omitempty"`
-	AutomountServiceAccountToken *bool             `json:"automountServiceAccountToken"`
-	SecurityContext              *kubePodSecurity  `json:"securityContext,omitempty"`
-	Containers                   []kubeContainer   `json:"containers"`
-	Volumes                      []kubeVolume      `json:"volumes,omitempty"`
-	ImagePullSecrets             []kubeLocalRef    `json:"imagePullSecrets,omitempty"`
-	NodeSelector                 map[string]string `json:"nodeSelector,omitempty"`
+	RuntimeClassName             *string          `json:"runtimeClassName,omitempty"`
+	ServiceAccountName           string           `json:"serviceAccountName,omitempty"`
+	AutomountServiceAccountToken *bool            `json:"automountServiceAccountToken"`
+	SecurityContext              *kubePodSecurity `json:"securityContext,omitempty"`
+	Containers                   []kubeContainer  `json:"containers"`
+	Volumes                      []kubeVolume     `json:"volumes,omitempty"`
+	ImagePullSecrets             []kubeLocalRef   `json:"imagePullSecrets,omitempty"`
 	// RestartPolicy is Never, so a sandbox whose process died shows as
 	// finished instead of quietly restarting into an empty shell.
 	RestartPolicy string `json:"restartPolicy,omitempty"`
@@ -239,7 +236,6 @@ type kubeContainer struct {
 type kubeCtrSecurity struct {
 	AllowPrivilegeEscalation *bool     `json:"allowPrivilegeEscalation"`
 	Capabilities             *kubeCaps `json:"capabilities,omitempty"`
-	ReadOnlyRootFilesystem   *bool     `json:"readOnlyRootFilesystem,omitempty"`
 }
 
 type kubeCaps struct {
@@ -285,7 +281,6 @@ type kubeVolume struct {
 }
 
 type kubeEmptyDir struct {
-	Medium    string `json:"medium,omitempty"`
 	SizeLimit string `json:"sizeLimit,omitempty"`
 }
 
@@ -397,7 +392,6 @@ func (k *Kubernetes) labelsFor(spec Spec) map[string]string {
 	if spec.Team != "" {
 		labels[labelTeam] = spec.Team
 	}
-	maps.Copy(labels, k.opts.ExtraLabels)
 	return labels
 }
 
@@ -493,11 +487,12 @@ func (k *Kubernetes) build(spec Spec, runtimeClass string) *kubeSandbox {
 
 // sandboxContainer is the one container in a sandbox pod.
 func sandboxContainer(spec Spec) kubeContainer {
-	return kubeContainer{
+	c := kubeContainer{
 		Name:  "sandbox",
 		Image: spec.Class.Image,
 		Env:   envList(spec.Env),
-		Ports: portList(spec.Ports),
+		// Only sshd is declared: every attach goes through it.
+		Ports: []kubePort{{Name: "ssh", ContainerPort: PortSSH, Protocol: "TCP"}},
 		Resources: kubeResources{
 			// Requests equal limits, so every sandbox is Guaranteed: a noisy
 			// neighbour cannot make it slow in the afternoon.
@@ -522,6 +517,11 @@ func sandboxContainer(spec Spec) kubeContainer {
 			FailureThreshold:    40,
 		},
 	}
+	// An agent's sandbox runs no sshd, so it is ready once it has started.
+	if spec.Purpose == policy.PurposeAgent {
+		c.ReadinessProbe = nil
+	}
+	return c
 }
 
 // shutdownPolicy decides what happens to the object when its time runs out.
@@ -561,7 +561,6 @@ func (k *Kubernetes) statusOf(ref Ref, obj *kubeSandbox) Status {
 		Ref:     ref,
 		Node:    obj.Status.NodeName,
 		Address: firstAddress(obj.Status.PodIPs, obj.Status.ServiceFQDN),
-		Expires: parseExpiry(obj.Spec.ShutdownTime),
 	}
 
 	conds := obj.Status.Conditions
@@ -578,6 +577,7 @@ func (k *Kubernetes) statusOf(ref Ref, obj *kubeSandbox) Status {
 		// The process exited cleanly. Nothing is left to attach to, but the
 		// detail says it exited rather than crashed.
 		st.State, st.Detail = policy.SandboxFailed, "the sandbox process exited"
+		st.Exited = true
 	case obj.Spec.OperatingMode == "Suspended":
 		st.State, st.Detail = policy.SandboxSuspended, "suspended; its volume is kept"
 	case hasReady && ready.Status == "True":
@@ -624,6 +624,34 @@ func (k *Kubernetes) Suspend(ctx context.Context, ref Ref) error {
 // Resume starts a suspended sandbox again.
 func (k *Kubernetes) Resume(ctx context.Context, ref Ref) error {
 	return k.setMode(ctx, ref, "Running")
+}
+
+// Revive gives an expired sandbox its new environment and end, and starts it.
+//
+// The container is sent whole, because a merge patch replaces a list: it is
+// built from the same spec as at creation, with the new environment. The
+// pod is made again from the template, on the volume the sandbox kept.
+func (k *Kubernetes) Revive(ctx context.Context, spec Spec) error {
+	until := formatExpiry(spec.Expires)
+	if spec.Claimed() {
+		// A claim carries its environment itself, and the bound Sandbox runs.
+		patch := map[string]any{"spec": map[string]any{
+			"env":       claimEnvList(spec.Env),
+			"lifecycle": map[string]any{"shutdownTime": until},
+		}}
+		if err := kubeNotFound(k.c.patch(ctx, k.claimPath(spec.Ref), patch, nil)); err != nil {
+			return err
+		}
+		return k.setMode(ctx, spec.Ref, "Running")
+	}
+	patch := map[string]any{"spec": map[string]any{
+		"operatingMode": "Running",
+		"shutdownTime":  until,
+		"podTemplate": map[string]any{"spec": map[string]any{
+			"containers": []kubeContainer{sandboxContainer(spec)},
+		}},
+	}}
+	return kubeNotFound(k.c.patch(ctx, k.object(spec.Ref), patch, nil))
 }
 
 func (k *Kubernetes) setMode(ctx context.Context, ref Ref, mode string) error {
@@ -716,23 +744,6 @@ func envList(env map[string]string) []kubeEnv {
 	out := make([]kubeEnv, 0, len(names))
 	for _, n := range names {
 		out = append(out, kubeEnv{Name: n, Value: env[n]})
-	}
-	return out
-}
-
-func portList(ports []int) []kubePort {
-	out := make([]kubePort, 0, len(ports)+1)
-	seen := map[int]bool{}
-	for _, p := range append([]int{PortSSH}, ports...) {
-		if seen[p] {
-			continue
-		}
-		seen[p] = true
-		name := fmt.Sprintf("p%d", p)
-		if p == PortSSH {
-			name = "ssh"
-		}
-		out = append(out, kubePort{Name: name, ContainerPort: p, Protocol: "TCP"})
 	}
 	return out
 }

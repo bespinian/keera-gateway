@@ -154,9 +154,13 @@ export const api = {
     get("/v1/keys" + query({ org_id: orgID, team_id: teamID })),
   createKey: (payload) => request("POST", "/v1/keys", payload),
   revokeKey: (id) => request("DELETE", `/v1/keys/${encodeURIComponent(id)}`),
+  rotateKey: (id) =>
+    request("POST", `/v1/keys/${encodeURIComponent(id)}/rotate`, {}),
 
   guardrails: (scope, id) =>
-    get(`/v1/guardrails/${encodeURIComponent(scope)}/${encodeURIComponent(id)}`),
+    get(
+      `/v1/guardrails/${encodeURIComponent(scope)}/${encodeURIComponent(id)}`,
+    ),
   putGuardrails: (scope, id, limits) =>
     request(
       "PUT",
@@ -242,10 +246,12 @@ export const api = {
   // about only after choosing.
   sandboxClasses: (orgID) =>
     get("/v1/sandbox-classes" + query({ org_id: orgID })),
-  putSandboxClass: (name, cls) =>
-    request("PUT", `/v1/sandbox-classes/${encodeURIComponent(name)}`, cls),
-  deleteSandboxClass: (name) =>
-    request("DELETE", `/v1/sandbox-classes/${encodeURIComponent(name)}`),
+  deleteSandboxClass: (name, orgID) =>
+    request(
+      "DELETE",
+      `/v1/sandbox-classes/${encodeURIComponent(name)}` +
+        query({ org_id: orgID }),
+    ),
 
   sandboxes: (orgID, { all, team, cls, purpose } = {}) =>
     get(
@@ -258,7 +264,6 @@ export const api = {
           purpose,
         }),
     ),
-  sandbox: (id) => get(`/v1/sandboxes/${encodeURIComponent(id)}`),
   createSandbox: (sandbox) => request("POST", "/v1/sandboxes", sandbox),
   // DELETE is the method; terminate is the word, because the row outlives the
   // machine and the panel says so everywhere else.
@@ -270,33 +275,54 @@ export const api = {
     request("POST", `/v1/sandboxes/${encodeURIComponent(id)}/suspend`),
   resumeSandbox: (id) =>
     request("POST", `/v1/sandboxes/${encodeURIComponent(id)}/resume`),
-  // What sandboxes have cost, grouped. The other half of `usage`: a task that
-  // cost a franc in tokens and eleven minutes of a four-core machine is a
-  // number a budget conversation can use, and the first half on its own is not.
-  sandboxUsage: (orgID, { groupBy, since } = {}) =>
-    get("/v1/sandbox-usage" + query({ org_id: orgID, group_by: groupBy, since })),
 
   // The client catalogue: what a developer puts where to point their editor
   // here. It comes from the control plane rather than from this bundle so that
   // the panel and `keera connect` cannot hand out configurations that differ.
   connect: () => get("/v1/connect"),
 
-  models: () => get("/v1/models"),
+  // An organisation's models. The writes take the organisation a model
+  // belongs to.
+  // The organisation's models. `stats` asks for how fast each has been
+  // answering in the window as well, which only the Models screen shows.
+  models: (orgID, { stats, since } = {}) =>
+    get(
+      "/v1/models" + query({ org_id: orgID, stats: stats ? "1" : "", since }),
+    ),
   providers: () => get("/v1/providers"),
-  putModel: (alias, model) =>
-    request("PUT", `/v1/models/${encodeURIComponent(alias)}`, model),
-  deleteModel: (alias) =>
-    request("DELETE", `/v1/models/${encodeURIComponent(alias)}`),
-  checkModel: (alias) =>
-    request("POST", `/v1/models/${encodeURIComponent(alias)}/check`),
+  putModel: (alias, model, orgID) =>
+    request(
+      "PUT",
+      `/v1/models/${encodeURIComponent(alias)}` + query({ org_id: orgID }),
+      model,
+    ),
+  deleteModel: (alias, orgID) =>
+    request(
+      "DELETE",
+      `/v1/models/${encodeURIComponent(alias)}` + query({ org_id: orgID }),
+    ),
+  checkModel: (alias, orgID) =>
+    request(
+      "POST",
+      `/v1/models/${encodeURIComponent(alias)}/check` +
+        query({ org_id: orgID }),
+    ),
 
   // The MCP servers the gateway stands in front of, and their tool calls.
-  // toolCalls takes { org_id, since, server, tool, summary }.
-  mcpServers: () => get("/v1/mcp-servers"),
-  putMCPServer: (alias, server) =>
-    request("PUT", `/v1/mcp-servers/${encodeURIComponent(alias)}`, server),
-  deleteMCPServer: (alias) =>
-    request("DELETE", `/v1/mcp-servers/${encodeURIComponent(alias)}`),
+  // toolCalls takes { org_id, since, server, tool, summary, limit }.
+  // Like the models, they belong to an organisation.
+  mcpServers: (orgID) => get("/v1/mcp-servers" + query({ org_id: orgID })),
+  putMCPServer: (alias, server, orgID) =>
+    request(
+      "PUT",
+      `/v1/mcp-servers/${encodeURIComponent(alias)}` + query({ org_id: orgID }),
+      server,
+    ),
+  deleteMCPServer: (alias, orgID) =>
+    request(
+      "DELETE",
+      `/v1/mcp-servers/${encodeURIComponent(alias)}` + query({ org_id: orgID }),
+    ),
   toolCalls: (params) => get("/v1/tool-calls" + query(params)),
 
   playground: (orgID, payload, signal) =>
@@ -322,10 +348,11 @@ export const api = {
   requests: (params) => get("/v1/requests" + query(params)),
 
   // The same log grouped into the tasks its requests were made for: one row
-  // per session rather than per call. It takes the narrowing requests() takes,
-  // plus `sort` and `unhappy`, because what this screen is opened for is the
-  // ranking - the task that cost four francs, the one that made four hundred
-  // calls - and a log ordered by time buries both.
+  // per session rather than per call. It takes the team, key, model and person
+  // narrowing of requests(), but no outcome or status. It adds `sort` and
+  // `unhappy`, because this screen is opened for the ranking - the task that
+  // cost four francs, the one that made four hundred calls - and a log
+  // ordered by time buries both.
   sessions: (params) => get("/v1/sessions" + query(params)),
 
   // One task from beginning to end, named by the id of any request in it.
@@ -359,3 +386,27 @@ export const api = {
     a.remove();
   },
 };
+
+/** chatTargets is what a client may name as its model: the organisation's
+ *  enabled chat models, then its routers, as `keera connect` offers them.
+ *  Failing to read the routers still leaves the models. */
+export async function chatTargets(orgID) {
+  const [models, routers] = await Promise.all([
+    api.models(orgID).then((r) => r.data || []),
+    api
+      .routers(orgID)
+      .then((r) => r.data || [])
+      .catch(() => []),
+  ]);
+  return models
+    .filter((m) => m.enabled !== false && m.kind === "chat")
+    .concat(
+      routers.map((rt) => ({
+        alias: rt.alias,
+        kind: "chat",
+        enabled: true,
+        router: true,
+        description: rt.description,
+      })),
+    );
+}

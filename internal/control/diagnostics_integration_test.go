@@ -30,7 +30,7 @@ func diagnosed(t *testing.T) (*Server, *store.Store) {
 		"TRUNCATE filters, routers, guardrails RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatalf("emptying the tables: %v", err)
 	}
-	if _, err := st.CreateOrg(ctx, "org_a", "Example Bank"); err != nil {
+	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_a", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
 	if _, err := st.CreateTeam(ctx, "team_a", "org_a", "Payments"); err != nil {
@@ -97,12 +97,12 @@ func TestDoctorFailsADeploymentThatCanServeNothing(t *testing.T) {
 }
 
 func TestDoctorNamesWhatTheEnvironmentIsMissing(t *testing.T) {
-	// The three that are warnings rather than failures: the deployment runs,
+	// The ones that are warnings rather than failures: the deployment runs,
 	// and a customer will want each of them.
 	srv, _ := diagnosed(t)
 	d := diagnose(t, srv, operator(), "")
 
-	for _, name := range []string{"Public URL", "Secret key", "Metrics", "Identity"} {
+	for _, name := range []string{"Public URL", "Metrics", "Identity"} {
 		c, ok := d.find(name)
 		if !ok {
 			t.Errorf("no %q check", name)
@@ -127,25 +127,33 @@ func TestDoctorTellsAnAdministratorNothingAboutTheDeployment(t *testing.T) {
 	}
 	d := diagnose(t, srv, admin, "?org_id=org_a")
 
-	for _, name := range []string{"Public URL", "Secret key", "Metrics", "Identity", "Database"} {
+	for _, name := range []string{"Public URL", "Metrics", "Identity", "Database"} {
 		if _, ok := d.find(name); ok {
 			t.Errorf("an administrator was told about %q, which is the deployment's", name)
 		}
 	}
 }
 
-func TestDoctorRefusesAProbeToAnyoneButAnOperator(t *testing.T) {
-	// A probe reaches the inference plane and spends a generation per model.
+func TestDoctorLetsOnlyTheOrganisationsAdministratorsProbe(t *testing.T) {
+	// A probe spends a generation per model, like `keera model check`, so it
+	// is for the same people.
 	srv, _ := diagnosed(t)
-	admin := &authn.Principal{
-		Via: authn.MethodSession, Role: authn.RoleAdmin, OrgID: "org_a", UserID: "user_a",
+	member := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleMember, OrgID: "org_a", UserID: "user_m",
 	}
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet,
 		httpx.ControlPrefix+"/v1/diagnostics?probe=1&org_id=org_a", nil)
-	srv.diagnostics(w, r, admin)
+	srv.diagnostics(w, r, member)
 	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", w.Code)
+		t.Fatalf("a member's probe = %d, want 403", w.Code)
+	}
+
+	admin := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleAdmin, OrgID: "org_a", UserID: "user_a",
+	}
+	if d := diagnose(t, srv, admin, "?probe=1&org_id=org_a"); !d.Probed {
+		t.Error("an administrator's probe did not run")
 	}
 }
 

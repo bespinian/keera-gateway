@@ -16,7 +16,7 @@ sandbox base image.
 
 | Path                 | What it is                                                 |
 | -------------------- | ---------------------------------------------------------- |
-| `cmd/keera-gateway`  | The server binary: the listener and the schema.            |
+| `cmd/keera-gateway`  | The server binary. It only starts `internal/server`.       |
 | `cmd/keera`          | Administration command line, over the control API.         |
 | `internal/server`    | Wiring and lifecycle of the server binary.                 |
 | `internal/cli`       | The `keera` command: every subcommand and its help.        |
@@ -26,7 +26,7 @@ sandbox base image.
 | `internal/auth`      | API key hashing and verification.                          |
 | `internal/webui`     | The control panel, embedded in the server binary.          |
 | `internal/policy`    | The tenancy model and how limits combine.                  |
-| `internal/catalog`   | The model catalogue file and the hosted-provider table.    |
+| `internal/catalog`   | The catalogue files and the hosted-provider table.         |
 | `internal/registry`  | The gateway's in-memory view of the control plane.         |
 | `internal/sandbox`   | The machines it lends out: two drivers, and the manager.   |
 | `internal/forge`     | Short-lived repository credentials, from GitHub or GitLab. |
@@ -34,7 +34,7 @@ sandbox base image.
 | `internal/ratelimit` | Request and token rate limiting.                           |
 | `internal/usage`     | The usage recorder behind billing and reports.             |
 | `internal/metrics`   | The Prometheus exposition on `/metrics`.                   |
-| `internal/secret`    | Encryption for hosted-provider API keys.                   |
+| `internal/secret`    | Encryption for stored model and MCP credentials.           |
 | `internal/store`     | Postgres schema and queries.                               |
 | `internal/config`    | Every setting, read from the environment.                  |
 | `internal/httpx`     | Shared HTTP plumbing: prefixes, compression, request ids.  |
@@ -42,29 +42,33 @@ sandbox base image.
 | `internal/version`   | The build version both binaries report.                    |
 | `Containerfile`      | The image the gateway ships in. `FROM scratch`.            |
 | `compose`            | Single-host deployment, and the development loop.          |
-| `sandbox`            | The sandbox image: sshd, the entrypoint, the Git helper.   |
+| `sandbox`            | The sandbox image: sshd, entrypoint, Git and agent tools.  |
 | `scripts`            | The third-party notices the image and the archives carry.  |
 
 ## Commands
 
 ```sh
 make build             # both binaries
-make check             # test + vet + fmt-check, what CI runs
+make check             # test + vet + fmt-check
 make test              # go test -race -cover ./...
-make test-integration  # store, control and ratelimit tests, against throwaway containers
+make test-integration  # store, control and ratelimit tests, against Postgres and Redis
 make check-all         # check + test-integration
 make lint              # golangci-lint, if installed
 make dev               # the development loop: backends in containers, gateway under air
+make dev TIER=gpu      # the same with vLLM instead of llama.cpp, for tool calls
+make dev-down          # stop the backend containers make dev left running
 make image             # the gateway image, tagged localhost/keera-gateway:latest
 make sandbox-image     # the sandbox base image, which the podman driver needs
 make sbom              # rebuild the image and write build/sbom/keera-gateway.cdx.json
 make notices           # the licences of what is compiled in, to build/THIRD_PARTY_NOTICES
 make dist              # the keera command for every release platform, to build/dist
-nix build .#keera      # needs the vendor directory
+nix build .#keera -o build/result  # vendorHash in flake.nix follows go.mod
 ```
 
 Everything those write goes to `build/` - the two binaries, the SBOM, the
-notices, the release archives, and what air rebuilds during `make dev`. `make clean` removes it.
+notices, the release archives, and what air rebuilds during `make dev`.
+`make clean` removes it. The exception is `compose/.env`, which `make dev`
+creates on a fresh clone and `make clean` keeps.
 
 Run `make check` before handing work back.
 

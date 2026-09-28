@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"log/slog"
@@ -53,7 +54,7 @@ type view struct {
 // RedisOptions configures a Redis limiter. The zero value is usable.
 type RedisOptions struct {
 	// Prefix namespaces the keys, so two deployments can share one Redis.
-	// Defaults to "keera".
+	// Defaults to DefaultRedisPrefix.
 	Prefix string
 	// Timeout bounds one round trip. It is short on purpose: every request
 	// waits for it, and a slow Redis should cost accuracy, not latency.
@@ -62,8 +63,11 @@ type RedisOptions struct {
 	Metrics Reporter
 }
 
+// DefaultRedisPrefix is the key prefix when none is set. internal/config reads
+// it from here.
+const DefaultRedisPrefix = "keera"
+
 const (
-	defaultRedisPrefix  = "keera"
 	defaultRedisTimeout = 250 * time.Millisecond
 	// complainEvery bounds the log while Redis is down.
 	complainEvery = time.Minute
@@ -85,7 +89,7 @@ func NewRedis(rdb redis.Scripter, local *Limiter, opts RedisOptions, log *slog.L
 	r := &Redis{
 		rdb:     rdb,
 		local:   local,
-		prefix:  orDefault(opts.Prefix, defaultRedisPrefix),
+		prefix:  cmp.Or(opts.Prefix, DefaultRedisPrefix),
 		timeout: opts.Timeout,
 		log:     log,
 		report:  opts.Metrics,
@@ -95,13 +99,6 @@ func NewRedis(rdb redis.Scripter, local *Limiter, opts RedisOptions, log *slog.L
 		r.timeout = defaultRedisTimeout
 	}
 	return r
-}
-
-func orDefault(s, fallback string) string {
-	if s == "" {
-		return fallback
-	}
-	return s
 }
 
 // admitSource refills every bucket in the batch, decides them all, and charges
@@ -260,11 +257,6 @@ func (r *Redis) admitArgs(reqs []Requirement, now time.Time) (keys []string, arg
 	return keys, args, at
 }
 
-// Charge takes n units from key's bucket.
-func (r *Redis) Charge(key string, perMinute int, n float64, now time.Time) {
-	r.ChargeAll([]Requirement{{Key: key, PerMinute: perMinute}}, n, now)
-}
-
 // ChargeAll takes n units from the bucket of every requirement, in one round
 // trip. Take is not used.
 func (r *Redis) ChargeAll(reqs []Requirement, n float64, now time.Time) {
@@ -328,7 +320,8 @@ func (r *Redis) Retry(key string, perMinute int, now time.Time) time.Duration {
 }
 
 // Sweep forgets the views and in-memory buckets untouched for idle. The buckets
-// in Redis expire on their own, one full refill after their last write.
+// in Redis expire on their own, a minute after one full refill past their
+// last write.
 func (r *Redis) Sweep(idle time.Duration, now time.Time) {
 	r.local.Sweep(idle, now)
 	r.mu.Lock()

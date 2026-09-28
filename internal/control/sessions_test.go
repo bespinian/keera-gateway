@@ -22,7 +22,7 @@ import (
 func sessionFixture(t *testing.T, st *store.Store) (from, to time.Time) {
 	t.Helper()
 	ctx, now := t.Context(), time.Now().UTC().Truncate(time.Second)
-	if _, err := st.CreateOrg(ctx, "org_1", "Example Bank"); err != nil {
+	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_1", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
 	// The team and the key exist as rows, not only as ids on a usage event:

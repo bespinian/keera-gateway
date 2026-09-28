@@ -21,7 +21,7 @@ your machine. In short:
 ```sh
 go mod vendor   # once, after cloning
 make dev        # the gateway and its backends, rebuilt on every save
-make check      # tests, vet and formatting - what CI runs
+make check      # tests, vet and formatting; CI also runs the linter
 ```
 
 Run `make check` before you open a pull request. If your change touches the

@@ -14,16 +14,13 @@ models:
     provider: anthropic
     backend_model: claude-opus-5
 `
-	models, err := Parse([]byte(in))
+	models, err := parseModelFile([]byte(in))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 	m := models[0]
 	if got, want := m.Backends, []string{"https://api.anthropic.com/v1"}; len(got) != 1 || got[0] != want[0] {
 		t.Errorf("Backends = %v, want %v", got, want)
-	}
-	if m.APIKeyEnv != "ANTHROPIC_API_KEY" {
-		t.Errorf("APIKeyEnv = %q, want ANTHROPIC_API_KEY", m.APIKeyEnv)
 	}
 	if m.MaxContext != 1_000_000 {
 		t.Errorf("MaxContext = %d, want 1000000", m.MaxContext)
@@ -44,29 +41,25 @@ models:
 }
 
 func TestProviderDefaultsGiveWayToTheCatalogue(t *testing.T) {
-	// A corporate egress proxy, a key variable of the deployment's own naming,
-	// and a department's internal price. None of them should be overwritten.
+	// A corporate egress proxy and a department's internal price. Neither
+	// should be overwritten.
 	const in = `
 models:
   - alias: keera-frontier
     provider: ANTHROPIC
     backend_model: claude-opus-5
     backends: ["http://egress.corp:8080/v1"]
-    api_key_env: CORP_ANTHROPIC_KEY
     max_context: 200000
     input_micros_per_mtok: 1
     output_micros_per_mtok: 0
 `
-	models, err := Parse([]byte(in))
+	models, err := parseModelFile([]byte(in))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 	m := models[0]
 	if len(m.Backends) != 1 || m.Backends[0] != "http://egress.corp:8080/v1" {
 		t.Errorf("Backends = %v, want the declared proxy", m.Backends)
-	}
-	if m.APIKeyEnv != "CORP_ANTHROPIC_KEY" {
-		t.Errorf("APIKeyEnv = %q, want CORP_ANTHROPIC_KEY", m.APIKeyEnv)
 	}
 	if m.MaxContext != 200_000 {
 		t.Errorf("MaxContext = %d, want 200000", m.MaxContext)
@@ -105,7 +98,7 @@ models:
     backend_model: claude-haiku-4-5
     description: "   "
 `
-	models, err := Parse([]byte(in))
+	models, err := parseModelFile([]byte(in))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -168,7 +161,7 @@ func TestProviderRejectsWhatWouldFailSilentlyAtRuntime(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Parse([]byte(tc.in))
+			_, err := parseModelFile([]byte(tc.in))
 			if err == nil {
 				t.Fatal("Parse accepted a catalogue that would fail at runtime")
 			}
@@ -188,7 +181,7 @@ models:
     input_micros_per_mtok: 5000000
     output_micros_per_mtok: 25000000
 `
-	models, err := Parse([]byte(in))
+	models, err := parseModelFile([]byte(in))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -208,7 +201,7 @@ func TestProvidersIsACopy(t *testing.T) {
 	}
 	got[0].Endpoint = "http://attacker.example/v1"
 	got[0].Models[0].InputMicrosPerMTok = 0
-	models, err := Parse([]byte("models:\n  - alias: a\n    provider: " + got[0].Name +
+	models, err := parseModelFile([]byte("models:\n  - alias: a\n    provider: " + got[0].Name +
 		"\n    backend_model: " + got[0].Models[0].ID))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -225,16 +218,13 @@ models:
     provider: openai
     backend_model: gpt-5.1
 `
-	models, err := Parse([]byte(in))
+	models, err := parseModelFile([]byte(in))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 	m := models[0]
 	if got, want := m.Backends, []string{"https://api.openai.com/v1"}; len(got) != 1 || got[0] != want[0] {
 		t.Errorf("Backends = %v, want %v", got, want)
-	}
-	if m.APIKeyEnv != "OPENAI_API_KEY" {
-		t.Errorf("APIKeyEnv = %q, want OPENAI_API_KEY", m.APIKeyEnv)
 	}
 	if m.MaxContext != 400_000 {
 		t.Errorf("MaxContext = %d, want 400000", m.MaxContext)
@@ -257,7 +247,7 @@ models:
     provider: stepping-stone
     backend_model: Qwen/Qwen3-Coder-Next
 `
-	models, err := Parse([]byte(in))
+	models, err := parseModelFile([]byte(in))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -265,8 +255,8 @@ models:
 	if got, want := m.Backends, []string{"https://llm.stoney-cloud.com/v1"}; len(got) != 1 || got[0] != want[0] {
 		t.Errorf("Backends = %v, want %v", got, want)
 	}
-	if m.APIKeyEnv != "STEPPING_STONE_API_KEY" || m.MaxContext != 256_000 {
-		t.Errorf("model = %+v, want the provider's key variable and context window", m)
+	if m.MaxContext != 256_000 {
+		t.Errorf("MaxContext = %d, want the provider's 256000", m.MaxContext)
 	}
 	if m.InputMicrosPerMTok != 340_000 || m.OutputMicrosPerMTok != 1_700_000 ||
 		m.CachedInputMicrosPerMTok != 51_000 {
@@ -312,8 +302,8 @@ func checkProvider(t *testing.T, p Provider) {
 		// The data plane appends the path, so this would double the slash.
 		t.Errorf("endpoint %q has a trailing slash", p.Endpoint)
 	}
-	if p.APIKeyEnv == "" || p.Currency == "" || len(p.Kinds) == 0 || len(p.Models) == 0 {
-		t.Errorf("entry = %+v, want a key variable, a currency, a kind and a model", p)
+	if p.Currency == "" || len(p.Kinds) == 0 || len(p.Models) == 0 {
+		t.Errorf("entry = %+v, want a currency, a kind and a model", p)
 	}
 	// Every model declared against it takes this location, so it must be one
 	// the catalogue accepts, and it must not claim to be the deployment's own.
@@ -379,7 +369,7 @@ func checkProviderModel(t *testing.T, p Provider, m ProviderModel, seenDescripti
 // and given way on like every other one: a department charged an internal rate
 // for a hosted model is charged it for the cached half of its prompts too.
 func TestProviderFillsInTheCachedInputRate(t *testing.T) {
-	models, err := Parse([]byte(`
+	models, err := parseModelFile([]byte(`
 models:
   - alias: keera-frontier
     provider: anthropic
@@ -394,7 +384,7 @@ models:
 			"discounted one", m.CachedInputMicrosPerMTok, m.InputMicrosPerMTok)
 	}
 
-	overridden, err := Parse([]byte(`
+	overridden, err := parseModelFile([]byte(`
 models:
   - alias: keera-frontier
     provider: anthropic
@@ -414,7 +404,7 @@ models:
 // tokens are charged at the input price, which is too high rather than too
 // low and is what the gateway charged for them before the column existed.
 func TestAnUnknownModelNeedsNoCachedRate(t *testing.T) {
-	models, err := Parse([]byte(`
+	models, err := parseModelFile([]byte(`
 models:
   - alias: keera-frontier
     provider: anthropic
@@ -445,7 +435,7 @@ models:
     product_id: 100234
     backend_model: swiss-ai/Apertus-v1.5-70B
 `
-	models, err := Parse([]byte(in))
+	models, err := parseModelFile([]byte(in))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -454,8 +444,8 @@ models:
 	if len(m.Backends) != 1 || m.Backends[0] != want {
 		t.Errorf("Backends = %v, want [%s]", m.Backends, want)
 	}
-	if m.APIKeyEnv != "INFOMANIAK_API_KEY" || m.MaxContext != 100_000 {
-		t.Errorf("model = %+v, want the provider's key variable and context window", m)
+	if m.MaxContext != 100_000 {
+		t.Errorf("MaxContext = %d, want the provider's 100000", m.MaxContext)
 	}
 	// No cached-input rate is published, so there is none to fill in and those
 	// tokens are charged at the input price.
@@ -475,7 +465,7 @@ models:
     backends: ["http://egress.corp:8080/2/ai/{product_id}/openai/v1"]
     backend_model: google/gemma-4-31B-it
 `
-	models, err := Parse([]byte(in))
+	models, err := parseModelFile([]byte(in))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -495,7 +485,7 @@ models:
     backends: ["https://api.infomaniak.com/2/ai/100234/openai/v1"]
     backend_model: google/gemma-4-31B-it
 `
-	if _, err := Parse([]byte(in)); err != nil {
+	if _, err := parseModelFile([]byte(in)); err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 }
@@ -554,7 +544,7 @@ models:
 	}}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := Parse([]byte(c.in))
+			_, err := parseModelFile([]byte(c.in))
 			if err == nil {
 				t.Fatalf("Parse accepted it")
 			}
@@ -565,11 +555,11 @@ models:
 	}
 }
 
-// Where a model runs is the provider's, and a model with none runs on the
-// deployment's own inference plane. An entry may say otherwise, for an endpoint
-// that runs somewhere else.
+// Where a model runs is the provider's. Without one, a backend inside the
+// network is onprem. An entry may say otherwise, for an endpoint that runs
+// somewhere else.
 func TestLocationComesFromTheProvider(t *testing.T) {
-	models, err := Parse([]byte(`
+	models, err := parseModelFile([]byte(`
 models:
   - alias: keera-frontier
     provider: anthropic
@@ -584,14 +574,34 @@ models:
     provider: openai
     backend_model: gpt-5.5
     location: CH
+  - alias: keera-embed
+    kind: embedding
+    backends: ["https://llm.stoney-cloud.com/v1"]
+    backend_model: BAAI/bge-m3
+    location: ch
 `))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	for i, want := range []string{"usa", "ch", "onprem", "ch"} {
+	for i, want := range []string{"usa", "ch", "onprem", "ch", "ch"} {
 		if got := models[i].Location; got != want {
 			t.Errorf("%s: location = %q, want %q", models[i].Alias, got, want)
 		}
+	}
+}
+
+// A backend on the internet does not say which country it is in, so a model
+// with no provider there must state it rather than be called onprem.
+func TestAnOutsideBackendWithNoProviderMustStateItsLocation(t *testing.T) {
+	_, err := parseModelFile([]byte(`
+models:
+  - alias: keera-embed
+    kind: embedding
+    backends: ["https://llm.stoney-cloud.com/v1"]
+    backend_model: BAAI/bge-m3
+`))
+	if err == nil || !strings.Contains(err.Error(), "location is required") {
+		t.Errorf("Parse = %v, want it to ask for the location", err)
 	}
 }
 
@@ -609,7 +619,7 @@ func TestReleaseDateComesFromTheTable(t *testing.T) {
 	if known.ID == "" {
 		t.Skip("the table states no release date")
 	}
-	models, err := Parse([]byte(`
+	models, err := parseModelFile([]byte(`
 models:
   - alias: keera-frontier
     provider: anthropic

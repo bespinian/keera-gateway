@@ -57,6 +57,21 @@ func NewCLICode() (code string, hash []byte, err error) {
 // HashCLICode returns the value stored in cli_codes.id for code.
 func HashCLICode(code string) []byte { return sum256(code) }
 
+// NewSession mints a panel session's cookie value, the hash stored for it,
+// and its CSRF token.
+func NewSession() (token string, hash []byte, csrf string, err error) {
+	if token, err = randomToken(); err != nil {
+		return "", nil, "", err
+	}
+	if csrf, err = randomToken(); err != nil {
+		return "", nil, "", err
+	}
+	return token, HashSession(token), csrf, nil
+}
+
+// HashSession returns the value stored for a session's cookie value.
+func HashSession(token string) []byte { return sum256(token) }
+
 // CLIChallenge derives the S256 challenge for a verifier.
 //
 // The command line publishes it when it starts a sign-in, and the gateway

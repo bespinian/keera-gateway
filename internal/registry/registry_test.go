@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -514,7 +515,7 @@ func TestTheCatalogueIsReplacedWholeOrNotAtAll(t *testing.T) {
 	s.routers = []policy.Router{{OrgID: "org_1", Alias: "cheap-first"}}
 	r := newRegistry(t, s, Options{})
 
-	if _, ok := r.Model("small"); !ok {
+	if _, ok := r.Model("", "small"); !ok {
 		t.Fatal("the catalogue did not load")
 	}
 
@@ -524,14 +525,45 @@ func TestTheCatalogueIsReplacedWholeOrNotAtAll(t *testing.T) {
 	s.loadErr = errors.New("connection refused")
 	s.mu.Unlock()
 
-	if err := r.refreshCatalogue(t.Context()); err == nil {
-		t.Fatal("refreshCatalogue succeeded with a database it could not read")
+	if err := r.refreshAll(t.Context()); err == nil {
+		t.Fatal("refreshAll succeeded with a database it could not read")
 	}
-	if _, ok := r.Model("large"); ok {
+	if _, ok := r.Model("", "large"); ok {
 		t.Error("half of a failed refresh was adopted")
 	}
 	if _, ok := r.Filter("org_1", "pii"); !ok {
 		t.Error("a failed refresh threw away the filters that were already loaded")
+	}
+}
+
+func TestAnOrganisationSeesItsOwnModelsAndNoOtherTenants(t *testing.T) {
+	s := newSource()
+	s.models = []policy.Model{
+		{OrgID: "org_1", Alias: "fast", BackendModel: "own"},
+		{OrgID: "org_1", Alias: "private"},
+		{OrgID: "org_2", Alias: "fast", BackendModel: "theirs"},
+	}
+	r := newRegistry(t, s, Options{})
+
+	if m, _ := r.Model("org_1", "fast"); m.BackendModel != "own" {
+		t.Errorf("org_1 got the %q fast, want its own", m.BackendModel)
+	}
+	if m, _ := r.Model("org_2", "fast"); m.BackendModel != "theirs" {
+		t.Errorf("org_2 got the %q fast, want its own", m.BackendModel)
+	}
+	if _, ok := r.Model("org_2", "private"); ok {
+		t.Error("org_2 can reach org_1's model")
+	}
+	if _, ok := r.Model("", "private"); ok {
+		t.Error("a model is reachable without an organisation")
+	}
+
+	var got []string
+	for _, m := range r.Models("org_1") {
+		got = append(got, m.OrgID+"/"+m.Alias)
+	}
+	if want := []string{"org_1/fast", "org_1/private"}; !slices.Equal(got, want) {
+		t.Errorf("org_1 lists %v, want %v", got, want)
 	}
 }
 
@@ -547,9 +579,6 @@ func TestDefaultsAreFilledInForWhateverIsNotSet(t *testing.T) {
 	}
 	if o.NegativeTTL >= o.TTL {
 		t.Errorf("NegativeTTL %v is not shorter than TTL %v", o.NegativeTTL, o.TTL)
-	}
-	if o.ModelRefresh != time.Minute {
-		t.Errorf("ModelRefresh = %v, want 1m", o.ModelRefresh)
 	}
 	if o.SpendRefresh != 10*time.Second {
 		t.Errorf("SpendRefresh = %v, want 10s", o.SpendRefresh)

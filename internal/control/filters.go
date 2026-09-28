@@ -1,6 +1,7 @@
 package control
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -20,23 +21,10 @@ import (
 // whole conversation, so it costs even more.
 const maxFilterPromptBytes = 16 << 10
 
-// filterOrg resolves which organisation a filter request is about. A filter
-// belongs to one organisation, even though its model is the operator's.
-func (s *Server) filterOrg(w http.ResponseWriter, r *http.Request, p *authn.Principal) (string, bool) {
-	return s.requireOrg(w, p, r.URL.Query().Get("org_id"),
-		"choose an organisation first; a filter belongs to one")
-}
-
-// filterAdmin is filterOrg for a request that changes a filter.
-func (s *Server) filterAdmin(w http.ResponseWriter, r *http.Request, p *authn.Principal) (string, bool) {
-	orgID, ok := s.filterOrg(w, r, p)
-	return orgID, ok && s.requireOrgAdmin(w, p, orgID)
-}
-
 // listFilters is readable by every member of the organisation, instruction
 // and all. It is text added to the reader's own requests, not a credential.
 func (s *Server) listFilters(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	orgID, ok := s.filterOrg(w, r, p)
+	orgID, ok := s.queryOrg(w, r, p)
 	if !ok {
 		return
 	}
@@ -56,7 +44,7 @@ func (s *Server) listFilters(w http.ResponseWriter, r *http.Request, p *authn.Pr
 // Every member may read it: these are counts of the organisation's own
 // traffic, which members already see on the Overview.
 func (s *Server) filterReport(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	orgID, ok := s.filterOrg(w, r, p)
+	orgID, ok := s.queryOrg(w, r, p)
 	if !ok {
 		return
 	}
@@ -93,7 +81,7 @@ func (s *Server) filterReport(w http.ResponseWriter, r *http.Request, p *authn.P
 }
 
 func (s *Server) putFilter(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	orgID, ok := s.filterAdmin(w, r, p)
+	orgID, ok := s.adminOrg(w, r, p)
 	if !ok {
 		return
 	}
@@ -124,17 +112,13 @@ func (s *Server) putFilter(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		Rules:       in.Rules,
 		Description: strings.TrimSpace(in.Description),
 	}
-	// A missing mode means rewrite, the only mode older clients know.
-	if f.Mode == "" {
-		f.Mode = policy.FilterModeRewrite
-	}
-	if !policy.ValidFilterAlias(f.Alias) {
+	if !policy.ValidAlias(f.Alias) {
 		badRequest(w, "a filter's alias is written into guardrails, command lines and URLs, so it is "+
 			"lowercase letters, digits and inner hyphens - 'redact-secrets', not "+
 			"'"+f.Alias+"'")
 		return
 	}
-	if !policy.ValidFilterMode(f.Mode) {
+	if !f.Mode.Valid() {
 		badRequest(w, "'mode' is 'rewrite' - the filter is shown the request's text and answers with "+
 			"it rewritten - or 'gate', where it answers only whether the request may "+
 			"go at all, or 'pattern', where a list of rules is applied to the text with "+
@@ -165,7 +149,9 @@ func (s *Server) checkFilterFields(w http.ResponseWriter, r *http.Request,
 	}
 	switch {
 	case len(f.Rules) > 0:
-		badRequest(w, "'rules' is set, and this is a "+string(f.Mode)+" filter: it reads the "+
+		// The store fills in a missing mode later, so it is named here.
+		mode := cmp.Or(f.Mode, policy.FilterModeRewrite)
+		badRequest(w, "'rules' is set, and this is a "+string(mode)+" filter: it reads the "+
 			"request with a model and an instruction, so there is nothing for a "+
 			"list of expressions to be applied by. Use 'mode': 'pattern' for one "+
 			"that runs rules instead")
@@ -230,11 +216,11 @@ func (s *Server) checkFilterModel(w http.ResponseWriter, r *http.Request, orgID,
 		badRequest(w, "'model' is required; it names the model the filter runs on")
 		return false
 	}
-	m, err := s.st.Model(r.Context(), alias)
+	m, err := s.st.Model(r.Context(), orgID, alias)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		httpx.WriteError(w, http.StatusBadRequest, "invalid_request_error", "model_not_found",
-			"no model '"+alias+"' exists; a filter runs on a model from the catalogue")
+			"this organisation has no model '"+alias+"'; a filter runs on one of its models")
 		return false
 	case err != nil:
 		s.fail(w, err)
@@ -282,7 +268,7 @@ func filterModelRefusal(alias string, m policy.Model) string {
 }
 
 func (s *Server) deleteFilter(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	orgID, ok := s.filterAdmin(w, r, p)
+	orgID, ok := s.adminOrg(w, r, p)
 	if !ok {
 		return
 	}
@@ -316,8 +302,8 @@ func (s *Server) deleteFilter(w http.ResponseWriter, r *http.Request, p *authn.P
 // instruction deletes code. Both show up here in one click, instead of when a
 // developer complains.
 func (s *Server) checkFilter(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	orgID, ok := s.filterAdmin(w, r, p)
-	if !ok || !s.requireGateway(w) {
+	orgID, ok := s.adminOrg(w, r, p)
+	if !ok {
 		return
 	}
 	f, err := s.st.Filter(r.Context(), orgID, r.PathValue("alias"))
@@ -325,23 +311,7 @@ func (s *Server) checkFilter(w http.ResponseWriter, r *http.Request, p *authn.Pr
 		s.fail(w, err)
 		return
 	}
-	// A pattern filter runs no model, so there is nothing to look up.
-	var m policy.Model
-	if f.UsesModel() {
-		// The registry, not the store: it holds the decrypted credential the
-		// data plane would present.
-		live, found := s.reg.Model(f.Model)
-		if !found {
-			httpx.WriteJSON(w, http.StatusOK, map[string]any{
-				"alias": f.Alias, "model": f.Model, "ok": false,
-				"error": "the model '" + f.Model + "' is not in the catalogue any more, so this " +
-					"filter would refuse every request it covers",
-			})
-			return
-		}
-		m = live
-	}
-	probe := s.opts.Gateway.CheckFilter(r.Context(), f, m)
+	probe := s.opts.Gateway.CheckFilter(r.Context(), f)
 	s.auditf(r, p, orgID, "filter.check", "filter", f.Alias, map[string]any{
 		"ok": probe.OK, "error": probe.Error,
 	})

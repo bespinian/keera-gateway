@@ -8,12 +8,14 @@ import (
 	"log/slog"
 	"maps"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/auth"
+	"github.com/bespinian/keera-gateway/internal/catalog"
 	"github.com/bespinian/keera-gateway/internal/connect"
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/id"
@@ -37,9 +39,6 @@ type ManagerOptions struct {
 	// Empty creates sandboxes with no inference configured: fine for an
 	// engineer, useless for an agent. It is a startup warning, not an error.
 	PublicURL string
-	// DefaultModel is the alias a sandbox's agent starts on. Empty leaves it to
-	// the client.
-	DefaultModel string
 	// IdleSuspend is how long an engineer's sandbox may sit unused before it
 	// is suspended. Zero never suspends it.
 	//
@@ -100,9 +99,6 @@ type GitCredential struct {
 	// token leaves Username empty.
 	Username string
 	Token    string
-	// SSHKey is a PEM private key, for a forge reached over ssh. Exactly one
-	// of Token and SSHKey is set.
-	SSHKey string
 	// ID is the forge's id for the credential, for a minter that can revoke
 	// it. It is stored; the credential is not.
 	ID string
@@ -199,10 +195,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (store.Sandbox,
 	sbID := id.New("sbx")
 	// Decided once and stored on the row, so the sandbox stays addressable if
 	// warm pools are later turned off.
-	backing := BackingSandbox
-	if class.Warm > 0 && m.driver.Capabilities().Warm {
-		backing = BackingClaim
-	}
+	backing := backingFor(class, req.Purpose, m.driver.Capabilities().Warm)
 	ref := Ref{ID: sbID, Name: req.Name, Backing: backing}
 
 	// Minted now, so it expires and is revoked with the sandbox. Nobody sees
@@ -215,14 +208,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (store.Sandbox,
 	// Revokes the key and the repository credential on every failure below,
 	// so nothing live is left for a sandbox that does not exist.
 	var git GitCredential
-	rollback := func() {
-		if err := m.st.RevokeKey(context.WithoutCancel(ctx), keyID); err != nil {
-			m.log.Warn("sandbox: revoking the key of a sandbox that was not created failed",
-				"key_id", keyID, "error", err)
-		}
-		m.changed()
-		m.revokeCredential(context.WithoutCancel(ctx), git.Repo, git.ID)
-	}
+	rollback := m.undoStart(ctx, keyID, &git)
 
 	row := store.Sandbox{
 		ID: sbID, OrgID: req.OrgID, TeamID: req.TeamID, UserID: req.UserID, Owner: req.Owner,
@@ -243,13 +229,11 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (store.Sandbox,
 
 	env := m.environment(ctx, req, row, secret, expires)
 	if req.Repo != "" {
-		git, err = m.mintGit(ctx, GitRequest{Repo: req.Repo, Until: expires, Sandbox: req.Name,
-			Allow: allowRepo(req.Limits)})
+		git, err = m.checkOut(ctx, env, req, expires)
 		if err != nil {
 			rollback()
 			return store.Sandbox{}, err
 		}
-		m.repoEnv(env, git, req.Branch)
 		row.Repo, row.GitCredentialID = git.Repo, git.ID
 	}
 
@@ -285,6 +269,16 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (store.Sandbox,
 	return row, nil
 }
 
+// backingFor decides whether a new sandbox is claimed from its class's warm
+// pool. Only an engineer's is: pool members are started before anybody asks,
+// as engineer sandboxes that wait for sshd, and an agent runs no sshd.
+func backingFor(class policy.SandboxClass, p policy.Purpose, warm bool) Backing {
+	if warm && class.Warm > 0 && p == policy.PurposeEngineer {
+		return BackingClaim
+	}
+	return BackingSandbox
+}
+
 // admit runs the checks in the order of the questions: is the request valid,
 // does the class exist, may this purpose and scope use it, can the driver
 // deliver it, is there room. It returns the class.
@@ -298,10 +292,20 @@ func (m *Manager) admit(ctx context.Context, req CreateRequest) (policy.SandboxC
 			"in the cluster and half of an ssh config entry on your laptop, so it is lowercase "+
 			"letters, digits and interior hyphens", req.Name)
 	}
+	if req.Purpose == policy.PurposeAgent {
+		if strings.TrimSpace(req.Task) == "" {
+			return policy.SandboxClass{}, refuse("an agent sandbox needs a task: it is the " +
+				"instruction the agent starts on")
+		}
+		if req.Repo == "" {
+			return policy.SandboxClass{}, refuse("an agent sandbox needs a repository: the " +
+				"agent's work comes out of it only as a branch pushed there")
+		}
+	}
 
-	class, err := m.st.SandboxClass(ctx, req.Class)
+	class, err := m.st.SandboxClass(ctx, req.OrgID, req.Class)
 	if errors.Is(err, store.ErrNotFound) {
-		return policy.SandboxClass{}, refuse("there is no sandbox class %q in this deployment; "+
+		return policy.SandboxClass{}, refuse("this organisation has no sandbox class %q; "+
 			"`keera sandbox classes` lists them", req.Class)
 	}
 	if err != nil {
@@ -309,20 +313,21 @@ func (m *Manager) admit(ctx context.Context, req CreateRequest) (policy.SandboxC
 	}
 	if !class.Allows(req.Purpose) {
 		return policy.SandboxClass{}, refuse("the sandbox class %q is not offered for %s sandboxes "+
-			"in this deployment", class.Name, req.Purpose)
+			"in this organisation", class.Name, req.Purpose)
 	}
 	if err := req.Limits.Admits(class); err != nil {
 		return policy.SandboxClass{}, &ErrRefused{Reason: err.Error()}
 	}
-	if caps := m.driver.Capabilities(); !caps.Isolation.AtLeast(class.Isolation) {
+	if caps := m.driver.Capabilities(); !slices.Contains(caps.Tiers, class.Isolation) {
 		return policy.SandboxClass{}, refuse("the sandbox class %q asks for %s isolation and the %s "+
-			"driver in this deployment can deliver at most %s; a sandbox that claimed a kernel "+
-			"of its own and did not have one would be worse than this refusal",
-			class.Name, class.Isolation, m.driver.Name(), caps.Isolation)
+			"driver in this deployment has no runtime for it; set KEERA_SANDBOX_RUNTIME_%s, or "+
+			"move the class to a tier it has. A sandbox that claimed a kernel of its own and "+
+			"did not have one would be worse than this refusal",
+			class.Name, class.Isolation, m.driver.Name(), strings.ToUpper(string(class.Isolation)))
 	}
 	if req.Purpose == policy.PurposeEngineer && len(req.AuthorizedKeys) == 0 {
 		return policy.SandboxClass{}, refuse("no ssh public key was given, so nothing could open a " +
-			"shell in this sandbox. `keera sandbox up` sends yours from ~/.ssh; if you have " +
+			"shell in this sandbox. `keera sandbox create` sends yours from ~/.ssh; if you have " +
 			"none, `ssh-keygen -t ed25519` makes one")
 	}
 	if req.Repo != "" && m.opts.Git == nil {
@@ -441,15 +446,15 @@ func (m *Manager) environment(ctx context.Context, req CreateRequest, row store.
 		env["KEERA_GIT_AUTHOR_NAME"] = req.Owner
 	}
 
-	m.inferenceEnv(env)
-	m.agentEnv(ctx, req, env)
-
-	// An agent sandbox names its own session (docs/sessions.md): once for the
-	// entrypoint to pass on, and once as the header Claude Code reads itself.
+	// An agent sandbox names its own session (docs/sessions.md): as the
+	// header Claude Code reads itself, and in Pi's configuration below.
 	if row.Purpose == policy.PurposeAgent {
 		env["KEERA_SESSION"] = row.ID
 		env["ANTHROPIC_CUSTOM_HEADERS"] = "X-Keera-Session: " + row.ID
 	}
+
+	m.inferenceEnv(env)
+	m.agentEnv(ctx, req, env)
 	// Passed once at start and never stored.
 	if req.Task != "" {
 		env["KEERA_TASK"] = req.Task
@@ -478,8 +483,8 @@ func (m *Manager) inferenceEnv(env map[string]string) {
 	// in its own entrypoint (docs/sandboxes.md), and so re-arms that vendor.
 }
 
-// agentEnv configures Pi with every model the key may reach, and names the
-// model to start on.
+// agentEnv configures Pi with every model the key may reach, and starts it on
+// the first of them.
 func (m *Manager) agentEnv(ctx context.Context, req CreateRequest, env map[string]string) {
 	models := m.reachableModels(ctx, req)
 	if len(models) == 0 && env["KEERA_BASE_URL"] != "" {
@@ -487,20 +492,16 @@ func (m *Manager) agentEnv(ctx context.Context, req CreateRequest, env map[strin
 			"with no agent configuration; check the organisation's and the team's "+
 			"allowed models", "org", req.OrgID, "team", req.TeamID)
 	}
-	if cfg := m.piConfig(env["KEERA_BASE_URL"], models); cfg != "" {
+	if cfg := m.piConfig(env["KEERA_BASE_URL"], models, env["KEERA_SESSION"]); cfg != "" {
 		env["KEERA_PI_CONFIG"] = cfg
 		// Also make this gateway Pi's default provider. Pi prefers an armed
 		// built-in provider, so without this an image that exports a vendor
 		// variable would send the key to that vendor. This is sandbox-only:
 		// `keera connect` must not override a laptop's own default.
-		env["KEERA_PI_SETTINGS"] = piSettings(piDefaultModel(m.opts.DefaultModel, models))
+		env["KEERA_PI_SETTINGS"] = piSettings(models[0].Alias)
 	}
-	if m.opts.DefaultModel != "" {
-		env["KEERA_MODEL"] = piDefaultModel(m.opts.DefaultModel, models)
-		env["ANTHROPIC_MODEL"] = env["KEERA_MODEL"]
-	} else if len(models) > 0 {
-		// No deployment default, so name the first model the key can reach,
-		// for the agent runner's --model.
+	if len(models) > 0 {
+		// For the agent runner's --model.
 		env["KEERA_MODEL"] = models[0].Alias
 		env["ANTHROPIC_MODEL"] = models[0].Alias
 	}
@@ -523,15 +524,39 @@ func (m *Manager) mintGit(ctx context.Context, req GitRequest) (GitCredential, e
 	return cred, nil
 }
 
+// undoStart revokes what a sandbox that did not start was given: its key and,
+// once *git is set, its repository credential.
+func (m *Manager) undoStart(ctx context.Context, keyID string, git *GitCredential) func() {
+	return func() {
+		ctx := context.WithoutCancel(ctx)
+		if err := m.st.RevokeKey(ctx, keyID); err != nil {
+			m.log.Warn("sandbox: revoking the key of a sandbox that did not start failed",
+				"key_id", keyID, "error", err)
+		}
+		m.changed()
+		m.revokeCredential(ctx, git.Repo, git.ID)
+	}
+}
+
+// checkOut mints the credential for the repository a starting sandbox checks
+// out, and tells the sandbox what to check out and how.
+func (m *Manager) checkOut(ctx context.Context, env map[string]string, req CreateRequest,
+	until time.Time,
+) (GitCredential, error) {
+	cred, err := m.mintGit(ctx, GitRequest{Repo: req.Repo, Until: until, Sandbox: req.Name,
+		Allow: allowRepo(req.Limits)})
+	if err != nil {
+		return cred, err
+	}
+	m.repoEnv(env, cred, req.Branch)
+	return cred, nil
+}
+
 // repoEnv tells the sandbox what to check out and how.
 func (m *Manager) repoEnv(env map[string]string, cred GitCredential, branch string) {
 	env["KEERA_REPO"] = cred.Repo
 	if branch != "" {
 		env["KEERA_BRANCH"] = branch
-	}
-	if cred.SSHKey != "" {
-		env["KEERA_GIT_SSH_KEY"] = cred.SSHKey
-		return
 	}
 	env["KEERA_GIT_USERNAME"] = cred.Username
 	env["KEERA_GIT_TOKEN"] = cred.Token
@@ -625,12 +650,13 @@ func (m *Manager) revokeCredential(ctx context.Context, repo, id string) {
 
 // Suspend releases a sandbox's compute and keeps its volume.
 func (m *Manager) Suspend(ctx context.Context, sb store.Sandbox) error {
-	if !m.driver.Capabilities().Suspend {
-		return refuse("the %s driver in this deployment cannot suspend a sandbox",
-			m.driver.Name())
-	}
 	if sb.State == policy.SandboxSuspended {
 		return nil
+	}
+	// Resuming starts an agent's task again from the start.
+	if sb.Purpose == policy.PurposeAgent {
+		return refuse("sandbox %s is an agent's; it runs its task to the end and is not "+
+			"suspended. Terminate it to stop it", sb.Name)
 	}
 	if !sb.State.Running() {
 		return refuse("sandbox %s is %s; only a running sandbox can be suspended",
@@ -647,17 +673,22 @@ func (m *Manager) Suspend(ctx context.Context, sb store.Sandbox) error {
 	})
 }
 
-// Resume brings a suspended sandbox back.
-func (m *Manager) Resume(ctx context.Context, sb store.Sandbox) error {
+// Resume brings a suspended or expired sandbox back. limits is the owner's
+// sandbox guardrail as it is now, which an expired sandbox is held to again.
+func (m *Manager) Resume(ctx context.Context, sb store.Sandbox, limits policy.ResolvedSandbox) error {
 	switch {
 	case sb.State == policy.SandboxReady || sb.State == policy.SandboxPending:
 		return nil
 	case sb.State.Final():
 		return refuse("sandbox %s is %s; there is nothing left to resume", sb.Name, sb.State)
+	case sb.State == policy.SandboxExpired:
+		return m.revive(ctx, sb, limits)
 	}
 	if err := m.driver.Resume(ctx, refOf(sb)); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			m.fail(ctx, sb.ID, errors.New("the sandbox is no longer in the cluster"))
+			m.revokeKey(ctx, sb, "sandbox: revoking a vanished sandbox's key failed", "sandbox", sb.ID)
+			m.revokeGit(ctx, sb)
 			return refuse("sandbox %s is no longer in the cluster; its volume went with it",
 				sb.Name)
 		}
@@ -678,6 +709,124 @@ func (m *Manager) Resume(ctx context.Context, sb store.Sandbox) error {
 	return nil
 }
 
+// revive starts an expired sandbox again, as if it were new but on the volume
+// it kept: a new key, a new repository credential and the class's default
+// lifetime, all under the guardrail as it is now.
+func (m *Manager) revive(ctx context.Context, sb store.Sandbox, limits policy.ResolvedSandbox) error {
+	if sb.Purpose != policy.PurposeEngineer {
+		return refuse("sandbox %s is an agent's; its task is over, so it is not resumed", sb.Name)
+	}
+	// The machine is the one it was, so it keeps its own copy of the class.
+	// The class as it is now only decides the lifetime.
+	machine := standIn(sb)
+	lifetime, err := m.lifetimeClass(ctx, sb)
+	if err != nil {
+		return err
+	}
+	if err := limits.Admits(machine); err != nil {
+		return &ErrRefused{Reason: err.Error()}
+	}
+	if sb.Repo != "" && m.opts.Git == nil {
+		return refuse("sandbox %s checks out %s and this deployment no longer has a forge "+
+			"configured (KEERA_SANDBOX_GIT_FORGE), so it could not get a new credential",
+			sb.Name, sb.Repo)
+	}
+	expires := time.Now().Add(clampTTL(lifetime, 0, limits)).UTC()
+
+	req := CreateRequest{
+		OrgID: sb.OrgID, TeamID: sb.TeamID, UserID: sb.UserID, Owner: sb.Owner,
+		Name: sb.Name, Class: sb.Class, Purpose: sb.Purpose,
+		Repo: sb.Repo, Branch: sb.Branch, Limits: limits,
+	}
+	secret, keyID, err := m.mintKey(ctx, req, expires)
+	if err != nil {
+		return err
+	}
+	var git GitCredential
+	rollback := m.undoStart(ctx, keyID, &git)
+
+	row := sb
+	row.KeyID = keyID
+	env := m.environment(ctx, req, row, secret, expires)
+	if sb.Repo != "" {
+		if git, err = m.checkOut(ctx, env, req, expires); err != nil {
+			rollback()
+			return err
+		}
+	}
+
+	if err := m.st.ReviveSandbox(ctx, sb.ID, keyID, git.ID, expires); err != nil {
+		rollback()
+		if errors.Is(err, store.ErrNotFound) {
+			return refuse("sandbox %s is no longer expired; somebody else resumed or "+
+				"terminated it", sb.Name)
+		}
+		return err
+	}
+	m.changed()
+
+	err = m.driver.Revive(ctx, Spec{
+		Ref: refOf(sb), Class: machine, Purpose: sb.Purpose,
+		Owner: sb.Owner, Org: sb.OrgID, Team: sb.TeamID,
+		Env: env, Expires: expires,
+	})
+	if err != nil {
+		rollback()
+		if errors.Is(err, ErrNotFound) {
+			m.fail(ctx, sb.ID, errors.New("the sandbox is no longer there; its volume went with it"))
+			return refuse("sandbox %s is no longer there; its volume went with it", sb.Name)
+		}
+		// Back to expired, with its volume, and without the new key.
+		if oerr := m.st.ObserveSandbox(context.WithoutCancel(ctx), sb.ID, store.SandboxObservation{
+			State: policy.SandboxExpired, Detail: "resuming failed: " + err.Error(),
+		}); oerr != nil {
+			m.log.Warn("sandbox: recording a failed resume failed", "sandbox", sb.ID, "error", oerr)
+		}
+		return fmt.Errorf("resuming sandbox %s: %w", sb.Name, err)
+	}
+	status, err := m.driver.Status(ctx, refOf(sb))
+	if err != nil {
+		// The resume itself worked; the sweep will correct the row.
+		m.log.Warn("sandbox: reading a resumed sandbox's state failed",
+			"sandbox", sb.ID, "error", err)
+		return nil
+	}
+	m.observe(ctx, sb.ID, stillStarting(status, expires, time.Now()))
+	return nil
+}
+
+// lifetimeClass is the class that decides a sandbox's new lifetime: its class
+// as it is now, or standIn if the class was deleted since.
+func (m *Manager) lifetimeClass(ctx context.Context, sb store.Sandbox) (policy.SandboxClass, error) {
+	class, err := m.st.SandboxClass(ctx, sb.OrgID, sb.Class)
+	if errors.Is(err, store.ErrNotFound) {
+		return standIn(sb), nil
+	}
+	return class, err
+}
+
+// standIn is the row's own copy of its class: the machine the sandbox is. It
+// also stands in for a class deleted while the sandbox lived, which is
+// allowed. The row does not record the class's lifetimes, so it gets those of
+// a class that states none. Anything based on the sandbox's own age would
+// grow with each extend or resume.
+func standIn(sb store.Sandbox) policy.SandboxClass {
+	return policy.SandboxClass{
+		OrgID: sb.OrgID, Name: sb.Class, Image: sb.Image, Isolation: sb.Isolation,
+		CPU: sb.CPU, Memory: sb.Memory, Disk: sb.Disk,
+		DefaultTTL: catalog.DefaultSandboxTTL, MaxTTL: catalog.DefaultSandboxMaxTTL,
+	}
+}
+
+// stillStarting reads a driver's "expired" for a sandbox whose new end is
+// still ahead as the cluster not having caught up yet, rather than as the end.
+func stillStarting(status Status, expires, now time.Time) Status {
+	if status.State == policy.SandboxExpired && expires.After(now) {
+		status.State, status.Detail = policy.SandboxPending, "waiting for the cluster to start it again"
+	}
+	return status
+}
+
 // Extend moves when a sandbox ends.
 //
 // The new lifetime counts from now, not from the old end, and is clamped by
@@ -686,16 +835,16 @@ func (m *Manager) Resume(ctx context.Context, sb store.Sandbox) error {
 func (m *Manager) Extend(ctx context.Context, sb store.Sandbox, want time.Duration,
 	limits policy.ResolvedSandbox,
 ) (time.Time, error) {
+	if sb.State == policy.SandboxExpired {
+		return time.Time{}, refuse("sandbox %s has expired; `keera sandbox resume %s` brings "+
+			"it back with a new lifetime", sb.Name, sb.Name)
+	}
 	if !sb.State.Live() {
 		return time.Time{}, refuse("sandbox %s is %s; its lifetime cannot be extended",
 			sb.Name, sb.State)
 	}
-	class, err := m.st.SandboxClass(ctx, sb.Class)
-	if errors.Is(err, store.ErrNotFound) {
-		// The class was removed while the sandbox ran, which is allowed. Only
-		// the policy's ceiling is left.
-		class = policy.SandboxClass{Name: sb.Class, DefaultTTL: want, MaxTTL: want}
-	} else if err != nil {
+	class, err := m.lifetimeClass(ctx, sb)
+	if err != nil {
 		return time.Time{}, err
 	}
 
@@ -716,6 +865,11 @@ func (m *Manager) Extend(ctx context.Context, sb store.Sandbox, want time.Durati
 // key. A failed revoke only logs: the sandbox is gone and the key expires by
 // itself.
 func (m *Manager) Terminate(ctx context.Context, sb store.Sandbox) error {
+	return m.terminate(ctx, sb, "terminated")
+}
+
+// terminate is Terminate, with the detail to leave on the row.
+func (m *Manager) terminate(ctx context.Context, sb store.Sandbox, detail string) error {
 	if sb.State == policy.SandboxTerminated {
 		return nil
 	}
@@ -727,8 +881,40 @@ func (m *Manager) Terminate(ctx context.Context, sb store.Sandbox) error {
 		"sandbox", sb.ID, "key_id", sb.KeyID)
 	m.revokeGit(ctx, sb)
 	return m.st.ObserveSandbox(ctx, sb.ID, store.SandboxObservation{
-		State: policy.SandboxTerminated, Detail: "terminated",
+		State: policy.SandboxTerminated, Detail: detail,
 	})
+}
+
+// finish terminates an agent's sandbox whose task is done.
+func (m *Manager) finish(ctx context.Context, sb store.Sandbox) {
+	if err := m.terminate(ctx, sb, "the agent finished its task"); err != nil {
+		m.log.Warn("sandbox: removing a finished agent sandbox failed",
+			"sandbox", sb.ID, "error", err)
+	}
+}
+
+// failed records a sandbox that stopped by itself and will not come back,
+// and gives back what it held.
+//
+// An agent's is removed from the driver: its result is the branch it pushed,
+// and nothing sweeps its row again. An engineer's keeps its volume until
+// somebody terminates it, since it may hold work. It stays live meanwhile: it
+// counts towards the quota and keeps its name, and the sweep notices if its
+// volume vanishes. Either way the key and the repository credential are
+// revoked.
+func (m *Manager) failed(ctx context.Context, sb store.Sandbox, status Status) {
+	if sb.Purpose == policy.PurposeAgent {
+		if err := m.driver.Terminate(ctx, refOf(sb)); err != nil && !errors.Is(err, ErrNotFound) {
+			// The row stays live, so the next sweep tries again.
+			m.log.Warn("sandbox: removing a failed agent sandbox failed",
+				"sandbox", sb.ID, "error", err)
+			return
+		}
+	}
+	m.stopClock(ctx, sb.ID)
+	m.revokeKey(ctx, sb, "sandbox: revoking a failed sandbox's key failed", "sandbox", sb.ID)
+	m.revokeGit(ctx, sb)
+	m.observe(ctx, sb.ID, status)
 }
 
 // Offboarded is what Offboard did.
@@ -753,8 +939,7 @@ func (m *Manager) Offboard(ctx context.Context, userID string) (Offboarded, erro
 		return done, err
 	}
 	for _, sb := range live {
-		keep := sb.Purpose == policy.PurposeEngineer && sb.State != policy.SandboxPending &&
-			m.driver.Capabilities().Suspend
+		keep := sb.Purpose == policy.PurposeEngineer && sb.State != policy.SandboxPending
 		var err error
 		switch {
 		case !keep:
@@ -787,9 +972,9 @@ func (m *Manager) Dial(ctx context.Context, sb store.Sandbox, port int) (net.Con
 			"is that only a branch came out of it, and a shell nobody recorded would make that "+
 			"claim unprovable", sb.Name)
 	}
-	if sb.State == policy.SandboxSuspended {
-		return nil, refuse("sandbox %s is suspended; `keera sandbox resume %s` brings it back, "+
-			"with its volume as you left it", sb.Name, sb.Name)
+	if sb.State == policy.SandboxSuspended || sb.State == policy.SandboxExpired {
+		return nil, refuse("sandbox %s is %s; `keera sandbox resume %s` brings it back, "+
+			"with its volume as you left it", sb.Name, sb.State, sb.Name)
 	}
 	if sb.State != policy.SandboxReady {
 		return nil, refuse("sandbox %s is %s: %s", sb.Name, sb.State, sb.Detail)
@@ -838,7 +1023,8 @@ func (m *Manager) Sweep(ctx context.Context, now time.Time) {
 //
 // An agent's is terminated: the task is over and its result is a branch. An
 // engineer's is suspended and marked expired, because its volume holds work
-// in progress; resuming it is one command.
+// in progress. Its key and repository credential are revoked; resuming it
+// gives it new ones.
 func (m *Manager) endExpired(ctx context.Context, sb store.Sandbox) {
 	if sb.Purpose == policy.PurposeAgent {
 		if err := m.Terminate(ctx, sb); err != nil {
@@ -856,7 +1042,7 @@ func (m *Manager) endExpired(ctx context.Context, sb store.Sandbox) {
 	m.stopClock(ctx, sb.ID)
 	if err := m.st.ObserveSandbox(ctx, sb.ID, store.SandboxObservation{
 		State:  policy.SandboxExpired,
-		Detail: "its lifetime ran out; the volume is kept until it is terminated",
+		Detail: "its lifetime ran out; resuming it brings it back, terminating it frees the volume",
 	}); err != nil {
 		m.log.Warn("sandbox: recording an expiry failed", "sandbox", sb.ID, "error", err)
 	}
@@ -867,8 +1053,16 @@ func (m *Manager) endExpired(ctx context.Context, sb store.Sandbox) {
 }
 
 // reconcile writes back what the driver says about one sandbox.
+//
+// An expired or failed sandbox is only checked for having vanished. Its state
+// is settled: to a driver an expired one looks suspended, and a failed one
+// has already given back its key.
 func (m *Manager) reconcile(ctx context.Context, sb store.Sandbox, now time.Time) {
 	status, err := m.driver.Status(ctx, refOf(sb))
+	settled := sb.State == policy.SandboxExpired || sb.State == policy.SandboxFailed
+	if settled && !errors.Is(err, ErrNotFound) {
+		return
+	}
 	switch {
 	case errors.Is(err, ErrNotFound):
 		// Gone. On Kubernetes that is usually the controller expiring it;
@@ -884,11 +1078,27 @@ func (m *Manager) reconcile(ctx context.Context, sb store.Sandbox, now time.Time
 		m.log.Warn("sandbox: reading a sandbox's state failed", "sandbox", sb.ID, "error", err)
 		return
 	}
+	// An agent that exited cleanly has done its task, unless it was only
+	// suspended: on podman the two look the same.
+	if status.Exited && sb.Purpose == policy.PurposeAgent && sb.State != policy.SandboxSuspended {
+		m.finish(ctx, sb)
+		return
+	}
+	if status.State == policy.SandboxFailed {
+		m.failed(ctx, sb, status)
+		return
+	}
+	if sb.ExpiresAt != nil {
+		status = stillStarting(status, *sb.ExpiresAt, now)
+	}
 	m.observe(ctx, sb.ID, status)
 
-	// Idle suspension, for an engineer's sandbox.
+	// Idle suspension, for an engineer's sandbox. It has to have been ready
+	// when the row was read too: a sandbox that has only now come back is
+	// not idle from before, and its row does not say so yet.
 	if m.opts.IdleSuspend > 0 && status.State == policy.SandboxReady &&
-		sb.Purpose == policy.PurposeEngineer && idleSince(sb).Add(m.opts.IdleSuspend).Before(now) {
+		sb.State == policy.SandboxReady && sb.Purpose == policy.PurposeEngineer &&
+		idleSince(sb).Add(m.opts.IdleSuspend).Before(now) {
 		m.log.Info("sandbox: suspending an idle sandbox",
 			"sandbox", sb.ID, "name", sb.Name, "idle_for", now.Sub(idleSince(sb)).Round(time.Minute))
 		if err := m.Suspend(ctx, sb); err != nil {
@@ -897,19 +1107,22 @@ func (m *Manager) reconcile(ctx context.Context, sb store.Sandbox, now time.Time
 	}
 }
 
-// idleSince is when a sandbox counts as idle from: when it became ready, or
-// else when it was created.
+// idleSince is when a sandbox counts as idle from: the last time somebody
+// was connected or it came back to ready, whichever is latest.
 func idleSince(sb store.Sandbox) time.Time {
-	if sb.ReadyAt != nil && sb.ReadyAt.After(sb.CreatedAt) {
-		return *sb.ReadyAt
+	since := sb.CreatedAt
+	for _, t := range []*time.Time{sb.ReadyAt, sb.ActiveAt} {
+		if t != nil && t.After(since) {
+			since = *t
+		}
 	}
-	return sb.CreatedAt
+	return since
 }
 
 func (m *Manager) observe(ctx context.Context, sbID string, status Status) {
 	if err := m.st.ObserveSandbox(ctx, sbID, store.SandboxObservation{
 		State: status.State, Detail: status.Detail,
-		Address: status.Address, Node: status.Node, Expires: status.Expires,
+		Address: status.Address, Node: status.Node,
 	}); err != nil {
 		m.log.Warn("sandbox: writing back a sandbox's state failed", "sandbox", sbID, "error", err)
 	}
@@ -975,19 +1188,25 @@ func (m *Manager) reconcilePools(ctx context.Context) {
 		})
 		return
 	}
-	classes, err := m.st.ListSandboxClasses(ctx)
+	classes, err := m.st.LoadSandboxClasses(ctx)
 	if err != nil {
 		m.log.Warn("sandbox: reading the catalogue to reconcile warm pools failed", "error", err)
 		return
 	}
 	keep := make(map[string]bool, len(classes))
 	for _, c := range classes {
-		keep[c.Name] = true
+		// A class with no warm pool is left out of keep, so PrunePools deletes
+		// a pool it had once. Asking for its deletion every minute would be
+		// two needless API calls per class and organisation.
+		if c.Warm <= 0 {
+			continue
+		}
+		keep[PoolKey(c.OrgID, c.Name)] = true
 		if err := pooler.EnsurePool(ctx, c); err != nil {
 			// Not fatal: Create falls back to a cold start, which only costs
 			// the seconds the pool would have saved.
 			m.log.Warn("sandbox: reconciling a warm pool failed",
-				"class", c.Name, "warm", c.Warm, "error", err)
+				"org", c.OrgID, "class", c.Name, "warm", c.Warm, "error", err)
 		}
 	}
 	if err := pooler.PrunePools(ctx, keep); err != nil {
@@ -1017,8 +1236,8 @@ func piSettings(alias string) string {
 const (
 	piProvider = "keera"
 	piAPI      = "openai-completions"
-	// piAPIKeyRef is expanded by Pi from the environment, so the key is never
-	// written to the sandbox's volume.
+	// piAPIKeyRef is expanded by Pi from the environment, so the file keeps
+	// working when a resumed sandbox gets a new key.
 	piAPIKeyRef = "${KEERA_API_KEY}"
 )
 
@@ -1027,10 +1246,11 @@ type piFile struct {
 }
 
 type piProviderConfig struct {
-	BaseURL string    `json:"baseUrl"`
-	API     string    `json:"api"`
-	APIKey  string    `json:"apiKey"`
-	Models  []piModel `json:"models"`
+	BaseURL string            `json:"baseUrl"`
+	API     string            `json:"api"`
+	APIKey  string            `json:"apiKey"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Models  []piModel         `json:"models"`
 }
 
 type piModel struct {
@@ -1042,9 +1262,12 @@ type piModel struct {
 // piConfig renders Pi's models.json for a sandbox: one entry per model the key
 // may reach, so /model offers exactly what the guardrail allows.
 //
+// A session id, given for an agent's sandbox, is sent with every request, so
+// the task is one session in `keera sessions`.
+//
 // It is empty with no base URL or no models: no configuration is better than
 // a wrong one.
-func (m *Manager) piConfig(base string, models []policy.Model) string {
+func (m *Manager) piConfig(base string, models []policy.Model, session string) string {
 	if base == "" || len(models) == 0 {
 		return ""
 	}
@@ -1056,11 +1279,16 @@ func (m *Manager) piConfig(base string, models []policy.Model) string {
 			ID: mod.Alias, Name: connect.Title(mod.Alias), ContextWindow: window,
 		})
 	}
+	var headers map[string]string
+	if session != "" {
+		headers = map[string]string{"X-Keera-Session": session}
+	}
 	raw, err := json.MarshalIndent(piFile{Providers: map[string]piProviderConfig{
 		piProvider: {
 			BaseURL: strings.TrimRight(base, "/") + "/v1",
 			API:     piAPI,
 			APIKey:  piAPIKeyRef,
+			Headers: headers,
 			Models:  entries,
 		},
 	}}, "", "  ")
@@ -1095,7 +1323,7 @@ func (m *Manager) reachableModels(ctx context.Context, req CreateRequest) []poli
 		nil,
 	)
 
-	catalogue, err := m.st.LoadModels(ctx)
+	catalogue, err := m.st.ListModels(ctx, req.OrgID)
 	if err != nil {
 		m.log.Warn("sandbox: reading the catalogue for the agent configuration failed",
 			"error", err)
@@ -1109,21 +1337,4 @@ func (m *Manager) reachableModels(ctx context.Context, req CreateRequest) []poli
 		out = append(out, mod)
 	}
 	return out
-}
-
-// piDefaultModel is the model a sandbox's Pi starts on: the deployment's
-// default if the key may reach it, otherwise the first one it may.
-//
-// The default is global but allow-lists are per team, so insisting on it
-// could start a team on a model it is refused.
-func piDefaultModel(want string, models []policy.Model) string {
-	for _, mod := range models {
-		if mod.Alias == want {
-			return want
-		}
-	}
-	if len(models) > 0 {
-		return models[0].Alias
-	}
-	return want
 }

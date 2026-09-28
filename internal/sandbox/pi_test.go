@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/bespinian/keera-gateway/internal/connect"
@@ -12,7 +13,7 @@ import (
 // `keera connect pi` prints for a laptop. The provider name, API shape and key
 // reference must still match that template, or the two drift silently.
 func TestPiConfigAgreesWithTheConnectCatalogue(t *testing.T) {
-	client, ok := connect.Lookup("pi")
+	client, ok := connect.Find(connect.Clients(), "pi")
 	if !ok {
 		t.Fatal("the connect catalogue has no pi entry")
 	}
@@ -62,7 +63,7 @@ func TestPiConfigListsEveryReachableModel(t *testing.T) {
 			} `json:"models"`
 		} `json:"providers"`
 	}
-	raw := m.piConfig("http://keera-gateway:8080/api", models)
+	raw := m.piConfig("http://keera-gateway:8080/api", models, "")
 	if err := json.Unmarshal([]byte(raw), &got); err != nil {
 		t.Fatalf("not valid JSON: %v\n%s", err, raw)
 	}
@@ -70,7 +71,8 @@ func TestPiConfigListsEveryReachableModel(t *testing.T) {
 	if p.BaseURL != "http://keera-gateway:8080/api/v1" {
 		t.Errorf("baseUrl = %q", p.BaseURL)
 	}
-	// A reference, never the key itself, which would then sit on the volume.
+	// A reference, never the key itself, which an edited copy would keep after
+	// a resume gave the sandbox a new one.
 	if p.APIKey != piAPIKeyRef {
 		t.Errorf("apiKey = %q, want the environment reference", p.APIKey)
 	}
@@ -89,27 +91,33 @@ func TestPiConfigListsEveryReachableModel(t *testing.T) {
 
 func TestPiConfigIsEmptyWithNothingToSay(t *testing.T) {
 	m := &Manager{}
-	if got := m.piConfig("", []policy.Model{{Alias: "a"}}); got != "" {
+	if got := m.piConfig("", []policy.Model{{Alias: "a"}}, ""); got != "" {
 		t.Error("a sandbox with no gateway address should get no configuration " +
 			"rather than one pointing nowhere")
 	}
-	if got := m.piConfig("http://x/api", nil); got != "" {
+	if got := m.piConfig("http://x/api", nil, ""); got != "" {
 		t.Error("a key that can reach nothing should get no configuration rather " +
 			"than an empty picker")
 	}
 }
 
-func TestPiDefaultModelFallsBackToWhatTheKeyCanReach(t *testing.T) {
-	models := []policy.Model{{Alias: "keera-speed"}, {Alias: "keera-code"}}
-	// The deployment's favourite, when the key may reach it.
-	if got := piDefaultModel("keera-code", models); got != "keera-code" {
-		t.Errorf("got %q", got)
+// An agent's sandbox sends its own id, so its task is one session.
+func TestPiConfigSendsTheAgentSession(t *testing.T) {
+	m := &Manager{}
+	models := []policy.Model{{Alias: "keera-code", Kind: policy.KindChat, Enabled: true}}
+	var got struct {
+		Providers map[string]struct {
+			Headers map[string]string `json:"headers"`
+		} `json:"providers"`
 	}
-	// Otherwise the first one it may.
-	if got := piDefaultModel("keera-frontier", models); got != "keera-speed" {
-		t.Errorf("got %q, want the first model the key can actually reach", got)
+	raw := m.piConfig("http://x/api", models, "sbx_1")
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("not valid JSON: %v\n%s", err, raw)
 	}
-	if got := piDefaultModel("keera-speed", nil); got != "keera-speed" {
-		t.Errorf("got %q; with nothing to fall back to the ask is returned", got)
+	if h := got.Providers[piProvider].Headers["X-Keera-Session"]; h != "sbx_1" {
+		t.Errorf("X-Keera-Session = %q, want sbx_1", h)
+	}
+	if raw := m.piConfig("http://x/api", models, ""); strings.Contains(raw, "headers") {
+		t.Errorf("an engineer's sandbox got a session header:\n%s", raw)
 	}
 }

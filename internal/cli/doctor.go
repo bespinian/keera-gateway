@@ -69,8 +69,11 @@ func printDiagnosis(base string, d control.Diagnosis) {
 
 	// Details and fixes are wrapped to the column after two spaces, the
 	// verdict, a space, the padded name and a space.
-	const nameWidth = 18
-	const gutter = 2 + 4 + 1 + nameWidth + 1
+	nameWidth := 0
+	for _, check := range d.Checks {
+		nameWidth = max(nameWidth, len(check.Name))
+	}
+	gutter := 2 + 4 + 1 + nameWidth + 1
 
 	area := ""
 	for _, check := range d.Checks {

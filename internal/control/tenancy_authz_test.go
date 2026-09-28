@@ -246,3 +246,24 @@ func TestAnAccountAttachedToNoOrganisationReadsNothing(t *testing.T) {
 		}
 	}
 }
+
+// Keys are always one organisation's. An operator who names none is asked for
+// one, not given an empty list.
+func TestAnOperatorListingKeysNamesAnOrganisation(t *testing.T) {
+	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
+	w := invoke(s.listKeys, operator(), http.MethodGet, "/v1/keys", "")
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "org_required") {
+		t.Errorf("status = %d, body = %q, want 400 org_required", w.Code, w.Body.String())
+	}
+}
+
+// The panel sends what was typed. A URL saved as a domain would match no
+// sign-in, so the control plane refuses it rather than trusting the client.
+func TestAnOrganisationsDomainIsCleanedByTheControlPlane(t *testing.T) {
+	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
+	w := invoke(s.createOrg, operator(), http.MethodPost, "/v1/orgs",
+		`{"name":"Bank","email_domain":"https://example.ch/"}`)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "example.ch") {
+		t.Errorf("status = %d, body = %q, want 400 naming the domain meant", w.Code, w.Body.String())
+	}
+}

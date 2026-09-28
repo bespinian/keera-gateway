@@ -50,7 +50,7 @@ func TestFilterRoundTripAndTheGuardrailsThatNameOne(t *testing.T) {
 	}
 
 	// A second organisation's filter of the same alias is a different filter.
-	if _, err := st.CreateOrg(ctx, "org_2", "Another Bank"); err != nil {
+	if _, err := st.CreateOrg(ctx, Org{ID: "org_2", Name: "Another Bank"}, OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
 	other := redact
@@ -315,7 +315,7 @@ func TestFilterRunsStayInsideOneTenant(t *testing.T) {
 	now := time.Date(2026, 9, 7, 13, 0, 0, 0, time.UTC)
 	filterTraffic(t, st, ctx, f, now)
 
-	if _, err := st.CreateOrg(ctx, "org_2", "Another Bank"); err != nil {
+	if _, err := st.CreateOrg(ctx, Org{ID: "org_2", Name: "Another Bank"}, OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
 	// Two organisations may both have a filter called redact, and they are
@@ -338,14 +338,6 @@ func TestFilterRunsStayInsideOneTenant(t *testing.T) {
 	}
 	if rep.Runs != 6 || rep.Refused != 2 {
 		t.Errorf("report = %+v, want only this tenant's runs", rep.FilterStat)
-	}
-	// And an operator looking across every tenant sees both.
-	all, err := st.FilterStats(ctx, "", now.Add(-time.Hour), now.Add(time.Hour))
-	if err != nil {
-		t.Fatalf("FilterStats: %v", err)
-	}
-	if all["redact"].Runs != 7 {
-		t.Errorf("unscoped runs = %d, want every tenant's seven", all["redact"].Runs)
 	}
 }
 

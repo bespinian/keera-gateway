@@ -1,5 +1,5 @@
 // One team, one key, one model - the dashboard narrowed to it, and the
-// requests behind the numbers.
+// requests or sessions behind the numbers.
 //
 // The list screens answer "what exists and what is it configured to do". They
 // cannot answer the question somebody arrives with, which is always about one
@@ -35,26 +35,28 @@ import {
   rangePicker,
   locationName,
   releaseDay,
+  crumb,
+  isAdmin,
 } from "../ui.js";
 import { areaChart, barList } from "../chart.js";
 import { requestLog, setOutcome } from "./requestlog.js";
-import {
-  openGuardrails,
-  ceilingsFor,
-  modelsCell,
-  summarise,
-} from "./guardrails.js";
-import { openModel } from "./models.js";
-import { canRevoke, revokeBody } from "./keys.js";
+import { sessionLog, setUnhappy } from "./sessions.js";
+import { modelsCell, summarise } from "./guardrails.js";
+import { canEditModels, openModel } from "./models.js";
+import { canRevoke, openKey, revokeBody, stateOf } from "./keys.js";
+import { openTeam } from "./teams.js";
+import { chooseOrg, orgNameOf } from "./orgs.js";
 
 /* ------------------------------------------------------------------ teams */
 
 export async function teamDetailView(ctx) {
-  const [teamsRes, modelsRes] = await Promise.all([
-    api.teams(ctx.orgID),
-    api.models().catch(() => ({ data: [] })),
-  ]);
+  const teamsRes = await api.teams(ctx.orgID);
   const team = (teamsRes.data || []).find((t) => t.id === ctx.param);
+  // The team's own organisation, not the switcher's: with "All
+  // organisations" chosen there is no org to list models for.
+  const modelsRes = team
+    ? await api.models(team.org_id).catch(() => ({ data: [] }))
+    : { data: [] };
   const models = (modelsRes.data || []).filter((m) => m.enabled !== false);
   const canEdit = isAdmin(ctx);
 
@@ -70,10 +72,7 @@ export async function teamDetailView(ctx) {
   }
 
   const orgID = team.org_id || ctx.orgID || ctx.state.me.org_id;
-  const orgName =
-    ctx.state.me.org_name ||
-    (ctx.state.orgs.find((o) => o.id === orgID) || {}).name ||
-    "this organisation";
+  const orgName = orgNameOf(ctx, orgID);
 
   return screen(ctx, {
     back: { path: "/teams", label: "Teams" },
@@ -83,7 +82,7 @@ export async function teamDetailView(ctx) {
     hide: { team: true },
     meta: [
       pill(
-        `${num(team.active_keys)} active key${team.active_keys === 1 ? "" : "s"}`,
+        `${num(team.active_keys)} key${team.active_keys === 1 ? "" : "s"} not revoked`,
       ),
       budgetPill(ctx, team),
     ],
@@ -93,18 +92,7 @@ export async function teamDetailView(ctx) {
         {
           class: "btn",
           title: "Guardrails for this team's keys",
-          onClick: async () => {
-            const ceilings = await ceilingsFor("team", { orgID, orgName });
-            await openGuardrails(ctx, {
-              scope: "team",
-              id: team.id,
-              name: team.name,
-              models,
-              orgID,
-              ceilings,
-              canEdit,
-            });
-          },
+          onClick: () => openTeam(ctx, team, models, orgID, orgName, canEdit),
         },
         icon(icons.sliders),
         canEdit ? "Guardrails" : "View guardrails",
@@ -164,13 +152,16 @@ export async function teamDetailView(ctx) {
 /* ------------------------------------------------------------------- keys */
 
 export async function keyDetailView(ctx) {
-  const [keysRes, teamsRes, modelsRes, usersRes] = await Promise.all([
+  const [keysRes, teamsRes, usersRes] = await Promise.all([
     api.keys(ctx.orgID),
     api.teams(ctx.orgID).catch(() => ({ data: [] })),
-    api.models().catch(() => ({ data: [] })),
     api.users(ctx.orgID).catch(() => ({ data: [] })),
   ]);
   const key = (keysRes.data || []).find((k) => k.id === ctx.param);
+  // The key's own organisation, for the same reason as on a team's page.
+  const modelsRes = key
+    ? await api.models(key.org_id).catch(() => ({ data: [] }))
+    : { data: [] };
   const models = (modelsRes.data || []).filter((m) => m.enabled !== false);
   const canEdit = isAdmin(ctx);
 
@@ -186,14 +177,17 @@ export async function keyDetailView(ctx) {
 
   const teamName = (teamsRes.data || []).find((t) => t.id === key.team_id);
   const person = (usersRes.data || []).find((u) => u.id === key.user_id);
-  const state = keyState(key);
+  const state = stateOf(key);
 
   return screen(ctx, {
     back: { path: "/keys", label: "API keys" },
     title: key.alias,
     identity: key.prefix + "…",
     scope: { key_id: key.id },
-    hide: { key: true, team: true },
+    // A key is one person or one pipeline, so its traffic reads best as the
+    // tasks it ran rather than as single requests.
+    sessions: true,
+    hide: { who: true },
     meta: [
       state === "revoked"
         ? pill("Revoked", "bad")
@@ -219,29 +213,12 @@ export async function keyDetailView(ctx) {
         "button",
         {
           class: "btn",
-          title: "All limits for this key",
-          onClick: async () => {
-            const ceilings = await ceilingsFor("key", {
-              orgID: key.org_id,
-              orgName:
-                ctx.state.me.org_name ||
-                (ctx.state.orgs.find((o) => o.id === key.org_id) || {}).name,
-              teamID: key.team_id,
-              teamName: teamName ? teamName.name : "",
-            });
-            await openGuardrails(ctx, {
-              scope: "key",
-              id: key.id,
-              name: key.alias,
-              models,
-              orgID: key.org_id,
-              ceilings,
-              canEdit,
-            });
-          },
+          title: "Guardrails for this key",
+          onClick: () =>
+            openKey(ctx, key, models, teamName ? teamName.name : "", canEdit),
         },
         icon(icons.sliders),
-        canEdit ? "Limits" : "View limits",
+        canEdit ? "Guardrails" : "View guardrails",
       ),
       canRevoke(ctx, key) && state === "active"
         ? h(
@@ -297,10 +274,10 @@ export async function keyDetailView(ctx) {
                     { class: "muted", title: dateTime(key.last_used_at) },
                     ago(key.last_used_at),
                   )
-                : h("span", { class: "faint" }, "never used"),
+                : h("span", { class: "faint" }, "not this month"),
             ],
             [
-              "Limits",
+              "Guardrails",
               summarise(key.limits || {}).length
                 ? h(
                     "span",
@@ -322,15 +299,18 @@ export async function keyDetailView(ctx) {
 /* ----------------------------------------------------------------- models */
 
 export async function modelDetailView(ctx) {
-  const models = (await api.models()).data || [];
+  if (!ctx.orgID) return chooseOrg(ctx, "Models");
+  const models = (await api.models(ctx.orgID)).data || [];
   const model = models.find((m) => m.alias === ctx.param);
-  const canEdit = ctx.state.me.can_edit_catalogue;
+  const canEdit = model ? canEditModels(ctx) : false;
 
   return screen(ctx, {
     back: { path: "/models", label: "Models" },
     title: ctx.param,
     mono: true,
-    identity: model ? "serves " + model.backend_model : "not in the catalogue",
+    identity: model
+      ? "serves " + model.backend_model
+      : `not one of ${orgNameOf(ctx)}'s models`,
     scope: { alias: ctx.param },
     hide: { model: true },
     meta: model
@@ -345,13 +325,13 @@ export async function modelDetailView(ctx) {
             ? pill(`released ${releaseDay(model.release_date)}`)
             : null,
         ]
-      : [pill("Removed from the catalogue", "warn")],
+      : [pill("Removed", "warn")],
     // A model that was removed still has traffic behind it, and that traffic is
     // usually why somebody is here. The screen draws it and says why the
     // catalogue has nothing to show next to it, rather than refusing to open.
     banner: model
       ? null
-      : "This alias is no longer in the catalogue. Requests for it are " +
+      : `This alias is no longer one of ${orgNameOf(ctx)}'s models. Requests for it are ` +
         "refused with a 404. Its history is below.",
     actions: model
       ? [
@@ -421,7 +401,13 @@ export async function modelDetailView(ctx) {
                         ),
                       ),
                     )
-                  : h("span", { class: "faint" }, "none"),
+                  : h(
+                      "span",
+                      { class: "faint" },
+                      // Backends are for administrators, so an empty list
+                      // does not mean there are none.
+                      canEditModels(ctx) ? "none" : "not shown to your role",
+                    ),
               ],
               [
                 `Price / Mtok (${ctx.currency})`,
@@ -439,9 +425,9 @@ export async function modelDetailView(ctx) {
         )
       : null,
     note:
-      "Failures here come from the backend, not a guardrail: the request " +
-      "was forwarded and got no answer. A failed row shows the backend's own " +
-      "message. Share it with whoever runs that endpoint.",
+      "A failure is a 5xx: the backend did not answer, or no backend, filter " +
+      "or router destination was available. Each failed row shows the " +
+      "message.",
   });
 }
 
@@ -461,16 +447,7 @@ async function screen(ctx, spec) {
   const head = h(
     "div",
     { class: "detail-head" },
-    h(
-      "a",
-      {
-        class: "crumb",
-        href: spec.back.path,
-        onClick: go(ctx, spec.back.path),
-      },
-      icon(icons.back),
-      spec.back.label,
-    ),
+    crumb(ctx, spec.back.path, spec.back.label),
     h(
       "div",
       { class: "row", style: { flexWrap: "wrap" } },
@@ -501,7 +478,7 @@ async function screen(ctx, spec) {
         "Requests",
         compact(o.requests),
         null,
-        o.refused ? `${num(o.refused)} refused by a guardrail` : "none refused",
+        o.refused ? `${num(o.refused)} refused` : "none refused",
       ),
       stat(
         "Tokens",
@@ -539,6 +516,7 @@ async function screen(ctx, spec) {
             ? failureJump(
                 ctx,
                 `${num(o.failed)} failed (${failRate.toFixed(1)}%)`,
+                spec.sessions,
               )
             : h(
                 "span",
@@ -553,7 +531,9 @@ async function screen(ctx, spec) {
           o.requests === 0
             ? empty(
                 "Nothing recorded in this window",
-                "Widen the range, or see the refused requests below.",
+                spec.sessions
+                  ? "Widen the range."
+                  : "Widen the range, or see the refused requests below.",
               )
             : areaChart(o.series, { currency, bucket: o.bucket }),
         ),
@@ -576,17 +556,13 @@ async function screen(ctx, spec) {
     );
   }
 
-  // The log is administrator-only, exactly like the failure log and for the
-  // same reason: its rows name other people's keys and carry text the inference
-  // plane wrote. A member gets the charts, which are their own organisation's
+  // The log is administrator-only: its rows name other people's keys and carry
+  // text the inference plane wrote. A member gets the charts, which are their own organisation's
   // numbers and nobody's individual traffic.
   if (isAdmin(ctx)) {
+    const log = spec.sessions ? sessionLog : requestLog;
     wrap.append(
-      await requestLog(ctx, {
-        scope: spec.scope,
-        since,
-        hide: spec.hide || {},
-      }),
+      await log(ctx, { scope: spec.scope, since, hide: spec.hide || {} }),
     );
   }
 
@@ -598,8 +574,9 @@ async function screen(ctx, spec) {
 }
 
 // failureJump is the failed count as the way to the failed rows, which on this
-// screen are a scroll away rather than a page away.
-function failureJump(ctx, text) {
+// screen are a scroll away rather than a page away. Under a session log it
+// shows the tasks that hit trouble.
+function failureJump(ctx, text, sessions) {
   if (!isAdmin(ctx)) {
     return h(
       "span",
@@ -612,9 +589,12 @@ function failureJump(ctx, text) {
     "button",
     {
       class: "pill pill-bad pill-button",
-      title: "Show only the failed requests below",
+      title: sessions
+        ? "Show only the tasks that hit trouble below"
+        : "Show only the failed requests below",
       onClick: () => {
-        setOutcome("failed");
+        if (sessions) setUnhappy(true);
+        else setOutcome("failed");
         ctx.reload();
       },
     },
@@ -655,16 +635,6 @@ export function facts(rows) {
 
 /* ------------------------------------------------------------------ bits */
 
-function isAdmin(ctx) {
-  return ctx.state.me.unrestricted || ctx.state.me.role === "admin";
-}
-
-function keyState(k) {
-  if (k.revoked_at) return "revoked";
-  if (k.expires_at && new Date(k.expires_at) < new Date()) return "expired";
-  return "active";
-}
-
 function budgetPill(ctx, team) {
   if (!team.budget_micros) {
     return pill(
@@ -688,12 +658,7 @@ function gone(ctx, path, label, title, body) {
   return h(
     "div",
     {},
-    h(
-      "a",
-      { class: "crumb", href: path, onClick: go(ctx, path) },
-      icon(icons.back),
-      label,
-    ),
+    crumb(ctx, path, label),
     h("div", { class: "card" }, empty(title, body)),
   );
 }

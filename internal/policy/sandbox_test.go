@@ -6,28 +6,6 @@ import (
 	"time"
 )
 
-func TestIsolationOrdering(t *testing.T) {
-	// The ladder has to be a ladder, because a driver refuses a class it
-	// cannot deliver by comparing the two - and a comparison that got this
-	// backwards would run a class asking for a kernel of its own on the node's.
-	cases := []struct {
-		have, want Isolation
-		ok         bool
-	}{
-		{IsolationVM, IsolationStandard, true},
-		{IsolationVM, IsolationVM, true},
-		{IsolationIsolated, IsolationStandard, true},
-		{IsolationIsolated, IsolationVM, false},
-		{IsolationStandard, IsolationIsolated, false},
-		{IsolationStandard, IsolationStandard, true},
-	}
-	for _, c := range cases {
-		if got := c.have.AtLeast(c.want); got != c.ok {
-			t.Errorf("%s.AtLeast(%s) = %v, want %v", c.have, c.want, got, c.ok)
-		}
-	}
-}
-
 func TestIsolationValid(t *testing.T) {
 	// The empty string is deliberately not a tier. A class that did not say
 	// would be a class whose isolation is whatever the cluster defaults to,
@@ -215,10 +193,10 @@ func TestValidSandboxNames(t *testing.T) {
 		}
 	}
 	// A class name may be longer, because it is not a hostname.
-	if !ValidSandboxClass(strings.Repeat("a", 64)) {
+	if !ValidAlias(strings.Repeat("a", 64)) {
 		t.Error("a 64-character class name should be allowed")
 	}
-	if ValidSandboxClass(strings.Repeat("a", 65)) {
+	if ValidAlias(strings.Repeat("a", 65)) {
 		t.Error("a 65-character class name should not be")
 	}
 }
@@ -233,7 +211,12 @@ func TestSandboxStateGroupings(t *testing.T) {
 	if SandboxSuspended.Running() {
 		t.Error("a suspended sandbox holds no compute")
 	}
-	for _, s := range []SandboxState{SandboxExpired, SandboxFailed, SandboxTerminated} {
+	// Expired is the same: it keeps its volume until it is resumed or
+	// terminated.
+	if !SandboxExpired.Live() || SandboxExpired.Running() {
+		t.Error("an expired sandbox holds its volume and no compute")
+	}
+	for _, s := range []SandboxState{SandboxFailed, SandboxTerminated} {
 		if s.Live() {
 			t.Errorf("%s should not count against a quota", s)
 		}
@@ -251,6 +234,10 @@ func TestSandboxStateGroupings(t *testing.T) {
 func TestAllowedReposNarrowAndDefaultToNothing(t *testing.T) {
 	if err := (ResolvedSandbox{}).AdmitsRepo("acme/app"); err == nil {
 		t.Error("a scope with no list checked out a repository")
+	}
+	anyTeam := &Limits{SandboxLimits: SandboxLimits{AllowedRepos: []string{AnyRepo}}}
+	if err := Resolve(Key{OrgID: "o", TeamID: "t"}, nil, anyTeam, nil).Sandbox.AdmitsRepo("bankb/core"); err == nil {
+		t.Error("a team granted itself repositories in an organisation with no guardrail")
 	}
 
 	for _, tc := range []struct {
@@ -270,6 +257,9 @@ func TestAllowedReposNarrowAndDefaultToNothing(t *testing.T) {
 		{[]string{"acme"}, []string{AnyRepo}, "bankb/core", false},
 		{[]string{"acme"}, []string{"bankb"}, "bankb/core", false},
 		{[]string{AnyRepo}, []string{"acme"}, "bankb/core", false},
+		// Without an organisation list, a team cannot grant itself one.
+		{nil, []string{AnyRepo}, "bankb/core", false},
+		{nil, []string{"acme"}, "acme/app", false},
 	} {
 		org := &Limits{SandboxLimits: SandboxLimits{AllowedRepos: tc.org}}
 		team := &Limits{SandboxLimits: SandboxLimits{AllowedRepos: tc.team}}

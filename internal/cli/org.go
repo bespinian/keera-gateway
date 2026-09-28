@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"strings"
 	"time"
 
+	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
@@ -57,7 +57,7 @@ func (r *orgRun) create(ctx context.Context) error {
 	if err := parseArgs(r.fs, r.args, 1, "usage: keera org create <name> [--domain <domain>]"); err != nil {
 		return err
 	}
-	d, err := cleanDomain(r.domain)
+	d, err := policy.CleanEmailDomain(r.domain)
 	if err != nil {
 		return err
 	}
@@ -98,7 +98,7 @@ func (r *orgRun) set(ctx context.Context) error {
 		}
 		orgID = only
 	}
-	d, err := cleanDomain(r.domain)
+	d, err := policy.CleanEmailDomain(r.domain)
 	if err != nil {
 		return err
 	}
@@ -204,51 +204,6 @@ func orNotSet(domain string) string {
 	return domain
 }
 
-// cleanDomain turns what was typed into what a sign-in is compared against:
-// the lowercased part of an address after the @, as authn.Identity.Domain
-// returns it.
-//
-// Anything else is refused now. A domain that matches nothing fails silently,
-// and only once a second organisation exists.
-func cleanDomain(given string) (string, error) {
-	d := strings.ToLower(strings.TrimSpace(given))
-	// "@example.ch" and the fully-qualified "example.ch." both mean the domain.
-	d = strings.TrimSuffix(strings.TrimPrefix(d, "@"), ".")
-	if d == "" {
-		return "", nil
-	}
-	if at := strings.LastIndexByte(d, '@'); at >= 0 {
-		return "", fmt.Errorf("--domain takes a domain, not an address; "+
-			"for %s that is %s", given, d[at+1:])
-	}
-	if strings.ContainsAny(d, ":/") {
-		return "", fmt.Errorf("--domain takes a domain, not a URL; "+
-			"for %s that is %s", given, hostOf(d))
-	}
-	for _, r := range d {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '.', r == '-':
-		default:
-			return "", fmt.Errorf("%q is not an email domain: %q cannot appear in one", given, r)
-		}
-	}
-	if strings.HasPrefix(d, "-") || strings.HasPrefix(d, ".") ||
-		strings.HasSuffix(d, "-") || strings.Contains(d, "..") {
-		return "", fmt.Errorf("%q is not an email domain", given)
-	}
-	return d, nil
-}
-
-// hostOf is the host part of something typed as a URL.
-func hostOf(s string) string {
-	if _, after, ok := strings.Cut(s, "//"); ok {
-		s = after
-	}
-	s, _, _ = strings.Cut(s, "/")
-	s, _, _ = strings.Cut(s, ":")
-	return s
-}
-
 // deletedOrg is what DELETE /v1/orgs/{id} reports it removed.
 type deletedOrg struct {
 	ID    string `json:"id"`
@@ -290,11 +245,20 @@ func confirmOrgDelete(ctx context.Context, c *client, orgID string) error {
 	if err != nil {
 		return err
 	}
+	// The control plane refuses while sandboxes hold machines. Saying so now
+	// spares typing the name for nothing. A failed read leaves it to the
+	// control plane.
+	if live, err := list[store.Sandbox](ctx, c, inOrg("/v1/sandboxes", orgID)); err == nil && len(live) > 0 {
+		return fmt.Errorf("%s still has %d live sandbox(es); terminate them first "+
+			"(keera sandbox list --org %s)", org.Name, len(live), orgID)
+	}
 
 	fmt.Printf("%s\n", style.head(fmt.Sprintf("Deleting %s (%s) removes:", org.Name, org.ID)))
 	fmt.Printf("  %d team(s)\n  %d user(s), signed out everywhere\n  %d API key(s), which stop working at once\n",
 		len(teams), len(users), len(keys))
 	fmt.Println("  its guardrails and its budget counters")
+	fmt.Println("  its models and their stored provider keys, MCP servers, filters, routers,")
+	fmt.Println("  sandbox classes and the record of its finished sandboxes")
 	fmt.Println("Usage history and the audit log are kept.")
 	fmt.Println(style.bad("This cannot be undone."))
 	return confirmTyping("organisation's name", org.Name, "nothing was deleted")

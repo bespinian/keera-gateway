@@ -66,6 +66,9 @@ func filterCmd(ctx context.Context, args []string) error {
 	if err := parse(fs, rest); err != nil {
 		return err
 	}
+	if err := verbFlags(fs, "filter", sub); err != nil {
+		return err
+	}
 	if r.shadow && r.enforce {
 		return errors.New("--shadow and --enforce are opposites; pass one of them")
 	}
@@ -78,7 +81,11 @@ func filterCmd(ctx context.Context, args []string) error {
 	switch sub {
 	case "list", "ls", "":
 		return r.list(ctx)
-	case "add", "create", "new", "set", "edit", "update":
+	case "add", "create", "new":
+		return r.put(ctx)
+	case "set", "edit", "update":
+		// put tells a change from an addition by the verb.
+		r.sub = "set"
 		return r.put(ctx)
 	case "check", "probe", "test":
 		return r.check(ctx)
@@ -119,7 +126,7 @@ func (r *filterRun) path(alias, suffix string) string {
 
 func (r *filterRun) put(ctx context.Context) error {
 	if r.fs.NArg() != 1 {
-		return fmt.Errorf("usage: keera filter %s <alias> --model <model> --prompt <text>", r.sub)
+		return errors.New(filterUsage(r.sub, policy.FilterMode(r.mode)))
 	}
 	alias := r.fs.Arg(0)
 	// 'set' starts from the stored filter, so what is not given is kept. 'add'
@@ -136,6 +143,21 @@ func (r *filterRun) put(ctx context.Context) error {
 		return err
 	}
 	return putFilter(ctx, r.c, r.orgID, f, r.asJSON)
+}
+
+// filterUsage is the usage line for 'add' or 'set'. It names only the flags
+// the mode takes: a pattern filter has rules instead of a model and a prompt.
+func filterUsage(sub string, mode policy.FilterMode) string {
+	switch {
+	case sub == "set":
+		return "usage: keera filter set <alias> [flags]"
+	case !mode.UsesModel():
+		return "usage: keera filter add <alias> --mode pattern --rules <rules>"
+	case mode == policy.FilterModeGate:
+		return "usage: keera filter add <alias> --mode gate --model <model> --prompt <text>"
+	default:
+		return "usage: keera filter add <alias> --model <model> --prompt <text>"
+	}
 }
 
 // apply writes the given flags into f.
@@ -220,7 +242,8 @@ func (r *filterRun) report(ctx context.Context) error {
 	})
 }
 
-// deleteAlias deletes the filter or router at path and says so.
+// deleteAlias deletes the model, MCP server, filter or router at path and says
+// so.
 func deleteAlias(ctx context.Context, c *client, path, alias string, asJSON bool) error {
 	var res map[string]any
 	if err := c.do(ctx, "DELETE", path, nil, &res); err != nil {
@@ -234,22 +257,14 @@ func deleteAlias(ctx context.Context, c *client, path, alias string, asJSON bool
 // requireFilter reads one filter from the list. There is no endpoint for a
 // single filter; the list is small.
 func requireFilter(ctx context.Context, c *client, orgID, alias string) (policy.Filter, error) {
-	filters, err := list[policy.Filter](ctx, c, inOrg("/v1/filters", orgID))
-	if err != nil {
-		return policy.Filter{}, err
-	}
-	for _, f := range filters {
-		if f.Alias == alias {
-			return f, nil
-		}
-	}
-	return policy.Filter{}, fmt.Errorf("no filter %s (see: keera filter list)", alias)
+	return findAlias(ctx, c, inOrg("/v1/filters", orgID), alias, "filter",
+		func(f policy.Filter) string { return f.Alias })
 }
 
 func putFilter(ctx context.Context, c *client, orgID string, f policy.Filter, asJSON bool) error {
 	var saved policy.Filter
 	if err := c.do(ctx, "PUT",
-		"/v1/filters/"+url.PathEscape(f.Alias)+"?org_id="+url.QueryEscape(orgID),
+		inOrg("/v1/filters/"+url.PathEscape(f.Alias), orgID),
 		map[string]any{
 			"model": f.Model, "mode": f.Mode, "shadow": f.Shadow, "prompt": f.Prompt,
 			"rules": f.Rules, "description": f.Description,
@@ -292,12 +307,12 @@ func filterWhat(f policy.Filter) string {
 // "gate" in shadow enforces nothing.
 func filterModeLabel(f policy.Filter) string {
 	if f.Shadow {
-		return string(filterMode(f)) + " (shadow)"
+		return string(f.Mode) + " (shadow)"
 	}
-	return string(filterMode(f))
+	return string(f.Mode)
 }
 
-// filterMode is a filter's mode, including one stored before there were modes.
+// filterMode is a filter's mode. One not given yet will be rewrite.
 func filterMode(f policy.Filter) policy.FilterMode {
 	if f.Mode == "" {
 		return policy.FilterModeRewrite

@@ -151,7 +151,7 @@ func TestLookupKeyIgnoresATeamInAnotherOrganisation(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
 
-	if _, err := st.CreateOrg(ctx, "org_2", "Another Bank"); err != nil {
+	if _, err := st.CreateOrg(ctx, Org{ID: "org_2", Name: "Another Bank"}, OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
 	if _, err := st.CreateTeam(ctx, "team_elsewhere", "org_2", "Somebody Else"); err != nil {

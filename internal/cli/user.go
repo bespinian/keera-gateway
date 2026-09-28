@@ -16,12 +16,12 @@ import (
 // roleNames is what --role and `keera user role` accept, in the panel's order.
 //
 // The operator role is left out: it spans organisations, so it only comes from
-// KEERA_OPERATORS or KEERA_OIDC_OPERATOR_GROUPS. The control plane refuses it
-// too; refusing here gives the clearer message.
+// KEERA_OPERATORS or KEERA_OIDC_<NAME>_OPERATOR_GROUPS. The control plane
+// refuses it too; refusing here gives the clearer message.
 var roleNames = []string{"member", "admin"}
 
 const roleHint = " (the operator role comes from KEERA_OPERATORS or " +
-	"KEERA_OIDC_OPERATOR_GROUPS)"
+	"KEERA_OIDC_<NAME>_OPERATOR_GROUPS)"
 
 // userRun is one 'keera user' invocation.
 type userRun struct {
@@ -184,7 +184,8 @@ func (r *userRun) disable(ctx context.Context) error {
 		fmt.Println("  they cannot sign in, and are signed out everywhere")
 		fmt.Println("  every key attributed to them is revoked, for good")
 		if me, err := whoami(ctx, r.c); err == nil && me.Sandboxes {
-			fmt.Println("  their agent sandboxes are terminated, and their own are suspended")
+			fmt.Println("  their agent sandboxes and any not started yet are terminated; " +
+				"the rest are suspended")
 		}
 		fmt.Println("Usage history and the audit log are kept. 'keera user enable' lets them back in.")
 		if err := confirmTyping("email", user.Email, "nobody was disabled"); err != nil {

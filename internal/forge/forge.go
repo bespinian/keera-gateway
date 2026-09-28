@@ -218,10 +218,3 @@ func message(raw []byte) string {
 	}
 	return s
 }
-
-func httpClient(c *http.Client) *http.Client {
-	if c != nil {
-		return c
-	}
-	return &http.Client{Timeout: requestTimeout}
-}

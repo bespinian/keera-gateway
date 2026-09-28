@@ -28,10 +28,10 @@ func TestDisableUserRevokesKeysAndSessions(t *testing.T) {
 		}
 	}
 	later := time.Now().Add(time.Hour)
-	if err := st.CreateSession(ctx, []byte("cookie"), user.ID, "csrf", later, "", ""); err != nil {
+	if err := st.CreateSession(ctx, []byte("cookie"), user.ID, "csrf", later); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreateCLIToken(ctx, []byte("cli"), user.ID, "laptop", later); err != nil {
+	if err := st.CreateCLIToken(ctx, []byte("cli"), user.ID, later); err != nil {
 		t.Fatal(err)
 	}
 

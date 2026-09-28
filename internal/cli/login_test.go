@@ -24,7 +24,7 @@ func TestTheCredentialsFileIsReadableOnlyByItsOwner(t *testing.T) {
 	t.Setenv("KEERA_CONFIG_DIR", filepath.Join(dir, "keera"))
 
 	if err := saveSignIn("http://127.0.0.1:8080", signIn{
-		Token: "keera_cli_secret", ExpiresAt: time.Now().Add(time.Hour), Email: "alice@example.ch",
+		Token: "keera_cli_secret", ExpiresAt: time.Now().Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("storing the sign-in: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestTheDirectoryToSignInThroughIsSettledFirst(t *testing.T) {
 					providers = append(providers, map[string]string{"name": name, "label": name})
 				}
 				_ = json.NewEncoder(w).Encode(map[string]any{
-					"sso": tc.sso, "providers": providers, "operator_key": true,
+					"sso": tc.sso, "providers": providers,
 				})
 			}))
 			defer srv.Close()
@@ -347,9 +347,6 @@ func TestAWholeSignInFromTheTerminal(t *testing.T) {
 	stored := signInFor(gateway.URL)
 	if stored.Token != token {
 		t.Errorf("stored token = %q, want the one the gateway issued", stored.Token)
-	}
-	if stored.Email != "alice@example.ch" {
-		t.Errorf("stored address = %q, want the one the sign-in resolved to", stored.Email)
 	}
 	if stored.ExpiresAt.Before(time.Now()) {
 		t.Errorf("stored expiry = %v, want one in the future", stored.ExpiresAt)

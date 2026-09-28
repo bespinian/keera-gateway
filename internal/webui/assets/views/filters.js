@@ -24,7 +24,6 @@ import {
   meter,
   empty,
   rowLink,
-  go,
   compact,
   num,
   money,
@@ -36,9 +35,12 @@ import {
   showError,
   currentRange,
   rangePicker,
+  crumb,
+  isAdmin,
+  checkButton,
 } from "../ui.js";
 import { areaChart, barList } from "../chart.js";
-import { chooseOrg } from "./orgs.js";
+import { chooseOrg, orgNameOf } from "./orgs.js";
 // A filter's own screen is an entity's own screen, so it takes the window
 // picker the team, key and model screens use - and the window itself, which is
 // shared between them: arriving here from a team showing this afternoon and
@@ -53,13 +55,13 @@ export async function filtersView(ctx) {
   const since = currentRange();
   const [res, models] = await Promise.all([
     api.filters(ctx.orgID, { stats: true, since }),
-    api.models().then((r) => r.data || []),
+    api.models(ctx.orgID).then((r) => r.data || []),
   ]);
   const filters = res.data || [];
   const stats = res.stats || {};
   const currency = res.currency || ctx.currency;
   const chatModels = models.filter((m) => m.kind === "chat");
-  const canEdit = ctx.state.me.can_admin_org || ctx.state.me.unrestricted;
+  const canEdit = isAdmin(ctx);
   ctx.setSubtitle(`${filters.length} filter${filters.length === 1 ? "" : "s"}`);
 
   const head = h(
@@ -228,10 +230,9 @@ function usesModel(f) {
 // filter in shadow reads as a guardrail, and it is not one.
 function modePills(f) {
   const tone = { gate: "accent", pattern: "good" }[mode(f)] || "";
-  return [
-    pill(mode(f), tone),
-    f.shadow ? pill("shadow", "warn") : null,
-  ].filter(Boolean);
+  return [pill(mode(f), tone), f.shadow ? pill("shadow", "warn") : null].filter(
+    Boolean,
+  );
 }
 
 // trafficCell is what this filter did to the window's requests, in the room a
@@ -273,38 +274,11 @@ function trafficCell(st, currency) {
 // and whether it did so ten minutes ago is not a claim worth showing next to
 // what it will do to the next request.
 function checkCell(ctx, f) {
-  const slot = h("span");
-  const run = h(
-    "button",
-    {
-      class: "btn btn-sm btn-quiet",
-      title: "Run this filter on a sample",
-      onClick: async () => {
-        run.disabled = true;
-        slot.replaceChildren(
-          h(
-            "span",
-            { class: "faint nowrap" },
-            h("span", { class: "blip" }),
-            " checking…",
-          ),
-        );
-        try {
-          const probe = await api.checkFilter(ctx.orgID, f.alias);
-          slot.replaceChildren(verdict(ctx, probe));
-        } catch (ex) {
-          slot.replaceChildren(
-            h("span", { class: "pill pill-bad" }, "check failed"),
-          );
-          toast(ex.message, "bad");
-        } finally {
-          run.disabled = false;
-        }
-      },
-    },
-    "Check",
+  return checkButton(
+    "Run this filter on a sample",
+    () => api.checkFilter(ctx.orgID, f.alias),
+    (probe) => verdict(ctx, probe),
   );
-  return h("div", { class: "row-tight" }, run, slot);
 }
 
 function verdict(ctx, probe) {
@@ -318,7 +292,7 @@ function verdict(ctx, probe) {
     : probe.refused
       ? "Refused the sample"
       : warned
-        ? "Ran, with notes"
+        ? "Working, with notes"
         : "Working";
   return h(
     "button",
@@ -343,7 +317,9 @@ function report(ctx, probe) {
     wide: true,
     title: `Check - ${probe.alias}`,
     subtitle: !probe.ok
-      ? "This filter would refuse every request its guardrails cover."
+      ? probe.shadow
+        ? "This filter cannot run. It is in shadow, so requests go on as sent."
+        : "This filter would refuse every request its guardrails cover."
       : probe.mode === "gate"
         ? "The gate judged two requests: one it should stop, one it should not."
         : probe.refused
@@ -511,14 +487,14 @@ function report(ctx, probe) {
                 "nothing will report it.",
             )
           : probe.refused
-          ? null
-          : h(
-              "div",
-              { class: "hint", style: { marginTop: "14px" } },
-              "The third sample is ordinary code no filter should touch. If " +
-                "it changed, the instruction will also rewrite real source " +
-                "code, and nothing will report it.",
-            ),
+            ? null
+            : h(
+                "div",
+                { class: "hint", style: { marginTop: "14px" } },
+                "The third sample is ordinary code no filter should touch. If " +
+                  "it changed, the instruction will also rewrite real source " +
+                  "code, and nothing will report it.",
+              ),
       probe.total_ms
         ? h(
             "div",
@@ -558,9 +534,9 @@ export async function filterDetailView(ctx) {
   const f = res.filter || null;
   const currency = res.currency || ctx.currency;
   const teamNames = res.team_names || {};
-  const canEdit = ctx.state.me.can_admin_org || ctx.state.me.unrestricted;
+  const canEdit = isAdmin(ctx);
 
-  ctx.setTitle(ctx.param, f ? identity(f) : "no longer in this organisation");
+  ctx.setTitle(ctx.param, f ? identity(f) : `no longer in ${orgNameOf(ctx)}`);
 
   const wrap = h(
     "div",
@@ -568,19 +544,14 @@ export async function filterDetailView(ctx) {
     h(
       "div",
       { class: "detail-head" },
-      h(
-        "a",
-        { class: "crumb", href: "/filters", onClick: go(ctx, "/filters") },
-        icon(icons.back),
-        "Filters",
-      ),
+      crumb(ctx, "/filters", "Filters"),
       h(
         "div",
         { class: "row", style: { flexWrap: "wrap" } },
         h(
           "div",
           { class: "wrap-chips" },
-          f ? modePills(f) : [pill("Removed from this organisation", "warn")],
+          f ? modePills(f) : [pill(`Removed from ${orgNameOf(ctx)}`, "warn")],
           f && f.model ? pill("runs on " + f.model) : null,
         ),
         h("div", { style: { flex: 1 } }),
@@ -612,7 +583,7 @@ export async function filterDetailView(ctx) {
               {
                 class: "btn",
                 onClick: () =>
-                  api.models().then((r) =>
+                  api.models(ctx.orgID).then((r) =>
                     editFilter(
                       ctx,
                       f,
@@ -815,7 +786,8 @@ export async function filterDetailView(ctx) {
                       { class: "muted" },
                       {
                         gate: "yes - a refusal drops the request",
-                        pattern: "yes - the model gets the replaced text",
+                        pattern:
+                          "yes - the model gets the replaced text, and a REFUSE rule drops the request",
                       }[mode(f)] || "yes - the model gets the rewrite",
                     ),
               ],
@@ -1439,7 +1411,11 @@ function parseRules(text) {
       const answer = line.slice(at + 2).trim();
       const refusal = /^REFUSED?\b[:\s]*/i.exec(answer);
       if (refusal) {
-        return { pattern, refuse: true, reason: answer.slice(refusal[0].length) };
+        return {
+          pattern,
+          refuse: true,
+          reason: answer.slice(refusal[0].length),
+        };
       }
       return { pattern, replace: answer };
     });

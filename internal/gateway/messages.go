@@ -599,11 +599,22 @@ func anthropicErrorBody(status int, msg string) []byte {
 // returned, unchanged. Some clients recover by matching on the wording, so it
 // must not be rewritten.
 func upstreamErrorMessage(raw []byte, status int) string {
+	if msg := upstreamText(raw); msg != "" {
+		return msg
+	}
+	return "the inference plane refused the request with status " +
+		strconv.Itoa(status) + " and no message"
+}
+
+// upstreamText is the message in an error from the inference plane, whatever
+// envelope it came in, or "" when it gave none.
+func upstreamText(raw []byte) string {
 	var envelope struct {
 		Error *struct {
 			Message string `json:"message"`
 		} `json:"error"`
-		// vLLM answers some refusals with a bare message field.
+		// vLLM answers some refusals with a bare message field, and FastAPI
+		// with a detail field.
 		Message string `json:"message"`
 		Detail  string `json:"detail"`
 	}
@@ -617,11 +628,10 @@ func upstreamErrorMessage(raw []byte, status int) string {
 			return envelope.Detail
 		}
 	}
-	if text := strings.TrimSpace(string(raw)); text != "" && len(text) < 2048 {
+	if text := strings.TrimSpace(string(raw)); len(text) < 2048 {
 		return text
 	}
-	return "the inference plane refused the request with status " +
-		strconv.Itoa(status) + " and no message"
+	return ""
 }
 
 // writeError renders a refusal the gateway generated itself. The OpenAI type

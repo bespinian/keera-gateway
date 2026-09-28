@@ -10,38 +10,49 @@ Keera uses standard OpenID Connect, so any compliant provider works. This page
 covers **Google Workspace** and **Microsoft Entra ID**. A deployment can offer
 one or both.
 
-## One directory or several
+## Naming a provider
 
-| Shape                  | Identity                                | Configured with                           |
-| ---------------------- | --------------------------------------- | ----------------------------------------- |
-| Dedicated, on-premises | the customer's own directory            | `KEERA_OIDC_ISSUER` and the two beside it |
-| Hosted                 | whichever directory each customer is on | `KEERA_OIDC_PROVIDERS`                    |
+Every provider has a name, listed in `KEERA_OIDC_PROVIDERS`. Provider `N` reads
+its settings from `KEERA_OIDC_<N>_*`, with the name in upper case and a hyphen
+as an underscore: `acme-ad` reads `KEERA_OIDC_ACME_AD_*`. Nothing is shared
+between providers. One directory is a list of one:
 
-With one directory, the panel shows "Continue with single sign-on". The
-unprefixed `KEERA_OIDC_*` variables configure it.
+```sh
+KEERA_OIDC_PROVIDERS=google
+KEERA_OIDC_GOOGLE_ISSUER=https://accounts.google.com
+```
 
-With several, the panel shows one named button per directory. See
+The panel shows one named button per provider. See
 [Several directories at once](#several-directories-at-once).
+
+The identity provider sends the browser back to
+`<KEERA_PUBLIC_URL>/control/auth/callback`, so SSO needs `KEERA_PUBLIC_URL`.
+The gateway refuses to start without it as soon as `KEERA_OIDC_PROVIDERS`
+names a provider, even one whose settings are not filled in yet. Register that
+address as the redirect URI with each provider.
 
 ## Where a role comes from
 
 ### The operator role comes from the environment, always
 
-An address in `KEERA_OPERATORS`, or a group in `KEERA_OIDC_OPERATOR_GROUPS`
-(`KEERA_OIDC_<NAME>_OPERATOR_GROUPS` with several providers), grants it. Nothing else does: the panel does not offer it, `keera user role`
-refuses it, and `PATCH /control/v1/users/{id}` answers 403, even to an operator.
+An address in `KEERA_OPERATORS`, or a group in
+`KEERA_OIDC_<NAME>_OPERATOR_GROUPS`, grants it, even to someone who is also in
+an admin group. Nothing else does: the panel does not offer it,
+`keera user role` refuses it, `PATCH /control/v1/users/{id}` answers 403, even
+to an operator, and `KEERA_OIDC_<NAME>_DEFAULT_ROLE` cannot be `operator`.
 
-The operator role spans organisations and owns the model catalogue, so you can
-see who holds it by reading the configuration. Remove an address from
-`KEERA_OPERATORS`, or a person from the group, and they are demoted at their
-next sign-in.
+The operator role spans organisations, so you can see who holds it by reading
+the configuration. An administrator runs one organisation, including its
+models, MCP servers, filters, routers and sandbox classes. Remove an address
+from `KEERA_OPERATORS`, or a person from the group, and they are demoted at
+their next sign-in.
 
 ### The administrator role comes from one of two places
 
-| `KEERA_OIDC_ADMIN_GROUPS` | An administrator is                                  | Changed in                                                                      |
-| ------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------- |
-| set                       | whoever is in the group                              | the directory                                                                   |
-| unset                     | whoever an operator or another administrator says so | `keera user role`, the panel's **Users** screen, `PATCH /control/v1/users/{id}` |
+| `KEERA_OIDC_<NAME>_ADMIN_GROUPS` | An administrator is                                  | Changed in                                                                      |
+| -------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------- |
+| set                              | whoever is in the group                              | the directory                                                                   |
+| unset                            | whoever an operator or another administrator says so | `keera user role`, the panel's **Users** screen, `PATCH /control/v1/users/{id}` |
 
 **If set, the directory decides.** The group is read on every sign-in, so a
 person removed from it is demoted at their next sign-in. The panel _no longer
@@ -49,8 +60,9 @@ lets you change roles_, because the next sign-in would undo the change. With
 several directories, admin groups on one provider are enough to make the
 directory decide for the whole gateway.
 
-**If unset, Keera decides.** Everyone starts with `KEERA_OIDC_DEFAULT_ROLE`, and
-an operator or administrator promotes them:
+**If unset, Keera decides.** Everyone starts with
+`KEERA_OIDC_<NAME>_DEFAULT_ROLE` (`member` unless set to `admin`), and an operator or administrator promotes
+them:
 
 ```sh
 keera user role alice@example.ch admin
@@ -69,7 +81,7 @@ This is the only option on Google Workspace.
 the Admin SDK, which Keera does not call. So the group lists match nothing on
 Google. Leave both unset.
 
-Setting `KEERA_OIDC_ADMIN_GROUPS` on Google leaves you with no administrators
+Setting admin groups on Google leaves you with no administrators
 and no way to make one: the directory never grants the role, and the panel can
 no longer grant it. The gateway warns about this at start-up.
 
@@ -93,7 +105,7 @@ and the walkthrough below uses them.
    admitting any Google account. **External** would let any Google account
    reach the panel.
 3. Under **Scopes**, add `openid`, `email` and `profile`, the three Keera asks
-   for when `KEERA_OIDC_SCOPES` is unset.
+   for when `KEERA_OIDC_<NAME>_SCOPES` is unset.
 4. **Credentials → Create credentials → OAuth client ID**, type **Web
    application**.
 5. Add one **Authorised redirect URI**:
@@ -111,12 +123,11 @@ and the walkthrough below uses them.
 In `compose/.env`:
 
 ```sh
-KEERA_OIDC_ISSUER=https://accounts.google.com
-KEERA_OIDC_CLIENT_ID=<from the console>
-KEERA_OIDC_CLIENT_SECRET=<from the console>
-KEERA_OIDC_REDIRECT_URL=http://localhost:8080/control/auth/callback
 KEERA_PUBLIC_URL=http://localhost:8080
-KEERA_OIDC_DEFAULT_ROLE=member
+KEERA_OIDC_PROVIDERS=google
+KEERA_OIDC_GOOGLE_ISSUER=https://accounts.google.com
+KEERA_OIDC_GOOGLE_CLIENT_ID=<from the console>
+KEERA_OIDC_GOOGLE_CLIENT_SECRET=<from the console>
 KEERA_OPERATORS=you@example.ch
 ```
 
@@ -163,20 +174,19 @@ Users screen.
    first.
 
    To assign administrators in Keera instead, skip this step and leave
-   `KEERA_OIDC_ADMIN_GROUPS` out of the block below.
+   `KEERA_OIDC_ENTRA_ADMIN_GROUPS` out of the block below.
 
 Then:
 
 ```sh
-KEERA_OIDC_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0
-KEERA_OIDC_CLIENT_ID=<application (client) ID>
-KEERA_OIDC_CLIENT_SECRET=<the secret value>
-KEERA_OIDC_REDIRECT_URL=https://keera.example.ch/control/auth/callback
 KEERA_PUBLIC_URL=https://keera.example.ch
-KEERA_OIDC_GROUPS_CLAIM=roles
-KEERA_OIDC_ADMIN_GROUPS=keera-admins
-KEERA_OIDC_OPERATOR_GROUPS=keera-operators
-KEERA_OIDC_DEFAULT_ROLE=member
+KEERA_OIDC_PROVIDERS=entra
+KEERA_OIDC_ENTRA_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0
+KEERA_OIDC_ENTRA_CLIENT_ID=<application (client) ID>
+KEERA_OIDC_ENTRA_CLIENT_SECRET=<the secret value>
+KEERA_OIDC_ENTRA_GROUPS_CLAIM=roles
+KEERA_OIDC_ENTRA_ADMIN_GROUPS=keera-admins
+KEERA_OIDC_ENTRA_OPERATOR_GROUPS=keera-operators
 ```
 
 The issuer must contain the tenant ID and end in `/v2.0`. The v1 endpoint issues
@@ -188,7 +198,7 @@ tokens whose `iss` does not match what discovery reports.
 ## Several directories at once
 
 This is the hosted deployment. List the providers, then give each its own
-client:
+settings:
 
 ```sh
 KEERA_OIDC_PROVIDERS=google,entra
@@ -205,20 +215,13 @@ KEERA_OIDC_ENTRA_GROUPS_CLAIM=roles
 KEERA_OIDC_ENTRA_ADMIN_GROUPS=keera-admins
 KEERA_OIDC_ENTRA_DOMAINS=anotherbank.ch
 
-# Shared by every provider above.
-KEERA_OIDC_REDIRECT_URL=https://keera.example.ch/control/auth/callback
-KEERA_OIDC_DEFAULT_ROLE=member
+KEERA_PUBLIC_URL=https://keera.example.ch
 KEERA_OPERATORS=you@example.ch
 ```
 
-Most settings fall back to their unprefixed name. To override one for a
-provider, use `KEERA_OIDC_<NAME>_<SETTING>`. Four are never inherited:
-
-- The issuer and client: two providers sharing a client would sign people in
-  against the wrong directory instead of failing.
-- `_OPERATOR_GROUPS`: a customer's directory admin can create a group of any
-  name, so a shared one would let every customer make operators.
-- `_DOMAINS`: see below.
+Nothing is shared between providers. In particular, a customer's directory admin
+can create a group of any name, so a shared operator group would let every
+customer make operators.
 
 **Each provider says which email domains it may vouch for.** The domain picks
 the tenant, and an address can name an operator. A customer's directory admin
@@ -238,13 +241,15 @@ customers uses Google, leave that line out.
 
 **One callback serves every provider.** Keera recognises a sign-in by its state,
 not by the callback address. Each provider's client registration must still list
-the callback.
+`<KEERA_PUBLIC_URL>/control/auth/callback`.
 
-A **name** matches `[a-z0-9][a-z0-9-]*`. Do not rename a provider: the name is
+A **name** matches `[a-z0-9][a-z0-9-]*`, and `keera` is reserved for the
+gateway's own sign-ins. Do not rename a provider: the name is
 part of the sign-in URL and of every identity it creates, so renaming it cuts
 off everyone who signed in through it. The button label comes from the name
-(`google` shows Google; `entra`, `azure`, `azuread`, `microsoft` and `m365` show
-Microsoft) or from `KEERA_OIDC_<NAME>_LABEL`.
+(`google`, `workspace` and `gsuite` show Google; `entra`, `entraid`, `azure`,
+`azuread`, `microsoft` and `m365` show Microsoft) or from
+`KEERA_OIDC_<NAME>_LABEL`.
 
 ### One person, one provider
 
@@ -252,13 +257,10 @@ An identity is stored as `<provider>:<subject>`, because a subject is only
 unique within its directory.
 
 A row an administrator created in advance has no subject yet. The first sign-in
-with a matching address takes it over. A row that already has _another
-provider's_ subject is refused instead. Otherwise anyone who can get an address
-through the weaker directory could take over the account and role that the
-stronger one vouched for.
-
-`KEERA_OIDC_ADOPT_BY_EMAIL=true` turns the refusal off. Use it only while moving
-an organisation from one provider to another, then turn it off again.
+with a matching address takes it over. A row that already has _another_
+subject, from another provider or the same one, is refused instead. Otherwise
+anyone who gets the same address, through a weaker directory or by reuse in the
+same one, could take over the account and its role.
 
 ## Which tenant a sign-in lands in
 
@@ -318,8 +320,9 @@ the command gets a credential for that person. Commands then run as them: their
 role decides what is allowed, `keera usage` shows their organisation, and the
 audit log records their address.
 
-The credential is written to `~/.config/keera/credentials.json` (mode 0600),
-one entry per gateway. `KEERA_CONFIG_DIR` moves the file. The gateway you signed
+The credential is written to `keera/credentials.json` in the user's
+configuration directory (mode 0600), one entry per gateway. That is `~/.config`
+on Linux, `~/Library/Application Support` on macOS and `%AppData%` on Windows. With `KEERA_CONFIG_DIR` set, the file is `$KEERA_CONFIG_DIR/credentials.json`. The gateway you signed
 in to becomes the default for later commands, so nothing needs to go in a shell
 profile.
 
@@ -351,9 +354,9 @@ It uses the loopback redirect from RFC 8252, like `gcloud` and `gh`:
 
 Two rules make it safe:
 
-- The redirect must be a literal loopback address (`127.0.0.1` or `[::1]`, with
-  a port, over `http`), or the sign-in is refused. The name `localhost` is
-  refused too, because it can resolve to anything.
+- The redirect must be a literal loopback address (such as `127.0.0.1` or
+  `[::1]`, with a port, over `http`), or the sign-in is refused. The name
+  `localhost` is refused too, because it can resolve to anything.
 - The code is useless without the proof key. Any process on the machine can bind
   a loopback port, but only the process that started the sign-in has the proof
   key. The code is deleted when redeemed.
@@ -372,9 +375,8 @@ across. If you need this often, use the operator key instead.
 
 ## Moving off localhost
 
-Put the gateway's port behind a TLS terminator, then change three things: the
-authorised redirect URI in each provider's console, `KEERA_OIDC_REDIRECT_URL`
-and `KEERA_PUBLIC_URL`.
+Put the gateway's port behind a TLS terminator, then change two things: the
+authorised redirect URI in each provider's console, and `KEERA_PUBLIC_URL`.
 
 `KEERA_SECURE_COOKIES` follows the scheme, so the session cookie becomes
 `Secure` without another setting.
@@ -392,36 +394,39 @@ Or use **Users → Disable** in the panel. Immediately:
 
 - they cannot sign in, and all their sessions and `keera login` tokens end
 - every key attributed to them is revoked for good
-- their agent sandboxes are terminated, and their own are suspended with the
-  volume kept, so an administrator can decide what to do with the work
+- their agent sandboxes, and any sandbox that has not started yet, are
+  terminated. Their other sandboxes are suspended with the volume kept, so an
+  administrator can decide what to do with the work
 - the repository credentials those sandboxes held are revoked
 
 Usage, sandboxes and audit entries keep their name. `keera user enable` lets
 them back in without keys: the old ones stay revoked. An administrator can
-disable anyone in their organisation except themselves and an operator.
+disable anyone in their organisation except themselves. Nobody can disable an
+operator this way; take them out of `KEERA_OPERATORS` or the operator group
+instead.
 
 Keys attributed to nobody, such as a build pipeline's, are not affected. Give a
 key a `--user` when a person is behind it.
 
 ## When it does not work
 
-| Symptom                                                            | Cause                                                                                                                                                  |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Gateway will not start, "discovering the identity provider"        | An issuer is wrong, or the container cannot reach it. The message names which one.                                                                     |
-| `redirect_uri_mismatch`                                            | The console URI and `KEERA_OIDC_REDIRECT_URL` differ, often `127.0.0.1` against `localhost`.                                                           |
-| No sign-on button on the panel                                     | An issuer and a client ID are both needed; one is empty.                                                                                               |
-| Boot fails asking for a client secret                              | An issuer and client ID are set without the secret. The message names the provider.                                                                    |
-| "a sign-in has to name one of…"                                    | Several providers are configured and the link named none. Start from the panel, not the URL.                                                           |
-| Signed in, but everything is read-only                             | You have the default role. Ask an administrator for `keera user role <you> admin`, or, if `KEERA_OIDC_ADMIN_GROUPS` is set, to be added to that group. |
-| The panel will not let anybody change a role                       | `KEERA_OIDC_ADMIN_GROUPS` is set on some provider, so the directory decides. Change the group, or unset it on every provider.                          |
-| The panel refuses the operator role                                | It always does. `KEERA_OPERATORS` or `KEERA_OIDC_OPERATOR_GROUPS` grants it.                                                                           |
-| "no organisation matches …"                                        | There are two or more orgs and none has your email domain. Set it, as above.                                                                           |
-| "that email domain belongs to another organisation"                | Each domain belongs to one tenant. `keera org list` shows which; clear it there first.                                                                 |
-| "in too many groups"                                               | Entra group overage. Use app roles, or grant the role by address. See above.                                                                           |
-| "already belongs to an account from a different identity provider" | That address signed in through another provider first. See [One person, one provider](#one-person-one-provider).                                       |
-| Entra: "returned no email claim"                                   | Add `email` as an optional ID-token claim on the app registration.                                                                                     |
-| `keera login`: "has no identity provider configured"               | The gateway has none. Use `KEERA_OPERATOR_KEY`, or configure one as above.                                                                             |
-| `keera login`: "has to come back to a loopback address"            | The command line is older than the gateway, or something rewrote its redirect. Rebuild it.                                                             |
-| `keera login`: the browser signs in and nothing happens            | The browser is not on the same machine as the command, usually because of ssh. See above.                                                              |
-| A command says "your sign-in is no longer valid"                   | It expired, a role change ended it, or someone ran `keera logout --all`. Run `keera login` again.                                                      |
-| Entra: "did not match the issuer URL returned by provider"         | The issuer is `.../common/v2.0`, which answers discovery with a templated `{tenantid}` that matches nothing. Use the tenant ID.                        |
+| Symptom                                                        | Cause                                                                                                                                        |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gateway will not start, "discovering the identity provider"    | An issuer is wrong, or the container cannot reach it. The message names which one.                                                           |
+| `redirect_uri_mismatch`                                        | The console URI and `<KEERA_PUBLIC_URL>/control/auth/callback` differ, often `127.0.0.1` against `localhost`.                                |
+| No sign-on button on the panel                                 | An issuer and a client ID are both needed; one is empty.                                                                                     |
+| Boot fails asking for a client secret                          | An issuer and client ID are set without the secret. The message names the provider.                                                          |
+| "a sign-in has to name one of…"                                | Several providers are configured and the link named none. Start from the panel, not the URL.                                                 |
+| Signed in, but everything is read-only                         | You have the default role. Ask an administrator for `keera user role <you> admin`, or, if the provider has admin groups, to be added to one. |
+| The panel will not let anybody change a role                   | `KEERA_OIDC_<NAME>_ADMIN_GROUPS` is set on some provider, so the directory decides. Change the group, or unset it on every provider.         |
+| The panel refuses the operator role                            | It always does. `KEERA_OPERATORS` or `KEERA_OIDC_<NAME>_OPERATOR_GROUPS` grants it.                                                          |
+| "no organisation matches …"                                    | There are two or more orgs and none has your email domain. Set it, as above.                                                                 |
+| "that email domain belongs to another organisation"            | Each domain belongs to one tenant. `keera org list` shows which; clear it there first.                                                       |
+| "in too many groups"                                           | Entra group overage. Use app roles, or grant the role by address. See above.                                                                 |
+| "already belongs to an account linked to a different identity" | That address signed in first through another provider, or as someone else. See [One person, one provider](#one-person-one-provider).         |
+| Entra: "returned no email claim"                               | Add `email` as an optional ID-token claim on the app registration.                                                                           |
+| `keera login`: "has no identity provider configured"           | The gateway has none. Use `KEERA_OPERATOR_KEY`, or configure one as above.                                                                   |
+| `keera login`: "has to come back to a loopback address"        | The command line is older than the gateway, or something rewrote its redirect. Rebuild it.                                                   |
+| `keera login`: the browser signs in and nothing happens        | The browser is not on the same machine as the command, usually because of ssh. See above.                                                    |
+| A command says "your sign-in is no longer valid"               | It expired, a role change ended it, or someone ran `keera logout --all`. Run `keera login` again.                                            |
+| Entra: "did not match the issuer URL returned by provider"     | The issuer is `.../common/v2.0`, which answers discovery with a templated `{tenantid}` that matches nothing. Use the tenant ID.              |

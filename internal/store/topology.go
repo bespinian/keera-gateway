@@ -16,9 +16,10 @@ type Cell struct {
 	InputTokens  int64 `json:"input_tokens"`
 	OutputTokens int64 `json:"output_tokens"`
 	CostMicros   int64 `json:"cost_micros"`
-	// Refused is what a guardrail stopped, and Failed is what the inference
-	// plane could not answer. One is working as configured and the other is a
-	// fault, so they are counted apart.
+	// Refused is every 4xx: what a guardrail stopped, or a request that could
+	// not be taken. Failed is every 5xx: what the inference plane could not
+	// answer. One is working as configured and the other is a fault, so they
+	// are counted apart. The request log splits them the same way.
 	Refused int64 `json:"refused"`
 	Failed  int64 `json:"failed"`
 	// TTFTMedianMS is the median wait for the first token. A median, because
@@ -31,7 +32,7 @@ type Cell struct {
 const cellColumns = `count(*),
 	COALESCE(sum(input_tokens), 0), COALESCE(sum(output_tokens), 0),
 	COALESCE(sum(cost_micros), 0),
-	count(*) FILTER (WHERE status IN (402, 403, 404, 429)),
+	count(*) FILTER (WHERE status BETWEEN 400 AND 499),
 	count(*) FILTER (WHERE status >= 500),
 	COALESCE(round(percentile_cont(0.5) WITHIN GROUP (ORDER BY ttft_ms)
 	               FILTER (WHERE ttft_ms > 0)), 0)::bigint`
@@ -58,7 +59,8 @@ type FlowReport struct {
 	Flows   []Flow          `json:"flows"`
 }
 
-// Flows aggregates the window into the four readings the map draws.
+// Flows aggregates one organisation's window into the four readings the map
+// draws.
 //
 // GROUPING SETS does it in one pass. The coarser rows are computed by the
 // database, not summed here, because a median cannot be added up from the
@@ -76,7 +78,7 @@ func (s *Store) Flows(ctx context.Context, orgID string, from, to time.Time) (Fl
 		SELECT COALESCE(client, ''), COALESCE(alias, ''),
 		       grouping(client), grouping(alias), `+cellColumns+`
 		FROM usage_events
-		WHERE ts >= $1 AND ts < $2 AND ($3 = '' OR org_id = $3)
+		WHERE ts >= $1 AND ts < $2 AND org_id = $3
 		GROUP BY GROUPING SETS ((client, alias), (client), (alias), ())`,
 		from, to, orgID)
 	if err != nil {

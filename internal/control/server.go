@@ -8,6 +8,7 @@
 package control
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
@@ -41,16 +42,12 @@ type Options struct {
 	// MetricsToken reads /metrics and nothing else, so a scrape configuration
 	// does not need the operator key. Empty leaves /metrics to operators.
 	MetricsToken string
-	// Secrets seals the credentials of hosted models. Nil means there is no
-	// KEERA_SECRET_KEY, and the panel says so instead of storing them.
+	// Secrets seals the credentials of hosted models and MCP servers.
 	Secrets  *secret.Box
 	Currency string
 	// Providers are the identity providers, in the order the sign-in screen
 	// shows them. Empty means the operator key is the only way in.
 	Providers authn.Providers
-	// OIDCAdoptByEmail lets a sign-in take over a person already bound to a
-	// different provider's subject. See store.Link.
-	OIDCAdoptByEmail bool
 	// ServeUI serves the control panel from this listener's root.
 	ServeUI bool
 	// SecureCookies marks the session cookie Secure.
@@ -60,7 +57,6 @@ type Options struct {
 	// to the request's Host header.
 	PublicURL string
 	// Gateway is the data plane the playground and the checks send through.
-	// Nil means there is no inference listener, and those routes say so.
 	Gateway *gateway.Server
 	// SessionGap is how long an agent conversation may go quiet before the
 	// next request starts a new task. Zero is store.DefaultSessionGap.
@@ -69,6 +65,9 @@ type Options struct {
 	// sandbox catalogue can still be read and edited, and everything else
 	// answers that a driver has to be switched on.
 	Sandboxes *sandbox.Manager
+	// Template is what every new organisation starts with, from
+	// KEERA_MODELS_FILE and KEERA_SANDBOXES_FILE.
+	Template store.OrgTemplate
 }
 
 // handler is a route that has already been authenticated.
@@ -83,8 +82,9 @@ type Server struct {
 	opts     Options
 	log      *slog.Logger
 
-	// hasOperatorKey guards operatorHash: without it, a deployment with no
-	// operator key would accept sha256(""), which anyone can send.
+	// hasOperatorKey guards operatorHash: without it, a server built with no
+	// operator key would accept sha256(""), which anyone can send. Config
+	// requires one, so this only matters to a caller that skips it.
 	operatorHash   [32]byte
 	hasOperatorKey bool
 	// metricsHash is the same for the scrape token.
@@ -103,6 +103,7 @@ type Server struct {
 // New builds a control server.
 func New(st *store.Store, reg *registry.Registry, m *metrics.Registry, rec *usage.Recorder,
 	opts Options, log *slog.Logger) *Server {
+	opts.SessionGap = cmp.Or(opts.SessionGap, store.DefaultSessionGap)
 	return &Server{
 		st: st, reg: reg, metrics: m, recorder: rec, opts: opts,
 		operatorHash:    sha256.Sum256([]byte(opts.OperatorKey)),
@@ -177,6 +178,7 @@ func (s *Server) Handler() http.Handler {
 	route("POST /v1/keys", s.createKey)
 	route("GET /v1/keys", s.listKeys)
 	route("DELETE /v1/keys/{id}", s.revokeKey)
+	route("POST /v1/keys/{id}/rotate", s.rotateKey)
 
 	route("GET /v1/guardrails/{scope}/{id}", s.getGuardrails)
 	route("GET /v1/guardrails/{scope}/{id}/effective", s.effectiveGuardrails)
@@ -217,9 +219,7 @@ func (s *Server) Handler() http.Handler {
 	route("GET /v1/overview", s.overview)
 	route("GET /v1/map", s.trafficMap)
 	route("GET /v1/usage", s.usage)
-	route("GET /v1/spend", s.spend)
 	route("GET /v1/audit", s.audit)
-	route("GET /v1/failures", s.failures)
 	route("GET /v1/requests", s.requests)
 	// The request log grouped into tasks. A session is named by the id of any
 	// request in it.
@@ -327,7 +327,7 @@ func (s *Server) throttle(name string, perMinute int, next http.HandlerFunc) htt
 // a stray API key costs a string comparison and not a query.
 func (s *Server) principal(r *http.Request) (*authn.Principal, error) {
 	if presented, err := auth.FromHeader(r.Header.Get("Authorization")); err == nil {
-		if s.hasOperatorKey && s.matchesOperatorKey(presented) {
+		if s.matchesOperatorKey(presented) {
 			return &authn.Principal{Via: authn.MethodOperatorKey, Role: authn.RoleOperator}, nil
 		}
 		if strings.HasPrefix(presented, authn.CLITokenPrefix) {
@@ -339,14 +339,13 @@ func (s *Server) principal(r *http.Request) (*authn.Principal, error) {
 }
 
 // matchesOperatorKey and matchesMetricsToken compare a presented credential
-// with the configured one. Check hasOperatorKey or hasMetricsToken first:
-// with nothing configured, "" would match.
+// with the configured one. With nothing configured, nothing matches.
 func (s *Server) matchesOperatorKey(presented string) bool {
-	return constantTimeEqual(presented, s.operatorHash)
+	return s.hasOperatorKey && constantTimeEqual(presented, s.operatorHash)
 }
 
 func (s *Server) matchesMetricsToken(presented string) bool {
-	return constantTimeEqual(presented, s.metricsHash)
+	return s.hasMetricsToken && constantTimeEqual(presented, s.metricsHash)
 }
 
 func constantTimeEqual(presented string, want [32]byte) bool {
@@ -375,6 +374,10 @@ func (s *Server) scopeOrg(w http.ResponseWriter, p *authn.Principal, requested s
 	return orgID, true
 }
 
+// orgRequired is what an operator looking at every organisation at once is
+// told by a route that needs one.
+const orgRequired = "choose an organisation: pass org_id, or --org on the command line"
+
 // requireOrg is scopeOrg for a route that needs exactly one organisation. An
 // operator looking at all of them at once is told msg.
 func (s *Server) requireOrg(w http.ResponseWriter, p *authn.Principal, requested, msg string) (string, bool) {
@@ -383,27 +386,33 @@ func (s *Server) requireOrg(w http.ResponseWriter, p *authn.Principal, requested
 		return "", false
 	}
 	if orgID == "" {
-		httpx.WriteError(w, http.StatusBadRequest, "invalid_request_error", "org_required", msg)
+		needOrg(w, msg)
 		return "", false
 	}
 	return orgID, true
+}
+
+// needOrg refuses a request that names no organisation where it needs one.
+func needOrg(w http.ResponseWriter, msg string) {
+	httpx.WriteError(w, http.StatusBadRequest, "invalid_request_error", "org_required", msg)
+}
+
+// queryOrg is requireOrg for the organisation named in ?org_id.
+func (s *Server) queryOrg(w http.ResponseWriter, r *http.Request, p *authn.Principal) (string, bool) {
+	return s.requireOrg(w, p, r.URL.Query().Get("org_id"), orgRequired)
+}
+
+// adminOrg is queryOrg for a request that changes something of the
+// organisation's. An administrator who names none changes their own.
+func (s *Server) adminOrg(w http.ResponseWriter, r *http.Request, p *authn.Principal) (string, bool) {
+	orgID, ok := s.queryOrg(w, r, p)
+	return orgID, ok && s.requireOrgAdmin(w, p, orgID)
 }
 
 // requireOrgAdmin checks that the caller may change an organisation.
 func (s *Server) requireOrgAdmin(w http.ResponseWriter, p *authn.Principal, orgID string) bool {
 	if !p.CanAdminOrg(orgID) {
 		s.forbid(w, "only an administrator of this organisation can do that")
-		return false
-	}
-	return true
-}
-
-// requireGateway refuses a route that needs the inference plane when this
-// process has none.
-func (s *Server) requireGateway(w http.ResponseWriter) bool {
-	if s.opts.Gateway == nil {
-		httpx.WriteError(w, http.StatusServiceUnavailable, "server_error", "no_gateway",
-			"this process runs no inference listener, so it cannot reach a backend")
 		return false
 	}
 	return true
@@ -443,12 +452,10 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 // scrape config should not hold the operator key, so the scrape token reads
 // this route and nothing else.
 func (s *Server) metricsRoute(w http.ResponseWriter, r *http.Request) {
-	if s.hasMetricsToken {
-		if presented, err := auth.FromHeader(r.Header.Get("Authorization")); err == nil &&
-			s.matchesMetricsToken(presented) {
-			s.writeMetrics(w)
-			return
-		}
+	if presented, err := auth.FromHeader(r.Header.Get("Authorization")); err == nil &&
+		s.matchesMetricsToken(presented) {
+		s.writeMetrics(w)
+		return
 	}
 	// A wrong scrape token gets the ordinary refusal, so the answer does not
 	// say which kind of credential was sent.
@@ -478,8 +485,7 @@ func (s *Server) changed(r *http.Request) {
 	}
 }
 
-// auditf records a control-plane action. Pass an empty orgID only for an
-// action that belongs to no tenant.
+// auditf records a control-plane action in the organisation it happened in.
 func (s *Server) auditf(r *http.Request, p *authn.Principal, orgID, action,
 	targetType, targetID string, detail any) {
 	if err := s.st.Audit(r.Context(), p.Actor(), orgID, action, targetType, targetID, detail); err != nil {

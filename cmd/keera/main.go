@@ -1,6 +1,6 @@
 // Command keera administers a Keera Gateway: organisations, teams, people, keys,
-// the model catalogue, guardrails and usage. It only uses the control API, never
-// the database, so it works the same against any gateway.
+// each organisation's models, guardrails and usage. It only uses the control
+// API, never the database, so it works the same against any gateway.
 package main
 
 import (

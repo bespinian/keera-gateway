@@ -184,7 +184,7 @@ func TestExchangeReturnsAVerifiedIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Exchange: %v", err)
 	}
-	if id.Subject != "sub-123" || id.Email != "ada@example.ch" || id.Name != "Ada Lovelace" {
+	if id.Subject != "sub-123" || id.Email != "ada@example.ch" {
 		t.Errorf("identity = %+v", id)
 	}
 	if !slices.Contains(id.Groups, "keera-admins") {

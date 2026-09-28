@@ -31,8 +31,10 @@ import (
 // these modes get less exact as the gateway scales out. A restart starts with
 // nothing measured, the same as a newly added destination.
 type loads struct {
-	// alias -> *destLoad. A sync.Map because it is read and written on every
-	// request, over keys that change only with the catalogue.
+	// model key -> *destLoad. A sync.Map because it is read and written on
+	// every request, over keys that change only when models do. The key,
+	// not the alias, because two organisations can each have a model of the
+	// same alias.
 	m sync.Map
 }
 
@@ -73,25 +75,26 @@ type destLoad struct {
 // newLoads builds the tracker.
 func newLoads() *loads { return &loads{} }
 
-// get is the per-destination record, made on first use.
-func (l *loads) get(alias string) *destLoad {
-	if v, ok := l.m.Load(alias); ok {
+// get is the per-destination record, made on first use. key is the model's
+// Key.
+func (l *loads) get(key string) *destLoad {
+	if v, ok := l.m.Load(key); ok {
 		return v.(*destLoad)
 	}
-	v, _ := l.m.LoadOrStore(alias, &destLoad{})
+	v, _ := l.m.LoadOrStore(key, &destLoad{})
 	return v.(*destLoad)
 }
 
-// begin records that a request has been dispatched to alias, and returns the
-// function that records that it is over.
+// begin records that a request has been dispatched to the model under key,
+// and returns the function that records that it is over.
 //
 // The count covers the whole answer, because a model streaming is still busy.
 // The gateway's inflight metric is narrower: this process's concurrency.
 //
 // The returned function must be called exactly once (see the defer in
 // answer); a leaked count leaves a destination looking busy forever.
-func (l *loads) begin(alias string) func() {
-	d := l.get(alias)
+func (l *loads) begin(key string) func() {
+	d := l.get(key)
 	d.inflight.Add(1)
 	var once sync.Once
 	return func() { once.Do(func() { d.inflight.Add(-1) }) }
@@ -105,11 +108,11 @@ func (l *loads) begin(alias string) func() {
 //
 // Only answers count: a fast refusal would post the best score. Failures are
 // recorded by fail, and a 4xx, being the request's fault, not at all.
-func (l *loads) observe(alias string, ttft time.Duration, now time.Time) {
+func (l *loads) observe(key string, ttft time.Duration, now time.Time) {
 	if ttft <= 0 {
 		return
 	}
-	d := l.get(alias)
+	d := l.get(key)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	switch age := now.Sub(d.at); {
@@ -128,8 +131,8 @@ func (l *loads) observe(alias string, ttft time.Duration, now time.Time) {
 
 // fail records that a destination did not answer, which ranks it last until
 // loadPenalty has passed.
-func (l *loads) fail(alias string, now time.Time) {
-	d := l.get(alias)
+func (l *loads) fail(key string, now time.Time) {
+	d := l.get(key)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.failedAt = now
@@ -149,8 +152,8 @@ type reading struct {
 }
 
 // read takes one destination's numbers.
-func (l *loads) read(alias string, now time.Time) reading {
-	d := l.get(alias)
+func (l *loads) read(key string, now time.Time) reading {
+	d := l.get(key)
 	r := reading{inflight: d.inflight.Load()}
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -176,14 +179,16 @@ func (l *loads) read(alias string, now time.Time) reading {
 //     deliberate inefficiency keeps the order self-correcting: otherwise the
 //     first destination to post a good number would keep all the traffic.
 //  3. Then least in flight, or lowest latency.
-func (l *loads) order(mode policy.RouterMode, aliases []string) {
+//
+// key maps an alias to the model key its numbers are kept under.
+func (l *loads) order(mode policy.RouterMode, aliases []string, key func(alias string) string) {
 	if len(aliases) < 2 || !mode.Measures() {
 		return
 	}
 	now := time.Now()
 	r := make(map[string]reading, len(aliases))
 	for _, a := range aliases {
-		r[a] = l.read(a, now)
+		r[a] = l.read(key(a), now)
 	}
 	sort.SliceStable(aliases, func(i, j int) bool {
 		a, b := r[aliases[i]], r[aliases[j]]
@@ -200,14 +205,22 @@ func (l *loads) order(mode policy.RouterMode, aliases []string) {
 	})
 }
 
+// orderByLoad sorts a router's destinations by what has been measured of the
+// models they name for its organisation. See loads.order.
+func (s *Server) orderByLoad(rt policy.Router, aliases []string) {
+	s.load.order(rt.Mode, aliases, func(alias string) string {
+		return policy.ModelKey(rt.OrgID, alias)
+	})
+}
+
 // describe says in a few words what a measured router currently makes of a
 // destination, for the router's check. It is prose because it is one
 // replica's view of the last few minutes.
-func (l *loads) describe(mode policy.RouterMode, alias string) string {
+func (l *loads) describe(mode policy.RouterMode, key string) string {
 	if !mode.Measures() {
 		return ""
 	}
-	r := l.read(alias, time.Now())
+	r := l.read(key, time.Now())
 	var out string
 	if mode == policy.RouterModeLeastBusy {
 		out = strconv.FormatInt(r.inflight, 10) + " in flight"

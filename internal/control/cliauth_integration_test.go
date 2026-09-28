@@ -31,7 +31,7 @@ func signedInAtATerminal(t *testing.T, verifier string) (*httptest.Server, strin
 		"TRUNCATE users, cli_codes, cli_tokens, sessions RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatalf("emptying the tables: %v", err)
 	}
-	if _, err := st.CreateOrg(ctx, "org_1", "Example Bank"); err != nil {
+	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_1", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatalf("creating the organisation: %v", err)
 	}
 	user, err := st.AddUser(ctx, "user_1", "org_1", "alice@example.ch", "sso:alice", "member")

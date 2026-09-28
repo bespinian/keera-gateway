@@ -38,11 +38,15 @@ func (s *Server) requireSandboxes(w http.ResponseWriter) bool {
 
 /* --------------------------------------------------------------- the catalogue */
 
-// listSandboxClasses is readable by anyone signed in: a developer needs the
-// class names to ask for a machine. The caller's own limits come with it, so a
-// client can grey out what they may not use.
+// listSandboxClasses is readable by anyone in the organisation: a developer
+// needs the class names to ask for a machine. The caller's own limits come
+// with it, so a client can grey out what they may not use.
 func (s *Server) listSandboxClasses(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	classes, err := s.st.ListSandboxClasses(r.Context())
+	orgID, ok := s.queryOrg(w, r, p)
+	if !ok {
+		return
+	}
+	classes, err := s.st.ListSandboxClasses(r.Context(), orgID)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -52,100 +56,69 @@ func (s *Server) listSandboxClasses(w http.ResponseWriter, r *http.Request, p *a
 		caps := s.opts.Sandboxes.Driver().Capabilities()
 		out["driver"] = map[string]any{
 			"name": s.opts.Sandboxes.Driver().Name(),
-			// The strongest isolation the driver can deliver, so the panel
-			// does not offer a class the driver would refuse.
-			"isolation":   caps.Isolation,
-			"suspend":     caps.Suspend,
-			"persistence": caps.Persistence,
+			// What the driver can deliver, so the panel does not offer a
+			// class the driver would refuse.
+			"isolation": caps.Isolation,
+			"tiers":     caps.Tiers,
 		}
 	}
-	if orgID, ok := s.scopeOrg(w, p, r.URL.Query().Get("org_id")); ok && orgID != "" {
-		limits, err := s.sandboxLimits(r.Context(), orgID, "")
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		out["limits"] = limits
+	limits, err := s.sandboxLimits(r.Context(), orgID, "")
+	if err != nil {
+		s.fail(w, err)
+		return
 	}
+	out["limits"] = limits
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-// putSandboxClass creates or replaces one class.
-//
-// Operator-only, like the model catalogue: a class is an image, an isolation
-// tier and a share of the cluster, none of which belongs to one tenant. A
-// class the catalogue file declares is refused, because the next start would
-// undo the change.
+// putSandboxClass creates or replaces one of an organisation's classes.
 func (s *Server) putSandboxClass(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if !p.CanAdminCatalogue() {
-		s.forbid(w, "the sandbox catalogue is a property of the deployment, not of one "+
-			"organisation; only an operator can change it")
+	orgID, ok := s.adminOrg(w, r, p)
+	if !ok {
 		return
 	}
-	var in catalog.Sandbox
+	// The shape the list returns, so a class read can be written back.
+	var in policy.SandboxClass
 	if err := httpx.ReadJSON(r, &in); err != nil {
 		badRequest(w, err.Error())
 		return
 	}
 	in.Name = r.PathValue("name")
 
-	existing, err := s.st.SandboxClass(r.Context(), in.Name)
-	switch {
-	case err == nil && existing.Managed:
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "managed",
-			"'"+in.Name+"' is declared by this deployment's sandbox catalogue file, which is "+
-				"applied on every start - a change made here would last until the next "+
-				"restart. Change the file, then restart the gateway")
-		return
-	case err != nil && !errors.Is(err, store.ErrNotFound):
-		s.fail(w, err)
-		return
-	}
-
-	class, err := catalog.ParseSandbox(in)
+	class, err := catalog.CheckSandboxClass(in)
 	if err != nil {
 		badRequest(w, err.Error())
 		return
 	}
+	class.OrgID = orgID
 	if err := s.st.UpsertSandboxClass(r.Context(), &class); err != nil {
 		s.fail(w, err)
 		return
 	}
-	s.auditf(r, p, "", "sandbox_class.put", "sandbox_class", class.Name, class)
+	s.auditf(r, p, orgID, "sandbox_class.put", "sandbox_class", class.Name, class)
 	// No cache to clear: the gateway never holds sandbox classes, and each new
 	// sandbox reads its class from the database.
 	httpx.WriteJSON(w, http.StatusOK, class)
 }
 
 func (s *Server) deleteSandboxClass(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if !p.CanAdminCatalogue() {
-		s.forbid(w, "only an operator can change the sandbox catalogue")
+	orgID, ok := s.adminOrg(w, r, p)
+	if !ok {
 		return
 	}
 	name := r.PathValue("name")
-	existing, err := s.st.SandboxClass(r.Context(), name)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	if existing.Managed {
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "managed",
-			"'"+name+"' is declared by the sandbox catalogue file; take it out of the file "+
-				"and restart, or the next start would put it back")
-		return
-	}
 	// Unlike a filter, a class in use can be deleted: running sandboxes keep
 	// their own copy of it. The answer says how many are still running.
-	live, err := s.st.SandboxClassInUse(r.Context(), name)
+	live, err := s.st.SandboxClassInUse(r.Context(), orgID, name)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	if err := s.st.DeleteSandboxClass(r.Context(), name); err != nil {
+	if err := s.st.DeleteSandboxClass(r.Context(), orgID, name); err != nil {
 		s.fail(w, err)
 		return
 	}
-	s.auditf(r, p, "", "sandbox_class.delete", "sandbox_class", name,
+	s.auditf(r, p, orgID, "sandbox_class.delete", "sandbox_class", name,
 		map[string]any{"live_sandboxes": live})
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"name": name, "deleted": true, "live_sandboxes": live,
@@ -217,22 +190,23 @@ func (s *Server) getSandbox(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	httpx.WriteJSON(w, http.StatusOK, sb)
 }
 
-// canSeeSandbox is the read rule: an administrator sees their organisation's,
-// a member sees their own.
+// mayHandleSandbox is the rule for reading and changing a sandbox. An
+// administrator may see, terminate, suspend and extend any sandbox in their
+// organisation, as those are quota and cost decisions. A member may do that
+// with their own. Getting inside one is stricter: see canAttach.
+func mayHandleSandbox(p *authn.Principal, sb store.Sandbox) bool {
+	return p.CanAdminOrg(sb.OrgID) || (sb.UserID != "" && sb.UserID == p.UserID)
+}
+
+// canSeeSandbox applies mayHandleSandbox, and answers for a sandbox the
+// caller may not handle.
 func (s *Server) canSeeSandbox(w http.ResponseWriter, p *authn.Principal, sb store.Sandbox) bool {
-	if p.CanAdminOrg(sb.OrgID) || (sb.UserID != "" && sb.UserID == p.UserID) {
+	if mayHandleSandbox(p, sb) {
 		return true
 	}
 	// 404, not 403, so nobody can learn which sandboxes a colleague has.
 	s.fail(w, store.ErrNotFound)
 	return false
-}
-
-// canChangeSandbox is the write rule. An administrator may terminate, suspend
-// and extend any sandbox in their organisation, as those are quota and cost
-// decisions, but may not get inside one.
-func canChangeSandbox(p *authn.Principal, sb store.Sandbox) bool {
-	return p.CanAdminOrg(sb.OrgID) || (sb.UserID != "" && sb.UserID == p.UserID)
 }
 
 // sandboxToChange resolves the sandbox a request names and checks that the
@@ -242,10 +216,6 @@ func (s *Server) sandboxToChange(w http.ResponseWriter, r *http.Request, p *auth
 ) {
 	sb, ok := s.resolveSandbox(w, r, p)
 	if !ok || !s.canSeeSandbox(w, p, sb) {
-		return store.Sandbox{}, false
-	}
-	if !canChangeSandbox(p, sb) {
-		s.forbid(w, "that sandbox belongs to somebody else")
 		return store.Sandbox{}, false
 	}
 	return sb, true
@@ -419,7 +389,13 @@ func (s *Server) changeSandboxState(w http.ResponseWriter, r *http.Request, p *a
 	if action == "suspend" {
 		err = s.opts.Sandboxes.Suspend(r.Context(), sb)
 	} else {
-		err = s.opts.Sandboxes.Resume(r.Context(), sb)
+		// An expired sandbox is held to the guardrail again, as it is now.
+		var limits policy.ResolvedSandbox
+		if limits, err = s.sandboxLimits(r.Context(), sb.OrgID, sb.TeamID); err != nil {
+			s.fail(w, err)
+			return
+		}
+		err = s.opts.Sandboxes.Resume(r.Context(), sb, limits)
 	}
 	if err != nil {
 		s.failSandbox(w, err)

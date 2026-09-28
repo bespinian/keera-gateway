@@ -2,8 +2,32 @@ package cli
 
 import (
 	"flag"
+	"fmt"
+	"slices"
 	"strings"
 )
+
+// verbFlags refuses a flag the verb does not read, going by its entry in
+// help.go. A command whose verbs share one FlagSet would otherwise accept
+// another verb's flag and quietly drop it.
+func verbFlags(fs *flag.FlagSet, cmd, sub string) error {
+	c, ok := find(cmd)
+	if !ok {
+		return nil
+	}
+	s, ok := c.sub(sub)
+	if !ok {
+		return nil
+	}
+	var err error
+	fs.Visit(func(f *flag.Flag) {
+		if err == nil && !slices.Contains(s.flags, f.Name) {
+			err = fmt.Errorf("keera %s %s does not take --%s (see: keera %s %s --help)",
+				cmd, s.name, f.Name, cmd, s.name)
+		}
+	})
+	return err
+}
 
 // parse reads a subcommand's flags, before or after the positional
 // arguments. Go's flag package stops at the first non-flag, so

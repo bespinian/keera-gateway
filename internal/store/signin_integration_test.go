@@ -17,10 +17,10 @@ func TestSessionsExpireAndAreTouchedAtMostOnceAMinute(t *testing.T) {
 	}
 	live := []byte("session-hash-000000000000000001!")
 	dead := []byte("session-hash-000000000000000002!")
-	if err := st.CreateSession(ctx, live, user.ID, "csrf-1", now.Add(time.Hour), "Firefox", "10.0.0.1"); err != nil {
+	if err := st.CreateSession(ctx, live, user.ID, "csrf-1", now.Add(time.Hour)); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if err := st.CreateSession(ctx, dead, user.ID, "csrf-2", now.Add(-time.Minute), "Firefox", "10.0.0.1"); err != nil {
+	if err := st.CreateSession(ctx, dead, user.ID, "csrf-2", now.Add(-time.Minute)); err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
@@ -35,36 +35,6 @@ func TestSessionsExpireAndAreTouchedAtMostOnceAMinute(t *testing.T) {
 	// to check.
 	if _, err := st.LookupSession(ctx, dead); err != ErrNotFound {
 		t.Errorf("an expired session gave %v, want ErrNotFound", err)
-	}
-
-	// Touch is throttled in SQL: it is the only write on the control plane's
-	// read path, so it must not fire on every request.
-	if _, err := st.pool.Exec(ctx,
-		"UPDATE sessions SET last_seen_at = now() - interval '2 minutes' WHERE id = $1",
-		live); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.TouchSession(ctx, live); err != nil {
-		t.Fatalf("TouchSession: %v", err)
-	}
-	var seen time.Time
-	if err := st.pool.QueryRow(ctx,
-		"SELECT last_seen_at FROM sessions WHERE id = $1", live).Scan(&seen); err != nil {
-		t.Fatal(err)
-	}
-	if time.Since(seen) > time.Minute {
-		t.Errorf("last_seen_at = %s, want it moved forward", seen)
-	}
-	if err := st.TouchSession(ctx, live); err != nil {
-		t.Fatalf("TouchSession: %v", err)
-	}
-	var again time.Time
-	if err := st.pool.QueryRow(ctx,
-		"SELECT last_seen_at FROM sessions WHERE id = $1", live).Scan(&again); err != nil {
-		t.Fatal(err)
-	}
-	if !again.Equal(seen) {
-		t.Errorf("last_seen_at moved twice within a minute: %s then %s", seen, again)
 	}
 
 	// PurgeExpired keeps the table bounded; nothing depends on it for
@@ -205,14 +175,14 @@ func TestOrgLookupsForASignIn(t *testing.T) {
 
 	// Exactly one organisation: a dedicated or on-premises deployment, where a
 	// first sign-in needs no domain mapping at all.
-	if _, err := st.CreateOrg(ctx, "org_1", "Example Bank"); err != nil {
+	if _, err := st.CreateOrg(ctx, Org{ID: "org_1", Name: "Example Bank"}, OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
 	if org, err := st.OnlyOrg(ctx); err != nil || org.ID != "org_1" {
 		t.Errorf("OnlyOrg = %+v, %v", org, err)
 	}
 
-	if _, err := st.CreateOrg(ctx, "org_2", "Another Bank"); err != nil {
+	if _, err := st.CreateOrg(ctx, Org{ID: "org_2", Name: "Another Bank"}, OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
 	// Two, so there is no "only" one and the guess must not be made.
@@ -274,7 +244,7 @@ func TestLinkUserRefusesToTakeOverAnotherProvidersIdentity(t *testing.T) {
 	f := newFixture(t, st, ctx)
 
 	// Ada signs in through the first directory and is an administrator there.
-	ada, err := st.LinkUser(ctx, "user_ada", Link{
+	_, err := st.LinkUser(ctx, "user_ada", Link{
 		OrgID: f.orgID, Email: "ada@example.ch", ExternalID: "google:1", Role: "admin"})
 	if err != nil {
 		t.Fatalf("LinkUser: %v", err)
@@ -298,26 +268,6 @@ func TestLinkUserRefusesToTakeOverAnotherProvidersIdentity(t *testing.T) {
 	}
 	if len(users) != 1 {
 		t.Errorf("%d users, want the one that was already there: %+v", len(users), users)
-	}
-
-	// Moving an organisation from one provider to another is the case this is
-	// in the way of, so it can be asked for explicitly.
-	moved, err := st.LinkUser(ctx, "user_other", Link{
-		OrgID: f.orgID, Email: "ada@example.ch", ExternalID: "entra:2",
-		Role: "member", AdoptByEmail: true})
-	if err != nil {
-		t.Fatalf("LinkUser with AdoptByEmail: %v", err)
-	}
-	if moved.ID != ada.ID {
-		t.Errorf("LinkUser minted %s, want the existing %s", moved.ID, ada.ID)
-	}
-	if moved.ExternalID != "entra:2" {
-		t.Errorf("ExternalID = %q, want the new provider's", moved.ExternalID)
-	}
-	// The role is the row's, not this sign-in's: syncRole is what moves it, and
-	// it reads the directory the person actually came through.
-	if moved.Role != "admin" {
-		t.Errorf("Role = %q, want the role the row already held", moved.Role)
 	}
 }
 

@@ -18,7 +18,9 @@ import (
 	"os"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // command is one noun this command line understands.
@@ -68,13 +70,15 @@ var commands = []command{
 		args:    "[flags]",
 		flags:   []string{"provider", "no-browser"},
 		prose: "Opens a browser, signs you in the way the panel does, and keeps what comes " +
-			"back in ~/.config/keera/credentials.json. Commands then run as you: your role " +
+			"back in keera/credentials.json in your configuration directory " +
+			"(~/.config on Linux). Commands then run as you: your role " +
 			"decides what they may do, and the audit log records your address rather than " +
 			"\"operator key\". The sign-in lasts a month and ends sooner with 'keera logout'.\n\n" +
 			"--url makes this the only line a developer needs: the gateway signed in to " +
 			"becomes the one every later command talks to, with nothing to export into a " +
-			"shell profile. Without it the sign-in goes to https://gateway.keera.ch, the " +
-			"hosted deployment. 'keera whoami' says which gateway is in hand.\n\n" +
+			"shell profile. Without it the sign-in goes to KEERA_CONTROL_URL, then to the " +
+			"gateway you last signed in to, then to https://gateway.keera.ch, the hosted " +
+			"deployment. 'keera whoami' says which gateway is in hand.\n\n" +
 			"KEERA_OPERATOR_KEY still works and still wins where it is set. It is the " +
 			"deployment's own credential - shared, unexpiring, every organisation - so it is " +
 			"the one for automation and for the first ten minutes of a deployment, before " +
@@ -99,9 +103,8 @@ var commands = []command{
 		summary: "who the credential in hand belongs to, and which gateway",
 		args:    "[flags]",
 		flags:   []string{"json"},
-		prose: "The command to type when something is refused and it is not clear which of " +
-			"three credentials this shell is holding, or which of two deployments it is " +
-			"pointed at.",
+		prose: "Run it when something is refused, to see which credential this shell uses " +
+			"and which deployment it talks to.",
 	},
 	{
 		name:    "doctor",
@@ -109,7 +112,7 @@ var commands = []command{
 		args:    "[flags]",
 		flags:   []string{"probe", "org", "json"},
 		prose: "One command for \"why does this not work\". It reads the deployment's " +
-			"configuration and catalogue and says what is missing, with the thing to do " +
+			"configuration and models and says what is missing, with the thing to do " +
 			"about each. It changes nothing, so it is safe against live traffic.\n\n" +
 			"--probe also asks every enabled model to answer. That is the only check that " +
 			"catches the failure which quietly breaks coding agents: a backend returning " +
@@ -125,7 +128,7 @@ var commands = []command{
 		aliases: []string{"orgs"},
 		summary: "organisations: one per customer, or exactly one",
 		prose: "An organisation's --domain is the part of an address after the @, and it is " +
-			"what places a sign-in in the right tenant. Until there are two organisations " +
+			"what places a sign-in in the right organisation. Until there are two organisations " +
 			"nothing needs it: everyone who signs in lands in the only one there is. From " +
 			"the moment there are two, an address matching no organisation's domain is " +
 			"refused rather than put in one - so it is set on every organisation before the " +
@@ -134,10 +137,12 @@ var commands = []command{
 			{name: "create", aliases: []string{"add", "new"}, args: "<name>", summary: "create an organisation",
 				flags: []string{"domain", "json"}},
 			{name: "list", aliases: []string{"ls"}, summary: "every organisation", flags: []string{"json"}},
-			{name: "set", aliases: []string{"edit", "update"}, args: "<org-id>", summary: "set the email domain whose sign-ins land in it",
+			{name: "set", aliases: []string{"edit", "update"}, args: "[<org-id>]", summary: "set the email domain whose sign-ins land in it",
 				flags: []string{"domain", "no-domain", "json"}},
 			{name: "delete", aliases: []string{"rm", "remove"}, args: "<org-id>", summary: "delete an organisation and everything in it",
-				flags: []string{"yes", "json"}},
+				flags: []string{"yes", "json"},
+				prose: "Refused while any of its sandboxes is still live: terminate them first, " +
+					"so no machine keeps running after its organisation is gone."},
 		},
 		examples: []string{`keera org create "Example Bank" --domain example.ch`},
 	},
@@ -158,8 +163,9 @@ var commands = []command{
 			{name: "delete", aliases: []string{"rm", "remove"}, args: "<team>", summary: "delete a team that has no working keys",
 				flags: []string{"org", "yes", "json"},
 				prose: "Refused while any key in the team still works: deleting it would take " +
-					"those credentials with it. Revoke them, or move them to another team, " +
-					"first. Revoked keys stay as history, under no team."},
+					"those credentials with it. Revoke them first. A key cannot change team, " +
+					"so issue a new one in another team for anything that still needs one. " +
+					"Revoked keys stay as history, under no team."},
 		},
 	},
 	{
@@ -173,18 +179,19 @@ var commands = []command{
 			{name: "add", aliases: []string{"create", "invite", "new"}, args: "<email>", summary: "add a person",
 				flags: []string{"org", "role", "external-id", "json"}},
 			{name: "list", aliases: []string{"ls"}, summary: "everyone in the organisation", flags: []string{"org", "json"}},
-			{name: "role", aliases: []string{"set-role"}, args: "<email> <role>", summary: "member or admin; signs them out",
-				flags: []string{"org", "json"}},
-			{name: "disable", aliases: []string{"offboard"}, args: "<email>",
+			{name: "role", aliases: []string{"set-role"}, args: "<email-or-id> <member|admin>",
+				summary: "change what a person may do; signs them out",
+				flags:   []string{"org", "json"}},
+			{name: "disable", aliases: []string{"offboard"}, args: "<email-or-id>",
 				summary: "turn a person off, for when they leave",
 				flags:   []string{"org", "yes", "json"},
 				prose: "They cannot sign in and are signed out everywhere. Every key attributed " +
 					"to them is revoked. Where the deployment lends out sandboxes, their agent " +
-					"sandboxes are terminated and their own are suspended, with the volume " +
-					"kept. Usage and the audit log are kept.\n\n" +
+					"sandboxes and any that have not started yet are terminated, and the rest " +
+					"are suspended, with the volume kept. Usage and the audit log are kept.\n\n" +
 					"Leaving the directory is not enough on its own: it stops new sign-ins, " +
 					"but not the keys a person already has."},
-			{name: "enable", args: "<email>", summary: "let a disabled person sign in again",
+			{name: "enable", args: "<email-or-id>", summary: "let a disabled person sign in again",
 				flags: []string{"org", "json"},
 				prose: "Their old keys stay revoked, so they start with none."},
 		},
@@ -231,26 +238,28 @@ var commands = []command{
 	{
 		name:    "model",
 		aliases: []string{"models"},
-		summary: "the model catalogue clients name",
+		summary: "the models clients name: your organisation's",
 		prose: "Clients name an alias like 'keera-speed', never a backend model id and never an " +
 			"inference URL. That is what lets the model behind an alias be swapped without any " +
 			"developer changing anything.\n\n" +
-			"A model a catalogue file declares belongs to the file: it is applied again on " +
-			"every start, so 'set', 'enable', 'disable' and 'delete' refuse it and 'model " +
-			"list' shows it as sourced from the catalogue file. Change the file, then restart " +
-			"the gateway or run 'keera model apply'. Its stored API key is the exception - no " +
-			"catalogue file carries a credential.\n\n" +
+			"Models belong to an organisation, and only it can call them. Its administrators " +
+			"add, change and remove them. Only an operator with several organisations " +
+			"needs --org.\n\n" +
+			"A new organisation starts with a copy of each model in the catalogue file " +
+			"(KEERA_MODELS_FILE). The copies are its own, to change or remove like any " +
+			"other. 'keera model apply' adds the models of a file to an organisation that " +
+			"already exists.\n\n" +
 			"--description is a sentence saying what a model is for. Clients see it on " +
 			"/v1/models, and it is what a router is told about the model when the router is " +
 			"choosing between destinations - so a router whose models have no descriptions is " +
 			"choosing between bare aliases.",
 		subs: []subcommand{
-			{name: "list", aliases: []string{"ls"}, summary: "the model catalogue", flags: []string{"json"}},
+			{name: "list", aliases: []string{"ls"}, summary: "the models you can use", flags: []string{"org", "json"}},
 			{name: "add", aliases: []string{"create", "new"}, args: "<alias>", summary: "add a model",
-				flags: []string{"provider", "backend", "product-id", "backend-model", "kind",
+				flags: []string{"org", "provider", "backend", "product-id", "backend-model", "kind",
 					"description", "max-context", "release-date", "location",
 					"price-in", "price-out", "price-cached",
-					"api-key", "api-key-env", "disabled", "json"},
+					"api-key", "disabled", "json"},
 				examples: []string{
 					"keera model add keera-speed --backend http://vllm:8000/v1 \\\n" +
 						"    --backend-model Qwen/Qwen2.5-Coder-7B-Instruct --max-context 32768",
@@ -258,22 +267,22 @@ var commands = []command{
 						"    --backend-model swiss-ai/Apertus-v1.5-70B --api-key @-",
 				}},
 			{name: "set", aliases: []string{"edit", "update"}, args: "<alias>", summary: "change any of those on an existing model",
-				flags: []string{"provider", "backend", "product-id", "backend-model", "kind",
+				flags: []string{"org", "provider", "backend", "product-id", "backend-model", "kind",
 					"description", "max-context", "release-date", "location",
 					"price-in", "price-out", "price-cached",
-					"api-key", "api-key-env", "no-api-key", "json"}},
-			{name: "enable", args: "<alias>", summary: "serve this model", flags: []string{"json"}},
+					"api-key", "no-api-key", "json"}},
+			{name: "enable", args: "<alias>", summary: "serve this model", flags: []string{"org", "json"}},
 			{name: "disable", args: "<alias>", summary: "stop serving it, keeping its declaration",
-				flags: []string{"json"}},
+				flags: []string{"org", "json"}},
 			{name: "check", aliases: []string{"probe", "test"}, args: "<alias>", summary: "probe the live backend end to end",
-				flags: []string{"json"},
+				flags: []string{"org", "json"},
 				prose: "The test for the failure that quietly breaks coding agents: a backend " +
 					"answering 200 with prose in 'content' where a tool call was asked for, " +
 					"which is what a vLLM parser that does not match its model produces.",
 			},
-			{name: "delete", aliases: []string{"rm", "remove"}, args: "<alias>", summary: "remove a model", flags: []string{"yes", "json"}},
-			{name: "apply", args: "<file>", summary: "upsert every model a catalogue file declares",
-				flags: []string{"json"}},
+			{name: "delete", aliases: []string{"rm", "remove"}, args: "<alias>", summary: "remove a model", flags: []string{"org", "yes", "json"}},
+			{name: "apply", args: "<file>", summary: "add or update every model a catalogue file declares",
+				flags: []string{"org", "json"}},
 			{name: "validate", aliases: []string{"lint"}, args: "<file>", summary: "validate a catalogue file without a server",
 				flags: []string{"json"}},
 			{name: "providers", summary: "hosted endpoints a model can name, and their models",
@@ -288,14 +297,16 @@ var commands = []command{
 			"holds the server's own credential, shows the client only the tools its " +
 			"guardrail allows, runs its filters over what a call sends, and records every " +
 			"call without its content.\n\n" +
-			"Which tools a scope may call is a guardrail: 'keera guardrail set team t_1 " +
+			"Which tools a scope may call is a guardrail: 'keera guardrail set team team_1 " +
 			"--tools github/search_code,jira'. A server's alias allows all its tools; " +
 			"alias/tool allows one.\n\n" +
-			"Like a model, a server a catalogue file declares belongs to the file.",
+			"A server belongs to one organisation, and only its keys reach it. Its " +
+			"administrators add, change and remove it. Only an operator with several " +
+			"organisations needs --org.",
 		subs: []subcommand{
-			{name: "list", aliases: []string{"ls"}, summary: "the MCP servers", flags: []string{"json"}},
+			{name: "list", aliases: []string{"ls"}, summary: "the MCP servers", flags: []string{"org", "json"}},
 			{name: "add", aliases: []string{"create", "new"}, args: "<alias>", summary: "add an MCP server",
-				flags: []string{"endpoint", "description", "auth-header", "api-key", "api-key-env",
+				flags: []string{"org", "endpoint", "description", "auth-header", "api-key",
 					"disabled", "json"},
 				examples: []string{
 					"keera mcp add github --endpoint https://api.githubcopilot.com/mcp/ \\\n" +
@@ -303,18 +314,18 @@ var commands = []command{
 				}},
 			{name: "set", aliases: []string{"edit", "update"}, args: "<alias>",
 				summary: "change any of those on an existing server",
-				flags: []string{"endpoint", "description", "auth-header", "api-key", "api-key-env",
+				flags: []string{"org", "endpoint", "description", "auth-header", "api-key",
 					"no-api-key", "json"}},
-			{name: "enable", args: "<alias>", summary: "serve this server", flags: []string{"json"}},
+			{name: "enable", args: "<alias>", summary: "serve this server", flags: []string{"org", "json"}},
 			{name: "disable", args: "<alias>", summary: "stop serving it, keeping its declaration",
-				flags: []string{"json"}},
+				flags: []string{"org", "json"}},
 			{name: "delete", aliases: []string{"rm", "remove"}, args: "<alias>", summary: "remove a server",
-				flags: []string{"yes", "json"}},
+				flags: []string{"org", "yes", "json"}},
 			{name: "calls", summary: "the tool-call log: which tool, what came of it, how much went each way",
 				flags:    []string{"org", "server", "tool", "team", "key", "since", "limit", "summary", "json"},
 				examples: []string{"keera mcp calls --since 1h", "keera mcp calls --summary --since 168h"}},
 			{name: "connect", args: "<alias>", summary: "how to point Claude Code, Codex and others at a server",
-				flags: []string{}},
+				flags: []string{"org"}},
 		},
 	},
 	{
@@ -328,7 +339,8 @@ var commands = []command{
 			"is the ceiling a key's fits inside. So a scope that sets nothing is not " +
 			"unlimited - it is whatever holds it. 'guardrail effective' says which level " +
 			"each number came from, and is the thing to read before changing one.\n\n" +
-			"'keera limit' and 'keera budget' set one part of a guardrail each.",
+			"'keera limit' and 'keera budget' set one part of a guardrail each.\n\n" +
+			"For an organisation the id may be left out: it is then your own.",
 		subs: []subcommand{
 			{name: "get", aliases: []string{"show"}, args: "<scope> <id>", summary: "what this one scope sets; scope is org, team or key",
 				flags: []string{"json"}},
@@ -337,9 +349,9 @@ var commands = []command{
 				flags:   []string{"json"},
 				prose: "The chain collapsed the way the gateway collapses it, with the level " +
 					"that decided each value named beside it.\n\n" +
-					"Allow-lists intersect; ceilings take the minimum. Two things do not " +
-					"merge: budgets, which are checked per level, and system prompts, which " +
-					"are joined outermost first.",
+					"Allow-lists intersect; the output-token ceiling takes the minimum. Rate " +
+					"limits and budgets are not merged: each level is checked on its own. " +
+					"System prompts and filters add up, outermost first.",
 				examples: []string{"keera guardrail effective key key_06g9…"},
 			},
 			{name: "set", aliases: []string{"edit", "update"}, args: "<scope> <id>", summary: "set any of them on a scope",
@@ -355,6 +367,7 @@ var commands = []command{
 	},
 	{
 		name:    "limit",
+		aliases: []string{"limits"},
 		summary: "a scope's rate limits, on their own",
 		args:    "<scope> <id> [flags]",
 		flags:   []string{"rpm", "tpm", "max-output-tokens", "json"},
@@ -368,6 +381,7 @@ var commands = []command{
 	},
 	{
 		name:    "budget",
+		aliases: []string{"budgets"},
 		summary: "a scope's budget, on its own",
 		args:    "<scope> <id> [flags]",
 		flags:   []string{"budget", "period", "json"},
@@ -378,7 +392,7 @@ var commands = []command{
 			"have to hold. With no flags this prints every budget above the scope.",
 		examples: []string{
 			"keera budget team team_1 --budget 500 --period month",
-			"keera budget org org_06g9…",
+			"keera budget org",
 		},
 	},
 	{
@@ -442,19 +456,16 @@ var commands = []command{
 		name:    "router",
 		aliases: []string{"routers"},
 		summary: "which model answers a request",
-		prose: "A filter reads a request and changes it; a router chooses which model answers " +
-			"it - so that the requests that need the large model get it and the rest do not, " +
-			"so that a prompt carrying client data is not the one that leaves the cluster, and " +
-			"so that a model being down is not a department being down.\n\n" +
-			"It is reached by a client naming it in place of a model: 'keera connect --model " +
-			"auto' configures an editor for the router 'auto' exactly as it would for an alias. " +
-			"That is deliberate - a hook that rerouted a request which had asked for a " +
-			"particular model would answer a developer out of a model they did not choose. To " +
-			"route a scope whatever it asks for, narrow its allow-list to the router.\n\n" +
+		prose: "A router chooses which model answers a request: the large model only for the " +
+			"requests that need it, client data kept inside the cluster, and another model " +
+			"when one is down.\n\n" +
+			"A client names a router where it names a model: 'keera connect opencode --model " +
+			"auto' sets up an editor for the router 'auto'. A request that names a model is " +
+			"never rerouted. To route everything a scope sends, allow it only the router:\n\n" +
 			"  keera guardrail set team <team-id> --models auto\n\n" +
-			"What a router is told about each destination is that model's --description, so " +
-			"write those first. Allowing a router allows its destinations: a key that may use " +
-			"'auto' may be sent to anything in 'auto's list.\n\n" +
+			"A router learns what each destination is for from that model's --description, so " +
+			"write those first. A key that may use a router may be sent to any of its " +
+			"destinations.\n\n" +
 			"The modes:\n" +
 			"  instruction   a small local model reads the request. The default, and\n" +
 			"                the only one that costs a generation.\n" +
@@ -465,19 +476,16 @@ var commands = []command{
 			"                you want and the rest are what you want when it is not.\n" +
 			"  latency       fastest first, by what each has lately taken to begin.\n" +
 			"  least-busy    emptiest first, by requests this gateway has in flight.\n\n" +
-			"Reach for fallback when the destinations are ranked, and for latency or " +
-			"least-busy when they are equals: two identical vLLM deployments are not a first " +
-			"choice and a second choice, and a fallback router over them runs the deployment " +
-			"on half its GPUs while looking like one that works. Both are measured inside each " +
-			"gateway process - nothing is shared between replicas and nothing survives a " +
-			"restart - so a tie falls back to the order you wrote.\n\n" +
-			"All of them fail over the same way. A destination that cannot be reached, or that " +
-			"answers with a failure of its own, is passed over for the next one. A 4xx is not: " +
-			"a request that is too long or over a quota will be all of those things at the next " +
-			"destination too, so it is answered rather than repeated. Nothing fails over once " +
-			"an answer has started arriving.\n\n" +
-			"A router's failures are silent, because every request it places is answered - so " +
-			"the number to read is 'router report', the split between its destinations.",
+			"Use fallback when one destination is preferred, and latency or least-busy when they " +
+			"are equals, such as two identical vLLM deployments. A fallback router over equals " +
+			"leaves the second one idle. Latency and load are measured in each gateway process " +
+			"and are not shared or kept across a restart; a tie keeps the order you wrote.\n\n" +
+			"Every mode fails over the same way: a destination that cannot be reached, or " +
+			"answers with a server error, is skipped for the next one. A 4xx is not, because " +
+			"the next destination would refuse the same request. Nothing fails over once an " +
+			"answer has started.\n\n" +
+			"A router's failures are silent, because every request is still answered. Read " +
+			"'router report' to see where requests went.",
 		subs: []subcommand{
 			{name: "list", aliases: []string{"ls"}, summary: "this organisation's routers", flags: []string{"org", "json"}},
 			{name: "add", aliases: []string{"create", "new"}, args: "<alias>", summary: "add a router",
@@ -511,15 +519,15 @@ var commands = []command{
 		name:    "sandbox",
 		aliases: []string{"sandboxes", "sbx"},
 		summary: "the machines this gateway lends out",
-		prose: "A sandbox is a machine this gateway lends out for the length of one task or one " +
-			"working day: the toolchain already in it, a home directory that survives being " +
-			"suspended, an API key of its own that never reaches your laptop, and no way out to " +
-			"anywhere the deployment did not name. It expires by itself, which is the point - " +
-			"'extend' is how one lives longer, and nothing lives for ever.\n\n" +
+		prose: "A sandbox is a machine for one task or one working day. It has the toolchain " +
+			"installed, a home directory that survives a suspend, and its own API key that " +
+			"never reaches your laptop. On Kubernetes a network policy can limit its egress, " +
+			"if the cluster enforces it; podman has no egress control. It expires on its own; " +
+			"'extend' gives it more time.\n\n" +
 			"--team scopes the key the sandbox is given. A sandbox on a team is charged to that " +
 			"team's budget, held to its rate limit, counted against its sandbox quota, and its " +
 			"agent sees only the models the team allows. Without it the sandbox works inside " +
-			"the organisation's own guardrails.\n\n" +
+			"the organisation's own guardrails. Only an administrator can choose the team.\n\n" +
 			"'sandbox ssh' runs your own ssh over the gateway's single published port, so there " +
 			"is no second address and no jump host. That also means VS Code's Remote-SSH and " +
 			"JetBrains Gateway work against a sandbox unmodified: they want an ssh transport " +
@@ -530,20 +538,24 @@ var commands = []command{
 			"it is terminated rather than suspended when its time runs out, and it names its " +
 			"own session, so 'keera sessions' reports what it did as one task rather than " +
 			"inferring the grouping. The --task is passed to it and never stored.\n\n" +
-			"'up', 'ls' and 'rm' are accepted for create, list and terminate, for hands that " +
-			"have typed them at a container runtime for years.",
+			"'up', 'ls' and 'rm' also work for create, list and terminate.",
 		subs: []subcommand{
-			{name: "classes", summary: "the machines this deployment offers", flags: []string{"org", "json"}},
+			{name: "classes", summary: "the machines this organisation offers", flags: []string{"org", "json"}},
+			{name: "apply", args: "<file>", summary: "add or update every class a catalogue file declares",
+				flags: []string{"org", "json"}},
+			{name: "delete-class", aliases: []string{"remove-class", "rm-class"}, args: "<name>",
+				summary: "remove a class; sandboxes already running on it keep working",
+				flags:   []string{"org", "yes", "json"}},
 			{name: "create", aliases: []string{"add", "up", "new"}, args: "<name>", summary: "start one",
 				flags: []string{"org", "team", "class", "purpose", "ttl", "repo", "branch",
-					"ssh-key", "json"}},
+					"task", "ssh-key", "json"}},
 			{name: "agent", args: "<name>", summary: "start one for an agent",
 				flags: []string{"org", "team", "class", "ttl", "repo", "branch", "task", "json"}},
 			{name: "list", aliases: []string{"ls"}, summary: "what is running",
-				flags: []string{"org", "team", "class", "all", "json"}},
+				flags: []string{"org", "team", "class", "purpose", "all", "json"}},
 			{name: "show", aliases: []string{"get"}, args: "<name>", summary: "one sandbox in full", flags: []string{"org", "json"}},
 			{name: "ssh", args: "<name> [-- <command>]", summary: "open a shell in it",
-				flags: []string{"org", "port"}},
+				flags: []string{"org"}},
 			{name: "config", summary: "the ~/.ssh/config block, so any editor can attach",
 				flags: []string{"org"}},
 			{name: "proxy", args: "<name>", summary: "the attach surface, for ssh's ProxyCommand",
@@ -553,7 +565,10 @@ var commands = []command{
 			{name: "suspend", args: "<name>", summary: "release its compute, keep its disk",
 				flags: []string{"org", "json"}},
 			{name: "resume", args: "<name>", summary: "start it again where it left off",
-				flags: []string{"org", "json"}},
+				flags: []string{"org", "json"},
+				prose: "A suspended sandbox starts again as it was. An expired one also gets a " +
+					"new API key, a new repository credential and the class's default lifetime, " +
+					"because its old ones were revoked when it expired."},
 			{name: "terminate", aliases: []string{"delete", "rm", "remove", "down"}, args: "<name>", summary: "end it and take its volume with it",
 				flags: []string{"org", "yes", "json"}},
 			{name: "usage", summary: "what sandboxes have cost",
@@ -576,10 +591,8 @@ var commands = []command{
 		summary: "the calls that did not deliver, and what the backend said",
 		args:    "[flags]",
 		flags:   []string{"kind", "model", "team", "key", "status", "since", "limit", "org", "json"},
-		prose: "The message is printed beside the model and the key because the message is the " +
-			"whole point: a status says a call failed, and only the backend's own wording says " +
-			"whether that is the deployment's problem, the developer's, or the endpoint " +
-			"operator's.",
+		prose: "Each row shows the backend's own message beside the model and the key. The " +
+			"status says a call failed; the message says whose problem it is.",
 	},
 	{
 		name:    "sessions",
@@ -587,18 +600,22 @@ var commands = []command{
 		args:    "[flags]",
 		flags: []string{"sort", "unhappy", "model", "team", "key", "user", "since", "limit",
 			"org", "json"},
-		prose: "A session is the calls one coding agent made working through one task. Nobody " +
-			"decides how many calls a task takes, so a cost per call is a number nobody can act " +
-			"on and a cost per task is the one that goes into a budget conversation.\n\n" +
+		prose: "A session is the requests one coding agent made working through one task. Nobody " +
+			"decides how many requests a task takes, so a cost per request is a number nobody " +
+			"can act on and a cost per task is the one that goes into a budget conversation.\n\n" +
 			"The grouping is computed when the report is read, from a hash of the conversation " +
 			"the gateway records on each request - no prompt is stored - and cut wherever the " +
-			"agent went quiet for longer than KEERA_SESSION_GAP.",
+			"agent went quiet for longer than KEERA_SESSION_GAP.\n\n" +
+			"The first column is the id of the task's first request. 'keera session' " +
+			"takes it. --user takes an email or an id.",
 	},
 	{
 		name:    "session",
 		summary: "one task from beginning to end, named by any request in it",
 		args:    "<request-id> [flags]",
 		flags:   []string{"org", "json"},
+		prose: "The id is any request in the task: the first column of 'keera sessions' " +
+			"or 'keera failures'.",
 	},
 	{
 		name:    "connect",
@@ -638,11 +655,11 @@ func (c command) sub(name string) (subcommand, bool) {
 }
 
 // overview is what `keera` on its own prints: one line per command, short
-// enough to read without scrolling.
-func overview() string {
+// enough to read without scrolling. p is the painter of the stream it goes to.
+func overview(p painter) string {
 	var b strings.Builder
-	b.WriteString(style.head(tagline) + "\n\n" + style.head("Usage:") +
-		"\n  keera <command> [subcommand] [flags]\n\n" + style.head("Commands:") + "\n")
+	b.WriteString(p.head(tagline) + "\n\n" + p.head("Usage:") +
+		"\n  keera <command> [subcommand] [flags]\n\n" + p.head("Commands:") + "\n")
 	width := 0
 	for _, c := range commands {
 		if !c.hidden && len(c.name) > width {
@@ -653,13 +670,14 @@ func overview() string {
 		if c.hidden {
 			continue
 		}
-		fmt.Fprintf(&b, "  %s  %s\n", padTo(style.cmd(c.name), width), c.summary)
+		fmt.Fprintf(&b, "  %s  %s\n", padTo(p.cmd(c.name), width), c.summary)
 	}
 	base, from := resolveBase()
 	b.WriteString("\nRun 'keera help <command>', or 'keera help <command> <subcommand>'.\n")
-	b.WriteString("Every listing command also takes --json, and every command --color=never.\n")
+	b.WriteString("Every listing command also takes --json, and every command --color=never\n" +
+		"(or --no-color).\n")
 	// Which deployment the commands act on cannot be seen anywhere else.
-	fmt.Fprintf(&b, "\nThese commands talk to %s (%s).\n", style.cmd(base), from)
+	fmt.Fprintf(&b, "\nThese commands talk to %s (%s).\n", p.cmd(base), from)
 	b.WriteString("Point them elsewhere with --url, or sign in: keera login --url <your deployment>\n")
 	return b.String()
 }
@@ -669,7 +687,7 @@ func overview() string {
 func helpText(fs *flag.FlagSet, name, subName string) string {
 	c, ok := find(name)
 	if !ok {
-		return overview()
+		return overview(style)
 	}
 	if sub, found := c.sub(subName); found {
 		return subHelpText(fs, c, sub)
@@ -843,7 +861,7 @@ func writeFlagLines(b *strings.Builder, fs *flag.FlagSet, names []string) {
 		if name != "" {
 			left += " " + name
 		}
-		if f.DefValue != "" && f.DefValue != "false" && f.DefValue != "0" && f.DefValue != "-1" {
+		if shownDefault(f.DefValue) {
 			usage += " (default " + f.DefValue + ")"
 		}
 		if len(left) > width {
@@ -855,6 +873,22 @@ func writeFlagLines(b *strings.Builder, fs *flag.FlagSet, names []string) {
 		fmt.Fprintf(b, "  %s  %s\n", padTo(style.cmd(r.left), width),
 			wrapAt(r.usage, width+4))
 	}
+}
+
+// shownDefault reports whether a flag's default is worth printing. Empty,
+// false, zero and negative values mean "not given" here, whether a number or a
+// duration, so printing "(default -1ns)" would only mislead.
+func shownDefault(def string) bool {
+	if def == "" || def == "false" {
+		return false
+	}
+	if n, err := strconv.ParseFloat(def, 64); err == nil {
+		return n > 0
+	}
+	if d, err := time.ParseDuration(def); err == nil {
+		return d > 0
+	}
+	return true
 }
 
 func writeExamples(b *strings.Builder, examples []string) {
@@ -910,11 +944,16 @@ func printHelp(fs *flag.FlagSet, name, sub string) error {
 // wantsHelp spots a request for help in any of the ways people write it:
 // `keera filter --help`, `keera filter help`, `keera filter add --help` or
 // `keera filter help add`. It returns the subcommand asked about, empty for
-// the command itself, and false when this is not a request for help.
+// the command itself, and false when this is not a request for help. It stops
+// at "--", because what follows belongs to another program, as in
+// `keera sandbox ssh box -- git --help`.
 func wantsHelp(args []string) (string, bool) {
 	asked := false
 	var named []string
 	for _, a := range args {
+		if a == "--" {
+			break
+		}
 		switch a {
 		case "-h", "--help", "-help", "help":
 			asked = true
@@ -1035,7 +1074,7 @@ func unknownSub(name, typed string) error {
 // on the FlagSet it builds, so this runs the command with --help.
 func helpCmd(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		fmt.Print(overview())
+		fmt.Print(overview(style))
 		return nil
 	}
 	name := args[0]
@@ -1043,7 +1082,7 @@ func helpCmd(ctx context.Context, args []string) error {
 		if near := suggest(name); near != "" {
 			return fmt.Errorf("no command %q; did you mean 'keera %s'?", name, near)
 		}
-		fmt.Fprint(os.Stderr, overview())
+		fmt.Fprint(os.Stderr, overview(styleErr))
 		return fmt.Errorf("no command %q", name)
 	}
 	rest := append(slices.Clone(args[1:]), "--help")

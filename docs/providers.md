@@ -26,6 +26,9 @@ arrives.
 
 ### In the catalogue file
 
+Each new organisation gets a copy of the models in the file. See
+[gateway.md](gateway.md#models-belong-to-an-organisation).
+
 ```yaml
 models:
   - alias: keera-frontier
@@ -36,14 +39,18 @@ models:
       and whole-system questions. Must not be sent client data.
 ```
 
-`provider` fills in every field the entry leaves out: the endpoint, the
-credential variable, the context window, the three prices (input, output and
-cached input), a description, the release date and the location. `keera model
-providers` lists the providers this build knows.
+`provider` fills in every field the entry leaves out: the endpoint, the context
+window, the three prices (input, output and cached input), a description, the
+release date and the location. The providers are `anthropic`, `openai`,
+`infomaniak` and `stepping-stone`; `keera model providers` lists them with their
+models. For a `backend_model` not in that table, the entry must set
+`input_micros_per_mtok` and `output_micros_per_mtok` itself.
 
 The location is where the provider serves its models: `ch` for Infomaniak and
 stepping stone, `usa` for Anthropic and OpenAI. A model with no provider is
-`onprem`.
+`onprem` when its backend is inside your network: a service name, a private
+address or the loopback. A backend on the internet does not say which country
+it is in, so an entry for one must set `location` itself.
 
 The entry always wins over the provider table. So you can point
 `provider: anthropic` at a corporate egress proxy or a sovereign endpoint, or
@@ -76,17 +83,19 @@ and one for your own inference plane. The rest of the form appears after you
 pick one.
 
 For a provider, you enter the model names and the API key. The endpoint,
-credential variable, context window and prices are filled in and folded away
+context window and prices are filled in and folded away
 under **Advanced options**. The model remembers its provider, so editing it
 later opens the same tile with the same values.
 
 Infomaniak also asks for a product id and builds the endpoint from it.
 
-**Models → Model catalog** lists every model the providers offer, with its
-release date, location, context window and list prices. You can search it, filter it by provider, and
-sort it by any column. **Add** opens the same form with the provider and the
-model already picked. Everyone can see the catalog, but only operators can
-add a model from it.
+**Models → Model catalogue** lists every model the providers offer, with its
+release date, location, context window and list prices, as `keera model
+providers` does. You can search it, filter it by provider, and sort it by any
+column. **Add** opens the same form with the provider and the model already
+picked. Everyone can see the list. Operators and
+administrators can add a model from it to an organisation. See
+[Models belong to an organisation](gateway.md#models-belong-to-an-organisation).
 
 ### On the command line
 
@@ -101,26 +110,27 @@ keera model add keera-swiss --provider infomaniak --product-id 100234 \
 
 Use `@-`: a key passed as a flag value ends up in the shell history.
 
+An administrator adds the model to their own organisation. An operator passes
+`--org <id>`, unless there is only one organisation.
+
 ## Where the credential lives
 
-**Stored on the model, encrypted.** This is what the panel does. The key is
-encrypted with AES-GCM under `KEERA_SECRET_KEY` and stored in the database, so a
-Postgres dump holds only ciphertext.
+The key is stored on the model, encrypted with AES-GCM under
+`KEERA_SECRET_KEY`, so a Postgres dump holds only ciphertext. Set it in the
+panel or with `keera model set <alias> --api-key @-`. Each model holds its
+organisation's own key. Operators and the organisation's administrators can set
+it.
 
-Without `KEERA_SECRET_KEY`, the panel's field is disabled and the gateway
-refuses to store a credential. If you change the key later, every stored
-credential becomes unreadable and must be entered again.
+If you change `KEERA_SECRET_KEY` later, every stored credential becomes
+unreadable and must be entered again.
 
-**Named as an environment variable.** Set `api_key_env` on the model. The
-defaults are `ANTHROPIC_API_KEY` for `provider: anthropic`, `OPENAI_API_KEY`
-for `provider: openai`, `INFOMANIAK_API_KEY` for `provider: infomaniak` and
-`STEPPING_STONE_API_KEY` for `provider: stepping-stone`. The
-secret comes from the deployment (a Kubernetes Secret, a vault, a systemd
-environment file) and never enters the catalogue or the database.
+A catalogue file never holds a key. When an organisation gets a model from the
+file, store its key with the command above. `keera model apply` keeps a key
+that is already stored.
 
-Use the environment variable for a GitOps or NixOS deployment that keeps its
-catalogue as a file. Use the stored key otherwise, so the credential does not
-end up in a shell history, a ticket or a chat message.
+The gateway does not read keys from its own environment variables. A model that
+could name one would let an administrator send any of the gateway's secrets,
+such as `KEERA_SECRET_KEY`, to a server of their choice.
 
 An Infomaniak product id is not a secret. It goes in the catalogue entry next to
 the model id.
@@ -183,9 +193,8 @@ turn, so most of a long session is cached input. Charging it at the full input
 price overstates the session several times.
 
 A cached price of zero does not mean free. It means no price was set, and those
-tokens are charged at the full input price. This is deliberate: models declared
-before this field existed have a zero, and treating it as free would drop the
-cached half of every prompt from every budget on upgrade.
+tokens are charged at the full input price, so a forgotten price never drops
+the cached half of every prompt from a budget.
 
 ```sh
 # A negotiated rate, and the discount that goes with it.
@@ -211,13 +220,16 @@ Must not be sent client data."
 
 ## Known rough edges
 
-These come from the providers' own endpoints. `keera model providers` prints
-them as a note next to each provider.
+These come from the providers' own endpoints. `keera model providers` and the
+panel show each one in a sentence, next to each provider. This is the long
+form.
 
 ### Anthropic
 
 **Messages clients reach Anthropic's own API.** A request to `/api/v1/messages`
-(what Claude Code sends) is forwarded unchanged to Anthropic's `/v1/messages`.
+(what Claude Code sends) is forwarded to Anthropic's `/v1/messages` without
+being translated. The guardrails still apply to it in its own shape: filter
+rewrites, the system prompt, the output ceiling and blocked hosted tools.
 Prompt caching and thinking work, and cached input is charged at the cached
 rate. The key is sent as `x-api-key`, and the client's `anthropic-version` and
 `anthropic-beta` headers are passed on. An egress proxy in front of Anthropic
@@ -240,8 +252,10 @@ An agent on it pays full price for every resent token.
 
 Prompt caching works, and the gateway charges the discounted rate for the
 discounted part (see [Cached input](#cached-input)). A request to
-`/api/v1/responses` (what Codex sends) is forwarded unchanged to OpenAI's
-`/v1/responses`, with its reasoning items.
+`/api/v1/responses` (what Codex sends) is forwarded to OpenAI's
+`/v1/responses` with its reasoning items. Besides the guardrails, as for
+Anthropic, the only change is that a reasoning model gets no `temperature` or
+`top_p`, as below.
 
 **Reasoning tokens are billed as output.** OpenAI counts them in
 `completion_tokens`, which Keera prices at the output rate, so the cost is
@@ -249,10 +263,10 @@ right. But they cannot be told apart: the request log does not show how much of
 the cost was reasoning.
 
 **The reasoning models take no temperature.** OpenAI's reasoning models (every
-model after `gpt-4`) refuse `max_tokens`, and any `temperature` or `top_p` other
-than the default. So the gateway sends `max_completion_tokens` instead of
-`max_tokens` to every OpenAI model, and drops `temperature` and `top_p` for the
-reasoning models. A client that asked for a temperature gets the default.
+model whose id does not start with `gpt-4`, `gpt-3` or `chatgpt-`) refuse
+`max_tokens`, and any `temperature` or `top_p` other than the default. So the gateway sends `max_completion_tokens` instead of
+`max_tokens` to every OpenAI chat model, and drops `temperature` and `top_p` for
+the reasoning models. A client that asked for a temperature gets the default.
 
 **Built-in tools run on OpenAI's side.** A Responses request can ask OpenAI to
 search the web or connect to an MCP server. As with Anthropic, filters do not
@@ -262,6 +276,9 @@ see what OpenAI fetches, and `--block-hosted-tools` removes these tools.
 about twice as much per token above 272k input tokens. The table has the lower
 price, so long requests are billed low. Set the price yourself if that matters;
 see [What the prices are, and are not](#what-the-prices-are-and-are-not).
+
+**`gpt-5.6-sol` is on a promotional price** until 21 November 2026. After that,
+the table's price is low until a new build, or until you set it yourself.
 
 ### Infomaniak
 
@@ -277,15 +294,16 @@ lowercase one.
 **No prompt cache is priced.** See [Cached input](#cached-input).
 
 **The table covers the chat models only.** Infomaniak also serves embedding,
-re-ranking, transcription and image models on the same endpoint. They work:
-declare one with `kind: embedding`, its own `backends` or `product_id`, and its
-own prices. This build has no defaults for them.
+re-ranking, transcription and image models on the same endpoint. They work, but
+not through the `infomaniak` provider, which serves chat only: declare one with
+no `provider`, `kind: embedding`, the full address in `backends` (with your
+product id in it), `location: ch`, and its own prices. This build has no
+defaults for them.
 
 ### stepping stone
 
 **One key per model.** stepping stone issues a separate API key for each model.
-Store each key on its model, or give each model its own `api_key_env`; the
-default `STEPPING_STONE_API_KEY` can serve only one of them.
+Store each key on its own model.
 
 **The cache discount is not billed yet.** The table has stepping stone's cached
 input rates, but stepping stone only starts to bill them at about the end of
@@ -298,7 +316,8 @@ Infomaniak. Nemotron is `NVIDIA/NVIDIA-Nemotron-3-Super-120B-A12B`.
 **The table covers the chat models only**, including the three OCR models,
 which read images of pages and are no use for chat or code. stepping stone also
 serves embedding, re-ranking, audio and image models on the same endpoint.
-Declare one with `kind: embedding` and its own prices.
+Declare one with no `provider`, `kind: embedding`, the endpoint in `backends`,
+`location: ch`, and its own prices.
 
 ## What is recorded
 
@@ -310,4 +329,5 @@ Two places show the difference on purpose:
 - **Live map** draws a line between models served from your own network (above)
   and hosted providers (below). The line shows the share of the window's tokens
   that crossed it and what they cost.
-- `keera usage --by model` shows the same split in a terminal.
+- `keera usage --by model` shows one row per model in a terminal. It has no
+  column for where a model runs, so tell hosted from local by the alias.

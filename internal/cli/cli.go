@@ -28,7 +28,7 @@ func Run(ctx context.Context, args []string) error {
 	}
 
 	if len(args) == 0 {
-		fmt.Print(overview())
+		fmt.Print(overview(style))
 		return errors.New("no command given")
 	}
 

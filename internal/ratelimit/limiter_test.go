@@ -51,7 +51,7 @@ func TestChargeCanOverdrawSoOneHugeRequestIsPaidForLater(t *testing.T) {
 	if !inCredit(l, "k", 1000, now) {
 		t.Fatal("a fresh bucket should admit a request")
 	}
-	l.Charge("k", 1000, 5000, now)
+	charge(l, "k", 1000, 5000, now)
 	if inCredit(l, "k", 1000, now) {
 		t.Error("the bucket is overdrawn and should refuse")
 	}
@@ -68,7 +68,7 @@ func TestRetryReportsWhenTheNextRequestFits(t *testing.T) {
 	l := New()
 	now := time.Now()
 	l.Allow("k", 60, now)
-	l.Charge("k", 60, 60, now) // drain it
+	charge(l, "k", 60, 60, now) // drain it
 
 	d := l.Retry("k", 60, now)
 	if d <= 0 {
@@ -126,7 +126,7 @@ func TestConcurrentUse(_ *testing.T) {
 					{Key: "shared", PerMinute: 100000, Take: true},
 					{Key: "shared-tokens", PerMinute: 100000},
 				}, now)
-				l.Charge("shared-tokens", 100000, 3, now)
+				charge(l, "shared-tokens", 100000, 3, now)
 			}
 		}()
 	}
@@ -195,7 +195,7 @@ func TestAdmitReportsTheOutermostLimitThatBinds(t *testing.T) {
 	// A token bucket in debt refuses at its own position, and the request
 	// limits before it are not charged for the attempt.
 	l2 := New()
-	l2.Charge("org|tpm", 100, 500, now)
+	charge(l2, "org|tpm", 100, 500, now)
 	if got := l2.Admit(reqs, now); got != 1 {
 		t.Errorf("Admit = %d, want 1 - the token limit is what binds", got)
 	}

@@ -505,6 +505,59 @@ export function go(ctx, path) {
   };
 }
 
+/** isAdmin reports whether the signed-in person may change the organisation
+ *  they are looking at: an operator, or one of its administrators. */
+export function isAdmin(ctx) {
+  return !!ctx.state.me.can_admin_org;
+}
+
+/** checkButton is a Check button with its verdict beside it once it has run.
+ *  run asks the control plane, and render draws what came back. The result is
+ *  not kept: a check is a statement about right now. */
+export function checkButton(title, run, render) {
+  const slot = h("span");
+  const button = h(
+    "button",
+    {
+      class: "btn btn-sm btn-quiet",
+      title,
+      onClick: async () => {
+        button.disabled = true;
+        slot.replaceChildren(
+          h(
+            "span",
+            { class: "faint nowrap" },
+            h("span", { class: "blip" }),
+            " checking…",
+          ),
+        );
+        try {
+          slot.replaceChildren(render(await run()));
+        } catch (ex) {
+          slot.replaceChildren(
+            h("span", { class: "pill pill-bad" }, "check failed"),
+          );
+          toast(ex.message, "bad");
+        } finally {
+          button.disabled = false;
+        }
+      },
+    },
+    "Check",
+  );
+  return h("div", { class: "row-tight" }, button, slot);
+}
+
+/** crumb is the link back to the list a screen belongs to. */
+export function crumb(ctx, path, label) {
+  return h(
+    "a",
+    { class: "crumb", href: path, onClick: go(ctx, path) },
+    icon(icons.back),
+    label,
+  );
+}
+
 export function stat(label, value, unit, note) {
   return h(
     "div",
@@ -1034,6 +1087,17 @@ export function field(label, input, hint) {
     { class: "field" },
     h("label", { for: input.id || null }, label),
     input,
+    hint ? h("div", { class: "hint" }, hint) : null,
+  );
+}
+
+// readRow is a field that shows a value rather than asking for one.
+export function readRow(label, value, hint) {
+  return h(
+    "div",
+    { class: "field" },
+    h("label", {}, label),
+    h("div", {}, value),
     hint ? h("div", { class: "hint" }, hint) : null,
   );
 }

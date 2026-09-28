@@ -96,19 +96,28 @@ func (e *apiError) Error() string {
 	return e.Message
 }
 
-// do makes an authenticated call, and is what every command goes through.
-func (c *client) do(ctx context.Context, method, path string, in, out any) error {
+// credential is the bearer to present, or why there is none that works.
+func (c *client) credential() (string, error) {
 	cred := c.bearer()
 	switch {
 	case cred == "":
-		return fmt.Errorf("not signed in to %s (%s): run "+
+		return "", fmt.Errorf("not signed in to %s (%s): run "+
 			"'keera login --url <your deployment>', or set KEERA_OPERATOR_KEY to the "+
 			"deployment's own credential", c.base, c.baseFrom)
 	case c.key == "" && c.signedIn.expired():
-		return fmt.Errorf("your sign-in to %s ran out on %s: run 'keera login' again",
+		return "", fmt.Errorf("your sign-in to %s ran out on %s: run 'keera login' again",
 			c.base, c.signedIn.ExpiresAt.Local().Format("2 January 2006"))
 	}
-	err := c.send(ctx, method, path, cred, in, out)
+	return cred, nil
+}
+
+// do makes an authenticated call, and is what every command goes through.
+func (c *client) do(ctx context.Context, method, path string, in, out any) error {
+	cred, err := c.credential()
+	if err != nil {
+		return err
+	}
+	err = c.send(ctx, method, path, cred, in, out)
 	// A refused token is a sign-in that ended elsewhere: it expired, the
 	// person's role changed, or they signed out everywhere.
 	var apiErr *apiError

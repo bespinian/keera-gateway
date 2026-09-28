@@ -4,10 +4,10 @@ import "testing"
 
 func TestAuditIsScopedFilterableAndPagedByACursor(t *testing.T) {
 	st, ctx := db(t)
-	if _, err := st.CreateOrg(ctx, "org_1", "Example Bank"); err != nil {
+	if _, err := st.CreateOrg(ctx, Org{ID: "org_1", Name: "Example Bank"}, OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
-	if _, err := st.CreateOrg(ctx, "org_2", "Another Bank"); err != nil {
+	if _, err := st.CreateOrg(ctx, Org{ID: "org_2", Name: "Another Bank"}, OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
 
@@ -16,9 +16,7 @@ func TestAuditIsScopedFilterableAndPagedByACursor(t *testing.T) {
 		{"alice@example.ch", "org_1", "key.create"},
 		{"bob@example.ch", "org_1", "key.revoke"},
 		{"carol@another.example.ch", "org_2", "key.create"},
-		// An action that belongs to no tenant: a change to the shared
-		// catalogue, which only an operator sees.
-		{"operator key", "", "model.put"},
+		{"operator key", "org_2", "mcp_server.put"},
 	} {
 		if err := st.Audit(ctx, e.actor, e.org, e.action, "thing", "id-1",
 			map[string]any{"detail": e.action}); err != nil {
@@ -26,7 +24,7 @@ func TestAuditIsScopedFilterableAndPagedByACursor(t *testing.T) {
 		}
 	}
 
-	// An operator sees every tenant, and the unscoped entries too.
+	// An operator sees every tenant.
 	all, err := st.ListAudit(ctx, AuditQuery{})
 	if err != nil {
 		t.Fatalf("ListAudit: %v", err)
@@ -34,15 +32,14 @@ func TestAuditIsScopedFilterableAndPagedByACursor(t *testing.T) {
 	if len(all) != 5 {
 		t.Errorf("%d entries for an operator, want 5", len(all))
 	}
-	if all[0].Action != "model.put" {
+	if all[0].Action != "mcp_server.put" {
 		t.Errorf("first entry = %q, want the newest", all[0].Action)
 	}
 	if len(all[0].Detail) == 0 {
 		t.Error("the detail was not stored")
 	}
 
-	// An organisation's administrator sees their own tenant and nothing else -
-	// including none of the unscoped entries, which are not their history.
+	// An organisation's administrator sees their own tenant and nothing else.
 	mine, err := st.ListAudit(ctx, AuditQuery{OrgID: "org_1"})
 	if err != nil {
 		t.Fatalf("ListAudit: %v", err)
@@ -51,7 +48,7 @@ func TestAuditIsScopedFilterableAndPagedByACursor(t *testing.T) {
 		t.Errorf("%d entries for org_1, want 3: %+v", len(mine), mine)
 	}
 	for _, e := range mine {
-		if e.Actor == "carol@another.example.ch" || e.Action == "model.put" {
+		if e.Actor == "carol@another.example.ch" || e.Action == "mcp_server.put" {
 			t.Errorf("org_1 can read %+v", e)
 		}
 	}

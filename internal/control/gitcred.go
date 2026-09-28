@@ -46,8 +46,8 @@ func (s *Server) gitCredential(w http.ResponseWriter, r *http.Request) {
 	}
 	if cred.Token == "" {
 		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "sandbox_state",
-			"this deployment gives sandboxes an ssh key, which lasts as long as the sandbox "+
-				"and is not refreshed")
+			"the forge gave no token for this repository, so there is nothing to refresh; "+
+				"an operator can check the forge settings (KEERA_SANDBOX_GIT_*)")
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")

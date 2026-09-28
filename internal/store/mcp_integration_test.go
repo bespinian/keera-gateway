@@ -10,39 +10,72 @@ import (
 
 func TestMCPCatalogueRoundTrip(t *testing.T) {
 	st, ctx := db(t)
+	anOrg(t, st, ctx, "org_1")
+	anOrg(t, st, ctx, "org_2")
 
 	m := policy.MCPServer{
-		Alias: "github", URL: "https://api.githubcopilot.com/mcp/", Description: "Issues.",
-		AuthHeader: "X-Api-Key", APIKeyEnv: "GITHUB_TOKEN", Enabled: true, Managed: true,
+		OrgID: "org_1", Alias: "github", URL: "https://api.githubcopilot.com/mcp/", Description: "Issues.",
+		AuthHeader: "X-Api-Key", Enabled: true,
 	}
 	if err := st.UpsertMCPServer(ctx, m); err != nil {
 		t.Fatalf("UpsertMCPServer: %v", err)
 	}
-	if err := st.SetMCPCredential(ctx, "github", []byte("sealed")); err != nil {
+	if err := st.SetMCPCredential(ctx, "org_1", "github", []byte("sealed")); err != nil {
 		t.Fatalf("SetMCPCredential: %v", err)
 	}
-	// Applying the file again must not erase a credential set by hand.
+	// An edit that does not mention the credential keeps it.
 	if err := st.UpsertMCPServer(ctx, m); err != nil {
 		t.Fatal(err)
 	}
-	got, err := st.MCPServer(ctx, "github")
+	got, err := st.MCPServer(ctx, "org_1", "github")
 	if err != nil {
 		t.Fatalf("MCPServer: %v", err)
 	}
-	if !got.SameDeclaration(m) || !got.Managed || !got.HasAPIKey {
+	same := got.Alias == m.Alias && got.URL == m.URL && got.Description == m.Description &&
+		got.AuthHeader == m.AuthHeader && got.Enabled == m.Enabled
+	if !same || !got.HasAPIKey {
 		t.Errorf("MCPServer = %+v, want %+v with its credential", got, m)
 	}
-	if err := st.UnmanageMCPServers(ctx, nil); err != nil {
-		t.Fatal(err)
+	// Another organisation has none, and can have its own of the same alias.
+	if _, err := st.MCPServer(ctx, "org_2", "github"); err != ErrNotFound {
+		t.Errorf("org_2 reads org_1's server: %v", err)
 	}
-	if got, _ := st.MCPServer(ctx, "github"); got.Managed {
-		t.Error("a server the file no longer names is still managed")
+	if list, _ := st.ListMCPServers(ctx, "org_2"); len(list) != 0 {
+		t.Errorf("org_2 lists %v, want none", list)
 	}
-	if err := st.DeleteMCPServer(ctx, "github"); err != nil {
+	if err := st.DeleteMCPServer(ctx, "org_1", "github"); err != nil {
 		t.Fatal(err)
 	}
 	if list, _ := st.LoadMCPServers(ctx); len(list) != 0 {
 		t.Errorf("servers after delete = %v", list)
+	}
+}
+
+// A server is named in a tool allow-list by its alias, alone or before one of
+// its tools, and either counts as a use.
+func TestMCPServerUsersFindsEveryEntryForm(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	if users, err := st.MCPServerUsers(ctx, f.orgID, "jira"); err != nil || len(users) != 0 {
+		t.Fatalf("MCPServerUsers = %+v, %v, want none", users, err)
+	}
+	if err := st.PutPolicy(ctx, policy.ScopeOrg, f.orgID,
+		policy.Limits{AllowedTools: []string{"jira"}}); err != nil {
+		t.Fatalf("PutPolicy: %v", err)
+	}
+	if err := st.PutPolicy(ctx, policy.ScopeTeam, f.teamID,
+		policy.Limits{AllowedTools: []string{"jira/search", "jirafake"}}); err != nil {
+		t.Fatalf("PutPolicy: %v", err)
+	}
+	users, err := st.MCPServerUsers(ctx, f.orgID, "jira")
+	if err != nil {
+		t.Fatalf("MCPServerUsers: %v", err)
+	}
+	if len(users) != 2 {
+		t.Errorf("MCPServerUsers = %+v, want the organisation and the team", users)
+	}
+	if users, _ := st.MCPServerUsers(ctx, f.orgID, "jir"); len(users) != 0 {
+		t.Errorf("MCPServerUsers(jir) = %+v, want none: a prefix is not a name", users)
 	}
 }
 

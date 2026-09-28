@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
@@ -84,7 +85,7 @@ func filterHarnessWith(t *testing.T, filterReply func(instruction string, segmen
 	h := newHarness(t, backend, models, resolved)
 	h.src.filters = map[string]policy.Filter{
 		"org_1/redact": {
-			OrgID: "org_1", Alias: "redact", Model: "keera-guard",
+			OrgID: "org_1", Alias: "redact", Mode: policy.FilterModeRewrite, Model: "keera-guard",
 			Prompt: "Replace every credential with [CREDENTIAL].",
 		},
 	}
@@ -729,9 +730,7 @@ func TestCheckingAGateSendsBothHalvesOfTheSampleSeparately(t *testing.T) {
 		return "ALLOW"
 	})
 
-	f := h.src.filters["org_1/redact"]
-	m, _ := h.src.Model("keera-guard")
-	p := h.server().CheckFilter(context.Background(), f, m)
+	p := h.server().CheckFilter(context.Background(), h.src.filters["org_1/redact"])
 
 	if !p.OK || p.Error != "" {
 		t.Fatalf("the check failed: ok = %v, error = %q", p.OK, p.Error)
@@ -768,9 +767,7 @@ func TestCheckingAGateThatRefusesEverythingWarnsAboutIt(t *testing.T) {
 	// is told only that a guardrail refused them.
 	h := gateHarness(t, func([]string) string { return "REFUSED: it mentions a system" })
 
-	f := h.src.filters["org_1/redact"]
-	m, _ := h.src.Model("keera-guard")
-	p := h.server().CheckFilter(context.Background(), f, m)
+	p := h.server().CheckFilter(context.Background(), h.src.filters["org_1/redact"])
 
 	if !p.OK {
 		t.Fatalf("the check failed rather than warning: %q", p.Error)
@@ -783,9 +780,7 @@ func TestCheckingAGateThatRefusesEverythingWarnsAboutIt(t *testing.T) {
 func TestCheckingAGateWhoseModelCannotAnswerIsAFailure(t *testing.T) {
 	h := gateHarness(t, func([]string) string { return "I would allow this, probably." })
 
-	f := h.src.filters["org_1/redact"]
-	m, _ := h.src.Model("keera-guard")
-	p := h.server().CheckFilter(context.Background(), f, m)
+	p := h.server().CheckFilter(context.Background(), h.src.filters["org_1/redact"])
 
 	if p.OK {
 		t.Fatal("a gate whose answer cannot be read passed its check")
@@ -992,9 +987,7 @@ func TestAFilterRunIsRecordedWithWhatItDid(t *testing.T) {
 	case run.Filter != "redact":
 		t.Errorf("filter = %q, want the one that ran", run.Filter)
 	case run.Mode != policy.FilterModeRewrite:
-		// A filter stored before there were modes says nothing, and the log has
-		// to say what it actually was rather than repeat the blank.
-		t.Errorf("mode = %q, want it filled in as the rewrite it is", run.Mode)
+		t.Errorf("mode = %q, want the filter's own", run.Mode)
 	case run.Shadow:
 		t.Error("an enforcing filter was recorded as a shadow run")
 	case run.Outcome != store.FilterRewrite:
@@ -1283,13 +1276,70 @@ func TestAGateWithNeitherReadingStillFailsClosed(t *testing.T) {
 	}
 }
 
+// A hosted backend that refuses the logprobs fields must not take a gate
+// offline. As a router does, the gate asks again for the words, and remembers
+// not to ask that backend for a distribution again.
+func TestAGateWhoseBackendRejectsLogprobsReadsTheWords(t *testing.T) {
+	var withLogprobs, without atomic.Int32
+	backend := func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var sent struct {
+			Model    string `json:"model"`
+			Logprobs bool   `json:"logprobs"`
+		}
+		_ = json.Unmarshal(raw, &sent)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case sent.Model != "guard-served":
+			_, _ = io.WriteString(w, `{"id":"1","choices":[{"message":{"content":"hi"}}],`+
+				`"usage":{"prompt_tokens":10,"completion_tokens":5}}`)
+		case sent.Logprobs:
+			withLogprobs.Add(1)
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"error":{"message":"logprobs is not supported"}}`)
+		default:
+			without.Add(1)
+			_, _ = io.WriteString(w, `{"id":"2","choices":[{"message":{"content":"ALLOW"}}],`+
+				`"usage":{"prompt_tokens":100,"completion_tokens":2}}`)
+		}
+	}
+	resolved := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"}, nil, nil, nil)
+	resolved.Filters = []string{"redact"}
+	models := map[string]policy.Model{
+		"keera-code": {
+			Alias: "keera-code", Kind: policy.KindChat, BackendModel: "served-name", Enabled: true,
+		},
+		"keera-guard": {
+			Alias: "keera-guard", Kind: policy.KindChat, BackendModel: "guard-served", Enabled: true,
+		},
+	}
+	h := newHarness(t, backend, models, resolved)
+	h.src.filters = map[string]policy.Filter{
+		"org_1/redact": {
+			OrgID: "org_1", Alias: "redact", Mode: policy.FilterModeGate,
+			Model: "keera-guard", Prompt: "Refuse anything carrying a credential.",
+		},
+	}
+
+	for i := range 2 {
+		resp := h.post(t, "/v1/chat/completions",
+			`{"model":"keera-code","messages":[{"role":"user","content":"a"}]}`)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("request %d: status = %d, want 200", i+1, resp.StatusCode)
+		}
+	}
+	if withLogprobs.Load() != 1 || without.Load() != 2 {
+		t.Errorf("asked with logprobs %d times and without %d, want 1 and 2",
+			withLogprobs.Load(), without.Load())
+	}
+}
+
 // What a check reports, which is the whole reason the number is kept: a gate
 // that answered both halves correctly and could barely tell them apart.
 func TestAGateCheckReportsHowSureEachVerdictWas(t *testing.T) {
 	h := gateHarnessServingLogprobs(t, "ALLOW", 0.93)
 
-	p := h.srv.CheckFilter(t.Context(), h.src.filters["org_1/redact"],
-		h.src.models["keera-guard"])
+	p := h.srv.CheckFilter(t.Context(), h.src.filters["org_1/redact"])
 	if !p.OK {
 		t.Fatalf("the check failed: %s", p.Error)
 	}
@@ -1305,8 +1355,7 @@ func TestAGateCheckReportsHowSureEachVerdictWas(t *testing.T) {
 	// A plane serving no distribution says nothing rather than claiming the
 	// gate had no opinion.
 	plain := gateHarness(t, func([]string) string { return "ALLOW" })
-	p = plain.srv.CheckFilter(t.Context(), plain.src.filters["org_1/redact"],
-		plain.src.models["keera-guard"])
+	p = plain.srv.CheckFilter(t.Context(), plain.src.filters["org_1/redact"])
 	if !p.OK {
 		t.Fatalf("the check failed: %s", p.Error)
 	}

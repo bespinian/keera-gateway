@@ -1,16 +1,17 @@
-# The sandbox catalogue, for a single-host deployment.
+# The sandbox classes each new organisation starts with, for a single-host
+# deployment.
 #
 # A class name is a contract: it is typed on a command line and written into
-# repositories' own configuration, so the operator can change the image behind
-# it, move it to a stronger isolation tier or give it more memory without
-# anybody editing anything. This file is applied on every start and is
-# idempotent - the same file plus an empty database gives the same deployment -
-# and what it declares it owns: the panel and the API refuse to change a class
-# that is in here.
+# repositories' own configuration, so an administrator can change the image
+# behind it, move it to a stronger isolation tier or give it more memory without
+# anybody editing anything. When an organisation is created it gets a copy of
+# every class here, and the copies are its own to change. An organisation that
+# already exists is not changed.
 #
-# Nothing uses it unless KEERA_SANDBOX_DRIVER is set. On this shape that is the
-# podman driver, which cannot run from inside the gateway's own container - see
-# the note in README.md. It is what `make dev` points at, since that is the
+# The gateway reads it, and copies it into each new organisation, even with no
+# KEERA_SANDBOX_DRIVER set; only starting a sandbox needs a driver. On this
+# shape that is the podman driver, which cannot run from inside the gateway's
+# own container - see the note in README.md. It is what `make dev` points at, since that is the
 # local shape where the gateway is a host process and can run podman:
 #
 #   make sandbox-image
@@ -19,9 +20,8 @@
 #
 # It is also the worked example the Helm chart's values mirror.
 #
-# No class here declares an egress list, and that is deliberate: nothing reads
-# one, and on this driver a sandbox has unrestricted outbound network access -
-# the internet, the host and the LAN. The single-host shape is for development
+# On this driver a sandbox has unrestricted outbound network access - the
+# internet, the host and the LAN. The single-host shape is for development
 # and for a host the deployment already trusts. See docs/sandboxes.md, "What is
 # actually enforced".
 
@@ -41,10 +41,6 @@ sandboxes:
     disk: 20Gi
     default_ttl: 8h
     max_ttl: 24h
-    # Warm pools are a cluster feature: they need the agent-sandbox warm-pool
-    # extension, which a single host has no controller for. Asking for them
-    # here does nothing.
-    warm: 0
     purposes: [engineer]
 
   - name: agent

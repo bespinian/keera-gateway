@@ -1,6 +1,6 @@
 // The MCP page: the tools an agent calls, behind the same keys and guardrails
-// as the models. A server is catalogue like a model - shared by every tenant -
-// so only an operator adds or changes one.
+// as the models. A server belongs to one organisation, and its administrators
+// add and change it.
 
 import { api } from "../api.js";
 import {
@@ -22,25 +22,26 @@ import {
   rangePicker,
 } from "../ui.js";
 import { bytes, toolCallTable } from "./tools.js";
+import { chooseOrg } from "./orgs.js";
 
 // mcpView is the MCP page: the servers the gateway stands in front of, the
 // address a client is given for each, and - for an administrator - what each
 // tool has been called for and the latest calls.
 export async function mcpView(ctx) {
+  if (!ctx.orgID) return chooseOrg(ctx, "MCP servers");
   const me = ctx.state.me;
-  const canEdit = me.can_edit_catalogue;
-  const admin = me.unrestricted || me.role === "admin";
+  const canEdit = !!me.can_admin_org;
   const since = currentRange();
   const [servers, connect, summary, calls] = await Promise.all([
-    api.mcpServers().then((r) => r.data || []),
+    api.mcpServers(ctx.orgID).then((r) => r.data || []),
     api.connect().catch(() => ({})),
-    admin
+    canEdit
       ? api
-          .toolCalls({ org_id: ctx.orgID, since, summary: true })
+          .toolCalls({ org_id: ctx.orgID, since, summary: "1" })
           .then((r) => r.data || [])
           .catch(() => [])
       : [],
-    admin
+    canEdit
       ? api
           .toolCalls({ org_id: ctx.orgID, since, limit: 100 })
           .then((r) => r.data || [])
@@ -65,7 +66,7 @@ export async function mcpView(ctx) {
       "div",
       { class: "row", style: { flexWrap: "wrap" } },
       h("div", { style: { flex: 1 } }),
-      admin ? rangePicker(ctx, since) : null,
+      canEdit ? rangePicker(ctx, since) : null,
       canEdit
         ? h(
             "button",
@@ -115,7 +116,7 @@ export async function mcpView(ctx) {
         ),
     },
   ];
-  if (admin) {
+  if (canEdit) {
     columns.push({
       label: "Calls",
       num: true,
@@ -144,30 +145,27 @@ export async function mcpView(ctx) {
             { class: "btn btn-sm", onClick: () => editServer(ctx, m) },
             "Edit",
           ),
-          // A server the catalogue file declares comes back on the next start.
-          m.managed
-            ? null
-            : h(
-                "button",
-                {
-                  class: "btn btn-sm btn-danger",
-                  onClick: () =>
-                    confirm({
-                      title: `Remove ${m.alias}?`,
-                      body:
-                        "Clients lose access to its tools. To keep it and its " +
-                        "call log, disable it instead.",
-                      confirmLabel: "Remove server",
-                      danger: true,
-                      onConfirm: async () => {
-                        await api.deleteMCPServer(m.alias);
-                        toast("MCP server removed", "good");
-                        ctx.reload();
-                      },
-                    }),
-                },
-                "Remove",
-              ),
+          h(
+            "button",
+            {
+              class: "btn btn-sm btn-danger",
+              onClick: () =>
+                confirm({
+                  title: `Remove ${m.alias}?`,
+                  body:
+                    "Clients lose access to its tools. Its call log is kept. " +
+                    "To pause it instead, disable it.",
+                  confirmLabel: "Remove server",
+                  danger: true,
+                  onConfirm: async () => {
+                    await api.deleteMCPServer(m.alias, m.org_id);
+                    toast("MCP server removed", "good");
+                    ctx.reload();
+                  },
+                }),
+            },
+            "Remove",
+          ),
         ),
     });
   }
@@ -177,11 +175,11 @@ export async function mcpView(ctx) {
     emptyBody: canEdit
       ? "Add one. Its tools use the same keys, allow-lists, filters and log " +
         "as models."
-      : "An operator adds them.",
+      : "An administrator adds them.",
   });
 
   const wrap = h("div", {}, head, list);
-  if (!admin || !servers.length) return wrap;
+  if (!canEdit || !servers.length) return wrap;
 
   wrap.append(
     section("Tools", "each tool's calls in this window"),
@@ -273,17 +271,16 @@ function section(title, note) {
   );
 }
 
-// editServer adds a server, or changes one. A server the catalogue file
-// declares is applied again on every start, so only its stored credential can
-// change here - no file carries one.
+// editServer adds a server, or changes one.
 function editServer(ctx, existing) {
   const m = existing || { enabled: true };
-  const locked = !!m.managed;
+  // An existing server keeps its owner, and a new one is the organisation's
+  // in view.
+  const orgID = existing ? existing.org_id : ctx.orgID;
   const input = (value, props = {}) =>
     h("input", {
       class: "input",
       value: value || "",
-      disabled: locked,
       ...props,
     });
 
@@ -303,31 +300,21 @@ function editServer(ctx, existing) {
     class: "input mono",
     placeholder: "Authorization",
   });
-  const apiKeyEnv = input(m.api_key_env, {
-    class: "input mono",
-    placeholder: "GITHUB_TOKEN",
-  });
 
   // Write-only, as on a model: the control plane never sends a credential
   // back, so an empty field leaves the stored one alone.
-  const canStore = ctx.state.me.can_store_credentials;
   const apiKey = h("input", {
     class: "input",
     type: "password",
     autocomplete: "off",
-    placeholder: canStore
-      ? m.has_api_key
-        ? "•••••••• stored - type to replace"
-        : "the server's token"
-      : "set KEERA_SECRET_KEY to store a credential here",
-    disabled: !canStore,
+    placeholder: m.has_api_key
+      ? "•••••••• stored - type to replace"
+      : "the server's token",
   });
-  const clearKey =
-    m.has_api_key && canStore ? h("input", { type: "checkbox" }) : null;
+  const clearKey = m.has_api_key ? h("input", { type: "checkbox" }) : null;
   const enabled = h("input", {
     type: "checkbox",
     checked: m.enabled !== false,
-    disabled: locked,
   });
   const err = h("div");
 
@@ -335,14 +322,6 @@ function editServer(ctx, existing) {
     "form",
     { onSubmit: (e) => e.preventDefault() },
     err,
-    locked
-      ? h(
-          "div",
-          { class: "banner", style: { marginBottom: "12px" } },
-          "This server comes from the catalogue file, which is applied on " +
-            "every start. Change it there. Only its credential can be set here.",
-        )
-      : null,
     field("Alias", alias, "Used in the address clients connect to."),
     field("Address", url, "The server's Streamable HTTP endpoint."),
     field("Description", description, "What the server is for, in a sentence."),
@@ -362,11 +341,6 @@ function editServer(ctx, existing) {
             )
           : null,
       ),
-    ),
-    field(
-      "Credential variable",
-      apiKeyEnv,
-      "Or the name of a gateway environment variable that holds it.",
     ),
     field(
       "Header",
@@ -393,21 +367,24 @@ function editServer(ctx, existing) {
             if (!url.value.trim()) {
               return showError(err, "The server's address is required.");
             }
-            // Absent unless the operator typed one or asked for the stored
+            // Absent unless the administrator typed one or asked for the stored
             // one to go: sending "" on every save would wipe it.
             let credential;
             if (clearKey && clearKey.checked) credential = "";
             else if (apiKey.value) credential = apiKey.value;
             e.currentTarget.disabled = true;
             try {
-              await api.putMCPServer(name, {
-                url: url.value.trim(),
-                description: description.value.trim(),
-                auth_header: authHeader.value.trim(),
-                api_key_env: apiKeyEnv.value.trim(),
-                enabled: enabled.checked,
-                ...(credential === undefined ? {} : { api_key: credential }),
-              });
+              await api.putMCPServer(
+                name,
+                {
+                  url: url.value.trim(),
+                  description: description.value.trim(),
+                  auth_header: authHeader.value.trim(),
+                  enabled: enabled.checked,
+                  ...(credential === undefined ? {} : { api_key: credential }),
+                },
+                orgID,
+              );
               close();
               toast(existing ? "MCP server saved" : "MCP server added", "good");
               ctx.reload();
@@ -417,7 +394,7 @@ function editServer(ctx, existing) {
             }
           },
         },
-        !existing ? "Add server" : locked ? "Save credential" : "Save server",
+        !existing ? "Add server" : "Save server",
       ),
     ],
   });

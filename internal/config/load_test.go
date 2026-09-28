@@ -51,6 +51,7 @@ func valid(extra map[string]string) map[string]string {
 	env := map[string]string{
 		"KEERA_DATABASE_URL": "postgres://keera@127.0.0.1/keera",
 		"KEERA_OPERATOR_KEY": "an-operator-key-long-enough",
+		"KEERA_SECRET_KEY":   "a-secret-key-long-enough",
 	}
 	maps.Copy(env, extra)
 	return env
@@ -84,7 +85,7 @@ func TestLoadDefaultsAreWhatTheDocumentationSays(t *testing.T) {
 		// the billing history of a deployment that never asked it to.
 		{"usage retention", c.UsageRetention, time.Duration(0)},
 		{"audit retention", c.AuditRetention, time.Duration(0)},
-		{"session gap", c.SessionGap, time.Duration(0)},
+		{"session gap", c.SessionGap, 30 * time.Minute},
 		// The panel is the reason most deployments have a browser pointed at
 		// this process at all, so it is on unless switched off.
 		{"the panel", c.UI, true},
@@ -102,9 +103,10 @@ func TestLoadDefaultsAreWhatTheDocumentationSays(t *testing.T) {
 }
 
 func TestLoadNeedsTheTwoThingsItCannotInvent(t *testing.T) {
-	// A database it can reach and a credential for the control plane. Neither
-	// has a sensible default, and a gateway that started without them would be
-	// a gateway that serves nothing and lets anybody administer it.
+	// A database it can reach, a credential for the control plane and a key
+	// for stored credentials. None has a sensible default, and a gateway that
+	// started without the first two would serve nothing and let anybody
+	// administer it.
 	tests := []struct {
 		name string
 		env  map[string]string
@@ -126,6 +128,25 @@ func TestLoadNeedsTheTwoThingsItCannotInvent(t *testing.T) {
 				"KEERA_OPERATOR_KEY": "keera",
 			}),
 			want: "too short to be a credential",
+		},
+		{
+			name: "no secret key",
+			env: valid(map[string]string{
+				"KEERA_SECRET_KEY": "",
+			}),
+			want: "KEERA_SECRET_KEY is required",
+		},
+		{
+			name: "a secret key somebody could guess",
+			env:  valid(map[string]string{"KEERA_SECRET_KEY": "keera"}),
+			want: "KEERA_SECRET_KEY is too short",
+		},
+		{
+			// Caught here, before the database is migrated, not when the
+			// limiter is built.
+			name: "a Redis URL that is not one",
+			env:  valid(map[string]string{"KEERA_REDIS_URL": "localhost:6379"}),
+			want: "KEERA_REDIS_URL",
 		},
 	}
 	for _, tc := range tests {
@@ -314,14 +335,6 @@ func TestCookiesAreSecureWheneverTheBrowserWillBeOnHTTPS(t *testing.T) {
 	// The inference is the security-relevant part. Getting it wrong in the safe
 	// direction breaks a local http deployment loudly; getting it wrong in the
 	// other direction sends a session cookie over plaintext and nothing says so.
-	oidc := func(redirect string) map[string]string {
-		return map[string]string{
-			"KEERA_OIDC_ISSUER":        "https://accounts.example.ch",
-			"KEERA_OIDC_CLIENT_ID":     "keera",
-			"KEERA_OIDC_CLIENT_SECRET": "a-secret",
-			"KEERA_OIDC_REDIRECT_URL":  redirect,
-		}
-	}
 	tests := []struct {
 		name string
 		env  map[string]string
@@ -343,25 +356,22 @@ func TestCookiesAreSecureWheneverTheBrowserWillBeOnHTTPS(t *testing.T) {
 			want: true,
 		},
 		{
-			// The panel can be reached over http inside a cluster while the
-			// browser arrives over https at an ingress, and the redirect URL is
-			// the address the browser actually used.
-			name: "an https redirect behind an http public URL",
-			env: func() map[string]string {
-				e := oidc("https://keera.example.ch/control/auth/callback")
-				e["KEERA_PUBLIC_URL"] = "http://keera.internal:8080"
-				return e
-			}(),
-			want: true,
-		},
-		{
 			name: "an explicit setting wins over the inference",
 			env: map[string]string{
-				"KEERA_PUBLIC_URL":          "https://keera.example.ch",
-				"KEERA_SECURE_COOKIES":      "false",
-				"KEERA_OIDC_ADOPT_BY_EMAIL": "",
+				"KEERA_PUBLIC_URL":     "https://keera.example.ch",
+				"KEERA_SECURE_COOKIES": "false",
 			},
 			want: false,
+		},
+		{
+			// A typo is ignored like a malformed number, so it cannot turn
+			// Secure off.
+			name: "a value that is not a switch keeps the inference",
+			env: map[string]string{
+				"KEERA_PUBLIC_URL":     "https://keera.example.ch",
+				"KEERA_SECURE_COOKIES": "ture",
+			},
+			want: true,
 		},
 	}
 	for _, tc := range tests {
@@ -396,6 +406,7 @@ func TestAProviderNamedTwiceIsRefused(t *testing.T) {
 	// The name is stored in the external id of every sign-in it writes, so two
 	// providers under one name would file two directories' people together.
 	_, err := loadWith(t, valid(map[string]string{
+		"KEERA_PUBLIC_URL":     "https://keera.example.ch",
 		"KEERA_OIDC_PROVIDERS": "okta,okta",
 	}))
 	if err == nil {
@@ -410,16 +421,17 @@ func TestADefaultRoleThatIsNotARoleIsRefused(t *testing.T) {
 	// It decides what everybody who matches no group gets, so a typo here is a
 	// deployment where nobody can sign in - or one where the wrong people can.
 	_, err := loadWith(t, valid(map[string]string{
-		"KEERA_OIDC_ISSUER":        "https://accounts.example.ch",
-		"KEERA_OIDC_CLIENT_ID":     "keera",
-		"KEERA_OIDC_CLIENT_SECRET": "a-secret",
-		"KEERA_OIDC_REDIRECT_URL":  "https://keera.example.ch/control/auth/callback",
-		"KEERA_OIDC_DEFAULT_ROLE":  "administrator",
+		"KEERA_PUBLIC_URL":              "https://keera.example.ch",
+		"KEERA_OIDC_PROVIDERS":          "okta",
+		"KEERA_OIDC_OKTA_ISSUER":        "https://accounts.example.ch",
+		"KEERA_OIDC_OKTA_CLIENT_ID":     "keera",
+		"KEERA_OIDC_OKTA_CLIENT_SECRET": "a-secret",
+		"KEERA_OIDC_OKTA_DEFAULT_ROLE":  "administrator",
 	}))
 	if err == nil {
 		t.Fatal("an unknown default role was accepted")
 	}
-	if !strings.Contains(err.Error(), "operator, admin or member") {
+	if !strings.Contains(err.Error(), "admin or member") {
 		t.Errorf("error = %q, want it to name the roles that exist", err)
 	}
 }
@@ -463,15 +475,15 @@ func TestSandboxRuntimesAreReadPerIsolationTier(t *testing.T) {
 	}
 }
 
-// The single-provider shape is the one an on-premises deployment uses, and it
-// is deliberately unchanged from when one provider was all there was: the
-// unprefixed variables configure it and nothing has to name it.
-func TestTheUnprefixedSettingsStillConfigureOneProvider(t *testing.T) {
+// One provider is configured the same way as several. The callback is the
+// public address's, because one callback serves every provider.
+func TestOneProviderIsNamedLikeSeveral(t *testing.T) {
 	c, err := loadWith(t, valid(map[string]string{
-		"KEERA_OIDC_ISSUER":        "https://accounts.example.ch",
-		"KEERA_OIDC_CLIENT_ID":     "keera",
-		"KEERA_OIDC_CLIENT_SECRET": "a-secret",
-		"KEERA_OIDC_REDIRECT_URL":  "https://keera.example.ch/control/auth/callback",
+		"KEERA_PUBLIC_URL":              "https://keera.example.ch",
+		"KEERA_OIDC_PROVIDERS":          "okta",
+		"KEERA_OIDC_OKTA_ISSUER":        "https://accounts.example.ch",
+		"KEERA_OIDC_OKTA_CLIENT_ID":     "keera",
+		"KEERA_OIDC_OKTA_CLIENT_SECRET": "a-secret",
 	}))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -479,11 +491,28 @@ func TestTheUnprefixedSettingsStillConfigureOneProvider(t *testing.T) {
 	if len(c.OIDC) != 1 {
 		t.Fatalf("got %d providers, want 1", len(c.OIDC))
 	}
-	if c.OIDC[0].Name != singleProviderName {
-		t.Errorf("provider name = %q, want %q", c.OIDC[0].Name, singleProviderName)
+	p := c.OIDC[0]
+	if p.Name != "okta" {
+		t.Errorf("provider name = %q, want okta", p.Name)
 	}
-	if c.OIDC[0].Mapping.Default != authn.RoleMember {
-		t.Errorf("default role = %q, want member", c.OIDC[0].Mapping.Default)
+	if p.RedirectURL != "https://keera.example.ch/control/auth/callback" {
+		t.Errorf("redirect = %q, want the public URL's callback", p.RedirectURL)
+	}
+	if p.Mapping.Default != authn.RoleMember {
+		t.Errorf("default role = %q, want member", p.Mapping.Default)
+	}
+}
+
+// Without a public URL there is no address to send the browser back to.
+func TestSingleSignOnNeedsThePublicURL(t *testing.T) {
+	_, err := loadWith(t, valid(map[string]string{
+		"KEERA_OIDC_PROVIDERS":          "okta",
+		"KEERA_OIDC_OKTA_ISSUER":        "https://accounts.example.ch",
+		"KEERA_OIDC_OKTA_CLIENT_ID":     "keera",
+		"KEERA_OIDC_OKTA_CLIENT_SECRET": "a-secret",
+	}))
+	if err == nil || !strings.Contains(err.Error(), "KEERA_PUBLIC_URL") {
+		t.Errorf("error = %v, want it to ask for KEERA_PUBLIC_URL", err)
 	}
 }
 
@@ -493,7 +522,7 @@ func TestTheUnprefixedSettingsStillConfigureOneProvider(t *testing.T) {
 func TestSeveralProvidersMustNameTheirDomains(t *testing.T) {
 	env := valid(map[string]string{
 		"KEERA_OIDC_PROVIDERS":            "google,entra",
-		"KEERA_OIDC_REDIRECT_URL":         "https://keera.example.ch/control/auth/callback",
+		"KEERA_PUBLIC_URL":                "https://keera.example.ch",
 		"KEERA_OIDC_GOOGLE_ISSUER":        "https://accounts.google.com",
 		"KEERA_OIDC_GOOGLE_CLIENT_ID":     "google-client",
 		"KEERA_OIDC_GOOGLE_CLIENT_SECRET": "google-secret",
@@ -520,21 +549,40 @@ func TestSeveralProvidersMustNameTheirDomains(t *testing.T) {
 	}
 }
 
-// A customer's directory admin can create a group of any name. A shared
-// operator group would let every customer make operators.
-func TestNamedProvidersDoNotInheritOperatorGroups(t *testing.T) {
+// Nothing is shared between providers. A customer's directory admin can
+// create a group of any name, so a shared operator group would let every
+// customer make operators.
+func TestProvidersShareNothing(t *testing.T) {
 	t.Setenv("KEERA_OIDC_PROVIDERS", "google,entra")
-	t.Setenv("KEERA_OIDC_OPERATOR_GROUPS", "keera-operators")
+	t.Setenv("KEERA_OIDC_GOOGLE_ADMIN_GROUPS", "")
+	t.Setenv("KEERA_OIDC_GOOGLE_OPERATOR_GROUPS", "")
+	t.Setenv("KEERA_OIDC_ENTRA_ADMIN_GROUPS", "keera-admins")
 	t.Setenv("KEERA_OIDC_ENTRA_OPERATOR_GROUPS", "keera-ops")
 
-	got := oidcProviders()
+	got := oidcProviders("https://keera.example.ch")
 	if len(got) != 2 {
 		t.Fatalf("got %d providers, want 2", len(got))
 	}
-	if g := got[0].Mapping.OperatorGroups; len(g) != 0 {
-		t.Errorf("google operator groups = %v, want none inherited", g)
+	if g := got[0].Mapping; len(g.OperatorGroups) != 0 || len(g.AdminGroups) != 0 {
+		t.Errorf("google groups = %v / %v, want none", g.OperatorGroups, g.AdminGroups)
 	}
 	if g := got[1].Mapping.OperatorGroups; len(g) != 1 || g[0] != "keera-ops" {
 		t.Errorf("entra operator groups = %v, want its own", g)
+	}
+}
+
+// The operator role spans organisations, so it comes only from settings that
+// name who holds it. A default of operator would make a whole directory one.
+func TestADefaultRoleOfOperatorIsRefused(t *testing.T) {
+	_, err := loadWith(t, valid(map[string]string{
+		"KEERA_PUBLIC_URL":              "https://keera.example.ch",
+		"KEERA_OIDC_PROVIDERS":          "okta",
+		"KEERA_OIDC_OKTA_ISSUER":        "https://accounts.example.ch",
+		"KEERA_OIDC_OKTA_CLIENT_ID":     "keera",
+		"KEERA_OIDC_OKTA_CLIENT_SECRET": "a-secret",
+		"KEERA_OIDC_OKTA_DEFAULT_ROLE":  "operator",
+	}))
+	if err == nil {
+		t.Fatal("a default role of operator was accepted")
 	}
 }

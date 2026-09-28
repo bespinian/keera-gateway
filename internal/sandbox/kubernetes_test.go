@@ -396,6 +396,62 @@ func TestExtendMovesShutdownTime(t *testing.T) {
 	}
 }
 
+// An expired sandbox's key was revoked, so reviving it has to put the new key
+// into the pod template, move its end and start it, all on the same object.
+func TestReviveReplacesTheEnvironment(t *testing.T) {
+	f := newFakeAPI(t)
+	k := f.driver(t, KubernetesOptions{})
+	ref := Ref{ID: "sbx_test0007", Name: "rev"}
+	path := sandboxesPath + objectName(ref)
+	f.put(path, `{"spec":{"operatingMode":"Suspended"}}`)
+
+	until := time.Now().Add(8 * time.Hour).UTC().Truncate(time.Second)
+	err := k.Revive(context.Background(), Spec{
+		Ref: ref, Purpose: policy.PurposeEngineer, Expires: until,
+		Class: policy.SandboxClass{Name: "standard", Image: "example/sandbox:1", CPU: 1000, Memory: 1024},
+		Env:   map[string]string{"KEERA_API_KEY": "sk-new"},
+	})
+	if err != nil {
+		t.Fatalf("revive: %v", err)
+	}
+	last := f.seen[len(f.seen)-1]
+	if last.Method != http.MethodPatch || last.Path != path {
+		t.Fatalf("last request = %s %s, want a patch of the object", last.Method, last.Path)
+	}
+	raw, _ := json.Marshal(last.Body)
+	var got struct {
+		Spec struct {
+			OperatingMode string `json:"operatingMode"`
+			ShutdownTime  string `json:"shutdownTime"`
+			PodTemplate   struct {
+				Spec struct {
+					Containers []struct {
+						Image string `json:"image"`
+						Env   []struct{ Name, Value string }
+					} `json:"containers"`
+				} `json:"spec"`
+			} `json:"podTemplate"`
+		} `json:"spec"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Spec.OperatingMode != "Running" || got.Spec.ShutdownTime != until.Format(time.RFC3339) {
+		t.Errorf("mode %q, shutdownTime %q", got.Spec.OperatingMode, got.Spec.ShutdownTime)
+	}
+	cs := got.Spec.PodTemplate.Spec.Containers
+	if len(cs) != 1 || cs[0].Image != "example/sandbox:1" {
+		t.Fatalf("containers = %+v, want the one sandbox container", cs)
+	}
+	found := false
+	for _, e := range cs[0].Env {
+		found = found || (e.Name == "KEERA_API_KEY" && e.Value == "sk-new")
+	}
+	if !found {
+		t.Errorf("the new key is not in the container's environment: %+v", cs[0].Env)
+	}
+}
+
 func TestAgentSandboxIsTerminatedOnExpiry(t *testing.T) {
 	// An agent's task is over; an engineer's volume holds work in progress.
 	if shutdownPolicy(policy.PurposeAgent) != "Delete" {

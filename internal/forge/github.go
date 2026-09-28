@@ -33,7 +33,6 @@ type GitHub struct {
 	appID  string
 	key    *rsa.PrivateKey
 	client *http.Client
-	now    func() time.Time
 }
 
 // GitHubOptions configures the GitHub minter.
@@ -44,8 +43,7 @@ type GitHubOptions struct {
 	// AppID is the App's id, or its client id.
 	AppID string
 	// Key is the App's private key, as GitHub downloads it (PEM).
-	Key    []byte
-	Client *http.Client
+	Key []byte
 }
 
 // NewGitHub builds the minter.
@@ -66,7 +64,7 @@ func NewGitHub(o GitHubOptions) (*GitHub, error) {
 	}
 	return &GitHub{
 		api: api, web: githubWeb(api), appID: o.AppID, key: key,
-		client: httpClient(o.Client), now: time.Now,
+		client: &http.Client{Timeout: requestTimeout},
 	}, nil
 }
 
@@ -152,7 +150,7 @@ func (g *GitHub) endpoint(parts ...string) string {
 // appJWT is the App's own short-lived identity, which only asks for
 // installation tokens.
 func (g *GitHub) appJWT() (string, error) {
-	now := g.now()
+	now := time.Now()
 	var iss any = g.appID
 	if n, err := strconv.ParseInt(g.appID, 10, 64); err == nil {
 		iss = n

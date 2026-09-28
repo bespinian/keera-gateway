@@ -104,7 +104,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, res *policy.Resol
 	if c.routed && !s.useRouter(c, b) {
 		return
 	}
-	c.chain = s.destinations(c.model, c.decision)
+	c.chain = s.destinations(c.res.Key.OrgID, c.model, c.decision)
 	if !s.fits(c, b) || !s.useNative(c) {
 		return
 	}
@@ -125,7 +125,7 @@ func (s *Server) receive(c *call) ([]byte, bool) {
 		if errors.As(err, &tooLarge) {
 			s.refuse(c, refusal{
 				status: http.StatusRequestEntityTooLarge,
-				typ:    "invalid_request_error", code: "context_length_exceeded",
+				typ:    "invalid_request_error", code: "request_too_large",
 				msg: "the request body exceeds the gateway's limit",
 			})
 		}
@@ -167,8 +167,36 @@ func invalidBody(msg string) refusal {
 	}
 }
 
-// target works out what the 'model' field names: a model from the shared
-// catalogue, or one of this organisation's routers.
+// unreadableBody refuses a request a router or a filter had to read and could
+// not. who says what needed to read it, and why.
+func unreadableBody(who string, err error) *refusal {
+	r := invalidBody(who + ", and this request could not be read: " + err.Error())
+	r.advise = true
+	return &r
+}
+
+// noDestination refuses a request none of a router's destinations can serve.
+func noDestination(msg string) *refusal {
+	return &refusal{
+		status: http.StatusServiceUnavailable,
+		typ:    "server_error", code: "router_destination_unavailable",
+		msg: msg + ". Nothing was sent to a model", advise: true,
+	}
+}
+
+// notRebuilt refuses a request whose filtered text could not be put back.
+func notRebuilt(err error) *refusal {
+	return &refusal{
+		status: http.StatusBadGateway,
+		typ:    "server_error", code: "filter_failed",
+		msg: "the filtered request could not be rebuilt, so nothing was sent " +
+			"to the model: " + err.Error(),
+		advise: true,
+	}
+}
+
+// target works out what the 'model' field names: one of this organisation's
+// models, or one of its routers.
 func (s *Server) target(c *call, b *body) bool {
 	alias, hasAlias := b.str("model")
 	if !hasAlias || alias == "" {
@@ -193,9 +221,9 @@ func (s *Server) target(c *call, b *body) bool {
 	c.ev.Alias = alias
 	c.alias = alias
 
-	// The catalogue is asked first and wins. An alias is shared by every
-	// tenant, so one organisation's router must not be able to shadow it.
-	model, found := s.src.Model(alias)
+	// A model is looked up first. The control plane refuses a router named
+	// like a model, and a model named like a router, so the two rarely meet.
+	model, found := s.src.Model(c.res.Key.OrgID, alias)
 	if !found {
 		c.router, c.routed = s.src.Router(c.res.Key.OrgID, alias)
 		// Routers exist only on chat. The allow-list covers the router, not
@@ -299,19 +327,14 @@ func (s *Server) useRouter(c *call, b *body) bool {
 	// From here on the request is about the chosen model. That it was chosen
 	// is carried by ev.Router alone.
 	c.alias = d.alias
-	model, found := s.src.Model(c.alias)
-	if !found || !model.Enabled || model.Kind != c.surf.kind || len(model.Backends) == 0 {
+	model, ok := s.serveable(c.res.Key.OrgID, c.alias)
+	if !ok || model.Kind != c.surf.kind {
 		// Only offered destinations can be chosen, so this is an unchecked
 		// fallback, or a model deleted a moment ago.
 		c.ev.RouterOutcome = store.RouterError
-		s.refuse(c, refusal{
-			status: http.StatusServiceUnavailable,
-			typ:    "server_error", code: "router_destination_unavailable",
-			msg: fmt.Sprintf("the router %q placed this request on '%s', which cannot "+
-				"serve it: the model is missing, disabled, of another kind, or has no "+
-				"backend. Nothing was sent to a model", rt.Alias, c.alias),
-			advise: true,
-		})
+		s.refuse(c, *noDestination(fmt.Sprintf("the router %q placed this request on '%s', "+
+			"which cannot serve it: the model is missing, disabled, of another kind, or has "+
+			"no backend", rt.Alias, c.alias)))
 		return false
 	}
 	c.model = model
@@ -406,13 +429,7 @@ func (s *Server) retranslate(c *call, b *body) bool {
 			return true
 		}
 	}
-	s.refuse(c, refusal{
-		status: http.StatusBadGateway,
-		typ:    "server_error", code: "filter_failed",
-		msg: "the filtered request could not be rebuilt, so nothing was sent " +
-			"to the model: " + err.Error(),
-		advise: true,
-	})
+	s.refuse(c, *notRebuilt(err))
 	return false
 }
 
@@ -556,8 +573,9 @@ func (s *Server) settleRouter(c *call, fw forwarded) {
 }
 
 // upstreamUnreachable answers a request no destination could be reached for.
+//
+// It counts nothing on keera_upstream_errors_total: send already has.
 func (s *Server) upstreamUnreachable(c *call, fw forwarded) {
-	s.metrics.UpstreamError(c.alias)
 	s.log.Error("inference plane unreachable", "error", fw.err, "model", c.alias,
 		"request_id", httpx.RequestID(c.r.Context()))
 	c.surf.shape.writeError(c.w, http.StatusBadGateway, "server_error", "upstream_unavailable",
@@ -684,7 +702,7 @@ func (s *Server) finish(ev store.Event, model policy.Model, res *policy.Resolved
 	if tokens := float64(ev.InputTokens + ev.OutputTokens); tokens > 0 {
 		reqs := make([]ratelimit.Requirement, 0, len(res.Scopes))
 		for _, sc := range res.Scopes {
-			reqs = append(reqs, ratelimit.Requirement{Key: bucketKey(sc, "tpm"), PerMinute: sc.TPM})
+			reqs = append(reqs, tpmBucket(sc))
 		}
 		// Charged as of now, not the start: a stream can run for minutes, and
 		// a bucket told it is minutes younger than it is refills too much.
@@ -697,7 +715,7 @@ func (s *Server) finish(ev store.Event, model policy.Model, res *policy.Resolved
 	// refusal would post the best score. Stamped with the current time, not
 	// the start, so a long stream does not expire the reading at once.
 	if ev.Status < 400 && !ev.Canceled {
-		s.load.observe(ev.Alias, ev.TTFT, time.Now())
+		s.load.observe(model.Key(), ev.TTFT, time.Now())
 	}
 }
 

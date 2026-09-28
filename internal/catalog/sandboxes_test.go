@@ -9,7 +9,7 @@ import (
 )
 
 func TestParseSandboxes(t *testing.T) {
-	classes, err := ParseSandboxes([]byte(`
+	classes, err := parseSandboxFile([]byte(`
 sandboxes:
   - name: go-standard
     description: Go and the repo toolchain
@@ -21,7 +21,6 @@ sandboxes:
     default_ttl: 4h
     max_ttl: 24h
     warm: 2
-    egress: [gateway, git]
     purposes: [engineer]
 `))
 	if err != nil {
@@ -49,15 +48,10 @@ sandboxes:
 	case len(c.Purposes) != 1 || c.Purposes[0] != policy.PurposeEngineer:
 		t.Errorf("purposes = %v", c.Purposes)
 	}
-	// Everything ParseSandboxes produces came out of a file, which is what
-	// makes it the file's to own.
-	if !c.Managed {
-		t.Error("a class from a catalogue file should be marked managed")
-	}
 }
 
 func TestParseSandboxesDefaults(t *testing.T) {
-	classes, err := ParseSandboxes([]byte(`
+	classes, err := parseSandboxFile([]byte(`
 sandboxes:
   - name: minimal
     image: example/sandbox:1
@@ -154,7 +148,7 @@ func TestParseSandboxesRefusals(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ParseSandboxes([]byte(tc.yaml))
+			_, err := parseSandboxFile([]byte(tc.yaml))
 			if err == nil {
 				t.Fatal("expected a refusal")
 			}
@@ -226,18 +220,14 @@ func TestParseMiB(t *testing.T) {
 }
 
 func TestParseSandboxDeduplicates(t *testing.T) {
-	// A repeated egress name or purpose is somebody writing the same thing
-	// twice, not an instruction to do it twice.
+	// A repeated purpose is somebody writing the same thing twice, not an
+	// instruction to do it twice.
 	c, err := ParseSandbox(Sandbox{
 		Name: "a", Image: "x",
-		Egress:   []string{"git", "GIT", " git ", "gateway"},
 		Purposes: []string{"agent", "agent"},
 	})
 	if err != nil {
 		t.Fatalf("parse: %v", err)
-	}
-	if len(c.Egress) != 2 {
-		t.Errorf("egress = %v, want it folded to two", c.Egress)
 	}
 	if len(c.Purposes) != 1 {
 		t.Errorf("purposes = %v, want one", c.Purposes)

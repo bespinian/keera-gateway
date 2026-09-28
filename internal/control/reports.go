@@ -42,8 +42,9 @@ func (s *Server) reportScope(w http.ResponseWriter, r *http.Request,
 // and answers 404 for one in another organisation. Without this, another
 // tenant's key id would reveal their spend.
 //
-// A model alias is not checked: the catalogue is shared, and the rows are
-// still only this organisation's.
+// A model alias is not checked: it reveals nothing, since the rows are only
+// this organisation's. Across every organisation, which only an operator
+// sees, it adds up every organisation's model of that alias.
 func (s *Server) entityScope(w http.ResponseWriter, r *http.Request,
 	orgID string,
 ) (store.Scope, bool) {
@@ -66,7 +67,7 @@ func (s *Server) entityScope(w http.ResponseWriter, r *http.Request,
 		}
 	}
 	if sc.KeyID != "" {
-		owner, err := s.st.KeyOrg(ctx, sc.KeyID)
+		owner, _, err := s.st.KeyScope(ctx, sc.KeyID)
 		if !s.inOrg(w, orgID, owner, err) {
 			return sc, false
 		}
@@ -143,8 +144,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, p *authn.Princ
 // and carry messages from the inference plane. Members see their own traffic
 // on My access.
 func (s *Server) requests(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if !p.CanAdminOrg(p.OrgID) {
-		s.forbid(w, "only an administrator can read the request log")
+	if !s.requireOrgAdmin(w, p, p.OrgID) {
 		return
 	}
 	orgID, from, to, ok := s.reportScope(w, r, p)
@@ -375,121 +375,20 @@ func (s *Server) usageCSV(w http.ResponseWriter, orgID, groupBy string, from, to
 		"output_tokens", "cost_" + strings.ToLower(s.opts.Currency), "org_id", "from", "to",
 	})
 	for _, b := range buckets {
+		org := orgID
+		if b.OrgID != "" {
+			org = b.OrgID
+		}
 		_ = cw.Write([]string{
 			names.label(groupBy, b.Group), b.Group,
 			strconv.FormatInt(b.Requests, 10),
 			strconv.FormatInt(b.InputTokens, 10),
 			strconv.FormatInt(b.OutputTokens, 10),
 			policy.FormatMicros(b.CostMicros),
-			orgID, from.Format(time.RFC3339), to.Format(time.RFC3339),
+			org, from.Format(time.RFC3339), to.Format(time.RFC3339),
 		})
 	}
 	cw.Flush()
-}
-
-// failures opens up the dashboard's failure count: one row per request that
-// did not deliver, with the message the client got. It tells a model that is
-// down from a budget that ran out from a field the backend does not support.
-//
-// Administrator-only, like the audit log: rows name other people's keys, and
-// an upstream error can name a backend.
-func (s *Server) failures(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if !p.CanAdminOrg(p.OrgID) {
-		s.forbid(w, "only an administrator can read the failure log")
-		return
-	}
-	orgID, from, to, ok := s.reportScope(w, r, p)
-	if !ok {
-		return
-	}
-	q := r.URL.Query()
-	fq := store.FailureQuery{
-		OrgID:  orgID,
-		From:   from,
-		To:     to,
-		Alias:  q.Get("alias"),
-		KeyID:  q.Get("key_id"),
-		TeamID: q.Get("team_id"),
-		Kind:   store.FailureKind(q.Get("kind")),
-	}
-	fq.Status, _ = strconv.Atoi(q.Get("status"))
-	fq.Limit, _ = strconv.Atoi(q.Get("limit"))
-	fq.Before, _ = strconv.ParseInt(q.Get("before"), 10, 64)
-
-	names, err := s.groupNames(r.Context(), orgID)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	asCSV := q.Get("format") == "csv"
-	if asCSV {
-		fq.Before, fq.Limit = 0, csvExportRows
-	}
-	rows, err := s.st.Failures(r.Context(), fq)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	if asCSV {
-		s.failuresCSV(w, rows, names)
-		return
-	}
-	out := map[string]any{"from": from, "to": to, "data": rows}
-	names.addTo(out)
-	// Only the first page carries the filter choices: they do not change
-	// while paging, and they cost a second query.
-	if fq.Before == 0 {
-		facets, err := s.st.FailureFilters(r.Context(), fq)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		out["filters"] = facets
-	}
-	if len(rows) > 0 {
-		out["next_before"] = rows[len(rows)-1].ID
-	}
-	httpx.WriteJSON(w, http.StatusOK, out)
-}
-
-func (s *Server) failuresCSV(w http.ResponseWriter, rows []store.Failure, names groupLabels) {
-	cw := beginCSV(w, "keera-failures-"+time.Now().Format("2006-01-02")+".csv")
-	_ = cw.Write([]string{
-		"timestamp", "model", "status", "error", "key", "key_id",
-		"team", "user", "latency_ms", "stream", "canceled",
-	})
-	for _, f := range rows {
-		_ = cw.Write([]string{
-			f.TS.Format(time.RFC3339), f.Alias, strconv.Itoa(f.Status), f.Error,
-			names.label("key", f.KeyID), f.KeyID,
-			names.label("team", f.TeamID), names.label("user", f.UserID),
-			strconv.FormatInt(f.LatencyMS, 10),
-			strconv.FormatBool(f.Stream), strconv.FormatBool(f.Canceled),
-		})
-	}
-	cw.Flush()
-}
-
-func (s *Server) spend(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	q := r.URL.Query()
-	scope := policy.ScopeType(q.Get("scope_type"))
-	scopeID := q.Get("scope_id")
-	if !s.requireScopeRead(w, r, p, scope, scopeID) {
-		return
-	}
-	period := policy.Period(q.Get("period"))
-	if !period.Valid() {
-		period = policy.PeriodMonth
-	}
-	now := time.Now()
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"scope_type":   scope,
-		"scope_id":     scopeID,
-		"period":       period,
-		"period_start": period.Start(now),
-		"currency":     s.opts.Currency,
-		"micros":       s.reg.Budgets().Spent(scope, scopeID, period, now),
-	})
 }
 
 // audit is administrator-only, because it names people and what they
@@ -498,8 +397,7 @@ func (s *Server) spend(w http.ResponseWriter, r *http.Request, p *authn.Principa
 // It can be filtered and paged, because it is the product's compliance
 // record and has to answer real questions.
 func (s *Server) audit(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if !p.CanAdminOrg(p.OrgID) {
-		s.forbid(w, "only an administrator can read the audit log")
+	if !s.requireOrgAdmin(w, p, p.OrgID) {
 		return
 	}
 	q := r.URL.Query()

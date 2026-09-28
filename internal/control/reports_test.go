@@ -165,34 +165,21 @@ func TestAuditCSVKeepsTheDetailIntact(t *testing.T) {
 	}
 }
 
-// A check reaches the inference plane directly on the model's own credential.
-// That is operator work, for the same reason the backend URLs are operator-only.
-func TestCheckModelIsOperatorOnly(t *testing.T) {
+// A check reaches a backend directly on the model's own credential. That is
+// work for whoever runs the model: an operator, or the administrators of an
+// organisation's own. A member runs none.
+func TestCheckModelIsForWhoeverRunsTheModel(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, httpx.ControlPrefix+"/v1/models/keera-code/check", nil)
+	r := httptest.NewRequest(http.MethodPost, httpx.ControlPrefix+"/v1/models/keera-code/check?org_id=org_1", nil)
 
-	s.checkModel(w, r, &authn.Principal{Role: authn.RoleAdmin, OrgID: "org_1"})
+	s.checkModel(w, r, &authn.Principal{Role: authn.RoleMember, OrgID: "org_1"})
 
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", w.Code)
 	}
-	if !strings.Contains(w.Body.String(), "only an operator") {
+	if !strings.Contains(w.Body.String(), "only an administrator") {
 		t.Errorf("body = %q, want it to say who may run one", w.Body.String())
-	}
-}
-
-// A control plane running without an inference listener has nothing to check
-// against, and should say so rather than panic on a nil gateway.
-func TestCheckModelWithoutAGatewaySaysSo(t *testing.T) {
-	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, httpx.ControlPrefix+"/v1/models/keera-code/check", nil)
-
-	s.checkModel(w, r, &authn.Principal{Role: authn.RoleOperator})
-
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503", w.Code)
 	}
 }
 
@@ -257,34 +244,16 @@ func TestAuditCSVEscapesEveryFieldItIsGiven(t *testing.T) {
 	}
 }
 
-// The failure log names other people's keys and carries error text written by
-// the inference plane. A member reads their own failures on My access; this
-// screen is for whoever runs the organisation.
-func TestFailuresAreAdministratorOnly(t *testing.T) {
-	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, httpx.ControlPrefix+"/v1/failures", nil)
-
-	s.failures(w, r, &authn.Principal{Role: authn.RoleMember, OrgID: "org_1"})
-
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "only an administrator") {
-		t.Errorf("body = %q, want it to say who may read one", w.Body.String())
-	}
-}
-
 // The export exists to be attached to the message that goes to whoever runs the
-// endpoint that produced the failures, so it has to carry the wording they will
+// endpoint that produced a failure, so it has to carry the wording they will
 // recognise - and the names beside the ids, since a key id means nothing to
 // anybody outside this deployment.
-func TestFailuresCSVCarriesTheMessageAndTheNames(t *testing.T) {
+func TestRequestsCSVCarriesTheMessageAndTheNames(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	w := httptest.NewRecorder()
 	ts := time.Date(2026, 9, 6, 14, 30, 0, 0, time.UTC)
 
-	s.failuresCSV(w, []store.Failure{{
+	s.requestsCSV(w, []store.Request{{
 		ID: 9, TS: ts, Alias: "keera-code", Status: 500,
 		Error: "CUDA out of memory", KeyID: "key_1", TeamID: "team_1", UserID: "user_1",
 		LatencyMS: 1200, Stream: true,
@@ -315,29 +284,9 @@ func TestFailuresCSVCarriesTheMessageAndTheNames(t *testing.T) {
 	}
 }
 
-// A backend is free to answer with whatever it likes, and the file is opened in
-// a spreadsheet by whoever administers the deployment.
-func TestFailuresCSVEscapesTheBackendsWording(t *testing.T) {
-	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
-	w := httptest.NewRecorder()
-
-	s.failuresCSV(w, []store.Failure{{
-		ID: 1, TS: time.Now(), Alias: "keera-code", Status: 500,
-		Error: `=cmd|' /c calc'!A1`,
-	}}, groupLabels{})
-
-	rows, err := csv.NewReader(strings.NewReader(w.Body.String())).ReadAll()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rows[1][3] != `'=cmd|' /c calc'!A1` {
-		t.Errorf("message = %q, want it escaped", rows[1][3])
-	}
-}
-
-// The request log carries what the failure log carries and the served rows on
-// top, which is strictly more of other people's traffic. It is gated the same
-// way for the same reason.
+// The request log names other people's keys and carries error text written by
+// the inference plane. A member reads their own requests on My access; this
+// screen is for whoever runs the organisation.
 func TestRequestsAreAdministratorOnly(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	w := httptest.NewRecorder()

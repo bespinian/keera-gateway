@@ -27,24 +27,16 @@ func TestTheMapIsForAdministrators(t *testing.T) {
 	}
 }
 
-// What a model's box says about where it runs, and what it is allowed to say
-// about it. An external endpoint is the whole point of the screen and is the
-// provider's own published address; an internal one is the inference plane's
-// private topology, which the Models screen already keeps to operators.
-func TestAModelsBoxNamesTheProviderButNotTheCluster(t *testing.T) {
-	admin := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleAdmin, OrgID: "org_1"}
-	operator := &authn.Principal{Via: authn.MethodOperatorKey}
+// What a model's box says about where it runs. The map is for the
+// organisation's administrators, who see its backends on the Models screen too.
+func TestAModelsBoxNamesWhereItRuns(t *testing.T) {
+	inside := policy.Model{OrgID: "org_1", Alias: "keera-code", Backends: []string{"http://vllm:8000/v1"}}
+	outside := policy.Model{OrgID: "org_1", Alias: "keera-frontier", Backends: []string{"https://api.anthropic.com/v1"}}
 
-	inside := policy.Model{Alias: "keera-code", Backends: []string{"http://vllm:8000/v1"}}
-	outside := policy.Model{Alias: "keera-frontier", Backends: []string{"https://api.anthropic.com/v1"}}
-
-	if node := modelNode(inside, store.Cell{}, admin); node.Endpoint != "" {
-		t.Errorf("an administrator was shown the internal backend %q", node.Endpoint)
+	if node := modelNode(inside, store.Cell{}); node.Endpoint != "vllm:8000" {
+		t.Errorf("an administrator was not shown their own backend: %q", node.Endpoint)
 	}
-	if node := modelNode(inside, store.Cell{}, operator); node.Endpoint != "vllm:8000" {
-		t.Errorf("an operator was not shown the backend: %q", node.Endpoint)
-	}
-	node := modelNode(outside, store.Cell{}, admin)
+	node := modelNode(outside, store.Cell{})
 	if node.Endpoint != "api.anthropic.com" {
 		t.Errorf("endpoint = %q; where prompts go is the point of this screen", node.Endpoint)
 	}
@@ -53,20 +45,32 @@ func TestAModelsBoxNamesTheProviderButNotTheCluster(t *testing.T) {
 	}
 }
 
+// Across every organisation there is no one catalogue to draw.
+func TestTheMapIsOfOneOrganisation(t *testing.T) {
+	s := newServer()
+	operator := &authn.Principal{Via: authn.MethodOperatorKey}
+
+	w := httptest.NewRecorder()
+	s.trafficMap(w, httptest.NewRequest(http.MethodGet, httpx.ControlPrefix+"/v1/map", nil), operator)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d for no organisation, want 400", w.Code)
+	}
+}
+
 // The whole screen, against a real database: the catalogue as boxes, the window
 // as numbers on them, and the traffic between them as edges.
 func TestTheMapDrawsTheCatalogueAndTheTrafficTogether(t *testing.T) {
 	st, ctx := streamStore(t)
-	if _, err := st.CreateOrg(ctx, "org_1", "Example Bank"); err != nil {
+	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_1", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
 	for _, m := range []policy.Model{
-		{Alias: "keera-code", Kind: policy.KindChat, Backends: []string{"http://vllm:8000/v1"},
+		{OrgID: "org_1", Alias: "keera-code", Kind: policy.KindChat, Backends: []string{"http://vllm:8000/v1"},
 			BackendModel: "served-name", Enabled: true},
 		// Enabled, hosted, and deliberately quiet: a way out of the building
 		// that nobody used this week is still a way out of the building, and
 		// leaving it off the map is the one omission this screen cannot afford.
-		{Alias: "keera-frontier", Kind: policy.KindChat,
+		{OrgID: "org_1", Alias: "keera-frontier", Kind: policy.KindChat,
 			Backends:     []string{"https://api.anthropic.com/v1"},
 			BackendModel: "claude-opus-5", Enabled: true},
 	} {

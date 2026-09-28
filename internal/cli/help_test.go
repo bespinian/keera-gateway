@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
 // The registry in help.go says which flags each subcommand reads, and each
@@ -100,7 +102,7 @@ func TestCommandHelpNamesItsFlags(t *testing.T) {
 // command that dispatches and is not in the registry is a command nobody can
 // find.
 func TestOverviewNamesEveryCommand(t *testing.T) {
-	out := overview()
+	out := overview(style)
 	for _, c := range commands {
 		if c.hidden {
 			continue
@@ -124,7 +126,7 @@ func TestEveryDispatchedCommandIsRegistered(t *testing.T) {
 		"org", "orgs", "team", "teams", "user", "users", "key", "keys",
 		"model", "models", "filter", "filters", "router", "routers",
 		"sandbox", "sandboxes", "sbx", "guardrail", "guardrails",
-		"limit", "budget", "usage", "failure", "failures", "sessions",
+		"mcp", "limit", "limits", "budget", "budgets", "usage", "failure", "failures", "sessions",
 		"session", "connect", "doctor", "login", "logout", "whoami",
 		"version", "help",
 	}
@@ -149,6 +151,8 @@ func TestWantsHelp(t *testing.T) {
 		{[]string{"--help", "add"}, "add", true},
 		{[]string{"list"}, "", false},
 		{[]string{"add", "my-filter", "--mode", "gate"}, "", false},
+		{[]string{"ssh", "box", "--", "git", "--help"}, "", false},
+		{[]string{"ssh", "--help", "--", "git"}, "ssh", true},
 	}
 	for _, c := range cases {
 		sub, ok := wantsHelp(c.args)
@@ -217,5 +221,51 @@ func TestTakeURL(t *testing.T) {
 	}
 	if _, err := takeURL([]string{"--url"}); err == nil {
 		t.Error("--url with no address should be an error")
+	}
+}
+
+// TestHelpHidesDefaultsThatMeanNotGiven: -1 and 0 mean "not given" on these
+// flags, and printed as a duration they read as a real setting.
+func TestHelpHidesDefaultsThatMeanNotGiven(t *testing.T) {
+	for _, def := range []string{"", "false", "0", "-1", "0s", "-1ns"} {
+		if shownDefault(def) {
+			t.Errorf("shownDefault(%q) = true; it means not given", def)
+		}
+	}
+	for _, def := range []string{"2222", "168h0m0s", "class", "true"} {
+		if !shownDefault(def) {
+			t.Errorf("shownDefault(%q) = false; it is a real default", def)
+		}
+	}
+	for _, args := range [][]string{
+		{"guardrail", "set", "--help"}, {"sandbox", "create", "--help"},
+	} {
+		out := capture(t, args...)
+		if strings.Contains(out, "(default -1ns)") || strings.Contains(out, "(default 0s)") {
+			t.Errorf("keera %s prints a default that means not given:\n%s",
+				strings.Join(args, " "), out)
+		}
+	}
+}
+
+// TestUsageNamesOnlyTheFlagsTheModeTakes: a fallback router has no deciding
+// model and a pattern filter has no prompt, so their usage lines must not ask
+// for either.
+func TestUsageNamesOnlyTheFlagsTheModeTakes(t *testing.T) {
+	for _, mode := range []policy.RouterMode{"fallback", "latency", "least-busy", "size"} {
+		if u := routerUsage("add", mode); strings.Contains(u, "--model") ||
+			strings.Contains(u, "--prompt") {
+			t.Errorf("routerUsage(add, %s) = %q", mode, u)
+		}
+	}
+	if u := routerUsage("add", ""); !strings.Contains(u, "--prompt") {
+		t.Errorf("an instruction router's usage should name --prompt: %q", u)
+	}
+	if u := filterUsage("add", policy.FilterModePattern); strings.Contains(u, "--prompt") ||
+		!strings.Contains(u, "--rules") {
+		t.Errorf("filterUsage(add, pattern) = %q", u)
+	}
+	if u := filterUsage("set", policy.FilterModePattern); u != "usage: keera filter set <alias> [flags]" {
+		t.Errorf("filterUsage(set) = %q", u)
 	}
 }

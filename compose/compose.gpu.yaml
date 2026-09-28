@@ -1,4 +1,5 @@
-# The GPU tier: vLLM with the host's NVIDIA device passed through.
+# The GPU tier: vLLM in place of compose.yaml's llama.cpp, with the host's
+# NVIDIA device passed through. Tool calls work here.
 #
 #   sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml   # once, on the host
 #   podman compose -f compose.yaml -f compose.gpu.yaml up -d --build
@@ -11,15 +12,6 @@
 # large context every turn.
 
 services:
-  # The catalogue belongs to the gateway, not to the backend, so the tier that
-  # widens the context window has to say so on this service. max_context is
-  # enforced in internal/gateway/filter.go before a request is dispatched:
-  # leaving it at the base file's 16384 would silently cap a 32k-capable
-  # deployment at half, with nothing in the logs to say why.
-  keera-gateway:
-    volumes:
-      - ./models.gpu.yaml:/etc/keera/models.yaml:ro,z
-
   keera-engine:
     image: ${KEERA_VLLM_IMAGE:-docker.io/vllm/vllm-openai:latest}
     # CDI is how podman hands an NVIDIA device to a container. Generate the spec
@@ -34,11 +26,14 @@ services:
     # vLLM wants far more than podman's 64 MB /dev/shm, and dies at startup with
     # "Insufficient space in /dev/shm" when it does not get it. 8 GB is the
     # floor for one card; raise it again for tensor parallelism across several.
-    #
-    # Its own variable rather than the base file's KEERA_SHM_SIZE, because
-    # .env.example ships that one set to 2gb - so `${KEERA_SHM_SIZE:-8gb}` would
-    # resolve to 2gb here and the default would never apply.
-    shm_size: ${KEERA_GPU_SHM_SIZE:-8gb}
+    shm_size: ${KEERA_SHM_SIZE:-8gb}
+    # vLLM keeps its weights here. The base file's llama-cache mount rides
+    # along unused: podman-compose 1.6 cannot remove it from an override.
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    healthcheck:
+      # A 30 GB first download needs more grace than llama.cpp's 1 GB one.
+      start_period: 600s
     command:
       # Qwen2.5-Coder-7B-Instruct-AWQ is ~5.6 GB of weights: 3.4 GB of 4-bit
       # tensors plus 2.2 GB of fp16 embeddings, which AWQ leaves unquantised and
@@ -54,11 +49,14 @@ services:
       - ${KEERA_GPU_MODEL:-Qwen/Qwen2.5-Coder-7B-Instruct-AWQ}
       - --served-model-name
       - keera-speed
-      # A fraction of VRAM here - unlike the base file, where the CPU build
-      # reads the same flag as a fraction of system RAM.
+      # A fraction of VRAM.
       - --gpu-memory-utilization
       - "0.90"
-      # Kept in step with max_context in models.gpu.yaml. 32768 is also where
+      # models.yaml gives keera-speed 16384, which is safe but half of this.
+      # To use the whole window, raise it on each organisation's model:
+      #   keera model set keera-speed --max-context 32768
+      # New organisations still get 16384 from models.yaml.
+      # 32768 is also where
       # Qwen2.5-Coder's max_position_embeddings sits: the 131k the model card
       # advertises needs a static YaRN rope_scaling block, which vLLM then
       # applies to short prompts too and measurably degrades them.
@@ -71,3 +69,6 @@ services:
       - --enable-auto-tool-choice
       - --tool-call-parser
       - hermes
+
+volumes:
+  hf-cache:

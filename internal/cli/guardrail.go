@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"net/url"
@@ -68,7 +69,8 @@ func registerGuardrailFlags(fs *flag.FlagSet) *guardrailFlags {
 	fs.BoolVar(&f.allowHosted, "allow-hosted-tools", false,
 		"stop this scope blocking hosted tools; an outer level that blocks them still does")
 	fs.IntVar(&f.maxSandboxes, "max-sandboxes", -1,
-		"how many sandboxes this scope may run at once (0 for unlimited)")
+		"how many sandboxes this scope may run at once (0 for unlimited); the sandbox "+
+			"flags are for an organisation or a team, not a key")
 	fs.DurationVar(&f.maxSandboxTTL, "max-sandbox-ttl", -1,
 		"longest lifetime any one of them may be given (0 for unlimited)")
 	fs.StringVar(&f.sandboxClasses, "sandbox-classes", "",
@@ -185,34 +187,59 @@ func guardrailCmd(ctx context.Context, args []string) error {
 
 	switch sub {
 	case "get", "show":
-		if err := parseArgs(fs, rest, 2, "usage: keera guardrail get <org|team|key> <id>"); err != nil {
+		scope, scopeID, err := scopeArgs(ctx, c, fs, rest, "usage: keera guardrail get <org|team|key> <id>")
+		if err != nil {
 			return err
 		}
 		var lim policy.Limits
-		if err := c.do(ctx, "GET", guardrailPath(fs.Arg(0), fs.Arg(1)), nil, &lim); err != nil {
+		if err := c.do(ctx, "GET", guardrailPath(scope, scopeID), nil, &lim); err != nil {
 			return err
 		}
 		return out(f.asJSON, lim, func(w *table) { printLimits(w, lim) })
 	case "effective":
-		if err := parseArgs(fs, rest, 2, "usage: keera guardrail effective <org|team|key> <id>"); err != nil {
+		scope, scopeID, err := scopeArgs(ctx, c, fs, rest,
+			"usage: keera guardrail effective <org|team|key> <id>")
+		if err != nil {
 			return err
 		}
-		eff, err := effectiveFor(ctx, c, fs.Arg(0), fs.Arg(1))
+		eff, err := effectiveFor(ctx, c, scope, scopeID)
 		if err != nil {
 			return err
 		}
 		return out(f.asJSON, eff, func(w *table) { printEffective(w, eff, facetAll) })
 	case "set", "edit", "update":
-		if err := parseArgs(fs, rest, 2, "usage: keera guardrail set <org|team|key> <id> [flags]"); err != nil {
+		scope, scopeID, err := scopeArgs(ctx, c, fs, rest,
+			"usage: keera guardrail set <org|team|key> <id> [flags]")
+		if err != nil {
 			return err
 		}
-		lim, err := updateLimits(ctx, c, fs.Arg(0), fs.Arg(1), f.apply)
+		lim, err := updateLimits(ctx, c, scope, scopeID, f.apply)
 		if err != nil {
 			return err
 		}
 		return out(f.asJSON, lim, func(w *table) { printLimits(w, lim) })
 	default:
 		return unknownSub("guardrail", sub)
+	}
+}
+
+// scopeArgs reads the scope and its id. The id of an organisation may be left
+// out: it is then the caller's own, or an operator's only one. These commands
+// have no --org flag, so the id goes after the scope instead.
+func scopeArgs(ctx context.Context, c *client, fs *flag.FlagSet, args []string,
+	usage string,
+) (string, string, error) {
+	if err := parse(fs, args); err != nil {
+		return "", "", err
+	}
+	switch {
+	case fs.NArg() == 2:
+		return fs.Arg(0), fs.Arg(1), nil
+	case fs.NArg() == 1 && fs.Arg(0) == string(policy.ScopeOrg):
+		orgID, err := theOnlyOrg(ctx, c, "name the one you mean after the scope: org <org-id>")
+		return fs.Arg(0), orgID, err
+	default:
+		return "", "", errors.New(usage)
 	}
 }
 
@@ -298,13 +325,13 @@ func facetCmd(ctx context.Context, name string, args []string) error {
 	fs := flag.NewFlagSet(name, flag.ExitOnError)
 	f := registerFacetFlags(fs, name)
 	fs.Usage = func() { _ = printHelp(fs, name, "") }
-	if err := parseArgs(fs, args, 2,
-		fmt.Sprintf("usage: keera %s <org|team|key> <id> [flags]", name)); err != nil {
+	c := newClient()
+	scope, scopeID, err := scopeArgs(ctx, c, fs, args,
+		fmt.Sprintf("usage: keera %s <org|team|key> <id> [flags]", name))
+	if err != nil {
 		return err
 	}
-	scope, scopeID := fs.Arg(0), fs.Arg(1)
 
-	c := newClient()
 	if changesSomething(fs) {
 		change := func(lim *policy.Limits) error { return f.apply(name, lim) }
 		if _, err := updateLimits(ctx, c, scope, scopeID, change); err != nil {

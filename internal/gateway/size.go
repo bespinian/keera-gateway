@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"fmt"
-	"net/http"
 	"sort"
 	"strconv"
 
@@ -46,13 +45,8 @@ func (s *Server) sized(rt policy.Router, b *body, kind policy.Kind) (routeDecisi
 	// The same extraction the filters and instruction routers use.
 	doc, err := extractText(b, kind)
 	if err != nil {
-		return d, &refusal{
-			status: http.StatusBadRequest,
-			typ:    "invalid_request_error", code: "invalid_body",
-			msg: "'" + rt.Alias + "' is a router: it chooses the model by how much text is " +
-				"in the request, and this request could not be read: " + err.Error(),
-			advise: true,
-		}
+		return d, unreadableBody("'"+rt.Alias+"' is a router: it chooses the model by how much "+
+			"text is in the request", err)
 	}
 	tokens := estimateTokens(doc.texts())
 
@@ -64,7 +58,7 @@ func (s *Server) sized(rt policy.Router, b *body, kind policy.Kind) (routeDecisi
 	}
 	var order []ranked
 	for i, alias := range rt.Destinations {
-		m, ok := s.serveable(alias)
+		m, ok := s.serveable(rt.OrgID, alias)
 		if !ok {
 			continue
 		}
@@ -80,15 +74,9 @@ func (s *Server) sized(rt policy.Router, b *body, kind policy.Kind) (routeDecisi
 	}
 	if len(order) == 0 {
 		d.outcome = store.RouterError
-		return d, &refusal{
-			status: http.StatusServiceUnavailable,
-			typ:    "server_error", code: "router_destination_unavailable",
-			msg: fmt.Sprintf("'%s' is a router: it chooses between its destinations by how "+
-				"much text is in the request, and none of them can answer one - every one is "+
-				"missing, disabled, of another kind, or has no backend. Nothing was sent to "+
-				"a model", rt.Alias),
-			advise: true,
-		}
+		return d, noDestination(fmt.Sprintf("'%s' is a router: it chooses between its "+
+			"destinations by how much text is in the request, and none of them can answer "+
+			"one - every one is missing, disabled, of another kind, or has no backend", rt.Alias))
 	}
 
 	// Tier first, then the smallest ceiling (the cheaper model), then the

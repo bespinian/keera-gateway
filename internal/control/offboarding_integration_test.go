@@ -89,6 +89,16 @@ func (d *recordingDriver) Create(ctx context.Context, spec sandbox.Spec) (sandbo
 	return d.stubDriver.Create(ctx, spec)
 }
 
+func (d *recordingDriver) Revive(_ context.Context, spec sandbox.Spec) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.env == nil {
+		d.env = map[string]map[string]string{}
+	}
+	d.env[spec.Name] = spec.Env
+	return nil
+}
+
 func (d *recordingDriver) Status(_ context.Context, ref sandbox.Ref) (sandbox.Status, error) {
 	return sandbox.Status{Ref: ref, State: policy.SandboxReady}, nil
 }
@@ -213,7 +223,7 @@ func TestASandboxRefreshesItsRepositoryCredentialWithItsOwnKey(t *testing.T) {
 	}
 	if code := call(t, ts, http.MethodPost, httpx.ControlPrefix+"/v1/sandboxes", map[string]any{
 		"org_id": "org_1", "name": "nope", "class": "standard", "purpose": "agent",
-		"repo": "https://git.example.ch/acme/forbidden",
+		"repo": "https://git.example.ch/acme/forbidden", "task": "fix the login",
 	}, &refusal); code != http.StatusConflict || refusal.Error.Message != "the forge says no" {
 		t.Errorf("a refused repository = %d %q", code, refusal.Error.Message)
 	}
@@ -270,6 +280,7 @@ func TestASandboxOnlyGetsTheRepositoriesItsGuardrailAllows(t *testing.T) {
 		}
 		code := call(t, ts, http.MethodPost, httpx.ControlPrefix+"/v1/sandboxes", map[string]any{
 			"org_id": "org_1", "name": name, "class": "standard", "purpose": "agent", "repo": repo,
+			"task": "fix the login",
 		}, &out)
 		return code, out.Error.Message
 	}
@@ -346,5 +357,76 @@ func TestOnlyAnOperatorSetsAnOrganisationsRepositories(t *testing.T) {
 	}
 	if code := put(operator, `{"allowed_repos":["acme/../x"]}`); code != http.StatusBadRequest {
 		t.Errorf("a malformed entry = %d, want 400", code)
+	}
+}
+
+// An expired engineer's sandbox has lost its key and repository credential,
+// but kept its volume. Resuming it, by name, gives it new ones and a new
+// lifetime.
+func TestAnExpiredSandboxResumesWithANewKey(t *testing.T) {
+	st, ctx := sandboxStore(t)
+	driver := &recordingDriver{}
+	git := &fakeForge{}
+	m := sandbox.NewManager(st, driver, sandbox.ManagerOptions{Git: git})
+	ts := sandboxServer(t, st, m)
+	if err := st.PutPolicy(ctx, policy.ScopeOrg, "org_1", policy.Limits{
+		SandboxLimits: policy.SandboxLimits{AllowedRepos: []string{"acme"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var sb store.Sandbox
+	if code := call(t, ts, http.MethodPost, httpx.ControlPrefix+"/v1/sandboxes", map[string]any{
+		"org_id": "org_1", "name": "desk", "class": "standard",
+		"repo":            "https://git.example.ch/acme/app.git",
+		"authorized_keys": []string{"ssh-ed25519 AAAA test"},
+	}, &sb); code != http.StatusCreated {
+		t.Fatalf("creating the sandbox = %d", code)
+	}
+	oldKey := driver.env["desk"]["KEERA_API_KEY"]
+
+	// Its time runs out.
+	m.Sweep(ctx, sb.ExpiresAt.Add(time.Minute))
+	expired, err := st.Sandbox(ctx, sb.ID)
+	if err != nil || expired.State != policy.SandboxExpired {
+		t.Fatalf("after the sweep: %+v, %v; want expired", expired.State, err)
+	}
+	if _, err := st.LookupKey(ctx, auth.Hash(oldKey)); err == nil {
+		t.Error("an expired sandbox's key still works")
+	}
+	// A second sweep does not end it again.
+	m.Sweep(ctx, sb.ExpiresAt.Add(2*time.Minute))
+	if again, _ := st.Sandbox(ctx, sb.ID); again.State != policy.SandboxExpired {
+		t.Errorf("a second sweep left it %s", again.State)
+	}
+	// Its name is still taken, so nobody else can get a second "desk".
+	if code := call(t, ts, http.MethodPost, httpx.ControlPrefix+"/v1/sandboxes", map[string]any{
+		"org_id": "org_1", "name": "desk", "class": "standard",
+		"authorized_keys": []string{"ssh-ed25519 AAAA test"},
+	}, nil); code == http.StatusCreated {
+		t.Error("a second sandbox took the name of an expired one")
+	}
+
+	var resumed store.Sandbox
+	if code := call(t, ts, http.MethodPost,
+		httpx.ControlPrefix+"/v1/sandboxes/desk/resume?org_id=org_1", nil, &resumed,
+	); code != http.StatusOK {
+		t.Fatalf("resuming by name = %d", code)
+	}
+	if !resumed.State.Running() {
+		t.Errorf("state after resume = %s", resumed.State)
+	}
+	if resumed.ExpiresAt == nil || !resumed.ExpiresAt.After(time.Now()) {
+		t.Errorf("expires_at after resume = %v, want in the future", resumed.ExpiresAt)
+	}
+	newEnv := driver.env["desk"]
+	if newEnv["KEERA_API_KEY"] == "" || newEnv["KEERA_API_KEY"] == oldKey {
+		t.Fatal("the resumed sandbox was not given a new key")
+	}
+	if _, err := st.LookupKey(ctx, auth.Hash(newEnv["KEERA_API_KEY"])); err != nil {
+		t.Errorf("the new key does not work: %v", err)
+	}
+	if newEnv["KEERA_GIT_TOKEN"] != "token-2" {
+		t.Errorf("KEERA_GIT_TOKEN = %q, want a new one", newEnv["KEERA_GIT_TOKEN"])
 	}
 }

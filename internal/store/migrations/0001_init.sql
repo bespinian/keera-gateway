@@ -59,7 +59,9 @@ CREATE UNIQUE INDEX users_external_id_key ON users (external_id) WHERE external_
 CREATE TABLE api_keys (
     id         text PRIMARY KEY,
     org_id     text NOT NULL REFERENCES orgs (id) ON DELETE CASCADE,
-    team_id    text REFERENCES teams (id) ON DELETE CASCADE,
+    -- A deleted team leaves its revoked keys in the organisation, for the
+    -- usage history. DeleteTeam refuses while any still works.
+    team_id    text REFERENCES teams (id) ON DELETE SET NULL,
     user_id    text REFERENCES users (id) ON DELETE SET NULL,
     -- The label on a key is not what the key is called; it is what stands in
     -- for the key wherever the key itself must not appear. The secret is shown
@@ -146,7 +148,11 @@ CREATE TABLE guardrails (
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE models (
-    alias                  text PRIMARY KEY,
+    alias                  text NOT NULL,
+    -- The organisation the model belongs to. Nobody else can call it, so two
+    -- organisations can each have a 'fast'. A new organisation starts with a
+    -- copy of each model in KEERA_MODELS_FILE.
+    org_id                 text NOT NULL REFERENCES orgs (id) ON DELETE CASCADE,
     kind                   text NOT NULL CHECK (kind IN ('chat', 'completion', 'embedding')),
     backends               text[] NOT NULL,
     backend_model          text NOT NULL,
@@ -159,15 +165,10 @@ CREATE TABLE models (
     -- reads a zero that way.
     cached_input_micros_per_mtok bigint NOT NULL DEFAULT 0,
     max_context            int NOT NULL DEFAULT 0,
-    -- Names an environment variable, never a secret. It is still the right
-    -- answer for a deployment whose secrets come from a Kubernetes Secret or a
-    -- vault, and it is how one credential is shared by several models.
-    api_key_env            text NOT NULL DEFAULT '',
-    -- A credential for somebody else's endpoint, so that an operator can add a
-    -- hosted model from the control panel instead of needing an environment
-    -- variable and a restart. Encrypted with a key that lives only in the
-    -- gateway's environment (KEERA_SECRET_KEY), authenticated with the alias of
-    -- the model it belongs to, and never returned by the control API.
+    -- A credential for somebody else's endpoint, set from the control panel or
+    -- the CLI. Encrypted with a key that lives only in the gateway's
+    -- environment (KEERA_SECRET_KEY), authenticated with the organisation and
+    -- alias of the model it belongs to, and never returned by the control API.
     api_key_ct             bytea,
     -- What this model is for, in a sentence.
     --
@@ -180,28 +181,22 @@ CREATE TABLE models (
     -- router does.
     description            text NOT NULL DEFAULT '',
     -- Which hosted provider this model was declared against. A provider is a
-    -- table of defaults: naming one fills in the backend URL, the credential
-    -- variable, the context window and the prices, and the entry keeps the
-    -- expanded values rather than the name. Keeping the name is what says
-    -- whether those values are the provider's answers or the operator's - the
-    -- difference between a form that shows them and a form that asks somebody
-    -- to check somebody else's homework. Empty is a model served by an
-    -- inference plane of the deployment's own.
+    -- table of defaults: naming one fills in the backend URL, the context
+    -- window and the prices, and the entry keeps the expanded values rather
+    -- than the name. Keeping the name is what says whether those values are
+    -- the provider's answers or the administrator's - the difference between a
+    -- form that shows them and a form that asks somebody to check somebody
+    -- else's homework. Empty is a model served by an inference plane of the
+    -- deployment's own.
     provider               text NOT NULL DEFAULT '',
     -- The day the model came out. Null when nobody stated it.
     release_date           date,
     -- Where the model runs, and so where prompts go: a country such as ch or
     -- usa, or onprem for an inference plane of the deployment's own.
     location               text NOT NULL DEFAULT 'onprem',
-    -- Declared in KEERA_MODELS_FILE, which is applied on every start. Rather
-    -- than let a panel or a CLI accept a change it cannot keep, the ones the
-    -- file declares are marked here and refused to every other writer.
-    -- Applying a catalogue sets the flag; applying one that no longer names a
-    -- model clears it, which is how an entry deleted from the file is handed
-    -- back to the operator.
-    managed                boolean NOT NULL DEFAULT false,
     enabled                boolean NOT NULL DEFAULT true,
-    updated_at             timestamptz NOT NULL DEFAULT now()
+    updated_at             timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (org_id, alias)
 );
 
 -- ---------------------------------------------------------------------------
@@ -214,10 +209,8 @@ CREATE TABLE models (
 -- organisation that allows a hosted model at all wants what reaches it to have
 -- had its credentials, its customer names and its client data taken out first.
 --
--- A filter belongs to an organisation, unlike the model catalogue which is
--- shared by every tenant. The model it names is the operator's; the wording is
--- the organisation's, and it is the wording that encodes which of that
--- organisation's data is the data that must not leave.
+-- A filter belongs to an organisation, as its models do. The wording is what
+-- encodes which of that organisation's data is the data that must not leave.
 --
 -- The alias is the identity, as a model's is, because it is what an
 -- administrator types into a guardrail rather than something they copy.
@@ -225,10 +218,9 @@ CREATE TABLE filters (
     org_id      text NOT NULL REFERENCES orgs (id) ON DELETE CASCADE,
     alias       text NOT NULL,
     -- The model this filter runs on. Deliberately not a foreign key into
-    -- models: the catalogue is shared and a filter is not, so a model must
-    -- not become undeletable because one tenant referred to it. A filter whose
-    -- model has gone refuses the requests it guards, which is the safe
-    -- direction and is visible on the panel.
+    -- models, so a model does not become undeletable because a filter refers
+    -- to it. A filter whose model has gone refuses the requests it guards,
+    -- which is the safe direction and is visible on the panel.
     model       text NOT NULL,
     prompt      text NOT NULL,
     description text NOT NULL DEFAULT '',
@@ -317,11 +309,10 @@ ALTER TABLE filters
 -- routed whatever it asks for has the allow-list already: a key whose
 -- allowed_models is just the router can reach nothing else.
 --
--- A router belongs to an organisation, as a filter does, and for the same
--- reason: the models are the operator's and the judgement about which requests
--- deserve which of them is the organisation's.
+-- A router belongs to an organisation, as its models and filters do: which
+-- requests deserve which model is the organisation's judgement.
 --
--- Its alias shares a namespace with the catalogue's: a client puts one string
+-- Its alias shares a namespace with the organisation's models: a client puts one string
 -- in the 'model' field and the gateway decides, from that string alone, whether
 -- it named a model or a router.
 CREATE TABLE routers (
@@ -329,9 +320,8 @@ CREATE TABLE routers (
     alias       text NOT NULL,
     -- The model that makes the decision, for an instruction router.
     -- Deliberately not a foreign key into models, for the reason filters.model
-    -- is not: the catalogue is shared and a router is not, so one tenant naming
-    -- a model must not make it undeletable. A router whose model has gone falls
-    -- back or refuses, which is visible on its own screen.
+    -- is not. A router whose model has gone falls back or refuses, which is
+    -- visible on its own screen.
     model       text NOT NULL,
     prompt      text NOT NULL,
     -- The models this router may choose between, in the order they are offered
@@ -440,24 +430,24 @@ ALTER TABLE routers
 -- the MCP servers that carry those calls, so the same keys, allow-lists and
 -- filters decide them, and the same log records them.
 --
--- Shared by every tenant, like models: the operator declares where a server is
--- and what credential it takes, and a guardrail decides which of its tools a
--- scope may call.
+-- A server belongs to one organisation, as its models do. Its administrators
+-- declare where the server is and what credential it takes, and a guardrail
+-- decides which of its tools a scope may call.
 CREATE TABLE mcp_servers (
-    alias        text PRIMARY KEY,
+    org_id       text NOT NULL REFERENCES orgs (id) ON DELETE CASCADE,
+    alias        text NOT NULL,
     -- The server's Streamable HTTP endpoint.
     url          text NOT NULL,
     description  text NOT NULL DEFAULT '',
     -- The header the credential goes in. Empty is Authorization, as a bearer
     -- token, which is what most servers read.
     auth_header  text NOT NULL DEFAULT '',
-    -- As on models: an environment variable's name, or a sealed credential
-    -- set from the control plane and never returned by it.
-    api_key_env  text NOT NULL DEFAULT '',
+    -- As on models: a sealed credential set from the control plane and never
+    -- returned by it.
     api_key_ct   bytea,
-    managed      boolean NOT NULL DEFAULT false,
     enabled      boolean NOT NULL DEFAULT true,
-    updated_at   timestamptz NOT NULL DEFAULT now()
+    updated_at   timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (org_id, alias)
 );
 
 -- ---------------------------------------------------------------------------
@@ -561,7 +551,9 @@ CREATE INDEX usage_events_team_ts_idx ON usage_events (team_id, ts);
 CREATE INDEX usage_events_key_ts_idx ON usage_events (key_id, ts);
 -- The per-entity reports: one team, one key or one model, read on its own
 -- screen rather than as a share of the organisation's total.
-CREATE INDEX usage_events_alias_ts_idx ON usage_events (alias, ts);
+-- Led by the organisation, because two organisations can each have a model
+-- of one alias.
+CREATE INDEX usage_events_alias_ts_idx ON usage_events (org_id, alias, ts);
 CREATE INDEX usage_events_user_ts_idx ON usage_events (user_id, ts);
 
 -- The live request log's own shape. It filters on the organisation and orders
@@ -748,10 +740,8 @@ CREATE TABLE audit_log (
     target_id   text,
     detail      jsonb,
     -- Which tenant the entry belongs to. An organisation administrator must see
-    -- everything done inside their own tenant and nothing outside it. Null
-    -- means the action was not scoped to one - a change to the shared model
-    -- catalogue, say - and only an operator sees those.
-    org_id      text
+    -- everything done inside their own tenant and nothing outside it.
+    org_id      text NOT NULL
 );
 CREATE INDEX audit_log_ts_idx ON audit_log (ts);
 CREATE INDEX audit_log_org_id_idx ON audit_log (org_id, id DESC);
@@ -773,10 +763,7 @@ CREATE TABLE sessions (
     -- post; this covers the rest.
     csrf         text NOT NULL,
     created_at   timestamptz NOT NULL DEFAULT now(),
-    last_seen_at timestamptz NOT NULL DEFAULT now(),
-    expires_at   timestamptz NOT NULL,
-    user_agent   text NOT NULL DEFAULT '',
-    ip           text NOT NULL DEFAULT ''
+    expires_at   timestamptz NOT NULL
 );
 CREATE INDEX sessions_user_id_idx ON sessions (user_id);
 CREATE INDEX sessions_expires_at_idx ON sessions (expires_at);
@@ -840,17 +827,11 @@ CREATE INDEX cli_codes_expires_at_idx ON cli_codes (expires_at);
 -- session is carried by a browser, which means a cookie, a CSRF token and
 -- twelve hours. This is carried in a file by a person who will be typing
 -- commands next week, presented in an Authorization header where cross-site
--- request forgery is not a thing that exists, and it says which machine it is
--- on so that one laptop can be signed out without the others.
+-- request forgery is not a thing that exists.
 CREATE TABLE cli_tokens (
     id           bytea PRIMARY KEY,
     user_id      text NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-    -- The machine it was issued to, as that machine described itself. Shown to
-    -- a person deciding which of their sign-ins is which; nothing reads it to
-    -- decide anything.
-    label        text NOT NULL DEFAULT '',
     created_at   timestamptz NOT NULL DEFAULT now(),
-    last_seen_at timestamptz NOT NULL DEFAULT now(),
     expires_at   timestamptz NOT NULL
 );
 CREATE INDEX cli_tokens_user_id_idx ON cli_tokens (user_id);
@@ -864,24 +845,26 @@ CREATE INDEX cli_tokens_expires_at_idx ON cli_tokens (expires_at);
 -- what the agent does with the answer, because the agent runs on a laptop this
 -- gateway cannot see. A sandbox is that laptop moved inside the cluster - which
 -- is what makes three things possible that were not: an egress rule an agent
--- cannot talk its way past, an API key that never lands on anybody's disk, and
+-- cannot talk its way past, an API key that never lands on anybody's laptop, and
 -- a session that is stated rather than inferred.
 --
--- Two tables. The first is a catalogue and behaves exactly like models: it is
--- declared in a file, applied on every start, and owned by the deployment. The
--- second is the sandboxes themselves, and it is a log rather than a live view -
--- rows are kept after the sandbox is gone, because what a task cost and who
--- asked for it outlive the machine that answered.
+-- Two tables. The first is a catalogue and behaves exactly like models: each
+-- class belongs to one organisation, and a new organisation starts with a copy
+-- of each class in KEERA_SANDBOXES_FILE. The second is the sandboxes
+-- themselves, and it is a log rather than a live view - rows are kept after the
+-- sandbox is gone, because what a task cost and who asked for it outlive the
+-- machine that answered. They go with their organisation.
 
 -- The catalogue: a machine somebody can ask for by name.
 --
 -- The name is a contract in the way a model alias is. It is typed on a command
 -- line, written into a repository's own configuration and baked into a team's
--- habits, so the operator has to be able to change the image behind it, move it
--- to a stronger isolation tier or give it more memory without anybody editing
--- anything - and everything below exists to protect that.
+-- habits, so an administrator has to be able to change the image behind it,
+-- move it to a stronger isolation tier or give it more memory without anybody
+-- editing anything - and everything below exists to protect that.
 CREATE TABLE sandbox_classes (
-    name         text PRIMARY KEY,
+    org_id       text NOT NULL REFERENCES orgs (id) ON DELETE CASCADE,
+    name         text NOT NULL,
     description  text NOT NULL DEFAULT '',
     -- What the sandbox runs. It should carry the toolchain already installed:
     -- a sandbox that installs its own is one nobody waits for, and on an
@@ -893,10 +876,6 @@ CREATE TABLE sandbox_classes (
     -- deployment maps these three onto its own names once, and the catalogue
     -- stays portable between clusters.
     isolation    text NOT NULL DEFAULT 'isolated',
-    -- The escape hatch from that mapping, for a cluster with two of something
-    -- or a hand-rolled runtime. An entry that sets it has stopped being
-    -- portable, which is why it is not the ordinary way to answer the question.
-    runtime_class text NOT NULL DEFAULT '',
     cpu_millis   integer NOT NULL DEFAULT 2000,
     memory_mib   integer NOT NULL DEFAULT 4096,
     -- Zero is a real answer: a class with no volume keeps nothing across a
@@ -919,20 +898,11 @@ CREATE TABLE sandbox_classes (
     -- they work around, and it is also a standing bill: this many of the CPU
     -- and memory above, held by nobody, all the time.
     warm         integer NOT NULL DEFAULT 0,
-    -- Where a sandbox of this class may open a connection, by the names the
-    -- deployment's own network policy knows. An empty list is not "anywhere" -
-    -- it is the driver's default, which is the gateway and DNS and nothing
-    -- else, because a sandbox that can reach the internet is a sandbox a
-    -- repository can leave from.
-    egress       text[] NOT NULL DEFAULT '{}',
     -- Which of engineer and agent may ask for this class. Empty is both.
     purposes     text[] NOT NULL DEFAULT '{}',
-    -- Declared by the catalogue file, which is applied on every start. Nothing
-    -- but another apply may change such a row: an edit made elsewhere would be
-    -- silently undone by the next restart.
-    managed      boolean NOT NULL DEFAULT false,
     created_at   timestamptz NOT NULL DEFAULT now(),
-    updated_at   timestamptz NOT NULL DEFAULT now()
+    updated_at   timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (org_id, name)
 );
 
 -- The sandboxes themselves.
@@ -951,11 +921,10 @@ CREATE TABLE sandboxes (
     -- half of an ssh config Host pattern on their laptop, which is why it is
     -- held to the same shape as a model alias.
     name      text NOT NULL,
-    -- Deliberately not a foreign key into sandbox_classes, for the reason
-    -- filters.model is not one into models: the catalogue is shared and a
-    -- sandbox is not, so one team's running sandbox must not make a class
-    -- undeletable. Everything the sandbox actually needs from the class is
-    -- copied below.
+    -- The organisation's class. Deliberately not a foreign key into
+    -- sandbox_classes, for the reason filters.model is not one into models: a
+    -- running sandbox must not make a class undeletable. Everything the
+    -- sandbox actually needs from the class is copied below.
     class     text NOT NULL,
     purpose   text NOT NULL DEFAULT 'engineer',
     state     text NOT NULL DEFAULT 'pending',
@@ -1023,6 +992,11 @@ CREATE TABLE sandboxes (
     ready_at     timestamptz,
     expires_at   timestamptz,
     suspended_at timestamptz,
+    -- When somebody last had a connection open to this sandbox, or when it
+    -- last came back to ready. Idle suspension counts from here, so a sandbox
+    -- in use is not suspended, and a resumed one is not suspended again
+    -- straight away.
+    active_at    timestamptz,
     -- Terminated rather than deleted: everything else this schema deletes is a
     -- record that stops existing, and a terminated sandbox is the opposite -
     -- the machine is gone and the row is deliberately kept, because what it
@@ -1045,7 +1019,7 @@ CREATE TABLE sandboxes (
     accounted_at timestamptz
 );
 
--- A name is unique among the sandboxes an organisation currently has, and free
+-- A name is unique among the sandboxes one person currently has, and free
 -- again once one is gone.
 --
 -- Partial, on the live states only, and that is the point of it. `keera sandbox
@@ -1053,15 +1027,22 @@ CREATE TABLE sandboxes (
 -- be ambiguous at the moment it matters most; but a developer who finishes with
 -- "fix-login" on Tuesday and wants it again on Thursday is asking for something
 -- perfectly reasonable, and a unique index over every row this table has ever
--- held would refuse it for ever.
-CREATE UNIQUE INDEX sandboxes_live_name_idx ON sandboxes (org_id, name)
-    WHERE state IN ('pending', 'ready', 'suspended');
+-- held would refuse it for ever. The live states are those of liveSandbox in
+-- the store: a failed engineer sandbox still holds its volume.
+--
+-- Per person, not per organisation, so a refused name never tells a member
+-- what a colleague called theirs. It is keyed on the copied address, not on
+-- user_id, which turns null when a person is deleted.
+CREATE UNIQUE INDEX sandboxes_live_name_idx ON sandboxes (org_id, owner, name)
+    WHERE state IN ('pending', 'ready', 'suspended', 'expired')
+       OR (state = 'failed' AND purpose = 'engineer');
 
 -- The list, which is always one organisation's, newest first.
 CREATE INDEX sandboxes_org_idx ON sandboxes (org_id, created_at DESC);
 
--- What the sweep reads: the sandboxes whose time is up. Partial on the live
--- states, because this runs every minute and the table is mostly history.
+-- What the sweep reads: the sandboxes whose time is up. Partial on the states
+-- that can still expire, because this runs every minute and the table is mostly
+-- history.
 CREATE INDEX sandboxes_expiry_idx ON sandboxes (expires_at)
     WHERE state IN ('pending', 'ready', 'suspended');
 

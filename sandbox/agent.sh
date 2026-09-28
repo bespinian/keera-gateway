@@ -19,7 +19,7 @@ die() { log "$*"; exit 1; }
 # The branch. Named after the sandbox, because the sandbox id is the one string
 # that ties a branch back to what it cost, which model answered, and the task
 # it was carrying out - all of which are on the gateway under that id.
-BRANCH="${KEERA_PUSH_BRANCH:-keera/${KEERA_SANDBOX_NAME:-agent}-${KEERA_SANDBOX_ID##*_}}"
+BRANCH="keera/${KEERA_SANDBOX_NAME:-agent}-${KEERA_SANDBOX_ID##*_}"
 
 if [ -d .git ]; then
   git checkout -b "$BRANCH" 2>/dev/null || git checkout "$BRANCH"
@@ -36,11 +36,12 @@ fi
 # non-interactive mode; none of them is given a terminal, because there is
 # nobody here.
 #
-# The session header is already set for all three. Claude Code reads
-# ANTHROPIC_CUSTOM_HEADERS, which the gateway set; the other two are given
-# KEERA_SESSION and send it themselves. That is what makes this task one
-# session in `keera sessions` rather than an inference from its opening prompt -
-# see docs/sessions.md for why that distinction is worth the trouble.
+# The session header is already set for Pi and Claude Code. Pi's
+# configuration carries it, and Claude Code reads ANTHROPIC_CUSTOM_HEADERS,
+# both written by the gateway. That makes this task one session in
+# `keera sessions` rather than a guess from its opening prompt - see
+# docs/sessions.md. OpenCode is given no configuration here: an image that
+# adds it brings its own, and that decides whether it sends KEERA_SESSION.
 run_agent() {
   # Pi first, because it is the agent this image installs. The other two are
   # tried after it, so that a deployment which put one into its own image on top

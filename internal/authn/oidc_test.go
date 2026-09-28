@@ -38,6 +38,9 @@ func TestOIDCConfigValidate(t *testing.T) {
 		{"a name with a space", func(c *OIDCConfig) { c.Name = "entra id" }, "provider name"},
 		{"a name in capitals", func(c *OIDCConfig) { c.Name = "Entra" }, "provider name"},
 		{"a name with a colon", func(c *OIDCConfig) { c.Name = "en:tra" }, "provider name"},
+		// The operator key signs in as keera:operator-key, and a provider of
+		// that name could issue the same subject.
+		{"the reserved name", func(c *OIDCConfig) { c.Name = "keera" }, "reserved"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

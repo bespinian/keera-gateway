@@ -77,7 +77,7 @@ func newFixture(t *testing.T, st *Store, ctx context.Context) fixture {
 	t.Helper()
 	f := fixture{orgID: "org_1", teamID: "team_1", keyID: "key_1", key: "keera_sk_test"}
 	f.hash = []byte("hash-of-keera_sk_test-32-bytes!!!")
-	if _, err := st.CreateOrg(ctx, f.orgID, "Example Bank"); err != nil {
+	if _, err := st.CreateOrg(ctx, Org{ID: f.orgID, Name: "Example Bank"}, OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
 	if _, err := st.CreateTeam(ctx, f.teamID, f.orgID, "Payments Platform"); err != nil {

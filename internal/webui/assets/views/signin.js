@@ -9,7 +9,7 @@ import { api, ApiError } from "../api.js";
 import { h, replace, icon, icons, brandMark, idpMark } from "../ui.js";
 
 export async function signIn(root, onSignedIn) {
-  let config = { sso: false, providers: [], operator_key: true };
+  let config = { sso: false, providers: [] };
   try {
     config = await api.authConfig();
   } catch {
@@ -66,25 +66,22 @@ export async function signIn(root, onSignedIn) {
     "Sign in with the operator key",
   );
 
-  const keyForm =
-    config.operator_key === false
-      ? null
-      : h(
-          "form",
-          { onSubmit: submit },
-          h(
-            "div",
-            { class: "field" },
-            h("label", { for: "operator-key" }, "Operator key"),
-            keyInput,
-            h(
-              "div",
-              { class: "hint" },
-              "The value of KEERA_OPERATOR_KEY. It signs you in as an operator.",
-            ),
-          ),
-          button,
-        );
+  const keyForm = h(
+    "form",
+    { onSubmit: submit },
+    h(
+      "div",
+      { class: "field" },
+      h("label", { for: "operator-key" }, "Operator key"),
+      keyInput,
+      h(
+        "div",
+        { class: "hint" },
+        "The value of KEERA_OPERATOR_KEY. It signs you in as an operator.",
+      ),
+    ),
+    button,
+  );
 
   const card = h(
     "div",
@@ -110,19 +107,13 @@ export async function signIn(root, onSignedIn) {
     // single sign-on works it is the wrong door for everyone who is not doing
     // one of those two things, so it is off this screen entirely: an operator
     // who needs it comes to ?operator_key=1, and nobody else is offered it.
-    const operatorKey = keyForm !== null && params.get("operator_key") === "1";
+    const operatorKey = params.get("operator_key") === "1";
     focusKey = operatorKey;
 
-    // A deployment with one directory has nothing to choose between, so its
-    // button does not ask - it says "single sign-on" and the person behind it
-    // finds out which directory when they get there. Where there are several,
-    // each is named: somebody with both a work Google account and a work
-    // Microsoft one cannot answer "single sign-on", and picking wrong lands
-    // them in a failed sign-in rather than a different button.
-    const providers =
-      config.providers && config.providers.length
-        ? config.providers
-        : [{ name: "", label: "single sign-on" }];
+    // Each directory is named: somebody with both a work Google account and a
+    // work Microsoft one cannot answer "single sign-on", and picking wrong
+    // lands them in a failed sign-in rather than a different button.
+    const providers = config.providers || [];
     const next = params.get("next");
 
     card.append(
@@ -131,7 +122,7 @@ export async function signIn(root, onSignedIn) {
         { class: "signin-providers" },
         ...providers.map((p, i) => {
           const query = new URLSearchParams();
-          if (p.name) query.set("provider", p.name);
+          query.set("provider", p.name);
           if (next) query.set("next", next);
           return h(
             "a",
@@ -165,31 +156,19 @@ export async function signIn(root, onSignedIn) {
         ? [h("div", { class: "divider" }, "operator"), keyForm]
         : []),
     );
-  } else if (keyForm) {
+  } else {
     card.append(
       keyForm,
       h(
         "div",
         { class: "signin-note" },
         "No identity provider is set up, so only the operator key works. For " +
-          "single sign-on, set KEERA_OIDC_ISSUER, KEERA_OIDC_CLIENT_ID, " +
-          "KEERA_OIDC_CLIENT_SECRET and KEERA_OIDC_REDIRECT_URL, or " +
-          "KEERA_OIDC_PROVIDERS for more than one provider.",
+          "single sign-on, set KEERA_PUBLIC_URL, name the provider in " +
+          "KEERA_OIDC_PROVIDERS and set its KEERA_OIDC_<NAME>_ISSUER, _CLIENT_ID " +
+          "and _CLIENT_SECRET.",
       ),
     );
     focusKey = true;
-  } else {
-    // Neither way in is configured. Saying so beats a screen with nothing on
-    // it, which reads as a panel that failed to load.
-    card.append(
-      h(
-        "div",
-        { class: "banner banner-bad" },
-        "There is no way to sign in: no identity provider and no operator " +
-          "key. Set KEERA_OPERATOR_KEY, or KEERA_OIDC_ISSUER and its client " +
-          "settings, then restart.",
-      ),
-    );
   }
 
   root.classList.remove("boot");

@@ -17,16 +17,22 @@ import {
   copyText,
   rowLink,
   showError,
+  isAdmin,
 } from "../ui.js";
 import { openGuardrails, ceilingsFor, summarise } from "./guardrails.js";
-import { chooseOrg } from "./orgs.js";
+import { chooseOrg, orgNameOf } from "./orgs.js";
 import { loadClients, code, defaultBase, title } from "./connect.js";
 
 export async function keysView(ctx) {
+  // Keys, models and people all belong to one organisation, so an operator
+  // looking at every organisation picks one before anything is read.
+  if (!ctx.orgID && ctx.state.me.unrestricted)
+    return chooseOrg(ctx, "API keys");
+
   const [keysRes, teamsRes, modelsRes, usersRes, clients] = await Promise.all([
     api.keys(ctx.orgID),
     api.teams(ctx.orgID).catch(() => ({ data: [] })),
-    api.models().catch(() => ({ data: [] })),
+    api.models(ctx.orgID).catch(() => ({ data: [] })),
     // Who a key can be attributed to. A deployment with no identity provider
     // has nobody here, and the field is left out rather than shown empty.
     api.users(ctx.orgID).catch(() => ({ data: [] })),
@@ -39,18 +45,15 @@ export async function keysView(ctx) {
   const users = usersRes.data || [];
   const models = (modelsRes.data || []).filter((m) => m.enabled !== false);
   const teamName = Object.fromEntries(teams.map((t) => [t.id, t.name]));
-  const canEdit = ctx.state.me.unrestricted || ctx.state.me.role === "admin";
+  const canEdit = isAdmin(ctx);
   // A member issues keys for themselves and nobody else, so they get a button
   // and not the dialog above it: there is no person to choose and no team to
   // put it in, which leaves an alias and an expiry.
-  const canIssueOwn = !canEdit && ctx.state.me.can_issue_own_key;
+  const canIssueOwn = !canEdit && ctx.state.me.can_manage_own_keys;
   const currency = keysRes.currency || ctx.currency;
 
   const live = keys.filter((k) => stateOf(k) === "active").length;
   ctx.setSubtitle(`${live} active of ${keys.length}`);
-
-  if (!ctx.orgID && ctx.state.me.unrestricted)
-    return chooseOrg(ctx, "API keys");
 
   const head = h(
     "div",
@@ -152,11 +155,7 @@ export async function keysView(ctx) {
                 { class: "muted nowrap", title: k.last_used_at },
                 ago(k.last_used_at),
               )
-            : h(
-                "span",
-                { class: "faint nowrap" },
-                stateOf(k) === "active" ? "never used" : "never",
-              ),
+            : h("span", { class: "faint nowrap" }, "not this month"),
       },
       {
         label: "This month",
@@ -179,7 +178,7 @@ export async function keysView(ctx) {
             : h("span", { class: "faint" }, "-"),
       },
       {
-        label: "Limits",
+        label: "Guardrails",
         shrink: true,
         cell: (k) => {
           const bits = summarise(k.limits || {});
@@ -197,7 +196,11 @@ export async function keysView(ctx) {
                 { class: "muted nowrap", style: { fontSize: "11.5px" } },
                 bits.join(" · "),
               )
-            : h("span", { class: "faint" }, "team's");
+            : h(
+                "span",
+                { class: "faint" },
+                k.team_id ? "team's" : `${orgNameOf(ctx, k.org_id)}'s`,
+              );
         },
       },
       {
@@ -223,12 +226,35 @@ export async function keysView(ctx) {
               "button",
               {
                 class: "btn btn-sm",
-                title: "Limits for this key",
+                title: "Guardrails for this key",
                 onClick: () =>
                   openKey(ctx, k, models, teamName[k.team_id], canEdit),
               },
               "Guardrails",
             ),
+            canRevoke(ctx, k) && stateOf(k) === "active"
+              ? h(
+                  "button",
+                  {
+                    class: "btn btn-sm",
+                    title: "Replace this key with a new one",
+                    onClick: () =>
+                      confirm({
+                        title: "Rotate this key?",
+                        body:
+                          `A new key replaces ${k.alias}, with the same team, ` +
+                          "person and guardrails. The old key stops working " +
+                          "at once, so update its clients with the new one.",
+                        confirmLabel: "Rotate",
+                        onConfirm: async () => {
+                          const created = await api.rotateKey(k.id);
+                          showSecret(ctx, created, models, clients);
+                        },
+                      }),
+                  },
+                  "Rotate",
+                )
+              : null,
             canRevoke(ctx, k) && stateOf(k) === "active"
               ? h(
                   "button",
@@ -280,16 +306,16 @@ export async function keysView(ctx) {
   return h("div", {}, head, rows);
 }
 
-// canRevoke reports whether the reader may revoke this key. An administrator
+// canRevoke reports whether the reader may revoke or rotate this key. An administrator
 // revokes any of their organisation's; a member revokes one attributed to
 // themselves, on the same screen they issued it on. A key attributed to nobody
 // is the shared one an administrator issued for a pipeline, so it is nobody's to
 // take away but theirs - which is why the id has to be there and match, rather
 // than merely not belong to somebody else.
 export function canRevoke(ctx, k) {
-  if (ctx.state.me.unrestricted || ctx.state.me.role === "admin") return true;
+  if (isAdmin(ctx)) return true;
   return (
-    !!ctx.state.me.can_revoke_own_key &&
+    !!ctx.state.me.can_manage_own_keys &&
     !!k.user_id &&
     k.user_id === ctx.state.me.user_id
   );
@@ -300,12 +326,12 @@ export function canRevoke(ctx, k) {
 export function revokeBody(k) {
   const base =
     `Clients using ${k.alias} stop working within a second. ` +
-    "You cannot undo this. Issue a new key instead.";
-  if (!k.last_used_at) return base + " This key has never been used.";
+    "You cannot undo this. To replace the key instead, rotate it.";
+  if (!k.last_used_at) return base + " This key has not been used this month.";
   return base;
 }
 
-function stateOf(k) {
+export function stateOf(k) {
   if (k.revoked_at) return "revoked";
   if (k.expires_at && new Date(k.expires_at) < new Date()) return "expired";
   return "active";
@@ -317,12 +343,10 @@ function stateOf(k) {
 // A member gets the same dialog with nothing to fill in. These limits are the
 // answer to "why was my editor refused", and a key nobody may read is a key
 // whose refusals are a message to an administrator.
-async function openKey(ctx, key, models, teamName, canEdit) {
+export async function openKey(ctx, key, models, teamName, canEdit) {
   const ceilings = await ceilingsFor("key", {
     orgID: key.org_id,
-    orgName:
-      ctx.state.me.org_name ||
-      (ctx.state.orgs.find((o) => o.id === key.org_id) || {}).name,
+    orgName: orgNameOf(ctx, key.org_id),
     teamID: key.team_id,
     teamName,
   });

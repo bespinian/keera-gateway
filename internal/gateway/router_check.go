@@ -121,7 +121,7 @@ func (s *Server) CheckRouter(ctx context.Context, rt policy.Router) RouterProbe 
 
 	p.Destinations, p.Dropped = s.sortDestinations(rt)
 	for _, alias := range p.Destinations {
-		if m, _ := s.src.Model(alias); m.Description == "" {
+		if m, _ := s.src.Model(rt.OrgID, alias); m.Description == "" {
 			p.Warnings = append(p.Warnings, "the destination '"+alias+"' has no description, "+
 				"so the only thing the router is told about it is its name. A model's "+
 				"description is what a routing decision is made on: set one with "+
@@ -129,7 +129,7 @@ func (s *Server) CheckRouter(ctx context.Context, rt policy.Router) RouterProbe 
 		}
 	}
 
-	m, found := s.src.Model(rt.Model)
+	m, found := s.src.Model(rt.OrgID, rt.Model)
 	if p.Error = routerCheckProblem(rt, p.Destinations, m, found); p.Error != "" {
 		return p
 	}
@@ -160,17 +160,10 @@ func (s *Server) CheckRouter(ctx context.Context, rt policy.Router) RouterProbe 
 // served and, for the rest, the reason they cannot.
 func (s *Server) sortDestinations(rt policy.Router) (kept, dropped []string) {
 	for _, alias := range rt.Destinations {
-		m, ok := s.src.Model(alias)
-		switch {
-		case !ok:
-			dropped = append(dropped, alias+" is not in the catalogue")
-		case !m.Enabled:
-			dropped = append(dropped, alias+" is disabled")
-		case m.Kind != policy.KindChat:
-			dropped = append(dropped, alias+" is a "+string(m.Kind)+" model")
-		case len(m.Backends) == 0:
-			dropped = append(dropped, alias+" has no backend")
-		default:
+		m, ok := s.src.Model(rt.OrgID, alias)
+		if why := chatProblem(m, ok); why != "" {
+			dropped = append(dropped, alias+" "+why)
+		} else {
 			kept = append(kept, alias)
 		}
 	}
@@ -187,17 +180,9 @@ func routerCheckProblem(rt policy.Router, destinations []string, m policy.Model,
 	case len(destinations) == 1:
 		return "only one of this router's destinations can be reached ('" +
 			destinations[0] + "'), so there is no decision left for it to make"
-	case !found:
-		return "the model '" + rt.Model + "' is not in the catalogue any more, so this " +
-			"router could not decide anything"
-	case !m.Enabled:
-		return "the model '" + rt.Model + "' is disabled, so this router could not decide " +
-			"anything"
-	case m.Kind != policy.KindChat:
-		return "the model '" + rt.Model + "' is a " + string(m.Kind) + " model; a router " +
-			"reads text and answers with a name, which only a chat model does"
-	case len(m.Backends) == 0:
-		return "the model '" + rt.Model + "' has no backend configured"
+	}
+	if why := chatProblem(m, found); why != "" {
+		return "the model '" + rt.Model + "' " + why + ", so this router could not decide anything"
 	}
 	return ""
 }
@@ -213,7 +198,7 @@ func (s *Server) checkChain(ctx context.Context, rt policy.Router) RouterProbe {
 	p := RouterProbe{Alias: rt.Alias, Mode: rt.Mode}
 	p.Destinations, p.Dropped = s.sortDestinations(rt)
 	// Ranked once, so the whole check describes one ranking.
-	s.load.order(rt.Mode, p.Destinations)
+	s.orderByLoad(rt, p.Destinations)
 	if len(p.Destinations) == 0 {
 		p.Error = "none of this router's destinations can be reached, so every request " +
 			"naming it is refused"
@@ -232,9 +217,9 @@ func (s *Server) checkChain(ctx context.Context, rt policy.Router) RouterProbe {
 
 	start := time.Now()
 	for i, alias := range p.Destinations {
-		m, _ := s.src.Model(alias)
+		m, _ := s.src.Model(rt.OrgID, alias)
 		probe := s.CheckModel(ctx, m)
-		reading := s.load.describe(rt.Mode, alias)
+		reading := s.load.describe(rt.Mode, m.Key())
 		if bands != nil {
 			reading = describeBand(bands[i])
 		}
@@ -245,7 +230,7 @@ func (s *Server) checkChain(ctx context.Context, rt policy.Router) RouterProbe {
 	if bands != nil {
 		models := make(map[string]policy.Model, len(p.Destinations))
 		for _, alias := range p.Destinations {
-			if m, ok := s.src.Model(alias); ok {
+			if m, ok := s.src.Model(rt.OrgID, alias); ok {
 				models[alias] = m
 			}
 		}

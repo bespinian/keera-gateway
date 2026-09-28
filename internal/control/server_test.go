@@ -192,26 +192,9 @@ func TestThePlaygroundNeedsACredentialAndAnOrganisation(t *testing.T) {
 	}
 }
 
-func TestThePlaygroundSaysSoWhenThereIsNoGateway(t *testing.T) {
-	// A control plane running without an inference listener should say that
-	// rather than fail somewhere further in.
-	srv := New(nil, nil, nil, nil,
-		Options{OperatorKey: testOperatorKey}, slog.New(slog.DiscardHandler))
-
-	r := httptest.NewRequest(http.MethodPost, httpx.ControlPrefix+"/v1/playground/chat?org_id=org_1",
-		strings.NewReader("{}"))
-	r.Header.Set("Authorization", "Bearer "+testOperatorKey)
-	w := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, r)
-
-	if w.Code != http.StatusNotImplemented {
-		t.Errorf("status = %d, want 501", w.Code)
-	}
-}
-
 // The panel's "add a hosted model" list comes from the same table the
-// catalogue file is parsed against. Everyone may read it, but only an operator
-// sees the endpoints and credential variables.
+// catalogue file is parsed against. Everyone may read it, but only someone who
+// can add a model sees the endpoints.
 func TestProvidersAreServedWithoutSecrets(t *testing.T) {
 	s := newServer()
 
@@ -224,7 +207,7 @@ func TestProvidersAreServedWithoutSecrets(t *testing.T) {
 		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body)
 	}
 	body := w.Body.String()
-	for _, want := range []string{"anthropic", "api.anthropic.com", "ANTHROPIC_API_KEY"} {
+	for _, want := range []string{"anthropic", "api.anthropic.com"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("response does not mention %q: %s", want, body)
 		}
@@ -241,10 +224,8 @@ func TestProvidersAreServedWithoutSecrets(t *testing.T) {
 	if !strings.Contains(body, "anthropic") {
 		t.Errorf("a member does not see the providers: %s", body)
 	}
-	for _, hidden := range []string{"api.anthropic.com", "ANTHROPIC_API_KEY"} {
-		if strings.Contains(body, hidden) {
-			t.Errorf("a member sees %q: %s", hidden, body)
-		}
+	if strings.Contains(body, "api.anthropic.com") {
+		t.Errorf("a member sees the endpoint: %s", body)
 	}
 }
 
@@ -256,7 +237,7 @@ func TestUnknownProviderIsRefused(t *testing.T) {
 
 	body := `{"backend_model":"acme-1","backends":["https://api.acme.example/v1"],` +
 		`"provider":"acme"}`
-	r := httptest.NewRequest(http.MethodPut, httpx.ControlPrefix+"/v1/models/keera-acme", strings.NewReader(body))
+	r := httptest.NewRequest(http.MethodPut, httpx.ControlPrefix+"/v1/models/keera-acme?org_id=org_1", strings.NewReader(body))
 	r.Header.Set("Authorization", "Bearer "+testOperatorKey)
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -268,32 +249,6 @@ func TestUnknownProviderIsRefused(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "anthropic") {
 		t.Errorf("the refusal does not say which providers are known: %s", w.Body)
-	}
-}
-
-// A deployment with no encryption key must say so rather than store a
-// credential in a form a database dump would hand over.
-func TestAPIKeyIsRefusedWhenItCouldNotBeEncrypted(t *testing.T) {
-	s := newServer() // no Secrets configured
-
-	body := `{"backend_model":"claude-opus-5","backends":["https://api.anthropic.com/v1"],` +
-		`"api_key":"sk-ant-a-real-credential"}`
-	r := httptest.NewRequest(http.MethodPut, httpx.ControlPrefix+"/v1/models/keera-frontier", strings.NewReader(body))
-	r.Header.Set("Authorization", "Bearer "+testOperatorKey)
-	r.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	s.Handler().ServeHTTP(w, r)
-
-	// 400 rather than a 500 from the nil store behind this server: the refusal
-	// has to happen before anything is written.
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body)
-	}
-	if !strings.Contains(w.Body.String(), "KEERA_SECRET_KEY") {
-		t.Errorf("the refusal does not say what to set: %s", w.Body)
-	}
-	if strings.Contains(w.Body.String(), "sk-ant-a-real-credential") {
-		t.Error("the credential was echoed back in the error")
 	}
 }
 
@@ -352,17 +307,17 @@ func TestGatewayURL(t *testing.T) {
 }
 
 func TestAnEmptyOperatorKeyAuthenticatesNobody(t *testing.T) {
-	// A deployment that configured no operator key must not have one. Comparing a
-	// presented credential against sha256("") would hand an operator session to
-	// whoever sent an empty key first.
+	// Config requires an operator key, but a server built without one must not
+	// have one. Comparing a presented credential against sha256("") would hand
+	// an operator session to whoever sent an empty key first.
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 
-	t.Run("the sign-in route says so instead of comparing", func(t *testing.T) {
+	t.Run("the sign-in route refuses an empty key", func(t *testing.T) {
 		r := httptest.NewRequest(http.MethodPost, httpx.ControlPrefix+"/auth/local", strings.NewReader(`{"key":""}`))
 		w := httptest.NewRecorder()
 		s.localLogin(w, r)
-		if w.Code != http.StatusNotImplemented {
-			t.Fatalf("status = %d, want 501; an empty key must not sign anybody in", w.Code)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401; an empty key must not sign anybody in", w.Code)
 		}
 	})
 
@@ -376,20 +331,12 @@ func TestAnEmptyOperatorKeyAuthenticatesNobody(t *testing.T) {
 	})
 
 	t.Run("no bearer token is the operator key", func(t *testing.T) {
-		for _, presented := range []string{"x", " ", "anything"} {
+		for _, presented := range []string{"", "x", " ", "anything"} {
 			r := httptest.NewRequest(http.MethodGet, httpx.ControlPrefix+"/v1/orgs", nil)
 			r.Header.Set("Authorization", "Bearer "+presented)
 			if p, err := s.principal(r); err == nil {
 				t.Errorf("%q authenticated as %+v", presented, p)
 			}
-		}
-	})
-
-	t.Run("the panel is told not to offer the field", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		s.authConfig(w, httptest.NewRequest(http.MethodGet, httpx.ControlPrefix+"/auth/config", nil))
-		if strings.Contains(w.Body.String(), `"operator_key":true`) {
-			t.Errorf("auth config offers the operator key: %s", w.Body.String())
 		}
 	})
 }
@@ -506,6 +453,12 @@ func TestConnectServesTheClientCatalogueAndTheGatewayAddress(t *testing.T) {
 	}
 	if len(res.Data) != len(connect.Clients()) {
 		t.Errorf("served %d clients, want %d", len(res.Data), len(connect.Clients()))
+	}
+	// A gateway behind a proxy under a path is reached under that path.
+	prefixed := New(nil, nil, nil, nil, Options{PublicURL: "https://example.ch/keera"},
+		slog.New(slog.DiscardHandler))
+	if got := prefixed.gatewayURL(r); got != "https://example.ch/keera/api" {
+		t.Errorf("gateway_url = %q, want the public URL's path kept", got)
 	}
 	// The templates have to survive the round trip unsubstituted: the panel
 	// fills them in per keystroke in its URL field, which is why they are

@@ -32,7 +32,6 @@ import {
   toast,
   pill,
   stat,
-  empty,
   field,
   showError,
   duration,
@@ -43,14 +42,14 @@ import {
   icon,
   icons,
 } from "../ui.js";
-import { chooseOrg } from "./orgs.js";
+import { chooseOrg, orgNameOf } from "./orgs.js";
 
 export async function sandboxesView(ctx) {
   // A sandbox belongs to an organisation, because its quota and its bill do.
   if (!ctx.orgID) return chooseOrg(ctx, "Sandboxes");
 
   const me = ctx.state.me;
-  const canAdmin = me.can_admin_org || me.unrestricted;
+  const canAdmin = !!me.can_admin_org;
   const [list, cat, teams] = await Promise.all([
     api.sandboxes(ctx.orgID, { all: showAll() }),
     api.sandboxClasses(ctx.orgID),
@@ -63,57 +62,12 @@ export async function sandboxesView(ctx) {
   ctx.state.teams = teams.data || [];
   const sandboxes = list.data || [];
   const classes = cat.data || [];
-  const driver = cat.driver || null;
+  const driver = cat.driver;
   const limits = cat.limits || null;
 
   ctx.setSubtitle(
     `${sandboxes.length} sandbox${sandboxes.length === 1 ? "" : "es"}`,
   );
-
-  // A deployment with no driver gets the one sentence somebody can act on
-  // rather than an empty table, which would read as "nobody is using this".
-  //
-  // The two cases are worded apart on purpose. A deployment that has declared
-  // nothing has not started; a deployment whose catalogue is full and whose
-  // driver is unset has done half the configuration, and the half it did is the
-  // visible one - so telling that reader "this deployment lends out no
-  // sandboxes" underneath a table of sandbox classes reads as a panel that
-  // cannot see its own state.
-  if (!driver) {
-    return h(
-      "div",
-      { class: "grid" },
-      h(
-        "div",
-        { class: "card" },
-        classes.length
-          ? empty(
-              "Classes are set up, but no driver can start them",
-              h(
-                "div",
-                {},
-                "No sandbox driver is running, so every start is refused. " +
-                  "Set KEERA_SANDBOX_DRIVER to 'podman' on a single host, or " +
-                  "to 'kubernetes' with the agent-sandbox controller on the " +
-                  "cluster. See docs/sandboxes.md.",
-              ),
-            )
-          : empty(
-              "Sandboxes are not turned on",
-              h(
-                "div",
-                {},
-                "A sandbox is a machine with the toolchain installed, its own " +
-                  "API key that never leaves it, and network access only to " +
-                  "places the deployment allows. To turn them on, set " +
-                  "KEERA_SANDBOX_DRIVER and a catalogue in " +
-                  "KEERA_SANDBOXES_FILE. See docs/sandboxes.md.",
-              ),
-            ),
-      ),
-      classes.length ? classCard(ctx, classes, null, me) : null,
-    );
-  }
 
   const live = sandboxes.filter((s) => isLive(s));
   const running = live.filter((s) => s.state === "ready").length;
@@ -129,8 +83,13 @@ export async function sandboxesView(ctx) {
     h(
       "div",
       { class: "grid grid-4" },
-      stat("Live", num(live.length), null, limitNote(limits)),
-      stat("Running now", num(running), null, "the rest are suspended"),
+      stat("Live", num(live.length), null, limitNote(limits, canAdmin)),
+      stat(
+        "Running now",
+        num(running),
+        null,
+        "the rest are suspended or expired",
+      ),
       // Core-seconds rather than wall time, because two minutes of thirty-two
       // cores is not two minutes of two - and this is the number a chargeback
       // uses. The wall time is on each row, where it can be read against the
@@ -148,7 +107,7 @@ export async function sandboxesView(ctx) {
         `the strongest the ${driver.name} driver offers`,
       ),
     ),
-    listCard(ctx, sandboxes, canAdmin, me),
+    listCard(ctx, sandboxes, canAdmin, me, driver),
     classCard(ctx, classes, driver, me),
   );
 }
@@ -162,11 +121,9 @@ function head(ctx, classes, driver, limits, canAdmin, teams) {
     h(
       "div",
       { class: "muted" },
-      "A sandbox is a machine for one task or one working day. It has the " +
-        "toolchain installed, a home directory that survives suspension, its " +
-        "own API key that never leaves it, and network access only to places " +
-        "this deployment allows. It expires on its own. Only its owner can " +
-        "open a shell in it: 'keera sandbox ssh <name>', over this same port.",
+      "A sandbox is a machine for one task or one working day, with the " +
+        "toolchain installed and its own API key. It expires on its own. Only " +
+        "its owner can open a shell in it, with 'keera sandbox ssh <name>'.",
     ),
     h(
       "div",
@@ -187,13 +144,17 @@ function head(ctx, classes, driver, limits, canAdmin, teams) {
   );
 }
 
-function limitNote(limits) {
+// limitNote compares the count with the quota. The quota is the whole
+// organisation's, but a member's list holds only their own sandboxes.
+function limitNote(limits, canAdmin) {
   if (!limits || !limits.max_sandboxes) return "no limit set";
+  if (!canAdmin)
+    return `yours; the organisation allows ${limits.max_sandboxes} in all`;
   return `of ${limits.max_sandboxes} allowed here`;
 }
 
 /** The sandboxes themselves. */
-function listCard(ctx, sandboxes, canAdmin, me) {
+function listCard(ctx, sandboxes, canAdmin, me, driver) {
   return table(
     [
       {
@@ -219,9 +180,21 @@ function listCard(ctx, sandboxes, canAdmin, me) {
         cell: (s) =>
           h(
             "div",
-            { class: "row-tight" },
-            pill(s.state, stateTone(s.state)),
-            s.purpose === "agent" ? pill("agent", "accent") : null,
+            {},
+            h(
+              "div",
+              { class: "row-tight" },
+              pill(s.state, stateTone(s.state)),
+              s.purpose === "agent" ? pill("agent", "accent") : null,
+            ),
+            // Why it is stuck or failed. The other states explain themselves.
+            (s.state === "pending" || s.state === "failed") && s.detail
+              ? h(
+                  "div",
+                  { class: "faint", style: { fontSize: "11.5px" } },
+                  s.detail,
+                )
+              : null,
           ),
         sortKey: (s) => s.state,
       },
@@ -286,7 +259,7 @@ function listCard(ctx, sandboxes, canAdmin, me) {
       {
         label: "",
         shrink: true,
-        cell: (s) => actions(ctx, s, canAdmin, me),
+        cell: (s) => actions(ctx, s, canAdmin, me, driver),
       },
     ],
     sandboxes,
@@ -308,14 +281,14 @@ function listCard(ctx, sandboxes, canAdmin, me) {
       emptyTitle: "No sandboxes",
       emptyBody:
         "Start one with the button above, or with " +
-        "'keera sandbox up <name> --class <class>'.",
+        "'keera sandbox create <name> --class <class>'.",
     },
   );
 }
 
-/** The catalogue, which is the deployment's rather than the organisation's. */
+/** The organisation's classes. */
 function classCard(ctx, classes, driver, me) {
-  const canEdit = me.can_edit_catalogue;
+  const canEdit = !!me.can_admin_org;
   return h(
     "div",
     { class: "stack", style: { gap: "10px" } },
@@ -323,7 +296,7 @@ function classCard(ctx, classes, driver, me) {
       "h2",
       { style: { marginBottom: "0" } },
       "Classes",
-      h("span", { class: "faint" }, " — the machines this deployment offers"),
+      h("span", { class: "faint" }, ` — the machines ${orgNameOf(ctx)} offers`),
     ),
     table(
       [
@@ -385,22 +358,14 @@ function classCard(ctx, classes, driver, me) {
               : h("span", { class: "faint" }, "—"),
         },
         {
-          label: "Source",
-          shrink: true,
-          cell: (c) =>
-            c.managed
-              ? pill("catalogue file", "")
-              : h("span", { class: "faint" }, "control plane"),
-        },
-        {
           label: "",
           shrink: true,
           cell: (c) =>
-            canEdit && !c.managed
+            canEdit
               ? h(
                   "button",
                   {
-                    class: "btn btn-ghost btn-sm",
+                    class: "btn btn-sm",
                     title: "Delete this class",
                     onClick: () => removeClass(ctx, c),
                   },
@@ -412,20 +377,28 @@ function classCard(ctx, classes, driver, me) {
       classes,
       {
         emptyTitle: "No sandbox classes",
-        emptyBody:
-          "Classes come from KEERA_SANDBOXES_FILE, which is applied on " +
-          "every start.",
+        emptyBody: canEdit
+          ? "A new organisation starts with the classes in " +
+            "KEERA_SANDBOXES_FILE. To add classes to this one, run " +
+            "'keera sandbox apply <file> --org " +
+            ctx.orgID +
+            "'."
+          : "An administrator of this organisation adds them.",
       },
     ),
   );
 }
 
+/** delivers reports whether the driver has a runtime for this tier. Having a
+ *  stronger one is not enough: each tier needs its own. */
+function delivers(driver, isolation) {
+  return (driver.tiers || ["standard"]).includes(isolation || "standard");
+}
+
 /** isolationCell says both what a class asks for and whether it can be given. */
 function isolationCell(c, driver) {
-  const order = ["standard", "isolated", "vm"];
-  const deliverable =
-    !driver || order.indexOf(driver.isolation) >= order.indexOf(c.isolation);
-  if (deliverable) return pill(c.isolation, c.isolation === "vm" ? "good" : "");
+  if (delivers(driver, c.isolation))
+    return pill(c.isolation, c.isolation === "vm" ? "good" : "");
   // A class this deployment cannot deliver is refused at creation rather than
   // quietly run at a weaker tier, so saying so here is the difference between
   // a confusing refusal later and a configuration change now.
@@ -438,7 +411,7 @@ function isolationCell(c, driver) {
       {
         class: "faint",
         title:
-          "No RuntimeClass is mapped to this tier, so this class cannot start",
+          "This deployment has no runtime for this isolation tier, so this class cannot start",
       },
       "not available",
     ),
@@ -447,17 +420,20 @@ function isolationCell(c, driver) {
 
 /* ------------------------------------------------------------------ actions */
 
-function actions(ctx, s, canAdmin, me) {
+function actions(ctx, s, canAdmin, me, driver) {
   const mine = s.user_id && s.user_id === me.user_id;
   if (!isLive(s) || (!canAdmin && !mine)) return null;
+  const home = keepsHome(s, driver);
   const btns = [];
   if (s.state === "suspended" || s.state === "expired") {
     btns.push(
       h(
         "button",
         {
-          class: "btn btn-ghost btn-sm",
-          title: "Resume it with its volume intact",
+          class: "btn btn-sm",
+          title:
+            (home ? "Resume it with its files intact" : "Resume it") +
+            (s.state === "expired" ? ", a new key and a new lifetime" : ""),
           onClick: () =>
             act(ctx, () => api.resumeSandbox(s.id), `${s.name} is resuming`),
         },
@@ -469,8 +445,10 @@ function actions(ctx, s, canAdmin, me) {
       h(
         "button",
         {
-          class: "btn btn-ghost btn-sm",
-          title: "Release its compute and keep its volume",
+          class: "btn btn-sm",
+          title: home
+            ? "Release its compute and keep its files"
+            : "Release its compute. It has no volume, so its files are lost",
           onClick: () =>
             act(ctx, () => api.suspendSandbox(s.id), `${s.name} is suspending`),
         },
@@ -478,21 +456,27 @@ function actions(ctx, s, canAdmin, me) {
       ),
     );
   }
+  // The server refuses to extend an expired or failed sandbox. An expired one
+  // is resumed instead; a failed one can only be terminated.
+  if (s.state !== "expired" && s.state !== "failed") {
+    btns.push(
+      h(
+        "button",
+        {
+          class: "btn btn-sm",
+          title: "Extend its expiry",
+          onClick: () => extend(ctx, s),
+        },
+        "Extend",
+      ),
+    );
+  }
   btns.push(
     h(
       "button",
       {
-        class: "btn btn-ghost btn-sm",
-        title: "Extend its expiry",
-        onClick: () => extend(ctx, s),
-      },
-      "Extend",
-    ),
-    h(
-      "button",
-      {
         class: "btn btn-sm btn-danger",
-        title: "Terminate it and its volume",
+        title: "Terminate it and delete its files",
         onClick: () => terminateSandbox(ctx, s),
       },
       icon(icons.trash),
@@ -558,14 +542,12 @@ function terminateSandbox(ctx, s) {
       h(
         "div",
         {},
-        s.disk_mib
-          ? "Its home directory goes with it. Anything not pushed is lost."
-          : "It has no volume, so only what is in memory is lost.",
+        "Its home directory goes with it. Anything not pushed is lost.",
       ),
       h(
         "div",
         { class: "faint" },
-        "Its API key is revoked. Its cost stays in the usage report.",
+        "Its API key is revoked. Its cost stays in 'keera sandbox usage'.",
       ),
     ),
     confirmLabel: "Terminate",
@@ -590,7 +572,7 @@ function removeClass(ctx, c) {
     confirmLabel: "Delete",
     danger: true,
     onConfirm: async () => {
-      await api.deleteSandboxClass(c.name);
+      await api.deleteSandboxClass(c.name, c.org_id);
       toast(`${c.name} deleted`);
       ctx.reload();
     },
@@ -634,6 +616,7 @@ function newSandbox(ctx, classes, limits, teams) {
     placeholder: "https://git.example.internal/team/service.git",
   });
   const branch = h("input", { class: "input", placeholder: "main" });
+  const repos = (limits && limits.allowed_repos) || [];
   const ttl = h("input", {
     class: "input",
     placeholder: "the class's default",
@@ -666,26 +649,33 @@ function newSandbox(ctx, classes, limits, teams) {
             "Team",
             team,
             "The sandbox's key is scoped to this team, and the sandbox " +
-              "counts toward its quota.",
+              "counts toward its quota. The team's guardrails can allow " +
+              "fewer classes or a shorter lifetime than shown here.",
           )
         : null,
       field(
         "Your ssh public key (required)",
         key,
-        "The key that can open a shell in it. 'keera sandbox up' sends " +
+        "The key that can open a shell in it. 'keera sandbox create' sends " +
           "yours from ~/.ssh automatically.",
       ),
-      field(
-        "Repository",
-        repo,
-        "Optional. Cloned with a credential made for this sandbox only.",
-      ),
-      field("Branch", branch),
+      // Nil or empty allows no repository, and a team can only narrow it.
+      repos.length
+        ? field(
+            "Repository",
+            repo,
+            "Optional. Cloned with a credential made for this sandbox only. " +
+              (repos.includes("*")
+                ? "Any repository the forge credential reaches."
+                : `Allowed: ${repos.join(", ")}.`),
+          )
+        : null,
+      repos.length ? field("Branch", branch) : null,
       field(
         "Lifetime",
         ttl,
         limits && limits.max_sandbox_ttl_seconds
-          ? `Capped at ${duration(limits.max_sandbox_ttl_seconds * 1000)} here.`
+          ? `Capped at ${duration(limits.max_sandbox_ttl_seconds * 1000)} for ${orgNameOf(ctx)}.`
           : "Leave empty for the class default.",
       ),
     ),
@@ -760,9 +750,12 @@ function teamName(ctx, id) {
   return known ? known.name : id;
 }
 
+// isLive matches Sandbox.Live on the server. A failed engineer sandbox keeps
+// its volume, so it still counts, and it still needs a Terminate button.
 function isLive(s) {
   return (
-    s.state === "pending" || s.state === "ready" || s.state === "suspended"
+    ["pending", "ready", "suspended", "expired"].includes(s.state) ||
+    (s.state === "failed" && s.purpose === "engineer")
   );
 }
 
@@ -773,6 +766,7 @@ function stateTone(state) {
     case "pending":
       return "accent";
     case "suspended":
+    case "expired":
       return "warn";
     case "failed":
       return "bad";
@@ -801,6 +795,12 @@ function expiryCell(s) {
   );
 }
 
+// keepsHome reports whether the home directory survives a suspend. Podman
+// always keeps it in a volume. On Kubernetes, only a class with a disk does.
+function keepsHome(s, driver) {
+  return s.disk_mib > 0 || (driver && driver.name === "podman");
+}
+
 function size(s) {
   return sizeOf(s.cpu_millis, s.memory_mib);
 }
@@ -819,10 +819,7 @@ function gib(mib) {
 /** allowed reports whether this reader could actually be given this class, so
  *  the create dialog offers only the ones that would not be refused. */
 function allowed(c, limits, driver) {
-  const order = ["standard", "isolated", "vm"];
-  if (driver && order.indexOf(driver.isolation) < order.indexOf(c.isolation)) {
-    return false;
-  }
+  if (!delivers(driver, c.isolation)) return false;
   if (c.purposes && c.purposes.length && !c.purposes.includes("engineer")) {
     return false;
   }

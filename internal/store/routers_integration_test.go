@@ -56,7 +56,7 @@ func TestRouterRoundTripAndTheAllowListsThatNameOne(t *testing.T) {
 	}
 
 	// A second organisation's router of the same name is a different router.
-	if _, err := st.CreateOrg(ctx, "org_2", "Another Bank"); err != nil {
+	if _, err := st.CreateOrg(ctx, Org{ID: "org_2", Name: "Another Bank"}, OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
 	other := auto

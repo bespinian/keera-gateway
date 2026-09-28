@@ -1,43 +1,41 @@
-// Package catalog applies a declared model catalogue to the database.
+// Package catalog reads the catalogue files, and knows the hosted providers a
+// model can name.
 //
-// The catalogue is the gateway's API contract, so it lives in a file applied on
-// every start: the same file and an empty database give the same gateway.
+// The model file is a template: every new organisation starts with a copy of each
+// model it declares. The copies are the organisation's own, to change or
+// remove like any model it adds itself.
 package catalog
 
 import (
-	"context"
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
-	"github.com/bespinian/keera-gateway/internal/store"
 )
 
 // File is the on-disk shape.
 type File struct {
-	Models     []Model     `yaml:"models"`
-	MCPServers []MCPServer `yaml:"mcp_servers"`
-}
-
-// Catalogue is a parsed file: the models and the MCP servers it declares.
-type Catalogue struct {
-	Models     []policy.Model
-	MCPServers []policy.MCPServer
+	Models []Model `yaml:"models"`
 }
 
 // Model is one declared model.
 //
 // The fields a provider can fill in are pointers, so a stated zero differs from
-// no value: a price of 0 means unbilled, not "use the provider's price".
+// no value: an input or output price of 0 means unbilled, not "use the
+// provider's price". A cached price of 0 means the full input price.
 type Model struct {
 	Alias string `yaml:"alias"`
 	Kind  string `yaml:"kind"`
 	// Provider names a hosted endpoint Keera Gateway knows (see `keera model
-	// providers`). It fills in the backend, credential variable, context
-	// window, prices and description. The entry may override any of them.
+	// providers`). It fills in the backend, context window, prices,
+	// description, release date and location. The entry may override any of
+	// them.
 	Provider string   `yaml:"provider"`
 	Backends []string `yaml:"backends"`
 	// ProductID fills the hole in a per-customer endpoint, such as the product
@@ -59,49 +57,49 @@ type Model struct {
 	// ReleaseDate is the day the model came out, as YYYY-MM-DD. A provider
 	// fills it in for the models it knows.
 	ReleaseDate string `yaml:"release_date"`
-	// Location is where the model runs: a provider's country, such as ch or
-	// usa, or onprem for a model with no provider.
-	Location  string `yaml:"location"`
-	APIKeyEnv string `yaml:"api_key_env"`
-	Disabled  bool   `yaml:"disabled"`
+	// Location is where the model runs: a country, such as ch or usa, or
+	// onprem. A provider fills in its own. Without one, a backend inside the
+	// network is onprem, and one outside it must state its location.
+	Location string `yaml:"location"`
+	Disabled bool   `yaml:"disabled"`
 }
 
-// Parse reads and validates a catalogue file, and returns its models.
-func Parse(raw []byte) ([]policy.Model, error) {
-	c, err := ParseFile(raw)
-	return c.Models, err
+// LoadModels reads and validates a model catalogue file.
+func LoadModels(path string) ([]policy.Model, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	models, err := parseModelFile(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return models, nil
 }
 
-// ParseFile reads and validates a catalogue file.
-func ParseFile(raw []byte) (Catalogue, error) {
+// parseModelFile reads and validates a model catalogue file, and returns its
+// models.
+func parseModelFile(raw []byte) ([]policy.Model, error) {
 	var f File
-	if err := yaml.Unmarshal(raw, &f); err != nil {
-		return Catalogue{}, fmt.Errorf("parse catalogue: %w", err)
+	if err := decodeStrict(raw, &f); err != nil {
+		return nil, fmt.Errorf("parse catalogue: %w", err)
 	}
-	if len(f.Models) == 0 && len(f.MCPServers) == 0 {
-		return Catalogue{}, fmt.Errorf("catalogue declares no models")
+	if len(f.Models) == 0 {
+		return nil, fmt.Errorf("catalogue declares no models")
 	}
-	alias := func(m Model) string { return m.Alias }
-	models, err := parseEntries(f.Models, "models", "alias", alias, func(m Model) (policy.Model, error) {
-		parsed, err := ParseModel(m)
-		// The file owns what it declares, so only another apply may change it.
-		parsed.Managed = true
-		return parsed, err
-	})
-	if err != nil {
-		return Catalogue{}, err
+	return parseEntries(f.Models, "models", "alias", func(m Model) string { return m.Alias }, ParseModel)
+}
+
+// decodeStrict reads a catalogue file and refuses a field it does not know. A
+// field left over from an older file, such as egress, would otherwise be
+// dropped without a word, and whoever relied on it would not know.
+func decodeStrict(raw []byte, out any) error {
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	dec.KnownFields(true)
+	if err := dec.Decode(out); err != nil && !errors.Is(err, io.EOF) {
+		return err
 	}
-	servers, err := parseEntries(f.MCPServers, "mcp_servers", "alias",
-		func(m MCPServer) string { return m.Alias },
-		func(m MCPServer) (policy.MCPServer, error) {
-			parsed, err := ParseMCPServer(m)
-			parsed.Managed = true
-			return parsed, err
-		})
-	if err != nil {
-		return Catalogue{}, err
-	}
-	return Catalogue{Models: models, MCPServers: servers}, nil
+	return nil
 }
 
 // parseEntries parses each entry of a catalogue file and refuses a name used
@@ -160,7 +158,11 @@ func ParseModel(m Model) (policy.Model, error) {
 		return policy.Model{}, err
 	}
 	if m.Location == "" {
-		m.Location = policy.LocationOnPrem
+		loc, err := policy.Model{Backends: m.Backends}.LocationFromBackends()
+		if err != nil {
+			return policy.Model{}, err
+		}
+		m.Location = loc
 	}
 	switch {
 	case !policy.ValidLocation(m.Location):
@@ -191,7 +193,6 @@ func ParseModel(m Model) (policy.Model, error) {
 		MaxContext:               deref(m.MaxContext),
 		ReleaseDate:              m.ReleaseDate,
 		Location:                 m.Location,
-		APIKeyEnv:                m.APIKeyEnv,
 		Enabled:                  !m.Disabled,
 	}, nil
 }
@@ -221,43 +222,4 @@ func deref[T any](p *T) T {
 		return zero
 	}
 	return *p
-}
-
-// Apply writes a declared catalogue to the database. Models and MCP servers
-// the file does not mention are kept, because removing one would break every
-// client that names it.
-//
-// Declared models are marked as managed, so the panel and the CLI refuse to
-// edit them: the next start would undo the edit. A model dropped from the file
-// loses the mark on the next apply.
-func Apply(ctx context.Context, st *store.Store, path string) (Catalogue, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return Catalogue{}, err
-	}
-	c, err := ParseFile(raw)
-	if err != nil {
-		return Catalogue{}, fmt.Errorf("%s: %w", path, err)
-	}
-	declared := make([]string, 0, len(c.Models))
-	for _, m := range c.Models {
-		if err := st.UpsertModel(ctx, m); err != nil {
-			return Catalogue{}, fmt.Errorf("apply %s: %w", m.Alias, err)
-		}
-		declared = append(declared, m.Alias)
-	}
-	if err := st.UnmanageModels(ctx, declared); err != nil {
-		return Catalogue{}, fmt.Errorf("release models the catalogue no longer declares: %w", err)
-	}
-	declared = declared[:0]
-	for _, m := range c.MCPServers {
-		if err := st.UpsertMCPServer(ctx, m); err != nil {
-			return Catalogue{}, fmt.Errorf("apply %s: %w", m.Alias, err)
-		}
-		declared = append(declared, m.Alias)
-	}
-	if err := st.UnmanageMCPServers(ctx, declared); err != nil {
-		return Catalogue{}, fmt.Errorf("release MCP servers the catalogue no longer declares: %w", err)
-	}
-	return c, nil
 }

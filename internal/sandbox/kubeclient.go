@@ -36,8 +36,7 @@ type kubeClient struct {
 	base string
 	http *http.Client
 
-	// tokenPath is re-read on a timer. Empty for a static token, as in tests
-	// and outside a cluster.
+	// tokenPath is re-read on a timer. Empty for a test's static token.
 	tokenPath string
 	mu        sync.RWMutex
 	token     string
@@ -45,20 +44,16 @@ type kubeClient struct {
 }
 
 // KubeConfig points the client at an API server. Every field overrides an
-// in-cluster default.
+// in-cluster default. Only tests set them: the gateway always runs in the
+// cluster, because it reaches a sandbox by its pod IP.
 type KubeConfig struct {
 	// Server is the API server's base URL. Empty means in-cluster, from
 	// KUBERNETES_SERVICE_HOST and KUBERNETES_SERVICE_PORT.
 	Server string
-	// Token and TokenPath are the credential. In a cluster use the path,
-	// because the token rotates; a literal token is for development outside
-	// one.
-	Token     string
-	TokenPath string
-	// CAFile verifies the API server. Empty means the in-cluster bundle.
-	CAFile string
-	// Insecure skips certificate checks. It is only for development clusters,
-	// must be set by name, and is logged loudly.
+	// Token is the credential. Empty means the service account's, which is
+	// read again as it rotates.
+	Token string
+	// Insecure skips certificate checks, for a test server.
 	Insecure bool
 }
 
@@ -70,18 +65,15 @@ func newKubeClient(cfg KubeConfig) (*kubeClient, error) {
 	if c.base == "" {
 		host, port := os.Getenv("KUBERNETES_SERVICE_HOST"), os.Getenv("KUBERNETES_SERVICE_PORT")
 		if host == "" || port == "" {
-			return nil, errors.New("not running in a cluster: KUBERNETES_SERVICE_HOST is unset, " +
-				"and no API server was configured (KEERA_SANDBOX_KUBE_SERVER)")
+			return nil, errors.New("not running in a cluster: KUBERNETES_SERVICE_HOST is unset; " +
+				"the kubernetes driver runs in the cluster it creates sandboxes in")
 		}
 		c.base = "https://" + net.JoinHostPort(host, port)
 	}
 
-	switch {
-	case cfg.Token != "":
+	if cfg.Token != "" {
 		c.token = cfg.Token
-	case cfg.TokenPath != "":
-		c.tokenPath = cfg.TokenPath
-	default:
+	} else {
 		c.tokenPath = serviceAccountDir + "/token"
 	}
 	if c.tokenPath != "" {
@@ -107,14 +99,11 @@ func newKubeClient(cfg KubeConfig) (*kubeClient, error) {
 
 // kubeTLS is the TLS configuration for the API server.
 func kubeTLS(cfg KubeConfig) (*tls.Config, error) {
-	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: cfg.Insecure} //nolint:gosec // guarded by cfg.Insecure, which a deployment sets by name
+	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: cfg.Insecure} //nolint:gosec // only tests set cfg.Insecure
 	if cfg.Insecure {
 		return tlsCfg, nil
 	}
-	caFile := cfg.CAFile
-	if caFile == "" {
-		caFile = serviceAccountDir + "/ca.crt"
-	}
+	caFile := serviceAccountDir + "/ca.crt"
 	pem, err := os.ReadFile(caFile)
 	if err != nil {
 		return nil, fmt.Errorf("reading the cluster CA bundle %s: %w", caFile, err)
@@ -264,8 +253,8 @@ func (c *kubeClient) post(ctx context.Context, path string, in, out any) error {
 }
 
 // patch sends a JSON merge patch, which needs no schema and no field manager.
-// A merge patch replaces lists rather than merging them, so nothing here
-// patches a list.
+// A merge patch replaces lists rather than merging them, so a list in a patch
+// must be given whole.
 func (c *kubeClient) patch(ctx context.Context, path string, in, out any) error {
 	return c.do(ctx, http.MethodPatch, path, "application/merge-patch+json", in, out)
 }

@@ -13,14 +13,13 @@ import (
 // no fake can be: the partial unique index that makes a name reusable, the
 // accumulating clock, and the cascades a deleted tenant leaves behind.
 
-func newSandboxClass(t *testing.T, st *Store, ctx context.Context, name string) policy.SandboxClass {
+func newSandboxClass(t *testing.T, st *Store, ctx context.Context, orgID, name string) policy.SandboxClass {
 	t.Helper()
 	c := policy.SandboxClass{
-		Name: name, Image: "example/sandbox:1", Isolation: policy.IsolationIsolated,
+		OrgID: orgID, Name: name, Image: "example/sandbox:1", Isolation: policy.IsolationIsolated,
 		CPU: 4000, Memory: 16384, Disk: 51200,
 		DefaultTTL: 4 * time.Hour, MaxTTL: 24 * time.Hour,
-		Egress: []string{"gateway"}, Purposes: []policy.Purpose{policy.PurposeEngineer},
-		Managed: true,
+		Purposes: []policy.Purpose{policy.PurposeEngineer},
 	}
 	if err := st.UpsertSandboxClass(ctx, &c); err != nil {
 		t.Fatalf("UpsertSandboxClass: %v", err)
@@ -51,13 +50,16 @@ func newSandbox(t *testing.T, st *Store, ctx context.Context, f fixture, name st
 
 func TestSandboxClassRoundTrip(t *testing.T) {
 	st, ctx := db(t)
-	want := newSandboxClass(t, st, ctx, "standard")
+	anOrg(t, st, ctx, "org_1")
+	anOrg(t, st, ctx, "org_2")
+	want := newSandboxClass(t, st, ctx, "org_1", "standard")
 
-	got, err := st.SandboxClass(ctx, "standard")
+	got, err := st.SandboxClass(ctx, "org_1", "standard")
 	if err != nil {
 		t.Fatalf("SandboxClass: %v", err)
 	}
-	if !got.SameDeclaration(want) {
+	if got.Image != want.Image || got.CPU != want.CPU || got.Disk != want.Disk ||
+		got.Isolation != want.Isolation || len(got.Purposes) != 1 {
 		t.Errorf("read back %+v, want %+v", got, want)
 	}
 	// The two durations cross the driver as seconds and have to come back the
@@ -65,40 +67,66 @@ func TestSandboxClassRoundTrip(t *testing.T) {
 	if got.DefaultTTL != 4*time.Hour || got.MaxTTL != 24*time.Hour {
 		t.Errorf("lifetimes = %s / %s", got.DefaultTTL, got.MaxTTL)
 	}
-	if !got.Managed {
-		t.Error("a class from the catalogue file should stay managed")
-	}
 
-	// A class dropped from the file is released rather than deleted: the name
-	// is a contract, and removing one silently would break every configuration
-	// that still names it.
-	if err := st.UnmanageSandboxClasses(ctx, []string{"something-else"}); err != nil {
-		t.Fatalf("UnmanageSandboxClasses: %v", err)
+	// The class is org_1's alone, and org_2 may have its own of the same name.
+	if _, err := st.SandboxClass(ctx, "org_2", "standard"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("org_2 reads org_1's class: %v", err)
 	}
-	got, err = st.SandboxClass(ctx, "standard")
-	if err != nil {
-		t.Fatalf("SandboxClass after unmanage: %v", err)
+	newSandboxClass(t, st, ctx, "org_2", "standard")
+	if list, _ := st.ListSandboxClasses(ctx, "org_1"); len(list) != 1 {
+		t.Errorf("org_1 lists %d classes, want its one", len(list))
 	}
-	if got.Managed {
-		t.Error("a class the file no longer declares should have been released")
+	if all, _ := st.LoadSandboxClasses(ctx); len(all) != 2 {
+		t.Errorf("every organisation's classes are %d, want 2", len(all))
+	}
+	if err := st.DeleteSandboxClass(ctx, "org_2", "standard"); err != nil {
+		t.Fatalf("DeleteSandboxClass: %v", err)
+	}
+	if _, err := st.SandboxClass(ctx, "org_1", "standard"); err != nil {
+		t.Errorf("removing org_2's class removed org_1's: %v", err)
 	}
 }
 
 func TestSandboxNameIsUniqueOnlyWhileLive(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
-	newSandboxClass(t, st, ctx, "standard")
+	newSandboxClass(t, st, ctx, f.orgID, "standard")
 
 	first := newSandbox(t, st, ctx, f, "fix-login")
+	named := func(id, owner string) error {
+		_, err := st.CreateSandbox(ctx, Sandbox{
+			ID: id, OrgID: f.orgID, Owner: owner, Name: "fix-login", Class: "standard",
+			Purpose: policy.PurposeEngineer, State: policy.SandboxPending,
+		})
+		return err
+	}
 
-	// A second live one with the same name is refused: `keera sandbox ssh
-	// fix-login` has to mean something.
-	_, err := st.CreateSandbox(ctx, Sandbox{
-		ID: "sbx_second", OrgID: f.orgID, Name: "fix-login", Class: "standard",
-		Purpose: policy.PurposeEngineer, State: policy.SandboxPending,
-	})
-	if !errors.Is(err, ErrSandboxNameTaken) {
+	// A second live one of the same person with the same name is refused:
+	// `keera sandbox ssh fix-login` has to mean something.
+	if err := named("sbx_second", first.Owner); !errors.Is(err, ErrSandboxNameTaken) {
 		t.Fatalf("err = %v, want ErrSandboxNameTaken", err)
+	}
+	// A colleague may use the name. Refusing it would tell them what the
+	// first person called theirs.
+	if err := named("sbx_colleague", "other@example.ch"); err != nil {
+		t.Fatalf("a colleague using the same name: %v", err)
+	}
+	found, err := st.LiveSandboxesByName(ctx, f.orgID, "fix-login")
+	if err != nil || len(found) != 2 {
+		t.Fatalf("LiveSandboxesByName = %d sandboxes, %v; want both", len(found), err)
+	}
+
+	// A failed engineer sandbox keeps its volume, so it keeps its name too.
+	if err := st.ObserveSandbox(ctx, first.ID, SandboxObservation{
+		State: policy.SandboxFailed, Detail: "OOMKilled",
+	}); err != nil {
+		t.Fatalf("ObserveSandbox: %v", err)
+	}
+	if err := named("sbx_second", first.Owner); !errors.Is(err, ErrSandboxNameTaken) {
+		t.Fatalf("err = %v, want the failed sandbox to keep its name", err)
+	}
+	if n, err := st.SandboxClassInUse(ctx, f.orgID, "standard"); err != nil || n != 2 {
+		t.Errorf("live count = %d, %v; want the failed sandbox counted", n, err)
 	}
 
 	// Once the first is gone the name is free again. A developer who finishes
@@ -109,10 +137,7 @@ func TestSandboxNameIsUniqueOnlyWhileLive(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("ObserveSandbox: %v", err)
 	}
-	if _, err := st.CreateSandbox(ctx, Sandbox{
-		ID: "sbx_third", OrgID: f.orgID, Name: "fix-login", Class: "standard",
-		Purpose: policy.PurposeEngineer, State: policy.SandboxPending,
-	}); err != nil {
+	if err := named("sbx_third", first.Owner); err != nil {
 		t.Fatalf("reusing the name of a terminated sandbox: %v", err)
 	}
 }
@@ -120,7 +145,7 @@ func TestSandboxNameIsUniqueOnlyWhileLive(t *testing.T) {
 func TestObserveSandboxTimestamps(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
-	newSandboxClass(t, st, ctx, "standard")
+	newSandboxClass(t, st, ctx, f.orgID, "standard")
 	sb := newSandbox(t, st, ctx, f, "obs")
 
 	mustObserve := func(state policy.SandboxState, detail string) Sandbox {
@@ -158,6 +183,21 @@ func TestObserveSandboxTimestamps(t *testing.T) {
 	if again.SuspendedAt != nil {
 		t.Error("suspended_at should be cleared once a sandbox is running again")
 	}
+	// active_at does move, so idle suspension counts from the resume.
+	if again.ActiveAt == nil || again.ActiveAt.Before(firstReady) {
+		t.Errorf("active_at = %v on resume, want it at or after %v", again.ActiveAt, firstReady)
+	}
+	resumedAt := *again.ActiveAt
+	if err := st.TouchSandbox(ctx, sb.ID); err != nil {
+		t.Fatalf("TouchSandbox: %v", err)
+	}
+	touched, err := st.Sandbox(ctx, sb.ID)
+	if err != nil {
+		t.Fatalf("Sandbox: %v", err)
+	}
+	if touched.ActiveAt == nil || touched.ActiveAt.Before(resumedAt) {
+		t.Errorf("active_at = %v after a touch, want it at or after %v", touched.ActiveAt, resumedAt)
+	}
 
 	terminated := mustObserve(policy.SandboxTerminated, "terminated")
 	if terminated.TerminatedAt == nil {
@@ -174,7 +214,7 @@ func TestObserveSandboxTimestamps(t *testing.T) {
 func TestAccountSandboxesAccumulates(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
-	newSandboxClass(t, st, ctx, "standard")
+	newSandboxClass(t, st, ctx, f.orgID, "standard")
 	sb := newSandbox(t, st, ctx, f, "clock")
 
 	if err := st.ObserveSandbox(ctx, sb.ID, SandboxObservation{State: policy.SandboxReady}); err != nil {
@@ -240,19 +280,32 @@ func TestAccountSandboxesAccumulates(t *testing.T) {
 		t.Errorf("a suspended sandbox was charged %d extra seconds",
 			after.RunningSeconds-frozen.RunningSeconds)
 	}
+
+	// Nor is the time it was suspended charged once it is resumed.
+	if err := st.ObserveSandbox(ctx, sb.ID, SandboxObservation{State: policy.SandboxReady}); err != nil {
+		t.Fatalf("ObserveSandbox: %v", err)
+	}
+	if _, err := st.AccountSandboxes(ctx, time.Now()); err != nil {
+		t.Fatalf("AccountSandboxes: %v", err)
+	}
+	resumed, _ := st.Sandbox(ctx, sb.ID)
+	if resumed.RunningSeconds-frozen.RunningSeconds > 5 {
+		t.Errorf("resuming charged %d seconds of the suspension",
+			resumed.RunningSeconds-frozen.RunningSeconds)
+	}
 }
 
 func TestCountLiveSandboxes(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
-	newSandboxClass(t, st, ctx, "standard")
+	newSandboxClass(t, st, ctx, f.orgID, "standard")
 	a := newSandbox(t, st, ctx, f, "a")
 	newSandbox(t, st, ctx, f, "b")
 
 	for _, scope := range []struct {
 		typ policy.ScopeType
 		id  string
-	}{{policy.ScopeOrg, f.orgID}, {policy.ScopeTeam, f.teamID}, {policy.ScopeKey, f.keyID}} {
+	}{{policy.ScopeOrg, f.orgID}, {policy.ScopeTeam, f.teamID}} {
 		n, err := st.CountLiveSandboxes(ctx, scope.typ, scope.id)
 		if err != nil {
 			t.Fatalf("CountLiveSandboxes(%s): %v", scope.typ, err)
@@ -287,7 +340,7 @@ func TestCountLiveSandboxes(t *testing.T) {
 func TestSandboxesPastExpiry(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
-	newSandboxClass(t, st, ctx, "standard")
+	newSandboxClass(t, st, ctx, f.orgID, "standard")
 	sb := newSandbox(t, st, ctx, f, "expiring")
 	newSandbox(t, st, ctx, f, "not-yet")
 
@@ -300,6 +353,30 @@ func TestSandboxesPastExpiry(t *testing.T) {
 	}
 	if len(due) != 1 || due[0].ID != sb.ID {
 		t.Fatalf("got %d sandboxes past expiry, want just %s", len(due), sb.ID)
+	}
+}
+
+func TestSandboxExpiryMovesItsKey(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	newSandboxClass(t, st, ctx, f.orgID, "standard")
+	sb := newSandbox(t, st, ctx, f, "extended")
+
+	until := time.Now().Add(8 * time.Hour).UTC().Truncate(time.Second)
+	if err := st.SetSandboxExpiry(ctx, sb.ID, until); err != nil {
+		t.Fatalf("SetSandboxExpiry: %v", err)
+	}
+	var got time.Time
+	if err := st.pool.QueryRow(ctx,
+		"SELECT expires_at FROM api_keys WHERE id = $1", f.keyID).Scan(&got); err != nil {
+		t.Fatalf("reading the key: %v", err)
+	}
+	if !got.Equal(until) {
+		t.Errorf("key expires at %v, want %v", got, until)
+	}
+
+	if err := st.SetSandboxExpiry(ctx, "sbx_missing", until); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown sandbox: err = %v, want ErrNotFound", err)
 	}
 }
 
@@ -347,40 +424,10 @@ func TestSandboxPolicyLimitsRoundTrip(t *testing.T) {
 	}
 }
 
-func TestSandboxForSession(t *testing.T) {
-	st, ctx := db(t)
-	f := newFixture(t, st, ctx)
-	newSandboxClass(t, st, ctx, "standard")
-
-	// The join docs/sessions.md describes: a session is a hash that cannot be
-	// read back, but an agent sandbox states its own id, so the key it will hash
-	// to is computable when the sandbox is created.
-	key := StatedSessionKeyFor(f.keyID, "sbx_agentrun")
-	expires := time.Now().Add(time.Hour)
-	if _, err := st.CreateSandbox(ctx, Sandbox{
-		ID: "sbx_agentrun", OrgID: f.orgID, Name: "agentrun", Class: "standard",
-		Purpose: policy.PurposeAgent, State: policy.SandboxPending,
-		KeyID: f.keyID, SessionKey: key, ExpiresAt: &expires,
-	}); err != nil {
-		t.Fatalf("CreateSandbox: %v", err)
-	}
-
-	got, err := st.SandboxForSession(ctx, f.orgID, key)
-	if err != nil {
-		t.Fatalf("SandboxForSession: %v", err)
-	}
-	if got.ID != "sbx_agentrun" {
-		t.Errorf("found %s", got.ID)
-	}
-	if _, err := st.SandboxForSession(ctx, f.orgID, "cNOTASESSION"); !errors.Is(err, ErrNotFound) {
-		t.Errorf("err = %v, want ErrNotFound", err)
-	}
-}
-
 func TestSandboxUsageBy(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
-	newSandboxClass(t, st, ctx, "standard")
+	newSandboxClass(t, st, ctx, f.orgID, "standard")
 	a := newSandbox(t, st, ctx, f, "a")
 	newSandbox(t, st, ctx, f, "b")
 
@@ -420,13 +467,35 @@ func TestSandboxUsageBy(t *testing.T) {
 	if len(byUser) != 1 || byUser[0].Key != "dev@example.ch" {
 		t.Errorf("by user = %+v", byUser)
 	}
+
+	// Across every organisation a class is named with its organisation, since
+	// two of them can each have a "standard".
+	all, err := st.SandboxUsageBy(ctx, "", "class", time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("SandboxUsageBy(all orgs): %v", err)
+	}
+	if len(all) != 1 || all[0].Key != "standard" || all[0].OrgID != f.orgID {
+		t.Errorf("across orgs = %+v, want the class with its organisation", all)
+	}
 }
 
-func TestDeletingAnOrgKeepsItsSandboxes(t *testing.T) {
+func TestDeletingAnOrgDeletesItsSandboxes(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
-	newSandboxClass(t, st, ctx, "standard")
-	newSandbox(t, st, ctx, f, "gone")
+	newSandboxClass(t, st, ctx, f.orgID, "standard")
+	sb := newSandbox(t, st, ctx, f, "gone")
+
+	// A live sandbox holds a machine, which nothing would stop once its row
+	// was gone.
+	gone, err := st.DeleteOrg(ctx, f.orgID)
+	if !errors.Is(err, ErrOrgHasSandboxes) || gone.LiveSandboxes != 1 {
+		t.Fatalf("DeleteOrg with a live sandbox = %+v, %v; want it refused", gone, err)
+	}
+	if err := st.ObserveSandbox(ctx, sb.ID, SandboxObservation{
+		State: policy.SandboxTerminated, Detail: "terminated",
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// Sandboxes cascade with their organisation, unlike the usage log. The
 	// difference is what each is for: the usage log is what finance invoices

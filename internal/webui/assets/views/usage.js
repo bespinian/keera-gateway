@@ -11,6 +11,7 @@ import {
   icons,
   RANGES as SHARED_RANGES,
 } from "../ui.js";
+import { orgNameOf } from "./orgs.js";
 
 const GROUPS = [
   { key: "team", label: "Team" },
@@ -24,6 +25,9 @@ const GROUPS = [
   { key: "day", label: "Day" },
 ];
 
+// Offered only across every organisation: inside one it is a single row.
+const ORG_GROUP = { key: "org", label: "Organisation" };
+
 // The shared windows plus a quarter, and a window of its own rather than the
 // shared one: a chargeback is read over a month or a quarter, and carrying that
 // back to the dashboard would leave somebody looking at a quarter of traffic
@@ -35,7 +39,10 @@ const RANGES = [
 ];
 
 export async function usageView(ctx) {
-  const groupBy = sessionStorage.getItem("keera.usage.group") || "team";
+  const groups =
+    !ctx.orgID && ctx.state.me.unrestricted ? [ORG_GROUP, ...GROUPS] : GROUPS;
+  const stored = sessionStorage.getItem("keera.usage.group");
+  const groupBy = groups.some((g) => g.key === stored) ? stored : "team";
   const since = sessionStorage.getItem("keera.usage.range") || "720h";
 
   const res = await api.usage(ctx.orgID, groupBy, since);
@@ -52,7 +59,10 @@ export async function usageView(ctx) {
   const total = rows.reduce((a, r) => a + r.cost_micros, 0);
   const requests = rows.reduce((a, r) => a + r.requests, 0);
 
-  ctx.setSubtitle(`${num(requests)} requests · ${money(total, res.currency)}`);
+  // Only served requests count here: a refused or failed one costs nothing.
+  ctx.setSubtitle(
+    `${num(requests)} served requests · ${money(total, res.currency)}`,
+  );
 
   const controls = h(
     "div",
@@ -60,7 +70,7 @@ export async function usageView(ctx) {
     h(
       "div",
       { class: "seg" },
-      GROUPS.map((g) =>
+      groups.map((g) =>
         h(
           "button",
           {
@@ -128,6 +138,32 @@ export async function usageView(ctx) {
               : "-",
       );
     }
+    if (r.org_id) {
+      // Across every organisation, two of them can each have a model of the
+      // same alias, so the row names whose it is.
+      return h(
+        "div",
+        { class: "stack" },
+        h("span", { class: "mono" }, r.group),
+        h(
+          "span",
+          { class: "faint", style: { fontSize: "11px" } },
+          orgNameOf(ctx, r.org_id),
+        ),
+      );
+    }
+    if (groupBy === "org") {
+      return h(
+        "div",
+        { class: "stack" },
+        h("span", {}, orgNameOf(ctx, r.group)),
+        h(
+          "span",
+          { class: "mono faint", style: { fontSize: "11px" } },
+          r.group,
+        ),
+      );
+    }
     if (groupBy === "model" || groupBy === "day") {
       return h("span", { class: "mono" }, r.group);
     }
@@ -166,16 +202,16 @@ export async function usageView(ctx) {
   const body = table(
     [
       // The grouping column is given its width rather than measured from what
-      // is in it: the same table is redrawn over six groupings, and a first
-      // column that resizes under every one of them makes the tabs above read
-      // as six different reports rather than one asked six ways.
+      // is in it: the same table is redrawn over every grouping, and a first
+      // column that resizes under each of them makes the tabs above read as
+      // different reports rather than one asked several ways.
       {
-        label: GROUPS.find((g) => g.key === groupBy).label,
+        label: groups.find((g) => g.key === groupBy).label,
         width: "36%",
         cell: label,
       },
       {
-        label: "Requests",
+        label: "Served",
         width: "16%",
         num: true,
         cell: (r) => num(r.requests),
@@ -202,7 +238,7 @@ export async function usageView(ctx) {
     rows,
     {
       emptyTitle: "Nothing in this period",
-      emptyBody: "Usage appears here as soon as a key is used.",
+      emptyBody: "Usage appears here as soon as a request is served.",
     },
   );
 
@@ -215,7 +251,7 @@ export async function usageView(ctx) {
           { class: "card-body row" },
           h("strong", {}, "Total"),
           h("div", { style: { flex: 1 } }),
-          h("span", { class: "muted" }, `${num(requests)} requests`),
+          h("span", { class: "muted" }, `${num(requests)} served requests`),
           h("strong", {}, money(total, res.currency)),
         ),
       )
@@ -224,8 +260,9 @@ export async function usageView(ctx) {
   const note = h(
     "div",
     { class: "hint", style: { marginTop: "14px" } },
-    "Cost uses the model prices in the catalogue. Requests cancelled " +
-      "mid-stream are charged an estimate, and the log marks them.",
+    "Cost uses the prices set on each model. Only served requests count; " +
+      "refused and failed ones cost nothing and are in Requests. Requests " +
+      "cancelled mid-stream are charged an estimate, and the log marks them.",
   );
 
   return h("div", {}, controls, body, foot, note);

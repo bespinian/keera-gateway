@@ -70,6 +70,14 @@ func (s *Server) access(w http.ResponseWriter, r *http.Request, p *authn.Princip
 		return
 	}
 
+	// In the panel the operator key signs in as a stand-in user. That is not
+	// a person either, so the screen says so, and still lists any keys it
+	// issued for itself.
+	if u, err := s.st.UserByID(r.Context(), p.UserID); err == nil &&
+		u.ExternalID == operatorKeyExternalID {
+		out["operator_key"] = true
+	}
+
 	orgName, _ := s.orgName(r.Context(), p.OrgID)
 	out["org"] = map[string]string{"id": p.OrgID, "name": orgName}
 
@@ -149,11 +157,11 @@ func (s *Server) accessKeys(r *http.Request, orgID, orgName string, keys []store
 	return shown, nil
 }
 
-// callable is every name a client may put in the model field: the catalogue
-// and the organisation's routers. Without the routers, a key whose allow-list
-// names only a router would look like it may call nothing.
+// callable is every name a client may put in the model field: the models the
+// organisation has and its routers. Without the routers, a key whose
+// allow-list names only a router would look like it may call nothing.
 func (s *Server) callable(r *http.Request, orgID string) ([]policy.Model, error) {
-	models, err := s.st.LoadModels(r.Context())
+	models, err := s.st.ListModels(r.Context(), orgID)
 	if err != nil {
 		return nil, err
 	}

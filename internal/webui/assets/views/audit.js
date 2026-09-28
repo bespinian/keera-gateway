@@ -49,14 +49,24 @@ const LABELS = {
   "org.update": "Organisation changed",
   "org.delete": "Organisation deleted",
   "team.create": "Team created",
-  "user.put": "User added",
+  "team.update": "Team renamed",
+  "team.delete": "Team deleted",
+  "user.create": "User added",
   "user.set_role": "User role changed",
+  "user.disable": "User disabled",
+  "user.enable": "User enabled",
   "key.create": "API key issued",
   "key.revoke": "API key revoked",
   "guardrail.put": "Guardrails changed",
   "model.put": "Model saved",
   "model.check": "Model checked",
   "model.delete": "Model deleted",
+  "model.credential.set": "Model credential set",
+  "model.credential.clear": "Model credential removed",
+  "mcp_server.put": "MCP server saved",
+  "mcp_server.delete": "MCP server deleted",
+  "mcp_server.credential.set": "MCP server credential set",
+  "mcp_server.credential.clear": "MCP server credential removed",
   "filter.put": "Filter saved",
   "filter.check": "Filter checked",
   "filter.delete": "Filter deleted",
@@ -66,6 +76,8 @@ const LABELS = {
   "sandbox.create": "Sandbox created",
   "sandbox.extend": "Sandbox extended",
   "sandbox.terminate": "Sandbox terminated",
+  "sandbox.suspend": "Sandbox suspended",
+  "sandbox.resume": "Sandbox resumed",
   "sandbox.attach": "Sandbox attached to",
   "sandbox_class.put": "Sandbox class saved",
   "sandbox_class.delete": "Sandbox class deleted",
@@ -247,8 +259,8 @@ export async function auditView(ctx) {
         "div",
         { class: "banner banner-warn", style: { marginTop: "16px" } },
         "No identity provider is set up, so changes show as " +
-          '"operator key", not as a person. Set up single sign-on to see ' +
-          "names here.",
+          '"operator@localhost" or "operator key", not as a person. Set up ' +
+          "single sign-on to see names here.",
       ),
     );
   }
@@ -275,13 +287,21 @@ function auditTable(entries) {
       },
       {
         label: "Who",
+        // The operator key has no identity. Sent as a header it is logged as
+        // "operator key"; in the panel it signs in as operator@localhost.
         cell: (e) =>
-          e.actor === "operator key"
+          e.actor === "operator key" || e.actor === "operator@localhost"
             ? h(
                 "span",
                 { class: "muted" },
-                "operator key",
-                h("span", { class: "faint" }, " (no identity)"),
+                e.actor,
+                h(
+                  "span",
+                  { class: "faint" },
+                  e.actor === "operator key"
+                    ? " (no identity)"
+                    : " (operator key)",
+                ),
               )
             : h("strong", {}, e.actor),
       },

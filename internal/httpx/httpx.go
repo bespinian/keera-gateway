@@ -47,7 +47,6 @@ type APIError struct {
 	Message string `json:"message"`
 	Type    string `json:"type"`
 	Code    string `json:"code,omitempty"`
-	Param   string `json:"param,omitempty"`
 }
 
 // Flag reads a boolean query parameter. Only "1" counts, so every switch on

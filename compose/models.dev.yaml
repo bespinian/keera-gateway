@@ -1,17 +1,22 @@
-# The catalogue for `make dev`, where the gateway runs on the host.
+# The models each new organisation starts with under `make dev`, where the
+# gateway runs on the host. An organisation that already exists is not
+# changed; `keera model apply` adds the models to one.
 #
 # The only thing that differs from models.yaml is the backend address:
 # `keera-engine` is a container DNS name that resolves inside the compose
 # network and nowhere else, so a gateway running on the host has to be pointed
-# at the published loopback port instead. Everything above the backend - the alias
-# clients ask for, the model id the backend is asked for - is unchanged, which
-# is the point of keeping those three names separate.
+# at the published loopback port instead. Everything above the backend - the
+# alias clients ask for, the model id the backend is asked for - is unchanged,
+# which is the point of keeping those three names separate.
 #
-# max_context stays at 16384 even when GATEWAY_DEV_TIER=gpu has vLLM serving a
-# 32k window. Capping below the backend is the safe direction: the gateway
-# refuses an over-long prompt itself, with a message naming the limit, instead
-# of forwarding it for the backend to answer with a 400. Raise it to 32768 here
-# if the wider window is what you are working on.
+# `make dev` and `podman compose up` share one database. An organisation made
+# under one keeps that one's backend address, and does not reach the engine
+# under the other.
+#
+# max_context stays at 16384 even when TIER=gpu has vLLM serving a 32k window.
+# Capping below the backend is the safe direction: the gateway refuses an
+# over-long prompt itself, with a message naming the limit, instead of
+# forwarding it for the backend to answer with a 400.
 models:
   - alias: keera-speed
     kind: chat

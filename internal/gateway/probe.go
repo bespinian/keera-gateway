@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -111,23 +112,19 @@ func (s *Server) checkChat(ctx context.Context, m policy.Model, p Probe) Probe {
 	}
 
 	start := time.Now()
-	resp, backend, err := s.probeDispatch(ctx, m, "/chat/completions", payload)
-	if err != nil {
-		p.Error = unreachable(err)
+	resp := s.probeCall(ctx, m, "/chat/completions", payload, &p)
+	if resp == nil {
 		return p
 	}
 	defer func() { _ = resp.Body.Close() }()
-	p.Backend, p.Reachable, p.Status = backend, true, resp.StatusCode
-
-	if resp.StatusCode >= 300 {
-		p.Error = upstreamMessage(resp)
-		return p
-	}
 	p.Streamed = strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream")
 
 	r := &probeReply{}
 	if p.Streamed {
-		readSSE(resp.Body, r.scan)
+		_ = scanSSE(resp.Body, func(chunk []byte) error {
+			r.scan(chunk)
+			return nil
+		})
 	} else {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		r.first = time.Now()
@@ -213,19 +210,25 @@ func (r *probeReply) scan(chunk []byte) {
 	}
 }
 
-// chatWarnings collects what is worth saying about a check that otherwise
-// passed. None of these is a failure on its own.
+// chatWarnings collects what is worth saying about a chat check that
+// otherwise passed. None of these is a failure on its own.
 func chatWarnings(p Probe, m policy.Model) []string {
 	var out []string
 	if p.OK && !p.Streamed {
 		out = append(out, "the backend did not stream. Editors show a completion token by "+
 			"token; buffered, it arrives all at once at the end.")
 	}
+	return append(out, servedWarnings(p, m)...)
+}
+
+// servedWarnings is the warning every kind of check can give. The completion
+// and embedding checks ask for no stream, so they must not warn about one.
+func servedWarnings(p Probe, m policy.Model) []string {
 	if p.Served != "" && m.BackendModel != "" && p.Served != m.BackendModel {
-		out = append(out, fmt.Sprintf("the backend answered as %q, not %q - check the "+
-			"inference plane's --served-model-name.", p.Served, m.BackendModel))
+		return []string{fmt.Sprintf("the backend answered as %q, not %q - check the "+
+			"inference plane's --served-model-name.", p.Served, m.BackendModel)}
 	}
-	return out
+	return nil
 }
 
 func (s *Server) checkCompletion(ctx context.Context, m policy.Model, p Probe) Probe {
@@ -233,19 +236,13 @@ func (s *Server) checkCompletion(ctx context.Context, m policy.Model, p Probe) P
 		"model": m.BackendModel, "prompt": "func hello() {", "max_tokens": 16, "stream": false,
 	})
 	start := time.Now()
-	resp, backend, err := s.probeDispatch(ctx, m, "/completions", payload)
-	if err != nil {
-		p.Error = unreachable(err)
+	resp := s.probeCall(ctx, m, "/completions", payload, &p)
+	if resp == nil {
 		return p
 	}
 	defer func() { _ = resp.Body.Close() }()
-	p.Backend, p.Reachable, p.Status = backend, true, resp.StatusCode
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	p.TotalMS = time.Since(start).Milliseconds()
-	if resp.StatusCode >= 300 {
-		p.Error = upstreamMessage(resp)
-		return p
-	}
 	var out struct {
 		Model   string `json:"model"`
 		Choices []struct {
@@ -262,26 +259,20 @@ func (s *Server) checkCompletion(ctx context.Context, m policy.Model, p Probe) P
 		return p
 	}
 	p.OK = true
-	p.Warnings = chatWarnings(p, m)
+	p.Warnings = servedWarnings(p, m)
 	return p
 }
 
 func (s *Server) checkEmbedding(ctx context.Context, m policy.Model, p Probe) Probe {
 	payload, _ := json.Marshal(map[string]any{"model": m.BackendModel, "input": "keera"})
 	start := time.Now()
-	resp, backend, err := s.probeDispatch(ctx, m, "/embeddings", payload)
-	if err != nil {
-		p.Error = unreachable(err)
+	resp := s.probeCall(ctx, m, "/embeddings", payload, &p)
+	if resp == nil {
 		return p
 	}
 	defer func() { _ = resp.Body.Close() }()
-	p.Backend, p.Reachable, p.Status = backend, true, resp.StatusCode
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	p.TotalMS = time.Since(start).Milliseconds()
-	if resp.StatusCode >= 300 {
-		p.Error = upstreamMessage(resp)
-		return p
-	}
 	var out struct {
 		Model string `json:"model"`
 		Data  []struct {
@@ -296,87 +287,41 @@ func (s *Server) checkEmbedding(ctx context.Context, m policy.Model, p Probe) Pr
 	}
 	p.Sample = fmt.Sprintf("%d dimensions", len(out.Data[0].Embedding))
 	p.OK = true
-	p.Warnings = chatWarnings(p, m)
+	p.Warnings = servedWarnings(p, m)
 	return p
 }
 
-// probeDispatch is dispatch, plus which backend answered, so a check can name
-// the URL it reached.
-func (s *Server) probeDispatch(ctx context.Context, m policy.Model, path string,
-	payload []byte) (*http.Response, string, error) {
+// probeCall sends a check's request and records which backend answered, and
+// with what status. It returns nil when the check is already over, with
+// p.Error saying why.
+func (s *Server) probeCall(ctx context.Context, m policy.Model, path string,
+	payload []byte, p *Probe) *http.Response {
 	resp, err := s.dispatch(ctx, m, path, payload)
 	if err != nil {
-		return nil, "", err
+		p.Error = unreachable(err)
+		return nil
 	}
-	backend := ""
+	p.Reachable, p.Status = true, resp.StatusCode
 	if resp.Request != nil && resp.Request.URL != nil {
-		backend = strings.TrimSuffix(resp.Request.URL.String(), path)
+		p.Backend = strings.TrimSuffix(resp.Request.URL.String(), path)
 	}
-	return resp, backend, nil
-}
-
-// readSSE feeds each data payload of a server-sent event stream to fn.
-func readSSE(body io.Reader, fn func([]byte)) {
-	buf := make([]byte, 0, 8<<10)
-	chunk := make([]byte, 4<<10)
-	for {
-		n, err := body.Read(chunk)
-		if n > 0 {
-			buf = append(buf, chunk[:n]...)
-			for {
-				i := strings.Index(string(buf), "\n\n")
-				if i < 0 {
-					break
-				}
-				for line := range strings.SplitSeq(string(buf[:i]), "\n") {
-					line = strings.TrimSpace(line)
-					if !strings.HasPrefix(line, "data:") {
-						continue
-					}
-					data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-					if data == "" || data == "[DONE]" {
-						continue
-					}
-					fn([]byte(data))
-				}
-				buf = buf[i+2:]
-			}
-		}
-		if err != nil {
-			return
-		}
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		_ = resp.Body.Close()
+		p.Error = "the backend answered " + upstreamComplaint(body, resp.StatusCode)
+		return nil
 	}
-}
-
-// upstreamMessage turns a refusal from the inference plane into the sentence an
-// operator should read, preferring what the backend itself said.
-func upstreamMessage(resp *http.Response) string {
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-	return "the backend answered " + upstreamComplaint(body, resp.StatusCode)
+	return resp
 }
 
 // upstreamComplaint renders a refusal from the inference plane as a status
 // and, if the backend gave one, its message. The caller adds the subject ("the
 // backend", "its model").
 func upstreamComplaint(body []byte, status int) string {
-	var envelope struct {
-		Error struct {
-			Message string `json:"message"`
-		} `json:"error"`
-		Message string `json:"message"`
+	if msg := upstreamText(body); msg != "" {
+		return strconv.Itoa(status) + ": " + sample(msg)
 	}
-	_ = json.Unmarshal(body, &envelope)
-	msg := envelope.Error.Message
-	if msg == "" {
-		msg = envelope.Message
-	}
-	if msg == "" {
-		msg = strings.TrimSpace(sample(string(body)))
-	}
-	if msg == "" {
-		return strconv.Itoa(status)
-	}
-	return strconv.Itoa(status) + ": " + msg
+	return strconv.Itoa(status)
 }
 
 // unreachable explains a connection that never happened. Usually it is a
@@ -386,8 +331,8 @@ func unreachable(err error) string {
 	if err == nil {
 		return ""
 	}
-	if strings.Contains(err.Error(), "context deadline exceeded") {
-		return "the backend did not answer within 30s. On a first start the inference plane " +
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "the backend did not answer within " + probeTimeout.String() + ". On a first start the inference plane " +
 			"is still downloading and loading weights, which takes minutes - wait rather " +
 			"than restart. Otherwise: " + err.Error()
 	}

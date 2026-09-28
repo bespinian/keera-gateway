@@ -15,7 +15,7 @@ import (
 // signedInUser is one person to hang a sign-in on.
 func signedInUser(t *testing.T, st *Store, ctx context.Context) string {
 	t.Helper()
-	if _, err := st.CreateOrg(ctx, "org_1", "Example Bank"); err != nil {
+	if _, err := st.CreateOrg(ctx, Org{ID: "org_1", Name: "Example Bank"}, OrgTemplate{}); err != nil {
 		t.Fatalf("creating the organisation: %v", err)
 	}
 	u, err := st.AddUser(ctx, "user_1", "org_1", "alice@example.ch", "sso:alice", "member")
@@ -75,7 +75,7 @@ func TestACLITokenResolvesToThePersonBehindIt(t *testing.T) {
 	userID := signedInUser(t, st, ctx)
 
 	hash := []byte("token-hash-one-token-hash-one-01")
-	if err := st.CreateCLIToken(ctx, hash, userID, "alice@thinkpad",
+	if err := st.CreateCLIToken(ctx, hash, userID,
 		time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("storing the token: %v", err)
 	}
@@ -86,9 +86,6 @@ func TestACLITokenResolvesToThePersonBehindIt(t *testing.T) {
 	if tu.User.ID != userID || tu.User.Email != "alice@example.ch" ||
 		tu.User.Role != "member" || tu.User.OrgID != "org_1" {
 		t.Errorf("resolved %+v, want the person the token was issued to", tu.User)
-	}
-	if tu.Token.Label != "alice@thinkpad" {
-		t.Errorf("label = %q, want the machine it was issued to", tu.Token.Label)
 	}
 
 	if err := st.DeleteCLIToken(ctx, hash); err != nil {
@@ -106,7 +103,7 @@ func TestAnExpiredCLITokenIsNotAToken(t *testing.T) {
 	userID := signedInUser(t, st, ctx)
 
 	hash := []byte("token-hash-two-token-hash-two-01")
-	if err := st.CreateCLIToken(ctx, hash, userID, "alice@thinkpad",
+	if err := st.CreateCLIToken(ctx, hash, userID,
 		time.Now().Add(-time.Second)); err != nil {
 		t.Fatalf("storing the token: %v", err)
 	}
@@ -124,7 +121,7 @@ func TestSigningSomebodyOutReachesTheirTerminals(t *testing.T) {
 
 	token := []byte("token-hash-out-token-hash-out-01")
 	code := []byte("code-hash-out--code-hash-out--01")
-	if err := st.CreateCLIToken(ctx, token, userID, "alice@thinkpad",
+	if err := st.CreateCLIToken(ctx, token, userID,
 		time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("storing the token: %v", err)
 	}

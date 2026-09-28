@@ -59,17 +59,17 @@ func routerStore(t *testing.T) (*store.Store, context.Context) {
 		orgs RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
-	if _, err := st.CreateOrg(ctx, "org_1", "Example Bank"); err != nil {
+	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_1", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
 	for _, m := range []policy.Model{
-		{Alias: "keera-small", Kind: policy.KindChat, Backends: []string{"http://x/v1"},
+		{OrgID: "org_1", Alias: "keera-small", Kind: policy.KindChat, Backends: []string{"http://x/v1"},
 			BackendModel: "small", Description: "fast and local", Enabled: true},
-		{Alias: "keera-large", Kind: policy.KindChat, Backends: []string{"http://x/v1"},
+		{OrgID: "org_1", Alias: "keera-large", Kind: policy.KindChat, Backends: []string{"http://x/v1"},
 			BackendModel: "large", Description: "hosted and capable", Enabled: true},
-		{Alias: "keera-picker", Kind: policy.KindChat, Backends: []string{"http://x/v1"},
+		{OrgID: "org_1", Alias: "keera-picker", Kind: policy.KindChat, Backends: []string{"http://x/v1"},
 			BackendModel: "picker", Enabled: true},
-		{Alias: "keera-embed", Kind: policy.KindEmbedding, Backends: []string{"http://x/v1"},
+		{OrgID: "org_1", Alias: "keera-embed", Kind: policy.KindEmbedding, Backends: []string{"http://x/v1"},
 			BackendModel: "embed", Enabled: true},
 	} {
 		if err := st.UpsertModel(ctx, m); err != nil {

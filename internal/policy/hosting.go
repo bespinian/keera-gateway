@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"fmt"
 	"net/netip"
 	"net/url"
 	"strings"
@@ -8,7 +9,8 @@ import (
 
 // Hosting is which side of the customer's boundary a model is served on.
 // It is derived from the backend URL rather than stored, so a repointed
-// backend cannot make it wrong.
+// backend cannot make it wrong. A model's default location comes from it too:
+// see LocationFromBackends.
 type Hosting string
 
 const (
@@ -40,6 +42,17 @@ func (m Model) Hosting() Hosting {
 		}
 	}
 	return out
+}
+
+// LocationFromBackends is the location of a model that states none and names
+// no provider. A backend inside the network is onprem. A URL outside it does
+// not say which country the model runs in, so that is an error asking for it.
+func (m Model) LocationFromBackends() (string, error) {
+	if m.Hosting() == HostedInternal {
+		return LocationOnPrem, nil
+	}
+	return "", fmt.Errorf("location is required: %s is outside this network, and its "+
+		"address does not say where it runs - state it, such as ch or usa", m.Endpoint())
 }
 
 // Endpoint is the host that decided Hosting, so the screen can show the reason

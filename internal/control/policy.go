@@ -8,35 +8,15 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bespinian/keera-gateway/internal/authn"
 	"github.com/bespinian/keera-gateway/internal/catalog"
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/policy"
+	"github.com/bespinian/keera-gateway/internal/registry"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
-
-// scopeOwner resolves which organisation a policy scope belongs to, so an
-// administrator cannot reach another tenant's guardrails by guessing an id.
-func (s *Server) scopeOwner(r *http.Request, scope policy.ScopeType, scopeID string) (string, error) {
-	switch scope {
-	case policy.ScopeOrg:
-		ok, err := s.st.OrgExists(r.Context(), scopeID)
-		if err != nil {
-			return "", err
-		}
-		if !ok {
-			return "", store.ErrNotFound
-		}
-		return scopeID, nil
-	case policy.ScopeTeam:
-		return s.st.TeamOrg(r.Context(), scopeID)
-	case policy.ScopeKey:
-		return s.st.KeyOrg(r.Context(), scopeID)
-	default:
-		return "", errors.New("scope must be one of org, team, key")
-	}
-}
 
 // requireScopeRead checks that the caller may read the tenant owning a policy
 // scope. Another tenant's scope answers 404, not 403, so ids cannot be probed.
@@ -45,7 +25,7 @@ func (s *Server) requireScopeRead(w http.ResponseWriter, r *http.Request,
 	if p.Unrestricted() {
 		return true
 	}
-	owner, err := s.scopeOwner(r, scope, scopeID)
+	owner, _, err := s.scopeChain(r.Context(), scope, scopeID)
 	if err != nil {
 		s.fail(w, err)
 		return false
@@ -198,7 +178,9 @@ func (s *Server) effectiveGuardrails(w http.ResponseWriter, r *http.Request, p *
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-// scopeChain finds the organisation and team above a scope.
+// scopeChain finds the organisation and team above a scope. The organisation
+// is what an administrator must be in, so another tenant's guardrails cannot
+// be reached by guessing an id.
 func (s *Server) scopeChain(ctx context.Context, scope policy.ScopeType, scopeID string) (
 	orgID, teamID string, err error,
 ) {
@@ -212,9 +194,10 @@ func (s *Server) scopeChain(ctx context.Context, scope policy.ScopeType, scopeID
 	case policy.ScopeTeam:
 		orgID, err := s.st.TeamOrg(ctx, scopeID)
 		return orgID, scopeID, err
+	case policy.ScopeKey:
+		return s.st.KeyScope(ctx, scopeID)
 	default:
-		orgID, teamID, _, err := s.st.KeyScope(ctx, scopeID)
-		return orgID, teamID, err
+		return "", "", errors.New("scope must be one of org, team, key")
 	}
 }
 
@@ -293,7 +276,7 @@ func (s *Server) putGuardrails(w http.ResponseWriter, r *http.Request, p *authn.
 	if !ok {
 		return
 	}
-	owner, err := s.scopeOwner(r, scope, scopeID)
+	owner, _, err := s.scopeChain(r.Context(), scope, scopeID)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -311,13 +294,19 @@ func (s *Server) putGuardrails(w http.ResponseWriter, r *http.Request, p *authn.
 		badRequest(w, "'budget_period' must be 'day' or 'month'")
 		return
 	}
+	// A sandbox's key is minted for that sandbox and dies with it, so a key's
+	// guardrail has nothing to limit there. Stored, it would look like it did.
+	if scope == policy.ScopeKey && !lim.SandboxLimits.IsZero() {
+		badRequest(w, "sandbox limits are set on an organisation or a team, not on a key")
+		return
+	}
 	if size, ok := checkSystemPrompt(&lim); !ok {
 		badRequest(w, fmt.Sprintf("'system_prompt' is %d bytes; the limit is %d, because this text is "+
 			"sent and charged on every request this scope makes", size, maxSystemPromptBytes))
 		return
 	}
 	if !s.checkGuardrailFilters(w, r, owner, &lim) || !s.checkAllowList(w, r, scope, owner, &lim) ||
-		!s.checkAllowedTools(w, r, &lim) || !s.checkAllowedRepos(w, r, p, scope, scopeID, &lim) {
+		!s.checkAllowedTools(w, r, owner, &lim) || !s.checkAllowedRepos(w, r, p, scope, scopeID, &lim) {
 		return
 	}
 	if lim.BudgetMicros != nil && lim.BudgetPeriod == nil {
@@ -349,47 +338,51 @@ func (s *Server) putGuardrails(w http.ResponseWriter, r *http.Request, p *authn.
 // listModels is readable by anyone signed in: a developer needs to know which
 // models exist and their limits.
 //
-// Backend URLs are the inference plane's internal layout, shared by every
-// tenant, so only an operator sees them.
+// Backend URLs and whether a key is stored are for the organisation's
+// administrators.
 func (s *Server) listModels(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	models, err := s.st.LoadModels(r.Context())
+	orgID, ok := s.queryOrg(w, r, p)
+	if !ok {
+		return
+	}
+	models, err := s.st.ListModels(r.Context(), orgID)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
+	admin := p.CanAdminOrg(orgID)
 	for i := range models {
-		if !p.CanAdminCatalogue() {
+		if !admin {
 			models[i].Backends = nil
-			models[i].APIKeyEnv = ""
 			models[i].HasAPIKey = false
 		}
 		// Already left out of JSON by its tag; cleared as well to be safe.
 		models[i].APIKeyCiphertext = nil
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"data": models})
+	s.writeHookList(w, r, models, func(from, to time.Time) (any, error) {
+		return s.st.ModelStats(r.Context(), orgID, from, to)
+	})
 }
 
 // listProviders serves the hosted providers this binary knows, so adding a
 // hosted model in the panel needs only a model id. It is the same table the
 // catalogue file is read against.
 //
-// Anyone signed in may read it, for the panel's model catalog. As with
-// listModels, only an operator sees where a model is reached and which
-// variable holds its credential. Credentials are named here, never returned.
+// Anyone signed in may read it, for the panel's model catalog. Only someone who
+// can add a model sees where a provider is reached: the form fills it in.
 func (s *Server) listProviders(w http.ResponseWriter, _ *http.Request, p *authn.Principal) {
 	providers := catalog.Providers()
-	if !p.CanAdminCatalogue() {
+	if !p.CanAdminOrg(p.OrgID) {
 		for i := range providers {
 			providers[i].Endpoint = ""
-			providers[i].APIKeyEnv = ""
 		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"data": providers})
 }
 
 func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if !p.CanAdminCatalogue() {
-		s.forbid(w, "a model is an API contract shared by every tenant; only an operator can change one")
+	orgID, ok := s.adminOrg(w, r, p)
+	if !ok {
 		return
 	}
 	// The credential is write-only, so it is part of the request and not of
@@ -397,9 +390,6 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 	var body struct {
 		policy.Model
 		APIKey *string `json:"api_key"`
-		// FromCatalogue marks the write as applying the catalogue file, as
-		// `keera model apply` does, rather than an edit by hand.
-		FromCatalogue bool `json:"from_catalogue"`
 	}
 	if err := httpx.ReadJSON(r, &body); err != nil {
 		badRequest(w, err.Error())
@@ -407,48 +397,45 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 	}
 	m := body.Model
 	m.Alias = r.PathValue("alias")
+	m.OrgID = orgID
 	if !policy.ValidAlias(m.Alias) {
 		badRequest(w, "an alias must be lowercase letters, digits and interior hyphens: it is rendered "+
 			"into the client configurations `keera connect` prints, which quote none of it")
 		return
 	}
-	// Both are derived, never taken from the caller: has_api_key from what is
-	// stored, managed from whether this write is the catalogue file.
-	m.HasAPIKey = false
-	m.Managed = body.FromCatalogue
 	credential := ""
 	if body.APIKey != nil {
 		credential = strings.TrimSpace(*body.APIKey)
-	}
-	if credential != "" && !s.opts.Secrets.Enabled() {
-		badRequest(w, "this deployment cannot store a credential: set KEERA_SECRET_KEY (openssl rand -hex 32) "+
-			"and restart, or name an environment variable in 'api_key_env' instead")
-		return
 	}
 	if msg := normalizeModel(&m); msg != "" {
 		badRequest(w, msg)
 		return
 	}
-	if !s.checkManaged(w, r, &m, body.FromCatalogue) {
+	if !s.checkModelAlias(w, r, orgID, m.Alias) {
 		return
 	}
 	if err := s.st.UpsertModel(r.Context(), m); err != nil {
 		s.fail(w, err)
 		return
 	}
-	// The catalogue belongs to no tenant, so neither does its audit entry. The
-	// model marshals without its credential.
-	s.auditf(r, p, "", "model.put", "model", m.Alias, m)
+	// The model marshals without its credential.
+	s.auditf(r, p, orgID, "model.put", "model", m.Alias, m)
 
 	if body.APIKey != nil {
-		if err := s.setModelCredential(r, p, m.Alias, credential); err != nil {
+		if err := s.setModelCredential(r, p, orgID, m.Alias, credential); err != nil {
 			s.fail(w, err)
 			return
 		}
-		m.HasAPIKey = credential != ""
 	}
 	s.changed(r)
-	httpx.WriteJSON(w, http.StatusOK, m)
+	// Read back, so has_api_key says what is stored and not what this body
+	// happened to mention.
+	stored, err := s.st.Model(r.Context(), orgID, m.Alias)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, stored)
 }
 
 // normalizeModel fills in a model's defaults and says what is wrong with it,
@@ -467,9 +454,9 @@ func normalizeModel(m *policy.Model) string {
 	if !m.Kind.Valid() {
 		return "'kind' must be chat, completion or embedding"
 	}
-	// A provider only says where the values came from, so it is only checked
-	// against the providers this build knows. Its defaults are not applied:
-	// an entry may override any of them.
+	// The provider must be one this build knows, because the gateway reads
+	// it to choose how to talk to the backend. Its defaults are not applied
+	// here: the caller sends every value, and may have changed any of them.
 	m.Provider = strings.ToLower(strings.TrimSpace(m.Provider))
 	provider, known := catalog.ProviderByName(m.Provider)
 	if m.Provider != "" && !known {
@@ -477,13 +464,17 @@ func normalizeModel(m *policy.Model) string {
 			catalog.ProviderNames()
 	}
 	// Every model runs somewhere, so an unstated location is the provider's,
-	// or the deployment's own.
+	// or read off the backend, as for a catalogue file.
 	m.Location = strings.ToLower(strings.TrimSpace(m.Location))
 	switch {
 	case m.Location == "" && known:
 		m.Location = provider.Location
 	case m.Location == "":
-		m.Location = policy.LocationOnPrem
+		loc, err := m.LocationFromBackends()
+		if err != nil {
+			return err.Error()
+		}
+		m.Location = loc
 	}
 	m.ReleaseDate = strings.TrimSpace(m.ReleaseDate)
 	switch {
@@ -495,44 +486,50 @@ func normalizeModel(m *policy.Model) string {
 	return ""
 }
 
-// checkManaged refuses to edit a model the catalogue file declares: the next
-// start would undo the edit. Only the credential, which no file carries, may
-// still change.
-func (s *Server) checkManaged(w http.ResponseWriter, r *http.Request, m *policy.Model,
-	fromCatalogue bool,
-) bool {
-	existing, err := s.st.Model(r.Context(), m.Alias)
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-		return true
-	case err != nil:
+// checkModelAlias refuses a new model named like one of the organisation's
+// routers. A model is looked up first, so the router would become
+// unreachable.
+func (s *Server) checkModelAlias(w http.ResponseWriter, r *http.Request, orgID, alias string) bool {
+	switch _, err := s.st.Model(r.Context(), orgID, alias); {
+	case err == nil:
+		return true // an edit
+	case !errors.Is(err, store.ErrNotFound):
 		s.fail(w, err)
 		return false
-	case !existing.Managed || fromCatalogue:
-		return true
-	case !existing.SameDeclaration(*m):
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "model_is_managed",
-			"the model "+m.Alias+" is declared in this deployment's catalogue file, which is "+
-				"applied on every start: change it there, or remove it from the file to "+
-				"take it over here")
-		return false
 	}
-	// Only the credential changes, so the model stays managed.
-	m.Managed = true
-	return true
+	_, err := s.st.Router(r.Context(), orgID, alias)
+	return !s.aliasTaken(w, err, "'"+alias+"' is already one of this organisation's routers, "+
+		"which a model of the same alias would make unreachable - give this model a "+
+		"different alias")
+}
+
+// aliasTaken refuses an alias that another kind of thing already has, and
+// reports whether it did. err is what looking that thing up returned.
+func (s *Server) aliasTaken(w http.ResponseWriter, err error, msg string) bool {
+	switch {
+	case err == nil:
+		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "alias_in_use", msg)
+		return true
+	case !errors.Is(err, store.ErrNotFound):
+		s.fail(w, err)
+		return true
+	}
+	return false
 }
 
 // setModelCredential seals a pasted credential, or clears the stored one when
-// the operator emptied the field.
-func (s *Server) setModelCredential(r *http.Request, p *authn.Principal, alias, credential string) error {
+// the field was emptied.
+func (s *Server) setModelCredential(r *http.Request, p *authn.Principal,
+	orgID, alias, credential string,
+) error {
 	var sealed []byte
 	if credential != "" {
 		var err error
-		if sealed, err = s.opts.Secrets.Seal(alias, credential); err != nil {
+		if sealed, err = s.opts.Secrets.Seal(registry.ModelSecretName(orgID, alias), credential); err != nil {
 			return err
 		}
 	}
-	if err := s.st.SetModelCredential(r.Context(), alias, sealed); err != nil {
+	if err := s.st.SetModelCredential(r.Context(), orgID, alias, sealed); err != nil {
 		return err
 	}
 	action := "model.credential.set"
@@ -541,34 +538,32 @@ func (s *Server) setModelCredential(r *http.Request, p *authn.Principal, alias, 
 	}
 	// Nothing about the credential goes into the audit log, not even its
 	// length. Who set it and when is the record.
-	s.auditf(r, p, "", action, "model", alias, nil)
+	s.auditf(r, p, orgID, action, "model", alias, nil)
 	return nil
 }
 
-// checkModel tests one model against its own backends. It is operator-only,
-// because it reveals the inference plane's layout and puts load on it.
+// checkModel tests one model against its own backends. It is for the
+// organisation's administrators, because it reveals where the model runs and
+// puts load on it.
 //
 // It offers the model a tool and a question only that tool can answer, so a
 // vLLM tool-call parser that does not match the model shows up here.
 func (s *Server) checkModel(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if !p.CanAdminCatalogue() {
-		s.forbid(w, "a check reaches the inference plane directly; only an operator can run one")
-		return
-	}
-	if !s.requireGateway(w) {
+	orgID, ok := s.adminOrg(w, r, p)
+	if !ok {
 		return
 	}
 	alias := r.PathValue("alias")
 	// The registry, not the store: it holds the decrypted credential the data
 	// plane would present.
-	m, found := s.reg.Model(alias)
+	m, found := s.reg.Model(orgID, alias)
 	if !found {
 		s.fail(w, store.ErrNotFound)
 		return
 	}
 	probe := s.opts.Gateway.CheckModel(r.Context(), m)
 	// Kept, so an operator can later show when a model last worked.
-	s.auditf(r, p, "", "model.check", "model", alias, map[string]any{
+	s.auditf(r, p, orgID, "model.check", "model", alias, map[string]any{
 		"ok": probe.OK, "status": probe.Status, "tool_calls": probe.ToolCalls,
 		"tool_call_as_text": probe.ToolCallAsText, "error": probe.Error,
 	})
@@ -576,25 +571,14 @@ func (s *Server) checkModel(w http.ResponseWriter, r *http.Request, p *authn.Pri
 }
 
 func (s *Server) deleteModel(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if !p.CanAdminCatalogue() {
-		s.forbid(w, "only an operator can remove a model")
+	orgID, ok := s.adminOrg(w, r, p)
+	if !ok {
 		return
 	}
 	alias := r.PathValue("alias")
-	// A model the catalogue file declares comes back on the next start.
-	switch existing, err := s.st.Model(r.Context(), alias); {
-	case err != nil:
-		s.fail(w, err)
-		return
-	case existing.Managed:
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "model_is_managed",
-			"the model "+alias+" is declared in this deployment's catalogue file and would be "+
-				"applied again on the next start: remove it from the file instead")
-		return
-	}
-	if err := s.st.DeleteModel(r.Context(), alias); err != nil {
+	if err := s.st.DeleteModel(r.Context(), orgID, alias); err != nil {
 		s.fail(w, err)
 		return
 	}
-	s.deleted(w, r, p, "", "model", alias)
+	s.deleted(w, r, p, orgID, "model", alias)
 }

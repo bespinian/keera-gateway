@@ -2,9 +2,6 @@ package control
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
 	"errors"
 	"net"
 	"net/http"
@@ -20,9 +17,10 @@ import (
 
 const sessionCookie = "keera_session"
 
-// operatorKeyExternalID is the stand-in user the operator key signs in as. No
-// identity provider can issue this subject, so it never matches a real person.
-const operatorKeyExternalID = "keera:operator-key"
+// operatorKeyExternalID is the stand-in user the operator key signs in as.
+// Its provider is reserved, so no identity provider can issue this subject and
+// it never matches a real person.
+const operatorKeyExternalID = authn.ReservedProvider + ":operator-key"
 
 // authConfig tells the panel how to offer signing in, before anybody has.
 func (s *Server) authConfig(w http.ResponseWriter, _ *http.Request) {
@@ -36,8 +34,6 @@ func (s *Server) authConfig(w http.ResponseWriter, _ *http.Request) {
 		"sso": s.opts.Providers.Enabled(),
 		// One button per provider.
 		"providers": providers,
-		// Without an operator key, the panel should not offer a field for it.
-		"operator_key": s.hasOperatorKey,
 	})
 }
 
@@ -45,7 +41,7 @@ func (s *Server) authConfig(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if !s.opts.Providers.Enabled() {
 		httpx.WriteError(w, http.StatusNotImplemented, "invalid_request_error", "sso_not_configured",
-			"no identity provider is configured; sign in with the operator key, or set KEERA_OIDC_ISSUER")
+			"no identity provider is configured; sign in with the operator key, or set KEERA_OIDC_PROVIDERS")
 		return
 	}
 	provider, err := s.providerFor(r.URL.Query().Get("provider"))
@@ -185,17 +181,16 @@ func (s *Server) linkIdentity(w http.ResponseWriter, r *http.Request, provider *
 	role := provider.Mapping().RoleFor(identity.Email, identity.Groups)
 
 	user, err = s.st.LinkUser(r.Context(), id.New("user"), store.Link{
-		OrgID:        orgID,
-		Email:        identity.Email,
-		ExternalID:   identity.ExternalID(),
-		Role:         string(role),
-		AdoptByEmail: s.opts.OIDCAdoptByEmail,
+		OrgID:      orgID,
+		Email:      identity.Email,
+		ExternalID: identity.ExternalID(),
+		Role:       string(role),
 	})
 	if errors.Is(err, store.ErrEmailTaken) {
-		s.log.Warn("sign-in refused: the address belongs to another provider's identity",
+		s.log.Warn("sign-in refused: the address belongs to a different identity",
 			"email", identity.Email, "provider", identity.Provider)
 		s.signInFailed(w, r, errors.New(identity.Email+" already belongs to an account "+
-			"from a different identity provider; sign in the way that account was created, "+
+			"linked to a different identity; sign in the way that account was created, "+
 			"or ask an operator to move it"))
 		return user, "", false
 	}
@@ -246,15 +241,6 @@ func (s *Server) orgFor(r *http.Request, identity authn.Identity) (string, error
 // It is the way in before an identity provider is set up. It grants only what
 // the key already grants, but behind a session, so the panel can be used.
 func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
-	// With no key configured, comparing would accept sha256(""), which anyone
-	// can send.
-	if !s.hasOperatorKey {
-		httpx.WriteError(w, http.StatusNotImplemented, "invalid_request_error",
-			"operator_key_not_configured",
-			"no operator key is configured; sign in through the identity provider, "+
-				"or set KEERA_OPERATOR_KEY")
-		return
-	}
 	var in struct {
 		Key string `json:"key"`
 	}
@@ -313,7 +299,7 @@ func (s *Server) operatorKeyOrg(ctx context.Context) (string, error) {
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return "", err
 	}
-	org, err := s.st.CreateOrg(ctx, id.New("org"), "Keera")
+	org, err := s.st.CreateOrg(ctx, store.Org{ID: id.New("org"), Name: "Keera"}, s.opts.Template)
 	if err != nil {
 		return "", err
 	}
@@ -352,22 +338,12 @@ func roleAtSignIn(stored string, fromIDP authn.Role, adminFromDirectory bool) (a
 
 // startSession creates a session and sets its cookie.
 func (s *Server) startSession(w http.ResponseWriter, r *http.Request, user store.User) error {
-	var raw [32]byte
-	if _, err := rand.Read(raw[:]); err != nil {
+	token, hash, csrf, err := authn.NewSession()
+	if err != nil {
 		return err
 	}
-	token := base64.RawURLEncoding.EncodeToString(raw[:])
-	sum := sha256.Sum256([]byte(token))
-
-	var csrfRaw [24]byte
-	if _, err := rand.Read(csrfRaw[:]); err != nil {
-		return err
-	}
-	csrf := base64.RawURLEncoding.EncodeToString(csrfRaw[:])
-
 	expires := time.Now().Add(authn.SessionTTL)
-	if err := s.st.CreateSession(r.Context(), sum[:], user.ID, csrf, expires,
-		r.Header.Get("User-Agent"), clientIP(r)); err != nil {
+	if err := s.st.CreateSession(r.Context(), hash, user.ID, csrf, expires); err != nil {
 		return err
 	}
 	http.SetCookie(w, &http.Cookie{
@@ -388,13 +364,10 @@ func (s *Server) sessionPrincipal(r *http.Request) (*authn.Principal, error) {
 	if err != nil || c.Value == "" {
 		return nil, authn.ErrUnauthenticated
 	}
-	sum := sha256.Sum256([]byte(c.Value))
-	su, err := s.st.LookupSession(r.Context(), sum[:])
+	hash := authn.HashSession(c.Value)
+	su, err := s.st.LookupSession(r.Context(), hash)
 	if err != nil {
 		return nil, authn.ErrUnauthenticated
-	}
-	if err := s.st.TouchSession(r.Context(), sum[:]); err != nil {
-		s.log.Warn("recording session activity failed", "error", err)
 	}
 	return &authn.Principal{
 		Via:            authn.MethodSession,
@@ -403,7 +376,7 @@ func (s *Server) sessionPrincipal(r *http.Request) (*authn.Principal, error) {
 		Role:           authn.Role(su.User.Role),
 		OrgID:          su.User.OrgID,
 		CSRF:           su.Session.CSRF,
-		CredentialHash: sum[:],
+		CredentialHash: hash,
 	}, nil
 }
 
@@ -460,25 +433,19 @@ func (s *Server) providerOf(r *http.Request, userID string) *authn.OIDC {
 // me is what the panel loads first: who you are and what you may do.
 func (s *Server) me(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	out := map[string]any{
-		"via":                p.Via,
-		"user_id":            p.UserID,
-		"email":              p.Email,
-		"role":               p.Role,
-		"org_id":             p.OrgID,
-		"unrestricted":       p.Unrestricted(),
-		"can_edit_catalogue": p.CanAdminCatalogue(),
-		// Whether a hosted model's credential can be typed into the panel, or
-		// has to come from an environment variable.
-		"can_store_credentials": p.CanAdminCatalogue() && s.opts.Secrets.Enabled(),
-		"can_admin_org":         p.CanAdminOrg(p.OrgID),
-		// Whether to offer this person a key of their own. The operator key is
-		// nobody, so it gets no button.
-		"can_issue_own_key": p.UserID != "" && p.CanIssueKeyFor(p.OrgID, p.UserID),
-		// Separate from the flag above because another screen reads it.
-		"can_revoke_own_key": p.UserID != "" && p.CanRevokeKeyFor(p.OrgID, p.UserID),
-		"currency":           s.opts.Currency,
-		"csrf":               p.CSRF,
-		"sso":                s.opts.Providers.Enabled(),
+		"via":           p.Via,
+		"user_id":       p.UserID,
+		"email":         p.Email,
+		"role":          p.Role,
+		"org_id":        p.OrgID,
+		"unrestricted":  p.Unrestricted(),
+		"can_admin_org": p.CanAdminOrg(p.OrgID),
+		// Whether to offer this person issuing and revoking keys of their own.
+		// The operator key is nobody, so it gets no button.
+		"can_manage_own_keys": p.UserID != "" && p.CanManageKeyFor(p.OrgID, p.UserID),
+		"currency":            s.opts.Currency,
+		"csrf":                p.CSRF,
+		"sso":                 s.opts.Providers.Enabled(),
 		// True when a directory group decides roles. The panel then shows
 		// roles instead of offering to change them.
 		"roles_from_directory": s.opts.Providers.AdminFromDirectory(),
@@ -518,13 +485,14 @@ func (s *Server) gatewayURL(r *http.Request) string {
 	return s.publicOrigin(r) + httpx.InferencePrefix
 }
 
-// publicOrigin is the scheme and host a browser reaches this panel on.
-// PublicURL wins over the Host header, because behind a proxy it is the name
-// a browser is known to use.
+// publicOrigin is the address a browser reaches this panel on. PublicURL
+// wins over the Host header, because behind a proxy it is the name a browser
+// is known to use. Its path is kept: a gateway behind a proxy at
+// https://host/keera is reached there, not at the host's root.
 func (s *Server) publicOrigin(r *http.Request) string {
 	if s.opts.PublicURL != "" {
 		if u, err := url.Parse(s.opts.PublicURL); err == nil && u.Host != "" {
-			return u.Scheme + "://" + u.Host
+			return u.Scheme + "://" + u.Host + strings.TrimRight(u.Path, "/")
 		}
 	}
 	scheme := "http"

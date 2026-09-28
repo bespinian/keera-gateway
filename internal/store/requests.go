@@ -3,14 +3,16 @@ package store
 import (
 	"context"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // The request log: every recorded inference request, one row at a time. It
-// reads the same table as the dashboard and the failure log, so all three
-// always agree on what a request was.
+// reads the same table as the dashboard, so the two always agree on what a
+// request was.
 
-// Outcome is which requests a log asks for. It adds "everything" and "the ones
-// that worked" to the failure log's kinds.
+// Outcome is which requests a log asks for. The unhappy ones are kept apart
+// because each needs a different response.
 type Outcome string
 
 const (
@@ -18,27 +20,32 @@ const (
 	OutcomeAny Outcome = ""
 	// OutcomeOK is a request that was served and finished without error.
 	OutcomeOK Outcome = "ok"
-	// OutcomeUnhappy is everything that did not deliver, the same set as the
-	// failure log's KindAny.
+	// OutcomeUnhappy is everything that did not deliver: a status of 400 or
+	// more, or a message.
 	OutcomeUnhappy Outcome = "unhappy"
-	// OutcomeFailed means the same as KindFailed.
+	// OutcomeFailed is a request the inference plane could not answer. It is
+	// the same set the dashboard counts as failed.
 	OutcomeFailed Outcome = "failed"
-	// OutcomeRefused means the same as KindRefused.
+	// OutcomeRefused is a request that got a 4xx. Mostly a guardrail stopped
+	// it: a spent budget, a rate limit, a model this key may not use, a
+	// filter. It can also be a request the gateway or backend could not take,
+	// such as one too large. It cost nothing.
 	OutcomeRefused Outcome = "refused"
-	// OutcomeInterrupted means the same as KindInterrupted.
+	// OutcomeInterrupted is a request that was answered and then did not
+	// finish, such as a stream that ended early. Its status is the 200 the
+	// client got; the message says what went wrong afterwards.
 	OutcomeInterrupted Outcome = "interrupted"
 )
 
 // outcomeClauses maps an outcome to its condition, which keeps the caller's
-// string out of the SQL text. The unhappy ones reuse the failure log's
-// clauses, so the two screens count the same way.
+// string out of the SQL text.
 var outcomeClauses = map[Outcome]string{
 	OutcomeAny:         "TRUE",
 	OutcomeOK:          "status < 400 AND error IS NULL",
-	OutcomeUnhappy:     kindClauses[KindAny],
-	OutcomeFailed:      kindClauses[KindFailed],
-	OutcomeRefused:     kindClauses[KindRefused],
-	OutcomeInterrupted: kindClauses[KindInterrupted],
+	OutcomeUnhappy:     "(status >= 400 OR error IS NOT NULL)",
+	OutcomeFailed:      "status >= 500",
+	OutcomeRefused:     "status BETWEEN 400 AND 499",
+	OutcomeInterrupted: "status < 400 AND error IS NOT NULL",
 }
 
 // outcomeClause is the condition for o, or OutcomeAny's for an outcome it does
@@ -202,6 +209,26 @@ func (c *RequestOutcomes) Add(d RequestOutcomes) {
 	c.Interrupted += d.Interrupted
 }
 
+// FacetCount is one value a log can be narrowed by, with how many rows in the
+// window have it. The count shows which of many values is the problem.
+type FacetCount struct {
+	Value string `json:"value"`
+	Count int64  `json:"count"`
+}
+
+// readFacets calls add for every (facet, value, count) row.
+func readFacets(rows pgx.Rows, add func(facet string, c FacetCount)) error {
+	var (
+		facet string
+		c     FacetCount
+	)
+	_, err := pgx.ForEachRow(rows, []any{&facet, &c.Value, &c.Count}, func() error {
+		add(facet, c)
+		return nil
+	})
+	return err
+}
+
 // RequestFacets is what the request log can be narrowed by, over the whole
 // window: the models, keys, teams, people and statuses that occur, each with
 // its count. They are read from the log rather than listed from the roster,
@@ -218,8 +245,8 @@ type RequestFacets struct {
 
 // RequestFilters counts the window by model, key, team, person and status.
 //
-// Like FailureFilters, only the tenant, the outcome and the time bounds of q
-// are read. So a model picked after a team can match nothing, and the screen
+// Only the tenant, the outcome and the time bounds of q are read, so the
+// screen still offers the other values after one is picked. So a model picked after a team can match nothing, and the screen
 // says so.
 func (s *Store) RequestFilters(ctx context.Context, q RequestQuery) (RequestFacets, error) {
 	f := RequestFacets{

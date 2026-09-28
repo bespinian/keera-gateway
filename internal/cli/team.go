@@ -47,7 +47,7 @@ func teamCmd(ctx context.Context, args []string) error {
 }
 
 func (r *teamRun) create(ctx context.Context) error {
-	if err := parseArgs(r.fs, r.args, 1, "usage: keera team create --org <id> <name>"); err != nil {
+	if err := parseArgs(r.fs, r.args, 1, "usage: keera team create <name> [--org <id>]"); err != nil {
 		return err
 	}
 	orgID, err := resolveOrg(ctx, r.c, r.org)

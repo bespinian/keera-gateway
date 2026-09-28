@@ -60,14 +60,16 @@ function advice(outcome) {
       );
     case "failed":
       return (
-        "The request was forwarded, but the backend did not answer. Each row " +
-        "shows the backend's own message. Share it with whoever runs that " +
-        "endpoint. If only one model fails, the problem is its backend."
+        "The request got a 5xx: the backend did not answer, or the gateway " +
+        "had nowhere to send it. Each row shows the message. If only one " +
+        "model fails, look at its backends."
       );
     case "refused":
       return (
-        "A guardrail stopped the request. Change the budget or rate limit on " +
-        "the team or key, or tell the developer which model to use."
+        "The request got a 4xx. Mostly a guardrail stopped it: change the " +
+        "budget or rate limit on the team or key, or tell the developer which " +
+        "model to use. A 400 or 413 is a request that could not be taken; " +
+        "each row shows why."
       );
     case "interrupted":
       return (

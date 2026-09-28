@@ -19,7 +19,24 @@ leaves the containers running, so later starts are instant.
 2. **`dev-backends`** - starts `keera-db` and `keera-engine` in podman, stops
    any gateway container holding port 8080, and waits for Postgres.
 3. **air** - builds and runs the gateway on the host against those two, with
-   `compose/models.dev.yaml` as the catalogue and debug logging on.
+   debug logging on. Each new organisation starts with the models in
+   `compose/models.dev.yaml` and the sandbox classes in `compose/sandboxes.yaml`.
+   An organisation that already exists keeps its own. When
+   `KEERA_SANDBOX_DRIVER` is set, `KEERA_SANDBOX_PUBLIC_URL` defaults to
+   `http://host.containers.internal:8080`.
+
+The gateway reads every setting in `compose/.env`, sandbox ones included. Four
+are always overridden, whatever `.env` says:
+
+| Setting              | `make dev` sets                               |
+| -------------------- | --------------------------------------------- |
+| `KEERA_DATABASE_URL` | the `keera-db` container, on `127.0.0.1:5432` |
+| `KEERA_MODELS_FILE`  | `compose/models.dev.yaml`                     |
+| `KEERA_LOG_LEVEL`    | `debug`                                       |
+| `KEERA_LOG_FORMAT`   | `text`                                        |
+
+`KEERA_SANDBOXES_FILE` and `KEERA_SANDBOX_PUBLIC_URL` are only defaults: a
+value in `.env` wins.
 
 Install air once if you do not have it:
 
@@ -30,12 +47,12 @@ go install github.com/air-verse/air@latest
 ## Which inference backend
 
 ```sh
-make dev                        # llama.cpp on the CPU (the default)
-GATEWAY_DEV_TIER=gpu make dev   # vLLM, needs a GPU
+make dev            # llama.cpp on the CPU (the default)
+make dev TIER=gpu   # vLLM, needs a GPU
 ```
 
 **Tool calls do not work on the CPU tier.** Replies come back as prose in
-`content` instead of `tool_calls`. Use `GATEWAY_DEV_TIER=gpu` when working on
+`content` instead of `tool_calls`. Use `TIER=gpu` when working on
 the model probe, filters, routers or anything else that reads `tool_calls`. See
 [compose/README.md](../compose/README.md).
 
@@ -68,35 +85,38 @@ starts.
 ## Running the whole thing in containers instead
 
 ```sh
-make compose-up
-make compose-down
-make compose-up COMPOSE_TIER=gpu    # vLLM instead of llama.cpp
+cd compose
+podman compose up -d --build                                   # llama.cpp
+podman compose -f compose.yaml -f compose.gpu.yaml up -d --build  # vLLM
+podman compose down
 ```
 
-This also runs the gateway as a container, as described in `compose/`. It is
-good for a demo but slow for development: every change needs an image build.
+This also runs the gateway as a container, as described in
+[compose/README.md](../compose/README.md). It is good for a demo but slow for
+development: every change needs an image build.
 
-`COMPOSE_TIER` picks the backend like `GATEWAY_DEV_TIER` does for `make dev`,
-and defaults to `cpu`. Pass the same value to `compose-down`, or it stops a
-different `keera-engine` than the one `up` started.
+Both setups share one database, but reach the engine at different addresses.
+An organisation created under one keeps that one's backend address, so its
+models do not answer under the other. Use a fresh organisation, or point its
+models at the other address with `keera model set`.
 
 ## Tests
 
 ```sh
 make check             # go test -race, go vet, gofmt
-make test-integration  # the store and the control plane, against a real Postgres
+make test-integration  # store, control plane and rate limiter, against Postgres and Redis
 make check-all         # both
 ```
 
-`make check` needs only Go. The store's tests skip without a database, so
-`make check` does not cover the schema, its queries or the migrations.
-`make test-integration` starts a throwaway Postgres in podman, runs those
-packages against it and removes it. To use your own database, set
-`KEERA_TEST_DATABASE_URL`.
+`make check` needs Go and a C compiler, because the race detector needs cgo.
+The store's tests skip without a database, so `make check` does not cover the
+schema, its queries or the migrations. `make test-integration` starts a
+throwaway Postgres and Redis in podman, runs those packages against them and
+removes them. To use your own instead, set both `KEERA_TEST_DATABASE_URL` and
+`KEERA_TEST_REDIS_URL`.
 
-The control plane is in the integration run for one thing no fake covers: the
-live request log. The write path sends a Postgres notification, and a listener
-picks it up.
+The control plane is in the integration run for the live request log, and the
+rate limiter for the buckets shared through Redis. No fake covers either.
 
 ## Building
 
@@ -105,12 +125,17 @@ make build          # ./build/keera-gateway and ./build/keera
 nix build .#keera -o build/result
 ```
 
-Every build writes to `build/`: the two binaries, the SBOM, and air's binary
-and log from `make dev`. `make clean` deletes that directory.
+Every build writes to `build/`: the two binaries, the SBOM, the third-party
+notices, the release archives, and air's binary and log from `make dev`.
+`make clean` deletes that directory. The one file written elsewhere is
+`compose/.env`, which `make dev` creates on a fresh clone. `make clean` keeps
+it.
 
-The Nix build sets `vendorHash = null`, so it needs a `vendor` directory in the
-source tree. That directory is not committed; run `go mod vendor` once after
-cloning. With it, both builds work offline.
+The Nix build fetches the Go modules itself and checks them against
+`vendorHash` in `flake.nix`. When `go.mod` changes, set it to
+`pkgs.lib.fakeHash`, build, and copy the hash Nix prints. `make image`,
+`make notices`, `make dist` and `make dev` use `vendor/`, which is not
+committed; run `go mod vendor` once after cloning.
 
 ```sh
 make image      # the gateway image, tagged localhost/keera-gateway:latest

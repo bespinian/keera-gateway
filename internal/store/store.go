@@ -64,7 +64,7 @@ func Open(ctx context.Context, dsn string, maxConns int32) (*Store, error) {
 // Close releases the pool.
 func (s *Store) Close() { s.pool.Close() }
 
-// Pool exposes the underlying pool for the LISTEN connection.
+// Pool exposes the underlying pool, for tests that set up rows directly.
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
 // Ping reports whether the database is reachable.

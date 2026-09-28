@@ -70,7 +70,7 @@ func TestFilterModePredicates(t *testing.T) {
 			t.Errorf("%q is a model and an instruction", m)
 		}
 	}
-	if !ValidFilterMode(FilterModePattern) {
+	if !FilterModePattern.Valid() {
 		t.Error("pattern is a mode a filter may run in")
 	}
 }
@@ -116,7 +116,7 @@ func TestRouterModePredicates(t *testing.T) {
 			t.Errorf("%q does not choose by size", m)
 		}
 	}
-	if !ValidRouterMode(RouterModeSize) {
+	if !RouterModeSize.Valid() {
 		t.Error("size is a mode a router may run in")
 	}
 }

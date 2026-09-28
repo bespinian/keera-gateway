@@ -16,8 +16,9 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// The podman driver runs sandboxes on a single host, for the compose and NixOS
-// setups, which have podman but no cluster.
+// The podman driver runs sandboxes on a single host, for a gateway that runs as
+// a process there (`make dev`, a NixOS service) and has podman but no cluster.
+// The compose gateway runs in a container and cannot use it.
 //
 // It is the weaker driver, on purpose and openly:
 //
@@ -26,7 +27,7 @@ import (
 //	weaker isolation      whatever runtime the host has, usually runc
 //	expiry is ours        no controller enforces it, so the gateway's sweep
 //	                      does; while the gateway is down, sandboxes outlive
-//	                      their lifetime, and Reap cleans up on restart
+//	                      their lifetime, and the sweep at start-up ends them
 //
 // The last one is the real difference from Kubernetes, and docs/sandboxes.md
 // says so too.
@@ -72,12 +73,11 @@ func NewPodman(ctx context.Context, opts PodmanOptions) (*Podman, error) {
 // Name returns "podman".
 func (p *Podman) Name() string { return "podman" }
 
-// Capabilities reports what this driver does: suspend and persistence, no
-// warm pool, and the strongest isolation tier with a runtime mapped.
+// Capabilities reports what this driver does: no warm pool, and the
+// strongest isolation tier with a runtime mapped.
 func (p *Podman) Capabilities() Capabilities {
 	return Capabilities{
-		Suspend: true, Isolation: strongestIsolation(p.opts.Runtimes),
-		Warm: false, Persistence: true,
+		Isolation: strongestIsolation(p.opts.Runtimes), Tiers: mappedTiers(p.opts.Runtimes),
 	}
 }
 
@@ -86,12 +86,11 @@ func (p *Podman) Capabilities() Capabilities {
 func containerName(ref Ref) string { return "keera-sbx-" + objectName(ref) }
 func volumeName(ref Ref) string    { return "keera-home-" + objectName(ref) }
 
-// The labels on every container. Reap and operators read them, and they are
-// the only record of a sandbox outside the database.
+// The labels on every container, for an operator reading `podman ps`. They
+// are the only record of a sandbox outside the database.
 const (
 	podmanLabelID      = "keera.sandbox.id"
 	podmanLabelName    = "keera.sandbox.name"
-	podmanLabelExpires = "keera.sandbox.expires"
 	podmanLabelOwner   = "keera.sandbox.owner"
 	podmanLabelClass   = "keera.sandbox.class"
 	podmanLabelPurpose = "keera.sandbox.purpose"
@@ -136,9 +135,6 @@ func (p *Podman) runArgs(spec Spec, runtime string) []string {
 	if spec.Owner != "" {
 		args = append(args, "--label", podmanLabelOwner+"="+spec.Owner)
 	}
-	if !spec.Expires.IsZero() {
-		args = append(args, "--label", podmanLabelExpires+"="+formatExpiry(spec.Expires))
-	}
 	if spec.Class.CPU > 0 {
 		args = append(args, "--cpus", strconv.FormatFloat(float64(spec.Class.CPU)/1000, 'f', 2, 64))
 	}
@@ -153,12 +149,10 @@ func (p *Podman) runArgs(spec Spec, runtime string) []string {
 		"--user", strconv.Itoa(sandboxUID),
 		"--volume", volumeName(spec.Ref)+":"+homePath,
 	)
-	// Each port is published on a host-chosen port on loopback. Rootless
-	// podman's network is not routable from the host, and loopback keeps
-	// developers' shells off the host's public address.
-	for _, port := range append([]int{PortSSH}, spec.Ports...) {
-		args = append(args, "--publish", "127.0.0.1::"+strconv.Itoa(port))
-	}
+	// sshd is published on a host-chosen port on loopback. Rootless podman's
+	// network is not routable from the host, and loopback keeps developers'
+	// shells off the host's public address.
+	args = append(args, "--publish", "127.0.0.1::"+strconv.Itoa(PortSSH))
 	for _, kv := range envList(spec.Env) {
 		args = append(args, "--env", kv.Name+"="+kv.Value)
 	}
@@ -187,12 +181,6 @@ type podmanInspect struct {
 	Config struct {
 		Labels map[string]string `json:"Labels"`
 	} `json:"Config"`
-	NetworkSettings struct {
-		Ports map[string][]struct {
-			HostIP   string `json:"HostIp"`
-			HostPort string `json:"HostPort"`
-		} `json:"Ports"`
-	} `json:"NetworkSettings"`
 }
 
 // Status reads one container back.
@@ -207,13 +195,25 @@ func (p *Podman) Status(ctx context.Context, ref Ref) (Status, error) {
 	}
 	in := items[0]
 
-	st := Status{
-		Ref:     ref,
-		Address: "127.0.0.1",
-		Expires: parseExpiry(in.Config.Labels[podmanLabelExpires]),
-	}
+	st := Status{Ref: ref, Address: "127.0.0.1"}
 	st.State, st.Detail = podmanState(in)
+	st.Exited = in.State.Status == "exited" && in.State.ExitCode == 0
+	if st.State == policy.SandboxReady && in.Config.Labels[podmanLabelPurpose] != string(policy.PurposeAgent) &&
+		!p.sshdListens(ctx, ref) {
+		st.State, st.Detail = policy.SandboxPending, "setting up; sshd is not listening yet"
+	}
 	return st, nil
+}
+
+// sshdListens is the Kubernetes readiness probe, run inside the container.
+// The entrypoint starts sshd last, so a running container is only ready once
+// sshd answers: before that, the repository may still be checking out. The
+// check runs inside because a published port on rootless podman can accept a
+// connection even when nothing listens behind it yet.
+func (p *Podman) sshdListens(ctx context.Context, ref Ref) bool {
+	_, err := p.run(ctx, "exec", containerName(ref), "bash", "-c",
+		": </dev/tcp/127.0.0.1/"+strconv.Itoa(PortSSH))
+	return err == nil
 }
 
 // podmanState collapses a container's state into a sandbox state and detail.
@@ -226,7 +226,9 @@ func podmanState(in podmanInspect) (policy.SandboxState, string) {
 	case in.State.Status == "exited" && in.State.ExitCode == 0:
 		// A clean stop is what a suspend looks like here. A process that
 		// exited zero by itself looks the same; reading it as suspended is the
-		// safe guess, since a resume that exits again is visible.
+		// safe guess, since a resume that exits again is visible. An agent
+		// that finished is told apart by the manager, which knows it was
+		// not suspended.
 		return policy.SandboxSuspended, "stopped; its volume is kept"
 	case in.State.Status == "exited":
 		detail := fmt.Sprintf("the sandbox process exited with status %d", in.State.ExitCode)
@@ -251,11 +253,23 @@ func (p *Podman) Resume(ctx context.Context, ref Ref) error {
 	return podmanNotFound(err)
 }
 
+// Revive replaces the container and keeps the named volume. A container's
+// environment is fixed when it is made, so a new key needs a new container.
+// Only the home directory carries over. A suspend keeps more, since it only
+// stops the container.
+func (p *Podman) Revive(ctx context.Context, spec Spec) error {
+	if err := p.removeContainer(ctx, containerName(spec.Ref)); err != nil && !isNoSuchContainer(err) {
+		return err
+	}
+	_, err := p.Create(ctx, spec)
+	return err
+}
+
 // Extend only checks that the container still exists.
 //
-// There is no controller here: the gateway's sweep enforces the expiry from
-// the database row. podman cannot change a running container's labels, so
-// the expiry label keeps its original value.
+// There is no controller here: the database row holds the expiry, and the
+// gateway's sweep enforces it. That is also why no label carries it: podman
+// cannot change a container's labels, so one would go stale.
 func (p *Podman) Extend(ctx context.Context, ref Ref, _ time.Time) error {
 	_, err := p.Status(ctx, ref)
 	return err
@@ -297,51 +311,6 @@ func (p *Podman) Dial(ctx context.Context, ref Ref, port int) (net.Conn, error) 
 			ErrNotReady, port, ref.Name)
 	}
 	return dialSandbox(ctx, ref, port, line)
-}
-
-// Reap removes every sandbox container whose expiry label is in the past.
-//
-// It is meant to run at startup, to clean up containers that expired while
-// the gateway was down. It reads the labels, not the database, so containers
-// whose rows were lost are cleaned up too.
-func (p *Podman) Reap(ctx context.Context, now time.Time) (int, error) {
-	out, err := p.run(ctx, "ps", "--all", "--filter", "label="+podmanLabelID,
-		"--format", "{{.Names}}\t{{.Labels}}")
-	if err != nil {
-		return 0, err
-	}
-	var reaped int
-	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
-		name, labels, ok := strings.Cut(strings.TrimSpace(line), "\t")
-		if !ok || name == "" {
-			continue
-		}
-		raw := labelValue(labels, podmanLabelExpires)
-		if raw == "" {
-			continue
-		}
-		expires, err := time.Parse(time.RFC3339, raw)
-		if err != nil || expires.After(now) {
-			continue
-		}
-		if err := p.removeContainer(ctx, name); err != nil {
-			p.log.Warn("sandbox: reaping an expired container failed", "container", name, "error", err)
-			continue
-		}
-		reaped++
-	}
-	return reaped, nil
-}
-
-// labelValue picks one label out of podman's "k=v,k=v" output. The format has
-// no escaping, so every label this driver writes avoids commas.
-func labelValue(labels, want string) string {
-	for kv := range strings.SplitSeq(labels, ",") {
-		if k, v, ok := strings.Cut(strings.TrimSpace(kv), "="); ok && k == want {
-			return v
-		}
-	}
-	return ""
 }
 
 /* ------------------------------------------------------------------ running */

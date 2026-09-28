@@ -30,8 +30,6 @@ type credentials struct {
 type signIn struct {
 	Token     string    `json:"token"`
 	ExpiresAt time.Time `json:"expires_at"`
-	// Email is kept so `keera whoami` can answer without a round trip.
-	Email string `json:"email,omitempty"`
 }
 
 // expired reports whether this sign-in has run out. The gateway decides;
@@ -92,13 +90,6 @@ func defaultGateway() string {
 	c, err := loadCredentials()
 	if err != nil {
 		return ""
-	}
-	// A file from before the default field existed, with one gateway in it,
-	// means that gateway.
-	if c.Default == "" && len(c.Gateways) == 1 {
-		for only := range c.Gateways {
-			return only
-		}
 	}
 	return c.Default
 }

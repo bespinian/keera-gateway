@@ -916,7 +916,7 @@ export function showRequest(ctx, q, names, currency) {
           "button",
           {
             class: "btn",
-            title: "All calls the agent made for the same task",
+            title: "All requests the agent made for the same task",
             onClick: () => {
               close();
               ctx.navigate("/sessions/" + encodeURIComponent(q.id));

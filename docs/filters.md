@@ -177,7 +177,9 @@ one of the two readings says so.
 
 It needs a backend that returns logprobs. vLLM and llama.cpp do; most hosted
 providers do not. There is nothing to configure: a gate whose model serves none
-reads the words only. Rewrite filters do not use it.
+reads the words only. If a backend refuses the request for logprobs with a 4xx,
+the gate asks again without them and stops asking that model from then on, as a
+router does. Rewrite filters do not use it.
 
 It also tells the gateway **how sure** the gate was, which
 [`keera filter check`](#checking-one) shows.
@@ -300,6 +302,11 @@ The gateway also enforces:
   lists the guardrails.
 - A guardrail that names a filter the organisation does not have is refused
   when it is written.
+- A filter's model must be on the organisation's allow-list, if it has one.
+  Otherwise the filter is refused with a 400 `model_not_allowed`.
+- Narrowing the organisation's allow-list so that a filter's model drops off
+  it is refused with a 409 `filter_model_not_allowed`. Move the filter to an
+  allowed model first.
 
 ## Shadow: rolling one out
 
@@ -383,12 +390,13 @@ Within one request, the order is:
 
 1. authenticate, rate-limit, budget
 2. the [router](routers.md), if the client named one
-3. **filters**, in the order above
-4. the standing system prompt is prepended
-5. the output ceiling is clamped
-6. forward
+3. refuse the request if it cannot fit in the destination's context
+4. **filters**, in the order above
+5. the standing system prompt is prepended
+6. the output ceiling is clamped
+7. forward
 
-Filters run before step 4 so the administrator's system prompt is never handed
+Filters run before step 5 so the administrator's system prompt is never handed
 to a small model that is allowed to edit it.
 
 ## Choosing and sizing the model
@@ -522,9 +530,10 @@ shown.
 
 **A pattern filter** gets all three and shows both sides of each, plus **which
 rules fired and how many times**, so you can find the line responsible for a
-wrong result. The function is also run on its own, so a rule that matches it is
-reported even when an earlier rule refused the sample. The result is exact: the
-rules do the same thing to the same text every time.
+wrong result. If a rule refuses the sample, the other rules never run on it,
+so there is nothing to show. The function is then run on its own, and a rule
+that would refuse it is still named. The result is exact: the rules do the
+same thing to the same text every time.
 
 Nothing is scored as a pass. The check does point out the two clear mistakes: a
 filter that left the planted secret alone, and a filter that touched the code.
@@ -567,13 +576,9 @@ The filter log is kept as long as the usage log and purged by the same cutoff
 
 ## Who owns what
 
-The model catalogue is shared by every tenant, and only an operator changes it.
-A filter belongs to one organisation, and its administrators write it. Two
-organisations may each have a filter with the same alias; they are different
-filters.
-
-A pattern filter uses nothing from the catalogue, so an administrator can write
-one without an operator setting anything up first.
+A filter belongs to one organisation, and its administrators write it. It runs
+on one of the organisation's models. Two organisations may each have a filter with the same alias; they are
+different filters.
 
 A filter's alias is its identity, like a model's: lowercase letters, digits and
 interior hyphens. It cannot change. For a different alias, create a new filter

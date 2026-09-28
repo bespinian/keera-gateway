@@ -50,7 +50,7 @@ func streamStore(t *testing.T) (*store.Store, context.Context) {
 
 func TestRequestStreamCarriesARequestAsItIsRecorded(t *testing.T) {
 	st, ctx := streamStore(t)
-	if _, err := st.CreateOrg(ctx, "org_1", "Example Bank"); err != nil {
+	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_1", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
 
