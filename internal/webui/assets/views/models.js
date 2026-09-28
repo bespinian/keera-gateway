@@ -22,6 +22,8 @@ import {
   rowLink,
   providerMark,
   showError,
+  locationName,
+  releaseDay,
 } from "../ui.js";
 
 export async function modelsView(ctx) {
@@ -137,6 +139,19 @@ export async function modelsView(ctx) {
                 pill([providerMark(m.provider), m.provider], "warn"),
               )
             : h("span", { class: "faint" }, "-"),
+      },
+      {
+        label: "Location",
+        shrink: true,
+        sortKey: (m) => m.location || "",
+        cell: (m) => locationCell(m.location),
+      },
+      {
+        label: "Released",
+        shrink: true,
+        sortKey: (m) => m.release_date || null,
+        sortDir: "desc",
+        cell: (m) => releasedCell(m.release_date),
       },
       {
         label: "Context",
@@ -258,6 +273,8 @@ export async function modelsView(ctx) {
           m.backend_model,
           m.kind,
           m.provider || "",
+          m.location || "",
+          locationName(m.location),
           ...(m.backends || []),
         ].join(" "),
       searchLabel: "models",
@@ -350,6 +367,19 @@ export async function modelCatalogView(ctx) {
         cell: (r) => pill([providerMark(r.p.name), r.p.name]),
       },
       {
+        label: "Location",
+        shrink: true,
+        sortKey: (r) => r.p.location || "",
+        cell: (r) => locationCell(r.p.location),
+      },
+      {
+        label: "Released",
+        shrink: true,
+        sortKey: (r) => r.m.release_date || null,
+        sortDir: "desc",
+        cell: (r) => releasedCell(r.m.release_date),
+      },
+      {
         label: "Context",
         num: true,
         shrink: true,
@@ -420,13 +450,26 @@ export async function modelCatalogView(ctx) {
     {
       emptyTitle: "No hosted models",
       emptyBody: "This build knows no hosted providers.",
-      search: (r) => [r.m.id, r.m.description, r.p.name].join(" "),
+      // Newest first: the model somebody is looking for is usually a new one.
+      sortBy: "Released",
+      sortDir: "desc",
+      search: (r) =>
+        [r.m.id, r.m.description, r.p.name, locationName(r.p.location)].join(
+          " ",
+        ),
       searchLabel: "models",
       choices: [
         {
           label: "Providers",
           options: providers.map((p) => ({ value: p.name, label: p.name })),
           test: (r, v) => r.p.name === v,
+        },
+        {
+          label: "Locations",
+          options: [...new Set(providers.map((p) => p.location))]
+            .filter(Boolean)
+            .map((l) => ({ value: l, label: locationName(l) })),
+          test: (r, v) => r.p.location === v,
         },
         {
           label: "Kinds",
@@ -453,6 +496,19 @@ function dash() {
   return h("span", { class: "faint" }, "-");
 }
 
+// locationCell is where a model runs, with the code it is stored as on hover.
+function locationCell(loc) {
+  if (!loc) return dash();
+  return h(
+    "span",
+    { class: "nowrap", title: `Prompts to this model go to: ${loc}` },
+    locationName(loc),
+  );
+}
+
+function releasedCell(day) {
+  return day ? h("span", { class: "nowrap" }, releaseDay(day)) : dash();
+}
 
 // openModel is this model's dialog opened from somewhere other than the
 // catalogue - the model's own screen, which links here rather than growing a
@@ -499,6 +555,22 @@ function viewModel(ctx, m) {
         "Model it serves",
         h("span", { class: "mono" }, m.backend_model),
         "The model the backend runs.",
+      ),
+      h(
+        "div",
+        { class: "field-row" },
+        readRow(
+          "Location",
+          h("span", {}, locationName(m.location)),
+          "Where the model runs, and so where your prompts go.",
+        ),
+        readRow(
+          "Released",
+          m.release_date
+            ? h("span", {}, releaseDay(m.release_date))
+            : h("span", { class: "muted" }, "not known"),
+          "The day the model came out.",
+        ),
       ),
       h(
         "div",
@@ -814,6 +886,13 @@ const PRESET_FIELDS = [
   },
   { key: "apiKeyEnv", label: "credential variable", of: (p) => p.api_key_env },
   {
+    key: "releaseDate",
+    label: "release date",
+    fromModel: true,
+    of: (p, m) => (m && m.release_date ? m.release_date : null),
+  },
+  { key: "location", label: "location", of: (p) => p.location || null },
+  {
     key: "priceIn",
     label: "list input price",
     fromModel: true,
@@ -890,6 +969,19 @@ function editModel(ctx, existing, providers, pick) {
     placeholder: "KEERA_UPSTREAM_KEY",
     disabled: locked,
   });
+  const releaseDate = h("input", {
+    class: "input",
+    type: "date",
+    value: m.release_date || "",
+    disabled: locked,
+  });
+  const location = h("input", {
+    class: "input",
+    value: m.location || "",
+    placeholder: "onprem",
+    list: "model-locations",
+    disabled: locked,
+  });
   const priceIn = priceInput(m.input_micros_per_mtok, locked);
   const priceOut = priceInput(m.output_micros_per_mtok, locked);
   const priceCached = priceInput(m.cached_input_micros_per_mtok, locked);
@@ -901,6 +993,8 @@ function editModel(ctx, existing, providers, pick) {
     backends,
     maxContext,
     apiKeyEnv,
+    releaseDate,
+    location,
     priceIn,
     priceOut,
     priceCached,
@@ -1033,6 +1127,38 @@ function editModel(ctx, existing, providers, pick) {
           "Advertised to clients. A request that cannot fit is refused.",
         ),
         marks.maxContext,
+      ),
+    ),
+    h(
+      "div",
+      { class: "field-row" },
+      h(
+        "div",
+        { class: "field" },
+        h("label", {}, "Location"),
+        location,
+        // Suggestions, not a fixed list: any short lowercase name is taken.
+        h(
+          "datalist",
+          { id: "model-locations" },
+          ["onprem", "ch", "usa"].map((l) =>
+            h("option", { value: l }, locationName(l)),
+          ),
+        ),
+        h(
+          "div",
+          { class: "hint" },
+          "Where the model runs, such as ch, usa or onprem. Clients see it.",
+        ),
+        marks.location,
+      ),
+      h(
+        "div",
+        { class: "field" },
+        h("label", {}, "Release date"),
+        releaseDate,
+        h("div", { class: "hint" }, "The day the model came out."),
+        marks.releaseDate,
       ),
     ),
     h(
@@ -1253,6 +1379,8 @@ function editModel(ctx, existing, providers, pick) {
                 provider: m.provider || "",
                 max_context: m.max_context || 0,
                 description: m.description || "",
+                release_date: m.release_date || "",
+                location: m.location || "",
                 api_key_env: m.api_key_env || "",
                 input_micros_per_mtok: m.input_micros_per_mtok || 0,
                 output_micros_per_mtok: m.output_micros_per_mtok || 0,
@@ -1272,6 +1400,10 @@ function editModel(ctx, existing, providers, pick) {
                   state.hosted && state.preset ? state.preset.p.name : "",
                 max_context: parseInt(maxContext.value, 10) || 0,
                 description: description.value.trim(),
+                release_date: releaseDate.value,
+                // Left empty, the control plane fills in the provider's, or
+                // onprem.
+                location: location.value.trim().toLowerCase(),
                 api_key_env: apiKeyEnv.value.trim(),
                 input_micros_per_mtok: micros(priceIn.value),
                 output_micros_per_mtok: micros(priceOut.value),
@@ -1373,6 +1505,8 @@ function providerAnswers(p, known, currency) {
   return {
     backends: true,
     apiKeyEnv: true,
+    location: true,
+    releaseDate: !!known && !!known.release_date,
     // The description is deliberately not here. The table fills it in like
     // everything else, and then it is the operator's: a provider's sentence
     // says what the model is, and what this deployment means by the alias is
@@ -1742,6 +1876,10 @@ function hostedFields(ctx, providers, form) {
       applyModel();
     } else {
       productIDField.hidden = true;
+      // Where the model runs is the question these tiles answer, so the
+      // location follows it. The release date stays: a model you host
+      // yourself may well be one a provider also serves.
+      fields.location.value = "onprem";
       paintMachinery();
       setKinds(fields.kind, KINDS, fields.kind.value);
       paintPresets(null, fields, marks, state);

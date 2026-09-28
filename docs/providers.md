@@ -38,12 +38,17 @@ models:
 
 `provider` fills in every field the entry leaves out: the endpoint, the
 credential variable, the context window, the three prices (input, output and
-cached input) and a description. `keera model providers` lists the providers
-this build knows.
+cached input), a description, the release date and the location. `keera model
+providers` lists the providers this build knows.
+
+The location is where the provider serves its models: `ch` for Infomaniak and
+stepping stone, `usa` for Anthropic and OpenAI. A model with no provider is
+`onprem`.
 
 The entry always wins over the provider table. So you can point
 `provider: anthropic` at a corporate egress proxy or a sovereign endpoint, or
-set your internal price.
+set your internal price. If that endpoint runs somewhere else, set `location`
+too.
 
 #### One provider needs a product id
 
@@ -78,7 +83,7 @@ later opens the same tile with the same values.
 Infomaniak also asks for a product id and builds the endpoint from it.
 
 **Models → Model catalog** lists every model the providers offer, with its
-context window and list prices. You can search it, filter it by provider, and
+release date, location, context window and list prices. You can search it, filter it by provider, and
 sort it by any column. **Add** opens the same form with the provider and the
 model already picked. Everyone can see the catalog, but only operators can
 add a model from it.

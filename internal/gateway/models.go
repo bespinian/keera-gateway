@@ -2,8 +2,10 @@ package gateway
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/bespinian/keera-gateway/internal/httpx"
+	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
 // listModels answers /v1/models with the models this key may use. Clients
@@ -24,6 +26,8 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 		// Description says what the model is for, so a person choosing has
 		// more to go on than the name.
 		Description string `json:"description,omitempty"`
+		// Location says where prompts sent to the model go.
+		Location string `json:"location,omitempty"`
 		// Destinations is set only on routers, which is also how a client
 		// tells a router from a model.
 		Destinations []string `json:"destinations,omitempty"`
@@ -34,8 +38,8 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		out = append(out, model{
-			ID: m.Alias, Object: "model", Created: 0, OwnedBy: "keera", MaxContext: m.MaxContext,
-			Description: m.Description,
+			ID: m.Alias, Object: "model", Created: created(m), OwnedBy: "keera",
+			MaxContext: m.MaxContext, Description: m.Description, Location: m.Location,
 		})
 	}
 	// The organisation's routers are listed as models, because a client names
@@ -62,8 +66,8 @@ func (s *Server) getModel(w http.ResponseWriter, r *http.Request) {
 	m, found := s.src.Model(alias)
 	if found && m.Enabled && res.AllowsModel(alias) {
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{
-			"id": m.Alias, "object": "model", "created": 0, "owned_by": "keera",
-			"max_context": m.MaxContext, "description": m.Description,
+			"id": m.Alias, "object": "model", "created": created(m), "owned_by": "keera",
+			"max_context": m.MaxContext, "description": m.Description, "location": m.Location,
 		})
 		return
 	}
@@ -78,4 +82,14 @@ func (s *Server) getModel(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.WriteError(w, http.StatusNotFound, "invalid_request_error", "model_not_found",
 		"the model '"+alias+"' does not exist or you do not have access to it")
+}
+
+// created is the model's release date as a Unix time, which is what OpenAI's
+// "created" field holds. Zero when no date is stated.
+func created(m policy.Model) int64 {
+	t, err := time.Parse(time.DateOnly, m.ReleaseDate)
+	if err != nil {
+		return 0
+	}
+	return t.Unix()
 }

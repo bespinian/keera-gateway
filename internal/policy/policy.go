@@ -99,6 +99,13 @@ type Model struct {
 	// it is refused. Without the tokeniser the check counts the least a request
 	// can be, so a request near the limit is left to the inference plane.
 	MaxContext int `json:"max_context"`
+	// ReleaseDate is the day the model came out, as YYYY-MM-DD, or empty when
+	// nobody stated it. It tells a newer model from an older one.
+	ReleaseDate string `json:"release_date,omitempty"`
+	// Location is where the model runs, and so where prompts go: a country,
+	// such as ch or usa, or onprem for an inference plane of the deployment's
+	// own.
+	Location string `json:"location"`
 	// APIKeyEnv names the environment variable holding the backend's
 	// credential. The secret stays out of the catalogue, so it can come from a
 	// Kubernetes Secret or a vault, and several models can share it.
@@ -130,7 +137,8 @@ func (m Model) SameDeclaration(other Model) bool {
 		m.OutputMicrosPerMTok == other.OutputMicrosPerMTok &&
 		m.CachedInputMicrosPerMTok == other.CachedInputMicrosPerMTok &&
 		m.MaxContext == other.MaxContext && m.APIKeyEnv == other.APIKeyEnv &&
-		m.Description == other.Description && m.Enabled == other.Enabled
+		m.Description == other.Description && m.Enabled == other.Enabled &&
+		m.ReleaseDate == other.ReleaseDate && m.Location == other.Location
 }
 
 // Credential returns the secret to present to this backend. A key typed into
@@ -489,6 +497,19 @@ func ValidRouterAlias(s string) bool { return validName(s, maxAliasLen) }
 
 // ValidAlias reports whether s is a name a model may be called by.
 func ValidAlias(s string) bool { return validName(s, maxAliasLen) }
+
+// LocationOnPrem is the location of a model the deployment serves itself.
+const LocationOnPrem = "onprem"
+
+// ValidLocation reports whether s can name where a model runs. It is a short
+// name, not a fixed list, so a provider in a new country needs no new build.
+func ValidLocation(s string) bool { return validName(s, 16) }
+
+// ValidReleaseDate reports whether s is a day written as YYYY-MM-DD.
+func ValidReleaseDate(s string) bool {
+	_, err := time.Parse(time.DateOnly, s)
+	return err == nil
+}
 
 // validName is the shape every name in this package shares: lowercase letters,
 // digits, and hyphens that neither open nor close the name.

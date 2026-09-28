@@ -1048,6 +1048,42 @@ func TestProductIDFlagGivesWayToAStatedBackend(t *testing.T) {
 	}
 }
 
+// Where a model runs belongs to its provider, so a new provider brings its own
+// location rather than keeping the old one's.
+func TestProviderFlagBringsItsOwnLocation(t *testing.T) {
+	current := declared(policy.Model{
+		Alias: "keera-big", Kind: policy.KindChat, Provider: "anthropic",
+		Backends: []string{"https://api.anthropic.com/v1"}, BackendModel: "claude-opus-5",
+		ReleaseDate: "2026-01-01", Location: "usa", Enabled: true,
+	})
+	f := &modelFlags{
+		provider: "stepping-stone", backends: stringList{"https://llm.stoney-cloud.com/v1"},
+		backendModel: "Qwen/Qwen3-Coder-Next",
+		maxContext:   -1, priceIn: -1, priceOut: -1, priceCached: -1,
+	}
+	got, err := catalog.ParseModel(applyModelFlags(current, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Location != "ch" {
+		t.Errorf("location = %q, want stepping stone's ch", got.Location)
+	}
+	if got.ReleaseDate == "2026-01-01" {
+		t.Error("the old model's release date was kept for a different model")
+	}
+
+	// A stated location wins, and changing only the price keeps both.
+	f = &modelFlags{location: "onprem", maxContext: -1, priceIn: 1, priceOut: -1, priceCached: -1}
+	got, err = catalog.ParseModel(applyModelFlags(current, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Location != "onprem" || got.ReleaseDate != "2026-01-01" {
+		t.Errorf("location = %q, release date = %q, want onprem and the kept date",
+			got.Location, got.ReleaseDate)
+	}
+}
+
 func TestStringListTakesRepeatsAndCommas(t *testing.T) {
 	var l stringList
 	if err := l.Set("http://a:8000/v1, http://b:8000/v1"); err != nil {

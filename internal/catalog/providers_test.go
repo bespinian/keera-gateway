@@ -3,6 +3,8 @@ package catalog
 import (
 	"strings"
 	"testing"
+
+	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
 func TestProviderFillsInEverythingButTheAlias(t *testing.T) {
@@ -313,6 +315,11 @@ func checkProvider(t *testing.T, p Provider) {
 	if p.APIKeyEnv == "" || p.Currency == "" || len(p.Kinds) == 0 || len(p.Models) == 0 {
 		t.Errorf("entry = %+v, want a key variable, a currency, a kind and a model", p)
 	}
+	// Every model declared against it takes this location, so it must be one
+	// the catalogue accepts, and it must not claim to be the deployment's own.
+	if !policy.ValidLocation(p.Location) || p.Location == policy.LocationOnPrem {
+		t.Errorf("%s's location %q is not a provider's country", p.Name, p.Location)
+	}
 	switch {
 	case p.Summary == "":
 		t.Errorf("%s has no summary; its tile in the panel is a name and a logo",
@@ -345,6 +352,9 @@ func checkProviderModel(t *testing.T, p Provider, m ProviderModel, seenDescripti
 			"the two apart", m.ID)
 	}
 	seenDescription[m.Description] = true
+	if m.ReleaseDate != "" && !policy.ValidReleaseDate(m.ReleaseDate) {
+		t.Errorf("%s's release date %q is not YYYY-MM-DD", m.ID, m.ReleaseDate)
+	}
 	if m.InputMicrosPerMTok <= 0 || m.OutputMicrosPerMTok <= 0 {
 		t.Errorf("%s is priced %d/%d; a defaulted price of 0 escapes every budget",
 			m.ID, m.InputMicrosPerMTok, m.OutputMicrosPerMTok)
@@ -552,5 +562,70 @@ models:
 				t.Errorf("error = %v, want one mentioning %q", err, c.want)
 			}
 		})
+	}
+}
+
+// Where a model runs is the provider's, and a model with none runs on the
+// deployment's own inference plane. An entry may say otherwise, for an endpoint
+// that runs somewhere else.
+func TestLocationComesFromTheProvider(t *testing.T) {
+	models, err := Parse([]byte(`
+models:
+  - alias: keera-frontier
+    provider: anthropic
+    backend_model: claude-opus-5
+  - alias: keera-swiss
+    provider: stepping-stone
+    backend_model: Qwen/Qwen3-Coder-Next
+  - alias: keera-code
+    backends: ["http://keera-code:8000/v1"]
+    backend_model: keera-code
+  - alias: keera-proxied
+    provider: openai
+    backend_model: gpt-5.5
+    location: CH
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	for i, want := range []string{"usa", "ch", "onprem", "ch"} {
+		if got := models[i].Location; got != want {
+			t.Errorf("%s: location = %q, want %q", models[i].Alias, got, want)
+		}
+	}
+}
+
+// The release date is filled in like the other values the table knows, and an
+// entry's own date wins. It may be written unquoted, as YAML users will.
+func TestReleaseDateComesFromTheTable(t *testing.T) {
+	p, _ := ProviderByName("anthropic")
+	var known ProviderModel
+	for _, m := range p.Models {
+		if m.ReleaseDate != "" {
+			known = m
+			break
+		}
+	}
+	if known.ID == "" {
+		t.Skip("the table states no release date")
+	}
+	models, err := Parse([]byte(`
+models:
+  - alias: keera-frontier
+    provider: anthropic
+    backend_model: ` + known.ID + `
+  - alias: keera-code
+    backends: ["http://keera-code:8000/v1"]
+    backend_model: keera-code
+    release_date: 2026-03-01
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got := models[0].ReleaseDate; got != known.ReleaseDate {
+		t.Errorf("release date = %q, want the table's %q", got, known.ReleaseDate)
+	}
+	if got := models[1].ReleaseDate; got != "2026-03-01" {
+		t.Errorf("release date = %q, want the declared 2026-03-01", got)
 	}
 }

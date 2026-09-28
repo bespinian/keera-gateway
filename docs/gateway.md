@@ -55,6 +55,11 @@ remote endpoint without any developer changing anything.
 - `max_context` is shown to clients on `/v1/models`, sizes a filter's or a
   router's own model, and bounds every request. See
   [Requests too long for the model](#requests-too-long-for-the-model).
+- `location` says where the model runs, and so where prompts go: `ch` or `usa`
+  for a hosted provider, `onprem` for your own inference plane. A provider fills
+  it in, and a model without one is `onprem`. Clients see it on `/v1/models`.
+- `release_date` is the day the model came out, as `YYYY-MM-DD`. A provider
+  fills it in for the models it knows. `/v1/models` gives it as `created`.
 - An alias is lowercase letters, digits and interior hyphens, because it appears
   in the client configurations `keera connect` prints.
 

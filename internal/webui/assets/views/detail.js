@@ -33,6 +33,8 @@ import {
   icons,
   currentRange,
   rangePicker,
+  locationName,
+  releaseDay,
 } from "../ui.js";
 import { areaChart, barList } from "../chart.js";
 import { requestLog, setOutcome } from "./requestlog.js";
@@ -337,6 +339,10 @@ export async function modelDetailView(ctx) {
           model.enabled ? pill("Enabled", "good") : pill("Disabled", "warn"),
           model.max_context
             ? pill(`${compact(model.max_context)} context`)
+            : null,
+          model.location ? pill(locationName(model.location)) : null,
+          model.release_date
+            ? pill(`released ${releaseDay(model.release_date)}`)
             : null,
         ]
       : [pill("Removed from the catalogue", "warn")],

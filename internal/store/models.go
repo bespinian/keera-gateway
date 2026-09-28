@@ -6,15 +6,17 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
+// The release date is read as text, so an unstated one is simply empty.
 const modelColumns = `SELECT alias, kind, backends, backend_model, provider, description,
 	input_micros_per_mtok, output_micros_per_mtok, cached_input_micros_per_mtok, max_context,
+	coalesce(to_char(release_date, 'YYYY-MM-DD'), ''), location,
 	api_key_env, api_key_ct, enabled, managed`
 
 func scanModel(r row) (policy.Model, error) {
 	var m policy.Model
 	if err := r.Scan(&m.Alias, &m.Kind, &m.Backends, &m.BackendModel, &m.Provider, &m.Description,
 		&m.InputMicrosPerMTok, &m.OutputMicrosPerMTok, &m.CachedInputMicrosPerMTok, &m.MaxContext,
-		&m.APIKeyEnv, &m.APIKeyCiphertext, &m.Enabled, &m.Managed); err != nil {
+		&m.ReleaseDate, &m.Location, &m.APIKeyEnv, &m.APIKeyCiphertext, &m.Enabled, &m.Managed); err != nil {
 		return policy.Model{}, err
 	}
 	m.HasAPIKey = len(m.APIKeyCiphertext) > 0
@@ -52,19 +54,21 @@ func (s *Store) Model(ctx context.Context, alias string) (policy.Model, error) {
 func (s *Store) UpsertModel(ctx context.Context, m policy.Model) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO models (alias, kind, backends, backend_model,
 		provider, description, input_micros_per_mtok, output_micros_per_mtok,
-		cached_input_micros_per_mtok, max_context, api_key_env, enabled, managed, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, now())
+		cached_input_micros_per_mtok, max_context, release_date, location, api_key_env,
+		enabled, managed, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULLIF($11, '')::date,$12,$13,$14,$15, now())
 		ON CONFLICT (alias) DO UPDATE SET kind = EXCLUDED.kind, backends = EXCLUDED.backends,
 			backend_model = EXCLUDED.backend_model, provider = EXCLUDED.provider,
 			description = EXCLUDED.description,
 			input_micros_per_mtok = EXCLUDED.input_micros_per_mtok,
 			output_micros_per_mtok = EXCLUDED.output_micros_per_mtok,
 			cached_input_micros_per_mtok = EXCLUDED.cached_input_micros_per_mtok,
-			max_context = EXCLUDED.max_context, api_key_env = EXCLUDED.api_key_env,
+			max_context = EXCLUDED.max_context, release_date = EXCLUDED.release_date,
+			location = EXCLUDED.location, api_key_env = EXCLUDED.api_key_env,
 			enabled = EXCLUDED.enabled, managed = EXCLUDED.managed, updated_at = now()`,
 		m.Alias, string(m.Kind), m.Backends, m.BackendModel, m.Provider, m.Description,
 		m.InputMicrosPerMTok, m.OutputMicrosPerMTok, m.CachedInputMicrosPerMTok, m.MaxContext,
-		m.APIKeyEnv, m.Enabled, m.Managed)
+		m.ReleaseDate, m.Location, m.APIKeyEnv, m.Enabled, m.Managed)
 	return err
 }
 

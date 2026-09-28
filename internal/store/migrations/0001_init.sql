@@ -188,6 +188,11 @@ CREATE TABLE models (
     -- to check somebody else's homework. Empty is a model served by an
     -- inference plane of the deployment's own.
     provider               text NOT NULL DEFAULT '',
+    -- The day the model came out. Null when nobody stated it.
+    release_date           date,
+    -- Where the model runs, and so where prompts go: a country such as ch or
+    -- usa, or onprem for an inference plane of the deployment's own.
+    location               text NOT NULL DEFAULT 'onprem',
     -- Declared in KEERA_MODELS_FILE, which is applied on every start. Rather
     -- than let a panel or a CLI accept a change it cannot keep, the ones the
     -- file declares are marked here and refused to every other writer.

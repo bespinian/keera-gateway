@@ -6,6 +6,27 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
+// A model with no release date is stored as null and read back as empty.
+func TestModelWithoutAReleaseDate(t *testing.T) {
+	st, ctx := db(t)
+
+	m := policy.Model{
+		Alias: "keera-code", Kind: policy.KindChat, Backends: []string{"http://x/v1"},
+		BackendModel: "x", Location: policy.LocationOnPrem, Enabled: true,
+	}
+	if err := st.UpsertModel(ctx, m); err != nil {
+		t.Fatalf("UpsertModel: %v", err)
+	}
+	got, err := st.Model(ctx, "keera-code")
+	if err != nil {
+		t.Fatalf("Model: %v", err)
+	}
+	if got.ReleaseDate != "" || got.Location != policy.LocationOnPrem {
+		t.Errorf("release date = %q, location = %q, want empty and onprem",
+			got.ReleaseDate, got.Location)
+	}
+}
+
 func TestModelCatalogueRoundTrip(t *testing.T) {
 	st, ctx := db(t)
 
@@ -16,7 +37,7 @@ func TestModelCatalogueRoundTrip(t *testing.T) {
 		InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 4_000_000,
 		CachedInputMicrosPerMTok: 100_000,
 		MaxContext:               65536, APIKeyEnv: "ANTHROPIC_API_KEY", Enabled: true,
-		Managed: true, Provider: "anthropic",
+		Managed: true, Provider: "anthropic", ReleaseDate: "2026-07-24", Location: "usa",
 	}
 	if err := st.UpsertModel(ctx, m); err != nil {
 		t.Fatalf("UpsertModel: %v", err)
@@ -47,6 +68,12 @@ func TestModelCatalogueRoundTrip(t *testing.T) {
 	}
 	if got.HasAPIKey {
 		t.Error("HasAPIKey is set for a model with no stored credential")
+	}
+	// The date is stored as a date and read back as text, so it is worth
+	// checking it comes back as it went in.
+	if got.ReleaseDate != "2026-07-24" || got.Location != "usa" {
+		t.Errorf("release date = %q, location = %q, want 2026-07-24 and usa",
+			got.ReleaseDate, got.Location)
 	}
 
 	// A credential is the one change a file-managed alias still accepts, and

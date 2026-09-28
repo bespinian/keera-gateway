@@ -248,7 +248,8 @@ var commands = []command{
 			{name: "list", aliases: []string{"ls"}, summary: "the model catalogue", flags: []string{"json"}},
 			{name: "add", aliases: []string{"create", "new"}, args: "<alias>", summary: "add a model",
 				flags: []string{"provider", "backend", "product-id", "backend-model", "kind",
-					"description", "max-context", "price-in", "price-out", "price-cached",
+					"description", "max-context", "release-date", "location",
+					"price-in", "price-out", "price-cached",
 					"api-key", "api-key-env", "disabled", "json"},
 				examples: []string{
 					"keera model add keera-speed --backend http://vllm:8000/v1 \\\n" +
@@ -258,7 +259,8 @@ var commands = []command{
 				}},
 			{name: "set", aliases: []string{"edit", "update"}, args: "<alias>", summary: "change any of those on an existing model",
 				flags: []string{"provider", "backend", "product-id", "backend-model", "kind",
-					"description", "max-context", "price-in", "price-out", "price-cached",
+					"description", "max-context", "release-date", "location",
+					"price-in", "price-out", "price-cached",
 					"api-key", "api-key-env", "no-api-key", "json"}},
 			{name: "enable", args: "<alias>", summary: "serve this model", flags: []string{"json"}},
 			{name: "disable", args: "<alias>", summary: "stop serving it, keeping its declaration",

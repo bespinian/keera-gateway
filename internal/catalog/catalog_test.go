@@ -97,6 +97,16 @@ func TestParseRejectsWhatWouldFailSilentlyAtRuntime(t *testing.T) {
 			wantErr: "unknown kind",
 		},
 		{
+			name:    "a location that is not a short name",
+			in:      "models:\n  - alias: a\n    backends: [\"http://x/v1\"]\n    backend_model: m\n    location: \"on prem\"",
+			wantErr: "location",
+		},
+		{
+			name:    "a release date that is not a day",
+			in:      "models:\n  - alias: a\n    backends: [\"http://x/v1\"]\n    backend_model: m\n    release_date: March 2026",
+			wantErr: "YYYY-MM-DD",
+		},
+		{
 			name:    "not YAML at all",
 			in:      "models: [[[",
 			wantErr: "parse catalogue",

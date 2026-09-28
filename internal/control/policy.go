@@ -471,11 +471,26 @@ func normalizeModel(m *policy.Model) string {
 	// against the providers this build knows. Its defaults are not applied:
 	// an entry may override any of them.
 	m.Provider = strings.ToLower(strings.TrimSpace(m.Provider))
-	if m.Provider != "" {
-		if _, known := catalog.ProviderByName(m.Provider); !known {
-			return "unknown provider " + strconv.Quote(m.Provider) + "; Keera Gateway knows: " +
-				catalog.ProviderNames()
-		}
+	provider, known := catalog.ProviderByName(m.Provider)
+	if m.Provider != "" && !known {
+		return "unknown provider " + strconv.Quote(m.Provider) + "; Keera Gateway knows: " +
+			catalog.ProviderNames()
+	}
+	// Every model runs somewhere, so an unstated location is the provider's,
+	// or the deployment's own.
+	m.Location = strings.ToLower(strings.TrimSpace(m.Location))
+	switch {
+	case m.Location == "" && known:
+		m.Location = provider.Location
+	case m.Location == "":
+		m.Location = policy.LocationOnPrem
+	}
+	m.ReleaseDate = strings.TrimSpace(m.ReleaseDate)
+	switch {
+	case !policy.ValidLocation(m.Location):
+		return "'location' must be a short lowercase name, such as ch, usa or onprem"
+	case m.ReleaseDate != "" && !policy.ValidReleaseDate(m.ReleaseDate):
+		return "'release_date' must be a day written as YYYY-MM-DD"
 	}
 	return ""
 }

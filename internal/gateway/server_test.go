@@ -616,7 +616,10 @@ func TestListModelsShowsOnlyWhatTheKeyMayUse(t *testing.T) {
 	restricted := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"},
 		&policy.Limits{AllowedModels: []string{"keera-code"}}, nil, nil)
 	models := map[string]policy.Model{
-		"keera-code":    {Alias: "keera-code", Kind: policy.KindChat, BackendModel: "a", MaxContext: 65536, Enabled: true},
+		"keera-code": {
+			Alias: "keera-code", Kind: policy.KindChat, BackendModel: "a", MaxContext: 65536,
+			ReleaseDate: "2026-03-01", Location: "ch", Enabled: true,
+		},
 		"keera-premium": {Alias: "keera-premium", Kind: policy.KindChat, BackendModel: "b", Enabled: true},
 		"keera-off":     {Alias: "keera-off", Kind: policy.KindChat, BackendModel: "c"},
 	}
@@ -634,7 +637,9 @@ func TestListModelsShowsOnlyWhatTheKeyMayUse(t *testing.T) {
 		Object string `json:"object"`
 		Data   []struct {
 			ID         string `json:"id"`
+			Created    int64  `json:"created"`
 			MaxContext int    `json:"max_context"`
+			Location   string `json:"location"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
@@ -649,6 +654,15 @@ func TestListModelsShowsOnlyWhatTheKeyMayUse(t *testing.T) {
 	if out.Data[0].MaxContext != 65536 {
 		t.Errorf("max_context = %d, want it advertised so clients can size a request",
 			out.Data[0].MaxContext)
+	}
+	// OpenAI's "created" is when the model came out, so it carries the
+	// release date.
+	if want := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC).Unix(); out.Data[0].Created != want {
+		t.Errorf("created = %d, want the release date %d", out.Data[0].Created, want)
+	}
+	if out.Data[0].Location != "ch" {
+		t.Errorf("location = %q, want ch, so a client can tell where prompts go",
+			out.Data[0].Location)
 	}
 }
 

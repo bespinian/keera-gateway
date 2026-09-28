@@ -27,6 +27,8 @@ type modelFlags struct {
 	kind         string
 	description  string
 	maxContext   int
+	releaseDate  string
+	location     string
 	priceIn      float64
 	priceOut     float64
 	priceCached  float64
@@ -52,6 +54,10 @@ func registerModelFlags(fs *flag.FlagSet) *modelFlags {
 		"what this model is for, in a sentence; clients see it and routers decide on it "+
 			"(a --provider model starts with that provider's own)")
 	fs.IntVar(&f.maxContext, "max-context", -1, "context window: advertised to clients, and a request that cannot fit is refused")
+	fs.StringVar(&f.releaseDate, "release-date", "",
+		"the day the model came out, as YYYY-MM-DD (a --provider model starts with that provider's own)")
+	fs.StringVar(&f.location, "location", "",
+		"where the model runs, such as ch or usa (default: the provider's, or onprem without one)")
 	fs.Float64Var(&f.priceIn, "price-in", -1,
 		"input price per million tokens, in whole currency units (0 for unbilled)")
 	fs.Float64Var(&f.priceOut, "price-out", -1, "output price per million tokens")
@@ -69,6 +75,12 @@ func registerModelFlags(fs *flag.FlagSet) *modelFlags {
 // applyModelFlags folds one invocation's flags into a declared catalogue entry.
 func applyModelFlags(m catalog.Model, f *modelFlags) catalog.Model {
 	if f.provider != "" {
+		// Where the model runs belongs to the provider, so a new provider
+		// brings its own location. A --location given too wins.
+		if !strings.EqualFold(f.provider, m.Provider) {
+			m.Location = ""
+			m.ReleaseDate = ""
+		}
 		m.Provider = f.provider
 	}
 	if len(f.backends) > 0 {
@@ -83,6 +95,11 @@ func applyModelFlags(m catalog.Model, f *modelFlags) catalog.Model {
 		}
 	}
 	if f.backendModel != "" {
+		// Another model came out on another day. The provider fills in the
+		// new one's date, if it knows it.
+		if f.backendModel != m.BackendModel {
+			m.ReleaseDate = ""
+		}
 		m.BackendModel = f.backendModel
 	}
 	if f.kind != "" {
@@ -94,6 +111,12 @@ func applyModelFlags(m catalog.Model, f *modelFlags) catalog.Model {
 	if f.maxContext >= 0 {
 		n := f.maxContext
 		m.MaxContext = &n
+	}
+	if f.releaseDate != "" {
+		m.ReleaseDate = f.releaseDate
+	}
+	if f.location != "" {
+		m.Location = f.location
 	}
 	setPrice(&m.InputMicrosPerMTok, f.priceIn)
 	setPrice(&m.OutputMicrosPerMTok, f.priceOut)
@@ -121,7 +144,7 @@ func setPrice(dst **int64, units float64) {
 func onlyCredential(f *modelFlags) bool {
 	declared := f.provider != "" || len(f.backends) > 0 || f.productID != "" ||
 		f.backendModel != "" || f.kind != "" || f.description != "" || f.maxContext >= 0 ||
-		f.priceIn >= 0 || f.priceOut >= 0 || f.priceCached >= 0 || f.apiKeyEnv != "" ||
+		f.releaseDate != "" || f.location != "" || f.priceIn >= 0 || f.priceOut >= 0 || f.priceCached >= 0 || f.apiKeyEnv != "" ||
 		f.disabled
 	return !declared && (f.apiKey != "" || f.noAPIKey)
 }
@@ -180,6 +203,8 @@ func declared(m policy.Model) catalog.Model {
 		OutputMicrosPerMTok:      &outPrice,
 		CachedInputMicrosPerMTok: &cachedPrice,
 		MaxContext:               &maxContext,
+		ReleaseDate:              m.ReleaseDate,
+		Location:                 m.Location,
 		APIKeyEnv:                m.APIKeyEnv,
 		Disabled:                 !m.Enabled,
 	}
@@ -506,8 +531,8 @@ func printProviders(w *table) {
 		if p.Summary != "" {
 			_, _ = fmt.Fprintf(w, "  %s\n", p.Summary)
 		}
-		_, _ = fmt.Fprintf(w, "  reads the key from %s, serves %s\n",
-			p.APIKeyEnv, kindNames(p.Kinds))
+		_, _ = fmt.Fprintf(w, "  runs in %s, reads the key from %s, serves %s\n",
+			p.Location, p.APIKeyEnv, kindNames(p.Kinds))
 		if p.NeedsProductID {
 			_, _ = fmt.Fprintf(w, "  its address is per customer, so a model "+
 				"here also needs --product-id\n")
@@ -515,10 +540,11 @@ func printProviders(w *table) {
 		// The description goes last: a trailing cell is not padded, so a long
 		// one does not push the other columns out of line.
 		_, _ = fmt.Fprintf(w,
-			"  MODEL\tCONTEXT\tIN/MTOK\tCACHED/MTOK\tOUT/MTOK (%s)\tDESCRIPTION\n",
+			"  MODEL\tRELEASED\tCONTEXT\tIN/MTOK\tCACHED/MTOK\tOUT/MTOK (%s)\tDESCRIPTION\n",
 			p.Currency)
 		for _, m := range p.Models {
-			_, _ = fmt.Fprintf(w, "  %s\t%d\t%s\t%s\t%s\t%s\n", m.ID, m.MaxContext,
+			_, _ = fmt.Fprintf(w, "  %s\t%s\t%d\t%s\t%s\t%s\t%s\n", m.ID, dash(m.ReleaseDate),
+				m.MaxContext,
 				policy.FormatMicros(m.InputMicrosPerMTok),
 				cachedPrice(m.CachedInputMicrosPerMTok),
 				policy.FormatMicros(m.OutputMicrosPerMTok), m.Description)
@@ -530,11 +556,12 @@ func printProviders(w *table) {
 }
 
 func printModels(w *table, models []policy.Model) {
-	w.header("ALIAS\tKIND\tBACKEND MODEL\tPROVIDER\tBACKENDS\t" +
+	w.header("ALIAS\tKIND\tBACKEND MODEL\tPROVIDER\tLOCATION\tRELEASED\tBACKENDS\t" +
 		"IN/MTOK\tCACHED/MTOK\tOUT/MTOK\tCREDENTIAL\tSOURCE\tENABLED")
 	for _, m := range models {
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			m.Alias, m.Kind, m.BackendModel, dash(m.Provider), strings.Join(m.Backends, ","),
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			m.Alias, m.Kind, m.BackendModel, dash(m.Provider), dash(m.Location),
+			dash(m.ReleaseDate), strings.Join(m.Backends, ","),
 			policy.FormatMicros(m.InputMicrosPerMTok), cachedPrice(m.CachedInputMicrosPerMTok),
 			policy.FormatMicros(m.OutputMicrosPerMTok),
 			credentialSource(m), modelSource(m), statusWord(strconv.FormatBool(m.Enabled)))
@@ -557,6 +584,10 @@ func printModel(w *table, m policy.Model) {
 	show(w, "backends", strings.Join(m.Backends, ", "))
 	if m.Provider != "" {
 		show(w, "provider", m.Provider)
+	}
+	show(w, "location", dash(m.Location))
+	if m.ReleaseDate != "" {
+		show(w, "released", m.ReleaseDate)
 	}
 	// Printed even when missing: without a description a router knows the
 	// model by its alias alone.

@@ -56,8 +56,14 @@ type Model struct {
 	// tokens cost the full input price.
 	CachedInputMicrosPerMTok *int64 `yaml:"cached_input_micros_per_mtok"`
 	MaxContext               *int   `yaml:"max_context"`
-	APIKeyEnv                string `yaml:"api_key_env"`
-	Disabled                 bool   `yaml:"disabled"`
+	// ReleaseDate is the day the model came out, as YYYY-MM-DD. A provider
+	// fills it in for the models it knows.
+	ReleaseDate string `yaml:"release_date"`
+	// Location is where the model runs: a provider's country, such as ch or
+	// usa, or onprem for a model with no provider.
+	Location  string `yaml:"location"`
+	APIKeyEnv string `yaml:"api_key_env"`
+	Disabled  bool   `yaml:"disabled"`
 }
 
 // Parse reads and validates a catalogue file, and returns its models.
@@ -142,6 +148,8 @@ func ParseModel(m Model) (policy.Model, error) {
 	// Trimmed first, so a blank description gets the provider's default.
 	m.Description = strings.TrimSpace(m.Description)
 	m.ProductID = strings.TrimSpace(m.ProductID)
+	m.ReleaseDate = strings.TrimSpace(m.ReleaseDate)
+	m.Location = strings.ToLower(strings.TrimSpace(m.Location))
 	if m.Provider = strings.ToLower(strings.TrimSpace(m.Provider)); m.Provider != "" {
 		var err error
 		if m, err = applyProvider(m); err != nil {
@@ -150,6 +158,17 @@ func ParseModel(m Model) (policy.Model, error) {
 	}
 	if err := checkBackend(m); err != nil {
 		return policy.Model{}, err
+	}
+	if m.Location == "" {
+		m.Location = policy.LocationOnPrem
+	}
+	switch {
+	case !policy.ValidLocation(m.Location):
+		return policy.Model{}, fmt.Errorf("location %q must be a short lowercase name, "+
+			"such as ch, usa or onprem", m.Location)
+	case m.ReleaseDate != "" && !policy.ValidReleaseDate(m.ReleaseDate):
+		return policy.Model{}, fmt.Errorf("release_date %q must be a day written as "+
+			"YYYY-MM-DD", m.ReleaseDate)
 	}
 	kind := policy.Kind(m.Kind)
 	if kind == "" {
@@ -170,6 +189,8 @@ func ParseModel(m Model) (policy.Model, error) {
 		OutputMicrosPerMTok:      deref(m.OutputMicrosPerMTok),
 		CachedInputMicrosPerMTok: deref(m.CachedInputMicrosPerMTok),
 		MaxContext:               deref(m.MaxContext),
+		ReleaseDate:              m.ReleaseDate,
+		Location:                 m.Location,
 		APIKeyEnv:                m.APIKeyEnv,
 		Enabled:                  !m.Disabled,
 	}, nil

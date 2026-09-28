@@ -126,6 +126,26 @@ export function date(iso) {
   });
 }
 
+/** releaseDay is a day written as YYYY-MM-DD, such as a model's release date.
+ *  It is read as UTC, so it shows the same day in every time zone. */
+export function releaseDay(day) {
+  if (!day) return "-";
+  return new Date(day + "T00:00:00Z").toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/** locationName is where a model runs, in words. An unknown code is shown as
+ *  it is, in capitals. */
+export function locationName(loc) {
+  const names = { ch: "Switzerland", usa: "USA", onprem: "On-prem" };
+  if (!loc) return "-";
+  return names[loc] || loc.toUpperCase();
+}
+
 /** ago is what a table wants for "when", with the exact time on hover. */
 export function ago(iso) {
   if (!iso) return "-";
