@@ -39,7 +39,7 @@ func keyCmd(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("key "+sub, flag.ExitOnError)
 	r := &keyRun{c: newClient(), fs: fs, args: rest, sub: sub}
 	fs.StringVar(&r.org, "org", "", orgUsage)
-	fs.StringVar(&r.team, "team", "", "team id")
+	fs.StringVar(&r.team, "team", "", "team, by name or id")
 	fs.StringVar(&r.user, "user", "", "the person this key belongs to, by email or id")
 	fs.StringVar(&r.alias, "alias", "", "what this key is called; what it is for, in one label")
 	fs.StringVar(&r.expires, "expires", "", "lifetime, e.g. 720h")
@@ -88,7 +88,11 @@ func (r *keyRun) create(ctx context.Context) error {
 	if r.alias == "" && r.fs.NArg() == 1 {
 		r.alias = r.fs.Arg(0)
 	}
-	req := map[string]string{"org_id": orgID, "team_id": r.team, "alias": r.alias}
+	team, err := teamID(ctx, r.c, orgID, r.team)
+	if err != nil {
+		return err
+	}
+	req := map[string]string{"org_id": orgID, "team_id": team, "alias": r.alias}
 	// A key with a person on it is what makes `keera usage --by user` work.
 	if r.user != "" {
 		owner, err := findUser(ctx, r.c, orgID, r.user)
@@ -121,9 +125,13 @@ func (r *keyRun) list(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	team, err := teamID(ctx, r.c, orgID, r.team)
+	if err != nil {
+		return err
+	}
 	path := inOrg("/v1/keys", orgID)
-	if r.team != "" {
-		path += "&team_id=" + url.QueryEscape(r.team)
+	if team != "" {
+		path += "&team_id=" + url.QueryEscape(team)
 	}
 	keys, err := list[store.KeySummary](ctx, r.c, path)
 	if err != nil {

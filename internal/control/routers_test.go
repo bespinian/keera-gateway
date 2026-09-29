@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -564,5 +565,45 @@ func TestPutRouterDropsACeilingOfZero(t *testing.T) {
 	}
 	if _, bounded := saved.Ceiling("keera-large"); bounded {
 		t.Error("a ceiling of zero was stored as a ceiling")
+	}
+}
+
+func TestADecidingRouterStaysOnTheAllowList(t *testing.T) {
+	// The deciding model reads each request before anything is redacted, so
+	// one outside the allow-list would receive every request in full.
+	st, ctx := routerStore(t)
+	srv := routerServer(ctx, t, st)
+
+	putOrgAllowList := func(models []string) (int, string) {
+		t.Helper()
+		raw, err := json.Marshal(map[string]any{"allowed_models": models})
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPut,
+			httpx.ControlPrefix+"/v1/guardrails/org/org_1", bytes.NewReader(raw))
+		req.Header.Set("Authorization", "Bearer "+testOperatorKey)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, req)
+		return w.Code, w.Body.String()
+	}
+
+	if code, out := putRouter(t, srv, "auto", validRouter()); code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", code, out)
+	}
+	code, out := putOrgAllowList([]string{"keera-small", "keera-large"})
+	if code != http.StatusConflict || !strings.Contains(out, "router_model_not_allowed") {
+		t.Fatalf("narrowing the list past the deciding model: status = %d, want 409: %s", code, out)
+	}
+
+	if code, out := putOrgAllowList([]string{"keera-small", "keera-picker"}); code != http.StatusOK {
+		t.Fatalf("a list that keeps the deciding model: status = %d, want 200: %s", code, out)
+	}
+	body := validRouter()
+	body["model"] = "keera-large"
+	code, out = putRouter(t, srv, "auto", body)
+	if code != http.StatusBadRequest || !strings.Contains(out, "model_not_allowed") {
+		t.Fatalf("a deciding model outside the list: status = %d, want 400: %s", code, out)
 	}
 }

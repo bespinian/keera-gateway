@@ -100,7 +100,7 @@ func (s *Server) failDomain(w http.ResponseWriter, err error) {
 	if errors.Is(err, store.ErrDomainTaken) {
 		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "domain_taken",
 			"that email domain belongs to another organisation; "+
-				"one domain places sign-ins in one tenant, so it can only be set on one")
+				"one domain places sign-ins in one organisation, so it can only be set on one")
 		return
 	}
 	s.fail(w, err)

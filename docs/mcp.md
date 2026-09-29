@@ -36,14 +36,19 @@ is stored encrypted under `KEERA_SECRET_KEY`, like a hosted model's key.
 
 The credential is sent in `Authorization` as a bearer token. For a server that
 reads another header, pass `--auth-header X-Api-Key`; the credential is then
-sent as is.
+sent as is. A header name holds only letters, digits and hyphens.
+`--no-api-key` removes the stored credential.
 
-In the panel, the **MCP** page does the same: **New MCP server**, and Edit and
+`--disabled` adds a server without serving it yet, and `keera mcp enable` and
+`keera mcp disable` switch it later. A disabled server answers 404, like one
+that does not exist.
+
+In the panel, the **MCP** screen does the same: **New MCP server**, and Edit and
 Remove on each row. It lists every server with the address to give clients. An
 administrator also sees each tool's calls and the latest ones. `keera mcp list`
 shows the same list in a terminal.
 
-Like Filters and Routers, the page sits under **More** in the sidebar until the
+Like Filters and Routers, the screen sits under **More** in the sidebar until the
 organisation has its first server.
 
 ## Connecting a client
@@ -68,6 +73,7 @@ keera guardrail set team <team-id> --tools github/search_code
 ```
 
 An entry is a server alias, for all its tools, or `alias/tool` for one tool.
+`--tools any` clears a level's list.
 Each level narrows the one above: a tool must be on every level's list. Here
 the team may call only `github/search_code`. The team's list does not name
 `jira/search`, and it names no other github tool. A level that sets no list
@@ -113,15 +119,20 @@ key, and the error if any. The outcomes are:
 | `denied`     | the key may not call this tool                                                  |
 | `refused`    | a filter stopped the call                                                       |
 
-A session's screen in the panel lists its tool calls under its model calls. If
-the client names the session with `X-Keera-Session`, send the same header to the
-MCP server and the tool calls are matched by name. Other sessions are matched by
-time - the key's calls between the session's first and last request - so a key
-running two tasks at once shows both tasks' calls in each.
+A session's screen in the panel lists its tool calls under its model calls:
+those between the session's first and last request. If the client names the
+session with one of the [session headers](sessions.md#a-client-stated-id), send
+the same header to the MCP server and the tool calls are matched by name. Other
+sessions are matched by key, so a key running two tasks at once shows both
+tasks' calls in each.
+
+When the server itself fails, the client gets a 502: `mcp_credential_refused`
+when it rejects the stored credential (401 or 403), and `mcp_unavailable` when
+it cannot be reached.
 
 Tool calls are kept as long as the request log (`KEERA_USAGE_RETENTION`).
 `keera_tool_calls_total` on `/metrics` counts them by server, organisation and
-outcome.
+outcome, and `keera_tool_call_duration_seconds` times them.
 
 ## Hosted tools
 
@@ -135,9 +146,13 @@ keera guardrail set org <org-id> --block-hosted-tools
 
 removes those tools from every request before it is forwarded, including
 Anthropic's `mcp_servers` and OpenAI's `web_search_options`. Tools the client
-runs itself are kept: its own functions, and Anthropic's bash, editor and
-computer tools. The response header `X-Keera-Removed-Tools` names what was
-removed. Once a level blocks hosted tools, no level below can unblock them.
+runs itself are kept: its own functions, Anthropic's bash, editor, computer and
+memory tools, and OpenAI's shell, local shell, computer use and apply-patch
+tools. Every other tool type is removed, including ones released after this
+build. The response header `X-Keera-Removed-Tools` names what was removed.
+
+`--allow-hosted-tools` stops a level blocking them. Once a level blocks hosted
+tools, no level below can unblock them.
 
 ## Limits
 
@@ -150,3 +165,5 @@ removed. Once a level blocks hosted tools, no level below can unblock them.
   [sandbox](sandboxes.md), whose egress is enforced.
 - **One tool call per request.** A JSON-RPC batch that holds a tool call is
   refused. MCP removed batches in its 2025-06-18 version.
+- **A tool call needs an id.** One sent as a notification is refused with
+  JSON-RPC error -32602, because it would get no answer to check or record.

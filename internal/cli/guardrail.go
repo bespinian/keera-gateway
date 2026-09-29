@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"net/url"
 	"slices"
 	"strings"
@@ -152,14 +153,18 @@ func setList(dst *[]string, v string) {
 	}
 }
 
+// micros converts whole currency units to millionths. It rounds, because
+// 2.01 is 2009999.99... as a float and truncating it would lose a millionth.
+func micros(units float64) int64 { return int64(math.Round(units * 1_000_000)) }
+
 // setBudget sets a budget given in whole currency units; 0 removes it.
 func setBudget(dst **int64, amount float64) {
-	micros := int64(amount * 1_000_000)
-	if micros == 0 {
+	m := micros(amount)
+	if m == 0 {
 		*dst = nil
 		return
 	}
-	*dst = &micros
+	*dst = &m
 }
 
 // setPeriod applies --period, which may be left empty.
@@ -184,6 +189,13 @@ func guardrailCmd(ctx context.Context, args []string) error {
 	if want, ok := wantsHelp(args); ok {
 		return printHelp(fs, "guardrail", want)
 	}
+	if err := parse(fs, rest); err != nil {
+		return err
+	}
+	if err := verbFlags(fs, "guardrail", sub); err != nil {
+		return err
+	}
+	rest = fs.Args()
 
 	switch sub {
 	case "get", "show":

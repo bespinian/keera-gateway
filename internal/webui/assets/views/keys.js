@@ -65,9 +65,9 @@ export async function keysView(ctx) {
         ? "A key is shown only once, when it is issued. It is not stored."
         : canIssueOwn
           ? "A key is shown only once, when it is issued. You can issue your " +
-            "own. An administrator sets its limits."
+            "own. An administrator sets its guardrails."
           : "A key is shown only once, when it is issued. Open a key to see " +
-            "its limits. An administrator sets them.",
+            "its guardrails. An administrator sets them.",
     ),
     h("div", { style: { flex: 1 } }),
     canEdit

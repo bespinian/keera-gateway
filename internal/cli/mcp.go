@@ -235,18 +235,18 @@ func (m *mcpRun) delete(ctx context.Context, org *string) error {
 
 // callFlags narrow 'keera mcp calls'.
 type callFlags struct {
-	server, tool, team, key string
-	since                   time.Duration
-	limit                   int
-	summary                 bool
+	server, tool string
+	who          *who
+	since        time.Duration
+	limit        int
+	summary      bool
 }
 
 func registerCallFlags(fs *flag.FlagSet) *callFlags {
 	f := &callFlags{}
 	fs.StringVar(&f.server, "server", "", "restrict to one MCP server")
 	fs.StringVar(&f.tool, "tool", "", "restrict to one tool")
-	fs.StringVar(&f.team, "team", "", "restrict to one team id")
-	fs.StringVar(&f.key, "key", "", "restrict to one key id")
+	f.who = registerWho(fs)
 	fs.DurationVar(&f.since, "since", 24*time.Hour, "how far back to look")
 	fs.IntVar(&f.limit, "limit", 50, "how many calls to print")
 	fs.BoolVar(&f.summary, "summary", false, "add up the calls of each tool instead")
@@ -262,14 +262,14 @@ func mcpCalls(ctx context.Context, c *client, fs *flag.FlagSet, args []string, a
 	if err != nil {
 		return err
 	}
+	params, err := f.who.params(ctx, c, orgID)
+	if err != nil {
+		return err
+	}
 	q := url.Values{}
 	q.Set("from", sinceParam(f.since))
-	for k, v := range map[string]string{"org_id": orgID, "server": f.server, "tool": f.tool,
-		"team_id": f.team, "key_id": f.key} {
-		if v != "" {
-			q.Set(k, v)
-		}
-	}
+	setIfGiven(q, map[string]string{"org_id": orgID, "server": f.server, "tool": f.tool})
+	setIfGiven(q, params)
 	if f.summary {
 		q.Set("summary", "1")
 		var res struct {

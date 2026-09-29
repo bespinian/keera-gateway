@@ -35,7 +35,7 @@ func loginCmd(ctx context.Context, args []string) error {
 	provider := fs.String("provider", "",
 		"which identity provider to sign in through, where a deployment offers several")
 	noBrowser := fs.Bool("no-browser", false,
-		"print the sign-in URL instead of opening it")
+		"do not open a browser; the sign-in URL is printed either way")
 	fs.Usage = func() { _ = printHelp(fs, "login", "") }
 	if want, ok := wantsHelp(args); ok {
 		return printHelp(fs, "login", want)

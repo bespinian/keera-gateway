@@ -335,6 +335,16 @@ func (s *Server) checkRouterModel(w http.ResponseWriter, r *http.Request, orgID,
 			"alias, which only a chat model does")
 		return false
 	}
+	allowed, err := s.orgAllowsModel(r.Context(), orgID, alias)
+	if err != nil {
+		s.fail(w, err)
+		return false
+	}
+	if !allowed {
+		httpx.WriteError(w, http.StatusBadRequest, "invalid_request_error", "model_not_allowed",
+			readerModelRefusal("router", alias, m))
+		return false
+	}
 	return true
 }
 

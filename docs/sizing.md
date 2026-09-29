@@ -112,7 +112,7 @@ counts follow _tasks × calls per task_, not the number of developers.
 ## Sizing the gateway
 
 The gateway keeps an in-memory view of the control plane (`internal/registry`).
-Its size depends on the number of orgs, teams, recently used keys, models, MCP
+Its size depends on the number of organisations, teams, recently used keys, models, MCP
 servers, filters and routers, not on traffic.
 
 Per request, it holds the request body, up to `KEERA_MAX_BODY_BYTES`. For a

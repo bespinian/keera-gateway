@@ -9,8 +9,8 @@ control plane and the control panel, and it talks to Postgres.
 talks to the server's control API over HTTP, so the same commands work against
 a gateway on a customer's cluster and against one on localhost.
 
-Both are static (`CGO_ENABLED=0`) and ship in one `FROM scratch` image with no
-shell.
+Both are static (`CGO_ENABLED=0`). The server ships in a `FROM scratch` image
+with no shell. `keera` ships as release archives (`make dist`).
 
 On start, the gateway applies its own schema under a Postgres advisory lock, so
 several replicas can start at once and no migration job is needed.
@@ -19,20 +19,21 @@ several replicas can start at once and no migration job is needed.
 
 Port 8080 carries everything, told apart by path:
 
-| Path       | What it is                                                          |
-| ---------- | ------------------------------------------------------------------- |
-| `/api`     | The inference API and the MCP servers. Authenticated by an API key. |
-| `/control` | The control API. Authenticated by the operator key or a session.    |
-| `/sandbox` | Attaching to a sandbox. Only live when sandboxes are switched on.   |
-| `/`        | The control panel, and `/metrics`, `/healthz` and `/readyz`.        |
+| Path       | What it is                                                                                            |
+| ---------- | ----------------------------------------------------------------------------------------------------- |
+| `/api`     | The inference API and the MCP servers. Authenticated by an API key, as a bearer token or `x-api-key`. |
+| `/control` | The control API. Authenticated by the operator key, a panel session or a `keera login` token.         |
+| `/sandbox` | Attaching to a sandbox, and the Git credential a sandbox asks for.                                    |
+| `/`        | The control panel, and `/metrics`, `/healthz` and `/readyz`.                                          |
 
 `/sandbox` is not JSON. It carries a byte stream between an authenticated
 caller and a port inside a sandbox, so attaching needs no second port and no
-second certificate. See [sandboxes.md](sandboxes.md).
+second certificate. With sandboxes switched off, it answers 501
+`sandboxes_disabled`. See [sandboxes.md](sandboxes.md).
 
 A deployment publishes one address and one certificate. The downside is that no
-port separates the planes, only the operator key and the session cookie. To
-separate them, put a proxy in front that publishes `/api` and nothing else.
+port separates the planes, only the credentials. To separate them, put a proxy
+in front that publishes `/api` and nothing else.
 
 `/healthz` checks only the process. `/readyz` also pings Postgres, so a replica
 that has lost the database leaves the inference Service instead of being
@@ -93,9 +94,10 @@ To stop a team or a key using a model, leave it out of that guardrail:
 `keera guardrail set team <id> --models a,b`. To stop the whole organisation
 using it, disable the model in its edit dialog.
 
-Deleting a model does not change the filters and routers that use it. A filter
-whose model is gone refuses every request it covers. A router leaves the model
-out of its choice, or falls back or refuses when it was the model that decides.
+Deleting a model does not change the filters and routers that use it. An
+enforcing filter whose model is gone refuses every request it covers; a shadow
+one records an error and lets them through. A router leaves the model out of its
+choice, or falls back or refuses when it was the model that decides.
 The delete confirmation lists them first.
 
 ## Three request shapes
@@ -105,6 +107,10 @@ The data plane serves the OpenAI API at `/api/v1/chat/completions`,
 `/api/v1/messages`, and the OpenAI Responses API at `/api/v1/responses`. Claude
 Code uses the Messages API and Codex the Responses API. All of them go through
 the same guardrails, accounting and audit.
+
+`GET /api/v1/models` lists the models a key may call, and
+`GET /api/v1/models/{alias}` describes one. `HEAD /api/api/hello` answers 200,
+for the warm-up probe some Anthropic clients send.
 
 The inference plane speaks chat completions, so the other two are translated on
 the way in and back on the way out. Fields that chat completions has no place
@@ -149,17 +155,20 @@ Three levels: organisation, team, key. A guardrail can attach at any of them.
 
 The combining rule is **restrict-only**. A level can narrow what it inherits but
 never widen it. Allow-lists intersect; the output-token ceiling takes the
-minimum.
+minimum; once a level blocks hosted tools, the levels below cannot unblock them.
 
-Two exceptions:
+The exceptions:
 
 - **Rate limits and budgets are kept per level and checked separately**, not
   merged. An organisation cap of 10,000 and a team cap of 1,000 are two limits
   that must both hold, and each level's `rpm` and `tpm` has its own bucket.
 - **System prompts and filters accumulate**, outermost first. A level may add to
   what it inherits but may not drop it.
+- **Only the organisation grants repositories** to sandboxes. A team or key can
+  only narrow the list.
 
-Budgets reset on UTC boundaries in every deployment.
+A budget with no period is a monthly one. Budgets reset on UTC boundaries in
+every deployment.
 
 A level that sets nothing is not unlimited: it gets whatever it inherits. To see
 the combined result, run `keera guardrail effective <scope> <id>` (or
@@ -169,14 +178,15 @@ decided each value.
 
 ## What happens to one request
 
-1. Authenticate the key, and resolve the guardrails attached to its org, team and
-   itself.
+1. Authenticate the key, and resolve the guardrails attached to its
+   organisation, its team and itself.
 2. Read the body, find the model, check the rate limits and the budgets.
 3. **Router**, if the client named one: choose the destination.
 4. Refuse the request if it cannot fit in the destination's context.
 5. **Filters**, outermost level first: each may rewrite the request or refuse it,
    with a model and an instruction or with a list of expressions.
-6. Prepend the standing system prompt and clamp the output ceiling.
+6. Prepend the standing system prompt, take out blocked hosted tools, and clamp
+   the output ceiling.
 7. Forward, stream the answer back, and record what it cost.
 
 Why this order:
@@ -215,7 +225,7 @@ A coding agent keeps one response open for minutes. So the gateway limits only
 how long the inference plane may take to _start_ responding
 (`KEERA_UPSTREAM_HEADER_TIMEOUT`, two minutes by default), never the response
 itself. A router uses the same timeout to decide that a destination did not
-answer.
+answer in time.
 
 Usage is recorded once per request, when it ends, from the token counts the
 inference plane reported. If the client disconnects before those arrive, the
@@ -282,8 +292,51 @@ A `tpm` limit has no header. When a limit is hit, the message says which limit
 and its value. A rate limit answers 429 with `Retry-After`. A budget answers
 402, and its message gives the day it resets.
 
-Every forwarded answer also carries `X-Keera-Model`: the alias that answered.
-Behind a router, that is the destination it chose.
+Other response headers:
+
+| Header                  | What it holds                                                                             |
+| ----------------------- | ----------------------------------------------------------------------------------------- |
+| `X-Keera-Model`         | the alias that answered; behind a router, the destination it chose                        |
+| `X-Keera-Router`        | the router and where it sent the request ([routers.md](routers.md#what-a-client-can-see)) |
+| `X-Keera-Filters`       | the filters that acted on the request ([filters.md](filters.md#what-is-recorded))         |
+| `X-Keera-Removed-Tools` | the hosted tools a guardrail took out ([mcp.md](mcp.md#hosted-tools))                     |
+| `X-Request-Id`          | the request's id; one the client sends is kept                                            |
+
+## Errors
+
+Errors come in the shape of the API that was called. The codes:
+
+| Status | Code                                                                                                                  |
+| ------ | --------------------------------------------------------------------------------------------------------------------- |
+| 400    | `missing_model`, `invalid_body`, `unsupported_parameter`, `context_length_exceeded`                                   |
+| 401    | `missing_api_key`, `invalid_api_key`, `expired_api_key`, `revoked_api_key`                                            |
+| 402    | `budget_exceeded`                                                                                                     |
+| 403    | `filter_refused`                                                                                                      |
+| 404    | `model_not_found`: no such model, or the key may not use it                                                           |
+| 413    | `request_too_large` (`KEERA_MAX_BODY_BYTES`), `filter_input_too_large`                                                |
+| 429    | `rate_limit_exceeded` (`rpm`), `token_rate_limit_exceeded` (`tpm`)                                                    |
+| 502    | `upstream_unavailable`, `filter_failed`                                                                               |
+| 503    | `control_plane_unavailable`, `no_backend`, `filter_unavailable`, `router_undecided`, `router_destination_unavailable` |
+
+## Metrics
+
+`/metrics` is the Prometheus exposition. It needs the operator key, an
+operator's session, or `KEERA_METRICS_TOKEN`, because its labels name every
+organisation.
+
+| Metric                           | Labels             | What it counts                                           |
+| -------------------------------- | ------------------ | -------------------------------------------------------- |
+| `keera_requests_total`           | model, org, status | inference requests                                       |
+| `keera_tokens_total`             | model, org, status | input plus output tokens                                 |
+| `keera_request_duration_seconds` | model, org, status | wall time of a request                                   |
+| `keera_gateway_overhead_seconds` | model, org         | time the gateway added, not counting filters and routers |
+| `keera_upstream_errors_total`    | model, org         | failed attempts at a model                               |
+| `keera_inflight_requests`        |                    | requests open against the inference plane now            |
+| `keera_ratelimit_fallback_total` |                    | rate-limit decisions made without Redis                  |
+
+Filters, routers and MCP tool calls have their own metrics, listed in
+[filters.md](filters.md#what-is-recorded), [routers.md](routers.md#what-is-recorded)
+and [mcp.md](mcp.md#the-tool-call-log).
 
 ## What it deliberately does not do
 
@@ -298,10 +351,11 @@ Behind a router, that is the destination it chose.
   to every OpenAI chat model, and drops `temperature` and `top_p` for its
   reasoning models, which refuse them. Any other field a hosted provider
   rejects is an error the client sees.
-- **It does not retry.** A model with several backends moves to the next one
-  only when it cannot connect to one, so a request reaches at most one. A
-  router moves an unanswered request to its next destination, but nothing sends
-  the same request to the same model twice.
+- **It does not retry.** A model with several backends takes them in turn,
+  round-robin, and moves to the next one only when it cannot connect, so a
+  request reaches at most one. A router moves on to its next destination when
+  one cannot be reached, is too slow to start answering, or answers 5xx. Nothing
+  sends the same request to the same model twice.
 
 ## Failure modes worth knowing
 

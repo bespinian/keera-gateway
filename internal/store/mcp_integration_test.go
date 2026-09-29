@@ -172,9 +172,19 @@ func TestToolCallsAreWrittenAndRead(t *testing.T) {
 	}
 	named, _ := st.SessionToolCalls(ctx, "org_1", AgentSession{
 		Stated: true, Key: StatedSessionKeyFor("key_1", "t"), KeyID: "key_1",
+		StartedAt: now.Add(-time.Second), EndedAt: now,
 	})
 	if len(named) != 1 || named[0].Outcome != ToolFailed {
 		t.Errorf("calls matched by session = %+v", named)
+	}
+	// The same id stated again after the idle gap is a new session, and the
+	// old one's calls are not part of it.
+	later, _ := st.SessionToolCalls(ctx, "org_1", AgentSession{
+		Stated: true, Key: StatedSessionKeyFor("key_1", "t"), KeyID: "key_1",
+		StartedAt: now.Add(time.Hour), EndedAt: now.Add(2 * time.Hour),
+	})
+	if len(later) != 0 {
+		t.Errorf("a later session with the same id got the earlier one's calls: %+v", later)
 	}
 
 	gone, err := st.PurgeUsage(ctx, now.Add(time.Hour))

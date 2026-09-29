@@ -393,8 +393,9 @@ Within one request, the order is:
 3. refuse the request if it cannot fit in the destination's context
 4. **filters**, in the order above
 5. the standing system prompt is prepended
-6. the output ceiling is clamped
-7. forward
+6. hosted tools are removed, if the guardrail blocks them
+7. the output ceiling is clamped
+8. forward
 
 Filters run before step 5 so the administrator's system prompt is never handed
 to a small model that is allowed to edit it.
@@ -540,8 +541,10 @@ filter that left the planted secret alone, and a filter that touched the code.
 
 A check of a model filter goes straight to the backend, with the credentials the
 data plane uses. It is not rate-limited, budgeted or billed and writes no usage
-row, but it does put one real request on the GPUs. A check of a pattern filter
-touches nothing and costs nothing.
+row, but it does put real requests on the GPUs: one for a rewrite filter, two
+for a gate, one per half of the sample. A gate whose backend refuses logprobs is
+asked again without them. A check of a pattern filter touches nothing and costs
+nothing.
 
 A check of a filter in shadow still runs it, and says so.
 

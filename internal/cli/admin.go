@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bespinian/keera-gateway/internal/id"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
@@ -102,6 +103,75 @@ func resolveOrg(ctx context.Context, c *client, given string) (string, error) {
 		return given, nil
 	}
 	return theOnlyOrg(ctx, c, "pass --org <id>")
+}
+
+// who narrows a report to one team, key or person, each given the way the
+// other commands take it: a team by name, a key by alias, a person by email,
+// or any of them by id.
+type who struct{ team, key, user string }
+
+func registerWho(fs *flag.FlagSet) *who {
+	w := &who{}
+	fs.StringVar(&w.team, "team", "", "restrict to one team, by name or id")
+	fs.StringVar(&w.key, "key", "", "restrict to one key, by alias or id")
+	fs.StringVar(&w.user, "user", "", "restrict to one person, by email or id")
+	return w
+}
+
+// params resolves the given flags to the ids the control API filters by. A
+// report may span every organisation, so one is only resolved when a name
+// needs looking up.
+func (w *who) params(ctx context.Context, c *client, org string) (map[string]string, error) {
+	p := map[string]string{}
+	orgID := org
+	for _, f := range []struct {
+		param, given string
+		find         func(context.Context, *client, string, string) (string, error)
+	}{
+		{"team_id", w.team, teamID},
+		{"key_id", w.key, keyID},
+		{"user_id", w.user, userID},
+	} {
+		if f.given == "" {
+			continue
+		}
+		var err error
+		if orgID == "" {
+			if orgID, err = resolveOrg(ctx, c, org); err != nil {
+				return nil, err
+			}
+		}
+		if p[f.param], err = f.find(ctx, c, orgID, f.given); err != nil {
+			return nil, err
+		}
+	}
+	return p, nil
+}
+
+// teamID, keyID and userID resolve what a flag was given to an id. An id is
+// passed on unchanged, so it needs no lookup.
+func teamID(ctx context.Context, c *client, orgID, given string) (string, error) {
+	if given == "" || id.HasPrefix(given, "team") {
+		return given, nil
+	}
+	t, err := findTeam(ctx, c, orgID, given)
+	return t.ID, err
+}
+
+func keyID(ctx context.Context, c *client, orgID, given string) (string, error) {
+	if given == "" || id.HasPrefix(given, "key") {
+		return given, nil
+	}
+	k, err := findKey(ctx, c, orgID, given)
+	return k.ID, err
+}
+
+func userID(ctx context.Context, c *client, orgID, given string) (string, error) {
+	if given == "" || id.HasPrefix(given, "user") {
+		return given, nil
+	}
+	u, err := findUser(ctx, c, orgID, given)
+	return u.ID, err
 }
 
 // theOnlyOrg is the organisation a command means when it was not told one.

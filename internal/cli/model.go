@@ -147,8 +147,8 @@ func clearModelValues(m catalog.Model) catalog.Model {
 // tokens, where -1 means "not given".
 func setPrice(dst **int64, units float64) {
 	if units >= 0 {
-		micros := int64(units * 1_000_000)
-		*dst = &micros
+		m := micros(units)
+		*dst = &m
 	}
 }
 

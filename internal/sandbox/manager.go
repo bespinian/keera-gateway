@@ -1203,8 +1203,9 @@ func (m *Manager) reconcilePools(ctx context.Context) {
 		}
 		keep[PoolKey(c.OrgID, c.Name)] = true
 		if err := pooler.EnsurePool(ctx, c); err != nil {
-			// Not fatal: Create falls back to a cold start, which only costs
-			// the seconds the pool would have saved.
+			// Not fatal: a pool that already exists keeps serving claims, and
+			// the next sweep tries again. Create does not fall back to a cold
+			// start, so a class whose pool was never made cannot be claimed.
 			m.log.Warn("sandbox: reconciling a warm pool failed",
 				"org", c.OrgID, "class", c.Name, "warm", c.Warm, "error", err)
 		}

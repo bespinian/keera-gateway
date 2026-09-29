@@ -24,9 +24,7 @@ func sessionsCmd(ctx context.Context, args []string) error {
 	org := fs.String("org", "", "restrict to one organisation")
 	sort := fs.String("sort", "cost", "cost, requests, duration or recent")
 	alias := fs.String("model", "", "restrict to the tasks that used one model")
-	teamID := fs.String("team", "", "restrict to one team id")
-	keyID := fs.String("key", "", "restrict to one key id")
-	user := fs.String("user", "", "restrict to one person, by email or id")
+	w := registerWho(fs)
 	unhappy := fs.Bool("unhappy", false, "only the tasks that hit trouble")
 	since := fs.Duration("since", 7*24*time.Hour, "how far back to look")
 	limit := fs.Int("limit", 25, "how many to print")
@@ -38,18 +36,9 @@ func sessionsCmd(ctx context.Context, args []string) error {
 	if err := parse(fs, args); err != nil {
 		return err
 	}
-	// The same person `keera key create --user` takes, by email or id.
-	userID := ""
-	if *user != "" {
-		orgID, err := resolveOrg(ctx, c, *org)
-		if err != nil {
-			return err
-		}
-		u, err := findUser(ctx, c, orgID, *user)
-		if err != nil {
-			return err
-		}
-		userID = u.ID
+	params, err := w.params(ctx, c, *org)
+	if err != nil {
+		return err
 	}
 
 	q := url.Values{}
@@ -59,10 +48,8 @@ func sessionsCmd(ctx context.Context, args []string) error {
 	if *unhappy {
 		q.Set("unhappy", "1")
 	}
-	setIfGiven(q, map[string]string{
-		"org_id": *org, "alias": *alias, "team_id": *teamID,
-		"key_id": *keyID, "user_id": userID,
-	})
+	setIfGiven(q, map[string]string{"org_id": *org, "alias": *alias})
+	setIfGiven(q, params)
 
 	var res sessionsResponse
 	if err := c.do(ctx, "GET", "/v1/sessions?"+q.Encode(), nil, &res); err != nil {

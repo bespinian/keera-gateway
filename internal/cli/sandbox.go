@@ -61,7 +61,7 @@ func sandboxCmd(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("sandbox "+sub, flag.ExitOnError)
 	r := &sandboxRun{c: newClient(), fs: fs, sub: sub}
 	fs.StringVar(&r.org, "org", "", orgUsage)
-	fs.StringVar(&r.team, "team", "", "team the sandbox belongs to; its key is scoped to that "+
+	fs.StringVar(&r.team, "team", "", "team the sandbox belongs to, by name or id; its key is scoped to that "+
 		"team, so the budget, the rate limit and the allowed models are the team's")
 	fs.StringVar(&r.class, "class", "", "which machine to ask for; `keera sandbox classes` lists them")
 	fs.StringVar(&r.purpose, "purpose", "", "'engineer' - a machine you work in - or 'agent' - one task's")
@@ -138,11 +138,15 @@ func (r *sandboxRun) list(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	team, err := teamID(ctx, r.c, orgID, r.team)
+	if err != nil {
+		return err
+	}
 	q := url.Values{"org_id": {orgID}}
 	if r.all {
 		q.Set("all", "1")
 	}
-	setIfGiven(q, map[string]string{"team_id": r.team, "class": r.class, "purpose": r.purpose})
+	setIfGiven(q, map[string]string{"team_id": team, "class": r.class, "purpose": r.purpose})
 	sandboxes, err := list[store.Sandbox](ctx, r.c, "/v1/sandboxes?"+q.Encode())
 	if err != nil {
 		return err
@@ -170,8 +174,12 @@ func (r *sandboxRun) create(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	team, err := teamID(ctx, r.c, orgID, r.team)
+	if err != nil {
+		return err
+	}
 	body := map[string]any{
-		"org_id": orgID, "team_id": r.team, "name": r.fs.Arg(0), "class": r.class,
+		"org_id": orgID, "team_id": team, "name": r.fs.Arg(0), "class": r.class,
 		"purpose": r.purpose, "repo": r.repo, "branch": r.branch, "task": task,
 		"authorized_keys": keys,
 	}

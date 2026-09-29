@@ -255,7 +255,8 @@ discounted part (see [Cached input](#cached-input)). A request to
 `/api/v1/responses` (what Codex sends) is forwarded to OpenAI's
 `/v1/responses` with its reasoning items. Besides the guardrails, as for
 Anthropic, the only change is that a reasoning model gets no `temperature` or
-`top_p`, as below.
+`top_p`, as below. An egress proxy in front of OpenAI must pass `/v1/responses` as
+well as `/v1/chat/completions`.
 
 **Reasoning tokens are billed as output.** OpenAI counts them in
 `completion_tokens`, which Keera prices at the output rate, so the cost is

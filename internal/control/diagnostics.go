@@ -167,11 +167,7 @@ func (s *Server) checkCatalogue(ctx context.Context, d *Diagnosis, orgID string,
 		return // an operator looking at every organisation at once
 	}
 	const area = "Models"
-	// Only an operator names the organisation. Anyone else's is their own.
-	org := ""
-	if p.Unrestricted() {
-		org = " --org " + orgID
-	}
+	org := orgFlag(p, orgID)
 
 	models, err := s.st.ListModels(ctx, orgID)
 	if err != nil {
@@ -192,12 +188,13 @@ func (s *Server) checkCatalogue(ctx context.Context, d *Diagnosis, orgID string,
 		d.add(area, "Catalogue", VerdictFail,
 			fmt.Sprintf("%d declared, none enabled: every inference request is refused",
 				len(models)),
-			"add one with 'keera model add <alias>"+org+"'")
+			"add one with 'keera model add <alias> --backend <url>"+org+"', or --provider "+
+				"for a hosted one")
 	case len(chat) == 0:
 		d.add(area, "Catalogue", VerdictWarn,
 			fmt.Sprintf("%d enabled, none of them chat: no coding agent can use this "+
 				"deployment", len(enabled)),
-			"add a chat model with 'keera model add <alias> --kind chat"+org+"'")
+			"add a chat model with 'keera model add <alias> --backend <url>"+org+"'")
 	default:
 		d.add(area, "Catalogue", VerdictOK,
 			fmt.Sprintf("%d enabled, %d of them chat", len(enabled), len(chat)), "")
@@ -280,7 +277,7 @@ func (s *Server) checkTenancy(ctx context.Context, d *Diagnosis, orgID string, p
 	case setup.Keys == 0:
 		d.add(area, "API keys", VerdictWarn, "no key has been issued, so nothing can call this "+
 			"deployment yet",
-			"issue one with 'keera key create --team <team-id> --alias <what for>'")
+			"issue one with 'keera key create --team <team> --alias <what for>"+orgFlag(p, orgID)+"'")
 	default:
 		d.add(area, "API keys", VerdictOK, fmt.Sprintf("%d active", setup.Keys), "")
 	}
@@ -330,11 +327,7 @@ func (s *Server) checkHooks(ctx context.Context, d *Diagnosis, orgID string, p *
 			enabled[m.Alias] = true
 		}
 	}
-	// Only an operator names the organisation. Anyone else's is their own.
-	org := ""
-	if p.Unrestricted() {
-		org = " --org " + orgID
-	}
+	org := orgFlag(p, orgID)
 	s.checkFilters(ctx, d, orgID, org, enabled)
 	s.checkRouters(ctx, d, orgID, org, enabled)
 }
@@ -424,6 +417,15 @@ func (s *Server) checkSandboxes(ctx context.Context, d *Diagnosis, orgID string)
 }
 
 // plural completes "has" or "have" after "ha".
+// orgFlag is the --org a suggested command needs. Only an operator names the
+// organisation; anyone else's is their own.
+func orgFlag(p *authn.Principal, orgID string) string {
+	if p.Unrestricted() {
+		return " --org " + orgID
+	}
+	return ""
+}
+
 func plural(n int) string {
 	if n == 1 {
 		return "s"

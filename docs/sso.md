@@ -1,8 +1,9 @@
 # Single sign-on
 
 Without an identity provider, the control panel accepts one shared credential:
-`KEERA_OPERATOR_KEY`. Every audit entry then reads `operator key`, so it does
-not say who did what.
+`KEERA_OPERATOR_KEY`. Every audit entry then reads `operator key`, or
+`operator@localhost` for a panel sign-in with it, so it does not say who did
+what.
 
 With SSO, the audit log names a person, and roles can differ between people.
 
@@ -101,8 +102,8 @@ and the walkthrough below uses them.
    screen**.
 2. Choose **Internal** as the user type. This limits sign-in to your Workspace
    and stops the fallback in
-   [Which tenant a sign-in lands in](#which-tenant-a-sign-in-lands-in) from
-   admitting any Google account. **External** would let any Google account
+   [Which organisation a sign-in lands in](#which-organisation-a-sign-in-lands-in)
+   from admitting any Google account. **External** would let any Google account
    reach the panel.
 3. Under **Scopes**, add `openid`, `email` and `profile`, the three Keera asks
    for when `KEERA_OIDC_<NAME>_SCOPES` is unset.
@@ -224,8 +225,8 @@ can create a group of any name, so a shared operator group would let every
 customer make operators.
 
 **Each provider says which email domains it may vouch for.** The domain picks
-the tenant, and an address can name an operator. A customer's directory admin
-can give any user any address, including another customer's or yours. So
+the organisation, and an address can name an operator. A customer's directory
+admin can give any user any address, including another customer's or yours. So
 `KEERA_OIDC_<NAME>_DOMAINS` lists the domains that provider may sign people in
 with, and the gateway refuses to start with several providers if one has none.
 A sign-in with an address outside the list is refused.
@@ -248,7 +249,8 @@ gateway's own sign-ins. Do not rename a provider: the name is
 part of the sign-in URL and of every identity it creates, so renaming it cuts
 off everyone who signed in through it. The button label comes from the name
 (`google`, `workspace` and `gsuite` show Google; `entra`, `entraid`, `azure`,
-`azuread`, `microsoft` and `m365` show Microsoft) or from
+`azuread`, `microsoft` and `m365` show Microsoft; `okta` shows Okta and
+`keycloak` Keycloak; any other name is shown capitalised) or from
 `KEERA_OIDC_<NAME>_LABEL`.
 
 ### One person, one provider
@@ -262,7 +264,7 @@ subject, from another provider or the same one, is refused instead. Otherwise
 anyone who gets the same address, through a weaker directory or by reuse in the
 same one, could take over the account and its role.
 
-## Which tenant a sign-in lands in
+## Which organisation a sign-in lands in
 
 `orgFor` in `internal/control/auth.go` checks in this order:
 
@@ -272,13 +274,15 @@ same one, could take over the account and its role.
 3. The only organisation, if there is exactly one.
 4. Otherwise refuse.
 
-On a single-org compose deployment, step 3 applies. So **every** directory user
-who passes the consent screen joins that org with the default role. Restrict
-the consent screen to your own directory to keep that to your own staff.
+On a compose deployment with one organisation, step 3 applies. So **every**
+directory user who passes the consent screen joins that organisation with the
+default role. Restrict the consent screen to your own directory to keep that to
+your own staff.
 
 **On the hosted deployment, avoid step 3.** It stops applying once there is a
 second organisation, but until then a new customer's first sign-in lands in the
-existing tenant. Give every org its domain before you create the second one:
+existing organisation. Give every organisation its domain before you create
+the second one:
 
 ```sh
 keera org create "Another Bank" --domain anotherbank.ch
@@ -306,6 +310,9 @@ curl -X PATCH https://keera.example.ch/control/v1/orgs/<org-id> \
 The panel shows one button per provider. With an identity provider configured,
 the operator key is no longer on the sign-in screen. It still works, and it is
 the way back in if SSO is broken: open `/?operator_key=1`.
+
+Signing out also sends the browser to the provider's sign-out page, if the
+provider has one.
 
 ## Signing in from the command line
 
@@ -420,8 +427,10 @@ key a `--user` when a person is behind it.
 | Signed in, but everything is read-only                         | You have the default role. Ask an administrator for `keera user role <you> admin`, or, if the provider has admin groups, to be added to one. |
 | The panel will not let anybody change a role                   | `KEERA_OIDC_<NAME>_ADMIN_GROUPS` is set on some provider, so the directory decides. Change the group, or unset it on every provider.         |
 | The panel refuses the operator role                            | It always does. `KEERA_OPERATORS` or `KEERA_OIDC_<NAME>_OPERATOR_GROUPS` grants it.                                                          |
-| "no organisation matches …"                                    | There are two or more orgs and none has your email domain. Set it, as above.                                                                 |
-| "that email domain belongs to another organisation"            | Each domain belongs to one tenant. `keera org list` shows which; clear it there first.                                                       |
+| "no organisation matches …"                                    | There are two or more organisations and none has your email domain. Set it, as above.                                                        |
+| "that email domain belongs to another organisation"            | Each domain belongs to one organisation. `keera org list` shows which; clear it there first.                                                 |
+| "cannot be used with … sign-in"                                | The provider is only allowed some domains (`KEERA_OIDC_<NAME>_DOMAINS`), and the address is at another. Sign in through its own provider.    |
+| "is not a verified address"                                    | The directory marks the email unverified (`email_verified` is false). Verify it there. A missing claim is accepted.                          |
 | "in too many groups"                                           | Entra group overage. Use app roles, or grant the role by address. See above.                                                                 |
 | "already belongs to an account linked to a different identity" | That address signed in first through another provider, or as someone else. See [One person, one provider](#one-person-one-provider).         |
 | Entra: "returned no email claim"                               | Add `email` as an optional ID-token claim on the app registration.                                                                           |

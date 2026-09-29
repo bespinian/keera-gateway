@@ -184,7 +184,7 @@ keera sessions                        # ranked by cost, the last seven days
 keera sessions --sort requests        # the tasks that would not stop
 keera sessions --unhappy              # only the ones that hit trouble
 keera sessions --model keera-frontier # the tasks that reached the hosted model
-keera sessions --team <team-id> --since 720h
+keera sessions --team <team> --since 720h
 keera sessions --user ada@example.ch  # one person, by email or id
 keera session <request-id>            # one task, from beginning to end
 ```

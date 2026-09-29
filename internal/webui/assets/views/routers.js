@@ -43,7 +43,7 @@ import { facts } from "./detail.js";
 
 export async function routersView(ctx) {
   // A router is one organisation's judgement about which of its requests
-  // deserve which model, so it belongs to one rather than to the deployment.
+  // deserve which model. Like everything else, it belongs to one.
   if (!ctx.orgID) return chooseOrg(ctx, "Routers");
 
   const since = currentRange();
@@ -1267,7 +1267,7 @@ function editRouter(ctx, existing, chatModels) {
   // The destinations, as checkboxes over the catalogue rather than a text
   // field. The list is the authority on where this router can send a prompt,
   // so choosing from what exists is the only way to write one that cannot
-  // name a model the deployment does not have.
+  // name a model the organisation does not have.
   //
   // They are kept in an array rather than a set because on a fallback router
   // the order is the entire configuration, and it has to be something

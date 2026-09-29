@@ -97,7 +97,8 @@ curl http://127.0.0.1:8080/api/v1/chat/completions \
 
 `keera-speed` is an alias. Only `models.yaml` should name a backend model id.
 To swap the model, change `KEERA_LLAMA_MODEL` or `KEERA_GPU_MODEL` in `.env`
-and recreate `keera-engine`. llama.cpp's `--alias` and vLLM's
+and recreate `keera-engine`. `KEERA_LLAMA_IMAGE` and `KEERA_VLLM_IMAGE` choose
+the server images the same way. llama.cpp's `--alias` and vLLM's
 `--served-model-name` keep serving it as `keera-speed`, so `models.yaml` and
 developers' editors do not change.
 

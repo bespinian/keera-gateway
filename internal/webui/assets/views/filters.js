@@ -49,7 +49,7 @@ import { facts } from "./detail.js";
 
 export async function filtersView(ctx) {
   // A filter is one organisation's judgement about what its own requests may
-  // carry, so it belongs to one rather than to the deployment.
+  // carry. Like everything else, it belongs to one.
   if (!ctx.orgID) return chooseOrg(ctx, "Filters");
 
   const since = currentRange();

@@ -138,7 +138,7 @@ export function firstRun(ctx, setup) {
       remaining
         ? `This deployment has not served a request yet. ${remaining} step` +
             `${remaining === 1 ? "" : "s"} to go.`
-        : "Everything is set up. The dashboard appears after the first " +
+        : "Everything is set up. The overview appears after the first " +
             "request.",
     ),
     list,

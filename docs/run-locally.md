@@ -65,7 +65,7 @@ export KEERA_OPERATOR_KEY=$(sed -n 's/^KEERA_OPERATOR_KEY=//p' compose/.env)
 
 ./build/keera org create "Example Bank"
 ./build/keera team create "Payments Platform"
-KEY=$(./build/keera key create --team <team-id> --alias "local")
+KEY=$(./build/keera key create --team <team> --alias "local")
 ```
 
 The panel is at <http://127.0.0.1:8080>. Sign in with the operator key.

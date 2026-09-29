@@ -12,7 +12,7 @@ services:
       # panel at /, the inference API under /api, the control API under
       # /control. Open http://127.0.0.1:8080 to reach the panel.
       #
-      # Bound to loopback until a real operator key is set. Publishing this port
+      # Bound to loopback unless KEERA_BIND says otherwise. Publishing this port
       # publishes the control API with it, so put a TLS proxy in front of
       # anything beyond a development machine.
       - "${KEERA_BIND:-127.0.0.1}:8080:8080"

@@ -14,9 +14,9 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-func TestFilterModelRefusal(t *testing.T) {
+func TestReaderModelRefusal(t *testing.T) {
 	t.Run("it says what a filter would do with the request", func(t *testing.T) {
-		msg := filterModelRefusal("keera-code", policy.Model{
+		msg := readerModelRefusal("filter", "keera-code", policy.Model{
 			Alias:    "keera-code",
 			Backends: []string{"http://vllm:8000/v1"},
 		})
@@ -31,7 +31,7 @@ func TestFilterModelRefusal(t *testing.T) {
 	})
 
 	t.Run("a hosted model is named with the endpoint it would reach", func(t *testing.T) {
-		msg := filterModelRefusal("claude-opus-5", policy.Model{
+		msg := readerModelRefusal("filter", "claude-opus-5", policy.Model{
 			Alias:    "claude-opus-5",
 			Backends: []string{"https://api.anthropic.com/v1"},
 		})
@@ -41,7 +41,7 @@ func TestFilterModelRefusal(t *testing.T) {
 	})
 
 	t.Run("an internal model is not described as hosted anywhere", func(t *testing.T) {
-		msg := filterModelRefusal("keera-code", policy.Model{
+		msg := readerModelRefusal("filter", "keera-code", policy.Model{
 			Alias:    "keera-code",
 			Backends: []string{"http://vllm.svc:8000/v1"},
 		})

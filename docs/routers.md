@@ -100,18 +100,23 @@ Before the filters:
 3. refuse the request if it cannot fit in the destination's context
 4. the filters, in the order the hierarchy gives them
 5. the standing system prompt is prepended
-6. the output ceiling is clamped
-7. forward
+6. hosted tools are removed, if the guardrail blocks them
+7. the output ceiling is clamped
+8. forward
 
 The router reads what the client sent, before any redaction. So **the deciding
-model must be served locally**, just like a filter's.
+model should be served locally**, just like a filter's. It must also be on the
+organisation's allow-list, if it has one: otherwise the router is refused with
+a 400 `model_not_allowed`, and narrowing the list so that it drops off is
+refused with a 409 `router_model_not_allowed`.
 
 It runs after the budget check because deciding costs money. A
 [size router](#routing-by-size) costs nothing but runs in the same step.
 
 ## When it cannot decide
 
-Choose one when writing the router:
+Choose when writing the router. Without `--fallback`, it refuses what it cannot
+place.
 
 | `--fallback <destination>`                | `--no-fallback`                    |
 | ----------------------------------------- | ---------------------------------- |
@@ -129,6 +134,7 @@ place to send the request.
 A router cannot decide when:
 
 - its model is missing, disabled, not a chat model, or has no backend
+- none of its destinations can be served
 - its model errored, timed out, or answered nothing
 - its answer names none of its destinations
 - its answer names two destinations at once
@@ -209,8 +215,8 @@ Limits:
 - The instruction is capped at 4 KiB, a quarter of a filter's. It is sent with
   the destination list and every description on every request that names the
   router.
-- At most 16 destinations. With longer lists, a small model tends to pick
-  whichever end it read last.
+- At most 16 destinations, as in every mode. With longer lists, a small model
+  tends to pick whichever end it read last.
 
 ## Routing by size
 
@@ -378,8 +384,9 @@ It shows in the split on the router's screen, and in:
 keera router check ha
 ```
 
-which asks each destination, in order, whether it is up. The result only holds
-for that moment. Alert on the fallback rate.
+which asks each destination, in order, whether it is up, and warns when the
+first one is not answering or only one is. The result only holds for that
+moment. Alert on the fallback rate.
 
 ## Balancing between equals
 
@@ -467,8 +474,9 @@ A fallback router has no decision to sample, so its check
 A [size router's](#routing-by-size) check does the same, and prints **the sizes
 each destination is first choice for**. Unlike everything else a check shows,
 this is not a sample: it is the router's whole behaviour. It also warns when a
-ceiling is larger than its model's context, and when a destination is first
-choice for nothing.
+ceiling is larger than its model's context, when a destination is first choice
+for nothing, and when every request goes to the same destination whatever its
+size.
 
 On a router that decides, the check sends three sample prompts and shows where
 each went:
@@ -487,14 +495,17 @@ returns no probabilities, nothing is shown.
 
 There is no pass or fail. But the check does warn when **every sample went to
 the same model**: that router pays a generation per request to do what naming
-the model directly would do.
+the model directly would do. It also warns when some samples could not be
+placed.
 
 It also lists destinations that were not offered, and destinations with no
 description.
 
 A check calls the backend directly, with the data plane's credentials. It is not
-rate-limited, budgeted or billed and writes no usage row - but it does put three
-real requests on the GPUs.
+rate-limited, budgeted or billed and writes no usage row - but it does put real
+requests on the GPUs: at least three for a router that decides, since a sample
+whose lettered answer cannot be read is asked again for a name, and one per
+destination for the other modes.
 
 ## What it is doing
 
@@ -547,7 +558,7 @@ X-Keera-Router: auto -> keera-speed (fallback)
 ## Who owns what
 
 A router belongs to one organisation, and its administrators write it. It can
-send to the organisation's models.
+send to the organisation's models: 2 to 16 of them, in every mode.
 Two organisations can each have a router with the same name; they are different
 routers.
 
@@ -558,6 +569,10 @@ under a router's alias.
 
 The alias is the router's identity: lowercase letters, digits and interior
 hyphens. It cannot change. To rename, create a new router and move the clients.
+
+Deleting a router that an allow-list still names is refused with a 409
+`router_in_use`, and the refusal lists the scopes. Take it off those
+allow-lists first.
 
 Members cannot create or change routers, but they can read them, instruction
 included. The Routers screen, each router's screen, `GET /control/v1/routers`

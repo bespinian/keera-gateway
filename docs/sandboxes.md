@@ -63,6 +63,12 @@ types. The clock starts again when a sandbox is resumed.
 **Nothing attaches to an agent sandbox.** A shell would not be less safe - the
 isolation is the same. The point is that only a branch comes out of it.
 
+**What creating one needs.** A name of lowercase letters, digits and interior
+hyphens, at most 40 characters, because it becomes a hostname in the cluster.
+An engineer's sandbox needs an ssh public key: `keera sandbox create` sends the
+ones in `~/.ssh`, or the one `--ssh-key` names. An agent's needs both `--repo`
+and `--task`.
+
 ## Agent-in-sandbox, not sandbox-as-a-tool
 
 The upstream SDK is built for an agent outside that drives a sandbox through
@@ -73,8 +79,8 @@ In Keera the agent runs _inside_.
 `keera sandbox agent <name> --class … --repo … --task …` starts a machine,
 checks out the repository, runs the image's coding agent on the task (Pi in the
 base image), and pushes a branch. Only that branch leaves. When the agent exits
-cleanly, the sandbox is terminated. When it fails, the sandbox is removed too,
-and marked failed with the reason.
+cleanly, the sandbox is terminated. When it fails, its machine is removed too,
+and the sandbox is marked failed with the reason.
 
 ## Isolation
 
@@ -120,7 +126,9 @@ Gateway work unmodified**.
 
 sshd listens on **2222**, not 22, because a process with every capability
 dropped cannot bind a privileged port. Nobody types the number: the gateway
-dials it, and a developer goes through the ProxyCommand.
+dials it, and a developer goes through the ProxyCommand. The route accepts any
+port from 1024 to 65535. On podman only 2222 is published, so no other port can
+be reached.
 
 ```sh
 keera sandbox create fix-login --class standard --repo git@internal:team/service.git
@@ -141,12 +149,12 @@ from the command itself points at the proxy.
 
 ## Who may do what
 
-|                            | See it | Terminate, suspend, extend | Open a shell |
-| -------------------------- | ------ | -------------------------- | ------------ |
-| Operator                   | yes    | yes                        | yes          |
-| Organisation administrator | yes    | yes                        | **no**       |
-| The owner                  | yes    | yes                        | yes          |
-| Anybody else               | no     | no                         | no           |
+|                            | See it | Terminate, suspend, resume, extend | Open a shell |
+| -------------------------- | ------ | ---------------------------------- | ------------ |
+| Operator                   | yes    | yes                                | yes          |
+| Organisation administrator | yes    | yes                                | **no**       |
+| The owner                  | yes    | yes                                | yes          |
+| Anybody else               | no     | no                                 | no           |
 
 An administrator can see and terminate every sandbox in their organisation,
 because the quota and the bill are theirs. They cannot get inside: a sandbox
@@ -301,7 +309,7 @@ changes the fields it shows.
 
 ## Naming a team
 
-`keera sandbox create <name> --team <id>`, or the Team field in the panel's
+`keera sandbox create <name> --team <team>`, or the Team field in the panel's
 dialog. The sandbox's key is scoped to that team, which decides:
 
 - which **budget** the agent's inference is charged to,
@@ -315,7 +323,7 @@ Without a team, the sandbox uses the organisation's own guardrails.
 
 **The team must belong to the same organisation.** The foreign key only checks
 that the team exists, so the control plane checks the owner. Otherwise a sandbox
-could use another tenant's system prompt, budget, rate limit and model
+could use another organisation's system prompt, budget, rate limit and model
 allow-list.
 
 Only an administrator may choose a team. A member's sandbox uses the
@@ -333,8 +341,10 @@ keera sandbox usage --by user
 keera sandbox usage --by class
 ```
 
-The report counts sandboxes, how many of them are live now, how long they ran,
-and core-seconds, because no single number tells the whole story. Forty
+Only an administrator can read it. The report counts sandboxes, how many of
+them are live now, how long they ran, and core-seconds, because no single number
+tells the whole story. A sandbox is counted whole in the window it was created
+in. Forty
 sandboxes that each lived ninety seconds is an agent fleet; one that lived a
 week is somebody who forgot. Core-seconds is what a chargeback uses.
 
@@ -370,26 +380,29 @@ on a different host than the forge's is refused.
 
 **Only the repositories the guardrail allows.** The deployment's forge
 credential can reach every repository it is installed on, including other
-tenants'. So a sandbox gets a token only for a repository in `allowed_repos`,
-and a scope where no level sets it gets none:
+organisations'. So a sandbox gets a token only for a repository in
+`allowed_repos`, and one whose organisation does not set it gets none:
 
 ```sh
 keera guardrail set org <org-id> --repos acme            # everything under acme/
 keera guardrail set team <team-id> --repos acme/service  # narrows it for one team
-keera guardrail set org <org-id> --repos '*'             # any repository, for one tenant
+keera guardrail set org <org-id> --repos '*'             # any repository, for one organisation
 ```
 
 An entry is a path on the forge: an owner or group for everything under it, or
-one repository. Case does not matter. On an organisation, only an operator can
-set it; an administrator can narrow it for a team. It is checked again on every
+one repository. Case does not matter. Only the organisation grants
+repositories, and only an operator can set its list. A team's list can only
+narrow it, and an administrator can set that. It is checked again on every
 token refresh, so taking a repository off the list stops running sandboxes
 getting a new token.
 
 **Tokens are refreshed.** A GitHub token lasts an hour; an engineer's sandbox
 lasts a working day. Git in the sandbox asks `git-credential-keera`, which keeps
 the current token. When it has five minutes left, the helper gets a new one from
-`POST /sandbox/v1/git-credential` with the sandbox's own key. The gateway
-revokes the replaced token where the forge allows it. The helper only answers
+`POST /sandbox/v1/git-credential` with the sandbox's own key. That route takes
+10 requests a minute per client address, and sandboxes that reach the gateway
+from the same address share it. The gateway revokes the replaced token where
+the forge allows it. The helper only answers
 for the repository's own host, so a submodule on another host never sees the
 token. A resumed sandbox keeps the token the helper last got, unless the gateway
 handed it a new one, as it does when an expired sandbox is resumed.
@@ -440,7 +453,8 @@ They need the upstream warm-pool extension (`extensions.agents.x-k8s.io/v1beta1`
 controller. The pool's update strategy is `OnReplenish`, not `Recreate`, so
 changing a class in the afternoon does not empty the pool while people use it.
 The downside: for a few minutes after a change, some sandboxes get the previous
-image. Every sandbox records which image it got.
+image. A sandbox records its class's image when it is created, so during those
+minutes the recorded image can be the new one while the pod still runs the old.
 
 Whether a sandbox came from a pool is stored on its row, not derived from
 configuration. So a deployment that turns warm pools off still knows which
@@ -525,7 +539,7 @@ namespace. See [What is actually enforced](#what-is-actually-enforced).
 | ---------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------- |
 | `KEERA_SANDBOX_DRIVER`             | -                        | `kubernetes`, `podman`, or unset for no sandboxes, and no Sandboxes screen in the panel              |
 | `KEERA_SANDBOXES_FILE`             | -                        | the classes each new organisation starts with                                                        |
-| `KEERA_SANDBOX_NAMESPACE`          | the gateway's            | where sandboxes run. Should not be the gateway's - see above                                         |
+| `KEERA_SANDBOX_NAMESPACE`          | the gateway's            | where sandboxes run; outside a cluster, `default`. Should not be the gateway's - see above           |
 | `KEERA_SANDBOX_RUNTIME_STANDARD`   | -                        | the runtime for the standard tier, if not the default: a RuntimeClass, or on podman `crun` or `runc` |
 | `KEERA_SANDBOX_RUNTIME_ISOLATED`   | -                        | the gVisor RuntimeClass, or `runsc` on podman. Unset makes that tier unavailable                     |
 | `KEERA_SANDBOX_RUNTIME_VM`         | -                        | the Kata RuntimeClass, or `krun` on podman. Unset makes that tier unavailable                        |

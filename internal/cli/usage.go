@@ -84,8 +84,7 @@ func failuresCmd(ctx context.Context, args []string) error {
 	org := fs.String("org", "", "restrict to one organisation")
 	kind := fs.String("kind", "failed", "failed, refused, interrupted or all")
 	alias := fs.String("model", "", "restrict to one model")
-	teamID := fs.String("team", "", "restrict to one team id")
-	keyID := fs.String("key", "", "restrict to one key id")
+	w := registerWho(fs)
 	status := fs.Int("status", 0, "restrict to one status")
 	since := fs.Duration("since", 7*24*time.Hour, "how far back to look")
 	limit := fs.Int("limit", 50, "how many to print")
@@ -95,6 +94,10 @@ func failuresCmd(ctx context.Context, args []string) error {
 		return printHelp(fs, "failures", want)
 	}
 	if err := parse(fs, args); err != nil {
+		return err
+	}
+	params, err := w.params(ctx, c, *org)
+	if err != nil {
 		return err
 	}
 	// 'all' is every request that did not deliver, which the request log
@@ -108,9 +111,8 @@ func failuresCmd(ctx context.Context, args []string) error {
 	q.Set("facets", "1")
 	q.Set("limit", strconv.Itoa(*limit))
 	q.Set("from", sinceParam(*since))
-	setIfGiven(q, map[string]string{
-		"org_id": *org, "alias": *alias, "team_id": *teamID, "key_id": *keyID,
-	})
+	setIfGiven(q, map[string]string{"org_id": *org, "alias": *alias})
+	setIfGiven(q, params)
 	if *status != 0 {
 		q.Set("status", strconv.Itoa(*status))
 	}

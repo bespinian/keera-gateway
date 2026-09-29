@@ -31,7 +31,7 @@ request, logs it and passes it on.
         Your tools                       Keera Gateway                          Models
 ┌───────────────────────┐         ┌──────────────────────────┐         ┌─────────────────────┐
 │ Claude Code           │         │ 1  Identify the key, its │         │ Keera Engine on     │
-│ OpenCode, Pi          │         │    team and its org      │         │ vLLM, on your GPUs  │
+│ OpenCode, Pi          │         │    team and organisation │         │ vLLM, on your GPUs  │
 │ Internal apps         │  HTTPS  │ 2  Apply guardrails,     │         │ or Swiss ones       │
 │ Notebooks and CI jobs │────────▶│    budget, rate limit    │────────▶│                     │
 │ any OpenAI client     │         │ 3  Filter secrets and    │         │ Anthropic and other │
@@ -93,7 +93,7 @@ export KEERA_OPERATOR_KEY=…              # the same value as in .env
 export KEERA_CONTROL_URL=http://127.0.0.1:8080
 keera org create "Example Bank"
 keera team create "Payments Platform"
-KEY=$(keera key create --team <team-id> --alias "a developer's laptop")
+KEY=$(keera key create --team <team> --alias "a developer's laptop")
 
 curl http://127.0.0.1:8080/api/v1/chat/completions \
   -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \

@@ -1,7 +1,7 @@
 // Connecting a coding agent to Keera Gateway.
 //
 // This screen exists because the last mile is where a gateway is actually
-// adopted or quietly abandoned: an operator has models and keys, and a
+// adopted or quietly abandoned: an organisation has models and keys, and a
 // developer still has to work out which URL, which model and which file. It
 // answers that for each client the deployment supports, with the model the
 // developer picked already substituted in - so the thing they copy is the thing

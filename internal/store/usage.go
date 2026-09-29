@@ -251,7 +251,7 @@ type UsageQuery struct {
 	Scope
 	From    time.Time
 	To      time.Time
-	GroupBy string // team, key, user, model, client, day or org; anything else groups by model
+	GroupBy string // team, key, user, model, client, day or org; empty or anything else means model
 }
 
 // groupColumns maps the public group_by values to columns, which keeps the

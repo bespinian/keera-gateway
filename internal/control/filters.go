@@ -237,7 +237,7 @@ func (s *Server) checkFilterModel(w http.ResponseWriter, r *http.Request, orgID,
 	}
 	if !allowed {
 		httpx.WriteError(w, http.StatusBadRequest, "invalid_request_error", "model_not_allowed",
-			filterModelRefusal(alias, m))
+			readerModelRefusal("filter", alias, m))
 		return false
 	}
 	return true
@@ -253,15 +253,15 @@ func (s *Server) orgAllowsModel(ctx context.Context, orgID, alias string) (bool,
 	return lim.AllowedModels == nil || slices.Contains(lim.AllowedModels, alias), nil
 }
 
-// filterModelRefusal says why a filter may not run on a model its organisation
-// does not allow: the filter sees each request before redaction, so it would
-// send them there in full.
-func filterModelRefusal(alias string, m policy.Model) string {
+// readerModelRefusal says why a filter or router may not run on a model its
+// organisation does not allow: both read each request before redaction, so
+// they would send them there in full.
+func readerModelRefusal(what, alias string, m policy.Model) string {
 	msg := "this organisation's allow-list does not include '" + alias + "'"
 	if m.Hosting() == policy.HostedExternal {
 		msg += ", which is hosted at " + m.Endpoint()
 	}
-	return msg + ". A filter reads a request before anything is redacted from it, so one " +
+	return msg + ". A " + what + " reads a request before anything is redacted from it, so one " +
 		"running on a model the organisation does not allow would send every request it " +
 		"covers there in full. Allow the model for this organisation, or name one it already " +
 		"allows"
@@ -319,10 +319,11 @@ func (s *Server) checkFilter(w http.ResponseWriter, r *http.Request, p *authn.Pr
 }
 
 // checkAllowList refuses an organisation allow-list that would leave one of
-// its filters on a model outside it. It is the other half of
-// checkFilterModel, since the two writes can come in either order.
+// its filters or deciding routers on a model outside it. It is the other half
+// of checkFilterModel and checkRouterModel, since the two writes can come in
+// either order.
 //
-// Only the organisation scope is checked: a filter belongs to the
+// Only the organisation scope is checked: filters and routers belong to the
 // organisation, and a team's or key's list narrows only that key.
 func (s *Server) checkAllowList(w http.ResponseWriter, r *http.Request,
 	scope policy.ScopeType, orgID string, lim *policy.Limits) bool {
@@ -341,15 +342,35 @@ func (s *Server) checkAllowList(w http.ResponseWriter, r *http.Request,
 			stranded = append(stranded, "'"+f.Alias+"' (on "+f.Model+")")
 		}
 	}
-	if len(stranded) == 0 {
-		return true
+	if len(stranded) > 0 {
+		strandedRefusal(w, "filter_model_not_allowed", "filter", stranded)
+		return false
 	}
-	httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "filter_model_not_allowed",
+	routers, err := s.st.ListRouters(r.Context(), orgID)
+	if err != nil {
+		s.fail(w, err)
+		return false
+	}
+	for _, rt := range routers {
+		if rt.Decides() && !slices.Contains(lim.AllowedModels, rt.Model) {
+			stranded = append(stranded, "'"+rt.Alias+"' (on "+rt.Model+")")
+		}
+	}
+	if len(stranded) > 0 {
+		strandedRefusal(w, "router_model_not_allowed", "router", stranded)
+		return false
+	}
+	return true
+}
+
+// strandedRefusal refuses an allow-list that leaves filters or routers on a
+// model it does not include.
+func strandedRefusal(w http.ResponseWriter, code, what string, stranded []string) {
+	httpx.WriteError(w, http.StatusConflict, "invalid_request_error", code,
 		"this allow-list leaves "+strings.Join(stranded, ", ")+" running on a model it does "+
-			"not include. A filter reads a request before anything is redacted from it, so "+
-			"those requests would still go there in full - point the filters somewhere this "+
+			"not include. A "+what+" reads a request before anything is redacted from it, so "+
+			"those requests would still go there in full - point the "+what+"s somewhere this "+
 			"list allows first, or keep the model on it")
-	return false
 }
 
 // checkGuardrailFilters refuses a guardrail that names a filter its

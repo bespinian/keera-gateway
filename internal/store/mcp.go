@@ -182,18 +182,19 @@ func scanToolCall(r row) (ToolCallRow, error) {
 	return t, err
 }
 
-// SessionToolCalls reads the tool calls of one session, oldest first. A
-// session the client named has its calls named too. Any other is matched by
-// time: the key's calls between its first request and its last, which on a
-// key running two tasks at once includes both tasks' calls.
+// SessionToolCalls reads the tool calls of one session, oldest first: those
+// between its first request and its last. A session the client named has its
+// calls named too. Any other is matched by key, which on a key running two
+// tasks at once includes both tasks' calls. The time bound applies to both: a
+// client that reuses its session id after the idle gap starts a new session.
 func (s *Store) SessionToolCalls(ctx context.Context, orgID string, a AgentSession) ([]ToolCallRow, error) {
 	rows, err := s.pool.Query(ctx, `SELECT id, ts, COALESCE(team_id, ''), COALESCE(user_id, ''),
 		COALESCE(key_id, ''), server, tool, outcome, latency_ms, arg_bytes, result_bytes,
 		cost_micros, COALESCE(error, ''), COALESCE(session_key, ''), COALESCE(client, '')
 		FROM tool_calls
 		WHERE ($1 = '' OR org_id = $1)
-		  AND CASE WHEN $2 THEN session_key = $3
-		           ELSE key_id = $4 AND ts >= $5 AND ts <= $6 END
+		  AND CASE WHEN $2 THEN session_key = $3 ELSE key_id = $4 END
+		  AND ts >= $5 AND ts <= $6
 		ORDER BY ts, id LIMIT 1000`,
 		orgID, a.Stated, a.Key, a.KeyID, a.StartedAt, a.EndedAt)
 	if err != nil {

@@ -102,6 +102,17 @@ func TestLoadDefaultsAreWhatTheDocumentationSays(t *testing.T) {
 	}
 }
 
+func TestACountOfZeroIsTheDefault(t *testing.T) {
+	// Zero would otherwise reach pgx, which reads it as "choose for me".
+	c, err := loadWith(t, valid(map[string]string{"KEERA_MAX_DB_CONNS": "0"}))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.MaxDBConns != 16 {
+		t.Errorf("MaxDBConns = %d, want the documented 16", c.MaxDBConns)
+	}
+}
+
 func TestLoadNeedsTheTwoThingsItCannotInvent(t *testing.T) {
 	// A database it can reach, a credential for the control plane and a key
 	// for stored credentials. None has a sensible default, and a gateway that

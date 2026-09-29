@@ -358,9 +358,12 @@ func env(key, def string) string {
 	return def
 }
 
+// envInt reads a size or a count. Zero or less is the default too: none of
+// them means "unlimited", and a pool of zero connections would be pgx's size,
+// not ours.
 func envInt(key string, def int) int {
 	n, err := strconv.Atoi(env(key, ""))
-	if err != nil {
+	if err != nil || n <= 0 {
 		return def
 	}
 	return n

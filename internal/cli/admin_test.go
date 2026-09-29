@@ -1473,3 +1473,58 @@ func TestAnAdministratorsModelNeedsNoOrg(t *testing.T) {
 		t.Errorf("the model was sent with %q, want the only organisation", got)
 	}
 }
+
+func TestMicrosRoundsRatherThanTruncates(t *testing.T) {
+	// 2.01 * 1e6 is 2009999.9999999998 as a float; the panel rounds, so the
+	// command must too or the two would store different budgets.
+	for units, want := range map[float64]int64{2.01: 2_010_000, 0.29: 290_000, 15: 15_000_000, 0: 0} {
+		if got := micros(units); got != want {
+			t.Errorf("micros(%v) = %d, want %d", units, got, want)
+		}
+	}
+}
+
+func TestOrgAndGuardrailRefuseAnotherVerbsFlag(t *testing.T) {
+	// Each of these used to go ahead and quietly drop the flag.
+	quiet(t)
+	f := newFakeControl(t, map[string]any{"GET /v1/orgs": oneOrg})
+
+	for _, args := range [][]string{
+		{"org", "list", "--domain", "example.ch"},
+		{"org", "create", "Another Bank", "--no-domain"},
+		{"org", "delete", "org_1", "--domain", "example.ch", "--yes"},
+		{"guardrail", "get", "team", "team_1", "--rpm", "5"},
+	} {
+		err := Run(context.Background(), args)
+		if err == nil || !strings.Contains(err.Error(), "does not take") {
+			t.Errorf("%v: err = %v, want a refusal of the flag", args, err)
+		}
+	}
+	if len(f.seen) != 0 {
+		t.Errorf("a refused command still called the control plane: %+v", f.seen)
+	}
+}
+
+func TestReportsTakeATeamByNameAndAPersonByEmail(t *testing.T) {
+	// The same names 'keera team rename' and 'keera key create --user' take.
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/orgs": oneOrg,
+		"GET /v1/teams": map[string]any{"data": []map[string]any{
+			{"id": "team_1", "org_id": "org_1", "name": "Payments Platform"},
+		}},
+		"GET /v1/users": map[string]any{"data": []map[string]any{
+			{"id": "user_1", "org_id": "org_1", "email": "ada@example.ch"},
+		}},
+		"GET /v1/requests": map[string]any{"data": []any{}},
+	})
+
+	if err := Run(context.Background(), []string{"failures",
+		"--team", "payments platform", "--user", "Ada@example.ch"}); err != nil {
+		t.Fatal(err)
+	}
+	q := f.request("GET", "/v1/requests").query
+	if !strings.Contains(q, "team_id=team_1") || !strings.Contains(q, "user_id=user_1") {
+		t.Errorf("query = %q, want the team's and the person's ids", q)
+	}
+}

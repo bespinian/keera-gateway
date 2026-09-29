@@ -36,7 +36,7 @@ type OIDCConfig struct {
 	GroupsClaim string
 	Mapping     RoleMapping
 	// Domains are the email domains this provider may vouch for. The domain
-	// picks the tenant and can name an operator, and a customer's directory
+	// picks the organisation and can name an operator, and a customer's directory
 	// admin can give anyone any address. "*" allows any domain, for a provider
 	// that proves the address itself, such as Google. Empty allows any too;
 	// the configuration refuses that when there are several providers.
@@ -123,7 +123,7 @@ func (i Identity) ExternalID() string {
 }
 
 // Domain is the email domain, used to place a first sign-in in the right
-// tenant.
+// organisation.
 func (i Identity) Domain() string {
 	if at := strings.LastIndexByte(i.Email, '@'); at >= 0 {
 		return strings.ToLower(i.Email[at+1:])
@@ -328,8 +328,8 @@ func (o *OIDC) verifiedIDToken(ctx context.Context, code string, f Flow) (*oidc.
 		return nil, fmt.Errorf("verifying the id_token: %w", err)
 	}
 	if idToken.Nonce != f.Nonce {
-		// The token was minted for a different login.
-		return nil, errors.New("the id_token nonce does not match this login")
+		// The token was minted for a different sign-in.
+		return nil, errors.New("the id_token nonce does not match this sign-in")
 	}
 	return idToken, nil
 }
@@ -348,7 +348,7 @@ func (o *OIDC) checkIdentity(id Identity, claims map[string]any, groupsClaim str
 			"groups claim to %q", groupsClaim, "roles")
 	}
 	// Without an email there is nothing to attribute an audit entry to, and
-	// nothing to place the person in a tenant with.
+	// nothing to place the person in an organisation with.
 	if id.Email == "" {
 		return errors.New("the identity provider returned no email claim; " +
 			"add the 'email' scope, or map an email claim for this client")
@@ -359,12 +359,12 @@ func (o *OIDC) checkIdentity(id Identity, claims map[string]any, groupsClaim str
 		return fmt.Errorf("%s cannot be used with %s sign-in, which is only for "+
 			"addresses at %s", id.Email, o.cfg.Label(), strings.Join(o.cfg.Domains, ", "))
 	}
-	// The email picks the tenant and can name an operator, so it must not be
+	// The email picks the organisation and can name an operator, so it must not be
 	// one the directory calls unverified. A missing claim is trusted: most
 	// enterprise providers issue none.
 	if verified, present := boolClaim(claims, "email_verified"); present && !verified {
 		return fmt.Errorf("the identity provider says %s is not a verified "+
-			"address, and Keera places a sign-in in a tenant by its email domain; "+
+			"address, and Keera places a sign-in in an organisation by its email domain; "+
 			"verify it in the directory, or map a verified claim for this client", id.Email)
 	}
 	return nil

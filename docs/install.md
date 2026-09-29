@@ -87,12 +87,13 @@ is refused too.
 Sizes are a plain number of bytes. Durations take `h`, `m` and `s`. On/off
 settings take `true`/`false`, `yes`/`no`, `on`/`off` or `1`/`0`. A number,
 duration or on/off value that cannot be read, such as `64MB`, `365d` or
-`enabled`, is ignored and the default is used.
+`enabled`, is ignored and the default is used. So is a size or count of zero or
+less.
 
 These stop the start instead, with a message that names the setting: a
-`KEERA_REDIS_URL` that is not a Redis URL, a `KEERA_SANDBOX_DRIVER` or
-`KEERA_SANDBOX_GIT_FORGE` it does not know, and a `KEERA_OIDC_<N>_DEFAULT_ROLE`
-other than `admin` or `member`.
+`KEERA_REDIS_URL` that is not a Redis URL, a `KEERA_SANDBOX_DRIVER` it does
+not know, a `KEERA_SANDBOX_GIT_FORGE` it does not know when a sandbox driver is
+set, and a `KEERA_OIDC_<N>_DEFAULT_ROLE` other than `admin` or `member`.
 
 ### Rate limits with more than one replica
 
@@ -232,7 +233,7 @@ export KEERA_CONTROL_URL=http://127.0.0.1:8080
 
 keera org create "Example Bank"
 keera team create "Payments Platform"     # --org only with several organisations
-KEY=$(keera key create --team <team-id> --alias "a developer's laptop")
+KEY=$(keera key create --team <team> --alias "a developer's laptop")
 ```
 
 A key is printed once and never stored. Nobody, not even an operator, can read

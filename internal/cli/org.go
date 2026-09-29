@@ -20,6 +20,7 @@ type orgRun struct {
 	args     []string
 	domain   string
 	noDomain bool
+	yes      bool
 	asJSON   bool
 }
 
@@ -30,14 +31,20 @@ func orgCmd(ctx context.Context, args []string) error {
 	fs.StringVar(&r.domain, "domain", "",
 		"email domain whose sign-ins land in this organisation, such as example.ch")
 	fs.BoolVar(&r.noDomain, "no-domain", false, "remove the organisation's email domain")
+	fs.BoolVar(&r.yes, "yes", false, yesUsage)
 	fs.BoolVar(&r.asJSON, "json", false, jsonUsage)
 
 	fs.Usage = func() { _ = printHelp(fs, "org", sub) }
 	if want, ok := wantsHelp(args); ok {
-		// 'delete' declares --yes itself; help needs it on the set too.
-		fs.Bool("yes", false, yesUsage)
 		return printHelp(fs, "org", want)
 	}
+	if err := parse(fs, rest); err != nil {
+		return err
+	}
+	if err := verbFlags(fs, "org", sub); err != nil {
+		return err
+	}
+	r.args = fs.Args()
 
 	switch sub {
 	case "create", "add", "new":
@@ -138,12 +145,11 @@ func (r *orgRun) list(ctx context.Context) error {
 }
 
 func (r *orgRun) delete(ctx context.Context) error {
-	yes := r.fs.Bool("yes", false, yesUsage)
 	if err := parseArgs(r.fs, r.args, 1, "usage: keera org delete <org-id> [--yes]"); err != nil {
 		return err
 	}
 	orgID := r.fs.Arg(0)
-	if !*yes {
+	if !r.yes {
 		if err := confirmOrgDelete(ctx, r.c, orgID); err != nil {
 			return err
 		}

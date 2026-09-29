@@ -983,7 +983,7 @@ function describe(lim, currency) {
       `${lim.filters.length} filter${lim.filters.length === 1 ? "" : "s"}`,
     );
   }
-  return bits.join(" · ") || "no limits";
+  return bits.join(" · ") || "nothing set";
 }
 
 /** inheritedPrompts shows the wording the levels above already send.

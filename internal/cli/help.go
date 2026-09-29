@@ -112,7 +112,7 @@ var commands = []command{
 		args:    "[flags]",
 		flags:   []string{"probe", "org", "json"},
 		prose: "One command for \"why does this not work\". It reads the deployment's " +
-			"configuration and models and says what is missing, with the thing to do " +
+			"configuration and an organisation's models and says what is missing, with the thing to do " +
 			"about each. It changes nothing, so it is safe against live traffic.\n\n" +
 			"--probe also asks every enabled model to answer. That is the only check that " +
 			"catches the failure which quietly breaks coding agents: a backend returning " +
@@ -211,7 +211,7 @@ var commands = []command{
 					"the reports and the audit log call this key, so a key issued without one " +
 					"is a row nobody can identify later.",
 				examples: []string{
-					`keera key create --team team_1 --user ada@example.ch --alias "Ada's laptop"`,
+					`keera key create --team payments --user ada@example.ch --alias "Ada's laptop"`,
 				}},
 			{name: "list", aliases: []string{"ls"}, summary: "every key", flags: []string{"org", "team", "json"}},
 			{name: "revoke", aliases: []string{"delete", "rm", "remove"}, args: "<alias>", summary: "stop a key working",
@@ -322,7 +322,7 @@ var commands = []command{
 			{name: "delete", aliases: []string{"rm", "remove"}, args: "<alias>", summary: "remove a server",
 				flags: []string{"org", "yes", "json"}},
 			{name: "calls", summary: "the tool-call log: which tool, what came of it, how much went each way",
-				flags:    []string{"org", "server", "tool", "team", "key", "since", "limit", "summary", "json"},
+				flags:    []string{"org", "server", "tool", "team", "key", "user", "since", "limit", "summary", "json"},
 				examples: []string{"keera mcp calls --since 1h", "keera mcp calls --summary --since 168h"}},
 			{name: "connect", args: "<alias>", summary: "how to point Claude Code, Codex and others at a server",
 				flags: []string{"org"}},
@@ -537,8 +537,7 @@ var commands = []command{
 			"already set - the sandbox is one task's machine instead. Nothing attaches to it, " +
 			"it is terminated rather than suspended when its time runs out, and it names its " +
 			"own session, so 'keera sessions' reports what it did as one task rather than " +
-			"inferring the grouping. The --task is passed to it and never stored.\n\n" +
-			"'up', 'ls' and 'rm' also work for create, list and terminate.",
+			"inferring the grouping. The --task is passed to it and never stored.",
 		subs: []subcommand{
 			{name: "classes", summary: "the machines this organisation offers", flags: []string{"org", "json"}},
 			{name: "apply", args: "<file>", summary: "add or update every class a catalogue file declares",
@@ -590,7 +589,7 @@ var commands = []command{
 		aliases: []string{"failure"},
 		summary: "the calls that did not deliver, and what the backend said",
 		args:    "[flags]",
-		flags:   []string{"kind", "model", "team", "key", "status", "since", "limit", "org", "json"},
+		flags:   []string{"kind", "model", "team", "key", "user", "status", "since", "limit", "org", "json"},
 		prose: "Each row shows the backend's own message beside the model and the key. The " +
 			"status says a call failed; the message says whose problem it is.",
 	},
