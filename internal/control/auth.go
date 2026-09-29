@@ -1,6 +1,7 @@
 package control
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"github.com/bespinian/keera-gateway/internal/authn"
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/id"
+	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
@@ -164,7 +166,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		s.handOverToCLI(w, r, flow, user)
 		return
 	}
-	http.Redirect(w, r, orRoot(flow.RedirectTo), http.StatusFound)
+	http.Redirect(w, r, cmp.Or(flow.RedirectTo, "/"), http.StatusFound)
 }
 
 // linkIdentity finds or creates the user for a signed-in identity and applies
@@ -303,6 +305,7 @@ func (s *Server) operatorKeyOrg(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	s.announce(ctx)
 	return org.ID, nil
 }
 
@@ -466,16 +469,8 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request, p *authn.Principal) 
 // orgName looks up an organisation's name. A failed read counts as not found:
 // the name is only for display.
 func (s *Server) orgName(ctx context.Context, orgID string) (string, bool) {
-	orgs, err := s.st.ListOrgs(ctx)
-	if err != nil {
-		return "", false
-	}
-	for _, o := range orgs {
-		if o.ID == orgID {
-			return o.Name, true
-		}
-	}
-	return "", false
+	name, err := s.st.ScopeName(ctx, policy.ScopeOrg, orgID)
+	return name, err == nil
 }
 
 // gatewayURL is the inference plane as a developer's client reaches it: the
@@ -523,13 +518,6 @@ func safeRedirect(next string) string {
 		return ""
 	}
 	return next
-}
-
-func orRoot(path string) string {
-	if path == "" {
-		return "/"
-	}
-	return path
 }
 
 // clientIP is the address a request came from. It trusts the first entry of

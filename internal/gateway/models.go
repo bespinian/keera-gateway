@@ -81,7 +81,7 @@ func (s *Server) getModel(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	httpx.WriteError(w, http.StatusNotFound, "invalid_request_error", "model_not_found",
-		"the model '"+alias+"' does not exist or this key may not use it")
+		s.advise("the model '"+alias+"' does not exist or this key may not use it"))
 }
 
 // created is the model's release date as a Unix time, which is what OpenAI's

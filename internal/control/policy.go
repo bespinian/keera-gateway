@@ -281,7 +281,7 @@ func (s *Server) putGuardrails(w http.ResponseWriter, r *http.Request, p *authn.
 		s.fail(w, err)
 		return
 	}
-	if !s.requireOrgAdmin(w, p, owner) {
+	if !s.requireOwnerAdmin(w, p, owner) {
 		return
 	}
 
@@ -323,6 +323,10 @@ func (s *Server) putGuardrails(w http.ResponseWriter, r *http.Request, p *authn.
 			badRequest(w, "'"+f.name+"' cannot be negative; omit it for unlimited")
 			return
 		}
+	}
+	if lim.BudgetMicros != nil && *lim.BudgetMicros < 0 {
+		badRequest(w, "'budget_micros' cannot be negative; omit it for unlimited")
+		return
 	}
 	if err := s.st.PutPolicy(r.Context(), scope, scopeID, lim); err != nil {
 		s.fail(w, err)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"time"
 	"unicode/utf8"
@@ -275,19 +276,10 @@ func ValidGroupBy(s string) bool {
 
 // GroupBys lists the groupings, for the error a refused one earns.
 func GroupBys() []string {
-	return sortedKeys(groupColumns)
+	return slices.Sorted(maps.Keys(groupColumns))
 }
 
 // sortedKeys returns the keys of m in order.
-func sortedKeys(m map[string]string) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	slices.Sort(out)
-	return out
-}
-
 // Usage aggregates the event log: what billing and the usage report read.
 //
 // It counts only what was served. A refusal consumed nothing, so counting it

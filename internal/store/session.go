@@ -53,8 +53,12 @@ func (s *Store) DeleteSession(ctx context.Context, hash []byte) error {
 // revocation needs. That includes command-line tokens and half-finished
 // command-line sign-ins, since a pending code could still mint a token.
 func (s *Store) DeleteUserSessions(ctx context.Context, userID string) error {
+	return deleteUserSessions(ctx, s.pool, userID)
+}
+
+func deleteUserSessions(ctx context.Context, db querier, userID string) error {
 	for _, table := range []string{"sessions", "cli_codes", "cli_tokens"} {
-		if _, err := s.pool.Exec(ctx, "DELETE FROM "+table+" WHERE user_id = $1", userID); err != nil {
+		if _, err := db.Exec(ctx, "DELETE FROM "+table+" WHERE user_id = $1", userID); err != nil {
 			return err
 		}
 	}
@@ -142,9 +146,7 @@ func (s *Store) SetUserRole(ctx context.Context, userID, role string) error {
 
 // orgWhere reads the one organisation the rest of the query picks.
 func (s *Store) orgWhere(ctx context.Context, rest string, args ...any) (Org, error) {
-	var o Org
-	err := s.pool.QueryRow(ctx, "SELECT id, name, created_at FROM orgs "+rest, args...).
-		Scan(&o.ID, &o.Name, &o.CreatedAt)
+	o, err := scanOrg(s.pool.QueryRow(ctx, orgColumns+" FROM orgs "+rest, args...))
 	return o, notFound(err)
 }
 

@@ -31,13 +31,9 @@ import {
   checkButton,
   currentRange,
   rangePicker,
+  isAdmin,
+  plural,
 } from "../ui.js";
-
-// canEditModels reports whether the reader may change the models they see:
-// they are their organisation's administrators'.
-export function canEditModels(ctx) {
-  return !!ctx.state.me.can_admin_org;
-}
 
 // usersOfModel names the filters and routers that use a model, for the
 // removal warning. Removing it does not stop them.
@@ -62,7 +58,7 @@ async function usersOfModel(m) {
 // canAddModel reports whether the reader may add a model to the organisation
 // in view.
 function canAddModel(ctx) {
-  return !!ctx.state.me.can_admin_org && !!ctx.orgID;
+  return isAdmin(ctx) && !!ctx.orgID;
 }
 
 export async function modelsView(ctx) {
@@ -75,7 +71,7 @@ export async function modelsView(ctx) {
   // The hosted endpoints this binary knows. They only fill in a form, so a
   // deployment that cannot reach them still gets a working catalogue screen.
   const providers = canAdd ? await presets() : [];
-  ctx.setSubtitle(`${models.length} model${models.length === 1 ? "" : "s"}`);
+  ctx.setSubtitle(`${models.length} ${plural(models.length, "model")}`);
 
   const head = h(
     "div",
@@ -237,7 +233,7 @@ export async function modelsView(ctx) {
             "div",
             { class: "stack" },
             m.enabled ? pill("Enabled", "good") : pill("Disabled", "warn"),
-            canEditModels(ctx) ? healthCell(m) : null,
+            isAdmin(ctx) ? healthCell(m) : null,
           ),
       },
       {
@@ -249,7 +245,7 @@ export async function modelsView(ctx) {
           // answer to "why does this one cost that much" or "how large a
           // request may I send" is here rather than in a message to an
           // administrator.
-          if (!canEditModels(ctx)) {
+          if (!isAdmin(ctx)) {
             return h(
               "button",
               {
@@ -349,8 +345,8 @@ export async function providerModelsView(ctx) {
     })),
   );
   ctx.setSubtitle(
-    `${rows.length} model${rows.length === 1 ? "" : "s"} from ` +
-      `${providers.length} provider${providers.length === 1 ? "" : "s"}`,
+    `${rows.length} ${plural(rows.length, "model")} from ` +
+      `${providers.length} ${plural(providers.length, "provider")}`,
   );
 
   // Prices are in the provider's own currency, which is not always this
@@ -561,7 +557,7 @@ function ttftCell(st) {
 // second copy of the same form. Which of the two dialogs it is depends on the
 // reader, exactly as it does on the row.
 export async function openModel(ctx, m) {
-  if (!canEditModels(ctx)) return viewModel(ctx, m);
+  if (!isAdmin(ctx)) return viewModel(ctx, m);
   return editModel(ctx, m, await presets());
 }
 

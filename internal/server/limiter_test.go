@@ -11,29 +11,29 @@ import (
 	"github.com/bespinian/keera-gateway/internal/config"
 	"github.com/bespinian/keera-gateway/internal/metrics"
 	"github.com/bespinian/keera-gateway/internal/ratelimit"
+	"github.com/redis/go-redis/v9"
 )
 
 // Which buckets a deployment gets, and what happens when its Redis is down.
 // An unreachable Redis must warn and start, so Redis stays optional.
 
 // logged runs buildLimiter with a logger whose output can be read back.
-func logged(t *testing.T, cfg config.Config) (limiter, string, error) {
+func logged(t *testing.T, cfg config.Config) (limiter, string) {
 	t.Helper()
 	var buf bytes.Buffer
 	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	lim, closeLimiter, err := buildLimiter(t.Context(), cfg, metrics.New(), log)
-	if closeLimiter != nil {
-		t.Cleanup(closeLimiter)
-	}
-	return lim, buf.String(), err
+	lim, closeLimiter := buildLimiter(t.Context(), cfg, metrics.New(), log)
+	t.Cleanup(closeLimiter)
+	return lim, buf.String()
 }
+
+// unreachable is a Redis nothing listens on, so the connection is refused at
+// once.
+func unreachable() *redis.Options { return &redis.Options{Addr: "127.0.0.1:1"} }
 
 func TestWithNoRedisTheBucketsStayInThisProcess(t *testing.T) {
 	// The default: one replica needs no Redis.
-	lim, logs, err := logged(t, config.Config{})
-	if err != nil {
-		t.Fatalf("buildLimiter: %v", err)
-	}
+	lim, logs := logged(t, config.Config{})
 	if _, ok := lim.(*ratelimit.Limiter); !ok {
 		t.Errorf("limiter is %T, want the in-memory one", lim)
 	}
@@ -42,28 +42,9 @@ func TestWithNoRedisTheBucketsStayInThisProcess(t *testing.T) {
 	}
 }
 
-func TestAnUnusableRedisURLStopsTheGateway(t *testing.T) {
-	// A refusal, not a warning: an unparsable address is a typo nobody would
-	// notice while the gateway works. An unreachable one is an outage.
-	_, _, err := logged(t, config.Config{RedisURL: "127.0.0.1:6379"})
-	if err == nil {
-		t.Fatal("buildLimiter accepted an address that is not a URL")
-	}
-	if !strings.Contains(err.Error(), "KEERA_REDIS_URL") {
-		t.Errorf("error = %q, want it to name the setting that is wrong", err)
-	}
-}
-
 func TestARedisThatCannotBeReachedWarnsAndTheGatewayStillStarts(t *testing.T) {
-	// Limits fall back to the in-memory buckets. Nothing listens on port 1,
-	// so the connection is refused at once.
-	lim, logs, err := logged(t, config.Config{
-		RedisURL:    "redis://127.0.0.1:1/0",
-		RedisPrefix: "keera",
-	})
-	if err != nil {
-		t.Fatalf("an unreachable Redis stopped the gateway: %v", err)
-	}
+	// Limits fall back to the in-memory buckets.
+	lim, logs := logged(t, config.Config{Redis: unreachable(), RedisPrefix: "keera"})
 	if _, ok := lim.(*ratelimit.Redis); !ok {
 		t.Fatalf("limiter is %T, want the Redis one with the local buckets under it", lim)
 	}
@@ -92,12 +73,9 @@ func TestTheLimiterIsAlwaysSweepable(t *testing.T) {
 	// Both shapes go to the sweep loop, which bounds their memory.
 	for _, cfg := range []config.Config{
 		{},
-		{RedisURL: "redis://127.0.0.1:1/0"},
+		{Redis: unreachable()},
 	} {
-		lim, _, err := logged(t, cfg)
-		if err != nil {
-			t.Fatalf("buildLimiter: %v", err)
-		}
+		lim, _ := logged(t, cfg)
 		lim.Sweep(time.Hour, time.Now())
 	}
 }
@@ -107,13 +85,10 @@ func TestClosingTheLimiterIsSafeInBothShapes(t *testing.T) {
 	// return one that does nothing rather than nil.
 	for _, cfg := range []config.Config{
 		{},
-		{RedisURL: "redis://127.0.0.1:1/0"},
+		{Redis: unreachable()},
 	} {
-		_, closeLimiter, err := buildLimiter(context.Background(), cfg,
+		_, closeLimiter := buildLimiter(context.Background(), cfg,
 			metrics.New(), slog.New(slog.DiscardHandler))
-		if err != nil {
-			t.Fatalf("buildLimiter: %v", err)
-		}
 		if closeLimiter == nil {
 			t.Fatal("buildLimiter returned no closer; serve defers it unconditionally")
 		}

@@ -199,16 +199,19 @@ func deleteScoped(ctx context.Context, tx pgx.Tx, where, id string) error {
 
 // ListOrgs returns every organisation.
 func (s *Store) ListOrgs(ctx context.Context) ([]Org, error) {
-	rows, err := s.pool.Query(ctx,
-		"SELECT id, name, COALESCE(email_domain, ''), created_at FROM orgs ORDER BY created_at")
+	rows, err := s.pool.Query(ctx, orgColumns+" FROM orgs ORDER BY created_at")
 	if err != nil {
 		return nil, err
 	}
-	return collect(rows, func(r row) (Org, error) {
-		var o Org
-		err := r.Scan(&o.ID, &o.Name, &o.EmailDomain, &o.CreatedAt)
-		return o, err
-	})
+	return collect(rows, scanOrg)
+}
+
+const orgColumns = "SELECT id, name, COALESCE(email_domain, ''), created_at"
+
+func scanOrg(r row) (Org, error) {
+	var o Org
+	err := r.Scan(&o.ID, &o.Name, &o.EmailDomain, &o.CreatedAt)
+	return o, err
 }
 
 // CreateTeam inserts a team.
@@ -348,10 +351,11 @@ func (s *Store) AddUser(ctx context.Context, newID, orgID, email, externalID, ro
 	return u, err
 }
 
-// ListUsers returns the users of one org.
+// ListUsers returns the users of one org. An empty orgID means every
+// organisation, as for teams.
 func (s *Store) ListUsers(ctx context.Context, orgID string) ([]User, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+userColumns+`
-		FROM users WHERE org_id = $1 ORDER BY email`, orgID)
+		FROM users WHERE ($1 = '' OR org_id = $1) ORDER BY email`, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -385,10 +389,8 @@ func (s *Store) DisableUser(ctx context.Context, userID string) (int, error) {
 		return 0, err
 	}
 	revoked := int(tag.RowsAffected())
-	for _, table := range []string{"sessions", "cli_codes", "cli_tokens"} {
-		if _, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE user_id = $1", userID); err != nil {
-			return 0, err
-		}
+	if err := deleteUserSessions(ctx, tx, userID); err != nil {
+		return 0, err
 	}
 	return revoked, tx.Commit(ctx)
 }
@@ -401,7 +403,11 @@ func (s *Store) EnableUser(ctx context.Context, userID string) error {
 
 // CreateKey stores an issued key. The caller holds the only copy of the secret.
 func (s *Store) CreateKey(ctx context.Context, k KeyInfo, hash []byte) (KeyInfo, error) {
-	err := s.pool.QueryRow(ctx, `INSERT INTO api_keys
+	return insertKey(ctx, s.pool, k, hash)
+}
+
+func insertKey(ctx context.Context, db querier, k KeyInfo, hash []byte) (KeyInfo, error) {
+	err := db.QueryRow(ctx, `INSERT INTO api_keys
 		(id, org_id, team_id, user_id, alias, key_hash, prefix, expires_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING created_at`,
 		k.ID, k.OrgID, nullable(k.TeamID), nullable(k.UserID), k.Alias, hash, k.Prefix, k.ExpiresAt,
@@ -455,24 +461,10 @@ func (s *Store) RotateKey(ctx context.Context, oldID string, next KeyInfo, hash 
 		next.ExpiresAt = &t
 	}
 
-	if err := tx.QueryRow(ctx, `INSERT INTO api_keys
-		(id, org_id, team_id, user_id, alias, key_hash, prefix, expires_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING created_at`,
-		next.ID, next.OrgID, nullable(next.TeamID), nullable(next.UserID), next.Alias, hash,
-		next.Prefix, next.ExpiresAt,
-	).Scan(&next.CreatedAt); err != nil {
+	if next, err = insertKey(ctx, tx, next, hash); err != nil {
 		return KeyInfo{}, err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO guardrails
-		(scope_type, scope_id, allowed_models, max_output_tokens, rpm, tpm, budget_micros,
-		 budget_period, system_prompt, filters, max_sandboxes, max_sandbox_ttl_seconds,
-		 sandbox_classes, max_sandbox_cpu_millis, max_sandbox_memory_mib, allowed_tools,
-		 block_hosted_tools, allowed_repos, updated_at)
-		SELECT scope_type, $2, allowed_models, max_output_tokens, rpm, tpm, budget_micros,
-		 budget_period, system_prompt, filters, max_sandboxes, max_sandbox_ttl_seconds,
-		 sandbox_classes, max_sandbox_cpu_millis, max_sandbox_memory_mib, allowed_tools,
-		 block_hosted_tools, allowed_repos, now()
-		FROM guardrails WHERE scope_type = 'key' AND scope_id = $1`, oldID, next.ID); err != nil {
+	if _, err := tx.Exec(ctx, copyKeyPolicySQL, oldID, next.ID); err != nil {
 		return KeyInfo{}, err
 	}
 	if _, err := tx.Exec(ctx,

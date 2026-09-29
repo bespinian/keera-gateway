@@ -323,13 +323,15 @@ func (x *mcpExchange) toolCall(msg *rpcMessage) bool {
 			// carry on, as it would after any failed tool.
 			outcome := store.ToolRefused
 			if ref.code != "filter_refused" {
-				outcome = store.ToolError
+				outcome = store.ToolNoResult
 			}
 			x.writeRPC(rpcMessage{JSONRPC: "2.0", ID: msg.ID, Result: toolErrorResult(x.s.advise(ref.msg))})
 			x.record(p, outcome, ref.msg, 0)
 			return false
 		}
 		if x.r.Context().Err() != nil {
+			// Recorded all the same, or what the filters spent would be lost.
+			x.record(p, store.ToolNoResult, "the client hung up while a filter was running", 0)
 			return false
 		}
 		if run.rewrote {
@@ -512,7 +514,7 @@ func (x *mcpExchange) serverMessage(raw []byte) []byte {
 	case "tools/call":
 		switch {
 		case msg.Error != nil:
-			x.record(p, store.ToolError, msg.Error.Message, 0)
+			x.record(p, store.ToolNoResult, msg.Error.Message, 0)
 		case toolFailed(msg.Result):
 			x.record(p, store.ToolFailed, "", len(msg.Result))
 		default:
@@ -562,7 +564,7 @@ func toolFailed(result json.RawMessage) bool {
 func (x *mcpExchange) failPending(msg string) {
 	for id, p := range x.pending {
 		if p.method == "tools/call" {
-			x.record(p, store.ToolError, msg, 0)
+			x.record(p, store.ToolNoResult, msg, 0)
 		}
 		delete(x.pending, id)
 	}

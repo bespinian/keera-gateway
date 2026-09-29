@@ -41,6 +41,8 @@ import {
   num,
   icon,
   icons,
+  plural,
+  isAdmin,
 } from "../ui.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
 
@@ -49,7 +51,7 @@ export async function sandboxesView(ctx) {
   if (!ctx.orgID) return chooseOrg(ctx, "Sandboxes");
 
   const me = ctx.state.me;
-  const canAdmin = !!me.can_admin_org;
+  const canAdmin = isAdmin(ctx);
   const [list, cat, teams] = await Promise.all([
     api.sandboxes(ctx.orgID, { all: showAll() }),
     api.sandboxClasses(ctx.orgID),
@@ -66,7 +68,7 @@ export async function sandboxesView(ctx) {
   const limits = cat.limits || null;
 
   ctx.setSubtitle(
-    `${sandboxes.length} sandbox${sandboxes.length === 1 ? "" : "es"}`,
+    `${sandboxes.length} ${plural(sandboxes.length, "sandbox", "sandboxes")}`,
   );
 
   const live = sandboxes.filter((s) => isLive(s));
@@ -108,7 +110,7 @@ export async function sandboxesView(ctx) {
       ),
     ),
     listCard(ctx, sandboxes, canAdmin, me, driver),
-    classCard(ctx, classes, driver, me),
+    classCard(ctx, classes, driver),
   );
 }
 
@@ -287,8 +289,8 @@ function listCard(ctx, sandboxes, canAdmin, me, driver) {
 }
 
 /** The organisation's classes. */
-function classCard(ctx, classes, driver, me) {
-  const canEdit = !!me.can_admin_org;
+function classCard(ctx, classes, driver) {
+  const canEdit = isAdmin(ctx);
   return h(
     "div",
     { class: "stack", style: { gap: "10px" } },
@@ -808,7 +810,7 @@ function size(s) {
 function sizeOf(cpuMillis, memoryMiB) {
   const cores =
     cpuMillis % 1000 === 0 ? cpuMillis / 1000 : (cpuMillis / 1000).toFixed(1);
-  return `${cores} core${cores === 1 ? "" : "s"}, ${gib(memoryMiB)}`;
+  return `${cores} ${plural(cores, "core")}, ${gib(memoryMiB)}`;
 }
 
 function gib(mib) {

@@ -596,9 +596,9 @@ func TestKeyRevokeByIdLooksNothingUp(t *testing.T) {
 
 // Revoking is immediate and cannot be undone, so it asks first like every other
 // destructive command. Standard input is closed here, which is a confirmation
-// that was not given.
+// that was not given. The prompt goes to stderr, so `--json` output stays JSON.
 func TestKeyRevokeAsksBeforeItRevokes(t *testing.T) {
-	quiet(t)
+	stderr := captureStderr(t)
 	keyID := id.New("key")
 	f := newFakeControl(t, map[string]any{
 		"GET /v1/orgs": oneOrg,
@@ -613,6 +613,10 @@ func TestKeyRevokeAsksBeforeItRevokes(t *testing.T) {
 	}
 	if f.called("DELETE", "/v1/keys/"+keyID) {
 		t.Error("the key was revoked although nothing confirmed it")
+	}
+	if said := stderr(); !strings.Contains(said, "Revoking laptop") ||
+		!strings.Contains(said, "Type the alias to confirm:") {
+		t.Errorf("stderr = %q, want the prompt on it", said)
 	}
 }
 
@@ -1526,5 +1530,20 @@ func TestReportsTakeATeamByNameAndAPersonByEmail(t *testing.T) {
 	q := f.request("GET", "/v1/requests").query
 	if !strings.Contains(q, "team_id=team_1") || !strings.Contains(q, "user_id=user_1") {
 		t.Errorf("query = %q, want the team's and the person's ids", q)
+	}
+}
+
+func TestANegativeBudgetFlagIsLeftUnset(t *testing.T) {
+	// Negative is how the flag says it was not given. 'keera budget' and
+	// 'guardrail set' must read it the same way.
+	for _, amount := range []float64{-1, -5} {
+		var lim policy.Limits
+		f := &facetFlags{budget: amount, rpm: -1, tpm: -1, maxOut: -1}
+		if err := f.apply("budget", &lim); err != nil {
+			t.Fatal(err)
+		}
+		if lim.BudgetMicros != nil {
+			t.Errorf("--budget %v set a budget of %d", amount, *lim.BudgetMicros)
+		}
 	}
 }

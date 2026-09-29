@@ -607,3 +607,21 @@ func TestADecidingRouterStaysOnTheAllowList(t *testing.T) {
 		t.Fatalf("a deciding model outside the list: status = %d, want 400: %s", code, out)
 	}
 }
+
+func TestAGuardrailRefusesANegativeLimit(t *testing.T) {
+	// A negative budget would be spent before the first request, and a
+	// negative rate could never be met, so both are refused rather than stored.
+	st, ctx := routerStore(t)
+	srv := routerServer(ctx, t, st)
+	for _, body := range []string{`{"budget_micros":-5000000}`, `{"rpm":-1}`} {
+		req := httptest.NewRequest(http.MethodPut,
+			httpx.ControlPrefix+"/v1/guardrails/org/org_1", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+testOperatorKey)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "cannot be negative") {
+			t.Errorf("%s: status = %d, want 400: %s", body, w.Code, w.Body.String())
+		}
+	}
+}

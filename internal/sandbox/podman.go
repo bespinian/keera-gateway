@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -111,15 +112,24 @@ func (p *Podman) Create(ctx context.Context, spec Spec) (Status, error) {
 		return Status{}, err
 	}
 
-	if _, err := p.run(ctx, p.runArgs(spec, runtime)...); err != nil {
+	args, env := p.runArgs(spec, runtime)
+	if _, err := p.runEnv(ctx, env, args...); err != nil {
 		return Status{}, err
 	}
 	return p.Status(ctx, spec.Ref)
 }
 
-// runArgs is the `podman run` command line for a spec.
-func (p *Podman) runArgs(spec Spec, runtime string) []string {
-	args := []string{"run", "--detach", "--name", containerName(spec.Ref)}
+// privateEnv are the values kept off podman's command line, where every user
+// of the host can read them. podman takes them from its own environment
+// instead, which only the gateway's user can read.
+var privateEnv = map[string]bool{
+	"KEERA_API_KEY": true, "KEERA_GIT_TOKEN": true, "KEERA_TASK": true,
+}
+
+// runArgs is the `podman run` command line for a spec, and the environment
+// podman needs to run it with.
+func (p *Podman) runArgs(spec Spec, runtime string) (args, env []string) {
+	args = []string{"run", "--detach", "--name", containerName(spec.Ref)}
 	if runtime != "" {
 		args = append(args, "--runtime", runtime)
 	}
@@ -154,9 +164,14 @@ func (p *Podman) runArgs(spec Spec, runtime string) []string {
 	// shells off the host's public address.
 	args = append(args, "--publish", "127.0.0.1::"+strconv.Itoa(PortSSH))
 	for _, kv := range envList(spec.Env) {
+		if privateEnv[kv.Name] {
+			args = append(args, "--env", kv.Name)
+			env = append(env, kv.Name+"="+kv.Value)
+			continue
+		}
 		args = append(args, "--env", kv.Name+"="+kv.Value)
 	}
-	return append(args, spec.Class.Image)
+	return append(args, spec.Class.Image), env
 }
 
 func (p *Podman) runtimeFor(c policy.SandboxClass) (string, error) {
@@ -195,7 +210,10 @@ func (p *Podman) Status(ctx context.Context, ref Ref) (Status, error) {
 	}
 	in := items[0]
 
-	st := Status{Ref: ref, Address: "127.0.0.1"}
+	st := Status{Ref: ref}
+	if in.State.Running {
+		st.Address = "127.0.0.1"
+	}
 	st.State, st.Detail = podmanState(in)
 	st.Exited = in.State.Status == "exited" && in.State.ExitCode == 0
 	if st.State == policy.SandboxReady && in.Config.Labels[podmanLabelPurpose] != string(policy.PurposeAgent) &&
@@ -320,10 +338,18 @@ func (p *Podman) Dial(ctx context.Context, ref Ref, port int) (net.Conn, error) 
 const podmanTimeout = 5 * time.Minute
 
 func (p *Podman) run(ctx context.Context, args ...string) ([]byte, error) {
+	return p.runEnv(ctx, nil, args...)
+}
+
+// runEnv is run with env added to podman's own environment.
+func (p *Podman) runEnv(ctx context.Context, env []string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, podmanTimeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, p.opts.Binary, args...)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {

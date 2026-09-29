@@ -318,4 +318,14 @@ func TestAStoredConversationOnlyGoesToOpenAI(t *testing.T) {
 	if got := nextSeen(t, seen); !strings.Contains(got.body, `"previous_response_id"`) {
 		t.Errorf("forwarded = %s", got.body)
 	}
+
+	// An SDK may send the field empty, which continues nothing.
+	for _, empty := range []string{`null`, `""`} {
+		resp = h.post(t, "/v1/responses", `{"model":"keera-code","previous_response_id":`+empty+
+			`,"conversation":null,"input":"hi"}`)
+		if resp.StatusCode == http.StatusBadRequest {
+			body, _ := io.ReadAll(resp.Body)
+			t.Errorf("an empty previous_response_id (%s) was refused: %s", empty, body)
+		}
+	}
 }

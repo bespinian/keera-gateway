@@ -129,7 +129,8 @@ download again next time.
   a standing system prompt, set one on a guardrail:
   `keera guardrail set org <org-id> --system-prompt ...`.
 - **Port 8080 carries everything**, split by path: the panel at `/`, the
-  inference API under `/api`, the control API under `/control`. Wherever the
+  inference API under `/api`, the control API under `/control`, sandbox attach
+  under `/sandbox`. Wherever the
   inference API is reachable, so is the control API, protected only by the
   operator key and a session cookie. It binds to loopback by default
   (`KEERA_BIND`). Before opening it up, put a TLS terminator in front. If

@@ -47,6 +47,7 @@ type anthropicRequest struct {
 // `defer_loading` describe how to treat the schema and have no OpenAI
 // counterpart, so they are not read.
 type anthropicTool struct {
+	Type        string          `json:"type"`
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	InputSchema json.RawMessage `json:"input_schema"`
@@ -126,22 +127,41 @@ type oaiToolDeclaration struct {
 	Parameters  json.RawMessage `json:"parameters"`
 }
 
+// decodeRequest reads a request body into in. api names the API in the
+// error, which the client is shown.
+func decodeRequest(raw []byte, in any, api string) error {
+	err := json.Unmarshal(raw, in)
+	if err == nil {
+		return nil
+	}
+	if typeErr, ok := errors.AsType[*json.UnmarshalTypeError](err); ok && typeErr.Field != "" {
+		return errors.New("the '" + typeErr.Field + "' field has the wrong type")
+	}
+	return errors.New("request body is not a valid " + api + " request: " + err.Error())
+}
+
+// functionTool declares one tool as a chat function.
+func functionTool(name, description string, schema json.RawMessage) oaiTool {
+	if len(schema) == 0 || string(schema) == "null" {
+		schema = emptySchema
+	}
+	return oaiTool{
+		Type:     "function",
+		Function: oaiToolDeclaration{Name: name, Description: description, Parameters: schema},
+	}
+}
+
 // emptySchema stands in for a tool declared without one. vLLM rejects a
 // function without parameters, and tools without arguments are real.
 var emptySchema = json.RawMessage(`{"type":"object","properties":{}}`)
 
 // decode turns a Messages request into a chat completion request.
 func (anthropicShape) decode(raw []byte) ([]byte, error) {
+	// A missing model is left to serve, which refuses it the same way on
+	// every API.
 	var in anthropicRequest
-	if err := json.Unmarshal(raw, &in); err != nil {
-		var typeErr *json.UnmarshalTypeError
-		if errors.As(err, &typeErr) && typeErr.Field != "" {
-			return nil, errors.New("the '" + typeErr.Field + "' field has the wrong type")
-		}
-		return nil, errors.New("request body is not a valid Messages request: " + err.Error())
-	}
-	if in.Model == "" {
-		return nil, errors.New("the 'model' field is required")
+	if err := decodeRequest(raw, &in, "Messages"); err != nil {
+		return nil, err
 	}
 	if len(in.Messages) == 0 {
 		return nil, errors.New("the 'messages' field is required and must not be empty")
@@ -204,23 +224,15 @@ func addSampling(out map[string]any, in anthropicRequest) {
 	}
 }
 
-// convertTools declares the tools as OpenAI functions.
+// convertTools declares the tools as OpenAI functions. Server tools, such as
+// web search, run on Anthropic's servers, so no other model has them.
 func convertTools(in []anthropicTool) []oaiTool {
 	tools := make([]oaiTool, 0, len(in))
 	for _, t := range in {
-		if t.Name == "" {
+		if t.Name == "" || !keepsTool(t.Type, anthropicClientTools) {
 			continue
 		}
-		schema := t.InputSchema
-		if len(schema) == 0 || string(schema) == "null" {
-			schema = emptySchema
-		}
-		tools = append(tools, oaiTool{
-			Type: "function",
-			Function: oaiToolDeclaration{
-				Name: t.Name, Description: t.Description, Parameters: schema,
-			},
-		})
+		tools = append(tools, functionTool(t.Name, t.Description, t.InputSchema))
 	}
 	return tools
 }

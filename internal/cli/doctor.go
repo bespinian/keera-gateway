@@ -22,7 +22,7 @@ func doctorCmd(ctx context.Context, args []string) error {
 	probe := fs.Bool("probe", false,
 		"put a real request through every enabled model; costs a generation each")
 	org := fs.String("org", "", "organisation to check (defaults to the only one, if there is only one)")
-	asJSON := fs.Bool("json", false, "print raw JSON")
+	asJSON := fs.Bool("json", false, jsonUsage)
 	fs.Usage = func() { _ = printHelp(fs, "doctor", "") }
 	if want, ok := wantsHelp(args); ok {
 		return printHelp(fs, "doctor", want)
@@ -59,7 +59,7 @@ func doctorCmd(ctx context.Context, args []string) error {
 	// A failed check fails the command, so an install script can end with it.
 	// Warnings do not: a deployment with warnings still works.
 	if d.Failures > 0 {
-		return fmt.Errorf("%d check%s failed", d.Failures, pluralS(d.Failures))
+		return fmt.Errorf("%s failed", plural(d.Failures, "check"))
 	}
 	return nil
 }
@@ -82,10 +82,10 @@ func printDiagnosis(base string, d control.Diagnosis) {
 			fmt.Printf("%s\n", style.head(area))
 		}
 		fmt.Printf("  %s %-*s %s\n", mark(check.Verdict), nameWidth, check.Name,
-			wrapAt(check.Detail, gutter))
+			wrapAt(check.Detail, gutter, gutter, proseWidth))
 		if check.Fix != "" {
 			fmt.Printf("%s%s\n", strings.Repeat(" ", gutter),
-				style.cmd(wrapAt("→ "+check.Fix, gutter)))
+				style.cmd(wrapAt("→ "+check.Fix, gutter, gutter, proseWidth)))
 		}
 	}
 
@@ -96,7 +96,7 @@ func printDiagnosis(base string, d control.Diagnosis) {
 			style.bad(fmt.Sprintf("%d failing", d.Failures)), d.Warnings)
 	case d.Warnings > 0:
 		fmt.Printf("Nothing is broken. %s worth fixing.\n",
-			style.warn(fmt.Sprintf("%d thing%s", d.Warnings, pluralS(d.Warnings))))
+			style.warn(plural(d.Warnings, "thing")))
 	default:
 		fmt.Println(style.ok("Everything checks out."))
 	}
@@ -119,11 +119,4 @@ func mark(v control.Verdict) string {
 	default:
 		return "  " + style.ok("ok")
 	}
-}
-
-func pluralS(n int) string {
-	if n == 1 {
-		return ""
-	}
-	return "s"
 }

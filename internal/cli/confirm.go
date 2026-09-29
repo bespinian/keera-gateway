@@ -13,8 +13,11 @@ import (
 //
 // noun is what the name is called ("alias", "name"), and undone says what did
 // not happen when the answer is wrong.
+//
+// The prompt goes to stderr, like the lines before it, so stdout carries only
+// the result: `delete --json` stays valid JSON.
 func confirmTyping(noun, want, undone string) error {
-	fmt.Printf("\n%s ", style.head("Type the "+noun+" to confirm:"))
+	fmt.Fprintf(os.Stderr, "\n%s ", styleErr.head("Type the "+noun+" to confirm:"))
 	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil {
 		return fmt.Errorf("reading the confirmation: %w", err)

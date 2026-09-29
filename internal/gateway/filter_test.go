@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/store"
@@ -34,6 +35,18 @@ func filterHarnessWith(t *testing.T, filterReply func(instruction string, segmen
 	resolved *policy.Resolved,
 ) *harness {
 	t.Helper()
+	return filterHarnessAnswering(t, filterReply, resolved, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"id":"1","choices":[{"message":{"content":"hi"}}],`+
+			`"usage":{"prompt_tokens":10,"completion_tokens":5}}`)
+	})
+}
+
+// filterHarnessAnswering is the same with answer standing in for the model
+// the client asked for.
+func filterHarnessAnswering(t *testing.T, filterReply func(instruction string, segments []string) string,
+	resolved *policy.Resolved, answer http.HandlerFunc,
+) *harness {
+	t.Helper()
 
 	backend := func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
@@ -47,8 +60,7 @@ func filterHarnessWith(t *testing.T, filterReply func(instruction string, segmen
 		w.Header().Set("Content-Type", "application/json")
 
 		if sent.Model != "guard-served" {
-			_, _ = io.WriteString(w, `{"id":"1","choices":[{"message":{"content":"hi"}}],`+
-				`"usage":{"prompt_tokens":10,"completion_tokens":5}}`)
+			answer(w, r)
 			return
 		}
 		var segments []string
@@ -150,6 +162,43 @@ func TestFilterSpendIsChargedToTheSameBudget(t *testing.T) {
 	}
 	if h.budgets.charged < filterMicros {
 		t.Errorf("charged = %d, want the filter's spend included", h.budgets.charged)
+	}
+}
+
+func TestAClientThatHangsUpAfterAFilterIsStillCharged(t *testing.T) {
+	// The filter's tokens are spent whether or not the client waits for the
+	// answer. Without a row they would drop out of the spend table on its next
+	// refresh, and hanging up would make a filter free.
+	ctx, cancel := context.WithCancel(context.Background())
+	h := filterHarnessAnswering(t, func(_ string, segments []string) string {
+		return redactor(segments)
+	}, nil, func(_ http.ResponseWriter, r *http.Request) {
+		cancel()
+		<-r.Context().Done()
+	})
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, h.url("/v1/chat/completions"),
+		strings.NewReader(`{"model":"keera-code","messages":[{"role":"user","content":"hunter2"}]}`))
+	req.Header.Set("Authorization", "Bearer "+testKey)
+	if resp, err := http.DefaultClient.Do(req); err == nil {
+		_ = resp.Body.Close()
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for h.sink.count() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	ev := h.sink.last(t)
+	if !ev.Canceled || ev.Status != statusClientClosed {
+		t.Errorf("canceled = %v, status = %d; want the row to say the client hung up",
+			ev.Canceled, ev.Status)
+	}
+	const filterMicros = 600
+	if ev.CostMicros < filterMicros {
+		t.Errorf("cost = %d, want at least the %d the filter spent", ev.CostMicros, filterMicros)
+	}
+	if len(ev.FilterRuns) == 0 {
+		t.Error("the filter run was not recorded")
 	}
 }
 

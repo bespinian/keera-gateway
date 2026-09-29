@@ -190,10 +190,6 @@ func (anthropicDialect) usage(raw []byte) *tokenUsage {
 	return doc.Usage.tokens()
 }
 
-func (anthropicDialect) rename(raw []byte, alias string) []byte {
-	return renameIn(raw, "", alias)
-}
-
 func (anthropicDialect) stream(alias string) nativeStream {
 	return &anthropicStream{alias: alias}
 }
@@ -297,9 +293,9 @@ func (s *Server) countTokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Tool declarations are part of the prompt too, and on a coding agent a
-	// large one.
+	// large one. So is the guardrail's system prompt, which every request gets.
 	tools, _ := b.value("tools")
-	tokens := estimateTokens(doc.texts()) + len(tools)/bytesPerToken
+	tokens := estimateTokens(doc.texts()) + (len(tools)+len(res.SystemPrompt))/bytesPerToken
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]int{"input_tokens": tokens})
 }

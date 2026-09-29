@@ -181,9 +181,11 @@ func (r *Registry) listenOnce(ctx context.Context) error {
 // control plane when both listeners live in the same process.
 func (r *Registry) Invalidate() { r.gen.Add(1) }
 
-// refreshAll reloads models, filters and routers together. They name each
+// refreshAll reloads models, filters and routers in one pass. They name each
 // other, so renewing only part of the chain could refuse a request for a link
-// that already exists. MCP servers come along, so one refresh renews all.
+// that already exists. MCP servers come along, so one refresh renews all. They
+// are read one after another, so a failure part way leaves the rest as they
+// were until the next pass.
 func (r *Registry) refreshAll(ctx context.Context) error {
 	if err := r.refreshModels(ctx); err != nil {
 		return err
@@ -362,17 +364,28 @@ func (r *Registry) Resolve(ctx context.Context, presented string) (*policy.Resol
 	if actual, loaded := r.inflight.LoadOrStore(ck, c); loaded {
 		return wait(ctx, actual.(*call))
 	}
-	// A query that finished between the check above and LoadOrStore has
+	// The query runs on its own context: others may be waiting on it, and
+	// the first caller hanging up must not fail them all.
+	go r.lookup(context.WithoutCancel(ctx), hash, ck, gen, c)
+	return wait(ctx, c)
+}
+
+// lookupTimeout bounds a shared key query, which no caller can cancel.
+const lookupTimeout = 10 * time.Second
+
+func (r *Registry) lookup(ctx context.Context, hash []byte, ck string, gen uint64, c *call) {
+	defer r.inflight.Delete(ck)
+	defer close(c.done)
+	// A query that finished between the check in Resolve and LoadOrStore has
 	// already cached its answer, because remember runs before Delete.
 	if e, ok := r.lookupCache(ck, gen); ok {
 		c.resolved, c.err = e.resolved, e.err
-	} else {
-		c.resolved, c.err = r.store.LookupKey(ctx, hash)
-		r.remember(ck, gen, c)
+		return
 	}
-	close(c.done)
-	r.inflight.Delete(ck)
-	return c.resolved, c.err
+	ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
+	defer cancel()
+	c.resolved, c.err = r.store.LookupKey(ctx, hash)
+	r.remember(ck, gen, c)
 }
 
 func (r *Registry) lookupCache(ck string, gen uint64) (entry, bool) {

@@ -20,8 +20,11 @@ import {
   aliasProblem,
   currentRange,
   rangePicker,
+  bytes,
+  plural,
+  isAdmin,
 } from "../ui.js";
-import { bytes, toolCallTable } from "./tools.js";
+import { toolCallTable } from "./tools.js";
 import { chooseOrg } from "./orgs.js";
 
 // mcpView is the MCP page: the servers the gateway stands in front of, the
@@ -29,8 +32,7 @@ import { chooseOrg } from "./orgs.js";
 // tool has been called for and the latest calls.
 export async function mcpView(ctx) {
   if (!ctx.orgID) return chooseOrg(ctx, "MCP servers");
-  const me = ctx.state.me;
-  const canEdit = !!me.can_admin_org;
+  const canEdit = isAdmin(ctx);
   const since = currentRange();
   const [servers, connect, summary, calls] = await Promise.all([
     api.mcpServers(ctx.orgID).then((r) => r.data || []),
@@ -49,7 +51,7 @@ export async function mcpView(ctx) {
       : [],
   ]);
   const base = (connect.gateway_url || "").replace(/\/$/, "");
-  ctx.setSubtitle(`${servers.length} server${servers.length === 1 ? "" : "s"}`);
+  ctx.setSubtitle(`${servers.length} ${plural(servers.length, "server")}`);
 
   const head = h(
     "div",
@@ -372,7 +374,8 @@ function editServer(ctx, existing) {
             let credential;
             if (clearKey && clearKey.checked) credential = "";
             else if (apiKey.value) credential = apiKey.value;
-            e.currentTarget.disabled = true;
+            const button = e.currentTarget;
+            button.disabled = true;
             try {
               await api.putMCPServer(
                 name,
@@ -390,7 +393,7 @@ function editServer(ctx, existing) {
               ctx.reload();
             } catch (ex) {
               showError(err, ex.message);
-              e.target.disabled = false;
+              button.disabled = false;
             }
           },
         },

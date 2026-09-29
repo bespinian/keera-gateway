@@ -255,8 +255,8 @@ func (c *kubeClient) post(ctx context.Context, path string, in, out any) error {
 // patch sends a JSON merge patch, which needs no schema and no field manager.
 // A merge patch replaces lists rather than merging them, so a list in a patch
 // must be given whole.
-func (c *kubeClient) patch(ctx context.Context, path string, in, out any) error {
-	return c.do(ctx, http.MethodPatch, path, "application/merge-patch+json", in, out)
+func (c *kubeClient) patch(ctx context.Context, path string, in any) error {
+	return c.do(ctx, http.MethodPatch, path, "application/merge-patch+json", in, nil)
 }
 
 // delete uses foreground propagation, so a sandbox reported as terminated

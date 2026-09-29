@@ -38,6 +38,7 @@ import {
   crumb,
   isAdmin,
   checkButton,
+  plural,
 } from "../ui.js";
 import { areaChart, barList } from "../chart.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
@@ -62,7 +63,7 @@ export async function filtersView(ctx) {
   const currency = res.currency || ctx.currency;
   const chatModels = models.filter((m) => m.kind === "chat");
   const canEdit = isAdmin(ctx);
-  ctx.setSubtitle(`${filters.length} filter${filters.length === 1 ? "" : "s"}`);
+  ctx.setSubtitle(`${filters.length} ${plural(filters.length, "filter")}`);
 
   const head = h(
     "div",
@@ -121,10 +122,11 @@ export async function filtersView(ctx) {
           // somebody had not finished setting, so it says what it holds
           // instead.
           if (!usesModel(f)) {
+            const rules = (f.rules || []).length;
             return h(
               "span",
               { class: "faint nowrap" },
-              `${(f.rules || []).length} rule${(f.rules || []).length === 1 ? "" : "s"}, no model`,
+              `${rules} ${plural(rules, "rule")}, no model`,
             );
           }
           return known.has(f.model)
@@ -439,7 +441,7 @@ function report(ctx, probe) {
                   { class: "row-tight" },
                   h("code", { class: "mono" }, hit.rule),
                   pill(
-                    hit.matches === 1 ? "1 match" : `${hit.matches} matches`,
+                    `${hit.matches} ${plural(hit.matches, "match", "matches")}`,
                     hit.refused ? "bad" : "accent",
                   ),
                   hit.refused ? pill("refused the request", "bad") : null,
@@ -622,7 +624,7 @@ export async function filterDetailView(ctx) {
         pct(rep.refused, rep.runs),
         null,
         rep.refused
-          ? `${num(rep.refused)} request${rep.refused === 1 ? "" : "s"} ` +
+          ? `${num(rep.refused)} ${plural(rep.refused, "request")} ` +
               (f && f.shadow ? "would have been dropped" : "dropped")
           : "nothing refused",
       ),
@@ -656,7 +658,7 @@ export async function filterDetailView(ctx) {
           h("h2", {}, "When it fired"),
           h("div", { class: "spacer" }),
           rep.runs
-            ? pill(`${compact(rep.runs)} run${rep.runs === 1 ? "" : "s"}`)
+            ? pill(`${compact(rep.runs)} ${plural(rep.runs, "run")}`)
             : null,
         ),
         h(
@@ -710,8 +712,8 @@ export async function filterDetailView(ctx) {
                   ? h(
                       "div",
                       { class: "hint", style: { marginTop: "12px" } },
-                      `It was shown ${num(rep.segments)} segment` +
-                        `${rep.segments === 1 ? "" : "s"} of text and changed ` +
+                      `It was shown ${num(rep.segments)} ` +
+                        `${plural(rep.segments, "segment")} of text and changed ` +
                         `${num(rep.changed)} of them (${pct(rep.changed, rep.segments)}). `,
                     )
                   : null,
@@ -878,7 +880,7 @@ function detailBanners(rep, f) {
       h(
         "div",
         { class: "banner banner-bad", style },
-        `${num(rep.errors)} run${rep.errors === 1 ? "" : "s"} failed. ` +
+        `${num(rep.errors)} ${plural(rep.errors, "run")} failed. ` +
           (f && f.shadow
             ? "In shadow those requests were still forwarded, but they are " +
               "missing from these numbers."

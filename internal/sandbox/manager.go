@@ -172,8 +172,9 @@ type CreateRequest struct {
 	// Limits is the caller's resolved sandbox guardrail: the organisation's,
 	// narrowed by the team's.
 	Limits policy.ResolvedSandbox
-	// Env is extra environment from the caller. It cannot override what the
-	// manager sets, or a caller could point a sandbox at another endpoint.
+	// Env is extra environment from the caller, for the first start only. It
+	// cannot name a KEERA_ variable, or a caller could point a sandbox at
+	// another endpoint.
 	Env map[string]string
 }
 
@@ -216,7 +217,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (store.Sandbox,
 		State: policy.SandboxPending, Detail: "accepted",
 		Image: class.Image, Isolation: class.Isolation,
 		CPU: class.CPU, Memory: class.Memory, Disk: class.Disk,
-		KeyID: keyID, Repo: req.Repo, Branch: req.Branch,
+		KeyID: keyID, Repo: req.Repo, Branch: req.Branch, AuthorizedKeys: req.AuthorizedKeys,
 		Backing:   string(backing),
 		ExpiresAt: &expires,
 	}
@@ -291,6 +292,15 @@ func (m *Manager) admit(ctx context.Context, req CreateRequest) (policy.SandboxC
 		return policy.SandboxClass{}, refuse("%q is not a usable sandbox name; it becomes a hostname "+
 			"in the cluster and half of an ssh config entry on your laptop, so it is lowercase "+
 			"letters, digits and interior hyphens", req.Name)
+	}
+	// Some KEERA_ values are set only in some sandboxes, and one from the
+	// caller would stand in for them where they are not: KEERA_BASE_URL, for
+	// one, decides where the sandbox's key is sent.
+	for name := range req.Env {
+		if strings.HasPrefix(name, "KEERA_") {
+			return policy.SandboxClass{}, refuse("%s is set by the gateway; a sandbox's own "+
+				"environment cannot name a KEERA_ variable", name)
+		}
 	}
 	if req.Purpose == policy.PurposeAgent {
 		if strings.TrimSpace(req.Task) == "" {
@@ -686,9 +696,8 @@ func (m *Manager) Resume(ctx context.Context, sb store.Sandbox, limits policy.Re
 	}
 	if err := m.driver.Resume(ctx, refOf(sb)); err != nil {
 		if errors.Is(err, ErrNotFound) {
+			m.release(ctx, sb)
 			m.fail(ctx, sb.ID, errors.New("the sandbox is no longer in the cluster"))
-			m.revokeKey(ctx, sb, "sandbox: revoking a vanished sandbox's key failed", "sandbox", sb.ID)
-			m.revokeGit(ctx, sb)
 			return refuse("sandbox %s is no longer in the cluster; its volume went with it",
 				sb.Name)
 		}
@@ -736,7 +745,7 @@ func (m *Manager) revive(ctx context.Context, sb store.Sandbox, limits policy.Re
 	req := CreateRequest{
 		OrgID: sb.OrgID, TeamID: sb.TeamID, UserID: sb.UserID, Owner: sb.Owner,
 		Name: sb.Name, Class: sb.Class, Purpose: sb.Purpose,
-		Repo: sb.Repo, Branch: sb.Branch, Limits: limits,
+		Repo: sb.Repo, Branch: sb.Branch, AuthorizedKeys: sb.AuthorizedKeys, Limits: limits,
 	}
 	secret, keyID, err := m.mintKey(ctx, req, expires)
 	if err != nil {
@@ -876,10 +885,7 @@ func (m *Manager) terminate(ctx context.Context, sb store.Sandbox, detail string
 	if err := m.driver.Terminate(ctx, refOf(sb)); err != nil {
 		return err
 	}
-	m.stopClock(ctx, sb.ID)
-	m.revokeKey(ctx, sb, "sandbox: revoking the key of a terminated sandbox failed",
-		"sandbox", sb.ID, "key_id", sb.KeyID)
-	m.revokeGit(ctx, sb)
+	m.release(ctx, sb)
 	return m.st.ObserveSandbox(ctx, sb.ID, store.SandboxObservation{
 		State: policy.SandboxTerminated, Detail: detail,
 	})
@@ -911,9 +917,7 @@ func (m *Manager) failed(ctx context.Context, sb store.Sandbox, status Status) {
 			return
 		}
 	}
-	m.stopClock(ctx, sb.ID)
-	m.revokeKey(ctx, sb, "sandbox: revoking a failed sandbox's key failed", "sandbox", sb.ID)
-	m.revokeGit(ctx, sb)
+	m.release(ctx, sb)
 	m.observe(ctx, sb.ID, status)
 }
 
@@ -952,7 +956,10 @@ func (m *Manager) Offboard(ctx context.Context, userID string) (Offboarded, erro
 			}
 			if err == nil {
 				m.revokeGit(ctx, sb)
-				done.Suspended++
+				// An expired or failed one is kept too, but is not suspended.
+				if sb.State == policy.SandboxReady || sb.State == policy.SandboxSuspended {
+					done.Suspended++
+				}
 			}
 		}
 		if err != nil {
@@ -1006,16 +1013,23 @@ func (m *Manager) Sweep(ctx context.Context, now time.Time) {
 
 	m.reconcilePools(ctx)
 
-	live, err := m.st.LiveSandboxes(ctx, 500)
-	if err != nil {
-		m.log.Warn("sandbox: reading live sandboxes failed", "error", err)
-		return
-	}
-	for _, sb := range live {
-		if ctx.Err() != nil {
+	const page = 500
+	for after := ""; ; {
+		live, err := m.st.LiveSandboxes(ctx, after, page)
+		if err != nil {
+			m.log.Warn("sandbox: reading live sandboxes failed", "error", err)
 			return
 		}
-		m.reconcile(ctx, sb, now)
+		for _, sb := range live {
+			if ctx.Err() != nil {
+				return
+			}
+			m.reconcile(ctx, sb, now)
+		}
+		if len(live) < page {
+			return
+		}
+		after = live[len(live)-1].ID
 	}
 }
 
@@ -1039,17 +1053,15 @@ func (m *Manager) endExpired(ctx context.Context, sb store.Sandbox) {
 				"sandbox", sb.ID, "error", err)
 		}
 	}
-	m.stopClock(ctx, sb.ID)
+	// The key goes now, not at termination: nothing legitimate uses it while
+	// the sandbox is stopped.
+	m.release(ctx, sb)
 	if err := m.st.ObserveSandbox(ctx, sb.ID, store.SandboxObservation{
 		State:  policy.SandboxExpired,
 		Detail: "its lifetime ran out; resuming it brings it back, terminating it frees the volume",
 	}); err != nil {
 		m.log.Warn("sandbox: recording an expiry failed", "sandbox", sb.ID, "error", err)
 	}
-	// Revoke the key now, not at termination: nothing legitimate uses it
-	// while the sandbox is stopped.
-	m.revokeKey(ctx, sb, "sandbox: revoking an expired sandbox's key failed", "sandbox", sb.ID)
-	m.revokeGit(ctx, sb)
 }
 
 // reconcile writes back what the driver says about one sandbox.
@@ -1067,10 +1079,9 @@ func (m *Manager) reconcile(ctx context.Context, sb store.Sandbox, now time.Time
 	case errors.Is(err, ErrNotFound):
 		// Gone. On Kubernetes that is usually the controller expiring it;
 		// otherwise somebody removed it by hand. Either way, record the end.
+		m.release(ctx, sb)
 		m.observe(ctx, sb.ID, Status{Ref: refOf(sb), State: policy.SandboxTerminated,
 			Detail: "no longer in the cluster"})
-		m.revokeKey(ctx, sb, "sandbox: revoking a vanished sandbox's key failed", "sandbox", sb.ID)
-		m.revokeGit(ctx, sb)
 		return
 	case err != nil:
 		// An unreachable driver is not a dead sandbox. Leave the row alone, so
@@ -1078,9 +1089,9 @@ func (m *Manager) reconcile(ctx context.Context, sb store.Sandbox, now time.Time
 		m.log.Warn("sandbox: reading a sandbox's state failed", "sandbox", sb.ID, "error", err)
 		return
 	}
-	// An agent that exited cleanly has done its task, unless it was only
-	// suspended: on podman the two look the same.
-	if status.Exited && sb.Purpose == policy.PurposeAgent && sb.State != policy.SandboxSuspended {
+	// An agent that exited cleanly has done its task. It is never suspended,
+	// so on podman a clean stop cannot be mistaken for one.
+	if status.Exited && sb.Purpose == policy.PurposeAgent {
 		m.finish(ctx, sb)
 		return
 	}
@@ -1136,6 +1147,15 @@ func (m *Manager) fail(ctx context.Context, sbID string, cause error) {
 	}
 }
 
+// release gives back what a sandbox held while it ran: its running clock, its
+// key and its repository credential. It comes before the new state is
+// recorded, since the clock only counts a sandbox the row still shows running.
+func (m *Manager) release(ctx context.Context, sb store.Sandbox) {
+	m.stopClock(ctx, sb.ID)
+	m.revokeKey(ctx, sb)
+	m.revokeGit(ctx, sb)
+}
+
 // stopClock stops a sandbox's running-time accounting.
 func (m *Manager) stopClock(ctx context.Context, sbID string) {
 	if err := m.st.StopAccounting(ctx, sbID, time.Now()); err != nil {
@@ -1144,13 +1164,14 @@ func (m *Manager) stopClock(ctx context.Context, sbID string) {
 }
 
 // revokeKey revokes a sandbox's key, if it has one. A key already gone is
-// fine; any other failure is logged with logMsg and logArgs.
-func (m *Manager) revokeKey(ctx context.Context, sb store.Sandbox, logMsg string, logArgs ...any) {
+// fine; any other failure is logged.
+func (m *Manager) revokeKey(ctx context.Context, sb store.Sandbox) {
 	if sb.KeyID == "" {
 		return
 	}
 	if err := m.st.RevokeKey(ctx, sb.KeyID); err != nil && !errors.Is(err, store.ErrNotFound) {
-		m.log.Warn(logMsg, append(logArgs, "error", err)...)
+		m.log.Warn("sandbox: revoking a sandbox's key failed", "sandbox", sb.ID,
+			"key_id", sb.KeyID, "state", sb.State, "error", err)
 	}
 	m.changed()
 }

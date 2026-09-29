@@ -430,3 +430,67 @@ func TestAnExpiredSandboxResumesWithANewKey(t *testing.T) {
 		t.Errorf("KEERA_GIT_TOKEN = %q, want a new one", newEnv["KEERA_GIT_TOKEN"])
 	}
 }
+
+func TestResumingAnExpiredSandboxLetsTheSamePeopleIn(t *testing.T) {
+	// Resuming an expired sandbox starts it again. On a machine with no disk
+	// of its own nothing survives from before, so its ssh keys have to come
+	// from the row, or nobody can open a shell in it.
+	st, ctx := sandboxStore(t)
+	driver := &recordingDriver{}
+	m := sandbox.NewManager(st, driver, sandbox.ManagerOptions{})
+	const key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample mine@laptop"
+	sb, err := m.Create(ctx, sandbox.CreateRequest{
+		OrgID: "org_1", Owner: "mine@example.ch", Name: "desk", Class: "standard",
+		AuthorizedKeys: []string{key},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ObserveSandbox(ctx, sb.ID, store.SandboxObservation{
+		State: policy.SandboxExpired, Detail: "expired",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	row, err := st.Sandbox(ctx, sb.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver.env = nil
+	if err := m.Resume(ctx, row, policy.ResolvedSandbox{}); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if got := driver.env["desk"]["KEERA_AUTHORIZED_KEYS"]; got != key {
+		t.Errorf("the resumed sandbox was given the keys %q, want %q", got, key)
+	}
+}
+
+// suspendingDriver can suspend, which the stub cannot.
+type suspendingDriver struct{ recordingDriver }
+
+func (*suspendingDriver) Suspend(context.Context, sandbox.Ref) error { return nil }
+
+func TestOffboardCountsOnlyWhatItSuspended(t *testing.T) {
+	// An engineer's expired sandbox is kept, like a suspended one, but saying
+	// it was suspended would count it twice in "what happened to their work".
+	st, ctx := sandboxStore(t)
+	m := sandbox.NewManager(st, &suspendingDriver{}, sandbox.ManagerOptions{})
+	user, err := st.AddUser(ctx, "usr_1", "org_1", "leaver@example.ch", "", "member")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expires := time.Now().Add(time.Hour)
+	for _, sb := range []store.Sandbox{
+		{ID: "sbx_wip", Name: "wip", State: policy.SandboxReady},
+		{ID: "sbx_old", Name: "old", State: policy.SandboxExpired},
+	} {
+		sb.OrgID, sb.UserID, sb.Class, sb.ExpiresAt = "org_1", user.ID, "standard", &expires
+		sb.Purpose = policy.PurposeEngineer
+		if _, err := st.CreateSandbox(ctx, sb); err != nil {
+			t.Fatal(err)
+		}
+	}
+	done, err := m.Offboard(ctx, user.ID)
+	if err != nil || done.Suspended != 1 || done.Terminated != 0 || done.Failed != 0 {
+		t.Errorf("Offboard = %+v, %v; want the running one suspended and nothing else", done, err)
+	}
+}

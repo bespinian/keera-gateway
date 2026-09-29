@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -20,6 +19,7 @@ import (
 
 	"github.com/bespinian/keera-gateway/internal/catalog"
 	"github.com/bespinian/keera-gateway/internal/httpx"
+	"github.com/bespinian/keera-gateway/internal/id"
 	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/sandbox"
 	"github.com/bespinian/keera-gateway/internal/store"
@@ -361,9 +361,9 @@ func (r *sandboxRun) deleteClass(ctx context.Context) error {
 		return err
 	}
 	if !r.yes {
-		fmt.Printf("%s\n", style.head("Deleting the sandbox class "+name+":"))
-		fmt.Println("  nobody can start a new sandbox of this class")
-		fmt.Println("  sandboxes already running on it keep working")
+		fmt.Fprintf(os.Stderr, "%s\n", styleErr.head("Deleting the sandbox class "+name+":"))
+		fmt.Fprintln(os.Stderr, "  nobody can start a new sandbox of this class")
+		fmt.Fprintln(os.Stderr, "  sandboxes already running on it keep working")
 		if err := confirmTyping("class name", name, "nothing was deleted"); err != nil {
 			return err
 		}
@@ -380,7 +380,8 @@ func (r *sandboxRun) deleteClass(ctx context.Context) error {
 	return out(r.asJSON, res, func(w *table) {
 		_, _ = fmt.Fprintf(w, "deleted\t%s\n", res.Name)
 		if res.LiveSandboxes > 0 {
-			_, _ = fmt.Fprintf(w, "\n%d sandbox(es) still run on it.\n", res.LiveSandboxes)
+			_, _ = fmt.Fprintf(w, "\n%s still running on it.\n",
+				plural(res.LiveSandboxes, "sandbox", "sandboxes"))
 		}
 	})
 }
@@ -417,7 +418,7 @@ func (r *sandboxRun) classes(ctx context.Context) error {
 func requireSandbox(ctx context.Context, c *client, org, ref string) (store.Sandbox, error) {
 	ref = sandboxRef(ref)
 	var sb store.Sandbox
-	if strings.HasPrefix(ref, "sbx_") {
+	if id.HasPrefix(ref, "sbx") {
 		err := c.do(ctx, "GET", "/v1/sandboxes/"+url.PathEscape(ref), nil, &sb)
 		return sb, err
 	}
@@ -494,7 +495,7 @@ func proxyTo(ctx context.Context, c *client, org, ref string, port int,
 ) error {
 	ref = sandboxRef(ref)
 	query := ""
-	if !strings.HasPrefix(ref, "sbx_") {
+	if !id.HasPrefix(ref, "sbx") {
 		orgID, err := resolveOrg(ctx, c, org)
 		if err != nil {
 			return err
@@ -618,22 +619,6 @@ func refusal(resp *http.Response, raw []byte) string {
 	return resp.Status
 }
 
-// errorMessage pulls the sentence out of a control-plane error envelope. A
-// refused upgrade is read off a bare connection, not through client.do, and
-// its message ("sandbox fix-login is suspended; resume it") is what the
-// developer can act on.
-func errorMessage(raw []byte) string {
-	var envelope struct {
-		Error struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(raw, &envelope); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(envelope.Error.Message)
-}
-
 // bufferedConn is a connection with a reader in front of it, so bytes the
 // server sent before the response header was read are not lost.
 type bufferedConn struct {
@@ -755,7 +740,7 @@ func printSandboxClasses(w *table, classes []policy.SandboxClass,
 			yours = "no"
 		}
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
-			c.Name, c.Isolation, sizeOf(c.CPU, c.Memory), diskOf(c.Disk),
+			c.Name, c.Isolation, sizeOf(c.CPU, c.Memory), mibOf(c.Disk),
 			c.DefaultTTL, c.MaxTTL, c.Warm, purposesOf(c), statusWord(yours),
 			dash(c.Description))
 	}
@@ -781,19 +766,19 @@ func printSandboxUsage(w *table, by string, since time.Duration,
 }
 
 func confirmSandboxTerminate(sb store.Sandbox) error {
-	fmt.Printf("%s\n", style.head("Terminating the sandbox "+sb.Name+":"))
+	fmt.Fprintf(os.Stderr, "%s\n", styleErr.head("Terminating the sandbox "+sb.Name+":"))
 	// Said for every class: a home with no disk behind it is lost too.
-	fmt.Printf("  its home volume goes with it - anything in %s that is not pushed is lost\n",
+	fmt.Fprintf(os.Stderr, "  its home volume goes with it - anything in %s that is not pushed is lost\n",
 		"/home/"+sandboxUser)
-	fmt.Println("  its API key is revoked")
-	fmt.Println("What it cost and who it belonged to are kept.")
+	fmt.Fprintln(os.Stderr, "  its API key is revoked")
+	fmt.Fprintln(os.Stderr, "What it cost and who it belonged to are kept.")
 	return confirmTyping("name", sb.Name, "nothing was terminated")
 }
 
 func sandboxSize(sb store.Sandbox) string { return sizeOf(sb.CPU, sb.Memory) }
 
 func sizeOf(cpuMillis, memoryMiB int) string {
-	return fmt.Sprintf("%s/%s", coresOf(cpuMillis), diskOf(memoryMiB))
+	return fmt.Sprintf("%s/%s", coresOf(cpuMillis), mibOf(memoryMiB))
 }
 
 func coresOf(millis int) string {
@@ -803,7 +788,8 @@ func coresOf(millis int) string {
 	return fmt.Sprintf("%.1fc", float64(millis)/1000)
 }
 
-func diskOf(mib int) string {
+// mibOf renders a size in MiB, of memory or of disk.
+func mibOf(mib int) string {
 	switch {
 	case mib == 0:
 		return "-"

@@ -333,3 +333,37 @@ func TestCountTokensIsAnsweredWithoutForwarding(t *testing.T) {
 		t.Errorf("status for an unknown model = %d, want 404", resp.StatusCode)
 	}
 }
+
+func TestCountTokensCountsTheGuardrailsSystemPrompt(t *testing.T) {
+	// Every request gets the guardrail's prompt, so a count without it is
+	// low, and a client would compact too late.
+	prompt := strings.Repeat("b", 3000)
+	h, _ := providerHarness(t, "anthropic", "claude-opus-5", jsonBackend(`{}`), guarded(prompt, 1000))
+
+	resp := h.post(t, "/v1/messages/count_tokens",
+		`{"model":"keera-frontier","messages":[{"role":"user","content":"`+strings.Repeat("a", 3000)+`"}]}`)
+	body, _ := io.ReadAll(resp.Body)
+	var out struct {
+		InputTokens int `json:"input_tokens"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil || out.InputTokens != 2000 {
+		t.Errorf("input_tokens = %d, want 2000 with the guardrail's prompt: %s", out.InputTokens, body)
+	}
+}
+
+func TestRenameModelChangesOnlyTheModelField(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`{"id":"1","model":"served","x":1}`, `{"id":"1","model":"alias","x":1}`},
+		{`{"model": "served"}`, `{"model": "alias"}`},
+		{`{"model":"a\"b"}`, `{"model":"alias"}`},
+		{`{"content":"say \"model\":\"x\""}`, `{"content":"say \"model\":\"x\""}`},
+		{`{"model":null}`, `{"model":null}`},
+		{`{"model":"unterminated`, `{"model":"unterminated`},
+		{`data: {"model":"served"}` + "\n\n", `data: {"model":"alias"}` + "\n\n"},
+	}
+	for _, tc := range cases {
+		if got := string(renameModel([]byte(tc.in), "alias")); got != tc.want {
+			t.Errorf("renameModel(%s) = %s, want %s", tc.in, got, tc.want)
+		}
+	}
+}

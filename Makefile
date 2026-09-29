@@ -60,20 +60,27 @@ endif
 .PHONY: check-all
 check-all: check test-integration
 
+# wait-for polls a probe once a second until it succeeds. $(1) is what it
+# waits for, $(2) how many seconds it waits, $(3) the probe, and $(4) prints
+# the logs when it gives up.
+define wait-for
+printf 'waiting for $(1)'; \
+for i in $$(seq 1 $(2)); do \
+	if $(3) >/dev/null 2>&1; then \
+		echo " ready"; exit 0; \
+	fi; \
+	printf '.'; sleep 1; \
+done; \
+echo " timed out"; $(4); exit 1
+endef
+
 .PHONY: pg-up
 pg-up:
 	@$(PODMAN) rm -f $(PG_CONTAINER) >/dev/null 2>&1 || true
 	@$(PODMAN) run --rm -d --name $(PG_CONTAINER) \
 		-e POSTGRES_USER=keera -e POSTGRES_PASSWORD=keera -e POSTGRES_DB=keera_test \
 		-p $(PG_PORT):5432 $(PG_IMAGE) >/dev/null
-	@printf 'waiting for postgres'; \
-	for i in $$(seq 1 60); do \
-		if $(PODMAN) exec $(PG_CONTAINER) pg_isready -U keera -d keera_test >/dev/null 2>&1; then \
-			echo " ready"; exit 0; \
-		fi; \
-		printf '.'; sleep 1; \
-	done; \
-	echo " timed out"; $(PODMAN) logs $(PG_CONTAINER); exit 1
+	@$(call wait-for,postgres,60,$(PODMAN) exec $(PG_CONTAINER) pg_isready -U keera -d keera_test,$(PODMAN) logs $(PG_CONTAINER))
 
 .PHONY: pg-down
 pg-down:
@@ -84,14 +91,7 @@ redis-up:
 	@$(PODMAN) rm -f $(REDIS_CONTAINER) >/dev/null 2>&1 || true
 	@$(PODMAN) run --rm -d --name $(REDIS_CONTAINER) \
 		-p $(REDIS_PORT):6379 $(REDIS_IMAGE) >/dev/null
-	@printf 'waiting for redis'; \
-	for i in $$(seq 1 30); do \
-		if $(PODMAN) exec $(REDIS_CONTAINER) redis-cli ping >/dev/null 2>&1; then \
-			echo " ready"; exit 0; \
-		fi; \
-		printf '.'; sleep 1; \
-	done; \
-	echo " timed out"; $(PODMAN) logs $(REDIS_CONTAINER); exit 1
+	@$(call wait-for,redis,30,$(PODMAN) exec $(REDIS_CONTAINER) redis-cli ping,$(PODMAN) logs $(REDIS_CONTAINER))
 
 .PHONY: redis-down
 redis-down:
@@ -116,8 +116,9 @@ lint:
 
 .PHONY: fmt-check
 fmt-check:
-	@test -z "$$(gofmt -l . | grep -v '^vendor/')" || \
-		{ echo "not gofmt-clean:"; gofmt -l . | grep -v '^vendor/'; exit 1; }
+	@# vendor/ is not in Git, so listing the files skips it.
+	@out=$$(gofmt -l $$(git ls-files -co --exclude-standard '*.go')); \
+		test -z "$$out" || { echo "not gofmt-clean:"; echo "$$out"; exit 1; }
 
 .PHONY: clean
 clean:
@@ -175,8 +176,8 @@ sbom: image
 			scan oci-archive:/scan/image.tar \
 			--source-name '$(GATEWAY_IMAGE)' --source-version "sha256:$$id" \
 			-o '$(SBOM_FORMAT)=/out/$(notdir $(SBOM_FILE))'; \
-	fi
-	@echo "wrote $(SBOM_FILE) for $(GATEWAY_IMAGE) ($$($(PODMAN) image inspect --format '{{.Id}}' $(GATEWAY_IMAGE) | cut -c1-12))"
+	fi && \
+	echo "wrote $(SBOM_FILE) for $(GATEWAY_IMAGE) ($$(echo "$$id" | cut -c1-12))"
 
 # The licences of everything compiled into the binaries. MIT, BSD and Apache-2.0
 # ask for them to ship with a binary, so the image and every release archive
@@ -311,14 +312,7 @@ dev-backends:
 	@# store.Open pings Postgres and fails fast rather than retrying, so air's
 	@# first build would start a binary that exits at once and then sit there
 	@# until the next save. Wait for the database instead.
-	@printf 'waiting for postgres'; \
-	for i in $$(seq 1 60); do \
-		if $(COMPOSE) $(DEV_COMPOSE) exec -T keera-db pg_isready -U keera >/dev/null 2>&1; then \
-			echo " ready"; exit 0; \
-		fi; \
-		printf '.'; sleep 1; \
-	done; \
-	echo " timed out"; $(COMPOSE) $(DEV_COMPOSE) logs keera-db; exit 1
+	@$(call wait-for,postgres,60,$(COMPOSE) $(DEV_COMPOSE) exec -T keera-db pg_isready -U keera,$(COMPOSE) $(DEV_COMPOSE) logs keera-db)
 
 # Takes the containers down but keeps the volumes, so the model weights and the
 # database survive and the next `make dev` is instant. podman-compose prints

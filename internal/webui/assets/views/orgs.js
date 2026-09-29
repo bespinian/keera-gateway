@@ -13,11 +13,12 @@ import {
   icons,
   empty,
   showError,
+  plural,
 } from "../ui.js";
 
 export async function orgsView(ctx) {
   const orgs = (await api.orgs()).data || [];
-  ctx.setSubtitle(`${orgs.length} organisation${orgs.length === 1 ? "" : "s"}`);
+  ctx.setSubtitle(`${orgs.length} ${plural(orgs.length, "organisation")}`);
 
   const head = h(
     "div",
@@ -339,12 +340,7 @@ function deleteOrg(ctx, org) {
         "ul",
         { class: "muted", style: { margin: "8px 0 0", paddingLeft: "20px" } },
         ...counts.map(([n, label]) =>
-          h(
-            "li",
-            {},
-            h("strong", {}, String(n)),
-            ` ${label}${n === 1 ? "" : "s"}`,
-          ),
+          h("li", {}, h("strong", {}, String(n)), ` ${plural(n, label)}`),
         ),
         h("li", {}, "its guardrails and its budget counters"),
         h(

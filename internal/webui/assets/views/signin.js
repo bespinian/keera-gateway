@@ -120,11 +120,8 @@ export async function signIn(root, onSignedIn) {
       h(
         "div",
         { class: "signin-providers" },
-        ...providers.map((p, i) => {
-          const query = new URLSearchParams();
-          query.set("provider", p.name);
-          if (next) query.set("next", next);
-          return h(
+        ...providers.map((p, i) =>
+          h(
             "a",
             {
               // The first is the primary button and the rest are plain. It is
@@ -134,14 +131,12 @@ export async function signIn(root, onSignedIn) {
               // one does.
               class: "btn" + (i === 0 ? " btn-primary" : ""),
               style: { width: "100%", justifyContent: "center" },
-              href:
-                "/control/auth/login" +
-                (query.size ? "?" + query.toString() : ""),
+              href: api.loginURL({ provider: p.name, next }),
             },
             idpMark(p.name) || icon(icons.signout),
             "Continue with " + (p.label || p.name),
-          );
-        }),
+          ),
+        ),
       ),
       h(
         "div",

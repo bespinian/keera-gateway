@@ -97,8 +97,19 @@ func TestLoadDefaultsAreWhatTheDocumentationSays(t *testing.T) {
 	}
 	// No Redis configured is the single-replica shape, and it is the default:
 	// requiring one would make a coordination layer a dependency of a demo.
-	if c.RedisURL != "" {
-		t.Errorf("RedisURL = %q, want empty: Redis is opt-in", c.RedisURL)
+	if c.Redis != nil {
+		t.Errorf("Redis = %+v, want nil: Redis is opt-in", c.Redis)
+	}
+}
+
+func TestARedisURLIsParsedOnce(t *testing.T) {
+	// The limiter takes these options as they are, so Load is the only parse.
+	c, err := loadWith(t, valid(map[string]string{"KEERA_REDIS_URL": "redis://cache:6380/2"}))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.Redis == nil || c.Redis.Addr != "cache:6380" || c.Redis.DB != 2 {
+		t.Errorf("Redis = %+v, want cache:6380, database 2", c.Redis)
 	}
 }
 

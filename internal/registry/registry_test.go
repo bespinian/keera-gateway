@@ -55,13 +55,17 @@ func newSource() *source {
 	}
 }
 
-func (s *source) LookupKey(_ context.Context, hash []byte) (*policy.Resolved, error) {
+func (s *source) LookupKey(ctx context.Context, hash []byte) (*policy.Resolved, error) {
 	s.lookups.Add(1)
 	s.mu.Lock()
 	before := s.beforeLookup
 	s.mu.Unlock()
 	if before != nil {
 		before()
+	}
+	// As Postgres does: a query whose context is gone fails.
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	s.mu.Lock()
@@ -430,6 +434,53 @@ func TestACallerThatGivesUpDoesNotTakeTheOthersWithIt(t *testing.T) {
 	close(release)
 	if err := <-first; err != nil {
 		t.Errorf("the caller doing the work was failed by one that left: %v", err)
+	}
+}
+
+func TestTheCallerDoingTheWorkCanLeaveWithoutFailingTheOthers(t *testing.T) {
+	// The other way round: the first caller's query is the one everybody
+	// waits on, so its client hanging up must not cancel it.
+	s := newSource()
+	s.set("sk-live", resolved("org_1"))
+	release := make(chan struct{})
+	var once sync.Once
+	var arrived sync.WaitGroup
+	arrived.Add(1)
+	s.beforeLookup = func() {
+		once.Do(func() {
+			arrived.Done()
+			<-release
+		})
+	}
+	r := newRegistry(t, s, Options{TTL: time.Minute})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	first := make(chan error, 1)
+	go func() {
+		_, err := r.Resolve(ctx, "sk-live")
+		first <- err
+	}()
+	arrived.Wait()
+
+	joined := make(chan error, 1)
+	go func() {
+		_, err := r.Resolve(context.Background(), "sk-live")
+		joined <- err
+	}()
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-first:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("the caller that gave up got %v, want a cancellation", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the caller that gave up is still waiting on the query")
+	}
+	close(release)
+	if err := <-joined; err != nil {
+		t.Errorf("the caller that joined was failed by the one that left: %v", err)
 	}
 }
 

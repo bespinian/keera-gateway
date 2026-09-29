@@ -224,9 +224,9 @@ func TestConnectRefusesWhenNothingChatIsServed(t *testing.T) {
 }
 
 func TestWrapBreaksProseAndIndentsWhatItCarries(t *testing.T) {
-	got := wrap("one two three four five", 9, "  ")
+	got := wrapAt("one two three four five", 0, 2, 9)
 	want := "one two\n  three\n  four\n  five"
 	if got != want {
-		t.Errorf("wrap = %q, want %q", got, want)
+		t.Errorf("wrapAt = %q, want %q", got, want)
 	}
 }

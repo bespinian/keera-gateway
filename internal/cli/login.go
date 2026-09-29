@@ -181,7 +181,7 @@ func logoutCmd(ctx context.Context, args []string) error {
 func whoamiCmd(ctx context.Context, args []string) error {
 	c := newClient()
 	fs := flag.NewFlagSet("whoami", flag.ExitOnError)
-	asJSON := fs.Bool("json", false, "print raw JSON")
+	asJSON := fs.Bool("json", false, jsonUsage)
 	fs.Usage = func() { _ = printHelp(fs, "whoami", "") }
 	if want, ok := wantsHelp(args); ok {
 		return printHelp(fs, "whoami", want)

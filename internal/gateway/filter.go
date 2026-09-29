@@ -57,10 +57,6 @@ const (
 	// sentence, however long the conversation. That fixed cost is why gates
 	// exist.
 	gateOutputTokens = 192
-	// bytesPerToken sizes a filter's output allowance and checks a request
-	// against a model's context. It is pessimistic on purpose, since both uses
-	// want to over-estimate.
-	bytesPerToken = 3
 )
 
 // rewriteProtocol and gateProtocol are added after the administrator's
@@ -517,7 +513,7 @@ func (s *Server) askOwnModel(ctx context.Context, m policy.Model, payload []byte
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	resp, err := s.dispatch(ctx, m, "/chat/completions", payload)
+	resp, err := s.send(ctx, m, outbound{path: "/chat/completions", payload: payload})
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return nil, 0, fmt.Errorf("%s did not answer within %s", subject, timeout)

@@ -342,9 +342,9 @@ var commands = []command{
 			"'keera limit' and 'keera budget' set one part of a guardrail each.\n\n" +
 			"For an organisation the id may be left out: it is then your own.",
 		subs: []subcommand{
-			{name: "get", aliases: []string{"show"}, args: "<scope> <id>", summary: "what this one scope sets; scope is org, team or key",
+			{name: "get", aliases: []string{"show"}, args: "<scope> [<id>]", summary: "what this one scope sets; scope is org, team or key",
 				flags: []string{"json"}},
-			{name: "effective", args: "<scope> <id>",
+			{name: "effective", args: "<scope> [<id>]",
 				summary: "what a request actually meets, and which level decided each part",
 				flags:   []string{"json"},
 				prose: "The chain collapsed the way the gateway collapses it, with the level " +
@@ -354,7 +354,7 @@ var commands = []command{
 					"System prompts and filters add up, outermost first.",
 				examples: []string{"keera guardrail effective key key_06g9…"},
 			},
-			{name: "set", aliases: []string{"edit", "update"}, args: "<scope> <id>", summary: "set any of them on a scope",
+			{name: "set", aliases: []string{"edit", "update"}, args: "<scope> [<id>]", summary: "set any of them on a scope",
 				flags: []string{"models", "rpm", "tpm", "max-output-tokens", "budget", "period",
 					"system-prompt", "no-system-prompt", "filters", "no-filters", "tools",
 					"block-hosted-tools", "allow-hosted-tools", "max-sandboxes",
@@ -369,7 +369,7 @@ var commands = []command{
 		name:    "limit",
 		aliases: []string{"limits"},
 		summary: "a scope's rate limits, on their own",
-		args:    "<scope> <id> [flags]",
+		args:    "<scope> [<id>] [flags]",
 		flags:   []string{"rpm", "tpm", "max-output-tokens", "json"},
 		prose: "The rate-limiting part of 'guardrail set', and nothing else. Same object, " +
 			"same scopes, same nesting - fewer flags to read.\n\n" +
@@ -383,7 +383,7 @@ var commands = []command{
 		name:    "budget",
 		aliases: []string{"budgets"},
 		summary: "a scope's budget, on its own",
-		args:    "<scope> <id> [flags]",
+		args:    "<scope> [<id>] [flags]",
 		flags:   []string{"budget", "period", "json"},
 		prose: "The spending part of 'guardrail set', and nothing else. Spend past a budget " +
 			"is refused with 402, not 429: a client reading it as \"slow down\" would retry " +
@@ -795,7 +795,7 @@ func writeProse(b *strings.Builder, prose string) {
 			b.WriteString(indent(para, "  ") + "\n\n")
 			continue
 		}
-		b.WriteString("  " + wrapAt(para, 2) + "\n\n")
+		b.WriteString("  " + wrapAt(para, 2, 2, proseWidth) + "\n\n")
 	}
 	// The caller's next section opens with its own blank line.
 	trimTrailingBlank(b)
@@ -804,20 +804,21 @@ func writeProse(b *strings.Builder, prose string) {
 // proseWidth is the width help and reports are laid out for.
 const proseWidth = 78
 
-// wrapAt breaks text to proseWidth, for text that starts at column start
-// because something is already printed in front of it. Every line after the
-// first is indented to that column.
-func wrapAt(text string, start int) string {
+// wrapAt breaks text to width. The first line starts at column first,
+// because something is already printed in front of it, and every later line
+// is indented to column indent. It counts runes, not bytes, because the prose
+// holds em-dashes.
+func wrapAt(text string, first, indent, width int) string {
 	var b strings.Builder
-	column := start
+	column := first
 	for i, word := range strings.Fields(text) {
 		n := len([]rune(word))
 		switch {
 		case i == 0:
-			column = start + n
-		case column+1+n > proseWidth:
-			b.WriteString("\n" + strings.Repeat(" ", start))
-			column = start + n
+			column = first + n
+		case column+1+n > width:
+			b.WriteString("\n" + strings.Repeat(" ", indent))
+			column = indent + n
 		default:
 			b.WriteString(" ")
 			column += 1 + n
@@ -870,7 +871,7 @@ func writeFlagLines(b *strings.Builder, fs *flag.FlagSet, names []string) {
 	}
 	for _, r := range rows {
 		fmt.Fprintf(b, "  %s  %s\n", padTo(style.cmd(r.left), width),
-			wrapAt(r.usage, width+4))
+			wrapAt(r.usage, width+4, width+4, proseWidth))
 	}
 }
 

@@ -45,6 +45,8 @@ func (s *Server) createOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		return
 	}
 	s.auditf(r, p, org.ID, "org.create", "org", org.ID, org)
+	// Its models, copied from the template, are for the gateway to serve now.
+	s.changed(r)
 	httpx.WriteJSON(w, http.StatusCreated, org)
 }
 
@@ -202,11 +204,10 @@ func (s *Server) teamOrg(w http.ResponseWriter, r *http.Request, p *authn.Princi
 		s.fail(w, err)
 		return "", false
 	}
-	orgID, ok := s.scopeOrg(w, p, owner)
-	if !ok || !s.requireOrgAdmin(w, p, orgID) {
+	if !s.requireOwnerAdmin(w, p, owner) {
 		return "", false
 	}
-	return orgID, true
+	return owner, true
 }
 
 // requireTeamInOrg refuses a team from another organisation. The foreign key
@@ -402,7 +403,7 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request, p *authn.Pri
 		s.fail(w, err)
 		return
 	}
-	if !s.requireOrgAdmin(w, p, target.OrgID) {
+	if !s.requireOwnerAdmin(w, p, target.OrgID) {
 		return
 	}
 	if target.Role == string(authn.RoleOperator) {
@@ -497,7 +498,7 @@ func (s *Server) userToSwitch(w http.ResponseWriter, r *http.Request, p *authn.P
 		s.fail(w, err)
 		return target, false
 	}
-	if !s.requireOrgAdmin(w, p, target.OrgID) {
+	if !s.requireOwnerAdmin(w, p, target.OrgID) {
 		return target, false
 	}
 	if target.ID == p.UserID {
@@ -607,14 +608,8 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	info := store.KeyInfo{
 		ID: id.New("key"), OrgID: orgID, TeamID: in.TeamID, UserID: in.UserID, Alias: in.Alias,
 	}
-	if in.ExpiresIn != "" {
-		d, err := time.ParseDuration(in.ExpiresIn)
-		if err != nil || d <= 0 {
-			badRequest(w, "'expires_in' must be a positive duration such as 720h")
-			return
-		}
-		t := time.Now().Add(d)
-		info.ExpiresAt = &t
+	if info.ExpiresAt, ok = expiresIn(w, in.ExpiresIn); !ok {
+		return
 	}
 
 	secret, hash, prefix, err := auth.Generate()
@@ -657,31 +652,13 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		return
 	}
 	oldID := r.PathValue("id")
-	// Another tenant's key answers 404, not 403, so ids cannot be probed.
-	owner, holder, err := s.st.KeyOwner(r.Context(), oldID)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	if !p.CanReadOrg(owner) {
-		s.fail(w, store.ErrNotFound)
-		return
-	}
-	if !p.CanManageKeyFor(owner, holder) {
-		s.forbid(w, "a member can only rotate a key attributed to themselves; "+
-			"somebody else's, or one attributed to nobody, is for an "+
-			"administrator of this organisation")
+	owner, _, ok := s.keyToManage(w, r, p, oldID, "rotate")
+	if !ok {
 		return
 	}
 	next := store.KeyInfo{ID: id.New("key"), Alias: in.Alias}
-	if in.ExpiresIn != "" {
-		d, err := time.ParseDuration(in.ExpiresIn)
-		if err != nil || d <= 0 {
-			badRequest(w, "'expires_in' must be a positive duration such as 720h")
-			return
-		}
-		t := time.Now().Add(d)
-		next.ExpiresAt = &t
+	if next.ExpiresAt, ok = expiresIn(w, in.ExpiresIn); !ok {
+		return
 	}
 	secret, hash, prefix, err := auth.Generate()
 	if err != nil {
@@ -733,24 +710,49 @@ func (s *Server) listKeys(w http.ResponseWriter, r *http.Request, p *authn.Princ
 	})
 }
 
-func (s *Server) revokeKey(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	keyID := r.PathValue("id")
-	// Another tenant's key answers 404, not 403, so ids cannot be probed.
+// keyToManage reads whose key keyID is, and checks the caller may verb it.
+// Another tenant's key answers 404, not 403, so ids cannot be probed. Inside
+// their organisation a member can already see every key, so they are told
+// whose key it is rather than "not found".
+func (s *Server) keyToManage(w http.ResponseWriter, r *http.Request, p *authn.Principal,
+	keyID, verb string,
+) (owner, holder string, ok bool) {
 	owner, holder, err := s.st.KeyOwner(r.Context(), keyID)
 	if err != nil {
 		s.fail(w, err)
-		return
+		return "", "", false
 	}
 	if !p.CanReadOrg(owner) {
 		s.fail(w, store.ErrNotFound)
-		return
+		return "", "", false
 	}
-	// Inside their organisation a member can already see every key, so they
-	// are told whose key it is rather than "not found".
 	if !p.CanManageKeyFor(owner, holder) {
-		s.forbid(w, "a member can only revoke a key attributed to themselves; "+
+		s.forbid(w, "a member can only "+verb+" a key attributed to themselves; "+
 			"somebody else's, or one attributed to nobody, is for an "+
 			"administrator of this organisation")
+		return "", "", false
+	}
+	return owner, holder, true
+}
+
+// expiresIn reads a key's 'expires_in'. Empty means the key does not expire.
+func expiresIn(w http.ResponseWriter, in string) (*time.Time, bool) {
+	if in == "" {
+		return nil, true
+	}
+	d, err := time.ParseDuration(in)
+	if err != nil || d <= 0 {
+		badRequest(w, "'expires_in' must be a positive duration such as 720h")
+		return nil, false
+	}
+	t := time.Now().Add(d)
+	return &t, true
+}
+
+func (s *Server) revokeKey(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
+	keyID := r.PathValue("id")
+	owner, holder, ok := s.keyToManage(w, r, p, keyID, "revoke")
+	if !ok {
 		return
 	}
 	if err := s.st.RevokeKey(r.Context(), keyID); err != nil {

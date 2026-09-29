@@ -114,8 +114,9 @@ for the warm-up probe some Anthropic clients send.
 
 The inference plane speaks chat completions, so the other two are translated on
 the way in and back on the way out. Fields that chat completions has no place
-for, such as thinking blocks, reasoning items and OpenAI's built-in tools, are
-dropped.
+for, such as thinking blocks, reasoning items, OpenAI's built-in tools and
+Anthropic's server tools, are dropped. Every answer names the alias as its
+model, never the backend's name for it.
 
 The exception: a Messages request to a model declared with Anthropic, or a
 Responses request to a model declared with OpenAI, is forwarded as it is.
@@ -185,8 +186,8 @@ decided each value.
 4. Refuse the request if it cannot fit in the destination's context.
 5. **Filters**, outermost level first: each may rewrite the request or refuse it,
    with a model and an instruction or with a list of expressions.
-6. Prepend the standing system prompt, take out blocked hosted tools, and clamp
-   the output ceiling.
+6. Prepend the standing system prompt (chat requests only; a completion has no
+   place for one), take out blocked hosted tools, and clamp the output ceiling.
 7. Forward, stream the answer back, and record what it cost.
 
 Why this order:
@@ -230,6 +231,10 @@ answer in time.
 Usage is recorded once per request, when it ends, from the token counts the
 inference plane reported. If the client disconnects before those arrive, the
 request is charged on an estimate and marked as estimated.
+
+A client that hangs up before any answer still gets a row, with status 499 and
+marked as cancelled. It carries what the router and the filters had spent by
+then, so hanging up never makes them free.
 
 If you put an ingress in front, turn off response buffering and set a read
 timeout longer than the longest completion. Most controllers buffer by default.
@@ -312,10 +317,10 @@ Errors come in the shape of the API that was called. The codes:
 | 401    | `missing_api_key`, `invalid_api_key`, `expired_api_key`, `revoked_api_key`                                            |
 | 402    | `budget_exceeded`                                                                                                     |
 | 403    | `filter_refused`                                                                                                      |
-| 404    | `model_not_found`: no such model, or the key may not use it                                                           |
+| 404    | `model_not_found`: no such model, or the key may not use it; `mcp_server_not_found`                                   |
 | 413    | `request_too_large` (`KEERA_MAX_BODY_BYTES`), `filter_input_too_large`                                                |
 | 429    | `rate_limit_exceeded` (`rpm`), `token_rate_limit_exceeded` (`tpm`)                                                    |
-| 502    | `upstream_unavailable`, `filter_failed`                                                                               |
+| 502    | `upstream_unavailable`, `filter_failed`, `mcp_credential_refused`, `mcp_unavailable`                                  |
 | 503    | `control_plane_unavailable`, `no_backend`, `filter_unavailable`, `router_undecided`, `router_destination_unavailable` |
 
 ## Metrics
@@ -330,8 +335,8 @@ organisation.
 | `keera_tokens_total`             | model, org, status | input plus output tokens                                 |
 | `keera_request_duration_seconds` | model, org, status | wall time of a request                                   |
 | `keera_gateway_overhead_seconds` | model, org         | time the gateway added, not counting filters and routers |
-| `keera_upstream_errors_total`    | model, org         | failed attempts at a model                               |
-| `keera_inflight_requests`        |                    | requests open against the inference plane now            |
+| `keera_upstream_errors_total`    | model, org         | a model not reached, or a 5xx a router moved past        |
+| `keera_inflight_requests`        |                    | requests waiting for the inference plane to answer       |
 | `keera_ratelimit_fallback_total` |                    | rate-limit decisions made without Redis                  |
 
 Filters, routers and MCP tool calls have their own metrics, listed in

@@ -402,8 +402,9 @@ Or use **Users → Disable** in the panel. Immediately:
 - they cannot sign in, and all their sessions and `keera login` tokens end
 - every key attributed to them is revoked for good
 - their agent sandboxes, and any sandbox that has not started yet, are
-  terminated. Their other sandboxes are suspended with the volume kept, so an
-  administrator can decide what to do with the work
+  terminated. Their other sandboxes are suspended with the volume kept. An
+  administrator can keep or terminate them; getting at the work inside takes an
+  operator, since nobody else can open a shell in another person's sandbox
 - the repository credentials those sandboxes held are revoked
 
 Usage, sandboxes and audit entries keep their name. `keera user enable` lets

@@ -157,8 +157,8 @@ func printSession(w *table, res sessionResponse) {
 	}
 
 	// Oldest first: a task that went wrong is read from its beginning.
-	_, _ = fmt.Fprintf(w, "\nREQUEST\tWHEN\tMODEL\tSTATUS\tCOST (%s)\tFIRST TOKEN\tMESSAGE\n",
-		res.Currency)
+	_, _ = fmt.Fprintln(w)
+	w.header(fmt.Sprintf("REQUEST\tWHEN\tMODEL\tSTATUS\tCOST (%s)\tFIRST TOKEN\tMESSAGE", res.Currency))
 	for _, r := range res.Requests {
 		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%d\t%s\t%dms\t%s\n",
 			r.ID, r.TS.Local().Format("15:04:05"), dash(r.Alias), r.Status,

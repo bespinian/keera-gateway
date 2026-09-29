@@ -175,11 +175,6 @@ func (s *Server) forward(ctx context.Context, chain []policy.Model,
 	return f
 }
 
-// dispatch sends an OpenAI-shaped request to one of a model's backends.
-func (s *Server) dispatch(ctx context.Context, model policy.Model, path string, payload []byte) (*http.Response, error) {
-	return s.send(ctx, model, outbound{path: path, payload: payload})
-}
-
 // send sends the request to one of a model's backends, moving to the next one
 // only if a backend cannot be connected to. It never resends a request a
 // backend may have received: generation is not free, a 500 from vLLM is an

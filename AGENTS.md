@@ -53,7 +53,7 @@ make check             # test + vet + fmt-check
 make test              # go test -race -cover ./...
 make test-integration  # store, control and ratelimit tests, against Postgres and Redis
 make check-all         # check + test-integration
-make lint              # golangci-lint, if installed
+make lint              # golangci-lint; says how to install it if missing
 make dev               # the development loop: backends in containers, gateway under air
 make dev TIER=gpu      # the same with vLLM instead of llama.cpp, for tool calls
 make dev-down          # stop the backend containers make dev left running

@@ -188,12 +188,14 @@ not in this repository. They read the same settings as above. Only the image
 they run is built here:
 
 ```sh
-go mod vendor                                                       # once
-podman build -t <registry>/keera-gateway:0.1.0 -f Containerfile .
+go mod vendor                                                     # once
+make image GATEWAY_IMAGE=<registry>/keera-gateway:0.1.0 VERSION=0.1.0
 podman push <registry>/keera-gateway:0.1.0
 ```
 
-The vendor directory is not committed. With it, the build works offline. The
+The vendor directory is not committed, and the build needs it. With it, the
+build works offline. `VERSION` is what the binary reports; without it, the
+image says `devel`. The
 result is a `FROM scratch` image with one static binary. The release workflow
 also publishes one for every `v*` tag, as
 `ghcr.io/bespinian/keera-gateway:<tag>`.
@@ -302,9 +304,9 @@ written to the audit log, so you can show when a model last worked.
 
 ## Publishing it
 
-Port 8080 carries the panel, the control API and the inference API. There is
-no second port to firewall; only the operator key and a session cookie protect
-the control side. So:
+Port 8080 carries the panel, the control API, the inference API and sandbox
+attach. There is no second port to firewall; only the operator key and a
+session cookie protect the control side. So:
 
 - **Put a TLS terminator in front.** None of these deployments terminates TLS.
 - **Turn off response buffering** on the proxy, and set a read timeout longer

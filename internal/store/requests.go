@@ -137,6 +137,23 @@ type RequestQuery struct {
 	Limit int
 }
 
+// where is the condition on everything in q but the outcome, on $1 to $11.
+func (q RequestQuery) where() string {
+	return `($1 = '' OR org_id = $1)
+		  AND ($2::timestamptz IS NULL OR ts >= $2)
+		  AND ($3::timestamptz IS NULL OR ts < $3)
+		  AND ($4 = 0 OR status = $4)
+		  AND ($5 = 0 OR status / 100 = $5)
+		  AND ($6 = 0 OR id < $6)
+		  AND ($7 = 0 OR id > $7)` + q.narrow("", 7)
+}
+
+// whereArgs are the values where refers to.
+func (q RequestQuery) whereArgs() []any {
+	return append([]any{q.OrgID, nullableTime(q.From), nullableTime(q.To), q.Status,
+		q.StatusClass, q.Before, q.After}, q.args()...)
+}
+
 // Requests returns the matching rows, newest first.
 //
 // An empty OrgID means every tenant, which only an operator ever asks for.
@@ -146,17 +163,9 @@ func (s *Store) Requests(ctx context.Context, q RequestQuery) ([]Request, error)
 	}
 	rows, err := s.pool.Query(ctx, `SELECT `+requestColumns+`
 		FROM usage_events
-		WHERE `+outcomeClause(q.Outcome)+`
-		  AND ($1 = '' OR org_id = $1)
-		  AND ($2 = 0 OR status = $2)
-		  AND ($3::timestamptz IS NULL OR ts >= $3)
-		  AND ($4::timestamptz IS NULL OR ts < $4)
-		  AND ($5 = 0 OR id < $5)
-		  AND ($6 = 0 OR status / 100 = $6)
-		  AND ($7 = 0 OR id > $7)`+q.narrow("", 7)+`
+		WHERE `+outcomeClause(q.Outcome)+` AND `+q.where()+`
 		ORDER BY id DESC LIMIT $12`,
-		append([]any{q.OrgID, q.Status, nullableTime(q.From), nullableTime(q.To), q.Before,
-			q.StatusClass, q.After}, append(q.args(), q.Limit)...)...)
+		append(q.whereArgs(), q.Limit)...)
 	if err != nil {
 		return nil, err
 	}
@@ -187,15 +196,7 @@ func (s *Store) Outcomes(ctx context.Context, q RequestQuery) (RequestOutcomes, 
 		count(*) FILTER (WHERE `+outcomeClauses[OutcomeRefused]+`),
 		count(*) FILTER (WHERE `+outcomeClauses[OutcomeInterrupted]+`)
 		FROM usage_events
-		WHERE ($1 = '' OR org_id = $1)
-		  AND ($2::timestamptz IS NULL OR ts >= $2)
-		  AND ($3::timestamptz IS NULL OR ts < $3)
-		  AND ($4 = 0 OR status = $4)
-		  AND ($5 = 0 OR status / 100 = $5)
-		  AND ($6 = 0 OR id < $6)
-		  AND ($7 = 0 OR id > $7)`+q.narrow("", 7),
-		append([]any{q.OrgID, nullableTime(q.From), nullableTime(q.To), q.Status,
-			q.StatusClass, q.Before, q.After}, q.args()...)...,
+		WHERE `+q.where(), q.whereArgs()...,
 	).Scan(&c.Total, &c.OK, &c.Failed, &c.Refused, &c.Interrupted)
 	return c, err
 }
@@ -246,8 +247,8 @@ type RequestFacets struct {
 // RequestFilters counts the window by model, key, team, person and status.
 //
 // Only the tenant, the outcome and the time bounds of q are read, so the
-// screen still offers the other values after one is picked. So a model picked after a team can match nothing, and the screen
-// says so.
+// screen still offers the other values after one is picked. A model picked
+// after a team can then match nothing, and the screen says so.
 func (s *Store) RequestFilters(ctx context.Context, q RequestQuery) (RequestFacets, error) {
 	f := RequestFacets{
 		Models:   []FacetCount{},

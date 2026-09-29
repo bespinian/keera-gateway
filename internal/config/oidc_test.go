@@ -56,8 +56,9 @@ func TestEachProviderReadsItsOwnSettings(t *testing.T) {
 		t.Errorf("google issuer = %q", google.IssuerURL)
 	}
 
-	if entra.GroupsClaim != "roles" || google.GroupsClaim != "groups" {
-		t.Errorf("groups claims = %q and %q, want the override and the default",
+	// Unset is empty, which authn reads as "groups".
+	if entra.GroupsClaim != "roles" || google.GroupsClaim != "" {
+		t.Errorf("groups claims = %q and %q, want the override and unset",
 			entra.GroupsClaim, google.GroupsClaim)
 	}
 	if entra.Mapping.Default != authn.RoleAdmin || google.Mapping.Default != authn.RoleMember {

@@ -1,8 +1,9 @@
 package control
 
 import (
+	"cmp"
 	"net/http"
-	"sort"
+	"slices"
 
 	"github.com/bespinian/keera-gateway/internal/authn"
 	"github.com/bespinian/keera-gateway/internal/connect"
@@ -89,11 +90,8 @@ func (s *Server) trafficMap(w http.ResponseWriter, r *http.Request, p *authn.Pri
 		})
 	}
 	// Busiest first, so a crowded map shows the models that matter.
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Requests != out[j].Requests {
-			return out[i].Requests > out[j].Requests
-		}
-		return out[i].Alias < out[j].Alias
+	slices.SortFunc(out, func(a, b mapModel) int {
+		return cmp.Or(cmp.Compare(b.Requests, a.Requests), cmp.Compare(a.Alias, b.Alias))
 	})
 
 	clients := make([]mapClient, 0, len(rep.Clients))
@@ -102,11 +100,8 @@ func (s *Server) trafficMap(w http.ResponseWriter, r *http.Request, p *authn.Pri
 			Key: key, Label: connect.ClientLabel(key), Cell: cell,
 		})
 	}
-	sort.Slice(clients, func(i, j int) bool {
-		if clients[i].Requests != clients[j].Requests {
-			return clients[i].Requests > clients[j].Requests
-		}
-		return clients[i].Key < clients[j].Key
+	slices.SortFunc(clients, func(a, b mapClient) int {
+		return cmp.Or(cmp.Compare(b.Requests, a.Requests), cmp.Compare(a.Key, b.Key))
 	})
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{

@@ -14,7 +14,7 @@ tmp_dir = "build/air"
 env_files = []
 
 [build]
-  cmd = "go build -mod=vendor -trimpath -o ./build/air/keera-gateway ./cmd/keera-gateway"
+  cmd = "go build -trimpath -o ./build/air/keera-gateway ./cmd/keera-gateway"
   bin = "./build/air/keera-gateway"
   args_bin = ["serve"]
 

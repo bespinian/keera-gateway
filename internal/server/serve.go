@@ -74,10 +74,7 @@ func serve(ctx context.Context) error {
 	mreg := metrics.New()
 	recorder := usage.NewRecorder(st, usage.Options{}, log)
 
-	limiter, closeLimiter, err := buildLimiter(ctx, cfg, mreg, log)
-	if err != nil {
-		return err
-	}
+	limiter, closeLimiter := buildLimiter(ctx, cfg, mreg, log)
 	defer closeLimiter()
 
 	gw := gateway.New(reg, reg.Budgets(), limiter, recorder, mreg, gateway.Options{
@@ -290,16 +287,16 @@ func warnGoogleGroups(p *authn.OIDC, log *slog.Logger) {
 	if !isGoogle(p.Issuer()) {
 		return
 	}
-	setting := "KEERA_OIDC_" + strings.ToUpper(strings.ReplaceAll(p.Name(), "-", "_"))
+	setting := config.OIDCEnvPrefix(p.Name())
 	switch {
 	case p.Mapping().DecidesAdmin():
-		log.Warn(setting+"_ADMIN_GROUPS is set for a Google Workspace provider, "+
+		log.Warn(setting+"ADMIN_GROUPS is set for a Google Workspace provider, "+
 			"which issues no groups claim; it will match nobody, and setting it "+
 			"stops roles being assigned in the panel, the CLI and the API - "+
 			"unset it and make administrators with `keera user role`",
 			"provider", p.Name())
 	case p.Mapping().UsesGroups():
-		log.Warn(setting+"_OPERATOR_GROUPS is set for a Google Workspace "+
+		log.Warn(setting+"OPERATOR_GROUPS is set for a Google Workspace "+
 			"provider, which issues no groups claim; it will match nobody - "+
 			"name operators in KEERA_OPERATORS instead",
 			"provider", p.Name())
@@ -358,15 +355,12 @@ type limiter interface {
 // replicas share one allowance, and the in-memory limiter is the fallback.
 func buildLimiter(ctx context.Context, cfg config.Config, mreg *metrics.Registry,
 	log *slog.Logger,
-) (limiter, func(), error) {
+) (limiter, func()) {
 	local := ratelimit.New()
-	if cfg.RedisURL == "" {
-		return local, func() {}, nil
+	if cfg.Redis == nil {
+		return local, func() {}
 	}
-	opt, err := redis.ParseURL(cfg.RedisURL)
-	if err != nil {
-		return nil, nil, fmt.Errorf("KEERA_REDIS_URL: %w", err)
-	}
+	opt := cfg.Redis
 	rdb := redis.NewClient(opt)
 
 	// Ping once, so an unreachable Redis shows up at start. It is a warning,
@@ -385,7 +379,7 @@ func buildLimiter(ctx context.Context, cfg config.Config, mreg *metrics.Registry
 	return ratelimit.NewRedis(rdb, local, ratelimit.RedisOptions{
 		Prefix:  cfg.RedisPrefix,
 		Metrics: mreg,
-	}, log), func() { _ = rdb.Close() }, nil
+	}, log), func() { _ = rdb.Close() }
 }
 
 // sweep bounds the memory the caches hold. Without it a public endpoint keeps
@@ -450,9 +444,9 @@ func purgeOld(ctx context.Context, st *store.Store, cfg config.Config, log *slog
 		n, err := st.PurgeUsage(ctx, now.Add(-cfg.UsageRetention))
 		switch {
 		case err != nil && ctx.Err() == nil:
-			log.Error("purging old usage events failed", "error", err, "deleted", n)
+			log.Error("purging old usage failed", "error", err, "deleted", n)
 		case n > 0:
-			log.Info("purged usage events past their retention window", "deleted", n)
+			log.Info("purged usage past its retention window", "deleted", n)
 		}
 	}
 	if cfg.AuditRetention > 0 {
@@ -516,17 +510,17 @@ func buildSandboxes(ctx context.Context, st *store.Store, reg *registry.Registry
 		log.Warn("sandboxes are enabled but no address is configured for them to reach this " +
 			"gateway on; sandboxes will be created with no inference configured, which is a " +
 			"machine a developer can work in and an agent cannot " +
-			"(set KEERA_SANDBOX_PUBLIC_URL to this gateway's in-cluster address)")
+			"(set KEERA_SANDBOX_PUBLIC_URL to the address sandboxes reach this gateway on)")
 	}
 
 	caps := driver.Capabilities()
 	log.Info("sandboxes enabled", "driver", driver.Name(),
 		"isolation", caps.Isolation, "warm", caps.Warm,
 		"namespace", cfg.Sandbox.Namespace, "idle_suspend", cfg.Sandbox.IdleSuspend)
-	// Without a RuntimeClass, sandboxes get the same isolation as every other
-	// pod on the node, which is weak for running a model's output.
+	// Without a stronger runtime, sandboxes get the same isolation as anything
+	// else on the host, which is weak for running a model's output.
 	if caps.Isolation == policy.IsolationStandard {
-		log.Warn("no sandbox RuntimeClass is mapped, so sandboxes run with the node's own " +
+		log.Warn("no stronger sandbox runtime is mapped, so sandboxes run with the host's own " +
 			"isolation; a class asking for 'isolated' or 'vm' will be refused rather than " +
 			"quietly downgraded (KEERA_SANDBOX_RUNTIME_ISOLATED, KEERA_SANDBOX_RUNTIME_VM)")
 	}

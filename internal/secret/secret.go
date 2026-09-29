@@ -29,6 +29,8 @@ func New(key string) (*Box, error) {
 		return nil, errors.New("the encryption key is too short to be one; generate one with: openssl rand -hex 32")
 	}
 	// Domain separation: the same value used elsewhere yields a different key.
+	// It seals MCP credentials too; the label predates them, and changing it
+	// would make every stored credential unreadable.
 	sum := sha256.Sum256([]byte("keera-model-credential-v1|" + key))
 	block, err := aes.NewCipher(sum[:])
 	if err != nil {

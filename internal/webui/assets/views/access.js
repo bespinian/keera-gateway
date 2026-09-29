@@ -28,6 +28,7 @@ import {
   confirm,
   toast,
   go,
+  plural,
 } from "../ui.js";
 import { oneLine, statusMeaning } from "../status.js";
 import { canRevoke, revokeBody } from "./keys.js";
@@ -80,7 +81,7 @@ export async function accessView(ctx) {
       h(
         "div",
         { class: "banner banner-warn", style: { marginBottom: "16px" } },
-        `${num(recent.length)} request${recent.length === 1 ? " was" : "s were"} refused or failed in the ` +
+        `${num(recent.length)} ${plural(recent.length, "request was", "requests were")} refused or failed in the ` +
           `last 24 hours: ${statusMeaning(recent[0].status)[0].toLowerCase()}` +
           `${recent.some((f) => f.status !== recent[0].status) ? ", among others" : ""}. ` +
           "Details are at the bottom of this screen.",
@@ -226,7 +227,7 @@ function summary(live, currency) {
   if (!live.length) return "no active key";
   const spend = live.reduce((a, k) => a + (k.spend_micros || 0), 0);
   return (
-    `${live.length} active key${live.length === 1 ? "" : "s"} · ` +
+    `${live.length} active ${plural(live.length, "key")} · ` +
     `${money(spend, currency)} this month`
   );
 }

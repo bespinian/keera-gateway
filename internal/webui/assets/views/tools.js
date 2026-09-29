@@ -5,7 +5,7 @@
 // of it, how long it took and how much went each way - which is enough to see
 // an agent looping on one tool, or sending four megabytes to a chat channel.
 
-import { h, table, pill, num, ms, dateTime } from "../ui.js";
+import { h, table, pill, ms, bytes, dateTime } from "../ui.js";
 
 // OUTCOMES are the words a tool call ends in, and how each is drawn.
 const OUTCOMES = {
@@ -19,13 +19,6 @@ const OUTCOMES = {
 function toolOutcome(outcome) {
   const [label, tone] = OUTCOMES[outcome] || [outcome, ""];
   return pill(label, tone);
-}
-
-// bytes is a size for a person: 812 B, 4.2 kB, 3.1 MB.
-export function bytes(n) {
-  if (n < 1000) return `${num(n)} B`;
-  if (n < 1e6) return `${(n / 1e3).toFixed(1)} kB`;
-  return `${(n / 1e6).toFixed(1)} MB`;
 }
 
 // toolCallTable lists tool calls, one row each.

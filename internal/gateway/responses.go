@@ -86,15 +86,8 @@ type responsesPart struct {
 // decode turns a Responses request into a chat completion request.
 func (responsesShape) decode(raw []byte) ([]byte, error) {
 	var in responsesRequest
-	if err := json.Unmarshal(raw, &in); err != nil {
-		var typeErr *json.UnmarshalTypeError
-		if errors.As(err, &typeErr) && typeErr.Field != "" {
-			return nil, errors.New("the '" + typeErr.Field + "' field has the wrong type")
-		}
-		return nil, errors.New("request body is not a valid Responses request: " + err.Error())
-	}
-	if in.Model == "" {
-		return nil, errors.New("the 'model' field is required")
+	if err := decodeRequest(raw, &in, "Responses"); err != nil {
+		return nil, err
 	}
 	msgs, err := responsesMessages(in)
 	if err != nil {
@@ -267,16 +260,7 @@ func responsesTools(in []responsesTool) []oaiTool {
 		if t.Type != "function" || t.Name == "" {
 			continue
 		}
-		schema := t.Parameters
-		if len(schema) == 0 || string(schema) == "null" {
-			schema = emptySchema
-		}
-		tools = append(tools, oaiTool{
-			Type: "function",
-			Function: oaiToolDeclaration{
-				Name: t.Name, Description: t.Description, Parameters: schema,
-			},
-		})
+		tools = append(tools, functionTool(t.Name, t.Description, t.Parameters))
 	}
 	return tools
 }
@@ -519,10 +503,6 @@ func (responsesDialect) usage(raw []byte) *tokenUsage {
 		return nil
 	}
 	return doc.Usage.tokens()
-}
-
-func (responsesDialect) rename(raw []byte, alias string) []byte {
-	return renameIn(raw, "", alias)
 }
 
 func (responsesDialect) stream(alias string) nativeStream {

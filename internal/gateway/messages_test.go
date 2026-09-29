@@ -294,6 +294,29 @@ func TestDecodeTranslatesToolsAndToolChoice(t *testing.T) {
 	}
 }
 
+func TestDecodeDropsAnthropicServerTools(t *testing.T) {
+	// A server tool runs on Anthropic's servers. Declared to another model as a
+	// function with no schema, it would be a tool nothing can run.
+	req := decodeMessages(t, `{
+		"model": "keera-code",
+		"max_tokens": 100,
+		"messages": [{"role":"user","content":"hi"}],
+		"tools": [
+			{"type":"web_search_20250305","name":"web_search","max_uses":3},
+			{"type":"custom","name":"read","input_schema":{"type":"object"}},
+			{"name":"ping"}
+		]
+	}`)
+	tools, _ := req["tools"].([]any)
+	var names []string
+	for _, tool := range tools {
+		names = append(names, tool.(map[string]any)["function"].(map[string]any)["name"].(string))
+	}
+	if strings.Join(names, ",") != "read,ping" {
+		t.Errorf("tools = %v, want the client's own tools only", names)
+	}
+}
+
 func TestDecodeNamesAToolChoiceByFunction(t *testing.T) {
 	req := decodeMessages(t, `{"model":"keera-code","max_tokens":1,
 		"messages":[{"role":"user","content":"hi"}],
@@ -309,7 +332,6 @@ func TestDecodeNamesAToolChoiceByFunction(t *testing.T) {
 
 func TestDecodeRejectsWhatItCannotTranslate(t *testing.T) {
 	for name, in := range map[string]string{
-		"no model":      `{"max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`,
 		"no messages":   `{"model":"keera-code","max_tokens":1,"messages":[]}`,
 		"bad role":      `{"model":"keera-code","max_tokens":1,"messages":[{"role":"tool","content":"x"}]}`,
 		"bad content":   `{"model":"keera-code","max_tokens":1,"messages":[{"role":"user","content":42}]}`,

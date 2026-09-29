@@ -140,8 +140,8 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, p *authn.Princ
 // requests is the event log: one row per request, whatever happened to it,
 // narrowed to the entity whose screen is asking.
 //
-// Administrator-only, like the failure log: the rows name other people's keys
-// and carry messages from the inference plane. Members see their own traffic
+// Administrator-only: the rows name other people's keys and carry messages
+// from the inference plane. Members see their own traffic
 // on My access.
 func (s *Server) requests(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	if !s.requireOrgAdmin(w, p, p.OrgID) {

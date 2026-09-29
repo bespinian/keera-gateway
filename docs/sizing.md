@@ -68,7 +68,9 @@ Keep in mind:
   start-up.
 
 Retention runs hourly and deletes in batches of 5,000, so it does not block the
-replicas that write to the usage log. Each pass logs how many rows it deleted.
+replicas that write to the usage log. Closed budget windows in `spend` go with
+it in one statement; that table is small. Each pass logs how many rows it
+deleted.
 
 ## Read cost
 

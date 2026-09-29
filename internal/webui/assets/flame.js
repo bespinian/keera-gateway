@@ -106,7 +106,7 @@ const GROUPS = [
  *  the number rather than the whole chart being written in one of them. A chart
  *  in milliseconds rounds half its bars to zero; one in microseconds asks its
  *  reader to count digits to find out whether a model took two seconds. */
-export function micros(v) {
+function micros(v) {
   const n = Math.max(0, Math.round(v || 0));
   if (n < 1000) return n + " µs";
   if (n < 10000) return (n / 1000).toFixed(1) + " ms";

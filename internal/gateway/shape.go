@@ -64,16 +64,21 @@ type openAIShape struct{}
 
 func (openAIShape) decode(raw []byte) ([]byte, error) { return raw, nil }
 
-func (openAIShape) encode(raw []byte, _ string, status int) ([]byte, int) {
-	return raw, status
+// encode names the alias as the model, the only change it makes: the client
+// was promised the alias, never the backend's name for it.
+func (openAIShape) encode(raw []byte, alias string, status int) ([]byte, int) {
+	if status >= 300 {
+		return raw, status
+	}
+	return renameModel(raw, alias), status
 }
 
 func (openAIShape) contentType() string { return "" }
 
-func (openAIShape) pipe(dst io.Writer, flush func(), src io.Reader, _ string,
+func (openAIShape) pipe(dst io.Writer, flush func(), src io.Reader, alias string,
 	dropUsageEvent bool,
 ) (streamStats, error) {
-	return pipeSSE(dst, flush, src, dropUsageEvent)
+	return pipeSSE(dst, flush, src, alias, dropUsageEvent)
 }
 
 func (openAIShape) writeError(w http.ResponseWriter, status int, typ, code, msg string) {

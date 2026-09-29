@@ -208,7 +208,7 @@ func (r *Registry) Write(w io.Writer) {
 		func(s *series) int64 { return s.count.Load() })
 	tools.histogram("keera_tool_call_duration_seconds", "Wall time of an MCP tool call.", false)
 
-	header(w, "keera_inflight_requests", "Requests currently open against the inference plane.", "gauge")
+	header(w, "keera_inflight_requests", "Requests waiting for the inference plane to start answering.", "gauge")
 	_, _ = fmt.Fprintf(w, "keera_inflight_requests %d\n", r.inflight.Load())
 }
 

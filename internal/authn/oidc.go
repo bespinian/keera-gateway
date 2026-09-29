@@ -32,7 +32,7 @@ type OIDCConfig struct {
 	RedirectURL string
 	Scopes      []string
 	// GroupsClaim is where the provider puts group membership, usually
-	// "groups" and sometimes "roles".
+	// "groups" and sometimes "roles". Empty is "groups".
 	GroupsClaim string
 	Mapping     RoleMapping
 	// Domains are the email domains this provider may vouch for. The domain

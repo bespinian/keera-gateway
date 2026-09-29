@@ -289,7 +289,7 @@ func (k *Kubernetes) apply(ctx context.Context, path string, obj any) error {
 	collection := path[:strings.LastIndexByte(path, '/')]
 	err := k.c.post(ctx, collection, obj, nil)
 	if isConflict(err) {
-		return k.c.patch(ctx, path, obj, nil)
+		return k.c.patch(ctx, path, obj)
 	}
 	return err
 }

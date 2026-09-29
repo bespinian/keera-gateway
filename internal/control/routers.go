@@ -331,7 +331,7 @@ func (s *Server) checkRouterModel(w http.ResponseWriter, r *http.Request, orgID,
 		s.fail(w, err)
 		return false
 	case m.Kind != policy.KindChat:
-		badRequest(w, "'"+alias+"' is a "+string(m.Kind)+" model; a router reads text and answers with a "+
+		badRequest(w, "'"+alias+"' is a "+string(m.Kind)+" model; a router reads text and answers with an "+
 			"alias, which only a chat model does")
 		return false
 	}

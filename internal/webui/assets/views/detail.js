@@ -37,12 +37,13 @@ import {
   releaseDay,
   crumb,
   isAdmin,
+  plural,
 } from "../ui.js";
 import { areaChart, barList } from "../chart.js";
 import { requestLog, setOutcome } from "./requestlog.js";
 import { sessionLog, setUnhappy } from "./sessions.js";
 import { modelsCell, summarise } from "./guardrails.js";
-import { canEditModels, openModel } from "./models.js";
+import { openModel } from "./models.js";
 import { canRevoke, openKey, revokeBody, stateOf } from "./keys.js";
 import { openTeam } from "./teams.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
@@ -82,7 +83,7 @@ export async function teamDetailView(ctx) {
     hide: { team: true },
     meta: [
       pill(
-        `${num(team.active_keys)} key${team.active_keys === 1 ? "" : "s"} not revoked`,
+        `${num(team.active_keys)} ${plural(team.active_keys, "key")} not revoked`,
       ),
       budgetPill(ctx, team),
     ],
@@ -302,7 +303,7 @@ export async function modelDetailView(ctx) {
   if (!ctx.orgID) return chooseOrg(ctx, "Models");
   const models = (await api.models(ctx.orgID)).data || [];
   const model = models.find((m) => m.alias === ctx.param);
-  const canEdit = model ? canEditModels(ctx) : false;
+  const canEdit = model ? isAdmin(ctx) : false;
 
   return screen(ctx, {
     back: { path: "/models", label: "Models" },
@@ -406,7 +407,7 @@ export async function modelDetailView(ctx) {
                       { class: "faint" },
                       // Backends are for administrators, so an empty list
                       // does not mean there are none.
-                      canEditModels(ctx) ? "none" : "not shown to your role",
+                      isAdmin(ctx) ? "none" : "not shown to your role",
                     ),
               ],
               [

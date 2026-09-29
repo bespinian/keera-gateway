@@ -12,6 +12,7 @@ import {
   icon,
   icons,
   showError,
+  plural,
 } from "../ui.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
 
@@ -52,7 +53,7 @@ export async function peopleView(ctx) {
   // sign-in, so the screen says where roles come from rather than offering a
   // control that does not keep.
   const canAssign = !ctx.state.me.roles_from_directory;
-  ctx.setSubtitle(`${users.length} user${users.length === 1 ? "" : "s"}`);
+  ctx.setSubtitle(`${users.length} ${plural(users.length, "user")}`);
 
   const head = h(
     "div",
@@ -367,8 +368,7 @@ function disablePerson(ctx, user) {
     danger: true,
     onConfirm: async () => {
       const res = await api.disableUser(user.id);
-      const keys =
-        res.revoked_keys === 1 ? "1 key" : `${res.revoked_keys} keys`;
+      const keys = `${res.revoked_keys} ${plural(res.revoked_keys, "key")}`;
       toast(
         res.warning
           ? `${user.email} disabled. ${res.warning}`

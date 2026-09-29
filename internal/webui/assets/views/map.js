@@ -34,6 +34,7 @@ import {
   currentRange,
   rangePicker,
   go,
+  liveControl,
 } from "../ui.js";
 
 // How the boxes are sized. Fixed rather than measured: a map whose boxes are as
@@ -101,7 +102,18 @@ export async function mapView(ctx) {
   const tip = h("div", { class: "map-tip", hidden: true });
   const holder = h("div", { class: "card map-holder" }, canvas, tip);
 
-  const live = liveControl();
+  const live = liveControl({
+    key: "keera.map.live",
+    label: "Follow the request log",
+    titles: {
+      live: "Live: requests cross the map as they happen. Click to pause.",
+      connecting: "Reconnecting. Click to stop.",
+      paused: "Paused. The numbers cover the selected window.",
+      stopped:
+        "The live stream stopped. Click to try again, or reload the page.",
+    },
+    words: { paused: "Paused", stopped: "Reconnect" },
+  });
   const head = h(
     "div",
     { class: "map-head" },
@@ -1347,61 +1359,6 @@ function refresh(ctx, { since, scene, painter }) {
 }
 
 /* --------------------------------------------------------------- controls */
-
-/** liveControl is the switch, and the one thing on the screen that says whether
- *  what is in front of the reader is current. It is the request log's switch,
- *  down to the dot and the four things the dot can mean: a map that has quietly
- *  stopped following the log looks exactly like a deployment that has gone
- *  quiet, and those are not the same afternoon. */
-function liveControl() {
-  const KEY = "keera.map.live";
-  const on = sessionStorage.getItem(KEY) !== "off";
-  const blip = h("span", { class: "blip" });
-  const text = h("span", {}, "Live");
-  const button = h(
-    "button",
-    {
-      class: "btn btn-sm",
-      type: "button",
-      "aria-pressed": String(on),
-      "aria-label": "Follow the request log",
-    },
-    blip,
-    text,
-  );
-  let listener = null;
-
-  const control = {
-    on,
-    el: button,
-    state(what) {
-      blip.dataset.state = what;
-      button.title = {
-        live: "Live: requests cross the map as they happen. Click to pause.",
-        connecting: "Reconnecting. Click to stop.",
-        paused: "Paused. The numbers cover the selected window.",
-        stopped:
-          "The live stream stopped. Click to try again, or reload the page.",
-      }[what];
-      text.textContent =
-        what === "paused"
-          ? "Paused"
-          : what === "stopped"
-            ? "Reconnect"
-            : "Live";
-    },
-    onChange(fn) {
-      listener = fn;
-    },
-  };
-  button.addEventListener("click", () => {
-    control.on = !control.on;
-    sessionStorage.setItem(KEY, control.on ? "on" : "off");
-    button.setAttribute("aria-pressed", String(control.on));
-    if (listener) listener(control.on);
-  });
-  return control;
-}
 
 function legend() {
   const mark = (cls, label) =>

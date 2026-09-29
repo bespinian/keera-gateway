@@ -301,11 +301,11 @@ func (s *Server) useRouter(c *call, b *body) bool {
 	if rt.Decides() || ref != nil || d.why != "" {
 		c.tr.since(store.SpanRoute, rt.Alias, routeAt, routeNote(d, ref))
 	}
-	// A router that decides is counted now; one that tries is counted after
+	// A router that decides is counted here; one that tries is counted after
 	// forwarding. A refusal is counted either way, since nothing else would
 	// show a router that has stopped placing traffic.
-	if ref != nil || rt.Decides() {
-		s.metrics.RouterRun(rt.Alias, c.res.Key.OrgID, string(d.outcome),
+	count := func(outcome store.RouterOutcome) {
+		s.metrics.RouterRun(rt.Alias, c.res.Key.OrgID, string(outcome),
 			d.alias, d.took.Seconds(), d.micros)
 	}
 	if d.why != "" {
@@ -314,12 +314,17 @@ func (s *Server) useRouter(c *call, b *body) bool {
 		c.ev.Error = "the router " + strconv.Quote(rt.Alias) + " could not choose: " + d.why
 	}
 	if ref != nil {
+		count(d.outcome)
 		c.ev.CostMicros = d.micros
 		s.refuse(c, *ref)
 		return false
 	}
 	if c.r.Context().Err() != nil {
-		return false // the client hung up while the router was deciding
+		if rt.Decides() {
+			count(d.outcome)
+		}
+		s.hungUp(c, "while the router was deciding", "")
+		return false
 	}
 
 	// From here on the request is about the chosen model. That it was chosen
@@ -330,10 +335,14 @@ func (s *Server) useRouter(c *call, b *body) bool {
 		// Only offered destinations can be chosen, so this is an unchecked
 		// fallback, or a model deleted a moment ago.
 		c.ev.RouterOutcome = store.RouterError
+		count(store.RouterError)
 		s.refuse(c, *noDestination(fmt.Sprintf("the router %q placed this request on '%s', "+
 			"which cannot serve it: the model is missing, disabled, of another kind, or has "+
 			"no backend", rt.Alias, c.alias)))
 		return false
+	}
+	if rt.Decides() {
+		count(d.outcome)
 	}
 	c.model = model
 	c.ev.Alias = c.alias
@@ -405,7 +414,8 @@ func (s *Server) useFilters(c *call, b *body) bool {
 		return false
 	}
 	if c.r.Context().Err() != nil {
-		return false // the client hung up while a filter was running
+		s.hungUp(c, "while a filter was running", "")
+		return false
 	}
 	if run.rewrote && c.native != nil && c.translated {
 		if !s.retranslate(c, b) {
@@ -495,7 +505,8 @@ func (s *Server) answer(c *call, b *body) {
 		defer func() { _ = fw.resp.Body.Close() }()
 	}
 	if c.r.Context().Err() != nil {
-		return // the client hung up while we were connecting
+		s.hungUp(c, "before the model answered", fw.note())
+		return
 	}
 	// The destination that answered is the model this request is about now:
 	// its tokens, its price, its name in the answer.
@@ -716,12 +727,6 @@ func (s *Server) finish(ev store.Event, model policy.Model, res *policy.Resolved
 		s.load.observe(model.Key(), ev.TTFT, time.Now())
 	}
 }
-
-// estimateInputTokens is used only when a client disconnected before the
-// upstream reported real counts. Four bytes per token is the usual rule of
-// thumb for code, and the JSON envelope makes it a slight over-estimate, which
-// is the right way to err for a guardrail.
-func estimateInputTokens(payload []byte) int { return len(payload) / 4 }
 
 // clampOutputTokens holds a request to the guardrail's ceiling rather than
 // refusing it, so an administrator's limit does not break a developer's editor.

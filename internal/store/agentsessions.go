@@ -46,9 +46,10 @@ func DerivedSessionKey(hash string) string { return derivedPrefix + hash }
 // the idle gap anyway.
 const MaxSessionInput = 128 << 10
 
-// SessionHash derives a session hash. It lives here because two callers need
-// it: the gateway for each request, and a sandbox for the session id it will
-// send. Two copies would drift apart, and the sessions would no longer match.
+// SessionHash derives a session hash. It lives here because the gateway
+// computes it for each request, and a sandbox, through StatedSessionKeyFor,
+// for the session id it will send. Two copies would drift apart, and the
+// sessions would no longer match.
 //
 // The kind is mixed in so a stated id and an opening prompt with the same bytes
 // still differ. The zero separator is a byte no id or JSON document contains.
@@ -68,9 +69,12 @@ func SessionHash(keyID, kind string, payload []byte) string {
 	return base64.RawURLEncoding.EncodeToString(sum.Sum(nil)[:12])
 }
 
-// SessionKindStated is the kind mixed in for a session the client named. It is
-// exported so that the two callers cannot spell it differently.
-const SessionKindStated = "stated"
+// The kinds mixed in: a session the client named, and one derived from the
+// opening prompt.
+const (
+	SessionKindStated  = "stated"
+	SessionKindOpening = "opening"
+)
 
 // StatedSessionKeyFor is the key that appears on the usage rows of every
 // request made with keyID that names session stated in a session header.
@@ -356,8 +360,8 @@ func (s *Store) AgentSessionSummary(ctx context.Context,
 }
 
 // AgentSessionAt is the session holding any one of its requests, together with
-// all of its requests. A reader usually arrives from one row in the request or
-// failure log.
+// all of its requests. A reader usually arrives from one row in the request
+// log.
 //
 // The summary comes from the same query that lists sessions, so a session on
 // its own screen always matches its row in a list.

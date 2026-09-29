@@ -639,7 +639,7 @@ func (k *Kubernetes) Revive(ctx context.Context, spec Spec) error {
 			"env":       claimEnvList(spec.Env),
 			"lifecycle": map[string]any{"shutdownTime": until},
 		}}
-		if err := kubeNotFound(k.c.patch(ctx, k.claimPath(spec.Ref), patch, nil)); err != nil {
+		if err := kubeNotFound(k.c.patch(ctx, k.claimPath(spec.Ref), patch)); err != nil {
 			return err
 		}
 		return k.setMode(ctx, spec.Ref, "Running")
@@ -651,7 +651,7 @@ func (k *Kubernetes) Revive(ctx context.Context, spec Spec) error {
 			"containers": []kubeContainer{sandboxContainer(spec)},
 		}},
 	}}
-	return kubeNotFound(k.c.patch(ctx, k.object(spec.Ref), patch, nil))
+	return kubeNotFound(k.c.patch(ctx, k.object(spec.Ref), patch))
 }
 
 func (k *Kubernetes) setMode(ctx context.Context, ref Ref, mode string) error {
@@ -666,7 +666,7 @@ func (k *Kubernetes) setMode(ctx context.Context, ref Ref, mode string) error {
 		path = bound
 	}
 	patch := map[string]any{"spec": map[string]any{"operatingMode": mode}}
-	return kubeNotFound(k.c.patch(ctx, path, patch, nil))
+	return kubeNotFound(k.c.patch(ctx, path, patch))
 }
 
 // Extend moves the shutdown time.
@@ -687,7 +687,7 @@ func (k *Kubernetes) Extend(ctx context.Context, ref Ref, until time.Time) error
 			},
 		}
 	}
-	return kubeNotFound(k.c.patch(ctx, path, patch, nil))
+	return kubeNotFound(k.c.patch(ctx, path, patch))
 }
 
 // Terminate removes the sandbox and, through owner references, its pod,

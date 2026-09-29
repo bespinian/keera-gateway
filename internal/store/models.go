@@ -27,8 +27,7 @@ func scanModel(r row) (policy.Model, error) {
 	return m, nil
 }
 
-// LoadModels reads every organisation's models. An empty catalogue is nil,
-// not an empty slice.
+// LoadModels reads every organisation's models.
 func (s *Store) LoadModels(ctx context.Context) ([]policy.Model, error) {
 	return s.queryModels(ctx, modelColumns+" FROM models ORDER BY org_id, alias")
 }
@@ -65,7 +64,7 @@ func (s *Store) UpsertModel(ctx context.Context, m policy.Model) error {
 }
 
 // querier is what a pool and a transaction share, so a write can run on its
-// own or inside CreateOrg's transaction.
+// own or inside a transaction.
 type querier interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 
@@ -281,7 +282,7 @@ func modelCmd(ctx context.Context, args []string) error {
 }
 
 func (r *modelRun) validate() error {
-	if err := r.args(1, "usage: keera model validate <catalogue.yaml>"); err != nil {
+	if err := r.oneArg("usage: keera model validate <catalogue.yaml>"); err != nil {
 		return err
 	}
 	models, err := catalog.LoadModels(r.fs.Arg(0))
@@ -304,7 +305,7 @@ func (r *modelRun) list(ctx context.Context) error {
 }
 
 func (r *modelRun) add(ctx context.Context) error {
-	if err := r.args(1, "usage: keera model add <alias> [flags]"); err != nil {
+	if err := r.oneArg("usage: keera model add <alias> [flags]"); err != nil {
 		return err
 	}
 	alias := r.fs.Arg(0)
@@ -319,7 +320,7 @@ func (r *modelRun) add(ctx context.Context) error {
 }
 
 func (r *modelRun) set(ctx context.Context) error {
-	if err := r.args(1, "usage: keera model set <alias> [flags]"); err != nil {
+	if err := r.oneArg("usage: keera model set <alias> [flags]"); err != nil {
 		return err
 	}
 	// The endpoint replaces the entry, so read it first to keep what was not
@@ -346,7 +347,7 @@ func (r *modelRun) save(ctx context.Context, orgID, alias string, m catalog.Mode
 }
 
 func (r *modelRun) toggle(ctx context.Context) error {
-	if err := r.args(1, fmt.Sprintf("usage: keera model %s <alias>", r.sub)); err != nil {
+	if err := r.oneArg(fmt.Sprintf("usage: keera model %s <alias>", r.sub)); err != nil {
 		return err
 	}
 	m, err := r.requireModel(ctx, r.fs.Arg(0))
@@ -358,7 +359,7 @@ func (r *modelRun) toggle(ctx context.Context) error {
 }
 
 func (r *modelRun) check(ctx context.Context) error {
-	if err := r.args(1, "usage: keera model check <alias>"); err != nil {
+	if err := r.oneArg("usage: keera model check <alias>"); err != nil {
 		return err
 	}
 	alias := r.fs.Arg(0)
@@ -381,7 +382,7 @@ func (r *modelRun) check(ctx context.Context) error {
 }
 
 func (r *modelRun) apply(ctx context.Context) error {
-	if err := r.args(1, "usage: keera model apply <catalogue.yaml>"); err != nil {
+	if err := r.oneArg("usage: keera model apply <catalogue.yaml>"); err != nil {
 		return err
 	}
 	models, err := catalog.LoadModels(r.fs.Arg(0))
@@ -402,13 +403,13 @@ func (r *modelRun) apply(ctx context.Context) error {
 	}
 	return out(r.asJSON, models, func(w *table) {
 		printModels(w, models)
-		_, _ = fmt.Fprintf(w, "\napplied %d model(s). A model the file does not name is left alone.\n",
-			len(models))
+		_, _ = fmt.Fprintf(w, "\napplied %s. A model the file does not name is left alone.\n",
+			plural(len(models), "model"))
 	})
 }
 
 func (r *modelRun) delete(ctx context.Context) error {
-	if err := r.args(1, "usage: keera model delete <alias> [--yes]"); err != nil {
+	if err := r.oneArg("usage: keera model delete <alias> [--yes]"); err != nil {
 		return err
 	}
 	m, err := r.requireModel(ctx, r.fs.Arg(0))
@@ -427,9 +428,9 @@ func (r *modelRun) delete(ctx context.Context) error {
 	return deleteAlias(ctx, r.c, modelPath(m.OrgID, m.Alias, ""), m.Alias, r.asJSON)
 }
 
-// args checks the number of positional arguments.
-func (r *modelRun) args(n int, usage string) error {
-	if r.fs.NArg() != n {
+// oneArg checks that there is exactly one positional argument.
+func (r *modelRun) oneArg(usage string) error {
+	if r.fs.NArg() != 1 {
 		return errors.New(usage)
 	}
 	return nil
@@ -503,20 +504,20 @@ func modelUsers(ctx context.Context, c *client, orgID, alias string) (filters, r
 // confirmModelDelete makes the caller type the alias back. Clients name
 // models, so removing one breaks every client that still names it.
 func confirmModelDelete(m policy.Model, filters, routers []string) error {
-	fmt.Printf("%s\n", style.head("Deleting the model "+m.Alias+":"))
-	fmt.Printf("  every client that names it starts being refused\n")
-	fmt.Printf("  guardrails that allow only %s stop allowing anything\n", m.Alias)
+	fmt.Fprintf(os.Stderr, "%s\n", styleErr.head("Deleting the model "+m.Alias+":"))
+	fmt.Fprintf(os.Stderr, "  every client that names it starts being refused\n")
+	fmt.Fprintf(os.Stderr, "  guardrails that allow only %s stop allowing anything\n", m.Alias)
 	if len(filters) > 0 {
-		fmt.Printf("  the filters that run on it refuse every request they cover: %s\n",
+		fmt.Fprintf(os.Stderr, "  the filters that run on it refuse every request they cover: %s\n",
 			strings.Join(filters, ", "))
 	}
 	if len(routers) > 0 {
-		fmt.Printf("  the routers that name it lose it: %s\n", strings.Join(routers, ", "))
+		fmt.Fprintf(os.Stderr, "  the routers that name it lose it: %s\n", strings.Join(routers, ", "))
 	}
 	if m.HasAPIKey {
-		fmt.Println("  its stored credential is removed")
+		fmt.Fprintln(os.Stderr, "  its stored credential is removed")
 	}
-	fmt.Println("Usage history and the audit log are kept.")
+	fmt.Fprintln(os.Stderr, "Usage history and the audit log are kept.")
 	return confirmTyping("alias", m.Alias, "nothing was deleted")
 }
 
@@ -536,9 +537,8 @@ func printProviders(w *table) {
 		}
 		// The description goes last: a trailing cell is not padded, so a long
 		// one does not push the other columns out of line.
-		_, _ = fmt.Fprintf(w,
-			"  MODEL\tRELEASED\tCONTEXT\tIN/MTOK\tCACHED/MTOK\tOUT/MTOK (%s)\tDESCRIPTION\n",
-			p.Currency)
+		w.header(fmt.Sprintf(
+			"  MODEL\tRELEASED\tCONTEXT\tIN/MTOK\tCACHED/MTOK\tOUT/MTOK (%s)\tDESCRIPTION", p.Currency))
 		for _, m := range p.Models {
 			_, _ = fmt.Fprintf(w, "  %s\t%s\t%d\t%s\t%s\t%s\t%s\n", m.ID, dash(m.ReleaseDate),
 				m.MaxContext,

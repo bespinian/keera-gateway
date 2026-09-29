@@ -44,9 +44,6 @@ type dialect interface {
 	auth(client http.Header) func(h http.Header, credential string)
 	// usage reads the token counts off a buffered answer.
 	usage(raw []byte) *tokenUsage
-	// rename writes the alias over the backend's model name in a buffered
-	// answer.
-	rename(raw []byte, alias string) []byte
 	// stream reads a streamed answer as it passes through.
 	stream(alias string) nativeStream
 	// stripHostedTools takes out the tools the provider runs on its own
@@ -77,7 +74,7 @@ func (s *Server) relayNativeBuffered(c *call, resp *http.Response, answered time
 	var usage *tokenUsage
 	if err == nil && resp.StatusCode < 300 {
 		usage = c.surf.dialect.usage(raw)
-		raw = c.surf.dialect.rename(raw, c.alias)
+		raw = renameIn(raw, "", c.alias)
 	}
 	if msg := bufferedError(err, raw, resp.StatusCode, resp.StatusCode); msg != "" {
 		c.ev.Error = msg
@@ -206,6 +203,45 @@ func renameIn(raw []byte, key, alias string) []byte {
 		return raw
 	}
 	return out
+}
+
+// modelKey is the start of the model field in an OpenAI answer or chunk.
+var modelKey = []byte(`"model":`)
+
+// renameModel writes the alias as the value of the first model field in an
+// OpenAI answer or chunk, and leaves every other byte as it came.
+//
+// It works on the bytes, because a stream has one chunk per token and each
+// would otherwise be decoded and encoded again. That is safe: inside a JSON
+// string a quote is escaped, so the first unescaped `"model":` is a key, and
+// in these documents the only one is the answer's own.
+func renameModel(raw []byte, alias string) []byte {
+	i := bytes.Index(raw, modelKey)
+	if i < 0 {
+		return raw
+	}
+	start := i + len(modelKey)
+	for start < len(raw) && (raw[start] == ' ' || raw[start] == '\t') {
+		start++
+	}
+	if start >= len(raw) || raw[start] != '"' {
+		return raw
+	}
+	end := start + 1
+	for end < len(raw) && raw[end] != '"' {
+		if raw[end] == '\\' {
+			end++
+		}
+		end++
+	}
+	if end >= len(raw) {
+		return raw
+	}
+	name, _ := json.Marshal(alias)
+	out := make([]byte, 0, len(raw)-(end+1-start)+len(name))
+	out = append(out, raw[:start]...)
+	out = append(out, name...)
+	return append(out, raw[end+1:]...)
 }
 
 // ------------------------------------------------------------------ text

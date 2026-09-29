@@ -234,12 +234,20 @@ type stringList []string
 func (l *stringList) String() string { return strings.Join(*l, ",") }
 
 func (l *stringList) Set(v string) error {
+	*l = append(*l, splitList(v)...)
+	return nil
+}
+
+// splitList splits a comma-separated value, dropping spaces and empty items,
+// so "a, b" means the same as "a,b".
+func splitList(v string) []string {
+	var items []string
 	for s := range strings.SplitSeq(v, ",") {
 		if s = strings.TrimSpace(s); s != "" {
-			*l = append(*l, s)
+			items = append(items, s)
 		}
 	}
-	return nil
+	return items
 }
 
 // show writes one "name<tab>value" row, for the printers that describe one
@@ -288,9 +296,14 @@ func yesNo(b bool) string {
 }
 
 // plural renders a count with its noun, so a single one is not "1 rules".
-func plural(n int, noun string) string {
+// A noun that does not just take an "s" passes its plural too:
+// plural(n, "sandbox", "sandboxes").
+func plural(n int, noun string, many ...string) string {
 	if n == 1 {
 		return "1 " + noun
+	}
+	if len(many) > 0 {
+		return strconv.Itoa(n) + " " + many[0]
 	}
 	return strconv.Itoa(n) + " " + noun + "s"
 }

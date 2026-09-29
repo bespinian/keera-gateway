@@ -207,42 +207,16 @@ func printConnect(c connect.Client, m policy.Model, base string) {
 	fmt.Fprintln(os.Stderr)
 	fmt.Println(c.Render(base, alias, m.MaxContext))
 	if c.Note != "" {
-		fmt.Fprintf(os.Stderr, "\n   %s\n", styleErr.muted(wrap(c.NoteText(), 76, "   ")))
+		fmt.Fprintf(os.Stderr, "\n   %s\n", styleErr.muted(wrapAt(c.NoteText(), 0, 3, 76)))
 	}
 
-	fmt.Fprintf(os.Stderr, "\n%s %s\n", styleErr.head("3."), wrap(c.RunText(alias), 76, "   "))
-}
-
-// wrap breaks prose to width, indenting the lines it carries over. It counts
-// runes, not bytes, because the prose holds em-dashes.
-func wrap(text string, width int, indent string) string {
-	var b strings.Builder
-	column := 0
-	for i, word := range strings.Fields(text) {
-		n := len([]rune(word))
-		switch {
-		case i == 0:
-			column = n
-		case column+1+n > width:
-			b.WriteString("\n" + indent)
-			column = len([]rune(indent)) + n
-		default:
-			b.WriteString(" ")
-			column += 1 + n
-		}
-		b.WriteString(word)
-	}
-	return b.String()
+	fmt.Fprintf(os.Stderr, "\n%s %s\n", styleErr.head("3."), wrapAt(c.RunText(alias), 0, 3, 76))
 }
 
 // connectRouters reads the organisation's routers as model entries with no
 // backend and no context window, which is what a router is to a client. Which
 // model answers is decided per request, so no context window is right.
-func connectRouters(ctx context.Context, c *client, org string) ([]policy.Model, error) {
-	orgID, err := resolveOrg(ctx, c, org)
-	if err != nil {
-		return nil, err
-	}
+func connectRouters(ctx context.Context, c *client, orgID string) ([]policy.Model, error) {
 	routers, err := list[policy.Router](ctx, c, inOrg("/v1/routers", orgID))
 	if err != nil {
 		return nil, err

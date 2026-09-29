@@ -91,6 +91,19 @@ export function ms(v) {
     : Math.round(v) + " ms";
 }
 
+/** bytes is a size for a person: 812 B, 4.2 kB, 3.1 MB. */
+export function bytes(n) {
+  if (n < 1000) return `${num(n)} B`;
+  if (n < 1e6) return `${(n / 1e3).toFixed(1)} kB`;
+  return `${(n / 1e6).toFixed(1)} MB`;
+}
+
+/** plural is the word for n of something: word for one, many for the rest.
+ *  many is word + "s" unless given, for words like "sandbox" that differ. */
+export function plural(n, word, many = word + "s") {
+  return n === 1 ? word : many;
+}
+
 /** duration is how long something ran, in the units somebody would say it in.
  *
  *  ms() is for one request, where the interesting range is milliseconds to a
@@ -433,7 +446,7 @@ export const RANGES = [
 
 /** currentRange is the window in force. Screens read it rather than a default
  *  of their own; DEFAULT_RANGE is the one they all start on. */
-export const DEFAULT_RANGE = "168h";
+const DEFAULT_RANGE = "168h";
 
 export function currentRange() {
   try {
@@ -470,6 +483,54 @@ export function rangePicker(ctx, since) {
       ),
     ),
   );
+}
+
+/** liveControl is the Live switch on a screen that follows the request log,
+ *  and the one thing on it that says whether what is shown is current.
+ *
+ *  Its dot tells four states apart: watching, reconnecting, paused by the
+ *  reader, or stopped. A screen that has quietly stopped following looks just
+ *  like a quiet afternoon, and the reader should not mistake one for the other.
+ *
+ *  key remembers the choice for the session, label names the button for a
+ *  screen reader, titles say what each state means, and words, if given,
+ *  change the button's text with the state. */
+export function liveControl({ key, label, titles, words = {} }) {
+  const on = sessionStorage.getItem(key) !== "off";
+  const blip = h("span", { class: "blip" });
+  const text = h("span", {}, "Live");
+  const button = h(
+    "button",
+    {
+      class: "btn btn-sm",
+      type: "button",
+      "aria-pressed": String(on),
+      "aria-label": label,
+    },
+    blip,
+    text,
+  );
+  let listener = null;
+
+  const control = {
+    on,
+    el: button,
+    state(what) {
+      blip.dataset.state = what;
+      button.title = titles[what];
+      text.textContent = words[what] || "Live";
+    },
+    onChange(fn) {
+      listener = fn;
+    },
+  };
+  button.addEventListener("click", () => {
+    control.on = !control.on;
+    sessionStorage.setItem(key, control.on ? "on" : "off");
+    button.setAttribute("aria-pressed", String(control.on));
+    if (listener) listener(control.on);
+  });
+  return control;
 }
 
 export function pill(text, tone) {

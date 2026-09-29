@@ -219,16 +219,16 @@ func confirmKeyRevoke(k store.KeySummary) error {
 	if named == "" {
 		named, noun = k.ID, "id"
 	}
-	fmt.Printf("%s\n", style.head(fmt.Sprintf("Revoking %s (%s):", named, k.ID)))
-	fmt.Println("  every client still holding it is refused from its next call")
-	fmt.Println("  nothing can print it again, so it cannot be put back")
+	fmt.Fprintf(os.Stderr, "%s\n", styleErr.head(fmt.Sprintf("Revoking %s (%s):", named, k.ID)))
+	fmt.Fprintln(os.Stderr, "  every client still holding it is refused from its next call")
+	fmt.Fprintln(os.Stderr, "  nothing can print it again, so it cannot be put back")
 	if k.LastUsedAt != nil {
-		fmt.Printf("  it was last used %s\n", k.LastUsedAt.Format(time.DateOnly))
+		fmt.Fprintf(os.Stderr, "  it was last used %s\n", k.LastUsedAt.Format(time.DateOnly))
 	} else {
-		fmt.Println("  it has never been used")
+		fmt.Fprintln(os.Stderr, "  it has never been used")
 	}
-	fmt.Printf("To replace it without an outage instead: keera key rotate %s\n", named)
-	fmt.Println("Usage history and the audit log are kept.")
+	fmt.Fprintf(os.Stderr, "To replace it without an outage instead: keera key rotate %s\n", named)
+	fmt.Fprintln(os.Stderr, "Usage history and the audit log are kept.")
 	return confirmTyping(noun, named, "nothing was revoked")
 }
 

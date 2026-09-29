@@ -511,7 +511,7 @@ func (s *Server) destinationList(orgID string, offered []string, byLetter bool) 
 // and reports whether it named exactly one.
 //
 // It is lenient about what surrounds the name (fences, quotes, bullets) and
-// strict about the name itself. Longer names are matched first, so
+// strict about the name itself: a name must stand on its own, so
 // 'keera-small-eu' is never read as 'keera-small'.
 func chosenDestination(text string, destinations []string) (string, bool) {
 	cleaned := strings.ToLower(strings.Trim(strings.TrimSpace(text), "`*#>_-\"'.,:;! \t\n\r"))
@@ -529,14 +529,12 @@ func chosenDestination(text string, destinations []string) (string, bool) {
 		matches int
 	)
 	lower := strings.ToLower(text)
-	byLength := slices.Clone(destinations)
-	slices.SortStableFunc(byLength, func(a, b string) int { return len(b) - len(a) })
-	for _, alias := range byLength {
+	for _, alias := range destinations {
 		at := strings.Index(lower, strings.ToLower(alias))
 		if at < 0 {
 			continue
 		}
-		// Not part of a longer name already claimed by a longer destination.
+		// Not part of a longer name, such as another destination's.
 		if isAliasByte(lower, at-1) || isAliasByte(lower, at+len(alias)) {
 			continue
 		}

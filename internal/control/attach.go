@@ -75,8 +75,8 @@ func (s *Server) attach(w http.ResponseWriter, r *http.Request, p *authn.Princip
 		return
 	}
 
-	sb, ok := s.resolveSandbox(w, r, p)
-	if !ok || !s.canSeeSandbox(w, p, sb) {
+	sb, ok := s.sandboxToChange(w, r, p)
+	if !ok {
 		return
 	}
 	// Seeing a sandbox is not enough to open a shell in it. See canAttach.

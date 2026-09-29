@@ -72,10 +72,11 @@ type Config struct {
 	// micro-units of it.
 	Currency string
 
-	// RedisURL is the Redis the replicas share their rate limits through.
-	// Empty, the default, keeps limits per process, so N replicas allow N
-	// times the limit. Nothing in Redis has to survive. See docs/gateway.md.
-	RedisURL string
+	// Redis is the Redis the replicas share their rate limits through, read
+	// from KEERA_REDIS_URL. Nil, the default, keeps limits per process, so N
+	// replicas allow N times the limit. Nothing in Redis has to survive. See
+	// docs/gateway.md.
+	Redis *redis.Options
 	// RedisPrefix namespaces the keys, so two deployments can share one Redis.
 	RedisPrefix string
 
@@ -120,7 +121,6 @@ func Load() (Config, error) {
 		AuditRetention:        envDuration("KEERA_AUDIT_RETENTION", 0),
 		SessionGap:            envDuration("KEERA_SESSION_GAP", store.DefaultSessionGap),
 		Currency:              env("KEERA_CURRENCY", "CHF"),
-		RedisURL:              env("KEERA_REDIS_URL", ""),
 		RedisPrefix:           env("KEERA_REDIS_PREFIX", ratelimit.DefaultRedisPrefix),
 		Sandbox:               sandboxConfig(),
 		UI:                    envBool("KEERA_UI", true),
@@ -128,7 +128,18 @@ func Load() (Config, error) {
 	}
 	c.OIDC = oidcProviders(c.PublicURL)
 	c.SecureCookies = envBool("KEERA_SECURE_COOKIES", c.servedOverHTTPS())
-	return c, c.validate()
+	if err := c.validate(); err != nil {
+		return c, err
+	}
+	// Parsed here, so a typo stops the start before the database is touched.
+	if u := env("KEERA_REDIS_URL", ""); u != "" {
+		opt, err := redis.ParseURL(u)
+		if err != nil {
+			return c, fmt.Errorf("KEERA_REDIS_URL: %w", err)
+		}
+		c.Redis = opt
+	}
+	return c, nil
 }
 
 // servedOverHTTPS reports whether the public URL is https, which is when
@@ -168,13 +179,6 @@ func (c Config) validateCredentials() error {
 	}
 	if len(c.SecretKey) < 16 {
 		return errors.New("KEERA_SECRET_KEY is too short to be a key; generate one with: openssl rand -hex 32")
-	}
-	// Parsed here, and again where it is used, so a typo stops the start
-	// before the database is touched.
-	if c.RedisURL != "" {
-		if _, err := redis.ParseURL(c.RedisURL); err != nil {
-			return fmt.Errorf("KEERA_REDIS_URL: %w", err)
-		}
 	}
 	if c.MetricsToken == "" {
 		return nil
@@ -244,9 +248,9 @@ func (c Config) validateOIDC() error {
 		// With several directories, one customer's could otherwise give its
 		// users another customer's addresses, or an operator's.
 		if len(c.OIDC) > 1 && p.Configured() && len(p.Domains) == 0 {
-			return fmt.Errorf("set KEERA_OIDC_%s_DOMAINS to the email domains the %s "+
+			return fmt.Errorf("set %sDOMAINS to the email domains the %s "+
 				"identity provider may vouch for, or to %q for one that proves every "+
-				"address itself, such as Google", envSegment(p.Name), p.Name, authn.AnyDomain)
+				"address itself, such as Google", OIDCEnvPrefix(p.Name), p.Name, authn.AnyDomain)
 		}
 	}
 	return nil
@@ -268,7 +272,7 @@ func oidcProviders(publicURL string) []authn.OIDCConfig {
 		if name == "" {
 			continue
 		}
-		out = append(out, providerFrom("KEERA_OIDC_"+envSegment(name)+"_", name, redirect))
+		out = append(out, providerFrom(OIDCEnvPrefix(name), name, redirect))
 	}
 	return out
 }
@@ -283,7 +287,7 @@ func providerFrom(prefix, name, redirect string) authn.OIDCConfig {
 		ClientSecret: env(prefix+"CLIENT_SECRET", ""),
 		RedirectURL:  redirect,
 		Scopes:       envList(prefix + "SCOPES"),
-		GroupsClaim:  env(prefix+"GROUPS_CLAIM", "groups"),
+		GroupsClaim:  env(prefix+"GROUPS_CLAIM", ""),
 		Mapping: authn.RoleMapping{
 			OperatorGroups: envList(prefix + "OPERATOR_GROUPS"),
 			AdminGroups:    envList(prefix + "ADMIN_GROUPS"),
@@ -296,9 +300,10 @@ func providerFrom(prefix, name, redirect string) authn.OIDCConfig {
 	}
 }
 
-// envSegment turns a provider name into the middle of an environment variable.
-func envSegment(name string) string {
-	return strings.ToUpper(strings.ReplaceAll(name, "-", "_"))
+// OIDCEnvPrefix is how every setting of the named provider starts:
+// "acme-ad" reads KEERA_OIDC_ACME_AD_*.
+func OIDCEnvPrefix(name string) string {
+	return "KEERA_OIDC_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_"
 }
 
 // providerLabel is what the sign-in button says when no label is set. People

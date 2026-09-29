@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/bespinian/keera-gateway/internal/store"
@@ -121,8 +122,8 @@ func (r *teamRun) delete(ctx context.Context) error {
 		return err
 	}
 	return out(r.asJSON, gone, func(w *table) {
-		_, _ = fmt.Fprintf(w, "deleted %s (%s)\t%d revoked key(s) kept\n",
-			gone.ID, gone.Name, gone.DetachedKeys)
+		_, _ = fmt.Fprintf(w, "deleted %s (%s)\t%s kept\n",
+			gone.ID, gone.Name, plural(gone.DetachedKeys, "revoked key"))
 	})
 }
 
@@ -180,14 +181,14 @@ func confirmTeamDelete(ctx context.Context, c *client, team store.Team) error {
 			live++
 		}
 	}
-	fmt.Printf("%s\n", style.head(fmt.Sprintf("Deleting %s (%s) removes:", team.Name, team.ID)))
-	fmt.Println("  its guardrails - budget, rate limit, allowed models and system prompt")
-	fmt.Println("  its budget counters")
+	fmt.Fprintf(os.Stderr, "%s\n", styleErr.head(fmt.Sprintf("Deleting %s (%s) removes:", team.Name, team.ID)))
+	fmt.Fprintln(os.Stderr, "  its guardrails - budget, rate limit, allowed models and system prompt")
+	fmt.Fprintln(os.Stderr, "  its budget counters")
 	if live > 0 {
-		fmt.Printf("%s\n", style.bad(fmt.Sprintf(
-			"  %d key(s) in this team still work; the deletion will be refused until they are revoked",
-			live)))
+		fmt.Fprintf(os.Stderr, "%s\n", styleErr.bad(fmt.Sprintf(
+			"  this team still has %s; the deletion will be refused until they are revoked",
+			plural(live, "live key"))))
 	}
-	fmt.Println("Revoked keys, usage history and the audit log are kept.")
+	fmt.Fprintln(os.Stderr, "Revoked keys, usage history and the audit log are kept.")
 	return confirmTyping("team's name", team.Name, "nothing was deleted")
 }

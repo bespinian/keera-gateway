@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -284,8 +285,8 @@ func putRouter(ctx context.Context, c *client, orgID string, rt policy.Router, a
 // the scopes that use one, but not the clients: they name routers in their
 // own configuration, and would get "model not found".
 func confirmRouterDelete(alias string) error {
-	fmt.Printf("Deleting the router %s. Any client still naming it will be told the model "+
-		"does not exist.\n", alias)
+	fmt.Fprintf(os.Stderr, "%s\n", styleErr.head("Deleting the router "+alias+":"))
+	fmt.Fprintln(os.Stderr, "  any client still naming it is told the model does not exist")
 	return confirmTyping("alias", alias, "nothing was deleted")
 }
 
@@ -459,14 +460,16 @@ func printRouterChain(w *table, p gateway.RouterProbe) {
 	// A size router's bands are configuration, not a reading, so they get a
 	// column of their own.
 	if p.Mode.Sizes() {
-		_, _ = fmt.Fprintln(w, "\nPLACED ON\tTAKES\tANSWERS\tTOOK\tNOTE")
+		_, _ = fmt.Fprintln(w)
+		w.header("PLACED ON\tTAKES\tANSWERS\tTOOK\tNOTE")
 		for _, hop := range p.Chain {
 			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 				hop.Alias, hop.Reading, yesNo(hop.Answers), hopTook(hop), hop.Note)
 		}
 		return
 	}
-	_, _ = fmt.Fprintln(w, "\nTRIES\tANSWERS\tTOOK\tNOTE")
+	_, _ = fmt.Fprintln(w)
+	w.header("TRIES\tANSWERS\tTOOK\tNOTE")
 	for i, hop := range p.Chain {
 		// The reading goes with the note: only some modes have one, and an
 		// empty column would look like a measurement of nothing.
@@ -496,7 +499,7 @@ func appendReading(note, reading string) string {
 	}
 }
 
-// routerReportResponse is what /v1/routers/{name}/report answers with.
+// routerReportResponse is what /v1/routers/{alias}/report answers with.
 type routerReportResponse struct {
 	Router   *policy.Router     `json:"router"`
 	Report   store.RouterReport `json:"report"`
@@ -544,7 +547,8 @@ func printRouterReport(w *table, name string, since time.Duration,
 	if len(rep.Destinations) == 0 {
 		return
 	}
-	_, _ = fmt.Fprintln(w, "\nDESTINATION\tREQUESTS\tSHARE\tTOKENS\tSPEND\tMEDIAN TTFT")
+	_, _ = fmt.Fprintln(w)
+	w.header("DESTINATION\tREQUESTS\tSHARE\tTOKENS\tSPEND\tMEDIAN TTFT")
 	for _, d := range rep.Destinations {
 		_, _ = fmt.Fprintf(w, "%s\t%d\t%s\t%d\t%s\t%dms\n",
 			d.Alias, d.Requests, share(d.Requests, rep.Total.Requests),
@@ -556,10 +560,10 @@ func printRouterReport(w *table, name string, since time.Duration,
 // usually no client has been told to.
 func noRoutedReason(res routerReportResponse) string {
 	if res.Router == nil {
-		return "No router of this name exists in this organisation."
+		return "No router of this alias exists in this organisation."
 	}
 	return "A router is reached by a client naming it where it would name a model, " +
-		"so either no client has been configured with it, or nothing called this week."
+		"so either no client has been configured with it, or nothing called it in this window."
 }
 
 // fellBackMeans says what a fallback means for this kind of router: a

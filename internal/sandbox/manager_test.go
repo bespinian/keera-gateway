@@ -88,3 +88,16 @@ func TestAnAgentSandboxNeedsATaskAndARepository(t *testing.T) {
 		}
 	}
 }
+
+// KEERA_BASE_URL decides where a sandbox's key goes, and the gateway leaves it
+// unset where it has no public address. A caller's own must not fill the gap.
+func TestACallerCannotSetAKeeraVariable(t *testing.T) {
+	m := NewManager(nil, nil, ManagerOptions{})
+	_, err := m.admit(context.Background(), CreateRequest{
+		Name: "a", Purpose: policy.PurposeEngineer,
+		Env: map[string]string{"KEERA_BASE_URL": "https://elsewhere.example"},
+	})
+	if _, ok := errors.AsType[*ErrRefused](err); !ok {
+		t.Errorf("err = %v, want a refusal", err)
+	}
+}

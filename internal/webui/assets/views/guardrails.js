@@ -17,6 +17,7 @@ import {
   pill,
   showError,
   readRow,
+  plural,
 } from "../ui.js";
 import { orgNameOf } from "./orgs.js";
 
@@ -963,11 +964,8 @@ function ceilingSummary(ctx, ceilings) {
 function describe(lim, currency) {
   const bits = [];
   if (lim.allowed_models) {
-    bits.push(
-      lim.allowed_models.length
-        ? `${lim.allowed_models.length} model${lim.allowed_models.length === 1 ? "" : "s"}`
-        : "no model",
-    );
+    const n = lim.allowed_models.length;
+    bits.push(n ? `${n} ${plural(n, "model")}` : "no model");
   }
   if (lim.rpm) bits.push(`${num(lim.rpm)}/min`);
   if (lim.tpm) bits.push(`${compact(lim.tpm)} tok/min`);
@@ -979,9 +977,7 @@ function describe(lim, currency) {
   }
   if (lim.system_prompt) bits.push("a system prompt");
   if ((lim.filters || []).length) {
-    bits.push(
-      `${lim.filters.length} filter${lim.filters.length === 1 ? "" : "s"}`,
-    );
+    bits.push(`${lim.filters.length} ${plural(lim.filters.length, "filter")}`);
   }
   return bits.join(" · ") || "nothing set";
 }

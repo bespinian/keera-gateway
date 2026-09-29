@@ -117,8 +117,11 @@ func (l *sseLines) next() ([]byte, error) {
 //
 // dropUsageEvent removes the trailing usage-only chunk from what reaches the
 // client. It is set when the gateway, not the client, asked for that chunk.
-func pipeSSE(dst io.Writer, flush func(), src io.Reader, dropUsageEvent bool) (streamStats, error) {
-	p := &ssePipe{dst: dst, flush: flush, dropUsage: dropUsageEvent}
+// alias, when set, is written as the model name of every chunk.
+func pipeSSE(dst io.Writer, flush func(), src io.Reader, alias string,
+	dropUsageEvent bool,
+) (streamStats, error) {
+	p := &ssePipe{dst: dst, flush: flush, alias: alias, dropUsage: dropUsageEvent}
 	lines := newSSELines(src, maxLineBytes)
 	for {
 		line, readErr := lines.next()
@@ -143,6 +146,7 @@ func pipeSSE(dst io.Writer, flush func(), src io.Reader, dropUsageEvent bool) (s
 type ssePipe struct {
 	dst       io.Writer
 	flush     func()
+	alias     string
 	dropUsage bool
 
 	stats     streamStats
@@ -184,7 +188,11 @@ func (p *ssePipe) emit() error {
 		if p.stats.firstAt.IsZero() {
 			p.stats.firstAt = time.Now()
 		}
-		if _, err := p.dst.Write(p.event); err != nil {
+		out := p.event
+		if p.alias != "" {
+			out = renameModel(out, p.alias)
+		}
+		if _, err := p.dst.Write(out); err != nil {
 			return err
 		}
 		p.flush()

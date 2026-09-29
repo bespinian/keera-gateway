@@ -566,8 +566,8 @@ CREATE INDEX usage_events_user_ts_idx ON usage_events (user_id, ts);
 CREATE INDEX usage_events_org_id_idx ON usage_events (org_id, id DESC);
 
 -- Failures are a small fraction of the log and are always read newest first, so
--- the index over them is partial and ordered. The predicate matches the one the
--- failure report filters on, including the rows that carry a message without a
+-- the index over them is partial and ordered. The predicate matches the request
+-- log's filter for unhappy rows, including the rows that carry a message without a
 -- failing status: a stream that ended early answered 200 and still did not
 -- deliver what was asked for.
 CREATE INDEX usage_events_failed_idx ON usage_events (org_id, id DESC)
@@ -974,6 +974,9 @@ CREATE TABLE sandboxes (
     -- around it tight enough to be worth writing.
     repo      text NOT NULL DEFAULT '',
     branch    text NOT NULL DEFAULT '',
+    -- The ssh public keys that may open a shell in it. Kept so that resuming
+    -- an expired sandbox, which starts it again, lets the same people in.
+    authorized_keys text[] NOT NULL DEFAULT '{}',
 
     node      text NOT NULL DEFAULT '',
     address   text NOT NULL DEFAULT '',
@@ -1032,7 +1035,7 @@ CREATE TABLE sandboxes (
 --
 -- Per person, not per organisation, so a refused name never tells a member
 -- what a colleague called theirs. It is keyed on the copied address, not on
--- user_id, which turns null when a person is deleted.
+-- user_id, which turns null if the row it points at goes.
 CREATE UNIQUE INDEX sandboxes_live_name_idx ON sandboxes (org_id, owner, name)
     WHERE state IN ('pending', 'ready', 'suspended', 'expired')
        OR (state = 'failed' AND purpose = 'engineer');

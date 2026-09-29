@@ -45,7 +45,8 @@ keeping. An engineer's sandbox holds unfinished work, so it is kept.
 and repository credential are revoked. It still counts towards the quota and
 keeps its name, because its volume still takes up space. `keera sandbox resume`
 brings it back with a new key, a new repository credential and the class's
-default lifetime, under the guardrails as they are now. `resume` takes no
+default lifetime, under the guardrails as they are now. The same ssh keys let
+you in. `resume` takes no
 `--ttl`: `extend` the sandbox once it is back. `extend` does not work while it
 is expired. `terminate` frees the volume.
 
@@ -54,6 +55,11 @@ credential are revoked at once. An agent's sandbox is also removed. An
 engineer's keeps its volume, in case it holds work, until somebody terminates
 it. Until then it is still live, like an expired one: it counts towards the
 quota, keeps its name and shows in `keera sandbox ls`.
+
+A sandbox whose process exits by itself, with success, is not a failure on
+podman: it shows as suspended, because podman can start it again. On Kubernetes
+the pod is finished and cannot be restarted, so it has failed. Either way, an
+agent's sandbox that exits cleanly has done its task and is removed.
 
 **Idle means no connection.** With `KEERA_SANDBOX_IDLE_SUSPEND` set, an
 engineer's sandbox is suspended once no connection has been open to it for that
@@ -67,7 +73,8 @@ isolation is the same. The point is that only a branch comes out of it.
 hyphens, at most 40 characters, because it becomes a hostname in the cluster.
 An engineer's sandbox needs an ssh public key: `keera sandbox create` sends the
 ones in `~/.ssh`, or the one `--ssh-key` names. An agent's needs both `--repo`
-and `--task`.
+and `--task`. Through the API, `env` adds variables for the first start. It
+cannot name a `KEERA_` variable: those are the gateway's.
 
 ## Agent-in-sandbox, not sandbox-as-a-tool
 
@@ -525,9 +532,10 @@ would let the holder reach any pod in the namespace on any port. So the gateway
 has to run in the cluster where it creates sandboxes.
 
 The egress rule allows DNS, the gateway, and whatever the deployment adds in
-`sandboxes.egress.extra`. **The internet is not on that list**, on purpose. A
-deployment that needs package downloads points its sandboxes at an internal
-proxy and adds it there. That is also the only way this works on an air-gapped
+`sandboxes.egress.extra`. **The internet is not on that list**, on purpose.
+Cloning and pushing need the forge, so add its host there. A deployment that
+needs package downloads points its sandboxes at an internal proxy and adds it
+there too. That is also the only way this works on an air-gapped
 site.
 
 That rule is the only network control, and it is one rule for the whole
@@ -539,7 +547,7 @@ namespace. See [What is actually enforced](#what-is-actually-enforced).
 | ---------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------- |
 | `KEERA_SANDBOX_DRIVER`             | -                        | `kubernetes`, `podman`, or unset for no sandboxes, and no Sandboxes screen in the panel              |
 | `KEERA_SANDBOXES_FILE`             | -                        | the classes each new organisation starts with                                                        |
-| `KEERA_SANDBOX_NAMESPACE`          | the gateway's            | where sandboxes run; outside a cluster, `default`. Should not be the gateway's - see above           |
+| `KEERA_SANDBOX_NAMESPACE`          | the gateway's            | where sandboxes run on Kubernetes. Should not be the gateway's - see above                            |
 | `KEERA_SANDBOX_RUNTIME_STANDARD`   | -                        | the runtime for the standard tier, if not the default: a RuntimeClass, or on podman `crun` or `runc` |
 | `KEERA_SANDBOX_RUNTIME_ISOLATED`   | -                        | the gVisor RuntimeClass, or `runsc` on podman. Unset makes that tier unavailable                     |
 | `KEERA_SANDBOX_RUNTIME_VM`         | -                        | the Kata RuntimeClass, or `krun` on podman. Unset makes that tier unavailable                        |

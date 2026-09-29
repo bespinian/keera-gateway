@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -180,14 +181,14 @@ func (r *userRun) disable(ctx context.Context) error {
 		return err
 	}
 	if !*yes {
-		fmt.Printf("%s\n", style.head("Disabling "+user.Email+":"))
-		fmt.Println("  they cannot sign in, and are signed out everywhere")
-		fmt.Println("  every key attributed to them is revoked, for good")
+		fmt.Fprintf(os.Stderr, "%s\n", styleErr.head("Disabling "+user.Email+":"))
+		fmt.Fprintln(os.Stderr, "  they cannot sign in, and are signed out everywhere")
+		fmt.Fprintln(os.Stderr, "  every key attributed to them is revoked, for good")
 		if me, err := whoami(ctx, r.c); err == nil && me.Sandboxes {
-			fmt.Println("  their agent sandboxes and any not started yet are terminated; " +
+			fmt.Fprintln(os.Stderr, "  their agent sandboxes and any not started yet are terminated; "+
 				"the rest are suspended")
 		}
-		fmt.Println("Usage history and the audit log are kept. 'keera user enable' lets them back in.")
+		fmt.Fprintln(os.Stderr, "Usage history and the audit log are kept. 'keera user enable' lets them back in.")
 		if err := confirmTyping("email", user.Email, "nobody was disabled"); err != nil {
 			return err
 		}
@@ -209,7 +210,7 @@ func (r *userRun) disable(ctx context.Context) error {
 	}
 	return out(r.asJSON, res, func(w *table) {
 		_, _ = fmt.Fprintf(w, "%s is disabled and signed out everywhere.\n", res.Email)
-		_, _ = fmt.Fprintf(w, "Revoked %s.\n", keyCount(res.RevokedKeys))
+		_, _ = fmt.Fprintf(w, "Revoked %s.\n", plural(res.RevokedKeys, "key"))
 		if sb := res.Sandboxes; sb != nil && sb.Terminated+sb.Suspended > 0 {
 			_, _ = fmt.Fprintf(w, "Sandboxes: %d terminated, %d suspended.\n",
 				sb.Terminated, sb.Suspended)
@@ -243,14 +244,6 @@ func (r *userRun) enable(ctx context.Context) error {
 	return out(r.asJSON, res, func(w *table) {
 		_, _ = fmt.Fprintf(w, "%s can sign in again. Their old keys stay revoked.\n", res.Email)
 	})
-}
-
-// keyCount writes "1 key" or "n keys".
-func keyCount(n int) string {
-	if n == 1 {
-		return "1 key"
-	}
-	return fmt.Sprintf("%d keys", n)
 }
 
 // errNoUser is what findUser returns when nobody matches, so a caller can

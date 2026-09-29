@@ -14,9 +14,9 @@ import {
   icon,
   icons,
   rowLink,
-  go,
   showError,
   isAdmin,
+  plural,
 } from "../ui.js";
 import {
   openGuardrails,
@@ -37,7 +37,7 @@ export async function teamsView(ctx) {
   const models = (modelsRes.data || []).filter((m) => m.enabled);
   const canEdit = isAdmin(ctx);
 
-  ctx.setSubtitle(`${teams.length} team${teams.length === 1 ? "" : "s"}`);
+  ctx.setSubtitle(`${teams.length} ${plural(teams.length, "team")}`);
 
   const orgID = ctx.orgID || ctx.state.me.org_id;
   const orgName = orgNameOf(ctx, orgID);
@@ -339,16 +339,16 @@ function renameTeam(ctx, team) {
 function deleteTeam(ctx, team) {
   const live = team.active_keys || 0;
   if (live) {
+    const them = plural(live, "it", "them");
     const close = modal({
       title: `Delete ${team.name}?`,
       body: h(
         "div",
         { class: "muted" },
-        `${live} key${live === 1 ? "" : "s"} in this team ${live === 1 ? "is" : "are"} ` +
+        `${live} ${plural(live, "key")} in this team ${plural(live, "is", "are")} ` +
           "not revoked. Deleting the team would take " +
-          `${live === 1 ? "it" : "them"} with it, and clients using ` +
-          `${live === 1 ? "it" : "them"} would be refused. Revoke ` +
-          `${live === 1 ? "it" : "them"} first.`,
+          `${them} with it, and clients using ${them} would be refused. ` +
+          `Revoke ${them} first.`,
       ),
       actions: (dismiss) => [
         h("button", { class: "btn", onClick: dismiss }, "Cancel"),

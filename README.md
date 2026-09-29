@@ -51,6 +51,7 @@ Everything runs on one port, `:8080`, split by path:
 - `/` - the control panel
 - `/control` - administration
 - `/sandbox` - attaching to a sandbox
+- `/metrics`, `/healthz` and `/readyz` - Prometheus and the health probes
 
 Authentication, not the network, keeps the inference side and the control side
 apart. To split them on the network as well, put a proxy in front that

@@ -27,8 +27,8 @@ type refusal struct {
 // refuse answers a request the gateway turned away, and records it.
 //
 // A refusal gets a usage row like any other request, because it is the event
-// a developer asks about later ("my editor stopped working"). It charges
-// nothing.
+// a developer asks about later ("my editor stopped working"). The model is not
+// charged; what a router or filter spent before the refusal is on the row.
 func (s *Server) refuse(c *call, ref refusal) {
 	s.limitHeaders(c.w, c.res, c.tr.start)
 	if ref.retry > 0 {
@@ -50,6 +50,24 @@ func (s *Server) refuse(c *call, ref refusal) {
 	ev.Spans = c.tr.steps(ref.code)
 	s.sink.Record(ev)
 	s.metrics.Observe(metricModel(s.src, ev.OrgID, ev.Alias), ev.OrgID, ev.Status, ev.Latency.Seconds(), 0)
+}
+
+// statusClientClosed is the status of a request the client gave up on before
+// it was answered. Nothing was sent back; 499 is the name nginx gives that.
+const statusClientClosed = 499
+
+// hungUp records a request whose client left before it was answered. The row
+// carries what the router and the filters spent, so the spend table keeps it.
+func (s *Server) hungUp(c *call, while, note string) {
+	ev := c.ev
+	ev.Status = statusClientClosed
+	ev.Canceled = true
+	ev.Error = appendNote(appendNote(ev.Error, "the client hung up "+while), note)
+	ev.Latency = time.Since(c.tr.start)
+	ev.CostMicros = c.hookMicros()
+	ev.Spans = c.tr.steps("client_closed")
+	s.sink.Record(ev)
+	s.metrics.Observe(ev.Alias, ev.OrgID, ev.Status, ev.Latency.Seconds(), 0)
 }
 
 // unknownModel is the model label a refusal carries when the model it names is

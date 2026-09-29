@@ -8,11 +8,12 @@
 //
 // It replaces the dashboard only until the first request has been served.
 
-import { h, icon, icons, pill } from "../ui.js";
+import { h, icon, icons, pill, plural, isAdmin } from "../ui.js";
 import { newOrg } from "./orgs.js";
 
 export function firstRun(ctx, setup) {
   const operator = ctx.state.me.unrestricted;
+  const admin = isAdmin(ctx);
 
   // Steps are ordered by what the next one needs, which is also the order a
   // deployment actually comes up in.
@@ -41,14 +42,14 @@ export function firstRun(ctx, setup) {
         "Clients ask for a model by its alias. Until an enabled model " +
         "exists, every request is refused. A new organisation starts with " +
         "the models in the catalogue file, if the deployment has one.",
-      action: ctx.state.me.can_admin_org
+      action: admin
         ? { label: "Go to Models", run: () => ctx.navigate("/models") }
         : null,
-      note: ctx.state.me.can_admin_org
+      note: admin
         ? "Then run its check. It catches a backend that answers with text " +
           "instead of a tool call, which breaks coding agents."
         : null,
-      skipped: !ctx.state.me.can_admin_org,
+      skipped: !admin,
       by: "An administrator",
     },
     {
@@ -58,10 +59,10 @@ export function firstRun(ctx, setup) {
         "Usually one per department, so budgets and reports match how the " +
         "organisation works. Its guardrails apply to every key in it.",
       action:
-        setup.orgs > 0 && ctx.state.me.can_admin_org
+        setup.orgs > 0 && admin
           ? { label: "Go to Teams", run: () => ctx.navigate("/teams") }
           : null,
-      skipped: !ctx.state.me.can_admin_org,
+      skipped: !admin,
       by: "An administrator",
     },
     {
@@ -136,8 +137,8 @@ export function firstRun(ctx, setup) {
       "div",
       { class: "banner banner-info", style: { marginBottom: "16px" } },
       remaining
-        ? `This deployment has not served a request yet. ${remaining} step` +
-            `${remaining === 1 ? "" : "s"} to go.`
+        ? `This deployment has not served a request yet. ${remaining} ` +
+            `${plural(remaining, "step")} to go.`
         : "Everything is set up. The overview appears after the first " +
             "request.",
     ),

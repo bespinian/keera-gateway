@@ -159,8 +159,8 @@ func (r *orgRun) delete(ctx context.Context) error {
 		return err
 	}
 	return out(r.asJSON, gone, func(w *table) {
-		_, _ = fmt.Fprintf(w, "deleted %s (%s)\t%d team(s), %d user(s), %d key(s)\n",
-			gone.ID, gone.Name, gone.Teams, gone.Users, gone.Keys)
+		_, _ = fmt.Fprintf(w, "deleted %s (%s)\t%s, %s, %s\n", gone.ID, gone.Name,
+			plural(gone.Teams, "team"), plural(gone.Users, "user"), plural(gone.Keys, "key"))
 	})
 }
 
@@ -255,17 +255,17 @@ func confirmOrgDelete(ctx context.Context, c *client, orgID string) error {
 	// spares typing the name for nothing. A failed read leaves it to the
 	// control plane.
 	if live, err := list[store.Sandbox](ctx, c, inOrg("/v1/sandboxes", orgID)); err == nil && len(live) > 0 {
-		return fmt.Errorf("%s still has %d live sandbox(es); terminate them first "+
-			"(keera sandbox list --org %s)", org.Name, len(live), orgID)
+		return fmt.Errorf("%s still has %s; terminate them first "+
+			"(keera sandbox list --org %s)", org.Name, plural(len(live), "live sandbox", "live sandboxes"), orgID)
 	}
 
-	fmt.Printf("%s\n", style.head(fmt.Sprintf("Deleting %s (%s) removes:", org.Name, org.ID)))
-	fmt.Printf("  %d team(s)\n  %d user(s), signed out everywhere\n  %d API key(s), which stop working at once\n",
-		len(teams), len(users), len(keys))
-	fmt.Println("  its guardrails and its budget counters")
-	fmt.Println("  its models and their stored provider keys, MCP servers, filters, routers,")
-	fmt.Println("  sandbox classes and the record of its finished sandboxes")
-	fmt.Println("Usage history and the audit log are kept.")
-	fmt.Println(style.bad("This cannot be undone."))
+	fmt.Fprintf(os.Stderr, "%s\n", styleErr.head(fmt.Sprintf("Deleting %s (%s) removes:", org.Name, org.ID)))
+	fmt.Fprintf(os.Stderr, "  %s\n  %s, signed out everywhere\n  %s, which stop working at once\n",
+		plural(len(teams), "team"), plural(len(users), "user"), plural(len(keys), "API key"))
+	fmt.Fprintln(os.Stderr, "  its guardrails and its budget counters")
+	fmt.Fprintln(os.Stderr, "  its models and their stored provider keys, MCP servers, filters, routers,")
+	fmt.Fprintln(os.Stderr, "  sandbox classes and the record of its finished sandboxes")
+	fmt.Fprintln(os.Stderr, "Usage history and the audit log are kept.")
+	fmt.Fprintln(os.Stderr, styleErr.bad("This cannot be undone."))
 	return confirmTyping("organisation's name", org.Name, "nothing was deleted")
 }

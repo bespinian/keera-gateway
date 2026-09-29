@@ -3,17 +3,45 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
+// limitFields are a guardrail's columns, in the order limitTargets reads them
+// and limitValues writes them. Every query over them is built from this list,
+// so a new limit is one entry here and one in each of those two.
+var limitFields = []string{"allowed_models", "max_output_tokens", "rpm", "tpm",
+	"budget_micros", "budget_period", "system_prompt", "filters",
+	"max_sandboxes", "max_sandbox_ttl_seconds", "sandbox_classes",
+	"max_sandbox_cpu_millis", "max_sandbox_memory_mib", "allowed_tools", "block_hosted_tools",
+	"allowed_repos"}
+
 // limitColumns is a guardrail row as policy.Limits holds it, read from a table
-// aliased p. limitTargets scans the same columns in the same order.
-const limitColumns = `p.allowed_models, p.max_output_tokens, p.rpm, p.tpm,
-	p.budget_micros, p.budget_period, p.system_prompt, p.filters,
-	p.max_sandboxes, p.max_sandbox_ttl_seconds, p.sandbox_classes,
-	p.max_sandbox_cpu_millis, p.max_sandbox_memory_mib, p.allowed_tools, p.block_hosted_tools,
-	p.allowed_repos`
+// aliased p.
+var limitColumns = "p." + strings.Join(limitFields, ", p.")
+
+// putPolicySQL writes one scope's limits, $1 and $2 being the scope and the
+// rest limitValues.
+var putPolicySQL = func() string {
+	values := make([]string, len(limitFields))
+	updates := make([]string, len(limitFields))
+	for i, f := range limitFields {
+		values[i] = fmt.Sprintf("$%d", i+3)
+		updates[i] = f + " = EXCLUDED." + f
+	}
+	return `INSERT INTO guardrails (scope_type, scope_id, ` + strings.Join(limitFields, ", ") +
+		`, updated_at) VALUES ($1, $2, ` + strings.Join(values, ", ") + `, now())
+		ON CONFLICT (scope_type, scope_id) DO UPDATE SET ` + strings.Join(updates, ", ") +
+		`, updated_at = now()`
+}()
+
+// copyKeyPolicySQL gives key $2 the limits of key $1.
+var copyKeyPolicySQL = `INSERT INTO guardrails (scope_type, scope_id, ` +
+	strings.Join(limitFields, ", ") + `, updated_at)
+	SELECT scope_type, $2, ` + strings.Join(limitFields, ", ") + `, now()
+	FROM guardrails WHERE scope_type = 'key' AND scope_id = $1`
 
 // limitTargets points at the fields limitColumns fills. The budget period is
 // nullable text, so it is scanned into period and converted afterwards.
@@ -23,6 +51,15 @@ func limitTargets(lim *policy.Limits, period **string) []any {
 		&lim.MaxSandboxes, &lim.MaxSandboxTTLSeconds, &lim.SandboxClasses,
 		&lim.MaxSandboxCPU, &lim.MaxSandboxMemory, &lim.AllowedTools, &lim.BlockHostedTools,
 		&lim.AllowedRepos}
+}
+
+// limitValues is what putPolicySQL writes, in limitFields' order.
+func limitValues(lim policy.Limits) []any {
+	return []any{lim.AllowedModels, lim.MaxOutputTokens, lim.RPM, lim.TPM,
+		lim.BudgetMicros, periodStr(lim.BudgetPeriod), lim.SystemPrompt, lim.Filters,
+		lim.MaxSandboxes, lim.MaxSandboxTTLSeconds, lim.SandboxClasses,
+		lim.MaxSandboxCPU, lim.MaxSandboxMemory, lim.AllowedTools, lim.BlockHostedTools,
+		lim.AllowedRepos}
 }
 
 // GetPolicy reads the limits attached to one scope.
@@ -44,29 +81,8 @@ func (s *Store) GetPolicy(ctx context.Context, scopeType policy.ScopeType, scope
 
 // PutPolicy replaces the limits attached to one scope.
 func (s *Store) PutPolicy(ctx context.Context, scopeType policy.ScopeType, scopeID string, lim policy.Limits) error {
-	_, err := s.pool.Exec(ctx, `INSERT INTO guardrails
-		(scope_type, scope_id, allowed_models, max_output_tokens, rpm, tpm, budget_micros,
-		 budget_period, system_prompt, filters, max_sandboxes, max_sandbox_ttl_seconds,
-		 sandbox_classes, max_sandbox_cpu_millis, max_sandbox_memory_mib, allowed_tools,
-		 block_hosted_tools, allowed_repos, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18, now())
-		ON CONFLICT (scope_type, scope_id) DO UPDATE SET
-			allowed_models = EXCLUDED.allowed_models, max_output_tokens = EXCLUDED.max_output_tokens,
-			rpm = EXCLUDED.rpm, tpm = EXCLUDED.tpm, budget_micros = EXCLUDED.budget_micros,
-			budget_period = EXCLUDED.budget_period, system_prompt = EXCLUDED.system_prompt,
-			filters = EXCLUDED.filters, max_sandboxes = EXCLUDED.max_sandboxes,
-			max_sandbox_ttl_seconds = EXCLUDED.max_sandbox_ttl_seconds,
-			sandbox_classes = EXCLUDED.sandbox_classes,
-			max_sandbox_cpu_millis = EXCLUDED.max_sandbox_cpu_millis,
-			max_sandbox_memory_mib = EXCLUDED.max_sandbox_memory_mib,
-			allowed_tools = EXCLUDED.allowed_tools,
-			block_hosted_tools = EXCLUDED.block_hosted_tools,
-			allowed_repos = EXCLUDED.allowed_repos, updated_at = now()`,
-		string(scopeType), scopeID, lim.AllowedModels, lim.MaxOutputTokens, lim.RPM, lim.TPM,
-		lim.BudgetMicros, periodStr(lim.BudgetPeriod), lim.SystemPrompt, lim.Filters,
-		lim.MaxSandboxes, lim.MaxSandboxTTLSeconds, lim.SandboxClasses,
-		lim.MaxSandboxCPU, lim.MaxSandboxMemory, lim.AllowedTools, lim.BlockHostedTools,
-		lim.AllowedRepos)
+	args := append([]any{string(scopeType), scopeID}, limitValues(lim)...)
+	_, err := s.pool.Exec(ctx, putPolicySQL, args...)
 	return err
 }
 

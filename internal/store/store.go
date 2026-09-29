@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -217,6 +218,15 @@ func notFound(err error) error {
 }
 
 // isUnique reports whether err is a unique violation.
+// IsMissingOrg reports whether a write named an organisation that does not
+// exist. Every org_id is a foreign key into orgs that cascades on delete, so
+// this is the only way one of them fails.
+func IsMissingOrg(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23503" &&
+		strings.HasSuffix(pgErr.ConstraintName, "_org_id_fkey")
+}
+
 func isUnique(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"

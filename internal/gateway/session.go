@@ -58,9 +58,8 @@ func sessionKey(r *http.Request, keyID string, b *body, kind policy.Kind) string
 	if !ok {
 		return ""
 	}
-	// The hash lives in the store because sandboxes compute the same key, and
-	// two copies would silently drift apart.
-	return store.DerivedSessionKey(store.SessionHash(keyID, "opening", opening))
+	// The hash lives in the store, next to the stated one sandboxes use.
+	return store.DerivedSessionKey(store.SessionHash(keyID, store.SessionKindOpening, opening))
 }
 
 // statedSession is the session the client named, or empty if it named none.

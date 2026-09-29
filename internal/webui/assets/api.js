@@ -5,7 +5,7 @@
 // cannot make a change at all.
 //
 // The panel is at the root, so every path below is relative to BASE and the
-// three places that open a connection put it on. The paths here then read
+// places that open a connection or build a link put it on. The paths here then read
 // exactly as the routes do.
 
 const BASE = "/control";
@@ -54,15 +54,19 @@ async function request(method, path, body) {
       payload = null;
     }
   }
-  if (!res.ok) {
-    const err = payload && payload.error ? payload.error : {};
-    throw new ApiError(
-      res.status,
-      err.message || `Request failed (${res.status}).`,
-      err.code,
-    );
-  }
+  if (!res.ok) throw failure(res, payload);
   return payload;
+}
+
+// failure is the ApiError for a response that was not ok, shared so a plain
+// call and a stream report a refusal the same way.
+function failure(res, payload) {
+  const err = payload && payload.error ? payload.error : {};
+  return new ApiError(
+    res.status,
+    err.message || `Request failed (${res.status}).`,
+    err.code,
+  );
 }
 
 const get = (path) => request("GET", path);
@@ -94,12 +98,7 @@ async function stream(path, body, signal) {
     } catch {
       payload = null;
     }
-    const err = payload && payload.error ? payload.error : {};
-    throw new ApiError(
-      res.status,
-      err.message || `Request failed (${res.status}).`,
-      err.code,
-    );
+    throw failure(res, payload);
   }
   return res;
 }
@@ -118,6 +117,8 @@ export const api = {
   me: () => get("/v1/me"),
   localSignIn: (key) => request("POST", "/auth/local", { key }),
   signOut: () => request("POST", "/auth/logout"),
+  // Signing in with a provider is a page the browser goes to, not a call.
+  loginURL: (params) => url("/auth/login" + query(params)),
 
   orgs: () => get("/v1/orgs"),
   createOrg: (name, emailDomain) =>
@@ -281,9 +282,8 @@ export const api = {
   // the panel and `keera connect` cannot hand out configurations that differ.
   connect: () => get("/v1/connect"),
 
-  // An organisation's models. The writes take the organisation a model
-  // belongs to.
-  // The organisation's models. `stats` asks for how fast each has been
+  // The organisation's models. The writes take the organisation a model
+  // belongs to. `stats` asks for how fast each has been
   // answering in the window as well, which only the Models screen shows.
   models: (orgID, { stats, since } = {}) =>
     get(

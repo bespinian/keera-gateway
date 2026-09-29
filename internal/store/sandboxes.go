@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
@@ -157,6 +159,8 @@ type Sandbox struct {
 
 	Repo   string `json:"repo,omitempty"`
 	Branch string `json:"branch,omitempty"`
+	// AuthorizedKeys are the ssh public keys that may open a shell in it.
+	AuthorizedKeys []string `json:"-"`
 	// GitCredentialID is the forge's id for the repository credential this
 	// sandbox holds, so it can be revoked when the sandbox ends. The
 	// credential itself is not stored.
@@ -196,7 +200,7 @@ func (s Sandbox) CoreSeconds() int64 {
 
 const sandboxColumns = `SELECT id, org_id, COALESCE(team_id,''), COALESCE(user_id,''), owner,
 	name, class, purpose, state, detail, image, isolation, cpu_millis, memory_mib, disk_mib,
-	COALESCE(key_id,''), COALESCE(session_key,''), repo, branch, git_credential_id,
+	COALESCE(key_id,''), COALESCE(session_key,''), repo, branch, authorized_keys, git_credential_id,
 	node, address, backing, created_at, ready_at, active_at, expires_at, suspended_at, terminated_at, running_seconds, accounted_at`
 
 func scanSandbox(r row) (Sandbox, error) {
@@ -204,7 +208,7 @@ func scanSandbox(r row) (Sandbox, error) {
 	err := r.Scan(&sb.ID, &sb.OrgID, &sb.TeamID, &sb.UserID, &sb.Owner,
 		&sb.Name, &sb.Class, &sb.Purpose, &sb.State, &sb.Detail,
 		&sb.Image, &sb.Isolation, &sb.CPU, &sb.Memory, &sb.Disk,
-		&sb.KeyID, &sb.SessionKey, &sb.Repo, &sb.Branch, &sb.GitCredentialID,
+		&sb.KeyID, &sb.SessionKey, &sb.Repo, &sb.Branch, &sb.AuthorizedKeys, &sb.GitCredentialID,
 		&sb.Node, &sb.Address, &sb.Backing,
 		&sb.CreatedAt, &sb.ReadyAt, &sb.ActiveAt, &sb.ExpiresAt, &sb.SuspendedAt, &sb.TerminatedAt,
 		&sb.RunningSeconds, &sb.AccountedAt)
@@ -238,14 +242,16 @@ func (s *Store) CreateSandbox(ctx context.Context, sb Sandbox) (Sandbox, error) 
 	err := s.pool.QueryRow(ctx, `INSERT INTO sandboxes
 		(id, org_id, team_id, user_id, owner, name, class, purpose, state, detail,
 		 image, isolation, cpu_millis, memory_mib, disk_mib, key_id, session_key,
-		 repo, branch, git_credential_id, backing, expires_at, accounted_at)
+		 repo, branch, authorized_keys, git_credential_id, backing, expires_at, accounted_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,
-		        now())
+		        $23, now())
 		RETURNING created_at, accounted_at`,
 		sb.ID, sb.OrgID, nullable(sb.TeamID), nullable(sb.UserID), sb.Owner,
 		sb.Name, sb.Class, string(sb.Purpose), string(sb.State), sb.Detail,
 		sb.Image, string(sb.Isolation), sb.CPU, sb.Memory, sb.Disk,
-		nullable(sb.KeyID), nullable(sb.SessionKey), sb.Repo, sb.Branch, sb.GitCredentialID,
+		nullable(sb.KeyID), nullable(sb.SessionKey), sb.Repo, sb.Branch,
+		// Never nil, which pgx would send as NULL.
+		append([]string{}, sb.AuthorizedKeys...), sb.GitCredentialID,
 		sb.Backing, sb.ExpiresAt,
 	).Scan(&sb.CreatedAt, &sb.AccountedAt)
 	if isUnique(err) {
@@ -449,13 +455,15 @@ func (s *Store) SandboxesPastExpiry(ctx context.Context, now time.Time, limit in
 		LIMIT $2`, now, limit)
 }
 
-// LiveSandboxes reads every sandbox the drivers should still know about, for
-// the sweep that reconciles rows with reality.
-func (s *Store) LiveSandboxes(ctx context.Context, limit int) ([]Sandbox, error) {
+// LiveSandboxes reads the sandboxes the drivers should still know about, for
+// the sweep that reconciles rows with reality: up to limit of them, in id
+// order after the id after, so the sweep can page through all of them.
+func (s *Store) LiveSandboxes(ctx context.Context, after string, limit int) ([]Sandbox, error) {
 	if limit <= 0 {
 		limit = 500
 	}
-	return s.sandboxesWhere(ctx, "WHERE "+liveSandbox+" ORDER BY created_at LIMIT $1", limit)
+	return s.sandboxesWhere(ctx, "WHERE "+liveSandbox+" AND id > $1 ORDER BY id LIMIT $2",
+		after, limit)
 }
 
 // accrueRunning adds the time since accounted_at to running_seconds, as of $1,
@@ -525,7 +533,7 @@ func ValidSandboxGroupBy(s string) bool {
 
 // SandboxGroupBys lists the groupings, for the error a refused one earns.
 func SandboxGroupBys() []string {
-	return sortedKeys(sandboxGroupColumns)
+	return slices.Sorted(maps.Keys(sandboxGroupColumns))
 }
 
 // SandboxUsageBy groups sandbox time over a window.

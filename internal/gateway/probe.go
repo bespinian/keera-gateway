@@ -296,7 +296,7 @@ func (s *Server) checkEmbedding(ctx context.Context, m policy.Model, p Probe) Pr
 // p.Error saying why.
 func (s *Server) probeCall(ctx context.Context, m policy.Model, path string,
 	payload []byte, p *Probe) *http.Response {
-	resp, err := s.dispatch(ctx, m, path, payload)
+	resp, err := s.send(ctx, m, outbound{path: path, payload: payload})
 	if err != nil {
 		p.Error = unreachable(err)
 		return nil

@@ -93,9 +93,7 @@ func (f *guardrailFlags) apply(lim *policy.Limits) error {
 	setInt(&lim.RPM, f.rpm)
 	setInt(&lim.TPM, f.tpm)
 	setInt(&lim.MaxOutputTokens, f.maxOut)
-	if f.budget >= 0 {
-		setBudget(&lim.BudgetMicros, f.budget)
-	}
+	setBudget(&lim.BudgetMicros, f.budget)
 	if err := setPeriod(&lim.BudgetPeriod, f.period); err != nil {
 		return err
 	}
@@ -116,7 +114,7 @@ func (f *guardrailFlags) apply(lim *policy.Limits) error {
 	case f.noFilters:
 		lim.Filters = nil
 	case f.filters != "":
-		lim.Filters = strings.Split(f.filters, ",")
+		lim.Filters = splitList(f.filters)
 	}
 	setList(&lim.AllowedTools, f.tools)
 	switch {
@@ -149,7 +147,9 @@ func setList(dst *[]string, v string) {
 	case "any":
 		*dst = nil
 	default:
-		*dst = strings.Split(v, ",")
+		// Never nil, which would read as "any": a list of only commas names
+		// nothing.
+		*dst = append([]string{}, splitList(v)...)
 	}
 }
 
@@ -159,6 +159,10 @@ func micros(units float64) int64 { return int64(math.Round(units * 1_000_000)) }
 
 // setBudget sets a budget given in whole currency units; 0 removes it.
 func setBudget(dst **int64, amount float64) {
+	// Negative is the flag's default, for not given, as in setInt.
+	if amount < 0 {
+		return
+	}
 	m := micros(amount)
 	if m == 0 {
 		*dst = nil
@@ -313,9 +317,7 @@ func registerFacetFlags(fs *flag.FlagSet, name string) *facetFlags {
 // apply writes the given flags of one facet into lim.
 func (f *facetFlags) apply(name string, lim *policy.Limits) error {
 	if name == "budget" {
-		if f.budget != -1 {
-			setBudget(&lim.BudgetMicros, f.budget)
-		}
+		setBudget(&lim.BudgetMicros, f.budget)
 		return setPeriod(&lim.BudgetPeriod, f.period)
 	}
 	setInt(&lim.RPM, f.rpm)
@@ -558,10 +560,10 @@ func showTightest(w *table, eff control.Effective, name string,
 		}
 	}
 	if tightest == 0 {
-		_, _ = fmt.Fprintf(w, "%s\t(unlimited)\t\n", name)
+		showFrom(w, name, "(unlimited)", "")
 		return
 	}
-	_, _ = fmt.Fprintf(w, "%s\t%d\tset by %s\n", name, tightest, from)
+	showFrom(w, name, tightest, from)
 }
 
 // narrowedBy names the innermost level that set a field. For a field that

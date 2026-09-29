@@ -26,6 +26,7 @@ import {
   dateTime,
   icon,
   icons,
+  liveControl,
 } from "../ui.js";
 import { outcomeMeaning, statusLabel, oneLine } from "../status.js";
 import { flameChart } from "../flame.js";
@@ -341,7 +342,21 @@ export async function requestLog(
     }
   }
 
-  const watch = live ? liveControl() : null;
+  const watch = live
+    ? liveControl({
+        key: LIVE_KEY,
+        label: "Watch for new requests",
+        titles: {
+          live: "Live: new requests appear here. Click to stop.",
+          connecting:
+            "Reconnecting to the request log. Click to stop watching.",
+          paused: "Paused. Click to see new requests live.",
+          stopped:
+            "The stream stopped and could not reconnect. Click to try again, " +
+            "or reload the page.",
+        },
+      })
+    : null;
   wrap.append(
     h(
       "div",
@@ -350,7 +365,7 @@ export async function requestLog(
       lead,
       h("div", { style: { flex: 1 } }),
       seg,
-      watch ? watch.button : null,
+      watch ? watch.el : null,
       h(
         "button",
         {
@@ -576,54 +591,6 @@ export async function requestLog(
     if (watch.on) open();
     else watch.state("paused");
   }
-}
-
-// liveControl is the switch, and the one thing on the screen that says whether
-// the log is being watched at all.
-//
-// It says which of three things is true, because they are three different
-// situations for the reader: it is watching, they turned it off, or it is not
-// connected and they should not read an unchanging screen as a quiet afternoon.
-function liveControl() {
-  const on = sessionStorage.getItem(LIVE_KEY) !== "off";
-  const blip = h("span", { class: "blip" });
-  const button = h(
-    "button",
-    {
-      class: "btn btn-sm",
-      "aria-pressed": String(on),
-      "aria-label": "Watch for new requests",
-    },
-    blip,
-    "Live",
-  );
-  let listener = null;
-
-  const control = {
-    on,
-    button,
-    state(what) {
-      blip.dataset.state = what;
-      button.title = {
-        live: "Live: new requests appear here. Click to stop.",
-        connecting: "Reconnecting to the request log. Click to stop watching.",
-        paused: "Paused. Click to see new requests live.",
-        stopped:
-          "The stream stopped and could not reconnect. Click to try again, " +
-          "or reload the page.",
-      }[what];
-    },
-    onChange(fn) {
-      listener = fn;
-    },
-  };
-  button.addEventListener("click", () => {
-    control.on = !control.on;
-    sessionStorage.setItem(LIVE_KEY, control.on ? "on" : "off");
-    button.setAttribute("aria-pressed", String(control.on));
-    if (listener) listener(control.on);
-  });
-  return control;
 }
 
 // narrowSelect is one filter, listing only the values that occur in the window

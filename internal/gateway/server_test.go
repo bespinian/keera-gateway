@@ -1545,3 +1545,51 @@ func TestChatCompletionChargesCachedTokensAtTheInputRateWhenNoneIsStated(t *test
 		t.Errorf("cost = %d, want the full input price %d", ev.CostMicros, want)
 	}
 }
+
+func TestAChatAnswerNamesTheAliasNotTheBackendModel(t *testing.T) {
+	// The alias is the contract. The backend's name for the model is how the
+	// gateway reaches it, and is not the client's business.
+	t.Run("buffered", func(t *testing.T) {
+		h := newHarness(t, jsonBackend(`{"id":"1","model":"served-name",`+
+			`"choices":[{"message":{"content":"the \"model\":\"served-name\" field"}}]}`), nil, nil)
+		resp := h.post(t, "/v1/chat/completions", `{"model":"keera-code","messages":[]}`)
+		raw, _ := io.ReadAll(resp.Body)
+		if !strings.Contains(string(raw), `"model":"keera-code"`) {
+			t.Errorf("the answer does not name the alias: %s", raw)
+		}
+		if !strings.Contains(string(raw), `the \"model\":\"served-name\" field`) {
+			t.Errorf("the content was changed: %s", raw)
+		}
+	})
+	t.Run("streamed", func(t *testing.T) {
+		h := newHarness(t, sseBackend(
+			`{"id":"1","model":"served-name","choices":[{"delta":{"content":"x"}}]}`,
+			`{"id":"1","model":"served-name","choices":[{"delta":{"content":"y"}}]}`,
+		), nil, nil)
+		resp := h.post(t, "/v1/chat/completions", `{"model":"keera-code","messages":[],"stream":true}`)
+		raw, _ := io.ReadAll(resp.Body)
+		if strings.Contains(string(raw), "served-name") {
+			t.Errorf("the stream names the backend model: %s", raw)
+		}
+		if strings.Count(string(raw), `"model":"keera-code"`) != 2 {
+			t.Errorf("not every chunk names the alias: %s", raw)
+		}
+	})
+}
+
+func TestAMissingModelIsRefusedAlikeOnEveryAPI(t *testing.T) {
+	// The translations leave the model to serve, so a client hears the same
+	// refusal whichever API it speaks.
+	h := newHarness(t, jsonBackend(`{}`), nil, nil)
+	for path, body := range map[string]string{
+		"/v1/chat/completions": `{"messages":[{"role":"user","content":"hi"}]}`,
+		"/v1/messages":         `{"max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`,
+		"/v1/responses":        `{"input":"hi"}`,
+	} {
+		resp := h.post(t, path, body)
+		raw, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(raw), "'model' field is required") {
+			t.Errorf("%s: status = %d: %s", path, resp.StatusCode, raw)
+		}
+	}
+}

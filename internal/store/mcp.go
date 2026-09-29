@@ -83,11 +83,13 @@ type ToolOutcome string
 
 // The outcomes a tool call can have. See the tool_calls table.
 const (
-	ToolOK      ToolOutcome = "ok"
-	ToolFailed  ToolOutcome = "tool_error"
-	ToolError   ToolOutcome = "error"
-	ToolDenied  ToolOutcome = "denied"
-	ToolRefused ToolOutcome = "refused"
+	ToolOK ToolOutcome = "ok"
+	// ToolFailed is a result the tool itself marked as a failure.
+	ToolFailed ToolOutcome = "tool_error"
+	// ToolNoResult is a call that got no result, from the server or the gateway.
+	ToolNoResult ToolOutcome = "error"
+	ToolDenied   ToolOutcome = "denied"
+	ToolRefused  ToolOutcome = "refused"
 )
 
 // ToolCall is the part of an event that makes it a tool call rather than an
@@ -163,16 +165,19 @@ func (s *Store) ListToolCalls(ctx context.Context, q ToolCallQuery) ([]ToolCallR
 	if limit <= 0 || limit > 1000 {
 		limit = 200
 	}
-	rows, err := s.pool.Query(ctx, `SELECT id, ts, COALESCE(team_id, ''), COALESCE(user_id, ''),
-		COALESCE(key_id, ''), server, tool, outcome, latency_ms, arg_bytes, result_bytes,
-		cost_micros, COALESCE(error, ''), COALESCE(session_key, ''), COALESCE(client, '')
-		FROM tool_calls`+toolWhere+` ORDER BY ts DESC, id DESC LIMIT $9`,
+	rows, err := s.pool.Query(ctx, toolCallColumns+toolWhere+` ORDER BY ts DESC, id DESC LIMIT $9`,
 		append(q.args(), limit)...)
 	if err != nil {
 		return nil, err
 	}
 	return collect(rows, scanToolCall)
 }
+
+// toolCallColumns reads what scanToolCall scans.
+const toolCallColumns = `SELECT id, ts, COALESCE(team_id, ''), COALESCE(user_id, ''),
+	COALESCE(key_id, ''), server, tool, outcome, latency_ms, arg_bytes, result_bytes,
+	cost_micros, COALESCE(error, ''), COALESCE(session_key, ''), COALESCE(client, '')
+	FROM tool_calls`
 
 func scanToolCall(r row) (ToolCallRow, error) {
 	var t ToolCallRow
@@ -188,10 +193,7 @@ func scanToolCall(r row) (ToolCallRow, error) {
 // tasks at once includes both tasks' calls. The time bound applies to both: a
 // client that reuses its session id after the idle gap starts a new session.
 func (s *Store) SessionToolCalls(ctx context.Context, orgID string, a AgentSession) ([]ToolCallRow, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, ts, COALESCE(team_id, ''), COALESCE(user_id, ''),
-		COALESCE(key_id, ''), server, tool, outcome, latency_ms, arg_bytes, result_bytes,
-		cost_micros, COALESCE(error, ''), COALESCE(session_key, ''), COALESCE(client, '')
-		FROM tool_calls
+	rows, err := s.pool.Query(ctx, toolCallColumns+`
 		WHERE ($1 = '' OR org_id = $1)
 		  AND CASE WHEN $2 THEN session_key = $3 ELSE key_id = $4 END
 		  AND ts >= $5 AND ts <= $6

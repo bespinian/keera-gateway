@@ -36,6 +36,7 @@ import {
   crumb,
   isAdmin,
   checkButton,
+  plural,
 } from "../ui.js";
 import { barList } from "../chart.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
@@ -56,7 +57,7 @@ export async function routersView(ctx) {
   const currency = res.currency || ctx.currency;
   const chatModels = models.filter((m) => m.kind === "chat");
   const canEdit = isAdmin(ctx);
-  ctx.setSubtitle(`${routers.length} router${routers.length === 1 ? "" : "s"}`);
+  ctx.setSubtitle(`${routers.length} ${plural(routers.length, "router")}`);
 
   const head = h(
     "div",
@@ -1030,10 +1031,10 @@ function detailBanners(rep, rt, placed) {
         "div",
         { class: "banner banner-bad" },
         chained
-          ? `${num(rep.errored)} request${rep.errored === 1 ? "" : "s"} ran out of ` +
+          ? `${num(rep.errored)} ${plural(rep.errored, "request")} ran out of ` +
               "destinations: every model failed, and the client got the last " +
               "one's answer."
-          : `${num(rep.errored)} request${rep.errored === 1 ? " was" : "s were"} refused ` +
+          : `${num(rep.errored)} ${plural(rep.errored, "request was", "requests were")} refused ` +
               "because this router could not place them and has no fallback. " +
               "The clients got a 503 saying the router could not choose.",
       ),
@@ -1076,7 +1077,7 @@ function chosenNote(rt, rep) {
 
 function identity(rt) {
   const destinations = (rt.destinations || []).length;
-  const models = `${destinations} model` + (destinations === 1 ? "" : "s");
+  const models = `${destinations} ${plural(destinations, "model")}`;
   if (decides(rt)) return `decides with ${rt.model}, between ${models}`;
   if (sizes(rt)) return `places between ${models}, by the size of the request`;
   if (measures(rt)) return `tries ${models}, by ${ordersBy(rt)}`;

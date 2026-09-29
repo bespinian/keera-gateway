@@ -96,6 +96,21 @@ func (e *apiError) Error() string {
 	return e.Message
 }
 
+// errorMessage pulls the sentence out of a control-plane error envelope. The
+// sandbox attach surface reads a refused upgrade off a bare connection, not
+// through client.do, so it needs this too.
+func errorMessage(raw []byte) string {
+	var envelope struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(envelope.Error.Message)
+}
+
 // credential is the bearer to present, or why there is none that works.
 func (c *client) credential() (string, error) {
 	cred := c.bearer()
@@ -169,13 +184,7 @@ func (c *client) send(ctx context.Context, method, path, cred string, in, out an
 		return err
 	}
 	if resp.StatusCode >= 300 {
-		var envelope struct {
-			Error struct {
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		_ = json.Unmarshal(raw, &envelope)
-		return &apiError{Status: resp.StatusCode, Message: envelope.Error.Message}
+		return &apiError{Status: resp.StatusCode, Message: errorMessage(raw)}
 	}
 	if out == nil {
 		return nil

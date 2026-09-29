@@ -307,7 +307,7 @@ func TestAServerRefusingTheGatewaysCredentialIsNotTheClientsFault(t *testing.T) 
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Errorf("status = %d, want 502", resp.StatusCode)
 	}
-	if ev := lastToolCall(t, h); ev.Tool.Outcome != store.ToolError {
+	if ev := lastToolCall(t, h); ev.Tool.Outcome != store.ToolNoResult {
 		t.Errorf("outcome = %q", ev.Tool.Outcome)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -278,7 +279,8 @@ func putFilter(ctx context.Context, c *client, orgID string, f policy.Filter, as
 // refuses to delete one a guardrail names, so this is about a filter nothing
 // uses today, whose wording is kept nowhere else.
 func confirmFilterDelete(alias string) error {
-	fmt.Printf("Deleting the filter %s. Its instruction is not kept anywhere else.\n", alias)
+	fmt.Fprintf(os.Stderr, "%s\n", styleErr.head("Deleting the filter "+alias+":"))
+	fmt.Fprintln(os.Stderr, "  its instruction is not kept anywhere else")
 	return confirmTyping("alias", alias, "nothing was deleted")
 }
 
@@ -499,7 +501,8 @@ func printFilterReport(w *table, name string, since time.Duration,
 	if len(rep.Teams) == 0 {
 		return
 	}
-	_, _ = fmt.Fprintln(w, "\nTEAM\tRUNS\tREFUSED\tRATE\tREWROTE\tFAILED\tSPEND")
+	_, _ = fmt.Fprintln(w)
+	w.header("TEAM\tRUNS\tREFUSED\tRATE\tREWROTE\tFAILED\tSPEND")
 	for _, t := range rep.Teams {
 		label := t.TeamID
 		if name, ok := res.TeamNames[t.TeamID]; ok && name != "" {

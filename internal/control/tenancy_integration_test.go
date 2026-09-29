@@ -439,8 +439,8 @@ func TestATeamIsRenamedAndDeletedOnlyInsideItsOwnTenant(t *testing.T) {
 	// a team id is not something they should be able to confirm exists.
 	w := tn.changeTeam(tn.srv.updateTeam, admin("org_b"), http.MethodPatch,
 		`{"name":"Ours Now"}`)
-	if w.Code != http.StatusForbidden && w.Code != http.StatusNotFound {
-		t.Errorf("another tenant's administrator renamed it: status = %d, %s", w.Code, w.Body)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("another tenant's administrator renamed it: status = %d, want 404: %s", w.Code, w.Body)
 	}
 
 	w = tn.changeTeam(tn.srv.updateTeam, admin("org_a"), http.MethodPatch,
@@ -508,5 +508,39 @@ func TestDeletingATeamIsRefusedWhileItHoldsAWorkingKey(t *testing.T) {
 	}
 	if names, err := st.TeamNames(tn.ctx, "org_a"); err != nil || len(names) != 0 {
 		t.Errorf("after the deletion TeamNames = %v, %v", names, err)
+	}
+}
+
+func TestAnotherTenantsPeopleAndGuardrailsAnswerAsMissing(t *testing.T) {
+	// As with keys and teams: an administrator elsewhere must not be able to
+	// confirm that an id exists by the difference between 403 and 404.
+	tn := twoTenants(t)
+	carol := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleAdmin, OrgID: "org_a", UserID: "user_carol",
+	}
+	dave := map[string]string{"id": "user_dave"}
+	for name, w := range map[string]*httptest.ResponseRecorder{
+		"changing a role": tn.call(tn.srv.updateUser, carol, http.MethodPatch,
+			"/v1/users/user_dave", `{"role":"admin"}`, dave),
+		"disabling a person": tn.call(tn.srv.disableUser, carol, http.MethodPost,
+			"/v1/users/user_dave/disable", "", dave),
+		"setting a guardrail": tn.call(tn.srv.putGuardrails, carol, http.MethodPut,
+			"/v1/guardrails/org/org_b", `{"rpm":1}`, map[string]string{"scope": "org", "id": "org_b"}),
+	} {
+		if w.Code != http.StatusNotFound {
+			t.Errorf("%s in another organisation: status = %d, want 404: %s", name, w.Code, w.Body)
+		}
+	}
+}
+
+func TestAnOperatorNamingAMissingOrganisationIsToldSo(t *testing.T) {
+	// Only an operator can name an organisation other than their own. A typo
+	// there is a missing organisation, not an internal error.
+	tn := twoTenants(t)
+	operator := &authn.Principal{Via: authn.MethodOperatorKey, Role: authn.RoleOperator}
+	w := tn.call(tn.srv.createTeam, operator, http.MethodPost, "/v1/teams",
+		`{"org_id":"org_nope","name":"Payments"}`, nil)
+	if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "no such organisation") {
+		t.Errorf("status = %d, want 404: %s", w.Code, w.Body)
 	}
 }

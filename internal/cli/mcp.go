@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -220,12 +221,12 @@ func (m *mcpRun) delete(ctx context.Context, org *string) error {
 		return err
 	}
 	if !*yes {
-		fmt.Printf("%s\n", style.head("Deleting the MCP server "+alias+":"))
-		fmt.Println("  every client configured for it stops reaching its tools")
+		fmt.Fprintf(os.Stderr, "%s\n", styleErr.head("Deleting the MCP server "+alias+":"))
+		fmt.Fprintln(os.Stderr, "  every client configured for it stops reaching its tools")
 		if srv.HasAPIKey {
-			fmt.Println("  its stored credential is removed")
+			fmt.Fprintln(os.Stderr, "  its stored credential is removed")
 		}
-		fmt.Println("Tool-call history and the audit log are kept.")
+		fmt.Fprintln(os.Stderr, "Tool-call history and the audit log are kept.")
 		if err := confirmTyping("alias", alias, "nothing was deleted"); err != nil {
 			return err
 		}
@@ -329,7 +330,7 @@ bearer_token_env_var = "KEERA_API_KEY"
 }
 
 func printMCPServers(w *table, servers []policy.MCPServer) {
-	w.header("ALIAS\tURL\tCREDENTIAL\tENABLED\tDESCRIPTION")
+	w.header("ALIAS\tENDPOINT\tCREDENTIAL\tENABLED\tDESCRIPTION")
 	for _, m := range servers {
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", m.Alias, dash(m.URL), mcpCredential(m),
 			statusWord(strconv.FormatBool(m.Enabled)), dash(m.Description))

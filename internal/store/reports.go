@@ -55,13 +55,13 @@ func scanTeamSummary(r row) (TeamSummary, error) {
 		return TeamSummary{}, err
 	}
 	t.ActiveKeys = int(keys)
-	// A budget with no period resets monthly, as the spend join above assumes.
-	if period == nil {
-		month := string(policy.PeriodMonth)
-		period = &month
-	}
-	t.Period = policy.Period(*period)
+	// Limits stays as stored. Period says what the spend is counted over: a
+	// budget with no period resets monthly, as the spend join above assumes.
 	t.Limits.BudgetPeriod = periodPtr(period)
+	t.Period = policy.PeriodMonth
+	if period != nil {
+		t.Period = policy.Period(*period)
+	}
 	if t.Limits.BudgetMicros != nil {
 		t.BudgetMicros = *t.Limits.BudgetMicros
 	}

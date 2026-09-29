@@ -8,9 +8,9 @@ services:
     image: localhost/keera-gateway:latest
     restart: unless-stopped
     ports:
-      # One port carries all three surfaces, told apart by path: the control
-      # panel at /, the inference API under /api, the control API under
-      # /control. Open http://127.0.0.1:8080 to reach the panel.
+      # One port carries everything, told apart by path: the control panel at
+      # /, the inference API under /api, the control API under /control, and
+      # sandbox attach under /sandbox. Open http://127.0.0.1:8080 for the panel.
       #
       # Bound to loopback unless KEERA_BIND says otherwise. Publishing this port
       # publishes the control API with it, so put a TLS proxy in front of
@@ -23,21 +23,20 @@ services:
     environment:
       KEERA_DATABASE_URL: postgres://keera:keera@keera-db:5432/keera?sslmode=disable
       KEERA_OPERATOR_KEY: ${KEERA_OPERATOR_KEY:?set KEERA_OPERATOR_KEY in .env - see .env.example}
-      KEERA_ADDR: ":8080"
       KEERA_MODELS_FILE: /etc/keera/models.yaml
       # Read even with no sandbox driver, so each new organisation has the
       # classes once one is switched on. See README.md.
       KEERA_SANDBOXES_FILE: /etc/keera/sandboxes.yaml
-      KEERA_LOG_FORMAT: ${KEERA_LOG_FORMAT:-text}
-      KEERA_LOG_LEVEL: ${KEERA_LOG_LEVEL:-info}
+      KEERA_LOG_FORMAT: ${KEERA_LOG_FORMAT:-}
+      KEERA_LOG_LEVEL: ${KEERA_LOG_LEVEL:-}
       # Encrypts the API keys administrators type into the control panel. Required:
       # the gateway does not start without it. See docs/providers.md.
       KEERA_SECRET_KEY: ${KEERA_SECRET_KEY:?set KEERA_SECRET_KEY in .env - see .env.example}
       # Reads /metrics and nothing else, so a scrape configuration does not
       # have to hold the operator key. Empty leaves the route to operators.
       KEERA_METRICS_TOKEN: ${KEERA_METRICS_TOKEN:-}
-      # How long the two tables that grow with traffic are kept. Empty is for
-      # ever, which is the deliberate default for billing and audit data.
+      # How long usage and audit entries are kept. Empty is for ever, which is
+      # the deliberate default for billing and audit data.
       KEERA_USAGE_RETENTION: ${KEERA_USAGE_RETENTION:-}
       KEERA_AUDIT_RETENTION: ${KEERA_AUDIT_RETENTION:-}
       # How long an agent conversation may go quiet before the next request on

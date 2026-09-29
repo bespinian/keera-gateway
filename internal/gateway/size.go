@@ -103,21 +103,6 @@ func (s *Server) sized(rt policy.Router, b *body, kind policy.Kind) (routeDecisi
 	return d, nil
 }
 
-// estimateTokens estimates a request's size without a tokeniser, the same
-// way the filters do. It over-estimates, which sends a borderline request to
-// the larger model.
-//
-// It counts only text, so images are not counted. That understates the
-// context they use, which is why the MaxContext tier is a guard, not a
-// guarantee.
-func estimateTokens(texts []string) int {
-	n := 0
-	for _, t := range texts {
-		n += len(t)
-	}
-	return n / bytesPerToken
-}
-
 /* ------------------------------------------------------------ checking one */
 
 // sizeBand is one destination's share of the size range, for the check. The

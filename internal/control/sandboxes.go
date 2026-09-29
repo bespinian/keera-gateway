@@ -183,8 +183,8 @@ func (s *Server) listSandboxes(w http.ResponseWriter, r *http.Request, p *authn.
 }
 
 func (s *Server) getSandbox(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	sb, ok := s.resolveSandbox(w, r, p)
-	if !ok || !s.canSeeSandbox(w, p, sb) {
+	sb, ok := s.sandboxToChange(w, r, p)
+	if !ok {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, sb)
@@ -210,7 +210,7 @@ func (s *Server) canSeeSandbox(w http.ResponseWriter, p *authn.Principal, sb sto
 }
 
 // sandboxToChange resolves the sandbox a request names and checks that the
-// caller may change it.
+// caller may see and change it.
 func (s *Server) sandboxToChange(w http.ResponseWriter, r *http.Request, p *authn.Principal) (
 	store.Sandbox, bool,
 ) {

@@ -9,6 +9,7 @@ package control
 
 import (
 	"cmp"
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
@@ -418,6 +419,16 @@ func (s *Server) requireOrgAdmin(w http.ResponseWriter, p *authn.Principal, orgI
 	return true
 }
 
+// requireOwnerAdmin is requireOrgAdmin for a thing named by its id. Another
+// tenant's thing answers 404, not 403, so ids cannot be probed.
+func (s *Server) requireOwnerAdmin(w http.ResponseWriter, p *authn.Principal, owner string) bool {
+	if !p.CanReadOrg(owner) {
+		s.fail(w, store.ErrNotFound)
+		return false
+	}
+	return s.requireOrgAdmin(w, p, owner)
+}
+
 // queryWindow reads a report's time window from ?from, ?to and ?since.
 func queryWindow(w http.ResponseWriter, q url.Values) (from, to time.Time, ok bool) {
 	from, to, err := timeRange(q.Get("from"), q.Get("to"), q.Get("since"))
@@ -478,9 +489,12 @@ func (s *Server) writeMetrics(w http.ResponseWriter) {
 // changed tells every gateway replica to drop its cached policy. The local
 // registry is cleared directly, so a single process does not wait for its own
 // notification.
-func (s *Server) changed(r *http.Request) {
+func (s *Server) changed(r *http.Request) { s.announce(r.Context()) }
+
+// announce is changed for a caller without a request.
+func (s *Server) announce(ctx context.Context) {
 	s.reg.Invalidate()
-	if err := s.st.Notify(r.Context()); err != nil {
+	if err := s.st.Notify(ctx); err != nil {
 		s.log.Warn("announcing guardrail change failed", "error", err)
 	}
 }
@@ -497,6 +511,11 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		httpx.WriteError(w, http.StatusNotFound, "invalid_request_error", "not_found", "not found")
+	case store.IsMissingOrg(err):
+		// Only an operator can name an organisation that is not theirs, so
+		// only they get here, and a typo is not an internal error.
+		httpx.WriteError(w, http.StatusNotFound, "invalid_request_error", "not_found",
+			"no such organisation")
 	case errors.Is(err, authn.ErrForbidden):
 		s.forbid(w, err.Error())
 	default:
