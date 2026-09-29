@@ -927,10 +927,10 @@ func TestTheOutputCeilingDoesNotTouchEmbeddings(t *testing.T) {
 	}
 }
 
-func TestServeChatEnforcesForACallerWithNoKey(t *testing.T) {
-	// The control panel's playground authorises its own caller and then hands
-	// the request here. It must land on exactly the path a key takes: the
-	// alias is rewritten, the allow-list holds, and the request is billed.
+func TestServeChatEnforcesTheKeysGuardrails(t *testing.T) {
+	// The control panel's playground resolves one of the user's keys and then
+	// hands the request here. It must land on exactly the path the key takes:
+	// the alias is rewritten, the allow-list holds, and the key is billed.
 	models := map[string]policy.Model{
 		"keera-code": {
 			Alias: "keera-code", Kind: policy.KindChat, BackendModel: "served-name",
@@ -942,9 +942,8 @@ func TestServeChatEnforcesForACallerWithNoKey(t *testing.T) {
 	}
 	h := newHarness(t, jsonBackend(`{"choices":[{"message":{"content":"hi"}}],`+
 		`"usage":{"prompt_tokens":1000,"completion_tokens":500}}`), models, nil)
-	res := policy.ResolveOrg("org_1", "user_7", &policy.Limits{
-		AllowedModels: []string{"keera-code"},
-	})
+	res := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1", UserID: "user_7"},
+		&policy.Limits{AllowedModels: []string{"keera-code"}}, nil, nil)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.server().ServeChat(w, r, res)
@@ -974,15 +973,15 @@ func TestServeChatEnforcesForACallerWithNoKey(t *testing.T) {
 	}
 
 	ev := h.sink.last(t)
-	if ev.OrgID != "org_1" || ev.UserID != "user_7" || ev.KeyID != "" {
-		t.Errorf("event = %+v; a panel request is the organisation's and the person's", ev)
+	if ev.OrgID != "org_1" || ev.UserID != "user_7" || ev.KeyID != "key_1" {
+		t.Errorf("event = %+v; a panel request is the key's and the person's", ev)
 	}
 	if h.budgets.total() == 0 {
 		t.Error("a request made from the panel has to be charged like any other")
 	}
 
-	// And a model that exists but is outside the organisation's allow-list is
-	// refused here too, or the panel would be the way round every guardrail.
+	// And a model that exists but is outside the allow-list is refused here
+	// too, or the panel would be the way round every guardrail.
 	if got := post(`{"model":"keera-premium","messages":[]}`).StatusCode; got != http.StatusNotFound {
 		t.Errorf("status = %d for a disallowed alias, want 404", got)
 	}

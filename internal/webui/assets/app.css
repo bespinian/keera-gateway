@@ -2,6 +2,9 @@
    One stylesheet, no build step. Tokens first, then layout, then components. */
 
 :root {
+  /* Native parts the tokens cannot reach, like an open list of options and
+     scrollbars, follow this. */
+  color-scheme: light;
   --bg: #f7f7f5;
   --surface: #ffffff;
   --surface-2: #fafaf9;
@@ -39,6 +42,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --bg: #121215;
     --surface: #1a1a1e;
     --surface-2: #1f1f24;
@@ -68,6 +72,7 @@
 }
 
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --bg: #121215;
   --surface: #1a1a1e;
   --surface-2: #1f1f24;
@@ -494,8 +499,64 @@ code,
 .input::placeholder {
   color: var(--faint);
 }
+/* The browser's own arrow differs per platform and ignores the theme, so the
+   select draws its own. */
 .select {
   cursor: pointer;
+  appearance: none;
+  padding-right: 30px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 16px) 50%,
+    calc(100% - 11px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+
+/* Where the browser lets CSS style the open list too, it looks like the rest
+   of the panel instead of the operating system's menu. */
+@supports (appearance: base-select) {
+  .select,
+  .select::picker(select) {
+    appearance: base-select;
+  }
+  /* The arrow drawn above stays; this one is heavier and points sideways
+     while open. */
+  .select::picker-icon {
+    display: none;
+  }
+  .select::picker(select) {
+    margin-block: 4px;
+    padding: 4px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow);
+  }
+  .select option {
+    padding: 6px 8px;
+    border-radius: 5px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .select option:hover,
+  .select option:focus-visible {
+    background: var(--surface-3);
+    outline: none;
+  }
+  .select option:checked {
+    color: var(--accent);
+  }
+  .select option::checkmark {
+    color: var(--accent);
+  }
+  .select option:disabled {
+    color: var(--faint);
+    cursor: not-allowed;
+  }
 }
 
 /* A field whose value cannot be set here.
@@ -503,7 +564,7 @@ code,
    disabled rather than only refuse the keystroke. */
 .input:disabled,
 .select:disabled {
-  background: var(--surface-2);
+  background-color: var(--surface-2);
   border-color: var(--border);
   color: var(--muted);
   -webkit-text-fill-color: var(--muted);

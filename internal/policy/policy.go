@@ -642,17 +642,6 @@ func (r *Resolved) narrow(lim *Limits, top bool) {
 	r.Sandbox.narrow(lim, top)
 }
 
-// ResolveOrg combines an organisation's limits for a caller without an API
-// key, such as the control panel's playground. The organisation is the only
-// scope.
-func ResolveOrg(orgID, userID string, org *Limits) *Resolved {
-	// Built on Resolve so the panel enforces exactly what a key would. The key
-	// scope is dropped because there is no key.
-	r := Resolve(Key{OrgID: orgID, UserID: userID}, org, nil, nil)
-	r.Scopes = r.Scopes[:1]
-	return r
-}
-
 // intersect narrows an allow-list. A nil list means unrestricted, not empty.
 func intersect(cur, next []string) []string {
 	switch {

@@ -197,49 +197,6 @@ func TestModelCostClampsAnImpossibleCachedCount(t *testing.T) {
 	}
 }
 
-func TestResolveOrgIsOrgScopedOnly(t *testing.T) {
-	// The panel's playground has no key. Charging one to a scope nothing else
-	// refers to would leave orphan rows in the spend table, and skipping the
-	// organisation's own limits would make the panel a way round them.
-	const budget = int64(5_000_000)
-	const rpm = 30
-	r := ResolveOrg("org_1", "user_7", &Limits{
-		AllowedModels: []string{"keera-code"},
-		RPM:           new(rpm),
-		BudgetMicros:  new(budget),
-	})
-
-	if len(r.Scopes) != 1 {
-		t.Fatalf("Scopes = %+v, want only the organisation", r.Scopes)
-	}
-	sc := r.Scopes[0]
-	if sc.Type != ScopeOrg || sc.ID != "org_1" {
-		t.Errorf("scope = %s/%s, want org/org_1", sc.Type, sc.ID)
-	}
-	if sc.RPM != rpm || sc.BudgetMicros != budget {
-		t.Errorf("scope = %+v; the organisation's limits must still apply", sc)
-	}
-	if r.AllowsModel("keera-premium") {
-		t.Error("the organisation's allow-list must bind a request made from the panel")
-	}
-	if r.Key.OrgID != "org_1" || r.Key.UserID != "user_7" {
-		t.Errorf("Key = %+v; usage has to name the person who typed it", r.Key)
-	}
-	if r.Key.ID != "" {
-		t.Errorf("Key.ID = %q, want empty: there is no key behind a panel request", r.Key.ID)
-	}
-}
-
-func TestResolveOrgWithoutLimitsIsUnlimited(t *testing.T) {
-	r := ResolveOrg("org_1", "user_7", &Limits{})
-	if !r.AllowsModel("anything") {
-		t.Error("an organisation with no allow-list must reach the whole catalogue")
-	}
-	if r.Scopes[0].RPM != 0 || r.Scopes[0].BudgetMicros != 0 {
-		t.Errorf("scope = %+v, want no ceilings", r.Scopes[0])
-	}
-}
-
 func TestFiltersAccumulateOutermostFirst(t *testing.T) {
 	r := Resolve(
 		Key{ID: "key_1", OrgID: "org_1", TeamID: "team_1"},
@@ -278,14 +235,6 @@ func TestAFilterNamedTwiceRunsOnce(t *testing.T) {
 	if !slices.Equal(r.Filters, want) {
 		t.Errorf("Filters = %q, want %q - a second pass over redacted text costs "+
 			"as much as the first and finds nothing", r.Filters, want)
-	}
-}
-
-func TestResolveOrgKeepsTheOrganisationsFilters(t *testing.T) {
-	r := ResolveOrg("org_1", "usr_1", &Limits{Filters: []string{"redact-secrets"}})
-	if !slices.Equal(r.Filters, []string{"redact-secrets"}) {
-		t.Errorf("Filters = %q; the panel's playground must meet the same filters "+
-			"an editor does", r.Filters)
 	}
 }
 
@@ -449,16 +398,6 @@ func TestResolveConcatenatesSystemPrompts(t *testing.T) {
 				t.Errorf("SystemPrompt = %q, want %q", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestResolveOrgCarriesTheOrgPrompt(t *testing.T) {
-	// The panel's playground holds no key, so the organisation's standing
-	// instruction is the only one there is - and it still applies, or the
-	// playground would be a way to ask a model what it says unguarded.
-	r := ResolveOrg("org_1", "user_1", &Limits{SystemPrompt: new("Answer in British English.")})
-	if r.SystemPrompt != "Answer in British English." {
-		t.Errorf("SystemPrompt = %q, want the organisation's", r.SystemPrompt)
 	}
 }
 

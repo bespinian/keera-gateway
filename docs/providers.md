@@ -274,8 +274,10 @@ the reasoning models. A client that asked for a temperature gets the default.
 search the web or connect to an MCP server. As with Anthropic, filters do not
 see what OpenAI fetches, and `--block-hosted-tools` removes these tools.
 
-**`gpt-5.5` and `gpt-5.4` have two prices, and the table holds one.** Both cost
-about twice as much per token above 272k input tokens. The table has the lower
+**The `gpt-6` models, `gpt-5.5` and `gpt-5.4` have two prices, and the table
+holds one.** Above 272k input tokens, `gpt-5.5` and `gpt-5.4` cost about twice
+as much per token, and the `gpt-6` models twice as much for input and one and a
+half times as much for output. The table has the lower
 price, so long requests are billed low. Set the price yourself if that matters;
 see [What the prices are, and are not](#what-the-prices-are-and-are-not).
 

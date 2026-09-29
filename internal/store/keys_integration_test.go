@@ -1,6 +1,8 @@
 package store
 
 import (
+	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -186,5 +188,40 @@ func TestLookupKeyIgnoresATeamInAnotherOrganisation(t *testing.T) {
 		if sc.BudgetMicros == 999_000_000 {
 			t.Errorf("the other tenant's budget was inherited by scope %+v", sc)
 		}
+	}
+}
+
+func TestLookupKeyByIDMatchesTheHashLookup(t *testing.T) {
+	// The playground finds a key by its id, and must meet exactly the guardrails
+	// the key's own requests do.
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	if err := st.PutPolicy(ctx, policy.ScopeTeam, f.teamID, policy.Limits{
+		AllowedModels: []string{"keera-code"}, RPM: new(120),
+	}); err != nil {
+		t.Fatalf("PutPolicy team: %v", err)
+	}
+
+	byHash, err := st.LookupKey(ctx, f.hash)
+	if err != nil {
+		t.Fatalf("LookupKey: %v", err)
+	}
+	byID, err := st.LookupKeyByID(ctx, f.keyID)
+	if err != nil {
+		t.Fatalf("LookupKeyByID: %v", err)
+	}
+	if byID.Key != byHash.Key || len(byID.Scopes) != len(byHash.Scopes) ||
+		!slices.Equal(byID.AllowedModels, byHash.AllowedModels) {
+		t.Errorf("by id = %+v, by hash = %+v; want the same key and chain", byID, byHash)
+	}
+
+	if _, err := st.LookupKeyByID(ctx, "key_nobody"); !errors.Is(err, policy.ErrUnknownKey) {
+		t.Errorf("unknown id: err = %v, want ErrUnknownKey", err)
+	}
+	if err := st.RevokeKey(ctx, f.keyID); err != nil {
+		t.Fatalf("RevokeKey: %v", err)
+	}
+	if _, err := st.LookupKeyByID(ctx, f.keyID); !errors.Is(err, policy.ErrKeyRevoked) {
+		t.Errorf("revoked key: err = %v, want ErrKeyRevoked", err)
 	}
 }

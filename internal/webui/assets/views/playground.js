@@ -1,10 +1,10 @@
 // The playground: a conversation with one model.
 //
 // The first question anyone asks of a new gateway is whether the models behind
-// it actually answer, and the honest way to find out is to ask one. The request
-// goes through the same data plane an editor's does - same allow-list, same
-// rate limits, same budget, same usage row - so an answer here means the path a
-// developer will use works, not that a second path does.
+// it actually answer, and the honest way to find out is to ask one. Messages
+// are sent with one of the reader's own keys, through the same data plane an
+// editor uses. They meet that key's guardrails, come out of its budgets and
+// show in its usage.
 
 import { api, ApiError, chatTargets } from "../api.js";
 import {
@@ -18,14 +18,16 @@ import {
   ms,
   empty,
   toast,
+  go,
+  isAdmin,
 } from "../ui.js";
-import { chooseOrg, orgNameOf } from "./orgs.js";
 
 /** session outlives a route change, so stepping over to Usage to look at what a
  *  message cost and stepping back does not throw the conversation away. It does
  *  not outlive a reload: a scratchpad that comes back from the dead days later
  *  is a surprise, not a feature. */
 const session = {
+  keyID: "",
   model: "",
   system: "",
   temperature: "",
@@ -34,54 +36,101 @@ const session = {
 };
 
 export async function playgroundView(ctx) {
-  // Only an operator can be looking at every organisation at once. There is
-  // no sensible default for whose budget a message comes out of.
-  if (!ctx.orgID) return chooseOrg(ctx, "Messages sent here");
+  // Only the reader's own keys: a message spends a key's budget, so it has to
+  // be one they may spend.
+  const a = await api.access();
+  const keys = (a.keys || []).filter((k) => k.state === "active");
+  if (!keys.length) return noKey(ctx, a);
+  if (!keys.some((k) => k.id === session.keyID)) session.keyID = keys[0].id;
+  const key = keys.find((k) => k.id === session.keyID);
+
   // Routers are offered where the chat models are: this is the one screen in
   // the panel where somebody can type a prompt and see which model a router
-  // sent it to.
-  const models = await usable(ctx, await chatTargets(ctx.orgID));
-
+  // sent it to. Only what the key may call is offered, so the picker cannot
+  // offer a model that only ever answers 404.
+  const allowed = key.allowed_models || [];
+  const models = (await chatTargets(key.org_id)).filter((m) =>
+    allowed.includes(m.alias),
+  );
   if (!models.length) {
     return h(
       "div",
       { class: "card" },
+      keyPicker(ctx, keys),
       empty(
-        catalogue.length
-          ? "No chat model is available to you"
-          : `${orgNameOf(ctx, null, { start: true })} has no chat model`,
-        catalogue.length
-          ? `${orgNameOf(ctx, null, { start: true })}'s guardrails allow no model that serves chat.`
-          : "Add a chat model under Models.",
+        "This key can call no chat model",
+        "Its guardrails allow no model that serves chat. Choose another key.",
       ),
     );
   }
   if (!models.some((m) => m.alias === session.model))
     session.model = models[0].alias;
 
-  return chat(ctx, models);
+  return chat(ctx, keys, key, models);
 }
 
-/** usable narrows the catalogue to what this organisation is actually allowed
- *  to reach, so the picker cannot offer a model that only ever answers 404. */
-async function usable(ctx, catalogue) {
-  if (!ctx.orgID) return catalogue;
-  try {
-    const limits = await api.guardrails("org", ctx.orgID);
-    // Null inherits and allows every model; an empty list allows none.
-    const allowed = limits && limits.allowed_models;
-    if (!Array.isArray(allowed)) return catalogue;
-    return catalogue.filter((m) => allowed.includes(m.alias));
-  } catch {
-    // Not being able to read the guardrails is not a reason to show nothing;
-    // the gateway refuses a model this organisation may not use anyway.
-    return catalogue;
+/** noKey explains why there is nothing to send with, and where to get a key. */
+function noKey(ctx, a) {
+  if (a.anonymous || (a.operator_key && !(a.keys || []).length)) {
+    return h(
+      "div",
+      { class: "card" },
+      empty(
+        "The operator key has no API keys",
+        "Messages are sent with one of your own API keys. Sign in with your " +
+          "identity provider to use yours.",
+      ),
+    );
   }
+  const canIssue = isAdmin(ctx) || ctx.state.me.can_manage_own_keys;
+  return h(
+    "div",
+    { class: "card" },
+    empty(
+      "You have no active API key",
+      canIssue
+        ? h(
+            "span",
+            {},
+            "Messages are sent with one of your own keys. Issue one on ",
+            h("a", { href: "/keys", onClick: go(ctx, "/keys") }, "API keys"),
+            ".",
+          )
+        : "Messages are sent with one of your own keys. Ask an " +
+            "administrator for a key in your name.",
+    ),
+  );
+}
+
+/** keyPicker chooses the key messages are sent with. Changing it redraws the
+ *  screen, because the models on offer depend on it. */
+function keyPicker(ctx, keys, onChange) {
+  const el = h(
+    "select",
+    {
+      class: "select",
+      style: { width: "auto" },
+      "aria-label": "API key",
+      onChange: () => {
+        if (onChange) onChange();
+        session.keyID = el.value;
+        ctx.reload();
+      },
+    },
+    keys.map((k) =>
+      h(
+        "option",
+        { value: k.id, selected: k.id === session.keyID },
+        k.alias || k.prefix,
+      ),
+    ),
+  );
+  return el;
 }
 
 /* ------------------------------------------------------------------- chat */
 
-function chat(ctx, models) {
+function chat(ctx, keys, key, models) {
   const byAlias = new Map(models.map((m) => [m.alias, m]));
   let abort = null;
 
@@ -235,6 +284,7 @@ function chat(ctx, models) {
   const bar = h(
     "div",
     { class: "chat-bar" },
+    keyPicker(ctx, keys, () => abort && abort.abort()),
     modelSelect,
     h("div", { style: { flex: 1 } }),
     h(
@@ -286,8 +336,8 @@ function chat(ctx, models) {
       h(
         "div",
         { class: "composer-hint" },
-        "Enter sends · Shift+Enter breaks the line · charged to ",
-        h("strong", {}, orgNameOf(ctx)),
+        "Enter sends · Shift+Enter breaks the line · sent with ",
+        h("strong", {}, key.alias || key.prefix),
       ),
     ),
   );
@@ -327,8 +377,8 @@ function chat(ctx, models) {
           h(
             "div",
             { class: "muted" },
-            "These are real requests. Guardrails apply, and they show up " +
-              "in Usage.",
+            "These are real requests, sent with your key. Its guardrails " +
+              "and budgets apply, and they show up in Usage.",
           ),
         ),
       );
@@ -409,7 +459,7 @@ function chat(ctx, models) {
 
     try {
       const res = await api.playground(
-        ctx.orgID,
+        session.keyID,
         request(reply.model, history),
         abort.signal,
       );

@@ -247,10 +247,10 @@ func (s *Server) inference(surf surface) http.HandlerFunc {
 	}
 }
 
-// ServeChat forwards one chat completion for a caller that was authorised
-// some other way than by an API key: the panel's playground. It goes through
-// the same rate limits, budgets and billing, because a playground that skipped
-// the guardrails would be a hole in them.
+// ServeChat forwards one chat completion for a key the caller did not present
+// itself: the panel's playground, which names one of the user's keys by id. It
+// goes through the same rate limits, budgets and billing as that key's own
+// requests.
 func (s *Server) ServeChat(w http.ResponseWriter, r *http.Request, res *policy.Resolved) {
 	// No auth span: the control plane authorised this caller, not this handler.
 	s.serve(w, r, res, chatSurface, newTrace())

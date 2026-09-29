@@ -325,8 +325,8 @@ export const api = {
     ),
   toolCalls: (params) => get("/v1/tool-calls" + query(params)),
 
-  playground: (orgID, payload, signal) =>
-    stream("/v1/playground/chat" + query({ org_id: orgID }), payload, signal),
+  playground: (keyID, payload, signal) =>
+    stream("/v1/playground/chat" + query({ key_id: keyID }), payload, signal),
 
   // The dashboard, and - with a scope of { team_id }, { key_id } or { alias } -
   // one team's, one key's or one model's own screen. The same report over

@@ -177,6 +177,10 @@ the combined result, run `keera guardrail effective <scope> <id>` (or
 level's guardrails and the combined answer; the command also shows which level
 decided each value.
 
+The panel's **Playground** has no way around this. You pick one of your own
+active keys, and every message is sent with it: it meets that key's guardrails,
+counts against its rate limits and budgets, and shows in its usage.
+
 ## What happens to one request
 
 1. Authenticate the key, and resolve the guardrails attached to its

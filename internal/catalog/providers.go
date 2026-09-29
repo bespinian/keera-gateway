@@ -75,9 +75,9 @@ type ProviderModel struct {
 // Release dates are the day each model came out, from its maker's own
 // announcement. An FP8 build takes the day of the model it was made from.
 //
-// Last checked against each pricing page: Anthropic on 2026-09-22, OpenAI and
-// Infomaniak on 2026-09-21, stepping stone against its offer of 2026-09-25,
-// and Phoeniqs on 2026-09-29. This is not a live price feed, so a price cut
+// Last checked against each pricing page: Anthropic on 2026-09-22, Infomaniak on
+// 2026-09-21, stepping stone against its offer of 2026-09-25, and OpenAI and
+// Phoeniqs on 2026-09-29. This is not a live price feed, so a price cut
 // since then is over-charged until somebody rebuilds.
 //
 // Retired models are dropped before their retirement date, because a row for
@@ -162,34 +162,51 @@ var providers = []Provider{{
 		Description: "most powerful and dearest here - thorough on the hardest " +
 			"problems, over a million-token context",
 	}, {
+		ID: "gpt-6.1-sol", MaxContext: 1_050_000, ReleaseDate: "2026-09-29",
+		InputMicrosPerMTok: 2_000_000, OutputMicrosPerMTok: 10_000_000,
+		CachedInputMicrosPerMTok: 100_000,
+		Description: "nearly as powerful at a fifth of the price - hard code and " +
+			"agent work without the top price",
+	}, {
+		ID: "gpt-6-sol", MaxContext: 1_050_000, ReleaseDate: "2026-09-22",
+		InputMicrosPerMTok: 2_000_000, OutputMicrosPerMTok: 10_000_000,
+		CachedInputMicrosPerMTok: 200_000,
+		Description: "the version before gpt-6.1-sol at the same price - less " +
+			"accurate on hard work",
+	}, {
+		ID: "gpt-6-luna", MaxContext: 1_050_000, ReleaseDate: "2026-09-22",
+		InputMicrosPerMTok: 100_000, OutputMicrosPerMTok: 500_000,
+		CachedInputMicrosPerMTok: 10_000,
+		Description: "fastest, cheapest and lightest here - short, simple, " +
+			"high-volume work over a very long context",
+	}, {
 		ID: "gpt-5.6-sol", MaxContext: 1_050_000, ReleaseDate: "2026-07-09",
 		InputMicrosPerMTok: 4_000_000, OutputMicrosPerMTok: 20_000_000,
 		CachedInputMicrosPerMTok: 400_000,
-		Description: "nearly as powerful, quicker and far cheaper - hard work " +
-			"without the top price",
+		Description: "previous generation's most powerful - hard work, at twice " +
+			"the price of gpt-6.1-sol",
 	}, {
 		ID: "gpt-5.6-terra", MaxContext: 1_050_000, ReleaseDate: "2026-07-09",
 		InputMicrosPerMTok: 2_000_000, OutputMicrosPerMTok: 12_000_000,
 		CachedInputMicrosPerMTok: 200_000,
-		Description: "capable, quick enough and mid-priced - the middle option, " +
-			"over a million-token context",
+		Description: "previous generation's middle option - capable, quick enough " +
+			"and mid-priced",
 	}, {
 		ID: "gpt-5.6-luna", MaxContext: 1_050_000, ReleaseDate: "2026-07-09",
 		InputMicrosPerMTok: 200_000, OutputMicrosPerMTok: 1_200_000,
 		CachedInputMicrosPerMTok: 20_000,
-		Description: "fastest, cheapest and lightest of its range - short, simple, " +
-			"high-volume work over a very long context",
+		Description: "previous generation's lightest - short, simple work, at " +
+			"twice the price of gpt-6-luna",
 	}, {
 		ID: "gpt-5.5", MaxContext: 1_050_000, ReleaseDate: "2026-04-24",
 		InputMicrosPerMTok: 5_000_000, OutputMicrosPerMTok: 30_000_000,
 		CachedInputMicrosPerMTok: 500_000,
-		Description: "previous generation's most powerful - thorough on hard " +
-			"problems, slow and dear",
+		Description:              "older top model - thorough on hard problems, slow and dear",
 	}, {
 		ID: "gpt-5.4", MaxContext: 1_050_000, ReleaseDate: "2026-03-05",
 		InputMicrosPerMTok: 2_500_000, OutputMicrosPerMTok: 15_000_000,
 		CachedInputMicrosPerMTok: 250_000,
-		Description:              "previous generation's middle option - capable and mid-priced",
+		Description:              "older middle option - capable and mid-priced",
 	}, {
 		ID: "gpt-5.4-mini", MaxContext: 400_000, ReleaseDate: "2026-03-17",
 		InputMicrosPerMTok: 750_000, OutputMicrosPerMTok: 4_500_000,
@@ -243,8 +260,8 @@ var providers = []Provider{{
 		"the reasoning models (all but gpt-4 and older) get no temperature or top_p. " +
 		"Built-in tools such as web search run at OpenAI, out of sight of " +
 		"filters; a guardrail that blocks hosted tools removes them. " +
-		"gpt-5.5 and gpt-5.4 cost about twice as much above 272k input tokens, " +
-		"and the table has the lower price. " +
+		"The gpt-6 models, gpt-5.5 and gpt-5.4 cost more above 272k input " +
+		"tokens, and the table has the lower price. " +
 		"gpt-5.6-sol is on a promotional price until 21 November 2026.",
 }, {
 	Name:    "infomaniak",
@@ -412,10 +429,10 @@ var providers = []Provider{{
 	Kinds:    []policy.Kind{policy.KindChat},
 	// Ids are Phoeniqs's own names. One keeps its name when the model behind
 	// it gets a minor upgrade, so the release dates are those of the models
-	// served on 2026-09-29. inference-glm5 was GLM-5.2 then, whose date is
-	// not known.
+	// served on 2026-09-29: GLM-5.2 for inference-glm5 and
+	// MinerU2.5-Pro-2605 for inference-miner-u25.
 	Models: []ProviderModel{{
-		ID: "inference-glm5", MaxContext: 131_072,
+		ID: "inference-glm5", MaxContext: 131_072, ReleaseDate: "2026-08-28",
 		InputMicrosPerMTok: 1_077_000, OutputMicrosPerMTok: 3_386_000,
 		Description: "the most capable and dearest here - long agent sessions, " +
 			"hard code and terminal work",
@@ -488,7 +505,7 @@ var providers = []Provider{{
 		Description: "tiny vision model: describes images and reads charts - not " +
 			"for chat or code",
 	}, {
-		ID: "inference-miner-u25", MaxContext: 8_192,
+		ID: "inference-miner-u25", MaxContext: 8_192, ReleaseDate: "2026-05-21",
 		InputMicrosPerMTok: 380_000, OutputMicrosPerMTok: 230_000,
 		Description: "document parsing: turns images of pages into text, tables " +
 			"and formulas - not for chat or code",

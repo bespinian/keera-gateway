@@ -478,6 +478,18 @@ func (s *Store) RotateKey(ctx context.Context, oldID string, next KeyInfo, hash 
 // guardrails of its whole chain. It is one round trip, because it runs on a
 // cache miss in the request path.
 func (s *Store) LookupKey(ctx context.Context, hash []byte) (*policy.Resolved, error) {
+	return s.lookupKey(ctx, "k.key_hash = $1", hash)
+}
+
+// LookupKeyByID is LookupKey for a key named by its id, for the panel's
+// playground, which never holds the key itself.
+func (s *Store) LookupKeyByID(ctx context.Context, id string) (*policy.Resolved, error) {
+	return s.lookupKey(ctx, "k.id = $1", id)
+}
+
+// lookupKey finds the key that where matches. where is a constant, never
+// input.
+func (s *Store) lookupKey(ctx context.Context, where string, arg any) (*policy.Resolved, error) {
 	// The team join also requires the team to be in the key's own org. The
 	// control plane already refuses anything else; this is a second check, so a
 	// bad row gives a key with no team rather than another tenant's guardrails.
@@ -493,7 +505,7 @@ func (s *Store) LookupKey(ctx context.Context, hash []byte) (*policy.Resolved, e
 			(p.scope_type = 'org'  AND p.scope_id = k.org_id) OR
 			(p.scope_type = 'team' AND p.scope_id = t.id) OR
 			(p.scope_type = 'key'  AND p.scope_id = k.id)
-		WHERE k.key_hash = $1`, hash)
+		WHERE `+where, arg)
 	if err != nil {
 		return nil, err
 	}

@@ -159,12 +159,12 @@ func TestErrorsAreParseableEnvelopes(t *testing.T) {
 	}
 }
 
-func TestThePlaygroundNeedsACredentialAndAnOrganisation(t *testing.T) {
-	// A message typed into the panel spends money, so it is a write in every
-	// sense that matters - and it has to say whose money.
+func TestThePlaygroundNeedsAKeyOfTheCallersOwn(t *testing.T) {
+	// A message typed into the panel spends money, so it is sent with one of
+	// the caller's keys and meets that key's guardrails.
 	srv := New(nil, nil, nil, nil, Options{
 		OperatorKey: testOperatorKey,
-		// A gateway that is never reached: both refusals happen before it.
+		// A gateway that is never reached: every refusal happens before it.
 		Gateway: gateway.New(nil, nil, nil, nil, nil, gateway.Options{},
 			slog.New(slog.DiscardHandler)),
 	}, slog.New(slog.DiscardHandler))
@@ -182,13 +182,16 @@ func TestThePlaygroundNeedsACredentialAndAnOrganisation(t *testing.T) {
 		return w.Code
 	}
 
-	if got := post(httpx.ControlPrefix+"/v1/playground/chat", ""); got != http.StatusUnauthorized {
+	const path = httpx.ControlPrefix + "/v1/playground/chat"
+	if got := post(path+"?key_id=key_1", ""); got != http.StatusUnauthorized {
 		t.Errorf("status = %d without a credential, want 401", got)
 	}
-	// An operator looking at every tenant at once has not said which budget
-	// this comes out of, and there is no defensible default.
-	if got := post(httpx.ControlPrefix+"/v1/playground/chat", testOperatorKey); got != http.StatusBadRequest {
-		t.Errorf("status = %d with no organisation chosen, want 400", got)
+	if got := post(path, testOperatorKey); got != http.StatusBadRequest {
+		t.Errorf("status = %d with no key chosen, want 400", got)
+	}
+	// The operator key is not a person, so it has no keys to send with.
+	if got := post(path+"?key_id=key_1", testOperatorKey); got != http.StatusForbidden {
+		t.Errorf("status = %d for the operator key, want 403", got)
 	}
 }
 
