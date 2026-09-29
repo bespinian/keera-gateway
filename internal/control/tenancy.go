@@ -272,8 +272,7 @@ func (s *Server) deleteTeam(w http.ResponseWriter, r *http.Request, p *authn.Pri
 		return
 	}
 	gone, err := s.st.DeleteTeam(r.Context(), teamID)
-	var inUse *store.TeamInUseError
-	if errors.As(err, &inUse) {
+	if inUse, ok := errors.AsType[*store.TeamInUseError](err); ok {
 		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "team_has_keys",
 			"'"+inUse.Team+"' still holds "+keyCount(len(inUse.Aliases))+" that have not been "+
 				"revoked ("+strings.Join(inUse.Aliases, ", ")+"). Deleting the team would take "+

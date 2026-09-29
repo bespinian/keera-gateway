@@ -458,8 +458,7 @@ func sshInto(ctx context.Context, c *client, org, name string, rest []string) er
 	cmd := exec.CommandContext(ctx, "ssh", args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
-		var exit *exec.ExitError
-		if errors.As(err, &exit) {
+		if exit, ok := errors.AsType[*exec.ExitError](err); ok {
 			// ssh exits with the remote command's status, which a script needs.
 			os.Exit(exit.ExitCode())
 		}

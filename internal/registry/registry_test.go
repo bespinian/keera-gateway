@@ -31,7 +31,7 @@ type source struct {
 
 	keys    map[string]*policy.Resolved
 	keyErr  map[string]error
-	lookups int32
+	lookups atomic.Int32
 
 	models  []policy.Model
 	filters []policy.Filter
@@ -56,7 +56,7 @@ func newSource() *source {
 }
 
 func (s *source) LookupKey(_ context.Context, hash []byte) (*policy.Resolved, error) {
-	atomic.AddInt32(&s.lookups, 1)
+	s.lookups.Add(1)
 	s.mu.Lock()
 	before := s.beforeLookup
 	s.mu.Unlock()
@@ -123,7 +123,7 @@ func (s *source) announce() {
 	}
 }
 
-func (s *source) calls() int { return int(atomic.LoadInt32(&s.lookups)) }
+func (s *source) calls() int { return int(s.lookups.Load()) }
 
 func (s *source) set(key string, r *policy.Resolved) {
 	s.mu.Lock()

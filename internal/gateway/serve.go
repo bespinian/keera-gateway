@@ -121,8 +121,7 @@ func (s *Server) receive(c *call) ([]byte, bool) {
 	c.tr.open(store.SpanReceive, "")
 	raw, err := io.ReadAll(http.MaxBytesReader(c.w, c.r.Body, s.opts.MaxBodyBytes))
 	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			s.refuse(c, refusal{
 				status: http.StatusRequestEntityTooLarge,
 				typ:    "invalid_request_error", code: "request_too_large",
@@ -266,8 +265,7 @@ func (s *Server) admit(c *call) bool {
 	if err == nil {
 		return true
 	}
-	var exceeded *policy.ErrBudgetExceeded
-	if !errors.As(err, &exceeded) {
+	if _, ok := errors.AsType[*policy.ErrBudgetExceeded](err); !ok {
 		// The budgeter should only ever say yes or no, so anything else is a bug.
 		s.log.Error("unexpected budget error", "error", err,
 			"request_id", httpx.RequestID(c.r.Context()))

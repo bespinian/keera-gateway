@@ -399,7 +399,7 @@ func TestRequestsCarryWhatWasServedAndWhatWasNot(t *testing.T) {
 	}
 
 	// Scoped to a model, and paged on the id rather than an offset.
-	fast, err := st.Requests(ctx, RequestQuery{OrgID: f.orgID, Scope: Scope{Alias: "keera-fast"}})
+	fast, err := st.Requests(ctx, RequestQuery{OrgID: f.orgID, Alias: "keera-fast"})
 	if err != nil {
 		t.Fatalf("Requests(alias): %v", err)
 	}
@@ -566,7 +566,7 @@ func TestOutcomesCountTheWindowNotThePage(t *testing.T) {
 	}
 
 	q := RequestQuery{
-		OrgID: f.orgID, Scope: Scope{TeamID: f.teamID},
+		OrgID: f.orgID, TeamID: f.teamID,
 		From: now.Add(-6 * time.Hour), To: now.Add(time.Hour),
 		// The outcome the reader is looking at must not narrow the counts: a
 		// filter that only offers the filter already applied is no filter.
@@ -716,7 +716,7 @@ func TestRequestFiltersOfferOnlyWhatOccurred(t *testing.T) {
 		From:  now.Add(-6 * time.Hour), To: now.Add(time.Hour),
 		// What has already been narrowed to must not narrow the facets, or the
 		// screen ends up offering only the filter it is already showing.
-		Scope: Scope{Alias: "keera-code"},
+		Alias: "keera-code",
 	}
 	all, err := st.RequestFilters(ctx, q)
 	if err != nil {

@@ -282,8 +282,8 @@ func ValidRepoPattern(s string) bool {
 	if s == AnyRepo {
 		return true
 	}
-	parts := strings.Split(s, "/")
-	for _, p := range parts {
+	parts := strings.SplitSeq(s, "/")
+	for p := range parts {
 		if p == "" || p == "." || p == ".." || strings.Trim(p, "abcdefghijklmnopqrstuvwxyz"+
 			"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-") != "" {
 			return false

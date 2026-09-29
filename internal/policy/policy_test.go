@@ -483,7 +483,7 @@ func TestLimitsIsZeroCountsEveryField(t *testing.T) {
 
 func TestAnEmptyAllowListSurvivesJSON(t *testing.T) {
 	none := Limits{AllowedModels: []string{}, AllowedTools: []string{},
-		SandboxLimits: SandboxLimits{SandboxClasses: []string{}, AllowedRepos: []string{}}}
+		SandboxClasses: []string{}, AllowedRepos: []string{}}
 	b, err := json.Marshal(none)
 	if err != nil {
 		t.Fatal(err)

@@ -138,7 +138,7 @@ func TestCreateBuildsTheObject(t *testing.T) {
 
 	expires := time.Now().Add(2 * time.Hour)
 	_, err := k.Create(context.Background(), Spec{
-		Ref: Ref{ID: "sbx_test0001", Name: "fix-login"},
+		ID: "sbx_test0001", Name: "fix-login",
 		Class: policy.SandboxClass{
 			Name: "big", Image: "example/sandbox:1", Isolation: policy.IsolationVM,
 			CPU: 4000, Memory: 16384, Disk: 51200,
@@ -203,7 +203,7 @@ func TestCreateSortsTheEnvironment(t *testing.T) {
 	f := newFakeAPI(t)
 	k := f.driver(t, KubernetesOptions{})
 	spec := Spec{
-		Ref:     Ref{ID: "sbx_test0002", Name: "envtest"},
+		ID: "sbx_test0002", Name: "envtest",
 		Class:   policy.SandboxClass{Name: "c", Image: "i", Isolation: policy.IsolationStandard},
 		Purpose: policy.PurposeAgent,
 		Env:     map[string]string{"ZZZ": "1", "AAA": "2", "MMM": "3"},
@@ -222,7 +222,7 @@ func TestCreateRefusesUndeliverableIsolation(t *testing.T) {
 	f := newFakeAPI(t)
 	k := f.driver(t, KubernetesOptions{}) // no runtime mapping at all
 	_, err := k.Create(context.Background(), Spec{
-		Ref:   Ref{ID: "sbx_test0003", Name: "vm"},
+		ID: "sbx_test0003", Name: "vm",
 		Class: policy.SandboxClass{Name: "vm", Image: "i", Isolation: policy.IsolationVM},
 	})
 	if err == nil {

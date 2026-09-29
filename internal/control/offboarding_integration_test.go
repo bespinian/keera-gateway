@@ -149,7 +149,7 @@ func TestASandboxRefreshesItsRepositoryCredentialWithItsOwnKey(t *testing.T) {
 	})
 	ts := sandboxServer(t, st, m)
 	if err := st.PutPolicy(t.Context(), policy.ScopeOrg, "org_1", policy.Limits{
-		SandboxLimits: policy.SandboxLimits{AllowedRepos: []string{"acme"}},
+		AllowedRepos: []string{"acme"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestASandboxOnlyGetsTheRepositoriesItsGuardrailAllows(t *testing.T) {
 	put := func(repos ...string) {
 		t.Helper()
 		if err := st.PutPolicy(ctx, policy.ScopeOrg, "org_1", policy.Limits{
-			SandboxLimits: policy.SandboxLimits{AllowedRepos: repos},
+			AllowedRepos: repos,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -370,7 +370,7 @@ func TestAnExpiredSandboxResumesWithANewKey(t *testing.T) {
 	m := sandbox.NewManager(st, driver, sandbox.ManagerOptions{Git: git})
 	ts := sandboxServer(t, st, m)
 	if err := st.PutPolicy(ctx, policy.ScopeOrg, "org_1", policy.Limits{
-		SandboxLimits: policy.SandboxLimits{AllowedRepos: []string{"acme"}},
+		AllowedRepos: []string{"acme"},
 	}); err != nil {
 		t.Fatal(err)
 	}

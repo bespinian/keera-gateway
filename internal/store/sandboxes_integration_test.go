@@ -385,13 +385,12 @@ func TestSandboxPolicyLimitsRoundTrip(t *testing.T) {
 	f := newFixture(t, st, ctx)
 
 	ttl := 8 * 3600
-	want := policy.Limits{SandboxLimits: policy.SandboxLimits{
+	want := policy.Limits{
 		MaxSandboxes:         new(6),
 		MaxSandboxTTLSeconds: &ttl,
 		SandboxClasses:       []string{"standard", "small"},
 		MaxSandboxCPU:        new(8000),
-		MaxSandboxMemory:     new(32768),
-	}}
+		MaxSandboxMemory:     new(32768)}
 	if err := st.PutPolicy(ctx, policy.ScopeOrg, f.orgID, want); err != nil {
 		t.Fatalf("PutPolicy: %v", err)
 	}

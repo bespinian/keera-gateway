@@ -171,8 +171,8 @@ type FilterReport struct {
 func (s *Store) FilterReportFor(ctx context.Context, orgID, alias string,
 	from, to time.Time) (FilterReport, error) {
 	bucket := chartBucket(from, to)
-	rep := FilterReport{From: from, To: to, Bucket: bucket}
-	rep.Filter = alias
+	rep := FilterReport{From: from, To: to, Bucket: bucket,
+		Filter: alias}
 
 	err := s.pool.QueryRow(ctx, `SELECT `+filterStatColumns+`
 		FROM filter_runs

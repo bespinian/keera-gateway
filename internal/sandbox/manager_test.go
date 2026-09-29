@@ -69,8 +69,7 @@ func TestAnAgentSandboxIsNotSuspended(t *testing.T) {
 	sb := store.Sandbox{Name: "fix-it", Purpose: policy.PurposeAgent, State: policy.SandboxReady}
 
 	err := m.Suspend(context.Background(), sb)
-	var refused *ErrRefused
-	if !errors.As(err, &refused) {
+	if _, ok := errors.AsType[*ErrRefused](err); !ok {
 		t.Fatalf("err = %v, want a refusal", err)
 	}
 }
@@ -84,8 +83,7 @@ func TestAnAgentSandboxNeedsATaskAndARepository(t *testing.T) {
 		"no repo": {Name: "a", Purpose: policy.PurposeAgent, Task: "fix the tests"},
 	} {
 		_, err := m.admit(context.Background(), req)
-		var refused *ErrRefused
-		if !errors.As(err, &refused) {
+		if _, ok := errors.AsType[*ErrRefused](err); !ok {
 			t.Errorf("%s: err = %v, want a refusal", name, err)
 		}
 	}

@@ -162,8 +162,7 @@ func call(ctx context.Context, c *http.Client, method, target string, header htt
 
 // status is the HTTP status of a forge's refusal, or 0.
 func status(err error) int {
-	var api *apiError
-	if errors.As(err, &api) {
+	if api, ok := errors.AsType[*apiError](err); ok {
 		return api.Status
 	}
 	return 0

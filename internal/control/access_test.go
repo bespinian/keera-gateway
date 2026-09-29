@@ -118,7 +118,7 @@ func TestKeyState(t *testing.T) {
 
 func summaryWith(revoked, expires *time.Time) store.KeySummary {
 	return store.KeySummary{
-		KeyInfo: store.KeyInfo{RevokedAt: revoked, ExpiresAt: expires},
+		RevokedAt: revoked, ExpiresAt: expires,
 	}
 }
 

@@ -130,8 +130,7 @@ func (s *Server) CheckFilter(ctx context.Context, f policy.Filter) FilterProbe {
 	p.TotalMS = time.Since(start).Milliseconds()
 	p.CostMicros = cost.micros
 	if err != nil {
-		var refused *filterRefusedError
-		if errors.As(err, &refused) {
+		if refused, ok := errors.AsType[*filterRefusedError](err); ok {
 			p.OK = true
 			p.Refused, p.Refusal = true, refused.reason
 			return p

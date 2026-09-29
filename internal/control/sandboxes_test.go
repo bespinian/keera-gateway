@@ -301,12 +301,12 @@ func TestSandboxHonoursTeamGuardrail(t *testing.T) {
 		t.Fatalf("CreateTeam: %v", err)
 	}
 	if err := st.PutPolicy(ctx, policy.ScopeOrg, "org_1", policy.Limits{
-		SandboxLimits: policy.SandboxLimits{MaxSandboxes: new(5)},
+		MaxSandboxes: new(5),
 	}); err != nil {
 		t.Fatalf("PutPolicy org: %v", err)
 	}
 	if err := st.PutPolicy(ctx, policy.ScopeTeam, "team_small", policy.Limits{
-		SandboxLimits: policy.SandboxLimits{MaxSandboxes: new(1), MaxSandboxTTLSeconds: new(3600)},
+		MaxSandboxes: new(1), MaxSandboxTTLSeconds: new(3600),
 	}); err != nil {
 		t.Fatalf("PutPolicy team: %v", err)
 	}

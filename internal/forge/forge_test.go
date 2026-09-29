@@ -46,8 +46,7 @@ func TestParseRepo(t *testing.T) {
 		"https://github.com/acme/app?x=1#y/z", "https://github.com/acme/%2e%2e", "git@github.com:",
 	} {
 		_, err := parseRepo(bad)
-		var refused *sandbox.ErrRefused
-		if !errors.As(err, &refused) {
+		if _, ok := errors.AsType[*sandbox.ErrRefused](err); !ok {
 			t.Errorf("parseRepo(%q) = %v, want a refusal", bad, err)
 		}
 	}

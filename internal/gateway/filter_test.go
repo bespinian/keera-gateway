@@ -523,8 +523,7 @@ func TestABareRefusalThatIsAnEchoedPromptIsAFaultAndNotAVerdict(t *testing.T) {
 	if err == nil {
 		t.Fatal("the echoed prompt was accepted as a rewrite")
 	}
-	var refused *filterRefusedError
-	if errors.As(err, &refused) {
+	if _, ok := errors.AsType[*filterRefusedError](err); ok {
 		t.Errorf("an echo was reported as the filter refusing: %v", err)
 	}
 }

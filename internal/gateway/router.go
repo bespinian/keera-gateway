@@ -294,8 +294,8 @@ func routerWindow(texts []string) []string {
 	}
 	budget := routerWindowBytes
 	first := len(texts) - 1
-	for i := len(texts) - 1; i >= 0; i-- {
-		budget -= len(texts[i])
+	for i, text := range slices.Backward(texts) {
+		budget -= len(text)
 		if budget < 0 {
 			break
 		}

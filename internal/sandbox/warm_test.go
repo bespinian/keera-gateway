@@ -94,7 +94,7 @@ func TestCreateClaimCarriesTheCredentials(t *testing.T) {
 
 	expires := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
 	_, err := k.Create(context.Background(), Spec{
-		Ref: Ref{ID: "sbx_warm01", Name: "warm", Backing: BackingClaim},
+		ID: "sbx_warm01", Name: "warm", Backing: BackingClaim,
 		Class: policy.SandboxClass{
 			OrgID: "org_1", Name: "standard", Image: "i", Isolation: policy.IsolationStandard,
 			CPU: 2000, Memory: 4096, Warm: 2,

@@ -278,8 +278,7 @@ func (s *Server) chainFilter(ctx context.Context, run *filterRun, orgID, alias s
 		// A filter that said no is the guardrail working; one that broke is a
 		// deployment that is not ready. They must answer differently, or a
 		// client retries the second forever.
-		var refused *filterRefusedError
-		if errors.As(err, &refused) {
+		if refused, ok := errors.AsType[*filterRefusedError](err); ok {
 			s.noteFilter(run, f, store.FilterRefuse, took, cost.micros, len(texts), 0, tr)
 			if !f.Enforces() {
 				return nil, nil, false
@@ -336,8 +335,7 @@ func (s *Server) runOne(ctx context.Context, f policy.Filter, m policy.Model,
 // filterFailed is the refusal for an enforcing filter that could not produce
 // an answer.
 func filterFailed(f policy.Filter, err error) *refusal {
-	var tooLarge *filterTooLargeError
-	if errors.As(err, &tooLarge) {
+	if _, ok := errors.AsType[*filterTooLargeError](err); ok {
 		return &refusal{
 			status: http.StatusRequestEntityTooLarge,
 			typ:    "invalid_request_error", code: "filter_input_too_large",

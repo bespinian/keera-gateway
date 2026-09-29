@@ -128,8 +128,7 @@ func (s *Server) mcpPost(w http.ResponseWriter, r *http.Request) {
 	}
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, s.opts.MaxBodyBytes))
 	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			httpx.WriteError(w, http.StatusRequestEntityTooLarge, "invalid_request_error",
 				"request_too_large", "the request body exceeds the gateway's limit")
 		}

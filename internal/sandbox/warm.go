@@ -198,7 +198,7 @@ func (k *Kubernetes) EnsurePool(ctx context.Context, class policy.SandboxClass) 
 	// The same builder as a cold sandbox, with no per-sandbox parts (no env,
 	// owner or expiry), so warm and cold sandboxes stay the same machine.
 	blueprint := k.build(Spec{
-		Ref:   Ref{ID: "pool_" + class.Name, Name: class.Name},
+		ID: "pool_" + class.Name, Name: class.Name,
 		Org:   class.OrgID,
 		Class: class,
 		// Only an engineer's sandbox is claimed from a pool (backingFor), so
