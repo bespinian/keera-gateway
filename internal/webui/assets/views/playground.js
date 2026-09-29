@@ -17,6 +17,7 @@ import {
   num,
   ms,
   empty,
+  toast,
 } from "../ui.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
 
@@ -127,6 +128,71 @@ function chat(ctx, models) {
     },
   });
 
+  // Images wait here until the message they belong to is sent.
+  let attached = [];
+  const tray = h("div", { class: "composer-tray", hidden: true });
+  const picker = h("input", {
+    type: "file",
+    accept: imageTypes,
+    multiple: true,
+    hidden: true,
+    onChange: async () => {
+      const files = [...picker.files];
+      // Cleared, so choosing the same file again still fires a change.
+      picker.value = "";
+      for (const file of files) {
+        try {
+          attached.push({ name: file.name, url: await readImage(file) });
+        } catch {
+          toast(`${file.name} is not an image this browser can read.`, "bad");
+        }
+      }
+      paintTray();
+      input.focus();
+    },
+  });
+  const attachBtn = h(
+    "button",
+    {
+      class: "btn composer-send",
+      type: "button",
+      title: "Attach an image",
+      "aria-label": "Attach an image",
+      onClick: () => picker.click(),
+    },
+    icon(icons.plus),
+  );
+
+  function paintTray() {
+    tray.hidden = attached.length === 0;
+    replace(
+      tray,
+      attached.map((a) =>
+        h(
+          "div",
+          { class: "composer-thumb" },
+          h("img", { src: a.url, alt: a.name }),
+          h(
+            "button",
+            {
+              class: "composer-thumb-remove",
+              type: "button",
+              title: "Remove",
+              "aria-label": `Remove ${a.name}`,
+              onClick: () => {
+                attached = attached.filter((x) => x !== a);
+                paintTray();
+                // The button is gone, so focus would be lost with it.
+                input.focus();
+              },
+            },
+            icon(icons.close),
+          ),
+        ),
+      ),
+    );
+  }
+
   const sendBtn = h(
     "button",
     {
@@ -199,9 +265,11 @@ function chat(ctx, models) {
         submit();
       },
     },
+    attachBtn,
     input,
     sendBtn,
     stopBtn,
+    picker,
   );
 
   const root = h(
@@ -213,6 +281,7 @@ function chat(ctx, models) {
     h(
       "div",
       { class: "composer-wrap" },
+      tray,
       form,
       h(
         "div",
@@ -276,18 +345,21 @@ function chat(ctx, models) {
 
   async function submit() {
     const text = input.value.trim();
-    if (!text || abort) return;
+    const images = attached.map((a) => a.url);
+    if ((!text && !images.length) || abort) return;
 
     // The history goes out before the placeholder joins it, so the request does
     // not carry an empty assistant turn.
     const history = wireMessages(session.messages);
     if (session.system.trim())
       history.unshift({ role: "system", content: session.system.trim() });
-    history.push({ role: "user", content: text });
+    history.push({ role: "user", content: wireContent(text, images) });
 
     input.value = "";
     autosize(input);
-    const ask = { role: "user", content: text };
+    attached = [];
+    paintTray();
+    const ask = { role: "user", content: text, images };
     session.messages.push(ask);
 
     const reply = {
@@ -305,6 +377,7 @@ function chat(ctx, models) {
     sendBtn.hidden = true;
     stopBtn.hidden = false;
     input.disabled = true;
+    attachBtn.disabled = true;
 
     // While tokens arrive the message is redrawn as plain text on an animation
     // frame rather than per chunk: a fast model emits a chunk per token, and
@@ -377,6 +450,7 @@ function chat(ctx, models) {
       sendBtn.hidden = false;
       stopBtn.hidden = true;
       input.disabled = false;
+      attachBtn.disabled = false;
       // The finished message is drawn once more in full, which is where fenced
       // code becomes a code block - mid-stream a fence is usually still open.
       render();
@@ -419,11 +493,59 @@ function subtitle(model) {
 }
 
 /** wireMessages is the conversation as the inference plane should see it:
- *  turns that carry text, and nothing that failed. */
+ *  turns that carry text or images, and nothing that failed. */
 function wireMessages(messages) {
   return messages
-    .filter((m) => !m.error && !m.unsent && m.content)
-    .map((m) => ({ role: m.role, content: m.content }));
+    .filter((m) => !m.error && !m.unsent && (m.content || m.images?.length))
+    .map((m) => ({ role: m.role, content: wireContent(m.content, m.images) }));
+}
+
+/** wireContent is a turn's content: a plain string, or the OpenAI parts form
+ *  when it carries images, which only models that read images accept. */
+function wireContent(text, images) {
+  if (!images || !images.length) return text;
+  const parts = images.map((url) => ({
+    type: "image_url",
+    image_url: { url },
+  }));
+  if (text) parts.unshift({ type: "text", text });
+  return parts;
+}
+
+/* ----------------------------------------------------------------- images */
+
+// The formats every API that reads images accepts.
+const imageTypes = "image/png,image/jpeg,image/gif,image/webp";
+
+// Providers scale a larger image down to about this size anyway. Sending more
+// only makes the request bigger, and every image is sent again with each
+// later message of the conversation.
+const maxImageSide = 2048;
+
+/** readImage reads a file as a data URL, scaled down to maxImageSide. */
+async function readImage(file) {
+  const url = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+  // Also checks that the file is an image at all.
+  const bitmap = await createImageBitmap(file);
+  const scale = maxImageSide / Math.max(bitmap.width, bitmap.height);
+  // A GIF is kept as it is, because redrawing it would drop its animation.
+  if (scale >= 1 || file.type === "image/gif") {
+    bitmap.close();
+    return url;
+  }
+  const canvas = h("canvas", {
+    width: Math.round(bitmap.width * scale),
+    height: Math.round(bitmap.height * scale),
+  });
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  // A browser that cannot write the file's own format writes PNG.
+  return canvas.toDataURL(file.type, 0.9);
 }
 
 /* ------------------------------------------------------------- transport */
@@ -531,6 +653,13 @@ function messageEl(msg, ctx, byAlias) {
       h(
         "div",
         { class: "bubble" + (msg.unsent ? " bubble-unsent" : "") },
+        msg.images?.length
+          ? h(
+              "div",
+              { class: "bubble-images" },
+              msg.images.map((url) => h("img", { src: url, alt: "" })),
+            )
+          : null,
         ...prose(msg.content),
       ),
       msg.unsent
