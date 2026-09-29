@@ -1,14 +1,15 @@
 # Hosted models
 
 A hosted model runs outside your infrastructure: at Anthropic, OpenAI,
-Infomaniak, stepping stone, or any other endpoint that speaks the OpenAI API.
+Infomaniak, stepping stone, Phoeniqs, or any other endpoint that speaks the
+OpenAI API.
 
 **Prompts sent to a hosted model leave your infrastructure.** Treat it as a
 deliberate exception. This page covers what to weigh before you offer one and
 how to keep it contained.
 
-Infomaniak and stepping stone serve open-weight models from their own data
-centres in Switzerland, so those prompts stay under Swiss law. Prompts to
+Infomaniak, stepping stone and Phoeniqs serve open-weight models from their own
+data centres in Switzerland, so those prompts stay under Swiss law. Prompts to
 Anthropic and OpenAI do not. Everything below applies to all of them.
 
 ## Why offer one at all
@@ -42,12 +43,12 @@ models:
 `provider` fills in every field the entry leaves out: the endpoint, the context
 window, the three prices (input, output and cached input), a description, the
 release date and the location. The providers are `anthropic`, `openai`,
-`infomaniak` and `stepping-stone`; `keera model providers` lists them with their
-models. For a `backend_model` not in that table, the entry must set
+`infomaniak`, `stepping-stone` and `phoeniqs`; `keera model providers` lists
+them with their models. For a `backend_model` not in that table, the entry must set
 `input_micros_per_mtok` and `output_micros_per_mtok` itself.
 
-The location is where the provider serves its models: `ch` for Infomaniak and
-stepping stone, `usa` for Anthropic and OpenAI. A model with no provider is
+The location is where the provider serves its models: `ch` for Infomaniak,
+stepping stone and Phoeniqs, `usa` for Anthropic and OpenAI. A model with no provider is
 `onprem` when its backend is inside your network: a service name, a private
 address or the loopback. A backend on the internet does not say which country
 it is in, so an entry for one must set `location` itself.
@@ -164,8 +165,8 @@ showback, not as a contract.
 Each model has three prices: input, output, and cached input (an input token
 the provider served from its prompt cache).
 
-- **The currency may not be yours.** Anthropic and OpenAI are in USD, Infomaniak
-  and stepping stone in CHF. Nothing is converted. Override the prices on the
+- **The currency may not be yours.** Anthropic and OpenAI are in USD, Infomaniak,
+  stepping stone and Phoeniqs in CHF. Nothing is converted. Override the prices on the
   entry.
 - **List price is not your price.** Put a negotiated rate, a discount or an
   internal cross-charge on the entry.
@@ -185,7 +186,7 @@ provider's console.
 stepping stone publishes a cache rate too. The gateway charges it for whatever
 the response reports as cached; see [stepping stone](#stepping-stone).
 
-Infomaniak publishes no cache discount. Its cached column is empty and every
+Infomaniak and Phoeniqs publish no cache discount. Their cached column is empty and every
 input token is charged at the input price. That is correct, not a gap.
 
 This price matters most. A coding agent resends its whole context on every
@@ -319,6 +320,28 @@ which read images of pages and are no use for chat or code. stepping stone also
 serves embedding, re-ranking, audio and image models on the same endpoint.
 Declare one with no `provider`, `kind: embedding`, the endpoint in `backends`,
 `location: ch`, and its own prices.
+
+### Phoeniqs
+
+The Phoeniqs Model Service is documented on
+[documentation.kvant.cloud](https://documentation.kvant.cloud/maas/active-models/).
+
+**Model ids are Phoeniqs's own names**, such as `inference-glm5`, not the
+upstream ones. `keera model providers` lists them.
+
+**The model behind an id can change.** An id keeps its name when Phoeniqs
+upgrades the model to a new minor version: `inference-glm5` is GLM-5.2 today.
+Phoeniqs sends an email only for a new major version or a removed id. The
+table's release dates are those of the models served when it was last checked.
+
+**No prompt cache is priced.** See [Cached input](#cached-input).
+
+**The table covers the chat models only**, including the vision models and one
+document parser, which is no use for chat or code. Phoeniqs also serves
+embedding, re-ranking, OCR and speech models on the same endpoint. Declare one
+with no `provider`, `kind: embedding`, the endpoint in `backends`,
+`location: ch`, and its own prices. DeepSeek OCR is left out because Phoeniqs
+publishes no context window for it.
 
 ## What is recorded
 

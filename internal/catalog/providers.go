@@ -76,9 +76,9 @@ type ProviderModel struct {
 // announcement. An FP8 build takes the day of the model it was made from.
 //
 // Last checked against each pricing page: Anthropic on 2026-09-22, OpenAI and
-// Infomaniak on 2026-09-21, and stepping stone against its offer of
-// 2026-09-25. This is not a live price feed, so a price cut since then is
-// over-charged until somebody rebuilds.
+// Infomaniak on 2026-09-21, stepping stone against its offer of 2026-09-25,
+// and Phoeniqs on 2026-09-29. This is not a live price feed, so a price cut
+// since then is over-charged until somebody rebuilds.
 //
 // Retired models are dropped before their retirement date, because a row for
 // a model nobody can call is worse than no row. OpenAI's gpt-5, gpt-5-mini and
@@ -402,6 +402,106 @@ var providers = []Provider{{
 		"Model ids are the upstream names, with capitals. " +
 		"Only chat and OCR models are listed: declare an embedding model with " +
 		"no provider, its address, its location and its prices. " +
+		"Prices are in CHF.",
+}, {
+	Name:     "phoeniqs",
+	Summary:  "Open-weight models, served in Switzerland.",
+	Endpoint: "https://maas.phoeniqs.com/v1",
+	Location: "ch",
+	Currency: "CHF",
+	Kinds:    []policy.Kind{policy.KindChat},
+	// Ids are Phoeniqs's own names. One keeps its name when the model behind
+	// it gets a minor upgrade, so the release dates are those of the models
+	// served on 2026-09-29. inference-glm5 was GLM-5.2 then, whose date is
+	// not known.
+	Models: []ProviderModel{{
+		ID: "inference-glm5", MaxContext: 131_072,
+		InputMicrosPerMTok: 1_077_000, OutputMicrosPerMTok: 3_386_000,
+		Description: "the most capable and dearest here - long agent sessions, " +
+			"hard code and terminal work",
+	}, {
+		ID: "inference-deepseek-v32", MaxContext: 163_840, ReleaseDate: "2025-12-01",
+		InputMicrosPerMTok: 615_600, OutputMicrosPerMTok: 1_846_900,
+		Description: "large reasoning model, mid-priced - hard questions and " +
+			"planning over a long context",
+	}, {
+		ID: "inference-qwen3-vl-235b", MaxContext: 128_000, ReleaseDate: "2025-09-23",
+		InputMicrosPerMTok: 700_300, OutputMicrosPerMTok: 2_000_000,
+		Description: "large and mid-priced, and reads images as well as text - " +
+			"screenshots, diagrams and scans",
+	}, {
+		ID: "inference-deepseek-v4-flash", MaxContext: 1_000_000, ReleaseDate: "2026-07-31",
+		InputMicrosPerMTok: 146_200, OutputMicrosPerMTok: 392_500,
+		Description: "capable, quick and cheap, over a million-token context - " +
+			"large codebases and long documents",
+	}, {
+		ID: "inference-glm53-flash", MaxContext: 1_000_000, ReleaseDate: "2026-08-26",
+		InputMicrosPerMTok: 123_000, OutputMicrosPerMTok: 410_000,
+		Description: "quick and cheap all-rounder over a million-token context - " +
+			"code, reasoning and tool use",
+	}, {
+		ID: "inference-apertus-v15-70b", MaxContext: 262_144, ReleaseDate: "2026-07-24",
+		InputMicrosPerMTok: 619_500, OutputMicrosPerMTok: 2_220_100,
+		Description: "middling power and mid-priced, with open weights and open " +
+			"training data - auditable work",
+	}, {
+		ID: "inference-gpt-oss-120b", MaxContext: 131_072, ReleaseDate: "2025-08-05",
+		InputMicrosPerMTok: 115_400, OutputMicrosPerMTok: 461_700,
+		Description: "middling power, quick and cheap, and reasons before it " +
+			"answers - everyday work and tool use",
+	}, {
+		ID: "inference-llama4-maverick", MaxContext: 1_048_576, ReleaseDate: "2025-04-05",
+		InputMicrosPerMTok: 269_300, OutputMicrosPerMTok: 1_077_300,
+		Description: "middling power and cheap, reads up to four images a prompt, " +
+			"over a million-token context",
+	}, {
+		ID: "inference-gemma4-31b", MaxContext: 131_072, ReleaseDate: "2026-04-02",
+		InputMicrosPerMTok: 118_000, OutputMicrosPerMTok: 325_000,
+		Description: "middling power, quick and cheap, reads images too - " +
+			"documents, chatbots and ordinary code",
+	}, {
+		ID: "inference-llama4-scout-17b", MaxContext: 62_256, ReleaseDate: "2025-04-05",
+		InputMicrosPerMTok: 192_400, OutputMicrosPerMTok: 638_700,
+		Description: "light, quick and cheap, reads images too, over a short context",
+	}, {
+		ID: "inference-qwq-32b", MaxContext: 32_768, ReleaseDate: "2025-03-06",
+		InputMicrosPerMTok: 923_400, OutputMicrosPerMTok: 923_400,
+		Description: "older reasoning model that thinks at length over a short " +
+			"context - dear for what it does",
+	}, {
+		ID: "inference-qwen3-8b", MaxContext: 40_960, ReleaseDate: "2025-04-29",
+		InputMicrosPerMTok: 26_900, OutputMicrosPerMTok: 106_200,
+		Description: "the cheapest chat model here, small and quick, with a " +
+			"thinking mode - simple work",
+	}, {
+		ID: "inference-granite-33-8b", MaxContext: 32_768, ReleaseDate: "2025-04-16",
+		InputMicrosPerMTok: 153_900, OutputMicrosPerMTok: 153_900,
+		Description: "small and cheap, follows plain instructions - short, simple tasks",
+	}, {
+		ID: "inference-mistral-v03-7b", MaxContext: 32_768, ReleaseDate: "2024-05-22",
+		InputMicrosPerMTok: 153_900, OutputMicrosPerMTok: 153_900,
+		Description: "small, old and cheap, for chat in many languages - short, " +
+			"simple tasks",
+	}, {
+		ID: "inference-granite-vision-2b", MaxContext: 8_192, ReleaseDate: "2025-02-26",
+		InputMicrosPerMTok: 77_000, OutputMicrosPerMTok: 77_000,
+		Description: "tiny vision model: describes images and reads charts - not " +
+			"for chat or code",
+	}, {
+		ID: "inference-miner-u25", MaxContext: 8_192,
+		InputMicrosPerMTok: 380_000, OutputMicrosPerMTok: 230_000,
+		Description: "document parsing: turns images of pages into text, tables " +
+			"and formulas - not for chat or code",
+	}},
+	Note: "Prompts leave your infrastructure, but stay in Switzerland. " +
+		"Model ids are Phoeniqs's own names, such as inference-glm5. An id " +
+		"stays the same when the model behind it gets a minor upgrade, so " +
+		"the model can change under it. " +
+		"No cached-input rate is published, so every input token costs the " +
+		"input price. " +
+		"Only chat, vision and document-parsing models are listed: declare an " +
+		"embedding model with no provider, its address, its location and its " +
+		"prices. " +
 		"Prices are in CHF.",
 }}
 

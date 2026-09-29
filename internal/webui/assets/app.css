@@ -1059,6 +1059,11 @@ th.num .th-sort {
   width: auto;
   flex: none;
 }
+/* A logo about twice as wide as it is tall looks too big at full height next
+   to the square ones. A tile's fixed square already fits it. */
+.provider-mark-wide {
+  height: 0.7em;
+}
 
 .dot {
   width: 6px;
