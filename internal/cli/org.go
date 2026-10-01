@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
@@ -18,6 +19,7 @@ type orgRun struct {
 	c        *client
 	fs       *flag.FlagSet
 	args     []string
+	name     string
 	domain   string
 	noDomain bool
 	yes      bool
@@ -28,6 +30,7 @@ func orgCmd(ctx context.Context, args []string) error {
 	sub, rest := split(args)
 	fs := flag.NewFlagSet("org "+sub, flag.ExitOnError)
 	r := &orgRun{c: newClient(), fs: fs, args: rest}
+	fs.StringVar(&r.name, "name", "", "the organisation's new name")
 	fs.StringVar(&r.domain, "domain", "",
 		"email domain whose sign-ins land in this organisation, such as example.ch")
 	fs.BoolVar(&r.noDomain, "no-domain", false, "remove the organisation's email domain")
@@ -87,10 +90,11 @@ func (r *orgRun) set(ctx context.Context) error {
 		return err
 	}
 	if r.fs.NArg() > 1 {
-		return fmt.Errorf("usage: keera org set [<org-id>] --domain <domain>")
+		return fmt.Errorf("usage: keera org set [<org-id>] [--name <name>] [--domain <domain> | --no-domain]")
 	}
-	if r.domain == "" && !r.noDomain {
-		return fmt.Errorf("nothing to change; pass --domain <domain> or --no-domain")
+	r.name = strings.TrimSpace(r.name)
+	if r.name == "" && r.domain == "" && !r.noDomain {
+		return fmt.Errorf("nothing to change; pass --name <name>, --domain <domain> or --no-domain")
 	}
 	if r.domain != "" && r.noDomain {
 		return fmt.Errorf("--domain and --no-domain say opposite things; pass one of them")
@@ -105,23 +109,28 @@ func (r *orgRun) set(ctx context.Context) error {
 		}
 		orgID = only
 	}
-	d, err := policy.CleanEmailDomain(r.domain)
-	if err != nil {
+	change := map[string]string{}
+	if r.name != "" {
+		change["name"] = r.name
+	}
+	if r.domain != "" || r.noDomain {
+		d, err := policy.CleanEmailDomain(r.domain)
+		if err != nil {
+			return err
+		}
+		change["email_domain"] = d
+	}
+	var org store.Org
+	if err := r.c.do(ctx, "PATCH", "/v1/orgs/"+url.PathEscape(orgID), change, &org); err != nil {
 		return err
 	}
-	var res struct {
-		ID          string `json:"id"`
-		EmailDomain string `json:"email_domain"`
-	}
-	if err := r.c.do(ctx, "PATCH", "/v1/orgs/"+url.PathEscape(orgID),
-		map[string]string{"email_domain": d}, &res); err != nil {
-		return err
-	}
-	return out(r.asJSON, res, func(w *table) {
-		_, _ = fmt.Fprintf(w, "%s\t%s\n", res.ID, orNotSet(res.EmailDomain))
-		// Only a first sign-in reads the domain, so nobody already here moves.
-		_, _ = fmt.Fprintln(w, "\nThis decides where a first sign-in lands. "+
-			"Everyone already here keeps the organisation they are in.")
+	return out(r.asJSON, org, func(w *table) {
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", org.ID, org.Name, orNotSet(org.EmailDomain))
+		if _, ok := change["email_domain"]; ok {
+			// Only a first sign-in reads the domain, so nobody already here moves.
+			_, _ = fmt.Fprintln(w, "\nThis decides where a first sign-in lands. "+
+				"Everyone already here keeps the organisation they are in.")
+		}
 	})
 }
 

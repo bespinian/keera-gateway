@@ -217,7 +217,6 @@ func notFound(err error) error {
 	return err
 }
 
-// isUnique reports whether err is a unique violation.
 // IsMissingOrg reports whether a write named an organisation that does not
 // exist. Every org_id is a foreign key into orgs that cascades on delete, so
 // this is the only way one of them fails.
@@ -227,9 +226,17 @@ func IsMissingOrg(err error) bool {
 		strings.HasSuffix(pgErr.ConstraintName, "_org_id_fkey")
 }
 
+// isUnique reports whether err is a unique violation.
 func isUnique(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+// uniqueOn reports whether err is a unique violation of the named constraint,
+// for a table with more than one.
+func uniqueOn(err error, constraint string) bool {
+	var pgErr *pgconn.PgError
+	return isUnique(err) && errors.As(err, &pgErr) && pgErr.ConstraintName == constraint
 }
 
 // nullable stores an empty string as NULL.

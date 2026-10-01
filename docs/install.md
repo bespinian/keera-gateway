@@ -240,6 +240,10 @@ keera team create "Payments Platform"     # --org only with several organisation
 KEY=$(keera key create --team <team> --alias "a developer's laptop")
 ```
 
+Organisation names are unique, ignoring case. An operator renames one with
+`keera org set <org-id> --name "Example Bank AG"`, or **Edit** on the
+organisations screen. Everything refers to it by id, so nothing else changes.
+
 A key is printed once and never stored. Nobody, not even an operator, can read
 it later.
 

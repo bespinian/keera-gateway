@@ -204,6 +204,26 @@ func TestOrgSetPatchesTheDomain(t *testing.T) {
 	}
 }
 
+// A rename sends only the name, so the domain stays what it was.
+func TestOrgSetRenamesWithoutTouchingTheDomain(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"PATCH /v1/orgs/org_2": map[string]any{"id": "org_2", "name": "Another Bank AG"},
+	})
+
+	if err := Run(context.Background(), []string{"org", "set", "org_2",
+		"--name", " Another Bank AG "}); err != nil {
+		t.Fatal(err)
+	}
+	body := f.request("PATCH", "/v1/orgs/org_2").body
+	if body["name"] != "Another Bank AG" {
+		t.Errorf("name sent = %v, want Another Bank AG", body["name"])
+	}
+	if _, present := body["email_domain"]; present {
+		t.Errorf("email_domain was sent with a rename: %v", body)
+	}
+}
+
 // The id can be left off where there is only one organisation, which is the
 // deployment that has to set a domain before it gets its second.
 func TestOrgSetFindsTheOnlyOrganisation(t *testing.T) {
@@ -245,8 +265,8 @@ func TestOrgSetClearsTheDomainOnlyWithItsOwnFlag(t *testing.T) {
 	if err := Run(context.Background(), []string{"org", "set", "org_2", "--no-domain"}); err != nil {
 		t.Fatal(err)
 	}
-	// Sent as an empty string rather than left out: the endpoint takes an
-	// absent field as "say what to set" and refuses it.
+	// Sent as an empty string rather than left out: the endpoint leaves an
+	// absent field as it is.
 	if got, present := f.request("PATCH", "/v1/orgs/org_2").body["email_domain"]; !present || got != "" {
 		t.Errorf("email_domain = %v (present %v), want an empty string", got, present)
 	}

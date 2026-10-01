@@ -361,3 +361,58 @@ func TestCreateOrgWithATakenDomainCreatesNothing(t *testing.T) {
 		t.Errorf("ListOrgs = %+v, want only the first organisation", orgs)
 	}
 }
+
+// Names are unique across organisations, ignoring case, on create and on
+// rename alike. A rename and a domain change go in one statement, so a refused
+// domain keeps the old name too.
+func TestOrgNamesAreUnique(t *testing.T) {
+	st, ctx := db(t)
+	for _, o := range []Org{
+		{ID: "org_1", Name: "Example Bank", EmailDomain: "example.ch"},
+		{ID: "org_2", Name: "Another Bank"},
+	} {
+		if _, err := st.CreateOrg(ctx, o, OrgTemplate{}); err != nil {
+			t.Fatalf("CreateOrg %s: %v", o.ID, err)
+		}
+	}
+	if _, err := st.CreateOrg(ctx, Org{ID: "org_3", Name: "example bank"}, OrgTemplate{}); !errors.Is(err, ErrOrgNameTaken) {
+		t.Errorf("CreateOrg with a taken name = %v, want ErrOrgNameTaken", err)
+	}
+
+	name := "Example Bank AG"
+	org, err := st.UpdateOrg(ctx, "org_1", OrgChange{Name: &name})
+	if err != nil {
+		t.Fatalf("UpdateOrg: %v", err)
+	}
+	if org.Name != name || org.EmailDomain != "example.ch" {
+		t.Errorf("UpdateOrg = %+v, want the new name and the domain it had", org)
+	}
+
+	taken := "EXAMPLE BANK AG"
+	if _, err := st.UpdateOrg(ctx, "org_2", OrgChange{Name: &taken}); !errors.Is(err, ErrOrgNameTaken) {
+		t.Errorf("renaming onto a name in use = %v, want ErrOrgNameTaken", err)
+	}
+	// Changing only the capitalisation is not a collision with itself.
+	lower := "example bank ag"
+	if _, err := st.UpdateOrg(ctx, "org_1", OrgChange{Name: &lower}); err != nil {
+		t.Errorf("renaming an organisation to its own name in lower case: %v", err)
+	}
+
+	fresh, domain := "Another Bank AG", "Example.CH"
+	if _, err := st.UpdateOrg(ctx, "org_2", OrgChange{Name: &fresh, EmailDomain: &domain}); !errors.Is(err, ErrDomainTaken) {
+		t.Errorf("a taken domain = %v, want ErrDomainTaken", err)
+	}
+	orgs, err := st.ListOrgs(ctx)
+	if err != nil {
+		t.Fatalf("ListOrgs: %v", err)
+	}
+	for _, o := range orgs {
+		if o.ID == "org_2" && o.Name != "Another Bank" {
+			t.Errorf("org_2 is called %q after a refused update, want the old name", o.Name)
+		}
+	}
+
+	if _, err := st.UpdateOrg(ctx, "nobody", OrgChange{Name: &fresh}); err != ErrNotFound {
+		t.Errorf("renaming a missing org = %v, want ErrNotFound", err)
+	}
+}

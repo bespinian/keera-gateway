@@ -123,8 +123,9 @@ export const api = {
   orgs: () => get("/v1/orgs"),
   createOrg: (name, emailDomain) =>
     request("POST", "/v1/orgs", { name, email_domain: emailDomain || "" }),
-  setOrgDomain: (id, emailDomain) =>
+  updateOrg: (id, name, emailDomain) =>
     request("PATCH", `/v1/orgs/${encodeURIComponent(id)}`, {
+      name,
       email_domain: emailDomain,
     }),
   deleteOrg: (id) => request("DELETE", `/v1/orgs/${encodeURIComponent(id)}`),

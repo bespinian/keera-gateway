@@ -41,7 +41,7 @@ func (s *Server) createOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	org, err := s.st.CreateOrg(r.Context(),
 		store.Org{ID: id.New("org"), Name: name, EmailDomain: domain}, s.opts.Template)
 	if err != nil {
-		s.failDomain(w, err)
+		s.failOrg(w, err)
 		return
 	}
 	s.auditf(r, p, org.ID, "org.create", "org", org.ID, org)
@@ -72,40 +72,58 @@ func (s *Server) listOrgs(w http.ResponseWriter, r *http.Request, p *authn.Princ
 
 func (s *Server) updateOrg(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	if !p.Unrestricted() {
-		s.forbid(w, "only an operator can change an organisation's identity mapping")
+		s.forbid(w, "only an operator can change an organisation")
 		return
 	}
 	var in struct {
+		Name        *string `json:"name"`
 		EmailDomain *string `json:"email_domain"`
 	}
-	if err := httpx.ReadJSON(r, &in); err != nil || in.EmailDomain == nil {
-		badRequest(w, "'email_domain' is required; send an empty string to clear it")
+	if err := httpx.ReadJSON(r, &in); err != nil || (in.Name == nil && in.EmailDomain == nil) {
+		badRequest(w, "send 'name', 'email_domain' or both; an empty 'email_domain' clears it")
 		return
 	}
-	domain, err := policy.CleanEmailDomain(*in.EmailDomain)
-	if err != nil {
-		badRequest(w, err.Error())
-		return
+	if in.Name != nil {
+		name := strings.TrimSpace(*in.Name)
+		if name == "" {
+			badRequest(w, "'name' cannot be empty")
+			return
+		}
+		in.Name = &name
+	}
+	if in.EmailDomain != nil {
+		domain, err := policy.CleanEmailDomain(*in.EmailDomain)
+		if err != nil {
+			badRequest(w, err.Error())
+			return
+		}
+		in.EmailDomain = &domain
 	}
 	orgID := r.PathValue("id")
-	if err := s.st.SetOrgEmailDomain(r.Context(), orgID, domain); err != nil {
-		s.failDomain(w, err)
+	org, err := s.st.UpdateOrg(r.Context(), orgID,
+		store.OrgChange{Name: in.Name, EmailDomain: in.EmailDomain})
+	if err != nil {
+		s.failOrg(w, err)
 		return
 	}
-	s.auditf(r, p, orgID, "org.update", "org", orgID, map[string]string{"email_domain": domain})
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"id": orgID, "email_domain": domain})
+	s.auditf(r, p, orgID, "org.update", "org", orgID, org)
+	httpx.WriteJSON(w, http.StatusOK, org)
 }
 
-// failDomain answers a domain another organisation already holds with a
+// failOrg answers a name or domain another organisation already holds with a
 // message that says so, instead of a generic internal error.
-func (s *Server) failDomain(w http.ResponseWriter, err error) {
-	if errors.Is(err, store.ErrDomainTaken) {
+func (s *Server) failOrg(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, store.ErrOrgNameTaken):
+		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "org_name_taken",
+			"another organisation already has that name")
+	case errors.Is(err, store.ErrDomainTaken):
 		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "domain_taken",
 			"that email domain belongs to another organisation; "+
 				"one domain places sign-ins in one organisation, so it can only be set on one")
-		return
+	default:
+		s.fail(w, err)
 	}
-	s.fail(w, err)
 }
 
 func (s *Server) deleteOrg(w http.ResponseWriter, r *http.Request, p *authn.Principal) {

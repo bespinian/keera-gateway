@@ -199,6 +199,7 @@ export function newOrg(ctx, { switchTo = false } = {}) {
 }
 
 function orgSettings(ctx, org) {
+  const name = h("input", { class: "input", value: org.name });
   const domain = h("input", {
     class: "input",
     value: org.email_domain || "",
@@ -211,6 +212,17 @@ function orgSettings(ctx, org) {
       "div",
       {},
       err,
+      h(
+        "div",
+        { class: "field" },
+        h("label", {}, "Name"),
+        name,
+        h(
+          "div",
+          { class: "hint" },
+          "Must differ from every other organisation's name.",
+        ),
+      ),
       h(
         "div",
         { class: "field" },
@@ -230,11 +242,24 @@ function orgSettings(ctx, org) {
         {
           class: "btn btn-primary",
           onClick: async (e) => {
+            if (!name.value.trim()) return name.focus();
             e.target.disabled = true;
             try {
-              await api.setOrgDomain(org.id, domain.value.trim());
+              const saved = await api.updateOrg(
+                org.id,
+                name.value.trim(),
+                domain.value.trim(),
+              );
+              // The topbar's switcher reads the shell's copy of the list,
+              // which reload() does not fetch again.
+              const i = (ctx.state.orgs || []).findIndex(
+                (o) => o.id === org.id,
+              );
+              if (i >= 0) ctx.state.orgs[i] = saved;
+              if (org.id === ctx.state.me.org_id)
+                ctx.state.me.org_name = saved.name;
               close();
-              toast("Domain saved", "good");
+              toast("Organisation saved", "good");
               ctx.reload();
             } catch (ex) {
               showError(err, ex.message);

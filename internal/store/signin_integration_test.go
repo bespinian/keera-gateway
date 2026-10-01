@@ -196,8 +196,12 @@ func TestOrgLookupsForASignIn(t *testing.T) {
 		t.Errorf("FirstOrg = %+v, %v; want the organisation the deployment started with", org, err)
 	}
 
-	if err := st.SetOrgEmailDomain(ctx, "org_2", "AnotherBank.CH"); err != nil {
-		t.Fatalf("SetOrgEmailDomain: %v", err)
+	setDomain := func(orgID, domain string) error {
+		_, err := st.UpdateOrg(ctx, orgID, OrgChange{EmailDomain: &domain})
+		return err
+	}
+	if err := setDomain("org_2", "AnotherBank.CH"); err != nil {
+		t.Fatalf("UpdateOrg: %v", err)
 	}
 	// Matched case-insensitively: nobody types their own domain consistently.
 	if org, err := st.OrgByEmailDomain(ctx, "anotherbank.ch"); err != nil || org.ID != "org_2" {
@@ -207,27 +211,27 @@ func TestOrgLookupsForASignIn(t *testing.T) {
 		t.Errorf("an unmapped domain gave %v, want ErrNotFound", err)
 	}
 	// Clearing it is how a tenant stops adopting sign-ins by domain.
-	if err := st.SetOrgEmailDomain(ctx, "org_2", ""); err != nil {
-		t.Fatalf("SetOrgEmailDomain: %v", err)
+	if err := setDomain("org_2", ""); err != nil {
+		t.Fatalf("UpdateOrg: %v", err)
 	}
 	if _, err := st.OrgByEmailDomain(ctx, "anotherbank.ch"); err != ErrNotFound {
 		t.Errorf("the domain still matches after being cleared: %v", err)
 	}
-	if err := st.SetOrgEmailDomain(ctx, "nobody", "x.ch"); err != ErrNotFound {
+	if err := setDomain("nobody", "x.ch"); err != ErrNotFound {
 		t.Errorf("setting a domain on a missing org gave %v, want ErrNotFound", err)
 	}
 	// One domain places sign-ins in one tenant, so the second claim on it is
 	// refused - and told apart from a driver failure, because the operator who
 	// typed it against the wrong organisation is the one who has to hear which
 	// it is.
-	if err := st.SetOrgEmailDomain(ctx, "org_1", "shared.ch"); err != nil {
-		t.Fatalf("SetOrgEmailDomain: %v", err)
+	if err := setDomain("org_1", "shared.ch"); err != nil {
+		t.Fatalf("UpdateOrg: %v", err)
 	}
-	if err := st.SetOrgEmailDomain(ctx, "org_2", "Shared.CH"); !errors.Is(err, ErrDomainTaken) {
+	if err := setDomain("org_2", "Shared.CH"); !errors.Is(err, ErrDomainTaken) {
 		t.Errorf("a domain another organisation holds gave %v, want ErrDomainTaken", err)
 	}
 	// Setting the one it already has is not a collision with itself.
-	if err := st.SetOrgEmailDomain(ctx, "org_1", "shared.ch"); err != nil {
+	if err := setDomain("org_1", "shared.ch"); err != nil {
 		t.Errorf("re-setting an organisation's own domain gave %v", err)
 	}
 }

@@ -20,6 +20,9 @@ CREATE TABLE orgs (
 );
 CREATE UNIQUE INDEX orgs_email_domain_key
     ON orgs (lower(email_domain)) WHERE email_domain IS NOT NULL;
+-- Operators pick an organisation by name, and type it back to delete one, so
+-- two that differ only in case would be easy to mix up.
+CREATE UNIQUE INDEX orgs_name_key ON orgs (lower(name));
 
 CREATE TABLE teams (
     id         text PRIMARY KEY,

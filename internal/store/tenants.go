@@ -101,10 +101,7 @@ func (s *Store) CreateOrg(ctx context.Context, o Org, tmpl OrgTemplate) (Org, er
 		"INSERT INTO orgs (id, name, email_domain) VALUES ($1,$2,$3) RETURNING created_at",
 		id, o.Name, domain,
 	).Scan(&o.CreatedAt); err != nil {
-		if domain != nil && isUnique(err) {
-			return o, ErrDomainTaken
-		}
-		return o, err
+		return o, orgConflict(err)
 	}
 	for _, m := range tmpl.Models {
 		m.OrgID = id
@@ -119,6 +116,47 @@ func (s *Store) CreateOrg(ctx context.Context, o Org, tmpl OrgTemplate) (Org, er
 		}
 	}
 	return o, tx.Commit(ctx)
+}
+
+// ErrOrgNameTaken means another organisation already has the name, ignoring
+// case.
+var ErrOrgNameTaken = errors.New("store: another organisation already has that name")
+
+// orgConflict names which of an organisation's unique columns a write
+// collided on.
+func orgConflict(err error) error {
+	switch {
+	case uniqueOn(err, "orgs_name_key"):
+		return ErrOrgNameTaken
+	case uniqueOn(err, "orgs_email_domain_key"):
+		return ErrDomainTaken
+	}
+	return err
+}
+
+// OrgChange is what UpdateOrg changes. A nil field is left as it is, and an
+// empty EmailDomain clears it.
+type OrgChange struct {
+	Name        *string
+	EmailDomain *string
+}
+
+// UpdateOrg renames an organisation, changes its email domain, or both, in
+// one statement, so a refused domain does not leave the rename behind.
+// Everything else refers to an organisation by id, so the name is only a
+// label. The old one is kept in the audit log.
+func (s *Store) UpdateOrg(ctx context.Context, orgID string, c OrgChange) (Org, error) {
+	var domain *string
+	if c.EmailDomain != nil {
+		domain = nullable(strings.TrimSpace(*c.EmailDomain))
+	}
+	o, err := scanOrg(s.pool.QueryRow(ctx, `UPDATE orgs SET
+			name = COALESCE($2, name),
+			email_domain = CASE WHEN $3 THEN $4 ELSE email_domain END
+		WHERE id = $1
+		RETURNING id, name, COALESCE(email_domain, ''), created_at`,
+		orgID, c.Name, c.EmailDomain != nil, domain))
+	return o, notFound(orgConflict(err))
 }
 
 // DeletedOrg is what a deletion took with it. The counts are read in the same

@@ -137,14 +137,20 @@ var commands = []command{
 			{name: "create", aliases: []string{"add", "new"}, args: "<name>", summary: "create an organisation",
 				flags: []string{"domain", "json"}},
 			{name: "list", aliases: []string{"ls"}, summary: "every organisation", flags: []string{"json"}},
-			{name: "set", aliases: []string{"edit", "update"}, args: "[<org-id>]", summary: "set the email domain whose sign-ins land in it",
-				flags: []string{"domain", "no-domain", "json"}},
+			{name: "set", aliases: []string{"edit", "update"}, args: "[<org-id>]", summary: "rename it, or set the email domain whose sign-ins land in it",
+				flags: []string{"name", "domain", "no-domain", "json"},
+				prose: "Names are unique, ignoring case. Everything refers to an organisation " +
+					"by its id, so a rename changes only what it is called. The old name stays " +
+					"in the audit log."},
 			{name: "delete", aliases: []string{"rm", "remove"}, args: "<org-id>", summary: "delete an organisation and everything in it",
 				flags: []string{"yes", "json"},
 				prose: "Refused while any of its sandboxes is still live: terminate them first, " +
 					"so no machine keeps running after its organisation is gone."},
 		},
-		examples: []string{`keera org create "Example Bank" --domain example.ch`},
+		examples: []string{
+			`keera org create "Example Bank" --domain example.ch`,
+			`keera org set org_123 --name "Example Bank AG"`,
+		},
 	},
 	{
 		name:    "team",

@@ -172,19 +172,6 @@ func (s *Store) FirstOrg(ctx context.Context) (Org, error) {
 // One domain maps to one tenant, so a second claim is refused.
 var ErrDomainTaken = errors.New("store: that email domain belongs to another organisation")
 
-// SetOrgEmailDomain attaches an email domain to a tenant.
-func (s *Store) SetOrgEmailDomain(ctx context.Context, orgID, domain string) error {
-	var d *string
-	if domain = strings.TrimSpace(domain); domain != "" {
-		d = &domain
-	}
-	err := s.execOne(ctx, "UPDATE orgs SET email_domain = $2 WHERE id = $1", orgID, d)
-	if isUnique(err) {
-		return ErrDomainTaken
-	}
-	return err
-}
-
 // Link identifies the person behind a sign-in.
 type Link struct {
 	OrgID string

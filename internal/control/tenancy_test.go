@@ -61,21 +61,29 @@ func TestOperatorCannotDeleteTheirOwnOrg(t *testing.T) {
 	}
 }
 
-// Two organisations cannot share a domain: one domain places a sign-in in one
-// tenant. That is an ordinary mistake - a domain typed against the wrong id -
-// and the generic failure path would answer it with "internal error" and a
-// request id, which names neither what was wrong nor what to change.
-func TestADomainAnotherOrganisationHoldsIsAConflict(t *testing.T) {
+// Two organisations cannot share a name or a domain. Hitting either is an
+// ordinary mistake, and the generic failure path would answer it with
+// "internal error" and a request id, which names neither what was wrong nor
+// what to change.
+func TestATakenNameOrDomainIsAConflict(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
-	w := httptest.NewRecorder()
+	for _, c := range []struct {
+		err  error
+		code string
+	}{
+		{store.ErrOrgNameTaken, "org_name_taken"},
+		{store.ErrDomainTaken, "domain_taken"},
+	} {
+		w := httptest.NewRecorder()
+		s.failOrg(w, fmt.Errorf("setting it: %w", c.err))
 
-	s.failDomain(w, fmt.Errorf("setting it: %w", store.ErrDomainTaken))
-
-	if w.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "another organisation") {
-		t.Errorf("body = %q, want it to say what holds the domain", w.Body.String())
+		if w.Code != http.StatusConflict {
+			t.Fatalf("%s: status = %d, want 409", c.code, w.Code)
+		}
+		if body := w.Body.String(); !strings.Contains(body, c.code) ||
+			!strings.Contains(body, "another organisation") {
+			t.Errorf("body = %q, want %s and what holds it", body, c.code)
+		}
 	}
 }
 
