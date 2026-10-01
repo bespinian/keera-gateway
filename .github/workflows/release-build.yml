@@ -35,9 +35,8 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # Containerfile builds with -mod=vendor and the vendor tree is gitignored,
-      # so a clean checkout has to write it before the build can copy it in.
-      # This is also what keeps the build itself offline.
+      # The Containerfile writes the vendor tree itself when the context has
+      # none. Writing it here instead keeps the image build itself offline.
       - name: Vendor dependencies
         run: go mod vendor
 

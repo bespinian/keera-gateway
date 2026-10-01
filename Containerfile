@@ -5,6 +5,9 @@ ARG REVISION=""
 
 WORKDIR /src
 COPY . .
+# vendor/ is not in Git, so a builder that builds straight from a clone has to
+# write it here. With a vendor tree in the context, the build stays offline.
+RUN [ -f vendor/modules.txt ] || go mod vendor
 RUN CGO_ENABLED=0 go build -mod=vendor -trimpath \
         -ldflags="-s -w \
           -X github.com/bespinian/keera-gateway/internal/version.release=${VERSION} \

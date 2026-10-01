@@ -195,8 +195,8 @@ make image GATEWAY_IMAGE=<registry>/keera-gateway:0.1.0 VERSION=0.1.0
 podman push <registry>/keera-gateway:0.1.0
 ```
 
-The vendor directory is not committed, and the build needs it. With it, the
-build works offline. `VERSION` is what the binary reports; without it, the
+The vendor directory is not committed. Without it, the build writes its own,
+which needs network access. With it, the build works offline. `VERSION` is what the binary reports; without it, the
 image says `devel`. The
 result is a `FROM scratch` image with one static binary. The release workflow
 also publishes one for every `v*` tag, as
