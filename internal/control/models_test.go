@@ -156,3 +156,54 @@ func TestANewOrganisationStartsWithTheTemplate(t *testing.T) {
 		t.Errorf("the administrator could not change the copy: %d %s", w.Code, w.Body)
 	}
 }
+
+// A subscription model is sent each caller's Claude sign-in, so it takes no
+// key of its own and goes nowhere but Anthropic's own API.
+func TestASubscriptionModelIsAnthropicsAPIWithNoKey(t *testing.T) {
+	st, ctx := routerStore(t)
+	s := routerServer(ctx, t, st)
+	const plan = `{"kind":"chat","provider":"anthropic","backends":["https://api.anthropic.com/v1"],
+		"backend_model":"claude-opus-5-5","subscription":true,"enabled":true`
+
+	if w := callModel(s.putModel, admin("org_1"), http.MethodPut, "claude", "",
+		plan+`,"api_key":"sk-ant-api03-x"}`); w.Code != http.StatusBadRequest {
+		t.Errorf("a subscription model took an API key: %d %s", w.Code, w.Body)
+	}
+	elsewhere := strings.Replace(plan, "https://api.anthropic.com/v1", "https://collect.example.ch/v1", 1)
+	if w := callModel(s.putModel, admin("org_1"), http.MethodPut, "claude", "", elsewhere+"}"); w.Code != http.StatusBadRequest {
+		t.Errorf("a subscription model was pointed elsewhere: %d %s", w.Code, w.Body)
+	}
+	if w := callModel(s.putModel, admin("org_1"), http.MethodPut, "claude", "", plan+"}"); w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body)
+	}
+	saved, err := st.Model(ctx, "org_1", "claude")
+	if err != nil || !saved.Subscription {
+		t.Errorf("saved = %+v, %v; want a subscription model", saved, err)
+	}
+}
+
+// Only Claude Code signed in to a Claude plan reaches a subscription model,
+// so a model a router uses does not become one: the router would fail.
+func TestAModelARouterUsesDoesNotBecomeASubscriptionModel(t *testing.T) {
+	st, ctx := routerStore(t)
+	s := routerServer(ctx, t, st)
+	if code, out := putRouter(t, s, "auto", validRouter()); code != http.StatusOK {
+		t.Fatalf("putRouter: %d %s", code, out)
+	}
+	const plan = `{"kind":"chat","provider":"anthropic","backends":["https://api.anthropic.com/v1"],
+		"backend_model":"claude-opus-5-5","subscription":true,"enabled":true}`
+
+	for alias, role := range map[string]string{
+		"keera-picker": "deciding model", "keera-large": "destination",
+	} {
+		w := callModel(s.putModel, admin("org_1"), http.MethodPut, alias, "", plan)
+		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "model_in_use") ||
+			!strings.Contains(w.Body.String(), "router 'auto' ("+role+")") {
+			t.Errorf("%s: status = %d, want 409 naming the router: %s", alias, w.Code, w.Body)
+		}
+		saved, err := st.Model(ctx, "org_1", alias)
+		if err != nil || saved.Subscription {
+			t.Errorf("%s: saved = %+v, %v; want it unchanged", alias, saved, err)
+		}
+	}
+}

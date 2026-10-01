@@ -199,7 +199,7 @@ colon:
 
 ```
 (?i)\b[a-z_]*(?:secret|token|password|api[_-]?key)[a-z_]*\s*[=:]\s*\S+ => [CREDENTIAL]
-(?i)\b(sk|pk|ghp|gho|xox[baprs])-[a-z0-9_-]{16,}\b                     => [CREDENTIAL]
+(?i)\b(?:(?:sk|pk|xox[baprs])-|gh[pousr]_)[a-z0-9_-]{16,}\b            => [CREDENTIAL]
 (?i)\b[a-z]+://[^\s:@]+:[^\s:@]+@\S+                                   => [CONNECTION-STRING]
 \b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]{4}){2,7}\b                              => [IBAN]
 \b\d{3}\.\d{4}\.\d{4}\.\d{2}\b                                          => [AHV]
@@ -307,6 +307,9 @@ The gateway also enforces:
 - Narrowing the organisation's allow-list so that a filter's model drops off
   it is refused with a 409 `filter_model_not_allowed`. Move the filter to an
   allowed model first.
+- A [subscription model](subscriptions.md#what-a-subscription-key-can-do)
+  cannot be a filter's model (a 400 when saved), and turning on `subscription`
+  for a model a filter uses is refused with a 409.
 
 ## Shadow: rolling one out
 

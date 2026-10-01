@@ -415,7 +415,15 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 		badRequest(w, msg)
 		return
 	}
+	if m.Subscription && credential != "" {
+		badRequest(w, "a subscription model is sent each caller's own Claude sign-in, so it "+
+			"takes no API key")
+		return
+	}
 	if !s.checkModelAlias(w, r, orgID, m.Alias) {
+		return
+	}
+	if m.Subscription && !s.checkSubscriptionUsers(w, r, orgID, m.Alias) {
 		return
 	}
 	if err := s.st.UpsertModel(r.Context(), m); err != nil {
@@ -438,6 +446,15 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 	if err != nil {
 		s.fail(w, err)
 		return
+	}
+	// A model turned into a subscription model keeps no key it will never use.
+	if stored.Subscription && stored.HasAPIKey {
+		if err := s.setModelCredential(r, p, orgID, m.Alias, ""); err != nil {
+			s.fail(w, err)
+			return
+		}
+		s.changed(r)
+		stored.HasAPIKey = false
 	}
 	httpx.WriteJSON(w, http.StatusOK, stored)
 }
@@ -487,6 +504,9 @@ func normalizeModel(m *policy.Model) string {
 	case m.ReleaseDate != "" && !policy.ValidReleaseDate(m.ReleaseDate):
 		return "'release_date' must be a day written as YYYY-MM-DD"
 	}
+	if err := catalog.CheckSubscription(*m); err != nil {
+		return err.Error()
+	}
 	return ""
 }
 
@@ -505,6 +525,47 @@ func (s *Server) checkModelAlias(w http.ResponseWriter, r *http.Request, orgID, 
 	return !s.aliasTaken(w, err, "'"+alias+"' is already one of this organisation's routers, "+
 		"which a model of the same alias would make unreachable - give this model a "+
 		"different alias")
+}
+
+// checkSubscriptionUsers refuses to make a model a subscription model while a
+// filter or router uses it. Only Claude Code signed in to a Claude plan
+// reaches such a model, so they would fail on every request. It is the other
+// half of the subscription checks in checkFilterModel, checkRouterModel and
+// checkDestinations, since the writes can come in either order.
+func (s *Server) checkSubscriptionUsers(w http.ResponseWriter, r *http.Request,
+	orgID, alias string) bool {
+	filters, err := s.st.ListFilters(r.Context(), orgID)
+	if err != nil {
+		s.fail(w, err)
+		return false
+	}
+	var users []string
+	for _, f := range filters {
+		if f.UsesModel() && f.Model == alias {
+			users = append(users, "filter '"+f.Alias+"'")
+		}
+	}
+	routers, err := s.st.ListRouters(r.Context(), orgID)
+	if err != nil {
+		s.fail(w, err)
+		return false
+	}
+	for _, rt := range routers {
+		switch {
+		case rt.Decides() && rt.Model == alias:
+			users = append(users, "router '"+rt.Alias+"' (deciding model)")
+		case rt.Offers(alias):
+			users = append(users, "router '"+rt.Alias+"' (destination)")
+		}
+	}
+	if len(users) == 0 {
+		return true
+	}
+	httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "model_in_use",
+		"'"+alias+"' is used by "+strings.Join(users, ", ")+". A subscription model is "+
+			"reached only by Claude Code signed in to a Claude plan, so they would fail - "+
+			"point them at another model first")
+	return false
 }
 
 // aliasTaken refuses an alias that another kind of thing already has, and

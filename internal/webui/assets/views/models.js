@@ -647,12 +647,23 @@ function viewModel(ctx, m) {
                 `${money(m.output_micros_per_mtok, "")} out`,
             )
           : h("span", { class: "muted" }, "not billed"),
-        "What requests to this model count against your budgets." +
-          (m.kind === "chat"
-            ? " Clients resend the whole conversation each turn, so input " +
-              "is charged again."
-            : ""),
+        m.subscription
+          ? "What the API would have charged. No budget is charged, " +
+              "because each person's Claude subscription pays."
+          : "What requests to this model count against your budgets." +
+              (m.kind === "chat"
+                ? " Clients resend the whole conversation each turn, so " +
+                  "input is charged again."
+                : ""),
       ),
+      m.subscription
+        ? readRow(
+            "Paid by",
+            pill("Claude subscription", "good"),
+            "Only Claude Code signed in to a Claude plan can use it. Set it " +
+              "up with: keera connect claude-code --subscription",
+          )
+        : null,
     ),
     actions: (close) => [
       h("button", { class: "btn btn-primary", onClick: close }, "Close"),
@@ -1015,6 +1026,12 @@ function editModel(ctx, existing, providers, pick) {
     placeholder: m.has_api_key ? "•••••••• stored - type to replace" : "sk-…",
   });
   const clearKey = m.has_api_key ? h("input", { type: "checkbox" }) : null;
+  // Only Anthropic's models can be paid by a Claude plan. Such a model is sent
+  // each person's own Claude sign-in, so it takes no key of its own.
+  const subscription = h("input", {
+    type: "checkbox",
+    checked: !!m.subscription,
+  });
   const enabled = h("input", {
     type: "checkbox",
     checked: m.enabled !== false,
@@ -1206,6 +1223,53 @@ function editModel(ctx, existing, providers, pick) {
     onPick: () => reveal(),
   });
 
+  const keyField = h(
+    "div",
+    { class: "field" },
+    h("label", {}, "API key"),
+    apiKey,
+    h(
+      "div",
+      { class: "hint" },
+      "The key the gateway sends to the backend. Stored encrypted " +
+        "and never shown again. Leave empty to keep the stored key.",
+    ),
+    clearKey
+      ? h(
+          "label",
+          { class: "row-tight", style: { marginTop: "6px" } },
+          clearKey,
+          "Remove the stored key",
+        )
+      : null,
+  );
+  const subscriptionField = h(
+    "div",
+    { class: "field" },
+    h(
+      "label",
+      { class: "row-tight" },
+      subscription,
+      "Paid by each person's Claude subscription",
+    ),
+    h(
+      "div",
+      { class: "hint" },
+      "For Claude Team and Enterprise plans. Only Claude Code signed in to " +
+        "the plan can use this model. The gateway forwards each person's " +
+        "own sign-in and stores no key. The prices only show what the API " +
+        "would have charged.",
+    ),
+  );
+  const anthropicChosen = () =>
+    state.hosted && !!state.place && state.place.p?.name === "anthropic";
+  const paidByClaudePlan = () => anthropicChosen() && subscription.checked;
+  const paintSubscription = () => {
+    subscriptionField.hidden = !anthropicChosen();
+    keyField.hidden = paidByClaudePlan();
+  };
+  subscription.addEventListener("change", paintSubscription);
+
   // Everything the tiles govern, in one wrapper the dialog can hold back until
   // one of them is clicked. On a new model that is most of the form: where it
   // runs decides whether these fields are questions at all, or a provider's
@@ -1245,29 +1309,11 @@ function editModel(ctx, existing, providers, pick) {
       marks.description,
     ),
     productSlot,
+    subscriptionField,
     // Above the fold below it, because it is a question rather than an
     // answer: a hosted model takes a provider, a model and a key, and the key
     // is the only one of the three that is not on the screen already.
-    h(
-      "div",
-      { class: "field" },
-      h("label", {}, "API key"),
-      apiKey,
-      h(
-        "div",
-        { class: "hint" },
-        "The key the gateway sends to the backend. Stored encrypted " +
-          "and never shown again. Leave empty to keep the stored key.",
-      ),
-      clearKey
-        ? h(
-            "label",
-            { class: "row-tight", style: { marginTop: "6px" } },
-            clearKey,
-            "Remove the stored key",
-          )
-        : null,
-    ),
+    keyField,
     slot,
     h(
       "div",
@@ -1331,8 +1377,10 @@ function editModel(ctx, existing, providers, pick) {
         try {
           // Absent unless the administrator typed one or asked for the stored
           // one to go: sending "" on every save would wipe it.
+          const paidByPlan = paidByClaudePlan();
           let credential;
-          if (clearKey && clearKey.checked) credential = "";
+          if (paidByPlan) credential = undefined;
+          else if (clearKey && clearKey.checked) credential = "";
           else if (apiKey.value) credential = apiKey.value;
 
           const declaration = {
@@ -1353,6 +1401,7 @@ function editModel(ctx, existing, providers, pick) {
             input_micros_per_mtok: micros(priceIn.value),
             output_micros_per_mtok: micros(priceOut.value),
             cached_input_micros_per_mtok: micros(priceCached.value),
+            subscription: paidByPlan,
             enabled: enabled.checked,
           };
           await api.putModel(
@@ -1385,7 +1434,9 @@ function editModel(ctx, existing, providers, pick) {
     rest.hidden = false;
     saveButton.hidden = false;
     saveButton.disabled = false;
+    paintSubscription();
   };
+  paintSubscription();
   if (hosted && pick && !existing) hosted.pick(pick.p, pick.m);
   // Held back only where there is a choice to make: a build that knows no
   // providers has no tiles, and a model that already exists has answered.

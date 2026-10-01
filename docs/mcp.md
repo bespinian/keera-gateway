@@ -13,9 +13,15 @@ gateway then:
 - **records every call**: which tool, the outcome, how long it took and how many
   bytes went each way - never the content.
 
-It speaks MCP's Streamable HTTP transport and passes everything else through
-unchanged: sessions, notifications, the server's own requests, resources and
-prompts.
+It speaks MCP's Streamable HTTP transport, up to its 2026-07-28 version, and
+passes everything else through unchanged: sessions, notifications, the server's
+own requests, resources and prompts.
+
+Since 2026-07-28 a request also names its method and target in headers:
+`Mcp-Method`, `Mcp-Name` and `Mcp-Param-*`. The gateway checks `Mcp-Method` and
+`Mcp-Name` against the body and refuses a mismatch with a 400 and JSON-RPC error
+-32020, as the server would. A load balancer behind the gateway may route on
+these headers, so they must say what the body says.
 
 ## Adding a server
 
@@ -86,7 +92,9 @@ that list it; take it off them first.
 A tool the key may not call is left out of `tools/list`, so the agent never sees
 it. If called anyway, it is refused as an unknown tool and recorded as `denied`.
 A server where the key may call no tool answers 404, like a model it may not
-use.
+use. A [subscription key](subscriptions.md#what-a-subscription-key-can-do)
+gets a 404 `mcp_server_not_found` from every server. Because the list depends on the key, a list the server marks `public` for
+caching is passed on as `private`.
 
 `keera guardrail effective` shows the tools in force and which level narrowed
 them.
@@ -95,8 +103,9 @@ them.
 
 The key's filters run over every string in a call's arguments before the call is
 forwarded - the same filters, in the same order, as on its model requests. A
-rewrite goes to the server. A refusal comes back to the agent as a failed tool
-result that says why, so the model can carry on.
+rewrite goes to the server, and so does an `Mcp-Param-*` header that carried the
+old value. A refusal comes back to the agent as a failed tool result that says
+why, so the model can carry on.
 
 Results are not filtered here. A result goes into the agent's next model
 request, and the filters read it there.
@@ -111,13 +120,14 @@ keera mcp calls --summary --since 168h
 Each call is one row: server, tool, outcome, time, bytes sent and received, the
 key, and the error if any. The outcomes are:
 
-| Outcome      | Means                                                                           |
-| ------------ | ------------------------------------------------------------------------------- |
-| `ok`         | the tool answered                                                               |
-| `tool_error` | the tool answered that it failed                                                |
-| `error`      | no result: the server failed or could not be reached, or a filter could not run |
-| `denied`     | the key may not call this tool                                                  |
-| `refused`    | a filter stopped the call                                                       |
+| Outcome          | Means                                                                           |
+| ---------------- | ------------------------------------------------------------------------------- |
+| `ok`             | the tool answered                                                               |
+| `tool_error`     | the tool answered that it failed                                                |
+| `error`          | no result: the server failed or could not be reached, or a filter could not run |
+| `denied`         | the key may not call this tool                                                  |
+| `refused`        | a filter stopped the call                                                       |
+| `input_required` | the server asked for the user's input first; the retry is a row of its own      |
 
 A session's screen in the panel lists its tool calls under its model calls:
 those between the session's first and last request. If the client names the
@@ -162,7 +172,8 @@ tools, no level below can unblock them.
   in to the server is not built yet.
 - **Only remote servers.** An MCP server that an agent starts as a local process
   never passes through the gateway. For those, give the agent a
-  [sandbox](sandboxes.md), whose egress is enforced.
+  [sandbox](sandboxes.md), whose egress can be limited
+  ([what is enforced](sandboxes.md#what-is-actually-enforced)).
 - **One tool call per request.** A JSON-RPC batch that holds a tool call is
   refused. MCP removed batches in its 2025-06-18 version.
 - **A tool call needs an id.** One sent as a notification is refused with

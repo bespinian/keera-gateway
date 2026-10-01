@@ -52,12 +52,12 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []modelEntry{}
 	for _, m := range s.src.Models(res.Key.OrgID) {
-		if m.Enabled && res.AllowsModel(m.Alias) {
+		if m.Enabled && res.MayUse(m) {
 			out = append(out, modelEntryOf(m))
 		}
 	}
 	for _, rt := range s.src.Routers(res.Key.OrgID) {
-		if res.AllowsModel(rt.Alias) {
+		if res.AllowsModel(rt.Alias) && !res.Key.Subscription() {
 			out = append(out, routerEntryOf(rt))
 		}
 	}
@@ -71,11 +71,11 @@ func (s *Server) getModel(w http.ResponseWriter, r *http.Request) {
 	}
 	alias := r.PathValue("alias")
 	if res.AllowsModel(alias) {
-		if m, found := s.src.Model(res.Key.OrgID, alias); found && m.Enabled {
+		if m, found := s.src.Model(res.Key.OrgID, alias); found && m.Enabled && res.MayUse(m) {
 			httpx.WriteJSON(w, http.StatusOK, modelEntryOf(m))
 			return
 		}
-		if rt, found := s.src.Router(res.Key.OrgID, alias); found {
+		if rt, found := s.src.Router(res.Key.OrgID, alias); found && !res.Key.Subscription() {
 			httpx.WriteJSON(w, http.StatusOK, routerEntryOf(rt))
 			return
 		}

@@ -104,6 +104,8 @@ type Registry struct {
 	gen atomic.Uint64
 
 	inflight sync.Map // string -> *call
+	// lookups holds a slot for each key query running, up to maxLookups.
+	lookups chan struct{}
 
 	budgets *Budgets
 }
@@ -118,6 +120,7 @@ func New(ctx context.Context, st Source, opts Options, log *slog.Logger) (*Regis
 		log:     log,
 		keys:    make(map[string]entry),
 		budgets: newBudgets(),
+		lookups: make(chan struct{}, maxLookups),
 	}
 	if err := r.refreshAll(ctx); err != nil {
 		return nil, err
@@ -347,8 +350,21 @@ type call struct {
 	err      error
 }
 
+// maxLookups caps the key queries that run at once. The database pool is
+// shared with usage writes and the control plane, and a flood of made-up keys
+// must not take all of it.
+const maxLookups = 4
+
+// errLookupsBusy is what a caller gets who shared a query that never got a
+// slot, because the one who started it hung up first.
+var errLookupsBusy = errors.New("registry: too many key lookups at once")
+
 // Resolve implements policy.Source.
 func (r *Registry) Resolve(ctx context.Context, presented string) (*policy.Resolved, error) {
+	// Nothing else can be a key, so it costs no query and no cache entry.
+	if !auth.WellFormed(presented) {
+		return nil, policy.ErrUnknownKey
+	}
 	// Keyed by the hash, so a heap dump does not hand out working credentials.
 	hash := auth.Hash(presented)
 	ck := string(hash)
@@ -364,6 +380,16 @@ func (r *Registry) Resolve(ctx context.Context, presented string) (*policy.Resol
 	if actual, loaded := r.inflight.LoadOrStore(ck, c); loaded {
 		return wait(ctx, actual.(*call))
 	}
+	// Waiting for a slot ends when this caller hangs up, so a flood holds
+	// no more goroutines than it holds connections.
+	select {
+	case r.lookups <- struct{}{}:
+	case <-ctx.Done():
+		c.err = errLookupsBusy
+		r.inflight.Delete(ck)
+		close(c.done)
+		return nil, ctx.Err()
+	}
 	// The query runs on its own context: others may be waiting on it, and
 	// the first caller hanging up must not fail them all.
 	go r.lookup(context.WithoutCancel(ctx), hash, ck, gen, c)
@@ -374,6 +400,7 @@ func (r *Registry) Resolve(ctx context.Context, presented string) (*policy.Resol
 const lookupTimeout = 10 * time.Second
 
 func (r *Registry) lookup(ctx context.Context, hash []byte, ck string, gen uint64, c *call) {
+	defer func() { <-r.lookups }()
 	defer r.inflight.Delete(ck)
 	defer close(c.done)
 	// A query that finished between the check in Resolve and LoadOrStore has

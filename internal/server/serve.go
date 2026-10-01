@@ -437,7 +437,8 @@ func retain(ctx context.Context, st *store.Store, cfg config.Config, log *slog.L
 	}
 }
 
-// purgeOld deletes the usage events and audit entries past their windows.
+// purgeOld deletes the usage events and audit entries past their windows, and
+// the sandboxes and keys that ended before the usage window.
 func purgeOld(ctx context.Context, st *store.Store, cfg config.Config, log *slog.Logger) {
 	now := time.Now()
 	if cfg.UsageRetention > 0 {
@@ -447,6 +448,14 @@ func purgeOld(ctx context.Context, st *store.Store, cfg config.Config, log *slog
 			log.Error("purging old usage failed", "error", err, "deleted", n)
 		case n > 0:
 			log.Info("purged usage past its retention window", "deleted", n)
+		}
+		n, err = st.PurgeEnded(ctx, now.Add(-cfg.UsageRetention))
+		switch {
+		case err != nil && ctx.Err() == nil:
+			log.Error("purging ended sandboxes and keys failed", "error", err, "deleted", n)
+		case n > 0:
+			log.Info("purged sandboxes and keys that ended before the usage retention window",
+				"deleted", n)
 		}
 	}
 	if cfg.AuditRetention > 0 {

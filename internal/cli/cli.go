@@ -64,9 +64,7 @@ func Run(ctx context.Context, args []string) error {
 		return usageCmd(ctx, rest)
 	case "failure", "failures":
 		return failuresCmd(ctx, rest)
-	case "sessions":
-		return sessionsCmd(ctx, rest)
-	case "session":
+	case "session", "sessions":
 		return sessionCmd(ctx, rest)
 	case "connect":
 		return connectCmd(ctx, rest)

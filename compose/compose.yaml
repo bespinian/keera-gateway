@@ -35,8 +35,9 @@ services:
       # Reads /metrics and nothing else, so a scrape configuration does not
       # have to hold the operator key. Empty leaves the route to operators.
       KEERA_METRICS_TOKEN: ${KEERA_METRICS_TOKEN:-}
-      # How long usage and audit entries are kept. Empty is for ever, which is
-      # the deliberate default for billing and audit data.
+      # How long usage and audit entries are kept. Usage retention also deletes
+      # ended sandboxes and revoked or expired keys. Empty is for ever, which
+      # is the deliberate default for billing and audit data.
       KEERA_USAGE_RETENTION: ${KEERA_USAGE_RETENTION:-}
       KEERA_AUDIT_RETENTION: ${KEERA_AUDIT_RETENTION:-}
       # How long an agent conversation may go quiet before the next request on

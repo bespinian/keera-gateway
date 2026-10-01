@@ -259,8 +259,8 @@ func show(w *table, name string, v any) {
 // firstLine renders a multi-line value as the one line a table has room for.
 func firstLine(s string) string {
 	line, rest, cut := strings.Cut(s, "\n")
-	if len(line) > 60 {
-		line, cut = line[:59], true
+	if r := []rune(line); len(r) > 60 {
+		line, cut = string(r[:59]), true
 	}
 	if cut || strings.TrimSpace(rest) != "" {
 		return strings.TrimRight(line, " ") + "…"
@@ -272,8 +272,9 @@ func firstLine(s string) string {
 // trace, and a table that reflows is not a table.
 func oneLine(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
-	if len(s) > 100 {
-		return s[:99] + "…"
+	// Cut by character, not byte, so a multi-byte one is never split.
+	if r := []rune(s); len(r) > 100 {
+		return string(r[:99]) + "…"
 	}
 	if s == "" {
 		return "-"

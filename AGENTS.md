@@ -88,8 +88,8 @@ Run `make check` before handing work back.
 
 `docs/` explains the pieces. `run-locally.md` is the development loop and
 `install.md` every setting; `gateway.md`, `filters.md`, `routers.md`,
-`sandboxes.md`, `providers.md`, `mcp.md`, `sessions.md`, `sizing.md` and
-`sso.md` each take one part. Update them when behaviour changes.
+`sandboxes.md`, `providers.md`, `subscriptions.md`, `mcp.md`, `sessions.md`,
+`sizing.md` and `sso.md` each take one part. Update them when behaviour changes.
 
 ## Instructions
 

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -45,7 +46,9 @@ var sessionHeaders = []string{SessionHeader, "X-Session-Id", "Helicone-Session-I
 // Two limits: rewriting the opening prompt mid-task starts a new session, and
 // two tasks opened with the same sentence within the idle gap merge. Both are
 // why SessionHeader exists.
-func sessionKey(r *http.Request, keyID string, b *body, kind policy.Kind) string {
+func sessionKey(r *http.Request, keyID string, kind policy.Kind,
+	opening func() (json.RawMessage, bool),
+) string {
 	if kind != policy.KindChat {
 		return ""
 	}
@@ -54,12 +57,12 @@ func sessionKey(r *http.Request, keyID string, b *body, kind policy.Kind) string
 	if stated := statedSession(r); stated != "" {
 		return store.StatedSessionKeyFor(keyID, stated)
 	}
-	opening, ok := b.firstUserMessage()
+	first, ok := opening()
 	if !ok {
 		return ""
 	}
 	// The hash lives in the store, next to the stated one sandboxes use.
-	return store.DerivedSessionKey(store.SessionHash(keyID, store.SessionKindOpening, opening))
+	return store.DerivedSessionKey(store.SessionHash(keyID, store.SessionKindOpening, first))
 }
 
 // statedSession is the session the client named, or empty if it named none.

@@ -14,13 +14,14 @@ import (
 const modelColumns = `SELECT alias, org_id, kind, backends, backend_model, provider,
 	description, input_micros_per_mtok, output_micros_per_mtok, cached_input_micros_per_mtok,
 	max_context, coalesce(to_char(release_date, 'YYYY-MM-DD'), ''), location,
-	api_key_ct, enabled`
+	api_key_ct, subscription, enabled`
 
 func scanModel(r row) (policy.Model, error) {
 	var m policy.Model
 	if err := r.Scan(&m.Alias, &m.OrgID, &m.Kind, &m.Backends, &m.BackendModel, &m.Provider,
 		&m.Description, &m.InputMicrosPerMTok, &m.OutputMicrosPerMTok, &m.CachedInputMicrosPerMTok,
-		&m.MaxContext, &m.ReleaseDate, &m.Location, &m.APIKeyCiphertext, &m.Enabled); err != nil {
+		&m.MaxContext, &m.ReleaseDate, &m.Location, &m.APIKeyCiphertext, &m.Subscription,
+		&m.Enabled); err != nil {
 		return policy.Model{}, err
 	}
 	m.HasAPIKey = len(m.APIKeyCiphertext) > 0
@@ -74,8 +75,8 @@ func upsertModel(ctx context.Context, db querier, m policy.Model) error {
 	_, err := db.Exec(ctx, `INSERT INTO models (alias, org_id, kind, backends, backend_model,
 		provider, description, input_micros_per_mtok, output_micros_per_mtok,
 		cached_input_micros_per_mtok, max_context, release_date, location,
-		enabled, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NULLIF($12, '')::date,$13,$14, now())
+		subscription, enabled, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NULLIF($12, '')::date,$13,$14,$15, now())
 		ON CONFLICT (org_id, alias) DO UPDATE SET kind = EXCLUDED.kind, backends = EXCLUDED.backends,
 			backend_model = EXCLUDED.backend_model, provider = EXCLUDED.provider,
 			description = EXCLUDED.description,
@@ -83,10 +84,11 @@ func upsertModel(ctx context.Context, db querier, m policy.Model) error {
 			output_micros_per_mtok = EXCLUDED.output_micros_per_mtok,
 			cached_input_micros_per_mtok = EXCLUDED.cached_input_micros_per_mtok,
 			max_context = EXCLUDED.max_context, release_date = EXCLUDED.release_date,
-			location = EXCLUDED.location, enabled = EXCLUDED.enabled, updated_at = now()`,
+			location = EXCLUDED.location, subscription = EXCLUDED.subscription,
+			enabled = EXCLUDED.enabled, updated_at = now()`,
 		m.Alias, m.OrgID, string(m.Kind), m.Backends, m.BackendModel, m.Provider, m.Description,
 		m.InputMicrosPerMTok, m.OutputMicrosPerMTok, m.CachedInputMicrosPerMTok, m.MaxContext,
-		m.ReleaseDate, m.Location, m.Enabled)
+		m.ReleaseDate, m.Location, m.Subscription, m.Enabled)
 	return err
 }
 

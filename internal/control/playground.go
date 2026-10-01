@@ -45,6 +45,10 @@ func (s *Server) playgroundChat(w http.ResponseWriter, r *http.Request, p *authn
 	case err != nil:
 		s.fail(w, err)
 		return
+	case res.Key.Subscription():
+		s.forbid(w, "this is a subscription key, which only Claude Code signed in to a Claude "+
+			"plan can use; choose another one")
+		return
 	}
 
 	// The listener's write timeout is for small JSON answers. A streamed

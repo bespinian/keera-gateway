@@ -167,7 +167,7 @@ func TestSuggest(t *testing.T) {
 		"fliter":   "filter",
 		"guardrai": "guardrail",
 		"keys":     "key",
-		"sesions":  "sessions",
+		"sesions":  "session",
 		// Nothing near enough: a guess here would read as the tool having
 		// misunderstood rather than as help.
 		"deploy": "",

@@ -20,11 +20,14 @@ import (
 // fakeMCP is a stand-in MCP server with two tools. It answers over SSE when
 // sse is set, and records what it was sent.
 type fakeMCP struct {
-	mu     sync.Mutex
-	bodies []string
-	auth   []string
-	sse    bool
-	status int
+	mu      sync.Mutex
+	bodies  []string
+	auth    []string
+	headers []http.Header
+	sse     bool
+	status  int
+	// result, when set, is the result of every request it answers.
+	result string
 }
 
 func (f *fakeMCP) handler(w http.ResponseWriter, r *http.Request) {
@@ -32,7 +35,8 @@ func (f *fakeMCP) handler(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.bodies = append(f.bodies, string(raw))
 	f.auth = append(f.auth, r.Header.Get("Authorization"))
-	sse, status := f.sse, f.status
+	f.headers = append(f.headers, r.Header.Clone())
+	sse, status, canned := f.sse, f.status, f.result
 	f.mu.Unlock()
 	if status != 0 {
 		w.WriteHeader(status)
@@ -58,6 +62,9 @@ func (f *fakeMCP) handler(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusAccepted)
 		return
+	}
+	if canned != "" {
+		result = canned
 	}
 	answer := `{"jsonrpc":"2.0","id":` + string(msg.ID) + `,"result":` + result + `}`
 	if sse {
@@ -211,6 +218,21 @@ func TestMCPCallIsForwardedAndRecorded(t *testing.T) {
 	}
 	if ev.SessionKey != store.StatedSessionKeyFor("key_1", "task-7") {
 		t.Errorf("session = %q, want the one the client named", ev.SessionKey)
+	}
+}
+
+func TestAnMCPAnswerOverTheSizeLimitIsAFailureNotACut(t *testing.T) {
+	h, _ := mcpHarness(t, nil)
+	h.srv.opts.MaxResponseBytes = 20
+
+	resp, body := h.rpc(t, `{"jsonrpc":"2.0","id":3,"method":"tools/call",`+
+		`"params":{"name":"search_code","arguments":{"q":"TODO"}}}`)
+	if resp.StatusCode != http.StatusBadGateway || strings.Contains(body, "TODO") {
+		t.Errorf("status = %d, body = %s; want a 502 and none of the answer", resp.StatusCode, body)
+	}
+	if ev := lastToolCall(t, h); ev.Tool.Outcome != store.ToolNoResult ||
+		!strings.Contains(ev.Error, "larger than the limit") {
+		t.Errorf("row = %+v %q, want no result and the reason", ev.Tool, ev.Error)
 	}
 }
 
@@ -418,5 +440,119 @@ func TestANativeEventLargerThanTheLimitEndsTheStream(t *testing.T) {
 	_, err := pipeNative(&dst, func() {}, src, mcpEvents{&mcpExchange{}}, 1024)
 	if err == nil || dst.Len() != 0 {
 		t.Errorf("err = %v, wrote %d bytes; want the stream ended before the event", err, dst.Len())
+	}
+}
+
+func TestMCPHeadersOfTheNewVersionReachTheServer(t *testing.T) {
+	h, fake := mcpHarness(t, nil)
+
+	h.rpc(t, `{"jsonrpc":"2.0","id":10,"method":"tools/call",`+
+		`"params":{"name":"search_code","arguments":{"region":"eu"}}}`,
+		"Mcp-Protocol-Version", "2026-07-28", "Mcp-Method", "tools/call",
+		"Mcp-Name", "search_code", "Mcp-Param-Region", "eu")
+	got := fake.headers[0]
+	for h, want := range map[string]string{
+		"Mcp-Protocol-Version": "2026-07-28", "Mcp-Method": "tools/call",
+		"Mcp-Name": "search_code", "Mcp-Param-Region": "eu",
+	} {
+		if got.Get(h) != want {
+			t.Errorf("server was sent %s %q, want %q", h, got.Get(h), want)
+		}
+	}
+}
+
+func TestMCPHeadersThatDisagreeWithTheBodyAreRefused(t *testing.T) {
+	// A load balancer behind the gateway may route on the header while the
+	// server runs what the body says.
+	h, fake := mcpHarness(t, allowing("github/search_code"))
+	call := `{"jsonrpc":"2.0","id":11,"method":"tools/call",` +
+		`"params":{"name":"create_issue","arguments":{}}}`
+	for _, header := range [][]string{
+		{"Mcp-Method", "tools/list"},
+		{"Mcp-Name", "search_code"},
+		{"Mcp-Name", "=?base64?c2VhcmNoX2NvZGU=?="},
+	} {
+		resp, body := h.rpc(t, call, header...)
+		var answer rpcMessage
+		_ = json.Unmarshal([]byte(body), &answer)
+		if resp.StatusCode != http.StatusBadRequest || answer.Error == nil ||
+			answer.Error.Code != rpcHeaderMismatch || string(answer.ID) != "11" {
+			t.Errorf("%v: status %d, answer %s; want 400 and a HeaderMismatch error",
+				header, resp.StatusCode, body)
+		}
+	}
+	if n := len(fake.received()); n != 0 {
+		t.Errorf("the server received %d requests", n)
+	}
+
+	// The same name in Base64 matches.
+	h.rpc(t, `{"jsonrpc":"2.0","id":12,"method":"tools/call",`+
+		`"params":{"name":"search_code","arguments":{}}}`,
+		"Mcp-Method", "tools/call", "Mcp-Name", "=?base64?c2VhcmNoX2NvZGU=?=")
+	if n := len(fake.received()); n != 1 {
+		t.Errorf("a call whose headers match was not forwarded")
+	}
+}
+
+func TestAFilteredArgumentDoesNotLeaveInAHeader(t *testing.T) {
+	res := allowing("github")
+	res.Filters = []string{"redact"}
+	h, fake := mcpHarness(t, res)
+	h.src.filters = map[string]policy.Filter{"org_1/redact": patternFilterFor("org_1", "redact",
+		policy.FilterRule{Pattern: `hunter2`, Replace: "[CREDENTIAL]"})}
+
+	h.rpc(t, `{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"login",`+
+		`"arguments":{"user":{"password":"hunter2"},"region":"eu"}}}`,
+		"Mcp-Param-Password", "hunter2", "Mcp-Param-Region", "eu")
+	got := fake.headers[0]
+	if p := got.Get("Mcp-Param-Password"); p != "[CREDENTIAL]" {
+		t.Errorf("Mcp-Param-Password = %q, want it rewritten as the argument was", p)
+	}
+	if r := got.Get("Mcp-Param-Region"); r != "eu" {
+		t.Errorf("Mcp-Param-Region = %q, want it left as it was", r)
+	}
+}
+
+func TestHeaderValuesAreEncodedAsMCPAsks(t *testing.T) {
+	for in, want := range map[string]string{
+		"us-west1":           "us-west1",
+		"Hello, 世界":          "=?base64?SGVsbG8sIOS4lueVjA==?=",
+		" padded ":           "=?base64?IHBhZGRlZCA=?=",
+		"line1\nline2":       "=?base64?bGluZTEKbGluZTI=?=",
+		"=?base64?literal?=": "=?base64?PT9iYXNlNjQ/bGl0ZXJhbD89?=",
+	} {
+		if got := encodeHeaderValue(in); got != want {
+			t.Errorf("encode(%q) = %q, want %q", in, got, want)
+		}
+		if back, ok := decodeHeaderValue(want); !ok || back != in {
+			t.Errorf("decode(%q) = %q, %v; want %q", want, back, ok, in)
+		}
+	}
+}
+
+func TestAToolAskingForInputIsNotRecordedAsAnswered(t *testing.T) {
+	h, fake := mcpHarness(t, nil)
+	fake.result = `{"resultType":"input_required","inputRequests":{"login":` +
+		`{"method":"elicitation/create","params":{"message":"Your username?"}}}}`
+
+	_, body := h.rpc(t, `{"jsonrpc":"2.0","id":14,"method":"tools/call",`+
+		`"params":{"name":"search_code","arguments":{}}}`)
+	if !strings.Contains(body, "elicitation/create") {
+		t.Errorf("answer = %s, want the server's request for input", body)
+	}
+	if ev := lastToolCall(t, h); ev.Tool.Outcome != store.ToolInputRequired {
+		t.Errorf("outcome = %q, want %q", ev.Tool.Outcome, store.ToolInputRequired)
+	}
+}
+
+func TestAToolListThroughTheGatewayIsNotPublic(t *testing.T) {
+	// The list depends on the key, so a shared cache must not serve it to
+	// another.
+	h, fake := mcpHarness(t, nil)
+	fake.result = `{"tools":[{"name":"search_code"}],"ttlMs":60000,"cacheScope":"public"}`
+
+	_, body := h.rpc(t, `{"jsonrpc":"2.0","id":15,"method":"tools/list"}`)
+	if !strings.Contains(body, `"cacheScope":"private"`) || !strings.Contains(body, `"ttlMs":60000`) {
+		t.Errorf("tools/list = %s, want it marked private and the rest kept", body)
 	}
 }

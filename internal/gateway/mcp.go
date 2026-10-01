@@ -3,10 +3,13 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -33,17 +36,23 @@ import (
 // through: sessions, notifications, the server's own requests, resources and
 // prompts.
 
-// mcpClientHeaders are the client's headers the server is sent. Everything
-// else stays behind, above all the client's Authorization, which is its Keera
-// key.
+// mcpClientHeaders are the client's headers the server is sent, with every
+// Mcp-Param-* header. Everything else stays behind, above all the client's
+// Authorization, which is its Keera key.
 var mcpClientHeaders = []string{
-	"Accept", "Content-Type", "Mcp-Session-Id", "Mcp-Protocol-Version", "Last-Event-Id",
+	"Accept", "Content-Type", "Mcp-Session-Id", "Mcp-Protocol-Version", "Mcp-Method", "Mcp-Name",
+	"Last-Event-Id",
 }
+
+// mcpParamPrefix starts the headers that copy a tool call's arguments, which
+// MCP added in its 2026-07-28 version.
+const mcpParamPrefix = "Mcp-Param-"
 
 // JSON-RPC error codes the proxy answers with itself.
 const (
-	rpcParseError    = -32700
-	rpcInvalidParams = -32602
+	rpcParseError     = -32700
+	rpcInvalidParams  = -32602
+	rpcHeaderMismatch = -32020
 )
 
 // rpcMessage is one JSON-RPC message: a request, a notification or a response.
@@ -81,6 +90,8 @@ type mcpExchange struct {
 	// session is the session the client named in a header, hashed, or empty.
 	session string
 	client  string
+	// header is what the server is sent of the client's headers.
+	header http.Header
 	// pending is every request the answer will carry that the gateway acts on,
 	// by id.
 	pending map[string]*pendingRPC
@@ -104,7 +115,9 @@ func (s *Server) mcpBegin(w http.ResponseWriter, r *http.Request) (*mcpExchange,
 	}
 	alias := r.PathValue("alias")
 	srv, found := s.src.MCPServer(res.Key.OrgID, alias)
-	if !found || !srv.Enabled || !res.AllowsServer(alias) {
+	// A subscription key reaches no MCP server: a server holds the
+	// organisation's credentials, and the key sits in a settings file.
+	if !found || !srv.Enabled || !res.AllowsServer(alias) || res.Key.Subscription() {
 		httpx.WriteError(w, http.StatusNotFound, "invalid_request_error", "mcp_server_not_found",
 			s.advise("the MCP server '"+alias+"' does not exist or this key may not use it"))
 		return nil, false
@@ -112,7 +125,18 @@ func (s *Server) mcpBegin(w http.ResponseWriter, r *http.Request) (*mcpExchange,
 	x := &mcpExchange{
 		s: s, w: w, r: r, res: res, srv: srv,
 		client:  connect.Identify(r.Header.Get(connect.ClientHeader), r.UserAgent()),
+		header:  http.Header{},
 		pending: map[string]*pendingRPC{},
+	}
+	for _, h := range mcpClientHeaders {
+		if v := r.Header.Get(h); v != "" {
+			x.header.Set(h, v)
+		}
+	}
+	for h, v := range r.Header {
+		if strings.HasPrefix(h, mcpParamPrefix) {
+			x.header[h] = v
+		}
 	}
 	if stated := statedSession(r); stated != "" {
 		x.session = store.StatedSessionKeyFor(res.Key.ID, stated)
@@ -138,7 +162,7 @@ func (s *Server) mcpPost(w http.ResponseWriter, r *http.Request) {
 	if !forward {
 		return
 	}
-	resp, err := s.mcpSend(r.Context(), x.srv, http.MethodPost, out, r.Header)
+	resp, err := s.mcpSend(r.Context(), x.srv, http.MethodPost, out, x.header)
 	if err != nil {
 		x.unreachable(err)
 		return
@@ -154,7 +178,7 @@ func (s *Server) mcpForward(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	resp, err := s.mcpSend(r.Context(), x.srv, r.Method, nil, r.Header)
+	resp, err := s.mcpSend(r.Context(), x.srv, r.Method, nil, x.header)
 	if err != nil {
 		x.unreachable(err)
 		return
@@ -163,9 +187,10 @@ func (s *Server) mcpForward(w http.ResponseWriter, r *http.Request) {
 	x.relay(resp)
 }
 
-// mcpSend sends one request to the server, with its credential.
+// mcpSend sends one request to the server, with the client's headers it may
+// see and the server's credential.
 func (s *Server) mcpSend(ctx context.Context, srv policy.MCPServer, method string,
-	payload []byte, client http.Header,
+	payload []byte, header http.Header,
 ) (*http.Response, error) {
 	var body io.Reader
 	if payload != nil {
@@ -175,11 +200,7 @@ func (s *Server) mcpSend(ctx context.Context, srv policy.MCPServer, method strin
 	if err != nil {
 		return nil, err
 	}
-	for _, h := range mcpClientHeaders {
-		if v := client.Get(h); v != "" {
-			req.Header.Set(h, v)
-		}
-	}
+	req.Header = header.Clone()
 	if payload != nil && req.Header.Get("Content-Type") == "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -213,7 +234,7 @@ func (x *mcpExchange) inspect(raw []byte) (out []byte, forward bool) {
 			Error: &rpcError{Code: rpcParseError, Message: "the body is not a JSON-RPC message"}})
 		return nil, false
 	}
-	if refuseUnanswerable(x, msg) {
+	if refuseUnanswerable(x, msg) || !x.headersMatch(msg) {
 		return nil, false
 	}
 	if msg.isRequest() {
@@ -278,6 +299,144 @@ func refuseUnanswerable(x *mcpExchange, m rpcMessage) bool {
 	return true
 }
 
+// headersMatch checks the Mcp-Method and Mcp-Name headers against the message,
+// as MCP asks of anything that reads the body. The gateway decides on the
+// body, but a load balancer behind it may route on the headers. A client of a
+// version before 2026-07-28 sends neither. It reports whether they match, and
+// answers when they do not.
+func (x *mcpExchange) headersMatch(msg rpcMessage) bool {
+	why := ""
+	if m := x.r.Header.Get("Mcp-Method"); m != "" && m != msg.Method {
+		why = "the Mcp-Method header '" + m + "' is not the message's method '" + msg.Method + "'"
+	} else if n := x.r.Header.Get("Mcp-Name"); n != "" {
+		if got, ok := decodeHeaderValue(n); !ok || got != mcpName(msg) {
+			why = "the Mcp-Name header '" + n + "' is not the name or URI in the message"
+		}
+	}
+	if why == "" {
+		return true
+	}
+	id := msg.ID
+	if len(id) == 0 {
+		id = json.RawMessage("null")
+	}
+	x.writeRPCStatus(http.StatusBadRequest, rpcMessage{JSONRPC: "2.0", ID: id,
+		Error: &rpcError{Code: rpcHeaderMismatch, Message: "Header mismatch: " + why}})
+	return false
+}
+
+// mcpName is what the Mcp-Name header carries for a message: the name of the
+// tool or prompt, the URI of the resource, or nothing.
+func mcpName(msg rpcMessage) string {
+	var p struct {
+		Name string `json:"name"`
+		URI  string `json:"uri"`
+	}
+	_ = json.Unmarshal(msg.Params, &p)
+	switch msg.Method {
+	case "tools/call", "prompts/get":
+		return p.Name
+	case "resources/read":
+		return p.URI
+	}
+	return ""
+}
+
+// The markers around a header value MCP carries in Base64, because it is not
+// plain ASCII.
+const (
+	base64Open  = "=?base64?"
+	base64Close = "?="
+)
+
+func inBase64(v string) bool {
+	return len(v) >= len(base64Open)+len(base64Close) &&
+		strings.HasPrefix(v, base64Open) && strings.HasSuffix(v, base64Close)
+}
+
+// decodeHeaderValue reads an Mcp-Name or Mcp-Param-* value.
+func decodeHeaderValue(v string) (string, bool) {
+	if !inBase64(v) {
+		return v, true
+	}
+	raw, err := base64.StdEncoding.DecodeString(v[len(base64Open) : len(v)-len(base64Close)])
+	return string(raw), err == nil
+}
+
+// encodeHeaderValue writes a value as MCP puts it in a header.
+func encodeHeaderValue(v string) string {
+	plain := v != "" && v == strings.TrimSpace(v) && !inBase64(v)
+	for i := 0; plain && i < len(v); i++ {
+		plain = v[i] >= 0x20 && v[i] <= 0x7e
+	}
+	if plain {
+		return v
+	}
+	return base64Open + base64.StdEncoding.EncodeToString([]byte(v)) + base64Close
+}
+
+// syncParams keeps the Mcp-Param-* headers true to arguments a filter
+// rewrote, so that a value taken out of the body does not leave in a header.
+// Which argument a header copies is in the tool's schema, which the gateway
+// does not hold, so it finds the argument by the value the client sent. A
+// value still in the arguments where it was is left as it is.
+func (x *mcpExchange) syncParams(before, after json.RawMessage) {
+	var old, cur any
+	if json.Unmarshal(before, &old) != nil || json.Unmarshal(after, &cur) != nil {
+		return
+	}
+	for h, vs := range x.header {
+		if !strings.HasPrefix(h, mcpParamPrefix) || len(vs) == 0 {
+			continue
+		}
+		v, ok := decodeHeaderValue(vs[0])
+		if !ok {
+			continue
+		}
+		paths := stringPaths(old, v, nil, nil)
+		if len(paths) == 0 || slices.ContainsFunc(paths, func(p []string) bool {
+			s, _ := valueAt(cur, p).(string)
+			return s == v
+		}) {
+			continue
+		}
+		if s, ok := valueAt(cur, paths[0]).(string); ok {
+			x.header.Set(h, encodeHeaderValue(s))
+		} else {
+			x.header.Del(h)
+		}
+	}
+}
+
+// stringPaths finds where a string is in decoded arguments, first path first.
+// A header copies only a value reached through object keys, never through an
+// array.
+func stringPaths(v any, want string, at []string, found [][]string) [][]string {
+	switch v := v.(type) {
+	case string:
+		if v == want {
+			found = append(found, slices.Clone(at))
+		}
+	case map[string]any:
+		for _, k := range slices.Sorted(maps.Keys(v)) {
+			found = stringPaths(v[k], want, append(at, k), found)
+		}
+	}
+	return found
+}
+
+// valueAt is the value at a path of object keys, or nil.
+func valueAt(v any, path []string) any {
+	for _, k := range path {
+		m, ok := v.(map[string]any)
+		if !ok {
+			return nil
+		}
+		v = m[k]
+	}
+	return v
+}
+
 // toolCall decides one tool call: whether the key may make it, and what the
 // filters make of its arguments. It returns false when the call was answered
 // here.
@@ -335,8 +494,10 @@ func (x *mcpExchange) toolCall(msg *rpcMessage) bool {
 			return false
 		}
 		if run.rewrote {
+			before := args
 			args, _ = params.value("arguments")
 			p.argBytes = len(args)
+			x.syncParams(before, args)
 		}
 	}
 	// Re-encoded from what was read, rewritten or not. See inspect.
@@ -393,10 +554,12 @@ func toolErrorResult(text string) json.RawMessage {
 }
 
 // writeRPC answers the client's POST with one message of the gateway's own.
-func (x *mcpExchange) writeRPC(msg rpcMessage) {
+func (x *mcpExchange) writeRPC(msg rpcMessage) { x.writeRPCStatus(http.StatusOK, msg) }
+
+func (x *mcpExchange) writeRPCStatus(status int, msg rpcMessage) {
 	raw, _ := json.Marshal(msg)
 	x.w.Header().Set("Content-Type", "application/json")
-	x.w.WriteHeader(http.StatusOK)
+	x.w.WriteHeader(status)
 	_, _ = x.w.Write(raw)
 }
 
@@ -434,11 +597,16 @@ func (x *mcpExchange) relay(resp *http.Response) {
 		_, _ = pipeNative(x.w, func() { _ = flusher.Flush() }, resp.Body, mcpEvents{x},
 			x.s.opts.MaxResponseBytes)
 	case strings.HasPrefix(ct, "application/json"):
-		raw, err := io.ReadAll(io.LimitReader(resp.Body, x.s.opts.MaxResponseBytes))
-		if err == nil {
-			if out := x.serverMessage(raw); out != nil {
-				raw = out
-			}
+		raw, err := readCapped(resp.Body, x.s.opts.MaxResponseBytes)
+		if err != nil {
+			// Cut JSON would reach the client as the server's own answer.
+			msg := "the answer from the MCP server '" + x.srv.Alias + "' could not be read"
+			x.failPending(msg + ": " + err.Error())
+			httpx.WriteError(x.w, http.StatusBadGateway, "server_error", "mcp_unavailable", msg)
+			return
+		}
+		if out := x.serverMessage(raw); out != nil {
+			raw = out
 		}
 		x.w.WriteHeader(status)
 		_, _ = x.w.Write(raw)
@@ -506,33 +674,55 @@ func (x *mcpExchange) serverMessage(raw []byte) []byte {
 	delete(x.pending, idKey(msg.ID))
 	switch p.method {
 	case "tools/list":
-		if list := x.allowedTools(msg.Result); list != nil {
+		if list := x.toolList(msg.Result); list != nil {
 			msg.Result = list
 			out, _ := json.Marshal(msg)
 			return out
 		}
 	case "tools/call":
-		switch {
-		case msg.Error != nil:
+		if msg.Error != nil {
 			x.record(p, store.ToolNoResult, msg.Error.Message, 0)
-		case toolFailed(msg.Result):
-			x.record(p, store.ToolFailed, "", len(msg.Result))
-		default:
-			x.record(p, store.ToolOK, "", len(msg.Result))
+		} else {
+			x.record(p, toolOutcome(msg.Result), "", len(msg.Result))
 		}
 	}
 	return nil
 }
 
-// allowedTools takes the tools the key may not call out of a tools/list
-// result, and returns nil when there is nothing to take out.
-func (x *mcpExchange) allowedTools(result json.RawMessage) json.RawMessage {
-	if x.res.AllowedTools == nil || len(result) == 0 {
+// publicScope is how a server marks a list any caller may be served from a
+// cache.
+var publicScope = json.RawMessage(`"public"`)
+
+// toolList takes the tools the key may not call out of a tools/list result,
+// and returns nil when it needs no change.
+//
+// What the gateway lists depends on the key, so a list the server marks
+// public is marked private. A shared cache in front of the gateway would
+// otherwise serve one key's list to another.
+func (x *mcpExchange) toolList(result json.RawMessage) json.RawMessage {
+	var r map[string]json.RawMessage
+	if len(result) == 0 || json.Unmarshal(result, &r) != nil {
 		return nil
 	}
-	var r map[string]json.RawMessage
+	changed := false
+	if bytes.Equal(bytes.TrimSpace(r["cacheScope"]), publicScope) {
+		r["cacheScope"], changed = json.RawMessage(`"private"`), true
+	}
+	if kept := x.allowedTools(r["tools"]); kept != nil {
+		r["tools"], changed = kept, true
+	}
+	if !changed {
+		return nil
+	}
+	out, _ := json.Marshal(r)
+	return out
+}
+
+// allowedTools takes the tools the key may not call out of a list of tools,
+// and returns nil when there is nothing to take out.
+func (x *mcpExchange) allowedTools(list json.RawMessage) json.RawMessage {
 	var tools []json.RawMessage
-	if json.Unmarshal(result, &r) != nil || json.Unmarshal(r["tools"], &tools) != nil {
+	if x.res.AllowedTools == nil || json.Unmarshal(list, &tools) != nil {
 		return nil
 	}
 	kept := make([]json.RawMessage, 0, len(tools))
@@ -547,17 +737,27 @@ func (x *mcpExchange) allowedTools(result json.RawMessage) json.RawMessage {
 	if len(kept) == len(tools) {
 		return nil
 	}
-	r["tools"], _ = json.Marshal(kept)
-	out, _ := json.Marshal(r)
+	out, _ := json.Marshal(kept)
 	return out
 }
 
-// toolFailed reports whether a tool result says the tool itself failed.
-func toolFailed(result json.RawMessage) bool {
+// toolOutcome reads what a tool result says came of the call. Since MCP's
+// 2026-07-28 version a server that needs the user's input answers with a
+// request for it, and the client sends the call again with the answers. That
+// second call is a row of its own.
+func toolOutcome(result json.RawMessage) store.ToolOutcome {
 	var r struct {
-		IsError bool `json:"isError"`
+		IsError    bool   `json:"isError"`
+		ResultType string `json:"resultType"`
 	}
-	return json.Unmarshal(result, &r) == nil && r.IsError
+	_ = json.Unmarshal(result, &r)
+	switch {
+	case r.ResultType == "input_required":
+		return store.ToolInputRequired
+	case r.IsError:
+		return store.ToolFailed
+	}
+	return store.ToolOK
 }
 
 // failPending records every tool call still waiting as one that got no result.

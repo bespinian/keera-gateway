@@ -39,7 +39,11 @@ export async function playgroundView(ctx) {
   // Only the reader's own keys: a message spends a key's budget, so it has to
   // be one they may spend.
   const a = await api.access();
-  const keys = (a.keys || []).filter((k) => k.state === "active");
+  // A subscription key only works from Claude Code, with its holder's Claude
+  // sign-in, so the playground cannot send with one.
+  const keys = (a.keys || []).filter(
+    (k) => k.state === "active" && k.kind !== "subscription",
+  );
   if (!keys.length) return noKey(ctx, a);
   if (!keys.some((k) => k.id === session.keyID)) session.keyID = keys[0].id;
   const key = keys.find((k) => k.id === session.keyID);

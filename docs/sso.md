@@ -72,7 +72,9 @@ keera user role alice@example.ch admin
 The change is audited, signs the person out everywhere so the new role applies
 at once, and stays until someone changes it. You can also add a person before
 their first sign-in with `keera user add alice@example.ch --role admin`; their
-identity takes over that row when they first sign in.
+identity takes over that row when they first sign in, if the sign-in lands in
+that row's organisation (see
+[Which organisation a sign-in lands in](#which-organisation-a-sign-in-lands-in)).
 
 This is the only option on Google Workspace.
 
@@ -259,7 +261,7 @@ An identity is stored as `<provider>:<subject>`, because a subject is only
 unique within its directory.
 
 A row an administrator created in advance has no subject yet. The first sign-in
-with a matching address takes it over. A row that already has _another_
+with a matching address takes it over, if it lands in that row's organisation. A row that already has _another_
 subject, from another provider or the same one, is refused instead. Otherwise
 anyone who gets the same address, through a weaker directory or by reuse in the
 same one, could take over the account and its role.

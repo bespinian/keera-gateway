@@ -13,15 +13,20 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// sessionsCmd is the panel's Sessions screen, in a terminal.
-//
-// It reports calls, minutes and cost per task rather than per request,
-// because nobody decides how many calls a task takes. It sorts by cost by
-// default: the row worth reading is the task that cost the most.
-func sessionsCmd(ctx context.Context, args []string) error {
+// sessionCmd is the panel's Sessions screen, in a terminal: 'list' ranks the
+// tasks, 'show' opens one.
+func sessionCmd(ctx context.Context, args []string) error {
+	// 'keera session <id>' opened a task before 'show' existed, and a row's id
+	// pasted after 'session' should still open it.
+	if len(args) > 0 {
+		if _, err := strconv.ParseInt(args[0], 10, 64); err == nil {
+			args = append([]string{"show"}, args...)
+		}
+	}
+	sub, rest := split(args)
 	c := newClient()
-	fs := flag.NewFlagSet("sessions", flag.ExitOnError)
-	org := fs.String("org", "", "restrict to one organisation")
+	fs := flag.NewFlagSet("session "+sub, flag.ExitOnError)
+	org := fs.String("org", "", orgUsage)
 	sort := fs.String("sort", "cost", "cost, requests, duration or recent")
 	alias := fs.String("model", "", "restrict to the tasks that used one model")
 	w := registerWho(fs)
@@ -29,33 +34,66 @@ func sessionsCmd(ctx context.Context, args []string) error {
 	since := fs.Duration("since", 7*24*time.Hour, "how far back to look")
 	limit := fs.Int("limit", 25, "how many to print")
 	asJSON := fs.Bool("json", false, jsonUsage)
-	fs.Usage = func() { _ = printHelp(fs, "sessions", "") }
+	fs.Usage = func() { _ = printHelp(fs, "session", sub) }
 	if want, ok := wantsHelp(args); ok {
-		return printHelp(fs, "sessions", want)
+		return printHelp(fs, "session", want)
 	}
-	if err := parse(fs, args); err != nil {
-		return err
+
+	switch sub {
+	case "list", "ls", "":
+		if err := parseArgs(fs, rest, 0, "usage: keera session list [flags]"); err != nil {
+			return err
+		}
+		if err := verbFlags(fs, "session", sub); err != nil {
+			return err
+		}
+		return sessionList(ctx, c, sessionQuery{org: *org, sort: *sort, alias: *alias, who: w,
+			unhappy: *unhappy, since: *since, limit: *limit}, *asJSON)
+	case "show", "get":
+		if err := parseArgs(fs, rest, 1, "usage: keera session show <request-id>"); err != nil {
+			return err
+		}
+		if err := verbFlags(fs, "session", sub); err != nil {
+			return err
+		}
+		return sessionShow(ctx, c, fs.Arg(0), *org, *asJSON)
+	default:
+		return unknownSub("session", sub)
 	}
-	params, err := w.params(ctx, c, *org)
+}
+
+type sessionQuery struct {
+	org, sort, alias string
+	who              *who
+	unhappy          bool
+	since            time.Duration
+	limit            int
+}
+
+// sessionList reports calls, minutes and cost per task rather than per
+// request, because nobody decides how many calls a task takes. It sorts by
+// cost by default: the row worth reading is the task that cost the most.
+func sessionList(ctx context.Context, c *client, sq sessionQuery, asJSON bool) error {
+	params, err := sq.who.params(ctx, c, sq.org)
 	if err != nil {
 		return err
 	}
 
 	q := url.Values{}
-	q.Set("sort", *sort)
-	q.Set("limit", strconv.Itoa(*limit))
-	q.Set("from", sinceParam(*since))
-	if *unhappy {
+	q.Set("sort", sq.sort)
+	q.Set("limit", strconv.Itoa(sq.limit))
+	q.Set("from", sinceParam(sq.since))
+	if sq.unhappy {
 		q.Set("unhappy", "1")
 	}
-	setIfGiven(q, map[string]string{"org_id": *org, "alias": *alias})
+	setIfGiven(q, map[string]string{"org_id": sq.org, "alias": sq.alias})
 	setIfGiven(q, params)
 
 	var res sessionsResponse
 	if err := c.do(ctx, "GET", "/v1/sessions?"+q.Encode(), nil, &res); err != nil {
 		return err
 	}
-	return out(*asJSON, res, func(w *table) { printSessions(w, res, *since) })
+	return out(asJSON, res, func(w *table) { printSessions(w, res, sq.since) })
 }
 
 type sessionsResponse struct {
@@ -79,7 +117,7 @@ func printSessions(w *table, res sessionsResponse, since time.Duration) {
 		if who == "" {
 			who = res.KeyAliases[s.KeyID]
 		}
-		// The id, not the conversation hash: it is what `keera session` takes.
+		// The id, not the conversation hash: it is what `keera session show` takes.
 		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%d\t%s\t%s\t%s\t%s\n",
 			s.ID, s.StartedAt.Local().Format("2006-01-02 15:04"),
 			shortDuration(s.Duration()), s.Requests,
@@ -101,33 +139,22 @@ func printSessions(w *table, res sessionsResponse, since time.Duration) {
 		shortDuration(time.Duration(res.GapSeconds)*time.Second))
 }
 
-// sessionCmd is one task from start to end, named by any request in it.
-func sessionCmd(ctx context.Context, args []string) error {
-	c := newClient()
-	fs := flag.NewFlagSet("session", flag.ExitOnError)
-	org := fs.String("org", "", "the organisation the request belongs to")
-	asJSON := fs.Bool("json", false, jsonUsage)
-	fs.Usage = func() { _ = printHelp(fs, "session", "") }
-	if want, ok := wantsHelp(args); ok {
-		return printHelp(fs, "session", want)
-	}
-	if err := parseArgs(fs, args, 1, "usage: keera session <request-id>"); err != nil {
-		return err
-	}
-	requestID, err := strconv.ParseInt(fs.Arg(0), 10, 64)
+// sessionShow is one task from start to end, named by any request in it.
+func sessionShow(ctx context.Context, c *client, arg, org string, asJSON bool) error {
+	requestID, err := strconv.ParseInt(arg, 10, 64)
 	if err != nil {
 		return fmt.Errorf("a session is named by the id of one of its requests")
 	}
 
 	path := fmt.Sprintf("/v1/sessions/%d", requestID)
-	if *org != "" {
-		path += "?" + url.Values{"org_id": {*org}}.Encode()
+	if org != "" {
+		path += "?" + url.Values{"org_id": {org}}.Encode()
 	}
 	var res sessionResponse
 	if err := c.do(ctx, "GET", path, nil, &res); err != nil {
 		return err
 	}
-	return out(*asJSON, res, func(w *table) { printSession(w, res) })
+	return out(asJSON, res, func(w *table) { printSession(w, res) })
 }
 
 type sessionResponse struct {

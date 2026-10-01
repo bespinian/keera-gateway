@@ -208,7 +208,9 @@ curl "$ANTHROPIC_BASE_URL/v1/messages" \
 			"shell, put the same variables in the `env` block of `~/.claude/settings.json`. " +
 			"Use the key itself there, because that file does not expand shell variables. " +
 			"To fetch the key from a vault, use the `apiKeyHelper` setting instead. Do not " +
-			"put it in a project's `.claude/settings.json`, which is committed.",
+			"put it in a project's `.claude/settings.json`, which is committed. If your " +
+			"Claude Team or Enterprise plan should pay instead, run `keera login` and then " +
+			"`keera connect claude-code --subscription`.",
 		Run: "Run `claude` in your project. It already uses the model above. `/status` " +
 			"shows which gateway and key it uses.",
 	},

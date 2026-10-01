@@ -64,8 +64,13 @@ func (s *Server) CheckModel(ctx context.Context, m policy.Model) Probe {
 	defer cancel()
 
 	p := Probe{Alias: m.Alias}
-	if len(m.Backends) == 0 {
+	switch {
+	case len(m.Backends) == 0:
 		p.Error = "this model has no backend configured"
+		return p
+	case m.Subscription:
+		p.Error = "this model is paid by each person's own Claude subscription, so the " +
+			"gateway holds no credential to check it with; send it a message from Claude Code"
 		return p
 	}
 	switch m.Kind {

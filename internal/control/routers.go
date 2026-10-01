@@ -334,6 +334,9 @@ func (s *Server) checkRouterModel(w http.ResponseWriter, r *http.Request, orgID,
 		badRequest(w, "'"+alias+"' is a "+string(m.Kind)+" model; a router reads text and answers with an "+
 			"alias, which only a chat model does")
 		return false
+	case m.Subscription:
+		badRequest(w, subscriptionReader(alias, "router"))
+		return false
 	}
 	allowed, err := s.orgAllowsModel(r.Context(), orgID, alias)
 	if err != nil {
@@ -346,6 +349,14 @@ func (s *Server) checkRouterModel(w http.ResponseWriter, r *http.Request, orgID,
 		return false
 	}
 	return true
+}
+
+// subscriptionReader refuses a subscription model as the model a filter or a
+// router runs on. Only a caller's own sign-in reaches it, and that sign-in is
+// for the caller's request alone.
+func subscriptionReader(alias, what string) string {
+	return "'" + alias + "' is paid by each person's own Claude subscription, so the gateway " +
+		"cannot run a " + what + " on it; choose a model the organisation pays for"
 }
 
 // checkDestinations refuses a router that could not send a request everywhere
@@ -371,6 +382,10 @@ func (s *Server) checkDestinations(w http.ResponseWriter, r *http.Request,
 		case m.Kind != policy.KindChat:
 			badRequest(w, "'"+alias+"' is a "+string(m.Kind)+" model; a router is reached on a chat "+
 				"request, so everything it may choose between has to be able to answer one")
+			return false
+		case m.Subscription:
+			badRequest(w, "'"+alias+"' is paid by each person's own Claude subscription, and only "+
+				"Claude Code signed in to one reaches it; a router cannot send a request there")
 			return false
 		}
 	}

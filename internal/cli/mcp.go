@@ -386,6 +386,8 @@ func outcomeWord(o store.ToolOutcome) string {
 		return style.ok(string(o))
 	case store.ToolDenied, store.ToolRefused:
 		return style.warn(string(o))
+	case store.ToolInputRequired:
+		return style.muted(string(o))
 	default:
 		return style.bad(string(o))
 	}

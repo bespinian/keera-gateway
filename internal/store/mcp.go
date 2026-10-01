@@ -90,6 +90,9 @@ const (
 	ToolNoResult ToolOutcome = "error"
 	ToolDenied   ToolOutcome = "denied"
 	ToolRefused  ToolOutcome = "refused"
+	// ToolInputRequired is a server asking for the user's input before it
+	// answers. The client sends the call again with it.
+	ToolInputRequired ToolOutcome = "input_required"
 )
 
 // ToolCall is the part of an event that makes it a tool call rather than an

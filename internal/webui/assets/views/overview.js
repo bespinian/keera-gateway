@@ -63,7 +63,16 @@ export async function overviewView(ctx) {
       null,
       `${compact(o.input_tokens)} in · ${compact(o.output_tokens)} out`,
     ),
-    stat("Spend", money(o.cost_micros, ""), currency),
+    // What Claude plans paid for is not spend, so it is said beside it rather
+    // than added to it.
+    stat(
+      "Spend",
+      money(o.cost_micros, ""),
+      currency,
+      o.subscription_micros
+        ? `+ ${money(o.subscription_micros, currency)} on Claude plans, at API prices`
+        : null,
+    ),
     stat("First token", ms(o.ttft_median_ms), null, `p95 ${ms(o.ttft_p95_ms)}`),
   );
 

@@ -2,7 +2,10 @@ package registry
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"sync"
@@ -143,6 +146,12 @@ func (s *source) reject(key string, err error) {
 	s.keyErr[hashOf(key)] = err
 }
 
+// testKey turns a name into a well-formed key, so tests can name their keys.
+func testKey(name string) string {
+	sum := sha256.Sum256([]byte(name))
+	return auth.Prefix + base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
 // hashOf is how the store is keyed, which is how the cache is keyed too.
 func hashOf(key string) string { return string(auth.Hash(key)) }
 
@@ -180,11 +189,11 @@ func TestAResolvedKeyIsReadOnceAndThenServedFromMemory(t *testing.T) {
 	// not a query. Without this a busy gateway is one database round trip per
 	// request before it has done anything at all.
 	s := newSource()
-	s.set("sk-live", resolved("org_1"))
+	s.set(testKey("sk-live"), resolved("org_1"))
 	r := newRegistry(t, s, Options{TTL: time.Minute})
 
 	for range 10 {
-		got, err := r.Resolve(t.Context(), "sk-live")
+		got, err := r.Resolve(t.Context(), testKey("sk-live"))
 		if err != nil {
 			t.Fatalf("Resolve: %v", err)
 		}
@@ -203,20 +212,20 @@ func TestARevokedKeyStopsWorkingWhenTheControlPlaneSaysSo(t *testing.T) {
 	// because it leaked keeps working for the length of that TTL - which is the
 	// one minute during which it matters.
 	s := newSource()
-	s.set("sk-live", resolved("org_1"))
+	s.set(testKey("sk-live"), resolved("org_1"))
 	// A TTL long enough that expiry cannot be what invalidates it: if this
 	// passes, it passed because of the notify.
 	r := newRegistry(t, s, Options{TTL: time.Hour})
 
 	go r.Run(t.Context())
-	if _, err := r.Resolve(t.Context(), "sk-live"); err != nil {
+	if _, err := r.Resolve(t.Context(), testKey("sk-live")); err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
 
-	s.reject("sk-live", policy.ErrKeyRevoked)
+	s.reject(testKey("sk-live"), policy.ErrKeyRevoked)
 	r.Invalidate()
 
-	if _, err := r.Resolve(t.Context(), "sk-live"); !errors.Is(err, policy.ErrKeyRevoked) {
+	if _, err := r.Resolve(t.Context(), testKey("sk-live")); !errors.Is(err, policy.ErrKeyRevoked) {
 		t.Errorf("error = %v, want the key to be refused as revoked", err)
 	}
 }
@@ -226,7 +235,7 @@ func TestANotifyFromTheControlPlaneDropsEveryCachedKey(t *testing.T) {
 	// another replica revokes a key and announces it over LISTEN/NOTIFY, and
 	// every gateway has to let go of what it holds.
 	s := newSource()
-	s.set("sk-live", resolved("org_1"))
+	s.set(testKey("sk-live"), resolved("org_1"))
 	r := newRegistry(t, s, Options{TTL: time.Hour})
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -245,15 +254,15 @@ func TestANotifyFromTheControlPlaneDropsEveryCachedKey(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 
-	if _, err := r.Resolve(ctx, "sk-live"); err != nil {
+	if _, err := r.Resolve(ctx, testKey("sk-live")); err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
 	before := s.calls()
 
-	s.reject("sk-live", policy.ErrKeyRevoked)
+	s.reject(testKey("sk-live"), policy.ErrKeyRevoked)
 	s.announce()
 
-	if _, err := r.Resolve(ctx, "sk-live"); !errors.Is(err, policy.ErrKeyRevoked) {
+	if _, err := r.Resolve(ctx, testKey("sk-live")); !errors.Is(err, policy.ErrKeyRevoked) {
 		t.Errorf("error = %v, want the key refused after the announcement", err)
 	}
 	if s.calls() <= before {
@@ -267,15 +276,15 @@ func TestADatabaseOutageIsNeverCached(t *testing.T) {
 	// let a momentary outage pin a rejection in memory for a whole TTL - long
 	// after the database came back.
 	s := newSource()
-	s.reject("sk-live", errors.New("dial tcp: connection refused"))
+	s.reject(testKey("sk-live"), errors.New("dial tcp: connection refused"))
 	r := newRegistry(t, s, Options{TTL: time.Hour, NegativeTTL: time.Hour})
 
-	if _, err := r.Resolve(t.Context(), "sk-live"); err == nil {
+	if _, err := r.Resolve(t.Context(), testKey("sk-live")); err == nil {
 		t.Fatal("Resolve succeeded against an unreachable database")
 	}
 	// The database comes back, and the very next request has to see that.
-	s.set("sk-live", resolved("org_1"))
-	got, err := r.Resolve(t.Context(), "sk-live")
+	s.set(testKey("sk-live"), resolved("org_1"))
+	got, err := r.Resolve(t.Context(), testKey("sk-live"))
 	if err != nil {
 		t.Fatalf("Resolve after the outage: %v", err)
 	}
@@ -293,11 +302,11 @@ func TestARejectedKeyIsCachedButOnlyBriefly(t *testing.T) {
 	for _, err := range []error{policy.ErrUnknownKey, policy.ErrKeyRevoked, policy.ErrKeyExpired} {
 		t.Run(err.Error(), func(t *testing.T) {
 			s := newSource()
-			s.reject("sk-bad", err)
+			s.reject(testKey("sk-bad"), err)
 			r := newRegistry(t, s, Options{TTL: time.Hour, NegativeTTL: time.Hour})
 
 			for range 5 {
-				if _, got := r.Resolve(t.Context(), "sk-bad"); !errors.Is(got, err) {
+				if _, got := r.Resolve(t.Context(), testKey("sk-bad")); !errors.Is(got, err) {
 					t.Fatalf("error = %v, want %v", got, err)
 				}
 			}
@@ -314,20 +323,20 @@ func TestTheNegativeLifetimeIsShorterThanTheOtherOne(t *testing.T) {
 	// there are two settings. A refactor that used one lifetime for both would
 	// pass every other test in this file.
 	s := newSource()
-	s.set("sk-good", resolved("org_1"))
-	s.reject("sk-bad", policy.ErrUnknownKey)
+	s.set(testKey("sk-good"), resolved("org_1"))
+	s.reject(testKey("sk-bad"), policy.ErrUnknownKey)
 	// Long enough that neither expires during the test, so what is being read
 	// is the lifetime that was recorded and not the clock.
 	r := newRegistry(t, s, Options{TTL: time.Hour, NegativeTTL: time.Minute})
 
-	if _, err := r.Resolve(t.Context(), "sk-good"); err != nil {
+	if _, err := r.Resolve(t.Context(), testKey("sk-good")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.Resolve(t.Context(), "sk-bad"); err == nil {
+	if _, err := r.Resolve(t.Context(), testKey("sk-bad")); err == nil {
 		t.Fatal("a bad key resolved")
 	}
 
-	good, bad := r.expiryOf("sk-good"), r.expiryOf("sk-bad")
+	good, bad := r.expiryOf(testKey("sk-good")), r.expiryOf(testKey("sk-bad"))
 	if good.IsZero() || bad.IsZero() {
 		t.Fatal("one of the two was not cached at all")
 	}
@@ -343,7 +352,7 @@ func TestOneMissIsOneQueryHoweverManyAskAtOnce(t *testing.T) {
 	// the collapse that is one query per request against a database that is
 	// already the thing being protected.
 	s := newSource()
-	s.set("sk-live", resolved("org_1"))
+	s.set(testKey("sk-live"), resolved("org_1"))
 
 	release := make(chan struct{})
 	var arrived sync.WaitGroup
@@ -363,7 +372,7 @@ func TestOneMissIsOneQueryHoweverManyAskAtOnce(t *testing.T) {
 	orgs := make([]string, callers)
 	for i := range callers {
 		wg.Go(func() {
-			got, err := r.Resolve(t.Context(), "sk-live")
+			got, err := r.Resolve(t.Context(), testKey("sk-live"))
 			errs[i] = err
 			if got != nil {
 				orgs[i] = got.Key.OrgID
@@ -397,7 +406,7 @@ func TestACallerThatGivesUpDoesNotTakeTheOthersWithIt(t *testing.T) {
 	// hangs up mid-flight must not then be able to fail the request of everyone
 	// who joined behind it.
 	s := newSource()
-	s.set("sk-live", resolved("org_1"))
+	s.set(testKey("sk-live"), resolved("org_1"))
 	release := make(chan struct{})
 	var once sync.Once
 	var arrived sync.WaitGroup
@@ -413,7 +422,7 @@ func TestACallerThatGivesUpDoesNotTakeTheOthersWithIt(t *testing.T) {
 	// The one that will do the work.
 	first := make(chan error, 1)
 	go func() {
-		_, err := r.Resolve(context.Background(), "sk-live")
+		_, err := r.Resolve(context.Background(), testKey("sk-live"))
 		first <- err
 	}()
 	arrived.Wait()
@@ -422,7 +431,7 @@ func TestACallerThatGivesUpDoesNotTakeTheOthersWithIt(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	joined := make(chan error, 1)
 	go func() {
-		_, err := r.Resolve(ctx, "sk-live")
+		_, err := r.Resolve(ctx, testKey("sk-live"))
 		joined <- err
 	}()
 	time.Sleep(20 * time.Millisecond)
@@ -441,7 +450,7 @@ func TestTheCallerDoingTheWorkCanLeaveWithoutFailingTheOthers(t *testing.T) {
 	// The other way round: the first caller's query is the one everybody
 	// waits on, so its client hanging up must not cancel it.
 	s := newSource()
-	s.set("sk-live", resolved("org_1"))
+	s.set(testKey("sk-live"), resolved("org_1"))
 	release := make(chan struct{})
 	var once sync.Once
 	var arrived sync.WaitGroup
@@ -457,14 +466,14 @@ func TestTheCallerDoingTheWorkCanLeaveWithoutFailingTheOthers(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	first := make(chan error, 1)
 	go func() {
-		_, err := r.Resolve(ctx, "sk-live")
+		_, err := r.Resolve(ctx, testKey("sk-live"))
 		first <- err
 	}()
 	arrived.Wait()
 
 	joined := make(chan error, 1)
 	go func() {
-		_, err := r.Resolve(context.Background(), "sk-live")
+		_, err := r.Resolve(context.Background(), testKey("sk-live"))
 		joined <- err
 	}()
 	time.Sleep(20 * time.Millisecond)
@@ -489,14 +498,14 @@ func TestSweepForgetsWhatIsExpiredAndWhatIsStale(t *testing.T) {
 	// which on a public endpoint is every scan. Two things make an entry
 	// collectable: it has run out, or the generation it was minted in is over.
 	s := newSource()
-	s.set("sk-a", resolved("org_1"))
-	s.reject("sk-b", policy.ErrUnknownKey)
+	s.set(testKey("sk-a"), resolved("org_1"))
+	s.reject(testKey("sk-b"), policy.ErrUnknownKey)
 	r := newRegistry(t, s, Options{TTL: time.Nanosecond, NegativeTTL: time.Nanosecond})
 
-	if _, err := r.Resolve(t.Context(), "sk-a"); err != nil {
+	if _, err := r.Resolve(t.Context(), testKey("sk-a")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.Resolve(t.Context(), "sk-b"); err == nil {
+	if _, err := r.Resolve(t.Context(), testKey("sk-b")); err == nil {
 		t.Fatal("a bad key resolved")
 	}
 	if n := r.cached(); n != 2 {
@@ -511,7 +520,7 @@ func TestSweepForgetsWhatIsExpiredAndWhatIsStale(t *testing.T) {
 
 	// And a generation that has moved on, without waiting for any expiry.
 	r2 := newRegistry(t, s, Options{TTL: time.Hour})
-	if _, err := r2.Resolve(t.Context(), "sk-a"); err != nil {
+	if _, err := r2.Resolve(t.Context(), testKey("sk-a")); err != nil {
 		t.Fatal(err)
 	}
 	if n := r2.cached(); n != 1 {
@@ -529,17 +538,17 @@ func TestTheCacheIsKeyedByHashAndNotByTheKeyItself(t *testing.T) {
 	// ends up wherever such things end up. It must not contain working
 	// credentials, so the cache holds what the database holds.
 	s := newSource()
-	s.set("sk-live-secret-value", resolved("org_1"))
+	s.set(testKey("sk-live-secret-value"), resolved("org_1"))
 	r := newRegistry(t, s, Options{TTL: time.Minute})
-	if _, err := r.Resolve(t.Context(), "sk-live-secret-value"); err != nil {
+	if _, err := r.Resolve(t.Context(), testKey("sk-live-secret-value")); err != nil {
 		t.Fatal(err)
 	}
 
 	for k := range r.keys {
-		if k == "sk-live-secret-value" {
+		if k == testKey("sk-live-secret-value") {
 			t.Fatal("the presented key is a cache key; a heap dump would hand it out")
 		}
-		if k != hashOf("sk-live-secret-value") {
+		if k != hashOf(testKey("sk-live-secret-value")) {
 			t.Errorf("cache key %q is neither the key nor its hash", k)
 		}
 	}
@@ -639,3 +648,89 @@ func TestDefaultsAreFilledInForWhateverIsNotSet(t *testing.T) {
 // Keeps the compiler honest about the store still being a Source, which is the
 // only thing that makes any of the above worth running.
 var _ Source = (*store.Store)(nil)
+
+func TestATokenThatCannotBeAKeyCostsNoQuery(t *testing.T) {
+	// Scanners send every token they have. None of them is shaped like a
+	// Keera key, so none of them may reach the database or the cache.
+	s := newSource()
+	r := newRegistry(t, s, Options{TTL: time.Minute})
+
+	for _, tok := range []string{"sk-live", "Bearer", "keera_sk_short"} {
+		if _, err := r.Resolve(t.Context(), tok); !errors.Is(err, policy.ErrUnknownKey) {
+			t.Errorf("Resolve(%q) = %v, want ErrUnknownKey", tok, err)
+		}
+	}
+	if n := s.lookups.Load(); n != 0 {
+		t.Errorf("%d queries for tokens that cannot be keys, want 0", n)
+	}
+	if n := r.cached(); n != 0 {
+		t.Errorf("%d cache entries for tokens that cannot be keys, want 0", n)
+	}
+}
+
+func TestKeyQueriesNeverTakeMoreThanTheirShareOfThePool(t *testing.T) {
+	// A flood of made-up but well-formed keys is one miss each. The queries
+	// they cause must leave the rest of the pool to usage writes and the
+	// control plane.
+	s := newSource()
+	release := make(chan struct{})
+	var running, peak atomic.Int32
+	s.beforeLookup = func() {
+		n := running.Add(1)
+		for {
+			p := peak.Load()
+			if n <= p || peak.CompareAndSwap(p, n) {
+				break
+			}
+		}
+		<-release
+		running.Add(-1)
+	}
+	r := newRegistry(t, s, Options{TTL: time.Minute})
+
+	const callers = 3 * maxLookups
+	var wg sync.WaitGroup
+	for i := range callers {
+		wg.Go(func() { _, _ = r.Resolve(t.Context(), testKey(fmt.Sprint("flood-", i))) })
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for s.lookups.Load() < maxLookups && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	// Give any query that should not have started the chance to.
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+	wg.Wait()
+
+	if p := peak.Load(); p > maxLookups {
+		t.Errorf("%d key queries ran at once, want at most %d", p, maxLookups)
+	}
+	if n := s.lookups.Load(); n != callers {
+		t.Errorf("%d queries ran, want %d: a caller waiting for a slot was dropped", n, callers)
+	}
+}
+
+func TestACallerWhoHangsUpWaitingForASlotGivesItUp(t *testing.T) {
+	s := newSource()
+	release := make(chan struct{})
+	s.beforeLookup = func() { <-release }
+	r := newRegistry(t, s, Options{TTL: time.Minute})
+	defer close(release)
+
+	for i := range maxLookups {
+		go func() { _, _ = r.Resolve(context.Background(), testKey(fmt.Sprint("busy-", i))) }()
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for s.lookups.Load() < maxLookups && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := r.Resolve(ctx, testKey("late")); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Resolve = %v, want the caller's own deadline", err)
+	}
+	if _, loaded := r.inflight.Load(hashOf(testKey("late"))); loaded {
+		t.Error("the abandoned query is still marked in flight, so nobody can retry it")
+	}
+}

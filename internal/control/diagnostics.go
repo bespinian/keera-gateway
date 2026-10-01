@@ -235,6 +235,11 @@ func modelFix(m policy.Model, flags string, p *authn.Principal) string {
 func (s *Server) probeModels(ctx context.Context, d *Diagnosis, enabled []policy.Model) {
 	const area = "Models"
 	for _, m := range enabled {
+		// Each caller's own Claude plan pays for a subscription model, so the
+		// gateway has no credential to probe it with.
+		if m.Subscription {
+			continue
+		}
 		live, found := s.reg.Model(m.OrgID, m.Alias)
 		if !found {
 			continue

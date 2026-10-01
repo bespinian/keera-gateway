@@ -206,10 +206,13 @@ var commands = []command{
 			"A key is shown once, when it is created. Nothing can print it again.",
 		subs: []subcommand{
 			{name: "create", aliases: []string{"add", "new"}, args: "[<alias>]", summary: "issue an API key",
-				flags: []string{"org", "team", "user", "alias", "expires", "json"},
+				flags: []string{"org", "team", "user", "alias", "expires", "subscription", "json"},
 				prose: "The alias is what the key is for, in one label - it is what the panel, " +
 					"the reports and the audit log call this key, so a key issued without one " +
-					"is a row nobody can identify later.",
+					"is a row nobody can identify later.\n\n" +
+					"--subscription issues a key for Claude Code signed in to a Claude plan. It " +
+					"reaches only subscription models, which that plan pays for. A person " +
+					"usually gets one from 'keera connect claude-code --subscription' instead.",
 				examples: []string{
 					`keera key create --team payments --user ada@example.ch --alias "Ada's laptop"`,
 				}},
@@ -259,18 +262,24 @@ var commands = []command{
 				flags: []string{"org", "provider", "backend", "product-id", "backend-model", "kind",
 					"description", "max-context", "release-date", "location",
 					"price-in", "price-out", "price-cached",
-					"api-key", "disabled", "json"},
+					"api-key", "subscription", "disabled", "json"},
+				prose: "--subscription makes each caller's own Claude subscription pay. The " +
+					"gateway then forwards the caller's Claude sign-in and stores no API key, " +
+					"and only Claude Code signed in to a Claude plan can use the model. See " +
+					"docs/subscriptions.md.",
 				examples: []string{
 					"keera model add keera-speed --backend http://vllm:8000/v1 \\\n" +
 						"    --backend-model Qwen/Qwen2.5-Coder-7B-Instruct --max-context 32768",
 					"keera model add keera-swiss --provider infomaniak --product-id 100234 \\\n" +
 						"    --backend-model swiss-ai/Apertus-v1.5-70B --api-key @-",
+					"keera model add claude-opus --provider anthropic \\\n" +
+						"    --backend-model claude-opus-5-5 --subscription",
 				}},
 			{name: "set", aliases: []string{"edit", "update"}, args: "<alias>", summary: "change any of those on an existing model",
 				flags: []string{"org", "provider", "backend", "product-id", "backend-model", "kind",
 					"description", "max-context", "release-date", "location",
 					"price-in", "price-out", "price-cached",
-					"api-key", "no-api-key", "json"}},
+					"api-key", "no-api-key", "subscription", "no-subscription", "json"}},
 			{name: "enable", args: "<alias>", summary: "serve this model", flags: []string{"org", "json"}},
 			{name: "disable", args: "<alias>", summary: "stop serving it, keeping its declaration",
 				flags: []string{"org", "json"}},
@@ -536,7 +545,7 @@ var commands = []command{
 			"With --purpose agent - or 'sandbox agent', which is the same thing with the flags " +
 			"already set - the sandbox is one task's machine instead. Nothing attaches to it, " +
 			"it is terminated rather than suspended when its time runs out, and it names its " +
-			"own session, so 'keera sessions' reports what it did as one task rather than " +
+			"own session, so 'keera session list' reports what it did as one task rather than " +
 			"inferring the grouping. The --task is passed to it and never stored.",
 		subs: []subcommand{
 			{name: "classes", summary: "the machines this organisation offers", flags: []string{"org", "json"}},
@@ -594,40 +603,46 @@ var commands = []command{
 			"status says a call failed; the message says whose problem it is.",
 	},
 	{
-		name:    "sessions",
-		summary: "what agents have been carrying out, one row per task",
-		args:    "[flags]",
-		flags: []string{"sort", "unhappy", "model", "team", "key", "user", "since", "limit",
-			"org", "json"},
+		name:    "session",
+		aliases: []string{"sessions"},
+		summary: "what agents have been carrying out, one task at a time",
 		prose: "A session is the requests one coding agent made working through one task. Nobody " +
 			"decides how many requests a task takes, so a cost per request is a number nobody " +
 			"can act on and a cost per task is the one that goes into a budget conversation.\n\n" +
 			"The grouping is computed when the report is read, from a hash of the conversation " +
 			"the gateway records on each request - no prompt is stored - and cut wherever the " +
-			"agent went quiet for longer than KEERA_SESSION_GAP.\n\n" +
-			"The first column is the id of the task's first request. 'keera session' " +
-			"takes it. --user takes an email or an id.",
-	},
-	{
-		name:    "session",
-		summary: "one task from beginning to end, named by any request in it",
-		args:    "<request-id> [flags]",
-		flags:   []string{"org", "json"},
-		prose: "The id is any request in the task: the first column of 'keera sessions' " +
-			"or 'keera failures'.",
+			"agent went quiet for longer than KEERA_SESSION_GAP.",
+		subs: []subcommand{
+			{name: "list", aliases: []string{"ls"}, summary: "one row per task, the costliest first",
+				flags: []string{"sort", "unhappy", "model", "team", "key", "user", "since", "limit",
+					"org", "json"},
+				prose: "The first column is the id of the task's first request. 'keera session " +
+					"show' takes it. --user takes an email or an id."},
+			{name: "show", aliases: []string{"get"}, args: "<request-id>",
+				summary: "one task from beginning to end, named by any request in it",
+				flags:   []string{"org", "json"},
+				prose: "The id is any request in the task: the first column of 'keera session " +
+					"list' or 'keera failures'. 'keera session <id>' is short for it."},
+		},
 	},
 	{
 		name:    "connect",
 		summary: "the finished configuration for an editor",
 		args:    "[<client>] [flags]",
-		flags:   []string{"model", "org", "json"},
+		flags:   []string{"model", "org", "subscription", "team", "json"},
 		prose: "The panel's \"Connect a client\" screen for whoever does not have the panel. It " +
 			"prints the configuration block on stdout and everything around it on stderr, so it " +
 			"can be redirected straight into the file it names.\n\n" +
-			"With no client it lists the ones this deployment can configure.",
+			"With no client it lists the ones this deployment can configure.\n\n" +
+			"'keera connect claude-code --subscription' is for Claude Code signed in to a " +
+			"Claude plan. It needs 'keera login' first. It issues this machine its own " +
+			"subscription key and writes it into ~/.claude/settings.json, so there is no key " +
+			"to copy. Running it again replaces that key. --team puts the key in a team, " +
+			"which only an administrator may choose.",
 		examples: []string{
 			"keera connect",
 			"keera connect opencode --model keera-speed > ~/.config/opencode/opencode.json",
+			"keera connect claude-code --subscription",
 		},
 	},
 	{name: "version", summary: "the build version this command line reports"},

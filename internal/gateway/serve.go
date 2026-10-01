@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -53,6 +54,7 @@ type call struct {
 	// native is the body in the client's own API, for the destinations that
 	// are sent that API rather than a translation (see native.go). It is nil
 	// when none are. translated says some destinations get the translation.
+	// Until then, or when none do, the OpenAI-shaped body is nil.
 	native     *body
 	translated bool
 
@@ -101,14 +103,16 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, res *policy.Resol
 	// The router runs before the filters, so it reads what the client sent. A
 	// router after a redaction filter could send a cleaned-up prompt outside
 	// the cluster, so its own model has to be local, like a filter's.
-	if c.routed && !s.useRouter(c, b) {
-		return
+	if c.routed {
+		if b, ok = s.translate(c, b); !ok || !s.useRouter(c, b) {
+			return
+		}
 	}
 	c.chain = s.destinations(c.res.Key.OrgID, c.model, c.decision)
-	if !s.fits(c, b) || !s.useNative(c) {
+	if b, ok = s.useNative(c, b); !ok {
 		return
 	}
-	if !s.useFilters(c, b) || !s.prepare(c, b) {
+	if !s.fits(c, b) || !s.useFilters(c, b) || !s.prepare(c, b) {
 		return
 	}
 	s.answer(c, b)
@@ -133,29 +137,51 @@ func (s *Server) receive(c *call) ([]byte, bool) {
 	return raw, true
 }
 
-// decode turns the body into the OpenAI shape and parses it. Everything after
-// this is written against that one shape, except what is sent to a provider
-// in the client's own API, which keeps the body as it came in c.native.
+// decode parses the body. Everything after this is written against the OpenAI
+// shape, except what is sent to a provider in the client's own API. A body in
+// such an API is kept as it came, in c.native, and is translated only once
+// something needs the OpenAI shape (see translate). Until then b is nil.
 func (s *Server) decode(c *call, raw []byte) (*body, bool) {
-	translated, err := c.surf.shape.decode(raw)
+	d := c.surf.dialect
+	if d == nil {
+		var err error
+		if raw, err = c.surf.shape.decode(raw); err != nil {
+			s.refuse(c, invalidBody(err.Error()))
+			return nil, false
+		}
+	}
+	b, err := parseBody(raw)
 	if err != nil {
 		s.refuse(c, invalidBody(err.Error()))
 		return nil, false
-	}
-	b, err := parseBody(translated)
-	if err != nil {
-		s.refuse(c, invalidBody(err.Error()))
-		return nil, false
-	}
-	if c.surf.dialect != nil {
-		// The shape has read it already, so this cannot fail. Whether any
-		// destination is sent it is decided once the destinations are known.
-		c.native, _ = parseBody(raw)
 	}
 	// Set before anything can refuse, so a session cut short by a budget
 	// shows the refusal too.
-	c.ev.SessionKey = sessionKey(c.r, c.res.Key.ID, b, c.surf.kind)
-	return b, true
+	if d == nil {
+		c.ev.SessionKey = sessionKey(c.r, c.res.Key.ID, c.surf.kind, b.firstUserMessage)
+		return b, true
+	}
+	c.native = b
+	c.ev.SessionKey = sessionKey(c.r, c.res.Key.ID, c.surf.kind,
+		func() (json.RawMessage, bool) { return d.opening(b) })
+	return nil, true
+}
+
+// translate makes the OpenAI-shaped body from the client's own, the first
+// time a router or a destination that is not the client's provider needs it.
+// A body that is in the OpenAI shape already is returned as it is.
+func (s *Server) translate(c *call, b *body) (*body, bool) {
+	if b != nil {
+		return b, true
+	}
+	raw, err := c.surf.shape.decode(c.native.encode())
+	if err == nil {
+		if b, err = parseBody(raw); err == nil {
+			return b, true
+		}
+	}
+	s.refuse(c, invalidBody(err.Error()))
+	return nil, false
 }
 
 // invalidBody is the refusal for a body the gateway cannot use.
@@ -197,7 +223,13 @@ func notRebuilt(err error) *refusal {
 // target works out what the 'model' field names: one of this organisation's
 // models, or one of its routers.
 func (s *Server) target(c *call, b *body) bool {
-	alias, hasAlias := b.str("model")
+	// Before the translation, the model is read from the client's own API,
+	// which names it in the same field.
+	sent := b
+	if sent == nil {
+		sent = c.native
+	}
+	alias, hasAlias := sent.str("model")
 	if !hasAlias || alias == "" {
 		s.refuse(c, refusal{
 			status: http.StatusBadRequest,
@@ -226,14 +258,17 @@ func (s *Server) target(c *call, b *body) bool {
 	if !found {
 		c.router, c.routed = s.src.Router(c.res.Key.OrgID, alias)
 		// Routers exist only on chat. The allow-list covers the router, not
-		// its destinations: allowing a router allows where it sends.
-		if c.routed && (c.surf.kind != policy.KindChat || !c.res.AllowsModel(alias)) {
+		// its destinations: allowing a router allows where it sends. A
+		// subscription key reaches no router, which would place it on models
+		// the organisation pays for.
+		if c.routed && (c.surf.kind != policy.KindChat || !c.res.AllowsModel(alias) ||
+			c.res.Key.Subscription()) {
 			c.routed = false
 		}
 	}
 	// A model the key may not use is reported as missing, so other teams'
 	// models cannot be discovered through 403s. Routers answer the same way.
-	if !c.routed && (!found || !model.Enabled || model.Kind != c.surf.kind || !c.res.AllowsModel(alias)) {
+	if !c.routed && (!found || !model.Enabled || model.Kind != c.surf.kind || !c.res.MayUse(model)) {
 		s.refuse(c, refusal{
 			status: http.StatusNotFound,
 			typ:    "invalid_request_error", code: "model_not_found",
@@ -250,6 +285,12 @@ func (s *Server) target(c *call, b *body) bool {
 		})
 		return false
 	}
+	if model.Subscription {
+		if ref := subscriptionRefusal(c); ref != nil {
+			s.refuse(c, *ref)
+			return false
+		}
+	}
 	c.model = model
 	return true
 }
@@ -260,6 +301,11 @@ func (s *Server) admit(c *call) bool {
 	if ref, ok := s.checkRates(c.res, c.now); !ok {
 		s.refuse(c, ref)
 		return false
+	}
+	// A subscription pays for the model, so only filters can spend the
+	// organisation's money, and without them no budget applies.
+	if c.model.Subscription && len(c.res.Filters) == 0 {
+		return true
 	}
 	err := s.budgets.Allow(c.res.Scopes, c.now)
 	if err == nil {
@@ -315,7 +361,6 @@ func (s *Server) useRouter(c *call, b *body) bool {
 	}
 	if ref != nil {
 		count(d.outcome)
-		c.ev.CostMicros = d.micros
 		s.refuse(c, *ref)
 		return false
 	}
@@ -350,10 +395,11 @@ func (s *Server) useRouter(c *call, b *body) bool {
 }
 
 // useNative decides which destinations are sent the client's own API rather
-// than the translation, and keeps the body for them only if some are.
-func (s *Server) useNative(c *call) bool {
+// than the translation, and keeps the body for them only if some are. It
+// returns the translation if any destination needs it.
+func (s *Server) useNative(c *call, b *body) (*body, bool) {
 	if c.native == nil {
-		return true
+		return b, true
 	}
 	d := c.surf.dialect
 	// A body only the provider itself can read goes nowhere else, so the
@@ -371,7 +417,7 @@ func (s *Server) useNative(c *call) bool {
 				typ:    "invalid_request_error", code: "unsupported_parameter",
 				msg: why + ". The model '" + c.alias + "' is not one of them",
 			})
-			return false
+			return nil, false
 		}
 		c.chain = kept
 	}
@@ -383,10 +429,16 @@ func (s *Server) useNative(c *call) bool {
 			c.translated = true
 		}
 	}
+	if c.translated {
+		var ok bool
+		if b, ok = s.translate(c, b); !ok {
+			return nil, false
+		}
+	}
 	if !native {
 		c.native = nil
 	}
-	return true
+	return b, true
 }
 
 // useFilters runs the key's filters over the request.
@@ -409,7 +461,6 @@ func (s *Server) useFilters(c *call, b *body) bool {
 	// Kept on every outcome: a filter refusal is what the log is read for most.
 	c.ev.FilterRuns = run.runs
 	if ref != nil {
-		c.ev.CostMicros = c.hookMicros()
 		s.refuse(c, *ref)
 		return false
 	}
@@ -450,13 +501,17 @@ func (s *Server) prepare(c *call, b *body) bool {
 	// is kept after it. Only chat has a place for one. A chat body without a
 	// messages array is refused, because forwarding it would skip the prompt.
 	if c.res.SystemPrompt != "" && c.surf.kind == policy.KindChat {
-		if !b.prependSystem(c.res.SystemPrompt) {
+		if b != nil && !b.prependSystem(c.res.SystemPrompt) {
 			s.refuse(c, invalidBody("the 'messages' field must be an array; a guardrail on this key "+
 				"adds a system message to every chat request and has nothing here to add it to"))
 			return false
 		}
 		if c.native != nil {
-			if err := c.surf.dialect.addSystem(c.native, c.res.SystemPrompt); err != nil {
+			add := c.surf.dialect.addSystem
+			if c.model.Subscription {
+				add = appendSystem
+			}
+			if err := add(c.native, c.res.SystemPrompt); err != nil {
 				s.refuse(c, invalidBody(err.Error()))
 				return false
 			}
@@ -465,7 +520,7 @@ func (s *Server) prepare(c *call, b *body) bool {
 	if c.res.BlockHostedTools {
 		// On chat completions a hosted search is a field rather than a tool.
 		removed := []string{}
-		if b.remove("web_search_options") {
+		if b != nil && b.remove("web_search_options") {
 			removed = append(removed, "web_search_options")
 		}
 		if c.native != nil {
@@ -475,13 +530,20 @@ func (s *Server) prepare(c *call, b *body) bool {
 	}
 	// Embeddings have no output length to limit.
 	if c.res.MaxOutputTokens > 0 && c.surf.kind != policy.KindEmbedding {
-		clampOutputTokens(b, c.res.MaxOutputTokens)
+		if b != nil {
+			clampOutputTokens(b, c.res.MaxOutputTokens)
+		}
 		if c.native != nil {
 			c.surf.dialect.clamp(c.native, c.res.MaxOutputTokens)
 		}
 	}
-	c.stream, _ = b.boolean("stream")
-	if c.stream {
+	// Both APIs that can go untranslated name it as the OpenAI shape does.
+	sent := b
+	if sent == nil {
+		sent = c.native
+	}
+	c.stream, _ = sent.boolean("stream")
+	if c.stream && b != nil {
 		c.injectedUsage = b.ensureUsageInStream()
 	}
 	c.ev.Stream = c.stream
@@ -525,6 +587,10 @@ func (s *Server) answer(c *call, b *body) {
 	streaming := c.stream && strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream")
 	s.copyResponseHeaders(c.w, resp, c.alias, streaming)
 	s.limitHeaders(c.w, c.res, c.now)
+	if c.model.Subscription {
+		passPlanHeaders(c.w, resp.Header)
+		c.ev.Plan = planUsage(resp.Header, time.Now())
+	}
 	native := c.native != nil && speaksNative(c.surf.dialect, c.model)
 	switch {
 	case streaming && native:
@@ -559,10 +625,11 @@ func (c *call) outbound(b *body) func(policy.Model) outbound {
 	return func(m policy.Model) outbound {
 		if c.native != nil && speaksNative(c.surf.dialect, m) {
 			c.native.setString("model", m.BackendModel)
-			return outbound{
-				path: c.surf.dialect.path(), payload: c.native.encode(),
-				auth: c.surf.dialect.auth(c.r.Header),
+			auth := c.surf.dialect.auth(c.r.Header)
+			if m.Subscription {
+				auth = subscriptionAuth(c.r.Header)
 			}
+			return outbound{path: c.surf.dialect.path(), payload: c.native.encode(), auth: auth}
 		}
 		b.setString("model", m.BackendModel)
 		return outbound{path: c.surf.path, payload: b.encode()}
@@ -639,16 +706,19 @@ func (s *Server) relayStream(c *call, resp *http.Response, answered time.Time, p
 // relayBuffered reads a whole answer, translates it into the client's shape
 // and writes it.
 func (s *Server) relayBuffered(c *call, resp *http.Response, answered time.Time) {
-	body, err := io.ReadAll(io.LimitReader(resp.Body, s.opts.MaxResponseBytes))
+	body, ok := s.readAnswer(c, resp, answered)
+	if !ok {
+		return
+	}
 	// Token counts are read before translation, from what the plane sent.
 	var usage *tokenUsage
-	if err == nil && resp.StatusCode < 300 {
+	if resp.StatusCode < 300 {
 		usage = usageFromResponse(body)
 	}
 	// The shape picks the status, because a success it cannot translate has
 	// to become an error.
 	out, status := c.surf.shape.encode(body, c.alias, resp.StatusCode)
-	if msg := bufferedError(err, body, resp.StatusCode, status); msg != "" {
+	if msg := bufferedError(body, resp.StatusCode, status); msg != "" {
 		c.ev.Error = msg
 	}
 	if ct := c.surf.shape.contentType(); ct != "" {
@@ -668,12 +738,40 @@ func (s *Server) relayBuffered(c *call, resp *http.Response, answered time.Time)
 	}
 }
 
-// bufferedError is what the usage row says went wrong with a buffered answer,
-// or empty when nothing did.
-func bufferedError(readErr error, body []byte, upstream, status int) string {
+// readAnswer reads a whole buffered answer, up to MaxResponseBytes.
+//
+// An answer it cannot read in full is answered with a 502 and false. Passing
+// on what arrived would hand the client cut JSON under the plane's 2xx, and
+// the usage record at its end would be lost.
+func (s *Server) readAnswer(c *call, resp *http.Response, answered time.Time) ([]byte, bool) {
+	raw, err := readCapped(resp.Body, s.opts.MaxResponseBytes)
+	if err == nil {
+		return raw, true
+	}
+	c.surf.shape.writeError(c.w, http.StatusBadGateway, "server_error", "upstream_error",
+		"the answer from the inference plane could not be read")
+	c.ev.Status = http.StatusBadGateway
+	c.ev.Error = "the answer could not be read from the inference plane: " + err.Error()
+	c.ev.TTFT = time.Since(c.tr.start)
+	c.tr.since(store.SpanRespond, c.alias, answered, "")
+	return nil, false
+}
+
+// readCapped reads r to the end, and fails when it holds more than limit
+// bytes rather than returning the first limit of them.
+func readCapped(r io.Reader, limit int64) ([]byte, error) {
+	// One byte past the limit tells a long answer from one that fits exactly.
+	raw, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err == nil && int64(len(raw)) > limit {
+		err = fmt.Errorf("it is larger than the limit of %d bytes", limit)
+	}
+	return raw, err
+}
+
+// bufferedError is what the usage row says went wrong with a buffered answer
+// that was read in full, or empty when nothing did.
+func bufferedError(body []byte, upstream, status int) string {
 	switch {
-	case readErr != nil:
-		return "the answer could not be read from the inference plane: " + readErr.Error()
 	case upstream >= 400:
 		// The plane's own words: two 400s can mean very different things, and
 		// only the message says which.
@@ -705,6 +803,11 @@ func (s *Server) finish(ev store.Event, model policy.Model, res *policy.Resolved
 ) {
 	ev.Spans = tr.steps("")
 	ev.CostMicros = model.Cost(ev.InputTokens, ev.CachedInputTokens, ev.OutputTokens)
+	// A subscription paid for this. What it would have cost on the API is kept
+	// to compare against, and charged to no budget.
+	if model.Subscription {
+		ev.ListCostMicros, ev.CostMicros = ev.CostMicros, 0
+	}
 	s.budgets.Charge(res.Scopes, ev.CostMicros, now)
 	ev.CostMicros += hookMicros
 

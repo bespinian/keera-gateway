@@ -116,6 +116,17 @@ export async function keysView(ctx) {
               { class: "faint mono", style: { fontSize: "11px" } },
               k.prefix + "…",
             ),
+            k.kind === "subscription"
+              ? h(
+                  "span",
+                  {
+                    title:
+                      "For Claude Code signed in to a Claude plan. It reaches " +
+                      "only the models that plan pays for.",
+                  },
+                  pill("Claude plan"),
+                )
+              : null,
           ),
       },
       {
@@ -174,6 +185,20 @@ export async function keysView(ctx) {
                   { class: "faint nowrap", style: { fontSize: "11.5px" } },
                   money(k.spend_micros, currency),
                 ),
+                k.subscription_micros
+                  ? h(
+                      "span",
+                      {
+                        class: "faint nowrap",
+                        style: { fontSize: "11.5px" },
+                        title:
+                          "What the Claude plan paid for, at API prices. " +
+                          "No budget is charged it.",
+                      },
+                      `${money(k.subscription_micros, currency)} on the plan`,
+                    )
+                  : null,
+                planUsed(k.plan),
               )
             : h("span", { class: "faint" }, "-"),
       },
@@ -560,7 +585,7 @@ function issueOwnKey(ctx, models, clients) {
 // contains it. Sending somebody to Connect a client afterwards sends them to a
 // screen where the key is gone forever and the file has a blank in it.
 function showSecret(ctx, created, models, clients) {
-  const chat = models.filter((m) => m.kind === "chat");
+  const chat = models.filter((m) => m.kind === "chat" && !m.subscription);
   const base = defaultBase(ctx) || location.origin + "/api";
 
   const secret = h("input", {
@@ -706,4 +731,29 @@ function showSecret(ctx, created, models, clients) {
       ),
     ],
   });
+}
+
+// planUsed is how much of their Claude plan a subscription key's holder has
+// used, in the plan's two windows, as Anthropic last reported it.
+function planUsed(plan) {
+  if (!plan) return null;
+  const parts = [];
+  if (plan.five_hour != null)
+    parts.push(`5h ${Math.round(plan.five_hour * 100)}%`);
+  if (plan.seven_day != null)
+    parts.push(`7d ${Math.round(plan.seven_day * 100)}%`);
+  if (!parts.length) return null;
+  const limited = plan.status === "rejected";
+  return h(
+    "span",
+    {
+      class: (limited ? "" : "faint ") + "nowrap",
+      style: { fontSize: "11.5px" },
+      title:
+        "How much of the Claude plan is used: in the last five hours, and " +
+        "in the last seven days.",
+    },
+    "plan " + parts.join(" · "),
+    limited ? h("span", {}, " ", pill("limit reached", "warn")) : null,
+  );
 }

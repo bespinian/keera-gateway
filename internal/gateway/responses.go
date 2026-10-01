@@ -430,6 +430,35 @@ func (responsesDialect) provider() string { return "openai" }
 
 func (responsesDialect) path() string { return "/responses" }
 
+func (responsesDialect) opening(b *body) (json.RawMessage, bool) {
+	raw, _ := b.value("input")
+	// Checked before decoding, so an array input is not read in full.
+	if t := bytes.TrimSpace(raw); len(t) > 0 && t[0] == '"' {
+		var text string
+		if json.Unmarshal(t, &text) != nil {
+			return nil, false
+		}
+		return openingOf([]oaiMessage{{Role: "user", Content: text}})
+	}
+	var (
+		opening json.RawMessage
+		found   bool
+	)
+	eachElement(raw, func(elem []byte) bool {
+		var it responsesItem
+		if json.Unmarshal(elem, &it) != nil {
+			return true
+		}
+		msgs, err := addItem(nil, it)
+		if err != nil {
+			return true
+		}
+		opening, found = openingOf(msgs)
+		return !found
+	})
+	return opening, found
+}
+
 // text is the instructions, and the text of every message and tool output in
 // the input. Function call arguments are not text, as on the chat surface.
 func (responsesDialect) text(b *body) (textDoc, error) {

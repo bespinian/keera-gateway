@@ -24,7 +24,10 @@ func (s *Server) gitCredential(w http.ResponseWriter, r *http.Request) {
 			"send this sandbox's own key, KEERA_API_KEY, as a bearer token")
 		return
 	}
-	sb, err := s.st.LiveSandboxByKey(r.Context(), auth.Hash(key))
+	sb, err := store.Sandbox{}, store.ErrNotFound
+	if auth.WellFormed(key) {
+		sb, err = s.st.LiveSandboxByKey(r.Context(), auth.Hash(key))
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		httpx.WriteError(w, http.StatusUnauthorized, "invalid_request_error", "invalid_api_key",
 			"this key belongs to no live sandbox")

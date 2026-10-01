@@ -276,10 +276,10 @@ func (s *Server) deleteTeam(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	if inUse, ok := errors.AsType[*store.TeamInUseError](err); ok {
 		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "team_has_keys",
 			"'"+inUse.Team+"' still holds "+keyCount(len(inUse.Aliases))+" that have not been "+
-				"revoked ("+strings.Join(inUse.Aliases, ", ")+"). Deleting the team would take "+
-				"them with it and whatever uses them would start answering 401, so revoke them "+
-				"first. A key cannot change team: issue a new one in another team for anything "+
-				"that still needs one")
+				"revoked ("+strings.Join(inUse.Aliases, ", ")+"). Without the team they would "+
+				"keep working under the organisation's guardrails alone, outside the team's "+
+				"allow-list, budget and rate limit, so revoke them first. A key cannot change "+
+				"team: issue a new one in another team for anything that still needs one")
 		return
 	}
 	if err != nil {
@@ -547,14 +547,22 @@ func (s *Server) mayGrant(w http.ResponseWriter, role authn.Role) bool {
 
 func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	var in struct {
-		OrgID     string `json:"org_id"`
-		TeamID    string `json:"team_id"`
-		UserID    string `json:"user_id"`
-		Alias     string `json:"alias"`
-		ExpiresIn string `json:"expires_in"`
+		OrgID     string         `json:"org_id"`
+		TeamID    string         `json:"team_id"`
+		UserID    string         `json:"user_id"`
+		Alias     string         `json:"alias"`
+		Kind      policy.KeyKind `json:"kind"`
+		ExpiresIn string         `json:"expires_in"`
 	}
 	if err := httpx.ReadJSON(r, &in); err != nil {
 		badRequest(w, err.Error())
+		return
+	}
+	if in.Kind == "" {
+		in.Kind = policy.KeyStandard
+	}
+	if !in.Kind.Valid() {
+		badRequest(w, "'kind' must be standard or subscription")
 		return
 	}
 	orgID, ok := s.requireOrg(w, p, in.OrgID, orgRequired)
@@ -582,6 +590,13 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	if in.Alias == "" {
 		in.Alias = "unnamed"
 	}
+	// A subscription key goes next to one person's own Claude sign-in, so it is
+	// always somebody's.
+	if in.Kind == policy.KeySubscription && in.UserID == "" {
+		badRequest(w, "a subscription key is for one person's Claude Code, so it must be "+
+			"attributed to them; name them in 'user_id'")
+		return
+	}
 	// The person a key is attributed to is who its spend is reported under,
 	// so it must be someone in this organisation.
 	if in.UserID != "" {
@@ -607,6 +622,7 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	}
 	info := store.KeyInfo{
 		ID: id.New("key"), OrgID: orgID, TeamID: in.TeamID, UserID: in.UserID, Alias: in.Alias,
+		Kind: in.Kind,
 	}
 	if info.ExpiresAt, ok = expiresIn(w, in.ExpiresIn); !ok {
 		return
@@ -627,7 +643,7 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	// it is part of the record.
 	s.auditf(r, p, orgID, "key.create", "key", info.ID, map[string]any{
 		"org_id": info.OrgID, "team_id": info.TeamID, "user_id": info.UserID,
-		"alias": info.Alias, "prefix": info.Prefix,
+		"alias": info.Alias, "prefix": info.Prefix, "kind": info.Kind,
 	})
 	s.changed(r)
 
@@ -639,8 +655,8 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	}{KeyInfo: info, Key: secret})
 }
 
-// rotateKey replaces a key with a new one that keeps its team, person and own
-// guardrails, and revokes the old one. Whoever may revoke a key may rotate
+// rotateKey replaces a key with a new one that keeps its team, person, kind
+// and own guardrails, and revokes the old one. Whoever may revoke a key may rotate
 // it, so a member can replace their own leaked key.
 func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	var in struct {
@@ -678,7 +694,7 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	}
 	s.auditf(r, p, owner, "key.rotate", "key", info.ID, map[string]any{
 		"replaced": oldID, "team_id": info.TeamID, "user_id": info.UserID,
-		"alias": info.Alias, "prefix": info.Prefix,
+		"alias": info.Alias, "prefix": info.Prefix, "kind": info.Kind,
 	})
 	s.changed(r)
 

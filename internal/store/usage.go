@@ -34,12 +34,18 @@ type Event struct {
 	CachedInputTokens int
 	OutputTokens      int
 	CostMicros        int64
-	Status            int
-	Latency           time.Duration
-	TTFT              time.Duration
-	Stream            bool
-	Estimated         bool
-	Canceled          bool
+	// ListCostMicros is what a request a subscription paid for would have
+	// cost at the model's API prices. No budget is charged it.
+	ListCostMicros int64
+	// Plan is how much of the caller's Claude plan is used, on a request a
+	// subscription paid for. Only the newest one per key is kept.
+	Plan      *policy.PlanUsage
+	Status    int
+	Latency   time.Duration
+	TTFT      time.Duration
+	Stream    bool
+	Estimated bool
+	Canceled  bool
 	// Error is what the caller was told went wrong, empty on success: the
 	// inference plane's wording for an upstream failure, the guardrail's for a
 	// refusal.
@@ -85,8 +91,12 @@ func (s *Store) WriteEvents(ctx context.Context, events []Event) error {
 	}
 	batch := &pgx.Batch{}
 	spend := make(map[spendKey]int64)
+	plans := make(map[string]policy.PlanUsage)
 	for _, e := range events {
 		queueEvent(batch, e)
+		if e.Plan != nil && e.KeyID != "" && !e.Plan.UpdatedAt.Before(plans[e.KeyID].UpdatedAt) {
+			plans[e.KeyID] = *e.Plan
+		}
 		if e.CostMicros == 0 {
 			continue
 		}
@@ -101,6 +111,7 @@ func (s *Store) WriteEvents(ctx context.Context, events []Event) error {
 			DO UPDATE SET micros = spend.micros + EXCLUDED.micros`,
 			string(k.scopeType), k.scopeID, string(k.period), k.start, spend[k])
 	}
+	queuePlans(batch, plans)
 	batch.Queue("SELECT pg_notify($1, '')", EventsChannel)
 	return s.pool.SendBatch(ctx, batch).Close()
 }
@@ -112,19 +123,40 @@ func queueEvent(batch *pgx.Batch, e Event) {
 		return
 	}
 	batch.Queue(`INSERT INTO usage_events (ts, org_id, team_id, user_id, key_id, alias,
-		client, input_tokens, cached_input_tokens, output_tokens, cost_micros, status,
-		latency_ms, ttft_ms, stream, estimated, canceled, error, session_key, router,
+		client, input_tokens, cached_input_tokens, output_tokens, cost_micros, list_cost_micros,
+		status, latency_ms, ttft_ms, stream, estimated, canceled, error, session_key, router,
 		router_outcome, router_ms, spans)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
-		$22,$23)`,
+		$22,$23,$24)`,
 		e.TS, e.OrgID, nullable(e.TeamID), nullable(e.UserID), nullable(e.KeyID), e.Alias,
 		nullable(e.Client),
-		e.InputTokens, e.CachedInputTokens, e.OutputTokens, e.CostMicros, e.Status,
+		e.InputTokens, e.CachedInputTokens, e.OutputTokens, e.CostMicros, e.ListCostMicros,
+		e.Status,
 		e.Latency.Milliseconds(), e.TTFT.Milliseconds(), e.Stream, e.Estimated, e.Canceled,
 		nullable(truncate(e.Error, maxErrorBytes)), nullable(e.SessionKey),
 		nullable(e.Router), nullable(string(e.RouterOutcome)), e.RouterMS,
 		spansJSON(e.Spans))
 	queueFilterRuns(batch, e, e.Alias)
+}
+
+// queuePlans keeps the newest plan usage of each key. A row from another
+// replica's later batch can arrive first, so an older reading never replaces a
+// newer one. Keys are sorted so every replica takes the row locks in one order.
+func queuePlans(batch *pgx.Batch, plans map[string]policy.PlanUsage) {
+	for _, keyID := range slices.Sorted(maps.Keys(plans)) {
+		p := plans[keyID]
+		batch.Queue(`INSERT INTO plan_usage (key_id, five_hour, five_hour_resets_at,
+			seven_day, seven_day_resets_at, status, updated_at)
+			SELECT $1,$2,$3,$4,$5,$6,$7 WHERE EXISTS (SELECT 1 FROM api_keys WHERE id = $1)
+			ON CONFLICT (key_id) DO UPDATE SET five_hour = EXCLUDED.five_hour,
+				five_hour_resets_at = EXCLUDED.five_hour_resets_at,
+				seven_day = EXCLUDED.seven_day,
+				seven_day_resets_at = EXCLUDED.seven_day_resets_at,
+				status = EXCLUDED.status, updated_at = EXCLUDED.updated_at
+			WHERE plan_usage.updated_at <= EXCLUDED.updated_at`,
+			keyID, p.FiveHour, p.FiveHourResetsAt, p.SevenDay, p.SevenDayResetsAt, p.Status,
+			p.UpdatedAt)
+	}
 }
 
 // queueFilterRuns adds an event's filter runs to the batch, against what the
@@ -207,6 +239,9 @@ type UsageBucket struct {
 	InputTokens  int64  `json:"input_tokens"`
 	OutputTokens int64  `json:"output_tokens"`
 	CostMicros   int64  `json:"cost_micros"`
+	// SubscriptionMicros is what Claude subscriptions paid for, at API
+	// prices. It is not part of CostMicros.
+	SubscriptionMicros int64 `json:"subscription_micros"`
 }
 
 // Scope narrows a report to one team, key, person or model inside the
@@ -279,11 +314,11 @@ func GroupBys() []string {
 	return slices.Sorted(maps.Keys(groupColumns))
 }
 
-// sortedKeys returns the keys of m in order.
 // Usage aggregates the event log: what billing and the usage report read.
 //
-// It counts only what was served. A refusal consumed nothing, so counting it
-// would put a request next to a cost that does not explain it.
+// Cost and tokens add up every row, as budgets do: a refused or failed
+// request can still have paid for a filter or router call. Requests counts
+// only what was served, as the keys screen does.
 func (s *Store) Usage(ctx context.Context, q UsageQuery) ([]UsageBucket, error) {
 	col, ok := groupColumns[q.GroupBy]
 	if !ok {
@@ -298,10 +333,12 @@ func (s *Store) Usage(ctx context.Context, q UsageQuery) ([]UsageBucket, error) 
 	if q.GroupBy == "day" {
 		order = "grp"
 	}
-	sql := `SELECT ` + col + ` AS grp, ` + org + `, count(*), COALESCE(sum(input_tokens),0),
-		COALESCE(sum(output_tokens),0), COALESCE(sum(cost_micros),0)
+	sql := `SELECT ` + col + ` AS grp, ` + org + `, count(*) FILTER (WHERE status < 400),
+		COALESCE(sum(input_tokens),0),
+		COALESCE(sum(output_tokens),0), COALESCE(sum(cost_micros),0),
+		COALESCE(sum(list_cost_micros),0)
 		FROM usage_events
-		WHERE ts >= $1 AND ts < $2 AND ($3 = '' OR org_id = $3) AND status < 400` +
+		WHERE ts >= $1 AND ts < $2 AND ($3 = '' OR org_id = $3)` +
 		q.narrow("", 3) + `
 		GROUP BY ` + group + ` ORDER BY ` + order
 	rows, err := s.pool.Query(ctx, sql, append([]any{q.From, q.To, q.OrgID}, q.args()...)...)
@@ -311,7 +348,7 @@ func (s *Store) Usage(ctx context.Context, q UsageQuery) ([]UsageBucket, error) 
 	return collect(rows, func(r row) (UsageBucket, error) {
 		var b UsageBucket
 		err := r.Scan(&b.Group, &b.OrgID, &b.Requests, &b.InputTokens, &b.OutputTokens,
-			&b.CostMicros)
+			&b.CostMicros, &b.SubscriptionMicros)
 		return b, err
 	})
 }

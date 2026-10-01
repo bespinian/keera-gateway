@@ -39,7 +39,7 @@ fi
 # The session header is already set for Pi and Claude Code. Pi's
 # configuration carries it, and Claude Code reads ANTHROPIC_CUSTOM_HEADERS,
 # both written by the gateway. That makes this task one session in
-# `keera sessions` rather than a guess from its opening prompt - see
+# `keera session list` rather than a guess from its opening prompt - see
 # docs/sessions.md. OpenCode is given no configuration here: an image that
 # adds it brings its own, and that decides whether it sends KEERA_SESSION.
 run_agent() {
@@ -62,7 +62,7 @@ run_agent() {
   fi
   if command -v opencode >/dev/null 2>&1; then
     log "running opencode on the task"
-    opencode run --model "${KEERA_MODEL:-}" "$KEERA_TASK"
+    opencode run ${KEERA_MODEL:+--model "$KEERA_MODEL"} "$KEERA_TASK"
     return
   fi
   die "no coding agent is on PATH. The base image installs Pi; an image built on \

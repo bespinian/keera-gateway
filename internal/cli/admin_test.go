@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/bespinian/keera-gateway/internal/catalog"
 	"github.com/bespinian/keera-gateway/internal/httpx"
@@ -1544,6 +1545,16 @@ func TestANegativeBudgetFlagIsLeftUnset(t *testing.T) {
 		}
 		if lim.BudgetMicros != nil {
 			t.Errorf("--budget %v set a budget of %d", amount, *lim.BudgetMicros)
+		}
+	}
+}
+
+// A cut never splits a character in two.
+func TestTruncatingKeepsWholeCharacters(t *testing.T) {
+	long := strings.Repeat("ä", 120)
+	for name, got := range map[string]string{"firstLine": firstLine(long), "oneLine": oneLine(long)} {
+		if !utf8.ValidString(got) || !strings.HasSuffix(got, "…") {
+			t.Errorf("%s cut %q badly", name, got)
 		}
 	}
 }

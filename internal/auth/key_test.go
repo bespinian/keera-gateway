@@ -21,6 +21,9 @@ func TestGenerateProducesDistinctRecognisableKeys(t *testing.T) {
 		}
 		seen[key] = true
 
+		if !WellFormed(key) {
+			t.Fatalf("key %q is not well formed", key)
+		}
 		if !bytes.Equal(hash, Hash(key)) {
 			t.Error("the stored hash does not verify against the key")
 		}
@@ -29,6 +32,27 @@ func TestGenerateProducesDistinctRecognisableKeys(t *testing.T) {
 		}
 		if strings.Contains(prefix, key[len(prefix):]) {
 			t.Error("the display prefix leaks part of the secret")
+		}
+	}
+}
+
+func TestWellFormedRefusesWhatGenerateCannotMake(t *testing.T) {
+	key, _, _, err := Generate()
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	for _, bad := range []string{
+		"",
+		"sk-live",
+		Prefix,
+		key[:len(key)-1],
+		key + "A",
+		"keera_pk_" + key[len(Prefix):],
+		key[:len(key)-1] + "=",
+		key[:len(key)-1] + " ",
+	} {
+		if WellFormed(bad) {
+			t.Errorf("WellFormed(%q) = true", bad)
 		}
 	}
 }

@@ -120,7 +120,12 @@ type Model struct {
 	// HasAPIKey tells the control panel a credential is stored, and nothing
 	// more about it.
 	HasAPIKey bool `json:"has_api_key,omitempty"`
-	Enabled   bool `json:"enabled"`
+	// Subscription says each caller's own Claude subscription pays. The
+	// gateway forwards the caller's sign-in and holds no credential of its
+	// own, and the prices only say what the request would cost on the API.
+	// See docs/subscriptions.md.
+	Subscription bool `json:"subscription,omitempty"`
+	Enabled      bool `json:"enabled"`
 }
 
 // Key names the model across every tenant: its organisation and its alias.
@@ -551,12 +556,48 @@ type Scope struct {
 	Period       Period
 }
 
+// KeyKind says what a key may reach.
+type KeyKind string
+
+// The kinds of key.
+const (
+	// KeyStandard reaches every model its guardrails allow.
+	KeyStandard KeyKind = "standard"
+	// KeySubscription reaches only subscription models. It sits in a settings
+	// file in plain text, so a copy must not spend the organisation's money.
+	KeySubscription KeyKind = "subscription"
+)
+
+// Valid reports whether k is a kind of key. Empty is not one.
+func (k KeyKind) Valid() bool { return k == KeyStandard || k == KeySubscription }
+
 // Key identifies the principal behind a request.
 type Key struct {
 	ID     string
 	OrgID  string
 	TeamID string
 	UserID string
+	Kind   KeyKind
+}
+
+// Subscription reports whether the key only reaches subscription models.
+func (k Key) Subscription() bool { return k.Kind == KeySubscription }
+
+// Reaches reports whether a key of this kind may call m at all, before its
+// guardrails are asked. A subscription model takes only a subscription key,
+// because only that key's requests carry the caller's sign-in.
+func (k Key) Reaches(m Model) bool { return k.Subscription() == m.Subscription }
+
+// PlanUsage is how much of a Claude plan's usage limit is used, as Anthropic
+// reports it on each answer. Utilisation is a fraction from 0 to 1.
+type PlanUsage struct {
+	FiveHour         *float64   `json:"five_hour,omitempty"`
+	FiveHourResetsAt *time.Time `json:"five_hour_resets_at,omitempty"`
+	SevenDay         *float64   `json:"seven_day,omitempty"`
+	SevenDayResetsAt *time.Time `json:"seven_day_resets_at,omitempty"`
+	// Status is allowed, allowed_warning or rejected.
+	Status    string    `json:"status,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Resolved is a key with its policy chain already combined, so the gateway
@@ -588,6 +629,10 @@ type Resolved struct {
 func (r *Resolved) AllowsModel(alias string) bool {
 	return r.AllowedModels == nil || slices.Contains(r.AllowedModels, alias)
 }
+
+// MayUse reports whether the key may call m: its kind reaches m, and its
+// guardrails allow it.
+func (r *Resolved) MayUse(m Model) bool { return r.Key.Reaches(m) && r.AllowsModel(m.Alias) }
 
 // Resolve combines the guardrails of a key's org, team and the key itself.
 //

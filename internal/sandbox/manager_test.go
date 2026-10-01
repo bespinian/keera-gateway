@@ -101,3 +101,19 @@ func TestACallerCannotSetAKeeraVariable(t *testing.T) {
 		t.Errorf("err = %v, want a refusal", err)
 	}
 }
+
+// A sandbox key is a standard key. Its agent must not be offered a
+// subscription model, which the gateway refuses that key.
+func TestASandboxIsNotOfferedASubscriptionModel(t *testing.T) {
+	resolved := policy.Resolve(policy.Key{OrgID: "org_1", Kind: policy.KeyStandard}, nil, nil, nil)
+	catalogue := []policy.Model{
+		{Alias: "keera-code", Kind: policy.KindChat, Enabled: true},
+		{Alias: "claude", Kind: policy.KindChat, Enabled: true, Subscription: true},
+		{Alias: "embed", Kind: policy.KindEmbedding, Enabled: true},
+		{Alias: "off", Kind: policy.KindChat},
+	}
+	got := chatModelsFor(resolved, catalogue)
+	if len(got) != 1 || got[0].Alias != "keera-code" {
+		t.Errorf("offered %+v, want only keera-code", got)
+	}
+}

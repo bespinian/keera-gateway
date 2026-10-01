@@ -5,14 +5,15 @@ grows. Three tables grow with traffic.
 
 ## What grows
 
-| Table           | One row per                                                      | Grows with        |
-| --------------- | ---------------------------------------------------------------- | ----------------- |
-| `usage_events`  | inference request                                                | traffic           |
-| `filter_runs`   | filter run, per request                                          | traffic × filters |
-| `tool_calls`    | MCP tool call                                                    | traffic           |
-| `audit_log`     | administrative action                                            | people, slowly    |
-| `sandboxes`     | sandbox lent out                                                 | agent tasks       |
-| everything else | org, team, key, model, filter, router, MCP server, sandbox class | customers         |
+| Table           | One row per                                                 | Grows with             |
+| --------------- | ----------------------------------------------------------- | ---------------------- |
+| `usage_events`  | inference request                                           | traffic                |
+| `filter_runs`   | filter run, per request                                     | traffic × filters      |
+| `tool_calls`    | MCP tool call                                               | traffic                |
+| `audit_log`     | administrative action                                       | people, slowly         |
+| `sandboxes`     | sandbox lent out                                            | agent tasks            |
+| `api_keys`      | key, including the one each sandbox gets                    | people and agent tasks |
+| everything else | org, team, model, filter, router, MCP server, sandbox class | customers              |
 
 `usage_events` is the busiest table. It is the request log, the report source,
 the session report and the billing record. Every completed request writes one
@@ -27,9 +28,9 @@ A row is mostly small integers and short ids, plus two variable parts:
 `session_key` adds seventeen characters to a chat request's row, plus one
 partial index over the rows that have one.
 
-**No prompt or completion is stored**, not even a fragment or a length. What a
-filter or router read, and what a session was about, is reduced to counts and
-hashes.
+**No prompt or completion text is stored**, only token counts and byte sizes.
+What a filter or router read, and what a session was about, is reduced to counts
+and hashes.
 
 ## Retention
 
@@ -54,10 +55,14 @@ What `KEERA_USAGE_RETENTION` covers:
   [mcp.md](mcp.md).
 - Closed `spend` windows. Nothing reads them: budgets check the open day and
   month, and reports aggregate the events directly.
-
-Retention never deletes `sandboxes`. A row stays after its sandbox ends,
-because what it cost and whose it was still matter. Agent sandboxes add one
-row per task.
+- `sandboxes` that ended before the cutoff: terminated ones, and agent
+  sandboxes that failed. A sandbox's row is its usage: the
+  sandbox report counts it by when it started, which is earlier still. Agent
+  sandboxes add one row per task, so without retention this table keeps
+  growing too.
+- `api_keys` revoked or expired before the cutoff, with the guardrails and
+  spend rows set on them. Every sandbox mints its own key, so these add up.
+  A key that a sandbox still names stays until that sandbox goes.
 
 Keep in mind:
 
@@ -77,8 +82,8 @@ deleted.
 Reports aggregate `usage_events` by time and organisation. The table has ten
 indexes, and each one adds to the size on disk:
 
-- `(ts)`, `(org_id, ts)`, `(team_id, ts)`, `(key_id, ts)`, `(alias, ts)` and
-  `(user_id, ts)`, for the reports
+- `(ts)`, `(org_id, ts)`, `(team_id, ts)`, `(key_id, ts)`, `(org_id, alias, ts)`
+  and `(user_id, ts)`, for the reports
 - `(org_id, id DESC)`, for the live request log, and the same over failed rows
   only
 - `(org_id, router, ts DESC)` over the rows a router placed

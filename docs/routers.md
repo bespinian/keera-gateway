@@ -65,10 +65,15 @@ router can send a prompt. The instruction only affects which one it picks.
 
 Also:
 
-- A destination the organisation cannot serve - no such model, disabled, not a
-  chat model, no backend - is **left out of the choice**. `keera router check`
-  reports what was and was not offered.
+- A destination that does not exist or is not a chat model is refused with a
+  400 when the router is saved. One that cannot be served later - disabled, or
+  no backend - is **left out of the choice**. `keera router check` reports what
+  was and was not offered.
 - The **fallback must be one of the destinations**.
+- A [subscription model](subscriptions.md#what-a-subscription-key-can-do) cannot
+  be the deciding model or a destination (a 400 when saved). Turning on
+  `subscription` for a model a router uses is refused with a 409. A
+  subscription key reaches no router.
 
 ## Descriptions are what a router decides on
 

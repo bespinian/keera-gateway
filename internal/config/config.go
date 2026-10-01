@@ -58,8 +58,9 @@ type Config struct {
 	SpendRefresh          time.Duration
 
 	// UsageRetention and AuditRetention are how long usage events and audit
-	// entries are kept. Zero, the default, keeps them for ever, because billing
-	// and audits depend on them. See docs/sizing.md.
+	// entries are kept. Ended sandboxes and keys go with usage. Zero, the
+	// default, keeps them for ever, because billing and audits depend on them.
+	// See docs/sizing.md.
 	UsageRetention time.Duration
 	AuditRetention time.Duration
 

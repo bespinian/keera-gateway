@@ -205,8 +205,13 @@ func (p *Podman) Status(ctx context.Context, ref Ref) (Status, error) {
 		return Status{}, podmanNotFound(err)
 	}
 	var items []podmanInspect
-	if err := json.Unmarshal(out, &items); err != nil || len(items) == 0 {
+	if err := json.Unmarshal(out, &items); err != nil {
 		return Status{}, fmt.Errorf("reading the state of sandbox %s: %w", ref.Name, err)
+	}
+	// An empty list means podman found no such container, the same as its
+	// "no such container" error.
+	if len(items) == 0 {
+		return Status{}, ErrNotFound
 	}
 	in := items[0]
 

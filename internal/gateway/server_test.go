@@ -1345,6 +1345,53 @@ func TestAFailedCallRecordsWhatTheBackendSaid(t *testing.T) {
 	}
 }
 
+func TestAnAnswerOverTheSizeLimitIsAFailureNotACut(t *testing.T) {
+	// Cut JSON under the backend's 200 breaks the client and loses the usage
+	// record, so an answer too large to hold is a 502 the row explains.
+	big := `{"choices":[{"message":{"content":"` + strings.Repeat("x", 200) + `"}}],` +
+		`"usage":{"prompt_tokens":1,"completion_tokens":1}}`
+	for _, tc := range []struct{ name, provider, path, body string }{
+		{"translated", "", "/v1/chat/completions",
+			`{"model":"keera-frontier","messages":[{"role":"user","content":"hi"}]}`},
+		{"native", "anthropic", "/v1/messages",
+			`{"model":"keera-frontier","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _ := providerHarness(t, tc.provider, "served-name", jsonBackend(big), nil)
+			h.srv.opts.MaxResponseBytes = 100
+
+			resp := h.post(t, tc.path, tc.body)
+			if resp.StatusCode != http.StatusBadGateway {
+				t.Fatalf("status = %d, want 502", resp.StatusCode)
+			}
+			raw, _ := io.ReadAll(resp.Body)
+			if strings.Contains(string(raw), "xxx") {
+				t.Errorf("part of the answer was passed on: %s", raw)
+			}
+			ev := h.sink.last(t)
+			if ev.Status != http.StatusBadGateway ||
+				!strings.Contains(ev.Error, "larger than the limit of 100 bytes") {
+				t.Errorf("recorded %d %q, want 502 and the reason", ev.Status, ev.Error)
+			}
+		})
+	}
+}
+
+func TestAnAnswerExactlyAtTheSizeLimitIsServed(t *testing.T) {
+	answer := `{"choices":[{"message":{"content":"hi"}}],` +
+		`"usage":{"prompt_tokens":1,"completion_tokens":1}}`
+	h := newHarnessWith(t, jsonBackend(answer), nil, nil,
+		Options{MaxResponseBytes: int64(len(answer))})
+
+	resp := h.post(t, "/v1/chat/completions", `{"model":"keera-code","messages":[]}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if ev := h.sink.last(t); ev.OutputTokens != 1 {
+		t.Errorf("output tokens = %d, want the usage record read", ev.OutputTokens)
+	}
+}
+
 func TestAnUnreachableBackendRecordsWhichOneAndWhy(t *testing.T) {
 	// What the client is told stays deliberately vague - the deployment's own
 	// topology is none of its business. Whoever has to fix it needs exactly the
@@ -1590,5 +1637,32 @@ func TestAMissingModelIsRefusedAlikeOnEveryAPI(t *testing.T) {
 		if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(raw), "'model' field is required") {
 			t.Errorf("%s: status = %d: %s", path, resp.StatusCode, raw)
 		}
+	}
+}
+
+// roundTripFunc lets a test see the request the gateway hands its transport.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestUpstreamRequestsCanBeResentOnAStaleConnection(t *testing.T) {
+	// Go resends a request on a keep-alive connection the backend has just
+	// closed only when it can read the body again. Without GetBody the
+	// developer gets a 502 for a request the backend never saw.
+	h := newHarness(t, jsonBackend(`{"id":"1","choices":[{"message":{"content":"hi"}}],`+
+		`"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`), nil, nil)
+	next := h.srv.client.Transport
+	resendable := make(chan bool, 1)
+	h.srv.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		resendable <- r.GetBody != nil
+		return next.RoundTrip(r)
+	})
+
+	resp := h.post(t, "/v1/chat/completions", `{"model":"keera-code","messages":[]}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if !<-resendable {
+		t.Error("the upstream request has no GetBody, so Go cannot resend it")
 	}
 }

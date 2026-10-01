@@ -46,6 +46,9 @@ func (s *Server) refuse(c *call, ref refusal) {
 	// one and what it was set to.
 	ev.Error = ref.msg
 	ev.Latency = time.Since(c.tr.start)
+	// Set here, not by the callers, so no refusal after a router or a filter
+	// drops what they already charged to the budgets.
+	ev.CostMicros = c.hookMicros()
 	// The step the request was stopped in is closed and named by the code.
 	ev.Spans = c.tr.steps(ref.code)
 	s.sink.Record(ev)

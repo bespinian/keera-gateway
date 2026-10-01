@@ -52,14 +52,14 @@ new organisations start with, which are files.
 
 ### Worth setting on any real deployment
 
-| Variable                | Default     | What it is                                                                                                                                                              |
-| ----------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `KEERA_METRICS_TOKEN`   | unset       | Reads `/metrics` and nothing else. Must differ from the operator key.                                                                                                   |
-| `KEERA_PUBLIC_URL`      | Host header | The gateway's address as a browser sees it. Used for the sign-out redirect, by **Connect a client**, and for the panel link in a refusal. Unset, a refusal has no link. |
-| `KEERA_MODELS_FILE`     | unset       | The models each new organisation starts with. Existing organisations are not changed.                                                                                   |
-| `KEERA_USAGE_RETENTION` | for ever    | How long usage events are kept. See [sizing.md](sizing.md).                                                                                                             |
-| `KEERA_AUDIT_RETENTION` | for ever    | How long audit entries are kept.                                                                                                                                        |
-| `KEERA_CURRENCY`        | `CHF`       | The label on every money figure. Amounts are stored as integer micro-units.                                                                                             |
+| Variable                | Default     | What it is                                                                                                                                                                                            |
+| ----------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `KEERA_METRICS_TOKEN`   | unset       | Reads `/metrics` and nothing else. Must differ from the operator key.                                                                                                                                 |
+| `KEERA_PUBLIC_URL`      | Host header | The gateway's address as a browser sees it. Used for the sign-out redirect, by **Connect a client**, and for the panel link in a refusal. Unset, a refusal has no link. Required with single sign-on. |
+| `KEERA_MODELS_FILE`     | unset       | The models each new organisation starts with. Existing organisations are not changed.                                                                                                                 |
+| `KEERA_USAGE_RETENTION` | for ever    | How long usage events, ended sandboxes and ended keys are kept. See [sizing.md](sizing.md).                                                                                                           |
+| `KEERA_AUDIT_RETENTION` | for ever    | How long audit entries are kept.                                                                                                                                                                      |
+| `KEERA_CURRENCY`        | `CHF`       | The label on every money figure. Amounts are stored as integer micro-units.                                                                                                                           |
 
 ### Everything else
 
@@ -88,7 +88,9 @@ Sizes are a plain number of bytes. Durations take `h`, `m` and `s`. On/off
 settings take `true`/`false`, `yes`/`no`, `on`/`off` or `1`/`0`. A number,
 duration or on/off value that cannot be read, such as `64MB`, `365d` or
 `enabled`, is ignored and the default is used. So is a size or count of zero or
-less.
+less, and a zero or negative `KEERA_CACHE_TTL`, `KEERA_SPEND_REFRESH` or
+`KEERA_UPSTREAM_HEADER_TIMEOUT`. For retention and `KEERA_SANDBOX_IDLE_SUSPEND`,
+`0` means off and a negative value is refused.
 
 These stop the start instead, with a message that names the setting: a
 `KEERA_REDIS_URL` that is not a Redis URL, a `KEERA_SANDBOX_DRIVER` it does
@@ -366,16 +368,16 @@ one generation per model, so only the organisation's administrators can run it.
 A failing check exits non-zero, so `keera doctor` can be the last step of an
 install script.
 
-| Symptom                                                | Where to look                                                                                                                                                                                |
-| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Gateway exits at once with a message about a variable  | A required setting is missing or too short. The message names it.                                                                                                                            |
-| Every request comes back 404 from the backend          | `backend_model` does not match what the backend serves the model as - vLLM's `--served-model-name`, llama.cpp's `--alias`.                                                                   |
-| Long prompts fail with a 400 from the backend          | `max_context` on the model does not match the backend's window. They have to move together.                                                                                                  |
-| A filter or router refuses long conversations with 413 | `max_context` on that filter's or router's model is too small for the traffic. See [filters.md](filters.md).                                                                                 |
-| The agent answers in prose and never edits a file      | Tool calls come back as text. Run `keera model check`. On the CPU tier this is expected.                                                                                                     |
-| The panel shows no sign-on button                      | Both an issuer and a client ID are needed under each name in `KEERA_OIDC_PROVIDERS`. Naming any provider also needs `KEERA_PUBLIC_URL`, or the gateway does not start. See [sso.md](sso.md). |
-| A rate limit admits more than it is set to             | The buckets are per replica unless `KEERA_REDIS_URL` is set. If it is set, check `keera_ratelimit_fallback_total`.                                                                           |
-| Streaming arrives all at once                          | Something in front is buffering the response.                                                                                                                                                |
-| A developer says their agent stopped this afternoon    | The **Requests** screen filtered to their key, or their **My access** screen. Each refusal is logged with the message the client got.                                                        |
-| A limit is set and does not seem to apply              | `keera guardrail effective <scope> <id>`. Guardrails nest and the tightest level wins. The command shows which level each value came from.                                                   |
-| `keera` acts on a gateway you did not mean             | No deployment was set, so it used the default, `https://gateway.keera.ch`. Run `keera login --url <your deployment>` or set `KEERA_CONTROL_URL`. `keera whoami` shows why.                   |
+| Symptom                                               | Where to look                                                                                                                                                                                                                                  |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gateway exits at once with a message about a variable | A required setting is missing or too short. The message names it.                                                                                                                                                                              |
+| Every request comes back 404 from the backend         | `backend_model` does not match what the backend serves the model as - vLLM's `--served-model-name`, llama.cpp's `--alias`.                                                                                                                     |
+| Long prompts fail with a 400 from the backend         | `max_context` on the model does not match the backend's window. They have to move together.                                                                                                                                                    |
+| A filter refuses long conversations with 413          | `max_context` on that filter's model is too small for the traffic. A router whose model is too small cannot decide instead: it uses its fallback or answers 503 `router_undecided`. See [filters.md](filters.md) and [routers.md](routers.md). |
+| The agent answers in prose and never edits a file     | Tool calls come back as text. Run `keera model check`. On the CPU tier this is expected.                                                                                                                                                       |
+| The panel shows no sign-on button                     | Both an issuer and a client ID are needed under each name in `KEERA_OIDC_PROVIDERS`. Naming any provider also needs `KEERA_PUBLIC_URL`, or the gateway does not start. See [sso.md](sso.md).                                                   |
+| A rate limit admits more than it is set to            | The buckets are per replica unless `KEERA_REDIS_URL` is set. If it is set, check `keera_ratelimit_fallback_total`.                                                                                                                             |
+| Streaming arrives all at once                         | Something in front is buffering the response.                                                                                                                                                                                                  |
+| A developer says their agent stopped this afternoon   | The **Requests** screen filtered to their key, or their **My access** screen. Each refusal is logged with the message the client got.                                                                                                          |
+| A limit is set and does not seem to apply             | `keera guardrail effective <scope> <id>`. Guardrails nest and the tightest level wins. The command shows which level each value came from.                                                                                                     |
+| `keera` acts on a gateway you did not mean            | No deployment was set, so it used the default, `https://gateway.keera.ch`. Run `keera login --url <your deployment>` or set `KEERA_CONTROL_URL`. `keera whoami` shows why.                                                                     |

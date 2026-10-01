@@ -25,6 +25,30 @@ func (anthropicDialect) provider() string { return "anthropic" }
 
 func (anthropicDialect) path() string { return "/messages" }
 
+func (anthropicDialect) opening(b *body) (json.RawMessage, bool) {
+	raw, _ := b.value("messages")
+	var (
+		opening json.RawMessage
+		found   bool
+	)
+	eachElement(raw, func(elem []byte) bool {
+		var m struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		}
+		if json.Unmarshal(elem, &m) != nil {
+			return true
+		}
+		msgs, err := convertMessage(m.Role, m.Content)
+		if err != nil {
+			return true
+		}
+		opening, found = openingOf(msgs)
+		return !found
+	})
+	return opening, found
+}
+
 // text is the system prompt, and the text and tool results of every turn.
 // Thinking blocks are left alone: they are signed, and one that was changed is
 // refused.
@@ -73,8 +97,13 @@ func addTextBlock(d *treeDoc, block map[string]any) {
 // addSystem puts the guardrail's prompt first, as a block of its own, so the
 // client's blocks keep their cache markers.
 func (anthropicDialect) addSystem(b *body, prompt string) error {
-	first := map[string]any{"type": "text", "text": prompt}
-	blocks := []any{first}
+	return setSystem(b, prompt, true)
+}
+
+// setSystem adds the guardrail's prompt as a text block of its own, before the
+// client's system blocks or after them.
+func setSystem(b *body, prompt string, first bool) error {
+	var blocks []any
 	if raw, ok := b.value("system"); ok {
 		var s string
 		var rest []json.RawMessage
@@ -89,6 +118,12 @@ func (anthropicDialect) addSystem(b *body, prompt string) error {
 			return errors.New("the 'system' field must be a string or an array of text blocks; " +
 				"a guardrail on this key adds a system prompt to every request")
 		}
+	}
+	block := map[string]any{"type": "text", "text": prompt}
+	if first {
+		blocks = append([]any{block}, blocks...)
+	} else {
+		blocks = append(blocks, block)
 	}
 	encoded, err := json.Marshal(blocks)
 	if err != nil {
@@ -307,8 +342,8 @@ func (s *Server) mayCall(res *policy.Resolved, alias string) bool {
 		return false
 	}
 	if m, found := s.src.Model(res.Key.OrgID, alias); found {
-		return m.Enabled && m.Kind == policy.KindChat
+		return m.Enabled && m.Kind == policy.KindChat && res.Key.Reaches(m)
 	}
 	_, routed := s.src.Router(res.Key.OrgID, alias)
-	return routed
+	return routed && !res.Key.Subscription()
 }

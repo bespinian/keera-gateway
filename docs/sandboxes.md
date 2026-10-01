@@ -31,7 +31,7 @@ so a sandbox and its task can be read side by side.
 
 |                  | Engineer                                               | Agent                              |
 | ---------------- | ------------------------------------------------------ | ---------------------------------- |
-| Default lifetime | the class's, typically 8h                              | the class's, typically 1h          |
+| Default lifetime | the class's; 4h if it sets none                        | the class's; 4h if it sets none    |
 | When it expires  | suspended, key revoked, resumable                      | terminated                         |
 | When it is idle  | suspended after `IDLE_SUSPEND` with no connection open | never - it has nothing to wait for |
 | Session header   | not set                                                | `X-Keera-Session: <sandbox id>`    |
@@ -85,9 +85,10 @@ every read.
 In Keera the agent runs _inside_.
 `keera sandbox agent <name> --class … --repo … --task …` starts a machine,
 checks out the repository, runs the image's coding agent on the task (Pi in the
-base image), and pushes a branch. Only that branch leaves. When the agent exits
-cleanly, the sandbox is terminated. When it fails, its machine is removed too,
-and the sandbox is marked failed with the reason.
+base image), and pushes a branch. Where egress is enforced, only that branch
+leaves; see [What is actually enforced](#what-is-actually-enforced). When the
+agent exits cleanly, the sandbox is terminated. When it fails, its machine is
+removed too, and the sandbox is marked failed with the reason.
 
 ## Isolation
 
@@ -362,6 +363,9 @@ sandbox stops holding compute, not at the next sweep.
 If the gateway was down, the time it could not observe is still charged,
 because the sandbox was running.
 
+Ended sandboxes are deleted after `KEERA_USAGE_RETENTION`, so `--since` reaches
+back no further than that.
+
 ## Code in, work out
 
 **In.** At creation the gateway mints a credential for the sandbox: one
@@ -437,7 +441,8 @@ Setting up GitLab: create a token with the `api` scope for a user, group or
 service account that is a Maintainer of those projects. Project access tokens
 need GitLab Premium on GitLab.com; self-managed GitLab has them on every tier.
 
-**Out.** Push a branch. For an agent sandbox that is the only egress. The agent
+**Out.** Push a branch. For an agent sandbox that is the only egress, where
+egress is [enforced](#what-is-actually-enforced). The agent
 runner never writes to a default branch: its output is a proposal, and a person
 opens it.
 
@@ -468,8 +473,8 @@ configuration. So a deployment that turns warm pools off still knows which
 sandboxes came from one.
 
 Pools do not outlive their class. The sweep deletes the pool and template of a
-class the organisation removed, and a gateway started with warm pools off
-deletes every pool it finds. Both need `list` on templates and pools.
+class the organisation removed or set back to `warm: 0`, and a gateway started
+with warm pools off deletes every pool it finds. Both need `list` on templates and pools.
 
 ## The two drivers
 

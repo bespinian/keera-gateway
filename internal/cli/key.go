@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/id"
+	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
@@ -25,7 +26,9 @@ type keyRun struct {
 	user    string
 	alias   string
 	expires string
-	asJSON  bool
+	// subscription issues a key for Claude Code signed in to a Claude plan.
+	subscription bool
+	asJSON       bool
 }
 
 // createdKey is a new key as the control API returns it, secret included.
@@ -43,6 +46,8 @@ func keyCmd(ctx context.Context, args []string) error {
 	fs.StringVar(&r.user, "user", "", "the person this key belongs to, by email or id")
 	fs.StringVar(&r.alias, "alias", "", "what this key is called; what it is for, in one label")
 	fs.StringVar(&r.expires, "expires", "", "lifetime, e.g. 720h")
+	fs.BoolVar(&r.subscription, "subscription", false,
+		"a key that reaches only subscription models, for Claude Code signed in to a Claude plan")
 	fs.BoolVar(&r.asJSON, "json", false, jsonUsage)
 
 	fs.Usage = func() { _ = printHelp(fs, "key", sub) }
@@ -104,6 +109,9 @@ func (r *keyRun) create(ctx context.Context) error {
 	if r.expires != "" {
 		req["expires_in"] = r.expires
 	}
+	if r.subscription {
+		req["kind"] = string(policy.KeySubscription)
+	}
 	var created createdKey
 	if err := r.c.do(ctx, "POST", "/v1/keys", req, &created); err != nil {
 		return err
@@ -139,16 +147,41 @@ func (r *keyRun) list(ctx context.Context) error {
 	}
 	return out(r.asJSON, keys, func(w *table) {
 		// Last use decides whether a key is safe to revoke, so it is a column.
-		w.header("ID\tALIAS\tPREFIX\tTEAM\tSTATE\tLAST USED")
+		w.header("ID\tALIAS\tPREFIX\tKIND\tTEAM\tSTATE\tLAST USED\tCLAUDE PLAN USED")
 		for _, k := range keys {
 			last := "never"
 			if k.LastUsedAt != nil {
 				last = k.LastUsedAt.Format(time.DateOnly)
 			}
-			_, _ = fmt.Fprintf(w, "%s\t%s\t%s…\t%s\t%s\t%s\n",
-				k.ID, k.Alias, k.Prefix, k.TeamID, statusWord(keyState(k)), statusWord(last))
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s…\t%s\t%s\t%s\t%s\t%s\n",
+				k.ID, k.Alias, k.Prefix, dash(string(k.Kind)), dash(k.TeamID),
+				statusWord(keyState(k)), statusWord(last), planText(k.Plan))
 		}
 	})
+}
+
+// planText is how much of a Claude plan a subscription key's holder has used,
+// in each of the plan's two windows.
+func planText(p *policy.PlanUsage) string {
+	if p == nil {
+		return "-"
+	}
+	var parts []string
+	for _, w := range []struct {
+		name string
+		used *float64
+	}{{"5h", p.FiveHour}, {"7d", p.SevenDay}} {
+		if w.used != nil {
+			parts = append(parts, fmt.Sprintf("%s %.0f%%", w.name, *w.used*100))
+		}
+	}
+	if p.Status == "rejected" {
+		parts = append(parts, "limit reached")
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, " · ")
 }
 
 func keyState(k store.KeySummary) string {

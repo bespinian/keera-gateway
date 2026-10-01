@@ -63,7 +63,7 @@ func sandboxCmd(ctx context.Context, args []string) error {
 	fs.StringVar(&r.org, "org", "", orgUsage)
 	fs.StringVar(&r.team, "team", "", "team the sandbox belongs to, by name or id; its key is scoped to that "+
 		"team, so the budget, the rate limit and the allowed models are the team's")
-	fs.StringVar(&r.class, "class", "", "which machine to ask for; `keera sandbox classes` lists them")
+	fs.StringVar(&r.class, "class", "", "which machine to ask for; 'keera sandbox classes' lists them")
 	fs.StringVar(&r.purpose, "purpose", "", "'engineer' - a machine you work in - or 'agent' - one task's")
 	fs.DurationVar(&r.ttl, "ttl", 0, "how long it lives; the class's default if not given")
 	fs.StringVar(&r.repo, "repo", "", "repository to check out into it")

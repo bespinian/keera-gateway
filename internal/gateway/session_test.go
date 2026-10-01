@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,7 +23,7 @@ func keyFor(t *testing.T, keyID, body string, kind policy.Kind, headers ...strin
 	for i := 0; i+1 < len(headers); i += 2 {
 		r.Header.Set(headers[i], headers[i+1])
 	}
-	return sessionKey(r, keyID, b, kind)
+	return sessionKey(r, keyID, kind, b.firstUserMessage)
 }
 
 // stated is keyFor with the gateway's own header set, which is what most of
@@ -291,5 +292,93 @@ func TestTheTwoChatSurfacesAgreeOnTheSession(t *testing.T) {
 	if openAI == "" || anthropic != openAI {
 		t.Errorf("the same conversation is session %q on one surface and %q on the "+
 			"other", openAI, anthropic)
+	}
+}
+
+func TestTheOpeningOfAnUntranslatedBodyIsTheTranslations(t *testing.T) {
+	// A request in the client's own API is not translated unless it has to
+	// be, but its session key must be the one the translation would give: the
+	// translation drops what changes between turns, and keys must not change
+	// with the destination.
+	cases := []struct {
+		name string
+		surf surface
+		body string
+	}{
+		{"messages, string content", messagesSurface,
+			`{"model":"m","system":"be brief","messages":[{"role":"user","content":"fix the build"}]}`},
+		{"messages, blocks with a cache marker", messagesSurface,
+			`{"model":"m","messages":[{"role":"user","content":[{"type":"text","text":"fix <the> build",` +
+				`"cache_control":{"type":"ephemeral"}},{"type":"text","text":"and the tests"}]}]}`},
+		{"messages, an assistant turn first", messagesSurface,
+			`{"model":"m","messages":[{"role":"assistant","content":"hello"},` +
+				`{"role":"user","content":"fix the build"}]}`},
+		{"messages, a tool result before the text", messagesSurface,
+			`{"model":"m","messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1",` +
+				`"content":"ok"},{"type":"text","text":"go on"}]}]}`},
+		{"messages, a tool result alone", messagesSurface,
+			`{"model":"m","messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1",` +
+				`"content":"ok"}]},{"role":"assistant","content":"done"},{"role":"user","content":"next"}]}`},
+		{"messages, an image", messagesSurface,
+			`{"model":"m","messages":[{"role":"user","content":[{"type":"image","source":{"type":"base64",` +
+				`"media_type":"image/png","data":"iVBO"}},{"type":"text","text":"what is this"}]}]}`},
+		{"messages, none from the user", messagesSurface,
+			`{"model":"m","messages":[{"role":"assistant","content":"hello"}]}`},
+		{"responses, string input", responsesSurface,
+			`{"model":"m","instructions":"be brief","input":"fix the build"}`},
+		{"responses, items", responsesSurface,
+			`{"model":"m","input":[{"role":"developer","content":"be brief"},` +
+				`{"type":"message","role":"user","content":[{"type":"input_text","text":"fix it"},` +
+				`{"type":"input_text","text":"now"}]}]}`},
+		{"responses, an image", responsesSurface,
+			`{"model":"m","input":[{"role":"user","content":[{"type":"input_text","text":"what is this"},` +
+				`{"type":"input_image","image_url":"data:image/png;base64,iVBO"}]}]}`},
+		{"responses, a tool output first", responsesSurface,
+			`{"model":"m","input":[{"type":"function_call","call_id":"c1","name":"ls","arguments":"{}"},` +
+				`{"type":"function_call_output","call_id":"c1","output":"a.go"},` +
+				`{"role":"user","content":"go on"}]}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			native, err := parseBody([]byte(tc.body))
+			if err != nil {
+				t.Fatalf("parseBody: %v", err)
+			}
+			raw, err := tc.surf.shape.decode([]byte(tc.body))
+			if err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			translated, err := parseBody(raw)
+			if err != nil {
+				t.Fatalf("parseBody(translated): %v", err)
+			}
+			want, wantOK := translated.firstUserMessage()
+			got, gotOK := tc.surf.dialect.opening(native)
+			if gotOK != wantOK || string(got) != string(want) {
+				t.Errorf("opening = %s, %v; the translation's is %s, %v", got, gotOK, want, wantOK)
+			}
+		})
+	}
+}
+
+func TestACacheMarkerMovingOnDoesNotSplitAClaudeCodeSession(t *testing.T) {
+	// Claude Code marks the newest message for caching. On the first turn that
+	// is the opening prompt; on the second it is not any more.
+	first := `{"model":"m","messages":[{"role":"user","content":[{"type":"text","text":"fix the build",` +
+		`"cache_control":{"type":"ephemeral"}}]}]}`
+	second := `{"model":"m","messages":[{"role":"user","content":[{"type":"text","text":"fix the build"}]},` +
+		`{"role":"assistant","content":"on it"},{"role":"user","content":[{"type":"text","text":"and",` +
+		`"cache_control":{"type":"ephemeral"}}]}]}`
+	key := func(body string) string {
+		b, err := parseBody([]byte(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+		return sessionKey(r, "key_1", policy.KindChat,
+			func() (json.RawMessage, bool) { return anthropicDialect{}.opening(b) })
+	}
+	if a, b := key(first), key(second); a == "" || a != b {
+		t.Errorf("the two turns have keys %q and %q, want one", a, b)
 	}
 }

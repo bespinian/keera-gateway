@@ -187,14 +187,31 @@ func (s *Server) Handler() http.Handler {
 
 // authenticate resolves the presented key, answering in the shape the caller's
 // surface speaks.
+//
+// The key is read from KeyHeader first, because then Authorization carries the
+// caller's Claude sign-in instead. See subscription.go.
 func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, sh shape) (*policy.Resolved, bool) {
-	presented, err := auth.FromHeader(r.Header.Get("Authorization"))
-	if err != nil {
-		// Some clients send the key as X-Api-Key instead of a bearer token,
-		// depending on a setting. Reading both saves a 401 that is hard to
-		// explain from inside an editor.
-		if k := strings.TrimSpace(r.Header.Get("X-Api-Key")); k != "" {
-			presented, err = k, nil
+	presented := strings.TrimSpace(r.Header.Get(KeyHeader))
+	inHeader := presented != ""
+	var err error
+	switch {
+	case inHeader:
+	case claudeSignIn(r):
+		// Claude Code signed in to a Claude plan, and pointed here without a
+		// Keera key: the administrator set the address for everyone.
+		sh.writeError(w, http.StatusUnauthorized, "authentication_error", "missing_api_key",
+			"this request carries a Claude sign-in but no Keera key; to use Claude Code "+
+				"through Keera Gateway, "+connectHint)
+		return nil, false
+	default:
+		presented, err = auth.FromHeader(r.Header.Get("Authorization"))
+		if err != nil {
+			// Some clients send the key as X-Api-Key instead of a bearer token,
+			// depending on a setting. Reading both saves a 401 that is hard to
+			// explain from inside an editor.
+			if k := strings.TrimSpace(r.Header.Get("X-Api-Key")); k != "" {
+				presented, err = k, nil
+			}
 		}
 	}
 	if err != nil {
@@ -205,6 +222,14 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, sh shape) 
 	}
 	res, err := s.src.Resolve(r.Context(), presented)
 	switch {
+	case err == nil && res.Key.Subscription() && !inHeader:
+		// Without the header, Authorization holds this key, so there is no
+		// Claude sign-in to forward.
+		sh.writeError(w, http.StatusUnauthorized, "authentication_error", "subscription_key",
+			"this is a subscription key, for Claude Code signed in to a Claude plan; it goes "+
+				"in the "+KeyHeader+" header, and the sign-in in Authorization. To set Claude "+
+				"Code up, "+connectHint)
+		return nil, false
 	case err == nil:
 		return res, true
 	case errors.Is(err, policy.ErrUnknownKey):

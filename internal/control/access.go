@@ -135,7 +135,7 @@ func (s *Server) accessKeys(r *http.Request, orgID, orgName string, keys []store
 		}
 		own := k.Limits
 		resolved := policy.Resolve(
-			policy.Key{ID: k.ID, OrgID: k.OrgID, TeamID: k.TeamID, UserID: k.UserID},
+			policy.Key{ID: k.ID, OrgID: k.OrgID, TeamID: k.TeamID, UserID: k.UserID, Kind: k.Kind},
 			orgLimits, teamLimits[k.TeamID], &own)
 
 		shown = append(shown, accessKey{
@@ -238,12 +238,12 @@ func (s *Server) scopeStates(res *policy.Resolved, orgName string,
 	return out
 }
 
-// allowedModels is what a key may actually call: the enabled models its
-// allow-list permits.
+// allowedModels is what a key may actually call: the enabled models its kind
+// reaches and its allow-list permits.
 func allowedModels(res *policy.Resolved, models []policy.Model) []string {
 	out := []string{}
 	for _, m := range models {
-		if m.Enabled && res.AllowsModel(m.Alias) {
+		if m.Enabled && res.MayUse(m) {
 			out = append(out, m.Alias)
 		}
 	}

@@ -82,20 +82,23 @@ type SeriesPoint struct {
 // One team's, key's or model's own screen uses it too, over fewer rows.
 // Computing both the same way keeps the screens from disagreeing.
 type Overview struct {
-	From         time.Time     `json:"from"`
-	To           time.Time     `json:"to"`
-	Bucket       string        `json:"bucket"`
-	Requests     int64         `json:"requests"`
-	InputTokens  int64         `json:"input_tokens"`
-	OutputTokens int64         `json:"output_tokens"`
-	CostMicros   int64         `json:"cost_micros"`
-	Refused      int64         `json:"refused"`
-	Failed       int64         `json:"failed"`
-	TTFTMedianMS int64         `json:"ttft_median_ms"`
-	TTFTP95MS    int64         `json:"ttft_p95_ms"`
-	Series       []SeriesPoint `json:"series"`
-	TopTeams     []UsageBucket `json:"top_teams"`
-	TopModels    []UsageBucket `json:"top_models"`
+	From         time.Time `json:"from"`
+	To           time.Time `json:"to"`
+	Bucket       string    `json:"bucket"`
+	Requests     int64     `json:"requests"`
+	InputTokens  int64     `json:"input_tokens"`
+	OutputTokens int64     `json:"output_tokens"`
+	CostMicros   int64     `json:"cost_micros"`
+	// SubscriptionMicros is what Claude subscriptions paid for, at API prices.
+	// It is not part of CostMicros.
+	SubscriptionMicros int64         `json:"subscription_micros"`
+	Refused            int64         `json:"refused"`
+	Failed             int64         `json:"failed"`
+	TTFTMedianMS       int64         `json:"ttft_median_ms"`
+	TTFTP95MS          int64         `json:"ttft_p95_ms"`
+	Series             []SeriesPoint `json:"series"`
+	TopTeams           []UsageBucket `json:"top_teams"`
+	TopModels          []UsageBucket `json:"top_models"`
 	// TopKeys is only filled in for a scoped overview, where "which key is
 	// doing this" is the next question.
 	TopKeys []UsageBucket `json:"top_keys,omitempty"`
@@ -119,7 +122,7 @@ func (s *Store) Overview(ctx context.Context, orgID string, from, to time.Time,
 	err := s.pool.QueryRow(ctx, `
 		SELECT count(*),
 		       COALESCE(sum(input_tokens), 0), COALESCE(sum(output_tokens), 0),
-		       COALESCE(sum(cost_micros), 0),
+		       COALESCE(sum(cost_micros), 0), COALESCE(sum(list_cost_micros), 0),
 		       count(*) FILTER (WHERE status BETWEEN 400 AND 499),
 		       count(*) FILTER (WHERE status >= 500),
 		       COALESCE(round(percentile_cont(0.5) WITHIN GROUP (ORDER BY ttft_ms)
@@ -129,7 +132,7 @@ func (s *Store) Overview(ctx context.Context, orgID string, from, to time.Time,
 		FROM usage_events
 		WHERE ts >= $1 AND ts < $2 AND ($3 = '' OR org_id = $3)`+sc.narrow("", 3),
 		append([]any{from, to, orgID}, sc.args()...)...,
-	).Scan(&o.Requests, &o.InputTokens, &o.OutputTokens, &o.CostMicros,
+	).Scan(&o.Requests, &o.InputTokens, &o.OutputTokens, &o.CostMicros, &o.SubscriptionMicros,
 		&o.Refused, &o.Failed, &o.TTFTMedianMS, &o.TTFTP95MS)
 	if err != nil {
 		return o, err
@@ -314,6 +317,11 @@ type KeySummary struct {
 	LastUsedAt  *time.Time    `json:"last_used_at,omitempty"`
 	Requests    int64         `json:"requests"`
 	SpendMicros int64         `json:"spend_micros"`
+	// SubscriptionMicros and Plan are for a subscription key: what its
+	// holder's Claude plan paid for, at API prices, and how much of the plan
+	// is used.
+	SubscriptionMicros int64             `json:"subscription_micros"`
+	Plan               *policy.PlanUsage `json:"plan,omitempty"`
 }
 
 // KeyQuery narrows a key listing. OrgID is required; the rest are optional.
@@ -332,13 +340,17 @@ func (s *Store) KeySummaries(ctx context.Context, q KeyQuery) ([]KeySummary, err
 		SELECT k.id, k.org_id, COALESCE(k.team_id,''), COALESCE(k.user_id,''),
 		       k.alias, k.prefix, k.created_at, k.expires_at, k.revoked_at,
 		       `+limitColumns+`,
-		       u.last_used_at, COALESCE(u.requests, 0), COALESCE(u.micros, 0)
+		       u.last_used_at, COALESCE(u.requests, 0), COALESCE(u.micros, 0),
+		       COALESCE(u.list_micros, 0), k.kind, pu.five_hour, pu.five_hour_resets_at,
+		       pu.seven_day, pu.seven_day_resets_at, pu.status, pu.updated_at
 		FROM api_keys k
 		LEFT JOIN guardrails p ON p.scope_type = 'key' AND p.scope_id = k.id
+		LEFT JOIN plan_usage pu ON pu.key_id = k.id
 		LEFT JOIN LATERAL (
 		    SELECT max(e.ts) AS last_used_at,
 		           count(*) FILTER (WHERE e.status < 400) AS requests,
-		           COALESCE(sum(e.cost_micros), 0) AS micros
+		           COALESCE(sum(e.cost_micros), 0) AS micros,
+		           COALESCE(sum(e.list_cost_micros), 0) AS list_micros
 		    FROM usage_events e WHERE e.key_id = k.id AND e.ts >= $3
 		) u ON true
 		WHERE k.org_id = $1 AND ($2 = '' OR k.team_id = $2) AND ($4 = '' OR k.user_id = $4)
@@ -351,17 +363,29 @@ func (s *Store) KeySummaries(ctx context.Context, q KeyQuery) ([]KeySummary, err
 
 func scanKeySummary(r row) (KeySummary, error) {
 	var (
-		k      KeySummary
-		period *string
+		k        KeySummary
+		period   *string
+		plan     policy.PlanUsage
+		status   *string
+		reported *time.Time
 	)
 	dest := []any{&k.ID, &k.OrgID, &k.TeamID, &k.UserID, &k.Alias, &k.Prefix,
 		&k.CreatedAt, &k.ExpiresAt, &k.RevokedAt}
 	dest = append(dest, limitTargets(&k.Limits, &period)...)
-	dest = append(dest, &k.LastUsedAt, &k.Requests, &k.SpendMicros)
+	dest = append(dest, &k.LastUsedAt, &k.Requests, &k.SpendMicros, &k.SubscriptionMicros,
+		&k.Kind, &plan.FiveHour, &plan.FiveHourResetsAt, &plan.SevenDay, &plan.SevenDayResetsAt,
+		&status, &reported)
 	if err := r.Scan(dest...); err != nil {
 		return KeySummary{}, err
 	}
 	k.Limits.BudgetPeriod = periodPtr(period)
+	if reported != nil {
+		plan.UpdatedAt = *reported
+		if status != nil {
+			plan.Status = *status
+		}
+		k.Plan = &plan
+	}
 	return k, nil
 }
 
@@ -392,7 +416,9 @@ func (s *Store) SetupState(ctx context.Context, orgID string) (Setup, error) {
 		(SELECT count(*) FROM api_keys WHERE ($1 = '' OR org_id = $1) AND revoked_at IS NULL),
 		(SELECT count(*) FROM models WHERE enabled AND ($1 = '' OR org_id = $1)),
 		(SELECT count(*) FROM users  WHERE $1 = '' OR org_id = $1),
-		(SELECT count(*) FROM usage_events WHERE $1 = '' OR org_id = $1),
+		-- 1 once anything was served, as counting it all would read the
+		-- whole usage log on every panel load.
+		(SELECT count(*) FROM (SELECT 1 FROM usage_events WHERE $1 = '' OR org_id = $1 LIMIT 1) AS served),
 		(SELECT count(*) FROM filters WHERE $1 = '' OR org_id = $1),
 		(SELECT count(*) FROM routers WHERE $1 = '' OR org_id = $1),
 		-- Classes, not running machines, so the screen stays when none is up.

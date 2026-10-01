@@ -1285,7 +1285,7 @@ type piModel struct {
 // may reach, so /model offers exactly what the guardrail allows.
 //
 // A session id, given for an agent's sandbox, is sent with every request, so
-// the task is one session in `keera sessions`.
+// the task is one session in `keera session list`.
 //
 // It is empty with no base URL or no models: no configuration is better than
 // a wrong one.
@@ -1338,8 +1338,10 @@ func (m *Manager) reachableModels(ctx context.Context, req CreateRequest) []poli
 		}
 		return &lim
 	}
+	// The key mintKey issues is a standard one, so it cannot reach a
+	// subscription model either.
 	resolved := policy.Resolve(
-		policy.Key{OrgID: req.OrgID, TeamID: req.TeamID, UserID: req.UserID},
+		policy.Key{OrgID: req.OrgID, TeamID: req.TeamID, UserID: req.UserID, Kind: policy.KeyStandard},
 		limits(policy.ScopeOrg, req.OrgID),
 		limits(policy.ScopeTeam, req.TeamID),
 		nil,
@@ -1351,9 +1353,14 @@ func (m *Manager) reachableModels(ctx context.Context, req CreateRequest) []poli
 			"error", err)
 		return nil
 	}
+	return chatModelsFor(resolved, catalogue)
+}
+
+// chatModelsFor is every enabled chat model of catalogue that resolved may use.
+func chatModelsFor(resolved *policy.Resolved, catalogue []policy.Model) []policy.Model {
 	out := make([]policy.Model, 0, len(catalogue))
 	for _, mod := range catalogue {
-		if !mod.Enabled || mod.Kind != policy.KindChat || !resolved.AllowsModel(mod.Alias) {
+		if !mod.Enabled || mod.Kind != policy.KindChat || !resolved.MayUse(mod) {
 			continue
 		}
 		out = append(out, mod)

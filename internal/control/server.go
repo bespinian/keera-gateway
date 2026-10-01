@@ -147,12 +147,15 @@ func (s *Server) Handler() http.Handler {
 	// are throttled per address. /auth/config reads and decides nothing, so it
 	// is not.
 	mux.HandleFunc("GET "+httpx.ControlPrefix+"/auth/config", s.authConfig)
-	mux.Handle("GET "+httpx.ControlPrefix+"/auth/login", s.throttle("login", flowRPM, s.login))
-	mux.Handle("GET "+httpx.ControlPrefix+"/auth/callback", s.throttle("callback", flowRPM, s.callback))
-	mux.Handle("POST "+httpx.ControlPrefix+"/auth/local", s.throttle("local", signInRPM, s.localLogin))
+	mux.Handle("GET "+httpx.ControlPrefix+"/auth/login",
+		s.throttle("login", flowRPM, signInThrottled, s.login))
+	mux.Handle("GET "+httpx.ControlPrefix+"/auth/callback",
+		s.throttle("callback", flowRPM, signInThrottled, s.callback))
+	mux.Handle("POST "+httpx.ControlPrefix+"/auth/local",
+		s.throttle("local", signInRPM, signInThrottled, s.localLogin))
 	// The last step of `keera login`: a one-time code redeemed for a token.
 	mux.Handle("POST "+httpx.ControlPrefix+"/auth/cli/token",
-		s.throttle("cli_token", signInRPM, s.cliToken))
+		s.throttle("cli_token", signInRPM, signInThrottled, s.cliToken))
 	route("POST /auth/logout", s.logout)
 
 	route("GET /v1/me", s.me)
@@ -247,6 +250,12 @@ func (s *Server) Handler() http.Handler {
 	// See attach.go.
 	s.attachRoutes(mux)
 
+	// Everything under the control prefix is the API. Without this, a typo in
+	// a path would fall through to the panel and answer HTML with a 200.
+	mux.HandleFunc(httpx.ControlPrefix+"/", func(w http.ResponseWriter, r *http.Request) {
+		httpx.WriteError(w, http.StatusNotFound, "invalid_request_error", "not_found",
+			"the control API has no route "+r.Method+" "+r.URL.Path)
+	})
 	if s.opts.ServeUI {
 		mux.Handle("/", webui.Handler())
 	}
@@ -297,14 +306,19 @@ const (
 	throttleIdle = 10 * time.Minute
 )
 
-// throttle limits one unauthenticated route per client address.
+// signInThrottled is what a throttled sign-in route answers.
+const signInThrottled = "too many sign-in attempts from this address; wait a moment and try again"
+
+// throttle limits one unauthenticated route per client address, and answers
+// msg once it is over the limit.
 //
 // Unthrottled, POST /auth/local would let anyone guess the operator key, and
 // GET /auth/login would let anyone fill the login flow table.
 //
 // It is a brake, not a security boundary: the address comes from
 // X-Forwarded-For, which a caller can set. That is why the rates are generous.
-func (s *Server) throttle(name string, perMinute int, next http.HandlerFunc) http.Handler {
+func (s *Server) throttle(name string, perMinute int, msg string,
+	next http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := name + "|" + clientIP(r)
 		now := time.Now()
@@ -313,8 +327,7 @@ func (s *Server) throttle(name string, perMinute int, next http.HandlerFunc) htt
 				w.Header().Set("Retry-After", strconv.Itoa(max(int(d.Seconds()), 1)))
 			}
 			httpx.WriteError(w, http.StatusTooManyRequests, "rate_limit_error",
-				"rate_limit_exceeded",
-				"too many sign-in attempts from this address; wait a moment and try again")
+				"rate_limit_exceeded", msg)
 			return
 		}
 		next(w, r)

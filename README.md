@@ -174,8 +174,9 @@ watch the split between its destinations.
 installed, a home directory that can survive a suspend, its own API key that
 is revoked when it ends, and an expiry. On Kubernetes a network policy can limit
 its egress; the podman driver has no egress control. `--purpose agent` creates
-a machine for one task, and a branch is the only thing that leaves it.
-[docs/sandboxes.md](docs/sandboxes.md)
+a machine for one task, which ends by pushing a branch. Where egress is
+enforced, that branch is the only thing that leaves it.
+[docs/sandboxes.md](docs/sandboxes.md#what-is-actually-enforced)
 
 **MCP servers** get the same controls as models. An agent calls a server's
 tools through `/api/mcp/<alias>` with its Keera key. It sees only the tools its
@@ -195,6 +196,10 @@ any other model. Add them on the panel's **Models** screen, or in the catalogue
 file that new organisations start from. Prompts sent to them leave your infrastructure, so put a guardrail on
 them. [docs/providers.md](docs/providers.md)
 
+**Claude subscriptions** let a Claude Team or Enterprise plan pay for Claude
+Code, while Keera applies the guardrails and shows each person's usage.
+[docs/subscriptions.md](docs/subscriptions.md)
+
 **The panel** has these screens:
 
 - **Live map** - how much of the traffic leaves your infrastructure.
@@ -203,7 +208,7 @@ them. [docs/providers.md](docs/providers.md)
 - **My access** - the developer's own view.
 
 Every team, key, model, filter and router has its own screen with the same four
-numbers. `keera usage`, `keera failures`, `keera sessions`,
+numbers. `keera usage`, `keera failures`, `keera session list`,
 `keera filter report` and `keera router report` show the same reports in a
 terminal.
 

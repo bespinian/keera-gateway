@@ -19,12 +19,12 @@ several replicas can start at once and no migration job is needed.
 
 Port 8080 carries everything, told apart by path:
 
-| Path       | What it is                                                                                            |
-| ---------- | ----------------------------------------------------------------------------------------------------- |
-| `/api`     | The inference API and the MCP servers. Authenticated by an API key, as a bearer token or `x-api-key`. |
-| `/control` | The control API. Authenticated by the operator key, a panel session or a `keera login` token.         |
-| `/sandbox` | Attaching to a sandbox, and the Git credential a sandbox asks for.                                    |
-| `/`        | The control panel, and `/metrics`, `/healthz` and `/readyz`.                                          |
+| Path       | What it is                                                                                                           |
+| ---------- | -------------------------------------------------------------------------------------------------------------------- |
+| `/api`     | The inference API and the MCP servers. Authenticated by an API key, as a bearer token, `x-api-key` or `X-Keera-Key`. |
+| `/control` | The control API. Authenticated by the operator key, a panel session or a `keera login` token.                        |
+| `/sandbox` | Attaching to a sandbox, and the Git credential a sandbox asks for.                                                   |
+| `/`        | The control panel, and `/metrics`, `/healthz` and `/readyz`.                                                         |
 
 `/sandbox` is not JSON. It carries a byte stream between an authenticated
 caller and a port inside a sandbox, so attaching needs no second port and no
@@ -125,7 +125,8 @@ reasoning items at OpenAI. In a coding agent's session, most of the bill is the
 cache. The guardrails still apply: filters read and rewrite the request in its
 own shape, and the system prompt and the output ceiling are written into it. If
 a router falls back from such a model to a local one, the local one gets the
-translation.
+translation. Without a router or a local fallback, the request is not
+translated at all, so the provider checks it rather than the gateway.
 
 - `POST /api/v1/messages/count_tokens` is answered by the gateway with an
   estimate that errs high. It is never forwarded, because that would send the
@@ -185,13 +186,17 @@ counts against its rate limits and budgets, and shows in its usage.
 
 1. Authenticate the key, and resolve the guardrails attached to its
    organisation, its team and itself.
-2. Read the body, find the model, check the rate limits and the budgets.
+2. Read the body, find the model, check the rate limits and the budgets. A
+   [subscription model](subscriptions.md#what-it-costs) meets the budgets only
+   when filters apply, because only they spend money.
 3. **Router**, if the client named one: choose the destination.
 4. Refuse the request if it cannot fit in the destination's context.
 5. **Filters**, outermost level first: each may rewrite the request or refuse it,
    with a model and an instruction or with a list of expressions.
 6. Prepend the standing system prompt (chat requests only; a completion has no
    place for one), take out blocked hosted tools, and clamp the output ceiling.
+   For a subscription model the prompt goes after Claude Code's own system
+   blocks instead; see [subscriptions.md](subscriptions.md#what-is-sent-to-anthropic).
 7. Forward, stream the answer back, and record what it cost.
 
 Why this order:
@@ -315,17 +320,17 @@ Other response headers:
 
 Errors come in the shape of the API that was called. The codes:
 
-| Status | Code                                                                                                                  |
-| ------ | --------------------------------------------------------------------------------------------------------------------- |
-| 400    | `missing_model`, `invalid_body`, `unsupported_parameter`, `context_length_exceeded`                                   |
-| 401    | `missing_api_key`, `invalid_api_key`, `expired_api_key`, `revoked_api_key`                                            |
-| 402    | `budget_exceeded`                                                                                                     |
-| 403    | `filter_refused`                                                                                                      |
-| 404    | `model_not_found`: no such model, or the key may not use it; `mcp_server_not_found`                                   |
-| 413    | `request_too_large` (`KEERA_MAX_BODY_BYTES`), `filter_input_too_large`                                                |
-| 429    | `rate_limit_exceeded` (`rpm`), `token_rate_limit_exceeded` (`tpm`)                                                    |
-| 502    | `upstream_unavailable`, `filter_failed`, `mcp_credential_refused`, `mcp_unavailable`                                  |
-| 503    | `control_plane_unavailable`, `no_backend`, `filter_unavailable`, `router_undecided`, `router_destination_unavailable` |
+| Status | Code                                                                                                                     |
+| ------ | ------------------------------------------------------------------------------------------------------------------------ |
+| 400    | `missing_model`, `invalid_body`, `unsupported_parameter`, `context_length_exceeded`, `subscription_model`                |
+| 401    | `missing_api_key`, `invalid_api_key`, `expired_api_key`, `revoked_api_key`, `subscription_key`, `missing_claude_sign_in` |
+| 402    | `budget_exceeded`                                                                                                        |
+| 403    | `filter_refused`                                                                                                         |
+| 404    | `model_not_found`: no such model, or the key may not use it; `mcp_server_not_found`                                      |
+| 413    | `request_too_large` (`KEERA_MAX_BODY_BYTES`), `filter_input_too_large`                                                   |
+| 429    | `rate_limit_exceeded` (`rpm`), `token_rate_limit_exceeded` (`tpm`)                                                       |
+| 502    | `upstream_unavailable`, `filter_failed`, `mcp_credential_refused`, `mcp_unavailable`                                     |
+| 503    | `control_plane_unavailable`, `no_backend`, `filter_unavailable`, `router_undecided`, `router_destination_unavailable`    |
 
 ## Metrics
 
@@ -333,15 +338,15 @@ Errors come in the shape of the API that was called. The codes:
 operator's session, or `KEERA_METRICS_TOKEN`, because its labels name every
 organisation.
 
-| Metric                           | Labels             | What it counts                                           |
-| -------------------------------- | ------------------ | -------------------------------------------------------- |
-| `keera_requests_total`           | model, org, status | inference requests                                       |
-| `keera_tokens_total`             | model, org, status | input plus output tokens                                 |
-| `keera_request_duration_seconds` | model, org, status | wall time of a request                                   |
-| `keera_gateway_overhead_seconds` | model, org         | time the gateway added, not counting filters and routers |
-| `keera_upstream_errors_total`    | model, org         | a model not reached, or a 5xx a router moved past        |
-| `keera_inflight_requests`        |                    | requests waiting for the inference plane to answer       |
-| `keera_ratelimit_fallback_total` |                    | rate-limit decisions made without Redis                  |
+| Metric                           | Labels             | What it counts                                                                   |
+| -------------------------------- | ------------------ | -------------------------------------------------------------------------------- |
+| `keera_requests_total`           | model, org, status | inference requests                                                               |
+| `keera_tokens_total`             | model, org, status | input plus output tokens                                                         |
+| `keera_request_duration_seconds` | model, org, status | wall time of a request                                                           |
+| `keera_gateway_overhead_seconds` | model, org         | time the gateway added, not counting filters and routers                         |
+| `keera_upstream_errors_total`    | model, org         | a model not reached or too slow to start answering, or a 5xx a router moved past |
+| `keera_inflight_requests`        |                    | requests waiting for the inference plane to answer                               |
+| `keera_ratelimit_fallback_total` |                    | rate-limit decisions made without Redis                                          |
 
 Filters, routers and MCP tool calls have their own metrics, listed in
 [filters.md](filters.md#what-is-recorded), [routers.md](routers.md#what-is-recorded)

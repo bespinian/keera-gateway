@@ -158,7 +158,7 @@ func printFailures(w *table, res failuresResponse, o store.Outcome, since time.D
 		_, _ = fmt.Fprintf(w, "nothing matched in the last %s\n", since)
 		return
 	}
-	// The request id opens the whole task: keera session <id>.
+	// The request id opens the whole task: keera session show <id>.
 	w.header("REQUEST\tWHEN\tMODEL\tSTATUS\tKEY\tMESSAGE")
 	for _, f := range res.Data {
 		key := f.KeyID

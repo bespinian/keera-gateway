@@ -389,7 +389,8 @@ export const api = {
 
 /** chatTargets is what a client may name as its model: the organisation's
  *  enabled chat models, then its routers, as `keera connect` offers them.
- *  Failing to read the routers still leaves the models. */
+ *  Subscription models are left out, because an ordinary key cannot reach
+ *  them. Failing to read the routers still leaves the models. */
 export async function chatTargets(orgID) {
   const [models, routers] = await Promise.all([
     api.models(orgID).then((r) => r.data || []),
@@ -399,7 +400,7 @@ export async function chatTargets(orgID) {
       .catch(() => []),
   ]);
   return models
-    .filter((m) => m.enabled !== false && m.kind === "chat")
+    .filter((m) => m.enabled !== false && m.kind === "chat" && !m.subscription)
     .concat(
       routers.map((rt) => ({
         alias: rt.alias,

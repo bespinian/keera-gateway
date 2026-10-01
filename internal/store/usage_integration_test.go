@@ -29,6 +29,11 @@ func TestWriteEventsRollsUpSpendPerScope(t *testing.T) {
 		// and charged nothing.
 		{TS: now.Add(2 * time.Minute), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 402, Latency: time.Millisecond, Scopes: scopes},
+		// A refusal by a filter, which paid for the filter's own call. The
+		// budget charges it, so the report must show it too.
+		{TS: now.Add(3 * time.Minute), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+			Alias: "keera-code", InputTokens: 50, OutputTokens: 5, CostMicros: 300,
+			Status: 403, Latency: time.Millisecond, Scopes: scopes},
 	}
 	if err := st.WriteEvents(ctx, events); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
@@ -43,9 +48,9 @@ func TestWriteEventsRollsUpSpendPerScope(t *testing.T) {
 		got[string(r.ScopeType)+":"+r.ScopeID+":"+string(r.Period)] = r.Micros
 	}
 	want := map[string]int64{
-		"org:" + f.orgID + ":month": 2700,
-		"team:" + f.teamID + ":day": 2700,
-		"key:" + f.keyID + ":month": 2700,
+		"org:" + f.orgID + ":month": 3000,
+		"team:" + f.teamID + ":day": 3000,
+		"key:" + f.keyID + ":month": 3000,
 	}
 	for k, v := range want {
 		if got[k] != v {
@@ -53,8 +58,8 @@ func TestWriteEventsRollsUpSpendPerScope(t *testing.T) {
 		}
 	}
 
-	// The report counts what was served, so the refusal is not a request with a
-	// cost that does not explain it.
+	// The report counts as requests only what was served, but its cost is what
+	// the budget charged, refusals included.
 	buckets, err := st.Usage(ctx, UsageQuery{OrgID: f.orgID, From: now.Add(-time.Hour),
 		To: now.Add(time.Hour), GroupBy: "model"})
 	if err != nil {
@@ -64,19 +69,19 @@ func TestWriteEventsRollsUpSpendPerScope(t *testing.T) {
 		t.Fatalf("Usage = %+v, want one model", buckets)
 	}
 	b := buckets[0]
-	if b.Group != "keera-code" || b.Requests != 2 || b.InputTokens != 1500 ||
-		b.OutputTokens != 300 || b.CostMicros != 2700 {
-		t.Errorf("Usage bucket = %+v, want two served requests and their tokens", b)
+	if b.Group != "keera-code" || b.Requests != 2 || b.InputTokens != 1550 ||
+		b.OutputTokens != 305 || b.CostMicros != 3000 {
+		t.Errorf("Usage bucket = %+v, want two served requests and every row's cost", b)
 	}
 
-	// The refusal is still there to be read, which is the whole reason it was
-	// written.
+	// The refusals are still there to be read, which is the whole reason they
+	// were written.
 	refusals, err := st.Refusals(ctx, f.orgID, []string{f.keyID}, now.Add(-time.Hour), 10)
 	if err != nil {
 		t.Fatalf("Refusals: %v", err)
 	}
-	if len(refusals) != 1 || refusals[0].Status != 402 {
-		t.Errorf("Refusals = %+v, want the one 402", refusals)
+	if len(refusals) != 2 || refusals[0].Status != 403 || refusals[1].Status != 402 {
+		t.Errorf("Refusals = %+v, want the 403 and the 402, newest first", refusals)
 	}
 }
 
@@ -602,5 +607,70 @@ func TestFlowsOverAnEmptyWindow(t *testing.T) {
 	}
 	if rep.Clients == nil || rep.Models == nil {
 		t.Error("the lookups must exist even when empty; the panel indexes into them")
+	}
+}
+
+func TestASubscriptionKeyKeepsItsKindAndItsPlanUsage(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	now := time.Now().UTC().Truncate(time.Second)
+	hash := []byte("hash-of-keera_sk_plan-32-bytes!!!")
+	if _, err := st.CreateKey(ctx, KeyInfo{ID: "key_sub", OrgID: f.orgID, Alias: "claude-code",
+		Prefix: "keera_sk_pla", Kind: policy.KeySubscription}, hash); err != nil {
+		t.Fatalf("CreateKey: %v", err)
+	}
+	res, err := st.LookupKey(ctx, hash)
+	if err != nil || !res.Key.Subscription() {
+		t.Fatalf("LookupKey = %+v, %v; want a subscription key", res, err)
+	}
+
+	plan := func(used float64, at time.Time) *policy.PlanUsage {
+		return &policy.PlanUsage{FiveHour: &used, Status: "allowed", UpdatedAt: at}
+	}
+	// The newer reading arrives first, as it can from another replica, and the
+	// older one must not replace it.
+	for _, batch := range [][]Event{
+		{{TS: now, OrgID: f.orgID, KeyID: "key_sub", Alias: "claude", Status: 200,
+			ListCostMicros: 390, Plan: plan(0.4, now)}},
+		{{TS: now.Add(-time.Minute), OrgID: f.orgID, KeyID: "key_sub", Alias: "claude",
+			Status: 200, ListCostMicros: 10, Plan: plan(0.7, now.Add(-time.Minute))}},
+	} {
+		if err := st.WriteEvents(ctx, batch); err != nil {
+			t.Fatalf("WriteEvents: %v", err)
+		}
+	}
+
+	keys, err := st.KeySummaries(ctx, KeyQuery{OrgID: f.orgID, Since: now.Add(-time.Hour)})
+	if err != nil {
+		t.Fatalf("KeySummaries: %v", err)
+	}
+	var sub KeySummary
+	for _, k := range keys {
+		if k.ID == "key_sub" {
+			sub = k
+		}
+	}
+	switch {
+	case sub.Kind != policy.KeySubscription:
+		t.Errorf("kind = %q, want subscription", sub.Kind)
+	case sub.SpendMicros != 0 || sub.SubscriptionMicros != 400:
+		t.Errorf("spend %d, on the plan %d; want 0 and 400", sub.SpendMicros, sub.SubscriptionMicros)
+	case sub.Plan == nil || sub.Plan.FiveHour == nil || *sub.Plan.FiveHour != 0.4:
+		t.Errorf("plan = %+v, want the newer reading, 0.4", sub.Plan)
+	}
+
+	o, err := st.Overview(ctx, f.orgID, now.Add(-time.Hour), now.Add(time.Hour), Scope{})
+	if err != nil {
+		t.Fatalf("Overview: %v", err)
+	}
+	if o.CostMicros != 0 || o.SubscriptionMicros != 400 {
+		t.Errorf("overview spend %d, on plans %d; want 0 and 400", o.CostMicros, o.SubscriptionMicros)
+	}
+
+	// A rotated key is still one a copied settings file cannot spend money with.
+	next, err := st.RotateKey(ctx, "key_sub", KeyInfo{ID: "key_sub2", Prefix: "keera_sk_pl2"},
+		[]byte("hash-of-keera_sk_pl2-32-bytes!!!!"))
+	if err != nil || next.Kind != policy.KeySubscription {
+		t.Errorf("RotateKey = %+v, %v; want a subscription key", next, err)
 	}
 }

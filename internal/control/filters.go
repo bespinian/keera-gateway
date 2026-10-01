@@ -229,6 +229,9 @@ func (s *Server) checkFilterModel(w http.ResponseWriter, r *http.Request, orgID,
 		badRequest(w, "'"+alias+"' is a "+string(m.Kind)+" model; a filter reads text and answers in "+
 			"words, which only a chat model does")
 		return false
+	case m.Subscription:
+		badRequest(w, subscriptionReader(alias, "filter"))
+		return false
 	}
 	allowed, err := s.orgAllowsModel(r.Context(), orgID, alias)
 	if err != nil {

@@ -31,12 +31,18 @@ func (s *Server) fits(c *call, b *body) bool {
 			window, largest = m.MaxContext, m.Alias
 		}
 	}
+	// Without a translation, every destination is sent the client's own API,
+	// so that is what is measured.
+	sent, extract := b, func(b *body) (textDoc, error) { return extractText(b, c.surf.kind) }
+	if b == nil {
+		sent, extract = c.native, c.surf.dialect.text
+	}
 	// The whole body is more than its text, so a body that fits needs no
 	// closer look. That is nearly every request, and it costs nothing.
-	if b.size()/bytesPerTokenAtMost <= window {
+	if sent.size()/bytesPerTokenAtMost <= window {
 		return true
 	}
-	doc, err := extractText(b, c.surf.kind)
+	doc, err := extract(sent)
 	if err != nil {
 		return true // a body that cannot be read is refused where it is read
 	}

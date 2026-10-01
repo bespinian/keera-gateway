@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"io"
 	"net"
 	"net/http"
 	"strconv"
@@ -193,9 +192,11 @@ func (s *Server) send(ctx context.Context, model policy.Model, out outbound) (*h
 	for i := range model.Backends {
 		base := model.Backends[(int(offset)+i)%len(model.Backends)]
 		// A fresh reader per attempt lets this loop move to the next backend
-		// after a connection failure.
+		// after a connection failure. A bare *bytes.Reader also gives the
+		// request a GetBody, without which Go cannot resend it on a stale
+		// keep-alive connection or after an HTTP/2 GOAWAY.
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-			strings.TrimRight(base, "/")+out.path, io.NopCloser(bytes.NewReader(payload)))
+			strings.TrimRight(base, "/")+out.path, bytes.NewReader(payload))
 		if err != nil {
 			return nil, err
 		}

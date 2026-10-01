@@ -55,7 +55,9 @@ export async function routersView(ctx) {
   const routers = res.data || [];
   const stats = res.stats || {};
   const currency = res.currency || ctx.currency;
-  const chatModels = models.filter((m) => m.kind === "chat");
+  // A subscription model only answers its caller's own sign-in, so a router
+  // can neither decide with it nor send there.
+  const chatModels = models.filter((m) => m.kind === "chat" && !m.subscription);
   const canEdit = isAdmin(ctx);
   ctx.setSubtitle(`${routers.length} ${plural(routers.length, "router")}`);
 
@@ -676,7 +678,9 @@ export async function routerDetailView(ctx) {
                     editRouter(
                       ctx,
                       rt,
-                      (r.data || []).filter((m) => m.kind === "chat"),
+                      (r.data || []).filter(
+                        (m) => m.kind === "chat" && !m.subscription,
+                      ),
                     ),
                   ),
               },

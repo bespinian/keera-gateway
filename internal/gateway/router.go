@@ -237,6 +237,9 @@ func chatProblem(m policy.Model, found bool) string {
 		return "is a " + string(m.Kind) + " model, and only a chat model reads text and answers in words"
 	case len(m.Backends) == 0:
 		return "has no backend"
+	case m.Subscription:
+		// Only a caller's own sign-in reaches it, and the gateway holds none.
+		return "is paid by each person's own Claude subscription, so the gateway cannot send it anything of its own"
 	}
 	return ""
 }

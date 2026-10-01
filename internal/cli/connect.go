@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -25,6 +26,11 @@ func connectCmd(ctx context.Context, args []string) error {
 	org := fs.String("org", "", "organisation whose models and routers to offer "+
 		"(default: your own; an operator's only one)")
 	asJSON := fs.Bool("json", false, jsonUsage)
+	subscription := fs.Bool("subscription", false,
+		"for Claude Code signed in to a Claude plan: issue this machine its own key and "+
+			"write it into ~/.claude/settings.json")
+	team := fs.String("team", "", "with --subscription, the team the new key belongs to "+
+		"(administrators only)")
 	fs.Usage = func() { _ = printHelp(fs, "connect", "") }
 	if want, ok := wantsHelp(args); ok {
 		return printHelp(fs, "connect", want)
@@ -41,6 +47,20 @@ func connectCmd(ctx context.Context, args []string) error {
 	}
 	if err := c.do(ctx, "GET", "/v1/connect", nil, &cat); err != nil {
 		return err
+	}
+	if *subscription {
+		if sub != "claude-code" {
+			return errors.New("--subscription is for Claude Code: keera connect claude-code --subscription")
+		}
+		if cat.GatewayURL == "" {
+			return errNoGatewayURL
+		}
+		return connectSubscription(ctx, c, subscriptionSetup{
+			org: *org, team: *team, model: *model, gatewayURL: cat.GatewayURL, asJSON: *asJSON,
+		})
+	}
+	if *team != "" {
+		return errors.New("--team is for --subscription, which issues a key")
 	}
 	listing := sub == "list" || sub == ""
 	chat, err := connectModels(ctx, c, listing, *model, *org)
@@ -74,8 +94,7 @@ func connectCmd(ctx context.Context, args []string) error {
 	// else would get a 401 that looks like a bad key.
 	gatewayURL := cat.GatewayURL
 	if gatewayURL == "" {
-		return fmt.Errorf("this deployment does not say where a client reaches the " +
-			"inference plane; set KEERA_PUBLIC_URL on the gateway")
+		return errNoGatewayURL
 	}
 
 	if *asJSON {
@@ -90,8 +109,14 @@ func connectCmd(ctx context.Context, args []string) error {
 	return nil
 }
 
+// errNoGatewayURL is a deployment that does not say where clients reach it.
+var errNoGatewayURL = errors.New("this deployment does not say where a client reaches the " +
+	"inference plane; set KEERA_PUBLIC_URL on the gateway")
+
 // connectModels is what a client may be pointed at: the enabled chat models,
 // and the organisation's routers, which a client names in the same field.
+// Subscription models are left out: only a subscription key reaches them, and
+// --subscription sets those up.
 //
 // Routers cost a second round trip, so they are read only for the listing or
 // for a --model that is not a model. Failing to read them is not an error:
@@ -108,7 +133,7 @@ func connectModels(ctx context.Context, c *client, listing bool, model, org stri
 	}
 	chat := make([]policy.Model, 0, len(models))
 	for _, m := range models {
-		if m.Enabled && m.Kind == policy.KindChat {
+		if m.Enabled && m.Kind == policy.KindChat && !m.Subscription {
 			chat = append(chat, m)
 		}
 	}

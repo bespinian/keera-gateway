@@ -40,17 +40,17 @@ CREATE TABLE users (
     -- directory. Null for users Keera authenticates itself.
     external_id text,
     -- Roles are deliberately few. "operator" is us, and crosses organisations;
-    -- "admin" runs one organisation's teams, guardrails and keys; "member" can
-    -- see what they and their own teams are using and nothing else.
+    -- "admin" runs one organisation's teams, guardrails and keys; "member" sees
+    -- the organisation's usage, manages their own keys and changes no policy.
     role        text NOT NULL DEFAULT 'member'
         CHECK (role IN ('operator', 'admin', 'member')),
     created_at  timestamptz NOT NULL DEFAULT now(),
     -- A person can be disabled, for when they leave.
     --
     -- Disabled rather than deleted: usage rows, keys, sandboxes and audit
-    -- entries still name them, and "whose was this" has to keep an answer. A
-    -- disabled person cannot sign in, and their keys are revoked when they are
-    -- disabled.
+    -- entries still name them, and "whose was this" has to keep an answer
+    -- until retention deletes those. A disabled person cannot sign in, and
+    -- their keys are revoked when they are disabled.
     disabled_at timestamptz,
     UNIQUE (org_id, email)
 );
@@ -73,6 +73,10 @@ CREATE TABLE api_keys (
     -- SHA-256 of the presented key. The key itself is never stored.
     key_hash   bytea NOT NULL UNIQUE,
     prefix     text NOT NULL,
+    -- A subscription key only reaches subscription models, which the caller's
+    -- own Claude plan pays for. It sits in plain text in a settings file, so a
+    -- copy of it must not be able to spend the organisation's money.
+    kind       text NOT NULL DEFAULT 'standard' CHECK (kind IN ('standard', 'subscription')),
     created_at timestamptz NOT NULL DEFAULT now(),
     expires_at timestamptz,
     revoked_at timestamptz
@@ -194,6 +198,10 @@ CREATE TABLE models (
     -- Where the model runs, and so where prompts go: a country such as ch or
     -- usa, or onprem for an inference plane of the deployment's own.
     location               text NOT NULL DEFAULT 'onprem',
+    -- Paid by each caller's own Claude subscription. The gateway forwards the
+    -- caller's sign-in and holds no credential, and the prices only say what
+    -- the same request would have cost on the API.
+    subscription           boolean NOT NULL DEFAULT false,
     enabled                boolean NOT NULL DEFAULT true,
     updated_at             timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (org_id, alias)
@@ -470,6 +478,9 @@ CREATE TABLE usage_events (
     -- row can be reconciled against an invoice rather than only believed.
     cached_input_tokens int NOT NULL DEFAULT 0,
     cost_micros       bigint NOT NULL DEFAULT 0,
+    -- What a request a subscription paid for would have cost at the model's
+    -- API prices. It is never charged to a budget. Zero on every other row.
+    list_cost_micros  bigint NOT NULL DEFAULT 0,
     status            int NOT NULL,
     latency_ms        int NOT NULL,
     -- Time to the first token the client saw. For a coding agent this is the
@@ -686,9 +697,10 @@ CREATE TABLE tool_calls (
     -- 'ok' is a result; 'tool_error' a result the tool itself marked as a
     -- failure; 'error' a call that got no result, from the server or the
     -- gateway; 'denied' a tool the key may not call; 'refused' a call a filter
-    -- stopped.
+    -- stopped; 'input_required' a server asking for the user's input first.
     outcome      text NOT NULL
-        CHECK (outcome IN ('ok', 'tool_error', 'error', 'denied', 'refused')),
+        CHECK (outcome IN ('ok', 'tool_error', 'error', 'denied', 'refused',
+                           'input_required')),
     latency_ms   int NOT NULL DEFAULT 0,
     arg_bytes    int NOT NULL DEFAULT 0,
     result_bytes int NOT NULL DEFAULT 0,
@@ -710,6 +722,20 @@ CREATE INDEX tool_calls_org_ts_idx ON tool_calls (org_id, ts);
 CREATE INDEX tool_calls_key_ts_idx ON tool_calls (key_id, ts);
 -- Retention deletes by age across every tenant at once.
 CREATE INDEX tool_calls_ts_idx ON tool_calls (ts);
+
+-- How much of their Claude plan the holder of a subscription key has used, as
+-- Anthropic last reported it. A plan's limit is a usage window, not money, so
+-- this is the number that runs out. Utilisation is a fraction from 0 to 1.
+CREATE TABLE plan_usage (
+    key_id              text PRIMARY KEY REFERENCES api_keys (id) ON DELETE CASCADE,
+    five_hour           double precision,
+    five_hour_resets_at timestamptz,
+    seven_day           double precision,
+    seven_day_resets_at timestamptz,
+    -- allowed, allowed_warning or rejected.
+    status              text NOT NULL DEFAULT '',
+    updated_at          timestamptz NOT NULL
+);
 
 -- Rolled up alongside usage_events so a budget check is one indexed read rather
 -- than an aggregate over the event log.
@@ -853,7 +879,8 @@ CREATE INDEX cli_tokens_expires_at_idx ON cli_tokens (expires_at);
 -- of each class in KEERA_SANDBOXES_FILE. The second is the sandboxes
 -- themselves, and it is a log rather than a live view - rows are kept after the
 -- sandbox is gone, because what a task cost and who asked for it outlive the
--- machine that answered. They go with their organisation.
+-- machine that answered. They go with usage retention, or with their
+-- organisation.
 
 -- The catalogue: a machine somebody can ask for by name.
 --
@@ -1000,10 +1027,9 @@ CREATE TABLE sandboxes (
     -- in use is not suspended, and a resumed one is not suspended again
     -- straight away.
     active_at    timestamptz,
-    -- Terminated rather than deleted: everything else this schema deletes is a
-    -- record that stops existing, and a terminated sandbox is the opposite -
-    -- the machine is gone and the row is deliberately kept, because what it
-    -- cost and who it belonged to outlive it.
+    -- Terminated rather than deleted: the machine is gone but the row is
+    -- kept, because what it cost and who it belonged to outlive it. Usage
+    -- retention deletes it once that usage is gone too.
     terminated_at timestamptz,
 
     -- How long this sandbox has actually held compute, accumulated.
@@ -1052,3 +1078,7 @@ CREATE INDEX sandboxes_expiry_idx ON sandboxes (expires_at)
 -- A person's own sandboxes, for the developer's screen.
 CREATE INDEX sandboxes_user_idx ON sandboxes (user_id, created_at DESC)
     WHERE user_id IS NOT NULL;
+
+-- A key's sandbox: what the gateway looks up by key, what retention checks
+-- before it deletes a key, and what deleting a key scans to clear key_id.
+CREATE INDEX sandboxes_key_idx ON sandboxes (key_id) WHERE key_id IS NOT NULL;

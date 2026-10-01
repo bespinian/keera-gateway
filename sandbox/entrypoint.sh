@@ -212,16 +212,26 @@ checkout() {
   # A shallow clone. An agent working on one task needs the tip and not five
   # years of history, and on a large repository the difference is minutes of
   # somebody's time every single sandbox. `git fetch --unshallow` gets the rest.
+  # set -e does not apply inside the $(...) that calls this, so each failure
+  # returns on its own. git's output goes to stderr: stdout is the directory.
   if [ -n "${KEERA_BRANCH:-}" ]; then
-    git clone --depth 1 --branch "$KEERA_BRANCH" "$KEERA_REPO" "$dir"
+    git clone --depth 1 --branch "$KEERA_BRANCH" "$KEERA_REPO" "$dir" >&2 || return 1
   else
-    git clone --depth 1 "$KEERA_REPO" "$dir"
+    git clone --depth 1 "$KEERA_REPO" "$dir" >&2 || return 1
   fi
   echo "$dir"
 }
 
 setup_git
-WORKDIR="$(checkout || true)"
+# An agent's task is about its repository, so it stops without one. Somebody
+# working in an engineer sandbox can still clone it by hand.
+if ! WORKDIR="$(checkout)"; then
+  WORKDIR=""
+  if [ "$KEERA_SANDBOX_PURPOSE" = "agent" ]; then
+    die "cloning ${KEERA_REPO} failed; the agent has no repository to work on"
+  fi
+  log "warning: cloning ${KEERA_REPO} failed; the sandbox starts without it"
+fi
 if [ -n "${WORKDIR:-}" ]; then
   ln -sfn "$WORKDIR" "$HOME/repo"
   echo "cd $HOME/repo" > "$HOME/.keera-cd"

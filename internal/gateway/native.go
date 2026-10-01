@@ -22,7 +22,9 @@ import (
 // forwarded in that API. It still passes every guardrail: the filters read and
 // rewrite it in its own shape, and the system prompt and the output ceiling
 // are written into it in that shape. Every other destination gets it
-// translated, as before.
+// translated, as before. The translation is made only when a router or such a
+// destination needs it: on a long session it costs far more than the rest of
+// the gateway's work.
 
 // dialect is a client API that one hosted provider serves as its own.
 type dialect interface {
@@ -49,6 +51,11 @@ type dialect interface {
 	// stripHostedTools takes out the tools the provider runs on its own
 	// servers, and returns what it took out. See hosted.go.
 	stripHostedTools(b *body) []string
+	// opening is the first user message as the translation has it, for the
+	// session key. Only the turns up to it are translated. The translation
+	// drops what changes from turn to turn, such as cache markers, so a task
+	// keeps one key.
+	opening(b *body) (json.RawMessage, bool)
 }
 
 // nativeStream watches a provider's own event stream on its way to the client.
@@ -62,6 +69,23 @@ type nativeStream interface {
 	counts() (usage *tokenUsage, deltas int, partial bool)
 }
 
+// openingOf is the first user message in msgs, encoded as firstUserMessage
+// reads it out of a translated body.
+func openingOf(msgs []oaiMessage) (json.RawMessage, bool) {
+	for _, m := range msgs {
+		if m.Role != "user" {
+			continue
+		}
+		var v any = m
+		if m.Content != nil {
+			v = m.Content
+		}
+		raw, err := json.Marshal(v)
+		return raw, err == nil
+	}
+	return nil, false
+}
+
 // speaksNative reports whether a destination is sent the client's own API.
 func speaksNative(d dialect, m policy.Model) bool {
 	return d != nil && m.Provider == d.provider()
@@ -70,13 +94,16 @@ func speaksNative(d dialect, m policy.Model) bool {
 // relayNativeBuffered is relayBuffered for an answer in the client's own API:
 // only the model name changes.
 func (s *Server) relayNativeBuffered(c *call, resp *http.Response, answered time.Time) {
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, s.opts.MaxResponseBytes))
+	raw, ok := s.readAnswer(c, resp, answered)
+	if !ok {
+		return
+	}
 	var usage *tokenUsage
-	if err == nil && resp.StatusCode < 300 {
+	if resp.StatusCode < 300 {
 		usage = c.surf.dialect.usage(raw)
 		raw = renameIn(raw, "", c.alias)
 	}
-	if msg := bufferedError(err, raw, resp.StatusCode, resp.StatusCode); msg != "" {
+	if msg := bufferedError(raw, resp.StatusCode, resp.StatusCode); msg != "" {
 		c.ev.Error = msg
 	}
 	c.w.WriteHeader(resp.StatusCode)

@@ -53,7 +53,9 @@ func (s *Server) attachRoutes(mux *http.ServeMux) {
 	mux.Handle("GET "+httpx.SandboxPrefix+"/v1/{ref}/tcp/{port}", s.authenticated(s.attach))
 	// Asked for by a sandbox, not a person: it has no session, only its key.
 	mux.Handle("POST "+httpx.SandboxPrefix+sandbox.GitCredentialPath,
-		s.throttle("git_credential", signInRPM, s.gitCredential))
+		s.throttle("git_credential", signInRPM,
+			"too many repository credential requests from this address; wait a moment "+
+				"and try again", s.gitCredential))
 }
 
 // attach proxies one connection.

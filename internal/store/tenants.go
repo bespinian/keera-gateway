@@ -62,15 +62,17 @@ func scanUser(r row) (User, error) {
 // entries name the key by its alias. A rotation moves the alias to a new
 // secret on purpose.
 type KeyInfo struct {
-	ID        string     `json:"id"`
-	OrgID     string     `json:"org_id"`
-	TeamID    string     `json:"team_id,omitempty"`
-	UserID    string     `json:"user_id,omitempty"`
-	Alias     string     `json:"alias"`
-	Prefix    string     `json:"prefix"`
-	CreatedAt time.Time  `json:"created_at"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+	ID     string `json:"id"`
+	OrgID  string `json:"org_id"`
+	TeamID string `json:"team_id,omitempty"`
+	UserID string `json:"user_id,omitempty"`
+	Alias  string `json:"alias"`
+	Prefix string `json:"prefix"`
+	// Kind is standard or subscription. Empty is stored as standard.
+	Kind      policy.KeyKind `json:"kind"`
+	CreatedAt time.Time      `json:"created_at"`
+	ExpiresAt *time.Time     `json:"expires_at,omitempty"`
+	RevokedAt *time.Time     `json:"revoked_at,omitempty"`
 }
 
 // OrgTemplate is what a new organisation starts with: a copy of each model
@@ -276,9 +278,10 @@ type DeletedTeam struct {
 
 // DeleteTeam removes a team that no live key uses.
 //
-// The foreign key cascades, so deleting a team with working keys would
-// silently break those keys. The check runs against the row locked FOR
-// UPDATE, so a key issued in between cannot slip through.
+// The foreign key sets team_id to null, so a working key would quietly fall
+// back to the organisation's guardrails and escape the team's allow-list,
+// budget and rate limit. The check runs against the row locked FOR UPDATE, so
+// a key issued in between cannot slip through.
 //
 // Revoked keys are detached, not deleted, because usage rows still name them.
 // Guardrails and spend have no foreign key, so they are cleared here.
@@ -407,10 +410,14 @@ func (s *Store) CreateKey(ctx context.Context, k KeyInfo, hash []byte) (KeyInfo,
 }
 
 func insertKey(ctx context.Context, db querier, k KeyInfo, hash []byte) (KeyInfo, error) {
+	if k.Kind == "" {
+		k.Kind = policy.KeyStandard
+	}
 	err := db.QueryRow(ctx, `INSERT INTO api_keys
-		(id, org_id, team_id, user_id, alias, key_hash, prefix, expires_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING created_at`,
-		k.ID, k.OrgID, nullable(k.TeamID), nullable(k.UserID), k.Alias, hash, k.Prefix, k.ExpiresAt,
+		(id, org_id, team_id, user_id, alias, key_hash, prefix, kind, expires_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING created_at`,
+		k.ID, k.OrgID, nullable(k.TeamID), nullable(k.UserID), k.Alias, hash, k.Prefix,
+		string(k.Kind), k.ExpiresAt,
 	).Scan(&k.CreatedAt)
 	return k, err
 }
@@ -427,7 +434,7 @@ func (s *Store) RevokeKey(ctx context.Context, id string) error {
 var ErrKeyRevoked = errors.New("store: the key was already revoked")
 
 // RotateKey replaces the key oldID with next, in one transaction: next gets
-// the old key's organisation, team, person and own guardrails, and the old key
+// the old key's organisation, team, person, kind and own guardrails, and the old key
 // is revoked. An empty next.Alias keeps the old alias. A nil next.ExpiresAt
 // gives the new key the old key's lifetime, counted from now.
 //
@@ -442,15 +449,16 @@ func (s *Store) RotateKey(ctx context.Context, oldID string, next KeyInfo, hash 
 
 	var old KeyInfo
 	err = tx.QueryRow(ctx, `SELECT org_id, COALESCE(team_id,''), COALESCE(user_id,''), alias,
-		created_at, expires_at, revoked_at FROM api_keys WHERE id = $1 FOR UPDATE`, oldID,
-	).Scan(&old.OrgID, &old.TeamID, &old.UserID, &old.Alias, &old.CreatedAt, &old.ExpiresAt, &old.RevokedAt)
+		kind, created_at, expires_at, revoked_at FROM api_keys WHERE id = $1 FOR UPDATE`, oldID,
+	).Scan(&old.OrgID, &old.TeamID, &old.UserID, &old.Alias, &old.Kind, &old.CreatedAt,
+		&old.ExpiresAt, &old.RevokedAt)
 	if err != nil {
 		return KeyInfo{}, notFound(err)
 	}
 	if old.RevokedAt != nil {
 		return KeyInfo{}, ErrKeyRevoked
 	}
-	next.OrgID, next.TeamID, next.UserID = old.OrgID, old.TeamID, old.UserID
+	next.OrgID, next.TeamID, next.UserID, next.Kind = old.OrgID, old.TeamID, old.UserID, old.Kind
 	if next.Alias == "" {
 		next.Alias = old.Alias
 	}
@@ -496,7 +504,7 @@ func (s *Store) lookupKey(ctx context.Context, where string, arg any) (*policy.R
 	// A disabled holder counts as a revoked key, which is also a second check:
 	// disabling somebody revokes their keys.
 	rows, err := s.pool.Query(ctx, `
-		SELECT k.id, k.org_id, COALESCE(t.id,''), COALESCE(k.user_id,''),
+		SELECT k.id, k.org_id, COALESCE(t.id,''), COALESCE(k.user_id,''), k.kind,
 		       k.expires_at, COALESCE(k.revoked_at, u.disabled_at), p.scope_type, `+limitColumns+`
 		FROM api_keys k
 		LEFT JOIN users u ON u.id = k.user_id
@@ -523,7 +531,7 @@ func (s *Store) lookupKey(ctx context.Context, where string, arg any) (*policy.R
 			lim       policy.Limits
 			period    *string
 		)
-		dest := append([]any{&key.ID, &key.OrgID, &key.TeamID, &key.UserID,
+		dest := append([]any{&key.ID, &key.OrgID, &key.TeamID, &key.UserID, &key.Kind,
 			&expires, &revoked, &scopeType}, limitTargets(&lim, &period)...)
 		if err := rows.Scan(dest...); err != nil {
 			return nil, err

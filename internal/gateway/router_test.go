@@ -1071,3 +1071,24 @@ func TestACheckSaysNothingAboutConfidenceItCannotRead(t *testing.T) {
 		}
 	}
 }
+
+// Any refusal after the router decided carries what the decision cost, not
+// only the router's own refusals: the budget was charged either way.
+func TestARefusalAfterTheRouterCarriesWhatItSpent(t *testing.T) {
+	h := routerHarness(t, picks("keera-large"), autoRouter(), nil)
+	large := h.src.models["keera-large"]
+	large.MaxContext = 10
+	h.src.models["keera-large"] = large
+
+	resp := h.post(t, "/v1/chat/completions", `{"model":"auto","messages":[`+
+		`{"role":"user","content":"`+strings.Repeat("a", 600)+`"}]}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for a prompt over the chosen model's window",
+			resp.StatusCode)
+	}
+	ev := h.sink.last(t)
+	if ev.CostMicros == 0 || ev.CostMicros != h.budgets.total() {
+		t.Errorf("cost = %d, want the %d the decision charged to the budgets",
+			ev.CostMicros, h.budgets.total())
+	}
+}

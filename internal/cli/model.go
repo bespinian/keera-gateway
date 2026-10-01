@@ -20,21 +20,23 @@ const disabledUsage = "add the model without serving it yet"
 // modelFlags are the fields of a catalogue entry, as flags. Each one left out
 // means "leave this as it is", so `keera model set` can change one field.
 type modelFlags struct {
-	provider     string
-	backends     stringList
-	productID    string
-	backendModel string
-	kind         string
-	description  string
-	maxContext   int
-	releaseDate  string
-	location     string
-	priceIn      float64
-	priceOut     float64
-	priceCached  float64
-	apiKey       string
-	noAPIKey     bool
-	disabled     bool
+	provider       string
+	backends       stringList
+	productID      string
+	backendModel   string
+	kind           string
+	description    string
+	maxContext     int
+	releaseDate    string
+	location       string
+	priceIn        float64
+	priceOut       float64
+	priceCached    float64
+	apiKey         string
+	noAPIKey       bool
+	subscription   bool
+	noSubscription bool
+	disabled       bool
 }
 
 func registerModelFlags(fs *flag.FlagSet) *modelFlags {
@@ -67,6 +69,11 @@ func registerModelFlags(fs *flag.FlagSet) *modelFlags {
 	fs.StringVar(&f.apiKey, "api-key", "",
 		"credential to store encrypted; @path reads a file and @- reads stdin")
 	fs.BoolVar(&f.noAPIKey, "no-api-key", false, "remove the stored credential")
+	fs.BoolVar(&f.subscription, "subscription", false,
+		"each caller's own Claude subscription pays; needs --provider anthropic, and takes no "+
+			"API key (see docs/subscriptions.md)")
+	fs.BoolVar(&f.noSubscription, "no-subscription", false,
+		"the organisation pays again, with the model's stored API key")
 	return f
 }
 
@@ -126,6 +133,12 @@ func applyModelFlags(m catalog.Model, f *modelFlags) catalog.Model {
 	setPrice(&m.InputMicrosPerMTok, f.priceIn)
 	setPrice(&m.OutputMicrosPerMTok, f.priceOut)
 	setPrice(&m.CachedInputMicrosPerMTok, f.priceCached)
+	if f.subscription {
+		m.Subscription = true
+	}
+	if f.noSubscription {
+		m.Subscription = false
+	}
 	if f.disabled {
 		m.Disabled = true
 	}
@@ -157,6 +170,8 @@ func setPrice(dst **int64, units float64) {
 // to leave the stored one alone, "" to remove it, or the secret itself.
 func credential(f *modelFlags) (*string, error) {
 	switch {
+	case f.subscription && f.noSubscription:
+		return nil, fmt.Errorf("--subscription and --no-subscription contradict each other")
 	case f.noAPIKey && f.apiKey != "":
 		return nil, fmt.Errorf("--api-key and --no-api-key contradict each other")
 	case f.noAPIKey:
@@ -196,6 +211,7 @@ func declared(m policy.Model) catalog.Model {
 		MaxContext:               &maxContext,
 		ReleaseDate:              m.ReleaseDate,
 		Location:                 m.Location,
+		Subscription:             m.Subscription,
 		Disabled:                 !m.Enabled,
 	}
 }
@@ -608,13 +624,20 @@ func printModel(w *table, m policy.Model) {
 		show(w, "cached in/mtok", "(not stated - charged at the input price)")
 	}
 	show(w, "credential", credentialSource(m))
+	if m.Subscription {
+		show(w, "paid by", "each caller's own Claude subscription; the prices only say "+
+			"what the API would have charged")
+	}
 	show(w, "enabled", m.Enabled)
 }
 
 // credentialSource says whether a backend credential is stored, which is what
 // an operator debugging a 401 wants to know.
 func credentialSource(m policy.Model) string {
-	if m.HasAPIKey {
+	switch {
+	case m.Subscription:
+		return "caller's Claude sign-in"
+	case m.HasAPIKey:
 		return "stored"
 	}
 	return "(none)"

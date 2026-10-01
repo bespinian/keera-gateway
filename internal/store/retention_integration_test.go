@@ -1,8 +1,11 @@
 package store
 
 import (
+	"slices"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
@@ -12,7 +15,9 @@ func TestRetentionDeletesPastTheWindowAndNothingInsideIt(t *testing.T) {
 	f := newFixture(t, st, ctx)
 	now := time.Now().UTC()
 
-	old, recent := now.AddDate(0, 0, -400), now.AddDate(0, 0, -1)
+	// recent is now, not a day ago: on the 1st, a day ago is last month, and
+	// its spend window is not the open one this test checks survives.
+	old, recent := now.AddDate(0, 0, -400), now
 	for _, ts := range []time.Time{old, recent} {
 		if err := st.WriteEvents(ctx, []Event{{TS: ts, OrgID: f.orgID, Alias: "keera-code",
 			CostMicros: 100, Status: 200,
@@ -161,5 +166,96 @@ func TestRetentionKeepsTheOpenMonthWhenItBeganBeforeTheCutoff(t *testing.T) {
 	// March's month and today's day survive; February and the 2nd go.
 	if windows != 2 {
 		t.Errorf("%d spend windows left, want 2", windows)
+	}
+}
+
+func TestEndedSandboxesAndKeysGoOnceTheirUsageHasGone(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	newSandboxClass(t, st, ctx, f.orgID, "standard")
+	now := time.Now().UTC()
+	old, cutoff := now.AddDate(0, 0, -400), now.AddDate(0, 0, -365)
+
+	key := func(id, ended string) {
+		t.Helper()
+		if _, err := st.CreateKey(ctx, KeyInfo{ID: id, OrgID: f.orgID, TeamID: f.teamID,
+			Alias: id, Prefix: id}, []byte("hash-of-"+id)); err != nil {
+			t.Fatalf("CreateKey %s: %v", id, err)
+		}
+		if ended == "" {
+			return
+		}
+		if _, err := st.pool.Exec(ctx, "UPDATE api_keys SET "+ended+" = $2 WHERE id = $1",
+			id, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	key("key_revoked", "revoked_at")
+	key("key_expired", "expires_at")
+	key("key_of_suspended", "expires_at") // an old sandbox's, which may yet be revived
+	key("key_of_expired", "expires_at")
+	key("key_of_failed_agent", "revoked_at")
+	key("key_of_failed_engineer", "revoked_at")
+	key("key_live", "")
+	// A guardrail and a spend row on a key name it by id alone.
+	if _, err := st.pool.Exec(ctx, `INSERT INTO guardrails (scope_type, scope_id) VALUES ('key', 'key_revoked');
+		INSERT INTO spend (scope_type, scope_id, period, period_start) VALUES ('key', 'key_revoked', 'month', now())`,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// sandbox makes one created at, and for a terminated one also ended at, at.
+	sandbox := func(name, keyID string, state policy.SandboxState, purpose policy.Purpose, at time.Time) {
+		t.Helper()
+		sb := newSandbox(t, st, ctx, f, name)
+		if _, err := st.pool.Exec(ctx, `UPDATE sandboxes SET key_id = $2, state = $3, purpose = $4,
+			created_at = $5, terminated_at = CASE WHEN $3 = 'terminated' THEN $5::timestamptz END
+			WHERE id = $1`, sb.ID, keyID, string(state), string(purpose), at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	engineer, agent := policy.PurposeEngineer, policy.PurposeAgent
+	sandbox("gone", "key_expired", policy.SandboxTerminated, engineer, old)
+	sandbox("recent", "key_live", policy.SandboxTerminated, engineer, now)
+	sandbox("resting", "key_of_suspended", policy.SandboxSuspended, engineer, old)
+	// An expired one can be resumed, and a failed engineer one keeps its
+	// volume until it is terminated, so both stay however old they are.
+	sandbox("lapsed", "key_of_expired", policy.SandboxExpired, engineer, old)
+	sandbox("broken-dev", "key_of_failed_engineer", policy.SandboxFailed, engineer, old)
+	// A failed agent sandbox has ended. It has no end time, so its age counts.
+	sandbox("broken-task", "key_of_failed_agent", policy.SandboxFailed, agent, old)
+	sandbox("broken-today", "key_live", policy.SandboxFailed, agent, now)
+
+	n, err := st.PurgeEnded(ctx, cutoff)
+	if err != nil {
+		t.Fatalf("PurgeEnded: %v", err)
+	}
+	if n != 5 {
+		t.Errorf("PurgeEnded deleted %d rows, want 5: two sandboxes and three keys", n)
+	}
+
+	left := func(query string) []string {
+		t.Helper()
+		rows, err := st.pool.Query(ctx, query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ids
+	}
+	wantSandboxes := []string{"broken-dev", "broken-today", "lapsed", "recent", "resting"}
+	if got := left("SELECT name FROM sandboxes ORDER BY name"); !slices.Equal(got, wantSandboxes) {
+		t.Errorf("sandboxes left: %v, want %v", got, wantSandboxes)
+	}
+	want := []string{f.keyID, "key_live", "key_of_expired", "key_of_failed_engineer", "key_of_suspended"}
+	if got := left("SELECT id FROM api_keys ORDER BY id"); !slices.Equal(got, want) {
+		t.Errorf("keys left: %v, want %v", got, want)
+	}
+	if got := left("SELECT scope_id FROM guardrails WHERE scope_type = 'key' UNION ALL " +
+		"SELECT scope_id FROM spend WHERE scope_type = 'key'"); len(got) != 0 {
+		t.Errorf("rows still name a deleted key: %v", got)
 	}
 }

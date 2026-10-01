@@ -483,3 +483,33 @@ func TestConnectServesTheClientCatalogueAndTheGatewayAddress(t *testing.T) {
 		t.Error("the catalogue carries the operator key")
 	}
 }
+
+// A typo in an API path is a JSON 404, not the panel's HTML with a 200.
+func TestAnUnknownAPIPathIsAJSONNotFound(t *testing.T) {
+	s := New(nil, nil, nil, nil, Options{OperatorKey: testOperatorKey, ServeUI: true},
+		slog.New(slog.DiscardHandler))
+	h := s.Handler()
+
+	r := httptest.NewRequest(http.MethodGet, httpx.ControlPrefix+"/v1/no-such-thing", nil)
+	r.Header.Set("Authorization", "Bearer "+testOperatorKey)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want JSON", ct)
+	}
+	if !strings.Contains(w.Body.String(), `"not_found"`) {
+		t.Errorf("body = %s, want a not_found error", w.Body)
+	}
+
+	// The panel still answers its own pages.
+	r = httptest.NewRequest(http.MethodGet, "/keys", nil)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/html") {
+		t.Errorf("panel: status = %d, Content-Type = %q; want the HTML shell",
+			w.Code, w.Header().Get("Content-Type"))
+	}
+}

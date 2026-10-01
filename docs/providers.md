@@ -236,6 +236,10 @@ rate. The key is sent as `x-api-key`, and the client's `anthropic-version` and
 `anthropic-beta` headers are passed on. An egress proxy in front of Anthropic
 must pass `/v1/messages` as well as `/v1/chat/completions`.
 
+**A Claude Team or Enterprise plan can pay instead.** A subscription model
+forwards each person's own Claude sign-in from Claude Code, and stores no key.
+See [subscriptions.md](subscriptions.md).
+
 **A cache write is charged at the input price.** Anthropic charges 25% more for
 it, and the gateway has no separate rate. A session that writes a lot to the
 cache is billed slightly low.

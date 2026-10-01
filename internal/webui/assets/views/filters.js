@@ -61,7 +61,9 @@ export async function filtersView(ctx) {
   const filters = res.data || [];
   const stats = res.stats || {};
   const currency = res.currency || ctx.currency;
-  const chatModels = models.filter((m) => m.kind === "chat");
+  // A subscription model only answers its caller's own sign-in, so nothing
+  // can run on it.
+  const chatModels = models.filter((m) => m.kind === "chat" && !m.subscription);
   const canEdit = isAdmin(ctx);
   ctx.setSubtitle(`${filters.length} ${plural(filters.length, "filter")}`);
 
@@ -589,7 +591,9 @@ export async function filterDetailView(ctx) {
                     editFilter(
                       ctx,
                       f,
-                      (r.data || []).filter((m) => m.kind === "chat"),
+                      (r.data || []).filter(
+                        (m) => m.kind === "chat" && !m.subscription,
+                      ),
                     ),
                   ),
               },
@@ -1427,7 +1431,7 @@ function parseRules(text) {
 // never the right instrument for: each of these is a shape rather than a
 // judgement.
 const RULES_EXAMPLE = `(?i)\\b[a-z_]*(?:secret|token|password|api[_-]?key)[a-z_]*\\s*[=:]\\s*\\S+ => [CREDENTIAL]
-(?i)\\b(sk|pk|ghp|gho|xox[baprs])-[a-z0-9_-]{16,}\\b                     => [CREDENTIAL]
+(?i)\\b(?:(?:sk|pk|xox[baprs])-|gh[pousr]_)[a-z0-9_-]{16,}\\b            => [CREDENTIAL]
 (?i)\\b[a-z]+://[^\\s:@]+:[^\\s:@]+@\\S+                                   => [CONNECTION-STRING]
 \\b[A-Z]{2}\\d{2}(?:[ ]?[A-Z0-9]{4}){2,7}\\b                               => [IBAN]
 \\b\\d{3}\\.\\d{4}\\.\\d{4}\\.\\d{2}\\b                                            => [AHV]

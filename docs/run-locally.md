@@ -134,8 +134,8 @@ it.
 The Nix build fetches the Go modules itself and checks them against
 `vendorHash` in `flake.nix`. When `go.mod` changes, set it to
 `pkgs.lib.fakeHash`, build, and copy the hash Nix prints. `make image`,
-`make notices`, `make dist` and `make dev` use `vendor/`, which is not
-committed; run `go mod vendor` once after cloning.
+`make notices` and `make dist` use `vendor/`, which is not committed; run
+`go mod vendor` once after cloning.
 
 ```sh
 make image      # the gateway image, tagged localhost/keera-gateway:latest

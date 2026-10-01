@@ -14,6 +14,7 @@ const OUTCOMES = {
   error: ["no result", "bad"],
   denied: ["not allowed", "warn"],
   refused: ["refused by a filter", "warn"],
+  input_required: ["asked for input", ""],
 };
 
 function toolOutcome(outcome) {

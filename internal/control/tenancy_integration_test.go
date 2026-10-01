@@ -544,3 +544,38 @@ func TestAnOperatorNamingAMissingOrganisationIsToldSo(t *testing.T) {
 		t.Errorf("status = %d, want 404: %s", w.Code, w.Body)
 	}
 }
+
+// create calls createKey directly, as revoke calls revokeKey.
+func (tn tenants) create(p *authn.Principal, body string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, httpx.ControlPrefix+"/v1/keys",
+		strings.NewReader(body)).WithContext(tn.ctx)
+	tn.srv.createKey(w, r, p)
+	return w
+}
+
+func TestASubscriptionKeyAlwaysBelongsToSomebody(t *testing.T) {
+	tn := twoTenants(t)
+	alice := &authn.Principal{Via: authn.MethodCLI, Role: authn.RoleMember,
+		OrgID: "org_a", UserID: "user_alice"}
+	carol := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleAdmin,
+		OrgID: "org_a", UserID: "user_carol"}
+
+	// What `keera connect claude-code --subscription` sends for a member.
+	w := tn.create(alice, `{"org_id":"org_a","user_id":"user_alice","alias":"claude-code on laptop",
+		"kind":"subscription"}`)
+	var got store.KeyInfo
+	if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &got) != nil ||
+		got.Kind != policy.KeySubscription || got.UserID != "user_alice" {
+		t.Errorf("member's subscription key: %d %s", w.Code, w.Body)
+	}
+
+	// An administrator's own key defaults to nobody, and a subscription key
+	// next to nobody's sign-in is refused.
+	if w := tn.create(carol, `{"org_id":"org_a","kind":"subscription"}`); w.Code != http.StatusBadRequest {
+		t.Errorf("a subscription key for nobody: %d %s", w.Code, w.Body)
+	}
+	if w := tn.create(carol, `{"org_id":"org_a","user_id":"user_bob","kind":"pro"}`); w.Code != http.StatusBadRequest {
+		t.Errorf("an unknown kind: %d %s", w.Code, w.Body)
+	}
+}

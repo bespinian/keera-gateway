@@ -61,7 +61,10 @@ type Model struct {
 	// onprem. A provider fills in its own. Without one, a backend inside the
 	// network is onprem, and one outside it must state its location.
 	Location string `yaml:"location"`
-	Disabled bool   `yaml:"disabled"`
+	// Subscription says each caller's own Claude subscription pays, and the
+	// gateway forwards their sign-in. See docs/subscriptions.md.
+	Subscription bool `yaml:"subscription"`
+	Disabled     bool `yaml:"disabled"`
 }
 
 // LoadModels reads and validates a model catalogue file.
@@ -179,7 +182,7 @@ func ParseModel(m Model) (policy.Model, error) {
 	if !kind.Valid() {
 		return policy.Model{}, fmt.Errorf("unknown kind %q", m.Kind)
 	}
-	return policy.Model{
+	parsed := policy.Model{
 		Alias:        m.Alias,
 		Kind:         kind,
 		Backends:     m.Backends,
@@ -193,8 +196,37 @@ func ParseModel(m Model) (policy.Model, error) {
 		MaxContext:               deref(m.MaxContext),
 		ReleaseDate:              m.ReleaseDate,
 		Location:                 m.Location,
+		Subscription:             m.Subscription,
 		Enabled:                  !m.Disabled,
-	}, nil
+	}
+	if err := CheckSubscription(parsed); err != nil {
+		return policy.Model{}, err
+	}
+	return parsed, nil
+}
+
+// CheckSubscription says what is wrong with a subscription model, or nil when
+// nothing is, or when m is not one.
+//
+// Each caller's Claude sign-in is sent to the model's backend. So the backend
+// must be Anthropic's own API: any other address would collect those sign-ins.
+func CheckSubscription(m policy.Model) error {
+	if !m.Subscription {
+		return nil
+	}
+	p, _ := provider("anthropic")
+	switch {
+	case m.Provider != p.Name:
+		return fmt.Errorf("a subscription model must name the provider %s: "+
+			"only a Claude plan can pay for it", p.Name)
+	case m.Kind != policy.KindChat:
+		return fmt.Errorf("a subscription model must be a chat model")
+	case len(m.Backends) != 1 || strings.TrimRight(m.Backends[0], "/") != p.Endpoint:
+		return fmt.Errorf("a subscription model is sent each caller's Claude sign-in, "+
+			"so its only backend must be Anthropic's own API, %s; to go through "+
+			"an egress proxy, set HTTPS_PROXY on the gateway", p.Endpoint)
+	}
+	return nil
 }
 
 // checkBackend checks that an entry says where to send a request and which

@@ -11,8 +11,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// What `keera sessions` and `keera failures` print in their first column is
-// what `keera session` takes, so a row can be pasted straight into it.
+// What `keera session list` and `keera failures` print in their first column
+// is what `keera session show` takes, so a row can be pasted straight into it.
 func TestSessionAndFailureRowsNameWhatKeeraSessionTakes(t *testing.T) {
 	var buf bytes.Buffer
 	w := newTable(&buf)
@@ -21,7 +21,7 @@ func TestSessionAndFailureRowsNameWhatKeeraSessionTakes(t *testing.T) {
 	}}}, time.Hour)
 	_ = w.Flush()
 	if !strings.Contains(buf.String(), "4711") || strings.Contains(buf.String(), "pU6F5haDO6VBv8V-H") {
-		t.Errorf("keera sessions should print the request id, not the hash:\n%s", buf.String())
+		t.Errorf("keera session list should print the request id, not the hash:\n%s", buf.String())
 	}
 
 	buf.Reset()
@@ -44,7 +44,7 @@ func TestSessionsTakesAPersonByEmail(t *testing.T) {
 		}},
 		"GET /v1/sessions": map[string]any{"data": []any{}},
 	})
-	if err := sessionsCmd(context.Background(), []string{"--user", "Ada@example.ch"}); err != nil {
+	if err := sessionCmd(context.Background(), []string{"list", "--user", "Ada@example.ch"}); err != nil {
 		t.Fatal(err)
 	}
 	q, _ := url.ParseQuery(f.request("GET", "/v1/sessions").query)
@@ -72,4 +72,16 @@ func TestUsageNamesTheGroups(t *testing.T) {
 			t.Errorf("label(%s, %q) = %q, want %q", c.by, c.group, got, c.want)
 		}
 	}
+}
+
+// A session id straight after 'session' opens it, as it did before 'show'.
+func TestSessionTakesAnIdWithoutShow(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/sessions/4711": map[string]any{"session": map[string]any{"id": 4711}},
+	})
+	if err := sessionCmd(context.Background(), []string{"4711", "--json"}); err != nil {
+		t.Fatal(err)
+	}
+	f.request("GET", "/v1/sessions/4711")
 }

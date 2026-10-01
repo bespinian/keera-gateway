@@ -320,14 +320,39 @@ func (b *body) firstUserMessage() (json.RawMessage, bool) {
 	if !ok {
 		return nil, false
 	}
+	var opening json.RawMessage
+	eachElement(raw, func(elem []byte) bool {
+		fields, _, err := splitObject(elem)
+		if err != nil {
+			return true
+		}
+		var role string
+		if json.Unmarshal(fields["role"], &role) != nil || role != "user" {
+			return true
+		}
+		// A message without content uses the whole element: all that matters
+		// is that the same conversation hashes the same way.
+		opening = elem
+		if content, ok := fields["content"]; ok {
+			opening = content
+		}
+		return false
+	})
+	return opening, opening != nil
+}
+
+// eachElement calls fn with each value of a JSON array, in order, until fn
+// returns false. It steps over the values without decoding them, so stopping
+// early costs nothing for the rest.
+func eachElement(raw json.RawMessage, fn func(elem []byte) bool) {
 	arr := bytes.TrimSpace(raw)
 	if len(arr) < 2 || arr[0] != '[' {
-		return nil, false
+		return
 	}
 	for i := 1; ; {
 		i = skipSpace(arr, i)
 		if i >= len(arr) || arr[i] == ']' {
-			return nil, false
+			return
 		}
 		if arr[i] == ',' {
 			i++
@@ -335,25 +360,12 @@ func (b *body) firstUserMessage() (json.RawMessage, bool) {
 		}
 		end := endOfValue(arr, i)
 		if end <= i {
-			return nil, false
+			return
 		}
-		elem := arr[i:end]
+		if !fn(arr[i:end]) {
+			return
+		}
 		i = end
-
-		fields, _, err := splitObject(elem)
-		if err != nil {
-			continue
-		}
-		var role string
-		if json.Unmarshal(fields["role"], &role) != nil || role != "user" {
-			continue
-		}
-		// A message without content uses the whole element: all that matters
-		// is that the same conversation hashes the same way.
-		if content, ok := fields["content"]; ok {
-			return content, true
-		}
-		return elem, true
 	}
 }
 

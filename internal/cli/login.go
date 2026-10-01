@@ -211,6 +211,7 @@ func whoamiCmd(ctx context.Context, args []string) error {
 
 // identity is what /v1/me says, the same answer the panel gets.
 type identity struct {
+	UserID  string `json:"user_id"`
 	Email   string `json:"email"`
 	Role    string `json:"role"`
 	OrgID   string `json:"org_id"`

@@ -180,19 +180,19 @@ not finish.
 ### The command line
 
 ```sh
-keera sessions                        # ranked by cost, the last seven days
-keera sessions --sort requests        # the tasks that would not stop
-keera sessions --unhappy              # only the ones that hit trouble
-keera sessions --model keera-frontier # the tasks that reached the hosted model
-keera sessions --team <team> --since 720h
-keera sessions --user ada@example.ch  # one person, by email or id
-keera session <request-id>            # one task, from beginning to end
+keera session list                        # ranked by cost, the last seven days
+keera session list --sort requests        # the tasks that would not stop
+keera session list --unhappy              # only the ones that hit trouble
+keera session list --model keera-frontier # the tasks that reached the hosted model
+keera session list --team <team> --since 720h
+keera session list --user ada@example.ch  # one person, by email or id
+keera session show <request-id>           # one task, from beginning to end
 ```
 
-`keera sessions` ranks by cost, not by recency. Its first column is the id of
-each task's first request. `keera session` takes the id of **any** request in
-the task: that column, the first column of `keera failures`, or the
-`REQUEST` column of `keera session` itself.
+`keera session list` ranks by cost, not by recency. Its first column is the id
+of each task's first request. `keera session show` takes the id of **any**
+request in the task: that column, the first column of `keera failures`, or the
+`REQUEST` column of `keera session show` itself.
 
 ### The API
 

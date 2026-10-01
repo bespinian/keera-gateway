@@ -39,6 +39,25 @@ func Generate() (key string, hash []byte, prefix string, err error) {
 	return key, sum, key[:prefixLen], nil
 }
 
+// keyLen is the length of every key Generate makes.
+var keyLen = len(Prefix) + base64.RawURLEncoding.EncodedLen(32)
+
+// WellFormed reports whether key has the shape Generate gives every key. A
+// token that does not cannot be a key, so it is refused without a query.
+func WellFormed(key string) bool {
+	if len(key) != keyLen || !strings.HasPrefix(key, Prefix) {
+		return false
+	}
+	for _, c := range key[len(Prefix):] {
+		switch {
+		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9', c == '-', c == '_':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // Hash returns the value stored in api_keys.key_hash for key.
 func Hash(key string) []byte {
 	sum := sha256.Sum256([]byte(key))
