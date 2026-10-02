@@ -9,7 +9,8 @@ With SSO, the audit log names a person, and roles can differ between people.
 
 Keera uses standard OpenID Connect, so any compliant provider works. This page
 covers **Google Workspace** and **Microsoft Entra ID**. A deployment can offer
-one or both.
+one or both. For people no directory vouches for, it can also offer
+[passkeys](#passkeys).
 
 ## Naming a provider
 
@@ -418,6 +419,99 @@ instead.
 Keys attributed to nobody, such as a build pipeline's, are not affected. Give a
 key a `--user` when a person is behind it.
 
+## Passkeys
+
+A passkey signs someone in with their fingerprint, face or device PIN, without
+a directory. Use it for people who have no account in your identity provider,
+or for a deployment with no identity provider at all. It is off by default:
+
+```sh
+KEERA_PASSKEYS=true
+KEERA_PUBLIC_URL=https://keera.example.ch
+```
+
+A passkey belongs to the host name in `KEERA_PUBLIC_URL`. Browsers allow
+passkeys only on https, or on `http://localhost`, and never on an IP address,
+so the gateway refuses to start otherwise. **Do not change the host name
+later**: every passkey stops working, and each person needs a new set-up link.
+
+### Adding someone
+
+An administrator creates the account and gets a one-time set-up link:
+
+```sh
+keera user add ada@example.ch --passkey
+```
+
+Or on the panel: **Users → Add user**, then **Signs in with: A passkey**. Send
+the link to the person privately. Whoever opens it can add a passkey to that
+account. It works once and for 24 hours, and a new link replaces the last one.
+Opening it creates the passkey and signs the person in.
+
+Once signed in, a person adds a passkey for each device under the key button
+next to their address. That needs a browser sign-in from the last 15 minutes, so
+a stolen session cannot plant a passkey of its own. They can remove one, but not their last.
+
+For a lost device, or a new device with no passkey on it yet, an administrator
+sends a new link:
+
+```sh
+keera user passkey-link ada@example.ch
+```
+
+On the panel, that is **Users → Passkeys → New set-up link**. The same screen
+lists a person's passkeys and removes one. Removing someone else's passkey also
+signs them out everywhere.
+
+A person who was added but has not signed in yet can be moved to passkeys
+with the same command, or **Use a passkey** on the panel.
+
+### What keeps passkeys from weakening single sign-on
+
+- **A directory account never gets a passkey.** Leaving the directory has to
+  keep locking a person out, so `passkey-link` refuses an account linked to an
+  identity provider. In the other direction, a passkey account is never taken
+  over by a first SSO sign-in with the same address.
+- **Leaving is handled in Keera.** No directory knows about a passkey account,
+  so disable it when the person leaves: `keera user disable`. That also removes
+  their passkeys. `keera user enable` lets them back in only with a new link.
+- **A passkey account is never an operator.** Nobody proved its address; an
+  administrator typed it. So `KEERA_OPERATORS` does not apply to it, and a
+  passkey sign-in drops the operator role if the row somehow has it. Operators
+  sign in through a directory, or with the operator key.
+- **An administrator can only use their own domain.** If the organisation has
+  an email domain, an administrator can only create passkey accounts at it. An
+  operator can use any address.
+- **Admin groups still decide.** Where `KEERA_OIDC_<NAME>_ADMIN_GROUPS` is set,
+  a passkey account can only be a member, as no directory group speaks for it.
+
+Each sign-in checks that the passkey verified the person (PIN or biometrics),
+that the page asking was this gateway's own, and that the passkey's counter
+did not go backwards. The last one catches a copied hardware key. Synced
+passkeys always report zero, which is fine.
+
+### With no identity provider
+
+With passkeys and no directory, the sign-in screen shows **Sign in with a
+passkey** and, below it, the operator key. The operator key stays on the screen
+because a passkey account is never an operator: the first administrator is made
+with the operator key.
+
+```sh
+export KEERA_OPERATOR_KEY=...
+keera user add you@example.ch --passkey --role admin
+```
+
+### From the command line
+
+```sh
+keera login --provider passkey
+```
+
+The browser opens a page with **Sign in with a passkey**. After that, the
+sign-in goes back to the terminal the same way as with single sign-on. On a
+gateway whose only way in is passkeys, `--provider` can be left out.
+
 ## When it does not work
 
 | Symptom                                                        | Cause                                                                                                                                        |
@@ -442,3 +536,8 @@ key a `--user` when a person is behind it.
 | `keera login`: the browser signs in and nothing happens        | The browser is not on the same machine as the command, usually because of ssh. See above.                                                    |
 | A command says "your sign-in is no longer valid"               | It expired, a role change ended it, or someone ran `keera logout --all`. Run `keera login` again.                                            |
 | Entra: "did not match the issuer URL returned by provider"     | The issuer is `.../common/v2.0`, which answers discovery with a templated `{tenantid}` that matches nothing. Use the tenant ID.              |
+| Boot fails with "KEERA_PASSKEYS: passkeys need …"              | `KEERA_PUBLIC_URL` is unset, plain http on a name other than `localhost`, or an IP address. Browsers refuse passkeys there.                  |
+| "this set-up link has expired, was already used, or …"         | Links work once, for 24 hours, and a new one replaces the last. Ask for a new one: `keera user passkey-link <email>`.                        |
+| "a directory account does not get passkeys"                    | That person signs in through an identity provider. That is how leaving the directory locks them out.                                         |
+| "that passkey was not accepted"                                | The passkey was removed, belongs to a disabled person, or is for another host name. The gateway log says which.                              |
+| The browser says the passkey prompt failed with SecurityError  | The panel is open at an address other than `KEERA_PUBLIC_URL`, such as `127.0.0.1` instead of `localhost`.                                   |

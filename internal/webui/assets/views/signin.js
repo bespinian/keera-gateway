@@ -6,10 +6,19 @@
 // every day.
 
 import { api, ApiError } from "../api.js";
+import { getPasskey, passkeysSupported } from "../webauthn.js";
 import { h, replace, icon, icons, brandMark, idpMark } from "../ui.js";
 
+/** passkeySignInFlow is the sign-in `keera login --provider passkey` started,
+ *  if this page was opened for one. It comes after the #, so it never reaches
+ *  a server log. */
+export function passkeySignInFlow() {
+  const m = location.hash.match(/^#passkey-sign-in=([A-Za-z0-9_-]+)$/);
+  return m ? m[1] : "";
+}
+
 export async function signIn(root, onSignedIn) {
-  let config = { sso: false, providers: [] };
+  let config = { sso: false, providers: [], passkeys: false };
   try {
     config = await api.authConfig();
   } catch {
@@ -19,6 +28,8 @@ export async function signIn(root, onSignedIn) {
 
   const params = new URLSearchParams(location.search);
   const ssoError = params.get("sign_in_error");
+  // Where the person was going, kept through any way of signing in.
+  const next = params.get("next");
 
   const message = h("div");
   const keyInput = h("input", {
@@ -88,11 +99,7 @@ export async function signIn(root, onSignedIn) {
     { class: "signin-card" },
     h("div", { class: "signin-brand" }, brandMark(28), "Keera Gateway"),
     ssoError
-      ? h(
-          "div",
-          { class: "banner banner-bad" },
-          "Single sign-on failed: " + ssoError,
-        )
+      ? h("div", { class: "banner banner-bad" }, "Sign-in failed: " + ssoError)
       : null,
     message,
   );
@@ -101,7 +108,59 @@ export async function signIn(root, onSignedIn) {
   // cursor lands in it once the card is actually in the document.
   let focusKey = false;
 
-  if (config.sso) {
+  const cliFlow = passkeySignInFlow();
+  const passkeyButton = (primary) => {
+    const b = h(
+      "button",
+      {
+        class: "btn" + (primary ? " btn-primary" : ""),
+        style: { width: "100%", justifyContent: "center" },
+        onClick: async () => {
+          replace(message);
+          b.disabled = true;
+          try {
+            const opts = await api.passkeySignInOptions(cliFlow, next);
+            const credential = await getPasskey(opts.options);
+            const res = await api.passkeySignIn(opts.flow, credential);
+            if (cliFlow) {
+              // On to the port `keera login` is waiting on.
+              location.href = res.redirect;
+              return;
+            }
+            history.replaceState({}, "", res.redirect || "/");
+            await onSignedIn();
+          } catch (err) {
+            replace(
+              message,
+              h(
+                "div",
+                { class: "banner banner-bad" },
+                err.message || "Signing in with a passkey failed.",
+              ),
+            );
+            b.disabled = false;
+          }
+        },
+      },
+      icon(icons.passkey),
+      "Sign in with a passkey",
+    );
+    if (!passkeysSupported()) b.disabled = true;
+    return b;
+  };
+
+  if (cliFlow) {
+    // `keera login` sent the browser here. Only the passkey finishes it.
+    card.append(
+      h("p", {}, "Sign in to the keera command line."),
+      h("div", { class: "signin-providers" }, passkeyButton(true)),
+      h(
+        "div",
+        { class: "signin-note" },
+        "Your browser then hands the sign-in over to the terminal.",
+      ),
+    );
+  } else if (config.sso) {
     // The operator key is how a deployment is set up before its identity
     // provider exists, and how an operator does the odd task afterwards. Once
     // single sign-on works it is the wrong door for everyone who is not doing
@@ -114,7 +173,6 @@ export async function signIn(root, onSignedIn) {
     // work Microsoft one cannot answer "single sign-on", and picking wrong
     // lands them in a failed sign-in rather than a different button.
     const providers = config.providers || [];
-    const next = params.get("next");
 
     card.append(
       h(
@@ -137,6 +195,7 @@ export async function signIn(root, onSignedIn) {
             "Continue with " + (p.label || p.name),
           ),
         ),
+        config.passkeys ? passkeyButton(false) : null,
       ),
       h(
         "div",
@@ -144,12 +203,28 @@ export async function signIn(root, onSignedIn) {
         // Deliberately not "ask to be put in the right group": on a deployment
         // whose roles are assigned in Keera there is no group to be put in, and
         // on Google Workspace there could not be one.
-        "Sign in with your identity provider. If you cannot, ask your " +
-          "administrator.",
+        (config.passkeys
+          ? "Sign in with your identity provider or a passkey. "
+          : "Sign in with your identity provider. ") +
+          "If you cannot, ask your administrator.",
       ),
       ...(operatorKey
         ? [h("div", { class: "divider" }, "operator"), keyForm]
         : []),
+    );
+  } else if (config.passkeys) {
+    // No directory, so the operator key stays on the screen: a passkey
+    // account is never an operator, so this is the only way to be one.
+    card.append(
+      h("div", { class: "signin-providers" }, passkeyButton(true)),
+      h(
+        "div",
+        { class: "signin-note" },
+        "Sign in with the passkey you set up. If you have none, ask your " +
+          "administrator for a set-up link.",
+      ),
+      h("div", { class: "divider" }, "operator"),
+      keyForm,
     );
   } else {
     card.append(

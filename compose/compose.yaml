@@ -60,7 +60,8 @@ services:
       KEERA_MAX_BODY_BYTES: ${KEERA_MAX_BODY_BYTES:-}
       KEERA_MAX_RESPONSE_BYTES: ${KEERA_MAX_RESPONSE_BYTES:-}
       KEERA_MAX_DB_CONNS: ${KEERA_MAX_DB_CONNS:-}
-      # Single sign-on. Empty means the panel accepts only the operator key.
+      # Single sign-on. Without it or passkeys, the panel accepts only the
+      # operator key.
       # A button per name on the sign-in screen, each configured under
       # KEERA_OIDC_<NAME>_*. Compose cannot pass through variables it does not
       # name, so the two blocks below are the ones this file ships with;
@@ -92,6 +93,9 @@ services:
       KEERA_OIDC_ENTRA_OPERATOR_GROUPS: ${KEERA_OIDC_ENTRA_OPERATOR_GROUPS:-}
       KEERA_OIDC_ENTRA_DOMAINS: ${KEERA_OIDC_ENTRA_DOMAINS:-}
       KEERA_OPERATORS: ${KEERA_OPERATORS:-}
+      # Accounts that sign in with a passkey instead of a directory. Needs
+      # KEERA_PUBLIC_URL on https, or on http://localhost. See docs/sso.md.
+      KEERA_PASSKEYS: ${KEERA_PASSKEYS:-}
       # The gateway as a browser sees it. It is also what the panel's "Connect
       # a client" page tells a developer to point their editor at, with /api on
       # the end. Empty leaves both to the Host header.

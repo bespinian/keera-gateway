@@ -92,6 +92,15 @@ func serve(ctx context.Context) error {
 		return err
 	}
 
+	var passkeys *authn.RelyingParty
+	if cfg.Passkeys {
+		// Config checked the URL already.
+		if passkeys, err = authn.NewRelyingParty(cfg.PublicURL); err != nil {
+			return err
+		}
+		log.Info("passkeys enabled", "rp_id", passkeys.ID())
+	}
+
 	sandboxes, err := buildSandboxes(ctx, st, reg, cfg, log)
 	if err != nil {
 		return err
@@ -104,6 +113,7 @@ func serve(ctx context.Context) error {
 		Secrets:       secrets,
 		Currency:      cfg.Currency,
 		Providers:     providers,
+		Passkeys:      passkeys,
 		ServeUI:       cfg.UI,
 		SecureCookies: cfg.SecureCookies,
 		// The browser's origin. Editors send inference to the same origin.
@@ -272,7 +282,7 @@ func buildProviders(ctx context.Context, cfg config.Config, log *slog.Logger) (a
 				"operator_groups", p.Mapping().OperatorGroups)
 			warnGoogleGroups(p, log)
 		}
-	case cfg.UI:
+	case cfg.UI && !cfg.Passkeys:
 		log.Warn("no identity provider configured; the control panel accepts only " +
 			"the operator key, and audit entries cannot name a person")
 	}

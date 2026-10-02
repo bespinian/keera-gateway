@@ -151,6 +151,7 @@ func TestTheDirectoryToSignInThroughIsSettledFirst(t *testing.T) {
 		name      string
 		providers []string
 		sso       bool
+		passkeys  bool
 		asked     string
 		want      string
 		wantErr   string
@@ -165,6 +166,11 @@ func TestTheDirectoryToSignInThroughIsSettledFirst(t *testing.T) {
 			providers: []string{"google"}, asked: "okta", wantErr: "google"},
 		{name: "no identity provider at all", sso: false,
 			wantErr: "KEERA_OPERATOR_KEY"},
+		{name: "passkeys only", passkeys: true, want: "passkey"},
+		{name: "a directory and passkeys", sso: true, passkeys: true,
+			providers: []string{"google"}, wantErr: "google, passkey"},
+		{name: "passkey named", sso: true, passkeys: true,
+			providers: []string{"google"}, asked: "passkey", want: "passkey"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -176,7 +182,7 @@ func TestTheDirectoryToSignInThroughIsSettledFirst(t *testing.T) {
 					providers = append(providers, map[string]string{"name": name, "label": name})
 				}
 				_ = json.NewEncoder(w).Encode(map[string]any{
-					"sso": tc.sso, "providers": providers,
+					"sso": tc.sso, "providers": providers, "passkeys": tc.passkeys,
 				})
 			}))
 			defer srv.Close()

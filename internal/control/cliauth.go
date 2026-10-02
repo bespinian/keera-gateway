@@ -116,20 +116,29 @@ func validChallenge(s string) bool {
 // sends the browser to the port the command line is waiting on.
 func (s *Server) handOverToCLI(w http.ResponseWriter, r *http.Request,
 	flow store.LoginFlow, user store.User) {
-	code, hash, err := authn.NewCLICode()
+	to, err := s.cliHandOver(r, flow, user)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
+	http.Redirect(w, r, to, http.StatusFound)
+}
+
+// cliHandOver creates the one-time code and returns the loopback address to
+// send the browser to with it.
+func (s *Server) cliHandOver(r *http.Request, flow store.LoginFlow, user store.User) (string, error) {
+	code, hash, err := authn.NewCLICode()
+	if err != nil {
+		return "", err
+	}
 	if err := s.st.CreateCLICode(r.Context(), hash, user.ID, flow.CLIChallenge,
 		time.Now().Add(authn.CLICodeTTL)); err != nil {
-		s.fail(w, err)
-		return
+		return "", err
 	}
 	// The redirect was rebuilt without a query at the start, so appending one
 	// is safe.
 	q := url.Values{"code": {code}, "state": {flow.CLIState}}
-	http.Redirect(w, r, flow.CLIRedirect+"?"+q.Encode(), http.StatusFound)
+	return flow.CLIRedirect + "?" + q.Encode(), nil
 }
 
 // cliToken redeems a one-time code for a token the command line keeps.

@@ -66,7 +66,7 @@ const tagline = "keera - administer a Keera Gateway"
 var commands = []command{
 	{
 		name:    "login",
-		summary: "sign in to a deployment through its identity provider",
+		summary: "sign in to a deployment through its identity provider or a passkey",
 		args:    "[flags]",
 		flags:   []string{"provider", "no-browser"},
 		prose: "Opens a browser, signs you in the way the panel does, and keeps what comes " +
@@ -183,7 +183,11 @@ var commands = []command{
 			"'user role' is refused: the next sign-in would undo it.",
 		subs: []subcommand{
 			{name: "add", aliases: []string{"create", "invite", "new"}, args: "<email>", summary: "add a person",
-				flags: []string{"org", "role", "external-id", "json"}},
+				flags: []string{"org", "role", "external-id", "passkey", "json"},
+				prose: "With --passkey, they sign in with a passkey instead of an identity " +
+					"provider, and the command prints a set-up link to send them. This needs " +
+					"KEERA_PASSKEYS on the gateway. An administrator can only use their " +
+					"organisation's email domain."},
 			{name: "list", aliases: []string{"ls"}, summary: "everyone in the organisation", flags: []string{"org", "json"}},
 			{name: "role", aliases: []string{"set-role"}, args: "<email-or-id> <member|admin>",
 				summary: "change what a person may do; signs them out",
@@ -199,7 +203,15 @@ var commands = []command{
 					"but not the keys a person already has."},
 			{name: "enable", args: "<email-or-id>", summary: "let a disabled person sign in again",
 				flags: []string{"org", "json"},
-				prose: "Their old keys stay revoked, so they start with none."},
+				prose: "Their old keys stay revoked, so they start with none. Their passkeys " +
+					"are gone too: send them a new set-up link."},
+			{name: "passkey-link", aliases: []string{"passkey"}, args: "<email-or-id>",
+				summary: "a new set-up link, to add a passkey",
+				flags:   []string{"org", "json"},
+				prose: "For a new device, or after a lost passkey. It works once, for 24 hours, " +
+					"and replaces any earlier link. Someone who has not signed in yet becomes " +
+					"a passkey account. A directory account is refused: leaving the directory " +
+					"has to lock them out."},
 		},
 	},
 	{

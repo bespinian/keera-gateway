@@ -333,6 +333,15 @@ func (s *Store) Usage(ctx context.Context, q UsageQuery) ([]UsageBucket, error) 
 	if q.GroupBy == "day" {
 		order = "grp"
 	}
+	// The alias is whatever the client sent, so a mistyped name is on its
+	// refusal's row. A name that was never served and cost nothing is not a
+	// model; the request log still shows the refusal.
+	having := ""
+	if col == groupColumns["model"] {
+		having = ` HAVING count(*) FILTER (WHERE status < 400) > 0
+		    OR sum(input_tokens + output_tokens) > 0
+		    OR sum(cost_micros + list_cost_micros) > 0`
+	}
 	sql := `SELECT ` + col + ` AS grp, ` + org + `, count(*) FILTER (WHERE status < 400),
 		COALESCE(sum(input_tokens),0),
 		COALESCE(sum(output_tokens),0), COALESCE(sum(cost_micros),0),
@@ -340,7 +349,7 @@ func (s *Store) Usage(ctx context.Context, q UsageQuery) ([]UsageBucket, error) 
 		FROM usage_events
 		WHERE ts >= $1 AND ts < $2 AND ($3 = '' OR org_id = $3)` +
 		q.narrow("", 3) + `
-		GROUP BY ` + group + ` ORDER BY ` + order
+		GROUP BY ` + group + having + ` ORDER BY ` + order
 	rows, err := s.pool.Query(ctx, sql, append([]any{q.From, q.To, q.OrgID}, q.args()...)...)
 	if err != nil {
 		return nil, err

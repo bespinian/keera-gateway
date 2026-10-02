@@ -93,7 +93,7 @@ func (c OIDCConfig) Validate() error {
 	case !nameRE.MatchString(c.Name):
 		return fmt.Errorf("%q is not a usable provider name; use lower-case "+
 			"letters, digits and hyphens", c.Name)
-	case c.Name == ReservedProvider:
+	case c.Name == ReservedProvider || c.Name == PasskeyProvider:
 		return fmt.Errorf("%q is reserved for the gateway's own sign-ins; give the "+
 			"identity provider another name", c.Name)
 	case c.ClientSecret == "":

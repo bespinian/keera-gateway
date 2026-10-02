@@ -15,6 +15,7 @@ import {
   plural,
 } from "../ui.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
+import { userPasskeys, showPasskeyLink } from "./passkeys.js";
 
 const ROLES = [
   {
@@ -43,6 +44,41 @@ const ASSIGNABLE = ROLES.filter((r) => r.key !== "operator");
 
 const TONE = { operator: "accent", admin: "good", member: "" };
 
+// isPasskeyAccount mirrors authn.IsPasskeyAccount: the account signs in with
+// passkeys, not through a directory.
+const isPasskeyAccount = (u) =>
+  (u.external_id || "").startsWith("keera:passkey:");
+
+/** headline says how people get in and where their roles come from. */
+function headline(me, canAssign) {
+  if (!me.sso && me.passkeys)
+    return (
+      "People sign in with a passkey. Add someone to get a set-up link " +
+      "for them."
+    );
+  if (!me.sso)
+    return (
+      "Nobody can sign in until single sign-on is set up. People added " +
+      "here are linked to their identity when they first sign in."
+    );
+  if (canAssign)
+    return (
+      "Roles set here stay until you change them. The operator role is " +
+      "set in the gateway's configuration."
+    );
+  return (
+    "Roles come from a group in the identity provider, read at every " +
+    "sign-in. Change them in the directory."
+  );
+}
+
+/** signsInWith is the line under a person's address. */
+function signsInWith(u) {
+  if (isPasskeyAccount(u)) return "signs in with a passkey";
+  if (u.external_id) return "linked to " + u.external_id;
+  return "not linked to an identity yet";
+}
+
 export async function peopleView(ctx) {
   const canOperate = ctx.state.me.unrestricted;
   if (!ctx.orgID && canOperate) return chooseOrg(ctx, "Users");
@@ -58,18 +94,7 @@ export async function peopleView(ctx) {
   const head = h(
     "div",
     { class: "row", style: { marginBottom: "16px" } },
-    h(
-      "div",
-      { class: "muted" },
-      !ctx.state.me.sso
-        ? "Nobody can sign in until single sign-on is set up. People added " +
-            "here are linked to their identity when they first sign in."
-        : canAssign
-          ? "Roles set here stay until you change them. The operator role is " +
-            "set in the gateway's configuration."
-          : "Roles come from a group in the identity provider, read at every " +
-            "sign-in. Change them in the directory.",
-    ),
+    h("div", { class: "muted" }, headline(ctx.state.me, canAssign)),
     h("div", { style: { flex: 1 } }),
     h(
       "button",
@@ -94,17 +119,11 @@ export async function peopleView(ctx) {
               h("strong", {}, u.email),
               u.disabled_at ? pill("Disabled", "bad") : null,
             ),
-            u.external_id
-              ? h(
-                  "span",
-                  { class: "faint", style: { fontSize: "11px" } },
-                  "linked to " + u.external_id,
-                )
-              : h(
-                  "span",
-                  { class: "faint", style: { fontSize: "11px" } },
-                  "not linked to an identity yet",
-                ),
+            h(
+              "span",
+              { class: "faint", style: { fontSize: "11px" } },
+              signsInWith(u),
+            ),
           ),
       },
       {
@@ -168,6 +187,7 @@ export async function peopleView(ctx) {
           return h(
             "div",
             { class: "row nowrap", style: { gap: "8px" } },
+            passkeyButton(ctx, u),
             canAssign && !u.disabled_at
               ? h(
                   "button",
@@ -233,11 +253,24 @@ function addPerson(ctx) {
   const canAssign = !ctx.state.me.roles_from_directory;
   const role = roleSelect("member");
   const err = h("div");
+  // Without a directory a passkey is the only way in, so it is the default.
+  const signIn = h(
+    "select",
+    { class: "select" },
+    h(
+      "option",
+      { value: "", selected: Boolean(ctx.state.me.sso) },
+      "Their identity provider",
+    ),
+    h("option", { value: "passkey", selected: !ctx.state.me.sso }, "A passkey"),
+  );
 
   modal({
     title: "Add a user",
     subtitle: canAssign
-      ? "This reserves their role. They still sign in through the identity provider."
+      ? ctx.state.me.passkeys
+        ? "This reserves their role."
+        : "This reserves their role. They still sign in through the identity provider."
       : `This adds them to ${orgNameOf(ctx)} before they first sign in. ` +
         "Their role comes from the directory.",
     body: h(
@@ -245,6 +278,20 @@ function addPerson(ctx) {
       { onSubmit: (e) => e.preventDefault() },
       err,
       h("div", { class: "field" }, h("label", {}, "Email"), email),
+      ctx.state.me.passkeys
+        ? h(
+            "div",
+            { class: "field" },
+            h("label", {}, "Signs in with"),
+            signIn,
+            h(
+              "div",
+              { class: "hint" },
+              "A passkey account does not leave with the directory: disable " +
+                "it here when they leave. You get a set-up link to send them.",
+            ),
+          )
+        : null,
       canAssign
         ? h(
             "div",
@@ -271,14 +318,19 @@ function addPerson(ctx) {
             if (!email.value.trim()) return email.focus();
             e.target.disabled = true;
             try {
-              await api.inviteUser(
+              const passkey =
+                ctx.state.me.passkeys && signIn.value === "passkey";
+              const user = await api.inviteUser(
                 ctx.orgID || ctx.state.me.org_id,
                 email.value.trim().toLowerCase(),
                 role.value,
+                passkey ? "passkey" : "",
               );
               close();
               toast("User added", "good");
               ctx.reload();
+              if (user.passkey_link)
+                showPasskeyLink(user.email, user.passkey_link);
             } catch (ex) {
               showError(err, ex.message);
               e.target.disabled = false;
@@ -349,6 +401,9 @@ function disablePerson(ctx, user) {
         {},
         h("li", {}, "they cannot sign in, and are signed out everywhere"),
         h("li", {}, "all their keys are revoked for good"),
+        ctx.state.me.passkeys && isPasskeyAccount(user)
+          ? h("li", {}, "their passkeys are removed")
+          : null,
         ctx.state.me.sandboxes
           ? h(
               "li",
@@ -380,12 +435,55 @@ function disablePerson(ctx, user) {
   });
 }
 
+// Passkeys are for accounts no directory vouches for: a passkey account, or
+// someone who has not signed in yet.
+function passkeyButton(ctx, u) {
+  if (!ctx.state.me.passkeys || u.disabled_at) return null;
+  if (isPasskeyAccount(u))
+    return h(
+      "button",
+      {
+        class: "btn btn-sm",
+        title: "This person's passkeys, and a new set-up link",
+        onClick: () => userPasskeys(u),
+      },
+      "Passkeys",
+    );
+  if (u.external_id) return null;
+  return h(
+    "button",
+    {
+      class: "btn btn-sm",
+      title: "Let this person sign in with a passkey instead",
+      onClick: () => switchToPasskey(ctx, u),
+    },
+    "Use a passkey",
+  );
+}
+
+function switchToPasskey(ctx, user) {
+  confirm({
+    title: `Let ${user.email} sign in with a passkey?`,
+    body:
+      "They will sign in with a passkey instead of the identity provider, and " +
+      "you get a set-up link to send them. This cannot be undone here.",
+    confirmLabel: "Create set-up link",
+    onConfirm: async () => {
+      const link = await api.passkeyLink(user.id);
+      ctx.reload();
+      showPasskeyLink(user.email, link);
+    },
+  });
+}
+
 function enablePerson(ctx, user) {
   confirm({
     title: `Enable ${user.email}?`,
-    body:
-      "They can sign in again. Their old keys stay revoked, so they start " +
-      "with none.",
+    body: isPasskeyAccount(user)
+      ? "Their old keys stay revoked, and their passkeys are gone. Send them " +
+        "a new set-up link from Passkeys."
+      : "They can sign in again. Their old keys stay revoked, so they start " +
+        "with none.",
     confirmLabel: "Enable",
     onConfirm: async () => {
       await api.enableUser(user.id);

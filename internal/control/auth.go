@@ -36,11 +36,16 @@ func (s *Server) authConfig(w http.ResponseWriter, _ *http.Request) {
 		"sso": s.opts.Providers.Enabled(),
 		// One button per provider.
 		"providers": providers,
+		"passkeys":  s.opts.Passkeys != nil,
 	})
 }
 
 // login starts the authorization code flow.
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	if s.passkeyLogin(r.URL.Query().Get("provider")) {
+		s.startPasskeyLogin(w, r)
+		return
+	}
 	if !s.opts.Providers.Enabled() {
 		httpx.WriteError(w, http.StatusNotImplemented, "invalid_request_error", "sso_not_configured",
 			"no identity provider is configured; sign in with the operator key, or set KEERA_OIDC_PROVIDERS")
@@ -92,8 +97,12 @@ func (s *Server) providerFor(name string) (*authn.OIDC, error) {
 		if only := s.opts.Providers.Only(); only != nil {
 			return only, nil
 		}
-		return nil, errors.New("this gateway has more than one identity provider, " +
-			"so a sign-in has to name one of: " + strings.Join(s.opts.Providers.Names(), ", "))
+		names := s.opts.Providers.Names()
+		if s.opts.Passkeys != nil {
+			names = append(names, authn.PasskeyProvider)
+		}
+		return nil, errors.New("this gateway has more than one way to sign in, " +
+			"so a sign-in has to name one of: " + strings.Join(names, ", "))
 	}
 	if p := s.opts.Providers.ByName(name); p != nil {
 		return p, nil
@@ -380,6 +389,7 @@ func (s *Server) sessionPrincipal(r *http.Request) (*authn.Principal, error) {
 		OrgID:          su.User.OrgID,
 		CSRF:           su.Session.CSRF,
 		CredentialHash: hash,
+		SignedInAt:     su.Session.CreatedAt,
 	}, nil
 }
 
@@ -457,6 +467,10 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request, p *authn.Principal) 
 		// Whether this deployment lends out sandboxes. Without a driver the
 		// panel does not show them at all.
 		"sandboxes": s.opts.Sandboxes != nil,
+		// Whether administrators can create passkey accounts, and whether
+		// this is one, which has passkeys to manage.
+		"passkeys":        s.opts.Passkeys != nil,
+		"passkey_account": s.isPasskeyAccount(r, p.UserID),
 	}
 	if p.OrgID != "" {
 		if name, found := s.orgName(r.Context(), p.OrgID); found {
@@ -464,6 +478,16 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request, p *authn.Principal) 
 		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// isPasskeyAccount reports whether a person signs in with passkeys. A failed
+// read counts as no: it only decides what the panel offers.
+func (s *Server) isPasskeyAccount(r *http.Request, userID string) bool {
+	if s.opts.Passkeys == nil || userID == "" {
+		return false
+	}
+	u, err := s.st.UserByID(r.Context(), userID)
+	return err == nil && authn.IsPasskeyAccount(u.ExternalID)
 }
 
 // orgName looks up an organisation's name. A failed read counts as not found:

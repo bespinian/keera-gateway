@@ -41,6 +41,8 @@ func TestOIDCConfigValidate(t *testing.T) {
 		// The operator key signs in as keera:operator-key, and a provider of
 		// that name could issue the same subject.
 		{"the reserved name", func(c *OIDCConfig) { c.Name = "keera" }, "reserved"},
+		// ?provider=passkey starts a passkey sign-in.
+		{"the passkey name", func(c *OIDCConfig) { c.Name = "passkey" }, "reserved"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

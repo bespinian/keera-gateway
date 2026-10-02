@@ -142,20 +142,20 @@ func (s *Server) checkDeployment(ctx context.Context, d *Diagnosis, p *authn.Pri
 // checkIdentity checks how people sign in.
 func (s *Server) checkIdentity(d *Diagnosis) {
 	const area = "Deployment"
-	switch {
-	case s.opts.Providers.Enabled():
-		names := make([]string, 0, len(s.opts.Providers))
-		for _, provider := range s.opts.Providers {
-			names = append(names, provider.Name())
-		}
-		d.add(area, "Identity", VerdictOK, strings.Join(names, ", "), "")
-	default:
-		d.add(area, "Identity", VerdictWarn,
-			"none, so the operator key is the only way in and no audit entry can name "+
-				"a person",
-			"name a provider in KEERA_OIDC_PROVIDERS and set its "+
-				"KEERA_OIDC_<NAME>_ISSUER, _CLIENT_ID and _CLIENT_SECRET; see docs/sso.md")
+	names := s.opts.Providers.Names()
+	if s.opts.Passkeys != nil {
+		names = append(names, authn.PasskeyProvider)
 	}
+	if len(names) > 0 {
+		d.add(area, "Identity", VerdictOK, strings.Join(names, ", "), "")
+		return
+	}
+	d.add(area, "Identity", VerdictWarn,
+		"none, so the operator key is the only way in and no audit entry can name "+
+			"a person",
+		"name a provider in KEERA_OIDC_PROVIDERS and set its "+
+			"KEERA_OIDC_<NAME>_ISSUER, _CLIENT_ID and _CLIENT_SECRET, or set "+
+			"KEERA_PASSKEYS=true; see docs/sso.md")
 }
 
 // checkCatalogue checks the models, which is where a deployment that serves

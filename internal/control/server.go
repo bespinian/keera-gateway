@@ -47,8 +47,12 @@ type Options struct {
 	Secrets  *secret.Box
 	Currency string
 	// Providers are the identity providers, in the order the sign-in screen
-	// shows them. Empty means the operator key is the only way in.
+	// shows them. With none and no passkeys, the operator key is the only way
+	// in.
 	Providers authn.Providers
+	// Passkeys is this gateway as WebAuthn sees it. Nil means passkeys are
+	// off.
+	Passkeys *authn.RelyingParty
 	// ServeUI serves the control panel from this listener's root.
 	ServeUI bool
 	// SecureCookies marks the session cookie Secure.
@@ -156,6 +160,15 @@ func (s *Server) Handler() http.Handler {
 	// The last step of `keera login`: a one-time code redeemed for a token.
 	mux.Handle("POST "+httpx.ControlPrefix+"/auth/cli/token",
 		s.throttle("cli_token", signInRPM, signInThrottled, s.cliToken))
+	// Passkeys: signing in, and adding the first one from a set-up link.
+	mux.Handle("POST "+httpx.ControlPrefix+"/auth/passkey/options",
+		s.throttle("passkey_options", flowRPM, signInThrottled, s.passkeySignInOptions))
+	mux.Handle("POST "+httpx.ControlPrefix+"/auth/passkey/sign-in",
+		s.throttle("passkey_sign_in", signInRPM, signInThrottled, s.passkeySignIn))
+	mux.Handle("POST "+httpx.ControlPrefix+"/auth/passkey/setup/options",
+		s.throttle("passkey_setup_options", signInRPM, signInThrottled, s.passkeySetupOptions))
+	mux.Handle("POST "+httpx.ControlPrefix+"/auth/passkey/setup",
+		s.throttle("passkey_setup", signInRPM, signInThrottled, s.passkeySetup))
 	route("POST /auth/logout", s.logout)
 
 	route("GET /v1/me", s.me)
@@ -178,6 +191,12 @@ func (s *Server) Handler() http.Handler {
 	route("PATCH /v1/users/{id}", s.updateUser)
 	route("POST /v1/users/{id}/disable", s.disableUser)
 	route("POST /v1/users/{id}/enable", s.enableUser)
+	route("POST /v1/users/{id}/passkey-link", s.issuePasskeyLinkRoute)
+
+	route("GET /v1/passkeys", s.listPasskeys)
+	route("POST /v1/passkeys/options", s.ownPasskeyOptions)
+	route("POST /v1/passkeys", s.addOwnPasskey)
+	route("DELETE /v1/passkeys/{id}", s.deletePasskey)
 
 	route("POST /v1/keys", s.createKey)
 	route("GET /v1/keys", s.listKeys)

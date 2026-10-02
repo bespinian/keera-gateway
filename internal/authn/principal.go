@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Role is what a person may do.
@@ -73,6 +74,9 @@ type Principal struct {
 	// CredentialHash names the session or command-line token row, for
 	// sign-out.
 	CredentialHash []byte `json:"-"`
+	// SignedInAt is when a session's sign-in happened. Adding a passkey
+	// needs a recent one.
+	SignedInAt time.Time `json:"-"`
 }
 
 // Actor is what goes in the audit log. The operator key cannot say who used

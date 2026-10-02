@@ -133,6 +133,10 @@ providers. With several, each needs its domains.
 signs them in. SSO needs `KEERA_PUBLIC_URL`: the provider sends the browser back
 to `<KEERA_PUBLIC_URL>/control/auth/callback`. See [sso.md](sso.md).
 
+`KEERA_PASSKEYS` (`false` unless set) lets administrators create accounts that
+sign in with a passkey instead of a directory. It needs `KEERA_PUBLIC_URL` on
+https, or on `http://localhost`. See [Passkeys](sso.md#passkeys).
+
 Discovery runs at start-up, so a wrong issuer URL stops the gateway with the URL
 in the error, instead of breaking sign-in later. [sso.md](sso.md) is the
 walkthrough.
@@ -321,9 +325,9 @@ session cookie protect the control side. So:
   lower limit rejects long conversations before they reach the gateway.
 - **Choose which paths to publish.** To give developers the inference API
   without the panel, publish only `/api`.
-- **Set up single sign-on** before anyone else can reach the panel. Without it,
-  the only way in is the operator key, which can change every guardrail, and
-  every audit entry reads `operator key`.
+- **Set up single sign-on or passkeys** before anyone else can reach the panel.
+  Without either, the only way in is the operator key, which can change every
+  guardrail, and every audit entry reads `operator key`.
 
 Set `KEERA_PUBLIC_URL` to the panel's public address. The sign-out redirect
 uses it, and **Connect a client** gives developers that address with `/api`

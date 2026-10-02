@@ -22,8 +22,8 @@ import (
 //
 // KEERA_OPERATOR_KEY is shared, never expires and can do everything, and the
 // audit log cannot say who used it. `keera login` signs a person in through
-// the deployment's identity provider instead, and stores a credential that is
-// theirs, carries their role and expires. The operator key stays for
+// the deployment's identity provider or a passkey instead, and stores a
+// credential that is theirs, carries their role and expires. The operator key stays for
 // automation and for setting up a new deployment.
 //
 // The flow is RFC 8252's loopback redirect; cliauth.go on the gateway is the
@@ -33,7 +33,7 @@ import (
 func loginCmd(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("login", flag.ExitOnError)
 	provider := fs.String("provider", "",
-		"which identity provider to sign in through, where a deployment offers several")
+		"which identity provider to sign in through, or passkey, where a deployment offers several")
 	noBrowser := fs.Bool("no-browser", false,
 		"do not open a browser; the sign-in URL is printed either way")
 	fs.Usage = func() { _ = printHelp(fs, "login", "") }
@@ -257,24 +257,32 @@ func chooseProvider(ctx context.Context, c *client, named string) (string, error
 			Name  string `json:"name"`
 			Label string `json:"label"`
 		} `json:"providers"`
+		Passkeys bool `json:"passkeys"`
 	}
 	if err := c.anon(ctx, "GET", "/auth/config", nil, &cfg); err != nil {
 		return "", err
 	}
-	if !cfg.SSO {
+	if !cfg.SSO && !cfg.Passkeys {
 		return "", fmt.Errorf("%s has no identity provider configured, so there is "+
 			"nothing to sign in to; use KEERA_OPERATOR_KEY, or configure one - see docs/sso.md",
 			c.base)
 	}
-	names := make([]string, 0, len(cfg.Providers))
-	for _, p := range cfg.Providers {
-		names = append(names, p.Name)
+	names := make([]string, 0, len(cfg.Providers)+1)
+	if cfg.SSO {
+		for _, p := range cfg.Providers {
+			names = append(names, p.Name)
+		}
+	}
+	// A passkey sign-in is named like a provider, and runs in the browser
+	// the same way.
+	if cfg.Passkeys {
+		names = append(names, authn.PasskeyProvider)
 	}
 	if named == "" {
 		if len(names) == 1 {
 			return names[0], nil
 		}
-		return "", fmt.Errorf("%s has more than one identity provider, so --provider has "+
+		return "", fmt.Errorf("%s has more than one way to sign in, so --provider has "+
 			"to name one of: %s", c.base, strings.Join(names, ", "))
 	}
 	for _, n := range names {

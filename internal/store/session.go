@@ -11,6 +11,7 @@ import (
 type Session struct {
 	UserID    string
 	CSRF      string
+	CreatedAt time.Time
 	ExpiresAt time.Time
 }
 
@@ -33,11 +34,11 @@ type SessionUser struct {
 // disabled person, is reported as missing, so no caller has to check either.
 func (s *Store) LookupSession(ctx context.Context, hash []byte) (SessionUser, error) {
 	var su SessionUser
-	err := s.pool.QueryRow(ctx, `SELECT s.user_id, s.csrf, s.expires_at,
+	err := s.pool.QueryRow(ctx, `SELECT s.user_id, s.csrf, s.created_at, s.expires_at,
 		u.id, u.org_id, u.email, COALESCE(u.external_id,''), u.role, u.created_at
 		FROM sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.id = $1 AND s.expires_at > now() AND u.disabled_at IS NULL`, hash,
-	).Scan(&su.Session.UserID, &su.Session.CSRF, &su.Session.ExpiresAt,
+	).Scan(&su.Session.UserID, &su.Session.CSRF, &su.Session.CreatedAt, &su.Session.ExpiresAt,
 		&su.User.ID, &su.User.OrgID, &su.User.Email, &su.User.ExternalID, &su.User.Role,
 		&su.User.CreatedAt)
 	return su, notFound(err)
@@ -68,7 +69,8 @@ func deleteUserSessions(ctx context.Context, db querier, userID string) error {
 // PurgeExpired removes sessions and login flows that have run out. Every
 // lookup already filters on expiry, so this only keeps the tables small.
 func (s *Store) PurgeExpired(ctx context.Context) error {
-	for _, table := range []string{"sessions", "login_flows", "cli_codes", "cli_tokens"} {
+	for _, table := range []string{"sessions", "login_flows", "cli_codes", "cli_tokens",
+		"passkey_links", "passkey_challenges"} {
 		if _, err := s.pool.Exec(ctx,
 			"DELETE FROM "+table+" WHERE expires_at < now()"); err != nil {
 			return err
@@ -124,6 +126,19 @@ func (s *Store) TakeLoginFlow(ctx context.Context, state string) (LoginFlow, err
 	return f, notFound(err)
 }
 
+// LoginFlowByState reads a flow without using it up. A passkey sign-in from
+// the command line reads its challenge this way before the browser asks for
+// the passkey.
+func (s *Store) LoginFlowByState(ctx context.Context, state string) (LoginFlow, error) {
+	var f LoginFlow
+	err := s.pool.QueryRow(ctx, `SELECT state, verifier, nonce, provider, redirect_to,
+		cli_redirect, cli_challenge, cli_state
+		FROM login_flows WHERE state = $1 AND expires_at > now()`, state,
+	).Scan(&f.State, &f.Verifier, &f.Nonce, &f.Provider, &f.RedirectTo,
+		&f.CLIRedirect, &f.CLIChallenge, &f.CLIState)
+	return f, notFound(err)
+}
+
 // UserByExternalID finds the person behind an identity provider's subject
 // claim.
 func (s *Store) UserByExternalID(ctx context.Context, externalID string) (User, error) {
@@ -154,6 +169,11 @@ func (s *Store) orgWhere(ctx context.Context, rest string, args ...any) (Org, er
 // multi-tenant deployment needs no invitation step.
 func (s *Store) OrgByEmailDomain(ctx context.Context, domain string) (Org, error) {
 	return s.orgWhere(ctx, "WHERE lower(email_domain) = lower($1)", domain)
+}
+
+// OrgByID finds one organisation.
+func (s *Store) OrgByID(ctx context.Context, orgID string) (Org, error) {
+	return s.orgWhere(ctx, "WHERE id = $1", orgID)
 }
 
 // OnlyOrg returns the single organisation, if there is exactly one. Dedicated

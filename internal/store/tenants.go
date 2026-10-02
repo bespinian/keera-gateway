@@ -403,9 +403,9 @@ func (s *Store) ListUsers(ctx context.Context, orgID string) ([]User, error) {
 	return collect(rows, scanUser)
 }
 
-// DisableUser turns a person off: it revokes every key attributed to them and
-// ends every session, in one transaction. It returns how many keys it
-// revoked.
+// DisableUser turns a person off: it revokes every key attributed to them,
+// ends every session and removes their passkeys, in one transaction. It
+// returns how many keys it revoked.
 //
 // Disabling somebody twice keeps the first date, and still revokes any key
 // issued in between.
@@ -431,6 +431,11 @@ func (s *Store) DisableUser(ctx context.Context, userID string) (int, error) {
 	}
 	revoked := int(tag.RowsAffected())
 	if err := deleteUserSessions(ctx, tx, userID); err != nil {
+		return 0, err
+	}
+	// Like keys, passkeys do not come back with 'enable': a new set-up link
+	// does.
+	if err := deletePasskeys(ctx, tx, userID); err != nil {
 		return 0, err
 	}
 	return revoked, tx.Commit(ctx)

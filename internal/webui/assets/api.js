@@ -120,6 +120,37 @@ export const api = {
   // Signing in with a provider is a page the browser goes to, not a call.
   loginURL: (params) => url("/auth/login" + query(params)),
 
+  // Passkeys. The /auth routes work before anybody has signed in, and take
+  // a JSON body even when it is empty.
+  passkeySignInOptions: (flow, next) =>
+    request("POST", "/auth/passkey/options", {
+      flow: flow || "",
+      next: next || "",
+    }),
+  passkeySignIn: (flow, credential) =>
+    request("POST", "/auth/passkey/sign-in", { flow, credential }),
+  passkeySetupOptions: (token) =>
+    request("POST", "/auth/passkey/setup/options", { token }),
+  passkeySetup: (token, challengeID, name, credential) =>
+    request("POST", "/auth/passkey/setup", {
+      token,
+      challenge_id: challengeID,
+      name,
+      credential,
+    }),
+  passkeys: (userID) => get("/v1/passkeys" + query({ user_id: userID })),
+  ownPasskeyOptions: () => request("POST", "/v1/passkeys/options", {}),
+  addPasskey: (challengeID, name, credential) =>
+    request("POST", "/v1/passkeys", {
+      challenge_id: challengeID,
+      name,
+      credential,
+    }),
+  deletePasskey: (id) =>
+    request("DELETE", `/v1/passkeys/${encodeURIComponent(id)}`),
+  passkeyLink: (userID) =>
+    request("POST", `/v1/users/${encodeURIComponent(userID)}/passkey-link`),
+
   orgs: () => get("/v1/orgs"),
   createOrg: (name, emailDomain) =>
     request("POST", "/v1/orgs", { name, email_domain: emailDomain || "" }),
@@ -138,8 +169,13 @@ export const api = {
   deleteTeam: (id) => request("DELETE", `/v1/teams/${encodeURIComponent(id)}`),
 
   users: (orgID) => get("/v1/users" + query({ org_id: orgID })),
-  inviteUser: (orgID, email, role) =>
-    request("POST", "/v1/users", { org_id: orgID, email, role }),
+  inviteUser: (orgID, email, role, signIn) =>
+    request("POST", "/v1/users", {
+      org_id: orgID,
+      email,
+      role,
+      sign_in: signIn || "",
+    }),
   setUserRole: (id, role) =>
     request("PATCH", `/v1/users/${encodeURIComponent(id)}`, { role }),
   disableUser: (id) =>

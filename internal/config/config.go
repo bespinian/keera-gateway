@@ -97,8 +97,12 @@ type Config struct {
 	Sandbox SandboxConfig
 
 	// OIDC is every identity provider, in the order the sign-in screen shows
-	// them. Empty leaves the operator key as the only way in.
+	// them. With none and no passkeys, the operator key is the only way in.
 	OIDC []authn.OIDCConfig
+	// Passkeys lets administrators create accounts that sign in with a
+	// passkey instead of a directory. Off by default: such an account does
+	// not leave when someone leaves the directory. See docs/sso.md.
+	Passkeys bool
 }
 
 // Load reads the environment.
@@ -128,6 +132,7 @@ func Load() (Config, error) {
 		PublicURL:             strings.TrimRight(env("KEERA_PUBLIC_URL", ""), "/"),
 	}
 	c.OIDC = oidcProviders(c.PublicURL)
+	c.Passkeys = envBool("KEERA_PASSKEYS", false)
 	c.SecureCookies = envBool("KEERA_SECURE_COOKIES", c.servedOverHTTPS())
 	if err := c.validate(); err != nil {
 		return c, err
@@ -162,7 +167,22 @@ func (c Config) validate() error {
 	if err := c.Sandbox.validate(); err != nil {
 		return err
 	}
-	return c.validateOIDC()
+	if err := c.validateOIDC(); err != nil {
+		return err
+	}
+	return c.validatePasskeys()
+}
+
+// validatePasskeys checks the public URL is one a browser runs WebAuthn on,
+// since a passkey is bound to its host name.
+func (c Config) validatePasskeys() error {
+	if !c.Passkeys {
+		return nil
+	}
+	if _, err := authn.NewRelyingParty(c.PublicURL); err != nil {
+		return fmt.Errorf("KEERA_PASSKEYS: %w", err)
+	}
+	return nil
 }
 
 func (c Config) validateCredentials() error {

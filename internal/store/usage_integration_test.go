@@ -178,6 +178,10 @@ func TestUsageGroupsByEveryDimensionThePanelOffers(t *testing.T) {
 			Alias: "keera-code", CostMicros: 100, Status: 200},
 		{TS: day.AddDate(0, 0, 1), OrgID: f.orgID, TeamID: f.teamID, UserID: user.ID,
 			KeyID: f.keyID, Alias: "keera-speed", CostMicros: 50, Status: 200},
+		// A mistyped model: refused before anything ran, so it is no model's
+		// usage, though it is still the team's and the key's request.
+		{TS: day, OrgID: f.orgID, TeamID: f.teamID, UserID: user.ID, KeyID: f.keyID,
+			Alias: "keera-cdoe", Status: 404},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}

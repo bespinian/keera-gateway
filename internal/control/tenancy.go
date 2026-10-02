@@ -329,6 +329,9 @@ func (s *Server) addUser(w http.ResponseWriter, r *http.Request, p *authn.Princi
 		Email      string `json:"email"`
 		ExternalID string `json:"external_id"`
 		Role       string `json:"role"`
+		// SignIn is "passkey" for an account that signs in with passkeys.
+		// Empty is the identity provider.
+		SignIn string `json:"sign_in"`
 	}
 	err := httpx.ReadJSON(r, &in)
 	email := strings.TrimSpace(in.Email)
@@ -362,8 +365,28 @@ func (s *Server) addUser(w http.ResponseWriter, r *http.Request, p *authn.Princi
 	if role != authn.RoleMember && !s.mayGrant(w, role) {
 		return
 	}
-	user, err := s.st.AddUser(r.Context(), id.New("user"), orgID,
-		email, in.ExternalID, string(role))
+	userID := id.New("user")
+	externalID := in.ExternalID
+	passkey := false
+	switch in.SignIn {
+	case "", "sso":
+	case authn.PasskeyProvider:
+		if s.passkeysOff(w) {
+			return
+		}
+		if in.ExternalID != "" {
+			badRequest(w, "a passkey account has no 'external_id'")
+			return
+		}
+		if !s.mayVouchFor(w, r, p, orgID, email) {
+			return
+		}
+		externalID, passkey = authn.PasskeyExternalID(userID), true
+	default:
+		badRequest(w, "'sign_in' must be sso or passkey")
+		return
+	}
+	user, err := s.st.AddUser(r.Context(), userID, orgID, email, externalID, string(role))
 	switch {
 	case errors.Is(err, store.ErrUserExists):
 		// Adding never changes someone who is already here: a role change has
@@ -381,7 +404,21 @@ func (s *Server) addUser(w http.ResponseWriter, r *http.Request, p *authn.Princi
 		return
 	}
 	s.auditf(r, p, orgID, "user.create", "user", user.ID, user)
-	httpx.WriteJSON(w, http.StatusCreated, user)
+	if !passkey {
+		httpx.WriteJSON(w, http.StatusCreated, user)
+		return
+	}
+	// A passkey account is no use without its first passkey, so the link
+	// comes with it.
+	link, err := s.issuePasskeyLink(r, p, user)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusCreated, struct {
+		store.User
+		PasskeyLink passkeyLinkOut `json:"passkey_link"`
+	}{user, link})
 }
 
 func (s *Server) listUsers(w http.ResponseWriter, r *http.Request, p *authn.Principal) {

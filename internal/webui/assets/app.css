@@ -477,6 +477,13 @@ code,
   width: 15px;
   height: 15px;
 }
+/* The key beside each passkey in a list. */
+.passkey-mark svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  color: var(--muted);
+}
 
 .input,
 .select {

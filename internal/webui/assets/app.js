@@ -2,7 +2,8 @@
 
 import { api, setCsrf, ApiError } from "./api.js";
 import { h, icon, icons, brandMark, clear, replace, toast } from "./ui.js";
-import { signIn } from "./views/signin.js";
+import { signIn, passkeySignInFlow } from "./views/signin.js";
+import { passkeySetupView, managePasskeys } from "./views/passkeys.js";
 import { overviewView } from "./views/overview.js";
 import { teamsView } from "./views/teams.js";
 import { keysView } from "./views/keys.js";
@@ -567,6 +568,18 @@ function renderShell() {
           ),
           h("div", { class: "account-role" }, state.me.role),
         ),
+        state.me.passkey_account
+          ? h(
+              "button",
+              {
+                class: "btn btn-quiet btn-sm",
+                title: "Your passkeys",
+                "aria-label": "Your passkeys",
+                onClick: managePasskeys,
+              },
+              icon(icons.passkey),
+            )
+          : null,
         h(
           "button",
           {
@@ -793,6 +806,12 @@ async function boot() {
   clear(root);
   root.classList.add("boot");
   root.append(h("div", { class: "boot-mark" }));
+
+  // A set-up link, or a passkey sign-in for `keera login`, comes first: both
+  // are for whoever holds the link, even in a browser already signed in.
+  const setup = location.hash.match(/^#passkey-setup=([A-Za-z0-9_-]+)$/);
+  if (setup) return passkeySetupView(root, setup[1], boot);
+  if (passkeySignInFlow()) return signIn(root, boot);
 
   let me;
   try {
