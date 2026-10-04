@@ -101,7 +101,7 @@ Kubernetes, an OCI runtime on podman.
 | ---------- | ---------------------------------------- | ------------------------------- | ----------------------------------------------------------------------- |
 | `standard` | the cluster's own; on podman, the host's | the host kernel, as for any pod | none                                                                    |
 | `isolated` | gVisor (`runsc`)                         | syscalls served in userspace    | some syscall-heavy work; no `io_uring`, some FUSE, no nested containers |
-| `vm`       | Kata; on podman, `krun`                  | **a kernel of its own**         | 1–2s of boot, ~100–200 MB per sandbox, hardware virtualisation          |
+| `vm`       | Kata; on podman, `krun`                  | **a kernel of its own**         | 1–2s of boot, about 100 MB per sandbox, hardware virtualisation         |
 
 `vm` is the best tier for an agent sandbox, since it runs code a model wrote.
 
@@ -113,9 +113,10 @@ platform team may not enable. So gVisor is a full tier, not a fallback.
 A class that asks for a tier the deployment has not mapped is **refused at
 creation**, with the name of the setting to fix. It never runs at a weaker tier.
 
-Every tier gets this hardening: a non-root user, `no-new-privileges`, all
-capabilities dropped, no service account token mounted, and `RuntimeDefault`
-seccomp. The root filesystem stays writable, because people work in a sandbox.
+Every tier runs as a non-root user, with `no-new-privileges` and all
+capabilities dropped. On Kubernetes, no service account token is mounted and
+seccomp is `RuntimeDefault`. Podman uses its own default seccomp profile. The
+root filesystem stays writable, because people work in a sandbox.
 
 ## Getting in, without a second address
 
@@ -163,6 +164,9 @@ from the command itself points at the proxy.
 | Organisation administrator | yes    | yes                                | **no**       |
 | The owner                  | yes    | yes                                | yes          |
 | Anybody else               | no     | no                                 | no           |
+
+An agent's sandbox runs its task to the end: it cannot be suspended, and once
+it has expired it cannot be resumed.
 
 An administrator can see and terminate every sandbox in their organisation,
 because the quota and the bill are theirs. They cannot get inside: a sandbox
@@ -358,7 +362,9 @@ week is somebody who forgot. Core-seconds is what a chargeback uses.
 
 Running time is summed across runs, not derived from timestamps, because a
 sandbox can be suspended and resumed many times. The clock stops as soon as a
-sandbox stops holding compute, not at the next sweep.
+sandbox is suspended or terminated, not at the next sweep. A podman sandbox
+that stops by itself is only noticed at the next sweep, and is charged until
+then.
 
 If the gateway was down, the time it could not observe is still charged,
 because the sandbox was running.
@@ -548,27 +554,27 @@ namespace. See [What is actually enforced](#what-is-actually-enforced).
 
 ## Configuration
 
-| Variable                           | Default                  | What it does                                                                                         |
-| ---------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------- |
-| `KEERA_SANDBOX_DRIVER`             | -                        | `kubernetes`, `podman`, or unset for no sandboxes, and no Sandboxes screen in the panel              |
-| `KEERA_SANDBOXES_FILE`             | -                        | the classes each new organisation starts with                                                        |
-| `KEERA_SANDBOX_NAMESPACE`          | the gateway's            | where sandboxes run on Kubernetes. Should not be the gateway's - see above                            |
-| `KEERA_SANDBOX_RUNTIME_STANDARD`   | -                        | the runtime for the standard tier, if not the default: a RuntimeClass, or on podman `crun` or `runc` |
-| `KEERA_SANDBOX_RUNTIME_ISOLATED`   | -                        | the gVisor RuntimeClass, or `runsc` on podman. Unset makes that tier unavailable                     |
-| `KEERA_SANDBOX_RUNTIME_VM`         | -                        | the Kata RuntimeClass, or `krun` on podman. Unset makes that tier unavailable                        |
-| `KEERA_SANDBOX_PUBLIC_URL`         | `KEERA_PUBLIC_URL`       | the gateway **as a sandbox reaches it** - the in-cluster Service, not the ingress                    |
-| `KEERA_SANDBOX_IDLE_SUSPEND`       | off                      | how long an engineer's sandbox runs with no connection open before it is suspended. Refused below 5m |
-| `KEERA_SANDBOX_STORAGE_CLASS`      | the cluster's            | what a home volume is provisioned from                                                               |
-| `KEERA_SANDBOX_SERVICE_ACCOUNT`    | the namespace's          | what a sandbox pod runs as; its token is never mounted                                               |
-| `KEERA_SANDBOX_IMAGE_PULL_SECRETS` | -                        | comma-separated, for a sandbox image in a private registry                                           |
-| `KEERA_SANDBOX_WARM`               | off                      | warm pools, which need the upstream extension                                                        |
-| `KEERA_SANDBOX_PODMAN_BINARY`      | `podman`                 | the single-host driver's command                                                                     |
-| `KEERA_SANDBOX_PODMAN_NETWORK`     | podman's default         | the network a single-host sandbox joins                                                              |
-| `KEERA_SANDBOX_GIT_FORGE`          | -                        | `github`, `gitlab`, or unset for sandboxes without a repository                                      |
-| `KEERA_SANDBOX_GIT_URL`            | GitHub.com or GitLab.com | GitHub's API (`https://<host>/api/v3` for Enterprise Server), or the GitLab instance                 |
-| `KEERA_SANDBOX_GIT_APP_ID`         | -                        | the GitHub App's id                                                                                  |
-| `KEERA_SANDBOX_GIT_APP_KEY_FILE`   | -                        | a file holding the GitHub App's private key                                                          |
-| `KEERA_SANDBOX_GIT_TOKEN_FILE`     | -                        | a file holding the GitLab token                                                                      |
+| Variable                           | Default                                       | What it does                                                                                         |
+| ---------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `KEERA_SANDBOX_DRIVER`             | -                                             | `kubernetes`, `podman`, or unset for no sandboxes, and no Sandboxes screen in the panel              |
+| `KEERA_SANDBOXES_FILE`             | -                                             | the classes each new organisation starts with                                                        |
+| `KEERA_SANDBOX_NAMESPACE`          | the gateway's, or `default` outside a cluster | where sandboxes run on Kubernetes. Should not be the gateway's - see above                           |
+| `KEERA_SANDBOX_RUNTIME_STANDARD`   | -                                             | the runtime for the standard tier, if not the default: a RuntimeClass, or on podman `crun` or `runc` |
+| `KEERA_SANDBOX_RUNTIME_ISOLATED`   | -                                             | the gVisor RuntimeClass, or `runsc` on podman. Unset makes that tier unavailable                     |
+| `KEERA_SANDBOX_RUNTIME_VM`         | -                                             | the Kata RuntimeClass, or `krun` on podman. Unset makes that tier unavailable                        |
+| `KEERA_SANDBOX_PUBLIC_URL`         | `KEERA_PUBLIC_URL`                            | the gateway **as a sandbox reaches it** - the in-cluster Service, not the ingress                    |
+| `KEERA_SANDBOX_IDLE_SUSPEND`       | off                                           | how long an engineer's sandbox runs with no connection open before it is suspended. Refused below 5m |
+| `KEERA_SANDBOX_STORAGE_CLASS`      | the cluster's                                 | what a home volume is provisioned from                                                               |
+| `KEERA_SANDBOX_SERVICE_ACCOUNT`    | the namespace's                               | what a sandbox pod runs as; its token is never mounted                                               |
+| `KEERA_SANDBOX_IMAGE_PULL_SECRETS` | -                                             | comma-separated, for a sandbox image in a private registry                                           |
+| `KEERA_SANDBOX_WARM`               | off                                           | warm pools, which need the upstream extension                                                        |
+| `KEERA_SANDBOX_PODMAN_BINARY`      | `podman`                                      | the single-host driver's command                                                                     |
+| `KEERA_SANDBOX_PODMAN_NETWORK`     | podman's default                              | the network a single-host sandbox joins                                                              |
+| `KEERA_SANDBOX_GIT_FORGE`          | -                                             | `github`, `gitlab`, or unset for sandboxes without a repository                                      |
+| `KEERA_SANDBOX_GIT_URL`            | GitHub.com or GitLab.com                      | GitHub's API (`https://<host>/api/v3` for Enterprise Server), or the GitLab instance                 |
+| `KEERA_SANDBOX_GIT_APP_ID`         | -                                             | the GitHub App's id                                                                                  |
+| `KEERA_SANDBOX_GIT_APP_KEY_FILE`   | -                                             | a file holding the GitHub App's private key                                                          |
+| `KEERA_SANDBOX_GIT_TOKEN_FILE`     | -                                             | a file holding the GitLab token                                                                      |
 
 `KEERA_SANDBOX_PUBLIC_URL` is the one to get right. A sandbox pointed at the
 public name leaves the cluster and comes back through the load balancer to reach

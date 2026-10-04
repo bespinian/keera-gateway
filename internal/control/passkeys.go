@@ -77,10 +77,6 @@ func readPasskeyJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	return true
 }
 
-func unauthorized(w http.ResponseWriter, code, msg string) {
-	httpx.WriteError(w, http.StatusUnauthorized, "invalid_request_error", code, msg)
-}
-
 // ------------------------------------------------------------------ sign-in
 
 // passkeyLogin reports whether a sign-in that names this provider is a
@@ -114,14 +110,8 @@ func (s *Server) startPasskeyLogin(w http.ResponseWriter, r *http.Request) {
 // any other, so the command-line hand-over works the same; the nonce is the
 // challenge.
 func (s *Server) newPasskeyFlow(ctx context.Context, cli cliLogin, next string) (store.LoginFlow, error) {
-	state, err := authn.NewPasskeyChallenge()
-	if err != nil {
-		return store.LoginFlow{}, err
-	}
-	challenge, err := authn.NewPasskeyChallenge()
-	if err != nil {
-		return store.LoginFlow{}, err
-	}
+	state := authn.NewPasskeyChallenge()
+	challenge := authn.NewPasskeyChallenge()
 	f := store.LoginFlow{
 		State: state, Nonce: challenge, Provider: authn.PasskeyProvider, RedirectTo: next,
 		CLIRedirect: cli.Redirect, CLIChallenge: cli.Challenge, CLIState: cli.State,
@@ -186,7 +176,7 @@ func (s *Server) passkeySignIn(w http.ResponseWriter, r *http.Request) {
 		unauthorized(w, "passkey_refused", passkeyRefused)
 		return
 	case errors.Is(err, errUserDisabled):
-		s.forbid(w, "your access to Keera has been turned off; ask an administrator of "+
+		forbid(w, "your access to Keera has been turned off; ask an administrator of "+
 			"your organisation")
 		return
 	case err != nil:
@@ -309,11 +299,7 @@ func (s *Server) registrationOptions(w http.ResponseWriter, r *http.Request, use
 	for _, k := range existing {
 		exclude = append(exclude, k.CredentialID)
 	}
-	challenge, err := authn.NewPasskeyChallenge()
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
+	challenge := authn.NewPasskeyChallenge()
 	challengeID := id.New("challenge")
 	if err := s.st.CreatePasskeyChallenge(r.Context(), challengeID, user.ID, challenge,
 		time.Now().Add(authn.PasskeyChallengeTTL)); err != nil {
@@ -441,13 +427,13 @@ func (s *Server) storePasskey(w http.ResponseWriter, r *http.Request, p *authn.P
 func (s *Server) ownPasskeyAccount(w http.ResponseWriter, r *http.Request,
 	p *authn.Principal) (store.User, bool) {
 	if p.UserID == "" {
-		s.forbid(w, "the operator key is nobody, so it has no passkeys")
+		forbid(w, "the operator key is nobody, so it has no passkeys")
 		return store.User{}, false
 	}
 	// Only from a browser that signed in moments ago: not with a
 	// command-line token, and not with a session that may have been taken.
 	if p.Via != authn.MethodSession {
-		s.forbid(w, "add a passkey in the panel, not from the command line")
+		forbid(w, "add a passkey in the panel, not from the command line")
 		return store.User{}, false
 	}
 	if time.Since(p.SignedInAt) > passkeyStepUp {
@@ -462,7 +448,7 @@ func (s *Server) ownPasskeyAccount(w http.ResponseWriter, r *http.Request,
 		return user, false
 	}
 	if !authn.IsPasskeyAccount(user.ExternalID) {
-		s.forbid(w, "you sign in through your identity provider, so your account has no passkeys")
+		forbid(w, "you sign in through your identity provider, so your account has no passkeys")
 		return user, false
 	}
 	return user, true
@@ -604,7 +590,7 @@ func (s *Server) issuePasskeyLinkRoute(w http.ResponseWriter, r *http.Request, p
 		return
 	}
 	if target.Role == string(authn.RoleOperator) {
-		s.forbid(w, target.Email+" is an operator, which comes from the configuration; "+
+		forbid(w, target.Email+" is an operator, which comes from the configuration; "+
 			"a passkey account cannot hold that role")
 		return
 	}
@@ -638,10 +624,7 @@ func (s *Server) issuePasskeyLinkRoute(w http.ResponseWriter, r *http.Request, p
 // issuePasskeyLink mints a set-up link, replacing any earlier one.
 func (s *Server) issuePasskeyLink(r *http.Request, p *authn.Principal,
 	user store.User) (passkeyLinkOut, error) {
-	token, hash, err := authn.NewPasskeyLink()
-	if err != nil {
-		return passkeyLinkOut{}, err
-	}
+	token, hash := authn.NewPasskeyLink()
 	expires := time.Now().Add(authn.PasskeyLinkTTL)
 	if err := s.st.CreatePasskeyLink(r.Context(), hash, user.ID, expires); err != nil {
 		return passkeyLinkOut{}, err
@@ -675,7 +658,7 @@ func (s *Server) mayVouchFor(w http.ResponseWriter, r *http.Request, p *authn.Pr
 	}
 	domain := (authn.Identity{Email: email}).Domain()
 	if !strings.EqualFold(domain, strings.TrimPrefix(org.EmailDomain, "@")) {
-		s.forbid(w, email+" is not at "+org.EmailDomain+", this organisation's domain; "+
+		forbid(w, email+" is not at "+org.EmailDomain+", this organisation's domain; "+
 			"only an operator can create a passkey account at another domain")
 		return false
 	}

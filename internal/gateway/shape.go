@@ -60,7 +60,15 @@ type shape interface {
 
 // openAIShape is the identity: the surfaces that already speak what the
 // inference plane speaks.
-type openAIShape struct{}
+type openAIShape struct{ openAIErrors }
+
+// openAIErrors renders a refusal in the chat shape's envelope. The Responses
+// API shares it.
+type openAIErrors struct{}
+
+func (openAIErrors) writeError(w http.ResponseWriter, status int, typ, code, msg string) {
+	httpx.WriteError(w, status, typ, code, msg)
+}
 
 func (openAIShape) decode(raw []byte) ([]byte, error) { return raw, nil }
 
@@ -79,8 +87,4 @@ func (openAIShape) pipe(dst io.Writer, flush func(), src io.Reader, alias string
 	dropUsageEvent bool,
 ) (streamStats, error) {
 	return pipeSSE(dst, flush, src, alias, dropUsageEvent)
-}
-
-func (openAIShape) writeError(w http.ResponseWriter, status int, typ, code, msg string) {
-	httpx.WriteError(w, status, typ, code, msg)
 }

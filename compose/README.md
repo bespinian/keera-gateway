@@ -144,7 +144,8 @@ download again next time.
   on only the variables the file names. It passes every setting in
   [docs/install.md](../docs/install.md) except the sandbox ones, and single
   sign-on only for providers named `google` and `entra`. The database, the
-  listener and the catalogue files are fixed in the file.
+  published port and the catalogue files are fixed in the file, and
+  `KEERA_ADDR` is not passed.
 - The gateway image is `FROM scratch`: one static binary, no shell. So its
   healthcheck is `keera-gateway health`, which asks the running server's
   `/readyz` instead of `curl`.

@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -112,81 +111,6 @@ loop:
 	}
 }
 
-// scanSSE walks the data payloads of a server-sent event stream, joining an
-// event's data lines the way the format says to and skipping the terminator.
-func scanSSE(src io.Reader, fn func(payload []byte) error) error {
-	lines := newSSELines(src, maxLineBytes)
-	// data holds one event's payload and is reused for the next, to avoid an
-	// allocation per token. fn must not keep what it is given.
-	var data []byte
-
-	complete := func() error {
-		if len(data) == 0 {
-			return nil
-		}
-		payload := data
-		data = data[:0]
-		if bytes.Equal(bytes.TrimSpace(payload), doneMarker) {
-			return nil
-		}
-		return fn(payload)
-	}
-
-	for {
-		line, err := lines.next()
-		if len(line) > 0 {
-			trimmed := bytes.TrimRight(line, "\r\n")
-			switch {
-			case len(trimmed) == 0:
-				if cerr := complete(); cerr != nil {
-					return cerr
-				}
-			case bytes.HasPrefix(trimmed, dataPrefix):
-				chunk := bytes.TrimSpace(trimmed[len(dataPrefix):])
-				if len(data)+len(chunk) > maxLineBytes {
-					return errEventTooLarge
-				}
-				if len(data) > 0 {
-					data = append(data, '\n')
-				}
-				data = append(data, chunk...)
-			}
-		}
-		if err != nil {
-			if cerr := complete(); cerr != nil {
-				return cerr
-			}
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
-			return err
-		}
-	}
-}
-
-// oaiStreamChunk is one chunk of a chat completion stream.
-type oaiStreamChunk struct {
-	Choices []struct {
-		Delta struct {
-			Content   string             `json:"content"`
-			ToolCalls []oaiToolCallDelta `json:"tool_calls"`
-		} `json:"delta"`
-		FinishReason string `json:"finish_reason"`
-	} `json:"choices"`
-	Usage *tokenUsage `json:"usage"`
-}
-
-// oaiToolCallDelta is one fragment of a streamed tool call.
-type oaiToolCallDelta struct {
-	// Index is which of several parallel tool calls this fragment belongs to.
-	Index    *int   `json:"index"`
-	ID       string `json:"id"`
-	Function struct {
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
-	} `json:"function"`
-}
-
 // messagesStream is the state a chat completion stream has to be read against
 // to be re-emitted as a Messages stream.
 type messagesStream struct {
@@ -202,42 +126,12 @@ type messagesStream struct {
 	openTool  int // upstream tool_call index behind the open block, if any
 	isTool    bool
 
-	stopReason string
-	usage      *tokenUsage
-	deltas     int
+	chatChunks
 }
 
 // chunk folds one upstream chunk into the stream.
 func (s *messagesStream) chunk(payload []byte) error {
-	var c oaiStreamChunk
-	if err := json.Unmarshal(payload, &c); err != nil {
-		// An unreadable chunk is skipped: the rest of the turn is still worth
-		// delivering.
-		return nil
-	}
-	if c.Usage != nil {
-		s.usage = c.Usage
-	}
-	if len(c.Choices) == 0 {
-		// The usage-only chunk. Its numbers go into message_delta at the end.
-		return nil
-	}
-
-	choice := c.Choices[0]
-	if choice.FinishReason != "" {
-		s.stopReason = stopReason(choice.FinishReason)
-	}
-	if text := choice.Delta.Content; text != "" {
-		if err := s.text(text); err != nil {
-			return err
-		}
-	}
-	for _, tc := range choice.Delta.ToolCalls {
-		if err := s.toolCall(tc); err != nil {
-			return err
-		}
-	}
-	return nil
+	return s.fold(payload, s.text, s.toolCall)
 }
 
 // text emits a fragment of text, opening a text block first if needed.
@@ -261,13 +155,9 @@ func (s *messagesStream) text(text string) error {
 }
 
 // toolCall emits a fragment of a tool call, opening its block first if needed.
-func (s *messagesStream) toolCall(tc oaiToolCallDelta) error {
+func (s *messagesStream) toolCall(index int, tc oaiToolCallDelta) error {
 	if err := s.start(); err != nil {
 		return err
-	}
-	index := 0
-	if tc.Index != nil {
-		index = *tc.Index
 	}
 	if s.openIndex < 0 || !s.isTool || s.openTool != index {
 		if err := s.closeBlock(); err != nil {
@@ -351,10 +241,7 @@ func (s *messagesStream) finish() error {
 		return err
 	}
 
-	reason := s.stopReason
-	if reason == "" {
-		reason = "end_turn"
-	}
+	reason := stopReason(s.finishReason)
 	usage := map[string]int{"input_tokens": 0, "output_tokens": 0}
 	if s.usage != nil {
 		usage["input_tokens"] = s.usage.InputTokens

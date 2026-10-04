@@ -38,6 +38,7 @@ import {
   currentRange,
   rangePicker,
   crumb,
+  gone,
 } from "../ui.js";
 import { outcomeMeaning, outcomeOf, oneLine } from "../status.js";
 import { requestTable, showRequest } from "./requestlog.js";
@@ -50,13 +51,13 @@ const PAGE = 100;
 // picker rather than behind a menu.
 const SORTS = [
   { key: "", label: "Recent", long: "Newest first" },
-  { key: "cost", label: "Cost", long: "The tasks that cost the most" },
+  { key: "cost", label: "Cost", long: "The sessions that cost the most" },
   {
     key: "requests",
     label: "Requests",
-    long: "The tasks that made the most requests",
+    long: "The sessions that made the most requests",
   },
-  { key: "duration", label: "Time", long: "The tasks that ran the longest" },
+  { key: "duration", label: "Time", long: "The sessions that ran the longest" },
 ];
 
 const SORT_KEY = "keera.sessions.sort";
@@ -109,9 +110,9 @@ export async function sessionsView(ctx) {
         { class: "card", style: { marginTop: "16px" } },
         unhappy
           ? empty(
-              "Nothing hit trouble in this window",
-              "Every task in this range succeeded. Turn off Hit trouble to " +
-                "see them.",
+              "No sessions with problems in this window",
+              "Every session in this range succeeded. Turn off With " +
+                "problems to see them.",
             )
           : empty(
               "No sessions in this window",
@@ -207,8 +208,8 @@ export async function sessionLog(ctx, { scope = {}, since, hide = {} }) {
         { class: "card", style: { marginTop: "12px" } },
         unhappy
           ? empty(
-              "Nothing hit trouble in this window",
-              "Turn off Hit trouble to see every task.",
+              "No sessions with problems in this window",
+              "Turn off With problems to see every session.",
             )
           : empty(
               "No sessions in this window",
@@ -237,7 +238,7 @@ export async function sessionLog(ctx, { scope = {}, since, hide = {} }) {
   return wrap;
 }
 
-/** setUnhappy narrows the session lists to the tasks that hit trouble. */
+/** setUnhappy narrows the session lists to the sessions with problems. */
 export function setUnhappy(on) {
   sessionStorage.setItem(UNHAPPY_KEY, on ? "1" : "0");
 }
@@ -269,13 +270,13 @@ function troubleButton(ctx, unhappy) {
     {
       class: "btn btn-sm",
       "aria-pressed": String(unhappy),
-      title: "Only tasks with a failure, a refusal or an interrupted answer",
+      title: "Only sessions with a failure, a refusal or an interrupted answer",
       onClick: () => {
         setUnhappy(!unhappy);
         ctx.reload();
       },
     },
-    "Hit trouble",
+    "With problems",
   );
 }
 
@@ -284,7 +285,7 @@ function csvButton(params) {
     "button",
     {
       class: "btn btn-sm",
-      title: "Download all matching tasks as CSV, one row per task",
+      title: "Download the matching sessions as CSV, one row each",
       onClick: () => api.download("/v1/sessions", params),
     },
     icon(icons.download),
@@ -343,19 +344,19 @@ function totalTiles(t, currency) {
     "div",
     { class: "grid grid-4" },
     stat(
-      "Tasks",
+      "Sessions",
       compact(tasks),
       null,
-      t.unhappy ? `${num(t.unhappy)} hit trouble` : "none hit trouble",
+      t.unhappy ? `${num(t.unhappy)} with problems` : "none with problems",
     ),
     stat(
       "Spend",
       money(t.cost_micros, ""),
       currency,
-      tasks ? `${money(t.median_cost_micros, "")} median per task` : null,
+      tasks ? `${money(t.median_cost_micros, "")} median per session` : null,
     ),
     stat(
-      "Requests per task",
+      "Requests per session",
       num(t.median_requests),
       null,
       tasks
@@ -363,7 +364,7 @@ function totalTiles(t, currency) {
         : null,
     ),
     stat(
-      "Time per task",
+      "Time per session",
       duration(t.median_duration_ms),
       null,
       tasks
@@ -401,7 +402,7 @@ function sessionTable(ctx, rows, names, currency, hide = {}) {
               h("span", { class: "mono" }, a.key),
               a.stated
                 ? "The client named this session itself"
-                : "Grouped by a hash of the prompt that opened the task",
+                : "Grouped by a hash of the prompt that opened the session",
             ),
             a.stated ? pill("named") : null,
           ),
@@ -510,7 +511,7 @@ function sessionTable(ctx, rows, names, currency, hide = {}) {
           "button",
           {
             class: "btn btn-sm",
-            title: "All requests in this task, in order",
+            title: "All requests in this session, in order",
             onClick: () =>
               ctx.navigate("/sessions/" + encodeURIComponent(a.id)),
           },
@@ -579,8 +580,11 @@ export async function sessionDetailView(ctx) {
     res = await api.session(ctx.param, ctx.orgID);
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
+      ctx.setTitle("Session", "");
       return gone(
         ctx,
+        "/sessions",
+        "Sessions",
         "This request is not part of a session",
         "Nothing was recorded under this id, the request has no " +
           "conversation (such as an embedding), or retention has deleted it.",
@@ -734,7 +738,7 @@ export async function sessionDetailView(ctx) {
       h(
         "div",
         { class: "banner banner-warn", style: { marginTop: "16px" } },
-        h("strong", {}, "How this task ended: "),
+        h("strong", {}, "How this session ended: "),
         s.last_error,
       ),
     );
@@ -787,7 +791,7 @@ export async function sessionDetailView(ctx) {
             { class: "faint" },
             s.stated
               ? "named by the client with this session"
-              : "this key's calls while the task ran",
+              : "this key's calls while the session ran",
           ),
         ),
         h(
@@ -838,23 +842,13 @@ function turnStrip(ctx, requests, names, currency) {
 
 // gone is a session that is not there, said in the terms of why it might not
 // be rather than as a failure to load a page.
-function gone(ctx, title, body) {
-  ctx.setTitle("Session", "");
-  return h(
-    "div",
-    {},
-    h("div", { class: "detail-head" }, crumb(ctx, "/sessions", "Sessions")),
-    h("div", { class: "card" }, empty(title, body)),
-  );
-}
-
 // hint is what this screen is and what it cannot promise, which for a grouping
 // that is inferred rather than stored is worth saying on the screen instead of
 // in a document nobody opens.
 function hint(gapSeconds, detail) {
   const gap = duration((gapSeconds || 0) * 1000);
   const how =
-    `Requests belong to one task when they share a conversation and are less than ` +
+    `Requests belong to one session when they share a conversation and are less than ` +
     `${gap} apart. `;
   return h(
     "div",
@@ -864,9 +858,9 @@ function hint(gapSeconds, detail) {
           "A conversation is matched by a hash of its opening prompt, or of " +
           "an id the client sent. The prompt is not stored and cannot be " +
           "recovered from the hash. If a client changes its opening prompt, a " +
-          "new task starts."
+          "new session starts."
       : how +
           "Grouping is computed each time you open this screen, so changing " +
-          "the gap re-groups past tasks too.",
+          "the gap re-groups past sessions too.",
   );
 }

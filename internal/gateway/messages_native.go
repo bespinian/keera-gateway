@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
@@ -303,13 +303,12 @@ func (s *Server) countTokens(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, s.opts.MaxBodyBytes))
+	raw, err := readBody(w, r, s.opts.MaxBodyBytes)
 	if err != nil {
-		if tooLarge := (*http.MaxBytesError)(nil); errors.As(err, &tooLarge) {
-			sh.writeError(w, http.StatusRequestEntityTooLarge, "", "",
-				"the request body exceeds the gateway's limit")
+		if errors.Is(err, errBodyTooLarge) {
+			sh.writeError(w, http.StatusRequestEntityTooLarge, "", "", err.Error())
 		}
-		return // otherwise the client went away mid-upload
+		return
 	}
 	b, err := parseBody(raw)
 	if err != nil {
@@ -319,7 +318,7 @@ func (s *Server) countTokens(w http.ResponseWriter, r *http.Request) {
 	alias, _ := b.str("model")
 	if !s.mayCall(res, alias) {
 		sh.writeError(w, http.StatusNotFound, "", "",
-			s.advise("the model '"+alias+"' does not exist or this key may not use it"))
+			s.advise(modelNotFound(alias)))
 		return
 	}
 	doc, err := anthropicDialect{}.text(b)
@@ -331,19 +330,18 @@ func (s *Server) countTokens(w http.ResponseWriter, r *http.Request) {
 	// large one. So is the guardrail's system prompt, which every request gets.
 	tools, _ := b.value("tools")
 	tokens := estimateTokens(doc.texts()) + (len(tools)+len(res.SystemPrompt))/bytesPerToken
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]int{"input_tokens": tokens})
+	httpx.WriteJSON(w, http.StatusOK, map[string]int{"input_tokens": tokens})
 }
 
 // mayCall reports whether a key may name alias as its model: a chat model it
 // is allowed, or one of its organisation's routers.
 func (s *Server) mayCall(res *policy.Resolved, alias string) bool {
-	if alias == "" || !res.AllowsModel(alias) {
+	if alias == "" {
 		return false
 	}
-	if m, found := s.src.Model(res.Key.OrgID, alias); found {
-		return m.Enabled && m.Kind == policy.KindChat && res.Key.Reaches(m)
+	if m, found := s.findModel(res.Key, alias); found {
+		return m.Enabled && m.Kind == policy.KindChat && res.MayUse(m)
 	}
 	_, routed := s.src.Router(res.Key.OrgID, alias)
-	return routed && !res.Key.Subscription()
+	return routed && res.MayRoute(alias)
 }

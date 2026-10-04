@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/ratelimit"
 )
@@ -32,7 +33,7 @@ type refusal struct {
 func (s *Server) refuse(c *call, ref refusal) {
 	s.limitHeaders(c.w, c.res, c.tr.start)
 	if ref.retry > 0 {
-		retryAfter(c.w, ref.retry)
+		httpx.SetRetryAfter(c.w, ref.retry)
 	}
 	msg := ref.msg
 	if ref.advise {
@@ -217,9 +218,4 @@ func (s *Server) rateHeaders(h http.Header, res *policy.Resolved, now time.Time)
 // bucketKey names one scope's bucket for one kind of rate limit.
 func bucketKey(sc policy.Scope, limit string) string {
 	return string(sc.Type) + ":" + sc.ID + "|" + limit
-}
-
-func retryAfter(w http.ResponseWriter, d time.Duration) {
-	secs := max(int(d.Seconds()), 1)
-	w.Header().Set("Retry-After", strconv.Itoa(secs))
 }

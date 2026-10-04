@@ -164,16 +164,12 @@ var sessionOrder = map[AgentSessionSort]string{
 // tenant's most recent sessions".
 type AgentSessionQuery struct {
 	OrgID string
-	// TeamID, UserID and KeyID narrow to one entity. They apply before the
-	// runs are cut: a session belongs to one key, so this drops whole sessions
-	// and never splits one.
-	TeamID string
-	UserID string
-	KeyID  string
-	// Alias keeps the sessions that used one model, and applies after the runs
-	// are cut. Applied to rows, it would split a session that used two models
-	// into pieces.
-	Alias string
+	// Scope's TeamID, UserID and KeyID narrow to one entity. They apply
+	// before the runs are cut: a session belongs to one key, so this drops
+	// whole sessions and never splits one. Its Alias keeps the sessions that
+	// used one model, and applies after the runs are cut. Applied to rows, it
+	// would split a session that used two models into pieces.
+	Scope
 	// Key narrows to one conversation.
 	Key string
 	// Unhappy keeps only the sessions with a failure, a refusal or an

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"slices"
 	"time"
@@ -263,13 +264,7 @@ func (s *Store) CreateSandbox(ctx context.Context, sb Sandbox) (Sandbox, error) 
 // ErrSandboxNameTaken means a live sandbox of the same person already has the
 // name. The control plane turns it into a 409; the name is free again once
 // that sandbox is gone.
-var ErrSandboxNameTaken = errSandboxNameTaken{}
-
-type errSandboxNameTaken struct{}
-
-func (errSandboxNameTaken) Error() string {
-	return "store: this person already has a live sandbox of that name"
-}
+var ErrSandboxNameTaken = errors.New("store: this person already has a live sandbox of that name")
 
 // Sandbox reads one row by id.
 func (s *Store) Sandbox(ctx context.Context, id string) (Sandbox, error) {

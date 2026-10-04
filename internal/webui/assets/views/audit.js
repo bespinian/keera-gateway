@@ -12,6 +12,7 @@ import {
   table,
   pill,
   ago,
+  dateTime,
   modal,
   icon,
   icons,
@@ -22,6 +23,7 @@ import {
 const TONES = {
   "key.create": "accent",
   "key.revoke": "bad",
+  "key.rotate": "warn",
   "guardrail.put": "warn",
   "filter.put": "warn",
   // Removing a filter is the entry a compliance reader is looking for: from
@@ -31,6 +33,7 @@ const TONES = {
   "model.delete": "bad",
   "model.check": "",
   "auth.sign_in": "good",
+  "auth.directory_check": "warn",
 };
 
 // What each action is called on screen. The wire keeps `noun.verb` because
@@ -45,6 +48,7 @@ const TONES = {
 const LABELS = {
   "auth.sign_in": "Signed in",
   "auth.cli_token": "Signed in from the command line",
+  "auth.directory_check": "Changed by the directory",
   "org.create": "Organisation created",
   "org.update": "Organisation changed",
   "org.delete": "Organisation deleted",
@@ -57,6 +61,10 @@ const LABELS = {
   "user.enable": "User enabled",
   "key.create": "API key issued",
   "key.revoke": "API key revoked",
+  "key.rotate": "API key rotated",
+  "passkey.create": "Passkey added",
+  "passkey.delete": "Passkey removed",
+  "user.passkey_link": "Passkey set-up link created",
   "guardrail.put": "Guardrails changed",
   "model.put": "Model saved",
   "model.check": "Model checked",
@@ -334,7 +342,7 @@ function auditTable(entries) {
                   onClick: () =>
                     modal({
                       title: e.action,
-                      subtitle: `${e.actor} · ${new Date(e.ts).toLocaleString()}`,
+                      subtitle: `${e.actor} · ${dateTime(e.ts)}`,
                       body: h(
                         "pre",
                         {

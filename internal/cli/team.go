@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
-	"os"
 	"strings"
 
 	"github.com/bespinian/keera-gateway/internal/store"
@@ -15,42 +14,39 @@ import (
 type teamRun struct {
 	c      *client
 	fs     *flag.FlagSet
-	args   []string
 	org    string
+	yes    bool
 	asJSON bool
 }
 
 func teamCmd(ctx context.Context, args []string) error {
 	sub, rest := split(args)
 	fs := flag.NewFlagSet("team "+sub, flag.ExitOnError)
-	r := &teamRun{c: newClient(), fs: fs, args: rest}
+	r := &teamRun{c: newClient(), fs: fs}
 	fs.StringVar(&r.org, "org", "", orgUsage)
+	fs.BoolVar(&r.yes, "yes", false, yesUsage)
 	fs.BoolVar(&r.asJSON, "json", false, jsonUsage)
 	fs.Usage = func() { _ = printHelp(fs, "team", sub) }
 	if want, ok := wantsHelp(args); ok {
-		// 'delete' declares --yes itself; help needs it on the set too.
-		fs.Bool("yes", false, yesUsage)
 		return printHelp(fs, "team", want)
 	}
-
-	switch sub {
-	case "create", "add", "new":
+	verb, err := parseVerb(fs, "team", sub, rest)
+	if err != nil {
+		return err
+	}
+	switch verb {
+	case "create":
 		return r.create(ctx)
-	case "list", "ls", "":
-		return r.list(ctx)
-	case "rename", "set", "edit", "update":
+	case "rename":
 		return r.rename(ctx)
-	case "delete", "rm", "remove":
+	case "delete":
 		return r.delete(ctx)
 	default:
-		return unknownSub("team", sub)
+		return r.list(ctx)
 	}
 }
 
 func (r *teamRun) create(ctx context.Context) error {
-	if err := parseArgs(r.fs, r.args, 1, "usage: keera team create <name> [--org <id>]"); err != nil {
-		return err
-	}
 	orgID, err := resolveOrg(ctx, r.c, r.org)
 	if err != nil {
 		return err
@@ -66,9 +62,6 @@ func (r *teamRun) create(ctx context.Context) error {
 }
 
 func (r *teamRun) list(ctx context.Context) error {
-	if err := parse(r.fs, r.args); err != nil {
-		return err
-	}
 	orgID, err := resolveOrg(ctx, r.c, r.org)
 	if err != nil {
 		return err
@@ -86,9 +79,6 @@ func (r *teamRun) list(ctx context.Context) error {
 }
 
 func (r *teamRun) rename(ctx context.Context) error {
-	if err := parseArgs(r.fs, r.args, 2, "usage: keera team rename <team> <new-name>"); err != nil {
-		return err
-	}
 	team, err := r.find(ctx)
 	if err != nil {
 		return err
@@ -104,15 +94,11 @@ func (r *teamRun) rename(ctx context.Context) error {
 }
 
 func (r *teamRun) delete(ctx context.Context) error {
-	yes := r.fs.Bool("yes", false, yesUsage)
-	if err := parseArgs(r.fs, r.args, 1, "usage: keera team delete <team> [--yes]"); err != nil {
-		return err
-	}
 	team, err := r.find(ctx)
 	if err != nil {
 		return err
 	}
-	if !*yes {
+	if !r.yes {
 		if err := confirmTeamDelete(ctx, r.c, team); err != nil {
 			return err
 		}
@@ -181,14 +167,16 @@ func confirmTeamDelete(ctx context.Context, c *client, team store.Team) error {
 			live++
 		}
 	}
-	fmt.Fprintf(os.Stderr, "%s\n", styleErr.head(fmt.Sprintf("Deleting %s (%s) removes:", team.Name, team.ID)))
-	fmt.Fprintln(os.Stderr, "  its guardrails - budget, rate limit, allowed models and system prompt")
-	fmt.Fprintln(os.Stderr, "  its budget counters")
+	lines := []string{
+		"  its guardrails - budget, rate limit, allowed models and system prompt",
+		"  its budget counters",
+	}
 	if live > 0 {
-		fmt.Fprintf(os.Stderr, "%s\n", styleErr.bad(fmt.Sprintf(
+		lines = append(lines, styleErr.bad(fmt.Sprintf(
 			"  this team still has %s; the deletion will be refused until they are revoked",
 			plural(live, "live key"))))
 	}
-	fmt.Fprintln(os.Stderr, "Revoked keys, usage history and the audit log are kept.")
-	return confirmTyping("team's name", team.Name, "nothing was deleted")
+	lines = append(lines, "Revoked keys, usage history and the audit log are kept.")
+	return confirm(fmt.Sprintf("Deleting %s (%s) removes:", team.Name, team.ID), lines,
+		"team's name", team.Name, "nothing was deleted")
 }

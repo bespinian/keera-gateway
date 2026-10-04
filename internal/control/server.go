@@ -16,7 +16,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -288,7 +287,7 @@ func (s *Server) authenticated(next handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, err := s.principal(r)
 		if err != nil {
-			httpx.WriteError(w, http.StatusUnauthorized, "invalid_request_error", "unauthenticated",
+			unauthorized(w, "unauthenticated",
 				"sign in, or send the operator key as 'Authorization: Bearer <key>'")
 			return
 		}
@@ -343,7 +342,7 @@ func (s *Server) throttle(name string, perMinute int, msg string,
 		now := time.Now()
 		if !s.signIn.Allow(key, perMinute, now) {
 			if d := s.signIn.Retry(key, perMinute, now); d > 0 {
-				w.Header().Set("Retry-After", strconv.Itoa(max(int(d.Seconds()), 1)))
+				httpx.SetRetryAfter(w, d)
 			}
 			httpx.WriteError(w, http.StatusTooManyRequests, "rate_limit_error",
 				"rate_limit_exceeded", msg)
@@ -387,8 +386,13 @@ func constantTimeEqual(presented string, want [32]byte) bool {
 }
 
 // forbid writes the standard refusal for an authorisation failure.
-func (s *Server) forbid(w http.ResponseWriter, msg string) {
+func forbid(w http.ResponseWriter, msg string) {
 	httpx.WriteError(w, http.StatusForbidden, "invalid_request_error", "forbidden", msg)
+}
+
+// unauthorized writes the standard refusal for a missing or bad credential.
+func unauthorized(w http.ResponseWriter, code, msg string) {
+	httpx.WriteError(w, http.StatusUnauthorized, "invalid_request_error", code, msg)
 }
 
 // badRequest writes the standard refusal for a request that is not valid.
@@ -401,7 +405,7 @@ func badRequest(w http.ResponseWriter, msg string) {
 func (s *Server) scopeOrg(w http.ResponseWriter, p *authn.Principal, requested string) (string, bool) {
 	orgID, err := p.ScopeOrg(requested)
 	if err != nil {
-		s.forbid(w, err.Error())
+		forbid(w, err.Error())
 		return "", false
 	}
 	return orgID, true
@@ -445,10 +449,17 @@ func (s *Server) adminOrg(w http.ResponseWriter, r *http.Request, p *authn.Princ
 // requireOrgAdmin checks that the caller may change an organisation.
 func (s *Server) requireOrgAdmin(w http.ResponseWriter, p *authn.Principal, orgID string) bool {
 	if !p.CanAdminOrg(orgID) {
-		s.forbid(w, "only an administrator of this organisation can do that")
+		forbid(w, "only an administrator of this organisation can do that")
 		return false
 	}
 	return true
+}
+
+// requireAdmin refuses a caller who administers no organisation. It comes
+// before a read, so a member cannot probe what exists; which organisation is
+// checked after.
+func (s *Server) requireAdmin(w http.ResponseWriter, p *authn.Principal) bool {
+	return s.requireOrgAdmin(w, p, p.OrgID)
 }
 
 // requireOwnerAdmin is requireOrgAdmin for a thing named by its id. Another
@@ -507,7 +518,7 @@ func (s *Server) metricsRoute(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) serveMetrics(w http.ResponseWriter, _ *http.Request, p *authn.Principal) {
 	if !p.Unrestricted() {
-		s.forbid(w, "metrics span every organisation; only an operator can read them")
+		forbid(w, "metrics span every organisation; only an operator can read them")
 		return
 	}
 	s.writeMetrics(w)
@@ -549,7 +560,7 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 		httpx.WriteError(w, http.StatusNotFound, "invalid_request_error", "not_found",
 			"no such organisation")
 	case errors.Is(err, authn.ErrForbidden):
-		s.forbid(w, err.Error())
+		forbid(w, err.Error())
 	default:
 		// The detail goes only to the log: a driver error can name tables and
 		// hosts. The caller gets the request id, which finds the log line.

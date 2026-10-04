@@ -19,8 +19,6 @@ import (
 type keyRun struct {
 	c       *client
 	fs      *flag.FlagSet
-	args    []string
-	sub     string
 	org     string
 	team    string
 	user    string
@@ -28,6 +26,7 @@ type keyRun struct {
 	expires string
 	// subscription issues a key for Claude Code signed in to a Claude plan.
 	subscription bool
+	yes          bool
 	asJSON       bool
 }
 
@@ -40,7 +39,7 @@ type createdKey struct {
 func keyCmd(ctx context.Context, args []string) error {
 	sub, rest := split(args)
 	fs := flag.NewFlagSet("key "+sub, flag.ExitOnError)
-	r := &keyRun{c: newClient(), fs: fs, args: rest, sub: sub}
+	r := &keyRun{c: newClient(), fs: fs}
 	fs.StringVar(&r.org, "org", "", orgUsage)
 	fs.StringVar(&r.team, "team", "", "team, by name or id")
 	fs.StringVar(&r.user, "user", "", "the person this key belongs to, by email or id")
@@ -48,50 +47,39 @@ func keyCmd(ctx context.Context, args []string) error {
 	fs.StringVar(&r.expires, "expires", "", "lifetime, e.g. 720h")
 	fs.BoolVar(&r.subscription, "subscription", false,
 		"a key that reaches only subscription models, for Claude Code signed in to a Claude plan")
+	fs.BoolVar(&r.yes, "yes", false, yesUsage)
 	fs.BoolVar(&r.asJSON, "json", false, jsonUsage)
 
 	fs.Usage = func() { _ = printHelp(fs, "key", sub) }
 	if want, ok := wantsHelp(args); ok {
-		// 'revoke' declares --yes itself; help needs it on the set too.
-		fs.Bool("yes", false, yesUsage)
 		return printHelp(fs, "key", want)
 	}
-	switch sub {
-	case "create", "add", "new":
+	verb, err := parseVerb(fs, "key", sub, rest)
+	if err != nil {
+		return err
+	}
+	switch verb {
+	case "create":
 		return r.create(ctx)
-	case "list", "ls", "":
-		return r.list(ctx)
-	case "revoke", "delete", "rm", "remove":
+	case "revoke":
 		return r.revoke(ctx)
 	case "rotate":
 		return r.rotate(ctx)
 	default:
-		return unknownSub("key", sub)
+		return r.list(ctx)
 	}
-}
-
-// parse reads the verb's flags and refuses another verb's. n is how many
-// arguments it takes, or -1 for any.
-func (r *keyRun) parse(n int, usage string) error {
-	if err := parse(r.fs, r.args); err != nil {
-		return err
-	}
-	if n >= 0 && r.fs.NArg() != n {
-		return errors.New(usage)
-	}
-	return verbFlags(r.fs, "key", r.sub)
 }
 
 func (r *keyRun) create(ctx context.Context) error {
-	if err := r.parse(-1, ""); err != nil {
-		return err
+	if r.fs.NArg() == 1 {
+		if r.alias != "" {
+			return errors.New("give the alias once: as the argument or with --alias")
+		}
+		r.alias = r.fs.Arg(0)
 	}
 	orgID, err := resolveOrg(ctx, r.c, r.org)
 	if err != nil {
 		return err
-	}
-	if r.alias == "" && r.fs.NArg() == 1 {
-		r.alias = r.fs.Arg(0)
 	}
 	team, err := teamID(ctx, r.c, orgID, r.team)
 	if err != nil {
@@ -126,9 +114,6 @@ func (r *keyRun) create(ctx context.Context) error {
 }
 
 func (r *keyRun) list(ctx context.Context) error {
-	if err := r.parse(-1, ""); err != nil {
-		return err
-	}
 	orgID, err := resolveOrg(ctx, r.c, r.org)
 	if err != nil {
 		return err
@@ -155,7 +140,7 @@ func (r *keyRun) list(ctx context.Context) error {
 			}
 			_, _ = fmt.Fprintf(w, "%s\t%s\t%s…\t%s\t%s\t%s\t%s\t%s\n",
 				k.ID, k.Alias, k.Prefix, dash(string(k.Kind)), dash(k.TeamID),
-				statusWord(keyState(k)), statusWord(last), planText(k.Plan))
+				statusWord(k.State(time.Now())), statusWord(last), planText(k.Plan))
 		}
 	})
 }
@@ -184,27 +169,12 @@ func planText(p *policy.PlanUsage) string {
 	return strings.Join(parts, " · ")
 }
 
-func keyState(k store.KeySummary) string {
-	switch {
-	case k.RevokedAt != nil:
-		return "revoked"
-	case k.ExpiresAt != nil && k.ExpiresAt.Before(time.Now()):
-		return "expired"
-	default:
-		return "active"
-	}
-}
-
 func (r *keyRun) revoke(ctx context.Context) error {
-	yes := r.fs.Bool("yes", false, yesUsage)
-	if err := r.parse(1, "usage: keera key revoke <alias> [--yes]"); err != nil {
-		return err
-	}
 	// An id names a key outright, so --yes with an id needs no lookup. An
 	// alias only means something inside an organisation, and the prompt needs
 	// the record to say what it is about.
 	target := r.fs.Arg(0)
-	if !*yes || !id.HasPrefix(target, "key") {
+	if !r.yes || !id.HasPrefix(target, "key") {
 		orgID, err := resolveOrg(ctx, r.c, r.org)
 		if err != nil {
 			return err
@@ -214,7 +184,7 @@ func (r *keyRun) revoke(ctx context.Context) error {
 			return err
 		}
 		target = found.ID
-		if !*yes {
+		if !r.yes {
 			if err := confirmKeyRevoke(found); err != nil {
 				return err
 			}
@@ -233,10 +203,6 @@ func (r *keyRun) revoke(ctx context.Context) error {
 }
 
 func (r *keyRun) rotate(ctx context.Context) error {
-	if err := r.parse(1,
-		"usage: keera key rotate <alias> [--alias <new-alias>] [--expires 720h]"); err != nil {
-		return err
-	}
 	orgID, err := resolveOrg(ctx, r.c, r.org)
 	if err != nil {
 		return err
@@ -252,17 +218,17 @@ func confirmKeyRevoke(k store.KeySummary) error {
 	if named == "" {
 		named, noun = k.ID, "id"
 	}
-	fmt.Fprintf(os.Stderr, "%s\n", styleErr.head(fmt.Sprintf("Revoking %s (%s):", named, k.ID)))
-	fmt.Fprintln(os.Stderr, "  every client still holding it is refused from its next call")
-	fmt.Fprintln(os.Stderr, "  nothing can print it again, so it cannot be put back")
+	used := "  it has never been used"
 	if k.LastUsedAt != nil {
-		fmt.Fprintf(os.Stderr, "  it was last used %s\n", k.LastUsedAt.Format(time.DateOnly))
-	} else {
-		fmt.Fprintln(os.Stderr, "  it has never been used")
+		used = "  it was last used " + k.LastUsedAt.Format(time.DateOnly)
 	}
-	fmt.Fprintf(os.Stderr, "To replace it without an outage instead: keera key rotate %s\n", named)
-	fmt.Fprintln(os.Stderr, "Usage history and the audit log are kept.")
-	return confirmTyping(noun, named, "nothing was revoked")
+	return confirm(fmt.Sprintf("Revoking %s (%s):", named, k.ID), []string{
+		"  every client still holding it is refused from its next call",
+		"  nothing can print it again, so it cannot be put back",
+		used,
+		"To replace it without an outage instead: keera key rotate " + named,
+		"Usage history and the audit log are kept.",
+	}, noun, named, "nothing was revoked")
 }
 
 // rotateKey replaces a key with one carrying the same team, owner, alias and
@@ -276,9 +242,13 @@ func rotateKey(ctx context.Context, c *client, orgID, who, newAlias, expires str
 		return err
 	}
 	if old.RevokedAt != nil {
+		fresh := "keera key create"
+		if old.TeamID != "" {
+			fresh += " --team " + old.TeamID
+		}
 		return fmt.Errorf("%s was already revoked on %s; there is nothing to rotate - "+
-			"issue a fresh key with: keera key create --team %s --alias %q",
-			old.ID, old.RevokedAt.Format(time.DateOnly), old.TeamID, old.Alias)
+			"issue a fresh key with: %s --alias %q",
+			old.ID, old.RevokedAt.Format(time.DateOnly), fresh, old.Alias)
 	}
 
 	var created struct {

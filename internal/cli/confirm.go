@@ -7,6 +7,16 @@ import (
 	"strings"
 )
 
+// confirm says what is about to happen, one line each under a heading, then
+// asks as confirmTyping does. A line meant as a bullet starts with two spaces.
+func confirm(title string, lines []string, noun, want, undone string) error {
+	fmt.Fprintln(os.Stderr, styleErr.head(title))
+	for _, line := range lines {
+		fmt.Fprintln(os.Stderr, line)
+	}
+	return confirmTyping(noun, want, undone)
+}
+
 // confirmTyping makes somebody type a thing's name back before something
 // irreversible happens to it. A reflex "y" does not catch the wrong row;
 // typing the name does.

@@ -249,3 +249,126 @@ func usageFromResponse(raw []byte) *tokenUsage {
 	}
 	return envelope.Usage
 }
+
+// scanSSE walks the data payloads of a server-sent event stream, joining an
+// event's data lines the way the format says to and skipping the terminator.
+func scanSSE(src io.Reader, fn func(payload []byte) error) error {
+	lines := newSSELines(src, maxLineBytes)
+	// data holds one event's payload and is reused for the next, to avoid an
+	// allocation per token. fn must not keep what it is given.
+	var data []byte
+
+	complete := func() error {
+		if len(data) == 0 {
+			return nil
+		}
+		payload := data
+		data = data[:0]
+		if bytes.Equal(bytes.TrimSpace(payload), doneMarker) {
+			return nil
+		}
+		return fn(payload)
+	}
+
+	for {
+		line, err := lines.next()
+		if len(line) > 0 {
+			trimmed := bytes.TrimRight(line, "\r\n")
+			switch {
+			case len(trimmed) == 0:
+				if cerr := complete(); cerr != nil {
+					return cerr
+				}
+			case bytes.HasPrefix(trimmed, dataPrefix):
+				chunk := bytes.TrimSpace(trimmed[len(dataPrefix):])
+				if len(data)+len(chunk) > maxLineBytes {
+					return errEventTooLarge
+				}
+				if len(data) > 0 {
+					data = append(data, '\n')
+				}
+				data = append(data, chunk...)
+			}
+		}
+		if err != nil {
+			if cerr := complete(); cerr != nil {
+				return cerr
+			}
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+	}
+}
+
+// oaiStreamChunk is one chunk of a chat completion stream.
+type oaiStreamChunk struct {
+	Choices []struct {
+		Delta struct {
+			Content   string             `json:"content"`
+			ToolCalls []oaiToolCallDelta `json:"tool_calls"`
+		} `json:"delta"`
+		FinishReason string `json:"finish_reason"`
+	} `json:"choices"`
+	Usage *tokenUsage `json:"usage"`
+}
+
+// oaiToolCallDelta is one fragment of a streamed tool call.
+type oaiToolCallDelta struct {
+	// Index is which of several parallel tool calls this fragment belongs to.
+	Index    *int   `json:"index"`
+	ID       string `json:"id"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
+// chatChunks is what a stream translated into another API learns from a chat
+// completion stream besides its content. Both the Messages and the Responses
+// streams embed it.
+type chatChunks struct {
+	finishReason string
+	usage        *tokenUsage
+	deltas       int
+}
+
+// fold reads one chunk: it keeps the usage record and the finish reason, and
+// hands the text and each tool-call fragment on, in that order.
+func (c *chatChunks) fold(payload []byte, text func(string) error,
+	tool func(index int, tc oaiToolCallDelta) error,
+) error {
+	var chunk oaiStreamChunk
+	if json.Unmarshal(payload, &chunk) != nil {
+		// An unreadable chunk is skipped: the rest of the turn is still worth
+		// delivering.
+		return nil
+	}
+	if chunk.Usage != nil {
+		c.usage = chunk.Usage
+	}
+	if len(chunk.Choices) == 0 {
+		// The usage-only chunk. Its numbers go into the closing event.
+		return nil
+	}
+	choice := chunk.Choices[0]
+	if choice.FinishReason != "" {
+		c.finishReason = choice.FinishReason
+	}
+	if t := choice.Delta.Content; t != "" {
+		if err := text(t); err != nil {
+			return err
+		}
+	}
+	for _, tc := range choice.Delta.ToolCalls {
+		index := 0
+		if tc.Index != nil {
+			index = *tc.Index
+		}
+		if err := tool(index, tc); err != nil {
+			return err
+		}
+	}
+	return nil
+}

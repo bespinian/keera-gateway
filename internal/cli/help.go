@@ -73,7 +73,9 @@ var commands = []command{
 			"back in keera/credentials.json in your configuration directory " +
 			"(~/.config on Linux). Commands then run as you: your role " +
 			"decides what they may do, and the audit log records your address rather than " +
-			"\"operator key\". The sign-in lasts a month and ends sooner with 'keera logout'.\n\n" +
+			"\"operator key\". The sign-in lasts a month, or 12 hours where the directory gives no refresh " +
+			"token. It ends sooner with 'keera logout', or when the directory stops vouching " +
+			"for you.\n\n" +
 			"--url makes this the only line a developer needs: the gateway signed in to " +
 			"becomes the one every later command talks to, with nothing to export into a " +
 			"shell profile. Without it the sign-in goes to KEERA_CONTROL_URL, then to the " +
@@ -199,8 +201,8 @@ var commands = []command{
 					"to them is revoked. Where the deployment lends out sandboxes, their agent " +
 					"sandboxes and any that have not started yet are terminated, and the rest " +
 					"are suspended, with the volume kept. Usage and the audit log are kept.\n\n" +
-					"Leaving the directory is not enough on its own: it stops new sign-ins, " +
-					"but not the keys a person already has."},
+					"Leaving the directory is not enough on its own: it ends their sign-ins " +
+					"within 15 minutes, but not the keys they already have."},
 			{name: "enable", args: "<email-or-id>", summary: "let a disabled person sign in again",
 				flags: []string{"org", "json"},
 				prose: "Their old keys stay revoked, so they start with none. Their passkeys " +
@@ -655,7 +657,9 @@ var commands = []command{
 			"'keera connect claude-code --subscription' is for Claude Code signed in to a " +
 			"Claude plan. It needs 'keera login' first. It issues this machine its own " +
 			"subscription key and writes it into ~/.claude/settings.json, so there is no key " +
-			"to copy. Running it again replaces that key. --team puts the key in a team, " +
+			"to copy. When the organisation's managed settings already set the gateway's " +
+			"address, it leaves the address to them. Running it again replaces that key. " +
+			"--team puts the key in a team, " +
 			"which only an administrator may choose.",
 		examples: []string{
 			"keera connect",
@@ -977,23 +981,23 @@ func printHelp(fs *flag.FlagSet, name, sub string) error {
 // wantsHelp spots a request for help in any of the ways people write it:
 // `keera filter --help`, `keera filter help`, `keera filter add --help` or
 // `keera filter help add`. It returns the subcommand asked about, empty for
-// the command itself, and false when this is not a request for help. It stops
-// at "--", because what follows belongs to another program, as in
-// `keera sandbox ssh box -- git --help`.
+// the command itself, and false when this is not a request for help.
+//
+// The word "help" counts only where a verb goes, so a team or a prompt can be
+// called "help". It stops at "--", because what follows belongs to another
+// program, as in `keera sandbox ssh box -- git --help`.
 func wantsHelp(args []string) (string, bool) {
 	asked := false
 	var named []string
-	for _, a := range args {
+	for i, a := range args {
 		if a == "--" {
 			break
 		}
-		switch a {
-		case "-h", "--help", "-help", "help":
+		switch {
+		case a == "-h" || a == "--help" || a == "-help" || (a == "help" && i == 0):
 			asked = true
-		default:
-			if !strings.HasPrefix(a, "-") {
-				named = append(named, a)
-			}
+		case !strings.HasPrefix(a, "-"):
+			named = append(named, a)
 		}
 	}
 	if !asked {

@@ -11,7 +11,6 @@ import (
 
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/policy"
-	"github.com/bespinian/keera-gateway/internal/store"
 )
 
 func TestAccessSaysTheOperatorKeyIsNobody(t *testing.T) {
@@ -87,38 +86,6 @@ func TestAllowedModelsIsWhatTheKeyCanActuallyCall(t *testing.T) {
 				t.Errorf("allowedModels = %v, want %v", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestKeyState(t *testing.T) {
-	now := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
-	past, future := now.Add(-time.Hour), now.Add(time.Hour)
-
-	tests := []struct {
-		name string
-		key  store.KeySummary
-		want string
-	}{
-		{"nothing set", store.KeySummary{}, "active"},
-		{"expiry ahead", summaryWith(nil, &future), "active"},
-		{"expiry behind", summaryWith(nil, &past), "expired"},
-		{"revoked", summaryWith(&past, nil), "revoked"},
-		// Revocation is the one that matters: an expired key that was also
-		// revoked is revoked, because that is the one somebody did on purpose.
-		{"revoked and expired", summaryWith(&past, &past), "revoked"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := keyState(tc.key, now); got != tc.want {
-				t.Errorf("keyState = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-func summaryWith(revoked, expires *time.Time) store.KeySummary {
-	return store.KeySummary{
-		RevokedAt: revoked, ExpiresAt: expires,
 	}
 }
 

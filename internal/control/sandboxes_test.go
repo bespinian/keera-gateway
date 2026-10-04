@@ -244,11 +244,10 @@ func TestSandboxRefusesAnotherOrgsTeam(t *testing.T) {
 			"org_id": "org_1", "team_id": "team_other", "name": "cross",
 			"class": "standard", "authorized_keys": []string{"ssh-ed25519 AAAA test"},
 		}, &envelope)
-	if code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", code)
-	}
-	if !strings.Contains(envelope.Error.Message, "not in this organisation") {
-		t.Errorf("message = %q", envelope.Error.Message)
+	// 404, as for a team that does not exist, so another tenant's team ids
+	// cannot be probed.
+	if code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", code)
 	}
 	// And nothing was created on the way to refusing - not the sandbox, and not
 	// the key, which is the one that would have outlived the mistake.

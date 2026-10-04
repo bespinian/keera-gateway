@@ -483,6 +483,26 @@ func TestAuthenticationFailures(t *testing.T) {
 	}
 }
 
+func TestAnUnknownInferencePathAnswersJSON(t *testing.T) {
+	h := newHarness(t, jsonBackend(`{}`), nil, nil)
+	for _, path := range []string{"/v1/chat/completion", "/v2/chat/completions"} {
+		resp := h.post(t, path, `{}`)
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("%s: status = %d, want 404", path, resp.StatusCode)
+		}
+		if ct := resp.Header.Get("Content-Type"); ct != "application/json" {
+			t.Errorf("%s: content type = %q, want JSON a client can parse", path, ct)
+		}
+		var envelope struct {
+			Error struct{ Code string } `json:"error"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil ||
+			envelope.Error.Code != "not_found" {
+			t.Errorf("%s: envelope = %+v, %v; want code not_found", path, envelope, err)
+		}
+	}
+}
+
 func TestBudgetExceededIsNotRetryable(t *testing.T) {
 	h := newHarness(t, jsonBackend(`{}`), nil, nil)
 	h.budgets.err = &policy.ErrBudgetExceeded{

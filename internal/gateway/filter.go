@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -459,11 +458,13 @@ func (s *Server) runFilter(ctx context.Context, f policy.Filter, m policy.Model,
 	// A gate asks for logprobs: its first token is the verdict, whatever the
 	// model wraps it in. The reason after it is still read from the text.
 	logprobs := gate && s.readsLogprobs(m)
-	raw, status, err := s.askFilter(ctx, m, instruction, input, outputTokens, logprobs)
+	ask := guardQuestion{instruction: instruction, input: input, outputTokens: outputTokens,
+		timeout: filterTimeout, limit: maxFilterResponseBytes, subject: "the filter's model"}
+	raw, status, err := s.askGuard(ctx, m, ask, logprobs)
 	if err == nil && logprobs && rejectsLogprobs(status) {
 		// As a router does: remember it, and ask again for the words only.
 		s.dropLogprobs(m)
-		raw, status, err = s.askFilter(ctx, m, instruction, input, outputTokens, false)
+		raw, status, err = s.askGuard(ctx, m, ask, false)
 	}
 	if err != nil {
 		return nil, filterCost{}, err
@@ -475,10 +476,7 @@ func (s *Server) runFilter(ctx context.Context, f policy.Filter, m policy.Model,
 
 	// The cost is read before the answer is judged: an unusable answer still
 	// used the GPU.
-	var cost filterCost
-	if u := usageFromResponse(raw); u != nil {
-		cost.micros = m.Cost(u.InputTokens, u.cached(), u.OutputTokens)
-	}
+	cost := filterCost{micros: guardCost(m, raw)}
 
 	if gate {
 		cost.confidence, err = parseGateReply(raw)
@@ -491,42 +489,52 @@ func (s *Server) runFilter(ctx context.Context, f policy.Filter, m policy.Model,
 	return out, cost, nil
 }
 
-// askFilter sends a filter's model one request and reads back the whole answer,
-// whatever its status.
-func (s *Server) askFilter(ctx context.Context, m policy.Model, instruction string,
-	input []byte, outputTokens int, logprobs bool,
+// guardQuestion is one question a filter or a router puts to its own model.
+type guardQuestion struct {
+	instruction  string
+	input        []byte
+	outputTokens int
+	timeout      time.Duration
+	limit        int64
+	// subject names the model in an error.
+	subject string
+}
+
+// askGuard sends a filter's or a router's model one question, and reads back
+// the whole answer, whatever its status.
+func (s *Server) askGuard(ctx context.Context, m policy.Model, q guardQuestion, logprobs bool,
 ) ([]byte, int, error) {
-	payload, err := guardRequest(m, instruction, input, outputTokens, logprobs)
+	payload, err := guardRequest(m, q.instruction, q.input, q.outputTokens, logprobs)
 	if err != nil {
 		return nil, 0, err
 	}
-	return s.askOwnModel(ctx, m, payload, filterTimeout, maxFilterResponseBytes,
-		"the filter's model")
-}
-
-// askOwnModel sends the request a filter or a router puts to its own model,
-// and reads back the whole answer, whatever its status. subject names that
-// model in an error.
-func (s *Server) askOwnModel(ctx context.Context, m policy.Model, payload []byte,
-	timeout time.Duration, limit int64, subject string,
-) ([]byte, int, error) {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	ctx, cancel := context.WithTimeout(ctx, q.timeout)
 	defer cancel()
 
 	resp, err := s.send(ctx, m, outbound{path: "/chat/completions", payload: payload})
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, 0, fmt.Errorf("%s did not answer within %s", subject, timeout)
+			return nil, 0, fmt.Errorf("%s did not answer within %s", q.subject, q.timeout)
 		}
-		return nil, 0, fmt.Errorf("%s could not be reached: %w", subject, err)
+		return nil, 0, fmt.Errorf("%s could not be reached: %w", q.subject, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, limit))
+	// Cut JSON would only fail later as a confusing parse error.
+	raw, err := readCapped(resp.Body, q.limit)
 	if err != nil {
-		return nil, 0, fmt.Errorf("reading the answer of %s failed: %w", subject, err)
+		return nil, 0, fmt.Errorf("reading the answer of %s failed: %w", q.subject, err)
 	}
 	return raw, resp.StatusCode, nil
+}
+
+// guardCost is what a filter's or a router's model charged for one answer,
+// read from its usage record.
+func guardCost(m policy.Model, raw []byte) int64 {
+	if u := usageFromResponse(raw); u != nil {
+		return m.Cost(u.InputTokens, u.cached(), u.OutputTokens)
+	}
+	return 0
 }
 
 // guardRequest builds the chat request a filter or a router sends its own

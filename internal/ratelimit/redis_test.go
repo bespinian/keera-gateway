@@ -165,7 +165,7 @@ func redisFor(t *testing.T) (*redis.Client, string) {
 	t.Helper()
 	url := os.Getenv("KEERA_TEST_REDIS_URL")
 	if url == "" {
-		t.Skip("set KEERA_TEST_REDIS_URL to run the Redis rate-limiting tests (make redis-up)")
+		t.Skip("set KEERA_TEST_REDIS_URL to run the Redis rate-limiting tests (make test-integration)")
 	}
 	opt, err := redis.ParseURL(url)
 	if err != nil {

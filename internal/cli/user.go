@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
-	"os"
 	"slices"
 	"strings"
 	"time"
@@ -27,53 +26,51 @@ const roleHint = " (the operator role comes from KEERA_OPERATORS or " +
 
 // userRun is one 'keera user' invocation.
 type userRun struct {
-	c      *client
-	fs     *flag.FlagSet
-	args   []string
-	org    string
-	asJSON bool
+	c          *client
+	fs         *flag.FlagSet
+	org        string
+	addRole    string
+	externalID string
+	passkey    bool
+	yes        bool
+	asJSON     bool
 }
 
 func userCmd(ctx context.Context, args []string) error {
 	sub, rest := split(args)
 	fs := flag.NewFlagSet("user "+sub, flag.ExitOnError)
-	r := &userRun{c: newClient(), fs: fs, args: rest}
+	r := &userRun{c: newClient(), fs: fs}
 	fs.StringVar(&r.org, "org", "", orgUsage)
+	fs.StringVar(&r.addRole, "role", "member", "member or admin")
+	fs.StringVar(&r.externalID, "external-id", "",
+		"the identity provider's subject, when it is known before the first sign-in")
+	fs.BoolVar(&r.passkey, "passkey", false,
+		"they sign in with a passkey instead of an identity provider; prints their set-up link")
+	fs.BoolVar(&r.yes, "yes", false, yesUsage)
 	fs.BoolVar(&r.asJSON, "json", false, jsonUsage)
 
 	fs.Usage = func() { _ = printHelp(fs, "user", sub) }
 	if want, ok := wantsHelp(args); ok {
-		// 'add' and 'disable' declare these themselves; help needs them on the
-		// set too.
-		registerUserAddFlags(fs)
-		fs.Bool("yes", false, yesUsage)
 		return printHelp(fs, "user", want)
 	}
-	switch sub {
-	case "add", "create", "invite", "new":
+	verb, err := parseVerb(fs, "user", sub, rest)
+	if err != nil {
+		return err
+	}
+	switch verb {
+	case "add":
 		return r.add(ctx)
-	case "list", "ls", "":
-		return r.list(ctx)
-	case "role", "set-role":
+	case "role":
 		return r.role(ctx)
-	case "disable", "offboard":
+	case "disable":
 		return r.disable(ctx)
 	case "enable":
 		return r.enable(ctx)
-	case "passkey-link", "passkey":
+	case "passkey-link":
 		return r.passkeyLink(ctx)
 	default:
-		return unknownSub("user", sub)
+		return r.list(ctx)
 	}
-}
-
-func registerUserAddFlags(fs *flag.FlagSet) (role, externalID *string, passkey *bool) {
-	role = fs.String("role", "member", "member or admin")
-	externalID = fs.String("external-id", "",
-		"the identity provider's subject, when it is known before the first sign-in")
-	passkey = fs.Bool("passkey", false,
-		"they sign in with a passkey instead of an identity provider; prints their set-up link")
-	return role, externalID, passkey
 }
 
 // passkeyLinkOut is a set-up link as the control plane hands it out.
@@ -89,16 +86,10 @@ func printPasskeyLink(w *table, email string, link passkeyLinkOut) {
 }
 
 func (r *userRun) add(ctx context.Context) error {
-	role, externalID, passkey := registerUserAddFlags(r.fs)
-	if err := parseArgs(r.fs, r.args, 1,
-		"usage: keera user add <email> [--role member|admin] [--passkey]"); err != nil {
-		return err
+	if r.passkey && r.externalID != "" {
+		return opposites("passkey", "external-id")
 	}
-	if *passkey && *externalID != "" {
-		return errors.New("--passkey and --external-id do not go together: a passkey " +
-			"account has no identity provider")
-	}
-	if !slices.Contains(roleNames, *role) {
+	if !slices.Contains(roleNames, r.addRole) {
 		return fmt.Errorf("--role must be one of: %s%s",
 			strings.Join(roleNames, ", "), roleHint)
 	}
@@ -117,7 +108,7 @@ func (r *userRun) add(ctx context.Context) error {
 		return err
 	}
 	signIn := ""
-	if *passkey {
+	if r.passkey {
 		signIn = "passkey"
 	}
 	var user struct {
@@ -125,7 +116,7 @@ func (r *userRun) add(ctx context.Context) error {
 		PasskeyLink *passkeyLinkOut `json:"passkey_link,omitempty"`
 	}
 	if err := r.c.do(ctx, "POST", "/v1/users", map[string]string{
-		"org_id": orgID, "email": email, "role": *role, "external_id": *externalID,
+		"org_id": orgID, "email": email, "role": r.addRole, "external_id": r.externalID,
 		"sign_in": signIn,
 	}, &user); err != nil {
 		return err
@@ -143,9 +134,6 @@ func (r *userRun) add(ctx context.Context) error {
 // passkeyLink hands out a new set-up link: for a new device, after a lost
 // passkey, or to move someone who has not signed in yet to passkeys.
 func (r *userRun) passkeyLink(ctx context.Context) error {
-	if err := parseArgs(r.fs, r.args, 1, "usage: keera user passkey-link <email-or-id>"); err != nil {
-		return err
-	}
 	orgID, err := resolveOrg(ctx, r.c, r.org)
 	if err != nil {
 		return err
@@ -166,9 +154,6 @@ func (r *userRun) passkeyLink(ctx context.Context) error {
 }
 
 func (r *userRun) list(ctx context.Context) error {
-	if err := parse(r.fs, r.args); err != nil {
-		return err
-	}
 	orgID, err := resolveOrg(ctx, r.c, r.org)
 	if err != nil {
 		return err
@@ -198,9 +183,6 @@ func (r *userRun) list(ctx context.Context) error {
 }
 
 func (r *userRun) role(ctx context.Context) error {
-	if err := parseArgs(r.fs, r.args, 2, "usage: keera user role <email-or-id> <member|admin>"); err != nil {
-		return err
-	}
 	role := r.fs.Arg(1)
 	if !slices.Contains(roleNames, role) {
 		return fmt.Errorf("the role must be one of: %s%s",
@@ -230,10 +212,6 @@ func (r *userRun) role(ctx context.Context) error {
 }
 
 func (r *userRun) disable(ctx context.Context) error {
-	yes := r.fs.Bool("yes", false, yesUsage)
-	if err := parseArgs(r.fs, r.args, 1, "usage: keera user disable <email-or-id> [--yes]"); err != nil {
-		return err
-	}
 	orgID, err := resolveOrg(ctx, r.c, r.org)
 	if err != nil {
 		return err
@@ -242,16 +220,18 @@ func (r *userRun) disable(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if !*yes {
-		fmt.Fprintf(os.Stderr, "%s\n", styleErr.head("Disabling "+user.Email+":"))
-		fmt.Fprintln(os.Stderr, "  they cannot sign in, and are signed out everywhere")
-		fmt.Fprintln(os.Stderr, "  every key attributed to them is revoked, for good")
+	if !r.yes {
+		lines := []string{
+			"  they cannot sign in, and are signed out everywhere",
+			"  every key attributed to them is revoked, for good",
+		}
 		if me, err := whoami(ctx, r.c); err == nil && me.Sandboxes {
-			fmt.Fprintln(os.Stderr, "  their agent sandboxes and any not started yet are terminated; "+
+			lines = append(lines, "  their agent sandboxes and any not started yet are terminated; "+
 				"the rest are suspended")
 		}
-		fmt.Fprintln(os.Stderr, "Usage history and the audit log are kept. 'keera user enable' lets them back in.")
-		if err := confirmTyping("email", user.Email, "nobody was disabled"); err != nil {
+		lines = append(lines, "Usage history and the audit log are kept. 'keera user enable' lets them back in.")
+		if err := confirm("Disabling "+user.Email+":", lines, "email", user.Email,
+			"nobody was disabled"); err != nil {
 			return err
 		}
 	}
@@ -284,9 +264,6 @@ func (r *userRun) disable(ctx context.Context) error {
 }
 
 func (r *userRun) enable(ctx context.Context) error {
-	if err := parseArgs(r.fs, r.args, 1, "usage: keera user enable <email-or-id>"); err != nil {
-		return err
-	}
 	orgID, err := resolveOrg(ctx, r.c, r.org)
 	if err != nil {
 		return err

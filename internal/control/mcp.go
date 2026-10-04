@@ -99,8 +99,7 @@ func (s *Server) putMCPServer(w http.ResponseWriter, r *http.Request, p *authn.P
 // or "" when nothing is.
 func normalizeMCPServer(m *policy.MCPServer) string {
 	if !policy.ValidAlias(m.Alias) {
-		return "an alias must be lowercase letters, digits and interior hyphens: it is part " +
-			"of the address clients are given"
+		return badAlias(m.Alias)
 	}
 	u, err := url.Parse(strings.TrimSpace(m.URL))
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
@@ -133,22 +132,8 @@ func validHeaderName(s string) bool {
 
 // setMCPCredential seals a pasted credential, or clears the stored one.
 func (s *Server) setMCPCredential(r *http.Request, p *authn.Principal, orgID, alias, credential string) error {
-	var sealed []byte
-	if credential != "" {
-		var err error
-		if sealed, err = s.opts.Secrets.Seal(registry.MCPSecretName(orgID, alias), credential); err != nil {
-			return err
-		}
-	}
-	if err := s.st.SetMCPCredential(r.Context(), orgID, alias, sealed); err != nil {
-		return err
-	}
-	action := "mcp_server.credential.set"
-	if credential == "" {
-		action = "mcp_server.credential.clear"
-	}
-	s.auditf(r, p, orgID, action, "mcp_server", alias, nil)
-	return nil
+	return s.setCredential(r, p, orgID, alias, credential, "mcp_server",
+		registry.MCPSecretName, s.st.SetMCPCredential)
 }
 
 func (s *Server) deleteMCPServer(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
@@ -184,15 +169,11 @@ func (s *Server) deleteMCPServer(w http.ResponseWriter, r *http.Request, p *auth
 // organisations can each have a server of the same name, and their calls
 // would add up as one.
 func (s *Server) toolCalls(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if !s.requireOrgAdmin(w, p, p.OrgID) {
+	if !s.requireAdmin(w, p) {
 		return
 	}
-	orgID, from, to, ok := s.reportScope(w, r, p)
+	orgID, from, to, ok := s.reportOrg(w, r, p)
 	if !ok {
-		return
-	}
-	if orgID == "" {
-		needOrg(w, orgRequired)
 		return
 	}
 	sc, ok := s.entityScope(w, r, orgID)
@@ -204,7 +185,7 @@ func (s *Server) toolCalls(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		OrgID: orgID, TeamID: sc.TeamID, KeyID: sc.KeyID, UserID: sc.UserID,
 		Server: q.Get("server"), Tool: q.Get("tool"), From: from, To: to,
 	}
-	tq.Limit, _ = strconv.Atoi(q.Get("limit"))
+	tq.Limit, _ = page(q)
 	if httpx.Flag(q, "summary") {
 		data, err := s.st.SummarizeToolCalls(r.Context(), tq)
 		if err != nil {

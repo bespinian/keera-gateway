@@ -150,11 +150,11 @@ func (s *Server) mcpPost(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, s.opts.MaxBodyBytes))
+	raw, err := readBody(w, r, s.opts.MaxBodyBytes)
 	if err != nil {
-		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+		if errors.Is(err, errBodyTooLarge) {
 			httpx.WriteError(w, http.StatusRequestEntityTooLarge, "invalid_request_error",
-				"request_too_large", "the request body exceeds the gateway's limit")
+				"request_too_large", err.Error())
 		}
 		return
 	}
@@ -557,10 +557,7 @@ func toolErrorResult(text string) json.RawMessage {
 func (x *mcpExchange) writeRPC(msg rpcMessage) { x.writeRPCStatus(http.StatusOK, msg) }
 
 func (x *mcpExchange) writeRPCStatus(status int, msg rpcMessage) {
-	raw, _ := json.Marshal(msg)
-	x.w.Header().Set("Content-Type", "application/json")
-	x.w.WriteHeader(status)
-	_, _ = x.w.Write(raw)
+	httpx.WriteJSON(x.w, status, msg)
 }
 
 // ------------------------------------------------------------ the way back
@@ -590,8 +587,7 @@ func (x *mcpExchange) relay(resp *http.Response) {
 
 	switch {
 	case strings.HasPrefix(ct, "text/event-stream"):
-		x.w.Header().Set("Cache-Control", "no-cache")
-		x.w.Header().Set("X-Accel-Buffering", "no")
+		streamHeaders(x.w.Header())
 		x.w.WriteHeader(status)
 		flusher := http.NewResponseController(x.w)
 		_, _ = pipeNative(x.w, func() { _ = flusher.Flush() }, resp.Body, mcpEvents{x},

@@ -36,7 +36,7 @@ var sessionSorts = map[string]store.AgentSessionSort{
 func (s *Server) sessionQuery(w http.ResponseWriter, r *http.Request,
 	p *authn.Principal) (store.AgentSessionQuery, bool) {
 	var q store.AgentSessionQuery
-	if !s.requireOrgAdmin(w, p, p.OrgID) {
+	if !s.requireAdmin(w, p) {
 		return q, false
 	}
 	orgID, from, to, ok := s.reportScope(w, r, p)
@@ -55,10 +55,7 @@ func (s *Server) sessionQuery(w http.ResponseWriter, r *http.Request,
 	}
 	q = store.AgentSessionQuery{
 		OrgID:   orgID,
-		TeamID:  sc.TeamID,
-		KeyID:   sc.KeyID,
-		UserID:  sc.UserID,
-		Alias:   sc.Alias,
+		Scope:   sc,
 		Key:     v.Get("key"),
 		Unhappy: httpx.Flag(v, "unhappy"),
 		From:    from,
@@ -66,9 +63,10 @@ func (s *Server) sessionQuery(w http.ResponseWriter, r *http.Request,
 		Gap:     s.opts.SessionGap,
 		Sort:    sort,
 	}
-	q.Limit, _ = strconv.Atoi(v.Get("limit"))
+	var before int64
+	q.Limit, before = page(v)
 	if sort == store.SortRecent {
-		q.Before, _ = strconv.ParseInt(v.Get("before"), 10, 64)
+		q.Before = before
 	}
 	return q, true
 }
@@ -129,7 +127,7 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request, p *authn.Princ
 // The id in the path may be any request in the session, because readers come
 // from a row in the request log.
 func (s *Server) session(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if !s.requireOrgAdmin(w, p, p.OrgID) {
+	if !s.requireAdmin(w, p) {
 		return
 	}
 	orgID, ok := s.scopeOrg(w, p, r.URL.Query().Get("org_id"))

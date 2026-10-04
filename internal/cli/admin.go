@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -19,7 +18,10 @@ import (
 
 // Flag descriptions that several commands share word for word.
 const (
-	orgUsage  = "organisation id (default: your own; an operator's only one)"
+	orgUsage = "organisation id (default: your own; an operator's only one)"
+	// orgsUsage is --org on a report, which spans every organisation the
+	// caller can see unless told one.
+	orgsUsage = "restrict to one organisation (default: every one you can see)"
 	jsonUsage = "print raw JSON"
 	yesUsage  = "do not ask for confirmation"
 )
@@ -48,17 +50,6 @@ func split(args []string) (sub string, rest []string) {
 	return args[0], args[1:]
 }
 
-// parseArgs parses a verb's flags and checks that exactly n arguments are left.
-func parseArgs(fs *flag.FlagSet, args []string, n int, usage string) error {
-	if err := parse(fs, args); err != nil {
-		return err
-	}
-	if fs.NArg() != n {
-		return errors.New(usage)
-	}
-	return nil
-}
-
 // list reads one of the control API's {"data": [...]} listings.
 func list[T any](ctx context.Context, c *client, path string) ([]T, error) {
 	var res struct {
@@ -69,7 +60,8 @@ func list[T any](ctx context.Context, c *client, path string) ([]T, error) {
 }
 
 // findAlias reads the entry called alias from the list at path. noun names
-// the kind of entry, for the error and the command that lists them.
+// the kind of entry, for the error; its first word is the command that lists
+// them, as in "MCP server" and 'keera mcp list'.
 func findAlias[T any](ctx context.Context, c *client, path, alias, noun string,
 	aliasOf func(T) string,
 ) (T, error) {
@@ -83,7 +75,8 @@ func findAlias[T any](ctx context.Context, c *client, path, alias, noun string,
 			return e, nil
 		}
 	}
-	return zero, fmt.Errorf("no %s %s (see: keera %s list)", noun, alias, noun)
+	cmd := strings.ToLower(strings.Fields(noun)[0])
+	return zero, fmt.Errorf("no %s %s (see: keera %s list)", noun, alias, cmd)
 }
 
 // inOrg scopes a control API path to one organisation.

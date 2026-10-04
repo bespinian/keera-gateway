@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -167,6 +168,10 @@ func captureStderr(t *testing.T) func() string {
 // oneOrg is what resolveOrg needs to fill in --org by itself, which is the
 // case in every dedicated deployment.
 var oneOrg = map[string]any{"data": []map[string]any{{"id": "org_1", "name": "Example Bank"}}}
+
+var paymentsTeam = map[string]any{"data": []map[string]any{
+	{"id": "team_1", "org_id": "org_1", "name": "Payments"},
+}}
 
 // -------------------------------------------------------------------- orgs
 
@@ -1011,14 +1016,14 @@ func TestStringListTakesRepeatsAndCommas(t *testing.T) {
 }
 
 func TestCredentialFlags(t *testing.T) {
-	if got, err := credential(&modelFlags{}); err != nil || got != nil {
+	if got, err := credential("", false); err != nil || got != nil {
 		t.Errorf("nothing given: %v, %v - want the stored one left alone", got, err)
 	}
-	got, err := credential(&modelFlags{noAPIKey: true})
+	got, err := credential("", true)
 	if err != nil || got == nil || *got != "" {
 		t.Errorf("--no-api-key: %v, %v - want an empty credential", got, err)
 	}
-	if _, err := credential(&modelFlags{apiKey: "sk-1", noAPIKey: true}); err == nil {
+	if _, err := credential("sk-1", true); err == nil {
 		t.Error("--api-key with --no-api-key was accepted")
 	}
 }
@@ -1264,6 +1269,8 @@ func TestFilterReportAsksForTheWindowAndPrintsTheSplit(t *testing.T) {
 func TestPolicySetAppliesFiltersAndClearsThemByFlag(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
+		"GET /v1/orgs":                   oneOrg,
+		"GET /v1/teams":                  paymentsTeam,
 		"GET /v1/guardrails/team/team_1": map[string]any{"rpm": 120},
 		"PUT /v1/guardrails/team/team_1": map[string]any{},
 	})
@@ -1287,6 +1294,8 @@ func TestPolicySetAppliesFiltersAndClearsThemByFlag(t *testing.T) {
 func TestPolicySetClearsFiltersOnlyWithItsOwnFlag(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
+		"GET /v1/orgs":                   oneOrg,
+		"GET /v1/teams":                  paymentsTeam,
 		"GET /v1/guardrails/team/team_1": map[string]any{"filters": []string{"redact-secrets"}},
 		"PUT /v1/guardrails/team/team_1": map[string]any{},
 	})
@@ -1556,11 +1565,12 @@ func TestReportsTakeATeamByNameAndAPersonByEmail(t *testing.T) {
 
 func TestANegativeBudgetFlagIsLeftUnset(t *testing.T) {
 	// Negative is how the flag says it was not given. 'keera budget' and
-	// 'guardrail set' must read it the same way.
+	// 'guardrail set' share the flags, so they read it the same way.
 	for _, amount := range []float64{-1, -5} {
 		var lim policy.Limits
-		f := &facetFlags{budget: amount, rpm: -1, tpm: -1, maxOut: -1}
-		if err := f.apply("budget", &lim); err != nil {
+		f := registerGuardrailFlags(flag.NewFlagSet("budget", flag.ContinueOnError))
+		f.budget = amount
+		if err := f.apply(&lim); err != nil {
 			t.Fatal(err)
 		}
 		if lim.BudgetMicros != nil {
@@ -1576,5 +1586,107 @@ func TestTruncatingKeepsWholeCharacters(t *testing.T) {
 		if !utf8.ValidString(got) || !strings.HasSuffix(got, "…") {
 			t.Errorf("%s cut %q badly", name, got)
 		}
+	}
+}
+
+// A guardrail names its team the way every other command does: by name.
+func TestGuardrailTakesATeamByName(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/orgs":                   oneOrg,
+		"GET /v1/teams":                  paymentsTeam,
+		"GET /v1/guardrails/team/team_1": map[string]any{},
+		"PUT /v1/guardrails/team/team_1": map[string]any{},
+
+		"GET /v1/guardrails/team/team_1/effective": map[string]any{},
+	})
+	if err := Run(context.Background(), []string{"limit", "team", "payments", "--rpm", "60"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.request("PUT", "/v1/guardrails/team/team_1").body["rpm"]; got != float64(60) {
+		t.Errorf("rpm = %v, want 60 on the team named payments", got)
+	}
+}
+
+// An unknown verb is said before anything is sent: no sign-in is needed to
+// be told about a typo.
+func TestAnUnknownVerbIsRefusedBeforeAnyCall(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{})
+	for _, args := range [][]string{
+		{"model", "lst"}, {"filter", "lst"}, {"router", "lst"}, {"mcp", "lst"},
+		{"usage", "--by", "team", "extra"}, {"mcp", "connect", "github", "--json"},
+	} {
+		if err := Run(context.Background(), args); err == nil {
+			t.Errorf("keera %s was accepted", strings.Join(args, " "))
+		}
+	}
+	if len(f.seen) != 0 {
+		t.Errorf("a refused command still called the control plane: %+v", f.seen)
+	}
+}
+
+// A filter or router that does not exist is said before the prompt, not after
+// somebody has typed its alias back.
+func TestDeleteLooksTheAliasUpBeforeAsking(t *testing.T) {
+	quiet(t)
+	newFakeControl(t, map[string]any{
+		"GET /v1/orgs":    oneOrg,
+		"GET /v1/filters": map[string]any{"data": []any{}},
+		"GET /v1/routers": map[string]any{"data": []any{}},
+	})
+	for _, cmd := range []string{"filter", "router"} {
+		err := Run(context.Background(), []string{cmd, "delete", "typo"})
+		if err == nil || !strings.Contains(err.Error(), "no "+cmd+" typo") {
+			t.Errorf("%s delete typo: err = %v, want the alias refused", cmd, err)
+		}
+	}
+}
+
+func TestKeyCreateTakesTheAliasOnce(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{})
+	err := Run(context.Background(), []string{"key", "create", "laptop", "--alias", "phone"})
+	if err == nil || !strings.Contains(err.Error(), "alias once") {
+		t.Errorf("err = %v, want the two aliases refused", err)
+	}
+	if len(f.seen) != 0 {
+		t.Errorf("a refused command still called the control plane: %+v", f.seen)
+	}
+}
+
+func TestRotatingARevokedKeyWithNoTeamSuggestsNoTeam(t *testing.T) {
+	quiet(t)
+	newFakeControl(t, map[string]any{
+		"GET /v1/keys": map[string]any{"data": []map[string]any{
+			{"id": "key_1", "alias": "ci", "revoked_at": "2026-01-01T00:00:00Z"},
+		}},
+	})
+	err := rotateKey(context.Background(), newClient(), "org_1", "key_1", "", "", false)
+	if err == nil || strings.Contains(err.Error(), "--team") {
+		t.Errorf("err = %v, want a hint without --team", err)
+	}
+}
+
+func TestMaxSizeShowsEitherPartAlone(t *testing.T) {
+	for _, tc := range []struct {
+		cpu, memory int
+		want        string
+	}{
+		{2000, 0, "2c, any memory"},
+		{0, 8192, "any CPU, 8Gi"},
+		{1500, 4096, "1.5c, 4Gi"},
+	} {
+		if got := maxSize(tc.cpu, tc.memory); got != tc.want {
+			t.Errorf("maxSize(%d, %d) = %q, want %q", tc.cpu, tc.memory, got, tc.want)
+		}
+	}
+	var w strings.Builder
+	tw := newTable(&w)
+	memory := 8192
+	printLimits(tw, policy.Limits{MaxSandboxMemory: &memory})
+	_ = tw.Flush()
+	if !strings.Contains(w.String(), "any CPU, 8Gi") {
+		t.Errorf("a memory-only limit was not shown:\n%s", w.String())
 	}
 }

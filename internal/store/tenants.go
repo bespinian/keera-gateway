@@ -75,6 +75,19 @@ type KeyInfo struct {
 	RevokedAt *time.Time     `json:"revoked_at,omitempty"`
 }
 
+// State is the one word a screen shows for a key at now: revoked, expired or
+// active. Revocation wins over expiry, because somebody did it on purpose.
+func (k KeyInfo) State(now time.Time) string {
+	switch {
+	case k.RevokedAt != nil:
+		return "revoked"
+	case k.ExpiresAt != nil && k.ExpiresAt.Before(now):
+		return "expired"
+	default:
+		return "active"
+	}
+}
+
 // OrgTemplate is what a new organisation starts with: a copy of each model
 // and sandbox class, from the catalogue files.
 type OrgTemplate struct {
@@ -269,13 +282,7 @@ func (s *Store) CreateTeam(ctx context.Context, id, orgID, name string) (Team, e
 
 // ErrTeamNameTaken means another team in the organisation already has the
 // name. The control plane turns it into a 409 with a readable message.
-var ErrTeamNameTaken = errTeamNameTaken{}
-
-type errTeamNameTaken struct{}
-
-func (errTeamNameTaken) Error() string {
-	return "store: a team of that name already exists in this organisation"
-}
+var ErrTeamNameTaken = errors.New("store: a team of that name already exists in this organisation")
 
 // RenameTeam gives a team a different name. Everything else refers to a team
 // by id, so this changes one column. The old name is kept in the audit log.

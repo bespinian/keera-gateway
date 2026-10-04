@@ -21,13 +21,13 @@ func doctorCmd(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
 	probe := fs.Bool("probe", false,
 		"put a real request through every enabled model; costs a generation each")
-	org := fs.String("org", "", "organisation to check (defaults to the only one, if there is only one)")
+	org := fs.String("org", "", orgUsage)
 	asJSON := fs.Bool("json", false, jsonUsage)
 	fs.Usage = func() { _ = printHelp(fs, "doctor", "") }
 	if want, ok := wantsHelp(args); ok {
 		return printHelp(fs, "doctor", want)
 	}
-	if err := parse(fs, args); err != nil {
+	if err := parseCmd(fs, "doctor", args); err != nil {
 		return err
 	}
 
@@ -71,7 +71,7 @@ func printDiagnosis(base string, d control.Diagnosis) {
 	// verdict, a space, the padded name and a space.
 	nameWidth := 0
 	for _, check := range d.Checks {
-		nameWidth = max(nameWidth, len(check.Name))
+		nameWidth = max(nameWidth, len([]rune(check.Name)))
 	}
 	gutter := 2 + 4 + 1 + nameWidth + 1
 
@@ -81,7 +81,7 @@ func printDiagnosis(base string, d control.Diagnosis) {
 			area = check.Area
 			fmt.Printf("%s\n", style.head(area))
 		}
-		fmt.Printf("  %s %-*s %s\n", mark(check.Verdict), nameWidth, check.Name,
+		fmt.Printf("  %s %s %s\n", mark(check.Verdict), padTo(check.Name, nameWidth),
 			wrapAt(check.Detail, gutter, gutter, proseWidth))
 		if check.Fix != "" {
 			fmt.Printf("%s%s\n", strings.Repeat(" ", gutter),

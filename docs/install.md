@@ -92,10 +92,13 @@ less, and a zero or negative `KEERA_CACHE_TTL`, `KEERA_SPEND_REFRESH` or
 `KEERA_UPSTREAM_HEADER_TIMEOUT`. For retention and `KEERA_SANDBOX_IDLE_SUSPEND`,
 `0` means off and a negative value is refused.
 
-These stop the start instead, with a message that names the setting: a
-`KEERA_REDIS_URL` that is not a Redis URL, a `KEERA_SANDBOX_DRIVER` it does
-not know, a `KEERA_SANDBOX_GIT_FORGE` it does not know when a sandbox driver is
-set, and a `KEERA_OIDC_<N>_DEFAULT_ROLE` other than `admin` or `member`.
+Some values stop the start instead, with a message that names the setting.
+Among them: a `KEERA_LOG_LEVEL` or `KEERA_LOG_FORMAT` not listed above, a
+`KEERA_REDIS_URL` that is not a Redis URL, a `KEERA_METRICS_TOKEN` equal to the
+operator key, and a `KEERA_OIDC_<N>_DEFAULT_ROLE` other than `admin` or
+`member`. The single sign-on, passkey and sandbox settings below have checks
+of their own, which their sections and [sso.md](sso.md) and
+[sandboxes.md](sandboxes.md#configuration) describe.
 
 ### Rate limits with more than one replica
 
@@ -178,11 +181,16 @@ Without them, compose acts on llama.cpp rather than the vLLM that is running.
 `compose.yaml` passes the settings on this page from `.env` to the gateway,
 with three exceptions:
 
-- The database, the listener and the catalogue files are fixed in the file.
+- The database, the published port and the catalogue files are fixed in the
+  file. `KEERA_ADDR` is not passed.
 - Single sign-on has blocks only for providers named `google` and `entra`.
   Another name needs its own block.
 - The sandbox settings are left out. The compose gateway cannot run sandboxes,
   so only `make dev` reads them. See [run-locally.md](run-locally.md).
+
+Some settings only exist in compose, such as `KEERA_BIND` (the address the
+port is published on) and the inference engine's model and image. They are in
+`.env.example` and [compose/README.md](../compose/README.md).
 
 The gateway is up at once. It applies its schema on start and waits only for
 Postgres.
@@ -285,7 +293,7 @@ keera guardrail effective key <key-id>    # what a request with this key meets
 ```
 
 Or open the panel at `http://127.0.0.1:8080` and sign in with the operator
-key. On an empty deployment, **Overview** shows a first-run checklist.
+key. On an empty deployment, **Dashboard** shows a first-run checklist.
 
 ### In a script, and on a screen
 

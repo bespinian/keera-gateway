@@ -73,7 +73,7 @@ func parseRepo(raw string) (repo, error) {
 }
 
 func badRepo(raw string) error {
-	return &sandbox.ErrRefused{Reason: fmt.Sprintf("%q is not a repository address; use the "+
+	return &sandbox.ErrRefused{Invalid: true, Reason: fmt.Sprintf("%q is not a repository address; use the "+
 		"https or ssh address the forge shows for cloning", raw)}
 }
 

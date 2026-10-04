@@ -4,7 +4,7 @@ import { api, setCsrf, ApiError } from "./api.js";
 import { h, icon, icons, brandMark, clear, replace, toast } from "./ui.js";
 import { signIn, passkeySignInFlow } from "./views/signin.js";
 import { passkeySetupView, managePasskeys } from "./views/passkeys.js";
-import { overviewView } from "./views/overview.js";
+import { dashboardView } from "./views/dashboard.js";
 import { teamsView } from "./views/teams.js";
 import { keysView } from "./views/keys.js";
 import { modelsView, providerModelsView } from "./views/models.js";
@@ -55,7 +55,7 @@ export const state = {
  *  then the ones for whoever runs the organisation, then the ones only an
  *  administrator or an operator can see. */
 const routes = [
-  { path: "/", label: "Overview", icon: "overview", view: overviewView },
+  { path: "/", label: "Dashboard", icon: "dashboard", view: dashboardView },
 
   // The screens a developer rather than an administrator comes here for. For a
   // member these are the only ones that answer a question they actually have,
@@ -305,7 +305,7 @@ function visibleRoutes() {
     if (r.operator && !state.me.unrestricted) return false;
     if (r.admin && !state.me.can_admin_org) return false;
     // A link somebody was sent, or a page they bookmarked, opens whatever the
-    // sidebar is showing - otherwise matchRoute would fall back to Overview
+    // sidebar is showing - otherwise matchRoute would fall back to Dashboard
     // and the address bar would quietly rewrite itself.
     if (
       r.advanced &&
@@ -458,9 +458,9 @@ matchMedia("(min-width: 991px)").addEventListener("change", (e) => {
  *  It names them rather than saying "More", because the whole point is that
  *  somebody who does not know what a router is should be able to decide from
  *  the sidebar whether they want one. Once any of them is in use it stops
- *  offering that one, and when all three are it disappears. */
+ *  offering that one, and when all four are it disappears. */
 function moreItem() {
-  // Nothing to offer once the deployment uses all three: they are on the
+  // Nothing to offer once the deployment uses all four: they are on the
   // sidebar because they are in use, and an entry that would put them away
   // again is one nobody wants.
   if (routes.filter((r) => r.advanced && offered(r)).every(inUse)) return null;
@@ -513,7 +513,7 @@ function renderShell() {
       {
         class: "brand",
         href: "/",
-        title: "Overview",
+        title: "Dashboard",
         onClick: (e) => {
           e.preventDefault();
           navigate("/");

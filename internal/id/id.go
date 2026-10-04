@@ -20,10 +20,8 @@ func New(prefix string) string {
 	binary.BigEndian.PutUint64(ts[:], uint64(time.Now().UnixMilli()))
 
 	var b [16]byte
-	copy(b[:6], ts[2:]) // the low 48 bits hold every realistic timestamp
-	if _, err := rand.Read(b[6:]); err != nil {
-		panic("id: entropy source failed: " + err.Error())
-	}
+	copy(b[:6], ts[2:])     // the low 48 bits hold every realistic timestamp
+	_, _ = rand.Read(b[6:]) // never fails; see crypto/rand.Read
 	return prefix + "_" + enc.EncodeToString(b[:])
 }
 

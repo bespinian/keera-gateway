@@ -11,7 +11,8 @@ import (
 )
 
 // Filters and routers are the two hooks an organisation puts in front of a
-// request. Their routes share the helpers here.
+// request. Their routes share the helpers here, and so do the routes of
+// models and MCP servers.
 
 // writeHookList answers a filter, router or model list. With ?stats it adds
 // what each one did in the window. Only the panel asks for that, so the CLI and the

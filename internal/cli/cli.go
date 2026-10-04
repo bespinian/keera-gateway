@@ -33,38 +33,43 @@ func Run(ctx context.Context, args []string) error {
 	}
 
 	cmd, rest := args[0], args[1:]
-	switch cmd {
-	case "org", "orgs":
+	name := cmd
+	if c, ok := find(cmd); ok {
+		// One case per command: help.go owns the other spellings.
+		name = c.name
+	}
+	switch name {
+	case "org":
 		return orgCmd(ctx, rest)
-	case "team", "teams":
+	case "team":
 		return teamCmd(ctx, rest)
-	case "user", "users":
+	case "user":
 		return userCmd(ctx, rest)
-	case "key", "keys":
+	case "key":
 		return keyCmd(ctx, rest)
-	case "model", "models":
+	case "model":
 		return modelCmd(ctx, rest)
-	case "filter", "filters":
+	case "filter":
 		return filterCmd(ctx, rest)
-	case "router", "routers":
+	case "router":
 		return routerCmd(ctx, rest)
 	case "mcp":
 		return mcpCmd(ctx, rest)
-	case "sandbox", "sandboxes", "sbx":
+	case "sandbox":
 		return sandboxCmd(ctx, rest)
-	case "guardrail", "guardrails":
+	case "guardrail":
 		return guardrailCmd(ctx, rest)
 	// One part of a guardrail each: the same call as 'guardrail set', with
 	// fewer flags to read.
-	case "limit", "limits":
+	case "limit":
 		return facetCmd(ctx, "limit", rest)
-	case "budget", "budgets":
+	case "budget":
 		return facetCmd(ctx, "budget", rest)
 	case "usage":
 		return usageCmd(ctx, rest)
-	case "failure", "failures":
+	case "failures":
 		return failuresCmd(ctx, rest)
-	case "session", "sessions":
+	case "session":
 		return sessionCmd(ctx, rest)
 	case "connect":
 		return connectCmd(ctx, rest)

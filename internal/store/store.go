@@ -236,7 +236,7 @@ func isUnique(err error) bool {
 // for a table with more than one.
 func uniqueOn(err error, constraint string) bool {
 	var pgErr *pgconn.PgError
-	return isUnique(err) && errors.As(err, &pgErr) && pgErr.ConstraintName == constraint
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == constraint
 }
 
 // nullable stores an empty string as NULL.

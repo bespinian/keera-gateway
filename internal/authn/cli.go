@@ -20,7 +20,8 @@ const CLITokenPrefix = "keera_cli_"
 const (
 	// CLITokenTTL is how long a signed-in terminal stays signed in. Signing in
 	// again costs a browser window, so it is a month rather than a browser
-	// session's twelve hours; a lost laptop still stops working by itself.
+	// session's twelve hours; a lost laptop still stops working by itself. The
+	// directory is asked again meanwhile, so leaving it ends the token sooner.
 	CLITokenTTL = 30 * 24 * time.Hour
 	// CLICodeTTL bounds the hop from the browser to the loopback listener. It
 	// is minutes because people often leave a consent screen open for a while.
@@ -29,13 +30,9 @@ const (
 
 // NewCLIToken mints a token and the hash stored for it. Only the hash is
 // stored, so a database dump holds no working credentials.
-func NewCLIToken() (token string, hash []byte, err error) {
-	raw, err := randomToken()
-	if err != nil {
-		return "", nil, err
-	}
-	token = CLITokenPrefix + raw
-	return token, HashCLIToken(token), nil
+func NewCLIToken() (token string, hash []byte) {
+	token = CLITokenPrefix + randomToken()
+	return token, HashCLIToken(token)
 }
 
 // HashCLIToken returns the value stored in cli_tokens.id for token.
@@ -46,12 +43,9 @@ func HashCLIToken(token string) []byte { return sum256(token) }
 
 // NewCLICode mints the one-time code the browser carries back to the loopback
 // listener, and the hash stored for it.
-func NewCLICode() (code string, hash []byte, err error) {
-	code, err = randomToken()
-	if err != nil {
-		return "", nil, err
-	}
-	return code, HashCLICode(code), nil
+func NewCLICode() (code string, hash []byte) {
+	code = randomToken()
+	return code, HashCLICode(code)
 }
 
 // HashCLICode returns the value stored in cli_codes.id for code.
@@ -59,14 +53,9 @@ func HashCLICode(code string) []byte { return sum256(code) }
 
 // NewSession mints a panel session's cookie value, the hash stored for it,
 // and its CSRF token.
-func NewSession() (token string, hash []byte, csrf string, err error) {
-	if token, err = randomToken(); err != nil {
-		return "", nil, "", err
-	}
-	if csrf, err = randomToken(); err != nil {
-		return "", nil, "", err
-	}
-	return token, HashSession(token), csrf, nil
+func NewSession() (token string, hash []byte, csrf string) {
+	token = randomToken()
+	return token, HashSession(token), randomToken()
 }
 
 // HashSession returns the value stored for a session's cookie value.
@@ -80,15 +69,14 @@ func HashSession(token string) []byte { return sum256(token) }
 func CLIChallenge(verifier string) string { return s256(verifier) }
 
 // NewCLIVerifier mints the verifier a command line keeps to itself.
-func NewCLIVerifier() (string, error) { return randomToken() }
+func NewCLIVerifier() string { return randomToken() }
 
-// randomToken returns 32 random bytes, URL-safe base64 encoded.
-func randomToken() (string, error) {
+// randomToken returns 32 random bytes, URL-safe base64 encoded. rand.Read
+// never fails: it crashes the program instead of returning weak bytes.
+func randomToken() string {
 	var raw [32]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(raw[:]), nil
+	_, _ = rand.Read(raw[:])
+	return base64.RawURLEncoding.EncodeToString(raw[:])
 }
 
 func sum256(s string) []byte {

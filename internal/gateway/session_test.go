@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
@@ -30,7 +31,7 @@ func keyFor(t *testing.T, keyID, body string, kind policy.Kind, headers ...strin
 // these tests mean by "the client named it".
 func stated(t *testing.T, keyID, body, id string) string {
 	t.Helper()
-	return keyFor(t, keyID, body, policy.KindChat, SessionHeader, id)
+	return keyFor(t, keyID, body, policy.KindChat, httpx.SessionHeader, id)
 }
 
 // The property the whole report rests on: every call an agent makes working

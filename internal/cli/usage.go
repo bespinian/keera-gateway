@@ -16,7 +16,7 @@ import (
 func usageCmd(ctx context.Context, args []string) error {
 	c := newClient()
 	fs := flag.NewFlagSet("usage", flag.ExitOnError)
-	org := fs.String("org", "", "restrict to one organisation")
+	org := fs.String("org", "", orgsUsage)
 	groupBy := fs.String("by", "model", "group by: model, client, team, key, user, day or org")
 	since := fs.Duration("since", 30*24*time.Hour, "how far back to report")
 	asJSON := fs.Bool("json", false, jsonUsage)
@@ -24,7 +24,7 @@ func usageCmd(ctx context.Context, args []string) error {
 	if want, ok := wantsHelp(args); ok {
 		return printHelp(fs, "usage", want)
 	}
-	if err := parse(fs, args); err != nil {
+	if err := parseCmd(fs, "usage", args); err != nil {
 		return err
 	}
 
@@ -81,7 +81,7 @@ func (res usageResponse) label(groupBy, group string) string {
 func failuresCmd(ctx context.Context, args []string) error {
 	c := newClient()
 	fs := flag.NewFlagSet("failures", flag.ExitOnError)
-	org := fs.String("org", "", "restrict to one organisation")
+	org := fs.String("org", "", orgsUsage)
 	kind := fs.String("kind", "failed", "failed, refused, interrupted or all")
 	alias := fs.String("model", "", "restrict to one model")
 	w := registerWho(fs)
@@ -93,7 +93,7 @@ func failuresCmd(ctx context.Context, args []string) error {
 	if want, ok := wantsHelp(args); ok {
 		return printHelp(fs, "failures", want)
 	}
-	if err := parse(fs, args); err != nil {
+	if err := parseCmd(fs, "failures", args); err != nil {
 		return err
 	}
 	params, err := w.params(ctx, c, *org)

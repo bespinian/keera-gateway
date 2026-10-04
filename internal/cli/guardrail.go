@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"math"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/control"
+	"github.com/bespinian/keera-gateway/internal/id"
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
@@ -119,7 +119,7 @@ func (f *guardrailFlags) apply(lim *policy.Limits) error {
 	setList(&lim.AllowedTools, f.tools)
 	switch {
 	case f.blockHosted && f.allowHosted:
-		return fmt.Errorf("--block-hosted-tools and --allow-hosted-tools contradict each other")
+		return opposites("block-hosted-tools", "allow-hosted-tools")
 	case f.blockHosted:
 		yes := true
 		lim.BlockHostedTools = &yes
@@ -186,76 +186,78 @@ func setPeriod(dst **policy.Period, given string) error {
 
 func guardrailCmd(ctx context.Context, args []string) error {
 	sub, rest := split(args)
-	c := newClient()
 	fs := flag.NewFlagSet("guardrail "+sub, flag.ExitOnError)
 	f := registerGuardrailFlags(fs)
 	fs.Usage = func() { _ = printHelp(fs, "guardrail", sub) }
 	if want, ok := wantsHelp(args); ok {
 		return printHelp(fs, "guardrail", want)
 	}
-	if err := parse(fs, rest); err != nil {
+	verb, err := parseVerb(fs, "guardrail", sub, rest)
+	if err != nil {
 		return err
 	}
-	if err := verbFlags(fs, "guardrail", sub); err != nil {
+	c := newClient()
+	scope, scopeID, err := scopeArgs(ctx, c, fs)
+	if err != nil {
 		return err
 	}
-	rest = fs.Args()
 
-	switch sub {
-	case "get", "show":
-		scope, scopeID, err := scopeArgs(ctx, c, fs, rest, "usage: keera guardrail get <org|team|key> <id>")
-		if err != nil {
-			return err
-		}
-		var lim policy.Limits
-		if err := c.do(ctx, "GET", guardrailPath(scope, scopeID), nil, &lim); err != nil {
-			return err
-		}
-		return out(f.asJSON, lim, func(w *table) { printLimits(w, lim) })
+	switch verb {
 	case "effective":
-		scope, scopeID, err := scopeArgs(ctx, c, fs, rest,
-			"usage: keera guardrail effective <org|team|key> <id>")
-		if err != nil {
-			return err
-		}
 		eff, err := effectiveFor(ctx, c, scope, scopeID)
 		if err != nil {
 			return err
 		}
 		return out(f.asJSON, eff, func(w *table) { printEffective(w, eff, facetAll) })
-	case "set", "edit", "update":
-		scope, scopeID, err := scopeArgs(ctx, c, fs, rest,
-			"usage: keera guardrail set <org|team|key> <id> [flags]")
-		if err != nil {
-			return err
-		}
+	case "set":
 		lim, err := updateLimits(ctx, c, scope, scopeID, f.apply)
 		if err != nil {
 			return err
 		}
 		return out(f.asJSON, lim, func(w *table) { printLimits(w, lim) })
 	default:
-		return unknownSub("guardrail", sub)
+		var lim policy.Limits
+		if err := c.do(ctx, "GET", guardrailPath(scope, scopeID), nil, &lim); err != nil {
+			return err
+		}
+		return out(f.asJSON, lim, func(w *table) { printLimits(w, lim) })
 	}
 }
 
-// scopeArgs reads the scope and its id. The id of an organisation may be left
-// out: it is then the caller's own, or an operator's only one. These commands
-// have no --org flag, so the id goes after the scope instead.
-func scopeArgs(ctx context.Context, c *client, fs *flag.FlagSet, args []string,
-	usage string,
-) (string, string, error) {
-	if err := parse(fs, args); err != nil {
-		return "", "", err
-	}
-	switch {
-	case fs.NArg() == 2:
-		return fs.Arg(0), fs.Arg(1), nil
-	case fs.NArg() == 1 && fs.Arg(0) == string(policy.ScopeOrg):
+// scopeArgs reads the scope and its id from the arguments already parsed. A
+// team may be named by its name and a key by its alias, as everywhere else.
+// The id of an organisation may be left out: it is then the caller's own, or
+// an operator's only one. These commands have no --org flag, so the id goes
+// after the scope instead.
+func scopeArgs(ctx context.Context, c *client, fs *flag.FlagSet) (string, string, error) {
+	scope, given := fs.Arg(0), fs.Arg(1)
+	switch policy.ScopeType(scope) {
+	case policy.ScopeOrg:
+		if given != "" {
+			return scope, given, nil
+		}
 		orgID, err := theOnlyOrg(ctx, c, "name the one you mean after the scope: org <org-id>")
-		return fs.Arg(0), orgID, err
+		return scope, orgID, err
+	case policy.ScopeTeam, policy.ScopeKey:
+		if given == "" {
+			return "", "", fmt.Errorf("name the %s after the scope: %s <%s>", scope, scope, scope)
+		}
+		find := teamID
+		if scope == string(policy.ScopeKey) {
+			find = keyID
+		}
+		// An id needs no organisation; a name is only unique inside one.
+		if id.HasPrefix(given, scope) {
+			return scope, given, nil
+		}
+		orgID, err := theOnlyOrg(ctx, c, "name the "+scope+" by its id")
+		if err != nil {
+			return "", "", err
+		}
+		scopeID, err := find(ctx, c, orgID, given)
+		return scope, scopeID, err
 	default:
-		return "", "", errors.New(usage)
+		return "", "", fmt.Errorf("the scope is org, team or key, not %q", scope)
 	}
 }
 
@@ -277,9 +279,9 @@ func updateLimits(ctx context.Context, c *client, scope, scopeID string,
 }
 
 // A facet is one part of a guardrail on its own: 'keera limit' for the rates
-// and 'keera budget' for the spend. Same scopes and same call, fewer flags.
-// With no flags it reports rather than writes, because `keera limit team t_1`
-// is a question.
+// and 'keera budget' for the spend. Same scopes, same call and the same flags
+// as 'guardrail set', of which help.go lets each take its own. With no flags
+// it reports rather than writes, because `keera limit team t_1` is a question.
 
 // facetAll is every part of the effective report, in the order it prints.
 var facetAll = []string{"models", "rates", "spend", "prompt", "filters", "tools", "sandboxes"}
@@ -287,68 +289,27 @@ var facetAll = []string{"models", "rates", "spend", "prompt", "filters", "tools"
 // facetFields are the parts of the effective report each facet prints.
 var facetFields = map[string][]string{"limit": {"rates"}, "budget": {"spend"}}
 
-// facetFlags are the flags of 'keera limit' or 'keera budget'.
-type facetFlags struct {
-	budget float64
-	period string
-	rpm    int
-	tpm    int
-	maxOut int
-	asJSON bool
-}
-
-// registerFacetFlags declares the part of a guardrail one facet owns, in the
-// same words 'guardrail set' uses.
-func registerFacetFlags(fs *flag.FlagSet, name string) *facetFlags {
-	f := &facetFlags{}
-	switch name {
-	case "budget":
-		fs.Float64Var(&f.budget, "budget", -1, budgetUsage)
-		fs.StringVar(&f.period, "period", "", periodUsage)
-	default:
-		fs.IntVar(&f.rpm, "rpm", -1, rpmUsage)
-		fs.IntVar(&f.tpm, "tpm", -1, tpmUsage)
-		fs.IntVar(&f.maxOut, "max-output-tokens", -1, maxOutUsage)
-	}
-	fs.BoolVar(&f.asJSON, "json", false, jsonUsage)
-	return f
-}
-
-// apply writes the given flags of one facet into lim.
-func (f *facetFlags) apply(name string, lim *policy.Limits) error {
-	if name == "budget" {
-		setBudget(&lim.BudgetMicros, f.budget)
-		return setPeriod(&lim.BudgetPeriod, f.period)
-	}
-	setInt(&lim.RPM, f.rpm)
-	setInt(&lim.TPM, f.tpm)
-	setInt(&lim.MaxOutputTokens, f.maxOut)
-	return nil
-}
-
 func facetCmd(ctx context.Context, name string, args []string) error {
+	fs := flag.NewFlagSet(name, flag.ExitOnError)
+	f := registerGuardrailFlags(fs)
+	fs.Usage = func() { _ = printHelp(fs, name, "") }
 	if want, ok := wantsHelp(args); ok {
-		fs := flag.NewFlagSet(name, flag.ExitOnError)
-		registerFacetFlags(fs, name)
 		return printHelp(fs, name, want)
 	}
 	if err := wrongFacet(name, args); err != nil {
 		return err
 	}
-
-	fs := flag.NewFlagSet(name, flag.ExitOnError)
-	f := registerFacetFlags(fs, name)
-	fs.Usage = func() { _ = printHelp(fs, name, "") }
+	if err := parseCmd(fs, name, args); err != nil {
+		return err
+	}
 	c := newClient()
-	scope, scopeID, err := scopeArgs(ctx, c, fs, args,
-		fmt.Sprintf("usage: keera %s <org|team|key> <id> [flags]", name))
+	scope, scopeID, err := scopeArgs(ctx, c, fs)
 	if err != nil {
 		return err
 	}
 
 	if changesSomething(fs) {
-		change := func(lim *policy.Limits) error { return f.apply(name, lim) }
-		if _, err := updateLimits(ctx, c, scope, scopeID, change); err != nil {
+		if _, err := updateLimits(ctx, c, scope, scopeID, f.apply); err != nil {
 			return err
 		}
 	}
@@ -369,9 +330,12 @@ func wrongFacet(name string, args []string) error {
 			continue
 		}
 		flagName := strings.TrimLeft(strings.SplitN(arg, "=", 2)[0], "-")
-		if other := facetOwning(flagName); other != "" && other != name {
-			return fmt.Errorf("--%s is not part of 'keera %s'; it is 'keera %s --%s'",
-				flagName, name, other, flagName)
+		for _, other := range []string{"limit", "budget"} {
+			c, _ := find(other)
+			if other != name && flagName != "json" && slices.Contains(c.flags, flagName) {
+				return fmt.Errorf("--%s is not part of 'keera %s'; it is 'keera %s --%s'",
+					flagName, name, other, flagName)
+			}
 		}
 	}
 	return nil
@@ -386,18 +350,6 @@ func changesSomething(fs *flag.FlagSet) bool {
 		}
 	})
 	return set
-}
-
-// facetOwning names the facet a flag belongs to.
-func facetOwning(flagName string) string {
-	switch flagName {
-	case "rpm", "tpm", "max-output-tokens":
-		return "limit"
-	case "budget", "period":
-		return "budget"
-	default:
-		return ""
-	}
 }
 
 // guardrailPath addresses one scope's guardrails. Both parts are typed by
@@ -547,6 +499,14 @@ func printEffectiveSandboxes(w *table, eff control.Effective) {
 			(time.Duration(sb.MaxSandboxTTLSeconds) * time.Second).String(),
 			narrowedBy(eff, func(l policy.Limits) bool { return l.MaxSandboxTTLSeconds != nil }))
 	}
+	if sb.MaxSandboxCPU == 0 && sb.MaxSandboxMemory == 0 {
+		showFrom(w, "max sandbox size", "(unlimited)", "")
+	} else {
+		showFrom(w, "max sandbox size", maxSize(sb.MaxSandboxCPU, sb.MaxSandboxMemory),
+			narrowedBy(eff, func(l policy.Limits) bool {
+				return l.MaxSandboxCPU != nil || l.MaxSandboxMemory != nil
+			}))
+	}
 }
 
 func showTightest(w *table, eff control.Effective, name string,
@@ -648,12 +608,24 @@ func printLimits(w *table, lim policy.Limits) {
 		show(w, "max sandbox lifetime",
 			(time.Duration(*lim.MaxSandboxTTLSeconds) * time.Second).String())
 	}
-	// In cores and mebibytes, the units the catalogue file and the flags use.
-	if lim.MaxSandboxCPU == nil {
+	if lim.MaxSandboxCPU == nil && lim.MaxSandboxMemory == nil {
 		show(w, "max sandbox size", "(unlimited)")
 	} else {
-		show(w, "max sandbox size", sizeOf(*lim.MaxSandboxCPU, derefInt(lim.MaxSandboxMemory)))
+		show(w, "max sandbox size", maxSize(derefInt(lim.MaxSandboxCPU), derefInt(lim.MaxSandboxMemory)))
 	}
+}
+
+// maxSize is a ceiling on a sandbox's size, in cores and mebibytes, the units
+// the catalogue file and the flags use. Either part may be unset.
+func maxSize(cpuMillis, memoryMiB int) string {
+	cpu, memory := "any CPU", "any memory"
+	if cpuMillis > 0 {
+		cpu = coresOf(cpuMillis)
+	}
+	if memoryMiB > 0 {
+		memory = mibOf(memoryMiB)
+	}
+	return cpu + ", " + memory
 }
 
 // joinedOr joins a list for a table cell, or says what a nil list means.

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/id"
 )
 
@@ -23,7 +22,7 @@ import (
 // and settings that only OpenAI's servers act on.
 
 // responsesShape implements shape for `/v1/responses`.
-type responsesShape struct{}
+type responsesShape struct{ openAIErrors }
 
 // ------------------------------------------------------------------- requests
 
@@ -366,12 +365,7 @@ func responseStatus(finish string) (string, any) {
 
 // callID keeps the upstream's identifier when it has one, since the client
 // sends it back with the tool's output.
-func callID(s string) string {
-	if s == "" {
-		return id.New("call")
-	}
-	return s
-}
+func callID(s string) string { return upstreamID(s, "call") }
 
 // encode turns a buffered chat completion into a response. Errors are already
 // in the shape this API uses, which is the chat one.
@@ -413,12 +407,6 @@ func responsesErrorBody(msg string) []byte {
 }
 
 func (responsesShape) contentType() string { return "application/json" }
-
-// writeError renders a refusal in the chat shape's envelope, which the
-// Responses API shares.
-func (responsesShape) writeError(w http.ResponseWriter, status int, typ, code, msg string) {
-	httpx.WriteError(w, status, typ, code, msg)
-}
 
 // ---------------------------------------------------------------- native
 

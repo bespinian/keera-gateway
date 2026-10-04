@@ -37,6 +37,8 @@ import {
   isAdmin,
   checkButton,
   plural,
+  pct,
+  field,
 } from "../ui.js";
 import { barList } from "../chart.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
@@ -67,13 +69,11 @@ export async function routersView(ctx) {
     h(
       "div",
       { class: "muted" },
-      "A router picks which model answers a request: a model reads the " +
-        "request, or the destinations are tried until one answers - in the " +
-        "listed order, fastest first or least busy first. Clients use a " +
-        "router's alias as the model name. Give them the alias, or limit a " +
-        "scope's allowed models to it. A router that reads requests should " +
-        "use a fast local model: a hosted one receives the prompt before it " +
-        "decides.",
+      "A router picks which model answers a request. A model reads it, " +
+        "its size decides, or the destinations are tried until one answers: " +
+        "in the listed order, fastest first or least busy first. Clients use " +
+        "the router's alias as the model name. A router that reads requests " +
+        "should use a fast local model.",
     ),
     h(
       "div",
@@ -168,22 +168,22 @@ export async function routersView(ctx) {
                 class: "btn btn-sm btn-danger",
                 onClick: () =>
                   confirm({
-                    title: `Remove ${rt.alias}?`,
+                    title: `Delete ${rt.alias}?`,
                     body:
-                      "A router named in an allow-list cannot be removed. " +
+                      "A router named in an allow-list cannot be deleted. " +
                       "Take it off those allow-lists first; the error lists " +
                       "them. Clients still using the alias will be told the " +
                       "model does not exist.",
-                    confirmLabel: "Remove router",
+                    confirmLabel: "Delete router",
                     danger: true,
                     onConfirm: async () => {
                       await api.deleteRouter(ctx.orgID, rt.alias);
-                      toast("Router removed", "good");
+                      toast("Router deleted", "good");
                       ctx.reload();
                     },
                   }),
               },
-              "Remove",
+              "Delete",
             ),
           );
         },
@@ -643,7 +643,7 @@ export async function routerDetailView(ctx) {
                 ),
                 fallbackPill(rt),
               ]
-            : [pill(`Removed from ${orgNameOf(ctx)}`, "warn")],
+            : [pill(`Deleted from ${orgNameOf(ctx)}`, "warn")],
         ),
         h("div", { style: { flex: 1 } }),
         rangePicker(ctx, since),
@@ -1088,11 +1088,6 @@ function identity(rt) {
   return `tries ${models} in order, first that answers`;
 }
 
-function pct(part, whole) {
-  if (!whole) return "-";
-  return ((100 * (part || 0)) / whole).toFixed(1) + "%";
-}
-
 /* -------------------------------------------------------------- editing one */
 
 // MODES are the five things a router can choose with, as the dialog offers
@@ -1481,14 +1476,6 @@ function editRouter(ctx, existing, chatModels) {
   // The fields only one kind of router has. They are hidden rather than
   // disabled, because a form that offers an instruction to a router that reads
   // nothing is a form inviting somebody to write one and wonder where it went.
-  const field = (label, control, hint) =>
-    h(
-      "div",
-      { class: "field" },
-      h("label", {}, label),
-      control,
-      hint ? h("div", { class: "hint" }, hint) : null,
-    );
   const modelField = field(
     "Runs on",
     model,
@@ -1585,21 +1572,15 @@ function editRouter(ctx, existing, chatModels) {
     h(
       "div",
       { class: "field-row" },
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "Alias"),
+      field(
+        "Alias",
         alias,
-        h(
-          "div",
-          { class: "hint" },
-          creating
-            ? "Lowercase letters, digits and hyphens. Clients use it as the " +
-                "model name."
-            : "Clients use this name, so it cannot change.",
-        ),
+        creating
+          ? "Lowercase letters, digits and hyphens. Clients use it as the " +
+              "model name."
+          : "Clients use this name, so it cannot change.",
       ),
-      h("div", { class: "field" }, h("label", {}, "Description"), description),
+      field("Description", description),
     ),
     modelField,
     h(

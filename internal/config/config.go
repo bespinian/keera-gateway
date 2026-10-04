@@ -7,6 +7,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -109,14 +110,14 @@ type Config struct {
 func Load() (Config, error) {
 	c := Config{
 		DatabaseURL:           env("KEERA_DATABASE_URL", ""),
-		MaxDBConns:            int32(envInt("KEERA_MAX_DB_CONNS", 16)),
+		MaxDBConns:            int32(min(envInt("KEERA_MAX_DB_CONNS", 16), math.MaxInt32)),
 		Addr:                  Addr(),
 		OperatorKey:           env("KEERA_OPERATOR_KEY", ""),
 		SecretKey:             env("KEERA_SECRET_KEY", ""),
 		MetricsToken:          env("KEERA_METRICS_TOKEN", ""),
 		ModelsFile:            env("KEERA_MODELS_FILE", ""),
-		LogLevel:              env("KEERA_LOG_LEVEL", "info"),
-		LogFormat:             env("KEERA_LOG_FORMAT", "text"),
+		LogLevel:              strings.ToLower(env("KEERA_LOG_LEVEL", "info")),
+		LogFormat:             strings.ToLower(env("KEERA_LOG_FORMAT", "text")),
 		MaxBodyBytes:          int64(envInt("KEERA_MAX_BODY_BYTES", gateway.DefaultMaxBodyBytes)),
 		MaxResponseBytes:      int64(envInt("KEERA_MAX_RESPONSE_BYTES", gateway.DefaultMaxResponseBytes)),
 		UpstreamHeaderTimeout: envDuration("KEERA_UPSTREAM_HEADER_TIMEOUT", gateway.DefaultUpstreamHeaderTimeout),
@@ -156,6 +157,9 @@ func (c Config) servedOverHTTPS() bool {
 
 func (c Config) validate() error {
 	if err := c.validateCredentials(); err != nil {
+		return err
+	}
+	if err := c.validateLogging(); err != nil {
 		return err
 	}
 	if err := c.validateRetention(); err != nil {
@@ -212,6 +216,22 @@ func (c Config) validateCredentials() error {
 	if c.MetricsToken == c.OperatorKey {
 		return errors.New("KEERA_METRICS_TOKEN must differ from KEERA_OPERATOR_KEY; " +
 			"it exists so a scrape configuration does not have to hold the operator key")
+	}
+	return nil
+}
+
+// validateLogging refuses a log setting it does not know, rather than quietly
+// logging at another level or in another format than the one asked for.
+func (c Config) validateLogging() error {
+	switch c.LogLevel {
+	case "debug", "info", "warn", "error":
+	default:
+		return fmt.Errorf("KEERA_LOG_LEVEL is %q; it is 'debug', 'info', 'warn' or 'error'", c.LogLevel)
+	}
+	switch c.LogFormat {
+	case "text", "json":
+	default:
+		return fmt.Errorf("KEERA_LOG_FORMAT is %q; it is 'text' or 'json'", c.LogFormat)
 	}
 	return nil
 }
@@ -287,19 +307,22 @@ func oidcProviders(publicURL string) []authn.OIDCConfig {
 	if publicURL != "" {
 		redirect = publicURL + httpx.ControlPrefix + "/auth/callback"
 	}
+	// An address is the same whichever directory vouched for it, so there is
+	// one operator list for the deployment.
+	operators := envList("KEERA_OPERATORS")
 	var out []authn.OIDCConfig
 	for _, name := range envList("KEERA_OIDC_PROVIDERS") {
 		name = strings.ToLower(strings.TrimSpace(name))
 		if name == "" {
 			continue
 		}
-		out = append(out, providerFrom(OIDCEnvPrefix(name), name, redirect))
+		out = append(out, providerFrom(OIDCEnvPrefix(name), name, redirect, operators))
 	}
 	return out
 }
 
 // providerFrom reads one provider's settings from prefix.
-func providerFrom(prefix, name, redirect string) authn.OIDCConfig {
+func providerFrom(prefix, name, redirect string, operators []string) authn.OIDCConfig {
 	return authn.OIDCConfig{
 		Name:         name,
 		DisplayName:  env(prefix+"LABEL", providerLabel(name)),
@@ -312,9 +335,7 @@ func providerFrom(prefix, name, redirect string) authn.OIDCConfig {
 		Mapping: authn.RoleMapping{
 			OperatorGroups: envList(prefix + "OPERATOR_GROUPS"),
 			AdminGroups:    envList(prefix + "ADMIN_GROUPS"),
-			// An address is the same whichever directory vouched for it, so
-			// there is one operator list for the deployment.
-			OperatorEmails: envList("KEERA_OPERATORS"),
+			OperatorEmails: operators,
 			Default:        authn.Role(env(prefix+"DEFAULT_ROLE", string(authn.RoleMember))),
 		},
 		Domains: envList(prefix + "DOMAINS"),

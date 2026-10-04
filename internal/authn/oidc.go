@@ -114,6 +114,9 @@ type Identity struct {
 	Subject  string
 	Email    string
 	Groups   []string
+	// RefreshToken lets the gateway ask the directory about this person again
+	// later. Empty when the provider issued none.
+	RefreshToken string
 }
 
 // ExternalID is how this identity is stored. It includes the provider because
@@ -137,6 +140,10 @@ type OIDC struct {
 	provider *oidc.Provider
 	verifier *oidc.IDTokenVerifier
 	oauth    *oauth2.Config
+	// google is set for accounts.google.com, which issues refresh tokens for
+	// a URL parameter rather than the offline_access scope, and refuses that
+	// scope.
+	google bool
 }
 
 // NewOIDC discovers the provider's metadata. It does so once at start-up, so a
@@ -155,12 +162,18 @@ func NewOIDC(ctx context.Context, cfg OIDCConfig, client *http.Client) (*OIDC, e
 	if err != nil {
 		return nil, fmt.Errorf("discovering the identity provider at %s: %w", cfg.IssuerURL, err)
 	}
+	google := isGoogle(cfg.IssuerURL)
 	scopes := cfg.Scopes
 	if len(scopes) == 0 {
 		scopes = []string{oidc.ScopeOpenID, "profile", "email"}
+		if !google {
+			// For a refresh token, so the directory can be asked again.
+			scopes = append(scopes, oidc.ScopeOfflineAccess)
+		}
 	}
 	return &OIDC{
 		cfg:      cfg,
+		google:   google,
 		provider: provider,
 		verifier: provider.Verifier(&oidc.Config{ClientID: cfg.ClientID}),
 		oauth: &oauth2.Config{
@@ -171,6 +184,12 @@ func NewOIDC(ctx context.Context, cfg OIDCConfig, client *http.Client) (*OIDC, e
 			Scopes:       scopes,
 		},
 	}, nil
+}
+
+// isGoogle reports whether an issuer is Google's.
+func isGoogle(issuer string) bool {
+	u, err := url.Parse(issuer)
+	return err == nil && u.Host == "accounts.google.com"
 }
 
 // Name is how this provider is addressed in a URL and stored in an identity.
@@ -265,33 +284,89 @@ type Flow struct {
 }
 
 // NewFlow mints the state, the PKCE verifier and the nonce for a login.
-func NewFlow() (Flow, error) {
-	var parts [3]string
-	for i := range parts {
-		s, err := randomToken()
-		if err != nil {
-			return Flow{}, err
-		}
-		parts[i] = s
-	}
-	return Flow{State: parts[0], Verifier: parts[1], Nonce: parts[2]}, nil
+func NewFlow() Flow {
+	return Flow{State: randomToken(), Verifier: randomToken(), Nonce: randomToken()}
 }
 
 // AuthCodeURL is where the browser is sent to sign in.
 func (o *OIDC) AuthCodeURL(f Flow) string {
-	return o.oauth.AuthCodeURL(f.State,
+	opts := []oauth2.AuthCodeOption{
 		oidc.Nonce(f.Nonce),
 		oauth2.SetAuthURLParam("code_challenge", s256(f.Verifier)),
 		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
-	)
+	}
+	if o.google {
+		opts = append(opts, oauth2.AccessTypeOffline)
+	}
+	return o.oauth.AuthCodeURL(f.State, opts...)
 }
 
 // Exchange turns an authorization code into a verified identity.
 func (o *OIDC) Exchange(ctx context.Context, code string, f Flow) (Identity, error) {
-	idToken, err := o.verifiedIDToken(ctx, code, f)
+	token, err := o.oauth.Exchange(ctx, code,
+		oauth2.SetAuthURLParam("code_verifier", f.Verifier))
+	if err != nil {
+		return Identity{}, fmt.Errorf("exchanging the authorization code: %w", err)
+	}
+	idToken, err := o.verifiedIDToken(ctx, token)
 	if err != nil {
 		return Identity{}, err
 	}
+	if idToken.Nonce != f.Nonce {
+		// The token was minted for a different sign-in.
+		return Identity{}, errors.New("the id_token nonce does not match this sign-in")
+	}
+	id, err := o.identity(idToken)
+	id.RefreshToken = token.RefreshToken
+	return id, err
+}
+
+// ErrDirectoryRefused is Recheck's answer when the directory no longer
+// vouches for the person: their refresh token was revoked, or the account was
+// removed or disabled.
+var ErrDirectoryRefused = errors.New("the identity provider no longer accepts this sign-in")
+
+// DirectoryCheckEvery is how often the gateway asks a person's directory
+// again while they stay signed in. It bounds how long someone removed from
+// the directory, or from an admin group, keeps their access.
+const DirectoryCheckEvery = 15 * time.Minute
+
+// Recheck asks the directory about someone again, with the refresh token an
+// earlier sign-in returned.
+//
+// The identity is only filled in when the provider sent a fresh id_token,
+// which most do. Without one, an answer still says the account is active, and
+// fresh reports false. The returned refresh token is the one to keep: some
+// providers rotate it on every use.
+func (o *OIDC) Recheck(ctx context.Context, refreshToken string) (id Identity, fresh bool, err error) {
+	token, err := o.oauth.TokenSource(ctx, &oauth2.Token{RefreshToken: refreshToken}).Token()
+	if err != nil {
+		if re, ok := errors.AsType[*oauth2.RetrieveError](err); ok && re.ErrorCode == "invalid_grant" {
+			return Identity{}, false, ErrDirectoryRefused
+		}
+		// Anything else, such as the provider being down, is not an answer
+		// about the person.
+		return Identity{}, false, fmt.Errorf("refreshing the sign-in: %w", err)
+	}
+	if _, ok := token.Extra("id_token").(string); !ok {
+		return Identity{RefreshToken: token.RefreshToken}, false, nil
+	}
+	idToken, err := o.verifiedIDToken(ctx, token)
+	if err != nil {
+		return Identity{}, false, err
+	}
+	id, err = o.identity(idToken)
+	id.RefreshToken = token.RefreshToken
+	if err != nil {
+		// Signing in with these claims would be refused, so they end the
+		// access the earlier sign-in gave.
+		return id, false, fmt.Errorf("%w: %w", ErrDirectoryRefused, err)
+	}
+	return id, true, nil
+}
+
+// identity reads and checks the claims of a verified id_token.
+func (o *OIDC) identity(idToken *oidc.IDToken) (Identity, error) {
 	claims := map[string]any{}
 	if err := idToken.Claims(&claims); err != nil {
 		return Identity{}, fmt.Errorf("reading the id_token claims: %w", err)
@@ -312,13 +387,8 @@ func (o *OIDC) Exchange(ctx context.Context, code string, f Flow) (Identity, err
 	return id, nil
 }
 
-// verifiedIDToken redeems the code and checks the id_token it returns.
-func (o *OIDC) verifiedIDToken(ctx context.Context, code string, f Flow) (*oidc.IDToken, error) {
-	token, err := o.oauth.Exchange(ctx, code,
-		oauth2.SetAuthURLParam("code_verifier", f.Verifier))
-	if err != nil {
-		return nil, fmt.Errorf("exchanging the authorization code: %w", err)
-	}
+// verifiedIDToken checks the id_token that came with a token response.
+func (o *OIDC) verifiedIDToken(ctx context.Context, token *oauth2.Token) (*oidc.IDToken, error) {
 	raw, ok := token.Extra("id_token").(string)
 	if !ok {
 		return nil, errors.New("the identity provider returned no id_token")
@@ -326,10 +396,6 @@ func (o *OIDC) verifiedIDToken(ctx context.Context, code string, f Flow) (*oidc.
 	idToken, err := o.verifier.Verify(ctx, raw)
 	if err != nil {
 		return nil, fmt.Errorf("verifying the id_token: %w", err)
-	}
-	if idToken.Nonce != f.Nonce {
-		// The token was minted for a different sign-in.
-		return nil, errors.New("the id_token nonce does not match this sign-in")
 	}
 	return idToken, nil
 }

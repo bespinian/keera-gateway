@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -38,6 +39,26 @@ func (s *Server) reportScope(w http.ResponseWriter, r *http.Request,
 	return orgID, from, to, true
 }
 
+// reportOrg is reportScope for a report that needs exactly one organisation.
+func (s *Server) reportOrg(w http.ResponseWriter, r *http.Request,
+	p *authn.Principal,
+) (orgID string, from, to time.Time, ok bool) {
+	orgID, from, to, ok = s.reportScope(w, r, p)
+	if ok && orgID == "" {
+		needOrg(w, orgRequired)
+		return "", from, to, false
+	}
+	return orgID, from, to, ok
+}
+
+// page reads ?limit and ?before. Zero means the store's default and the
+// newest rows.
+func page(q url.Values) (limit int, before int64) {
+	limit, _ = strconv.Atoi(q.Get("limit"))
+	before, _ = strconv.ParseInt(q.Get("before"), 10, 64)
+	return limit, before
+}
+
 // entityScope resolves the one team, key or person a report is narrowed to,
 // and answers 404 for one in another organisation. Without this, another
 // tenant's key id would reveal their spend.
@@ -67,8 +88,8 @@ func (s *Server) entityScope(w http.ResponseWriter, r *http.Request,
 		}
 	}
 	if sc.KeyID != "" {
-		owner, _, err := s.st.KeyScope(ctx, sc.KeyID)
-		if !s.inOrg(w, orgID, owner, err) {
+		o, err := s.st.KeyOwnerOf(ctx, sc.KeyID)
+		if !s.inOrg(w, orgID, o.OrgID, err) {
 			return sc, false
 		}
 	}
@@ -144,7 +165,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, p *authn.Princ
 // from the inference plane. Members see their own traffic
 // on My access.
 func (s *Server) requests(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if !s.requireOrgAdmin(w, p, p.OrgID) {
+	if !s.requireAdmin(w, p) {
 		return
 	}
 	orgID, from, to, ok := s.reportScope(w, r, p)
@@ -164,8 +185,7 @@ func (s *Server) requests(w http.ResponseWriter, r *http.Request, p *authn.Princ
 		Outcome: store.Outcome(q.Get("outcome")),
 	}
 	rq.Status, rq.StatusClass = parseStatus(q.Get("status"))
-	rq.Limit, _ = strconv.Atoi(q.Get("limit"))
-	rq.Before, _ = strconv.ParseInt(q.Get("before"), 10, 64)
+	rq.Limit, rq.Before = page(q)
 
 	names, err := s.groupNames(r.Context(), orgID)
 	if err != nil {
@@ -397,7 +417,7 @@ func (s *Server) usageCSV(w http.ResponseWriter, orgID, groupBy string, from, to
 // It can be filtered and paged, because it is the product's compliance
 // record and has to answer real questions.
 func (s *Server) audit(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if !s.requireOrgAdmin(w, p, p.OrgID) {
+	if !s.requireAdmin(w, p) {
 		return
 	}
 	q := r.URL.Query()
@@ -411,8 +431,7 @@ func (s *Server) audit(w http.ResponseWriter, r *http.Request, p *authn.Principa
 			return
 		}
 	}
-	aq.Limit, _ = strconv.Atoi(q.Get("limit"))
-	aq.Before, _ = strconv.ParseInt(q.Get("before"), 10, 64)
+	aq.Limit, aq.Before = page(q)
 
 	// Half an audit trail is worse than none, so an export is never a page.
 	asCSV := q.Get("format") == "csv"

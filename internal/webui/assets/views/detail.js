@@ -36,6 +36,7 @@ import {
   locationName,
   releaseDay,
   crumb,
+  gone,
   isAdmin,
   plural,
 } from "../ui.js";
@@ -576,7 +577,7 @@ async function screen(ctx, spec) {
 
 // failureJump is the failed count as the way to the failed rows, which on this
 // screen are a scroll away rather than a page away. Under a session log it
-// shows the tasks that hit trouble.
+// shows the sessions with problems.
 function failureJump(ctx, text, sessions) {
   if (!isAdmin(ctx)) {
     return h(
@@ -591,7 +592,7 @@ function failureJump(ctx, text, sessions) {
     {
       class: "pill pill-bad pill-button",
       title: sessions
-        ? "Show only the tasks that hit trouble below"
+        ? "Show only the sessions with problems below"
         : "Show only the failed requests below",
       onClick: () => {
         if (sessions) setUnhappy(true);
@@ -655,11 +656,3 @@ function budgetPill(ctx, team) {
 // gone is the screen for an id that names nothing. It is an answer rather than
 // an error: the usual way to reach one is a bookmark from before the thing was
 // deleted, and "it is not there any more" is what the reader needs to be told.
-function gone(ctx, path, label, title, body) {
-  return h(
-    "div",
-    {},
-    crumb(ctx, path, label),
-    h("div", { class: "card" }, empty(title, body)),
-  );
-}

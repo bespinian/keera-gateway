@@ -134,10 +134,9 @@ func New(ctx context.Context, st Source, opts Options, log *slog.Logger) (*Regis
 // Run keeps the caches fresh until ctx is cancelled.
 func (r *Registry) Run(ctx context.Context) {
 	var wg sync.WaitGroup
-	wg.Add(3)
-	go func() { defer wg.Done(); r.loop(ctx, refreshEvery, r.refreshAll) }()
-	go func() { defer wg.Done(); r.loop(ctx, r.opts.SpendRefresh, r.refreshSpend) }()
-	go func() { defer wg.Done(); r.listen(ctx) }()
+	wg.Go(func() { r.loop(ctx, refreshEvery, r.refreshAll) })
+	wg.Go(func() { r.loop(ctx, r.opts.SpendRefresh, r.refreshSpend) })
+	wg.Go(func() { r.listen(ctx) })
 	wg.Wait()
 }
 

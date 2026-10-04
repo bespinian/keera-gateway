@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -49,57 +48,53 @@ type mcpPut struct {
 func mcpCmd(ctx context.Context, args []string) error {
 	sub, rest := split(args)
 	fs := flag.NewFlagSet("mcp "+sub, flag.ExitOnError)
-	asJSON := fs.Bool("json", false, jsonUsage)
-	org := fs.String("org", "", orgUsage)
+	m := &mcpRun{fs: fs, f: registerMCPFlags(fs), calls: registerCallFlags(fs)}
+	fs.BoolVar(&m.f.disabled, "disabled", false, "add the server without serving it yet")
+	fs.StringVar(&m.org, "org", "", orgUsage)
+	fs.BoolVar(&m.yes, "yes", false, yesUsage)
+	fs.BoolVar(&m.asJSON, "json", false, jsonUsage)
 	fs.Usage = func() { _ = printHelp(fs, "mcp", sub) }
 	if want, ok := wantsHelp(args); ok {
-		registerMCPFlags(fs)
-		fs.Bool("disabled", false, "add the server without serving it yet")
-		fs.Bool("yes", false, yesUsage)
-		registerCallFlags(fs)
 		return printHelp(fs, "mcp", want)
 	}
-	c := newClient()
-	m := &mcpRun{c: c, fs: fs, args: rest, asJSON: asJSON}
-	switch sub {
-	case "list", "ls", "":
-		if err := parse(fs, rest); err != nil {
-			return err
-		}
-		if err := m.resolveOrg(ctx, *org); err != nil {
-			return err
-		}
-		servers, err := m.servers(ctx)
+	verb, err := parseVerb(fs, "mcp", sub, rest)
+	if err != nil {
+		return err
+	}
+	m.c = newClient()
+	if m.org, err = resolveOrg(ctx, m.c, m.org); err != nil {
+		return err
+	}
+	switch verb {
+	case "add", "set":
+		return m.save(ctx, verb == "add")
+	case "enable", "disable":
+		return m.toggle(ctx, verb == "enable")
+	case "delete":
+		return m.delete(ctx)
+	case "calls":
+		return m.toolCalls(ctx)
+	case "connect":
+		return m.connect(ctx)
+	default:
+		servers, err := list[policy.MCPServer](ctx, m.c, inOrg("/v1/mcp-servers", m.org))
 		if err != nil {
 			return err
 		}
-		return out(*asJSON, servers, func(w *table) { printMCPServers(w, servers) })
-	case "add", "create", "new":
-		return m.save(ctx, org, true)
-	case "set", "edit", "update":
-		return m.save(ctx, org, false)
-	case "enable", "disable":
-		return m.toggle(ctx, org, sub)
-	case "delete", "rm", "remove":
-		return m.delete(ctx, org)
-	case "calls":
-		return mcpCalls(ctx, c, fs, rest, asJSON, org)
-	case "connect":
-		return m.connect(ctx, org)
-	default:
-		return unknownSub("mcp", sub)
+		return out(m.asJSON, servers, func(w *table) { printMCPServers(w, servers) })
 	}
 }
 
 // mcpRun is one 'keera mcp' invocation.
 type mcpRun struct {
-	c      *client
-	fs     *flag.FlagSet
-	args   []string
-	asJSON *bool
-	// org is the organisation whose servers to use. Empty leaves it to the
-	// control plane: the caller's own.
-	org string
+	c     *client
+	fs    *flag.FlagSet
+	f     *mcpFlags
+	calls *callFlags
+	yes   bool
+	// org is the organisation whose servers to use.
+	org    string
+	asJSON bool
 }
 
 // path is a control API path for one of the organisation's servers.
@@ -107,49 +102,21 @@ func (m *mcpRun) path(alias string) string {
 	return inOrg("/v1/mcp-servers/"+url.PathEscape(alias), m.org)
 }
 
-// resolveOrg fills in the organisation, as every command does.
-func (m *mcpRun) resolveOrg(ctx context.Context, given string) (err error) {
-	m.org, err = resolveOrg(ctx, m.c, given)
-	return err
-}
-
-func (m *mcpRun) servers(ctx context.Context) ([]policy.MCPServer, error) {
-	return list[policy.MCPServer](ctx, m.c, inOrg("/v1/mcp-servers", m.org))
-}
-
 // require reads one server. There is no endpoint for one; the list is small.
 func (m *mcpRun) require(ctx context.Context, alias string) (policy.MCPServer, error) {
-	servers, err := m.servers(ctx)
-	if err != nil {
-		return policy.MCPServer{}, err
+	s, err := findAlias(ctx, m.c, inOrg("/v1/mcp-servers", m.org), alias, "MCP server",
+		func(s policy.MCPServer) string { return s.Alias })
+	if err == nil {
+		// The writes go to the organisation it belongs to.
+		m.org = s.OrgID
 	}
-	for _, s := range servers {
-		if s.Alias == alias {
-			// The writes go to the organisation it belongs to.
-			m.org = s.OrgID
-			return s, nil
-		}
-	}
-	return policy.MCPServer{}, fmt.Errorf("no MCP server %s (see: keera mcp list)", alias)
+	return s, err
 }
 
 // save is 'add' and 'set': 'set' reads the server first, so a flag left out
 // keeps what is there.
-func (m *mcpRun) save(ctx context.Context, org *string, adding bool) error {
-	fs, args := m.fs, m.args
-	f := registerMCPFlags(fs)
-	verb := "set"
-	if adding {
-		fs.BoolVar(&f.disabled, "disabled", false, "add the server without serving it yet")
-		verb = "add"
-	}
-	if err := parseArgs(fs, args, 1, "usage: keera mcp "+verb+" <alias> [flags]"); err != nil {
-		return err
-	}
-	alias := fs.Arg(0)
-	if err := m.resolveOrg(ctx, *org); err != nil {
-		return err
-	}
+func (m *mcpRun) save(ctx context.Context, adding bool) error {
+	f, alias := m.f, m.fs.Arg(0)
 	put := mcpPut{Enabled: !f.disabled}
 	if !adding {
 		cur, err := m.require(ctx, alias)
@@ -159,24 +126,20 @@ func (m *mcpRun) save(ctx context.Context, org *string, adding bool) error {
 		put = mcpPut{URL: cur.URL, Description: cur.Description, AuthHeader: cur.AuthHeader,
 			Enabled: cur.Enabled}
 	}
-	given := func(name string) bool {
-		seen := false
-		fs.Visit(func(fl *flag.Flag) { seen = seen || fl.Name == name })
-		return seen
-	}
-	for name, set := range map[string]func(){
-		"endpoint":    func() { put.URL = f.endpoint },
-		"description": func() { put.Description = f.description },
-		"auth-header": func() { put.AuthHeader = f.authHeader },
-	} {
-		if given(name) {
-			set()
+	m.fs.Visit(func(fl *flag.Flag) {
+		switch fl.Name {
+		case "endpoint":
+			put.URL = f.endpoint
+		case "description":
+			put.Description = f.description
+		case "auth-header":
+			put.AuthHeader = f.authHeader
 		}
-	}
+	})
 	if adding && put.URL == "" {
 		return fmt.Errorf("--endpoint is required: the server's Streamable HTTP endpoint")
 	}
-	cred, err := credential(&modelFlags{apiKey: f.apiKey, noAPIKey: f.noAPIKey})
+	cred, err := credential(f.apiKey, f.noAPIKey)
 	if err != nil {
 		return err
 	}
@@ -189,49 +152,35 @@ func (m *mcpRun) put(ctx context.Context, alias string, put mcpPut) error {
 	if err := m.c.do(ctx, "PUT", m.path(alias), put, &saved); err != nil {
 		return err
 	}
-	return out(*m.asJSON, saved, func(w *table) { printMCPServer(w, saved) })
+	return out(m.asJSON, saved, func(w *table) { printMCPServer(w, saved) })
 }
 
-func (m *mcpRun) toggle(ctx context.Context, org *string, sub string) error {
-	if err := parseArgs(m.fs, m.args, 1, "usage: keera mcp "+sub+" <alias>"); err != nil {
-		return err
-	}
-	if err := m.resolveOrg(ctx, *org); err != nil {
-		return err
-	}
+func (m *mcpRun) toggle(ctx context.Context, enable bool) error {
 	cur, err := m.require(ctx, m.fs.Arg(0))
 	if err != nil {
 		return err
 	}
 	return m.put(ctx, cur.Alias, mcpPut{URL: cur.URL, Description: cur.Description,
-		AuthHeader: cur.AuthHeader, Enabled: sub == "enable"})
+		AuthHeader: cur.AuthHeader, Enabled: enable})
 }
 
-func (m *mcpRun) delete(ctx context.Context, org *string) error {
-	yes := m.fs.Bool("yes", false, yesUsage)
-	if err := parseArgs(m.fs, m.args, 1, "usage: keera mcp delete <alias> [--yes]"); err != nil {
-		return err
-	}
-	alias := m.fs.Arg(0)
-	if err := m.resolveOrg(ctx, *org); err != nil {
-		return err
-	}
-	srv, err := m.require(ctx, alias)
+func (m *mcpRun) delete(ctx context.Context) error {
+	srv, err := m.require(ctx, m.fs.Arg(0))
 	if err != nil {
 		return err
 	}
-	if !*yes {
-		fmt.Fprintf(os.Stderr, "%s\n", styleErr.head("Deleting the MCP server "+alias+":"))
-		fmt.Fprintln(os.Stderr, "  every client configured for it stops reaching its tools")
+	if !m.yes {
+		lines := []string{"  every client configured for it stops reaching its tools"}
 		if srv.HasAPIKey {
-			fmt.Fprintln(os.Stderr, "  its stored credential is removed")
+			lines = append(lines, "  its stored credential is removed")
 		}
-		fmt.Fprintln(os.Stderr, "Tool-call history and the audit log are kept.")
-		if err := confirmTyping("alias", alias, "nothing was deleted"); err != nil {
+		lines = append(lines, "Tool-call history and the audit log are kept.")
+		if err := confirm("Deleting the MCP server "+srv.Alias+":", lines,
+			"alias", srv.Alias, "nothing was deleted"); err != nil {
 			return err
 		}
 	}
-	return deleteAlias(ctx, m.c, m.path(alias), alias, *m.asJSON)
+	return deleteAlias(ctx, m.c, m.path(srv.Alias), srv.Alias, m.asJSON)
 }
 
 // callFlags narrow 'keera mcp calls'.
@@ -254,15 +203,9 @@ func registerCallFlags(fs *flag.FlagSet) *callFlags {
 	return f
 }
 
-func mcpCalls(ctx context.Context, c *client, fs *flag.FlagSet, args []string, asJSON *bool, org *string) error {
-	f := registerCallFlags(fs)
-	if err := parse(fs, args); err != nil {
-		return err
-	}
-	orgID, err := resolveOrg(ctx, c, *org)
-	if err != nil {
-		return err
-	}
+// toolCalls is 'keera mcp calls', the tool-call log.
+func (m *mcpRun) toolCalls(ctx context.Context) error {
+	c, f, orgID := m.c, m.calls, m.org
 	params, err := f.who.params(ctx, c, orgID)
 	if err != nil {
 		return err
@@ -279,7 +222,7 @@ func mcpCalls(ctx context.Context, c *client, fs *flag.FlagSet, args []string, a
 		if err := c.do(ctx, "GET", "/v1/tool-calls?"+q.Encode(), nil, &res); err != nil {
 			return err
 		}
-		return out(*asJSON, res.Data, func(w *table) { printToolSummary(w, res.Data) })
+		return out(m.asJSON, res.Data, func(w *table) { printToolSummary(w, res.Data) })
 	}
 	q.Set("limit", strconv.Itoa(f.limit))
 	var res struct {
@@ -288,28 +231,21 @@ func mcpCalls(ctx context.Context, c *client, fs *flag.FlagSet, args []string, a
 	if err := c.do(ctx, "GET", "/v1/tool-calls?"+q.Encode(), nil, &res); err != nil {
 		return err
 	}
-	return out(*asJSON, res.Data, func(w *table) { printToolCalls(w, res.Data) })
+	return out(m.asJSON, res.Data, func(w *table) { printToolCalls(w, res.Data) })
 }
 
 // mcpConnect prints how to point the common clients at one server through
 // the gateway. The key stays in the environment, as it does for 'keera
 // connect'.
-func (m *mcpRun) connect(ctx context.Context, org *string) error {
-	c := m.c
-	if err := parseArgs(m.fs, m.args, 1, "usage: keera mcp connect <alias>"); err != nil {
-		return err
-	}
+func (m *mcpRun) connect(ctx context.Context) error {
 	alias := m.fs.Arg(0)
-	if err := m.resolveOrg(ctx, *org); err != nil {
-		return err
-	}
 	if _, err := m.require(ctx, alias); err != nil {
 		return err
 	}
 	var cat struct {
 		GatewayURL string `json:"gateway_url"`
 	}
-	if err := c.do(ctx, "GET", "/v1/connect", nil, &cat); err != nil {
+	if err := m.c.do(ctx, "GET", "/v1/connect", nil, &cat); err != nil {
 		return err
 	}
 	endpoint := strings.TrimRight(cat.GatewayURL, "/") + "/mcp/" + alias

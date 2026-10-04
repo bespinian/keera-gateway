@@ -222,7 +222,7 @@ code,
   overflow-y: auto;
 }
 
-/* The name and the mark are the way back to Overview, so the brand is a link
+/* The name and the mark are the way back to the Dashboard, so the brand is a link
    that answers to the pointer the way the entries below it do. It is still the
    product's name at the top of its own panel, so it keeps the text colour and
    gains no underline. The space before the first group is a margin rather than

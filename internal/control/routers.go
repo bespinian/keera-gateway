@@ -160,7 +160,7 @@ func (s *Server) putRouter(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	if !s.checkRouterAlias(w, r, orgID, rt.Alias) {
 		return
 	}
-	if rt.Decides() && !s.checkRouterModel(w, r, orgID, rt.Model) {
+	if rt.Decides() && !s.checkReaderModel(w, r, orgID, rt.Model, routerReader) {
 		return
 	}
 	if rt.Sizes() && !checkCeilings(w, rt) {
@@ -185,16 +185,10 @@ func (s *Server) putRouter(w http.ResponseWriter, r *http.Request, p *authn.Prin
 func routerProblem(rt policy.Router) string {
 	switch {
 	case !policy.ValidAlias(rt.Alias):
-		return "a router's alias goes where a model's alias goes - into a developer's own client " +
-			"configuration - so it is lowercase letters, digits and inner hyphens: " +
-			"'auto', not '" + rt.Alias + "'"
+		return badAlias(rt.Alias)
 	case !rt.Mode.Valid():
-		return "'mode' is '" + string(rt.Mode) + "'; a router either reads each request with a model " +
-			"and sends it where that model says ('instruction'), places it by how much " +
-			"text is in it ('size'), or tries its destinations until one answers - in " +
-			"the order they are written ('fallback'), fastest first by what they have " +
-			"lately taken to begin answering ('latency'), or emptiest first by what the " +
-			"gateway has in flight against each ('least-busy')"
+		return "'mode' must be instruction, size, fallback, latency or least-busy, not '" +
+			string(rt.Mode) + "'"
 	case len(rt.Ceilings) > 0 && !rt.Sizes():
 		return "'ceilings' is set, and this is a " + string(rt.Mode) + " router: what orders its " +
 			"destinations is " + ordersBy(rt.Mode) + ", and nothing there reads the size of " +
@@ -311,44 +305,6 @@ func checkCeilings(w http.ResponseWriter, rt policy.Router) bool {
 			"would never be the first choice for anything")
 		return false
 	}
-}
-
-// checkRouterModel refuses a model that cannot make a decision.
-func (s *Server) checkRouterModel(w http.ResponseWriter, r *http.Request, orgID, alias string) bool {
-	if alias == "" {
-		badRequest(w, "'model' is required; it names the model that makes the decision, which should be "+
-			"a fast one served locally - its generation is added to every request that "+
-			"names this router")
-		return false
-	}
-	m, err := s.st.Model(r.Context(), orgID, alias)
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-		httpx.WriteError(w, http.StatusBadRequest, "invalid_request_error", "model_not_found",
-			"this organisation has no model '"+alias+"'; a router decides with one of its models")
-		return false
-	case err != nil:
-		s.fail(w, err)
-		return false
-	case m.Kind != policy.KindChat:
-		badRequest(w, "'"+alias+"' is a "+string(m.Kind)+" model; a router reads text and answers with an "+
-			"alias, which only a chat model does")
-		return false
-	case m.Subscription:
-		badRequest(w, subscriptionReader(alias, "router"))
-		return false
-	}
-	allowed, err := s.orgAllowsModel(r.Context(), orgID, alias)
-	if err != nil {
-		s.fail(w, err)
-		return false
-	}
-	if !allowed {
-		httpx.WriteError(w, http.StatusBadRequest, "invalid_request_error", "model_not_allowed",
-			readerModelRefusal("router", alias, m))
-		return false
-	}
-	return true
 }
 
 // subscriptionReader refuses a subscription model as the model a filter or a

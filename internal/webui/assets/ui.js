@@ -208,7 +208,7 @@ export function icon(path) {
 }
 
 export const icons = {
-  overview: "M3 13h5v8H3zM10 3h5v18h-5zM17 9h4v12h-4z",
+  dashboard: "M3 13h5v8H3zM10 3h5v18h-5zM17 9h4v12h-4z",
   teams:
     "M17 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9.5 7a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0M22 20v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75",
   keys: "M21 2l-2 2m-7.6 7.6a5 5 0 1 1-7.1 7.1 5 5 0 0 1 7.1-7.1zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3",
@@ -341,7 +341,7 @@ export const icons = {
  *  artwork is in internal/webui/marks/, outside the embedded assets/ tree so
  *  the binary does not serve a second copy of every logo. A new mark is named
  *  in marks/NOTICE too, which says they are their owners' trademarks. */
-export const providerMarks = {
+const providerMarks = {
   anthropic: {
     viewBox: "0 0 35 24",
     path: "M 24.547 0 L 19.338 0 L 28.837997 24 L 34.047 24 Z M 9.499 0 L 0 24 L 5.311 24 L 7.254 18.96 L 17.191 18.96 L 19.134 24 L 24.445 24 L 14.946001 0 Z M 8.972 14.503 L 12.222001 6.069 L 15.473999 14.503 Z",
@@ -399,7 +399,7 @@ export function providerMark(name) {
  *
  *  idpMark returns null for anything unlisted and the button falls back to a
  *  generic icon, because an unrecognisable logo is worse than none. */
-export const idpMarks = {
+const idpMarks = {
   google: {
     viewBox: "0 0 24 24",
     path: "M12.24 10.285V14.4h6.806c-.275 1.765-2.056 5.174-6.806 5.174-4.095 0-7.439-3.389-7.439-7.574s3.344-7.574 7.439-7.574c2.33 0 3.891.989 4.785 1.849l3.254-3.138C18.189 1.186 15.479 0 12.24 0c-6.635 0-12 5.365-12 12s5.365 12 12 12c6.926 0 11.52-4.869 11.52-11.726 0-.788-.085-1.39-.189-1.989H12.24z",
@@ -627,6 +627,25 @@ export function crumb(ctx, path, label) {
     icon(icons.back),
     label,
   );
+}
+
+/** gone is a detail screen for something that is not there, with the way
+ *  back to its list. */
+export function gone(ctx, path, label, title, body) {
+  return h(
+    "div",
+    {},
+    h("div", { class: "detail-head" }, crumb(ctx, path, label)),
+    h("div", { class: "card" }, empty(title, body)),
+  );
+}
+
+/** pct is part of whole as a percentage. Tiny shares keep three decimals,
+ *  so they do not round to zero. */
+export function pct(part, whole) {
+  if (!whole) return "-";
+  const frac = (part || 0) / whole;
+  return `${(frac * 100).toFixed(frac > 0 && frac < 0.001 ? 3 : 1)}%`;
 }
 
 export function stat(label, value, unit, note) {

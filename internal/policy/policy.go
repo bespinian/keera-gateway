@@ -634,6 +634,14 @@ func (r *Resolved) AllowsModel(alias string) bool {
 // guardrails allow it.
 func (r *Resolved) MayUse(m Model) bool { return r.Key.Reaches(m) && r.AllowsModel(m.Alias) }
 
+// MayRoute reports whether the key may name the router alias. The allow-list
+// covers the router, not its destinations: allowing a router allows where it
+// sends. A subscription key reaches no router, which would place it on models
+// the organisation pays for.
+func (r *Resolved) MayRoute(alias string) bool {
+	return r.AllowsModel(alias) && !r.Key.Subscription()
+}
+
 // Resolve combines the guardrails of a key's org, team and the key itself.
 //
 // A level can narrow what it inherits but never widen it: allow-lists

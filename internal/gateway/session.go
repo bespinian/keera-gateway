@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
@@ -18,21 +19,13 @@ import (
 // The key is a hash. It cannot be read back or searched, and says only that
 // two requests belong together.
 
-// SessionHeader is the header a client can name its own session in. The
-// value is hashed, so it is never stored as sent.
-//
-// Deriving the session is a guess; the header is a fact. It groups a client
-// exactly, even when it rewrites its history or restarts a task with the same
-// words.
-const SessionHeader = "X-Keera-Session"
-
 // sessionHeaders is every header read as a session, in precedence order.
 //
 // There is no standard: neither the OpenAI nor the Anthropic API has a field
 // for the conversation, and grouping by user would merge all of a developer's
 // tasks. So the three headers used in practice are read as one: ours, the
 // generic X-Session-Id, and Helicone-Session-Id.
-var sessionHeaders = []string{SessionHeader, "X-Session-Id", "Helicone-Session-Id"}
+var sessionHeaders = []string{httpx.SessionHeader, "X-Session-Id", "Helicone-Session-Id"}
 
 // sessionKey derives the session key for one request, or returns empty for a
 // request that is not part of a conversation.
@@ -45,7 +38,7 @@ var sessionHeaders = []string{SessionHeader, "X-Session-Id", "Helicone-Session-I
 //
 // Two limits: rewriting the opening prompt mid-task starts a new session, and
 // two tasks opened with the same sentence within the idle gap merge. Both are
-// why SessionHeader exists.
+// why httpx.SessionHeader exists.
 func sessionKey(r *http.Request, keyID string, kind policy.Kind,
 	opening func() (json.RawMessage, bool),
 ) string {

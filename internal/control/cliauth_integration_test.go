@@ -39,10 +39,7 @@ func signedInAtATerminal(t *testing.T, verifier string) (*httptest.Server, strin
 		t.Fatalf("creating the person: %v", err)
 	}
 
-	code, hash, err := authn.NewCLICode()
-	if err != nil {
-		t.Fatalf("minting the code: %v", err)
-	}
+	code, hash := authn.NewCLICode()
 	if err := st.CreateCLICode(ctx, hash, user.ID, authn.CLIChallenge(verifier),
 		time.Now().Add(authn.CLICodeTTL)); err != nil {
 		t.Fatalf("recording the code: %v", err)
@@ -109,10 +106,7 @@ func asToken(t *testing.T, ts *httptest.Server, token string, out any) int {
 // person, with their role and their organisation - not the operator key, which
 // is what it would have been holding before.
 func TestARedeemedCodeSignsTheTerminalInAsThePerson(t *testing.T) {
-	verifier, err := authn.NewCLIVerifier()
-	if err != nil {
-		t.Fatal(err)
-	}
+	verifier := authn.NewCLIVerifier()
 	ts, code, user := signedInAtATerminal(t, verifier)
 
 	var issued struct {
@@ -167,10 +161,7 @@ func TestARedeemedCodeSignsTheTerminalInAsThePerson(t *testing.T) {
 // The code travels in a URL, so it lands in a browser's history and sometimes in
 // a shell's. Redeeming it has to be something that works exactly once.
 func TestACodeCannotBeRedeemedTwice(t *testing.T) {
-	verifier, err := authn.NewCLIVerifier()
-	if err != nil {
-		t.Fatal(err)
-	}
+	verifier := authn.NewCLIVerifier()
 	ts, code, _ := signedInAtATerminal(t, verifier)
 
 	body := map[string]string{"code": code, "verifier": verifier, "label": "alice@thinkpad"}
@@ -186,16 +177,10 @@ func TestACodeCannotBeRedeemedTwice(t *testing.T) {
 // any of them could reach the listener before the one that started the sign-in.
 // The verifier is what that other process does not have.
 func TestACodeIsWorthNothingWithoutTheVerifier(t *testing.T) {
-	verifier, err := authn.NewCLIVerifier()
-	if err != nil {
-		t.Fatal(err)
-	}
+	verifier := authn.NewCLIVerifier()
 	ts, code, _ := signedInAtATerminal(t, verifier)
 
-	other, err := authn.NewCLIVerifier()
-	if err != nil {
-		t.Fatal(err)
-	}
+	other := authn.NewCLIVerifier()
 	if status := redeem(t, ts, map[string]string{
 		"code": code, "verifier": other,
 	}, nil); status != http.StatusUnauthorized {
@@ -213,10 +198,7 @@ func TestACodeIsWorthNothingWithoutTheVerifier(t *testing.T) {
 // A role change signs somebody out everywhere, and a terminal they are still
 // signed in on is part of everywhere.
 func TestARoleChangeEndsASignedInTerminal(t *testing.T) {
-	verifier, err := authn.NewCLIVerifier()
-	if err != nil {
-		t.Fatal(err)
-	}
+	verifier := authn.NewCLIVerifier()
 	ts, code, user := signedInAtATerminal(t, verifier)
 
 	var issued struct {

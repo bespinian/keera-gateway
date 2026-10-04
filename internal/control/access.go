@@ -141,7 +141,7 @@ func (s *Server) accessKeys(r *http.Request, orgID, orgName string, keys []store
 		shown = append(shown, accessKey{
 			KeySummary: k,
 			TeamName:   teamNames[k.TeamID],
-			State:      keyState(k, now),
+			State:      k.State(now),
 			// Resolved to real names, so the screen lists what the key can
 			// call instead of saying "no restriction".
 			AllowedModels:   allowedModels(resolved, models),
@@ -248,15 +248,4 @@ func allowedModels(res *policy.Resolved, models []policy.Model) []string {
 		}
 	}
 	return out
-}
-
-func keyState(k store.KeySummary, now time.Time) string {
-	switch {
-	case k.RevokedAt != nil:
-		return "revoked"
-	case k.ExpiresAt != nil && k.ExpiresAt.Before(now):
-		return "expired"
-	default:
-		return "active"
-	}
 }

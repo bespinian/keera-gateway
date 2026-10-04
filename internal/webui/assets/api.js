@@ -188,8 +188,7 @@ export const api = {
   // own keys, the limits above them, and what has been refused lately.
   access: () => get("/v1/access"),
 
-  keys: (orgID, teamID) =>
-    get("/v1/keys" + query({ org_id: orgID, team_id: teamID })),
+  keys: (orgID) => get("/v1/keys" + query({ org_id: orgID })),
   createKey: (payload) => request("POST", "/v1/keys", payload),
   revokeKey: (id) => request("DELETE", `/v1/keys/${encodeURIComponent(id)}`),
   rotateKey: (id) =>
@@ -291,17 +290,8 @@ export const api = {
         query({ org_id: orgID }),
     ),
 
-  sandboxes: (orgID, { all, team, cls, purpose } = {}) =>
-    get(
-      "/v1/sandboxes" +
-        query({
-          org_id: orgID,
-          all: all ? "1" : "",
-          team_id: team,
-          class: cls,
-          purpose,
-        }),
-    ),
+  sandboxes: (orgID, { all } = {}) =>
+    get("/v1/sandboxes" + query({ org_id: orgID, all: all ? "1" : "" })),
   createSandbox: (sandbox) => request("POST", "/v1/sandboxes", sandbox),
   // DELETE is the method; terminate is the word, because the row outlives the
   // machine and the panel says so everywhere else.

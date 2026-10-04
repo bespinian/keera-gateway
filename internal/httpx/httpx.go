@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"runtime/debug"
+	"strconv"
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/id"
@@ -16,7 +17,7 @@ import (
 
 // The one listener is split by path: the panel at the root, and each API under
 // its prefix. They live here so the routes, the panel and the `keera` CLI agree
-// without the CLI linking the whole server.
+// on them in one place.
 //
 // InferencePrefix comes before the version because clients append /v1/...
 // themselves: an OpenAI SDK at <origin>/api/v1 and an Anthropic one at
@@ -29,6 +30,15 @@ const (
 	ControlPrefix   = "/control"
 	SandboxPrefix   = "/sandbox"
 )
+
+// SessionHeader is the header a client can name its own session in. It is
+// here, not in the gateway, because the sandboxes set it for the agents they
+// run. The value is hashed, so it is never stored as sent.
+//
+// Deriving the session is a guess; the header is a fact. It groups a client
+// exactly, even when it rewrites its history or restarts a task with the same
+// words.
+const SessionHeader = "X-Keera-Session"
 
 type ctxKey int
 
@@ -67,6 +77,12 @@ func WriteJSON(w http.ResponseWriter, status int, v any) {
 	if v != nil {
 		_ = json.NewEncoder(w).Encode(v)
 	}
+}
+
+// SetRetryAfter says when to try again, in whole seconds. It is never zero,
+// which a client would read as "now" and retry at once.
+func SetRetryAfter(w http.ResponseWriter, d time.Duration) {
+	w.Header().Set("Retry-After", strconv.Itoa(max(int(d.Seconds()), 1)))
 }
 
 // ReadJSON decodes a request body, rejecting unknown fields so a typo in a

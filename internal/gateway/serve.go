@@ -123,18 +123,31 @@ func (s *Server) receive(c *call) ([]byte, bool) {
 	// Opened rather than timed, so a body refused halfway (over the size cap)
 	// is still drawn as the step it was refused in.
 	c.tr.open(store.SpanReceive, "")
-	raw, err := io.ReadAll(http.MaxBytesReader(c.w, c.r.Body, s.opts.MaxBodyBytes))
+	raw, err := readBody(c.w, c.r, s.opts.MaxBodyBytes)
 	if err != nil {
-		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+		if errors.Is(err, errBodyTooLarge) {
 			s.refuse(c, refusal{
 				status: http.StatusRequestEntityTooLarge,
 				typ:    "invalid_request_error", code: "request_too_large",
-				msg: "the request body exceeds the gateway's limit",
+				msg: err.Error(),
 			})
 		}
-		return nil, false // otherwise the client went away mid-upload
+		return nil, false
 	}
 	return raw, true
+}
+
+// errBodyTooLarge is readBody's refusal of a body over the cap. Any other
+// error is a client that went away mid-upload, which needs no answer.
+var errBodyTooLarge = errors.New("the request body exceeds the gateway's limit")
+
+// readBody reads a request body of at most limit bytes.
+func readBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, error) {
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
+	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+		return nil, errBodyTooLarge
+	}
+	return raw, err
 }
 
 // decode parses the body. Everything after this is written against the OpenAI
@@ -174,14 +187,21 @@ func (s *Server) translate(c *call, b *body) (*body, bool) {
 	if b != nil {
 		return b, true
 	}
-	raw, err := c.surf.shape.decode(c.native.encode())
-	if err == nil {
-		if b, err = parseBody(raw); err == nil {
-			return b, true
-		}
+	b, err := openAIBody(c)
+	if err != nil {
+		s.refuse(c, invalidBody(err.Error()))
+		return nil, false
 	}
-	s.refuse(c, invalidBody(err.Error()))
-	return nil, false
+	return b, true
+}
+
+// openAIBody turns the client's own body into the OpenAI shape.
+func openAIBody(c *call) (*body, error) {
+	raw, err := c.surf.shape.decode(c.native.encode())
+	if err != nil {
+		return nil, err
+	}
+	return parseBody(raw)
 }
 
 // invalidBody is the refusal for a body the gateway cannot use.
@@ -254,15 +274,13 @@ func (s *Server) target(c *call, b *body) bool {
 
 	// A model is looked up first. The control plane refuses a router named
 	// like a model, and a model named like a router, so the two rarely meet.
-	model, found := s.src.Model(c.res.Key.OrgID, alias)
-	if !found {
+	model, found := s.findModel(c.res.Key, alias)
+	if found {
+		c.alias, c.ev.Alias = model.Alias, model.Alias
+	} else {
 		c.router, c.routed = s.src.Router(c.res.Key.OrgID, alias)
-		// Routers exist only on chat. The allow-list covers the router, not
-		// its destinations: allowing a router allows where it sends. A
-		// subscription key reaches no router, which would place it on models
-		// the organisation pays for.
-		if c.routed && (c.surf.kind != policy.KindChat || !c.res.AllowsModel(alias) ||
-			c.res.Key.Subscription()) {
+		// Routers exist only on chat.
+		if c.routed && (c.surf.kind != policy.KindChat || !c.res.MayRoute(alias)) {
 			c.routed = false
 		}
 	}
@@ -272,7 +290,7 @@ func (s *Server) target(c *call, b *body) bool {
 		s.refuse(c, refusal{
 			status: http.StatusNotFound,
 			typ:    "invalid_request_error", code: "model_not_found",
-			msg:    "the model '" + alias + "' does not exist or this key may not use it",
+			msg:    modelNotFound(alias),
 			advise: true,
 		})
 		return false
@@ -480,16 +498,13 @@ func (s *Server) useFilters(c *call, b *body) bool {
 // retranslate makes the translated body again from the client's own, after a
 // filter rewrote that.
 func (s *Server) retranslate(c *call, b *body) bool {
-	raw, err := c.surf.shape.decode(c.native.encode())
-	if err == nil {
-		var fresh *body
-		if fresh, err = parseBody(raw); err == nil {
-			*b = *fresh
-			return true
-		}
+	fresh, err := openAIBody(c)
+	if err != nil {
+		s.refuse(c, *notRebuilt(err))
+		return false
 	}
-	s.refuse(c, *notRebuilt(err))
-	return false
+	*b = *fresh
+	return true
 }
 
 // prepare adds what the gateway adds on its own account: the standing system
@@ -585,7 +600,7 @@ func (s *Server) answer(c *call, b *body) {
 
 	c.ev.Status = resp.StatusCode
 	streaming := c.stream && strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream")
-	s.copyResponseHeaders(c.w, resp, c.alias, streaming)
+	copyResponseHeaders(c.w, resp, c.alias, streaming)
 	s.limitHeaders(c.w, c.res, c.now)
 	if c.model.Subscription {
 		passPlanHeaders(c.w, resp.Header)
@@ -736,6 +751,12 @@ func (s *Server) relayBuffered(c *call, resp *http.Response, answered time.Time)
 	if usage != nil {
 		setUsage(&c.ev, usage)
 	}
+}
+
+// modelNotFound is the one answer for a model that is missing and for one the
+// key may not use, so other teams' models cannot be discovered.
+func modelNotFound(alias string) string {
+	return "the model '" + alias + "' does not exist or this key may not use it"
 }
 
 // readAnswer reads a whole buffered answer, up to MaxResponseBytes.

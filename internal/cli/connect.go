@@ -18,13 +18,11 @@ import (
 // binary, so an older CLI cannot hand out a configuration the deployment has
 // moved on from.
 func connectCmd(ctx context.Context, args []string) error {
-	sub, rest := split(args)
 	c := newClient()
 	fs := flag.NewFlagSet("connect", flag.ExitOnError)
 	model := fs.String("model", "",
 		"the model or router to configure (default: the first enabled chat model)")
-	org := fs.String("org", "", "organisation whose models and routers to offer "+
-		"(default: your own; an operator's only one)")
+	org := fs.String("org", "", orgUsage)
 	asJSON := fs.Bool("json", false, jsonUsage)
 	subscription := fs.Bool("subscription", false,
 		"for Claude Code signed in to a Claude plan: issue this machine its own key and "+
@@ -35,11 +33,11 @@ func connectCmd(ctx context.Context, args []string) error {
 	if want, ok := wantsHelp(args); ok {
 		return printHelp(fs, "connect", want)
 	}
-	// Here split() has taken the client's name, not a verb. No client, or only
-	// a flag, lands on the listing.
-	if err := parse(fs, rest); err != nil {
+	if err := parseCmd(fs, "connect", args); err != nil {
 		return err
 	}
+	// No client, or only a flag, lands on the listing.
+	sub := fs.Arg(0)
 
 	var cat struct {
 		Data       []connect.Client `json:"data"`

@@ -40,7 +40,7 @@ func loginCmd(ctx context.Context, args []string) error {
 	if want, ok := wantsHelp(args); ok {
 		return printHelp(fs, "login", want)
 	}
-	if err := parse(fs, args); err != nil {
+	if err := parseCmd(fs, "login", args); err != nil {
 		return err
 	}
 	// Run has already taken the global --url, so the client uses it.
@@ -58,14 +58,8 @@ func loginCmd(ctx context.Context, args []string) error {
 	}
 	defer func() { _ = ln.Close() }()
 
-	verifier, err := authn.NewCLIVerifier()
-	if err != nil {
-		return err
-	}
-	state, err := authn.NewCLIVerifier()
-	if err != nil {
-		return err
-	}
+	verifier := authn.NewCLIVerifier()
+	state := authn.NewCLIVerifier()
 	redirect := "http://" + ln.Addr().String() + "/callback"
 
 	q := url.Values{
@@ -138,7 +132,7 @@ func logoutCmd(ctx context.Context, args []string) error {
 	if want, ok := wantsHelp(args); ok {
 		return printHelp(fs, "logout", want)
 	}
-	if err := parse(fs, args); err != nil {
+	if err := parseCmd(fs, "logout", args); err != nil {
 		return err
 	}
 	switch {
@@ -159,10 +153,8 @@ func logoutCmd(ctx context.Context, args []string) error {
 	// Clear the local file whatever the gateway says, so a token it already
 	// forgot does not stay behind.
 	err := c.do(ctx, "POST", path, nil, nil)
-	if c.signedIn.Token != "" {
-		if forget := forgetSignIn(c.base); forget != nil {
-			return forget
-		}
+	if forget := forgetSignIn(c.base); forget != nil {
+		return forget
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "The gateway did not confirm the sign-out (%v), "+
@@ -186,7 +178,7 @@ func whoamiCmd(ctx context.Context, args []string) error {
 	if want, ok := wantsHelp(args); ok {
 		return printHelp(fs, "whoami", want)
 	}
-	if err := parse(fs, args); err != nil {
+	if err := parseCmd(fs, "whoami", args); err != nil {
 		return err
 	}
 	me, err := whoami(ctx, c)

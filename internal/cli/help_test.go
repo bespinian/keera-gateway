@@ -7,8 +7,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-
-	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
 // The registry in help.go says which flags each subcommand reads, and each
@@ -153,6 +151,9 @@ func TestWantsHelp(t *testing.T) {
 		{[]string{"add", "my-filter", "--mode", "gate"}, "", false},
 		{[]string{"ssh", "box", "--", "git", "--help"}, "", false},
 		{[]string{"ssh", "--help", "--", "git"}, "ssh", true},
+		// "help" is a verb only where a verb goes: here it is a name and a value.
+		{[]string{"create", "help"}, "", false},
+		{[]string{"add", "f", "--prompt", "help"}, "", false},
 	}
 	for _, c := range cases {
 		sub, ok := wantsHelp(c.args)
@@ -248,24 +249,24 @@ func TestHelpHidesDefaultsThatMeanNotGiven(t *testing.T) {
 	}
 }
 
-// TestUsageNamesOnlyTheFlagsTheModeTakes: a fallback router has no deciding
-// model and a pattern filter has no prompt, so their usage lines must not ask
-// for either.
-func TestUsageNamesOnlyTheFlagsTheModeTakes(t *testing.T) {
-	for _, mode := range []policy.RouterMode{"fallback", "latency", "least-busy", "size"} {
-		if u := routerUsage("add", mode); strings.Contains(u, "--model") ||
-			strings.Contains(u, "--prompt") {
-			t.Errorf("routerUsage(add, %s) = %q", mode, u)
+// TestUsageComesFromTheRegistry: a wrong count of arguments is answered with
+// the line help.go prints, before anything is sent, so the two cannot drift.
+func TestUsageComesFromTheRegistry(t *testing.T) {
+	newFakeControl(t, map[string]any{})
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"filter", "add"}, "usage: keera filter add <alias>"},
+		{[]string{"router", "delete", "a", "b"}, "usage: keera router delete <alias>"},
+		{[]string{"usage", "team"}, "usage: keera usage"},
+		{[]string{"guardrail", "get"}, "usage: keera guardrail get <scope> [<id>]"},
+		{[]string{"limit"}, "usage: keera limit <scope> [<id>]"},
+		{[]string{"key", "create", "a", "b"}, "usage: keera key create [<alias>]"},
+	} {
+		err := Run(context.Background(), tc.args)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("keera %s: err = %v, want %q", strings.Join(tc.args, " "), err, tc.want)
 		}
-	}
-	if u := routerUsage("add", ""); !strings.Contains(u, "--prompt") {
-		t.Errorf("an instruction router's usage should name --prompt: %q", u)
-	}
-	if u := filterUsage("add", policy.FilterModePattern); strings.Contains(u, "--prompt") ||
-		!strings.Contains(u, "--rules") {
-		t.Errorf("filterUsage(add, pattern) = %q", u)
-	}
-	if u := filterUsage("set", policy.FilterModePattern); u != "usage: keera filter set <alias> [flags]" {
-		t.Errorf("filterUsage(set) = %q", u)
 	}
 }

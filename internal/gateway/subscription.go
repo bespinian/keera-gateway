@@ -64,6 +64,38 @@ func subscriptionRefusal(c *call) *refusal {
 	return nil
 }
 
+// findModel finds the model a key names. A subscription key may also name one
+// by its backend model: Claude Code asks for some background work by
+// Anthropic's names, whatever its settings say. A dated name and the same name
+// without the date are the same model.
+func (s *Server) findModel(key policy.Key, name string) (policy.Model, bool) {
+	if m, found := s.src.Model(key.OrgID, name); found || !key.Subscription() {
+		return m, found
+	}
+	want := undated(name)
+	for _, m := range s.src.Models(key.OrgID) {
+		if m.Subscription && m.Enabled && m.Kind == policy.KindChat &&
+			undated(m.BackendModel) == want {
+			return m, true
+		}
+	}
+	return policy.Model{}, false
+}
+
+// undated takes the date off a model name, as in claude-haiku-4-5-20251001.
+func undated(name string) string {
+	i := strings.LastIndexByte(name, '-')
+	if i < 0 || len(name)-i-1 != 8 {
+		return name
+	}
+	for _, r := range name[i+1:] {
+		if r < '0' || r > '9' {
+			return name
+		}
+	}
+	return name[:i]
+}
+
 // subscriptionAuth forwards the caller's sign-in and the headers Claude Code
 // identifies itself with, instead of a credential of the gateway's. Anthropic
 // accepts a Claude sign-in only from Claude Code, so the request has to reach

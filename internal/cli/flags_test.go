@@ -100,25 +100,51 @@ func TestFormatMicrosKeepsSmallAmountsVisible(t *testing.T) {
 }
 
 // Every sandbox verb shares one FlagSet, so without this 'resume --ttl 8h'
-// would parse and the lifetime would be dropped without a word.
-func TestVerbFlagsRefusesAnotherVerbsFlag(t *testing.T) {
+// would parse and the lifetime would be dropped without a word. The same
+// check holds the arguments to what help.go says the verb takes.
+func TestParseVerbHoldsAVerbToItsFlagsAndArguments(t *testing.T) {
 	for _, tc := range []struct {
 		sub  string
 		args []string
-		ok   bool
+		want string // the verb's own name, or "" for a refusal
 	}{
-		{"extend", []string{"box", "--ttl", "8h"}, true},
-		{"resume", []string{"box", "--ttl", "8h"}, false},
-		{"resume", []string{"box", "--json"}, true},
+		{"extend", []string{"box", "--ttl", "8h"}, "extend"},
+		{"resume", []string{"box", "--ttl", "8h"}, ""},
+		{"resume", []string{"box", "--json"}, "resume"},
+		{"down", []string{"box"}, "terminate"},
+		{"", nil, "list"},
+		{"show", nil, ""},
+		{"show", []string{"box", "extra"}, ""},
+		{"ssh", []string{"box", "--", "git", "status"}, "ssh"},
+		{"lst", nil, ""},
 	} {
 		fs := flag.NewFlagSet("sandbox "+tc.sub, flag.ContinueOnError)
 		fs.Duration("ttl", 0, "")
 		fs.Bool("json", false, "")
-		if err := parse(fs, tc.args); err != nil {
-			t.Fatal(err)
+		got, err := parseVerb(fs, "sandbox", tc.sub, tc.args)
+		if tc.want == "" && err == nil {
+			t.Errorf("sandbox %s %v was accepted, want a refusal", tc.sub, tc.args)
 		}
-		if err := verbFlags(fs, "sandbox", tc.sub); (err == nil) != tc.ok {
-			t.Errorf("sandbox %s %v: err = %v, want ok=%v", tc.sub, tc.args, err, tc.ok)
+		if tc.want != "" && (err != nil || got != tc.want) {
+			t.Errorf("sandbox %s %v = %q, %v; want %q", tc.sub, tc.args, got, err, tc.want)
+		}
+	}
+}
+
+func TestArgCount(t *testing.T) {
+	for spec, want := range map[string][2]int{
+		"":                             {0, 0},
+		"[flags]":                      {0, 0},
+		"<alias>":                      {1, 1},
+		"[<alias>]":                    {0, 1},
+		"<scope> [<id>] [flags]":       {1, 2},
+		"<name> [-- <command>]":        {1, -1},
+		"<team> <new-name>":            {2, 2},
+		"[<client>] [flags]":           {0, 1},
+		"<email-or-id> <member|admin>": {2, 2},
+	} {
+		if lo, hi := argCount(spec); lo != want[0] || hi != want[1] {
+			t.Errorf("argCount(%q) = %d, %d; want %d, %d", spec, lo, hi, want[0], want[1])
 		}
 	}
 }

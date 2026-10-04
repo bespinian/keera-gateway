@@ -85,7 +85,7 @@ const NARROWINGS = [
     param: "user_id",
     facet: "users",
     label: "Everyone",
-    aria: "Person",
+    aria: "User",
     name: (v, names) => names.users[v] || v,
   },
   {
@@ -883,7 +883,7 @@ export function showRequest(ctx, q, names, currency) {
           "button",
           {
             class: "btn",
-            title: "All requests the agent made for the same task",
+            title: "All requests in the same session",
             onClick: () => {
               close();
               ctx.navigate("/sessions/" + encodeURIComponent(q.id));

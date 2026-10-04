@@ -175,9 +175,9 @@ func (s *Server) checkGate(ctx context.Context, f policy.Filter, m policy.Model,
 		v := FilterVerdict{
 			Sent: half.sent, ExpectRefusal: half.expectRefusal, Confidence: cost.confidence,
 		}
-		var refused *filterRefusedError
+		refused, isRefusal := errors.AsType[*filterRefusedError](err)
 		switch {
-		case errors.As(err, &refused):
+		case isRefusal:
 			v.Refused, v.Reason = true, refused.reason
 		case err != nil:
 			// One unreadable half is enough: such a gate refuses everything.
@@ -208,9 +208,9 @@ func (s *Server) checkPattern(f policy.Filter, p FilterProbe) FilterProbe {
 	p.TotalMS = time.Since(start).Milliseconds()
 	p.Hits = hits
 
-	var refused *filterRefusedError
+	refused, isRefusal := errors.AsType[*filterRefusedError](err)
 	switch {
-	case errors.As(err, &refused):
+	case isRefusal:
 		// An answer, not a fault, as with a model's refusal. There is no
 		// rewrite to read, because the sweep stopped at the match.
 		p.OK = true

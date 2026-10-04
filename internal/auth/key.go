@@ -29,14 +29,11 @@ var ErrMalformed = errors.New("auth: malformed key")
 // SHA-256 rather than a password hash: the key is 256 random bits, so there is
 // no dictionary to defend against, and a slow hash on the hot path would invite
 // denial of service.
-func Generate() (key string, hash []byte, prefix string, err error) {
+func Generate() (key string, hash []byte, prefix string) {
 	var raw [32]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return "", nil, "", err
-	}
+	_, _ = rand.Read(raw[:]) // never fails; see crypto/rand.Read
 	key = Prefix + base64.RawURLEncoding.EncodeToString(raw[:])
-	sum := Hash(key)
-	return key, sum, key[:prefixLen], nil
+	return key, Hash(key), key[:prefixLen]
 }
 
 // keyLen is the length of every key Generate makes.

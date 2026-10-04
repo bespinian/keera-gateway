@@ -28,9 +28,9 @@ func sessionCmd(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("session "+sub, flag.ExitOnError)
 	org := fs.String("org", "", orgUsage)
 	sort := fs.String("sort", "cost", "cost, requests, duration or recent")
-	alias := fs.String("model", "", "restrict to the tasks that used one model")
+	alias := fs.String("model", "", "only the sessions that used one model")
 	w := registerWho(fs)
-	unhappy := fs.Bool("unhappy", false, "only the tasks that hit trouble")
+	unhappy := fs.Bool("unhappy", false, "only the sessions with problems")
 	since := fs.Duration("since", 7*24*time.Hour, "how far back to look")
 	limit := fs.Int("limit", 25, "how many to print")
 	asJSON := fs.Bool("json", false, jsonUsage)
@@ -39,27 +39,15 @@ func sessionCmd(ctx context.Context, args []string) error {
 		return printHelp(fs, "session", want)
 	}
 
-	switch sub {
-	case "list", "ls", "":
-		if err := parseArgs(fs, rest, 0, "usage: keera session list [flags]"); err != nil {
-			return err
-		}
-		if err := verbFlags(fs, "session", sub); err != nil {
-			return err
-		}
-		return sessionList(ctx, c, sessionQuery{org: *org, sort: *sort, alias: *alias, who: w,
-			unhappy: *unhappy, since: *since, limit: *limit}, *asJSON)
-	case "show", "get":
-		if err := parseArgs(fs, rest, 1, "usage: keera session show <request-id>"); err != nil {
-			return err
-		}
-		if err := verbFlags(fs, "session", sub); err != nil {
-			return err
-		}
-		return sessionShow(ctx, c, fs.Arg(0), *org, *asJSON)
-	default:
-		return unknownSub("session", sub)
+	verb, err := parseVerb(fs, "session", sub, rest)
+	if err != nil {
+		return err
 	}
+	if verb == "show" {
+		return sessionShow(ctx, c, fs.Arg(0), *org, *asJSON)
+	}
+	return sessionList(ctx, c, sessionQuery{org: *org, sort: *sort, alias: *alias, who: w,
+		unhappy: *unhappy, since: *since, limit: *limit}, *asJSON)
 }
 
 type sessionQuery struct {
@@ -129,10 +117,10 @@ func printSessions(w *table, res sessionsResponse, since time.Duration) {
 	t := res.Totals
 	_, _ = fmt.Fprintf(w, "\n%d sessions over %d requests in the last %s; showing %d\n",
 		t.Sessions, t.Requests, since, len(res.Data))
-	_, _ = fmt.Fprintf(w, "middle task: %d requests, %s, %s %s\n",
+	_, _ = fmt.Fprintf(w, "middle session: %d requests, %s, %s %s\n",
 		t.MedianRequests, shortDuration(time.Duration(t.MedianDurationMS)*time.Millisecond),
 		policy.FormatMicros(t.MedianCostMicros), res.Currency)
-	_, _ = fmt.Fprintf(w, "worst task: %d requests, %s %s; %d of %d hit trouble\n",
+	_, _ = fmt.Fprintf(w, "worst session: %d requests, %s %s; %d of %d had problems\n",
 		t.LongestRequests, policy.FormatMicros(t.CostliestMicros), res.Currency,
 		t.Unhappy, t.Sessions)
 	_, _ = fmt.Fprintf(w, "grouped by conversation, cut after %s idle\n",
@@ -148,7 +136,7 @@ func sessionShow(ctx context.Context, c *client, arg, org string, asJSON bool) e
 
 	path := fmt.Sprintf("/v1/sessions/%d", requestID)
 	if org != "" {
-		path += "?" + url.Values{"org_id": {org}}.Encode()
+		path = inOrg(path, org)
 	}
 	var res sessionResponse
 	if err := c.do(ctx, "GET", path, nil, &res); err != nil {

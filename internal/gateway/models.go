@@ -57,7 +57,7 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, rt := range s.src.Routers(res.Key.OrgID) {
-		if res.AllowsModel(rt.Alias) && !res.Key.Subscription() {
+		if res.MayRoute(rt.Alias) {
 			out = append(out, routerEntryOf(rt))
 		}
 	}
@@ -70,18 +70,16 @@ func (s *Server) getModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	alias := r.PathValue("alias")
-	if res.AllowsModel(alias) {
-		if m, found := s.src.Model(res.Key.OrgID, alias); found && m.Enabled && res.MayUse(m) {
-			httpx.WriteJSON(w, http.StatusOK, modelEntryOf(m))
-			return
-		}
-		if rt, found := s.src.Router(res.Key.OrgID, alias); found && !res.Key.Subscription() {
-			httpx.WriteJSON(w, http.StatusOK, routerEntryOf(rt))
-			return
-		}
+	if m, found := s.src.Model(res.Key.OrgID, alias); found && m.Enabled && res.MayUse(m) {
+		httpx.WriteJSON(w, http.StatusOK, modelEntryOf(m))
+		return
+	}
+	if rt, found := s.src.Router(res.Key.OrgID, alias); found && res.MayRoute(alias) {
+		httpx.WriteJSON(w, http.StatusOK, routerEntryOf(rt))
+		return
 	}
 	httpx.WriteError(w, http.StatusNotFound, "invalid_request_error", "model_not_found",
-		s.advise("the model '"+alias+"' does not exist or this key may not use it"))
+		s.advise(modelNotFound(alias)))
 }
 
 // created is the model's release date as a Unix time, which is what OpenAI's

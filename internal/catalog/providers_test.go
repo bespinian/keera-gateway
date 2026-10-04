@@ -665,3 +665,19 @@ models:
 		t.Errorf("release date = %q, want the declared 2026-03-01", got)
 	}
 }
+
+// A model Anthropic dates can be named by either id, and is priced the same.
+func TestADatedModelIsTheSameModel(t *testing.T) {
+	models, err := parseModelFile([]byte(`
+models:
+  - alias: claude-haiku
+    provider: anthropic
+    backend_model: claude-haiku-4-5-20251001
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if p := models[0].InputMicrosPerMTok; p != 1_000_000 {
+		t.Errorf("input price = %d, want claude-haiku-4-5's", p)
+	}
+}

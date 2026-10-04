@@ -114,14 +114,12 @@ func (rp *RelyingParty) ID() string { return rp.id }
 func (rp *RelyingParty) Origin() string { return rp.origin }
 
 // NewPasskeyChallenge mints a ceremony's challenge, as base64url.
-func NewPasskeyChallenge() (string, error) { return randomToken() }
+func NewPasskeyChallenge() string { return randomToken() }
 
 // NewPasskeyLink mints the token of a set-up link and the hash stored for it.
-func NewPasskeyLink() (token string, hash []byte, err error) {
-	if token, err = randomToken(); err != nil {
-		return "", nil, err
-	}
-	return token, HashPasskeyLink(token), nil
+func NewPasskeyLink() (token string, hash []byte) {
+	token = randomToken()
+	return token, HashPasskeyLink(token)
 }
 
 // HashPasskeyLink returns the value stored in passkey_links.id for token.

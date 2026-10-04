@@ -138,8 +138,8 @@ func TestEveryProviderMarkNamesAProvider(t *testing.T) {
 	// Only the first table in the file: the identity-provider marks below it
 	// are keyed by names an operator chooses, which nothing here can check.
 	table := string(body)
-	start := strings.Index(table, "export const providerMarks = {")
-	end := strings.Index(table, "export const idpMarks = {")
+	start := strings.Index(table, "const providerMarks = {")
+	end := strings.Index(table, "const idpMarks = {")
 	if start < 0 || end < start {
 		t.Fatal("ui.js no longer holds a providerMarks table")
 	}

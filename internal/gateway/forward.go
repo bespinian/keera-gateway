@@ -236,18 +236,24 @@ func undelivered(err error) bool {
 
 // copyResponseHeaders forwards what the client needs and adds what an SSE
 // stream needs to survive an ingress.
-func (s *Server) copyResponseHeaders(w http.ResponseWriter, resp *http.Response, alias string, streaming bool) {
+func copyResponseHeaders(w http.ResponseWriter, resp *http.Response, alias string, streaming bool) {
 	if ct := resp.Header.Get("Content-Type"); ct != "" {
 		w.Header().Set("Content-Type", forwardableContentType(ct))
 	}
 	w.Header().Set("X-Keera-Model", alias)
 	if streaming {
-		w.Header().Set("Cache-Control", "no-cache")
+		streamHeaders(w.Header())
 		w.Header().Set("Connection", "keep-alive")
-		// ingress-nginx buffers responses unless told not to, and the editor
-		// then shows nothing until the end.
-		w.Header().Set("X-Accel-Buffering", "no")
 	}
+}
+
+// streamHeaders keeps an event stream from being held back on its way to the
+// client.
+func streamHeaders(h http.Header) {
+	h.Set("Cache-Control", "no-cache")
+	// ingress-nginx buffers responses unless told not to, and the editor then
+	// shows nothing until the end.
+	h.Set("X-Accel-Buffering", "no")
 }
 
 // forwardableContentType limits an upstream media type to the two this

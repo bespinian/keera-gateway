@@ -153,20 +153,20 @@ export async function mcpView(ctx) {
               class: "btn btn-sm btn-danger",
               onClick: () =>
                 confirm({
-                  title: `Remove ${m.alias}?`,
+                  title: `Delete ${m.alias}?`,
                   body:
                     "Clients lose access to its tools. Its call log is kept. " +
                     "To pause it instead, disable it.",
-                  confirmLabel: "Remove server",
+                  confirmLabel: "Delete server",
                   danger: true,
                   onConfirm: async () => {
                     await api.deleteMCPServer(m.alias, m.org_id);
-                    toast("MCP server removed", "good");
+                    toast("MCP server deleted", "good");
                     ctx.reload();
                   },
                 }),
             },
-            "Remove",
+            "Delete",
           ),
         ),
     });

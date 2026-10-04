@@ -20,7 +20,7 @@ import (
 func (s *Server) gitCredential(w http.ResponseWriter, r *http.Request) {
 	key, err := auth.FromHeader(r.Header.Get("Authorization"))
 	if err != nil {
-		httpx.WriteError(w, http.StatusUnauthorized, "invalid_request_error", "unauthenticated",
+		unauthorized(w, "unauthenticated",
 			"send this sandbox's own key, KEERA_API_KEY, as a bearer token")
 		return
 	}
@@ -29,8 +29,7 @@ func (s *Server) gitCredential(w http.ResponseWriter, r *http.Request) {
 		sb, err = s.st.LiveSandboxByKey(r.Context(), auth.Hash(key))
 	}
 	if errors.Is(err, store.ErrNotFound) {
-		httpx.WriteError(w, http.StatusUnauthorized, "invalid_request_error", "invalid_api_key",
-			"this key belongs to no live sandbox")
+		unauthorized(w, "invalid_api_key", "this key belongs to no live sandbox")
 		return
 	}
 	if err != nil {

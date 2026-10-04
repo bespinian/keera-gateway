@@ -83,7 +83,7 @@ func (s *Server) attach(w http.ResponseWriter, r *http.Request, p *authn.Princip
 	}
 	// Seeing a sandbox is not enough to open a shell in it. See canAttach.
 	if !canAttach(p, sb) {
-		s.forbid(w, "that sandbox belongs to somebody else; an administrator can see it and "+
+		forbid(w, "that sandbox belongs to somebody else; an administrator can see it and "+
 			"can delete it, and opening a shell in it is the owner's alone - it holds their "+
 			"working copy")
 		return
@@ -319,14 +319,16 @@ func (n *noticing) Write(b []byte) (int, error) {
 	return n.w.Write(b)
 }
 
-// failSandbox maps a driver's refusal onto a status code.
+// failSandbox maps the sandbox manager's refusal onto a status code.
 //
-// A refusal is 409, not 400: the request was fine, but the sandbox is in the
-// wrong state, which can change. The driver's own message is passed on, as it
-// is written for the developer.
+// A request that is wrong in itself is 400. Any other refusal is 409: the
+// request was fine, but the state it met, which can change, was not. The
+// manager's message is passed on, as it is written for the developer.
 func (s *Server) failSandbox(w http.ResponseWriter, err error) {
 	var refused *sandbox.ErrRefused
 	switch {
+	case errors.As(err, &refused) && refused.Invalid:
+		badRequest(w, refused.Reason)
 	case errors.As(err, &refused):
 		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "sandbox_state",
 			refused.Reason)

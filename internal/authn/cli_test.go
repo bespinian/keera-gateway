@@ -11,10 +11,7 @@ import (
 // code - so they have to agree, and it has to be the S256 the rest of the flow
 // uses rather than anything resembling it.
 func TestTheProofKeyIsTheSameOnBothSides(t *testing.T) {
-	verifier, err := NewCLIVerifier()
-	if err != nil {
-		t.Fatalf("minting a verifier: %v", err)
-	}
+	verifier := NewCLIVerifier()
 	challenge := CLIChallenge(verifier)
 	if CLIChallenge(verifier) != challenge {
 		t.Error("the same verifier produced two challenges")
@@ -28,10 +25,7 @@ func TestTheProofKeyIsTheSameOnBothSides(t *testing.T) {
 		t.Errorf("challenge = %q, want raw base64url: %v", challenge, err)
 	}
 
-	other, err := NewCLIVerifier()
-	if err != nil {
-		t.Fatalf("minting a verifier: %v", err)
-	}
+	other := NewCLIVerifier()
 	if CLIChallenge(other) == challenge {
 		t.Error("two verifiers produced one challenge")
 	}
@@ -41,10 +35,7 @@ func TestTheProofKeyIsTheSameOnBothSides(t *testing.T) {
 // recognisable as one at a glance - and as this one rather than as an API key,
 // which admits its holder to something else entirely.
 func TestACommandLineTokenSaysWhatItIs(t *testing.T) {
-	token, hash, err := NewCLIToken()
-	if err != nil {
-		t.Fatalf("minting a token: %v", err)
-	}
+	token, hash := NewCLIToken()
 	if !strings.HasPrefix(token, CLITokenPrefix) {
 		t.Errorf("token = %q, want it to carry %q", token, CLITokenPrefix)
 	}
@@ -55,10 +46,7 @@ func TestACommandLineTokenSaysWhatItIs(t *testing.T) {
 		t.Error("the stored hash is not the one a presented token resolves to")
 	}
 
-	second, _, err := NewCLIToken()
-	if err != nil {
-		t.Fatalf("minting a token: %v", err)
-	}
+	second, _ := NewCLIToken()
 	if second == token {
 		t.Error("two sign-ins minted one token")
 	}
@@ -67,10 +55,7 @@ func TestACommandLineTokenSaysWhatItIs(t *testing.T) {
 // The code is short-lived and single-use, but it still crosses a URL, so it is
 // stored the way every other credential here is: as a hash, never as itself.
 func TestAOneTimeCodeIsStoredAsAHash(t *testing.T) {
-	code, hash, err := NewCLICode()
-	if err != nil {
-		t.Fatalf("minting a code: %v", err)
-	}
+	code, hash := NewCLICode()
 	if string(HashCLICode(code)) != string(hash) {
 		t.Error("the stored hash is not the one a presented code resolves to")
 	}

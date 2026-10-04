@@ -18,6 +18,7 @@ import {
   showError,
   readRow,
   plural,
+  field,
 } from "../ui.js";
 import { orgNameOf } from "./orgs.js";
 
@@ -291,17 +292,11 @@ function render(
   // nothing to be ahead of, and what runs before this scope's own filters is
   // already said under the boxes.
   const order = h("div", { class: "stack", style: { gap: "4px" } });
-  const orderField = h(
-    "div",
-    { class: "field" },
-    h("label", {}, "In this order"),
+  const orderField = field(
+    "In this order",
     order,
-    h(
-      "div",
-      { class: "hint" },
-      "Each filter gets the output of the one above. A gate placed first " +
-        "saves the cost of the filters below when it refuses.",
-    ),
+    "Each filter gets the output of the one above. A gate placed first " +
+      "saves the cost of the filters below when it refuses.",
   );
   const renderOrder = () => {
     orderField.hidden = picked.length < 2;
@@ -456,71 +451,35 @@ function render(
       h(
         "div",
         { class: "field-row" },
-        h(
-          "div",
-          { class: "field" },
-          h("label", {}, "Requests per minute"),
-          rpm,
-          h(
-            "div",
-            { class: "hint" },
-            "Per gateway replica, unless the replicas share a Redis.",
-            ceilingNote(ceilings, "rpm", num),
-          ),
-        ),
-        h(
-          "div",
-          { class: "field" },
-          h("label", {}, "Tokens per minute"),
-          tpm,
-          h(
-            "div",
-            { class: "hint" },
-            "Counted when each request finishes.",
-            ceilingNote(ceilings, "tpm", compact),
-          ),
-        ),
+        field("Requests per minute", rpm, [
+          "Per gateway replica, unless the replicas share a Redis.",
+          ceilingNote(ceilings, "rpm", num),
+        ]),
+        field("Tokens per minute", tpm, [
+          "Counted when each request finishes.",
+          ceilingNote(ceilings, "tpm", compact),
+        ]),
       ),
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "Maximum output tokens per request"),
-        maxOut,
-        h(
-          "div",
-          { class: "hint" },
-          "Requests asking for more are capped to this, not refused.",
-          ceilingNote(ceilings, "max_output_tokens", compact),
-        ),
-      ),
+      field("Maximum output tokens per request", maxOut, [
+        "Requests asking for more are capped to this, not refused.",
+        ceilingNote(ceilings, "max_output_tokens", compact),
+      ]),
       section("Spend"),
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, `Budget (${ctx.currency})`),
+      field(
+        `Budget (${ctx.currency})`,
         h("div", { class: "field-row" }, budget, period),
-        h(
-          "div",
-          { class: "hint" },
+        [
           "Past this, requests get a 402 until the period resets. A busy " +
             "scope can overshoot slightly.",
           ceilingNote(ceilings, "budget_micros", (v) => money(v, ctx.currency)),
-        ),
+        ],
       ),
       section("Every request", "Applied to each request."),
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "System prompt"),
-        systemPrompt,
-        h(
-          "div",
-          { class: "hint" },
-          "Added before the messages on every chat request. The " +
-            "organisation's prompt is sent first, then the team's.",
-          inheritedPrompts(ceilings),
-        ),
-      ),
+      field("System prompt", systemPrompt, [
+        "Added before the messages on every chat request. The " +
+          "organisation's prompt is sent first, then the team's.",
+        inheritedPrompts(ceilings),
+      ]),
       h(
         "div",
         { class: "field" },

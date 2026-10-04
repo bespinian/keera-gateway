@@ -11,8 +11,10 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
+	"github.com/bespinian/keera-gateway/internal/catalog"
 	"github.com/bespinian/keera-gateway/internal/gateway"
 	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/store"
@@ -61,14 +63,23 @@ func connectSubscription(ctx context.Context, c *client, in subscriptionSetup) e
 	if err != nil {
 		return err
 	}
-	env["ANTHROPIC_BASE_URL"] = in.gatewayURL
-
-	// The settings are read before a key is issued, so a file that cannot be
-	// changed leaves no key behind that nothing holds.
-	path, err := claudeSettingsPath()
+	dir, err := claudeConfigDir()
 	if err != nil {
 		return err
 	}
+	// Claude Code stops fetching the organisation's settings from Anthropic when
+	// the user's own settings name an address. So when managed settings set it
+	// already, it is left to them, and an earlier copy is taken out.
+	managed := managedBaseURL(filepath.Join(dir, "remote-settings.json"), managedSettingsDir())
+	if managed == "" {
+		env["ANTHROPIC_BASE_URL"] = in.gatewayURL
+	} else {
+		env["ANTHROPIC_BASE_URL"] = ""
+	}
+
+	// The settings are read before a key is issued, so a file that cannot be
+	// changed leaves no key behind that nothing holds.
+	path := filepath.Join(dir, "settings.json")
 	settings, err := readSettings(path)
 	if err != nil {
 		return err
@@ -79,6 +90,11 @@ func connectSubscription(ctx context.Context, c *client, in subscriptionSetup) e
 		return err
 	}
 	warnings := setClaudeEnv(settings, env, key.Key)
+	setModelOverrides(settings, claudeModelOverrides(models))
+	if managed != "" && strings.TrimRight(managed, "/") != strings.TrimRight(in.gatewayURL, "/") {
+		warnings = append(warnings, "Your organisation's managed settings send Claude Code to "+
+			managed+", not to "+in.gatewayURL+". The key works only if both are this gateway.")
+	}
 	if err := writeSettings(path, settings); err != nil {
 		return fmt.Errorf("the key %s was issued, but %w; run this again to replace it", key.ID, err)
 	}
@@ -86,7 +102,7 @@ func connectSubscription(ctx context.Context, c *client, in subscriptionSetup) e
 	if in.asJSON {
 		return out(true, map[string]any{
 			"settings": path, "key_id": key.ID, "replaced": replaced, "model": alias,
-			"url": in.gatewayURL, "warnings": warnings,
+			"url": in.gatewayURL, "url_managed": managed != "", "warnings": warnings,
 		}, nil)
 	}
 	fmt.Fprintf(os.Stderr, "%s · model %s · %s\n\n", styleErr.head("Claude Code with your Claude plan"),
@@ -96,7 +112,12 @@ func connectSubscription(ctx context.Context, c *client, in subscriptionSetup) e
 	} else {
 		fmt.Fprintf(os.Stderr, "Issued this machine the key %s (%s…).\n", key.ID, key.Prefix)
 	}
-	fmt.Fprintf(os.Stderr, "Wrote the gateway, the key and the models into %s.\n", path)
+	if managed != "" {
+		fmt.Fprintf(os.Stderr, "Wrote the key and the models into %s. The gateway's address "+
+			"comes from your organisation's managed settings.\n", path)
+	} else {
+		fmt.Fprintf(os.Stderr, "Wrote the gateway, the key and the models into %s.\n", path)
+	}
 	for _, w := range warnings {
 		fmt.Fprintf(os.Stderr, "\n%s\n", styleErr.warn(wrapAt(w, 0, 0, 76)))
 	}
@@ -112,12 +133,7 @@ func connectSubscription(ctx context.Context, c *client, in subscriptionSetup) e
 // names, which the gateway does not know. So each of the three is mapped to
 // the subscription model of that family, or to the main one when there is none.
 func subscriptionEnv(models []policy.Model, named string) (map[string]string, string, error) {
-	var subs []policy.Model
-	for _, m := range models {
-		if m.Enabled && m.Subscription && m.Kind == policy.KindChat {
-			subs = append(subs, m)
-		}
-	}
+	subs := subscriptionModels(models)
 	if len(subs) == 0 {
 		return nil, "", errors.New("this organisation has no subscription model, so a Claude " +
 			"plan cannot pay for anything here; an administrator adds one with: keera model " +
@@ -132,18 +148,84 @@ func subscriptionEnv(models []policy.Model, named string) (map[string]string, st
 		}
 		main = found
 	}
-	env := map[string]string{"ANTHROPIC_MODEL": main.Alias}
+	env := map[string]string{
+		"ANTHROPIC_MODEL": claudeCodeName(main),
+		// Claude Code turns tool search off for any address that is not
+		// Anthropic's, and then sends every tool of every MCP server with each
+		// request. The gateway forwards a subscription request as it is, so
+		// tool search works through it.
+		"ENABLE_TOOL_SEARCH": "true",
+	}
 	for _, family := range []string{"opus", "sonnet", "haiku"} {
-		alias := main.Alias
+		name := claudeCodeName(main)
 		for _, m := range subs {
 			if strings.Contains(m.BackendModel, family) {
-				alias = m.Alias
+				name = claudeCodeName(m)
 				break
 			}
 		}
-		env["ANTHROPIC_DEFAULT_"+strings.ToUpper(family)+"_MODEL"] = alias
+		env["ANTHROPIC_DEFAULT_"+strings.ToUpper(family)+"_MODEL"] = name
 	}
 	return env, main.Alias, nil
+}
+
+// subscriptionModels is the models a subscription key can reach.
+func subscriptionModels(models []policy.Model) []policy.Model {
+	var subs []policy.Model
+	for _, m := range models {
+		if m.Enabled && m.Subscription && m.Kind == policy.KindChat {
+			subs = append(subs, m)
+		}
+	}
+	return subs
+}
+
+// claudeCodeName is the name Claude Code is given for a model. For a model
+// Claude Code does not know, it assumes a 200K context. The [1m] suffix tells
+// it the window is 1M, and Claude Code takes the suffix off before it sends the
+// request.
+func claudeCodeName(m policy.Model) string {
+	if m.MaxContext >= 1_000_000 {
+		return m.Alias + "[1m]"
+	}
+	return m.Alias
+}
+
+// claudeModelOverrides tells Claude Code which Claude model each alias is.
+// Without it, Claude Code does not know the gateway's aliases, and guesses
+// what they support: Haiku would be sent adaptive thinking it then refuses.
+// Claude Code knows a model by Anthropic's id, and a dated model by the dated
+// one, so both are written. The first model by alias wins an id two share.
+func claudeModelOverrides(models []policy.Model) map[string]string {
+	anthropic, _ := catalog.ProviderByName("anthropic")
+	overrides := map[string]string{}
+	for _, m := range subscriptionModels(models) {
+		ids := []string{m.BackendModel}
+		if known, found := anthropic.Model(m.BackendModel); found {
+			ids = append(ids, known.ID, known.Snapshot)
+		}
+		for _, id := range ids {
+			if _, taken := overrides[id]; !taken && id != "" {
+				overrides[id] = m.Alias
+			}
+		}
+	}
+	return overrides
+}
+
+// setModelOverrides writes the overrides into the 'modelOverrides' setting,
+// keeping the entries for other models.
+func setModelOverrides(settings map[string]any, overrides map[string]string) {
+	block, _ := settings["modelOverrides"].(map[string]any)
+	if block == nil {
+		block = map[string]any{}
+	}
+	for id, alias := range overrides {
+		block[id] = alias
+	}
+	if len(block) > 0 {
+		settings["modelOverrides"] = block
+	}
 }
 
 // machineKey replaces this machine's subscription key, or issues the first one.
@@ -210,9 +292,7 @@ func machineID() (string, error) {
 		return "", err
 	}
 	buf := make([]byte, 4)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
+	_, _ = rand.Read(buf) // never fails; see crypto/rand.Read
 	id := hex.EncodeToString(buf)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", err
@@ -223,17 +303,69 @@ func machineID() (string, error) {
 	return id, nil
 }
 
-// claudeSettingsPath is Claude Code's user settings file. CLAUDE_CONFIG_DIR
+// claudeConfigDir is Claude Code's configuration directory. CLAUDE_CONFIG_DIR
 // moves it, as it does for Claude Code itself.
-func claudeSettingsPath() (string, error) {
+func claudeConfigDir() (string, error) {
 	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
-		return filepath.Join(dir, "settings.json"), nil
+		return dir, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("finding Claude Code's settings: %w", err)
 	}
-	return filepath.Join(home, ".claude", "settings.json"), nil
+	return filepath.Join(home, ".claude"), nil
+}
+
+// managedSettingsDir is where Claude Code reads managed settings files from.
+func managedSettingsDir() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "/Library/Application Support/ClaudeCode"
+	case "windows":
+		return `C:\Program Files\ClaudeCode`
+	default:
+		return "/etc/claude-code"
+	}
+}
+
+// managedBaseURL is the address Claude Code's managed settings send it to, or
+// "" when they set none. serverCache is Claude Code's copy of the settings
+// from the claude.ai admin console, which win. Then come the files in
+// systemDir, where a later drop-in wins over an earlier one. Settings from MDM
+// profiles and the Windows registry are not read.
+func managedBaseURL(serverCache, systemDir string) string {
+	if u := settingsBaseURL(serverCache); u != "" {
+		return u
+	}
+	files := []string{filepath.Join(systemDir, "managed-settings.json")}
+	dropIns, _ := filepath.Glob(filepath.Join(systemDir, "managed-settings.d", "*.json"))
+	found := ""
+	for _, f := range append(files, dropIns...) {
+		if strings.HasPrefix(filepath.Base(f), ".") {
+			continue
+		}
+		if u := settingsBaseURL(f); u != "" {
+			found = u
+		}
+	}
+	return found
+}
+
+// settingsBaseURL reads ANTHROPIC_BASE_URL from a settings file's 'env' block.
+// A file that is missing or cannot be read sets nothing.
+func settingsBaseURL(path string) string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var doc struct {
+		Env map[string]any `json:"env"`
+	}
+	if json.Unmarshal(raw, &doc) != nil {
+		return ""
+	}
+	u, _ := doc.Env["ANTHROPIC_BASE_URL"].(string)
+	return strings.TrimSpace(u)
 }
 
 // readSettings reads a settings file, or an empty one when there is none yet.
@@ -252,17 +384,20 @@ func readSettings(path string) (map[string]any, error) {
 	if err := json.Unmarshal(raw, &settings); err != nil {
 		return nil, fmt.Errorf("%s is not valid JSON, so it was left alone; fix it first: %w", path, err)
 	}
-	if env, ok := settings["env"]; ok {
-		if _, isObject := env.(map[string]any); !isObject {
-			return nil, fmt.Errorf("the 'env' setting in %s is not an object, so it was left alone", path)
+	for _, name := range []string{"env", "modelOverrides"} {
+		if v, ok := settings[name]; ok {
+			if _, isObject := v.(map[string]any); !isObject {
+				return nil, fmt.Errorf("the '%s' setting in %s is not an object, so it was left alone",
+					name, path)
+			}
 		}
 	}
 	return settings, nil
 }
 
 // setClaudeEnv writes the gateway's settings into the 'env' block, and says
-// what else in the file would stop them working. Other headers in
-// ANTHROPIC_CUSTOM_HEADERS are kept.
+// what else in the file would stop them working. An empty value removes the
+// setting. Other headers in ANTHROPIC_CUSTOM_HEADERS are kept.
 func setClaudeEnv(settings map[string]any, env map[string]string, key string) []string {
 	block, _ := settings["env"].(map[string]any)
 	if block == nil {
@@ -270,7 +405,11 @@ func setClaudeEnv(settings map[string]any, env map[string]string, key string) []
 		settings["env"] = block
 	}
 	for name, value := range env {
-		block[name] = value
+		if value == "" {
+			delete(block, name)
+		} else {
+			block[name] = value
+		}
 	}
 	var headers []string
 	if old, ok := block["ANTHROPIC_CUSTOM_HEADERS"].(string); ok {

@@ -166,8 +166,8 @@ The exceptions:
   that must both hold, and each level's `rpm` and `tpm` has its own bucket.
 - **System prompts and filters accumulate**, outermost first. A level may add to
   what it inherits but may not drop it.
-- **Only the organisation grants repositories** to sandboxes. A team or key can
-  only narrow the list.
+- **Only the organisation grants repositories** to sandboxes. A team can only
+  narrow the list; a key cannot set it.
 
 A budget with no period is a monthly one. Budgets reset on UTC boundaries in
 every deployment.
@@ -329,7 +329,7 @@ Errors come in the shape of the API that was called. The codes:
 | 404    | `model_not_found`: no such model, or the key may not use it; `mcp_server_not_found`                                      |
 | 413    | `request_too_large` (`KEERA_MAX_BODY_BYTES`), `filter_input_too_large`                                                   |
 | 429    | `rate_limit_exceeded` (`rpm`), `token_rate_limit_exceeded` (`tpm`)                                                       |
-| 502    | `upstream_unavailable`, `filter_failed`, `mcp_credential_refused`, `mcp_unavailable`                                     |
+| 502    | `upstream_unavailable`, `upstream_error`, `filter_failed`, `mcp_credential_refused`, `mcp_unavailable`                   |
 | 503    | `control_plane_unavailable`, `no_backend`, `filter_unavailable`, `router_undecided`, `router_destination_unavailable`    |
 
 ## Metrics

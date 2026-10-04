@@ -45,8 +45,9 @@ type CLIToken struct {
 // CLITokenUser is a token joined to the person it belongs to. Like
 // SessionUser it is one query, because it runs on every command.
 type CLITokenUser struct {
-	Token CLIToken
-	User  User
+	Token     CLIToken
+	User      User
+	Directory Directory
 }
 
 // CreateCLIToken stores a token under its hash.
@@ -62,12 +63,13 @@ func (s *Store) CreateCLIToken(ctx context.Context, hash []byte, userID string,
 func (s *Store) LookupCLIToken(ctx context.Context, hash []byte) (CLITokenUser, error) {
 	var tu CLITokenUser
 	err := s.pool.QueryRow(ctx, `SELECT t.user_id, t.expires_at,
-		u.id, u.org_id, u.email, COALESCE(u.external_id,''), u.role, u.created_at
+		u.id, u.org_id, u.email, COALESCE(u.external_id,''), u.role, u.created_at,
+		`+directoryColumns+`
 		FROM cli_tokens t JOIN users u ON u.id = t.user_id
 		WHERE t.id = $1 AND t.expires_at > now() AND u.disabled_at IS NULL`, hash,
 	).Scan(&tu.Token.UserID, &tu.Token.ExpiresAt,
 		&tu.User.ID, &tu.User.OrgID, &tu.User.Email, &tu.User.ExternalID, &tu.User.Role,
-		&tu.User.CreatedAt)
+		&tu.User.CreatedAt, &tu.Directory.Linked, &tu.Directory.CheckedAt)
 	return tu, notFound(err)
 }
 

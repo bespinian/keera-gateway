@@ -102,7 +102,7 @@ curl http://127.0.0.1:8080/api/v1/chat/completions \
 ```
 
 Or open the control panel at <http://127.0.0.1:8080> and sign in with the
-operator key. **Overview** shows a first-run checklist.
+operator key. **Dashboard** shows a first-run checklist.
 [docs/install.md](docs/install.md) covers every setting, the first run and
 troubleshooting.
 
@@ -200,7 +200,7 @@ them. [docs/providers.md](docs/providers.md)
 Code, while Keera applies the guardrails and shows each person's usage.
 [docs/subscriptions.md](docs/subscriptions.md)
 
-**The panel** has these screens:
+**The panel** has these screens, among others:
 
 - **Live map** - how much of the traffic leaves your infrastructure.
 - **Requests** - the log every other number is counted from.

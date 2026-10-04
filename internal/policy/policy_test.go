@@ -123,6 +123,17 @@ func TestAllowsModel(t *testing.T) {
 	}
 }
 
+func TestMayRoute(t *testing.T) {
+	restricted := &Resolved{AllowedModels: []string{"auto"}}
+	if !restricted.MayRoute("auto") || restricted.MayRoute("other") {
+		t.Error("a router must follow the allow-list like a model")
+	}
+	subscription := &Resolved{Key: Key{Kind: KeySubscription}}
+	if subscription.MayRoute("auto") {
+		t.Error("a subscription key must reach no router, even with no allow-list")
+	}
+}
+
 func TestPeriodStart(t *testing.T) {
 	// Budgets reset on UTC boundaries whatever the cluster's timezone, so a
 	// spend figure means the same thing in Zurich as in the report.

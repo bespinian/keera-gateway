@@ -6,116 +6,18 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
+	"errors"
 	"net/url"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/go-jose/go-jose/v4"
+	"github.com/bespinian/keera-gateway/internal/authn/oidctest"
 )
 
-// fakeIDP is a minimal but real OpenID provider: discovery, a JWK set, and a
-// token endpoint that mints a properly signed id_token. It exists so the whole
-// sign-in exchange is exercised - including signature verification and the
-// nonce check - rather than assumed to work.
-type fakeIDP struct {
-	*httptest.Server
-	key *rsa.PrivateKey
-	// claims is what the next id_token will carry, so a test can bend one field.
-	claims func(m map[string]any)
-	// lastForm records what the client actually posted, which is where PKCE
-	// either happened or did not.
-	lastForm url.Values
-}
-
-func newFakeIDP(t *testing.T) *fakeIDP {
-	t.Helper()
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
-	idp := &fakeIDP{key: key}
-
-	mux := http.NewServeMux()
-	idp.Server = httptest.NewServer(mux)
-	t.Cleanup(idp.Close)
-
-	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, map[string]any{
-			"issuer":                                idp.URL,
-			"authorization_endpoint":                idp.URL + "/authorize",
-			"token_endpoint":                        idp.URL + "/token",
-			"jwks_uri":                              idp.URL + "/jwks",
-			"end_session_endpoint":                  idp.URL + "/logout",
-			"id_token_signing_alg_values_supported": []string{"RS256"},
-		})
-	})
-	mux.HandleFunc("/jwks", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{
-			Key: key.Public(), KeyID: "test", Algorithm: "RS256", Use: "sig",
-		}}})
-	})
-	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		idp.lastForm = r.PostForm
-		claims := map[string]any{
-			"iss":    idp.URL,
-			"aud":    "keera",
-			"sub":    "sub-123",
-			"exp":    time.Now().Add(time.Hour).Unix(),
-			"iat":    time.Now().Unix(),
-			"nonce":  r.PostForm.Get("__nonce"),
-			"email":  "ada@example.ch",
-			"name":   "Ada Lovelace",
-			"groups": []string{"engineering", "keera-admins"},
-		}
-		if idp.claims != nil {
-			idp.claims(claims)
-		}
-		writeJSON(w, map[string]any{
-			"access_token": "at",
-			"token_type":   "Bearer",
-			"expires_in":   3600,
-			"id_token":     idp.sign(t, claims),
-		})
-	})
-	return idp
-}
-
-func (idp *fakeIDP) sign(t *testing.T, claims map[string]any) string {
-	t.Helper()
-	signer, err := jose.NewSigner(
-		jose.SigningKey{Algorithm: jose.RS256, Key: idp.key},
-		(&jose.SignerOptions{}).WithType("JWT").WithHeader("kid", "test"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	payload, err := json.Marshal(claims)
-	if err != nil {
-		t.Fatal(err)
-	}
-	jws, err := signer.Sign(payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, err := jws.CompactSerialize()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return raw
-}
-
-func writeJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
-}
-
 // connect wires Keera Gateway to the fake provider.
-func connect(t *testing.T, idp *fakeIDP, mapping RoleMapping) *OIDC {
+func connect(t *testing.T, idp *oidctest.IDP, mapping RoleMapping) *OIDC {
 	t.Helper()
 	o, err := NewOIDC(context.Background(), OIDCConfig{
 		Name:         "test",
@@ -136,13 +38,10 @@ func connect(t *testing.T, idp *fakeIDP, mapping RoleMapping) *OIDC {
 }
 
 func TestAuthCodeURLCarriesStateAndPKCE(t *testing.T) {
-	idp := newFakeIDP(t)
+	idp := oidctest.New(t)
 	o := connect(t, idp, RoleMapping{Default: RoleMember})
 
-	flow, err := NewFlow()
-	if err != nil {
-		t.Fatal(err)
-	}
+	flow := NewFlow()
 	u, err := url.Parse(o.AuthCodeURL(flow))
 	if err != nil {
 		t.Fatal(err)
@@ -173,12 +72,12 @@ func TestAuthCodeURLCarriesStateAndPKCE(t *testing.T) {
 }
 
 func TestExchangeReturnsAVerifiedIdentity(t *testing.T) {
-	idp := newFakeIDP(t)
+	idp := oidctest.New(t)
 	o := connect(t, idp, RoleMapping{AdminGroups: []string{"keera-admins"}, Default: RoleMember})
 
-	flow, _ := NewFlow()
+	flow := NewFlow()
 	// The stand-in provider echoes back whatever nonce it is told to.
-	idp.claims = func(m map[string]any) { m["nonce"] = flow.Nonce }
+	idp.Claims = func(m map[string]any) { m["nonce"] = flow.Nonce }
 
 	id, err := o.Exchange(context.Background(), "the-code", flow)
 	if err != nil {
@@ -198,18 +97,18 @@ func TestExchangeReturnsAVerifiedIdentity(t *testing.T) {
 	}
 
 	// PKCE has to reach the token endpoint, or it protected nothing.
-	if got := idp.lastForm.Get("code_verifier"); got != flow.Verifier {
+	if got := idp.LastForm().Get("code_verifier"); got != flow.Verifier {
 		t.Errorf("code_verifier posted = %q, want the flow's", got)
 	}
 }
 
 func TestExchangeRejectsAMismatchedNonce(t *testing.T) {
 	// A token minted for a different login must not be accepted for this one.
-	idp := newFakeIDP(t)
+	idp := oidctest.New(t)
 	o := connect(t, idp, RoleMapping{Default: RoleMember})
-	idp.claims = func(m map[string]any) { m["nonce"] = "some-other-login" }
+	idp.Claims = func(m map[string]any) { m["nonce"] = "some-other-login" }
 
-	flow, _ := NewFlow()
+	flow := NewFlow()
 	if _, err := o.Exchange(context.Background(), "the-code", flow); err == nil {
 		t.Fatal("a token with the wrong nonce was accepted")
 	} else if !strings.Contains(err.Error(), "nonce") {
@@ -219,28 +118,28 @@ func TestExchangeRejectsAMismatchedNonce(t *testing.T) {
 
 func TestExchangeRejectsAForeignSignature(t *testing.T) {
 	// The whole point of the JWKS fetch: a token signed by anybody else fails.
-	idp := newFakeIDP(t)
+	idp := oidctest.New(t)
 	o := connect(t, idp, RoleMapping{Default: RoleMember})
 
 	other, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
 	}
-	idp.key = other // the JWK set still advertises the original public key
+	idp.Key = other // the JWK set still advertises the original public key
 
-	flow, _ := NewFlow()
-	idp.claims = func(m map[string]any) { m["nonce"] = flow.Nonce }
+	flow := NewFlow()
+	idp.Claims = func(m map[string]any) { m["nonce"] = flow.Nonce }
 	if _, err := o.Exchange(context.Background(), "the-code", flow); err == nil {
 		t.Fatal("a token signed by an unknown key was accepted")
 	}
 }
 
 func TestExchangeRejectsATokenForAnotherClient(t *testing.T) {
-	idp := newFakeIDP(t)
+	idp := oidctest.New(t)
 	o := connect(t, idp, RoleMapping{Default: RoleMember})
 
-	flow, _ := NewFlow()
-	idp.claims = func(m map[string]any) {
+	flow := NewFlow()
+	idp.Claims = func(m map[string]any) {
 		m["nonce"] = flow.Nonce
 		m["aud"] = "some-other-application"
 	}
@@ -250,11 +149,11 @@ func TestExchangeRejectsATokenForAnotherClient(t *testing.T) {
 }
 
 func TestExchangeRejectsAnExpiredToken(t *testing.T) {
-	idp := newFakeIDP(t)
+	idp := oidctest.New(t)
 	o := connect(t, idp, RoleMapping{Default: RoleMember})
 
-	flow, _ := NewFlow()
-	idp.claims = func(m map[string]any) {
+	flow := NewFlow()
+	idp.Claims = func(m map[string]any) {
 		m["nonce"] = flow.Nonce
 		m["exp"] = time.Now().Add(-time.Minute).Unix()
 	}
@@ -267,11 +166,11 @@ func TestExchangeRefusesAnIdentityWithNoEmail(t *testing.T) {
 	// Without an email there is nothing to attribute an audit entry to and no
 	// way to place the person in a tenant, so signing in is refused rather than
 	// half-completed.
-	idp := newFakeIDP(t)
+	idp := oidctest.New(t)
 	o := connect(t, idp, RoleMapping{Default: RoleMember})
 
-	flow, _ := NewFlow()
-	idp.claims = func(m map[string]any) {
+	flow := NewFlow()
+	idp.Claims = func(m map[string]any) {
 		m["nonce"] = flow.Nonce
 		delete(m, "email")
 	}
@@ -289,12 +188,12 @@ func TestExchangeRefusesAnIdentityWithNoEmail(t *testing.T) {
 // do either. Providers that federate guest, external or self-registered
 // accounts are where an unverified one comes from.
 func TestExchangeRefusesAnUnverifiedEmail(t *testing.T) {
-	idp := newFakeIDP(t)
+	idp := oidctest.New(t)
 	o := connect(t, idp, RoleMapping{OperatorEmails: []string{"ada@example.ch"}, Default: RoleMember})
 
 	for _, claim := range []any{false, "false"} {
-		flow, _ := NewFlow()
-		idp.claims = func(m map[string]any) {
+		flow := NewFlow()
+		idp.Claims = func(m map[string]any) {
 			m["nonce"] = flow.Nonce
 			m["email_verified"] = claim
 		}
@@ -312,12 +211,12 @@ func TestExchangeRefusesAnUnverifiedEmail(t *testing.T) {
 // directory that says nothing is trusted as it always was - refusing there
 // would lock out the deployments this product is sold into.
 func TestExchangeAcceptsAVerifiedOrUnstatedEmail(t *testing.T) {
-	idp := newFakeIDP(t)
+	idp := oidctest.New(t)
 	o := connect(t, idp, RoleMapping{Default: RoleMember})
 
 	for _, claim := range []any{true, "true", nil} {
-		flow, _ := NewFlow()
-		idp.claims = func(m map[string]any) {
+		flow := NewFlow()
+		idp.Claims = func(m map[string]any) {
 			m["nonce"] = flow.Nonce
 			if claim == nil {
 				delete(m, "email_verified")
@@ -339,7 +238,7 @@ func TestExchangeAcceptsAVerifiedOrUnstatedEmail(t *testing.T) {
 // address. A provider is only trusted for its own domains, so that address
 // cannot place its user in another tenant or make them an operator.
 func TestExchangeRefusesAnAddressOutsideTheProvidersDomains(t *testing.T) {
-	idp := newFakeIDP(t)
+	idp := oidctest.New(t)
 	for _, tc := range []struct {
 		domains []string
 		ok      bool
@@ -362,8 +261,8 @@ func TestExchangeRefusesAnAddressOutsideTheProvidersDomains(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewOIDC: %v", err)
 		}
-		flow, _ := NewFlow()
-		idp.claims = func(m map[string]any) { m["nonce"] = flow.Nonce }
+		flow := NewFlow()
+		idp.Claims = func(m map[string]any) { m["nonce"] = flow.Nonce }
 		_, err = o.Exchange(context.Background(), "the-code", flow)
 		if tc.ok && err != nil {
 			t.Errorf("domains %v: %v", tc.domains, err)
@@ -375,7 +274,7 @@ func TestExchangeRefusesAnAddressOutsideTheProvidersDomains(t *testing.T) {
 }
 
 func TestExchangeReadsAGroupsClaimUnderAnotherName(t *testing.T) {
-	idp := newFakeIDP(t)
+	idp := oidctest.New(t)
 	o, err := NewOIDC(context.Background(), OIDCConfig{
 		Name:      "test",
 		IssuerURL: idp.URL, ClientID: "keera", ClientSecret: "s",
@@ -386,8 +285,8 @@ func TestExchangeReadsAGroupsClaimUnderAnotherName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	flow, _ := NewFlow()
-	idp.claims = func(m map[string]any) {
+	flow := NewFlow()
+	idp.Claims = func(m map[string]any) {
 		m["nonce"] = flow.Nonce
 		m["roles"] = []string{"platform"}
 	}
@@ -401,7 +300,7 @@ func TestExchangeReadsAGroupsClaimUnderAnotherName(t *testing.T) {
 }
 
 func TestLogoutURLUsesTheProvidersEndSession(t *testing.T) {
-	idp := newFakeIDP(t)
+	idp := oidctest.New(t)
 	o := connect(t, idp, RoleMapping{Default: RoleMember})
 
 	got := o.LogoutURL("https://keera.example.ch")
@@ -438,11 +337,11 @@ func TestNewOIDCFailsLoudlyOnABadIssuer(t *testing.T) {
 // and the people it happens to are the ones in the most groups, which is to say
 // the administrators.
 func TestExchangeRefusesAGroupsClaimTheProviderReplacedWithAPointer(t *testing.T) {
-	idp := newFakeIDP(t)
+	idp := oidctest.New(t)
 	o := connect(t, idp, RoleMapping{AdminGroups: []string{"keera-admins"}, Default: RoleMember})
 
-	flow, _ := NewFlow()
-	idp.claims = func(m map[string]any) {
+	flow := NewFlow()
+	idp.Claims = func(m map[string]any) {
 		m["nonce"] = flow.Nonce
 		delete(m, "groups")
 		m["_claim_names"] = map[string]any{"groups": "src1"}
@@ -463,11 +362,11 @@ func TestExchangeRefusesAGroupsClaimTheProviderReplacedWithAPointer(t *testing.T
 // grants roles by address has nothing to lose by the claim being absent, and
 // refusing the sign-in would be a failure invented out of nothing.
 func TestExchangeAllowsAnOverageWhenNoRoleDependsOnGroups(t *testing.T) {
-	idp := newFakeIDP(t)
+	idp := oidctest.New(t)
 	o := connect(t, idp, RoleMapping{OperatorEmails: []string{"ada@example.ch"}, Default: RoleMember})
 
-	flow, _ := NewFlow()
-	idp.claims = func(m map[string]any) {
+	flow := NewFlow()
+	idp.Claims = func(m map[string]any) {
 		m["nonce"] = flow.Nonce
 		delete(m, "groups")
 		m["_claim_names"] = map[string]any{"groups": "src1"}
@@ -488,11 +387,11 @@ func TestExchangeAllowsAnOverageWhenNoRoleDependsOnGroups(t *testing.T) {
 // ever unique inside the directory that issued it, and two directories writing
 // to one key is how somebody signs in as somebody else.
 func TestExchangeStampsTheProviderOnTheIdentity(t *testing.T) {
-	idp := newFakeIDP(t)
+	idp := oidctest.New(t)
 	o := connect(t, idp, RoleMapping{Default: RoleMember})
 
-	flow, _ := NewFlow()
-	idp.claims = func(m map[string]any) { m["nonce"] = flow.Nonce }
+	flow := NewFlow()
+	idp.Claims = func(m map[string]any) { m["nonce"] = flow.Nonce }
 	id, err := o.Exchange(context.Background(), "the-code", flow)
 	if err != nil {
 		t.Fatal(err)
@@ -506,7 +405,7 @@ func TestExchangeStampsTheProviderOnTheIdentity(t *testing.T) {
 }
 
 func TestProvidersResolveByName(t *testing.T) {
-	idp := newFakeIDP(t)
+	idp := oidctest.New(t)
 	base := func(name string) OIDCConfig {
 		return OIDCConfig{
 			Name: name, IssuerURL: idp.URL, ClientID: "keera", ClientSecret: "s",
@@ -566,7 +465,7 @@ func TestProvidersResolveByName(t *testing.T) {
 // decides roles and Google cannot would otherwise have to explain, per person,
 // which of the two a reader is looking at.
 func TestAdminFromDirectoryIsTrueIfAnyProviderMapsAdminGroups(t *testing.T) {
-	idp := newFakeIDP(t)
+	idp := oidctest.New(t)
 	base := func(name string, m RoleMapping) OIDCConfig {
 		return OIDCConfig{
 			Name: name, IssuerURL: idp.URL, ClientID: "keera", ClientSecret: "s",
@@ -606,5 +505,115 @@ func TestAdminFromDirectoryIsTrueIfAnyProviderMapsAdminGroups(t *testing.T) {
 				t.Errorf("AdminFromDirectory = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestExchangeKeepsTheRefreshToken(t *testing.T) {
+	idp := oidctest.New(t)
+	o := connect(t, idp, RoleMapping{Default: RoleMember})
+	flow := NewFlow()
+	idp.Claims = func(m map[string]any) { m["nonce"] = flow.Nonce }
+	idp.RefreshToken = "rt-1"
+
+	id, err := o.Exchange(context.Background(), "the-code", flow)
+	if err != nil {
+		t.Fatalf("Exchange: %v", err)
+	}
+	if id.RefreshToken != "rt-1" {
+		t.Errorf("refresh token = %q, want the provider's", id.RefreshToken)
+	}
+}
+
+func TestTheDefaultScopesAskForARefreshToken(t *testing.T) {
+	o := connect(t, oidctest.New(t), RoleMapping{Default: RoleMember})
+	flow := NewFlow()
+	u, err := url.Parse(o.AuthCodeURL(flow))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(strings.Fields(u.Query().Get("scope")), "offline_access") {
+		t.Errorf("scope = %q, want offline_access", u.Query().Get("scope"))
+	}
+}
+
+func TestGoogleIsRecognisedByItsIssuer(t *testing.T) {
+	for issuer, want := range map[string]bool{
+		"https://accounts.google.com":                         true,
+		"https://accounts.google.com/":                        true,
+		"https://login.microsoftonline.com/tenant/v2.0":       false,
+		"https://accounts.google.com.attacker.example/issuer": false,
+	} {
+		if got := isGoogle(issuer); got != want {
+			t.Errorf("isGoogle(%q) = %v, want %v", issuer, got, want)
+		}
+	}
+}
+
+func TestRecheckReadsTheDirectoryAgain(t *testing.T) {
+	idp := oidctest.New(t)
+	o := connect(t, idp, RoleMapping{AdminGroups: []string{"keera-admins"}, Default: RoleMember})
+	idp.RefreshToken = "rt-2"
+	idp.Claims = func(m map[string]any) { m["groups"] = []string{"engineering"} }
+
+	id, fresh, err := o.Recheck(context.Background(), "rt-1")
+	if err != nil {
+		t.Fatalf("Recheck: %v", err)
+	}
+	if !fresh || id.ExternalID() != "test:sub-123" {
+		t.Errorf("identity = %+v, fresh = %v", id, fresh)
+	}
+	if got := o.Mapping().RoleFor(id.Email, id.Groups); got != RoleMember {
+		t.Errorf("role = %q, want member now that the admin group is gone", got)
+	}
+	if id.RefreshToken != "rt-2" {
+		t.Errorf("refresh token = %q, want the rotated one", id.RefreshToken)
+	}
+	if got := idp.LastForm().Get("refresh_token"); got != "rt-1" {
+		t.Errorf("refresh token posted = %q, want the stored one", got)
+	}
+}
+
+func TestRecheckWithoutAnIDTokenOnlyConfirmsTheAccount(t *testing.T) {
+	idp := oidctest.New(t)
+	o := connect(t, idp, RoleMapping{Default: RoleMember})
+	idp.NoIDTokenOnRefresh = true
+
+	id, fresh, err := o.Recheck(context.Background(), "rt-1")
+	if err != nil {
+		t.Fatalf("Recheck: %v", err)
+	}
+	if fresh {
+		t.Error("fresh = true without an id_token")
+	}
+	// The provider sent no new refresh token, so the old one is kept.
+	if id.RefreshToken != "rt-1" {
+		t.Errorf("refresh token = %q, want the old one", id.RefreshToken)
+	}
+}
+
+func TestRecheckTellsARefusalFromAnOutage(t *testing.T) {
+	idp := oidctest.New(t)
+	o := connect(t, idp, RoleMapping{Default: RoleMember})
+
+	idp.RefuseRefresh = "invalid_grant"
+	if _, _, err := o.Recheck(context.Background(), "rt-1"); !errors.Is(err, ErrDirectoryRefused) {
+		t.Errorf("revoked token: err = %v, want ErrDirectoryRefused", err)
+	}
+
+	idp.RefuseRefresh = ""
+	idp.FailRefresh = true
+	_, _, err := o.Recheck(context.Background(), "rt-1")
+	if err == nil || errors.Is(err, ErrDirectoryRefused) {
+		t.Errorf("provider down: err = %v, want an error that is not a refusal", err)
+	}
+}
+
+func TestRecheckRefusesClaimsASignInWouldRefuse(t *testing.T) {
+	idp := oidctest.New(t)
+	o := connect(t, idp, RoleMapping{Default: RoleMember})
+	idp.Claims = func(m map[string]any) { m["email_verified"] = false }
+
+	if _, _, err := o.Recheck(context.Background(), "rt-1"); !errors.Is(err, ErrDirectoryRefused) {
+		t.Errorf("err = %v, want ErrDirectoryRefused", err)
 	}
 }

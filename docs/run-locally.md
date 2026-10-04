@@ -36,7 +36,8 @@ are always overridden, whatever `.env` says:
 | `KEERA_LOG_FORMAT`   | `text`                                        |
 
 `KEERA_SANDBOXES_FILE` and `KEERA_SANDBOX_PUBLIC_URL` are only defaults: a
-value in `.env` wins.
+value in `.env` wins. The addresses `make dev` prints assume the default
+`KEERA_ADDR` of `:8080`.
 
 Install air once if you do not have it:
 

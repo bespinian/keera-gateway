@@ -214,32 +214,22 @@ func (s *Store) TeamOrg(ctx context.Context, teamID string) (string, error) {
 	return orgID, nil
 }
 
-// KeyOwner returns which organisation a key belongs to and which user it is
-// for, empty for a key issued for nobody in particular.
-//
-// Members may revoke only their own keys, so both are read in one row: a
-// second query could see a key that was reassigned in between.
-func (s *Store) KeyOwner(ctx context.Context, keyID string) (string, string, error) {
-	var orgID, userID string
-	err := s.pool.QueryRow(ctx,
-		"SELECT org_id, COALESCE(user_id,'') FROM api_keys WHERE id = $1", keyID,
-	).Scan(&orgID, &userID)
-	if err != nil {
-		return "", "", notFound(err)
-	}
-	return orgID, userID, nil
+// KeyOwner is where a key sits: its organisation, and its team and the person
+// it is for, each empty for none.
+type KeyOwner struct {
+	OrgID, TeamID, UserID string
 }
 
-// KeyScope is where a key sits in the hierarchy: its organisation and its
-// team (empty for none).
-func (s *Store) KeyScope(ctx context.Context, keyID string) (orgID, teamID string, err error) {
-	err = s.pool.QueryRow(ctx,
-		"SELECT org_id, COALESCE(team_id,'') FROM api_keys WHERE id = $1", keyID,
-	).Scan(&orgID, &teamID)
-	if err != nil {
-		return "", "", notFound(err)
-	}
-	return orgID, teamID, nil
+// KeyOwnerOf reads where a key sits. Members may revoke only their own keys,
+// so all of it is read in one row: a second query could see a key that was
+// reassigned in between.
+func (s *Store) KeyOwnerOf(ctx context.Context, keyID string) (KeyOwner, error) {
+	var o KeyOwner
+	err := s.pool.QueryRow(ctx,
+		"SELECT org_id, COALESCE(team_id,''), COALESCE(user_id,'') FROM api_keys WHERE id = $1",
+		keyID,
+	).Scan(&o.OrgID, &o.TeamID, &o.UserID)
+	return o, notFound(err)
 }
 
 // ScopeName is what one org, team or key is called, for a report that names
@@ -261,14 +251,6 @@ func (s *Store) ScopeName(ctx context.Context, scope policy.ScopeType, id string
 		return "", notFound(err)
 	}
 	return name, nil
-}
-
-// OrgExists reports whether an organisation id names anything.
-func (s *Store) OrgExists(ctx context.Context, orgID string) (bool, error) {
-	var exists bool
-	err := s.pool.QueryRow(ctx,
-		"SELECT EXISTS (SELECT 1 FROM orgs WHERE id = $1)", orgID).Scan(&exists)
-	return exists, err
 }
 
 // TeamNames maps team ids to names, for a report grouped by team.

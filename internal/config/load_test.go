@@ -335,6 +335,26 @@ func TestAForgeNeedsItsCredential(t *testing.T) {
 	}
 }
 
+func TestLogSettingsAreReadWhateverTheirCaseAndUnknownOnesRefused(t *testing.T) {
+	c, err := loadWith(t, valid(map[string]string{
+		"KEERA_LOG_LEVEL": "DEBUG", "KEERA_LOG_FORMAT": "JSON",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.LogLevel != "debug" || c.LogFormat != "json" {
+		t.Errorf("level, format = %q, %q; want debug, json", c.LogLevel, c.LogFormat)
+	}
+	for name, value := range map[string]string{
+		"KEERA_LOG_LEVEL": "verbose", "KEERA_LOG_FORMAT": "logfmt",
+	} {
+		_, err := loadWith(t, valid(map[string]string{name: value}))
+		if err == nil || !strings.Contains(err.Error(), name) {
+			t.Errorf("%s=%s: error = %v, want a refusal that names it", name, value, err)
+		}
+	}
+}
+
 func TestAnUnknownSandboxDriverIsRefused(t *testing.T) {
 	// The alternative is a gateway that starts, advertises sandboxes and fails
 	// every request to create one.

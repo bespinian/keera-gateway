@@ -150,7 +150,7 @@ What the refusal carries:
   prompt, so it is quoted as the filter's, not the gateway's. It is capped at
   240 bytes and collapsed to one line.
 - **The status is `403`**, not the `502` of a broken filter. **My access** shows
-  it as "Not permitted".
+  it as "Refused by a filter".
 - **The filter's generation is charged**, as on every outcome.
 
 `keera filter check` shows a refusal as a refusal, not a failure. Its first two
@@ -278,14 +278,14 @@ to `rewrite` and `gate` only.
 A filter that cannot run refuses the request. There is no setting to change
 this.
 
-| Situation                                                           | Status |
-| ------------------------------------------------------------------- | ------ |
-| the guardrail names a filter that no longer exists                  | 503    |
-| its model is missing, disabled, not a chat model, or has no backend | 503    |
-| its model was reached but the answer was unusable, or it errored    | 502    |
-| a gate answered neither `ALLOW` nor `REFUSED`, in word or in token  | 502    |
-| the conversation will not fit through its model's context           | 413    |
-| a pattern filter's rules will not compile                           | 502    |
+| Situation                                                                                 | Status |
+| ----------------------------------------------------------------------------------------- | ------ |
+| the guardrail names a filter that no longer exists                                        | 503    |
+| its model is missing, disabled, not a chat model, a subscription model, or has no backend | 503    |
+| its model was reached but the answer was unusable, or it errored                          | 502    |
+| a gate answered neither `ALLOW` nor `REFUSED`, in word or in token                        | 502    |
+| the conversation will not fit through its model's context                                 | 413    |
+| a pattern filter's rules will not compile                                                 | 502    |
 
 A pattern filter has no model, no answer and no context, so the middle rows do
 not apply to it.

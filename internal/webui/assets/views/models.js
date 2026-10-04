@@ -23,6 +23,7 @@ import {
   rowLink,
   providerMark,
   showError,
+  aliasProblem,
   locationName,
   releaseDay,
   readRow,
@@ -33,6 +34,7 @@ import {
   rangePicker,
   isAdmin,
   plural,
+  field,
 } from "../ui.js";
 
 // usersOfModel names the filters and routers that use a model, for the
@@ -274,21 +276,21 @@ export async function modelsView(ctx) {
                 class: "btn btn-sm btn-danger",
                 onClick: async () =>
                   confirm({
-                    title: `Remove ${m.alias}?`,
+                    title: `Delete ${m.alias}?`,
                     body:
                       "Clients that still use this model will get 404s. " +
                       "Disable it instead to keep its reports." +
                       (await usersOfModel(m)),
-                    confirmLabel: "Remove model",
+                    confirmLabel: "Delete model",
                     danger: true,
                     onConfirm: async () => {
                       await api.deleteModel(m.alias, m.org_id);
-                      toast("Model removed", "good");
+                      toast("Model deleted", "good");
                       ctx.reload();
                     },
                   }),
               },
-              "Remove",
+              "Delete",
             ),
           );
         },
@@ -340,7 +342,7 @@ export async function providerModelsView(ctx) {
       // The aliases that already serve this model, so it is not added twice
       // by accident.
       aliases: models
-        .filter((x) => x.provider === p.name && x.backend_model === m.id)
+        .filter((x) => x.provider === p.name && isModel(m, x.backend_model))
         .map((x) => x.alias),
     })),
   );
@@ -887,6 +889,8 @@ const PRESET_FIELDS = [
     label: "model id",
     fromModel: true,
     of: (p, m) => (m ? m.id : null),
+    // A dated id is the same model, so it overrides nothing.
+    same: (now, m) => isModel(m, now),
   },
   {
     key: "description",
@@ -1110,7 +1114,7 @@ function editModel(ctx, existing, providers, pick) {
     h(
       "div",
       { class: "field-row" },
-      h("div", { class: "field" }, h("label", {}, "Kind"), kind),
+      field("Kind", kind),
       h(
         "div",
         { class: "field" },
@@ -1277,17 +1281,11 @@ function editModel(ctx, existing, providers, pick) {
   const rest = h(
     "div",
     {},
-    h(
-      "div",
-      { class: "field" },
-      h("label", {}, "Alias"),
+    field(
+      "Alias",
       alias,
-      h(
-        "div",
-        { class: "hint" },
-        "The name clients use. Changing it breaks them." +
-          ` Only ${orgNameOf(ctx)} can use this model.`,
-      ),
+      "The name clients use. Changing it breaks them." +
+        ` Only ${orgNameOf(ctx)} can use this model.`,
     ),
     // Under the alias, and outside the machinery below, for two reasons. It
     // is the one field on this form addressed to a reader rather than to the
@@ -1371,6 +1369,12 @@ function editModel(ctx, existing, providers, pick) {
                   "Advanced options."
               : "Enter an alias, a backend model and at least one backend.",
           );
+          return;
+        }
+        const problem = aliasProblem(alias.value.trim());
+        if (problem) {
+          showError(err, problem);
+          alias.focus();
           return;
         }
         e.target.disabled = true;
@@ -1515,8 +1519,14 @@ function presetOf(providers, m) {
   if (!p) return null;
   return {
     p,
-    m: (p.models || []).find((mm) => mm.id === m.backend_model) || null,
+    m: (p.models || []).find((mm) => isModel(mm, m.backend_model)) || null,
   };
+}
+
+// isModel reports whether id names a model of the table: by its id, or by the
+// dated id its maker also names it by.
+function isModel(mm, id) {
+  return mm.id === id || (!!mm.snapshot && mm.snapshot === id);
 }
 
 // providerAnswers says which of the fields below the chosen provider answers
@@ -1647,12 +1657,7 @@ function hostedFields(ctx, providers, form) {
   );
   // What follows a hosted provider: which of its models this alias serves, and
   // what is worth knowing about the endpoint before that is answered.
-  const block = h(
-    "div",
-    { hidden: true },
-    h("div", { class: "field" }, h("label", {}, "Model"), model),
-    note,
-  );
+  const block = h("div", { hidden: true }, field("Model", model), note);
   // Its own place in the form, far from the block above, so hiding that block
   // is not what hides it - see choose().
   if (productSlot) productSlot.replaceChildren(productIDField);
@@ -1939,7 +1944,7 @@ function hostedFields(ctx, providers, form) {
     productID.value = state.productID;
     for (const f of PRESET_FIELDS) {
       const def = f.of(initial.p, initial.m, state);
-      if (def !== null && !sameValue(f, fields[f.key].value, def)) {
+      if (def !== null && !sameValue(f, fields[f.key].value, def, initial.m)) {
         state.overridden.add(f.key);
       }
     }
@@ -2017,7 +2022,7 @@ function paintPresets(preset, fields, marks, state) {
       continue;
     }
     line.replaceChildren(
-      sameValue(f, fields[f.key].value, def)
+      sameValue(f, fields[f.key].value, def, preset.m)
         ? `${preset.p.name}'s ${f.label}.`
         : f.prose
           ? `Replaces ${preset.p.name}'s own ${f.label}.`
@@ -2028,8 +2033,9 @@ function paintPresets(preset, fields, marks, state) {
 
 // sameValue reports whether a field still holds what the provider's table put
 // there. Numbers are compared as numbers, because 5 and 5.0 are one price.
-function sameValue(f, now, def) {
+function sameValue(f, now, def, m) {
   now = String(now).trim();
+  if (f.same) return f.same(now, m);
   return f.numeric ? Number(now) === Number(def) : now === def;
 }
 

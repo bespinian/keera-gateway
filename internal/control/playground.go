@@ -26,7 +26,7 @@ func (s *Server) playgroundChat(w http.ResponseWriter, r *http.Request, p *authn
 	}
 	// The operator key is not a person, so no key is linked to it.
 	if p.UserID == "" {
-		s.forbid(w, "the operator key has no API keys of its own; sign in to the panel to use the playground")
+		forbid(w, "the operator key has no API keys of its own; sign in to the panel to use the playground")
 		return
 	}
 	res, err := s.st.LookupKeyByID(r.Context(), keyID)
@@ -37,16 +37,16 @@ func (s *Server) playgroundChat(w http.ResponseWriter, r *http.Request, p *authn
 		s.fail(w, store.ErrNotFound)
 		return
 	case errors.Is(err, policy.ErrKeyRevoked):
-		s.forbid(w, "this API key has been revoked; choose another one")
+		forbid(w, "this API key has been revoked; choose another one")
 		return
 	case errors.Is(err, policy.ErrKeyExpired):
-		s.forbid(w, "this API key has expired; choose another one")
+		forbid(w, "this API key has expired; choose another one")
 		return
 	case err != nil:
 		s.fail(w, err)
 		return
 	case res.Key.Subscription():
-		s.forbid(w, "this is a subscription key, which only Claude Code signed in to a Claude "+
+		forbid(w, "this is a subscription key, which only Claude Code signed in to a Claude "+
 			"plan can use; choose another one")
 		return
 	}

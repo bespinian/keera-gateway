@@ -546,9 +546,13 @@ func stopReason(finish string) string {
 // toolUseID keeps the upstream's identifier when it has one. Any string works,
 // since the client only sends it back, but an empty one would leave the tool
 // result with nothing to attach to.
-func toolUseID(s string) string {
+func toolUseID(s string) string { return upstreamID(s, "toolu") }
+
+// upstreamID keeps a tool call's upstream identifier, or makes one with
+// prefix when the upstream sent none.
+func upstreamID(s, prefix string) string {
 	if s == "" {
-		return id.New("toolu")
+		return id.New(prefix)
 	}
 	return s
 }

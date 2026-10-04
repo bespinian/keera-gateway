@@ -39,6 +39,8 @@ import {
   isAdmin,
   checkButton,
   plural,
+  pct,
+  field,
 } from "../ui.js";
 import { areaChart, barList } from "../chart.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
@@ -184,21 +186,21 @@ export async function filtersView(ctx) {
                 class: "btn btn-sm btn-danger",
                 onClick: () =>
                   confirm({
-                    title: `Remove ${f.alias}?`,
+                    title: `Delete ${f.alias}?`,
                     body:
-                      "A filter still used by a guardrail cannot be removed. " +
+                      "A filter still used by a guardrail cannot be deleted. " +
                       "Take it off those guardrails first; the error lists " +
                       "them.",
-                    confirmLabel: "Remove filter",
+                    confirmLabel: "Delete filter",
                     danger: true,
                     onConfirm: async () => {
                       await api.deleteFilter(ctx.orgID, f.alias);
-                      toast("Filter removed", "good");
+                      toast("Filter deleted", "good");
                       ctx.reload();
                     },
                   }),
               },
-              "Remove",
+              "Delete",
             ),
           );
         },
@@ -555,7 +557,7 @@ export async function filterDetailView(ctx) {
         h(
           "div",
           { class: "wrap-chips" },
-          f ? modePills(f) : [pill(`Removed from ${orgNameOf(ctx)}`, "warn")],
+          f ? modePills(f) : [pill(`Deleted from ${orgNameOf(ctx)}`, "warn")],
           f && f.model ? pill("runs on " + f.model) : null,
         ),
         h("div", { style: { flex: 1 } }),
@@ -854,7 +856,7 @@ function detailBanners(rep, f) {
         "div",
         { class: "banner banner-warn", style },
         "This filter no longer exists. Below is the traffic it saw before " +
-          "it was removed.",
+          "it was deleted.",
       ),
     );
   } else if (f.shadow) {
@@ -992,12 +994,6 @@ function teamTable(ctx, teams, names, currency) {
 // pct is one count against another, which is how these numbers are compared -
 // this team against that one, this week against last. "4.1%" compares at a
 // glance where "173 of 4,219" does not.
-function pct(part, whole) {
-  if (!whole) return "-";
-  const frac = (part || 0) / whole;
-  return `${(frac * 100).toFixed(frac > 0 && frac < 0.001 ? 3 : 1)}%`;
-}
-
 // identity is the subtitle under a filter's alias: what it does and what it does
 // it on, with the one thing that outranks both when it applies.
 function identity(f) {
@@ -1074,8 +1070,7 @@ function editFilter(ctx, existing, chatModels) {
       h(
         "option",
         { value: m.alias, selected: m.alias === f.model },
-        m.alias +
-          (m.max_context ? ` - ${m.max_context.toLocaleString()} context` : ""),
+        m.alias + (m.max_context ? ` - ${compact(m.max_context)} context` : ""),
       ),
     ),
   );
@@ -1278,20 +1273,14 @@ function editFilter(ctx, existing, chatModels) {
     h(
       "div",
       { class: "field-row" },
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "Alias"),
+      field(
+        "Alias",
         alias,
-        h(
-          "div",
-          { class: "hint" },
-          creating
-            ? "Lowercase letters, digits and hyphens."
-            : "Guardrails use this name, so it cannot change.",
-        ),
+        creating
+          ? "Lowercase letters, digits and hyphens."
+          : "Guardrails use this name, so it cannot change.",
       ),
-      h("div", { class: "field" }, h("label", {}, "Description"), description),
+      field("Description", description),
     ),
     modelField,
     h(

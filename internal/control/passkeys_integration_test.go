@@ -326,7 +326,7 @@ func TestAnAdministratorKeepsToTheirDomain(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := e.browser()
-	token, hash, csrf, _ := authn.NewSession()
+	token, hash, csrf := authn.NewSession()
 	if err := e.st.CreateSession(e.ctx, hash, admin.ID, csrf, time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
@@ -404,7 +404,7 @@ func TestTheCommandLineSignsInWithAPasskey(t *testing.T) {
 		t.Fatalf("set-up: %d %v", status, out)
 	}
 
-	verifier, _ := authn.NewCLIVerifier()
+	verifier := authn.NewCLIVerifier()
 	q := url.Values{
 		"provider":      {"passkey"},
 		"cli_redirect":  {"http://127.0.0.1:4242/callback"},
@@ -478,7 +478,7 @@ func TestAddingAPasskeyNeedsARecentBrowserSignIn(t *testing.T) {
 		t.Errorf("an hour-old session gave %d %v, want 403 sign_in_again", status, out)
 	}
 
-	cli, hash, _ := authn.NewCLIToken()
+	cli, hash := authn.NewCLIToken()
 	if err := e.st.CreateCLIToken(e.ctx, hash, userID, time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}

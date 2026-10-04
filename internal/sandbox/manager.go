@@ -132,12 +132,22 @@ func (m *Manager) Driver() Driver { return m.driver }
 // ErrRefused is a request this deployment will not carry out, with the reason.
 // There is one type because every refusal ends up as a sentence in a
 // developer's terminal.
-type ErrRefused struct{ Reason string }
+type ErrRefused struct {
+	Reason string
+	// Invalid marks a request that can never succeed as sent, such as a bad
+	// name. Otherwise the refusal depends on state, which can change.
+	Invalid bool
+}
 
 func (e *ErrRefused) Error() string { return e.Reason }
 
 func refuse(format string, args ...any) error {
 	return &ErrRefused{Reason: fmt.Sprintf(format, args...)}
+}
+
+// invalid is refuse for a request that is wrong in itself.
+func invalid(format string, args ...any) error {
+	return &ErrRefused{Reason: fmt.Sprintf(format, args...), Invalid: true}
 }
 
 // CreateRequest is one authenticated request for a sandbox.
@@ -285,11 +295,11 @@ func backingFor(class policy.SandboxClass, p policy.Purpose, warm bool) Backing 
 // deliver it, is there room. It returns the class.
 func (m *Manager) admit(ctx context.Context, req CreateRequest) (policy.SandboxClass, error) {
 	if !req.Purpose.Valid() {
-		return policy.SandboxClass{}, refuse("%q is not a purpose; a sandbox is for an 'engineer' "+
+		return policy.SandboxClass{}, invalid("%q is not a purpose; a sandbox is for an 'engineer' "+
 			"or for an 'agent'", req.Purpose)
 	}
 	if !policy.ValidSandboxName(req.Name) {
-		return policy.SandboxClass{}, refuse("%q is not a usable sandbox name; it becomes a hostname "+
+		return policy.SandboxClass{}, invalid("%q is not a usable sandbox name; it becomes a hostname "+
 			"in the cluster and half of an ssh config entry on your laptop, so it is lowercase "+
 			"letters, digits and interior hyphens", req.Name)
 	}
@@ -298,17 +308,17 @@ func (m *Manager) admit(ctx context.Context, req CreateRequest) (policy.SandboxC
 	// one, decides where the sandbox's key is sent.
 	for name := range req.Env {
 		if strings.HasPrefix(name, "KEERA_") {
-			return policy.SandboxClass{}, refuse("%s is set by the gateway; a sandbox's own "+
+			return policy.SandboxClass{}, invalid("%s is set by the gateway; a sandbox's own "+
 				"environment cannot name a KEERA_ variable", name)
 		}
 	}
 	if req.Purpose == policy.PurposeAgent {
 		if strings.TrimSpace(req.Task) == "" {
-			return policy.SandboxClass{}, refuse("an agent sandbox needs a task: it is the " +
+			return policy.SandboxClass{}, invalid("an agent sandbox needs a task: it is the " +
 				"instruction the agent starts on")
 		}
 		if req.Repo == "" {
-			return policy.SandboxClass{}, refuse("an agent sandbox needs a repository: the " +
+			return policy.SandboxClass{}, invalid("an agent sandbox needs a repository: the " +
 				"agent's work comes out of it only as a branch pushed there")
 		}
 	}
@@ -336,7 +346,7 @@ func (m *Manager) admit(ctx context.Context, req CreateRequest) (policy.SandboxC
 			class.Name, class.Isolation, m.driver.Name(), strings.ToUpper(string(class.Isolation)))
 	}
 	if req.Purpose == policy.PurposeEngineer && len(req.AuthorizedKeys) == 0 {
-		return policy.SandboxClass{}, refuse("no ssh public key was given, so nothing could open a " +
+		return policy.SandboxClass{}, invalid("no ssh public key was given, so nothing could open a " +
 			"shell in this sandbox. `keera sandbox create` sends yours from ~/.ssh; if you have " +
 			"none, `ssh-keygen -t ed25519` makes one")
 	}
@@ -412,10 +422,7 @@ func (m *Manager) checkQuota(ctx context.Context, req CreateRequest) error {
 func (m *Manager) mintKey(ctx context.Context, req CreateRequest, expires time.Time) (
 	secret, keyID string, err error,
 ) {
-	secret, hash, prefix, err := auth.Generate()
-	if err != nil {
-		return "", "", err
-	}
+	secret, hash, prefix := auth.Generate()
 	info := store.KeyInfo{
 		ID: id.New("key"), OrgID: req.OrgID, TeamID: req.TeamID, UserID: req.UserID,
 		// Named after the sandbox, so a request in the log leads back to it.
@@ -460,7 +467,7 @@ func (m *Manager) environment(ctx context.Context, req CreateRequest, row store.
 	// header Claude Code reads itself, and in Pi's configuration below.
 	if row.Purpose == policy.PurposeAgent {
 		env["KEERA_SESSION"] = row.ID
-		env["ANTHROPIC_CUSTOM_HEADERS"] = "X-Keera-Session: " + row.ID
+		env["ANTHROPIC_CUSTOM_HEADERS"] = httpx.SessionHeader + ": " + row.ID
 	}
 
 	m.inferenceEnv(env)
@@ -1303,7 +1310,7 @@ func (m *Manager) piConfig(base string, models []policy.Model, session string) s
 	}
 	var headers map[string]string
 	if session != "" {
-		headers = map[string]string{"X-Keera-Session": session}
+		headers = map[string]string{httpx.SessionHeader: session}
 	}
 	raw, err := json.MarshalIndent(piFile{Providers: map[string]piProviderConfig{
 		piProvider: {

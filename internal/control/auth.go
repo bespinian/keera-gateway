@@ -64,11 +64,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		s.signInFailed(w, r, err)
 		return
 	}
-	flow, err := authn.NewFlow()
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
+	flow := authn.NewFlow()
 	if err := s.st.CreateLoginFlow(r.Context(), store.LoginFlow{
 		State:    flow.State,
 		Verifier: flow.Verifier,
@@ -151,6 +147,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	s.rememberDirectory(r, user, identity.RefreshToken)
 	if err := s.startSession(w, r, user); err != nil {
 		s.fail(w, err)
 		return
@@ -261,7 +258,7 @@ func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if !s.matchesOperatorKey(strings.TrimSpace(in.Key)) {
 		// The same message whatever was wrong with it.
-		httpx.WriteError(w, http.StatusUnauthorized, "invalid_request_error", "invalid_api_key",
+		unauthorized(w, "invalid_api_key",
 			"that operator key is not valid")
 		return
 	}
@@ -350,10 +347,7 @@ func roleAtSignIn(stored string, fromIDP authn.Role, adminFromDirectory bool) (a
 
 // startSession creates a session and sets its cookie.
 func (s *Server) startSession(w http.ResponseWriter, r *http.Request, user store.User) error {
-	token, hash, csrf, err := authn.NewSession()
-	if err != nil {
-		return err
-	}
+	token, hash, csrf := authn.NewSession()
 	expires := time.Now().Add(authn.SessionTTL)
 	if err := s.st.CreateSession(r.Context(), hash, user.ID, csrf, expires); err != nil {
 		return err
@@ -381,12 +375,16 @@ func (s *Server) sessionPrincipal(r *http.Request) (*authn.Principal, error) {
 	if err != nil {
 		return nil, authn.ErrUnauthenticated
 	}
+	user, ok := s.checkDirectory(r, su.User, su.Directory)
+	if !ok {
+		return nil, authn.ErrUnauthenticated
+	}
 	return &authn.Principal{
 		Via:            authn.MethodSession,
-		UserID:         su.User.ID,
-		Email:          su.User.Email,
-		Role:           authn.Role(su.User.Role),
-		OrgID:          su.User.OrgID,
+		UserID:         user.ID,
+		Email:          user.Email,
+		Role:           authn.Role(user.Role),
+		OrgID:          user.OrgID,
 		CSRF:           su.Session.CSRF,
 		CredentialHash: hash,
 		SignedInAt:     su.Session.CreatedAt,

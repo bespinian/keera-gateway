@@ -163,7 +163,7 @@ it started.
 **Sessions**, under Administration, next to Requests. Administrators only, like
 the request log, because the rows name other people's keys.
 
-The screen starts with per-task figures for the window. Each is a median, with
+The screen starts with per-session figures for the window. Each is a median, with
 the maximum below it. Then come the rankings by **Cost**, **Requests** and
 **Time**, which are the point of the screen. The row worth reading is rarely the
 latest one.
@@ -182,7 +182,7 @@ not finish.
 ```sh
 keera session list                        # ranked by cost, the last seven days
 keera session list --sort requests        # the tasks that would not stop
-keera session list --unhappy              # only the ones that hit trouble
+keera session list --unhappy              # only the ones with problems
 keera session list --model keera-frontier # the tasks that reached the hosted model
 keera session list --team <team> --since 720h
 keera session list --user ada@example.ch  # one person, by email or id
@@ -203,7 +203,7 @@ GET /control/v1/sessions/{id}  where {id} is any request in the session
 
 `key` is a session key, as the list returns it: it narrows the list to one
 conversation. Both return `gap_seconds`, the threshold used for the grouping. `format=csv` on
-the list exports the whole filtered window, one row per task.
+the list exports up to 5000 sessions of the filtered window, one row per session.
 
 Paging with `before` works only with the default order. Under a ranking the
 cursor would skip rows without warning.

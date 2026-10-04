@@ -70,38 +70,12 @@ type responsesStream struct {
 	name     string
 	text     strings.Builder
 
-	finishReason string
-	usage        *tokenUsage
-	deltas       int
+	chatChunks
 }
 
 // chunk folds one upstream chunk into the stream.
 func (s *responsesStream) chunk(payload []byte) error {
-	var c oaiStreamChunk
-	if json.Unmarshal(payload, &c) != nil {
-		return nil // skipped: the rest of the answer is still worth delivering
-	}
-	if c.Usage != nil {
-		s.usage = c.Usage
-	}
-	if len(c.Choices) == 0 {
-		return nil
-	}
-	choice := c.Choices[0]
-	if choice.FinishReason != "" {
-		s.finishReason = choice.FinishReason
-	}
-	if text := choice.Delta.Content; text != "" {
-		if err := s.textDelta(text); err != nil {
-			return err
-		}
-	}
-	for _, tc := range choice.Delta.ToolCalls {
-		if err := s.toolDelta(tc); err != nil {
-			return err
-		}
-	}
-	return nil
+	return s.fold(payload, s.textDelta, s.toolDelta)
 }
 
 func (s *responsesStream) textDelta(text string) error {
@@ -124,13 +98,9 @@ func (s *responsesStream) textDelta(text string) error {
 	})
 }
 
-func (s *responsesStream) toolDelta(tc oaiToolCallDelta) error {
+func (s *responsesStream) toolDelta(index int, tc oaiToolCallDelta) error {
 	if err := s.start(); err != nil {
 		return err
-	}
-	index := 0
-	if tc.Index != nil {
-		index = *tc.Index
 	}
 	if s.open < 0 || !s.isTool || s.openTool != index {
 		if err := s.closeItem(); err != nil {

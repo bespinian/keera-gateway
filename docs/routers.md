@@ -138,7 +138,8 @@ place to send the request.
 
 A router cannot decide when:
 
-- its model is missing, disabled, not a chat model, or has no backend
+- its model is missing, disabled, not a chat model, a subscription model, or
+  has no backend
 - none of its destinations can be served
 - its model errored, timed out, or answered nothing
 - its answer names none of its destinations

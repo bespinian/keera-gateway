@@ -26,8 +26,9 @@ func (s *Store) CreateSession(ctx context.Context, hash []byte, userID, csrf str
 // SessionUser is a session joined to the person it belongs to. It is one query
 // because it runs on every request the browser makes.
 type SessionUser struct {
-	Session Session
-	User    User
+	Session   Session
+	User      User
+	Directory Directory
 }
 
 // LookupSession resolves a session cookie. An expired session, or one of a
@@ -35,12 +36,13 @@ type SessionUser struct {
 func (s *Store) LookupSession(ctx context.Context, hash []byte) (SessionUser, error) {
 	var su SessionUser
 	err := s.pool.QueryRow(ctx, `SELECT s.user_id, s.csrf, s.created_at, s.expires_at,
-		u.id, u.org_id, u.email, COALESCE(u.external_id,''), u.role, u.created_at
+		u.id, u.org_id, u.email, COALESCE(u.external_id,''), u.role, u.created_at,
+		`+directoryColumns+`
 		FROM sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.id = $1 AND s.expires_at > now() AND u.disabled_at IS NULL`, hash,
 	).Scan(&su.Session.UserID, &su.Session.CSRF, &su.Session.CreatedAt, &su.Session.ExpiresAt,
 		&su.User.ID, &su.User.OrgID, &su.User.Email, &su.User.ExternalID, &su.User.Role,
-		&su.User.CreatedAt)
+		&su.User.CreatedAt, &su.Directory.Linked, &su.Directory.CheckedAt)
 	return su, notFound(err)
 }
 
@@ -113,30 +115,31 @@ func (s *Store) CreateLoginFlow(ctx context.Context, f LoginFlow, expires time.T
 	return err
 }
 
+// loginFlowColumns are the columns scanLoginFlow reads.
+const loginFlowColumns = `state, verifier, nonce, provider, redirect_to,
+	cli_redirect, cli_challenge, cli_state`
+
+func scanLoginFlow(r row) (LoginFlow, error) {
+	var f LoginFlow
+	err := r.Scan(&f.State, &f.Verifier, &f.Nonce, &f.Provider, &f.RedirectTo,
+		&f.CLIRedirect, &f.CLIChallenge, &f.CLIState)
+	return f, notFound(err)
+}
+
 // TakeLoginFlow consumes a flow. It deletes and returns in one statement, so a
 // replayed callback finds nothing.
 func (s *Store) TakeLoginFlow(ctx context.Context, state string) (LoginFlow, error) {
-	var f LoginFlow
-	err := s.pool.QueryRow(ctx, `DELETE FROM login_flows
+	return scanLoginFlow(s.pool.QueryRow(ctx, `DELETE FROM login_flows
 		WHERE state = $1 AND expires_at > now()
-		RETURNING state, verifier, nonce, provider, redirect_to,
-		          cli_redirect, cli_challenge, cli_state`, state,
-	).Scan(&f.State, &f.Verifier, &f.Nonce, &f.Provider, &f.RedirectTo,
-		&f.CLIRedirect, &f.CLIChallenge, &f.CLIState)
-	return f, notFound(err)
+		RETURNING `+loginFlowColumns, state))
 }
 
 // LoginFlowByState reads a flow without using it up. A passkey sign-in from
 // the command line reads its challenge this way before the browser asks for
 // the passkey.
 func (s *Store) LoginFlowByState(ctx context.Context, state string) (LoginFlow, error) {
-	var f LoginFlow
-	err := s.pool.QueryRow(ctx, `SELECT state, verifier, nonce, provider, redirect_to,
-		cli_redirect, cli_challenge, cli_state
-		FROM login_flows WHERE state = $1 AND expires_at > now()`, state,
-	).Scan(&f.State, &f.Verifier, &f.Nonce, &f.Provider, &f.RedirectTo,
-		&f.CLIRedirect, &f.CLIChallenge, &f.CLIState)
-	return f, notFound(err)
+	return scanLoginFlow(s.pool.QueryRow(ctx, `SELECT `+loginFlowColumns+`
+		FROM login_flows WHERE state = $1 AND expires_at > now()`, state))
 }
 
 // UserByExternalID finds the person behind an identity provider's subject

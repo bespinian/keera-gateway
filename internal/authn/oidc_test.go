@@ -62,10 +62,7 @@ func TestOIDCConfigValidate(t *testing.T) {
 func TestNewFlowIsUniqueInEveryPart(t *testing.T) {
 	seen := map[string]bool{}
 	for range 200 {
-		f, err := NewFlow()
-		if err != nil {
-			t.Fatal(err)
-		}
+		f := NewFlow()
 		for _, part := range []string{f.State, f.Verifier, f.Nonce} {
 			if len(part) < 40 {
 				t.Fatalf("%q is too short to be unguessable", part)

@@ -9,10 +9,7 @@ import (
 func TestGenerateProducesDistinctRecognisableKeys(t *testing.T) {
 	seen := make(map[string]bool, 100)
 	for range 100 {
-		key, hash, prefix, err := Generate()
-		if err != nil {
-			t.Fatalf("Generate: %v", err)
-		}
+		key, hash, prefix := Generate()
 		if !strings.HasPrefix(key, Prefix) {
 			t.Fatalf("key %q lacks the prefix that makes a leak recognisable", key)
 		}
@@ -37,10 +34,7 @@ func TestGenerateProducesDistinctRecognisableKeys(t *testing.T) {
 }
 
 func TestWellFormedRefusesWhatGenerateCannotMake(t *testing.T) {
-	key, _, _, err := Generate()
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
+	key, _, _ := Generate()
 	for _, bad := range []string{
 		"",
 		"sk-live",

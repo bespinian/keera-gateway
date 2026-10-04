@@ -18,7 +18,6 @@ import (
 type orgRun struct {
 	c        *client
 	fs       *flag.FlagSet
-	args     []string
 	name     string
 	domain   string
 	noDomain bool
@@ -29,7 +28,7 @@ type orgRun struct {
 func orgCmd(ctx context.Context, args []string) error {
 	sub, rest := split(args)
 	fs := flag.NewFlagSet("org "+sub, flag.ExitOnError)
-	r := &orgRun{c: newClient(), fs: fs, args: rest}
+	r := &orgRun{c: newClient(), fs: fs}
 	fs.StringVar(&r.name, "name", "", "the organisation's new name")
 	fs.StringVar(&r.domain, "domain", "",
 		"email domain whose sign-ins land in this organisation, such as example.ch")
@@ -41,32 +40,23 @@ func orgCmd(ctx context.Context, args []string) error {
 	if want, ok := wantsHelp(args); ok {
 		return printHelp(fs, "org", want)
 	}
-	if err := parse(fs, rest); err != nil {
+	verb, err := parseVerb(fs, "org", sub, rest)
+	if err != nil {
 		return err
 	}
-	if err := verbFlags(fs, "org", sub); err != nil {
-		return err
-	}
-	r.args = fs.Args()
-
-	switch sub {
-	case "create", "add", "new":
+	switch verb {
+	case "create":
 		return r.create(ctx)
-	case "set", "edit", "update":
+	case "set":
 		return r.set(ctx)
-	case "list", "ls", "":
-		return r.list(ctx)
-	case "delete", "rm", "remove":
+	case "delete":
 		return r.delete(ctx)
 	default:
-		return unknownSub("org", sub)
+		return r.list(ctx)
 	}
 }
 
 func (r *orgRun) create(ctx context.Context) error {
-	if err := parseArgs(r.fs, r.args, 1, "usage: keera org create <name> [--domain <domain>]"); err != nil {
-		return err
-	}
 	d, err := policy.CleanEmailDomain(r.domain)
 	if err != nil {
 		return err
@@ -86,18 +76,12 @@ func (r *orgRun) create(ctx context.Context) error {
 }
 
 func (r *orgRun) set(ctx context.Context) error {
-	if err := parse(r.fs, r.args); err != nil {
-		return err
-	}
-	if r.fs.NArg() > 1 {
-		return fmt.Errorf("usage: keera org set [<org-id>] [--name <name>] [--domain <domain> | --no-domain]")
-	}
 	r.name = strings.TrimSpace(r.name)
 	if r.name == "" && r.domain == "" && !r.noDomain {
 		return fmt.Errorf("nothing to change; pass --name <name>, --domain <domain> or --no-domain")
 	}
 	if r.domain != "" && r.noDomain {
-		return fmt.Errorf("--domain and --no-domain say opposite things; pass one of them")
+		return opposites("domain", "no-domain")
 	}
 	// The id may be left off while there is only one organisation, which is
 	// exactly when the domain has to be set.
@@ -135,9 +119,6 @@ func (r *orgRun) set(ctx context.Context) error {
 }
 
 func (r *orgRun) list(ctx context.Context) error {
-	if err := parse(r.fs, r.args); err != nil {
-		return err
-	}
 	orgs, err := list[store.Org](ctx, r.c, "/v1/orgs")
 	if err != nil {
 		return err
@@ -154,9 +135,6 @@ func (r *orgRun) list(ctx context.Context) error {
 }
 
 func (r *orgRun) delete(ctx context.Context) error {
-	if err := parseArgs(r.fs, r.args, 1, "usage: keera org delete <org-id> [--yes]"); err != nil {
-		return err
-	}
 	orgID := r.fs.Arg(0)
 	if !r.yes {
 		if err := confirmOrgDelete(ctx, r.c, orgID); err != nil {
@@ -268,13 +246,14 @@ func confirmOrgDelete(ctx context.Context, c *client, orgID string) error {
 			"(keera sandbox list --org %s)", org.Name, plural(len(live), "live sandbox", "live sandboxes"), orgID)
 	}
 
-	fmt.Fprintf(os.Stderr, "%s\n", styleErr.head(fmt.Sprintf("Deleting %s (%s) removes:", org.Name, org.ID)))
-	fmt.Fprintf(os.Stderr, "  %s\n  %s, signed out everywhere\n  %s, which stop working at once\n",
-		plural(len(teams), "team"), plural(len(users), "user"), plural(len(keys), "API key"))
-	fmt.Fprintln(os.Stderr, "  its guardrails and its budget counters")
-	fmt.Fprintln(os.Stderr, "  its models and their stored provider keys, MCP servers, filters, routers,")
-	fmt.Fprintln(os.Stderr, "  sandbox classes and the record of its finished sandboxes")
-	fmt.Fprintln(os.Stderr, "Usage history and the audit log are kept.")
-	fmt.Fprintln(os.Stderr, styleErr.bad("This cannot be undone."))
-	return confirmTyping("organisation's name", org.Name, "nothing was deleted")
+	return confirm(fmt.Sprintf("Deleting %s (%s) removes:", org.Name, org.ID), []string{
+		"  " + plural(len(teams), "team"),
+		"  " + plural(len(users), "user") + ", signed out everywhere",
+		"  " + plural(len(keys), "API key") + ", which stop working at once",
+		"  its guardrails and its budget counters",
+		"  its models and their stored provider keys, MCP servers, filters, routers,",
+		"  sandbox classes and the record of its finished sandboxes",
+		"Usage history and the audit log are kept.",
+		styleErr.bad("This cannot be undone."),
+	}, "organisation's name", org.Name, "nothing was deleted")
 }

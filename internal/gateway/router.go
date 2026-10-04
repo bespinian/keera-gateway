@@ -394,12 +394,11 @@ func (s *Server) decideOnce(ctx context.Context, rt policy.Router, m policy.Mode
 		}
 	}
 
-	payload, err := guardRequest(m, instruction, input, outputTokens, byLetter)
-	if err != nil {
-		return decision{}, err
-	}
-	raw, status, err := s.askOwnModel(ctx, m, payload, routerTimeout, maxRouterResponseBytes,
-		"the model it decides with")
+	raw, status, err := s.askGuard(ctx, m, guardQuestion{
+		instruction: instruction, input: input, outputTokens: outputTokens,
+		timeout: routerTimeout, limit: maxRouterResponseBytes,
+		subject: "the model it decides with",
+	}, byLetter)
 	if err != nil {
 		return decision{}, err
 	}
@@ -412,10 +411,7 @@ func (s *Server) decideOnce(ctx context.Context, rt policy.Router, m policy.Mode
 	}
 
 	// The cost is read before the answer is judged, as a filter's is.
-	var d decision
-	if u := usageFromResponse(raw); u != nil {
-		d.micros = m.Cost(u.InputTokens, u.cached(), u.OutputTokens)
-	}
+	d := decision{micros: guardCost(m, raw)}
 	d.alias, d.confidence, err = readDecision(raw, offered, byLetter)
 	return d, err
 }
@@ -477,13 +473,8 @@ func rejectsLogprobs(status int) bool { return status >= 400 && status < 500 }
 // unreachable. The model's answer is looked up in this list, not the
 // router's, so it cannot be talked into one that was never offered.
 func (s *Server) offeredDestinations(rt policy.Router) []string {
-	out := make([]string, 0, len(rt.Destinations))
-	for _, alias := range rt.Destinations {
-		if _, ok := s.serveable(rt.OrgID, alias); ok {
-			out = append(out, alias)
-		}
-	}
-	return out
+	kept, _ := s.sortDestinations(rt)
+	return kept
 }
 
 // destinationList renders the choice the router's model is given: each

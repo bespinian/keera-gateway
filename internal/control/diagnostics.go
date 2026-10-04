@@ -87,7 +87,7 @@ func (s *Server) diagnostics(w http.ResponseWriter, r *http.Request, p *authn.Pr
 		return
 	}
 	if probe && !p.CanAdminOrg(orgID) {
-		s.forbid(w, "a probe calls this organisation's models and puts load on them; only "+
+		forbid(w, "a probe calls this organisation's models and puts load on them; only "+
 			"its administrators can run one")
 		return
 	}
@@ -310,9 +310,9 @@ func (s *Server) checkTenancy(ctx context.Context, d *Diagnosis, orgID string, p
 	}
 	sort.Strings(missing)
 	d.add(area, "Email domains", VerdictFail,
-		fmt.Sprintf("%d organisations, and %s ha%s no email domain: a sign-in matching "+
+		fmt.Sprintf("%d organisations, and %s %s no email domain: a sign-in matching "+
 			"none of them is refused rather than placed",
-			len(orgs), strings.Join(missing, ", "), plural(len(missing))),
+			len(orgs), strings.Join(missing, ", "), has(len(missing))),
 		"set one on each with 'keera org set <org-id> --domain <domain>'")
 }
 
@@ -431,9 +431,10 @@ func orgFlag(p *authn.Principal, orgID string) string {
 	return ""
 }
 
-func plural(n int) string {
+// has is "has" or "have", to agree with n things.
+func has(n int) string {
 	if n == 1 {
-		return "s"
+		return "has"
 	}
-	return "ve"
+	return "have"
 }

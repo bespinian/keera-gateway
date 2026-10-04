@@ -14,6 +14,7 @@ import {
   empty,
   showError,
   plural,
+  field,
 } from "../ui.js";
 
 export async function orgsView(ctx) {
@@ -149,17 +150,11 @@ export function newOrg(ctx, { switchTo = false } = {}) {
       "form",
       { onSubmit: (e) => e.preventDefault() },
       err,
-      h("div", { class: "field" }, h("label", {}, "Name"), name),
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "Email domain"),
+      field("Name", name),
+      field(
+        "Email domain",
         domain,
-        h(
-          "div",
-          { class: "hint" },
-          "Optional. New users who sign in from this domain join here.",
-        ),
+        "Optional. New users who sign in from this domain join here.",
       ),
     ),
     actions: (close) => [
@@ -212,27 +207,11 @@ function orgSettings(ctx, org) {
       "div",
       {},
       err,
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "Name"),
-        name,
-        h(
-          "div",
-          { class: "hint" },
-          "Must differ from every other organisation's name.",
-        ),
-      ),
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "Domain"),
+      field("Name", name, "Must differ from every other organisation's name."),
+      field(
+        "Domain",
         domain,
-        h(
-          "div",
-          { class: "hint" },
-          "Leave empty to clear it. Existing users stay where they are.",
-        ),
+        "Leave empty to clear it. Existing users stay where they are.",
       ),
     ),
     actions: (close) => [
@@ -417,7 +396,7 @@ export function chooseOrg(ctx, what) {
       { class: "card" },
       empty(
         "No organisations yet",
-        "Create one first. The Overview screen guides you through setup.",
+        "Create one first. The Dashboard guides you through setup.",
       ),
     );
   }

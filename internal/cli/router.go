@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -67,14 +66,14 @@ func routerCmd(ctx context.Context, args []string) error {
 	if want, ok := wantsHelp(args); ok {
 		return printHelp(fs, "router", want)
 	}
-	if err := parse(fs, rest); err != nil {
+	verb, err := parseVerb(fs, "router", sub, rest)
+	if err != nil {
 		return err
 	}
-	if err := verbFlags(fs, "router", sub); err != nil {
-		return err
-	}
+	// put tells a change from an addition by the verb.
+	r.sub = verb
 	if r.fallback != "" && r.noFallback {
-		return errors.New("--fallback and --no-fallback are opposites; pass one of them")
+		return opposites("fallback", "no-fallback")
 	}
 	if !policy.RouterMode(r.mode).Valid() {
 		return fmt.Errorf("--mode is %q; it is 'instruction' (a model reads each request and "+
@@ -85,29 +84,21 @@ func routerCmd(ctx context.Context, args []string) error {
 			"'least-busy' emptiest first by what the gateway has in flight against each",
 			r.mode)
 	}
-	orgID, err := resolveOrg(ctx, r.c, r.org)
-	if err != nil {
+	if r.orgID, err = resolveOrg(ctx, r.c, r.org); err != nil {
 		return err
 	}
-	r.orgID = orgID
 
-	switch sub {
-	case "list", "ls", "":
-		return r.list(ctx)
-	case "add", "create", "new":
+	switch verb {
+	case "add", "set":
 		return r.put(ctx)
-	case "set", "edit", "update":
-		// put tells a change from an addition by the verb.
-		r.sub = "set"
-		return r.put(ctx)
-	case "check", "probe", "test":
+	case "check":
 		return r.check(ctx)
-	case "report", "stats":
+	case "report":
 		return r.report(ctx)
-	case "delete", "rm", "remove":
+	case "delete":
 		return r.delete(ctx)
 	default:
-		return unknownSub("router", sub)
+		return r.list(ctx)
 	}
 }
 
@@ -120,27 +111,30 @@ func (r *routerRun) list(ctx context.Context) error {
 }
 
 func (r *routerRun) delete(ctx context.Context) error {
-	if r.fs.NArg() != 1 {
-		return fmt.Errorf("usage: keera router delete <alias> [--yes]")
+	// Read first, so a typo is said before anybody types the alias back.
+	rt, err := requireRouter(ctx, r.c, r.orgID, r.fs.Arg(0))
+	if err != nil {
+		return err
 	}
-	alias := r.fs.Arg(0)
 	if !r.yes {
-		if err := confirmRouterDelete(alias); err != nil {
+		if err := confirmRouterDelete(rt.Alias); err != nil {
 			return err
 		}
 	}
-	return deleteAlias(ctx, r.c, r.path(alias, ""), alias, r.asJSON)
+	return deleteAlias(ctx, r.c, r.path(rt.Alias, ""), rt.Alias, r.asJSON)
 }
 
 // path addresses one router, or with a suffix a route under it.
 func (r *routerRun) path(alias, suffix string) string {
-	return inOrg("/v1/routers/"+url.PathEscape(alias)+suffix, r.orgID)
+	return routerPath(r.orgID, alias, suffix)
+}
+
+// routerPath is a control API path for a router of orgID.
+func routerPath(orgID, alias, suffix string) string {
+	return inOrg("/v1/routers/"+url.PathEscape(alias)+suffix, orgID)
 }
 
 func (r *routerRun) put(ctx context.Context) error {
-	if r.fs.NArg() != 1 {
-		return errors.New(routerUsage(r.sub, policy.RouterMode(r.mode)))
-	}
 	alias := r.fs.Arg(0)
 	// 'set' starts from the stored router, so what is not given is kept. 'add'
 	// starts from nothing, and the control plane refuses what is missing.
@@ -156,21 +150,6 @@ func (r *routerRun) put(ctx context.Context) error {
 		return err
 	}
 	return putRouter(ctx, r.c, r.orgID, rt, r.asJSON)
-}
-
-// routerUsage is the usage line for 'add' or 'set'. It names only the flags
-// the mode takes: a fallback router has no deciding model to name.
-func routerUsage(sub string, mode policy.RouterMode) string {
-	switch {
-	case sub == "set":
-		return "usage: keera router set <alias> [flags]"
-	case mode.Decides():
-		return "usage: keera router add <alias> --model <alias> --destinations a,b --prompt <text>"
-	case mode.Sizes():
-		return "usage: keera router add <alias> --mode size --destinations small:4k,big"
-	default:
-		return "usage: keera router add <alias> --mode " + string(mode) + " --destinations a,b"
-	}
 }
 
 // apply writes the given flags into rt.
@@ -229,9 +208,6 @@ func (r *routerRun) apply(rt *policy.Router) error {
 }
 
 func (r *routerRun) check(ctx context.Context) error {
-	if r.fs.NArg() != 1 {
-		return fmt.Errorf("usage: keera router check <alias>")
-	}
 	var probe gateway.RouterProbe
 	if err := r.c.do(ctx, "POST", r.path(r.fs.Arg(0), "/check"), nil, &probe); err != nil {
 		return err
@@ -246,9 +222,6 @@ func (r *routerRun) check(ctx context.Context) error {
 }
 
 func (r *routerRun) report(ctx context.Context) error {
-	if r.fs.NArg() != 1 {
-		return fmt.Errorf("usage: keera router report <alias> [--since 168h]")
-	}
 	var res routerReportResponse
 	if err := r.c.do(ctx, "GET",
 		r.path(r.fs.Arg(0), "/report")+"&from="+url.QueryEscape(sinceParam(r.since)),
@@ -268,8 +241,7 @@ func requireRouter(ctx context.Context, c *client, orgID, alias string) (policy.
 
 func putRouter(ctx context.Context, c *client, orgID string, rt policy.Router, asJSON bool) error {
 	var saved policy.Router
-	if err := c.do(ctx, "PUT",
-		inOrg("/v1/routers/"+url.PathEscape(rt.Alias), orgID),
+	if err := c.do(ctx, "PUT", routerPath(orgID, rt.Alias, ""),
 		map[string]any{
 			"mode": rt.Mode, "model": rt.Model, "prompt": rt.Prompt,
 			"destinations": rt.Destinations, "ceilings": rt.Ceilings,
@@ -285,9 +257,9 @@ func putRouter(ctx context.Context, c *client, orgID string, rt policy.Router, a
 // the scopes that use one, but not the clients: they name routers in their
 // own configuration, and would get "model not found".
 func confirmRouterDelete(alias string) error {
-	fmt.Fprintf(os.Stderr, "%s\n", styleErr.head("Deleting the router "+alias+":"))
-	fmt.Fprintln(os.Stderr, "  any client still naming it is told the model does not exist")
-	return confirmTyping("alias", alias, "nothing was deleted")
+	return confirm("Deleting the router "+alias+":",
+		[]string{"  any client still naming it is told the model does not exist"},
+		"alias", alias, "nothing was deleted")
 }
 
 func printRouters(w *table, routers []policy.Router) {

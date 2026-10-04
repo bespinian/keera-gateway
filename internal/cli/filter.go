@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -64,38 +63,30 @@ func filterCmd(ctx context.Context, args []string) error {
 	if want, ok := wantsHelp(args); ok {
 		return printHelp(fs, "filter", want)
 	}
-	if err := parse(fs, rest); err != nil {
-		return err
-	}
-	if err := verbFlags(fs, "filter", sub); err != nil {
-		return err
-	}
-	if r.shadow && r.enforce {
-		return errors.New("--shadow and --enforce are opposites; pass one of them")
-	}
-	orgID, err := resolveOrg(ctx, r.c, r.org)
+	verb, err := parseVerb(fs, "filter", sub, rest)
 	if err != nil {
 		return err
 	}
-	r.orgID = orgID
+	// put tells a change from an addition by the verb.
+	r.sub = verb
+	if r.shadow && r.enforce {
+		return opposites("shadow", "enforce")
+	}
+	if r.orgID, err = resolveOrg(ctx, r.c, r.org); err != nil {
+		return err
+	}
 
-	switch sub {
-	case "list", "ls", "":
-		return r.list(ctx)
-	case "add", "create", "new":
+	switch verb {
+	case "add", "set":
 		return r.put(ctx)
-	case "set", "edit", "update":
-		// put tells a change from an addition by the verb.
-		r.sub = "set"
-		return r.put(ctx)
-	case "check", "probe", "test":
+	case "check":
 		return r.check(ctx)
-	case "report", "stats":
+	case "report":
 		return r.report(ctx)
-	case "delete", "rm", "remove":
+	case "delete":
 		return r.delete(ctx)
 	default:
-		return unknownSub("filter", sub)
+		return r.list(ctx)
 	}
 }
 
@@ -108,27 +99,30 @@ func (r *filterRun) list(ctx context.Context) error {
 }
 
 func (r *filterRun) delete(ctx context.Context) error {
-	if r.fs.NArg() != 1 {
-		return fmt.Errorf("usage: keera filter delete <alias> [--yes]")
+	// Read first, so a typo is said before anybody types the alias back.
+	f, err := requireFilter(ctx, r.c, r.orgID, r.fs.Arg(0))
+	if err != nil {
+		return err
 	}
-	alias := r.fs.Arg(0)
 	if !r.yes {
-		if err := confirmFilterDelete(alias); err != nil {
+		if err := confirmFilterDelete(f.Alias); err != nil {
 			return err
 		}
 	}
-	return deleteAlias(ctx, r.c, r.path(alias, ""), alias, r.asJSON)
+	return deleteAlias(ctx, r.c, r.path(f.Alias, ""), f.Alias, r.asJSON)
 }
 
 // path addresses one filter, or with a suffix a route under it.
 func (r *filterRun) path(alias, suffix string) string {
-	return inOrg("/v1/filters/"+url.PathEscape(alias)+suffix, r.orgID)
+	return filterPath(r.orgID, alias, suffix)
+}
+
+// filterPath is a control API path for a filter of orgID.
+func filterPath(orgID, alias, suffix string) string {
+	return inOrg("/v1/filters/"+url.PathEscape(alias)+suffix, orgID)
 }
 
 func (r *filterRun) put(ctx context.Context) error {
-	if r.fs.NArg() != 1 {
-		return errors.New(filterUsage(r.sub, policy.FilterMode(r.mode)))
-	}
 	alias := r.fs.Arg(0)
 	// 'set' starts from the stored filter, so what is not given is kept. 'add'
 	// starts from nothing, and the control plane refuses what is missing.
@@ -144,21 +138,6 @@ func (r *filterRun) put(ctx context.Context) error {
 		return err
 	}
 	return putFilter(ctx, r.c, r.orgID, f, r.asJSON)
-}
-
-// filterUsage is the usage line for 'add' or 'set'. It names only the flags
-// the mode takes: a pattern filter has rules instead of a model and a prompt.
-func filterUsage(sub string, mode policy.FilterMode) string {
-	switch {
-	case sub == "set":
-		return "usage: keera filter set <alias> [flags]"
-	case !mode.UsesModel():
-		return "usage: keera filter add <alias> --mode pattern --rules <rules>"
-	case mode == policy.FilterModeGate:
-		return "usage: keera filter add <alias> --mode gate --model <model> --prompt <text>"
-	default:
-		return "usage: keera filter add <alias> --model <model> --prompt <text>"
-	}
 }
 
 // apply writes the given flags into f.
@@ -212,9 +191,6 @@ func (r *filterRun) apply(f *policy.Filter) error {
 }
 
 func (r *filterRun) check(ctx context.Context) error {
-	if r.fs.NArg() != 1 {
-		return fmt.Errorf("usage: keera filter check <alias>")
-	}
 	var probe gateway.FilterProbe
 	if err := r.c.do(ctx, "POST", r.path(r.fs.Arg(0), "/check"), nil, &probe); err != nil {
 		return err
@@ -229,9 +205,6 @@ func (r *filterRun) check(ctx context.Context) error {
 }
 
 func (r *filterRun) report(ctx context.Context) error {
-	if r.fs.NArg() != 1 {
-		return fmt.Errorf("usage: keera filter report <alias> [--since 168h]")
-	}
 	var res filterReportResponse
 	if err := r.c.do(ctx, "GET",
 		r.path(r.fs.Arg(0), "/report")+"&from="+url.QueryEscape(sinceParam(r.since)),
@@ -264,8 +237,7 @@ func requireFilter(ctx context.Context, c *client, orgID, alias string) (policy.
 
 func putFilter(ctx context.Context, c *client, orgID string, f policy.Filter, asJSON bool) error {
 	var saved policy.Filter
-	if err := c.do(ctx, "PUT",
-		inOrg("/v1/filters/"+url.PathEscape(f.Alias), orgID),
+	if err := c.do(ctx, "PUT", filterPath(orgID, f.Alias, ""),
 		map[string]any{
 			"model": f.Model, "mode": f.Mode, "shadow": f.Shadow, "prompt": f.Prompt,
 			"rules": f.Rules, "description": f.Description,
@@ -279,9 +251,8 @@ func putFilter(ctx context.Context, c *client, orgID string, f policy.Filter, as
 // refuses to delete one a guardrail names, so this is about a filter nothing
 // uses today, whose wording is kept nowhere else.
 func confirmFilterDelete(alias string) error {
-	fmt.Fprintf(os.Stderr, "%s\n", styleErr.head("Deleting the filter "+alias+":"))
-	fmt.Fprintln(os.Stderr, "  its instruction is not kept anywhere else")
-	return confirmTyping("alias", alias, "nothing was deleted")
+	return confirm("Deleting the filter "+alias+":",
+		[]string{"  its instruction is not kept anywhere else"}, "alias", alias, "nothing was deleted")
 }
 
 func printFilters(w *table, filters []policy.Filter) {

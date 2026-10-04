@@ -17,6 +17,7 @@ import {
   showError,
   isAdmin,
   plural,
+  field,
 } from "../ui.js";
 import {
   openGuardrails,
@@ -243,7 +244,7 @@ function newTeam(ctx) {
       "form",
       { onSubmit: (e) => e.preventDefault() },
       err,
-      h("div", { class: "field" }, h("label", {}, "Name"), name),
+      field("Name", name),
     ),
     actions: (close) => [
       h("button", { class: "btn", onClick: close }, "Cancel"),
@@ -296,7 +297,7 @@ function renameTeam(ctx, team) {
       "form",
       { onSubmit: (e) => e.preventDefault() },
       err,
-      h("div", { class: "field" }, h("label", {}, "Name"), name),
+      field("Name", name),
     ),
     actions: (close) => [
       h("button", { class: "btn", onClick: close }, "Cancel"),

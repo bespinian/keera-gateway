@@ -45,7 +45,9 @@ window, the three prices (input, output and cached input), a description, the
 release date and the location. The providers are `anthropic`, `openai`,
 `infomaniak`, `stepping-stone` and `phoeniqs`; `keera model providers` lists
 them with their models. For a `backend_model` not in that table, the entry must set
-`input_micros_per_mtok` and `output_micros_per_mtok` itself.
+`input_micros_per_mtok` and `output_micros_per_mtok` itself. A model the table
+names without a date, such as `claude-haiku-4-5`, may also be named by its
+dated id, `claude-haiku-4-5-20251001`.
 
 The location is where the provider serves its models: `ch` for Infomaniak,
 stepping stone and Phoeniqs, `usa` for Anthropic and OpenAI. A model with no provider is

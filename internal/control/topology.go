@@ -50,15 +50,11 @@ type mapModel struct {
 // trafficMap serves the map: the catalogue as nodes, the window as numbers on
 // them, and the traffic between them as edges.
 func (s *Server) trafficMap(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if !s.requireOrgAdmin(w, p, p.OrgID) {
+	if !s.requireAdmin(w, p) {
 		return
 	}
-	orgID, from, to, ok := s.reportScope(w, r, p)
+	orgID, from, to, ok := s.reportOrg(w, r, p)
 	if !ok {
-		return
-	}
-	if orgID == "" {
-		needOrg(w, orgRequired)
 		return
 	}
 	ctx := r.Context()

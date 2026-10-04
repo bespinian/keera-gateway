@@ -127,10 +127,7 @@ func (s *Server) handOverToCLI(w http.ResponseWriter, r *http.Request,
 // cliHandOver creates the one-time code and returns the loopback address to
 // send the browser to with it.
 func (s *Server) cliHandOver(r *http.Request, flow store.LoginFlow, user store.User) (string, error) {
-	code, hash, err := authn.NewCLICode()
-	if err != nil {
-		return "", err
-	}
+	code, hash := authn.NewCLICode()
 	if err := s.st.CreateCLICode(r.Context(), hash, user.ID, flow.CLIChallenge,
 		time.Now().Add(authn.CLICodeTTL)); err != nil {
 		return "", err
@@ -163,7 +160,7 @@ func (s *Server) cliToken(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// One message for expired, used and unknown codes, so a guesser
 		// cannot tell which codes were real.
-		httpx.WriteError(w, http.StatusUnauthorized, "invalid_request_error", "invalid_code",
+		unauthorized(w, "invalid_code",
 			"this sign-in has expired or was already completed; run 'keera login' again")
 		return
 	}
@@ -171,7 +168,7 @@ func (s *Server) cliToken(w http.ResponseWriter, r *http.Request) {
 		[]byte(code.Challenge)) != 1 {
 		s.log.Warn("a command-line sign-in was redeemed with the wrong proof key",
 			"user", code.UserID)
-		httpx.WriteError(w, http.StatusUnauthorized, "invalid_request_error", "invalid_verifier",
+		unauthorized(w, "invalid_verifier",
 			"this sign-in was completed by a different process than the one that started it")
 		return
 	}
@@ -181,12 +178,13 @@ func (s *Server) cliToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, hash, err := authn.NewCLIToken()
+	token, hash := authn.NewCLIToken()
+	ttl, err := s.cliTokenTTL(r, user)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	expires := time.Now().Add(authn.CLITokenTTL)
+	expires := time.Now().Add(ttl)
 	if err := s.st.CreateCLIToken(r.Context(), hash, user.ID, expires); err != nil {
 		s.fail(w, err)
 		return
@@ -204,6 +202,21 @@ func (s *Server) cliToken(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// cliTokenTTL is how long a new command-line token lasts. A month relies on
+// asking the directory again while it lasts; for a directory account without
+// a refresh token, that cannot happen, so it lasts as long as a browser
+// session.
+func (s *Server) cliTokenTTL(r *http.Request, user store.User) (time.Duration, error) {
+	if s.directoryOf(user) == nil {
+		return authn.CLITokenTTL, nil
+	}
+	linked, err := s.st.HasRefreshToken(r.Context(), user.ID)
+	if err != nil || linked {
+		return authn.CLITokenTTL, err
+	}
+	return authn.SessionTTL, nil
+}
+
 // cliPrincipal resolves a command-line token sent as a bearer credential.
 func (s *Server) cliPrincipal(r *http.Request, token string) (*authn.Principal, error) {
 	hash := authn.HashCLIToken(token)
@@ -211,12 +224,16 @@ func (s *Server) cliPrincipal(r *http.Request, token string) (*authn.Principal, 
 	if err != nil {
 		return nil, authn.ErrUnauthenticated
 	}
+	user, ok := s.checkDirectory(r, tu.User, tu.Directory)
+	if !ok {
+		return nil, authn.ErrUnauthenticated
+	}
 	return &authn.Principal{
 		Via:    authn.MethodCLI,
-		UserID: tu.User.ID,
-		Email:  tu.User.Email,
-		Role:   authn.Role(tu.User.Role),
-		OrgID:  tu.User.OrgID,
+		UserID: user.ID,
+		Email:  user.Email,
+		Role:   authn.Role(user.Role),
+		OrgID:  user.OrgID,
 		// No CSRF token: a browser never sends this credential.
 		CredentialHash: hash,
 	}, nil

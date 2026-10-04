@@ -18,6 +18,7 @@ import {
   rowLink,
   showError,
   isAdmin,
+  field,
 } from "../ui.js";
 import { openGuardrails, ceilingsFor, summarise } from "./guardrails.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
@@ -435,35 +436,27 @@ function issueKey(ctx, teams, models, users, clients) {
       "form",
       {},
       err,
-      h("div", { class: "field" }, h("label", {}, "Alias"), alias),
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "Team"),
+      field("Alias", alias),
+      field(
+        "Team",
         team,
-        h(
-          "div",
-          { class: "hint" },
-          "The team's guardrails apply to this key. Without a team, only " +
-            "the organisation's apply.",
-        ),
+        "The team's guardrails apply to this key. Without a team, only " +
+          "the organisation's apply.",
       ),
       users.length
-        ? h(
-            "div",
-            { class: "field" },
-            h("label", {}, "Person"),
+        ? field(
+            "User",
             person,
             h(
-              "div",
-              { class: "hint" },
+              "span",
+              {},
               "The key shows on their ",
               h("strong", {}, "My access"),
               " screen, and its usage counts as theirs.",
             ),
           )
         : null,
-      h("div", { class: "field" }, h("label", {}, "Expires"), expiry),
+      field("Expires", expiry),
     ),
     actions: (close) => [
       h("button", { class: "btn", onClick: close }, "Cancel"),
@@ -527,11 +520,11 @@ function issueOwnKey(ctx, models, clients) {
       "form",
       {},
       err,
-      h("div", { class: "field" }, h("label", {}, "Alias"), alias),
+      field("Alias", alias),
       h(
         "div",
         { class: "field" },
-        h("label", {}, "Person"),
+        h("label", {}, "User"),
         h(
           "div",
           { class: "input", style: { background: "transparent" } },
@@ -544,7 +537,7 @@ function issueOwnKey(ctx, models, clients) {
             "issue keys for others.",
         ),
       ),
-      h("div", { class: "field" }, h("label", {}, "Expires"), expiry),
+      field("Expires", expiry),
     ),
     actions: (close) => [
       h("button", { class: "btn", onClick: close }, "Cancel"),

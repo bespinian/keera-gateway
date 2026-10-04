@@ -15,11 +15,13 @@ import {
   copyText,
   money,
   num,
+  compact,
   ms,
   empty,
   toast,
   go,
   isAdmin,
+  field,
 } from "../ui.js";
 
 /** session outlives a route change, so stepping over to Usage to look at what a
@@ -542,7 +544,8 @@ function subtitle(model) {
     return "a router: it picks the model";
   }
   const bits = [model.backend_model];
-  if (model.max_context) bits.push(num(model.max_context) + " token context");
+  if (model.max_context)
+    bits.push(compact(model.max_context) + " token context");
   return bits.filter(Boolean).join(" · ");
 }
 
@@ -672,27 +675,19 @@ function settingsPanel() {
   const el = h(
     "div",
     { class: "card card-body chat-settings", hidden: true },
-    h(
-      "div",
-      { class: "field" },
-      h("label", {}, "System prompt"),
+    field(
+      "System prompt",
       system,
-      h(
-        "div",
-        { class: "hint" },
-        "Sent before the conversation with every message.",
-      ),
+      "Sent before the conversation with every message.",
     ),
     h(
       "div",
       { class: "field-row" },
-      h("div", { class: "field" }, h("label", {}, "Temperature"), temperature),
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "Max output tokens"),
+      field("Temperature", temperature),
+      field(
+        "Max output tokens",
         maxTokens,
-        h("div", { class: "hint" }, "A lower guardrail limit still applies."),
+        "A lower guardrail limit still applies.",
       ),
     ),
   );

@@ -64,6 +64,9 @@ type ProviderModel struct {
 	// Description is the default for an entry that states none, so routers
 	// never choose between bare aliases. An entry's own description wins.
 	Description string `json:"description"`
+	// Snapshot is the dated id the maker also names the model by, as in
+	// claude-haiku-4-5-20251001. Claude Code knows such a model only by it.
+	Snapshot string `json:"snapshot,omitempty"`
 }
 
 // providers is the built-in table.
@@ -109,7 +112,8 @@ var providers = []Provider{{
 		CachedInputMicrosPerMTok: 200_000,
 		Description:              "capable, quick enough and mid-priced - the middle option",
 	}, {
-		ID: "claude-haiku-4-5", MaxContext: 200_000, ReleaseDate: "2025-10-15",
+		ID: "claude-haiku-4-5", Snapshot: "claude-haiku-4-5-20251001",
+		MaxContext: 200_000, ReleaseDate: "2025-10-15",
 		InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 5_000_000,
 		CachedInputMicrosPerMTok: 100_000,
 		Description: "fastest, cheapest and lightest of its range - short, " +
@@ -561,9 +565,10 @@ func provider(name string) (Provider, bool) {
 	return Provider{}, false
 }
 
-func (p Provider) model(id string) (ProviderModel, bool) {
+// Model finds one of the provider's models by its id or its dated id.
+func (p Provider) Model(id string) (ProviderModel, bool) {
 	for _, m := range p.Models {
-		if m.ID == id {
+		if m.ID == id || (m.Snapshot != "" && m.Snapshot == id) {
 			return m, true
 		}
 	}
@@ -668,7 +673,7 @@ func applyProvider(m Model) (Model, error) {
 		// The caller's own check reports it, in terms of this provider.
 		return m, nil
 	}
-	known, isKnown := p.model(m.BackendModel)
+	known, isKnown := p.Model(m.BackendModel)
 	if !isKnown {
 		// A model newer than this build must be priced by hand: a model that
 		// silently costs nothing is one no budget can hold.

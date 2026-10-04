@@ -45,9 +45,11 @@ to an operator, and `KEERA_OIDC_<NAME>_DEFAULT_ROLE` cannot be `operator`.
 
 The operator role spans organisations, so you can see who holds it by reading
 the configuration. An administrator runs one organisation, including its
-models, MCP servers, filters, routers and sandbox classes. Remove an address
-from `KEERA_OPERATORS`, or a person from the group, and they are demoted at
-their next sign-in.
+models, MCP servers, filters, routers and sandbox classes. Remove a person
+from the group, and they are demoted within 15 minutes (see
+[Asking the directory again](#asking-the-directory-again)). Remove an address
+from `KEERA_OPERATORS`, and they are demoted at the next directory check after
+the restart.
 
 ### The administrator role comes from one of two places
 
@@ -56,8 +58,9 @@ their next sign-in.
 | set                              | whoever is in the group                              | the directory                                                                   |
 | unset                            | whoever an operator or another administrator says so | `keera user role`, the panel's **Users** screen, `PATCH /control/v1/users/{id}` |
 
-**If set, the directory decides.** The group is read on every sign-in, so a
-person removed from it is demoted at their next sign-in. The panel _no longer
+**If set, the directory decides.** The group is read at every sign-in and
+every 15 minutes after, so a person removed from it is demoted within 15
+minutes. The panel _no longer
 lets you change roles_, because the next sign-in would undo the change. With
 several directories, admin groups on one provider are enough to make the
 directory decide for the whole gateway.
@@ -109,7 +112,8 @@ and the walkthrough below uses them.
    from admitting any Google account. **External** would let any Google account
    reach the panel.
 3. Under **Scopes**, add `openid`, `email` and `profile`, the three Keera asks
-   for when `KEERA_OIDC_<NAME>_SCOPES` is unset.
+   for on Google when `KEERA_OIDC_<NAME>_SCOPES` is unset. Keera also asks
+   Google for offline access, so it gets a refresh token.
 4. **Credentials → Create credentials → OAuth client ID**, type **Web
    application**.
 5. Add one **Authorised redirect URI**:
@@ -247,8 +251,8 @@ customers uses Google, leave that line out.
 not by the callback address. Each provider's client registration must still list
 `<KEERA_PUBLIC_URL>/control/auth/callback`.
 
-A **name** matches `[a-z0-9][a-z0-9-]*`, and `keera` is reserved for the
-gateway's own sign-ins. Do not rename a provider: the name is
+A **name** matches `[a-z0-9][a-z0-9-]*`. `keera` and `passkey` are reserved for
+the gateway's own sign-ins. Do not rename a provider: the name is
 part of the sign-in URL and of every identity it creates, so renaming it cuts
 off everyone who signed in through it. The button label comes from the name
 (`google`, `workspace` and `gsuite` show Google; `entra`, `entraid`, `azure`,
@@ -339,10 +343,13 @@ profile.
 You can be signed in to several deployments at once. A command picks the
 gateway in this order: `--url`, then `KEERA_CONTROL_URL`, then the gateway last
 signed in to, then the built-in default `https://gateway.keera.ch`.
-`keera whoami` shows which address is used and why. `keera logout` also clears
-the default if it pointed at the removed sign-in.
+`keera whoami` shows which address is used and why. If `keera logout` removes
+the default, the one sign-in left becomes the default; with several left, there
+is none.
 
-The credential lasts 30 days. `keera logout` ends it sooner,
+The credential lasts 30 days, or 12 hours where the provider gives Keera no
+refresh token (see [Asking the directory again](#asking-the-directory-again)).
+`keera logout` ends it sooner,
 `keera logout --all` ends every sign-in of the account everywhere, and
 `keera whoami` shows which credential on this machine is in use.
 
@@ -391,10 +398,31 @@ authorised redirect URI in each provider's console, and `KEERA_PUBLIC_URL`.
 `KEERA_SECURE_COOKIES` follows the scheme, so the session cookie becomes
 `Secure` without another setting.
 
+## Asking the directory again
+
+A session lasts 12 hours and a `keera login` token 30 days. So Keera does not
+only read the directory at sign-in: it keeps the refresh token the sign-in
+returns, encrypted with `KEERA_SECRET_KEY`, and spends it every 15 minutes
+while the person is active.
+
+- If the directory refuses, because the person was removed or disabled or
+  revoked Keera's access, all their sessions and `keera login` tokens end.
+- If it answers, the role is applied again, as at sign-in.
+- If it cannot be reached, the person stays signed in, and the next request
+  asks again 15 minutes later.
+
+When `KEERA_OIDC_<NAME>_SCOPES` is unset, Keera asks for `offline_access`,
+which is what gets a refresh token from most providers. On Google it asks for
+offline access instead, as Google expects. If your provider refuses
+`offline_access`, set the scopes without it. Without a refresh token, the
+directory is only read at sign-in, and a `keera login` token lasts 12 hours
+instead of 30 days.
+
 ## When someone leaves
 
-Removing a person from the directory stops their next sign-in, but not their API
-keys. The directory never sees those. So disable them in Keera as well:
+Removing a person from the directory ends their sessions and `keera login`
+tokens within 15 minutes, but not their API keys. The directory never sees
+those. So disable them in Keera as well:
 
 ```sh
 keera user disable ada@example.ch

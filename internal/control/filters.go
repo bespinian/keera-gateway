@@ -42,7 +42,7 @@ func (s *Server) listFilters(w http.ResponseWriter, r *http.Request, p *authn.Pr
 // what it adds to latency and cost, and which teams it refuses.
 //
 // Every member may read it: these are counts of the organisation's own
-// traffic, which members already see on the Overview.
+// traffic, which members already see on the Dashboard.
 func (s *Server) filterReport(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	orgID, ok := s.queryOrg(w, r, p)
 	if !ok {
@@ -113,16 +113,11 @@ func (s *Server) putFilter(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		Description: strings.TrimSpace(in.Description),
 	}
 	if !policy.ValidAlias(f.Alias) {
-		badRequest(w, "a filter's alias is written into guardrails, command lines and URLs, so it is "+
-			"lowercase letters, digits and inner hyphens - 'redact-secrets', not "+
-			"'"+f.Alias+"'")
+		badRequest(w, badAlias(f.Alias))
 		return
 	}
 	if !f.Mode.Valid() {
-		badRequest(w, "'mode' is 'rewrite' - the filter is shown the request's text and answers with "+
-			"it rewritten - or 'gate', where it answers only whether the request may "+
-			"go at all, or 'pattern', where a list of rules is applied to the text with "+
-			"no model at all. Not '"+string(f.Mode)+"'")
+		badRequest(w, "'mode' must be rewrite, gate or pattern, not '"+string(f.Mode)+"'")
 		return
 	}
 	if !s.checkFilterFields(w, r, orgID, f) {
@@ -167,7 +162,7 @@ func (s *Server) checkFilterFields(w http.ResponseWriter, r *http.Request,
 			len(f.Prompt), maxFilterPromptBytes))
 		return false
 	}
-	return s.checkFilterModel(w, r, orgID, f.Model)
+	return s.checkReaderModel(w, r, orgID, f.Model, filterReader)
 }
 
 // checkFilterRules refuses a pattern filter that could not be applied.
@@ -209,28 +204,55 @@ func checkFilterRules(w http.ResponseWriter, f policy.Filter) bool {
 	return true
 }
 
-// checkFilterModel refuses a model that cannot serve as a filter, rather than
-// storing a guardrail that will refuse every request it covers.
-func (s *Server) checkFilterModel(w http.ResponseWriter, r *http.Request, orgID, alias string) bool {
+// reader describes what runs on a model: a filter or a router. Only the words
+// differ between the two.
+type reader struct {
+	name string
+	// required is the refusal when no model is named, uses ends "this
+	// organisation has no model 'x'; ...", and answers ends "... is a <kind>
+	// model; a <name> reads text and ...".
+	required, uses, answers string
+}
+
+var (
+	filterReader = reader{
+		name:     "filter",
+		required: "'model' is required; it names the model the filter runs on",
+		uses:     "a filter runs on one of its models",
+		answers:  "answers in words",
+	}
+	routerReader = reader{
+		name: "router",
+		required: "'model' is required; it names the model that makes the decision, " +
+			"best a fast one served locally",
+		uses:    "a router decides with one of its models",
+		answers: "answers with an alias",
+	}
+)
+
+// checkReaderModel refuses a model that cannot serve as a filter or a router,
+// rather than storing one that will refuse every request it covers.
+func (s *Server) checkReaderModel(w http.ResponseWriter, r *http.Request, orgID, alias string,
+	rd reader) bool {
 	if alias == "" {
-		badRequest(w, "'model' is required; it names the model the filter runs on")
+		badRequest(w, rd.required)
 		return false
 	}
 	m, err := s.st.Model(r.Context(), orgID, alias)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		httpx.WriteError(w, http.StatusBadRequest, "invalid_request_error", "model_not_found",
-			"this organisation has no model '"+alias+"'; a filter runs on one of its models")
+			"this organisation has no model '"+alias+"'; "+rd.uses)
 		return false
 	case err != nil:
 		s.fail(w, err)
 		return false
 	case m.Kind != policy.KindChat:
-		badRequest(w, "'"+alias+"' is a "+string(m.Kind)+" model; a filter reads text and answers in "+
-			"words, which only a chat model does")
+		badRequest(w, "'"+alias+"' is a "+string(m.Kind)+" model; a "+rd.name+" reads text and "+
+			rd.answers+", which only a chat model does")
 		return false
 	case m.Subscription:
-		badRequest(w, subscriptionReader(alias, "filter"))
+		badRequest(w, subscriptionReader(alias, rd.name))
 		return false
 	}
 	allowed, err := s.orgAllowsModel(r.Context(), orgID, alias)
@@ -240,7 +262,7 @@ func (s *Server) checkFilterModel(w http.ResponseWriter, r *http.Request, orgID,
 	}
 	if !allowed {
 		httpx.WriteError(w, http.StatusBadRequest, "invalid_request_error", "model_not_allowed",
-			readerModelRefusal("filter", alias, m))
+			readerModelRefusal(rd.name, alias, m))
 		return false
 	}
 	return true
@@ -323,7 +345,7 @@ func (s *Server) checkFilter(w http.ResponseWriter, r *http.Request, p *authn.Pr
 
 // checkAllowList refuses an organisation allow-list that would leave one of
 // its filters or deciding routers on a model outside it. It is the other half
-// of checkFilterModel and checkRouterModel, since the two writes can come in
+// of checkReaderModel, since the two writes can come in
 // either order.
 //
 // Only the organisation scope is checked: filters and routers belong to the

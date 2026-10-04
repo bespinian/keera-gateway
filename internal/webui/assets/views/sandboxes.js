@@ -300,6 +300,15 @@ function classCard(ctx, classes, driver) {
       "Classes",
       h("span", { class: "faint" }, ` — the machines ${orgNameOf(ctx)} offers`),
     ),
+    canEdit && classes.length
+      ? h(
+          "div",
+          { class: "hint" },
+          "To add or change classes, run 'keera sandbox apply <file> --org " +
+            ctx.orgID +
+            "'.",
+        )
+      : null,
     table(
       [
         {

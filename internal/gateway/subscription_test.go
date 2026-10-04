@@ -195,6 +195,55 @@ func TestEachKindOfKeyReachesOnlyItsOwnModels(t *testing.T) {
 	}
 }
 
+func TestASubscriptionKeyReachesAModelByAnthropicsName(t *testing.T) {
+	// Claude Code asks for some background work by Anthropic's own names,
+	// whatever its settings say.
+	h, seen := subscriptionHarness(t, nil)
+	// A disabled model on the same backend model is passed over.
+	old := h.src.models["keera-frontier"]
+	old.Alias, old.Enabled = "keera-frontier-old", false
+	h.src.models[old.Alias] = old
+
+	for _, name := range []string{"claude-opus-5", "claude-opus-5-20260101"} {
+		body := strings.Replace(planMessage, "keera-frontier", name, 1)
+		resp := claudeCode(t, h, "/v1/messages", body, nil)
+		raw, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s: status = %d, want 200: %s", name, resp.StatusCode, raw)
+		}
+		var sent struct {
+			Model string `json:"model"`
+		}
+		_ = json.Unmarshal([]byte(nextSeen(t, seen).body), &sent)
+		if sent.Model != "claude-opus-5" {
+			t.Errorf("%s: forwarded as %q, want the backend model claude-opus-5", name, sent.Model)
+		}
+		if ev := h.sink.last(t); ev.Alias != "keera-frontier" {
+			t.Errorf("%s: recorded as %q, want the alias keera-frontier", name, ev.Alias)
+		}
+	}
+
+	// A standard key names models by alias only.
+	resp := h.post(t, "/v1/messages", strings.Replace(planMessage, "keera-frontier", "claude-opus-5", 1))
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("standard key by Anthropic's name: status %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestUndatedTakesOffOnlyADate(t *testing.T) {
+	for in, want := range map[string]string{
+		"claude-haiku-4-5-20251001": "claude-haiku-4-5",
+		"claude-haiku-4-5":          "claude-haiku-4-5",
+		"claude-opus-5-5":           "claude-opus-5-5",
+		"model-2025100x":            "model-2025100x",
+		"20251001":                  "20251001",
+	} {
+		if got := undated(in); got != want {
+			t.Errorf("undated(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestASubscriptionKeyGoesInItsOwnHeader(t *testing.T) {
 	h, _ := subscriptionHarness(t, nil)
 	// In Authorization it pushes out the sign-in it is meant to sit next to.

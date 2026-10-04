@@ -82,43 +82,34 @@ func sandboxCmd(ctx context.Context, args []string) error {
 	if want, ok := wantsHelp(args); ok {
 		return printHelp(fs, "sandbox", want)
 	}
-	if err := parse(fs, rest); err != nil {
+	verb, err := parseVerb(fs, "sandbox", sub, rest)
+	if err != nil {
 		return err
 	}
-	if err := verbFlags(fs, "sandbox", sub); err != nil {
-		return err
-	}
+	r.sub = verb
 
-	switch sub {
+	switch verb {
 	case "classes":
 		return r.classes(ctx)
 	case "apply":
 		return r.apply(ctx)
-	case "delete-class", "remove-class", "rm-class":
+	case "delete-class":
 		return r.deleteClass(ctx)
-	case "list", "ls", "":
-		return r.list(ctx)
-	case "create", "add", "up", "new":
+	case "create":
 		return r.create(ctx)
 	case "agent":
 		return r.agent(ctx)
-	case "show", "get":
+	case "show":
 		return r.show(ctx)
-	case "terminate", "delete", "rm", "remove", "down":
+	case "terminate":
 		return r.terminate(ctx)
 	case "extend":
 		return r.extend(ctx)
 	case "suspend", "resume":
 		return r.suspendOrResume(ctx)
 	case "ssh":
-		if fs.NArg() < 1 {
-			return errors.New("usage: keera sandbox ssh <name> [-- <command>]")
-		}
 		return sshInto(ctx, r.c, r.org, fs.Arg(0), fs.Args()[1:])
 	case "proxy":
-		if fs.NArg() != 1 {
-			return errors.New("usage: keera sandbox proxy <name> [--port 2222]")
-		}
 		return proxyTo(ctx, r.c, r.org, fs.Arg(0), r.port, os.Stdin, os.Stdout)
 	case "config":
 		orgID, err := resolveOrg(ctx, r.c, r.org)
@@ -129,7 +120,7 @@ func sandboxCmd(ctx context.Context, args []string) error {
 	case "usage":
 		return r.usage(ctx)
 	default:
-		return unknownSub("sandbox", sub)
+		return r.list(ctx)
 	}
 }
 
@@ -155,9 +146,6 @@ func (r *sandboxRun) list(ctx context.Context) error {
 }
 
 func (r *sandboxRun) create(ctx context.Context) error {
-	if r.fs.NArg() != 1 {
-		return errors.New("usage: keera sandbox create <name> --class <class> [--repo <url>]")
-	}
 	orgID, err := resolveOrg(ctx, r.c, r.org)
 	if err != nil {
 		return err
@@ -195,10 +183,6 @@ func (r *sandboxRun) create(ctx context.Context) error {
 
 // agent is `create` with --purpose agent set, so nobody has to type it.
 func (r *sandboxRun) agent(ctx context.Context) error {
-	if r.fs.NArg() != 1 {
-		return errors.New("usage: keera sandbox agent <name> --class <class> " +
-			"--repo <url> --task <text>")
-	}
 	if r.task == "" {
 		return errors.New("--task is required for an agent sandbox; it is the instruction " +
 			"the agent starts on, and it is passed to the sandbox rather than stored")
@@ -223,9 +207,6 @@ func agentFlags(fs *flag.FlagSet) []string {
 }
 
 func (r *sandboxRun) show(ctx context.Context) error {
-	if r.fs.NArg() != 1 {
-		return errors.New("usage: keera sandbox show <name>")
-	}
 	sb, err := requireSandbox(ctx, r.c, r.org, r.fs.Arg(0))
 	if err != nil {
 		return err
@@ -234,9 +215,6 @@ func (r *sandboxRun) show(ctx context.Context) error {
 }
 
 func (r *sandboxRun) terminate(ctx context.Context) error {
-	if r.fs.NArg() != 1 {
-		return errors.New("usage: keera sandbox terminate <name> [--yes]")
-	}
 	sb, err := requireSandbox(ctx, r.c, r.org, r.fs.Arg(0))
 	if err != nil {
 		return err
@@ -256,9 +234,6 @@ func (r *sandboxRun) terminate(ctx context.Context) error {
 }
 
 func (r *sandboxRun) extend(ctx context.Context) error {
-	if r.fs.NArg() != 1 {
-		return errors.New("usage: keera sandbox extend <name> [--ttl 4h]")
-	}
 	sb, err := requireSandbox(ctx, r.c, r.org, r.fs.Arg(0))
 	if err != nil {
 		return err
@@ -283,9 +258,6 @@ func (r *sandboxRun) extend(ctx context.Context) error {
 }
 
 func (r *sandboxRun) suspendOrResume(ctx context.Context) error {
-	if r.fs.NArg() != 1 {
-		return fmt.Errorf("usage: keera sandbox %s <name>", r.sub)
-	}
 	sb, err := requireSandbox(ctx, r.c, r.org, r.fs.Arg(0))
 	if err != nil {
 		return err
@@ -319,9 +291,6 @@ func (r *sandboxRun) usage(ctx context.Context) error {
 }
 
 func (r *sandboxRun) apply(ctx context.Context) error {
-	if r.fs.NArg() != 1 {
-		return errors.New("usage: keera sandbox apply <sandboxes.yaml> [--org <id>]")
-	}
 	entries, err := catalog.LoadSandboxes(r.fs.Arg(0))
 	if err != nil {
 		return err
@@ -333,10 +302,9 @@ func (r *sandboxRun) apply(ctx context.Context) error {
 	// One class at a time, as the endpoint takes them. The file is checked
 	// first, so a stop halfway is the control plane going away, and a re-run
 	// is safe.
-	q := url.Values{"org_id": {orgID}}
 	classes := make([]policy.SandboxClass, len(entries))
 	for i, e := range entries {
-		path := "/v1/sandbox-classes/" + url.PathEscape(e.Name) + "?" + q.Encode()
+		path := inOrg("/v1/sandbox-classes/"+url.PathEscape(e.Name), orgID)
 		if err := r.c.do(ctx, "PUT", path, e, &classes[i]); err != nil {
 			return fmt.Errorf("applying %s: %w", e.Name, err)
 		}
@@ -352,28 +320,24 @@ func (r *sandboxRun) apply(ctx context.Context) error {
 // deleteClass removes one of the organisation's classes. Sandboxes already
 // running on it keep their own copy of it, so they are not affected.
 func (r *sandboxRun) deleteClass(ctx context.Context) error {
-	if r.fs.NArg() != 1 {
-		return errors.New("usage: keera sandbox delete-class <name> [--yes]")
-	}
 	name := r.fs.Arg(0)
 	orgID, err := resolveOrg(ctx, r.c, r.org)
 	if err != nil {
 		return err
 	}
 	if !r.yes {
-		fmt.Fprintf(os.Stderr, "%s\n", styleErr.head("Deleting the sandbox class "+name+":"))
-		fmt.Fprintln(os.Stderr, "  nobody can start a new sandbox of this class")
-		fmt.Fprintln(os.Stderr, "  sandboxes already running on it keep working")
-		if err := confirmTyping("class name", name, "nothing was deleted"); err != nil {
+		if err := confirm("Deleting the sandbox class "+name+":", []string{
+			"  nobody can start a new sandbox of this class",
+			"  sandboxes already running on it keep working",
+		}, "class name", name, "nothing was deleted"); err != nil {
 			return err
 		}
 	}
-	q := url.Values{"org_id": {orgID}}
 	var res struct {
 		Name          string `json:"name"`
 		LiveSandboxes int    `json:"live_sandboxes"`
 	}
-	path := "/v1/sandbox-classes/" + url.PathEscape(name) + "?" + q.Encode()
+	path := inOrg("/v1/sandbox-classes/"+url.PathEscape(name), orgID)
 	if err := r.c.do(ctx, "DELETE", path, nil, &res); err != nil {
 		return err
 	}
@@ -393,13 +357,12 @@ func (r *sandboxRun) classes(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	q := url.Values{"org_id": {orgID}}
 	var res struct {
 		Data   []policy.SandboxClass  `json:"data"`
 		Driver map[string]any         `json:"driver"`
 		Limits policy.ResolvedSandbox `json:"limits"`
 	}
-	if err := r.c.do(ctx, "GET", "/v1/sandbox-classes?"+q.Encode(), nil, &res); err != nil {
+	if err := r.c.do(ctx, "GET", inOrg("/v1/sandbox-classes", orgID), nil, &res); err != nil {
 		return err
 	}
 	return out(r.asJSON, res, func(w *table) {
@@ -494,16 +457,14 @@ func proxyTo(ctx context.Context, c *client, org, ref string, port int,
 	in io.Reader, outw io.Writer,
 ) error {
 	ref = sandboxRef(ref)
-	query := ""
+	endpoint := fmt.Sprintf("%s%s/v1/%s/tcp/%d", c.base, httpx.SandboxPrefix, url.PathEscape(ref), port)
 	if !id.HasPrefix(ref, "sbx") {
 		orgID, err := resolveOrg(ctx, c, org)
 		if err != nil {
 			return err
 		}
-		query = "?org_id=" + url.QueryEscape(orgID)
+		endpoint = inOrg(endpoint, orgID)
 	}
-	endpoint := fmt.Sprintf("%s%s/v1/%s/tcp/%d%s",
-		c.base, httpx.SandboxPrefix, url.PathEscape(ref), port, query)
 
 	conn, err := dialUpgrade(ctx, c, endpoint)
 	if err != nil {
@@ -766,13 +727,12 @@ func printSandboxUsage(w *table, by string, since time.Duration,
 }
 
 func confirmSandboxTerminate(sb store.Sandbox) error {
-	fmt.Fprintf(os.Stderr, "%s\n", styleErr.head("Terminating the sandbox "+sb.Name+":"))
-	// Said for every class: a home with no disk behind it is lost too.
-	fmt.Fprintf(os.Stderr, "  its home volume goes with it - anything in %s that is not pushed is lost\n",
-		"/home/"+sandboxUser)
-	fmt.Fprintln(os.Stderr, "  its API key is revoked")
-	fmt.Fprintln(os.Stderr, "What it cost and who it belonged to are kept.")
-	return confirmTyping("name", sb.Name, "nothing was terminated")
+	return confirm("Terminating the sandbox "+sb.Name+":", []string{
+		// Said for every class: a home with no disk behind it is lost too.
+		"  its home volume goes with it - anything in /home/" + sandboxUser + " that is not pushed is lost",
+		"  its API key is revoked",
+		"What it cost and who it belonged to are kept.",
+	}, "name", sb.Name, "nothing was terminated")
 }
 
 func sandboxSize(sb store.Sandbox) string { return sizeOf(sb.CPU, sb.Memory) }

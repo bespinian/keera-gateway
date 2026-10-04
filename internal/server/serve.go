@@ -453,29 +453,23 @@ func purgeOld(ctx context.Context, st *store.Store, cfg config.Config, log *slog
 	now := time.Now()
 	if cfg.UsageRetention > 0 {
 		n, err := st.PurgeUsage(ctx, now.Add(-cfg.UsageRetention))
-		switch {
-		case err != nil && ctx.Err() == nil:
-			log.Error("purging old usage failed", "error", err, "deleted", n)
-		case n > 0:
-			log.Info("purged usage past its retention window", "deleted", n)
-		}
+		logPurge(ctx, log, "usage past its retention window", n, err)
 		n, err = st.PurgeEnded(ctx, now.Add(-cfg.UsageRetention))
-		switch {
-		case err != nil && ctx.Err() == nil:
-			log.Error("purging ended sandboxes and keys failed", "error", err, "deleted", n)
-		case n > 0:
-			log.Info("purged sandboxes and keys that ended before the usage retention window",
-				"deleted", n)
-		}
+		logPurge(ctx, log, "sandboxes and keys that ended before the usage retention window", n, err)
 	}
 	if cfg.AuditRetention > 0 {
 		n, err := st.PurgeAudit(ctx, now.Add(-cfg.AuditRetention))
-		switch {
-		case err != nil && ctx.Err() == nil:
-			log.Error("purging old audit entries failed", "error", err, "deleted", n)
-		case n > 0:
-			log.Info("purged audit entries past their retention window", "deleted", n)
-		}
+		logPurge(ctx, log, "audit entries past their retention window", n, err)
+	}
+}
+
+// logPurge reports one purge. A failure caused by shutting down is not one.
+func logPurge(ctx context.Context, log *slog.Logger, what string, n int64, err error) {
+	switch {
+	case err != nil && ctx.Err() == nil:
+		log.Error("purging "+what+" failed", "error", err, "deleted", n)
+	case n > 0:
+		log.Info("purged "+what, "deleted", n)
 	}
 }
 

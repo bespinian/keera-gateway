@@ -45,12 +45,10 @@ func New(key string) (*Box, error) {
 
 // Seal encrypts a credential for the row name names. The name is
 // authenticated, so a ciphertext copied to another row fails to open.
-func (b *Box) Seal(name, plaintext string) ([]byte, error) {
+func (b *Box) Seal(name, plaintext string) []byte {
 	nonce := make([]byte, b.aead.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, err
-	}
-	return b.aead.Seal(nonce, nonce, []byte(plaintext), []byte(name)), nil
+	_, _ = rand.Read(nonce) // never fails; see crypto/rand.Read
+	return b.aead.Seal(nonce, nonce, []byte(plaintext), []byte(name))
 }
 
 // Open decrypts what Seal produced for the same name.

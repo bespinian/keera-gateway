@@ -131,7 +131,7 @@ func (s *Server) Run(ctx context.Context) {
 //
 // Administrator-only, like the request log.
 func (s *Server) requestStream(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if !s.requireOrgAdmin(w, p, p.OrgID) {
+	if !s.requireAdmin(w, p) {
 		return
 	}
 	orgID, _, _, ok := s.reportScope(w, r, p)

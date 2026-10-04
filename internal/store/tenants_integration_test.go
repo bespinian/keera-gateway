@@ -104,18 +104,12 @@ func TestTenancyLookupsUsedForAuthorisation(t *testing.T) {
 	if _, err := st.TeamOrg(ctx, "nobody"); err != ErrNotFound {
 		t.Errorf("TeamOrg for a missing team gave %v, want ErrNotFound", err)
 	}
-	if org, team, err := st.KeyScope(ctx, f.keyID); err != nil || org != f.orgID || team != f.teamID {
-		t.Errorf("KeyScope = %q, %q, %v", org, team, err)
-	}
-	if _, _, err := st.KeyScope(ctx, "nobody"); err != ErrNotFound {
-		t.Errorf("KeyScope for a missing key gave %v, want ErrNotFound", err)
-	}
-
-	// KeyOwner decides whether a member may revoke a key, so the attribution
-	// has to come back exactly as stored. The fixture's key is attributed to
-	// nobody, which is the case that must never read as "mine".
-	if org, user, err := st.KeyOwner(ctx, f.keyID); err != nil || org != f.orgID || user != "" {
-		t.Errorf("KeyOwner = %q, %q, %v; want the org and nobody", org, user, err)
+	// KeyOwnerOf decides whether a member may revoke a key, so the
+	// attribution has to come back exactly as stored. The fixture's key is
+	// attributed to nobody, which is the case that must never read as "mine".
+	want := KeyOwner{OrgID: f.orgID, TeamID: f.teamID}
+	if o, err := st.KeyOwnerOf(ctx, f.keyID); err != nil || o != want {
+		t.Errorf("KeyOwnerOf = %+v, %v; want %+v", o, err, want)
 	}
 	person, err := st.AddUser(ctx, "user_1", f.orgID, "dev@example.ch", "", "member")
 	if err != nil {
@@ -127,17 +121,12 @@ func TestTenancyLookupsUsedForAuthorisation(t *testing.T) {
 	}, []byte("hash-of-keera_sk_theirs-32-bytes!!")); err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
-	if org, user, err := st.KeyOwner(ctx, "key_2"); err != nil || org != f.orgID || user != person.ID {
-		t.Errorf("KeyOwner = %q, %q, %v; want the org and %q", org, user, err, person.ID)
+	want = KeyOwner{OrgID: f.orgID, UserID: person.ID}
+	if o, err := st.KeyOwnerOf(ctx, "key_2"); err != nil || o != want {
+		t.Errorf("KeyOwnerOf = %+v, %v; want %+v", o, err, want)
 	}
-	if _, _, err := st.KeyOwner(ctx, "nobody"); err != ErrNotFound {
-		t.Errorf("KeyOwner for a missing key gave %v, want ErrNotFound", err)
-	}
-	if ok, err := st.OrgExists(ctx, f.orgID); err != nil || !ok {
-		t.Errorf("OrgExists = %v, %v", ok, err)
-	}
-	if ok, err := st.OrgExists(ctx, "nobody"); err != nil || ok {
-		t.Errorf("OrgExists for a missing org = %v, %v", ok, err)
+	if _, err := st.KeyOwnerOf(ctx, "nobody"); err != ErrNotFound {
+		t.Errorf("KeyOwnerOf for a missing key gave %v, want ErrNotFound", err)
 	}
 
 	// A report grouped by team or key renders names, not ids.

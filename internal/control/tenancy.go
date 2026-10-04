@@ -20,7 +20,7 @@ import (
 
 func (s *Server) createOrg(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	if !p.Unrestricted() {
-		s.forbid(w, "only an operator can create an organisation")
+		forbid(w, "only an operator can create an organisation")
 		return
 	}
 	var in struct {
@@ -72,7 +72,7 @@ func (s *Server) listOrgs(w http.ResponseWriter, r *http.Request, p *authn.Princ
 
 func (s *Server) updateOrg(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	if !p.Unrestricted() {
-		s.forbid(w, "only an operator can change an organisation")
+		forbid(w, "only an operator can change an organisation")
 		return
 	}
 	var in struct {
@@ -128,7 +128,7 @@ func (s *Server) failOrg(w http.ResponseWriter, err error) {
 
 func (s *Server) deleteOrg(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	if !p.Unrestricted() {
-		s.forbid(w, "only an operator can delete an organisation")
+		forbid(w, "only an operator can delete an organisation")
 		return
 	}
 	orgID := r.PathValue("id")
@@ -136,7 +136,7 @@ func (s *Server) deleteOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	// session, and maybe the last operator with them. This is a guard, not a
 	// permission: another operator, or the operator key, can still do it.
 	if p.OrgID != "" && p.OrgID == orgID {
-		s.forbid(w, "you cannot delete the organisation you are signed in to; "+
+		forbid(w, "you cannot delete the organisation you are signed in to; "+
 			"use another operator's account or the operator key")
 		return
 	}
@@ -213,8 +213,7 @@ func (s *Server) teamOrg(w http.ResponseWriter, r *http.Request, p *authn.Princi
 ) (string, bool) {
 	// A caller who administers nothing is refused before the read, so a
 	// member cannot probe which team ids exist.
-	if !p.Unrestricted() && p.Role != authn.RoleAdmin {
-		s.forbid(w, "only an administrator of this organisation can do that")
+	if !s.requireAdmin(w, p) {
 		return "", false
 	}
 	owner, err := s.st.TeamOrg(r.Context(), teamID)
@@ -232,15 +231,7 @@ func (s *Server) teamOrg(w http.ResponseWriter, r *http.Request, p *authn.Princi
 // only says that the team exists somewhere.
 func (s *Server) requireTeamInOrg(w http.ResponseWriter, r *http.Request, teamID, orgID string) bool {
 	owner, err := s.st.TeamOrg(r.Context(), teamID)
-	if err != nil {
-		s.fail(w, err)
-		return false
-	}
-	if owner != orgID {
-		s.forbid(w, "that team is not in this organisation")
-		return false
-	}
-	return true
+	return s.inOrg(w, orgID, owner, err)
 }
 
 // updateTeam renames a team, the only field of a team that is not an id or a
@@ -293,11 +284,7 @@ func (s *Server) deleteTeam(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	gone, err := s.st.DeleteTeam(r.Context(), teamID)
 	if inUse, ok := errors.AsType[*store.TeamInUseError](err); ok {
 		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "team_has_keys",
-			"'"+inUse.Team+"' still holds "+keyCount(len(inUse.Aliases))+" that have not been "+
-				"revoked ("+strings.Join(inUse.Aliases, ", ")+"). Without the team they would "+
-				"keep working under the organisation's guardrails alone, outside the team's "+
-				"allow-list, budget and rate limit, so revoke them first. A key cannot change "+
-				"team: issue a new one in another team for anything that still needs one")
+			"revoke the keys of '"+inUse.Team+"' first: "+strings.Join(inUse.Aliases, ", "))
 		return
 	}
 	if err != nil {
@@ -311,14 +298,6 @@ func (s *Server) deleteTeam(w http.ResponseWriter, r *http.Request, p *authn.Pri
 		"id": gone.ID, "name": gone.Name, "deleted": true,
 		"detached_keys": gone.DetachedKeys,
 	})
-}
-
-// keyCount writes "1 key" or "n keys".
-func keyCount(n int) string {
-	if n == 1 {
-		return "1 key"
-	}
-	return strconv.Itoa(n) + " keys"
 }
 
 // ------------------------------------------------------------------- users
@@ -347,7 +326,7 @@ func (s *Server) addUser(w http.ResponseWriter, r *http.Request, p *authn.Princi
 	// administrator could name someone from another tenant's directory, so
 	// only an operator may. Everyone else is linked on their first sign-in.
 	if in.ExternalID != "" && !p.Unrestricted() {
-		s.forbid(w, "only an operator can set 'external_id'; leave it out, and the "+
+		forbid(w, "only an operator can set 'external_id'; leave it out, and the "+
 			"person is linked to their identity on their first sign-in")
 		return
 	}
@@ -469,7 +448,7 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	}
 	if target.ID == p.UserID && role != p.Role {
 		// Dropping your own last privilege could lock everyone out.
-		s.forbid(w, "you cannot change your own role")
+		forbid(w, "you cannot change your own role")
 		return
 	}
 	if err := s.st.SetUserRole(r.Context(), userID, string(role)); err != nil {
@@ -557,7 +536,7 @@ func (s *Server) userToSwitch(w http.ResponseWriter, r *http.Request, p *authn.P
 		return target, false
 	}
 	if target.ID == p.UserID {
-		s.forbid(w, "you cannot "+verb+" yourself")
+		forbid(w, "you cannot "+verb+" yourself")
 		return target, false
 	}
 	if target.Role == string(authn.RoleOperator) {
@@ -572,7 +551,7 @@ func (s *Server) userToSwitch(w http.ResponseWriter, r *http.Request, p *authn.P
 // forbidOperator refuses a change to an operator, whose role comes from the
 // gateway's configuration and not from here.
 func (s *Server) forbidOperator(w http.ResponseWriter, email string) {
-	s.forbid(w, email+" is an operator through the gateway's configuration; "+
+	forbid(w, email+" is an operator through the gateway's configuration; "+
 		"remove the address from KEERA_OPERATORS, or the person from a group in "+
 		"KEERA_OIDC_<NAME>_OPERATOR_GROUPS")
 }
@@ -585,12 +564,12 @@ func (s *Server) forbidOperator(w http.ResponseWriter, email string) {
 // it.
 func (s *Server) mayGrant(w http.ResponseWriter, role authn.Role) bool {
 	if !role.Assignable() {
-		s.forbid(w, "the operator role is granted by KEERA_OPERATORS or a group in "+
+		forbid(w, "the operator role is granted by KEERA_OPERATORS or a group in "+
 			"KEERA_OIDC_<NAME>_OPERATOR_GROUPS, and cannot be assigned here")
 		return false
 	}
 	if s.opts.Providers.AdminFromDirectory() {
-		s.forbid(w, "roles come from the identity provider on this deployment: "+
+		forbid(w, "roles come from the identity provider on this deployment: "+
 			"change this person's group membership in the directory, or unset "+
 			"KEERA_OIDC_<NAME>_ADMIN_GROUPS to assign roles here")
 		return false
@@ -630,7 +609,7 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		in.UserID = p.UserID
 	}
 	if !p.CanManageKeyFor(orgID, in.UserID) {
-		s.forbid(w, "a member can only issue a key attributed to themselves; "+
+		forbid(w, "a member can only issue a key attributed to themselves; "+
 			"issuing one for somebody else is for an administrator of this organisation")
 		return
 	}
@@ -638,7 +617,7 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	// nobody gets a key that belongs somewhere else than they asked. A
 	// member's key uses the organisation's own guardrails.
 	if in.TeamID != "" && !p.CanAdminOrg(orgID) {
-		s.forbid(w, "a member cannot choose the team a key belongs to; "+
+		forbid(w, "a member cannot choose the team a key belongs to; "+
 			"the key is issued against this organisation's own guardrails")
 		return
 	}
@@ -656,16 +635,11 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	// so it must be someone in this organisation.
 	if in.UserID != "" {
 		user, err := s.st.UserByID(r.Context(), in.UserID)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		if user.OrgID != orgID {
-			s.forbid(w, "that person is not in this organisation")
+		if !s.inOrg(w, orgID, user.OrgID, err) {
 			return
 		}
 		if user.Disabled() {
-			s.forbid(w, user.Email+" is disabled, so a key for them would not work; "+
+			forbid(w, user.Email+" is disabled, so a key for them would not work; "+
 				"enable them first")
 			return
 		}
@@ -683,13 +657,9 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		return
 	}
 
-	secret, hash, prefix, err := auth.Generate()
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
+	secret, hash, prefix := auth.Generate()
 	info.Prefix = prefix
-	info, err = s.st.CreateKey(r.Context(), info, hash)
+	info, err := s.st.CreateKey(r.Context(), info, hash)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -731,11 +701,7 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	if next.ExpiresAt, ok = expiresIn(w, in.ExpiresIn); !ok {
 		return
 	}
-	secret, hash, prefix, err := auth.Generate()
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
+	secret, hash, prefix := auth.Generate()
 	next.Prefix = prefix
 	info, err := s.st.RotateKey(r.Context(), oldID, next, hash)
 	if errors.Is(err, store.ErrKeyRevoked) {
@@ -768,16 +734,16 @@ func (s *Server) listKeys(w http.ResponseWriter, r *http.Request, p *authn.Princ
 		return
 	}
 	// Spend uses the same window as the teams screen, so the two agree.
+	since := policy.PeriodMonth.Start(time.Now())
 	keys, err := s.st.KeySummaries(r.Context(), store.KeyQuery{
-		OrgID: orgID, TeamID: q.Get("team_id"),
-		Since: policy.PeriodMonth.Start(time.Now()),
+		OrgID: orgID, TeamID: q.Get("team_id"), Since: since,
 	})
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"data": keys, "currency": s.opts.Currency, "since": policy.PeriodMonth.Start(time.Now()),
+		"data": keys, "currency": s.opts.Currency, "since": since,
 	})
 }
 
@@ -788,17 +754,18 @@ func (s *Server) listKeys(w http.ResponseWriter, r *http.Request, p *authn.Princ
 func (s *Server) keyToManage(w http.ResponseWriter, r *http.Request, p *authn.Principal,
 	keyID, verb string,
 ) (owner, holder string, ok bool) {
-	owner, holder, err := s.st.KeyOwner(r.Context(), keyID)
+	o, err := s.st.KeyOwnerOf(r.Context(), keyID)
 	if err != nil {
 		s.fail(w, err)
 		return "", "", false
 	}
+	owner, holder = o.OrgID, o.UserID
 	if !p.CanReadOrg(owner) {
 		s.fail(w, store.ErrNotFound)
 		return "", "", false
 	}
 	if !p.CanManageKeyFor(owner, holder) {
-		s.forbid(w, "a member can only "+verb+" a key attributed to themselves; "+
+		forbid(w, "a member can only "+verb+" a key attributed to themselves; "+
 			"somebody else's, or one attributed to nobody, is for an "+
 			"administrator of this organisation")
 		return "", "", false

@@ -13,6 +13,7 @@ import {
   icons,
   showError,
   plural,
+  field,
 } from "../ui.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
 import { userPasskeys, showPasskeyLink } from "./passkeys.js";
@@ -277,19 +278,13 @@ function addPerson(ctx) {
       "form",
       { onSubmit: (e) => e.preventDefault() },
       err,
-      h("div", { class: "field" }, h("label", {}, "Email"), email),
+      field("Email", email),
       ctx.state.me.passkeys
-        ? h(
-            "div",
-            { class: "field" },
-            h("label", {}, "Signs in with"),
+        ? field(
+            "Signs in with",
             signIn,
-            h(
-              "div",
-              { class: "hint" },
-              "A passkey account does not leave with the directory: disable " +
-                "it here when they leave. You get a set-up link to send them.",
-            ),
+            "A passkey account does not leave with the directory: disable " +
+              "it here when they leave. You get a set-up link to send them.",
           )
         : null,
       canAssign
@@ -352,16 +347,10 @@ function changeRole(ctx, user) {
       "div",
       {},
       err,
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "Role"),
+      field(
+        "Role",
         role,
-        h(
-          "div",
-          { class: "hint" },
-          "This signs them out everywhere, so the new role applies at once.",
-        ),
+        "This signs them out everywhere, so the new role applies at once.",
       ),
     ),
     actions: (close) => [
@@ -424,10 +413,15 @@ function disablePerson(ctx, user) {
     onConfirm: async () => {
       const res = await api.disableUser(user.id);
       const keys = `${res.revoked_keys} ${plural(res.revoked_keys, "key")}`;
+      const sb = res.sandboxes || {};
+      const stopped = (sb.terminated || 0) + (sb.suspended || 0);
+      const sandboxes = stopped
+        ? `, ${stopped} ${plural(stopped, "sandbox", "sandboxes")} stopped`
+        : "";
       toast(
         res.warning
           ? `${user.email} disabled. ${res.warning}`
-          : `${user.email} disabled; ${keys} revoked`,
+          : `${user.email} disabled; ${keys} revoked${sandboxes}`,
         res.warning ? "bad" : "good",
       );
       ctx.reload();

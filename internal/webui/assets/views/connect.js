@@ -8,7 +8,7 @@
 // that works, not a template they have to fill in and get wrong once.
 
 import { api, chatTargets } from "../api.js";
-import { h, icon, icons, copyText, empty, go } from "../ui.js";
+import { h, icon, icons, copyText, empty, go, compact } from "../ui.js";
 import { chooseOrg } from "./orgs.js";
 
 // The configuration blocks come from the control plane at /control/v1/connect
@@ -154,7 +154,7 @@ export async function connectView(ctx) {
         m.router
           ? `${m.alias} - router`
           : m.max_context
-            ? `${m.alias} - ${compactContext(m.max_context)} context`
+            ? `${m.alias} - ${compact(m.max_context)} context`
             : m.alias,
       ),
     ),
@@ -354,8 +354,4 @@ export function title(alias) {
     .filter(Boolean)
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
-}
-
-function compactContext(n) {
-  return n >= 1000 ? Math.round(n / 1000) + "k" : String(n);
 }

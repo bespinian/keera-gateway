@@ -165,7 +165,7 @@ func (s *Server) listSandboxes(w http.ResponseWriter, r *http.Request, p *authn.
 	// organisation's, but still cannot attach to them.
 	if !p.CanAdminOrg(orgID) {
 		if p.UserID == "" {
-			s.forbid(w, "this account is not attached to a person, so it has no sandboxes of "+
+			forbid(w, "this account is not attached to a person, so it has no sandboxes of "+
 				"its own to list")
 			return
 		}
@@ -266,7 +266,7 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request, p *authn.
 	// As with keys, a member may not pick the team: the team holds the
 	// guardrail, the budget and the sandbox quota.
 	if in.TeamID != "" && !p.CanAdminOrg(orgID) {
-		s.forbid(w, "a member cannot choose the team a sandbox belongs to; it is created "+
+		forbid(w, "a member cannot choose the team a sandbox belongs to; it is created "+
 			"against this organisation's own guardrails")
 		return
 	}
@@ -422,7 +422,7 @@ func (s *Server) sandboxUsage(w http.ResponseWriter, r *http.Request, p *authn.P
 		return
 	}
 	if orgID != "" && !p.CanAdminOrg(orgID) {
-		s.forbid(w, "sandbox usage spans everybody in the organisation; reading it is an "+
+		forbid(w, "sandbox usage spans everybody in the organisation; reading it is an "+
 			"administrator's")
 		return
 	}

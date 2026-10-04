@@ -15,10 +15,7 @@ func TestRoundTrip(t *testing.T) {
 	}
 	const credential = "sk-ant-a-real-looking-credential"
 
-	sealed, err := b.Seal("keera-frontier", credential)
-	if err != nil {
-		t.Fatalf("Seal: %v", err)
-	}
+	sealed := b.Seal("keera-frontier", credential)
 	if bytes.Contains(sealed, []byte("sk-ant")) {
 		t.Error("the credential is recognisable in its own ciphertext")
 	}
@@ -32,10 +29,7 @@ func TestRoundTrip(t *testing.T) {
 
 	// Two seals of the same credential must not be the same bytes, or the
 	// models table tells a reader which models share a key.
-	again, err := b.Seal("keera-frontier", credential)
-	if err != nil {
-		t.Fatalf("Seal: %v", err)
-	}
+	again := b.Seal("keera-frontier", credential)
 	if bytes.Equal(sealed, again) {
 		t.Error("sealing twice produced identical ciphertext")
 	}
@@ -46,10 +40,7 @@ func TestOpenRefusesWhatItShould(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	sealed, err := b.Seal("keera-frontier", "sk-ant-credential")
-	if err != nil {
-		t.Fatalf("Seal: %v", err)
-	}
+	sealed := b.Seal("keera-frontier", "sk-ant-credential")
 
 	// Moved to another alias's row.
 	if _, err := b.Open("keera-speed", sealed); err == nil {

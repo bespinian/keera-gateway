@@ -62,8 +62,8 @@ func (s *Server) storedLimits(ctx context.Context, scope policy.ScopeType, id st
 //
 // On an organisation, only an operator may: one forge credential reaches
 // every tenant's repositories, and this list keeps a tenant to its own. An
-// administrator's write keeps what the operator set. Teams and keys only
-// narrow it, so their administrators may set theirs.
+// administrator's write keeps what the operator set. A team only narrows it,
+// so its administrators may set theirs. A key cannot set it at all.
 func (s *Server) checkAllowedRepos(w http.ResponseWriter, r *http.Request, p *authn.Principal,
 	scope policy.ScopeType, scopeID string, lim *policy.Limits,
 ) bool {
@@ -85,7 +85,7 @@ func (s *Server) checkAllowedRepos(w http.ResponseWriter, r *http.Request, p *au
 		return false
 	}
 	if lim.AllowedRepos != nil && !slices.Equal(lim.AllowedRepos, stored.AllowedRepos) {
-		s.forbid(w, "only an operator can change which repositories an organisation's "+
+		forbid(w, "only an operator can change which repositories an organisation's "+
 			"sandboxes may check out; leave 'allowed_repos' out to keep it")
 		return false
 	}
@@ -186,18 +186,14 @@ func (s *Server) scopeChain(ctx context.Context, scope policy.ScopeType, scopeID
 ) {
 	switch scope {
 	case policy.ScopeOrg:
-		exists, err := s.st.OrgExists(ctx, scopeID)
-		if err == nil && !exists {
-			err = store.ErrNotFound
-		}
+		_, err := s.st.OrgByID(ctx, scopeID)
 		return scopeID, "", err
 	case policy.ScopeTeam:
 		orgID, err := s.st.TeamOrg(ctx, scopeID)
 		return orgID, scopeID, err
-	case policy.ScopeKey:
-		return s.st.KeyScope(ctx, scopeID)
-	default:
-		return "", "", errors.New("scope must be one of org, team, key")
+	default: // policy.ScopeKey; policyScope refuses any other.
+		o, err := s.st.KeyOwnerOf(ctx, scopeID)
+		return o.OrgID, o.TeamID, err
 	}
 }
 
@@ -403,8 +399,7 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 	m.Alias = r.PathValue("alias")
 	m.OrgID = orgID
 	if !policy.ValidAlias(m.Alias) {
-		badRequest(w, "an alias must be lowercase letters, digits and interior hyphens: it is rendered "+
-			"into the client configurations `keera connect` prints, which quote none of it")
+		badRequest(w, badAlias(m.Alias))
 		return
 	}
 	credential := ""
@@ -457,6 +452,12 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 		stored.HasAPIKey = false
 	}
 	httpx.WriteJSON(w, http.StatusOK, stored)
+}
+
+// badAlias refuses an alias that is not one. An alias goes into URLs, command
+// lines and client configurations, which quote none of it.
+func badAlias(alias string) string {
+	return "'" + alias + "' is not a usable alias; use lowercase letters, digits and inner hyphens"
 }
 
 // normalizeModel fills in a model's defaults and says what is wrong with it,
@@ -530,7 +531,7 @@ func (s *Server) checkModelAlias(w http.ResponseWriter, r *http.Request, orgID, 
 // checkSubscriptionUsers refuses to make a model a subscription model while a
 // filter or router uses it. Only Claude Code signed in to a Claude plan
 // reaches such a model, so they would fail on every request. It is the other
-// half of the subscription checks in checkFilterModel, checkRouterModel and
+// half of the subscription checks in checkReaderModel and
 // checkDestinations, since the writes can come in either order.
 func (s *Server) checkSubscriptionUsers(w http.ResponseWriter, r *http.Request,
 	orgID, alias string) bool {
@@ -587,23 +588,32 @@ func (s *Server) aliasTaken(w http.ResponseWriter, err error, msg string) bool {
 func (s *Server) setModelCredential(r *http.Request, p *authn.Principal,
 	orgID, alias, credential string,
 ) error {
+	return s.setCredential(r, p, orgID, alias, credential, "model",
+		registry.ModelSecretName, s.st.SetModelCredential)
+}
+
+// setCredential seals a credential for the thing of kind named by alias, or
+// clears it when credential is empty. name is the row's secret name, set the
+// store's setter.
+func (s *Server) setCredential(r *http.Request, p *authn.Principal,
+	orgID, alias, credential, kind string,
+	name func(orgID, alias string) string,
+	set func(ctx context.Context, orgID, alias string, sealed []byte) error,
+) error {
 	var sealed []byte
 	if credential != "" {
-		var err error
-		if sealed, err = s.opts.Secrets.Seal(registry.ModelSecretName(orgID, alias), credential); err != nil {
-			return err
-		}
+		sealed = s.opts.Secrets.Seal(name(orgID, alias), credential)
 	}
-	if err := s.st.SetModelCredential(r.Context(), orgID, alias, sealed); err != nil {
+	if err := set(r.Context(), orgID, alias, sealed); err != nil {
 		return err
 	}
-	action := "model.credential.set"
+	action := kind + ".credential.set"
 	if credential == "" {
-		action = "model.credential.clear"
+		action = kind + ".credential.clear"
 	}
 	// Nothing about the credential goes into the audit log, not even its
 	// length. Who set it and when is the record.
-	s.auditf(r, p, orgID, action, "model", alias, nil)
+	s.auditf(r, p, orgID, action, kind, alias, nil)
 	return nil
 }
 
