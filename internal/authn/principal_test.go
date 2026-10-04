@@ -87,17 +87,16 @@ func TestCanManageKeyForIsSelfOnlyForAMember(t *testing.T) {
 		user string
 		want bool
 	}{
-		{"member issues their own", member, "org_a", "user_1", true},
-		{"member cannot issue for a colleague", member, "org_a", "user_2", false},
+		{"member rotates their own", member, "org_a", "user_1", true},
+		{"member cannot rotate a colleague's", member, "org_a", "user_2", false},
 		// Attributed to nobody is what an administrator issues for a shared
-		// pipeline. A member's key is the one thing a member may create, and a
-		// key attributed to nobody is not theirs.
-		{"member cannot issue an unattributed key", member, "org_a", "", false},
-		{"member cannot issue into another organisation", member, "org_b", "user_1", false},
-		{"admin issues for anybody in their own", admin, "org_a", "user_1", true},
-		{"admin issues for nobody in particular", admin, "org_a", "", true},
-		{"admin cannot issue into another organisation", admin, "org_b", "user_1", false},
-		{"the operator key issues anywhere", operatorKey, "org_a", "user_1", true},
+		// pipeline. It is not the member's.
+		{"member cannot rotate an unattributed key", member, "org_a", "", false},
+		{"member cannot rotate in another organisation", member, "org_b", "user_1", false},
+		{"admin rotates anybody's in their own", admin, "org_a", "user_1", true},
+		{"admin rotates nobody's in particular", admin, "org_a", "", true},
+		{"admin cannot rotate in another organisation", admin, "org_b", "user_1", false},
+		{"the operator key rotates anywhere", operatorKey, "org_a", "user_1", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -108,13 +107,13 @@ func TestCanManageKeyForIsSelfOnlyForAMember(t *testing.T) {
 	}
 }
 
-// A member whose session carries no user row has nobody to attribute a key to,
-// so "issue your own" has no meaning for them. It must not collapse into
-// "issue one attributed to nobody", which is an administrator's key.
+// A member whose session carries no user row has no keys of their own. That
+// must not collapse into "the keys attributed to nobody", which are an
+// administrator's.
 func TestCanManageKeyForNeedsAUser(t *testing.T) {
 	orphan := &Principal{Via: MethodSession, Role: RoleMember, OrgID: "org_a"}
 	if orphan.CanManageKeyFor("org_a", "") {
-		t.Error("a member with no user id was allowed to issue a key")
+		t.Error("a member with no user id was allowed to manage a key attributed to nobody")
 	}
 }
 

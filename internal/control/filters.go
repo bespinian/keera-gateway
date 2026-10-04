@@ -39,7 +39,7 @@ func (s *Server) listFilters(w http.ResponseWriter, r *http.Request, p *authn.Pr
 }
 
 // filterReport is one filter's own screen: how often it fires, what it does,
-// what it adds to latency and cost, and which teams it refuses.
+// what it adds to latency and cost, and which projects it refuses.
 //
 // Every member may read it: these are counts of the organisation's own
 // traffic, which members already see on the Dashboard.
@@ -59,13 +59,13 @@ func (s *Server) filterReport(w http.ResponseWriter, r *http.Request, p *authn.P
 		s.fail(w, err)
 		return
 	}
-	names, err := s.st.TeamNames(r.Context(), orgID)
+	names, err := s.st.ProjectNames(r.Context(), orgID)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	out := map[string]any{
-		"report": report, "team_names": names, "currency": s.opts.Currency,
+		"report": report, "project_names": names, "currency": s.opts.Currency,
 	}
 	// A deleted filter keeps its traffic, so the report is served either way
 	// and "filter" is left out rather than answering 404.
@@ -349,7 +349,7 @@ func (s *Server) checkFilter(w http.ResponseWriter, r *http.Request, p *authn.Pr
 // either order.
 //
 // Only the organisation scope is checked: filters and routers belong to the
-// organisation, and a team's or key's list narrows only that key.
+// organisation, and a project's or key's list narrows only that key.
 func (s *Server) checkAllowList(w http.ResponseWriter, r *http.Request,
 	scope policy.ScopeType, orgID string, lim *policy.Limits) bool {
 	if scope != policy.ScopeOrg || lim.AllowedModels == nil {

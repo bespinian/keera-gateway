@@ -22,13 +22,13 @@ func TestLookupKeyCollapsesTheWholeChain(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("PutPolicy org: %v", err)
 	}
-	if err := st.PutPolicy(ctx, policy.ScopeTeam, f.teamID, policy.Limits{
+	if err := st.PutPolicy(ctx, policy.ScopeProject, f.projectID, policy.Limits{
 		AllowedModels:   []string{"keera-code", "keera-speed"},
 		MaxOutputTokens: new(2048), RPM: new(120),
 		BudgetMicros: new(int64(500_000_000)), BudgetPeriod: new(policy.PeriodDay),
-		SystemPrompt: new("Prefer the payments team's own libraries."),
+		SystemPrompt: new("Prefer the payments project's own libraries."),
 	}); err != nil {
-		t.Fatalf("PutPolicy team: %v", err)
+		t.Fatalf("PutPolicy project: %v", err)
 	}
 	if err := st.PutPolicy(ctx, policy.ScopeKey, f.keyID, policy.Limits{
 		AllowedModels: []string{"keera-speed", "keera-frontier"},
@@ -42,11 +42,11 @@ func TestLookupKeyCollapsesTheWholeChain(t *testing.T) {
 		t.Fatalf("LookupKey: %v", err)
 	}
 
-	if res.Key.OrgID != f.orgID || res.Key.TeamID != f.teamID || res.Key.ID != f.keyID {
+	if res.Key.OrgID != f.orgID || res.Key.ProjectID != f.projectID || res.Key.ID != f.keyID {
 		t.Errorf("resolved key = %+v, want the fixture's ids", res.Key)
 	}
 	// The intersection of all three allow-lists, and nothing else: keera-code is
-	// dropped by the key, keera-frontier by the team.
+	// dropped by the key, keera-frontier by the project.
 	if len(res.AllowedModels) != 1 || res.AllowedModels[0] != "keera-speed" {
 		t.Errorf("AllowedModels = %v, want [keera-speed]", res.AllowedModels)
 	}
@@ -55,9 +55,9 @@ func TestLookupKeyCollapsesTheWholeChain(t *testing.T) {
 			res.MaxOutputTokens)
 	}
 	// Text does not narrow: the organisation's instruction reaches the request
-	// whatever the team added after it.
+	// whatever the project added after it.
 	const wantPrompt = "Never include customer data in an example.\n\n" +
-		"Prefer the payments team's own libraries."
+		"Prefer the payments project's own libraries."
 	if res.SystemPrompt != wantPrompt {
 		t.Errorf("SystemPrompt = %q, want %q", res.SystemPrompt, wantPrompt)
 	}
@@ -66,7 +66,7 @@ func TestLookupKeyCollapsesTheWholeChain(t *testing.T) {
 	want := []policy.Scope{
 		{Type: policy.ScopeOrg, ID: f.orgID, RPM: 600, TPM: 400000,
 			BudgetMicros: 10_000_000_000, Period: policy.PeriodMonth},
-		{Type: policy.ScopeTeam, ID: f.teamID, RPM: 120, TPM: 0,
+		{Type: policy.ScopeProject, ID: f.projectID, RPM: 120, TPM: 0,
 			BudgetMicros: 500_000_000, Period: policy.PeriodDay},
 		{Type: policy.ScopeKey, ID: f.keyID, RPM: 30, TPM: 0,
 			BudgetMicros: 0, Period: policy.PeriodMonth},
@@ -114,7 +114,7 @@ func TestLookupKeyRejectsUnknownRevokedAndExpiredKeys(t *testing.T) {
 
 	past := time.Now().Add(-time.Hour)
 	if _, err := st.CreateKey(ctx, KeyInfo{
-		ID: "key_expired", OrgID: f.orgID, Alias: "expired", Prefix: "keera_sk_exp",
+		ID: "key_expired", OrgID: f.orgID, Name: "expired", Prefix: "keera_sk_exp",
 		ExpiresAt: &past,
 	}, []byte("hash-expired-0000000000000000000")); err != nil {
 		t.Fatalf("CreateKey: %v", err)
@@ -144,10 +144,10 @@ func TestLookupKeyRejectsUnknownRevokedAndExpiredKeys(t *testing.T) {
 	}
 }
 
-func TestLookupKeyIgnoresATeamInAnotherOrganisation(t *testing.T) {
-	// The control plane refuses to bind a key to a team outside its own
+func TestLookupKeyIgnoresAProjectInAnotherOrganisation(t *testing.T) {
+	// The control plane refuses to bind a key to a project outside its own
 	// organisation. This is the second lock on the same door: a row written
-	// another way must resolve as a key with no team - inheriting nothing and
+	// another way must resolve as a key with no project - inheriting nothing and
 	// consuming nothing of a tenant it does not belong to - rather than
 	// inheriting the other tenant's guardrails.
 	st, ctx := db(t)
@@ -156,10 +156,10 @@ func TestLookupKeyIgnoresATeamInAnotherOrganisation(t *testing.T) {
 	if _, err := st.CreateOrg(ctx, Org{ID: "org_2", Name: "Another Bank"}, OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
-	if _, err := st.CreateTeam(ctx, "team_elsewhere", "org_2", "Somebody Else"); err != nil {
-		t.Fatalf("CreateTeam: %v", err)
+	if _, err := st.CreateProject(ctx, Project{ID: "project_elsewhere", OrgID: "org_2", Name: "Somebody Else"}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
 	}
-	if err := st.PutPolicy(ctx, policy.ScopeTeam, "team_elsewhere", policy.Limits{
+	if err := st.PutPolicy(ctx, policy.ScopeProject, "project_elsewhere", policy.Limits{
 		AllowedModels: []string{"a-model-this-key-must-not-reach"},
 		BudgetMicros:  new(int64(999_000_000)),
 	}); err != nil {
@@ -167,7 +167,7 @@ func TestLookupKeyIgnoresATeamInAnotherOrganisation(t *testing.T) {
 	}
 	// Written past the control plane, which is the case this defends against.
 	if _, err := st.pool.Exec(ctx,
-		"UPDATE api_keys SET team_id = 'team_elsewhere' WHERE id = $1", f.keyID); err != nil {
+		"UPDATE api_keys SET project_id = 'project_elsewhere' WHERE id = $1", f.keyID); err != nil {
 		t.Fatalf("planting the cross-tenant row: %v", err)
 	}
 
@@ -175,11 +175,11 @@ func TestLookupKeyIgnoresATeamInAnotherOrganisation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LookupKey: %v", err)
 	}
-	if res.Key.TeamID != "" {
-		t.Errorf("TeamID = %q, want empty: the team is outside the key's org", res.Key.TeamID)
+	if res.Key.ProjectID != "" {
+		t.Errorf("ProjectID = %q, want empty: the project is outside the key's org", res.Key.ProjectID)
 	}
 	if len(res.Scopes) != 2 {
-		t.Errorf("%d scopes, want 2 - org and key, with no team between them", len(res.Scopes))
+		t.Errorf("%d scopes, want 2 - org and key, with no project between them", len(res.Scopes))
 	}
 	if res.AllowedModels != nil {
 		t.Errorf("the other tenant's allow-list was inherited: %v", res.AllowedModels)
@@ -196,10 +196,10 @@ func TestLookupKeyByIDMatchesTheHashLookup(t *testing.T) {
 	// the key's own requests do.
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
-	if err := st.PutPolicy(ctx, policy.ScopeTeam, f.teamID, policy.Limits{
+	if err := st.PutPolicy(ctx, policy.ScopeProject, f.projectID, policy.Limits{
 		AllowedModels: []string{"keera-code"}, RPM: new(120),
 	}); err != nil {
-		t.Fatalf("PutPolicy team: %v", err)
+		t.Fatalf("PutPolicy project: %v", err)
 	}
 
 	byHash, err := st.LookupKey(ctx, f.hash)

@@ -152,9 +152,9 @@ func invalid(format string, args ...any) error {
 
 // CreateRequest is one authenticated request for a sandbox.
 type CreateRequest struct {
-	OrgID  string
-	TeamID string
-	UserID string
+	OrgID     string
+	ProjectID string
+	UserID    string
 	// Owner is the address the sandbox belongs to. It is stamped into the
 	// cluster and copied onto the row.
 	Owner string
@@ -180,7 +180,7 @@ type CreateRequest struct {
 	// sandbox with none is refused.
 	AuthorizedKeys []string
 	// Limits is the caller's resolved sandbox guardrail: the organisation's,
-	// narrowed by the team's.
+	// narrowed by the project's.
 	Limits policy.ResolvedSandbox
 	// Env is extra environment from the caller, for the first start only. It
 	// cannot name a KEERA_ variable, or a caller could point a sandbox at
@@ -222,7 +222,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (store.Sandbox,
 	rollback := m.undoStart(ctx, keyID, &git)
 
 	row := store.Sandbox{
-		ID: sbID, OrgID: req.OrgID, TeamID: req.TeamID, UserID: req.UserID, Owner: req.Owner,
+		ID: sbID, OrgID: req.OrgID, ProjectID: req.ProjectID, UserID: req.UserID, Owner: req.Owner,
 		Name: req.Name, Class: class.Name, Purpose: req.Purpose,
 		State: policy.SandboxPending, Detail: "accepted",
 		Image: class.Image, Isolation: class.Isolation,
@@ -264,7 +264,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (store.Sandbox,
 
 	status, err := m.driver.Create(ctx, Spec{
 		Ref: ref, Class: class, Purpose: req.Purpose,
-		Owner: req.Owner, Org: req.OrgID, Team: req.TeamID,
+		Owner: req.Owner, Org: req.OrgID, Project: req.ProjectID,
 		Env: env, Expires: expires,
 	})
 	if err != nil {
@@ -371,18 +371,18 @@ func clampTTL(class policy.SandboxClass, want time.Duration, limits policy.Resol
 	return ttl
 }
 
-// checkQuota refuses a sandbox that would take the organisation or the team
+// checkQuota refuses a sandbox that would take the organisation or the project
 // past its limit.
 //
 // There is no per-key quota: the key is minted for one sandbox, so it would
 // always be a limit of one.
 //
 // Each count is held to its own level's limit. req.Limits is the tightest of
-// every level, which is right for the team, but a team capped at two must not
+// every level, which is right for the project, but a project capped at two must not
 // cap its whole organisation at two.
 func (m *Manager) checkQuota(ctx context.Context, req CreateRequest) error {
 	orgLimit := req.Limits.MaxSandboxes
-	if req.TeamID != "" {
+	if req.ProjectID != "" {
 		lim, err := m.st.GetPolicy(ctx, policy.ScopeOrg, req.OrgID)
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return err
@@ -399,7 +399,7 @@ func (m *Manager) checkQuota(ctx context.Context, req CreateRequest) error {
 		label string
 	}{
 		{policy.ScopeOrg, req.OrgID, orgLimit, "your organisation"},
-		{policy.ScopeTeam, req.TeamID, req.Limits.MaxSandboxes, "your team"},
+		{policy.ScopeProject, req.ProjectID, req.Limits.MaxSandboxes, "your project"},
 	} {
 		if scope.id == "" || scope.limit <= 0 {
 			continue
@@ -424,9 +424,9 @@ func (m *Manager) mintKey(ctx context.Context, req CreateRequest, expires time.T
 ) {
 	secret, hash, prefix := auth.Generate()
 	info := store.KeyInfo{
-		ID: id.New("key"), OrgID: req.OrgID, TeamID: req.TeamID, UserID: req.UserID,
+		ID: id.New("key"), OrgID: req.OrgID, ProjectID: req.ProjectID, UserID: req.UserID,
 		// Named after the sandbox, so a request in the log leads back to it.
-		Alias:  "sandbox/" + req.Name,
+		Name:   "sandbox/" + req.Name,
 		Prefix: prefix,
 		// Expires with the sandbox, so even a missed revocation is bounded.
 		ExpiresAt: &expires,
@@ -506,8 +506,8 @@ func (m *Manager) agentEnv(ctx context.Context, req CreateRequest, env map[strin
 	models := m.reachableModels(ctx, req)
 	if len(models) == 0 && env["KEERA_BASE_URL"] != "" {
 		m.log.Warn("sandbox: this key can reach no chat model, so the sandbox is created "+
-			"with no agent configuration; check the organisation's and the team's "+
-			"allowed models", "org", req.OrgID, "team", req.TeamID)
+			"with no agent configuration; check the organisation's and the project's "+
+			"allowed models", "org", req.OrgID, "project", req.ProjectID)
 	}
 	if cfg := m.piConfig(env["KEERA_BASE_URL"], models, env["KEERA_SESSION"]); cfg != "" {
 		env["KEERA_PI_CONFIG"] = cfg
@@ -750,7 +750,7 @@ func (m *Manager) revive(ctx context.Context, sb store.Sandbox, limits policy.Re
 	expires := time.Now().Add(clampTTL(lifetime, 0, limits)).UTC()
 
 	req := CreateRequest{
-		OrgID: sb.OrgID, TeamID: sb.TeamID, UserID: sb.UserID, Owner: sb.Owner,
+		OrgID: sb.OrgID, ProjectID: sb.ProjectID, UserID: sb.UserID, Owner: sb.Owner,
 		Name: sb.Name, Class: sb.Class, Purpose: sb.Purpose,
 		Repo: sb.Repo, Branch: sb.Branch, AuthorizedKeys: sb.AuthorizedKeys, Limits: limits,
 	}
@@ -783,7 +783,7 @@ func (m *Manager) revive(ctx context.Context, sb store.Sandbox, limits policy.Re
 
 	err = m.driver.Revive(ctx, Spec{
 		Ref: refOf(sb), Class: machine, Purpose: sb.Purpose,
-		Owner: sb.Owner, Org: sb.OrgID, Team: sb.TeamID,
+		Owner: sb.Owner, Org: sb.OrgID, Project: sb.ProjectID,
 		Env: env, Expires: expires,
 	})
 	if err != nil {
@@ -1331,7 +1331,7 @@ func (m *Manager) piConfig(base string, models []policy.Model, session string) s
 // catalogue order.
 //
 // It resolves the same allow-list the inference path enforces (the
-// organisation's, narrowed by the team's), so the sandbox offers only models
+// organisation's, narrowed by the project's), so the sandbox offers only models
 // that will answer. Embedding models are left out: a coding agent cannot use
 // them.
 func (m *Manager) reachableModels(ctx context.Context, req CreateRequest) []policy.Model {
@@ -1348,9 +1348,9 @@ func (m *Manager) reachableModels(ctx context.Context, req CreateRequest) []poli
 	// The key mintKey issues is a standard one, so it cannot reach a
 	// subscription model either.
 	resolved := policy.Resolve(
-		policy.Key{OrgID: req.OrgID, TeamID: req.TeamID, UserID: req.UserID, Kind: policy.KeyStandard},
+		policy.Key{OrgID: req.OrgID, ProjectID: req.ProjectID, UserID: req.UserID, Kind: policy.KeyStandard},
 		limits(policy.ScopeOrg, req.OrgID),
-		limits(policy.ScopeTeam, req.TeamID),
+		limits(policy.ScopeProject, req.ProjectID),
 		nil,
 	)
 

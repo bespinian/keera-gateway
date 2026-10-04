@@ -347,7 +347,7 @@ func mib(m int) string {
 
 // narrow applies one level's sandbox limits to what the levels above allowed.
 // Only the organisation's level, top, grants repositories: one forge
-// credential reaches every tenant's, and a team must not reach past its own.
+// credential reaches every tenant's, and a project must not reach past its own.
 func (r *ResolvedSandbox) narrow(lim *Limits, top bool) {
 	r.MaxSandboxes = minPositive(r.MaxSandboxes, deref(lim.MaxSandboxes))
 	r.MaxSandboxTTLSeconds = minPositive(r.MaxSandboxTTLSeconds, deref(lim.MaxSandboxTTLSeconds))

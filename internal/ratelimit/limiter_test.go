@@ -149,14 +149,14 @@ func TestSweepKeepsABucketThatWasJustUsed(t *testing.T) {
 }
 
 func TestAdmitChargesEveryLevelOrNone(t *testing.T) {
-	// The org allows plenty and the team almost nothing. Requests refused by
-	// the team must not spend the org's allowance: the org is what protects the
-	// inference plane from every other team.
+	// The org allows plenty and the project almost nothing. Requests refused by
+	// the project must not spend the org's allowance: the org is what protects the
+	// inference plane from every other project.
 	l := New()
 	now := time.Now()
 	reqs := []Requirement{
 		{Key: "org:o1|rpm", PerMinute: 600, Take: true},
-		{Key: "team:t1|rpm", PerMinute: 2, Take: true},
+		{Key: "project:t1|rpm", PerMinute: 2, Take: true},
 	}
 
 	for i := range 2 {
@@ -166,14 +166,14 @@ func TestAdmitChargesEveryLevelOrNone(t *testing.T) {
 	}
 	for range 50 {
 		if got := l.Admit(reqs, now); got != 1 {
-			t.Fatalf("Admit = %d, want 1 - the team's limit is what binds", got)
+			t.Fatalf("Admit = %d, want 1 - the project's limit is what binds", got)
 		}
 	}
 
 	// Two admitted requests, so two units gone from the org and no more.
 	if got := l.Remaining("org:o1|rpm", 600, now); got != 598 {
 		t.Errorf("the org has %d of 600 left, want 598: it was charged for "+
-			"requests the team refused", got)
+			"requests the project refused", got)
 	}
 }
 
@@ -225,7 +225,7 @@ func TestChargeAllChargesEveryLimitedBucket(t *testing.T) {
 	l.ChargeAll([]Requirement{
 		{Key: "org|tpm", PerMinute: 100},
 		{Key: "key|tpm", PerMinute: 50},
-		{Key: "team|tpm"}, // unlimited, so not charged
+		{Key: "project|tpm"}, // unlimited, so not charged
 	}, 30, now)
 
 	if got := l.Remaining("org|tpm", 100, now); got != 70 {
@@ -234,7 +234,7 @@ func TestChargeAllChargesEveryLimitedBucket(t *testing.T) {
 	if got := l.Remaining("key|tpm", 50, now); got != 20 {
 		t.Errorf("key has %d left, want 20", got)
 	}
-	if got := l.Remaining("team|tpm", 0, now); got != -1 {
+	if got := l.Remaining("project|tpm", 0, now); got != -1 {
 		t.Errorf("Remaining = %d for an unlimited bucket, want -1", got)
 	}
 }

@@ -126,7 +126,7 @@ func (s *Server) checkChat(ctx context.Context, m policy.Model, p Probe) Probe {
 
 	r := &probeReply{}
 	if p.Streamed {
-		_ = scanSSE(resp.Body, func(chunk []byte) error {
+		_ = scanSSE(resp.Body, s.opts.MaxResponseBytes, func(chunk []byte) error {
 			r.scan(chunk)
 			return nil
 		})

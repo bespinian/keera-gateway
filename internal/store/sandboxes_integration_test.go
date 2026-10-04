@@ -35,7 +35,7 @@ func newSandbox(t *testing.T, st *Store, ctx context.Context, f fixture, name st
 	t.Helper()
 	expires := time.Now().Add(time.Hour)
 	sb, err := st.CreateSandbox(ctx, Sandbox{
-		ID: "sbx_" + name, OrgID: f.orgID, TeamID: f.teamID,
+		ID: "sbx_" + name, OrgID: f.orgID, ProjectID: f.projectID,
 		Owner: "dev@example.ch", Name: name, Class: "standard",
 		Purpose: policy.PurposeEngineer, State: policy.SandboxPending,
 		Image: "example/sandbox:1", Isolation: policy.IsolationIsolated,
@@ -305,7 +305,7 @@ func TestCountLiveSandboxes(t *testing.T) {
 	for _, scope := range []struct {
 		typ policy.ScopeType
 		id  string
-	}{{policy.ScopeOrg, f.orgID}, {policy.ScopeTeam, f.teamID}} {
+	}{{policy.ScopeOrg, f.orgID}, {policy.ScopeProject, f.projectID}} {
 		n, err := st.CountLiveSandboxes(ctx, scope.typ, scope.id)
 		if err != nil {
 			t.Fatalf("CountLiveSandboxes(%s): %v", scope.typ, err)

@@ -1,7 +1,7 @@
 // The guardrails dialog, for every level that has them.
 //
-// Limits nest: an organisation's are the ceiling a team's must fit inside, and
-// a team's are the ceiling a key's must fit inside. That is the one thing about
+// Limits nest: an organisation's are the ceiling a project's must fit inside, and
+// a project's are the ceiling a key's must fit inside. That is the one thing about
 // this screen a person has to hold in their head, so the ceiling is shown
 // against every field rather than described in a sentence and discovered as a
 // number that silently did not take effect.
@@ -32,24 +32,24 @@ const SCOPES = {
   org: {
     title: "Guardrails",
     lead:
-      "The ceiling for the whole organisation. No team or key can go past " +
+      "The ceiling for the whole organisation. No project or key can go past " +
       "it.",
   },
-  team: {
+  project: {
     title: "Guardrails",
     lead:
-      "Applies to every key in the team. A team can narrow what the " +
+      "Applies to every key in the project. A project can narrow what the " +
       "organisation allows, not widen it.",
   },
   key: {
     title: "Guardrails",
     lead:
       "Applies to this key only. Useful for a key given to a contractor, " +
-      "or one that should not use the team's whole budget.",
+      "or one that should not use the project's whole budget.",
     // What to do with the field is not what somebody who cannot set it came
     // here to read; what holds their key is.
     readLead:
-      "Applies to this key, on top of its team's and organisation's " +
+      "Applies to this key, on top of its project's and organisation's " +
       "guardrails.",
   },
 };
@@ -58,7 +58,7 @@ const SCOPES = {
  *
  *  ceilings is the chain above this scope, outermost first: [{label, limits}].
  *  It is what makes "unlimited" honest - a key with no rpm of its own is
- *  whatever its team allows.
+ *  whatever its project allows.
  *
  *  canEdit false opens the same guardrails to somebody who may not change
  *  them, which is every member. They are held by these limits, so not being
@@ -69,7 +69,7 @@ export async function openGuardrails(
   { scope, id, name, models, orgID, ceilings = [], canEdit = true },
 ) {
   // The filters are the organisation's, whatever scope this dialog is for: a
-  // team applies one of its organisation's filters or none at all. The routers
+  // project applies one of its organisation's filters or none at all. The routers
   // are the organisation's for the same reason, and they are here because they
   // belong in the allow-list rather than in a section of their own - a client
   // names a router where it names a model, so "which models may this scope
@@ -138,17 +138,20 @@ export async function openGuardrails(
 
 /** ceilingsFor loads the chain above a scope. It is separate from open so a
  *  caller that already has the org's limits does not fetch them twice. */
-export async function ceilingsFor(scope, { orgID, orgName, teamID, teamName }) {
+export async function ceilingsFor(
+  scope,
+  { orgID, orgName, projectID, projectName },
+) {
   const out = [];
-  if (scope === "team" || scope === "key") {
+  if (scope === "project" || scope === "key") {
     if (orgID) {
       const lim = await api.guardrails("org", orgID).catch(() => null);
       if (lim) out.push({ label: orgName || "the organisation", limits: lim });
     }
   }
-  if (scope === "key" && teamID) {
-    const lim = await api.guardrails("team", teamID).catch(() => null);
-    if (lim) out.push({ label: teamName || "the team", limits: lim });
+  if (scope === "key" && projectID) {
+    const lim = await api.guardrails("project", projectID).catch(() => null);
+    if (lim) out.push({ label: projectName || "the project", limits: lim });
   }
   return out;
 }
@@ -191,7 +194,7 @@ function render(
   ctx,
   { scope, id, name, models, filters, ceilings, limits, orgID, orgName },
 ) {
-  const meta = SCOPES[scope] || SCOPES.team;
+  const meta = SCOPES[scope] || SCOPES.project;
   const lim = limits || {};
   const err = h("div");
 
@@ -477,7 +480,7 @@ function render(
       section("Every request", "Applied to each request."),
       field("System prompt", systemPrompt, [
         "Added before the messages on every chat request. The " +
-          "organisation's prompt is sent first, then the team's.",
+          "organisation's prompt is sent first, then the project's.",
         inheritedPrompts(ceilings),
       ]),
       h(
@@ -618,7 +621,7 @@ function renderReadOnly(
   ctx,
   { scope, name, models, filters, ceilings, limits, orgName },
 ) {
-  const meta = SCOPES[scope] || SCOPES.team;
+  const meta = SCOPES[scope] || SCOPES.project;
   // Outermost first with this scope last, which is the order limits combine in
   // and the order the prompts are sent in.
   const levels = [...ceilings, { label: name, limits: limits || {} }];
@@ -796,7 +799,7 @@ function tightest(levels, field, fmt) {
 }
 
 /** budgetsValue lists a budget per level rather than one number. Budgets are
- *  the one limit that is not collapsed: an organisation's 10,000 and a team's
+ *  the one limit that is not collapsed: an organisation's 10,000 and a project's
  *  1,000 are two caps that both have to hold, not one. */
 function budgetsValue(levels, currency) {
   const said = levels.filter((lv) => lv.limits && lv.limits.budget_micros);
@@ -944,7 +947,7 @@ function describe(lim, currency) {
 /** inheritedPrompts shows the wording the levels above already send.
  *
  *  Every other field on this form is narrowed by what is above it, and a number
- *  in a hint says enough. A prompt is appended to what is above it, so a team
+ *  in a hint says enough. A prompt is appended to what is above it, so a project
  *  that cannot read the organisation's wording would write it out again. */
 function inheritedPrompts(ceilings) {
   const said = ceilings.filter((c) => c.limits && c.limits.system_prompt);
@@ -1007,7 +1010,7 @@ export function summarise(lim) {
   return bits;
 }
 
-/** modelsCell renders an allow-list the way both the teams and keys tables do. */
+/** modelsCell renders an allow-list the way both the projects and keys tables do. */
 export function modelsCell(lim) {
   if (!lim || !lim.allowed_models) return h("span", { class: "muted" }, "all");
   return h(

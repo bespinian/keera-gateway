@@ -36,7 +36,7 @@ export async function dashboardView(ctx) {
   const res = await api.overview(ctx.orgID, since);
   const o = res.overview;
   const currency = res.currency;
-  const names = res.team_names || {};
+  const names = res.project_names || {};
 
   ctx.setSubtitle(rangeLabel(since));
 
@@ -70,7 +70,7 @@ export async function dashboardView(ctx) {
       money(o.cost_micros, ""),
       currency,
       o.subscription_micros
-        ? `+ ${money(o.subscription_micros, currency)} on Claude plans, at API prices`
+        ? `+ ${money(o.subscription_micros, currency)} covered by Claude plans`
         : null,
     ),
     stat("First token", ms(o.ttft_median_ms), null, `p95 ${ms(o.ttft_p95_ms)}`),
@@ -119,15 +119,19 @@ export async function dashboardView(ctx) {
       h(
         "div",
         { class: "card-head" },
-        h("h2", {}, "Teams by spend"),
+        h("h2", {}, "Projects by spend"),
         h("div", { class: "spacer" }),
-        h("a", { href: "/teams", onClick: go(ctx, "/teams") }, "All teams"),
+        h(
+          "a",
+          { href: "/projects", onClick: go(ctx, "/projects") },
+          "All projects",
+        ),
       ),
       h(
         "div",
         { class: "card-body" },
-        barList(o.top_teams, {
-          label: (r) => names[r.group] || (r.group ? r.group : "No team"),
+        barList(o.top_projects, {
+          label: (r) => names[r.group] || (r.group ? r.group : "No project"),
           value: (r) => r.cost_micros || r.requests,
           currency,
         }),
@@ -176,9 +180,14 @@ export async function dashboardView(ctx) {
       h(
         "div",
         { class: "banner banner-info" },
-        "No traffic in this period yet. Issue a key under ",
-        h("a", { href: "/keys", onClick: go(ctx, "/keys") }, "API keys"),
-        " and point a client at the gateway to see it here.",
+        isAdmin(ctx)
+          ? [
+              "No traffic in this period yet. Issue a key under ",
+              h("a", { href: "/keys", onClick: go(ctx, "/keys") }, "API keys"),
+              " and point a client at the gateway to see it here.",
+            ]
+          : "No traffic in this period yet. Point a client at the gateway " +
+              "with your key to see it here.",
       ),
     );
   }

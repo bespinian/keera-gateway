@@ -29,7 +29,7 @@ func TestPipeSSEDropsTheUsageChunkTheGatewayAskedFor(t *testing.T) {
 	var out bytes.Buffer
 	in := sseStream(deltaChunk, deltaChunk, usageChunk)
 
-	stats, err := pipeSSE(&out, func() {}, strings.NewReader(in), "", true)
+	stats, err := pipeSSE(&out, func() {}, strings.NewReader(in), "", true, DefaultMaxResponseBytes)
 	if err != nil {
 		t.Fatalf("pipeSSE: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestPipeSSEKeepsTheUsageChunkTheClientAskedFor(t *testing.T) {
 	var out bytes.Buffer
 	in := sseStream(deltaChunk, usageChunk)
 
-	stats, err := pipeSSE(&out, func() {}, strings.NewReader(in), "", false)
+	stats, err := pipeSSE(&out, func() {}, strings.NewReader(in), "", false, DefaultMaxResponseBytes)
 	if err != nil {
 		t.Fatalf("pipeSSE: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestPipeSSEKeepsAChunkThatCarriesBothContentAndUsage(t *testing.T) {
 	// of those would swallow generated content.
 	both := `{"choices":[{"delta":{"content":"x"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`
 	var out bytes.Buffer
-	if _, err := pipeSSE(&out, func() {}, strings.NewReader(sseStream(both)), "", true); err != nil {
+	if _, err := pipeSSE(&out, func() {}, strings.NewReader(sseStream(both)), "", true, DefaultMaxResponseBytes); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), `"delta"`) {
@@ -83,7 +83,7 @@ func TestPipeSSECountsDeltasForACancelledStream(t *testing.T) {
 	// No usage chunk ever arrives, because the client hung up. The delta count
 	// is what the request is charged on instead of nothing at all.
 	in := "data: " + deltaChunk + "\n\ndata: " + deltaChunk + "\n\ndata: " + deltaChunk + "\n\n"
-	stats, err := pipeSSE(io.Discard, func() {}, strings.NewReader(in), "", true)
+	stats, err := pipeSSE(io.Discard, func() {}, strings.NewReader(in), "", true, DefaultMaxResponseBytes)
 	if err != nil {
 		t.Fatalf("pipeSSE: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestPipeSSECountsDeltasForACancelledStream(t *testing.T) {
 func TestPipeSSEHandlesCRLF(t *testing.T) {
 	in := "data: " + deltaChunk + "\r\n\r\ndata: " + usageChunk + "\r\n\r\ndata: [DONE]\r\n\r\n"
 	var out bytes.Buffer
-	stats, err := pipeSSE(&out, func() {}, strings.NewReader(in), "", true)
+	stats, err := pipeSSE(&out, func() {}, strings.NewReader(in), "", true, DefaultMaxResponseBytes)
 	if err != nil {
 		t.Fatalf("pipeSSE: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestPipeSSEForwardsATruncatedFinalEvent(t *testing.T) {
 	// The upstream died mid-event. Whatever arrived is still the client's.
 	in := "data: " + deltaChunk + "\n\ndata: {\"choices\":[{\"delta\":"
 	var out bytes.Buffer
-	if _, err := pipeSSE(&out, func() {}, strings.NewReader(in), "", true); err != nil {
+	if _, err := pipeSSE(&out, func() {}, strings.NewReader(in), "", true, DefaultMaxResponseBytes); err != nil {
 		t.Fatalf("pipeSSE: %v", err)
 	}
 	if !strings.HasSuffix(out.String(), `"delta":`) {
@@ -126,14 +126,14 @@ func TestPipeSSEReportsAWriteFailure(t *testing.T) {
 	// A client disconnecting mid-stream surfaces as a write error, and the
 	// caller needs it to know the request was cut short.
 	want := errors.New("client gone")
-	_, err := pipeSSE(errWriter{want}, func() {}, strings.NewReader(sseStream(deltaChunk)), "", true)
+	_, err := pipeSSE(errWriter{want}, func() {}, strings.NewReader(sseStream(deltaChunk)), "", true, DefaultMaxResponseBytes)
 	if !errors.Is(err, want) {
 		t.Errorf("err = %v, want %v", err, want)
 	}
 }
 
 func TestPipeSSERecordsWhenTheFirstEventReachedTheClient(t *testing.T) {
-	stats, err := pipeSSE(io.Discard, func() {}, strings.NewReader(sseStream(deltaChunk)), "", true)
+	stats, err := pipeSSE(io.Discard, func() {}, strings.NewReader(sseStream(deltaChunk)), "", true, DefaultMaxResponseBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestPipeSSEFlushesEveryEvent(t *testing.T) {
 	// difference between an editor that types and one that pauses then dumps.
 	flushes := 0
 	in := sseStream(deltaChunk, deltaChunk)
-	if _, err := pipeSSE(io.Discard, func() { flushes++ }, strings.NewReader(in), "", true); err != nil {
+	if _, err := pipeSSE(io.Discard, func() { flushes++ }, strings.NewReader(in), "", true, DefaultMaxResponseBytes); err != nil {
 		t.Fatal(err)
 	}
 	if flushes != 3 {
@@ -185,7 +185,7 @@ func TestPipeSSEEmitsLargeEventsWithoutWaiting(t *testing.T) {
 	big := `{"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"` +
 		strings.Repeat("a", maxEventBytes) + `"}}]}}]}`
 	var out bytes.Buffer
-	if _, err := pipeSSE(&out, func() {}, strings.NewReader("data: "+big+"\n\n"), "", true); err != nil {
+	if _, err := pipeSSE(&out, func() {}, strings.NewReader("data: "+big+"\n\n"), "", true, DefaultMaxResponseBytes); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Contains(out.Bytes(), []byte("tool_calls")) {
@@ -201,7 +201,7 @@ func TestPipeSSEReadsAChunkLargerThanTheReadBuffer(t *testing.T) {
 	chunk := `{"choices":[{"delta":{"content":"` + strings.Repeat("x", 3*readBuffer) +
 		`"}}],"usage":{"prompt_tokens":40000,"completion_tokens":11,"total_tokens":40011}}`
 	var out bytes.Buffer
-	stats, err := pipeSSE(&out, func() {}, strings.NewReader(sseStream(chunk)), "", true)
+	stats, err := pipeSSE(&out, func() {}, strings.NewReader(sseStream(chunk)), "", true, DefaultMaxResponseBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestPipeSSEReadsTheCachedShareOfThePrompt(t *testing.T) {
 		`"completion_tokens":7,"total_tokens":107,"prompt_tokens_details":{"cached_tokens":90}}}`
 
 	stats, err := pipeSSE(io.Discard, func() {},
-		strings.NewReader(sseStream(deltaChunk, cachedUsageChunk)), "", true)
+		strings.NewReader(sseStream(deltaChunk, cachedUsageChunk)), "", true, DefaultMaxResponseBytes)
 	if err != nil {
 		t.Fatalf("pipeSSE: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestPipeSSEReadsTheCachedShareOfThePrompt(t *testing.T) {
 // which has to read as nothing cached rather than as a missing number.
 func TestPipeSSEReadsNoCachedShareAsNoneCached(t *testing.T) {
 	stats, err := pipeSSE(io.Discard, func() {},
-		strings.NewReader(sseStream(deltaChunk, usageChunk)), "", true)
+		strings.NewReader(sseStream(deltaChunk, usageChunk)), "", true, DefaultMaxResponseBytes)
 	if err != nil {
 		t.Fatalf("pipeSSE: %v", err)
 	}
@@ -283,5 +283,19 @@ func TestPipeSSEStopsALineThatNeverEnds(t *testing.T) {
 	lines := newSSELines(strings.NewReader(strings.Repeat("x", 4*readBuffer)), 2*readBuffer)
 	if _, err := lines.next(); !errors.Is(err, errEventTooLarge) {
 		t.Errorf("next = %v, want errEventTooLarge", err)
+	}
+}
+
+// KEERA_MAX_RESPONSE_BYTES bounds one event of every streamed shape, not only
+// a buffered answer.
+func TestStreamsHonourTheResponseLimit(t *testing.T) {
+	long := sseStream(`{"choices":[{"delta":{"content":"` + strings.Repeat("x", 4*readBuffer) + `"}}]}`)
+	for name, sh := range map[string]shape{
+		"openai": openAIShape{}, "messages": anthropicShape{}, "responses": responsesShape{},
+	} {
+		_, err := sh.pipe(io.Discard, func() {}, strings.NewReader(long), "keera-code", true, 2*readBuffer)
+		if !errors.Is(err, errEventTooLarge) {
+			t.Errorf("%s: pipe = %v, want errEventTooLarge", name, err)
+		}
 	}
 }

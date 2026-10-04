@@ -98,15 +98,15 @@ func resolveOrg(ctx context.Context, c *client, given string) (string, error) {
 	return theOnlyOrg(ctx, c, "pass --org <id>")
 }
 
-// who narrows a report to one team, key or person, each given the way the
-// other commands take it: a team by name, a key by alias, a person by email,
+// who narrows a report to one project, key or person, each given the way the
+// other commands take it: a project by name, a key by name, a person by email,
 // or any of them by id.
-type who struct{ team, key, user string }
+type who struct{ project, key, user string }
 
 func registerWho(fs *flag.FlagSet) *who {
 	w := &who{}
-	fs.StringVar(&w.team, "team", "", "restrict to one team, by name or id")
-	fs.StringVar(&w.key, "key", "", "restrict to one key, by alias or id")
+	fs.StringVar(&w.project, "project", "", "restrict to one project, by name or id")
+	fs.StringVar(&w.key, "key", "", "restrict to one key, by name or id")
 	fs.StringVar(&w.user, "user", "", "restrict to one person, by email or id")
 	return w
 }
@@ -121,7 +121,7 @@ func (w *who) params(ctx context.Context, c *client, org string) (map[string]str
 		param, given string
 		find         func(context.Context, *client, string, string) (string, error)
 	}{
-		{"team_id", w.team, teamID},
+		{"project_id", w.project, projectID},
 		{"key_id", w.key, keyID},
 		{"user_id", w.user, userID},
 	} {
@@ -141,13 +141,13 @@ func (w *who) params(ctx context.Context, c *client, org string) (map[string]str
 	return p, nil
 }
 
-// teamID, keyID and userID resolve what a flag was given to an id. An id is
+// projectID, keyID and userID resolve what a flag was given to an id. An id is
 // passed on unchanged, so it needs no lookup.
-func teamID(ctx context.Context, c *client, orgID, given string) (string, error) {
-	if given == "" || id.HasPrefix(given, "team") {
+func projectID(ctx context.Context, c *client, orgID, given string) (string, error) {
+	if given == "" || id.HasPrefix(given, "project") {
 		return given, nil
 	}
-	t, err := findTeam(ctx, c, orgID, given)
+	t, err := findProject(ctx, c, orgID, given)
 	return t.ID, err
 }
 

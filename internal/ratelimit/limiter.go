@@ -91,7 +91,7 @@ type Requirement struct {
 // first requirement that failed, or -1 when the request is admitted.
 //
 // Deciding and charging under one lock keeps a refusal free: otherwise an
-// org's bucket could pay for a request its team's bucket then refused.
+// org's bucket could pay for a request its project's bucket then refused.
 func (l *Limiter) Admit(reqs []Requirement, now time.Time) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()

@@ -63,7 +63,7 @@ func nextSeen(t *testing.T, seen chan seenRequest) seenRequest {
 
 // guarded is a key with a standing system prompt and an output ceiling.
 func guarded(prompt string, ceiling int) *policy.Resolved {
-	return policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1", TeamID: "team_1"},
+	return policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
 		&policy.Limits{SystemPrompt: &prompt, MaxOutputTokens: &ceiling}, nil, nil)
 }
 

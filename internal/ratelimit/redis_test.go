@@ -227,13 +227,13 @@ func TestRedisSpendsOneAllowanceAcrossReplicas(t *testing.T) {
 
 func TestRedisAdmitChargesEveryLevelOrNone(t *testing.T) {
 	// The same rule the in-memory limiter keeps, now across a round trip: an
-	// org must not pay for requests its team refused.
+	// org must not pay for requests its project refused.
 	rdb, prefix := redisFor(t)
 	r := replica(t, rdb, prefix)
 	now := time.Now()
 	reqs := []Requirement{
 		{Key: "org:o1|rpm", PerMinute: 600, Take: true},
-		{Key: "team:t1|rpm", PerMinute: 2, Take: true},
+		{Key: "project:t1|rpm", PerMinute: 2, Take: true},
 	}
 
 	for i := range 2 {
@@ -243,12 +243,12 @@ func TestRedisAdmitChargesEveryLevelOrNone(t *testing.T) {
 	}
 	for range 20 {
 		if got := r.Admit(reqs, now); got != 1 {
-			t.Fatalf("Admit = %d, want 1 - the team's limit is what binds", got)
+			t.Fatalf("Admit = %d, want 1 - the project's limit is what binds", got)
 		}
 	}
 	if got := r.Remaining("org:o1|rpm", 600, now); got != 598 {
 		t.Errorf("the org has %d of 600 left, want 598: it was charged for requests "+
-			"the team refused", got)
+			"the project refused", got)
 	}
 }
 
@@ -331,7 +331,7 @@ func TestRedisChargeAllChargesEveryBucketLikeMemory(t *testing.T) {
 	now := time.Now()
 	reqs := []Requirement{
 		{Key: "org|tpm", PerMinute: 1000},
-		{Key: "team|tpm"}, // unlimited, so left out
+		{Key: "project|tpm"}, // unlimited, so left out
 		{Key: "key|tpm", PerMinute: 300},
 	}
 	r.ChargeAll(reqs, 120, now)

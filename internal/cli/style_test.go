@@ -113,7 +113,7 @@ func TestPaintedTableHasThePlainTableSColumns(t *testing.T) {
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 			"key_1", "laptop", statusWord("active"), "2026-09-01")
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-			"key_longer", "a much longer alias", statusWord("revoked"), statusWord("never"))
+			"key_longer", "a much longer name", statusWord("revoked"), statusWord("never"))
 		_, _ = fmt.Fprintln(w, "\nA line of prose under the table, which is not a row.")
 	}
 

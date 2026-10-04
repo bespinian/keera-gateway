@@ -294,7 +294,7 @@ func TestHistogramBucketsAreCumulativeAndEndAtTheCount(t *testing.T) {
 	}
 }
 
-func TestTheOverheadSumIsStatedInTheUnitItsNamePromises(t *testing.T) {
+func TestTheHistogramSumIsStatedInTheUnitItsNamePromises(t *testing.T) {
 	// It is accumulated in microseconds so the counter stays an integer. The
 	// exposition says seconds, because that is what the name says and what a
 	// rate() over it is divided by.
@@ -309,6 +309,14 @@ func TestTheOverheadSumIsStatedInTheUnitItsNamePromises(t *testing.T) {
 	}
 	if got != 0.006 {
 		t.Errorf("_sum = %v, want 0.006 seconds and not 6000 microseconds", got)
+	}
+
+	// Every histogram has one, so an average can be taken of any of them.
+	r.Observe("gpt-oss", "org_1", 200, 1.5, 100)
+	got, ok = render(t, r).find("keera_request_duration_seconds_sum",
+		`model="gpt-oss",org="org_1",status="200"`)
+	if !ok || got != 1.5 {
+		t.Errorf("request _sum = %v (%v), want 1.5 seconds, not the 100 tokens", got, ok)
 	}
 }
 

@@ -130,10 +130,10 @@ func (s *Store) SandboxClassInUse(ctx context.Context, orgID, name string) (int,
 
 // Sandbox is one machine that was lent out.
 type Sandbox struct {
-	ID     string `json:"id"`
-	OrgID  string `json:"org_id"`
-	TeamID string `json:"team_id,omitempty"`
-	UserID string `json:"user_id,omitempty"`
+	ID        string `json:"id"`
+	OrgID     string `json:"org_id"`
+	ProjectID string `json:"project_id,omitempty"`
+	UserID    string `json:"user_id,omitempty"`
 	// Owner is the address the sandbox was created for. It is copied, not
 	// joined, so it survives the person being deleted.
 	Owner   string              `json:"owner,omitempty"`
@@ -199,14 +199,14 @@ func (s Sandbox) CoreSeconds() int64 {
 	return s.RunningSeconds * int64(s.CPU) / 1000
 }
 
-const sandboxColumns = `SELECT id, org_id, COALESCE(team_id,''), COALESCE(user_id,''), owner,
+const sandboxColumns = `SELECT id, org_id, COALESCE(project_id,''), COALESCE(user_id,''), owner,
 	name, class, purpose, state, detail, image, isolation, cpu_millis, memory_mib, disk_mib,
 	COALESCE(key_id,''), COALESCE(session_key,''), repo, branch, authorized_keys, git_credential_id,
 	node, address, backing, created_at, ready_at, active_at, expires_at, suspended_at, terminated_at, running_seconds, accounted_at`
 
 func scanSandbox(r row) (Sandbox, error) {
 	var sb Sandbox
-	err := r.Scan(&sb.ID, &sb.OrgID, &sb.TeamID, &sb.UserID, &sb.Owner,
+	err := r.Scan(&sb.ID, &sb.OrgID, &sb.ProjectID, &sb.UserID, &sb.Owner,
 		&sb.Name, &sb.Class, &sb.Purpose, &sb.State, &sb.Detail,
 		&sb.Image, &sb.Isolation, &sb.CPU, &sb.Memory, &sb.Disk,
 		&sb.KeyID, &sb.SessionKey, &sb.Repo, &sb.Branch, &sb.AuthorizedKeys, &sb.GitCredentialID,
@@ -241,13 +241,13 @@ func (s *Store) sandboxesWhere(ctx context.Context, rest string, args ...any) ([
 // colliding, which is not worth a message.
 func (s *Store) CreateSandbox(ctx context.Context, sb Sandbox) (Sandbox, error) {
 	err := s.pool.QueryRow(ctx, `INSERT INTO sandboxes
-		(id, org_id, team_id, user_id, owner, name, class, purpose, state, detail,
+		(id, org_id, project_id, user_id, owner, name, class, purpose, state, detail,
 		 image, isolation, cpu_millis, memory_mib, disk_mib, key_id, session_key,
 		 repo, branch, authorized_keys, git_credential_id, backing, expires_at, accounted_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,
 		        $23, now())
 		RETURNING created_at, accounted_at`,
-		sb.ID, sb.OrgID, nullable(sb.TeamID), nullable(sb.UserID), sb.Owner,
+		sb.ID, sb.OrgID, nullable(sb.ProjectID), nullable(sb.UserID), sb.Owner,
 		sb.Name, sb.Class, string(sb.Purpose), string(sb.State), sb.Detail,
 		sb.Image, string(sb.Isolation), sb.CPU, sb.Memory, sb.Disk,
 		nullable(sb.KeyID), nullable(sb.SessionKey), sb.Repo, sb.Branch,
@@ -302,10 +302,10 @@ func (s *Store) SetSandboxGitCredential(ctx context.Context, id, credentialID st
 // first.
 type SandboxQuery struct {
 	// OrgID empty lists every organisation's, for an operator.
-	OrgID  string
-	TeamID string
-	UserID string
-	Class  string
+	OrgID     string
+	ProjectID string
+	UserID    string
+	Class     string
 	// Purpose narrows to engineer or agent sandboxes.
 	Purpose policy.Purpose
 	// All includes finished sandboxes. It is off by default, because the usual
@@ -323,14 +323,14 @@ func (s *Store) ListSandboxes(ctx context.Context, q SandboxQuery) ([]Sandbox, e
 	}
 	return s.sandboxesWhere(ctx, `
 		WHERE ($1 = '' OR org_id = $1)
-		  AND ($2 = '' OR team_id = $2)
+		  AND ($2 = '' OR project_id = $2)
 		  AND ($3 = '' OR user_id = $3)
 		  AND ($4 = '' OR class = $4)
 		  AND ($5 = '' OR purpose = $5)
 		  AND ($6 OR `+liveSandbox+`)
 		ORDER BY created_at DESC
 		LIMIT $7`,
-		q.OrgID, q.TeamID, q.UserID, q.Class, string(q.Purpose), q.All, limit)
+		q.OrgID, q.ProjectID, q.UserID, q.Class, string(q.Purpose), q.All, limit)
 }
 
 // SandboxObservation is what the driver saw, written back onto the row.
@@ -423,12 +423,12 @@ func (s *Store) SetSandboxExpiry(ctx context.Context, id string, at time.Time) e
 	return nil
 }
 
-// CountLiveSandboxes counts what an organisation or a team is holding, for
+// CountLiveSandboxes counts what an organisation or a project is holding, for
 // the quota. A key has no sandbox quota: a sandbox's key is minted for it.
 func (s *Store) CountLiveSandboxes(ctx context.Context, scopeType policy.ScopeType, scopeID string) (int, error) {
 	column := "org_id"
-	if scopeType == policy.ScopeTeam {
-		column = "team_id"
+	if scopeType == policy.ScopeProject {
+		column = "project_id"
 	}
 	var n int
 	err := s.pool.QueryRow(ctx,
@@ -493,7 +493,7 @@ func (s *Store) StopAccounting(ctx context.Context, id string, now time.Time) er
 
 // SandboxUsage is what one group of sandboxes came to over a window.
 type SandboxUsage struct {
-	// Key is the group: a team id, a user's address or a class name, as the
+	// Key is the group: a project id, a user's address or a class name, as the
 	// caller grouped by.
 	Key   string `json:"key"`
 	Label string `json:"label,omitempty"`
@@ -514,9 +514,9 @@ type SandboxUsage struct {
 // sandboxGroupColumns maps the public group_by values to columns, which keeps
 // the caller's string out of the SQL text. It mirrors groupColumns in usage.go.
 var sandboxGroupColumns = map[string]string{
-	"class": "s.class",
-	"team":  "COALESCE(s.team_id, '')",
-	"user":  "COALESCE(NULLIF(s.owner, ''), COALESCE(s.user_id, ''))",
+	"class":   "s.class",
+	"project": "COALESCE(s.project_id, '')",
+	"user":    "COALESCE(NULLIF(s.owner, ''), COALESCE(s.user_id, ''))",
 }
 
 // ValidSandboxGroupBy reports whether s is a grouping SandboxUsageBy
@@ -533,7 +533,7 @@ func SandboxGroupBys() []string {
 
 // SandboxUsageBy groups sandbox time over a window.
 //
-// groupBy is "class", "team" or "user". The window applies to creation time,
+// groupBy is "class", "project" or "user". The window applies to creation time,
 // so a sandbox is counted whole in the window it started in. Splitting its
 // seconds across days would need a row per interval.
 func (s *Store) SandboxUsageBy(ctx context.Context, orgID, groupBy string, from, to time.Time) (

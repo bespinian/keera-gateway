@@ -57,7 +57,7 @@ func routerCmd(ctx context.Context, args []string) error {
 	fs.BoolVar(&r.noFallback, "no-fallback", false,
 		"refuse a request the router cannot place, rather than sending it to a fallback")
 	fs.StringVar(&r.prompt, "prompt", "", "the instruction the deciding model is given; @path reads a file")
-	fs.StringVar(&r.description, "description", "", "what this router is for, for whoever reads the list")
+	fs.StringVar(&r.description, "description", "", "what this router is for, for whoever reads the list; an empty one clears it")
 	fs.DurationVar(&r.since, "since", 7*24*time.Hour, "how far back 'report' looks")
 	fs.BoolVar(&r.yes, "yes", false, yesUsage)
 	fs.BoolVar(&r.asJSON, "json", false, jsonUsage)
@@ -140,6 +140,9 @@ func (r *routerRun) put(ctx context.Context) error {
 	// starts from nothing, and the control plane refuses what is missing.
 	rt := policy.Router{Alias: alias}
 	if r.sub == "set" {
+		if !changesSomething(r.fs) {
+			return nothingToChange("router set")
+		}
 		existing, err := requireRouter(ctx, r.c, r.orgID, alias)
 		if err != nil {
 			return err
@@ -201,7 +204,7 @@ func (r *routerRun) apply(rt *policy.Router) error {
 		}
 		rt.Prompt = text
 	}
-	if r.description != "" {
+	if given(r.fs, "description") {
 		rt.Description = r.description
 	}
 	return nil

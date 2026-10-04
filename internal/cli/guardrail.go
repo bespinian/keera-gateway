@@ -71,7 +71,7 @@ func registerGuardrailFlags(fs *flag.FlagSet) *guardrailFlags {
 		"stop this scope blocking hosted tools; an outer level that blocks them still does")
 	fs.IntVar(&f.maxSandboxes, "max-sandboxes", -1,
 		"how many sandboxes this scope may run at once (0 for unlimited); the sandbox "+
-			"flags are for an organisation or a team, not a key")
+			"flags are for an organisation or a project, not a key")
 	fs.DurationVar(&f.maxSandboxTTL, "max-sandbox-ttl", -1,
 		"longest lifetime any one of them may be given (0 for unlimited)")
 	fs.StringVar(&f.sandboxClasses, "sandbox-classes", "",
@@ -188,6 +188,7 @@ func guardrailCmd(ctx context.Context, args []string) error {
 	sub, rest := split(args)
 	fs := flag.NewFlagSet("guardrail "+sub, flag.ExitOnError)
 	f := registerGuardrailFlags(fs)
+	org := fs.String("org", "", orgUsage)
 	fs.Usage = func() { _ = printHelp(fs, "guardrail", sub) }
 	if want, ok := wantsHelp(args); ok {
 		return printHelp(fs, "guardrail", want)
@@ -197,7 +198,7 @@ func guardrailCmd(ctx context.Context, args []string) error {
 		return err
 	}
 	c := newClient()
-	scope, scopeID, err := scopeArgs(ctx, c, fs)
+	scope, scopeID, err := scopeArgs(ctx, c, fs, *org)
 	if err != nil {
 		return err
 	}
@@ -210,6 +211,9 @@ func guardrailCmd(ctx context.Context, args []string) error {
 		}
 		return out(f.asJSON, eff, func(w *table) { printEffective(w, eff, facetAll) })
 	case "set":
+		if !changesSomething(fs) {
+			return nothingToChange("guardrail set")
+		}
 		lim, err := updateLimits(ctx, c, scope, scopeID, f.apply)
 		if err != nil {
 			return err
@@ -225,24 +229,23 @@ func guardrailCmd(ctx context.Context, args []string) error {
 }
 
 // scopeArgs reads the scope and its id from the arguments already parsed. A
-// team may be named by its name and a key by its alias, as everywhere else.
-// The id of an organisation may be left out: it is then the caller's own, or
-// an operator's only one. These commands have no --org flag, so the id goes
-// after the scope instead.
-func scopeArgs(ctx context.Context, c *client, fs *flag.FlagSet) (string, string, error) {
+// project may be named by its name and a key by its name, as everywhere else,
+// inside the organisation org. The id of an organisation may be left out: it
+// is then org, the caller's own, or an operator's only one.
+func scopeArgs(ctx context.Context, c *client, fs *flag.FlagSet, org string) (string, string, error) {
 	scope, given := fs.Arg(0), fs.Arg(1)
 	switch policy.ScopeType(scope) {
 	case policy.ScopeOrg:
 		if given != "" {
 			return scope, given, nil
 		}
-		orgID, err := theOnlyOrg(ctx, c, "name the one you mean after the scope: org <org-id>")
+		orgID, err := resolveOrg(ctx, c, org)
 		return scope, orgID, err
-	case policy.ScopeTeam, policy.ScopeKey:
+	case policy.ScopeProject, policy.ScopeKey:
 		if given == "" {
 			return "", "", fmt.Errorf("name the %s after the scope: %s <%s>", scope, scope, scope)
 		}
-		find := teamID
+		find := projectID
 		if scope == string(policy.ScopeKey) {
 			find = keyID
 		}
@@ -250,14 +253,14 @@ func scopeArgs(ctx context.Context, c *client, fs *flag.FlagSet) (string, string
 		if id.HasPrefix(given, scope) {
 			return scope, given, nil
 		}
-		orgID, err := theOnlyOrg(ctx, c, "name the "+scope+" by its id")
+		orgID, err := resolveOrg(ctx, c, org)
 		if err != nil {
 			return "", "", err
 		}
 		scopeID, err := find(ctx, c, orgID, given)
 		return scope, scopeID, err
 	default:
-		return "", "", fmt.Errorf("the scope is org, team or key, not %q", scope)
+		return "", "", fmt.Errorf("the scope is org, project or key, not %q", scope)
 	}
 }
 
@@ -281,7 +284,7 @@ func updateLimits(ctx context.Context, c *client, scope, scopeID string,
 // A facet is one part of a guardrail on its own: 'keera limit' for the rates
 // and 'keera budget' for the spend. Same scopes, same call and the same flags
 // as 'guardrail set', of which help.go lets each take its own. With no flags
-// it reports rather than writes, because `keera limit team t_1` is a question.
+// it reports rather than writes, because `keera limit project t_1` is a question.
 
 // facetAll is every part of the effective report, in the order it prints.
 var facetAll = []string{"models", "rates", "spend", "prompt", "filters", "tools", "sandboxes"}
@@ -292,6 +295,7 @@ var facetFields = map[string][]string{"limit": {"rates"}, "budget": {"spend"}}
 func facetCmd(ctx context.Context, name string, args []string) error {
 	fs := flag.NewFlagSet(name, flag.ExitOnError)
 	f := registerGuardrailFlags(fs)
+	org := fs.String("org", "", orgUsage)
 	fs.Usage = func() { _ = printHelp(fs, name, "") }
 	if want, ok := wantsHelp(args); ok {
 		return printHelp(fs, name, want)
@@ -303,7 +307,7 @@ func facetCmd(ctx context.Context, name string, args []string) error {
 		return err
 	}
 	c := newClient()
-	scope, scopeID, err := scopeArgs(ctx, c, fs)
+	scope, scopeID, err := scopeArgs(ctx, c, fs, *org)
 	if err != nil {
 		return err
 	}
@@ -325,31 +329,24 @@ func facetCmd(ctx context.Context, name string, args []string) error {
 // wrongFacet refuses a flag that belongs to the other facet, naming the
 // command that takes it.
 func wrongFacet(name string, args []string) error {
+	own, _ := find(name)
 	for _, arg := range args {
 		if !strings.HasPrefix(arg, "-") {
 			continue
 		}
 		flagName := strings.TrimLeft(strings.SplitN(arg, "=", 2)[0], "-")
+		if slices.Contains(own.flags, flagName) {
+			continue
+		}
 		for _, other := range []string{"limit", "budget"} {
 			c, _ := find(other)
-			if other != name && flagName != "json" && slices.Contains(c.flags, flagName) {
+			if other != name && slices.Contains(c.flags, flagName) {
 				return fmt.Errorf("--%s is not part of 'keera %s'; it is 'keera %s --%s'",
 					flagName, name, other, flagName)
 			}
 		}
 	}
 	return nil
-}
-
-// changesSomething reports whether any flag other than --json was given.
-func changesSomething(fs *flag.FlagSet) bool {
-	set := false
-	fs.Visit(func(fl *flag.Flag) {
-		if fl.Name != "json" {
-			set = true
-		}
-	})
-	return set
 }
 
 // guardrailPath addresses one scope's guardrails. Both parts are typed by
@@ -559,8 +556,7 @@ func levelName(eff control.Effective, scopeType, scopeID string) string {
 	return scopeType
 }
 
-// levelLabel names a level by its name, or by its id when it has none (a key
-// issued without an alias).
+// levelLabel names a level by its name, or by its id when it has none.
 func levelLabel(l control.EffectiveLevel) string {
 	if l.Name == "" {
 		return string(l.Type) + " " + l.ID

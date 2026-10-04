@@ -38,8 +38,11 @@ var (
 )
 
 type series struct {
-	count   atomic.Int64
-	sum     atomic.Int64 // micro-units, for counters that carry a value
+	count atomic.Int64
+	sum   atomic.Int64 // tokens or micro-units, for counters that carry a value
+	// micros is the histogram's sum, kept in microseconds so it stays an
+	// integer.
+	micros  atomic.Int64
 	buckets []float64
 	hist    []atomic.Int64
 }
@@ -47,6 +50,7 @@ type series struct {
 func (s *series) observe(seconds float64, sum int64) {
 	s.count.Add(1)
 	s.sum.Add(sum)
+	s.micros.Add(int64(seconds * 1e6))
 	i, _ := slices.BinarySearch(s.buckets, seconds)
 	s.hist[i].Add(1)
 }
@@ -119,8 +123,7 @@ func (r *Registry) Observe(model, org string, status int, seconds float64, token
 // own metric and would otherwise make a new guardrail look like a slow gateway. Refusals are not recorded:
 // they never made an upstream call.
 func (r *Registry) Overhead(model, org string, seconds float64) {
-	r.seriesIn(r.overhead, OverheadBuckets, model, org).
-		observe(seconds, int64(seconds*1e6))
+	r.seriesIn(r.overhead, OverheadBuckets, model, org).observe(seconds, 0)
 }
 
 // FilterRun records one filter's pass over one request. shadow is a label so
@@ -170,7 +173,7 @@ func (r *Registry) Write(w io.Writer) {
 		func(s *series) int64 { return s.count.Load() })
 	requests.counter("keera_tokens_total", "Input plus output tokens.",
 		func(s *series) int64 { return s.sum.Load() })
-	requests.histogram("keera_request_duration_seconds", "Wall time of an inference request.", false)
+	requests.histogram("keera_request_duration_seconds", "Wall time of an inference request.")
 
 	upstream := keyed{w: w, labels: upstreamLabels, m: r.upstreamErrs}
 	upstream.counter("keera_upstream_errors_total",
@@ -183,7 +186,7 @@ func (r *Registry) Write(w io.Writer) {
 
 	overhead := keyed{w: w, labels: overheadLabels, m: r.overhead}
 	overhead.histogram("keera_gateway_overhead_seconds",
-		"Time the gateway added ahead of the inference plane, excluding filters and routers.", true)
+		"Time the gateway added ahead of the inference plane, excluding filters and routers.")
 
 	filters := keyed{w: w, labels: filterLabels, m: r.filters}
 	filters.counter("keera_filter_runs_total", "Filter runs, by what the filter did.",
@@ -192,7 +195,7 @@ func (r *Registry) Write(w io.Writer) {
 		"What filter models spent, in micro-units of the billing currency.",
 		func(s *series) int64 { return s.sum.Load() })
 	filters.histogram("keera_filter_duration_seconds",
-		"What a filter added to the request that waited for it.", false)
+		"What a filter added to the request that waited for it.")
 
 	routers := keyed{w: w, labels: routerLabels, m: r.routers}
 	routers.counter("keera_router_decisions_total", "Routing decisions, by where they sent the request.",
@@ -201,12 +204,12 @@ func (r *Registry) Write(w io.Writer) {
 		"What deciding cost, in micro-units of the billing currency.",
 		func(s *series) int64 { return s.sum.Load() })
 	routers.histogram("keera_router_duration_seconds",
-		"What deciding added to the request that waited for it.", false)
+		"What deciding added to the request that waited for it.")
 
 	tools := keyed{w: w, labels: toolLabels, m: r.tools}
 	tools.counter("keera_tool_calls_total", "MCP tool calls through the gateway, by outcome.",
 		func(s *series) int64 { return s.count.Load() })
-	tools.histogram("keera_tool_call_duration_seconds", "Wall time of an MCP tool call.", false)
+	tools.histogram("keera_tool_call_duration_seconds", "Wall time of an MCP tool call.")
 
 	header(w, "keera_inflight_requests", "Requests waiting for the inference plane to start answering.", "gauge")
 	_, _ = fmt.Fprintf(w, "keera_inflight_requests %d\n", r.inflight.Load())
@@ -230,8 +233,8 @@ func (f keyed) counter(name, help string, value func(*series) int64) {
 	}
 }
 
-// histogram writes cumulative buckets. Only the overhead histogram has a sum.
-func (f keyed) histogram(name, help string, withSum bool) {
+// histogram writes cumulative buckets, the count and the sum.
+func (f keyed) histogram(name, help string) {
 	header(f.w, name, help, "histogram")
 	for _, k := range slices.Sorted(maps.Keys(f.m)) {
 		s, labels := f.m[k], f.labelSet(k)
@@ -244,12 +247,9 @@ func (f keyed) histogram(name, help string, withSum bool) {
 		cum += s.hist[len(s.buckets)].Load()
 		_, _ = fmt.Fprintf(f.w, "%s_bucket{%s,le=\"+Inf\"} %d\n", name, labels, cum)
 		_, _ = fmt.Fprintf(f.w, "%s_count{%s} %d\n", name, labels, cum)
-		if withSum {
-			// Kept in microseconds so the counter stays an integer; written in
-			// seconds, as the metric's name promises.
-			_, _ = fmt.Fprintf(f.w, "%s_sum{%s} %s\n",
-				name, labels, strconv.FormatFloat(float64(s.sum.Load())/1e6, 'f', 6, 64))
-		}
+		// Written in seconds, as the metric's name promises.
+		_, _ = fmt.Fprintf(f.w, "%s_sum{%s} %s\n",
+			name, labels, strconv.FormatFloat(float64(s.micros.Load())/1e6, 'f', 6, 64))
 	}
 }
 

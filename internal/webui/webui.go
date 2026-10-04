@@ -130,7 +130,7 @@ const contentSecurityPolicy = "default-src 'self'; " +
 	"object-src 'none'"
 
 // Handler serves the panel, falling back to the application shell for any path
-// that is not a file: the panel routes on the URL, so /teams loads the same
+// that is not a file: the panel routes on the URL, so /projects loads the same
 // document as /.
 func Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -36,7 +36,7 @@ func (s *Server) gitCredential(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	limits, err := s.sandboxLimits(r.Context(), sb.OrgID, sb.TeamID)
+	limits, err := s.sandboxLimits(r.Context(), sb.OrgID, sb.ProjectID)
 	if err != nil {
 		s.fail(w, err)
 		return

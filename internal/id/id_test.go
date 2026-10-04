@@ -37,7 +37,7 @@ func TestHasPrefixRejectsOtherShapes(t *testing.T) {
 	if HasPrefix("org_short", "org") {
 		t.Error("a truncated id was accepted")
 	}
-	if HasPrefix(New("team"), "org") {
+	if HasPrefix(New("project"), "org") {
 		t.Error("an id with a different prefix was accepted")
 	}
 }

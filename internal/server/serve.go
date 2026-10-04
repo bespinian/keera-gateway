@@ -82,9 +82,7 @@ func serve(ctx context.Context) error {
 		MaxResponseBytes:      cfg.MaxResponseBytes,
 		UpstreamHeaderTimeout: cfg.UpstreamHeaderTimeout,
 		Currency:              cfg.Currency,
-		// Where a refusal points the developer. Empty unless the deployment
-		// declares a panel a browser can reach.
-		PanelURL: cfg.PublicURL,
+		PanelURL:              panelURL(cfg),
 	}, log)
 
 	providers, err := buildProviders(ctx, cfg, log)
@@ -635,4 +633,13 @@ func sweepSandboxes(ctx context.Context, m *sandbox.Manager) {
 			m.Sweep(ctx, now)
 		}
 	}
+}
+
+// panelURL is where a refusal points the developer: empty unless the
+// deployment serves a panel and declares an address a browser can reach.
+func panelURL(cfg config.Config) string {
+	if !cfg.UI {
+		return ""
+	}
+	return cfg.PublicURL
 }

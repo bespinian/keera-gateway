@@ -144,13 +144,20 @@ export async function mcpView(ctx) {
           { class: "row-tight" },
           h(
             "button",
-            { class: "btn btn-sm", onClick: () => editServer(ctx, m) },
-            "Edit",
+            {
+              class: "btn btn-sm",
+              title: "Edit this server",
+              "aria-label": `Edit ${m.alias}`,
+              onClick: () => editServer(ctx, m),
+            },
+            icon(icons.pencil),
           ),
           h(
             "button",
             {
               class: "btn btn-sm btn-danger",
+              title: "Delete this server",
+              "aria-label": `Delete ${m.alias}`,
               onClick: () =>
                 confirm({
                   title: `Delete ${m.alias}?`,
@@ -166,7 +173,7 @@ export async function mcpView(ctx) {
                   },
                 }),
             },
-            "Delete",
+            icon(icons.trash),
           ),
         ),
     });

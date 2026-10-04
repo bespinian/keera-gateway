@@ -45,6 +45,7 @@ import {
   isAdmin,
 } from "../ui.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
+import { oldestProject } from "./projects.js";
 
 export async function sandboxesView(ctx) {
   // A sandbox belongs to an organisation, because its quota and its bill do.
@@ -52,16 +53,18 @@ export async function sandboxesView(ctx) {
 
   const me = ctx.state.me;
   const canAdmin = isAdmin(ctx);
-  const [list, cat, teams] = await Promise.all([
+  const [list, cat, projects] = await Promise.all([
     api.sandboxes(ctx.orgID, { all: showAll() }),
     api.sandboxClasses(ctx.orgID),
-    // Only an administrator may put a sandbox on a team, so only an
+    // Only an administrator may put a sandbox on a project, so only an
     // administrator's dialog needs the list. A member's sandbox is created
     // against the organisation's own guardrails, and asking them to choose
     // from a list they cannot use would be a field that only ever refuses.
-    canAdmin ? api.teams(ctx.orgID).catch(() => ({ data: [] })) : { data: [] },
+    canAdmin
+      ? api.projects(ctx.orgID).catch(() => ({ data: [] }))
+      : { data: [] },
   ]);
-  ctx.state.teams = teams.data || [];
+  ctx.state.projects = projects.data || [];
   const sandboxes = list.data || [];
   const classes = cat.data || [];
   const driver = cat.driver;
@@ -81,7 +84,7 @@ export async function sandboxesView(ctx) {
   return h(
     "div",
     { class: "grid" },
-    head(ctx, classes, driver, limits, canAdmin, teams.data || []),
+    head(ctx, classes, driver, limits, canAdmin, projects.data || []),
     h(
       "div",
       { class: "grid grid-4" },
@@ -115,7 +118,7 @@ export async function sandboxesView(ctx) {
 }
 
 /** The strip above the table: what a sandbox is, and the button that makes one. */
-function head(ctx, classes, driver, limits, canAdmin, teams) {
+function head(ctx, classes, driver, limits, canAdmin, projects) {
   const usable = classes.filter((c) => allowed(c, limits, driver));
   return h(
     "div",
@@ -136,7 +139,7 @@ function head(ctx, classes, driver, limits, canAdmin, teams) {
             "button",
             {
               class: "btn btn-primary",
-              onClick: () => newSandbox(ctx, usable, limits, teams),
+              onClick: () => newSandbox(ctx, usable, limits, projects),
             },
             icon(icons.plus),
             "New sandbox",
@@ -226,15 +229,15 @@ function listCard(ctx, sandboxes, canAdmin, me, driver) {
             "div",
             {},
             h("span", { class: "muted" }, s.owner || "—"),
-            // The team, where there is one. It belongs beside the owner rather
+            // The project, where there is one. It belongs beside the owner rather
             // than in a column of its own: what it answers is "whose is this",
-            // and a team is the other half of that - it is the budget the
+            // and a project is the other half of that - it is the budget the
             // sandbox is charged to and the guardrail its agent works under.
-            s.team_id
+            s.project_id
               ? h(
                   "div",
                   { class: "faint", style: { fontSize: "11.5px" } },
-                  teamName(ctx, s.team_id),
+                  projectName(ctx, s.project_id),
                 )
               : null,
           ),
@@ -376,7 +379,7 @@ function classCard(ctx, classes, driver) {
               ? h(
                   "button",
                   {
-                    class: "btn btn-sm",
+                    class: "btn btn-sm btn-danger",
                     title: "Delete this class",
                     onClick: () => removeClass(ctx, c),
                   },
@@ -597,7 +600,7 @@ function removeClass(ctx, c) {
  *  nobody can open a shell in, so the field is required for an engineer's
  *  sandbox and the dialog says why rather than letting the control plane
  *  refuse after everything else has been filled in. */
-function newSandbox(ctx, classes, limits, teams) {
+function newSandbox(ctx, classes, limits, projects) {
   const name = h("input", { class: "input", placeholder: "fix-login" });
   const cls = h(
     "select",
@@ -610,21 +613,23 @@ function newSandbox(ctx, classes, limits, teams) {
       ),
     ),
   );
-  // Which team the sandbox - and the key minted for it - belongs to.
+  // Which project the sandbox - and the key minted for it - belongs to.
   //
-  // It is the field with the most behind it: the team decides the sandbox's
+  // It is the field with the most behind it: the project decides the sandbox's
   // quota, its budget, its rate limit, the system prompt its agent carries and
-  // which models that agent may reach. Empty is the organisation's own
-  // guardrails, which is what a sandbox got before this existed.
-  const team = h(
+  // which models that agent may reach. The oldest project is picked, as the
+  // control plane does for a sandbox that names none.
+  const first = oldestProject(projects);
+  const project = h(
     "select",
     { class: "input" },
-    h("option", { value: "" }, "No team — the organisation's own guardrails"),
-    ...teams.map((t) => h("option", { value: t.id }, t.name)),
+    ...projects.map((t) =>
+      h("option", { value: t.id, selected: t.id === first }, t.name),
+    ),
   );
   const repo = h("input", {
     class: "input",
-    placeholder: "https://git.example.internal/team/service.git",
+    placeholder: "https://git.example.internal/project/service.git",
   });
   const branch = h("input", { class: "input", placeholder: "main" });
   const repos = (limits && limits.allowed_repos) || [];
@@ -655,12 +660,12 @@ function newSandbox(ctx, classes, limits, teams) {
           "keera sandbox ssh <name>.",
       ),
       field("Class", cls),
-      teams.length
+      projects.length
         ? field(
-            "Team",
-            team,
-            "The sandbox's key is scoped to this team, and the sandbox " +
-              "counts toward its quota. The team's guardrails can allow " +
+            "Project",
+            project,
+            "The sandbox's key is scoped to this project, and the sandbox " +
+              "counts toward its quota. The project's guardrails can allow " +
               "fewer classes or a shorter lifetime than shown here.",
           )
         : null,
@@ -670,7 +675,7 @@ function newSandbox(ctx, classes, limits, teams) {
         "The key that can open a shell in it. 'keera sandbox create' sends " +
           "yours from ~/.ssh automatically.",
       ),
-      // Nil or empty allows no repository, and a team can only narrow it.
+      // Nil or empty allows no repository, and a project can only narrow it.
       repos.length
         ? field(
             "Repository",
@@ -728,7 +733,7 @@ function newSandbox(ctx, classes, limits, teams) {
                 org_id: ctx.orgID,
                 name: name.value.trim(),
                 class: cls.value,
-                team_id: team.value,
+                project_id: project.value,
                 repo: repo.value.trim(),
                 branch: branch.value.trim(),
                 ttl: ttl.value.trim(),
@@ -751,13 +756,13 @@ function newSandbox(ctx, classes, limits, teams) {
 
 /* ------------------------------------------------------------------ helpers */
 
-/** teamName is a team's name where the screen knows it, and its id otherwise.
+/** projectName is a project's name where the screen knows it, and its id otherwise.
  *
  *  A member's list is narrowed to their own sandboxes and they cannot read the
- *  team list, so the id is what they get - which is still better than nothing,
+ *  project list, so the id is what they get - which is still better than nothing,
  *  because it is the string their administrator will ask them for. */
-function teamName(ctx, id) {
-  const known = (ctx.state.teams || []).find((t) => t.id === id);
+function projectName(ctx, id) {
+  const known = (ctx.state.projects || []).find((t) => t.id === id);
   return known ? known.name : id;
 }
 

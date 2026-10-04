@@ -92,7 +92,7 @@ func mcpHarness(t *testing.T, res *policy.Resolved) (*harness, *fakeMCP) {
 	upstream := httptest.NewServer(http.HandlerFunc(fake.handler))
 	t.Cleanup(upstream.Close)
 	if res == nil {
-		res = policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1", TeamID: "team_1"}, nil, nil, nil)
+		res = policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"}, nil, nil, nil)
 	}
 	h := &harness{budgets: &fakeBudgets{}, sink: &fakeSink{}, metrics: metrics.New()}
 	h.src = &fakeSource{
@@ -129,7 +129,7 @@ func (h *harness) rpc(t *testing.T, body string, header ...string) (*http.Respon
 
 // allowing is a key allowed exactly these tool entries.
 func allowing(entries ...string) *policy.Resolved {
-	return policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1", TeamID: "team_1"},
+	return policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
 		&policy.Limits{AllowedTools: entries}, nil, nil)
 }
 
@@ -354,7 +354,7 @@ func TestAServerTheKeyMayNotUseDoesNotExist(t *testing.T) {
 
 func TestHostedToolsAreTakenOutWhenBlocked(t *testing.T) {
 	yes := true
-	res := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1", TeamID: "team_1"},
+	res := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
 		&policy.Limits{BlockHostedTools: &yes}, nil, nil)
 	h, seen := providerHarness(t, "anthropic", "claude-opus-5", jsonBackend(anthropicAnswer), res)
 
@@ -387,7 +387,7 @@ func TestHostedToolsAreTakenOutWhenBlocked(t *testing.T) {
 
 func TestHostedToolsAreTakenOutOfAResponsesRequest(t *testing.T) {
 	yes := true
-	res := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1", TeamID: "team_1"},
+	res := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
 		&policy.Limits{BlockHostedTools: &yes}, nil, nil)
 	h, seen := providerHarness(t, "openai", "gpt-5.5",
 		jsonBackend(`{"model":"gpt-5.5","usage":{"input_tokens":1,"output_tokens":1}}`), res)

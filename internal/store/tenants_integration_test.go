@@ -25,16 +25,16 @@ func TestDeleteOrgTakesItsTenancyAndKeepsItsHistory(t *testing.T) {
 	for _, sc := range []struct {
 		typ policy.ScopeType
 		id  string
-	}{{policy.ScopeOrg, f.orgID}, {policy.ScopeTeam, f.teamID}, {policy.ScopeKey, f.keyID}} {
+	}{{policy.ScopeOrg, f.orgID}, {policy.ScopeProject, f.projectID}, {policy.ScopeKey, f.keyID}} {
 		if err := st.PutPolicy(ctx, sc.typ, sc.id, policy.Limits{RPM: new(10)}); err != nil {
 			t.Fatalf("PutPolicy %s: %v", sc.typ, err)
 		}
 	}
-	if err := st.WriteEvents(ctx, []Event{{TS: now, OrgID: f.orgID, TeamID: f.teamID,
+	if err := st.WriteEvents(ctx, []Event{{TS: now, OrgID: f.orgID, ProjectID: f.projectID,
 		KeyID: f.keyID, Alias: "keera-code", CostMicros: 500, Status: 200,
 		Scopes: []policy.Scope{
 			{Type: policy.ScopeOrg, ID: f.orgID, Period: policy.PeriodMonth},
-			{Type: policy.ScopeTeam, ID: f.teamID, Period: policy.PeriodMonth},
+			{Type: policy.ScopeProject, ID: f.projectID, Period: policy.PeriodMonth},
 			{Type: policy.ScopeKey, ID: f.keyID, Period: policy.PeriodMonth},
 		}}}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
@@ -47,13 +47,13 @@ func TestDeleteOrgTakesItsTenancyAndKeepsItsHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteOrg: %v", err)
 	}
-	if gone.Name != "Example Bank" || gone.Teams != 1 || gone.Users != 1 || gone.Keys != 1 {
+	if gone.Name != "Example Bank" || gone.Projects != 2 || gone.Users != 1 || gone.Keys != 1 {
 		t.Errorf("DeletedOrg = %+v, want the counts of what went with it", gone)
 	}
 
-	// Teams, users, keys and sessions follow the foreign keys.
+	// Projects, users, keys and sessions follow the foreign keys.
 	for _, q := range []string{
-		"SELECT count(*) FROM teams",
+		"SELECT count(*) FROM projects",
 		"SELECT count(*) FROM users",
 		"SELECT count(*) FROM api_keys",
 		"SELECT count(*) FROM sessions",
@@ -92,22 +92,22 @@ func TestDeleteOrgTakesItsTenancyAndKeepsItsHistory(t *testing.T) {
 }
 
 func TestTenancyLookupsUsedForAuthorisation(t *testing.T) {
-	// The control plane checks a named team or key against the caller's own
+	// The control plane checks a named project or key against the caller's own
 	// tenant before it reads or writes anything, so these have to answer for a
 	// missing id rather than about one.
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
 
-	if org, err := st.TeamOrg(ctx, f.teamID); err != nil || org != f.orgID {
-		t.Errorf("TeamOrg = %q, %v", org, err)
+	if org, err := st.ProjectOrg(ctx, f.projectID); err != nil || org != f.orgID {
+		t.Errorf("ProjectOrg = %q, %v", org, err)
 	}
-	if _, err := st.TeamOrg(ctx, "nobody"); err != ErrNotFound {
-		t.Errorf("TeamOrg for a missing team gave %v, want ErrNotFound", err)
+	if _, err := st.ProjectOrg(ctx, "nobody"); err != ErrNotFound {
+		t.Errorf("ProjectOrg for a missing project gave %v, want ErrNotFound", err)
 	}
 	// KeyOwnerOf decides whether a member may revoke a key, so the
 	// attribution has to come back exactly as stored. The fixture's key is
 	// attributed to nobody, which is the case that must never read as "mine".
-	want := KeyOwner{OrgID: f.orgID, TeamID: f.teamID}
+	want := KeyOwner{OrgID: f.orgID, ProjectID: f.projectID}
 	if o, err := st.KeyOwnerOf(ctx, f.keyID); err != nil || o != want {
 		t.Errorf("KeyOwnerOf = %+v, %v; want %+v", o, err, want)
 	}
@@ -117,11 +117,16 @@ func TestTenancyLookupsUsedForAuthorisation(t *testing.T) {
 	}
 	if _, err := st.CreateKey(ctx, KeyInfo{
 		ID: "key_2", OrgID: f.orgID, UserID: person.ID,
-		Alias: "theirs", Prefix: "keera_sk_theirs",
+		Name: "theirs", Prefix: "keera_sk_theirs",
 	}, []byte("hash-of-keera_sk_theirs-32-bytes!!")); err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
-	want = KeyOwner{OrgID: f.orgID, UserID: person.ID}
+	// A key issued without a project is in the organisation's oldest one.
+	firstID, err := st.FirstProject(ctx, f.orgID)
+	if err != nil {
+		t.Fatalf("FirstProject: %v", err)
+	}
+	want = KeyOwner{OrgID: f.orgID, ProjectID: firstID, UserID: person.ID}
 	if o, err := st.KeyOwnerOf(ctx, "key_2"); err != nil || o != want {
 		t.Errorf("KeyOwnerOf = %+v, %v; want %+v", o, err, want)
 	}
@@ -129,106 +134,117 @@ func TestTenancyLookupsUsedForAuthorisation(t *testing.T) {
 		t.Errorf("KeyOwnerOf for a missing key gave %v, want ErrNotFound", err)
 	}
 
-	// A report grouped by team or key renders names, not ids.
-	if names, err := st.TeamNames(ctx, f.orgID); err != nil || names[f.teamID] != "Payments Platform" {
-		t.Errorf("TeamNames = %v, %v", names, err)
+	// A report grouped by project or key renders names, not ids.
+	if names, err := st.ProjectNames(ctx, f.orgID); err != nil || names[f.projectID] != "Payments Platform" {
+		t.Errorf("ProjectNames = %v, %v", names, err)
 	}
-	if aliases, err := st.KeyAliases(ctx, f.orgID); err != nil || aliases[f.keyID] != "a developer's laptop" {
-		t.Errorf("KeyAliases = %v, %v", aliases, err)
+	if names, err := st.KeyNames(ctx, f.orgID); err != nil || names[f.keyID] != "a developer's laptop" {
+		t.Errorf("KeyNames = %v, %v", names, err)
 	}
 
-	// A team name is unique inside its organisation, and the error says so
+	// A project name is unique inside its organisation, and the error says so
 	// rather than quoting a constraint.
-	if _, err := st.CreateTeam(ctx, "team_2", f.orgID, "Payments Platform"); err == nil {
-		t.Error("a duplicate team name was accepted")
+	if _, err := st.CreateProject(ctx, Project{ID: "project_2", OrgID: f.orgID, Name: "Payments Platform"}); !errors.Is(err, ErrProjectNameTaken) {
+		t.Errorf("a duplicate project name = %v, want ErrProjectNameTaken", err)
 	}
-	// The same name in another tenant is a different team.
+	// The same name in another tenant is a different project.
 	if _, err := st.CreateOrg(ctx, Org{ID: "org_2", Name: "Another Bank"}, OrgTemplate{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.CreateTeam(ctx, "team_3", "org_2", "Payments Platform"); err != nil {
-		t.Errorf("the same team name in another organisation was refused: %v", err)
+	if _, err := st.CreateProject(ctx, Project{ID: "project_3", OrgID: "org_2", Name: "Payments Platform"}); err != nil {
+		t.Errorf("the same project name in another organisation was refused: %v", err)
 	}
 }
 
 // A rename is one column, and the point of the test is everything it did not
-// touch: a key resolves by hash and not by team name, and the guardrails, the
-// spend and the id all stay where they were.
-func TestRenameTeamLeavesEverythingThatPointsAtItAlone(t *testing.T) {
+// touch: a key resolves by hash and not by project name, and the guardrails,
+// the spend and the id all stay where they were.
+func TestUpdateProjectLeavesEverythingThatPointsAtItAlone(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
-	if err := st.PutPolicy(ctx, policy.ScopeTeam, f.teamID,
+	if err := st.PutPolicy(ctx, policy.ScopeProject, f.projectID,
 		policy.Limits{RPM: new(60)}); err != nil {
 		t.Fatalf("PutPolicy: %v", err)
 	}
 
-	renamed, err := st.RenameTeam(ctx, f.teamID, "Payments")
+	renamed, err := st.UpdateProject(ctx, f.projectID, ProjectChange{Name: new("Payments")})
 	if err != nil {
-		t.Fatalf("RenameTeam: %v", err)
+		t.Fatalf("UpdateProject: %v", err)
 	}
-	if renamed.ID != f.teamID || renamed.Name != "Payments" || renamed.OrgID != f.orgID {
-		t.Errorf("RenameTeam returned %+v", renamed)
+	if renamed.ID != f.projectID || renamed.Name != "Payments" || renamed.OrgID != f.orgID {
+		t.Errorf("UpdateProject returned %+v", renamed)
 	}
 
-	// The key still resolves, and it resolves to the same team carrying the
+	// A description leaves the name alone, and an empty one clears it.
+	described, err := st.UpdateProject(ctx, f.projectID,
+		ProjectChange{Description: new("Card payments and refunds")})
+	if err != nil || described.Name != "Payments" || described.Description != "Card payments and refunds" {
+		t.Errorf("setting the description = %+v, %v", described, err)
+	}
+	cleared, err := st.UpdateProject(ctx, f.projectID, ProjectChange{Description: new("")})
+	if err != nil || cleared.Description != "" {
+		t.Errorf("clearing the description = %+v, %v", cleared, err)
+	}
+
+	// The key still resolves, and it resolves to the same project carrying the
 	// same limits. This is the whole claim the dialog in the panel makes.
 	res, err := st.LookupKey(ctx, f.hash)
 	if err != nil {
 		t.Fatalf("LookupKey after the rename: %v", err)
 	}
-	if res.Key.TeamID != f.teamID {
-		t.Errorf("the key's team = %q, want %q", res.Key.TeamID, f.teamID)
+	if res.Key.ProjectID != f.projectID {
+		t.Errorf("the key's project = %q, want %q", res.Key.ProjectID, f.projectID)
 	}
-	lim, err := st.GetPolicy(ctx, policy.ScopeTeam, f.teamID)
+	lim, err := st.GetPolicy(ctx, policy.ScopeProject, f.projectID)
 	if err != nil || lim.RPM == nil || *lim.RPM != 60 {
-		t.Errorf("the team's guardrails after the rename = %+v, %v", lim, err)
+		t.Errorf("the project's guardrails after the rename = %+v, %v", lim, err)
 	}
-	if names, err := st.TeamNames(ctx, f.orgID); err != nil || names[f.teamID] != "Payments" {
-		t.Errorf("TeamNames = %v, %v", names, err)
+	if names, err := st.ProjectNames(ctx, f.orgID); err != nil || names[f.projectID] != "Payments" {
+		t.Errorf("ProjectNames = %v, %v", names, err)
 	}
 
 	// The name is still one per organisation, and the refusal is the typed one
 	// the control plane turns into a sentence rather than a constraint name.
-	if _, err := st.CreateTeam(ctx, "team_2", f.orgID, "Data Science"); err != nil {
-		t.Fatalf("CreateTeam: %v", err)
+	if _, err := st.CreateProject(ctx, Project{ID: "project_2", OrgID: f.orgID, Name: "Data Science"}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
 	}
-	if _, err := st.RenameTeam(ctx, "team_2", "Payments"); !errors.Is(err, ErrTeamNameTaken) {
-		t.Errorf("renaming onto a name in use = %v, want ErrTeamNameTaken", err)
+	if _, err := st.UpdateProject(ctx, "project_2", ProjectChange{Name: new("Payments")}); !errors.Is(err, ErrProjectNameTaken) {
+		t.Errorf("renaming onto a name in use = %v, want ErrProjectNameTaken", err)
 	}
-	// Renaming a team to what it is already called is not a collision with
+	// Renaming a project to what it is already called is not a collision with
 	// itself. Somebody correcting the capitalisation of one word would meet
 	// that as an error otherwise.
-	if _, err := st.RenameTeam(ctx, f.teamID, "Payments"); err != nil {
-		t.Errorf("renaming a team to its own name: %v", err)
+	if _, err := st.UpdateProject(ctx, f.projectID, ProjectChange{Name: new("Payments")}); err != nil {
+		t.Errorf("renaming a project to its own name: %v", err)
 	}
-	if _, err := st.RenameTeam(ctx, "team_gone", "Anything"); !errors.Is(err, ErrNotFound) {
-		t.Errorf("renaming a team that does not exist = %v, want ErrNotFound", err)
+	if _, err := st.UpdateProject(ctx, "project_gone", ProjectChange{Name: new("Anything")}); !errors.Is(err, ErrNotFound) {
+		t.Errorf("changing a project that does not exist = %v, want ErrNotFound", err)
 	}
 }
 
-// Deleting a team is refused while a key in it still works, because the foreign
+// Deleting a project is refused while a key in it still works, because the foreign
 // key cascades: the alternative to this check is credentials disappearing and a
 // production job finding out.
-func TestDeleteTeamIsRefusedWhileAKeyStillWorks(t *testing.T) {
+func TestDeleteProjectIsRefusedWhileAKeyStillWorks(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
-	if err := st.PutPolicy(ctx, policy.ScopeTeam, f.teamID,
+	if err := st.PutPolicy(ctx, policy.ScopeProject, f.projectID,
 		policy.Limits{RPM: new(60)}); err != nil {
 		t.Fatalf("PutPolicy: %v", err)
 	}
 
-	_, err := st.DeleteTeam(ctx, f.teamID)
-	var inUse *TeamInUseError
+	_, err := st.DeleteProject(ctx, f.projectID)
+	var inUse *ProjectInUseError
 	if !errors.As(err, &inUse) {
-		t.Fatalf("DeleteTeam with a live key = %v, want TeamInUseError", err)
+		t.Fatalf("DeleteProject with a live key = %v, want ProjectInUseError", err)
 	}
-	// The aliases are carried because "in use" is not something anybody can
+	// The names are carried because "in use" is not something anybody can
 	// act on and "this credential" is.
-	if !slices.Equal(inUse.Aliases, []string{"a developer's laptop"}) {
-		t.Errorf("the refusal named %v", inUse.Aliases)
+	if !slices.Equal(inUse.Keys, []string{"a developer's laptop"}) {
+		t.Errorf("the refusal named %v", inUse.Keys)
 	}
-	if names, err := st.TeamNames(ctx, f.orgID); err != nil || names[f.teamID] == "" {
-		t.Errorf("the team went away despite the refusal: %v, %v", names, err)
+	if names, err := st.ProjectNames(ctx, f.orgID); err != nil || names[f.projectID] == "" {
+		t.Errorf("the project went away despite the refusal: %v, %v", names, err)
 	}
 
 	// Revoked, the key is no longer a reason to refuse - but it is still a row
@@ -236,28 +252,28 @@ func TestDeleteTeamIsRefusedWhileAKeyStillWorks(t *testing.T) {
 	if err := st.RevokeKey(ctx, f.keyID); err != nil {
 		t.Fatalf("RevokeKey: %v", err)
 	}
-	gone, err := st.DeleteTeam(ctx, f.teamID)
+	gone, err := st.DeleteProject(ctx, f.projectID)
 	if err != nil {
-		t.Fatalf("DeleteTeam after revoking: %v", err)
+		t.Fatalf("DeleteProject after revoking: %v", err)
 	}
 	if gone.Name != "Payments Platform" || gone.DetachedKeys != 1 {
-		t.Errorf("DeleteTeam reported %+v", gone)
+		t.Errorf("DeleteProject reported %+v", gone)
 	}
 
-	var teamID *string
+	var projectID *string
 	if err := st.pool.QueryRow(ctx,
-		"SELECT team_id FROM api_keys WHERE id = $1", f.keyID).Scan(&teamID); err != nil {
-		t.Fatalf("the revoked key did not survive its team: %v", err)
+		"SELECT project_id FROM api_keys WHERE id = $1", f.keyID).Scan(&projectID); err != nil {
+		t.Fatalf("the revoked key did not survive its project: %v", err)
 	}
-	if teamID != nil {
-		t.Errorf("the revoked key still names team %q", *teamID)
+	if projectID != nil {
+		t.Errorf("the revoked key still names project %q", *projectID)
 	}
 	// The guardrails name their scope by plain id with no foreign key to
 	// follow, so nothing would have cleared them.
-	if _, err := st.GetPolicy(ctx, policy.ScopeTeam, f.teamID); !errors.Is(err, ErrNotFound) {
-		t.Errorf("the team's guardrails outlived it: %v", err)
+	if _, err := st.GetPolicy(ctx, policy.ScopeProject, f.projectID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("the project's guardrails outlived it: %v", err)
 	}
-	if _, err := st.DeleteTeam(ctx, f.teamID); !errors.Is(err, ErrNotFound) {
+	if _, err := st.DeleteProject(ctx, f.projectID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("deleting it twice = %v, want ErrNotFound", err)
 	}
 }
@@ -296,7 +312,7 @@ func TestSetupStateCountsWhatAFirstRunHasToCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SetupState: %v", err)
 	}
-	want := Setup{Orgs: 1, Teams: 1, Keys: 1, Models: 1, People: 1, Requests: 1}
+	want := Setup{Orgs: 1, Keys: 1, Models: 1, People: 1, Requests: 1}
 	if got != want {
 		t.Errorf("SetupState = %+v, want %+v", got, want)
 	}
@@ -403,5 +419,65 @@ func TestOrgNamesAreUnique(t *testing.T) {
 
 	if _, err := st.UpdateOrg(ctx, "nobody", OrgChange{Name: &fresh}); err != ErrNotFound {
 		t.Errorf("renaming a missing org = %v, want ErrNotFound", err)
+	}
+}
+
+// Every working key is in a project, so a new organisation comes with one,
+// and a key issued without a project goes in the oldest project there is.
+func TestAKeyWithoutAProjectGoesInTheOldestOne(t *testing.T) {
+	st, ctx := db(t)
+	if _, err := st.CreateOrg(ctx, Org{ID: "org_1", Name: "Example Bank"}, OrgTemplate{}); err != nil {
+		t.Fatal(err)
+	}
+	projects, err := st.ProjectSummaries(ctx, "org_1", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 1 || projects[0].Name != DefaultProjectName ||
+		projects[0].Description != "The default project of Example Bank" {
+		t.Fatalf("a new organisation's projects = %+v, want one called %q", projects, DefaultProjectName)
+	}
+	first := projects[0].ID
+	if _, err := st.CreateProject(ctx, Project{ID: "project_zz", OrgID: "org_1", Name: "Payments"}); err != nil {
+		t.Fatal(err)
+	}
+
+	newKey := func(id string) (KeyInfo, error) {
+		return st.CreateKey(ctx, KeyInfo{ID: id, OrgID: "org_1", Name: id, Prefix: id},
+			[]byte("hash-of-"+id))
+	}
+	key, err := newKey("key_1")
+	if err != nil {
+		t.Fatalf("CreateKey without a project: %v", err)
+	}
+	if key.ProjectID != first {
+		t.Errorf("the key is in project %q, want the first %q", key.ProjectID, first)
+	}
+
+	// The first project is deleted like any other, and the next oldest takes
+	// its place.
+	if err := st.RevokeKey(ctx, key.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DeleteProject(ctx, first); err != nil {
+		t.Fatalf("deleting the first project: %v", err)
+	}
+	if key, err = newKey("key_2"); err != nil || key.ProjectID != "project_zz" {
+		t.Errorf("with the first project gone = %+v, %v; want a key in project_zz", key, err)
+	}
+
+	// With no project at all there can be no keys, because only a revoked
+	// key may have none.
+	if err := st.RevokeKey(ctx, key.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DeleteProject(ctx, "project_zz"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.FirstProject(ctx, "org_1"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("FirstProject with none = %v, want ErrNotFound", err)
+	}
+	if _, err := newKey("key_3"); !errors.Is(err, ErrNoProject) {
+		t.Errorf("CreateKey with no projects = %v, want ErrNoProject", err)
 	}
 }

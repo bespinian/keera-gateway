@@ -59,7 +59,7 @@ func page(q url.Values) (limit int, before int64) {
 	return limit, before
 }
 
-// entityScope resolves the one team, key or person a report is narrowed to,
+// entityScope resolves the one project, key or person a report is narrowed to,
 // and answers 404 for one in another organisation. Without this, another
 // tenant's key id would reveal their spend.
 //
@@ -71,18 +71,18 @@ func (s *Server) entityScope(w http.ResponseWriter, r *http.Request,
 ) (store.Scope, bool) {
 	q := r.URL.Query()
 	sc := store.Scope{
-		TeamID: q.Get("team_id"),
-		KeyID:  q.Get("key_id"),
-		UserID: q.Get("user_id"),
-		Alias:  q.Get("alias"),
+		ProjectID: q.Get("project_id"),
+		KeyID:     q.Get("key_id"),
+		UserID:    q.Get("user_id"),
+		Alias:     q.Get("alias"),
 	}
 	// An operator looking across every tenant may read all of them.
 	if orgID == "" {
 		return sc, true
 	}
 	ctx := r.Context()
-	if sc.TeamID != "" {
-		owner, err := s.st.TeamOrg(ctx, sc.TeamID)
+	if sc.ProjectID != "" {
+		owner, err := s.st.ProjectOrg(ctx, sc.ProjectID)
 		if !s.inOrg(w, orgID, owner, err) {
 			return sc, false
 		}
@@ -118,8 +118,8 @@ func (s *Server) inOrg(w http.ResponseWriter, orgID, owner string, err error) bo
 
 // overview is the dashboard in one round trip.
 //
-// Narrowed by the query, it is also one team's, key's or model's own screen.
-// Answering both here keeps a team's own page equal to its bar on the
+// Narrowed by the query, it is also one project's, key's or model's own screen.
+// Answering both here keeps a project's own page equal to its bar on the
 // dashboard.
 func (s *Server) overview(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	orgID, from, to, ok := s.reportScope(w, r, p)
@@ -135,25 +135,25 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, p *authn.Princ
 		s.fail(w, err)
 		return
 	}
-	names, err := s.st.TeamNames(r.Context(), orgID)
+	names, err := s.st.ProjectNames(r.Context(), orgID)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	out := map[string]any{
-		"currency":   s.opts.Currency,
-		"team_names": names,
-		"overview":   o,
+		"currency":      s.opts.Currency,
+		"project_names": names,
+		"overview":      o,
 	}
 	// A narrowed overview breaks its traffic down by key, so it needs the key
 	// names too.
 	if !sc.Empty() {
-		keys, err := s.st.KeyAliases(r.Context(), orgID)
+		keys, err := s.st.KeyNames(r.Context(), orgID)
 		if err != nil {
 			s.fail(w, err)
 			return
 		}
-		out["key_aliases"] = keys
+		out["key_names"] = keys
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
@@ -258,7 +258,7 @@ func (s *Server) requestsCSV(w http.ResponseWriter, rows []store.Request, names 
 	cw := beginCSV(w, "keera-requests-"+time.Now().Format("2006-01-02")+".csv")
 	_ = cw.Write([]string{
 		"timestamp", "model", "status", "error", "key", "key_id",
-		"team", "user", "input_tokens", "output_tokens",
+		"project", "user", "input_tokens", "output_tokens",
 		"cost_" + strings.ToLower(s.opts.Currency),
 		"latency_ms", "ttft_ms", "stream", "estimated", "canceled",
 	})
@@ -266,7 +266,7 @@ func (s *Server) requestsCSV(w http.ResponseWriter, rows []store.Request, names 
 		_ = cw.Write([]string{
 			q.TS.Format(time.RFC3339), q.Alias, strconv.Itoa(q.Status), q.Error,
 			names.label("key", q.KeyID), q.KeyID,
-			names.label("team", q.TeamID), names.label("user", q.UserID),
+			names.label("project", q.ProjectID), names.label("user", q.UserID),
 			strconv.FormatInt(q.InputTokens, 10), strconv.FormatInt(q.OutputTokens, 10),
 			policy.FormatMicros(q.CostMicros),
 			strconv.FormatInt(q.LatencyMS, 10), strconv.FormatInt(q.TTFTMS, 10),
@@ -328,7 +328,7 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request, p *authn.Principa
 // three are sent every time: they are small, and readers switch groupings
 // often.
 type groupLabels struct {
-	teams, keys, users map[string]string
+	projects, keys, users map[string]string
 }
 
 func (s *Server) groupNames(ctx context.Context, orgID string) (groupLabels, error) {
@@ -336,10 +336,10 @@ func (s *Server) groupNames(ctx context.Context, orgID string) (groupLabels, err
 		g   groupLabels
 		err error
 	)
-	if g.teams, err = s.st.TeamNames(ctx, orgID); err != nil {
+	if g.projects, err = s.st.ProjectNames(ctx, orgID); err != nil {
 		return g, err
 	}
-	if g.keys, err = s.st.KeyAliases(ctx, orgID); err != nil {
+	if g.keys, err = s.st.KeyNames(ctx, orgID); err != nil {
 		return g, err
 	}
 	if g.users, err = s.st.UserEmails(ctx, orgID); err != nil {
@@ -350,8 +350,8 @@ func (s *Server) groupNames(ctx context.Context, orgID string) (groupLabels, err
 
 // addTo puts the labels into a report's response.
 func (g groupLabels) addTo(out map[string]any) {
-	out["team_names"] = g.teams
-	out["key_aliases"] = g.keys
+	out["project_names"] = g.projects
+	out["key_names"] = g.keys
 	out["user_names"] = g.users
 }
 
@@ -361,8 +361,8 @@ func (g groupLabels) label(groupBy, id string) string {
 	}
 	var m map[string]string
 	switch groupBy {
-	case "team":
-		m = g.teams
+	case "project":
+		m = g.projects
 	case "key":
 		m = g.keys
 	case "user":
@@ -494,7 +494,7 @@ func beginCSV(w http.ResponseWriter, filename string) *csvWriter {
 // csvWriter is encoding/csv, except that no field can be read as a formula by
 // the spreadsheet that opens it.
 //
-// The exports carry names and audit detail that users wrote. A team called
+// The exports carry names and audit detail that users wrote. A project called
 // `=HYPERLINK(...)` would run as a formula in Excel, and quoting does not
 // prevent that.
 type csvWriter struct{ *csv.Writer }

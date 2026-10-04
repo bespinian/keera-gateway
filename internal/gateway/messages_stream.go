@@ -2,8 +2,9 @@ package gateway
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/id"
@@ -25,90 +26,112 @@ var anthropicPingInterval = 20 * time.Second
 
 var pingEvent = []byte("event: ping\ndata: {\"type\":\"ping\"}\n\n")
 
-// errStreamAbandoned stops the reader when the client has gone away. It is
-// never returned to a caller.
-var errStreamAbandoned = errors.New("gateway: client stopped reading the stream")
-
 // pipe forwards a chat completion stream as a Messages stream.
 //
-// Reading and translating run in a goroutine that hands finished events over
-// a channel. Only this goroutine writes to dst, so pings and events never
-// write at the same time.
+// Events are written as they are made, by the goroutine reading upstream.
+// Only the pings come from elsewhere, a timer, since they are needed exactly
+// when that goroutine is waiting.
 func (anthropicShape) pipe(dst io.Writer, flush func(), src io.Reader, alias string,
-	_ bool,
+	_ bool, limit int64,
 ) (streamStats, error) {
-	var (
-		stats    streamStats
-		events   = make(chan []byte, 64)
-		done     = make(chan struct{})
-		finished = make(chan struct{})
-		readErr  error
-	)
+	out := newPinger(dst, flush, anthropicPingInterval)
+	st := &messagesStream{alias: alias, msgID: id.New("msg"), openIndex: -1, send: out.write}
 
-	st := &messagesStream{alias: alias, msgID: id.New("msg"), openIndex: -1}
-	st.send = func(b []byte) error {
-		select {
-		case events <- b:
-			return nil
-		case <-done:
-			return errStreamAbandoned
-		}
-	}
-
-	go func() {
-		defer close(finished)
-		defer close(events)
-		readErr = scanSSE(src, st.chunk)
-		if errors.Is(readErr, errStreamAbandoned) {
-			return
-		}
-		// The message is closed even after an upstream failure: a client
-		// waiting for message_stop would hang, which is worse than a short turn.
+	readErr := scanSSE(src, limit, st.chunk)
+	// The message is closed even after an upstream failure: a client waiting
+	// for message_stop would hang, which is worse than a short turn. A client
+	// that is gone is sent nothing more.
+	if !out.failed() {
 		if err := st.finish(); err != nil && readErr == nil {
 			readErr = err
 		}
-	}()
-
-	ticker := time.NewTicker(anthropicPingInterval)
-	defer ticker.Stop()
-
-	var writeErr error
-loop:
-	for {
-		select {
-		case ev, ok := <-events:
-			if !ok {
-				break loop
-			}
-			if stats.firstAt.IsZero() {
-				stats.firstAt = time.Now()
-			}
-			if _, err := dst.Write(ev); err != nil {
-				writeErr = err
-				break loop
-			}
-			flush()
-			ticker.Reset(anthropicPingInterval)
-		case <-ticker.C:
-			if _, err := dst.Write(pingEvent); err != nil {
-				writeErr = err
-				break loop
-			}
-			flush()
-		}
 	}
-	close(done)
-	<-finished
+	writeErr := out.stop()
 
-	stats.usage, stats.deltas = st.usage, st.deltas
-	switch {
-	case writeErr != nil:
+	stats := streamStats{usage: st.usage, deltas: st.deltas, firstAt: out.firstAt}
+	if writeErr != nil {
 		return stats, writeErr
-	case errors.Is(readErr, errStreamAbandoned):
-		return stats, nil
-	default:
-		return stats, readErr
 	}
+	return stats, readErr
+}
+
+// pinger writes a stream's events, and a ping whenever nothing has been
+// written for a whole interval.
+type pinger struct {
+	dst   io.Writer
+	flush func()
+	every time.Duration
+
+	mu    sync.Mutex
+	timer *time.Timer
+	// last is when anything was last written, and firstAt when the first
+	// event was: the wait a developer feels.
+	last, firstAt time.Time
+	// err is the first failed write. Nothing is written after it.
+	err     error
+	stopped bool
+}
+
+func newPinger(dst io.Writer, flush func(), every time.Duration) *pinger {
+	p := &pinger{dst: dst, flush: flush, every: every, last: time.Now()}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.timer = time.AfterFunc(every, p.tick)
+	return p
+}
+
+// write writes one event. It does not keep ev, so the caller may reuse it.
+func (p *pinger) write(ev []byte) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.err != nil {
+		return p.err
+	}
+	p.last = time.Now()
+	if p.firstAt.IsZero() {
+		p.firstAt = p.last
+	}
+	if _, p.err = p.dst.Write(ev); p.err != nil {
+		return p.err
+	}
+	p.flush()
+	return nil
+}
+
+// tick pings if the stream has been quiet for the interval, and sets itself
+// for when the next interval would end. Moving the timer here, rather than
+// on every write, keeps it off the per-token path.
+func (p *pinger) tick() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.stopped || p.err != nil {
+		return
+	}
+	quiet := time.Since(p.last)
+	if quiet >= p.every {
+		if _, p.err = p.dst.Write(pingEvent); p.err != nil {
+			return
+		}
+		p.flush()
+		p.last, quiet = time.Now(), 0
+	}
+	p.timer.Reset(p.every - quiet)
+}
+
+func (p *pinger) failed() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.err != nil
+}
+
+// stop ends the pings and returns the first failed write. Nothing is written
+// once it returns.
+func (p *pinger) stop() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.stopped = true
+	p.timer.Stop()
+	return p.err
 }
 
 // messagesStream is the state a chat completion stream has to be read against
@@ -116,7 +139,10 @@ loop:
 type messagesStream struct {
 	alias string
 	msgID string
-	send  func([]byte) error
+	// send writes one event. It must not keep the slice, which is reused.
+	send func([]byte) error
+	// buf is reused for every token's event.
+	buf []byte
 
 	started   bool
 	nextIndex int
@@ -147,11 +173,7 @@ func (s *messagesStream) text(text string) error {
 			return err
 		}
 	}
-	s.deltas++
-	return s.emit("content_block_delta", textDeltaEvent{
-		Type: "content_block_delta", Index: s.openIndex,
-		Delta: textDelta{Type: "text_delta", Text: text},
-	})
+	return s.delta("text_delta", "text", text)
 }
 
 // toolCall emits a fragment of a tool call, opening its block first if needed.
@@ -171,11 +193,7 @@ func (s *messagesStream) toolCall(index int, tc oaiToolCallDelta) error {
 	if args == "" {
 		return nil
 	}
-	s.deltas++
-	return s.emit("content_block_delta", toolDeltaEvent{
-		Type: "content_block_delta", Index: s.openIndex,
-		Delta: jsonDelta{Type: "input_json_delta", PartialJSON: args},
-	})
+	return s.delta("input_json_delta", "partial_json", args)
 }
 
 // start opens the message, once.
@@ -259,30 +277,22 @@ func (s *messagesStream) finish() error {
 	return s.emit("message_stop", map[string]any{"type": "message_stop"})
 }
 
-// The two per-token events are structs rather than maps, because they are
-// encoded once per token per stream and a map is slower to marshal. They are
-// separate types, not one with omitempty fields, because an empty fragment
-// would make a broken event.
-type textDeltaEvent struct {
-	Type  string    `json:"type"`
-	Index int       `json:"index"`
-	Delta textDelta `json:"delta"`
-}
-
-type textDelta struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
-}
-
-type toolDeltaEvent struct {
-	Type  string    `json:"type"`
-	Index int       `json:"index"`
-	Delta jsonDelta `json:"delta"`
-}
-
-type jsonDelta struct {
-	Type        string `json:"type"`
-	PartialJSON string `json:"partial_json"`
+// delta sends a content_block_delta event to the open block. It runs once per
+// token, so it is written into a reused buffer rather than marshalled.
+func (s *messagesStream) delta(deltaType, key, value string) error {
+	s.deltas++
+	b := append(s.buf[:0], "event: content_block_delta\ndata: "+
+		`{"type":"content_block_delta","index":`...)
+	b = strconv.AppendInt(b, int64(s.openIndex), 10)
+	b = append(b, `,"delta":{"type":"`...)
+	b = append(b, deltaType...)
+	b = append(b, `","`...)
+	b = append(b, key...)
+	b = append(b, `":`...)
+	b = appendQuoted(b, value)
+	b = append(b, "}}\n\n"...)
+	s.buf = b
+	return s.send(b)
 }
 
 // emit renders one event and hands it to the writer.

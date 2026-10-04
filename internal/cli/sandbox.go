@@ -40,7 +40,7 @@ type sandboxRun struct {
 	sub string
 
 	org     string
-	team    string
+	project string
 	class   string
 	purpose string
 	ttl     time.Duration
@@ -61,8 +61,8 @@ func sandboxCmd(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("sandbox "+sub, flag.ExitOnError)
 	r := &sandboxRun{c: newClient(), fs: fs, sub: sub}
 	fs.StringVar(&r.org, "org", "", orgUsage)
-	fs.StringVar(&r.team, "team", "", "team the sandbox belongs to, by name or id; its key is scoped to that "+
-		"team, so the budget, the rate limit and the allowed models are the team's")
+	fs.StringVar(&r.project, "project", "", "project the sandbox belongs to, by name or id; without it, the organisation's oldest project. "+
+		"Its key is in that project, so the budget, the rate limit and the allowed models are the project's")
 	fs.StringVar(&r.class, "class", "", "which machine to ask for; 'keera sandbox classes' lists them")
 	fs.StringVar(&r.purpose, "purpose", "", "'engineer' - a machine you work in - or 'agent' - one task's")
 	fs.DurationVar(&r.ttl, "ttl", 0, "how long it lives; the class's default if not given")
@@ -73,7 +73,7 @@ func sandboxCmd(ctx context.Context, args []string) error {
 	fs.StringVar(&r.sshKey, "ssh-key", "",
 		"public key that may open a shell in it; the keys in ~/.ssh if not given")
 	fs.BoolVar(&r.all, "all", false, "include sandboxes that have finished")
-	fs.StringVar(&r.by, "by", "class", "group 'usage' by class, team or user")
+	fs.StringVar(&r.by, "by", "class", "group 'usage' by class, project or user")
 	fs.DurationVar(&r.since, "since", 7*24*time.Hour, "how far back 'usage' looks")
 	fs.BoolVar(&r.yes, "yes", false, yesUsage)
 	fs.BoolVar(&r.asJSON, "json", false, jsonUsage)
@@ -129,7 +129,7 @@ func (r *sandboxRun) list(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	team, err := teamID(ctx, r.c, orgID, r.team)
+	project, err := projectID(ctx, r.c, orgID, r.project)
 	if err != nil {
 		return err
 	}
@@ -137,7 +137,7 @@ func (r *sandboxRun) list(ctx context.Context) error {
 	if r.all {
 		q.Set("all", "1")
 	}
-	setIfGiven(q, map[string]string{"team_id": team, "class": r.class, "purpose": r.purpose})
+	setIfGiven(q, map[string]string{"project_id": project, "class": r.class, "purpose": r.purpose})
 	sandboxes, err := list[store.Sandbox](ctx, r.c, "/v1/sandboxes?"+q.Encode())
 	if err != nil {
 		return err
@@ -162,12 +162,12 @@ func (r *sandboxRun) create(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	team, err := teamID(ctx, r.c, orgID, r.team)
+	project, err := projectID(ctx, r.c, orgID, r.project)
 	if err != nil {
 		return err
 	}
 	body := map[string]any{
-		"org_id": orgID, "team_id": team, "name": r.fs.Arg(0), "class": r.class,
+		"org_id": orgID, "project_id": project, "name": r.fs.Arg(0), "class": r.class,
 		"purpose": r.purpose, "repo": r.repo, "branch": r.branch, "task": task,
 		"authorized_keys": keys,
 	}

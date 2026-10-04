@@ -9,10 +9,10 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// TeamSummary is a team with what the panel shows next to it: its guardrails,
+// ProjectSummary is a project with what the panel shows next to it: its guardrails,
 // its spend against them, and how many keys are live.
-type TeamSummary struct {
-	Team
+type ProjectSummary struct {
+	Project
 	Limits       policy.Limits `json:"limits"`
 	ActiveKeys   int           `json:"active_keys"`
 	SpendMicros  int64         `json:"spend_micros"`
@@ -20,17 +20,17 @@ type TeamSummary struct {
 	Period       policy.Period `json:"period"`
 }
 
-// TeamSummaries lists an organisation's teams with their guardrails and spend,
+// ProjectSummaries lists an organisation's projects with their guardrails and spend,
 // in one query to avoid N+1. An empty orgID means every organisation.
-func (s *Store) TeamSummaries(ctx context.Context, orgID string, now time.Time) ([]TeamSummary, error) {
+func (s *Store) ProjectSummaries(ctx context.Context, orgID string, now time.Time) ([]ProjectSummary, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT t.id, t.org_id, t.name, t.created_at, `+limitColumns+`,
+		SELECT t.id, t.org_id, t.name, t.description, t.created_at, `+limitColumns+`,
 		       (SELECT count(*) FROM api_keys k
-		         WHERE k.team_id = t.id AND k.revoked_at IS NULL),
+		         WHERE k.project_id = t.id AND k.revoked_at IS NULL),
 		       COALESCE(sp.micros, 0)
-		FROM teams t
-		LEFT JOIN guardrails p ON p.scope_type = 'team' AND p.scope_id = t.id
-		LEFT JOIN spend sp ON sp.scope_type = 'team' AND sp.scope_id = t.id
+		FROM projects t
+		LEFT JOIN guardrails p ON p.scope_type = 'project' AND p.scope_id = t.id
+		LEFT JOIN spend sp ON sp.scope_type = 'project' AND sp.scope_id = t.id
 		     AND sp.period = COALESCE(p.budget_period, 'month')
 		     AND sp.period_start = CASE WHEN COALESCE(p.budget_period, 'month') = 'day'
 		                                THEN $2::date ELSE $3::date END
@@ -40,19 +40,19 @@ func (s *Store) TeamSummaries(ctx context.Context, orgID string, now time.Time) 
 	if err != nil {
 		return nil, err
 	}
-	return collect(rows, scanTeamSummary)
+	return collect(rows, scanProjectSummary)
 }
 
-func scanTeamSummary(r row) (TeamSummary, error) {
+func scanProjectSummary(r row) (ProjectSummary, error) {
 	var (
-		t      TeamSummary
+		t      ProjectSummary
 		period *string
 		keys   int64
 	)
-	dest := append([]any{&t.ID, &t.OrgID, &t.Name, &t.CreatedAt},
+	dest := append([]any{&t.ID, &t.OrgID, &t.Name, &t.Description, &t.CreatedAt},
 		limitTargets(&t.Limits, &period)...)
 	if err := r.Scan(append(dest, &keys, &t.SpendMicros)...); err != nil {
-		return TeamSummary{}, err
+		return ProjectSummary{}, err
 	}
 	t.ActiveKeys = int(keys)
 	// Limits stays as stored. Period says what the spend is counted over: a
@@ -79,7 +79,7 @@ type SeriesPoint struct {
 
 // Overview is everything the dashboard needs, in one round trip.
 //
-// One team's, key's or model's own screen uses it too, over fewer rows.
+// One project's, key's or model's own screen uses it too, over fewer rows.
 // Computing both the same way keeps the screens from disagreeing.
 type Overview struct {
 	From         time.Time `json:"from"`
@@ -97,7 +97,7 @@ type Overview struct {
 	TTFTMedianMS       int64         `json:"ttft_median_ms"`
 	TTFTP95MS          int64         `json:"ttft_p95_ms"`
 	Series             []SeriesPoint `json:"series"`
-	TopTeams           []UsageBucket `json:"top_teams"`
+	TopProjects        []UsageBucket `json:"top_projects"`
 	TopModels          []UsageBucket `json:"top_models"`
 	// TopKeys is only filled in for a scoped overview, where "which key is
 	// doing this" is the next question.
@@ -142,14 +142,14 @@ func (s *Store) Overview(ctx context.Context, orgID string, from, to time.Time,
 	}
 
 	q := UsageQuery{OrgID: orgID, Scope: sc, From: from, To: to}
-	if o.TopTeams, err = s.topUsage(ctx, q, "team"); err != nil {
+	if o.TopProjects, err = s.topUsage(ctx, q, "project"); err != nil {
 		return o, err
 	}
 	if o.TopModels, err = s.topUsage(ctx, q, "model"); err != nil {
 		return o, err
 	}
 	// Across a whole organisation the key list is long and says little, so the
-	// dashboard skips it. Inside one team or model it names who is responsible.
+	// dashboard skips it. Inside one project or model it names who is responsible.
 	if !sc.Empty() {
 		if o.TopKeys, err = s.topUsage(ctx, q, "key"); err != nil {
 			return o, err
@@ -203,21 +203,21 @@ func (s *Store) topUsage(ctx context.Context, q UsageQuery, groupBy string) ([]U
 	return b, nil
 }
 
-// TeamOrg returns which organisation a team belongs to, so a request naming a
-// team can be checked against the caller's own tenant first.
-func (s *Store) TeamOrg(ctx context.Context, teamID string) (string, error) {
+// ProjectOrg returns which organisation a project belongs to, so a request naming a
+// project can be checked against the caller's own tenant first.
+func (s *Store) ProjectOrg(ctx context.Context, projectID string) (string, error) {
 	var orgID string
-	err := s.pool.QueryRow(ctx, "SELECT org_id FROM teams WHERE id = $1", teamID).Scan(&orgID)
+	err := s.pool.QueryRow(ctx, "SELECT org_id FROM projects WHERE id = $1", projectID).Scan(&orgID)
 	if err != nil {
 		return "", notFound(err)
 	}
 	return orgID, nil
 }
 
-// KeyOwner is where a key sits: its organisation, and its team and the person
+// KeyOwner is where a key sits: its organisation, and its project and the person
 // it is for, each empty for none.
 type KeyOwner struct {
-	OrgID, TeamID, UserID string
+	OrgID, ProjectID, UserID string
 }
 
 // KeyOwnerOf reads where a key sits. Members may revoke only their own keys,
@@ -226,23 +226,23 @@ type KeyOwner struct {
 func (s *Store) KeyOwnerOf(ctx context.Context, keyID string) (KeyOwner, error) {
 	var o KeyOwner
 	err := s.pool.QueryRow(ctx,
-		"SELECT org_id, COALESCE(team_id,''), COALESCE(user_id,'') FROM api_keys WHERE id = $1",
+		"SELECT org_id, COALESCE(project_id,''), COALESCE(user_id,'') FROM api_keys WHERE id = $1",
 		keyID,
-	).Scan(&o.OrgID, &o.TeamID, &o.UserID)
+	).Scan(&o.OrgID, &o.ProjectID, &o.UserID)
 	return o, notFound(err)
 }
 
-// ScopeName is what one org, team or key is called, for a report that names
+// ScopeName is what one org, project or key is called, for a report that names
 // the level a limit came from.
 func (s *Store) ScopeName(ctx context.Context, scope policy.ScopeType, id string) (string, error) {
 	var query string
 	switch scope {
 	case policy.ScopeOrg:
 		query = "SELECT name FROM orgs WHERE id = $1"
-	case policy.ScopeTeam:
-		query = "SELECT name FROM teams WHERE id = $1"
+	case policy.ScopeProject:
+		query = "SELECT name FROM projects WHERE id = $1"
 	case policy.ScopeKey:
-		query = "SELECT alias FROM api_keys WHERE id = $1"
+		query = "SELECT name FROM api_keys WHERE id = $1"
 	default:
 		return "", ErrNotFound
 	}
@@ -253,15 +253,15 @@ func (s *Store) ScopeName(ctx context.Context, scope policy.ScopeType, id string
 	return name, nil
 }
 
-// TeamNames maps team ids to names, for a report grouped by team.
-func (s *Store) TeamNames(ctx context.Context, orgID string) (map[string]string, error) {
-	return s.names(ctx, "SELECT id, name FROM teams WHERE $1 = '' OR org_id = $1", orgID)
+// ProjectNames maps project ids to names, for a report grouped by project.
+func (s *Store) ProjectNames(ctx context.Context, orgID string) (map[string]string, error) {
+	return s.names(ctx, "SELECT id, name FROM projects WHERE $1 = '' OR org_id = $1", orgID)
 }
 
-// KeyAliases maps key ids to aliases, for a report grouped by key. Revoked
-// keys are included, because their history stays.
-func (s *Store) KeyAliases(ctx context.Context, orgID string) (map[string]string, error) {
-	return s.names(ctx, "SELECT id, alias FROM api_keys WHERE $1 = '' OR org_id = $1", orgID)
+// KeyNames maps key ids to names, for a report grouped by key. Revoked keys
+// are included, because their history stays.
+func (s *Store) KeyNames(ctx context.Context, orgID string) (map[string]string, error) {
+	return s.names(ctx, "SELECT id, name FROM api_keys WHERE $1 = '' OR org_id = $1", orgID)
 }
 
 // UserEmails maps user ids to addresses, for a report grouped by user.
@@ -309,18 +309,18 @@ type KeySummary struct {
 // KeyQuery narrows a key listing. OrgID is required; the rest are optional.
 // UserID is set by a developer's own screen, to see only their keys.
 type KeyQuery struct {
-	OrgID  string
-	TeamID string
-	UserID string
-	Since  time.Time
+	OrgID     string
+	ProjectID string
+	UserID    string
+	Since     time.Time
 }
 
 // KeySummaries lists an organisation's keys with their guardrails and their
 // traffic since q.Since, in one query to avoid N+1.
 func (s *Store) KeySummaries(ctx context.Context, q KeyQuery) ([]KeySummary, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT k.id, k.org_id, COALESCE(k.team_id,''), COALESCE(k.user_id,''),
-		       k.alias, k.prefix, k.created_at, k.expires_at, k.revoked_at,
+		SELECT k.id, k.org_id, COALESCE(k.project_id,''), COALESCE(k.user_id,''),
+		       k.name, k.prefix, k.created_at, k.expires_at, k.revoked_at,
 		       `+limitColumns+`,
 		       u.last_used_at, COALESCE(u.requests, 0), COALESCE(u.micros, 0),
 		       COALESCE(u.list_micros, 0), k.kind, pu.five_hour, pu.five_hour_resets_at,
@@ -335,8 +335,8 @@ func (s *Store) KeySummaries(ctx context.Context, q KeyQuery) ([]KeySummary, err
 		           COALESCE(sum(e.list_cost_micros), 0) AS list_micros
 		    FROM usage_events e WHERE e.key_id = k.id AND e.ts >= $3
 		) u ON true
-		WHERE k.org_id = $1 AND ($2 = '' OR k.team_id = $2) AND ($4 = '' OR k.user_id = $4)
-		ORDER BY k.created_at DESC`, q.OrgID, q.TeamID, q.Since, q.UserID)
+		WHERE k.org_id = $1 AND ($2 = '' OR k.project_id = $2) AND ($4 = '' OR k.user_id = $4)
+		ORDER BY k.created_at DESC`, q.OrgID, q.ProjectID, q.Since, q.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -351,7 +351,7 @@ func scanKeySummary(r row) (KeySummary, error) {
 		status   *string
 		reported *time.Time
 	)
-	dest := []any{&k.ID, &k.OrgID, &k.TeamID, &k.UserID, &k.Alias, &k.Prefix,
+	dest := []any{&k.ID, &k.OrgID, &k.ProjectID, &k.UserID, &k.Name, &k.Prefix,
 		&k.CreatedAt, &k.ExpiresAt, &k.RevokedAt}
 	dest = append(dest, limitTargets(&k.Limits, &period)...)
 	dest = append(dest, &k.LastUsedAt, &k.Requests, &k.SpendMicros, &k.SubscriptionMicros,
@@ -375,7 +375,6 @@ func scanKeySummary(r row) (KeySummary, error) {
 // which step they are on.
 type Setup struct {
 	Orgs     int64 `json:"orgs"`
-	Teams    int64 `json:"teams"`
 	Keys     int64 `json:"keys"`
 	Models   int64 `json:"models"`
 	People   int64 `json:"people"`
@@ -394,7 +393,6 @@ func (s *Store) SetupState(ctx context.Context, orgID string) (Setup, error) {
 	var st Setup
 	err := s.pool.QueryRow(ctx, `SELECT
 		(SELECT count(*) FROM orgs),
-		(SELECT count(*) FROM teams  WHERE $1 = '' OR org_id = $1),
 		(SELECT count(*) FROM api_keys WHERE ($1 = '' OR org_id = $1) AND revoked_at IS NULL),
 		(SELECT count(*) FROM models WHERE enabled AND ($1 = '' OR org_id = $1)),
 		(SELECT count(*) FROM users  WHERE $1 = '' OR org_id = $1),
@@ -406,7 +404,7 @@ func (s *Store) SetupState(ctx context.Context, orgID string) (Setup, error) {
 		-- Classes, not running machines, so the screen stays when none is up.
 		(SELECT count(*) FROM sandbox_classes WHERE $1 = '' OR org_id = $1),
 		(SELECT count(*) FROM mcp_servers WHERE $1 = '' OR org_id = $1)`, orgID,
-	).Scan(&st.Orgs, &st.Teams, &st.Keys, &st.Models, &st.People, &st.Requests,
+	).Scan(&st.Orgs, &st.Keys, &st.Models, &st.People, &st.Requests,
 		&st.Filters, &st.Routers, &st.Sandboxes, &st.MCPServers)
 	return st, err
 }

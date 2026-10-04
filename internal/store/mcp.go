@@ -109,10 +109,10 @@ type ToolCall struct {
 // queueToolCall adds one tool call's row and its filter runs to the batch.
 func queueToolCall(batch *pgx.Batch, e Event) {
 	t := e.Tool
-	batch.Queue(`INSERT INTO tool_calls (ts, org_id, team_id, user_id, key_id, server, tool,
+	batch.Queue(`INSERT INTO tool_calls (ts, org_id, project_id, user_id, key_id, server, tool,
 		outcome, latency_ms, arg_bytes, result_bytes, cost_micros, error, session_key, client)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-		e.TS, e.OrgID, nullable(e.TeamID), nullable(e.UserID), nullable(e.KeyID),
+		e.TS, e.OrgID, nullable(e.ProjectID), nullable(e.UserID), nullable(e.KeyID),
 		t.Server, t.Tool, string(t.Outcome), e.Latency.Milliseconds(), t.ArgBytes, t.ResultBytes,
 		e.CostMicros, nullable(truncate(e.Error, maxErrorBytes)), nullable(e.SessionKey),
 		nullable(e.Client))
@@ -123,7 +123,7 @@ func queueToolCall(batch *pgx.Batch, e Event) {
 type ToolCallRow struct {
 	ID          int64       `json:"id"`
 	TS          time.Time   `json:"ts"`
-	TeamID      string      `json:"team_id,omitempty"`
+	ProjectID   string      `json:"project_id,omitempty"`
 	UserID      string      `json:"user_id,omitempty"`
 	KeyID       string      `json:"key_id,omitempty"`
 	Server      string      `json:"server"`
@@ -141,35 +141,38 @@ type ToolCallRow struct {
 // ToolCallQuery narrows a list of tool calls. OrgID is required; the other
 // empty fields narrow nothing.
 type ToolCallQuery struct {
-	OrgID  string
-	TeamID string
-	KeyID  string
-	UserID string
-	Server string
-	Tool   string
-	From   time.Time
-	To     time.Time
-	Limit  int
+	OrgID     string
+	ProjectID string
+	KeyID     string
+	UserID    string
+	Server    string
+	Tool      string
+	From      time.Time
+	To        time.Time
+	Limit     int
+	// Before pages backwards by id, as the request log does.
+	Before int64
 }
 
 // toolWhere is the condition every tool-call query shares, on $1 to $8. The
 // organisation is always named: the log is read one organisation at a time.
 const toolWhere = ` WHERE org_id = $1 AND ts >= $2 AND ts < $3
-	AND ($4 = '' OR team_id = $4) AND ($5 = '' OR key_id = $5)
+	AND ($4 = '' OR project_id = $4) AND ($5 = '' OR key_id = $5)
 	AND ($6 = '' OR user_id = $6) AND ($7 = '' OR server = $7) AND ($8 = '' OR tool = $8)`
 
 func (q ToolCallQuery) args() []any {
-	return []any{q.OrgID, q.From, q.To, q.TeamID, q.KeyID, q.UserID, q.Server, q.Tool}
+	return []any{q.OrgID, q.From, q.To, q.ProjectID, q.KeyID, q.UserID, q.Server, q.Tool}
 }
 
 // ListToolCalls reads tool calls, newest first.
 func (s *Store) ListToolCalls(ctx context.Context, q ToolCallQuery) ([]ToolCallRow, error) {
 	limit := q.Limit
-	if limit <= 0 || limit > 1000 {
-		limit = 200
+	if limit <= 0 || limit > 5000 {
+		limit = 100
 	}
-	rows, err := s.pool.Query(ctx, toolCallColumns+toolWhere+` ORDER BY ts DESC, id DESC LIMIT $9`,
-		append(q.args(), limit)...)
+	rows, err := s.pool.Query(ctx, toolCallColumns+toolWhere+`
+		AND ($9 = 0 OR id < $9) ORDER BY id DESC LIMIT $10`,
+		append(q.args(), q.Before, limit)...)
 	if err != nil {
 		return nil, err
 	}
@@ -177,14 +180,14 @@ func (s *Store) ListToolCalls(ctx context.Context, q ToolCallQuery) ([]ToolCallR
 }
 
 // toolCallColumns reads what scanToolCall scans.
-const toolCallColumns = `SELECT id, ts, COALESCE(team_id, ''), COALESCE(user_id, ''),
+const toolCallColumns = `SELECT id, ts, COALESCE(project_id, ''), COALESCE(user_id, ''),
 	COALESCE(key_id, ''), server, tool, outcome, latency_ms, arg_bytes, result_bytes,
 	cost_micros, COALESCE(error, ''), COALESCE(session_key, ''), COALESCE(client, '')
 	FROM tool_calls`
 
 func scanToolCall(r row) (ToolCallRow, error) {
 	var t ToolCallRow
-	err := r.Scan(&t.ID, &t.TS, &t.TeamID, &t.UserID, &t.KeyID, &t.Server, &t.Tool, &t.Outcome,
+	err := r.Scan(&t.ID, &t.TS, &t.ProjectID, &t.UserID, &t.KeyID, &t.Server, &t.Tool, &t.Outcome,
 		&t.LatencyMS, &t.ArgBytes, &t.ResultBytes, &t.CostMicros, &t.Error, &t.SessionKey,
 		&t.Client)
 	return t, err

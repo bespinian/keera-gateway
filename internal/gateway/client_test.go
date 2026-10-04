@@ -72,7 +72,7 @@ func TestTheUsageEventNamesWhatSentTheRequest(t *testing.T) {
 func TestARefusedRequestStillNamesItsClient(t *testing.T) {
 	h := newHarness(t, jsonBackend(`{}`), nil, nil)
 	h.budgets.err = &policy.ErrBudgetExceeded{
-		Scope:  policy.Scope{Type: policy.ScopeTeam, ID: "team_1", Period: policy.PeriodMonth},
+		Scope:  policy.Scope{Type: policy.ScopeProject, ID: "project_1", Period: policy.PeriodMonth},
 		Spent:  2_000_000,
 		Budget: 1_000_000,
 	}

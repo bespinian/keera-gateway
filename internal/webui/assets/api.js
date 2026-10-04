@@ -161,12 +161,14 @@ export const api = {
     }),
   deleteOrg: (id) => request("DELETE", `/v1/orgs/${encodeURIComponent(id)}`),
 
-  teams: (orgID) => get("/v1/teams" + query({ org_id: orgID })),
-  createTeam: (orgID, name) =>
-    request("POST", "/v1/teams", { org_id: orgID, name }),
-  renameTeam: (id, name) =>
-    request("PATCH", `/v1/teams/${encodeURIComponent(id)}`, { name }),
-  deleteTeam: (id) => request("DELETE", `/v1/teams/${encodeURIComponent(id)}`),
+  projects: (orgID) => get("/v1/projects" + query({ org_id: orgID })),
+  createProject: (orgID, name, description) =>
+    request("POST", "/v1/projects", { org_id: orgID, name, description }),
+  // change holds name, description or both.
+  updateProject: (id, change) =>
+    request("PATCH", `/v1/projects/${encodeURIComponent(id)}`, change),
+  deleteProject: (id) =>
+    request("DELETE", `/v1/projects/${encodeURIComponent(id)}`),
 
   users: (orgID) => get("/v1/users" + query({ org_id: orgID })),
   inviteUser: (orgID, email, role, signIn) =>
@@ -190,6 +192,8 @@ export const api = {
 
   keys: (orgID) => get("/v1/keys" + query({ org_id: orgID })),
   createKey: (payload) => request("POST", "/v1/keys", payload),
+  renameKey: (id, name) =>
+    request("PATCH", `/v1/keys/${encodeURIComponent(id)}`, { name }),
   revokeKey: (id) => request("DELETE", `/v1/keys/${encodeURIComponent(id)}`),
   rotateKey: (id) =>
     request("POST", `/v1/keys/${encodeURIComponent(id)}/rotate`, {}),
@@ -197,6 +201,10 @@ export const api = {
   guardrails: (scope, id) =>
     get(
       `/v1/guardrails/${encodeURIComponent(scope)}/${encodeURIComponent(id)}`,
+    ),
+  effectiveGuardrails: (scope, id) =>
+    get(
+      `/v1/guardrails/${encodeURIComponent(scope)}/${encodeURIComponent(id)}/effective`,
     ),
   putGuardrails: (scope, id, limits) =>
     request(
@@ -355,8 +363,8 @@ export const api = {
   playground: (keyID, payload, signal) =>
     stream("/v1/playground/chat" + query({ key_id: keyID }), payload, signal),
 
-  // The dashboard, and - with a scope of { team_id }, { key_id } or { alias } -
-  // one team's, one key's or one model's own screen. The same report over
+  // The dashboard, and - with a scope of { project_id }, { key_id } or { alias } -
+  // one project's, one key's or one model's own screen. The same report over
   // fewer rows, so that a number on an entity's page and its share of the
   // dashboard can never disagree.
   overview: (orgID, since, scope) =>
@@ -370,12 +378,12 @@ export const api = {
   usage: (orgID, groupBy, since) =>
     get("/v1/usage" + query({ org_id: orgID, group_by: groupBy, since })),
   audit: (params) => get("/v1/audit" + query(params)),
-  // The event log: every recorded request, narrowed to a team, a key, a model,
+  // The event log: every recorded request, narrowed to a project, a key, a model,
   // a person or a status - or to none of them, which is the Requests screen.
   requests: (params) => get("/v1/requests" + query(params)),
 
   // The same log grouped into the tasks its requests were made for: one row
-  // per session rather than per call. It takes the team, key, model and person
+  // per session rather than per call. It takes the project, key, model and person
   // narrowing of requests(), but no outcome or status. It adds `sort` and
   // `unhappy`, because this screen is opened for the ranking - the task that
   // cost four francs, the one that made four hundred calls - and a log

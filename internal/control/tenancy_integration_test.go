@@ -64,10 +64,10 @@ func twoTenants(t *testing.T) tenants {
 		}
 	}
 	keys := []store.KeyInfo{
-		{ID: "key_alice", OrgID: "org_a", UserID: "user_alice", Alias: "alice's laptop", Prefix: "sk-a"},
-		{ID: "key_bob", OrgID: "org_a", UserID: "user_bob", Alias: "bob's laptop", Prefix: "sk-b"},
-		{ID: "key_orphan", OrgID: "org_a", Alias: "the build pipeline", Prefix: "sk-o"},
-		{ID: "key_theirs", OrgID: "org_b", UserID: "user_dave", Alias: "dave's laptop", Prefix: "sk-d"},
+		{ID: "key_alice", OrgID: "org_a", UserID: "user_alice", Name: "alice's laptop", Prefix: "sk-a"},
+		{ID: "key_bob", OrgID: "org_a", UserID: "user_bob", Name: "bob's laptop", Prefix: "sk-b"},
+		{ID: "key_orphan", OrgID: "org_a", Name: "the build pipeline", Prefix: "sk-o"},
+		{ID: "key_theirs", OrgID: "org_b", UserID: "user_dave", Name: "dave's laptop", Prefix: "sk-d"},
 	}
 	for _, k := range keys {
 		if _, err := st.CreateKey(ctx, k, []byte("hash-of-"+k.ID)); err != nil {
@@ -175,8 +175,14 @@ func TestAMemberRotatesTheirOwnKeyAndItKeepsItsLimits(t *testing.T) {
 	if w := rotate(alice, "key_bob"); w.Code != http.StatusForbidden {
 		t.Errorf("rotating a colleague's key = %d, want 403", w.Code)
 	}
+	// The lifetime is the administrator's choice, so a member cannot stretch it.
+	w := tn.call(tn.srv.rotateKey, alice, http.MethodPost, "/v1/keys/key_alice/rotate",
+		`{"expires_in":"87600h"}`, map[string]string{"id": "key_alice"})
+	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "lifetime") {
+		t.Errorf("a member choosing the lifetime = %d %s, want 403", w.Code, w.Body)
+	}
 
-	w := rotate(alice, "key_alice")
+	w = rotate(alice, "key_alice")
 	if w.Code != http.StatusCreated {
 		t.Fatalf("rotating her own key = %d, want 201: %s", w.Code, w.Body)
 	}
@@ -189,7 +195,7 @@ func TestAMemberRotatesTheirOwnKeyAndItKeepsItsLimits(t *testing.T) {
 		t.Fatal(err)
 	}
 	if created.Key == "" || created.Replaced != "key_alice" || created.UserID != "user_alice" ||
-		created.Alias != "alice's laptop" {
+		created.Name != "alice's laptop" {
 		t.Errorf("the new key is %+v", created)
 	}
 	lim, err := tn.srv.st.GetPolicy(tn.ctx, policy.ScopeKey, created.ID)
@@ -202,6 +208,79 @@ func TestAMemberRotatesTheirOwnKeyAndItKeepsItsLimits(t *testing.T) {
 	if w := rotate(alice, "key_alice"); w.Code != http.StatusConflict {
 		t.Errorf("rotating a revoked key = %d, want 409", w.Code)
 	}
+}
+
+// Whoever may revoke a key may rename it: a member their own, an
+// administrator any in their organisation, an operator any at all.
+func TestKeysAreRenamedByWhoeverMayRevokeThem(t *testing.T) {
+	tn := twoTenants(t)
+	alice := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleMember, OrgID: "org_a", UserID: "user_alice",
+	}
+	carol := &authn.Principal{
+		Via: authn.MethodSession, Role: authn.RoleAdmin, OrgID: "org_a", UserID: "user_carol",
+	}
+	operator := &authn.Principal{Via: authn.MethodOperatorKey, Role: authn.RoleOperator}
+	rename := func(p *authn.Principal, keyID, body string) *httptest.ResponseRecorder {
+		return tn.call(tn.srv.renameKey, p, http.MethodPatch, "/v1/keys/"+keyID, body,
+			map[string]string{"id": keyID})
+	}
+	named := func(keyID string) string {
+		names, err := tn.srv.st.KeyNames(tn.ctx, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return names[keyID]
+	}
+
+	for _, c := range []struct {
+		who   string
+		p     *authn.Principal
+		keyID string
+		want  int
+	}{
+		{"a member, their own", alice, "key_alice", http.StatusOK},
+		{"a member, a colleague's", alice, "key_bob", http.StatusForbidden},
+		{"a member, nobody's", alice, "key_orphan", http.StatusForbidden},
+		{"a member, another tenant's", alice, "key_theirs", http.StatusNotFound},
+		{"an administrator, a member's", carol, "key_bob", http.StatusOK},
+		{"an administrator, nobody's", carol, "key_orphan", http.StatusOK},
+		{"an administrator, another tenant's", carol, "key_theirs", http.StatusNotFound},
+		{"an operator, any", operator, "key_theirs", http.StatusOK},
+	} {
+		before := named(c.keyID)
+		w := rename(c.p, c.keyID, `{"name":"  renamed  "}`)
+		if w.Code != c.want {
+			t.Errorf("%s: status = %d, want %d: %s", c.who, w.Code, c.want, w.Body)
+		}
+		want := before
+		if c.want == http.StatusOK {
+			want = "renamed"
+		}
+		if got := named(c.keyID); got != want {
+			t.Errorf("%s: the key is called %q, want %q", c.who, got, want)
+		}
+	}
+
+	if w := rename(carol, "key_alice", `{"name":" "}`); w.Code != http.StatusBadRequest {
+		t.Errorf("an empty name = %d, want 400", w.Code)
+	}
+
+	entries, err := tn.srv.st.ListAudit(tn.ctx, store.AuditQuery{
+		OrgID: "org_a", From: time.Now().Add(-time.Minute), Limit: 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Action == "key.rename" && e.TargetID == "key_bob" {
+			if !strings.Contains(string(e.Detail), "bob's laptop") {
+				t.Errorf("detail = %s, want the old name kept", e.Detail)
+			}
+			return
+		}
+	}
+	t.Error("renaming a key wrote no audit entry")
 }
 
 func TestAKeyInAnotherTenantIsIndistinguishableFromOneThatDoesNotExist(t *testing.T) {
@@ -308,7 +387,7 @@ func TestTheDevelopersOwnScreenShowsOnlyTheirOwnKeys(t *testing.T) {
 		var got []string
 		for _, k := range keys {
 			m, _ := k.(map[string]any)
-			if a, ok := m["alias"].(string); ok {
+			if a, ok := m["name"].(string); ok {
 				got = append(got, a)
 			}
 		}
@@ -403,59 +482,62 @@ func TestRevokingIsRecordedAgainstWhoTheKeyBelongedTo(t *testing.T) {
 	}
 }
 
-// changeTeam runs one of the two handlers that name a team in the path, on
-// team_a, the way the router would.
-func (tn tenants) changeTeam(h handler, p *authn.Principal, method, body string) *httptest.ResponseRecorder {
-	const teamID = "team_a"
+// changeProject runs one of the two handlers that name a project in the path, on
+// project_a, the way the router would.
+func (tn tenants) changeProject(h handler, p *authn.Principal, method, body string) *httptest.ResponseRecorder {
+	const projectID = "project_a"
 	w := httptest.NewRecorder()
-	target := httpx.ControlPrefix + "/v1/teams/" + teamID
+	target := httpx.ControlPrefix + "/v1/projects/" + projectID
 	var r *http.Request
 	if body == "" {
 		r = httptest.NewRequest(method, target, nil).WithContext(tn.ctx)
 	} else {
 		r = httptest.NewRequest(method, target, strings.NewReader(body)).WithContext(tn.ctx)
 	}
-	r.SetPathValue("id", teamID)
+	r.SetPathValue("id", projectID)
 	h(w, r, p)
 	return w
 }
 
-// A team names its organisation in a row rather than in the request, so the
+// A project names its organisation in a row rather than in the request, so the
 // tenant boundary on these two routes is only as good as that lookup. This is
 // the test that the lookup is made.
-func TestATeamIsRenamedAndDeletedOnlyInsideItsOwnTenant(t *testing.T) {
+func TestAProjectIsChangedAndDeletedOnlyInsideItsOwnTenant(t *testing.T) {
 	tn := twoTenants(t)
 	st := tn.srv.st
-	for _, team := range []struct{ id, org, name string }{
-		{"team_a", "org_a", "Payments Platform"},
-		{"team_a2", "org_a", "Data Science"},
+	for _, project := range []struct{ id, org, name string }{
+		{"project_a", "org_a", "Payments Platform"},
+		{"project_a2", "org_a", "Data Science"},
 	} {
-		if _, err := st.CreateTeam(tn.ctx, team.id, team.org, team.name); err != nil {
-			t.Fatalf("CreateTeam %s: %v", team.id, err)
+		if _, err := st.CreateProject(tn.ctx, store.Project{ID: project.id, OrgID: project.org, Name: project.name}); err != nil {
+			t.Fatalf("CreateProject %s: %v", project.id, err)
 		}
 	}
 
 	// The other customer's administrator is refused, and refused as missing:
-	// a team id is not something they should be able to confirm exists.
-	w := tn.changeTeam(tn.srv.updateTeam, admin("org_b"), http.MethodPatch,
+	// a project id is not something they should be able to confirm exists.
+	w := tn.changeProject(tn.srv.updateProject, admin("org_b"), http.MethodPatch,
 		`{"name":"Ours Now"}`)
 	if w.Code != http.StatusNotFound {
-		t.Errorf("another tenant's administrator renamed it: status = %d, want 404: %s", w.Code, w.Body)
+		t.Errorf("another tenant's administrator changed it: status = %d, want 404: %s", w.Code, w.Body)
 	}
 
-	w = tn.changeTeam(tn.srv.updateTeam, admin("org_a"), http.MethodPatch,
-		`{"name":"Payments"}`)
+	w = tn.changeProject(tn.srv.updateProject, admin("org_a"), http.MethodPatch,
+		`{"name":"Payments","description":"Card payments"}`)
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d renaming a team in the caller's own tenant, want 200: %s", w.Code, w.Body)
+		t.Fatalf("status = %d changing a project in the caller's own tenant, want 200: %s", w.Code, w.Body)
 	}
-	names, err := st.TeamNames(tn.ctx, "org_a")
-	if err != nil || names["team_a"] != "Payments" {
-		t.Errorf("after the rename TeamNames = %v, %v", names, err)
+	if !strings.Contains(w.Body.String(), `"description":"Card payments"`) {
+		t.Errorf("the change did not keep the description: %s", w.Body)
+	}
+	names, err := st.ProjectNames(tn.ctx, "org_a")
+	if err != nil || names["project_a"] != "Payments" {
+		t.Errorf("after the change ProjectNames = %v, %v", names, err)
 	}
 
-	// The name a sibling team already holds comes back as a conflict that says
-	// which name and why, not as an internal error over a unique index.
-	w = tn.changeTeam(tn.srv.updateTeam, admin("org_a"), http.MethodPatch,
+	// The name a sibling project already holds comes back as a conflict that
+	// says which name and why, not as an internal error over a unique index.
+	w = tn.changeProject(tn.srv.updateProject, admin("org_a"), http.MethodPatch,
 		`{"name":"Data Science"}`)
 	if w.Code != http.StatusConflict {
 		t.Fatalf("status = %d renaming onto a name in use, want 409: %s", w.Code, w.Body)
@@ -465,25 +547,25 @@ func TestATeamIsRenamedAndDeletedOnlyInsideItsOwnTenant(t *testing.T) {
 	}
 }
 
-// Deleting a team with a working key in it would take the key with it, so it is
+// Deleting a project with a working key in it would take the key with it, so it is
 // refused - and the refusal names the credentials, because that is the part
 // somebody has to deal with before they can try again.
-func TestDeletingATeamIsRefusedWhileItHoldsAWorkingKey(t *testing.T) {
+func TestDeletingAProjectIsRefusedWhileItHoldsAWorkingKey(t *testing.T) {
 	tn := twoTenants(t)
 	st := tn.srv.st
-	if _, err := st.CreateTeam(tn.ctx, "team_a", "org_a", "Payments Platform"); err != nil {
-		t.Fatalf("CreateTeam: %v", err)
+	if _, err := st.CreateProject(tn.ctx, store.Project{ID: "project_a", OrgID: "org_a", Name: "Payments Platform"}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
 	}
 	if _, err := st.CreateKey(tn.ctx, store.KeyInfo{
-		ID: "key_ci", OrgID: "org_a", TeamID: "team_a",
-		Alias: "the build pipeline", Prefix: "sk-ci",
+		ID: "key_ci", OrgID: "org_a", ProjectID: "project_a",
+		Name: "the build pipeline", Prefix: "sk-ci",
 	}, []byte("hash-of-key_ci")); err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
 
-	w := tn.changeTeam(tn.srv.deleteTeam, admin("org_a"), http.MethodDelete, "")
+	w := tn.changeProject(tn.srv.deleteProject, admin("org_a"), http.MethodDelete, "")
 	if w.Code != http.StatusConflict {
-		t.Fatalf("status = %d deleting a team with a live key, want 409: %s", w.Code, w.Body)
+		t.Fatalf("status = %d deleting a project with a live key, want 409: %s", w.Code, w.Body)
 	}
 	if !strings.Contains(w.Body.String(), "the build pipeline") {
 		t.Errorf("the refusal did not name the key: %s", w.Body)
@@ -492,9 +574,9 @@ func TestDeletingATeamIsRefusedWhileItHoldsAWorkingKey(t *testing.T) {
 	if err := st.RevokeKey(tn.ctx, "key_ci"); err != nil {
 		t.Fatalf("RevokeKey: %v", err)
 	}
-	w = tn.changeTeam(tn.srv.deleteTeam, admin("org_a"), http.MethodDelete, "")
+	w = tn.changeProject(tn.srv.deleteProject, admin("org_a"), http.MethodDelete, "")
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d deleting a team whose keys are revoked, want 200: %s", w.Code, w.Body)
+		t.Fatalf("status = %d deleting a project whose keys are revoked, want 200: %s", w.Code, w.Body)
 	}
 	var body struct {
 		Deleted      bool `json:"deleted"`
@@ -506,13 +588,83 @@ func TestDeletingATeamIsRefusedWhileItHoldsAWorkingKey(t *testing.T) {
 	if !body.Deleted || body.DetachedKeys != 1 {
 		t.Errorf("the deletion reported %+v", body)
 	}
-	if names, err := st.TeamNames(tn.ctx, "org_a"); err != nil || len(names) != 0 {
-		t.Errorf("after the deletion TeamNames = %v, %v", names, err)
+	if names, err := st.ProjectNames(tn.ctx, "org_a"); err != nil || names["project_a"] != "" {
+		t.Errorf("after the deletion ProjectNames = %v, %v", names, err)
+	}
+}
+
+// The project an organisation is created with is a project like any other.
+// A key that names none goes in the oldest project there is, and with no
+// projects at all there can be no keys - and the refusal says so.
+func TestAKeyWithoutAProjectGoesInTheOldestOne(t *testing.T) {
+	tn := twoTenants(t)
+	st := tn.srv.st
+	firstID, err := st.FirstProject(tn.ctx, "org_a")
+	if err != nil {
+		t.Fatalf("FirstProject: %v", err)
+	}
+	if _, err := st.CreateProject(tn.ctx, store.Project{ID: "project_a", OrgID: "org_a", Name: "Payments"}); err != nil {
+		t.Fatal(err)
+	}
+	remove := func(projectID string) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodDelete,
+			httpx.ControlPrefix+"/v1/projects/"+projectID, nil).WithContext(tn.ctx)
+		r.SetPathValue("id", projectID)
+		tn.srv.deleteProject(w, r, admin("org_a"))
+		if w.Code != http.StatusOK {
+			t.Fatalf("deleting %s = %d %s, want 200", projectID, w.Code, w.Body)
+		}
+	}
+	issue := func() (*httptest.ResponseRecorder, store.KeyInfo) {
+		t.Helper()
+		w := invoke(tn.srv.createKey, admin("org_a"), http.MethodPost, "/v1/keys",
+			`{"org_id":"org_a","name":"laptop"}`)
+		var key store.KeyInfo
+		if w.Code == http.StatusCreated {
+			if err := json.Unmarshal(w.Body.Bytes(), &key); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return w, key
+	}
+
+	if _, key := issue(); key.ProjectID != firstID {
+		t.Errorf("the key is in %q, want the organisation's first project %q", key.ProjectID, firstID)
+	}
+
+	// The fixture's keys are in the first project too, so they go first.
+	keys, err := st.KeySummaries(tn.ctx, store.KeyQuery{OrgID: "org_a", Since: time.Now().Add(-time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range keys {
+		if k.RevokedAt == nil {
+			if err := st.RevokeKey(tn.ctx, k.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	remove(firstID)
+	w, key := issue()
+	if w.Code != http.StatusCreated || key.ProjectID != "project_a" {
+		t.Errorf("with the first project gone = %d %s, want a key in project_a", w.Code, w.Body)
+	}
+
+	if err := st.RevokeKey(tn.ctx, key.ID); err != nil {
+		t.Fatal(err)
+	}
+	remove("project_a")
+	if w, _ := issue(); w.Code != http.StatusConflict ||
+		!strings.Contains(w.Body.String(), "create a project first") {
+		t.Errorf("a key in an organisation with no projects = %d %s, want a 409 that says to "+
+			"create one", w.Code, w.Body)
 	}
 }
 
 func TestAnotherTenantsPeopleAndGuardrailsAnswerAsMissing(t *testing.T) {
-	// As with keys and teams: an administrator elsewhere must not be able to
+	// As with keys and projects: an administrator elsewhere must not be able to
 	// confirm that an id exists by the difference between 403 and 404.
 	tn := twoTenants(t)
 	carol := &authn.Principal{
@@ -538,7 +690,7 @@ func TestAnOperatorNamingAMissingOrganisationIsToldSo(t *testing.T) {
 	// there is a missing organisation, not an internal error.
 	tn := twoTenants(t)
 	operator := &authn.Principal{Via: authn.MethodOperatorKey, Role: authn.RoleOperator}
-	w := tn.call(tn.srv.createTeam, operator, http.MethodPost, "/v1/teams",
+	w := tn.call(tn.srv.createProject, operator, http.MethodPost, "/v1/projects",
 		`{"org_id":"org_nope","name":"Payments"}`, nil)
 	if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "no such organisation") {
 		t.Errorf("status = %d, want 404: %s", w.Code, w.Body)
@@ -556,13 +708,12 @@ func (tn tenants) create(p *authn.Principal, body string) *httptest.ResponseReco
 
 func TestASubscriptionKeyAlwaysBelongsToSomebody(t *testing.T) {
 	tn := twoTenants(t)
-	alice := &authn.Principal{Via: authn.MethodCLI, Role: authn.RoleMember,
-		OrgID: "org_a", UserID: "user_alice"}
 	carol := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleAdmin,
 		OrgID: "org_a", UserID: "user_carol"}
 
-	// What `keera connect claude-code --subscription` sends for a member.
-	w := tn.create(alice, `{"org_id":"org_a","user_id":"user_alice","alias":"claude-code on laptop",
+	// What an administrator issues for a member to claim with `keera connect
+	// claude-code --subscription`.
+	w := tn.create(carol, `{"org_id":"org_a","user_id":"user_alice","name":"alice's Claude Code",
 		"kind":"subscription"}`)
 	var got store.KeyInfo
 	if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &got) != nil ||
@@ -570,8 +721,8 @@ func TestASubscriptionKeyAlwaysBelongsToSomebody(t *testing.T) {
 		t.Errorf("member's subscription key: %d %s", w.Code, w.Body)
 	}
 
-	// An administrator's own key defaults to nobody, and a subscription key
-	// next to nobody's sign-in is refused.
+	// A key the administrator leaves unattributed is for nobody, and a
+	// subscription key next to nobody's sign-in is refused.
 	if w := tn.create(carol, `{"org_id":"org_a","kind":"subscription"}`); w.Code != http.StatusBadRequest {
 		t.Errorf("a subscription key for nobody: %d %s", w.Code, w.Body)
 	}

@@ -3,7 +3,8 @@
 //
 // The control panel's "Connect a client" screen and `keera connect` both read
 // this one catalogue, so they hand out the same configuration. Each block is a
-// template; the caller fills in the gateway address, the model and its limits.
+// template; the caller fills in the gateway address and the models a key may
+// call, with their limits.
 package connect
 
 import (
@@ -22,14 +23,26 @@ type Client struct {
 	Path string `json:"path,omitempty"`
 	// Lang is how a renderer should highlight the block: json or sh.
 	Lang string `json:"lang"`
-	// Template is the block, carrying {{base}}, {{alias}}, {{name}} and the
-	// two limits, {{context}} and {{output}}, for Render to fill in.
+	// Template is the block. It carries {{base}}, {{models}}, {{aliases}}
+	// (every alias, comma-separated) and {{alias}} (the first, the default),
+	// for Render to fill in.
 	Template string `json:"template"`
+	// Entry is what {{models}} repeats, once per model, joined with commas. It
+	// carries {{alias}}, {{name}} and the two limits, {{context}} and
+	// {{output}}. It is empty for a client that does not list its models.
+	Entry string `json:"entry,omitempty"`
 	// Run is what to type once it is configured, and Note a caveat, both in
 	// prose. A span in backticks is something to type or a name to find;
 	// the panel shows it as code, and RunText and NoteText as quoted.
 	Run  string `json:"run"`
 	Note string `json:"note,omitempty"`
+}
+
+// Model is one model or router a configuration names.
+type Model struct {
+	Alias string `json:"alias"`
+	// MaxContext is its window, or zero for the default. A router has none.
+	MaxContext int `json:"max_context,omitempty"`
 }
 
 // The limits a client is given.
@@ -67,14 +80,21 @@ func Limits(maxContext int) (window, output int) {
 }
 
 // Render fills in a client's template: base is the gateway as the developer's
-// machine reaches it, alias the model to use, and maxContext its window, or
-// zero for the default.
-func (c Client) Render(base, alias string, maxContext int) string {
-	return fill(c.Template, base, alias, maxContext)
+// machine reaches it, and models what the key may call, the default first.
+func (c Client) Render(base string, models []Model) string {
+	entries := make([]string, 0, len(models))
+	for _, m := range models {
+		entries = append(entries, fill(c.Entry, m))
+	}
+	return strings.NewReplacer(
+		"{{base}}", strings.TrimRight(base, "/"),
+		"{{models}}", strings.Join(entries, ",\n"),
+		"{{aliases}}", strings.Join(aliases(models), ", "),
+	).Replace(fill(c.Template, first(models)))
 }
 
-// RunText is Run with the alias filled in, for a terminal.
-func (c Client) RunText(alias string) string { return plain(fill(c.Run, "", alias, 0)) }
+// RunText is Run with the default model filled in, for a terminal.
+func (c Client) RunText(models []Model) string { return plain(fill(c.Run, first(models))) }
 
 // NoteText is Note for a terminal.
 func (c Client) NoteText() string { return plain(c.Note) }
@@ -83,15 +103,30 @@ func (c Client) NoteText() string { return plain(c.Note) }
 // not render.
 func plain(s string) string { return strings.ReplaceAll(s, "`", "'") }
 
-func fill(text, base, alias string, maxContext int) string {
-	window, output := Limits(maxContext)
+// fill substitutes one model's placeholders.
+func fill(text string, m Model) string {
+	window, output := Limits(m.MaxContext)
 	return strings.NewReplacer(
-		"{{base}}", strings.TrimRight(base, "/"),
-		"{{alias}}", alias,
-		"{{name}}", Title(alias),
+		"{{alias}}", m.Alias,
+		"{{name}}", Title(m.Alias),
 		"{{context}}", strconv.Itoa(window),
 		"{{output}}", strconv.Itoa(output),
 	).Replace(text)
+}
+
+func first(models []Model) Model {
+	if len(models) == 0 {
+		return Model{}
+	}
+	return models[0]
+}
+
+func aliases(models []Model) []string {
+	out := make([]string, 0, len(models))
+	for _, m := range models {
+		out = append(out, m.Alias)
+	}
+	return out
 }
 
 // Title turns an alias into the label a model picker shows: keera-speed becomes
@@ -141,16 +176,17 @@ var clients = []Client{
       "api": "openai-completions",
       "apiKey": "${KEERA_API_KEY}",
       "models": [
-        {
-          "id": "{{alias}}",
-          "name": "{{name}}",
-          "contextWindow": {{context}}
-        }
+{{models}}
       ]
     }
   }
 }`,
-		Run: "Run `pi` in your project, then `/model`, and pick {{name}}.",
+		Entry: `        {
+          "id": "{{alias}}",
+          "name": "{{name}}",
+          "contextWindow": {{context}}
+        }`,
+		Run: "Run `pi` in your project, then `/model`, and pick one of the models above.",
 	},
 	{
 		Key:   "opencode",
@@ -168,19 +204,20 @@ var clients = []Client{
         "apiKey": "{env:KEERA_API_KEY}"
       },
       "models": {
-        "{{alias}}": {
+{{models}}
+      }
+    }
+  }
+}`,
+		Entry: `        "{{alias}}": {
           "name": "{{name}}",
           "tool_call": true,
           "limit": {
             "context": {{context}},
             "output": {{output}}
           }
-        }
-      }
-    }
-  }
-}`,
-		Run: "Run `opencode` in your project, then `/models`, and pick Keera · {{name}}.",
+        }`,
+		Run: "Run `opencode` in your project, then `/models`, and pick one of the models under Keera.",
 	},
 	{
 		Key:   "claude-code",
@@ -192,6 +229,8 @@ var clients = []Client{
 # /api/v1/messages. Claude Code adds /v1/messages itself.
 export ANTHROPIC_BASE_URL={{base}}
 export ANTHROPIC_AUTH_TOKEN=$KEERA_API_KEY
+
+# The key can use: {{aliases}}. Claude Code starts with this one.
 export ANTHROPIC_MODEL={{alias}}
 
 # Turn off Claude Code's telemetry to Anthropic. It holds no prompts, but it
@@ -211,8 +250,9 @@ curl "$ANTHROPIC_BASE_URL/v1/messages" \
 			"put it in a project's `.claude/settings.json`, which is committed. If your " +
 			"Claude Team or Enterprise plan should pay instead, run `keera login` and then " +
 			"`keera connect claude-code --subscription`.",
-		Run: "Run `claude` in your project. It already uses the model above. `/status` " +
-			"shows which gateway and key it uses.",
+		Run: "Run `claude` in your project. It starts with {{alias}}. `/model <name>` " +
+			"switches to another of the models above, and `/status` shows which gateway " +
+			"and key it uses.",
 	},
 	{
 		Key:   "openai",
@@ -220,7 +260,7 @@ curl "$ANTHROPIC_BASE_URL/v1/messages" \
 		// No file: where the two variables go depends on the client.
 		Lang: "sh",
 		Template: `# Keera Gateway speaks the OpenAI API. Most clients need only these two
-# settings and the model name.
+# settings and a model name. The key can use: {{aliases}}.
 export OPENAI_BASE_URL={{base}}/v1
 export OPENAI_API_KEY=$KEERA_API_KEY
 
@@ -230,6 +270,6 @@ curl "$OPENAI_BASE_URL/chat/completions" \
   -H 'Content-Type: application/json' \
   -d '{"model":"{{alias}}","messages":[{"role":"user","content":"Hello"}]}'`,
 		Run: "Start anything that reads `OPENAI_BASE_URL` (the official SDKs, Aider, your " +
-			"own scripts) with `{{alias}}` as the model.",
+			"own scripts) with one of the models above.",
 	},
 }

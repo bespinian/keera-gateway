@@ -63,7 +63,7 @@ func TestMCPServerUsersFindsEveryEntryForm(t *testing.T) {
 		policy.Limits{AllowedTools: []string{"jira"}}); err != nil {
 		t.Fatalf("PutPolicy: %v", err)
 	}
-	if err := st.PutPolicy(ctx, policy.ScopeTeam, f.teamID,
+	if err := st.PutPolicy(ctx, policy.ScopeProject, f.projectID,
 		policy.Limits{AllowedTools: []string{"jira/search", "jirafake"}}); err != nil {
 		t.Fatalf("PutPolicy: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestMCPServerUsersFindsEveryEntryForm(t *testing.T) {
 		t.Fatalf("MCPServerUsers: %v", err)
 	}
 	if len(users) != 2 {
-		t.Errorf("MCPServerUsers = %+v, want the organisation and the team", users)
+		t.Errorf("MCPServerUsers = %+v, want the organisation and the project", users)
 	}
 	if users, _ := st.MCPServerUsers(ctx, f.orgID, "jir"); len(users) != 0 {
 		t.Errorf("MCPServerUsers(jir) = %+v, want none: a prefix is not a name", users)
@@ -88,7 +88,7 @@ func TestAKeyResolvesItsToolGuardrails(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("PutPolicy: %v", err)
 	}
-	if err := st.PutPolicy(ctx, policy.ScopeTeam, f.teamID, policy.Limits{
+	if err := st.PutPolicy(ctx, policy.ScopeProject, f.projectID, policy.Limits{
 		AllowedTools: []string{"github/search_code"},
 	}); err != nil {
 		t.Fatal(err)
@@ -111,7 +111,7 @@ func TestToolCallsAreWrittenAndRead(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	call := func(ts time.Time, tool string, outcome ToolOutcome, session string, cost int64) Event {
 		return Event{
-			TS: ts, OrgID: "org_1", TeamID: "team_1", KeyID: "key_1", Latency: 40 * time.Millisecond,
+			TS: ts, OrgID: "org_1", ProjectID: "project_1", KeyID: "key_1", Latency: 40 * time.Millisecond,
 			SessionKey: session, CostMicros: cost,
 			Scopes: []policy.Scope{{Type: policy.ScopeOrg, ID: "org_1", Period: policy.PeriodMonth}},
 			FilterRuns: []FilterRun{{Filter: "redact", Mode: policy.FilterModePattern,
@@ -134,6 +134,14 @@ func TestToolCallsAreWrittenAndRead(t *testing.T) {
 	}
 	if len(rows) != 3 || rows[0].Outcome != ToolFailed || rows[0].LatencyMS != 40 || rows[0].ArgBytes != 10 {
 		t.Fatalf("rows = %+v", rows)
+	}
+	// The log pages backwards by id, as the request log does.
+	older := q
+	older.Before = rows[0].ID
+	older.Limit = 1
+	next, err := st.ListToolCalls(ctx, older)
+	if err != nil || len(next) != 1 || next[0].ID != rows[1].ID {
+		t.Fatalf("the page before %d = %+v, %v; want %d", rows[0].ID, next, err, rows[1].ID)
 	}
 	// Nothing about a tool call goes into the request log.
 	var requests int

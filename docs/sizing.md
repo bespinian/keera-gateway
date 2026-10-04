@@ -5,15 +5,15 @@ grows. Three tables grow with traffic.
 
 ## What grows
 
-| Table           | One row per                                                 | Grows with             |
-| --------------- | ----------------------------------------------------------- | ---------------------- |
-| `usage_events`  | inference request                                           | traffic                |
-| `filter_runs`   | filter run, per request                                     | traffic × filters      |
-| `tool_calls`    | MCP tool call                                               | traffic                |
-| `audit_log`     | administrative action                                       | people, slowly         |
-| `sandboxes`     | sandbox lent out                                            | agent tasks            |
-| `api_keys`      | key, including the one each sandbox gets                    | people and agent tasks |
-| everything else | org, team, model, filter, router, MCP server, sandbox class | customers              |
+| Table           | One row per                                                    | Grows with             |
+| --------------- | -------------------------------------------------------------- | ---------------------- |
+| `usage_events`  | inference request                                              | traffic                |
+| `filter_runs`   | filter run, per request                                        | traffic × filters      |
+| `tool_calls`    | MCP tool call                                                  | traffic                |
+| `audit_log`     | administrative action                                          | people, slowly         |
+| `sandboxes`     | sandbox lent out                                               | agent tasks            |
+| `api_keys`      | key, including the one each sandbox gets                       | people and agent tasks |
+| everything else | org, project, model, filter, router, MCP server, sandbox class | customers              |
 
 `usage_events` is the busiest table. It is the request log, the report source,
 the session report and the billing record. Every completed request writes one
@@ -66,7 +66,7 @@ What `KEERA_USAGE_RETENTION` covers:
 
 Keep in mind:
 
-- **The request log, the session report and every per-team, per-key and
+- **The request log, the session report and every per-project, per-key and
   per-model chart read `usage_events`.** They all stop where retention stops.
   With 90-day retention, they cover only the last 90 days.
 - **Deleted rows cannot be recovered.** Anything under `24h` is refused at
@@ -82,7 +82,7 @@ deleted.
 Reports aggregate `usage_events` by time and organisation. The table has ten
 indexes, and each one adds to the size on disk:
 
-- `(ts)`, `(org_id, ts)`, `(team_id, ts)`, `(key_id, ts)`, `(org_id, alias, ts)`
+- `(ts)`, `(org_id, ts)`, `(project_id, ts)`, `(key_id, ts)`, `(org_id, alias, ts)`
   and `(user_id, ts)`, for the reports
 - `(org_id, id DESC)`, for the live request log, and the same over failed rows
   only
@@ -119,13 +119,13 @@ counts follow _tasks × calls per task_, not the number of developers.
 ## Sizing the gateway
 
 The gateway keeps an in-memory view of the control plane (`internal/registry`).
-Its size depends on the number of organisations, teams, recently used keys, models, MCP
+Its size depends on the number of organisations, projects, recently used keys, models, MCP
 servers, filters and routers, not on traffic.
 
 Per request, it holds the request body, up to `KEERA_MAX_BODY_BYTES`. For a
 non-streamed answer it also holds the response body, up to
 `KEERA_MAX_RESPONSE_BYTES`. Streamed answers are forwarded as they arrive, one event
-at a time. A rewrite filter's answer is held whole, up to 32 MiB. Both settings
+at a time, and that setting also bounds one event. A rewrite filter's answer is held whole, up to 32 MiB. Both settings
 take a plain number of bytes: the defaults are `33554432` (32 MiB) and
 `67108864` (64 MiB).
 
@@ -139,7 +139,7 @@ Postgres and need nothing; see [gateway.md](gateway.md) for how far they can be
 overshot.
 
 Redis holds two small fields per active bucket, keyed by scope. They expire a
-minute after one refill past last use, so Redis size depends on how many organisations, teams
+minute after one refill past last use, so Redis size depends on how many organisations, projects
 and keys send traffic at once.
 
 ## Sizing the inference side

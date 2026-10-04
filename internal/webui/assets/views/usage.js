@@ -14,7 +14,7 @@ import {
 import { orgNameOf } from "./orgs.js";
 
 const GROUPS = [
-  { key: "team", label: "Team" },
+  { key: "project", label: "Project" },
   { key: "model", label: "Model" },
   // What sent the requests, which is the one grouping that says what is
   // pointed at this gateway rather than what it is pointed at. The Live map
@@ -42,17 +42,17 @@ export async function usageView(ctx) {
   const groups =
     !ctx.orgID && ctx.state.me.unrestricted ? [ORG_GROUP, ...GROUPS] : GROUPS;
   const stored = sessionStorage.getItem("keera.usage.group");
-  const groupBy = groups.some((g) => g.key === stored) ? stored : "team";
+  const groupBy = groups.some((g) => g.key === stored) ? stored : "project";
   const since = sessionStorage.getItem("keera.usage.range") || "720h";
 
   const res = await api.usage(ctx.orgID, groupBy, since);
   const rows = res.data || [];
-  // Every grouping resolves to a name, not only teams. A report grouped by key
+  // Every grouping resolves to a name, not only projects. A report grouped by key
   // or by user that shows raw ids is a report nobody can act on, and those two
   // are exactly what a manager asks for.
   const names = {
-    team: res.team_names || {},
-    key: res.key_aliases || {},
+    project: res.project_names || {},
+    key: res.key_names || {},
     user: res.user_names || {},
     client: res.client_names || {},
   };
@@ -124,13 +124,13 @@ export async function usageView(ctx) {
 
   const label = (r) => {
     if (!r.group) {
-      // A row with no group is real traffic: a key with no team, or a request
+      // A row with no group is real traffic: a key with no project, or a request
       // made with the operator key. Naming it beats a dash that reads as a bug.
       return h(
         "span",
         { class: "faint" },
-        groupBy === "team"
-          ? "No team"
+        groupBy === "project"
+          ? "No project"
           : groupBy === "user"
             ? "No user"
             : groupBy === "client"
@@ -209,34 +209,50 @@ export async function usageView(ctx) {
         label: groups.find((g) => g.key === groupBy).label,
         width: "36%",
         cell: label,
+        sortKey: (r) =>
+          groupBy === "org"
+            ? orgNameOf(ctx, r.group)
+            : (names[groupBy] && names[groupBy][r.group]) || r.group || "",
       },
       {
         label: "Served",
         width: "16%",
         num: true,
         cell: (r) => num(r.requests),
+        sortKey: (r) => r.requests,
+        sortDir: "desc",
       },
       {
         label: "Input Tokens",
         width: "16%",
         num: true,
         cell: (r) => compact(r.input_tokens),
+        sortKey: (r) => r.input_tokens,
+        sortDir: "desc",
       },
       {
         label: "Output Tokens",
         width: "16%",
         num: true,
         cell: (r) => compact(r.output_tokens),
+        sortKey: (r) => r.output_tokens,
+        sortDir: "desc",
       },
       {
         label: `Cost (${res.currency})`,
         width: "16%",
         num: true,
         cell: (r) => h("strong", {}, money(r.cost_micros, "")),
+        sortKey: (r) => r.cost_micros,
+        sortDir: "desc",
       },
     ],
     rows,
     {
+      // Most used first. Days stay in date order, which is the question a
+      // grouping by day asks.
+      sortBy: groupBy === "day" ? null : "Served",
+      sortDir: "desc",
       emptyTitle: "Nothing in this period",
       emptyBody: "Usage appears here as soon as a request is served.",
     },

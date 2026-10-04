@@ -367,11 +367,11 @@ func responseStatus(finish string) (string, any) {
 // sends it back with the tool's output.
 func callID(s string) string { return upstreamID(s, "call") }
 
-// encode turns a buffered chat completion into a response. Errors are already
-// in the shape this API uses, which is the chat one.
+// encode turns a buffered chat completion into a response. Errors use the
+// chat envelope, which this API shares.
 func (responsesShape) encode(raw []byte, alias string, status int) ([]byte, int) {
 	if status >= 300 {
-		return raw, status
+		return openAIErrorBody(raw, status), status
 	}
 	var in oaiCompletion
 	if err := json.Unmarshal(raw, &in); err != nil || len(in.Choices) == 0 {

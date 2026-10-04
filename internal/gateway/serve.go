@@ -76,7 +76,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, res *policy.Resol
 	surf surface, tr *trace,
 ) {
 	c := &call{w: w, r: r, res: res, surf: surf, tr: tr, ev: store.Event{
-		TS: tr.start, OrgID: res.Key.OrgID, TeamID: res.Key.TeamID, UserID: res.Key.UserID,
+		TS: tr.start, OrgID: res.Key.OrgID, ProjectID: res.Key.ProjectID, UserID: res.Key.UserID,
 		KeyID: res.Key.ID, Scopes: res.Scopes,
 		// Read now, before the headers are replaced by the ones the backend gets.
 		Client: connect.Identify(r.Header.Get(connect.ClientHeader), r.UserAgent()),
@@ -197,6 +197,9 @@ func (s *Server) translate(c *call, b *body) (*body, bool) {
 
 // openAIBody turns the client's own body into the OpenAI shape.
 func openAIBody(c *call) (*body, error) {
+	if d, ok := c.surf.shape.(bodyDecoder); ok {
+		return d.decodeBody(c.native.encode())
+	}
 	raw, err := c.surf.shape.decode(c.native.encode())
 	if err != nil {
 		return nil, err
@@ -284,7 +287,7 @@ func (s *Server) target(c *call, b *body) bool {
 			c.routed = false
 		}
 	}
-	// A model the key may not use is reported as missing, so other teams'
+	// A model the key may not use is reported as missing, so other projects'
 	// models cannot be discovered through 403s. Routers answer the same way.
 	if !c.routed && (!found || !model.Enabled || model.Kind != c.surf.kind || !c.res.MayUse(model)) {
 		s.refuse(c, refusal{
@@ -617,7 +620,8 @@ func (s *Server) answer(c *call, b *body) {
 	case streaming:
 		s.relayStream(c, resp, answered, fw.payload,
 			func(dst io.Writer, flush func(), src io.Reader) (streamStats, error) {
-				return c.surf.shape.pipe(dst, flush, src, c.alias, c.injectedUsage)
+				return c.surf.shape.pipe(dst, flush, src, c.alias, c.injectedUsage,
+					s.opts.MaxResponseBytes)
 			})
 	case native:
 		s.relayNativeBuffered(c, resp, answered)
@@ -754,7 +758,7 @@ func (s *Server) relayBuffered(c *call, resp *http.Response, answered time.Time)
 }
 
 // modelNotFound is the one answer for a model that is missing and for one the
-// key may not use, so other teams' models cannot be discovered.
+// key may not use, so other projects' models cannot be discovered.
 func modelNotFound(alias string) string {
 	return "the model '" + alias + "' does not exist or this key may not use it"
 }

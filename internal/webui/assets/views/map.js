@@ -877,7 +877,6 @@ function link(g, path, node, scene, c, hover, max, external) {
   g.lineWidth = 0.8 + 2.6 * Math.sqrt(node.cell.requests / max || 0);
   g.strokeStyle = external ? c.warn : c.strong;
   g.globalAlpha = hover ? (lit ? 1 : 0.15) : external ? 0.5 : 0.4;
-  if (external) g.setLineDash([6, 5]);
   g.beginPath();
   g.moveTo(path.x1, path.y1);
   g.bezierCurveTo(path.cx1, path.cy1, path.cx2, path.cy2, path.x2, path.y2);

@@ -173,7 +173,7 @@ func TestAPanelSignInIsNotACommandLineOne(t *testing.T) {
 
 	if err := st.CreateLoginFlow(ctx, LoginFlow{
 		State: "state", Verifier: "verifier", Nonce: "nonce", Provider: "google",
-		RedirectTo: "/teams",
+		RedirectTo: "/projects",
 	}, time.Now().Add(time.Minute)); err != nil {
 		t.Fatalf("starting the sign-in: %v", err)
 	}

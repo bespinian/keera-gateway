@@ -4,7 +4,7 @@ A filter reads the text of each request a guardrail applies it to, before the
 gateway forwards it. It is the only guardrail that looks at what is _inside_ a
 request.
 
-Its main use is a model outside the cluster. A team that needs one should still
+Its main use is a model outside the cluster. A project that needs one should still
 not send it credentials, customer names or account numbers.
 
 ## The three modes
@@ -41,12 +41,12 @@ customer's name in an ordinary sentence does not: no expression finds
 what that matches.
 
 The modes combine. A common setup is an organisation-wide `pattern` filter for
-credentials and account numbers, a `rewrite` filter on the teams whose prose
-names clients, and a `gate` on the one team with a hosted model. See
+credentials and account numbers, a `rewrite` filter on the projects whose prose
+names clients, and a `gate` on the one project with a hosted model. See
 [Ordering and combination](#ordering-and-combination).
 
 A model filter adds a second generation to every request, so deployments
-usually put it on one team rather than on everything.
+usually put it on one project rather than on everything.
 
 You can change a filter's mode later, and its fields change with it: `rewrite`
 and `gate` take a model and an instruction, `pattern` takes rules, and neither
@@ -332,7 +332,7 @@ three. Shadow measures that before anyone depends on the filter.
 
 ```sh
 keera filter add redact-secrets --model keera-guard --prompt @redact.txt --shadow
-keera guardrail set team <team-id> --filters redact-secrets
+keera guardrail set project <project-id> --filters redact-secrets
 # a week later
 keera filter report redact-secrets --since 168h
 keera filter set redact-secrets --enforce
@@ -361,7 +361,7 @@ What it does change:
 Filters accumulate down the hierarchy like system prompts. A level may add
 filters but never drop one an outer level applied.
 
-They run outermost first - organisation, then team, then key - and each sees
+They run outermost first - organisation, then project, then key - and each sees
 what the one before it wrote. A filter named at two levels runs once.
 
 Within one level they run in the order that level wrote them: the order of
@@ -383,10 +383,10 @@ does not save tokens, since the segments stay the same length. For example:
 keera filter add redact-keys --mode pattern --rules @redact.rules
 keera filter add redact-names --model keera-guard --prompt @names.txt
 keera guardrail set org <org-id> --filters redact-keys
-keera guardrail set team <team-id> --filters redact-names
+keera guardrail set project <project-id> --filters redact-names
 ```
 
-The organisation pays nothing for the first, and only the team that needs the
+The organisation pays nothing for the first, and only the project that needs the
 second pays for it.
 
 Within one request, the order is:
@@ -563,10 +563,10 @@ Each filter has its own screen: `/filters/<alias>` in the panel,
 | segments shown, segments changed                   | Is the instruction too eager? Two changed out of forty is normal; thirty-eight is rewriting work |
 | added latency, p50 and p95                         | How long does each request wait for it?                                                          |
 | its spend, against the organisation's              | What share of the bill is it? Zero for a pattern filter                                          |
-| the refusal rate **by team**                       | Who is affected?                                                                                 |
+| the refusal rate **by project**                    | Who is affected?                                                                                 |
 
 The last row matters most. Four percent across an organisation can be a whole
-working day for the one team it lands on.
+working day for the one project it lands on.
 
 The same figures are on `/metrics`, labelled by filter, organisation, outcome
 and shadow: `keera_filter_runs_total`, `keera_filter_cost_micros_total` and

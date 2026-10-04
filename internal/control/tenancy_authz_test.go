@@ -17,7 +17,7 @@ import (
 // so what is left - and what these are about - is whether each handler actually
 // asks. A handler that forgot to call CanAdminOrg is not a failing unit test
 // anywhere: it is a passing one in authn, a green build, and an administrator of
-// one customer reading another customer's teams.
+// one customer reading another customer's projects.
 //
 // Every case here refuses before the store is reached, which is why a nil store
 // does not panic. That is itself worth pinning: an authorization check that runs
@@ -67,7 +67,7 @@ func TestNoListRouteCanBePointedAtAnotherOrganisation(t *testing.T) {
 		path string
 	}{
 		{"keys", s.listKeys, "/v1/keys?org_id=org_other"},
-		{"teams", s.listTeams, "/v1/teams?org_id=org_other"},
+		{"projects", s.listProjects, "/v1/projects?org_id=org_other"},
 		{"users", s.listUsers, "/v1/users?org_id=org_other"},
 	}
 	for _, route := range routes {
@@ -143,13 +143,13 @@ func TestOnlyAnOperatorCanCreateAnOrganisation(t *testing.T) {
 	}
 }
 
-// A team is a set of guardrails: whoever can make one can make a budget and a
+// A project is a set of guardrails: whoever can make one can make a budget and a
 // rate limit. A member of the organisation is not that person.
-func TestCreatingATeamNeedsAnAdministratorOfThatOrganisation(t *testing.T) {
+func TestCreatingAProjectNeedsAnAdministratorOfThatOrganisation(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 
 	t.Run("a member of the right organisation", func(t *testing.T) {
-		w := invoke(s.createTeam, member("org_1"), http.MethodPost, "/v1/teams",
+		w := invoke(s.createProject, member("org_1"), http.MethodPost, "/v1/projects",
 			`{"org_id":"org_1","name":"Platform"}`)
 		if w.Code != http.StatusForbidden {
 			t.Fatalf("status = %d, want 403", w.Code)
@@ -163,7 +163,7 @@ func TestCreatingATeamNeedsAnAdministratorOfThatOrganisation(t *testing.T) {
 	// and the distinction matters: the answer must not depend on the caller
 	// happening to be an administrator somewhere.
 	t.Run("an administrator of another organisation", func(t *testing.T) {
-		w := invoke(s.createTeam, admin("org_mine"), http.MethodPost, "/v1/teams",
+		w := invoke(s.createProject, admin("org_mine"), http.MethodPost, "/v1/projects",
 			`{"org_id":"org_other","name":"Theirs"}`)
 		if w.Code != http.StatusForbidden {
 			t.Errorf("status = %d, want 403", w.Code)
@@ -171,11 +171,11 @@ func TestCreatingATeamNeedsAnAdministratorOfThatOrganisation(t *testing.T) {
 	})
 }
 
-// Renaming and deleting a team name the team in the path and nothing else, so
+// Changing and deleting a project name the project in the path and nothing else, so
 // the organisation they belong to comes from the row rather than from the
 // request. A caller who administers no organisation is still refused without
 // the read - a nil store here is what says so.
-func TestChangingATeamNeedsAnAdministrator(t *testing.T) {
+func TestChangingAProjectNeedsAnAdministrator(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 
 	for _, tc := range []struct {
@@ -184,11 +184,11 @@ func TestChangingATeamNeedsAnAdministrator(t *testing.T) {
 		method string
 		body   string
 	}{
-		{"rename", s.updateTeam, http.MethodPatch, `{"name":"Payments"}`},
-		{"delete", s.deleteTeam, http.MethodDelete, ""},
+		{"update", s.updateProject, http.MethodPatch, `{"name":"Payments"}`},
+		{"delete", s.deleteProject, http.MethodDelete, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			w := invoke(tc.h, member("org_1"), tc.method, "/v1/teams/team_1", tc.body)
+			w := invoke(tc.h, member("org_1"), tc.method, "/v1/projects/project_1", tc.body)
 			if w.Code != http.StatusForbidden {
 				t.Fatalf("status = %d, want 403", w.Code)
 			}
@@ -199,12 +199,13 @@ func TestChangingATeamNeedsAnAdministrator(t *testing.T) {
 	}
 }
 
-// A rename with nothing in it is a mistake, not a request to clear the name -
-// a team with no name is a row nobody can identify on any screen.
-func TestRenamingATeamRequiresAName(t *testing.T) {
+// An empty name is a mistake, not a request to clear it - a project with no
+// name is a row nobody can identify on any screen. A change with nothing in
+// it is a mistake too.
+func TestChangingAProjectRequiresAName(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	for _, body := range []string{`{"name":""}`, `{"name":"   "}`, `{}`} {
-		w := invoke(s.updateTeam, admin("org_1"), http.MethodPatch, "/v1/teams/team_1", body)
+		w := invoke(s.updateProject, admin("org_1"), http.MethodPatch, "/v1/projects/project_1", body)
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("status = %d for %s, want 400", w.Code, body)
 		}
@@ -215,7 +216,7 @@ func TestRenamingATeamRequiresAName(t *testing.T) {
 // Defaulting to something would be picking a tenant for it.
 func TestAnUnscopedCallerMustNameTheOrganisation(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
-	w := invoke(s.createTeam, operator(), http.MethodPost, "/v1/teams", `{"name":"Platform"}`)
+	w := invoke(s.createProject, operator(), http.MethodPost, "/v1/projects", `{"name":"Platform"}`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", w.Code)
 	}
@@ -235,7 +236,7 @@ func TestAnAccountAttachedToNoOrganisationReadsNothing(t *testing.T) {
 		Via: authn.MethodSession, Role: authn.RoleAdmin, UserID: "user_1",
 	}
 
-	for _, h := range []handler{s.listKeys, s.listTeams, s.listUsers} {
+	for _, h := range []handler{s.listKeys, s.listProjects, s.listUsers} {
 		w := invoke(h, orphan, http.MethodGet, "/v1/keys", "")
 		if w.Code != http.StatusForbidden {
 			t.Errorf("status = %d, want 403", w.Code)

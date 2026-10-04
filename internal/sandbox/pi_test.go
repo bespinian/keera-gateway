@@ -9,7 +9,7 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// A sandbox's Pi configuration lists every reachable model, unlike the one
+// A sandbox's Pi configuration lists every reachable model, like the one
 // `keera connect pi` prints for a laptop. The provider name, API shape and key
 // reference must still match that template, or the two drift silently.
 func TestPiConfigAgreesWithTheConnectCatalogue(t *testing.T) {
@@ -25,7 +25,8 @@ func TestPiConfigAgreesWithTheConnectCatalogue(t *testing.T) {
 		} `json:"providers"`
 	}
 	if err := json.Unmarshal(
-		[]byte(client.Render("https://keera.example.ch/api", "keera-code", 16384)),
+		[]byte(client.Render("https://keera.example.ch/api",
+			[]connect.Model{{Alias: "keera-code", MaxContext: 16384}})),
 		&laptop); err != nil {
 		t.Fatalf("the connect template is not valid JSON: %v", err)
 	}

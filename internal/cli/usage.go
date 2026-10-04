@@ -17,7 +17,7 @@ func usageCmd(ctx context.Context, args []string) error {
 	c := newClient()
 	fs := flag.NewFlagSet("usage", flag.ExitOnError)
 	org := fs.String("org", "", orgsUsage)
-	groupBy := fs.String("by", "model", "group by: model, client, team, key, user, day or org")
+	groupBy := fs.String("by", "model", "group by: model, client, project, key, user, day or org")
 	since := fs.Duration("since", 30*24*time.Hour, "how far back to report")
 	asJSON := fs.Bool("json", false, jsonUsage)
 	fs.Usage = func() { _ = printHelp(fs, "usage", "") }
@@ -52,22 +52,22 @@ func usageCmd(ctx context.Context, args []string) error {
 }
 
 type usageResponse struct {
-	Currency    string              `json:"currency"`
-	Data        []store.UsageBucket `json:"data"`
-	TeamNames   map[string]string   `json:"team_names"`
-	KeyAliases  map[string]string   `json:"key_aliases"`
-	UserNames   map[string]string   `json:"user_names"`
-	ClientNames map[string]string   `json:"client_names"`
+	Currency     string              `json:"currency"`
+	Data         []store.UsageBucket `json:"data"`
+	ProjectNames map[string]string   `json:"project_names"`
+	KeyNames     map[string]string   `json:"key_names"`
+	UserNames    map[string]string   `json:"user_names"`
+	ClientNames  map[string]string   `json:"client_names"`
 }
 
-// label is what a group is called: a team's name, a key's alias, a person's
+// label is what a group is called: a project's name, a key's name, a person's
 // email, rather than the id the rows are grouped by.
 func (res usageResponse) label(groupBy, group string) string {
 	if group == "" {
 		return "(none)"
 	}
 	names := map[string]map[string]string{
-		"team": res.TeamNames, "key": res.KeyAliases,
+		"project": res.ProjectNames, "key": res.KeyNames,
 		"user": res.UserNames, "client": res.ClientNames,
 	}[groupBy]
 	return labelled(names, group)
@@ -134,10 +134,10 @@ func setIfGiven(q url.Values, params map[string]string) {
 }
 
 type failuresResponse struct {
-	Data       []store.Request       `json:"data"`
-	Outcomes   store.RequestOutcomes `json:"outcomes"`
-	Filters    store.RequestFacets   `json:"filters"`
-	KeyAliases map[string]string     `json:"key_aliases"`
+	Data     []store.Request       `json:"data"`
+	Outcomes store.RequestOutcomes `json:"outcomes"`
+	Filters  store.RequestFacets   `json:"filters"`
+	KeyNames map[string]string     `json:"key_names"`
 }
 
 // matched is how many requests of the outcome asked for are in the window.
@@ -162,8 +162,8 @@ func printFailures(w *table, res failuresResponse, o store.Outcome, since time.D
 	w.header("REQUEST\tWHEN\tMODEL\tSTATUS\tKEY\tMESSAGE")
 	for _, f := range res.Data {
 		key := f.KeyID
-		if alias, ok := res.KeyAliases[f.KeyID]; ok && alias != "" {
-			key = alias
+		if name, ok := res.KeyNames[f.KeyID]; ok && name != "" {
+			key = name
 		}
 		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\n",
 			f.ID, f.TS.Local().Format("2006-01-02 15:04:05"), dash(f.Alias),

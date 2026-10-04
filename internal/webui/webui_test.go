@@ -41,8 +41,8 @@ func TestServesTheShell(t *testing.T) {
 
 func TestRoutesFallBackToTheShell(t *testing.T) {
 	// The panel routes on the URL, so a deep link has to load the same
-	// document - otherwise reloading on /teams is a 404.
-	for _, path := range []string{"/teams", "/keys", "/organisations", "/anything"} {
+	// document - otherwise reloading on /projects is a 404.
+	for _, path := range []string{"/projects", "/keys", "/organisations", "/anything"} {
 		w := get(t, path, nil)
 		if w.Code != http.StatusOK {
 			t.Errorf("%s: status = %d, want 200", path, w.Code)

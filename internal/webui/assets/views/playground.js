@@ -88,7 +88,7 @@ function noKey(ctx, a) {
       ),
     );
   }
-  const canIssue = isAdmin(ctx) || ctx.state.me.can_manage_own_keys;
+  const canIssue = isAdmin(ctx);
   return h(
     "div",
     { class: "card" },
@@ -127,7 +127,7 @@ function keyPicker(ctx, keys, onChange) {
       h(
         "option",
         { value: k.id, selected: k.id === session.keyID },
-        k.alias || k.prefix,
+        k.name || k.prefix,
       ),
     ),
   );
@@ -343,7 +343,7 @@ function chat(ctx, keys, key, models) {
         "div",
         { class: "composer-hint" },
         "Enter sends · Shift+Enter breaks the line · sent with ",
-        h("strong", {}, key.alias || key.prefix),
+        h("strong", {}, key.name || key.prefix),
       ),
     ),
   );

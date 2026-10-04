@@ -31,16 +31,16 @@ A client puts the router's alias in the `model` field:
 { "model": "auto", "messages": [{ "role": "user", "content": "…" }] }
 ```
 
-`keera connect opencode --model auto` writes it into an editor's configuration
-like any alias. `GET /api/v1/models` lists routers next to the models, with
-their destinations.
+`keera connect` and **Connect a client** list it in an editor's configuration
+next to the models, when the key may use it. `GET /api/v1/models` lists
+routers next to the models, with their destinations.
 
 Unlike a filter, a router is not attached to a scope. If it were, a developer
 who asked for the large model could get the small one without knowing. To route
 everything a scope sends, narrow its allow-list to the router:
 
 ```sh
-keera guardrail set team <team-id> --models auto
+keera guardrail set project <project-id> --models auto
 ```
 
 That is why guardrails have no router field.

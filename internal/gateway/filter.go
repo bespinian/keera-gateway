@@ -197,7 +197,7 @@ func (s *Server) applyFilters(ctx context.Context, res *policy.Resolved, b *body
 	}
 
 	// The text is extracted once and put back once. Each filter sees what the
-	// one before it wrote, so a team's filter sees the organisation's
+	// one before it wrote, so a project's filter sees the organisation's
 	// redactions, and a gate judges what would actually be sent.
 	doc, err := extract(b)
 	if err != nil {

@@ -80,10 +80,6 @@ func newSSELines(src io.Reader, limit int64) *sseLines {
 	return &sseLines{rd: bufio.NewReaderSize(src, readBuffer), limit: limit}
 }
 
-// maxLineBytes bounds one line of a stream whose caller sets no limit of its
-// own. It matches the default cap on a buffered response.
-const maxLineBytes = 64 << 20
-
 // readBuffer is what one read holds. Any event smaller than this, which is
 // every token of a completion, is read without copying.
 const readBuffer = 32 << 10
@@ -117,12 +113,13 @@ func (l *sseLines) next() ([]byte, error) {
 //
 // dropUsageEvent removes the trailing usage-only chunk from what reaches the
 // client. It is set when the gateway, not the client, asked for that chunk.
-// alias, when set, is written as the model name of every chunk.
+// alias, when set, is written as the model name of every chunk. limit bounds
+// one line, so an upstream that never ends one cannot fill the gateway's memory.
 func pipeSSE(dst io.Writer, flush func(), src io.Reader, alias string,
-	dropUsageEvent bool,
+	dropUsageEvent bool, limit int64,
 ) (streamStats, error) {
 	p := &ssePipe{dst: dst, flush: flush, alias: alias, dropUsage: dropUsageEvent}
-	lines := newSSELines(src, maxLineBytes)
+	lines := newSSELines(src, limit)
 	for {
 		line, readErr := lines.next()
 		if err := p.add(line); err != nil {
@@ -252,8 +249,9 @@ func usageFromResponse(raw []byte) *tokenUsage {
 
 // scanSSE walks the data payloads of a server-sent event stream, joining an
 // event's data lines the way the format says to and skipping the terminator.
-func scanSSE(src io.Reader, fn func(payload []byte) error) error {
-	lines := newSSELines(src, maxLineBytes)
+// limit bounds one event's payload.
+func scanSSE(src io.Reader, limit int64, fn func(payload []byte) error) error {
+	lines := newSSELines(src, limit)
 	// data holds one event's payload and is reused for the next, to avoid an
 	// allocation per token. fn must not keep what it is given.
 	var data []byte
@@ -281,7 +279,7 @@ func scanSSE(src io.Reader, fn func(payload []byte) error) error {
 				}
 			case bytes.HasPrefix(trimmed, dataPrefix):
 				chunk := bytes.TrimSpace(trimmed[len(dataPrefix):])
-				if len(data)+len(chunk) > maxLineBytes {
+				if int64(len(data)+len(chunk)) > limit {
 					return errEventTooLarge
 				}
 				if len(data) > 0 {

@@ -157,16 +157,17 @@ func (s *Server) deleteOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	s.changed(r)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"id": gone.ID, "name": gone.Name, "deleted": true,
-		"teams": gone.Teams, "users": gone.Users, "keys": gone.Keys,
+		"projects": gone.Projects, "users": gone.Users, "keys": gone.Keys,
 	})
 }
 
-// ------------------------------------------------------------------- teams
+// ------------------------------------------------------------------- projects
 
-func (s *Server) createTeam(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
+func (s *Server) createProject(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	var in struct {
-		OrgID string `json:"org_id"`
-		Name  string `json:"name"`
+		OrgID       string `json:"org_id"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
 	}
 	err := httpx.ReadJSON(r, &in)
 	name := strings.TrimSpace(in.Name)
@@ -178,45 +179,48 @@ func (s *Server) createTeam(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	if !ok || !s.requireOrgAdmin(w, p, orgID) {
 		return
 	}
-	team, err := s.st.CreateTeam(r.Context(), id.New("team"), orgID, name)
-	if errors.Is(err, store.ErrTeamNameTaken) {
-		teamNameTaken(w, name)
+	project, err := s.st.CreateProject(r.Context(), store.Project{
+		ID: id.New("project"), OrgID: orgID, Name: name,
+		Description: strings.TrimSpace(in.Description),
+	})
+	if errors.Is(err, store.ErrProjectNameTaken) {
+		projectNameTaken(w, name)
 		return
 	}
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	s.auditf(r, p, orgID, "team.create", "team", team.ID, team)
-	httpx.WriteJSON(w, http.StatusCreated, team)
+	s.auditf(r, p, orgID, "project.create", "project", project.ID, project)
+	httpx.WriteJSON(w, http.StatusCreated, project)
 }
 
-// listTeams returns teams with their guardrails and current spend, which is
+// listProjects returns projects with their guardrails and current spend, which is
 // what the panel shows on one screen.
-func (s *Server) listTeams(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
+func (s *Server) listProjects(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	orgID, ok := s.scopeOrg(w, p, r.URL.Query().Get("org_id"))
 	if !ok {
 		return
 	}
-	teams, err := s.st.TeamSummaries(r.Context(), orgID, time.Now())
+	projects, err := s.st.ProjectSummaries(r.Context(), orgID, time.Now())
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"data": teams})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"data": projects})
 }
 
-// teamOrg resolves the organisation of a team named in the path and checks
+// projectOrg resolves the organisation of a project named in the path and checks
 // that the caller administers it, before anything is written.
-func (s *Server) teamOrg(w http.ResponseWriter, r *http.Request, p *authn.Principal,
-	teamID string,
+func (s *Server) projectOrg(w http.ResponseWriter, r *http.Request, p *authn.Principal,
+	projectID string,
 ) (string, bool) {
 	// A caller who administers nothing is refused before the read, so a
-	// member cannot probe which team ids exist.
+	// member cannot probe which project ids exist.
 	if !s.requireAdmin(w, p) {
 		return "", false
 	}
-	owner, err := s.st.TeamOrg(r.Context(), teamID)
+	owner, err := s.st.ProjectOrg(r.Context(), projectID)
 	if err != nil {
 		s.fail(w, err)
 		return "", false
@@ -227,72 +231,107 @@ func (s *Server) teamOrg(w http.ResponseWriter, r *http.Request, p *authn.Princi
 	return owner, true
 }
 
-// requireTeamInOrg refuses a team from another organisation. The foreign key
-// only says that the team exists somewhere.
-func (s *Server) requireTeamInOrg(w http.ResponseWriter, r *http.Request, teamID, orgID string) bool {
-	owner, err := s.st.TeamOrg(r.Context(), teamID)
+// requireProjectInOrg refuses a project from another organisation. The foreign key
+// only says that the project exists somewhere.
+func (s *Server) requireProjectInOrg(w http.ResponseWriter, r *http.Request, projectID, orgID string) bool {
+	owner, err := s.st.ProjectOrg(r.Context(), projectID)
 	return s.inOrg(w, orgID, owner, err)
 }
 
-// updateTeam renames a team, the only field of a team that is not an id or a
-// guardrail.
-func (s *Server) updateTeam(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
+// updateProject renames a project, changes its description, or both: the
+// only fields of a project that are not an id or a guardrail.
+func (s *Server) updateProject(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	var in struct {
-		Name string `json:"name"`
+		Name        *string `json:"name"`
+		Description *string `json:"description"`
 	}
-	err := httpx.ReadJSON(r, &in)
-	name := strings.TrimSpace(in.Name)
-	if err != nil || name == "" {
-		badRequest(w, "a non-empty 'name' is required")
+	if err := httpx.ReadJSON(r, &in); err != nil || (in.Name == nil && in.Description == nil) {
+		badRequest(w, "send 'name', 'description' or both; an empty 'description' clears it")
 		return
 	}
-	teamID := r.PathValue("id")
-	orgID, ok := s.teamOrg(w, r, p, teamID)
+	if in.Name != nil {
+		name := strings.TrimSpace(*in.Name)
+		if name == "" {
+			badRequest(w, "'name' cannot be empty")
+			return
+		}
+		in.Name = &name
+	}
+	if in.Description != nil {
+		description := strings.TrimSpace(*in.Description)
+		in.Description = &description
+	}
+	projectID := r.PathValue("id")
+	orgID, ok := s.projectOrg(w, r, p, projectID)
 	if !ok {
 		return
 	}
-	team, err := s.st.RenameTeam(r.Context(), teamID, name)
-	if errors.Is(err, store.ErrTeamNameTaken) {
-		teamNameTaken(w, name)
+	project, err := s.st.UpdateProject(r.Context(), projectID,
+		store.ProjectChange{Name: in.Name, Description: in.Description})
+	if errors.Is(err, store.ErrProjectNameTaken) {
+		projectNameTaken(w, *in.Name)
 		return
 	}
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	s.auditf(r, p, orgID, "team.update", "team", teamID, team)
-	httpx.WriteJSON(w, http.StatusOK, team)
+	s.auditf(r, p, orgID, "project.update", "project", projectID, project)
+	httpx.WriteJSON(w, http.StatusOK, project)
 }
 
-// teamNameTaken refuses a second team of one name. Two would make every
-// report that names a team ambiguous.
-func teamNameTaken(w http.ResponseWriter, name string) {
-	httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "team_name_taken",
-		"another team in this organisation is already called '"+name+"'")
+// firstProject returns the project a sandbox goes in when none was named: the
+// organisation's oldest, as for keys. It answers the refusal itself when the
+// organisation has no project.
+func (s *Server) firstProject(w http.ResponseWriter, r *http.Request, orgID string) (string, bool) {
+	projectID, err := s.st.FirstProject(r.Context(), orgID)
+	if errors.Is(err, store.ErrNotFound) {
+		noProject(w)
+		return "", false
+	}
+	if err != nil {
+		s.fail(w, err)
+		return "", false
+	}
+	return projectID, true
 }
 
-// deleteTeam removes a team once no live key is bound to it.
+// noProject refuses a key in an organisation with no projects. Every key is
+// in one, so there can be no keys until a project is created.
+func noProject(w http.ResponseWriter) {
+	httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "project_required",
+		"this organisation has no projects, and every key is in one; create a project first")
+}
+
+// projectNameTaken refuses a second project of one name. Two would make
+// every report that names a project ambiguous.
+func projectNameTaken(w http.ResponseWriter, name string) {
+	httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "project_name_taken",
+		"another project in this organisation is already called '"+name+"'")
+}
+
+// deleteProject removes a project once no live key is bound to it.
 //
 // The store refuses while a key still works. This turns that into a message
 // naming the keys, because "in use" alone leaves the administrator guessing.
-func (s *Server) deleteTeam(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	teamID := r.PathValue("id")
-	orgID, ok := s.teamOrg(w, r, p, teamID)
+func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
+	projectID := r.PathValue("id")
+	orgID, ok := s.projectOrg(w, r, p, projectID)
 	if !ok {
 		return
 	}
-	gone, err := s.st.DeleteTeam(r.Context(), teamID)
-	if inUse, ok := errors.AsType[*store.TeamInUseError](err); ok {
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "team_has_keys",
-			"revoke the keys of '"+inUse.Team+"' first: "+strings.Join(inUse.Aliases, ", "))
+	gone, err := s.st.DeleteProject(r.Context(), projectID)
+	if inUse, ok := errors.AsType[*store.ProjectInUseError](err); ok {
+		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "project_has_keys",
+			"revoke the keys of '"+inUse.Project+"' first: "+strings.Join(inUse.Keys, ", "))
 		return
 	}
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	s.auditf(r, p, orgID, "team.delete", "team", teamID, gone)
-	// The team's guardrails are gone, so the gateways must drop them now.
+	s.auditf(r, p, orgID, "project.delete", "project", projectID, gone)
+	// The project's guardrails are gone, so the gateways must drop them now.
 	s.changed(r)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"id": gone.ID, "name": gone.Name, "deleted": true,
@@ -582,9 +621,9 @@ func (s *Server) mayGrant(w http.ResponseWriter, role authn.Role) bool {
 func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	var in struct {
 		OrgID     string         `json:"org_id"`
-		TeamID    string         `json:"team_id"`
+		ProjectID string         `json:"project_id"`
 		UserID    string         `json:"user_id"`
-		Alias     string         `json:"alias"`
+		Name      string         `json:"name"`
 		Kind      policy.KeyKind `json:"kind"`
 		ExpiresIn string         `json:"expires_in"`
 	}
@@ -603,26 +642,17 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	if !ok {
 		return
 	}
-	// A member may only issue keys for themselves, so leaving out the person
-	// means "me".
-	if in.UserID == "" && !p.CanAdminOrg(orgID) {
-		in.UserID = p.UserID
-	}
-	if !p.CanManageKeyFor(orgID, in.UserID) {
-		forbid(w, "a member can only issue a key attributed to themselves; "+
-			"issuing one for somebody else is for an administrator of this organisation")
+	// Only an administrator issues keys, so each one has the project and
+	// guardrails they chose for it. A key a member issued themselves would have
+	// only the organisation's, and step around their project's.
+	if !p.CanAdminOrg(orgID) {
+		forbid(w, "only an administrator of this organisation can issue a key; "+
+			"ask one for a key in your name, and rotate it yourself from then on")
 		return
 	}
-	// Nor may a member pick the team. This is refused rather than ignored, so
-	// nobody gets a key that belongs somewhere else than they asked. A
-	// member's key uses the organisation's own guardrails.
-	if in.TeamID != "" && !p.CanAdminOrg(orgID) {
-		forbid(w, "a member cannot choose the team a key belongs to; "+
-			"the key is issued against this organisation's own guardrails")
-		return
-	}
-	if in.Alias == "" {
-		in.Alias = "unnamed"
+	in.Name = strings.TrimSpace(in.Name)
+	if in.Name == "" {
+		in.Name = "unnamed"
 	}
 	// A subscription key goes next to one person's own Claude sign-in, so it is
 	// always somebody's.
@@ -644,13 +674,13 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 			return
 		}
 	}
-	// A key on another tenant's team would carry their system prompt, spend
+	// A key on another tenant's project would carry their system prompt, spend
 	// their budget and use their rate limit.
-	if in.TeamID != "" && !s.requireTeamInOrg(w, r, in.TeamID, orgID) {
+	if in.ProjectID != "" && !s.requireProjectInOrg(w, r, in.ProjectID, orgID) {
 		return
 	}
 	info := store.KeyInfo{
-		ID: id.New("key"), OrgID: orgID, TeamID: in.TeamID, UserID: in.UserID, Alias: in.Alias,
+		ID: id.New("key"), OrgID: orgID, ProjectID: in.ProjectID, UserID: in.UserID, Name: in.Name,
 		Kind: in.Kind,
 	}
 	if info.ExpiresAt, ok = expiresIn(w, in.ExpiresIn); !ok {
@@ -660,6 +690,10 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	secret, hash, prefix := auth.Generate()
 	info.Prefix = prefix
 	info, err := s.st.CreateKey(r.Context(), info, hash)
+	if errors.Is(err, store.ErrNoProject) {
+		noProject(w)
+		return
+	}
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -667,8 +701,8 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	// The attribution decides whose budget and report the spend lands in, so
 	// it is part of the record.
 	s.auditf(r, p, orgID, "key.create", "key", info.ID, map[string]any{
-		"org_id": info.OrgID, "team_id": info.TeamID, "user_id": info.UserID,
-		"alias": info.Alias, "prefix": info.Prefix, "kind": info.Kind,
+		"org_id": info.OrgID, "project_id": info.ProjectID, "user_id": info.UserID,
+		"name": info.Name, "prefix": info.Prefix, "kind": info.Kind,
 	})
 	s.changed(r)
 
@@ -680,12 +714,15 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	}{KeyInfo: info, Key: secret})
 }
 
-// rotateKey replaces a key with a new one that keeps its team, person, kind
+// rotateKey replaces a key with a new one that keeps its project, person, kind
 // and own guardrails, and revokes the old one. Whoever may revoke a key may rotate
 // it, so a member can replace their own leaked key.
+//
+// A member cannot choose the new key's lifetime. It keeps the old one's, so a
+// key an administrator issued for 30 days is not rotated into one for years.
 func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	var in struct {
-		Alias     string `json:"alias"`
+		Name      string `json:"name"`
 		ExpiresIn string `json:"expires_in"`
 	}
 	if err := httpx.ReadJSON(r, &in); err != nil {
@@ -697,7 +734,12 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	if !ok {
 		return
 	}
-	next := store.KeyInfo{ID: id.New("key"), Alias: in.Alias}
+	if in.ExpiresIn != "" && !p.CanAdminOrg(owner) {
+		forbid(w, "a member cannot choose how long a key lasts; "+
+			"the new key keeps the old one's lifetime")
+		return
+	}
+	next := store.KeyInfo{ID: id.New("key"), Name: strings.TrimSpace(in.Name)}
 	if next.ExpiresAt, ok = expiresIn(w, in.ExpiresIn); !ok {
 		return
 	}
@@ -714,8 +756,8 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		return
 	}
 	s.auditf(r, p, owner, "key.rotate", "key", info.ID, map[string]any{
-		"replaced": oldID, "team_id": info.TeamID, "user_id": info.UserID,
-		"alias": info.Alias, "prefix": info.Prefix, "kind": info.Kind,
+		"replaced": oldID, "project_id": info.ProjectID, "user_id": info.UserID,
+		"name": info.Name, "prefix": info.Prefix, "kind": info.Kind,
 	})
 	s.changed(r)
 
@@ -727,16 +769,43 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	}{KeyInfo: info, Key: secret, Replaced: oldID})
 }
 
+// renameKey changes what a key is called. Whoever may revoke a key may rename
+// it. The name is only a label, so nothing else about the key changes.
+func (s *Server) renameKey(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
+	var in struct {
+		Name string `json:"name"`
+	}
+	if err := httpx.ReadJSON(r, &in); err != nil || strings.TrimSpace(in.Name) == "" {
+		badRequest(w, "send the new 'name'; it cannot be empty")
+		return
+	}
+	keyID := r.PathValue("id")
+	owner, holder, ok := s.keyToManage(w, r, p, keyID, "rename")
+	if !ok {
+		return
+	}
+	name := strings.TrimSpace(in.Name)
+	old, err := s.st.RenameKey(r.Context(), keyID, name)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.auditf(r, p, owner, "key.rename", "key", keyID, map[string]any{
+		"user_id": holder, "from": old, "to": name,
+	})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"id": keyID, "name": name})
+}
+
 func (s *Server) listKeys(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	q := r.URL.Query()
 	orgID, ok := s.requireOrg(w, p, q.Get("org_id"), orgRequired)
 	if !ok {
 		return
 	}
-	// Spend uses the same window as the teams screen, so the two agree.
+	// Spend uses the same window as the projects screen, so the two agree.
 	since := policy.PeriodMonth.Start(time.Now())
 	keys, err := s.st.KeySummaries(r.Context(), store.KeyQuery{
-		OrgID: orgID, TeamID: q.Get("team_id"), Since: since,
+		OrgID: orgID, ProjectID: q.Get("project_id"), Since: since,
 	})
 	if err != nil {
 		s.fail(w, err)

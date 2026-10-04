@@ -11,9 +11,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 
+	"github.com/bespinian/keera-gateway/internal/authn"
 	"github.com/bespinian/keera-gateway/internal/catalog"
 	"github.com/bespinian/keera-gateway/internal/gateway"
 	"github.com/bespinian/keera-gateway/internal/policy"
@@ -22,17 +24,18 @@ import (
 
 // Claude Code signed in to a Claude plan.
 //
-// `keera connect claude-code --subscription` issues this machine its own
+// `keera connect claude-code --subscription` gives this machine its own
 // subscription key and writes it into Claude Code's settings, next to the
 // gateway's address. The person never sees or copies the key. Running it again
-// replaces the machine's key instead of adding another. See
+// replaces the machine's key instead of adding another. An administrator gets
+// a new key; a member takes over one an administrator issued them. See
 // docs/subscriptions.md.
 
 // subscriptionSetup is what one `connect --subscription` was asked for.
 type subscriptionSetup struct {
-	org, team, model string
-	gatewayURL       string
-	asJSON           bool
+	org, project, model string
+	gatewayURL          string
+	asJSON              bool
 }
 
 // connectSubscription sets Claude Code on this machine up for a Claude plan.
@@ -85,9 +88,13 @@ func connectSubscription(ctx context.Context, c *client, in subscriptionSetup) e
 		return err
 	}
 
-	key, replaced, err := machineKey(ctx, c, orgID, me.UserID, in.team)
+	key, replaced, err := machineKey(ctx, c, orgID, me, in.project)
 	if err != nil {
 		return err
+	}
+	replacedID := ""
+	if replaced != nil {
+		replacedID = replaced.ID
 	}
 	warnings := setClaudeEnv(settings, env, key.Key)
 	setModelOverrides(settings, claudeModelOverrides(models))
@@ -101,15 +108,19 @@ func connectSubscription(ctx context.Context, c *client, in subscriptionSetup) e
 
 	if in.asJSON {
 		return out(true, map[string]any{
-			"settings": path, "key_id": key.ID, "replaced": replaced, "model": alias,
+			"settings": path, "key_id": key.ID, "replaced": replacedID, "model": alias,
 			"url": in.gatewayURL, "url_managed": managed != "", "warnings": warnings,
 		}, nil)
 	}
 	fmt.Fprintf(os.Stderr, "%s · model %s · %s\n\n", styleErr.head("Claude Code with your Claude plan"),
 		alias, in.gatewayURL)
-	if replaced != "" {
-		fmt.Fprintf(os.Stderr, "Replaced this machine's key %s with %s (%s…).\n", replaced, key.ID, key.Prefix)
-	} else {
+	switch {
+	case replaced != nil && replaced.Name == key.Name:
+		fmt.Fprintf(os.Stderr, "Replaced this machine's key %s with %s (%s…).\n", replaced.ID, key.ID, key.Prefix)
+	case replaced != nil:
+		fmt.Fprintf(os.Stderr, "Replaced your key %s (%s) with %s (%s…), which is now this machine's.\n",
+			replaced.ID, replaced.Name, key.ID, key.Prefix)
+	default:
 		fmt.Fprintf(os.Stderr, "Issued this machine the key %s (%s…).\n", key.ID, key.Prefix)
 	}
 	if managed != "" {
@@ -228,51 +239,99 @@ func setModelOverrides(settings map[string]any, overrides map[string]string) {
 	}
 }
 
-// machineKey replaces this machine's subscription key, or issues the first one.
-// It returns the new key and the id of the one it replaced, if any.
-func machineKey(ctx context.Context, c *client, orgID, userID, team string,
-) (createdKey, string, error) {
+// machineKey replaces this machine's subscription key, or gets it its first one.
+// It returns the new key and the one it replaced, if any.
+//
+// Only an administrator issues keys. So a member's first run takes over a
+// subscription key an administrator issued them that no machine holds yet,
+// and rotates it to get a secret to write down.
+func machineKey(ctx context.Context, c *client, orgID string, me identity, project string,
+) (createdKey, *store.KeySummary, error) {
+	member := me.Role == string(authn.RoleMember)
+	if member && project != "" {
+		return createdKey{}, nil, errors.New("--project is for administrators; your key keeps " +
+			"the project an administrator issued it in")
+	}
 	machine, err := machineID()
 	if err != nil {
-		return createdKey{}, "", err
+		return createdKey{}, nil, err
 	}
 	host, err := os.Hostname()
 	if err != nil || host == "" {
 		host = "this machine"
 	}
-	// The id tells apart machines that share a hostname, such as copies of
-	// one VM image, so one never replaces another's key.
-	alias := "claude-code on " + host + " (" + machine + ")"
-	teamID, err := teamID(ctx, c, orgID, team)
-	if err != nil {
-		return createdKey{}, "", err
+	name := machineKeyName(host, machine)
+	inProject := ""
+	if !member {
+		if inProject, err = projectID(ctx, c, orgID, project); err != nil {
+			return createdKey{}, nil, err
+		}
 	}
 	keys, err := list[store.KeySummary](ctx, c, inOrg("/v1/keys", orgID))
 	if err != nil {
-		return createdKey{}, "", err
+		return createdKey{}, nil, err
 	}
-	for _, k := range keys {
-		if k.UserID == userID && k.Kind == policy.KeySubscription && k.Alias == alias &&
-			k.RevokedAt == nil {
-			// A rotation keeps the key's team, so a different --team would be
+	var unclaimed *store.KeySummary
+	for i, k := range keys {
+		if k.UserID != me.UserID || k.Kind != policy.KeySubscription || k.RevokedAt != nil {
+			continue
+		}
+		if k.Name == name {
+			// A rotation keeps the key's project, so a different --project would be
 			// ignored without a word.
-			if team != "" && teamID != k.TeamID {
-				return createdKey{}, "", fmt.Errorf("this machine already has the key %s, in "+
-					"another team, and replacing it keeps that team; to move it, revoke it "+
+			if project != "" && inProject != k.ProjectID {
+				return createdKey{}, nil, fmt.Errorf("this machine already has the key %s, in "+
+					"another project, and replacing it keeps that project; to move it, revoke it "+
 					"first with: keera key revoke %s, then run this again", k.ID, k.ID)
 			}
-			var rotated createdKey
-			err := c.do(ctx, "POST", "/v1/keys/"+url.PathEscape(k.ID)+"/rotate",
-				map[string]string{}, &rotated)
-			return rotated, k.ID, err
+			rotated, err := rotateFor(ctx, c, k.ID, "")
+			return rotated, &keys[i], err
 		}
+		if unclaimed == nil && !isMachineKeyName(k.Name) {
+			unclaimed = &keys[i]
+		}
+	}
+	if member {
+		if unclaimed == nil {
+			return createdKey{}, nil, fmt.Errorf("you have no subscription key for this machine, "+
+				"and only an administrator can issue one; ask one to run: keera key create "+
+				"--subscription --user %s --name \"%s's Claude Code\", then run this again",
+				me.Email, strings.Split(me.Email, "@")[0])
+		}
+		rotated, err := rotateFor(ctx, c, unclaimed.ID, name)
+		return rotated, unclaimed, err
 	}
 	var created createdKey
 	err = c.do(ctx, "POST", "/v1/keys", map[string]string{
-		"org_id": orgID, "team_id": teamID, "user_id": userID, "alias": alias,
+		"org_id": orgID, "project_id": inProject, "user_id": me.UserID, "name": name,
 		"kind": string(policy.KeySubscription),
 	}, &created)
-	return created, "", err
+	return created, nil, err
+}
+
+// rotateFor rotates a key and returns the new one. An empty name keeps the
+// old one's.
+func rotateFor(ctx context.Context, c *client, keyID, name string) (createdKey, error) {
+	var rotated createdKey
+	err := c.do(ctx, "POST", "/v1/keys/"+url.PathEscape(keyID)+"/rotate",
+		map[string]string{"name": name}, &rotated)
+	return rotated, err
+}
+
+// machineKeyName is the name of a machine's subscription key. The id tells
+// apart machines that share a hostname, such as copies of one VM image, so one
+// never replaces another's key.
+func machineKeyName(host, machine string) string {
+	return "claude-code on " + host + " (" + machine + ")"
+}
+
+// machineKeyNameRE matches what machineKeyName makes.
+var machineKeyNameRE = regexp.MustCompile(`^claude-code on .+ \([0-9a-f]{8}\)$`)
+
+// isMachineKeyName reports whether a key is some machine's already, so taking
+// it over would break that machine.
+func isMachineKeyName(name string) bool {
+	return machineKeyNameRE.MatchString(name)
 }
 
 // machineID names this machine for its subscription key. It is random, made

@@ -44,7 +44,7 @@ type accessScope struct {
 // works: its state, the chain of limits above it, and what it may call.
 type accessKey struct {
 	store.KeySummary
-	TeamName        string        `json:"team_name,omitempty"`
+	ProjectName     string        `json:"project_name,omitempty"`
 	State           string        `json:"state"`
 	Scopes          []accessScope `json:"scopes"`
 	AllowedModels   []string      `json:"allowed_models,omitempty"`
@@ -116,7 +116,7 @@ func (s *Server) access(w http.ResponseWriter, r *http.Request, p *authn.Princip
 func (s *Server) accessKeys(r *http.Request, orgID, orgName string, keys []store.KeySummary,
 	now time.Time,
 ) ([]accessKey, error) {
-	teamNames, err := s.st.TeamNames(r.Context(), orgID)
+	projectNames, err := s.st.ProjectNames(r.Context(), orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -126,31 +126,31 @@ func (s *Server) accessKeys(r *http.Request, orgID, orgName string, keys []store
 	}
 	// Each level above a key is read once, not once per key.
 	orgLimits := s.limitsFor(r, policy.ScopeOrg, orgID)
-	teamLimits := map[string]*policy.Limits{}
+	projectLimits := map[string]*policy.Limits{}
 
 	shown := make([]accessKey, 0, len(keys))
 	for _, k := range keys {
-		if _, ok := teamLimits[k.TeamID]; !ok && k.TeamID != "" {
-			teamLimits[k.TeamID] = s.limitsFor(r, policy.ScopeTeam, k.TeamID)
+		if _, ok := projectLimits[k.ProjectID]; !ok && k.ProjectID != "" {
+			projectLimits[k.ProjectID] = s.limitsFor(r, policy.ScopeProject, k.ProjectID)
 		}
 		own := k.Limits
 		resolved := policy.Resolve(
-			policy.Key{ID: k.ID, OrgID: k.OrgID, TeamID: k.TeamID, UserID: k.UserID, Kind: k.Kind},
-			orgLimits, teamLimits[k.TeamID], &own)
+			policy.Key{ID: k.ID, OrgID: k.OrgID, ProjectID: k.ProjectID, UserID: k.UserID, Kind: k.Kind},
+			orgLimits, projectLimits[k.ProjectID], &own)
 
 		shown = append(shown, accessKey{
-			KeySummary: k,
-			TeamName:   teamNames[k.TeamID],
-			State:      k.State(now),
+			KeySummary:  k,
+			ProjectName: projectNames[k.ProjectID],
+			State:       k.State(now),
 			// Resolved to real names, so the screen lists what the key can
 			// call instead of saying "no restriction".
 			AllowedModels:   allowedModels(resolved, models),
 			MaxOutputTokens: resolved.MaxOutputTokens,
-			Scopes: s.scopeStates(resolved, orgName, teamNames, k.Alias, now,
+			Scopes: s.scopeStates(resolved, orgName, projectNames, k.Name, now,
 				map[policy.ScopeType]scopeSays{
-					policy.ScopeOrg:  saysOf(orgLimits),
-					policy.ScopeTeam: saysOf(teamLimits[k.TeamID]),
-					policy.ScopeKey:  saysOf(&own),
+					policy.ScopeOrg:     saysOf(orgLimits),
+					policy.ScopeProject: saysOf(projectLimits[k.ProjectID]),
+					policy.ScopeKey:     saysOf(&own),
 				}),
 		})
 	}
@@ -208,7 +208,7 @@ func (s *Server) limitsFor(r *http.Request, scope policy.ScopeType, id string) *
 // scopeStates turns a resolved chain into what each level allows and what it
 // has spent, outermost first: the order the limits apply in.
 func (s *Server) scopeStates(res *policy.Resolved, orgName string,
-	teamNames map[string]string, keyAlias string, now time.Time,
+	projectNames map[string]string, keyName string, now time.Time,
 	says map[policy.ScopeType]scopeSays) []accessScope {
 	out := make([]accessScope, 0, len(res.Scopes))
 	for _, sc := range res.Scopes {
@@ -220,10 +220,10 @@ func (s *Server) scopeStates(res *policy.Resolved, orgName string,
 		switch sc.Type {
 		case policy.ScopeOrg:
 			st.Name = orgName
-		case policy.ScopeTeam:
-			st.Name = teamNames[sc.ID]
+		case policy.ScopeProject:
+			st.Name = projectNames[sc.ID]
 		case policy.ScopeKey:
-			st.Name = keyAlias
+			st.Name = keyName
 		}
 		if sc.BudgetMicros > 0 {
 			// The gateway's own spend figure, not a fresh query: it is the

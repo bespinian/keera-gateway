@@ -82,8 +82,8 @@ export async function sessionsView(ctx) {
   const totals = res.totals || {};
   const currency = res.currency || ctx.currency;
   const names = {
-    keys: res.key_aliases || {},
-    teams: res.team_names || {},
+    keys: res.key_names || {},
+    projects: res.project_names || {},
     users: res.user_names || {},
   };
 
@@ -149,7 +149,7 @@ export async function sessionsView(ctx) {
   return wrap;
 }
 
-/** sessionLog is the session list for one team, key or model, drawn below
+/** sessionLog is the session list for one project, key or model, drawn below
  *  that thing's charts. The range comes from the screen it sits on. */
 export async function sessionLog(ctx, { scope = {}, since, hide = {} }) {
   const sort = sessionStorage.getItem(SORT_KEY) || "";
@@ -182,8 +182,8 @@ export async function sessionLog(ctx, { scope = {}, since, hide = {} }) {
   const rows = res.data || [];
   const currency = res.currency || ctx.currency;
   const names = {
-    keys: res.key_aliases || {},
-    teams: res.team_names || {},
+    keys: res.key_names || {},
+    projects: res.project_names || {},
     users: res.user_names || {},
   };
 
@@ -430,8 +430,8 @@ function sessionTable(ctx, rows, names, currency, hide = {}) {
               {
                 class: "nowrap",
                 href: "/keys/" + encodeURIComponent(a.key_id),
-                title: names.teams[a.team_id]
-                  ? "in " + names.teams[a.team_id]
+                title: names.projects[a.project_id]
+                  ? "in " + names.projects[a.project_id]
                   : null,
                 onClick: go(ctx, "/keys/" + encodeURIComponent(a.key_id)),
               },
@@ -524,7 +524,7 @@ function sessionTable(ctx, rows, names, currency, hide = {}) {
     search: (a) =>
       `${a.key} ${(a.models || []).join(" ")} ${a.last_error || ""} ` +
       `${names.users[a.user_id] || ""} ${names.keys[a.key_id] || a.key_id || ""} ` +
-      `${names.teams[a.team_id] || ""}`,
+      `${names.projects[a.project_id] || ""}`,
     searchLabel: "these sessions",
     emptyTitle: "Nothing here",
   });
@@ -597,8 +597,8 @@ export async function sessionDetailView(ctx) {
   const requests = res.requests || [];
   const currency = res.currency || ctx.currency;
   const names = {
-    keys: res.key_aliases || {},
-    teams: res.team_names || {},
+    keys: res.key_names || {},
+    projects: res.project_names || {},
     users: res.user_names || {},
   };
   const [label, tone] = outcomeMeaning({
@@ -632,18 +632,21 @@ export async function sessionDetailView(ctx) {
               names.keys[s.key_id] || s.key_id,
             )
           : pill("no key"),
-        s.team_id
+        s.project_id
           ? h(
               "a",
               {
                 class: "pill pill-button",
-                href: "/teams/" + encodeURIComponent(s.team_id),
-                title: "Open this team",
-                onClick: go(ctx, "/teams/" + encodeURIComponent(s.team_id)),
+                href: "/projects/" + encodeURIComponent(s.project_id),
+                title: "Open this project",
+                onClick: go(
+                  ctx,
+                  "/projects/" + encodeURIComponent(s.project_id),
+                ),
               },
-              names.teams[s.team_id] || s.team_id,
+              names.projects[s.project_id] || s.project_id,
             )
-          : pill("Organisation-wide"),
+          : null,
         s.user_id ? pill(names.users[s.user_id] || s.user_id) : null,
         (s.models || []).map((m) =>
           h(
@@ -766,7 +769,7 @@ export async function sessionDetailView(ctx) {
           requests,
           names,
           currency,
-          { key: true, team: true },
+          { key: true, project: true },
           { sortBy: "When", sortDir: "asc" },
         ),
       ),

@@ -157,6 +157,36 @@ func TestANewOrganisationStartsWithTheTemplate(t *testing.T) {
 	}
 }
 
+// A model added without saying "enabled" is served at once, and an edit that
+// leaves it out does not switch it on or off behind the operator's back.
+func TestAnUnsaidEnabledServesANewModelAndKeepsAnOldOnesState(t *testing.T) {
+	st, ctx := routerStore(t)
+	s := routerServer(ctx, t, st)
+	const unsaid = `{"kind":"chat","backends":["http://10.0.0.7:8000/v1"],"backend_model":"mine"}`
+	put := func(body string) policy.Model {
+		t.Helper()
+		if w := callModel(s.putModel, admin("org_1"), http.MethodPut, "mine", "", body); w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", w.Code, w.Body)
+		}
+		m, err := st.Model(ctx, "org_1", "mine")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+
+	if !put(unsaid).Enabled {
+		t.Error("a new model without 'enabled' started disabled")
+	}
+	if put(`{"kind":"chat","backends":["http://10.0.0.7:8000/v1"],"backend_model":"mine",
+		"enabled":false}`).Enabled {
+		t.Error("'enabled': false did not disable the model")
+	}
+	if put(unsaid).Enabled {
+		t.Error("an edit without 'enabled' switched a disabled model on")
+	}
+}
+
 // A subscription model is sent each caller's Claude sign-in, so it takes no
 // key of its own and goes nowhere but Anthropic's own API.
 func TestASubscriptionModelIsAnthropicsAPIWithNoKey(t *testing.T) {

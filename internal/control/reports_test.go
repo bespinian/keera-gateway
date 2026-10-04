@@ -22,20 +22,20 @@ import (
 // rather than being shown bare.
 func TestGroupLabelsResolveEveryGrouping(t *testing.T) {
 	g := groupLabels{
-		teams: map[string]string{"team_1": "Payments Platform"},
-		keys:  map[string]string{"key_1": "a developer's laptop"},
-		users: map[string]string{"user_1": "first.last@example.ch"},
+		projects: map[string]string{"project_1": "Payments Platform"},
+		keys:     map[string]string{"key_1": "a developer's laptop"},
+		users:    map[string]string{"user_1": "first.last@example.ch"},
 	}
 	tests := []struct{ groupBy, id, want string }{
-		{"team", "team_1", "Payments Platform"},
+		{"project", "project_1", "Payments Platform"},
 		{"key", "key_1", "a developer's laptop"},
 		{"user", "user_1", "first.last@example.ch"},
 		{"model", "keera-code", "keera-code"},
 		{"day", "2026-09-06", "2026-09-06"},
 		// A key whose organisation was purged: the usage row outlives it.
 		{"key", "key_gone", "key_gone"},
-		// Real traffic with no team: a key issued organisation-wide.
-		{"team", "", "(none)"},
+		// Real traffic with no project: a key issued organisation-wide.
+		{"project", "", "(none)"},
 	}
 	for _, tc := range tests {
 		if got := g.label(tc.groupBy, tc.id); got != tc.want {
@@ -53,10 +53,10 @@ func TestUsageCSVCarriesNamesIdsAndCost(t *testing.T) {
 	from := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 
-	s.usageCSV(w, "org_1", "team", from, to, []store.UsageBucket{
-		{Group: "team_1", Requests: 12, InputTokens: 900, OutputTokens: 100, CostMicros: 2_500_000},
+	s.usageCSV(w, "org_1", "project", from, to, []store.UsageBucket{
+		{Group: "project_1", Requests: 12, InputTokens: 900, OutputTokens: 100, CostMicros: 2_500_000},
 		{Group: "", Requests: 1, CostMicros: 0},
-	}, groupLabels{teams: map[string]string{"team_1": "Payments Platform"}})
+	}, groupLabels{projects: map[string]string{"project_1": "Payments Platform"}})
 
 	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/csv") {
 		t.Errorf("Content-Type = %q, want text/csv", ct)
@@ -72,10 +72,10 @@ func TestUsageCSVCarriesNamesIdsAndCost(t *testing.T) {
 	if len(rows) != 3 {
 		t.Fatalf("got %d rows, want a header and two", len(rows))
 	}
-	if rows[0][0] != "team" || rows[0][5] != "cost_chf" {
+	if rows[0][0] != "project" || rows[0][5] != "cost_chf" {
 		t.Errorf("header = %v, want it named by the grouping and the currency", rows[0])
 	}
-	if rows[1][0] != "Payments Platform" || rows[1][1] != "team_1" {
+	if rows[1][0] != "Payments Platform" || rows[1][1] != "project_1" {
 		t.Errorf("row = %v, want both the name and the id it resolves", rows[1])
 	}
 	if rows[1][5] != "2.50" {
@@ -139,7 +139,7 @@ func TestAuditCSVKeepsTheDetailIntact(t *testing.T) {
 
 	s.auditCSV(w, []store.AuditEntry{{
 		ID: 7, TS: ts, Actor: "first.last@example.ch", Action: "guardrail.put",
-		TargetType: "team", TargetID: "team_1",
+		TargetType: "project", TargetID: "project_1",
 		Detail: json.RawMessage(`{"rpm":120,"budget_micros":500000000}`),
 	}})
 
@@ -222,7 +222,7 @@ func TestAuditCSVEscapesEveryFieldItIsGiven(t *testing.T) {
 
 	s.auditCSV(w, []store.AuditEntry{{
 		ID: 7, TS: time.Date(2026, 9, 6, 14, 30, 0, 0, time.UTC),
-		Actor: `=1+1`, Action: "guardrail.put", TargetType: "team", TargetID: `@A1`,
+		Actor: `=1+1`, Action: "guardrail.put", TargetType: "project", TargetID: `@A1`,
 		Detail: json.RawMessage(`{"system_prompt":"=1+1"}`),
 	}})
 
@@ -255,12 +255,12 @@ func TestRequestsCSVCarriesTheMessageAndTheNames(t *testing.T) {
 
 	s.requestsCSV(w, []store.Request{{
 		ID: 9, TS: ts, Alias: "keera-code", Status: 500,
-		Error: "CUDA out of memory", KeyID: "key_1", TeamID: "team_1", UserID: "user_1",
+		Error: "CUDA out of memory", KeyID: "key_1", ProjectID: "project_1", UserID: "user_1",
 		LatencyMS: 1200, Stream: true,
 	}}, groupLabels{
-		teams: map[string]string{"team_1": "Payments Platform"},
-		keys:  map[string]string{"key_1": "a developer's laptop"},
-		users: map[string]string{"user_1": "first.last@example.ch"},
+		projects: map[string]string{"project_1": "Payments Platform"},
+		keys:     map[string]string{"key_1": "a developer's laptop"},
+		users:    map[string]string{"user_1": "first.last@example.ch"},
 	})
 
 	rows, err := csv.NewReader(strings.NewReader(w.Body.String())).ReadAll()
@@ -280,7 +280,7 @@ func TestRequestsCSVCarriesTheMessageAndTheNames(t *testing.T) {
 		t.Errorf("row = %v, want both the key's name and the id it resolves", rows[1])
 	}
 	if rows[1][6] != "Payments Platform" || rows[1][7] != "first.last@example.ch" {
-		t.Errorf("row = %v, want the team and the person it happened to", rows[1])
+		t.Errorf("row = %v, want the project and the person it happened to", rows[1])
 	}
 }
 
@@ -290,7 +290,7 @@ func TestRequestsCSVCarriesTheMessageAndTheNames(t *testing.T) {
 func TestRequestsAreAdministratorOnly(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, httpx.ControlPrefix+"/v1/requests?team_id=team_1", nil)
+	r := httptest.NewRequest(http.MethodGet, httpx.ControlPrefix+"/v1/requests?project_id=project_1", nil)
 
 	s.requests(w, r, &authn.Principal{Role: authn.RoleMember, OrgID: "org_1"})
 
@@ -309,7 +309,7 @@ func TestEntityScopeReadsTheIdsAsGiven(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet,
-		"/v1/overview?team_id=team_1&key_id=key_1&alias=keera-code&user_id=user_1", nil)
+		"/v1/overview?project_id=project_1&key_id=key_1&alias=keera-code&user_id=user_1", nil)
 
 	// An empty organisation is the operator looking across tenants: nothing to
 	// check an id against, and every tenant theirs to read.
@@ -317,7 +317,7 @@ func TestEntityScopeReadsTheIdsAsGiven(t *testing.T) {
 	if !ok {
 		t.Fatalf("an operator was refused: %d %s", w.Code, w.Body.String())
 	}
-	if sc.TeamID != "team_1" || sc.KeyID != "key_1" ||
+	if sc.ProjectID != "project_1" || sc.KeyID != "key_1" ||
 		sc.Alias != "keera-code" || sc.UserID != "user_1" {
 		t.Errorf("scope = %+v, want every narrowing carried through", sc)
 	}
@@ -339,16 +339,16 @@ func TestRequestsCSVCarriesTheNumbersAndEscapesTheWording(t *testing.T) {
 
 	s.requestsCSV(w, []store.Request{{
 		ID: 9, TS: ts, Alias: "keera-code", Status: 200,
-		KeyID: "key_1", TeamID: "team_1", UserID: "user_1",
+		KeyID: "key_1", ProjectID: "project_1", UserID: "user_1",
 		InputTokens: 1000, OutputTokens: 200, CostMicros: 2_500_000,
 		LatencyMS: 4000, TTFTMS: 300, Stream: true,
 	}, {
 		ID: 10, TS: ts, Alias: "keera-code", Status: 500,
 		Error: `=cmd|' /c calc'!A1`,
 	}}, groupLabels{
-		teams: map[string]string{"team_1": "Payments Platform"},
-		keys:  map[string]string{"key_1": "a developer's laptop"},
-		users: map[string]string{"user_1": "first.last@example.ch"},
+		projects: map[string]string{"project_1": "Payments Platform"},
+		keys:     map[string]string{"key_1": "a developer's laptop"},
+		users:    map[string]string{"user_1": "first.last@example.ch"},
 	})
 
 	rows, err := csv.NewReader(strings.NewReader(w.Body.String())).ReadAll()

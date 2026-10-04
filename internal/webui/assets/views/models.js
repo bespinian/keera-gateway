@@ -266,14 +266,17 @@ export async function modelsView(ctx) {
               {
                 class: "btn btn-sm",
                 title: "What this model serves, and on what",
+                "aria-label": `Edit ${m.alias}`,
                 onClick: () => editModel(ctx, m, providers),
               },
-              "Edit",
+              icon(icons.pencil),
             ),
             h(
               "button",
               {
                 class: "btn btn-sm btn-danger",
+                title: "Delete this model",
+                "aria-label": `Delete ${m.alias}`,
                 onClick: async () =>
                   confirm({
                     title: `Delete ${m.alias}?`,
@@ -290,7 +293,7 @@ export async function modelsView(ctx) {
                     },
                   }),
               },
-              "Delete",
+              icon(icons.trash),
             ),
           );
         },
@@ -1835,7 +1838,7 @@ function hostedFields(ctx, providers, form) {
     "div",
     { class: "hint" },
     "With a hosted provider, prompts leave your infrastructure. Read " +
-      "docs/providers.md first, and set budgets for the teams that use it.",
+      "docs/providers.md first, and set budgets for the projects that use it.",
   );
   const showTiles = (show) => {
     tiles.hidden = !show;

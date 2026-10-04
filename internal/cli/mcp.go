@@ -28,7 +28,7 @@ func registerMCPFlags(fs *flag.FlagSet) *mcpFlags {
 	f := &mcpFlags{}
 	// Not --url, which every command already reads as the gateway to talk to.
 	fs.StringVar(&f.endpoint, "endpoint", "", "the server's Streamable HTTP endpoint")
-	fs.StringVar(&f.description, "description", "", "what the server is for, in a sentence")
+	fs.StringVar(&f.description, "description", "", "what the server is for, in a sentence; an empty one clears it")
 	fs.StringVar(&f.authHeader, "auth-header", "",
 		"header the credential goes in (default: Authorization, as a bearer token)")
 	fs.StringVar(&f.apiKey, "api-key", "", "credential to store encrypted; @- reads it from stdin")
@@ -119,6 +119,9 @@ func (m *mcpRun) save(ctx context.Context, adding bool) error {
 	f, alias := m.f, m.fs.Arg(0)
 	put := mcpPut{Enabled: !f.disabled}
 	if !adding {
+		if !changesSomething(m.fs) {
+			return nothingToChange("mcp set")
+		}
 		cur, err := m.require(ctx, alias)
 		if err != nil {
 			return err

@@ -22,7 +22,7 @@ func TestDisableUserRevokesKeysAndSessions(t *testing.T) {
 	for i, owner := range []string{user.ID, user.ID, other.ID} {
 		if _, err := st.CreateKey(ctx, KeyInfo{
 			ID: "key_u" + string(rune('a'+i)), OrgID: f.orgID, UserID: owner,
-			Alias: "laptop", Prefix: "p",
+			Name: "laptop", Prefix: "p",
 		}, []byte("hash-"+string(rune('a'+i)))); err != nil {
 			t.Fatal(err)
 		}
@@ -62,7 +62,7 @@ func TestDisableUserRevokesKeysAndSessions(t *testing.T) {
 
 	// A key issued to them later, by a bypass or a race, still does not work.
 	if _, err := st.CreateKey(ctx, KeyInfo{
-		ID: "key_late", OrgID: f.orgID, UserID: user.ID, Alias: "late", Prefix: "p",
+		ID: "key_late", OrgID: f.orgID, UserID: user.ID, Name: "late", Prefix: "p",
 	}, []byte("hash-late")); err != nil {
 		t.Fatal(err)
 	}

@@ -146,7 +146,7 @@ func TestCreateBuildsTheObject(t *testing.T) {
 		Purpose: policy.PurposeEngineer,
 		Owner:   "dev@example.ch",
 		Org:     "org_1",
-		Team:    "team_1",
+		Project: "project_1",
 		Env:     map[string]string{"KEERA_API_KEY": "keera_sk_x", "AAA": "1"},
 		Expires: expires,
 	})

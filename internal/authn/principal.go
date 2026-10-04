@@ -20,11 +20,11 @@ const (
 	// RoleOperator runs the deployment: it creates organisations and works in any
 	// of them.
 	RoleOperator Role = "operator"
-	// RoleAdmin runs one organisation: its teams, guardrails, keys and people,
+	// RoleAdmin runs one organisation: its projects, guardrails, keys and people,
 	// and its models, MCP servers, filters, routers and sandbox classes.
 	RoleAdmin Role = "admin"
-	// RoleMember sees their organisation's usage, manages their own keys and
-	// changes no policy.
+	// RoleMember sees their organisation's usage, rotates and revokes their
+	// own keys and changes no policy.
 	RoleMember Role = "member"
 )
 
@@ -101,20 +101,22 @@ func (p *Principal) CanReadOrg(orgID string) bool {
 	return p.Unrestricted() || p.inOrg(orgID)
 }
 
-// CanAdminOrg reports whether the principal may change an organisation's teams,
+// CanAdminOrg reports whether the principal may change an organisation's projects,
 // guardrails, keys and people, and its models, MCP servers, filters, routers
 // and sandbox classes.
 func (p *Principal) CanAdminOrg(orgID string) bool {
 	return p.Unrestricted() || (p.Role == RoleAdmin && p.inOrg(orgID))
 }
 
-// CanManageKeyFor reports whether the principal may issue or revoke a key in
-// an organisation, attributed to userID (empty means nobody in particular).
+// CanManageKeyFor reports whether the principal may rename, rotate or revoke a
+// key in an organisation, attributed to userID (empty means nobody in
+// particular).
 //
-// A member may do so only for their own keys. Otherwise they could put their
-// spend under a colleague's name, or under nobody's. Revoking their own lets a
-// member stop a leaked key without waiting for an administrator. A key
-// attributed to nobody, such as a pipeline's, stays an administrator's.
+// Only an administrator issues keys, so every key is one they shaped: its
+// project, kind and guardrails. A member may rename, rotate or revoke the keys
+// attributed to them, which replaces or stops a leaked key without waiting for
+// an administrator, but changes nothing else. A key attributed to nobody, such
+// as a pipeline's, stays an administrator's.
 func (p *Principal) CanManageKeyFor(orgID, userID string) bool {
 	return p.CanAdminOrg(orgID) || p.isMemberFor(orgID, userID)
 }

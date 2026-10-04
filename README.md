@@ -31,7 +31,7 @@ request, logs it and passes it on.
         Your tools                       Keera Gateway                          Models
 ┌───────────────────────┐         ┌──────────────────────────┐         ┌─────────────────────┐
 │ Claude Code           │         │ 1  Identify the key, its │         │ Keera Engine on     │
-│ OpenCode, Pi          │         │    team and organisation │         │ vLLM, on your GPUs  │
+│ OpenCode, Pi          │         │    project and organisation │         │ vLLM, on your GPUs  │
 │ Internal apps         │  HTTPS  │ 2  Apply guardrails,     │         │ or Swiss ones       │
 │ Notebooks and CI jobs │────────▶│    budget, rate limit    │────────▶│                     │
 │ any OpenAI client     │         │ 3  Filter secrets and    │         │ Anthropic and other │
@@ -93,8 +93,8 @@ Then issue a key and use it:
 export KEERA_OPERATOR_KEY=…              # the same value as in .env
 export KEERA_CONTROL_URL=http://127.0.0.1:8080
 keera org create "Example Bank"
-keera team create "Payments Platform"
-KEY=$(keera key create --team <team> --alias "a developer's laptop")
+keera project create "Payments Platform"
+KEY=$(keera key create --project <project> --name "a developer's laptop")
 
 curl http://127.0.0.1:8080/api/v1/chat/completions \
   -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
@@ -120,26 +120,27 @@ keera login --url https://keera.example.ch
 ```
 
 `keera connect` prints an editor configuration to stdout and the instructions
-to stderr, so you can redirect it straight into the file it names:
+to stderr, so you can redirect it straight into the file it names. It lists
+every model your key may use:
 
 ```sh
 keera connect                     # the clients this deployment can configure
-keera connect opencode --model keera-speed > ~/.config/opencode/opencode.json
+keera connect opencode --key laptop > ~/.config/opencode/opencode.json
 ```
 
 ## What it does
 
 **Guardrails, budgets and rate limits.** There are three levels: organisation,
-team and key. A guardrail can attach at any of them. A level can narrow what it
+project and key. A guardrail can attach at any of them. A level can narrow what it
 inherits but never widen it. `keera guardrail effective` shows which level each
 number came from. Clients name an alias like `keera-speed`, never a model id or
 a vLLM URL, so you can swap the model behind an alias without developers
 changing anything. [docs/gateway.md](docs/gateway.md)
 
 ```sh
-keera guardrail set team <team-id> --models keera-speed --rpm 120 --budget 500 --period month
+keera guardrail set project <project-id> --models keera-speed --rpm 120 --budget 500 --period month
 keera guardrail effective key <key-id>   # and what holds this one key
-keera usage --by team
+keera usage --by project
 ```
 
 `keera limit` and `keera budget` each edit one part of a guardrail: the rate
@@ -187,7 +188,7 @@ such as web search, from every request. [docs/mcp.md](docs/mcp.md)
 
 ```sh
 keera mcp add github --endpoint https://api.githubcopilot.com/mcp/ --api-key @-
-keera guardrail set team <team-id> --tools github/search_code
+keera guardrail set project <project-id> --tools github/search_code
 keera mcp calls --summary
 ```
 
@@ -207,7 +208,7 @@ Code, while Keera applies the guardrails and shows each person's usage.
 - **Sessions** - the same log, grouped into tasks.
 - **My access** - the developer's own view.
 
-Every team, key, model, filter and router has its own screen with the same four
+Every project, key, model, filter and router has its own screen with the same four
 numbers. `keera usage`, `keera failures`, `keera session list`,
 `keera filter report` and `keera router report` show the same reports in a
 terminal.

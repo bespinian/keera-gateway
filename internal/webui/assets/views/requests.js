@@ -7,7 +7,7 @@
 // answered by the rows that worked.
 //
 // The screen is the shared log section and nothing else, so the counts here
-// and on a team's or a key's own page can never disagree.
+// and on a project's or a key's own page can never disagree.
 //
 // Administrator-only, like the audit log: the rows name other people's keys
 // and carry text the inference plane wrote. A member reading their own traffic
@@ -67,7 +67,7 @@ function advice(outcome) {
     case "refused":
       return (
         "The request got a 4xx. Mostly a guardrail stopped it: change the " +
-        "budget or rate limit on the team or key, or tell the developer which " +
+        "budget or rate limit on the project or key, or tell the developer which " +
         "model to use. A 400 or 413 is a request that could not be taken; " +
         "each row shows why."
       );

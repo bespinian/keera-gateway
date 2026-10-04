@@ -26,7 +26,7 @@ func sessionCmd(ctx context.Context, args []string) error {
 	sub, rest := split(args)
 	c := newClient()
 	fs := flag.NewFlagSet("session "+sub, flag.ExitOnError)
-	org := fs.String("org", "", orgUsage)
+	org := fs.String("org", "", orgsUsage)
 	sort := fs.String("sort", "cost", "cost, requests, duration or recent")
 	alias := fs.String("model", "", "only the sessions that used one model")
 	w := registerWho(fs)
@@ -89,7 +89,7 @@ type sessionsResponse struct {
 	Totals     store.AgentSessionTotals `json:"totals"`
 	Currency   string                   `json:"currency"`
 	GapSeconds int64                    `json:"gap_seconds"`
-	KeyAliases map[string]string        `json:"key_aliases"`
+	KeyNames   map[string]string        `json:"key_names"`
 	UserNames  map[string]string        `json:"user_names"`
 }
 
@@ -103,7 +103,7 @@ func printSessions(w *table, res sessionsResponse, since time.Duration) {
 	for _, s := range res.Data {
 		who := res.UserNames[s.UserID]
 		if who == "" {
-			who = res.KeyAliases[s.KeyID]
+			who = res.KeyNames[s.KeyID]
 		}
 		// The id, not the conversation hash: it is what `keera session show` takes.
 		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%d\t%s\t%s\t%s\t%s\n",
@@ -146,12 +146,12 @@ func sessionShow(ctx context.Context, c *client, arg, org string, asJSON bool) e
 }
 
 type sessionResponse struct {
-	Session    store.AgentSession `json:"session"`
-	Requests   []store.Request    `json:"requests"`
-	Currency   string             `json:"currency"`
-	KeyAliases map[string]string  `json:"key_aliases"`
-	TeamNames  map[string]string  `json:"team_names"`
-	UserNames  map[string]string  `json:"user_names"`
+	Session      store.AgentSession `json:"session"`
+	Requests     []store.Request    `json:"requests"`
+	Currency     string             `json:"currency"`
+	KeyNames     map[string]string  `json:"key_names"`
+	ProjectNames map[string]string  `json:"project_names"`
+	UserNames    map[string]string  `json:"user_names"`
 }
 
 func printSession(w *table, res sessionResponse) {
@@ -161,8 +161,8 @@ func printSession(w *table, res sessionResponse) {
 	show(w, "started", s.StartedAt.Local().Format(time.RFC3339))
 	_, _ = fmt.Fprintf(w, "took\t%s over %d requests\n", shortDuration(s.Duration()), s.Requests)
 	show(w, "models", dash(strings.Join(s.Models, ", ")))
-	show(w, "key", dash(labelled(res.KeyAliases, s.KeyID)))
-	show(w, "team", dash(labelled(res.TeamNames, s.TeamID)))
+	show(w, "key", dash(labelled(res.KeyNames, s.KeyID)))
+	show(w, "project", dash(labelled(res.ProjectNames, s.ProjectID)))
 	show(w, "who", dash(labelled(res.UserNames, s.UserID)))
 	_, _ = fmt.Fprintf(w, "tokens\t%d in, %d out\n", s.InputTokens, s.OutputTokens)
 	_, _ = fmt.Fprintf(w, "cost\t%s %s\n", policy.FormatMicros(s.CostMicros), res.Currency)

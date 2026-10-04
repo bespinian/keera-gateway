@@ -1,5 +1,5 @@
-// Teams - the screen where an enterprise administrator sets guardrails per
-// department, which is the reason the panel exists.
+// Projects - the screen where an enterprise administrator sets guardrails per
+// project, which is the reason the panel exists.
 
 import { api } from "../api.js";
 import {
@@ -27,18 +27,19 @@ import {
 } from "./guardrails.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
 
-export async function teamsView(ctx) {
-  if (!ctx.orgID && ctx.state.me.unrestricted) return chooseOrg(ctx, "Teams");
+export async function projectsView(ctx) {
+  if (!ctx.orgID && ctx.state.me.unrestricted)
+    return chooseOrg(ctx, "Projects");
 
-  const [teamsRes, modelsRes] = await Promise.all([
-    api.teams(ctx.orgID),
+  const [projectsRes, modelsRes] = await Promise.all([
+    api.projects(ctx.orgID),
     api.models(ctx.orgID),
   ]);
-  const teams = teamsRes.data || [];
+  const projects = projectsRes.data || [];
   const models = (modelsRes.data || []).filter((m) => m.enabled);
   const canEdit = isAdmin(ctx);
 
-  ctx.setSubtitle(`${teams.length} ${plural(teams.length, "team")}`);
+  ctx.setSubtitle(`${projects.length} ${plural(projects.length, "project")}`);
 
   const orgID = ctx.orgID || ctx.state.me.org_id;
   const orgName = orgNameOf(ctx, orgID);
@@ -50,9 +51,9 @@ export async function teamsView(ctx) {
       "div",
       { class: "muted" },
       canEdit
-        ? "A team's guardrails apply to every key in it. They can narrow what " +
+        ? "A project's guardrails apply to every key in it. They can narrow what " +
             "the organisation allows, never widen it."
-        : "A team's guardrails apply to every key in it. Open a team to see " +
+        : "A project's guardrails apply to every key in it. Open a project to see " +
             "them. An administrator sets them.",
     ),
     h("div", { class: "spacer", style: { flex: 1 } }),
@@ -63,7 +64,7 @@ export async function teamsView(ctx) {
       "button",
       {
         class: "btn",
-        title: "Guardrails that apply to every team",
+        title: "Guardrails that apply to every project",
         onClick: () =>
           openGuardrails(ctx, {
             scope: "org",
@@ -82,10 +83,10 @@ export async function teamsView(ctx) {
           "button",
           {
             class: "btn btn-primary",
-            onClick: () => newTeam(ctx),
+            onClick: () => newProject(ctx),
           },
           icon(icons.plus),
-          "New team",
+          "New project",
         )
       : null,
   );
@@ -93,9 +94,9 @@ export async function teamsView(ctx) {
   const rows = table(
     [
       {
-        // The name opens the team's own screen: what it has been doing, what it
-        // spent doing it, and the requests behind both. The button at the end of
-        // the row stays what this screen is for, which is the guardrails.
+        // The name opens the project's own screen: what it has been doing, what
+        // it spent doing it, and the requests behind both. The button at the end
+        // of the row stays what this screen is for, which is the guardrails.
         label: "Name",
         cell: (t) =>
           h(
@@ -103,9 +104,9 @@ export async function teamsView(ctx) {
             { class: "stack" },
             rowLink(
               ctx,
-              "/teams/" + encodeURIComponent(t.id),
+              "/projects/" + encodeURIComponent(t.id),
               t.name,
-              "This team's traffic, spend and requests",
+              "This project's traffic, spend and requests",
             ),
             h(
               "span",
@@ -113,6 +114,13 @@ export async function teamsView(ctx) {
               t.id,
             ),
           ),
+      },
+      {
+        label: "Description",
+        cell: (t) =>
+          t.description
+            ? h("span", { class: "muted" }, t.description)
+            : h("span", { class: "faint" }, "—"),
       },
       { label: "Models", cell: (t) => modelsCell(t.limits) },
       {
@@ -180,25 +188,25 @@ export async function teamsView(ctx) {
               {
                 class: "btn btn-sm",
                 title: canEdit
-                  ? "Set this team's guardrails"
-                  : "View this team's guardrails",
+                  ? "Set this project's guardrails"
+                  : "View this project's guardrails",
                 onClick: () =>
-                  openTeam(ctx, t, models, orgID, orgName, canEdit),
+                  openProject(ctx, t, models, orgID, orgName, canEdit),
               },
               "Guardrails",
             ),
-            // Renaming and deleting sit behind the guardrails button rather
-            // than beside the name, because the name is a link to the team's
-            // own screen and a pencil next to it would be read as editing what
-            // that screen shows.
+            // Editing and deleting sit behind the guardrails button rather
+            // than beside the name, because the name is a link to the
+            // project's own screen and a pencil next to it would be read as
+            // editing what that screen shows.
             canEdit
               ? h(
                   "button",
                   {
                     class: "btn btn-sm",
-                    title: "Rename this team",
-                    "aria-label": `Rename ${t.name}`,
-                    onClick: () => renameTeam(ctx, t),
+                    title: "Edit this project",
+                    "aria-label": `Edit ${t.name}`,
+                    onClick: () => editProject(ctx, t),
                   },
                   icon(icons.pencil),
                 )
@@ -208,9 +216,9 @@ export async function teamsView(ctx) {
                   "button",
                   {
                     class: "btn btn-sm btn-danger",
-                    title: "Delete this team",
+                    title: "Delete this project",
                     "aria-label": `Delete ${t.name}`,
-                    onClick: () => deleteTeam(ctx, t),
+                    onClick: () => deleteProject(ctx, t),
                   },
                   icon(icons.trash),
                 )
@@ -218,33 +226,49 @@ export async function teamsView(ctx) {
           ),
       },
     ],
-    teams,
+    projects,
     {
-      emptyTitle: "No teams yet",
-      emptyBody: "Create one per department, then set its guardrails.",
+      emptyTitle: "No projects yet",
+      emptyBody:
+        "Create one per product or group of people, then set its guardrails.",
     },
   );
 
   return h("div", {}, head, rows);
 }
 
-function newTeam(ctx) {
+// projectFields are the inputs a new project and an edited one share.
+function projectFields(project) {
   const name = h("input", {
     class: "input",
-    placeholder: "Payments Platform",
+    placeholder: "accounting-team",
+    value: project ? project.name : "",
     autofocus: true,
+    autocomplete: "off",
   });
+  const description = h("textarea", {
+    class: "input",
+    rows: "3",
+    placeholder: "Bookkeeping, invoicing and payroll",
+  });
+  description.value = project ? project.description || "" : "";
+  return { name, description };
+}
+
+function newProject(ctx) {
+  const { name, description } = projectFields(null);
   const err = h("div");
   modal({
-    title: "New team",
+    title: "New project",
     subtitle:
-      "Usually one per department, so budgets and reports match how the " +
-      "organisation works.",
+      "Usually one per product or group of people, so budgets and reports " +
+      "match how the organisation works.",
     body: h(
       "form",
       { onSubmit: (e) => e.preventDefault() },
       err,
       field("Name", name),
+      field("Description", description, "Optional. What the project is for."),
     ),
     actions: (close) => [
       h("button", { class: "btn", onClick: close }, "Cancel"),
@@ -256,12 +280,13 @@ function newTeam(ctx) {
             if (!name.value.trim()) return name.focus();
             e.target.disabled = true;
             try {
-              await api.createTeam(
+              await api.createProject(
                 ctx.orgID || ctx.state.me.org_id,
                 name.value.trim(),
+                description.value.trim(),
               );
               close();
-              toast("Team created", "good");
+              toast("Project created", "good");
               ctx.reload();
             } catch (ex) {
               showError(err, ex.message);
@@ -269,35 +294,31 @@ function newTeam(ctx) {
             }
           },
         },
-        "Create team",
+        "Create project",
       ),
     ],
   });
 }
 
-// renameTeam changes a team's label and nothing else. Keys, guardrails, spend
-// and every usage row ever written hold the team by its id, so this is safe in
-// a way renaming things usually is not - which is worth saying in the dialog,
-// because an administrator looking at a month of reports has no reason to
-// assume it.
-function renameTeam(ctx, team) {
-  const name = h("input", {
-    class: "input",
-    value: team.name,
-    autofocus: true,
-    autocomplete: "off",
-  });
+// editProject changes a project's labels and nothing else. Keys, guardrails,
+// spend and every usage row ever written hold the project by its id, so a
+// rename is safe in a way renaming things usually is not - which is worth saying
+// in the dialog, because an administrator looking at a month of reports has no
+// reason to assume it.
+function editProject(ctx, project) {
+  const { name, description } = projectFields(project);
   const err = h("div");
   modal({
-    title: `Rename ${team.name}`,
+    title: `Edit ${project.name}`,
     subtitle:
-      "Keys, guardrails and spend stay with the team. Reports use the new " +
+      "Keys, guardrails and spend stay with the project. Reports use a new " +
       "name from now on. The old name stays in the audit log.",
     body: h(
       "form",
       { onSubmit: (e) => e.preventDefault() },
       err,
       field("Name", name),
+      field("Description", description, "Optional. What the project is for."),
     ),
     actions: (close) => [
       h("button", { class: "btn", onClick: close }, "Cancel"),
@@ -308,12 +329,16 @@ function renameTeam(ctx, team) {
           onClick: async (e) => {
             const next = name.value.trim();
             if (!next) return name.focus();
-            if (next === team.name) return close();
+            const change = {};
+            if (next !== project.name) change.name = next;
+            const text = description.value.trim();
+            if (text !== (project.description || "")) change.description = text;
+            if (!Object.keys(change).length) return close();
             e.target.disabled = true;
             try {
-              await api.renameTeam(team.id, next);
+              await api.updateProject(project.id, change);
               close();
-              toast(`Renamed to ${next}`, "good");
+              toast("Project saved", "good");
               ctx.reload();
             } catch (ex) {
               showError(err, ex.message);
@@ -321,33 +346,33 @@ function renameTeam(ctx, team) {
             }
           },
         },
-        "Rename team",
+        "Save project",
       ),
     ],
   });
 }
 
-// deleteTeam removes a team once nothing live is bound to it.
+// deleteProject removes a project once nothing live is bound to it.
 //
-// The control plane refuses while any key in the team is not revoked, expired
-// ones included, and the row already knows how many that is - so such a team
+// The control plane refuses while any key in the project is not revoked, expired
+// ones included, and the row already knows how many that is - so such a project
 // is not offered the button at all. Being told why, next to the screen that
 // fixes it, is more use than a red button that comes back with the same
 // sentence as an error.
 //
 // Where it can go ahead, the guardrails are the part worth naming: they are the
-// only thing in a team that is not recoverable from somewhere else.
-function deleteTeam(ctx, team) {
-  const live = team.active_keys || 0;
+// only thing in a project that is not recoverable from somewhere else.
+function deleteProject(ctx, project) {
+  const live = project.active_keys || 0;
   if (live) {
     const them = plural(live, "it", "them");
     const close = modal({
-      title: `Delete ${team.name}?`,
+      title: `Delete ${project.name}?`,
       body: h(
         "div",
         { class: "muted" },
-        `${live} ${plural(live, "key")} in this team ${plural(live, "is", "are")} ` +
-          "not revoked. Deleting the team would take " +
+        `${live} ${plural(live, "key")} in this project ${plural(live, "is", "are")} ` +
+          "not revoked. Deleting the project would take " +
           `${them} with it, and clients using ${them} would be refused. ` +
           `Revoke ${them} first.`,
       ),
@@ -369,37 +394,56 @@ function deleteTeam(ctx, team) {
     return;
   }
   confirm({
-    title: `Delete ${team.name}?`,
+    title: `Delete ${project.name}?`,
     body:
-      "Its guardrails and budget counters are deleted. Revoked keys, usage " +
-      "history and the audit log are kept for reports.",
-    confirmLabel: "Delete team",
+      "Its guardrails and budget counters are deleted. Its revoked keys " +
+      "stay, without a project. Usage history and the audit log are kept.",
+    confirmLabel: "Delete project",
     danger: true,
     onConfirm: async () => {
-      await api.deleteTeam(team.id);
-      toast(`${team.name} deleted`, "good");
+      await api.deleteProject(project.id);
+      toast(`${project.name} deleted`, "good");
       ctx.reload();
     },
   });
 }
 
-// openTeam opens the shared guardrails dialog with the organisation's limits
-// loaded as the ceiling, so the sentence "teams can only narrow" arrives as the
+// openProject opens the shared guardrails dialog with the organisation's limits
+// loaded as the ceiling, so the sentence "projects can only narrow" arrives as the
 // actual numbers rather than as a warning.
 //
-// A member gets the same dialog with nothing to fill in. What a team allows and
+// A member gets the same dialog with nothing to fill in. What a project allows and
 // what it says to the model on their behalf is what they are working inside;
 // the numbers are the answer to "why was I refused", and refusing to show them
 // only turns that into a message to an administrator.
-export async function openTeam(ctx, team, models, orgID, orgName, canEdit) {
-  const ceilings = await ceilingsFor("team", { orgID, orgName });
+export async function openProject(
+  ctx,
+  project,
+  models,
+  orgID,
+  orgName,
+  canEdit,
+) {
+  const ceilings = await ceilingsFor("project", { orgID, orgName });
   await openGuardrails(ctx, {
-    scope: "team",
-    id: team.id,
-    name: team.name,
+    scope: "project",
+    id: project.id,
+    name: project.name,
     models,
     orgID,
     ceilings,
     canEdit,
   });
+}
+
+/** oldestProject is the id of the project a key or sandbox that names none
+ *  goes in: the organisation's oldest. */
+export function oldestProject(projects) {
+  let first = null;
+  for (const t of projects) {
+    // Ties go by id, as the control plane orders them.
+    const d = first && Date.parse(t.created_at) - Date.parse(first.created_at);
+    if (!first || d < 0 || (d === 0 && t.id < first.id)) first = t;
+  }
+  return first ? first.id : "";
 }

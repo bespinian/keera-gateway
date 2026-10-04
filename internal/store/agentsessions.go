@@ -117,9 +117,9 @@ type AgentSession struct {
 	// Models is every alias the session used.
 	Models []string `json:"models"`
 
-	TeamID string `json:"team_id,omitempty"`
-	UserID string `json:"user_id,omitempty"`
-	KeyID  string `json:"key_id,omitempty"`
+	ProjectID string `json:"project_id,omitempty"`
+	UserID    string `json:"user_id,omitempty"`
+	KeyID     string `json:"key_id,omitempty"`
 
 	// LastStatus and LastError are how the session ended: the final request's
 	// status and, if any, the error its client got. Showing them in the list
@@ -164,7 +164,7 @@ var sessionOrder = map[AgentSessionSort]string{
 // tenant's most recent sessions".
 type AgentSessionQuery struct {
 	OrgID string
-	// Scope's TeamID, UserID and KeyID narrow to one entity. They apply
+	// Scope's ProjectID, UserID and KeyID narrow to one entity. They apply
 	// before the runs are cut: a session belongs to one key, so this drops
 	// whole sessions and never splits one. Its Alias keeps the sessions that
 	// used one model, and applies after the runs are cut. Applied to rows, it
@@ -215,7 +215,7 @@ func (q *AgentSessionQuery) setDefaults() {
 // Rows are ordered by (ts, id), so ties always cut the same way. `SELECT *` in
 // `ev` avoids a second column list to keep in step with requestColumns.
 //
-// It takes $1..$10: org, from, to, gap seconds, key, team, user, key id, alias,
+// It takes $1..$10: org, from, to, gap seconds, key, project, user, key id, alias,
 // unhappy. What follows it supplies its own parameters from $11 on.
 const sessionCTE = `
 	WITH ev AS (
@@ -228,7 +228,7 @@ const sessionCTE = `
 	           OR ts >= $2::timestamptz - make_interval(secs => $4))
 	      AND ($3::timestamptz IS NULL OR ts < $3)
 	      AND ($5 = '' OR session_key = $5)
-	      AND ($6 = '' OR team_id = $6)
+	      AND ($6 = '' OR project_id = $6)
 	      AND ($7 = '' OR user_id = $7)
 	      AND ($8 = '' OR key_id = $8)
 	),
@@ -255,7 +255,7 @@ const sessionCTE = `
 	                          FILTER (WHERE ttft_ms > 0)), 0)::bigint AS ttft_median_ms,
 	           COALESCE(array_agg(DISTINCT alias) FILTER (WHERE alias <> ''),
 	                    '{}'::text[]) AS models,
-	           COALESCE(max(team_id), '') AS team_id,
+	           COALESCE(max(project_id), '') AS project_id,
 	           COALESCE(max(user_id), '') AS user_id,
 	           COALESCE(max(key_id), '') AS key_id,
 	           (array_agg(status ORDER BY ts DESC, id DESC))[1] AS last_status,
@@ -270,7 +270,7 @@ const sessionCTE = `
 // args returns the ten values sessionCTE reads, in the order it numbers them.
 func (q AgentSessionQuery) args() []any {
 	return []any{q.OrgID, nullableTime(q.From), nullableTime(q.To), q.Gap.Seconds(),
-		q.Key, q.TeamID, q.UserID, q.KeyID, q.Alias, q.Unhappy}
+		q.Key, q.ProjectID, q.UserID, q.KeyID, q.Alias, q.Unhappy}
 }
 
 func scanAgentSession(r row) (AgentSession, error) {
@@ -278,7 +278,7 @@ func scanAgentSession(r row) (AgentSession, error) {
 	if err := r.Scan(&a.Key, &a.ID, &a.StartedAt, &a.EndedAt, &a.Requests,
 		&a.OK, &a.Failed, &a.Refused, &a.Interrupted,
 		&a.InputTokens, &a.OutputTokens, &a.CostMicros, &a.TTFTMedianMS,
-		&a.Models, &a.TeamID, &a.UserID, &a.KeyID,
+		&a.Models, &a.ProjectID, &a.UserID, &a.KeyID,
 		&a.LastStatus, &a.LastError); err != nil {
 		return AgentSession{}, err
 	}
@@ -293,7 +293,7 @@ func (s *Store) AgentSessions(ctx context.Context, q AgentSessionQuery) ([]Agent
 	rows, err := s.pool.Query(ctx, sessionCTE+`
 		SELECT session_key, id, started_at, ended_at, requests, ok, failed, refused,
 		       interrupted, input_tokens, output_tokens, cost_micros,
-		       ttft_median_ms, models, team_id, user_id, key_id, last_status, last_error
+		       ttft_median_ms, models, project_id, user_id, key_id, last_status, last_error
 		FROM grouped
 		WHERE ($11 = 0 OR id < $11)
 		ORDER BY `+sessionOrder[q.Sort]+`

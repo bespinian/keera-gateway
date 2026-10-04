@@ -60,7 +60,8 @@ type Options struct {
 	// MaxBodyBytes caps a request. Coding agents send large contexts, so this
 	// is generous by default and exists to stop a client exhausting memory.
 	MaxBodyBytes int64
-	// MaxResponseBytes caps a buffered (non-streamed) upstream response.
+	// MaxResponseBytes caps a buffered upstream response, and one event of a
+	// streamed one.
 	MaxResponseBytes int64
 	// UpstreamHeaderTimeout bounds how long the inference plane may take to
 	// begin responding. It must not bound the response itself: a streamed

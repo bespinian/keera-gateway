@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bespinian/keera-gateway/internal/authn"
 	"github.com/bespinian/keera-gateway/internal/id"
 	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/store"
@@ -20,9 +21,9 @@ type keyRun struct {
 	c       *client
 	fs      *flag.FlagSet
 	org     string
-	team    string
+	project string
 	user    string
-	alias   string
+	name    string
 	expires string
 	// subscription issues a key for Claude Code signed in to a Claude plan.
 	subscription bool
@@ -41,9 +42,9 @@ func keyCmd(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("key "+sub, flag.ExitOnError)
 	r := &keyRun{c: newClient(), fs: fs}
 	fs.StringVar(&r.org, "org", "", orgUsage)
-	fs.StringVar(&r.team, "team", "", "team, by name or id")
+	fs.StringVar(&r.project, "project", "", "project, by name or id; without it, the organisation's oldest project")
 	fs.StringVar(&r.user, "user", "", "the person this key belongs to, by email or id")
-	fs.StringVar(&r.alias, "alias", "", "what this key is called; what it is for, in one label")
+	fs.StringVar(&r.name, "name", "", "what this key is called; what it is for, in a few words")
 	fs.StringVar(&r.expires, "expires", "", "lifetime, e.g. 720h")
 	fs.BoolVar(&r.subscription, "subscription", false,
 		"a key that reaches only subscription models, for Claude Code signed in to a Claude plan")
@@ -65,6 +66,8 @@ func keyCmd(ctx context.Context, args []string) error {
 		return r.revoke(ctx)
 	case "rotate":
 		return r.rotate(ctx)
+	case "set":
+		return r.set(ctx)
 	default:
 		return r.list(ctx)
 	}
@@ -72,20 +75,20 @@ func keyCmd(ctx context.Context, args []string) error {
 
 func (r *keyRun) create(ctx context.Context) error {
 	if r.fs.NArg() == 1 {
-		if r.alias != "" {
-			return errors.New("give the alias once: as the argument or with --alias")
+		if r.name != "" {
+			return errors.New("give the name once: as the argument or with --name")
 		}
-		r.alias = r.fs.Arg(0)
+		r.name = r.fs.Arg(0)
 	}
 	orgID, err := resolveOrg(ctx, r.c, r.org)
 	if err != nil {
 		return err
 	}
-	team, err := teamID(ctx, r.c, orgID, r.team)
+	project, err := projectID(ctx, r.c, orgID, r.project)
 	if err != nil {
 		return err
 	}
-	req := map[string]string{"org_id": orgID, "team_id": team, "alias": r.alias}
+	req := map[string]string{"org_id": orgID, "project_id": project, "name": r.name}
 	// A key with a person on it is what makes `keera usage --by user` work.
 	if r.user != "" {
 		owner, err := findUser(ctx, r.c, orgID, r.user)
@@ -118,13 +121,13 @@ func (r *keyRun) list(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	team, err := teamID(ctx, r.c, orgID, r.team)
+	project, err := projectID(ctx, r.c, orgID, r.project)
 	if err != nil {
 		return err
 	}
 	path := inOrg("/v1/keys", orgID)
-	if team != "" {
-		path += "&team_id=" + url.QueryEscape(team)
+	if project != "" {
+		path += "&project_id=" + url.QueryEscape(project)
 	}
 	keys, err := list[store.KeySummary](ctx, r.c, path)
 	if err != nil {
@@ -132,14 +135,14 @@ func (r *keyRun) list(ctx context.Context) error {
 	}
 	return out(r.asJSON, keys, func(w *table) {
 		// Last use decides whether a key is safe to revoke, so it is a column.
-		w.header("ID\tALIAS\tPREFIX\tKIND\tTEAM\tSTATE\tLAST USED\tCLAUDE PLAN USED")
+		w.header("ID\tNAME\tPREFIX\tKIND\tPROJECT\tSTATE\tLAST USED\tCLAUDE PLAN USED")
 		for _, k := range keys {
 			last := "never"
 			if k.LastUsedAt != nil {
 				last = k.LastUsedAt.Format(time.DateOnly)
 			}
 			_, _ = fmt.Fprintf(w, "%s\t%s\t%s…\t%s\t%s\t%s\t%s\t%s\n",
-				k.ID, k.Alias, k.Prefix, dash(string(k.Kind)), dash(k.TeamID),
+				k.ID, k.Name, k.Prefix, dash(string(k.Kind)), dash(k.ProjectID),
 				statusWord(k.State(time.Now())), statusWord(last), planText(k.Plan))
 		}
 	})
@@ -170,8 +173,8 @@ func planText(p *policy.PlanUsage) string {
 }
 
 func (r *keyRun) revoke(ctx context.Context) error {
-	// An id names a key outright, so --yes with an id needs no lookup. An
-	// alias only means something inside an organisation, and the prompt needs
+	// An id names a key outright, so --yes with an id needs no lookup. A
+	// name only means something inside an organisation, and the prompt needs
 	// the record to say what it is about.
 	target := r.fs.Arg(0)
 	if !r.yes || !id.HasPrefix(target, "key") {
@@ -207,14 +210,40 @@ func (r *keyRun) rotate(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return rotateKey(ctx, r.c, orgID, r.fs.Arg(0), r.alias, r.expires, r.asJSON)
+	return rotateKey(ctx, r.c, orgID, r.fs.Arg(0), r.name, r.expires, r.asJSON)
+}
+
+func (r *keyRun) set(ctx context.Context) error {
+	name := strings.TrimSpace(r.name)
+	if name == "" {
+		return errors.New("nothing to change; pass --name <name>")
+	}
+	orgID, err := resolveOrg(ctx, r.c, r.org)
+	if err != nil {
+		return err
+	}
+	key, err := findKey(ctx, r.c, orgID, r.fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	var renamed struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := r.c.do(ctx, "PATCH", "/v1/keys/"+url.PathEscape(key.ID),
+		map[string]string{"name": name}, &renamed); err != nil {
+		return err
+	}
+	return out(r.asJSON, renamed, func(w *table) {
+		_, _ = fmt.Fprintf(w, "%s\t%s\n", renamed.ID, renamed.Name)
+	})
 }
 
 // confirmKeyRevoke says what stops working and makes the administrator type
 // the key back. A revoked key cannot be printed again or restored, so the
 // prompt points at rotation, which replaces a key with no outage.
 func confirmKeyRevoke(k store.KeySummary) error {
-	named, noun := k.Alias, "alias"
+	named, noun := k.Name, "name"
 	if named == "" {
 		named, noun = k.ID, "id"
 	}
@@ -231,10 +260,10 @@ func confirmKeyRevoke(k store.KeySummary) error {
 	}, noun, named, "nothing was revoked")
 }
 
-// rotateKey replaces a key with one carrying the same team, owner, alias and
+// rotateKey replaces a key with one carrying the same project, owner, name and
 // guardrails, then revokes the old one. The control plane does it in one
 // transaction, so it never leaves both keys live or drops the key's limits.
-func rotateKey(ctx context.Context, c *client, orgID, who, newAlias, expires string,
+func rotateKey(ctx context.Context, c *client, orgID, who, newName, expires string,
 	asJSON bool,
 ) error {
 	old, err := findKey(ctx, c, orgID, who)
@@ -242,20 +271,15 @@ func rotateKey(ctx context.Context, c *client, orgID, who, newAlias, expires str
 		return err
 	}
 	if old.RevokedAt != nil {
-		fresh := "keera key create"
-		if old.TeamID != "" {
-			fresh += " --team " + old.TeamID
-		}
-		return fmt.Errorf("%s was already revoked on %s; there is nothing to rotate - "+
-			"issue a fresh key with: %s --alias %q",
-			old.ID, old.RevokedAt.Format(time.DateOnly), fresh, old.Alias)
+		return fmt.Errorf("%s was already revoked on %s; there is nothing to rotate - %s",
+			old.ID, old.RevokedAt.Format(time.DateOnly), freshKeyHint(ctx, c, old.ProjectID, old.Name))
 	}
 
 	var created struct {
 		createdKey
 		Replaced string `json:"replaced"`
 	}
-	req := map[string]string{"alias": newAlias, "expires_in": expires}
+	req := map[string]string{"name": newName, "expires_in": expires}
 	if err := c.do(ctx, "POST", "/v1/keys/"+url.PathEscape(old.ID)+"/rotate", req, &created); err != nil {
 		return err
 	}
@@ -266,7 +290,7 @@ func rotateKey(ctx context.Context, c *client, orgID, who, newAlias, expires str
 	// The secret alone on stdout, so `KEY=$(keera key rotate …)` captures it.
 	fmt.Println(created.Key)
 	fmt.Fprintf(os.Stderr, "\nkey %s replaces %s (%s). %s\n",
-		created.ID, old.ID, old.Alias, styleErr.warn("This is the only time it is shown."))
+		created.ID, old.ID, old.Name, styleErr.warn("This is the only time it is shown."))
 	if !old.Limits.IsZero() {
 		fmt.Fprintln(os.Stderr, "Its guardrails were copied from the key it replaces.")
 	}
@@ -275,10 +299,10 @@ func rotateKey(ctx context.Context, c *client, orgID, who, newAlias, expires str
 	return nil
 }
 
-// findKey resolves an id or an alias to a key.
+// findKey resolves an id or a name to a key.
 //
-// An alias only matches keys that still work, because rotation leaves the old
-// key revoked under the same alias. If several live keys share the alias, it
+// A name only matches keys that still work, because rotation leaves the old
+// key revoked under the same name. If several live keys share the name, it
 // refuses and lists their ids: acting on the wrong key breaks its clients.
 func findKey(ctx context.Context, c *client, orgID, who string) (store.KeySummary, error) {
 	keys, err := list[store.KeySummary](ctx, c, inOrg("/v1/keys", orgID))
@@ -286,35 +310,48 @@ func findKey(ctx context.Context, c *client, orgID, who string) (store.KeySummar
 		return store.KeySummary{}, err
 	}
 	want := strings.ToLower(strings.TrimSpace(who))
-	var aliased, retired []store.KeySummary
+	var named, retired []store.KeySummary
 	for _, k := range keys {
 		if k.ID == who {
 			return k, nil
 		}
-		if strings.ToLower(k.Alias) != want {
+		if strings.ToLower(k.Name) != want {
 			continue
 		}
 		if k.RevokedAt == nil {
-			aliased = append(aliased, k)
+			named = append(named, k)
 		} else {
 			retired = append(retired, k)
 		}
 	}
 	switch {
-	case len(aliased) == 1:
-		return aliased[0], nil
-	case len(aliased) > 1:
-		ids := make([]string, 0, len(aliased))
-		for _, k := range aliased {
+	case len(named) == 1:
+		return named[0], nil
+	case len(named) > 1:
+		ids := make([]string, 0, len(named))
+		for _, k := range named {
 			ids = append(ids, k.ID)
 		}
 		return store.KeySummary{}, fmt.Errorf(
-			"%d keys in %s use the alias %q; name one by its id: %s",
-			len(aliased), orgID, who, strings.Join(ids, ", "))
+			"%d keys in %s are called %q; name one by its id: %s",
+			len(named), orgID, who, strings.Join(ids, ", "))
 	case len(retired) > 0:
 		return store.KeySummary{}, fmt.Errorf(
-			"every key using the alias %q in %s is already revoked; issue a fresh one with: keera key create",
-			who, orgID)
+			"every key called %q in %s is already revoked; %s",
+			who, orgID, freshKeyHint(ctx, c, retired[0].ProjectID, retired[0].Name))
 	}
 	return store.KeySummary{}, fmt.Errorf("no key %s in %s (see: keera key list)", who, orgID)
+}
+
+// freshKeyHint says how to get a new key in place of a revoked one. Only an
+// administrator issues keys, so a member is sent to one.
+func freshKeyHint(ctx context.Context, c *client, projectID, name string) string {
+	if me, err := whoami(ctx, c); err == nil && me.Role == string(authn.RoleMember) {
+		return "ask an administrator for a new key in your name"
+	}
+	fresh := "keera key create"
+	if projectID != "" {
+		fresh += " --project " + projectID
+	}
+	return fmt.Sprintf("issue a fresh key with: %s --name %q", fresh, name)
 }

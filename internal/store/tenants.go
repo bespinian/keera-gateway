@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
+	keeraid "github.com/bespinian/keera-gateway/internal/id"
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
@@ -23,13 +25,19 @@ type Org struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-// Team is a team or department inside an org.
-type Team struct {
-	ID        string    `json:"id"`
-	OrgID     string    `json:"org_id"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"created_at"`
+// Project groups keys inside an org, so they share guardrails and show up
+// together in reports.
+type Project struct {
+	ID          string    `json:"id"`
+	OrgID       string    `json:"org_id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
 }
+
+// DefaultProjectName is what the project an organisation is created with is
+// called. It is an ordinary project, and its name can be changed.
+const DefaultProjectName = "default"
 
 // User is a person, identified either by Keera Gateway or by the customer's IdP.
 type User struct {
@@ -59,15 +67,15 @@ func scanUser(r row) (User, error) {
 // KeyInfo is an issued key without its secret.
 //
 // The secret is shown once and never stored, so screens, reports and audit
-// entries name the key by its alias. A rotation moves the alias to a new
-// secret on purpose.
+// entries name the key by its name. A rotation carries the name over to the
+// new key.
 type KeyInfo struct {
-	ID     string `json:"id"`
-	OrgID  string `json:"org_id"`
-	TeamID string `json:"team_id,omitempty"`
-	UserID string `json:"user_id,omitempty"`
-	Alias  string `json:"alias"`
-	Prefix string `json:"prefix"`
+	ID        string `json:"id"`
+	OrgID     string `json:"org_id"`
+	ProjectID string `json:"project_id,omitempty"`
+	UserID    string `json:"user_id,omitempty"`
+	Name      string `json:"name"`
+	Prefix    string `json:"prefix"`
 	// Kind is standard or subscription. Empty is stored as standard.
 	Kind      policy.KeyKind `json:"kind"`
 	CreatedAt time.Time      `json:"created_at"`
@@ -115,6 +123,12 @@ func (s *Store) CreateOrg(ctx context.Context, o Org, tmpl OrgTemplate) (Org, er
 		id, o.Name, domain,
 	).Scan(&o.CreatedAt); err != nil {
 		return o, orgConflict(err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO projects (id, org_id, name, description) VALUES ($1,$2,$3,$4)`,
+		keeraid.New("project"), id, DefaultProjectName,
+		"The default project of "+o.Name); err != nil {
+		return o, err
 	}
 	for _, m := range tmpl.Models {
 		m.OrgID = id
@@ -175,11 +189,11 @@ func (s *Store) UpdateOrg(ctx context.Context, orgID string, c OrgChange) (Org, 
 // DeletedOrg is what a deletion took with it. The counts are read in the same
 // transaction as the delete, so they describe what was actually removed.
 type DeletedOrg struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Teams int    `json:"teams"`
-	Users int    `json:"users"`
-	Keys  int    `json:"keys"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Projects int    `json:"projects"`
+	Users    int    `json:"users"`
+	Keys     int    `json:"keys"`
 	// LiveSandboxes is set only when the delete was refused for them.
 	LiveSandboxes int `json:"live_sandboxes,omitempty"`
 }
@@ -192,7 +206,7 @@ var ErrOrgHasSandboxes = errors.New("store: the organisation still has live sand
 // DeleteOrg removes an organisation and everything scoped to it.
 //
 // Everything else goes through the foreign keys. Guardrails and spend are
-// cleared first, while the team and key ids that name them still exist.
+// cleared first, while the project and key ids that name them still exist.
 //
 // Usage events and the audit log stay: finance invoices from them, and the
 // audit log must keep the record of this deletion.
@@ -205,11 +219,11 @@ func (s *Store) DeleteOrg(ctx context.Context, orgID string) (DeletedOrg, error)
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	err = tx.QueryRow(ctx, `SELECT o.name,
-			(SELECT count(*) FROM teams    WHERE org_id = o.id),
+			(SELECT count(*) FROM projects WHERE org_id = o.id),
 			(SELECT count(*) FROM users    WHERE org_id = o.id),
 			(SELECT count(*) FROM api_keys WHERE org_id = o.id)
 		FROM orgs o WHERE o.id = $1 FOR UPDATE`, orgID,
-	).Scan(&gone.Name, &gone.Teams, &gone.Users, &gone.Keys)
+	).Scan(&gone.Name, &gone.Projects, &gone.Users, &gone.Keys)
 	if err != nil {
 		return gone, notFound(err)
 	}
@@ -226,9 +240,9 @@ func (s *Store) DeleteOrg(ctx context.Context, orgID string) (DeletedOrg, error)
 	}
 
 	// An organisation spans three scopes, and each is named explicitly.
-	const scoped = `(scope_type = 'org'  AND scope_id = $1)
-		OR (scope_type = 'team' AND scope_id IN (SELECT id FROM teams    WHERE org_id = $1))
-		OR (scope_type = 'key'  AND scope_id IN (SELECT id FROM api_keys WHERE org_id = $1))`
+	const scoped = `(scope_type = 'org'     AND scope_id = $1)
+		OR (scope_type = 'project' AND scope_id IN (SELECT id FROM projects WHERE org_id = $1))
+		OR (scope_type = 'key'     AND scope_id IN (SELECT id FROM api_keys WHERE org_id = $1))`
 	if err := deleteScoped(ctx, tx, scoped, orgID); err != nil {
 		return gone, err
 	}
@@ -267,71 +281,92 @@ func scanOrg(r row) (Org, error) {
 	return o, err
 }
 
-// CreateTeam inserts a team.
-func (s *Store) CreateTeam(ctx context.Context, id, orgID, name string) (Team, error) {
-	t := Team{ID: id, OrgID: orgID, Name: name}
+// CreateProject inserts a project.
+func (s *Store) CreateProject(ctx context.Context, p Project) (Project, error) {
 	err := s.pool.QueryRow(ctx,
-		"INSERT INTO teams (id, org_id, name) VALUES ($1,$2,$3) RETURNING created_at",
-		id, orgID, name,
-	).Scan(&t.CreatedAt)
+		`INSERT INTO projects (id, org_id, name, description) VALUES ($1,$2,$3,$4)
+			RETURNING created_at`,
+		p.ID, p.OrgID, p.Name, p.Description,
+	).Scan(&p.CreatedAt)
 	if isUnique(err) {
-		return t, ErrTeamNameTaken
+		return p, ErrProjectNameTaken
 	}
-	return t, err
+	return p, err
 }
 
-// ErrTeamNameTaken means another team in the organisation already has the
-// name. The control plane turns it into a 409 with a readable message.
-var ErrTeamNameTaken = errors.New("store: a team of that name already exists in this organisation")
+// ErrProjectNameTaken means another project in the organisation already has
+// the name. The control plane turns it into a 409 with a readable message.
+var ErrProjectNameTaken = errors.New("store: a project of that name already exists in this organisation")
 
-// RenameTeam gives a team a different name. Everything else refers to a team
-// by id, so this changes one column. The old name is kept in the audit log.
-func (s *Store) RenameTeam(ctx context.Context, teamID, name string) (Team, error) {
-	var t Team
+// ProjectChange is what UpdateProject changes. A nil field is left as it is.
+type ProjectChange struct {
+	Name        *string
+	Description *string
+}
+
+// UpdateProject renames a project, changes its description, or both.
+// Everything else refers to a project by id, so the name is only a label.
+// The old one is kept in the audit log.
+func (s *Store) UpdateProject(ctx context.Context, projectID string, c ProjectChange) (Project, error) {
+	var p Project
 	err := s.pool.QueryRow(ctx,
-		`UPDATE teams SET name = $2 WHERE id = $1
-			RETURNING id, org_id, name, created_at`, teamID, name,
-	).Scan(&t.ID, &t.OrgID, &t.Name, &t.CreatedAt)
+		`UPDATE projects SET
+			name = COALESCE($2, name),
+			description = COALESCE($3, description)
+		WHERE id = $1
+		RETURNING id, org_id, name, description, created_at`,
+		projectID, c.Name, c.Description,
+	).Scan(&p.ID, &p.OrgID, &p.Name, &p.Description, &p.CreatedAt)
 	if isUnique(err) {
-		return t, ErrTeamNameTaken
+		return p, ErrProjectNameTaken
 	}
-	return t, notFound(err)
+	return p, notFound(err)
 }
 
-// TeamInUseError is a team that still has working keys. It lists their
-// aliases, so somebody can decide which to revoke before the team can go.
-type TeamInUseError struct {
-	Team    string
-	Aliases []string
+// ProjectInUseError is a project that still has working keys. It lists their
+// names, so somebody can decide which to revoke before the project can go.
+type ProjectInUseError struct {
+	Project string
+	Keys    []string
 }
 
-func (e *TeamInUseError) Error() string {
-	return fmt.Sprintf("store: team %q still has %d key(s) that have not been revoked",
-		e.Team, len(e.Aliases))
+func (e *ProjectInUseError) Error() string {
+	return fmt.Sprintf("store: project %q still has %d key(s) that have not been revoked",
+		e.Project, len(e.Keys))
 }
 
-// DeletedTeam is what a team deletion took with it, read inside the same
+// DeletedProject is what a project deletion took with it, read inside the same
 // transaction as the delete.
-type DeletedTeam struct {
+type DeletedProject struct {
 	ID    string `json:"id"`
 	OrgID string `json:"org_id"`
 	Name  string `json:"name"`
 	// DetachedKeys is how many revoked keys stayed behind, no longer naming any
-	// team. They are kept as history.
+	// project. They are kept as history.
 	DetachedKeys int `json:"detached_keys"`
 }
 
-// DeleteTeam removes a team that no live key uses.
+// FirstProject returns the id of an organisation's oldest project, where a
+// key or sandbox that names none goes. That is the one the organisation was
+// created with, until it is deleted. ErrNotFound means there is no project.
+func (s *Store) FirstProject(ctx context.Context, orgID string) (string, error) {
+	var id string
+	err := s.pool.QueryRow(ctx,
+		"SELECT id FROM projects WHERE org_id = $1 ORDER BY created_at, id LIMIT 1", orgID,
+	).Scan(&id)
+	return id, notFound(err)
+}
+
+// DeleteProject removes a project that no live key uses.
 //
-// The foreign key sets team_id to null, so a working key would quietly fall
-// back to the organisation's guardrails and escape the team's allow-list,
-// budget and rate limit. The check runs against the row locked FOR UPDATE, so
-// a key issued in between cannot slip through.
+// Deleting it with a working key would move that key to another project's
+// guardrails, budget and rate limit. The check runs against the row locked
+// FOR UPDATE, so a key issued in between cannot slip through.
 //
 // Revoked keys are detached, not deleted, because usage rows still name them.
 // Guardrails and spend have no foreign key, so they are cleared here.
-func (s *Store) DeleteTeam(ctx context.Context, teamID string) (DeletedTeam, error) {
-	var gone DeletedTeam
+func (s *Store) DeleteProject(ctx context.Context, projectID string) (DeletedProject, error) {
+	var gone DeletedProject
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return gone, err
@@ -339,15 +374,15 @@ func (s *Store) DeleteTeam(ctx context.Context, teamID string) (DeletedTeam, err
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	err = tx.QueryRow(ctx,
-		"SELECT org_id, name FROM teams WHERE id = $1 FOR UPDATE", teamID,
+		"SELECT org_id, name FROM projects WHERE id = $1 FOR UPDATE", projectID,
 	).Scan(&gone.OrgID, &gone.Name)
 	if err != nil {
 		return gone, notFound(err)
 	}
-	gone.ID = teamID
+	gone.ID = projectID
 
-	rows, err := tx.Query(ctx, `SELECT alias FROM api_keys
-		WHERE team_id = $1 AND revoked_at IS NULL ORDER BY alias`, teamID)
+	rows, err := tx.Query(ctx, `SELECT name FROM api_keys
+		WHERE project_id = $1 AND revoked_at IS NULL ORDER BY name`, projectID)
 	if err != nil {
 		return gone, err
 	}
@@ -356,19 +391,19 @@ func (s *Store) DeleteTeam(ctx context.Context, teamID string) (DeletedTeam, err
 		return gone, err
 	}
 	if len(live) > 0 {
-		return gone, &TeamInUseError{Team: gone.Name, Aliases: live}
+		return gone, &ProjectInUseError{Project: gone.Name, Keys: live}
 	}
 
-	if err := deleteScoped(ctx, tx, "scope_type = 'team' AND scope_id = $1", teamID); err != nil {
+	if err := deleteScoped(ctx, tx, "scope_type = 'project' AND scope_id = $1", projectID); err != nil {
 		return gone, err
 	}
 	// The foreign key would detach them too; this is here for the count.
-	tag, err := tx.Exec(ctx, "UPDATE api_keys SET team_id = NULL WHERE team_id = $1", teamID)
+	tag, err := tx.Exec(ctx, "UPDATE api_keys SET project_id = NULL WHERE project_id = $1", projectID)
 	if err != nil {
 		return gone, err
 	}
 	gone.DetachedKeys = int(tag.RowsAffected())
-	if _, err := tx.Exec(ctx, "DELETE FROM teams WHERE id = $1", teamID); err != nil {
+	if _, err := tx.Exec(ctx, "DELETE FROM projects WHERE id = $1", projectID); err != nil {
 		return gone, err
 	}
 	return gone, tx.Commit(ctx)
@@ -400,7 +435,7 @@ func (s *Store) AddUser(ctx context.Context, newID, orgID, email, externalID, ro
 }
 
 // ListUsers returns the users of one org. An empty orgID means every
-// organisation, as for teams.
+// organisation, as for projects.
 func (s *Store) ListUsers(ctx context.Context, orgID string) ([]User, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+userColumns+`
 		FROM users WHERE ($1 = '' OR org_id = $1) ORDER BY email`, orgID)
@@ -459,16 +494,27 @@ func (s *Store) CreateKey(ctx context.Context, k KeyInfo, hash []byte) (KeyInfo,
 	return insertKey(ctx, s.pool, k, hash)
 }
 
+// ErrNoProject refuses a key in an organisation that has no projects.
+var ErrNoProject = errors.New("store: the organisation has no projects, and every key is in one")
+
+// insertKey puts a key without a project into its organisation's oldest one.
 func insertKey(ctx context.Context, db querier, k KeyInfo, hash []byte) (KeyInfo, error) {
 	if k.Kind == "" {
 		k.Kind = policy.KeyStandard
 	}
 	err := db.QueryRow(ctx, `INSERT INTO api_keys
-		(id, org_id, team_id, user_id, alias, key_hash, prefix, kind, expires_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING created_at`,
-		k.ID, k.OrgID, nullable(k.TeamID), nullable(k.UserID), k.Alias, hash, k.Prefix,
+		(id, org_id, project_id, user_id, name, key_hash, prefix, kind, expires_at)
+		VALUES ($1, $2,
+			COALESCE($3, (SELECT id FROM projects WHERE org_id = $2 ORDER BY created_at, id LIMIT 1)),
+			$4, $5, $6, $7, $8, $9)
+		RETURNING project_id, created_at`,
+		k.ID, k.OrgID, nullable(k.ProjectID), nullable(k.UserID), k.Name, hash, k.Prefix,
 		string(k.Kind), k.ExpiresAt,
-	).Scan(&k.CreatedAt)
+	).Scan(&k.ProjectID, &k.CreatedAt)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.ConstraintName == "api_keys_project_check" {
+		return k, ErrNoProject
+	}
 	return k, err
 }
 
@@ -479,13 +525,22 @@ func (s *Store) RevokeKey(ctx context.Context, id string) error {
 		"UPDATE api_keys SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL", id)
 }
 
+// RenameKey changes what a key is called and returns the name it had. Revoked
+// keys can be renamed too: their name still heads their usage history.
+func (s *Store) RenameKey(ctx context.Context, id, name string) (old string, err error) {
+	err = s.pool.QueryRow(ctx, `UPDATE api_keys k SET name = $2
+		FROM api_keys was WHERE k.id = $1 AND was.id = k.id
+		RETURNING was.name`, id, name).Scan(&old)
+	return old, notFound(err)
+}
+
 // ErrKeyRevoked is a key that was already revoked, so there is nothing to
 // rotate.
 var ErrKeyRevoked = errors.New("store: the key was already revoked")
 
 // RotateKey replaces the key oldID with next, in one transaction: next gets
-// the old key's organisation, team, person, kind and own guardrails, and the old key
-// is revoked. An empty next.Alias keeps the old alias. A nil next.ExpiresAt
+// the old key's organisation, project, person, kind and own guardrails, and the old key
+// is revoked. An empty next.Name keeps the old name. A nil next.ExpiresAt
 // gives the new key the old key's lifetime, counted from now.
 //
 // Doing it in steps can leave both keys live, or a new key without the old
@@ -498,9 +553,9 @@ func (s *Store) RotateKey(ctx context.Context, oldID string, next KeyInfo, hash 
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var old KeyInfo
-	err = tx.QueryRow(ctx, `SELECT org_id, COALESCE(team_id,''), COALESCE(user_id,''), alias,
+	err = tx.QueryRow(ctx, `SELECT org_id, COALESCE(project_id,''), COALESCE(user_id,''), name,
 		kind, created_at, expires_at, revoked_at FROM api_keys WHERE id = $1 FOR UPDATE`, oldID,
-	).Scan(&old.OrgID, &old.TeamID, &old.UserID, &old.Alias, &old.Kind, &old.CreatedAt,
+	).Scan(&old.OrgID, &old.ProjectID, &old.UserID, &old.Name, &old.Kind, &old.CreatedAt,
 		&old.ExpiresAt, &old.RevokedAt)
 	if err != nil {
 		return KeyInfo{}, notFound(err)
@@ -508,9 +563,9 @@ func (s *Store) RotateKey(ctx context.Context, oldID string, next KeyInfo, hash 
 	if old.RevokedAt != nil {
 		return KeyInfo{}, ErrKeyRevoked
 	}
-	next.OrgID, next.TeamID, next.UserID, next.Kind = old.OrgID, old.TeamID, old.UserID, old.Kind
-	if next.Alias == "" {
-		next.Alias = old.Alias
+	next.OrgID, next.ProjectID, next.UserID, next.Kind = old.OrgID, old.ProjectID, old.UserID, old.Kind
+	if next.Name == "" {
+		next.Name = old.Name
 	}
 	// The lifetime, not the date: a key rotated a week before it lapses should
 	// not be replaced by one that lapses in a week.
@@ -548,9 +603,9 @@ func (s *Store) LookupKeyByID(ctx context.Context, id string) (*policy.Resolved,
 // lookupKey finds the key that where matches. where is a constant, never
 // input.
 func (s *Store) lookupKey(ctx context.Context, where string, arg any) (*policy.Resolved, error) {
-	// The team join also requires the team to be in the key's own org. The
+	// The project join also requires the project to be in the key's own org. The
 	// control plane already refuses anything else; this is a second check, so a
-	// bad row gives a key with no team rather than another tenant's guardrails.
+	// bad row gives a key with no project rather than another tenant's guardrails.
 	// A disabled holder counts as a revoked key, which is also a second check:
 	// disabling somebody revokes their keys.
 	rows, err := s.pool.Query(ctx, `
@@ -558,11 +613,11 @@ func (s *Store) lookupKey(ctx context.Context, where string, arg any) (*policy.R
 		       k.expires_at, COALESCE(k.revoked_at, u.disabled_at), p.scope_type, `+limitColumns+`
 		FROM api_keys k
 		LEFT JOIN users u ON u.id = k.user_id
-		LEFT JOIN teams t ON t.id = k.team_id AND t.org_id = k.org_id
+		LEFT JOIN projects t ON t.id = k.project_id AND t.org_id = k.org_id
 		LEFT JOIN guardrails p ON
-			(p.scope_type = 'org'  AND p.scope_id = k.org_id) OR
-			(p.scope_type = 'team' AND p.scope_id = t.id) OR
-			(p.scope_type = 'key'  AND p.scope_id = k.id)
+			(p.scope_type = 'org'     AND p.scope_id = k.org_id) OR
+			(p.scope_type = 'project' AND p.scope_id = t.id) OR
+			(p.scope_type = 'key'     AND p.scope_id = k.id)
 		WHERE `+where, arg)
 	if err != nil {
 		return nil, err
@@ -570,10 +625,10 @@ func (s *Store) lookupKey(ctx context.Context, where string, arg any) (*policy.R
 	defer rows.Close()
 
 	var (
-		key               policy.Key
-		expires, revoked  *time.Time
-		orgL, teamL, ownL *policy.Limits
-		found             bool
+		key                  policy.Key
+		expires, revoked     *time.Time
+		orgL, projectL, ownL *policy.Limits
+		found                bool
 	)
 	for rows.Next() {
 		var (
@@ -581,7 +636,7 @@ func (s *Store) lookupKey(ctx context.Context, where string, arg any) (*policy.R
 			lim       policy.Limits
 			period    *string
 		)
-		dest := append([]any{&key.ID, &key.OrgID, &key.TeamID, &key.UserID, &key.Kind,
+		dest := append([]any{&key.ID, &key.OrgID, &key.ProjectID, &key.UserID, &key.Kind,
 			&expires, &revoked, &scopeType}, limitTargets(&lim, &period)...)
 		if err := rows.Scan(dest...); err != nil {
 			return nil, err
@@ -594,8 +649,8 @@ func (s *Store) lookupKey(ctx context.Context, where string, arg any) (*policy.R
 		switch policy.ScopeType(*scopeType) {
 		case policy.ScopeOrg:
 			orgL = &lim
-		case policy.ScopeTeam:
-			teamL = &lim
+		case policy.ScopeProject:
+			projectL = &lim
 		case policy.ScopeKey:
 			ownL = &lim
 		}
@@ -611,5 +666,5 @@ func (s *Store) lookupKey(ctx context.Context, where string, arg any) (*policy.R
 	case expires != nil && expires.Before(time.Now()):
 		return nil, policy.ErrKeyExpired
 	}
-	return policy.Resolve(key, orgL, teamL, ownL), nil
+	return policy.Resolve(key, orgL, projectL, ownL), nil
 }

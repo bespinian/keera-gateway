@@ -2,7 +2,7 @@
 //
 // A fresh deployment has nothing in it, and every screen that needs an
 // organisation points at a switcher that is not rendered until one exists.
-// This is the way out: the four things that have to happen, in order, each
+// This is the way out: the three things that have to happen, in order, each
 // with the button that does it, each ticking itself off from what the control
 // plane already has.
 //
@@ -53,28 +53,18 @@ export function firstRun(ctx, setup) {
       by: "An administrator",
     },
     {
-      title: "Create a team and set its guardrails",
-      done: setup.teams > 0,
-      body:
-        "Usually one per department, so budgets and reports match how the " +
-        "organisation works. Its guardrails apply to every key in it.",
-      action:
-        setup.orgs > 0 && admin
-          ? { label: "Go to Teams", run: () => ctx.navigate("/teams") }
-          : null,
-      skipped: !admin,
-      by: "An administrator",
-    },
-    {
       title: "Issue a key and connect a client",
       done: setup.keys > 0,
       body:
-        "Usage and limits are tracked per key. The panel gives you a ready " +
+        "Usage and limits are tracked per key. A key goes in the default " +
+        "project unless you pick another. The panel gives you a ready " +
         "editor configuration with it.",
       action:
-        setup.orgs > 0
+        setup.orgs > 0 && admin
           ? { label: "Go to API keys", run: () => ctx.navigate("/keys") }
           : null,
+      skipped: !admin,
+      by: "An administrator",
     },
   ];
 
@@ -149,7 +139,7 @@ export function firstRun(ctx, setup) {
       "Also on the command line: ",
       h("code", {}, "keera org create"),
       ", ",
-      h("code", {}, "keera team create"),
+      h("code", {}, "keera project create"),
       ", ",
       h("code", {}, "keera key create"),
       ".",

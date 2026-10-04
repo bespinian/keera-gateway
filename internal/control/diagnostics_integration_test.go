@@ -21,7 +21,7 @@ import (
 // These skip without KEERA_TEST_DATABASE_URL, as the rest of this package's
 // integration tests do; `make test-integration` provides one.
 
-// diagnosed brings up a deployment with one organisation, one team, one key
+// diagnosed brings up a deployment with one organisation, one project, one key
 // and a broken filter in it, and returns the server.
 func diagnosed(t *testing.T) (*Server, *store.Store) {
 	t.Helper()
@@ -33,11 +33,11 @@ func diagnosed(t *testing.T) (*Server, *store.Store) {
 	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_a", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
-	if _, err := st.CreateTeam(ctx, "team_a", "org_a", "Payments"); err != nil {
-		t.Fatalf("CreateTeam: %v", err)
+	if _, err := st.CreateProject(ctx, store.Project{ID: "project_a", OrgID: "org_a", Name: "Payments"}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
 	}
 	if _, err := st.CreateKey(ctx, store.KeyInfo{
-		ID: "key_a", OrgID: "org_a", TeamID: "team_a", Alias: "a laptop", Prefix: "sk-a",
+		ID: "key_a", OrgID: "org_a", ProjectID: "project_a", Name: "a laptop", Prefix: "sk-a",
 	}, []byte("hash-of-key_a")); err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestEffectiveGuardrailsCollapseTheChain(t *testing.T) {
 	srv, st := diagnosed(t)
 	ctx := t.Context()
 
-	rpm, teamRPM := 600, 120
+	rpm, projectRPM := 600, 120
 	budget := int64(500_000_000)
 	month := policy.PeriodMonth
 	if err := st.PutPolicy(ctx, policy.ScopeOrg, "org_a", policy.Limits{
@@ -198,10 +198,10 @@ func TestEffectiveGuardrailsCollapseTheChain(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("PutPolicy org: %v", err)
 	}
-	if err := st.PutPolicy(ctx, policy.ScopeTeam, "team_a", policy.Limits{
-		RPM: &teamRPM, AllowedModels: []string{"keera-speed"},
+	if err := st.PutPolicy(ctx, policy.ScopeProject, "project_a", policy.Limits{
+		RPM: &projectRPM, AllowedModels: []string{"keera-speed"},
 	}); err != nil {
-		t.Fatalf("PutPolicy team: %v", err)
+		t.Fatalf("PutPolicy project: %v", err)
 	}
 
 	w := httptest.NewRecorder()
@@ -218,28 +218,28 @@ func TestEffectiveGuardrailsCollapseTheChain(t *testing.T) {
 		t.Fatalf("decoding: %v", err)
 	}
 
-	// The allow-list intersects, so the team's narrower one wins.
+	// The allow-list intersects, so the project's narrower one wins.
 	if len(eff.AllowedModels) != 1 || eff.AllowedModels[0] != "keera-speed" {
 		t.Errorf("allowed models = %v, want the intersection", eff.AllowedModels)
 	}
 	// Every level is reported, because which level set a number is the thing
 	// somebody needs in order to change the right one.
 	if len(eff.Levels) != 3 {
-		t.Fatalf("levels = %d, want org, team and key", len(eff.Levels))
+		t.Fatalf("levels = %d, want org, project and key", len(eff.Levels))
 	}
 	if eff.Levels[0].Name != "Example Bank" || eff.Levels[1].Name != "Payments" {
 		t.Errorf("levels = %+v, want them named", eff.Levels)
 	}
 	// Rate limits are enforced per level rather than merged, so both are here
-	// and the tightest is the team's.
+	// and the tightest is the project's.
 	var tightest int
 	for _, s := range eff.Scopes {
 		if s.RPM > 0 && (tightest == 0 || s.RPM < tightest) {
 			tightest = s.RPM
 		}
 	}
-	if tightest != teamRPM {
-		t.Errorf("tightest rpm = %d, want the team's %d", tightest, teamRPM)
+	if tightest != projectRPM {
+		t.Errorf("tightest rpm = %d, want the project's %d", tightest, projectRPM)
 	}
 	// Budgets do not merge either: the organisation's is the one that holds,
 	// and it is reported against the organisation and not against the key.
@@ -254,16 +254,16 @@ func TestEffectiveGuardrailsCollapseTheChain(t *testing.T) {
 	}
 }
 
-func TestEffectiveGuardrailsOnATeamStopAtTheTeam(t *testing.T) {
-	// Asking about a team is asking what holds every key in it, and a key that
+func TestEffectiveGuardrailsOnAProjectStopAtTheProject(t *testing.T) {
+	// Asking about a project is asking what holds every key in it, and a key that
 	// does not exist yet holds nothing - so there is no trailing level with no
 	// id in the answer.
 	srv, _ := diagnosed(t)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet,
-		httpx.ControlPrefix+"/v1/guardrails/team/team_a/effective", nil).WithContext(t.Context())
-	r.SetPathValue("scope", "team")
-	r.SetPathValue("id", "team_a")
+		httpx.ControlPrefix+"/v1/guardrails/project/project_a/effective", nil).WithContext(t.Context())
+	r.SetPathValue("scope", "project")
+	r.SetPathValue("id", "project_a")
 	srv.effectiveGuardrails(w, r, operator())
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body)
@@ -273,11 +273,26 @@ func TestEffectiveGuardrailsOnATeamStopAtTheTeam(t *testing.T) {
 		t.Fatalf("decoding: %v", err)
 	}
 	if len(eff.Levels) != 2 {
-		t.Errorf("levels = %d, want the organisation and the team", len(eff.Levels))
+		t.Errorf("levels = %d, want the organisation and the project", len(eff.Levels))
 	}
 	for _, s := range eff.Scopes {
 		if s.Type == policy.ScopeKey {
-			t.Error("a team's effective guardrails named a key scope")
+			t.Error("a project's effective guardrails named a key scope")
 		}
+	}
+}
+
+// A scope that does not exist is missing for an operator too, the same as on
+// its effective view, rather than an empty guardrail.
+func TestAGuardrailOfAScopeThatDoesNotExistIsMissing(t *testing.T) {
+	srv, _ := diagnosed(t)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet,
+		httpx.ControlPrefix+"/v1/guardrails/project/project_gone", nil).WithContext(t.Context())
+	r.SetPathValue("scope", "project")
+	r.SetPathValue("id", "project_gone")
+	srv.getGuardrails(w, r, operator())
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404: %s", w.Code, w.Body)
 	}
 }

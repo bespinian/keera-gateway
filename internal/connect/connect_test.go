@@ -26,9 +26,12 @@ func TestTitleIsTheLabelAModelPickerShows(t *testing.T) {
 
 // A trailing slash on the base URL is what a person correcting the field in the
 // panel leaves behind, and it would otherwise reach a config as "…//v1".
+// one is the single model most tests render with.
+var one = []Model{{Alias: "keera-code"}}
+
 func TestRenderTrimsATrailingSlashFromTheBase(t *testing.T) {
 	c, _ := Find(Clients(), "openai")
-	got := c.Render("https://keera.example.ch///", "keera-code", 0)
+	got := c.Render("https://keera.example.ch///", one)
 	if !strings.Contains(got, "export OPENAI_BASE_URL=https://keera.example.ch/v1") {
 		t.Errorf("base URL not normalised:\n%s", got)
 	}
@@ -37,11 +40,14 @@ func TestRenderTrimsATrailingSlashFromTheBase(t *testing.T) {
 // Every template has to be fully substituted by Render: a placeholder that
 // survives is a configuration a developer copies and has to edit, which is the
 // one thing this package exists to prevent.
+// two is a key that may call a model and a router.
+var two = []Model{{Alias: "keera-code", MaxContext: 32_768}, {Alias: "auto"}}
+
 func TestNoTemplateLeavesAPlaceholderBehind(t *testing.T) {
 	for _, c := range Clients() {
 		for _, text := range map[string]string{
-			"config": c.Render("https://keera.example.ch", "keera-code", 0),
-			"run":    c.RunText("keera-code"),
+			"config": c.Render("https://keera.example.ch", two),
+			"run":    c.RunText(two),
 			"note":   c.NoteText(),
 		} {
 			if strings.Contains(text, "{{") {
@@ -70,12 +76,14 @@ func TestEveryClientIsCompleteEnoughToRender(t *testing.T) {
 		if c.Lang != "json" && c.Lang != "sh" {
 			t.Errorf("%s has lang %q, which no renderer highlights", c.Key, c.Lang)
 		}
-		// Every block has to name the gateway and the model. One that named
-		// neither would be a block that works for nobody in particular.
-		for _, want := range []string{"{{base}}", "{{alias}}"} {
-			if !strings.Contains(c.Template, want) {
-				t.Errorf("%s's template never uses %s", c.Key, want)
-			}
+		// Every block has to name the gateway and the key's models. One that
+		// named neither would be a block that works for nobody in particular.
+		if !strings.Contains(c.Template, "{{base}}") {
+			t.Errorf("%s's template never uses {{base}}", c.Key)
+		}
+		lists := strings.Contains(c.Template, "{{models}}") && c.Entry != ""
+		if !lists && !strings.Contains(c.Template, "{{aliases}}") {
+			t.Errorf("%s's template names neither {{models}} nor {{aliases}}", c.Key)
 		}
 	}
 	// The OpenAI-compatible entry is the one that answers for a client nobody
@@ -92,7 +100,7 @@ func TestJSONTemplatesRenderToValidJSON(t *testing.T) {
 		if c.Lang != "json" {
 			continue
 		}
-		rendered := c.Render("https://keera.example.ch", "keera-code", 0)
+		rendered := c.Render("https://keera.example.ch", two)
 		var doc map[string]any
 		if err := json.Unmarshal([]byte(rendered), &doc); err != nil {
 			t.Errorf("%s does not render valid JSON: %v\n%s", c.Key, err, rendered)
@@ -105,7 +113,7 @@ func TestJSONTemplatesRenderToValidJSON(t *testing.T) {
 // finds the place to put it by matching these spellings.
 func TestConfigsReadTheKeyFromTheEnvironment(t *testing.T) {
 	for _, c := range Clients() {
-		rendered := c.Render("https://keera.example.ch", "keera-code", 0)
+		rendered := c.Render("https://keera.example.ch", one)
 		if !strings.Contains(rendered, "KEERA_API_KEY") {
 			t.Errorf("%s's config never mentions KEERA_API_KEY:\n%s", c.Key, rendered)
 		}
@@ -138,7 +146,7 @@ func TestAFileClientNamesItsFile(t *testing.T) {
 // /v1/v1/messages.
 func TestClaudeCodeTakesTheGatewayRoot(t *testing.T) {
 	c, _ := Find(Clients(), "claude-code")
-	rendered := c.Render("https://keera.example.ch", "keera-code", 0)
+	rendered := c.Render("https://keera.example.ch", one)
 	if !strings.Contains(rendered, "export ANTHROPIC_BASE_URL=https://keera.example.ch\n") {
 		t.Errorf("the base URL is not the gateway root:\n%s", rendered)
 	}
@@ -151,6 +159,7 @@ func TestClaudeCodeTakesTheGatewayRoot(t *testing.T) {
 func TestFileClientsStateTheSameWindow(t *testing.T) {
 	const maxContext = 200_000
 	window, output := Limits(maxContext)
+	models := []Model{{Alias: "keera-code", MaxContext: maxContext}}
 
 	opencode, _ := Find(Clients(), "opencode")
 	var oc struct {
@@ -165,7 +174,7 @@ func TestFileClientsStateTheSameWindow(t *testing.T) {
 			} `json:"keera"`
 		} `json:"provider"`
 	}
-	if err := json.Unmarshal([]byte(opencode.Render("https://keera.example.ch", "keera-code", maxContext)), &oc); err != nil {
+	if err := json.Unmarshal([]byte(opencode.Render("https://keera.example.ch", models)), &oc); err != nil {
 		t.Fatalf("opencode: %v", err)
 	}
 	model, found := oc.Provider.Keera.Models["keera-code"]
@@ -190,7 +199,7 @@ func TestFileClientsStateTheSameWindow(t *testing.T) {
 			} `json:"keera"`
 		} `json:"providers"`
 	}
-	if err := json.Unmarshal([]byte(pi.Render("https://keera.example.ch", "keera-code", maxContext)), &p); err != nil {
+	if err := json.Unmarshal([]byte(pi.Render("https://keera.example.ch", models)), &p); err != nil {
 		t.Fatalf("pi: %v", err)
 	}
 	if len(p.Providers.Keera.Models) != 1 {
@@ -218,11 +227,52 @@ func TestFileClientsStateTheSameWindow(t *testing.T) {
 	}
 }
 
+// A key's every model is in the config, the first as the default, so the
+// developer can switch between them without editing it.
+func TestEveryModelOfTheKeyIsConfigured(t *testing.T) {
+	for _, c := range Clients() {
+		rendered := c.Render("https://keera.example.ch", two)
+		for _, want := range []string{"keera-code", "auto"} {
+			if !strings.Contains(rendered, want) {
+				t.Errorf("%s's config does not name %s:\n%s", c.Key, want, rendered)
+			}
+		}
+	}
+
+	pi, _ := Find(Clients(), "pi")
+	var p struct {
+		Providers struct {
+			Keera struct {
+				Models []struct {
+					ID            string `json:"id"`
+					ContextWindow int    `json:"contextWindow"`
+				} `json:"models"`
+			} `json:"keera"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal([]byte(pi.Render("https://keera.example.ch", two)), &p); err != nil {
+		t.Fatalf("pi: %v", err)
+	}
+	got := p.Providers.Keera.Models
+	if len(got) != 2 || got[0].ID != "keera-code" || got[1].ID != "auto" {
+		t.Fatalf("pi models = %+v, want keera-code then auto", got)
+	}
+	// Each model gets its own window: a router has none, so it gets the default.
+	if got[0].ContextWindow != 32_768 || got[1].ContextWindow != DefaultContext {
+		t.Errorf("pi windows = %d, %d", got[0].ContextWindow, got[1].ContextWindow)
+	}
+
+	cc, _ := Find(Clients(), "claude-code")
+	if !strings.Contains(cc.Render("https://keera.example.ch", two), "export ANTHROPIC_MODEL=keera-code\n") {
+		t.Error("claude code does not start with the first model")
+	}
+}
+
 // Only the client whose schema demands one is given an answer length. The
 // others state the window and leave the length to their own defaults.
 func TestOnlyOpenCodeStatesAnAnswerLength(t *testing.T) {
 	for _, c := range Clients() {
-		rendered := c.Render("https://keera.example.ch", "keera-code", 200_000)
+		rendered := c.Render("https://keera.example.ch", []Model{{Alias: "keera-code", MaxContext: 200_000}})
 		stated := strings.Contains(rendered, "maxTokens") ||
 			strings.Contains(rendered, "MAX_OUTPUT_TOKENS") ||
 			strings.Contains(rendered, `"output"`)
@@ -261,7 +311,7 @@ func TestLimitsFollowTheModelsWindow(t *testing.T) {
 // it works is the failure this package exists to prevent.
 func TestNoClientPinsATemperature(t *testing.T) {
 	for _, c := range Clients() {
-		if strings.Contains(c.Render("https://keera.example.ch", "keera-code", 0), "temperature") {
+		if strings.Contains(c.Render("https://keera.example.ch", one), "temperature") {
 			t.Errorf("%s's config sets a temperature", c.Key)
 		}
 	}

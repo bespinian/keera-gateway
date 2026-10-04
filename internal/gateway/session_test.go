@@ -64,7 +64,7 @@ func TestOneTasksCallsShareASessionKey(t *testing.T) {
 
 	// A different task, and the same task from somebody else's key, are both
 	// different sessions. The second matters: a session is read next to whose
-	// team and whose person it belonged to, so one key's session must never be
+	// project and whose person it belonged to, so one key's session must never be
 	// joinable by another.
 	other := strings.Replace(first, "rename Widget to Gadget", "add a health endpoint", 1)
 	if keyFor(t, "key_1", other, policy.KindChat) == opening {

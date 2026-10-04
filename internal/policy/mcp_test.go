@@ -7,10 +7,10 @@ import (
 
 func TestToolAllowListsNarrowToTheNarrowerEntry(t *testing.T) {
 	org := &Limits{AllowedTools: []string{"github", "jira/search"}}
-	team := &Limits{AllowedTools: []string{"github/search_code", "jira", "slack"}}
-	r := Resolve(Key{ID: "k", OrgID: "o", TeamID: "t"}, org, team, nil)
+	project := &Limits{AllowedTools: []string{"github/search_code", "jira", "slack"}}
+	r := Resolve(Key{ID: "k", OrgID: "o", ProjectID: "t"}, org, project, nil)
 
-	// The organisation allows all of github and one jira tool; the team allows
+	// The organisation allows all of github and one jira tool; the project allows
 	// one github tool and all of jira. What both allow is one tool of each, and
 	// slack, which the organisation never allowed, is not in it.
 	want := []string{"github/search_code", "jira/search"}
@@ -44,10 +44,10 @@ func TestNoToolAllowListAllowsEverything(t *testing.T) {
 
 func TestBlockingHostedToolsCannotBeUndoneBelow(t *testing.T) {
 	yes, no := true, false
-	r := Resolve(Key{ID: "k", OrgID: "o", TeamID: "t"},
+	r := Resolve(Key{ID: "k", OrgID: "o", ProjectID: "t"},
 		&Limits{BlockHostedTools: &yes}, &Limits{BlockHostedTools: &no}, nil)
 	if !r.BlockHostedTools {
-		t.Error("a team switched hosted tools back on under its organisation")
+		t.Error("a project switched hosted tools back on under its organisation")
 	}
 }
 

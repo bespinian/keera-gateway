@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/bespinian/keera-gateway/internal/config"
 	"github.com/bespinian/keera-gateway/internal/control"
 	"github.com/bespinian/keera-gateway/internal/gateway"
 	"github.com/bespinian/keera-gateway/internal/ratelimit"
@@ -31,7 +32,7 @@ func TestRoutesSendEachPathToTheRightPlane(t *testing.T) {
 	}{
 		// The panel routes in the browser, so its paths return the shell.
 		{"the panel is at the root", http.MethodGet, "/", http.StatusOK},
-		{"a panel route is the shell too", http.MethodGet, "/teams", http.StatusOK},
+		{"a panel route is the shell too", http.MethodGet, "/projects", http.StatusOK},
 
 		// The probes stay at the root.
 		{"liveness", http.MethodGet, "/healthz", http.StatusOK},
@@ -64,5 +65,16 @@ func TestRoutesSendEachPathToTheRightPlane(t *testing.T) {
 				t.Errorf("%s %s = %d, want %d", tt.method, tt.path, w.Code, tt.want)
 			}
 		})
+	}
+}
+
+// A refusal must not send the developer to a panel this deployment does not
+// serve.
+func TestPanelURLNeedsThePanel(t *testing.T) {
+	if got := panelURL(config.Config{UI: true, PublicURL: "https://keera.example"}); got != "https://keera.example" {
+		t.Errorf("with the panel: %q", got)
+	}
+	if got := panelURL(config.Config{UI: false, PublicURL: "https://keera.example"}); got != "" {
+		t.Errorf("without the panel: %q, want none", got)
 	}
 }

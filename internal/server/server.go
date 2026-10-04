@@ -28,7 +28,7 @@ One listener serves all of it, told apart by path rather than by port:
   /control/...  the control API
   /sandbox/...  attaching to a sandbox
 
-Administration - organisations, teams, keys, guardrails, usage - is the 'keera'
+Administration - organisations, projects, keys, guardrails, usage - is the 'keera'
 command, which talks to the control API over HTTP.
 
 The server reads its configuration from the environment. Three settings are

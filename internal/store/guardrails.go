@@ -90,7 +90,7 @@ func (s *Store) PutPolicy(ctx context.Context, scopeType policy.ScopeType, scope
 type GuardrailRef struct {
 	ScopeType policy.ScopeType `json:"scope_type"`
 	ScopeID   string           `json:"scope_id"`
-	// Name is what that scope is called, so a refusal can name the team rather
+	// Name is what that scope is called, so a refusal can name the project rather
 	// than show an id.
 	Name string `json:"name"`
 }
@@ -100,11 +100,11 @@ type GuardrailRef struct {
 // this package.
 func (s *Store) scopesNaming(ctx context.Context, match, orgID, alias string) ([]GuardrailRef, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT p.scope_type, p.scope_id, COALESCE(o.name, t.name, k.alias, p.scope_id)
+		SELECT p.scope_type, p.scope_id, COALESCE(o.name, t.name, k.name, p.scope_id)
 		FROM guardrails p
-		LEFT JOIN orgs     o ON p.scope_type = 'org'  AND o.id = p.scope_id AND o.id = $1
-		LEFT JOIN teams    t ON p.scope_type = 'team' AND t.id = p.scope_id AND t.org_id = $1
-		LEFT JOIN api_keys k ON p.scope_type = 'key'  AND k.id = p.scope_id AND k.org_id = $1
+		LEFT JOIN orgs     o ON p.scope_type = 'org'     AND o.id = p.scope_id AND o.id = $1
+		LEFT JOIN projects t ON p.scope_type = 'project' AND t.id = p.scope_id AND t.org_id = $1
+		LEFT JOIN api_keys k ON p.scope_type = 'key'     AND k.id = p.scope_id AND k.org_id = $1
 		WHERE `+match+`
 		  AND (o.id IS NOT NULL OR t.id IS NOT NULL OR k.id IS NOT NULL)
 		ORDER BY p.scope_type, p.scope_id`, orgID, alias)
@@ -209,7 +209,7 @@ func (s *Store) DeleteFilter(ctx context.Context, orgID, alias string) error {
 // FilterUsers lists the guardrails inside one organisation that name a filter.
 //
 // It is read before a deletion. A guardrail that names a missing filter
-// refuses every request, so removing a filter in use would break a team.
+// refuses every request, so removing a filter in use would break a project.
 func (s *Store) FilterUsers(ctx context.Context, orgID, alias string) ([]GuardrailRef, error) {
 	return s.scopesNaming(ctx, "$2 = ANY (p.filters)", orgID, alias)
 }

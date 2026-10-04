@@ -180,10 +180,10 @@ func (s *Server) Handler() http.Handler {
 	route("PATCH /v1/orgs/{id}", s.updateOrg)
 	route("DELETE /v1/orgs/{id}", s.deleteOrg)
 
-	route("POST /v1/teams", s.createTeam)
-	route("GET /v1/teams", s.listTeams)
-	route("PATCH /v1/teams/{id}", s.updateTeam)
-	route("DELETE /v1/teams/{id}", s.deleteTeam)
+	route("POST /v1/projects", s.createProject)
+	route("GET /v1/projects", s.listProjects)
+	route("PATCH /v1/projects/{id}", s.updateProject)
+	route("DELETE /v1/projects/{id}", s.deleteProject)
 
 	route("POST /v1/users", s.addUser)
 	route("GET /v1/users", s.listUsers)
@@ -199,6 +199,7 @@ func (s *Server) Handler() http.Handler {
 
 	route("POST /v1/keys", s.createKey)
 	route("GET /v1/keys", s.listKeys)
+	route("PATCH /v1/keys/{id}", s.renameKey)
 	route("DELETE /v1/keys/{id}", s.revokeKey)
 	route("POST /v1/keys/{id}/rotate", s.rotateKey)
 

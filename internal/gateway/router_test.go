@@ -329,7 +329,7 @@ func TestRouterFallsBackWhenItsModelIsGone(t *testing.T) {
 
 // A router is a name a key may or may not use, exactly as a model is, and the
 // answer to a key that may not use it is the one a model gets: it does not
-// exist, so another team's routers are not enumerable through 403s.
+// exist, so another project's routers are not enumerable through 403s.
 func TestRouterIsRefusedToAKeyWhoseAllowListOmitsIt(t *testing.T) {
 	resolved := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"}, nil, nil, nil)
 	resolved.AllowedModels = []string{"keera-small"}

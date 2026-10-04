@@ -80,7 +80,7 @@ const (
 // keeps the one it sweeps.
 //
 // rdb must be a single endpoint, not a Redis Cluster: one script touches the
-// org's, team's and key's buckets at once, and a cluster would refuse keys in
+// org's, project's and key's buckets at once, and a cluster would refuse keys in
 // different slots, so every decision would quietly go local.
 func NewRedis(rdb redis.Scripter, local *Limiter, opts RedisOptions, log *slog.Logger) *Redis {
 	if log == nil {

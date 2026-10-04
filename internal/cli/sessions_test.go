@@ -53,20 +53,20 @@ func TestSessionsTakesAPersonByEmail(t *testing.T) {
 	}
 }
 
-// Grouped by team, key or person, a row is called what people call it.
+// Grouped by project, key or person, a row is called what people call it.
 func TestUsageNamesTheGroups(t *testing.T) {
 	res := usageResponse{
-		TeamNames:  map[string]string{"team_1": "Payments"},
-		KeyAliases: map[string]string{"key_1": "ci"},
-		UserNames:  map[string]string{"user_1": "ada@example.ch"},
+		ProjectNames: map[string]string{"project_1": "Payments"},
+		KeyNames:     map[string]string{"key_1": "ci"},
+		UserNames:    map[string]string{"user_1": "ada@example.ch"},
 	}
 	for _, c := range []struct{ by, group, want string }{
-		{"team", "team_1", "Payments"},
+		{"project", "project_1", "Payments"},
 		{"key", "key_1", "ci"},
 		{"user", "user_1", "ada@example.ch"},
 		{"user", "user_2", "user_2"},
 		{"model", "keera-speed", "keera-speed"},
-		{"team", "", "(none)"},
+		{"project", "", "(none)"},
 	} {
 		if got := res.label(c.by, c.group); got != c.want {
 			t.Errorf("label(%s, %q) = %q, want %q", c.by, c.group, got, c.want)

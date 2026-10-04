@@ -158,14 +158,18 @@ export async function routersView(ctx) {
               "button",
               {
                 class: "btn btn-sm",
+                title: "Edit this router",
+                "aria-label": `Edit ${rt.alias}`,
                 onClick: () => editRouter(ctx, rt, chatModels),
               },
-              "Edit",
+              icon(icons.pencil),
             ),
             h(
               "button",
               {
                 class: "btn btn-sm btn-danger",
+                title: "Delete this router",
+                "aria-label": `Delete ${rt.alias}`,
                 onClick: () =>
                   confirm({
                     title: `Delete ${rt.alias}?`,
@@ -183,7 +187,7 @@ export async function routersView(ctx) {
                     },
                   }),
               },
-              "Delete",
+              icon(icons.trash),
             ),
           );
         },
@@ -673,6 +677,8 @@ export async function routerDetailView(ctx) {
               "button",
               {
                 class: "btn",
+                title: "Edit this router",
+                "aria-label": `Edit ${rt.alias}`,
                 onClick: () =>
                   api.models(ctx.orgID).then((r) =>
                     editRouter(
@@ -684,8 +690,7 @@ export async function routerDetailView(ctx) {
                     ),
                   ),
               },
-              icon(icons.sliders),
-              "Edit",
+              icon(icons.pencil),
             )
           : null,
       ),

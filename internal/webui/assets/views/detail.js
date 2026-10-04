@@ -1,9 +1,9 @@
-// One team, one key, one model - the dashboard narrowed to it, and the
+// One project, one key, one model - the dashboard narrowed to it, and the
 // requests or sessions behind the numbers.
 //
 // The list screens answer "what exists and what is it configured to do". They
 // cannot answer the question somebody arrives with, which is always about one
-// thing: this team's spend jumped on Tuesday, this key stopped working this
+// thing: this project's spend jumped on Tuesday, this key stopped working this
 // afternoon, this model has gone slow. That is the dashboard's eight numbers
 // over a narrower set of rows, plus the rows themselves - because a chart says
 // when something changed and only the log says what changed.
@@ -46,55 +46,57 @@ import { sessionLog, setUnhappy } from "./sessions.js";
 import { modelsCell, summarise } from "./guardrails.js";
 import { openModel } from "./models.js";
 import { canRevoke, openKey, revokeBody, stateOf } from "./keys.js";
-import { openTeam } from "./teams.js";
+import { openProject } from "./projects.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
 
-/* ------------------------------------------------------------------ teams */
+/* ------------------------------------------------------------------ projects */
 
-export async function teamDetailView(ctx) {
-  const teamsRes = await api.teams(ctx.orgID);
-  const team = (teamsRes.data || []).find((t) => t.id === ctx.param);
-  // The team's own organisation, not the switcher's: with "All
+export async function projectDetailView(ctx) {
+  const projectsRes = await api.projects(ctx.orgID);
+  const project = (projectsRes.data || []).find((t) => t.id === ctx.param);
+  // The project's own organisation, not the switcher's: with "All
   // organisations" chosen there is no org to list models for.
-  const modelsRes = team
-    ? await api.models(team.org_id).catch(() => ({ data: [] }))
+  const modelsRes = project
+    ? await api.models(project.org_id).catch(() => ({ data: [] }))
     : { data: [] };
   const models = (modelsRes.data || []).filter((m) => m.enabled !== false);
   const canEdit = isAdmin(ctx);
 
-  if (!team) {
+  if (!project) {
     return gone(
       ctx,
-      "/teams",
-      "Teams",
-      "No such team",
+      "/projects",
+      "Projects",
+      "No such project",
       "It was deleted, or it belongs to another organisation. Its requests " +
         "stay in the usage report.",
     );
   }
 
-  const orgID = team.org_id || ctx.orgID || ctx.state.me.org_id;
+  const orgID = project.org_id || ctx.orgID || ctx.state.me.org_id;
   const orgName = orgNameOf(ctx, orgID);
 
   return screen(ctx, {
-    back: { path: "/teams", label: "Teams" },
-    title: team.name,
-    identity: team.id,
-    scope: { team_id: team.id },
-    hide: { team: true },
+    back: { path: "/projects", label: "Projects" },
+    title: project.name,
+    identity: project.id,
+    note: project.description,
+    scope: { project_id: project.id },
+    hide: { project: true },
     meta: [
       pill(
-        `${num(team.active_keys)} ${plural(team.active_keys, "key")} not revoked`,
+        `${num(project.active_keys)} ${plural(project.active_keys, "key")} not revoked`,
       ),
-      budgetPill(ctx, team),
+      budgetPill(ctx, project),
     ],
     actions: [
       h(
         "button",
         {
           class: "btn",
-          title: "Guardrails for this team's keys",
-          onClick: () => openTeam(ctx, team, models, orgID, orgName, canEdit),
+          title: "Guardrails for this project's keys",
+          onClick: () =>
+            openProject(ctx, project, models, orgID, orgName, canEdit),
         },
         icon(icons.sliders),
         canEdit ? "Guardrails" : "View guardrails",
@@ -120,19 +122,19 @@ export async function teamDetailView(ctx) {
     aside: h(
       "div",
       { class: "card" },
-      h("div", { class: "card-head" }, h("h2", {}, "What this team allows")),
+      h("div", { class: "card-head" }, h("h2", {}, "What this project allows")),
       h(
         "div",
         { class: "card-body" },
         facts([
-          ["Models", modelsCell(team.limits)],
+          ["Models", modelsCell(project.limits)],
           [
             "Guardrails",
-            summarise(team.limits).length
+            summarise(project.limits).length
               ? h(
                   "span",
                   { class: "muted" },
-                  summarise(team.limits).join(" · "),
+                  summarise(project.limits).join(" · "),
                 )
               : h(
                   "span",
@@ -140,12 +142,12 @@ export async function teamDetailView(ctx) {
                   "inherited from the organisation",
                 ),
           ],
-          ["Created", h("span", { class: "muted" }, date(team.created_at))],
+          ["Created", h("span", { class: "muted" }, date(project.created_at))],
         ]),
       ),
     ),
     note:
-      "This team's guardrails apply to every key in it. A team can only " +
+      "This project's guardrails apply to every key in it. A project can only " +
       "narrow what the organisation allows. Refused requests show below and " +
       "cost nothing.",
   });
@@ -154,13 +156,13 @@ export async function teamDetailView(ctx) {
 /* ------------------------------------------------------------------- keys */
 
 export async function keyDetailView(ctx) {
-  const [keysRes, teamsRes, usersRes] = await Promise.all([
+  const [keysRes, projectsRes, usersRes] = await Promise.all([
     api.keys(ctx.orgID),
-    api.teams(ctx.orgID).catch(() => ({ data: [] })),
+    api.projects(ctx.orgID).catch(() => ({ data: [] })),
     api.users(ctx.orgID).catch(() => ({ data: [] })),
   ]);
   const key = (keysRes.data || []).find((k) => k.id === ctx.param);
-  // The key's own organisation, for the same reason as on a team's page.
+  // The key's own organisation, for the same reason as on a project's page.
   const modelsRes = key
     ? await api.models(key.org_id).catch(() => ({ data: [] }))
     : { data: [] };
@@ -177,13 +179,13 @@ export async function keyDetailView(ctx) {
     );
   }
 
-  const teamName = (teamsRes.data || []).find((t) => t.id === key.team_id);
+  const project = (projectsRes.data || []).find((t) => t.id === key.project_id);
   const person = (usersRes.data || []).find((u) => u.id === key.user_id);
   const state = stateOf(key);
 
   return screen(ctx, {
     back: { path: "/keys", label: "API keys" },
-    title: key.alias,
+    title: key.name,
     identity: key.prefix + "…",
     scope: { key_id: key.id },
     // A key is one person or one pipeline, so its traffic reads best as the
@@ -196,18 +198,22 @@ export async function keyDetailView(ctx) {
         : state === "expired"
           ? pill("Expired", "warn")
           : pill("Active", "good"),
-      key.team_id
+      // Only a revoked key can have none: its project was deleted.
+      key.project_id
         ? h(
             "a",
             {
               class: "pill pill-button",
-              href: "/teams/" + encodeURIComponent(key.team_id),
-              title: "Open this key's team",
-              onClick: go(ctx, "/teams/" + encodeURIComponent(key.team_id)),
+              href: "/projects/" + encodeURIComponent(key.project_id),
+              title: "Open this key's project",
+              onClick: go(
+                ctx,
+                "/projects/" + encodeURIComponent(key.project_id),
+              ),
             },
-            teamName ? teamName.name : key.team_id,
+            project ? project.name : key.project_id,
           )
-        : pill("Organisation-wide"),
+        : pill("Deleted project"),
       person ? pill(person.email) : null,
     ],
     actions: [
@@ -217,7 +223,7 @@ export async function keyDetailView(ctx) {
           class: "btn",
           title: "Guardrails for this key",
           onClick: () =>
-            openKey(ctx, key, models, teamName ? teamName.name : "", canEdit),
+            openKey(ctx, key, models, project ? project.name : "", canEdit),
         },
         icon(icons.sliders),
         canEdit ? "Guardrails" : "View guardrails",
@@ -286,7 +292,7 @@ export async function keyDetailView(ctx) {
                     { class: "muted" },
                     summarise(key.limits).join(" · "),
                   )
-                : h("span", { class: "faint" }, "the team's"),
+                : h("span", { class: "faint" }, "the project's"),
             ],
           ]),
         ),
@@ -344,18 +350,18 @@ export async function modelDetailView(ctx) {
               title: canEdit
                 ? "Edit this model's settings"
                 : "This model's settings",
+              "aria-label": canEdit ? "Edit model" : null,
               onClick: () => openModel(ctx, model),
             },
-            icon(icons.models),
-            canEdit ? "Edit model" : "View model",
+            canEdit ? icon(icons.pencil) : [icon(icons.models), "View model"],
           ),
         ]
       : [],
     panels: (o, names) => [
       barPanel(
-        "Teams by spend",
-        o.top_teams,
-        (r) => names.teams[r.group] || r.group || "No team",
+        "Projects by spend",
+        o.top_projects,
+        (r) => names.projects[r.group] || r.group || "No project",
         (r) => r.cost_micros || r.requests,
         0,
         ctx.currency,
@@ -442,7 +448,10 @@ async function screen(ctx, spec) {
   const res = await api.overview(ctx.orgID, since, spec.scope);
   const o = res.overview;
   const currency = res.currency || ctx.currency;
-  const names = { teams: res.team_names || {}, keys: res.key_aliases || {} };
+  const names = {
+    projects: res.project_names || {},
+    keys: res.key_names || {},
+  };
 
   ctx.setTitle(spec.title, spec.identity || "");
 
@@ -461,6 +470,11 @@ async function screen(ctx, spec) {
   );
 
   const wrap = h("div", {}, head);
+  if (spec.note) {
+    wrap.append(
+      h("p", { class: "muted", style: { margin: "0 0 16px" } }, spec.note),
+    );
+  }
   if (spec.banner) {
     wrap.append(
       h(
@@ -637,19 +651,19 @@ export function facts(rows) {
 
 /* ------------------------------------------------------------------ bits */
 
-function budgetPill(ctx, team) {
-  if (!team.budget_micros) {
+function budgetPill(ctx, project) {
+  if (!project.budget_micros) {
     return pill(
-      `${money(team.spend_micros, ctx.currency)} this month, no budget`,
+      `${money(project.spend_micros, ctx.currency)} this month, no budget`,
     );
   }
-  const frac = team.spend_micros / team.budget_micros;
+  const frac = project.spend_micros / project.budget_micros;
   const tone = frac >= 1 ? "bad" : frac >= 0.8 ? "warn" : "";
   return h(
     "span",
     { class: "pill" },
     meter(frac, tone),
-    `${money(team.spend_micros, "")} of ${money(team.budget_micros, ctx.currency)} per ${team.period}`,
+    `${money(project.spend_micros, "")} of ${money(project.budget_micros, ctx.currency)} per ${project.period}`,
   );
 }
 

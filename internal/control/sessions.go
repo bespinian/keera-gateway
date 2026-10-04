@@ -176,7 +176,7 @@ func (s *Server) sessionsCSV(w http.ResponseWriter, rows []store.AgentSession,
 	names groupLabels) {
 	cw := beginCSV(w, "keera-sessions-"+time.Now().Format("2006-01-02")+".csv")
 	_ = cw.Write([]string{"started", "ended", "minutes", "requests", "ok", "failed",
-		"refused", "interrupted", "models", "key", "key_id", "team", "user",
+		"refused", "interrupted", "models", "key", "key_id", "project", "user",
 		"input_tokens", "output_tokens", "cost_" + strings.ToLower(s.opts.Currency),
 		"last_status", "last_error", "session_id", "named_by_client"})
 	for _, a := range rows {
@@ -188,7 +188,7 @@ func (s *Server) sessionsCSV(w http.ResponseWriter, rows []store.AgentSession,
 			strconv.FormatInt(a.Interrupted, 10),
 			strings.Join(a.Models, " "),
 			names.label("key", a.KeyID), a.KeyID,
-			names.label("team", a.TeamID), names.label("user", a.UserID),
+			names.label("project", a.ProjectID), names.label("user", a.UserID),
 			strconv.FormatInt(a.InputTokens, 10), strconv.FormatInt(a.OutputTokens, 10),
 			policy.FormatMicros(a.CostMicros),
 			strconv.Itoa(a.LastStatus), a.LastError,

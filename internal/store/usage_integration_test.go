@@ -14,24 +14,24 @@ func TestWriteEventsRollsUpSpendPerScope(t *testing.T) {
 
 	scopes := []policy.Scope{
 		{Type: policy.ScopeOrg, ID: f.orgID, Period: policy.PeriodMonth},
-		{Type: policy.ScopeTeam, ID: f.teamID, Period: policy.PeriodDay},
+		{Type: policy.ScopeProject, ID: f.projectID, Period: policy.PeriodDay},
 		{Type: policy.ScopeKey, ID: f.keyID, Period: policy.PeriodMonth},
 	}
 	events := []Event{
-		{TS: now, OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID, Alias: "keera-code",
+		{TS: now, OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID, Alias: "keera-code",
 			InputTokens: 1000, OutputTokens: 200, CostMicros: 1800, Status: 200,
 			Latency: 900 * time.Millisecond, TTFT: 120 * time.Millisecond,
 			Stream: true, Scopes: scopes},
-		{TS: now.Add(time.Minute), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(time.Minute), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", InputTokens: 500, OutputTokens: 100, CostMicros: 900,
 			Status: 200, Latency: time.Second, Scopes: scopes},
 		// A refusal: recorded, because it is the event a developer asks about,
 		// and charged nothing.
-		{TS: now.Add(2 * time.Minute), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(2 * time.Minute), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 402, Latency: time.Millisecond, Scopes: scopes},
 		// A refusal by a filter, which paid for the filter's own call. The
 		// budget charges it, so the report must show it too.
-		{TS: now.Add(3 * time.Minute), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(3 * time.Minute), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", InputTokens: 50, OutputTokens: 5, CostMicros: 300,
 			Status: 403, Latency: time.Millisecond, Scopes: scopes},
 	}
@@ -48,9 +48,9 @@ func TestWriteEventsRollsUpSpendPerScope(t *testing.T) {
 		got[string(r.ScopeType)+":"+r.ScopeID+":"+string(r.Period)] = r.Micros
 	}
 	want := map[string]int64{
-		"org:" + f.orgID + ":month": 3000,
-		"team:" + f.teamID + ":day": 3000,
-		"key:" + f.keyID + ":month": 3000,
+		"org:" + f.orgID + ":month":       3000,
+		"project:" + f.projectID + ":day": 3000,
+		"key:" + f.keyID + ":month":       3000,
 	}
 	for k, v := range want {
 		if got[k] != v {
@@ -174,13 +174,13 @@ func TestUsageGroupsByEveryDimensionThePanelOffers(t *testing.T) {
 	day := time.Date(2026, 9, 7, 10, 0, 0, 0, time.UTC)
 
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: day, OrgID: f.orgID, TeamID: f.teamID, UserID: user.ID, KeyID: f.keyID,
+		{TS: day, OrgID: f.orgID, ProjectID: f.projectID, UserID: user.ID, KeyID: f.keyID,
 			Alias: "keera-code", CostMicros: 100, Status: 200},
-		{TS: day.AddDate(0, 0, 1), OrgID: f.orgID, TeamID: f.teamID, UserID: user.ID,
+		{TS: day.AddDate(0, 0, 1), OrgID: f.orgID, ProjectID: f.projectID, UserID: user.ID,
 			KeyID: f.keyID, Alias: "keera-speed", CostMicros: 50, Status: 200},
 		// A mistyped model: refused before anything ran, so it is no model's
-		// usage, though it is still the team's and the key's request.
-		{TS: day, OrgID: f.orgID, TeamID: f.teamID, UserID: user.ID, KeyID: f.keyID,
+		// usage, though it is still the project's and the key's request.
+		{TS: day, OrgID: f.orgID, ProjectID: f.projectID, UserID: user.ID, KeyID: f.keyID,
 			Alias: "keera-cdoe", Status: 404},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
@@ -192,7 +192,7 @@ func TestUsageGroupsByEveryDimensionThePanelOffers(t *testing.T) {
 		want    map[string]int64 // group -> cost
 	}{
 		{"model", map[string]int64{"keera-code": 100, "keera-speed": 50}},
-		{"team", map[string]int64{f.teamID: 150}},
+		{"project", map[string]int64{f.projectID: 150}},
 		{"key", map[string]int64{f.keyID: 150}},
 		{"user", map[string]int64{user.ID: 150}},
 		{"org", map[string]int64{f.orgID: 150}},
@@ -407,57 +407,56 @@ func TestKeySummariesReportsLastUseAndWhatWasServed(t *testing.T) {
 	}
 }
 
-func TestTeamSummariesReadsTheOpenBudgetWindow(t *testing.T) {
+func TestProjectSummariesReadsTheOpenBudgetWindow(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
 	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
 
-	if err := st.PutPolicy(ctx, policy.ScopeTeam, f.teamID, policy.Limits{
+	if err := st.PutPolicy(ctx, policy.ScopeProject, f.projectID, policy.Limits{
 		BudgetMicros: new(int64(500_000_000)), BudgetPeriod: new(policy.PeriodDay),
 	}); err != nil {
 		t.Fatalf("PutPolicy: %v", err)
 	}
 	// Today's spend, and yesterday's, which must not be counted.
 	for _, ts := range []time.Time{now, now.AddDate(0, 0, -1)} {
-		if err := st.WriteEvents(ctx, []Event{{TS: ts, OrgID: f.orgID, TeamID: f.teamID,
+		if err := st.WriteEvents(ctx, []Event{{TS: ts, OrgID: f.orgID, ProjectID: f.projectID,
 			Alias: "keera-code", CostMicros: 4_000_000, Status: 200,
-			Scopes: []policy.Scope{{Type: policy.ScopeTeam, ID: f.teamID, Period: policy.PeriodDay}},
+			Scopes: []policy.Scope{{Type: policy.ScopeProject, ID: f.projectID, Period: policy.PeriodDay}},
 		}}); err != nil {
 			t.Fatalf("WriteEvents: %v", err)
 		}
 	}
 
-	teams, err := st.TeamSummaries(ctx, f.orgID, now)
+	projects, err := st.ProjectSummaries(ctx, f.orgID, now)
 	if err != nil {
-		t.Fatalf("TeamSummaries: %v", err)
+		t.Fatalf("ProjectSummaries: %v", err)
 	}
-	if len(teams) != 1 {
-		t.Fatalf("%d teams, want 1", len(teams))
+	project := summaryOf(t, projects, f.projectID)
+	if project.SpendMicros != 4_000_000 {
+		t.Errorf("SpendMicros = %d, want only today's 4000000", project.SpendMicros)
 	}
-	if teams[0].SpendMicros != 4_000_000 {
-		t.Errorf("SpendMicros = %d, want only today's 4000000", teams[0].SpendMicros)
+	if project.BudgetMicros != 500_000_000 {
+		t.Errorf("BudgetMicros = %d, want the guardrail", project.BudgetMicros)
 	}
-	if teams[0].BudgetMicros != 500_000_000 {
-		t.Errorf("BudgetMicros = %d, want the guardrail", teams[0].BudgetMicros)
-	}
-	if teams[0].ActiveKeys != 1 {
-		t.Errorf("ActiveKeys = %d, want 1", teams[0].ActiveKeys)
+	if project.ActiveKeys != 1 {
+		t.Errorf("ActiveKeys = %d, want 1", project.ActiveKeys)
 	}
 	if err := st.RevokeKey(ctx, f.keyID); err != nil {
 		t.Fatalf("RevokeKey: %v", err)
 	}
-	teams, err = st.TeamSummaries(ctx, f.orgID, now)
+	projects, err = st.ProjectSummaries(ctx, f.orgID, now)
 	if err != nil {
-		t.Fatalf("TeamSummaries: %v", err)
+		t.Fatalf("ProjectSummaries: %v", err)
 	}
-	if teams[0].ActiveKeys != 0 {
-		t.Errorf("ActiveKeys = %d after a revocation, want 0", teams[0].ActiveKeys)
+	project = summaryOf(t, projects, f.projectID)
+	if project.ActiveKeys != 0 {
+		t.Errorf("ActiveKeys = %d after a revocation, want 0", project.ActiveKeys)
 	}
 }
 
 // A summary carries the scope's system prompt, because both screens that read
 // one show it to somebody who is subject to it: a member reading what their
-// team puts ahead of every request they make, and an administrator seeing at a
+// project puts ahead of every request they make, and an administrator seeing at a
 // glance which scopes say something at all. Leaving it out of the query made
 // every scope look as though it said nothing.
 func TestSummariesCarryTheSystemPrompt(t *testing.T) {
@@ -466,13 +465,13 @@ func TestSummariesCarryTheSystemPrompt(t *testing.T) {
 	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
 
 	const (
-		teamPrompt = "Answer in British English."
-		keyPrompt  = "Prefer the standard library."
+		projectPrompt = "Answer in British English."
+		keyPrompt     = "Prefer the standard library."
 	)
-	if err := st.PutPolicy(ctx, policy.ScopeTeam, f.teamID, policy.Limits{
-		SystemPrompt: new(teamPrompt),
+	if err := st.PutPolicy(ctx, policy.ScopeProject, f.projectID, policy.Limits{
+		SystemPrompt: new(projectPrompt),
 	}); err != nil {
-		t.Fatalf("PutPolicy(team): %v", err)
+		t.Fatalf("PutPolicy(project): %v", err)
 	}
 	if err := st.PutPolicy(ctx, policy.ScopeKey, f.keyID, policy.Limits{
 		SystemPrompt: new(keyPrompt),
@@ -480,15 +479,13 @@ func TestSummariesCarryTheSystemPrompt(t *testing.T) {
 		t.Fatalf("PutPolicy(key): %v", err)
 	}
 
-	teams, err := st.TeamSummaries(ctx, f.orgID, now)
+	projects, err := st.ProjectSummaries(ctx, f.orgID, now)
 	if err != nil {
-		t.Fatalf("TeamSummaries: %v", err)
+		t.Fatalf("ProjectSummaries: %v", err)
 	}
-	if len(teams) != 1 {
-		t.Fatalf("%d teams, want 1", len(teams))
-	}
-	if got := teams[0].Limits.SystemPrompt; got == nil || *got != teamPrompt {
-		t.Errorf("team SystemPrompt = %v, want %q", got, teamPrompt)
+	project := summaryOf(t, projects, f.projectID)
+	if got := project.Limits.SystemPrompt; got == nil || *got != projectPrompt {
+		t.Errorf("project SystemPrompt = %v, want %q", got, projectPrompt)
 	}
 
 	keys, err := st.KeySummaries(ctx, KeyQuery{OrgID: f.orgID, Since: now.AddDate(0, 0, -1)})
@@ -504,15 +501,16 @@ func TestSummariesCarryTheSystemPrompt(t *testing.T) {
 
 	// A scope that sets no prompt must come back as one that says nothing, not
 	// as an empty string a screen would render as a blank instruction.
-	if err := st.PutPolicy(ctx, policy.ScopeTeam, f.teamID, policy.Limits{}); err != nil {
-		t.Fatalf("PutPolicy(team, cleared): %v", err)
+	if err := st.PutPolicy(ctx, policy.ScopeProject, f.projectID, policy.Limits{}); err != nil {
+		t.Fatalf("PutPolicy(project, cleared): %v", err)
 	}
-	teams, err = st.TeamSummaries(ctx, f.orgID, now)
+	projects, err = st.ProjectSummaries(ctx, f.orgID, now)
 	if err != nil {
-		t.Fatalf("TeamSummaries: %v", err)
+		t.Fatalf("ProjectSummaries: %v", err)
 	}
-	if teams[0].Limits.SystemPrompt != nil {
-		t.Errorf("SystemPrompt = %q after clearing, want nil", *teams[0].Limits.SystemPrompt)
+	project = summaryOf(t, projects, f.projectID)
+	if project.Limits.SystemPrompt != nil {
+		t.Errorf("SystemPrompt = %q after clearing, want nil", *project.Limits.SystemPrompt)
 	}
 }
 
@@ -526,7 +524,7 @@ func TestFlowsCountsOneWindowFourWays(t *testing.T) {
 
 	ev := func(client, alias string, status int, cost int64, ttft time.Duration) Event {
 		return Event{
-			TS: day, OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+			TS: day, OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: alias, Client: client, Status: status, CostMicros: cost,
 			InputTokens: 10, OutputTokens: 5, TTFT: ttft,
 		}
@@ -619,7 +617,7 @@ func TestASubscriptionKeyKeepsItsKindAndItsPlanUsage(t *testing.T) {
 	f := newFixture(t, st, ctx)
 	now := time.Now().UTC().Truncate(time.Second)
 	hash := []byte("hash-of-keera_sk_plan-32-bytes!!!")
-	if _, err := st.CreateKey(ctx, KeyInfo{ID: "key_sub", OrgID: f.orgID, Alias: "claude-code",
+	if _, err := st.CreateKey(ctx, KeyInfo{ID: "key_sub", OrgID: f.orgID, Name: "claude-code",
 		Prefix: "keera_sk_pla", Kind: policy.KeySubscription}, hash); err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
@@ -677,4 +675,17 @@ func TestASubscriptionKeyKeepsItsKindAndItsPlanUsage(t *testing.T) {
 	if err != nil || next.Kind != policy.KeySubscription {
 		t.Errorf("RotateKey = %+v, %v; want a subscription key", next, err)
 	}
+}
+
+// summaryOf picks one project out of ProjectSummaries, which also lists the
+// project the organisation was created with.
+func summaryOf(t *testing.T, projects []ProjectSummary, id string) ProjectSummary {
+	t.Helper()
+	for _, p := range projects {
+		if p.ID == id {
+			return p
+		}
+	}
+	t.Fatalf("ProjectSummaries = %+v, want %s among them", projects, id)
+	return ProjectSummary{}
 }

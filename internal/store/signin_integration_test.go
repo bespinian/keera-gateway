@@ -63,7 +63,7 @@ func TestLoginFlowIsSingleUseAndExpires(t *testing.T) {
 	st, ctx := db(t)
 
 	if err := st.CreateLoginFlow(ctx, LoginFlow{
-		State: "state-1", Verifier: "verifier-1", Nonce: "nonce-1", RedirectTo: "/teams",
+		State: "state-1", Verifier: "verifier-1", Nonce: "nonce-1", RedirectTo: "/projects",
 	}, time.Now().Add(5*time.Minute)); err != nil {
 		t.Fatalf("CreateLoginFlow: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestLoginFlowIsSingleUseAndExpires(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TakeLoginFlow: %v", err)
 	}
-	if flow.Verifier != "verifier-1" || flow.Nonce != "nonce-1" || flow.RedirectTo != "/teams" {
+	if flow.Verifier != "verifier-1" || flow.Nonce != "nonce-1" || flow.RedirectTo != "/projects" {
 		t.Errorf("flow = %+v, want the PKCE verifier, nonce and path", flow)
 	}
 	// A replayed callback finds nothing, so a stolen code cannot be used twice.

@@ -43,7 +43,7 @@ func (anthropicDialect) opening(b *body) (json.RawMessage, bool) {
 		if err != nil {
 			return true
 		}
-		opening, found = openingOf(msgs)
+		opening, found = openingOfChat(msgs)
 		return !found
 	})
 	return opening, found

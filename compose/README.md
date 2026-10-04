@@ -79,8 +79,8 @@ export KEERA_OPERATOR_KEY=…                    # the value from .env
 export KEERA_CONTROL_URL=http://127.0.0.1:8080
 
 keera org create "Example Bank"
-keera team create "Payments Platform"       # --org is inferred when there is one
-KEY=$(keera key create --team <team-id> --alias "a developer's laptop")
+keera project create "Payments Platform"       # --org is inferred when there is one
+KEY=$(keera key create --project <project-id> --name "a developer's laptop")
 ```
 
 `keera key create` prints the key once and does not store it. Nobody, not even
@@ -105,9 +105,9 @@ developers' editors do not change.
 Guardrails and reports:
 
 ```sh
-keera guardrail set team <team-id> --models keera-speed --rpm 120 --budget 500 --period month
-keera guardrail get team <team-id>
-keera usage --by team
+keera guardrail set project <project-id> --models keera-speed --rpm 120 --budget 500 --period month
+keera guardrail get project <project-id>
+keera usage --by project
 keera usage --by day --since 168h
 ```
 

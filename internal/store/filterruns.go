@@ -12,7 +12,7 @@ import (
 // A filter can go wrong quietly in two ways: it rewrites too much, or it
 // refuses too much. Neither shows in the request log, so every run is recorded
 // here: how often it fires, what it does, how long it adds, what it costs, and
-// which team it affects.
+// which project it affects.
 
 // FilterOutcome is what one filter run did.
 //
@@ -141,10 +141,10 @@ type FilterPoint struct {
 	CostMicros int64     `json:"cost_micros"`
 }
 
-// FilterTeamRow is one team's experience of a filter. A small refusal rate
-// across the organisation can still be most of one team's traffic.
-type FilterTeamRow struct {
-	TeamID     string `json:"team_id"`
+// FilterProjectRow is one project's experience of a filter. A small refusal rate
+// across the organisation can still be most of one project's traffic.
+type FilterProjectRow struct {
+	ProjectID  string `json:"project_id"`
 	Runs       int64  `json:"runs"`
 	Refused    int64  `json:"refused"`
 	Rewrote    int64  `json:"rewrote"`
@@ -158,8 +158,8 @@ type FilterReport struct {
 	To     time.Time `json:"to"`
 	Bucket string    `json:"bucket"`
 	FilterStat
-	Series []FilterPoint   `json:"series"`
-	Teams  []FilterTeamRow `json:"teams"`
+	Series   []FilterPoint      `json:"series"`
+	Projects []FilterProjectRow `json:"projects"`
 	// Requests and OrgCostMicros are the organisation's whole traffic and cost
 	// in the same window, so the filter's numbers can be read as shares.
 	Requests      int64 `json:"requests"`
@@ -167,7 +167,7 @@ type FilterReport struct {
 }
 
 // FilterReportFor reads one filter's traffic: its totals, its shape over the
-// window, and which teams it affects.
+// window, and which projects it affects.
 func (s *Store) FilterReportFor(ctx context.Context, orgID, alias string,
 	from, to time.Time) (FilterReport, error) {
 	bucket := chartBucket(from, to)
@@ -184,7 +184,7 @@ func (s *Store) FilterReportFor(ctx context.Context, orgID, alias string,
 	if rep.Series, err = s.filterSeries(ctx, orgID, alias, from, to, bucket); err != nil {
 		return rep, err
 	}
-	if rep.Teams, err = s.filterTeams(ctx, orgID, alias, from, to); err != nil {
+	if rep.Projects, err = s.filterProjects(ctx, orgID, alias, from, to); err != nil {
 		return rep, err
 	}
 	err = s.pool.QueryRow(ctx, `SELECT count(*), COALESCE(sum(cost_micros), 0)
@@ -225,11 +225,11 @@ func (s *Store) filterSeries(ctx context.Context, orgID, alias string,
 	})
 }
 
-// filterTeams is one filter's runs split by team, most refused first.
-func (s *Store) filterTeams(ctx context.Context, orgID, alias string,
-	from, to time.Time) ([]FilterTeamRow, error) {
+// filterProjects is one filter's runs split by project, most refused first.
+func (s *Store) filterProjects(ctx context.Context, orgID, alias string,
+	from, to time.Time) ([]FilterProjectRow, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT COALESCE(team_id, ''), count(*),
+		SELECT COALESCE(project_id, ''), count(*),
 		       count(*) FILTER (WHERE outcome = 'refuse'),
 		       count(*) FILTER (WHERE outcome = 'rewrite'),
 		       count(*) FILTER (WHERE outcome = 'error'),
@@ -241,9 +241,9 @@ func (s *Store) filterTeams(ctx context.Context, orgID, alias string,
 	if err != nil {
 		return nil, err
 	}
-	return collect(rows, func(r row) (FilterTeamRow, error) {
-		var t FilterTeamRow
-		err := r.Scan(&t.TeamID, &t.Runs, &t.Refused, &t.Rewrote, &t.Errors, &t.CostMicros)
+	return collect(rows, func(r row) (FilterProjectRow, error) {
+		var t FilterProjectRow
+		err := r.Scan(&t.ProjectID, &t.Runs, &t.Refused, &t.Rewrote, &t.Errors, &t.CostMicros)
 		return t, err
 	})
 }

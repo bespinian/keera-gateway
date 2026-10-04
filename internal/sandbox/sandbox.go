@@ -74,15 +74,15 @@ type Spec struct {
 	Class policy.SandboxClass
 	// Purpose decides the lifecycle. See policy.Purpose.
 	Purpose policy.Purpose
-	// Owner, Org and Team are stamped onto a Kubernetes object, so a platform
-	// team can see whose sandbox is on a node without asking the gateway.
+	// Owner, Org and Project are stamped onto a Kubernetes object, so a platform
+	// project can see whose sandbox is on a node without asking the gateway.
 	// Podman labels only the owner.
 	//
 	// Owner is an email address where known. It is the only personal data this
 	// package puts into the cluster.
-	Owner string
-	Org   string
-	Team  string
+	Owner   string
+	Org     string
+	Project string
 	// Env is the sandbox's environment: the gateway's address, its API key,
 	// the session id for an agent, and what the repository setup needs.
 	//

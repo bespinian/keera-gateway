@@ -1,6 +1,6 @@
 // The request log: one row per recorded request, wherever it is being read.
 //
-// The Requests screen is this section and nothing else, and each team's,
+// The Requests screen is this section and nothing else, and each project's,
 // key's and model's own screen ends in it. A chart says when something
 // changed and only the log says what changed, so whoever learns to read it
 // under one chart has learned to read it everywhere.
@@ -68,11 +68,11 @@ const OUTCOME_KEY = "keera.requests.outcome";
 const NARROWINGS = [
   { param: "alias", facet: "models", label: "Every model", aria: "Model" },
   {
-    param: "team_id",
-    facet: "teams",
-    label: "Every team",
-    aria: "Team",
-    name: (v, names) => names.teams[v] || v,
+    param: "project_id",
+    facet: "projects",
+    label: "Every project",
+    aria: "Project",
+    name: (v, names) => names.projects[v] || v,
   },
   {
     param: "key_id",
@@ -224,7 +224,7 @@ export function currentOutcome() {
 
 /** requestLog is the section itself.
  *
- *  `scope` is what the caller is already about ({ team_id }, { key_id },
+ *  `scope` is what the caller is already about ({ project_id }, { key_id },
  *  { alias }) and is fixed; `filters` asks for the narrowing controls, which
  *  only a screen with no scope of its own has any use for. `hide` drops the
  *  columns that would repeat the scope in every row.
@@ -256,7 +256,7 @@ export async function requestLog(
 ) {
   const outcome = sessionStorage.getItem(OUTCOME_KEY) || "";
   const narrowed = filters ? readNarrowing() : {};
-  // The scope wins over the narrowing: a team's own screen is about that team
+  // The scope wins over the narrowing: a project's own screen is about that project
   // whatever was last picked on the dashboard.
   const params = {
     org_id: ctx.orgID,
@@ -295,8 +295,8 @@ export async function requestLog(
   const facets = res.filters || {};
   const currency = res.currency || ctx.currency;
   const names = {
-    keys: res.key_aliases || {},
-    teams: res.team_names || {},
+    keys: res.key_names || {},
+    projects: res.project_names || {},
     users: res.user_names || {},
   };
   const anyNarrowed = NARROWINGS.some((n) => narrowed[n.param]);
@@ -380,7 +380,7 @@ export async function requestLog(
   );
 
   // The narrowing keeps what it has when the outcome or the range changes,
-  // because "now show me that team's failures" is the next thing somebody asks
+  // because "now show me that project's failures" is the next thing somebody asks
   // rather than a mistake. A selection that matches nothing under the new
   // outcome says so below, and Clear is right beside it.
   if (filters) {
@@ -558,8 +558,8 @@ export async function requestLog(
       // Labels travel only when a row named something this screen opened too
       // early to know about - a key issued a minute ago, whose first request is
       // exactly what somebody is watching for.
-      Object.assign(names.keys, payload.key_aliases || {});
-      Object.assign(names.teams, payload.team_names || {});
+      Object.assign(names.keys, payload.key_names || {});
+      Object.assign(names.projects, payload.project_names || {});
       Object.assign(names.users, payload.user_names || {});
 
       const fresh = payload.data || [];
@@ -729,18 +729,18 @@ export function requestTable(ctx, rows, names, currency, hide, opts = {}) {
                 )
               : h("span", { class: "faint" }, "no key"),
         },
-    hide.team
+    hide.project
       ? null
       : {
-          label: "Team",
+          label: "Project",
           shrink: true,
-          sortKey: (q) => names.teams[q.team_id] || q.team_id || null,
+          sortKey: (q) => names.projects[q.project_id] || q.project_id || null,
           cell: (q) =>
-            q.team_id
+            q.project_id
               ? h(
                   "span",
                   { class: "muted nowrap" },
-                  names.teams[q.team_id] || q.team_id,
+                  names.projects[q.project_id] || q.project_id,
                 )
               : h("span", { class: "faint" }, "none"),
         },
@@ -818,7 +818,7 @@ export function requestTable(ctx, rows, names, currency, hide, opts = {}) {
   return table(columns, rows, {
     search: (q) =>
       `${q.alias} ${q.status} ${q.error || ""} ` +
-      `${names.keys[q.key_id] || q.key_id || ""} ${names.teams[q.team_id] || ""}`,
+      `${names.keys[q.key_id] || q.key_id || ""} ${names.projects[q.project_id] || ""}`,
     searchLabel: "these requests",
     emptyTitle: "Nothing here",
     // A row that arrived while the reader was looking at the screen. It is
@@ -850,7 +850,10 @@ export function showRequest(ctx, q, names, currency) {
       "Key",
       q.key_id ? `${names.keys[q.key_id] || q.key_id} (${q.key_id})` : "no key",
     ],
-    ["Team", q.team_id ? names.teams[q.team_id] || q.team_id : "-"],
+    [
+      "Project",
+      q.project_id ? names.projects[q.project_id] || q.project_id : "-",
+    ],
     ["Who", q.user_id ? names.users[q.user_id] || q.user_id : "-"],
     ["When", dateTime(q.ts)],
     [

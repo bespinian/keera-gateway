@@ -771,7 +771,7 @@ func (x *mcpExchange) record(p *pendingRPC, outcome store.ToolOutcome, errMsg st
 	took := time.Since(p.start)
 	k := x.res.Key
 	x.s.sink.Record(store.Event{
-		TS: p.start, OrgID: k.OrgID, TeamID: k.TeamID, UserID: k.UserID, KeyID: k.ID,
+		TS: p.start, OrgID: k.OrgID, ProjectID: k.ProjectID, UserID: k.UserID, KeyID: k.ID,
 		Client: x.client, SessionKey: x.session, Latency: took, Error: errMsg,
 		FilterRuns: p.filters.runs, CostMicros: p.filters.micros, Scopes: x.res.Scopes,
 		Tool: &store.ToolCall{

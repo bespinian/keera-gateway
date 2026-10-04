@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 
@@ -48,7 +49,7 @@ type shape interface {
 	encode(raw []byte, alias string, status int) ([]byte, int)
 	// pipe forwards a streamed upstream response in this shape, flushing as it
 	// goes, and reports what the stream carried.
-	pipe(dst io.Writer, flush func(), src io.Reader, alias string, dropUsageEvent bool) (streamStats, error)
+	pipe(dst io.Writer, flush func(), src io.Reader, alias string, dropUsageEvent bool, limit int64) (streamStats, error)
 	// writeError renders a refusal the gateway generated itself. typ and code
 	// are the OpenAI spellings; a shape that names its errors differently
 	// translates them.
@@ -56,6 +57,12 @@ type shape interface {
 	// contentType is the media type this shape's buffered responses carry, or
 	// empty to keep whatever the inference plane sent.
 	contentType() string
+}
+
+// bodyDecoder is a shape that can build the OpenAI request as a body, which
+// saves parsing again a large request it has just written.
+type bodyDecoder interface {
+	decodeBody(raw []byte) (*body, error)
 }
 
 // openAIShape is the identity: the surfaces that already speak what the
@@ -72,19 +79,41 @@ func (openAIErrors) writeError(w http.ResponseWriter, status int, typ, code, msg
 
 func (openAIShape) decode(raw []byte) ([]byte, error) { return raw, nil }
 
-// encode names the alias as the model, the only change it makes: the client
-// was promised the alias, never the backend's name for it.
+// encode names the alias as the model: the client was promised the alias,
+// never the backend's name for it.
 func (openAIShape) encode(raw []byte, alias string, status int) ([]byte, int) {
 	if status >= 300 {
-		return raw, status
+		return openAIErrorBody(raw, status), status
 	}
 	return renameModel(raw, alias), status
+}
+
+// openAIErrorBody puts an upstream error in the OpenAI envelope. One already
+// in it passes unchanged, type and code included. vLLM's bare message and
+// FastAPI's detail are wrapped, since an OpenAI SDK reads only error.message.
+func openAIErrorBody(raw []byte, status int) []byte {
+	var envelope struct {
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(raw, &envelope) == nil && envelope.Error != nil && envelope.Error.Message != "" {
+		return raw
+	}
+	typ := "invalid_request_error"
+	if status >= 500 {
+		typ = "server_error"
+	}
+	body, _ := json.Marshal(map[string]httpx.APIError{
+		"error": {Message: upstreamErrorMessage(raw, status), Type: typ},
+	})
+	return body
 }
 
 func (openAIShape) contentType() string { return "" }
 
 func (openAIShape) pipe(dst io.Writer, flush func(), src io.Reader, alias string,
-	dropUsageEvent bool,
+	dropUsageEvent bool, limit int64,
 ) (streamStats, error) {
-	return pipeSSE(dst, flush, src, alias, dropUsageEvent)
+	return pipeSSE(dst, flush, src, alias, dropUsageEvent, limit)
 }

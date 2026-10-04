@@ -87,54 +87,35 @@ func TestATakenNameOrDomainIsAConflict(t *testing.T) {
 	}
 }
 
-// A member issues keys for themselves, which is the whole point of letting them
-// issue any: the secret is readable exactly once, and the fewer screens that
-// moment happens on the better. Naming a colleague is the one thing that must
-// not work - attribution is what a budget and a usage report are read through,
-// so it would put this member's spend under somebody else's name.
+// Only an administrator issues keys, so every key has the project and guardrails
+// one chose for it. A member's own key would have only the organisation's, and
+// step around their project's. They rotate the key they were given instead.
 //
 // The refusal happens before the store is touched, which is why a nil store
 // here does not panic.
-func TestMemberCanOnlyIssueAKeyForThemselves(t *testing.T) {
+func TestMemberCannotIssueAKey(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	member := &authn.Principal{
 		Via: authn.MethodSession, Role: authn.RoleMember, OrgID: "org_1", UserID: "user_1",
 	}
 
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, httpx.ControlPrefix+"/v1/keys",
-		strings.NewReader(`{"org_id":"org_1","user_id":"user_2","alias":"not mine"}`))
+	for _, body := range []string{
+		`{"org_id":"org_1","name":"mine"}`,
+		`{"org_id":"org_1","user_id":"user_1","name":"mine"}`,
+		`{"org_id":"org_1","user_id":"user_1","kind":"subscription"}`,
+	} {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, httpx.ControlPrefix+"/v1/keys",
+			strings.NewReader(body))
 
-	s.createKey(w, r, member)
+		s.createKey(w, r, member)
 
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "attributed to themselves") {
-		t.Errorf("body = %q, want it to say whose key a member may issue", w.Body.String())
-	}
-}
-
-// A team is a set of guardrails, and there is no membership to read the right
-// one off. Choosing one is refused rather than dropped, so that a member is
-// never handed a key that belongs somewhere other than they asked for.
-func TestMemberCannotChooseTheTeamOfTheirOwnKey(t *testing.T) {
-	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
-	member := &authn.Principal{
-		Via: authn.MethodSession, Role: authn.RoleMember, OrgID: "org_1", UserID: "user_1",
-	}
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, httpx.ControlPrefix+"/v1/keys",
-		strings.NewReader(`{"org_id":"org_1","user_id":"user_1","team_id":"team_1"}`))
-
-	s.createKey(w, r, member)
-
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "team") {
-		t.Errorf("body = %q, want it to name the field it refused", w.Body.String())
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("%s: status = %d, want 403", body, w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "only an administrator") {
+			t.Errorf("body = %q, want it to say who may issue one", w.Body.String())
+		}
 	}
 }
 

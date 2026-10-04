@@ -142,6 +142,8 @@ export function managePasskeys() {
               "button",
               {
                 class: "btn btn-sm btn-danger",
+                title: "Remove this passkey",
+                "aria-label": `Remove ${k.name}`,
                 onClick: () =>
                   confirm({
                     title: `Remove “${k.name}”?`,
@@ -155,7 +157,7 @@ export function managePasskeys() {
                     },
                   }),
               },
-              "Remove",
+              icon(icons.trash),
             )
           : h(
               "span",
@@ -224,6 +226,8 @@ export function userPasskeys(user) {
               "button",
               {
                 class: "btn btn-sm btn-danger",
+                title: "Remove this passkey",
+                "aria-label": `Remove ${k.name}`,
                 onClick: () =>
                   confirm({
                     title: `Remove “${k.name}”?`,
@@ -239,7 +243,7 @@ export function userPasskeys(user) {
                     },
                   }),
               },
-              "Remove",
+              icon(icons.trash),
             ),
           )
         : h(

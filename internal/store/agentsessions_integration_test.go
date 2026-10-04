@@ -23,7 +23,7 @@ func TestSessionsGroupRequestsIntoTheTasksTheyWereMadeFor(t *testing.T) {
 	for i := range 4 {
 		events = append(events, Event{
 			TS:    now.Add(-3*time.Hour + time.Duration(i)*time.Minute),
-			OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID, Alias: "keera-code",
+			OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID, Alias: "keera-code",
 			SessionKey: conversation, InputTokens: 1000, OutputTokens: 100,
 			CostMicros: 500, Status: 200, Latency: 2 * time.Second,
 			TTFT: 400 * time.Millisecond, Stream: true,
@@ -31,14 +31,14 @@ func TestSessionsGroupRequestsIntoTheTasksTheyWereMadeFor(t *testing.T) {
 	}
 	events = append(events, Event{
 		TS:    now.Add(-3*time.Hour + 4*time.Minute),
-		OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID, Alias: "keera-code",
-		SessionKey: conversation, Status: 402, Error: "your team has spent its month budget",
+		OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID, Alias: "keera-code",
+		SessionKey: conversation, Status: 402, Error: "your project has spent its month budget",
 	})
 	// The same conversation two hours later. The opening prompt is the same
 	// bytes and so the key is the same, which is exactly the case the idle gap
 	// exists for: this is tomorrow's task, not more of this one.
 	events = append(events, Event{
-		TS: now.Add(-time.Hour), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 		Alias: "keera-speed", SessionKey: conversation, CostMicros: 250,
 		InputTokens: 40, OutputTokens: 8, Status: 200, Latency: time.Second,
 		TTFT: 200 * time.Millisecond,
@@ -46,7 +46,7 @@ func TestSessionsGroupRequestsIntoTheTasksTheyWereMadeFor(t *testing.T) {
 	// A request that belongs to no conversation - an embedding - is still a
 	// request and must not become a session of its own.
 	events = append(events, Event{
-		TS: now.Add(-90 * time.Minute), OrgID: f.orgID, TeamID: f.teamID,
+		TS: now.Add(-90 * time.Minute), OrgID: f.orgID, ProjectID: f.projectID,
 		KeyID: f.keyID, Alias: "keera-embed", Status: 200, CostMicros: 10,
 	})
 	if err := st.WriteEvents(ctx, events); err != nil {
@@ -158,7 +158,7 @@ func TestNarrowingToAModelKeepsTheSessionWhole(t *testing.T) {
 	for i, alias := range []string{"keera-code", "keera-frontier", "keera-code"} {
 		if err := st.WriteEvents(ctx, []Event{{
 			TS:    now.Add(-time.Hour + time.Duration(i)*time.Minute),
-			OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID, Alias: alias,
+			OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID, Alias: alias,
 			SessionKey: conversation, Status: 200, CostMicros: 100, Latency: time.Second,
 		}}); err != nil {
 			t.Fatalf("WriteEvents: %v", err)
@@ -205,7 +205,7 @@ func TestASessionIsFoundFromAnyRequestInIt(t *testing.T) {
 	for i := range 3 {
 		if err := st.WriteEvents(ctx, []Event{{
 			TS:    now.Add(-2*time.Hour + time.Duration(i)*time.Minute),
-			OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID, Alias: "keera-code",
+			OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID, Alias: "keera-code",
 			SessionKey: conversation, Status: 200, CostMicros: 100, Latency: time.Second,
 		}}); err != nil {
 			t.Fatalf("WriteEvents: %v", err)
@@ -213,7 +213,7 @@ func TestASessionIsFoundFromAnyRequestInIt(t *testing.T) {
 	}
 	// A later task on the same conversation, which must not be dragged in.
 	if err := st.WriteEvents(ctx, []Event{{
-		TS: now, OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID, Alias: "keera-code",
+		TS: now, OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID, Alias: "keera-code",
 		SessionKey: conversation, Status: 200, CostMicros: 100,
 	}, {
 		// And a request with no conversation at all.
@@ -410,7 +410,7 @@ func TestSessionsRankByWhatMakesOneWorthOpening(t *testing.T) {
 	}
 }
 
-// Every session report is one tenant's, and narrows to one team, key or person
+// Every session report is one tenant's, and narrows to one project, key or person
 // the way every other report over this log does.
 func TestSessionsStayInsideOneTenantAndNarrowToOneEntity(t *testing.T) {
 	st, ctx := db(t)
@@ -418,11 +418,11 @@ func TestSessionsStayInsideOneTenantAndNarrowToOneEntity(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	if err := st.WriteEvents(ctx, []Event{{
-		TS: now.Add(-time.Hour), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 		UserID: "user_1", Alias: "keera-code", SessionKey: DerivedSessionKey("ours000000000000"),
 		Status: 200, CostMicros: 100,
 	}, {
-		TS: now.Add(-time.Hour), OrgID: "org_other", TeamID: "team_other",
+		TS: now.Add(-time.Hour), OrgID: "org_other", ProjectID: "project_other",
 		KeyID: "key_other", Alias: "keera-code", SessionKey: DerivedSessionKey("theirs0000000000"),
 		Status: 500, Error: "CUDA out of memory",
 	}}); err != nil {
@@ -442,8 +442,8 @@ func TestSessionsStayInsideOneTenantAndNarrowToOneEntity(t *testing.T) {
 		q    AgentSessionQuery
 		want int
 	}{
-		{"this team", AgentSessionQuery{OrgID: f.orgID, TeamID: f.teamID}, 1},
-		{"another team", AgentSessionQuery{OrgID: f.orgID, TeamID: "team_other"}, 0},
+		{"this project", AgentSessionQuery{OrgID: f.orgID, ProjectID: f.projectID}, 1},
+		{"another project", AgentSessionQuery{OrgID: f.orgID, ProjectID: "project_other"}, 0},
 		{"this key", AgentSessionQuery{OrgID: f.orgID, KeyID: f.keyID}, 1},
 		{"this person", AgentSessionQuery{OrgID: f.orgID, UserID: "user_1"}, 1},
 		{"one conversation", AgentSessionQuery{OrgID: f.orgID, Key: DerivedSessionKey("ours000000000000")}, 1},

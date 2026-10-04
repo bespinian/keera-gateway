@@ -45,8 +45,8 @@ import {
 import { areaChart, barList } from "../chart.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
 // A filter's own screen is an entity's own screen, so it takes the window
-// picker the team, key and model screens use - and the window itself, which is
-// shared between them: arriving here from a team showing this afternoon and
+// picker the project, key and model screens use - and the window itself, which is
+// shared between them: arriving here from a project showing this afternoon and
 // being given the last thirty days would answer a question nobody asked.
 import { facts } from "./detail.js";
 
@@ -176,14 +176,18 @@ export async function filtersView(ctx) {
               "button",
               {
                 class: "btn btn-sm",
+                title: "Edit this filter",
+                "aria-label": `Edit ${f.alias}`,
                 onClick: () => editFilter(ctx, f, chatModels),
               },
-              "Edit",
+              icon(icons.pencil),
             ),
             h(
               "button",
               {
                 class: "btn btn-sm btn-danger",
+                title: "Delete this filter",
+                "aria-label": `Delete ${f.alias}`,
                 onClick: () =>
                   confirm({
                     title: `Delete ${f.alias}?`,
@@ -200,7 +204,7 @@ export async function filtersView(ctx) {
                     },
                   }),
               },
-              "Delete",
+              icon(icons.trash),
             ),
           );
         },
@@ -527,7 +531,7 @@ function report(ctx, probe) {
 //
 // Is it firing, what does it do when it fires, what does it cost the request
 // that waits for it, what share of the bill is it, and - the reason most
-// people arrive - which team is living with the refusals. An instruction
+// people arrive - which project is living with the refusals. An instruction
 // cannot be tuned against three sample segments.
 export async function filterDetailView(ctx) {
   // A filter belongs to one organisation, as the list does: an operator looking
@@ -539,7 +543,7 @@ export async function filterDetailView(ctx) {
   const rep = res.report || {};
   const f = res.filter || null;
   const currency = res.currency || ctx.currency;
-  const teamNames = res.team_names || {};
+  const projectNames = res.project_names || {};
   const canEdit = isAdmin(ctx);
 
   ctx.setTitle(ctx.param, f ? identity(f) : `no longer in ${orgNameOf(ctx)}`);
@@ -588,6 +592,8 @@ export async function filterDetailView(ctx) {
               "button",
               {
                 class: "btn",
+                title: "Edit this filter",
+                "aria-label": `Edit ${f.alias}`,
                 onClick: () =>
                   api.models(ctx.orgID).then((r) =>
                     editFilter(
@@ -599,8 +605,7 @@ export async function filterDetailView(ctx) {
                     ),
                   ),
               },
-              icon(icons.sliders),
-              "Edit",
+              icon(icons.pencil),
             )
           : null,
       ),
@@ -689,7 +694,7 @@ export async function filterDetailView(ctx) {
                 "Nothing ran in this window",
                 f
                   ? "No guardrail uses this filter, or nothing it covers was " +
-                      "called. Widen the range or check the team's guardrails."
+                      "called. Widen the range or check the project's guardrails."
                   : "This filter no longer exists.",
               ),
         ),
@@ -733,10 +738,10 @@ export async function filterDetailView(ctx) {
     ),
   );
 
-  // Refusals by team, which is the reading a filter is actually judged on. Four
+  // Refusals by project, which is the reading a filter is actually judged on. Four
   // percent across an organisation is a rounding error to whoever wrote the
-  // guardrail and the whole working day of the one team it lands on.
-  if ((rep.teams || []).length > 0) {
+  // guardrail and the whole working day of the one project it lands on.
+  if ((rep.projects || []).length > 0) {
     wrap.append(
       h(
         "div",
@@ -749,10 +754,10 @@ export async function filterDetailView(ctx) {
           h(
             "span",
             { class: "faint", style: { fontSize: "11.5px" } },
-            "refusals by team",
+            "refusals by project",
           ),
         ),
-        teamTable(ctx, rep.teams, teamNames, currency),
+        projectTable(ctx, rep.projects, projectNames, currency),
       ),
     );
   }
@@ -929,20 +934,20 @@ function outcomeRows(rep) {
   ].filter((r) => r.value > 0);
 }
 
-function teamTable(ctx, teams, names, currency) {
+function projectTable(ctx, projects, names, currency) {
   return table(
     [
       {
-        label: "Team",
+        label: "Project",
         cell: (t) =>
-          t.team_id
+          t.project_id
             ? rowLink(
                 ctx,
-                "/teams/" + encodeURIComponent(t.team_id),
-                names[t.team_id] || t.team_id,
-                "This team's traffic",
+                "/projects/" + encodeURIComponent(t.project_id),
+                names[t.project_id] || t.project_id,
+                "This project's traffic",
               )
-            : h("span", { class: "faint" }, "No team"),
+            : h("span", { class: "faint" }, "No project"),
       },
       { label: "Runs", shrink: true, num: true, cell: (t) => compact(t.runs) },
       {
@@ -986,13 +991,13 @@ function teamTable(ctx, teams, names, currency) {
           h("span", { class: "nowrap muted" }, money(t.cost_micros, currency)),
       },
     ],
-    teams,
+    projects,
     { emptyTitle: "Nobody yet" },
   );
 }
 
 // pct is one count against another, which is how these numbers are compared -
-// this team against that one, this week against last. "4.1%" compares at a
+// this project against that one, this week against last. "4.1%" compares at a
 // glance where "173 of 4,219" does not.
 // identity is the subtitle under a filter's alias: what it does and what it does
 // it on, with the one thing that outranks both when it applies.

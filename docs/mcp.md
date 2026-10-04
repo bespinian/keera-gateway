@@ -76,13 +76,13 @@ A guardrail sets this, like the models a key may use:
 
 ```sh
 keera guardrail set org <org-id> --tools github,jira/search
-keera guardrail set team <team-id> --tools github/search_code
+keera guardrail set project <project-id> --tools github/search_code
 ```
 
 An entry is a server alias, for all its tools, or `alias/tool` for one tool.
 `--tools any` clears a level's list.
 Each level narrows the one above: a tool must be on every level's list. Here
-the team may call only `github/search_code`. The team's list does not name
+the project may call only `github/search_code`. The project's list does not name
 `jira/search`, and it names no other github tool. A level that sets no list
 gets the list of the level above. If no level sets one, the key may call every
 tool of every server.

@@ -16,7 +16,7 @@ Anthropic and OpenAI do not. Everything below applies to all of them.
 
 **Work a small local model cannot do.** A 7B coding model handles renames, short
 edits and everyday questions. It is weak at design, multi-step reasoning and
-whole-system questions. If a team may only use the local model, it will stop
+whole-system questions. If a project may only use the local model, it will stop
 using the platform or go around it.
 
 **Evaluating before there are GPUs.** You can set up a deployment, issue keys,
@@ -144,8 +144,8 @@ Without a guardrail, every key in the organisation can reach a hosted model. At
 minimum:
 
 ```sh
-# Only this team may use it, and only up to a monthly budget.
-keera guardrail set team <team-id> --models keera-speed,keera-frontier \
+# Only this project may use it, and only up to a monthly budget.
+keera guardrail set project <project-id> --models keera-speed,keera-frontier \
   --budget 500 --period month
 ```
 

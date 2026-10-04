@@ -121,7 +121,7 @@ func TestOverviewNamesEveryCommand(t *testing.T) {
 // switch because there is no way to read a switch.
 func TestEveryDispatchedCommandIsRegistered(t *testing.T) {
 	dispatched := []string{
-		"org", "orgs", "team", "teams", "user", "users", "key", "keys",
+		"org", "orgs", "project", "projects", "user", "users", "key", "keys",
 		"model", "models", "filter", "filters", "router", "routers",
 		"sandbox", "sandboxes", "sbx", "guardrail", "guardrails",
 		"mcp", "limit", "limits", "budget", "budgets", "usage", "failure", "failures", "sessions",
@@ -259,10 +259,10 @@ func TestUsageComesFromTheRegistry(t *testing.T) {
 	}{
 		{[]string{"filter", "add"}, "usage: keera filter add <alias>"},
 		{[]string{"router", "delete", "a", "b"}, "usage: keera router delete <alias>"},
-		{[]string{"usage", "team"}, "usage: keera usage"},
+		{[]string{"usage", "project"}, "usage: keera usage"},
 		{[]string{"guardrail", "get"}, "usage: keera guardrail get <scope> [<id>]"},
 		{[]string{"limit"}, "usage: keera limit <scope> [<id>]"},
-		{[]string{"key", "create", "a", "b"}, "usage: keera key create [<alias>]"},
+		{[]string{"key", "create", "a", "b"}, "usage: keera key create [<name>]"},
 	} {
 		err := Run(context.Background(), tc.args)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {

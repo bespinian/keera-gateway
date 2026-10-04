@@ -20,8 +20,8 @@ func TestSafeRedirectKeepsOnlySameSitePaths(t *testing.T) {
 		next string
 		want string
 	}{
-		{"/teams", "/teams"},
-		{"/usage?by=team", "/usage?by=team"},
+		{"/projects", "/projects"},
+		{"/usage?by=project", "/usage?by=project"},
 		{"/", "/"},
 		{"", ""},
 		// The protocol-relative form, and the backslash spelling of it. Go
@@ -37,7 +37,7 @@ func TestSafeRedirectKeepsOnlySameSitePaths(t *testing.T) {
 		{"http://evil.example/", ""},
 		{"//user@evil.example/", ""},
 		// Not a path at all.
-		{"teams", ""},
+		{"projects", ""},
 		{"javascript:alert(1)", ""},
 	} {
 		if got := safeRedirect(tc.next); got != tc.want {

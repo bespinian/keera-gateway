@@ -287,7 +287,7 @@ Sandbox quotas are fields on the guardrail row. They combine by the usual
 restrict-only rule: the minimum for a ceiling, the intersection for a list.
 
 ```sh
-keera guardrail set team <team-id> \
+keera guardrail set project <project-id> \
   --max-sandboxes 6 \
   --max-sandbox-ttl 8h \
   --sandbox-classes standard,small \
@@ -307,7 +307,7 @@ is left, and the same two ceilings as at creation apply. The sandbox's key
 gets the new expiry too. A developer can extend
 as often as needed, and the sandbox still cannot live forever.
 
-Quotas attach to the organisation and the team. The organisation's own quota
+Quotas attach to the organisation and the project. The organisation's own quota
 is set by its administrators, like its classes. Only `allowed_repos` on the
 organisation is set by an operator. There is no per-key sandbox
 quota: a sandbox's key is minted _for_ that sandbox and dies with it. A key's
@@ -319,10 +319,10 @@ refuses a class the quota forbids. Saving the guardrails dialog keeps the
 sandbox fields unchanged: a guardrail is written whole, and the dialog only
 changes the fields it shows.
 
-## Naming a team
+## Naming a project
 
-`keera sandbox create <name> --team <team>`, or the Team field in the panel's
-dialog. The sandbox's key is scoped to that team, which decides:
+`keera sandbox create <name> --project <project>`, or the Project field in the panel's
+dialog. The sandbox's key is scoped to that project, which decides:
 
 - which **budget** the agent's inference is charged to,
 - which **rate limit** it uses,
@@ -331,16 +331,16 @@ dialog. The sandbox's key is scoped to that team, which decides:
 - and **which models** its agent may reach, which is what the picker inside the
   sandbox shows.
 
-Without a team, the sandbox uses the organisation's own guardrails.
+Without a project, the sandbox goes in the organisation's oldest project.
 
-**The team must belong to the same organisation.** The foreign key only checks
-that the team exists, so the control plane checks the owner. Otherwise a sandbox
+**The project must belong to the same organisation.** The foreign key only checks
+that the project exists, so the control plane checks the owner. Otherwise a sandbox
 could use another organisation's system prompt, budget, rate limit and model
 allow-list.
 
-Only an administrator may choose a team. A member's sandbox uses the
-organisation's guardrails and no team, just as a member cannot choose the team
-of a key they issue themselves.
+Only an administrator may choose a project. A member's sandbox goes in the
+organisation's oldest project, just as a member cannot choose the project of a
+key.
 
 ## What it costs
 
@@ -348,7 +348,7 @@ Sandbox time is recorded beside tokens, so a task's cost includes the machine it
 ran on, such as "eleven minutes of a four-core machine".
 
 ```sh
-keera sandbox usage --by team --since 720h
+keera sandbox usage --by project --since 720h
 keera sandbox usage --by user
 keera sandbox usage --by class
 ```
@@ -402,13 +402,13 @@ organisations'. So a sandbox gets a token only for a repository in
 
 ```sh
 keera guardrail set org <org-id> --repos acme            # everything under acme/
-keera guardrail set team <team-id> --repos acme/service  # narrows it for one team
+keera guardrail set project <project-id> --repos acme/service  # narrows it for one project
 keera guardrail set org <org-id> --repos '*'             # any repository, for one organisation
 ```
 
 An entry is a path on the forge: an owner or group for everything under it, or
 one repository. Case does not matter. Only the organisation grants
-repositories, and only an operator can set its list. A team's list can only
+repositories, and only an operator can set its list. A project's list can only
 narrow it, and an administrator can set that. It is checked again on every
 token refresh, so taking a repository off the list stops running sandboxes
 getting a new token.
@@ -600,7 +600,7 @@ The gateway configures Pi, not the image. The manager renders
 `~/.pi/agent/models.json` and the entrypoint writes it.
 
 **It lists every model the sandbox's own key may reach** - the organisation's
-allow-list narrowed by the team's - not just one model the deployment picked.
+allow-list narrowed by the project's - not just one model the deployment picked.
 Listing models the key is refused for would end prompts in refusals. Listing
 only one would hide the rest. Embedding models are left out.
 
@@ -637,7 +637,7 @@ that vendor's provider back on in the picker.
 
 Pi's **default model and provider** are pinned too, in
 `~/.pi/agent/settings.json`. The model is the first chat model the key may
-reach, so the team's allow-list decides it.
+reach, so the project's allow-list decides it.
 
 Pinning `defaultProvider: keera` is a security control. Pi picks its built-in
 providers over a configured one when both are available. So `pi` with no

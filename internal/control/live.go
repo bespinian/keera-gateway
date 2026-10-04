@@ -326,14 +326,14 @@ func (s *Server) countOutcomes(ctx context.Context, rq *store.RequestQuery,
 	return nil
 }
 
-// unnamed reports whether any row names a key, team or person the labels cannot
+// unnamed reports whether any row names a key, project or person the labels cannot
 // put a name to.
 func unnamed(rows []store.Request, names groupLabels) bool {
 	for _, q := range rows {
 		switch {
 		case q.KeyID != "" && names.keys[q.KeyID] == "":
 			return true
-		case q.TeamID != "" && names.teams[q.TeamID] == "":
+		case q.ProjectID != "" && names.projects[q.ProjectID] == "":
 			return true
 		case q.UserID != "" && names.users[q.UserID] == "":
 			return true

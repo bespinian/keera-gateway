@@ -1,6 +1,7 @@
-// API keys - issuing one, seeing what is live, and taking one away.
+// API keys - issuing one, seeing what is live, renaming one, and taking one
+// away.
 
-import { api } from "../api.js";
+import { api, chatTargets } from "../api.js";
 import {
   h,
   table,
@@ -22,7 +23,8 @@ import {
 } from "../ui.js";
 import { openGuardrails, ceilingsFor, summarise } from "./guardrails.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
-import { loadClients, code, defaultBase, title } from "./connect.js";
+import { oldestProject } from "./projects.js";
+import { loadClients, code, defaultBase, keyModels } from "./connect.js";
 
 export async function keysView(ctx) {
   // Keys, models and people all belong to one organisation, so an operator
@@ -30,27 +32,27 @@ export async function keysView(ctx) {
   if (!ctx.orgID && ctx.state.me.unrestricted)
     return chooseOrg(ctx, "API keys");
 
-  const [keysRes, teamsRes, modelsRes, usersRes, clients] = await Promise.all([
-    api.keys(ctx.orgID),
-    api.teams(ctx.orgID).catch(() => ({ data: [] })),
-    api.models(ctx.orgID).catch(() => ({ data: [] })),
-    // Who a key can be attributed to. A deployment with no identity provider
-    // has nobody here, and the field is left out rather than shown empty.
-    api.users(ctx.orgID).catch(() => ({ data: [] })),
-    // The client catalogue, so that the configuration handed over with a key
-    // is the same one Connect a client hands out.
-    loadClients().catch(() => []),
-  ]);
+  const [keysRes, projectsRes, modelsRes, usersRes, clients] =
+    await Promise.all([
+      api.keys(ctx.orgID),
+      api.projects(ctx.orgID).catch(() => ({ data: [] })),
+      api.models(ctx.orgID).catch(() => ({ data: [] })),
+      // Who a key can be attributed to. A deployment with no identity provider
+      // has nobody here, and the field is left out rather than shown empty.
+      api.users(ctx.orgID).catch(() => ({ data: [] })),
+      // The client catalogue, so that the configuration handed over with a key
+      // is the same one Connect a client hands out.
+      loadClients().catch(() => []),
+    ]);
   const keys = keysRes.data || [];
-  const teams = teamsRes.data || [];
+  const projects = projectsRes.data || [];
   const users = usersRes.data || [];
   const models = (modelsRes.data || []).filter((m) => m.enabled !== false);
-  const teamName = Object.fromEntries(teams.map((t) => [t.id, t.name]));
+  const projectNames = Object.fromEntries(projects.map((t) => [t.id, t.name]));
   const canEdit = isAdmin(ctx);
-  // A member issues keys for themselves and nobody else, so they get a button
-  // and not the dialog above it: there is no person to choose and no team to
-  // put it in, which leaves an alias and an expiry.
-  const canIssueOwn = !canEdit && ctx.state.me.can_manage_own_keys;
+  // Only an administrator issues keys, so each has the project and guardrails
+  // they chose. A member renames, rotates and revokes their own.
+  const canRotateOwn = !canEdit && ctx.state.me.can_manage_own_keys;
   const currency = keysRes.currency || ctx.currency;
 
   const live = keys.filter((k) => stateOf(k) === "active").length;
@@ -64,9 +66,10 @@ export async function keysView(ctx) {
       { class: "muted" },
       canEdit
         ? "A key is shown only once, when it is issued. It is not stored."
-        : canIssueOwn
-          ? "A key is shown only once, when it is issued. You can issue your " +
-            "own. An administrator sets its guardrails."
+        : canRotateOwn
+          ? "A key is shown only once, when it is issued. An administrator " +
+            "issues keys and sets their guardrails. You can rename, rotate or " +
+            "revoke your own."
           : "A key is shown only once, when it is issued. Open a key to see " +
             "its guardrails. An administrator sets them.",
     ),
@@ -76,32 +79,22 @@ export async function keysView(ctx) {
           "button",
           {
             class: "btn btn-primary",
-            onClick: () => issueKey(ctx, teams, models, users, clients),
+            onClick: () => issueKey(ctx, projects, users, clients),
           },
           icon(icons.plus),
           "Issue key",
         )
-      : canIssueOwn
-        ? h(
-            "button",
-            {
-              class: "btn btn-primary",
-              onClick: () => issueOwnKey(ctx, models, clients),
-            },
-            icon(icons.plus),
-            "Issue my own key",
-          )
-        : null,
+      : null,
   );
 
   const rows = table(
     [
       {
-        // The alias opens the key's own screen. "Can this be revoked" is answered
+        // The name opens the key's own screen. "Can this be revoked" is answered
         // by the columns here; "what has it actually been doing" is one request
         // at a time, and that is a screen rather than a cell.
-        label: "Alias",
-        sortKey: (k) => k.alias,
+        label: "Name",
+        sortKey: (k) => k.name,
         cell: (k) =>
           h(
             "div",
@@ -109,7 +102,7 @@ export async function keysView(ctx) {
             rowLink(
               ctx,
               "/keys/" + encodeURIComponent(k.id),
-              k.alias,
+              k.name,
               "This key's traffic, spend and requests",
             ),
             h(
@@ -131,12 +124,14 @@ export async function keysView(ctx) {
           ),
       },
       {
-        label: "Team",
-        sortKey: (k) => (k.team_id ? teamName[k.team_id] || k.team_id : null),
+        label: "Project",
+        // Only a revoked key can have none: its project was deleted.
+        sortKey: (k) =>
+          k.project_id ? projectNames[k.project_id] || k.project_id : null,
         cell: (k) =>
-          k.team_id
-            ? h("span", {}, teamName[k.team_id] || k.team_id)
-            : h("span", { class: "faint" }, "organisation-wide"),
+          k.project_id
+            ? h("span", {}, projectNames[k.project_id] || k.project_id)
+            : h("span", { class: "faint" }, "deleted project"),
       },
       {
         // Active first, because a list of keys is read to find the live ones.
@@ -225,7 +220,7 @@ export async function keysView(ctx) {
             : h(
                 "span",
                 { class: "faint" },
-                k.team_id ? "team's" : `${orgNameOf(ctx, k.org_id)}'s`,
+                k.project_id ? "project's" : `${orgNameOf(ctx, k.org_id)}'s`,
               );
         },
       },
@@ -254,11 +249,27 @@ export async function keysView(ctx) {
                 class: "btn btn-sm",
                 title: "Guardrails for this key",
                 onClick: () =>
-                  openKey(ctx, k, models, teamName[k.team_id], canEdit),
+                  openKey(ctx, k, models, projectNames[k.project_id], canEdit),
               },
               "Guardrails",
             ),
-            canRevoke(ctx, k) && stateOf(k) === "active"
+            // Any key can be renamed, revoked ones too: their name still
+            // heads their usage history.
+            canRevoke(ctx, k)
+              ? h(
+                  "button",
+                  {
+                    class: "btn btn-sm",
+                    title: "Rename this key",
+                    "aria-label": `Rename ${k.name}`,
+                    onClick: () => renameKey(ctx, k),
+                  },
+                  icon(icons.pencil),
+                )
+              : null,
+            // An expired key can be rotated too. A member cannot issue a new
+            // one, so this is how they get going again.
+            canRevoke(ctx, k) && stateOf(k) !== "revoked"
               ? h(
                   "button",
                   {
@@ -268,13 +279,13 @@ export async function keysView(ctx) {
                       confirm({
                         title: "Rotate this key?",
                         body:
-                          `A new key replaces ${k.alias}, with the same team, ` +
+                          `A new key replaces ${k.name}, with the same project, ` +
                           "person and guardrails. The old key stops working " +
                           "at once, so update its clients with the new one.",
                         confirmLabel: "Rotate",
                         onConfirm: async () => {
                           const created = await api.rotateKey(k.id);
-                          showSecret(ctx, created, models, clients);
+                          showSecret(ctx, created, clients);
                         },
                       }),
                   },
@@ -308,12 +319,14 @@ export async function keysView(ctx) {
     keys,
     {
       emptyTitle: "No keys yet",
-      emptyBody:
-        "Issue one to get started. Usage and the audit log are tracked per key.",
+      emptyBody: canEdit
+        ? "Issue one to get started. Usage and the audit log are tracked per key."
+        : "An administrator issues keys. Usage and the audit log are tracked per key.",
       // This list grows with however finely the deployment slices its keys, so it
-      // can get long. Searching it by alias is how anybody actually arrives at a
-      // row, since that is what the alias is for.
-      search: (k) => [k.alias, k.prefix, teamName[k.team_id] || ""].join(" "),
+      // can get long. Searching it by name is how anybody actually arrives at a
+      // row, since that is what the name is for.
+      search: (k) =>
+        [k.name, k.prefix, projectNames[k.project_id] || ""].join(" "),
       searchLabel: "keys",
       // Off by default: a revoked key is nobody's working key any more, and the
       // list is read to find one that works. It stays one click away, because a
@@ -332,9 +345,9 @@ export async function keysView(ctx) {
   return h("div", {}, head, rows);
 }
 
-// canRevoke reports whether the reader may revoke or rotate this key. An administrator
+// canRevoke reports whether the reader may rename, revoke or rotate this key. An administrator
 // revokes any of their organisation's; a member revokes one attributed to
-// themselves, on the same screen they issued it on. A key attributed to nobody
+// themselves. A key attributed to nobody
 // is the shared one an administrator issued for a pipeline, so it is nobody's to
 // take away but theirs - which is why the id has to be there and match, rather
 // than merely not belong to somebody else.
@@ -351,7 +364,7 @@ export function canRevoke(ctx, k) {
 // is a different sentence for a key in daily use and one nobody has ever used.
 export function revokeBody(k) {
   const base =
-    `Clients using ${k.alias} stop working within a second. ` +
+    `Clients using ${k.name} stop working within a second. ` +
     "You cannot undo this. To replace the key instead, rotate it.";
   if (!k.last_used_at) return base + " This key has not been used this month.";
   return base;
@@ -363,27 +376,69 @@ export function stateOf(k) {
   return "active";
 }
 
-// openKey opens this one key's limits with its team's and its organisation's
+// openKey opens this one key's limits with its project's and its organisation's
 // loaded as the ceiling above them.
 //
 // A member gets the same dialog with nothing to fill in. These limits are the
 // answer to "why was my editor refused", and a key nobody may read is a key
 // whose refusals are a message to an administrator.
-export async function openKey(ctx, key, models, teamName, canEdit) {
+export async function openKey(ctx, key, models, projectName, canEdit) {
   const ceilings = await ceilingsFor("key", {
     orgID: key.org_id,
     orgName: orgNameOf(ctx, key.org_id),
-    teamID: key.team_id,
-    teamName,
+    projectID: key.project_id,
+    projectName,
   });
   await openGuardrails(ctx, {
     scope: "key",
     id: key.id,
-    name: key.alias,
+    name: key.name,
     models,
     orgID: key.org_id,
     ceilings,
     canEdit,
+  });
+}
+
+// renameKey changes what a key is called and nothing else.
+function renameKey(ctx, k) {
+  const name = h("input", { class: "input", value: k.name, autofocus: true });
+  const err = h("div");
+  modal({
+    title: `Rename ${k.name}`,
+    subtitle:
+      "The key keeps working as it is. The old name stays in the audit log.",
+    body: h(
+      "form",
+      { onSubmit: (e) => e.preventDefault() },
+      err,
+      field("Name", name),
+    ),
+    actions: (close) => [
+      h("button", { class: "btn", onClick: close }, "Cancel"),
+      h(
+        "button",
+        {
+          class: "btn btn-primary",
+          onClick: async (e) => {
+            const next = name.value.trim();
+            if (!next) return name.focus();
+            if (next === k.name) return close();
+            e.target.disabled = true;
+            try {
+              await api.renameKey(k.id, next);
+              close();
+              toast("Key renamed", "good");
+              ctx.reload();
+            } catch (ex) {
+              showError(err, ex.message);
+              e.target.disabled = false;
+            }
+          },
+        },
+        "Rename",
+      ),
+    ],
   });
 }
 
@@ -395,17 +450,47 @@ const EXPIRIES = [
   { value: "", label: "Never" },
 ];
 
-function issueKey(ctx, teams, models, users, clients) {
-  const alias = h("input", {
+function issueKey(ctx, projects, users, clients) {
+  // Every key is in a project, so with none there is nothing to issue yet.
+  if (!projects.length) {
+    const close = modal({
+      title: "Create a project first",
+      body: h(
+        "div",
+        { class: "muted" },
+        "Every key is in a project, and this organisation has none.",
+      ),
+      actions: (dismiss) => [
+        h("button", { class: "btn", onClick: dismiss }, "Cancel"),
+        h(
+          "button",
+          {
+            class: "btn btn-primary",
+            onClick: () => {
+              close();
+              ctx.navigate("/projects");
+            },
+          },
+          "Go to Projects",
+        ),
+      ],
+    });
+    return;
+  }
+  const name = h("input", {
     class: "input",
-    placeholder: "my-secret-key",
+    placeholder: "alice-laptop",
     autofocus: true,
   });
-  const team = h(
+  // The oldest project is picked, as the control plane does for a key that
+  // names none.
+  const first = oldestProject(projects);
+  const project = h(
     "select",
     { class: "select" },
-    h("option", { value: "" }, "No team - organisation-wide"),
-    teams.map((t) => h("option", { value: t.id }, t.name)),
+    projects.map((t) =>
+      h("option", { value: t.id, selected: t.id === first }, t.name),
+    ),
   );
   const person = h(
     "select",
@@ -436,12 +521,16 @@ function issueKey(ctx, teams, models, users, clients) {
       "form",
       {},
       err,
-      field("Alias", alias),
       field(
-        "Team",
-        team,
-        "The team's guardrails apply to this key. Without a team, only " +
-          "the organisation's apply.",
+        "Name",
+        name,
+        "What the key is for. Reports and the audit log show it.",
+      ),
+      field(
+        "Project",
+        project,
+        "The project's guardrails apply to this key, inside the " +
+          "organisation's.",
       ),
       users.length
         ? field(
@@ -465,19 +554,19 @@ function issueKey(ctx, teams, models, users, clients) {
         {
           class: "btn btn-primary",
           onClick: async (e) => {
-            if (!alias.value.trim()) return alias.focus();
+            if (!name.value.trim()) return name.focus();
             const button = e.currentTarget;
             button.disabled = true;
             try {
               const created = await api.createKey({
                 org_id: ctx.orgID || ctx.state.me.org_id,
-                team_id: team.value,
+                project_id: project.value,
                 user_id: person.value,
-                alias: alias.value.trim(),
+                name: name.value.trim(),
                 expires_in: expiry.value,
               });
               close();
-              showSecret(ctx, created, models, clients);
+              showSecret(ctx, created, clients);
             } catch (ex) {
               showError(err, ex.message);
               button.disabled = false;
@@ -490,95 +579,29 @@ function issueKey(ctx, teams, models, users, clients) {
   });
 }
 
-// issueOwnKey is the member's version: the same secret and the same
-// hand-over, without the two fields they have no say in.
-//
-// It exists so that a developer's first key does not have to travel from an
-// administrator to them through a chat message - the one moment the key is
-// readable is the moment it is on the machine that will use it, and nobody
-// else's screen ever has it.
-function issueOwnKey(ctx, models, clients) {
-  const who = (ctx.state.me.email || "").split("@")[0] || "my";
-  const alias = h("input", {
-    class: "input",
-    placeholder: `${who}-work-laptop`,
-    autofocus: true,
-  });
-  const expiry = h(
-    "select",
-    { class: "select" },
-    h("option", { value: "720h" }, "30 days"),
-    h("option", { value: "2160h", selected: true }, "90 days"),
-    h("option", { value: "8760h" }, "1 year"),
-    h("option", { value: "" }, "Never"),
-  );
-  const err = h("div");
-
-  modal({
-    title: "Issue your own API key",
-    body: h(
-      "form",
-      {},
-      err,
-      field("Alias", alias),
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "User"),
-        h(
-          "div",
-          { class: "input", style: { background: "transparent" } },
-          ctx.state.me.email || ctx.state.me.user_id,
-        ),
-        h(
-          "div",
-          { class: "hint" },
-          "Keys you issue are always yours. Only an administrator can " +
-            "issue keys for others.",
-        ),
-      ),
-      field("Expires", expiry),
-    ),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Cancel"),
-      h(
-        "button",
-        {
-          class: "btn btn-primary",
-          onClick: async (e) => {
-            if (!alias.value.trim()) return alias.focus();
-            const button = e.currentTarget;
-            button.disabled = true;
-            try {
-              // Neither the person nor the team is sent: the control plane
-              // attributes the key to the caller and refuses a team from anybody
-              // who is not an administrator, and a field the panel cannot honour
-              // is worse than one it does not draw.
-              const created = await api.createKey({
-                org_id: ctx.orgID || ctx.state.me.org_id,
-                alias: alias.value.trim(),
-                expires_in: expiry.value,
-              });
-              close();
-              showSecret(ctx, created, models, clients);
-            } catch (ex) {
-              showError(err, ex.message);
-              button.disabled = false;
-            }
-          },
-        },
-        "Issue key",
-      ),
-    ],
-  });
+/** issuedModels is the chat models and routers a key may call. An allow-list
+ *  of null means every one. */
+async function issuedModels(created) {
+  const [targets, effective] = await Promise.all([
+    chatTargets(created.org_id),
+    api.effectiveGuardrails("key", created.id),
+  ]);
+  return effective.allowed_models == null
+    ? targets
+    : keyModels(targets, effective.allowed_models);
 }
 
 // showSecret is the only moment the key exists outside the developer's machine,
 // so it is also the only useful moment to hand over the configuration that
 // contains it. Sending somebody to Connect a client afterwards sends them to a
 // screen where the key is gone forever and the file has a blank in it.
-function showSecret(ctx, created, models, clients) {
-  const chat = models.filter((m) => m.kind === "chat" && !m.subscription);
+async function showSecret(ctx, created, clients) {
+  // Read before the dialog opens. Failing to read them still shows the key,
+  // which is what matters here.
+  const chat =
+    created.kind === "subscription"
+      ? []
+      : await issuedModels(created).catch(() => []);
   const base = defaultBase(ctx) || location.origin + "/api";
 
   const secret = h("input", {
@@ -622,11 +645,6 @@ function showSecret(ctx, created, models, clients) {
   );
 
   if (chat.length && clients.length) {
-    const model = h(
-      "select",
-      { class: "select" },
-      chat.map((m) => h("option", { value: m.alias }, m.alias)),
-    );
     const client = h(
       "select",
       { class: "select" },
@@ -636,11 +654,10 @@ function showSecret(ctx, created, models, clients) {
 
     const draw = () => {
       const c = clients.find((x) => x.key === client.value) || clients[0];
-      const m = chat.find((x) => x.alias === model.value) || chat[0];
       // The key is substituted in rather than left as an environment
       // reference: this is being handed over with the secret, once.
       const config = c
-        .config(base, m)
+        .config(base, chat)
         .replaceAll(
           /\{env:KEERA_API_KEY\}|\$\{KEERA_API_KEY\}|\$KEERA_API_KEY/g,
           created.key,
@@ -649,50 +666,34 @@ function showSecret(ctx, created, models, clients) {
       // note would otherwise put the string "null" under its config block.
       out.replaceChildren(
         ...[
-          c.path
-            ? h(
-                "p",
-                { class: "muted" },
-                "Save this as ",
-                h("code", {}, c.path),
-                ". If the file exists, merge these settings into it. Then run ",
-                h("code", {}, c.key),
-                " and pick ",
-                h("strong", {}, title(m.alias)),
-                ".",
-              )
-            : h(
-                "p",
-                { class: "muted" },
-                "Add these to the developer's shell profile. They set ",
-                h("strong", {}, m.alias),
-                " as the model.",
-              ),
+          h(
+            "p",
+            { class: "muted" },
+            c.path
+              ? [
+                  "Save this as ",
+                  h("code", {}, c.path),
+                  ". If the file exists, merge these settings into it. ",
+                ]
+              : "Add these to the developer's shell profile. ",
+            "It sets up every model this key can use: ",
+            chat.map((m) => m.alias).join(", "),
+            ".",
+          ),
           code(config),
-          c.note ? h("p", { class: "muted" }, c.note(m)) : null,
+          c.note ? h("p", { class: "muted" }, c.note()) : null,
         ].filter(Boolean),
       );
     };
-    model.addEventListener("change", draw);
     client.addEventListener("change", draw);
     draw();
 
     body.append(
       h(
         "div",
-        { class: "field-row" },
-        h(
-          "div",
-          { class: "field", style: { marginBottom: 0 } },
-          h("label", {}, "Client"),
-          client,
-        ),
-        h(
-          "div",
-          { class: "field", style: { marginBottom: 0 } },
-          h("label", {}, "Model"),
-          model,
-        ),
+        { class: "field", style: { marginBottom: 0 } },
+        h("label", {}, "Client"),
+        client,
       ),
       h("div", { style: { marginTop: "12px" } }, out),
       h(

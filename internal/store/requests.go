@@ -61,15 +61,15 @@ func outcomeClause(o Outcome) string {
 // in a row: when, which model, whose key, what it cost and what happened. It
 // covers both served and failed requests, because the log is one table.
 type Request struct {
-	ID     int64     `json:"id"`
-	TS     time.Time `json:"ts"`
-	Alias  string    `json:"alias,omitempty"`
-	Status int       `json:"status"`
-	Error  string    `json:"error,omitempty"`
-	KeyID  string    `json:"key_id,omitempty"`
-	TeamID string    `json:"team_id,omitempty"`
-	UserID string    `json:"user_id,omitempty"`
-	OrgID  string    `json:"org_id,omitempty"`
+	ID        int64     `json:"id"`
+	TS        time.Time `json:"ts"`
+	Alias     string    `json:"alias,omitempty"`
+	Status    int       `json:"status"`
+	Error     string    `json:"error,omitempty"`
+	KeyID     string    `json:"key_id,omitempty"`
+	ProjectID string    `json:"project_id,omitempty"`
+	UserID    string    `json:"user_id,omitempty"`
+	OrgID     string    `json:"org_id,omitempty"`
 	// Client is what sent the request, as it named itself.
 	Client      string `json:"client,omitempty"`
 	InputTokens int64  `json:"input_tokens"`
@@ -99,7 +99,7 @@ type Request struct {
 // requestColumns is the select list every reading of a request row shares, so
 // a new column reaches every screen at once. scanRequest reads it in order.
 const requestColumns = `id, ts, alias, status, COALESCE(error, ''),
-	COALESCE(key_id, ''), COALESCE(team_id, ''), COALESCE(user_id, ''), org_id,
+	COALESCE(key_id, ''), COALESCE(project_id, ''), COALESCE(user_id, ''), org_id,
 	COALESCE(client, ''), input_tokens, cached_input_tokens, output_tokens, cost_micros,
 	latency_ms, ttft_ms, stream, estimated, canceled, COALESCE(session_key, ''),
 	spans`
@@ -107,7 +107,7 @@ const requestColumns = `id, ts, alias, status, COALESCE(error, ''),
 func scanRequest(r row) (Request, error) {
 	var q Request
 	err := r.Scan(&q.ID, &q.TS, &q.Alias, &q.Status, &q.Error,
-		&q.KeyID, &q.TeamID, &q.UserID, &q.OrgID, &q.Client,
+		&q.KeyID, &q.ProjectID, &q.UserID, &q.OrgID, &q.Client,
 		&q.InputTokens, &q.CachedInputTokens, &q.OutputTokens, &q.CostMicros,
 		&q.LatencyMS, &q.TTFTMS, &q.Stream, &q.Estimated, &q.Canceled, &q.SessionKey,
 		&q.Spans)
@@ -231,7 +231,7 @@ func readFacets(rows pgx.Rows, add func(facet string, c FacetCount)) error {
 }
 
 // RequestFacets is what the request log can be narrowed by, over the whole
-// window: the models, keys, teams, people and statuses that occur, each with
+// window: the models, keys, projects, people and statuses that occur, each with
 // its count. They are read from the log rather than listed from the roster,
 // so only values that made requests are offered.
 //
@@ -239,28 +239,28 @@ func readFacets(rows pgx.Rows, add func(facet string, c FacetCount)) error {
 type RequestFacets struct {
 	Models   []FacetCount `json:"models"`
 	Keys     []FacetCount `json:"keys"`
-	Teams    []FacetCount `json:"teams"`
+	Projects []FacetCount `json:"projects"`
 	Users    []FacetCount `json:"users"`
 	Statuses []FacetCount `json:"statuses"`
 }
 
-// RequestFilters counts the window by model, key, team, person and status.
+// RequestFilters counts the window by model, key, project, person and status.
 //
 // Only the tenant, the outcome and the time bounds of q are read, so the
 // screen still offers the other values after one is picked. A model picked
-// after a team can then match nothing, and the screen says so.
+// after a project can then match nothing, and the screen says so.
 func (s *Store) RequestFilters(ctx context.Context, q RequestQuery) (RequestFacets, error) {
 	f := RequestFacets{
 		Models:   []FacetCount{},
 		Keys:     []FacetCount{},
-		Teams:    []FacetCount{},
+		Projects: []FacetCount{},
 		Users:    []FacetCount{},
 		Statuses: []FacetCount{},
 	}
 	rows, err := s.pool.Query(ctx, `
 		WITH matching AS (
 		    SELECT alias, COALESCE(key_id, '') AS key_id,
-		           COALESCE(team_id, '') AS team_id, COALESCE(user_id, '') AS user_id,
+		           COALESCE(project_id, '') AS project_id, COALESCE(user_id, '') AS user_id,
 		           status
 		    FROM usage_events
 		    WHERE `+outcomeClause(q.Outcome)+`
@@ -273,7 +273,7 @@ func (s *Store) RequestFilters(ctx context.Context, q RequestQuery) (RequestFace
 		UNION ALL
 		SELECT 'key', key_id, count(*) FROM matching WHERE key_id <> '' GROUP BY key_id
 		UNION ALL
-		SELECT 'team', team_id, count(*) FROM matching WHERE team_id <> '' GROUP BY team_id
+		SELECT 'project', project_id, count(*) FROM matching WHERE project_id <> '' GROUP BY project_id
 		UNION ALL
 		SELECT 'user', user_id, count(*) FROM matching WHERE user_id <> '' GROUP BY user_id
 		UNION ALL
@@ -289,8 +289,8 @@ func (s *Store) RequestFilters(ctx context.Context, q RequestQuery) (RequestFace
 			f.Models = append(f.Models, c)
 		case "key":
 			f.Keys = append(f.Keys, c)
-		case "team":
-			f.Teams = append(f.Teams, c)
+		case "project":
+			f.Projects = append(f.Projects, c)
 		case "user":
 			f.Users = append(f.Users, c)
 		case "status":

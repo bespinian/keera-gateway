@@ -67,7 +67,7 @@ func pipeMessages(t *testing.T, chunks ...string) []sseEvent {
 	t.Helper()
 	var buf bytes.Buffer
 	_, err := anthropicShape{}.pipe(&buf, func() {},
-		strings.NewReader(sseStream(chunks...)), "keera-code", true)
+		strings.NewReader(sseStream(chunks...)), "keera-code", true, DefaultMaxResponseBytes)
 	if err != nil {
 		t.Fatalf("pipe: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestMessagesStreamClosesATruncatedStream(t *testing.T) {
 	var buf bytes.Buffer
 	partial := "data: {\"choices\":[{\"delta\":{\"content\":\"half\"}}]}\n\n"
 	if _, err := (anthropicShape{}).pipe(&buf, func() {},
-		strings.NewReader(partial), "keera-code", true); err != nil {
+		strings.NewReader(partial), "keera-code", true, DefaultMaxResponseBytes); err != nil {
 		t.Fatalf("pipe: %v", err)
 	}
 	events := readMessagesStream(t, buf.String())
@@ -270,7 +270,7 @@ func TestMessagesStreamReportsUsageForBilling(t *testing.T) {
 		`{"choices":[{"delta":{"content":"a"}}]}`,
 		`{"choices":[{"delta":{"content":"b"}}]}`,
 		`{"choices":[],"usage":{"prompt_tokens":40,"completion_tokens":2,"total_tokens":42}}`,
-	)), "keera-code", true)
+	)), "keera-code", true, DefaultMaxResponseBytes)
 	if err != nil {
 		t.Fatalf("pipe: %v", err)
 	}
@@ -309,7 +309,7 @@ func TestMessagesSurfaceEnforcesTheSamePolicyAsChat(t *testing.T) {
 	// every other client passes. A surface that went round them would be a
 	// hole in the only thing this product enforces.
 	res := policy.Resolve(
-		policy.Key{ID: "key_1", OrgID: "org_1", TeamID: "team_1"},
+		policy.Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
 		&policy.Limits{
 			SystemPrompt:    func() *string { p := "obey the org"; return &p }(),
 			MaxOutputTokens: func() *int { n := 64; return &n }(),
@@ -564,7 +564,7 @@ func TestMessagesStreamPingsWhileTheUpstreamIsSilent(t *testing.T) {
 	)
 
 	var buf syncBuffer
-	if _, err := (anthropicShape{}).pipe(&buf, func() {}, src, "keera-code", true); err != nil {
+	if _, err := (anthropicShape{}).pipe(&buf, func() {}, src, "keera-code", true, DefaultMaxResponseBytes); err != nil {
 		t.Fatalf("pipe: %v", err)
 	}
 
@@ -652,4 +652,49 @@ func TestMessagesStreamReadsAToolCallLargerThanTheReadBuffer(t *testing.T) {
 	if got.String() != args {
 		t.Errorf("the tool call's arguments arrived as %d bytes, want %d", len(got.String()), len(args))
 	}
+}
+
+func TestMessagesStreamWritesNothingOnceTheClientIsGone(t *testing.T) {
+	// Pings come from a timer, not from the goroutine reading the stream. A
+	// ping after the pipe returned would write to a response the handler has
+	// already finished with.
+	restore := anthropicPingInterval
+	anthropicPingInterval = time.Millisecond
+	t.Cleanup(func() { anthropicPingInterval = restore })
+
+	dst := &failingWriter{after: 2}
+	_, err := (anthropicShape{}).pipe(dst, func() {},
+		strings.NewReader(sseStream(deltaChunk, deltaChunk, deltaChunk)), "keera-code", true, DefaultMaxResponseBytes)
+	if err == nil {
+		t.Fatal("pipe reported success to a client that was gone")
+	}
+	written := dst.count()
+	time.Sleep(20 * anthropicPingInterval)
+	if dst.count() != written {
+		t.Errorf("%d writes after the pipe returned, want none", dst.count()-written)
+	}
+}
+
+// failingWriter fails every write after the first few, as a closed connection
+// does.
+type failingWriter struct {
+	mu     sync.Mutex
+	after  int
+	writes int
+}
+
+func (w *failingWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.writes++
+	if w.writes > w.after {
+		return 0, io.ErrClosedPipe
+	}
+	return len(p), nil
+}
+
+func (w *failingWriter) count() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.writes
 }

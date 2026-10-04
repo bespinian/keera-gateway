@@ -56,7 +56,7 @@ func TestDisablingAPersonTurnsOffEverythingTheyHold(t *testing.T) {
 
 	// Nobody can hand her a new one while she is disabled.
 	w := tn.call(tn.srv.createKey, carol, http.MethodPost, "/v1/keys",
-		`{"org_id":"org_a","user_id":"user_alice","alias":"new laptop"}`, nil)
+		`{"org_id":"org_a","user_id":"user_alice","name":"new laptop"}`, nil)
 	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "disabled") {
 		t.Errorf("a key for a disabled person = %d %s, want 403 saying why", w.Code, w.Body)
 	}

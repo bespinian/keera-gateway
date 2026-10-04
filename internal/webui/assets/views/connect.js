@@ -3,13 +3,21 @@
 // This screen exists because the last mile is where a gateway is actually
 // adopted or quietly abandoned: an organisation has models and keys, and a
 // developer still has to work out which URL, which model and which file. It
-// answers that for each client the deployment supports, with the model the
-// developer picked already substituted in - so the thing they copy is the thing
-// that works, not a template they have to fill in and get wrong once.
+// answers that for each client the deployment supports, with every model the
+// developer's key may call already filled in - so the thing they copy is the
+// thing that works, not a template they have to fill in and get wrong once.
 
 import { api, chatTargets } from "../api.js";
-import { h, icon, icons, copyText, empty, go, compact } from "../ui.js";
-import { chooseOrg } from "./orgs.js";
+import {
+  h,
+  icon,
+  icons,
+  copyText,
+  empty,
+  go,
+  compact,
+  isAdmin,
+} from "../ui.js";
 
 // The configuration blocks come from the control plane at /control/v1/connect
 // - the same catalogue `keera connect` reads, so the panel and the command
@@ -38,16 +46,25 @@ function limits(maxContext) {
   };
 }
 
-/** fill renders one of the catalogue's templates. It has to agree with
- *  connect.Render on the server, which does the same substitutions. */
-function fill(template, base, alias, maxContext) {
-  const { context, output } = limits(maxContext || 0);
-  return String(template || "")
-    .replaceAll("{{base}}", String(base || "").replace(/\/+$/, ""))
+/** fill substitutes one model's placeholders. It has to agree with
+ *  connect.fill on the server. */
+function fill(text, m) {
+  const { context, output } = limits((m && m.max_context) || 0);
+  const alias = (m && m.alias) || "";
+  return String(text || "")
     .replaceAll("{{alias}}", alias)
     .replaceAll("{{name}}", title(alias))
     .replaceAll("{{context}}", String(context))
     .replaceAll("{{output}}", String(output));
+}
+
+/** render fills in a client's block for a key's models, the default first. It
+ *  has to agree with connect.Render on the server. */
+function render(c, base, models) {
+  return fill(c.template, models[0])
+    .replaceAll("{{base}}", String(base || "").replace(/\/+$/, ""))
+    .replaceAll("{{models}}", models.map((m) => fill(c.entry, m)).join(",\n"))
+    .replaceAll("{{aliases}}", models.map((m) => m.alias).join(", "));
 }
 
 // One fetch per page load. A catalogue that changed under a panel already open
@@ -58,7 +75,7 @@ let catalogue;
 /** loadClients reads the client catalogue and merges the panel's prose into it.
  *
  *  Every entry comes back with the same shape the screens here expect: a
- *  `config(base, model)` that renders the block, and `run`/`note` that build
+ *  `config(base, models)` that renders the block, and `run`/`note` that build
  *  the paragraphs either side of it. So no screen rendering one has to know
  *  which client it is looking at. */
 export function loadClients() {
@@ -68,8 +85,8 @@ export function loadClients() {
         (res.data || []).map((c) => ({
           ...c,
           path: c.path || null,
-          config: (base, m) => fill(c.template, base, m.alias, m.max_context),
-          run: (m) => prose(fill(c.run, "", m.alias)),
+          config: (base, models) => render(c, base, models),
+          run: (models) => prose(fill(c.run, models[0])),
           note: c.note ? () => prose(c.note) : null,
         })),
       (err) => {
@@ -83,30 +100,25 @@ export function loadClients() {
   return catalogue;
 }
 
-export async function connectView(ctx) {
-  if (!ctx.orgID && ctx.state.me.unrestricted)
-    return chooseOrg(ctx, "Connect a client");
+/** keyModels is the chat models and routers the key may call, in the
+ *  organisation's order. A key from /v1/access carries them resolved. */
+export function keyModels(targets, allowed) {
+  return targets.filter((m) => (allowed || []).includes(m.alias));
+}
 
-  const [clients, models] = await Promise.all([
-    loadClients(),
-    chatTargets(ctx.orgID),
-  ]);
+export async function connectView(ctx) {
+  // Only the reader's own keys: the configuration is for their machine. A
+  // subscription key works only from Claude Code signed in to a Claude plan,
+  // which `keera connect claude-code --subscription` sets up.
+  const [clients, a] = await Promise.all([loadClients(), api.access()]);
   ctx.setSubtitle(
     "Pi, OpenCode, Claude Code or any OpenAI-compatible client, pointed at " +
       "this gateway",
   );
-
-  if (!models.length) {
-    return h(
-      "div",
-      { class: "card" },
-      empty(
-        "Nothing to connect to yet",
-        "A coding agent needs an enabled chat model. An administrator can " +
-          "add one under Models.",
-      ),
-    );
-  }
+  const keys = (a.keys || []).filter(
+    (k) => k.state === "active" && k.kind !== "subscription",
+  );
+  if (!keys.length) return noKey(ctx, a);
   if (!clients.length) {
     return h(
       "div",
@@ -120,67 +132,73 @@ export async function connectView(ctx) {
     );
   }
 
-  const remembered = localStorage.getItem("keera.connect.model");
-  const chosen = models.find((m) => m.alias === remembered) || models[0];
+  // Every key here is in the reader's own organisation, so one read covers
+  // them all.
+  const targets = await chatTargets(keys[0].org_id);
+
+  const remembered = localStorage.getItem("keera.connect.key");
   const clientKey =
     localStorage.getItem("keera.connect.client") || clients[0].key;
-
   const state = {
-    model: chosen,
+    key: keys.find((k) => k.id === remembered) || keys[0],
     client: clients.find((c) => c.key === clientKey) || clients[0],
     base: defaultBase(ctx),
   };
 
-  // Only the instructions are rebuilt when the model or the client changes:
-  // the picker above them is not re-created, so the select keeps its focus.
+  // Only what depends on the key or the client is rebuilt when they change:
+  // the picker is not re-created, so the select keeps its focus.
+  const models = h("div", { class: "hint" });
   const steps = h("div");
-  const render = () => steps.replaceChildren(instructions(ctx, state));
+  const redraw = () => {
+    const usable = keyModels(targets, state.key.allowed_models);
+    models.replaceChildren(...modelList(usable));
+    steps.replaceChildren(
+      usable.length
+        ? instructions(ctx, state, usable)
+        : h(
+            "div",
+            { class: "card" },
+            empty(
+              "This key can use no chat model",
+              "Its guardrails allow no model that serves chat. Choose another " +
+                "key, or ask an administrator.",
+            ),
+          ),
+    );
+  };
 
-  const model = h(
+  const key = h(
     "select",
     {
       class: "select",
       onChange: (e) => {
-        state.model =
-          models.find((m) => m.alias === e.target.value) || models[0];
-        localStorage.setItem("keera.connect.model", state.model.alias);
-        render();
+        state.key = keys.find((k) => k.id === e.target.value) || keys[0];
+        localStorage.setItem("keera.connect.key", state.key.id);
+        redraw();
       },
     },
-    models.map((m) =>
+    keys.map((k) =>
       h(
         "option",
-        { value: m.alias, selected: m.alias === state.model.alias },
-        m.router
-          ? `${m.alias} - router`
-          : m.max_context
-            ? `${m.alias} - ${compact(m.max_context)} context`
-            : m.alias,
+        { value: k.id, selected: k.id === state.key.id },
+        `${k.name} - ${k.prefix}…`,
       ),
     ),
   );
 
-  // The model is the only choice on this screen. The gateway address had a
-  // field next to this one, and it is gone rather than shown disabled: it is
-  // not a decision, so a control for it - even one that refuses the keystroke -
-  // only invites a developer to look for the way to change it. It is already
-  // in the block below, which is where they need to read it, and an operator
-  // whose panel is published under another name declares it with
-  // KEERA_PUBLIC_URL so that every panel and `keera connect` agree.
+  // The key is the only choice on this screen. The models follow from it, and
+  // the gateway address is not a decision: it is already in the block below,
+  // and an operator whose panel is published under another name declares it
+  // with KEERA_PUBLIC_URL so that every panel and `keera connect` agree.
   const picker = h(
     "div",
     { class: "card card-body", style: { marginBottom: "16px" } },
     h(
       "div",
       { class: "field", style: { marginBottom: 0 } },
-      h("label", {}, "Model"),
-      model,
-      h(
-        "div",
-        { class: "hint" },
-        "This is an alias. If it is pointed at another model, your editor " +
-          "setup stays the same.",
-      ),
+      h("label", {}, "API key"),
+      key,
+      models,
     ),
   );
 
@@ -204,7 +222,7 @@ export async function connectView(ctx) {
                   String(el.textContent === c.label),
                 );
               }
-              render();
+              redraw();
             },
           },
           c.label,
@@ -213,15 +231,15 @@ export async function connectView(ctx) {
     ),
   );
 
-  render();
+  redraw();
   return h(
     "div",
     {},
     h(
       "div",
       { class: "muted", style: { marginBottom: "16px" } },
-      "Pick a model and a client, then copy the result. It is ready to use " +
-        "as is.",
+      "Pick one of your keys and a client, then copy the result. It sets up " +
+        "every model the key can use.",
     ),
     picker,
     tabs,
@@ -229,40 +247,81 @@ export async function connectView(ctx) {
   );
 }
 
-function instructions(ctx, state) {
-  const { client, model, base } = state;
-  const config = client.config(base || location.origin + "/api", model);
+/** modelList names the models a configuration sets up, with their windows. */
+function modelList(models) {
+  if (!models.length) return [];
+  return [
+    "This key can use ",
+    ...models.flatMap((m, i) => [
+      i ? ", " : "",
+      h("code", {}, m.alias),
+      m.router
+        ? " (router)"
+        : m.max_context
+          ? ` (${compact(m.max_context)} context)`
+          : "",
+    ]),
+    ". The first is the default.",
+  ];
+}
+
+/** noKey explains why there is no key to connect with, and where to get one. */
+function noKey(ctx, a) {
+  if (a.anonymous || (a.operator_key && !(a.keys || []).length)) {
+    return h(
+      "div",
+      { class: "card" },
+      empty(
+        "The operator key has no API keys",
+        "A client connects with one of your own API keys. Sign in with your " +
+          "identity provider to use yours.",
+      ),
+    );
+  }
+  const canIssue = isAdmin(ctx);
+  return h(
+    "div",
+    { class: "card" },
+    empty(
+      "You have no active API key",
+      canIssue
+        ? h(
+            "span",
+            {},
+            "A client connects with one of your own keys. Issue one on ",
+            h("a", { href: "/keys", onClick: go(ctx, "/keys") }, "API keys"),
+            ".",
+          )
+        : "A client connects with one of your own keys. Ask an " +
+            "administrator for a key in your name.",
+    ),
+  );
+}
+
+function instructions(ctx, state, models) {
+  const { client, key, base } = state;
+  const config = client.config(base || location.origin + "/api", models);
 
   return h(
     "div",
     { class: "steps" },
     step(
       1,
-      "Get a key",
+      "Set your key",
       h(
         "div",
         {},
         h(
           "p",
           { class: "muted" },
-          "Budgets, rate limits and the audit log are tracked per key. A key " +
-            "is shown only once, when it is issued.",
+          "Add the key ",
+          h("strong", {}, key.name),
+          " to your shell profile. It was shown only once, when it was " +
+            "issued. If you no longer have it, rotate it under ",
+          h("a", { href: "/keys", onClick: go(ctx, "/keys") }, "API keys"),
+          ".",
         ),
-        h(
-          "p",
-          { class: "muted" },
-          "Issue one under ",
-          h(
-            "a",
-            {
-              href: "/keys",
-              onClick: go(ctx, "/keys"),
-            },
-            "API keys",
-          ),
-          ", or ask an administrator. Then add it to your shell profile:",
-        ),
-        code("export KEERA_API_KEY=keera_sk_…"),
+        code(`export KEERA_API_KEY=${key.prefix}…`),
       ),
     ),
 
@@ -286,11 +345,11 @@ function instructions(ctx, state) {
                 "machine picks them up.",
         ),
         code(config),
-        client.note ? h("p", { class: "muted" }, client.note(model)) : null,
+        client.note ? h("p", { class: "muted" }, client.note()) : null,
       ),
     ),
 
-    step(3, "Run it", h("p", { class: "muted" }, client.run(model))),
+    step(3, "Run it", h("p", { class: "muted" }, client.run(models))),
   );
 }
 

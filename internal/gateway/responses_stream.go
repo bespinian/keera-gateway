@@ -20,7 +20,7 @@ import (
 // no keep-alive event, so unlike the Messages stream this one writes only
 // when the upstream does.
 func (responsesShape) pipe(dst io.Writer, flush func(), src io.Reader, alias string,
-	_ bool,
+	_ bool, limit int64,
 ) (streamStats, error) {
 	var stats streamStats
 	st := &responsesStream{
@@ -36,7 +36,7 @@ func (responsesShape) pipe(dst io.Writer, flush func(), src io.Reader, alias str
 		flush()
 		return nil
 	}
-	readErr := scanSSE(src, st.chunk)
+	readErr := scanSSE(src, limit, st.chunk)
 	// The response is closed even after an upstream failure, so a client does
 	// not wait for an end that never comes.
 	finishErr := st.finish()

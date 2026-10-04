@@ -12,7 +12,7 @@ import (
 func scopes() []policy.Scope {
 	return []policy.Scope{
 		{Type: policy.ScopeOrg, ID: "org_1", BudgetMicros: 10_000_000, Period: policy.PeriodMonth},
-		{Type: policy.ScopeTeam, ID: "team_1", BudgetMicros: 1_000_000, Period: policy.PeriodDay},
+		{Type: policy.ScopeProject, ID: "project_1", BudgetMicros: 1_000_000, Period: policy.PeriodDay},
 	}
 }
 
@@ -24,7 +24,7 @@ func TestAllowUntilTheTightestScopeIsSpent(t *testing.T) {
 		t.Fatalf("a fresh budget refused a request: %v", err)
 	}
 
-	// Spend the team's daily allowance but not the org's monthly one.
+	// Spend the project's daily allowance but not the org's monthly one.
 	b.Charge(scopes(), 1_000_000, now)
 
 	err := b.Allow(scopes(), now)
@@ -32,8 +32,8 @@ func TestAllowUntilTheTightestScopeIsSpent(t *testing.T) {
 	if !errors.As(err, &exceeded) {
 		t.Fatalf("err = %v, want ErrBudgetExceeded", err)
 	}
-	if exceeded.Scope.Type != policy.ScopeTeam {
-		// The org still has room; the team is what ran out.
+	if exceeded.Scope.Type != policy.ScopeProject {
+		// The org still has room; the project is what ran out.
 		t.Errorf("the wrong scope was blamed: %+v", exceeded.Scope)
 	}
 }
@@ -77,14 +77,14 @@ func TestReconcileReplacesLocalSpendWithTheDatabase(t *testing.T) {
 	b.Charge(scopes(), 500_000, now)
 
 	b.reconcile([]store.SpendRow{{
-		ScopeType:   policy.ScopeTeam,
-		ScopeID:     "team_1",
+		ScopeType:   policy.ScopeProject,
+		ScopeID:     "project_1",
 		Period:      policy.PeriodDay,
 		PeriodStart: policy.PeriodDay.Start(now),
 		Micros:      900_000,
 	}})
 
-	if got := b.Spent(policy.ScopeTeam, "team_1", policy.PeriodDay, now); got != 900_000 {
+	if got := b.Spent(policy.ScopeProject, "project_1", policy.PeriodDay, now); got != 900_000 {
 		t.Errorf("spend after reconcile = %d, want the database's 900000", got)
 	}
 	// The org row was not in the database, so its window is gone rather than

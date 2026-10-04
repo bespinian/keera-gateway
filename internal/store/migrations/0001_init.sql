@@ -24,11 +24,12 @@ CREATE UNIQUE INDEX orgs_email_domain_key
 -- two that differ only in case would be easy to mix up.
 CREATE UNIQUE INDEX orgs_name_key ON orgs (lower(name));
 
-CREATE TABLE teams (
-    id         text PRIMARY KEY,
-    org_id     text NOT NULL REFERENCES orgs (id) ON DELETE CASCADE,
-    name       text NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now(),
+CREATE TABLE projects (
+    id          text PRIMARY KEY,
+    org_id      text NOT NULL REFERENCES orgs (id) ON DELETE CASCADE,
+    name        text NOT NULL,
+    description text NOT NULL DEFAULT '',
+    created_at  timestamptz NOT NULL DEFAULT now(),
     UNIQUE (org_id, name)
 );
 
@@ -43,7 +44,7 @@ CREATE TABLE users (
     -- directory. Null for users Keera authenticates itself.
     external_id text,
     -- Roles are deliberately few. "operator" is us, and crosses organisations;
-    -- "admin" runs one organisation's teams, guardrails and keys; "member" sees
+    -- "admin" runs one organisation's projects, guardrails and keys; "member" sees
     -- the organisation's usage, manages their own keys and changes no policy.
     role        text NOT NULL DEFAULT 'member'
         CHECK (role IN ('operator', 'admin', 'member')),
@@ -62,17 +63,15 @@ CREATE UNIQUE INDEX users_external_id_key ON users (external_id) WHERE external_
 CREATE TABLE api_keys (
     id         text PRIMARY KEY,
     org_id     text NOT NULL REFERENCES orgs (id) ON DELETE CASCADE,
-    -- A deleted team leaves its revoked keys in the organisation, for the
-    -- usage history. DeleteTeam refuses while any still works.
-    team_id    text REFERENCES teams (id) ON DELETE SET NULL,
+    -- Every working key is in a project. DeleteProject refuses while one
+    -- still works, and leaves the revoked ones in the organisation without a
+    -- project, for the usage history.
+    project_id text REFERENCES projects (id) ON DELETE SET NULL,
     user_id    text REFERENCES users (id) ON DELETE SET NULL,
-    -- The label on a key is not what the key is called; it is what stands in
-    -- for the key wherever the key itself must not appear. The secret is shown
-    -- once and never again, so every screen, report and audit entry that has
-    -- something to say about a key says it about this column instead - and a
-    -- rotation deliberately carries the label over to a different credential,
-    -- which is a thing an alias does and a name does not.
-    alias      text NOT NULL,
+    -- The secret is shown once and never again, so every screen, report and
+    -- audit entry names the key by this instead. A rotation carries the name
+    -- over to the new key. Not unique: two people may each have "laptop".
+    name       text NOT NULL,
     -- SHA-256 of the presented key. The key itself is never stored.
     key_hash   bytea NOT NULL UNIQUE,
     prefix     text NOT NULL,
@@ -82,18 +81,19 @@ CREATE TABLE api_keys (
     kind       text NOT NULL DEFAULT 'standard' CHECK (kind IN ('standard', 'subscription')),
     created_at timestamptz NOT NULL DEFAULT now(),
     expires_at timestamptz,
-    revoked_at timestamptz
+    revoked_at timestamptz,
+    CONSTRAINT api_keys_project_check CHECK (project_id IS NOT NULL OR revoked_at IS NOT NULL)
 );
 CREATE INDEX api_keys_org_id_idx ON api_keys (org_id);
-CREATE INDEX api_keys_team_id_idx ON api_keys (team_id);
+CREATE INDEX api_keys_project_id_idx ON api_keys (project_id);
 
 -- What a scope is allowed, at each of the three levels a request belongs to.
 --
 -- The levels combine restrict-only - minimum for a ceiling, intersection for a
--- list - so delegating team administration cannot be used to grant that team
+-- list - so delegating project administration cannot be used to grant that project
 -- more than its organisation allowed.
 CREATE TABLE guardrails (
-    scope_type        text NOT NULL CHECK (scope_type IN ('org', 'team', 'key')),
+    scope_type        text NOT NULL CHECK (scope_type IN ('org', 'project', 'key')),
     scope_id          text NOT NULL,
     allowed_models    text[],
     max_output_tokens int,
@@ -105,7 +105,7 @@ CREATE TABLE guardrails (
 
     -- Every other column here narrows a number, and combining two of them is a
     -- minimum. This one carries text and combines by concatenation, so it
-    -- needs no CHECK to keep a team inside its organisation: a team's prompt is
+    -- needs no CHECK to keep a project inside its organisation: a project's prompt is
     -- sent after the organisation's, never instead of it. Its length is bounded
     -- by the control plane, which is the layer that knows the text is charged
     -- as input tokens on every request the scope makes.
@@ -114,7 +114,7 @@ CREATE TABLE guardrails (
     -- Which filters this scope applies, in the order they run.
     --
     -- Like system_prompt and unlike every other column here, this one adds
-    -- rather than narrows: a team's filters run after the organisation's, never
+    -- rather than narrows: a project's filters run after the organisation's, never
     -- instead of them. An alias that no filter in the scope's organisation
     -- answers to is a refusal at request time and not a silently skipped
     -- guardrail - a filter that can be removed by deleting it is not a
@@ -124,8 +124,8 @@ CREATE TABLE guardrails (
     -- The sandbox half. Each of these is here because leaving it out has a
     -- failure somebody has actually had: a cluster full of machines nobody
     -- deleted, the same thing more slowly, a department on the frontier-model
-    -- budget also being on the sixty-four-core class, and one team's agent
-    -- fleet taking a node pool three other teams share.
+    -- budget also being on the sixty-four-core class, and one project's agent
+    -- fleet taking a node pool three other projects share.
     max_sandboxes           integer,
     max_sandbox_ttl_seconds integer,
     sandbox_classes         text[],
@@ -469,7 +469,7 @@ CREATE TABLE usage_events (
     id                bigserial PRIMARY KEY,
     ts                timestamptz NOT NULL DEFAULT now(),
     org_id            text NOT NULL,
-    team_id           text,
+    project_id        text,
     user_id           text,
     key_id            text,
     -- The model that answered, which is where every other number on this row
@@ -561,9 +561,9 @@ CREATE TABLE usage_events (
 );
 CREATE INDEX usage_events_ts_idx ON usage_events (ts);
 CREATE INDEX usage_events_org_ts_idx ON usage_events (org_id, ts);
-CREATE INDEX usage_events_team_ts_idx ON usage_events (team_id, ts);
+CREATE INDEX usage_events_project_ts_idx ON usage_events (project_id, ts);
 CREATE INDEX usage_events_key_ts_idx ON usage_events (key_id, ts);
--- The per-entity reports: one team, one key or one model, read on its own
+-- The per-entity reports: one project, one key or one model, read on its own
 -- screen rather than as a share of the organisation's total.
 -- Led by the organisation, because two organisations can each have a model
 -- of one alias.
@@ -659,9 +659,9 @@ CREATE TABLE filter_runs (
     -- Whose request it was, copied from the same event the request row carries,
     -- so a refusal rate can be broken down by the department that is living
     -- with it. A guardrail that refuses four percent of an organisation's
-    -- traffic and sixty percent of one team's is two very different filters,
+    -- traffic and sixty percent of one project's is two very different filters,
     -- and only the second number gets anybody's attention.
-    team_id     text,
+    project_id  text,
     user_id     text,
     key_id      text,
     -- The model the request was addressed to, which is what says whether a
@@ -671,7 +671,7 @@ CREATE TABLE filter_runs (
 );
 
 -- One filter's own screen: its runs inside a window, in time order. Every
--- reading this table has - the totals, the chart, the breakdown by team - is
+-- reading this table has - the totals, the chart, the breakdown by project - is
 -- that same range scan, which is why there is one index and not four.
 CREATE INDEX filter_runs_org_filter_ts_idx ON filter_runs (org_id, filter, ts);
 -- The Filters list asks the same question of every filter at once, so it reads
@@ -690,7 +690,7 @@ CREATE TABLE tool_calls (
     id           bigserial PRIMARY KEY,
     ts           timestamptz NOT NULL DEFAULT now(),
     org_id       text NOT NULL,
-    team_id      text,
+    project_id   text,
     user_id      text,
     key_id       text,
     -- The server's alias and the tool's name, as the client called them. Not
@@ -888,7 +888,7 @@ CREATE INDEX cli_tokens_expires_at_idx ON cli_tokens (expires_at);
 -- The catalogue: a machine somebody can ask for by name.
 --
 -- The name is a contract in the way a model alias is. It is typed on a command
--- line, written into a repository's own configuration and baked into a team's
+-- line, written into a repository's own configuration and baked into a project's
 -- habits, so an administrator has to be able to change the image behind it,
 -- move it to a stronger isolation tier or give it more memory without anybody
 -- editing anything - and everything below exists to protect that.
@@ -939,12 +939,12 @@ CREATE TABLE sandbox_classes (
 CREATE TABLE sandboxes (
     id        text PRIMARY KEY,
     org_id    text NOT NULL REFERENCES orgs (id) ON DELETE CASCADE,
-    -- The team and the person are kept even when the row they pointed at goes.
+    -- The project and the person are kept even when the row they pointed at goes.
     -- A sandbox is a thing that cost money and held source code, so the
     -- question "whose was this" has to keep an answer after somebody leaves -
     -- which is why these are SET NULL rather than CASCADE, and why the
     -- addresses beside them are copied rather than joined.
-    team_id   text REFERENCES teams (id) ON DELETE SET NULL,
+    project_id text REFERENCES projects (id) ON DELETE SET NULL,
     user_id   text REFERENCES users (id) ON DELETE SET NULL,
     owner     text NOT NULL DEFAULT '',
     -- What the developer called it. It is a DNS label inside the cluster and

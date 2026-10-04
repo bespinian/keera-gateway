@@ -25,15 +25,15 @@ func sessionFixture(t *testing.T, st *store.Store) (from, to time.Time) {
 	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_1", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
-	// The team and the key exist as rows, not only as ids on a usage event:
+	// The project and the key exist as rows, not only as ids on a usage event:
 	// narrowing a report to one of them is checked against who owns it, which
 	// is what keeps one tenant from reading another's traffic by naming its id.
-	if _, err := st.CreateTeam(ctx, "team_1", "org_1", "Payments Platform"); err != nil {
-		t.Fatalf("CreateTeam: %v", err)
+	if _, err := st.CreateProject(ctx, store.Project{ID: "project_1", OrgID: "org_1", Name: "Payments Platform"}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
 	}
 	if _, err := st.CreateKey(ctx, store.KeyInfo{
-		ID: "key_1", OrgID: "org_1", TeamID: "team_1",
-		Alias: "a developer's laptop", Prefix: "keera_sk_ab",
+		ID: "key_1", OrgID: "org_1", ProjectID: "project_1",
+		Name: "a developer's laptop", Prefix: "keera_sk_ab",
 	}, []byte("hash-of-a-key-that-is-32-bytes!!")); err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
@@ -43,7 +43,7 @@ func sessionFixture(t *testing.T, st *store.Store) (from, to time.Time) {
 	for i := range 3 {
 		events = append(events, store.Event{
 			TS:    now.Add(-3*time.Hour + time.Duration(i)*time.Minute),
-			OrgID: "org_1", TeamID: "team_1", KeyID: "key_1", Alias: "keera-code",
+			OrgID: "org_1", ProjectID: "project_1", KeyID: "key_1", Alias: "keera-code",
 			SessionKey: task, Status: 200, CostMicros: 1000, InputTokens: 500,
 			OutputTokens: 50, Latency: 2 * time.Second, TTFT: 300 * time.Millisecond,
 		})
@@ -51,11 +51,11 @@ func sessionFixture(t *testing.T, st *store.Store) (from, to time.Time) {
 	events = append(events,
 		store.Event{
 			TS:    now.Add(-3*time.Hour + 3*time.Minute),
-			OrgID: "org_1", TeamID: "team_1", KeyID: "key_1", Alias: "keera-code",
-			SessionKey: task, Status: 402, Error: "your team has spent its month budget",
+			OrgID: "org_1", ProjectID: "project_1", KeyID: "key_1", Alias: "keera-code",
+			SessionKey: task, Status: 402, Error: "your project has spent its month budget",
 		},
 		store.Event{
-			TS: now.Add(-time.Hour), OrgID: "org_1", TeamID: "team_1", KeyID: "key_1",
+			TS: now.Add(-time.Hour), OrgID: "org_1", ProjectID: "project_1", KeyID: "key_1",
 			Alias: "keera-speed", SessionKey: store.DerivedSessionKey("bbbbbbbbbbbbbbbb"),
 			Status: 200, CostMicros: 20, Latency: time.Second,
 		},
@@ -105,7 +105,7 @@ type sessionList struct {
 	GapSeconds int64                    `json:"gap_seconds"`
 	Currency   string                   `json:"currency"`
 	NextBefore int64                    `json:"next_before"`
-	KeyAliases map[string]string        `json:"key_aliases"`
+	KeyNames   map[string]string        `json:"key_names"`
 }
 
 func TestSessionsReportTasksWithTheWindowsTotalsAboveThem(t *testing.T) {
@@ -140,8 +140,8 @@ func TestSessionsReportTasksWithTheWindowsTotalsAboveThem(t *testing.T) {
 		t.Errorf("currency = %q, want CHF", got.Currency)
 	}
 	// Ids alone are not something anybody can act on.
-	if got.KeyAliases == nil {
-		t.Error("the report carries no key aliases")
+	if got.KeyNames == nil {
+		t.Error("the report carries no key names")
 	}
 
 	// The task that ended on the refusal says so in the list, which is what
@@ -317,10 +317,10 @@ func TestSessionsCSVCarriesTheCostPerTask(t *testing.T) {
 		StartedAt: start, EndedAt: start.Add(11*time.Minute + 30*time.Second),
 		Requests: 41, OK: 40, Refused: 1, Models: []string{"keera-code", "keera-frontier"},
 		InputTokens: 900, OutputTokens: 100, CostMicros: 1_200_000,
-		KeyID: "key_1", TeamID: "team_1", LastStatus: 402, LastError: "budget spent",
+		KeyID: "key_1", ProjectID: "project_1", LastStatus: 402, LastError: "budget spent",
 	}}, groupLabels{
-		teams: map[string]string{"team_1": "Payments Platform"},
-		keys:  map[string]string{"key_1": "a developer's laptop"},
+		projects: map[string]string{"project_1": "Payments Platform"},
+		keys:     map[string]string{"key_1": "a developer's laptop"},
 	})
 
 	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/csv") {

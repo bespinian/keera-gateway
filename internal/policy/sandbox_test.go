@@ -114,21 +114,21 @@ func TestResolvedSandboxAdmits(t *testing.T) {
 }
 
 func TestResolveSandboxIsRestrictOnly(t *testing.T) {
-	// The whole point of the combining rule: delegating team administration
-	// must not be usable to grant that team more than its organisation allowed.
+	// The whole point of the combining rule: delegating project administration
+	// must not be usable to grant that project more than its organisation allowed.
 	org := &Limits{
 		MaxSandboxes:         new(4),
 		MaxSandboxTTLSeconds: new(8 * 3600),
 		SandboxClasses:       []string{"small", "medium", "big"},
 		MaxSandboxCPU:        new(8000)}
-	team := &Limits{
+	project := &Limits{
 		// Every one of these asks for more than the organisation allowed.
 		MaxSandboxes:         new(99),
 		MaxSandboxTTLSeconds: new(720 * 3600),
 		SandboxClasses:       []string{"medium", "big", "enormous"},
 		MaxSandboxCPU:        new(64000)}
 
-	got := Resolve(Key{ID: "key_1", OrgID: "org_1", TeamID: "team_1"}, org, team, nil).Sandbox
+	got := Resolve(Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"}, org, project, nil).Sandbox
 
 	if got.MaxSandboxes != 4 {
 		t.Errorf("MaxSandboxes = %d, want the organisation's 4", got.MaxSandboxes)
@@ -152,12 +152,12 @@ func TestResolveSandboxIsRestrictOnly(t *testing.T) {
 }
 
 func TestResolveSandboxNarrowsFromNothing(t *testing.T) {
-	// A team may narrow what an organisation left unlimited. Restrict-only is
+	// A project may narrow what an organisation left unlimited. Restrict-only is
 	// about the direction, not about whether the outer level said anything.
-	team := &Limits{MaxSandboxes: new(2)}
-	got := Resolve(Key{ID: "key_1", OrgID: "org_1", TeamID: "team_1"}, nil, team, nil).Sandbox
+	project := &Limits{MaxSandboxes: new(2)}
+	got := Resolve(Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"}, nil, project, nil).Sandbox
 	if got.MaxSandboxes != 2 {
-		t.Errorf("MaxSandboxes = %d, want the team's 2", got.MaxSandboxes)
+		t.Errorf("MaxSandboxes = %d, want the project's 2", got.MaxSandboxes)
 	}
 }
 
@@ -233,15 +233,15 @@ func TestAllowedReposNarrowAndDefaultToNothing(t *testing.T) {
 	if err := (ResolvedSandbox{}).AdmitsRepo("acme/app"); err == nil {
 		t.Error("a scope with no list checked out a repository")
 	}
-	anyTeam := &Limits{AllowedRepos: []string{AnyRepo}}
-	if err := Resolve(Key{OrgID: "o", TeamID: "t"}, nil, anyTeam, nil).Sandbox.AdmitsRepo("bankb/core"); err == nil {
-		t.Error("a team granted itself repositories in an organisation with no guardrail")
+	anyProject := &Limits{AllowedRepos: []string{AnyRepo}}
+	if err := Resolve(Key{OrgID: "o", ProjectID: "t"}, nil, anyProject, nil).Sandbox.AdmitsRepo("bankb/core"); err == nil {
+		t.Error("a project granted itself repositories in an organisation with no guardrail")
 	}
 
 	for _, tc := range []struct {
-		org, team []string
-		path      string
-		ok        bool
+		org, project []string
+		path         string
+		ok           bool
 	}{
 		{[]string{"acme"}, nil, "acme/app", true},
 		{[]string{"acme"}, nil, "ACME/App", true},
@@ -249,21 +249,21 @@ func TestAllowedReposNarrowAndDefaultToNothing(t *testing.T) {
 		{[]string{"acme"}, nil, "acmeapp", false},
 		{[]string{"group/sub"}, nil, "group/sub/deep/app", true},
 		{[]string{AnyRepo}, nil, "anyone/anything", true},
-		// A team can narrow the organisation's list, never widen it.
+		// A project can narrow the organisation's list, never widen it.
 		{[]string{"acme"}, []string{"acme/app"}, "acme/app", true},
 		{[]string{"acme"}, []string{"acme/app"}, "acme/other", false},
 		{[]string{"acme"}, []string{AnyRepo}, "bankb/core", false},
 		{[]string{"acme"}, []string{"bankb"}, "bankb/core", false},
 		{[]string{AnyRepo}, []string{"acme"}, "bankb/core", false},
-		// Without an organisation list, a team cannot grant itself one.
+		// Without an organisation list, a project cannot grant itself one.
 		{nil, []string{AnyRepo}, "bankb/core", false},
 		{nil, []string{"acme"}, "acme/app", false},
 	} {
 		org := &Limits{AllowedRepos: tc.org}
-		team := &Limits{AllowedRepos: tc.team}
-		r := Resolve(Key{OrgID: "o", TeamID: "t"}, org, team, nil).Sandbox
+		project := &Limits{AllowedRepos: tc.project}
+		r := Resolve(Key{OrgID: "o", ProjectID: "t"}, org, project, nil).Sandbox
 		if err := r.AdmitsRepo(tc.path); (err == nil) != tc.ok {
-			t.Errorf("org %v, team %v, %s: err = %v, want allowed=%v", tc.org, tc.team, tc.path, err, tc.ok)
+			t.Errorf("org %v, project %v, %s: err = %v, want allowed=%v", tc.org, tc.project, tc.path, err, tc.ok)
 		}
 	}
 }

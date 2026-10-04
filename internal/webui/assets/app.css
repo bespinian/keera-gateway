@@ -886,7 +886,7 @@ input[type="checkbox"]:disabled {
 
 /* -------------------------------------------------------------- detail */
 
-/* One team, one key, one model. Everything above the chart: the way back to
+/* One project, one key, one model. Everything above the chart: the way back to
    the list, what this thing is, and the window being read. */
 .detail-head {
   display: grid;

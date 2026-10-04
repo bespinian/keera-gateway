@@ -56,7 +56,7 @@ func db(t *testing.T) (*Store, context.Context) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
-	if _, err := testStore.pool.Exec(ctx, `TRUNCATE orgs, teams, users, api_keys, guardrails,
+	if _, err := testStore.pool.Exec(ctx, `TRUNCATE orgs, projects, users, api_keys, guardrails,
 		models, filters, filter_runs, routers, usage_events, spend, audit_log, sessions,
 		login_flows, cli_codes, cli_tokens, sandboxes, sandbox_classes, mcp_servers, tool_calls
 		RESTART IDENTITY CASCADE`); err != nil {
@@ -65,27 +65,27 @@ func db(t *testing.T) (*Store, context.Context) {
 	return testStore, ctx
 }
 
-// fixture is the tenancy every policy test needs: one org, one team in it, and
+// fixture is the tenancy every policy test needs: one org, one project in it, and
 // one key bound to both.
 type fixture struct {
-	orgID, teamID, keyID string
-	key                  string
-	hash                 []byte
+	orgID, projectID, keyID string
+	key                     string
+	hash                    []byte
 }
 
 func newFixture(t *testing.T, st *Store, ctx context.Context) fixture {
 	t.Helper()
-	f := fixture{orgID: "org_1", teamID: "team_1", keyID: "key_1", key: "keera_sk_test"}
+	f := fixture{orgID: "org_1", projectID: "project_1", keyID: "key_1", key: "keera_sk_test"}
 	f.hash = []byte("hash-of-keera_sk_test-32-bytes!!!")
 	if _, err := st.CreateOrg(ctx, Org{ID: f.orgID, Name: "Example Bank"}, OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
-	if _, err := st.CreateTeam(ctx, f.teamID, f.orgID, "Payments Platform"); err != nil {
-		t.Fatalf("CreateTeam: %v", err)
+	if _, err := st.CreateProject(ctx, Project{ID: f.projectID, OrgID: f.orgID, Name: "Payments Platform"}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
 	}
 	if _, err := st.CreateKey(ctx, KeyInfo{
-		ID: f.keyID, OrgID: f.orgID, TeamID: f.teamID,
-		Alias: "a developer's laptop", Prefix: "keera_sk_test",
+		ID: f.keyID, OrgID: f.orgID, ProjectID: f.projectID,
+		Name: "a developer's laptop", Prefix: "keera_sk_test",
 	}, f.hash); err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}

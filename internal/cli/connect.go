@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/bespinian/keera-gateway/internal/connect"
@@ -20,14 +21,16 @@ import (
 func connectCmd(ctx context.Context, args []string) error {
 	c := newClient()
 	fs := flag.NewFlagSet("connect", flag.ExitOnError)
-	model := fs.String("model", "",
-		"the model or router to configure (default: the first enabled chat model)")
+	key := fs.String("key", "",
+		"the API key whose models to configure, by alias or id (default: your first active key)")
+	model := fs.String("model", "", "with --subscription, the model Claude Code starts with "+
+		"(default: the first subscription model)")
 	org := fs.String("org", "", orgUsage)
 	asJSON := fs.Bool("json", false, jsonUsage)
 	subscription := fs.Bool("subscription", false,
-		"for Claude Code signed in to a Claude plan: issue this machine its own key and "+
+		"for Claude Code signed in to a Claude plan: give this machine its own key and "+
 			"write it into ~/.claude/settings.json")
-	team := fs.String("team", "", "with --subscription, the team the new key belongs to "+
+	project := fs.String("project", "", "with --subscription, the project the new key belongs to "+
 		"(administrators only)")
 	fs.Usage = func() { _ = printHelp(fs, "connect", "") }
 	if want, ok := wantsHelp(args); ok {
@@ -50,24 +53,34 @@ func connectCmd(ctx context.Context, args []string) error {
 		if sub != "claude-code" {
 			return errors.New("--subscription is for Claude Code: keera connect claude-code --subscription")
 		}
+		if *key != "" {
+			return errors.New("--key is not for --subscription, which issues its own key")
+		}
 		if cat.GatewayURL == "" {
 			return errNoGatewayURL
 		}
 		return connectSubscription(ctx, c, subscriptionSetup{
-			org: *org, team: *team, model: *model, gatewayURL: cat.GatewayURL, asJSON: *asJSON,
+			org: *org, project: *project, model: *model, gatewayURL: cat.GatewayURL, asJSON: *asJSON,
 		})
 	}
-	if *team != "" {
-		return errors.New("--team is for --subscription, which issues a key")
+	if *project != "" {
+		return errors.New("--project is for --subscription, which issues a key")
 	}
-	listing := sub == "list" || sub == ""
-	chat, err := connectModels(ctx, c, listing, *model, *org)
+	if *model != "" {
+		return errors.New("--model is for --subscription; a configuration lists every model " +
+			"its key may use, so choose the key with --key instead")
+	}
+	orgID, err := resolveOrg(ctx, c, *org)
+	if err != nil {
+		return err
+	}
+	chat, err := connectModels(ctx, c, orgID)
 	if err != nil {
 		return err
 	}
 
 	// No client named: list the choices rather than pick one.
-	if listing {
+	if sub == "list" || sub == "" {
 		return out(*asJSON, cat, func(w *table) {
 			listConnect(w, cat.Data, chat, cat.GatewayURL)
 		})
@@ -82,11 +95,21 @@ func connectCmd(ctx context.Context, args []string) error {
 		return fmt.Errorf("no client %q; this deployment can configure: %s",
 			sub, strings.Join(keys, ", "))
 	}
-	chosen, err := chooseConnectModel(chat, *model)
+	if len(chat) == 0 {
+		return errNoChatModel
+	}
+	own, err := connectKey(ctx, c, orgID, *key)
 	if err != nil {
 		return err
 	}
-	alias := chosen.Alias
+	models := chat
+	if own != nil {
+		models = keyModels(chat, own.AllowedModels)
+		if len(models) == 0 {
+			return fmt.Errorf("the key %s may use no chat model; an administrator can allow "+
+				"one in its guardrails", own.Name)
+		}
+	}
 
 	// The deployment says where clients reach it. A client pointed anywhere
 	// else would get a 401 that looks like a bad key.
@@ -96,14 +119,19 @@ func connectCmd(ctx context.Context, args []string) error {
 	}
 
 	if *asJSON {
-		return out(true, map[string]any{
-			"client": client.Key, "model": alias, "url": gatewayURL, "path": client.Path,
-			"config": client.Render(gatewayURL, alias, chosen.MaxContext),
-			"run":    client.RunText(alias),
+		res := map[string]any{
+			"client": client.Key, "models": aliasesOf(models), "url": gatewayURL,
+			"path":   client.Path,
+			"config": client.Render(gatewayURL, connectList(models)),
+			"run":    client.RunText(connectList(models)),
 			"note":   client.Note,
-		}, nil)
+		}
+		if own != nil {
+			res["key"] = own.Name
+		}
+		return out(true, res, nil)
 	}
-	printConnect(client, chosen, gatewayURL)
+	printConnect(client, own, models, gatewayURL)
 	return nil
 }
 
@@ -111,20 +139,18 @@ func connectCmd(ctx context.Context, args []string) error {
 var errNoGatewayURL = errors.New("this deployment does not say where a client reaches the " +
 	"inference plane; set KEERA_PUBLIC_URL on the gateway")
 
+var errNoChatModel = errors.New("a coding agent needs a chat model and this organisation has " +
+	"no enabled one; add one with: keera model add <alias> --backend <url> " +
+	"--backend-model <name>")
+
 // connectModels is what a client may be pointed at: the enabled chat models,
 // and the organisation's routers, which a client names in the same field.
 // Subscription models are left out: only a subscription key reaches them, and
 // --subscription sets those up.
 //
-// Routers cost a second round trip, so they are read only for the listing or
-// for a --model that is not a model. Failing to read them is not an error:
-// the models are still worth offering.
-func connectModels(ctx context.Context, c *client, listing bool, model, org string,
-) ([]policy.Model, error) {
-	org, err := resolveOrg(ctx, c, org)
-	if err != nil {
-		return nil, err
-	}
+// Failing to read the routers is not an error: the models are still worth
+// offering.
+func connectModels(ctx context.Context, c *client, org string) ([]policy.Model, error) {
 	models, err := catalogue(ctx, c, org)
 	if err != nil {
 		return nil, err
@@ -135,37 +161,83 @@ func connectModels(ctx context.Context, c *client, listing bool, model, org stri
 			chat = append(chat, m)
 		}
 	}
-	wantRouters := listing
-	if model != "" {
-		if _, found := findModel(chat, model); !found {
-			wantRouters = true
-		}
-	}
-	if wantRouters {
-		if routers, err := connectRouters(ctx, c, org); err == nil {
-			chat = append(chat, routers...)
-		}
+	if routers, err := connectRouters(ctx, c, org); err == nil {
+		chat = append(chat, routers...)
 	}
 	return chat, nil
 }
 
-// chooseConnectModel picks the named model, or the first one. The whole model
-// is returned because its context window goes into the configuration.
-func chooseConnectModel(chat []policy.Model, model string) (policy.Model, error) {
-	if len(chat) == 0 {
-		return policy.Model{}, fmt.Errorf("a coding agent needs a chat model and this organisation has no " +
-			"enabled one; add one with: keera model add <alias> --backend <url> " +
-			"--backend-model <name>")
+// ownKey is one of the caller's keys, as /v1/access describes it.
+type ownKey struct {
+	ID     string         `json:"id"`
+	OrgID  string         `json:"org_id"`
+	Name   string         `json:"name"`
+	Prefix string         `json:"prefix"`
+	Kind   policy.KeyKind `json:"kind"`
+	State  string         `json:"state"`
+	// AllowedModels is every model the key may call, already resolved.
+	AllowedModels []string `json:"allowed_models"`
+}
+
+// connectKey picks the caller's key whose models go into the configuration:
+// the one named, or else their first active one. Somebody with no key of their
+// own, such as the operator key, gets none, and every model is configured.
+//
+// Only the caller's own keys are offered: the configuration is for their
+// machine, and a subscription key works only through --subscription.
+func connectKey(ctx context.Context, c *client, org, named string) (*ownKey, error) {
+	var access struct {
+		Keys []ownKey `json:"keys"`
 	}
-	if model == "" {
-		return chat[0], nil
+	if err := c.do(ctx, "GET", "/v1/access", nil, &access); err != nil {
+		return nil, err
 	}
-	named, found := findModel(chat, model)
-	if !found {
-		return policy.Model{}, fmt.Errorf("no enabled chat model or router %s; this organisation "+
-			"serves: %s", model, strings.Join(aliasesOf(chat), ", "))
+	var usable []ownKey
+	for _, k := range access.Keys {
+		if k.State == "active" && k.Kind != policy.KeySubscription && k.OrgID == org {
+			usable = append(usable, k)
+		}
 	}
-	return named, nil
+	if named == "" {
+		if len(usable) == 0 {
+			return nil, nil
+		}
+		return &usable[0], nil
+	}
+	names := make([]string, 0, len(usable))
+	for i, k := range usable {
+		if k.ID == named || k.Name == named {
+			return &usable[i], nil
+		}
+		names = append(names, k.Name)
+	}
+	if len(names) == 0 {
+		return nil, fmt.Errorf("you have no active key %s, and no other either; "+
+			"ask an administrator to issue one in your name", named)
+	}
+	return nil, fmt.Errorf("you have no active key %s; yours are: %s",
+		named, strings.Join(names, ", "))
+}
+
+// keyModels is the chat models and routers a key's allow-list names, in the
+// organisation's order.
+func keyModels(chat []policy.Model, allowed []string) []policy.Model {
+	out := make([]policy.Model, 0, len(chat))
+	for _, m := range chat {
+		if slices.Contains(allowed, m.Alias) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// connectList is what the catalogue renders a configuration from.
+func connectList(models []policy.Model) []connect.Model {
+	out := make([]connect.Model, 0, len(models))
+	for _, m := range models {
+		out = append(out, connect.Model{Alias: m.Alias, MaxContext: m.MaxContext})
+	}
+	return out
 }
 
 func aliasesOf(models []policy.Model) []string {
@@ -197,26 +269,31 @@ func listConnect(w *table, clients []connect.Client,
 		_, _ = fmt.Fprintf(w, "Chat models and routers: %s\n", strings.Join(aliasesOf(chat), ", "))
 	}
 	if len(clients) > 0 {
-		_, _ = fmt.Fprintf(w, "\nThe configuration for one of them:\n  keera connect %s",
-			clients[0].Key)
-		if len(chat) > 0 {
-			_, _ = fmt.Fprintf(w, " --model %s", chat[0].Alias)
-		}
-		_, _ = fmt.Fprintln(w)
+		_, _ = fmt.Fprintf(w, "\nThe configuration for one of them, with every model your "+
+			"key may use:\n  keera connect %s\n", clients[0].Key)
 	}
 }
 
 // printConnect writes the three steps in order. Only the configuration block
 // goes to stdout, so it can be redirected into its file.
-func printConnect(c connect.Client, m policy.Model, base string) {
-	alias := m.Alias
-	fmt.Fprintf(os.Stderr, "%s · model %s · %s\n\n", styleErr.head(c.Label), alias, base)
+func printConnect(c connect.Client, own *ownKey, models []policy.Model, base string) {
+	which := "every model"
+	if own != nil {
+		which = "key " + own.Name
+	}
+	fmt.Fprintf(os.Stderr, "%s · %s · %s\n\n", styleErr.head(c.Label), which, base)
 
 	fmt.Fprintln(os.Stderr, styleErr.head("1.")+" The key, which your client reads from the "+
 		"environment:")
-	fmt.Fprintln(os.Stderr, "     "+styleErr.cmd("export KEERA_API_KEY=keera_sk_…"))
-	fmt.Fprintln(os.Stderr, "   Issue one with 'keera key create --user <email> --alias <what for>',")
-	fmt.Fprintln(os.Stderr, "   or ask whoever administers this deployment for one.")
+	if own != nil {
+		fmt.Fprintln(os.Stderr, "     "+styleErr.cmd("export KEERA_API_KEY="+own.Prefix+"…"))
+		fmt.Fprintf(os.Stderr, "   Use the key %s. It was shown once, when it was issued.\n",
+			own.Name)
+	} else {
+		fmt.Fprintln(os.Stderr, "     "+styleErr.cmd("export KEERA_API_KEY=keera_sk_…"))
+		fmt.Fprintln(os.Stderr, "   Issue one with 'keera key create --user <email> --name <what for>',")
+		fmt.Fprintln(os.Stderr, "   or ask whoever administers this deployment for one.")
+	}
 
 	if c.Path != "" {
 		fmt.Fprintf(os.Stderr, "\n%s This goes in %s. If that file exists already, merge\n",
@@ -228,12 +305,13 @@ func printConnect(c connect.Client, m policy.Model, base string) {
 		fmt.Fprintln(os.Stderr, "   picks them up:")
 	}
 	fmt.Fprintln(os.Stderr)
-	fmt.Println(c.Render(base, alias, m.MaxContext))
+	fmt.Println(c.Render(base, connectList(models)))
 	if c.Note != "" {
 		fmt.Fprintf(os.Stderr, "\n   %s\n", styleErr.muted(wrapAt(c.NoteText(), 0, 3, 76)))
 	}
 
-	fmt.Fprintf(os.Stderr, "\n%s %s\n", styleErr.head("3."), wrapAt(c.RunText(alias), 0, 3, 76))
+	fmt.Fprintf(os.Stderr, "\n%s %s\n", styleErr.head("3."),
+		wrapAt(c.RunText(connectList(models)), 0, 3, 76))
 }
 
 // connectRouters reads the organisation's routers as model entries with no

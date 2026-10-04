@@ -103,6 +103,15 @@ before rolling it out.
 
 ## 3. Each person, once per machine
 
+Only an administrator issues keys. So first, an administrator issues each
+member one subscription key per machine:
+
+```sh
+keera key create --subscription --user ada@example.ch --name "Ada's Claude Code"
+```
+
+The key itself is not needed. Nobody has to pass it on.
+
 When the address comes from the claude.ai admin console, run `claude` and
 `/login` first, and approve the managed settings. Claude Code then has a copy
 of them, so the command below sees the address. Then run:
@@ -112,10 +121,12 @@ keera login
 keera connect claude-code --subscription --model claude-opus
 ```
 
-This issues the machine its own subscription key, named
+This gives the machine its own subscription key, named
 `claude-code on <hostname> (<id>)`. The id is random and kept in keera's
 configuration directory, so machines that share a hostname keep their own
-keys. It writes the key into `~/.claude/settings.json` (or
+keys. The command finds the machine's key by this name, so keep it. A member takes over a subscription key issued to them that no other
+machine holds yet, and rotates it. An administrator gets a new key. The
+command writes the key into `~/.claude/settings.json` (or
 `$CLAUDE_CONFIG_DIR/settings.json`), so nobody has to paste it:
 
 ```json
@@ -167,8 +178,8 @@ registry. `claude doctor` shows whether the fetch works, on its
 `Managed settings (remote)` line.
 
 The rest of the file is kept. Running the command again replaces the machine's
-key. A member's key uses the organisation's guardrails. An administrator can
-put it in a team with `--team`.
+key. The key keeps the project and guardrails it was issued with. An
+administrator's new key can go in a project with `--project`.
 
 Then run `claude`, and `/login` if it is not signed in to the plan yet.
 `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY` and `apiKeyHelper` must not be set:
@@ -186,8 +197,8 @@ when it finds one.
   asking Anthropic, so a key sent with someone else's sign-in is recorded as
   the key holder's.
 
-`keera key create --subscription` issues one by hand. The panel marks these
-keys **Claude plan**.
+`keera key create --subscription` issues one. The panel marks these keys
+**Claude plan**.
 
 ## What it costs
 
@@ -199,8 +210,7 @@ nothing:
 - **What the plan paid for** is what the same requests would have cost on
   Anthropic's API, from the model's prices. It is never charged. It shows
   whether the plan is worth it. The dashboard shows it next to spend as
-  "on Claude plans, at API prices", and the keys screen per key as "on the
-  plan".
+  "covered by Claude plans", and the keys screen per key as "on the plan".
 - **How much of the plan is used** is the share of the plan's usage limit, as
   Anthropic reports it on each answer: the last five hours and the last seven
   days. The keys screen shows it as "plan 5h 40% · 7d 12%", and `keera key list`

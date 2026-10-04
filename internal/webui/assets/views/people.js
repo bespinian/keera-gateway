@@ -22,12 +22,12 @@ const ROLES = [
   {
     key: "member",
     label: "Member",
-    note: "Sees their organisation's usage and manages their own keys.",
+    note: "Sees their organisation's usage and rotates or revokes their own keys.",
   },
   {
     key: "admin",
     label: "Administrator",
-    note: "Manages the organisation: people, teams, keys, guardrails, models, MCP servers, filters, routers and sandbox classes.",
+    note: "Manages the organisation: people, projects, keys, guardrails, models, MCP servers, filters, routers and sandbox classes.",
   },
   {
     key: "operator",
@@ -195,9 +195,10 @@ export async function peopleView(ctx) {
                   {
                     class: "btn btn-sm",
                     title: "This person's role",
+                    "aria-label": "Edit this person's role",
                     onClick: () => changeRole(ctx, u),
                   },
-                  "Edit",
+                  icon(icons.pencil),
                 )
               : !canAssign
                 ? h(

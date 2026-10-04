@@ -128,24 +128,24 @@ func (s *Server) deleteSandboxClass(w http.ResponseWriter, r *http.Request, p *a
 /* --------------------------------------------------------------- the sandboxes */
 
 // sandboxLimits resolves what a sandbox may be: the organisation's guardrail,
-// narrowed by the team's when it has one. The caller is a person, not an API
-// key, so there is no key level.
-func (s *Server) sandboxLimits(ctx context.Context, orgID, teamID string) (
+// narrowed by the project's. The caller is a person, not an API key, so there
+// is no key level.
+func (s *Server) sandboxLimits(ctx context.Context, orgID, projectID string) (
 	policy.ResolvedSandbox, error,
 ) {
 	org, err := s.storedLimits(ctx, policy.ScopeOrg, orgID)
 	if err != nil {
 		return policy.ResolvedSandbox{}, err
 	}
-	var team *policy.Limits
-	if teamID != "" {
-		lim, err := s.storedLimits(ctx, policy.ScopeTeam, teamID)
+	var project *policy.Limits
+	if projectID != "" {
+		lim, err := s.storedLimits(ctx, policy.ScopeProject, projectID)
 		if err != nil {
 			return policy.ResolvedSandbox{}, err
 		}
-		team = &lim
+		project = &lim
 	}
-	return policy.Resolve(policy.Key{OrgID: orgID, TeamID: teamID}, &org, team, nil).Sandbox, nil
+	return policy.Resolve(policy.Key{OrgID: orgID, ProjectID: projectID}, &org, project, nil).Sandbox, nil
 }
 
 func (s *Server) listSandboxes(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
@@ -155,11 +155,11 @@ func (s *Server) listSandboxes(w http.ResponseWriter, r *http.Request, p *authn.
 		return
 	}
 	q := store.SandboxQuery{
-		OrgID:   orgID,
-		TeamID:  v.Get("team_id"),
-		Class:   v.Get("class"),
-		Purpose: policy.Purpose(v.Get("purpose")),
-		All:     httpx.Flag(v, "all"),
+		OrgID:     orgID,
+		ProjectID: v.Get("project_id"),
+		Class:     v.Get("class"),
+		Purpose:   policy.Purpose(v.Get("purpose")),
+		All:       httpx.Flag(v, "all"),
 	}
 	// A member sees only their own. An administrator sees the whole
 	// organisation's, but still cannot attach to them.
@@ -240,15 +240,15 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request, p *authn.
 		return
 	}
 	var in struct {
-		OrgID   string         `json:"org_id"`
-		TeamID  string         `json:"team_id"`
-		Name    string         `json:"name"`
-		Class   string         `json:"class"`
-		Purpose policy.Purpose `json:"purpose"`
-		TTL     string         `json:"ttl"`
-		Repo    string         `json:"repo"`
-		Branch  string         `json:"branch"`
-		Task    string         `json:"task"`
+		OrgID     string         `json:"org_id"`
+		ProjectID string         `json:"project_id"`
+		Name      string         `json:"name"`
+		Class     string         `json:"class"`
+		Purpose   policy.Purpose `json:"purpose"`
+		TTL       string         `json:"ttl"`
+		Repo      string         `json:"repo"`
+		Branch    string         `json:"branch"`
+		Task      string         `json:"task"`
 		// AuthorizedKeys are the ssh public keys that may open a shell in it.
 		AuthorizedKeys []string          `json:"authorized_keys"`
 		Env            map[string]string `json:"env"`
@@ -263,30 +263,37 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request, p *authn.
 	if !ok {
 		return
 	}
-	// As with keys, a member may not pick the team: the team holds the
+	// As with keys, a member may not pick the project: the project holds the
 	// guardrail, the budget and the sandbox quota.
-	if in.TeamID != "" && !p.CanAdminOrg(orgID) {
-		forbid(w, "a member cannot choose the team a sandbox belongs to; it is created "+
-			"against this organisation's own guardrails")
+	if in.ProjectID != "" && !p.CanAdminOrg(orgID) {
+		forbid(w, "a member cannot choose the project a sandbox belongs to; it is created "+
+			"in this organisation's oldest project")
 		return
 	}
-	// A sandbox gets a key. On another tenant's team, that key would use their
+	// A sandbox gets a key. On another tenant's project, that key would use their
 	// guardrails, budget, rate limit and quota.
-	if in.TeamID != "" && !s.requireTeamInOrg(w, r, in.TeamID, orgID) {
+	if in.ProjectID != "" && !s.requireProjectInOrg(w, r, in.ProjectID, orgID) {
 		return
+	}
+	// Its key needs a project, and the sandbox has to count against the same
+	// one, so it is resolved here rather than when the key is stored.
+	if in.ProjectID == "" {
+		if in.ProjectID, ok = s.firstProject(w, r, orgID); !ok {
+			return
+		}
 	}
 	ttl, ok := sandboxTTL(w, in.TTL)
 	if !ok {
 		return
 	}
-	limits, err := s.sandboxLimits(r.Context(), orgID, in.TeamID)
+	limits, err := s.sandboxLimits(r.Context(), orgID, in.ProjectID)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 
 	sb, err := s.opts.Sandboxes.Create(r.Context(), sandbox.CreateRequest{
-		OrgID: orgID, TeamID: in.TeamID, UserID: p.UserID, Owner: p.Email,
+		OrgID: orgID, ProjectID: in.ProjectID, UserID: p.UserID, Owner: p.Email,
 		Name: strings.TrimSpace(in.Name), Class: strings.TrimSpace(in.Class),
 		Purpose: in.Purpose, TTL: ttl,
 		Repo: strings.TrimSpace(in.Repo), Branch: strings.TrimSpace(in.Branch),
@@ -349,7 +356,7 @@ func (s *Server) extendSandbox(w http.ResponseWriter, r *http.Request, p *authn.
 	if !ok {
 		return
 	}
-	limits, err := s.sandboxLimits(r.Context(), sb.OrgID, sb.TeamID)
+	limits, err := s.sandboxLimits(r.Context(), sb.OrgID, sb.ProjectID)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -391,7 +398,7 @@ func (s *Server) changeSandboxState(w http.ResponseWriter, r *http.Request, p *a
 	} else {
 		// An expired sandbox is held to the guardrail again, as it is now.
 		var limits policy.ResolvedSandbox
-		if limits, err = s.sandboxLimits(r.Context(), sb.OrgID, sb.TeamID); err != nil {
+		if limits, err = s.sandboxLimits(r.Context(), sb.OrgID, sb.ProjectID); err != nil {
 			s.fail(w, err)
 			return
 		}
@@ -414,7 +421,7 @@ func (s *Server) changeSandboxState(w http.ResponseWriter, r *http.Request, p *a
 	httpx.WriteJSON(w, http.StatusOK, fresh)
 }
 
-// sandboxUsage is what sandboxes have cost, grouped by team, person or class.
+// sandboxUsage is what sandboxes have cost, grouped by project, person or class.
 func (s *Server) sandboxUsage(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	q := r.URL.Query()
 	orgID, ok := s.scopeOrg(w, p, q.Get("org_id"))

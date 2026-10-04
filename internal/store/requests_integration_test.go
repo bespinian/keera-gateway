@@ -18,13 +18,13 @@ func TestUnhappyRequestsCarryWhatTheClientWasTold(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now.Add(-3 * time.Hour), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(-3 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 200, CostMicros: 500},
-		{TS: now.Add(-2 * time.Hour), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(-2 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 500, Error: "CUDA out of memory",
 			Latency: 1200 * time.Millisecond, Stream: true},
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
-			Alias: "keera-fast", Status: 429, Error: "your team is over its rate limit"},
+		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			Alias: "keera-fast", Status: 429, Error: "your project is over its rate limit"},
 		// Answered, and then cut short: the 200 the client was sent stands.
 		{TS: now.Add(-30 * time.Minute), OrgID: f.orgID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 200, Error: "the stream ended before the model was done"},
@@ -40,8 +40,8 @@ func TestUnhappyRequestsCarryWhatTheClientWasTold(t *testing.T) {
 		t.Fatalf("%d failures, want only the backend error", len(failed))
 	}
 	got := failed[0]
-	if got.Alias != "keera-code" || got.KeyID != f.keyID || got.TeamID != f.teamID {
-		t.Errorf("row = %+v, want the model, the key and the team it happened to", got)
+	if got.Alias != "keera-code" || got.KeyID != f.keyID || got.ProjectID != f.projectID {
+		t.Errorf("row = %+v, want the model, the key and the project it happened to", got)
 	}
 	if got.Error != "CUDA out of memory" {
 		t.Errorf("Error = %q, want the backend's own wording", got.Error)
@@ -185,34 +185,34 @@ func TestAnEnormousBackendMessageIsBounded(t *testing.T) {
 }
 
 // The entity screens exist because a share of the organisation's total is not
-// an answer about one team. What has to hold is that the narrowed report is the
-// same report: this team's requests, tokens, spend and latency, and none of
+// an answer about one project. What has to hold is that the narrowed report is the
+// same report: this project's requests, tokens, spend and latency, and none of
 // anybody else's.
 func TestOverviewNarrowsToOneEntity(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
 	now := time.Now().UTC().Truncate(time.Second)
 
-	if _, err := st.CreateTeam(ctx, "team_2", f.orgID, "Data Science"); err != nil {
-		t.Fatalf("CreateTeam: %v", err)
+	if _, err := st.CreateProject(ctx, Project{ID: "project_2", OrgID: f.orgID, Name: "Data Science"}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
 	}
 	if _, err := st.CreateKey(ctx, KeyInfo{
-		ID: "key_2", OrgID: f.orgID, TeamID: "team_2", Alias: "a notebook", Prefix: "keera_sk_two",
+		ID: "key_2", OrgID: f.orgID, ProjectID: "project_2", Name: "a notebook", Prefix: "keera_sk_two",
 	}, []byte("hash-of-the-second-key-32-bytes!")); err != nil {
 		t.Fatalf("CreateKey: %v", err)
 	}
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now.Add(-2 * time.Hour), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(-2 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", InputTokens: 100, OutputTokens: 20,
 			CostMicros: 500, Status: 200, TTFT: 200 * time.Millisecond},
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-fast", InputTokens: 10, OutputTokens: 5,
 			CostMicros: 100, Status: 200, TTFT: 50 * time.Millisecond},
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 502, Error: "no backend answered"},
-		// Another team, another key, the same window: none of it belongs in the
-		// first team's report.
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, TeamID: "team_2", KeyID: "key_2",
+		// Another project, another key, the same window: none of it belongs in the
+		// first project's report.
+		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: "project_2", KeyID: "key_2",
 			Alias: "keera-code", InputTokens: 900, OutputTokens: 90,
 			CostMicros: 9000, Status: 200, TTFT: 400 * time.Millisecond},
 	}); err != nil {
@@ -233,34 +233,34 @@ func TestOverviewNarrowsToOneEntity(t *testing.T) {
 		t.Errorf("TopKeys = %+v on an unscoped overview, want none", whole.TopKeys)
 	}
 
-	team, err := st.Overview(ctx, f.orgID, from, to, Scope{TeamID: f.teamID})
+	project, err := st.Overview(ctx, f.orgID, from, to, Scope{ProjectID: f.projectID})
 	if err != nil {
-		t.Fatalf("Overview by team: %v", err)
+		t.Fatalf("Overview by project: %v", err)
 	}
-	if team.Requests != 3 {
-		t.Errorf("Requests = %d, want the team's 3 - refused and failed included",
-			team.Requests)
+	if project.Requests != 3 {
+		t.Errorf("Requests = %d, want the project's 3 - refused and failed included",
+			project.Requests)
 	}
-	if team.CostMicros != 600 {
-		t.Errorf("CostMicros = %d, want 600 and not the other team's spend", team.CostMicros)
+	if project.CostMicros != 600 {
+		t.Errorf("CostMicros = %d, want 600 and not the other project's spend", project.CostMicros)
 	}
-	if team.Failed != 1 {
-		t.Errorf("Failed = %d, want 1", team.Failed)
+	if project.Failed != 1 {
+		t.Errorf("Failed = %d, want 1", project.Failed)
 	}
-	if team.TTFTP95MS > 300 {
-		t.Errorf("TTFTP95MS = %d, want the team's own samples, not the slow one next door",
-			team.TTFTP95MS)
+	if project.TTFTP95MS > 300 {
+		t.Errorf("TTFTP95MS = %d, want the project's own samples, not the slow one next door",
+			project.TTFTP95MS)
 	}
 	// A scoped screen breaks its traffic down by key, because "which of them is
 	// doing this" is the next question.
-	if len(team.TopKeys) != 1 || team.TopKeys[0].Group != f.keyID {
-		t.Errorf("TopKeys = %+v, want only this team's key", team.TopKeys)
+	if len(project.TopKeys) != 1 || project.TopKeys[0].Group != f.keyID {
+		t.Errorf("TopKeys = %+v, want only this project's key", project.TopKeys)
 	}
-	if len(team.TopModels) != 2 {
-		t.Errorf("TopModels = %+v, want both models the team used", team.TopModels)
+	if len(project.TopModels) != 2 {
+		t.Errorf("TopModels = %+v, want both models the project used", project.TopModels)
 	}
 	var charted int64
-	for _, p := range team.Series {
+	for _, p := range project.Series {
 		charted += p.Requests
 	}
 	if charted != 3 {
@@ -275,8 +275,8 @@ func TestOverviewNarrowsToOneEntity(t *testing.T) {
 		t.Errorf("by model = %d requests / %d micros, want 3 / 9500",
 			model.Requests, model.CostMicros)
 	}
-	if len(model.TopTeams) != 2 {
-		t.Errorf("TopTeams = %+v, want both teams that called this model", model.TopTeams)
+	if len(model.TopProjects) != 2 {
+		t.Errorf("TopProjects = %+v, want both projects that called this model", model.TopProjects)
 	}
 
 	key, err := st.Overview(ctx, f.orgID, from, to, Scope{KeyID: "key_2"})
@@ -310,10 +310,10 @@ func TestRequestsCarryWhereTheirTimeWent(t *testing.T) {
 			Note: "answered 200"},
 	}
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 200, Latency: 1203 * time.Millisecond,
 			Spans: steps},
-		{TS: now, OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now, OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 200, Latency: time.Second},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
@@ -341,15 +341,15 @@ func TestRequestsCarryWhatWasServedAndWhatWasNot(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now.Add(-4 * time.Hour), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(-4 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", InputTokens: 1000, OutputTokens: 200,
 			CostMicros: 2500, Status: 200, Latency: 4 * time.Second,
 			TTFT: 300 * time.Millisecond, Stream: true},
-		{TS: now.Add(-3 * time.Hour), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(-3 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 500, Error: "CUDA out of memory"},
-		{TS: now.Add(-2 * time.Hour), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(-2 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-fast", Status: 429, Error: "over the rate limit"},
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 200, Error: "the stream ended early",
 			Canceled: true, Estimated: true, OutputTokens: 12},
 	}); err != nil {
@@ -440,9 +440,9 @@ func TestRequestsAfterACursorIsWhatALiveReaderSees(t *testing.T) {
 	}
 
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now.Add(-2 * time.Minute), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(-2 * time.Minute), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 200},
-		{TS: now.Add(-time.Minute), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(-time.Minute), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 500, Error: "CUDA out of memory"},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
@@ -466,7 +466,7 @@ func TestRequestsAfterACursorIsWhatALiveReaderSees(t *testing.T) {
 	}
 
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now, OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now, OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-fast", Status: 429, Error: "over the rate limit"},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
@@ -519,7 +519,7 @@ func TestWriteEventsAnnouncesThatTheLogGrew(t *testing.T) {
 	}
 
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: time.Now(), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: time.Now(), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 200},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
@@ -547,26 +547,26 @@ func TestOutcomesCountTheWindowNotThePage(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	events := []Event{
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 500, Error: "backend fell over"},
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 402, Error: "budget spent"},
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 200, Error: "cut short"},
 		// Outside the window, and so outside every count.
-		{TS: now.AddDate(0, 0, -10), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.AddDate(0, 0, -10), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 200},
 	}
 	for range 3 {
 		events = append(events, Event{TS: now.Add(-time.Hour), OrgID: f.orgID,
-			TeamID: f.teamID, KeyID: f.keyID, Alias: "keera-code", Status: 200})
+			ProjectID: f.projectID, KeyID: f.keyID, Alias: "keera-code", Status: 200})
 	}
 	if err := st.WriteEvents(ctx, events); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
 
 	q := RequestQuery{
-		OrgID: f.orgID, TeamID: f.teamID,
+		OrgID: f.orgID, ProjectID: f.projectID,
 		From: now.Add(-6 * time.Hour), To: now.Add(time.Hour),
 		// The outcome the reader is looking at must not narrow the counts: a
 		// filter that only offers the filter already applied is no filter.
@@ -596,12 +596,12 @@ func TestOutcomesCountTheWindowNotThePage(t *testing.T) {
 		t.Errorf("counts under status 402 = %+v, want the one refused row and no others", only)
 	}
 
-	// Another team's traffic is not in this team's counts.
-	if _, err := st.CreateTeam(ctx, "team_2", f.orgID, "Data Science"); err != nil {
-		t.Fatalf("CreateTeam: %v", err)
+	// Another project's traffic is not in this project's counts.
+	if _, err := st.CreateProject(ctx, Project{ID: "project_2", OrgID: f.orgID, Name: "Data Science"}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
 	}
 	if err := st.WriteEvents(ctx, []Event{{TS: now.Add(-time.Hour), OrgID: f.orgID,
-		TeamID: "team_2", Alias: "keera-code", Status: 500, Error: "not ours"}}); err != nil {
+		ProjectID: "project_2", Alias: "keera-code", Status: 500, Error: "not ours"}}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
 	again, err := st.Outcomes(ctx, q)
@@ -609,7 +609,7 @@ func TestOutcomesCountTheWindowNotThePage(t *testing.T) {
 		t.Fatalf("Outcomes: %v", err)
 	}
 	if again.Failed != 1 {
-		t.Errorf("Failed = %d after another team failed, want this team's 1", again.Failed)
+		t.Errorf("Failed = %d after another project failed, want this project's 1", again.Failed)
 	}
 
 	// The live stream counts the whole window up to its cursor, then only the
@@ -639,13 +639,13 @@ func TestRequestsNarrowToAClassOfStatuses(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now.Add(-4 * time.Hour), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(-4 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 200},
-		{TS: now.Add(-3 * time.Hour), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(-3 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 402, Error: "budget spent"},
-		{TS: now.Add(-2 * time.Hour), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(-2 * time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 429, Error: "over the rate limit"},
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 503, Error: "nothing serving"},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
@@ -697,15 +697,15 @@ func TestRequestFiltersOfferOnlyWhatOccurred(t *testing.T) {
 		t.Fatalf("AddUser: %v", err)
 	}
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			UserID: "user_1", Alias: "keera-code", Status: 200},
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			UserID: "user_1", Alias: "keera-code", Status: 500, Error: "backend fell over"},
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-fast", Status: 500, Error: "backend fell over"},
 		// Outside the window, so outside every facet: a model nobody has called
 		// this week must not be offered as a way to narrow this week.
-		{TS: now.AddDate(0, 0, -10), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.AddDate(0, 0, -10), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-retired", Status: 200},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
@@ -733,8 +733,8 @@ func TestRequestFiltersOfferOnlyWhatOccurred(t *testing.T) {
 	if len(all.Keys) != 1 || all.Keys[0].Count != 3 {
 		t.Errorf("keys = %+v, want the one key with all 3 rows", all.Keys)
 	}
-	if len(all.Teams) != 1 || all.Teams[0].Value != f.teamID {
-		t.Errorf("teams = %+v, want the one team", all.Teams)
+	if len(all.Projects) != 1 || all.Projects[0].Value != f.projectID {
+		t.Errorf("projects = %+v, want the one project", all.Projects)
 	}
 	// A row with no person on it is nobody's, not a blank entry in the list.
 	if len(all.Users) != 1 || all.Users[0].Value != "user_1" || all.Users[0].Count != 2 {
@@ -774,12 +774,12 @@ func TestRequestsCarryTheCachedShareOfThePrompt(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now.Add(-time.Minute), OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now.Add(-time.Minute), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 200, InputTokens: 1000, CachedInputTokens: 900,
 			OutputTokens: 500, CostMicros: 2190},
 		// A model served inside your own infrastructure caches nothing, which
 		// has to come back as none cached rather than as absent.
-		{TS: now, OrgID: f.orgID, TeamID: f.teamID, KeyID: f.keyID,
+		{TS: now, OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: 200, InputTokens: 1000, OutputTokens: 500,
 			CostMicros: 3000},
 	}); err != nil {

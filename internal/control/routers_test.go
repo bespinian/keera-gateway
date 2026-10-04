@@ -56,7 +56,7 @@ func routerStore(t *testing.T) (*store.Store, context.Context) {
 	if _, err := st.Migrate(ctx); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	if _, err := st.Pool().Exec(ctx, `TRUNCATE routers, guardrails, models, api_keys, teams,
+	if _, err := st.Pool().Exec(ctx, `TRUNCATE routers, guardrails, models, api_keys, projects,
 		orgs RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
@@ -243,10 +243,10 @@ func TestDeleteRouterRefusesOneAnAllowListNarrowsTo(t *testing.T) {
 	if code, body := putRouter(t, srv, "auto", validRouter()); code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", code, body)
 	}
-	if _, err := st.CreateTeam(ctx, "team_1", "org_1", "Payments Platform"); err != nil {
-		t.Fatalf("CreateTeam: %v", err)
+	if _, err := st.CreateProject(ctx, store.Project{ID: "project_1", OrgID: "org_1", Name: "Payments Platform"}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
 	}
-	if err := st.PutPolicy(ctx, policy.ScopeTeam, "team_1",
+	if err := st.PutPolicy(ctx, policy.ScopeProject, "project_1",
 		policy.Limits{AllowedModels: []string{"auto"}}); err != nil {
 		t.Fatalf("PutPolicy: %v", err)
 	}

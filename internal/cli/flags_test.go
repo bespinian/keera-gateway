@@ -19,7 +19,7 @@ func newFlagSet() (*flag.FlagSet, *int, *bool, *string) {
 func TestParseAcceptsFlagsAfterPositionalArguments(t *testing.T) {
 	// This is how the command reads naturally, and how it will be typed.
 	fs, rpm, asJSON, _ := newFlagSet()
-	if err := parse(fs, []string{"team", "team_1", "--rpm", "60", "--json"}); err != nil {
+	if err := parse(fs, []string{"project", "project_1", "--rpm", "60", "--json"}); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
 	if *rpm != 60 {
@@ -28,21 +28,21 @@ func TestParseAcceptsFlagsAfterPositionalArguments(t *testing.T) {
 	if !*asJSON {
 		t.Error("a trailing boolean flag was not seen")
 	}
-	if got := fs.Args(); !slices.Equal(got, []string{"team", "team_1"}) {
-		t.Errorf("positional args = %v, want [team team_1]", got)
+	if got := fs.Args(); !slices.Equal(got, []string{"project", "project_1"}) {
+		t.Errorf("positional args = %v, want [project project_1]", got)
 	}
 }
 
 func TestParseStillAcceptsTheConventionalOrder(t *testing.T) {
 	fs, rpm, _, org := newFlagSet()
-	if err := parse(fs, []string{"--rpm=60", "--org", "org_1", "team", "team_1"}); err != nil {
+	if err := parse(fs, []string{"--rpm=60", "--org", "org_1", "project", "project_1"}); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
 	if *rpm != 60 || *org != "org_1" {
 		t.Errorf("rpm = %d, org = %q", *rpm, *org)
 	}
-	if got := fs.Args(); !slices.Equal(got, []string{"team", "team_1"}) {
-		t.Errorf("positional args = %v, want [team team_1]", got)
+	if got := fs.Args(); !slices.Equal(got, []string{"project", "project_1"}) {
+		t.Errorf("positional args = %v, want [project project_1]", got)
 	}
 }
 
@@ -58,21 +58,21 @@ func TestParseTreatsEverythingAfterDoubleDashAsPositional(t *testing.T) {
 
 func TestParseDoesNotSwallowAPositionalAfterABooleanFlag(t *testing.T) {
 	fs, _, asJSON, _ := newFlagSet()
-	if err := parse(fs, []string{"--json", "team_1"}); err != nil {
+	if err := parse(fs, []string{"--json", "project_1"}); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
 	if !*asJSON {
 		t.Error("--json was not set")
 	}
-	if got := fs.Args(); !slices.Equal(got, []string{"team_1"}) {
-		t.Errorf("positional args = %v, want [team_1]", got)
+	if got := fs.Args(); !slices.Equal(got, []string{"project_1"}) {
+		t.Errorf("positional args = %v, want [project_1]", got)
 	}
 }
 
 func TestParseRejectsAnUnknownFlag(t *testing.T) {
 	fs, _, _, _ := newFlagSet()
 	fs.SetOutput(discard{})
-	if err := parse(fs, []string{"team_1", "--nonsense", "1"}); err == nil {
+	if err := parse(fs, []string{"project_1", "--nonsense", "1"}); err == nil {
 		t.Error("an unknown flag was accepted; a typo would silently do nothing")
 	}
 }
@@ -139,7 +139,7 @@ func TestArgCount(t *testing.T) {
 		"[<alias>]":                    {0, 1},
 		"<scope> [<id>] [flags]":       {1, 2},
 		"<name> [-- <command>]":        {1, -1},
-		"<team> <new-name>":            {2, 2},
+		"<project> <new-name>":         {2, 2},
 		"[<client>] [flags]":           {0, 1},
 		"<email-or-id> <member|admin>": {2, 2},
 	} {

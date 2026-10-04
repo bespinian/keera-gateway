@@ -90,8 +90,8 @@ Each organisation has its own aliases, so two organisations can each have a
 first, then in its routers. A model and a router in the same organisation
 cannot share an alias.
 
-To stop a team or a key using a model, leave it out of that guardrail:
-`keera guardrail set team <id> --models a,b`. To stop the whole organisation
+To stop a project or a key using a model, leave it out of that guardrail:
+`keera guardrail set project <id> --models a,b`. To stop the whole organisation
 using it, disable the model in its edit dialog.
 
 Deleting a model does not change the filters and routers that use it. An
@@ -153,7 +153,7 @@ says, so it tells what is connected, not who may connect.
 
 ## The tenancy model
 
-Three levels: organisation, team, key. A guardrail can attach at any of them.
+Three levels: organisation, project, key. A guardrail can attach at any of them.
 
 The combining rule is **restrict-only**. A level can narrow what it inherits but
 never widen it. Allow-lists intersect; the output-token ceiling takes the
@@ -162,11 +162,11 @@ minimum; once a level blocks hosted tools, the levels below cannot unblock them.
 The exceptions:
 
 - **Rate limits and budgets are kept per level and checked separately**, not
-  merged. An organisation cap of 10,000 and a team cap of 1,000 are two limits
+  merged. An organisation cap of 10,000 and a project cap of 1,000 are two limits
   that must both hold, and each level's `rpm` and `tpm` has its own bucket.
 - **System prompts and filters accumulate**, outermost first. A level may add to
   what it inherits but may not drop it.
-- **Only the organisation grants repositories** to sandboxes. A team can only
+- **Only the organisation grants repositories** to sandboxes. A project can only
   narrow the list; a key cannot set it.
 
 A budget with no period is a monthly one. Budgets reset on UTC boundaries in
@@ -185,7 +185,7 @@ counts against its rate limits and budgets, and shows in its usage.
 ## What happens to one request
 
 1. Authenticate the key, and resolve the guardrails attached to its
-   organisation, its team and itself.
+   organisation, its project and itself.
 2. Read the body, find the model, check the rate limits and the budgets. A
    [subscription model](subscriptions.md#what-it-costs) meets the budgets only
    when filters apply, because only they spend money.
@@ -291,16 +291,16 @@ Answers say what is left of the allowance, so a client can see a limit coming.
 The budget headers are sent when some level has a budget, and the request
 headers when some level has an `rpm`. They describe only the tightest level:
 
-| Header                           | What it holds                       |
-| -------------------------------- | ----------------------------------- |
-| `X-Keera-Budget-Remaining`       | what is left to spend               |
-| `X-Keera-Budget-Limit`           | the budget                          |
-| `X-Keera-Budget-Reset`           | when it resets, in RFC 3339         |
-| `X-Keera-Budget-Scope`           | the level: `org`, `team` or `key`   |
-| `X-Keera-Budget-Currency`        | the currency, from `KEERA_CURRENCY` |
-| `X-RateLimit-Limit-Requests`     | the `rpm`                           |
-| `X-RateLimit-Remaining-Requests` | requests left in the bucket         |
-| `X-Keera-RateLimit-Scope`        | the level: `org`, `team` or `key`   |
+| Header                           | What it holds                        |
+| -------------------------------- | ------------------------------------ |
+| `X-Keera-Budget-Remaining`       | what is left to spend                |
+| `X-Keera-Budget-Limit`           | the budget                           |
+| `X-Keera-Budget-Reset`           | when it resets, in RFC 3339          |
+| `X-Keera-Budget-Scope`           | the level: `org`, `project` or `key` |
+| `X-Keera-Budget-Currency`        | the currency, from `KEERA_CURRENCY`  |
+| `X-RateLimit-Limit-Requests`     | the `rpm`                            |
+| `X-RateLimit-Remaining-Requests` | requests left in the bucket          |
+| `X-Keera-RateLimit-Scope`        | the level: `org`, `project` or `key` |
 
 A `tpm` limit has no header. When a limit is hit, the message says which limit
 and its value. A rate limit answers 429 with `Retry-After`. A budget answers

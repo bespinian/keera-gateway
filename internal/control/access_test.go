@@ -100,16 +100,16 @@ func TestScopeStatesNameEachLevelsOwnPrompt(t *testing.T) {
 		fromOrg = "Answer in British English."
 		fromKey = "Prefer the standard library."
 	)
-	// The team sets none, which must read as a level that says nothing rather
+	// The project sets none, which must read as a level that says nothing rather
 	// than as the level above it repeated.
 	res := policy.Resolve(
-		policy.Key{ID: "key_1", OrgID: "org_1", TeamID: "team_1"},
+		policy.Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
 		&policy.Limits{SystemPrompt: new(fromOrg)},
 		&policy.Limits{},
 		&policy.Limits{SystemPrompt: new(fromKey)},
 	)
 	got := s.scopeStates(res, "Example Bank",
-		map[string]string{"team_1": "Payments Platform"}, "a developer's laptop",
+		map[string]string{"project_1": "Payments Platform"}, "a developer's laptop",
 		time.Now(), map[policy.ScopeType]scopeSays{
 			policy.ScopeOrg: {prompt: fromOrg, filters: []string{"redact-secrets"}},
 			policy.ScopeKey: {prompt: fromKey},
@@ -121,7 +121,7 @@ func TestScopeStatesNameEachLevelsOwnPrompt(t *testing.T) {
 		prompt string
 	}{
 		{policy.ScopeOrg, "Example Bank", fromOrg},
-		{policy.ScopeTeam, "Payments Platform", ""},
+		{policy.ScopeProject, "Payments Platform", ""},
 		{policy.ScopeKey, "a developer's laptop", fromKey},
 	}
 	if len(got) != len(want) {
@@ -145,7 +145,7 @@ func TestScopeStatesNameEachLevelsOwnPrompt(t *testing.T) {
 		t.Errorf("the organisation's filters = %q, want them named", got[0].Filters)
 	}
 	if len(got[1].Filters) != 0 {
-		t.Errorf("the team's filters = %q; a level that applies none must not "+
+		t.Errorf("the project's filters = %q; a level that applies none must not "+
 			"inherit the display of one above it", got[1].Filters)
 	}
 }

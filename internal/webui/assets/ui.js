@@ -209,8 +209,9 @@ export function icon(path) {
 
 export const icons = {
   dashboard: "M3 13h5v8H3zM10 3h5v18h-5zM17 9h4v12h-4z",
-  teams:
-    "M17 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9.5 7a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0M22 20v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75",
+  // A folder, not people: a project holds keys and their guardrails.
+  projects:
+    "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z",
   keys: "M21 2l-2 2m-7.6 7.6a5 5 0 1 1-7.1 7.1 5 5 0 0 1 7.1-7.1zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3",
   models: "M12 2l9 5v10l-9 5-9-5V7zM3.3 7L12 12l8.7-5M12 12v10",
   // The two places a model can run, drawn for the tiles that choose between
@@ -238,9 +239,9 @@ export const icons = {
   stop: "M7 7h10v10H7z",
   trash:
     "M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6",
-  // A pencil, for renaming a thing in place. The 'rewrite' mark below is a
-  // pencil too, but over lines of text: that one is a filter changing what a
-  // request says, and this one is a label being corrected.
+  // A pencil, for every edit button. The 'rewrite' mark below is a pencil
+  // too, but over lines of text: that one is a filter changing what a request
+  // says.
   pencil: "M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z",
   sliders:
     "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
@@ -444,7 +445,7 @@ export function idpMark(name) {
  *
  *  One list and one remembered value, shared rather than per screen, because
  *  moving between them is how these screens are read - a filter's refusals this
- *  afternoon next to the team's traffic this afternoon. A picker that reset on
+ *  afternoon next to the project's traffic this afternoon. A picker that reset on
  *  each arrival would make that comparison something the reader sets up twice,
  *  and a screen with a default of its own would answer a different question
  *  than the one asked a click ago. */

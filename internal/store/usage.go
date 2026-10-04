@@ -17,12 +17,12 @@ import (
 
 // Event is one completed inference request, as the gateway saw it.
 type Event struct {
-	TS     time.Time
-	OrgID  string
-	TeamID string
-	UserID string
-	KeyID  string
-	Alias  string
+	TS        time.Time
+	OrgID     string
+	ProjectID string
+	UserID    string
+	KeyID     string
+	Alias     string
 	// Client is what the client called itself: a known coding agent's name,
 	// otherwise the product token of its User-Agent, or empty. It is a claim,
 	// never a credential; see internal/connect/identify.go.
@@ -122,13 +122,13 @@ func queueEvent(batch *pgx.Batch, e Event) {
 		queueToolCall(batch, e)
 		return
 	}
-	batch.Queue(`INSERT INTO usage_events (ts, org_id, team_id, user_id, key_id, alias,
+	batch.Queue(`INSERT INTO usage_events (ts, org_id, project_id, user_id, key_id, alias,
 		client, input_tokens, cached_input_tokens, output_tokens, cost_micros, list_cost_micros,
 		status, latency_ms, ttft_ms, stream, estimated, canceled, error, session_key, router,
 		router_outcome, router_ms, spans)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
 		$22,$23,$24)`,
-		e.TS, e.OrgID, nullable(e.TeamID), nullable(e.UserID), nullable(e.KeyID), e.Alias,
+		e.TS, e.OrgID, nullable(e.ProjectID), nullable(e.UserID), nullable(e.KeyID), e.Alias,
 		nullable(e.Client),
 		e.InputTokens, e.CachedInputTokens, e.OutputTokens, e.CostMicros, e.ListCostMicros,
 		e.Status,
@@ -164,11 +164,11 @@ func queuePlans(batch *pgx.Batch, plans map[string]policy.PlanUsage) {
 func queueFilterRuns(batch *pgx.Batch, e Event, alias string) {
 	for _, f := range e.FilterRuns {
 		batch.Queue(`INSERT INTO filter_runs (ts, org_id, filter, mode, shadow, outcome,
-			latency_ms, cost_micros, segments, changed, team_id, user_id, key_id, alias)
+			latency_ms, cost_micros, segments, changed, project_id, user_id, key_id, alias)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
 			e.TS, e.OrgID, f.Filter, string(f.Mode), f.Shadow, string(f.Outcome),
 			f.LatencyMS, f.CostMicros, f.Segments, f.Changed,
-			nullable(e.TeamID), nullable(e.UserID), nullable(e.KeyID), alias)
+			nullable(e.ProjectID), nullable(e.UserID), nullable(e.KeyID), alias)
 	}
 }
 
@@ -244,34 +244,34 @@ type UsageBucket struct {
 	SubscriptionMicros int64 `json:"subscription_micros"`
 }
 
-// Scope narrows a report to one team, key, person or model inside the
+// Scope narrows a report to one project, key, person or model inside the
 // organisation. The zero value is the whole tenant.
 //
 // One type for the usage reports and the request log, so the totals, the
 // chart and the log of an entity's screen are narrowed the same way.
 type Scope struct {
-	TeamID string
-	KeyID  string
-	UserID string
+	ProjectID string
+	KeyID     string
+	UserID    string
 	// Alias is the model, named the way a client names it.
 	Alias string
 }
 
 // Empty reports whether this scope narrows anything at all.
 func (sc Scope) Empty() bool {
-	return sc.TeamID == "" && sc.KeyID == "" && sc.UserID == "" && sc.Alias == ""
+	return sc.ProjectID == "" && sc.KeyID == "" && sc.UserID == "" && sc.Alias == ""
 }
 
 // scopeClause is the SQL every scoped report shares, written against the four
 // placeholders args appends in the same order.
-const scopeClause = ` AND ($%[2]d = '' OR %[1]steam_id = $%[2]d)
+const scopeClause = ` AND ($%[2]d = '' OR %[1]sproject_id = $%[2]d)
 	AND ($%[3]d = '' OR %[1]skey_id = $%[3]d)
 	AND ($%[4]d = '' OR %[1]suser_id = $%[4]d)
 	AND ($%[5]d = '' OR %[1]salias = $%[5]d)`
 
 // args returns the scope's four values, in the order narrow numbers them.
 func (sc Scope) args() []any {
-	return []any{sc.TeamID, sc.KeyID, sc.UserID, sc.Alias}
+	return []any{sc.ProjectID, sc.KeyID, sc.UserID, sc.Alias}
 }
 
 // narrow renders the scope's conditions for a query whose last parameter is
@@ -287,19 +287,19 @@ type UsageQuery struct {
 	Scope
 	From    time.Time
 	To      time.Time
-	GroupBy string // team, key, user, model, client, day or org; empty or anything else means model
+	GroupBy string // project, key, user, model, client, day or org; empty or anything else means model
 }
 
 // groupColumns maps the public group_by values to columns, which keeps the
 // caller's string out of the SQL text.
 var groupColumns = map[string]string{
-	"team":   "COALESCE(team_id, '')",
-	"key":    "COALESCE(key_id, '')",
-	"user":   "COALESCE(user_id, '')",
-	"model":  "alias",
-	"client": "COALESCE(client, '')",
-	"day":    "to_char(date_trunc('day', ts), 'YYYY-MM-DD')",
-	"org":    "org_id",
+	"project": "COALESCE(project_id, '')",
+	"key":     "COALESCE(key_id, '')",
+	"user":    "COALESCE(user_id, '')",
+	"model":   "alias",
+	"client":  "COALESCE(client, '')",
+	"day":     "to_char(date_trunc('day', ts), 'YYYY-MM-DD')",
+	"org":     "org_id",
 }
 
 // ValidGroupBy reports whether s is a grouping Usage understands. The empty

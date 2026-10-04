@@ -43,7 +43,7 @@ const (
 	labelName      = "app.kubernetes.io/name"
 	labelSandboxID = "keera.dev/sandbox-id"
 	labelOrg       = "keera.dev/org"
-	labelTeam      = "keera.dev/team"
+	labelProject   = "keera.dev/project"
 	labelClass     = "keera.dev/class"
 	labelPurpose   = "keera.dev/purpose"
 	// annotationOwner is an email address. It is an annotation because a
@@ -389,8 +389,8 @@ func (k *Kubernetes) labelsFor(spec Spec) map[string]string {
 	if spec.Org != "" {
 		labels[labelOrg] = spec.Org
 	}
-	if spec.Team != "" {
-		labels[labelTeam] = spec.Team
+	if spec.Project != "" {
+		labels[labelProject] = spec.Project
 	}
 	return labels
 }

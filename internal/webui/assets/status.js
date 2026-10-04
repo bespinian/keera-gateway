@@ -2,7 +2,7 @@
 //
 // This lives on its own because several screens read the same event log and
 // have to call the same thing by the same name. The request log says "Budget
-// spent" for a 402; a team's own screen showing "402" next to it, or worse a
+// spent" for a 402; a project's own screen showing "402" next to it, or worse a
 // different sentence, would be the same row described two ways in one panel.
 //
 // The number is the record. These are the sentence next to it.

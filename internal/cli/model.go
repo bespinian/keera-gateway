@@ -18,12 +18,14 @@ const disabledUsage = "add the model without serving it yet"
 // modelFlags are the fields of a catalogue entry, as flags. Each one left out
 // means "leave this as it is", so `keera model set` can change one field.
 type modelFlags struct {
-	provider       string
-	backends       stringList
-	productID      string
-	backendModel   string
-	kind           string
-	description    string
+	provider     string
+	backends     stringList
+	productID    string
+	backendModel string
+	kind         string
+	description  string
+	// describe is whether --description was given, so an empty one clears.
+	describe       bool
 	maxContext     int
 	releaseDate    string
 	location       string
@@ -51,7 +53,7 @@ func registerModelFlags(fs *flag.FlagSet) *modelFlags {
 	fs.StringVar(&f.kind, "kind", "", "chat, completion or embedding (default chat)")
 	fs.StringVar(&f.description, "description", "",
 		"what this model is for, in a sentence; clients see it and routers decide on it "+
-			"(a --provider model starts with that provider's own)")
+			"(a --provider model starts with that provider's own); an empty one clears it")
 	fs.IntVar(&f.maxContext, "max-context", -1, "context window: advertised to clients, and a request that cannot fit is refused")
 	fs.StringVar(&f.releaseDate, "release-date", "",
 		"the day the model came out, as YYYY-MM-DD (a --provider model starts with that provider's own)")
@@ -115,7 +117,7 @@ func applyModelFlags(m catalog.Model, f *modelFlags) catalog.Model {
 	if f.kind != "" {
 		m.Kind = f.kind
 	}
-	if f.description != "" {
+	if f.describe {
 		m.Description = f.description
 	}
 	if f.maxContext >= 0 {
@@ -255,6 +257,7 @@ func modelCmd(ctx context.Context, args []string) error {
 		return err
 	}
 	r.sub = verb
+	r.f.describe = given(fs, "description")
 
 	// These two need no server, so a catalogue can be checked in CI.
 	switch verb {
@@ -323,6 +326,9 @@ func (r *modelRun) add(ctx context.Context) error {
 }
 
 func (r *modelRun) set(ctx context.Context) error {
+	if !changesSomething(r.fs) {
+		return nothingToChange("model set")
+	}
 	// The endpoint replaces the entry, so read it first to keep what was not
 	// given.
 	current, err := r.requireModel(ctx, r.fs.Arg(0))

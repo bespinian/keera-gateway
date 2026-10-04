@@ -282,7 +282,7 @@ func (s *Server) checkTenancy(ctx context.Context, d *Diagnosis, orgID string, p
 	case setup.Keys == 0:
 		d.add(area, "API keys", VerdictWarn, "no key has been issued, so nothing can call this "+
 			"deployment yet",
-			"issue one with 'keera key create --team <team> --alias <what for>"+orgFlag(p, orgID)+"'")
+			"issue one with 'keera key create --project <project> --name <what for>"+orgFlag(p, orgID)+"'")
 	default:
 		d.add(area, "API keys", VerdictOK, fmt.Sprintf("%d active", setup.Keys), "")
 	}

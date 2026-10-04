@@ -184,7 +184,7 @@ keera session list                        # ranked by cost, the last seven days
 keera session list --sort requests        # the tasks that would not stop
 keera session list --unhappy              # only the ones with problems
 keera session list --model keera-frontier # the tasks that reached the hosted model
-keera session list --team <team> --since 720h
+keera session list --project <project> --since 720h
 keera session list --user ada@example.ch  # one person, by email or id
 keera session show <request-id>           # one task, from beginning to end
 ```
@@ -197,7 +197,7 @@ request in the task: that column, the first column of `keera failures`, or the
 ### The API
 
 ```
-GET /control/v1/sessions      ?org_id&from&to&since&sort&unhappy&alias&team_id&key_id&user_id&key&limit&before
+GET /control/v1/sessions      ?org_id&from&to&since&sort&unhappy&alias&project_id&key_id&user_id&key&limit&before
 GET /control/v1/sessions/{id}  where {id} is any request in the session
 ```
 
@@ -210,8 +210,8 @@ cursor would skip rows without warning.
 
 ## Narrowing, and the one filter that is not what it looks like
 
-`team_id`, `key_id` and `user_id` filter the rows before the runs are cut. That
-is safe: a session belongs to exactly one key, so to one team and one person.
+`project_id`, `key_id` and `user_id` filter the rows before the runs are cut. That
+is safe: a session belongs to exactly one key, so to one project and one person.
 
 `alias` filters the **sessions**, not the rows. Filtering rows would cut a task
 that used a hosted model in its middle into three pieces, reported as three

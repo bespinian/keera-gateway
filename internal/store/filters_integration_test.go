@@ -76,9 +76,9 @@ func TestFilterRoundTripAndTheGuardrailsThatNameOne(t *testing.T) {
 		t.Fatalf("FilterUsers = %+v, %v, want none", users, err)
 	}
 
-	// A guardrail on the team, and one in the other organisation that happens
+	// A guardrail on the project, and one in the other organisation that happens
 	// to use the same alias.
-	if err := st.PutPolicy(ctx, policy.ScopeTeam, f.teamID,
+	if err := st.PutPolicy(ctx, policy.ScopeProject, f.projectID,
 		policy.Limits{Filters: []string{redact.Alias}}); err != nil {
 		t.Fatalf("PutPolicy: %v", err)
 	}
@@ -94,18 +94,18 @@ func TestFilterRoundTripAndTheGuardrailsThatNameOne(t *testing.T) {
 	if len(users) != 1 {
 		t.Fatalf("FilterUsers = %+v, want only this organisation's guardrail", users)
 	}
-	if users[0].ScopeType != policy.ScopeTeam || users[0].Name != "Payments Platform" {
-		t.Errorf("FilterUsers[0] = %+v, want the team named so a refusal can quote it",
+	if users[0].ScopeType != policy.ScopeProject || users[0].Name != "Payments Platform" {
+		t.Errorf("FilterUsers[0] = %+v, want the project named so a refusal can quote it",
 			users[0])
 	}
 
-	// The key inherits the team's filter through the one join the gateway makes.
+	// The key inherits the project's filter through the one join the gateway makes.
 	resolved, err := st.LookupKey(ctx, f.hash)
 	if err != nil {
 		t.Fatalf("LookupKey: %v", err)
 	}
 	if len(resolved.Filters) != 1 || resolved.Filters[0] != redact.Alias {
-		t.Errorf("Filters = %q, want the team's", resolved.Filters)
+		t.Errorf("Filters = %q, want the project's", resolved.Filters)
 	}
 
 	if err := st.DeleteFilter(ctx, f.orgID, redact.Alias); err != nil {
@@ -138,13 +138,13 @@ func TestDeletingAnOrgTakesItsFiltersWithIt(t *testing.T) {
 	}
 }
 
-// filterTraffic is a week of one organisation's filtered requests: two teams,
+// filterTraffic is a week of one organisation's filtered requests: two projects,
 // one filter, and every outcome it has.
 func filterTraffic(t *testing.T, st *Store, ctx context.Context, f fixture,
 	now time.Time) {
 	t.Helper()
-	if _, err := st.CreateTeam(ctx, "team_2", f.orgID, "Retail Lending"); err != nil {
-		t.Fatalf("CreateTeam: %v", err)
+	if _, err := st.CreateProject(ctx, Project{ID: "project_2", OrgID: f.orgID, Name: "Retail Lending"}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
 	}
 	run := func(outcome FilterOutcome, ms int64, micros int64, changed int) FilterRun {
 		return FilterRun{
@@ -153,25 +153,25 @@ func filterTraffic(t *testing.T, st *Store, ctx context.Context, f fixture,
 			Segments: 4, Changed: changed,
 		}
 	}
-	event := func(offset time.Duration, teamID string, status int, cost int64,
+	event := func(offset time.Duration, projectID string, status int, cost int64,
 		runs ...FilterRun) Event {
 		return Event{
-			TS: now.Add(offset), OrgID: f.orgID, TeamID: teamID, KeyID: f.keyID,
+			TS: now.Add(offset), OrgID: f.orgID, ProjectID: projectID, KeyID: f.keyID,
 			Alias: "keera-code", Status: status, CostMicros: cost,
 			Latency: time.Second, FilterRuns: runs,
 		}
 	}
 	events := []Event{
-		event(0, f.teamID, 200, 1800, run(FilterPass, 100, 300, 0)),
-		event(time.Minute, f.teamID, 200, 1800, run(FilterRewrite, 200, 300, 2)),
-		event(2*time.Minute, f.teamID, 200, 1800, run(FilterRewrite, 300, 300, 1)),
-		// The refusals, all in one team - which is the point of the breakdown:
+		event(0, f.projectID, 200, 1800, run(FilterPass, 100, 300, 0)),
+		event(time.Minute, f.projectID, 200, 1800, run(FilterRewrite, 200, 300, 2)),
+		event(2*time.Minute, f.projectID, 200, 1800, run(FilterRewrite, 300, 300, 1)),
+		// The refusals, all in one project - which is the point of the breakdown:
 		// a rate across an organisation is not a rate anybody experiences.
-		event(3*time.Minute, "team_2", 403, 300, run(FilterRefuse, 400, 300, 0)),
-		event(4*time.Minute, "team_2", 403, 300, run(FilterRefuse, 900, 300, 0)),
+		event(3*time.Minute, "project_2", 403, 300, run(FilterRefuse, 400, 300, 0)),
+		event(4*time.Minute, "project_2", 403, 300, run(FilterRefuse, 900, 300, 0)),
 		// One that could not run at all, and one request nothing filtered.
-		event(5*time.Minute, "team_2", 502, 0, run(FilterError, 0, 0, 0)),
-		event(6*time.Minute, f.teamID, 200, 1800),
+		event(5*time.Minute, "project_2", 502, 0, run(FilterError, 0, 0, 0)),
+		event(6*time.Minute, f.projectID, 200, 1800),
 	}
 	if err := st.WriteEvents(ctx, events); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
@@ -232,20 +232,20 @@ func TestFilterRunsAreRecordedWithTheRequestsTheyFiltered(t *testing.T) {
 		t.Errorf("org cost = %d, want every request's", rep.OrgCostMicros)
 	}
 
-	byTeam := map[string]FilterTeamRow{}
-	for _, row := range rep.Teams {
-		byTeam[row.TeamID] = row
+	byProject := map[string]FilterProjectRow{}
+	for _, row := range rep.Projects {
+		byProject[row.ProjectID] = row
 	}
-	if got := byTeam["team_2"]; got.Runs != 3 || got.Refused != 2 || got.Errors != 1 {
-		t.Errorf("team_2 = %+v, want the three runs and both refusals", got)
+	if got := byProject["project_2"]; got.Runs != 3 || got.Refused != 2 || got.Errors != 1 {
+		t.Errorf("project_2 = %+v, want the three runs and both refusals", got)
 	}
-	if got := byTeam[f.teamID]; got.Runs != 3 || got.Refused != 0 || got.Rewrote != 2 {
-		t.Errorf("%s = %+v, want three runs and no refusal", f.teamID, got)
+	if got := byProject[f.projectID]; got.Runs != 3 || got.Refused != 0 || got.Rewrote != 2 {
+		t.Errorf("%s = %+v, want three runs and no refusal", f.projectID, got)
 	}
-	// Ordered by refusals, because the team living with them is what this
+	// Ordered by refusals, because the project living with them is what this
 	// breakdown is opened for.
-	if len(rep.Teams) != 2 || rep.Teams[0].TeamID != "team_2" {
-		t.Errorf("teams = %+v, want the most refused first", rep.Teams)
+	if len(rep.Projects) != 2 || rep.Projects[0].ProjectID != "project_2" {
+		t.Errorf("projects = %+v, want the most refused first", rep.Projects)
 	}
 }
 

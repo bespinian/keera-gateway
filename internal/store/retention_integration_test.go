@@ -132,7 +132,7 @@ func TestRetentionKeepsTheOpenMonthWhenItBeganBeforeTheCutoff(t *testing.T) {
 			CostMicros: 100, Status: 200,
 			Scopes: []policy.Scope{
 				{Type: policy.ScopeOrg, ID: f.orgID, Period: policy.PeriodMonth},
-				{Type: policy.ScopeTeam, ID: "team_1", Period: policy.PeriodDay},
+				{Type: policy.ScopeProject, ID: "project_1", Period: policy.PeriodDay},
 			},
 		}}); err != nil {
 			t.Fatalf("WriteEvents: %v", err)
@@ -178,8 +178,8 @@ func TestEndedSandboxesAndKeysGoOnceTheirUsageHasGone(t *testing.T) {
 
 	key := func(id, ended string) {
 		t.Helper()
-		if _, err := st.CreateKey(ctx, KeyInfo{ID: id, OrgID: f.orgID, TeamID: f.teamID,
-			Alias: id, Prefix: id}, []byte("hash-of-"+id)); err != nil {
+		if _, err := st.CreateKey(ctx, KeyInfo{ID: id, OrgID: f.orgID, ProjectID: f.projectID,
+			Name: id, Prefix: id}, []byte("hash-of-"+id)); err != nil {
 			t.Fatalf("CreateKey %s: %v", id, err)
 		}
 		if ended == "" {

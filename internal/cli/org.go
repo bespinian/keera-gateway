@@ -147,7 +147,7 @@ func (r *orgRun) delete(ctx context.Context) error {
 	}
 	return out(r.asJSON, gone, func(w *table) {
 		_, _ = fmt.Fprintf(w, "deleted %s (%s)\t%s, %s, %s\n", gone.ID, gone.Name,
-			plural(gone.Teams, "team"), plural(gone.Users, "user"), plural(gone.Keys, "key"))
+			plural(gone.Projects, "project"), plural(gone.Users, "user"), plural(gone.Keys, "key"))
 	})
 }
 
@@ -199,11 +199,11 @@ func orNotSet(domain string) string {
 
 // deletedOrg is what DELETE /v1/orgs/{id} reports it removed.
 type deletedOrg struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Teams int    `json:"teams"`
-	Users int    `json:"users"`
-	Keys  int    `json:"keys"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Projects int    `json:"projects"`
+	Users    int    `json:"users"`
+	Keys     int    `json:"keys"`
 }
 
 // confirmOrgDelete prints what the deletion destroys and makes the operator
@@ -226,7 +226,7 @@ func confirmOrgDelete(ctx context.Context, c *client, orgID string) error {
 	}
 
 	// Three extra reads, only when asking, so the prompt can say how much goes.
-	teams, err := list[store.Team](ctx, c, inOrg("/v1/teams", orgID))
+	projects, err := list[store.Project](ctx, c, inOrg("/v1/projects", orgID))
 	if err != nil {
 		return err
 	}
@@ -247,7 +247,7 @@ func confirmOrgDelete(ctx context.Context, c *client, orgID string) error {
 	}
 
 	return confirm(fmt.Sprintf("Deleting %s (%s) removes:", org.Name, org.ID), []string{
-		"  " + plural(len(teams), "team"),
+		"  " + plural(len(projects), "project"),
 		"  " + plural(len(users), "user") + ", signed out everywhere",
 		"  " + plural(len(keys), "API key") + ", which stop working at once",
 		"  its guardrails and its budget counters",

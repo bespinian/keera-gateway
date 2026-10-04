@@ -79,11 +79,12 @@ export async function orgsView(ctx) {
               {
                 class: "btn btn-sm",
                 title: `${o.name}'s settings`,
+                "aria-label": `Edit ${o.name}`,
                 onClick: () => orgSettings(ctx, o),
               },
-              "Edit",
+              icon(icons.pencil),
             ),
-            // Not "Edit": this one does not show anything, it changes which
+            // Not an edit: this one does not show anything, it changes which
             // organisation every other screen in the panel is about.
             h(
               "button",
@@ -110,16 +111,19 @@ export async function orgsView(ctx) {
                       `You are signed in to ${o.name}. ` +
                       "Delete it as an operator in another organisation, or " +
                       "run keera org delete with KEERA_OPERATOR_KEY set.",
+                    "aria-label": `Delete ${o.name}`,
                   },
-                  "Delete",
+                  icon(icons.trash),
                 )
               : h(
                   "button",
                   {
                     class: "btn btn-sm btn-danger",
+                    title: "Delete this organisation",
+                    "aria-label": `Delete ${o.name}`,
                     onClick: () => deleteOrg(ctx, o),
                   },
-                  "Delete",
+                  icon(icons.trash),
                 ),
           ),
       },
@@ -329,12 +333,12 @@ function deleteOrg(ctx, org) {
   // spinner, and failing softly: not knowing the counts is no reason to block a
   // deletion the typed name already confirms.
   Promise.all([
-    api.teams(org.id).catch(() => ({ data: [] })),
+    api.projects(org.id).catch(() => ({ data: [] })),
     api.users(org.id).catch(() => ({ data: [] })),
     api.keys(org.id).catch(() => ({ data: [] })),
-  ]).then(([teams, users, keys]) => {
+  ]).then(([projects, users, keys]) => {
     const counts = [
-      [(teams.data || []).length, "team"],
+      [(projects.data || []).length, "project"],
       [(users.data || []).length, "user"],
       [(keys.data || []).length, "API key"],
     ];

@@ -169,8 +169,8 @@ func captureStderr(t *testing.T) func() string {
 // case in every dedicated deployment.
 var oneOrg = map[string]any{"data": []map[string]any{{"id": "org_1", "name": "Example Bank"}}}
 
-var paymentsTeam = map[string]any{"data": []map[string]any{
-	{"id": "team_1", "org_id": "org_1", "name": "Payments"},
+var paymentsProject = map[string]any{"data": []map[string]any{
+	{"id": "project_1", "org_id": "org_1", "name": "Payments"},
 }}
 
 // -------------------------------------------------------------------- orgs
@@ -450,7 +450,7 @@ func TestKeyCreateAttributesAPersonByEmail(t *testing.T) {
 		"POST /v1/keys": map[string]any{"id": "key_1", "key": "sk-keera-secret"},
 	})
 
-	if err := keyCmd(context.Background(), []string{"create", "--user", "alice@example.com", "--alias", "laptop"}); err != nil {
+	if err := keyCmd(context.Background(), []string{"create", "--user", "alice@example.com", "--name", "laptop"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.request("POST", "/v1/keys").body["user_id"]; got != "user_1" {
@@ -458,18 +458,18 @@ func TestKeyCreateAttributesAPersonByEmail(t *testing.T) {
 	}
 }
 
-// liveKey is one key as GET /v1/keys reports it: on a team, attributed to a
+// liveKey is one key as GET /v1/keys reports it: on a project, attributed to a
 // person, issued for 90 days, and carrying guardrails of its own.
 var liveKey = map[string]any{
 	"data": []map[string]any{{
-		"id": "key_old", "org_id": "org_1", "team_id": "team_1", "user_id": "user_1",
-		"alias": "a developer's laptop", "prefix": "keera_sk_ab",
+		"id": "key_old", "org_id": "org_1", "project_id": "project_1", "user_id": "user_1",
+		"name": "a developer's laptop", "prefix": "keera_sk_ab",
 		"created_at": "2026-01-01T00:00:00Z", "expires_at": "2026-04-01T00:00:00Z",
 		"limits": map[string]any{"rpm": 120, "allowed_models": []string{"keera-speed"}},
 	}},
 }
 
-// The control plane copies the team, the person, the lifetime and the key's
+// The control plane copies the project, the person, the lifetime and the key's
 // own guardrails in one transaction. The CLI only names the key and passes on
 // what was asked to change.
 func TestKeyRotateAsksTheControlPlane(t *testing.T) {
@@ -483,15 +483,36 @@ func TestKeyRotateAsksTheControlPlane(t *testing.T) {
 	})
 
 	if err := keyCmd(context.Background(),
-		[]string{"rotate", "a developer's laptop", "--alias", "new laptop"}); err != nil {
+		[]string{"rotate", "a developer's laptop", "--name", "new laptop"}); err != nil {
 		t.Fatal(err)
 	}
 	sent := f.request("POST", "/v1/keys/key_old/rotate").body
-	if sent["alias"] != "new laptop" || sent["expires_in"] != "" {
-		t.Errorf("sent %v, want the new alias and no expiry", sent)
+	if sent["name"] != "new laptop" || sent["expires_in"] != "" {
+		t.Errorf("sent %v, want the new name and no expiry", sent)
 	}
 	if f.called("POST", "/v1/keys") || f.called("DELETE", "/v1/keys/key_old") {
 		t.Errorf("the CLI rotated by hand: %v", f.seen)
+	}
+}
+
+func TestKeySetRenamesTheKeyItFinds(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/orgs":           oneOrg,
+		"GET /v1/keys":           liveKey,
+		"PATCH /v1/keys/key_old": map[string]any{"id": "key_old", "name": "old laptop"},
+	})
+
+	if err := keyCmd(context.Background(),
+		[]string{"rename", "a developer's laptop", "--name", " old laptop "}); err != nil {
+		t.Fatal(err)
+	}
+	if sent := f.request("PATCH", "/v1/keys/key_old").body; sent["name"] != "old laptop" {
+		t.Errorf("sent %v, want the new name", sent)
+	}
+	if err := keyCmd(context.Background(), []string{"set", "key_old"}); err == nil ||
+		!strings.Contains(err.Error(), "--name") {
+		t.Errorf("err = %v, want it to ask for --name", err)
 	}
 }
 
@@ -500,7 +521,7 @@ func TestKeyRotateRefusesAKeyThatIsAlreadyRevoked(t *testing.T) {
 	newFakeControl(t, map[string]any{
 		"GET /v1/orgs": oneOrg,
 		"GET /v1/keys": map[string]any{"data": []map[string]any{{
-			"id": "key_old", "org_id": "org_1", "alias": "laptop",
+			"id": "key_old", "org_id": "org_1", "name": "laptop",
 			"created_at": "2026-01-01T00:00:00Z", "revoked_at": "2026-02-01T00:00:00Z",
 		}}},
 	})
@@ -511,18 +532,42 @@ func TestKeyRotateRefusesAKeyThatIsAlreadyRevoked(t *testing.T) {
 	}
 }
 
-func TestKeyRotateResolvesAnAliasAmongTheKeysThatStillWork(t *testing.T) {
+// Only an administrator issues keys, so a member is not pointed at a command
+// that would refuse them.
+func TestKeyRotateSendsAMemberWithARevokedKeyToAnAdministrator(t *testing.T) {
+	quiet(t)
+	revoked := []map[string]any{{
+		"id": "key_old", "org_id": "org_1", "user_id": "user_1", "name": "laptop",
+		"created_at": "2026-01-01T00:00:00Z", "revoked_at": "2026-02-01T00:00:00Z",
+	}}
+	newFakeControl(t, map[string]any{
+		"GET /v1/me":   map[string]any{"role": "member", "org_id": "org_1", "user_id": "user_1"},
+		"GET /v1/orgs": oneOrg,
+		"GET /v1/keys": map[string]any{"data": revoked},
+	})
+
+	// By id, the key is found and then refused; by name, no live key is found.
+	for _, who := range []string{"key_old", "laptop"} {
+		err := keyCmd(context.Background(), []string{"rotate", who})
+		if err == nil || !strings.Contains(err.Error(), "ask an administrator") ||
+			strings.Contains(err.Error(), "keera key create") {
+			t.Errorf("%s: error = %v, want one pointing at an administrator", who, err)
+		}
+	}
+}
+
+func TestKeyRotateResolvesANameAmongTheKeysThatStillWork(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
 		"GET /v1/orgs": oneOrg,
-		// The shape an organisation is in after one rotation: two keys under the
-		// same alias, one of them revoked.
+		// The shape an organisation is in after one rotation: two keys with the
+		// same name, one of them revoked.
 		"GET /v1/keys": map[string]any{"data": []map[string]any{
 			{
-				"id": "key_gone", "org_id": "org_1", "alias": "laptop",
+				"id": "key_gone", "org_id": "org_1", "name": "laptop",
 				"created_at": "2026-01-01T00:00:00Z", "revoked_at": "2026-02-01T00:00:00Z",
 			},
-			{"id": "key_live", "org_id": "org_1", "alias": "laptop", "created_at": "2026-02-01T00:00:00Z"},
+			{"id": "key_live", "org_id": "org_1", "name": "laptop", "created_at": "2026-02-01T00:00:00Z"},
 		}},
 		"POST /v1/keys/key_live/rotate": map[string]any{"id": "key_new", "key": "keera_sk_new"},
 	})
@@ -535,19 +580,19 @@ func TestKeyRotateResolvesAnAliasAmongTheKeysThatStillWork(t *testing.T) {
 	}
 }
 
-func TestKeyRotateRefusesAnAmbiguousAlias(t *testing.T) {
+func TestKeyRotateRefusesAnAmbiguousName(t *testing.T) {
 	quiet(t)
 	newFakeControl(t, map[string]any{
 		"GET /v1/orgs": oneOrg,
 		"GET /v1/keys": map[string]any{"data": []map[string]any{
-			{"id": "key_a", "org_id": "org_1", "alias": "laptop", "created_at": "2026-01-01T00:00:00Z"},
-			{"id": "key_b", "org_id": "org_1", "alias": "laptop", "created_at": "2026-02-01T00:00:00Z"},
+			{"id": "key_a", "org_id": "org_1", "name": "laptop", "created_at": "2026-01-01T00:00:00Z"},
+			{"id": "key_b", "org_id": "org_1", "name": "laptop", "created_at": "2026-02-01T00:00:00Z"},
 		}},
 	})
 
 	err := keyCmd(context.Background(), []string{"rotate", "laptop"})
 	if err == nil {
-		t.Fatal("rotate picked one of two keys with the same alias")
+		t.Fatal("rotate picked one of two keys with the same name")
 	}
 	for _, want := range []string{"key_a", "key_b"} {
 		if !strings.Contains(err.Error(), want) {
@@ -556,16 +601,16 @@ func TestKeyRotateRefusesAnAmbiguousAlias(t *testing.T) {
 	}
 }
 
-func TestKeyRevokeResolvesAnAliasAmongTheKeysThatStillWork(t *testing.T) {
+func TestKeyRevokeResolvesANameAmongTheKeysThatStillWork(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
 		"GET /v1/orgs": oneOrg,
 		"GET /v1/keys": map[string]any{"data": []map[string]any{
 			{
-				"id": "key_gone", "org_id": "org_1", "alias": "laptop",
+				"id": "key_gone", "org_id": "org_1", "name": "laptop",
 				"created_at": "2026-01-01T00:00:00Z", "revoked_at": "2026-02-01T00:00:00Z",
 			},
-			{"id": "key_live", "org_id": "org_1", "alias": "laptop", "created_at": "2026-02-01T00:00:00Z"},
+			{"id": "key_live", "org_id": "org_1", "name": "laptop", "created_at": "2026-02-01T00:00:00Z"},
 		}},
 		"DELETE /v1/keys/key_live": map[string]any{},
 	})
@@ -578,19 +623,19 @@ func TestKeyRevokeResolvesAnAliasAmongTheKeysThatStillWork(t *testing.T) {
 	}
 }
 
-func TestKeyRevokeRefusesAnAmbiguousAlias(t *testing.T) {
+func TestKeyRevokeRefusesAnAmbiguousName(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
 		"GET /v1/orgs": oneOrg,
 		"GET /v1/keys": map[string]any{"data": []map[string]any{
-			{"id": "key_a", "org_id": "org_1", "alias": "laptop", "created_at": "2026-01-01T00:00:00Z"},
-			{"id": "key_b", "org_id": "org_1", "alias": "laptop", "created_at": "2026-02-01T00:00:00Z"},
+			{"id": "key_a", "org_id": "org_1", "name": "laptop", "created_at": "2026-01-01T00:00:00Z"},
+			{"id": "key_b", "org_id": "org_1", "name": "laptop", "created_at": "2026-02-01T00:00:00Z"},
 		}},
 	})
 
 	err := keyCmd(context.Background(), []string{"revoke", "laptop"})
 	if err == nil {
-		t.Fatal("revoke picked one of two keys with the same alias")
+		t.Fatal("revoke picked one of two keys with the same name")
 	}
 	for _, want := range []string{"key_a", "key_b"} {
 		if !strings.Contains(err.Error(), want) {
@@ -598,7 +643,7 @@ func TestKeyRevokeRefusesAnAmbiguousAlias(t *testing.T) {
 		}
 	}
 	if f.called("DELETE", "/v1/keys/key_a") || f.called("DELETE", "/v1/keys/key_b") {
-		t.Error("a key was revoked despite the alias naming two")
+		t.Error("a key was revoked despite the name matching two")
 	}
 }
 
@@ -629,7 +674,7 @@ func TestKeyRevokeAsksBeforeItRevokes(t *testing.T) {
 	f := newFakeControl(t, map[string]any{
 		"GET /v1/orgs": oneOrg,
 		"GET /v1/keys": map[string]any{"data": []map[string]any{
-			{"id": keyID, "org_id": "org_1", "alias": "laptop", "created_at": "2026-01-01T00:00:00Z"},
+			{"id": keyID, "org_id": "org_1", "name": "laptop", "created_at": "2026-01-01T00:00:00Z"},
 		}},
 		"DELETE /v1/keys/" + keyID: map[string]any{},
 	})
@@ -641,7 +686,7 @@ func TestKeyRevokeAsksBeforeItRevokes(t *testing.T) {
 		t.Error("the key was revoked although nothing confirmed it")
 	}
 	if said := stderr(); !strings.Contains(said, "Revoking laptop") ||
-		!strings.Contains(said, "Type the alias to confirm:") {
+		!strings.Contains(said, "Type the name to confirm:") {
 		t.Errorf("stderr = %q, want the prompt on it", said)
 	}
 }
@@ -1107,6 +1152,40 @@ func TestFilterSetChangesOneFieldAndKeepsTheRest(t *testing.T) {
 	}
 }
 
+// An empty --description clears it, on every command that has one, and a set
+// with nothing to change writes nothing.
+func TestSetClearsADescriptionAndRefusesNothing(t *testing.T) {
+	for _, kind := range []string{"filter", "router"} {
+		t.Run(kind, func(t *testing.T) {
+			quiet(t)
+			f := newFakeControl(t, map[string]any{
+				"GET /v1/orgs": oneOrg,
+				"GET /v1/" + kind + "s": map[string]any{"data": []map[string]any{{
+					"alias": "a", "model": "keera-guard", "mode": "model",
+					"prompt": "Pick one.", "description": "the original",
+				}}},
+				"PUT /v1/" + kind + "s/a": map[string]any{"alias": "a"},
+			})
+			if err := Run(context.Background(), []string{kind, "set", "a", "--description", ""}); err != nil {
+				t.Fatalf("%s set: %v", kind, err)
+			}
+			if d := f.request("PUT", "/v1/"+kind+"s/a").body["description"]; d != "" {
+				t.Errorf("description = %v, want it cleared", d)
+			}
+		})
+	}
+
+	quiet(t)
+	f := newFakeControl(t, map[string]any{"GET /v1/orgs": oneOrg})
+	if err := Run(context.Background(), []string{"filter", "set", "a"}); err == nil ||
+		!strings.Contains(err.Error(), "nothing to change") {
+		t.Errorf("filter set with no flags = %v, want nothing to change", err)
+	}
+	if f.called("PUT", "/v1/filters/a") {
+		t.Error("an empty set wrote the filter back")
+	}
+}
+
 // edit and update are other names for set, so they keep what is not given too.
 func TestFilterAndRouterEditAndUpdateKeepTheRest(t *testing.T) {
 	for _, verb := range []string{"edit", "update"} {
@@ -1227,17 +1306,17 @@ func TestFilterReportAsksForTheWindowAndPrintsTheSplit(t *testing.T) {
 	f := newFakeControl(t, map[string]any{
 		"GET /v1/orgs": oneOrg,
 		"GET /v1/filters/redact-secrets/report": map[string]any{
-			"currency":   "CHF",
-			"filter":     map[string]any{"alias": "redact-secrets", "model": "keera-guard"},
-			"team_names": map[string]any{"team_1": "Payments Platform"},
+			"currency":      "CHF",
+			"filter":        map[string]any{"alias": "redact-secrets", "model": "keera-guard"},
+			"project_names": map[string]any{"project_1": "Payments Platform"},
 			"report": map[string]any{
 				"filter": "redact-secrets", "runs": 400, "pass": 300, "rewrote": 80,
 				"refused": 16, "errors": 4, "requests": 1000,
 				"cost_micros": 2_000_000, "org_cost_micros": 40_000_000,
 				"latency_median_ms": 210, "latency_p95_ms": 900,
 				"segments": 1600, "changed": 120,
-				"teams": []map[string]any{
-					{"team_id": "team_1", "runs": 100, "refused": 16, "rewrote": 20,
+				"projects": []map[string]any{
+					{"project_id": "project_1", "runs": 100, "refused": 16, "rewrote": 20,
 						"cost_micros": 500_000},
 				},
 			},
@@ -1258,7 +1337,7 @@ func TestFilterReportAsksForTheWindowAndPrintsTheSplit(t *testing.T) {
 		"4.0%",                    // and how much of that was a refusal
 		"210ms median, 900ms p95", // what the request waiting for it paid
 		"Payments Platform",       // and who is living with it
-		"16.0%",                   // the team's own rate, not the org's
+		"16.0%",                   // the project's own rate, not the org's
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("report did not carry %q:\n%s", want, out)
@@ -1269,17 +1348,17 @@ func TestFilterReportAsksForTheWindowAndPrintsTheSplit(t *testing.T) {
 func TestPolicySetAppliesFiltersAndClearsThemByFlag(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs":                   oneOrg,
-		"GET /v1/teams":                  paymentsTeam,
-		"GET /v1/guardrails/team/team_1": map[string]any{"rpm": 120},
-		"PUT /v1/guardrails/team/team_1": map[string]any{},
+		"GET /v1/orgs":                         oneOrg,
+		"GET /v1/projects":                     paymentsProject,
+		"GET /v1/guardrails/project/project_1": map[string]any{"rpm": 120},
+		"PUT /v1/guardrails/project/project_1": map[string]any{},
 	})
 
-	if err := Run(context.Background(), []string{"guardrail", "set", "team", "team_1",
+	if err := Run(context.Background(), []string{"guardrail", "set", "project", "project_1",
 		"--filters", "redact-secrets,redact-clients"}); err != nil {
 		t.Fatalf("guardrail set: %v", err)
 	}
-	req := f.request("PUT", "/v1/guardrails/team/team_1")
+	req := f.request("PUT", "/v1/guardrails/project/project_1")
 	got, _ := req.body["filters"].([]any)
 	if len(got) != 2 || got[0] != "redact-secrets" || got[1] != "redact-clients" {
 		t.Errorf("filters = %v, want both in the order given", req.body["filters"])
@@ -1294,17 +1373,17 @@ func TestPolicySetAppliesFiltersAndClearsThemByFlag(t *testing.T) {
 func TestPolicySetClearsFiltersOnlyWithItsOwnFlag(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs":                   oneOrg,
-		"GET /v1/teams":                  paymentsTeam,
-		"GET /v1/guardrails/team/team_1": map[string]any{"filters": []string{"redact-secrets"}},
-		"PUT /v1/guardrails/team/team_1": map[string]any{},
+		"GET /v1/orgs":                         oneOrg,
+		"GET /v1/projects":                     paymentsProject,
+		"GET /v1/guardrails/project/project_1": map[string]any{"filters": []string{"redact-secrets"}},
+		"PUT /v1/guardrails/project/project_1": map[string]any{},
 	})
 
-	if err := Run(context.Background(), []string{"guardrail", "set", "team", "team_1",
+	if err := Run(context.Background(), []string{"guardrail", "set", "project", "project_1",
 		"--no-filters"}); err != nil {
 		t.Fatalf("guardrail set: %v", err)
 	}
-	if got, present := f.request("PUT", "/v1/guardrails/team/team_1").body["filters"]; present {
+	if got, present := f.request("PUT", "/v1/guardrails/project/project_1").body["filters"]; present {
 		t.Errorf("filters = %v, want them gone", got)
 	}
 }
@@ -1425,9 +1504,9 @@ func TestAnOrganisationsGuardrailNeedsNoID(t *testing.T) {
 	if !f.called("PUT", "/v1/guardrails/org/org_1") {
 		t.Errorf("the guardrail was not written to the caller's organisation: %v", f.seen)
 	}
-	// A team or a key still has to be named.
-	if err := guardrailCmd(context.Background(), []string{"get", "team"}); err == nil {
-		t.Error("a team guardrail was read without naming the team")
+	// A project or a key still has to be named.
+	if err := guardrailCmd(context.Background(), []string{"get", "project"}); err == nil {
+		t.Error("a project guardrail was read without naming the project")
 	}
 }
 
@@ -1527,7 +1606,7 @@ func TestOrgAndGuardrailRefuseAnotherVerbsFlag(t *testing.T) {
 		{"org", "list", "--domain", "example.ch"},
 		{"org", "create", "Another Bank", "--no-domain"},
 		{"org", "delete", "org_1", "--domain", "example.ch", "--yes"},
-		{"guardrail", "get", "team", "team_1", "--rpm", "5"},
+		{"guardrail", "get", "project", "project_1", "--rpm", "5"},
 	} {
 		err := Run(context.Background(), args)
 		if err == nil || !strings.Contains(err.Error(), "does not take") {
@@ -1539,13 +1618,13 @@ func TestOrgAndGuardrailRefuseAnotherVerbsFlag(t *testing.T) {
 	}
 }
 
-func TestReportsTakeATeamByNameAndAPersonByEmail(t *testing.T) {
-	// The same names 'keera team rename' and 'keera key create --user' take.
+func TestReportsTakeAProjectByNameAndAPersonByEmail(t *testing.T) {
+	// The same names 'keera project set' and 'keera key create --user' take.
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
 		"GET /v1/orgs": oneOrg,
-		"GET /v1/teams": map[string]any{"data": []map[string]any{
-			{"id": "team_1", "org_id": "org_1", "name": "Payments Platform"},
+		"GET /v1/projects": map[string]any{"data": []map[string]any{
+			{"id": "project_1", "org_id": "org_1", "name": "Payments Platform"},
 		}},
 		"GET /v1/users": map[string]any{"data": []map[string]any{
 			{"id": "user_1", "org_id": "org_1", "email": "ada@example.ch"},
@@ -1554,12 +1633,12 @@ func TestReportsTakeATeamByNameAndAPersonByEmail(t *testing.T) {
 	})
 
 	if err := Run(context.Background(), []string{"failures",
-		"--team", "payments platform", "--user", "Ada@example.ch"}); err != nil {
+		"--project", "payments platform", "--user", "Ada@example.ch"}); err != nil {
 		t.Fatal(err)
 	}
 	q := f.request("GET", "/v1/requests").query
-	if !strings.Contains(q, "team_id=team_1") || !strings.Contains(q, "user_id=user_1") {
-		t.Errorf("query = %q, want the team's and the person's ids", q)
+	if !strings.Contains(q, "project_id=project_1") || !strings.Contains(q, "user_id=user_1") {
+		t.Errorf("query = %q, want the project's and the person's ids", q)
 	}
 }
 
@@ -1589,22 +1668,48 @@ func TestTruncatingKeepsWholeCharacters(t *testing.T) {
 	}
 }
 
-// A guardrail names its team the way every other command does: by name.
-func TestGuardrailTakesATeamByName(t *testing.T) {
+// A guardrail names its project the way every other command does: by name.
+func TestGuardrailTakesAProjectByName(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs":                   oneOrg,
-		"GET /v1/teams":                  paymentsTeam,
-		"GET /v1/guardrails/team/team_1": map[string]any{},
-		"PUT /v1/guardrails/team/team_1": map[string]any{},
+		"GET /v1/orgs":                         oneOrg,
+		"GET /v1/projects":                     paymentsProject,
+		"GET /v1/guardrails/project/project_1": map[string]any{},
+		"PUT /v1/guardrails/project/project_1": map[string]any{},
 
-		"GET /v1/guardrails/team/team_1/effective": map[string]any{},
+		"GET /v1/guardrails/project/project_1/effective": map[string]any{},
 	})
-	if err := Run(context.Background(), []string{"limit", "team", "payments", "--rpm", "60"}); err != nil {
+	if err := Run(context.Background(), []string{"limit", "project", "payments", "--rpm", "60"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.request("PUT", "/v1/guardrails/team/team_1").body["rpm"]; got != float64(60) {
-		t.Errorf("rpm = %v, want 60 on the team named payments", got)
+	if got := f.request("PUT", "/v1/guardrails/project/project_1").body["rpm"]; got != float64(60) {
+		t.Errorf("rpm = %v, want 60 on the project named payments", got)
+	}
+}
+
+// With several organisations, --org says which one a name is looked up in.
+func TestGuardrailTakesAProjectByNameInOneOfSeveralOrgs(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/orgs": map[string]any{"data": []map[string]any{
+			{"id": "org_1", "name": "Example Bank"}, {"id": "org_2", "name": "Other"},
+		}},
+		"GET /v1/projects":                     paymentsProject,
+		"GET /v1/guardrails/project/project_1": map[string]any{},
+		"PUT /v1/guardrails/project/project_1": map[string]any{},
+
+		"GET /v1/guardrails/project/project_1/effective": map[string]any{},
+	})
+	if err := Run(context.Background(), []string{"budget", "project", "payments"}); err == nil ||
+		!strings.Contains(err.Error(), "--org") {
+		t.Errorf("without --org = %v, want to be told to pass it", err)
+	}
+	if err := Run(context.Background(), []string{"budget", "project", "payments", "--org", "org_1",
+		"--budget", "500"}); err != nil {
+		t.Fatal(err)
+	}
+	if !f.called("PUT", "/v1/guardrails/project/project_1") {
+		t.Error("the project named payments in org_1 was not changed")
 	}
 }
 
@@ -1615,7 +1720,7 @@ func TestAnUnknownVerbIsRefusedBeforeAnyCall(t *testing.T) {
 	f := newFakeControl(t, map[string]any{})
 	for _, args := range [][]string{
 		{"model", "lst"}, {"filter", "lst"}, {"router", "lst"}, {"mcp", "lst"},
-		{"usage", "--by", "team", "extra"}, {"mcp", "connect", "github", "--json"},
+		{"usage", "--by", "project", "extra"}, {"mcp", "connect", "github", "--json"},
 	} {
 		if err := Run(context.Background(), args); err == nil {
 			t.Errorf("keera %s was accepted", strings.Join(args, " "))
@@ -1643,28 +1748,28 @@ func TestDeleteLooksTheAliasUpBeforeAsking(t *testing.T) {
 	}
 }
 
-func TestKeyCreateTakesTheAliasOnce(t *testing.T) {
+func TestKeyCreateTakesTheNameOnce(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{})
-	err := Run(context.Background(), []string{"key", "create", "laptop", "--alias", "phone"})
-	if err == nil || !strings.Contains(err.Error(), "alias once") {
-		t.Errorf("err = %v, want the two aliases refused", err)
+	err := Run(context.Background(), []string{"key", "create", "laptop", "--name", "phone"})
+	if err == nil || !strings.Contains(err.Error(), "name once") {
+		t.Errorf("err = %v, want the two names refused", err)
 	}
 	if len(f.seen) != 0 {
 		t.Errorf("a refused command still called the control plane: %+v", f.seen)
 	}
 }
 
-func TestRotatingARevokedKeyWithNoTeamSuggestsNoTeam(t *testing.T) {
+func TestRotatingARevokedKeyWithNoProjectSuggestsNoProject(t *testing.T) {
 	quiet(t)
 	newFakeControl(t, map[string]any{
 		"GET /v1/keys": map[string]any{"data": []map[string]any{
-			{"id": "key_1", "alias": "ci", "revoked_at": "2026-01-01T00:00:00Z"},
+			{"id": "key_1", "name": "ci", "revoked_at": "2026-01-01T00:00:00Z"},
 		}},
 	})
 	err := rotateKey(context.Background(), newClient(), "org_1", "key_1", "", "", false)
-	if err == nil || strings.Contains(err.Error(), "--team") {
-		t.Errorf("err = %v, want a hint without --team", err)
+	if err == nil || strings.Contains(err.Error(), "--project") {
+		t.Errorf("err = %v, want a hint without --project", err)
 	}
 }
 

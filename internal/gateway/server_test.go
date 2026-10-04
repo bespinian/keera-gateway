@@ -243,7 +243,7 @@ func newHarnessWith(t *testing.T, backend http.HandlerFunc, models map[string]po
 	}
 	if resolved == nil {
 		resolved = policy.Resolve(
-			policy.Key{ID: "key_1", OrgID: "org_1", TeamID: "team_1"}, nil, nil, nil)
+			policy.Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"}, nil, nil, nil)
 	}
 	h.src = &fakeSource{
 		resolved: map[string]*policy.Resolved{testKey: resolved},
@@ -362,8 +362,8 @@ func TestChatCompletionRewritesTheAliasAndAccountsForTheTokens(t *testing.T) {
 	if h.budgets.total() != ev.CostMicros {
 		t.Errorf("charged %d against budgets, want %d", h.budgets.total(), ev.CostMicros)
 	}
-	if ev.OrgID != "org_1" || ev.TeamID != "team_1" {
-		t.Errorf("event = %+v, want the key's org and team for attribution", ev)
+	if ev.OrgID != "org_1" || ev.ProjectID != "project_1" {
+		t.Errorf("event = %+v, want the key's org and project for attribution", ev)
 	}
 }
 
@@ -420,7 +420,7 @@ func TestStreamingPassesThroughAUsageChunkTheClientAskedFor(t *testing.T) {
 
 func TestUnknownAndForbiddenModelsAreIndistinguishable(t *testing.T) {
 	// Answering 403 for a model that exists but is not permitted would let any
-	// key enumerate another team's catalogue.
+	// key enumerate another project's catalogue.
 	restricted := policy.Resolve(
 		policy.Key{ID: "key_1", OrgID: "org_1"},
 		&policy.Limits{AllowedModels: []string{"keera-code"}}, nil, nil)
@@ -506,7 +506,7 @@ func TestAnUnknownInferencePathAnswersJSON(t *testing.T) {
 func TestBudgetExceededIsNotRetryable(t *testing.T) {
 	h := newHarness(t, jsonBackend(`{}`), nil, nil)
 	h.budgets.err = &policy.ErrBudgetExceeded{
-		Scope:  policy.Scope{Type: policy.ScopeTeam, ID: "team_1", Period: policy.PeriodMonth},
+		Scope:  policy.Scope{Type: policy.ScopeProject, ID: "project_1", Period: policy.PeriodMonth},
 		Spent:  2_000_000,
 		Budget: 1_000_000,
 	}
@@ -536,14 +536,14 @@ func TestRateLimitReturns429WithRetryAfter(t *testing.T) {
 }
 
 func TestARefusedRequestDoesNotSpendTheLevelsAboveIt(t *testing.T) {
-	// One team is over its own rate limit; another team in the same
+	// One project is over its own rate limit; another project in the same
 	// organisation is not. The refusals must cost the organisation nothing, or
 	// one runaway editor drains the ceiling that protects everybody else's.
 	rpm := func(n int) *policy.Limits { return &policy.Limits{RPM: &n} }
 	org := rpm(3)
-	busy := policy.Resolve(policy.Key{ID: "key_a", OrgID: "org_1", TeamID: "team_1"},
+	busy := policy.Resolve(policy.Key{ID: "key_a", OrgID: "org_1", ProjectID: "project_1"},
 		org, rpm(1), nil)
-	quiet := policy.Resolve(policy.Key{ID: "key_b", OrgID: "org_1", TeamID: "team_2"},
+	quiet := policy.Resolve(policy.Key{ID: "key_b", OrgID: "org_1", ProjectID: "project_2"},
 		org, nil, nil)
 
 	h := newHarness(t, jsonBackend(`{"usage":{"prompt_tokens":1,"completion_tokens":1}}`),
@@ -553,24 +553,24 @@ func TestARefusedRequestDoesNotSpendTheLevelsAboveIt(t *testing.T) {
 
 	const body = `{"model":"keera-code","messages":[]}`
 	if resp := h.post(t, "/v1/chat/completions", body); resp.StatusCode != http.StatusOK {
-		t.Fatalf("the busy team's first request should be admitted, got %d", resp.StatusCode)
+		t.Fatalf("the busy project's first request should be admitted, got %d", resp.StatusCode)
 	}
 	for i := range 5 {
 		resp := h.post(t, "/v1/chat/completions", body)
 		if resp.StatusCode != http.StatusTooManyRequests {
 			t.Fatalf("refusal %d: status = %d, want 429", i, resp.StatusCode)
 		}
-		if got := resp.Header.Get("X-Keera-RateLimit-Scope"); got != string(policy.ScopeTeam) {
-			t.Errorf("the refusal names the %q limit, want the team's", got)
+		if got := resp.Header.Get("X-Keera-RateLimit-Scope"); got != string(policy.ScopeProject) {
+			t.Errorf("the refusal names the %q limit, want the project's", got)
 		}
 	}
 
 	// Three admitted requests are the organisation's whole minute, and one has
-	// been used. The other team must get the remaining two.
+	// been used. The other project must get the remaining two.
 	for i := range 2 {
 		resp := h.postWithKey(t, "/v1/chat/completions", body, otherKey)
 		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("the quiet team's request %d: status = %d, want 200 - the "+
+			t.Fatalf("the quiet project's request %d: status = %d, want 200 - the "+
 				"organisation was charged for requests it never forwarded",
 				i, resp.StatusCode)
 		}
@@ -1117,7 +1117,7 @@ func TestASpentBudgetSaysWhenItLiftsAndWhereToLook(t *testing.T) {
 	h := newHarnessWith(t, jsonBackend(`{}`), nil, budgeted(),
 		Options{PanelURL: "https://keera.example.ch"})
 	h.budgets.err = &policy.ErrBudgetExceeded{
-		Scope:    policy.Scope{Type: policy.ScopeTeam, ID: "team_1", Period: policy.PeriodMonth},
+		Scope:    policy.Scope{Type: policy.ScopeProject, ID: "project_1", Period: policy.PeriodMonth},
 		Spent:    2_000_000,
 		Budget:   1_000_000,
 		ResetsAt: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
@@ -1136,7 +1136,7 @@ func TestASpentBudgetSaysWhenItLiftsAndWhereToLook(t *testing.T) {
 	// This message is read inside an editor by the person it just stopped, and
 	// is the only thing they will be shown. An id and the word "exceeded" leave
 	// them with nothing to do but ask somebody.
-	for _, want := range []string{"your team", "1 October 2026", "https://keera.example.ch/access"} {
+	for _, want := range []string{"your project", "1 October 2026", "https://keera.example.ch/access"} {
 		if !strings.Contains(envelope.Error.Message, want) {
 			t.Errorf("the refusal does not say %q: %s", want, envelope.Error.Message)
 		}
@@ -1171,10 +1171,10 @@ func TestRefusalsAreRecordedWithTheirReason(t *testing.T) {
 }
 
 func TestTheSystemPromptReachesTheInferencePlaneAheadOfTheConversation(t *testing.T) {
-	// The org's wording, then the team's, then the client's own system message.
+	// The org's wording, then the project's, then the client's own system message.
 	// Order is the assertion: a guardrail that lands after what it is guarding
 	// against is a suggestion.
-	res := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1", TeamID: "team_1"},
+	res := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
 		&policy.Limits{SystemPrompt: new("Answer in British English.")},
 		&policy.Limits{SystemPrompt: new("Never suggest a new dependency.")}, nil)
 	h := newHarness(t, jsonBackend(`{"usage":{"prompt_tokens":1,"completion_tokens":1}}`), nil, res)
@@ -1442,7 +1442,7 @@ func TestARefusalRecordsTheSentenceWithoutThePanelAddress(t *testing.T) {
 	h := newHarnessWith(t, jsonBackend(`{}`), nil, budgeted(),
 		Options{PanelURL: "https://keera.example.ch"})
 	h.budgets.err = &policy.ErrBudgetExceeded{
-		Scope:  policy.Scope{Type: policy.ScopeTeam, ID: "team_1", Period: policy.PeriodMonth},
+		Scope:  policy.Scope{Type: policy.ScopeProject, ID: "project_1", Period: policy.PeriodMonth},
 		Spent:  2_000_000,
 		Budget: 1_000_000,
 	}
@@ -1462,7 +1462,7 @@ func TestARefusalRecordsTheSentenceWithoutThePanelAddress(t *testing.T) {
 	}
 
 	ev := h.sink.last(t)
-	if ev.Error == "" || !strings.Contains(ev.Error, "your team") {
+	if ev.Error == "" || !strings.Contains(ev.Error, "your project") {
 		t.Errorf("the recorded refusal does not say what stopped the request: %q", ev.Error)
 	}
 	if strings.Contains(ev.Error, "keera.example.ch") {

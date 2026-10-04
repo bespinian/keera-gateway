@@ -151,7 +151,7 @@ func TestResponsesStreamEmitsTheEventSequence(t *testing.T) {
 		`data: [DONE]`,
 	}, "\n\n") + "\n\n")
 	var dst bytes.Buffer
-	stats, err := responsesShape{}.pipe(&dst, func() {}, src, "keera-code", true)
+	stats, err := responsesShape{}.pipe(&dst, func() {}, src, "keera-code", true, DefaultMaxResponseBytes)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -15,6 +15,7 @@
 import { api } from "../api.js";
 import {
   h,
+  isAdmin,
   replace,
   table,
   pill,
@@ -34,11 +35,11 @@ import { oneLine, statusMeaning } from "../status.js";
 import { canRevoke, revokeBody } from "./keys.js";
 
 // Each level of the hierarchy as the person held by it would name it. They know
-// they are in an organisation and a team; the ids are for quoting to whoever
+// they are in an organisation and a project; the ids are for quoting to whoever
 // administers them.
 const SCOPE_NAMES = {
   org: "Your organisation",
-  team: "Your team",
+  project: "Your project",
   key: "This key",
 };
 
@@ -58,7 +59,7 @@ export async function accessView(ctx) {
       { class: "card" },
       empty(
         "This is the operator key",
-        "The operator key is not a person, so it has no keys, team or " +
+        "The operator key is not a person, so it has no keys, project or " +
           "budget. Sign in with your identity provider to see yours.",
       ),
     );
@@ -96,22 +97,21 @@ export async function accessView(ctx) {
         { class: "card" },
         empty(
           "You signed in with the operator key",
-          "It is not a person, so it has no team or budget of its own. Sign " +
+          "It is not a person, so it has no project or budget of its own. Sign " +
             "in with your identity provider to see your own access.",
         ),
       ),
     );
   } else if (!keys.length) {
     // The way out of this state depends on whether the reader can issue one
-    // themselves. Telling somebody to go and ask an administrator when there
-    // is a button two screens away would be the worse of the two answers.
+    // themselves. Only an administrator can; a member has to ask one.
     wrap.append(
       h(
         "div",
         { class: "card" },
         empty(
           "No key is linked to you",
-          ctx.state.me.can_manage_own_keys
+          isAdmin(ctx)
             ? h(
                 "span",
                 {},
@@ -241,8 +241,10 @@ function keyCard(k, currency, ctx) {
     "div",
     { class: "row", style: { gap: "24px", flexWrap: "wrap" } },
     fact(
-      "Team",
-      k.team_name || h("span", { class: "faint" }, "organisation-wide"),
+      "Project",
+      k.project_name ||
+        k.project_id ||
+        h("span", { class: "faint" }, "deleted project"),
     ),
     fact(
       "Last used",
@@ -344,7 +346,7 @@ function keyCard(k, currency, ctx) {
       h(
         "div",
         { class: "stack" },
-        h("h2", {}, k.alias),
+        h("h2", {}, k.name),
         h(
           "span",
           { class: "faint mono", style: { fontSize: "11px" } },
@@ -389,7 +391,7 @@ function keyCard(k, currency, ctx) {
 // their own traffic: text nobody in their editor wrote is prepended to every
 // chat request they make, and until it is here the only ways to find out were
 // to ask an administrator or to notice the model behaving oddly and guess. It
-// is quoted rather than summarised, because "your team sets a system prompt"
+// is quoted rather than summarised, because "your project sets a system prompt"
 // answers nothing.
 function promptsSection(prompts) {
   return h(
@@ -538,7 +540,7 @@ function rateChips(sc) {
 // gateway records a refusal the way it records a completed request, so this is
 // the same log the dashboard counts from rather than a second account of it.
 function refusalsCard(refusals, keys) {
-  const keyAlias = Object.fromEntries(keys.map((k) => [k.id, k.alias]));
+  const keyName = Object.fromEntries(keys.map((k) => [k.id, k.name]));
 
   const head = h(
     "div",
@@ -565,7 +567,7 @@ function refusalsCard(refusals, keys) {
         cell: (f) => {
           const [label, why] = statusMeaning(f.status);
           // The gateway's own sentence when there is one, because it names the
-          // limit that bound and the number behind it - "your team is over its
+          // limit that bound and the number behind it - "your project is over its
           // rate limit of 60 requests per minute" is a different morning from
           // "rate limit". The standing explanation is the fallback.
           return h(
@@ -596,7 +598,7 @@ function refusalsCard(refusals, keys) {
         label: "Key",
         shrink: true,
         cell: (f) =>
-          h("span", { class: "muted nowrap" }, keyAlias[f.key_id] || f.key_id),
+          h("span", { class: "muted nowrap" }, keyName[f.key_id] || f.key_id),
       },
       {
         label: "Status",

@@ -84,9 +84,35 @@ func argCount(spec string) (lo, hi int) {
 	return lo, hi
 }
 
+// changesSomething reports whether any flag was given other than those that
+// only pick the target or the output.
+func changesSomething(fs *flag.FlagSet) bool {
+	set := false
+	fs.Visit(func(fl *flag.Flag) {
+		if fl.Name != "json" && fl.Name != "org" && fl.Name != "yes" {
+			set = true
+		}
+	})
+	return set
+}
+
+// nothingToChange refuses a 'set' given no flag that changes anything. Sent
+// anyway, it would write the entry back as it was, with an audit entry for it.
+func nothingToChange(name string) error {
+	return fmt.Errorf("nothing to change; pass a flag to change (see: keera help %s)", name)
+}
+
+// given reports whether the flag was on the command line, so an empty value
+// can clear what is stored rather than be read as left out.
+func given(fs *flag.FlagSet, name string) bool {
+	found := false
+	fs.Visit(func(fl *flag.Flag) { found = found || fl.Name == name })
+	return found
+}
+
 // parse reads a subcommand's flags, before or after the positional
 // arguments. Go's flag package stops at the first non-flag, so
-// "keera guardrail set team t_1 --rpm 60" is reordered before parsing.
+// "keera guardrail set project t_1 --rpm 60" is reordered before parsing.
 func parse(fs *flag.FlagSet, args []string) error {
 	return fs.Parse(reorder(fs, args))
 }

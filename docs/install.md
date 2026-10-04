@@ -71,7 +71,7 @@ new organisations start with, which are files.
 | `KEERA_LOG_LEVEL`               | `info`              | `debug`, `info`, `warn` or `error`.                                                 |
 | `KEERA_LOG_FORMAT`              | `text`              | `text` or `json`.                                                                   |
 | `KEERA_MAX_BODY_BYTES`          | `33554432` (32 MiB) | Largest request body, in bytes. Coding agents send large contexts.                  |
-| `KEERA_MAX_RESPONSE_BYTES`      | `67108864` (64 MiB) | Largest buffered (non-streamed) upstream response, in bytes.                        |
+| `KEERA_MAX_RESPONSE_BYTES`      | `67108864` (64 MiB) | Largest buffered upstream response, and largest streamed event, in bytes.          |
 | `KEERA_UPSTREAM_HEADER_TIMEOUT` | `2m`                | How long a backend may take to _start_ answering. Does not limit the answer itself. |
 | `KEERA_CACHE_TTL`               | `30s`               | How long a checked key is reused. Models, filters and the rest reload every minute. |
 | `KEERA_REDIS_URL`               | unset               | Shares rate-limit buckets between replicas. Unset, they are per process. See below. |
@@ -112,7 +112,7 @@ the buckets into Redis. The limit then holds however many replicas run. Only
 the buckets are stored there: no guardrail, spend, session or prompt.
 
 Use a single Redis endpoint, standalone or managed, not Redis Cluster. Each
-request checks its organisation's, team's and key's buckets in one script, and
+request checks its organisation's, project's and key's buckets in one script, and
 Redis Cluster refuses a script whose keys are in different slots. Redis holds
 two small fields per scope that is currently sending traffic.
 
@@ -248,25 +248,50 @@ export KEERA_OPERATOR_KEY=…
 export KEERA_CONTROL_URL=http://127.0.0.1:8080
 
 keera org create "Example Bank"
-keera team create "Payments Platform"     # --org only with several organisations
-KEY=$(keera key create --team <team> --alias "a developer's laptop")
+keera project create "Payments Platform"     # --org only with several organisations
+KEY=$(keera key create --project <project> --name "a developer's laptop")
 ```
 
 Organisation names are unique, ignoring case. An operator renames one with
-`keera org set <org-id> --name "Example Bank AG"`, or **Edit** on the
+`keera org set <org-id> --name "Example Bank AG"`, or the pencil on the
 organisations screen. Everything refers to it by id, so nothing else changes.
 
+Every key is in a project. A new organisation starts with one project, called
+`default`, which is a project like any other. A key created without `--project`
+goes in the organisation's oldest project, and an organisation with no projects
+cannot have keys. A project with working keys cannot be deleted. Its revoked
+keys stay, without a project.
+
+A project has a name, unique in its organisation, and an optional
+description. An administrator changes either with
+`keera project set <project> --name <name> --description <text>`, or the pencil
+on the projects screen. Everything refers to a project by id, so nothing else
+changes.
+
 A key is printed once and never stored. Nobody, not even an operator, can read
-it later.
+it later. Screens, reports and the audit log show its name instead.
+
+A key's name is only a label, so it can change at any time:
+`keera key set <key> --name <name>`, or the pencil on the keys screen. A member
+can rename their own keys, an administrator any key in their organisation, and
+an operator any key. The old name stays in the audit log.
+
+Only an administrator issues keys. That way every key has the project and
+guardrails an administrator chose for it. A member asks for a first key, and
+from then on rotates it themselves.
 
 `keera key rotate`, or **Rotate** on the keys screen, replaces a key in one
-step. The new key has the same team, owner, lifetime and guardrails, and the
+step. The new key has the same project, owner, lifetime and guardrails, and the
 old key is revoked in the same step. Anyone who may revoke a key may rotate it,
-so members can rotate their own:
+so members can rotate their own. Only an administrator can give the new key
+another lifetime with `--expires`. An expired key can still be rotated.
 
 ```sh
 KEY=$(keera key rotate "a developer's laptop")
 ```
+
+A rotated key stops working everywhere it is used. So give each machine its
+own key.
 
 The operator key is for before an identity provider is set up. After that,
 people sign in as themselves with `keera login`.
@@ -278,8 +303,8 @@ keera model check keera-speed             # the acceptance test - see below
 curl http://127.0.0.1:8080/api/v1/chat/completions \
   -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
   -d '{"model":"keera-speed","messages":[{"role":"user","content":"Hello"}]}'
-keera guardrail set team <team-id> --models keera-speed --rpm 120 --budget 500 --period month
-keera usage --by team
+keera guardrail set project <project-id> --models keera-speed --rpm 120 --budget 500 --period month
+keera usage --by project
 keera doctor                              # and what is still missing
 ```
 
@@ -287,8 +312,8 @@ keera doctor                              # and what is still missing
 flags, they print what is in force:
 
 ```sh
-keera limit team <team-id> --rpm 120
-keera budget team <team-id>               # every budget above this team
+keera limit project <project-id> --rpm 120
+keera budget project <project-id>               # every budget above this project
 keera guardrail effective key <key-id>    # what a request with this key meets
 ```
 

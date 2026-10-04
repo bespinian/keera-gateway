@@ -41,8 +41,8 @@ func Run(ctx context.Context, args []string) error {
 	switch name {
 	case "org":
 		return orgCmd(ctx, rest)
-	case "team":
-		return teamCmd(ctx, rest)
+	case "project":
+		return projectCmd(ctx, rest)
 	case "user":
 		return userCmd(ctx, rest)
 	case "key":

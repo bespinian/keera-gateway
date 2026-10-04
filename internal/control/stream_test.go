@@ -42,7 +42,7 @@ func streamStore(t *testing.T) (*store.Store, context.Context) {
 		t.Fatalf("Migrate: %v", err)
 	}
 	if _, err := st.Pool().Exec(ctx,
-		"TRUNCATE usage_events, spend, api_keys, models, teams, orgs RESTART IDENTITY CASCADE"); err != nil {
+		"TRUNCATE usage_events, spend, api_keys, models, projects, orgs RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	return st, ctx

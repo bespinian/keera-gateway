@@ -46,7 +46,7 @@ func sandboxStore(t *testing.T) (*store.Store, context.Context) {
 		t.Fatalf("Migrate: %v", err)
 	}
 	if _, err := st.Pool().Exec(ctx, `TRUNCATE sandboxes, sandbox_classes, guardrails,
-		api_keys, users, teams, orgs RESTART IDENTITY CASCADE`); err != nil {
+		api_keys, users, projects, orgs RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_1", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
@@ -213,21 +213,21 @@ func TestSandboxClassBelongsToAnOrganisation(t *testing.T) {
 	}
 }
 
-// A sandbox mints a key, and the team on that key decides six things that
-// belong to whoever owns the team: the system prompt every request carries, the
+// A sandbox mints a key, and the project on that key decides six things that
+// belong to whoever owns the project: the system prompt every request carries, the
 // budget it is charged to, the rate limit it consumes, the sandbox quota it
 // counts against, and the models it may reach. The foreign key on the column
-// says only that the team exists somewhere.
-func TestSandboxRefusesAnotherOrgsTeam(t *testing.T) {
+// says only that the project exists somewhere.
+func TestSandboxRefusesAnotherOrgsProject(t *testing.T) {
 	st, ctx := sandboxStore(t)
 	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_2", Name: "Other Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
-	if _, err := st.CreateTeam(ctx, "team_other", "org_2", "Their Platform"); err != nil {
-		t.Fatalf("CreateTeam: %v", err)
+	if _, err := st.CreateProject(ctx, store.Project{ID: "project_other", OrgID: "org_2", Name: "Their Platform"}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
 	}
-	if _, err := st.CreateTeam(ctx, "team_ours", "org_1", "Our Platform"); err != nil {
-		t.Fatalf("CreateTeam: %v", err)
+	if _, err := st.CreateProject(ctx, store.Project{ID: "project_ours", OrgID: "org_1", Name: "Our Platform"}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
 	}
 	m := sandbox.NewManager(st, stubDriver{}, sandbox.ManagerOptions{
 		Log: slog.New(slog.DiscardHandler),
@@ -241,10 +241,10 @@ func TestSandboxRefusesAnotherOrgsTeam(t *testing.T) {
 	}
 	code := call(t, ts, http.MethodPost, httpx.ControlPrefix+"/v1/sandboxes",
 		map[string]any{
-			"org_id": "org_1", "team_id": "team_other", "name": "cross",
+			"org_id": "org_1", "project_id": "project_other", "name": "cross",
 			"class": "standard", "authorized_keys": []string{"ssh-ed25519 AAAA test"},
 		}, &envelope)
-	// 404, as for a team that does not exist, so another tenant's team ids
+	// 404, as for a project that does not exist, so another tenant's project ids
 	// cannot be probed.
 	if code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", code)
@@ -267,71 +267,71 @@ func TestSandboxRefusesAnotherOrgsTeam(t *testing.T) {
 		t.Errorf("a refused request left %d keys behind", keys)
 	}
 
-	// The organisation's own team is accepted, and the key carries it - which
+	// The organisation's own project is accepted, and the key carries it - which
 	// is the whole point of naming one.
 	var sb store.Sandbox
 	if code := call(t, ts, http.MethodPost, httpx.ControlPrefix+"/v1/sandboxes",
 		map[string]any{
-			"org_id": "org_1", "team_id": "team_ours", "name": "ours",
+			"org_id": "org_1", "project_id": "project_ours", "name": "ours",
 			"class": "standard", "authorized_keys": []string{"ssh-ed25519 AAAA test"},
 		}, &sb); code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201", code)
 	}
-	if sb.TeamID != "team_ours" {
-		t.Errorf("sandbox team = %q", sb.TeamID)
+	if sb.ProjectID != "project_ours" {
+		t.Errorf("sandbox project = %q", sb.ProjectID)
 	}
-	var keyTeam string
+	var keyProject string
 	if err := st.Pool().QueryRow(ctx,
-		"SELECT COALESCE(team_id,'') FROM api_keys WHERE id = $1", sb.KeyID,
-	).Scan(&keyTeam); err != nil {
+		"SELECT COALESCE(project_id,'') FROM api_keys WHERE id = $1", sb.KeyID,
+	).Scan(&keyProject); err != nil {
 		t.Fatalf("reading the minted key: %v", err)
 	}
-	if keyTeam != "team_ours" {
-		t.Errorf("the minted key is on team %q, want team_ours", keyTeam)
+	if keyProject != "project_ours" {
+		t.Errorf("the minted key is on project %q, want project_ours", keyProject)
 	}
 }
 
-// A team's sandbox guardrail narrows the organisation's, as it does for keys.
-// Each count is held to its own level's limit: a team capped at one must not
+// A project's sandbox guardrail narrows the organisation's, as it does for keys.
+// Each count is held to its own level's limit: a project capped at one must not
 // cap the whole organisation at one.
-func TestSandboxHonoursTeamGuardrail(t *testing.T) {
+func TestSandboxHonoursProjectGuardrail(t *testing.T) {
 	st, ctx := sandboxStore(t)
-	if _, err := st.CreateTeam(ctx, "team_small", "org_1", "Small"); err != nil {
-		t.Fatalf("CreateTeam: %v", err)
+	if _, err := st.CreateProject(ctx, store.Project{ID: "project_small", OrgID: "org_1", Name: "Small"}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
 	}
 	if err := st.PutPolicy(ctx, policy.ScopeOrg, "org_1", policy.Limits{
 		MaxSandboxes: new(5),
 	}); err != nil {
 		t.Fatalf("PutPolicy org: %v", err)
 	}
-	if err := st.PutPolicy(ctx, policy.ScopeTeam, "team_small", policy.Limits{
+	if err := st.PutPolicy(ctx, policy.ScopeProject, "project_small", policy.Limits{
 		MaxSandboxes: new(1), MaxSandboxTTLSeconds: new(3600),
 	}); err != nil {
-		t.Fatalf("PutPolicy team: %v", err)
+		t.Fatalf("PutPolicy project: %v", err)
 	}
 	m := sandbox.NewManager(st, stubDriver{}, sandbox.ManagerOptions{
 		Log: slog.New(slog.DiscardHandler),
 	})
 	ts := sandboxServer(t, st, m)
 
-	create := func(name, team string, into any) int {
+	create := func(name, project string, into any) int {
 		t.Helper()
 		body := map[string]any{
 			"org_id": "org_1", "name": name, "class": "standard", "ttl": "8h",
 			"authorized_keys": []string{"ssh-ed25519 AAAA test"},
 		}
-		if team != "" {
-			body["team_id"] = team
+		if project != "" {
+			body["project_id"] = project
 		}
 		return call(t, ts, http.MethodPost, httpx.ControlPrefix+"/v1/sandboxes", body, into)
 	}
 
 	var first store.Sandbox
-	if code := create("first", "team_small", &first); code != http.StatusCreated {
-		t.Fatalf("first team sandbox: status = %d, want 201", code)
+	if code := create("first", "project_small", &first); code != http.StatusCreated {
+		t.Fatalf("first project sandbox: status = %d, want 201", code)
 	}
 	if first.ExpiresAt == nil || time.Until(*first.ExpiresAt) > time.Hour+time.Minute {
-		t.Errorf("expires_at = %v, want within the team's one-hour ceiling", first.ExpiresAt)
+		t.Errorf("expires_at = %v, want within the project's one-hour ceiling", first.ExpiresAt)
 	}
 
 	var envelope struct {
@@ -339,16 +339,16 @@ func TestSandboxHonoursTeamGuardrail(t *testing.T) {
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	if code := create("second", "team_small", &envelope); code == http.StatusCreated {
-		t.Fatal("a second team sandbox was created past the team's limit of one")
+	if code := create("second", "project_small", &envelope); code == http.StatusCreated {
+		t.Fatal("a second project sandbox was created past the project's limit of one")
 	}
-	if !strings.Contains(envelope.Error.Message, "your team") {
-		t.Errorf("message = %q, want the team's limit named", envelope.Error.Message)
+	if !strings.Contains(envelope.Error.Message, "your project") {
+		t.Errorf("message = %q, want the project's limit named", envelope.Error.Message)
 	}
 
 	// The organisation still has room under its own limit of five.
 	if code := create("third", "", nil); code != http.StatusCreated {
-		t.Errorf("sandbox outside the team: status = %d, want 201", code)
+		t.Errorf("sandbox outside the project: status = %d, want 201", code)
 	}
 }
 

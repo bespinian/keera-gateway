@@ -242,7 +242,7 @@ function niceCeil(v) {
 }
 
 /**
- * barList is the "top teams" and "top models" panel: a ranked list where the
+ * barList is the "top projects" and "top models" panel: a ranked list where the
  * bar is the row, so the label stays readable at any value.
  */
 export function barList(

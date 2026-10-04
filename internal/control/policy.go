@@ -18,19 +18,17 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// requireScopeRead checks that the caller may read the tenant owning a policy
-// scope. Another tenant's scope answers 404, not 403, so ids cannot be probed.
+// requireScopeRead checks that the scope exists and that the caller may read
+// the tenant owning it. Another tenant's scope answers 404, not 403, so ids
+// cannot be probed.
 func (s *Server) requireScopeRead(w http.ResponseWriter, r *http.Request,
 	p *authn.Principal, scope policy.ScopeType, scopeID string) bool {
-	if p.Unrestricted() {
-		return true
-	}
 	owner, _, err := s.scopeChain(r.Context(), scope, scopeID)
 	if err != nil {
 		s.fail(w, err)
 		return false
 	}
-	if !p.CanReadOrg(owner) {
+	if !p.Unrestricted() && !p.CanReadOrg(owner) {
 		s.fail(w, store.ErrNotFound)
 		return false
 	}
@@ -40,9 +38,9 @@ func (s *Server) requireScopeRead(w http.ResponseWriter, r *http.Request,
 func (s *Server) policyScope(w http.ResponseWriter, r *http.Request) (policy.ScopeType, string, bool) {
 	scope := policy.ScopeType(r.PathValue("scope"))
 	switch scope {
-	case policy.ScopeOrg, policy.ScopeTeam, policy.ScopeKey:
+	case policy.ScopeOrg, policy.ScopeProject, policy.ScopeKey:
 	default:
-		badRequest(w, "scope must be one of org, team, key")
+		badRequest(w, "scope must be one of org, project, key")
 		return "", "", false
 	}
 	return scope, r.PathValue("id"), true
@@ -62,7 +60,7 @@ func (s *Server) storedLimits(ctx context.Context, scope policy.ScopeType, id st
 //
 // On an organisation, only an operator may: one forge credential reaches
 // every tenant's repositories, and this list keeps a tenant to its own. An
-// administrator's write keeps what the operator set. A team only narrows it,
+// administrator's write keeps what the operator set. A project only narrows it,
 // so its administrators may set theirs. A key cannot set it at all.
 func (s *Server) checkAllowedRepos(w http.ResponseWriter, r *http.Request, p *authn.Principal,
 	scope policy.ScopeType, scopeID string, lim *policy.Limits,
@@ -178,28 +176,28 @@ func (s *Server) effectiveGuardrails(w http.ResponseWriter, r *http.Request, p *
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-// scopeChain finds the organisation and team above a scope. The organisation
+// scopeChain finds the organisation and project above a scope. The organisation
 // is what an administrator must be in, so another tenant's guardrails cannot
 // be reached by guessing an id.
 func (s *Server) scopeChain(ctx context.Context, scope policy.ScopeType, scopeID string) (
-	orgID, teamID string, err error,
+	orgID, projectID string, err error,
 ) {
 	switch scope {
 	case policy.ScopeOrg:
 		_, err := s.st.OrgByID(ctx, scopeID)
 		return scopeID, "", err
-	case policy.ScopeTeam:
-		orgID, err := s.st.TeamOrg(ctx, scopeID)
+	case policy.ScopeProject:
+		orgID, err := s.st.ProjectOrg(ctx, scopeID)
 		return orgID, scopeID, err
 	default: // policy.ScopeKey; policyScope refuses any other.
 		o, err := s.st.KeyOwnerOf(ctx, scopeID)
-		return o.OrgID, o.TeamID, err
+		return o.OrgID, o.ProjectID, err
 	}
 }
 
 // effective reads every level above a scope and combines them.
 func (s *Server) effective(ctx context.Context, scope policy.ScopeType, scopeID string) (Effective, error) {
-	orgID, teamID, err := s.scopeChain(ctx, scope, scopeID)
+	orgID, projectID, err := s.scopeChain(ctx, scope, scopeID)
 	if err != nil {
 		return Effective{}, err
 	}
@@ -207,17 +205,17 @@ func (s *Server) effective(ctx context.Context, scope policy.ScopeType, scopeID 
 	if err != nil {
 		return Effective{}, err
 	}
-	// The team level exists only when there is a team, and the key level only
+	// The project level exists only when there is a project, and the key level only
 	// when a key was asked about.
-	var team, own *policy.Limits
-	if teamID != "" {
-		lim, err := s.storedLimits(ctx, policy.ScopeTeam, teamID)
+	var project, own *policy.Limits
+	if projectID != "" {
+		lim, err := s.storedLimits(ctx, policy.ScopeProject, projectID)
 		if err != nil {
 			return Effective{}, err
 		}
-		team = &lim
+		project = &lim
 	}
-	key := policy.Key{OrgID: orgID, TeamID: teamID}
+	key := policy.Key{OrgID: orgID, ProjectID: projectID}
 	if scope == policy.ScopeKey {
 		lim, err := s.storedLimits(ctx, policy.ScopeKey, scopeID)
 		if err != nil {
@@ -227,9 +225,9 @@ func (s *Server) effective(ctx context.Context, scope policy.ScopeType, scopeID 
 		key.ID = scopeID
 	}
 
-	res := policy.Resolve(key, &org, team, own)
+	res := policy.Resolve(key, &org, project, own)
 	// Resolve always ends with a key level, because a real request has a key.
-	// Asked about an org or a team, there is no key, so that level is dropped.
+	// Asked about an org or a project, there is no key, so that level is dropped.
 	if scope != policy.ScopeKey && len(res.Scopes) > 0 {
 		res.Scopes = res.Scopes[:len(res.Scopes)-1]
 	}
@@ -246,8 +244,8 @@ func (s *Server) effective(ctx context.Context, scope policy.ScopeType, scopeID 
 		Scopes:           res.Scopes,
 		Sandbox:          res.Sandbox,
 	}
-	if team != nil {
-		out.Levels = append(out.Levels, s.effectiveLevel(ctx, policy.ScopeTeam, teamID, *team))
+	if project != nil {
+		out.Levels = append(out.Levels, s.effectiveLevel(ctx, policy.ScopeProject, projectID, *project))
 	}
 	if own != nil {
 		out.Levels = append(out.Levels, s.effectiveLevel(ctx, policy.ScopeKey, scopeID, *own))
@@ -293,7 +291,7 @@ func (s *Server) putGuardrails(w http.ResponseWriter, r *http.Request, p *authn.
 	// A sandbox's key is minted for that sandbox and dies with it, so a key's
 	// guardrail has nothing to limit there. Stored, it would look like it did.
 	if scope == policy.ScopeKey && !lim.SandboxLimits.IsZero() {
-		badRequest(w, "sandbox limits are set on an organisation or a team, not on a key")
+		badRequest(w, "sandbox limits are set on an organisation or a project, not on a key")
 		return
 	}
 	if size, ok := checkSystemPrompt(&lim); !ok {
@@ -390,6 +388,9 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 	var body struct {
 		policy.Model
 		APIKey *string `json:"api_key"`
+		// Enabled nil means not said: a new model starts enabled, and an
+		// existing one keeps what it was.
+		Enabled *bool `json:"enabled"`
 	}
 	if err := httpx.ReadJSON(r, &body); err != nil {
 		badRequest(w, err.Error())
@@ -420,6 +421,20 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 	}
 	if m.Subscription && !s.checkSubscriptionUsers(w, r, orgID, m.Alias) {
 		return
+	}
+	if body.Enabled != nil {
+		m.Enabled = *body.Enabled
+	} else {
+		existing, err := s.st.Model(r.Context(), orgID, m.Alias)
+		switch {
+		case err == nil:
+			m.Enabled = existing.Enabled
+		case errors.Is(err, store.ErrNotFound):
+			m.Enabled = true
+		default:
+			s.fail(w, err)
+			return
+		}
 	}
 	if err := s.st.UpsertModel(r.Context(), m); err != nil {
 		s.fail(w, err)

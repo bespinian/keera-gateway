@@ -54,7 +54,7 @@ func filterCmd(ctx context.Context, args []string) error {
 	fs.StringVar(&r.rules, "rules", "",
 		"a pattern filter's rules, one per line: an expression, '=>', then what each match "+
 			"becomes - or 'REFUSE: why' to drop the request. @path reads a file")
-	fs.StringVar(&r.description, "description", "", "what this filter is for, for whoever reads the list")
+	fs.StringVar(&r.description, "description", "", "what this filter is for, for whoever reads the list; an empty one clears it")
 	fs.DurationVar(&r.since, "since", 7*24*time.Hour, "how far back 'report' looks")
 	fs.BoolVar(&r.yes, "yes", false, yesUsage)
 	fs.BoolVar(&r.asJSON, "json", false, jsonUsage)
@@ -128,6 +128,9 @@ func (r *filterRun) put(ctx context.Context) error {
 	// starts from nothing, and the control plane refuses what is missing.
 	f := policy.Filter{Alias: alias}
 	if r.sub == "set" {
+		if !changesSomething(r.fs) {
+			return nothingToChange("filter set")
+		}
 		existing, err := requireFilter(ctx, r.c, r.orgID, alias)
 		if err != nil {
 			return err
@@ -184,7 +187,7 @@ func (r *filterRun) apply(f *policy.Filter) error {
 		}
 		f.Rules = parsed
 	}
-	if r.description != "" {
+	if given(r.fs, "description") {
 		f.Description = r.description
 	}
 	return nil
@@ -424,15 +427,15 @@ func changedLabel(changed bool) string {
 
 // filterReportResponse is what /v1/filters/{alias}/report answers with.
 type filterReportResponse struct {
-	Filter    *policy.Filter     `json:"filter"`
-	Report    store.FilterReport `json:"report"`
-	TeamNames map[string]string  `json:"team_names"`
-	Currency  string             `json:"currency"`
+	Filter       *policy.Filter     `json:"filter"`
+	Report       store.FilterReport `json:"report"`
+	ProjectNames map[string]string  `json:"project_names"`
+	Currency     string             `json:"currency"`
 }
 
 // printFilterReport is what a filter has been doing, in the order people ask:
 // is it firing, what does it do, what does it add to the wait and the bill,
-// and which team is living with its refusals.
+// and which project is living with its refusals.
 func printFilterReport(w *table, name string, since time.Duration,
 	res filterReportResponse,
 ) {
@@ -469,18 +472,18 @@ func printFilterReport(w *table, name string, since time.Duration,
 		policy.FormatMicros(rep.CostMicros), policy.FormatMicros(rep.OrgCostMicros),
 		share(rep.CostMicros, rep.OrgCostMicros)))
 
-	if len(rep.Teams) == 0 {
+	if len(rep.Projects) == 0 {
 		return
 	}
 	_, _ = fmt.Fprintln(w)
-	w.header("TEAM\tRUNS\tREFUSED\tRATE\tREWROTE\tFAILED\tSPEND")
-	for _, t := range rep.Teams {
-		label := t.TeamID
-		if name, ok := res.TeamNames[t.TeamID]; ok && name != "" {
+	w.header("PROJECT\tRUNS\tREFUSED\tRATE\tREWROTE\tFAILED\tSPEND")
+	for _, t := range rep.Projects {
+		label := t.ProjectID
+		if name, ok := res.ProjectNames[t.ProjectID]; ok && name != "" {
 			label = name
 		}
 		if label == "" {
-			label = "(no team)"
+			label = "(no project)"
 		}
 		_, _ = fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%d\t%d\t%s\n",
 			label, t.Runs, t.Refused, share(t.Refused, t.Runs), t.Rewrote, t.Errors,

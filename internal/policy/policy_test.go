@@ -9,13 +9,13 @@ import (
 )
 
 func TestResolveIsRestrictOnly(t *testing.T) {
-	key := Key{ID: "key_1", OrgID: "org_1", TeamID: "team_1"}
+	key := Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"}
 
 	tests := []struct {
-		name             string
-		org, team, own   *Limits
-		wantModels       []string
-		wantMaxOutTokens int
+		name              string
+		org, project, own *Limits
+		wantModels        []string
+		wantMaxOutTokens  int
 	}{
 		{
 			name:       "nothing set anywhere is unrestricted",
@@ -27,15 +27,15 @@ func TestResolveIsRestrictOnly(t *testing.T) {
 			wantModels: []string{"keera-code", "keera-embed"},
 		},
 		{
-			name:       "a team narrows the org list",
+			name:       "a project narrows the org list",
 			org:        &Limits{AllowedModels: []string{"keera-code", "keera-embed"}},
-			team:       &Limits{AllowedModels: []string{"keera-code"}},
+			project:    &Limits{AllowedModels: []string{"keera-code"}},
 			wantModels: []string{"keera-code"},
 		},
 		{
-			name: "a team cannot widen the org list",
-			org:  &Limits{AllowedModels: []string{"keera-code"}},
-			team: &Limits{AllowedModels: []string{"keera-code", "keera-premium"}},
+			name:    "a project cannot widen the org list",
+			org:     &Limits{AllowedModels: []string{"keera-code"}},
+			project: &Limits{AllowedModels: []string{"keera-code", "keera-premium"}},
 			// The department administrator asked for keera-premium. The
 			// organisation never granted it, so it is not granted.
 			wantModels: []string{"keera-code"},
@@ -43,13 +43,13 @@ func TestResolveIsRestrictOnly(t *testing.T) {
 		{
 			name:       "an intersection can be empty, which allows nothing",
 			org:        &Limits{AllowedModels: []string{"keera-code"}},
-			team:       &Limits{AllowedModels: []string{"keera-premium"}},
+			project:    &Limits{AllowedModels: []string{"keera-premium"}},
 			wantModels: []string{},
 		},
 		{
 			name:             "the tightest output cap wins regardless of level",
 			org:              &Limits{MaxOutputTokens: new(4096)},
-			team:             &Limits{MaxOutputTokens: new(8192)},
+			project:          &Limits{MaxOutputTokens: new(8192)},
 			own:              &Limits{MaxOutputTokens: new(2048)},
 			wantMaxOutTokens: 2048,
 		},
@@ -62,7 +62,7 @@ func TestResolveIsRestrictOnly(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := Resolve(key, tc.org, tc.team, tc.own)
+			got := Resolve(key, tc.org, tc.project, tc.own)
 			if !slices.Equal(got.AllowedModels, tc.wantModels) {
 				t.Errorf("AllowedModels = %v, want %v", got.AllowedModels, tc.wantModels)
 			}
@@ -74,36 +74,36 @@ func TestResolveIsRestrictOnly(t *testing.T) {
 }
 
 func TestResolveKeepsBudgetsPerScope(t *testing.T) {
-	// An org cap and a team cap are two limits that both have to hold, so they
+	// An org cap and a project cap are two limits that both have to hold, so they
 	// must not be collapsed into one the way the ceilings are.
 	got := Resolve(
-		Key{ID: "key_1", OrgID: "org_1", TeamID: "team_1"},
+		Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
 		&Limits{BudgetMicros: new(int64(10_000_000))},
 		&Limits{BudgetMicros: new(int64(1_000_000)), BudgetPeriod: new(PeriodDay)},
 		nil,
 	)
 	if len(got.Scopes) != 3 {
-		t.Fatalf("got %d scopes, want org, team and key", len(got.Scopes))
+		t.Fatalf("got %d scopes, want org, project and key", len(got.Scopes))
 	}
 	if got.Scopes[0].BudgetMicros != 10_000_000 || got.Scopes[0].Period != PeriodMonth {
 		t.Errorf("org scope = %+v, want the org's own monthly budget", got.Scopes[0])
 	}
 	if got.Scopes[1].BudgetMicros != 1_000_000 || got.Scopes[1].Period != PeriodDay {
-		t.Errorf("team scope = %+v, want the team's own daily budget", got.Scopes[1])
+		t.Errorf("project scope = %+v, want the project's own daily budget", got.Scopes[1])
 	}
 	if got.Scopes[2].BudgetMicros != 0 {
 		t.Errorf("key scope = %+v, want no budget of its own", got.Scopes[2])
 	}
 }
 
-func TestResolveSkipsTeamScopeForAKeyWithoutOne(t *testing.T) {
+func TestResolveSkipsProjectScopeForAKeyWithoutOne(t *testing.T) {
 	got := Resolve(Key{ID: "key_1", OrgID: "org_1"}, nil, &Limits{RPM: new(1)}, nil)
 	if len(got.Scopes) != 2 {
 		t.Fatalf("got %d scopes, want org and key only", len(got.Scopes))
 	}
 	for _, sc := range got.Scopes {
-		if sc.Type == ScopeTeam {
-			t.Errorf("a key with no team must not be limited by a team scope: %+v", sc)
+		if sc.Type == ScopeProject {
+			t.Errorf("a key with no project must not be limited by a project scope: %+v", sc)
 		}
 	}
 }
@@ -210,7 +210,7 @@ func TestModelCostClampsAnImpossibleCachedCount(t *testing.T) {
 
 func TestFiltersAccumulateOutermostFirst(t *testing.T) {
 	r := Resolve(
-		Key{ID: "key_1", OrgID: "org_1", TeamID: "team_1"},
+		Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
 		&Limits{Filters: []string{"redact-secrets"}},
 		&Limits{Filters: []string{"redact-clients"}},
 		&Limits{Filters: []string{"strip-tickets"}},
@@ -224,9 +224,9 @@ func TestFiltersAccumulateOutermostFirst(t *testing.T) {
 
 func TestALevelCannotDropAFilterAboveIt(t *testing.T) {
 	r := Resolve(
-		Key{ID: "key_1", OrgID: "org_1", TeamID: "team_1"},
+		Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
 		&Limits{Filters: []string{"redact-secrets"}},
-		&Limits{}, // the team says nothing
+		&Limits{}, // the project says nothing
 		&Limits{Filters: []string{"strip-tickets"}},
 	)
 	if !slices.Contains(r.Filters, "redact-secrets") {
@@ -237,7 +237,7 @@ func TestALevelCannotDropAFilterAboveIt(t *testing.T) {
 
 func TestAFilterNamedTwiceRunsOnce(t *testing.T) {
 	r := Resolve(
-		Key{ID: "key_1", OrgID: "org_1", TeamID: "team_1"},
+		Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
 		&Limits{Filters: []string{"redact-secrets"}},
 		&Limits{Filters: []string{"redact-secrets"}},
 		&Limits{Filters: []string{"redact-secrets", "strip-tickets"}},
@@ -340,31 +340,31 @@ func TestPeriodNextIsWhenABudgetLifts(t *testing.T) {
 
 func TestBudgetRefusalNamesTheScopeAndTheReset(t *testing.T) {
 	err := &ErrBudgetExceeded{
-		Scope:    Scope{Type: ScopeTeam, ID: "team_9f2", Period: PeriodMonth},
+		Scope:    Scope{Type: ScopeProject, ID: "project_9f2", Period: PeriodMonth},
 		Spent:    512_400_000,
 		Budget:   500_000_000,
 		ResetsAt: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
 	}
 	msg := err.Error()
-	for _, want := range []string{"your team", "512.40", "500.00", "1 October 2026"} {
+	for _, want := range []string{"your project", "512.40", "500.00", "1 October 2026"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("the message does not say %q: %s", want, msg)
 		}
 	}
 	// The id is the tenancy's business, not the developer's: they cannot act on
 	// it and it is noise in an editor's error toast.
-	if strings.Contains(msg, "team_9f2") {
+	if strings.Contains(msg, "project_9f2") {
 		t.Errorf("the message quotes an internal id: %s", msg)
 	}
 }
 
 func TestResolveConcatenatesSystemPrompts(t *testing.T) {
-	key := Key{ID: "key_1", OrgID: "org_1", TeamID: "team_1"}
+	key := Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"}
 
 	tests := []struct {
-		name           string
-		org, team, own *Limits
-		want           string
+		name              string
+		org, project, own *Limits
+		want              string
 	}{
 		{
 			name: "nothing set anywhere leaves the conversation alone",
@@ -375,25 +375,25 @@ func TestResolveConcatenatesSystemPrompts(t *testing.T) {
 			want: "Answer in British English.",
 		},
 		{
-			name: "a team adds to the org rather than replacing it",
-			org:  &Limits{SystemPrompt: new("Answer in British English.")},
-			team: &Limits{SystemPrompt: new("Never suggest a new dependency.")},
+			name:    "a project adds to the org rather than replacing it",
+			org:     &Limits{SystemPrompt: new("Answer in British English.")},
+			project: &Limits{SystemPrompt: new("Never suggest a new dependency.")},
 			// The department administrator cannot drop the organisation's
 			// instruction, which is the whole point of the ordering.
 			want: "Answer in British English.\n\nNever suggest a new dependency.",
 		},
 		{
-			name: "all three levels are sent, outermost first",
-			org:  &Limits{SystemPrompt: new("One.")},
-			team: &Limits{SystemPrompt: new("Two.")},
-			own:  &Limits{SystemPrompt: new("Three.")},
-			want: "One.\n\nTwo.\n\nThree.",
+			name:    "all three levels are sent, outermost first",
+			org:     &Limits{SystemPrompt: new("One.")},
+			project: &Limits{SystemPrompt: new("Two.")},
+			own:     &Limits{SystemPrompt: new("Three.")},
+			want:    "One.\n\nTwo.\n\nThree.",
 		},
 		{
-			name: "a level that sets only whitespace adds nothing",
-			org:  &Limits{SystemPrompt: new("One.")},
-			team: &Limits{SystemPrompt: new("   \n  ")},
-			want: "One.",
+			name:    "a level that sets only whitespace adds nothing",
+			org:     &Limits{SystemPrompt: new("One.")},
+			project: &Limits{SystemPrompt: new("   \n  ")},
+			want:    "One.",
 		},
 		{
 			name: "a gap in the middle does not leave a stray separator",
@@ -405,7 +405,7 @@ func TestResolveConcatenatesSystemPrompts(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := Resolve(key, tc.org, tc.team, tc.own).SystemPrompt; got != tc.want {
+			if got := Resolve(key, tc.org, tc.project, tc.own).SystemPrompt; got != tc.want {
 				t.Errorf("SystemPrompt = %q, want %q", got, tc.want)
 			}
 		})

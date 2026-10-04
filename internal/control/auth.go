@@ -451,8 +451,8 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request, p *authn.Principal) 
 		"org_id":        p.OrgID,
 		"unrestricted":  p.Unrestricted(),
 		"can_admin_org": p.CanAdminOrg(p.OrgID),
-		// Whether to offer this person issuing and revoking keys of their own.
-		// The operator key is nobody, so it gets no button.
+		// Whether to offer this person renaming, rotating and revoking keys of
+		// their own. The operator key is nobody, so it gets no button.
 		"can_manage_own_keys": p.UserID != "" && p.CanManageKeyFor(p.OrgID, p.UserID),
 		"currency":            s.opts.Currency,
 		"csrf":                p.CSRF,

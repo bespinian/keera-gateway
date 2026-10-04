@@ -3,7 +3,9 @@ package gateway
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -62,8 +64,8 @@ type anthropicToolChoice struct {
 // anthropicBlock is one content block. Block types are told apart by `type`
 // on a flat object, so one struct with all their fields reads every kind.
 type anthropicBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type string   `json:"type"`
+	Text jsonText `json:"text"`
 
 	// tool_use
 	ID    string          `json:"id"`
@@ -76,10 +78,10 @@ type anthropicBlock struct {
 
 	// image
 	Source *struct {
-		Type      string `json:"type"`
-		MediaType string `json:"media_type"`
-		Data      string `json:"data"`
-		URL       string `json:"url"`
+		Type      string   `json:"type"`
+		MediaType string   `json:"media_type"`
+		Data      jsonText `json:"data"`
+		URL       string   `json:"url"`
 	} `json:"source"`
 }
 
@@ -156,7 +158,17 @@ func functionTool(name, description string, schema json.RawMessage) oaiTool {
 var emptySchema = json.RawMessage(`{"type":"object","properties":{}}`)
 
 // decode turns a Messages request into a chat completion request.
-func (anthropicShape) decode(raw []byte) ([]byte, error) {
+func (sh anthropicShape) decode(raw []byte) ([]byte, error) {
+	b, err := sh.decodeBody(raw)
+	if err != nil {
+		return nil, err
+	}
+	return b.encode(), nil
+}
+
+// decodeBody is decode without writing the request out: the body is built
+// field by field, so it need not be parsed again.
+func (anthropicShape) decodeBody(raw []byte) (*body, error) {
 	// A missing model is left to serve, which refuses it the same way on
 	// every API.
 	var in anthropicRequest
@@ -171,7 +183,7 @@ func (anthropicShape) decode(raw []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := map[string]any{"model": in.Model, "messages": msgs}
+	out := map[string]any{}
 	addSampling(out, in)
 	if tools := convertTools(in.Tools); len(tools) > 0 {
 		out["tools"] = tools
@@ -179,14 +191,26 @@ func (anthropicShape) decode(raw []byte) ([]byte, error) {
 	if in.ToolChoice != nil {
 		addToolChoice(out, *in.ToolChoice)
 	}
-	return json.Marshal(out)
+
+	b := &body{fields: make(map[string]json.RawMessage, len(out)+2)}
+	b.setString("model", in.Model)
+	// The messages are most of the request, so the buffer starts at its size.
+	b.set("messages", appendMessages(make([]byte, 0, len(raw)), msgs))
+	for _, k := range slices.Sorted(maps.Keys(out)) {
+		v, err := json.Marshal(out[k])
+		if err != nil {
+			return nil, err
+		}
+		b.set(k, v)
+	}
+	return b, nil
 }
 
 // convertMessages turns the system prompt and every turn into OpenAI messages.
-func convertMessages(in anthropicRequest) ([]oaiMessage, error) {
-	msgs := make([]oaiMessage, 0, len(in.Messages)+1)
-	if sys := systemText(in.System); sys != "" {
-		msgs = append(msgs, oaiMessage{Role: "system", Content: sys})
+func convertMessages(in anthropicRequest) ([]chatMessage, error) {
+	msgs := make([]chatMessage, 0, len(in.Messages)+1)
+	if sys := systemText(in.System); !sys.isEmpty() {
+		msgs = append(msgs, chatMessage{role: "system", content: sys})
 	}
 	for i, m := range in.Messages {
 		converted, err := convertMessage(m.Role, m.Content)
@@ -260,17 +284,16 @@ func addToolChoice(out map[string]any, tc anthropicToolChoice) {
 
 // systemText flattens the system prompt, which the Messages API sends either as
 // a string or as an array of text blocks.
-func systemText(raw json.RawMessage) string {
+func systemText(raw json.RawMessage) jsonText {
 	if len(raw) == 0 {
-		return ""
+		return nil
 	}
-	var s string
-	if json.Unmarshal(raw, &s) == nil {
-		return s
+	if t, err := textOf(raw); err == nil {
+		return t
 	}
 	var blocks []anthropicBlock
 	if json.Unmarshal(raw, &blocks) != nil {
-		return ""
+		return nil
 	}
 	return joinText(blocks)
 }
@@ -280,7 +303,7 @@ func systemText(raw json.RawMessage) string {
 // Tool results are why it can be more than one. The Messages API puts them
 // in a user turn; the OpenAI shape wants each as its own "tool" message, placed
 // before any user text so it still follows the assistant turn that called it.
-func convertMessage(role string, content json.RawMessage) ([]oaiMessage, error) {
+func convertMessage(role string, content json.RawMessage) ([]chatMessage, error) {
 	if role != "user" && role != "assistant" {
 		return nil, errors.New("'role' must be 'user' or 'assistant'")
 	}
@@ -289,9 +312,8 @@ func convertMessage(role string, content json.RawMessage) ([]oaiMessage, error) 
 	}
 
 	// The common shape by a wide margin: content is a bare string.
-	var text string
-	if json.Unmarshal(content, &text) == nil {
-		return []oaiMessage{{Role: role, Content: text}}, nil
+	if text, err := textOf(content); err == nil {
+		return []chatMessage{{role: role, content: text}}, nil
 	}
 	var blocks []anthropicBlock
 	if err := json.Unmarshal(content, &blocks); err != nil {
@@ -299,7 +321,7 @@ func convertMessage(role string, content json.RawMessage) ([]oaiMessage, error) 
 	}
 
 	if role == "assistant" {
-		return convertAssistant(blocks), nil
+		return []chatMessage{convertAssistant(blocks)}, nil
 	}
 	return convertUser(blocks), nil
 }
@@ -307,8 +329,8 @@ func convertMessage(role string, content json.RawMessage) ([]oaiMessage, error) 
 // convertAssistant collapses an assistant turn. Its text becomes the content
 // and its tool_use blocks become tool_calls. Thinking blocks have no
 // counterpart and are dropped.
-func convertAssistant(blocks []anthropicBlock) []oaiMessage {
-	msg := oaiMessage{Role: "assistant"}
+func convertAssistant(blocks []anthropicBlock) chatMessage {
+	msg := chatMessage{role: "assistant"}
 	for _, b := range blocks {
 		if b.Type != "tool_use" {
 			continue
@@ -317,34 +339,32 @@ func convertAssistant(blocks []anthropicBlock) []oaiMessage {
 		if len(b.Input) > 0 && string(b.Input) != "null" {
 			args = string(b.Input)
 		}
-		msg.ToolCalls = append(msg.ToolCalls, oaiToolCall{
+		msg.toolCalls = append(msg.toolCalls, oaiToolCall{
 			ID: b.ID, Type: "function", Function: oaiFunction{Name: b.Name, Arguments: args},
 		})
 	}
-	if text := joinText(blocks); text != "" {
-		msg.Content = text
-	}
+	msg.content = joinText(blocks)
 	// An empty assistant turn gets an empty string. Upstream rejects a
 	// message without content, and dropping the turn would break the
 	// user/assistant alternation the chat template needs.
-	if msg.Content == nil && len(msg.ToolCalls) == 0 {
-		msg.Content = ""
+	if msg.content == nil && len(msg.toolCalls) == 0 {
+		msg.content = emptyText
 	}
-	return []oaiMessage{msg}
+	return msg
 }
 
 // convertUser splits a user turn into the tool results it carries and whatever
 // the person actually said.
-func convertUser(blocks []anthropicBlock) []oaiMessage {
+func convertUser(blocks []anthropicBlock) []chatMessage {
 	var (
-		out   []oaiMessage
-		parts []oaiPart
+		out   []chatMessage
+		parts []chatPart
 	)
 	for _, b := range blocks {
 		switch b.Type {
 		case "text":
-			if b.Text != "" {
-				parts = append(parts, oaiPart{Type: "text", Text: b.Text})
+			if !b.Text.isEmpty() {
+				parts = append(parts, chatPart{text: b.Text})
 			}
 		case "image":
 			if p, ok := imagePart(b); ok {
@@ -352,9 +372,7 @@ func convertUser(blocks []anthropicBlock) []oaiMessage {
 			}
 		case "tool_result":
 			text, images := toolResult(b.Content)
-			out = append(out, oaiMessage{
-				Role: "tool", ToolCallID: b.ToolUseID, Content: text,
-			})
+			out = append(out, chatMessage{role: "tool", toolCallID: b.ToolUseID, content: text})
 			// The OpenAI tool role carries only text, so images from a tool
 			// move to the user turn after the results, where the model reads
 			// them.
@@ -367,38 +385,48 @@ func convertUser(blocks []anthropicBlock) []oaiMessage {
 	switch {
 	case len(parts) == 0:
 		// Only tool results, so no empty user turn after them.
-	case len(parts) == 1 && parts[0].Type == "text":
-		out = append(out, oaiMessage{Role: "user", Content: parts[0].Text})
+	case len(parts) == 1 && parts[0].imageURL == nil:
+		out = append(out, chatMessage{role: "user", content: parts[0].text})
 	default:
-		out = append(out, oaiMessage{Role: "user", Content: parts})
+		out = append(out, chatMessage{role: "user", parts: parts})
 	}
 	if len(out) == 0 {
-		out = append(out, oaiMessage{Role: "user", Content: ""})
+		out = append(out, chatMessage{role: "user", content: emptyText})
 	}
 	return out
 }
 
 // imagePart converts an image block. The Messages API carries the bytes
 // inline; the OpenAI shape carries the same bytes as a data URL.
-func imagePart(b anthropicBlock) (oaiPart, bool) {
+func imagePart(b anthropicBlock) (chatPart, bool) {
 	if b.Source == nil {
-		return oaiPart{}, false
+		return chatPart{}, false
 	}
 	switch b.Source.Type {
 	case "url":
 		if b.Source.URL == "" {
-			return oaiPart{}, false
+			return chatPart{}, false
 		}
-		return oaiPart{Type: "image_url", ImageURL: &oaiImageURL{URL: b.Source.URL}}, true
+		return chatPart{imageURL: quoteText(b.Source.URL)}, true
 	case "base64":
-		if b.Source.Data == "" || b.Source.MediaType == "" {
-			return oaiPart{}, false
+		if b.Source.Data.isEmpty() || b.Source.MediaType == "" {
+			return chatPart{}, false
 		}
-		return oaiPart{Type: "image_url", ImageURL: &oaiImageURL{
-			URL: "data:" + b.Source.MediaType + ";base64," + b.Source.Data,
-		}}, true
+		return chatPart{imageURL: dataURL(b.Source.MediaType, b.Source.Data)}, true
 	}
-	return oaiPart{}, false
+	return chatPart{}, false
+}
+
+// dataURL makes the data URL of inline bytes. An image can be megabytes, so
+// its base64 is copied as it came rather than decoded.
+func dataURL(mediaType string, data jsonText) jsonText {
+	media := quoteText(mediaType)
+	out := make(jsonText, 0, len(media)+len(data)+16)
+	out = append(out, `"data:`...)
+	out = append(out, media[1:len(media)-1]...)
+	out = append(out, ";base64,"...)
+	out = append(out, data[1:len(data)-1]...)
+	return append(out, '"')
 }
 
 // toolResult flattens a tool result's content, which is a string or an array of
@@ -406,19 +434,18 @@ func imagePart(b anthropicBlock) (oaiPart, bool) {
 //
 // `is_error` is dropped: the OpenAI shape has no field for it, and a failed
 // tool says so in its text anyway.
-func toolResult(raw json.RawMessage) (string, []oaiPart) {
+func toolResult(raw json.RawMessage) (jsonText, []chatPart) {
 	if len(raw) == 0 {
-		return "", nil
+		return emptyText, nil
 	}
-	var s string
-	if json.Unmarshal(raw, &s) == nil {
-		return s, nil
+	if text, err := textOf(raw); err == nil {
+		return text, nil
 	}
 	var blocks []anthropicBlock
 	if json.Unmarshal(raw, &blocks) != nil {
-		return string(raw), nil
+		return quoteText(string(raw)), nil
 	}
-	var images []oaiPart
+	var images []chatPart
 	for _, b := range blocks {
 		if b.Type == "image" {
 			if p, ok := imagePart(b); ok {
@@ -426,19 +453,119 @@ func toolResult(raw json.RawMessage) (string, []oaiPart) {
 			}
 		}
 	}
-	return joinText(blocks), images
+	text := joinText(blocks)
+	if text == nil {
+		text = emptyText
+	}
+	return text, images
 }
 
 // joinText joins the text blocks in a list with a blank line. Running them
 // together would glue the last word of one to the first of the next.
-func joinText(blocks []anthropicBlock) string {
-	var texts []string
+func joinText(blocks []anthropicBlock) jsonText {
+	texts := make([]jsonText, 0, len(blocks))
 	for _, b := range blocks {
-		if b.Type == "text" && b.Text != "" {
+		if b.Type == "text" {
 			texts = append(texts, b.Text)
 		}
 	}
-	return strings.Join(texts, "\n\n")
+	return joinTexts(texts)
+}
+
+// chatMessage is one message of the chat request a Messages request becomes.
+// It is written out by hand, so its text is copied rather than escaped again.
+type chatMessage struct {
+	role string
+	// content is left out when nil: an assistant turn of only tool calls has
+	// none.
+	content jsonText
+	// parts replaces content when the turn has images.
+	parts      []chatPart
+	toolCalls  []oaiToolCall
+	toolCallID string
+}
+
+// chatPart is text or, when imageURL is set, an image.
+type chatPart struct {
+	text     jsonText
+	imageURL jsonText
+}
+
+// openingOfChat is openingOf for a translated Messages request. It writes the
+// content exactly as appendMessages does, so a request keeps its session
+// whether or not it is translated.
+func openingOfChat(msgs []chatMessage) (json.RawMessage, bool) {
+	for _, m := range msgs {
+		if m.role == "user" {
+			return m.appendContent(nil), true
+		}
+	}
+	return nil, false
+}
+
+// appendContent writes the content: the text, or the parts.
+func (m chatMessage) appendContent(dst []byte) []byte {
+	if m.parts == nil {
+		return append(dst, m.content...)
+	}
+	dst = append(dst, '[')
+	for i, p := range m.parts {
+		if i > 0 {
+			dst = append(dst, ',')
+		}
+		if p.imageURL != nil {
+			dst = append(dst, `{"type":"image_url","image_url":{"url":`...)
+			dst = append(dst, p.imageURL...)
+			dst = append(dst, "}}"...)
+			continue
+		}
+		dst = append(dst, `{"type":"text","text":`...)
+		dst = append(dst, p.text...)
+		dst = append(dst, '}')
+	}
+	return append(dst, ']')
+}
+
+// appendMessages writes the messages as a JSON array.
+func appendMessages(dst []byte, msgs []chatMessage) []byte {
+	dst = append(dst, '[')
+	for i, m := range msgs {
+		if i > 0 {
+			dst = append(dst, ',')
+		}
+		dst = m.appendJSON(dst)
+	}
+	return append(dst, ']')
+}
+
+func (m chatMessage) appendJSON(dst []byte) []byte {
+	dst = append(dst, `{"role":`...)
+	dst = appendQuoted(dst, m.role)
+	if m.parts != nil || m.content != nil {
+		dst = append(dst, `,"content":`...)
+		dst = m.appendContent(dst)
+	}
+	if len(m.toolCalls) > 0 {
+		dst = append(dst, `,"tool_calls":[`...)
+		for i, tc := range m.toolCalls {
+			if i > 0 {
+				dst = append(dst, ',')
+			}
+			dst = append(dst, `{"id":`...)
+			dst = appendQuoted(dst, tc.ID)
+			dst = append(dst, `,"type":"function","function":{"name":`...)
+			dst = appendQuoted(dst, tc.Function.Name)
+			dst = append(dst, `,"arguments":`...)
+			dst = appendQuoted(dst, tc.Function.Arguments)
+			dst = append(dst, "}}"...)
+		}
+		dst = append(dst, ']')
+	}
+	if m.toolCallID != "" {
+		dst = append(dst, `,"tool_call_id":`...)
+		dst = appendQuoted(dst, m.toolCallID)
+	}
+	return append(dst, '}')
 }
 
 // ------------------------------------------------------------------ responses

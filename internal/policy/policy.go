@@ -1,4 +1,4 @@
-// Package policy holds Keera Gateway's tenancy model: the org → team → key
+// Package policy holds Keera Gateway's tenancy model: the org → project → key
 // hierarchy, the limits that attach at each level, and the rule for combining
 // them.
 package policy
@@ -20,9 +20,9 @@ type ScopeType string
 
 // The levels of the hierarchy, outermost first.
 const (
-	ScopeOrg  ScopeType = "org"
-	ScopeTeam ScopeType = "team"
-	ScopeKey  ScopeType = "key"
+	ScopeOrg     ScopeType = "org"
+	ScopeProject ScopeType = "project"
+	ScopeKey     ScopeType = "key"
 )
 
 // Period is the window a budget resets on.
@@ -573,11 +573,11 @@ func (k KeyKind) Valid() bool { return k == KeyStandard || k == KeySubscription 
 
 // Key identifies the principal behind a request.
 type Key struct {
-	ID     string
-	OrgID  string
-	TeamID string
-	UserID string
-	Kind   KeyKind
+	ID        string
+	OrgID     string
+	ProjectID string
+	UserID    string
+	Kind      KeyKind
 }
 
 // Subscription reports whether the key only reaches subscription models.
@@ -618,7 +618,7 @@ type Resolved struct {
 	AllowedTools []string
 	// BlockHostedTools says a request's hosted tools are taken out.
 	BlockHostedTools bool
-	// Scopes runs outermost first: org, team if any, then the key. Rate
+	// Scopes runs outermost first: org, project if any, then the key. Rate
 	// limits and budgets are enforced at every level.
 	Scopes []Scope
 	// Sandbox is what this key may hold of the sandbox pool.
@@ -642,18 +642,18 @@ func (r *Resolved) MayRoute(alias string) bool {
 	return r.AllowsModel(alias) && !r.Key.Subscription()
 }
 
-// Resolve combines the guardrails of a key's org, team and the key itself.
+// Resolve combines the guardrails of a key's org, project and the key itself.
 //
 // A level can narrow what it inherits but never widen it: allow-lists
 // intersect and ceilings take the minimum. The exceptions:
 //
 //   - Budgets and rate limits are kept per level and checked separately. An
-//     org cap of 10,000 and a team cap of 1,000 must both hold.
+//     org cap of 10,000 and a project cap of 1,000 must both hold.
 //   - System prompts concatenate outermost first, because text does not narrow.
 //   - Filters add up level by level, and hosted tools stay blocked once any
 //     level blocks them.
 //   - Only the organisation grants repositories; the levels below narrow them.
-func Resolve(key Key, org, team, own *Limits) *Resolved {
+func Resolve(key Key, org, project, own *Limits) *Resolved {
 	r := &Resolved{Key: key}
 
 	type level struct {
@@ -662,8 +662,8 @@ func Resolve(key Key, org, team, own *Limits) *Resolved {
 		lim *Limits
 	}
 	levels := []level{{ScopeOrg, key.OrgID, org}}
-	if key.TeamID != "" {
-		levels = append(levels, level{ScopeTeam, key.TeamID, team})
+	if key.ProjectID != "" {
+		levels = append(levels, level{ScopeProject, key.ProjectID, project})
 	}
 	levels = append(levels, level{ScopeKey, key.ID, own})
 
@@ -728,7 +728,7 @@ func joinPrompts(cur, next string) string {
 
 // appendFilters adds one level's filters to the ones above it, dropping
 // repeats. The first mention wins, so an organisation's filter runs before its
-// teams'. A second pass over the same text would find nothing new.
+// projects'. A second pass over the same text would find nothing new.
 func appendFilters(cur, next []string) []string {
 	for _, alias := range next {
 		if alias != "" && !slices.Contains(cur, alias) {
@@ -786,8 +786,8 @@ func (t ScopeType) Possessive() string {
 	switch t {
 	case ScopeOrg:
 		return "your organisation"
-	case ScopeTeam:
-		return "your team"
+	case ScopeProject:
+		return "your project"
 	default:
 		return "this API key"
 	}

@@ -5,7 +5,7 @@ import { h, icon, icons, brandMark, clear, replace, toast } from "./ui.js";
 import { signIn, passkeySignInFlow } from "./views/signin.js";
 import { passkeySetupView, managePasskeys } from "./views/passkeys.js";
 import { dashboardView } from "./views/dashboard.js";
-import { teamsView } from "./views/teams.js";
+import { projectsView } from "./views/projects.js";
 import { keysView } from "./views/keys.js";
 import { modelsView, providerModelsView } from "./views/models.js";
 import { filtersView, filterDetailView } from "./views/filters.js";
@@ -23,7 +23,7 @@ import { sessionsView, sessionDetailView } from "./views/sessions.js";
 import { peopleView } from "./views/people.js";
 import { orgsView } from "./views/orgs.js";
 import {
-  teamDetailView,
+  projectDetailView,
   keyDetailView,
   modelDetailView,
 } from "./views/detail.js";
@@ -47,8 +47,8 @@ export const state = {
  *  the fallback route and the aria-current sweep all walk this one array - and
  *  `group` folds it into labelled blocks at the point of rendering.
  *
- *  A `detail` on an entry is that screen's row opened up: /teams lists the
- *  teams, /teams/team_1 is one of them. It hangs off the list route so that who
+ *  A `detail` on an entry is that screen's row opened up: /projects lists the
+ *  projects, /projects/project_1 is one of them. It hangs off the list route so that who
  *  may see it, and which sidebar entry lights up, are decided once for both.
  *
  *  The order is by audience, widest first: the screens shaped for members lead,
@@ -88,12 +88,12 @@ const routes = [
   // What the organisation is made of, and the report over it. Usage belongs
   // with them: it is the organisation's spend, not the reader's own.
   {
-    path: "/teams",
+    path: "/projects",
     group: "Organisation",
-    label: "Teams",
-    icon: "teams",
-    view: teamsView,
-    detail: { label: "Team", view: teamDetailView },
+    label: "Projects",
+    icon: "projects",
+    view: projectsView,
+    detail: { label: "Project", view: projectDetailView },
   },
   {
     path: "/keys",
@@ -123,7 +123,7 @@ const routes = [
   },
   // Filters sit next to the catalogue because that is what they are made of -
   // a model and an instruction - and next to the guardrails they belong to,
-  // which are reached from Teams and API keys either side of them.
+  // which are reached from Projects and API keys either side of them.
   {
     path: "/filters",
     group: "Organisation",
@@ -135,7 +135,7 @@ const routes = [
     // thing anybody sets up before they have a reason to.
     advanced: "filters",
     about: "Checks requests, and can redact or refuse them.",
-    // A filter has its own screen for the same reason a team and a model do:
+    // A filter has its own screen for the same reason a project and a model do:
     // it is a thing with traffic. It is the only guardrail that runs a model on
     // every request it covers, spends money on each one and refuses some of
     // them, and none of that fits in a row.
@@ -328,7 +328,7 @@ function foldedAway() {
 /** matchRoute resolves a path to the screen that draws it.
  *
  *  A detail path is the list path plus one segment, and that segment is what
- *  the screen is given: /teams/team_1, /models/keera-code. It is decoded here
+ *  the screen is given: /projects/project_1, /models/keera-code. It is decoded here
  *  rather than by the view, so a segment cannot be read as more of the path.
  *
  *  Anything that matches nothing falls back to the first screen the reader may
@@ -720,8 +720,8 @@ async function renderRoute() {
   const available = visibleRoutes();
   const { route, param } = matchRoute(available, location.pathname);
 
-  // A detail screen lights up the list it belongs to: somebody reading one team
-  // is still under Teams, and a sidebar with nothing marked reads as a screen
+  // A detail screen lights up the list it belongs to: somebody reading one project
+  // is still under Projects, and a sidebar with nothing marked reads as a screen
   // that fell out of the panel.
   const current = route.under || (route.parent || route).path;
   for (const el of document.querySelectorAll(".nav-item")) {
@@ -750,7 +750,7 @@ async function renderRoute() {
     reload: renderRoute,
     navigate,
     setOrg,
-    /** param is the one path segment a detail screen was opened with: the team
+    /** param is the one path segment a detail screen was opened with: the project
      *  id, the key id, the model alias. It is empty on every other screen. */
     param,
     setSubtitle: (s) => setTitle(title, s),
@@ -758,8 +758,8 @@ async function renderRoute() {
      *  reload, or on navigation to another one. */
     onTeardown: (fn) => teardowns.push(fn),
     /** setTitle is for a screen whose heading is the thing it is showing rather
-     *  than the name of the screen - one team is called by its own name, not
-     *  "Team". */
+     *  than the name of the screen - one project is called by its own name, not
+     *  "Project". */
     setTitle: (t, s) => {
       title = t;
       setTitle(t, s);

@@ -96,7 +96,7 @@ func TestAHalfWrittenHandshakeIsRefusedAtTheStart(t *testing.T) {
 
 	// And the ordinary sign-in, which names none of them and is not one of
 	// these at all.
-	got, err := cliLoginFrom(url.Values{"next": {"/teams"}})
+	got, err := cliLoginFrom(url.Values{"next": {"/projects"}})
 	if err != nil || got != (cliLogin{}) {
 		t.Errorf("cliLoginFrom(panel sign-in) = %+v, %v; want an empty handshake", got, err)
 	}

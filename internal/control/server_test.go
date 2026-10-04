@@ -90,7 +90,7 @@ func TestOperatorKeyIsExemptFromCSRF(t *testing.T) {
 	var seen *authn.Principal
 	h := newServer().authenticated(echo(&seen))
 
-	r := httptest.NewRequest(http.MethodPost, httpx.ControlPrefix+"/v1/teams", strings.NewReader("{}"))
+	r := httptest.NewRequest(http.MethodPost, httpx.ControlPrefix+"/v1/projects", strings.NewReader("{}"))
 	r.Header.Set("Authorization", "Bearer "+testOperatorKey)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
@@ -129,7 +129,7 @@ func TestSessionsNeedTheirCSRFTokenOnAWrite(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			seen = nil
-			r := httptest.NewRequest(tc.method, httpx.ControlPrefix+"/v1/teams", strings.NewReader("{}"))
+			r := httptest.NewRequest(tc.method, httpx.ControlPrefix+"/v1/projects", strings.NewReader("{}"))
 			if tc.token != "" {
 				r.Header.Set("X-CSRF-Token", tc.token)
 			}

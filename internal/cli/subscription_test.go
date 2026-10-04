@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"maps"
 	"os"
 	"path/filepath"
@@ -53,7 +54,7 @@ func TestSetClaudeEnvKeepsTheRestOfTheSettings(t *testing.T) {
 	settings := map[string]any{
 		"theme": "dark",
 		"env": map[string]any{
-			"ANTHROPIC_CUSTOM_HEADERS": "X-Team: payments\nx-keera-key: keera_sk_old",
+			"ANTHROPIC_CUSTOM_HEADERS": "X-Project: payments\nx-keera-key: keera_sk_old",
 			"ANTHROPIC_AUTH_TOKEN":     "keera_sk_old",
 		},
 	}
@@ -64,7 +65,7 @@ func TestSetClaudeEnvKeepsTheRestOfTheSettings(t *testing.T) {
 	if settings["theme"] != "dark" || env["ANTHROPIC_BASE_URL"] != "https://gw/api" {
 		t.Errorf("settings = %+v, want the theme kept and the address set", settings)
 	}
-	if got := env["ANTHROPIC_CUSTOM_HEADERS"]; got != "X-Team: payments\nX-Keera-Key: keera_sk_new" {
+	if got := env["ANTHROPIC_CUSTOM_HEADERS"]; got != "X-Project: payments\nX-Keera-Key: keera_sk_new" {
 		t.Errorf("headers = %q, want the other header kept and the key replaced", got)
 	}
 	if len(warnings) == 0 || !strings.Contains(warnings[0], "ANTHROPIC_AUTH_TOKEN") {
@@ -186,5 +187,76 @@ func TestTheMachineIDStaysTheSame(t *testing.T) {
 	}
 	if again, _ := machineID(); again != first {
 		t.Errorf("the id changed from %s to %s; the machine's key would not be found again", first, again)
+	}
+}
+
+// memberKeys is /v1/keys for a member with a key on another machine and a
+// subscription key an administrator issued them that no machine holds yet.
+var memberKeys = map[string]any{"data": []map[string]any{
+	{"id": "key_desktop", "org_id": "org_1", "user_id": "user_1", "kind": "subscription",
+		"name": "claude-code on desktop (0a1b2c3d)"},
+	{"id": "key_issued", "org_id": "org_1", "user_id": "user_1", "kind": "subscription",
+		"name": "ada's Claude Code"},
+	{"id": "key_bob", "org_id": "org_1", "user_id": "user_2", "kind": "subscription",
+		"name": "bob's Claude Code"},
+}}
+
+var member = identity{UserID: "user_1", Email: "ada@example.ch", Role: "member", OrgID: "org_1"}
+
+// Only an administrator issues keys, so a member's first run takes over the
+// key one issued them. The key another machine holds is left alone, or that
+// machine would stop working.
+func TestMachineKeyTakesOverAMembersIssuedKey(t *testing.T) {
+	t.Setenv("KEERA_CONFIG_DIR", t.TempDir())
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/keys": memberKeys,
+		"POST /v1/keys/key_issued/rotate": map[string]any{
+			"id": "key_new", "key": "keera_sk_new", "name": "claude-code on laptop (ffffffff)",
+		},
+	})
+
+	key, replaced, err := machineKey(context.Background(), newClient(), "org_1", member, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key.ID != "key_new" || replaced == nil || replaced.ID != "key_issued" {
+		t.Errorf("got %s replacing %+v, want key_new replacing key_issued", key.ID, replaced)
+	}
+	name, _ := f.request("POST", "/v1/keys/key_issued/rotate").body["name"].(string)
+	if !isMachineKeyName(name) {
+		t.Errorf("rotated to the name %q, want this machine's", name)
+	}
+	if f.called("POST", "/v1/keys") {
+		t.Error("a member's run tried to issue a key")
+	}
+}
+
+func TestMachineKeySendsAMemberWithoutAKeyToAnAdministrator(t *testing.T) {
+	t.Setenv("KEERA_CONFIG_DIR", t.TempDir())
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/keys": map[string]any{"data": memberKeys["data"].([]map[string]any)[:1]},
+	})
+
+	_, _, err := machineKey(context.Background(), newClient(), "org_1", member, "")
+	if err == nil || !strings.Contains(err.Error(), "administrator") ||
+		!strings.Contains(err.Error(), "--user ada@example.ch") {
+		t.Errorf("err = %v, want it to say what to ask an administrator for", err)
+	}
+	if f.called("POST", "/v1/keys") || f.called("POST", "/v1/keys/key_desktop/rotate") {
+		t.Errorf("the CLI changed a key anyway: %v", f.seen)
+	}
+}
+
+func TestIsMachineKeyName(t *testing.T) {
+	for name, want := range map[string]bool{
+		machineKeyName("laptop", "0a1b2c3d"):          true,
+		machineKeyName("my (old) laptop", "0a1b2c3d"): true,
+		"ada's Claude Code":                           false,
+		"claude-code on laptop":                       false,
+		"claude-code on laptop (not-hex!)":            false,
+	} {
+		if got := isMachineKeyName(name); got != want {
+			t.Errorf("isMachineKeyName(%q) = %v, want %v", name, got, want)
+		}
 	}
 }

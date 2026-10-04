@@ -182,10 +182,10 @@ func (s *Server) toolCalls(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	}
 	q := r.URL.Query()
 	tq := store.ToolCallQuery{
-		OrgID: orgID, TeamID: sc.TeamID, KeyID: sc.KeyID, UserID: sc.UserID,
+		OrgID: orgID, ProjectID: sc.ProjectID, KeyID: sc.KeyID, UserID: sc.UserID,
 		Server: q.Get("server"), Tool: q.Get("tool"), From: from, To: to,
 	}
-	tq.Limit, _ = page(q)
+	tq.Limit, tq.Before = page(q)
 	if httpx.Flag(q, "summary") {
 		data, err := s.st.SummarizeToolCalls(r.Context(), tq)
 		if err != nil {
@@ -200,7 +200,11 @@ func (s *Server) toolCalls(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		s.fail(w, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"from": from, "to": to, "data": data})
+	out := map[string]any{"from": from, "to": to, "data": data}
+	if len(data) > 0 {
+		out["next_before"] = data[len(data)-1].ID
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 // checkAllowedTools refuses a tool allow-list with an entry that is not one,
