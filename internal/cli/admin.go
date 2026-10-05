@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -39,13 +40,11 @@ func out(asJSON bool, v any, render func(*table)) error {
 }
 
 // split takes the verb off a command's arguments. A leading flag means the
-// verb was left out, which is a listing.
+// verb was left out, so the verb is empty and parseVerb reads it as the
+// listing, where the command has one.
 func split(args []string) (sub string, rest []string) {
-	if len(args) == 0 {
-		return "", nil
-	}
-	if strings.HasPrefix(args[0], "-") {
-		return "list", args
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return "", args
 	}
 	return args[0], args[1:]
 }
@@ -59,26 +58,6 @@ func list[T any](ctx context.Context, c *client, path string) ([]T, error) {
 	return res.Data, err
 }
 
-// findAlias reads the entry called alias from the list at path. noun names
-// the kind of entry, for the error; its first word is the command that lists
-// them, as in "MCP server" and 'keera mcp list'.
-func findAlias[T any](ctx context.Context, c *client, path, alias, noun string,
-	aliasOf func(T) string,
-) (T, error) {
-	var zero T
-	entries, err := list[T](ctx, c, path)
-	if err != nil {
-		return zero, err
-	}
-	for _, e := range entries {
-		if aliasOf(e) == alias {
-			return e, nil
-		}
-	}
-	cmd := strings.ToLower(strings.Fields(noun)[0])
-	return zero, fmt.Errorf("no %s %s (see: keera %s list)", noun, alias, cmd)
-}
-
 // inOrg scopes a control API path to one organisation.
 func inOrg(path, orgID string) string {
 	return path + "?org_id=" + url.QueryEscape(orgID)
@@ -87,6 +66,90 @@ func inOrg(path, orgID string) string {
 // sinceParam is the start of a report window, as the control API reads it.
 func sinceParam(d time.Duration) string {
 	return time.Now().Add(-d).UTC().Format(time.RFC3339)
+}
+
+// reportWindow is how far back a report looks unless told otherwise.
+const reportWindow = 7 * 24 * time.Hour
+
+// reportLimit is how many rows a report prints unless told otherwise.
+const reportLimit = 50
+
+// reportQuery starts a report's query: its window, its organisation if one
+// was given, the project, key or person it is narrowed to, and extra. Empty
+// values are left out. w may be nil, for a report that takes no --project,
+// --key or --user.
+func reportQuery(ctx context.Context, c *client, org string, w *who, since time.Duration,
+	extra map[string]string,
+) (url.Values, error) {
+	q := url.Values{"from": {sinceParam(since)}}
+	setIfGiven(q, map[string]string{"org_id": org})
+	setIfGiven(q, extra)
+	if w == nil {
+		return q, nil
+	}
+	params, err := w.params(ctx, c, org)
+	if err != nil {
+		return nil, err
+	}
+	setIfGiven(q, params)
+	return q, nil
+}
+
+// setIfGiven sets each query parameter that has a value.
+func setIfGiven(q url.Values, params map[string]string) {
+	for name, v := range params {
+		if v != "" {
+			q.Set(name, v)
+		}
+	}
+}
+
+// errNotFound is what a lookup by name returns when nothing matches, so a
+// caller can tell "not there" from "the control API is down".
+var errNotFound = errors.New("not found")
+
+// notFoundError is a lookup that matched nothing, worded for the person.
+type notFoundError string
+
+func (e notFoundError) Error() string      { return string(e) }
+func (notFoundError) Is(target error) bool { return target == errNotFound }
+
+// notFound is how every command says a name matched nothing: what was looked
+// for, where, and the command that lists what there is.
+func notFound(noun, name, orgID, cmd string) error {
+	where := ""
+	if orgID != "" {
+		where = " in " + orgID
+	}
+	return notFoundError(fmt.Sprintf("no %s %q%s (see: keera %s list)", noun, name, where, cmd))
+}
+
+// keepRaw sends a request and decodes the answer into v. It returns the
+// answer as it came, so --json prints everything the control API said rather
+// than only the fields a table shows.
+func keepRaw(ctx context.Context, c *client, method, path string, body, v any) (json.RawMessage, error) {
+	var raw json.RawMessage
+	if err := c.do(ctx, method, path, body, &raw); err != nil {
+		return nil, err
+	}
+	return raw, json.Unmarshal(raw, v)
+}
+
+// printNone says a listing is empty, so a bare heading is not taken for a
+// broken command. add, when given, is the command that makes one.
+func printNone(w io.Writer, what, add string) {
+	if add == "" {
+		_, _ = fmt.Fprintf(w, "No %s.\n", what)
+		return
+	}
+	_, _ = fmt.Fprintf(w, "No %s. Add one with: %s\n", what, add)
+}
+
+// handOver prints a new key: the secret alone on stdout, so
+// 'KEY=$(keera key create …)' captures it, and what happened on stderr.
+func handOver(secret, said string) {
+	fmt.Println(secret)
+	fmt.Fprintf(os.Stderr, "\n%s %s\n", said, styleErr.warn("This is the only time it is shown."))
 }
 
 // resolveOrg fills in the organisation when there is only one, which is the
@@ -282,11 +345,12 @@ func dash(s string) string {
 	return s
 }
 
+// yesNo is how every table says yes or no, painted like a state.
 func yesNo(b bool) string {
 	if b {
-		return "yes"
+		return statusWord("yes")
 	}
-	return "no"
+	return statusWord("no")
 }
 
 // plural renders a count with its noun, so a single one is not "1 rules".
@@ -325,14 +389,19 @@ func orUnlimited(p *int) any {
 	return *p
 }
 
-// shortDuration is how long something ran, in the units a person would say.
-// time.Duration's own string is "11m30.000000001s".
+// shortDuration is a length of time in the units a person would say.
+// time.Duration's own string is "11m30.000000001s", or "168h0m0s" for a week.
 func shortDuration(d time.Duration) string {
+	const day = 24 * time.Hour
 	switch {
 	case d < time.Minute:
 		return fmt.Sprintf("%ds", int(d.Seconds()))
 	case d < time.Hour:
 		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+	case d >= 2*day && d%day == 0:
+		return fmt.Sprintf("%dd", d/day)
+	case d%time.Hour == 0:
+		return fmt.Sprintf("%dh", int(d.Hours()))
 	default:
 		return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
 	}

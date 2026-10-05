@@ -220,7 +220,7 @@ func TestOverviewNarrowsToOneEntity(t *testing.T) {
 	}
 	from, to := now.Add(-6*time.Hour), now.Add(time.Hour)
 
-	whole, err := st.Overview(ctx, f.orgID, from, to, Scope{})
+	whole, err := st.Overview(ctx, f.orgID, from, to, ReportScope{})
 	if err != nil {
 		t.Fatalf("Overview: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestOverviewNarrowsToOneEntity(t *testing.T) {
 		t.Errorf("TopKeys = %+v on an unscoped overview, want none", whole.TopKeys)
 	}
 
-	project, err := st.Overview(ctx, f.orgID, from, to, Scope{ProjectID: f.projectID})
+	project, err := st.Overview(ctx, f.orgID, from, to, ReportScope{ProjectID: f.projectID})
 	if err != nil {
 		t.Fatalf("Overview by project: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestOverviewNarrowsToOneEntity(t *testing.T) {
 		t.Errorf("the chart plots %d requests, want the same 3 the totals count", charted)
 	}
 
-	model, err := st.Overview(ctx, f.orgID, from, to, Scope{Alias: "keera-code"})
+	model, err := st.Overview(ctx, f.orgID, from, to, ReportScope{Alias: "keera-code"})
 	if err != nil {
 		t.Fatalf("Overview by model: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestOverviewNarrowsToOneEntity(t *testing.T) {
 		t.Errorf("TopProjects = %+v, want both projects that called this model", model.TopProjects)
 	}
 
-	key, err := st.Overview(ctx, f.orgID, from, to, Scope{KeyID: "key_2"})
+	key, err := st.Overview(ctx, f.orgID, from, to, ReportScope{KeyID: "key_2"})
 	if err != nil {
 		t.Fatalf("Overview by key: %v", err)
 	}
@@ -294,8 +294,8 @@ func TestOverviewNarrowsToOneEntity(t *testing.T) {
 // that only holds failures cannot answer it.
 // The breakdown of one request's latency survives the round trip, and a
 // request that has none is told apart from a request whose steps were all of
-// zero length. The second is what a row written by an older gateway looks like,
-// and the panel draws nothing at all rather than a chart of nothing.
+// zero length. The panel draws nothing at all for the second, rather than a
+// chart of nothing.
 func TestRequestsCarryWhereTheirTimeWent(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)

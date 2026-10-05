@@ -57,8 +57,7 @@ func (s *Server) putMCPServer(w http.ResponseWriter, r *http.Request, p *authn.P
 		// APIKey is write-only. Nil leaves the stored one alone, and "" clears it.
 		APIKey *string `json:"api_key"`
 	}
-	if err := httpx.ReadJSON(r, &body); err != nil {
-		badRequest(w, err.Error())
+	if !readJSON(w, r, &body) {
 		return
 	}
 	m := policy.MCPServer{
@@ -136,32 +135,13 @@ func (s *Server) setMCPCredential(r *http.Request, p *authn.Principal, orgID, al
 		registry.MCPSecretName, s.st.SetMCPCredential)
 }
 
+// deleteMCPServer keeps a server that is still in use: a guardrail naming a
+// missing server cannot be saved again.
 func (s *Server) deleteMCPServer(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	orgID, ok := s.adminOrg(w, r, p)
-	if !ok {
-		return
-	}
-	alias := r.PathValue("alias")
-
-	// A guardrail naming a missing server cannot be saved again, so a server
-	// still in use is not deleted; the refusal lists who uses it.
-	users, err := s.st.MCPServerUsers(r.Context(), orgID, alias)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	if len(users) > 0 {
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "mcp_server_in_use",
-			"the MCP server '"+alias+"' is in the tool allow-list of "+scopeList(users)+
-				", so take it off them first")
-		return
-	}
-
-	if err := s.st.DeleteMCPServer(r.Context(), orgID, alias); err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.deleted(w, r, p, orgID, "mcp_server", alias)
+	s.deleteUnused(w, r, p, "mcp_server", s.st.MCPServerUsers, s.st.DeleteMCPServer, func(alias, users string) string {
+		return "the MCP server '" + alias + "' is in the tool allow-list of " + users +
+			", so take it off them first"
+	})
 }
 
 // toolCalls is the tool-call log of one organisation, newest first, or with

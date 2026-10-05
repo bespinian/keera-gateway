@@ -85,10 +85,14 @@ func SetRetryAfter(w http.ResponseWriter, d time.Duration) {
 	w.Header().Set("Retry-After", strconv.Itoa(max(int(d.Seconds()), 1)))
 }
 
+// MaxJSONBody is the largest body ReadJSON takes. A longer one fails with an
+// *http.MaxBytesError, which the caller answers with 413.
+const MaxJSONBody = 1 << 20
+
 // ReadJSON decodes a request body, rejecting unknown fields so a typo in a
 // control-plane call is an error rather than a silently ignored setting.
 func ReadJSON(r *http.Request, v any) error {
-	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20))
+	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, MaxJSONBody))
 	dec.DisallowUnknownFields()
 	return dec.Decode(v)
 }

@@ -72,7 +72,8 @@ isolation is the same. The point is that only a branch comes out of it.
 **What creating one needs.** A name of lowercase letters, digits and interior
 hyphens, at most 40 characters, because it becomes a hostname in the cluster.
 An engineer's sandbox needs an ssh public key: `keera sandbox create` sends the
-ones in `~/.ssh`, or the one `--ssh-key` names. An agent's needs both `--repo`
+ones in `~/.ssh`, or the one in the file `--ssh-key` names, such as
+`--ssh-key ~/.ssh/work.pub`. An agent's needs both `--repo`
 and `--task`. Through the API, `env` adds variables for the first start. It
 cannot name a `KEERA_` variable: those are the gateway's.
 
@@ -140,7 +141,7 @@ port from 1024 to 65535. On podman only 2222 is published, so no other port can
 be reached.
 
 ```sh
-keera sandbox create fix-login --class standard --repo git@internal:team/service.git
+keera sandbox create fix-login --class standard --repo git@internal:platform/service.git
 keera sandbox ssh fix-login
 keera sandbox config >> ~/.ssh/config   # then: ssh sbx-fix-login, or open it in any editor
 ```
@@ -321,8 +322,8 @@ changes the fields it shows.
 
 ## Naming a project
 
-`keera sandbox create <name> --project <project>`, or the Project field in the panel's
-dialog. The sandbox's key is scoped to that project, which decides:
+`keera sandbox create <name> --project <project>`, or the Project field in the
+panel's dialog. The sandbox's key is scoped to that project, which decides:
 
 - which **budget** the agent's inference is charged to,
 - which **rate limit** it uses,
@@ -333,10 +334,10 @@ dialog. The sandbox's key is scoped to that project, which decides:
 
 Without a project, the sandbox goes in the organisation's oldest project.
 
-**The project must belong to the same organisation.** The foreign key only checks
-that the project exists, so the control plane checks the owner. Otherwise a sandbox
-could use another organisation's system prompt, budget, rate limit and model
-allow-list.
+**The project must belong to the same organisation.** The foreign key only
+checks that the project exists, so the control plane checks the owner.
+Otherwise a sandbox could use another organisation's system prompt, budget,
+rate limit and model allow-list.
 
 Only an administrator may choose a project. A member's sandbox goes in the
 organisation's oldest project, just as a member cannot choose the project of a
@@ -401,9 +402,9 @@ organisations'. So a sandbox gets a token only for a repository in
 `allowed_repos`, and one whose organisation does not set it gets none:
 
 ```sh
-keera guardrail set org <org-id> --repos acme            # everything under acme/
-keera guardrail set project <project-id> --repos acme/service  # narrows it for one project
-keera guardrail set org <org-id> --repos '*'             # any repository, for one organisation
+keera guardrail set org <org-id> --repos acme                 # everything under acme/
+keera guardrail set project <project-id> --repos acme/service # narrows it for one project
+keera guardrail set org <org-id> --repos '*'                  # any repository, for one organisation
 ```
 
 An entry is a path on the forge: an owner or group for everything under it, or
@@ -418,10 +419,10 @@ lasts a working day. Git in the sandbox asks `git-credential-keera`, which keeps
 the current token. When it has five minutes left, the helper gets a new one from
 `POST /sandbox/v1/git-credential` with the sandbox's own key. That route takes
 10 requests a minute per client address, and sandboxes that reach the gateway
-from the same address share it. The gateway revokes the replaced token where
-the forge allows it. The helper only answers
-for the repository's own host, so a submodule on another host never sees the
-token. A resumed sandbox keeps the token the helper last got, unless the gateway
+from the same address share it. When the forge gives no token, it answers 409
+`no_git_credential`. The gateway revokes the replaced token where the forge
+allows it. The helper only answers for the repository's own host, so a
+submodule on another host never sees the token. A resumed sandbox keeps the token the helper last got, unless the gateway
 handed it a new one, as it does when an expired sandbox is resumed.
 
 **When the sandbox ends, so does access.** Its key is revoked, so it cannot get
@@ -480,7 +481,8 @@ sandboxes came from one.
 
 Pools do not outlive their class. The sweep deletes the pool and template of a
 class the organisation removed or set back to `warm: 0`, and a gateway started
-with warm pools off deletes every pool it finds. Both need `list` on templates and pools.
+with warm pools off deletes every pool it finds. Both need `list` on templates
+and pools.
 
 ## The two drivers
 
@@ -493,13 +495,17 @@ with warm pools off deletes every pool it finds. Both need `list` on templates a
 | Warm pools         | with the extension                                | no                                 |
 | Suspend/resume     | yes                                               | yes (`stop`/`start`)               |
 | Volumes            | a PVC, or an emptyDir with no `disk`              | a named volume, always, unsized    |
+| Ports reachable    | any from 1024 to 65535                            | 2222 only                          |
+| Clean exit         | failed: a finished pod cannot restart             | suspended: it can start again      |
+| Whose it is        | org and project labels, owner annotation          | owner, org and project labels      |
 
 Expiry is the real difference. On Kubernetes it is `spec.shutdownTime` and the
 cluster enforces it, so **a gateway that crashes and never comes back leaves no
 sandboxes running.** An engineer's sandbox keeps its volume, as it does when it
 expires. On podman there is no controller, so the gateway's sweep
-enforces it, from the expiry on the sandbox's row. A gateway that is down over a weekend comes back to containers that
-should have ended on Friday. The sweep that runs at start-up ends those.
+enforces it, from the expiry on the sandbox's row. A gateway that is down over
+a weekend comes back to containers that should have ended on Friday. The sweep
+that runs at start-up ends those.
 
 To run podman locally, the gateway must run as a host process: run
 `make sandbox-image` once, then set `KEERA_SANDBOX_DRIVER=podman` in
@@ -660,8 +666,9 @@ The entrypoint prepares the home directory idempotently, writes the gateway's
 address into a file every login shell sources, checks out the repository, and
 then starts sshd or runs the agent. **sshd starts last**, so a sandbox is ready
 only once sshd answers, which also means setup finished. Both drivers check
-this: Kubernetes with a readiness probe on the port, podman by connecting to it
-from inside the container. An agent sandbox runs no sshd and has no such check:
+this: Kubernetes with a readiness probe on the port, podman by connecting to
+the published port and waiting for sshd's greeting, so the image needs no shell
+for it. An agent sandbox runs no sshd and has no such check:
 it is ready once it has started.
 
 The host key is generated at build time, so every sandbox from an image shares
@@ -669,6 +676,26 @@ it. It proves nothing about which sandbox you reach, and it does not need to:
 the gateway has already authenticated you over TLS and dials the sandbox
 itself. So `keera sandbox ssh` and `keera sandbox config` turn host-key
 checking off, and nobody learns to click through an unknown-host prompt.
+
+The gateway tells the entrypoint what to do through these variables. An image
+that replaces the entrypoint has to handle them itself.
+
+| Variable                                          | What it holds                                                                                     |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `KEERA_API_KEY`                                   | The sandbox's own key.                                                                            |
+| `KEERA_BASE_URL`                                  | The gateway's inference address. Also as `OPENAI_BASE_URL` (with `/v1`) and `ANTHROPIC_BASE_URL`. |
+| `KEERA_MODEL`                                     | The first chat model the key may reach. Also as `ANTHROPIC_MODEL`.                                |
+| `KEERA_SANDBOX_ID`, `_NAME`, `_CLASS`, `_PURPOSE` | Which sandbox this is.                                                                            |
+| `KEERA_SANDBOX_EXPIRES`                           | When it ends, in RFC 3339.                                                                        |
+| `KEERA_AUTHORIZED_KEYS`                           | The ssh public keys that may log in, one per line.                                                |
+| `KEERA_SESSION`                                   | An agent sandbox's session id. Also in `ANTHROPIC_CUSTOM_HEADERS`.                                |
+| `KEERA_TASK`                                      | The agent's task, when one was given.                                                             |
+| `KEERA_REPO`, `KEERA_BRANCH`                      | The repository and branch to check out.                                                           |
+| `KEERA_GIT_USERNAME`, `KEERA_GIT_TOKEN`           | The first repository credential.                                                                  |
+| `KEERA_GIT_TOKEN_EXPIRES`                         | When that token runs out, in Unix seconds.                                                        |
+| `KEERA_GIT_CREDENTIAL_URL`                        | Where the Git helper asks for a fresh token.                                                      |
+| `KEERA_GIT_AUTHOR_NAME`, `KEERA_GIT_AUTHOR_EMAIL` | The sandbox's owner, so commits are theirs.                                                       |
+| `KEERA_PI_CONFIG`, `KEERA_PI_SETTINGS`            | Pi's `models.json` and `settings.json`, which the entrypoint writes.                              |
 
 ## What is not built, and what to watch
 

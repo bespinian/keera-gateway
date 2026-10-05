@@ -10,6 +10,7 @@ import {
   icon,
   icons,
   RANGES as SHARED_RANGES,
+  rangePicker,
 } from "../ui.js";
 import { orgNameOf } from "./orgs.js";
 
@@ -85,23 +86,7 @@ export async function usageView(ctx) {
       ),
     ),
     h("div", { style: { flex: 1 } }),
-    h(
-      "div",
-      { class: "seg" },
-      RANGES.map((r) =>
-        h(
-          "button",
-          {
-            "aria-pressed": String(r.since === since),
-            onClick: () => {
-              sessionStorage.setItem("keera.usage.range", r.since);
-              ctx.reload();
-            },
-          },
-          r.label,
-        ),
-      ),
-    ),
+    rangePicker(ctx, since, { ranges: RANGES, key: "keera.usage.range" }),
     // A chargeback is reconciled in a spreadsheet. A report that cannot leave
     // the panel is a report somebody re-types by hand.
     h(

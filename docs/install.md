@@ -44,11 +44,11 @@ new organisations start with, which are files.
 
 ### Required
 
-| Variable             | What it is                                                                                                                                                                                                                                                    |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `KEERA_DATABASE_URL` | Postgres connection string.                                                                                                                                                                                                                                   |
-| `KEERA_OPERATOR_KEY` | The credential for the control API and the `keera` command, and the only one not stored in the database. Once an identity provider is set up, people use `keera login` and this key is for automation. See [sso.md](sso.md#signing-in-from-the-command-line). |
-| `KEERA_SECRET_KEY`   | Encrypts the API keys of hosted models and MCP servers saved in the panel. Changing it later makes the stored keys unreadable. Generate one with `openssl rand -hex 32`.                                                                                      |
+| Variable             | What it is                                                                                                                                                                                                                                                                                                                                                                                            |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `KEERA_DATABASE_URL` | Postgres connection string.                                                                                                                                                                                                                                                                                                                                                                           |
+| `KEERA_OPERATOR_KEY` | The credential for the control API and the `keera` command, and the only one not stored in the database. Once an identity provider is set up, people use `keera login` and this key is for automation. See [sso.md](sso.md#signing-in-from-the-command-line).                                                                                                                                         |
+| `KEERA_SECRET_KEY`   | Encrypts the API keys of hosted models and MCP servers saved in the panel, and the sign-in refresh tokens Keera keeps to ask the directory again ([sso.md](sso.md#asking-the-directory-again)). Changing it later makes all of them unreadable: the API keys have to be entered again, and a person's directory is not asked again until they sign in anew. Generate one with `openssl rand -hex 32`. |
 
 ### Worth setting on any real deployment
 
@@ -71,7 +71,7 @@ new organisations start with, which are files.
 | `KEERA_LOG_LEVEL`               | `info`              | `debug`, `info`, `warn` or `error`.                                                 |
 | `KEERA_LOG_FORMAT`              | `text`              | `text` or `json`.                                                                   |
 | `KEERA_MAX_BODY_BYTES`          | `33554432` (32 MiB) | Largest request body, in bytes. Coding agents send large contexts.                  |
-| `KEERA_MAX_RESPONSE_BYTES`      | `67108864` (64 MiB) | Largest buffered upstream response, and largest streamed event, in bytes.          |
+| `KEERA_MAX_RESPONSE_BYTES`      | `67108864` (64 MiB) | Largest buffered upstream response, and largest streamed event, in bytes.           |
 | `KEERA_UPSTREAM_HEADER_TIMEOUT` | `2m`                | How long a backend may take to _start_ answering. Does not limit the answer itself. |
 | `KEERA_CACHE_TTL`               | `30s`               | How long a checked key is reused. Models, filters and the rest reload every minute. |
 | `KEERA_REDIS_URL`               | unset               | Shares rate-limit buckets between replicas. Unset, they are per process. See below. |
@@ -202,16 +202,19 @@ not in this repository. They read the same settings as above. Only the image
 they run is built here:
 
 ```sh
-go mod vendor                                                     # once
+go mod vendor        # after cloning, and again whenever go.mod changes
 make image GATEWAY_IMAGE=<registry>/keera-gateway:0.1.0 VERSION=0.1.0
 podman push <registry>/keera-gateway:0.1.0
 ```
 
 The vendor directory is not committed. Without it, the build writes its own,
-which needs network access. With it, the build works offline. `VERSION` is what the binary reports; without it, the
-image says `devel`. The
-result is a `FROM scratch` image with one static binary. The release workflow
-also publishes one for every `v*` tag, as
+which needs network access. With it, the build works offline, but an old one
+breaks the build.
+
+`VERSION` is what the binary reports. Without it, the image says the tag when
+the commit has one, and `devel` otherwise, followed by the short commit, and
+`-dirty` if the tree had changes. The result is a `FROM scratch` image with one
+static binary. The release workflow also publishes one for every `v*` tag, as
 `ghcr.io/bespinian/keera-gateway:<tag>`.
 
 ## The `keera` command
@@ -269,7 +272,9 @@ on the projects screen. Everything refers to a project by id, so nothing else
 changes.
 
 A key is printed once and never stored. Nobody, not even an operator, can read
-it later. Screens, reports and the audit log show its name instead.
+it later. Screens, reports and the audit log show its name instead. A key from
+`keera key create` lasts 90 days, as in the panel. `--expires 720h` gives it
+another lifetime, and `--expires never` makes a key that does not expire.
 
 A key's name is only a label, so it can change at any time:
 `keera key set <key> --name <name>`, or the pencil on the keys screen. A member
@@ -284,7 +289,9 @@ from then on rotates it themselves.
 step. The new key has the same project, owner, lifetime and guardrails, and the
 old key is revoked in the same step. Anyone who may revoke a key may rotate it,
 so members can rotate their own. Only an administrator can give the new key
-another lifetime with `--expires`. An expired key can still be rotated.
+another lifetime with `--expires`. An expired key can still be rotated. The old
+key stops working at once, so `keera key rotate` asks you to type the key's name
+first; `--yes` skips that in a script.
 
 ```sh
 KEY=$(keera key rotate "a developer's laptop")
@@ -342,7 +349,7 @@ the model a tool and a question only that tool can answer. It reports whether
 the call came back in `tool_calls`, whether the response streamed, and whether
 the backend answered as the model the alias names.
 
-Run it after every change of model, quantization or vLLM version. Each check is
+Run it after every change of model, quantisation or vLLM version. Each check is
 written to the audit log, so you can show when a model last worked.
 
 ## Publishing it

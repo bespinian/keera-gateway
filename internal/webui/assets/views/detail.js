@@ -19,8 +19,6 @@ import {
   pill,
   meter,
   empty,
-  confirm,
-  toast,
   go,
   compact,
   num,
@@ -45,7 +43,13 @@ import { requestLog, setOutcome } from "./requestlog.js";
 import { sessionLog, setUnhappy } from "./sessions.js";
 import { modelsCell, summarise } from "./guardrails.js";
 import { openModel } from "./models.js";
-import { canRevoke, openKey, revokeBody, stateOf } from "./keys.js";
+import {
+  canRevoke,
+  confirmRevoke,
+  openKey,
+  statePill,
+  stateOf,
+} from "./keys.js";
 import { openProject } from "./projects.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
 
@@ -193,11 +197,7 @@ export async function keyDetailView(ctx) {
     sessions: true,
     hide: { who: true },
     meta: [
-      state === "revoked"
-        ? pill("Revoked", "bad")
-        : state === "expired"
-          ? pill("Expired", "warn")
-          : pill("Active", "good"),
+      statePill(state),
       // Only a revoked key can have none: its project was deleted.
       key.project_id
         ? h(
@@ -233,18 +233,7 @@ export async function keyDetailView(ctx) {
             "button",
             {
               class: "btn btn-danger",
-              onClick: () =>
-                confirm({
-                  title: "Revoke this key?",
-                  body: revokeBody(key),
-                  confirmLabel: "Revoke",
-                  danger: true,
-                  onConfirm: async () => {
-                    await api.revokeKey(key.id);
-                    toast("Key revoked", "good");
-                    ctx.navigate("/keys");
-                  },
-                }),
+              onClick: () => confirmRevoke(key, () => ctx.navigate("/keys")),
             },
             "Revoke",
           )

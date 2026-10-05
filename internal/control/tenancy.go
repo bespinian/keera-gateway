@@ -27,9 +27,11 @@ func (s *Server) createOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		Name        string `json:"name"`
 		EmailDomain string `json:"email_domain"`
 	}
-	err := httpx.ReadJSON(r, &in)
+	if !readJSON(w, r, &in) {
+		return
+	}
 	name := strings.TrimSpace(in.Name)
-	if err != nil || name == "" {
+	if name == "" {
 		badRequest(w, "a non-empty 'name' is required")
 		return
 	}
@@ -79,7 +81,10 @@ func (s *Server) updateOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		Name        *string `json:"name"`
 		EmailDomain *string `json:"email_domain"`
 	}
-	if err := httpx.ReadJSON(r, &in); err != nil || (in.Name == nil && in.EmailDomain == nil) {
+	if !readJSON(w, r, &in) {
+		return
+	}
+	if in.Name == nil && in.EmailDomain == nil {
 		badRequest(w, "send 'name', 'email_domain' or both; an empty 'email_domain' clears it")
 		return
 	}
@@ -169,9 +174,11 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request, p *authn.
 		Name        string `json:"name"`
 		Description string `json:"description"`
 	}
-	err := httpx.ReadJSON(r, &in)
+	if !readJSON(w, r, &in) {
+		return
+	}
 	name := strings.TrimSpace(in.Name)
-	if err != nil || name == "" {
+	if name == "" {
 		badRequest(w, "a non-empty 'name' is required")
 		return
 	}
@@ -245,7 +252,10 @@ func (s *Server) updateProject(w http.ResponseWriter, r *http.Request, p *authn.
 		Name        *string `json:"name"`
 		Description *string `json:"description"`
 	}
-	if err := httpx.ReadJSON(r, &in); err != nil || (in.Name == nil && in.Description == nil) {
+	if !readJSON(w, r, &in) {
+		return
+	}
+	if in.Name == nil && in.Description == nil {
 		badRequest(w, "send 'name', 'description' or both; an empty 'description' clears it")
 		return
 	}
@@ -351,9 +361,11 @@ func (s *Server) addUser(w http.ResponseWriter, r *http.Request, p *authn.Princi
 		// Empty is the identity provider.
 		SignIn string `json:"sign_in"`
 	}
-	err := httpx.ReadJSON(r, &in)
+	if !readJSON(w, r, &in) {
+		return
+	}
 	email := strings.TrimSpace(in.Email)
-	if err != nil || email == "" {
+	if email == "" {
 		badRequest(w, "'email' is required")
 		return
 	}
@@ -456,8 +468,7 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	var in struct {
 		Role string `json:"role"`
 	}
-	if err := httpx.ReadJSON(r, &in); err != nil {
-		badRequest(w, "'role' is required")
+	if !readJSON(w, r, &in) {
 		return
 	}
 	role := authn.Role(in.Role)
@@ -627,8 +638,7 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		Kind      policy.KeyKind `json:"kind"`
 		ExpiresIn string         `json:"expires_in"`
 	}
-	if err := httpx.ReadJSON(r, &in); err != nil {
-		badRequest(w, err.Error())
+	if !readJSON(w, r, &in) {
 		return
 	}
 	if in.Kind == "" {
@@ -725,8 +735,7 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		Name      string `json:"name"`
 		ExpiresIn string `json:"expires_in"`
 	}
-	if err := httpx.ReadJSON(r, &in); err != nil {
-		badRequest(w, err.Error())
+	if !readJSON(w, r, &in) {
 		return
 	}
 	oldID := r.PathValue("id")
@@ -775,7 +784,10 @@ func (s *Server) renameKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	var in struct {
 		Name string `json:"name"`
 	}
-	if err := httpx.ReadJSON(r, &in); err != nil || strings.TrimSpace(in.Name) == "" {
+	if !readJSON(w, r, &in) {
+		return
+	}
+	if strings.TrimSpace(in.Name) == "" {
 		badRequest(w, "send the new 'name'; it cannot be empty")
 		return
 	}
@@ -798,7 +810,7 @@ func (s *Server) renameKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 
 func (s *Server) listKeys(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	q := r.URL.Query()
-	orgID, ok := s.requireOrg(w, p, q.Get("org_id"), orgRequired)
+	orgID, ok := s.queryOrg(w, r, p)
 	if !ok {
 		return
 	}

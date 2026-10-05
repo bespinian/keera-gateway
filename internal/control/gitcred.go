@@ -47,7 +47,7 @@ func (s *Server) gitCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if cred.Token == "" {
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "sandbox_state",
+		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "no_git_credential",
 			"the forge gave no token for this repository, so there is nothing to refresh; "+
 				"an operator can check the forge settings (KEERA_SANDBOX_GIT_*)")
 		return

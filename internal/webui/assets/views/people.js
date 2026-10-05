@@ -9,6 +9,7 @@ import {
   confirm,
   pill,
   ago,
+  dateTime,
   icon,
   icons,
   showError,
@@ -144,7 +145,7 @@ export async function peopleView(ctx) {
         cell: (u) =>
           h(
             "span",
-            { class: "muted nowrap", title: u.created_at },
+            { class: "muted nowrap", title: dateTime(u.created_at) },
             ago(u.created_at),
           ),
       },

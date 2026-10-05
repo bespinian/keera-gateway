@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -35,8 +36,7 @@ import (
 
 // PodmanOptions configures the driver.
 type PodmanOptions struct {
-	// Binary is the container command, "podman" by default. "docker" works
-	// too: no podman-only flag is used.
+	// Binary is the podman command, "podman" by default.
 	Binary string
 	// Network is the container network sandboxes join. Empty is podman's
 	// default, which on rootless podman the host cannot route into; that is
@@ -88,11 +88,14 @@ func containerName(ref Ref) string { return "keera-sbx-" + objectName(ref) }
 func volumeName(ref Ref) string    { return "keera-home-" + objectName(ref) }
 
 // The labels on every container, for an operator reading `podman ps`. They
-// are the only record of a sandbox outside the database.
+// are the only record of a sandbox outside the database, so they say whose it
+// is as the Kubernetes labels do.
 const (
 	podmanLabelID      = "keera.sandbox.id"
 	podmanLabelName    = "keera.sandbox.name"
 	podmanLabelOwner   = "keera.sandbox.owner"
+	podmanLabelOrg     = "keera.sandbox.org"
+	podmanLabelProject = "keera.sandbox.project"
 	podmanLabelClass   = "keera.sandbox.class"
 	podmanLabelPurpose = "keera.sandbox.purpose"
 )
@@ -142,8 +145,12 @@ func (p *Podman) runArgs(spec Spec, runtime string) (args, env []string) {
 		"--label", podmanLabelClass+"="+spec.Class.Name,
 		"--label", podmanLabelPurpose+"="+string(spec.Purpose),
 	)
-	if spec.Owner != "" {
-		args = append(args, "--label", podmanLabelOwner+"="+spec.Owner)
+	for _, l := range [][2]string{
+		{podmanLabelOwner, spec.Owner}, {podmanLabelOrg, spec.Org}, {podmanLabelProject, spec.Project},
+	} {
+		if l[1] != "" {
+			args = append(args, "--label", l[0]+"="+l[1])
+		}
 	}
 	if spec.Class.CPU > 0 {
 		args = append(args, "--cpus", strconv.FormatFloat(float64(spec.Class.CPU)/1000, 'f', 2, 64))
@@ -228,15 +235,32 @@ func (p *Podman) Status(ctx context.Context, ref Ref) (Status, error) {
 	return st, nil
 }
 
-// sshdListens is the Kubernetes readiness probe, run inside the container.
-// The entrypoint starts sshd last, so a running container is only ready once
-// sshd answers: before that, the repository may still be checking out. The
-// check runs inside because a published port on rootless podman can accept a
-// connection even when nothing listens behind it yet.
+// sshdListens stands in for the Kubernetes readiness probe. The entrypoint
+// starts sshd last, so a running container is only ready once sshd answers:
+// before that, the repository may still be checking out.
+//
+// It dials from the host, so the image needs no shell for it. A connection
+// alone proves nothing, since rootless podman's port forwarder accepts one
+// even when nothing listens behind it yet, so it waits for sshd's greeting.
 func (p *Podman) sshdListens(ctx context.Context, ref Ref) bool {
-	_, err := p.run(ctx, "exec", containerName(ref), "bash", "-c",
-		": </dev/tcp/127.0.0.1/"+strconv.Itoa(PortSSH))
-	return err == nil
+	conn, err := p.dialPublished(ctx, ref, PortSSH)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = conn.Close() }()
+	return sshGreets(conn)
+}
+
+// sshGreetingTimeout bounds the wait for sshd's greeting, which it sends as
+// soon as a connection is open.
+const sshGreetingTimeout = 2 * time.Second
+
+// sshGreets reports whether conn opens with an SSH version line.
+func sshGreets(conn net.Conn) bool {
+	_ = conn.SetReadDeadline(time.Now().Add(sshGreetingTimeout))
+	greeting := make([]byte, 4)
+	_, err := io.ReadFull(conn, greeting)
+	return err == nil && string(greeting) == "SSH-"
 }
 
 // podmanState collapses a container's state into a sandbox state and detail.
@@ -317,8 +341,22 @@ func (p *Podman) removeContainer(ctx context.Context, name string) error {
 	return err
 }
 
-// Dial connects to the host port the container's port is published on.
+// Dial connects to the host port the container's port is published on. Like
+// the Kubernetes driver, it refuses a sandbox that is not ready, so a
+// suspended one says so rather than that its port is not published.
 func (p *Podman) Dial(ctx context.Context, ref Ref, port int) (net.Conn, error) {
+	st, err := p.Status(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	if st.State != policy.SandboxReady {
+		return nil, fmt.Errorf("%w: it is %s", ErrNotReady, st.State)
+	}
+	return p.dialPublished(ctx, ref, port)
+}
+
+// dialPublished connects to a published port without looking at the state.
+func (p *Podman) dialPublished(ctx context.Context, ref Ref, port int) (net.Conn, error) {
 	out, err := p.run(ctx, "port", containerName(ref), strconv.Itoa(port))
 	if err != nil {
 		return nil, podmanNotFound(err)

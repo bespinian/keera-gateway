@@ -39,6 +39,7 @@ import {
   plural,
   pct,
   field,
+  modeTiles,
 } from "../ui.js";
 import { barList } from "../chart.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
@@ -1132,10 +1133,6 @@ const MODES = [
   },
 ];
 
-function modeNamed(value) {
-  return MODES.find((m) => m.value === value) || MODES[0];
-}
-
 function editRouter(ctx, existing, chatModels) {
   const err = h("div");
   const creating = !existing;
@@ -1195,72 +1192,21 @@ function editRouter(ctx, existing, chatModels) {
   // the whole configuration, and the hint has to stop saying that it is.
   const ranks = () => chosen === "latency" || chosen === "least-busy";
 
-  // The modes as tiles rather than as options, because each of them needs a
-  // sentence and an option list that reads like prose is one nobody reads to
-  // the end.
-  const tiles = h(
-    "div",
-    { class: "tiles" },
-    MODES.map((m) =>
-      h(
-        "button",
-        {
-          class: "tile",
-          type: "button",
-          "aria-pressed": String(m.value === chosen),
-          onClick: () => choose(m.value),
-        },
-        h("span", { class: "tile-mark" }, icon(m.icon)),
-        h("span", { class: "tile-name" }, m.name),
-        h("span", { class: "tile-what" }, m.what),
-      ),
-    ),
-  );
-  const chosenRow = h("div", { class: "tile-chosen", hidden: true });
-  // The way back to the five. Changing the mode keeps the form filled in: the
-  // alias, the destinations and their order mean something under every mode,
-  // and what the new mode has no use for is hidden rather than discarded, so
-  // going to look at the other tiles costs nothing.
-  const change = h(
-    "button",
-    {
-      class: "btn btn-sm",
-      type: "button",
-      onClick: () => {
-        tiles.hidden = false;
-        chosenRow.hidden = true;
-        tiles.firstChild.focus();
-      },
-    },
-    "Change",
-  );
-  const choose = (value) => {
+  // Changing the mode keeps the form filled in: the alias, the destinations
+  // and their order mean something under every mode, and what the new mode has
+  // no use for is hidden rather than discarded, so going to look at the other
+  // tiles costs nothing.
+  const picker = modeTiles(MODES, chosen, (value) => {
     chosen = value;
-    const m = modeNamed(value);
-    tiles.childNodes.forEach((tile, i) => {
-      tile.setAttribute("aria-pressed", String(MODES[i].value === value));
-    });
-    chosenRow.replaceChildren(
-      icon(m.icon),
-      h(
-        "div",
-        { class: "stack", style: { gap: "1px" } },
-        h("span", { class: "tile-name" }, m.name),
-        h("span", { class: "tile-what" }, m.what),
-      ),
-      h("div", { class: "spacer" }),
-      change,
-    );
-    tiles.hidden = true;
-    chosenRow.hidden = false;
     syncMode();
     // Where the cursor lands is the point of asking this first: on a new
     // router, the first thing left to type; on one being changed, the control
     // that opened the tiles. Before the dialog is in the document neither
     // does anything, which is what the first choice of an edit wants.
     if (creating && !alias.value) alias.focus();
-    else change.focus();
-  };
+    else picker.change.focus();
+  });
+  const { tiles, chosenRow, choose } = picker;
   const modeField = h(
     "div",
     { class: "field" },

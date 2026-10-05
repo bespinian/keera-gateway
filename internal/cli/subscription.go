@@ -132,8 +132,8 @@ func connectSubscription(ctx context.Context, c *client, in subscriptionSetup) e
 	for _, w := range warnings {
 		fmt.Fprintf(os.Stderr, "\n%s\n", styleErr.warn(wrapAt(w, 0, 0, 76)))
 	}
-	fmt.Fprintf(os.Stderr, "\n%s\n", wrapAt("Run `claude` in your project. If it is not signed in "+
-		"to your Claude plan yet, run `/login` there. `/status` shows the gateway.", 0, 0, 76))
+	fmt.Fprintf(os.Stderr, "\n%s\n", wrapAt("Run 'claude' in your project. If it is not signed in "+
+		"to your Claude plan yet, run '/login' there. '/status' shows the gateway.", 0, 0, 76))
 	return nil
 }
 

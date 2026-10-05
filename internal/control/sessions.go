@@ -54,14 +54,14 @@ func (s *Server) sessionQuery(w http.ResponseWriter, r *http.Request,
 		return q, false
 	}
 	q = store.AgentSessionQuery{
-		OrgID:   orgID,
-		Scope:   sc,
-		Key:     v.Get("key"),
-		Unhappy: httpx.Flag(v, "unhappy"),
-		From:    from,
-		To:      to,
-		Gap:     s.opts.SessionGap,
-		Sort:    sort,
+		OrgID:       orgID,
+		ReportScope: sc,
+		Key:         v.Get("key"),
+		Unhappy:     httpx.Flag(v, "unhappy"),
+		From:        from,
+		To:          to,
+		Gap:         s.opts.SessionGap,
+		Sort:        sort,
 	}
 	var before int64
 	q.Limit, before = page(v)

@@ -145,10 +145,10 @@ func (s *Server) requestStream(w http.ResponseWriter, r *http.Request, p *authn.
 
 	q := r.URL.Query()
 	rq := store.RequestQuery{
-		OrgID:   orgID,
-		Scope:   sc,
-		Outcome: store.Outcome(q.Get("outcome")),
-		Limit:   streamRows,
+		OrgID:       orgID,
+		ReportScope: sc,
+		Outcome:     store.Outcome(q.Get("outcome")),
+		Limit:       streamRows,
 	}
 	rq.Status, rq.StatusClass = parseStatus(q.Get("status"))
 	rq.After, _ = strconv.ParseInt(q.Get("after"), 10, 64)
@@ -299,7 +299,7 @@ func (s *Server) sendRequests(ctx context.Context, w http.ResponseWriter,
 func (s *Server) countOutcomes(ctx context.Context, rq *store.RequestQuery,
 	tally *outcomeTally, since string) error {
 	q := store.RequestQuery{
-		OrgID: rq.OrgID, Scope: rq.Scope,
+		OrgID: rq.OrgID, ReportScope: rq.ReportScope,
 		Status: rq.Status, StatusClass: rq.StatusClass,
 		Before: rq.After + 1,
 	}

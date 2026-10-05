@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"io"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/bespinian/keera-gateway/internal/catalog"
@@ -282,8 +284,8 @@ func TestOrgSetRefusesToDoNothing(t *testing.T) {
 	f := newFakeControl(t, map[string]any{})
 
 	err := Run(context.Background(), []string{"org", "set", "org_2"})
-	if err == nil || !strings.Contains(err.Error(), "--domain") {
-		t.Fatalf("error = %v, want it to name the flag", err)
+	if err == nil || !strings.Contains(err.Error(), "nothing to change") {
+		t.Fatalf("error = %v, want nothing to change", err)
 	}
 	if len(f.seen) != 0 {
 		t.Errorf("the CLI called %v; a command that changes nothing changes nothing", f.seen)
@@ -483,7 +485,7 @@ func TestKeyRotateAsksTheControlPlane(t *testing.T) {
 	})
 
 	if err := keyCmd(context.Background(),
-		[]string{"rotate", "a developer's laptop", "--name", "new laptop"}); err != nil {
+		[]string{"rotate", "a developer's laptop", "--name", "new laptop", "--yes"}); err != nil {
 		t.Fatal(err)
 	}
 	sent := f.request("POST", "/v1/keys/key_old/rotate").body
@@ -511,8 +513,8 @@ func TestKeySetRenamesTheKeyItFinds(t *testing.T) {
 		t.Errorf("sent %v, want the new name", sent)
 	}
 	if err := keyCmd(context.Background(), []string{"set", "key_old"}); err == nil ||
-		!strings.Contains(err.Error(), "--name") {
-		t.Errorf("err = %v, want it to ask for --name", err)
+		!strings.Contains(err.Error(), "nothing to change") {
+		t.Errorf("err = %v, want nothing to change", err)
 	}
 }
 
@@ -572,7 +574,7 @@ func TestKeyRotateResolvesANameAmongTheKeysThatStillWork(t *testing.T) {
 		"POST /v1/keys/key_live/rotate": map[string]any{"id": "key_new", "key": "keera_sk_new"},
 	})
 
-	if err := keyCmd(context.Background(), []string{"rotate", "laptop"}); err != nil {
+	if err := keyCmd(context.Background(), []string{"rotate", "laptop", "--yes"}); err != nil {
 		t.Fatal(err)
 	}
 	if !f.called("POST", "/v1/keys/key_live/rotate") {
@@ -1089,7 +1091,7 @@ func TestCredentialSourceSaysWhetherAKeyIsStored(t *testing.T) {
 		model policy.Model
 		want  string
 	}{
-		{policy.Model{}, "(none)"},
+		{policy.Model{}, "-"},
 		{policy.Model{HasAPIKey: true}, "stored"},
 	}
 	for _, c := range cases {
@@ -1102,7 +1104,8 @@ func TestCredentialSourceSaysWhetherAKeyIsStored(t *testing.T) {
 func TestFilterAddSendsTheModelAndTheInstruction(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
+		"GET /v1/orgs":    oneOrg,
+		"GET /v1/filters": map[string]any{"data": []any{}},
 		"PUT /v1/filters/redact-secrets": map[string]any{
 			"alias": "redact-secrets", "model": "keera-guard", "prompt": "Remove credentials.",
 		},
@@ -1230,6 +1233,7 @@ func TestFilterAddInShadowSaysSo(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
 		"GET /v1/orgs":                   oneOrg,
+		"GET /v1/filters":                map[string]any{"data": []any{}},
 		"PUT /v1/filters/redact-secrets": map[string]any{"alias": "redact-secrets"},
 	})
 
@@ -1742,7 +1746,7 @@ func TestDeleteLooksTheAliasUpBeforeAsking(t *testing.T) {
 	})
 	for _, cmd := range []string{"filter", "router"} {
 		err := Run(context.Background(), []string{cmd, "delete", "typo"})
-		if err == nil || !strings.Contains(err.Error(), "no "+cmd+" typo") {
+		if err == nil || !strings.Contains(err.Error(), `no `+cmd+` "typo"`) {
 			t.Errorf("%s delete typo: err = %v, want the alias refused", cmd, err)
 		}
 	}
@@ -1767,7 +1771,7 @@ func TestRotatingARevokedKeyWithNoProjectSuggestsNoProject(t *testing.T) {
 			{"id": "key_1", "name": "ci", "revoked_at": "2026-01-01T00:00:00Z"},
 		}},
 	})
-	err := rotateKey(context.Background(), newClient(), "org_1", "key_1", "", "", false)
+	err := keyCmd(context.Background(), []string{"rotate", "key_1", "--org", "org_1", "--yes"})
 	if err == nil || strings.Contains(err.Error(), "--project") {
 		t.Errorf("err = %v, want a hint without --project", err)
 	}
@@ -1793,5 +1797,154 @@ func TestMaxSizeShowsEitherPartAlone(t *testing.T) {
 	_ = tw.Flush()
 	if !strings.Contains(w.String(), "any CPU, 8Gi") {
 		t.Errorf("a memory-only limit was not shown:\n%s", w.String())
+	}
+}
+
+// 'add' never replaces what is there: changing an entry is what 'set' is for,
+// and an 'add' that overwrote would drop every field it was not given.
+func TestAddRefusesAnAliasThatExists(t *testing.T) {
+	quiet(t)
+	existing := map[string]any{"data": []map[string]any{{"alias": "a"}}}
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/orgs":        oneOrg,
+		"GET /v1/filters":     existing,
+		"GET /v1/routers":     existing,
+		"GET /v1/mcp-servers": existing,
+	})
+	for _, args := range [][]string{
+		{"filter", "add", "a", "--mode", "pattern", "--rules", "x => y"},
+		{"router", "add", "a", "--mode", "fallback", "--destinations", "b,c"},
+		{"mcp", "add", "a", "--endpoint", "https://mcp.example.ch"},
+	} {
+		err := Run(context.Background(), args)
+		if err == nil || !strings.Contains(err.Error(), "keera "+args[0]+" set a") {
+			t.Errorf("keera %s: err = %v, want it to point at set", strings.Join(args, " "), err)
+		}
+	}
+	for _, r := range f.seen {
+		if r.method == "PUT" {
+			t.Errorf("an add of an existing alias wrote %s", r.path)
+		}
+	}
+}
+
+// A filter's mode is checked before anything is sent, as a router's is.
+func TestFilterRefusesAModeItDoesNotHave(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{})
+	err := Run(context.Background(), []string{"filter", "add", "a", "--mode", "redact"})
+	if err == nil || !strings.Contains(err.Error(), "--mode") {
+		t.Errorf("err = %v, want the mode refused", err)
+	}
+	if len(f.seen) != 0 {
+		t.Errorf("a refused command still called the control plane: %+v", f.seen)
+	}
+}
+
+// Rotating revokes the old key at once, so it asks first, as revoking does.
+func TestKeyRotateAsksBeforeItRotates(t *testing.T) {
+	stderr := captureStderr(t)
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/orgs":                 oneOrg,
+		"GET /v1/keys":                 liveKey,
+		"POST /v1/keys/key_old/rotate": map[string]any{"id": "key_new", "key": "keera_sk_new"},
+	})
+
+	if err := keyCmd(context.Background(), []string{"rotate", "a developer's laptop"}); err == nil {
+		t.Fatal("rotate went ahead without a confirmation")
+	}
+	if f.called("POST", "/v1/keys/key_old/rotate") {
+		t.Error("the key was rotated although nothing confirmed it")
+	}
+	if said := stderr(); !strings.Contains(said, "Rotating a developer's laptop") {
+		t.Errorf("stderr = %q, want the prompt on it", said)
+	}
+}
+
+// A new key lasts as long as the panel's default unless told otherwise, and
+// 'never' is how to ask for one that does not expire.
+func TestKeyCreateExpiresByDefault(t *testing.T) {
+	quiet(t)
+	for _, tc := range []struct {
+		flags []string
+		want  any
+	}{
+		{nil, "2160h"},
+		{[]string{"--expires", "720h"}, "720h"},
+		{[]string{"--expires", "never"}, nil},
+	} {
+		f := newFakeControl(t, map[string]any{
+			"GET /v1/orgs":  oneOrg,
+			"POST /v1/keys": map[string]any{"id": "key_1", "key": "keera_sk_new"},
+		})
+		args := append([]string{"create", "laptop"}, tc.flags...)
+		if err := keyCmd(context.Background(), args); err != nil {
+			t.Fatal(err)
+		}
+		if got := f.request("POST", "/v1/keys").body["expires_in"]; got != tc.want {
+			t.Errorf("%v: expires_in = %v, want %v", tc.flags, got, tc.want)
+		}
+	}
+	if err := keyCmd(context.Background(), []string{"rotate", "laptop", "--expires", "never"}); err == nil {
+		t.Error("rotate accepted --expires never, which the control API reads as keeping the old lifetime")
+	}
+}
+
+// --json prints the control API's answer whole, not the fields a table needs.
+func TestDeleteJSONKeepsWhatTheServerSaid(t *testing.T) {
+	newFakeControl(t, map[string]any{
+		"DELETE /v1/orgs/org_2": map[string]any{
+			"id": "org_2", "name": "Another Bank", "projects": 1, "sandbox_classes": 3,
+		},
+	})
+	out := captured(t, func() error {
+		return Run(context.Background(), []string{"org", "delete", "org_2", "--yes", "--json"})
+	})
+	if !strings.Contains(out, "sandbox_classes") {
+		t.Errorf("--json dropped a field the server sent:\n%s", out)
+	}
+}
+
+// A leading flag leaves the verb out, which is the listing where there is one
+// and a request for the verbs where there is not.
+func TestALeadingFlagIsTheListing(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/projects": map[string]any{"data": []any{}},
+	})
+	if err := Run(context.Background(), []string{"project", "--org", "org_1"}); err != nil {
+		t.Fatal(err)
+	}
+	f.request("GET", "/v1/projects")
+	err := Run(context.Background(), []string{"guardrail", "--org", "org_1"})
+	if err == nil || !strings.Contains(err.Error(), "needs a subcommand") {
+		t.Errorf("guardrail --org: err = %v, want it to ask for a subcommand", err)
+	}
+}
+
+func TestMCPConnectNeedsTheGatewaysAddress(t *testing.T) {
+	quiet(t)
+	newFakeControl(t, map[string]any{
+		"GET /v1/orgs":        oneOrg,
+		"GET /v1/mcp-servers": map[string]any{"data": []map[string]any{{"alias": "github"}}},
+		"GET /v1/connect":     map[string]any{"data": []any{}},
+	})
+	err := Run(context.Background(), []string{"mcp", "connect", "github"})
+	if !errors.Is(err, errNoGatewayURL) {
+		t.Errorf("err = %v, want the missing address named", err)
+	}
+}
+
+func TestShortDuration(t *testing.T) {
+	for d, want := range map[time.Duration]string{
+		42 * time.Second:                "42s",
+		11*time.Minute + 30*time.Second: "11m30s",
+		24 * time.Hour:                  "24h",
+		7 * 24 * time.Hour:              "7d",
+		3*time.Hour + 12*time.Minute:    "3h12m",
+	} {
+		if got := shortDuration(d); got != want {
+			t.Errorf("shortDuration(%v) = %q, want %q", d, got, want)
+		}
 	}
 }

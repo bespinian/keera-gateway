@@ -139,7 +139,7 @@ var commands = []command{
 			{name: "create", aliases: []string{"add", "new"}, args: "<name>", summary: "create an organisation",
 				flags: []string{"domain", "json"}},
 			{name: "list", aliases: []string{"ls"}, summary: "every organisation", flags: []string{"json"}},
-			{name: "set", aliases: []string{"edit", "update"}, args: "[<org-id>]", summary: "rename it, or set the email domain whose sign-ins land in it",
+			{name: "set", aliases: []string{"edit", "update", "rename"}, args: "[<org-id>]", summary: "rename it, or set the email domain whose sign-ins land in it",
 				flags: []string{"name", "domain", "no-domain", "json"},
 				prose: "Names are unique, ignoring case. Everything refers to an organisation " +
 					"by its id, so a rename changes only what it is called. The old name stays " +
@@ -245,6 +245,8 @@ var commands = []command{
 					"reaches only subscription models, which that plan pays for. For a member, " +
 					"issue one with --user; their 'keera connect claude-code --subscription' " +
 					"then takes it over for their machine.\n\n" +
+					"A new key lasts 90 days unless --expires says otherwise; --expires never " +
+					"makes one that does not expire.\n\n" +
 					"Only an administrator issues keys. A member renames, rotates and revokes " +
 					"their own.",
 				examples: []string{
@@ -270,13 +272,15 @@ var commands = []command{
 			},
 			{name: "rotate", args: "<key>",
 				summary: "replace a key with an identical one and revoke it",
-				flags:   []string{"org", "name", "expires", "json"},
+				flags:   []string{"org", "name", "expires", "yes", "json"},
 				prose: "For a key that has leaked, and for the ordinary rotation a policy asks " +
 					"for. A name finds the working key with that name; an id out of " +
 					"'keera key list' names a key outright. --name and --expires override " +
 					"what it had; everything else, including its project and its guardrails, " +
 					"is carried over. A member may rotate their own keys, but not choose " +
-					"--expires: the new key keeps the old one's lifetime.",
+					"--expires: the new key keeps the old one's lifetime.\n\n" +
+					"The old key stops working at once, so it asks for the key's name first; " +
+					"--yes skips that, for a script.",
 			},
 		},
 	},
@@ -578,8 +582,8 @@ var commands = []command{
 			"'extend' gives it more time.\n\n" +
 			"--project scopes the key the sandbox is given. A sandbox on a project is charged to that " +
 			"project's budget, held to its rate limit, counted against its sandbox quota, and its " +
-			"agent sees only the models the project allows. Without it the sandbox works inside " +
-			"the organisation's own guardrails. Only an administrator can choose the project.\n\n" +
+			"agent sees only the models the project allows. Without it the sandbox goes in " +
+			"the organisation's oldest project. Only an administrator can choose the project.\n\n" +
 			"'sandbox ssh' runs your own ssh over the gateway's single published port, so there " +
 			"is no second address and no jump host. That also means VS Code's Remote-SSH and " +
 			"JetBrains Gateway work against a sandbox unmodified: they want an ssh transport " +

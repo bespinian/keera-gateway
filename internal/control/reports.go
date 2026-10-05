@@ -68,9 +68,9 @@ func page(q url.Values) (limit int, before int64) {
 // sees, it adds up every organisation's model of that alias.
 func (s *Server) entityScope(w http.ResponseWriter, r *http.Request,
 	orgID string,
-) (store.Scope, bool) {
+) (store.ReportScope, bool) {
 	q := r.URL.Query()
-	sc := store.Scope{
+	sc := store.ReportScope{
 		ProjectID: q.Get("project_id"),
 		KeyID:     q.Get("key_id"),
 		UserID:    q.Get("user_id"),
@@ -178,11 +178,11 @@ func (s *Server) requests(w http.ResponseWriter, r *http.Request, p *authn.Princ
 	}
 	q := r.URL.Query()
 	rq := store.RequestQuery{
-		OrgID:   orgID,
-		Scope:   sc,
-		From:    from,
-		To:      to,
-		Outcome: store.Outcome(q.Get("outcome")),
+		OrgID:       orgID,
+		ReportScope: sc,
+		From:        from,
+		To:          to,
+		Outcome:     store.Outcome(q.Get("outcome")),
 	}
 	rq.Status, rq.StatusClass = parseStatus(q.Get("status"))
 	rq.Limit, rq.Before = page(q)

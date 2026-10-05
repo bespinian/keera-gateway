@@ -116,7 +116,7 @@ func chartBucket(from, to time.Time) string {
 // Overview aggregates the usage log for the dashboard, or for one entity's own
 // screen when sc narrows it.
 func (s *Store) Overview(ctx context.Context, orgID string, from, to time.Time,
-	sc Scope) (Overview, error) {
+	sc ReportScope) (Overview, error) {
 	o := Overview{From: from, To: to, Bucket: chartBucket(from, to)}
 
 	err := s.pool.QueryRow(ctx, `
@@ -141,7 +141,7 @@ func (s *Store) Overview(ctx context.Context, orgID string, from, to time.Time,
 		return o, err
 	}
 
-	q := UsageQuery{OrgID: orgID, Scope: sc, From: from, To: to}
+	q := UsageQuery{OrgID: orgID, ReportScope: sc, From: from, To: to}
 	if o.TopProjects, err = s.topUsage(ctx, q, "project"); err != nil {
 		return o, err
 	}
@@ -161,7 +161,7 @@ func (s *Store) Overview(ctx context.Context, orgID string, from, to time.Time,
 // series is the dashboard's chart. Every bucket in the window is generated, not
 // only those with traffic, so a quiet stretch shows as a dip, not a flat line.
 func (s *Store) series(ctx context.Context, orgID string, from, to time.Time,
-	bucket string, sc Scope) ([]SeriesPoint, error) {
+	bucket string, sc ReportScope) ([]SeriesPoint, error) {
 	rows, err := s.pool.Query(ctx, `
 		WITH buckets AS (
 		    SELECT generate_series(

@@ -47,7 +47,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.opts.Providers.Enabled() {
-		httpx.WriteError(w, http.StatusNotImplemented, "invalid_request_error", "sso_not_configured",
+		httpx.WriteError(w, http.StatusNotImplemented, "invalid_request_error", "sso_disabled",
 			"no identity provider is configured; sign in with the operator key, or set KEERA_OIDC_PROVIDERS")
 		return
 	}
@@ -252,8 +252,7 @@ func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Key string `json:"key"`
 	}
-	if err := httpx.ReadJSON(r, &in); err != nil {
-		badRequest(w, "a 'key' is required")
+	if !readJSON(w, r, &in) {
 		return
 	}
 	if !s.matchesOperatorKey(strings.TrimSpace(in.Key)) {

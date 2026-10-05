@@ -55,7 +55,7 @@ func subscriptionRefusal(c *call) *refusal {
 	case !claudeSignIn(c.r):
 		return &refusal{
 			status: http.StatusUnauthorized,
-			typ:    "authentication_error", code: "missing_claude_sign_in",
+			typ:    "invalid_request_error", code: "missing_claude_sign_in",
 			msg: "the model '" + c.alias + "' is paid by your Claude subscription, and this " +
 				"request carries no Claude sign-in; sign in to Claude Code with `/login`, and " +
 				"leave ANTHROPIC_AUTH_TOKEN and ANTHROPIC_API_KEY unset",

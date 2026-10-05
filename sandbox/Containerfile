@@ -48,7 +48,6 @@ RUN apk add --no-cache \
       npm \
       openssh-server \
       openssh-client \
-      openssh-sftp-server \
       procps-ng \
       ripgrep \
       rsync \

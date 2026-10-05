@@ -12,8 +12,8 @@ models:
     kind: chat
     backends:
       - http://keera-engine:8000/v1
-    # What vLLM was started with as --served-model-name. Getting this wrong is
-    # the mistake that makes every request come back 404.
+    # The name the backend serves the model under: vLLM's --served-model-name,
+    # llama.cpp's --alias. Getting this wrong makes every request come back 404.
     backend_model: keera-speed
     max_context: 16384
     # What this model is for, in a sentence. Clients see it on /v1/models, and

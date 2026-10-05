@@ -118,7 +118,7 @@ func scanRequest(r row) (Request, error) {
 // is "the most recent requests of this tenant".
 type RequestQuery struct {
 	OrgID string
-	Scope
+	ReportScope
 	Outcome Outcome
 	// Status matches one exact status.
 	Status int

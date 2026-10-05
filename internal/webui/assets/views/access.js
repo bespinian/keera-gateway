@@ -18,7 +18,6 @@ import {
   isAdmin,
   replace,
   table,
-  pill,
   meter,
   ago,
   date,
@@ -26,13 +25,11 @@ import {
   money,
   num,
   empty,
-  confirm,
-  toast,
   go,
   plural,
 } from "../ui.js";
 import { oneLine, statusMeaning } from "../status.js";
-import { canRevoke, revokeBody } from "./keys.js";
+import { canRevoke, confirmRevoke, statePill } from "./keys.js";
 
 // Each level of the hierarchy as the person held by it would name it. They know
 // they are in an organisation and a project; the ids are for quoting to whoever
@@ -234,9 +231,6 @@ function summary(live, currency) {
 
 // keyCard is one key and everything that decides whether it works.
 function keyCard(k, currency, ctx) {
-  const tone =
-    { active: "good", expired: "warn", revoked: "bad" }[k.state] || "";
-
   const facts = h(
     "div",
     { class: "row", style: { gap: "24px", flexWrap: "wrap" } },
@@ -249,8 +243,8 @@ function keyCard(k, currency, ctx) {
     fact(
       "Last used",
       k.last_used_at
-        ? h("span", { title: k.last_used_at }, ago(k.last_used_at))
-        : h("span", { class: "faint" }, "never"),
+        ? h("span", { title: dateTime(k.last_used_at) }, ago(k.last_used_at))
+        : h("span", { class: "faint" }, "not this month"),
     ),
     fact(
       "Expires",
@@ -354,7 +348,7 @@ function keyCard(k, currency, ctx) {
         ),
       ),
       h("div", { class: "spacer", style: { flex: 1 } }),
-      pill(k.state[0].toUpperCase() + k.state.slice(1), tone),
+      statePill(k.state),
       // Only a key that still works can be taken away, and only the state
       // above says whether this one does.
       k.state === "active" && canRevoke(ctx, k)
@@ -363,18 +357,7 @@ function keyCard(k, currency, ctx) {
             {
               class: "btn btn-sm btn-danger",
               title: "Stop this key from working",
-              onClick: () =>
-                confirm({
-                  title: "Revoke this key?",
-                  body: revokeBody(k),
-                  confirmLabel: "Revoke",
-                  danger: true,
-                  onConfirm: async () => {
-                    await api.revokeKey(k.id);
-                    toast("Key revoked", "good");
-                    ctx.reload();
-                  },
-                }),
+              onClick: () => confirmRevoke(k, ctx.reload),
             },
             "Revoke",
           )

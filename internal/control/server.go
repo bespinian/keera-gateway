@@ -13,6 +13,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -399,6 +400,28 @@ func unauthorized(w http.ResponseWriter, code, msg string) {
 // badRequest writes the standard refusal for a request that is not valid.
 func badRequest(w http.ResponseWriter, msg string) {
 	httpx.WriteError(w, http.StatusBadRequest, "invalid_request_error", "", msg)
+}
+
+// readJSON decodes a request body into v, or answers why it could not and
+// returns false.
+func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+	if err := httpx.ReadJSON(r, v); err != nil {
+		refuseBody(w, err)
+		return false
+	}
+	return true
+}
+
+// refuseBody answers a body httpx.ReadJSON could not decode. The decoder's own
+// words name the problem, such as a misspelt field. A body over the limit is
+// 413, as on the gateway, so a client can tell it from a mistake in the JSON.
+func refuseBody(w http.ResponseWriter, err error) {
+	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+		httpx.WriteError(w, http.StatusRequestEntityTooLarge, "invalid_request_error",
+			"request_too_large", fmt.Sprintf("the request body is larger than %d MiB", httpx.MaxJSONBody>>20))
+		return
+	}
+	badRequest(w, err.Error())
 }
 
 // scopeOrg resolves the organisation a request applies to. A caller who names

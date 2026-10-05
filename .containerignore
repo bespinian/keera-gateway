@@ -4,6 +4,7 @@
 result
 .git
 .github
+.claude
 docs
 /build
 # The compose credentials. The build stage copies the whole context, so they

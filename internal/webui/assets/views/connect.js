@@ -106,19 +106,24 @@ export function keyModels(targets, allowed) {
   return targets.filter((m) => (allowed || []).includes(m.alias));
 }
 
+/** usableKeys is the reader's own keys that work from a client or the
+ *  playground. A subscription key works only from Claude Code signed in to a
+ *  Claude plan, which `keera connect claude-code --subscription` sets up. */
+export function usableKeys(a) {
+  return (a.keys || []).filter(
+    (k) => k.state === "active" && k.kind !== "subscription",
+  );
+}
+
 export async function connectView(ctx) {
-  // Only the reader's own keys: the configuration is for their machine. A
-  // subscription key works only from Claude Code signed in to a Claude plan,
-  // which `keera connect claude-code --subscription` sets up.
+  // Only the reader's own keys: the configuration is for their machine.
   const [clients, a] = await Promise.all([loadClients(), api.access()]);
   ctx.setSubtitle(
     "Pi, OpenCode, Claude Code or any OpenAI-compatible client, pointed at " +
       "this gateway",
   );
-  const keys = (a.keys || []).filter(
-    (k) => k.state === "active" && k.kind !== "subscription",
-  );
-  if (!keys.length) return noKey(ctx, a);
+  const keys = usableKeys(a);
+  if (!keys.length) return noKey(ctx, a, "A client connects with");
   if (!clients.length) {
     return h(
       "div",
@@ -265,16 +270,17 @@ function modelList(models) {
   ];
 }
 
-/** noKey explains why there is no key to connect with, and where to get one. */
-function noKey(ctx, a) {
+/** noKey explains why the reader has no key to use, and where to get one.
+ *  lead says what the key is for, as in "A client connects with". */
+export function noKey(ctx, a, lead) {
   if (a.anonymous || (a.operator_key && !(a.keys || []).length)) {
     return h(
       "div",
       { class: "card" },
       empty(
         "The operator key has no API keys",
-        "A client connects with one of your own API keys. Sign in with your " +
-          "identity provider to use yours.",
+        `${lead} one of your own API keys. Sign in with your identity ` +
+          "provider to use yours.",
       ),
     );
   }
@@ -288,19 +294,19 @@ function noKey(ctx, a) {
         ? h(
             "span",
             {},
-            "A client connects with one of your own keys. Issue one on ",
+            `${lead} one of your own keys. Issue one on `,
             h("a", { href: "/keys", onClick: go(ctx, "/keys") }, "API keys"),
             ".",
           )
-        : "A client connects with one of your own keys. Ask an " +
-            "administrator for a key in your name.",
+        : `${lead} one of your own keys. Ask an administrator for a key ` +
+            "in your name.",
     ),
   );
 }
 
 function instructions(ctx, state, models) {
   const { client, key, base } = state;
-  const config = client.config(base || location.origin + "/api", models);
+  const config = client.config(base, models);
 
   return h(
     "div",
@@ -407,7 +413,7 @@ function prose(text) {
 }
 
 /** title turns an alias into the label a model picker shows: keera-speed → Keera Speed. */
-export function title(alias) {
+function title(alias) {
   return alias
     .split(/[-_.\s]+/)
     .filter(Boolean)

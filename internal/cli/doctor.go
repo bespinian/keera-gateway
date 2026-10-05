@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/bespinian/keera-gateway/internal/control"
@@ -67,27 +68,37 @@ func doctorCmd(ctx context.Context, args []string) error {
 func printDiagnosis(base string, d control.Diagnosis) {
 	fmt.Printf("%s\n\n", style.head(base))
 
-	// Details and fixes are wrapped to the column after two spaces, the
-	// verdict, a space, the padded name and a space.
+	// Details and fixes are wrapped to fit after the verdict and the longest
+	// name. Their later lines start with two empty cells, so they stay in the
+	// detail column.
 	nameWidth := 0
 	for _, check := range d.Checks {
 		nameWidth = max(nameWidth, len([]rune(check.Name)))
 	}
-	gutter := 2 + 4 + 1 + nameWidth + 1
+	gutter := 2 + 4 + tablePad + nameWidth + tablePad
+	cells := func(text string, paint func(string) string) string {
+		lines := strings.Split(wrapAt(text, gutter, gutter, proseWidth), "\n")
+		for i, line := range lines {
+			lines[i] = paint(strings.TrimLeft(line, " "))
+		}
+		return strings.Join(lines, "\n\t\t")
+	}
+	plain := func(s string) string { return s }
 
+	w := newTable(os.Stdout)
 	area := ""
 	for _, check := range d.Checks {
 		if check.Area != area {
 			area = check.Area
-			fmt.Printf("%s\n", style.head(area))
+			_, _ = fmt.Fprintln(w, style.head(area))
 		}
-		fmt.Printf("  %s %s %s\n", mark(check.Verdict), padTo(check.Name, nameWidth),
-			wrapAt(check.Detail, gutter, gutter, proseWidth))
+		_, _ = fmt.Fprintf(w, "  %s\t%s\t%s\n", mark(check.Verdict), check.Name,
+			cells(check.Detail, plain))
 		if check.Fix != "" {
-			fmt.Printf("%s%s\n", strings.Repeat(" ", gutter),
-				style.cmd(wrapAt("→ "+check.Fix, gutter, gutter, proseWidth)))
+			_, _ = fmt.Fprintf(w, "\t\t%s\n", cells("→ "+check.Fix, style.cmd))
 		}
 	}
+	_ = w.Flush()
 
 	fmt.Println()
 	switch {

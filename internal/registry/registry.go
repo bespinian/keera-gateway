@@ -88,13 +88,12 @@ type Registry struct {
 	opts  Options
 	log   *slog.Logger
 
-	// mcp is keyed by org, then by alias, like models.
-	mcp atomic.Pointer[map[string]map[string]policy.MCPServer]
-	// models, filters and routers are keyed by org, then by alias. All three
-	// are read on the inference path.
+	// models, filters, routers and MCP servers are keyed by org, then by
+	// alias. All four are read on the inference path.
 	models  atomic.Pointer[map[string]map[string]policy.Model]
 	filters atomic.Pointer[map[string]map[string]policy.Filter]
 	routers atomic.Pointer[map[string]map[string]policy.Router]
+	mcp     atomic.Pointer[map[string]map[string]policy.MCPServer]
 
 	mu   sync.RWMutex
 	keys map[string]entry
@@ -202,13 +201,9 @@ func (r *Registry) refreshAll(ctx context.Context) error {
 }
 
 func (r *Registry) refreshFilters(ctx context.Context) error {
-	list, err := r.store.LoadFilters(ctx)
-	if err != nil {
-		return err
-	}
-	byOrg := groupByOrg(list, func(f policy.Filter) (string, string) { return f.OrgID, f.Alias })
-	r.filters.Store(&byOrg)
-	return nil
+	return reload(ctx, &r.filters, r.store.LoadFilters, func(f *policy.Filter) (string, string) {
+		return f.OrgID, f.Alias
+	})
 }
 
 // Filter implements policy.Source.
@@ -218,26 +213,34 @@ func (r *Registry) Filter(orgID, alias string) (policy.Filter, bool) {
 }
 
 func (r *Registry) refreshRouters(ctx context.Context) error {
-	list, err := r.store.LoadRouters(ctx)
+	return reload(ctx, &r.routers, r.store.LoadRouters, func(rt *policy.Router) (string, string) {
+		return rt.OrgID, rt.Alias
+	})
+}
+
+// reload loads one kind of thing and swaps in a new index of it, by org and
+// then by alias. key names where each one goes, and may first finish it, such
+// as by opening its credential.
+//
+// The index is replaced whole, never changed in place, so a request reading
+// the old one is never half-way through an update.
+func reload[T any](ctx context.Context, into *atomic.Pointer[map[string]map[string]T],
+	load func(context.Context) ([]T, error), key func(*T) (org, alias string),
+) error {
+	list, err := load(ctx)
 	if err != nil {
 		return err
 	}
-	byOrg := groupByOrg(list, func(rt policy.Router) (string, string) { return rt.OrgID, rt.Alias })
-	r.routers.Store(&byOrg)
-	return nil
-}
-
-// groupByOrg indexes list by org and then by alias.
-func groupByOrg[T any](list []T, key func(T) (org, alias string)) map[string]map[string]T {
 	byOrg := make(map[string]map[string]T)
-	for _, v := range list {
-		org, alias := key(v)
+	for i := range list {
+		org, alias := key(&list[i])
 		if byOrg[org] == nil {
 			byOrg[org] = make(map[string]T)
 		}
-		byOrg[org][alias] = v
+		byOrg[org][alias] = list[i]
 	}
-	return byOrg
+	into.Store(&byOrg)
+	return nil
 }
 
 // Router implements policy.Source.
@@ -262,33 +265,21 @@ func sortedValues[T any](byAlias map[string]T) []T {
 }
 
 func (r *Registry) refreshModels(ctx context.Context) error {
-	list, err := r.store.LoadModels(ctx)
-	if err != nil {
-		return err
-	}
-	for i, m := range list {
+	return reload(ctx, &r.models, r.store.LoadModels, func(m *policy.Model) (string, string) {
 		if len(m.APIKeyCiphertext) > 0 {
-			list[i].APIKey = r.open(ModelSecretName(m.OrgID, m.Alias), m.APIKeyCiphertext)
+			m.APIKey = r.open(ModelSecretName(m.OrgID, m.Alias), m.APIKeyCiphertext)
 		}
-	}
-	byOrg := groupByOrg(list, func(m policy.Model) (string, string) { return m.OrgID, m.Alias })
-	r.models.Store(&byOrg)
-	return nil
+		return m.OrgID, m.Alias
+	})
 }
 
 func (r *Registry) refreshMCP(ctx context.Context) error {
-	list, err := r.store.LoadMCPServers(ctx)
-	if err != nil {
-		return err
-	}
-	for i, srv := range list {
-		if len(srv.APIKeyCiphertext) > 0 {
-			list[i].APIKey = r.open(MCPSecretName(srv.OrgID, srv.Alias), srv.APIKeyCiphertext)
+	return reload(ctx, &r.mcp, r.store.LoadMCPServers, func(m *policy.MCPServer) (string, string) {
+		if len(m.APIKeyCiphertext) > 0 {
+			m.APIKey = r.open(MCPSecretName(m.OrgID, m.Alias), m.APIKeyCiphertext)
 		}
-	}
-	byOrg := groupByOrg(list, func(m policy.MCPServer) (string, string) { return m.OrgID, m.Alias })
-	r.mcp.Store(&byOrg)
-	return nil
+		return m.OrgID, m.Alias
+	})
 }
 
 // MCPSecretName is what an MCP server's credential is sealed against. It

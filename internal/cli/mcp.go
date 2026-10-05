@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -31,7 +30,8 @@ func registerMCPFlags(fs *flag.FlagSet) *mcpFlags {
 	fs.StringVar(&f.description, "description", "", "what the server is for, in a sentence; an empty one clears it")
 	fs.StringVar(&f.authHeader, "auth-header", "",
 		"header the credential goes in (default: Authorization, as a bearer token)")
-	fs.StringVar(&f.apiKey, "api-key", "", "credential to store encrypted; @- reads it from stdin")
+	fs.StringVar(&f.apiKey, "api-key", "",
+		"credential to store encrypted; @path reads a file and @- reads stdin")
 	fs.BoolVar(&f.noAPIKey, "no-api-key", false, "remove the stored credential")
 	return f
 }
@@ -81,7 +81,13 @@ func mcpCmd(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		return out(m.asJSON, servers, func(w *table) { printMCPServers(w, servers) })
+		return out(m.asJSON, servers, func(w *table) {
+			if len(servers) == 0 {
+				printNone(w, "MCP servers", "keera mcp add <alias> --endpoint <url>")
+				return
+			}
+			printMCPServers(w, servers)
+		})
 	}
 }
 
@@ -99,13 +105,14 @@ type mcpRun struct {
 
 // path is a control API path for one of the organisation's servers.
 func (m *mcpRun) path(alias string) string {
-	return inOrg("/v1/mcp-servers/"+url.PathEscape(alias), m.org)
+	return aliasPath("mcp-servers", m.org, alias, "")
 }
+
+func mcpAlias(s policy.MCPServer) string { return s.Alias }
 
 // require reads one server. There is no endpoint for one; the list is small.
 func (m *mcpRun) require(ctx context.Context, alias string) (policy.MCPServer, error) {
-	s, err := findAlias(ctx, m.c, inOrg("/v1/mcp-servers", m.org), alias, "MCP server",
-		func(s policy.MCPServer) string { return s.Alias })
+	s, err := findAlias(ctx, m.c, "mcp-servers", m.org, alias, "MCP server", mcpAlias)
 	if err == nil {
 		// The writes go to the organisation it belongs to.
 		m.org = s.OrgID
@@ -118,7 +125,11 @@ func (m *mcpRun) require(ctx context.Context, alias string) (policy.MCPServer, e
 func (m *mcpRun) save(ctx context.Context, adding bool) error {
 	f, alias := m.f, m.fs.Arg(0)
 	put := mcpPut{Enabled: !f.disabled}
-	if !adding {
+	if adding {
+		if err := alreadyExists(ctx, m.c, "mcp-servers", m.org, alias, "MCP server", mcpAlias); err != nil {
+			return err
+		}
+	} else {
 		if !changesSomething(m.fs) {
 			return nothingToChange("mcp set")
 		}
@@ -178,8 +189,7 @@ func (m *mcpRun) delete(ctx context.Context) error {
 			lines = append(lines, "  its stored credential is removed")
 		}
 		lines = append(lines, "Tool-call history and the audit log are kept.")
-		if err := confirm("Deleting the MCP server "+srv.Alias+":", lines,
-			"alias", srv.Alias, "nothing was deleted"); err != nil {
+		if err := confirmAliasDelete("MCP server", srv.Alias, lines); err != nil {
 			return err
 		}
 	}
@@ -200,23 +210,20 @@ func registerCallFlags(fs *flag.FlagSet) *callFlags {
 	fs.StringVar(&f.server, "server", "", "restrict to one MCP server")
 	fs.StringVar(&f.tool, "tool", "", "restrict to one tool")
 	f.who = registerWho(fs)
-	fs.DurationVar(&f.since, "since", 24*time.Hour, "how far back to look")
-	fs.IntVar(&f.limit, "limit", 50, "how many calls to print")
+	fs.DurationVar(&f.since, "since", reportWindow, "how far back to look")
+	fs.IntVar(&f.limit, "limit", reportLimit, "how many calls to print")
 	fs.BoolVar(&f.summary, "summary", false, "add up the calls of each tool instead")
 	return f
 }
 
 // toolCalls is 'keera mcp calls', the tool-call log.
 func (m *mcpRun) toolCalls(ctx context.Context) error {
-	c, f, orgID := m.c, m.calls, m.org
-	params, err := f.who.params(ctx, c, orgID)
+	c, f := m.c, m.calls
+	q, err := reportQuery(ctx, c, m.org, f.who, f.since,
+		map[string]string{"server": f.server, "tool": f.tool})
 	if err != nil {
 		return err
 	}
-	q := url.Values{}
-	q.Set("from", sinceParam(f.since))
-	setIfGiven(q, map[string]string{"org_id": orgID, "server": f.server, "tool": f.tool})
-	setIfGiven(q, params)
 	if f.summary {
 		q.Set("summary", "1")
 		var res struct {
@@ -225,7 +232,13 @@ func (m *mcpRun) toolCalls(ctx context.Context) error {
 		if err := c.do(ctx, "GET", "/v1/tool-calls?"+q.Encode(), nil, &res); err != nil {
 			return err
 		}
-		return out(m.asJSON, res.Data, func(w *table) { printToolSummary(w, res.Data) })
+		return out(m.asJSON, res.Data, func(w *table) {
+			if len(res.Data) == 0 {
+				printNone(w, "tool calls in the last "+shortDuration(f.since), "")
+				return
+			}
+			printToolSummary(w, res.Data)
+		})
 	}
 	q.Set("limit", strconv.Itoa(f.limit))
 	var res struct {
@@ -234,7 +247,13 @@ func (m *mcpRun) toolCalls(ctx context.Context) error {
 	if err := c.do(ctx, "GET", "/v1/tool-calls?"+q.Encode(), nil, &res); err != nil {
 		return err
 	}
-	return out(m.asJSON, res.Data, func(w *table) { printToolCalls(w, res.Data) })
+	return out(m.asJSON, res.Data, func(w *table) {
+		if len(res.Data) == 0 {
+			printNone(w, "tool calls in the last "+shortDuration(f.since), "")
+			return
+		}
+		printToolCalls(w, res.Data)
+	})
 }
 
 // mcpConnect prints how to point the common clients at one server through
@@ -250,6 +269,10 @@ func (m *mcpRun) connect(ctx context.Context) error {
 	}
 	if err := m.c.do(ctx, "GET", "/v1/connect", nil, &cat); err != nil {
 		return err
+	}
+	// Without the gateway's own address the lines below would name no host.
+	if cat.GatewayURL == "" {
+		return errNoGatewayURL
 	}
 	endpoint := strings.TrimRight(cat.GatewayURL, "/") + "/mcp/" + alias
 	fmt.Printf(`# Claude Code
@@ -272,7 +295,7 @@ func printMCPServers(w *table, servers []policy.MCPServer) {
 	w.header("ALIAS\tENDPOINT\tCREDENTIAL\tENABLED\tDESCRIPTION")
 	for _, m := range servers {
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", m.Alias, dash(m.URL), mcpCredential(m),
-			statusWord(strconv.FormatBool(m.Enabled)), dash(m.Description))
+			yesNo(m.Enabled), dash(m.Description))
 	}
 }
 
@@ -288,7 +311,7 @@ func printMCPServer(w *table, m policy.MCPServer) {
 	}
 	show(w, "auth header", header)
 	show(w, "credential", mcpCredential(m))
-	show(w, "enabled", m.Enabled)
+	show(w, "enabled", yesNo(m.Enabled))
 }
 
 // mcpCredential says whether a server's credential is stored, never what it

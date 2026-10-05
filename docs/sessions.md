@@ -202,16 +202,18 @@ GET /control/v1/sessions/{id}  where {id} is any request in the session
 ```
 
 `key` is a session key, as the list returns it: it narrows the list to one
-conversation. Both return `gap_seconds`, the threshold used for the grouping. `format=csv` on
-the list exports up to 5000 sessions of the filtered window, one row per session.
+conversation. Both return `gap_seconds`, the threshold used for the grouping.
+`format=csv` on the list exports up to 5000 sessions of the filtered window, one
+row per session.
 
 Paging with `before` works only with the default order. Under a ranking the
 cursor would skip rows without warning.
 
 ## Narrowing, and the one filter that is not what it looks like
 
-`project_id`, `key_id` and `user_id` filter the rows before the runs are cut. That
-is safe: a session belongs to exactly one key, so to one project and one person.
+`project_id`, `key_id` and `user_id` filter the rows before the runs are cut.
+That is safe: a session belongs to exactly one key, so to one project and one
+person.
 
 `alias` filters the **sessions**, not the rows. Filtering rows would cut a task
 that used a hosted model in its middle into three pieces, reported as three

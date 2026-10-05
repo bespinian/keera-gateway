@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -31,8 +30,8 @@ func sessionCmd(ctx context.Context, args []string) error {
 	alias := fs.String("model", "", "only the sessions that used one model")
 	w := registerWho(fs)
 	unhappy := fs.Bool("unhappy", false, "only the sessions with problems")
-	since := fs.Duration("since", 7*24*time.Hour, "how far back to look")
-	limit := fs.Int("limit", 25, "how many to print")
+	since := fs.Duration("since", reportWindow, "how far back to look")
+	limit := fs.Int("limit", reportLimit, "how many to print")
 	asJSON := fs.Bool("json", false, jsonUsage)
 	fs.Usage = func() { _ = printHelp(fs, "session", sub) }
 	if want, ok := wantsHelp(args); ok {
@@ -62,20 +61,15 @@ type sessionQuery struct {
 // request, because nobody decides how many calls a task takes. It sorts by
 // cost by default: the row worth reading is the task that cost the most.
 func sessionList(ctx context.Context, c *client, sq sessionQuery, asJSON bool) error {
-	params, err := sq.who.params(ctx, c, sq.org)
+	q, err := reportQuery(ctx, c, sq.org, sq.who, sq.since, map[string]string{
+		"sort": sq.sort, "limit": strconv.Itoa(sq.limit), "alias": sq.alias,
+	})
 	if err != nil {
 		return err
 	}
-
-	q := url.Values{}
-	q.Set("sort", sq.sort)
-	q.Set("limit", strconv.Itoa(sq.limit))
-	q.Set("from", sinceParam(sq.since))
 	if sq.unhappy {
 		q.Set("unhappy", "1")
 	}
-	setIfGiven(q, map[string]string{"org_id": sq.org, "alias": sq.alias})
-	setIfGiven(q, params)
 
 	var res sessionsResponse
 	if err := c.do(ctx, "GET", "/v1/sessions?"+q.Encode(), nil, &res); err != nil {
@@ -95,7 +89,7 @@ type sessionsResponse struct {
 
 func printSessions(w *table, res sessionsResponse, since time.Duration) {
 	if len(res.Data) == 0 {
-		_, _ = fmt.Fprintf(w, "no sessions in the last %s\n", since)
+		printNone(w, "sessions in the last "+shortDuration(since), "")
 		return
 	}
 	w.header(fmt.Sprintf("SESSION\tSTARTED\tTOOK\tREQUESTS\tMODELS\tWHO\tCOST (%s)\tENDED",
@@ -116,7 +110,7 @@ func printSessions(w *table, res sessionsResponse, since time.Duration) {
 	// makes an average that describes none of the others.
 	t := res.Totals
 	_, _ = fmt.Fprintf(w, "\n%d sessions over %d requests in the last %s; showing %d\n",
-		t.Sessions, t.Requests, since, len(res.Data))
+		t.Sessions, t.Requests, shortDuration(since), len(res.Data))
 	_, _ = fmt.Fprintf(w, "middle session: %d requests, %s, %s %s\n",
 		t.MedianRequests, shortDuration(time.Duration(t.MedianDurationMS)*time.Millisecond),
 		policy.FormatMicros(t.MedianCostMicros), res.Currency)
@@ -175,8 +169,8 @@ func printSession(w *table, res sessionResponse) {
 	_, _ = fmt.Fprintln(w)
 	w.header(fmt.Sprintf("REQUEST\tWHEN\tMODEL\tSTATUS\tCOST (%s)\tFIRST TOKEN\tMESSAGE", res.Currency))
 	for _, r := range res.Requests {
-		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%d\t%s\t%dms\t%s\n",
-			r.ID, r.TS.Local().Format("15:04:05"), dash(r.Alias), r.Status,
+		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%dms\t%s\n",
+			r.ID, r.TS.Local().Format("15:04:05"), dash(r.Alias), httpStatus(r.Status),
 			policy.FormatMicros(r.CostMicros), r.TTFTMS, oneLine(r.Error))
 	}
 }

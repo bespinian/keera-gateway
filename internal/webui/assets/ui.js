@@ -469,12 +469,19 @@ export function currentRange() {
 
 /** rangePicker is the segmented control that sets it. ctx.reload() re-renders
  *  the screen against the new window, which is every screen's whole response to
- *  the change. */
-export function rangePicker(ctx, since) {
+ *  the change.
+ *
+ *  A screen that keeps a window of its own, like Usage or the audit log, passes
+ *  its own ranges and the session key it stores the choice under. */
+export function rangePicker(
+  ctx,
+  since,
+  { ranges = RANGES, key = "keera.range" } = {},
+) {
   return h(
     "div",
     { class: "seg" },
-    RANGES.map((r) =>
+    ranges.map((r) =>
       h(
         "button",
         {
@@ -482,7 +489,7 @@ export function rangePicker(ctx, since) {
           title: r.long,
           onClick: () => {
             try {
-              sessionStorage.setItem("keera.range", r.since);
+              sessionStorage.setItem(key, r.since);
             } catch {
               // A browser that refuses storage still gets the new window; it
               // just does not carry to the next screen.
@@ -1016,6 +1023,19 @@ export function modal({ title, subtitle, body, actions, wide }) {
     ".modal-foot .btn-primary, .modal-foot .btn-danger",
   );
   if (form && primary) {
+    // A browser submits on Enter only if the form has a submit button or a
+    // single text field. The real buttons are in the footer, so this hidden
+    // one stands in for them, first so that it is the form's default.
+    if (!form.querySelector("[type=submit]")) {
+      form.prepend(
+        h("button", {
+          type: "submit",
+          class: "submit-proxy",
+          tabindex: "-1",
+          "aria-hidden": "true",
+        }),
+      );
+    }
     form.addEventListener("submit", (e) => {
       e.preventDefault();
       if (!primary.disabled) primary.click();
@@ -1041,7 +1061,11 @@ function trapTab(card, e) {
       "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), " +
         "textarea:not([disabled]), [tabindex]:not([tabindex='-1'])",
     ),
-  ].filter((el) => el.offsetParent !== null || el === document.activeElement);
+  ].filter(
+    (el) =>
+      el.tabIndex >= 0 &&
+      (el.offsetParent !== null || el === document.activeElement),
+  );
   if (!items.length) return;
   const firstEl = items[0];
   const lastEl = items[items.length - 1];
@@ -1124,7 +1148,6 @@ export async function copyText(text) {
   }
 }
 
-/** field renders a labelled control and returns { el, input }. */
 /** showError puts a failure where the person who caused it is looking.
  *
  *  Every dialog renders its errors into a host element at the top of the body,
@@ -1162,8 +1185,19 @@ export function showError(host, message) {
  *  that neither open nor close the name. Returns "" when there is no problem. */
 export function aliasProblem(alias) {
   if (!alias) return "An alias is required. It is the name clients use.";
-  if (alias.length > 64) return "An alias is at most 64 characters.";
-  if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(alias)) {
+  return nameProblem(alias, 64, "An alias");
+}
+
+/** sandboxNameProblem mirrors policy.ValidSandboxName: the alias rule, but at
+ *  most 40 characters, because the name also becomes a hostname. */
+export function sandboxNameProblem(name) {
+  if (!name) return "Give the sandbox a name.";
+  return nameProblem(name, 40, "A sandbox name");
+}
+
+function nameProblem(name, max, what) {
+  if (name.length > max) return `${what} is at most ${max} characters.`;
+  if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(name)) {
     return (
       "Use only lowercase letters, digits and hyphens. It cannot start or " +
       "end with a hyphen."
@@ -1172,6 +1206,72 @@ export function aliasProblem(alias) {
   return "";
 }
 
+/** modeTiles asks which mode something works in, as tiles that each carry a
+ *  sentence, because an option list that reads like prose is one nobody reads
+ *  to the end. Once a mode is chosen the tiles fold into one row with a Change
+ *  button, which shows them again.
+ *
+ *  modes is a list of { value, icon, name, what }. chosen is the starting
+ *  value, or null for none. onChoose runs after each choice; the caller decides
+ *  where focus goes. choose(value) picks a mode from code, as an edit dialog
+ *  does on opening. */
+export function modeTiles(modes, chosen, onChoose) {
+  const tiles = h(
+    "div",
+    { class: "tiles" },
+    modes.map((m) =>
+      h(
+        "button",
+        {
+          class: "tile",
+          type: "button",
+          "aria-pressed": String(m.value === chosen),
+          onClick: () => choose(m.value),
+        },
+        h("span", { class: "tile-mark" }, icon(m.icon)),
+        h("span", { class: "tile-name" }, m.name),
+        h("span", { class: "tile-what" }, m.what),
+      ),
+    ),
+  );
+  const chosenRow = h("div", { class: "tile-chosen", hidden: true });
+  const change = h(
+    "button",
+    {
+      class: "btn btn-sm",
+      type: "button",
+      onClick: () => {
+        tiles.hidden = false;
+        chosenRow.hidden = true;
+        tiles.firstChild.focus();
+      },
+    },
+    "Change",
+  );
+  const choose = (value) => {
+    const m = modes.find((x) => x.value === value) || modes[0];
+    tiles.childNodes.forEach((tile, i) => {
+      tile.setAttribute("aria-pressed", String(modes[i].value === value));
+    });
+    chosenRow.replaceChildren(
+      icon(m.icon),
+      h(
+        "div",
+        { class: "stack", style: { gap: "1px" } },
+        h("span", { class: "tile-name" }, m.name),
+        h("span", { class: "tile-what" }, m.what),
+      ),
+      h("div", { class: "spacer" }),
+      change,
+    );
+    tiles.hidden = true;
+    chosenRow.hidden = false;
+    onChoose(value);
+  };
+  return { tiles, chosenRow, change, choose };
+}
+
+/** field renders a labelled control. */
 export function field(label, input, hint) {
   return h(
     "div",

@@ -6,7 +6,8 @@ models behind it. See [README.md](README.md).
 
 The repository is one Go module: a gateway (`cmd/keera-gateway`), a CLI
 (`cmd/keera`), and the packages under `internal/`. `vendor/` is gitignored - run
-`go mod vendor` once after cloning, and do not edit what it writes.
+`go mod vendor` after cloning and again whenever `go.mod` changes, and do not
+edit what it writes.
 
 This repository holds what is built from this source tree: the gateway's
 image, the compose deployment, which is also the development loop, and the

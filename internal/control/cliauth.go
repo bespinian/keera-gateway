@@ -151,7 +151,10 @@ func (s *Server) cliToken(w http.ResponseWriter, r *http.Request) {
 		// log and decides nothing.
 		Label string `json:"label"`
 	}
-	if err := httpx.ReadJSON(r, &in); err != nil || in.Code == "" || in.Verifier == "" {
+	if !readJSON(w, r, &in) {
+		return
+	}
+	if in.Code == "" || in.Verifier == "" {
 		badRequest(w, "a 'code' and the 'verifier' that redeems it are required")
 		return
 	}

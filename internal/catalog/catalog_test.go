@@ -125,8 +125,8 @@ func TestParseRejectsWhatWouldFailSilentlyAtRuntime(t *testing.T) {
 	}
 }
 
-// A field the file shape does not have is refused, so a setting left over from
-// an older file does not quietly stop doing anything.
+// A field the file shape does not have is refused, so a setting nothing reads
+// is not mistaken for one that works.
 func TestAnUnknownFieldIsRefused(t *testing.T) {
 	_, err := parseModelFile([]byte(`
 models:

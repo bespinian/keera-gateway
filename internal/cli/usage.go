@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -18,7 +17,7 @@ func usageCmd(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("usage", flag.ExitOnError)
 	org := fs.String("org", "", orgsUsage)
 	groupBy := fs.String("by", "model", "group by: model, client, project, key, user, day or org")
-	since := fs.Duration("since", 30*24*time.Hour, "how far back to report")
+	since := fs.Duration("since", reportWindow, "how far back to report")
 	asJSON := fs.Bool("json", false, jsonUsage)
 	fs.Usage = func() { _ = printHelp(fs, "usage", "") }
 	if want, ok := wantsHelp(args); ok {
@@ -28,13 +27,19 @@ func usageCmd(ctx context.Context, args []string) error {
 		return err
 	}
 
-	q := url.Values{"group_by": {*groupBy}, "from": {sinceParam(*since)}}
-	setIfGiven(q, map[string]string{"org_id": *org})
+	q, err := reportQuery(ctx, c, *org, nil, *since, map[string]string{"group_by": *groupBy})
+	if err != nil {
+		return err
+	}
 	var res usageResponse
 	if err := c.do(ctx, "GET", "/v1/usage?"+q.Encode(), nil, &res); err != nil {
 		return err
 	}
 	return out(*asJSON, res, func(w *table) {
+		if len(res.Data) == 0 {
+			printNone(w, "usage in the last "+shortDuration(*since), "")
+			return
+		}
 		w.header(fmt.Sprintf("%s\tREQUESTS\tIN\tOUT\tCOST (%s)",
 			strings.ToUpper(*groupBy), res.Currency))
 		var totalCost int64
@@ -86,8 +91,8 @@ func failuresCmd(ctx context.Context, args []string) error {
 	alias := fs.String("model", "", "restrict to one model")
 	w := registerWho(fs)
 	status := fs.Int("status", 0, "restrict to one status")
-	since := fs.Duration("since", 7*24*time.Hour, "how far back to look")
-	limit := fs.Int("limit", 50, "how many to print")
+	since := fs.Duration("since", reportWindow, "how far back to look")
+	limit := fs.Int("limit", reportLimit, "how many to print")
 	asJSON := fs.Bool("json", false, jsonUsage)
 	fs.Usage = func() { _ = printHelp(fs, "failures", "") }
 	if want, ok := wantsHelp(args); ok {
@@ -96,23 +101,17 @@ func failuresCmd(ctx context.Context, args []string) error {
 	if err := parseCmd(fs, "failures", args); err != nil {
 		return err
 	}
-	params, err := w.params(ctx, c, *org)
-	if err != nil {
-		return err
-	}
 	// 'all' is every request that did not deliver, which the request log
 	// calls unhappy.
 	if *kind == "all" {
 		*kind = string(store.OutcomeUnhappy)
 	}
-
-	q := url.Values{}
-	q.Set("outcome", *kind)
-	q.Set("facets", "1")
-	q.Set("limit", strconv.Itoa(*limit))
-	q.Set("from", sinceParam(*since))
-	setIfGiven(q, map[string]string{"org_id": *org, "alias": *alias})
-	setIfGiven(q, params)
+	q, err := reportQuery(ctx, c, *org, w, *since, map[string]string{
+		"outcome": *kind, "facets": "1", "limit": strconv.Itoa(*limit), "alias": *alias,
+	})
+	if err != nil {
+		return err
+	}
 	if *status != 0 {
 		q.Set("status", strconv.Itoa(*status))
 	}
@@ -122,15 +121,6 @@ func failuresCmd(ctx context.Context, args []string) error {
 		return err
 	}
 	return out(*asJSON, res, func(w *table) { printFailures(w, res, store.Outcome(*kind), *since) })
-}
-
-// setIfGiven sets each query parameter that has a value.
-func setIfGiven(q url.Values, params map[string]string) {
-	for name, v := range params {
-		if v != "" {
-			q.Set(name, v)
-		}
-	}
 }
 
 type failuresResponse struct {
@@ -155,7 +145,11 @@ func (r failuresResponse) matched(o store.Outcome) int64 {
 
 func printFailures(w *table, res failuresResponse, o store.Outcome, since time.Duration) {
 	if len(res.Data) == 0 {
-		_, _ = fmt.Fprintf(w, "nothing matched in the last %s\n", since)
+		what := string(o) + " requests"
+		if o == store.OutcomeUnhappy {
+			what = "failed, refused or interrupted requests"
+		}
+		printNone(w, what+" in the last "+shortDuration(since), "")
 		return
 	}
 	// The request id opens the whole task: keera session show <id>.
@@ -171,7 +165,7 @@ func printFailures(w *table, res failuresResponse, o store.Outcome, since time.D
 	}
 	// The counts cover the whole window, not just the page printed.
 	if total := res.matched(o); total > int64(len(res.Data)) {
-		_, _ = fmt.Fprintf(w, "\n%d in the last %s; showing %d\n", total, since, len(res.Data))
+		_, _ = fmt.Fprintf(w, "\n%d in the last %s; showing %d\n", total, shortDuration(since), len(res.Data))
 	}
 	if len(res.Filters.Models) > 1 {
 		parts := make([]string, 0, len(res.Filters.Models))

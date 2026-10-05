@@ -32,7 +32,7 @@ services:
     volumes:
       - hf-cache:/root/.cache/huggingface
     healthcheck:
-      # A 30 GB first download needs more grace than llama.cpp's 1 GB one.
+      # A 6 GB first download needs more grace than llama.cpp's 1 GB one.
       start_period: 600s
     command:
       # Qwen2.5-Coder-7B-Instruct-AWQ is ~5.6 GB of weights: 3.4 GB of 4-bit

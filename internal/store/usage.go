@@ -244,12 +244,12 @@ type UsageBucket struct {
 	SubscriptionMicros int64 `json:"subscription_micros"`
 }
 
-// Scope narrows a report to one project, key, person or model inside the
+// ReportScope narrows a report to one project, key, person or model inside the
 // organisation. The zero value is the whole tenant.
 //
 // One type for the usage reports and the request log, so the totals, the
 // chart and the log of an entity's screen are narrowed the same way.
-type Scope struct {
+type ReportScope struct {
 	ProjectID string
 	KeyID     string
 	UserID    string
@@ -258,7 +258,7 @@ type Scope struct {
 }
 
 // Empty reports whether this scope narrows anything at all.
-func (sc Scope) Empty() bool {
+func (sc ReportScope) Empty() bool {
 	return sc.ProjectID == "" && sc.KeyID == "" && sc.UserID == "" && sc.Alias == ""
 }
 
@@ -270,21 +270,21 @@ const scopeClause = ` AND ($%[2]d = '' OR %[1]sproject_id = $%[2]d)
 	AND ($%[5]d = '' OR %[1]salias = $%[5]d)`
 
 // args returns the scope's four values, in the order narrow numbers them.
-func (sc Scope) args() []any {
+func (sc ReportScope) args() []any {
 	return []any{sc.ProjectID, sc.KeyID, sc.UserID, sc.Alias}
 }
 
 // narrow renders the scope's conditions for a query whose last parameter is
 // number n, with each column prefixed by table ("e." or ""). The numbers are
 // computed, so adding a parameter to a query cannot shift them silently.
-func (sc Scope) narrow(table string, n int) string {
+func (sc ReportScope) narrow(table string, n int) string {
 	return fmt.Sprintf(scopeClause, table, n+1, n+2, n+3, n+4)
 }
 
 // UsageQuery narrows a usage report.
 type UsageQuery struct {
 	OrgID string
-	Scope
+	ReportScope
 	From    time.Time
 	To      time.Time
 	GroupBy string // project, key, user, model, client, day or org; empty or anything else means model

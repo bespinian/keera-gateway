@@ -42,7 +42,6 @@ AuthorizedKeysFile /home/keera/.ssh/authorized_keys
 PasswordAuthentication no
 PermitEmptyPasswords no
 KbdInteractiveAuthentication no
-ChallengeResponseAuthentication no
 PermitRootLogin no
 UsePAM no
 

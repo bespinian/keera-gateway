@@ -316,7 +316,7 @@ func (s *Server) countTokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	alias, _ := b.str("model")
-	if !s.mayCall(res, alias) {
+	if _, ok := s.callable(res, alias, policy.KindChat); !ok {
 		sh.writeError(w, http.StatusNotFound, "", "",
 			s.advise(modelNotFound(alias)))
 		return
@@ -331,17 +331,4 @@ func (s *Server) countTokens(w http.ResponseWriter, r *http.Request) {
 	tools, _ := b.value("tools")
 	tokens := estimateTokens(doc.texts()) + (len(tools)+len(res.SystemPrompt))/bytesPerToken
 	httpx.WriteJSON(w, http.StatusOK, map[string]int{"input_tokens": tokens})
-}
-
-// mayCall reports whether a key may name alias as its model: a chat model it
-// is allowed, or one of its organisation's routers.
-func (s *Server) mayCall(res *policy.Resolved, alias string) bool {
-	if alias == "" {
-		return false
-	}
-	if m, found := s.findModel(res.Key, alias); found {
-		return m.Enabled && m.Kind == policy.KindChat && res.MayUse(m)
-	}
-	_, routed := s.src.Router(res.Key.OrgID, alias)
-	return routed && res.MayRoute(alias)
 }

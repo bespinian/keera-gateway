@@ -79,8 +79,7 @@ func (s *Server) putSandboxClass(w http.ResponseWriter, r *http.Request, p *auth
 	}
 	// The shape the list returns, so a class read can be written back.
 	var in policy.SandboxClass
-	if err := httpx.ReadJSON(r, &in); err != nil {
-		badRequest(w, err.Error())
+	if !readJSON(w, r, &in) {
 		return
 	}
 	in.Name = r.PathValue("name")
@@ -253,8 +252,7 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request, p *authn.
 		AuthorizedKeys []string          `json:"authorized_keys"`
 		Env            map[string]string `json:"env"`
 	}
-	if err := httpx.ReadJSON(r, &in); err != nil {
-		badRequest(w, err.Error())
+	if !readJSON(w, r, &in) {
 		return
 	}
 	orgID, ok := s.requireOrg(w, p, in.OrgID,
@@ -345,7 +343,7 @@ func (s *Server) extendSandbox(w http.ResponseWriter, r *http.Request, p *authn.
 	}
 	// An empty body is fine: `keera sandbox extend <name>` sends none.
 	if err := httpx.ReadJSON(r, &in); err != nil && !errors.Is(err, io.EOF) {
-		badRequest(w, err.Error())
+		refuseBody(w, err)
 		return
 	}
 	sb, ok := s.sandboxToChange(w, r, p)

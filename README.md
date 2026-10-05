@@ -28,21 +28,21 @@ Every tool that calls a model uses the same address. The gateway checks each
 request, logs it and passes it on.
 
 ```
-        Your tools                       Keera Gateway                          Models
-┌───────────────────────┐         ┌──────────────────────────┐         ┌─────────────────────┐
-│ Claude Code           │         │ 1  Identify the key, its │         │ Keera Engine on     │
+       Your tools                          Keera Gateway                          Models
+┌───────────────────────┐         ┌─────────────────────────────┐         ┌─────────────────────┐
+│ Claude Code           │         │ 1  Identify the key, its    │         │ Keera Engine on     │
 │ OpenCode, Pi          │         │    project and organisation │         │ vLLM, on your GPUs  │
-│ Internal apps         │  HTTPS  │ 2  Apply guardrails,     │         │ or Swiss ones       │
-│ Notebooks and CI jobs │────────▶│    budget, rate limit    │────────▶│                     │
-│ any OpenAI client     │         │ 3  Filter secrets and    │         │ Anthropic and other │
-└───────────────────────┘         │    personal data out     │         │ providers, opened   │
-                                  │ 4  Route to a model the  │         │ by policy           │
-                                  │    key may use           │         └─────────────────────┘
-                                  └─────────────┬────────────┘
-                                                │
-                                                ▼
-                               Every request into the audit log,
-                                    Postgres and your SIEM
+│ Internal apps         │  HTTPS  │ 2  Apply guardrails,        │         │ or Swiss ones       │
+│ Notebooks and CI jobs │────────▶│    budget, rate limit       │────────▶│                     │
+│ any OpenAI client     │         │ 3  Filter secrets and       │         │ Anthropic and other │
+└───────────────────────┘         │    personal data out        │         │ providers, opened   │
+                                  │ 4  Route to a model the     │         │ by policy           │
+                                  │    key may use              │         └─────────────────────┘
+                                  └──────────────┬──────────────┘
+                                                 │
+                                                 ▼
+                                 Every request into the audit log,
+                                      Postgres and your SIEM
 ```
 
 Everything runs on one port, `:8080`, split by path:
@@ -94,7 +94,7 @@ export KEERA_OPERATOR_KEY=…              # the same value as in .env
 export KEERA_CONTROL_URL=http://127.0.0.1:8080
 keera org create "Example Bank"
 keera project create "Payments Platform"
-KEY=$(keera key create --project <project> --name "a developer's laptop")
+KEY=$(keera key create --project <project> --name laptop)
 
 curl http://127.0.0.1:8080/api/v1/chat/completions \
   -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \

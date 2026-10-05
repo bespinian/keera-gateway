@@ -1885,6 +1885,18 @@ a.pill-button:hover {
 .modal-body > .stack > :last-child {
   margin-bottom: 0;
 }
+/* The hidden submit button modal() puts in a dialog's form. It has to be
+   rendered for every browser to submit on Enter, so it is shrunk to nothing
+   rather than hidden. */
+.submit-proxy {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
 .modal-foot {
   padding: 13px 18px;
   border-top: 1px solid var(--border);

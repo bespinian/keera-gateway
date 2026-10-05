@@ -1,6 +1,7 @@
 package control
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -45,6 +46,36 @@ func scopeList(users []store.GuardrailRef) string {
 		labels = append(labels, string(u.ScopeType)+" "+u.Name)
 	}
 	return strings.Join(labels, ", ")
+}
+
+// deleteUnused deletes a filter, router or MCP server that no guardrail uses.
+// One still in use is refused with a 409 naming those guardrails; inUse says
+// why, given the alias and that list. kind names which, as deleted takes it.
+func (s *Server) deleteUnused(w http.ResponseWriter, r *http.Request, p *authn.Principal, kind string,
+	users func(ctx context.Context, orgID, alias string) ([]store.GuardrailRef, error),
+	remove func(ctx context.Context, orgID, alias string) error,
+	inUse func(alias, users string) string,
+) {
+	orgID, ok := s.adminOrg(w, r, p)
+	if !ok {
+		return
+	}
+	alias := r.PathValue("alias")
+	refs, err := users(r.Context(), orgID, alias)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if len(refs) > 0 {
+		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", kind+"_in_use",
+			inUse(alias, scopeList(refs)))
+		return
+	}
+	if err := remove(r.Context(), orgID, alias); err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.deleted(w, r, p, orgID, kind, alias)
 }
 
 // deleted finishes the delete of a filter, router, model or MCP server: it

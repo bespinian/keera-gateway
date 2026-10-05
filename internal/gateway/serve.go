@@ -275,21 +275,8 @@ func (s *Server) target(c *call, b *body) bool {
 	c.ev.Alias = alias
 	c.alias = alias
 
-	// A model is looked up first. The control plane refuses a router named
-	// like a model, and a model named like a router, so the two rarely meet.
-	model, found := s.findModel(c.res.Key, alias)
-	if found {
-		c.alias, c.ev.Alias = model.Alias, model.Alias
-	} else {
-		c.router, c.routed = s.src.Router(c.res.Key.OrgID, alias)
-		// Routers exist only on chat.
-		if c.routed && (c.surf.kind != policy.KindChat || !c.res.MayRoute(alias)) {
-			c.routed = false
-		}
-	}
-	// A model the key may not use is reported as missing, so other projects'
-	// models cannot be discovered through 403s. Routers answer the same way.
-	if !c.routed && (!found || !model.Enabled || model.Kind != c.surf.kind || !c.res.MayUse(model)) {
+	n, ok := s.callable(c.res, alias, c.surf.kind)
+	if !ok {
 		s.refuse(c, refusal{
 			status: http.StatusNotFound,
 			typ:    "invalid_request_error", code: "model_not_found",
@@ -297,6 +284,12 @@ func (s *Server) target(c *call, b *body) bool {
 			advise: true,
 		})
 		return false
+	}
+	model := n.model
+	c.router, c.routed = n.router, n.routed
+	if !c.routed {
+		// A subscription key may have named the model by another name.
+		c.alias, c.ev.Alias = model.Alias, model.Alias
 	}
 	if !c.routed && len(model.Backends) == 0 {
 		s.refuse(c, refusal{

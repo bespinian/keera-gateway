@@ -324,7 +324,7 @@ func TestEntityScopeReadsTheIdsAsGiven(t *testing.T) {
 	if sc.Empty() {
 		t.Error("a scope with four ids in it reports itself as empty")
 	}
-	if !(store.Scope{}).Empty() {
+	if !(store.ReportScope{}).Empty() {
 		t.Error("the zero scope has to be the dashboard's, which narrows nothing")
 	}
 }

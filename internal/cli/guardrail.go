@@ -493,7 +493,7 @@ func printEffectiveSandboxes(w *table, eff control.Effective) {
 	}
 	if sb.MaxSandboxTTLSeconds > 0 {
 		showFrom(w, "max sandbox lifetime",
-			(time.Duration(sb.MaxSandboxTTLSeconds) * time.Second).String(),
+			shortDuration(time.Duration(sb.MaxSandboxTTLSeconds)*time.Second),
 			narrowedBy(eff, func(l policy.Limits) bool { return l.MaxSandboxTTLSeconds != nil }))
 	}
 	if sb.MaxSandboxCPU == 0 && sb.MaxSandboxMemory == 0 {
@@ -602,7 +602,7 @@ func printLimits(w *table, lim policy.Limits) {
 		show(w, "max sandbox lifetime", "(unlimited)")
 	} else {
 		show(w, "max sandbox lifetime",
-			(time.Duration(*lim.MaxSandboxTTLSeconds) * time.Second).String())
+			shortDuration(time.Duration(*lim.MaxSandboxTTLSeconds)*time.Second))
 	}
 	if lim.MaxSandboxCPU == nil && lim.MaxSandboxMemory == nil {
 		show(w, "max sandbox size", "(unlimited)")

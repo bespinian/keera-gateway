@@ -77,6 +77,10 @@ func (r *projectRun) list(ctx context.Context) error {
 		return err
 	}
 	return out(r.asJSON, projects, func(w *table) {
+		if len(projects) == 0 {
+			printNone(w, "projects", "keera project create <name>")
+			return
+		}
 		w.header("ID\tNAME\tDESCRIPTION")
 		for _, t := range projects {
 			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", t.ID, t.Name, dash(t.Description))
@@ -94,8 +98,8 @@ func (r *projectRun) set(ctx context.Context) error {
 			change["description"] = r.description
 		}
 	})
-	if len(change) == 0 {
-		return fmt.Errorf("nothing to change; pass --name <name>, --description <text> or both")
+	if !changesSomething(r.fs) {
+		return nothingToChange("project set")
 	}
 	project, err := r.find(ctx)
 	if err != nil {
@@ -122,10 +126,11 @@ func (r *projectRun) delete(ctx context.Context) error {
 		}
 	}
 	var gone deletedProject
-	if err := r.c.do(ctx, "DELETE", "/v1/projects/"+url.PathEscape(project.ID), nil, &gone); err != nil {
+	raw, err := keepRaw(ctx, r.c, "DELETE", "/v1/projects/"+url.PathEscape(project.ID), nil, &gone)
+	if err != nil {
 		return err
 	}
-	return out(r.asJSON, gone, func(w *table) {
+	return out(r.asJSON, raw, func(w *table) {
 		_, _ = fmt.Fprintf(w, "deleted %s (%s)\t%s kept\n",
 			gone.ID, gone.Name, plural(gone.DetachedKeys, "revoked key"))
 	})
@@ -140,7 +145,8 @@ func (r *projectRun) find(ctx context.Context) (store.Project, error) {
 	return findProject(ctx, r.c, orgID, r.fs.Arg(0))
 }
 
-// deletedProject is what DELETE /v1/projects/{id} reports it removed.
+// deletedProject is what DELETE /v1/projects/{id} reports it removed, as far
+// as the table shows it.
 type deletedProject struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
@@ -165,7 +171,7 @@ func findProject(ctx context.Context, c *client, orgID, given string) (store.Pro
 			return t, nil
 		}
 	}
-	return store.Project{}, fmt.Errorf("no project %q in %s (see: keera project list)", given, orgID)
+	return store.Project{}, notFound("project", given, orgID, "project")
 }
 
 // confirmProjectDelete says what the deletion takes with it and makes the

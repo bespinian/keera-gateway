@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"net/url"
@@ -76,9 +77,12 @@ func (r *orgRun) create(ctx context.Context) error {
 }
 
 func (r *orgRun) set(ctx context.Context) error {
+	if !changesSomething(r.fs) {
+		return nothingToChange("org set")
+	}
 	r.name = strings.TrimSpace(r.name)
-	if r.name == "" && r.domain == "" && !r.noDomain {
-		return fmt.Errorf("nothing to change; pass --name <name>, --domain <domain> or --no-domain")
+	if given(r.fs, "name") && r.name == "" {
+		return errors.New("--name is empty; an organisation needs a name")
 	}
 	if r.domain != "" && r.noDomain {
 		return opposites("domain", "no-domain")
@@ -126,6 +130,10 @@ func (r *orgRun) list(ctx context.Context) error {
 	// The domain is a column because a missing one is what an operator must
 	// notice: with two organisations or more, nobody new can sign in to it.
 	return out(r.asJSON, orgs, func(w *table) {
+		if len(orgs) == 0 {
+			printNone(w, "organisations", "keera org create <name>")
+			return
+		}
 		w.header("ID\tNAME\tEMAIL DOMAIN\tCREATED")
 		for _, o := range orgs {
 			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
@@ -142,10 +150,11 @@ func (r *orgRun) delete(ctx context.Context) error {
 		}
 	}
 	var gone deletedOrg
-	if err := r.c.do(ctx, "DELETE", "/v1/orgs/"+url.PathEscape(orgID), nil, &gone); err != nil {
+	raw, err := keepRaw(ctx, r.c, "DELETE", "/v1/orgs/"+url.PathEscape(orgID), nil, &gone)
+	if err != nil {
 		return err
 	}
-	return out(r.asJSON, gone, func(w *table) {
+	return out(r.asJSON, raw, func(w *table) {
 		_, _ = fmt.Fprintf(w, "deleted %s (%s)\t%s, %s, %s\n", gone.ID, gone.Name,
 			plural(gone.Projects, "project"), plural(gone.Users, "user"), plural(gone.Keys, "key"))
 	})
@@ -197,7 +206,8 @@ func orNotSet(domain string) string {
 	return domain
 }
 
-// deletedOrg is what DELETE /v1/orgs/{id} reports it removed.
+// deletedOrg is what DELETE /v1/orgs/{id} reports it removed, as far as the
+// table shows it.
 type deletedOrg struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
@@ -222,7 +232,7 @@ func confirmOrgDelete(ctx context.Context, c *client, orgID string) error {
 		}
 	}
 	if org == nil {
-		return fmt.Errorf("no organisation %s (see: keera org list)", orgID)
+		return notFound("organisation", orgID, "", "org")
 	}
 
 	// Three extra reads, only when asking, so the prompt can say how much goes.

@@ -20,23 +20,22 @@ leaves the containers running, so later starts are instant.
    any gateway container holding port 8080, and waits for Postgres.
 3. **air** - builds and runs the gateway on the host against those two, with
    debug logging on. Each new organisation starts with the models in
-   `compose/models.dev.yaml` and the sandbox classes in `compose/sandboxes.yaml`.
-   An organisation that already exists keeps its own. When
-   `KEERA_SANDBOX_DRIVER` is set, `KEERA_SANDBOX_PUBLIC_URL` defaults to
-   `http://host.containers.internal:8080`.
+   `compose/models.dev.yaml` and the sandbox classes in
+   `compose/sandboxes.yaml`, unless `.env` names other files. An organisation
+   that already exists keeps its own. When `KEERA_SANDBOX_DRIVER` is set,
+   `KEERA_SANDBOX_PUBLIC_URL` defaults to `http://host.containers.internal:8080`.
 
-The gateway reads every setting in `compose/.env`, sandbox ones included. Four
-are always overridden, whatever `.env` says:
+The gateway reads every setting in `compose/.env`, sandbox ones included.
+Three are always overridden, whatever `.env` says:
 
 | Setting              | `make dev` sets                               |
 | -------------------- | --------------------------------------------- |
 | `KEERA_DATABASE_URL` | the `keera-db` container, on `127.0.0.1:5432` |
-| `KEERA_MODELS_FILE`  | `compose/models.dev.yaml`                     |
 | `KEERA_LOG_LEVEL`    | `debug`                                       |
 | `KEERA_LOG_FORMAT`   | `text`                                        |
 
-`KEERA_SANDBOXES_FILE` and `KEERA_SANDBOX_PUBLIC_URL` are only defaults: a
-value in `.env` wins. The addresses `make dev` prints assume the default
+`KEERA_MODELS_FILE`, `KEERA_SANDBOXES_FILE` and `KEERA_SANDBOX_PUBLIC_URL` are
+only defaults: a value in `.env` wins. The addresses `make dev` prints assume the default
 `KEERA_ADDR` of `:8080`.
 
 Install air once if you do not have it:
@@ -134,9 +133,11 @@ it.
 
 The Nix build fetches the Go modules itself and checks them against
 `vendorHash` in `flake.nix`. When `go.mod` changes, set it to
-`pkgs.lib.fakeHash`, build, and copy the hash Nix prints. `make image`,
-`make notices` and `make dist` use `vendor/`, which is not committed; run
-`go mod vendor` once after cloning.
+`pkgs.lib.fakeHash`, build, and copy the hash Nix prints. `make notices`,
+`make dist` and `make image` use `vendor/`, which is not committed. Run
+`go mod vendor` after cloning and again whenever `go.mod` changes. `make image`
+vendors the modules itself only when `vendor/` is missing, so an old one breaks
+its build too.
 
 ```sh
 make image      # the gateway image, tagged localhost/keera-gateway:latest

@@ -513,3 +513,28 @@ func TestAnUnknownAPIPathIsAJSONNotFound(t *testing.T) {
 			w.Code, w.Header().Get("Content-Type"))
 	}
 }
+
+func TestABodyThatCannotBeReadSaysWhy(t *testing.T) {
+	for _, tc := range []struct {
+		body   string
+		status int
+		want   string
+	}{
+		// A misspelt field is named, not reported as a missing one.
+		{`{"name":"x","email_domian":"y"}`, http.StatusBadRequest, "email_domian"},
+		{`{"name":"` + strings.Repeat("x", httpx.MaxJSONBody) + `"}`,
+			http.StatusRequestEntityTooLarge, "request_too_large"},
+	} {
+		var in struct {
+			Name string `json:"name"`
+		}
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tc.body))
+		if readJSON(w, r, &in) {
+			t.Fatalf("%.40s: read, want a refusal", tc.body)
+		}
+		if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.want) {
+			t.Errorf("%.40s: %d %s, want %d naming %q", tc.body, w.Code, w.Body, tc.status, tc.want)
+		}
+	}
+}

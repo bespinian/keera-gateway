@@ -241,7 +241,7 @@ export async function projectsView(ctx) {
 function projectFields(project) {
   const name = h("input", {
     class: "input",
-    placeholder: "accounting-team",
+    placeholder: "Payments Platform",
     value: project ? project.name : "",
     autofocus: true,
     autocomplete: "off",
@@ -249,7 +249,7 @@ function projectFields(project) {
   const description = h("textarea", {
     class: "input",
     rows: "3",
-    placeholder: "Bookkeeping, invoicing and payroll",
+    placeholder: "Checkout, billing and refunds",
   });
   description.value = project ? project.description || "" : "";
   return { name, description };

@@ -31,6 +31,11 @@ type keyRun struct {
 	asJSON       bool
 }
 
+// defaultKeyLife is how long a new key lasts unless --expires says otherwise.
+// The panel offers the same default, so a key does not live for ever because
+// nobody chose.
+const defaultKeyLife = "2160h"
+
 // createdKey is a new key as the control API returns it, secret included.
 type createdKey struct {
 	store.KeyInfo
@@ -42,10 +47,13 @@ func keyCmd(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("key "+sub, flag.ExitOnError)
 	r := &keyRun{c: newClient(), fs: fs}
 	fs.StringVar(&r.org, "org", "", orgUsage)
-	fs.StringVar(&r.project, "project", "", "project, by name or id; without it, the organisation's oldest project")
+	fs.StringVar(&r.project, "project", "", "project, by name or id. A new key without it goes in the organisation's oldest project; "+
+		"a list without it shows every project")
 	fs.StringVar(&r.user, "user", "", "the person this key belongs to, by email or id")
 	fs.StringVar(&r.name, "name", "", "what this key is called; what it is for, in a few words")
-	fs.StringVar(&r.expires, "expires", "", "lifetime, e.g. 720h")
+	fs.StringVar(&r.expires, "expires", "",
+		"how long the key lasts, such as 720h, or 'never'. A new key lasts "+defaultKeyLife+
+			" (90 days) unless told otherwise; a rotated key keeps the old one's lifetime")
 	fs.BoolVar(&r.subscription, "subscription", false,
 		"a key that reaches only subscription models, for Claude Code signed in to a Claude plan")
 	fs.BoolVar(&r.yes, "yes", false, yesUsage)
@@ -97,7 +105,12 @@ func (r *keyRun) create(ctx context.Context) error {
 		}
 		req["user_id"] = owner.ID
 	}
-	if r.expires != "" {
+	// The control API reads no expiry as a key that never expires.
+	switch r.expires {
+	case "":
+		req["expires_in"] = defaultKeyLife
+	case "never":
+	default:
 		req["expires_in"] = r.expires
 	}
 	if r.subscription {
@@ -110,9 +123,7 @@ func (r *keyRun) create(ctx context.Context) error {
 	if r.asJSON {
 		return out(true, created, nil)
 	}
-	fmt.Println(created.Key)
-	fmt.Fprintf(os.Stderr, "\nkey %s created for %s. %s\n",
-		created.ID, orgID, styleErr.warn("This is the only time it is shown."))
+	handOver(created.Key, fmt.Sprintf("key %s created for %s.", created.ID, orgID))
 	return nil
 }
 
@@ -134,6 +145,10 @@ func (r *keyRun) list(ctx context.Context) error {
 		return err
 	}
 	return out(r.asJSON, keys, func(w *table) {
+		if len(keys) == 0 {
+			printNone(w, "keys", "keera key create <name>")
+			return
+		}
 		// Last use decides whether a key is safe to revoke, so it is a column.
 		w.header("ID\tNAME\tPREFIX\tKIND\tPROJECT\tSTATE\tLAST USED\tCLAUDE PLAN USED")
 		for _, k := range keys {
@@ -172,17 +187,22 @@ func planText(p *policy.PlanUsage) string {
 	return strings.Join(parts, " · ")
 }
 
+// find resolves the key named by the first argument in the organisation.
+func (r *keyRun) find(ctx context.Context) (store.KeySummary, error) {
+	orgID, err := resolveOrg(ctx, r.c, r.org)
+	if err != nil {
+		return store.KeySummary{}, err
+	}
+	return findKey(ctx, r.c, orgID, r.fs.Arg(0))
+}
+
 func (r *keyRun) revoke(ctx context.Context) error {
 	// An id names a key outright, so --yes with an id needs no lookup. A
 	// name only means something inside an organisation, and the prompt needs
 	// the record to say what it is about.
 	target := r.fs.Arg(0)
 	if !r.yes || !id.HasPrefix(target, "key") {
-		orgID, err := resolveOrg(ctx, r.c, r.org)
-		if err != nil {
-			return err
-		}
-		found, err := findKey(ctx, r.c, orgID, target)
+		found, err := r.find(ctx)
 		if err != nil {
 			return err
 		}
@@ -206,23 +226,37 @@ func (r *keyRun) revoke(ctx context.Context) error {
 }
 
 func (r *keyRun) rotate(ctx context.Context) error {
-	orgID, err := resolveOrg(ctx, r.c, r.org)
+	// The control API reads no lifetime as "keep the old one's", so a rotated
+	// key cannot be told to never expire.
+	if r.expires == "never" {
+		return errors.New("--expires never is for 'keera key create'; a rotated key keeps " +
+			"the old one's lifetime unless --expires gives another")
+	}
+	old, err := r.find(ctx)
 	if err != nil {
 		return err
 	}
-	return rotateKey(ctx, r.c, orgID, r.fs.Arg(0), r.name, r.expires, r.asJSON)
+	if old.RevokedAt != nil {
+		return fmt.Errorf("%s was already revoked on %s; there is nothing to rotate - %s",
+			old.ID, old.RevokedAt.Format(time.DateOnly), freshKeyHint(ctx, r.c, old.ProjectID, old.Name))
+	}
+	if !r.yes {
+		if err := confirmKeyRotate(old); err != nil {
+			return err
+		}
+	}
+	return rotateKey(ctx, r.c, old, r.name, r.expires, r.asJSON)
 }
 
 func (r *keyRun) set(ctx context.Context) error {
+	if !changesSomething(r.fs) {
+		return nothingToChange("key set")
+	}
 	name := strings.TrimSpace(r.name)
 	if name == "" {
-		return errors.New("nothing to change; pass --name <name>")
+		return errors.New("--name is empty; a key's name says what it is for")
 	}
-	orgID, err := resolveOrg(ctx, r.c, r.org)
-	if err != nil {
-		return err
-	}
-	key, err := findKey(ctx, r.c, orgID, r.fs.Arg(0))
+	key, err := r.find(ctx)
 	if err != nil {
 		return err
 	}
@@ -239,42 +273,55 @@ func (r *keyRun) set(ctx context.Context) error {
 	})
 }
 
+// keyNamed is what a person types back to confirm: the key's name, or its id
+// when it has none.
+func keyNamed(k store.KeySummary) (named, noun string) {
+	if k.Name == "" {
+		return k.ID, "id"
+	}
+	return k.Name, "name"
+}
+
+// lastUsed says when a key was last used, for a prompt about it.
+func lastUsed(k store.KeySummary) string {
+	if k.LastUsedAt == nil {
+		return "  it has never been used"
+	}
+	return "  it was last used " + k.LastUsedAt.Format(time.DateOnly)
+}
+
 // confirmKeyRevoke says what stops working and makes the administrator type
 // the key back. A revoked key cannot be printed again or restored, so the
 // prompt points at rotation, which replaces a key with no outage.
 func confirmKeyRevoke(k store.KeySummary) error {
-	named, noun := k.Name, "name"
-	if named == "" {
-		named, noun = k.ID, "id"
-	}
-	used := "  it has never been used"
-	if k.LastUsedAt != nil {
-		used = "  it was last used " + k.LastUsedAt.Format(time.DateOnly)
-	}
+	named, noun := keyNamed(k)
 	return confirm(fmt.Sprintf("Revoking %s (%s):", named, k.ID), []string{
 		"  every client still holding it is refused from its next call",
 		"  nothing can print it again, so it cannot be put back",
-		used,
+		lastUsed(k),
 		"To replace it without an outage instead: keera key rotate " + named,
 		"Usage history and the audit log are kept.",
 	}, noun, named, "nothing was revoked")
 }
 
-// rotateKey replaces a key with one carrying the same project, owner, name and
-// guardrails, then revokes the old one. The control plane does it in one
-// transaction, so it never leaves both keys live or drops the key's limits.
-func rotateKey(ctx context.Context, c *client, orgID, who, newName, expires string,
+// confirmKeyRotate asks before a rotation, which revokes the old key at once:
+// whatever still holds it fails until it is given the new one.
+func confirmKeyRotate(k store.KeySummary) error {
+	named, noun := keyNamed(k)
+	return confirm(fmt.Sprintf("Rotating %s (%s):", named, k.ID), []string{
+		"  a new key with the same project, owner and guardrails is printed once",
+		"  the old key is revoked at once: every client still holding it is refused " +
+			"from its next call",
+		lastUsed(k),
+	}, noun, named, "nothing was rotated")
+}
+
+// rotateKey replaces old with a key carrying the same project, owner, name and
+// guardrails, then revokes old. The control plane does it in one transaction,
+// so it never leaves both keys live or drops the key's limits.
+func rotateKey(ctx context.Context, c *client, old store.KeySummary, newName, expires string,
 	asJSON bool,
 ) error {
-	old, err := findKey(ctx, c, orgID, who)
-	if err != nil {
-		return err
-	}
-	if old.RevokedAt != nil {
-		return fmt.Errorf("%s was already revoked on %s; there is nothing to rotate - %s",
-			old.ID, old.RevokedAt.Format(time.DateOnly), freshKeyHint(ctx, c, old.ProjectID, old.Name))
-	}
-
 	var created struct {
 		createdKey
 		Replaced string `json:"replaced"`
@@ -287,10 +334,7 @@ func rotateKey(ctx context.Context, c *client, orgID, who, newName, expires stri
 	if asJSON {
 		return out(true, created, nil)
 	}
-	// The secret alone on stdout, so `KEY=$(keera key rotate …)` captures it.
-	fmt.Println(created.Key)
-	fmt.Fprintf(os.Stderr, "\nkey %s replaces %s (%s). %s\n",
-		created.ID, old.ID, old.Name, styleErr.warn("This is the only time it is shown."))
+	handOver(created.Key, fmt.Sprintf("key %s replaces %s (%s).", created.ID, old.ID, old.Name))
 	if !old.Limits.IsZero() {
 		fmt.Fprintln(os.Stderr, "Its guardrails were copied from the key it replaces.")
 	}
@@ -340,7 +384,7 @@ func findKey(ctx context.Context, c *client, orgID, who string) (store.KeySummar
 			"every key called %q in %s is already revoked; %s",
 			who, orgID, freshKeyHint(ctx, c, retired[0].ProjectID, retired[0].Name))
 	}
-	return store.KeySummary{}, fmt.Errorf("no key %s in %s (see: keera key list)", who, orgID)
+	return store.KeySummary{}, notFound("key", who, orgID, "key")
 }
 
 // freshKeyHint says how to get a new key in place of a revoked one. Only an

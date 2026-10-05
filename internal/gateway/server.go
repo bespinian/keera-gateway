@@ -206,7 +206,7 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, sh shape) 
 	case claudeSignIn(r):
 		// Claude Code signed in to a Claude plan, and pointed here without a
 		// Keera key: the administrator set the address for everyone.
-		sh.writeError(w, http.StatusUnauthorized, "authentication_error", "missing_api_key",
+		sh.writeError(w, http.StatusUnauthorized, "invalid_request_error", "missing_api_key",
 			"this request carries a Claude sign-in but no Keera key; to use Claude Code "+
 				"through Keera Gateway, "+connectHint)
 		return nil, false
@@ -232,7 +232,7 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, sh shape) 
 	case err == nil && res.Key.Subscription() && !inHeader:
 		// Without the header, Authorization holds this key, so there is no
 		// Claude sign-in to forward.
-		sh.writeError(w, http.StatusUnauthorized, "authentication_error", "subscription_key",
+		sh.writeError(w, http.StatusUnauthorized, "invalid_request_error", "subscription_key",
 			"this is a subscription key, for Claude Code signed in to a Claude plan; it goes "+
 				"in the "+KeyHeader+" header, and the sign-in in Authorization. To set Claude "+
 				"Code up, "+connectHint)

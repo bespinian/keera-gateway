@@ -94,8 +94,7 @@ func (s *Server) putFilter(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		Rules       []policy.FilterRule `json:"rules"`
 		Description string              `json:"description"`
 	}
-	if err := httpx.ReadJSON(r, &in); err != nil {
-		badRequest(w, err.Error())
+	if !readJSON(w, r, &in) {
 		return
 	}
 
@@ -292,33 +291,14 @@ func readerModelRefusal(what, alias string, m policy.Model) string {
 		"allows"
 }
 
+// deleteFilter keeps a filter that is still in use: a guardrail naming a
+// missing filter refuses every request it covers.
 func (s *Server) deleteFilter(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	orgID, ok := s.adminOrg(w, r, p)
-	if !ok {
-		return
-	}
-	alias := r.PathValue("alias")
-
-	// A guardrail naming a missing filter refuses every request it covers. So
-	// a filter still in use is not deleted; the refusal lists who uses it.
-	users, err := s.st.FilterUsers(r.Context(), orgID, alias)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	if len(users) > 0 {
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "filter_in_use",
-			"the filter '"+alias+"' is still applied by "+scopeList(users)+
-				". Every request those guardrails cover would be refused rather than sent "+
-				"unfiltered, so take it off them first")
-		return
-	}
-
-	if err := s.st.DeleteFilter(r.Context(), orgID, alias); err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.deleted(w, r, p, orgID, "filter", alias)
+	s.deleteUnused(w, r, p, "filter", s.st.FilterUsers, s.st.DeleteFilter, func(alias, users string) string {
+		return "the filter '" + alias + "' is still applied by " + users +
+			". Every request those guardrails cover would be refused rather than sent " +
+			"unfiltered, so take it off them first"
+	})
 }
 
 // checkFilter runs one filter over a sample and shows what came back.

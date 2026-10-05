@@ -9,14 +9,16 @@ BUILD_DIR ?= build
 # KEERA_TEST_REDIS_URL point at services of your own.
 PODMAN ?= podman
 COMPOSE ?= podman compose
-PG_IMAGE ?= docker.io/library/postgres:latest
+# Pinned to the major versions CI runs. compose mounts its volume where
+# Postgres 18 keeps its data, so a newer major would not find it.
+PG_IMAGE ?= docker.io/library/postgres:18
 PG_CONTAINER ?= keera-test-pg
 PG_PORT ?= 55432
 PG_DSN ?= postgres://keera:keera@127.0.0.1:$(PG_PORT)/keera_test?sslmode=disable
 
 # The Redis rate limiter needs a Redis for the same reason: what is tested is
 # the Lua the server runs, which no fake covers.
-REDIS_IMAGE ?= docker.io/library/redis:latest
+REDIS_IMAGE ?= docker.io/library/redis:8
 REDIS_CONTAINER ?= keera-test-redis
 REDIS_PORT ?= 56379
 REDIS_URL ?= redis://127.0.0.1:$(REDIS_PORT)/0
@@ -74,28 +76,35 @@ done; \
 echo " timed out"; $(4); exit 1
 endef
 
+# test-service starts a throwaway container and waits for it. $(1) is what
+# it is called in messages, $(2) the container, $(3) the arguments to `podman
+# run`, image included, $(4) how many seconds it may take and $(5) the probe
+# run inside it. test-service-down removes container $(1) again.
+test-service-down = $(PODMAN) rm -f $(1) >/dev/null 2>&1 || true
+
+define test-service
+$(call test-service-down,$(2))
+@$(PODMAN) run --rm -d --name $(2) $(3) >/dev/null
+@$(call wait-for,$(1),$(4),$(PODMAN) exec $(2) $(5),$(PODMAN) logs $(2))
+endef
+
 .PHONY: pg-up
 pg-up:
-	@$(PODMAN) rm -f $(PG_CONTAINER) >/dev/null 2>&1 || true
-	@$(PODMAN) run --rm -d --name $(PG_CONTAINER) \
+	@$(call test-service,postgres,$(PG_CONTAINER),\
 		-e POSTGRES_USER=keera -e POSTGRES_PASSWORD=keera -e POSTGRES_DB=keera_test \
-		-p $(PG_PORT):5432 $(PG_IMAGE) >/dev/null
-	@$(call wait-for,postgres,60,$(PODMAN) exec $(PG_CONTAINER) pg_isready -U keera -d keera_test,$(PODMAN) logs $(PG_CONTAINER))
-
-.PHONY: pg-down
-pg-down:
-	@$(PODMAN) rm -f $(PG_CONTAINER) >/dev/null 2>&1 || true
+		-p $(PG_PORT):5432 $(PG_IMAGE),60,pg_isready -U keera -d keera_test)
 
 .PHONY: redis-up
 redis-up:
-	@$(PODMAN) rm -f $(REDIS_CONTAINER) >/dev/null 2>&1 || true
-	@$(PODMAN) run --rm -d --name $(REDIS_CONTAINER) \
-		-p $(REDIS_PORT):6379 $(REDIS_IMAGE) >/dev/null
-	@$(call wait-for,redis,30,$(PODMAN) exec $(REDIS_CONTAINER) redis-cli ping,$(PODMAN) logs $(REDIS_CONTAINER))
+	@$(call test-service,redis,$(REDIS_CONTAINER),-p $(REDIS_PORT):6379 $(REDIS_IMAGE),30,redis-cli ping)
+
+.PHONY: pg-down
+pg-down:
+	@$(call test-service-down,$(PG_CONTAINER))
 
 .PHONY: redis-down
 redis-down:
-	@$(PODMAN) rm -f $(REDIS_CONTAINER) >/dev/null 2>&1 || true
+	@$(call test-service-down,$(REDIS_CONTAINER))
 
 .PHONY: vet
 vet:
@@ -126,11 +135,14 @@ clean:
 
 GATEWAY_IMAGE ?= localhost/keera-gateway:latest
 
-# What the binary inside the image reports as its version. .git is not in the
-# build context, so the toolchain cannot stamp it itself. A local build leaves
-# VERSION empty and the binary says "devel"; the release workflow passes the tag.
-VERSION ?=
-REVISION ?= $(shell git rev-parse HEAD 2>/dev/null)
+# What the binary inside the image and `make dist` report as their version.
+# .git is not in the build context, so the toolchain cannot stamp it itself.
+# Both follow what the toolchain stamps for `make build`: the tag when HEAD is
+# one, "devel" otherwise, and the commit, marked dirty when the tree has
+# changes - so one commit reads the same however it was built. The release
+# workflow passes the tag.
+VERSION ?= $(shell git describe --tags --exact-match --match 'v[0-9]*' HEAD 2>/dev/null)
+REVISION ?= $(shell git rev-parse HEAD 2>/dev/null)$(if $(shell git status --porcelain 2>/dev/null),-dirty)
 
 # What is inside the image we ship, in a format an auditor or a vulnerability
 # scanner can read. The image is FROM scratch, so this is the Go binary
@@ -155,28 +167,27 @@ image:
 
 # syft is run from its own image unless one is on PATH. It reads an OCI archive
 # rather than the image store, which keeps it out of the container socket and
-# works the same under podman and docker.
+# works the same under podman and docker. run_syft hides which one it is: the
+# container sees the archive under /scan and writes to /out.
 #
 # --source-name and --source-version are needed because, pointed at an archive,
 # syft would otherwise name the SBOM's subject as a path under /tmp.
 .PHONY: sbom
 sbom: image
-	@mkdir -p $(SBOM_DIR)
+	@mkdir -p $(dir $(SBOM_FILE))
 	@id=$$($(PODMAN) image inspect --format '{{.Id}}' $(GATEWAY_IMAGE)); \
-	out=$$(cd $(SBOM_DIR) && pwd); \
+	out=$$(cd $(dir $(SBOM_FILE)) && pwd); \
 	tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT INT TERM; \
 	$(PODMAN) save --format oci-archive -o "$$tmp/image.tar" $(GATEWAY_IMAGE) >/dev/null 2>&1; \
 	if command -v $(SYFT) >/dev/null 2>&1; then \
-		$(SYFT) scan "oci-archive:$$tmp/image.tar" \
-			--source-name '$(GATEWAY_IMAGE)' --source-version "sha256:$$id" \
-			-o '$(SBOM_FORMAT)=$(SBOM_FILE)'; \
+		run_syft() { $(SYFT) "$$@"; }; scan=$$tmp; dest=$$out; \
 	else \
-		$(PODMAN) run --rm \
-			-v "$$tmp:/scan:z" -v "$$out:/out:z" $(SYFT_IMAGE) \
-			scan oci-archive:/scan/image.tar \
-			--source-name '$(GATEWAY_IMAGE)' --source-version "sha256:$$id" \
-			-o '$(SBOM_FORMAT)=/out/$(notdir $(SBOM_FILE))'; \
-	fi && \
+		run_syft() { $(PODMAN) run --rm -v "$$tmp:/scan:z" -v "$$out:/out:z" $(SYFT_IMAGE) "$$@"; }; \
+		scan=/scan; dest=/out; \
+	fi; \
+	run_syft scan "oci-archive:$$scan/image.tar" \
+		--source-name '$(GATEWAY_IMAGE)' --source-version "sha256:$$id" \
+		-o "$(SBOM_FORMAT)=$$dest/$(notdir $(SBOM_FILE))" && \
 	echo "wrote $(SBOM_FILE) for $(GATEWAY_IMAGE) ($$(echo "$$id" | cut -c1-12))"
 
 # The licences of everything compiled into the binaries. MIT, BSD and Apache-2.0
@@ -247,12 +258,13 @@ dev: dev-env dev-backends
 	@echo
 	@echo "^C stops the gateway and leaves the containers up."
 	@echo
-	@# The sandbox address is defaulted only when a driver is named. The class
-	@# file always is, so the first organisation has classes to start from
-	@# once a driver is switched on.
+	@# The two catalogue files are defaults, so .env can name others. The
+	@# sandbox class file is set even without a driver, so the first
+	@# organisation has classes once one is switched on; the sandbox address
+	@# only when a driver is named.
 	@set -a; . ./$(DEV_ENV); set +a; \
 		KEERA_DATABASE_URL='postgres://keera:keera@127.0.0.1:5432/keera?sslmode=disable' \
-		KEERA_MODELS_FILE=compose/models.dev.yaml \
+		KEERA_MODELS_FILE="$${KEERA_MODELS_FILE:-compose/models.dev.yaml}" \
 		KEERA_SANDBOXES_FILE="$${KEERA_SANDBOXES_FILE:-compose/sandboxes.yaml}" \
 		KEERA_SANDBOX_PUBLIC_URL="$${KEERA_SANDBOX_DRIVER:+$${KEERA_SANDBOX_PUBLIC_URL:-http://host.containers.internal:8080}}" \
 		KEERA_LOG_FORMAT=text KEERA_LOG_LEVEL=debug \

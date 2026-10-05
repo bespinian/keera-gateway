@@ -896,11 +896,10 @@ export function showRequest(ctx, q, names, currency) {
         )
     : null;
 
-  // Where the time went, when the gateway that served this request recorded
-  // it. It goes above the fields rather than below them because it is the
-  // question the dialog is most often opened with - the row already said what
-  // happened and what it cost, and what it could not say is which part of the
-  // request was the wait.
+  // Where the time went, when it was recorded. It goes above the fields because
+  // it is the question the dialog is most often opened with - the row already
+  // said what happened and what it cost, but not which part of the request was
+  // the wait.
   const steps = flameChart(q.spans, q.latency_ms);
 
   modal({

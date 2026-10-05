@@ -22,7 +22,7 @@ func connectCmd(ctx context.Context, args []string) error {
 	c := newClient()
 	fs := flag.NewFlagSet("connect", flag.ExitOnError)
 	key := fs.String("key", "",
-		"the API key whose models to configure, by alias or id (default: your first active key)")
+		"the API key whose models to configure, by name or id (default: your first active key)")
 	model := fs.String("model", "", "with --subscription, the model Claude Code starts with "+
 		"(default: the first subscription model)")
 	org := fs.String("org", "", orgUsage)

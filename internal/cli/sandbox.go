@@ -61,8 +61,9 @@ func sandboxCmd(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("sandbox "+sub, flag.ExitOnError)
 	r := &sandboxRun{c: newClient(), fs: fs, sub: sub}
 	fs.StringVar(&r.org, "org", "", orgUsage)
-	fs.StringVar(&r.project, "project", "", "project the sandbox belongs to, by name or id; without it, the organisation's oldest project. "+
-		"Its key is in that project, so the budget, the rate limit and the allowed models are the project's")
+	fs.StringVar(&r.project, "project", "", "project the sandbox belongs to, by name or id. A new sandbox without it goes in the "+
+		"organisation's oldest project; a list without it shows every project. Its key is in "+
+		"that project, so the budget, the rate limit and the allowed models are the project's")
 	fs.StringVar(&r.class, "class", "", "which machine to ask for; 'keera sandbox classes' lists them")
 	fs.StringVar(&r.purpose, "purpose", "", "'engineer' - a machine you work in - or 'agent' - one task's")
 	fs.DurationVar(&r.ttl, "ttl", 0, "how long it lives; the class's default if not given")
@@ -71,10 +72,11 @@ func sandboxCmd(ctx context.Context, args []string) error {
 	fs.StringVar(&r.task, "task", "", "what an agent sandbox should carry out; @path reads a file")
 	fs.IntVar(&r.port, "port", sandbox.PortSSH, "which port to reach through 'proxy'")
 	fs.StringVar(&r.sshKey, "ssh-key", "",
-		"public key that may open a shell in it; the keys in ~/.ssh if not given")
+		"a file holding the public key that may open a shell in it, such as "+
+			"~/.ssh/id_ed25519.pub (default: every *.pub file in ~/.ssh)")
 	fs.BoolVar(&r.all, "all", false, "include sandboxes that have finished")
 	fs.StringVar(&r.by, "by", "class", "group 'usage' by class, project or user")
-	fs.DurationVar(&r.since, "since", 7*24*time.Hour, "how far back 'usage' looks")
+	fs.DurationVar(&r.since, "since", reportWindow, "how far back 'usage' looks")
 	fs.BoolVar(&r.yes, "yes", false, yesUsage)
 	fs.BoolVar(&r.asJSON, "json", false, jsonUsage)
 
@@ -151,7 +153,7 @@ func (r *sandboxRun) create(ctx context.Context) error {
 		return err
 	}
 	if r.class == "" {
-		return errors.New("--class is required; `keera sandbox classes` lists what this " +
+		return errors.New("--class is required; 'keera sandbox classes' lists what this " +
 			"organisation offers")
 	}
 	task, err := textOrFile(r.task)
@@ -246,14 +248,13 @@ func (r *sandboxRun) extend(ctx context.Context) error {
 		Name      string    `json:"name"`
 		ExpiresAt time.Time `json:"expires_at"`
 	}
-	if err := r.c.do(ctx, "POST", "/v1/sandboxes/"+url.PathEscape(sb.ID)+"/extend",
-		body, &res); err != nil {
+	raw, err := keepRaw(ctx, r.c, "POST", "/v1/sandboxes/"+url.PathEscape(sb.ID)+"/extend", body, &res)
+	if err != nil {
 		return err
 	}
-	return out(r.asJSON, res, func(w *table) {
-		_, _ = fmt.Fprintf(w, "sandbox\t%s\nexpires\t%s (in %s)\n", res.Name,
-			res.ExpiresAt.Local().Format(time.RFC3339),
-			time.Until(res.ExpiresAt).Round(time.Minute))
+	return out(r.asJSON, raw, func(w *table) {
+		_, _ = fmt.Fprintf(w, "sandbox\t%s\nexpires\t%s (%s)\n", res.Name,
+			res.ExpiresAt.Local().Format(time.RFC3339), expiresIn(&res.ExpiresAt))
 	})
 }
 
@@ -275,8 +276,9 @@ func (r *sandboxRun) usage(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	q := url.Values{
-		"org_id": {orgID}, "group_by": {r.by}, "from": {sinceParam(r.since)},
+	q, err := reportQuery(ctx, r.c, orgID, nil, r.since, map[string]string{"group_by": r.by})
+	if err != nil {
+		return err
 	}
 	var res struct {
 		Data    []store.SandboxUsage `json:"data"`
@@ -304,7 +306,7 @@ func (r *sandboxRun) apply(ctx context.Context) error {
 	// is safe.
 	classes := make([]policy.SandboxClass, len(entries))
 	for i, e := range entries {
-		path := inOrg("/v1/sandbox-classes/"+url.PathEscape(e.Name), orgID)
+		path := aliasPath("sandbox-classes", orgID, e.Name, "")
 		if err := r.c.do(ctx, "PUT", path, e, &classes[i]); err != nil {
 			return fmt.Errorf("applying %s: %w", e.Name, err)
 		}
@@ -337,11 +339,11 @@ func (r *sandboxRun) deleteClass(ctx context.Context) error {
 		Name          string `json:"name"`
 		LiveSandboxes int    `json:"live_sandboxes"`
 	}
-	path := inOrg("/v1/sandbox-classes/"+url.PathEscape(name), orgID)
-	if err := r.c.do(ctx, "DELETE", path, nil, &res); err != nil {
+	raw, err := keepRaw(ctx, r.c, "DELETE", aliasPath("sandbox-classes", orgID, name, ""), nil, &res)
+	if err != nil {
 		return err
 	}
-	return out(r.asJSON, res, func(w *table) {
+	return out(r.asJSON, raw, func(w *table) {
 		_, _ = fmt.Fprintf(w, "deleted\t%s\n", res.Name)
 		if res.LiveSandboxes > 0 {
 			_, _ = fmt.Fprintf(w, "\n%s still running on it.\n",
@@ -599,7 +601,7 @@ func writeSSHConfig(base, orgID string) error {
 		return err
 	}
 	path := filepath.Join("~", ".ssh", "config")
-	fmt.Fprintf(os.Stderr, "Append this to %s. Then `ssh %s<name>` reaches any sandbox you "+
+	fmt.Fprintf(os.Stderr, "Append this to %s. Then 'ssh %s<name>' reaches any sandbox you "+
 		"own, and so does VS Code's Remote-SSH and JetBrains Gateway - they need an ssh "+
 		"transport and nothing else.\n\n", path, sshHostPrefix)
 	fmt.Printf("Host %s*\n", sshHostPrefix)
@@ -620,8 +622,7 @@ func writeSSHConfig(base, orgID string) error {
 
 func printSandboxes(w *table, sandboxes []store.Sandbox) {
 	if len(sandboxes) == 0 {
-		_, _ = fmt.Fprintln(w, "No sandboxes. `keera sandbox create <name> --class <class>` "+
-			"makes one.")
+		printNone(w, "sandboxes", "keera sandbox create <name> --class <class>")
 		return
 	}
 	w.header("NAME\tCLASS\tFOR\tSTATE\tISOLATION\tSIZE\tEXPIRES\tRAN\tOWNER")
@@ -675,10 +676,10 @@ func printSandboxCreated(w *table, sb store.Sandbox) {
 		show(w, "expires", expiresIn(sb.ExpiresAt))
 	}
 	// It is still starting, so say how to find out when it is ready.
-	_, _ = fmt.Fprintf(w, "\nIt is starting. `keera sandbox show %s` says when it is ready",
+	_, _ = fmt.Fprintf(w, "\nIt is starting. 'keera sandbox show %s' says when it is ready",
 		sb.Name)
 	if sb.Purpose == policy.PurposeEngineer {
-		_, _ = fmt.Fprintf(w, ", and `keera sandbox ssh %s` gets in", sb.Name)
+		_, _ = fmt.Fprintf(w, ", and 'keera sandbox ssh %s' gets in", sb.Name)
 	}
 	_, _ = fmt.Fprintln(w, ".")
 	if sb.Purpose == policy.PurposeAgent {
@@ -691,28 +692,24 @@ func printSandboxClasses(w *table, classes []policy.SandboxClass,
 	limits policy.ResolvedSandbox,
 ) {
 	if len(classes) == 0 {
-		_, _ = fmt.Fprintln(w, "This organisation has no sandbox classes.")
+		printNone(w, "sandbox classes", "keera sandbox apply <file>")
 		return
 	}
 	w.header("CLASS\tISOLATION\tSIZE\tDISK\tDEFAULT\tMAX\tWARM\tFOR\tYOURS\tWHAT IT IS")
 	for _, c := range classes {
-		yours := "yes"
-		if err := limits.Admits(c); err != nil {
-			yours = "no"
-		}
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
 			c.Name, c.Isolation, sizeOf(c.CPU, c.Memory), mibOf(c.Disk),
-			c.DefaultTTL, c.MaxTTL, c.Warm, purposesOf(c), statusWord(yours),
-			dash(c.Description))
+			shortDuration(c.DefaultTTL), shortDuration(c.MaxTTL), c.Warm, purposesOf(c),
+			yesNo(limits.Admits(c) == nil), dash(c.Description))
 	}
 }
 
 func printSandboxUsage(w *table, by string, since time.Duration,
 	rows []store.SandboxUsage,
 ) {
-	_, _ = fmt.Fprintf(w, "Sandbox time by %s, the last %s\n\n", by, since)
+	_, _ = fmt.Fprintf(w, "Sandbox time by %s, the last %s\n\n", by, shortDuration(since))
 	if len(rows) == 0 {
-		_, _ = fmt.Fprintln(w, "No sandboxes in this window.")
+		printNone(w, "sandboxes in this window", "")
 		return
 	}
 	w.header(strings.ToUpper(by) + "\tSANDBOXES\tLIVE\tRAN\tCORE-SECONDS")
@@ -770,14 +767,14 @@ func expiresIn(at *time.Time) string {
 	if d <= 0 {
 		return "expired"
 	}
-	return "in " + d.Round(time.Minute).String()
+	return "in " + shortDuration(d.Round(time.Minute))
 }
 
 func ranFor(seconds int64) string {
 	if seconds <= 0 {
 		return "-"
 	}
-	return (time.Duration(seconds) * time.Second).Round(time.Second).String()
+	return shortDuration(time.Duration(seconds) * time.Second)
 }
 
 func purposesOf(c policy.SandboxClass) string {

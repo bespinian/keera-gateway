@@ -3,9 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -17,12 +15,8 @@ import (
 
 // filterRun is one 'keera filter' invocation.
 type filterRun struct {
-	c     *client
-	fs    *flag.FlagSet
-	sub   string
-	orgID string
+	*aliasRun
 
-	org         string
 	model       string
 	mode        string
 	shadow      bool
@@ -30,16 +24,12 @@ type filterRun struct {
 	prompt      string
 	rules       string
 	description string
-	since       time.Duration
-	yes         bool
-	asJSON      bool
 }
 
 func filterCmd(ctx context.Context, args []string) error {
-	sub, rest := split(args)
-	fs := flag.NewFlagSet("filter "+sub, flag.ExitOnError)
-	r := &filterRun{c: newClient(), fs: fs, sub: sub}
-	fs.StringVar(&r.org, "org", "", orgUsage)
+	a, rest := newAliasRun("filter", args)
+	r := &filterRun{aliasRun: a}
+	fs := a.fs
 	fs.StringVar(&r.model, "model", "", "the model the filter runs on")
 	fs.StringVar(&r.mode, "mode", "",
 		"rewrite (a model edits the request and lets it go), gate (a model judges only "+
@@ -55,71 +45,57 @@ func filterCmd(ctx context.Context, args []string) error {
 		"a pattern filter's rules, one per line: an expression, '=>', then what each match "+
 			"becomes - or 'REFUSE: why' to drop the request. @path reads a file")
 	fs.StringVar(&r.description, "description", "", "what this filter is for, for whoever reads the list; an empty one clears it")
-	fs.DurationVar(&r.since, "since", 7*24*time.Hour, "how far back 'report' looks")
-	fs.BoolVar(&r.yes, "yes", false, yesUsage)
-	fs.BoolVar(&r.asJSON, "json", false, jsonUsage)
 
-	fs.Usage = func() { _ = printHelp(fs, "filter", sub) }
-	if want, ok := wantsHelp(args); ok {
-		return printHelp(fs, "filter", want)
-	}
-	verb, err := parseVerb(fs, "filter", sub, rest)
-	if err != nil {
+	verb, err := a.parse(args, rest)
+	if err != nil || verb == "" {
 		return err
 	}
-	// put tells a change from an addition by the verb.
-	r.sub = verb
 	if r.shadow && r.enforce {
 		return opposites("shadow", "enforce")
 	}
-	if r.orgID, err = resolveOrg(ctx, r.c, r.org); err != nil {
-		return err
+	if !policy.FilterMode(r.mode).Valid() {
+		return fmt.Errorf("--mode is %q; it is 'rewrite' (a model edits the request and lets "+
+			"it go), 'gate' (a model judges only whether it may go) or 'pattern' (a list of "+
+			"rules is applied, with no model)", r.mode)
 	}
+	return a.run(ctx, verb, r)
+}
 
-	switch verb {
-	case "add", "set":
-		return r.put(ctx)
-	case "check":
-		return r.check(ctx)
-	case "report":
-		return r.report(ctx)
-	case "delete":
-		return r.delete(ctx)
-	default:
-		return r.list(ctx)
-	}
+func filterAlias(f policy.Filter) string { return f.Alias }
+
+// find reads one of the organisation's filters.
+func (r *filterRun) find(ctx context.Context, alias string) (policy.Filter, error) {
+	return findAlias(ctx, r.c, "filters", r.orgID, alias, "filter", filterAlias)
 }
 
 func (r *filterRun) list(ctx context.Context) error {
-	filters, err := list[policy.Filter](ctx, r.c, inOrg("/v1/filters", r.orgID))
-	if err != nil {
-		return err
-	}
-	return out(r.asJSON, filters, func(w *table) { printFilters(w, filters) })
+	return listAliases(ctx, r.aliasRun, printFilters)
+}
+
+func (r *filterRun) check(ctx context.Context) error {
+	alias := r.fs.Arg(0)
+	return checkProbe(ctx, r.c, r.path(alias, "/check"), "the filter "+alias, r.asJSON,
+		printFilterProbe, func(p gateway.FilterProbe) bool { return p.OK })
+}
+
+func (r *filterRun) report(ctx context.Context) error {
+	return reportAlias(ctx, r.aliasRun, printFilterReport)
 }
 
 func (r *filterRun) delete(ctx context.Context) error {
 	// Read first, so a typo is said before anybody types the alias back.
-	f, err := requireFilter(ctx, r.c, r.orgID, r.fs.Arg(0))
+	f, err := r.find(ctx, r.fs.Arg(0))
 	if err != nil {
 		return err
 	}
-	if !r.yes {
-		if err := confirmFilterDelete(f.Alias); err != nil {
-			return err
-		}
+	// The control plane already refuses to delete one a guardrail names, so
+	// this is about a filter nothing uses today, whose wording is kept nowhere
+	// else.
+	what := "its instruction is"
+	if !f.UsesModel() {
+		what = "its rules are"
 	}
-	return deleteAlias(ctx, r.c, r.path(f.Alias, ""), f.Alias, r.asJSON)
-}
-
-// path addresses one filter, or with a suffix a route under it.
-func (r *filterRun) path(alias, suffix string) string {
-	return filterPath(r.orgID, alias, suffix)
-}
-
-// filterPath is a control API path for a filter of orgID.
-func filterPath(orgID, alias, suffix string) string {
-	return inOrg("/v1/filters/"+url.PathEscape(alias)+suffix, orgID)
+	return r.deleteEntry(ctx, f.Alias, []string{"  " + what + " not kept anywhere else"})
 }
 
 func (r *filterRun) put(ctx context.Context) error {
@@ -131,16 +107,21 @@ func (r *filterRun) put(ctx context.Context) error {
 		if !changesSomething(r.fs) {
 			return nothingToChange("filter set")
 		}
-		existing, err := requireFilter(ctx, r.c, r.orgID, alias)
+		existing, err := r.find(ctx, alias)
 		if err != nil {
 			return err
 		}
 		f = existing
+	} else if err := alreadyExists(ctx, r.c, "filters", r.orgID, alias, "filter", filterAlias); err != nil {
+		return err
 	}
 	if err := r.apply(&f); err != nil {
 		return err
 	}
-	return putFilter(ctx, r.c, r.orgID, f, r.asJSON)
+	return putAlias(ctx, r.aliasRun, f.Alias, map[string]any{
+		"model": f.Model, "mode": f.Mode, "shadow": f.Shadow, "prompt": f.Prompt,
+		"rules": f.Rules, "description": f.Description,
+	}, printFilter)
 }
 
 // apply writes the given flags into f.
@@ -193,71 +174,6 @@ func (r *filterRun) apply(f *policy.Filter) error {
 	return nil
 }
 
-func (r *filterRun) check(ctx context.Context) error {
-	var probe gateway.FilterProbe
-	if err := r.c.do(ctx, "POST", r.path(r.fs.Arg(0), "/check"), nil, &probe); err != nil {
-		return err
-	}
-	if err := out(r.asJSON, probe, func(w *table) { printFilterProbe(w, probe) }); err != nil {
-		return err
-	}
-	if !probe.OK {
-		return errors.New("the filter did not pass its check")
-	}
-	return nil
-}
-
-func (r *filterRun) report(ctx context.Context) error {
-	var res filterReportResponse
-	if err := r.c.do(ctx, "GET",
-		r.path(r.fs.Arg(0), "/report")+"&from="+url.QueryEscape(sinceParam(r.since)),
-		nil, &res); err != nil {
-		return err
-	}
-	return out(r.asJSON, res, func(w *table) {
-		printFilterReport(w, r.fs.Arg(0), r.since, res)
-	})
-}
-
-// deleteAlias deletes the model, MCP server, filter or router at path and says
-// so.
-func deleteAlias(ctx context.Context, c *client, path, alias string, asJSON bool) error {
-	var res map[string]any
-	if err := c.do(ctx, "DELETE", path, nil, &res); err != nil {
-		return err
-	}
-	return out(asJSON, res, func(w *table) {
-		_, _ = fmt.Fprintf(w, "deleted\t%s\n", alias)
-	})
-}
-
-// requireFilter reads one filter from the list. There is no endpoint for a
-// single filter; the list is small.
-func requireFilter(ctx context.Context, c *client, orgID, alias string) (policy.Filter, error) {
-	return findAlias(ctx, c, inOrg("/v1/filters", orgID), alias, "filter",
-		func(f policy.Filter) string { return f.Alias })
-}
-
-func putFilter(ctx context.Context, c *client, orgID string, f policy.Filter, asJSON bool) error {
-	var saved policy.Filter
-	if err := c.do(ctx, "PUT", filterPath(orgID, f.Alias, ""),
-		map[string]any{
-			"model": f.Model, "mode": f.Mode, "shadow": f.Shadow, "prompt": f.Prompt,
-			"rules": f.Rules, "description": f.Description,
-		}, &saved); err != nil {
-		return err
-	}
-	return out(asJSON, saved, func(w *table) { printFilter(w, saved) })
-}
-
-// confirmFilterDelete asks before removing a filter. The control plane already
-// refuses to delete one a guardrail names, so this is about a filter nothing
-// uses today, whose wording is kept nowhere else.
-func confirmFilterDelete(alias string) error {
-	return confirm("Deleting the filter "+alias+":",
-		[]string{"  its instruction is not kept anywhere else"}, "alias", alias, "nothing was deleted")
-}
-
 func printFilters(w *table, filters []policy.Filter) {
 	w.header("ALIAS\tMODE\tMODEL\tDESCRIPTION\tINSTRUCTION")
 	for _, f := range filters {
@@ -266,7 +182,7 @@ func printFilters(w *table, filters []policy.Filter) {
 			model = "-"
 		}
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			f.Alias, filterModeLabel(f), model, f.Description, filterWhat(f))
+			f.Alias, filterModeLabel(f), model, dash(f.Description), filterWhat(f))
 	}
 }
 
@@ -442,7 +358,7 @@ func printFilterReport(w *table, name string, since time.Duration,
 	rep := res.Report
 	show(w, "filter", name)
 	show(w, "state", filterState(res.Filter))
-	show(w, "window", "the last "+since.String())
+	show(w, "window", "the last "+shortDuration(since))
 
 	if rep.Runs == 0 {
 		_, _ = fmt.Fprintf(w, "\nnothing ran in this window. %s\n", noRunsReason(res))

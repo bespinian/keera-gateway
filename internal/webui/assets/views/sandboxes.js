@@ -43,6 +43,7 @@ import {
   icons,
   plural,
   isAdmin,
+  sandboxNameProblem,
 } from "../ui.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
 import { oldestProject } from "./projects.js";
@@ -57,8 +58,8 @@ export async function sandboxesView(ctx) {
     api.sandboxes(ctx.orgID, { all: showAll() }),
     api.sandboxClasses(ctx.orgID),
     // Only an administrator may put a sandbox on a project, so only an
-    // administrator's dialog needs the list. A member's sandbox is created
-    // against the organisation's own guardrails, and asking them to choose
+    // administrator's dialog needs the list. A member's sandbox goes in the
+    // organisation's oldest project, and asking them to choose
     // from a list they cannot use would be a field that only ever refuses.
     canAdmin
       ? api.projects(ctx.orgID).catch(() => ({ data: [] }))
@@ -189,7 +190,7 @@ function listCard(ctx, sandboxes, canAdmin, me, driver) {
             h(
               "div",
               { class: "row-tight" },
-              pill(s.state, stateTone(s.state)),
+              pill(stateLabel(s.state), stateTone(s.state)),
               s.purpose === "agent" ? pill("agent", "accent") : null,
             ),
             // Why it is stuck or failed. The other states explain themselves.
@@ -271,12 +272,12 @@ function listCard(ctx, sandboxes, canAdmin, me, driver) {
     {
       search: (s) => `${s.name} ${s.class} ${s.owner} ${s.repo}`,
       searchLabel: "sandboxes",
-      // Not a filter over the rows here: a terminated sandbox is not in this
+      // Not a filter over the rows here: a finished sandbox is not in this
       // list until the control plane is asked for it, because the list is
       // capped and the live ones are what the cap is for.
       toggles: [
         {
-          label: "Show terminated",
+          label: "Show finished",
           on: showAll(),
           onChange: (v) => setShowAll(v, ctx),
         },
@@ -502,7 +503,7 @@ function actions(ctx, s, canAdmin, me, driver) {
 async function act(ctx, fn, message) {
   try {
     await fn();
-    toast(message);
+    toast(message, "good");
     ctx.reload();
   } catch (e) {
     toast(e.message, "bad");
@@ -510,14 +511,22 @@ async function act(ctx, fn, message) {
 }
 
 function extend(ctx, s) {
-  const ttl = h("input", { class: "input", value: "4h", placeholder: "4h" });
+  const ttl = h("input", {
+    class: "input",
+    placeholder: "the class's default",
+  });
   const err = h("div");
   modal({
     title: `Extend ${s.name}`,
     subtitle:
       "Counted from now, not added to the time left. The same limits as at " +
       "creation apply.",
-    body: h("div", {}, err, field("Lifetime from now", ttl)),
+    body: h(
+      "form",
+      {},
+      err,
+      field("Lifetime from now", ttl, "Leave empty for the class default."),
+    ),
     actions: (close) => [
       h("button", { class: "btn", onClick: close }, "Cancel"),
       h(
@@ -568,7 +577,7 @@ function terminateSandbox(ctx, s) {
     danger: true,
     onConfirm: async () => {
       await api.terminateSandbox(s.id);
-      toast(`${s.name} terminated`);
+      toast(`${s.name} terminated`, "good");
       ctx.reload();
     },
   });
@@ -583,11 +592,11 @@ function removeClass(ctx, c) {
       "Running sandboxes keep their image and resources, so nothing " +
         "breaks. New sandboxes can no longer use this class.",
     ),
-    confirmLabel: "Delete",
+    confirmLabel: "Delete class",
     danger: true,
     onConfirm: async () => {
       await api.deleteSandboxClass(c.name, c.org_id);
-      toast(`${c.name} deleted`);
+      toast(`${c.name} deleted`, "good");
       ctx.reload();
     },
   });
@@ -650,7 +659,7 @@ function newSandbox(ctx, classes, limits, projects) {
       "It gets its own API key, scoped to you and revoked with the sandbox.",
     wide: true,
     body: h(
-      "div",
+      "form",
       {},
       err,
       field(
@@ -665,7 +674,7 @@ function newSandbox(ctx, classes, limits, projects) {
             "Project",
             project,
             "The sandbox's key is scoped to this project, and the sandbox " +
-              "counts toward its quota. The project's guardrails can allow " +
+              "counts towards its quota. The project's guardrails can allow " +
               "fewer classes or a shorter lifetime than shown here.",
           )
         : null,
@@ -712,17 +721,18 @@ function newSandbox(ctx, classes, limits, projects) {
               .map((l) => l.trim())
               .filter((l) => l && !l.startsWith("#"));
             for (const check of [
-              [!name.value.trim(), name, "Give the sandbox a name."],
+              [sandboxNameProblem(name.value.trim()), name],
               [
-                !keys.length,
+                keys.length
+                  ? ""
+                  : "Paste an ssh public key. Without one, nobody can open " +
+                    "a shell in this sandbox. 'cat ~/.ssh/id_ed25519.pub' " +
+                    "prints yours.",
                 key,
-                "Paste an ssh public key. Without one, nobody can open a " +
-                  "shell in this sandbox. 'cat ~/.ssh/id_ed25519.pub' prints " +
-                  "yours.",
               ],
             ]) {
               if (check[0]) {
-                showError(err, check[2]);
+                showError(err, check[0]);
                 check[1].focus();
                 return;
               }
@@ -773,6 +783,11 @@ function isLive(s) {
     ["pending", "ready", "suspended", "expired"].includes(s.state) ||
     (s.state === "failed" && s.purpose === "engineer")
   );
+}
+
+// stateLabel capitalises a state, as every other status pill here is.
+function stateLabel(state) {
+  return state ? state[0].toUpperCase() + state.slice(1) : "";
 }
 
 function stateTone(state) {
@@ -861,7 +876,7 @@ function allowed(c, limits, driver) {
 /** setShowAll remembers the choice and asks for the list again.
  *
  *  Per-viewer and per-browser, which is right for a view preference: whether
- *  somebody wants to see terminated sandboxes is a fact about how they are
+ *  somebody wants to see finished sandboxes is a fact about how they are
  *  reading the screen, not about the deployment. */
 function setShowAll(on, ctx) {
   try {

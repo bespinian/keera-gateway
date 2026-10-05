@@ -11,6 +11,7 @@ import {
   pill,
   ago,
   date,
+  dateTime,
   money,
   num,
   icon,
@@ -138,12 +139,7 @@ export async function keysView(ctx) {
         label: "Status",
         shrink: true,
         sortKey: (k) => ({ active: 0, expired: 1, revoked: 2 })[stateOf(k)],
-        cell: (k) => {
-          const s = stateOf(k);
-          if (s === "revoked") return pill("Revoked", "bad");
-          if (s === "expired") return pill("Expired", "warn");
-          return pill("Active", "good");
-        },
+        cell: (k) => statePill(stateOf(k)),
       },
       {
         // The question anyone actually has about a key is whether revoking it
@@ -159,7 +155,7 @@ export async function keysView(ctx) {
           k.last_used_at
             ? h(
                 "span",
-                { class: "muted nowrap", title: k.last_used_at },
+                { class: "muted nowrap", title: dateTime(k.last_used_at) },
                 ago(k.last_used_at),
               )
             : h("span", { class: "faint nowrap" }, "not this month"),
@@ -297,18 +293,7 @@ export async function keysView(ctx) {
                   "button",
                   {
                     class: "btn btn-sm btn-danger",
-                    onClick: () =>
-                      confirm({
-                        title: "Revoke this key?",
-                        body: revokeBody(k),
-                        confirmLabel: "Revoke",
-                        danger: true,
-                        onConfirm: async () => {
-                          await api.revokeKey(k.id);
-                          toast("Key revoked", "good");
-                          ctx.reload();
-                        },
-                      }),
+                    onClick: () => confirmRevoke(k, ctx.reload),
                   },
                   "Revoke",
                 )
@@ -368,6 +353,29 @@ export function revokeBody(k) {
     "You cannot undo this. To replace the key instead, rotate it.";
   if (!k.last_used_at) return base + " This key has not been used this month.";
   return base;
+}
+
+// confirmRevoke asks before revoking a key, then runs done. Every screen that
+// shows a live key offers this, and it should read the same on each.
+export function confirmRevoke(k, done) {
+  confirm({
+    title: "Revoke this key?",
+    body: revokeBody(k),
+    confirmLabel: "Revoke",
+    danger: true,
+    onConfirm: async () => {
+      await api.revokeKey(k.id);
+      toast("Key revoked", "good");
+      done();
+    },
+  });
+}
+
+// statePill is a key's state as the panel shows it everywhere.
+export function statePill(state) {
+  if (state === "revoked") return pill("Revoked", "bad");
+  if (state === "expired") return pill("Expired", "warn");
+  return pill("Active", "good");
 }
 
 export function stateOf(k) {
@@ -602,7 +610,7 @@ async function showSecret(ctx, created, clients) {
     created.kind === "subscription"
       ? []
       : await issuedModels(created).catch(() => []);
-  const base = defaultBase(ctx) || location.origin + "/api";
+  const base = defaultBase(ctx);
 
   const secret = h("input", {
     class: "input key-value mono",

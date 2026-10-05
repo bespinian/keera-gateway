@@ -188,7 +188,9 @@ services:
       start_period: 120s
 
   keera-db:
-    image: docker.io/library/postgres:latest
+    # The major version is pinned: the volume is mounted where Postgres 18
+    # keeps its data, and a new major cannot read an old one's files anyway.
+    image: docker.io/library/postgres:18
     restart: unless-stopped
     environment:
       POSTGRES_USER: keera

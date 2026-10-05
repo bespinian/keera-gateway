@@ -94,8 +94,8 @@ func parseModelFile(raw []byte) ([]policy.Model, error) {
 }
 
 // decodeStrict reads a catalogue file and refuses a field it does not know. A
-// field left over from an older file, such as egress, would otherwise be
-// dropped without a word, and whoever relied on it would not know.
+// misspelt field would otherwise be dropped without a word, and whoever set it
+// would think it took effect.
 func decodeStrict(raw []byte, out any) error {
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	dec.KnownFields(true)

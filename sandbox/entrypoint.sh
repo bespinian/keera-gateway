@@ -14,6 +14,22 @@ set -euo pipefail
 log() { printf '%s keera-sandbox: %s\n' "$(date -u +%H:%M:%SZ)" "$*" >&2; }
 die() { log "$*"; exit 1; }
 
+# hook adds a line to each of the shell startup files given, unless one with
+# the marker is there already: the home directory survives a suspend, so the
+# second start finds it.
+hook() {
+  local marker="$1" line="$2" rc
+  shift 2
+  for rc in "$@"; do
+    touch "$rc"
+    grep -qF "$marker" "$rc" || printf '%s\n' "$line" >> "$rc"
+  done
+}
+
+# The startup files of the interactive shells in the image. zsh reads only its
+# own, so a hook for a person at a prompt goes into both.
+interactive=("$HOME/.bashrc" "$HOME/.zshrc")
+
 : "${HOME:=/home/keera}"
 : "${KEERA_SANDBOX_PURPOSE:=engineer}"
 
@@ -87,10 +103,9 @@ if [ -f "$HOME/.ssh/environment" ]; then
 fi
 PROFILE
 chmod 600 "$HOME/.keera-env"
-for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
-  touch "$rc"
-  grep -qF '.keera-env' "$rc" || echo '[ -f "$HOME/.keera-env" ] && . "$HOME/.keera-env"' >> "$rc"
-done
+# shellcheck disable=SC2016 # expanded by the shell that reads the line
+hook .keera-env '[ -f "$HOME/.keera-env" ] && . "$HOME/.keera-env"' \
+  "${interactive[@]}" "$HOME/.profile"
 
 # A banner, because the single most useful thing to tell somebody who has just
 # opened a shell in an ephemeral machine is when it goes away.
@@ -100,20 +115,21 @@ cat > "$HOME/.keera-motd" <<MOTD
   Keep your work in /home/keera. Nothing else is sure to survive a suspend,
   and on a class with no disk, not even that.
 
-  pi is configured for the models this organisation may use, and for no
+  pi is configured for the models this project may use, and for no
   others. No vendor credential is exported: setting one would fill pi's
   model picker with that vendor's whole catalogue and send this key to them.
   For a script that wants the OpenAI SDK's own variable, one line:
-      export OPENAI_API_KEY=\$KEERA_API_KEY  OPENAI_BASE_URL=\$KEERA_BASE_URL/v1
+      export OPENAI_API_KEY=\$KEERA_API_KEY
 MOTD
-grep -qF '.keera-motd' "$HOME/.bashrc" || \
-  echo '[ -n "$PS1" ] && [ -f "$HOME/.keera-motd" ] && cat "$HOME/.keera-motd"' >> "$HOME/.bashrc"
+# shellcheck disable=SC2016 # expanded by the shell that reads the line
+hook .keera-motd '[ -n "$PS1" ] && [ -f "$HOME/.keera-motd" ] && cat "$HOME/.keera-motd"' \
+  "${interactive[@]}"
 
 # ------------------------------------------------------------- the agent's config
 #
 # Pi reads ~/.pi/agent/models.json. The gateway renders it with every model the
-# key may use, through the same package that prints the block `keera connect
-# pi` gives somebody for their laptop.
+# key may use. A test keeps it in step with the block `keera connect pi` prints
+# for a laptop.
 #
 # The credential is not in the file. The rendered config names ${KEERA_API_KEY}
 # and Pi expands it from the environment, so a developer's edited copy never
@@ -127,7 +143,8 @@ grep -qF '.keera-motd' "$HOME/.bashrc" || \
 # people trusting a machine. The copy beside it is how "unchanged" is decided.
 keep_ours() {
   local live="$1" content="$2" what="$3"
-  local ours="${live%/*}/.keera-$(basename "$live")"
+  local ours
+  ours="${live%/*}/.keera-$(basename "$live")"
   if [ ! -f "$live" ] || { [ -f "$ours" ] && cmp -s "$ours" "$live"; }; then
     printf '%s\n' "$content" > "$live"
     cp "$live" "$ours"
@@ -202,7 +219,8 @@ setup_git() {
 
 checkout() {
   [ -n "${KEERA_REPO:-}" ] || return 0
-  local dir="$HOME/work/$(basename "${KEERA_REPO%.git}")"
+  local dir
+  dir="$HOME/work/$(basename "${KEERA_REPO%.git}")"
   if [ -d "$dir/.git" ]; then
     log "repository already checked out at $dir"
     echo "$dir"
@@ -235,8 +253,9 @@ fi
 if [ -n "${WORKDIR:-}" ]; then
   ln -sfn "$WORKDIR" "$HOME/repo"
   echo "cd $HOME/repo" > "$HOME/.keera-cd"
-  grep -qF '.keera-cd' "$HOME/.bashrc" || \
-    echo '[ -n "$PS1" ] && [ -f "$HOME/.keera-cd" ] && . "$HOME/.keera-cd"' >> "$HOME/.bashrc"
+  # shellcheck disable=SC2016 # expanded by the shell that reads the line
+  hook .keera-cd '[ -n "$PS1" ] && [ -f "$HOME/.keera-cd" ] && . "$HOME/.keera-cd"' \
+    "${interactive[@]}"
 fi
 
 # ---------------------------------------------------------------- the agent
@@ -253,7 +272,7 @@ fi
 #
 # Started last, which is deliberate: both drivers call a sandbox ready only
 # once this port answers, so everything above has finished by the time the
-# gateway reports the sandbox ready. "Ready" then means what a developer means by it rather
-# than "the container started".
+# gateway reports the sandbox ready. "Ready" then means what a developer means
+# by it rather than "the container started".
 log "ready; sshd is listening on 2222"
 exec /usr/sbin/sshd -D -e -f /etc/ssh/keera/sshd_config

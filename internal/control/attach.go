@@ -15,6 +15,7 @@ import (
 
 	"github.com/bespinian/keera-gateway/internal/authn"
 	"github.com/bespinian/keera-gateway/internal/httpx"
+	"github.com/bespinian/keera-gateway/internal/id"
 	"github.com/bespinian/keera-gateway/internal/sandbox"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
@@ -142,7 +143,7 @@ func (s *Server) resolveSandbox(w http.ResponseWriter, r *http.Request, p *authn
 		sb  store.Sandbox
 		err error
 	)
-	if strings.HasPrefix(ref, "sbx_") {
+	if id.HasPrefix(ref, "sbx") {
 		sb, err = s.st.Sandbox(r.Context(), ref)
 	} else {
 		orgID, ok := s.requireOrg(w, p, r.URL.Query().Get("org_id"),

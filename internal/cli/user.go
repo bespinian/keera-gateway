@@ -89,9 +89,8 @@ func (r *userRun) add(ctx context.Context) error {
 	if r.passkey && r.externalID != "" {
 		return opposites("passkey", "external-id")
 	}
-	if !slices.Contains(roleNames, r.addRole) {
-		return fmt.Errorf("--role must be one of: %s%s",
-			strings.Join(roleNames, ", "), roleHint)
+	if err := checkRole(r.addRole); err != nil {
+		return err
 	}
 	orgID, err := resolveOrg(ctx, r.c, r.org)
 	if err != nil {
@@ -104,7 +103,7 @@ func (r *userRun) add(ctx context.Context) error {
 	case err == nil:
 		return fmt.Errorf("%s is already in %s as %s; change that with: keera user role %s <role>",
 			existing.Email, orgID, existing.Role, existing.Email)
-	case !errors.Is(err, errNoUser):
+	case !errors.Is(err, errNotFound):
 		return err
 	}
 	signIn := ""
@@ -134,11 +133,7 @@ func (r *userRun) add(ctx context.Context) error {
 // passkeyLink hands out a new set-up link: for a new device, after a lost
 // passkey, or to move someone who has not signed in yet to passkeys.
 func (r *userRun) passkeyLink(ctx context.Context) error {
-	orgID, err := resolveOrg(ctx, r.c, r.org)
-	if err != nil {
-		return err
-	}
-	user, err := findUser(ctx, r.c, orgID, r.fs.Arg(0))
+	user, err := r.find(ctx)
 	if err != nil {
 		return err
 	}
@@ -163,6 +158,10 @@ func (r *userRun) list(ctx context.Context) error {
 		return err
 	}
 	return out(r.asJSON, users, func(w *table) {
+		if len(users) == 0 {
+			printNone(w, "people", "keera user add <email>")
+			return
+		}
 		w.header("ID\tEMAIL\tROLE\tSTATE\tIDP SUBJECT\tCREATED")
 		for _, u := range users {
 			subject := u.ExternalID
@@ -172,9 +171,9 @@ func (r *userRun) list(ctx context.Context) error {
 			case authn.IsPasskeyAccount(subject):
 				subject = "(passkey)"
 			}
-			state := style.ok("active")
+			state := statusWord("active")
 			if u.Disabled() {
-				state = style.bad("disabled " + u.DisabledAt.Format(time.DateOnly))
+				state = statusWord("disabled") + " " + u.DisabledAt.Format(time.DateOnly)
 			}
 			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 				u.ID, u.Email, u.Role, state, subject, u.CreatedAt.Format(time.DateOnly))
@@ -184,15 +183,10 @@ func (r *userRun) list(ctx context.Context) error {
 
 func (r *userRun) role(ctx context.Context) error {
 	role := r.fs.Arg(1)
-	if !slices.Contains(roleNames, role) {
-		return fmt.Errorf("the role must be one of: %s%s",
-			strings.Join(roleNames, ", "), roleHint)
-	}
-	orgID, err := resolveOrg(ctx, r.c, r.org)
-	if err != nil {
+	if err := checkRole(role); err != nil {
 		return err
 	}
-	user, err := findUser(ctx, r.c, orgID, r.fs.Arg(0))
+	user, err := r.find(ctx)
 	if err != nil {
 		return err
 	}
@@ -212,11 +206,7 @@ func (r *userRun) role(ctx context.Context) error {
 }
 
 func (r *userRun) disable(ctx context.Context) error {
-	orgID, err := resolveOrg(ctx, r.c, r.org)
-	if err != nil {
-		return err
-	}
-	user, err := findUser(ctx, r.c, orgID, r.fs.Arg(0))
+	user, err := r.find(ctx)
 	if err != nil {
 		return err
 	}
@@ -246,11 +236,11 @@ func (r *userRun) disable(ctx context.Context) error {
 		} `json:"sandboxes,omitempty"`
 		Warning string `json:"warning,omitempty"`
 	}
-	if err := r.c.do(ctx, "POST", "/v1/users/"+url.PathEscape(user.ID)+"/disable",
-		nil, &res); err != nil {
+	raw, err := keepRaw(ctx, r.c, "POST", "/v1/users/"+url.PathEscape(user.ID)+"/disable", nil, &res)
+	if err != nil {
 		return err
 	}
-	return out(r.asJSON, res, func(w *table) {
+	return out(r.asJSON, raw, func(w *table) {
 		_, _ = fmt.Fprintf(w, "%s is disabled and signed out everywhere.\n", res.Email)
 		_, _ = fmt.Fprintf(w, "Revoked %s.\n", plural(res.RevokedKeys, "key"))
 		if sb := res.Sandboxes; sb != nil && sb.Terminated+sb.Suspended > 0 {
@@ -264,11 +254,7 @@ func (r *userRun) disable(ctx context.Context) error {
 }
 
 func (r *userRun) enable(ctx context.Context) error {
-	orgID, err := resolveOrg(ctx, r.c, r.org)
-	if err != nil {
-		return err
-	}
-	user, err := findUser(ctx, r.c, orgID, r.fs.Arg(0))
+	user, err := r.find(ctx)
 	if err != nil {
 		return err
 	}
@@ -276,18 +262,32 @@ func (r *userRun) enable(ctx context.Context) error {
 		ID    string `json:"id"`
 		Email string `json:"email"`
 	}
-	if err := r.c.do(ctx, "POST", "/v1/users/"+url.PathEscape(user.ID)+"/enable",
-		nil, &res); err != nil {
+	raw, err := keepRaw(ctx, r.c, "POST", "/v1/users/"+url.PathEscape(user.ID)+"/enable", nil, &res)
+	if err != nil {
 		return err
 	}
-	return out(r.asJSON, res, func(w *table) {
+	return out(r.asJSON, raw, func(w *table) {
 		_, _ = fmt.Fprintf(w, "%s can sign in again. Their old keys stay revoked.\n", res.Email)
 	})
 }
 
-// errNoUser is what findUser returns when nobody matches, so a caller can
-// tell "not there" from "the control API is down".
-var errNoUser = errors.New("no such person")
+// find resolves the person named by the first argument in the organisation.
+func (r *userRun) find(ctx context.Context) (store.User, error) {
+	orgID, err := resolveOrg(ctx, r.c, r.org)
+	if err != nil {
+		return store.User{}, err
+	}
+	return findUser(ctx, r.c, orgID, r.fs.Arg(0))
+}
+
+// checkRole refuses a role the control plane would refuse, before anything is
+// sent.
+func checkRole(role string) error {
+	if slices.Contains(roleNames, role) {
+		return nil
+	}
+	return fmt.Errorf("the role must be one of: %s%s", strings.Join(roleNames, ", "), roleHint)
+}
 
 // findUser resolves an email address or an id to a person.
 func findUser(ctx context.Context, c *client, orgID, who string) (store.User, error) {
@@ -301,5 +301,5 @@ func findUser(ctx context.Context, c *client, orgID, who string) (store.User, er
 			return u, nil
 		}
 	}
-	return store.User{}, fmt.Errorf("%w in %s: %s (see: keera user list)", errNoUser, orgID, who)
+	return store.User{}, notFound("person", who, orgID, "user")
 }

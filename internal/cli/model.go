@@ -4,8 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/bespinian/keera-gateway/internal/catalog"
@@ -234,11 +232,6 @@ type modelRun struct {
 	org string
 }
 
-// modelPath is a control API path for a model of orgID.
-func modelPath(orgID, alias, suffix string) string {
-	return inOrg("/v1/models/"+url.PathEscape(alias)+suffix, orgID)
-}
-
 func modelCmd(ctx context.Context, args []string) error {
 	sub, rest := split(args)
 	fs := flag.NewFlagSet("model "+sub, flag.ExitOnError)
@@ -310,17 +303,21 @@ func (r *modelRun) list(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return out(r.asJSON, models, func(w *table) { printModels(w, models) })
+	return out(r.asJSON, models, func(w *table) {
+		if len(models) == 0 {
+			printNone(w, "models", "keera model add <alias>")
+			return
+		}
+		printModels(w, models)
+	})
 }
+
+func modelAlias(m policy.Model) string { return m.Alias }
 
 func (r *modelRun) add(ctx context.Context) error {
 	alias := r.fs.Arg(0)
-	models, err := r.catalogue(ctx)
-	if err != nil {
+	if err := alreadyExists(ctx, r.c, "models", r.org, alias, "model", modelAlias); err != nil {
 		return err
-	}
-	if _, found := findModel(models, alias); found {
-		return fmt.Errorf("the model %s already exists; change it with: keera model set %s", alias, alias)
 	}
 	return r.save(ctx, r.org, alias, catalog.Model{Alias: alias})
 }
@@ -370,18 +367,8 @@ func (r *modelRun) check(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var probe gateway.Probe
-	if err := r.c.do(ctx, "POST", modelPath(m.OrgID, alias, "/check"), nil, &probe); err != nil {
-		return err
-	}
-	if err := out(r.asJSON, probe, func(w *table) { printProbe(w, probe) }); err != nil {
-		return err
-	}
-	// A failed check fails the command, so a pipeline can gate on it.
-	if !probe.OK {
-		return fmt.Errorf("%s did not pass its check", alias)
-	}
-	return nil
+	return checkProbe(ctx, r.c, aliasPath("models", m.OrgID, alias, "/check"), "the model "+alias,
+		r.asJSON, printProbe, func(p gateway.Probe) bool { return p.OK })
 }
 
 func (r *modelRun) apply(ctx context.Context) error {
@@ -397,7 +384,7 @@ func (r *modelRun) apply(ctx context.Context) error {
 	// is safe.
 	for i, m := range models {
 		m.OrgID = r.org
-		if err := r.c.do(ctx, "PUT", modelPath(r.org, m.Alias, ""), modelPut{Model: m}, &models[i]); err != nil {
+		if err := r.c.do(ctx, "PUT", aliasPath("models", r.org, m.Alias, ""), modelPut{Model: m}, &models[i]); err != nil {
 			return fmt.Errorf("applying %s: %w", m.Alias, err)
 		}
 	}
@@ -422,7 +409,7 @@ func (r *modelRun) delete(ctx context.Context) error {
 			return err
 		}
 	}
-	return deleteAlias(ctx, r.c, modelPath(m.OrgID, m.Alias, ""), m.Alias, r.asJSON)
+	return deleteAlias(ctx, r.c, aliasPath("models", m.OrgID, m.Alias, ""), m.Alias, r.asJSON)
 }
 
 // resolveOrg fills in the organisation, as every command does.
@@ -453,13 +440,12 @@ func findModel(models []policy.Model, alias string) (policy.Model, bool) {
 // requireModel reads one of the organisation's models. There is no endpoint
 // for a single model; the list is small.
 func (r *modelRun) requireModel(ctx context.Context, alias string) (policy.Model, error) {
-	return findAlias(ctx, r.c, inOrg("/v1/models", r.org), alias, "model",
-		func(m policy.Model) string { return m.Alias })
+	return findAlias(ctx, r.c, "models", r.org, alias, "model", modelAlias)
 }
 
 func (r *modelRun) putModel(ctx context.Context, m policy.Model, cred *string) error {
 	var saved policy.Model
-	if err := r.c.do(ctx, "PUT", modelPath(m.OrgID, m.Alias, ""),
+	if err := r.c.do(ctx, "PUT", aliasPath("models", m.OrgID, m.Alias, ""),
 		modelPut{Model: m, APIKey: cred}, &saved); err != nil {
 		return err
 	}
@@ -508,7 +494,7 @@ func confirmModelDelete(m policy.Model, filters, routers []string) error {
 		lines = append(lines, "  its stored credential is removed")
 	}
 	lines = append(lines, "Usage history and the audit log are kept.")
-	return confirm("Deleting the model "+m.Alias+":", lines, "alias", m.Alias, "nothing was deleted")
+	return confirmAliasDelete("model", m.Alias, lines)
 }
 
 func printProviders(w *table) {
@@ -551,7 +537,7 @@ func printModels(w *table, models []policy.Model) {
 			dash(m.ReleaseDate), strings.Join(m.Backends, ","),
 			policy.FormatMicros(m.InputMicrosPerMTok), cachedPrice(m.CachedInputMicrosPerMTok),
 			policy.FormatMicros(m.OutputMicrosPerMTok),
-			credentialSource(m), statusWord(strconv.FormatBool(m.Enabled)))
+			credentialSource(m), yesNo(m.Enabled))
 	}
 }
 
@@ -602,7 +588,7 @@ func printModel(w *table, m policy.Model) {
 		show(w, "paid by", "each caller's own Claude subscription; the prices only say "+
 			"what the API would have charged")
 	}
-	show(w, "enabled", m.Enabled)
+	show(w, "enabled", yesNo(m.Enabled))
 }
 
 // credentialSource says whether a backend credential is stored, which is what
@@ -614,7 +600,7 @@ func credentialSource(m policy.Model) string {
 	case m.HasAPIKey:
 		return "stored"
 	}
-	return "(none)"
+	return "-"
 }
 
 func printProbe(w *table, p gateway.Probe) {
@@ -623,9 +609,9 @@ func printProbe(w *table, p gateway.Probe) {
 		show(w, "backend", p.Backend)
 	}
 	if p.Reachable {
-		show(w, "reachable", fmt.Sprintf("yes (HTTP %d)", p.Status))
+		show(w, "reachable", fmt.Sprintf("%s (HTTP %d)", yesNo(true), p.Status))
 	} else {
-		show(w, "reachable", "no")
+		show(w, "reachable", yesNo(false))
 	}
 	show(w, "streamed", yesNo(p.Streamed))
 	if p.ToolCallAsText {
@@ -651,11 +637,7 @@ func printProbe(w *table, p gateway.Probe) {
 	if !p.OK && p.Sample != "" {
 		show(w, "sample", firstLine(p.Sample))
 	}
-	if p.OK {
-		show(w, "result", "ok")
-	} else {
-		show(w, "result", "not ok")
-	}
+	show(w, "result", yesNo(p.OK))
 }
 
 func kindNames(kinds []policy.Kind) string {

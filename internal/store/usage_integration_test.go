@@ -279,7 +279,7 @@ func TestOverviewPlotsEveryBucketInTheWindow(t *testing.T) {
 	}
 
 	// Six hours, so hourly buckets.
-	o, err := st.Overview(ctx, f.orgID, now.Add(-3*time.Hour), now.Add(3*time.Hour), Scope{})
+	o, err := st.Overview(ctx, f.orgID, now.Add(-3*time.Hour), now.Add(3*time.Hour), ReportScope{})
 	if err != nil {
 		t.Fatalf("Overview: %v", err)
 	}
@@ -316,7 +316,7 @@ func TestOverviewPlotsEveryBucketInTheWindow(t *testing.T) {
 	}
 
 	// Four days, so daily buckets.
-	daily, err := st.Overview(ctx, f.orgID, now.AddDate(0, 0, -2), now.AddDate(0, 0, 2), Scope{})
+	daily, err := st.Overview(ctx, f.orgID, now.AddDate(0, 0, -2), now.AddDate(0, 0, 2), ReportScope{})
 	if err != nil {
 		t.Fatalf("Overview: %v", err)
 	}
@@ -661,7 +661,7 @@ func TestASubscriptionKeyKeepsItsKindAndItsPlanUsage(t *testing.T) {
 		t.Errorf("plan = %+v, want the newer reading, 0.4", sub.Plan)
 	}
 
-	o, err := st.Overview(ctx, f.orgID, now.Add(-time.Hour), now.Add(time.Hour), Scope{})
+	o, err := st.Overview(ctx, f.orgID, now.Add(-time.Hour), now.Add(time.Hour), ReportScope{})
 	if err != nil {
 		t.Fatalf("Overview: %v", err)
 	}

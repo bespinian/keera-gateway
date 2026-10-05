@@ -70,16 +70,49 @@ func (s *Server) getModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	alias := r.PathValue("alias")
-	if m, found := s.src.Model(res.Key.OrgID, alias); found && m.Enabled && res.MayUse(m) {
-		httpx.WriteJSON(w, http.StatusOK, modelEntryOf(m))
-		return
+	n, ok := s.callable(res, alias, "")
+	switch {
+	case !ok:
+		httpx.WriteError(w, http.StatusNotFound, "invalid_request_error", "model_not_found",
+			s.advise(modelNotFound(alias)))
+	case n.routed:
+		httpx.WriteJSON(w, http.StatusOK, routerEntryOf(n.router))
+	default:
+		httpx.WriteJSON(w, http.StatusOK, modelEntryOf(n.model))
+	}
+}
+
+// named is what a request's 'model' field names: a model, or a router.
+type named struct {
+	model  policy.Model
+	router policy.Router
+	routed bool
+}
+
+// callable decides what a key may name as its model: a model it may use, or
+// else one of its organisation's routers. kind narrows it to one API surface,
+// and empty accepts any. Routers answer only chat.
+//
+// Every route that takes a model name asks here, so they all agree. What is
+// missing and what is forbidden are both "not found", so other projects'
+// models cannot be discovered through 403s.
+func (s *Server) callable(res *policy.Resolved, alias string, kind policy.Kind) (named, bool) {
+	if alias == "" {
+		return named{}, false
+	}
+	// A model is looked up first. The control plane refuses a router named
+	// like a model, and a model named like a router, so the two rarely meet.
+	if m, found := s.findModel(res.Key, alias); found {
+		ok := m.Enabled && (kind == "" || m.Kind == kind) && res.MayUse(m)
+		return named{model: m}, ok
+	}
+	if kind != "" && kind != policy.KindChat {
+		return named{}, false
 	}
 	if rt, found := s.src.Router(res.Key.OrgID, alias); found && res.MayRoute(alias) {
-		httpx.WriteJSON(w, http.StatusOK, routerEntryOf(rt))
-		return
+		return named{router: rt, routed: true}, true
 	}
-	httpx.WriteError(w, http.StatusNotFound, "invalid_request_error", "model_not_found",
-		s.advise(modelNotFound(alias)))
+	return named{}, false
 }
 
 // created is the model's release date as a Unix time, which is what OpenAI's

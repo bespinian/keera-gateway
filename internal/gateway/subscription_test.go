@@ -230,6 +230,29 @@ func TestASubscriptionKeyReachesAModelByAnthropicsName(t *testing.T) {
 	}
 }
 
+func TestASubscriptionKeyCanLookUpAModelByAnthropicsName(t *testing.T) {
+	// What a key may send it may also look up, so a client that checks the
+	// model first is not turned away from one it could use.
+	h, _ := subscriptionHarness(t, nil)
+	for key, want := range map[string]int{subKey: http.StatusOK, testKey: http.StatusNotFound} {
+		req, _ := http.NewRequest(http.MethodGet, h.url("/v1/models/claude-opus-5-20260101"), nil)
+		req.Header.Set(KeyHeader, key)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got modelEntry
+		_ = json.NewDecoder(resp.Body).Decode(&got)
+		_ = resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Errorf("%s: status %d, want %d", key, resp.StatusCode, want)
+		}
+		if want == http.StatusOK && got.ID != "keera-frontier" {
+			t.Errorf("%s: answered %q, want the alias keera-frontier", key, got.ID)
+		}
+	}
+}
+
 func TestUndatedTakesOffOnlyADate(t *testing.T) {
 	for in, want := range map[string]string{
 		"claude-haiku-4-5-20251001": "claude-haiku-4-5",

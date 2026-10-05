@@ -148,8 +148,7 @@ func (s *Server) putRouter(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		return
 	}
 	var in routerInput
-	if err := httpx.ReadJSON(r, &in); err != nil {
-		badRequest(w, err.Error())
+	if !readJSON(w, r, &in) {
 		return
 	}
 	rt := in.router(orgID, r.PathValue("alias"))
@@ -354,34 +353,15 @@ func (s *Server) checkDestinations(w http.ResponseWriter, r *http.Request,
 	return true
 }
 
+// deleteRouter keeps a router that is still in use. Editors that name it are
+// out of sight. What can be seen are the scopes whose allow-list names it:
+// they would be left able to reach nothing.
 func (s *Server) deleteRouter(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	orgID, ok := s.adminOrg(w, r, p)
-	if !ok {
-		return
-	}
-	alias := r.PathValue("alias")
-
-	// Editors that name a deleted router are out of sight. What can be seen
-	// are the scopes whose allow-list names it: they would be left able to
-	// reach nothing, so the router is not deleted while they exist.
-	users, err := s.st.RouterUsers(r.Context(), orgID, alias)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	if len(users) > 0 {
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "router_in_use",
-			"the router '"+alias+"' is in the allow-list of "+scopeList(users)+
-				". Every request naming it would be answered 'model not found', so take it "+
-				"off those allow-lists first")
-		return
-	}
-
-	if err := s.st.DeleteRouter(r.Context(), orgID, alias); err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.deleted(w, r, p, orgID, "router", alias)
+	s.deleteUnused(w, r, p, "router", s.st.RouterUsers, s.st.DeleteRouter, func(alias, users string) string {
+		return "the router '" + alias + "' is in the allow-list of " + users +
+			". Every request naming it would be answered 'model not found', so take it " +
+			"off those allow-lists first"
+	})
 }
 
 // checkRouter puts sample prompts through a router and shows where each went.

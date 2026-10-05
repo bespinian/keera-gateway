@@ -18,6 +18,7 @@ import {
   icons,
   empty,
   RANGES as SHARED_RANGES,
+  rangePicker,
 } from "../ui.js";
 
 const TONES = {
@@ -164,20 +165,10 @@ export async function auditView(ctx) {
       ),
     ),
     h("div", { style: { flex: 1 } }),
-    h(
-      "div",
-      { class: "seg" },
-      RANGES.map((r) =>
-        h(
-          "button",
-          {
-            "aria-pressed": String(r.since === filter.since),
-            onClick: () => set("since", r.since),
-          },
-          r.label,
-        ),
-      ),
-    ),
+    rangePicker(ctx, filter.since, {
+      ranges: RANGES,
+      key: "keera.audit.since",
+    }),
     h(
       "button",
       {

@@ -28,7 +28,7 @@ func (s *Server) requireScopeRead(w http.ResponseWriter, r *http.Request,
 		s.fail(w, err)
 		return false
 	}
-	if !p.Unrestricted() && !p.CanReadOrg(owner) {
+	if !p.CanReadOrg(owner) {
 		s.fail(w, store.ErrNotFound)
 		return false
 	}
@@ -280,8 +280,7 @@ func (s *Server) putGuardrails(w http.ResponseWriter, r *http.Request, p *authn.
 	}
 
 	var lim policy.Limits
-	if err := httpx.ReadJSON(r, &lim); err != nil {
-		badRequest(w, err.Error())
+	if !readJSON(w, r, &lim) {
 		return
 	}
 	if lim.BudgetPeriod != nil && !lim.BudgetPeriod.Valid() {
@@ -366,7 +365,7 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request, p *authn.Pri
 // hosted model in the panel needs only a model id. It is the same table the
 // catalogue file is read against.
 //
-// Anyone signed in may read it, for the panel's model catalog. Only someone who
+// Anyone signed in may read it, for the panel's model catalogue. Only someone who
 // can add a model sees where a provider is reached: the form fills it in.
 func (s *Server) listProviders(w http.ResponseWriter, _ *http.Request, p *authn.Principal) {
 	providers := catalog.Providers()
@@ -392,8 +391,7 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 		// existing one keeps what it was.
 		Enabled *bool `json:"enabled"`
 	}
-	if err := httpx.ReadJSON(r, &body); err != nil {
-		badRequest(w, err.Error())
+	if !readJSON(w, r, &body) {
 		return
 	}
 	m := body.Model

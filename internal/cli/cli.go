@@ -6,6 +6,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -82,8 +83,7 @@ func Run(ctx context.Context, args []string) error {
 	case "whoami":
 		return whoamiCmd(ctx, rest)
 	case "version":
-		fmt.Println(version.String())
-		return nil
+		return versionCmd(rest)
 	case "help", "-h", "--help":
 		return helpCmd(ctx, rest)
 	default:
@@ -94,6 +94,21 @@ func Run(ctx context.Context, args []string) error {
 		}
 		return fmt.Errorf("no command %q; run 'keera' for the list", cmd)
 	}
+}
+
+// versionCmd prints the build version. It takes nothing, and says so rather
+// than ignore what it was given.
+func versionCmd(args []string) error {
+	fs := flag.NewFlagSet("version", flag.ExitOnError)
+	fs.Usage = func() { _ = printHelp(fs, "version", "") }
+	if want, ok := wantsHelp(args); ok {
+		return printHelp(fs, "version", want)
+	}
+	if err := parseCmd(fs, "version", args); err != nil {
+		return err
+	}
+	fmt.Println(version.String())
+	return nil
 }
 
 // Fail prints a command's error, painting the prefix only when stderr is a

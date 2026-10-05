@@ -2,10 +2,7 @@ package cli
 
 import (
 	"context"
-	"errors"
-	"flag"
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 
@@ -16,12 +13,8 @@ import (
 
 // routerRun is one 'keera router' invocation.
 type routerRun struct {
-	c     *client
-	fs    *flag.FlagSet
-	sub   string
-	orgID string
+	*aliasRun
 
-	org          string
 	mode         string
 	model        string
 	destinations string
@@ -29,16 +22,12 @@ type routerRun struct {
 	noFallback   bool
 	prompt       string
 	description  string
-	since        time.Duration
-	yes          bool
-	asJSON       bool
 }
 
 func routerCmd(ctx context.Context, args []string) error {
-	sub, rest := split(args)
-	fs := flag.NewFlagSet("router "+sub, flag.ExitOnError)
-	r := &routerRun{c: newClient(), fs: fs, sub: sub}
-	fs.StringVar(&r.org, "org", "", orgUsage)
+	a, rest := newAliasRun("router", args)
+	r := &routerRun{aliasRun: a}
+	fs := a.fs
 	fs.StringVar(&r.mode, "mode", "",
 		"what chooses: 'instruction' reads the request with a model; 'size' places it by how "+
 			"much text is in it; 'fallback', 'latency' and 'least-busy' try the destinations "+
@@ -58,20 +47,11 @@ func routerCmd(ctx context.Context, args []string) error {
 		"refuse a request the router cannot place, rather than sending it to a fallback")
 	fs.StringVar(&r.prompt, "prompt", "", "the instruction the deciding model is given; @path reads a file")
 	fs.StringVar(&r.description, "description", "", "what this router is for, for whoever reads the list; an empty one clears it")
-	fs.DurationVar(&r.since, "since", 7*24*time.Hour, "how far back 'report' looks")
-	fs.BoolVar(&r.yes, "yes", false, yesUsage)
-	fs.BoolVar(&r.asJSON, "json", false, jsonUsage)
 
-	fs.Usage = func() { _ = printHelp(fs, "router", sub) }
-	if want, ok := wantsHelp(args); ok {
-		return printHelp(fs, "router", want)
-	}
-	verb, err := parseVerb(fs, "router", sub, rest)
-	if err != nil {
+	verb, err := a.parse(args, rest)
+	if err != nil || verb == "" {
 		return err
 	}
-	// put tells a change from an addition by the verb.
-	r.sub = verb
 	if r.fallback != "" && r.noFallback {
 		return opposites("fallback", "no-fallback")
 	}
@@ -84,54 +64,41 @@ func routerCmd(ctx context.Context, args []string) error {
 			"'least-busy' emptiest first by what the gateway has in flight against each",
 			r.mode)
 	}
-	if r.orgID, err = resolveOrg(ctx, r.c, r.org); err != nil {
-		return err
-	}
+	return a.run(ctx, verb, r)
+}
 
-	switch verb {
-	case "add", "set":
-		return r.put(ctx)
-	case "check":
-		return r.check(ctx)
-	case "report":
-		return r.report(ctx)
-	case "delete":
-		return r.delete(ctx)
-	default:
-		return r.list(ctx)
-	}
+func routerAlias(rt policy.Router) string { return rt.Alias }
+
+// find reads one of the organisation's routers.
+func (r *routerRun) find(ctx context.Context, alias string) (policy.Router, error) {
+	return findAlias(ctx, r.c, "routers", r.orgID, alias, "router", routerAlias)
 }
 
 func (r *routerRun) list(ctx context.Context) error {
-	routers, err := list[policy.Router](ctx, r.c, inOrg("/v1/routers", r.orgID))
-	if err != nil {
-		return err
-	}
-	return out(r.asJSON, routers, func(w *table) { printRouters(w, routers) })
+	return listAliases(ctx, r.aliasRun, printRouters)
+}
+
+func (r *routerRun) check(ctx context.Context) error {
+	alias := r.fs.Arg(0)
+	return checkProbe(ctx, r.c, r.path(alias, "/check"), "the router "+alias, r.asJSON,
+		printRouterProbe, func(p gateway.RouterProbe) bool { return p.OK })
+}
+
+func (r *routerRun) report(ctx context.Context) error {
+	return reportAlias(ctx, r.aliasRun, printRouterReport)
 }
 
 func (r *routerRun) delete(ctx context.Context) error {
 	// Read first, so a typo is said before anybody types the alias back.
-	rt, err := requireRouter(ctx, r.c, r.orgID, r.fs.Arg(0))
+	rt, err := r.find(ctx, r.fs.Arg(0))
 	if err != nil {
 		return err
 	}
-	if !r.yes {
-		if err := confirmRouterDelete(rt.Alias); err != nil {
-			return err
-		}
-	}
-	return deleteAlias(ctx, r.c, r.path(rt.Alias, ""), rt.Alias, r.asJSON)
-}
-
-// path addresses one router, or with a suffix a route under it.
-func (r *routerRun) path(alias, suffix string) string {
-	return routerPath(r.orgID, alias, suffix)
-}
-
-// routerPath is a control API path for a router of orgID.
-func routerPath(orgID, alias, suffix string) string {
-	return inOrg("/v1/routers/"+url.PathEscape(alias)+suffix, orgID)
+	// The control plane guards the scopes that use one, but not the clients:
+	// they name routers in their own configuration, and would get "model not
+	// found".
+	return r.deleteEntry(ctx, rt.Alias,
+		[]string{"  any client still naming it is told the model does not exist"})
 }
 
 func (r *routerRun) put(ctx context.Context) error {
@@ -143,16 +110,23 @@ func (r *routerRun) put(ctx context.Context) error {
 		if !changesSomething(r.fs) {
 			return nothingToChange("router set")
 		}
-		existing, err := requireRouter(ctx, r.c, r.orgID, alias)
+		existing, err := r.find(ctx, alias)
 		if err != nil {
 			return err
 		}
 		rt = existing
+	} else if err := alreadyExists(ctx, r.c, "routers", r.orgID, alias, "router", routerAlias); err != nil {
+		return err
 	}
 	if err := r.apply(&rt); err != nil {
 		return err
 	}
-	return putRouter(ctx, r.c, r.orgID, rt, r.asJSON)
+	return putAlias(ctx, r.aliasRun, rt.Alias, map[string]any{
+		"mode": rt.Mode, "model": rt.Model, "prompt": rt.Prompt,
+		"destinations": rt.Destinations, "ceilings": rt.Ceilings,
+		// Always sent, so that clearing the fallback works.
+		"fallback": rt.Fallback, "description": rt.Description,
+	}, printRouter)
 }
 
 // apply writes the given flags into rt.
@@ -210,61 +184,6 @@ func (r *routerRun) apply(rt *policy.Router) error {
 	return nil
 }
 
-func (r *routerRun) check(ctx context.Context) error {
-	var probe gateway.RouterProbe
-	if err := r.c.do(ctx, "POST", r.path(r.fs.Arg(0), "/check"), nil, &probe); err != nil {
-		return err
-	}
-	if err := out(r.asJSON, probe, func(w *table) { printRouterProbe(w, probe) }); err != nil {
-		return err
-	}
-	if !probe.OK {
-		return errors.New("the router did not pass its check")
-	}
-	return nil
-}
-
-func (r *routerRun) report(ctx context.Context) error {
-	var res routerReportResponse
-	if err := r.c.do(ctx, "GET",
-		r.path(r.fs.Arg(0), "/report")+"&from="+url.QueryEscape(sinceParam(r.since)),
-		nil, &res); err != nil {
-		return err
-	}
-	return out(r.asJSON, res, func(w *table) {
-		printRouterReport(w, r.fs.Arg(0), r.since, res)
-	})
-}
-
-// requireRouter reads one router from the list, as requireFilter does.
-func requireRouter(ctx context.Context, c *client, orgID, alias string) (policy.Router, error) {
-	return findAlias(ctx, c, inOrg("/v1/routers", orgID), alias, "router",
-		func(rt policy.Router) string { return rt.Alias })
-}
-
-func putRouter(ctx context.Context, c *client, orgID string, rt policy.Router, asJSON bool) error {
-	var saved policy.Router
-	if err := c.do(ctx, "PUT", routerPath(orgID, rt.Alias, ""),
-		map[string]any{
-			"mode": rt.Mode, "model": rt.Model, "prompt": rt.Prompt,
-			"destinations": rt.Destinations, "ceilings": rt.Ceilings,
-			// Always sent, so that clearing the fallback works.
-			"fallback": rt.Fallback, "description": rt.Description,
-		}, &saved); err != nil {
-		return err
-	}
-	return out(asJSON, saved, func(w *table) { printRouter(w, saved) })
-}
-
-// confirmRouterDelete asks before removing a router. The control plane guards
-// the scopes that use one, but not the clients: they name routers in their
-// own configuration, and would get "model not found".
-func confirmRouterDelete(alias string) error {
-	return confirm("Deleting the router "+alias+":",
-		[]string{"  any client still naming it is told the model does not exist"},
-		"alias", alias, "nothing was deleted")
-}
-
 func printRouters(w *table, routers []policy.Router) {
 	w.header("ALIAS\tMODE\tDECIDES WITH\tDESTINATIONS\tCANNOT PLACE\tDESCRIPTION")
 	for _, rt := range routers {
@@ -274,7 +193,7 @@ func printRouters(w *table, routers []policy.Router) {
 		}
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			rt.Alias, rt.Mode, decidesWith, destinationsLabel(rt), fallbackLabel(rt),
-			rt.Description)
+			dash(rt.Description))
 	}
 }
 
@@ -494,7 +413,7 @@ func printRouterReport(w *table, name string, since time.Duration,
 	} else {
 		show(w, "state", routerState(*res.Router))
 	}
-	show(w, "window", "the last "+since.String())
+	show(w, "window", "the last "+shortDuration(since))
 
 	if rep.Total.Requests == 0 {
 		_, _ = fmt.Fprintf(w, "\nnothing named this router in this window. %s\n",

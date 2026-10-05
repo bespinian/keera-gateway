@@ -31,7 +31,7 @@ import {
 const root = document.getElementById("root");
 
 /** state is everything the shell and the views share. */
-export const state = {
+const state = {
   me: null,
   orgs: [],
   /** setup is what this organisation has: the counts the first-run checklist
@@ -294,7 +294,8 @@ function inUse(route) {
 }
 
 /** offered reports whether this deployment has the feature a route is for at
- *  all. A route that is not offered is never shown, not even under "More". */
+ *  all. A route that is not offered is never shown, not even among the unused
+ *  screens moreItem offers. */
 function offered(route) {
   return !route.needs || Boolean(state.me[route.needs]);
 }
@@ -319,7 +320,7 @@ function visibleRoutes() {
 }
 
 /** foldedAway is the advanced screens the sidebar is currently not showing,
- *  which is what the "More" entry is offering. */
+ *  which is what moreItem offers by name. */
 function foldedAway() {
   if (advancedShown()) return [];
   return routes.filter((r) => r.advanced && offered(r) && !inUse(r));
@@ -358,7 +359,7 @@ function decode(segment) {
   }
 }
 
-export function navigate(path) {
+function navigate(path) {
   closeDrawer();
   if (location.pathname !== path) history.pushState({}, "", path);
   renderRoute();

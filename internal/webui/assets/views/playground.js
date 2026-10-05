@@ -19,10 +19,9 @@ import {
   ms,
   empty,
   toast,
-  go,
-  isAdmin,
   field,
 } from "../ui.js";
+import { keyModels, noKey, usableKeys } from "./connect.js";
 
 /** session outlives a route change, so stepping over to Usage to look at what a
  *  message cost and stepping back does not throw the conversation away. It does
@@ -41,12 +40,8 @@ export async function playgroundView(ctx) {
   // Only the reader's own keys: a message spends a key's budget, so it has to
   // be one they may spend.
   const a = await api.access();
-  // A subscription key only works from Claude Code, with its holder's Claude
-  // sign-in, so the playground cannot send with one.
-  const keys = (a.keys || []).filter(
-    (k) => k.state === "active" && k.kind !== "subscription",
-  );
-  if (!keys.length) return noKey(ctx, a);
+  const keys = usableKeys(a);
+  if (!keys.length) return noKey(ctx, a, "Messages are sent with");
   if (!keys.some((k) => k.id === session.keyID)) session.keyID = keys[0].id;
   const key = keys.find((k) => k.id === session.keyID);
 
@@ -54,10 +49,7 @@ export async function playgroundView(ctx) {
   // the panel where somebody can type a prompt and see which model a router
   // sent it to. Only what the key may call is offered, so the picker cannot
   // offer a model that only ever answers 404.
-  const allowed = key.allowed_models || [];
-  const models = (await chatTargets(key.org_id)).filter((m) =>
-    allowed.includes(m.alias),
-  );
+  const models = keyModels(await chatTargets(key.org_id), key.allowed_models);
   if (!models.length) {
     return h(
       "div",
@@ -73,39 +65,6 @@ export async function playgroundView(ctx) {
     session.model = models[0].alias;
 
   return chat(ctx, keys, key, models);
-}
-
-/** noKey explains why there is nothing to send with, and where to get a key. */
-function noKey(ctx, a) {
-  if (a.anonymous || (a.operator_key && !(a.keys || []).length)) {
-    return h(
-      "div",
-      { class: "card" },
-      empty(
-        "The operator key has no API keys",
-        "Messages are sent with one of your own API keys. Sign in with your " +
-          "identity provider to use yours.",
-      ),
-    );
-  }
-  const canIssue = isAdmin(ctx);
-  return h(
-    "div",
-    { class: "card" },
-    empty(
-      "You have no active API key",
-      canIssue
-        ? h(
-            "span",
-            {},
-            "Messages are sent with one of your own keys. Issue one on ",
-            h("a", { href: "/keys", onClick: go(ctx, "/keys") }, "API keys"),
-            ".",
-          )
-        : "Messages are sent with one of your own keys. Ask an " +
-            "administrator for a key in your name.",
-    ),
-  );
 }
 
 /** keyPicker chooses the key messages are sent with. Changing it redraws the
@@ -738,7 +697,7 @@ function messageEl(msg, ctx, byAlias) {
 
   return h(
     "div",
-    { class: "msg msg-assistant" },
+    { class: "msg" },
     h(
       "div",
       { class: "msg-head" },

@@ -57,7 +57,7 @@ func (s *Server) passkeysOff(w http.ResponseWriter) bool {
 		return false
 	}
 	httpx.WriteError(w, http.StatusNotImplemented, "invalid_request_error",
-		"passkeys_not_enabled", "passkeys are off on this gateway; set KEERA_PASSKEYS=true")
+		"passkeys_disabled", "passkeys are off on this gateway; set KEERA_PASSKEYS=true")
 	return true
 }
 
@@ -70,11 +70,7 @@ func readPasskeyJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 			"send the request as application/json")
 		return false
 	}
-	if err := httpx.ReadJSON(r, v); err != nil {
-		badRequest(w, "the request is not valid: "+err.Error())
-		return false
-	}
-	return true
+	return readJSON(w, r, v)
 }
 
 // ------------------------------------------------------------------ sign-in
@@ -471,8 +467,7 @@ func (s *Server) addOwnPasskey(w http.ResponseWriter, r *http.Request, p *authn.
 		return
 	}
 	var in registration
-	if err := httpx.ReadJSON(r, &in); err != nil {
-		badRequest(w, "the request is not valid: "+err.Error())
+	if !readJSON(w, r, &in) {
 		return
 	}
 	user, ok := s.ownPasskeyAccount(w, r, p)
