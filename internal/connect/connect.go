@@ -24,7 +24,7 @@ type Client struct {
 	// Path is the file the configuration belongs in. It is empty for a client
 	// configured by environment variables.
 	Path string `json:"path,omitempty"`
-	// Lang is how a renderer should highlight the block: json or sh.
+	// Lang is how a renderer should highlight the block: json, toml or sh.
 	Lang string `json:"lang"`
 	// Template is the block. It carries {{base}}, {{models}}, {{aliases}}
 	// (every alias, comma-separated) and {{alias}} (the first, the default),
@@ -51,7 +51,8 @@ type Model struct {
 // The limits a client is given.
 //
 // Every client that takes a context window gets the one the catalogue
-// advertises, so an alias behaves the same in every editor. Only OpenCode gets
+// advertises, so an alias behaves the same in every editor. Codex takes one
+// window for every model, so it gets the default model's. Only OpenCode gets
 // an output length, because its schema needs one with the window; the others
 // keep their own defaults. No entry sets a temperature, because reasoning
 // models reject one.
@@ -260,6 +261,27 @@ curl "$ANTHROPIC_BASE_URL/v1/messages" \
 		Run: "Run `claude` in your project. It starts with {{alias}}. `/model <name>` " +
 			"switches to another of the models above, and `/status` shows which gateway " +
 			"and key it uses.",
+	},
+	{
+		Key:   "codex",
+		Label: "Codex",
+		About: "OpenAI's coding agent, over the Responses API.",
+		Path:  "~/.codex/config.toml",
+		Lang:  "toml",
+		Template: `# The key can use: {{aliases}}. Codex starts with this one.
+model = "{{alias}}"
+model_provider = "keera"
+model_context_window = {{context}}
+
+[model_providers.keera]
+name = "Keera"
+base_url = "{{base}}/v1"
+env_key = "KEERA_API_KEY"
+wire_api = "responses"`,
+		Note: "If the file exists, put the first three settings above its first " +
+			"`[section]`. TOML reads anything below a section as part of it.",
+		Run: "Run `codex` in your project. It starts with {{alias}}. `codex -m <name>` " +
+			"starts with another of the models above.",
 	},
 	{
 		Key:   "openai",

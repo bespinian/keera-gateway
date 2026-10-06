@@ -406,7 +406,10 @@ const providerMarks = {
 /** providerMark is a provider's logo at the size of the text beside it, or
  *  null for a provider this build has no mark for. */
 export function providerMark(name) {
-  const mark = providerMarks[String(name || "").toLowerCase()];
+  return drawMark(providerMarks[String(name || "").toLowerCase()]);
+}
+
+function drawMark(mark) {
   if (!mark) return null;
   return svg(
     "svg",
@@ -471,6 +474,36 @@ export function idpMark(name) {
     },
     svg("path", { d: mark.path }),
   );
+}
+
+/** clientMarks are the logos of coding agents that are not a provider's own,
+ *  on the same terms as providerMarks. Keyed by the client keys in
+ *  internal/connect. */
+const clientMarks = {
+  opencode: {
+    // The artwork's dark tile is left out. The frame is solid and the block
+    // inside it is the artwork's grey, as an opacity.
+    viewBox: "80 80 352 352",
+    layers: [
+      { opacity: 1, path: "M384 416H128V96H384ZM320 160H192V352H320Z" },
+      { opacity: 0.3, path: "M320 224V352H192V224Z" },
+    ],
+  },
+  pi: {
+    // The artwork's three blocks in one shade, so the two that touch become
+    // one shape with a square hole. The margin keeps a solid mark from looking
+    // bigger than the outlined ones beside it.
+    viewBox: "100 100 600 600",
+    path:
+      "M165.29 165.29H517.36V400H400V517.36H282.65V634.72H165.29Z" +
+      "M282.65 282.65V400H400V282.65Z" +
+      "M517.36 400H634.72V634.72H517.36Z",
+  },
+};
+
+/** clientMark is a client's logo, or null for one this build has no mark for. */
+export function clientMark(key) {
+  return drawMark(clientMarks[key]);
 }
 
 /* The reporting window every screen with a picker is looking at.

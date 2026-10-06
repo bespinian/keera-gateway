@@ -23,12 +23,12 @@ const maxClientName = 32
 
 // agents maps User-Agent product tokens to client keys.
 //
-// The first three have no label because the connect catalogue names them, so a
+// The first four have no label because the connect catalogue names them, so a
 // client is called the same on every screen. The rest are clients Keera does
 // not configure but can recognise. An unknown client falls back to its own
 // product token.
 //
-// The catalogue's fourth entry, openai, is not here on purpose. It is a setup
+// The catalogue's last entry, openai, is not here on purpose. It is a setup
 // that any OpenAI-compatible tool reads, not one client, so its requests are
 // filed under the tool that sends them: Aider, the OpenAI SDK, curl. A client
 // that states "openai" is the OpenAI SDK, like the SDK's own User-Agent.
@@ -46,7 +46,7 @@ var agents = []struct {
 	{key: "pi", products: []string{"pi", "pi-agent"}},
 	{key: "opencode", products: []string{"opencode"}},
 	{key: "claude-code", products: []string{"claude-cli", "claude-code"}},
-	{key: "codex", label: "Codex", products: []string{"codex", "codex-cli", "codex_cli_rs"}},
+	{key: "codex", products: []string{"codex", "codex-cli", "codex_cli_rs"}},
 	{key: "aider", label: "Aider", products: []string{"aider"}},
 	{key: "keera", label: "Keera CLI", products: []string{"keera", "keera-cli"}},
 	// The panel's playground states its name in the header. Its User-Agent is

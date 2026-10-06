@@ -73,7 +73,7 @@ func TestEveryClientIsCompleteEnoughToRender(t *testing.T) {
 		if c.Key == "" || c.Label == "" || c.About == "" || c.Template == "" || c.Run == "" {
 			t.Errorf("%q is missing a key, label, about, template or run", c.Key)
 		}
-		if c.Lang != "json" && c.Lang != "sh" {
+		if c.Lang != "json" && c.Lang != "toml" && c.Lang != "sh" {
 			t.Errorf("%s has lang %q, which no renderer highlights", c.Key, c.Lang)
 		}
 		// Every block has to name the gateway and the key's models. One that
@@ -120,10 +120,44 @@ func TestConfigsReadTheKeyFromTheEnvironment(t *testing.T) {
 	}
 }
 
+// TOML has no parser in the standard library, so this checks what a hand-edited
+// template gets wrong: a line that is neither a section nor a setting, and, for
+// Codex, a top-level setting below a section, which TOML reads as part of it.
+func TestTOMLTemplatesRenderToTOML(t *testing.T) {
+	for _, c := range Clients() {
+		if c.Lang != "toml" {
+			continue
+		}
+		for line := range strings.Lines(c.Render("https://keera.example.ch", two)) {
+			line = strings.TrimSpace(line)
+			switch {
+			case line == "" || strings.HasPrefix(line, "#"):
+			case strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]"):
+			case strings.Contains(line, " = "):
+			default:
+				t.Errorf("%s renders a line that is not TOML: %q", c.Key, line)
+			}
+		}
+	}
+	codex, _ := Find(Clients(), "codex")
+	rendered := codex.Render("https://keera.example.ch", two)
+	top, _, _ := strings.Cut(rendered, "\n[")
+	for _, want := range []string{`model = "keera-code"`, `model_provider = "keera"`,
+		"model_context_window = 32768"} {
+		if !strings.Contains(top, want) {
+			t.Errorf("codex does not set %s above its first section:\n%s", want, rendered)
+		}
+	}
+	if !strings.Contains(rendered, `base_url = "https://keera.example.ch/v1"`) ||
+		!strings.Contains(rendered, `wire_api = "responses"`) {
+		t.Errorf("codex is not pointed at the gateway's Responses API:\n%s", rendered)
+	}
+}
+
 // A client configured by a file says which file, and one configured by the
 // environment says nothing rather than guessing at a shell profile.
 func TestAFileClientNamesItsFile(t *testing.T) {
-	for _, key := range []string{"opencode", "pi"} {
+	for _, key := range []string{"opencode", "pi", "codex"} {
 		c, found := Find(Clients(), key)
 		if !found {
 			t.Fatalf("no client %s", key)
@@ -275,6 +309,7 @@ func TestOnlyOpenCodeStatesAnAnswerLength(t *testing.T) {
 		rendered := c.Render("https://keera.example.ch", []Model{{Alias: "keera-code", MaxContext: 200_000}})
 		stated := strings.Contains(rendered, "maxTokens") ||
 			strings.Contains(rendered, "MAX_OUTPUT_TOKENS") ||
+			strings.Contains(rendered, "max_output_tokens") ||
 			strings.Contains(rendered, `"output"`)
 		if want := c.Key == "opencode"; stated != want {
 			t.Errorf("%s states an answer length: %v, want %v\n%s", c.Key, stated, want, rendered)

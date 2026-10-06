@@ -25,6 +25,7 @@ import {
   toast,
   modeTiles,
   modal,
+  clientMark,
   providerMark,
   currentRange,
   rangePicker,
@@ -331,7 +332,10 @@ async function addClient(ctx, catalogue, keys, button) {
 // clientMarks are the vendors' own logos, for the clients that have one here.
 const clientMarks = {
   "claude-code": () => providerMark("anthropic"),
+  codex: () => providerMark("openai"),
   openai: () => providerMark("openai"),
+  opencode: () => clientMark("opencode"),
+  pi: () => clientMark("pi"),
 };
 
 /** modelList names the models a configuration sets up, with their windows. */

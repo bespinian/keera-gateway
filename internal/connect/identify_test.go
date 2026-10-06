@@ -100,8 +100,8 @@ func TestClientLabelAgreesWithTheCatalogue(t *testing.T) {
 			t.Errorf("ClientLabel(%q) = %q, but the catalogue calls it %q", c.Key, got, c.Label)
 		}
 	}
-	if got := ClientLabel("codex"); got != "Codex" {
-		t.Errorf("ClientLabel(codex) = %q, want its own label", got)
+	if got := ClientLabel("aider"); got != "Aider" {
+		t.Errorf("ClientLabel(aider) = %q, want its own label", got)
 	}
 	// An unrecognised client is shown under the name it gave, which is more
 	// use than "other".

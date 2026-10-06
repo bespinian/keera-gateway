@@ -31,7 +31,7 @@ request, logs it and passes it on.
        Your tools                          Keera Gateway                          Models
 ┌───────────────────────┐         ┌─────────────────────────────┐         ┌─────────────────────┐
 │ Claude Code           │         │ 1  Identify the key, its    │         │ Keera Engine on     │
-│ OpenCode, Pi          │         │    project and organisation │         │ vLLM, on your GPUs  │
+│ Codex, OpenCode, Pi   │         │    project and organisation │         │ vLLM, on your GPUs  │
 │ Internal apps         │  HTTPS  │ 2  Apply guardrails,        │         │ or Swiss ones       │
 │ Notebooks and CI jobs │────────▶│    budget, rate limit       │────────▶│                     │
 │ any OpenAI client     │         │ 3  Filter secrets and       │         │ Anthropic and other │
