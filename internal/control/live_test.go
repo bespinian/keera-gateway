@@ -1,7 +1,11 @@
 package control
 
 import (
+	"slices"
 	"testing"
+	"time"
+
+	"github.com/bespinian/keera-gateway/internal/store"
 )
 
 // The feed is what turns one database notification into every open reader's
@@ -88,4 +92,59 @@ func TestDrainEndsEveryStreamAndIsSafeTwice(t *testing.T) {
 	// Shutdown can be reached more than once - a signal, then a listener error.
 	// Closing a closed channel panics, so this is the test that it cannot.
 	s.Drain()
+}
+
+// The cursor has to catch a row that is committed after a newer one, which is
+// what happens when several replicas write the log.
+
+func rowsOf(ids ...int64) []store.Request {
+	rows := make([]store.Request, len(ids))
+	for i, id := range ids {
+		rows[i] = store.Request{ID: id}
+	}
+	return rows
+}
+
+func TestCursorReadsAgainForARowCommittedLate(t *testing.T) {
+	now := time.Now()
+	c := newLiveCursor(100)
+
+	// Rows 103 and 102 are in; 101 is still in a batch that has not committed.
+	c.took(rowsOf(103, 102), streamRows, now)
+	q := c.query(store.RequestQuery{})
+	if q.After != 100 {
+		t.Errorf("After = %d, want 100: row 101 can still appear", q.After)
+	}
+	if !slices.Equal(slices.Sorted(slices.Values(q.Skip)), []int64{102, 103}) {
+		t.Errorf("Skip = %v, want the rows already sent", q.Skip)
+	}
+	if c.newest != 103 {
+		t.Errorf("newest = %d, want 103", c.newest)
+	}
+}
+
+func TestCursorSettlesOnceEveryBatchHasCommitted(t *testing.T) {
+	now := time.Now()
+	c := newLiveCursor(100)
+	c.took(rowsOf(103, 102), streamRows, now)
+	c.took(rowsOf(105), streamRows, now.Add(time.Second))
+
+	c.settle(now.Add(streamSettle))
+	q := c.query(store.RequestQuery{})
+	if q.After != 103 {
+		t.Errorf("After = %d, want 103: everything up to it has committed by now", q.After)
+	}
+	if !slices.Equal(q.Skip, []int64{105}) {
+		t.Errorf("Skip = %v, want only what was sent past the settled id", q.Skip)
+	}
+}
+
+func TestCursorLetsAFullBatchsBacklogGo(t *testing.T) {
+	// A reader that fell behind is sent the newest rows, not the backlog.
+	now := time.Now()
+	c := newLiveCursor(0)
+	c.took(rowsOf(300, 299, 298), 3, now)
+	if q := c.query(store.RequestQuery{}); q.After != 298 || !slices.Equal(q.Skip, []int64{300, 299}) {
+		t.Errorf("After = %d, Skip = %v; want 298 and the two newer rows", q.After, q.Skip)
+	}
 }

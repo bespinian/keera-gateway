@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -39,6 +40,10 @@ const (
 	streamRecount = time.Minute
 	// feedRetry is how long a dropped listener waits before reconnecting.
 	feedRetry = 2 * time.Second
+	// streamSettle is how long a stream keeps reading behind its newest row
+	// for rows committed late. A batch commits or fails within the usage
+	// recorder's write timeout of ten seconds; this leaves room.
+	streamSettle = 30 * time.Second
 )
 
 // requestFeed fans one notification out to every stream open in this process.
@@ -204,6 +209,7 @@ func (s *Server) streamRequests(ctx context.Context, w http.ResponseWriter,
 	// Look once before waiting. A stream reopened after a pause has a backlog,
 	// which would otherwise wait for the next request to arrive.
 	grown := true
+	cur := newLiveCursor(rq.After)
 	var tally outcomeTally
 	for {
 		select {
@@ -224,28 +230,97 @@ func (s *Server) streamRequests(ctx context.Context, w http.ResponseWriter,
 				continue
 			}
 			grown = false
-			if !s.sendRequests(ctx, w, rc, rq, names, &tally, orgID, since) {
+			if !s.sendRequests(ctx, w, rc, rq, cur, names, &tally, orgID, since) {
 				return
 			}
 		}
 	}
 }
 
+// liveCursor is where a stream is in the log.
+//
+// A row gets its id when it is inserted, but readers see it only once its
+// batch commits. With several replicas writing, one batch can commit after a
+// later one, so a row can appear behind the newest one already sent. So a
+// stream reads again from settled, behind which every batch has committed,
+// and skips the rows it sent since.
+type liveCursor struct {
+	// settled is the id up to which nothing can still appear.
+	settled int64
+	// newest is the newest id sent, which a reconnecting reader resumes from.
+	newest int64
+	// sent is the ids sent past settled.
+	sent []int64
+	// seen is newest as it was at each batch, oldest first. Every row up to
+	// one of these ids has committed streamSettle later.
+	seen []seenID
+}
+
+type seenID struct {
+	id int64
+	at time.Time
+}
+
+func newLiveCursor(after int64) *liveCursor {
+	return &liveCursor{settled: after, newest: after}
+}
+
+// query narrows rq to the rows this stream has not sent yet.
+func (c *liveCursor) query(rq store.RequestQuery) store.RequestQuery {
+	rq.After, rq.Skip = c.settled, c.sent
+	return rq
+}
+
+// settle moves settled up to the newest id seen streamSettle ago, and forgets
+// what was sent behind it.
+func (c *liveCursor) settle(now time.Time) {
+	n := 0
+	for n < len(c.seen) && now.Sub(c.seen[n].at) >= streamSettle {
+		c.settled = max(c.settled, c.seen[n].id)
+		n++
+	}
+	c.seen = slices.Delete(c.seen, 0, n)
+	c.forget()
+}
+
+// took records a batch sent at now. Rows come newest first.
+func (c *liveCursor) took(rows []store.Request, limit int, now time.Time) {
+	for _, r := range rows {
+		c.sent = append(c.sent, r.ID)
+		c.newest = max(c.newest, r.ID)
+	}
+	c.seen = append(c.seen, seenID{c.newest, now})
+	// A full batch means the reader fell behind. The older rows that did not
+	// fit are not sent later: a tail that fell behind stays behind.
+	if len(rows) >= limit {
+		c.settled = max(c.settled, rows[len(rows)-1].ID)
+		c.forget()
+	}
+}
+
+func (c *liveCursor) forget() {
+	c.sent = slices.DeleteFunc(c.sent, func(id int64) bool { return id <= c.settled })
+}
+
 // outcomeTally is one stream's running outcome counts.
 type outcomeTally struct {
-	counts store.RequestOutcomes
-	// upTo is the newest id the counts include, and at when the whole window
-	// was last counted. A zero at means nothing was counted yet.
+	// base counts the window up to upTo, a settled id, so no late row can
+	// change it. at is when the whole window was last counted; a zero at
+	// means nothing was counted yet.
+	base store.RequestOutcomes
 	upTo int64
 	at   time.Time
 }
 
-// sendRequests writes the rows past the cursor, moving the cursor and
-// refreshing the labels as needed. It reports whether the stream can go on.
+// sendRequests writes the rows the stream has not sent yet, moving the cursor
+// and refreshing the labels as needed. It reports whether the stream can go
+// on.
 func (s *Server) sendRequests(ctx context.Context, w http.ResponseWriter,
-	rc *http.ResponseController, rq *store.RequestQuery, names *groupLabels,
-	tally *outcomeTally, orgID, since string) bool {
-	rows, err := s.st.Requests(ctx, *rq)
+	rc *http.ResponseController, rq *store.RequestQuery, cur *liveCursor,
+	names *groupLabels, tally *outcomeTally, orgID, since string) bool {
+	now := time.Now()
+	cur.settle(now)
+	rows, err := s.st.Requests(ctx, cur.query(*rq))
 	if err != nil {
 		if ctx.Err() == nil {
 			s.log.Warn("reading the live request log failed", "error", err)
@@ -255,12 +330,10 @@ func (s *Server) sendRequests(ctx context.Context, w http.ResponseWriter,
 	if len(rows) == 0 {
 		return true
 	}
-	// Newest first, so the first id is the new cursor. Older rows that did not
-	// fit are not resent: a tail that fell behind stays behind, and the counts
-	// are not built from these rows, so they stay right.
-	rq.After = rows[0].ID
+	cur.took(rows, rq.Limit, now)
 
-	if err := s.countOutcomes(ctx, rq, tally, since); err != nil {
+	counts, err := s.countOutcomes(ctx, *rq, cur.settled, tally, since)
+	if err != nil {
 		if ctx.Err() == nil {
 			s.log.Warn("counting the live request log failed", "error", err)
 		}
@@ -268,7 +341,7 @@ func (s *Server) sendRequests(ctx context.Context, w http.ResponseWriter,
 	}
 
 	out := map[string]any{
-		"data": rows, "outcomes": tally.counts, "next_after": rq.After,
+		"data": rows, "outcomes": counts, "next_after": cur.newest,
 	}
 	// A brand-new key is the one someone is most likely watching for, and its
 	// name is not in the labels yet. So the labels are re-read, and sent, only
@@ -294,36 +367,47 @@ func (s *Server) sendRequests(ctx context.Context, w http.ResponseWriter,
 	return true
 }
 
-// countOutcomes brings the tally up to the cursor. Both ends are bounded by
-// id, so each row is counted once, even when a batch sends only some of them.
-func (s *Server) countOutcomes(ctx context.Context, rq *store.RequestQuery,
-	tally *outcomeTally, since string) error {
+// countOutcomes counts the stream's window. The part up to settled is kept in
+// the tally and only grows. The rows past it are counted again each time,
+// because a late commit can still add to them.
+func (s *Server) countOutcomes(ctx context.Context, rq store.RequestQuery, settled int64,
+	tally *outcomeTally, since string) (store.RequestOutcomes, error) {
 	q := store.RequestQuery{
 		OrgID: rq.OrgID, ReportScope: rq.ReportScope,
 		Status: rq.Status, StatusClass: rq.StatusClass,
-		Before: rq.After + 1,
 	}
 	now := time.Now()
-	if tally.at.IsZero() || now.Sub(tally.at) >= streamRecount {
+	switch {
+	case tally.at.IsZero() || now.Sub(tally.at) >= streamRecount:
 		// The window moves with the clock, so a stream left open overnight
-		// counts the last 24 hours. Its end is the cursor, not the clock. The
-		// error cannot happen: reportScope already checked this string.
-		q.From, _, _ = timeRange("", "", since)
-		counts, err := s.st.Outcomes(ctx, q)
+		// counts the last 24 hours. The error cannot happen: reportScope
+		// already checked this string.
+		whole := q
+		whole.From, _, _ = timeRange("", "", since)
+		whole.Before = settled + 1
+		base, err := s.st.Outcomes(ctx, whole)
 		if err != nil {
-			return err
+			return store.RequestOutcomes{}, err
 		}
-		*tally = outcomeTally{counts: counts, upTo: rq.After, at: now}
-		return nil
+		*tally = outcomeTally{base: base, upTo: settled, at: now}
+	case settled > tally.upTo:
+		step := q
+		step.After, step.Before = tally.upTo, settled+1
+		more, err := s.st.Outcomes(ctx, step)
+		if err != nil {
+			return store.RequestOutcomes{}, err
+		}
+		tally.base.Add(more)
+		tally.upTo = settled
 	}
-	q.After = tally.upTo
-	counts, err := s.st.Outcomes(ctx, q)
+	recent := q
+	recent.After = settled
+	counts, err := s.st.Outcomes(ctx, recent)
 	if err != nil {
-		return err
+		return store.RequestOutcomes{}, err
 	}
-	tally.counts.Add(counts)
-	tally.upTo = rq.After
-	return nil
+	counts.Add(tally.base)
+	return counts, nil
 }
 
 // unnamed reports whether any row names a key, project or person the labels cannot

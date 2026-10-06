@@ -571,11 +571,12 @@ export async function requestLog(
         ctx.reload();
         return;
       }
-      // The batch arrives newest first and the table reads the same way, so
-      // they go on in the other order to keep the newest at the top.
-      for (const q of fresh.slice().reverse()) {
+      // The table reads newest first. A row that was committed late is older
+      // than some already shown, so each goes in where its id belongs.
+      for (const q of fresh) {
         q.fresh = true;
-        rows.unshift(q);
+        const at = rows.findIndex((r) => r.id < q.id);
+        rows.splice(at < 0 ? rows.length : at, 0, q);
       }
       log.redraw();
       // The mark comes off after a moment, and the table is drawn again so that

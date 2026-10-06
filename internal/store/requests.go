@@ -140,10 +140,13 @@ type RequestQuery struct {
 	// recorded since the last row shown. The id is used, not a timestamp,
 	// because two requests can share a timestamp.
 	After int64
+	// Skip leaves out rows a live reader already has. A reader that reads
+	// past After again, for rows that were committed late, needs it.
+	Skip  []int64
 	Limit int
 }
 
-// where is the condition on everything in q but the outcome, on $1 to $11.
+// where is the condition on everything in q but the outcome, on $1 to $12.
 func (q RequestQuery) where() string {
 	return `($1 = '' OR org_id = $1)
 		  AND ($2::timestamptz IS NULL OR ts >= $2)
@@ -151,13 +154,14 @@ func (q RequestQuery) where() string {
 		  AND ($4 = 0 OR status = $4)
 		  AND ($5 = 0 OR status / 100 = $5)
 		  AND ($6 = 0 OR id < $6)
-		  AND ($7 = 0 OR id > $7)` + q.narrow("", 7)
+		  AND ($7 = 0 OR id > $7)
+		  AND ($8::bigint[] IS NULL OR id <> ALL($8))` + q.narrow("", 8)
 }
 
 // whereArgs are the values where refers to.
 func (q RequestQuery) whereArgs() []any {
 	return append([]any{q.OrgID, nullableTime(q.From), nullableTime(q.To), q.Status,
-		q.StatusClass, q.Before, q.After}, q.args()...)
+		q.StatusClass, q.Before, q.After, q.Skip}, q.args()...)
 }
 
 // Requests returns the matching rows, newest first.
@@ -167,7 +171,7 @@ func (s *Store) Requests(ctx context.Context, q RequestQuery) ([]Request, error)
 	rows, err := s.pool.Query(ctx, `SELECT `+requestColumns+`
 		FROM usage_events
 		WHERE `+outcomeClause(q.Outcome)+` AND `+q.where()+`
-		ORDER BY id DESC LIMIT $12`,
+		ORDER BY id DESC LIMIT $13`,
 		append(q.whereArgs(), pageLimit(q.Limit, 100, 5000))...)
 	if err != nil {
 		return nil, err

@@ -122,6 +122,77 @@ func TestRequestStreamCarriesARequestAsItIsRecorded(t *testing.T) {
 	}
 }
 
+func TestRequestStreamCarriesARowCommittedAfterANewerOne(t *testing.T) {
+	// Two replicas writing the log: one has inserted a row and not committed
+	// yet, the other inserts after it and commits first. The stream sees the
+	// newer row first and must still send the older one when it lands.
+	st, ctx := streamStore(t)
+	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_1", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
+		t.Fatalf("CreateOrg: %v", err)
+	}
+	srv := New(st, nil, nil, nil, Options{OperatorKey: testOperatorKey, Currency: "CHF"},
+		slog.New(slog.DiscardHandler))
+	listen, stopListening := context.WithCancel(ctx)
+	defer stopListening()
+	go srv.Run(listen)
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	slow, err := st.Pool().Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	defer func() { _ = slow.Rollback(context.WithoutCancel(ctx)) }()
+
+	// The stream starts at the log's end, so it opens before the slow row is
+	// inserted. The slow row then has the lower id.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		ts.URL+httpx.ControlPrefix+"/v1/requests/stream?org_id=org_1&since=24h", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+testOperatorKey)
+	res, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatalf("opening the stream: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	events := readEvents(res.Body)
+
+	if _, err := slow.Exec(ctx, `INSERT INTO usage_events (org_id, alias, status, latency_ms)
+		VALUES ('org_1', 'keera-late', 200, 0)`); err != nil {
+		t.Fatalf("inserting the slow row: %v", err)
+	}
+
+	// As in the test above, the write is retried until the listener is on.
+	done := make(chan struct{})
+	go func() {
+		for {
+			_ = st.WriteEvents(ctx, []store.Event{{
+				TS: time.Now(), OrgID: "org_1", Alias: "keera-code", Status: 200,
+			}})
+			select {
+			case <-done:
+				return
+			case <-time.After(200 * time.Millisecond):
+			}
+		}
+	}()
+	awaitAlias(t, events, "keera-code")
+	close(done)
+
+	if err := slow.Commit(ctx); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if err := st.WriteEvents(ctx, []store.Event{{
+		TS: time.Now(), OrgID: "org_1", Alias: "keera-code", Status: 200,
+	}}); err != nil {
+		t.Fatalf("WriteEvents: %v", err)
+	}
+	awaitAlias(t, events, "keera-late")
+}
+
 func TestRequestStreamIsAdministratorOnly(t *testing.T) {
 	// The rows name other people's keys and carry text the inference plane
 	// wrote, so this is held to what the log itself is held to - and it is a
@@ -187,5 +258,51 @@ func awaitEvent(t *testing.T, body interface{ Read([]byte) (int, error) },
 		t.Fatal("no request reached the stream; a panel watching this log would " +
 			"have shown nothing")
 		return batch{}
+	}
+}
+
+// readEvents reads the requests events of a stream as they come.
+func readEvents(body interface{ Read([]byte) (int, error) }) <-chan batch {
+	out := make(chan batch, 64)
+	go func() {
+		defer close(out)
+		sc := bufio.NewScanner(body)
+		sc.Buffer(make([]byte, 0, 64*1024), 4<<20)
+		named := false
+		for sc.Scan() {
+			line := sc.Text()
+			switch {
+			case line == "event: requests":
+				named = true
+			case named && strings.HasPrefix(line, "data: "):
+				named = false
+				var b batch
+				if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &b) == nil {
+					out <- b
+				}
+			}
+		}
+	}()
+	return out
+}
+
+// awaitAlias waits for a row of that model to arrive on the stream.
+func awaitAlias(t *testing.T, events <-chan batch, alias string) {
+	t.Helper()
+	deadline := time.After(30 * time.Second)
+	for {
+		select {
+		case b, ok := <-events:
+			if !ok {
+				t.Fatalf("the stream ended before a %s row arrived", alias)
+			}
+			for _, r := range b.Data {
+				if r.Alias == alias {
+					return
+				}
+			}
+		case <-deadline:
+			t.Fatalf("no %s row reached the stream", alias)
+		}
 	}
 }
