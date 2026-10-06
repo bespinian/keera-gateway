@@ -291,6 +291,32 @@ models:
 	}
 }
 
+// CSCS bills cached input at the input price, so there is no cache rate.
+func TestCSCSProviderFillsInEverythingButTheAlias(t *testing.T) {
+	const in = `
+models:
+  - alias: keera-swiss-coder
+    provider: cscs
+    backend_model: moonshotai/Kimi-K2.7-Code
+`
+	models, err := parseModelFile([]byte(in))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	m := models[0]
+	if got, want := m.Backends, []string{"https://api.inference.cscs.ch/v1"}; len(got) != 1 || got[0] != want[0] {
+		t.Errorf("Backends = %v, want %v", got, want)
+	}
+	if m.Location != "ch" || m.MaxContext != 262_144 {
+		t.Errorf("location, context = %q, %d, want ch, 262144", m.Location, m.MaxContext)
+	}
+	if m.InputMicrosPerMTok != 1_300_000 || m.OutputMicrosPerMTok != 6_050_000 ||
+		m.CachedInputMicrosPerMTok != 0 {
+		t.Errorf("prices = %d/%d/%d, want the list's 1.30/6.05 CHF and no cache rate",
+			m.InputMicrosPerMTok, m.OutputMicrosPerMTok, m.CachedInputMicrosPerMTok)
+	}
+}
+
 // TestProviderTableIsUsable checks what every entry needs for a catalogue to
 // name it, so a new provider cannot ship a broken URL or an unbillable model.
 func TestProviderTableIsUsable(t *testing.T) {

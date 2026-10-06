@@ -1,15 +1,15 @@
 # Hosted models
 
 A hosted model runs outside your infrastructure: at Anthropic, OpenAI,
-Infomaniak, stepping stone, Phoeniqs, or any other endpoint that speaks the
-OpenAI API.
+Infomaniak, stepping stone, Phoeniqs, CSCS, or any other endpoint that speaks
+the OpenAI API.
 
 **Prompts sent to a hosted model leave your infrastructure.** Treat it as a
 deliberate exception. This page covers what to weigh before you offer one and
 how to keep it contained.
 
-Infomaniak, stepping stone and Phoeniqs serve open-weight models from their own
-data centres in Switzerland, so those prompts stay under Swiss law. Prompts to
+Infomaniak, stepping stone, Phoeniqs and CSCS serve open-weight models from
+their own data centres in Switzerland, so those prompts stay under Swiss law. Prompts to
 Anthropic and OpenAI do not. Everything below applies to all of them.
 
 ## Why offer one at all
@@ -43,16 +43,16 @@ models:
 `provider` fills in every field the entry leaves out: the endpoint, the context
 window, the three prices (input, output and cached input), a description, the
 release date and the location. The providers are `anthropic`, `openai`,
-`infomaniak`, `stepping-stone` and `phoeniqs`; `keera model providers` lists
-them with their models. For a `backend_model` not in that table, the entry must set
-`input_micros_per_mtok` and `output_micros_per_mtok` itself. A model the table
-names without a date, such as `claude-haiku-4-5`, may also be named by its
-dated id, `claude-haiku-4-5-20251001`.
+`infomaniak`, `stepping-stone`, `phoeniqs` and `cscs`; `keera model providers`
+lists them with their models. For a `backend_model` not in that table, the entry
+must set `input_micros_per_mtok` and `output_micros_per_mtok` itself. A model
+the table names without a date, such as `claude-haiku-4-5`, may also be named by
+its dated id, `claude-haiku-4-5-20251001`.
 
 The location is where the provider serves its models: `ch` for Infomaniak,
-stepping stone and Phoeniqs, `usa` for Anthropic and OpenAI. A model with no provider is
-`onprem` when its backend is inside your network: a service name, a private
-address or the loopback. A backend on the internet does not say which country
+stepping stone, Phoeniqs and CSCS, `usa` for Anthropic and OpenAI. A model with
+no provider is `onprem` when its backend is inside your network: a service name,
+a private address or the loopback. A backend on the internet does not say which country
 it is in, so an entry for one must set `location` itself.
 
 The entry always wins over the provider table. So you can point
@@ -173,7 +173,7 @@ Each model has three prices: input, output, and cached input (an input token
 the provider served from its prompt cache).
 
 - **The currency may not be yours.** Anthropic and OpenAI are in USD, Infomaniak,
-  stepping stone and Phoeniqs in CHF. Nothing is converted. Override the prices on the
+  stepping stone, Phoeniqs and CSCS in CHF. Nothing is converted. Override the prices on the
   entry.
 - **List price is not your price.** Put a negotiated rate, a discount or an
   internal cross-charge on the entry.
@@ -193,7 +193,7 @@ provider's console.
 stepping stone publishes a cache rate too. The gateway charges it for whatever
 the response reports as cached; see [stepping stone](#stepping-stone).
 
-Infomaniak and Phoeniqs publish no cache discount. Their cached column is empty and every
+Infomaniak, Phoeniqs and CSCS publish no cache discount. Their cached column is empty and every
 input token is charged at the input price. That is correct, not a gap.
 
 This price matters most. A coding agent resends its whole context on every
@@ -355,6 +355,34 @@ embedding, re-ranking, OCR and speech models on the same endpoint. Declare one
 with no `provider`, `kind: embedding`, the endpoint in `backends`,
 `location: ch`, and its own prices. DeepSeek OCR is left out because Phoeniqs
 publishes no context window for it.
+
+### CSCS
+
+The Swiss National Supercomputing Centre's inference service is documented on
+[docs.cscs.ch](https://docs.cscs.ch/services/inference/api/).
+
+**A key needs a CSCS project.** The project needs an inference resource. A
+project member then makes a key in the
+[CSCS Inference API UI](https://ui.inference.cscs.ch/login).
+
+**The prices are for academia.** The table has CSCS's pay-per-use fees for
+academia, from its [pricing page](https://ui.inference.cscs.ch/pricing). Your
+project may pay a different rate; set it on the entry.
+
+**No prompt cache is priced.** CSCS bills cached input at the full input price.
+See [Cached input](#cached-input).
+
+**The `-thinking` Apertus models take no tool calls.** A coding agent sends
+tools with every request, so it fails on them. Use them for chat only.
+
+**Model ids are the upstream projects' own names**, with capitals, as for
+Infomaniak.
+
+**It runs from one site.** CSCS warns of pauses for incidents and maintenance,
+and posts them on [inference.status.cscs.ch](https://inference.status.cscs.ch).
+
+**The table covers the chat models only.** CSCS also has an embeddings endpoint
+but publishes no embedding model or price for it.
 
 ## What is recorded
 

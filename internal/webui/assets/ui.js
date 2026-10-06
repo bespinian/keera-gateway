@@ -334,6 +334,8 @@ export const icons = {
  *  pill it sits in through both themes, which a brand SVG with its own
  *  near-black fill does not. Each keeps the artwork's own viewBox. A mark
  *  about twice as wide as it is tall sets `wide`, so a pill draws it smaller.
+ *  A mark whose artwork needs more than one shade has `layers` instead of
+ *  `path`: paths that do not overlap, each at its own opacity.
  *
  *  Keyed by the provider names in internal/catalog/providers.go. A provider
  *  with no mark here is not an error - providerMark draws nothing. The source
@@ -344,6 +346,34 @@ const providerMarks = {
   anthropic: {
     viewBox: "0 0 35 24",
     path: "M 24.547 0 L 19.338 0 L 28.837997 24 L 34.047 24 Z M 9.499 0 L 0 24 L 5.311 24 L 7.254 18.96 L 17.191 18.96 L 19.134 24 L 24.445 24 L 14.946001 0 Z M 8.972 14.503 L 12.222001 6.069 L 15.473999 14.503 Z",
+  },
+  cscs: {
+    viewBox: "0 0 76.502 52.377",
+    // The source artwork is five colours, some of them drawn over others.
+    // Each colour is one path here, with what lay under another cut out, so
+    // the shades can be opacities without the overlaps showing through.
+    layers: [
+      {
+        opacity: 0.3,
+        path: "M34.364 0 26.182 0 15.953 10.228 24.136 10.228ZM18.411 15.959 10.228 15.959 0.004 26.184 8.182 26.188ZM29.864 36.415 26.182 36.415 23.932 34.165 15.953 42.143 24.136 42.143Z",
+      },
+      {
+        opacity: 0.55,
+        path: "M15.953 10.228 23.932 18.209 26.182 15.959 29.865 15.959 24.136 10.228ZM10.228 36.415 18.411 36.415 8.182 26.188 0 26.184ZM26.182 52.375 34.364 52.375 24.136 42.143 15.953 42.143Z",
+      },
+      {
+        opacity: 0.6,
+        path: "M50.321 0 42.135 0 31.911 10.228 40.093 10.228ZM26.182 15.959 15.957 26.184 24.136 26.188 34.364 15.959ZM58.095 15.959 47.87 26.184 56.048 26.188 66.276 15.959ZM42.14 31.915 31.911 42.143 40.093 42.143 50.321 31.915Z",
+      },
+      {
+        opacity: 0.8,
+        path: "M42.14 20.46 50.321 20.46 40.093 10.228 31.911 10.228ZM26.182 36.415 34.364 36.415 24.136 26.188 15.953 26.184ZM58.095 36.415 66.276 36.415 56.048 26.188 47.866 26.184ZM31.911 42.143 42.14 52.375 50.321 52.375 40.093 42.143Z",
+      },
+      {
+        opacity: 1,
+        path: "M50.319 0.004 40.095 10.23 50.322 20.461 60.549 10.231ZM24.136 26.188 34.362 36.413 44.588 26.184 34.363 15.96ZM56.048 26.188 66.275 36.415 76.502 26.188 66.275 15.961ZM40.095 42.145 50.321 52.375 50.318 52.375 50.32 52.377 60.547 42.147 50.317 31.92Z",
+      },
+    ],
   },
   infomaniak: {
     viewBox: "0 0 24 24",
@@ -386,7 +416,11 @@ export function providerMark(name) {
       fill: "currentColor",
       "aria-hidden": "true",
     },
-    svg("path", { d: mark.path, "fill-rule": mark.fillRule || null }),
+    mark.layers
+      ? mark.layers.map((l) =>
+          svg("path", { d: l.path, "fill-opacity": l.opacity }),
+        )
+      : svg("path", { d: mark.path, "fill-rule": mark.fillRule || null }),
   );
 }
 

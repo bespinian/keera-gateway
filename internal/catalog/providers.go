@@ -79,8 +79,8 @@ type ProviderModel struct {
 // announcement. An FP8 build takes the day of the model it was made from.
 //
 // Last checked against each pricing page: Anthropic on 2026-09-22, Infomaniak on
-// 2026-09-21, stepping stone against its offer of 2026-09-25, and OpenAI and
-// Phoeniqs on 2026-09-29. This is not a live price feed, so a price cut
+// 2026-09-21, stepping stone against its offer of 2026-09-25, OpenAI and
+// Phoeniqs on 2026-09-29, and CSCS on 2026-10-06. This is not a live price feed, so a price cut
 // since then is over-charged until somebody rebuilds.
 //
 // Retired models are dropped before their retirement date, because a row for
@@ -523,6 +523,79 @@ var providers = []Provider{{
 		"Only chat, vision and document-parsing models are listed: declare an " +
 		"embedding model with no provider, its address, its location and its " +
 		"prices. " +
+		"Prices are in CHF.",
+}, {
+	Name:     "cscs",
+	Summary:  "Open-weight models at the Swiss National Supercomputing Centre.",
+	Endpoint: "https://api.inference.cscs.ch/v1",
+	Location: "ch",
+	Currency: "CHF",
+	Kinds:    []policy.Kind{policy.KindChat},
+	// Ids are the upstream names, capitals and all, as the endpoint expects.
+	// A -thinking id is the same weights with reasoning on and tool calls off,
+	// so it keeps the release date of its model.
+	Models: []ProviderModel{{
+		ID: "moonshotai/Kimi-K2.7-Code", MaxContext: 262_144, ReleaseDate: "2026-06-12",
+		InputMicrosPerMTok: 1_300_000, OutputMicrosPerMTok: 6_050_000,
+		Description: "made for code and the one to reach for first - long agent " +
+			"sessions over many files, reads images too",
+	}, {
+		ID: "zai-org/GLM-5.2", MaxContext: 976_000, ReleaseDate: "2026-08-28",
+		InputMicrosPerMTok: 6_360_000, OutputMicrosPerMTok: 27_310_000,
+		Description: "capable all-rounder over the longest context here, and by " +
+			"far the dearest - about five times Kimi's price",
+	}, {
+		ID: "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16", MaxContext: 262_144, ReleaseDate: "2026-03-11",
+		InputMicrosPerMTok: 300_000, OutputMicrosPerMTok: 1_490_000,
+		Description: "large reasoning model, quick and cheap - hard questions and " +
+			"tool use over a long context",
+	}, {
+		ID: "google/gemma-4-31B-it", MaxContext: 262_144, ReleaseDate: "2026-04-02",
+		InputMicrosPerMTok: 60_000, OutputMicrosPerMTok: 420_000,
+		Description: "middling power, quick and very cheap, reads images too - " +
+			"documents, chatbots and ordinary code",
+	}, {
+		ID: "swiss-ai/Apertus-v1.5-70B", MaxContext: 262_144, ReleaseDate: "2026-07-24",
+		InputMicrosPerMTok: 60_000, OutputMicrosPerMTok: 400_000,
+		Description: "middling power and very cheap, with open weights and open " +
+			"training data - auditable work",
+	}, {
+		ID: "swiss-ai/Apertus-v1.5-70B-thinking", MaxContext: 262_144, ReleaseDate: "2026-07-24",
+		InputMicrosPerMTok: 60_000, OutputMicrosPerMTok: 400_000,
+		Description: "Apertus-v1.5-70B reasoning before it answers, with no tool " +
+			"calls - hard questions, not agents",
+	}, {
+		ID: "swiss-ai/Apertus-v1.5-8B", MaxContext: 262_144, ReleaseDate: "2026-07-24",
+		InputMicrosPerMTok: 10_000, OutputMicrosPerMTok: 40_000,
+		Description: "the smallest and cheapest here, with open weights and open " +
+			"training data - simple work",
+	}, {
+		ID: "swiss-ai/Apertus-v1.5-8B-thinking", MaxContext: 262_144, ReleaseDate: "2026-07-24",
+		InputMicrosPerMTok: 10_000, OutputMicrosPerMTok: 40_000,
+		Description: "Apertus-v1.5-8B reasoning before it answers, with no tool " +
+			"calls - simple questions, not agents",
+	}, {
+		ID: "swiss-ai/Apertus-70B-Instruct-2509", MaxContext: 64_000, ReleaseDate: "2025-09-02",
+		InputMicrosPerMTok: 60_000, OutputMicrosPerMTok: 400_000,
+		Description: "previous Apertus at the price of Apertus-v1.5-70B, over a " +
+			"shorter context - weaker at tool use",
+	}, {
+		ID: "swiss-ai/Apertus-8B-Instruct-2509", MaxContext: 32_768, ReleaseDate: "2025-09-02",
+		InputMicrosPerMTok: 10_000, OutputMicrosPerMTok: 40_000,
+		Description: "previous small Apertus at the price of Apertus-v1.5-8B, " +
+			"over a short context",
+	}},
+	Note: "Prompts leave your infrastructure, but stay in Switzerland. " +
+		"A key needs a CSCS project with an inference resource, and is made in " +
+		"the CSCS Inference API UI. " +
+		"The prices are CSCS's pay-per-use fees for academia. " +
+		"No cached-input rate is published, so every input token costs the " +
+		"input price. " +
+		"The -thinking Apertus models take no tool calls, so coding agents " +
+		"fail on them. " +
+		"Model ids are the upstream names, with capitals. " +
+		"The service runs from one site, so expect pauses for incidents and " +
+		"maintenance. " +
 		"Prices are in CHF.",
 }}
 
