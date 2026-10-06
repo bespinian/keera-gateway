@@ -13,7 +13,7 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// connectCmd is the panel's "Connect a client" screen, in a terminal.
+// connectCmd is the panel's "Connect client" dialog, in a terminal.
 //
 // The configuration blocks come from the control plane rather than from this
 // binary, so an older CLI cannot hand out a configuration the deployment has

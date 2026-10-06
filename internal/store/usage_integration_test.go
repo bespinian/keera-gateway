@@ -612,6 +612,49 @@ func TestFlowsOverAnEmptyWindow(t *testing.T) {
 	}
 }
 
+// A developer's clients are what called with their own keys: someone else's
+// traffic in the same organisation is not theirs.
+func TestClientUsesReadsOnePersonsClientsAndKeys(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	day := time.Date(2026, 9, 7, 10, 0, 0, 0, time.UTC)
+
+	ev := func(user, key, client string, at time.Duration) Event {
+		return Event{
+			TS: day.Add(at), OrgID: f.orgID, ProjectID: f.projectID, UserID: user,
+			KeyID: key, Alias: "keera-code", Client: client, Status: 200,
+		}
+	}
+	if err := st.WriteEvents(ctx, []Event{
+		ev("user_1", "key_1", "claude-code", 0),
+		ev("user_1", "key_1", "claude-code", time.Minute),
+		ev("user_1", "key_2", "opencode", 2*time.Minute),
+		ev("user_1", "key_1", "", 3*time.Minute),
+		ev("user_2", "key_3", "pi", 4*time.Minute),
+	}); err != nil {
+		t.Fatalf("WriteEvents: %v", err)
+	}
+
+	uses, err := st.ClientUses(ctx, f.orgID, "user_1", day.Add(-time.Hour), day.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("ClientUses: %v", err)
+	}
+	want := []ClientUse{
+		{Client: "", KeyID: "key_1", Requests: 1, LastUsed: day.Add(3 * time.Minute)},
+		{Client: "opencode", KeyID: "key_2", Requests: 1, LastUsed: day.Add(2 * time.Minute)},
+		{Client: "claude-code", KeyID: "key_1", Requests: 2, LastUsed: day.Add(time.Minute)},
+	}
+	if len(uses) != len(want) {
+		t.Fatalf("got %+v, want %+v", uses, want)
+	}
+	for i := range want {
+		if uses[i].Client != want[i].Client || uses[i].KeyID != want[i].KeyID ||
+			uses[i].Requests != want[i].Requests || !uses[i].LastUsed.Equal(want[i].LastUsed) {
+			t.Errorf("row %d = %+v, want %+v", i, uses[i], want[i])
+		}
+	}
+}
+
 func TestASubscriptionKeyKeepsItsKindAndItsPlanUsage(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)

@@ -204,10 +204,10 @@ export async function accessView(ctx) {
       h(
         "a",
         {
-          href: "/connect",
-          onClick: go(ctx, "/connect"),
+          href: "/clients",
+          onClick: go(ctx, "/clients"),
         },
-        "Connect a client",
+        "My clients",
       ),
       ". Each response reports what is left in the ",
       h("code", {}, "X-Keera-Budget-Remaining"),

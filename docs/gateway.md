@@ -149,7 +149,9 @@ itself instead in `X-Keera-Client`, which wins, so a tool built on a common
 HTTP library is not filed under that library. The name is what the client
 says, so it tells what is connected, not who may connect.
 
-`keera usage --by client` adds up usage by client.
+`keera usage --by client` adds up usage by client. In the panel, **My
+clients** lists the clients that called with your own keys, and which key each
+one used. Its **Connect client** button shows how to set up a new one.
 
 ## The tenancy model
 

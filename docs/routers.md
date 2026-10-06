@@ -31,7 +31,7 @@ A client puts the router's alias in the `model` field:
 { "model": "auto", "messages": [{ "role": "user", "content": "…" }] }
 ```
 
-`keera connect` and **Connect a client** list it in an editor's configuration
+`keera connect` and **Connect client** under **My clients** list it in an editor's configuration
 next to the models, when the key may use it. `GET /api/v1/models` lists
 routers next to the models, with their destinations.
 

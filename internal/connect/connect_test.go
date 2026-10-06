@@ -70,8 +70,8 @@ func TestEveryClientIsCompleteEnoughToRender(t *testing.T) {
 			t.Errorf("two clients share the key %q", c.Key)
 		}
 		seen[c.Key] = true
-		if c.Key == "" || c.Label == "" || c.Template == "" || c.Run == "" {
-			t.Errorf("%q is missing a key, label, template or run", c.Key)
+		if c.Key == "" || c.Label == "" || c.About == "" || c.Template == "" || c.Run == "" {
+			t.Errorf("%q is missing a key, label, about, template or run", c.Key)
 		}
 		if c.Lang != "json" && c.Lang != "sh" {
 			t.Errorf("%s has lang %q, which no renderer highlights", c.Key, c.Lang)

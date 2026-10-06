@@ -247,6 +247,7 @@ export const icons = {
     "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
   connect:
     "M4 17l5-5-5-5M12 19h8M3 3h18a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z",
+  terminal: "M4 17l6-6-6-6M12 19h8",
   download: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3",
   filter: "M22 3H2l8 9.5V19l4 2v-8.5z",
   // The guardrail that rewrites rather than refuses: a funnel with the shield
@@ -1211,7 +1212,8 @@ function nameProblem(name, max, what) {
  *  to the end. Once a mode is chosen the tiles fold into one row with a Change
  *  button, which shows them again.
  *
- *  modes is a list of { value, icon, name, what }. chosen is the starting
+ *  modes is a list of { value, icon, name, what }, with an optional mark()
+ *  that draws a logo in place of the icon. chosen is the starting
  *  value, or null for none. onChoose runs after each choice; the caller decides
  *  where focus goes. choose(value) picks a mode from code, as an edit dialog
  *  does on opening. */
@@ -1228,7 +1230,7 @@ export function modeTiles(modes, chosen, onChoose) {
           "aria-pressed": String(m.value === chosen),
           onClick: () => choose(m.value),
         },
-        h("span", { class: "tile-mark" }, icon(m.icon)),
+        h("span", { class: "tile-mark" }, markOf(m)),
         h("span", { class: "tile-name" }, m.name),
         h("span", { class: "tile-what" }, m.what),
       ),
@@ -1254,7 +1256,7 @@ export function modeTiles(modes, chosen, onChoose) {
       tile.setAttribute("aria-pressed", String(modes[i].value === value));
     });
     chosenRow.replaceChildren(
-      icon(m.icon),
+      markOf(m),
       h(
         "div",
         { class: "stack", style: { gap: "1px" } },
@@ -1269,6 +1271,10 @@ export function modeTiles(modes, chosen, onChoose) {
     onChoose(value);
   };
   return { tiles, chosenRow, change, choose };
+}
+
+function markOf(m) {
+  return (m.mark && m.mark()) || icon(m.icon);
 }
 
 /** field renders a labelled control. */

@@ -1484,7 +1484,7 @@ function clientReport(scene, currency) {
         { class: "card" },
         empty(
           "Nothing has called in this window",
-          "Connect an editor from Connect a client. It shows here after its " +
+          "Connect an editor under My clients. It shows here after its " +
             "first request.",
         ),
       ),

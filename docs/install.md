@@ -55,7 +55,7 @@ new organisations start with, which are files.
 | Variable                | Default     | What it is                                                                                                                                                                                            |
 | ----------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `KEERA_METRICS_TOKEN`   | unset       | Reads `/metrics` and nothing else. Must differ from the operator key.                                                                                                                                 |
-| `KEERA_PUBLIC_URL`      | Host header | The gateway's address as a browser sees it. Used for the sign-out redirect, by **Connect a client**, and for the panel link in a refusal. Unset, a refusal has no link. Required with single sign-on. |
+| `KEERA_PUBLIC_URL`      | Host header | The gateway's address as a browser sees it. Used for the sign-out redirect, by **My clients**, and for the panel link in a refusal. Unset, a refusal has no link. Required with single sign-on. |
 | `KEERA_MODELS_FILE`     | unset       | The models each new organisation starts with. Existing organisations are not changed.                                                                                                                 |
 | `KEERA_USAGE_RETENTION` | for ever    | How long usage events, ended sandboxes and ended keys are kept. See [sizing.md](sizing.md).                                                                                                           |
 | `KEERA_AUDIT_RETENTION` | for ever    | How long audit entries are kept.                                                                                                                                                                      |
@@ -398,7 +398,7 @@ session cookie protect the control side. So:
   guardrail, and every audit entry reads `operator key`.
 
 Set `KEERA_PUBLIC_URL` to the panel's public address. The sign-out redirect
-uses it, and **Connect a client** gives developers that address with `/api`
+uses it, and **My clients** gives developers that address with `/api`
 appended.
 
 ## Backups

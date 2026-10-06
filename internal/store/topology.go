@@ -108,3 +108,33 @@ func (s *Store) Flows(ctx context.Context, orgID string, from, to time.Time) (Fl
 	}
 	return rep, rows.Err()
 }
+
+// ClientUse is one client's traffic through one key.
+type ClientUse struct {
+	// Client is empty for requests whose sender did not name itself.
+	Client   string    `json:"client"`
+	KeyID    string    `json:"key_id"`
+	Requests int64     `json:"requests"`
+	LastUsed time.Time `json:"last_used"`
+}
+
+// ClientUses lists which clients called with one person's keys in a window,
+// and through which key, most recent first. It is the Clients screen: a
+// developer's own view of what they have connected.
+func (s *Store) ClientUses(ctx context.Context, orgID, userID string, from, to time.Time) ([]ClientUse, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT COALESCE(client, ''), COALESCE(key_id, ''), count(*), max(ts)
+		FROM usage_events
+		WHERE user_id = $1 AND org_id = $2 AND ts >= $3 AND ts < $4
+		GROUP BY 1, 2
+		ORDER BY 4 DESC`,
+		userID, orgID, from, to)
+	if err != nil {
+		return nil, err
+	}
+	return collect(rows, func(r row) (ClientUse, error) {
+		var u ClientUse
+		err := r.Scan(&u.Client, &u.KeyID, &u.Requests, &u.LastUsed)
+		return u, err
+	})
+}

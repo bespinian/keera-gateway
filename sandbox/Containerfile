@@ -58,15 +58,20 @@ RUN apk add --no-cache \
       vim \
       zsh
 
-# The Pi coding agent, pinned.
+# The Pi coding agent, pinned with everything under it.
 #
 # Pinned because a sandbox image is a thing a deployment builds once and runs
 # for months: an unpinned agent would mean two sandboxes from the same catalogue
 # entry running different software, which is the property a class name exists to
-# prevent. --ignore-scripts is upstream's own documented install line.
-ARG PI_VERSION=0.85.1
-RUN npm install -g --ignore-scripts "@earendil-works/pi-coding-agent@${PI_VERSION}" \
+# prevent. Pi's npm package no longer pins its own dependencies, so the lockfile
+# in sandbox/pi does. To move to a newer Pi, change the version in
+# sandbox/pi/package.json and run `npm install --package-lock-only` there.
+# --ignore-scripts because Pi needs no install scripts, and nothing else then
+# runs code at build time.
+COPY sandbox/pi/package.json sandbox/pi/package-lock.json /opt/pi/
+RUN npm ci --prefix /opt/pi --omit=dev --ignore-scripts \
  && npm cache clean --force \
+ && ln -s /opt/pi/node_modules/.bin/pi /usr/local/bin/pi \
  && pi --version
 
 RUN addgroup -g "${KEERA_UID}" "${KEERA_USER}" \

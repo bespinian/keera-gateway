@@ -90,7 +90,7 @@ type Config struct {
 	// UI serves the control panel from the listener's root.
 	UI bool
 	// PublicURL is the gateway's origin as a browser sees it. It is used for
-	// the redirect after sign-out, the address under "Connect a client" and
+	// the redirect after sign-out, the address under "My clients" and
 	// the panel link in a refusal. Empty uses the request's Host header for
 	// the first two and leaves the link out.
 	PublicURL string

@@ -677,7 +677,7 @@ var commands = []command{
 		summary: "the finished configuration for an editor",
 		args:    "[<client>] [flags]",
 		flags:   []string{"key", "org", "subscription", "model", "project", "json"},
-		prose: "The panel's \"Connect a client\" screen for whoever does not have the panel. It " +
+		prose: "The panel's \"Connect client\" dialog for whoever does not have the panel. It " +
 			"prints the configuration block on stdout and everything around it on stderr, so it " +
 			"can be redirected straight into the file it names.\n\n" +
 			"The configuration lists every chat model and router your key may use, the first " +

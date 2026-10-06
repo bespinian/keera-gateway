@@ -316,6 +316,9 @@ export const api = {
   // here. It comes from the control plane rather than from this bundle so that
   // the panel and `keera connect` cannot hand out configurations that differ.
   connect: () => get("/v1/connect"),
+  // Which clients called with the reader's own keys in the window, and with
+  // which key.
+  clients: (since) => get("/v1/clients" + query({ since })),
 
   // The organisation's models. The writes take the organisation a model
   // belongs to. `stats` asks for how fast each has been

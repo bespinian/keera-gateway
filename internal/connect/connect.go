@@ -1,7 +1,7 @@
 // Package connect holds the configuration a developer needs to point a coding
 // agent at a Keera Gateway.
 //
-// The control panel's "Connect a client" screen and `keera connect` both read
+// The control panel's Clients screen and `keera connect` both read
 // this one catalogue, so they hand out the same configuration. Each block is a
 // template; the caller fills in the gateway address and the models a key may
 // call, with their limits.
@@ -18,6 +18,8 @@ type Client struct {
 	// Key names it on the wire and as the argument to `keera connect <key>`.
 	Key   string `json:"key"`
 	Label string `json:"label"`
+	// About says in one line what the client is, for the panel's picker.
+	About string `json:"about"`
 	// Path is the file the configuration belongs in. It is empty for a client
 	// configured by environment variables.
 	Path string `json:"path,omitempty"`
@@ -167,6 +169,7 @@ var clients = []Client{
 	{
 		Key:   "pi",
 		Label: "Pi",
+		About: "A minimal coding agent for the terminal.",
 		Path:  "~/.pi/agent/models.json",
 		Lang:  "json",
 		Template: `{
@@ -191,6 +194,7 @@ var clients = []Client{
 	{
 		Key:   "opencode",
 		Label: "OpenCode",
+		About: "An open-source coding agent for the terminal.",
 		Path:  "~/.config/opencode/opencode.json",
 		Lang:  "json",
 		Template: `{
@@ -222,6 +226,7 @@ var clients = []Client{
 	{
 		Key:   "claude-code",
 		Label: "Claude Code",
+		About: "Anthropic's coding agent, over the Messages API.",
 		// No file: settings.json takes the key as a literal, and we have no
 		// key to put in it. The note explains.
 		Lang: "sh",
@@ -257,6 +262,7 @@ curl "$ANTHROPIC_BASE_URL/v1/messages" \
 	{
 		Key:   "openai",
 		Label: "Anything OpenAI-compatible",
+		About: "Any tool that takes an OpenAI base URL and key.",
 		// No file: where the two variables go depends on the client.
 		Lang: "sh",
 		Template: `# Keera Gateway speaks the OpenAI API. Most clients need only these two

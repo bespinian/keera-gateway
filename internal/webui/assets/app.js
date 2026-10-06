@@ -13,7 +13,7 @@ import { routersView, routerDetailView } from "./views/routers.js";
 import { sandboxesView } from "./views/sandboxes.js";
 import { mcpView } from "./views/mcp.js";
 import { playgroundView } from "./views/playground.js";
-import { connectView } from "./views/connect.js";
+import { clientsView } from "./views/connect.js";
 import { accessView } from "./views/access.js";
 import { usageView } from "./views/usage.js";
 import { auditView } from "./views/audit.js";
@@ -68,11 +68,11 @@ const routes = [
     view: accessView,
   },
   {
-    path: "/connect",
+    path: "/clients",
     group: "You",
-    label: "Connect a client",
+    label: "My clients",
     icon: "connect",
-    view: connectView,
+    view: clientsView,
   },
   // The playground verifies that the path an editor will take works. That is a
   // question the person about to configure an editor has, not a piece of

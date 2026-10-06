@@ -1,6 +1,7 @@
-// Connecting a coding agent to Keera Gateway.
+// My clients: the coding agents that call Keera Gateway with the reader's
+// keys, and how to add one.
 //
-// This screen exists because the last mile is where a gateway is actually
+// Connect client exists because the last mile is where a gateway is actually
 // adopted or quietly abandoned: an organisation has models and keys, and a
 // developer still has to work out which URL, which model and which file. It
 // answers that for each client the deployment supports, with every model the
@@ -17,6 +18,18 @@ import {
   go,
   compact,
   isAdmin,
+  table,
+  rowLink,
+  num,
+  plural,
+  ago,
+  dateTime,
+  toast,
+  modeTiles,
+  modal,
+  providerMark,
+  currentRange,
+  rangePicker,
 } from "../ui.js";
 
 // The configuration blocks come from the control plane at /control/v1/connect
@@ -115,43 +128,136 @@ export function usableKeys(a) {
   );
 }
 
-export async function connectView(ctx) {
-  // Only the reader's own keys: the configuration is for their machine.
-  const [clients, a] = await Promise.all([loadClients(), api.access()]);
-  ctx.setSubtitle(
-    "Pi, OpenCode, Claude Code or any OpenAI-compatible client, pointed at " +
-      "this gateway",
-  );
+export async function clientsView(ctx) {
+  const since = currentRange();
+  // Only the reader's own keys: the setup is for their machine.
+  const [catalogue, a, res] = await Promise.all([
+    loadClients(),
+    api.access(),
+    api.clients(since),
+  ]);
+  const used = res.data || [];
   const keys = usableKeys(a);
-  if (!keys.length) return noKey(ctx, a, "A client connects with");
-  if (!clients.length) {
-    return h(
-      "div",
-      { class: "card" },
-      empty(
-        "No client catalogue",
-        "The gateway returned no clients, which should not happen. An " +
-          "OpenAI-compatible client needs only the base URL and a key, and " +
-          "My access has both.",
-      ),
-    );
-  }
+  ctx.setSubtitle(
+    `${used.length} ${plural(used.length, "client")} called with your keys`,
+  );
 
+  const canAdd = keys.length > 0 && catalogue.length > 0;
+  const head = h(
+    "div",
+    { class: "detail-head" },
+    h(
+      "div",
+      { class: "muted" },
+      "The clients that called the gateway with your keys, and which key " +
+        "each one used. A client shows here after its first request.",
+    ),
+    h(
+      "div",
+      { class: "row", style: { flexWrap: "wrap" } },
+      h("div", { style: { flex: 1 } }),
+      rangePicker(ctx, since),
+      canAdd
+        ? h(
+            "button",
+            {
+              class: "btn btn-primary",
+              onClick: (e) => addClient(ctx, catalogue, keys, e.currentTarget),
+            },
+            icon(icons.plus),
+            "Connect client",
+          )
+        : null,
+    ),
+  );
+
+  const list = table(
+    [
+      {
+        label: "Client",
+        sortKey: (c) => c.label,
+        cell: (c) =>
+          h(
+            "span",
+            { class: c.key ? null : "muted" },
+            h("strong", {}, c.label),
+          ),
+      },
+      {
+        label: "Keys",
+        cell: (c) =>
+          c.keys.flatMap((k, i) => [
+            i ? ", " : "",
+            rowLink(
+              ctx,
+              "/keys/" + encodeURIComponent(k.id),
+              k.name || k.id,
+              `${num(k.requests)} ${plural(k.requests, "request")}, ` +
+                `last ${ago(k.last_used)}`,
+            ),
+          ]),
+      },
+      {
+        label: "Requests",
+        num: true,
+        shrink: true,
+        sortKey: (c) => c.requests,
+        sortDir: "desc",
+        cell: (c) => num(c.requests),
+      },
+      {
+        label: "Last used",
+        shrink: true,
+        sortKey: (c) => c.last_used,
+        sortDir: "desc",
+        cell: (c) =>
+          h("span", { title: dateTime(c.last_used) }, ago(c.last_used)),
+      },
+    ],
+    used,
+    {
+      emptyTitle: "No client has called in this window",
+      emptyBody: canAdd
+        ? "Use Connect client to set one up."
+        : "You need an API key to set one up.",
+    },
+  );
+
+  return h(
+    "div",
+    { class: "stack" },
+    head,
+    // Without a key there is nothing to add, so the reason comes first.
+    keys.length ? null : noKey(ctx, a, "A client connects with"),
+    list,
+  );
+}
+
+/** addClient asks which client to set up, then shows its setup for one of the
+ *  reader's keys. */
+async function addClient(ctx, catalogue, keys, button) {
   // Every key here is in the reader's own organisation, so one read covers
   // them all.
-  const targets = await chatTargets(keys[0].org_id);
+  button.disabled = true;
+  let targets;
+  try {
+    targets = await chatTargets(keys[0].org_id);
+  } catch (err) {
+    toast(err.message, "bad");
+    return;
+  } finally {
+    button.disabled = false;
+  }
 
   const remembered = localStorage.getItem("keera.connect.key");
-  const clientKey =
-    localStorage.getItem("keera.connect.client") || clients[0].key;
   const state = {
     key: keys.find((k) => k.id === remembered) || keys[0],
-    client: clients.find((c) => c.key === clientKey) || clients[0],
+    client: null,
     base: defaultBase(ctx),
   };
 
-  // Only what depends on the key or the client is rebuilt when they change:
-  // the picker is not re-created, so the select keeps its focus.
+  // Only what depends on the key or the client is rebuilt when they change,
+  // so the select keeps its focus.
   const models = h("div", { class: "hint" });
   const steps = h("div");
   const redraw = () => {
@@ -160,19 +266,15 @@ export async function connectView(ctx) {
     steps.replaceChildren(
       usable.length
         ? instructions(ctx, state, usable)
-        : h(
-            "div",
-            { class: "card" },
-            empty(
-              "This key can use no chat model",
-              "Its guardrails allow no model that serves chat. Choose another " +
-                "key, or ask an administrator.",
-            ),
+        : empty(
+            "This key can use no chat model",
+            "Its guardrails allow no model that serves chat. Choose another " +
+              "key, or ask an administrator.",
           ),
     );
   };
 
-  const key = h(
+  const keySelect = h(
     "select",
     {
       class: "select",
@@ -186,71 +288,67 @@ export async function connectView(ctx) {
       h(
         "option",
         { value: k.id, selected: k.id === state.key.id },
-        `${k.name} - ${k.prefix}…`,
+        k.name || k.prefix,
       ),
     ),
   );
 
-  // The key is the only choice on this screen. The models follow from it, and
-  // the gateway address is not a decision: it is already in the block below,
-  // and an operator whose panel is published under another name declares it
-  // with KEERA_PUBLIC_URL so that every panel and `keera connect` agree.
-  const picker = h(
+  // The key is the only choice after the client. The models follow from it,
+  // and the gateway address is already in the setup: an operator whose panel
+  // is published under another name sets KEERA_PUBLIC_URL, so that every
+  // panel and `keera connect` agree.
+  const setup = h(
     "div",
-    { class: "card card-body", style: { marginBottom: "16px" } },
-    h(
-      "div",
-      { class: "field", style: { marginBottom: 0 } },
-      h("label", {}, "API key"),
-      key,
-      models,
-    ),
-  );
-
-  const tabs = h(
-    "div",
-    { class: "row", style: { marginBottom: "16px" } },
-    h(
-      "div",
-      { class: "seg" },
-      clients.map((c) =>
-        h(
-          "button",
-          {
-            "aria-pressed": String(c.key === state.client.key),
-            onClick: () => {
-              state.client = c;
-              localStorage.setItem("keera.connect.client", c.key);
-              for (const el of tabs.querySelectorAll("button")) {
-                el.setAttribute(
-                  "aria-pressed",
-                  String(el.textContent === c.label),
-                );
-              }
-              redraw();
-            },
-          },
-          c.label,
-        ),
-      ),
-    ),
-  );
-
-  redraw();
-  return h(
-    "div",
-    {},
-    h(
-      "div",
-      { class: "muted", style: { marginBottom: "16px" } },
-      "Pick one of your keys and a client, then copy the result. It sets up " +
-        "every model the key can use.",
-    ),
-    picker,
-    tabs,
+    { hidden: true },
+    h("div", { class: "field" }, h("label", {}, "API key"), keySelect, models),
     steps,
   );
+
+  const picker = modeTiles(
+    catalogue.map((c) => ({
+      value: c.key,
+      icon: icons.terminal,
+      mark: clientMarks[c.key],
+      name: c.label,
+      what: c.about,
+    })),
+    null,
+    (value) => {
+      state.client = catalogue.find((c) => c.key === value);
+      setup.hidden = false;
+      redraw();
+      picker.change.focus();
+    },
+  );
+
+  modal({
+    wide: true,
+    title: "Connect client",
+    subtitle:
+      "Choose a client, then copy its setup. It sets up every model " +
+      "your key can use.",
+    body: h(
+      "div",
+      {},
+      h(
+        "div",
+        { class: "field" },
+        h("label", {}, "Client"),
+        picker.tiles,
+        picker.chosenRow,
+      ),
+      setup,
+    ),
+    actions: (close) => [h("button", { class: "btn", onClick: close }, "Done")],
+  });
+  picker.tiles.firstChild.focus();
 }
+
+// clientMarks are the vendors' own logos, for the clients that have one here.
+const clientMarks = {
+  "claude-code": () => providerMark("anthropic"),
+  openai: () => providerMark("openai"),
+};
 
 /** modelList names the models a configuration sets up, with their windows. */
 function modelList(models) {

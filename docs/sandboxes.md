@@ -601,6 +601,9 @@ uses it as `fsGroup`), sshd, the coding agent, and the entrypoint.
 It is Alpine, and the coding agent is **Pi**, pinned. Alpine because its Node is
 24.18 and Pi needs at least 22.19. Pinned because an image is built once and run
 for months, and two sandboxes of the same class must run the same software.
+The version is in `sandbox/pi/package.json`, and `package-lock.json` beside it
+pins every package under Pi. To update, change the version and run
+`npm install --package-lock-only` in that directory.
 
 The gateway configures Pi, not the image. The manager renders
 `~/.pi/agent/models.json` and the entrypoint writes it.

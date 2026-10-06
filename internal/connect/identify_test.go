@@ -126,7 +126,7 @@ func TestEveryAgentIsReachableByItsOwnKey(t *testing.T) {
 
 func TestEveryCatalogueClientIsFiledUnderOneName(t *testing.T) {
 	// A client the catalogue configures is reported under the catalogue's key,
-	// so the panel's "Connect a client" and the reports use one name for it.
+	// so the panel's "My clients" and the reports use one name for it.
 	// openai is a setup many tools share, so it is filed under the tool.
 	for _, c := range Clients() {
 		want := c.Key

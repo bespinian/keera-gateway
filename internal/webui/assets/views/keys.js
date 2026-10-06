@@ -42,7 +42,7 @@ export async function keysView(ctx) {
       // has nobody here, and the field is left out rather than shown empty.
       api.users(ctx.orgID).catch(() => ({ data: [] })),
       // The client catalogue, so that the configuration handed over with a key
-      // is the same one Connect a client hands out.
+      // is the same one My clients hands out.
       loadClients().catch(() => []),
     ]);
   const keys = keysRes.data || [];
@@ -601,7 +601,7 @@ async function issuedModels(created) {
 
 // showSecret is the only moment the key exists outside the developer's machine,
 // so it is also the only useful moment to hand over the configuration that
-// contains it. Sending somebody to Connect a client afterwards sends them to a
+// contains it. Sending somebody to My clients afterwards sends them to a
 // screen where the key is gone forever and the file has a blank in it.
 async function showSecret(ctx, created, clients) {
   // Read before the dialog opens. Failing to read them still shows the key,
@@ -708,8 +708,8 @@ async function showSecret(ctx, created, clients) {
         "div",
         { class: "hint", style: { marginTop: "12px" } },
         "This contains the key in plain text. For a file without it, use ",
-        h("strong", {}, "Connect a client"),
-        ", which reads it from the environment.",
+        h("strong", {}, "Connect client"),
+        " under My clients, which reads it from the environment.",
       ),
     );
   }
