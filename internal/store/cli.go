@@ -36,16 +36,9 @@ func (s *Store) TakeCLICode(ctx context.Context, hash []byte) (CLICode, error) {
 	return c, notFound(err)
 }
 
-// CLIToken is one signed-in machine.
-type CLIToken struct {
-	UserID    string
-	ExpiresAt time.Time
-}
-
-// CLITokenUser is a token joined to the person it belongs to. Like
-// SessionUser it is one query, because it runs on every command.
+// CLITokenUser is the person a token belongs to. Like SessionUser it is one
+// query, because it runs on every command.
 type CLITokenUser struct {
-	Token     CLIToken
 	User      User
 	Directory Directory
 }
@@ -62,14 +55,10 @@ func (s *Store) CreateCLIToken(ctx context.Context, hash []byte, userID string,
 // disabled person, is reported as missing, so no caller has to check either.
 func (s *Store) LookupCLIToken(ctx context.Context, hash []byte) (CLITokenUser, error) {
 	var tu CLITokenUser
-	err := s.pool.QueryRow(ctx, `SELECT t.user_id, t.expires_at,
-		u.id, u.org_id, u.email, COALESCE(u.external_id,''), u.role, u.created_at,
-		`+directoryColumns+`
+	err := s.pool.QueryRow(ctx, `SELECT `+userColumnsOf("u.")+`, `+directoryColumns+`
 		FROM cli_tokens t JOIN users u ON u.id = t.user_id
 		WHERE t.id = $1 AND t.expires_at > now() AND u.disabled_at IS NULL`, hash,
-	).Scan(&tu.Token.UserID, &tu.Token.ExpiresAt,
-		&tu.User.ID, &tu.User.OrgID, &tu.User.Email, &tu.User.ExternalID, &tu.User.Role,
-		&tu.User.CreatedAt, &tu.Directory.Linked, &tu.Directory.CheckedAt)
+	).Scan(append(userTargets(&tu.User), &tu.Directory.Linked, &tu.Directory.CheckedAt)...)
 	return tu, notFound(err)
 }
 

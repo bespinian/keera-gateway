@@ -787,7 +787,8 @@ func (s *Server) renameKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	if !readJSON(w, r, &in) {
 		return
 	}
-	if strings.TrimSpace(in.Name) == "" {
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
 		badRequest(w, "send the new 'name'; it cannot be empty")
 		return
 	}
@@ -796,7 +797,6 @@ func (s *Server) renameKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	if !ok {
 		return
 	}
-	name := strings.TrimSpace(in.Name)
 	old, err := s.st.RenameKey(r.Context(), keyID, name)
 	if err != nil {
 		s.fail(w, err)

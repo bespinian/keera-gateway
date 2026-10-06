@@ -8,7 +8,6 @@ package cli
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"net/url"
 	"os"
@@ -18,19 +17,14 @@ import (
 )
 
 func doctorCmd(ctx context.Context, args []string) error {
-	c := newClient()
-	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
+	r := newCmdRun("doctor", args, "org", "json")
+	fs := r.fs
 	probe := fs.Bool("probe", false,
 		"put a real request through every enabled model; costs a generation each")
-	org := fs.String("org", "", orgUsage)
-	asJSON := fs.Bool("json", false, jsonUsage)
-	fs.Usage = func() { _ = printHelp(fs, "doctor", "") }
-	if want, ok := wantsHelp(args); ok {
-		return printHelp(fs, "doctor", want)
-	}
-	if err := parseCmd(fs, "doctor", args); err != nil {
+	if done, err := r.parse(); done {
 		return err
 	}
+	c := r.c
 
 	q := url.Values{}
 	if *probe {
@@ -38,8 +32,8 @@ func doctorCmd(ctx context.Context, args []string) error {
 	}
 	// An organisation is optional: without one, the checks that need it are
 	// skipped.
-	if *org != "" {
-		q.Set("org_id", *org)
+	if r.org != "" {
+		q.Set("org_id", r.org)
 	} else if only, err := theOnlyOrg(ctx, c, ""); err == nil && only != "" {
 		q.Set("org_id", only)
 	}
@@ -52,7 +46,7 @@ func doctorCmd(ctx context.Context, args []string) error {
 	if err := c.do(ctx, "GET", path, nil, &d); err != nil {
 		return err
 	}
-	if *asJSON {
+	if r.asJSON {
 		return out(true, d, nil)
 	}
 	printDiagnosis(c.base, d)

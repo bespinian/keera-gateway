@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/authn"
@@ -183,20 +184,20 @@ var errSandboxAmbiguous = errors.New("more than one sandbox of that name")
 // The caller's own wins. Otherwise only those the caller may handle count, so
 // a member never learns that a colleague used the name.
 func pickSandbox(p *authn.Principal, named []store.Sandbox) (store.Sandbox, error) {
-	var mine []store.Sandbox
+	var candidates []store.Sandbox
 	for _, sb := range named {
 		if p.UserID != "" && sb.UserID == p.UserID {
 			return sb, nil
 		}
 		if mayHandleSandbox(p, sb) {
-			mine = append(mine, sb)
+			candidates = append(candidates, sb)
 		}
 	}
-	switch len(mine) {
+	switch len(candidates) {
 	case 0:
 		return store.Sandbox{}, store.ErrNotFound
 	case 1:
-		return mine[0], nil
+		return candidates[0], nil
 	}
 	return store.Sandbox{}, errSandboxAmbiguous
 }
@@ -277,8 +278,8 @@ func pipe(client io.ReadWriteCloser, remote net.Conn, idle time.Duration, tick f
 
 	// Both copies record activity here, and the watchdog reads it. Resetting a
 	// deadline instead would cost a syscall per keystroke.
-	var activity atomic64
-	activity.set(time.Now().UnixNano())
+	var activity atomic.Int64
+	activity.Store(time.Now().UnixNano())
 
 	go func() {
 		defer stop()
@@ -298,7 +299,7 @@ func pipe(client io.ReadWriteCloser, remote net.Conn, idle time.Duration, tick f
 		case <-done:
 			return
 		case now := <-t.C:
-			if idle > 0 && now.UnixNano()-activity.get() > int64(idle) {
+			if idle > 0 && now.UnixNano()-activity.Load() > int64(idle) {
 				stop()
 				return
 			}
@@ -312,11 +313,11 @@ func pipe(client io.ReadWriteCloser, remote net.Conn, idle time.Duration, tick f
 // noticing records that bytes moved, for the idle watchdog.
 type noticing struct {
 	w    io.Writer
-	seen *atomic64
+	seen *atomic.Int64
 }
 
 func (n *noticing) Write(b []byte) (int, error) {
-	n.seen.set(time.Now().UnixNano())
+	n.seen.Store(time.Now().UnixNano())
 	return n.w.Write(b)
 }
 
@@ -326,16 +327,16 @@ func (n *noticing) Write(b []byte) (int, error) {
 // request was fine, but the state it met, which can change, was not. The
 // manager's message is passed on, as it is written for the developer.
 func (s *Server) failSandbox(w http.ResponseWriter, err error) {
-	var refused *sandbox.ErrRefused
+	refused, isRefused := errors.AsType[*sandbox.ErrRefused](err)
 	switch {
-	case errors.As(err, &refused) && refused.Invalid:
+	case isRefused && refused.Invalid:
 		badRequest(w, refused.Reason)
-	case errors.As(err, &refused):
+	case isRefused:
 		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "sandbox_state",
 			refused.Reason)
 	case errors.Is(err, sandbox.ErrNotFound):
 		httpx.WriteError(w, http.StatusNotFound, "invalid_request_error", "not_found",
-			"that sandbox is no longer in the cluster")
+			"that sandbox is no longer there")
 	case errors.Is(err, sandbox.ErrNotReady):
 		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "sandbox_not_ready",
 			err.Error())

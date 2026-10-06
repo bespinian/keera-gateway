@@ -178,7 +178,8 @@ type AgentSessionQuery struct {
 
 	From time.Time
 	To   time.Time
-	// Gap is the idle threshold. Zero means DefaultSessionGap.
+	// Gap is the idle threshold. The caller always sets it: the control
+	// server owns the deployment's value.
 	Gap  time.Duration
 	Sort AgentSessionSort
 	// Before pages backwards on the id of the session's first request. It only
@@ -189,12 +190,7 @@ type AgentSessionQuery struct {
 }
 
 func (q *AgentSessionQuery) setDefaults() {
-	if q.Gap <= 0 {
-		q.Gap = DefaultSessionGap
-	}
-	if q.Limit <= 0 || q.Limit > 5000 {
-		q.Limit = 100
-	}
+	q.Limit = pageLimit(q.Limit, 100, 5000)
 	if _, ok := sessionOrder[q.Sort]; !ok {
 		q.Sort = SortRecent
 	}
@@ -217,7 +213,7 @@ func (q *AgentSessionQuery) setDefaults() {
 //
 // It takes $1..$10: org, from, to, gap seconds, key, project, user, key id, alias,
 // unhappy. What follows it supplies its own parameters from $11 on.
-const sessionCTE = `
+var sessionCTE = `
 	WITH ev AS (
 	    SELECT *, EXTRACT(EPOCH FROM (ts - lag(ts)
 	               OVER (PARTITION BY session_key ORDER BY ts, id))) AS gap
@@ -244,10 +240,10 @@ const sessionCTE = `
 	           min(ts) AS started_at,
 	           max(ts + latency_ms * interval '1 millisecond') AS ended_at,
 	           count(*) AS requests,
-	           count(*) FILTER (WHERE status < 400 AND error IS NULL) AS ok,
-	           count(*) FILTER (WHERE status >= 500) AS failed,
-	           count(*) FILTER (WHERE status BETWEEN 400 AND 499) AS refused,
-	           count(*) FILTER (WHERE status < 400 AND error IS NOT NULL) AS interrupted,
+	           ` + countOutcome(OutcomeOK) + ` AS ok,
+	           ` + countOutcome(OutcomeFailed) + ` AS failed,
+	           ` + countOutcome(OutcomeRefused) + ` AS refused,
+	           ` + countOutcome(OutcomeInterrupted) + ` AS interrupted,
 	           COALESCE(sum(input_tokens), 0) AS input_tokens,
 	           COALESCE(sum(output_tokens), 0) AS output_tokens,
 	           COALESCE(sum(cost_micros), 0) AS cost_micros,
@@ -264,7 +260,7 @@ const sessionCTE = `
 	    GROUP BY session_key, run
 	    HAVING ($2::timestamptz IS NULL OR max(ts) >= $2)
 	       AND bool_or($9 = '' OR alias = $9)
-	       AND (NOT $10 OR bool_or(status >= 400 OR error IS NOT NULL))
+	       AND (NOT $10 OR bool_or(` + outcomeClauses[OutcomeUnhappy] + `))
 	)`
 
 // args returns the ten values sessionCTE reads, in the order it numbers them.
@@ -363,10 +359,6 @@ func (s *Store) AgentSessionSummary(ctx context.Context,
 // its own screen always matches its row in a list.
 func (s *Store) AgentSessionAt(ctx context.Context, orgID string, requestID int64,
 	gap time.Duration) (AgentSession, []Request, error) {
-	if gap <= 0 {
-		gap = DefaultSessionGap
-	}
-
 	// The organisation is read back rather than filtered on, so a request of
 	// another tenant is simply not found, as with every other scoped read.
 	var (

@@ -35,14 +35,13 @@ type SessionUser struct {
 // disabled person, is reported as missing, so no caller has to check either.
 func (s *Store) LookupSession(ctx context.Context, hash []byte) (SessionUser, error) {
 	var su SessionUser
+	dest := append([]any{&su.Session.UserID, &su.Session.CSRF, &su.Session.CreatedAt,
+		&su.Session.ExpiresAt}, userTargets(&su.User)...)
 	err := s.pool.QueryRow(ctx, `SELECT s.user_id, s.csrf, s.created_at, s.expires_at,
-		u.id, u.org_id, u.email, COALESCE(u.external_id,''), u.role, u.created_at,
-		`+directoryColumns+`
+		`+userColumnsOf("u.")+`, `+directoryColumns+`
 		FROM sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.id = $1 AND s.expires_at > now() AND u.disabled_at IS NULL`, hash,
-	).Scan(&su.Session.UserID, &su.Session.CSRF, &su.Session.CreatedAt, &su.Session.ExpiresAt,
-		&su.User.ID, &su.User.OrgID, &su.User.Email, &su.User.ExternalID, &su.User.Role,
-		&su.User.CreatedAt, &su.Directory.Linked, &su.Directory.CheckedAt)
+	).Scan(append(dest, &su.Directory.Linked, &su.Directory.CheckedAt)...)
 	return su, notFound(err)
 }
 

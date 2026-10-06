@@ -52,7 +52,7 @@ Moving a server to another host needs the credential again, or
 `keera mcp disable` switch it later. A disabled server answers 404, like one
 that does not exist.
 
-In the panel, the **MCP** screen does the same: **New MCP server**, and Edit and
+In the panel, the **MCP** screen does the same: **Add MCP server**, and Edit and
 Delete on each row. It lists every server with the address to give clients. An
 administrator also sees each tool's calls and the latest ones. `keera mcp list`
 shows the same list in a terminal.

@@ -102,7 +102,7 @@ const (
 
 // Create starts one container.
 func (p *Podman) Create(ctx context.Context, spec Spec) (Status, error) {
-	runtime, err := p.runtimeFor(spec.Class)
+	runtime, err := runtimeFor(spec.Class, p.opts.Runtimes, p.Name())
 	if err != nil {
 		return Status{}, err
 	}
@@ -120,13 +120,6 @@ func (p *Podman) Create(ctx context.Context, spec Spec) (Status, error) {
 		return Status{}, err
 	}
 	return p.Status(ctx, spec.Ref)
-}
-
-// privateEnv are the values kept off podman's command line, where every user
-// of the host can read them. podman takes them from its own environment
-// instead, which only the gateway's user can read.
-var privateEnv = map[string]bool{
-	"KEERA_API_KEY": true, "KEERA_GIT_TOKEN": true, "KEERA_TASK": true,
 }
 
 // runArgs is the `podman run` command line for a spec, and the environment
@@ -170,26 +163,19 @@ func (p *Podman) runArgs(spec Spec, runtime string) (args, env []string) {
 	// network is not routable from the host, and loopback keeps developers'
 	// shells off the host's public address.
 	args = append(args, "--publish", "127.0.0.1::"+strconv.Itoa(PortSSH))
+	// Every user of the host can read a process's arguments, so values go to
+	// podman through its own environment, which only the gateway's user can
+	// read. A name podman already has, such as PATH or HOME, stays on the
+	// command line: podman itself would run with the sandbox's value.
 	for _, kv := range envList(spec.Env) {
-		if privateEnv[kv.Name] {
-			args = append(args, "--env", kv.Name)
-			env = append(env, kv.Name+"="+kv.Value)
+		if _, podmans := os.LookupEnv(kv.Name); podmans && !strings.HasPrefix(kv.Name, "KEERA_") {
+			args = append(args, "--env", kv.Name+"="+kv.Value)
 			continue
 		}
-		args = append(args, "--env", kv.Name+"="+kv.Value)
+		args = append(args, "--env", kv.Name)
+		env = append(env, kv.Name+"="+kv.Value)
 	}
 	return append(args, spec.Class.Image), env
-}
-
-func (p *Podman) runtimeFor(c policy.SandboxClass) (string, error) {
-	name, ok := mappedRuntime(c, p.opts.Runtimes)
-	if !ok {
-		return "", fmt.Errorf("the sandbox class %q asks for %s isolation and this host has no "+
-			"OCI runtime mapped to it; set KEERA_SANDBOX_RUNTIME_%s (runsc for isolated, krun "+
-			"for vm), or move the class to a tier this host can deliver",
-			c.Name, c.Isolation, strings.ToUpper(string(c.Isolation)))
-	}
-	return name, nil
 }
 
 // podmanInspect is the part of `podman inspect` this driver reads.
@@ -205,23 +191,30 @@ type podmanInspect struct {
 	} `json:"Config"`
 }
 
-// Status reads one container back.
-func (p *Podman) Status(ctx context.Context, ref Ref) (Status, error) {
+// inspect reads one container's state and labels.
+func (p *Podman) inspect(ctx context.Context, ref Ref) (podmanInspect, error) {
 	out, err := p.run(ctx, "inspect", "--type", "container", containerName(ref))
 	if err != nil {
-		return Status{}, podmanNotFound(err)
+		return podmanInspect{}, podmanNotFound(err)
 	}
 	var items []podmanInspect
 	if err := json.Unmarshal(out, &items); err != nil {
-		return Status{}, fmt.Errorf("reading the state of sandbox %s: %w", ref.Name, err)
+		return podmanInspect{}, fmt.Errorf("reading the state of sandbox %s: %w", ref.Name, err)
 	}
 	// An empty list means podman found no such container, the same as its
 	// "no such container" error.
 	if len(items) == 0 {
-		return Status{}, ErrNotFound
+		return podmanInspect{}, ErrNotFound
 	}
-	in := items[0]
+	return items[0], nil
+}
 
+// Status reads one container back.
+func (p *Podman) Status(ctx context.Context, ref Ref) (Status, error) {
+	in, err := p.inspect(ctx, ref)
+	if err != nil {
+		return Status{}, err
+	}
 	st := Status{Ref: ref}
 	if in.State.Running {
 		st.Address = "127.0.0.1"
@@ -305,6 +298,11 @@ func (p *Podman) Resume(ctx context.Context, ref Ref) error {
 // Only the home directory carries over. A suspend keeps more, since it only
 // stops the container.
 func (p *Podman) Revive(ctx context.Context, spec Spec) error {
+	// Without its volume there is no home to carry over, and `podman run`
+	// would quietly make a new, empty one.
+	if _, err := p.run(ctx, "volume", "inspect", volumeName(spec.Ref)); err != nil {
+		return podmanNotFound(err)
+	}
 	if err := p.removeContainer(ctx, containerName(spec.Ref)); err != nil && !isNoSuchContainer(err) {
 		return err
 	}
@@ -342,15 +340,21 @@ func (p *Podman) removeContainer(ctx context.Context, name string) error {
 }
 
 // Dial connects to the host port the container's port is published on. Like
-// the Kubernetes driver, it refuses a sandbox that is not ready, so a
-// suspended one says so rather than that its port is not published.
+// the Kubernetes driver, it refuses a sandbox that is not running, so a
+// suspended one says so rather than that its port is not published. It skips
+// Status's wait for sshd's greeting: the connection itself shows whether sshd
+// answers.
 func (p *Podman) Dial(ctx context.Context, ref Ref, port int) (net.Conn, error) {
-	st, err := p.Status(ctx, ref)
+	// Only sshd's port is published, so any other could never be reached.
+	if port != PortSSH {
+		return nil, Refuse("on podman only port %d of a sandbox is reachable, not %d", PortSSH, port)
+	}
+	in, err := p.inspect(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
-	if st.State != policy.SandboxReady {
-		return nil, fmt.Errorf("%w: it is %s", ErrNotReady, st.State)
+	if state, _ := podmanState(in); state != policy.SandboxReady {
+		return nil, fmt.Errorf("%w: it is %s", ErrNotReady, state)
 	}
 	return p.dialPublished(ctx, ref, port)
 }
@@ -400,26 +404,30 @@ func (p *Podman) runEnv(ctx context.Context, env []string, args ...string) ([]by
 		if msg == "" {
 			msg = err.Error()
 		}
-		return nil, &podmanError{Args: args, Msg: msg, Err: err}
+		return nil, &podmanError{Binary: p.opts.Binary, Args: args, Msg: msg, Err: err}
 	}
 	return stdout.Bytes(), nil
 }
 
 // podmanError carries what the command printed, which is the useful part.
 type podmanError struct {
-	Args []string
-	Msg  string
-	Err  error
+	// Binary is the command that was run, which KEERA_SANDBOX_PODMAN_BINARY
+	// can point somewhere other than podman.
+	Binary string
+	Args   []string
+	Msg    string
+	Err    error
 }
 
 func (e *podmanError) Error() string {
-	return fmt.Sprintf("podman %s: %s", e.Args[0], e.Msg)
+	return fmt.Sprintf("%s %s: %s", e.Binary, e.Args[0], e.Msg)
 }
 
 func (e *podmanError) Unwrap() error { return e.Err }
 
-// isNoSuchContainer recognises a missing container. It matches the message,
-// because podman's exit code for it (125) is shared with every usage error.
+// isNoSuchContainer recognises a missing container or volume. It matches the
+// message, because podman's exit code for it (125) is shared with every usage
+// error.
 func isNoSuchContainer(err error) bool {
 	var pe *podmanError
 	if !errors.As(err, &pe) {
@@ -427,11 +435,12 @@ func isNoSuchContainer(err error) bool {
 	}
 	msg := strings.ToLower(pe.Msg)
 	return strings.Contains(msg, "no such container") ||
+		strings.Contains(msg, "no such volume") ||
 		strings.Contains(msg, "no such object") ||
 		strings.Contains(msg, "not found")
 }
 
-// podmanNotFound turns a missing container into ErrNotFound and passes
+// podmanNotFound turns a missing container or volume into ErrNotFound and passes
 // anything else through.
 func podmanNotFound(err error) error {
 	if isNoSuchContainer(err) {

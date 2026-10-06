@@ -59,13 +59,13 @@ func TestMCPServerUsersFindsEveryEntryForm(t *testing.T) {
 	if users, err := st.MCPServerUsers(ctx, f.orgID, "jira"); err != nil || len(users) != 0 {
 		t.Fatalf("MCPServerUsers = %+v, %v, want none", users, err)
 	}
-	if err := st.PutPolicy(ctx, policy.ScopeOrg, f.orgID,
+	if err := st.PutGuardrail(ctx, policy.ScopeOrg, f.orgID,
 		policy.Limits{AllowedTools: []string{"jira"}}); err != nil {
-		t.Fatalf("PutPolicy: %v", err)
+		t.Fatalf("PutGuardrail: %v", err)
 	}
-	if err := st.PutPolicy(ctx, policy.ScopeProject, f.projectID,
+	if err := st.PutGuardrail(ctx, policy.ScopeProject, f.projectID,
 		policy.Limits{AllowedTools: []string{"jira/search", "jirafake"}}); err != nil {
-		t.Fatalf("PutPolicy: %v", err)
+		t.Fatalf("PutGuardrail: %v", err)
 	}
 	users, err := st.MCPServerUsers(ctx, f.orgID, "jira")
 	if err != nil {
@@ -83,19 +83,19 @@ func TestAKeyResolvesItsToolGuardrails(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
 	yes := true
-	if err := st.PutPolicy(ctx, policy.ScopeOrg, f.orgID, policy.Limits{
+	if err := st.PutGuardrail(ctx, policy.ScopeOrg, f.orgID, policy.Limits{
 		AllowedTools: []string{"github"}, BlockHostedTools: &yes,
 	}); err != nil {
-		t.Fatalf("PutPolicy: %v", err)
+		t.Fatalf("PutGuardrail: %v", err)
 	}
-	if err := st.PutPolicy(ctx, policy.ScopeProject, f.projectID, policy.Limits{
+	if err := st.PutGuardrail(ctx, policy.ScopeProject, f.projectID, policy.Limits{
 		AllowedTools: []string{"github/search_code"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	lim, err := st.GetPolicy(ctx, policy.ScopeOrg, f.orgID)
+	lim, err := st.GetGuardrail(ctx, policy.ScopeOrg, f.orgID)
 	if err != nil || !slices.Equal(lim.AllowedTools, []string{"github"}) || lim.BlockHostedTools == nil {
-		t.Errorf("GetPolicy = %+v, %v", lim, err)
+		t.Errorf("GetGuardrail = %+v, %v", lim, err)
 	}
 	res, err := st.LookupKey(ctx, f.hash)
 	if err != nil {

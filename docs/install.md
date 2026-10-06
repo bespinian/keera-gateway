@@ -290,8 +290,8 @@ organisations screen. Everything refers to it by id, so nothing else changes.
 Every key is in a project. A new organisation starts with one project, called
 `default`, which is a project like any other. A key created without `--project`
 goes in the organisation's oldest project, and an organisation with no projects
-cannot have keys. A project with working keys cannot be deleted. Its revoked
-keys stay, without a project.
+cannot have keys. A project with keys that are not revoked, expired ones
+included, cannot be deleted. Its revoked keys stay, without a project.
 
 A project has a name, unique in its organisation, and an optional
 description. An administrator changes either with
@@ -305,7 +305,7 @@ it later. Screens, reports and the audit log show its name instead. A key from
 another lifetime, and `--expires never` makes a key that does not expire.
 
 A key's name is only a label, so it can change at any time:
-`keera key set <key> --name <name>`, or the pencil on the keys screen. A member
+`keera key set <key> --name <name>`, or the pencil on the **API keys** screen. A member
 can rename their own keys, an administrator any key in their organisation, and
 an operator any key. The old name stays in the audit log.
 
@@ -313,7 +313,7 @@ Only an administrator issues keys. That way every key has the project and
 guardrails an administrator chose for it. A member asks for a first key, and
 from then on rotates it themselves.
 
-`keera key rotate`, or **Rotate** on the keys screen, replaces a key in one
+`keera key rotate`, or **Rotate** on the **API keys** screen, replaces a key in one
 step. The new key has the same project, owner, lifetime and guardrails, and the
 old key is revoked in the same step. Anyone who may revoke a key may rotate it,
 so members can rotate their own. Only an administrator can give the new key

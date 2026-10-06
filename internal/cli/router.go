@@ -15,6 +15,7 @@ import (
 type routerRun struct {
 	*aliasRun
 
+	since        time.Duration
 	mode         string
 	model        string
 	destinations string
@@ -25,9 +26,9 @@ type routerRun struct {
 }
 
 func routerCmd(ctx context.Context, args []string) error {
-	a, rest := newAliasRun("router", args)
-	r := &routerRun{aliasRun: a}
-	fs := a.fs
+	r := &routerRun{aliasRun: newAliasRun("router", "routers", "router", args)}
+	fs := r.fs
+	fs.DurationVar(&r.since, "since", reportWindow, reportSinceUsage)
 	fs.StringVar(&r.mode, "mode", "",
 		"what chooses: 'instruction' reads the request with a model; 'size' places it by how "+
 			"much text is in it; 'fallback', 'latency' and 'least-busy' try the destinations "+
@@ -48,8 +49,7 @@ func routerCmd(ctx context.Context, args []string) error {
 	fs.StringVar(&r.prompt, "prompt", "", "the instruction the deciding model is given; @path reads a file")
 	fs.StringVar(&r.description, "description", "", "what this router is for, for whoever reads the list; an empty one clears it")
 
-	verb, err := a.parse(args, rest)
-	if err != nil || verb == "" {
+	if done, err := r.parse(); done {
 		return err
 	}
 	if r.fallback != "" && r.noFallback {
@@ -64,14 +64,14 @@ func routerCmd(ctx context.Context, args []string) error {
 			"'least-busy' emptiest first by what the gateway has in flight against each",
 			r.mode)
 	}
-	return a.run(ctx, verb, r)
+	return r.run(ctx, r)
 }
 
 func routerAlias(rt policy.Router) string { return rt.Alias }
 
 // find reads one of the organisation's routers.
 func (r *routerRun) find(ctx context.Context, alias string) (policy.Router, error) {
-	return findAlias(ctx, r.c, "routers", r.orgID, alias, "router", routerAlias)
+	return findAlias(ctx, r.aliasRun, alias, routerAlias)
 }
 
 func (r *routerRun) list(ctx context.Context) error {
@@ -85,7 +85,7 @@ func (r *routerRun) check(ctx context.Context) error {
 }
 
 func (r *routerRun) report(ctx context.Context) error {
-	return reportAlias(ctx, r.aliasRun, printRouterReport)
+	return reportAlias(ctx, r.aliasRun, r.since, printRouterReport)
 }
 
 func (r *routerRun) delete(ctx context.Context) error {
@@ -106,7 +106,7 @@ func (r *routerRun) put(ctx context.Context) error {
 	// 'set' starts from the stored router, so what is not given is kept. 'add'
 	// starts from nothing, and the control plane refuses what is missing.
 	rt := policy.Router{Alias: alias}
-	if r.sub == "set" {
+	if r.verb == "set" {
 		if !changesSomething(r.fs) {
 			return nothingToChange("router set")
 		}
@@ -115,7 +115,7 @@ func (r *routerRun) put(ctx context.Context) error {
 			return err
 		}
 		rt = existing
-	} else if err := alreadyExists(ctx, r.c, "routers", r.orgID, alias, "router", routerAlias); err != nil {
+	} else if err := alreadyExists(ctx, r.aliasRun, alias, routerAlias); err != nil {
 		return err
 	}
 	if err := r.apply(&rt); err != nil {

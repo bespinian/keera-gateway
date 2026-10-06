@@ -7,7 +7,6 @@ import {
   h,
   table,
   modal,
-  confirm,
   toast,
   pill,
   num,
@@ -23,6 +22,9 @@ import {
   bytes,
   plural,
   isAdmin,
+  rowActions,
+  listHead,
+  sectionHead,
 } from "../ui.js";
 import { toolCallTable } from "./tools.js";
 import { chooseOrg } from "./orgs.js";
@@ -53,31 +55,16 @@ export async function mcpView(ctx) {
   const base = (connect.gateway_url || "").replace(/\/$/, "");
   ctx.setSubtitle(`${servers.length} ${plural(servers.length, "server")}`);
 
-  const head = h(
-    "div",
-    { class: "detail-head" },
-    h(
-      "div",
-      { class: "muted" },
-      "Agents call a server's tools through the gateway with their Keera " +
-        "key. They see only the tools their guardrails allow, filters check " +
-        "each call, the server's credential stays on the gateway, and every " +
-        "call is logged without its content.",
-    ),
-    h(
-      "div",
-      { class: "row", style: { flexWrap: "wrap" } },
-      h("div", { style: { flex: 1 } }),
-      canEdit ? rangePicker(ctx, since) : null,
-      canEdit
-        ? h(
-            "button",
-            { class: "btn btn-primary", onClick: () => editServer(ctx, null) },
-            icon(icons.plus),
-            "New MCP server",
-          )
-        : null,
-    ),
+  const head = listHead(
+    "Agents call a server's tools through the gateway with their Keera " +
+      "key. They see only the tools their guardrails allow, filters check " +
+      "each call, the server's credential stays on the gateway, and every " +
+      "call is logged without its content.",
+    canEdit ? [rangePicker(ctx, since)] : [],
+    canEdit && {
+      label: "Add MCP server",
+      onClick: () => editServer(ctx, null),
+    },
   );
 
   const columns = [
@@ -139,43 +126,17 @@ export async function mcpView(ctx) {
       label: "",
       shrink: true,
       cell: (m) =>
-        h(
-          "div",
-          { class: "row-tight" },
-          h(
-            "button",
-            {
-              class: "btn btn-sm",
-              title: "Edit this server",
-              "aria-label": `Edit ${m.alias}`,
-              onClick: () => editServer(ctx, m),
-            },
-            icon(icons.pencil),
-          ),
-          h(
-            "button",
-            {
-              class: "btn btn-sm btn-danger",
-              title: "Delete this server",
-              "aria-label": `Delete ${m.alias}`,
-              onClick: () =>
-                confirm({
-                  title: `Delete ${m.alias}?`,
-                  body:
-                    "Clients lose access to its tools. Its call log is kept. " +
-                    "To pause it instead, disable it.",
-                  confirmLabel: "Delete server",
-                  danger: true,
-                  onConfirm: async () => {
-                    await api.deleteMCPServer(m.alias, m.org_id);
-                    toast("MCP server deleted", "good");
-                    ctx.reload();
-                  },
-                }),
-            },
-            icon(icons.trash),
-          ),
-        ),
+        rowActions(ctx, m.alias, {
+          editTitle: "Edit this server",
+          onEdit: () => editServer(ctx, m),
+          deleteTitle: "Delete this server",
+          body:
+            "Clients lose access to its tools. Its call log is kept. " +
+            "To pause it instead, disable it.",
+          confirmLabel: "Delete server",
+          remove: () => api.deleteMCPServer(m.alias, m.org_id),
+          removed: "MCP server deleted",
+        }),
     });
   }
 
@@ -190,8 +151,9 @@ export async function mcpView(ctx) {
   const wrap = h("div", {}, head, list);
   if (!canEdit || !servers.length) return wrap;
 
+  const gap = { marginTop: "28px" };
   wrap.append(
-    section("Tools", "each tool's calls in this window"),
+    sectionHead("Tools", "each tool's calls in this window", gap),
     table(
       [
         {
@@ -251,7 +213,7 @@ export async function mcpView(ctx) {
           "Point a client at a server address above, with a Keera key.",
       },
     ),
-    section("Latest calls", "newest first, at most 100"),
+    sectionHead("Latest calls", "newest first, at most 100", gap),
     toolCallTable(calls, {
       emptyBody: "Nothing has called a tool in this window.",
     }),
@@ -264,20 +226,6 @@ function callsOf(summary, alias) {
   return summary
     .filter((t) => t.server === alias)
     .reduce((n, t) => n + t.calls, 0);
-}
-
-// section is a heading between the page's tables.
-function section(title, note) {
-  return h(
-    "div",
-    {
-      class: "section-head",
-      style: { marginTop: "28px", marginBottom: "12px" },
-    },
-    h("h2", {}, title),
-    h("div", { style: { flex: 1 } }),
-    h("span", { class: "faint" }, note),
-  );
 }
 
 // editServer adds a server, or changes one.
@@ -361,7 +309,7 @@ function editServer(ctx, existing) {
   );
 
   modal({
-    title: existing ? `Edit ${m.alias}` : "New MCP server",
+    title: existing ? `Edit ${m.alias}` : "Add MCP server",
     body,
     actions: (close) => [
       h("button", { class: "btn", onClick: close }, "Cancel"),
@@ -404,7 +352,7 @@ function editServer(ctx, existing) {
             }
           },
         },
-        !existing ? "Add server" : "Save server",
+        !existing ? "Add MCP server" : "Save",
       ),
     ],
   });

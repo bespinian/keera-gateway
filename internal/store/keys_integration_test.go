@@ -14,27 +14,27 @@ func TestLookupKeyCollapsesTheWholeChain(t *testing.T) {
 	f := newFixture(t, st, ctx)
 
 	// Each level narrows what it inherits, and each says something of its own.
-	if err := st.PutPolicy(ctx, policy.ScopeOrg, f.orgID, policy.Limits{
+	if err := st.PutGuardrail(ctx, policy.ScopeOrg, f.orgID, policy.Limits{
 		AllowedModels:   []string{"keera-code", "keera-speed", "keera-frontier"},
 		MaxOutputTokens: new(4096), RPM: new(600), TPM: new(400000),
 		BudgetMicros: new(int64(10_000_000_000)), BudgetPeriod: new(policy.PeriodMonth),
 		SystemPrompt: new("Never include customer data in an example."),
 	}); err != nil {
-		t.Fatalf("PutPolicy org: %v", err)
+		t.Fatalf("PutGuardrail org: %v", err)
 	}
-	if err := st.PutPolicy(ctx, policy.ScopeProject, f.projectID, policy.Limits{
+	if err := st.PutGuardrail(ctx, policy.ScopeProject, f.projectID, policy.Limits{
 		AllowedModels:   []string{"keera-code", "keera-speed"},
 		MaxOutputTokens: new(2048), RPM: new(120),
 		BudgetMicros: new(int64(500_000_000)), BudgetPeriod: new(policy.PeriodDay),
 		SystemPrompt: new("Prefer the payments project's own libraries."),
 	}); err != nil {
-		t.Fatalf("PutPolicy project: %v", err)
+		t.Fatalf("PutGuardrail project: %v", err)
 	}
-	if err := st.PutPolicy(ctx, policy.ScopeKey, f.keyID, policy.Limits{
+	if err := st.PutGuardrail(ctx, policy.ScopeKey, f.keyID, policy.Limits{
 		AllowedModels: []string{"keera-speed", "keera-frontier"},
 		RPM:           new(30),
 	}); err != nil {
-		t.Fatalf("PutPolicy key: %v", err)
+		t.Fatalf("PutGuardrail key: %v", err)
 	}
 
 	res, err := st.LookupKey(ctx, f.hash)
@@ -159,11 +159,11 @@ func TestLookupKeyIgnoresAProjectInAnotherOrganisation(t *testing.T) {
 	if _, err := st.CreateProject(ctx, Project{ID: "project_elsewhere", OrgID: "org_2", Name: "Somebody Else"}); err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
-	if err := st.PutPolicy(ctx, policy.ScopeProject, "project_elsewhere", policy.Limits{
+	if err := st.PutGuardrail(ctx, policy.ScopeProject, "project_elsewhere", policy.Limits{
 		AllowedModels: []string{"a-model-this-key-must-not-reach"},
 		BudgetMicros:  new(int64(999_000_000)),
 	}); err != nil {
-		t.Fatalf("PutPolicy: %v", err)
+		t.Fatalf("PutGuardrail: %v", err)
 	}
 	// Written past the control plane, which is the case this defends against.
 	if _, err := st.pool.Exec(ctx,
@@ -196,10 +196,10 @@ func TestLookupKeyByIDMatchesTheHashLookup(t *testing.T) {
 	// the key's own requests do.
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
-	if err := st.PutPolicy(ctx, policy.ScopeProject, f.projectID, policy.Limits{
+	if err := st.PutGuardrail(ctx, policy.ScopeProject, f.projectID, policy.Limits{
 		AllowedModels: []string{"keera-code"}, RPM: new(120),
 	}); err != nil {
-		t.Fatalf("PutPolicy project: %v", err)
+		t.Fatalf("PutGuardrail project: %v", err)
 	}
 
 	byHash, err := st.LookupKey(ctx, f.hash)

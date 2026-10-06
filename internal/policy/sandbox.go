@@ -129,9 +129,17 @@ func (c SandboxClass) TTLFor(want time.Duration) time.Duration {
 	return want
 }
 
-// maxSandboxName is shorter than a class name's limit, because a sandbox name
-// is also a hostname in the cluster and part of an ssh config Host pattern.
+// maxSandboxName keeps a sandbox name short, because it is also a hostname in
+// the cluster and part of an ssh config Host pattern.
 const maxSandboxName = 40
+
+// maxClassName keeps a class name inside a Kubernetes label value, which
+// allows 63 characters, and inside the name of the class's warm pool, which
+// adds 15 more.
+const maxClassName = 40
+
+// ValidClassName reports whether s is a name a sandbox class may have.
+func ValidClassName(s string) bool { return validName(s, maxClassName) }
 
 // ValidSandboxName reports whether s is a name a sandbox may have. It becomes
 // a DNS label in the cluster and what a developer types after

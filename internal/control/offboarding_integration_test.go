@@ -148,7 +148,7 @@ func TestASandboxRefreshesItsRepositoryCredentialWithItsOwnKey(t *testing.T) {
 		PublicURL: "http://gateway.internal:8080", Git: git,
 	})
 	ts := sandboxServer(t, st, m)
-	if err := st.PutPolicy(t.Context(), policy.ScopeOrg, "org_1", policy.Limits{
+	if err := st.PutGuardrail(t.Context(), policy.ScopeOrg, "org_1", policy.Limits{
 		AllowedRepos: []string{"acme"},
 	}); err != nil {
 		t.Fatal(err)
@@ -293,7 +293,7 @@ func TestASandboxOnlyGetsTheRepositoriesItsGuardrailAllows(t *testing.T) {
 
 	put := func(repos ...string) {
 		t.Helper()
-		if err := st.PutPolicy(ctx, policy.ScopeOrg, "org_1", policy.Limits{
+		if err := st.PutGuardrail(ctx, policy.ScopeOrg, "org_1", policy.Limits{
 			AllowedRepos: repos,
 		}); err != nil {
 			t.Fatal(err)
@@ -348,7 +348,7 @@ func TestOnlyAnOperatorSetsAnOrganisationsRepositories(t *testing.T) {
 	if code := put(admin, `{"rpm":60}`); code != http.StatusOK {
 		t.Fatalf("an administrator setting a rate limit = %d", code)
 	}
-	lim, err := tn.srv.st.GetPolicy(tn.ctx, policy.ScopeOrg, "org_a")
+	lim, err := tn.srv.st.GetGuardrail(tn.ctx, policy.ScopeOrg, "org_a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +369,7 @@ func TestAnExpiredSandboxResumesWithANewKey(t *testing.T) {
 	git := &fakeForge{}
 	m := sandbox.NewManager(st, driver, sandbox.ManagerOptions{Git: git})
 	ts := sandboxServer(t, st, m)
-	if err := st.PutPolicy(ctx, policy.ScopeOrg, "org_1", policy.Limits{
+	if err := st.PutGuardrail(ctx, policy.ScopeOrg, "org_1", policy.Limits{
 		AllowedRepos: []string{"acme"},
 	}); err != nil {
 		t.Fatal(err)

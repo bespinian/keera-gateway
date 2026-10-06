@@ -8,12 +8,11 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
+// window is one budget period's spend: the last figure read from the
+// database, plus what this replica charged since.
 type window struct {
-	start time.Time
-	// base is the last figure read from the database and delta what this
-	// replica charged since. Kept apart so a reconcile can simply replace base.
-	base  int64
-	delta int64
+	start  time.Time
+	micros int64
 }
 
 // Budgets is the gateway's in-memory view of spend, reconciled with the
@@ -67,19 +66,19 @@ func (b *Budgets) Charge(scopes []policy.Scope, micros int64, now time.Time) {
 			w = &window{start: start}
 			b.w[k] = w
 		}
-		w.delta += micros
+		w.micros += micros
 	}
 }
 
 // reconcile replaces every window with the database's figure and forgets the
-// local delta, which the recorder has written by then. A charge still in the
+// local charges, which the recorder has written by then. A charge still in the
 // recorder's buffer is briefly uncounted until the next reconcile.
 func (b *Budgets) reconcile(rows []store.SpendRow) {
 	next := make(map[string]*window, len(rows))
 	for _, r := range rows {
 		next[windowKey(r.ScopeType, r.ScopeID, r.Period)] = &window{
-			start: r.PeriodStart.UTC(),
-			base:  r.Micros,
+			start:  r.PeriodStart.UTC(),
+			micros: r.Micros,
 		}
 	}
 	b.mu.Lock()
@@ -102,5 +101,5 @@ func (b *Budgets) spent(t policy.ScopeType, id string, p policy.Period, now time
 	if !ok || !w.start.Equal(p.Start(now)) {
 		return 0
 	}
-	return w.base + w.delta
+	return w.micros
 }

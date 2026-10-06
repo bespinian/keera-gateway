@@ -12,6 +12,8 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
+
+	"github.com/bespinian/keera-gateway/internal/auth"
 )
 
 // OIDCConfig describes one identity provider. A dedicated deployment has one;
@@ -201,6 +203,10 @@ func (o *OIDC) Label() string { return o.cfg.Label() }
 // Issuer is the directory this provider signs people in against.
 func (o *OIDC) Issuer() string { return o.cfg.IssuerURL }
 
+// IsGoogle reports whether this provider is Google's. Google's ID tokens carry
+// no groups claim at all.
+func (o *OIDC) IsGoogle() bool { return isGoogle(o.cfg.IssuerURL) }
+
 // Mapping returns how this provider's groups map onto Keera Gateway's roles.
 func (o *OIDC) Mapping() RoleMapping { return o.cfg.Mapping }
 
@@ -285,7 +291,7 @@ type Flow struct {
 
 // NewFlow mints the state, the PKCE verifier and the nonce for a login.
 func NewFlow() Flow {
-	return Flow{State: randomToken(), Verifier: randomToken(), Nonce: randomToken()}
+	return Flow{State: auth.RandomToken(), Verifier: auth.RandomToken(), Nonce: auth.RandomToken()}
 }
 
 // AuthCodeURL is where the browser is sent to sign in.

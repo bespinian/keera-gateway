@@ -1,11 +1,83 @@
 package cli
 
 import (
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 )
+
+// cmdRun is what every command starts with: the client, the flags, and the
+// verb. A command declares its own flags on fs, then calls parse.
+type cmdRun struct {
+	c        *client
+	fs       *flag.FlagSet
+	cmd      string
+	hasVerbs bool
+	// verb is the verb as typed until parse, and its own name after.
+	verb string
+	args []string
+	// rest is args without the verb.
+	rest []string
+
+	// The flags many commands share, declared when newCmdRun is asked to.
+	org    string
+	yes    bool
+	asJSON bool
+}
+
+// newCmdRun takes the verb off args, when cmd has verbs, and declares the
+// shared flags named: "org", "yes" and "json". "orgs" is --org on a report,
+// which spans every organisation the caller can see unless told one.
+func newCmdRun(cmd string, args []string, shared ...string) *cmdRun {
+	entry, _ := find(cmd)
+	r := &cmdRun{c: newClient(), cmd: cmd, hasVerbs: len(entry.subs) > 0, args: args, rest: args}
+	if r.hasVerbs {
+		r.verb, r.rest = split(args)
+	}
+	r.fs = flag.NewFlagSet(cmd, flag.ContinueOnError)
+	for _, name := range shared {
+		switch name {
+		case "org":
+			r.fs.StringVar(&r.org, "org", "", orgUsage)
+		case "orgs":
+			r.fs.StringVar(&r.org, "org", "", orgsUsage)
+		case "yes":
+			r.fs.BoolVar(&r.yes, "yes", false, yesUsage)
+		case "json":
+			r.fs.BoolVar(&r.asJSON, "json", false, jsonUsage)
+		}
+	}
+	return r
+}
+
+// parse reads the verb and the flags. done means there is nothing left to
+// run: help was asked for and printed, or err says what was wrong.
+func (r *cmdRun) parse() (done bool, err error) {
+	if want, ok := wantsHelp(r.args); ok {
+		return true, printHelp(r.fs, r.cmd, want)
+	}
+	if r.hasVerbs {
+		r.verb, err = parseVerb(r.fs, r.cmd, r.verb, r.rest)
+	} else {
+		err = parseCmd(r.fs, r.cmd, r.args)
+	}
+	return err != nil, err
+}
+
+// verbAsked is the verb args name, run or asked about in a request for help,
+// by its own name. It is empty when args name none that cmd has.
+func verbAsked(cmd string, args []string) string {
+	name, _ := split(args)
+	if want, ok := wantsHelp(args); ok {
+		name = want
+	}
+	entry, _ := find(cmd)
+	s, _ := entry.sub(name)
+	return s.name
+}
 
 // parseVerb reads one verb's flags and arguments, going by its entry in
 // help.go. It refuses a verb the command does not have, a flag the verb does
@@ -47,12 +119,12 @@ func parseCmd(fs *flag.FlagSet, cmd string, args []string) error {
 // accept another verb's flag and quietly drop it.
 func parseChecked(fs *flag.FlagSet, args []string, name string, flags []string, spec string) error {
 	if err := parse(fs, args); err != nil {
-		return err
+		return fmt.Errorf("%w (see: keera help %s)", err, name)
 	}
 	var err error
 	fs.Visit(func(f *flag.Flag) {
 		if err == nil && !slices.Contains(flags, f.Name) {
-			err = fmt.Errorf("keera %s does not take --%s (see: keera help %s)", name, f.Name, name)
+			err = fmt.Errorf("%s does not take --%s (see: keera help %s)", name, f.Name, name)
 		}
 	})
 	if err != nil {
@@ -112,9 +184,19 @@ func given(fs *flag.FlagSet, name string) bool {
 
 // parse reads a subcommand's flags, before or after the positional
 // arguments. Go's flag package stops at the first non-flag, so
-// "keera guardrail set project t_1 --rpm 60" is reordered before parsing.
+// "keera guardrail set project project_1 --rpm 60" is reordered before parsing.
+//
+// A bad flag comes back as an error for Run to print, worded the way the rest
+// of the CLI names flags, instead of the flag package printing the whole help.
 func parse(fs *flag.FlagSet, args []string) error {
-	return fs.Parse(reorder(fs, args))
+	fs.SetOutput(io.Discard)
+	err := fs.Parse(reorder(fs, args))
+	if err == nil {
+		return nil
+	}
+	msg := strings.Replace(err.Error(), "flag provided but not defined: -", "unknown flag --", 1)
+	msg = strings.Replace(msg, "flag needs an argument: -", "a value is missing after --", 1)
+	return errors.New(strings.Replace(msg, " for flag -", " for --", 1))
 }
 
 func reorder(fs *flag.FlagSet, args []string) []string {

@@ -50,7 +50,7 @@ func (s *Server) listClients(w http.ResponseWriter, r *http.Request, p *authn.Pr
 	}
 	out := map[string]any{"from": from, "to": to, "data": []connectedClient{}}
 	// The operator key is not a person and has no keys.
-	if p.Via == authn.MethodOperatorKey || p.UserID == "" || p.OrgID == "" {
+	if !isPerson(p) {
 		out["anonymous"] = true
 		httpx.WriteJSON(w, http.StatusOK, out)
 		return

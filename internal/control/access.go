@@ -51,6 +51,12 @@ type accessKey struct {
 	MaxOutputTokens int           `json:"max_output_tokens,omitempty"`
 }
 
+// isPerson reports whether p is someone in an organisation who can hold keys.
+// The operator key is not.
+func isPerson(p *authn.Principal) bool {
+	return p.Via != authn.MethodOperatorKey && p.UserID != "" && p.OrgID != ""
+}
+
 func (s *Server) access(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	now := time.Now()
 	out := map[string]any{
@@ -64,7 +70,7 @@ func (s *Server) access(w http.ResponseWriter, r *http.Request, p *authn.Princip
 
 	// The operator key is not a person and has no keys or spend. Saying so is
 	// clearer than an empty screen.
-	if p.Via == authn.MethodOperatorKey || p.UserID == "" || p.OrgID == "" {
+	if !isPerson(p) {
 		out["anonymous"] = true
 		httpx.WriteJSON(w, http.StatusOK, out)
 		return
@@ -198,7 +204,7 @@ func saysOf(lim *policy.Limits) scopeSays {
 // limit rather than failing the screen: the gateway enforces the guardrail,
 // this only describes it.
 func (s *Server) limitsFor(r *http.Request, scope policy.ScopeType, id string) *policy.Limits {
-	lim, err := s.st.GetPolicy(r.Context(), scope, id)
+	lim, err := s.storedLimits(r.Context(), scope, id)
 	if err != nil {
 		return &policy.Limits{}
 	}

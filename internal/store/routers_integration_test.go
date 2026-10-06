@@ -83,13 +83,13 @@ func TestRouterRoundTripAndTheAllowListsThatNameOne(t *testing.T) {
 	// An allow-list narrowed to the router, which is how a scope is made to
 	// route whatever it asks for - and so the one arrangement a deletion would
 	// leave able to reach nothing at all.
-	if err := st.PutPolicy(ctx, policy.ScopeProject, f.projectID,
+	if err := st.PutGuardrail(ctx, policy.ScopeProject, f.projectID,
 		policy.Limits{AllowedModels: []string{auto.Alias}}); err != nil {
-		t.Fatalf("PutPolicy: %v", err)
+		t.Fatalf("PutGuardrail: %v", err)
 	}
-	if err := st.PutPolicy(ctx, policy.ScopeOrg, "org_2",
+	if err := st.PutGuardrail(ctx, policy.ScopeOrg, "org_2",
 		policy.Limits{AllowedModels: []string{auto.Alias}}); err != nil {
-		t.Fatalf("PutPolicy: %v", err)
+		t.Fatalf("PutGuardrail: %v", err)
 	}
 	users, err := st.RouterUsers(ctx, f.orgID, auto.Alias)
 	if err != nil {

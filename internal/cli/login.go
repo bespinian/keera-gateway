@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"net"
 	"net/http"
@@ -31,20 +30,17 @@ import (
 
 // loginCmd signs this machine in to a gateway.
 func loginCmd(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("login", flag.ExitOnError)
+	// Run has already taken the global --url, so the client uses it.
+	r := newCmdRun("login", args)
+	fs := r.fs
 	provider := fs.String("provider", "",
 		"which identity provider to sign in through, or passkey, where a deployment offers several")
 	noBrowser := fs.Bool("no-browser", false,
 		"do not open a browser; the sign-in URL is printed either way")
-	fs.Usage = func() { _ = printHelp(fs, "login", "") }
-	if want, ok := wantsHelp(args); ok {
-		return printHelp(fs, "login", want)
-	}
-	if err := parseCmd(fs, "login", args); err != nil {
+	if done, err := r.parse(); done {
 		return err
 	}
-	// Run has already taken the global --url, so the client uses it.
-	c := newClient()
+	c := r.c
 
 	name, err := chooseProvider(ctx, c, *provider)
 	if err != nil {
@@ -124,17 +120,14 @@ func loginCmd(ctx context.Context, args []string) error {
 // logoutCmd ends this machine's sign-in, and with --all every one this person
 // holds.
 func logoutCmd(ctx context.Context, args []string) error {
-	c := newClient()
-	fs := flag.NewFlagSet("logout", flag.ExitOnError)
+	r := newCmdRun("logout", args)
+	fs := r.fs
 	all := fs.Bool("all", false,
 		"end every sign-in this account holds, on every machine and in every browser")
-	fs.Usage = func() { _ = printHelp(fs, "logout", "") }
-	if want, ok := wantsHelp(args); ok {
-		return printHelp(fs, "logout", want)
-	}
-	if err := parseCmd(fs, "logout", args); err != nil {
+	if done, err := r.parse(); done {
 		return err
 	}
+	c := r.c
 	switch {
 	case c.signedIn.Token == "" && c.key == "":
 		fmt.Printf("Not signed in to %s.\n", c.base)
@@ -171,21 +164,16 @@ func logoutCmd(ctx context.Context, args []string) error {
 
 // whoamiCmd says who the credential in use belongs to, and which gateway.
 func whoamiCmd(ctx context.Context, args []string) error {
-	c := newClient()
-	fs := flag.NewFlagSet("whoami", flag.ExitOnError)
-	asJSON := fs.Bool("json", false, jsonUsage)
-	fs.Usage = func() { _ = printHelp(fs, "whoami", "") }
-	if want, ok := wantsHelp(args); ok {
-		return printHelp(fs, "whoami", want)
-	}
-	if err := parseCmd(fs, "whoami", args); err != nil {
+	r := newCmdRun("whoami", args, "json")
+	if done, err := r.parse(); done {
 		return err
 	}
+	c := r.c
 	me, err := whoami(ctx, c)
 	if err != nil {
 		return err
 	}
-	if *asJSON {
+	if r.asJSON {
 		return out(true, me, nil)
 	}
 	fmt.Printf("%s at %s\n", describe(me), c.base)

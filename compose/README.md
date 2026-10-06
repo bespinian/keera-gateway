@@ -154,7 +154,7 @@ download again next time.
   The usual fix is `--ipc=host`, but podman-compose 1.6 ignores `ipc:`, so the
   GPU tier sets the `/dev/shm` size instead, 8 GB by default.
 - **`max_context` must match the backend's window.** Clients read it from
-  `/v1/models`, and filter and router models are sized against it. A wrong
+  `/api/v1/models`, and filter and router models are sized against it. A wrong
   value misleads every client and mis-sizes every hook. `models.yaml` says
   16384, which is safe on both tiers. On the GPU tier, raise it on each
   organisation's model with `keera model set keera-speed --max-context 32768`.

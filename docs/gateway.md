@@ -71,7 +71,7 @@ and its administrators add, change and remove it. The backend can be any URL:
 your own inference plane, or a provider reached with the organisation's own
 key.
 
-An administrator adds one in the panel (**Models → New model**) or with
+An administrator adds one in the panel (**Models → Add model**) or with
 `keera model add <alias>`. The CLI uses their own organisation, so they never
 pass `--org`. An operator picks the organisation in the panel, or passes
 `--org <id>` when there is more than one.

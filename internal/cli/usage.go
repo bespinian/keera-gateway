@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"strconv"
 	"strings"
@@ -13,21 +12,16 @@ import (
 )
 
 func usageCmd(ctx context.Context, args []string) error {
-	c := newClient()
-	fs := flag.NewFlagSet("usage", flag.ExitOnError)
-	org := fs.String("org", "", orgsUsage)
+	r := newCmdRun("usage", args, "orgs", "json")
+	fs := r.fs
 	groupBy := fs.String("by", "model", "group by: model, client, project, key, user, day or org")
 	since := fs.Duration("since", reportWindow, "how far back to report")
-	asJSON := fs.Bool("json", false, jsonUsage)
-	fs.Usage = func() { _ = printHelp(fs, "usage", "") }
-	if want, ok := wantsHelp(args); ok {
-		return printHelp(fs, "usage", want)
-	}
-	if err := parseCmd(fs, "usage", args); err != nil {
+	if done, err := r.parse(); done {
 		return err
 	}
+	c := r.c
 
-	q, err := reportQuery(ctx, c, *org, nil, *since, map[string]string{"group_by": *groupBy})
+	q, err := reportQuery(ctx, c, r.org, nil, *since, map[string]string{"group_by": *groupBy})
 	if err != nil {
 		return err
 	}
@@ -35,7 +29,7 @@ func usageCmd(ctx context.Context, args []string) error {
 	if err := c.do(ctx, "GET", "/v1/usage?"+q.Encode(), nil, &res); err != nil {
 		return err
 	}
-	return out(*asJSON, res, func(w *table) {
+	return out(r.asJSON, res, func(w *table) {
 		if len(res.Data) == 0 {
 			printNone(w, "usage in the last "+shortDuration(*since), "")
 			return
@@ -84,29 +78,24 @@ func (res usageResponse) label(groupBy, group string) string {
 // The backend's message is printed beside the model and the key, because only
 // its wording says whose problem a failure is.
 func failuresCmd(ctx context.Context, args []string) error {
-	c := newClient()
-	fs := flag.NewFlagSet("failures", flag.ExitOnError)
-	org := fs.String("org", "", orgsUsage)
+	r := newCmdRun("failures", args, "orgs", "json")
+	fs := r.fs
 	kind := fs.String("kind", "failed", "failed, refused, interrupted or all")
 	alias := fs.String("model", "", "restrict to one model")
 	w := registerWho(fs)
 	status := fs.Int("status", 0, "restrict to one status")
 	since := fs.Duration("since", reportWindow, "how far back to look")
 	limit := fs.Int("limit", reportLimit, "how many to print")
-	asJSON := fs.Bool("json", false, jsonUsage)
-	fs.Usage = func() { _ = printHelp(fs, "failures", "") }
-	if want, ok := wantsHelp(args); ok {
-		return printHelp(fs, "failures", want)
-	}
-	if err := parseCmd(fs, "failures", args); err != nil {
+	if done, err := r.parse(); done {
 		return err
 	}
+	c := r.c
 	// 'all' is every request that did not deliver, which the request log
 	// calls unhappy.
 	if *kind == "all" {
 		*kind = string(store.OutcomeUnhappy)
 	}
-	q, err := reportQuery(ctx, c, *org, w, *since, map[string]string{
+	q, err := reportQuery(ctx, c, r.org, w, *since, map[string]string{
 		"outcome": *kind, "facets": "1", "limit": strconv.Itoa(*limit), "alias": *alias,
 	})
 	if err != nil {
@@ -120,7 +109,7 @@ func failuresCmd(ctx context.Context, args []string) error {
 	if err := c.do(ctx, "GET", "/v1/requests?"+q.Encode(), nil, &res); err != nil {
 		return err
 	}
-	return out(*asJSON, res, func(w *table) { printFailures(w, res, store.Outcome(*kind), *since) })
+	return out(r.asJSON, res, func(w *table) { printFailures(w, res, store.Outcome(*kind), *since) })
 }
 
 type failuresResponse struct {

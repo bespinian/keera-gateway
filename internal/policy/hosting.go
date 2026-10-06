@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"errors"
 	"fmt"
 	"net/netip"
 	"net/url"
@@ -53,6 +54,20 @@ func (m Model) LocationFromBackends() (string, error) {
 	}
 	return "", fmt.Errorf("location is required: %s is outside this network, and its "+
 		"address does not say where it runs - state it, such as ch or usa", m.Endpoint())
+}
+
+// CheckBackend says what is wrong with where a model is sent and what it
+// asks for there, or nil when nothing is. The control API and catalogue files
+// share it, so both refuse the same entries.
+func (m Model) CheckBackend() error {
+	switch {
+	case len(m.Backends) == 0:
+		return errors.New("at least one backend is required")
+	case m.BackendModel == "":
+		return errors.New("'backend_model' is required - it is the name the inference " +
+			"plane serves, which for vLLM is --served-model-name")
+	}
+	return nil
 }
 
 // Endpoint is the host that decided Hosting, so the screen can show the reason

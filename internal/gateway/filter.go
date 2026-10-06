@@ -247,7 +247,7 @@ func (s *Server) chainFilter(ctx context.Context, run *filterRun, orgID, alias s
 	if !ok {
 		// Nothing is known about it, not even whether it was enforcing, so it
 		// fails closed.
-		return nil, s.filterUnavailable(alias,
+		return nil, filterUnavailable(alias,
 			"no filter of that alias exists in this organisation any more"), true
 	}
 	m, broken := s.filterModel(f)
@@ -256,7 +256,7 @@ func (s *Server) chainFilter(ctx context.Context, run *filterRun, orgID, alias s
 		// nothing, and nothing else would show it.
 		s.noteFilter(run, f, store.FilterError, 0, 0, len(texts), 0, tr)
 		if f.Enforces() {
-			return nil, s.filterUnavailable(alias, broken), true
+			return nil, filterUnavailable(alias, broken), true
 		}
 		return nil, nil, false
 	}
@@ -278,7 +278,7 @@ func (s *Server) chainFilter(ctx context.Context, run *filterRun, orgID, alias s
 			if !f.Enforces() {
 				return nil, nil, false
 			}
-			return nil, s.filterRefused(f, refused.reason), true
+			return nil, filterRefused(f, refused.reason), true
 		}
 		s.noteFilter(run, f, store.FilterError, took, cost.micros, len(texts), 0, tr)
 		// A shadow filter that cannot run lets the request through: a
@@ -364,7 +364,7 @@ func filterFailed(f policy.Filter, err error) *refusal {
 // 503 because the deployment is not ready for this key and an administrator
 // can fix that. It names the filter, since the developer will pass the
 // message on.
-func (s *Server) filterUnavailable(alias, why string) *refusal {
+func filterUnavailable(alias, why string) *refusal {
 	return &refusal{
 		status: http.StatusServiceUnavailable,
 		typ:    "server_error", code: "filter_unavailable",
@@ -381,7 +381,7 @@ func (s *Server) filterUnavailable(alias, why string) *refusal {
 // It is 403, unlike the failures above: a refusal is the guardrail working,
 // and only the status stops a client retrying what will never succeed. The
 // reason is quoted as the filter's, since a small model may have misread.
-func (s *Server) filterRefused(f policy.Filter, reason string) *refusal {
+func filterRefused(f policy.Filter, reason string) *refusal {
 	msg := fmt.Sprintf("a guardrail on this key filters every request through %q "+
 		"before it is forwarded, and that filter refused this one", f.Alias)
 	switch {

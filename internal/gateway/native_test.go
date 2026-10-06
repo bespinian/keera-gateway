@@ -332,6 +332,11 @@ func TestCountTokensIsAnsweredWithoutForwarding(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status for an unknown model = %d, want 404", resp.StatusCode)
 	}
+	// As /v1/messages answers: no model is a bad request, not a missing one.
+	resp = h.post(t, "/v1/messages/count_tokens", `{"messages":[]}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status without a model = %d, want 400", resp.StatusCode)
+	}
 }
 
 func TestCountTokensCountsTheGuardrailsSystemPrompt(t *testing.T) {

@@ -86,7 +86,7 @@ export async function projectsView(ctx) {
             onClick: () => newProject(ctx),
           },
           icon(icons.plus),
-          "New project",
+          "Create project",
         )
       : null,
   );
@@ -259,7 +259,7 @@ function newProject(ctx) {
   const { name, description } = projectFields(null);
   const err = h("div");
   modal({
-    title: "New project",
+    title: "Create project",
     subtitle:
       "Usually one per product or group of people, so budgets and reports " +
       "match how the organisation works.",
@@ -346,7 +346,7 @@ function editProject(ctx, project) {
             }
           },
         },
-        "Save project",
+        "Save",
       ),
     ],
   });
@@ -355,10 +355,10 @@ function editProject(ctx, project) {
 // deleteProject removes a project once nothing live is bound to it.
 //
 // The control plane refuses while any key in the project is not revoked, expired
-// ones included, and the row already knows how many that is - so such a project
-// is not offered the button at all. Being told why, next to the screen that
-// fixes it, is more use than a red button that comes back with the same
-// sentence as an error.
+// ones included, and the row already knows how many that is - so for such a
+// project the button explains why instead of asking to confirm, and offers the
+// way to the keys. That is more use than a red button that comes back with the
+// same sentence as an error.
 //
 // Where it can go ahead, the guardrails are the part worth naming: they are the
 // only thing in a project that is not recoverable from somewhere else.

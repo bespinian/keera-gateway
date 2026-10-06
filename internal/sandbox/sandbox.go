@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
@@ -190,11 +191,6 @@ func ValidPort(p int) bool {
 // the sandbox is close by and a developer is waiting at a terminal.
 const DialTimeout = 10 * time.Second
 
-// dialAddress joins a host and a port, handling IPv6.
-func dialAddress(host string, port int) string {
-	return net.JoinHostPort(host, fmt.Sprint(port))
-}
-
 // dialSandbox connects to addr, which serves the given port of the sandbox.
 func dialSandbox(ctx context.Context, ref Ref, port int, addr string) (net.Conn, error) {
 	d := net.Dialer{Timeout: DialTimeout}
@@ -229,18 +225,36 @@ func mappedTiers(runtimes map[policy.Isolation]string) []policy.Isolation {
 	return tiers
 }
 
-// mappedRuntime is the runtime a class runs on. ok is false when the class
-// needs a tier that has no runtime mapped; the caller words the refusal. The
-// standard tier never needs one: empty means the platform's default.
-func mappedRuntime(c policy.SandboxClass, runtimes map[policy.Isolation]string) (name string, ok bool) {
+// runtimeFor is the runtime a class runs on with the given driver. The
+// standard tier never needs one mapped: empty means the platform's default.
+func runtimeFor(c policy.SandboxClass, runtimes map[policy.Isolation]string, driver string) (string, error) {
 	if c.Isolation == policy.IsolationStandard {
-		return runtimes[policy.IsolationStandard], true
+		return runtimes[policy.IsolationStandard], nil
 	}
-	name = runtimes[c.Isolation]
-	return name, name != ""
+	if name := runtimes[c.Isolation]; name != "" {
+		return name, nil
+	}
+	return "", noRuntime(c, driver)
 }
 
-// formatExpiry renders an expiry the way the Kubernetes objects hold it.
-func formatExpiry(t time.Time) string {
-	return t.UTC().Format(time.RFC3339)
+// noRuntime refuses a class whose isolation tier has no runtime here. The
+// class is never run with a weaker one: a sandbox that claimed a kernel of its
+// own and did not have one would be worse than this refusal.
+func noRuntime(c policy.SandboxClass, driver string) error {
+	return Refuse("the sandbox class %q asks for %s isolation and the %s driver in this "+
+		"deployment has no runtime for it; set KEERA_SANDBOX_RUNTIME_%s (a RuntimeClass on "+
+		"Kubernetes, runsc or krun on podman), or move the class to a tier it has",
+		c.Name, c.Isolation, driver, strings.ToUpper(string(c.Isolation)))
 }
+
+// The home volume. It is one volume because everything that should survive a
+// suspend - working copy, build cache, shell history - lives under home. The
+// image's sshd_config and entrypoint use the same path and user.
+const (
+	homeVolume = "home"
+	homePath   = "/home/keera"
+	// sandboxUID is the user a sandbox runs as. It is fixed rather than taken
+	// from the image, so an image upgrade cannot lock a sandbox out of its
+	// own home volume.
+	sandboxUID = 1000
+)

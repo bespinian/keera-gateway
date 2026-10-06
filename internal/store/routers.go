@@ -164,9 +164,9 @@ func (s *Store) RouterReportFor(ctx context.Context, orgID, alias string, from, 
 
 	err := s.pool.QueryRow(ctx, `
 		SELECT `+cellColumns+`,
-		       count(*) FILTER (WHERE router_outcome = 'chose'),
-		       count(*) FILTER (WHERE router_outcome = 'fallback'),
-		       count(*) FILTER (WHERE router_outcome = 'error'),
+		       `+countOf("router_outcome", RouterChose)+`,
+		       `+countOf("router_outcome", RouterFellBack)+`,
+		       `+countOf("router_outcome", RouterError)+`,
 		       COALESCE(round(percentile_cont(0.5) WITHIN GROUP (ORDER BY router_ms)
 		                      FILTER (WHERE router_ms > 0)), 0)::bigint,
 		       COALESCE(round(percentile_cont(0.95) WITHIN GROUP (ORDER BY router_ms)
@@ -185,7 +185,7 @@ func (s *Store) RouterReportFor(ctx context.Context, orgID, alias string, from, 
 		SELECT COALESCE(alias, ''), `+cellColumns+`
 		FROM usage_events
 		WHERE ts >= $1 AND ts < $2 AND org_id = $3 AND router = $4
-		  AND router_outcome <> 'error'
+		  AND router_outcome <> '`+string(RouterError)+`'
 		GROUP BY 1
 		ORDER BY 2 DESC`,
 		from, to, orgID, alias)
@@ -217,9 +217,9 @@ func (s *Store) RouterStats(ctx context.Context, orgID string, from, to time.Tim
 ) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT router, count(*),
-		       count(*) FILTER (WHERE router_outcome = 'chose'),
-		       count(*) FILTER (WHERE router_outcome = 'fallback'),
-		       count(*) FILTER (WHERE router_outcome = 'error'),
+		       `+countOf("router_outcome", RouterChose)+`,
+		       `+countOf("router_outcome", RouterFellBack)+`,
+		       `+countOf("router_outcome", RouterError)+`,
 		       COALESCE(sum(cost_micros), 0)
 		FROM usage_events
 		WHERE ts >= $1 AND ts < $2 AND org_id = $3 AND router IS NOT NULL

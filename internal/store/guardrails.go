@@ -22,9 +22,9 @@ var limitFields = []string{"allowed_models", "max_output_tokens", "rpm", "tpm",
 // aliased p.
 var limitColumns = "p." + strings.Join(limitFields, ", p.")
 
-// putPolicySQL writes one scope's limits, $1 and $2 being the scope and the
+// putGuardrailSQL writes one scope's limits, $1 and $2 being the scope and the
 // rest limitValues.
-var putPolicySQL = func() string {
+var putGuardrailSQL = func() string {
 	values := make([]string, len(limitFields))
 	updates := make([]string, len(limitFields))
 	for i, f := range limitFields {
@@ -37,8 +37,8 @@ var putPolicySQL = func() string {
 		`, updated_at = now()`
 }()
 
-// copyKeyPolicySQL gives key $2 the limits of key $1.
-var copyKeyPolicySQL = `INSERT INTO guardrails (scope_type, scope_id, ` +
+// copyKeyGuardrailSQL gives key $2 the limits of key $1.
+var copyKeyGuardrailSQL = `INSERT INTO guardrails (scope_type, scope_id, ` +
 	strings.Join(limitFields, ", ") + `, updated_at)
 	SELECT scope_type, $2, ` + strings.Join(limitFields, ", ") + `, now()
 	FROM guardrails WHERE scope_type = 'key' AND scope_id = $1`
@@ -53,7 +53,7 @@ func limitTargets(lim *policy.Limits, period **string) []any {
 		&lim.AllowedRepos}
 }
 
-// limitValues is what putPolicySQL writes, in limitFields' order.
+// limitValues is what putGuardrailSQL writes, in limitFields' order.
 func limitValues(lim policy.Limits) []any {
 	return []any{lim.AllowedModels, lim.MaxOutputTokens, lim.RPM, lim.TPM,
 		lim.BudgetMicros, periodStr(lim.BudgetPeriod), lim.SystemPrompt, lim.Filters,
@@ -62,8 +62,8 @@ func limitValues(lim policy.Limits) []any {
 		lim.AllowedRepos}
 }
 
-// GetPolicy reads the limits attached to one scope.
-func (s *Store) GetPolicy(ctx context.Context, scopeType policy.ScopeType, scopeID string) (policy.Limits, error) {
+// GetGuardrail reads the limits attached to one scope.
+func (s *Store) GetGuardrail(ctx context.Context, scopeType policy.ScopeType, scopeID string) (policy.Limits, error) {
 	var (
 		lim    policy.Limits
 		period *string
@@ -79,10 +79,10 @@ func (s *Store) GetPolicy(ctx context.Context, scopeType policy.ScopeType, scope
 	return lim, nil
 }
 
-// PutPolicy replaces the limits attached to one scope.
-func (s *Store) PutPolicy(ctx context.Context, scopeType policy.ScopeType, scopeID string, lim policy.Limits) error {
+// PutGuardrail replaces the limits attached to one scope.
+func (s *Store) PutGuardrail(ctx context.Context, scopeType policy.ScopeType, scopeID string, lim policy.Limits) error {
 	args := append([]any{string(scopeType), scopeID}, limitValues(lim)...)
-	_, err := s.pool.Exec(ctx, putPolicySQL, args...)
+	_, err := s.pool.Exec(ctx, putGuardrailSQL, args...)
 	return err
 }
 
@@ -100,13 +100,13 @@ type GuardrailRef struct {
 // this package.
 func (s *Store) scopesNaming(ctx context.Context, match, orgID, alias string) ([]GuardrailRef, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT p.scope_type, p.scope_id, COALESCE(o.name, t.name, k.name, p.scope_id)
+		SELECT p.scope_type, p.scope_id, COALESCE(o.name, pr.name, k.name, p.scope_id)
 		FROM guardrails p
-		LEFT JOIN orgs     o ON p.scope_type = 'org'     AND o.id = p.scope_id AND o.id = $1
-		LEFT JOIN projects t ON p.scope_type = 'project' AND t.id = p.scope_id AND t.org_id = $1
-		LEFT JOIN api_keys k ON p.scope_type = 'key'     AND k.id = p.scope_id AND k.org_id = $1
+		LEFT JOIN orgs      o ON p.scope_type = 'org'     AND o.id = p.scope_id AND o.id = $1
+		LEFT JOIN projects pr ON p.scope_type = 'project' AND pr.id = p.scope_id AND pr.org_id = $1
+		LEFT JOIN api_keys  k ON p.scope_type = 'key'     AND k.id = p.scope_id AND k.org_id = $1
 		WHERE `+match+`
-		  AND (o.id IS NOT NULL OR t.id IS NOT NULL OR k.id IS NOT NULL)
+		  AND (o.id IS NOT NULL OR pr.id IS NOT NULL OR k.id IS NOT NULL)
 		ORDER BY p.scope_type, p.scope_id`, orgID, alias)
 	if err != nil {
 		return nil, err

@@ -91,7 +91,12 @@ export async function peopleView(ctx) {
   // sign-in, so the screen says where roles come from rather than offering a
   // control that does not keep.
   const canAssign = !ctx.state.me.roles_from_directory;
-  ctx.setSubtitle(`${users.length} ${plural(users.length, "user")}`);
+  const active = users.filter((u) => !u.disabled_at).length;
+  ctx.setSubtitle(
+    active === users.length
+      ? `${users.length} ${plural(users.length, "user")}`
+      : `${active} active of ${users.length}`,
+  );
 
   const head = h(
     "div",
@@ -172,7 +177,7 @@ export async function peopleView(ctx) {
                 "button",
                 {
                   class: "btn btn-sm",
-                  title: "Let this person sign in again",
+                  title: "Let this user sign in again",
                   onClick: () => enablePerson(ctx, u),
                 },
                 "Enable",
@@ -181,7 +186,7 @@ export async function peopleView(ctx) {
                 "button",
                 {
                   class: "btn btn-sm btn-danger",
-                  title: "Disable this person, for example when they leave",
+                  title: "Disable this user, for example when they leave",
                   onClick: () => disablePerson(ctx, u),
                 },
                 "Disable",
@@ -195,8 +200,8 @@ export async function peopleView(ctx) {
                   "button",
                   {
                     class: "btn btn-sm",
-                    title: "This person's role",
-                    "aria-label": "Edit this person's role",
+                    title: "Edit this user's role",
+                    "aria-label": `Edit the role of ${u.email}`,
                     onClick: () => changeRole(ctx, u),
                   },
                   icon(icons.pencil),
@@ -225,6 +230,14 @@ export async function peopleView(ctx) {
           u.disabled_at ? "disabled" : "",
         ].join(" "),
       searchLabel: "users",
+      // Off by default: someone disabled has left, and is kept only so their
+      // usage and audit entries still have a name.
+      toggles: [
+        {
+          label: "Show disabled",
+          hidden: (u) => !!u.disabled_at,
+        },
+      ],
     },
   );
 
@@ -269,7 +282,7 @@ function addPerson(ctx) {
   );
 
   modal({
-    title: "Add a user",
+    title: "Add user",
     subtitle: canAssign
       ? ctx.state.me.passkeys
         ? "This reserves their role."
@@ -317,7 +330,7 @@ function addPerson(ctx) {
             try {
               const passkey =
                 ctx.state.me.passkeys && signIn.value === "passkey";
-              const user = await api.inviteUser(
+              const user = await api.addUser(
                 ctx.orgID || ctx.state.me.org_id,
                 email.value.trim().toLowerCase(),
                 role.value,
@@ -334,7 +347,7 @@ function addPerson(ctx) {
             }
           },
         },
-        "Add",
+        "Add user",
       ),
     ],
   });
@@ -366,7 +379,7 @@ function changeRole(ctx, user) {
             try {
               await api.setUserRole(user.id, role.value);
               close();
-              toast("Role updated", "good");
+              toast("Role saved", "good");
               ctx.reload();
             } catch (ex) {
               showError(err, ex.message);
@@ -374,7 +387,7 @@ function changeRole(ctx, user) {
             }
           },
         },
-        "Save role",
+        "Save",
       ),
     ],
   });
@@ -440,7 +453,7 @@ function passkeyButton(ctx, u) {
       "button",
       {
         class: "btn btn-sm",
-        title: "This person's passkeys, and a new set-up link",
+        title: "This user's passkeys, and a new set-up link",
         onClick: () => userPasskeys(u),
       },
       "Passkeys",
@@ -450,7 +463,7 @@ function passkeyButton(ctx, u) {
     "button",
     {
       class: "btn btn-sm",
-      title: "Let this person sign in with a passkey instead",
+      title: "Let this user sign in with a passkey instead",
       onClick: () => switchToPasskey(ctx, u),
     },
     "Use a passkey",
@@ -463,7 +476,7 @@ function switchToPasskey(ctx, user) {
     body:
       "They will sign in with a passkey instead of the identity provider, and " +
       "you get a set-up link to send them. This cannot be undone here.",
-    confirmLabel: "Create set-up link",
+    confirmLabel: "Get set-up link",
     onConfirm: async () => {
       const link = await api.passkeyLink(user.id);
       ctx.reload();

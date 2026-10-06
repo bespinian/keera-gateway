@@ -353,8 +353,7 @@ func (s *Server) decide(ctx context.Context, rt policy.Router, m policy.Model, t
 		return d, err
 	}
 
-	var unread *unreadable
-	if err != nil && errors.As(err, &unread) {
+	if _, ok := errors.AsType[*unreadable](err); ok {
 		// No usable answer to the lettered question: remember that and ask
 		// for a name instead.
 		s.dropLogprobs(m)

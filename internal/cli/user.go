@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"net/url"
 	"slices"
@@ -26,38 +25,24 @@ const roleHint = " (the operator role comes from KEERA_OPERATORS or " +
 
 // userRun is one 'keera user' invocation.
 type userRun struct {
-	c          *client
-	fs         *flag.FlagSet
-	org        string
+	*cmdRun
 	addRole    string
 	externalID string
 	passkey    bool
-	yes        bool
-	asJSON     bool
 }
 
 func userCmd(ctx context.Context, args []string) error {
-	sub, rest := split(args)
-	fs := flag.NewFlagSet("user "+sub, flag.ExitOnError)
-	r := &userRun{c: newClient(), fs: fs}
-	fs.StringVar(&r.org, "org", "", orgUsage)
+	r := &userRun{cmdRun: newCmdRun("user", args, "org", "yes", "json")}
+	fs := r.fs
 	fs.StringVar(&r.addRole, "role", "member", "member or admin")
 	fs.StringVar(&r.externalID, "external-id", "",
 		"the identity provider's subject, when it is known before the first sign-in")
 	fs.BoolVar(&r.passkey, "passkey", false,
 		"they sign in with a passkey instead of an identity provider; prints their set-up link")
-	fs.BoolVar(&r.yes, "yes", false, yesUsage)
-	fs.BoolVar(&r.asJSON, "json", false, jsonUsage)
-
-	fs.Usage = func() { _ = printHelp(fs, "user", sub) }
-	if want, ok := wantsHelp(args); ok {
-		return printHelp(fs, "user", want)
-	}
-	verb, err := parseVerb(fs, "user", sub, rest)
-	if err != nil {
+	if done, err := r.parse(); done {
 		return err
 	}
-	switch verb {
+	switch r.verb {
 	case "add":
 		return r.add(ctx)
 	case "role":
@@ -273,11 +258,7 @@ func (r *userRun) enable(ctx context.Context) error {
 
 // find resolves the person named by the first argument in the organisation.
 func (r *userRun) find(ctx context.Context) (store.User, error) {
-	orgID, err := resolveOrg(ctx, r.c, r.org)
-	if err != nil {
-		return store.User{}, err
-	}
-	return findUser(ctx, r.c, orgID, r.fs.Arg(0))
+	return findUser(ctx, r.c, r.org, r.fs.Arg(0))
 }
 
 // checkRole refuses a role the control plane would refuse, before anything is
@@ -289,8 +270,13 @@ func checkRole(role string) error {
 	return fmt.Errorf("the role must be one of: %s%s", strings.Join(roleNames, ", "), roleHint)
 }
 
-// findUser resolves an email address or an id to a person.
-func findUser(ctx context.Context, c *client, orgID, who string) (store.User, error) {
+// findUser resolves an email address or an id to a person. org is resolved
+// as resolveOrg does.
+func findUser(ctx context.Context, c *client, org, who string) (store.User, error) {
+	orgID, err := resolveOrg(ctx, c, org)
+	if err != nil {
+		return store.User{}, err
+	}
 	users, err := list[store.User](ctx, c, inOrg("/v1/users", orgID))
 	if err != nil {
 		return store.User{}, err

@@ -29,7 +29,7 @@ sandboxes:
   - name: standard
     description: A general-purpose workstation - the repo toolchain, an editor server, an agent.
     # No image is published for this. Build the base and put your own on top:
-    #   podman build -f sandbox/Containerfile -t localhost/keera-sandbox:dev .
+    #   podman build -t localhost/keera-sandbox:dev sandbox
     image: localhost/keera-sandbox:dev
     # On a single host this is whatever OCI runtime KEERA_SANDBOX_RUNTIME_*
     # names. Most hosts have only runc or crun, so "standard" is the honest
@@ -49,8 +49,9 @@ sandboxes:
     isolation: standard
     cpu: "2"
     memory: 4Gi
-    # No volume. An agent sandbox exists for one task and pushes a branch at the
+    # No disk. An agent sandbox exists for one task and pushes a branch at the
     # end of it, so there is nothing worth keeping - and it is never suspended.
+    # Podman keeps a home volume all the same.
     disk: ""
     default_ttl: 1h
     max_ttl: 4h

@@ -39,6 +39,7 @@ import {
   rangePicker,
   crumb,
   gone,
+  sectionHead,
 } from "../ui.js";
 import { outcomeMeaning, outcomeOf, oneLine } from "../status.js";
 import { requestTable, showRequest } from "./requestlog.js";
@@ -190,15 +191,11 @@ export async function sessionLog(ctx, { scope = {}, since, hide = {} }) {
   const wrap = h(
     "div",
     { style: { marginTop: "24px" } },
-    h(
-      "div",
-      { class: "section-head" },
-      h("h2", {}, "Sessions"),
-      h("div", { style: { flex: 1 } }),
+    sectionHead("Sessions", [
       sortSeg(ctx, sort),
       troubleButton(ctx, unhappy),
       csvButton(params),
-    ),
+    ]),
   );
 
   if (!rows.length) {
@@ -404,7 +401,7 @@ function sessionTable(ctx, rows, names, currency, hide = {}) {
                 ? "The client named this session itself"
                 : "Grouped by a hash of the prompt that opened the session",
             ),
-            a.stated ? pill("named") : null,
+            a.stated ? pill("Named") : null,
           ),
           h(
             "span",
@@ -631,7 +628,7 @@ export async function sessionDetailView(ctx) {
               },
               names.keys[s.key_id] || s.key_id,
             )
-          : pill("no key"),
+          : pill("No key"),
         s.project_id
           ? h(
               "a",
@@ -754,13 +751,7 @@ export async function sessionDetailView(ctx) {
     h(
       "div",
       { style: { marginTop: "24px" } },
-      h(
-        "div",
-        { class: "section-head" },
-        h("h2", {}, "Requests"),
-        h("div", { style: { flex: 1 } }),
-        h("span", { class: "faint" }, "oldest first"),
-      ),
+      sectionHead("Requests", "oldest first"),
       h(
         "div",
         { style: { marginTop: "12px" } },
@@ -784,18 +775,11 @@ export async function sessionDetailView(ctx) {
       h(
         "div",
         { style: { marginTop: "24px" } },
-        h(
-          "div",
-          { class: "section-head" },
-          h("h2", {}, "Tool calls"),
-          h("div", { style: { flex: 1 } }),
-          h(
-            "span",
-            { class: "faint" },
-            s.stated
-              ? "named by the client with this session"
-              : "this key's calls while the session ran",
-          ),
+        sectionHead(
+          "Tool calls",
+          s.stated
+            ? "named by the client with this session"
+            : "this key's calls while the session ran",
         ),
         h(
           "div",

@@ -35,11 +35,8 @@ import (
 
 // sandboxRun is one 'keera sandbox' invocation.
 type sandboxRun struct {
-	c   *client
-	fs  *flag.FlagSet
-	sub string
+	*cmdRun
 
-	org     string
 	project string
 	class   string
 	purpose string
@@ -52,20 +49,24 @@ type sandboxRun struct {
 	all     bool
 	by      string
 	since   time.Duration
-	yes     bool
-	asJSON  bool
 }
 
 func sandboxCmd(ctx context.Context, args []string) error {
-	sub, rest := split(args)
-	fs := flag.NewFlagSet("sandbox "+sub, flag.ExitOnError)
-	r := &sandboxRun{c: newClient(), fs: fs, sub: sub}
-	fs.StringVar(&r.org, "org", "", orgUsage)
+	// 'usage' is a report, which spans every organisation the caller can see
+	// unless told one.
+	org := "org"
+	if verbAsked("sandbox", args) == "usage" {
+		org = "orgs"
+	}
+	r := &sandboxRun{cmdRun: newCmdRun("sandbox", args, org, "yes", "json")}
+	fs := r.fs
 	fs.StringVar(&r.project, "project", "", "project the sandbox belongs to, by name or id. A new sandbox without it goes in the "+
 		"organisation's oldest project; a list without it shows every project. Its key is in "+
 		"that project, so the budget, the rate limit and the allowed models are the project's")
-	fs.StringVar(&r.class, "class", "", "which machine to ask for; 'keera sandbox classes' lists them")
-	fs.StringVar(&r.purpose, "purpose", "", "'engineer' - a machine you work in - or 'agent' - one task's")
+	fs.StringVar(&r.class, "class", "", "which machine to ask for, or on 'list' which to show; "+
+		"'keera sandbox classes' lists them")
+	fs.StringVar(&r.purpose, "purpose", "", "'engineer' - a machine you work in - or 'agent' - one task's; "+
+		"on 'list', which to show")
 	fs.DurationVar(&r.ttl, "ttl", 0, "how long it lives; the class's default if not given")
 	fs.StringVar(&r.repo, "repo", "", "repository to check out into it")
 	fs.StringVar(&r.branch, "branch", "", "branch to check out")
@@ -77,20 +78,10 @@ func sandboxCmd(ctx context.Context, args []string) error {
 	fs.BoolVar(&r.all, "all", false, "include sandboxes that have finished")
 	fs.StringVar(&r.by, "by", "class", "group 'usage' by class, project or user")
 	fs.DurationVar(&r.since, "since", reportWindow, "how far back 'usage' looks")
-	fs.BoolVar(&r.yes, "yes", false, yesUsage)
-	fs.BoolVar(&r.asJSON, "json", false, jsonUsage)
-
-	fs.Usage = func() { _ = printHelp(fs, "sandbox", sub) }
-	if want, ok := wantsHelp(args); ok {
-		return printHelp(fs, "sandbox", want)
-	}
-	verb, err := parseVerb(fs, "sandbox", sub, rest)
-	if err != nil {
+	if done, err := r.parse(); done {
 		return err
 	}
-	r.sub = verb
-
-	switch verb {
+	switch r.verb {
 	case "classes":
 		return r.classes(ctx)
 	case "apply":
@@ -265,18 +256,16 @@ func (r *sandboxRun) suspendOrResume(ctx context.Context) error {
 	}
 	var res store.Sandbox
 	if err := r.c.do(ctx, "POST",
-		"/v1/sandboxes/"+url.PathEscape(sb.ID)+"/"+r.sub, nil, &res); err != nil {
+		"/v1/sandboxes/"+url.PathEscape(sb.ID)+"/"+r.verb, nil, &res); err != nil {
 		return err
 	}
 	return out(r.asJSON, res, func(w *table) { printSandbox(w, res) })
 }
 
+// usage spans every organisation the caller can see unless --org names one,
+// as 'keera usage' does.
 func (r *sandboxRun) usage(ctx context.Context) error {
-	orgID, err := resolveOrg(ctx, r.c, r.org)
-	if err != nil {
-		return err
-	}
-	q, err := reportQuery(ctx, r.c, orgID, nil, r.since, map[string]string{"group_by": r.by})
+	q, err := reportQuery(ctx, r.c, r.org, nil, r.since, map[string]string{"group_by": r.by})
 	if err != nil {
 		return err
 	}

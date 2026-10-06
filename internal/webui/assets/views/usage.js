@@ -208,7 +208,7 @@ export async function usageView(ctx) {
         sortDir: "desc",
       },
       {
-        label: "Input Tokens",
+        label: "Input tokens",
         width: "16%",
         num: true,
         cell: (r) => compact(r.input_tokens),
@@ -216,7 +216,7 @@ export async function usageView(ctx) {
         sortDir: "desc",
       },
       {
-        label: "Output Tokens",
+        label: "Output tokens",
         width: "16%",
         num: true,
         cell: (r) => compact(r.output_tokens),

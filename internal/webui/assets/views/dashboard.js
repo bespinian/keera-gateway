@@ -100,7 +100,7 @@ export async function dashboardView(ctx) {
             "span",
             { class: "pill pill-good" },
             h("span", { class: "dot" }),
-            "no failures",
+            "No failures",
           ),
     ),
     h(

@@ -35,7 +35,7 @@ export async function orgsView(ctx) {
       "button",
       { class: "btn btn-primary", onClick: () => newOrg(ctx) },
       icon(icons.plus),
-      "New organisation",
+      "Create organisation",
     ),
   );
 
@@ -78,7 +78,7 @@ export async function orgsView(ctx) {
               "button",
               {
                 class: "btn btn-sm",
-                title: `${o.name}'s settings`,
+                title: "Edit this organisation",
                 "aria-label": `Edit ${o.name}`,
                 onClick: () => orgSettings(ctx, o),
               },
@@ -130,7 +130,7 @@ export async function orgsView(ctx) {
     ],
     orgs,
     {
-      emptyTitle: "No organisations",
+      emptyTitle: "No organisations yet",
       emptyBody: "Create one per customer.",
     },
   );
@@ -149,7 +149,7 @@ export function newOrg(ctx, { switchTo = false } = {}) {
   const domain = h("input", { class: "input", placeholder: "example.ch" });
   const err = h("div");
   modal({
-    title: "New organisation",
+    title: "Create organisation",
     body: h(
       "form",
       { onSubmit: (e) => e.preventDefault() },
@@ -191,7 +191,7 @@ export function newOrg(ctx, { switchTo = false } = {}) {
             }
           },
         },
-        "Create",
+        "Create organisation",
       ),
     ],
   });
@@ -206,14 +206,14 @@ function orgSettings(ctx, org) {
   });
   const err = h("div");
   modal({
-    title: `Settings - ${org.name}`,
+    title: `Edit ${org.name}`,
     body: h(
       "div",
       {},
       err,
       field("Name", name, "Must differ from every other organisation's name."),
       field(
-        "Domain",
+        "Email domain",
         domain,
         "Leave empty to clear it. Existing users stay where they are.",
       ),
@@ -280,7 +280,7 @@ function deleteOrg(ctx, org) {
       onClick: async (e) => {
         const button = e.currentTarget;
         button.disabled = true;
-        err.replaceChildren();
+        showError(err, "");
         try {
           const gone = await api.deleteOrg(org.id);
           // The shell's copy of the tenant list feeds the org switcher in the

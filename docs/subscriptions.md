@@ -124,9 +124,11 @@ keera connect claude-code --subscription --model claude-opus
 This gives the machine its own subscription key, named
 `claude-code on <hostname> (<id>)`. The id is random and kept in keera's
 configuration directory, so machines that share a hostname keep their own
-keys. The command finds the machine's key by this name, so keep it. A member takes over a subscription key issued to them that no other
-machine holds yet, and rotates it. An administrator gets a new key. The
-command writes the key into `~/.claude/settings.json` (or
+keys. The command finds the machine's key by this name, so keep it. A member
+takes over a subscription key issued to them that no other machine holds yet,
+and rotates it. An administrator gets a new key, which lasts 90 days like one
+from `keera key create`. Running the command again rotates the key and keeps
+its lifetime. The command writes the key into `~/.claude/settings.json` (or
 `$CLAUDE_CONFIG_DIR/settings.json`), so nobody has to paste it:
 
 ```json
@@ -210,10 +212,10 @@ nothing:
 - **What the plan paid for** is what the same requests would have cost on
   Anthropic's API, from the model's prices. It is never charged. It shows
   whether the plan is worth it. The dashboard shows it next to spend as
-  "covered by Claude plans", and the keys screen per key as "on the plan".
+  "covered by Claude plans", and the **API keys** screen per key as "on the plan".
 - **How much of the plan is used** is the share of the plan's usage limit, as
   Anthropic reports it on each answer: the last five hours and the last seven
-  days. The keys screen shows it as "plan 5h 40% · 7d 12%", and `keera key list`
+  days. The **API keys** screen shows it as "plan 5h 40% · 7d 12%", and `keera key list`
   shows it too.
 
 Token counts and rate limits work as for any other model.

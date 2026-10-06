@@ -268,7 +268,7 @@ func TestPrunePoolsRemovesThePoolsOfDeletedClasses(t *testing.T) {
 	f.put(warm+"sandboxwarmpools", items)
 	f.put(warm+"sandboxtemplates", items)
 
-	keep := map[string]bool{PoolKey("org_aaaaaaaa", "standard"): true}
+	keep := map[string]bool{poolKey("org_aaaaaaaa", "standard"): true}
 	if err := k.PrunePools(context.Background(), keep); err != nil {
 		t.Fatalf("prune pools: %v", err)
 	}

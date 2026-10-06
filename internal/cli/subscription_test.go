@@ -247,6 +247,24 @@ func TestMachineKeySendsAMemberWithoutAKeyToAnAdministrator(t *testing.T) {
 	}
 }
 
+// A key the CLI issues itself lasts as long as one from 'keera key create', so
+// it does not live for ever because nobody chose.
+func TestMachineKeyIssuedByAnAdministratorExpires(t *testing.T) {
+	t.Setenv("KEERA_CONFIG_DIR", t.TempDir())
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/keys":  map[string]any{"data": []map[string]any{}},
+		"POST /v1/keys": map[string]any{"id": "key_1", "key": "keera_sk_new"},
+	})
+	admin := identity{UserID: "user_1", Email: "ada@example.ch", Role: "admin", OrgID: "org_1"}
+
+	if _, _, err := machineKey(context.Background(), newClient(), "org_1", admin, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.request("POST", "/v1/keys").body["expires_in"]; got != defaultKeyLife {
+		t.Errorf("expires_in = %v, want %s", got, defaultKeyLife)
+	}
+}
+
 func TestIsMachineKeyName(t *testing.T) {
 	for name, want := range map[string]bool{
 		machineKeyName("laptop", "0a1b2c3d"):          true,

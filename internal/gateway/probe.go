@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
@@ -99,7 +99,8 @@ var toolProbe = []map[string]any{{
 }}
 
 func (s *Server) checkChat(ctx context.Context, m policy.Model, p Probe) Probe {
-	payload, err := json.Marshal(map[string]any{
+	start := time.Now()
+	resp := s.probeCall(ctx, m, "/chat/completions", map[string]any{
 		"model": m.BackendModel,
 		"messages": []map[string]string{{
 			"role":    "user",
@@ -110,14 +111,7 @@ func (s *Server) checkChat(ctx context.Context, m policy.Model, p Probe) Probe {
 		"stream":      true,
 		"max_tokens":  128,
 		"temperature": 0,
-	})
-	if err != nil {
-		p.Error = err.Error()
-		return p
-	}
-
-	start := time.Now()
-	resp := s.probeCall(ctx, m, "/chat/completions", payload, &p)
+	}, &p)
 	if resp == nil {
 		return p
 	}
@@ -131,7 +125,10 @@ func (s *Server) checkChat(ctx context.Context, m policy.Model, p Probe) Probe {
 			return nil
 		})
 	} else {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		body, ok := s.probeBody(resp, &p)
+		if !ok {
+			return p
+		}
 		r.first = time.Now()
 		r.scan(body)
 	}
@@ -237,16 +234,18 @@ func servedWarnings(p Probe, m policy.Model) []string {
 }
 
 func (s *Server) checkCompletion(ctx context.Context, m policy.Model, p Probe) Probe {
-	payload, _ := json.Marshal(map[string]any{
-		"model": m.BackendModel, "prompt": "func hello() {", "max_tokens": 16, "stream": false,
-	})
 	start := time.Now()
-	resp := s.probeCall(ctx, m, "/completions", payload, &p)
+	resp := s.probeCall(ctx, m, "/completions", map[string]any{
+		"model": m.BackendModel, "prompt": "func hello() {", "max_tokens": 16, "stream": false,
+	}, &p)
 	if resp == nil {
 		return p
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, ok := s.probeBody(resp, &p)
+	if !ok {
+		return p
+	}
 	p.TotalMS = time.Since(start).Milliseconds()
 	var out struct {
 		Model   string `json:"model"`
@@ -269,14 +268,17 @@ func (s *Server) checkCompletion(ctx context.Context, m policy.Model, p Probe) P
 }
 
 func (s *Server) checkEmbedding(ctx context.Context, m policy.Model, p Probe) Probe {
-	payload, _ := json.Marshal(map[string]any{"model": m.BackendModel, "input": "keera"})
 	start := time.Now()
-	resp := s.probeCall(ctx, m, "/embeddings", payload, &p)
+	resp := s.probeCall(ctx, m, "/embeddings",
+		map[string]any{"model": m.BackendModel, "input": "keera"}, &p)
 	if resp == nil {
 		return p
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	body, ok := s.probeBody(resp, &p)
+	if !ok {
+		return p
+	}
 	p.TotalMS = time.Since(start).Milliseconds()
 	var out struct {
 		Model string `json:"model"`
@@ -300,7 +302,12 @@ func (s *Server) checkEmbedding(ctx context.Context, m policy.Model, p Probe) Pr
 // with what status. It returns nil when the check is already over, with
 // p.Error saying why.
 func (s *Server) probeCall(ctx context.Context, m policy.Model, path string,
-	payload []byte, p *Probe) *http.Response {
+	request any, p *Probe) *http.Response {
+	payload, err := json.Marshal(request)
+	if err != nil {
+		p.Error = err.Error()
+		return nil
+	}
 	resp, err := s.send(ctx, m, outbound{path: path, payload: payload})
 	if err != nil {
 		p.Error = unreachable(err)
@@ -311,12 +318,23 @@ func (s *Server) probeCall(ctx context.Context, m policy.Model, path string,
 		p.Backend = strings.TrimSuffix(resp.Request.URL.String(), path)
 	}
 	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		// A body too large to read still leaves the status to report.
+		body, _ := readCapped(resp.Body, s.opts.MaxResponseBytes)
 		_ = resp.Body.Close()
 		p.Error = "the backend answered " + upstreamComplaint(body, resp.StatusCode)
 		return nil
 	}
 	return resp
+}
+
+// probeBody reads a whole answer, or says in p why it could not.
+func (s *Server) probeBody(resp *http.Response, p *Probe) ([]byte, bool) {
+	body, err := readCapped(resp.Body, s.opts.MaxResponseBytes)
+	if err != nil {
+		p.Error = "the backend's answer could not be read: " + err.Error()
+		return nil, false
+	}
+	return body, true
 }
 
 // upstreamComplaint renders a refusal from the inference plane as a status
@@ -344,10 +362,17 @@ func unreachable(err error) string {
 	return "the backend could not be reached: " + err.Error()
 }
 
+// sample is the start of s, short enough for a report. It cuts between
+// characters, never inside one.
 func sample(s string) string {
+	const limit = 400
 	s = strings.TrimSpace(s)
-	if len(s) > 400 {
-		return s[:400] + "…"
+	if len(s) <= limit {
+		return s
 	}
-	return s
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
 }

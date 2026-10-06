@@ -81,7 +81,7 @@ same shape (for example an egress proxy that mirrors the path), write
 
 ### In the panel
 
-**Models → New model** first asks where the model runs: one tile per provider,
+**Models → Add model** first asks where the model runs: one tile per provider,
 and one for your own inference plane. The rest of the form appears after you
 pick one.
 

@@ -236,16 +236,11 @@ func checkBackend(m Model) error {
 	case m.ProductID != "" && m.Provider == "":
 		return fmt.Errorf("product_id fills in a hosted provider's endpoint, " +
 			"and this entry names no provider; put the id in the backend URL instead")
-	case len(m.Backends) == 0:
-		return fmt.Errorf("at least one backend is required")
-	case m.BackendModel == "" && m.Provider != "":
+	case len(m.Backends) > 0 && m.BackendModel == "" && m.Provider != "":
 		return fmt.Errorf("backend_model is required - for the %s provider it is "+
 			"the model id, which `keera model providers` lists", m.Provider)
-	case m.BackendModel == "":
-		return fmt.Errorf("backend_model is required - it is the name the " +
-			"inference plane serves, which for vLLM is --served-model-name")
 	}
-	return nil
+	return policy.Model{Backends: m.Backends, BackendModel: m.BackendModel}.CheckBackend()
 }
 
 func deref[T any](p *T) T {

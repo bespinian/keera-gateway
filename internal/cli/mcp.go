@@ -46,30 +46,22 @@ type mcpPut struct {
 }
 
 func mcpCmd(ctx context.Context, args []string) error {
-	sub, rest := split(args)
-	fs := flag.NewFlagSet("mcp "+sub, flag.ExitOnError)
-	m := &mcpRun{fs: fs, f: registerMCPFlags(fs), calls: registerCallFlags(fs)}
-	fs.BoolVar(&m.f.disabled, "disabled", false, "add the server without serving it yet")
-	fs.StringVar(&m.org, "org", "", orgUsage)
-	fs.BoolVar(&m.yes, "yes", false, yesUsage)
-	fs.BoolVar(&m.asJSON, "json", false, jsonUsage)
-	fs.Usage = func() { _ = printHelp(fs, "mcp", sub) }
-	if want, ok := wantsHelp(args); ok {
-		return printHelp(fs, "mcp", want)
-	}
-	verb, err := parseVerb(fs, "mcp", sub, rest)
-	if err != nil {
+	m := &mcpRun{aliasRun: newAliasRun("mcp", "mcp-servers", "MCP server", args)}
+	// A server cannot be added without its endpoint.
+	m.addHint += " --endpoint <url>"
+	m.f, m.calls = registerMCPFlags(m.fs), registerCallFlags(m.fs)
+	m.fs.BoolVar(&m.f.disabled, "disabled", false, "add the server without serving it yet")
+	if done, err := m.parse(); done {
 		return err
 	}
-	m.c = newClient()
-	if m.org, err = resolveOrg(ctx, m.c, m.org); err != nil {
+	if err := m.resolveOrg(ctx); err != nil {
 		return err
 	}
-	switch verb {
+	switch m.verb {
 	case "add", "set":
-		return m.save(ctx, verb == "add")
+		return m.save(ctx, m.verb == "add")
 	case "enable", "disable":
-		return m.toggle(ctx, verb == "enable")
+		return m.toggle(ctx, m.verb == "enable")
 	case "delete":
 		return m.delete(ctx)
 	case "calls":
@@ -77,47 +69,22 @@ func mcpCmd(ctx context.Context, args []string) error {
 	case "connect":
 		return m.connect(ctx)
 	default:
-		servers, err := list[policy.MCPServer](ctx, m.c, inOrg("/v1/mcp-servers", m.org))
-		if err != nil {
-			return err
-		}
-		return out(m.asJSON, servers, func(w *table) {
-			if len(servers) == 0 {
-				printNone(w, "MCP servers", "keera mcp add <alias> --endpoint <url>")
-				return
-			}
-			printMCPServers(w, servers)
-		})
+		return listAliases(ctx, m.aliasRun, printMCPServers)
 	}
 }
 
 // mcpRun is one 'keera mcp' invocation.
 type mcpRun struct {
-	c     *client
-	fs    *flag.FlagSet
+	*aliasRun
 	f     *mcpFlags
 	calls *callFlags
-	yes   bool
-	// org is the organisation whose servers to use.
-	org    string
-	asJSON bool
-}
-
-// path is a control API path for one of the organisation's servers.
-func (m *mcpRun) path(alias string) string {
-	return aliasPath("mcp-servers", m.org, alias, "")
 }
 
 func mcpAlias(s policy.MCPServer) string { return s.Alias }
 
-// require reads one server. There is no endpoint for one; the list is small.
-func (m *mcpRun) require(ctx context.Context, alias string) (policy.MCPServer, error) {
-	s, err := findAlias(ctx, m.c, "mcp-servers", m.org, alias, "MCP server", mcpAlias)
-	if err == nil {
-		// The writes go to the organisation it belongs to.
-		m.org = s.OrgID
-	}
-	return s, err
+// find reads one of the organisation's servers.
+func (m *mcpRun) find(ctx context.Context, alias string) (policy.MCPServer, error) {
+	return findAlias(ctx, m.aliasRun, alias, mcpAlias)
 }
 
 // save is 'add' and 'set': 'set' reads the server first, so a flag left out
@@ -126,14 +93,14 @@ func (m *mcpRun) save(ctx context.Context, adding bool) error {
 	f, alias := m.f, m.fs.Arg(0)
 	put := mcpPut{Enabled: !f.disabled}
 	if adding {
-		if err := alreadyExists(ctx, m.c, "mcp-servers", m.org, alias, "MCP server", mcpAlias); err != nil {
+		if err := alreadyExists(ctx, m.aliasRun, alias, mcpAlias); err != nil {
 			return err
 		}
 	} else {
 		if !changesSomething(m.fs) {
 			return nothingToChange("mcp set")
 		}
-		cur, err := m.require(ctx, alias)
+		cur, err := m.find(ctx, alias)
 		if err != nil {
 			return err
 		}
@@ -162,15 +129,11 @@ func (m *mcpRun) save(ctx context.Context, adding bool) error {
 }
 
 func (m *mcpRun) put(ctx context.Context, alias string, put mcpPut) error {
-	var saved policy.MCPServer
-	if err := m.c.do(ctx, "PUT", m.path(alias), put, &saved); err != nil {
-		return err
-	}
-	return out(m.asJSON, saved, func(w *table) { printMCPServer(w, saved) })
+	return putAlias(ctx, m.aliasRun, alias, put, printMCPServer)
 }
 
 func (m *mcpRun) toggle(ctx context.Context, enable bool) error {
-	cur, err := m.require(ctx, m.fs.Arg(0))
+	cur, err := m.find(ctx, m.fs.Arg(0))
 	if err != nil {
 		return err
 	}
@@ -179,21 +142,16 @@ func (m *mcpRun) toggle(ctx context.Context, enable bool) error {
 }
 
 func (m *mcpRun) delete(ctx context.Context) error {
-	srv, err := m.require(ctx, m.fs.Arg(0))
+	srv, err := m.find(ctx, m.fs.Arg(0))
 	if err != nil {
 		return err
 	}
-	if !m.yes {
-		lines := []string{"  every client configured for it stops reaching its tools"}
-		if srv.HasAPIKey {
-			lines = append(lines, "  its stored credential is removed")
-		}
-		lines = append(lines, "Tool-call history and the audit log are kept.")
-		if err := confirmAliasDelete("MCP server", srv.Alias, lines); err != nil {
-			return err
-		}
+	lines := []string{"  every client configured for it stops reaching its tools"}
+	if srv.HasAPIKey {
+		lines = append(lines, "  its stored credential is removed")
 	}
-	return deleteAlias(ctx, m.c, m.path(srv.Alias), srv.Alias, m.asJSON)
+	lines = append(lines, "Tool-call history and the audit log are kept.")
+	return m.deleteEntry(ctx, srv.Alias, lines)
 }
 
 // callFlags narrow 'keera mcp calls'.
@@ -219,7 +177,7 @@ func registerCallFlags(fs *flag.FlagSet) *callFlags {
 // toolCalls is 'keera mcp calls', the tool-call log.
 func (m *mcpRun) toolCalls(ctx context.Context) error {
 	c, f := m.c, m.calls
-	q, err := reportQuery(ctx, c, m.org, f.who, f.since,
+	q, err := reportQuery(ctx, c, m.orgID, f.who, f.since,
 		map[string]string{"server": f.server, "tool": f.tool})
 	if err != nil {
 		return err
@@ -261,7 +219,7 @@ func (m *mcpRun) toolCalls(ctx context.Context) error {
 // connect'.
 func (m *mcpRun) connect(ctx context.Context) error {
 	alias := m.fs.Arg(0)
-	if _, err := m.require(ctx, alias); err != nil {
+	if _, err := m.find(ctx, alias); err != nil {
 		return err
 	}
 	var cat struct {

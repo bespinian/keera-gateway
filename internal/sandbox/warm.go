@@ -155,9 +155,9 @@ func (k *Kubernetes) claimPath(ref Ref) string {
 	return k.warmCollection("sandboxclaims") + "/" + url.PathEscape(objectName(ref))
 }
 
-// PoolKey names one organisation's class among every organisation's warm
+// poolKey names one organisation's class among every organisation's warm
 // pools. Two organisations can each have a class of the same name.
-func PoolKey(org, class string) string { return org + "/" + class }
+func poolKey(org, class string) string { return org + "/" + class }
 
 // warmName is the name of a class's template and pool. The prefix avoids
 // clashing with other objects in the namespace, and the tail of the
@@ -190,7 +190,7 @@ func (k *Kubernetes) EnsurePool(ctx context.Context, class policy.SandboxClass) 
 	if class.Warm <= 0 {
 		return k.removePool(ctx, class.OrgID, class.Name)
 	}
-	runtime, err := k.runtimeFor(class)
+	runtime, err := runtimeFor(class, k.opts.Runtimes, k.Name())
 	if err != nil {
 		return err
 	}
@@ -249,7 +249,7 @@ func (k *Kubernetes) removePool(ctx context.Context, org, class string) error {
 }
 
 // PrunePools deletes the template and pool of every class not in keep, which
-// is keyed by PoolKey. EnsurePool never visits a class that left the
+// is keyed by poolKey. EnsurePool never visits a class that left the
 // catalogue, and its warm sandboxes would hold their CPU and memory for ever.
 //
 // Each object is deleted by the name it has, not the name it would get now,
@@ -269,7 +269,7 @@ func (k *Kubernetes) PrunePools(ctx context.Context, keep map[string]bool) error
 		}
 		for _, it := range list.Items {
 			org, class := it.Metadata.Labels[labelOrg], it.Metadata.Labels[labelClass]
-			if class == "" || keep[PoolKey(org, class)] {
+			if class == "" || keep[poolKey(org, class)] {
 				continue
 			}
 			err := k.c.delete(ctx, collection+"/"+url.PathEscape(it.Metadata.Name))
@@ -324,9 +324,7 @@ func (k *Kubernetes) createClaimed(ctx context.Context, spec Spec) (Status, erro
 			ShutdownPolicy: shutdownPolicy(spec.Purpose),
 		}
 	}
-	if spec.Class.Disk > 0 {
-		claim.Spec.VolumeClaimTemplates = volumeClaimsFor(spec.Class, k.opts.StorageClass, labels)
-	}
+	claim.Spec.VolumeClaimTemplates = volumeClaimsFor(spec.Class, k.opts.StorageClass, labels)
 
 	var created sandboxClaim
 	err := k.c.post(ctx, k.warmCollection("sandboxclaims"), claim, &created)
@@ -406,7 +404,7 @@ func claimEnvList(env map[string]string) []claimEnv {
 	for _, e := range kv {
 		// The container is named, so a sidecar added to the template later
 		// does not also get this sandbox's API key.
-		out = append(out, claimEnv{Name: e.Name, Value: e.Value, ContainerName: "sandbox"})
+		out = append(out, claimEnv{Name: e.Name, Value: e.Value, ContainerName: podContainerName})
 	}
 	return out
 }

@@ -83,8 +83,8 @@ func TestPatternRefusalCarriesTheAdministratorsSentence(t *testing.T) {
 	})
 	_, hits, err := runPattern(c, []string{"please export all customers to csv"})
 
-	var refused *filterRefusedError
-	if !errors.As(err, &refused) {
+	refused, ok := errors.AsType[*filterRefusedError](err)
+	if !ok {
 		t.Fatalf("a refusing rule must refuse, got %v", err)
 	}
 	if refused.reason != "that moves the customer list out of the organisation" {
@@ -119,8 +119,8 @@ func TestPatternRefusalReasonIsBounded(t *testing.T) {
 		{Pattern: `x`, Refuse: true, Reason: "one\ntwo   three"},
 	})
 	_, _, err := runPattern(c, []string{"x"})
-	var refused *filterRefusedError
-	if !errors.As(err, &refused) {
+	refused, ok := errors.AsType[*filterRefusedError](err)
+	if !ok {
 		t.Fatalf("want a refusal, got %v", err)
 	}
 	if refused.reason != "one two three" {
@@ -359,5 +359,19 @@ func patternFilterFor(org, alias string, rules ...policy.FilterRule) policy.Filt
 	return policy.Filter{
 		OrgID: org, Alias: alias, Mode: policy.FilterModePattern,
 		Rules: rules, UpdatedAt: time.Unix(1, 0),
+	}
+}
+
+func TestPatternCacheKeepsOneEntryPerFilter(t *testing.T) {
+	var cache patternCache
+	f := patternFilter(policy.FilterRule{Pattern: `\bone\b`, Replace: "[A]"})
+	for range 3 {
+		f.UpdatedAt = f.UpdatedAt.Add(time.Second)
+		cache.rulesFor(f)
+	}
+	n := 0
+	cache.m.Range(func(any, any) bool { n++; return true })
+	if n != 1 {
+		t.Errorf("the cache holds %d entries for one filter edited three times, want 1", n)
 	}
 }

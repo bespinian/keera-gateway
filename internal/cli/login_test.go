@@ -358,3 +358,12 @@ func TestAWholeSignInFromTheTerminal(t *testing.T) {
 		t.Errorf("stored expiry = %v, want one in the future", stored.ExpiresAt)
 	}
 }
+
+// signInFor is the sign-in held for one gateway, if there is one.
+func signInFor(base string) signIn {
+	c, err := loadCredentials()
+	if err != nil {
+		return signIn{}
+	}
+	return c.Gateways[gatewayKey(base)]
+}

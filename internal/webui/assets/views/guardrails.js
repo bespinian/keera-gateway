@@ -232,7 +232,7 @@ function render(
         : h("span", { class: "faint", style: { fontSize: "11.5px" } }, m.kind),
       allowedAbove(ceilings, m.alias)
         ? null
-        : h("span", { class: "pill pill-warn" }, "blocked above"),
+        : h("span", { class: "pill pill-warn" }, "Blocked above"),
     ),
   );
   const modelList = h(
@@ -325,7 +325,7 @@ function render(
             { class: f.mode === "gate" ? "pill pill-accent" : "pill" },
             f.mode === "gate" || f.mode === "pattern" ? f.mode : "rewrite",
           ),
-          f.shadow ? pill("shadow", "warn") : null,
+          f.shadow ? pill("Shadow", "warn") : null,
           h("div", { style: { flex: 1 } }),
           h(
             "button",
@@ -387,7 +387,7 @@ function render(
       // And whether it enforces at all, which matters more than the mode:
       // attaching a filter in shadow costs this scope a second generation per
       // request and protects it from nothing.
-      f.shadow ? pill("shadow", "warn") : null,
+      f.shadow ? pill("Shadow", "warn") : null,
       f.description
         ? h(
             "span",
@@ -492,7 +492,7 @@ function render(
           : h(
               "div",
               { class: "muted" },
-              `${orgName} has no filters. Add one under Filters.`,
+              `${orgName} has no filters. Create one under Filters.`,
             ),
         h(
           "div",
@@ -694,7 +694,7 @@ function renderReadOnly(
       ),
     ),
     actions: (close) => [
-      h("button", { class: "btn btn-primary", onClick: close }, "Close"),
+      h("button", { class: "btn", onClick: close }, "Close"),
     ],
   });
 }
@@ -877,7 +877,7 @@ function filtersValue(levels, known) {
         {},
         h("span", { class: "mono" }, f.alias),
         defs.get(f.alias) && defs.get(f.alias).shadow
-          ? [" ", pill("shadow", "warn")]
+          ? [" ", pill("Shadow", "warn")]
           : null,
         h("span", { class: "hint-origin" }, ` - applied by ${f.from}`),
       ),
@@ -1012,13 +1012,13 @@ export function summarise(lim) {
 
 /** modelsCell renders an allow-list the way both the projects and keys tables do. */
 export function modelsCell(lim) {
-  if (!lim || !lim.allowed_models) return h("span", { class: "muted" }, "all");
+  if (!lim || !lim.allowed_models) return h("span", { class: "muted" }, "All");
   return h(
     "div",
     { class: "wrap-chips" },
     lim.allowed_models.length
       ? lim.allowed_models.map((m) => pill(m, "accent"))
-      : pill("none", "bad"),
+      : pill("None", "bad"),
   );
 }
 

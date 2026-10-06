@@ -174,9 +174,7 @@ func (anthropicDialect) auth(client http.Header) func(http.Header, string) {
 	}
 	beta := strings.Join(client.Values("Anthropic-Beta"), ",")
 	return func(h http.Header, credential string) {
-		if credential != "" {
-			h.Set("X-Api-Key", credential)
-		}
+		setCredential(h, "X-Api-Key", credential)
 		h.Set("Anthropic-Version", version)
 		if beta != "" {
 			h.Set("Anthropic-Beta", beta)
@@ -303,11 +301,10 @@ func (s *Server) countTokens(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	raw, err := readBody(w, r, s.opts.MaxBodyBytes)
-	if err != nil {
-		if errors.Is(err, errBodyTooLarge) {
-			sh.writeError(w, http.StatusRequestEntityTooLarge, "", "", err.Error())
-		}
+	raw, ok := readBody(w, r, s.opts.MaxBodyBytes, func(msg string) {
+		sh.writeError(w, http.StatusRequestEntityTooLarge, "", "", msg)
+	})
+	if !ok {
 		return
 	}
 	b, err := parseBody(raw)
@@ -316,6 +313,11 @@ func (s *Server) countTokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	alias, _ := b.str("model")
+	if alias == "" {
+		sh.writeError(w, http.StatusBadRequest, "", "",
+			"the 'model' field is required; send one of the models from /v1/models")
+		return
+	}
 	if _, ok := s.callable(res, alias, policy.KindChat); !ok {
 		sh.writeError(w, http.StatusNotFound, "", "",
 			s.advise(modelNotFound(alias)))

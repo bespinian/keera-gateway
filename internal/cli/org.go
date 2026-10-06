@@ -3,10 +3,10 @@ package cli
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,35 +17,23 @@ import (
 // orgRun is one 'keera org' invocation: the client, the flags every verb
 // shares, and the arguments after the verb.
 type orgRun struct {
-	c        *client
-	fs       *flag.FlagSet
+	*cmdRun
 	name     string
 	domain   string
 	noDomain bool
-	yes      bool
-	asJSON   bool
 }
 
 func orgCmd(ctx context.Context, args []string) error {
-	sub, rest := split(args)
-	fs := flag.NewFlagSet("org "+sub, flag.ExitOnError)
-	r := &orgRun{c: newClient(), fs: fs}
+	r := &orgRun{cmdRun: newCmdRun("org", args, "yes", "json")}
+	fs := r.fs
 	fs.StringVar(&r.name, "name", "", "the organisation's new name")
 	fs.StringVar(&r.domain, "domain", "",
 		"email domain whose sign-ins land in this organisation, such as example.ch")
 	fs.BoolVar(&r.noDomain, "no-domain", false, "remove the organisation's email domain")
-	fs.BoolVar(&r.yes, "yes", false, yesUsage)
-	fs.BoolVar(&r.asJSON, "json", false, jsonUsage)
-
-	fs.Usage = func() { _ = printHelp(fs, "org", sub) }
-	if want, ok := wantsHelp(args); ok {
-		return printHelp(fs, "org", want)
-	}
-	verb, err := parseVerb(fs, "org", sub, rest)
-	if err != nil {
+	if done, err := r.parse(); done {
 		return err
 	}
-	switch verb {
+	switch r.verb {
 	case "create":
 		return r.create(ctx)
 	case "set":
@@ -224,16 +212,11 @@ func confirmOrgDelete(ctx context.Context, c *client, orgID string) error {
 	if err != nil {
 		return err
 	}
-	var org *store.Org
-	for i := range orgs {
-		if orgs[i].ID == orgID {
-			org = &orgs[i]
-			break
-		}
-	}
-	if org == nil {
+	i := slices.IndexFunc(orgs, func(o store.Org) bool { return o.ID == orgID })
+	if i < 0 {
 		return notFound("organisation", orgID, "", "org")
 	}
+	org := orgs[i]
 
 	// Three extra reads, only when asking, so the prompt can say how much goes.
 	projects, err := list[store.Project](ctx, c, inOrg("/v1/projects", orgID))

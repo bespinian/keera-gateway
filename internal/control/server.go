@@ -123,7 +123,7 @@ func New(st *store.Store, reg *registry.Registry, m *metrics.Registry, rec *usag
 
 // Sweep bounds the memory the sign-in throttle holds: one bucket per address
 // that has tried to sign in.
-func (s *Server) Sweep(now time.Time) { s.signIn.Sweep(throttleIdle, now) }
+func (s *Server) Sweep(now time.Time) { s.signIn.Sweep(BucketIdle, now) }
 
 // Handler returns the root handler: the control routes, the probes and, if
 // enabled, the panel. The inference plane is mounted in front of it, under
@@ -324,9 +324,11 @@ func safeMethod(m string) bool {
 const (
 	signInRPM = 10
 	flowRPM   = 30
-	// throttleIdle is how long a bucket outlives the address that made it.
-	throttleIdle = 10 * time.Minute
 )
+
+// BucketIdle is how long a rate-limit bucket outlives its last use. The
+// gateway's limiter sweeps with it too.
+const BucketIdle = 10 * time.Minute
 
 // signInThrottled is what a throttled sign-in route answers.
 const signInThrottled = "too many sign-in attempts from this address; wait a moment and try again"
@@ -561,10 +563,14 @@ func (s *Server) writeMetrics(w http.ResponseWriter) {
 func (s *Server) changed(r *http.Request) { s.announce(r.Context()) }
 
 // announce is changed for a caller without a request.
-func (s *Server) announce(ctx context.Context) {
-	s.reg.Invalidate()
-	if err := s.st.Notify(ctx); err != nil {
-		s.log.Warn("announcing guardrail change failed", "error", err)
+func (s *Server) announce(ctx context.Context) { Announce(ctx, s.reg, s.st, s.log) }
+
+// Announce is changed for code outside the control plane, such as the sandbox
+// manager, which is built before the Server is.
+func Announce(ctx context.Context, reg *registry.Registry, st *store.Store, log *slog.Logger) {
+	reg.Invalidate()
+	if err := st.Notify(ctx); err != nil {
+		log.Warn("announcing a policy change failed", "error", err)
 	}
 }
 

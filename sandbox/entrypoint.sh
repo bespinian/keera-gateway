@@ -26,11 +26,12 @@ hook() {
   done
 }
 
+: "${HOME:=/home/keera}"
+
 # The startup files of the interactive shells in the image. zsh reads only its
 # own, so a hook for a person at a prompt goes into both.
 interactive=("$HOME/.bashrc" "$HOME/.zshrc")
 
-: "${HOME:=/home/keera}"
 : "${KEERA_SANDBOX_PURPOSE:=engineer}"
 
 # ---------------------------------------------------------------- the home

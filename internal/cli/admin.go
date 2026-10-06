@@ -205,28 +205,28 @@ func (w *who) params(ctx context.Context, c *client, org string) (map[string]str
 }
 
 // projectID, keyID and userID resolve what a flag was given to an id. An id is
-// passed on unchanged, so it needs no lookup.
-func projectID(ctx context.Context, c *client, orgID, given string) (string, error) {
+// passed on unchanged, so it needs no lookup and no organisation.
+func projectID(ctx context.Context, c *client, org, given string) (string, error) {
 	if given == "" || id.HasPrefix(given, "project") {
 		return given, nil
 	}
-	t, err := findProject(ctx, c, orgID, given)
+	t, err := findProject(ctx, c, org, given)
 	return t.ID, err
 }
 
-func keyID(ctx context.Context, c *client, orgID, given string) (string, error) {
+func keyID(ctx context.Context, c *client, org, given string) (string, error) {
 	if given == "" || id.HasPrefix(given, "key") {
 		return given, nil
 	}
-	k, err := findKey(ctx, c, orgID, given)
+	k, err := findKey(ctx, c, org, given)
 	return k.ID, err
 }
 
-func userID(ctx context.Context, c *client, orgID, given string) (string, error) {
+func userID(ctx context.Context, c *client, org, given string) (string, error) {
 	if given == "" || id.HasPrefix(given, "user") {
 		return given, nil
 	}
-	u, err := findUser(ctx, c, orgID, given)
+	u, err := findUser(ctx, c, org, given)
 	return u.ID, err
 }
 

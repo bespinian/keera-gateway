@@ -41,15 +41,14 @@ const defaultBase = "https://gateway.keera.ch"
 
 // resolveBase decides which gateway this invocation talks to, and says what
 // decided it. The most deliberate choice wins: --url, then
-// KEERA_CONTROL_URL, then the gateway of the last `keera login`.
-func resolveBase() (base, from string) {
+// KEERA_CONTROL_URL, then saved, the gateway of the last `keera login`.
+func resolveBase(saved string) (base, from string) {
 	switch {
 	case urlFlag != "":
 		return urlFlag, "--url"
 	case os.Getenv("KEERA_CONTROL_URL") != "":
 		return os.Getenv("KEERA_CONTROL_URL"), "KEERA_CONTROL_URL"
-	}
-	if saved := defaultGateway(); saved != "" {
+	case saved != "":
 		return saved, "the gateway you last signed in to"
 	}
 	return defaultBase, "the default"
@@ -61,7 +60,9 @@ func resolveBase() (base, from string) {
 // purpose for this shell. A missing credential only fails at the first
 // request, so that `--help` works without one.
 func newClient() *client {
-	base, from := resolveBase()
+	// A file that cannot be read holds no sign-in.
+	creds, _ := loadCredentials()
+	base, from := resolveBase(creds.Default)
 	base = strings.TrimRight(base, "/")
 	c := &client{
 		base:     base,
@@ -70,7 +71,7 @@ func newClient() *client {
 		http:     &http.Client{Timeout: 30 * time.Second},
 	}
 	if c.key == "" {
-		c.signedIn = signInFor(base)
+		c.signedIn = creds.Gateways[gatewayKey(base)]
 	}
 	return c
 }

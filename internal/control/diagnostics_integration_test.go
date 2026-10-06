@@ -192,16 +192,16 @@ func TestEffectiveGuardrailsCollapseTheChain(t *testing.T) {
 	rpm, projectRPM := 600, 120
 	budget := int64(500_000_000)
 	month := policy.PeriodMonth
-	if err := st.PutPolicy(ctx, policy.ScopeOrg, "org_a", policy.Limits{
+	if err := st.PutGuardrail(ctx, policy.ScopeOrg, "org_a", policy.Limits{
 		RPM: &rpm, BudgetMicros: &budget, BudgetPeriod: &month,
 		AllowedModels: []string{"keera-speed", "keera-frontier"},
 	}); err != nil {
-		t.Fatalf("PutPolicy org: %v", err)
+		t.Fatalf("PutGuardrail org: %v", err)
 	}
-	if err := st.PutPolicy(ctx, policy.ScopeProject, "project_a", policy.Limits{
+	if err := st.PutGuardrail(ctx, policy.ScopeProject, "project_a", policy.Limits{
 		RPM: &projectRPM, AllowedModels: []string{"keera-speed"},
 	}); err != nil {
-		t.Fatalf("PutPolicy project: %v", err)
+		t.Fatalf("PutGuardrail project: %v", err)
 	}
 
 	w := httptest.NewRecorder()

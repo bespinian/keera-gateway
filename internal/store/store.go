@@ -276,3 +276,23 @@ func periodStr(p *policy.Period) *string {
 	s := string(*p)
 	return &s
 }
+
+// pageLimit is how many rows a list reads: n, or def when n is unset or past
+// max. A cap keeps one request from reading a whole table.
+func pageLimit(n, def, max int) int {
+	if n <= 0 || n > max {
+		return def
+	}
+	return n
+}
+
+// countOf counts the rows whose col is one of vals. The values are this
+// package's own constants, never a caller's string, so they can go into the
+// SQL text, quoted.
+func countOf[T ~string](col string, vals ...T) string {
+	quoted := make([]string, len(vals))
+	for i, v := range vals {
+		quoted[i] = "'" + string(v) + "'"
+	}
+	return "count(*) FILTER (WHERE " + col + " IN (" + strings.Join(quoted, ", ") + "))"
+}

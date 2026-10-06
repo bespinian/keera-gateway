@@ -361,9 +361,9 @@ func TestKeySummariesReportsLastUseAndWhatWasServed(t *testing.T) {
 	f := newFixture(t, st, ctx)
 	now := time.Now().UTC().Truncate(time.Second)
 
-	if err := st.PutPolicy(ctx, policy.ScopeKey, f.keyID,
+	if err := st.PutGuardrail(ctx, policy.ScopeKey, f.keyID,
 		policy.Limits{RPM: new(30)}); err != nil {
-		t.Fatalf("PutPolicy: %v", err)
+		t.Fatalf("PutGuardrail: %v", err)
 	}
 	if err := st.WriteEvents(ctx, []Event{
 		{TS: now.Add(-2 * time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
@@ -412,10 +412,10 @@ func TestProjectSummariesReadsTheOpenBudgetWindow(t *testing.T) {
 	f := newFixture(t, st, ctx)
 	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
 
-	if err := st.PutPolicy(ctx, policy.ScopeProject, f.projectID, policy.Limits{
+	if err := st.PutGuardrail(ctx, policy.ScopeProject, f.projectID, policy.Limits{
 		BudgetMicros: new(int64(500_000_000)), BudgetPeriod: new(policy.PeriodDay),
 	}); err != nil {
-		t.Fatalf("PutPolicy: %v", err)
+		t.Fatalf("PutGuardrail: %v", err)
 	}
 	// Today's spend, and yesterday's, which must not be counted.
 	for _, ts := range []time.Time{now, now.AddDate(0, 0, -1)} {
@@ -468,15 +468,15 @@ func TestSummariesCarryTheSystemPrompt(t *testing.T) {
 		projectPrompt = "Answer in British English."
 		keyPrompt     = "Prefer the standard library."
 	)
-	if err := st.PutPolicy(ctx, policy.ScopeProject, f.projectID, policy.Limits{
+	if err := st.PutGuardrail(ctx, policy.ScopeProject, f.projectID, policy.Limits{
 		SystemPrompt: new(projectPrompt),
 	}); err != nil {
-		t.Fatalf("PutPolicy(project): %v", err)
+		t.Fatalf("PutGuardrail(project): %v", err)
 	}
-	if err := st.PutPolicy(ctx, policy.ScopeKey, f.keyID, policy.Limits{
+	if err := st.PutGuardrail(ctx, policy.ScopeKey, f.keyID, policy.Limits{
 		SystemPrompt: new(keyPrompt),
 	}); err != nil {
-		t.Fatalf("PutPolicy(key): %v", err)
+		t.Fatalf("PutGuardrail(key): %v", err)
 	}
 
 	projects, err := st.ProjectSummaries(ctx, f.orgID, now)
@@ -501,8 +501,8 @@ func TestSummariesCarryTheSystemPrompt(t *testing.T) {
 
 	// A scope that sets no prompt must come back as one that says nothing, not
 	// as an empty string a screen would render as a blank instruction.
-	if err := st.PutPolicy(ctx, policy.ScopeProject, f.projectID, policy.Limits{}); err != nil {
-		t.Fatalf("PutPolicy(project, cleared): %v", err)
+	if err := st.PutGuardrail(ctx, policy.ScopeProject, f.projectID, policy.Limits{}); err != nil {
+		t.Fatalf("PutGuardrail(project, cleared): %v", err)
 	}
 	projects, err = st.ProjectSummaries(ctx, f.orgID, now)
 	if err != nil {

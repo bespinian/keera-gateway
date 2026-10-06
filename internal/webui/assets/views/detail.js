@@ -213,7 +213,7 @@ export async function keyDetailView(ctx) {
             },
             project ? project.name : key.project_id,
           )
-        : pill("Deleted project"),
+        : pill("Deleted"),
       person ? pill(person.email) : null,
     ],
     actions: [
@@ -319,10 +319,10 @@ export async function modelDetailView(ctx) {
             : null,
           model.location ? pill(locationName(model.location)) : null,
           model.release_date
-            ? pill(`released ${releaseDay(model.release_date)}`)
+            ? pill(`Released ${releaseDay(model.release_date)}`)
             : null,
         ]
-      : [pill("Removed", "warn")],
+      : [pill("Deleted", "warn")],
     // A model that was removed still has traffic behind it, and that traffic is
     // usually why somebody is here. The screen draws it and says why the
     // catalogue has nothing to show next to it, rather than refusing to open.
@@ -527,7 +527,7 @@ async function screen(ctx, spec) {
                 "span",
                 { class: "pill pill-good" },
                 h("span", { class: "dot" }),
-                "no failures",
+                "No failures",
               ),
         ),
         h(

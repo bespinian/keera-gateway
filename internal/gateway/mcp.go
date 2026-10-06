@@ -165,12 +165,11 @@ func (s *Server) mcpPost(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	raw, err := readBody(w, r, s.opts.MaxBodyBytes)
-	if err != nil {
-		if errors.Is(err, errBodyTooLarge) {
-			httpx.WriteError(w, http.StatusRequestEntityTooLarge, "invalid_request_error",
-				"request_too_large", err.Error())
-		}
+	raw, ok := readBody(w, r, s.opts.MaxBodyBytes, func(msg string) {
+		httpx.WriteError(w, http.StatusRequestEntityTooLarge, "invalid_request_error",
+			"request_too_large", msg)
+	})
+	if !ok {
 		return
 	}
 	out, forward := x.inspect(raw)
@@ -219,13 +218,7 @@ func (s *Server) mcpSend(ctx context.Context, srv policy.MCPServer, method strin
 	if payload != nil && req.Header.Get("Content-Type") == "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if srv.APIKey != "" {
-		if srv.AuthHeader == "" {
-			req.Header.Set("Authorization", "Bearer "+srv.APIKey)
-		} else {
-			req.Header.Set(srv.AuthHeader, srv.APIKey)
-		}
-	}
+	setCredential(req.Header, srv.AuthHeader, srv.APIKey)
 	return s.client.Do(req)
 }
 
@@ -303,7 +296,12 @@ func (x *mcpExchange) inspectBatch(raw []byte) ([]byte, bool) {
 		}
 	}
 	encoded, err := json.Marshal(msgs)
-	return encoded, err == nil
+	if err != nil {
+		x.writeRPC(rpcMessage{JSONRPC: "2.0", ID: json.RawMessage("null"),
+			Error: &rpcError{Code: rpcParseError, Message: "the batch could not be re-encoded"}})
+		return nil, false
+	}
+	return encoded, true
 }
 
 // mayRequest refuses a request a key that may call only some of the server's

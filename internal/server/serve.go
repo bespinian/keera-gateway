@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -29,12 +28,6 @@ import (
 	"github.com/bespinian/keera-gateway/internal/usage"
 	"github.com/redis/go-redis/v9"
 )
-
-// isGoogle reports whether an issuer is Google's. Google's ID tokens carry no
-// groups claim at all.
-func isGoogle(issuer string) bool {
-	return strings.Contains(issuer, "accounts.google.com")
-}
 
 // shutdownGrace is how long in-flight requests get to finish. It is generous
 // because an in-flight request is often an editor mid-completion.
@@ -106,8 +99,7 @@ func serve(ctx context.Context) error {
 	}
 
 	ctl := control.New(st, reg, mreg, recorder, control.Options{
-		OperatorKey: cfg.OperatorKey,
-		// Only reads /metrics, so a scrape config does not need the operator key.
+		OperatorKey:   cfg.OperatorKey,
 		MetricsToken:  cfg.MetricsToken,
 		Secrets:       secrets,
 		Currency:      cfg.Currency,
@@ -115,17 +107,11 @@ func serve(ctx context.Context) error {
 		Passkeys:      passkeys,
 		ServeUI:       cfg.UI,
 		SecureCookies: cfg.SecureCookies,
-		// The browser's origin. Editors send inference to the same origin.
-		PublicURL: cfg.PublicURL,
-		// The playground uses the real data plane, so it tests the real path.
-		Gateway: gw,
-		// How long an agent conversation may go quiet before the next request
-		// starts a new task.
-		SessionGap: cfg.SessionGap,
-		// Nil when the deployment lends out no sandboxes.
-		Sandboxes: sandboxes,
-		// What each new organisation starts with.
-		Template: template,
+		PublicURL:     cfg.PublicURL,
+		Gateway:       gw,
+		SessionGap:    cfg.SessionGap,
+		Sandboxes:     sandboxes,
+		Template:      template,
 	}, log)
 
 	// The background context outlives the signal, so a request being served is
@@ -293,7 +279,7 @@ func buildProviders(ctx context.Context, cfg config.Config, log *slog.Logger) (a
 // worse: it stops roles being assigned anywhere else, so nobody can ever be
 // made an administrator.
 func warnGoogleGroups(p *authn.OIDC, log *slog.Logger) {
-	if !isGoogle(p.Issuer()) {
+	if !p.IsGoogle() {
 		return
 	}
 	setting := config.OIDCEnvPrefix(p.Name())
@@ -403,7 +389,7 @@ func sweep(ctx context.Context, reg *registry.Registry, limiter limiter,
 			return
 		case now := <-t.C:
 			reg.Sweep()
-			limiter.Sweep(10*time.Minute, now)
+			limiter.Sweep(control.BucketIdle, now)
 			// One sign-in bucket per address, unbounded for the same reason.
 			ctl.Sweep(now)
 			// Every lookup filters on expiry anyway, so a failure only logs.
@@ -555,13 +541,8 @@ func buildSandboxes(ctx context.Context, st *store.Store, reg *registry.Registry
 		Git:         git,
 		// A new sandbox key must work on every replica at once, and a revoked
 		// one must stop at once, not a cache lifetime later.
-		OnChange: func() {
-			reg.Invalidate()
-			if err := st.Notify(context.WithoutCancel(ctx)); err != nil {
-				log.Warn("announcing a sandbox key change failed", "error", err)
-			}
-		},
-		Log: log,
+		OnChange: func() { control.Announce(context.WithoutCancel(ctx), reg, st, log) },
+		Log:      log,
 	}), nil
 }
 

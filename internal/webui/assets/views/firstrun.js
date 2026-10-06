@@ -28,7 +28,7 @@ export function firstRun(ctx, setup) {
       // deployment that already has theirs, so for them this is already done.
       action: operator
         ? {
-            label: "New organisation",
+            label: "Create organisation",
             run: () => newOrg(ctx, { switchTo: true }),
           }
         : null,
@@ -41,7 +41,7 @@ export function firstRun(ctx, setup) {
       body:
         "Clients ask for a model by its alias. Until an enabled model " +
         "exists, every request is refused. A new organisation starts with " +
-        "the models in the catalogue file, if the deployment has one.",
+        "the models in KEERA_MODELS_FILE, if the deployment sets it.",
       action: admin
         ? { label: "Go to Models", run: () => ctx.navigate("/models") }
         : null,

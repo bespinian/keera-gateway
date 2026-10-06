@@ -23,9 +23,8 @@ import (
 // Developer can push to unprotected branches only, so an agent cannot push to
 // a protected default branch.
 type GitLab struct {
-	web    *url.URL
-	token  string
-	client *http.Client
+	web   *url.URL
+	token string
 }
 
 // GitLabOptions configures the GitLab minter.
@@ -41,17 +40,14 @@ type GitLabOptions struct {
 
 // NewGitLab builds the minter.
 func NewGitLab(o GitLabOptions) (*GitLab, error) {
-	if o.URL == "" {
-		o.URL = "https://gitlab.com"
-	}
-	web, err := url.Parse(strings.TrimRight(o.URL, "/"))
-	if err != nil || web.Host == "" {
-		return nil, fmt.Errorf("%q is not a GitLab address", o.URL)
+	web, err := parseBase(o.URL, "https://gitlab.com", "GitLab")
+	if err != nil {
+		return nil, err
 	}
 	if strings.TrimSpace(o.Token) == "" {
 		return nil, errors.New("a GitLab token is required")
 	}
-	return &GitLab{web: web, token: strings.TrimSpace(o.Token), client: &http.Client{Timeout: requestTimeout}}, nil
+	return &GitLab{web: web, token: strings.TrimSpace(o.Token)}, nil
 }
 
 // Mint implements sandbox.GitMinter.
@@ -69,7 +65,7 @@ func (g *GitLab) Mint(ctx context.Context, req sandbox.GitRequest) (sandbox.GitC
 		ID    int64  `json:"id"`
 		Token string `json:"token"`
 	}
-	err = call(ctx, g.client, http.MethodPost, g.tokens(r.path, ""), g.header(),
+	err = call(ctx, http.MethodPost, g.tokens(r.path, ""), g.header(),
 		map[string]any{
 			"name":         name,
 			"scopes":       []string{"read_repository", "write_repository"},
@@ -79,16 +75,15 @@ func (g *GitLab) Mint(ctx context.Context, req sandbox.GitRequest) (sandbox.GitC
 	switch status(err) {
 	case 0:
 	case http.StatusNotFound:
-		return sandbox.GitCredential{}, &sandbox.ErrRefused{Reason: fmt.Sprintf(
-			"there is no project %s on %s, or Keera's GitLab token cannot see it",
-			r.path, g.web.Hostname())}
+		return sandbox.GitCredential{}, sandbox.Refuse("there is no project %s on %s, or "+
+			"Keera's GitLab token cannot see it", r.path, g.web.Hostname())
 	case http.StatusForbidden, http.StatusUnauthorized:
-		return sandbox.GitCredential{}, &sandbox.ErrRefused{Reason: fmt.Sprintf(
-			"Keera's GitLab token may not create access tokens on %s; it needs the api "+
-				"scope and the Maintainer role on that project", r.path)}
+		return sandbox.GitCredential{}, sandbox.Refuse("Keera's GitLab token may not create "+
+			"access tokens on %s; it needs the api scope and the Maintainer role on that "+
+			"project", r.path)
 	case http.StatusBadRequest:
-		return sandbox.GitCredential{}, &sandbox.ErrRefused{Reason: fmt.Sprintf(
-			"GitLab refused a token for %s: %s", r.path, reason(err))}
+		return sandbox.GitCredential{}, sandbox.Refuse("GitLab refused a token for %s: %s",
+			r.path, reason(err))
 	}
 	if err != nil {
 		return sandbox.GitCredential{}, fmt.Errorf("minting a GitLab project access token: %w", err)
@@ -105,17 +100,14 @@ func (g *GitLab) Mint(ctx context.Context, req sandbox.GitRequest) (sandbox.GitC
 
 // Revoke implements sandbox.GitRevoker. A token already gone is fine.
 func (g *GitLab) Revoke(ctx context.Context, repo, id string) error {
-	r, err := parseRepo(repo)
+	r, err := repoOn(repo, g.web)
 	if err != nil {
-		return err
-	}
-	if r, err = r.on(g.web); err != nil {
 		return err
 	}
 	if _, err := strconv.ParseInt(id, 10, 64); err != nil {
 		return fmt.Errorf("%q is not a GitLab token id", id)
 	}
-	err = call(ctx, g.client, http.MethodDelete, g.tokens(r.path, id), g.header(), nil, nil)
+	err = call(ctx, http.MethodDelete, g.tokens(r.path, id), g.header(), nil, nil)
 	if status(err) == http.StatusNotFound {
 		return nil
 	}

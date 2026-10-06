@@ -12,34 +12,21 @@ import (
 
 // projectRun is one 'keera project' invocation.
 type projectRun struct {
-	c           *client
-	fs          *flag.FlagSet
-	org         string
+	*cmdRun
 	name        string
 	description string
-	yes         bool
-	asJSON      bool
 }
 
 func projectCmd(ctx context.Context, args []string) error {
-	sub, rest := split(args)
-	fs := flag.NewFlagSet("project "+sub, flag.ExitOnError)
-	r := &projectRun{c: newClient(), fs: fs}
-	fs.StringVar(&r.org, "org", "", orgUsage)
+	r := &projectRun{cmdRun: newCmdRun("project", args, "org", "yes", "json")}
+	fs := r.fs
 	fs.StringVar(&r.name, "name", "", "the project's new name")
 	fs.StringVar(&r.description, "description", "",
 		"what the project is for; an empty one clears it")
-	fs.BoolVar(&r.yes, "yes", false, yesUsage)
-	fs.BoolVar(&r.asJSON, "json", false, jsonUsage)
-	fs.Usage = func() { _ = printHelp(fs, "project", sub) }
-	if want, ok := wantsHelp(args); ok {
-		return printHelp(fs, "project", want)
-	}
-	verb, err := parseVerb(fs, "project", sub, rest)
-	if err != nil {
+	if done, err := r.parse(); done {
 		return err
 	}
-	switch verb {
+	switch r.verb {
 	case "create":
 		return r.create(ctx)
 	case "set":
@@ -138,11 +125,7 @@ func (r *projectRun) delete(ctx context.Context) error {
 
 // find resolves the project named by the first argument.
 func (r *projectRun) find(ctx context.Context) (store.Project, error) {
-	orgID, err := resolveOrg(ctx, r.c, r.org)
-	if err != nil {
-		return store.Project{}, err
-	}
-	return findProject(ctx, r.c, orgID, r.fs.Arg(0))
+	return findProject(ctx, r.c, r.org, r.fs.Arg(0))
 }
 
 // deletedProject is what DELETE /v1/projects/{id} reports it removed, as far
@@ -155,8 +138,13 @@ type deletedProject struct {
 
 // findProject takes an id or a name and returns the project. Names are unique
 // in an organisation and are what people remember. The id is tried first, so
-// a project named like an id still resolves to itself.
-func findProject(ctx context.Context, c *client, orgID, given string) (store.Project, error) {
+// a project named like an id still resolves to itself. org is resolved as
+// resolveOrg does.
+func findProject(ctx context.Context, c *client, org, given string) (store.Project, error) {
+	orgID, err := resolveOrg(ctx, c, org)
+	if err != nil {
+		return store.Project{}, err
+	}
 	projects, err := list[store.Project](ctx, c, inOrg("/v1/projects", orgID))
 	if err != nil {
 		return store.Project{}, err

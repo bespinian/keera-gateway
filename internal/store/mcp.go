@@ -166,13 +166,9 @@ func (q ToolCallQuery) args() []any {
 
 // ListToolCalls reads tool calls, newest first.
 func (s *Store) ListToolCalls(ctx context.Context, q ToolCallQuery) ([]ToolCallRow, error) {
-	limit := q.Limit
-	if limit <= 0 || limit > 5000 {
-		limit = 100
-	}
 	rows, err := s.pool.Query(ctx, toolCallColumns+toolWhere+`
 		AND ($9 = 0 OR id < $9) ORDER BY id DESC LIMIT $10`,
-		append(q.args(), q.Before, limit)...)
+		append(q.args(), q.Before, pageLimit(q.Limit, 100, 5000))...)
 	if err != nil {
 		return nil, err
 	}
@@ -229,9 +225,9 @@ type ToolSummary struct {
 // no result.
 func (s *Store) SummarizeToolCalls(ctx context.Context, q ToolCallQuery) ([]ToolSummary, error) {
 	rows, err := s.pool.Query(ctx, `SELECT server, tool, count(*),
-		count(*) FILTER (WHERE outcome IN ('tool_error', 'error')),
-		count(*) FILTER (WHERE outcome = 'denied'),
-		count(*) FILTER (WHERE outcome = 'refused'),
+		`+countOf("outcome", ToolFailed, ToolNoResult)+`,
+		`+countOf("outcome", ToolDenied)+`,
+		`+countOf("outcome", ToolRefused)+`,
 		COALESCE(avg(latency_ms)::bigint, 0), COALESCE(sum(arg_bytes), 0),
 		COALESCE(sum(result_bytes), 0)
 		FROM tool_calls`+toolWhere+` GROUP BY server, tool ORDER BY count(*) DESC, server, tool`,

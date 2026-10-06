@@ -175,10 +175,10 @@ var commands = []command{
 					"guardrails, spend and every usage row hold the project by its id, so a " +
 					"rename changes only what reports are headed. The old name stays in the " +
 					"audit log."},
-			{name: "delete", aliases: []string{"rm", "remove"}, args: "<project>", summary: "delete a project that has no working keys",
+			{name: "delete", aliases: []string{"rm", "remove"}, args: "<project>", summary: "delete a project whose keys are all revoked",
 				flags: []string{"org", "yes", "json"},
-				prose: "Refused while any key in the project still works: deleting it would " +
-					"take those credentials with it. Revoke them first. A key cannot change " +
+				prose: "Refused while any key in the project is not revoked, expired ones " +
+					"included: deleting it would take those credentials with it. Revoke them first. A key cannot change " +
 					"project, so issue a new one in another project for anything that still " +
 					"needs one. Revoked keys stay as history, under no project."},
 		},
@@ -739,7 +739,7 @@ func overview(p painter) string {
 		}
 		fmt.Fprintf(&b, "  %s  %s\n", padTo(p.cmd(c.name), width), c.summary)
 	}
-	base, from := resolveBase()
+	base, from := resolveBase(defaultGateway())
 	b.WriteString("\nRun 'keera help <command>', or 'keera help <command> <subcommand>'.\n")
 	b.WriteString("Every listing command also takes --json, and every command --color=never\n" +
 		"(or --no-color).\n")
@@ -1123,7 +1123,7 @@ func unknownSub(name, typed string) error {
 	// Commands with a listing never get here.
 	if typed == "" {
 		fmt.Print(helpText(nil, name, ""))
-		return fmt.Errorf("keera %s needs a subcommand", name)
+		return fmt.Errorf("%s needs a subcommand", name)
 	}
 	verbs := make([]string, 0, len(c.subs))
 	for _, s := range c.subs {

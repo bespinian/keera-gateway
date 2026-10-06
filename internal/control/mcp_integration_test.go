@@ -129,6 +129,37 @@ func TestAPutAnswersWithTheStoredCredentialState(t *testing.T) {
 	}
 }
 
+// An edit that leaves out "enabled" does not switch a disabled server back on.
+func TestAnEditKeepsAServerDisabled(t *testing.T) {
+	tn := twoTenants(t)
+	if _, err := tn.srv.st.Pool().Exec(tn.ctx, "TRUNCATE mcp_servers"); err != nil {
+		t.Fatal(err)
+	}
+	carol := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleAdmin,
+		OrgID: "org_a", UserID: "user_carol"}
+	path := map[string]string{"alias": "github"}
+	put := func(body string) policy.MCPServer {
+		t.Helper()
+		w := tn.call(tn.srv.putMCPServer, carol, "PUT", "/v1/mcp-servers/github", body, path)
+		if w.Code != http.StatusOK {
+			t.Fatalf("PUT = %d: %s", w.Code, w.Body)
+		}
+		var out policy.MCPServer
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	if !put(`{"url":"https://mcp.example.ch/mcp"}`).Enabled {
+		t.Error("a new server started disabled")
+	}
+	put(`{"url":"https://mcp.example.ch/mcp","enabled":false}`)
+	if put(`{"url":"https://mcp.example.ch/mcp","description":"Issues"}`).Enabled {
+		t.Error("an edit switched a disabled server back on")
+	}
+}
+
 // A stored credential goes only to the hosts it was entered for. Otherwise an
 // administrator could repoint a model someone else set up and read its key.
 func TestAStoredCredentialDoesNotMoveToANewHost(t *testing.T) {

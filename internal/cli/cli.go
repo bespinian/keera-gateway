@@ -6,7 +6,6 @@ package cli
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -99,12 +98,7 @@ func Run(ctx context.Context, args []string) error {
 // versionCmd prints the build version. It takes nothing, and says so rather
 // than ignore what it was given.
 func versionCmd(args []string) error {
-	fs := flag.NewFlagSet("version", flag.ExitOnError)
-	fs.Usage = func() { _ = printHelp(fs, "version", "") }
-	if want, ok := wantsHelp(args); ok {
-		return printHelp(fs, "version", want)
-	}
-	if err := parseCmd(fs, "version", args); err != nil {
+	if done, err := newCmdRun("version", args).parse(); done {
 		return err
 	}
 	fmt.Println(version.String())

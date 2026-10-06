@@ -10,7 +10,6 @@ import {
   h,
   table,
   modal,
-  confirm,
   toast,
   pill,
   money,
@@ -19,7 +18,6 @@ import {
   ms,
   icon,
   icons,
-  copyText,
   rowLink,
   providerMark,
   showError,
@@ -35,6 +33,9 @@ import {
   isAdmin,
   plural,
   field,
+  rowActions,
+  code,
+  verdictPill,
 } from "../ui.js";
 
 // usersOfModel names the filters and routers that use a model, for the
@@ -109,7 +110,7 @@ export async function modelsView(ctx) {
             onClick: () => editModel(ctx, null, providers),
           },
           icon(icons.plus),
-          "New model",
+          "Add model",
         )
       : null,
   );
@@ -258,44 +259,18 @@ export async function modelsView(ctx) {
               "View",
             );
           }
-          return h(
-            "div",
-            { class: "row-tight" },
-            h(
-              "button",
-              {
-                class: "btn btn-sm",
-                title: "What this model serves, and on what",
-                "aria-label": `Edit ${m.alias}`,
-                onClick: () => editModel(ctx, m, providers),
-              },
-              icon(icons.pencil),
-            ),
-            h(
-              "button",
-              {
-                class: "btn btn-sm btn-danger",
-                title: "Delete this model",
-                "aria-label": `Delete ${m.alias}`,
-                onClick: async () =>
-                  confirm({
-                    title: `Delete ${m.alias}?`,
-                    body:
-                      "Clients that still use this model will get 404s. " +
-                      "Disable it instead to keep its reports." +
-                      (await usersOfModel(m)),
-                    confirmLabel: "Delete model",
-                    danger: true,
-                    onConfirm: async () => {
-                      await api.deleteModel(m.alias, m.org_id);
-                      toast("Model deleted", "good");
-                      ctx.reload();
-                    },
-                  }),
-              },
-              icon(icons.trash),
-            ),
-          );
+          return rowActions(ctx, m.alias, {
+            editTitle: "What this model serves, and on what",
+            onEdit: () => editModel(ctx, m, providers),
+            deleteTitle: "Delete this model",
+            body: async () =>
+              "Clients that still use this model will get 404s. " +
+              "Disable it instead to keep its reports." +
+              (await usersOfModel(m)),
+            confirmLabel: "Delete model",
+            remove: () => api.deleteModel(m.alias, m.org_id),
+            removed: "Model deleted",
+          });
         },
       },
     ].filter(Boolean),
@@ -671,7 +646,7 @@ function viewModel(ctx, m) {
         : null,
     ),
     actions: (close) => [
-      h("button", { class: "btn btn-primary", onClick: close }, "Close"),
+      h("button", { class: "btn", onClick: close }, "Close"),
     ],
   });
 }
@@ -723,16 +698,7 @@ function verdict(probe, kind) {
       : probe.reachable
         ? "Answering, unusable"
         : "Unreachable";
-  return h(
-    "button",
-    {
-      class: "pill pill-" + tone + " pill-button",
-      title: "The full report",
-      onClick: () => report(probe, kind),
-    },
-    h("span", { class: "dot" }),
-    label,
-  );
+  return verdictPill(label, tone, "The full report", () => report(probe, kind));
 }
 
 // Only a chat check streams and asks for a tool call. A completion or
@@ -805,21 +771,7 @@ function report(probe, kind) {
             "div",
             { style: { marginTop: "12px" } },
             h("div", { class: "hint" }, "What the model produced:"),
-            h(
-              "div",
-              { class: "code" },
-              h(
-                "button",
-                {
-                  class: "btn btn-sm code-copy",
-                  title: "Copy",
-                  "aria-label": "Copy",
-                  onClick: () => copyText(probe.sample),
-                },
-                icon(icons.copy),
-              ),
-              h("pre", {}, h("code", {}, probe.sample)),
-            ),
+            code(probe.sample),
           )
         : null,
       h(
@@ -1330,8 +1282,8 @@ function editModel(ctx, existing, providers, pick) {
   );
 
   // Save is built out here rather than in the footer's callback, because the
-  // tiles turn it on: there is nothing to save before one is clicked, and a
-  // Create button beside four unanswered tiles is one inviting somebody to
+  // tiles turn it on: there is nothing to save before one is clicked, and an
+  // Add model button beside four unanswered tiles is one inviting somebody to
   // skip the question. It closes the dialog through the handle modal hands
   // back.
   let close;
@@ -1405,9 +1357,9 @@ function editModel(ctx, existing, providers, pick) {
             // Left empty, the control plane fills in the provider's, or
             // onprem.
             location: location.value.trim().toLowerCase(),
-            input_micros_per_mtok: micros(priceIn.value),
-            output_micros_per_mtok: micros(priceOut.value),
-            cached_input_micros_per_mtok: micros(priceCached.value),
+            input_micros_per_mtok: toMicros(priceIn.value),
+            output_micros_per_mtok: toMicros(priceOut.value),
+            cached_input_micros_per_mtok: toMicros(priceCached.value),
             subscription: paidByPlan,
             enabled: enabled.checked,
           };
@@ -1420,7 +1372,7 @@ function editModel(ctx, existing, providers, pick) {
             orgID,
           );
           close();
-          toast("Model saved", "good");
+          toast(existing ? "Model saved" : "Model added", "good");
           if (!existing)
             await allowNewModel(
               orgID,
@@ -1434,7 +1386,7 @@ function editModel(ctx, existing, providers, pick) {
         }
       },
     },
-    !existing ? "Create model" : "Save model",
+    !existing ? "Add model" : "Save",
   );
 
   const reveal = () => {
@@ -1454,7 +1406,7 @@ function editModel(ctx, existing, providers, pick) {
 
   close = modal({
     wide: true,
-    title: existing ? `Edit ${m.alias}` : "New model",
+    title: existing ? `Edit ${m.alias}` : "Add model",
     subtitle: waiting
       ? "Start with where it runs. A hosted provider fills in the " +
         "endpoint, context window and prices. For self-hosted, you enter " +
@@ -1575,7 +1527,7 @@ function providerAnswers(p, known, currency) {
 // had to leave out.
 //
 // It is asked first and on its own, the way a filter's mode is: the answer
-// decides what the rest of the form means, and a Create button beside an
+// decides what the rest of the form means, and an Add model button beside an
 // unanswered question is one inviting somebody to skip it. Once a tile is
 // clicked it collapses to a single row with the way back to the others, so the
 // choice stays on the screen without the other tiles staying with it.
@@ -2054,7 +2006,7 @@ function priceInput(v, disabled) {
   });
 }
 
-function micros(v) {
+function toMicros(v) {
   const n = parseFloat(v);
   return Number.isFinite(n) && n > 0 ? Math.round(n * 1e6) : 0;
 }

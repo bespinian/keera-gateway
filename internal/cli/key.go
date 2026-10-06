@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"net/url"
 	"os"
@@ -18,17 +17,13 @@ import (
 
 // keyRun is one 'keera key' invocation.
 type keyRun struct {
-	c       *client
-	fs      *flag.FlagSet
-	org     string
+	*cmdRun
 	project string
 	user    string
 	name    string
 	expires string
 	// subscription issues a key for Claude Code signed in to a Claude plan.
 	subscription bool
-	yes          bool
-	asJSON       bool
 }
 
 // defaultKeyLife is how long a new key lasts unless --expires says otherwise.
@@ -43,10 +38,8 @@ type createdKey struct {
 }
 
 func keyCmd(ctx context.Context, args []string) error {
-	sub, rest := split(args)
-	fs := flag.NewFlagSet("key "+sub, flag.ExitOnError)
-	r := &keyRun{c: newClient(), fs: fs}
-	fs.StringVar(&r.org, "org", "", orgUsage)
+	r := &keyRun{cmdRun: newCmdRun("key", args, "org", "yes", "json")}
+	fs := r.fs
 	fs.StringVar(&r.project, "project", "", "project, by name or id. A new key without it goes in the organisation's oldest project; "+
 		"a list without it shows every project")
 	fs.StringVar(&r.user, "user", "", "the person this key belongs to, by email or id")
@@ -56,18 +49,10 @@ func keyCmd(ctx context.Context, args []string) error {
 			" (90 days) unless told otherwise; a rotated key keeps the old one's lifetime")
 	fs.BoolVar(&r.subscription, "subscription", false,
 		"a key that reaches only subscription models, for Claude Code signed in to a Claude plan")
-	fs.BoolVar(&r.yes, "yes", false, yesUsage)
-	fs.BoolVar(&r.asJSON, "json", false, jsonUsage)
-
-	fs.Usage = func() { _ = printHelp(fs, "key", sub) }
-	if want, ok := wantsHelp(args); ok {
-		return printHelp(fs, "key", want)
-	}
-	verb, err := parseVerb(fs, "key", sub, rest)
-	if err != nil {
+	if done, err := r.parse(); done {
 		return err
 	}
-	switch verb {
+	switch r.verb {
 	case "create":
 		return r.create(ctx)
 	case "revoke":
@@ -189,11 +174,7 @@ func planText(p *policy.PlanUsage) string {
 
 // find resolves the key named by the first argument in the organisation.
 func (r *keyRun) find(ctx context.Context) (store.KeySummary, error) {
-	orgID, err := resolveOrg(ctx, r.c, r.org)
-	if err != nil {
-		return store.KeySummary{}, err
-	}
-	return findKey(ctx, r.c, orgID, r.fs.Arg(0))
+	return findKey(ctx, r.c, r.org, r.fs.Arg(0))
 }
 
 func (r *keyRun) revoke(ctx context.Context) error {
@@ -245,7 +226,20 @@ func (r *keyRun) rotate(ctx context.Context) error {
 			return err
 		}
 	}
-	return rotateKey(ctx, r.c, old, r.name, r.expires, r.asJSON)
+	created, err := rotateKey(ctx, r.c, old.ID, r.name, r.expires)
+	if err != nil {
+		return err
+	}
+	if r.asJSON {
+		return out(true, created, nil)
+	}
+	handOver(created.Key, fmt.Sprintf("key %s replaces %s (%s).", created.ID, old.ID, old.Name))
+	if !old.Limits.IsZero() {
+		fmt.Fprintln(os.Stderr, "Its guardrails were copied from the key it replaces.")
+	}
+	fmt.Fprintf(os.Stderr, "%s\n", styleErr.warn(fmt.Sprintf(
+		"%s is revoked: every client still using it is already failing.", old.ID)))
+	return nil
 }
 
 func (r *keyRun) set(ctx context.Context) error {
@@ -316,31 +310,21 @@ func confirmKeyRotate(k store.KeySummary) error {
 	}, noun, named, "nothing was rotated")
 }
 
-// rotateKey replaces old with a key carrying the same project, owner, name and
-// guardrails, then revokes old. The control plane does it in one transaction,
-// so it never leaves both keys live or drops the key's limits.
-func rotateKey(ctx context.Context, c *client, old store.KeySummary, newName, expires string,
-	asJSON bool,
-) error {
-	var created struct {
-		createdKey
-		Replaced string `json:"replaced"`
-	}
-	req := map[string]string{"name": newName, "expires_in": expires}
-	if err := c.do(ctx, "POST", "/v1/keys/"+url.PathEscape(old.ID)+"/rotate", req, &created); err != nil {
-		return err
-	}
+// rotatedKey is a new key from a rotation, and the id of the key it replaced.
+type rotatedKey struct {
+	createdKey
+	Replaced string `json:"replaced"`
+}
 
-	if asJSON {
-		return out(true, created, nil)
-	}
-	handOver(created.Key, fmt.Sprintf("key %s replaces %s (%s).", created.ID, old.ID, old.Name))
-	if !old.Limits.IsZero() {
-		fmt.Fprintln(os.Stderr, "Its guardrails were copied from the key it replaces.")
-	}
-	fmt.Fprintf(os.Stderr, "%s\n", styleErr.warn(fmt.Sprintf(
-		"%s is revoked: every client still using it is already failing.", old.ID)))
-	return nil
+// rotateKey replaces a key with one carrying the same project, owner and
+// guardrails, then revokes the old one. The control plane does it in one
+// transaction, so it never leaves both keys live or drops the key's limits.
+// An empty name or expires keeps the old key's.
+func rotateKey(ctx context.Context, c *client, keyID, name, expires string) (rotatedKey, error) {
+	var rotated rotatedKey
+	err := c.do(ctx, "POST", "/v1/keys/"+url.PathEscape(keyID)+"/rotate",
+		map[string]string{"name": name, "expires_in": expires}, &rotated)
+	return rotated, err
 }
 
 // findKey resolves an id or a name to a key.
@@ -348,7 +332,12 @@ func rotateKey(ctx context.Context, c *client, old store.KeySummary, newName, ex
 // A name only matches keys that still work, because rotation leaves the old
 // key revoked under the same name. If several live keys share the name, it
 // refuses and lists their ids: acting on the wrong key breaks its clients.
-func findKey(ctx context.Context, c *client, orgID, who string) (store.KeySummary, error) {
+// org is resolved as resolveOrg does.
+func findKey(ctx context.Context, c *client, org, who string) (store.KeySummary, error) {
+	orgID, err := resolveOrg(ctx, c, org)
+	if err != nil {
+		return store.KeySummary{}, err
+	}
 	keys, err := list[store.KeySummary](ctx, c, inOrg("/v1/keys", orgID))
 	if err != nil {
 		return store.KeySummary{}, err

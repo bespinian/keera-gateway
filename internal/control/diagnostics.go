@@ -82,7 +82,7 @@ func (s *Server) diagnostics(w http.ResponseWriter, r *http.Request, p *authn.Pr
 	// so it is for the same people: that organisation's administrators.
 	probe := httpx.Flag(r.URL.Query(), "probe")
 	if probe && orgID == "" {
-		badRequest(w, "a probe calls one organisation's models: pass org_id, or --org on the "+
+		needOrg(w, "a probe calls one organisation's models: pass org_id, or --org on the "+
 			"command line")
 		return
 	}
@@ -220,13 +220,9 @@ func (s *Server) checkCatalogue(ctx context.Context, d *Diagnosis, orgID string,
 	}
 }
 
-// modelFix says how to change a model. Only an operator names the
-// organisation; anyone else's is their own.
+// modelFix says how to change a model.
 func modelFix(m policy.Model, flags string, p *authn.Principal) string {
-	if p.Unrestricted() {
-		flags += " --org " + m.OrgID
-	}
-	return "'keera model set " + m.Alias + " " + flags + "'"
+	return "'keera model set " + m.Alias + " " + flags + orgFlag(p, m.OrgID) + "'"
 }
 
 // probeModels calls each enabled model. It catches a vLLM parser that does
@@ -421,7 +417,6 @@ func (s *Server) checkSandboxes(ctx context.Context, d *Diagnosis, orgID string)
 	d.add(area, "Driver", VerdictOK, fmt.Sprintf("%d classes", len(classes)), "")
 }
 
-// plural completes "has" or "have" after "ha".
 // orgFlag is the --org a suggested command needs. Only an operator names the
 // organisation; anyone else's is their own.
 func orgFlag(p *authn.Principal, orgID string) string {

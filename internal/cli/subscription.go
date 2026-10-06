@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -284,8 +283,8 @@ func machineKey(ctx context.Context, c *client, orgID string, me identity, proje
 					"another project, and replacing it keeps that project; to move it, revoke it "+
 					"first with: keera key revoke %s, then run this again", k.ID, k.ID)
 			}
-			rotated, err := rotateFor(ctx, c, k.ID, "")
-			return rotated, &keys[i], err
+			rotated, err := rotateKey(ctx, c, k.ID, "", "")
+			return rotated.createdKey, &keys[i], err
 		}
 		if unclaimed == nil && !isMachineKeyName(k.Name) {
 			unclaimed = &keys[i]
@@ -298,24 +297,15 @@ func machineKey(ctx context.Context, c *client, orgID string, me identity, proje
 				"--subscription --user %s --name \"%s's Claude Code\", then run this again",
 				me.Email, strings.Split(me.Email, "@")[0])
 		}
-		rotated, err := rotateFor(ctx, c, unclaimed.ID, name)
-		return rotated, unclaimed, err
+		rotated, err := rotateKey(ctx, c, unclaimed.ID, name, "")
+		return rotated.createdKey, unclaimed, err
 	}
 	var created createdKey
 	err = c.do(ctx, "POST", "/v1/keys", map[string]string{
 		"org_id": orgID, "project_id": inProject, "user_id": me.UserID, "name": name,
-		"kind": string(policy.KeySubscription),
+		"kind": string(policy.KeySubscription), "expires_in": defaultKeyLife,
 	}, &created)
 	return created, nil, err
-}
-
-// rotateFor rotates a key and returns the new one. An empty name keeps the
-// old one's.
-func rotateFor(ctx context.Context, c *client, keyID, name string) (createdKey, error) {
-	var rotated createdKey
-	err := c.do(ctx, "POST", "/v1/keys/"+url.PathEscape(keyID)+"/rotate",
-		map[string]string{"name": name}, &rotated)
-	return rotated, err
 }
 
 // machineKeyName is the name of a machine's subscription key. The id tells
@@ -511,19 +501,7 @@ func writeSettings(path string, settings map[string]any) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating %s: %w", dir, err)
 	}
-	tmp, err := os.CreateTemp(dir, ".settings-*.json")
-	if err != nil {
-		return fmt.Errorf("writing %s: %w", path, err)
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	if _, err := tmp.Write(append(raw, '\n')); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("writing %s: %w", path, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("writing %s: %w", path, err)
-	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
+	if err := writeFileAtomic(path, append(raw, '\n'), 0o600); err != nil {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
 	return nil

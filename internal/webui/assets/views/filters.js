@@ -17,7 +17,6 @@ import {
   h,
   table,
   modal,
-  confirm,
   toast,
   pill,
   stat,
@@ -42,6 +41,10 @@ import {
   pct,
   field,
   modeTiles,
+  rowActions,
+  listHead,
+  verdictPill,
+  sectionHead,
 } from "../ui.js";
 import { areaChart, barList } from "../chart.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
@@ -70,35 +73,17 @@ export async function filtersView(ctx) {
   const canEdit = isAdmin(ctx);
   ctx.setSubtitle(`${filters.length} ${plural(filters.length, "filter")}`);
 
-  const head = h(
-    "div",
-    { class: "detail-head" },
-    h(
-      "div",
-      { class: "muted" },
-      "A filter checks each request its guardrails cover before it is " +
-        "forwarded. Rewrite and gate use a small model, so each request is " +
-        "generated twice. Run that model in your own infrastructure: a hosted " +
-        "one receives the prompt before anything is redacted. Pattern uses " +
-        "regular expressions in the gateway and costs nothing.",
-    ),
-    h(
-      "div",
-      { class: "row", style: { flexWrap: "wrap" } },
-      h("div", { style: { flex: 1 } }),
-      rangePicker(ctx, since),
-      canEdit
-        ? h(
-            "button",
-            {
-              class: "btn btn-primary",
-              onClick: () => editFilter(ctx, null, chatModels),
-            },
-            icon(icons.plus),
-            "New filter",
-          )
-        : null,
-    ),
+  const head = listHead(
+    "A filter checks each request its guardrails cover before it is " +
+      "forwarded. Rewrite and gate use a small model, so each request is " +
+      "generated twice. Run that model in your own infrastructure: a hosted " +
+      "one receives the prompt before anything is redacted. Pattern uses " +
+      "regular expressions in the gateway and costs nothing.",
+    [rangePicker(ctx, since)],
+    canEdit && {
+      label: "Create filter",
+      onClick: () => editFilter(ctx, null, chatModels),
+    },
   );
 
   const known = new Set(models.map((m) => m.alias));
@@ -140,7 +125,7 @@ export async function filtersView(ctx) {
                 "div",
                 { class: "row-tight" },
                 h("span", { class: "mono muted" }, f.model),
-                pill("missing", "bad"),
+                pill("Missing", "bad"),
               );
         },
       },
@@ -168,54 +153,27 @@ export async function filtersView(ctx) {
       {
         label: "",
         shrink: true,
-        cell: (f) => {
-          if (!canEdit) return null;
-          return h(
-            "div",
-            { class: "row-tight" },
-            h(
-              "button",
-              {
-                class: "btn btn-sm",
-                title: "Edit this filter",
-                "aria-label": `Edit ${f.alias}`,
-                onClick: () => editFilter(ctx, f, chatModels),
-              },
-              icon(icons.pencil),
-            ),
-            h(
-              "button",
-              {
-                class: "btn btn-sm btn-danger",
-                title: "Delete this filter",
-                "aria-label": `Delete ${f.alias}`,
-                onClick: () =>
-                  confirm({
-                    title: `Delete ${f.alias}?`,
-                    body:
-                      "A filter still used by a guardrail cannot be deleted. " +
-                      "Take it off those guardrails first; the error lists " +
-                      "them.",
-                    confirmLabel: "Delete filter",
-                    danger: true,
-                    onConfirm: async () => {
-                      await api.deleteFilter(ctx.orgID, f.alias);
-                      toast("Filter deleted", "good");
-                      ctx.reload();
-                    },
-                  }),
-              },
-              icon(icons.trash),
-            ),
-          );
-        },
+        cell: (f) =>
+          canEdit
+            ? rowActions(ctx, f.alias, {
+                editTitle: "Edit this filter",
+                onEdit: () => editFilter(ctx, f, chatModels),
+                deleteTitle: "Delete this filter",
+                body:
+                  "A filter still used by a guardrail cannot be deleted. " +
+                  "Take it off those guardrails first; the error lists them.",
+                confirmLabel: "Delete filter",
+                remove: () => api.deleteFilter(ctx.orgID, f.alias),
+                removed: "Filter deleted",
+              })
+            : null,
       },
     ],
     filters,
     {
-      emptyTitle: "No filters",
+      emptyTitle: "No filters yet",
       emptyBody:
-        "Requests are forwarded as sent. Add a filter to keep something " +
+        "Requests are forwarded as sent. Create a filter to keep something " +
         "from reaching the model.",
     },
   );
@@ -241,7 +199,7 @@ function usesModel(f) {
 // filter in shadow reads as a guardrail, and it is not one.
 function modePills(f) {
   const tone = { gate: "accent", pattern: "good" }[mode(f)] || "";
-  return [pill(mode(f), tone), f.shadow ? pill("shadow", "warn") : null].filter(
+  return [pill(mode(f), tone), f.shadow ? pill("Shadow", "warn") : null].filter(
     Boolean,
   );
 }
@@ -305,15 +263,8 @@ function verdict(ctx, probe) {
       : warned
         ? "Working, with notes"
         : "Working";
-  return h(
-    "button",
-    {
-      class: "pill pill-" + tone + " pill-button",
-      title: "What the filter did to the sample",
-      onClick: () => report(ctx, probe),
-    },
-    h("span", { class: "dot" }),
-    label,
+  return verdictPill(label, tone, "What the filter did to the sample", () =>
+    report(ctx, probe),
   );
 }
 
@@ -398,8 +349,8 @@ function report(ctx, probe) {
               : "Ordinary source code",
             " ",
             v.refused === v.expect_refusal
-              ? pill(v.refused ? "refused" : "allowed", "good")
-              : pill(v.refused ? "refused" : "allowed", "warn"),
+              ? pill(v.refused ? "Refused" : "Allowed", "good")
+              : pill(v.refused ? "Refused" : "Allowed", "warn"),
             // How much of the verdict that verdict took. A gate answering both
             // halves right at 55% cannot tell them apart, which the pill alone
             // cannot show. Absent where the model's backend serves no
@@ -453,7 +404,7 @@ function report(ctx, probe) {
                     `${hit.matches} ${plural(hit.matches, "match", "matches")}`,
                     hit.refused ? "bad" : "accent",
                   ),
-                  hit.refused ? pill("refused the request", "bad") : null,
+                  hit.refused ? pill("Refused the request", "bad") : null,
                 ),
               ),
             ),
@@ -474,7 +425,7 @@ function report(ctx, probe) {
             {},
             `Sample ${i + 1}`,
             " ",
-            seg.changed ? pill("rewritten", "accent") : pill("unchanged"),
+            seg.changed ? pill("Rewritten", "accent") : pill("Unchanged"),
           ),
           h("div", { class: "prompt-text" }, seg.before),
           h("div", { class: "hint" }, "came back as"),
@@ -563,7 +514,7 @@ export async function filterDetailView(ctx) {
           "div",
           { class: "wrap-chips" },
           f ? modePills(f) : [pill(`Deleted from ${orgNameOf(ctx)}`, "warn")],
-          f && f.model ? pill("runs on " + f.model) : null,
+          f && f.model ? pill("Runs on " + f.model) : null,
         ),
         h("div", { style: { flex: 1 } }),
         rangePicker(ctx, since),
@@ -747,11 +698,8 @@ export async function filterDetailView(ctx) {
       h(
         "div",
         { style: { marginTop: "20px" } },
-        h(
-          "div",
-          { class: "section-head" },
-          h("h2", {}, "Who it happened to"),
-          h("div", { style: { flex: 1 } }),
+        sectionHead(
+          "Who it happened to",
           h(
             "span",
             { class: "faint", style: { fontSize: "11.5px" } },
@@ -1280,7 +1228,7 @@ function editFilter(ctx, existing, chatModels) {
             description: description.value.trim(),
           });
           close();
-          toast("Filter saved", "good");
+          toast(creating ? "Filter created" : "Filter saved", "good");
           ctx.reload();
         } catch (ex) {
           showError(err, ex.message);
@@ -1288,7 +1236,7 @@ function editFilter(ctx, existing, chatModels) {
         }
       },
     },
-    "Save",
+    creating ? "Create filter" : "Save",
   );
 
   if (creating) syncMode();
@@ -1296,7 +1244,7 @@ function editFilter(ctx, existing, chatModels) {
 
   close = modal({
     wide: true,
-    title: creating ? "New filter" : `Edit ${f.alias}`,
+    title: creating ? "Create filter" : `Edit ${f.alias}`,
     subtitle: creating
       ? "Choose what it does first; the rest of the form depends on it. " +
         "Every request its guardrails cover goes through it."

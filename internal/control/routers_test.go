@@ -246,9 +246,9 @@ func TestDeleteRouterRefusesOneAnAllowListNarrowsTo(t *testing.T) {
 	if _, err := st.CreateProject(ctx, store.Project{ID: "project_1", OrgID: "org_1", Name: "Payments Platform"}); err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
-	if err := st.PutPolicy(ctx, policy.ScopeProject, "project_1",
+	if err := st.PutGuardrail(ctx, policy.ScopeProject, "project_1",
 		policy.Limits{AllowedModels: []string{"auto"}}); err != nil {
-		t.Fatalf("PutPolicy: %v", err)
+		t.Fatalf("PutGuardrail: %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodDelete, httpx.ControlPrefix+"/v1/routers/auto?org_id=org_1", nil)

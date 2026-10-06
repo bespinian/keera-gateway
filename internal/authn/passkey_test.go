@@ -23,15 +23,15 @@ func relyingParty(t *testing.T) *authn.RelyingParty {
 
 func TestTheRelyingPartyComesFromThePublicURL(t *testing.T) {
 	rp := relyingParty(t)
-	if rp.ID() != "keera.example.ch" || rp.Origin() != origin {
-		t.Errorf("got %s at %s, want keera.example.ch at %s", rp.ID(), rp.Origin(), origin)
+	if rp.ID() != "keera.example.ch" {
+		t.Errorf("got %s, want keera.example.ch", rp.ID())
 	}
 	local, err := authn.NewRelyingParty("http://localhost:8080")
 	if err != nil {
 		t.Fatalf("http on localhost is a secure context: %v", err)
 	}
-	if local.ID() != "localhost" || local.Origin() != "http://localhost:8080" {
-		t.Errorf("got %s at %s", local.ID(), local.Origin())
+	if local.ID() != "localhost" {
+		t.Errorf("got %s, want localhost", local.ID())
 	}
 	// Browsers refuse each of these, so the gateway refuses to start with them.
 	for _, bad := range []string{"", "http://keera.example.ch", "https://127.0.0.1",

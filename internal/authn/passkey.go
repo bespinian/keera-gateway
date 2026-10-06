@@ -19,6 +19,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/bespinian/keera-gateway/internal/auth"
 )
 
 // Passkeys are WebAuthn credentials that Keera checks itself, for accounts no
@@ -110,15 +112,12 @@ func NewRelyingParty(publicURL string) (*RelyingParty, error) {
 // ID is the RP ID.
 func (rp *RelyingParty) ID() string { return rp.id }
 
-// Origin is the only origin a ceremony may come from.
-func (rp *RelyingParty) Origin() string { return rp.origin }
-
 // NewPasskeyChallenge mints a ceremony's challenge, as base64url.
-func NewPasskeyChallenge() string { return randomToken() }
+func NewPasskeyChallenge() string { return auth.RandomToken() }
 
 // NewPasskeyLink mints the token of a set-up link and the hash stored for it.
 func NewPasskeyLink() (token string, hash []byte) {
-	token = randomToken()
+	token = auth.RandomToken()
 	return token, HashPasskeyLink(token)
 }
 

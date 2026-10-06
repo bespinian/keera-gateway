@@ -16,16 +16,17 @@ import {
   num,
   icon,
   icons,
-  copyText,
   rowLink,
   showError,
   isAdmin,
   field,
+  code,
+  secretField,
 } from "../ui.js";
 import { openGuardrails, ceilingsFor, summarise } from "./guardrails.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
 import { oldestProject } from "./projects.js";
-import { loadClients, code, defaultBase, keyModels } from "./connect.js";
+import { loadClients, defaultBase, keyModels } from "./connect.js";
 
 export async function keysView(ctx) {
   // Keys, models and people all belong to one organisation, so an operator
@@ -273,7 +274,9 @@ export async function keysView(ctx) {
                     title: "Replace this key with a new one",
                     onClick: () =>
                       confirm({
-                        title: "Rotate this key?",
+                        title: k.name
+                          ? `Rotate ${k.name}?`
+                          : "Rotate this key?",
                         body:
                           `A new key replaces ${k.name}, with the same project, ` +
                           "person and guardrails. The old key stops working " +
@@ -359,7 +362,7 @@ export function revokeBody(k) {
 // shows a live key offers this, and it should read the same on each.
 export function confirmRevoke(k, done) {
   confirm({
-    title: "Revoke this key?",
+    title: k.name ? `Revoke ${k.name}?` : "Revoke this key?",
     body: revokeBody(k),
     confirmLabel: "Revoke",
     danger: true,
@@ -524,7 +527,7 @@ function issueKey(ctx, projects, users, clients) {
   const err = h("div");
 
   modal({
-    title: "Issue an API key",
+    title: "Issue key",
     body: h(
       "form",
       {},
@@ -612,18 +615,6 @@ async function showSecret(ctx, created, clients) {
       : await issuedModels(created).catch(() => []);
   const base = defaultBase(ctx);
 
-  const secret = h("input", {
-    class: "input key-value mono",
-    readonly: true,
-    value: created.key,
-    "aria-label": "The issued API key",
-    // Selecting on focus makes the manual path one click, which is the path
-    // taken whenever the clipboard is unavailable - a panel served over plain
-    // http on anything but localhost has no clipboard at all.
-    onFocus: (e) => e.target.select(),
-    onClick: (e) => e.target.select(),
-  });
-
   const body = h(
     "div",
     {},
@@ -631,17 +622,7 @@ async function showSecret(ctx, created, clients) {
       "div",
       { class: "field" },
       h("label", {}, "The key"),
-      h(
-        "div",
-        { class: "row-tight" },
-        secret,
-        h(
-          "button",
-          { class: "btn", onClick: () => copyText(created.key) },
-          icon(icons.copy),
-          "Copy",
-        ),
-      ),
+      secretField(created.key, "The issued API key"),
       h(
         "div",
         { class: "hint" },
@@ -756,6 +737,6 @@ function planUsed(plan) {
         "in the last seven days.",
     },
     "plan " + parts.join(" · "),
-    limited ? h("span", {}, " ", pill("limit reached", "warn")) : null,
+    limited ? h("span", {}, " ", pill("Limit reached", "warn")) : null,
   );
 }

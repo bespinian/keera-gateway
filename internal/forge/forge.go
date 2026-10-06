@@ -21,9 +21,22 @@ import (
 	"github.com/bespinian/keera-gateway/internal/sandbox"
 )
 
-// requestTimeout bounds one call to a forge. Minting runs while somebody
-// waits for their sandbox.
+// requestTimeout bounds one call to a forge, body included. Minting runs
+// while somebody waits for their sandbox.
 const requestTimeout = 20 * time.Second
+
+// parseBase reads the address a forge is configured with, or fallback when
+// it is empty. what names the address in the error.
+func parseBase(raw, fallback, what string) (*url.URL, error) {
+	if raw == "" {
+		raw = fallback
+	}
+	u, err := url.Parse(strings.TrimRight(raw, "/"))
+	if err != nil || u.Host == "" {
+		return nil, fmt.Errorf("%q is not a %s address", raw, what)
+	}
+	return u, nil
+}
 
 // repo is a repository on one host: "owner/name", or "group/sub/name" on
 // GitLab.
@@ -82,9 +95,8 @@ func badRepo(raw string) error {
 // https://example.ch/gitlab, has that path taken off.
 func (r repo) on(web *url.URL) (repo, error) {
 	if !strings.EqualFold(r.host, web.Hostname()) {
-		return repo{}, &sandbox.ErrRefused{Reason: fmt.Sprintf("%s is on %s, and this "+
-			"deployment mints repository credentials for %s only",
-			r.path, r.host, web.Hostname())}
+		return repo{}, sandbox.Refuse("%s is on %s, and this deployment mints repository "+
+			"credentials for %s only", r.path, r.host, web.Hostname())
 	}
 	if prefix := strings.Trim(web.Path, "/"); prefix != "" {
 		r.path = strings.TrimPrefix(r.path, prefix+"/")
@@ -92,15 +104,21 @@ func (r repo) on(web *url.URL) (repo, error) {
 	return r, nil
 }
 
+// repoOn reads a repository address as a path on the forge at web.
+func repoOn(raw string, web *url.URL) (repo, error) {
+	r, err := parseRepo(raw)
+	if err != nil {
+		return repo{}, err
+	}
+	return r.on(web)
+}
+
 // target reads the repository a request is for, as a path on this forge, and
 // checks the caller's guardrail allows it. Both forges start here, so neither
 // can mint for a repository the guardrail has not allowed.
 func target(req sandbox.GitRequest, web *url.URL) (repo, error) {
-	r, err := parseRepo(req.Repo)
+	r, err := repoOn(req.Repo, web)
 	if err != nil {
-		return repo{}, err
-	}
-	if r, err = r.on(web); err != nil {
 		return repo{}, err
 	}
 	if req.Allow == nil {
@@ -120,9 +138,7 @@ func (r repo) cloneURL(web *url.URL) string {
 
 // call sends one JSON request and decodes a 2xx answer into out. Anything
 // else comes back as an *apiError, with the forge's own message.
-func call(ctx context.Context, c *http.Client, method, target string, header http.Header,
-	body, out any,
-) error {
+func call(ctx context.Context, method, target string, header http.Header, body, out any) error {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 	var rd io.Reader
@@ -142,7 +158,7 @@ func call(ctx context.Context, c *http.Client, method, target string, header htt
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	res, err := c.Do(req)
+	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -170,8 +186,7 @@ func status(err error) int {
 
 // reason is what a forge said when it refused.
 func reason(err error) string {
-	var api *apiError
-	if errors.As(err, &api) && api.Message != "" {
+	if api, ok := errors.AsType[*apiError](err); ok && api.Message != "" {
 		return api.Message
 	}
 	return "no reason given"

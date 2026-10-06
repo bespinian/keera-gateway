@@ -53,7 +53,8 @@ func (s *Server) putMCPServer(w http.ResponseWriter, r *http.Request, p *authn.P
 		URL         string `json:"url"`
 		Description string `json:"description"`
 		AuthHeader  string `json:"auth_header"`
-		// Enabled is a pointer, so leaving it out keeps a server on.
+		// Enabled is a pointer, so leaving it out keeps the stored state, and a
+		// new server starts on.
 		Enabled *bool `json:"enabled"`
 		// APIKey is write-only. Nil leaves the stored one alone, and "" clears it.
 		APIKey *string `json:"api_key"`
@@ -63,7 +64,7 @@ func (s *Server) putMCPServer(w http.ResponseWriter, r *http.Request, p *authn.P
 	}
 	m := policy.MCPServer{
 		OrgID: orgID, Alias: r.PathValue("alias"), URL: body.URL, Description: body.Description,
-		AuthHeader: body.AuthHeader, Enabled: body.Enabled == nil || *body.Enabled,
+		AuthHeader: body.AuthHeader,
 	}
 	if msg := normalizeMCPServer(&m); msg != "" {
 		badRequest(w, msg)
@@ -74,15 +75,22 @@ func (s *Server) putMCPServer(w http.ResponseWriter, r *http.Request, p *authn.P
 		credential = strings.TrimSpace(*body.APIKey)
 	}
 	existing, err := s.st.MCPServer(r.Context(), orgID, m.Alias)
-	switch {
-	case err == nil:
-		if existing.HasAPIKey && body.APIKey == nil && !sameOrigins([]string{existing.URL}, []string{m.URL}) {
-			badRequest(w, keyNotMoved("url"))
-			return
-		}
-	case !errors.Is(err, store.ErrNotFound):
+	found := err == nil
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		s.fail(w, err)
 		return
+	}
+	if found && existing.HasAPIKey && body.APIKey == nil && !sameOrigins([]string{existing.URL}, []string{m.URL}) {
+		badRequest(w, keyNotMoved("url"))
+		return
+	}
+	switch {
+	case body.Enabled != nil:
+		m.Enabled = *body.Enabled
+	case found:
+		m.Enabled = existing.Enabled
+	default:
+		m.Enabled = true
 	}
 	if err := s.st.UpsertMCPServer(r.Context(), m); err != nil {
 		s.fail(w, err)
@@ -226,8 +234,9 @@ func (s *Server) checkAllowedTools(w http.ResponseWriter, r *http.Request, orgID
 		}
 	}
 	if len(unknown) > 0 {
-		badRequest(w, "this organisation has no MCP server called "+strings.Join(unknown, ", ")+
-			" (see: keera mcp list)")
+		httpx.WriteError(w, http.StatusBadRequest, "invalid_request_error", "mcp_server_not_found",
+			"this organisation has no MCP server called "+strings.Join(unknown, ", ")+
+				" (see: keera mcp list)")
 		return false
 	}
 	return true

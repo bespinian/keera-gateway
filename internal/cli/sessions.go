@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"strconv"
 	"strings"
@@ -22,31 +21,23 @@ func sessionCmd(ctx context.Context, args []string) error {
 			args = append([]string{"show"}, args...)
 		}
 	}
-	sub, rest := split(args)
-	c := newClient()
-	fs := flag.NewFlagSet("session "+sub, flag.ExitOnError)
-	org := fs.String("org", "", orgsUsage)
+	r := newCmdRun("session", args, "orgs", "json")
+	fs := r.fs
 	sort := fs.String("sort", "cost", "cost, requests, duration or recent")
 	alias := fs.String("model", "", "only the sessions that used one model")
 	w := registerWho(fs)
 	unhappy := fs.Bool("unhappy", false, "only the sessions with problems")
 	since := fs.Duration("since", reportWindow, "how far back to look")
 	limit := fs.Int("limit", reportLimit, "how many to print")
-	asJSON := fs.Bool("json", false, jsonUsage)
-	fs.Usage = func() { _ = printHelp(fs, "session", sub) }
-	if want, ok := wantsHelp(args); ok {
-		return printHelp(fs, "session", want)
-	}
-
-	verb, err := parseVerb(fs, "session", sub, rest)
-	if err != nil {
+	if done, err := r.parse(); done {
 		return err
 	}
-	if verb == "show" {
-		return sessionShow(ctx, c, fs.Arg(0), *org, *asJSON)
+	c := r.c
+	if r.verb == "show" {
+		return sessionShow(ctx, c, fs.Arg(0), r.org, r.asJSON)
 	}
-	return sessionList(ctx, c, sessionQuery{org: *org, sort: *sort, alias: *alias, who: w,
-		unhappy: *unhappy, since: *since, limit: *limit}, *asJSON)
+	return sessionList(ctx, c, sessionQuery{org: r.org, sort: *sort, alias: *alias, who: w,
+		unhappy: *unhappy, since: *since, limit: *limit}, r.asJSON)
 }
 
 type sessionQuery struct {

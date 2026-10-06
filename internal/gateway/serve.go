@@ -123,31 +123,29 @@ func (s *Server) receive(c *call) ([]byte, bool) {
 	// Opened rather than timed, so a body refused halfway (over the size cap)
 	// is still drawn as the step it was refused in.
 	c.tr.open(store.SpanReceive, "")
-	raw, err := readBody(c.w, c.r, s.opts.MaxBodyBytes)
-	if err != nil {
-		if errors.Is(err, errBodyTooLarge) {
-			s.refuse(c, refusal{
-				status: http.StatusRequestEntityTooLarge,
-				typ:    "invalid_request_error", code: "request_too_large",
-				msg: err.Error(),
-			})
-		}
-		return nil, false
-	}
-	return raw, true
+	return readBody(c.w, c.r, s.opts.MaxBodyBytes, func(msg string) {
+		s.refuse(c, refusal{
+			status: http.StatusRequestEntityTooLarge,
+			typ:    "invalid_request_error", code: "request_too_large",
+			msg: msg,
+		})
+	})
 }
 
-// errBodyTooLarge is readBody's refusal of a body over the cap. Any other
-// error is a client that went away mid-upload, which needs no answer.
-var errBodyTooLarge = errors.New("the request body exceeds the gateway's limit")
-
-// readBody reads a request body of at most limit bytes.
-func readBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, error) {
+// readBody reads a request body of at most limit bytes. A body over the limit
+// is answered by tooLarge, in the caller's own shape. Any other error is a
+// client that went away mid-upload, which needs no answer.
+func readBody(w http.ResponseWriter, r *http.Request, limit int64,
+	tooLarge func(msg string),
+) ([]byte, bool) {
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
-	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-		return nil, errBodyTooLarge
+	if err == nil {
+		return raw, true
 	}
-	return raw, err
+	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+		tooLarge("the request body exceeds the gateway's limit")
+	}
+	return nil, false
 }
 
 // decode parses the body. Everything after this is written against the OpenAI
@@ -666,6 +664,7 @@ func (s *Server) settleRouter(c *call, fw forwarded) {
 func (s *Server) upstreamUnreachable(c *call, fw forwarded) {
 	s.log.Error("inference plane unreachable", "error", fw.err, "model", c.alias,
 		"request_id", httpx.RequestID(c.r.Context()))
+	s.limitHeaders(c.w, c.res, c.now)
 	c.surf.shape.writeError(c.w, http.StatusBadGateway, "server_error", "upstream_unavailable",
 		"the inference plane could not be reached")
 	c.ev.Status = http.StatusBadGateway

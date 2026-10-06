@@ -30,10 +30,16 @@ var ErrMalformed = errors.New("auth: malformed key")
 // no dictionary to defend against, and a slow hash on the hot path would invite
 // denial of service.
 func Generate() (key string, hash []byte, prefix string) {
-	var raw [32]byte
-	_, _ = rand.Read(raw[:]) // never fails; see crypto/rand.Read
-	key = Prefix + base64.RawURLEncoding.EncodeToString(raw[:])
+	key = Prefix + RandomToken()
 	return key, Hash(key), key[:prefixLen]
+}
+
+// RandomToken returns 32 random bytes, URL-safe base64 encoded. rand.Read
+// never fails: it crashes the program instead of returning weak bytes.
+func RandomToken() string {
+	var raw [32]byte
+	_, _ = rand.Read(raw[:])
+	return base64.RawURLEncoding.EncodeToString(raw[:])
 }
 
 // keyLen is the length of every key Generate makes.
@@ -78,9 +84,6 @@ func FromHeader(h string) (string, error) {
 		if rest[0] == ' ' || rest[0] == '\t' {
 			h = strings.TrimSpace(rest)
 		}
-	}
-	if h == "" {
-		return "", ErrMalformed
 	}
 	return h, nil
 }

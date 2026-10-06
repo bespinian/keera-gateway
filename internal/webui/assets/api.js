@@ -171,7 +171,7 @@ export const api = {
     request("DELETE", `/v1/projects/${encodeURIComponent(id)}`),
 
   users: (orgID) => get("/v1/users" + query({ org_id: orgID })),
-  inviteUser: (orgID, email, role, signIn) =>
+  addUser: (orgID, email, role, signIn) =>
     request("POST", "/v1/users", {
       org_id: orgID,
       email,

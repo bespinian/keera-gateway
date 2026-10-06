@@ -78,13 +78,13 @@ func TestFilterRoundTripAndTheGuardrailsThatNameOne(t *testing.T) {
 
 	// A guardrail on the project, and one in the other organisation that happens
 	// to use the same alias.
-	if err := st.PutPolicy(ctx, policy.ScopeProject, f.projectID,
+	if err := st.PutGuardrail(ctx, policy.ScopeProject, f.projectID,
 		policy.Limits{Filters: []string{redact.Alias}}); err != nil {
-		t.Fatalf("PutPolicy: %v", err)
+		t.Fatalf("PutGuardrail: %v", err)
 	}
-	if err := st.PutPolicy(ctx, policy.ScopeOrg, "org_2",
+	if err := st.PutGuardrail(ctx, policy.ScopeOrg, "org_2",
 		policy.Limits{Filters: []string{redact.Alias}}); err != nil {
-		t.Fatalf("PutPolicy: %v", err)
+		t.Fatalf("PutGuardrail: %v", err)
 	}
 
 	users, err := st.FilterUsers(ctx, f.orgID, redact.Alias)

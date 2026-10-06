@@ -28,11 +28,10 @@ import (
 // GitHub cannot revoke such a token without the token itself, which is not
 // kept, so the last one can outlive its sandbox by up to an hour.
 type GitHub struct {
-	api    *url.URL
-	web    *url.URL
-	appID  string
-	key    *rsa.PrivateKey
-	client *http.Client
+	api   *url.URL
+	web   *url.URL
+	appID string
+	key   *rsa.PrivateKey
 }
 
 // GitHubOptions configures the GitHub minter.
@@ -48,12 +47,9 @@ type GitHubOptions struct {
 
 // NewGitHub builds the minter.
 func NewGitHub(o GitHubOptions) (*GitHub, error) {
-	if o.API == "" {
-		o.API = "https://api.github.com"
-	}
-	api, err := url.Parse(strings.TrimRight(o.API, "/"))
-	if err != nil || api.Host == "" {
-		return nil, fmt.Errorf("%q is not a GitHub API address", o.API)
+	api, err := parseBase(o.API, "https://api.github.com", "GitHub API")
+	if err != nil {
+		return nil, err
 	}
 	if o.AppID == "" {
 		return nil, errors.New("a GitHub App id is required")
@@ -62,10 +58,7 @@ func NewGitHub(o GitHubOptions) (*GitHub, error) {
 	if err != nil {
 		return nil, fmt.Errorf("the GitHub App's private key: %w", err)
 	}
-	return &GitHub{
-		api: api, web: githubWeb(api), appID: o.AppID, key: key,
-		client: &http.Client{Timeout: requestTimeout},
-	}, nil
+	return &GitHub{api: api, web: githubWeb(api), appID: o.AppID, key: key}, nil
 }
 
 // githubWeb is where repositories are cloned from, for an API address.
@@ -101,12 +94,11 @@ func (g *GitHub) Mint(ctx context.Context, req sandbox.GitRequest) (sandbox.GitC
 	var install struct {
 		ID int64 `json:"id"`
 	}
-	err = call(ctx, g.client, http.MethodGet,
+	err = call(ctx, http.MethodGet,
 		g.endpoint("repos", owner, name, "installation"), header, nil, &install)
 	if status(err) == http.StatusNotFound {
-		return sandbox.GitCredential{}, &sandbox.ErrRefused{Reason: fmt.Sprintf(
-			"Keera's GitHub App is not installed on %s, so it cannot give a sandbox access; "+
-				"install it on that repository first", r.path)}
+		return sandbox.GitCredential{}, sandbox.Refuse("Keera's GitHub App is not installed "+
+			"on %s, so it cannot give a sandbox access; install it on that repository first", r.path)
 	}
 	if err != nil {
 		return sandbox.GitCredential{}, fmt.Errorf("finding the GitHub App installation: %w", err)
@@ -116,7 +108,7 @@ func (g *GitHub) Mint(ctx context.Context, req sandbox.GitRequest) (sandbox.GitC
 		Token     string    `json:"token"`
 		ExpiresAt time.Time `json:"expires_at"`
 	}
-	err = call(ctx, g.client, http.MethodPost,
+	err = call(ctx, http.MethodPost,
 		g.endpoint("app", "installations", strconv.FormatInt(install.ID, 10), "access_tokens"),
 		header, map[string]any{
 			"repositories": []string{name},
@@ -125,9 +117,8 @@ func (g *GitHub) Mint(ctx context.Context, req sandbox.GitRequest) (sandbox.GitC
 			"permissions": map[string]string{"contents": "write"},
 		}, &token)
 	if s := status(err); s == http.StatusUnprocessableEntity || s == http.StatusForbidden {
-		return sandbox.GitCredential{}, &sandbox.ErrRefused{Reason: fmt.Sprintf(
-			"GitHub refused a token for %s: %s. The App needs read and write access to "+
-				"repository contents", r.path, reason(err))}
+		return sandbox.GitCredential{}, sandbox.Refuse("GitHub refused a token for %s: %s. "+
+			"The App needs read and write access to repository contents", r.path, reason(err))
 	}
 	if err != nil {
 		return sandbox.GitCredential{}, fmt.Errorf("minting a GitHub installation token: %w", err)

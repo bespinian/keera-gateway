@@ -29,11 +29,11 @@ type Cell struct {
 
 // cellColumns aggregates usage_events into a Cell. cellTargets scans the same
 // columns in the same order.
-const cellColumns = `count(*),
+var cellColumns = `count(*),
 	COALESCE(sum(input_tokens), 0), COALESCE(sum(output_tokens), 0),
 	COALESCE(sum(cost_micros), 0),
-	count(*) FILTER (WHERE status BETWEEN 400 AND 499),
-	count(*) FILTER (WHERE status >= 500),
+	` + countOutcome(OutcomeRefused) + `,
+	` + countOutcome(OutcomeFailed) + `,
 	COALESCE(round(percentile_cont(0.5) WITHIN GROUP (ORDER BY ttft_ms)
 	               FILTER (WHERE ttft_ms > 0)), 0)::bigint`
 

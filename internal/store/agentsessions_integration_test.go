@@ -53,7 +53,7 @@ func TestSessionsGroupRequestsIntoTheTasksTheyWereMadeFor(t *testing.T) {
 		t.Fatalf("WriteEvents: %v", err)
 	}
 
-	q := AgentSessionQuery{OrgID: f.orgID, From: now.Add(-24 * time.Hour), To: now.Add(time.Minute)}
+	q := AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID, From: now.Add(-24 * time.Hour), To: now.Add(time.Minute)}
 	sessions, err := st.AgentSessions(ctx, q)
 	if err != nil {
 		t.Fatalf("AgentSessions: %v", err)
@@ -135,7 +135,7 @@ func TestAStatedSessionKeyIsMarkedAsOne(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
-	sessions, err := st.AgentSessions(ctx, AgentSessionQuery{OrgID: f.orgID})
+	sessions, err := st.AgentSessions(ctx, AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID})
 	if err != nil {
 		t.Fatalf("AgentSessions: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestNarrowingToAModelKeepsTheSessionWhole(t *testing.T) {
 	}
 
 	hosted, err := st.AgentSessions(ctx, AgentSessionQuery{
-		OrgID: f.orgID, Alias: "keera-frontier",
+		Gap: DefaultSessionGap, OrgID: f.orgID, Alias: "keera-frontier",
 		From: now.Add(-24 * time.Hour), To: now.Add(time.Minute),
 	})
 	if err != nil {
@@ -185,7 +185,7 @@ func TestNarrowingToAModelKeepsTheSessionWhole(t *testing.T) {
 		t.Errorf("models = %v, want both of them", hosted[0].Models)
 	}
 
-	none, err := st.AgentSessions(ctx, AgentSessionQuery{OrgID: f.orgID, Alias: "keera-speed"})
+	none, err := st.AgentSessions(ctx, AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID, Alias: "keera-speed"})
 	if err != nil {
 		t.Fatalf("AgentSessions(unused alias): %v", err)
 	}
@@ -239,7 +239,7 @@ func TestASessionIsFoundFromAnyRequestInIt(t *testing.T) {
 		t.Fatal("the rows this test needs are not in the log")
 	}
 
-	session, requests, err := st.AgentSessionAt(ctx, f.orgID, middle, 0)
+	session, requests, err := st.AgentSessionAt(ctx, f.orgID, middle, DefaultSessionGap)
 	if err != nil {
 		t.Fatalf("AgentSessionAt(the middle request): %v", err)
 	}
@@ -266,7 +266,7 @@ func TestASessionIsFoundFromAnyRequestInIt(t *testing.T) {
 	}
 
 	// The opening request finds the same session as the middle one did.
-	opening, _, err := st.AgentSessionAt(ctx, f.orgID, requests[0].ID, 0)
+	opening, _, err := st.AgentSessionAt(ctx, f.orgID, requests[0].ID, DefaultSessionGap)
 	if err != nil {
 		t.Fatalf("AgentSessionAt(the opening request): %v", err)
 	}
@@ -277,11 +277,11 @@ func TestASessionIsFoundFromAnyRequestInIt(t *testing.T) {
 
 	// A request that was part of no conversation is part of no session, and
 	// that is a 404 rather than an empty session.
-	if _, _, err := st.AgentSessionAt(ctx, f.orgID, loose, 0); !errors.Is(err, ErrNotFound) {
+	if _, _, err := st.AgentSessionAt(ctx, f.orgID, loose, DefaultSessionGap); !errors.Is(err, ErrNotFound) {
 		t.Errorf("a request with no conversation gave %v, want ErrNotFound", err)
 	}
 	// And neither is another tenant's request, however guessable its id.
-	if _, _, err := st.AgentSessionAt(ctx, "org_other", middle, 0); !errors.Is(err, ErrNotFound) {
+	if _, _, err := st.AgentSessionAt(ctx, "org_other", middle, DefaultSessionGap); !errors.Is(err, ErrNotFound) {
 		t.Errorf("another tenant's session gave %v, want ErrNotFound", err)
 	}
 }
@@ -317,7 +317,7 @@ func TestASessionStraddlingTheWindowIsReportedWhole(t *testing.T) {
 	}
 
 	sessions, err := st.AgentSessions(ctx, AgentSessionQuery{
-		OrgID: f.orgID, From: from, To: now,
+		Gap: DefaultSessionGap, OrgID: f.orgID, From: from, To: now,
 	})
 	if err != nil {
 		t.Fatalf("AgentSessions: %v", err)
@@ -359,7 +359,7 @@ func TestSessionsRankByWhatMakesOneWorthOpening(t *testing.T) {
 	write("runaway000000000", now.Add(-4*time.Hour), 40, 50, time.Minute)
 	write("ordinary00000000", now.Add(-2*time.Hour), 6, 200, time.Minute)
 
-	window := AgentSessionQuery{OrgID: f.orgID, From: now.Add(-24 * time.Hour), To: now.Add(time.Hour)}
+	window := AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID, From: now.Add(-24 * time.Hour), To: now.Add(time.Hour)}
 	for _, tc := range []struct {
 		sort AgentSessionSort
 		want string
@@ -429,7 +429,7 @@ func TestSessionsStayInsideOneTenantAndNarrowToOneEntity(t *testing.T) {
 		t.Fatalf("WriteEvents: %v", err)
 	}
 
-	ours, err := st.AgentSessions(ctx, AgentSessionQuery{OrgID: f.orgID})
+	ours, err := st.AgentSessions(ctx, AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID})
 	if err != nil {
 		t.Fatalf("AgentSessions: %v", err)
 	}
@@ -442,12 +442,12 @@ func TestSessionsStayInsideOneTenantAndNarrowToOneEntity(t *testing.T) {
 		q    AgentSessionQuery
 		want int
 	}{
-		{"this project", AgentSessionQuery{OrgID: f.orgID, ProjectID: f.projectID}, 1},
-		{"another project", AgentSessionQuery{OrgID: f.orgID, ProjectID: "project_other"}, 0},
-		{"this key", AgentSessionQuery{OrgID: f.orgID, KeyID: f.keyID}, 1},
-		{"this person", AgentSessionQuery{OrgID: f.orgID, UserID: "user_1"}, 1},
-		{"one conversation", AgentSessionQuery{OrgID: f.orgID, Key: DerivedSessionKey("ours000000000000")}, 1},
-		{"only the unhappy ones", AgentSessionQuery{OrgID: f.orgID, Unhappy: true}, 0},
+		{"this project", AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID, ProjectID: f.projectID}, 1},
+		{"another project", AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID, ProjectID: "project_other"}, 0},
+		{"this key", AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID, KeyID: f.keyID}, 1},
+		{"this person", AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID, UserID: "user_1"}, 1},
+		{"one conversation", AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID, Key: DerivedSessionKey("ours000000000000")}, 1},
+		{"only the unhappy ones", AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID, Unhappy: true}, 0},
 	} {
 		got, err := st.AgentSessions(ctx, tc.q)
 		if err != nil {
@@ -459,14 +459,14 @@ func TestSessionsStayInsideOneTenantAndNarrowToOneEntity(t *testing.T) {
 	}
 
 	// An operator reads across tenants, and gets both.
-	all, err := st.AgentSessions(ctx, AgentSessionQuery{})
+	all, err := st.AgentSessions(ctx, AgentSessionQuery{Gap: DefaultSessionGap})
 	if err != nil {
 		t.Fatalf("AgentSessions(every tenant): %v", err)
 	}
 	if len(all) != 2 {
 		t.Errorf("%d sessions across every tenant, want 2", len(all))
 	}
-	failing, err := st.AgentSessions(ctx, AgentSessionQuery{Unhappy: true})
+	failing, err := st.AgentSessions(ctx, AgentSessionQuery{Gap: DefaultSessionGap, Unhappy: true})
 	if err != nil {
 		t.Fatalf("AgentSessions(unhappy): %v", err)
 	}

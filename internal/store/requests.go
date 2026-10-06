@@ -57,6 +57,12 @@ func outcomeClause(o Outcome) string {
 	return outcomeClauses[OutcomeAny]
 }
 
+// countOutcome counts the rows with outcome o, so every report splits
+// requests the way the request log does.
+func countOutcome(o Outcome) string {
+	return "count(*) FILTER (WHERE " + outcomeClauses[o] + ")"
+}
+
 // Request is one recorded inference request with what an entity's screen shows
 // in a row: when, which model, whose key, what it cost and what happened. It
 // covers both served and failed requests, because the log is one table.
@@ -158,14 +164,11 @@ func (q RequestQuery) whereArgs() []any {
 //
 // An empty OrgID means every tenant, which only an operator ever asks for.
 func (s *Store) Requests(ctx context.Context, q RequestQuery) ([]Request, error) {
-	if q.Limit <= 0 || q.Limit > 5000 {
-		q.Limit = 100
-	}
 	rows, err := s.pool.Query(ctx, `SELECT `+requestColumns+`
 		FROM usage_events
 		WHERE `+outcomeClause(q.Outcome)+` AND `+q.where()+`
 		ORDER BY id DESC LIMIT $12`,
-		append(q.whereArgs(), q.Limit)...)
+		append(q.whereArgs(), pageLimit(q.Limit, 100, 5000))...)
 	if err != nil {
 		return nil, err
 	}
@@ -191,10 +194,10 @@ type RequestOutcomes struct {
 func (s *Store) Outcomes(ctx context.Context, q RequestQuery) (RequestOutcomes, error) {
 	var c RequestOutcomes
 	err := s.pool.QueryRow(ctx, `SELECT count(*),
-		count(*) FILTER (WHERE `+outcomeClauses[OutcomeOK]+`),
-		count(*) FILTER (WHERE `+outcomeClauses[OutcomeFailed]+`),
-		count(*) FILTER (WHERE `+outcomeClauses[OutcomeRefused]+`),
-		count(*) FILTER (WHERE `+outcomeClauses[OutcomeInterrupted]+`)
+		`+countOutcome(OutcomeOK)+`,
+		`+countOutcome(OutcomeFailed)+`,
+		`+countOutcome(OutcomeRefused)+`,
+		`+countOutcome(OutcomeInterrupted)+`
 		FROM usage_events
 		WHERE `+q.where(), q.whereArgs()...,
 	).Scan(&c.Total, &c.OK, &c.Failed, &c.Refused, &c.Interrupted)

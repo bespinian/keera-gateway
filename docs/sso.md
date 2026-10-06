@@ -116,7 +116,7 @@ and the walkthrough below uses them.
    Google for offline access, so it gets a refresh token.
 4. **Credentials → Create credentials → OAuth client ID**, type **Web
    application**.
-5. Add one **Authorised redirect URI**:
+5. Add one URI under **Authorized redirect URIs**:
 
    ```
    http://localhost:8080/control/auth/callback
@@ -148,7 +148,7 @@ Users screen.
 
 ## Microsoft Entra ID
 
-1. **Microsoft Entra admin centre → App registrations → New registration.**
+1. **Microsoft Entra admin center → App registrations → New registration.**
 2. Under **Supported account types**, choose **Accounts in this organizational
    directory only**. This is the same boundary as Google's **Internal**. The
    multi-tenant options admit accounts from other directories, and Keera places
@@ -217,8 +217,8 @@ KEERA_OIDC_GOOGLE_CLIENT_SECRET=<from the Google console>
 KEERA_OIDC_GOOGLE_DOMAINS=*
 
 KEERA_OIDC_ENTRA_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0
-KEERA_OIDC_ENTRA_CLIENT_ID=<from the Entra admin centre>
-KEERA_OIDC_ENTRA_CLIENT_SECRET=<from the Entra admin centre>
+KEERA_OIDC_ENTRA_CLIENT_ID=<from the Entra admin center>
+KEERA_OIDC_ENTRA_CLIENT_SECRET=<from the Entra admin center>
 KEERA_OIDC_ENTRA_GROUPS_CLAIM=roles
 KEERA_OIDC_ENTRA_ADMIN_GROUPS=keera-admins
 KEERA_OIDC_ENTRA_DOMAINS=anotherbank.ch
@@ -444,7 +444,8 @@ Or use **Users → Disable** in the panel. Immediately:
   operator, since nobody else can open a shell in another person's sandbox
 - the repository credentials those sandboxes held are revoked
 
-Usage, sandboxes and audit entries keep their name. `keera user enable` lets
+Usage, sandboxes and audit entries keep their name. The panel hides disabled
+people until you tick **Show disabled**. `keera user enable` lets
 them back in without keys: the old ones stay revoked. An administrator can
 disable anyone in their organisation except themselves. Nobody can disable an
 operator this way; take them out of `KEERA_OPERATORS` or the operator group
@@ -493,7 +494,7 @@ sends a new link:
 keera user passkey-link ada@example.ch
 ```
 
-On the panel, that is **Users → Passkeys → New set-up link**. The same screen
+On the panel, that is **Users → Passkeys → Get set-up link**. The same screen
 lists a person's passkeys and removes one. Removing someone else's passkey also
 signs them out everywhere.
 

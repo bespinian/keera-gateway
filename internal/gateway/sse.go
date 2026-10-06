@@ -108,6 +108,30 @@ func (l *sseLines) next() ([]byte, error) {
 	}
 }
 
+// eachLine calls line with every line of a server-sent event stream, and end
+// once the stream stops, so a last event cut off before its blank line still
+// counts. The stream ending is not an error; a failed read is, after end.
+func eachLine(src io.Reader, limit int64, line func([]byte) error, end func() error) error {
+	lines := newSSELines(src, limit)
+	for {
+		l, readErr := lines.next()
+		if len(l) > 0 {
+			if err := line(l); err != nil {
+				return err
+			}
+		}
+		if readErr != nil {
+			if err := end(); err != nil {
+				return err
+			}
+			if errors.Is(readErr, io.EOF) {
+				return nil
+			}
+			return readErr
+		}
+	}
+}
+
 // pipeSSE forwards a server-sent event stream, flushing every event as it goes,
 // while watching for the usage record.
 //
@@ -119,23 +143,8 @@ func pipeSSE(dst io.Writer, flush func(), src io.Reader, alias string,
 	dropUsageEvent bool, limit int64,
 ) (streamStats, error) {
 	p := &ssePipe{dst: dst, flush: flush, alias: alias, dropUsage: dropUsageEvent}
-	lines := newSSELines(src, limit)
-	for {
-		line, readErr := lines.next()
-		if err := p.add(line); err != nil {
-			return p.stats, err
-		}
-		if readErr != nil {
-			// Forward whatever a truncated final event held, then report.
-			if err := p.emit(); err != nil {
-				return p.stats, err
-			}
-			if errors.Is(readErr, io.EOF) {
-				return p.stats, nil
-			}
-			return p.stats, readErr
-		}
-	}
+	err := eachLine(src, limit, p.add, p.emit)
+	return p.stats, err
 }
 
 // ssePipe is the state of one piped stream: the event being gathered, and
@@ -154,9 +163,6 @@ type ssePipe struct {
 // add takes one line into the current event, and forwards the event once it
 // is complete or too large to hold.
 func (p *ssePipe) add(line []byte) error {
-	if len(line) == 0 {
-		return nil
-	}
 	p.event = append(p.event, line...)
 	trimmed := bytes.TrimRight(line, "\r\n")
 	switch {
@@ -251,7 +257,6 @@ func usageFromResponse(raw []byte) *tokenUsage {
 // event's data lines the way the format says to and skipping the terminator.
 // limit bounds one event's payload.
 func scanSSE(src io.Reader, limit int64, fn func(payload []byte) error) error {
-	lines := newSSELines(src, limit)
 	// data holds one event's payload and is reused for the next, to avoid an
 	// allocation per token. fn must not keep what it is given.
 	var data []byte
@@ -268,36 +273,23 @@ func scanSSE(src io.Reader, limit int64, fn func(payload []byte) error) error {
 		return fn(payload)
 	}
 
-	for {
-		line, err := lines.next()
-		if len(line) > 0 {
-			trimmed := bytes.TrimRight(line, "\r\n")
-			switch {
-			case len(trimmed) == 0:
-				if cerr := complete(); cerr != nil {
-					return cerr
-				}
-			case bytes.HasPrefix(trimmed, dataPrefix):
-				chunk := bytes.TrimSpace(trimmed[len(dataPrefix):])
-				if int64(len(data)+len(chunk)) > limit {
-					return errEventTooLarge
-				}
-				if len(data) > 0 {
-					data = append(data, '\n')
-				}
-				data = append(data, chunk...)
+	return eachLine(src, limit, func(line []byte) error {
+		trimmed := bytes.TrimRight(line, "\r\n")
+		switch {
+		case len(trimmed) == 0:
+			return complete()
+		case bytes.HasPrefix(trimmed, dataPrefix):
+			chunk := bytes.TrimSpace(trimmed[len(dataPrefix):])
+			if int64(len(data)+len(chunk)) > limit {
+				return errEventTooLarge
 			}
+			if len(data) > 0 {
+				data = append(data, '\n')
+			}
+			data = append(data, chunk...)
 		}
-		if err != nil {
-			if cerr := complete(); cerr != nil {
-				return cerr
-			}
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
-			return err
-		}
-	}
+		return nil
+	}, complete)
 }
 
 // oaiStreamChunk is one chunk of a chat completion stream.

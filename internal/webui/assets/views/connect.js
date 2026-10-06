@@ -11,9 +11,7 @@
 import { api, chatTargets } from "../api.js";
 import {
   h,
-  icon,
   icons,
-  copyText,
   empty,
   go,
   compact,
@@ -30,6 +28,8 @@ import {
   providerMark,
   currentRange,
   rangePicker,
+  listHead,
+  code,
 } from "../ui.js";
 
 // The configuration blocks come from the control plane at /control/v1/connect
@@ -143,32 +143,14 @@ export async function clientsView(ctx) {
   );
 
   const canAdd = keys.length > 0 && catalogue.length > 0;
-  const head = h(
-    "div",
-    { class: "detail-head" },
-    h(
-      "div",
-      { class: "muted" },
-      "The clients that called the gateway with your keys, and which key " +
-        "each one used. A client shows here after its first request.",
-    ),
-    h(
-      "div",
-      { class: "row", style: { flexWrap: "wrap" } },
-      h("div", { style: { flex: 1 } }),
-      rangePicker(ctx, since),
-      canAdd
-        ? h(
-            "button",
-            {
-              class: "btn btn-primary",
-              onClick: (e) => addClient(ctx, catalogue, keys, e.currentTarget),
-            },
-            icon(icons.plus),
-            "Connect client",
-          )
-        : null,
-    ),
+  const head = listHead(
+    "The clients that called the gateway with your keys, and which key " +
+      "each one used. A client shows here after its first request.",
+    [rangePicker(ctx, since)],
+    canAdd && {
+      label: "Connect client",
+      onClick: (e) => addClient(ctx, catalogue, keys, e.currentTarget),
+    },
   );
 
   const list = table(
@@ -339,7 +321,9 @@ async function addClient(ctx, catalogue, keys, button) {
       ),
       setup,
     ),
-    actions: (close) => [h("button", { class: "btn", onClick: close }, "Done")],
+    actions: (close) => [
+      h("button", { class: "btn", onClick: close }, "Close"),
+    ],
   });
   picker.tiles.firstChild.focus();
 }
@@ -468,27 +452,6 @@ function step(n, title, body) {
       h("h2", { style: { marginBottom: "6px" } }, title),
       body,
     ),
-  );
-}
-
-// code renders something to be copied, with the button that copies it. Every
-// block on this screen is meant to leave the panel and land in a file, so none
-// of them is shown without one.
-export function code(text) {
-  return h(
-    "div",
-    { class: "code" },
-    h(
-      "button",
-      {
-        class: "btn btn-sm code-copy",
-        title: "Copy",
-        "aria-label": "Copy",
-        onClick: () => copyText(text),
-      },
-      icon(icons.copy),
-    ),
-    h("pre", {}, h("code", {}, text)),
   );
 }
 

@@ -1,10 +1,11 @@
 package authn
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"time"
+
+	"github.com/bespinian/keera-gateway/internal/auth"
 )
 
 // The command line signs in through the browser, as the panel does, and keeps
@@ -31,7 +32,7 @@ const (
 // NewCLIToken mints a token and the hash stored for it. Only the hash is
 // stored, so a database dump holds no working credentials.
 func NewCLIToken() (token string, hash []byte) {
-	token = CLITokenPrefix + randomToken()
+	token = CLITokenPrefix + auth.RandomToken()
 	return token, HashCLIToken(token)
 }
 
@@ -44,7 +45,7 @@ func HashCLIToken(token string) []byte { return sum256(token) }
 // NewCLICode mints the one-time code the browser carries back to the loopback
 // listener, and the hash stored for it.
 func NewCLICode() (code string, hash []byte) {
-	code = randomToken()
+	code = auth.RandomToken()
 	return code, HashCLICode(code)
 }
 
@@ -54,8 +55,8 @@ func HashCLICode(code string) []byte { return sum256(code) }
 // NewSession mints a panel session's cookie value, the hash stored for it,
 // and its CSRF token.
 func NewSession() (token string, hash []byte, csrf string) {
-	token = randomToken()
-	return token, HashSession(token), randomToken()
+	token = auth.RandomToken()
+	return token, HashSession(token), auth.RandomToken()
 }
 
 // HashSession returns the value stored for a session's cookie value.
@@ -69,15 +70,7 @@ func HashSession(token string) []byte { return sum256(token) }
 func CLIChallenge(verifier string) string { return s256(verifier) }
 
 // NewCLIVerifier mints the verifier a command line keeps to itself.
-func NewCLIVerifier() string { return randomToken() }
-
-// randomToken returns 32 random bytes, URL-safe base64 encoded. rand.Read
-// never fails: it crashes the program instead of returning weak bytes.
-func randomToken() string {
-	var raw [32]byte
-	_, _ = rand.Read(raw[:])
-	return base64.RawURLEncoding.EncodeToString(raw[:])
-}
+func NewCLIVerifier() string { return auth.RandomToken() }
 
 func sum256(s string) []byte {
 	sum := sha256.Sum256([]byte(s))

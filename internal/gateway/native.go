@@ -131,7 +131,6 @@ func pipeNative(dst io.Writer, flush func(), src io.Reader, ns nativeStream,
 		head  []byte // its lines other than data, to rebuild it around new data
 		data  []byte
 	)
-	lines := newSSELines(src, limit)
 	emit := func() error {
 		if len(event) == 0 {
 			return nil
@@ -151,44 +150,28 @@ func pipeNative(dst io.Writer, flush func(), src io.Reader, ns nativeStream,
 		event, head, data = event[:0], nil, data[:0]
 		return err
 	}
-	for {
-		line, readErr := lines.next()
-		if len(line) > 0 {
-			if int64(len(event)+len(line)) > limit {
-				stats.usage, stats.deltas, stats.partial = ns.counts()
-				return stats, errEventTooLarge
-			}
-			event = append(event, line...)
-			trimmed := bytes.TrimRight(line, "\r\n")
-			switch {
-			case len(trimmed) == 0:
-				if err := emit(); err != nil {
-					stats.usage, stats.deltas, stats.partial = ns.counts()
-					return stats, err
-				}
-			case bytes.HasPrefix(trimmed, dataPrefix):
-				if len(data) > 0 {
-					data = append(data, '\n')
-				}
-				data = append(data, bytes.TrimSpace(trimmed[len(dataPrefix):])...)
-			default:
-				head = append(head, trimmed...)
-				head = append(head, '\n')
-			}
+	err := eachLine(src, limit, func(line []byte) error {
+		if int64(len(event)+len(line)) > limit {
+			return errEventTooLarge
 		}
-		if readErr != nil {
-			err := emit()
-			stats.usage, stats.deltas, stats.partial = ns.counts()
-			switch {
-			case err != nil:
-				return stats, err
-			case errors.Is(readErr, io.EOF):
-				return stats, nil
-			default:
-				return stats, readErr
+		event = append(event, line...)
+		trimmed := bytes.TrimRight(line, "\r\n")
+		switch {
+		case len(trimmed) == 0:
+			return emit()
+		case bytes.HasPrefix(trimmed, dataPrefix):
+			if len(data) > 0 {
+				data = append(data, '\n')
 			}
+			data = append(data, bytes.TrimSpace(trimmed[len(dataPrefix):])...)
+		default:
+			head = append(head, trimmed...)
+			head = append(head, '\n')
 		}
-	}
+		return nil
+	}, emit)
+	stats.usage, stats.deltas, stats.partial = ns.counts()
+	return stats, err
 }
 
 // errEventTooLarge ends a stream whose one event outgrew what the gateway holds.

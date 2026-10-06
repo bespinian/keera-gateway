@@ -59,7 +59,9 @@ func Compress(next http.Handler) http.Handler {
 		// Set even when not compressing: the resource varies, so a cache must
 		// not serve the plain answer to everyone.
 		w.Header().Set("Vary", "Accept-Encoding")
-		if !AcceptsGzip(r.Header.Get("Accept-Encoding")) {
+		// An upgrade hands the connection over, and nothing may be written to
+		// it afterwards, not even the headers a gzip answer would close with.
+		if r.Header.Get("Upgrade") != "" || !AcceptsGzip(r.Header.Get("Accept-Encoding")) {
 			next.ServeHTTP(w, r)
 			return
 		}

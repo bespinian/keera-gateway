@@ -299,15 +299,15 @@ func TestSandboxHonoursProjectGuardrail(t *testing.T) {
 	if _, err := st.CreateProject(ctx, store.Project{ID: "project_small", OrgID: "org_1", Name: "Small"}); err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
-	if err := st.PutPolicy(ctx, policy.ScopeOrg, "org_1", policy.Limits{
+	if err := st.PutGuardrail(ctx, policy.ScopeOrg, "org_1", policy.Limits{
 		MaxSandboxes: new(5),
 	}); err != nil {
-		t.Fatalf("PutPolicy org: %v", err)
+		t.Fatalf("PutGuardrail org: %v", err)
 	}
-	if err := st.PutPolicy(ctx, policy.ScopeProject, "project_small", policy.Limits{
+	if err := st.PutGuardrail(ctx, policy.ScopeProject, "project_small", policy.Limits{
 		MaxSandboxes: new(1), MaxSandboxTTLSeconds: new(3600),
 	}); err != nil {
-		t.Fatalf("PutPolicy project: %v", err)
+		t.Fatalf("PutGuardrail project: %v", err)
 	}
 	m := sandbox.NewManager(st, stubDriver{}, sandbox.ManagerOptions{
 		Log: slog.New(slog.DiscardHandler),

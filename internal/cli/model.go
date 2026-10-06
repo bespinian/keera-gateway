@@ -222,53 +222,35 @@ type modelPut struct {
 
 // modelRun is one 'keera model' invocation.
 type modelRun struct {
-	c      *client
-	fs     *flag.FlagSet
-	sub    string
-	f      *modelFlags
-	yes    bool
-	asJSON bool
-	// org is the organisation whose models to use.
-	org string
+	*aliasRun
+	f *modelFlags
 }
 
 func modelCmd(ctx context.Context, args []string) error {
-	sub, rest := split(args)
-	fs := flag.NewFlagSet("model "+sub, flag.ExitOnError)
-	r := &modelRun{fs: fs, sub: sub, f: registerModelFlags(fs)}
-	fs.BoolVar(&r.f.disabled, "disabled", false, disabledUsage)
-	fs.BoolVar(&r.yes, "yes", false, yesUsage)
-	fs.BoolVar(&r.asJSON, "json", false, jsonUsage)
-	fs.StringVar(&r.org, "org", "", orgUsage)
-
-	fs.Usage = func() { _ = printHelp(fs, "model", sub) }
-	if want, ok := wantsHelp(args); ok {
-		return printHelp(fs, "model", want)
-	}
-	verb, err := parseVerb(fs, "model", sub, rest)
-	if err != nil {
+	r := &modelRun{aliasRun: newAliasRun("model", "models", "model", args)}
+	r.f = registerModelFlags(r.fs)
+	r.fs.BoolVar(&r.f.disabled, "disabled", false, disabledUsage)
+	if done, err := r.parse(); done {
 		return err
 	}
-	r.sub = verb
-	r.f.describe = given(fs, "description")
+	r.f.describe = given(r.fs, "description")
 
 	// These two need no server, so a catalogue can be checked in CI.
-	switch verb {
+	switch r.verb {
 	case "validate":
 		return r.validate()
 	case "providers":
 		return r.providers()
 	}
 
-	r.c = newClient()
 	// apply picks the organisation once the file has been read, so a bad file
 	// fails without calling the control plane.
-	if verb != "apply" {
+	if r.verb != "apply" {
 		if err := r.resolveOrg(ctx); err != nil {
 			return err
 		}
 	}
-	switch verb {
+	switch r.verb {
 	case "add":
 		return r.add(ctx)
 	case "set":
@@ -282,7 +264,7 @@ func modelCmd(ctx context.Context, args []string) error {
 	case "delete":
 		return r.delete(ctx)
 	default:
-		return r.list(ctx)
+		return listAliases(ctx, r.aliasRun, printModels)
 	}
 }
 
@@ -298,28 +280,14 @@ func (r *modelRun) providers() error {
 	return out(r.asJSON, catalog.Providers(), printProviders)
 }
 
-func (r *modelRun) list(ctx context.Context) error {
-	models, err := r.catalogue(ctx)
-	if err != nil {
-		return err
-	}
-	return out(r.asJSON, models, func(w *table) {
-		if len(models) == 0 {
-			printNone(w, "models", "keera model add <alias>")
-			return
-		}
-		printModels(w, models)
-	})
-}
-
 func modelAlias(m policy.Model) string { return m.Alias }
 
 func (r *modelRun) add(ctx context.Context) error {
 	alias := r.fs.Arg(0)
-	if err := alreadyExists(ctx, r.c, "models", r.org, alias, "model", modelAlias); err != nil {
+	if err := alreadyExists(ctx, r.aliasRun, alias, modelAlias); err != nil {
 		return err
 	}
-	return r.save(ctx, r.org, alias, catalog.Model{Alias: alias})
+	return r.save(ctx, alias, catalog.Model{Alias: alias})
 }
 
 func (r *modelRun) set(ctx context.Context) error {
@@ -328,20 +296,21 @@ func (r *modelRun) set(ctx context.Context) error {
 	}
 	// The endpoint replaces the entry, so read it first to keep what was not
 	// given.
-	current, err := r.requireModel(ctx, r.fs.Arg(0))
+	current, err := r.find(ctx, r.fs.Arg(0))
 	if err != nil {
 		return err
 	}
-	return r.save(ctx, current.OrgID, current.Alias, declared(current))
+	return r.save(ctx, current.Alias, declared(current))
 }
 
-// save applies the flags to m, validates it and writes it to orgID's models.
-func (r *modelRun) save(ctx context.Context, orgID, alias string, m catalog.Model) error {
+// save applies the flags to m, validates it and writes it to the
+// organisation's models.
+func (r *modelRun) save(ctx context.Context, alias string, m catalog.Model) error {
 	parsed, err := catalog.ParseModel(applyModelFlags(m, r.f))
 	if err != nil {
 		return fmt.Errorf("%s: %w", alias, err)
 	}
-	parsed.OrgID = orgID
+	parsed.OrgID = r.orgID
 	if r.f.subscription && r.f.noSubscription {
 		return opposites("subscription", "no-subscription")
 	}
@@ -353,21 +322,20 @@ func (r *modelRun) save(ctx context.Context, orgID, alias string, m catalog.Mode
 }
 
 func (r *modelRun) toggle(ctx context.Context) error {
-	m, err := r.requireModel(ctx, r.fs.Arg(0))
+	m, err := r.find(ctx, r.fs.Arg(0))
 	if err != nil {
 		return err
 	}
-	m.Enabled = r.sub == "enable"
+	m.Enabled = r.verb == "enable"
 	return r.putModel(ctx, m, nil)
 }
 
 func (r *modelRun) check(ctx context.Context) error {
 	alias := r.fs.Arg(0)
-	m, err := r.requireModel(ctx, alias)
-	if err != nil {
+	if _, err := r.find(ctx, alias); err != nil {
 		return err
 	}
-	return checkProbe(ctx, r.c, aliasPath("models", m.OrgID, alias, "/check"), "the model "+alias,
+	return checkProbe(ctx, r.c, r.path(alias, "/check"), "the model "+alias,
 		r.asJSON, printProbe, func(p gateway.Probe) bool { return p.OK })
 }
 
@@ -383,8 +351,8 @@ func (r *modelRun) apply(ctx context.Context) error {
 	// first, so a stop halfway is the control plane going away, and a re-run
 	// is safe.
 	for i, m := range models {
-		m.OrgID = r.org
-		if err := r.c.do(ctx, "PUT", aliasPath("models", r.org, m.Alias, ""), modelPut{Model: m}, &models[i]); err != nil {
+		m.OrgID = r.orgID
+		if err := r.c.do(ctx, "PUT", r.path(m.Alias, ""), modelPut{Model: m}, &models[i]); err != nil {
 			return fmt.Errorf("applying %s: %w", m.Alias, err)
 		}
 	}
@@ -396,30 +364,19 @@ func (r *modelRun) apply(ctx context.Context) error {
 }
 
 func (r *modelRun) delete(ctx context.Context) error {
-	m, err := r.requireModel(ctx, r.fs.Arg(0))
+	m, err := r.find(ctx, r.fs.Arg(0))
 	if err != nil {
 		return err
 	}
+	var lines []string
 	if !r.yes {
 		filters, routers, err := modelUsers(ctx, r.c, m.OrgID, m.Alias)
 		if err != nil {
 			return err
 		}
-		if err := confirmModelDelete(m, filters, routers); err != nil {
-			return err
-		}
+		lines = modelDeleteLines(m, filters, routers)
 	}
-	return deleteAlias(ctx, r.c, aliasPath("models", m.OrgID, m.Alias, ""), m.Alias, r.asJSON)
-}
-
-// resolveOrg fills in the organisation, as every command does.
-func (r *modelRun) resolveOrg(ctx context.Context) (err error) {
-	r.org, err = resolveOrg(ctx, r.c, r.org)
-	return err
-}
-
-func (r *modelRun) catalogue(ctx context.Context) ([]policy.Model, error) {
-	return catalogue(ctx, r.c, r.org)
+	return r.deleteEntry(ctx, m.Alias, lines)
 }
 
 // catalogue lists an organisation's models. An empty orgID leaves the
@@ -437,19 +394,13 @@ func findModel(models []policy.Model, alias string) (policy.Model, bool) {
 	return policy.Model{}, false
 }
 
-// requireModel reads one of the organisation's models. There is no endpoint
-// for a single model; the list is small.
-func (r *modelRun) requireModel(ctx context.Context, alias string) (policy.Model, error) {
-	return findAlias(ctx, r.c, "models", r.org, alias, "model", modelAlias)
+// find reads one of the organisation's models.
+func (r *modelRun) find(ctx context.Context, alias string) (policy.Model, error) {
+	return findAlias(ctx, r.aliasRun, alias, modelAlias)
 }
 
 func (r *modelRun) putModel(ctx context.Context, m policy.Model, cred *string) error {
-	var saved policy.Model
-	if err := r.c.do(ctx, "PUT", aliasPath("models", m.OrgID, m.Alias, ""),
-		modelPut{Model: m, APIKey: cred}, &saved); err != nil {
-		return err
-	}
-	return out(r.asJSON, saved, func(w *table) { printModel(w, saved) })
+	return putAlias(ctx, r.aliasRun, m.Alias, modelPut{Model: m, APIKey: cred}, printModel)
 }
 
 // modelUsers lists the filters and routers that name a model. Deleting it
@@ -476,9 +427,9 @@ func modelUsers(ctx context.Context, c *client, orgID, alias string) (filters, r
 	return filters, routers, nil
 }
 
-// confirmModelDelete makes the caller type the alias back. Clients name
+// modelDeleteLines is what deleting a model takes with it. Clients name
 // models, so removing one breaks every client that still names it.
-func confirmModelDelete(m policy.Model, filters, routers []string) error {
+func modelDeleteLines(m policy.Model, filters, routers []string) []string {
 	lines := []string{
 		"  every client that names it starts being refused",
 		"  guardrails that allow only " + m.Alias + " stop allowing anything",
@@ -493,8 +444,7 @@ func confirmModelDelete(m policy.Model, filters, routers []string) error {
 	if m.HasAPIKey {
 		lines = append(lines, "  its stored credential is removed")
 	}
-	lines = append(lines, "Usage history and the audit log are kept.")
-	return confirmAliasDelete("model", m.Alias, lines)
+	return append(lines, "Usage history and the audit log are kept.")
 }
 
 func printProviders(w *table) {

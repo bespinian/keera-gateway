@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/control"
-	"github.com/bespinian/keera-gateway/internal/id"
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
@@ -46,7 +45,6 @@ type guardrailFlags struct {
 	maxSandboxCPU    float64
 	maxSandboxMemory int
 	repos            string
-	asJSON           bool
 }
 
 func registerGuardrailFlags(fs *flag.FlagSet) *guardrailFlags {
@@ -83,7 +81,6 @@ func registerGuardrailFlags(fs *flag.FlagSet) *guardrailFlags {
 	fs.StringVar(&f.repos, "repos", "",
 		"comma-separated repositories sandboxes may check out: owner, owner/name, or '*' "+
 			"for all ('any' to clear); on an organisation, operators only")
-	fs.BoolVar(&f.asJSON, "json", false, jsonUsage)
 	return f
 }
 
@@ -185,46 +182,39 @@ func setPeriod(dst **policy.Period, given string) error {
 }
 
 func guardrailCmd(ctx context.Context, args []string) error {
-	sub, rest := split(args)
-	fs := flag.NewFlagSet("guardrail "+sub, flag.ExitOnError)
-	f := registerGuardrailFlags(fs)
-	org := fs.String("org", "", orgUsage)
-	fs.Usage = func() { _ = printHelp(fs, "guardrail", sub) }
-	if want, ok := wantsHelp(args); ok {
-		return printHelp(fs, "guardrail", want)
-	}
-	verb, err := parseVerb(fs, "guardrail", sub, rest)
-	if err != nil {
+	r := newCmdRun("guardrail", args, "org", "json")
+	f := registerGuardrailFlags(r.fs)
+	if done, err := r.parse(); done {
 		return err
 	}
-	c := newClient()
-	scope, scopeID, err := scopeArgs(ctx, c, fs, *org)
+	c := r.c
+	scope, scopeID, err := scopeArgs(ctx, c, r.fs, r.org)
 	if err != nil {
 		return err
 	}
 
-	switch verb {
+	switch r.verb {
 	case "effective":
 		eff, err := effectiveFor(ctx, c, scope, scopeID)
 		if err != nil {
 			return err
 		}
-		return out(f.asJSON, eff, func(w *table) { printEffective(w, eff, facetAll) })
+		return out(r.asJSON, eff, func(w *table) { printEffective(w, eff, facetAll) })
 	case "set":
-		if !changesSomething(fs) {
+		if !changesSomething(r.fs) {
 			return nothingToChange("guardrail set")
 		}
 		lim, err := updateLimits(ctx, c, scope, scopeID, f.apply)
 		if err != nil {
 			return err
 		}
-		return out(f.asJSON, lim, func(w *table) { printLimits(w, lim) })
+		return out(r.asJSON, lim, func(w *table) { printLimits(w, lim) })
 	default:
 		var lim policy.Limits
 		if err := c.do(ctx, "GET", guardrailPath(scope, scopeID), nil, &lim); err != nil {
 			return err
 		}
-		return out(f.asJSON, lim, func(w *table) { printLimits(w, lim) })
+		return out(r.asJSON, lim, func(w *table) { printLimits(w, lim) })
 	}
 }
 
@@ -249,15 +239,7 @@ func scopeArgs(ctx context.Context, c *client, fs *flag.FlagSet, org string) (st
 		if scope == string(policy.ScopeKey) {
 			find = keyID
 		}
-		// An id needs no organisation; a name is only unique inside one.
-		if id.HasPrefix(given, scope) {
-			return scope, given, nil
-		}
-		orgID, err := resolveOrg(ctx, c, org)
-		if err != nil {
-			return "", "", err
-		}
-		scopeID, err := find(ctx, c, orgID, given)
+		scopeID, err := find(ctx, c, org, given)
 		return scope, scopeID, err
 	default:
 		return "", "", fmt.Errorf("the scope is org, project or key, not %q", scope)
@@ -284,7 +266,7 @@ func updateLimits(ctx context.Context, c *client, scope, scopeID string,
 // A facet is one part of a guardrail on its own: 'keera limit' for the rates
 // and 'keera budget' for the spend. Same scopes, same call and the same flags
 // as 'guardrail set', of which help.go lets each take its own. With no flags
-// it reports rather than writes, because `keera limit project t_1` is a question.
+// it reports rather than writes, because `keera limit project project_1` is a question.
 
 // facetAll is every part of the effective report, in the order it prints.
 var facetAll = []string{"models", "rates", "spend", "prompt", "filters", "tools", "sandboxes"}
@@ -293,26 +275,26 @@ var facetAll = []string{"models", "rates", "spend", "prompt", "filters", "tools"
 var facetFields = map[string][]string{"limit": {"rates"}, "budget": {"spend"}}
 
 func facetCmd(ctx context.Context, name string, args []string) error {
-	fs := flag.NewFlagSet(name, flag.ExitOnError)
-	f := registerGuardrailFlags(fs)
-	org := fs.String("org", "", orgUsage)
-	fs.Usage = func() { _ = printHelp(fs, name, "") }
+	r := newCmdRun(name, args, "org", "json")
+	f := registerGuardrailFlags(r.fs)
+	// Help comes first, then the other facet's flags, named by the command
+	// that takes them, before parse refuses them less helpfully.
 	if want, ok := wantsHelp(args); ok {
-		return printHelp(fs, name, want)
+		return printHelp(r.fs, name, want)
 	}
 	if err := wrongFacet(name, args); err != nil {
 		return err
 	}
-	if err := parseCmd(fs, name, args); err != nil {
+	if done, err := r.parse(); done {
 		return err
 	}
-	c := newClient()
-	scope, scopeID, err := scopeArgs(ctx, c, fs, *org)
+	c := r.c
+	scope, scopeID, err := scopeArgs(ctx, c, r.fs, r.org)
 	if err != nil {
 		return err
 	}
 
-	if changesSomething(fs) {
+	if changesSomething(r.fs) {
 		if _, err := updateLimits(ctx, c, scope, scopeID, f.apply); err != nil {
 			return err
 		}
@@ -323,7 +305,7 @@ func facetCmd(ctx context.Context, name string, args []string) error {
 	if err != nil {
 		return err
 	}
-	return out(f.asJSON, eff, func(w *table) { printEffective(w, eff, facetFields[name]) })
+	return out(r.asJSON, eff, func(w *table) { printEffective(w, eff, facetFields[name]) })
 }
 
 // wrongFacet refuses a flag that belongs to the other facet, naming the

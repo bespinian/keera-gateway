@@ -289,8 +289,12 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request, p *authn.Principa
 		badRequest(w, "'group_by' must be one of "+strings.Join(store.GroupBys(), ", "))
 		return
 	}
+	sc, ok := s.entityScope(w, r, orgID)
+	if !ok {
+		return
+	}
 	buckets, err := s.st.Usage(r.Context(), store.UsageQuery{
-		OrgID: orgID, From: from, To: to, GroupBy: groupBy,
+		OrgID: orgID, ReportScope: sc, From: from, To: to, GroupBy: groupBy,
 	})
 	if err != nil {
 		s.fail(w, err)
@@ -386,7 +390,7 @@ func (s *Server) usageCSV(w http.ResponseWriter, orgID, groupBy string, from, to
 	buckets []store.UsageBucket, names groupLabels,
 ) {
 	if groupBy == "" {
-		groupBy = "model"
+		groupBy = store.DefaultGroupBy
 	}
 	filename := fmt.Sprintf("keera-usage-%s-%s.csv", groupBy, to.Format("2006-01-02"))
 	cw := beginCSV(w, filename)

@@ -50,7 +50,7 @@ func (s *Server) policyScope(w http.ResponseWriter, r *http.Request) (policy.Sco
 // storedLimits reads one scope's guardrail. A scope with none has the empty
 // guardrail.
 func (s *Server) storedLimits(ctx context.Context, scope policy.ScopeType, id string) (policy.Limits, error) {
-	lim, err := s.st.GetPolicy(ctx, scope, id)
+	lim, err := s.st.GetGuardrail(ctx, scope, id)
 	if errors.Is(err, store.ErrNotFound) {
 		return policy.Limits{}, nil
 	}
@@ -322,7 +322,7 @@ func (s *Server) putGuardrails(w http.ResponseWriter, r *http.Request, p *authn.
 		badRequest(w, "'budget_micros' cannot be negative; omit it for unlimited")
 		return
 	}
-	if err := s.st.PutPolicy(r.Context(), scope, scopeID, lim); err != nil {
+	if err := s.st.PutGuardrail(r.Context(), scope, scopeID, lim); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -513,12 +513,8 @@ func badAlias(alias string) string {
 // normalizeModel fills in a model's defaults and says what is wrong with it,
 // or "" when nothing is.
 func normalizeModel(m *policy.Model) string {
-	switch {
-	case len(m.Backends) == 0:
-		return "at least one backend is required"
-	case m.BackendModel == "":
-		return "'backend_model' is required - it is the name the inference plane serves, " +
-			"which for vLLM is --served-model-name"
+	if err := m.CheckBackend(); err != nil {
+		return err.Error()
 	}
 	for _, b := range m.Backends {
 		u, err := url.Parse(strings.TrimSpace(b))

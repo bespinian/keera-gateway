@@ -24,18 +24,18 @@ type ProjectSummary struct {
 // in one query to avoid N+1. An empty orgID means every organisation.
 func (s *Store) ProjectSummaries(ctx context.Context, orgID string, now time.Time) ([]ProjectSummary, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT t.id, t.org_id, t.name, t.description, t.created_at, `+limitColumns+`,
+		SELECT pr.id, pr.org_id, pr.name, pr.description, pr.created_at, `+limitColumns+`,
 		       (SELECT count(*) FROM api_keys k
-		         WHERE k.project_id = t.id AND k.revoked_at IS NULL),
+		         WHERE k.project_id = pr.id AND k.revoked_at IS NULL),
 		       COALESCE(sp.micros, 0)
-		FROM projects t
-		LEFT JOIN guardrails p ON p.scope_type = 'project' AND p.scope_id = t.id
-		LEFT JOIN spend sp ON sp.scope_type = 'project' AND sp.scope_id = t.id
+		FROM projects pr
+		LEFT JOIN guardrails p ON p.scope_type = 'project' AND p.scope_id = pr.id
+		LEFT JOIN spend sp ON sp.scope_type = 'project' AND sp.scope_id = pr.id
 		     AND sp.period = COALESCE(p.budget_period, 'month')
 		     AND sp.period_start = CASE WHEN COALESCE(p.budget_period, 'month') = 'day'
 		                                THEN $2::date ELSE $3::date END
-		WHERE ($1 = '' OR t.org_id = $1)
-		ORDER BY t.name`,
+		WHERE ($1 = '' OR pr.org_id = $1)
+		ORDER BY pr.name`,
 		orgID, policy.PeriodDay.Start(now), policy.PeriodMonth.Start(now))
 	if err != nil {
 		return nil, err
@@ -45,27 +45,27 @@ func (s *Store) ProjectSummaries(ctx context.Context, orgID string, now time.Tim
 
 func scanProjectSummary(r row) (ProjectSummary, error) {
 	var (
-		t      ProjectSummary
+		p      ProjectSummary
 		period *string
 		keys   int64
 	)
-	dest := append([]any{&t.ID, &t.OrgID, &t.Name, &t.Description, &t.CreatedAt},
-		limitTargets(&t.Limits, &period)...)
-	if err := r.Scan(append(dest, &keys, &t.SpendMicros)...); err != nil {
+	dest := append([]any{&p.ID, &p.OrgID, &p.Name, &p.Description, &p.CreatedAt},
+		limitTargets(&p.Limits, &period)...)
+	if err := r.Scan(append(dest, &keys, &p.SpendMicros)...); err != nil {
 		return ProjectSummary{}, err
 	}
-	t.ActiveKeys = int(keys)
+	p.ActiveKeys = int(keys)
 	// Limits stays as stored. Period says what the spend is counted over: a
 	// budget with no period resets monthly, as the spend join above assumes.
-	t.Limits.BudgetPeriod = periodPtr(period)
-	t.Period = policy.PeriodMonth
+	p.Limits.BudgetPeriod = periodPtr(period)
+	p.Period = policy.PeriodMonth
 	if period != nil {
-		t.Period = policy.Period(*period)
+		p.Period = policy.Period(*period)
 	}
-	if t.Limits.BudgetMicros != nil {
-		t.BudgetMicros = *t.Limits.BudgetMicros
+	if p.Limits.BudgetMicros != nil {
+		p.BudgetMicros = *p.Limits.BudgetMicros
 	}
-	return t, nil
+	return p, nil
 }
 
 // SeriesPoint is one bucket of the dashboard's chart.
@@ -123,8 +123,8 @@ func (s *Store) Overview(ctx context.Context, orgID string, from, to time.Time,
 		SELECT count(*),
 		       COALESCE(sum(input_tokens), 0), COALESCE(sum(output_tokens), 0),
 		       COALESCE(sum(cost_micros), 0), COALESCE(sum(list_cost_micros), 0),
-		       count(*) FILTER (WHERE status BETWEEN 400 AND 499),
-		       count(*) FILTER (WHERE status >= 500),
+		       `+countOutcome(OutcomeRefused)+`,
+		       `+countOutcome(OutcomeFailed)+`,
 		       COALESCE(round(percentile_cont(0.5) WITHIN GROUP (ORDER BY ttft_ms)
 		                      FILTER (WHERE ttft_ms > 0)), 0)::bigint,
 		       COALESCE(round(percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms)
@@ -421,22 +421,19 @@ type Refusal struct {
 	Error string `json:"error,omitempty"`
 }
 
-// Refusals lists the most recent refused requests made with one of keyIDs,
-// newest first. An empty keyIDs returns nothing, not everything: the caller is
+// Refusals lists the most recent refused or failed requests made with one of
+// keyIDs, newest first. An empty keyIDs returns nothing, not everything: the caller is
 // asking about their own keys.
 func (s *Store) Refusals(ctx context.Context, orgID string, keyIDs []string,
 	since time.Time, limit int) ([]Refusal, error) {
 	if len(keyIDs) == 0 {
 		return []Refusal{}, nil
 	}
-	if limit <= 0 || limit > 200 {
-		limit = 20
-	}
 	rows, err := s.pool.Query(ctx, `SELECT ts, alias, status, COALESCE(key_id, ''),
 		COALESCE(error, '')
 		FROM usage_events
 		WHERE org_id = $1 AND key_id = ANY($2) AND ts >= $3 AND status >= 400
-		ORDER BY ts DESC LIMIT $4`, orgID, keyIDs, since, limit)
+		ORDER BY ts DESC LIMIT $4`, orgID, keyIDs, since, pageLimit(limit, 20, 200))
 	if err != nil {
 		return nil, err
 	}

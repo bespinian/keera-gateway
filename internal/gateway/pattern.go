@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
@@ -39,18 +40,23 @@ type compiledRule struct {
 }
 
 // patternCache holds the compiled rules of every pattern filter this process
-// has run, keyed by the filter and when it was last written. An edit changes
-// the key, so nothing has to invalidate the cache.
+// has run, one entry per filter. An edit changes the filter's write time, and
+// the next request recompiles in place, so old rules do not pile up.
 type patternCache struct{ m sync.Map }
+
+type patternEntry struct {
+	updatedAt time.Time
+	compiled  compiled
+}
 
 // rulesFor returns the compiled rules of one pattern filter.
 func (c *patternCache) rulesFor(f policy.Filter) compiled {
-	key := f.OrgID + "\x00" + f.Alias + "\x00" + f.UpdatedAt.UTC().String()
-	if got, ok := c.m.Load(key); ok {
-		return got.(compiled)
+	key := f.OrgID + "\x00" + f.Alias
+	if got, ok := c.m.Load(key); ok && got.(patternEntry).updatedAt.Equal(f.UpdatedAt) {
+		return got.(patternEntry).compiled
 	}
 	out := compileRules(f.Rules)
-	c.m.Store(key, out)
+	c.m.Store(key, patternEntry{updatedAt: f.UpdatedAt, compiled: out})
 	return out
 }
 

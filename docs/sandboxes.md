@@ -187,7 +187,8 @@ sandboxes of that name, from two people, gets a 409 and names one by its id
 ## The catalogue
 
 A class name is an API contract. People type it, commit it into repository
-config and get used to it. So an administrator can change its image, isolation
+config and get used to it. It is lowercase letters, digits and interior
+hyphens, at most 40 characters. So an administrator can change its image, isolation
 tier or memory without anyone else editing anything.
 
 Each class belongs to one organisation, like a model. Only its people and
@@ -593,7 +594,9 @@ does.
 
 `sandbox/Containerfile` builds a base image. A deployment builds its own on top,
 with the languages, language servers, internal certificates and agent its
-engineers need, and names that image in the catalogue.
+engineers need, and names that image in the catalogue. Build it with
+`make sandbox-image`, or `podman build -t <tag> sandbox`: the build context is
+the `sandbox/` directory, not the repository root.
 
 The base provides what the gateway depends on: a fixed uid 1000 (the home volume
 uses it as `fsGroup`), sshd, the coding agent, and the entrypoint.
@@ -665,8 +668,8 @@ any extra variables the caller set. Left out are `TERM`, values with a line
 break, and what only the start uses: the task, the ssh keys, Pi's files and the
 first repository token.
 
-The entrypoint prepares the home directory idempotently, writes the gateway's
-address into a file every login shell sources, checks out the repository, and
+The entrypoint prepares the home directory idempotently, has every shell
+startup file load that same environment, checks out the repository, and
 then starts sshd or runs the agent. **sshd starts last**, so a sandbox is ready
 only once sshd answers, which also means setup finished. Both drivers check
 this: Kubernetes with a readiness probe on the port, podman by connecting to

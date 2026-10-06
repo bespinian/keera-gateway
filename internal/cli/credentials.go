@@ -75,15 +75,6 @@ func loadCredentials() (credentials, error) {
 	return c, nil
 }
 
-// signInFor is the sign-in held for one gateway, if there is one.
-func signInFor(base string) signIn {
-	c, err := loadCredentials()
-	if err != nil {
-		return signIn{}
-	}
-	return c.Gateways[gatewayKey(base)]
-}
-
 // defaultGateway is the gateway this machine last signed in to, and empty on
 // one that never has.
 func defaultGateway() string {
@@ -139,18 +130,23 @@ func writeCredentials(c credentials) error {
 	if err != nil {
 		return err
 	}
-	// Written beside the file, so the rename stays on one filesystem and is
-	// atomic.
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".credentials-*")
+	return writeFileAtomic(path, append(raw, '\n'), 0o600)
+}
+
+// writeFileAtomic replaces the file at path in one step, so nothing ever reads
+// half of it. The new contents are written beside it, so the rename stays on
+// one filesystem and is atomic.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*")
 	if err != nil {
 		return err
 	}
 	defer func() { _ = os.Remove(tmp.Name()) }()
-	if err := tmp.Chmod(0o600); err != nil {
+	if err := tmp.Chmod(perm); err != nil {
 		_ = tmp.Close()
 		return err
 	}
-	if _, err := tmp.Write(append(raw, '\n')); err != nil {
+	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		return err
 	}

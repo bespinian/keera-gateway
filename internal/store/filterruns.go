@@ -82,11 +82,11 @@ type FilterStat struct {
 // filterStatColumns is the select list both readings of this table share: the
 // totals for one filter, and the same per filter for the list. Sharing it
 // means the two can never be computed differently.
-const filterStatColumns = `count(*),
-	count(*) FILTER (WHERE outcome = 'pass'),
-	count(*) FILTER (WHERE outcome = 'rewrite'),
-	count(*) FILTER (WHERE outcome = 'refuse'),
-	count(*) FILTER (WHERE outcome = 'error'),
+var filterStatColumns = `count(*),
+	` + countOf("outcome", FilterPass) + `,
+	` + countOf("outcome", FilterRewrite) + `,
+	` + countOf("outcome", FilterRefuse) + `,
+	` + countOf("outcome", FilterError) + `,
 	count(*) FILTER (WHERE shadow),
 	COALESCE(round(percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms)), 0)::bigint,
 	COALESCE(round(percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms)), 0)::bigint,
@@ -205,9 +205,9 @@ func (s *Store) filterSeries(ctx context.Context, orgID, alias string,
 		        ('1 ' || $5)::interval) AS at
 		)
 		SELECT b.at, count(f.id),
-		       count(f.id) FILTER (WHERE f.outcome = 'refuse'),
-		       count(f.id) FILTER (WHERE f.outcome = 'error'),
-		       count(f.id) FILTER (WHERE f.outcome = 'rewrite'),
+		       `+countOf("f.outcome", FilterRefuse)+`,
+		       `+countOf("f.outcome", FilterError)+`,
+		       `+countOf("f.outcome", FilterRewrite)+`,
 		       COALESCE(sum(f.cost_micros), 0)
 		FROM buckets b
 		LEFT JOIN filter_runs f
@@ -230,9 +230,9 @@ func (s *Store) filterProjects(ctx context.Context, orgID, alias string,
 	from, to time.Time) ([]FilterProjectRow, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT COALESCE(project_id, ''), count(*),
-		       count(*) FILTER (WHERE outcome = 'refuse'),
-		       count(*) FILTER (WHERE outcome = 'rewrite'),
-		       count(*) FILTER (WHERE outcome = 'error'),
+		       `+countOf("outcome", FilterRefuse)+`,
+		       `+countOf("outcome", FilterRewrite)+`,
+		       `+countOf("outcome", FilterError)+`,
 		       COALESCE(sum(cost_micros), 0)
 		FROM filter_runs
 		WHERE ts >= $1 AND ts < $2 AND org_id = $3 AND filter = $4

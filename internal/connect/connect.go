@@ -8,6 +8,7 @@
 package connect
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -160,8 +161,9 @@ func Find(clients []Client, key string) (Client, bool) {
 	return Client{}, false
 }
 
-// Clients is the catalogue.
-func Clients() []Client { return clients }
+// Clients is the catalogue. It is a copy, so a caller cannot change it for
+// everyone else.
+func Clients() []Client { return slices.Clone(clients) }
 
 // The last entry is the base URL and the key alone, which is all any other
 // OpenAI-compatible client needs.

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/bespinian/keera-gateway/internal/metrics"
 	"github.com/bespinian/keera-gateway/internal/policy"
@@ -278,4 +279,15 @@ func hasWarning(warnings []string, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestSampleNeverCutsACharacterInHalf(t *testing.T) {
+	// 399 bytes, then a two-byte character across the 400-byte cut.
+	got := sample(strings.Repeat("a", 399) + "é and more")
+	if !utf8.ValidString(got) {
+		t.Fatalf("the sample is not valid UTF-8: %q", got[390:])
+	}
+	if want := strings.Repeat("a", 399) + "…"; got != want {
+		t.Errorf("got %q, want the text cut before the character", got[390:])
+	}
 }

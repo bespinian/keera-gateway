@@ -17,6 +17,7 @@ import (
 type filterRun struct {
 	*aliasRun
 
+	since       time.Duration
 	model       string
 	mode        string
 	shadow      bool
@@ -27,9 +28,9 @@ type filterRun struct {
 }
 
 func filterCmd(ctx context.Context, args []string) error {
-	a, rest := newAliasRun("filter", args)
-	r := &filterRun{aliasRun: a}
-	fs := a.fs
+	r := &filterRun{aliasRun: newAliasRun("filter", "filters", "filter", args)}
+	fs := r.fs
+	fs.DurationVar(&r.since, "since", reportWindow, reportSinceUsage)
 	fs.StringVar(&r.model, "model", "", "the model the filter runs on")
 	fs.StringVar(&r.mode, "mode", "",
 		"rewrite (a model edits the request and lets it go), gate (a model judges only "+
@@ -46,8 +47,7 @@ func filterCmd(ctx context.Context, args []string) error {
 			"becomes - or 'REFUSE: why' to drop the request. @path reads a file")
 	fs.StringVar(&r.description, "description", "", "what this filter is for, for whoever reads the list; an empty one clears it")
 
-	verb, err := a.parse(args, rest)
-	if err != nil || verb == "" {
+	if done, err := r.parse(); done {
 		return err
 	}
 	if r.shadow && r.enforce {
@@ -58,14 +58,14 @@ func filterCmd(ctx context.Context, args []string) error {
 			"it go), 'gate' (a model judges only whether it may go) or 'pattern' (a list of "+
 			"rules is applied, with no model)", r.mode)
 	}
-	return a.run(ctx, verb, r)
+	return r.run(ctx, r)
 }
 
 func filterAlias(f policy.Filter) string { return f.Alias }
 
 // find reads one of the organisation's filters.
 func (r *filterRun) find(ctx context.Context, alias string) (policy.Filter, error) {
-	return findAlias(ctx, r.c, "filters", r.orgID, alias, "filter", filterAlias)
+	return findAlias(ctx, r.aliasRun, alias, filterAlias)
 }
 
 func (r *filterRun) list(ctx context.Context) error {
@@ -79,7 +79,7 @@ func (r *filterRun) check(ctx context.Context) error {
 }
 
 func (r *filterRun) report(ctx context.Context) error {
-	return reportAlias(ctx, r.aliasRun, printFilterReport)
+	return reportAlias(ctx, r.aliasRun, r.since, printFilterReport)
 }
 
 func (r *filterRun) delete(ctx context.Context) error {
@@ -103,7 +103,7 @@ func (r *filterRun) put(ctx context.Context) error {
 	// 'set' starts from the stored filter, so what is not given is kept. 'add'
 	// starts from nothing, and the control plane refuses what is missing.
 	f := policy.Filter{Alias: alias}
-	if r.sub == "set" {
+	if r.verb == "set" {
 		if !changesSomething(r.fs) {
 			return nothingToChange("filter set")
 		}
@@ -112,7 +112,7 @@ func (r *filterRun) put(ctx context.Context) error {
 			return err
 		}
 		f = existing
-	} else if err := alreadyExists(ctx, r.c, "filters", r.orgID, alias, "filter", filterAlias); err != nil {
+	} else if err := alreadyExists(ctx, r.aliasRun, alias, filterAlias); err != nil {
 		return err
 	}
 	if err := r.apply(&f); err != nil {

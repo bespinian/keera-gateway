@@ -68,8 +68,6 @@ type Options struct {
 	// begin responding. It must not bound the response itself: a streamed
 	// completion legitimately runs for minutes.
 	UpstreamHeaderTimeout time.Duration
-	// DialTimeout bounds establishing a connection to a backend.
-	DialTimeout time.Duration
 	// UpstreamDeny is the addresses the gateway never connects to. Nil denies
 	// nothing; the setting's default is DefaultUpstreamDeny. See egress.go.
 	UpstreamDeny []netip.Prefix
@@ -90,6 +88,9 @@ const (
 	DefaultUpstreamHeaderTimeout = 2 * time.Minute
 )
 
+// dialTimeout bounds establishing a connection to a backend.
+const dialTimeout = 5 * time.Second
+
 func (o *Options) setDefaults() {
 	if o.MaxBodyBytes <= 0 {
 		o.MaxBodyBytes = DefaultMaxBodyBytes
@@ -99,9 +100,6 @@ func (o *Options) setDefaults() {
 	}
 	if o.UpstreamHeaderTimeout <= 0 {
 		o.UpstreamHeaderTimeout = DefaultUpstreamHeaderTimeout
-	}
-	if o.DialTimeout <= 0 {
-		o.DialTimeout = 5 * time.Second
 	}
 }
 
@@ -134,7 +132,7 @@ type Server struct {
 func New(src policy.Source, budgets Budgeter, limiter Limiter, sink Sink,
 	m *metrics.Registry, opts Options, log *slog.Logger) *Server {
 	opts.setDefaults()
-	dialer := &net.Dialer{Timeout: opts.DialTimeout, KeepAlive: 30 * time.Second,
+	dialer := &net.Dialer{Timeout: dialTimeout, KeepAlive: 30 * time.Second,
 		Control: denyDial(opts.UpstreamDeny)}
 	return &Server{
 		src:     src,

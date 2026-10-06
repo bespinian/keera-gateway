@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"slices"
@@ -19,26 +18,21 @@ import (
 // binary, so an older CLI cannot hand out a configuration the deployment has
 // moved on from.
 func connectCmd(ctx context.Context, args []string) error {
-	c := newClient()
-	fs := flag.NewFlagSet("connect", flag.ExitOnError)
+	r := newCmdRun("connect", args, "org", "json")
+	fs := r.fs
 	key := fs.String("key", "",
 		"the API key whose models to configure, by name or id (default: your first active key)")
 	model := fs.String("model", "", "with --subscription, the model Claude Code starts with "+
 		"(default: the first subscription model)")
-	org := fs.String("org", "", orgUsage)
-	asJSON := fs.Bool("json", false, jsonUsage)
 	subscription := fs.Bool("subscription", false,
 		"for Claude Code signed in to a Claude plan: give this machine its own key and "+
 			"write it into ~/.claude/settings.json")
 	project := fs.String("project", "", "with --subscription, the project the new key belongs to "+
 		"(administrators only)")
-	fs.Usage = func() { _ = printHelp(fs, "connect", "") }
-	if want, ok := wantsHelp(args); ok {
-		return printHelp(fs, "connect", want)
-	}
-	if err := parseCmd(fs, "connect", args); err != nil {
+	if done, err := r.parse(); done {
 		return err
 	}
+	c := r.c
 	// No client, or only a flag, lands on the listing.
 	sub := fs.Arg(0)
 
@@ -60,7 +54,7 @@ func connectCmd(ctx context.Context, args []string) error {
 			return errNoGatewayURL
 		}
 		return connectSubscription(ctx, c, subscriptionSetup{
-			org: *org, project: *project, model: *model, gatewayURL: cat.GatewayURL, asJSON: *asJSON,
+			org: r.org, project: *project, model: *model, gatewayURL: cat.GatewayURL, asJSON: r.asJSON,
 		})
 	}
 	if *project != "" {
@@ -70,7 +64,7 @@ func connectCmd(ctx context.Context, args []string) error {
 		return errors.New("--model is for --subscription; a configuration lists every model " +
 			"its key may use, so choose the key with --key instead")
 	}
-	orgID, err := resolveOrg(ctx, c, *org)
+	orgID, err := resolveOrg(ctx, c, r.org)
 	if err != nil {
 		return err
 	}
@@ -81,7 +75,7 @@ func connectCmd(ctx context.Context, args []string) error {
 
 	// No client named: list the choices rather than pick one.
 	if sub == "list" || sub == "" {
-		return out(*asJSON, cat, func(w *table) {
+		return out(r.asJSON, cat, func(w *table) {
 			listConnect(w, cat.Data, chat, cat.GatewayURL)
 		})
 	}
@@ -118,7 +112,7 @@ func connectCmd(ctx context.Context, args []string) error {
 		return errNoGatewayURL
 	}
 
-	if *asJSON {
+	if r.asJSON {
 		res := map[string]any{
 			"client": client.Key, "models": aliasesOf(models), "url": gatewayURL,
 			"path":   client.Path,
@@ -206,7 +200,7 @@ func connectKey(ctx context.Context, c *client, org, named string) (*ownKey, err
 	}
 	names := make([]string, 0, len(usable))
 	for i, k := range usable {
-		if k.ID == named || k.Name == named {
+		if k.ID == named || strings.EqualFold(k.Name, named) {
 			return &usable[i], nil
 		}
 		names = append(names, k.Name)

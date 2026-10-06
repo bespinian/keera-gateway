@@ -391,12 +391,12 @@ func TestSandboxPolicyLimitsRoundTrip(t *testing.T) {
 		SandboxClasses:       []string{"standard", "small"},
 		MaxSandboxCPU:        new(8000),
 		MaxSandboxMemory:     new(32768)}
-	if err := st.PutPolicy(ctx, policy.ScopeOrg, f.orgID, want); err != nil {
-		t.Fatalf("PutPolicy: %v", err)
+	if err := st.PutGuardrail(ctx, policy.ScopeOrg, f.orgID, want); err != nil {
+		t.Fatalf("PutGuardrail: %v", err)
 	}
-	got, err := st.GetPolicy(ctx, policy.ScopeOrg, f.orgID)
+	got, err := st.GetGuardrail(ctx, policy.ScopeOrg, f.orgID)
 	if err != nil {
-		t.Fatalf("GetPolicy: %v", err)
+		t.Fatalf("GetGuardrail: %v", err)
 	}
 	if got.MaxSandboxes == nil || *got.MaxSandboxes != 6 {
 		t.Errorf("max_sandboxes = %v", got.MaxSandboxes)

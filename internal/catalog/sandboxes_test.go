@@ -95,6 +95,12 @@ func TestParseSandboxesRefusals(t *testing.T) {
 			"lowercase letters",
 		},
 		{
+			// It goes into a Kubernetes label, which allows 63 characters.
+			"long name",
+			"sandboxes:\n  - name: " + strings.Repeat("a", 41) + "\n    image: x\n",
+			"at most 40 characters",
+		},
+		{
 			"no image",
 			"sandboxes:\n  - name: a\n",
 			"image is required",

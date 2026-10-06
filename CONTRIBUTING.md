@@ -25,7 +25,8 @@ make check      # tests, vet and formatting; CI also runs the linter
 ```
 
 Run `make check` before you open a pull request. If your change touches the
-database, Redis or rate limiting, run `make test-integration` as well.
+database, Redis, rate limiting or the control plane, run `make test-integration`
+as well.
 
 Follow the existing style:
 

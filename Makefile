@@ -23,11 +23,13 @@ REDIS_CONTAINER ?= keera-test-redis
 REDIS_PORT ?= 56379
 REDIS_URL ?= redis://127.0.0.1:$(REDIS_PORT)/0
 
+# Without cgo, like the image, the release archives and the nix build, so what
+# you test is what ships.
 .PHONY: build
 build:
 	@mkdir -p $(BUILD_DIR)
-	@$(GO) build -trimpath -o $(BUILD_DIR)/keera-gateway ./cmd/keera-gateway
-	@$(GO) build -trimpath -o $(BUILD_DIR)/keera ./cmd/keera
+	@CGO_ENABLED=0 $(GO) build -trimpath -o $(BUILD_DIR)/keera-gateway ./cmd/keera-gateway
+	@CGO_ENABLED=0 $(GO) build -trimpath -o $(BUILD_DIR)/keera ./cmd/keera
 
 .PHONY: check
 check: test vet fmt-check
@@ -125,8 +127,8 @@ lint:
 
 .PHONY: fmt-check
 fmt-check:
-	@# vendor/ is not in Git, so listing the files skips it.
-	@out=$$(gofmt -l $$(git ls-files -co --exclude-standard '*.go')); \
+	@# Only the source directories, so vendor/ is skipped.
+	@out=$$(gofmt -l cmd internal); \
 		test -z "$$out" || { echo "not gofmt-clean:"; echo "$$out"; exit 1; }
 
 .PHONY: clean
@@ -262,7 +264,8 @@ dev: dev-env dev-backends
 	@# sandbox class file is set even without a driver, so the first
 	@# organisation has classes once one is switched on; the sandbox address
 	@# only when a driver is named. The backends are on loopback here, so the
-	@# deny list is the default one without loopback.
+	@# deny list is the default one without loopback: keep it in step with
+	@# DefaultUpstreamDeny in internal/gateway/egress.go.
 	@set -a; . ./$(DEV_ENV); set +a; \
 		KEERA_DATABASE_URL='postgres://keera:keera@127.0.0.1:5432/keera?sslmode=disable' \
 		KEERA_MODELS_FILE="$${KEERA_MODELS_FILE:-compose/models.dev.yaml}" \
@@ -280,12 +283,13 @@ dev: dev-env dev-backends
 #
 # sandbox/Containerfile is a base: it owns the parts the gateway
 # depends on - the fixed uid, sshd on 2222, the entrypoint - and a real
-# deployment builds its own on top.
+# deployment builds its own on top. Its build context is sandbox/ alone, so
+# vendor/ and the rest of the repository are not sent to the builder.
 SANDBOX_IMAGE ?= localhost/keera-sandbox:dev
 
 .PHONY: sandbox-image
 sandbox-image:
-	@$(PODMAN) build -f sandbox/Containerfile -t $(SANDBOX_IMAGE) .
+	@$(PODMAN) build -t $(SANDBOX_IMAGE) sandbox
 	@echo
 	@echo "built $(SANDBOX_IMAGE), which compose/sandboxes.yaml names."
 	@echo "Add KEERA_SANDBOX_DRIVER=podman to $(DEV_ENV) and restart 'make dev'."

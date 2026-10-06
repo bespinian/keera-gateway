@@ -18,7 +18,6 @@ import {
   h,
   table,
   modal,
-  confirm,
   toast,
   pill,
   stat,
@@ -40,6 +39,9 @@ import {
   pct,
   field,
   modeTiles,
+  rowActions,
+  listHead,
+  verdictPill,
 } from "../ui.js";
 import { barList } from "../chart.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
@@ -64,35 +66,17 @@ export async function routersView(ctx) {
   const canEdit = isAdmin(ctx);
   ctx.setSubtitle(`${routers.length} ${plural(routers.length, "router")}`);
 
-  const head = h(
-    "div",
-    { class: "detail-head" },
-    h(
-      "div",
-      { class: "muted" },
-      "A router picks which model answers a request. A model reads it, " +
-        "its size decides, or the destinations are tried until one answers: " +
-        "in the listed order, fastest first or least busy first. Clients use " +
-        "the router's alias as the model name. A router that reads requests " +
-        "should use a fast local model.",
-    ),
-    h(
-      "div",
-      { class: "row", style: { flexWrap: "wrap" } },
-      h("div", { style: { flex: 1 } }),
-      rangePicker(ctx, since),
-      canEdit
-        ? h(
-            "button",
-            {
-              class: "btn btn-primary",
-              onClick: () => editRouter(ctx, null, chatModels),
-            },
-            icon(icons.plus),
-            "New router",
-          )
-        : null,
-    ),
+  const head = listHead(
+    "A router picks which model answers a request. A model reads it, " +
+      "its size decides, or the destinations are tried until one answers: " +
+      "in the listed order, fastest first or least busy first. Clients use " +
+      "the router's alias as the model name. A router that reads requests " +
+      "should use a fast local model.",
+    [rangePicker(ctx, since)],
+    canEdit && {
+      label: "Create router",
+      onClick: () => editRouter(ctx, null, chatModels),
+    },
   );
 
   const known = new Set(models.map((m) => m.alias));
@@ -150,56 +134,30 @@ export async function routersView(ctx) {
       {
         label: "",
         shrink: true,
-        cell: (rt) => {
-          if (!canEdit) return null;
-          return h(
-            "div",
-            { class: "row-tight" },
-            h(
-              "button",
-              {
-                class: "btn btn-sm",
-                title: "Edit this router",
-                "aria-label": `Edit ${rt.alias}`,
-                onClick: () => editRouter(ctx, rt, chatModels),
-              },
-              icon(icons.pencil),
-            ),
-            h(
-              "button",
-              {
-                class: "btn btn-sm btn-danger",
-                title: "Delete this router",
-                "aria-label": `Delete ${rt.alias}`,
-                onClick: () =>
-                  confirm({
-                    title: `Delete ${rt.alias}?`,
-                    body:
-                      "A router named in an allow-list cannot be deleted. " +
-                      "Take it off those allow-lists first; the error lists " +
-                      "them. Clients still using the alias will be told the " +
-                      "model does not exist.",
-                    confirmLabel: "Delete router",
-                    danger: true,
-                    onConfirm: async () => {
-                      await api.deleteRouter(ctx.orgID, rt.alias);
-                      toast("Router deleted", "good");
-                      ctx.reload();
-                    },
-                  }),
-              },
-              icon(icons.trash),
-            ),
-          );
-        },
+        cell: (rt) =>
+          canEdit
+            ? rowActions(ctx, rt.alias, {
+                editTitle: "Edit this router",
+                onEdit: () => editRouter(ctx, rt, chatModels),
+                deleteTitle: "Delete this router",
+                body:
+                  "A router named in an allow-list cannot be deleted. " +
+                  "Take it off those allow-lists first; the error lists " +
+                  "them. Clients still using the alias will be told the " +
+                  "model does not exist.",
+                confirmLabel: "Delete router",
+                remove: () => api.deleteRouter(ctx.orgID, rt.alias),
+                removed: "Router deleted",
+              })
+            : null,
       },
     ],
     routers,
     {
-      emptyTitle: "No routers",
+      emptyTitle: "No routers yet",
       emptyBody:
         "Each request goes to the model the client named, and fails if that " +
-        "model fails. Add a router to send most requests to a smaller model, " +
+        "model fails. Create a router to send most requests to a smaller model, " +
         "keep some inside the cluster, or fall back when a model is down.",
     },
   );
@@ -299,7 +257,7 @@ function modeCell(rt, known) {
           "div",
           { class: "row-tight" },
           h("span", { class: "mono muted" }, rt.model),
-          pill("missing", "bad"),
+          pill("Missing", "bad"),
         ),
   );
 }
@@ -346,7 +304,7 @@ function fallbackPill(rt) {
   if (!decides(rt)) {
     return h("span", { class: "muted nowrap" }, "the last one's answer");
   }
-  if (!rt.fallback) return pill("refuse the request", "warn");
+  if (!rt.fallback) return pill("Refuse the request", "warn");
   return h("span", { class: "pill mono" }, "→ " + rt.fallback);
 }
 
@@ -404,15 +362,8 @@ function verdict(ctx, probe) {
     : warned
       ? "Working, with notes"
       : "Working";
-  return h(
-    "button",
-    {
-      class: "pill pill-" + tone + " pill-button",
-      title: "Where the router sent each sample",
-      onClick: () => report(ctx, probe),
-    },
-    h("span", { class: "dot" }),
-    label,
+  return verdictPill(label, tone, "Where the router sent each sample", () =>
+    report(ctx, probe),
   );
 }
 
@@ -519,8 +470,8 @@ function report(ctx, probe) {
                   shrink: true,
                   cell: (hop) =>
                     hop.answers
-                      ? pill("yes", "good")
-                      : pill(hop.status ? String(hop.status) : "no", "bad"),
+                      ? pill("Yes", "good")
+                      : pill(hop.status ? String(hop.status) : "No", "bad"),
                 },
                 {
                   label: "Took",
@@ -568,7 +519,7 @@ function report(ctx, probe) {
               h("h2", {}, d.asks),
               h("div", { class: "spacer" }),
               d.error
-                ? pill("could not decide", "bad")
+                ? pill("Could not decide", "bad")
                 : h("span", { class: "pill pill-good mono" }, d.chosen),
               // How much of the choice that destination took. A sample decided
               // at 35% went where it went by a hair, which is the state a
@@ -636,12 +587,12 @@ export async function routerDetailView(ctx) {
             ? [
                 pill(
                   decides(rt)
-                    ? "decides with " + rt.model
+                    ? "Decides with " + rt.model
                     : sizes(rt)
-                      ? "places " +
+                      ? "Places " +
                         (rt.destinations || []).length +
                         " destinations by size"
-                      : "tries " +
+                      : "Tries " +
                         (rt.destinations || []).length +
                         " destinations, " +
                         (measures(rt) ? "by " + ordersBy(rt) : "in order"),
@@ -1267,7 +1218,7 @@ function editRouter(ctx, existing, chatModels) {
           h("span", { class: "faint" }, i + 1 + "."),
           h("span", { class: "mono" }, alias),
           i === 0
-            ? pill("tried first", "good")
+            ? pill("Tried first", "good")
             : h("span", { class: "faint" }, "if the ones above fail"),
           h("div", { style: { flex: 1 } }),
           h(
@@ -1590,7 +1541,7 @@ function editRouter(ctx, existing, chatModels) {
             description: description.value.trim(),
           });
           close();
-          toast("Router saved", "good");
+          toast(creating ? "Router created" : "Router saved", "good");
           ctx.reload();
         } catch (ex) {
           showError(err, ex.message);
@@ -1598,7 +1549,7 @@ function editRouter(ctx, existing, chatModels) {
         }
       },
     },
-    "Save",
+    creating ? "Create router" : "Save",
   );
 
   if (creating) syncMode();
@@ -1606,7 +1557,7 @@ function editRouter(ctx, existing, chatModels) {
 
   close = modal({
     wide: true,
-    title: creating ? "New router" : `Edit ${rt.alias}`,
+    title: creating ? "Create router" : `Edit ${rt.alias}`,
     subtitle: creating
       ? "Choose how it picks first; the rest of the form depends on it. A " +
         "key allowed to use this router can reach all its destinations."

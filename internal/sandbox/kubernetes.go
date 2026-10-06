@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -325,22 +326,11 @@ func conditionOf(conds []kubeCondition, typ string) (kubeCondition, bool) {
 
 /* ------------------------------------------------------------------- create */
 
-// The home volume. It is one volume because everything that should survive a
-// suspend - working copy, build cache, shell history - lives under home.
-const (
-	homeVolume = "home"
-	homePath   = "/home/keera"
-	// sandboxUID is the user a sandbox runs as. It is fixed rather than taken
-	// from the image, so an image upgrade cannot lock a sandbox out of its
-	// own home volume.
-	sandboxUID = 1000
-)
-
 // Create writes one Sandbox object and returns without waiting for it to be
 // ready. The panel and the CLI poll the row; a sandbox stuck in Pending shows
 // the scheduler's own message.
 func (k *Kubernetes) Create(ctx context.Context, spec Spec) (Status, error) {
-	runtime, err := k.runtimeFor(spec.Class)
+	runtime, err := runtimeFor(spec.Class, k.opts.Runtimes, k.Name())
 	if err != nil {
 		return Status{}, err
 	}
@@ -362,18 +352,6 @@ func (k *Kubernetes) Create(ctx context.Context, spec Spec) (Status, error) {
 		return Status{}, err
 	}
 	return k.statusOf(spec.Ref, &created), nil
-}
-
-// runtimeFor maps a class's isolation tier to this cluster's RuntimeClass.
-func (k *Kubernetes) runtimeFor(c policy.SandboxClass) (string, error) {
-	name, ok := mappedRuntime(c, k.opts.Runtimes)
-	if !ok {
-		return "", fmt.Errorf("the sandbox class %q asks for %s isolation and this deployment "+
-			"has no RuntimeClass mapped to it; set KEERA_SANDBOX_RUNTIME_%s to the name of "+
-			"this cluster's %s RuntimeClass, or move the class to a tier it can deliver",
-			c.Name, c.Isolation, strings.ToUpper(string(c.Isolation)), c.Isolation)
-	}
-	return name, nil
 }
 
 // labelsFor is the label set on every object for a sandbox, shared with the
@@ -485,10 +463,14 @@ func (k *Kubernetes) build(spec Spec, runtimeClass string) *kubeSandbox {
 	return obj
 }
 
+// podContainerName names the one container in a sandbox pod. A claim names it
+// too when it hands over the environment.
+const podContainerName = "sandbox"
+
 // sandboxContainer is the one container in a sandbox pod.
 func sandboxContainer(spec Spec) kubeContainer {
 	c := kubeContainer{
-		Name:  "sandbox",
+		Name:  podContainerName,
 		Image: spec.Class.Image,
 		Env:   envList(spec.Env),
 		// Only sshd is declared: every attach goes through it.
@@ -522,6 +504,11 @@ func sandboxContainer(spec Spec) kubeContainer {
 		c.ReadinessProbe = nil
 	}
 	return c
+}
+
+// formatExpiry renders an expiry the way the Kubernetes objects hold it.
+func formatExpiry(t time.Time) string {
+	return t.UTC().Format(time.RFC3339)
 }
 
 // shutdownPolicy decides what happens to the object when its time runs out.
@@ -725,7 +712,7 @@ func (k *Kubernetes) Dial(ctx context.Context, ref Ref, port int) (net.Conn, err
 	if st.State != policy.SandboxReady || st.Address == "" {
 		return nil, fmt.Errorf("%w: it is %s", ErrNotReady, st.State)
 	}
-	return dialSandbox(ctx, ref, port, dialAddress(st.Address, port))
+	return dialSandbox(ctx, ref, port, net.JoinHostPort(st.Address, strconv.Itoa(port)))
 }
 
 /* ------------------------------------------------------------------ helpers */

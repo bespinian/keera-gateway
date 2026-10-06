@@ -205,11 +205,10 @@ func (s *Server) send(ctx context.Context, model policy.Model, out outbound) (*h
 		req.Header.Set("Accept", "text/event-stream, application/json")
 		// A model with no credential is sent unauthenticated, and the
 		// endpoint's own 401 is the clearest thing to show a developer.
-		switch {
-		case out.auth != nil:
+		if out.auth != nil {
 			out.auth(req.Header, model.APIKey)
-		case model.APIKey != "":
-			req.Header.Set("Authorization", "Bearer "+model.APIKey)
+		} else {
+			setCredential(req.Header, "", model.APIKey)
 		}
 		resp, err := s.client.Do(req)
 		if err == nil {
@@ -227,11 +226,23 @@ func (s *Server) send(ctx context.Context, model policy.Model, out outbound) (*h
 	return nil, lastErr
 }
 
+// setCredential sends credential in the header named name, or as a bearer
+// token when name is empty. An empty credential sends nothing.
+func setCredential(h http.Header, name, credential string) {
+	switch {
+	case credential == "":
+	case name == "":
+		h.Set("Authorization", "Bearer "+credential)
+	default:
+		h.Set(name, credential)
+	}
+}
+
 // undelivered reports whether a failed request never reached the backend,
 // because no connection to it was made.
 func undelivered(err error) bool {
-	var op *net.OpError
-	return errors.As(err, &op) && (op.Op == "dial" || op.Op == "proxyconnect")
+	op, ok := errors.AsType[*net.OpError](err)
+	return ok && (op.Op == "dial" || op.Op == "proxyconnect")
 }
 
 // copyResponseHeaders forwards what the client needs and adds what an SSE

@@ -92,6 +92,22 @@ func TestAClientThatDidNotAskIsNotSentGzip(t *testing.T) {
 	}
 }
 
+func TestAnUpgradeIsNotWrapped(t *testing.T) {
+	// The handler takes the connection over, so the compressor must not be
+	// between them to write its headers afterwards.
+	var wrapped bool
+	h := Compress(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, wrapped = w.(*compressWriter)
+	}))
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("Accept-Encoding", "gzip")
+	r.Header.Set("Upgrade", "keera-attach")
+	h.ServeHTTP(httptest.NewRecorder(), r)
+	if wrapped {
+		t.Error("an upgrade request went through the compressor")
+	}
+}
+
 func TestAStreamIsNotHeldInTheCompressor(t *testing.T) {
 	// The request log's stream: events written and flushed one at a time, with
 	// the reader expected to see each one as it happens.

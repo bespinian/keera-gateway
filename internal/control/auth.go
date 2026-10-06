@@ -458,11 +458,7 @@ func (s *Server) providerOf(r *http.Request, userID string) *authn.OIDC {
 	if err != nil {
 		return nil
 	}
-	name, _, ok := strings.Cut(u.ExternalID, ":")
-	if !ok {
-		return nil
-	}
-	return s.opts.Providers.ByName(name)
+	return s.directoryOf(u)
 }
 
 // me is what the panel loads first: who you are and what you may do.

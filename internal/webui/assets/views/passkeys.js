@@ -18,8 +18,8 @@ import {
   icons,
   showError,
   brandMark,
-  copyText,
   dateTime,
+  secretField,
 } from "../ui.js";
 
 /** passkeySetupView is the page a set-up link opens. It adds a passkey to the
@@ -68,7 +68,7 @@ export async function passkeySetupView(root, token, onDone) {
       style: { width: "100%", justifyContent: "center" },
     },
     icon(icons.passkey),
-    "Create passkey",
+    "Add passkey",
   );
   const submit = async (e) => {
     e.preventDefault();
@@ -138,27 +138,7 @@ export function managePasskeys() {
       list,
       passkeyRows(keys, (k) =>
         keys.length > 1
-          ? h(
-              "button",
-              {
-                class: "btn btn-sm btn-danger",
-                title: "Remove this passkey",
-                "aria-label": `Remove ${k.name}`,
-                onClick: () =>
-                  confirm({
-                    title: `Remove “${k.name}”?`,
-                    body: "You can no longer sign in with it.",
-                    confirmLabel: "Remove",
-                    danger: true,
-                    onConfirm: async () => {
-                      await api.deletePasskey(k.id);
-                      toast("Passkey removed", "good");
-                      draw();
-                    },
-                  }),
-              },
-              icon(icons.trash),
-            )
+          ? removeButton(k, "You can no longer sign in with it.", draw)
           : h(
               "span",
               {
@@ -222,28 +202,11 @@ export function userPasskeys(user) {
       list,
       keys.length
         ? passkeyRows(keys, (k) =>
-            h(
-              "button",
-              {
-                class: "btn btn-sm btn-danger",
-                title: "Remove this passkey",
-                "aria-label": `Remove ${k.name}`,
-                onClick: () =>
-                  confirm({
-                    title: `Remove “${k.name}”?`,
-                    body:
-                      `${user.email} can no longer sign in with it, and is ` +
-                      "signed out everywhere.",
-                    confirmLabel: "Remove",
-                    danger: true,
-                    onConfirm: async () => {
-                      await api.deletePasskey(k.id);
-                      toast("Passkey removed", "good");
-                      draw();
-                    },
-                  }),
-              },
-              icon(icons.trash),
+            removeButton(
+              k,
+              `${user.email} can no longer sign in with it, and is ` +
+                "signed out everywhere.",
+              draw,
             ),
           )
         : h(
@@ -275,7 +238,7 @@ export function userPasskeys(user) {
             }
           },
         },
-        "New set-up link",
+        "Get set-up link",
       ),
     ],
   });
@@ -284,14 +247,6 @@ export function userPasskeys(user) {
 
 /** showPasskeyLink hands over a set-up link. It is shown once. */
 export function showPasskeyLink(email, link) {
-  const value = h("input", {
-    class: "input key-value mono",
-    readonly: true,
-    value: link.url,
-    "aria-label": "The set-up link",
-    onFocus: (e) => e.target.select(),
-    onClick: (e) => e.target.select(),
-  });
   modal({
     title: `Set-up link for ${email}`,
     body: h(
@@ -300,17 +255,7 @@ export function showPasskeyLink(email, link) {
       h(
         "div",
         { class: "field" },
-        h(
-          "div",
-          { class: "row-tight" },
-          value,
-          h(
-            "button",
-            { class: "btn", onClick: () => copyText(link.url) },
-            icon(icons.copy),
-            "Copy",
-          ),
-        ),
+        secretField(link.url, "The set-up link"),
         h(
           "div",
           { class: "hint" },
@@ -324,6 +269,31 @@ export function showPasskeyLink(email, link) {
       h("button", { class: "btn btn-primary", onClick: close }, "Done"),
     ],
   });
+}
+
+// removeButton removes one passkey, after asking, and then redraws the list.
+function removeButton(k, body, draw) {
+  return h(
+    "button",
+    {
+      class: "btn btn-sm btn-danger",
+      title: "Remove this passkey",
+      "aria-label": `Remove ${k.name}`,
+      onClick: () =>
+        confirm({
+          title: `Remove ${k.name}?`,
+          body,
+          confirmLabel: "Remove",
+          danger: true,
+          onConfirm: async () => {
+            await api.deletePasskey(k.id);
+            toast("Passkey removed", "good");
+            draw();
+          },
+        }),
+    },
+    icon(icons.trash),
+  );
 }
 
 function passkeyRows(keys, action) {

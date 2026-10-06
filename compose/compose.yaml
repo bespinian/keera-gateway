@@ -50,6 +50,7 @@ services:
       # The sandbox settings are left out: the podman driver cannot run inside
       # this container, so only `make dev` reads them. See .env.example.
       KEERA_CURRENCY: ${KEERA_CURRENCY:-}
+      KEERA_UPSTREAM_DENY: ${KEERA_UPSTREAM_DENY:-}
       KEERA_REDIS_URL: ${KEERA_REDIS_URL:-}
       KEERA_REDIS_PREFIX: ${KEERA_REDIS_PREFIX:-}
       KEERA_UI: ${KEERA_UI:-}
@@ -96,8 +97,8 @@ services:
       # Accounts that sign in with a passkey instead of a directory. Needs
       # KEERA_PUBLIC_URL on https, or on http://localhost. See docs/sso.md.
       KEERA_PASSKEYS: ${KEERA_PASSKEYS:-}
-      # The gateway as a browser sees it. It is also what the panel's "Connect
-      # a client" page tells a developer to point their editor at, with /api on
+      # The gateway as a browser sees it. It is also what the panel's My
+      # clients screen tells a developer to point their editor at, with /api on
       # the end. Empty leaves both to the Host header.
       KEERA_PUBLIC_URL: ${KEERA_PUBLIC_URL:-}
     healthcheck:

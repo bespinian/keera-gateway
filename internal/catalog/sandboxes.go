@@ -82,10 +82,10 @@ func ParseSandbox(s Sandbox) (policy.SandboxClass, error) {
 	switch {
 	case s.Name == "":
 		return policy.SandboxClass{}, fmt.Errorf("name is required")
-	case !policy.ValidAlias(s.Name):
+	case !policy.ValidClassName(s.Name):
 		return policy.SandboxClass{}, fmt.Errorf("name %q must be lowercase letters, digits and "+
-			"interior hyphens: it is typed on a command line and written into repositories' own "+
-			"configuration, neither of which quotes it", s.Name)
+			"interior hyphens, at most 40 characters: it is typed on a command line and written "+
+			"into repositories' own configuration, neither of which quotes it", s.Name)
 	case strings.TrimSpace(s.Image) == "":
 		return policy.SandboxClass{}, fmt.Errorf("image is required; it is what the sandbox " +
 			"runs, and it should carry the toolchain already installed - a sandbox that " +

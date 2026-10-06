@@ -249,10 +249,7 @@ export const icons = {
     "M4 17l5-5-5-5M12 19h8M3 3h18a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z",
   terminal: "M4 17l6-6-6-6M12 19h8",
   download: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3",
-  filter: "M22 3H2l8 9.5V19l4 2v-8.5z",
-  // The guardrail that rewrites rather than refuses: a funnel with the shield
-  // the plain one lacks, so a table's filter control and this screen are not
-  // the same mark in two places.
+  // The guardrail that rewrites rather than refuses: a funnel with a shield.
   filters:
     "M21 4H3l7 8.5V19l4 2v-8.5zM17 3l3.5 1.4v3c0 2.2-1.4 4.2-3.5 5-2.1-.8-3.5-2.8-3.5-5v-3z",
   // The three things a filter can do to a request, one mark each. Like the
@@ -615,7 +612,7 @@ export function checkButton(title, run, render) {
           slot.replaceChildren(render(await run()));
         } catch (ex) {
           slot.replaceChildren(
-            h("span", { class: "pill pill-bad" }, "check failed"),
+            h("span", { class: "pill pill-bad" }, "Check failed"),
           );
           toast(ex.message, "bad");
         } finally {
@@ -626,6 +623,16 @@ export function checkButton(title, run, render) {
     "Check",
   );
   return h("div", { class: "row-tight" }, button, slot);
+}
+
+/** verdictPill is what a check found, as a pill that opens the full report. */
+export function verdictPill(label, tone, title, onClick) {
+  return h(
+    "button",
+    { class: "pill pill-" + tone + " pill-button", title, onClick },
+    h("span", { class: "dot" }),
+    label,
+  );
 }
 
 /** crumb is the link back to the list a screen belongs to. */
@@ -646,6 +653,43 @@ export function gone(ctx, path, label, title, body) {
     {},
     h("div", { class: "detail-head" }, crumb(ctx, path, label)),
     h("div", { class: "card" }, empty(title, body)),
+  );
+}
+
+/** listHead is the strip above a list: what the list is, then its controls
+ *  and the button that adds one. add is { label, onClick }, or null when the
+ *  reader cannot add. */
+export function listHead(intro, controls, add) {
+  return h(
+    "div",
+    { class: "detail-head" },
+    h("div", { class: "muted" }, intro),
+    h(
+      "div",
+      { class: "row", style: { flexWrap: "wrap" } },
+      h("div", { style: { flex: 1 } }),
+      controls,
+      add
+        ? h(
+            "button",
+            { class: "btn btn-primary", onClick: add.onClick },
+            icon(icons.plus),
+            add.label,
+          )
+        : null,
+    ),
+  );
+}
+
+/** sectionHead is a heading between a page's tables. A note given as text is
+ *  set faint on the right; anything else, such as buttons, goes there as is. */
+export function sectionHead(title, note, style) {
+  return h(
+    "div",
+    { class: "section-head", style },
+    h("h2", {}, title),
+    h("div", { style: { flex: 1 } }),
+    typeof note === "string" ? h("span", { class: "faint" }, note) : note,
   );
 }
 
@@ -1121,6 +1165,53 @@ export function confirm({
   });
 }
 
+/** rowActions is a row's edit and delete buttons. Delete asks first, and on
+ *  yes runs remove, shows the removed toast and reloads the page.
+ *
+ *  body may be a function, for a warning that is looked up only when the
+ *  button is pressed. */
+export function rowActions(
+  ctx,
+  name,
+  { editTitle, onEdit, deleteTitle, body, confirmLabel, remove, removed },
+) {
+  return h(
+    "div",
+    { class: "row-tight" },
+    h(
+      "button",
+      {
+        class: "btn btn-sm",
+        title: editTitle,
+        "aria-label": `Edit ${name}`,
+        onClick: () => onEdit(),
+      },
+      icon(icons.pencil),
+    ),
+    h(
+      "button",
+      {
+        class: "btn btn-sm btn-danger",
+        title: deleteTitle,
+        "aria-label": `Delete ${name}`,
+        onClick: async () =>
+          confirm({
+            title: `Delete ${name}?`,
+            body: typeof body === "function" ? await body() : body,
+            confirmLabel,
+            danger: true,
+            onConfirm: async () => {
+              await remove();
+              toast(removed, "good");
+              ctx.reload();
+            },
+          }),
+      },
+      icon(icons.trash),
+    ),
+  );
+}
+
 let toastHost;
 
 export function toast(message, tone = "") {
@@ -1147,6 +1238,52 @@ export async function copyText(text) {
     // Clipboard access needs a secure context, which a plain-http demo is not.
     toast("Could not copy. Select the text and copy it by hand.", "bad");
   }
+}
+
+// code renders something to be copied, with the button that copies it. Every
+// block it is used for is meant to leave the panel and land in a file, so none
+// of them is shown without one.
+export function code(text) {
+  return h(
+    "div",
+    { class: "code" },
+    h(
+      "button",
+      {
+        class: "btn btn-sm code-copy",
+        title: "Copy",
+        "aria-label": "Copy",
+        onClick: () => copyText(text),
+      },
+      icon(icons.copy),
+    ),
+    h("pre", {}, h("code", {}, text)),
+  );
+}
+
+/** secretField shows a value that is handed over once, with a Copy button. */
+export function secretField(value, ariaLabel) {
+  return h(
+    "div",
+    { class: "row-tight" },
+    h("input", {
+      class: "input key-value mono",
+      readonly: true,
+      value,
+      "aria-label": ariaLabel,
+      // Selecting on focus makes copying by hand one click, which is the way
+      // left when the clipboard is unavailable - a panel served over plain
+      // http on anything but localhost has no clipboard at all.
+      onFocus: (e) => e.target.select(),
+      onClick: (e) => e.target.select(),
+    }),
+    h(
+      "button",
+      { class: "btn", onClick: () => copyText(value) },
+      icon(icons.copy),
+      "Copy",
+    ),
+  );
 }
 
 /** showError puts a failure where the person who caused it is looking.

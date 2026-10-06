@@ -55,12 +55,25 @@ type User struct {
 // Disabled reports whether this person has been turned off.
 func (u User) Disabled() bool { return u.DisabledAt != nil }
 
-// userColumns is the select list scanUser reads, in its order.
-const userColumns = `id, org_id, email, COALESCE(external_id,''), role, created_at, disabled_at`
+// userColumnsOf is the select list userTargets fills, in its order, with each
+// column prefixed by table ("u." or ""). A join needs the prefix, because the
+// tables it joins share column names.
+func userColumnsOf(table string) string {
+	return fmt.Sprintf(`%[1]sid, %[1]sorg_id, %[1]semail, COALESCE(%[1]sexternal_id,''),
+	%[1]srole, %[1]screated_at, %[1]sdisabled_at`, table)
+}
+
+// userColumns is the select list scanUser reads, from users alone.
+var userColumns = userColumnsOf("")
+
+// userTargets points at the fields userColumnsOf fills, in its order.
+func userTargets(u *User) []any {
+	return []any{&u.ID, &u.OrgID, &u.Email, &u.ExternalID, &u.Role, &u.CreatedAt, &u.DisabledAt}
+}
 
 func scanUser(r row) (User, error) {
 	var u User
-	err := r.Scan(&u.ID, &u.OrgID, &u.Email, &u.ExternalID, &u.Role, &u.CreatedAt, &u.DisabledAt)
+	err := r.Scan(userTargets(&u)...)
 	return u, err
 }
 
@@ -346,14 +359,19 @@ type DeletedProject struct {
 	DetachedKeys int `json:"detached_keys"`
 }
 
-// FirstProject returns the id of an organisation's oldest project, where a
-// key or sandbox that names none goes. That is the one the organisation was
-// created with, until it is deleted. ErrNotFound means there is no project.
+// oldestProject selects the oldest project of the organisation named by the
+// parameter orgParam, such as "$1". A key or sandbox that names no project
+// goes there. That is the one the organisation was created with, until it is
+// deleted.
+func oldestProject(orgParam string) string {
+	return "SELECT id FROM projects WHERE org_id = " + orgParam + " ORDER BY created_at, id LIMIT 1"
+}
+
+// FirstProject returns the id of an organisation's oldest project.
+// ErrNotFound means there is no project.
 func (s *Store) FirstProject(ctx context.Context, orgID string) (string, error) {
 	var id string
-	err := s.pool.QueryRow(ctx,
-		"SELECT id FROM projects WHERE org_id = $1 ORDER BY created_at, id LIMIT 1", orgID,
-	).Scan(&id)
+	err := s.pool.QueryRow(ctx, oldestProject("$1"), orgID).Scan(&id)
 	return id, notFound(err)
 }
 
@@ -505,7 +523,7 @@ func insertKey(ctx context.Context, db querier, k KeyInfo, hash []byte) (KeyInfo
 	err := db.QueryRow(ctx, `INSERT INTO api_keys
 		(id, org_id, project_id, user_id, name, key_hash, prefix, kind, expires_at)
 		VALUES ($1, $2,
-			COALESCE($3, (SELECT id FROM projects WHERE org_id = $2 ORDER BY created_at, id LIMIT 1)),
+			COALESCE($3, (`+oldestProject("$2")+`)),
 			$4, $5, $6, $7, $8, $9)
 		RETURNING project_id, created_at`,
 		k.ID, k.OrgID, nullable(k.ProjectID), nullable(k.UserID), k.Name, hash, k.Prefix,
@@ -577,7 +595,7 @@ func (s *Store) RotateKey(ctx context.Context, oldID string, next KeyInfo, hash 
 	if next, err = insertKey(ctx, tx, next, hash); err != nil {
 		return KeyInfo{}, err
 	}
-	if _, err := tx.Exec(ctx, copyKeyPolicySQL, oldID, next.ID); err != nil {
+	if _, err := tx.Exec(ctx, copyKeyGuardrailSQL, oldID, next.ID); err != nil {
 		return KeyInfo{}, err
 	}
 	if _, err := tx.Exec(ctx,
@@ -609,14 +627,14 @@ func (s *Store) lookupKey(ctx context.Context, where string, arg any) (*policy.R
 	// A disabled holder counts as a revoked key, which is also a second check:
 	// disabling somebody revokes their keys.
 	rows, err := s.pool.Query(ctx, `
-		SELECT k.id, k.org_id, COALESCE(t.id,''), COALESCE(k.user_id,''), k.kind,
+		SELECT k.id, k.org_id, COALESCE(pr.id,''), COALESCE(k.user_id,''), k.kind,
 		       k.expires_at, COALESCE(k.revoked_at, u.disabled_at), p.scope_type, `+limitColumns+`
 		FROM api_keys k
 		LEFT JOIN users u ON u.id = k.user_id
-		LEFT JOIN projects t ON t.id = k.project_id AND t.org_id = k.org_id
+		LEFT JOIN projects pr ON pr.id = k.project_id AND pr.org_id = k.org_id
 		LEFT JOIN guardrails p ON
 			(p.scope_type = 'org'     AND p.scope_id = k.org_id) OR
-			(p.scope_type = 'project' AND p.scope_id = t.id) OR
+			(p.scope_type = 'project' AND p.scope_id = pr.id) OR
 			(p.scope_type = 'key'     AND p.scope_id = k.id)
 		WHERE `+where, arg)
 	if err != nil {

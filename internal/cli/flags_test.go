@@ -3,6 +3,7 @@ package cli
 import (
 	"flag"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
@@ -71,15 +72,19 @@ func TestParseDoesNotSwallowAPositionalAfterABooleanFlag(t *testing.T) {
 
 func TestParseRejectsAnUnknownFlag(t *testing.T) {
 	fs, _, _, _ := newFlagSet()
-	fs.SetOutput(discard{})
-	if err := parse(fs, []string{"project_1", "--nonsense", "1"}); err == nil {
-		t.Error("an unknown flag was accepted; a typo would silently do nothing")
+	err := parse(fs, []string{"project_1", "--nonsense", "1"})
+	if err == nil || err.Error() != "unknown flag --nonsense" {
+		t.Errorf("err = %v, want it to name the flag the way the help does", err)
+	}
+	err = parse(fs, []string{"--rpm"})
+	if err == nil || err.Error() != "a value is missing after --rpm" {
+		t.Errorf("err = %v, want it to say --rpm needs a value", err)
+	}
+	err = parse(fs, []string{"--rpm", "abc"})
+	if err == nil || !strings.Contains(err.Error(), "for --rpm") {
+		t.Errorf("err = %v, want it to name --rpm", err)
 	}
 }
-
-type discard struct{}
-
-func (discard) Write(p []byte) (int, error) { return len(p), nil }
 
 func TestFormatMicrosKeepsSmallAmountsVisible(t *testing.T) {
 	tests := []struct {

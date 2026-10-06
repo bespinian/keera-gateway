@@ -26,8 +26,8 @@ func TestDeleteOrgTakesItsTenancyAndKeepsItsHistory(t *testing.T) {
 		typ policy.ScopeType
 		id  string
 	}{{policy.ScopeOrg, f.orgID}, {policy.ScopeProject, f.projectID}, {policy.ScopeKey, f.keyID}} {
-		if err := st.PutPolicy(ctx, sc.typ, sc.id, policy.Limits{RPM: new(10)}); err != nil {
-			t.Fatalf("PutPolicy %s: %v", sc.typ, err)
+		if err := st.PutGuardrail(ctx, sc.typ, sc.id, policy.Limits{RPM: new(10)}); err != nil {
+			t.Fatalf("PutGuardrail %s: %v", sc.typ, err)
 		}
 	}
 	if err := st.WriteEvents(ctx, []Event{{TS: now, OrgID: f.orgID, ProjectID: f.projectID,
@@ -162,9 +162,9 @@ func TestTenancyLookupsUsedForAuthorisation(t *testing.T) {
 func TestUpdateProjectLeavesEverythingThatPointsAtItAlone(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
-	if err := st.PutPolicy(ctx, policy.ScopeProject, f.projectID,
+	if err := st.PutGuardrail(ctx, policy.ScopeProject, f.projectID,
 		policy.Limits{RPM: new(60)}); err != nil {
-		t.Fatalf("PutPolicy: %v", err)
+		t.Fatalf("PutGuardrail: %v", err)
 	}
 
 	renamed, err := st.UpdateProject(ctx, f.projectID, ProjectChange{Name: new("Payments")})
@@ -195,7 +195,7 @@ func TestUpdateProjectLeavesEverythingThatPointsAtItAlone(t *testing.T) {
 	if res.Key.ProjectID != f.projectID {
 		t.Errorf("the key's project = %q, want %q", res.Key.ProjectID, f.projectID)
 	}
-	lim, err := st.GetPolicy(ctx, policy.ScopeProject, f.projectID)
+	lim, err := st.GetGuardrail(ctx, policy.ScopeProject, f.projectID)
 	if err != nil || lim.RPM == nil || *lim.RPM != 60 {
 		t.Errorf("the project's guardrails after the rename = %+v, %v", lim, err)
 	}
@@ -228,9 +228,9 @@ func TestUpdateProjectLeavesEverythingThatPointsAtItAlone(t *testing.T) {
 func TestDeleteProjectIsRefusedWhileAKeyStillWorks(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
-	if err := st.PutPolicy(ctx, policy.ScopeProject, f.projectID,
+	if err := st.PutGuardrail(ctx, policy.ScopeProject, f.projectID,
 		policy.Limits{RPM: new(60)}); err != nil {
-		t.Fatalf("PutPolicy: %v", err)
+		t.Fatalf("PutGuardrail: %v", err)
 	}
 
 	_, err := st.DeleteProject(ctx, f.projectID)
@@ -270,7 +270,7 @@ func TestDeleteProjectIsRefusedWhileAKeyStillWorks(t *testing.T) {
 	}
 	// The guardrails name their scope by plain id with no foreign key to
 	// follow, so nothing would have cleared them.
-	if _, err := st.GetPolicy(ctx, policy.ScopeProject, f.projectID); !errors.Is(err, ErrNotFound) {
+	if _, err := st.GetGuardrail(ctx, policy.ScopeProject, f.projectID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("the project's guardrails outlived it: %v", err)
 	}
 	if _, err := st.DeleteProject(ctx, f.projectID); !errors.Is(err, ErrNotFound) {

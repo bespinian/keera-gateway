@@ -44,6 +44,7 @@ import {
   plural,
   isAdmin,
   sandboxNameProblem,
+  listHead,
 } from "../ui.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
 import { oldestProject } from "./projects.js";
@@ -121,32 +122,17 @@ export async function sandboxesView(ctx) {
 /** The strip above the table: what a sandbox is, and the button that makes one. */
 function head(ctx, classes, driver, limits, canAdmin, projects) {
   const usable = classes.filter((c) => allowed(c, limits, driver));
-  return h(
-    "div",
-    { class: "detail-head" },
-    h(
-      "div",
-      { class: "muted" },
-      "A sandbox is a machine for one task or one working day, with the " +
-        "toolchain installed and its own API key. It expires on its own. Only " +
-        "its owner can open a shell in it, with 'keera sandbox ssh <name>'.",
-    ),
-    h(
-      "div",
-      { class: "row", style: { flexWrap: "wrap" } },
-      h("div", { style: { flex: 1 } }),
-      usable.length
-        ? h(
-            "button",
-            {
-              class: "btn btn-primary",
-              onClick: () => newSandbox(ctx, usable, limits, projects),
-            },
-            icon(icons.plus),
-            "New sandbox",
-          )
-        : null,
-    ),
+  return listHead(
+    "A sandbox is a machine for one task or one working day, with the " +
+      "toolchain installed and its own API key. It expires on its own. Only " +
+      "its owner can open a shell in it, with 'keera sandbox ssh <name>'.",
+    [],
+    usable.length
+      ? {
+          label: "Create sandbox",
+          onClick: () => newSandbox(ctx, usable, limits, projects),
+        }
+      : null,
   );
 }
 
@@ -191,7 +177,7 @@ function listCard(ctx, sandboxes, canAdmin, me, driver) {
               "div",
               { class: "row-tight" },
               pill(stateLabel(s.state), stateTone(s.state)),
-              s.purpose === "agent" ? pill("agent", "accent") : null,
+              s.purpose === "agent" ? pill("Agent", "accent") : null,
             ),
             // Why it is stuck or failed. The other states explain themselves.
             (s.state === "pending" || s.state === "failed") && s.detail
@@ -284,9 +270,9 @@ function listCard(ctx, sandboxes, canAdmin, me, driver) {
       ],
       sortBy: "Expires",
       rowClass: (s) => (isLive(s) ? "" : "row-faint"),
-      emptyTitle: "No sandboxes",
+      emptyTitle: "No sandboxes yet",
       emptyBody:
-        "Start one with the button above, or with " +
+        "Start one with Create sandbox, or with " +
         "'keera sandbox create <name> --class <class>'.",
     },
   );
@@ -382,6 +368,7 @@ function classCard(ctx, classes, driver) {
                   {
                     class: "btn btn-sm btn-danger",
                     title: "Delete this class",
+                    "aria-label": `Delete ${c.name}`,
                     onClick: () => removeClass(ctx, c),
                   },
                   icon(icons.trash),
@@ -391,7 +378,7 @@ function classCard(ctx, classes, driver) {
       ],
       classes,
       {
-        emptyTitle: "No sandbox classes",
+        emptyTitle: "No sandbox classes yet",
         emptyBody: canEdit
           ? "A new organisation starts with the classes in " +
             "KEERA_SANDBOXES_FILE. To add classes to this one, run " +
@@ -492,6 +479,7 @@ function actions(ctx, s, canAdmin, me, driver) {
       {
         class: "btn btn-sm btn-danger",
         title: "Terminate it and delete its files",
+        "aria-label": `Terminate ${s.name}`,
         onClick: () => terminateSandbox(ctx, s),
       },
       icon(icons.trash),
@@ -654,7 +642,7 @@ function newSandbox(ctx, classes, limits, projects) {
   const err = h("div");
 
   modal({
-    title: "New sandbox",
+    title: "Create sandbox",
     subtitle:
       "It gets its own API key, scoped to you and revoked with the sandbox.",
     wide: true,
@@ -758,7 +746,7 @@ function newSandbox(ctx, classes, limits, projects) {
             }
           },
         },
-        "Create",
+        "Create sandbox",
       ),
     ],
   });

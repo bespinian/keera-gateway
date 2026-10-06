@@ -317,10 +317,7 @@ type SandboxQuery struct {
 // ListSandboxes reads sandboxes: one organisation's, or every one's when
 // q.OrgID is empty.
 func (s *Store) ListSandboxes(ctx context.Context, q SandboxQuery) ([]Sandbox, error) {
-	limit := q.Limit
-	if limit <= 0 || limit > 500 {
-		limit = 200
-	}
+	limit := pageLimit(q.Limit, 200, 500)
 	return s.sandboxesWhere(ctx, `
 		WHERE ($1 = '' OR org_id = $1)
 		  AND ($2 = '' OR project_id = $2)
@@ -495,8 +492,7 @@ func (s *Store) StopAccounting(ctx context.Context, id string, now time.Time) er
 type SandboxUsage struct {
 	// Key is the group: a project id, a user's address or a class name, as the
 	// caller grouped by.
-	Key   string `json:"key"`
-	Label string `json:"label,omitempty"`
+	Key string `json:"key"`
 	// OrgID is set only when a report across every organisation groups by
 	// class: two organisations can each have a class of the same name.
 	OrgID string `json:"org_id,omitempty"`
@@ -506,8 +502,8 @@ type SandboxUsage struct {
 	Count       int64 `json:"count"`
 	Running     int64 `json:"running_seconds"`
 	CoreSeconds int64 `json:"core_seconds"`
-	// Live is how many of them are still running now, which the other numbers
-	// cannot give.
+	// Live is how many of them still hold resources now, which the other
+	// numbers cannot give.
 	Live int64 `json:"live"`
 }
 

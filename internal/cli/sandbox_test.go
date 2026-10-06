@@ -142,3 +142,39 @@ func TestProxyCommandNamesTheGateway(t *testing.T) {
 		t.Errorf("left for the command: %q", rest)
 	}
 }
+
+// Sandbox usage is a report: without --org it spans every organisation the
+// caller can see, so an operator with several is not asked to pick one.
+func TestSandboxUsageSpansEveryOrganisationWithoutOrg(t *testing.T) {
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/me": map[string]any{"role": "operator"},
+		"GET /v1/sandbox-usage": map[string]any{"group_by": "class", "data": []map[string]any{
+			{"key": "standard", "org_id": "org_a", "count": 2},
+			{"key": "standard", "org_id": "org_b", "count": 1},
+		}},
+	})
+
+	said := capture(t, "sandbox", "usage")
+	if f.called("GET", "/v1/orgs") {
+		t.Error("the report looked for the only organisation")
+	}
+	if q := f.request("GET", "/v1/sandbox-usage").query; strings.Contains(q, "org_id") {
+		t.Errorf("query = %q, want no organisation", q)
+	}
+	// Two organisations can each have a class of the same name.
+	if !strings.Contains(said, "standard (org_a)") || !strings.Contains(said, "standard (org_b)") {
+		t.Errorf("the rows do not name their organisation:\n%s", said)
+	}
+
+	capture(t, "sandbox", "usage", "--org", "org_b")
+	if q := f.seen[len(f.seen)-1].query; !strings.Contains(q, "org_id=org_b") {
+		t.Errorf("query = %q, want org_b", q)
+	}
+	// The flag says so, on this verb only.
+	if help := capture(t, "help", "sandbox", "usage"); !strings.Contains(help, "every one you can") {
+		t.Errorf("--org on 'usage' does not say it spans every organisation:\n%s", help)
+	}
+	if help := capture(t, "help", "sandbox", "list"); strings.Contains(help, "every one you can") {
+		t.Errorf("--org on 'list' says it spans every organisation:\n%s", help)
+	}
+}

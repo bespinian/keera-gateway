@@ -393,7 +393,7 @@ Within one request, the order is:
 
 1. authenticate, rate-limit, budget
 2. the [router](routers.md), if the client named one
-3. refuse the request if it cannot fit in the destination's context
+3. refuse the request if it is too long for every model it may go to
 4. **filters**, in the order above
 5. the standing system prompt is prepended
 6. hosted tools are removed, if the guardrail blocks them

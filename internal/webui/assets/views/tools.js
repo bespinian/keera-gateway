@@ -9,12 +9,12 @@ import { h, table, pill, ms, bytes, dateTime } from "../ui.js";
 
 // OUTCOMES are the words a tool call ends in, and how each is drawn.
 const OUTCOMES = {
-  ok: ["answered", "good"],
-  tool_error: ["tool failed", "warn"],
-  error: ["no result", "bad"],
-  denied: ["not allowed", "warn"],
-  refused: ["refused by a filter", "warn"],
-  input_required: ["asked for input", ""],
+  ok: ["Answered", "good"],
+  tool_error: ["Tool failed", "warn"],
+  error: ["No result", "bad"],
+  denied: ["Not allowed", "warn"],
+  refused: ["Refused by a filter", "warn"],
+  input_required: ["Asked for input", ""],
 };
 
 function toolOutcome(outcome) {

@@ -287,8 +287,11 @@ type UsageQuery struct {
 	ReportScope
 	From    time.Time
 	To      time.Time
-	GroupBy string // project, key, user, model, client, day or org; empty or anything else means model
+	GroupBy string // project, key, user, model, client, day or org; empty or anything else means DefaultGroupBy
 }
+
+// DefaultGroupBy is the grouping a usage report gets when it asks for none.
+const DefaultGroupBy = "model"
 
 // groupColumns maps the public group_by values to columns, which keeps the
 // caller's string out of the SQL text.
@@ -303,7 +306,7 @@ var groupColumns = map[string]string{
 }
 
 // ValidGroupBy reports whether s is a grouping Usage understands. The empty
-// string is not one: the handler picks the default.
+// string is not one: Usage reads it as DefaultGroupBy.
 func ValidGroupBy(s string) bool {
 	_, ok := groupColumns[s]
 	return ok
@@ -322,7 +325,7 @@ func GroupBys() []string {
 func (s *Store) Usage(ctx context.Context, q UsageQuery) ([]UsageBucket, error) {
 	col, ok := groupColumns[q.GroupBy]
 	if !ok {
-		col = groupColumns["model"]
+		col = groupColumns[DefaultGroupBy]
 	}
 	org, group := "''", "grp"
 	if q.OrgID == "" && col == groupColumns["model"] {
@@ -412,9 +415,7 @@ type AuditQuery struct {
 // An empty OrgID means every tenant, which only an operator asks for. Anyone
 // else sees only their own organisation's entries.
 func (s *Store) ListAudit(ctx context.Context, q AuditQuery) ([]AuditEntry, error) {
-	if q.Limit <= 0 || q.Limit > 5000 {
-		q.Limit = 100
-	}
+	q.Limit = pageLimit(q.Limit, 100, 5000)
 	rows, err := s.pool.Query(ctx, `SELECT id, ts, actor, action, COALESCE(target_type,''),
 		COALESCE(target_id,''), detail FROM audit_log
 		WHERE ($1 = '' OR org_id = $1)
