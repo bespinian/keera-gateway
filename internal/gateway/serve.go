@@ -682,8 +682,9 @@ func (s *Server) relayStream(c *call, resp *http.Response, answered time.Time, p
 	pipe func(dst io.Writer, flush func(), src io.Reader) (streamStats, error),
 ) {
 	c.w.WriteHeader(resp.StatusCode)
-	flusher := http.NewResponseController(c.w)
-	stats, err := pipe(c.w, func() { _ = flusher.Flush() }, resp.Body)
+	src := &flushBeforeRead{src: resp.Body, flusher: http.NewResponseController(c.w)}
+	stats, err := pipe(c.w, src.later, src)
+	src.now()
 	if !stats.firstAt.IsZero() {
 		c.ev.TTFT = stats.firstAt.Sub(c.tr.start)
 		// Waiting for the first token (queues, cold starts) and streaming the

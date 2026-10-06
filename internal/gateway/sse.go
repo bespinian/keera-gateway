@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http"
 	"time"
 )
 
@@ -142,7 +143,10 @@ func eachLine(src io.Reader, limit int64, line func([]byte) error, end func() er
 func pipeSSE(dst io.Writer, flush func(), src io.Reader, alias string,
 	dropUsageEvent bool, limit int64,
 ) (streamStats, error) {
-	p := &ssePipe{dst: dst, flush: flush, alias: alias, dropUsage: dropUsageEvent}
+	p := &ssePipe{dst: dst, flush: flush, dropUsage: dropUsageEvent}
+	if alias != "" {
+		p.name, _ = json.Marshal(alias)
+	}
 	err := eachLine(src, limit, p.add, p.emit)
 	return p.stats, err
 }
@@ -150,10 +154,13 @@ func pipeSSE(dst io.Writer, flush func(), src io.Reader, alias string,
 // ssePipe is the state of one piped stream: the event being gathered, and
 // what has been learnt so far.
 type ssePipe struct {
-	dst       io.Writer
-	flush     func()
-	alias     string
+	dst   io.Writer
+	flush func()
+	// name is the alias, encoded once for every chunk it is written into.
+	name      []byte
 	dropUsage bool
+	// renamed holds the chunk with the alias in it, reused for every chunk.
+	renamed []byte
 
 	stats     streamStats
 	event     []byte
@@ -192,8 +199,11 @@ func (p *ssePipe) emit() error {
 			p.stats.firstAt = time.Now()
 		}
 		out := p.event
-		if p.alias != "" {
-			out = renameModel(out, p.alias)
+		if p.name != nil {
+			if start, end, ok := modelValue(out); ok {
+				p.renamed = appendRenamed(p.renamed[:0], out, p.name, start, end)
+				out = p.renamed
+			}
 		}
 		if _, err := p.dst.Write(out); err != nil {
 			return err
@@ -236,6 +246,37 @@ func hasUsage(payload []byte) bool {
 	rest := bytes.TrimLeft(after, " \t\r\n")
 	rest = bytes.TrimLeft(bytes.TrimPrefix(rest, []byte(":")), " \t\r\n")
 	return !bytes.HasPrefix(rest, []byte("null"))
+}
+
+// flushBeforeRead holds back a stream's flushes until the gateway goes back to
+// the upstream for more.
+//
+// A flush is a system call, and with one per token it was most of the CPU a
+// stream cost. The pipes read through a bufio.Reader, which reads from here
+// only once the events it holds are used up. So when one read brought several
+// events, they go out in one write; when it brought one, it goes out at once,
+// as before. A busy gateway falls behind, reads more per call and so flushes
+// less, which is when it matters.
+type flushBeforeRead struct {
+	src     io.Reader
+	flusher *http.ResponseController
+	pending bool
+}
+
+func (f *flushBeforeRead) Read(p []byte) (int, error) {
+	f.now()
+	return f.src.Read(p)
+}
+
+// later is the flush the pipes call after each event.
+func (f *flushBeforeRead) later() { f.pending = true }
+
+// now flushes what the pipes have written, if anything.
+func (f *flushBeforeRead) now() {
+	if f.pending {
+		_ = f.flusher.Flush()
+		f.pending = false
+	}
 }
 
 // usageFromResponse pulls the usage record out of a complete, non-streamed

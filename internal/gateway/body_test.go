@@ -470,3 +470,26 @@ func checkOrder(t *testing.T, in string, b *body) {
 		}
 	}
 }
+
+func TestEndOfString(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		at   int
+		want int
+	}{
+		{`"abc",`, 0, 5},
+		{`""`, 0, 2},
+		{`"a\"b",`, 0, 6},
+		// An escaped backslash: the quote after it ends the string.
+		{`"a\\",`, 0, 5},
+		{`"a\\\"b",`, 0, 8},
+		// Backslashes before the opening quote are not the string's.
+		{`\""`, 1, 3},
+		{`"abc`, 0, 4},
+		{`"a\`, 0, 3},
+	} {
+		if got := endOfString([]byte(tc.raw), tc.at); got != tc.want {
+			t.Errorf("endOfString(%s, %d) = %d, want %d", tc.raw, tc.at, got, tc.want)
+		}
+	}
+}

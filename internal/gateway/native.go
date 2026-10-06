@@ -226,18 +226,39 @@ var modelKey = []byte(`"model":`)
 // string a quote is escaped, so the first unescaped `"model":` is a key, and
 // in these documents the only one is the answer's own.
 func renameModel(raw []byte, alias string) []byte {
-	i := bytes.Index(raw, modelKey)
-	if i < 0 {
+	start, end, ok := modelValue(raw)
+	if !ok {
 		return raw
 	}
-	start := i + len(modelKey)
+	name, _ := json.Marshal(alias)
+	out := make([]byte, 0, len(raw)-(end-start)+len(name))
+	return appendRenamed(out, raw, name, start, end)
+}
+
+// appendRenamed appends raw to dst with name, an encoded JSON string, as the
+// model. A stream calls it once per chunk with the same name and buffer, so
+// renaming a token costs no encoding and no allocation.
+func appendRenamed(dst, raw, name []byte, start, end int) []byte {
+	dst = append(dst, raw[:start]...)
+	dst = append(dst, name...)
+	return append(dst, raw[end:]...)
+}
+
+// modelValue finds the model's string value in raw, quotes included, as
+// raw[start:end].
+func modelValue(raw []byte) (start, end int, ok bool) {
+	i := bytes.Index(raw, modelKey)
+	if i < 0 {
+		return 0, 0, false
+	}
+	start = i + len(modelKey)
 	for start < len(raw) && (raw[start] == ' ' || raw[start] == '\t') {
 		start++
 	}
 	if start >= len(raw) || raw[start] != '"' {
-		return raw
+		return 0, 0, false
 	}
-	end := start + 1
+	end = start + 1
 	for end < len(raw) && raw[end] != '"' {
 		if raw[end] == '\\' {
 			end++
@@ -245,13 +266,9 @@ func renameModel(raw []byte, alias string) []byte {
 		end++
 	}
 	if end >= len(raw) {
-		return raw
+		return 0, 0, false
 	}
-	name, _ := json.Marshal(alias)
-	out := make([]byte, 0, len(raw)-(end+1-start)+len(name))
-	out = append(out, raw[:start]...)
-	out = append(out, name...)
-	return append(out, raw[end+1:]...)
+	return start, end + 1, true
 }
 
 // ------------------------------------------------------------------ text

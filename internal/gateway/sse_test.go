@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 // sseStream builds a stream the way vLLM emits one.
@@ -297,5 +300,40 @@ func TestStreamsHonourTheResponseLimit(t *testing.T) {
 		if !errors.Is(err, errEventTooLarge) {
 			t.Errorf("%s: pipe = %v, want errEventTooLarge", name, err)
 		}
+	}
+}
+
+// countingFlusher counts the flushes that reach the client.
+type countingFlusher struct {
+	http.ResponseWriter
+	flushes int
+}
+
+func (c *countingFlusher) Flush() { c.flushes++ }
+
+func pipeFlushes(t *testing.T, src io.Reader) int {
+	t.Helper()
+	w := &countingFlusher{ResponseWriter: httptest.NewRecorder()}
+	f := &flushBeforeRead{src: src, flusher: http.NewResponseController(w)}
+	if _, err := pipeSSE(w, f.later, f, "", true, DefaultMaxResponseBytes); err != nil {
+		t.Fatal(err)
+	}
+	f.now()
+	return w.flushes
+}
+
+func TestFlushBeforeReadJoinsEventsThatArriveTogether(t *testing.T) {
+	in := sseStream(deltaChunk, deltaChunk, deltaChunk)
+	if n := pipeFlushes(t, strings.NewReader(in)); n != 1 {
+		t.Errorf("flushed %d times, want 1 for events that came in one read", n)
+	}
+}
+
+func TestFlushBeforeReadFlushesBeforeWaiting(t *testing.T) {
+	// One byte per read: every event is followed by a read that could wait, so
+	// each must reach the client before it.
+	in := sseStream(deltaChunk, deltaChunk)
+	if n := pipeFlushes(t, iotest.OneByteReader(strings.NewReader(in))); n != 3 {
+		t.Errorf("flushed %d times, want 3: one per event when each arrives alone", n)
 	}
 }

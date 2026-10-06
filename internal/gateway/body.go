@@ -128,18 +128,28 @@ func skipSpace(raw []byte, i int) int {
 	return i
 }
 
-// endOfString returns the index just past the string opening at i. The byte
-// after a backslash is skipped, so an escaped quote does not end the string.
+// endOfString returns the index just past the string opening at i. A quote
+// after an odd number of backslashes is escaped and does not end the string.
+//
+// Prompts are mostly string bytes, so this jumps from quote to quote with
+// IndexByte instead of looking at every byte.
 func endOfString(raw []byte, i int) int {
-	for i++; i < len(raw); i++ {
-		switch raw[i] {
-		case '\\':
-			i++
-		case '"':
+	start := i + 1
+	for i = start; i < len(raw); i++ {
+		q := bytes.IndexByte(raw[i:], '"')
+		if q < 0 {
+			return len(raw)
+		}
+		i += q
+		slashes := 0
+		for j := i - 1; j >= start && raw[j] == '\\'; j-- {
+			slashes++
+		}
+		if slashes%2 == 0 {
 			return i + 1
 		}
 	}
-	return i
+	return len(raw)
 }
 
 // endOfValue returns the index just past the JSON value beginning at i.
