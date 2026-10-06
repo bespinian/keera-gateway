@@ -40,8 +40,7 @@ export function firstRun(ctx, setup) {
       done: setup.models > 0,
       body:
         "Clients ask for a model by its alias. Until an enabled model " +
-        "exists, every request is refused. A new organisation starts with " +
-        "the models in KEERA_MODELS_FILE, if the deployment sets it.",
+        "exists, every request is refused.",
       action: admin
         ? { label: "Go to Models", run: () => ctx.navigate("/models") }
         : null,
