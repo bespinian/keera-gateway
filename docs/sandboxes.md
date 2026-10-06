@@ -12,7 +12,8 @@ cluster.
 internal registry and the internal Git. A script the agent writes to upload the
 repository then fails. How much this is worth depends on the driver and the
 cluster; see [What is actually enforced](#what-is-actually-enforced). On the
-podman driver there is no egress control today.
+podman driver, which is not meant for production, there is no egress control
+today.
 
 **The API key never lands on a laptop.** Each sandbox gets its own key at
 creation, scoped to whoever asked for it. The key expires with the sandbox,
@@ -486,6 +487,9 @@ with warm pools off deletes every pool it finds. Both need `list` on templates
 and pools.
 
 ## The two drivers
+
+**The podman driver is not meant for production yet.** It is there for local
+development and tests. Use `kubernetes` for real workloads.
 
 |                    | `kubernetes`                                      | `podman`                           |
 | ------------------ | ------------------------------------------------- | ---------------------------------- |

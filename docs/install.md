@@ -174,9 +174,10 @@ walkthrough.
 
 ### Sandboxes
 
-Off unless `KEERA_SANDBOX_DRIVER` is `kubernetes` or `podman`. While it is
-unset, the other `KEERA_SANDBOX_*` settings are ignored (a stray one does not
-stop the start) and the panel hides sandboxes.
+Off unless `KEERA_SANDBOX_DRIVER` is `kubernetes` or `podman`. The podman
+driver is for local development and tests, not for production. While the
+driver is unset, the other `KEERA_SANDBOX_*` settings are ignored (a stray one
+does not stop the start) and the panel hides sandboxes.
 
 `KEERA_SANDBOXES_FILE` is read either way: it holds the classes new
 organisations start with, so they are there once a driver is set. A missing or
