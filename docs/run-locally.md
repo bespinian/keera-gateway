@@ -34,8 +34,10 @@ Three are always overridden, whatever `.env` says:
 | `KEERA_LOG_LEVEL`    | `debug`                                       |
 | `KEERA_LOG_FORMAT`   | `text`                                        |
 
-`KEERA_MODELS_FILE`, `KEERA_SANDBOXES_FILE` and `KEERA_SANDBOX_PUBLIC_URL` are
-only defaults: a value in `.env` wins. The addresses `make dev` prints assume the default
+`KEERA_MODELS_FILE`, `KEERA_SANDBOXES_FILE`, `KEERA_SANDBOX_PUBLIC_URL` and
+`KEERA_UPSTREAM_DENY` are only defaults: a value in `.env` wins. The deny list
+drops loopback, because the backends are on `127.0.0.1` here
+([install.md](install.md#where-the-gateway-may-connect)). The addresses `make dev` prints assume the default
 `KEERA_ADDR` of `:8080`.
 
 Install air once if you do not have it:

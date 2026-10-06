@@ -261,12 +261,14 @@ dev: dev-env dev-backends
 	@# The two catalogue files are defaults, so .env can name others. The
 	@# sandbox class file is set even without a driver, so the first
 	@# organisation has classes once one is switched on; the sandbox address
-	@# only when a driver is named.
+	@# only when a driver is named. The backends are on loopback here, so the
+	@# deny list is the default one without loopback.
 	@set -a; . ./$(DEV_ENV); set +a; \
 		KEERA_DATABASE_URL='postgres://keera:keera@127.0.0.1:5432/keera?sslmode=disable' \
 		KEERA_MODELS_FILE="$${KEERA_MODELS_FILE:-compose/models.dev.yaml}" \
 		KEERA_SANDBOXES_FILE="$${KEERA_SANDBOXES_FILE:-compose/sandboxes.yaml}" \
 		KEERA_SANDBOX_PUBLIC_URL="$${KEERA_SANDBOX_DRIVER:+$${KEERA_SANDBOX_PUBLIC_URL:-http://host.containers.internal:8080}}" \
+		KEERA_UPSTREAM_DENY="$${KEERA_UPSTREAM_DENY:-169.254.0.0/16,fe80::/10,0.0.0.0/8,::/128,fd00:ec2::254/128}" \
 		KEERA_LOG_FORMAT=text KEERA_LOG_LEVEL=debug \
 		$(AIR)
 

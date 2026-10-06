@@ -321,6 +321,12 @@ the way back in if SSO is broken: open `/?operator_key=1`.
 Signing out also sends the browser to the provider's sign-out page, if the
 provider has one.
 
+A sign-in must finish in the browser that started it. The panel sets a
+short-lived cookie with the sign-in's state, and the callback refuses a state
+the browser does not hold. So a link to someone else's callback cannot sign you
+in to their account. Start from `KEERA_PUBLIC_URL`, since the callback goes
+there and the cookie has to be on that address.
+
 ## Signing in from the command line
 
 `keera login` is the same sign-in for the terminal:
@@ -549,6 +555,7 @@ gateway whose only way in is passkeys, `--provider` can be left out.
 | No sign-on button on the panel                                 | An issuer and a client ID are both needed; one is empty.                                                                                     |
 | Boot fails asking for a client secret                          | An issuer and client ID are set without the secret. The message names the provider.                                                          |
 | "a sign-in has to name one of…"                                | Several providers are configured and the link named none. Start from the panel, not the URL.                                                 |
+| "started in another browser or tab"                            | The callback came to a browser that did not start the sign-in, or to another address than the panel's. Start again from `KEERA_PUBLIC_URL`.  |
 | Signed in, but everything is read-only                         | You have the default role. Ask an administrator for `keera user role <you> admin`, or, if the provider has admin groups, to be added to one. |
 | The panel will not let anybody change a role                   | `KEERA_OIDC_<NAME>_ADMIN_GROUPS` is set on some provider, so the directory decides. Change the group, or unset it on every provider.         |
 | The panel refuses the operator role                            | It always does. `KEERA_OPERATORS` or `KEERA_OIDC_<NAME>_OPERATOR_GROUPS` grants it.                                                          |

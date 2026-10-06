@@ -3,6 +3,7 @@ package config
 import (
 	"maps"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -651,5 +652,32 @@ func TestPasskeysNeedAPublicURLABrowserAccepts(t *testing.T) {
 	}
 	if c, err := loadWith(t, valid(nil)); err != nil || c.Passkeys {
 		t.Errorf("passkeys = %v, %v; want them off by default", c.Passkeys, err)
+	}
+}
+
+func TestTheGatewayKeepsAwayFromItsHostByDefault(t *testing.T) {
+	// An administrator sets where models and MCP servers are. Loopback and the
+	// cloud metadata service are the gateway's host, not theirs.
+	c, err := loadWith(t, valid(nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	var denied []string
+	for _, p := range c.UpstreamDeny {
+		denied = append(denied, p.String())
+	}
+	for _, want := range []string{"127.0.0.0/8", "::1/128", "169.254.0.0/16"} {
+		if !slices.Contains(denied, want) {
+			t.Errorf("deny list %v does not have %s", denied, want)
+		}
+	}
+
+	if c, err := loadWith(t, valid(map[string]string{"KEERA_UPSTREAM_DENY": "none"})); err != nil ||
+		c.UpstreamDeny != nil {
+		t.Errorf("none = %v, %v; want nothing denied", c.UpstreamDeny, err)
+	}
+	// A typo must not quietly open the host up.
+	if _, err := loadWith(t, valid(map[string]string{"KEERA_UPSTREAM_DENY": "127.0.0.1/33"})); err == nil {
+		t.Error("an unreadable deny list was accepted")
 	}
 }

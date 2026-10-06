@@ -51,9 +51,24 @@ const mcpParamPrefix = "Mcp-Param-"
 // JSON-RPC error codes the proxy answers with itself.
 const (
 	rpcParseError     = -32700
+	rpcMethodNotFound = -32601
 	rpcInvalidParams  = -32602
 	rpcHeaderMismatch = -32020
 )
+
+// partialMethods are the requests a key that may call only some of a server's
+// tools may send it. Resources, prompts and completions read the server's data
+// outside any tool. Listing tasks would show other keys' tasks, because the
+// server sees one identity for all of them. A method MCP adds later is refused
+// until it is added here.
+var partialMethods = []string{
+	"initialize", "ping", "tools/list", "tools/call", "logging/setLevel",
+	"tasks/get", "tasks/result", "tasks/cancel",
+}
+
+// hiddenCapabilities are what a server is not shown to offer a key that may
+// call only some of its tools, so the client does not ask for them.
+var hiddenCapabilities = []string{"resources", "prompts", "completions"}
 
 // rpcMessage is one JSON-RPC message: a request, a notification or a response.
 type rpcMessage struct {
@@ -238,12 +253,15 @@ func (x *mcpExchange) inspect(raw []byte) (out []byte, forward bool) {
 		return nil, false
 	}
 	if msg.isRequest() {
+		if !x.mayRequest(msg) {
+			return nil, false
+		}
 		switch msg.Method {
 		case "tools/call":
 			if !x.toolCall(&msg) {
 				return nil, false
 			}
-		case "tools/list":
+		case "tools/list", "initialize":
 			x.pending[idKey(msg.ID)] = &pendingRPC{method: msg.Method, start: time.Now()}
 		}
 	}
@@ -270,6 +288,9 @@ func (x *mcpExchange) inspectBatch(raw []byte) ([]byte, bool) {
 		if refuseUnanswerable(x, m) {
 			return nil, false
 		}
+		if m.isRequest() && !x.mayRequest(m) {
+			return nil, false
+		}
 		switch {
 		case m.isRequest() && m.Method == "tools/call":
 			x.writeRPC(rpcMessage{JSONRPC: "2.0", ID: m.ID, Error: &rpcError{
@@ -277,12 +298,26 @@ func (x *mcpExchange) inspectBatch(raw []byte) ([]byte, bool) {
 					"not in a batch; send it as a request of its own",
 			}})
 			return nil, false
-		case m.isRequest() && m.Method == "tools/list":
+		case m.isRequest() && (m.Method == "tools/list" || m.Method == "initialize"):
 			x.pending[idKey(m.ID)] = &pendingRPC{method: m.Method, start: time.Now()}
 		}
 	}
 	encoded, err := json.Marshal(msgs)
 	return encoded, err == nil
+}
+
+// mayRequest refuses a request a key that may call only some of the server's
+// tools may not send. It reports whether the request may go on.
+func (x *mcpExchange) mayRequest(m rpcMessage) bool {
+	if x.res.AllowsWholeServer(x.srv.Alias) || slices.Contains(partialMethods, m.Method) {
+		return true
+	}
+	x.writeRPC(rpcMessage{JSONRPC: "2.0", ID: m.ID, Error: &rpcError{
+		Code: rpcMethodNotFound, Message: x.s.advise("Method not found: " + m.Method +
+			". This key may call only some of the tools of '" + x.srv.Alias +
+			"', so the gateway does not forward " + m.Method + " to it"),
+	}})
+	return false
 }
 
 // refuseUnanswerable refuses a tool call sent as a notification, without an
@@ -471,6 +506,12 @@ func (x *mcpExchange) toolCall(msg *rpcMessage) bool {
 		return false
 	}
 
+	if ref, ok := x.admit(); !ok {
+		x.writeRPC(rpcMessage{JSONRPC: "2.0", ID: msg.ID, Result: toolErrorResult(x.s.advise(ref.msg))})
+		x.record(p, store.ToolDenied, ref.msg, 0)
+		return false
+	}
+
 	if len(x.res.Filters) > 0 {
 		run, ref := x.s.applyFilters(x.r.Context(), x.res, params, argumentsText, nil)
 		p.filters = run
@@ -544,6 +585,23 @@ func addStrings(d *treeDoc, v any) {
 	}
 }
 
+// admit holds a tool call to the key's rate limits, as a model request is. A
+// call costs nothing unless filters read it, so only then does a budget stop
+// it. The refusal is a failed tool result, so the model reads why.
+func (x *mcpExchange) admit() (refusal, bool) {
+	now := time.Now()
+	if ref, ok := x.s.checkRates(x.res, now); !ok {
+		return ref, false
+	}
+	if len(x.res.Filters) == 0 {
+		return refusal{}, true
+	}
+	if err := x.s.budgets.Allow(x.res.Scopes, now); err != nil {
+		return refusal{msg: err.Error()}, false
+	}
+	return refusal{}, true
+}
+
 // toolErrorResult is a tool result that tells the model the call failed.
 func toolErrorResult(text string) json.RawMessage {
 	raw, _ := json.Marshal(map[string]any{
@@ -607,8 +665,10 @@ func (x *mcpExchange) relay(resp *http.Response) {
 		x.w.WriteHeader(status)
 		_, _ = x.w.Write(raw)
 	default:
+		// Anything else is not MCP, so only its status is passed on. The body
+		// could be any page the server's address reaches.
+		x.w.Header().Del("Content-Type")
 		x.w.WriteHeader(status)
-		_, _ = io.Copy(x.w, io.LimitReader(resp.Body, x.s.opts.MaxResponseBytes))
 	}
 	x.failPending("the MCP server answered " + http.StatusText(status) + " without a result")
 }
@@ -669,6 +729,12 @@ func (x *mcpExchange) serverMessage(raw []byte) []byte {
 	}
 	delete(x.pending, idKey(msg.ID))
 	switch p.method {
+	case "initialize":
+		if result := x.capabilities(msg.Result); result != nil {
+			msg.Result = result
+			out, _ := json.Marshal(msg)
+			return out
+		}
 	case "tools/list":
 		if list := x.toolList(msg.Result); list != nil {
 			msg.Result = list
@@ -683,6 +749,29 @@ func (x *mcpExchange) serverMessage(raw []byte) []byte {
 		}
 	}
 	return nil
+}
+
+// capabilities takes what the key may not use out of an initialize result,
+// and returns nil when it needs no change. See partialMethods.
+func (x *mcpExchange) capabilities(result json.RawMessage) json.RawMessage {
+	if x.res.AllowsWholeServer(x.srv.Alias) {
+		return nil
+	}
+	var r map[string]json.RawMessage
+	var caps map[string]json.RawMessage
+	if json.Unmarshal(result, &r) != nil || json.Unmarshal(r["capabilities"], &caps) != nil {
+		return nil
+	}
+	n := len(caps)
+	for _, c := range hiddenCapabilities {
+		delete(caps, c)
+	}
+	if len(caps) == n {
+		return nil
+	}
+	r["capabilities"], _ = json.Marshal(caps)
+	out, _ := json.Marshal(r)
+	return out
 }
 
 // publicScope is how a server marks a list any caller may be served from a

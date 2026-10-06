@@ -129,6 +129,52 @@ func TestAPutAnswersWithTheStoredCredentialState(t *testing.T) {
 	}
 }
 
+// A stored credential goes only to the hosts it was entered for. Otherwise an
+// administrator could repoint a model someone else set up and read its key.
+func TestAStoredCredentialDoesNotMoveToANewHost(t *testing.T) {
+	tn := twoTenants(t)
+	if _, err := tn.srv.st.Pool().Exec(tn.ctx, "TRUNCATE mcp_servers"); err != nil {
+		t.Fatal(err)
+	}
+	box, err := secret.New("a-test-key-long-enough-to-be-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tn.srv.opts.Secrets = box
+	carol := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleAdmin,
+		OrgID: "org_a", UserID: "user_carol"}
+	put := func(h handler, path, body string, values map[string]string) int {
+		t.Helper()
+		return tn.call(h, carol, "PUT", path, body, values).Code
+	}
+
+	mcp := map[string]string{"alias": "github"}
+	const mcpPath = "/v1/mcp-servers/github"
+	put(tn.srv.putMCPServer, mcpPath, `{"url":"https://mcp.example.ch/mcp","api_key":"secret"}`, mcp)
+	if code := put(tn.srv.putMCPServer, mcpPath, `{"url":"https://mcp.example.ch/v2/mcp"}`, mcp); code != http.StatusOK {
+		t.Errorf("a new path on the same host = %d, want 200", code)
+	}
+	if code := put(tn.srv.putMCPServer, mcpPath, `{"url":"https://attacker.example/mcp"}`, mcp); code != http.StatusBadRequest {
+		t.Errorf("a new host without the key = %d, want 400", code)
+	}
+	if code := put(tn.srv.putMCPServer, mcpPath, `{"url":"https://attacker.example/mcp","api_key":""}`, mcp); code != http.StatusOK {
+		t.Errorf("a new host with the key removed = %d, want 200", code)
+	}
+
+	model := map[string]string{"alias": "keera-frontier"}
+	const modelPath = "/v1/models/keera-frontier"
+	body := func(backends string) string {
+		return `{"backends":[` + backends + `],"backend_model":"m","location":"ch"`
+	}
+	put(tn.srv.putModel, modelPath, body(`"https://api.example.ch/v1"`)+`,"api_key":"secret"}`, model)
+	if code := put(tn.srv.putModel, modelPath, body(`"https://api.example.ch/v1","https://attacker.example/v1"`)+`}`, model); code != http.StatusBadRequest {
+		t.Errorf("a second backend on a new host without the key = %d, want 400", code)
+	}
+	if code := put(tn.srv.putModel, modelPath, body(`"https://attacker.example/v1"`)+`,"api_key":"other"}`, model); code != http.StatusOK {
+		t.Errorf("a new host with a new key = %d, want 200", code)
+	}
+}
+
 func TestAToolAllowListMustNameRealServers(t *testing.T) {
 	tn := twoTenants(t)
 	if _, err := tn.srv.st.Pool().Exec(tn.ctx, "TRUNCATE mcp_servers"); err != nil {

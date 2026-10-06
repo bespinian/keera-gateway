@@ -131,6 +131,11 @@ A catalogue file never holds a key. When an organisation gets a model from the
 file, store its key with the command above. `keera model apply` keeps a key
 that is already stored.
 
+A stored key is only sent to the hosts it was entered for. A change that adds a
+backend on another host is refused unless it gives the key again, or removes it
+with `--no-api-key`. Otherwise an administrator could point a model someone
+else set up at a host of their own and read its key.
+
 The gateway does not read keys from its own environment variables. A model that
 could name one would let an administrator send any of the gateway's secrets,
 such as `KEERA_SECRET_KEY`, to a server of their choice.

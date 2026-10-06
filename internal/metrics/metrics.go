@@ -3,6 +3,7 @@
 package metrics
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"maps"
@@ -163,8 +164,16 @@ func (r *Registry) RateLimitFallback() { r.rlFallback.Add(1) }
 // inference plane is saturated.
 func (r *Registry) InflightAdd(n int64) { r.inflight.Add(n) }
 
-// Write renders the exposition format.
+// Write renders the exposition format. It renders into memory first, so a
+// slow reader never holds the lock: a new series waiting for it would stall
+// every request behind it.
 func (r *Registry) Write(w io.Writer) {
+	var buf bytes.Buffer
+	r.render(&buf)
+	_, _ = w.Write(buf.Bytes())
+}
+
+func (r *Registry) render(w io.Writer) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 

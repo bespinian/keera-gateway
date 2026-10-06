@@ -45,6 +45,9 @@ reads another header, pass `--auth-header X-Api-Key`; the credential is then
 sent as is. A header name holds only letters, digits and hyphens.
 `--no-api-key` removes the stored credential.
 
+Moving a server to another host needs the credential again, or
+`--no-api-key`: a stored credential only goes to the host it was entered for.
+
 `--disabled` adds a server without serving it yet, and `keera mcp enable` and
 `keera mcp disable` switch it later. A disabled server answers 404, like one
 that does not exist.
@@ -99,8 +102,22 @@ is refused by every server: with a 401 `subscription_key` when it is sent in
 `X-Keera-Key`. Because the list depends on the key, a list the server marks `public` for
 caching is passed on as `private`.
 
+A key that may call only some of a server's tools reaches only its tools. The
+server's resources, prompts and completions are left out of what `initialize`
+says it offers, and requests for them are refused with JSON-RPC error -32601.
+So is `tasks/list`: the server sees one identity for every key, so it would
+list other people's tasks. A key allowed the whole server reaches all of it.
+
 `keera guardrail effective` shows the tools in force and which level narrowed
 them.
+
+## Rate limits and budgets
+
+A tool call counts as one request against the key's `rpm`, like a model
+request, and is refused while its `tpm` is used up. A call costs nothing unless
+the key has filters, so only then does a budget stop it. A refused call comes
+back as a failed tool result that says which limit, and is recorded as
+`denied`. Other MCP requests, such as `tools/list`, are not counted.
 
 ## Filters
 
@@ -128,7 +145,7 @@ key, and the error if any. The outcomes are:
 | `ok`             | the tool answered                                                               |
 | `tool_error`     | the tool answered that it failed                                                |
 | `error`          | no result: the server failed or could not be reached, or a filter could not run |
-| `denied`         | the key may not call this tool                                                  |
+| `denied`         | the key may not call this tool, or is over a rate limit or budget               |
 | `refused`        | a filter stopped the call                                                       |
 | `input_required` | the server asked for the user's input first; the retry is a row of its own      |
 
@@ -141,7 +158,8 @@ tasks' calls in each.
 
 When the server itself fails, the client gets a 502: `mcp_credential_refused`
 when it rejects the stored credential (401 or 403), and `mcp_unavailable` when
-it cannot be reached.
+it cannot be reached. An answer that is neither JSON nor an event stream is
+passed on with its status only, not its body.
 
 Tool calls are kept as long as the request log (`KEERA_USAGE_RETENTION`).
 `keera_tool_calls_total` on `/metrics` counts them by server, organisation and

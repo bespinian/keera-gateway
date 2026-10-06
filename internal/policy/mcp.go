@@ -53,6 +53,12 @@ func (r *Resolved) AllowsTool(server, tool string) bool {
 		slices.Contains(r.AllowedTools, server+"/"+tool)
 }
 
+// AllowsWholeServer reports whether a key may call every tool of a server,
+// rather than only some of them.
+func (r *Resolved) AllowsWholeServer(server string) bool {
+	return r.AllowedTools == nil || slices.Contains(r.AllowedTools, server)
+}
+
 // AllowsServer reports whether a key may call any tool of a server.
 func (r *Resolved) AllowsServer(server string) bool {
 	if r.AllowedTools == nil {

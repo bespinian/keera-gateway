@@ -5,11 +5,14 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/authn"
 	"github.com/bespinian/keera-gateway/internal/authn/oidctest"
+	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/secret"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
@@ -177,5 +180,52 @@ func TestATerminalTokenIsShortWithoutARefreshToken(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("refresh token %q: ttl = %v, want %v", tc.refreshToken, got, tc.want)
 		}
+	}
+}
+
+// The callback finishes only a sign-in this browser started. Otherwise a link
+// to the callback of someone else's sign-in would sign a victim in to the
+// sender's account.
+func TestASignInFinishesOnlyInTheBrowserThatStartedIt(t *testing.T) {
+	d := signedInThroughADirectory(t, "")
+	get := func(u string, c *http.Cookie) *http.Response {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, u, nil)
+		if c != nil {
+			req.AddCookie(c)
+		}
+		resp, err := http.DefaultTransport.RoundTrip(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp
+	}
+	cookie := func(resp *http.Response, name string) *http.Cookie {
+		for _, c := range resp.Cookies() {
+			if c.Name == name && c.Value != "" {
+				return c
+			}
+		}
+		return nil
+	}
+
+	resp := get(d.ts.URL+httpx.ControlPrefix+"/auth/login?provider=test", nil)
+	started := cookie(resp, loginCookie)
+	to, err := url.Parse(resp.Header.Get("Location"))
+	if err != nil || started == nil {
+		t.Fatalf("login = %d, Location %q, cookie %v", resp.StatusCode, resp.Header.Get("Location"), started)
+	}
+	d.idp.Claims = func(m map[string]any) { m["nonce"] = to.Query().Get("nonce") }
+	callback := d.ts.URL + httpx.ControlPrefix + "/auth/callback?code=c&state=" +
+		url.QueryEscape(to.Query().Get("state"))
+
+	resp = get(callback, nil)
+	if cookie(resp, sessionCookie) != nil || !strings.Contains(resp.Header.Get("Location"), "sign_in_error") {
+		t.Errorf("another browser finished the sign-in: Location %q", resp.Header.Get("Location"))
+	}
+	resp = get(callback, started)
+	if cookie(resp, sessionCookie) == nil || resp.Header.Get("Location") != "/" {
+		t.Errorf("the browser that started it was not signed in: Location %q", resp.Header.Get("Location"))
 	}
 }

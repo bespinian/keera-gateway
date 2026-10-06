@@ -49,6 +49,9 @@ func Open(ctx context.Context, dsn string, maxConns int32) (*Store, error) {
 	if maxConns > 0 {
 		cfg.MaxConns = maxConns
 	}
+	// Report queries filter with "$1 = '' OR org_id = $1". A cached generic
+	// plan cannot use the org index for that, and scans every tenant's rows.
+	cfg.ConnConfig.RuntimeParams["plan_cache_mode"] = "force_custom_plan"
 	cfg.MaxConnLifetime = time.Hour
 	cfg.MaxConnIdleTime = 10 * time.Minute
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)

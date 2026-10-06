@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -420,19 +421,23 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 	if m.Subscription && !s.checkSubscriptionUsers(w, r, orgID, m.Alias) {
 		return
 	}
-	if body.Enabled != nil {
+	existing, err := s.st.Model(r.Context(), orgID, m.Alias)
+	found := err == nil
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		s.fail(w, err)
+		return
+	}
+	if found && existing.HasAPIKey && body.APIKey == nil && !sameOrigins(existing.Backends, m.Backends) {
+		badRequest(w, keyNotMoved("backends"))
+		return
+	}
+	switch {
+	case body.Enabled != nil:
 		m.Enabled = *body.Enabled
-	} else {
-		existing, err := s.st.Model(r.Context(), orgID, m.Alias)
-		switch {
-		case err == nil:
-			m.Enabled = existing.Enabled
-		case errors.Is(err, store.ErrNotFound):
-			m.Enabled = true
-		default:
-			s.fail(w, err)
-			return
-		}
+	case found:
+		m.Enabled = existing.Enabled
+	default:
+		m.Enabled = true
 	}
 	if err := s.st.UpsertModel(r.Context(), m); err != nil {
 		s.fail(w, err)
@@ -467,6 +472,38 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 	httpx.WriteJSON(w, http.StatusOK, stored)
 }
 
+// sameOrigins reports whether every address in next is on a host one in prev
+// already was. A stored credential is only ever sent to the hosts it was
+// stored for, so whoever moves a model or a server elsewhere has to give it
+// again: an administrator could otherwise send a key someone else entered to
+// a host of their own.
+func sameOrigins(prev, next []string) bool {
+	origin := func(raw string) string {
+		u, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil {
+			return ""
+		}
+		return strings.ToLower(u.Scheme + "://" + u.Host)
+	}
+	known := map[string]bool{}
+	for _, b := range prev {
+		known[origin(b)] = true
+	}
+	for _, b := range next {
+		if o := origin(b); o == "" || !known[o] {
+			return false
+		}
+	}
+	return true
+}
+
+// keyNotMoved refuses a change that would send the stored credential to a new
+// host.
+func keyNotMoved(field string) string {
+	return "'" + field + "' now names a host the stored API key was never sent to; " +
+		"give 'api_key' again, or \"\" to remove it"
+}
+
 // badAlias refuses an alias that is not one. An alias goes into URLs, command
 // lines and client configurations, which quote none of it.
 func badAlias(alias string) string {
@@ -482,6 +519,13 @@ func normalizeModel(m *policy.Model) string {
 	case m.BackendModel == "":
 		return "'backend_model' is required - it is the name the inference plane serves, " +
 			"which for vLLM is --served-model-name"
+	}
+	for _, b := range m.Backends {
+		u, err := url.Parse(strings.TrimSpace(b))
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return "backend " + strconv.Quote(b) + " is not an http or https address, such as " +
+				"http://vllm:8000/v1"
+		}
 	}
 	if m.Kind == "" {
 		m.Kind = policy.KindChat

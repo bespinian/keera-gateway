@@ -60,6 +60,7 @@ new organisations start with, which are files.
 | `KEERA_USAGE_RETENTION` | for ever    | How long usage events, ended sandboxes and ended keys are kept. See [sizing.md](sizing.md).                                                                                                           |
 | `KEERA_AUDIT_RETENTION` | for ever    | How long audit entries are kept.                                                                                                                                                                      |
 | `KEERA_CURRENCY`        | `CHF`       | The label on every money figure. Amounts are stored as integer micro-units.                                                                                                                           |
+| `KEERA_UPSTREAM_DENY`   | see below   | Addresses the gateway never connects to. See [Where the gateway may connect](#where-the-gateway-may-connect).                                                                                         |
 
 ### Everything else
 
@@ -94,11 +95,38 @@ less, and a zero or negative `KEERA_CACHE_TTL`, `KEERA_SPEND_REFRESH` or
 
 Some values stop the start instead, with a message that names the setting.
 Among them: a `KEERA_LOG_LEVEL` or `KEERA_LOG_FORMAT` not listed above, a
-`KEERA_REDIS_URL` that is not a Redis URL, a `KEERA_METRICS_TOKEN` equal to the
-operator key, and a `KEERA_OIDC_<N>_DEFAULT_ROLE` other than `admin` or
+`KEERA_REDIS_URL` that is not a Redis URL, a `KEERA_UPSTREAM_DENY` entry that
+is not an address or a prefix, a `KEERA_METRICS_TOKEN` equal to the operator key, and a `KEERA_OIDC_<N>_DEFAULT_ROLE` other than `admin` or
 `member`. The single sign-on, passkey and sandbox settings below have checks
 of their own, which their sections and [sso.md](sso.md) and
 [sandboxes.md](sandboxes.md#configuration) describe.
+
+### Where the gateway may connect
+
+An organisation's administrators set where its models and MCP servers are, and
+the gateway connects there for them. `KEERA_UPSTREAM_DENY` keeps it away from
+the gateway's own host. It is a comma-separated list of addresses and prefixes.
+The default is
+
+```text
+127.0.0.0/8,::1/128,169.254.0.0/16,fe80::/10,0.0.0.0/8,::/128,fd00:ec2::254/128
+```
+
+That is loopback, link-local (where cloud metadata services answer), the
+unspecified address and AWS's IPv6 metadata address. Private ranges are
+allowed, because that is where a self-hosted inference plane runs.
+
+- **A backend on the same host**, such as vLLM on `127.0.0.1`: set the list
+  without the two loopback entries. `make dev` does this.
+- **Organisations you do not trust with your network**: add your private ranges,
+  such as `10.0.0.0/8`. A model the gateway must still reach then needs an
+  address outside them.
+- `none` turns the check off.
+
+The check applies to the address a name resolves to, so a DNS name that points
+at a blocked address is blocked too. Behind `HTTPS_PROXY`, the gateway only
+connects to the proxy, and the proxy has to do this filtering. The gateway does
+not follow redirects from a backend or an MCP server.
 
 ### Rate limits with more than one replica
 

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -55,8 +56,12 @@ type Config struct {
 	MaxBodyBytes          int64
 	MaxResponseBytes      int64
 	UpstreamHeaderTimeout time.Duration
-	CacheTTL              time.Duration
-	SpendRefresh          time.Duration
+	// UpstreamDeny is the addresses the gateway never sends a request to,
+	// whoever configured them: loopback and the cloud metadata service by
+	// default. See docs/install.md.
+	UpstreamDeny []netip.Prefix
+	CacheTTL     time.Duration
+	SpendRefresh time.Duration
 
 	// UsageRetention and AuditRetention are how long usage events and audit
 	// entries are kept. Ended sandboxes and keys go with usage. Zero, the
@@ -138,6 +143,11 @@ func Load() (Config, error) {
 	if err := c.validate(); err != nil {
 		return c, err
 	}
+	deny, err := gateway.ParseUpstreamDeny(env("KEERA_UPSTREAM_DENY", gateway.DefaultUpstreamDeny))
+	if err != nil {
+		return c, fmt.Errorf("KEERA_UPSTREAM_DENY: %w", err)
+	}
+	c.UpstreamDeny = deny
 	// Parsed here, so a typo stops the start before the database is touched.
 	if u := env("KEERA_REDIS_URL", ""); u != "" {
 		opt, err := redis.ParseURL(u)

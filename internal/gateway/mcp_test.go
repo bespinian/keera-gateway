@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -91,6 +92,12 @@ func mcpHarness(t *testing.T, res *policy.Resolved) (*harness, *fakeMCP) {
 	fake := &fakeMCP{}
 	upstream := httptest.NewServer(http.HandlerFunc(fake.handler))
 	t.Cleanup(upstream.Close)
+	return mcpHarnessFor(t, res, upstream.URL+"/mcp", Options{}), fake
+}
+
+// mcpHarnessFor is mcpHarness with the server at url and the gateway's options.
+func mcpHarnessFor(t *testing.T, res *policy.Resolved, url string, opts Options) *harness {
+	t.Helper()
 	if res == nil {
 		res = policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"}, nil, nil, nil)
 	}
@@ -98,14 +105,14 @@ func mcpHarness(t *testing.T, res *policy.Resolved) (*harness, *fakeMCP) {
 	h.src = &fakeSource{
 		resolved: map[string]*policy.Resolved{testKey: res},
 		mcp: map[string]policy.MCPServer{"github": {
-			Alias: "github", URL: upstream.URL + "/mcp", APIKey: "gh-token", Enabled: true,
+			Alias: "github", URL: url, APIKey: "gh-token", Enabled: true,
 		}},
 	}
-	h.srv = New(h.src, h.budgets, ratelimit.New(), h.sink, h.metrics, Options{},
+	h.srv = New(h.src, h.budgets, ratelimit.New(), h.sink, h.metrics, opts,
 		slog.New(slog.DiscardHandler))
 	h.gw = httptest.NewServer(h.srv.Handler())
 	t.Cleanup(h.gw.Close)
-	return h, fake
+	return h
 }
 
 // rpc posts one JSON-RPC message to the github server through the gateway.
@@ -554,5 +561,148 @@ func TestAToolListThroughTheGatewayIsNotPublic(t *testing.T) {
 	_, body := h.rpc(t, `{"jsonrpc":"2.0","id":15,"method":"tools/list"}`)
 	if !strings.Contains(body, `"cacheScope":"private"`) || !strings.Contains(body, `"ttlMs":60000`) {
 		t.Errorf("tools/list = %s, want it marked private and the rest kept", body)
+	}
+}
+
+func TestAToolCallCountsAgainstTheRateLimit(t *testing.T) {
+	res := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
+		&policy.Limits{RPM: new(1)}, nil, nil)
+	h, fake := mcpHarness(t, res)
+	call := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_code","arguments":{}}}`
+
+	h.rpc(t, call)
+	_, body := h.rpc(t, call)
+	if !strings.Contains(body, `"isError":true`) || !strings.Contains(body, "rate limit") {
+		t.Errorf("answer = %s, want a failed tool result naming the limit", body)
+	}
+	if n := len(fake.received()); n != 1 {
+		t.Errorf("the server received %d calls, want 1", n)
+	}
+	if ev := lastToolCall(t, h); ev.Tool.Outcome != store.ToolDenied {
+		t.Errorf("outcome = %q, want denied", ev.Tool.Outcome)
+	}
+}
+
+func TestABudgetStopsAToolCallOnlyWhenFiltersRun(t *testing.T) {
+	call := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_code","arguments":{}}}`
+
+	h, fake := mcpHarness(t, nil)
+	h.budgets.err = errors.New("the organisation is over its budget")
+	h.rpc(t, call)
+	if n := len(fake.received()); n != 1 {
+		t.Errorf("a call that costs nothing was stopped by the budget")
+	}
+
+	res := allowing("github")
+	res.Filters = []string{"redact"}
+	h, fake = mcpHarness(t, res)
+	h.src.filters = map[string]policy.Filter{"org_1/redact": patternFilterFor("org_1", "redact",
+		policy.FilterRule{Pattern: `x`, Replace: "y"})}
+	h.budgets.err = errors.New("the organisation is over its budget")
+	_, body := h.rpc(t, call)
+	if !strings.Contains(body, "over its budget") || len(fake.received()) != 0 {
+		t.Errorf("answer = %s, want the call stopped by the budget before its filters ran", body)
+	}
+}
+
+func TestAKeyWithSomeToolsOnlyReachesTheTools(t *testing.T) {
+	h, fake := mcpHarness(t, allowing("github/search_code"))
+
+	for _, method := range []string{"resources/read", "prompts/get", "completion/complete", "tasks/list"} {
+		_, body := h.rpc(t, `{"jsonrpc":"2.0","id":1,"method":"`+method+`","params":{}}`)
+		var answer rpcMessage
+		if err := json.Unmarshal([]byte(body), &answer); err != nil || answer.Error == nil ||
+			answer.Error.Code != rpcMethodNotFound {
+			t.Errorf("%s answered %s, want method not found", method, body)
+		}
+	}
+	_, body := h.rpc(t, `[{"jsonrpc":"2.0","id":1,"method":"resources/list"}]`)
+	if !strings.Contains(body, `"error"`) {
+		t.Errorf("a batch answered %s, want it refused", body)
+	}
+	if n := len(fake.received()); n != 0 {
+		t.Errorf("the server received %d requests", n)
+	}
+
+	// Notifications and the tools themselves still go through.
+	h.rpc(t, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	h.rpc(t, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+	if n := len(fake.received()); n != 2 {
+		t.Errorf("the server received %d requests, want 2", n)
+	}
+}
+
+func TestAKeyWithAWholeServerReachesItsResources(t *testing.T) {
+	h, fake := mcpHarness(t, allowing("github"))
+	h.rpc(t, `{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"repo://x"}}`)
+	if n := len(fake.received()); n != 1 {
+		t.Errorf("the server received %d requests, want 1", n)
+	}
+}
+
+func TestAKeyWithSomeToolsIsNotOfferedResources(t *testing.T) {
+	init := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`
+	h, fake := mcpHarness(t, allowing("github/search_code"))
+	fake.result = `{"protocolVersion":"2025-06-18","capabilities":{"tools":{},"resources":{},"prompts":{}}}`
+
+	_, body := h.rpc(t, init)
+	if !strings.Contains(body, `"tools"`) || strings.Contains(body, "resources") ||
+		strings.Contains(body, "prompts") {
+		t.Errorf("initialize = %s, want only tools offered", body)
+	}
+
+	h, fake = mcpHarness(t, nil)
+	fake.result = `{"protocolVersion":"2025-06-18","capabilities":{"tools":{},"resources":{}}}`
+	if _, body := h.rpc(t, init); !strings.Contains(body, "resources") {
+		t.Errorf("initialize = %s, want resources offered to a key that may use the whole server", body)
+	}
+}
+
+func TestAnAnswerThatIsNotMCPIsPassedOnWithoutItsBody(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, "internal page")
+	}))
+	t.Cleanup(upstream.Close)
+	h := mcpHarnessFor(t, nil, upstream.URL, Options{})
+
+	resp, body := h.rpc(t, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	if resp.StatusCode != http.StatusNotFound || strings.Contains(body, "internal page") {
+		t.Errorf("status = %d, body = %q; want the status and none of the body", resp.StatusCode, body)
+	}
+}
+
+func TestAnMCPServerOnADeniedAddressIsNotReached(t *testing.T) {
+	fake := &fakeMCP{}
+	upstream := httptest.NewServer(http.HandlerFunc(fake.handler))
+	t.Cleanup(upstream.Close)
+	deny, err := ParseUpstreamDeny(DefaultUpstreamDeny)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := mcpHarnessFor(t, nil, upstream.URL, Options{UpstreamDeny: deny})
+
+	resp, _ := h.rpc(t, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	if resp.StatusCode != http.StatusBadGateway || len(fake.received()) != 0 {
+		t.Errorf("status = %d, server received %d; want a 502 and nothing sent",
+			resp.StatusCode, len(fake.received()))
+	}
+}
+
+func TestARedirectIsNotFollowed(t *testing.T) {
+	elsewhere := &fakeMCP{}
+	target := httptest.NewServer(http.HandlerFunc(elsewhere.handler))
+	t.Cleanup(target.Close)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(upstream.Close)
+	h := mcpHarnessFor(t, nil, upstream.URL, Options{})
+
+	resp, _ := h.rpc(t, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	if resp.StatusCode != http.StatusTemporaryRedirect || len(elsewhere.received()) != 0 {
+		t.Errorf("status = %d, the target received %d; want the redirect answered, not followed",
+			resp.StatusCode, len(elsewhere.received()))
 	}
 }

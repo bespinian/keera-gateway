@@ -3,6 +3,7 @@ package control
 import (
 	"cmp"
 	"context"
+	"crypto/subtle"
 	"errors"
 	"net"
 	"net/http"
@@ -18,6 +19,12 @@ import (
 )
 
 const sessionCookie = "keera_session"
+
+// loginCookie holds the state of the sign-in this browser started, and the
+// callback must bring it back. Without it, anyone could send a victim the
+// callback link of a sign-in of their own, and the victim would be signed in
+// to the sender's account without noticing.
+const loginCookie = "keera_login"
 
 // operatorKeyExternalID is the stand-in user the operator key signs in as.
 // Its provider is reserved, so no identity provider can issue this subject and
@@ -80,7 +87,17 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	http.SetCookie(w, s.loginStateCookie(flow.State, int(authn.FlowTTL.Seconds())))
 	http.Redirect(w, r, provider.AuthCodeURL(flow), http.StatusFound)
+}
+
+// loginStateCookie sets loginCookie, or with maxAge -1 removes it. Lax is
+// enough: the provider sends the browser back with a plain GET.
+func (s *Server) loginStateCookie(state string, maxAge int) *http.Cookie {
+	return &http.Cookie{
+		Name: loginCookie, Value: state, Path: httpx.ControlPrefix + "/auth", MaxAge: maxAge,
+		HttpOnly: true, Secure: s.opts.SecureCookies, SameSite: http.SameSiteLaxMode,
+	}
 }
 
 // providerFor resolves which identity provider a sign-in names.
@@ -121,8 +138,16 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	state := q.Get("state")
+	if c, err := r.Cookie(loginCookie); err != nil || state == "" ||
+		subtle.ConstantTimeCompare([]byte(c.Value), []byte(state)) != 1 {
+		s.signInFailed(w, r, errors.New("this sign-in was started in another browser or tab; "+
+			"start it again here"))
+		return
+	}
+	http.SetCookie(w, s.loginStateCookie("", -1))
 	// Taking the flow deletes it, so a replayed callback finds nothing.
-	flow, err := s.st.TakeLoginFlow(r.Context(), q.Get("state"))
+	flow, err := s.st.TakeLoginFlow(r.Context(), state)
 	if err != nil {
 		s.signInFailed(w, r, errors.New("this sign-in link has expired or was already used"))
 		return

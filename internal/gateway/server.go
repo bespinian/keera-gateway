@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -69,6 +70,9 @@ type Options struct {
 	UpstreamHeaderTimeout time.Duration
 	// DialTimeout bounds establishing a connection to a backend.
 	DialTimeout time.Duration
+	// UpstreamDeny is the addresses the gateway never connects to. Nil denies
+	// nothing; the setting's default is DefaultUpstreamDeny. See egress.go.
+	UpstreamDeny []netip.Prefix
 	// Currency labels the budget headers. All money is integer micro-units of
 	// it.
 	Currency string
@@ -130,6 +134,8 @@ type Server struct {
 func New(src policy.Source, budgets Budgeter, limiter Limiter, sink Sink,
 	m *metrics.Registry, opts Options, log *slog.Logger) *Server {
 	opts.setDefaults()
+	dialer := &net.Dialer{Timeout: opts.DialTimeout, KeepAlive: 30 * time.Second,
+		Control: denyDial(opts.UpstreamDeny)}
 	return &Server{
 		src:     src,
 		budgets: budgets,
@@ -144,7 +150,7 @@ func New(src policy.Source, budgets Budgeter, limiter Limiter, sink Sink,
 			// setting. The request context cancels it when the client leaves.
 			Transport: &http.Transport{
 				Proxy:               http.ProxyFromEnvironment,
-				DialContext:         (&net.Dialer{Timeout: opts.DialTimeout, KeepAlive: 30 * time.Second}).DialContext,
+				DialContext:         dialer.DialContext,
 				MaxIdleConns:        512,
 				MaxIdleConnsPerHost: 256,
 				IdleConnTimeout:     90 * time.Second,
@@ -153,6 +159,9 @@ func New(src policy.Source, budgets Budgeter, limiter Limiter, sink Sink,
 				DisableCompression:    true,
 				ResponseHeaderTimeout: opts.UpstreamHeaderTimeout,
 			},
+			// A redirect is answered, not followed. Followed, it would take the
+			// request and its credential to an address nobody configured.
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
 	}
 }

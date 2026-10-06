@@ -1,6 +1,7 @@
 package control
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"slices"
@@ -71,6 +72,17 @@ func (s *Server) putMCPServer(w http.ResponseWriter, r *http.Request, p *authn.P
 	credential := ""
 	if body.APIKey != nil {
 		credential = strings.TrimSpace(*body.APIKey)
+	}
+	existing, err := s.st.MCPServer(r.Context(), orgID, m.Alias)
+	switch {
+	case err == nil:
+		if existing.HasAPIKey && body.APIKey == nil && !sameOrigins([]string{existing.URL}, []string{m.URL}) {
+			badRequest(w, keyNotMoved("url"))
+			return
+		}
+	case !errors.Is(err, store.ErrNotFound):
+		s.fail(w, err)
+		return
 	}
 	if err := s.st.UpsertMCPServer(r.Context(), m); err != nil {
 		s.fail(w, err)

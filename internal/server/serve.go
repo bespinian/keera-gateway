@@ -81,6 +81,7 @@ func serve(ctx context.Context) error {
 		MaxBodyBytes:          cfg.MaxBodyBytes,
 		MaxResponseBytes:      cfg.MaxResponseBytes,
 		UpstreamHeaderTimeout: cfg.UpstreamHeaderTimeout,
+		UpstreamDeny:          cfg.UpstreamDeny,
 		Currency:              cfg.Currency,
 		PanelURL:              panelURL(cfg),
 	}, log)

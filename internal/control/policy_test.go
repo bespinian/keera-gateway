@@ -48,3 +48,36 @@ func TestCheckSystemPrompt(t *testing.T) {
 		}
 	})
 }
+
+func TestSameOrigins(t *testing.T) {
+	prev := []string{"https://api.example.ch/v1", "http://10.0.0.7:8000/v1"}
+	tests := []struct {
+		next []string
+		want bool
+	}{
+		{[]string{"https://api.example.ch/v2"}, true},
+		{[]string{"HTTPS://API.example.ch/v1", "http://10.0.0.7:8000"}, true},
+		{[]string{"https://api.example.ch:8443/v1"}, false},
+		{[]string{"http://api.example.ch/v1"}, false},
+		{[]string{"https://api.example.ch/v1", "https://attacker.example/v1"}, false},
+		{[]string{"::not a url"}, false},
+	}
+	for _, tt := range tests {
+		if got := sameOrigins(prev, tt.next); got != tt.want {
+			t.Errorf("sameOrigins(%v) = %v, want %v", tt.next, got, tt.want)
+		}
+	}
+}
+
+func TestABackendMustBeAWebAddress(t *testing.T) {
+	for _, b := range []string{"file:///etc/passwd", "vllm:8000", "http://"} {
+		m := policy.Model{Backends: []string{b}, BackendModel: "m", Location: "ch"}
+		if msg := normalizeModel(&m); msg == "" {
+			t.Errorf("backend %q was accepted", b)
+		}
+	}
+	m := policy.Model{Backends: []string{"http://vllm:8000/v1"}, BackendModel: "m", Location: "ch"}
+	if msg := normalizeModel(&m); msg != "" {
+		t.Errorf("a plain backend was refused: %s", msg)
+	}
+}

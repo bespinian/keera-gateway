@@ -300,6 +300,10 @@ func (s *Server) chainFilter(ctx context.Context, run *filterRun, orgID, alias s
 		return nil, nil, false
 	}
 	run.applied = append(run.applied, f.Alias)
+	if changed == 0 {
+		// Same texts, so the body need not be encoded again.
+		return nil, nil, false
+	}
 	return out, nil, false
 }
 
