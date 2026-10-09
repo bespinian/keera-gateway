@@ -25,11 +25,7 @@ import (
 // and a broken filter in it, and returns the server.
 func diagnosed(t *testing.T) (*Server, *store.Store) {
 	t.Helper()
-	st, ctx := streamStore(t)
-	if _, err := st.Pool().Exec(ctx,
-		"TRUNCATE filters, routers, guardrails RESTART IDENTITY CASCADE"); err != nil {
-		t.Fatalf("emptying the tables: %v", err)
-	}
+	st, ctx := testStore(t, "filters", "routers", "guardrails")
 	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_a", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}

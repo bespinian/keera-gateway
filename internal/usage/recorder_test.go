@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
@@ -401,5 +402,27 @@ func TestWaitReturnsOnlyOnceEverythingIsWritten(t *testing.T) {
 	// time it has returned.
 	if got := len(w.seen()); got != 500 {
 		t.Errorf("Wait returned with %d of 500 events written", got)
+	}
+}
+
+// Anyone can send requests the gateway refuses, and each is recorded. Their
+// events must not crowd out what an organisation pays for.
+func TestABilledEventIsNotCrowdedOutByOthers(t *testing.T) {
+	w := &recorded{block: make(chan struct{})}
+	r, stop := run(t, w, Options{Buffer: 4, BatchSize: 1, BlockFor: time.Millisecond,
+		FlushInterval: time.Hour})
+
+	// The first is taken by the writer and held; the rest fill the buffer.
+	for range 20 {
+		r.Record(event("refused"))
+	}
+	r.Record(store.Event{OrgID: "org_1", Alias: "billed",
+		Bills: []policy.BillLine{{CreditMicros: 1}}})
+	close(w.block)
+	stop()
+
+	seen := w.seen()
+	if len(seen) < 2 || seen[1].Alias != "billed" {
+		t.Errorf("written = %v, want the billed event right after the one in flight", seen)
 	}
 }

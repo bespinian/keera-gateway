@@ -110,6 +110,9 @@ type mcpExchange struct {
 	// pending is every request the answer will carry that the gateway acts on,
 	// by id.
 	pending map[string]*pendingRPC
+	// held is the credit its tool calls' filters hold. It is given back once
+	// every call has been recorded, which charges what they spent.
+	held int64
 }
 
 // pendingRPC is one request waiting for its response.
@@ -135,6 +138,11 @@ func (s *Server) mcpBegin(w http.ResponseWriter, r *http.Request) (*mcpExchange,
 	if !found || !srv.Enabled || !res.AllowsServer(alias) || res.Key.Subscription() {
 		httpx.WriteError(w, http.StatusNotFound, "invalid_request_error", "mcp_server_not_found",
 			s.advise("the MCP server '"+alias+"' does not exist or this key may not use it"))
+		return nil, false
+	}
+	if srv.Locked {
+		httpx.WriteError(w, http.StatusForbidden, "permission_error", "org_limited",
+			"the MCP server '"+alias+"' is inside this deployment's network, and "+policy.LockedMessage)
 		return nil, false
 	}
 	x := &mcpExchange{
@@ -165,6 +173,7 @@ func (s *Server) mcpPost(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer func() { s.budgets.ReleaseCredit(x.res.Key.OrgID, x.held) }()
 	raw, ok := readBody(w, r, s.opts.MaxBodyBytes, func(msg string) {
 		httpx.WriteError(w, http.StatusRequestEntityTooLarge, "invalid_request_error",
 			"request_too_large", msg)
@@ -219,7 +228,7 @@ func (s *Server) mcpSend(ctx context.Context, srv policy.MCPServer, method strin
 		req.Header.Set("Content-Type", "application/json")
 	}
 	setCredential(req.Header, srv.AuthHeader, srv.APIKey)
-	return s.client.Do(req)
+	return s.clientFor(srv.Limited).Do(req)
 }
 
 // ----------------------------------------------------------- the way out
@@ -504,7 +513,9 @@ func (x *mcpExchange) toolCall(msg *rpcMessage) bool {
 		return false
 	}
 
-	if ref, ok := x.admit(); !ok {
+	held, ref, ok := x.admit(len(args))
+	x.held += held
+	if !ok {
 		x.writeRPC(rpcMessage{JSONRPC: "2.0", ID: msg.ID, Result: toolErrorResult(x.s.advise(ref.msg))})
 		x.record(p, store.ToolDenied, ref.msg, 0)
 		return false
@@ -585,19 +596,28 @@ func addStrings(d *treeDoc, v any) {
 
 // admit holds a tool call to the key's rate limits, as a model request is. A
 // call costs nothing unless filters read it, so only then does a budget stop
-// it. The refusal is a failed tool result, so the model reads why.
-func (x *mcpExchange) admit() (refusal, bool) {
+// it. Filters on the deployment's key hold the most they may cost, as a
+// request's do. The refusal is a failed tool result, so the model reads why.
+func (x *mcpExchange) admit(argBytes int) (int64, refusal, bool) {
 	now := time.Now()
 	if ref, ok := x.s.checkRates(x.res, now); !ok {
-		return ref, false
+		return 0, ref, false
 	}
 	if len(x.res.Filters) == 0 {
-		return refusal{}, true
+		return 0, refusal{}, true
 	}
 	if err := x.s.budgets.Allow(x.res.Scopes, now); err != nil {
-		return refusal{msg: err.Error()}, false
+		return 0, refusal{msg: err.Error()}, false
 	}
-	return refusal{}, true
+	if !x.s.filtersOnKey(x.res.Key.OrgID, x.res.Filters) {
+		return 0, refusal{}, true
+	}
+	held, err := x.s.budgets.HoldCredit(x.res.Key.OrgID,
+		x.s.filtersHold(x.res.Key.OrgID, x.res.Filters, argBytes/bytesPerToken))
+	if err != nil {
+		return 0, refusal{msg: err.Error()}, false
+	}
+	return held, refusal{}, true
 }
 
 // toolErrorResult is a tool result that tells the model the call failed.
@@ -674,6 +694,8 @@ func (x *mcpExchange) relay(resp *http.Response) {
 // unreachable answers a request the server could not be reached for.
 func (x *mcpExchange) unreachable(err error) {
 	if x.r.Context().Err() != nil {
+		// Recorded all the same, or what the filters spent would be lost.
+		x.failPending("the client hung up before the MCP server answered")
 		return
 	}
 	x.s.log.Error("MCP server unreachable", "server", x.srv.Alias, "error", err,
@@ -857,10 +879,10 @@ func (x *mcpExchange) failPending(msg string) {
 func (x *mcpExchange) record(p *pendingRPC, outcome store.ToolOutcome, errMsg string, resultBytes int) {
 	took := time.Since(p.start)
 	k := x.res.Key
-	x.s.sink.Record(store.Event{
+	x.s.record(store.Event{
 		TS: p.start, OrgID: k.OrgID, ProjectID: k.ProjectID, UserID: k.UserID, KeyID: k.ID,
 		Client: x.client, SessionKey: x.session, Latency: took, Error: errMsg,
-		FilterRuns: p.filters.runs, CostMicros: p.filters.micros, Scopes: x.res.Scopes,
+		FilterRuns: p.filters.runs, CostMicros: p.filters.micros, Bills: p.filters.bills, Scopes: x.res.Scopes,
 		Tool: &store.ToolCall{
 			Server: x.srv.Alias, Tool: p.tool, Outcome: outcome,
 			ArgBytes: p.argBytes, ResultBytes: resultBytes,

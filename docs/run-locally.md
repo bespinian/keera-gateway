@@ -20,8 +20,10 @@ leaves the containers running, so later starts are instant.
    any gateway container holding port 8080, and waits for Postgres.
 3. **air** - builds and runs the gateway on the host against those two, with
    debug logging on. Each new organisation starts with the models in
-   `compose/models.dev.yaml` and the sandbox classes in
-   `compose/sandboxes.yaml`, unless `.env` names other files. An organisation
+   `build/models.dev.yaml` and the sandbox classes in `compose/sandboxes.yaml`,
+   unless `.env` names other files. `make dev` writes `build/models.dev.yaml`
+   from `compose/models.yaml`, with the backend at `127.0.0.1` instead of
+   `keera-engine`. An organisation
    that already exists keeps its own. When `KEERA_SANDBOX_DRIVER` is set,
    `KEERA_SANDBOX_PUBLIC_URL` defaults to `http://host.containers.internal:8080`.
 
@@ -64,13 +66,10 @@ the model probe, filters, routers or anything else that reads `tool_calls`. See
 make build
 export KEERA_CONTROL_URL=http://127.0.0.1:8080
 export KEERA_OPERATOR_KEY=$(sed -n 's/^KEERA_OPERATOR_KEY=//p' compose/.env)
-
-./build/keera org create "Example Bank"
-./build/keera project create "Payments Platform"
-KEY=$(./build/keera key create --project <project> --name "local")
 ```
 
-The panel is at <http://127.0.0.1:8080>. Sign in with the operator key.
+Then follow [First run](install.md#first-run) with `./build/keera`. The panel is
+at <http://127.0.0.1:8080>. Sign in with the operator key.
 
 ## Stopping
 
@@ -86,16 +85,9 @@ starts.
 
 ## Running the whole thing in containers instead
 
-```sh
-cd compose
-podman compose up -d --build                                   # llama.cpp
-podman compose -f compose.yaml -f compose.gpu.yaml up -d --build  # vLLM
-podman compose down
-```
-
-This also runs the gateway as a container, as described in
-[compose/README.md](../compose/README.md). It is good for a demo but slow for
-development: every change needs an image build.
+[compose/README.md](../compose/README.md) runs the gateway as a container
+too. It is good for a demo but slow for development: every change needs an
+image build.
 
 Both setups share one database, but reach the engine at different addresses.
 An organisation created under one keeps that one's backend address, so its

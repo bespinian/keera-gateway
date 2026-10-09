@@ -7,10 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/policy"
@@ -41,25 +39,7 @@ func routerServer(ctx context.Context, t *testing.T, st *store.Store) *Server {
 
 func routerStore(t *testing.T) (*store.Store, context.Context) {
 	t.Helper()
-	dsn := os.Getenv("KEERA_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("set KEERA_TEST_DATABASE_URL to run the control-plane tests that need one")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	t.Cleanup(cancel)
-
-	st, err := store.Open(ctx, dsn, 4)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(st.Close)
-	if _, err := st.Migrate(ctx); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	if _, err := st.Pool().Exec(ctx, `TRUNCATE routers, guardrails, models, api_keys, projects,
-		orgs RESTART IDENTITY CASCADE`); err != nil {
-		t.Fatalf("truncate: %v", err)
-	}
+	st, ctx := testStore(t, "routers", "filters", "guardrails", "models", "api_keys", "projects")
 	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_1", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
@@ -80,15 +60,16 @@ func routerStore(t *testing.T) (*store.Store, context.Context) {
 	return st, ctx
 }
 
-// putRouter posts one router and returns the status and the body.
-func putRouter(t *testing.T, srv *Server, name string, body map[string]any) (int, string) {
+// putTo puts one router or filter as the operator, into org_1, and returns the
+// status and the body.
+func putTo(t *testing.T, srv *Server, path string, body map[string]any) (int, string) {
 	t.Helper()
 	raw, err := json.Marshal(body)
 	if err != nil {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest(http.MethodPut,
-		httpx.ControlPrefix+"/v1/routers/"+name+"?org_id=org_1", bytes.NewReader(raw))
+		httpx.ControlPrefix+path+"?org_id=org_1", bytes.NewReader(raw))
 	req.Header.Set("Authorization", "Bearer "+testOperatorKey)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -109,7 +90,7 @@ func validRouter() map[string]any {
 func TestPutRouterWritesAWholeOne(t *testing.T) {
 	st, ctx := routerStore(t)
 
-	if code, body := putRouter(t, routerServer(ctx, t, st), "auto",
+	if code, body := putTo(t, routerServer(ctx, t, st), "/v1/routers/auto",
 		validRouter()); code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", code, body)
 	}
@@ -180,7 +161,7 @@ func TestPutRouterRefusesWhatWouldLookLikeItWorked(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			body := validRouter()
 			tc.edit(body)
-			code, out := putRouter(t, srv, "auto", body)
+			code, out := putTo(t, srv, "/v1/routers/auto", body)
 			if code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400 - %s: %s", code, tc.why, out)
 			}
@@ -196,7 +177,7 @@ func TestPutRouterRefusesWhatWouldLookLikeItWorked(t *testing.T) {
 func TestPutRouterRefusesAnAliasThatIsAlreadyAModel(t *testing.T) {
 	st, ctx := routerStore(t)
 
-	code, body := putRouter(t, routerServer(ctx, t, st), "keera-small", validRouter())
+	code, body := putTo(t, routerServer(ctx, t, st), "/v1/routers/keera-small", validRouter())
 	if code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409: %s", code, body)
 	}
@@ -207,7 +188,7 @@ func TestPutRouterRefusesANameAClientCouldNotType(t *testing.T) {
 	srv := routerServer(ctx, t, st)
 
 	for _, name := range []string{"Auto", "auto-", "auto.1"} {
-		if code, body := putRouter(t, srv, name, validRouter()); code != http.StatusBadRequest {
+		if code, body := putTo(t, srv, "/v1/routers/"+name, validRouter()); code != http.StatusBadRequest {
 			t.Errorf("%q: status = %d, want 400: %s", name, code, body)
 		}
 	}
@@ -221,7 +202,7 @@ func TestPutRouterAcceptsNoFallbackAsADeliberateChoice(t *testing.T) {
 
 	body := validRouter()
 	body["fallback"] = ""
-	if code, out := putRouter(t, routerServer(ctx, t, st), "strict", body); code != http.StatusOK {
+	if code, out := putTo(t, routerServer(ctx, t, st), "/v1/routers/strict", body); code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", code, out)
 	}
 	saved, err := st.Router(ctx, "org_1", "strict")
@@ -240,7 +221,7 @@ func TestDeleteRouterRefusesOneAnAllowListNarrowsTo(t *testing.T) {
 	st, ctx := routerStore(t)
 
 	srv := routerServer(ctx, t, st)
-	if code, body := putRouter(t, srv, "auto", validRouter()); code != http.StatusOK {
+	if code, body := putTo(t, srv, "/v1/routers/auto", validRouter()); code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", code, body)
 	}
 	if _, err := st.CreateProject(ctx, store.Project{ID: "project_1", OrgID: "org_1", Name: "Payments Platform"}); err != nil {
@@ -268,7 +249,7 @@ func TestDeleteRouterRefusesOneAnAllowListNarrowsTo(t *testing.T) {
 	}
 }
 
-// ------------------------------------------------------------- fallback mode
+// --------------------------------------------------- the modes that try in turn
 
 func chainBody() map[string]any {
 	return map[string]any{
@@ -278,33 +259,54 @@ func chainBody() map[string]any {
 	}
 }
 
-func TestPutRouterWritesAFallbackRouter(t *testing.T) {
-	st, ctx := routerStore(t)
+// The modes that try their destinations in turn: fallback in the order they
+// were written, latency and least-busy in the order the gateway measured. They
+// are written and refused alike, because nothing about the order is written
+// down here.
+var chainModes = []policy.RouterMode{
+	policy.RouterModeFallback, policy.RouterModeLatency, policy.RouterModeLeastBusy,
+}
 
-	if code, body := putRouter(t, routerServer(ctx, t, st), "ha",
-		chainBody()); code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", code, body)
-	}
-	saved, err := st.Router(ctx, "org_1", "ha")
-	if err != nil {
-		t.Fatalf("Router: %v", err)
-	}
-	if saved.Decides() {
-		t.Error("the mode was not saved; this router would read every request with a " +
-			"model it does not have")
-	}
-	// The order is the whole of what this router does, so it is the one thing
-	// about it that has to survive a write and a read unchanged.
-	if len(saved.Destinations) != 2 || saved.Destinations[0] != "keera-large" {
-		t.Errorf("destinations = %v, want keera-large first", saved.Destinations)
+func TestPutRouterWritesARouterThatTriesItsDestinationsInTurn(t *testing.T) {
+	st, ctx := routerStore(t)
+	srv := routerServer(ctx, t, st)
+
+	for _, mode := range chainModes {
+		t.Run(string(mode), func(t *testing.T) {
+			body := chainBody()
+			body["mode"] = string(mode)
+			if code, out := putTo(t, srv, "/v1/routers/pool", body); code != http.StatusOK {
+				t.Fatalf("status = %d, want 200: %s", code, out)
+			}
+			saved, err := st.Router(ctx, "org_1", "pool")
+			if err != nil {
+				t.Fatalf("Router: %v", err)
+			}
+			if saved.Mode != mode {
+				t.Errorf("mode = %q, want %q", saved.Mode, mode)
+			}
+			if saved.Decides() {
+				t.Error("the mode was not saved; this router would read every request with a " +
+					"model it does not have")
+			}
+			if saved.Measures() != (mode != policy.RouterModeFallback) {
+				t.Errorf("Measures() = %v for %s; the destinations would be tried in an "+
+					"order nobody asked for", saved.Measures(), mode)
+			}
+			// The order is what a fallback router does and a measured one's
+			// tie-break, so it has to survive a write and a read unchanged.
+			if len(saved.Destinations) != 2 || saved.Destinations[0] != "keera-large" {
+				t.Errorf("destinations = %v, want keera-large first", saved.Destinations)
+			}
+		})
 	}
 }
 
-// A fallback router carrying a deciding model, an instruction or a fallback
-// destination is refused rather than tidied up. Each of those is a field
-// somebody would later read as the reason this router's traffic goes where it
-// goes, and none of them would be.
-func TestPutRouterRefusesAFallbackRouterThatDecidesSomething(t *testing.T) {
+// A router of these modes carrying a deciding model, an instruction or a
+// fallback destination is refused rather than tidied up. Each of those is a
+// field somebody would later read as the reason this router's traffic goes
+// where it goes, and none of them would be.
+func TestPutRouterRefusesARouterThatTriesInTurnAndDecidesSomething(t *testing.T) {
 	st, ctx := routerStore(t)
 	srv := routerServer(ctx, t, st)
 
@@ -319,17 +321,26 @@ func TestPutRouterRefusesAFallbackRouterThatDecidesSomething(t *testing.T) {
 		{"a destination that cannot answer a chat request", func(b map[string]any) {
 			b["destinations"] = []string{"keera-small", "keera-embed"}
 		}},
-		{"a mode that is neither", func(b map[string]any) { b["mode"] = "shadow" }},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			body := chainBody()
-			tc.edit(body)
-			if code, out := putRouter(t, srv, "ha", body); code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400: %s", code, out)
-			}
-		})
+	for _, mode := range chainModes {
+		for _, tc := range tests {
+			t.Run(string(mode)+"/"+tc.name, func(t *testing.T) {
+				body := chainBody()
+				body["mode"] = string(mode)
+				tc.edit(body)
+				if code, out := putTo(t, srv, "/v1/routers/pool", body); code != http.StatusBadRequest {
+					t.Fatalf("status = %d, want 400: %s", code, out)
+				}
+			})
+		}
 	}
+	t.Run("a mode that is none of them", func(t *testing.T) {
+		body := chainBody()
+		body["mode"] = "shadow"
+		if code, out := putTo(t, srv, "/v1/routers/pool", body); code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400: %s", code, out)
+		}
+	})
 }
 
 // A router that says nothing about its mode is the router this endpoint
@@ -337,7 +348,7 @@ func TestPutRouterRefusesAFallbackRouterThatDecidesSomething(t *testing.T) {
 func TestPutRouterDefaultsToTheModeThatReadsTheRequest(t *testing.T) {
 	st, ctx := routerStore(t)
 
-	if code, body := putRouter(t, routerServer(ctx, t, st), "auto",
+	if code, body := putTo(t, routerServer(ctx, t, st), "/v1/routers/auto",
 		validRouter()); code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", code, body)
 	}
@@ -347,72 +358,6 @@ func TestPutRouterDefaultsToTheModeThatReadsTheRequest(t *testing.T) {
 	}
 	if saved.Mode != policy.RouterModeInstruction {
 		t.Errorf("mode = %q, want %q", saved.Mode, policy.RouterModeInstruction)
-	}
-}
-
-// ------------------------------------------------------- the measured modes
-
-// A latency or least-busy router is written like a fallback router and refused
-// the same things, because it is one - what differs is only what puts its
-// destinations in order, which is not something anybody writes down here.
-func TestPutRouterWritesAMeasuredRouter(t *testing.T) {
-	st, ctx := routerStore(t)
-	srv := routerServer(ctx, t, st)
-
-	for _, mode := range []policy.RouterMode{
-		policy.RouterModeLatency, policy.RouterModeLeastBusy,
-	} {
-		t.Run(string(mode), func(t *testing.T) {
-			body := chainBody()
-			body["mode"] = string(mode)
-			if code, out := putRouter(t, srv, "pool", body); code != http.StatusOK {
-				t.Fatalf("status = %d, want 200: %s", code, out)
-			}
-			saved, err := st.Router(ctx, "org_1", "pool")
-			if err != nil {
-				t.Fatalf("Router: %v", err)
-			}
-			if saved.Mode != mode {
-				t.Errorf("mode = %q, want %q", saved.Mode, mode)
-			}
-			if saved.Decides() {
-				t.Error("a measured router was saved as one that reads the request")
-			}
-			if !saved.Measures() {
-				t.Error("the mode was saved and does not measure anything; its " +
-					"destinations would be tried in the order they were written, " +
-					"which is the mode nobody asked for")
-			}
-			// Still the tie-break, so it still has to survive the round trip.
-			if len(saved.Destinations) != 2 || saved.Destinations[0] != "keera-large" {
-				t.Errorf("destinations = %v, want keera-large first", saved.Destinations)
-			}
-		})
-	}
-}
-
-func TestPutRouterRefusesAMeasuredRouterThatDecidesSomething(t *testing.T) {
-	st, ctx := routerStore(t)
-	srv := routerServer(ctx, t, st)
-
-	tests := []struct {
-		name string
-		edit func(map[string]any)
-	}{
-		{"a deciding model", func(b map[string]any) { b["model"] = "keera-picker" }},
-		{"an instruction", func(b map[string]any) { b["prompt"] = "choose wisely" }},
-		{"a fallback destination", func(b map[string]any) { b["fallback"] = "keera-small" }},
-		{"one destination", func(b map[string]any) { b["destinations"] = []string{"keera-small"} }},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			body := chainBody()
-			body["mode"] = string(policy.RouterModeLeastBusy)
-			tc.edit(body)
-			if code, out := putRouter(t, srv, "pool", body); code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400: %s", code, out)
-			}
-		})
 	}
 }
 
@@ -432,7 +377,7 @@ func sizeBody() map[string]any {
 func TestPutRouterWritesASizeRouter(t *testing.T) {
 	st, ctx := routerStore(t)
 
-	if code, out := putRouter(t, routerServer(ctx, t, st), "bysize",
+	if code, out := putTo(t, routerServer(ctx, t, st), "/v1/routers/bysize",
 		sizeBody()); code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", code, out)
 	}
@@ -517,7 +462,7 @@ func TestPutRouterRefusesASizeRouterThatCouldNotPlaceEveryRequest(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			body := sizeBody()
 			tc.edit(body)
-			code, out := putRouter(t, srv, "bysize", body)
+			code, out := putTo(t, srv, "/v1/routers/bysize", body)
 			if code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400 - %s: %s", code, tc.why, out)
 			}
@@ -542,7 +487,7 @@ func TestPutRouterRefusesCeilingsOnAModeThatCannotReadThem(t *testing.T) {
 			}
 			body["mode"] = string(mode)
 			body["ceilings"] = map[string]int{"keera-small": 4000}
-			if code, out := putRouter(t, srv, "auto", body); code != http.StatusBadRequest {
+			if code, out := putTo(t, srv, "/v1/routers/auto", body); code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400: %s", code, out)
 			}
 		})
@@ -556,7 +501,7 @@ func TestPutRouterDropsACeilingOfZero(t *testing.T) {
 	body := sizeBody()
 	body["ceilings"] = map[string]int{"keera-small": 4000, "keera-large": 0}
 
-	if code, out := putRouter(t, routerServer(ctx, t, st), "bysize", body); code != http.StatusOK {
+	if code, out := putTo(t, routerServer(ctx, t, st), "/v1/routers/bysize", body); code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", code, out)
 	}
 	saved, err := st.Router(ctx, "org_1", "bysize")
@@ -589,7 +534,7 @@ func TestADecidingRouterStaysOnTheAllowList(t *testing.T) {
 		return w.Code, w.Body.String()
 	}
 
-	if code, out := putRouter(t, srv, "auto", validRouter()); code != http.StatusOK {
+	if code, out := putTo(t, srv, "/v1/routers/auto", validRouter()); code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", code, out)
 	}
 	code, out := putOrgAllowList([]string{"keera-small", "keera-large"})
@@ -602,7 +547,7 @@ func TestADecidingRouterStaysOnTheAllowList(t *testing.T) {
 	}
 	body := validRouter()
 	body["model"] = "keera-large"
-	code, out = putRouter(t, srv, "auto", body)
+	code, out = putTo(t, srv, "/v1/routers/auto", body)
 	if code != http.StatusBadRequest || !strings.Contains(out, "model_not_allowed") {
 		t.Fatalf("a deciding model outside the list: status = %d, want 400: %s", code, out)
 	}

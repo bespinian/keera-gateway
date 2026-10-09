@@ -102,17 +102,8 @@ func (r *filterRun) put(ctx context.Context) error {
 	alias := r.fs.Arg(0)
 	// 'set' starts from the stored filter, so what is not given is kept. 'add'
 	// starts from nothing, and the control plane refuses what is missing.
-	f := policy.Filter{Alias: alias}
-	if r.verb == "set" {
-		if !changesSomething(r.fs) {
-			return nothingToChange("filter set")
-		}
-		existing, err := r.find(ctx, alias)
-		if err != nil {
-			return err
-		}
-		f = existing
-	} else if err := alreadyExists(ctx, r.aliasRun, alias, filterAlias); err != nil {
+	f, err := startPut(ctx, r.aliasRun, alias, policy.Filter{Alias: alias}, filterAlias)
+	if err != nil {
 		return err
 	}
 	if err := r.apply(&f); err != nil {

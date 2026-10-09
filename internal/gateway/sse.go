@@ -7,7 +7,10 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"sync"
 	"time"
+
+	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
 var (
@@ -29,12 +32,17 @@ type tokenUsage struct {
 	OutputTokens int `json:"completion_tokens"`
 	TotalTokens  int `json:"total_tokens"`
 	// InputDetails says how much of the prompt the provider served from its
-	// cache, which is charged at a lower price. See policy.Model.Cost.
+	// cache, which is charged at a lower price, and how much it wrote to it,
+	// which may be charged at a higher one. See policy.Model.Cost.
 	//
-	// Cached tokens are part of InputTokens, not added to them. A self-hosted
-	// plane sends no such object, which reads as nothing cached.
+	// Both are part of InputTokens, not added to them. A self-hosted plane
+	// sends no such object, which reads as no cache at all.
 	InputDetails struct {
-		CachedTokens int `json:"cached_tokens"`
+		CachedTokens     int `json:"cached_tokens"`
+		CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
+		// CacheWriteHourTokens is the part of CacheWriteTokens kept for an
+		// hour, which costs more. Only Anthropic's own API reports it.
+		CacheWriteHourTokens int `json:"-"`
 	} `json:"prompt_tokens_details"`
 }
 
@@ -44,6 +52,20 @@ func (u *tokenUsage) cached() int {
 		return 0
 	}
 	return u.InputDetails.CachedTokens
+}
+
+// tokens is the record in the terms prices are given in.
+func (u *tokenUsage) tokens() policy.Tokens {
+	if u == nil {
+		return policy.Tokens{}
+	}
+	return policy.Tokens{
+		Input:          u.InputTokens,
+		CachedInput:    u.InputDetails.CachedTokens,
+		CacheWrite:     u.InputDetails.CacheWriteTokens,
+		CacheWriteHour: u.InputDetails.CacheWriteHourTokens,
+		Output:         u.OutputTokens,
+	}
 }
 
 // streamStats is what a piped stream tells the gateway about what it carried.
@@ -257,22 +279,56 @@ func hasUsage(payload []byte) bool {
 // events, they go out in one write; when it brought one, it goes out at once,
 // as before. A busy gateway falls behind, reads more per call and so flushes
 // less, which is when it matters.
+//
+// A ping is written by a timer while the read waits, so the stream's writes
+// and flushes all go through here under one lock, and a flush asked for
+// during that wait happens at once.
 type flushBeforeRead struct {
 	src     io.Reader
+	dst     io.Writer
 	flusher *http.ResponseController
+
+	mu      sync.Mutex
 	pending bool
+	waiting bool
+}
+
+func (f *flushBeforeRead) Write(p []byte) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.dst.Write(p)
 }
 
 func (f *flushBeforeRead) Read(p []byte) (int, error) {
-	f.now()
-	return f.src.Read(p)
+	f.mu.Lock()
+	f.flush()
+	f.waiting = true
+	f.mu.Unlock()
+	n, err := f.src.Read(p)
+	f.mu.Lock()
+	f.waiting = false
+	f.mu.Unlock()
+	return n, err
 }
 
 // later is the flush the pipes call after each event.
-func (f *flushBeforeRead) later() { f.pending = true }
+func (f *flushBeforeRead) later() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pending = true
+	if f.waiting {
+		f.flush()
+	}
+}
 
 // now flushes what the pipes have written, if anything.
 func (f *flushBeforeRead) now() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.flush()
+}
+
+func (f *flushBeforeRead) flush() {
 	if f.pending {
 		_ = f.flusher.Flush()
 		f.pending = false

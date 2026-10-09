@@ -100,9 +100,10 @@ var checkSecrets = []string{"wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY", "CH93 0076
 // and an eager instruction deletes part of a request. Neither shows until
 // someone complains.
 //
-// Like CheckModel, this is not a tenant's request: no rate limit, budget,
-// billing or usage event. Its cost is reported, since every guarded request
-// will pay the same.
+// Like CheckModel, this is not a tenant's request: no rate limit, budget or
+// usage event, but a model on the deployment's key needs credit and is
+// billed. Its cost is reported, since every guarded request will pay the
+// same.
 func (s *Server) CheckFilter(ctx context.Context, f policy.Filter) FilterProbe {
 	p := FilterProbe{Alias: f.Alias, Mode: f.Mode, Model: f.Model, Shadow: f.Shadow}
 	// A pattern filter needs no backend, and its result is exactly what
@@ -121,6 +122,10 @@ func (s *Server) CheckFilter(ctx context.Context, f policy.Filter) FilterProbe {
 		}
 		return p
 	}
+	if why := s.checkCredit(f.OrgID, m); why != "" {
+		p.Error = why
+		return p
+	}
 	if f.Mode.Gates() {
 		return s.checkGate(ctx, f, m, p)
 	}
@@ -129,6 +134,7 @@ func (s *Server) CheckFilter(ctx context.Context, f policy.Filter) FilterProbe {
 	out, cost, err := s.runFilter(ctx, f, m, filterCheckSample)
 	p.TotalMS = time.Since(start).Milliseconds()
 	p.CostMicros = cost.micros
+	s.billCheck(f.OrgID, cost.bills)
 	if err != nil {
 		if refused, ok := errors.AsType[*filterRefusedError](err); ok {
 			p.OK = true
@@ -172,6 +178,7 @@ func (s *Server) checkGate(ctx context.Context, f policy.Filter, m policy.Model,
 	for _, half := range halves {
 		_, cost, err := s.runFilter(ctx, f, m, half.sent)
 		p.CostMicros += cost.micros
+		s.billCheck(f.OrgID, cost.bills)
 		v := FilterVerdict{
 			Sent: half.sent, ExpectRefusal: half.expectRefusal, Confidence: cost.confidence,
 		}

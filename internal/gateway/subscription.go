@@ -37,6 +37,9 @@ func claudeSignIn(r *http.Request) bool {
 	return err == nil && strings.HasPrefix(token, claudeSignInPrefix)
 }
 
+// subscriptionsOff says the deployment does not take Claude subscriptions.
+const subscriptionsOff = "this gateway does not take Claude subscriptions"
+
 // connectHint is what to run to set Claude Code up for a subscription.
 const connectHint = "run `keera login`, then `keera connect claude-code --subscription`"
 

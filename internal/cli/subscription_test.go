@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"os"
 	"path/filepath"
@@ -85,7 +86,7 @@ func TestAnEmptyValueTakesTheSettingOut(t *testing.T) {
 
 func TestManagedBaseURLReadsEveryManagedSource(t *testing.T) {
 	dir := t.TempDir()
-	write := func(path, body string) string {
+	write := func(path, body string) {
 		t.Helper()
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
@@ -93,7 +94,6 @@ func TestManagedBaseURLReadsEveryManagedSource(t *testing.T) {
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		return path
 	}
 	env := func(url string) string { return `{"env":{"ANTHROPIC_BASE_URL":"` + url + `"}}` }
 	server := filepath.Join(dir, "remote-settings.json")
@@ -276,5 +276,20 @@ func TestIsMachineKeyName(t *testing.T) {
 		if got := isMachineKeyName(name); got != want {
 			t.Errorf("isMachineKeyName(%q) = %v, want %v", name, got, want)
 		}
+	}
+}
+
+func TestSubscriptionSetupStopsWhenTheDeploymentTakesNone(t *testing.T) {
+	t.Setenv("KEERA_CONFIG_DIR", t.TempDir())
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/me": map[string]any{"role": "member", "org_id": "org_1", "user_id": "user_1"},
+	})
+
+	err := connectSubscription(context.Background(), newClient(), subscriptionSetup{})
+	if !errors.Is(err, errSubscriptionsOff) {
+		t.Errorf("err = %v, want errSubscriptionsOff", err)
+	}
+	if f.called("GET", "/v1/keys") {
+		t.Error("it went on to look for a key")
 	}
 }

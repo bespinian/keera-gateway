@@ -2,6 +2,7 @@ package registry
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,7 +18,7 @@ func scopes() []policy.Scope {
 }
 
 func TestAllowUntilTheTightestScopeIsSpent(t *testing.T) {
-	b := newBudgets()
+	b := newBudgets(false)
 	now := time.Now()
 
 	if err := b.Allow(scopes(), now); err != nil {
@@ -39,7 +40,7 @@ func TestAllowUntilTheTightestScopeIsSpent(t *testing.T) {
 }
 
 func TestScopesWithoutABudgetAreNeverBlocked(t *testing.T) {
-	b := newBudgets()
+	b := newBudgets(false)
 	now := time.Now()
 	free := []policy.Scope{{Type: policy.ScopeKey, ID: "key_1", Period: policy.PeriodMonth}}
 	b.Charge(free, 999_999_999, now)
@@ -49,7 +50,7 @@ func TestScopesWithoutABudgetAreNeverBlocked(t *testing.T) {
 }
 
 func TestChargesLandInTheRightPeriodWindow(t *testing.T) {
-	b := newBudgets()
+	b := newBudgets(false)
 	sc := scopes()
 
 	sep := time.Date(2026, 9, 30, 23, 0, 0, 0, time.UTC)
@@ -72,7 +73,7 @@ func TestReconcileReplacesLocalSpendWithTheDatabase(t *testing.T) {
 	// Another replica has been spending too. Reconciling adopts the shared
 	// figure and forgets the local delta, which the recorder has by then
 	// written.
-	b := newBudgets()
+	b := newBudgets(false)
 	now := time.Now()
 	b.Charge(scopes(), 500_000, now)
 
@@ -96,7 +97,7 @@ func TestReconcileReplacesLocalSpendWithTheDatabase(t *testing.T) {
 
 func TestConcurrentChargeAndAllow(_ *testing.T) {
 	// Run with -race: both are on the hot path.
-	b := newBudgets()
+	b := newBudgets(false)
 	done := make(chan struct{})
 	for range 8 {
 		go func() {
@@ -110,5 +111,84 @@ func TestConcurrentChargeAndAllow(_ *testing.T) {
 	}
 	for range 8 {
 		<-done
+	}
+}
+
+// With payments, an organisation without credit cannot use the deployment's
+// keys until it pays, unless it is billed by invoice.
+func TestAnOrganisationWithoutCreditIsRefused(t *testing.T) {
+	b := newBudgets(true)
+	if _, ok := errors.AsType[*policy.ErrNoCredit](b.AllowCredit("org_new")); !ok {
+		t.Error("an organisation that never paid was let in")
+	}
+	b.reconcileCredit([]store.CreditRow{
+		{OrgID: "org_paid", BalanceMicros: 5_000_000},
+		{OrgID: "org_invoiced", BalanceMicros: -20_000_000, Invoiced: true},
+	})
+	if err := b.AllowCredit("org_paid"); err != nil {
+		t.Errorf("an organisation with CHF 5.00 was refused: %v", err)
+	}
+	if err := b.AllowCredit("org_invoiced"); err != nil {
+		t.Errorf("an organisation billed by invoice was refused: %v", err)
+	}
+	// Spent locally before the next reconcile.
+	b.ChargeCredit("org_paid", 5_000_000)
+	err := b.AllowCredit("org_paid")
+	if e, ok := errors.AsType[*policy.ErrNoCredit](err); !ok || e.BalanceMicros != 0 {
+		t.Errorf("after spending it all: %v", err)
+	}
+}
+
+func TestWithoutPaymentsCreditIsNotChecked(t *testing.T) {
+	b := newBudgets(false)
+	b.ChargeCredit("org_a", 1_000_000)
+	if err := b.AllowCredit("org_a"); err != nil {
+		t.Errorf("refused without payments: %v", err)
+	}
+}
+
+// Requests started together each hold what they may cost, so they cannot all
+// spend the same credit. A reconcile does not drop the holds: those requests
+// have not been charged yet.
+func TestRunningRequestsHoldTheCredit(t *testing.T) {
+	b := newBudgets(true)
+	b.reconcileCredit([]store.CreditRow{{OrgID: "org_a", BalanceMicros: 5_000_000}})
+
+	first, err := b.HoldCredit("org_a", 3_000_000)
+	if err != nil || first != 3_000_000 {
+		t.Fatalf("first hold = %d, %v", first, err)
+	}
+	// Some credit is still free, so the second request starts, and may go over.
+	second, err := b.HoldCredit("org_a", 3_000_000)
+	if err != nil {
+		t.Fatalf("second hold: %v", err)
+	}
+	b.reconcileCredit([]store.CreditRow{{OrgID: "org_a", BalanceMicros: 5_000_000}})
+	err = b.AllowCredit("org_a")
+	if e, ok := errors.AsType[*policy.ErrNoCredit](err); !ok || e.HeldMicros != 6_000_000 {
+		t.Fatalf("with all of it held: %v", err)
+	}
+	if !strings.Contains(err.Error(), "still running") {
+		t.Errorf("message = %q, want it to say why", err)
+	}
+
+	b.ReleaseCredit("org_a", first)
+	if err := b.AllowCredit("org_a"); err != nil {
+		t.Errorf("after one request ended: %v", err)
+	}
+	b.ReleaseCredit("org_a", second)
+	if len(b.held) != 0 {
+		t.Errorf("held = %v, want nothing left", b.held)
+	}
+}
+
+func TestAnInvoicedOrganisationHoldsNothing(t *testing.T) {
+	b := newBudgets(true)
+	b.reconcileCredit([]store.CreditRow{{OrgID: "org_a", Invoiced: true}})
+	if held, err := b.HoldCredit("org_a", 3_000_000); err != nil || held != 0 {
+		t.Errorf("hold = %d, %v; want nothing held", held, err)
+	}
+	if held, _ := newBudgets(false).HoldCredit("org_a", 3_000_000); held != 0 {
+		t.Errorf("without payments, hold = %d", held)
 	}
 }

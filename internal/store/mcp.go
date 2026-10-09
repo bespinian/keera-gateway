@@ -25,20 +25,12 @@ func scanMCPServer(r row) (policy.MCPServer, error) {
 
 // LoadMCPServers reads every organisation's MCP servers.
 func (s *Store) LoadMCPServers(ctx context.Context) ([]policy.MCPServer, error) {
-	rows, err := s.pool.Query(ctx, mcpColumns+" FROM mcp_servers ORDER BY org_id, alias")
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, scanMCPServer)
+	return queryAll(ctx, s.pool, scanMCPServer, mcpColumns+" FROM mcp_servers ORDER BY org_id, alias")
 }
 
 // ListMCPServers reads one organisation's MCP servers.
 func (s *Store) ListMCPServers(ctx context.Context, orgID string) ([]policy.MCPServer, error) {
-	rows, err := s.pool.Query(ctx, mcpColumns+" FROM mcp_servers WHERE org_id = $1 ORDER BY alias", orgID)
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, scanMCPServer)
+	return queryAll(ctx, s.pool, scanMCPServer, mcpColumns+" FROM mcp_servers WHERE org_id = $1 ORDER BY alias", orgID)
 }
 
 // MCPServer reads one of an organisation's servers, or ErrNotFound.
@@ -166,13 +158,9 @@ func (q ToolCallQuery) args() []any {
 
 // ListToolCalls reads tool calls, newest first.
 func (s *Store) ListToolCalls(ctx context.Context, q ToolCallQuery) ([]ToolCallRow, error) {
-	rows, err := s.pool.Query(ctx, toolCallColumns+toolWhere+`
+	return queryAll(ctx, s.pool, scanToolCall, toolCallColumns+toolWhere+`
 		AND ($9 = 0 OR id < $9) ORDER BY id DESC LIMIT $10`,
 		append(q.args(), q.Before, pageLimit(q.Limit, 100, 5000))...)
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, scanToolCall)
 }
 
 // toolCallColumns reads what scanToolCall scans.
@@ -195,16 +183,12 @@ func scanToolCall(r row) (ToolCallRow, error) {
 // tasks at once includes both tasks' calls. The time bound applies to both: a
 // client that reuses its session id after the idle gap starts a new session.
 func (s *Store) SessionToolCalls(ctx context.Context, orgID string, a AgentSession) ([]ToolCallRow, error) {
-	rows, err := s.pool.Query(ctx, toolCallColumns+`
+	return queryAll(ctx, s.pool, scanToolCall, toolCallColumns+`
 		WHERE ($1 = '' OR org_id = $1)
 		  AND CASE WHEN $2 THEN session_key = $3 ELSE key_id = $4 END
 		  AND ts >= $5 AND ts <= $6
 		ORDER BY ts, id LIMIT 1000`,
 		orgID, a.Stated, a.Key, a.KeyID, a.StartedAt, a.EndedAt)
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, scanToolCall)
 }
 
 // ToolSummary is one tool's calls inside a window, added up.
@@ -224,7 +208,7 @@ type ToolSummary struct {
 // called first. Failed counts both a tool's own failures and calls that got
 // no result.
 func (s *Store) SummarizeToolCalls(ctx context.Context, q ToolCallQuery) ([]ToolSummary, error) {
-	rows, err := s.pool.Query(ctx, `SELECT server, tool, count(*),
+	return queryAll(ctx, s.pool, scanToolSummary, `SELECT server, tool, count(*),
 		`+countOf("outcome", ToolFailed, ToolNoResult)+`,
 		`+countOf("outcome", ToolDenied)+`,
 		`+countOf("outcome", ToolRefused)+`,
@@ -232,13 +216,11 @@ func (s *Store) SummarizeToolCalls(ctx context.Context, q ToolCallQuery) ([]Tool
 		COALESCE(sum(result_bytes), 0)
 		FROM tool_calls`+toolWhere+` GROUP BY server, tool ORDER BY count(*) DESC, server, tool`,
 		q.args()...)
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, func(r row) (ToolSummary, error) {
-		var t ToolSummary
-		err := r.Scan(&t.Server, &t.Tool, &t.Calls, &t.Failed, &t.Denied, &t.Refused, &t.AvgMS,
-			&t.ArgBytes, &t.ResultBytes)
-		return t, err
-	})
+}
+
+func scanToolSummary(r row) (ToolSummary, error) {
+	var t ToolSummary
+	err := r.Scan(&t.Server, &t.Tool, &t.Calls, &t.Failed, &t.Denied, &t.Refused, &t.AvgMS,
+		&t.ArgBytes, &t.ResultBytes)
+	return t, err
 }

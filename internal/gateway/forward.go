@@ -210,7 +210,7 @@ func (s *Server) send(ctx context.Context, model policy.Model, out outbound) (*h
 		} else {
 			setCredential(req.Header, "", model.APIKey)
 		}
-		resp, err := s.client.Do(req)
+		resp, err := s.modelClient(model).Do(req)
 		if err == nil {
 			return resp, nil
 		}

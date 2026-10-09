@@ -199,6 +199,8 @@ type identity struct {
 	Via     string `json:"via"`
 	// Sandboxes is whether the deployment lends out sandboxes.
 	Sandboxes bool `json:"sandboxes"`
+	// ClaudeSubscriptions is whether it takes Claude subscriptions.
+	ClaudeSubscriptions bool `json:"claude_subscriptions"`
 }
 
 func whoami(ctx context.Context, c *client) (identity, error) {

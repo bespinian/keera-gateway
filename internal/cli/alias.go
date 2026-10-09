@@ -49,6 +49,19 @@ func alreadyExists[T any](ctx context.Context, a *aliasRun, alias string, aliasO
 	return err
 }
 
+// startPut is where 'add' and 'set' begin. 'add' refuses an alias that is
+// taken and starts from fresh. 'set' starts from the stored entry, so a flag
+// left out keeps what is there.
+func startPut[T any](ctx context.Context, a *aliasRun, alias string, fresh T, aliasOf func(T) string) (T, error) {
+	if a.verb == "add" {
+		return fresh, alreadyExists(ctx, a, alias, aliasOf)
+	}
+	if !changesSomething(a.fs) {
+		return fresh, nothingToChange(a.cmd + " set")
+	}
+	return findAlias(ctx, a, alias, aliasOf)
+}
+
 // checkProbe runs the check at path and prints what came back. A check that
 // did not pass fails the command, so a pipeline can gate on it.
 func checkProbe[T any](ctx context.Context, c *client, path, what string, asJSON bool,

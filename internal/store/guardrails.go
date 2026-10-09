@@ -99,7 +99,7 @@ type GuardrailRef struct {
 // match is the SQL condition, with alias as $2; it is always a constant from
 // this package.
 func (s *Store) scopesNaming(ctx context.Context, match, orgID, alias string) ([]GuardrailRef, error) {
-	rows, err := s.pool.Query(ctx, `
+	return queryAll(ctx, s.pool, scanGuardrailRef, `
 		SELECT p.scope_type, p.scope_id, COALESCE(o.name, pr.name, k.name, p.scope_id)
 		FROM guardrails p
 		LEFT JOIN orgs      o ON p.scope_type = 'org'     AND o.id = p.scope_id AND o.id = $1
@@ -108,14 +108,12 @@ func (s *Store) scopesNaming(ctx context.Context, match, orgID, alias string) ([
 		WHERE `+match+`
 		  AND (o.id IS NOT NULL OR pr.id IS NOT NULL OR k.id IS NOT NULL)
 		ORDER BY p.scope_type, p.scope_id`, orgID, alias)
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, func(r row) (GuardrailRef, error) {
-		var fs GuardrailRef
-		err := r.Scan(&fs.ScopeType, &fs.ScopeID, &fs.Name)
-		return fs, err
-	})
+}
+
+func scanGuardrailRef(r row) (GuardrailRef, error) {
+	var fs GuardrailRef
+	err := r.Scan(&fs.ScopeType, &fs.ScopeID, &fs.Name)
+	return fs, err
 }
 
 // MCPServerUsers lists the guardrails inside one organisation whose tool
@@ -145,21 +143,13 @@ func scanFilter(r row) (policy.Filter, error) {
 // LoadFilters reads every organisation's filters, for the gateway's cache.
 // Nothing on the inference path may wait on Postgres.
 func (s *Store) LoadFilters(ctx context.Context) ([]policy.Filter, error) {
-	rows, err := s.pool.Query(ctx, filterColumns+" FROM filters ORDER BY org_id, alias")
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, scanFilter)
+	return queryAll(ctx, s.pool, scanFilter, filterColumns+" FROM filters ORDER BY org_id, alias")
 }
 
 // ListFilters reads one organisation's filters.
 func (s *Store) ListFilters(ctx context.Context, orgID string) ([]policy.Filter, error) {
-	rows, err := s.pool.Query(ctx,
+	return queryAll(ctx, s.pool, scanFilter,
 		filterColumns+" FROM filters WHERE org_id = $1 ORDER BY alias", orgID)
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, scanFilter)
 }
 
 // Filter reads one filter, or ErrNotFound.

@@ -23,7 +23,7 @@ type ProjectSummary struct {
 // ProjectSummaries lists an organisation's projects with their guardrails and spend,
 // in one query to avoid N+1. An empty orgID means every organisation.
 func (s *Store) ProjectSummaries(ctx context.Context, orgID string, now time.Time) ([]ProjectSummary, error) {
-	rows, err := s.pool.Query(ctx, `
+	return queryAll(ctx, s.pool, scanProjectSummary, `
 		SELECT pr.id, pr.org_id, pr.name, pr.description, pr.created_at, `+limitColumns+`,
 		       (SELECT count(*) FROM api_keys k
 		         WHERE k.project_id = pr.id AND k.revoked_at IS NULL),
@@ -37,10 +37,6 @@ func (s *Store) ProjectSummaries(ctx context.Context, orgID string, now time.Tim
 		WHERE ($1 = '' OR pr.org_id = $1)
 		ORDER BY pr.name`,
 		orgID, policy.PeriodDay.Start(now), policy.PeriodMonth.Start(now))
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, scanProjectSummary)
 }
 
 func scanProjectSummary(r row) (ProjectSummary, error) {
@@ -162,7 +158,7 @@ func (s *Store) Overview(ctx context.Context, orgID string, from, to time.Time,
 // only those with traffic, so a quiet stretch shows as a dip, not a flat line.
 func (s *Store) series(ctx context.Context, orgID string, from, to time.Time,
 	bucket string, sc ReportScope) ([]SeriesPoint, error) {
-	rows, err := s.pool.Query(ctx, `
+	return queryAll(ctx, s.pool, scanSeriesPoint, `
 		WITH buckets AS (
 		    SELECT generate_series(
 		        date_trunc($4, $1::timestamptz),
@@ -180,14 +176,12 @@ func (s *Store) series(ctx context.Context, orgID string, from, to time.Time,
 		    AND ($3 = '' OR e.org_id = $3)`+sc.narrow("e.", 4)+`
 		GROUP BY b.at ORDER BY b.at`,
 		append([]any{from, to, orgID, bucket}, sc.args()...)...)
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, func(r row) (SeriesPoint, error) {
-		var p SeriesPoint
-		err := r.Scan(&p.At, &p.Requests, &p.Tokens, &p.CostMicros, &p.Errors)
-		return p, err
-	})
+}
+
+func scanSeriesPoint(r row) (SeriesPoint, error) {
+	var p SeriesPoint
+	err := r.Scan(&p.At, &p.Requests, &p.Tokens, &p.CostMicros, &p.Errors)
+	return p, err
 }
 
 // topUsage is the first six buckets of q grouped by groupBy.
@@ -318,7 +312,7 @@ type KeyQuery struct {
 // KeySummaries lists an organisation's keys with their guardrails and their
 // traffic since q.Since, in one query to avoid N+1.
 func (s *Store) KeySummaries(ctx context.Context, q KeyQuery) ([]KeySummary, error) {
-	rows, err := s.pool.Query(ctx, `
+	return queryAll(ctx, s.pool, scanKeySummary, `
 		SELECT k.id, k.org_id, COALESCE(k.project_id,''), COALESCE(k.user_id,''),
 		       k.name, k.prefix, k.created_at, k.expires_at, k.revoked_at,
 		       `+limitColumns+`,
@@ -337,10 +331,6 @@ func (s *Store) KeySummaries(ctx context.Context, q KeyQuery) ([]KeySummary, err
 		) u ON true
 		WHERE k.org_id = $1 AND ($2 = '' OR k.project_id = $2) AND ($4 = '' OR k.user_id = $4)
 		ORDER BY k.created_at DESC`, q.OrgID, q.ProjectID, q.Since, q.UserID)
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, scanKeySummary)
 }
 
 func scanKeySummary(r row) (KeySummary, error) {
@@ -429,17 +419,15 @@ func (s *Store) Refusals(ctx context.Context, orgID string, keyIDs []string,
 	if len(keyIDs) == 0 {
 		return []Refusal{}, nil
 	}
-	rows, err := s.pool.Query(ctx, `SELECT ts, alias, status, COALESCE(key_id, ''),
+	return queryAll(ctx, s.pool, scanRefusal, `SELECT ts, alias, status, COALESCE(key_id, ''),
 		COALESCE(error, '')
 		FROM usage_events
 		WHERE org_id = $1 AND key_id = ANY($2) AND ts >= $3 AND status >= 400
 		ORDER BY ts DESC LIMIT $4`, orgID, keyIDs, since, pageLimit(limit, 20, 200))
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, func(r row) (Refusal, error) {
-		var f Refusal
-		err := r.Scan(&f.TS, &f.Alias, &f.Status, &f.KeyID, &f.Error)
-		return f, err
-	})
+}
+
+func scanRefusal(r row) (Refusal, error) {
+	var f Refusal
+	err := r.Scan(&f.TS, &f.Alias, &f.Status, &f.KeyID, &f.Error)
+	return f, err
 }

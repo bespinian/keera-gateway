@@ -69,22 +69,9 @@ var commands = []command{
 		summary: "sign in to a deployment through its identity provider or a passkey",
 		args:    "[flags]",
 		flags:   []string{"provider", "no-browser"},
-		prose: "Opens a browser, signs you in the way the panel does, and keeps what comes " +
-			"back in keera/credentials.json in your configuration directory " +
-			"(~/.config on Linux). Commands then run as you: your role " +
-			"decides what they may do, and the audit log records your address rather than " +
-			"\"operator key\". The sign-in lasts a month, or 12 hours where the directory gives no refresh " +
-			"token. It ends sooner with 'keera logout', or when the directory stops vouching " +
-			"for you.\n\n" +
-			"--url makes this the only line a developer needs: the gateway signed in to " +
-			"becomes the one every later command talks to, with nothing to export into a " +
-			"shell profile. Without it the sign-in goes to KEERA_CONTROL_URL, then to the " +
-			"gateway you last signed in to, then to https://gateway.keera.ch, the hosted " +
-			"deployment. 'keera whoami' says which gateway is in hand.\n\n" +
-			"KEERA_OPERATOR_KEY still works and still wins where it is set. It is the " +
-			"deployment's own credential - shared, unexpiring, every organisation - so it is " +
-			"the one for automation and for the first ten minutes of a deployment, before " +
-			"there is an identity provider to sign in through.",
+		prose: "Opens a browser and signs you in, so commands run as you and the audit log " +
+			"names you. --url also makes that gateway the default for every later command; " +
+			"'keera whoami' says which one is in use. See docs/sso.md.",
 		examples: []string{
 			"keera login                # the hosted gateway",
 			"keera login --url https://keera.example.ch",
@@ -134,16 +121,20 @@ var commands = []command{
 			"nothing needs it: everyone who signs in lands in the only one there is. From " +
 			"the moment there are two, an address matching no organisation's domain is " +
 			"refused rather than put in one - so it is set on every organisation before the " +
-			"second one exists, including the one that was there first.",
+			"second one exists, including the one that was there first. Through a provider " +
+			"with KEERA_OIDC_<NAME>_SIGNUP, such a person creates an organisation of their own " +
+			"instead.",
 		subs: []subcommand{
 			{name: "create", aliases: []string{"add", "new"}, args: "<name>", summary: "create an organisation",
 				flags: []string{"domain", "json"}},
 			{name: "list", aliases: []string{"ls"}, summary: "every organisation", flags: []string{"json"}},
 			{name: "set", aliases: []string{"edit", "update", "rename"}, args: "[<org-id>]", summary: "rename it, or set the email domain whose sign-ins land in it",
-				flags: []string{"name", "domain", "no-domain", "json"},
+				flags: []string{"name", "domain", "no-domain", "lift-limit", "json"},
 				prose: "Names are unique, ignoring case. Everything refers to an organisation " +
 					"by its id, so a rename changes only what it is called. The old name stays " +
-					"in the audit log."},
+					"in the audit log. An organisation somebody created by signing up is " +
+					"limited until it buys credit: --lift-limit opens the models and MCP servers " +
+					"inside this deployment's network, and sandboxes, to it sooner."},
 			{name: "delete", aliases: []string{"rm", "remove"}, args: "<org-id>", summary: "delete an organisation and everything in it",
 				flags: []string{"yes", "json"},
 				prose: "Refused while any of its sandboxes is still live: terminate them first, " +
@@ -208,12 +199,8 @@ var commands = []command{
 			{name: "disable", aliases: []string{"offboard"}, args: "<email-or-id>",
 				summary: "turn a person off, for when they leave",
 				flags:   []string{"org", "yes", "json"},
-				prose: "They cannot sign in and are signed out everywhere. Every key attributed " +
-					"to them is revoked. Where the deployment lends out sandboxes, their agent " +
-					"sandboxes and any that have not started yet are terminated, and the rest " +
-					"are suspended, with the volume kept. Usage and the audit log are kept.\n\n" +
-					"Leaving the directory is not enough on its own: it ends their sign-ins " +
-					"within 15 minutes, but not the keys they already have."},
+				prose: "They are signed out and their keys revoked; leaving the directory alone " +
+					"does not revoke keys. See docs/sso.md."},
 			{name: "enable", args: "<email-or-id>", summary: "let a disabled person sign in again",
 				flags: []string{"org", "json"},
 				prose: "Their old keys stay revoked, so they start with none. Their passkeys " +
@@ -307,7 +294,7 @@ var commands = []command{
 			{name: "add", aliases: []string{"create", "new"}, args: "<alias>", summary: "add a model",
 				flags: []string{"org", "provider", "backend", "product-id", "backend-model", "kind",
 					"description", "max-context", "release-date", "location",
-					"price-in", "price-out", "price-cached",
+					"price-in", "price-out", "price-cached", "price-cache-write",
 					"api-key", "subscription", "disabled", "json"},
 				prose: "--subscription makes each caller's own Claude subscription pay. The " +
 					"gateway then forwards the caller's Claude sign-in and stores no API key, " +
@@ -324,7 +311,7 @@ var commands = []command{
 			{name: "set", aliases: []string{"edit", "update"}, args: "<alias>", summary: "change any of those on an existing model",
 				flags: []string{"org", "provider", "backend", "product-id", "backend-model", "kind",
 					"description", "max-context", "release-date", "location",
-					"price-in", "price-out", "price-cached",
+					"price-in", "price-out", "price-cached", "price-cache-write",
 					"api-key", "no-api-key", "subscription", "no-subscription", "json"}},
 			{name: "enable", args: "<alias>", summary: "serve this model", flags: []string{"org", "json"}},
 			{name: "disable", args: "<alias>", summary: "stop serving it, keeping its declaration",
@@ -455,26 +442,10 @@ var commands = []command{
 		name:    "filter",
 		aliases: []string{"filters"},
 		summary: "what a request may contain, before it is forwarded",
-		prose: "A filter is what every request a guardrail applies it to passes through before " +
-			"it is forwarded. With --mode rewrite, the default, a small model takes credentials " +
-			"or client data out of a prompt that is about to leave the cluster and lets the " +
-			"prompt go. With --mode gate the model edits nothing and answers only whether the " +
-			"request may be sent at all, which costs a verdict instead of the whole " +
-			"conversation written out again.\n\n" +
-			"Both of those cost a second generation on every request the guardrail covers. " +
-			"--mode pattern costs nothing: instead of a model and an instruction it takes " +
-			"--rules, a list of expressions and what each match becomes, applied in the " +
-			"gateway.\n\n" +
-			"Reach for pattern where what must not leave has a shape: an API key, a connection " +
-			"string, an IBAN, a card number. A rule is faster and more reliable than a model at " +
-			"those, gives the same answer every time, and cannot decide to improve somebody's " +
-			"stack trace on the way past. Reach for rewrite or gate where it does not - a " +
-			"customer's name in an ordinary sentence has no shape.\n\n" +
-			"They compose, and the usual shape is one of each with the rules outermost, so the " +
-			"model is never shown what the rules took out.\n\n" +
-			"A filter that cannot run refuses the request rather than forwarding it unfiltered, " +
-			"so 'delete' refuses one a guardrail still names, and says which guardrails to " +
-			"change first.",
+		prose: "A filter reads each request a guardrail applies it to, before it is forwarded. " +
+			"--mode rewrite (the default) and gate use a small model to take data out or refuse " +
+			"the request; --mode pattern applies --rules in the gateway and costs nothing. " +
+			"See docs/filters.md.",
 		subs: []subcommand{
 			{name: "list", aliases: []string{"ls"}, summary: "this organisation's filters", flags: []string{"org", "json"}},
 			{name: "add", aliases: []string{"create", "new"}, args: "<alias>", summary: "add a filter",
@@ -512,36 +483,9 @@ var commands = []command{
 		name:    "router",
 		aliases: []string{"routers"},
 		summary: "which model answers a request",
-		prose: "A router chooses which model answers a request: the large model only for the " +
-			"requests that need it, client data kept inside the cluster, and another model " +
-			"when one is down.\n\n" +
-			"A client names a router where it names a model, and 'keera connect' lists the " +
-			"routers a key may use with its models. A request that names a model is " +
-			"never rerouted. To route everything a scope sends, allow it only the router:\n\n" +
-			"  keera guardrail set project <project-id> --models auto\n\n" +
-			"A router learns what each destination is for from that model's --description, so " +
-			"write those first. A key that may use a router may be sent to any of its " +
-			"destinations.\n\n" +
-			"The modes:\n" +
-			"  instruction   a small local model reads the request. The default, and\n" +
-			"                the only one that costs a generation.\n" +
-			"  size          the smallest destination this request's size was meant\n" +
-			"                for. Each --destination carries its ceiling in estimated\n" +
-			"                tokens; the one without a ceiling takes what is larger.\n" +
-			"  fallback      the order they are written, fixed. The first is the one\n" +
-			"                you want and the rest are what you want when it is not.\n" +
-			"  latency       fastest first, by what each has lately taken to begin.\n" +
-			"  least-busy    emptiest first, by requests this gateway has in flight.\n\n" +
-			"Use fallback when one destination is preferred, and latency or least-busy when they " +
-			"are equals, such as two identical vLLM deployments. A fallback router over equals " +
-			"leaves the second one idle. Latency and load are measured in each gateway process " +
-			"and are not shared or kept across a restart; a tie keeps the order you wrote.\n\n" +
-			"Every mode fails over the same way: a destination that cannot be reached, or " +
-			"answers with a server error, is skipped for the next one. A 4xx is not, because " +
-			"the next destination would refuse the same request. Nothing fails over once an " +
-			"answer has started.\n\n" +
-			"A router's failures are silent, because every request is still answered. Read " +
-			"'router report' to see where requests went.",
+		prose: "A router chooses which model answers a request that names it. The modes are " +
+			"instruction (the default, a small model reads the request), size, fallback, " +
+			"latency and least-busy. See docs/routers.md.",
 		subs: []subcommand{
 			{name: "list", aliases: []string{"ls"}, summary: "this organisation's routers", flags: []string{"org", "json"}},
 			{name: "add", aliases: []string{"create", "new"}, args: "<alias>", summary: "add a router",
@@ -575,25 +519,10 @@ var commands = []command{
 		name:    "sandbox",
 		aliases: []string{"sandboxes", "sbx"},
 		summary: "the machines this gateway lends out",
-		prose: "A sandbox is a machine for one task or one working day. It has the toolchain " +
-			"installed, a home directory that survives a suspend, and its own API key that " +
-			"never reaches your laptop. On Kubernetes a network policy can limit its egress, " +
-			"if the cluster enforces it; podman has no egress control. It expires on its own; " +
-			"'extend' gives it more time.\n\n" +
-			"--project scopes the key the sandbox is given. A sandbox on a project is charged to that " +
-			"project's budget, held to its rate limit, counted against its sandbox quota, and its " +
-			"agent sees only the models the project allows. Without it the sandbox goes in " +
-			"the organisation's oldest project. Only an administrator can choose the project.\n\n" +
-			"'sandbox ssh' runs your own ssh over the gateway's single published port, so there " +
-			"is no second address and no jump host. That also means VS Code's Remote-SSH and " +
-			"JetBrains Gateway work against a sandbox unmodified: they want an ssh transport " +
-			"and nothing else. 'keera sandbox config >> ~/.ssh/config' is the whole of the " +
-			"setup.\n\n" +
-			"With --purpose agent - or 'sandbox agent', which is the same thing with the flags " +
-			"already set - the sandbox is one task's machine instead. Nothing attaches to it, " +
-			"it is terminated rather than suspended when its time runs out, and it names its " +
-			"own session, so 'keera session list' reports what it did as one task rather than " +
-			"inferring the grouping. The --task is passed to it and never stored.",
+		prose: "A sandbox is a machine for one task or one working day, with its own API key " +
+			"and an expiry. 'sandbox ssh' attaches through the gateway's one port, and " +
+			"'sandbox agent' starts one task's machine that ends by pushing a branch. " +
+			"See docs/sandboxes.md.",
 		subs: []subcommand{
 			{name: "classes", summary: "the machines this organisation offers", flags: []string{"org", "json"}},
 			{name: "apply", args: "<file>", summary: "add or update every class a catalogue file declares",
@@ -641,6 +570,53 @@ var commands = []command{
 		},
 	},
 	{
+		name:    "billing",
+		summary: "the bill and the credit for the deployment's own provider keys",
+		prose: "Calls to models on a provider key the deployment holds are billed at the " +
+			"provider's list price. On a deployment that takes payments, organisations pay " +
+			"for them in advance, in CHF, by card through PostFinance Checkout. Without " +
+			"credit, such models are refused; the organisation's own models still work. " +
+			"See docs/billing.md.",
+		subs: []subcommand{
+			{name: "report", aliases: []string{"list", "ls"}, summary: "one month's bill",
+				flags: []string{"month", "org", "json"},
+				prose: "Each currency is summed on its own; nothing is converted. Operators " +
+					"also see what the provider charges and the margin. 'keera billing' on " +
+					"its own is this.",
+				examples: []string{"keera billing", "keera billing --month 2026-09 --json"}},
+			{name: "credit", aliases: []string{"balance", "account"},
+				summary: "the balance, the saved card, the automatic top-up and the latest payments",
+				flags:   []string{"org", "json"}},
+			{name: "topup", aliases: []string{"pay"},
+				summary: "pay for credit: prints the payment page to open",
+				flags:   []string{"amount", "save-card", "org", "json"},
+				prose: "VAT is added on top, if the deployment charges it. The credit is added " +
+					"once PostFinance says the payment went through. --save-card keeps the card " +
+					"for automatic top-ups, and replaces a card saved before.",
+				examples: []string{"keera billing topup --amount 100 --save-card"}},
+			{name: "auto-topup", summary: "charge the saved card when the balance runs low",
+				flags:    []string{"below", "amount", "off", "org", "json"},
+				examples: []string{"keera billing auto-topup --below 50 --amount 200", "keera billing auto-topup --off"},
+				prose: "When a charge fails, no other is tried until the setting is saved " +
+					"again or someone tops up by hand."},
+			{name: "forget-card", aliases: []string{"remove-card"},
+				summary: "remove the saved card, which stops the automatic top-up",
+				flags:   []string{"org"}},
+			{name: "payments", summary: "the payments, newest first",
+				flags: []string{"limit", "org", "json"}},
+			{name: "grant", summary: "add credit without a payment, or take some away (operators)",
+				flags: []string{"amount", "note", "org", "json"},
+				prose: "For a trial, a refund, or money that came by bank transfer. A negative " +
+					"--amount takes credit away. --note is required: it says why, and is shown to " +
+					"the organisation.",
+				examples: []string{`keera billing grant --org org_123 --amount 50 --note "trial"`}},
+			{name: "invoiced", args: "<on|off>",
+				summary: "let an organisation use the keys without credit (operators)",
+				flags:   []string{"org", "json"},
+				prose:   "For an organisation billed by invoice instead. Its use is still metered."},
+		},
+	},
+	{
 		name:    "failures",
 		aliases: []string{"failure"},
 		summary: "the calls that did not deliver, and what the backend said",
@@ -677,21 +653,10 @@ var commands = []command{
 		summary: "the finished configuration for an editor",
 		args:    "[<client>] [flags]",
 		flags:   []string{"key", "org", "subscription", "model", "project", "json"},
-		prose: "The panel's \"Connect client\" dialog for whoever does not have the panel. It " +
-			"prints the configuration block on stdout and everything around it on stderr, so it " +
-			"can be redirected straight into the file it names.\n\n" +
-			"The configuration lists every chat model and router your key may use, the first " +
-			"as the default. --key picks one of your keys; without it, your first active key. " +
-			"With no key of your own, as with the operator key, it lists every one.\n\n" +
-			"With no client it lists the ones this deployment can configure.\n\n" +
-			"'keera connect claude-code --subscription' is for Claude Code signed in to a " +
-			"Claude plan. It needs 'keera login' first. It gives this machine its own " +
-			"subscription key and writes it into ~/.claude/settings.json, so there is no key " +
-			"to copy. An administrator gets a new key. A member takes over a subscription key " +
-			"an administrator issued them that no other machine holds yet. When the " +
-			"organisation's managed settings already set the gateway's address, it leaves the " +
-			"address to them. Running it again replaces that key. --project puts a new key in a " +
-			"project, which only an administrator may choose. --model picks the model it starts with.",
+		prose: "Prints an editor's configuration on stdout and the instructions on stderr, so " +
+			"it can be redirected into the file it names. With no client it lists the ones " +
+			"this deployment can configure. --subscription sets up Claude Code on a Claude " +
+			"plan; see docs/subscriptions.md.",
 		examples: []string{
 			"keera connect",
 			"keera connect opencode --key laptop > ~/.config/opencode/opencode.json",

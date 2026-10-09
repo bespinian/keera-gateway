@@ -94,3 +94,54 @@ func TestProviderLabelCanBeSet(t *testing.T) {
 		t.Errorf("label = %q, want the one that was set", got[0].Label())
 	}
 }
+
+// Sign-up makes whoever creates an organisation its administrator. An admin
+// group decides that role for the whole gateway, so the two together would
+// take it away again at the next sign-in.
+func TestSignUpIsRefusedAlongsideAnAdminGroup(t *testing.T) {
+	t.Setenv("KEERA_OIDC_PROVIDERS", "google,entra")
+	t.Setenv("KEERA_OIDC_GOOGLE_ISSUER", "https://accounts.google.com")
+	t.Setenv("KEERA_OIDC_GOOGLE_CLIENT_ID", "google-client")
+	t.Setenv("KEERA_OIDC_GOOGLE_CLIENT_SECRET", "google-secret")
+	t.Setenv("KEERA_OIDC_GOOGLE_DOMAINS", "*")
+	t.Setenv("KEERA_OIDC_GOOGLE_SIGNUP", "true")
+	t.Setenv("KEERA_OIDC_ENTRA_ISSUER", "https://login.microsoftonline.com/tenant/v2.0")
+	t.Setenv("KEERA_OIDC_ENTRA_CLIENT_ID", "entra-client")
+	t.Setenv("KEERA_OIDC_ENTRA_CLIENT_SECRET", "entra-secret")
+	t.Setenv("KEERA_OIDC_ENTRA_DOMAINS", "example.ch")
+
+	c := Config{PublicURL: "https://keera.example.ch", OIDC: oidcProviders("https://keera.example.ch")}
+	if !c.OIDC[0].SignUp || c.OIDC[1].SignUp {
+		t.Fatalf("sign-up = %v and %v, want Google's own setting only",
+			c.OIDC[0].SignUp, c.OIDC[1].SignUp)
+	}
+	if err := c.validateOIDC(); err != nil {
+		t.Fatalf("sign-up without admin groups: %v", err)
+	}
+
+	t.Setenv("KEERA_OIDC_ENTRA_ADMIN_GROUPS", "keera-admins")
+	c.OIDC = oidcProviders("https://keera.example.ch")
+	if err := c.validateOIDC(); err == nil {
+		t.Error("sign-up alongside an admin group was accepted")
+	}
+}
+
+// Anyone who signs up runs an organisation, and an organisation chooses where
+// its models are, so the operator has to say what inside the network it may
+// reach.
+func TestSignUpNeedsPrivateHostsSet(t *testing.T) {
+	t.Setenv("KEERA_OIDC_PROVIDERS", "google")
+	t.Setenv("KEERA_OIDC_GOOGLE_ISSUER", "https://accounts.google.com")
+	t.Setenv("KEERA_OIDC_GOOGLE_CLIENT_ID", "google-client")
+	t.Setenv("KEERA_OIDC_GOOGLE_CLIENT_SECRET", "google-secret")
+	t.Setenv("KEERA_OIDC_GOOGLE_SIGNUP", "true")
+	c := Config{OIDC: oidcProviders("https://keera.example.ch")}
+
+	if _, _, err := c.privateHosts(); err == nil {
+		t.Error("sign-up without KEERA_UPSTREAM_PRIVATE was accepted")
+	}
+	t.Setenv("KEERA_UPSTREAM_PRIVATE", "keera-engine")
+	if limit, hosts, err := c.privateHosts(); err != nil || !limit || len(hosts) != 1 {
+		t.Errorf("keera-engine = %v %v, %v", limit, hosts, err)
+	}
+}

@@ -1333,12 +1333,16 @@ func (m *Manager) piConfig(base string, models []policy.Model, session string) s
 // that will answer. Embedding models are left out: a coding agent cannot use
 // them.
 func (m *Manager) reachableModels(ctx context.Context, req CreateRequest) []policy.Model {
+	var failed error
 	limits := func(scope policy.ScopeType, id string) *policy.Limits {
 		if id == "" {
 			return nil
 		}
 		lim, err := m.st.GetGuardrail(ctx, scope, id)
 		if err != nil {
+			if !errors.Is(err, store.ErrNotFound) {
+				failed = err
+			}
 			return nil
 		}
 		return &lim
@@ -1351,6 +1355,12 @@ func (m *Manager) reachableModels(ctx context.Context, req CreateRequest) []poli
 		limits(policy.ScopeProject, req.ProjectID),
 		nil,
 	)
+	// Without the guardrails the list would offer models they forbid.
+	if failed != nil {
+		m.log.Warn("sandbox: reading the guardrails for the agent configuration failed",
+			"error", failed)
+		return nil
+	}
 
 	catalogue, err := m.st.ListModels(ctx, req.OrgID)
 	if err != nil {

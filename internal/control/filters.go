@@ -44,19 +44,8 @@ func (s *Server) listFilters(w http.ResponseWriter, r *http.Request, p *authn.Pr
 // Every member may read it: these are counts of the organisation's own
 // traffic, which members already see on the Dashboard.
 func (s *Server) filterReport(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	orgID, ok := s.queryOrg(w, r, p)
+	out, orgID, ok := hookReport(s, w, r, p, "filter", s.st.FilterReportFor, s.st.Filter)
 	if !ok {
-		return
-	}
-	from, to, ok := queryWindow(w, r.URL.Query())
-	if !ok {
-		return
-	}
-	alias := r.PathValue("alias")
-
-	report, err := s.st.FilterReportFor(r.Context(), orgID, alias, from, to)
-	if err != nil {
-		s.fail(w, err)
 		return
 	}
 	names, err := s.st.ProjectNames(r.Context(), orgID)
@@ -64,19 +53,7 @@ func (s *Server) filterReport(w http.ResponseWriter, r *http.Request, p *authn.P
 		s.fail(w, err)
 		return
 	}
-	out := map[string]any{
-		"report": report, "project_names": names, "currency": s.opts.Currency,
-	}
-	// A deleted filter keeps its traffic, so the report is served either way
-	// and "filter" is left out rather than answering 404.
-	f, err := s.st.Filter(r.Context(), orgID, alias)
-	switch {
-	case err == nil:
-		out["filter"] = f
-	case !errors.Is(err, store.ErrNotFound):
-		s.fail(w, err)
-		return
-	}
+	out["project_names"] = names
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 

@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -61,7 +60,7 @@ func (anthropicDialect) text(b *body) (textDoc, error) {
 	if s, ok := system.(string); ok {
 		d.add(s, func(v string) { d.roots["system"] = v })
 	}
-	for _, block := range objects(system) {
+	for _, block := range d.objects(system) {
 		addTextBlock(d, block)
 	}
 	msgs, err := d.root(b, "messages")
@@ -71,18 +70,21 @@ func (anthropicDialect) text(b *body) (textDoc, error) {
 	if _, ok := msgs.([]any); !ok {
 		return nil, errors.New("the 'messages' field must be an array")
 	}
-	for _, msg := range objects(msgs) {
+	for _, msg := range d.objects(msgs) {
 		d.addField(msg, "content")
-		for _, block := range objects(msg["content"]) {
+		for _, block := range d.objects(msg["content"]) {
 			addTextBlock(d, block)
 			if block["type"] != "tool_result" {
 				continue
 			}
 			d.addField(block, "content")
-			for _, inner := range objects(block["content"]) {
+			for _, inner := range d.objects(block["content"]) {
 				addTextBlock(d, inner)
 			}
 		}
+	}
+	if d.err != nil {
+		return nil, d.err
 	}
 	return d, nil
 }
@@ -165,6 +167,8 @@ func (anthropicDialect) clamp(b *body, limit int) {
 // needsNative is always empty: every Messages request can be translated.
 func (anthropicDialect) needsNative(*body) string { return "" }
 
+func (anthropicDialect) onKey(*body) string { return "" }
+
 // auth sends the key as x-api-key, which is what the Messages API reads, with
 // the client's API version and beta flags.
 func (anthropicDialect) auth(client http.Header) func(http.Header, string) {
@@ -189,6 +193,10 @@ type anthropicUsage struct {
 	OutputTokens        int `json:"output_tokens"`
 	CacheCreationTokens int `json:"cache_creation_input_tokens"`
 	CacheReadTokens     int `json:"cache_read_input_tokens"`
+	// CacheCreation splits the cache writes by how long they are kept.
+	CacheCreation struct {
+		HourTokens int `json:"ephemeral_1h_input_tokens"`
+	} `json:"cache_creation"`
 }
 
 // merge keeps the larger of each count. The stream reports them in pieces:
@@ -198,17 +206,19 @@ func (u *anthropicUsage) merge(o anthropicUsage) {
 	u.OutputTokens = max(u.OutputTokens, o.OutputTokens)
 	u.CacheCreationTokens = max(u.CacheCreationTokens, o.CacheCreationTokens)
 	u.CacheReadTokens = max(u.CacheReadTokens, o.CacheReadTokens)
+	u.CacheCreation.HourTokens = max(u.CacheCreation.HourTokens, o.CacheCreation.HourTokens)
 }
 
-// tokens is the record in the gateway's terms, where cached tokens are part of
-// the input. A cache write is charged as input: the gateway has no rate for
-// it, and Anthropic's is a quarter more.
+// tokens is the record in the gateway's terms, where cache reads and writes
+// are part of the input.
 func (u anthropicUsage) tokens() *tokenUsage {
 	t := &tokenUsage{
 		InputTokens:  u.InputTokens + u.CacheCreationTokens + u.CacheReadTokens,
 		OutputTokens: u.OutputTokens,
 	}
 	t.InputDetails.CachedTokens = u.CacheReadTokens
+	t.InputDetails.CacheWriteTokens = u.CacheCreationTokens
+	t.InputDetails.CacheWriteHourTokens = u.CacheCreation.HourTokens
 	t.TotalTokens = t.InputTokens + t.OutputTokens
 	return t
 }
@@ -239,17 +249,11 @@ type anthropicStream struct {
 	deltas         int
 }
 
-var (
-	contentDeltaType = []byte(`"content_block_delta"`)
-	messageStartType = []byte(`"message_start"`)
-	messageDeltaType = []byte(`"message_delta"`)
-)
-
 func (s *anthropicStream) event(payload []byte) []byte {
-	switch {
-	case bytes.Contains(payload, contentDeltaType):
+	switch eventType(payload) {
+	case "content_block_delta":
 		s.deltas++
-	case bytes.Contains(payload, messageStartType):
+	case "message_start":
 		var ev struct {
 			Message struct {
 				Usage *anthropicUsage `json:"usage"`
@@ -260,7 +264,7 @@ func (s *anthropicStream) event(payload []byte) []byte {
 			s.started = true
 		}
 		return renameIn(payload, "message", s.alias)
-	case bytes.Contains(payload, messageDeltaType):
+	case "message_delta":
 		var ev struct {
 			Usage *anthropicUsage `json:"usage"`
 		}

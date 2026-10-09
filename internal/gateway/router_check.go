@@ -110,8 +110,9 @@ var routerCheckSample = []struct{ prompt, asks string }{
 // shy, and account numbers go to a hosted endpoint.
 //
 // Like a model or filter check, this is not a tenant's request: no rate limit,
-// budget, billing or usage row. Its cost is reported, since every request
-// naming the router pays the same.
+// budget or usage row, but a model on the deployment's key needs credit and
+// is billed. Its cost is reported, since every request naming the router pays
+// the same.
 func (s *Server) CheckRouter(ctx context.Context, rt policy.Router) RouterProbe {
 	p := RouterProbe{Alias: rt.Alias, Mode: rt.Mode}
 	if !rt.Decides() {
@@ -133,6 +134,9 @@ func (s *Server) CheckRouter(ctx context.Context, rt policy.Router) RouterProbe 
 	if p.Error = routerCheckProblem(rt, p.Destinations, m, found); p.Error != "" {
 		return p
 	}
+	if p.Error = s.checkCredit(rt.OrgID, m); p.Error != "" {
+		return p
+	}
 
 	// Only reachable destinations are offered, exactly as on a real request.
 	offered := rt
@@ -142,6 +146,7 @@ func (s *Server) CheckRouter(ctx context.Context, rt policy.Router) RouterProbe 
 	for _, sample := range routerCheckSample {
 		chose, err := s.decide(ctx, offered, m, []string{sample.prompt})
 		p.CostMicros += chose.micros
+		s.billCheck(rt.OrgID, chose.bills)
 		d := RouterDecision{Prompt: sample.prompt, Asks: sample.asks}
 		if err != nil {
 			d.Error = err.Error()

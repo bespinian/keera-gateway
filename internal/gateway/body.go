@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // body is a shallow view of a JSON request body.
@@ -44,7 +46,49 @@ func parseBody(raw []byte) (*body, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := checkKeys(fields); err != nil {
+		return nil, err
+	}
 	return &body{fields: fields, order: order}, nil
+}
+
+// readNames are the keys the gateway reads in a request: at its top level, in
+// an MCP tool call, and in the messages, blocks and items that hold its text.
+var readNames = foldedNames(
+	"_meta", "arguments", "call_id", "content", "data", "description",
+	"disable_parallel_tool_use", "format", "id", "image_url", "input", "input_schema",
+	"instructions", "max_completion_tokens", "max_output_tokens", "max_tokens",
+	"media_type", "messages", "model", "name", "output", "parallel_tool_calls",
+	"parameters", "prompt", "refusal", "role", "schema", "source", "stop_sequences",
+	"stream", "stream_options", "strict", "system", "temperature", "text",
+	"tool_choice", "tool_use_id", "tools", "top_k", "top_p", "type", "url",
+)
+
+func foldedNames(names ...string) map[string]string {
+	out := make(map[string]string, len(names))
+	for _, n := range names {
+		out[foldKey(n)] = n
+	}
+	return out
+}
+
+// foldKey folds case the way encoding/json does when it matches a key to a
+// field, so "Content", "CONTENT" and "ſystem" fold like "content" and "system".
+func foldKey(k string) string {
+	return strings.Map(func(r rune) rune { return unicode.ToUpper(unicode.ToLower(r)) }, k)
+}
+
+// checkKeys refuses a key that is one the gateway reads, spelled with other
+// case. Filters look keys up as they are spelled, but encoding/json ignores
+// case, and so may an inference server: a model would read text under
+// "Content" that no filter saw.
+func checkKeys[V any](obj map[string]V) error {
+	for k := range obj {
+		if n, ok := readNames[foldKey(k)]; ok && n != k {
+			return fmt.Errorf("the key '%s' must be spelled '%s'", k, n)
+		}
+	}
+	return nil
 }
 
 // syntaxError re-reads an invalid body only to borrow encoding/json's message,

@@ -28,27 +28,15 @@ func chatAlias(url string) policy.Model {
 	}
 }
 
-// sse writes a server-sent event stream of the given data payloads.
-func sse(w http.ResponseWriter, chunks ...string) {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.WriteHeader(http.StatusOK)
-	for _, c := range chunks {
-		_, _ = io.WriteString(w, "data: "+c+"\n\n")
-	}
-	_, _ = io.WriteString(w, "data: [DONE]\n\n")
-}
-
 // This is the failure the check exists for. The endpoint answers 200, the model
 // produces prose, and `tool_calls` stays empty - which is what a vLLM tool-call
 // parser that does not match the model looks like. Nothing logs an error and it
 // reads to developers as "the model is bad", so a check that called this
 // healthy would be worse than no check at all.
 func TestCheckModelCatchesAToolCallReturnedAsText(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		sse(w,
-			`{"model":"keera-code","choices":[{"delta":{"content":"<tool_call>{\"name\": \"get_build_status\""}}]}`,
-			`{"model":"keera-code","choices":[{"delta":{"content":", \"arguments\": {}}</tool_call>"}}]}`)
-	}))
+	upstream := httptest.NewServer(sseBackend(
+		`{"model":"keera-code","choices":[{"delta":{"content":"<tool_call>{\"name\": \"get_build_status\""}}]}`,
+		`{"model":"keera-code","choices":[{"delta":{"content":", \"arguments\": {}}</tool_call>"}}]}`))
 	defer upstream.Close()
 
 	p := probeServer(t).CheckModel(context.Background(), chatAlias(upstream.URL))
@@ -67,10 +55,8 @@ func TestCheckModelCatchesAToolCallReturnedAsText(t *testing.T) {
 }
 
 func TestCheckModelPassesOnARealToolCall(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		sse(w, `{"model":"keera-code","choices":[{"delta":{"tool_calls":[`+
-			`{"index":0,"function":{"name":"get_build_status","arguments":"{}"}}]}}]}`)
-	}))
+	upstream := httptest.NewServer(sseBackend(`{"model":"keera-code","choices":[{"delta":{"tool_calls":[` +
+		`{"index":0,"function":{"name":"get_build_status","arguments":"{}"}}]}}]}`))
 	defer upstream.Close()
 
 	p := probeServer(t).CheckModel(context.Background(), chatAlias(upstream.URL))
@@ -86,9 +72,7 @@ func TestCheckModelPassesOnARealToolCall(t *testing.T) {
 // mis-parsed one, and has to read differently: nothing here is misconfigured,
 // the model simply will not drive an agent.
 func TestCheckModelReportsAModelThatCallsNoTool(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		sse(w, `{"model":"keera-code","choices":[{"delta":{"content":"I cannot know that."}}]}`)
-	}))
+	upstream := httptest.NewServer(sseBackend(`{"model":"keera-code","choices":[{"delta":{"content":"I cannot know that."}}]}`))
 	defer upstream.Close()
 
 	p := probeServer(t).CheckModel(context.Background(), chatAlias(upstream.URL))
@@ -120,7 +104,7 @@ func TestCheckModelWarnsWhenTheBackendDoesNotStream(t *testing.T) {
 	if p.Streamed {
 		t.Error("streamed = true for a JSON response")
 	}
-	if !hasWarning(p.Warnings, "did not stream") {
+	if !anyContains(p.Warnings, "did not stream") {
 		t.Errorf("warnings = %v, want one about streaming", p.Warnings)
 	}
 }
@@ -129,10 +113,8 @@ func TestCheckModelWarnsWhenTheBackendDoesNotStream(t *testing.T) {
 // serve is the other silent misconfiguration: vLLM answers as whatever it does
 // serve, and only the reply says so.
 func TestCheckModelWarnsWhenTheBackendServesAnotherModel(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		sse(w, `{"model":"qwen-2.5-coder","choices":[{"delta":{"tool_calls":`+
-			`[{"index":0,"function":{"name":"get_build_status"}}]}}]}`)
-	}))
+	upstream := httptest.NewServer(sseBackend(`{"model":"qwen-2.5-coder","choices":[{"delta":{"tool_calls":` +
+		`[{"index":0,"function":{"name":"get_build_status"}}]}}]}`))
 	defer upstream.Close()
 
 	p := probeServer(t).CheckModel(context.Background(), chatAlias(upstream.URL))
@@ -142,7 +124,7 @@ func TestCheckModelWarnsWhenTheBackendServesAnotherModel(t *testing.T) {
 	if p.Served != "qwen-2.5-coder" {
 		t.Errorf("served_model = %q, want the name the backend answered with", p.Served)
 	}
-	if !hasWarning(p.Warnings, "served-model-name") {
+	if !anyContains(p.Warnings, "served-model-name") {
 		t.Errorf("warnings = %v, want one naming --served-model-name", p.Warnings)
 	}
 }
@@ -254,8 +236,8 @@ func TestCheckModelPresentsTheModelCredential(t *testing.T) {
 	seen := make(chan string, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen <- r.Header.Get("Authorization")
-		sse(w, `{"choices":[{"delta":{"tool_calls":[{"index":0,`+
-			`"function":{"name":"get_build_status"}}]}}]}`)
+		sseBackend(`{"choices":[{"delta":{"tool_calls":[{"index":0,`+
+			`"function":{"name":"get_build_status"}}]}}]}`)(w, r)
 	}))
 	defer upstream.Close()
 
@@ -270,15 +252,6 @@ func TestCheckModelPresentsTheModelCredential(t *testing.T) {
 	if got := <-seen; got != "Bearer sk-ant-upstream" {
 		t.Errorf("Authorization = %q, want the model's own credential", got)
 	}
-}
-
-func hasWarning(warnings []string, substr string) bool {
-	for _, w := range warnings {
-		if strings.Contains(w, substr) {
-			return true
-		}
-	}
-	return false
 }
 
 func TestSampleNeverCutsACharacterInHalf(t *testing.T) {

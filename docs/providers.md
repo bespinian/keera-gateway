@@ -41,8 +41,9 @@ models:
 ```
 
 `provider` fills in every field the entry leaves out: the endpoint, the context
-window, the three prices (input, output and cached input), a description, the
-release date and the location. The providers are `anthropic`, `openai`,
+window, the prices (input, output, cached input, cache write, and the dearer
+ones for a long prompt where the provider charges more), a description, the release date and
+the location. The providers are `anthropic`, `openai`,
 `infomaniak`, `stepping-stone`, `phoeniqs` and `cscs`; `keera model providers`
 lists them with their models. For a `backend_model` not in that table, the entry
 must set `input_micros_per_mtok` and `output_micros_per_mtok` itself. A model
@@ -118,6 +119,10 @@ An administrator adds the model to their own organisation. An operator passes
 
 ## Where the credential lives
 
+If the deployment holds its own key for the provider, a model takes none: it
+uses that key and is billed at list price. See [billing.md](billing.md). The
+rest of this section is about keys an organisation enters itself.
+
 The key is stored on the model, encrypted with AES-GCM under
 `KEERA_SECRET_KEY`, so a Postgres dump holds only ciphertext. Set it in the
 panel or with `keera model set <alias> --api-key @-`. Each model holds its
@@ -136,9 +141,11 @@ backend on another host is refused unless it gives the key again, or removes it
 with `--no-api-key`. Otherwise an administrator could point a model someone
 else set up at a host of their own and read its key.
 
-The gateway does not read keys from its own environment variables. A model that
-could name one would let an administrator send any of the gateway's secrets,
-such as `KEERA_SECRET_KEY`, to a server of their choice.
+A model cannot name one of the gateway's environment variables as its key. It
+would let an administrator send any of the gateway's secrets, such as
+`KEERA_SECRET_KEY`, to a server of their choice. The deployment's own provider
+keys are the one exception, and they only ever go to the provider's own
+endpoint ([billing.md](billing.md)).
 
 An Infomaniak product id is not a secret. It goes in the catalogue entry next to
 the model id.
@@ -169,14 +176,16 @@ The provider table holds each provider's published list price, in its own
 currency, as micro-units per million tokens. Use it as a starting point for
 showback, not as a contract.
 
-Each model has three prices: input, output, and cached input (an input token
-the provider served from its prompt cache).
+Each model has four prices: input, output, cached input (an input token the
+provider served from its prompt cache) and cache write (an input token the
+provider wrote to it).
 
 - **The currency may not be yours.** Anthropic and OpenAI are in USD, Infomaniak,
   stepping stone, Phoeniqs and CSCS in CHF. Nothing is converted. Override the prices on the
   entry.
 - **List price is not your price.** Put a negotiated rate, a discount or an
-  internal cross-charge on the entry.
+  internal cross-charge on the entry. A model on the deployment's own key is
+  the exception: it is always billed at list price ([billing.md](billing.md)).
 
 The prices go stale. They are a table in a Go file, not a live feed. The comment
 above the table says when they were last checked.
@@ -191,7 +200,8 @@ charges the cached part at the cached rate, so a row's cost matches the
 provider's console.
 
 stepping stone publishes a cache rate too. The gateway charges it for whatever
-the response reports as cached; see [stepping stone](#stepping-stone).
+the response reports as cached, although stepping stone bills it only from
+about the end of October 2026 (`keera model providers` says so).
 
 Infomaniak, Phoeniqs and CSCS publish no cache discount. Their cached column is empty and every
 input token is charged at the input price. That is correct, not a gap.
@@ -211,6 +221,45 @@ keera model set keera-frontier --price-in 4 --price-cached 0.4
 
 A model in your own infrastructure reports no cache and needs no cached price.
 
+### Cache writes
+
+Anthropic, and OpenAI from `gpt-5.6` on, charge 25% more than the input price
+for the part of the prompt they write to their cache. Both report how much that
+was, as part of the prompt like a cache read. The gateway charges it at the
+cache-write rate. The table has the rate for every model that charges one.
+
+Like the cached price, a cache-write price of zero means none was set, and
+those tokens are charged at the input price. That is right for the providers
+that charge nothing extra.
+
+```sh
+keera model set keera-frontier --price-cache-write 5
+```
+
+### Long prompts
+
+Some models cost more per token when the prompt is long. `claude-haiku-5-5`
+costs five times as much once the prompt is over 100,000 tokens, and most of
+OpenAI's models cost more over 272,000. The prompt
+counts every input token, cached or not, as the provider counts it. The table
+holds both sets of prices for such a model, and the gateway charges the whole
+request at the dearer ones past the threshold: input, cached input, cache write
+and output.
+
+A catalogue entry can set its own:
+
+```yaml
+    long_prompt:
+      above_tokens: 100000
+      input_micros_per_mtok: 500000
+      output_micros_per_mtok: 2500000
+      cached_input_micros_per_mtok: 50000
+      cache_write_micros_per_mtok: 625000
+```
+
+`keera model list --json` (as `long_prompt`) and the control panel show them. The CLI has no flags for
+them: `--price-in` and the others change only the normal prices.
+
 ## Descriptions
 
 A model declared through a provider starts with that provider's description. It
@@ -228,11 +277,11 @@ Must not be sent client data."
 
 ## Known rough edges
 
-These come from the providers' own endpoints. `keera model providers` and the
-panel show each one in a sentence, next to each provider. This is the long
-form.
+`keera model providers`, and the panel next to each provider, show what to
+know about each one: pricing quirks, model ids, beta models and what the table
+leaves out. Below is what those notes do not say.
 
-### Anthropic
+### Anthropic and OpenAI requests are forwarded as they are
 
 **Messages clients reach Anthropic's own API.** A request to `/api/v1/messages`
 (what Claude Code sends) is forwarded to Anthropic's `/v1/messages` without
@@ -241,148 +290,37 @@ rewrites, the system prompt, the output ceiling and blocked hosted tools.
 Prompt caching and thinking work, and cached input is charged at the cached
 rate. The key is sent as `x-api-key`, and the client's `anthropic-version` and
 `anthropic-beta` headers are passed on. An egress proxy in front of Anthropic
-must pass `/v1/messages` as well as `/v1/chat/completions`.
+must pass `/v1/messages` as well as `/v1/chat/completions`. A Claude Team or
+Enterprise plan can pay instead; see [subscriptions.md](subscriptions.md).
 
-**A Claude Team or Enterprise plan can pay instead.** A subscription model
-forwards each person's own Claude sign-in from Claude Code, and stores no key.
-See [subscriptions.md](subscriptions.md).
+**Responses clients reach OpenAI's own API.** A request to `/api/v1/responses`
+(what Codex sends) is forwarded to OpenAI's `/v1/responses` with its reasoning
+items. Besides the guardrails, as for Anthropic, the only change is that a
+reasoning model gets no `temperature` or `top_p`. An egress proxy in front of
+OpenAI must pass `/v1/responses` as well as `/v1/chat/completions`.
 
-**A cache write is charged at the input price.** Anthropic charges 25% more for
-it, and the gateway has no separate rate. A session that writes a lot to the
-cache is billed slightly low.
+**The OpenAI reasoning models take no temperature.** Every OpenAI model whose
+id does not start with `gpt-4`, `gpt-3` or `chatgpt-` refuses `max_tokens`, and
+any `temperature` or `top_p` other than the default. So the gateway sends
+`max_completion_tokens` instead of `max_tokens` to every OpenAI chat model, and
+drops `temperature` and `top_p` for the reasoning models. A client that asked
+for a temperature gets the default.
 
-**Server tools run on Anthropic's side.** A request can ask Anthropic to search
-the web, fetch a URL or connect to an MCP server. Filters see the prompt, not
-what Anthropic fetches. A guardrail with `--block-hosted-tools` removes those
-tools from the request; see [mcp.md](mcp.md#hosted-tools).
+### Also worth knowing
 
-**Every other client uses the OpenAI-compatible endpoint.** Anthropic calls it a
-layer for evaluation, not production, and prompt caching does not work there.
-An agent on it pays full price for every resent token.
-
-### OpenAI
-
-Prompt caching works, and the gateway charges the discounted rate for the
-discounted part (see [Cached input](#cached-input)). A request to
-`/api/v1/responses` (what Codex sends) is forwarded to OpenAI's
-`/v1/responses` with its reasoning items. Besides the guardrails, as for
-Anthropic, the only change is that a reasoning model gets no `temperature` or
-`top_p`, as below. An egress proxy in front of OpenAI must pass `/v1/responses` as
-well as `/v1/chat/completions`.
-
-**Reasoning tokens are billed as output.** OpenAI counts them in
-`completion_tokens`, which Keera prices at the output rate, so the cost is
-right. But they cannot be told apart: the request log does not show how much of
-the cost was reasoning.
-
-**The reasoning models take no temperature.** OpenAI's reasoning models (every
-model whose id does not start with `gpt-4`, `gpt-3` or `chatgpt-`) refuse
-`max_tokens`, and any `temperature` or `top_p` other than the default. So the gateway sends `max_completion_tokens` instead of
-`max_tokens` to every OpenAI chat model, and drops `temperature` and `top_p` for
-the reasoning models. A client that asked for a temperature gets the default.
-
-**Built-in tools run on OpenAI's side.** A Responses request can ask OpenAI to
-search the web or connect to an MCP server. As with Anthropic, filters do not
-see what OpenAI fetches, and `--block-hosted-tools` removes these tools.
-
-**The `gpt-6` models, `gpt-5.5` and `gpt-5.4` have two prices, and the table
-holds one.** Above 272k input tokens, `gpt-5.5` and `gpt-5.4` cost about twice
-as much per token, and the `gpt-6` models twice as much for input and one and a
-half times as much for output. The table has the lower
-price, so long requests are billed low. Set the price yourself if that matters;
-see [What the prices are, and are not](#what-the-prices-are-and-are-not).
-
-**`gpt-5.6-sol` is on a promotional price** until 21 November 2026. After that,
-the table's price is low until a new build, or until you set it yourself.
-
-### Infomaniak
-
-**The endpoint is yours, not one endpoint.** It contains your AI Service's
-product id, so an entry needs `product_id` as well as a key. Both are in the
-Infomaniak console under AI Tools. A wrong id gives a 404 on every request.
-
-**Model ids are the upstream projects' own names**, with capitals:
-`swiss-ai/Apertus-v1.5-70B`, not `apertus`. `keera model providers` lists them.
-They are not valid aliases, so choose your own alias; the panel suggests a
-lowercase one.
-
-**No prompt cache is priced.** See [Cached input](#cached-input).
-
-**The table covers the chat models only.** Infomaniak also serves embedding,
-re-ranking, transcription and image models on the same endpoint. They work, but
-not through the `infomaniak` provider, which serves chat only: declare one with
-no `provider`, `kind: embedding`, the full address in `backends` (with your
-product id in it), `location: ch`, and its own prices. This build has no
-defaults for them.
-
-### stepping stone
-
-**One key per model.** stepping stone issues a separate API key for each model.
-Store each key on its own model.
-
-**The cache discount is not billed yet.** The table has stepping stone's cached
-input rates, but stepping stone only starts to bill them at about the end of
-October 2026. Until then it charges the full input price, so a cached prompt
-costs more on the invoice than in Keera.
-
-**Model ids are the upstream projects' own names**, with capitals, as for
-Infomaniak. Nemotron is `NVIDIA/NVIDIA-Nemotron-3-Super-120B-A12B`.
-
-**The table covers the chat models only**, including the three OCR models,
-which read images of pages and are no use for chat or code. stepping stone also
-serves embedding, re-ranking, audio and image models on the same endpoint.
-Declare one with no `provider`, `kind: embedding`, the endpoint in `backends`,
-`location: ch`, and its own prices.
-
-### Phoeniqs
-
-The Phoeniqs Model Service is documented on
-[documentation.kvant.cloud](https://documentation.kvant.cloud/maas/active-models/).
-
-**Model ids are Phoeniqs's own names**, such as `inference-glm5`, not the
-upstream ones. `keera model providers` lists them.
-
-**The model behind an id can change.** An id keeps its name when Phoeniqs
-upgrades the model to a new minor version: `inference-glm5` is GLM-5.2 today.
-Phoeniqs sends an email only for a new major version or a removed id. The
-table's release dates are those of the models served when it was last checked.
-
-**No prompt cache is priced.** See [Cached input](#cached-input).
-
-**The table covers the chat models only**, including the vision models and one
-document parser, which is no use for chat or code. Phoeniqs also serves
-embedding, re-ranking, OCR and speech models on the same endpoint. Declare one
-with no `provider`, `kind: embedding`, the endpoint in `backends`,
-`location: ch`, and its own prices. DeepSeek OCR is left out because Phoeniqs
-publishes no context window for it.
-
-### CSCS
-
-The Swiss National Supercomputing Centre's inference service is documented on
-[docs.cscs.ch](https://docs.cscs.ch/services/inference/api/).
-
-**A key needs a CSCS project.** The project needs an inference resource. A
-project member then makes a key in the
-[CSCS Inference API UI](https://ui.inference.cscs.ch/login).
-
-**The prices are for academia.** The table has CSCS's pay-per-use fees for
-academia, from its [pricing page](https://ui.inference.cscs.ch/pricing). Your
-project may pay a different rate; set it on the entry.
-
-**No prompt cache is priced.** CSCS bills cached input at the full input price.
-See [Cached input](#cached-input).
-
-**The `-thinking` Apertus models take no tool calls.** A coding agent sends
-tools with every request, so it fails on them. Use them for chat only.
-
-**Model ids are the upstream projects' own names**, with capitals, as for
-Infomaniak.
-
-**It runs from one site.** CSCS warns of pauses for incidents and maintenance,
-and posts them on [inference.status.cscs.ch](https://inference.status.cscs.ch).
-
-**The table covers the chat models only.** CSCS also has an embeddings endpoint
-but publishes no embedding model or price for it.
+- **A promotional price ends.** After `gpt-5.6-sol`'s promotion, the table's
+  price is too low until a new build, or until you set the price yourself.
+- **Upstream model ids are not aliases.** Infomaniak, stepping stone and CSCS
+  use names with capitals, such as `swiss-ai/Apertus-v1.5-70B`. Choose your own
+  alias; the panel suggests a lowercase one.
+- **Embedding models need their own entry**, with no `provider`,
+  `kind: embedding`, the full address in `backends` (for Infomaniak, with your
+  product id in it), `location: ch` and their own prices.
+- **Where to read more:** Phoeniqs on
+  [documentation.kvant.cloud](https://documentation.kvant.cloud/maas/active-models/),
+  CSCS on [docs.cscs.ch](https://docs.cscs.ch/services/inference/api/), its
+  [prices](https://ui.inference.cscs.ch/pricing) and its
+  [status page](https://inference.status.cscs.ch).
 
 ## What is recorded
 

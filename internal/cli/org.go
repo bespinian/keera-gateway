@@ -18,9 +18,10 @@ import (
 // shares, and the arguments after the verb.
 type orgRun struct {
 	*cmdRun
-	name     string
-	domain   string
-	noDomain bool
+	name      string
+	domain    string
+	noDomain  bool
+	liftLimit bool
 }
 
 func orgCmd(ctx context.Context, args []string) error {
@@ -30,6 +31,9 @@ func orgCmd(ctx context.Context, args []string) error {
 	fs.StringVar(&r.domain, "domain", "",
 		"email domain whose sign-ins land in this organisation, such as example.ch")
 	fs.BoolVar(&r.noDomain, "no-domain", false, "remove the organisation's email domain")
+	fs.BoolVar(&r.liftLimit, "lift-limit", false,
+		"open the models and MCP servers inside this deployment's network, and sandboxes, "+
+			"to an organisation that signed up")
 	if done, err := r.parse(); done {
 		return err
 	}
@@ -85,7 +89,10 @@ func (r *orgRun) set(ctx context.Context) error {
 		}
 		orgID = only
 	}
-	change := map[string]string{}
+	change := map[string]any{}
+	if r.liftLimit {
+		change["limited"] = false
+	}
 	if r.name != "" {
 		change["name"] = r.name
 	}
@@ -107,6 +114,10 @@ func (r *orgRun) set(ctx context.Context) error {
 			_, _ = fmt.Fprintln(w, "\nThis decides where a first sign-in lands. "+
 				"Everyone already here keeps the organisation they are in.")
 		}
+		if r.liftLimit {
+			_, _ = fmt.Fprintln(w, "\nThe models and MCP servers inside this deployment's "+
+				"network, and sandboxes, are open to it now.")
+		}
 	})
 }
 
@@ -124,8 +135,12 @@ func (r *orgRun) list(ctx context.Context) error {
 		}
 		w.header("ID\tNAME\tEMAIL DOMAIN\tCREATED")
 		for _, o := range orgs {
+			name := o.Name
+			if o.Limited {
+				name += " " + style.warn("(limited)")
+			}
 			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-				o.ID, o.Name, orNotSet(o.EmailDomain), o.CreatedAt.Format(time.DateOnly))
+				o.ID, name, orNotSet(o.EmailDomain), o.CreatedAt.Format(time.DateOnly))
 		}
 	})
 }

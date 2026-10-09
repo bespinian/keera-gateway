@@ -133,7 +133,8 @@ translated at all, so the provider checks it rather than the gateway.
   prompt to Anthropic without passing its filters.
 - A Responses request with `previous_response_id` or `conversation` continues a
   conversation stored at OpenAI. Only OpenAI's own models can read it, so any
-  other model refuses it with a 400.
+  other model refuses it with a 400. So does an OpenAI model on the
+  deployment's own key ([billing.md](billing.md)).
 
 The hosted providers in `internal/catalog/providers.go` are **not** adapters.
 They are a table of defaults - endpoint, context window, prices,
@@ -196,7 +197,9 @@ counts against its rate limits and budgets, and shows in its usage.
 5. **Filters**, outermost level first: each may rewrite the request or refuse it,
    with a model and an instruction or with a list of expressions.
 6. Prepend the standing system prompt (chat requests only; a completion has no
-   place for one), take out blocked hosted tools, and clamp the output ceiling.
+   place for one), take out hosted tools if the guardrail blocks them or the
+   model is on the deployment's key ([billing.md](billing.md)), and clamp the
+   output ceiling.
    For a subscription model the prompt goes after Claude Code's own system
    blocks instead; see [subscriptions.md](subscriptions.md#what-is-sent-to-anthropic).
 7. Forward, stream the answer back, and record what it cost.
@@ -237,7 +240,8 @@ A coding agent keeps one response open for minutes. So the gateway limits only
 how long the inference plane may take to _start_ responding
 (`KEERA_UPSTREAM_HEADER_TIMEOUT`, two minutes by default), never the response
 itself. A router uses the same timeout to decide that a destination did not
-answer in time.
+answer in time. A model on the deployment's own provider key gets 15 minutes
+instead ([billing.md](billing.md#what-is-billed)).
 
 Usage is recorded once per request, when it ends, from the token counts the
 inference plane reported. If the client disconnects before those arrive, the
@@ -274,9 +278,11 @@ the same thing however many gateways are running. Each replica reads spend again
 every `KEERA_SPEND_REFRESH` (10 s), so a budget can be overshot by about that
 much traffic.
 
-Set `KEERA_REDIS_URL` to keep the buckets in Redis. One script then decides all
-of a request's levels atomically, and every replica spends the same allowance -
-see `internal/ratelimit/redis.go`.
+Set `KEERA_REDIS_URL` (`redis://host:6379/0`, or `rediss://` for TLS) to keep
+the buckets in Redis. One script then decides all of a request's levels
+atomically, and every replica spends the same allowance - see
+`internal/ratelimit/redis.go`. Use a single Redis endpoint, not Redis Cluster,
+which refuses a script whose keys are in different slots.
 
 - **Redis holds buckets and nothing else.** No guardrails, spend, sessions or
   prompts. Nothing in it has to survive a restart.
@@ -310,13 +316,14 @@ and its value. A rate limit answers 429 with `Retry-After`. A budget answers
 
 Other response headers:
 
-| Header                  | What it holds                                                                             |
-| ----------------------- | ----------------------------------------------------------------------------------------- |
-| `X-Keera-Model`         | the alias that answered; behind a router, the destination it chose                        |
-| `X-Keera-Router`        | the router and where it sent the request ([routers.md](routers.md#what-a-client-can-see)) |
-| `X-Keera-Filters`       | the filters that acted on the request ([filters.md](filters.md#what-is-recorded))         |
-| `X-Keera-Removed-Tools` | the hosted tools a guardrail took out ([mcp.md](mcp.md#hosted-tools))                     |
-| `X-Request-Id`          | the request's id; one the client sends is kept                                            |
+| Header                   | What it holds                                                                             |
+| ------------------------ | ----------------------------------------------------------------------------------------- |
+| `X-Keera-Model`          | the alias that answered; behind a router, the destination it chose                        |
+| `X-Keera-Router`         | the router and where it sent the request ([routers.md](routers.md#what-a-client-can-see)) |
+| `X-Keera-Filters`        | the filters that acted on the request ([filters.md](filters.md#what-is-recorded))         |
+| `X-Keera-Removed-Tools`  | the hosted tools a guardrail took out ([mcp.md](mcp.md#hosted-tools))                     |
+| `X-Keera-Removed-Fields` | the fields that cost extra, taken out on the deployment's key ([billing.md](billing.md))  |
+| `X-Request-Id`           | the request's id; one the client sends is kept                                            |
 
 ## Errors
 
@@ -326,8 +333,8 @@ Errors come in the shape of the API that was called. The codes:
 | ------ | ------------------------------------------------------------------------------------------------------------------------ |
 | 400    | `missing_model`, `invalid_body`, `unsupported_parameter`, `context_length_exceeded`, `subscription_model`                |
 | 401    | `missing_api_key`, `invalid_api_key`, `expired_api_key`, `revoked_api_key`, `subscription_key`, `missing_claude_sign_in` |
-| 402    | `budget_exceeded`                                                                                                        |
-| 403    | `filter_refused`                                                                                                         |
+| 402    | `budget_exceeded`, `credit_exhausted` ([billing.md](billing.md#pay-in-advance))                                          |
+| 403    | `filter_refused`, `subscriptions_off`, `org_limited`                                                                     |
 | 404    | `model_not_found`: no such model, or the key may not use it; `mcp_server_not_found`; `not_found`: no such route          |
 | 413    | `request_too_large` (`KEERA_MAX_BODY_BYTES`), `filter_input_too_large`                                                   |
 | 429    | `rate_limit_exceeded` (`rpm`), `token_rate_limit_exceeded` (`tpm`)                                                       |

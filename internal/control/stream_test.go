@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -24,32 +23,8 @@ import (
 // up, and the cursor the stream reads from. Set KEERA_TEST_DATABASE_URL to run
 // it; without one it skips, exactly as the store's own tests do.
 
-func streamStore(t *testing.T) (*store.Store, context.Context) {
-	t.Helper()
-	dsn := os.Getenv("KEERA_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("set KEERA_TEST_DATABASE_URL to run the control-plane tests that need one")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	t.Cleanup(cancel)
-
-	st, err := store.Open(ctx, dsn, 8)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(st.Close)
-	if _, err := st.Migrate(ctx); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	if _, err := st.Pool().Exec(ctx,
-		"TRUNCATE usage_events, spend, api_keys, models, projects, orgs RESTART IDENTITY CASCADE"); err != nil {
-		t.Fatalf("truncate: %v", err)
-	}
-	return st, ctx
-}
-
 func TestRequestStreamCarriesARequestAsItIsRecorded(t *testing.T) {
-	st, ctx := streamStore(t)
+	st, ctx := testStore(t)
 	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_1", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
@@ -126,7 +101,7 @@ func TestRequestStreamCarriesARowCommittedAfterANewerOne(t *testing.T) {
 	// Two replicas writing the log: one has inserted a row and not committed
 	// yet, the other inserts after it and commits first. The stream sees the
 	// newer row first and must still send the older one when it lands.
-	st, ctx := streamStore(t)
+	st, ctx := testStore(t)
 	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_1", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
@@ -197,18 +172,10 @@ func TestRequestStreamIsAdministratorOnly(t *testing.T) {
 	// The rows name other people's keys and carry text the inference plane
 	// wrote, so this is held to what the log itself is held to - and it is a
 	// separate route, which is exactly how such a check gets forgotten.
-	srv := New(nil, nil, nil, nil, Options{OperatorKey: testOperatorKey},
-		slog.New(slog.DiscardHandler))
-	ts := httptest.NewServer(srv.Handler())
-	defer ts.Close()
-
-	res, err := ts.Client().Get(ts.URL + httpx.ControlPrefix + "/v1/requests/stream?org_id=org_1")
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	defer func() { _ = res.Body.Close() }()
-	if res.StatusCode != http.StatusUnauthorized {
-		t.Errorf("status = %d for a caller with no credential, want 401", res.StatusCode)
+	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
+	w := invoke(s.requestStream, member("org_1"), http.MethodGet, "/v1/requests/stream?org_id=org_1", "")
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d for a member, want 403", w.Code)
 	}
 }
 

@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"testing/iotest"
+	"time"
 )
 
 // sseStream builds a stream the way vLLM emits one.
@@ -314,8 +316,8 @@ func (c *countingFlusher) Flush() { c.flushes++ }
 func pipeFlushes(t *testing.T, src io.Reader) int {
 	t.Helper()
 	w := &countingFlusher{ResponseWriter: httptest.NewRecorder()}
-	f := &flushBeforeRead{src: src, flusher: http.NewResponseController(w)}
-	if _, err := pipeSSE(w, f.later, f, "", true, DefaultMaxResponseBytes); err != nil {
+	f := &flushBeforeRead{src: src, dst: w, flusher: http.NewResponseController(w)}
+	if _, err := pipeSSE(f, f.later, f, "", true, DefaultMaxResponseBytes); err != nil {
 		t.Fatal(err)
 	}
 	f.now()
@@ -335,5 +337,45 @@ func TestFlushBeforeReadFlushesBeforeWaiting(t *testing.T) {
 	in := sseStream(deltaChunk, deltaChunk)
 	if n := pipeFlushes(t, iotest.OneByteReader(strings.NewReader(in))); n != 3 {
 		t.Errorf("flushed %d times, want 3: one per event when each arrives alone", n)
+	}
+}
+
+func TestAPingReachesTheClientWhileTheUpstreamWaits(t *testing.T) {
+	// The ping is written while the reading goroutine waits on the upstream,
+	// so it must not wait for that read to end before it is flushed.
+	restore := anthropicPingInterval
+	anthropicPingInterval = time.Millisecond
+	t.Cleanup(func() { anthropicPingInterval = restore })
+
+	w := &signalFlusher{ResponseWriter: httptest.NewRecorder(), flushed: make(chan struct{})}
+	stalled := stallUntil(w.flushed)
+	f := &flushBeforeRead{
+		src:     io.MultiReader(stalled, strings.NewReader(sseStream(deltaChunk))),
+		dst:     w,
+		flusher: http.NewResponseController(w),
+	}
+	if _, err := (anthropicShape{}).pipe(f, f.later, f, "keera-code", true, DefaultMaxResponseBytes); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// signalFlusher closes flushed on its first flush.
+type signalFlusher struct {
+	http.ResponseWriter
+	once    sync.Once
+	flushed chan struct{}
+}
+
+func (s *signalFlusher) Flush() { s.once.Do(func() { close(s.flushed) }) }
+
+// stallUntil is an upstream that says nothing until done is closed.
+type stallUntil chan struct{}
+
+func (s stallUntil) Read([]byte) (int, error) {
+	select {
+	case <-s:
+		return 0, io.EOF
+	case <-time.After(2 * time.Second):
+		return 0, errors.New("nothing was flushed while the upstream was quiet")
 	}
 }

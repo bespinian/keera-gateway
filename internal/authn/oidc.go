@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -43,6 +44,10 @@ type OIDCConfig struct {
 	// that proves the address itself, such as Google. Empty allows any too;
 	// the configuration refuses that when there are several providers.
 	Domains []string
+	// SignUp lets a person whose sign-in matches no organisation create one,
+	// or accept an invitation. Only for a provider that proves every address,
+	// since anyone it vouches for can then become an administrator.
+	SignUp bool
 }
 
 // AnyDomain in Domains lets a provider vouch for every address.
@@ -60,6 +65,12 @@ func (c OIDCConfig) vouchesFor(domain string) bool {
 		}
 	}
 	return false
+}
+
+// vouchesForAll reports whether this provider may place someone with any
+// address.
+func (c OIDCConfig) vouchesForAll() bool {
+	return len(c.Domains) == 0 || slices.Contains(c.Domains, AnyDomain)
 }
 
 // ReservedProvider is the provider name the gateway uses for sign-ins of its
@@ -210,6 +221,10 @@ func (o *OIDC) IsGoogle() bool { return isGoogle(o.cfg.IssuerURL) }
 // Mapping returns how this provider's groups map onto Keera Gateway's roles.
 func (o *OIDC) Mapping() RoleMapping { return o.cfg.Mapping }
 
+// SignUp reports whether a person this provider vouches for may create an
+// organisation.
+func (o *OIDC) SignUp() bool { return o.cfg.SignUp }
+
 // Providers are the identity providers a deployment offers, in the order the
 // sign-in screen should show them.
 type Providers []*OIDC
@@ -266,6 +281,18 @@ func (p Providers) Only() *OIDC {
 func (p Providers) AdminFromDirectory() bool {
 	for _, o := range p {
 		if o.cfg.Mapping.DecidesAdmin() {
+			return true
+		}
+	}
+	return false
+}
+
+// SignUp reports whether any provider lets people sign up. The deployment is
+// then one where strangers create organisations, so a sign-in is never put
+// in an organisation only because it is the only one.
+func (p Providers) SignUp() bool {
+	for _, o := range p {
+		if o.cfg.SignUp {
 			return true
 		}
 	}
@@ -434,10 +461,18 @@ func (o *OIDC) checkIdentity(id Identity, claims map[string]any, groupsClaim str
 	// The email picks the organisation and can name an operator, so it must not be
 	// one the directory calls unverified. A missing claim is trusted: most
 	// enterprise providers issue none.
-	if verified, present := boolClaim(claims, "email_verified"); present && !verified {
+	verified, present := boolClaim(claims, "email_verified")
+	if present && !verified {
 		return fmt.Errorf("the identity provider says %s is not a verified "+
 			"address, and Keera places a sign-in in an organisation by its email domain; "+
 			"verify it in the directory, or map a verified claim for this client", id.Email)
+	}
+	// Except where strangers sign up through a provider that vouches for every
+	// domain: anyone it lets claim an address could take an invitation to it.
+	if !present && o.cfg.SignUp && o.cfg.vouchesForAll() {
+		return fmt.Errorf("%s sign-in allows sign-up for any address, so it must prove "+
+			"each one, and the identity provider did not say %s is verified; send the "+
+			"email_verified claim, or limit this provider to its own domains", o.cfg.Label(), id.Email)
 	}
 	return nil
 }

@@ -41,6 +41,7 @@ func subscriptionHarness(t *testing.T, res *policy.Resolved) (*harness, chan see
 			Kind: policy.KeySubscription}, nil, nil, nil)
 	}
 	h.src.resolved[subKey] = res
+	h.srv.opts.ClaudeSubscriptions = true
 	return h, seen
 }
 
@@ -360,4 +361,27 @@ func errorOf(t *testing.T, resp *http.Response) (code, msg string) {
 		t.Fatal(errors.Join(err, errors.New(string(raw))))
 	}
 	return doc.Error.Code, doc.Error.Message
+}
+
+// Claude subscriptions are off unless the deployment turns them on. Then a
+// subscription key reaches nothing, and a sign-in is told to use a Keera key.
+func TestClaudeSubscriptionsAreOffByDefault(t *testing.T) {
+	h, _ := subscriptionHarness(t, nil)
+	h.srv.opts.ClaudeSubscriptions = false
+
+	resp := claudeCode(t, h, "/v1/chat/completions",
+		`{"model":"keera-frontier","messages":[{"role":"user","content":"hi"}]}`, nil)
+	if code, _ := errorOf(t, resp); resp.StatusCode != http.StatusForbidden ||
+		code != "subscriptions_off" {
+		t.Errorf("subscription key: status %d, code %q; want 403 subscriptions_off",
+			resp.StatusCode, code)
+	}
+
+	resp = claudeCode(t, h, "/v1/messages", planMessage, map[string]string{KeyHeader: ""})
+	if _, msg := errorOf(t, resp); resp.StatusCode != http.StatusUnauthorized ||
+		strings.Contains(msg, "--subscription") ||
+		!strings.Contains(msg, "does not take Claude subscriptions") {
+		t.Errorf("sign-in without a key: status %d: %q; want 401 saying subscriptions are off",
+			resp.StatusCode, msg)
+	}
 }

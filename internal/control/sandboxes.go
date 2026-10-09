@@ -90,6 +90,19 @@ func (s *Server) putSandboxClass(w http.ResponseWriter, r *http.Request, p *auth
 		return
 	}
 	class.OrgID = orgID
+	if !p.Unrestricted() {
+		ok, err := s.mayUseImage(r.Context(), class)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		if !ok {
+			forbid(w, "only an operator can give a class the image "+class.Image+
+				"; an administrator can use the images of the classes every organisation "+
+				"starts with, and those KEERA_SANDBOX_IMAGES allows")
+			return
+		}
+	}
 	if err := s.st.UpsertSandboxClass(r.Context(), &class); err != nil {
 		s.fail(w, err)
 		return
@@ -98,6 +111,39 @@ func (s *Server) putSandboxClass(w http.ResponseWriter, r *http.Request, p *auth
 	// No cache to clear: the gateway never holds sandbox classes, and each new
 	// sandbox reads its class from the database.
 	httpx.WriteJSON(w, http.StatusOK, class)
+}
+
+// mayUseImage reports whether an administrator may give a class its image.
+// Sandbox pods pull with the deployment's registry credentials, so any image
+// would let one organisation run another's private image, or the operator's.
+// A class may keep the image it has.
+func (s *Server) mayUseImage(ctx context.Context, class policy.SandboxClass) (bool, error) {
+	for _, t := range s.opts.Template.SandboxClasses {
+		if t.Image == class.Image {
+			return true, nil
+		}
+	}
+	if imageUnder(class.Image, s.opts.SandboxImages) {
+		return true, nil
+	}
+	old, err := s.st.SandboxClass(ctx, class.OrgID, class.Name)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	return err == nil && old.Image == class.Image, err
+}
+
+// imageUnder reports whether image is one of prefixes, a tag or digest of
+// one, or under one that ends in a slash. So "registry.example.ch/sandbox"
+// allows its tags but not "registry.example.ch/sandbox-other".
+func imageUnder(image string, prefixes []string) bool {
+	for _, p := range prefixes {
+		rest, ok := strings.CutPrefix(image, p)
+		if ok && (rest == "" || strings.HasSuffix(p, "/") || rest[0] == ':' || rest[0] == '@') {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) deleteSandboxClass(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
@@ -282,6 +328,16 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request, p *authn.
 	}
 	ttl, ok := sandboxTTL(w, in.TTL)
 	if !ok {
+		return
+	}
+	// A sandbox is a machine of the deployment's, so an organisation that
+	// signed itself up waits for its first payment.
+	if org, err := s.st.OrgByID(r.Context(), orgID); err != nil {
+		s.fail(w, err)
+		return
+	} else if org.Limited {
+		httpx.WriteError(w, http.StatusForbidden, "permission_error", "org_limited",
+			"sandboxes run on this deployment's machines, and "+policy.LockedMessage)
 		return
 	}
 	limits, err := s.sandboxLimits(r.Context(), orgID, in.ProjectID)

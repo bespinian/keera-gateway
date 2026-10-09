@@ -58,7 +58,8 @@ func db(t *testing.T) (*Store, context.Context) {
 	t.Cleanup(cancel)
 	if _, err := testStore.pool.Exec(ctx, `TRUNCATE orgs, projects, users, api_keys, guardrails,
 		models, filters, filter_runs, routers, usage_events, spend, audit_log, sessions,
-		login_flows, cli_codes, cli_tokens, sandboxes, sandbox_classes, mcp_servers, tool_calls
+		login_flows, cli_codes, cli_tokens, sandboxes, sandbox_classes, mcp_servers, tool_calls,
+		billing_lines, credit_accounts, payments
 		RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("emptying the database: %v", err)
 	}

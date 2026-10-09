@@ -192,6 +192,7 @@ func TestAnUnsaidEnabledServesANewModelAndKeepsAnOldOnesState(t *testing.T) {
 func TestASubscriptionModelIsAnthropicsAPIWithNoKey(t *testing.T) {
 	st, ctx := routerStore(t)
 	s := routerServer(ctx, t, st)
+	s.opts.ClaudeSubscriptions = true
 	const plan = `{"kind":"chat","provider":"anthropic","backends":["https://api.anthropic.com/v1"],
 		"backend_model":"claude-opus-5-5","subscription":true,"enabled":true`
 
@@ -217,7 +218,8 @@ func TestASubscriptionModelIsAnthropicsAPIWithNoKey(t *testing.T) {
 func TestAModelARouterUsesDoesNotBecomeASubscriptionModel(t *testing.T) {
 	st, ctx := routerStore(t)
 	s := routerServer(ctx, t, st)
-	if code, out := putRouter(t, s, "auto", validRouter()); code != http.StatusOK {
+	s.opts.ClaudeSubscriptions = true
+	if code, out := putTo(t, s, "/v1/routers/auto", validRouter()); code != http.StatusOK {
 		t.Fatalf("putRouter: %d %s", code, out)
 	}
 	const plan = `{"kind":"chat","provider":"anthropic","backends":["https://api.anthropic.com/v1"],
@@ -235,5 +237,16 @@ func TestAModelARouterUsesDoesNotBecomeASubscriptionModel(t *testing.T) {
 		if err != nil || saved.Subscription {
 			t.Errorf("%s: saved = %+v, %v; want it unchanged", alias, saved, err)
 		}
+	}
+}
+
+// Without Claude subscriptions, no model is made a subscription model.
+func TestNoSubscriptionModelWhileSubscriptionsAreOff(t *testing.T) {
+	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
+	w := callModel(s.putModel, admin("org_1"), http.MethodPut, "claude", "?org_id=org_1",
+		`{"kind":"chat","provider":"anthropic","backends":["https://api.anthropic.com/v1"],
+		"backend_model":"claude-opus-5-5","subscription":true,"enabled":true}`)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "KEERA_CLAUDE_SUBSCRIPTIONS") {
+		t.Errorf("status = %d %s; want 400 naming the setting", w.Code, w.Body)
 	}
 }

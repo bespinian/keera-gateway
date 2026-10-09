@@ -3,6 +3,7 @@ package usage
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync/atomic"
 	"time"
@@ -56,12 +57,17 @@ type Writer interface {
 // for the database. If the database is away longer than the buffer holds,
 // events are dropped and counted rather than blocking inference. The count is
 // logged and reported by Dropped.
+//
+// Events that carry bills have a queue of their own, written first. Anyone can
+// send requests the gateway refuses, and their events must not crowd out what
+// an organisation pays for.
 type Recorder struct {
 	st   Writer
 	log  *slog.Logger
 	opts Options
 
 	ch      chan store.Event
+	billed  chan store.Event
 	dropped atomic.Int64
 	// failing is set while the last write failed. The buffer will not drain
 	// soon then, so a request does not wait for space that is not coming.
@@ -74,18 +80,23 @@ type Recorder struct {
 func NewRecorder(st Writer, opts Options, log *slog.Logger) *Recorder {
 	opts.setDefaults()
 	return &Recorder{
-		st:   st,
-		log:  log,
-		opts: opts,
-		ch:   make(chan store.Event, opts.Buffer),
-		done: make(chan struct{}),
+		st:     st,
+		log:    log,
+		opts:   opts,
+		ch:     make(chan store.Event, opts.Buffer),
+		billed: make(chan store.Event, opts.Buffer),
+		done:   make(chan struct{}),
 	}
 }
 
 // Record queues one event.
 func (r *Recorder) Record(e store.Event) {
+	ch := r.ch
+	if len(e.Bills) > 0 {
+		ch = r.billed
+	}
 	select {
-	case r.ch <- e:
+	case ch <- e:
 		return
 	default:
 	}
@@ -96,7 +107,7 @@ func (r *Recorder) Record(e store.Event) {
 	t := time.NewTimer(r.opts.BlockFor)
 	defer t.Stop()
 	select {
-	case r.ch <- e:
+	case ch <- e:
 	case <-t.C:
 		r.drop()
 	}
@@ -124,6 +135,14 @@ func (r *Recorder) Run(ctx context.Context) {
 	b := &batch{r: r, events: make([]store.Event, 0, r.opts.BatchSize)}
 	for {
 		select {
+		case e := <-r.billed:
+			b.add(ctx, e)
+			continue
+		default:
+		}
+		select {
+		case e := <-r.billed:
+			b.add(ctx, e)
 		case e := <-r.ch:
 			b.add(ctx, e)
 		case <-t.C:
@@ -142,6 +161,8 @@ func (r *Recorder) drain(ctx context.Context, b *batch) {
 	defer cancel()
 	for {
 		select {
+		case e := <-r.billed:
+			b.add(ctx, e)
 		case e := <-r.ch:
 			b.add(ctx, e)
 		default:
@@ -173,7 +194,15 @@ func (b *batch) flush(ctx context.Context) {
 	defer cancel()
 	// A failed batch is not retried: the write may have landed before the
 	// error, and a second copy would bill the requests twice.
-	if err := b.r.st.WriteEvents(ctx, b.events); err != nil {
+	err := b.r.st.WriteEvents(ctx, b.events)
+	if lost, ok := errors.AsType[*store.LostEvents](err); ok {
+		// The rest were written, so the database is fine.
+		b.r.log.Error("usage events were refused by the database", "error", err,
+			"events", lost.N)
+		b.r.dropped.Add(int64(lost.N))
+		b.r.written.Add(int64(n - lost.N))
+		b.r.failing.Store(false)
+	} else if err != nil {
 		b.r.log.Error("writing usage events failed", "error", err, "events", n)
 		b.r.dropped.Add(int64(n))
 		b.r.failing.Store(true)

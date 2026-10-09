@@ -46,5 +46,10 @@ $GO list -mod=vendor -deps \
     done
   done
 
+# The control panel embeds this font. It is not a Go module, so the build graph
+# above does not see it.
+printf '\n%s\nSpace Grotesk, the control panel'\''s display font\n\n' "$rule"
+cat internal/webui/fonts/OFL.txt
+
 printf '\n%s\nTrademarks\n\n' "$rule"
 cat internal/webui/marks/NOTICE

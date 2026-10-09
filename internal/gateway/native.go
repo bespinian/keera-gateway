@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
-	"github.com/bespinian/keera-gateway/internal/store"
 )
 
 // Two client APIs are also a hosted provider's own: the Anthropic Messages API
@@ -48,6 +47,9 @@ type dialect interface {
 	usage(raw []byte) *tokenUsage
 	// stream reads a streamed answer as it passes through.
 	stream(alias string) nativeStream
+	// onKey makes a body fit to send on the deployment's key, or says why it
+	// cannot be. See docs/billing.md.
+	onKey(b *body) string
 	// stripHostedTools takes out the tools the provider runs on its own
 	// servers, and returns what it took out. See hosted.go.
 	stripHostedTools(b *body) []string
@@ -69,50 +71,21 @@ type nativeStream interface {
 	counts() (usage *tokenUsage, deltas int, partial bool)
 }
 
-// openingOf is the first user message in msgs, encoded as firstUserMessage
-// reads it out of a translated body.
-func openingOf(msgs []oaiMessage) (json.RawMessage, bool) {
-	for _, m := range msgs {
-		if m.Role != "user" {
-			continue
-		}
-		var v any = m
-		if m.Content != nil {
-			v = m.Content
-		}
-		raw, err := json.Marshal(v)
-		return raw, err == nil
+// eventType is the type an event's data names. It is read from the JSON, not
+// searched for in the bytes: the data can quote what the client sent, such as
+// its metadata or a stop sequence, and a client could otherwise make the event
+// that carries the usage record look like another.
+func eventType(payload []byte) string {
+	var ev struct {
+		Type string `json:"type"`
 	}
-	return nil, false
+	_ = json.Unmarshal(payload, &ev)
+	return ev.Type
 }
 
 // speaksNative reports whether a destination is sent the client's own API.
 func speaksNative(d dialect, m policy.Model) bool {
 	return d != nil && m.Provider == d.provider()
-}
-
-// relayNativeBuffered is relayBuffered for an answer in the client's own API:
-// only the model name changes.
-func (s *Server) relayNativeBuffered(c *call, resp *http.Response, answered time.Time) {
-	raw, ok := s.readAnswer(c, resp, answered)
-	if !ok {
-		return
-	}
-	var usage *tokenUsage
-	if resp.StatusCode < 300 {
-		usage = c.surf.dialect.usage(raw)
-		raw = renameIn(raw, "", c.alias)
-	}
-	if msg := bufferedError(raw, resp.StatusCode, resp.StatusCode); msg != "" {
-		c.ev.Error = msg
-	}
-	c.w.WriteHeader(resp.StatusCode)
-	_, _ = c.w.Write(raw)
-	c.ev.TTFT = time.Since(c.tr.start)
-	c.tr.since(store.SpanRespond, c.alias, answered, "")
-	if usage != nil {
-		setUsage(&c.ev, usage)
-	}
 }
 
 // pipeNative forwards a provider's own event stream, flushing every event, and
@@ -280,6 +253,8 @@ type treeDoc struct {
 	roots  map[string]any
 	values []string
 	set    []func(string)
+	// err is the first misspelled key the walk met. See checkKeys.
+	err error
 }
 
 func newTreeDoc() *treeDoc { return &treeDoc{roots: map[string]any{}} }
@@ -333,12 +308,16 @@ func (d *treeDoc) apply(b *body, replaced []string) error {
 	return nil
 }
 
-// objects is the objects in a decoded array, skipping anything else.
-func objects(v any) []map[string]any {
+// objects is the objects in a decoded array, skipping anything else. It
+// checks their keys, as each holds text the filters read.
+func (d *treeDoc) objects(v any) []map[string]any {
 	arr, _ := v.([]any)
 	out := make([]map[string]any, 0, len(arr))
 	for _, e := range arr {
 		if obj, ok := e.(map[string]any); ok {
+			if err := checkKeys(obj); err != nil && d.err == nil {
+				d.err = err
+			}
 			out = append(out, obj)
 		}
 	}

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/authn"
+	"github.com/bespinian/keera-gateway/internal/catalog"
 	"github.com/bespinian/keera-gateway/internal/gateway"
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/policy"
@@ -60,13 +61,18 @@ type Config struct {
 	// whoever configured them: loopback and the cloud metadata service by
 	// default. See docs/install.md.
 	UpstreamDeny []netip.Prefix
+	// LimitPrivate keeps organisations from addresses inside the network,
+	// except through the host names in PrivateHosts. KEERA_UPSTREAM_PRIVATE
+	// sets both.
+	LimitPrivate bool
+	PrivateHosts []string
 	CacheTTL     time.Duration
 	SpendRefresh time.Duration
 
 	// UsageRetention and AuditRetention are how long usage events and audit
 	// entries are kept. Ended sandboxes and keys go with usage. Zero, the
 	// default, keeps them for ever, because billing and audits depend on them.
-	// See docs/sizing.md.
+	// See "Retention and sizing" in docs/install.md.
 	UsageRetention time.Duration
 	AuditRetention time.Duration
 
@@ -78,6 +84,17 @@ type Config struct {
 	// Currency is a label carried into reports. All money is stored as integer
 	// micro-units of it.
 	Currency string
+
+	// Platform is the deployment's own provider keys. An organisation's
+	// models of such a provider use it and are billed for it. See
+	// docs/billing.md.
+	Platform catalog.Platform
+	// Payments is how organisations pay for those keys in advance. Nil
+	// without a PostFinance Checkout account: then nobody pays in advance.
+	Payments *Payments
+	// ClaudeSubscriptions lets Claude Code signed in to a Claude plan through,
+	// paid by that plan. Off by default. See docs/subscriptions.md.
+	ClaudeSubscriptions bool
 
 	// Redis is the Redis the replicas share their rate limits through, read
 	// from KEERA_REDIS_URL. Nil, the default, keeps limits per process, so N
@@ -135,6 +152,7 @@ func Load() (Config, error) {
 		RedisPrefix:           env("KEERA_REDIS_PREFIX", ratelimit.DefaultRedisPrefix),
 		Sandbox:               sandboxConfig(),
 		UI:                    envBool("KEERA_UI", true),
+		ClaudeSubscriptions:   envBool("KEERA_CLAUDE_SUBSCRIPTIONS", false),
 		PublicURL:             strings.TrimRight(env("KEERA_PUBLIC_URL", ""), "/"),
 	}
 	c.OIDC = oidcProviders(c.PublicURL)
@@ -148,6 +166,15 @@ func Load() (Config, error) {
 		return c, fmt.Errorf("KEERA_UPSTREAM_DENY: %w", err)
 	}
 	c.UpstreamDeny = deny
+	if c.LimitPrivate, c.PrivateHosts, err = c.privateHosts(); err != nil {
+		return c, err
+	}
+	if c.Platform, err = platformKeys(); err != nil {
+		return c, err
+	}
+	if c.Payments, err = payments(c.Platform, c.PublicURL); err != nil {
+		return c, err
+	}
 	// Parsed here, so a typo stops the start before the database is touched.
 	if u := env("KEERA_REDIS_URL", ""); u != "" {
 		opt, err := redis.ParseURL(u)
@@ -304,7 +331,55 @@ func (c Config) validateOIDC() error {
 				"address itself, such as Google", OIDCEnvPrefix(p.Name), p.Name, authn.AnyDomain)
 		}
 	}
+	return c.validateSignUp()
+}
+
+// validateSignUp refuses sign-up where an admin group decides who is an
+// administrator. That decision covers the whole gateway, so the person who
+// created an organisation would be a member again at their next sign-in, and
+// the organisation would have no administrator.
+func (c Config) validateSignUp() error {
+	var signUp, group string
+	for _, p := range c.OIDC {
+		if !p.Configured() {
+			continue
+		}
+		if p.SignUp && signUp == "" {
+			signUp = p.Name
+		}
+		if p.Mapping.DecidesAdmin() && group == "" {
+			group = p.Name
+		}
+	}
+	if signUp != "" && group != "" {
+		return fmt.Errorf("%sSIGNUP and %sADMIN_GROUPS cannot both be set: an admin group "+
+			"decides the administrator role for the whole gateway, so whoever creates an "+
+			"organisation would lose it at their next sign-in", OIDCEnvPrefix(signUp),
+			OIDCEnvPrefix(group))
+	}
 	return nil
+}
+
+// privateHosts reads KEERA_UPSTREAM_PRIVATE. Where strangers can sign up, it
+// must be set: by default an organisation reaches the whole private network,
+// and anyone who signs up runs one.
+func (c Config) privateHosts() (bool, []string, error) {
+	raw := env("KEERA_UPSTREAM_PRIVATE", "")
+	if raw == "" {
+		for _, p := range c.OIDC {
+			if p.Configured() && p.SignUp {
+				return false, nil, fmt.Errorf("%sSIGNUP lets anyone create an organisation, "+
+					"so set KEERA_UPSTREAM_PRIVATE to the hosts inside this network they may "+
+					"reach, such as keera-engine, or to none or all", OIDCEnvPrefix(p.Name))
+			}
+		}
+		return false, nil, nil
+	}
+	limit, hosts, err := gateway.ParsePrivateHosts(raw)
+	if err != nil {
+		return false, nil, fmt.Errorf("KEERA_UPSTREAM_PRIVATE: %w", err)
+	}
+	return limit, hosts, nil
 }
 
 // oidcProviders reads the identity providers KEERA_OIDC_PROVIDERS names.
@@ -349,6 +424,7 @@ func providerFrom(prefix, name, redirect string, operators []string) authn.OIDCC
 			Default:        authn.Role(env(prefix+"DEFAULT_ROLE", string(authn.RoleMember))),
 		},
 		Domains: envList(prefix + "DOMAINS"),
+		SignUp:  envBool(prefix+"SIGNUP", false),
 	}
 }
 
@@ -460,6 +536,10 @@ type SandboxConfig struct {
 	StorageClass     string
 	ServiceAccount   string
 	ImagePullSecrets []string
+	// Images are the image prefixes an organisation's administrator may give
+	// a class, besides the images of the template's classes. Any other image
+	// needs an operator: pods pull with the deployment's credentials.
+	Images []string
 
 	// PublicURL is the gateway as a sandbox sees it, usually the in-cluster
 	// Service rather than the ingress. Empty falls back to the deployment's
@@ -513,6 +593,7 @@ func sandboxConfig() SandboxConfig {
 		StorageClass:     env("KEERA_SANDBOX_STORAGE_CLASS", ""),
 		ServiceAccount:   env("KEERA_SANDBOX_SERVICE_ACCOUNT", ""),
 		ImagePullSecrets: envList("KEERA_SANDBOX_IMAGE_PULL_SECRETS"),
+		Images:           envList("KEERA_SANDBOX_IMAGES"),
 		PublicURL:        strings.TrimRight(env("KEERA_SANDBOX_PUBLIC_URL", ""), "/"),
 		IdleSuspend:      envDuration("KEERA_SANDBOX_IDLE_SUSPEND", 0),
 		Warm:             envBool("KEERA_SANDBOX_WARM", false),

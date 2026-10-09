@@ -41,33 +41,9 @@ func (s *Server) listRouters(w http.ResponseWriter, r *http.Request, p *authn.Pr
 // and so whether it is worth having. A router's failures are quiet, because
 // every request it places still gets an answer.
 func (s *Server) routerReport(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	orgID, ok := s.queryOrg(w, r, p)
-	if !ok {
-		return
+	if out, _, ok := hookReport(s, w, r, p, "router", s.st.RouterReportFor, s.st.Router); ok {
+		httpx.WriteJSON(w, http.StatusOK, out)
 	}
-	from, to, ok := queryWindow(w, r.URL.Query())
-	if !ok {
-		return
-	}
-	alias := r.PathValue("alias")
-
-	report, err := s.st.RouterReportFor(r.Context(), orgID, alias, from, to)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	out := map[string]any{"report": report, "currency": s.opts.Currency}
-	// A deleted router keeps its traffic, so the report is served either way
-	// and "router" is left out rather than answering 404.
-	rt, err := s.st.Router(r.Context(), orgID, alias)
-	switch {
-	case err == nil:
-		out["router"] = rt
-	case !errors.Is(err, store.ErrNotFound):
-		s.fail(w, err)
-		return
-	}
-	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 // ordersBy says, for the error messages, what orders the destinations of a
@@ -305,6 +281,11 @@ func checkCeilings(w http.ResponseWriter, rt policy.Router) bool {
 		return false
 	}
 }
+
+// subscriptionsOff refuses a subscription model or key while the deployment
+// does not take Claude subscriptions.
+const subscriptionsOff = "this deployment does not take Claude subscriptions; " +
+	"its operator turns them on with KEERA_CLAUDE_SUBSCRIPTIONS"
 
 // subscriptionReader refuses a subscription model as the model a filter or a
 // router runs on. Only a caller's own sign-in reaches it, and that sign-in is

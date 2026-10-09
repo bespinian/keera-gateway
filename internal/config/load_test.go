@@ -460,22 +460,25 @@ func TestAProviderNamedTwiceIsRefused(t *testing.T) {
 	}
 }
 
-func TestADefaultRoleThatIsNotARoleIsRefused(t *testing.T) {
+func TestADefaultRoleThatIsNotAdminOrMemberIsRefused(t *testing.T) {
 	// It decides what everybody who matches no group gets, so a typo here is a
 	// deployment where nobody can sign in - or one where the wrong people can.
-	_, err := loadWith(t, valid(map[string]string{
-		"KEERA_PUBLIC_URL":              "https://keera.example.ch",
-		"KEERA_OIDC_PROVIDERS":          "okta",
-		"KEERA_OIDC_OKTA_ISSUER":        "https://accounts.example.ch",
-		"KEERA_OIDC_OKTA_CLIENT_ID":     "keera",
-		"KEERA_OIDC_OKTA_CLIENT_SECRET": "a-secret",
-		"KEERA_OIDC_OKTA_DEFAULT_ROLE":  "administrator",
-	}))
-	if err == nil {
-		t.Fatal("an unknown default role was accepted")
-	}
-	if !strings.Contains(err.Error(), "admin or member") {
-		t.Errorf("error = %q, want it to name the roles that exist", err)
+	// Operator spans organisations, so it comes only from settings that name
+	// who holds it: as a default it would make a whole directory operators.
+	for _, role := range []string{"administrator", "operator"} {
+		_, err := loadWith(t, valid(map[string]string{
+			"KEERA_PUBLIC_URL":              "https://keera.example.ch",
+			"KEERA_OIDC_PROVIDERS":          "okta",
+			"KEERA_OIDC_OKTA_ISSUER":        "https://accounts.example.ch",
+			"KEERA_OIDC_OKTA_CLIENT_ID":     "keera",
+			"KEERA_OIDC_OKTA_CLIENT_SECRET": "a-secret",
+			"KEERA_OIDC_OKTA_DEFAULT_ROLE":  role,
+		}))
+		if err == nil {
+			t.Errorf("a default role of %s was accepted", role)
+		} else if !strings.Contains(err.Error(), "admin or member") {
+			t.Errorf("%s: error = %q, want it to name the roles that can be defaults", role, err)
+		}
 	}
 }
 
@@ -614,22 +617,6 @@ func TestProvidersShareNothing(t *testing.T) {
 	}
 }
 
-// The operator role spans organisations, so it comes only from settings that
-// name who holds it. A default of operator would make a whole directory one.
-func TestADefaultRoleOfOperatorIsRefused(t *testing.T) {
-	_, err := loadWith(t, valid(map[string]string{
-		"KEERA_PUBLIC_URL":              "https://keera.example.ch",
-		"KEERA_OIDC_PROVIDERS":          "okta",
-		"KEERA_OIDC_OKTA_ISSUER":        "https://accounts.example.ch",
-		"KEERA_OIDC_OKTA_CLIENT_ID":     "keera",
-		"KEERA_OIDC_OKTA_CLIENT_SECRET": "a-secret",
-		"KEERA_OIDC_OKTA_DEFAULT_ROLE":  "operator",
-	}))
-	if err == nil {
-		t.Fatal("a default role of operator was accepted")
-	}
-}
-
 // A passkey belongs to a host name, and browsers run WebAuthn only on https
 // or on localhost.
 func TestPasskeysNeedAPublicURLABrowserAccepts(t *testing.T) {
@@ -679,5 +666,19 @@ func TestTheGatewayKeepsAwayFromItsHostByDefault(t *testing.T) {
 	// A typo must not quietly open the host up.
 	if _, err := loadWith(t, valid(map[string]string{"KEERA_UPSTREAM_DENY": "127.0.0.1/33"})); err == nil {
 		t.Error("an unreadable deny list was accepted")
+	}
+}
+
+func TestPrivateHostsLimitWhatOrganisationsReach(t *testing.T) {
+	c, err := loadWith(t, valid(nil))
+	if err != nil || c.LimitPrivate {
+		t.Errorf("default = %v, %v; want the private network open", c.LimitPrivate, err)
+	}
+	c, err = loadWith(t, valid(map[string]string{"KEERA_UPSTREAM_PRIVATE": "keera-engine"}))
+	if err != nil || !c.LimitPrivate || !slices.Equal(c.PrivateHosts, []string{"keera-engine"}) {
+		t.Errorf("keera-engine = %v %v, %v", c.LimitPrivate, c.PrivateHosts, err)
+	}
+	if _, err := loadWith(t, valid(map[string]string{"KEERA_UPSTREAM_PRIVATE": "keera-engine:8000"})); err == nil {
+		t.Error("a host with a port was accepted")
 	}
 }

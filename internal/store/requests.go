@@ -83,9 +83,12 @@ type Request struct {
 	// prompt cache at a lower price. Without it the cost cannot be recomputed
 	// from the counts.
 	CachedInputTokens int64 `json:"cached_input_tokens"`
-	OutputTokens      int64 `json:"output_tokens"`
-	CostMicros        int64 `json:"cost_micros"`
-	LatencyMS         int64 `json:"latency_ms"`
+	// CacheWriteTokens is the part of InputTokens the provider wrote to its
+	// prompt cache, for the same reason.
+	CacheWriteTokens int64 `json:"cache_write_tokens"`
+	OutputTokens     int64 `json:"output_tokens"`
+	CostMicros       int64 `json:"cost_micros"`
+	LatencyMS        int64 `json:"latency_ms"`
 	// TTFTMS is how long the client waited for the first token: the latency a
 	// developer notices.
 	TTFTMS int64 `json:"ttft_ms"`
@@ -106,7 +109,8 @@ type Request struct {
 // a new column reaches every screen at once. scanRequest reads it in order.
 const requestColumns = `id, ts, alias, status, COALESCE(error, ''),
 	COALESCE(key_id, ''), COALESCE(project_id, ''), COALESCE(user_id, ''), org_id,
-	COALESCE(client, ''), input_tokens, cached_input_tokens, output_tokens, cost_micros,
+	COALESCE(client, ''), input_tokens, cached_input_tokens, cache_write_tokens,
+	output_tokens, cost_micros,
 	latency_ms, ttft_ms, stream, estimated, canceled, COALESCE(session_key, ''),
 	spans`
 
@@ -114,7 +118,8 @@ func scanRequest(r row) (Request, error) {
 	var q Request
 	err := r.Scan(&q.ID, &q.TS, &q.Alias, &q.Status, &q.Error,
 		&q.KeyID, &q.ProjectID, &q.UserID, &q.OrgID, &q.Client,
-		&q.InputTokens, &q.CachedInputTokens, &q.OutputTokens, &q.CostMicros,
+		&q.InputTokens, &q.CachedInputTokens, &q.CacheWriteTokens, &q.OutputTokens,
+		&q.CostMicros,
 		&q.LatencyMS, &q.TTFTMS, &q.Stream, &q.Estimated, &q.Canceled, &q.SessionKey,
 		&q.Spans)
 	return q, err
@@ -168,15 +173,11 @@ func (q RequestQuery) whereArgs() []any {
 //
 // An empty OrgID means every tenant, which only an operator ever asks for.
 func (s *Store) Requests(ctx context.Context, q RequestQuery) ([]Request, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+requestColumns+`
+	return queryAll(ctx, s.pool, scanRequest, `SELECT `+requestColumns+`
 		FROM usage_events
 		WHERE `+outcomeClause(q.Outcome)+` AND `+q.where()+`
 		ORDER BY id DESC LIMIT $13`,
 		append(q.whereArgs(), pageLimit(q.Limit, 100, 5000))...)
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, scanRequest)
 }
 
 // RequestOutcomes counts one window by outcome, so the log can show how many

@@ -80,12 +80,14 @@ func (s *Server) updateOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	var in struct {
 		Name        *string `json:"name"`
 		EmailDomain *string `json:"email_domain"`
+		// Limited false lifts the limit of an organisation that signed up.
+		Limited *bool `json:"limited"`
 	}
 	if !readJSON(w, r, &in) {
 		return
 	}
-	if in.Name == nil && in.EmailDomain == nil {
-		badRequest(w, "send 'name', 'email_domain' or both; an empty 'email_domain' clears it")
+	if in.Name == nil && in.EmailDomain == nil && in.Limited == nil {
+		badRequest(w, "send 'name', 'email_domain' or 'limited'; an empty 'email_domain' clears it")
 		return
 	}
 	if in.Name != nil {
@@ -106,12 +108,16 @@ func (s *Server) updateOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	}
 	orgID := r.PathValue("id")
 	org, err := s.st.UpdateOrg(r.Context(), orgID,
-		store.OrgChange{Name: in.Name, EmailDomain: in.EmailDomain})
+		store.OrgChange{Name: in.Name, EmailDomain: in.EmailDomain, Limited: in.Limited})
 	if err != nil {
 		s.failOrg(w, err)
 		return
 	}
 	s.auditf(r, p, orgID, "org.update", "org", orgID, org)
+	if in.Limited != nil {
+		// What the organisation's models may reach changed.
+		s.changed(r)
+	}
 	httpx.WriteJSON(w, http.StatusOK, org)
 }
 
@@ -658,6 +664,10 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	if !p.CanAdminOrg(orgID) {
 		forbid(w, "only an administrator of this organisation can issue a key; "+
 			"ask one for a key in your name, and rotate it yourself from then on")
+		return
+	}
+	if in.Kind == policy.KeySubscription && !s.opts.ClaudeSubscriptions {
+		badRequest(w, subscriptionsOff)
 		return
 	}
 	in.Name = strings.TrimSpace(in.Name)

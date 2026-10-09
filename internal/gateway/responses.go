@@ -76,14 +76,14 @@ type responsesItem struct {
 
 // responsesPart is one part of a message's content.
 type responsesPart struct {
-	Type     string `json:"type"`
-	Text     string `json:"text"`
-	Refusal  string `json:"refusal"`
-	ImageURL string `json:"image_url"`
+	Type     string   `json:"type"`
+	Text     jsonText `json:"text"`
+	Refusal  jsonText `json:"refusal"`
+	ImageURL jsonText `json:"image_url"`
 }
 
-// decode turns a Responses request into a chat completion request.
-func (responsesShape) decode(raw []byte) ([]byte, error) {
+// decodeBody turns a Responses request into a chat completion request.
+func (responsesShape) decodeBody(raw []byte) (*body, error) {
 	var in responsesRequest
 	if err := decodeRequest(raw, &in, "Responses"); err != nil {
 		return nil, err
@@ -92,7 +92,7 @@ func (responsesShape) decode(raw []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := map[string]any{"model": in.Model, "messages": msgs}
+	out := map[string]any{}
 	if in.MaxOutputTokens != nil {
 		out["max_tokens"] = *in.MaxOutputTokens
 	}
@@ -126,21 +126,20 @@ func (responsesShape) decode(raw []byte) ([]byte, error) {
 			out["response_format"] = map[string]any{"type": "json_schema", "json_schema": schema}
 		}
 	}
-	return json.Marshal(out)
+	return chatBody(in.Model, msgs, out, len(raw))
 }
 
 // responsesMessages turns the instructions and the input into chat messages.
-func responsesMessages(in responsesRequest) ([]oaiMessage, error) {
-	var msgs []oaiMessage
+func responsesMessages(in responsesRequest) ([]chatMessage, error) {
+	var msgs []chatMessage
 	if in.Instructions != nil && *in.Instructions != "" {
-		msgs = append(msgs, oaiMessage{Role: "system", Content: *in.Instructions})
+		msgs = append(msgs, chatMessage{role: "system", content: quoteText(*in.Instructions)})
 	}
 	if len(in.Input) == 0 || string(in.Input) == "null" {
 		return nil, errors.New("the 'input' field is required")
 	}
-	var text string
-	if json.Unmarshal(in.Input, &text) == nil {
-		return append(msgs, oaiMessage{Role: "user", Content: text}), nil
+	if text, err := textOf(in.Input); err == nil {
+		return append(msgs, chatMessage{role: "user", content: text}), nil
 	}
 	var items []responsesItem
 	if err := json.Unmarshal(in.Input, &items); err != nil {
@@ -156,7 +155,7 @@ func responsesMessages(in responsesRequest) ([]oaiMessage, error) {
 }
 
 // addItem appends one input item to the conversation.
-func addItem(msgs []oaiMessage, it responsesItem) ([]oaiMessage, error) {
+func addItem(msgs []chatMessage, it responsesItem) ([]chatMessage, error) {
 	switch it.Type {
 	case "", "message":
 		return addMessageItem(msgs, it)
@@ -170,17 +169,17 @@ func addItem(msgs []oaiMessage, it responsesItem) ([]oaiMessage, error) {
 		}
 		// Calls made in one turn arrive as separate items. The chat shape wants
 		// them on one assistant message, with whatever text came before them.
-		if n := len(msgs); n > 0 && msgs[n-1].Role == "assistant" {
-			msgs[n-1].ToolCalls = append(msgs[n-1].ToolCalls, call)
-			if s, ok := msgs[n-1].Content.(string); ok && s == "" {
-				msgs[n-1].Content = nil
+		if n := len(msgs); n > 0 && msgs[n-1].role == "assistant" {
+			msgs[n-1].toolCalls = append(msgs[n-1].toolCalls, call)
+			if msgs[n-1].content.isEmpty() {
+				msgs[n-1].content = nil
 			}
 			return msgs, nil
 		}
-		return append(msgs, oaiMessage{Role: "assistant", ToolCalls: []oaiToolCall{call}}), nil
+		return append(msgs, chatMessage{role: "assistant", toolCalls: []oaiToolCall{call}}), nil
 	case "function_call_output":
 		text, _ := responsesContent(it.Output)
-		return append(msgs, oaiMessage{Role: "tool", ToolCallID: it.CallID, Content: text}), nil
+		return append(msgs, chatMessage{role: "tool", toolCallID: it.CallID, content: text}), nil
 	}
 	// Reasoning items, item references and the calls of built-in tools have no
 	// counterpart, and the model answers without them.
@@ -190,7 +189,7 @@ func addItem(msgs []oaiMessage, it responsesItem) ([]oaiMessage, error) {
 // addMessageItem appends a message. The developer role is the system role
 // under the name OpenAI now uses for it; self-hosted chat templates know only
 // the old one.
-func addMessageItem(msgs []oaiMessage, it responsesItem) ([]oaiMessage, error) {
+func addMessageItem(msgs []chatMessage, it responsesItem) ([]chatMessage, error) {
 	role := it.Role
 	switch role {
 	case "developer":
@@ -200,10 +199,10 @@ func addMessageItem(msgs []oaiMessage, it responsesItem) ([]oaiMessage, error) {
 		return nil, errors.New("'role' must be 'user', 'assistant', 'system' or 'developer'")
 	}
 	text, parts := responsesContent(it.Content)
-	msg := oaiMessage{Role: role, Content: text}
+	msg := chatMessage{role: role, content: text}
 	// Only a user can send an image; everyone else's content is text.
 	if role == "user" && len(parts) > 0 {
-		msg.Content = parts
+		msg.parts = parts
 	}
 	return append(msgs, msg), nil
 }
@@ -211,36 +210,35 @@ func addMessageItem(msgs []oaiMessage, it responsesItem) ([]oaiMessage, error) {
 // responsesContent reads content that is a string or an array of parts. It
 // returns the text joined, and the parts in the chat shape when any of them
 // is an image.
-func responsesContent(raw json.RawMessage) (string, []oaiPart) {
+func responsesContent(raw json.RawMessage) (jsonText, []chatPart) {
 	if len(raw) == 0 {
-		return "", nil
+		return emptyText, nil
 	}
-	var s string
-	if json.Unmarshal(raw, &s) == nil {
-		return s, nil
+	if text, err := textOf(raw); err == nil {
+		return text, nil
 	}
 	var parts []responsesPart
 	if json.Unmarshal(raw, &parts) != nil {
-		return string(raw), nil
+		return quoteText(string(raw)), nil
 	}
 	var (
-		texts   []string
-		out     []oaiPart
+		texts   []jsonText
+		out     []chatPart
 		picture bool
 	)
 	for _, p := range parts {
 		switch p.Type {
 		case "input_text", "output_text", "text":
 			texts = append(texts, p.Text)
-			out = append(out, oaiPart{Type: "text", Text: p.Text})
+			out = append(out, chatPart{text: orEmpty(p.Text)})
 		case "refusal":
 			texts = append(texts, p.Refusal)
-			out = append(out, oaiPart{Type: "text", Text: p.Refusal})
+			out = append(out, chatPart{text: orEmpty(p.Refusal)})
 		case "input_image":
 			// An image named by file id lives on OpenAI's servers, and no
 			// other model can fetch it.
-			if p.ImageURL != "" {
-				out = append(out, oaiPart{Type: "image_url", ImageURL: &oaiImageURL{URL: p.ImageURL}})
+			if !p.ImageURL.isEmpty() {
+				out = append(out, chatPart{imageURL: p.ImageURL})
 				picture = true
 			}
 		}
@@ -248,7 +246,16 @@ func responsesContent(raw json.RawMessage) (string, []oaiPart) {
 	if !picture {
 		out = nil
 	}
-	return strings.Join(texts, "\n\n"), out
+	return orEmpty(joinTexts(texts)), out
+}
+
+// orEmpty is t, or empty text in place of none, for a field the chat shape
+// needs.
+func orEmpty(t jsonText) jsonText {
+	if t == nil {
+		return emptyText
+	}
+	return t
 }
 
 // responsesTools declares the function tools in the chat shape. Built-in tools
@@ -299,12 +306,13 @@ type responsesOut struct {
 	Usage             *responsesUsage `json:"usage"`
 }
 
-// responsesUsage is the usage record of the Responses API. Cached tokens are
-// part of the input, as in the chat shape.
+// responsesUsage is the usage record of the Responses API. Cached and written
+// tokens are part of the input, as in the chat shape.
 type responsesUsage struct {
 	InputTokens        int `json:"input_tokens"`
 	InputTokensDetails struct {
-		CachedTokens int `json:"cached_tokens"`
+		CachedTokens     int `json:"cached_tokens"`
+		CacheWriteTokens int `json:"cache_write_tokens"`
 	} `json:"input_tokens_details"`
 	OutputTokens        int `json:"output_tokens"`
 	OutputTokensDetails struct {
@@ -320,6 +328,7 @@ func newResponsesUsage(u *tokenUsage) *responsesUsage {
 	out := &responsesUsage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
 		TotalTokens: u.InputTokens + u.OutputTokens}
 	out.InputTokensDetails.CachedTokens = u.cached()
+	out.InputTokensDetails.CacheWriteTokens = u.InputDetails.CacheWriteTokens
 	return out
 }
 
@@ -327,6 +336,7 @@ func (u *responsesUsage) tokens() *tokenUsage {
 	t := &tokenUsage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
 		TotalTokens: u.InputTokens + u.OutputTokens}
 	t.InputDetails.CachedTokens = u.InputTokensDetails.CachedTokens
+	t.InputDetails.CacheWriteTokens = u.InputTokensDetails.CacheWriteTokens
 	return t
 }
 
@@ -422,11 +432,8 @@ func (responsesDialect) opening(b *body) (json.RawMessage, bool) {
 	raw, _ := b.value("input")
 	// Checked before decoding, so an array input is not read in full.
 	if t := bytes.TrimSpace(raw); len(t) > 0 && t[0] == '"' {
-		var text string
-		if json.Unmarshal(t, &text) != nil {
-			return nil, false
-		}
-		return openingOf([]oaiMessage{{Role: "user", Content: text}})
+		text, err := textOf(t)
+		return json.RawMessage(text), err == nil
 	}
 	var (
 		opening json.RawMessage
@@ -441,7 +448,7 @@ func (responsesDialect) opening(b *body) (json.RawMessage, bool) {
 		if err != nil {
 			return true
 		}
-		opening, found = openingOf(msgs)
+		opening, found = openingOfChat(msgs)
 		return !found
 	})
 	return opening, found
@@ -465,18 +472,21 @@ func (responsesDialect) text(b *body) (textDoc, error) {
 	if s, ok := input.(string); ok {
 		d.add(s, func(v string) { d.roots["input"] = v })
 	}
-	for _, item := range objects(input) {
+	for _, item := range d.objects(input) {
 		field := "content"
 		if item["type"] == "function_call_output" {
 			field = "output"
 		}
 		d.addField(item, field)
-		for _, part := range objects(item[field]) {
+		for _, part := range d.objects(item[field]) {
 			switch part["type"] {
 			case "input_text", "output_text", "text":
 				d.addField(part, "text")
 			}
 		}
+	}
+	if d.err != nil {
+		return nil, d.err
 	}
 	return d, nil
 }
@@ -500,12 +510,38 @@ func (responsesDialect) clamp(b *body, limit int) {
 // needsNative names the fields that continue a conversation OpenAI stored.
 // The gateway stores none, so no other model can read it.
 func (responsesDialect) needsNative(b *body) string {
+	if field := storedConversation(b); field != "" {
+		return "the '" + field + "' field continues a conversation OpenAI stored, and only " +
+			"OpenAI's own models can read it; send the whole conversation in 'input' instead"
+	}
+	return ""
+}
+
+// storedConversation names the field that continues a conversation stored at
+// OpenAI, or is empty when the body carries the whole conversation.
+func storedConversation(b *body) string {
 	for _, field := range []string{"previous_response_id", "conversation"} {
 		if raw, ok := b.value(field); ok && !bytes.Equal(bytes.TrimSpace(raw), []byte(`""`)) {
-			return "the '" + field + "' field continues a conversation OpenAI stored, and only " +
-				"OpenAI's own models can read it; send the whole conversation in 'input' instead"
+			return field
 		}
 	}
+	return ""
+}
+
+// onKey keeps a request on the deployment's key to one answer, given now.
+// Every organisation shares that OpenAI account, so nothing is stored there
+// for another to read by its id. A background answer is generated after the
+// request ends, where the gateway cannot see or bill it.
+func (responsesDialect) onKey(b *body) string {
+	if on, _ := b.boolean("background"); on {
+		return "the 'background' field is not available on this deployment's OpenAI key: " +
+			"the answer would be generated where Keera cannot bill it. Leave it out"
+	}
+	if field := storedConversation(b); field != "" {
+		return "the '" + field + "' field is not available on this deployment's OpenAI key, " +
+			"which stores no conversations; send the whole conversation in 'input' instead"
+	}
+	b.set("store", json.RawMessage("false"))
 	return ""
 }
 
@@ -535,17 +571,15 @@ type responsesNativeStream struct {
 	deltas int
 }
 
-var (
-	deltaType   = []byte(`.delta"`)
-	responseKey = []byte(`"response":`)
-)
-
 func (s *responsesNativeStream) event(payload []byte) []byte {
-	if bytes.Contains(payload, deltaType) {
+	typ := eventType(payload)
+	if strings.HasSuffix(typ, ".delta") {
 		s.deltas++
 		return nil
 	}
-	if !bytes.Contains(payload, responseKey) {
+	// The events that carry the whole response: created, completed and the
+	// like.
+	if !strings.HasPrefix(typ, "response.") || strings.Count(typ, ".") != 1 {
 		return nil
 	}
 	var ev struct {

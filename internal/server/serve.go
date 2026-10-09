@@ -19,6 +19,7 @@ import (
 	"github.com/bespinian/keera-gateway/internal/gateway"
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/metrics"
+	"github.com/bespinian/keera-gateway/internal/payment"
 	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/ratelimit"
 	"github.com/bespinian/keera-gateway/internal/registry"
@@ -75,8 +76,11 @@ func serve(ctx context.Context) error {
 		MaxResponseBytes:      cfg.MaxResponseBytes,
 		UpstreamHeaderTimeout: cfg.UpstreamHeaderTimeout,
 		UpstreamDeny:          cfg.UpstreamDeny,
+		LimitPrivate:          cfg.LimitPrivate,
+		PrivateHosts:          cfg.PrivateHosts,
 		Currency:              cfg.Currency,
 		PanelURL:              panelURL(cfg),
+		ClaudeSubscriptions:   cfg.ClaudeSubscriptions,
 	}, log)
 
 	providers, err := buildProviders(ctx, cfg, log)
@@ -99,19 +103,23 @@ func serve(ctx context.Context) error {
 	}
 
 	ctl := control.New(st, reg, mreg, recorder, control.Options{
-		OperatorKey:   cfg.OperatorKey,
-		MetricsToken:  cfg.MetricsToken,
-		Secrets:       secrets,
-		Currency:      cfg.Currency,
-		Providers:     providers,
-		Passkeys:      passkeys,
-		ServeUI:       cfg.UI,
-		SecureCookies: cfg.SecureCookies,
-		PublicURL:     cfg.PublicURL,
-		Gateway:       gw,
-		SessionGap:    cfg.SessionGap,
-		Sandboxes:     sandboxes,
-		Template:      template,
+		OperatorKey:         cfg.OperatorKey,
+		MetricsToken:        cfg.MetricsToken,
+		Secrets:             secrets,
+		Currency:            cfg.Currency,
+		Providers:           providers,
+		Passkeys:            passkeys,
+		ServeUI:             cfg.UI,
+		SecureCookies:       cfg.SecureCookies,
+		PublicURL:           cfg.PublicURL,
+		Gateway:             gw,
+		SessionGap:          cfg.SessionGap,
+		Sandboxes:           sandboxes,
+		Template:            template,
+		SandboxImages:       cfg.Sandbox.Images,
+		Platform:            cfg.Platform,
+		Payments:            buildPayments(cfg),
+		ClaudeSubscriptions: cfg.ClaudeSubscriptions,
 	}, log)
 
 	// The background context outlives the signal, so a request being served is
@@ -124,6 +132,8 @@ func serve(ctx context.Context) error {
 	wg.Go(func() { recorder.Run(bg) })
 	// Lets the panel show a request as soon as it is recorded.
 	wg.Go(func() { ctl.Run(bg) })
+	// Charges saved cards that ran low, and settles payments.
+	wg.Go(func() { ctl.RunPayments(bg) })
 	wg.Go(func() { sweep(bg, reg, limiter, ctl, st, log) })
 	wg.Go(func() { retain(bg, st, cfg, log) })
 	// Its own loop, because it talks to a cluster and the cache sweep must
@@ -190,6 +200,10 @@ func loadTemplate(cfg config.Config, log *slog.Logger) (store.OrgTemplate, error
 		}
 		names := make([]string, 0, len(models))
 		for _, m := range models {
+			if m.Subscription && !cfg.ClaudeSubscriptions {
+				return t, fmt.Errorf("%s: '%s' is paid by Claude subscriptions, which are off; "+
+					"set KEERA_CLAUDE_SUBSCRIPTIONS=true or take it out", cfg.ModelsFile, m.Alias)
+			}
 			names = append(names, m.Alias)
 		}
 		log.Info("read model template", "file", cfg.ModelsFile, "models", names)
@@ -245,6 +259,8 @@ func buildRegistry(ctx context.Context, st *store.Store, cfg config.Config,
 		TTL:          cfg.CacheTTL,
 		SpendRefresh: cfg.SpendRefresh,
 		Secrets:      secrets,
+		Platform:     cfg.Platform,
+		Prepaid:      cfg.Payments != nil,
 	}, log)
 	if err != nil {
 		return nil, fmt.Errorf("load control-plane state: %w", err)
@@ -624,4 +640,17 @@ func panelURL(cfg config.Config) string {
 		return ""
 	}
 	return cfg.PublicURL
+}
+
+// buildPayments is the PostFinance Checkout account organisations pay into,
+// or nil without one.
+func buildPayments(cfg config.Config) *control.Payments {
+	if cfg.Payments == nil {
+		return nil
+	}
+	return &control.Payments{
+		Client:  payment.New(cfg.Payments.PostFinance),
+		SpaceID: cfg.Payments.PostFinance.SpaceID,
+		VATBP:   cfg.Payments.VATBP,
+	}
 }

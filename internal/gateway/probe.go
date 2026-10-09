@@ -46,6 +46,9 @@ type Probe struct {
 	Error  string `json:"error,omitempty"`
 	// Warnings are the things that are not failures but are worth saying.
 	Warnings []string `json:"warnings,omitempty"`
+	// NoCredit says the model is on the deployment's key and the
+	// organisation has no credit for it, so it was not called.
+	NoCredit bool `json:"no_credit,omitempty"`
 	// OK is the summary: it answered, and a chat model made a usable tool
 	// call.
 	OK bool `json:"ok"`
@@ -57,8 +60,9 @@ const probeTimeout = 30 * time.Second
 
 // CheckModel exercises one model end to end against its own backends, with
 // the same client, credentials and round-robin as real traffic. It skips
-// serve: a check is not a tenant's request, so it has no rate limit, budget,
-// billing or usage event.
+// serve: a check is not a tenant's request, so it has no rate limit, budget
+// or usage event. On the deployment's key it needs credit and is billed,
+// like any call there.
 func (s *Server) CheckModel(ctx context.Context, m policy.Model) Probe {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
@@ -71,6 +75,14 @@ func (s *Server) CheckModel(ctx context.Context, m policy.Model) Probe {
 	case m.Subscription:
 		p.Error = "this model is paid by each person's own Claude subscription, so the " +
 			"gateway holds no credential to check it with; send it a message from Claude Code"
+		return p
+	}
+	if m.Locked {
+		p.Error = "this model " + lockedReason(m) + ", and " + policy.LockedMessage
+		return p
+	}
+	if why := s.checkCredit(m.OrgID, m); why != "" {
+		p.Error, p.NoCredit = why, true
 		return p
 	}
 	switch m.Kind {
@@ -302,7 +314,7 @@ func (s *Server) checkEmbedding(ctx context.Context, m policy.Model, p Probe) Pr
 // with what status. It returns nil when the check is already over, with
 // p.Error saying why.
 func (s *Server) probeCall(ctx context.Context, m policy.Model, path string,
-	request any, p *Probe) *http.Response {
+	request map[string]any, p *Probe) *http.Response {
 	payload, err := json.Marshal(request)
 	if err != nil {
 		p.Error = err.Error()
@@ -314,6 +326,15 @@ func (s *Server) probeCall(ctx context.Context, m policy.Model, path string,
 		return nil
 	}
 	p.Reachable, p.Status = true, resp.StatusCode
+	if resp.StatusCode < 300 {
+		// Billed at its ceiling: a check reads too little of the answer to
+		// find the usage record, and it is small either way.
+		output, _ := request["max_tokens"].(int)
+		if line, ok := m.Bill(policy.Tokens{Input: len(payload) / bytesPerToken,
+			Output: output}); ok {
+			s.billCheck(m.OrgID, []policy.BillLine{line})
+		}
+	}
 	if resp.Request != nil && resp.Request.URL != nil {
 		p.Backend = strings.TrimSuffix(resp.Request.URL.String(), path)
 	}

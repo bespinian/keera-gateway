@@ -60,7 +60,7 @@ func TestTheMapIsOfOneOrganisation(t *testing.T) {
 // The whole screen, against a real database: the catalogue as boxes, the window
 // as numbers on them, and the traffic between them as edges.
 func TestTheMapDrawsTheCatalogueAndTheTrafficTogether(t *testing.T) {
-	st, ctx := streamStore(t)
+	st, ctx := testStore(t)
 	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_1", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}

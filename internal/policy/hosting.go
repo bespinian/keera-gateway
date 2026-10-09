@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -45,6 +46,18 @@ func (m Model) Hosting() Hosting {
 	return out
 }
 
+// HostingOf says which side of the network one URL is on.
+func HostingOf(raw string) Hosting {
+	h, _ := hostingOf(raw)
+	return h
+}
+
+// LockedMessage is what a signed-up organisation that has not paid yet is told
+// about a model or MCP server it may not use yet.
+const LockedMessage = "this organisation was created by signing up, and until it has bought " +
+	"credit once it can only use models billed from its credit and services on public " +
+	"addresses; an operator can also lift the limit"
+
 // LocationFromBackends is the location of a model that states none and names
 // no provider. A backend inside the network is onprem. A URL outside it does
 // not say which country the model runs in, so that is an error asking for it.
@@ -66,6 +79,13 @@ func (m Model) CheckBackend() error {
 	case m.BackendModel == "":
 		return errors.New("'backend_model' is required - it is the name the inference " +
 			"plane serves, which for vLLM is --served-model-name")
+	}
+	for _, b := range m.Backends {
+		u, err := url.Parse(strings.TrimSpace(b))
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return errors.New("backend " + strconv.Quote(b) + " is not an http or https address, " +
+				"such as http://vllm:8000/v1")
+		}
 	}
 	return nil
 }

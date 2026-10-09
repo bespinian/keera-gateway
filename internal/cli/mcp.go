@@ -59,7 +59,7 @@ func mcpCmd(ctx context.Context, args []string) error {
 	}
 	switch m.verb {
 	case "add", "set":
-		return m.save(ctx, m.verb == "add")
+		return m.save(ctx)
 	case "enable", "disable":
 		return m.toggle(ctx, m.verb == "enable")
 	case "delete":
@@ -89,24 +89,14 @@ func (m *mcpRun) find(ctx context.Context, alias string) (policy.MCPServer, erro
 
 // save is 'add' and 'set': 'set' reads the server first, so a flag left out
 // keeps what is there.
-func (m *mcpRun) save(ctx context.Context, adding bool) error {
+func (m *mcpRun) save(ctx context.Context) error {
 	f, alias := m.f, m.fs.Arg(0)
-	put := mcpPut{Enabled: !f.disabled}
-	if adding {
-		if err := alreadyExists(ctx, m.aliasRun, alias, mcpAlias); err != nil {
-			return err
-		}
-	} else {
-		if !changesSomething(m.fs) {
-			return nothingToChange("mcp set")
-		}
-		cur, err := m.find(ctx, alias)
-		if err != nil {
-			return err
-		}
-		put = mcpPut{URL: cur.URL, Description: cur.Description, AuthHeader: cur.AuthHeader,
-			Enabled: cur.Enabled}
+	cur, err := startPut(ctx, m.aliasRun, alias, policy.MCPServer{Enabled: !f.disabled}, mcpAlias)
+	if err != nil {
+		return err
 	}
+	put := mcpPut{URL: cur.URL, Description: cur.Description, AuthHeader: cur.AuthHeader,
+		Enabled: cur.Enabled}
 	m.fs.Visit(func(fl *flag.Flag) {
 		switch fl.Name {
 		case "endpoint":
@@ -117,7 +107,7 @@ func (m *mcpRun) save(ctx context.Context, adding bool) error {
 			put.AuthHeader = f.authHeader
 		}
 	})
-	if adding && put.URL == "" {
+	if m.verb == "add" && put.URL == "" {
 		return fmt.Errorf("--endpoint is required: the server's Streamable HTTP endpoint")
 	}
 	cred, err := credential(f.apiKey, f.noAPIKey)

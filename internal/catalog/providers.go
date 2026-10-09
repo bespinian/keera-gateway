@@ -61,6 +61,13 @@ type ProviderModel struct {
 	// turn, so without it a long session is priced far too high. Zero means
 	// no such rate, and those tokens cost the full input price.
 	CachedInputMicrosPerMTok int64 `json:"cached_input_micros_per_mtok"`
+	// CacheWriteMicrosPerMTok is the published rate for an input token
+	// written to the prompt cache. Zero means no such rate, and a write costs
+	// the input price.
+	CacheWriteMicrosPerMTok int64 `json:"cache_write_micros_per_mtok,omitempty"`
+	// LongPrompt is the dearer prices for a long prompt, for a model priced
+	// by prompt length.
+	LongPrompt *policy.PriceTier `json:"long_prompt,omitempty"`
 	// Description is the default for an entry that states none, so routers
 	// never choose between bare aliases. An entry's own description wins.
 	Description string `json:"description"`
@@ -78,14 +85,12 @@ type ProviderModel struct {
 // Release dates are the day each model came out, from its maker's own
 // announcement. An FP8 build takes the day of the model it was made from.
 //
-// Last checked against each pricing page: Anthropic on 2026-09-22, Infomaniak on
-// 2026-09-21, stepping stone against its offer of 2026-09-25, OpenAI and
-// Phoeniqs on 2026-09-29, and CSCS on 2026-10-06. This is not a live price feed, so a price cut
-// since then is over-charged until somebody rebuilds.
+// Last checked against each pricing page on 2026-10-08. This is not a live
+// price feed, so a price cut since then is over-charged until somebody
+// rebuilds.
 //
 // Retired models are dropped before their retirement date, because a row for
-// a model nobody can call is worse than no row. OpenAI's gpt-5, gpt-5-mini and
-// gpt-5-nano go on 2026-12-11 and were dropped on 2026-09-21.
+// a model nobody can call is worse than no row.
 var providers = []Provider{{
 	Name:    "anthropic",
 	Summary: "Anthropic's own Claude models, on Anthropic's own API.",
@@ -104,41 +109,69 @@ var providers = []Provider{{
 		ID: "claude-opus-5-5", MaxContext: 1_000_000, ReleaseDate: "2026-09-22",
 		InputMicrosPerMTok: 4_000_000, OutputMicrosPerMTok: 20_000_000,
 		CachedInputMicrosPerMTok: 200_000,
+		CacheWriteMicrosPerMTok:  5_000_000,
 		Description: "most capable of its range and the one to reach for " +
 			"first - thorough on long, hard work, at a middling speed",
+	}, {
+		ID: "claude-sonnet-5-5", MaxContext: 1_000_000, ReleaseDate: "2026-09-28",
+		InputMicrosPerMTok: 2_000_000, OutputMicrosPerMTok: 10_000_000,
+		CachedInputMicrosPerMTok: 100_000,
+		CacheWriteMicrosPerMTok:  2_500_000,
+		Description:              "capable, quick and mid-priced - the middle option",
+	}, {
+		ID: "claude-haiku-5-5", MaxContext: 1_000_000, ReleaseDate: "2026-10-07",
+		InputMicrosPerMTok: 100_000, OutputMicrosPerMTok: 500_000,
+		CachedInputMicrosPerMTok: 10_000,
+		CacheWriteMicrosPerMTok:  125_000,
+		// Anthropic charges five times as much for a prompt over 100k tokens.
+		LongPrompt: &policy.PriceTier{
+			AboveTokens:        100_000,
+			InputMicrosPerMTok: 500_000, OutputMicrosPerMTok: 2_500_000,
+			CachedInputMicrosPerMTok: 50_000,
+			CacheWriteMicrosPerMTok:  625_000,
+		},
+		Description: "fastest, cheapest and lightest of its range - short, " +
+			"simple, high-volume work; five times dearer past 100k tokens",
+	}, {
+		ID: "claude-fable-5-1", MaxContext: 1_000_000, ReleaseDate: "2026-09-01",
+		InputMicrosPerMTok: 10_000_000, OutputMicrosPerMTok: 50_000_000,
+		CachedInputMicrosPerMTok: 250_000,
+		CacheWriteMicrosPerMTok:  12_500_000,
+		Description:              "powerful, slow and dear, and stronger at prose than at code",
 	}, {
 		ID: "claude-sonnet-5", MaxContext: 1_000_000, ReleaseDate: "2026-06-30",
 		InputMicrosPerMTok: 2_000_000, OutputMicrosPerMTok: 10_000_000,
 		CachedInputMicrosPerMTok: 200_000,
-		Description:              "capable, quick enough and mid-priced - the middle option",
+		CacheWriteMicrosPerMTok:  2_500_000,
+		Description: "the middle option before claude-sonnet-5-5, at the same " +
+			"price but twice as dear for cached input",
 	}, {
 		ID: "claude-haiku-4-5", Snapshot: "claude-haiku-4-5-20251001",
 		MaxContext: 200_000, ReleaseDate: "2025-10-15",
 		InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 5_000_000,
 		CachedInputMicrosPerMTok: 100_000,
-		Description: "fastest, cheapest and lightest of its range - short, " +
-			"simple work",
-	}, {
-		ID: "claude-fable-5-1", MaxContext: 1_000_000, ReleaseDate: "2026-09-01",
-		InputMicrosPerMTok: 10_000_000, OutputMicrosPerMTok: 50_000_000,
-		CachedInputMicrosPerMTok: 250_000,
-		Description:              "powerful, slow and dear, and stronger at prose than at code",
+		CacheWriteMicrosPerMTok:  1_250_000,
+		Description: "previous generation's lightest - short, simple work, " +
+			"dearer than claude-haiku-5-5 and over a shorter context",
 	}, {
 		ID: "claude-opus-5", MaxContext: 1_000_000, ReleaseDate: "2026-07-24",
 		InputMicrosPerMTok: 5_000_000, OutputMicrosPerMTok: 25_000_000,
 		CachedInputMicrosPerMTok: 500_000,
+		CacheWriteMicrosPerMTok:  6_250_000,
 		Description: "the powerful one before claude-opus-5-5 - as thorough " +
 			"on hard problems, and dearer than what replaced it",
 	}, {
 		ID: "claude-opus-4-8", MaxContext: 1_000_000, ReleaseDate: "2026-05-28",
 		InputMicrosPerMTok: 5_000_000, OutputMicrosPerMTok: 25_000_000,
 		CachedInputMicrosPerMTok: 500_000,
+		CacheWriteMicrosPerMTok:  6_250_000,
 		Description: "two generations back, and the most powerful of them - " +
 			"thorough on hard problems, slow and dear",
 	}, {
 		ID: "claude-sonnet-4-6", MaxContext: 1_000_000, ReleaseDate: "2026-02-17",
 		InputMicrosPerMTok: 3_000_000, OutputMicrosPerMTok: 15_000_000,
 		CachedInputMicrosPerMTok: 300_000,
+		CacheWriteMicrosPerMTok:  3_750_000,
 		Description:              "previous generation's middle option - capable and mid-priced",
 	}},
 	Note: "Prompts leave your infrastructure. " +
@@ -146,7 +179,9 @@ var providers = []Provider{{
 		"prompt caching and thinking work. Every other client goes through the " +
 		"OpenAI-compatible layer, where caching does not, so it pays full price " +
 		"for every resent context. " +
-		"A cache write is charged at the input price; Anthropic charges 25% more. " +
+		"A cache write is charged at the five-minute cache's rate, 25% above " +
+		"the input price; a one-hour cache write costs twice the input price, " +
+		"so it is billed low. " +
 		"Server tools such as web search run at Anthropic, out of sight of " +
 		"filters; a guardrail that blocks hosted tools removes them.",
 }, {
@@ -159,58 +194,120 @@ var providers = []Provider{{
 	Location:    "usa",
 	Currency:    "USD",
 	Kinds:       []policy.Kind{policy.KindChat},
+	// Past 272k input tokens, OpenAI charges twice as much for input and one
+	// and a half times as much for output on its newer models. From gpt-5.6
+	// on, a cache write costs a quarter more than input; before, nothing more.
 	Models: []ProviderModel{{
 		ID: "gpt-6-astra", MaxContext: 1_050_000, ReleaseDate: "2026-09-03",
 		InputMicrosPerMTok: 10_000_000, OutputMicrosPerMTok: 50_000_000,
 		CachedInputMicrosPerMTok: 1_000_000,
+		CacheWriteMicrosPerMTok:  12_500_000,
+		LongPrompt: &policy.PriceTier{
+			AboveTokens:        272_000,
+			InputMicrosPerMTok: 20_000_000, OutputMicrosPerMTok: 75_000_000,
+			CachedInputMicrosPerMTok: 2_000_000,
+			CacheWriteMicrosPerMTok:  25_000_000,
+		},
 		Description: "most powerful and dearest here - thorough on the hardest " +
 			"problems, over a million-token context",
 	}, {
 		ID: "gpt-6.1-sol", MaxContext: 1_050_000, ReleaseDate: "2026-09-29",
 		InputMicrosPerMTok: 2_000_000, OutputMicrosPerMTok: 10_000_000,
 		CachedInputMicrosPerMTok: 100_000,
+		CacheWriteMicrosPerMTok:  2_500_000,
+		LongPrompt: &policy.PriceTier{
+			AboveTokens:        272_000,
+			InputMicrosPerMTok: 4_000_000, OutputMicrosPerMTok: 15_000_000,
+			CachedInputMicrosPerMTok: 200_000,
+			CacheWriteMicrosPerMTok:  5_000_000,
+		},
 		Description: "nearly as powerful at a fifth of the price - hard code and " +
 			"agent work without the top price",
 	}, {
 		ID: "gpt-6-sol", MaxContext: 1_050_000, ReleaseDate: "2026-09-22",
 		InputMicrosPerMTok: 2_000_000, OutputMicrosPerMTok: 10_000_000,
 		CachedInputMicrosPerMTok: 200_000,
+		CacheWriteMicrosPerMTok:  2_500_000,
+		LongPrompt: &policy.PriceTier{
+			AboveTokens:        272_000,
+			InputMicrosPerMTok: 4_000_000, OutputMicrosPerMTok: 15_000_000,
+			CachedInputMicrosPerMTok: 400_000,
+			CacheWriteMicrosPerMTok:  5_000_000,
+		},
 		Description: "the version before gpt-6.1-sol at the same price - less " +
 			"accurate on hard work",
 	}, {
 		ID: "gpt-6-luna", MaxContext: 1_050_000, ReleaseDate: "2026-09-22",
 		InputMicrosPerMTok: 100_000, OutputMicrosPerMTok: 500_000,
 		CachedInputMicrosPerMTok: 10_000,
+		CacheWriteMicrosPerMTok:  125_000,
+		LongPrompt: &policy.PriceTier{
+			AboveTokens:        272_000,
+			InputMicrosPerMTok: 200_000, OutputMicrosPerMTok: 750_000,
+			CachedInputMicrosPerMTok: 20_000,
+			CacheWriteMicrosPerMTok:  250_000,
+		},
 		Description: "fastest, cheapest and lightest here - short, simple, " +
 			"high-volume work over a very long context",
 	}, {
 		ID: "gpt-5.6-sol", MaxContext: 1_050_000, ReleaseDate: "2026-07-09",
 		InputMicrosPerMTok: 4_000_000, OutputMicrosPerMTok: 20_000_000,
 		CachedInputMicrosPerMTok: 400_000,
+		CacheWriteMicrosPerMTok:  5_000_000,
+		LongPrompt: &policy.PriceTier{
+			AboveTokens:        272_000,
+			InputMicrosPerMTok: 8_000_000, OutputMicrosPerMTok: 30_000_000,
+			CachedInputMicrosPerMTok: 800_000,
+			CacheWriteMicrosPerMTok:  10_000_000,
+		},
 		Description: "previous generation's most powerful - hard work, at twice " +
 			"the price of gpt-6.1-sol",
 	}, {
 		ID: "gpt-5.6-terra", MaxContext: 1_050_000, ReleaseDate: "2026-07-09",
 		InputMicrosPerMTok: 2_000_000, OutputMicrosPerMTok: 12_000_000,
 		CachedInputMicrosPerMTok: 200_000,
+		CacheWriteMicrosPerMTok:  2_500_000,
+		LongPrompt: &policy.PriceTier{
+			AboveTokens:        272_000,
+			InputMicrosPerMTok: 4_000_000, OutputMicrosPerMTok: 18_000_000,
+			CachedInputMicrosPerMTok: 400_000,
+			CacheWriteMicrosPerMTok:  5_000_000,
+		},
 		Description: "previous generation's middle option - capable, quick enough " +
 			"and mid-priced",
 	}, {
 		ID: "gpt-5.6-luna", MaxContext: 1_050_000, ReleaseDate: "2026-07-09",
 		InputMicrosPerMTok: 200_000, OutputMicrosPerMTok: 1_200_000,
 		CachedInputMicrosPerMTok: 20_000,
+		CacheWriteMicrosPerMTok:  250_000,
+		LongPrompt: &policy.PriceTier{
+			AboveTokens:        272_000,
+			InputMicrosPerMTok: 400_000, OutputMicrosPerMTok: 1_800_000,
+			CachedInputMicrosPerMTok: 40_000,
+			CacheWriteMicrosPerMTok:  500_000,
+		},
 		Description: "previous generation's lightest - short, simple work, at " +
 			"twice the price of gpt-6-luna",
 	}, {
 		ID: "gpt-5.5", MaxContext: 1_050_000, ReleaseDate: "2026-04-24",
 		InputMicrosPerMTok: 5_000_000, OutputMicrosPerMTok: 30_000_000,
 		CachedInputMicrosPerMTok: 500_000,
-		Description:              "older top model - thorough on hard problems, slow and dear",
+		LongPrompt: &policy.PriceTier{
+			AboveTokens:        272_000,
+			InputMicrosPerMTok: 10_000_000, OutputMicrosPerMTok: 45_000_000,
+			CachedInputMicrosPerMTok: 1_000_000,
+		},
+		Description: "older top model - thorough on hard problems, slow and dear",
 	}, {
 		ID: "gpt-5.4", MaxContext: 1_050_000, ReleaseDate: "2026-03-05",
 		InputMicrosPerMTok: 2_500_000, OutputMicrosPerMTok: 15_000_000,
 		CachedInputMicrosPerMTok: 250_000,
-		Description:              "older middle option - capable and mid-priced",
+		LongPrompt: &policy.PriceTier{
+			AboveTokens:        272_000,
+			InputMicrosPerMTok: 5_000_000, OutputMicrosPerMTok: 22_500_000,
+			CachedInputMicrosPerMTok: 500_000,
+		},
+		Description: "older middle option - capable and mid-priced",
 	}, {
 		ID: "gpt-5.4-mini", MaxContext: 400_000, ReleaseDate: "2026-03-17",
 		InputMicrosPerMTok: 750_000, OutputMicrosPerMTok: 4_500_000,
@@ -257,6 +354,8 @@ var providers = []Provider{{
 	}},
 	Note: "Prompts leave your infrastructure. " +
 		"Prompt caching works, and cached input is charged at the cached rate. " +
+		"From gpt-5.6 on, a cache write costs 25% more than input, and is " +
+		"charged so. " +
 		"Responses clients such as Codex reach OpenAI's Responses API. " +
 		"Reasoning tokens are billed as output, and the request log cannot " +
 		"show them apart. " +
@@ -264,9 +363,10 @@ var providers = []Provider{{
 		"the reasoning models (all but gpt-4 and older) get no temperature or top_p. " +
 		"Built-in tools such as web search run at OpenAI, out of sight of " +
 		"filters; a guardrail that blocks hosted tools removes them. " +
-		"The gpt-6 models, gpt-5.5 and gpt-5.4 cost more above 272k input " +
-		"tokens, and the table has the lower price. " +
-		"gpt-5.6-sol is on a promotional price until 21 November 2026.",
+		"The gpt-6 and gpt-5.6 models, gpt-5.5 and gpt-5.4 cost more above " +
+		"272k input tokens, and are charged so. " +
+		"gpt-5.6-sol is on a promotional price until at least 21 November 2026. " +
+		"gpt-5.1 and gpt-5.4-nano shut down on 1 April 2027.",
 }, {
 	Name:    "infomaniak",
 	Summary: "Open-weight models, served in Switzerland.",
@@ -308,11 +408,6 @@ var providers = []Provider{{
 		Description: "middling power, quick and cheap - document analysis, " +
 			"chatbots and ordinary code",
 	}, {
-		ID: "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-FP8", MaxContext: 1_000_000, ReleaseDate: "2025-12-15",
-		InputMicrosPerMTok: 50_000, OutputMicrosPerMTok: 200_000,
-		Description: "fastest and cheapest here, over a million-token context - " +
-			"high-volume, simple work",
-	}, {
 		ID: "mistralai/Ministral-3-14B-Instruct-2512", MaxContext: 100_000, ReleaseDate: "2025-12-02",
 		InputMicrosPerMTok: 300_000, OutputMicrosPerMTok: 400_000,
 		Description: "small, quick and cheap - chatbots, short edits and " +
@@ -322,6 +417,8 @@ var providers = []Provider{{
 		"The endpoint is per customer: a model needs your AI Service's product " +
 		"id as well as a key, both in the Infomaniak console under AI Tools. " +
 		"Model ids are the upstream names, with capitals. " +
+		"Kimi-K2.6, Qwen3.5-397B and Apertus-v1.5-70B are in beta, and " +
+		"Infomaniak can withdraw them without notice. " +
 		"No cached-input rate is published, so every input token costs the " +
 		"input price. " +
 		"Only chat models are listed: declare an embedding model with no " +
@@ -393,7 +490,7 @@ var providers = []Provider{{
 		Description:              "fast and cheap, light on reasoning - high-volume, simple work",
 	}, {
 		ID: "apertus-ai/Apertus-v1.5-8B", MaxContext: 128_000, ReleaseDate: "2026-07-24",
-		InputMicrosPerMTok: 20_000, OutputMicrosPerMTok: 100_000,
+		InputMicrosPerMTok: 120_000, OutputMicrosPerMTok: 580_000,
 		CachedInputMicrosPerMTok: 3_000,
 		Description: "the smallest and cheapest chat model here, with open weights " +
 			"and open training data - simple work",
@@ -433,8 +530,8 @@ var providers = []Provider{{
 	Kinds:    []policy.Kind{policy.KindChat},
 	// Ids are Phoeniqs's own names. One keeps its name when the model behind
 	// it gets a minor upgrade, so the release dates are those of the models
-	// served on 2026-09-29: GLM-5.2 for inference-glm5 and
-	// MinerU2.5-Pro-2605 for inference-miner-u25.
+	// served on 2026-10-08: GLM-5.2 for inference-glm5, GLM-5.3-Flash for
+	// inference-glm5-flash and MinerU2.5-Pro-2605 for inference-miner-u25.
 	Models: []ProviderModel{{
 		ID: "inference-glm5", MaxContext: 131_072, ReleaseDate: "2026-08-28",
 		InputMicrosPerMTok: 1_077_000, OutputMicrosPerMTok: 3_386_000,
@@ -456,7 +553,7 @@ var providers = []Provider{{
 		Description: "capable, quick and cheap, over a million-token context - " +
 			"large codebases and long documents",
 	}, {
-		ID: "inference-glm53-flash", MaxContext: 1_000_000, ReleaseDate: "2026-08-26",
+		ID: "inference-glm5-flash", MaxContext: 1_000_000, ReleaseDate: "2026-08-26",
 		InputMicrosPerMTok: 123_000, OutputMicrosPerMTok: 410_000,
 		Description: "quick and cheap all-rounder over a million-token context - " +
 			"code, reasoning and tool use",
@@ -626,6 +723,9 @@ func ProviderNames() string {
 func (p Provider) clone() Provider {
 	p.Kinds = slices.Clone(p.Kinds)
 	p.Models = slices.Clone(p.Models)
+	for i := range p.Models {
+		p.Models[i].LongPrompt = p.Models[i].longPrompt()
+	}
 	return p
 }
 
@@ -646,6 +746,16 @@ func (p Provider) Model(id string) (ProviderModel, bool) {
 		}
 	}
 	return ProviderModel{}, false
+}
+
+// longPrompt is a copy of the model's long-prompt prices, so a model given
+// them cannot change the table's.
+func (m ProviderModel) longPrompt() *policy.PriceTier {
+	if m.LongPrompt == nil {
+		return nil
+	}
+	t := *m.LongPrompt
+	return &t
 }
 
 func (p Provider) modelIDs() string {
@@ -781,6 +891,12 @@ func fillFromTable(m Model, known ProviderModel) Model {
 	}
 	if m.CachedInputMicrosPerMTok == nil {
 		m.CachedInputMicrosPerMTok = &known.CachedInputMicrosPerMTok
+	}
+	if m.CacheWriteMicrosPerMTok == nil {
+		m.CacheWriteMicrosPerMTok = &known.CacheWriteMicrosPerMTok
+	}
+	if m.LongPrompt == nil {
+		m.LongPrompt = known.longPrompt()
 	}
 	return m
 }

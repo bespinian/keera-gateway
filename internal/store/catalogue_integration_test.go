@@ -48,8 +48,13 @@ func TestModelCatalogueRoundTrip(t *testing.T) {
 		Backends:           []string{"http://vllm-a:8000/v1", "http://vllm-b:8000/v1"},
 		BackendModel:       "Qwen/Qwen2.5-Coder-32B-Instruct",
 		InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 4_000_000,
-		CachedInputMicrosPerMTok: 100_000,
-		MaxContext:               65536, Enabled: true,
+		CachedInputMicrosPerMTok: 100_000, CacheWriteMicrosPerMTok: 1_250_000,
+		LongPrompt: &policy.PriceTier{
+			AboveTokens: 32_000, InputMicrosPerMTok: 2_000_000,
+			OutputMicrosPerMTok: 8_000_000, CachedInputMicrosPerMTok: 200_000,
+			CacheWriteMicrosPerMTok: 2_500_000,
+		},
+		MaxContext: 65536, Enabled: true,
 		Provider: "anthropic", ReleaseDate: "2026-07-24", Location: "usa",
 	}
 	if err := st.UpsertModel(ctx, m); err != nil {
@@ -68,9 +73,12 @@ func TestModelCatalogueRoundTrip(t *testing.T) {
 	// This one is the difference between a hosted model's cost here and its
 	// cost in the provider's console, and a column that quietly failed to
 	// round-trip would read as a rate nobody set.
-	if got.CachedInputMicrosPerMTok != 100_000 {
-		t.Errorf("cached-input rate = %d, want the stored 100000",
-			got.CachedInputMicrosPerMTok)
+	if got.CachedInputMicrosPerMTok != 100_000 || got.CacheWriteMicrosPerMTok != 1_250_000 {
+		t.Errorf("cache rates = %d read, %d write, want the stored 100000 and 1250000",
+			got.CachedInputMicrosPerMTok, got.CacheWriteMicrosPerMTok)
+	}
+	if got.LongPrompt == nil || *got.LongPrompt != *m.LongPrompt {
+		t.Errorf("long prompt = %+v, want the stored %+v", got.LongPrompt, *m.LongPrompt)
 	}
 	if !slices.Equal(got.Backends, m.Backends) || got.MaxContext != m.MaxContext ||
 		got.OutputMicrosPerMTok != m.OutputMicrosPerMTok {

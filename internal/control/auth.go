@@ -33,10 +33,12 @@ const operatorKeyExternalID = authn.ReservedProvider + ":operator-key"
 
 // authConfig tells the panel how to offer signing in, before anybody has.
 func (s *Server) authConfig(w http.ResponseWriter, _ *http.Request) {
-	providers := make([]map[string]string, 0, len(s.opts.Providers))
+	providers := make([]map[string]any, 0, len(s.opts.Providers))
 	for _, p := range s.opts.Providers {
-		providers = append(providers, map[string]string{
+		providers = append(providers, map[string]any{
 			"name": p.Name(), "label": p.Label(),
+			// Whether somebody new may create an organisation through it.
+			"signup": p.SignUp(),
 		})
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
@@ -168,7 +170,24 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		s.signInFailed(w, r, err)
 		return
 	}
-	user, was, ok := s.linkIdentity(w, r, provider, identity)
+	place, err := s.orgFor(r, provider, identity)
+	if err != nil {
+		s.signInFailed(w, r, err)
+		return
+	}
+	if place.signUp {
+		if flow.CLI() {
+			// The choice is made on a screen of the panel, which this
+			// browser is not going to show.
+			s.signInFailed(w, r, errors.New("there is no organisation for "+identity.Email+
+				" yet; open "+s.publicOrigin(r)+" in a browser to create or join one, "+
+				"then run keera login again"))
+			return
+		}
+		s.startSignup(w, r, provider, identity, place.invited, flow.RedirectTo)
+		return
+	}
+	user, was, ok := s.linkIdentity(w, r, provider, identity, place.orgID)
 	if !ok {
 		return
 	}
@@ -204,16 +223,11 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 // the role the directory gives them. It also returns the role they had
 // before.
 func (s *Server) linkIdentity(w http.ResponseWriter, r *http.Request, provider *authn.OIDC,
-	identity authn.Identity,
+	identity authn.Identity, orgID string,
 ) (user store.User, was string, ok bool) {
-	orgID, err := s.orgFor(r, identity)
-	if err != nil {
-		s.signInFailed(w, r, err)
-		return user, "", false
-	}
 	role := provider.Mapping().RoleFor(identity.Email, identity.Groups)
 
-	user, err = s.st.LinkUser(r.Context(), id.New("user"), store.Link{
+	user, err := s.st.LinkUser(r.Context(), id.New("user"), store.Link{
 		OrgID:      orgID,
 		Email:      identity.Email,
 		ExternalID: identity.ExternalID(),
@@ -246,26 +260,51 @@ func (s *Server) linkIdentity(w http.ResponseWriter, r *http.Request, provider *
 	return user, was, true
 }
 
+// placement is where a sign-in lands: in an organisation, or on the sign-up
+// screen.
+type placement struct {
+	orgID  string
+	signUp bool
+	// invited is the organisation that added the person's address, which the
+	// sign-up screen offers to join.
+	invited string
+}
+
 // orgFor decides which tenant a sign-in belongs to: where the person already
-// is, else the organisation of their email domain, else the only one there
-// is. Anything else is refused, because the wrong tenant is worse than none.
-func (s *Server) orgFor(r *http.Request, identity authn.Identity) (string, error) {
+// is, else the organisation of their email domain. After that, a provider
+// that allows sign-up sends the person to choose; otherwise they land in the
+// only organisation there is. Anything else is refused, because the wrong
+// tenant is worse than none.
+//
+// An invitation is never joined without asking: anyone who administers an
+// organisation without a domain can add any address to it.
+func (s *Server) orgFor(r *http.Request, provider *authn.OIDC, identity authn.Identity) (placement, error) {
 	if u, err := s.st.UserByExternalID(r.Context(), identity.ExternalID()); err == nil {
-		return u.OrgID, nil
+		return placement{orgID: u.OrgID}, nil
 	} else if !errors.Is(err, store.ErrNotFound) {
-		return "", err
+		return placement{}, err
 	}
 	if org, err := s.st.OrgByEmailDomain(r.Context(), identity.Domain()); err == nil {
-		return org.ID, nil
+		return placement{orgID: org.ID}, nil
 	} else if !errors.Is(err, store.ErrNotFound) {
-		return "", err
+		return placement{}, err
 	}
-	if org, err := s.st.OnlyOrg(r.Context()); err == nil {
-		return org.ID, nil
-	} else if !errors.Is(err, store.ErrNotFound) {
-		return "", err
+	if provider.SignUp() {
+		org, err := s.st.InvitationFor(r.Context(), identity.Email)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return placement{}, err
+		}
+		return placement{signUp: true, invited: org.ID}, nil
 	}
-	return "", errors.New("no organisation matches " + identity.Domain() +
+	// Where strangers create organisations, the only one is somebody else's.
+	if !s.opts.Providers.SignUp() {
+		if org, err := s.st.OnlyOrg(r.Context()); err == nil {
+			return placement{orgID: org.ID}, nil
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return placement{}, err
+		}
+	}
+	return placement{}, errors.New("no organisation matches " + identity.Domain() +
 		"; an operator has to create one and set its email domain")
 }
 
@@ -485,14 +524,25 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request, p *authn.Principal) 
 		// Whether this deployment lends out sandboxes. Without a driver the
 		// panel does not show them at all.
 		"sandboxes": s.opts.Sandboxes != nil,
+		// Whether this deployment holds a provider key of its own, and so
+		// bills organisations. Without one the panel hides Billing.
+		"billing": len(s.opts.Platform) > 0,
+		// Whether organisations pay for those keys in advance, by card.
+		"payments": s.opts.Payments != nil,
+		// Whether Claude Code may come through on a Claude plan. Without it
+		// the panel offers no subscription models or keys.
+		"claude_subscriptions": s.opts.ClaudeSubscriptions,
 		// Whether administrators can create passkey accounts, and whether
 		// this is one, which has passkeys to manage.
 		"passkeys":        s.opts.Passkeys != nil,
 		"passkey_account": s.isPasskeyAccount(r, p.UserID),
 	}
 	if p.OrgID != "" {
-		if name, found := s.orgName(r.Context(), p.OrgID); found {
-			out["org_name"] = name
+		// A failed read leaves both out: they are only for display.
+		if org, err := s.st.OrgByID(r.Context(), p.OrgID); err == nil {
+			out["org_name"] = org.Name
+			// The panel says what a limited organisation cannot use yet.
+			out["org_limited"] = org.Limited
 		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)

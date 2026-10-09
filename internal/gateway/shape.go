@@ -39,9 +39,9 @@ var (
 // translated at the edges, so one set of guardrails covers every client. The
 // one exception is a request forwarded to the provider whose own API it is in.
 type shape interface {
-	// decode turns a request in this shape into an OpenAI chat request. The
+	// decodeBody turns a request in this shape into an OpenAI chat request. The
 	// error is shown to the client, so it says what is wrong with the body.
-	decode(raw []byte) ([]byte, error)
+	decodeBody(raw []byte) (*body, error)
 	// encode turns one buffered upstream response into this shape, and returns
 	// the status to answer with. The status in tells an error body from a
 	// completion. The status out may differ, since a success that cannot be
@@ -59,12 +59,6 @@ type shape interface {
 	contentType() string
 }
 
-// bodyDecoder is a shape that can build the OpenAI request as a body, which
-// saves parsing again a large request it has just written.
-type bodyDecoder interface {
-	decodeBody(raw []byte) (*body, error)
-}
-
 // openAIShape is the identity: the surfaces that already speak what the
 // inference plane speaks.
 type openAIShape struct{ openAIErrors }
@@ -77,7 +71,7 @@ func (openAIErrors) writeError(w http.ResponseWriter, status int, typ, code, msg
 	httpx.WriteError(w, status, typ, code, msg)
 }
 
-func (openAIShape) decode(raw []byte) ([]byte, error) { return raw, nil }
+func (openAIShape) decodeBody(raw []byte) (*body, error) { return parseBody(raw) }
 
 // encode names the alias as the model: the client was promised the alias,
 // never the backend's name for it.

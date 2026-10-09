@@ -350,6 +350,7 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	}
 	admin := p.CanAdminOrg(orgID)
 	for i := range models {
+		s.markPlatform(&models[i])
 		if !admin {
 			models[i].Backends = nil
 			models[i].HasAPIKey = false
@@ -362,6 +363,20 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	})
 }
 
+// markPlatform shows a model on the deployment's key as the gateway sends
+// it: to the provider's endpoint, at its list prices. The row may predate the
+// key.
+func (s *Server) markPlatform(m *policy.Model) {
+	if !s.opts.Platform.Covers(*m) {
+		return
+	}
+	// Its own key is never sent, either way. A model the price table does not
+	// know is not on the deployment's key either: the registry sends it
+	// without a key, and logs why.
+	m.HasAPIKey = false
+	_ = s.opts.Platform.Lock(m)
+}
+
 // listProviders serves the hosted providers this binary knows, so adding a
 // hosted model in the panel needs only a model id. It is the same table the
 // catalogue file is read against.
@@ -369,13 +384,21 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request, p *authn.Pri
 // Anyone signed in may read it, for the panel's model catalogue. Only someone who
 // can add a model sees where a provider is reached: the form fills it in.
 func (s *Server) listProviders(w http.ResponseWriter, _ *http.Request, p *authn.Principal) {
-	providers := catalog.Providers()
-	if !p.CanAdminOrg(p.OrgID) {
-		for i := range providers {
-			providers[i].Endpoint = ""
-		}
+	type entry struct {
+		catalog.Provider
+		// PlatformKey says the deployment holds the key, so a model of this
+		// provider takes none.
+		PlatformKey bool `json:"platform_key,omitempty"`
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"data": providers})
+	admin := p.CanAdminOrg(p.OrgID)
+	var out []entry
+	for _, prov := range catalog.Providers() {
+		if !admin {
+			prov.Endpoint = ""
+		}
+		out = append(out, entry{Provider: prov, PlatformKey: s.opts.Platform.Has(prov.Name)})
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"data": out})
 }
 
 func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
@@ -406,8 +429,26 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 	if body.APIKey != nil {
 		credential = strings.TrimSpace(*body.APIKey)
 	}
+	// Locked before the other checks, because it sets the backend they check.
+	m.Provider = strings.ToLower(strings.TrimSpace(m.Provider))
+	platform := s.opts.Platform.Covers(m)
+	if platform {
+		if credential != "" {
+			badRequest(w, "this deployment holds the key for "+m.Provider+", so its models "+
+				"take no API key")
+			return
+		}
+		if err := s.opts.Platform.Lock(&m); err != nil {
+			badRequest(w, err.Error())
+			return
+		}
+	}
 	if msg := normalizeModel(&m); msg != "" {
 		badRequest(w, msg)
+		return
+	}
+	if m.Subscription && !s.opts.ClaudeSubscriptions {
+		badRequest(w, subscriptionsOff)
 		return
 	}
 	if m.Subscription && credential != "" {
@@ -427,7 +468,8 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 		s.fail(w, err)
 		return
 	}
-	if found && existing.HasAPIKey && body.APIKey == nil && !sameOrigins(existing.Backends, m.Backends) {
+	if !platform && found && existing.HasAPIKey && body.APIKey == nil &&
+		!sameOrigins(existing.Backends, m.Backends) {
 		badRequest(w, keyNotMoved("backends"))
 		return
 	}
@@ -446,7 +488,10 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 	// The model marshals without its credential.
 	s.auditf(r, p, orgID, "model.put", "model", m.Alias, m)
 
-	if body.APIKey != nil {
+	// A model on the deployment's key keeps no key of its own: it would never
+	// be used, and would be sent to wherever the model points if the
+	// deployment's key were taken away.
+	if body.APIKey != nil || (platform && found && existing.HasAPIKey) {
 		if err := s.setModelCredential(r, p, orgID, m.Alias, credential); err != nil {
 			s.fail(w, err)
 			return
@@ -460,6 +505,7 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 		s.fail(w, err)
 		return
 	}
+	s.markPlatform(&stored)
 	// A model turned into a subscription model keeps no key it will never use.
 	if stored.Subscription && stored.HasAPIKey {
 		if err := s.setModelCredential(r, p, orgID, m.Alias, ""); err != nil {
@@ -516,13 +562,6 @@ func normalizeModel(m *policy.Model) string {
 	if err := m.CheckBackend(); err != nil {
 		return err.Error()
 	}
-	for _, b := range m.Backends {
-		u, err := url.Parse(strings.TrimSpace(b))
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			return "backend " + strconv.Quote(b) + " is not an http or https address, such as " +
-				"http://vllm:8000/v1"
-		}
-	}
 	if m.Kind == "" {
 		m.Kind = policy.KindChat
 	}
@@ -557,6 +596,11 @@ func normalizeModel(m *policy.Model) string {
 		return "'location' must be a short lowercase name, such as ch, usa or onprem"
 	case m.ReleaseDate != "" && !policy.ValidReleaseDate(m.ReleaseDate):
 		return "'release_date' must be a day written as YYYY-MM-DD"
+	}
+	if m.LongPrompt != nil {
+		if err := m.LongPrompt.Check(); err != nil {
+			return err.Error()
+		}
 	}
 	if err := catalog.CheckSubscription(*m); err != nil {
 		return err.Error()

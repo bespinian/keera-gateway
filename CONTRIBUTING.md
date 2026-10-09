@@ -15,18 +15,12 @@ agree to when you do.
 
 ## Making a change
 
-[docs/run-locally.md](docs/run-locally.md) shows how to build and run Keera on
-your machine. In short:
+[docs/run-locally.md](docs/run-locally.md) shows how to build, run and test
+Keera on your machine.
 
-```sh
-go mod vendor   # once, after cloning
-make dev        # the gateway and its backends, rebuilt on every save
-make check      # tests, vet and formatting; CI also runs the linter
-```
-
-Run `make check` before you open a pull request. If your change touches the
-database, Redis, rate limiting or the control plane, run `make test-integration`
-as well.
+Run `make check` before you open a pull request; CI also runs the linter. If
+your change touches the database, Redis, rate limiting or the control plane,
+run `make test-integration` as well.
 
 Follow the existing style:
 

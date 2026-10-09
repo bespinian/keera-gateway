@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -731,4 +732,50 @@ func summaryOf(t *testing.T, projects []ProjectSummary, id string) ProjectSummar
 	}
 	t.Fatalf("ProjectSummaries = %+v, want %s among them", projects, id)
 	return ProjectSummary{}
+}
+
+// A batch is one transaction. Text Postgres cannot store is cleaned, and an
+// event it refuses all the same loses only its own usage row: every other
+// event, and its own bills, are still written.
+func TestOneEventPostgresRefusesDoesNotLoseTheBatch(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	now := time.Now().UTC()
+	bill := []policy.BillLine{{Alias: "keera-code", Provider: "anthropic",
+		BackendModel: "claude-opus-5", Currency: "USD", InputTokens: 10, Micros: 100,
+		CreditMicros: 80}}
+
+	err := st.WriteEvents(ctx, []Event{
+		{TS: now, OrgID: f.orgID, Alias: "keera-code", Status: 200, Bills: bill},
+		// What a client put in its 'model' field.
+		{TS: now, OrgID: f.orgID, Alias: "a\x00b\xff", Error: "bad\x00", Status: 404},
+		// Refused by a check constraint, whatever its text.
+		{TS: now, OrgID: f.orgID, Alias: "keera-code", Status: 200, Bills: bill,
+			FilterRuns: []FilterRun{{Filter: "redact", Mode: policy.FilterModeRewrite,
+				Outcome: "nonsense"}}},
+	})
+	lost, ok := errors.AsType[*LostEvents](err)
+	if !ok || lost.N != 1 {
+		t.Fatalf("WriteEvents = %v, want one event lost", err)
+	}
+
+	var rows, aliased, lines int
+	var balance int64
+	if err := st.pool.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE alias = 'ab'||chr(65533))
+		FROM usage_events`).Scan(&rows, &aliased); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.pool.QueryRow(ctx, `SELECT count(*) FROM billing_lines`).Scan(&lines); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.pool.QueryRow(ctx, `SELECT balance_micros FROM credit_accounts
+		WHERE org_id = $1`, f.orgID).Scan(&balance); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 2 || aliased != 1 {
+		t.Errorf("usage rows = %d (%d with the cleaned alias), want 2 (1)", rows, aliased)
+	}
+	if lines != 2 || balance != -160 {
+		t.Errorf("billing lines = %d, balance = %d; want both bills written, -160", lines, balance)
+	}
 }

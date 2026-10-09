@@ -11,9 +11,7 @@ cluster.
 **Egress can be enforced.** A network policy can allow only the gateway, the
 internal registry and the internal Git. A script the agent writes to upload the
 repository then fails. How much this is worth depends on the driver and the
-cluster; see [What is actually enforced](#what-is-actually-enforced). On the
-podman driver, which is not meant for production, there is no egress control
-today.
+cluster; see [What is actually enforced](#what-is-actually-enforced).
 
 **The API key never lands on a laptop.** Each sandbox gets its own key at
 creation, scoped to whoever asked for it. The key expires with the sandbox,
@@ -21,12 +19,9 @@ moves with it when the sandbox is extended, and is revoked when it ends or
 fails. The sandbox boots already pointed at the gateway, so
 `keera connect` is not needed inside.
 
-**A session is known, not guessed.** [sessions.md](sessions.md) groups requests
-into tasks by inference, which can be wrong in two ways. An agent sandbox is
-exactly one task, so it sends its own id in `X-Keera-Session`: the gateway
-configures Pi and Claude Code to do so. The session key
-is computed once at creation, the same way the gateway computes it per request,
-so a sandbox and its task can be read side by side.
+**A session is known, not guessed.** An agent sandbox is exactly one task, so
+it names its own session instead of leaving the gateway to infer it
+([sessions.md](sessions.md#what-it-cannot-promise)).
 
 ## Two lifecycles, one substrate
 
@@ -185,6 +180,10 @@ A name finds the caller's own sandbox first. An administrator who can see two
 sandboxes of that name, from two people, gets a 409 and names one by its id
 (`sbx_…`).
 
+An organisation somebody created by signing up gets no sandbox until it has
+paid once, or an operator lifts its limit. See
+[What a new organisation can use](sso.md#what-a-new-organisation-can-use).
+
 ## The catalogue
 
 A class name is an API contract. People type it, commit it into repository
@@ -194,6 +193,11 @@ tier or memory without anyone else editing anything.
 
 Each class belongs to one organisation, like a model. Only its people and
 agents can ask for it, and two organisations can each have a `standard`.
+
+Sandbox pods pull their image with the deployment's registry credentials. So
+an administrator may only give a class an image of a class from the catalogue
+file, one under a prefix in `KEERA_SANDBOX_IMAGES`, or the image the class
+already has. Any other image needs an operator.
 
 ```yaml
 # KEERA_SANDBOXES_FILE
@@ -432,10 +436,8 @@ another token. A GitLab token is revoked at once. A GitHub token cannot be
 revoked without the token itself, which is not kept, so the last one works for
 up to an hour more.
 
-**When the owner is disabled** (see [sso.md](sso.md#when-someone-leaves)), their
-agent sandboxes and any that have not started yet are terminated, their other
-engineer sandboxes are suspended, and every repository credential they held is
-revoked.
+**When the owner is disabled**, their sandboxes end or are suspended and their
+repository credentials are revoked; see [sso.md](sso.md#when-someone-leaves).
 
 **What it cannot do.** Neither token can change CI: GitHub gets no `workflows`
 permission, and GitLab's Developer role cannot push to a protected branch. Keep
@@ -512,25 +514,9 @@ enforces it, from the expiry on the sandbox's row. A gateway that is down over
 a weekend comes back to containers that should have ended on Friday. The sweep
 that runs at start-up ends those.
 
-To run podman locally, the gateway must run as a host process: run
-`make sandbox-image` once, then set `KEERA_SANDBOX_DRIVER=podman` in
-`compose/.env` and run `make dev`. The compose deployment's own gateway cannot
-use this driver: it is a `FROM scratch` container, with no podman in it.
-
-## No client-go
-
-The Kubernetes driver calls the API server over plain HTTPS with the service
-account token, and decodes only the fields it reads. `client-go` would make the
-module graph a hundred times bigger to save a few hundred lines of JSON handling
-over six endpoints. This binary has to vendor cleanly for air-gapped customers.
-
-What `client-go` would give is avoided, not rebuilt:
-
-- no watch with resync - the driver polls on the sweep;
-- no server-side apply - it upserts with a JSON merge patch;
-- no discovery - the startup probe lists the sandbox resource, which proves at
-  once that the API server is there, the CRD is installed and the service
-  account may use it.
+To run podman locally, the gateway must run as a host process, under
+`make dev`; see
+[compose/README.md](../compose/README.md#sandboxes-do-not-work-in-this-shape).
 
 ## The security boundary
 
@@ -578,6 +564,7 @@ namespace. See [What is actually enforced](#what-is-actually-enforced).
 | `KEERA_SANDBOX_STORAGE_CLASS`      | the cluster's                                 | what a home volume is provisioned from                                                               |
 | `KEERA_SANDBOX_SERVICE_ACCOUNT`    | the namespace's                               | what a sandbox pod runs as; its token is never mounted                                               |
 | `KEERA_SANDBOX_IMAGE_PULL_SECRETS` | -                                             | comma-separated, for a sandbox image in a private registry                                           |
+| `KEERA_SANDBOX_IMAGES`             | -                                             | comma-separated image prefixes an administrator may give a class, such as `registry.internal/keera/` |
 | `KEERA_SANDBOX_WARM`               | off                                           | warm pools, which need the upstream extension                                                        |
 | `KEERA_SANDBOX_PODMAN_BINARY`      | `podman`                                      | the single-host driver's command                                                                     |
 | `KEERA_SANDBOX_PODMAN_NETWORK`     | podman's default                              | the network a single-host sandbox joins                                                              |

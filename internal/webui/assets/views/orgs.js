@@ -15,6 +15,7 @@ import {
   showError,
   plural,
   field,
+  pill,
 } from "../ui.js";
 
 export async function orgsView(ctx) {
@@ -47,7 +48,12 @@ export async function orgsView(ctx) {
           h(
             "div",
             { class: "stack" },
-            h("strong", {}, o.name),
+            h(
+              "div",
+              { class: "row-tight" },
+              h("strong", {}, o.name),
+              o.limited ? pill("Limited", "warn") : null,
+            ),
             h(
               "span",
               { class: "faint mono", style: { fontSize: "11px" } },
@@ -74,6 +80,18 @@ export async function orgsView(ctx) {
           h(
             "div",
             { class: "row-tight" },
+            o.limited
+              ? h(
+                  "button",
+                  {
+                    class: "btn btn-sm",
+                    title:
+                      "Open models and MCP servers inside this deployment's network, and sandboxes",
+                    onClick: () => liftLimit(ctx, o),
+                  },
+                  "Lift limit",
+                )
+              : null,
             h(
               "button",
               {
@@ -192,6 +210,59 @@ export function newOrg(ctx, { switchTo = false } = {}) {
           },
         },
         "Create organisation",
+      ),
+    ],
+  });
+}
+
+// liftLimit opens to an organisation that signed itself up what it would
+// otherwise get with its first payment.
+function liftLimit(ctx, org) {
+  const err = h("div");
+  modal({
+    title: `Lift the limit of ${org.name}`,
+    body: h(
+      "div",
+      {},
+      err,
+      h(
+        "p",
+        {},
+        "Somebody created this organisation by signing up. Until it buys " +
+          "credit, it can only use models billed from its credit and services " +
+          "on public addresses.",
+      ),
+      h(
+        "p",
+        {},
+        "Lifting the limit opens the models and MCP servers inside this " +
+          "deployment's network, and sandboxes. Only do this for a customer you know.",
+      ),
+    ),
+    actions: (close) => [
+      h("button", { class: "btn", onClick: close }, "Cancel"),
+      h(
+        "button",
+        {
+          class: "btn btn-primary",
+          onClick: async (e) => {
+            e.target.disabled = true;
+            try {
+              const saved = await api.liftOrgLimit(org.id);
+              const i = (ctx.state.orgs || []).findIndex(
+                (o) => o.id === org.id,
+              );
+              if (i >= 0) ctx.state.orgs[i] = saved;
+              close();
+              toast("Limit lifted", "good");
+              ctx.reload();
+            } catch (ex) {
+              showError(err, ex.message);
+              e.target.disabled = false;
+            }
+          },
+        },
+        "Lift limit",
       ),
     ],
   });

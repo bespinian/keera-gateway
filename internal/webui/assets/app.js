@@ -3,6 +3,7 @@
 import { api, setCsrf, ApiError } from "./api.js";
 import { h, icon, icons, brandMark, clear, replace, toast } from "./ui.js";
 import { signIn, passkeySignInFlow } from "./views/signin.js";
+import { signUp, signUpFlow } from "./views/signup.js";
 import { passkeySetupView, managePasskeys } from "./views/passkeys.js";
 import { dashboardView } from "./views/dashboard.js";
 import { projectsView } from "./views/projects.js";
@@ -22,6 +23,7 @@ import { mapView } from "./views/map.js";
 import { sessionsView, sessionDetailView } from "./views/sessions.js";
 import { peopleView } from "./views/people.js";
 import { orgsView } from "./views/orgs.js";
+import { billingView } from "./views/billing.js";
 import {
   projectDetailView,
   keyDetailView,
@@ -63,14 +65,14 @@ const routes = [
   {
     path: "/access",
     group: "You",
-    label: "My access",
+    label: "My Access",
     icon: "access",
     view: accessView,
   },
   {
     path: "/clients",
     group: "You",
-    label: "My clients",
+    label: "My Clients",
     icon: "connect",
     view: clientsView,
   },
@@ -98,7 +100,7 @@ const routes = [
   {
     path: "/keys",
     group: "Organisation",
-    label: "API keys",
+    label: "API Keys",
     icon: "keys",
     view: keysView,
     detail: { label: "API key", view: keyDetailView },
@@ -253,6 +255,18 @@ const routes = [
     icon: "audit",
     view: auditView,
     admin: true,
+  },
+  // What the deployment bills for its own provider keys. Administrators see
+  // their organisation's bill, operators every one and the margin. Not shown
+  // on a deployment without such a key: there is nothing to bill.
+  {
+    path: "/billing",
+    group: "Administration",
+    label: "Billing",
+    icon: "billing",
+    view: billingView,
+    admin: true,
+    needs: "billing",
   },
 
   {
@@ -813,6 +827,7 @@ async function boot() {
   const setup = location.hash.match(/^#passkey-setup=([A-Za-z0-9_-]+)$/);
   if (setup) return passkeySetupView(root, setup[1], boot);
   if (passkeySignInFlow()) return signIn(root, boot);
+  if (signUpFlow()) return signUp(root, boot);
 
   let me;
   try {

@@ -866,6 +866,9 @@ export function showRequest(ctx, q, names, currency) {
         (q.cached_input_tokens
           ? ` (${num(q.cached_input_tokens)} from the provider's cache)`
           : "") +
+        (q.cache_write_tokens
+          ? ` (${num(q.cache_write_tokens)} written to it)`
+          : "") +
         (q.estimated ? " (estimated)" : ""),
     ],
     [

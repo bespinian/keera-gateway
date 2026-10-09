@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -36,6 +37,40 @@ func (s *Server) writeHookList(w http.ResponseWriter, r *http.Request, data any,
 		out["currency"] = s.opts.Currency
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// hookReport reads one filter's or router's own screen: its report over the
+// window and, under kind, the filter or router itself. A deleted one keeps its
+// traffic, so the report is served either way and kind is left out rather than
+// answering 404. It returns false once it has answered with an error.
+func hookReport[R, H any](s *Server, w http.ResponseWriter, r *http.Request, p *authn.Principal, kind string,
+	report func(ctx context.Context, orgID, alias string, from, to time.Time) (R, error),
+	hook func(ctx context.Context, orgID, alias string) (H, error),
+) (out map[string]any, orgID string, ok bool) {
+	orgID, ok = s.queryOrg(w, r, p)
+	if !ok {
+		return nil, "", false
+	}
+	from, to, ok := queryWindow(w, r.URL.Query())
+	if !ok {
+		return nil, "", false
+	}
+	alias := r.PathValue("alias")
+	rep, err := report(r.Context(), orgID, alias, from, to)
+	if err != nil {
+		s.fail(w, err)
+		return nil, "", false
+	}
+	out = map[string]any{"report": rep, "currency": s.opts.Currency}
+	h, err := hook(r.Context(), orgID, alias)
+	switch {
+	case err == nil:
+		out[kind] = h
+	case !errors.Is(err, store.ErrNotFound):
+		s.fail(w, err)
+		return nil, "", false
+	}
+	return out, orgID, true
 }
 
 // scopeList names the guardrails that still use a filter, router or MCP

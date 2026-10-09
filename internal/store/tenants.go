@@ -21,8 +21,12 @@ type Org struct {
 	Name string `json:"name"`
 	// EmailDomain places a first sign-in in the right tenant. Empty in a
 	// deployment that has only one organisation.
-	EmailDomain string    `json:"email_domain,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	EmailDomain string `json:"email_domain,omitempty"`
+	// Limited is set on an organisation somebody created by signing up, until
+	// it pays once or an operator lifts it. Until then its models may not run
+	// on the deployment's own machines, and it gets no sandboxes.
+	Limited   bool      `json:"limited,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // Project groups keys inside an org, so they share guardrails and show up
@@ -120,20 +124,28 @@ type OrgTemplate struct {
 // what it starts with. It is one transaction, so an organisation never exists
 // without its template.
 func (s *Store) CreateOrg(ctx context.Context, o Org, tmpl OrgTemplate) (Org, error) {
-	id := o.ID
-	o.EmailDomain = strings.TrimSpace(o.EmailDomain)
-	domain := nullable(o.EmailDomain)
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return o, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if o, err = createOrg(ctx, tx, o, tmpl); err != nil {
+		return o, err
+	}
+	return o, tx.Commit(ctx)
+}
+
+// createOrg is CreateOrg inside a transaction the caller commits.
+func createOrg(ctx context.Context, tx pgx.Tx, o Org, tmpl OrgTemplate) (Org, error) {
+	id := o.ID
+	o.EmailDomain = strings.TrimSpace(o.EmailDomain)
+	domain := nullable(o.EmailDomain)
 	// The domain is set in the same insert, so a taken one creates nothing.
 	// Setting it afterwards left an organisation behind that a retry then
 	// created a second time.
 	if err := tx.QueryRow(ctx,
-		"INSERT INTO orgs (id, name, email_domain) VALUES ($1,$2,$3) RETURNING created_at",
-		id, o.Name, domain,
+		"INSERT INTO orgs (id, name, email_domain, limited) VALUES ($1,$2,$3,$4) RETURNING created_at",
+		id, o.Name, domain, o.Limited,
 	).Scan(&o.CreatedAt); err != nil {
 		return o, orgConflict(err)
 	}
@@ -155,7 +167,7 @@ func (s *Store) CreateOrg(ctx context.Context, o Org, tmpl OrgTemplate) (Org, er
 			return o, err
 		}
 	}
-	return o, tx.Commit(ctx)
+	return o, nil
 }
 
 // ErrOrgNameTaken means another organisation already has the name, ignoring
@@ -179,6 +191,7 @@ func orgConflict(err error) error {
 type OrgChange struct {
 	Name        *string
 	EmailDomain *string
+	Limited     *bool
 }
 
 // UpdateOrg renames an organisation, changes its email domain, or both, in
@@ -192,11 +205,22 @@ func (s *Store) UpdateOrg(ctx context.Context, orgID string, c OrgChange) (Org, 
 	}
 	o, err := scanOrg(s.pool.QueryRow(ctx, `UPDATE orgs SET
 			name = COALESCE($2, name),
-			email_domain = CASE WHEN $3 THEN $4 ELSE email_domain END
+			email_domain = CASE WHEN $3 THEN $4 ELSE email_domain END,
+			limited = COALESCE($5, limited)
 		WHERE id = $1
-		RETURNING id, name, COALESCE(email_domain, ''), created_at`,
-		orgID, c.Name, c.EmailDomain != nil, domain))
+		RETURNING `+orgFields,
+		orgID, c.Name, c.EmailDomain != nil, domain, c.Limited))
 	return o, notFound(orgConflict(err))
+}
+
+// LimitedOrgs lists the organisations that are still limited, for the
+// gateway to hold their models to what they may use.
+func (s *Store) LimitedOrgs(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx, "SELECT id FROM orgs WHERE limited")
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
 // DeletedOrg is what a deletion took with it. The counts are read in the same
@@ -279,18 +303,17 @@ func deleteScoped(ctx context.Context, tx pgx.Tx, where, id string) error {
 
 // ListOrgs returns every organisation.
 func (s *Store) ListOrgs(ctx context.Context) ([]Org, error) {
-	rows, err := s.pool.Query(ctx, orgColumns+" FROM orgs ORDER BY created_at")
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, scanOrg)
+	return queryAll(ctx, s.pool, scanOrg, orgColumns+" FROM orgs ORDER BY created_at")
 }
 
-const orgColumns = "SELECT id, name, COALESCE(email_domain, ''), created_at"
+// orgFields are the columns scanOrg reads, in its order.
+const orgFields = "id, name, COALESCE(email_domain, ''), limited, created_at"
+
+const orgColumns = "SELECT " + orgFields
 
 func scanOrg(r row) (Org, error) {
 	var o Org
-	err := r.Scan(&o.ID, &o.Name, &o.EmailDomain, &o.CreatedAt)
+	err := r.Scan(&o.ID, &o.Name, &o.EmailDomain, &o.Limited, &o.CreatedAt)
 	return o, err
 }
 
@@ -455,12 +478,8 @@ func (s *Store) AddUser(ctx context.Context, newID, orgID, email, externalID, ro
 // ListUsers returns the users of one org. An empty orgID means every
 // organisation, as for projects.
 func (s *Store) ListUsers(ctx context.Context, orgID string) ([]User, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+userColumns+`
+	return queryAll(ctx, s.pool, scanUser, `SELECT `+userColumns+`
 		FROM users WHERE ($1 = '' OR org_id = $1) ORDER BY email`, orgID)
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, scanUser)
 }
 
 // DisableUser turns a person off: it revokes every key attributed to them,

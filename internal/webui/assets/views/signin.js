@@ -173,6 +173,7 @@ export async function signIn(root, onSignedIn) {
     // work Microsoft one cannot answer "single sign-on", and picking wrong
     // lands them in a failed sign-in rather than a different button.
     const providers = config.providers || [];
+    const signUpWith = providers.find((p) => p.signup);
 
     card.append(
       h(
@@ -206,7 +207,11 @@ export async function signIn(root, onSignedIn) {
         (config.passkeys
           ? "Sign in with your identity provider or a passkey. "
           : "Sign in with your identity provider. ") +
-          "If you cannot, ask your administrator.",
+          (signUpWith
+            ? "New here? Continue with " +
+              (signUpWith.label || signUpWith.name) +
+              " to create an organisation."
+            : "If you cannot, ask your administrator."),
       ),
       ...(operatorKey
         ? [h("div", { class: "divider" }, "operator"), keyForm]

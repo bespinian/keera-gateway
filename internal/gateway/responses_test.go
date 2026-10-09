@@ -12,7 +12,7 @@ import (
 // decodeResponses translates a Responses request and returns the chat body.
 func decodeResponses(t *testing.T, raw string) map[string]any {
 	t.Helper()
-	out, err := responsesShape{}.decode([]byte(raw))
+	out, err := decodeRaw(responsesShape{}, raw)
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -123,24 +123,6 @@ func TestResponsesEncodeBuildsItems(t *testing.T) {
 	}
 }
 
-// responsesEvents reads a Responses stream into its events' payloads.
-func responsesEvents(t *testing.T, raw []byte) []map[string]any {
-	t.Helper()
-	var out []map[string]any
-	for block := range bytes.SplitSeq(raw, []byte("\n\n")) {
-		for line := range bytes.SplitSeq(block, []byte("\n")) {
-			if data, ok := bytes.CutPrefix(line, []byte("data: ")); ok {
-				var ev map[string]any
-				if err := json.Unmarshal(data, &ev); err != nil {
-					t.Fatalf("event %s: %v", data, err)
-				}
-				out = append(out, ev)
-			}
-		}
-	}
-	return out
-}
-
 func TestResponsesStreamEmitsTheEventSequence(t *testing.T) {
 	src := strings.NewReader(strings.Join([]string{
 		`data: {"choices":[{"delta":{"content":"he"}}]}`,
@@ -156,14 +138,13 @@ func TestResponsesStreamEmitsTheEventSequence(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events := responsesEvents(t, dst.Bytes())
-	var types []string
+	events := readEvents(t, dst.String())
 	for i, ev := range events {
-		types = append(types, ev["type"].(string))
-		if ev["sequence_number"] != float64(i) {
-			t.Errorf("event %d numbered %v", i, ev["sequence_number"])
+		if ev.payload["sequence_number"] != float64(i) {
+			t.Errorf("event %d numbered %v", i, ev.payload["sequence_number"])
 		}
 	}
+	types := names(events)
 	want := []string{
 		"response.created", "response.in_progress",
 		"response.output_item.added", "response.content_part.added",
@@ -180,10 +161,10 @@ func TestResponsesStreamEmitsTheEventSequence(t *testing.T) {
 
 	// Clients read the finished items off the closing events, so those carry
 	// the whole text and the whole arguments.
-	if item := events[13]["item"].(map[string]any); item["arguments"] != `{"a":1}` || item["call_id"] != "call_1" {
+	if item := events[13].payload["item"].(map[string]any); item["arguments"] != `{"a":1}` || item["call_id"] != "call_1" {
 		t.Errorf("finished call = %v", item)
 	}
-	done := events[14]["response"].(map[string]any)
+	done := events[14].payload["response"].(map[string]any)
 	output := done["output"].([]any)
 	if len(output) != 2 || done["status"] != "completed" {
 		t.Errorf("completed response = %v", done)

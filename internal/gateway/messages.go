@@ -85,26 +85,6 @@ type anthropicBlock struct {
 	} `json:"source"`
 }
 
-// oaiMessage is one message in the OpenAI chat shape.
-type oaiMessage struct {
-	Role string `json:"role"`
-	// Content is a string, an array of parts, or absent. The OpenAI shape
-	// needs it absent on an assistant turn of only tool calls.
-	Content    any           `json:"content,omitempty"`
-	ToolCalls  []oaiToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string        `json:"tool_call_id,omitempty"`
-}
-
-type oaiPart struct {
-	Type     string       `json:"type"`
-	Text     string       `json:"text,omitempty"`
-	ImageURL *oaiImageURL `json:"image_url,omitempty"`
-}
-
-type oaiImageURL struct {
-	URL string `json:"url"`
-}
-
 type oaiToolCall struct {
 	ID       string      `json:"id"`
 	Type     string      `json:"type"`
@@ -157,17 +137,8 @@ func functionTool(name, description string, schema json.RawMessage) oaiTool {
 // function without parameters, and tools without arguments are real.
 var emptySchema = json.RawMessage(`{"type":"object","properties":{}}`)
 
-// decode turns a Messages request into a chat completion request.
-func (sh anthropicShape) decode(raw []byte) ([]byte, error) {
-	b, err := sh.decodeBody(raw)
-	if err != nil {
-		return nil, err
-	}
-	return b.encode(), nil
-}
-
-// decodeBody is decode without writing the request out: the body is built
-// field by field, so it need not be parsed again.
+// decodeBody turns a Messages request into a chat completion request. The
+// body is built field by field, so it need not be parsed again.
 func (anthropicShape) decodeBody(raw []byte) (*body, error) {
 	// A missing model is left to serve, which refuses it the same way on
 	// every API.
@@ -192,10 +163,16 @@ func (anthropicShape) decodeBody(raw []byte) (*body, error) {
 		addToolChoice(out, *in.ToolChoice)
 	}
 
+	return chatBody(in.Model, msgs, out, len(raw))
+}
+
+// chatBody builds a chat completion request from its messages and the other
+// fields. size is the request it came from: the messages are most of it, so
+// their buffer starts at that size.
+func chatBody(model string, msgs []chatMessage, out map[string]any, size int) (*body, error) {
 	b := &body{fields: make(map[string]json.RawMessage, len(out)+2)}
-	b.setString("model", in.Model)
-	// The messages are most of the request, so the buffer starts at its size.
-	b.set("messages", appendMessages(make([]byte, 0, len(raw)), msgs))
+	b.setString("model", model)
+	b.set("messages", appendMessages(make([]byte, 0, size), msgs))
 	for _, k := range slices.Sorted(maps.Keys(out)) {
 		v, err := json.Marshal(out[k])
 		if err != nil {
@@ -453,11 +430,7 @@ func toolResult(raw json.RawMessage) (jsonText, []chatPart) {
 			}
 		}
 	}
-	text := joinText(blocks)
-	if text == nil {
-		text = emptyText
-	}
-	return text, images
+	return orEmpty(joinText(blocks)), images
 }
 
 // joinText joins the text blocks in a list with a blank line. Running them
@@ -472,7 +445,8 @@ func joinText(blocks []anthropicBlock) jsonText {
 	return joinTexts(texts)
 }
 
-// chatMessage is one message of the chat request a Messages request becomes.
+// chatMessage is one message of the chat request a Messages or Responses
+// request becomes.
 // It is written out by hand, so its text is copied rather than escaped again.
 type chatMessage struct {
 	role string
@@ -491,9 +465,9 @@ type chatPart struct {
 	imageURL jsonText
 }
 
-// openingOfChat is openingOf for a translated Messages request. It writes the
-// content exactly as appendMessages does, so a request keeps its session
-// whether or not it is translated.
+// openingOfChat is the first user message in msgs. It writes the content
+// exactly as appendMessages does, so a request keeps its session whether or
+// not it is translated.
 func openingOfChat(msgs []chatMessage) (json.RawMessage, bool) {
 	for _, m := range msgs {
 		if m.role == "user" {

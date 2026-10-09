@@ -34,6 +34,7 @@ sandbox base image.
 | `internal/connect`   | The client catalogue the panel and `keera connect` share.  |
 | `internal/ratelimit` | Request and token rate limiting.                           |
 | `internal/usage`     | The usage recorder behind billing and reports.             |
+| `internal/payment`   | Prepaid credit by card, through PostFinance Checkout.      |
 | `internal/metrics`   | The Prometheus exposition on `/metrics`.                   |
 | `internal/secret`    | Encryption for stored model and MCP credentials.           |
 | `internal/store`     | Postgres schema and queries.                               |
@@ -88,9 +89,10 @@ Run `make check` before handing work back.
 ## Docs
 
 `docs/` explains the pieces. `run-locally.md` is the development loop and
-`install.md` every setting; `gateway.md`, `filters.md`, `routers.md`,
-`sandboxes.md`, `providers.md`, `subscriptions.md`, `mcp.md`, `sessions.md`,
-`sizing.md` and `sso.md` each take one part. Update them when behaviour changes.
+`install.md` every setting, retention and sizing; `gateway.md`, `filters.md`,
+`routers.md`, `sandboxes.md`, `providers.md`, `subscriptions.md`, `mcp.md`,
+`sessions.md`, `sso.md` and `billing.md` each take one part. Explain each thing
+in one place and link to it. Update them when behaviour changes.
 
 ## Instructions
 

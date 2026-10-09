@@ -41,21 +41,13 @@ func scanRouter(r row) (policy.Router, error) {
 // The gateway checks every request's model against them, so they must not be
 // read from Postgres on the request path.
 func (s *Store) LoadRouters(ctx context.Context) ([]policy.Router, error) {
-	rows, err := s.pool.Query(ctx, routerColumns+" FROM routers ORDER BY org_id, alias")
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, scanRouter)
+	return queryAll(ctx, s.pool, scanRouter, routerColumns+" FROM routers ORDER BY org_id, alias")
 }
 
 // ListRouters reads one organisation's routers.
 func (s *Store) ListRouters(ctx context.Context, orgID string) ([]policy.Router, error) {
-	rows, err := s.pool.Query(ctx,
+	return queryAll(ctx, s.pool, scanRouter,
 		routerColumns+" FROM routers WHERE org_id = $1 ORDER BY alias", orgID)
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, scanRouter)
 }
 
 // Router reads one router, or ErrNotFound.
@@ -181,7 +173,7 @@ func (s *Store) RouterReportFor(ctx context.Context, orgID, alias string, from, 
 		return rep, err
 	}
 
-	rows, err := s.pool.Query(ctx, `
+	rep.Destinations, err = queryAll(ctx, s.pool, scanRouterDestination, `
 		SELECT COALESCE(alias, ''), `+cellColumns+`
 		FROM usage_events
 		WHERE ts >= $1 AND ts < $2 AND org_id = $3 AND router = $4
@@ -189,15 +181,13 @@ func (s *Store) RouterReportFor(ctx context.Context, orgID, alias string, from, 
 		GROUP BY 1
 		ORDER BY 2 DESC`,
 		from, to, orgID, alias)
-	if err != nil {
-		return rep, err
-	}
-	rep.Destinations, err = collect(rows, func(r row) (RouterDestination, error) {
-		var d RouterDestination
-		err := r.Scan(append([]any{&d.Alias}, cellTargets(&d.Cell)...)...)
-		return d, err
-	})
 	return rep, err
+}
+
+func scanRouterDestination(r row) (RouterDestination, error) {
+	var d RouterDestination
+	err := r.Scan(append([]any{&d.Alias}, cellTargets(&d.Cell)...)...)
+	return d, err
 }
 
 // RouterStat is one router's headline for the list.

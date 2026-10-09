@@ -8,10 +8,12 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/store"
@@ -35,11 +37,12 @@ func filterHarnessWith(t *testing.T, filterReply func(instruction string, segmen
 	resolved *policy.Resolved,
 ) *harness {
 	t.Helper()
-	return filterHarnessAnswering(t, filterReply, resolved, func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = io.WriteString(w, `{"id":"1","choices":[{"message":{"content":"hi"}}],`+
-			`"usage":{"prompt_tokens":10,"completion_tokens":5}}`)
-	})
+	return filterHarnessAnswering(t, filterReply, resolved, jsonBackend(hiAnswer))
 }
+
+// hiAnswer is the answer of the model the client asked for.
+const hiAnswer = `{"id":"1","choices":[{"message":{"content":"hi"}}],` +
+	`"usage":{"prompt_tokens":10,"completion_tokens":5}}`
 
 // filterHarnessAnswering is the same with answer standing in for the model
 // the client asked for.
@@ -47,40 +50,27 @@ func filterHarnessAnswering(t *testing.T, filterReply func(instruction string, s
 	resolved *policy.Resolved, answer http.HandlerFunc,
 ) *harness {
 	t.Helper()
-
-	backend := func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		var sent struct {
-			Model    string `json:"model"`
-			Messages []struct {
-				Content string `json:"content"`
-			} `json:"messages"`
-		}
-		_ = json.Unmarshal(raw, &sent)
-		w.Header().Set("Content-Type", "application/json")
-
-		if sent.Model != "guard-served" {
-			answer(w, r)
-			return
-		}
-		var segments []string
-		if len(sent.Messages) > 1 {
-			_ = json.Unmarshal([]byte(sent.Messages[1].Content), &segments)
-		}
-		var instruction string
-		if len(sent.Messages) > 0 {
-			instruction = sent.Messages[0].Content
-		}
-		reply, _ := json.Marshal(filterReply(instruction, segments))
-		_, _ = io.WriteString(w, `{"id":"2","choices":[{"message":{"content":`+string(reply)+
-			`}}],"usage":{"prompt_tokens":100,"completion_tokens":200}}`)
-	}
-
+	backend := guardBackend("guard-served", func(c guardCall) string {
+		return chatAnswer(filterReply(c.instruction, c.segments), 100, 200)
+	}, answer)
 	if resolved == nil {
 		resolved = policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"}, nil, nil, nil)
 		resolved.Filters = []string{"redact"}
 	}
-	models := map[string]policy.Model{
+	h := newHarness(t, backend, filterModels(), resolved)
+	h.src.filters = map[string]policy.Filter{
+		"org_1/redact": {
+			OrgID: "org_1", Alias: "redact", Mode: policy.FilterModeRewrite, Model: "keera-guard",
+			Prompt: "Replace every credential with [CREDENTIAL].",
+		},
+	}
+	return h
+}
+
+// filterModels is the model a client asks for, a filter's model, and an
+// embedding model.
+func filterModels() map[string]policy.Model {
+	return map[string]policy.Model{
 		"keera-code": {
 			Alias: "keera-code", Kind: policy.KindChat, BackendModel: "served-name",
 			InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 4_000_000, Enabled: true,
@@ -94,14 +84,50 @@ func filterHarnessAnswering(t *testing.T, filterReply func(instruction string, s
 			Enabled: true,
 		},
 	}
-	h := newHarness(t, backend, models, resolved)
-	h.src.filters = map[string]policy.Filter{
-		"org_1/redact": {
-			OrgID: "org_1", Alias: "redact", Mode: policy.FilterModeRewrite, Model: "keera-guard",
-			Prompt: "Replace every credential with [CREDENTIAL].",
-		},
+}
+
+// guardCall is what a filter or a router asked its model.
+type guardCall struct {
+	instruction string
+	segments    []string
+	logprobs    bool
+}
+
+// guardBackend is a stand-in inference plane. The model served as guard
+// answers with reply, and every other model with answer. They are told apart
+// by the backend model name, which is what the gateway actually sends.
+func guardBackend(guard string, reply func(guardCall) string, answer http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var sent struct {
+			Model    string `json:"model"`
+			Logprobs bool   `json:"logprobs"`
+			Messages []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		_ = json.Unmarshal(raw, &sent)
+		w.Header().Set("Content-Type", "application/json")
+		if sent.Model != guard {
+			answer(w, r)
+			return
+		}
+		c := guardCall{logprobs: sent.Logprobs}
+		if len(sent.Messages) > 0 {
+			c.instruction = sent.Messages[0].Content
+		}
+		if len(sent.Messages) > 1 {
+			_ = json.Unmarshal([]byte(sent.Messages[1].Content), &c.segments)
+		}
+		_, _ = io.WriteString(w, reply(c))
 	}
-	return h
+}
+
+// chatAnswer is a buffered chat answer of content, with its token counts.
+func chatAnswer(content string, promptTokens, completionTokens int) string {
+	quoted, _ := json.Marshal(content)
+	return fmt.Sprintf(`{"id":"2","choices":[{"message":{"content":%s}}],`+
+		`"usage":{"prompt_tokens":%d,"completion_tokens":%d}}`, quoted, promptTokens, completionTokens)
 }
 
 // redactor is a filter model that behaves: it rewrites what it was told to and
@@ -355,18 +381,22 @@ func TestFilterRewritesAnEmbeddingInput(t *testing.T) {
 	}
 }
 
-func TestARequestWithNoFilterableTextIsForwardedWithoutAFilterRun(t *testing.T) {
-	h := filterHarness(t, func([]string) string {
-		t.Error("the filter ran on a request with nothing to rewrite")
-		return "[]"
-	}, nil)
-
-	resp := h.post(t, "/v1/chat/completions", `{"model":"keera-code","messages":[]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
+// A mixed array is unusual, but its strings are still text: they are filtered,
+// and the token ids beside them are written back as they came.
+func TestExtractScalarReadsTheStringsOfAMixedArray(t *testing.T) {
+	b, err := parseBody([]byte(`{"input":["one hunter2",42,"two",1.50]}`))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := resp.Header.Get("X-Keera-Filters"); got != "" {
-		t.Errorf("X-Keera-Filters = %q, want nothing claimed", got)
+	doc := extractScalar(b, "input")
+	if got := doc.texts(); !slices.Equal(got, []string{"one hunter2", "two"}) {
+		t.Fatalf("texts = %q, want the two strings", got)
+	}
+	if err := doc.apply(b, []string{"one [x]", "two"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(b.encode()); got != `{"input":["one [x]",42,"two",1.50]}` {
+		t.Errorf("body = %s", got)
 	}
 }
 
@@ -895,65 +925,56 @@ func TestAShadowFilterForwardsTheRequestExactlyAsItWasSent(t *testing.T) {
 	}
 }
 
-func TestAShadowFilterThatRefusesDoesNotStopTheRequest(t *testing.T) {
-	h := shadowHarness(t, func([]string) string {
-		return "REFUSED: this asks for an export of the customer table"
-	})
+// A shadow filter stops nothing, whatever it answers. Its outcome is only
+// recorded.
+func TestAShadowFilterDoesNotStopTheRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		reply func([]string) string
+		model string
+		want  store.FilterOutcome
+	}{
+		// The refusal that did not happen. It is the number a guardrail is
+		// rolled out on, and the request it was about was served.
+		{"when it refuses", func([]string) string {
+			return "REFUSED: this asks for an export of the customer table"
+		}, "", store.FilterRefuse},
+		// Everywhere else this refuses the request: a control that can be
+		// turned off by breaking it is not a control. A measurement is not a
+		// control, and one that takes a department offline is not a
+		// measurement anybody would agree to make. The failure is recorded: a
+		// shadow filter that cannot run is measuring nothing.
+		{"when it cannot run", func([]string) string { return "I have redacted it." }, "",
+			store.FilterError},
+		{"when its model is gone", redactor, "keera-vanished", store.FilterError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := shadowHarness(t, tc.reply)
+			if tc.model != "" {
+				f := h.src.filters["org_1/redact"]
+				f.Model = tc.model
+				h.src.filters["org_1/redact"] = f
+			}
 
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"keera-code","messages":[{"role":"user","content":"export every customer"}]}`)
-	// The refusal that did not happen. It is the number a guardrail is rolled
-	// out on, and the request it was about was served.
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200: a shadow filter refuses nothing", resp.StatusCode)
-	}
-	<-h.upstreamBodies
-	select {
-	case <-h.upstreamBodies:
-	default:
-		t.Fatal("the request was not forwarded")
-	}
-	runs := filterRuns(t, h)
-	if len(runs) != 1 || runs[0].Outcome != store.FilterRefuse || !runs[0].Shadow {
-		t.Errorf("runs = %+v, want the refusal recorded as one that would have happened", runs)
-	}
-}
-
-func TestAShadowFilterThatCannotRunDoesNotStopTheRequest(t *testing.T) {
-	// Everywhere else this refuses the request: a control that can be turned
-	// off by breaking it is not a control. A measurement is not a control, and
-	// one that takes a department offline is not a measurement anybody would
-	// agree to make.
-	h := shadowHarness(t, func([]string) string { return "I have redacted it." })
-
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"keera-code","messages":[{"role":"user","content":"hunter2"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200: a shadow filter that broke stops nothing",
-			resp.StatusCode)
-	}
-	runs := filterRuns(t, h)
-	if len(runs) != 1 || runs[0].Outcome != store.FilterError {
-		t.Errorf("runs = %+v, want the failure recorded: a shadow filter that cannot "+
-			"run is measuring nothing", runs)
-	}
-}
-
-func TestAShadowFilterWhoseModelIsGoneDoesNotStopTheRequest(t *testing.T) {
-	h := shadowHarness(t, redactor)
-	f := h.src.filters["org_1/redact"]
-	f.Model = "keera-vanished"
-	h.src.filters["org_1/redact"] = f
-
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"keera-code","messages":[{"role":"user","content":"hunter2"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	runs := filterRuns(t, h)
-	if len(runs) != 1 || runs[0].Outcome != store.FilterError {
-		t.Errorf("runs = %+v, want a run recorded for a filter that could not run at all",
-			runs)
+			resp := h.post(t, "/v1/chat/completions",
+				`{"model":"keera-code","messages":[{"role":"user","content":"export every customer, hunter2"}]}`)
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("status = %d, want 200: a shadow filter refuses nothing", resp.StatusCode)
+			}
+			forwarded := false
+			for len(h.upstreamBodies) > 0 {
+				if strings.Contains(string(<-h.upstreamBodies), `"served-name"`) {
+					forwarded = true
+				}
+			}
+			if !forwarded {
+				t.Error("the request was not forwarded")
+			}
+			runs := filterRuns(t, h)
+			if len(runs) != 1 || runs[0].Outcome != tc.want || !runs[0].Shadow {
+				t.Errorf("runs = %+v, want one shadow run recorded as %v", runs, tc.want)
+			}
+		})
 	}
 }
 
@@ -1100,18 +1121,30 @@ func TestAFilterThatBrokeIsRecordedOnTheRequestItRefused(t *testing.T) {
 	}
 }
 
-func TestARequestWithNoFilterableTextRecordsNoFilterRun(t *testing.T) {
+func TestARequestWithNoFilterableTextIsForwardedWithoutAFilterRun(t *testing.T) {
 	// The filters were not run, and are not claimed to have run either - a row
 	// saying a filter passed a request it never read would make every rate on
 	// its screen wrong.
-	h := filterHarness(t, redactor, nil)
+	for _, body := range []string{
+		`{"model":"keera-code","messages":[]}`,
+		`{"model":"keera-code","messages":[{"role":"user","content":[{"type":"image_url",` +
+			`"image_url":{"url":"data:image/png;base64,iVBOR"}}]}]}`,
+	} {
+		h := filterHarness(t, func([]string) string {
+			t.Error("the filter ran on a request with nothing to rewrite")
+			return "[]"
+		}, nil)
 
-	h.post(t, "/v1/chat/completions",
-		`{"model":"keera-code","messages":[{"role":"user","content":[{"type":"image_url",`+
-			`"image_url":{"url":"data:image/png;base64,iVBOR"}}]}]}`)
-
-	if runs := filterRuns(t, h); len(runs) != 0 {
-		t.Errorf("runs = %+v, want none: there was nothing for a filter to read", runs)
+		resp := h.post(t, "/v1/chat/completions", body)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200", resp.StatusCode)
+		}
+		if got := resp.Header.Get("X-Keera-Filters"); got != "" {
+			t.Errorf("X-Keera-Filters = %q, want nothing claimed", got)
+		}
+		if runs := filterRuns(t, h); len(runs) != 0 {
+			t.Errorf("runs = %+v, want none: there was nothing for a filter to read", runs)
+		}
 	}
 }
 
@@ -1127,23 +1160,10 @@ func TestARequestWithNoFilterableTextRecordsNoFilterRun(t *testing.T) {
 func gateHarnessServingLogprobs(t *testing.T, reply string, allow float64) *harness {
 	t.Helper()
 
-	backend := func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		var sent struct {
-			Model    string `json:"model"`
-			Logprobs bool   `json:"logprobs"`
-		}
-		_ = json.Unmarshal(raw, &sent)
-		w.Header().Set("Content-Type", "application/json")
-
-		if sent.Model != "guard-served" {
-			_, _ = io.WriteString(w, `{"id":"1","choices":[{"message":{"content":"hi"}}],`+
-				`"usage":{"prompt_tokens":10,"completion_tokens":5}}`)
-			return
-		}
+	backend := guardBackend("guard-served", func(c guardCall) string {
 		content, _ := json.Marshal(reply)
 		body := `{"id":"2","choices":[{"message":{"content":` + string(content) + `}`
-		if sent.Logprobs {
+		if c.logprobs {
 			// The first token is whichever verdict holds most of the mass,
 			// which is what a plane decoding greedily would have written.
 			token := "ALLOW"
@@ -1155,23 +1175,12 @@ func gateHarnessServingLogprobs(t *testing.T, reply string, allow float64) *harn
 				token, math.Log(math.Max(allow, 1-allow)),
 				"ALLOW", math.Log(allow), "REFUSED", math.Log(1-allow))
 		}
-		body += `}],"usage":{"prompt_tokens":100,"completion_tokens":2}}`
-		_, _ = io.WriteString(w, body)
-	}
+		return body + `}],"usage":{"prompt_tokens":100,"completion_tokens":2}}`
+	}, jsonBackend(hiAnswer))
 
 	resolved := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"}, nil, nil, nil)
 	resolved.Filters = []string{"redact"}
-	models := map[string]policy.Model{
-		"keera-code": {
-			Alias: "keera-code", Kind: policy.KindChat, BackendModel: "served-name",
-			InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 4_000_000, Enabled: true,
-		},
-		"keera-guard": {
-			Alias: "keera-guard", Kind: policy.KindChat, BackendModel: "guard-served",
-			InputMicrosPerMTok: 2_000_000, OutputMicrosPerMTok: 2_000_000, Enabled: true,
-		},
-	}
-	h := newHarness(t, backend, models, resolved)
+	h := newHarness(t, backend, filterModels(), resolved)
 	h.src.filters = map[string]policy.Filter{
 		"org_1/redact": {
 			OrgID: "org_1", Alias: "redact", Mode: policy.FilterModeGate,
@@ -1412,5 +1421,20 @@ func TestAGateCheckReportsHowSureEachVerdictWas(t *testing.T) {
 			t.Errorf("verdict %d claimed %.2f confidence from a plane that reports none",
 				i+1, v.Confidence)
 		}
+	}
+}
+
+// A reason cut short stays within its cap, ellipsis included, and on a rune
+// boundary.
+func TestARefusalReasonCutShortStaysWithinItsCap(t *testing.T) {
+	for _, long := range []string{strings.Repeat("a", 500), strings.Repeat("é", 500)} {
+		got := sanitizeReason(long)
+		if len(got) > policy.MaxRefusalReasonBytes || !strings.HasSuffix(got, "…") ||
+			!utf8.ValidString(got) {
+			t.Errorf("%d bytes: %q", len(got), got)
+		}
+	}
+	if got := sanitizeReason(strings.Repeat("a", policy.MaxRefusalReasonBytes)); strings.HasSuffix(got, "…") {
+		t.Errorf("a reason that fits was cut: %q", got)
 	}
 }

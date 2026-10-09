@@ -148,63 +148,99 @@ func TestPeriodStart(t *testing.T) {
 
 func TestModelCost(t *testing.T) {
 	// 2.50 per million in, 10.00 per million out.
-	m := Model{InputMicrosPerMTok: 2_500_000, OutputMicrosPerMTok: 10_000_000}
-	if got := m.Cost(1_000_000, 0, 100_000); got != 2_500_000+1_000_000 {
-		t.Errorf("Cost = %d, want %d", got, 3_500_000)
-	}
-	if got := m.Cost(0, 0, 0); got != 0 {
-		t.Errorf("Cost of nothing = %d, want 0", got)
-	}
-	free := Model{}
-	if got := free.Cost(999_999_999, 999_999_999, 999_999_999); got != 0 {
-		t.Errorf("a model with no prices must cost nothing, got %d", got)
-	}
-}
-
-// Cached tokens are charged at their own rate, and are part of the prompt, not
-// added to it. On a long coding session most of the prompt is cached.
-func TestModelCostChargesCachedInputAtItsOwnRate(t *testing.T) {
+	plain := Model{InputMicrosPerMTok: 2_500_000, OutputMicrosPerMTok: 10_000_000}
 	// 2.50 per million in, 0.25 per million of that served from the cache.
-	m := Model{
+	cached := Model{
 		InputMicrosPerMTok:       2_500_000,
 		CachedInputMicrosPerMTok: 250_000,
 		OutputMicrosPerMTok:      10_000_000,
 	}
-	// A million-token prompt, 800,000 of it cached: 200,000 at 2.50 and
-	// 800,000 at 0.25 per million.
-	const want = int64(500_000 + 200_000)
-	if got := m.Cost(1_000_000, 800_000, 0); got != want {
-		t.Errorf("Cost = %d, want %d", got, want)
+	// Priced by prompt length, as Anthropic does for claude-haiku-5-5.
+	long := Model{
+		InputMicrosPerMTok: 100_000, OutputMicrosPerMTok: 500_000,
+		CachedInputMicrosPerMTok: 10_000,
+		LongPrompt: &PriceTier{
+			AboveTokens:        100_000,
+			InputMicrosPerMTok: 500_000, OutputMicrosPerMTok: 2_500_000,
+			CachedInputMicrosPerMTok: 50_000,
+		},
 	}
-	// The same prompt priced as if none of it had been cached, which is what
-	// this gateway charged for it before the rate existed. If these two ever
-	// come out equal the discount is not being applied.
-	if got := m.Cost(1_000_000, 0, 0); got != 2_500_000 {
-		t.Errorf("uncached Cost = %d, want 2500000", got)
+	writes := Model{
+		InputMicrosPerMTok:       2_000_000,
+		CachedInputMicrosPerMTok: 200_000,
+		CacheWriteMicrosPerMTok:  2_500_000,
 	}
-}
+	unstatedWrites := writes
+	unstatedWrites.CacheWriteMicrosPerMTok = 0
 
-// A model with no cached rate charges those tokens at the full input price,
-// because zero means "not stated", not "free".
-func TestModelCostChargesUnstatedCachedInputAtTheInputRate(t *testing.T) {
-	m := Model{InputMicrosPerMTok: 2_500_000, OutputMicrosPerMTok: 10_000_000}
-	if got := m.Cost(1_000_000, 800_000, 0); got != 2_500_000 {
-		t.Errorf("Cost = %d, want the full input price 2500000", got)
-	}
-}
+	for _, tc := range []struct {
+		name  string
+		model Model
+		used  Tokens
+		want  int64
+	}{
+		{"in and out", plain, Tokens{Input: 1_000_000, Output: 100_000}, 2_500_000 + 1_000_000},
+		{"nothing", plain, Tokens{}, 0},
+		{"a model with no prices", Model{},
+			Tokens{Input: 999_999_999, CachedInput: 999_999_999, Output: 999_999_999}, 0},
 
-// The counts come off somebody else's response body, so a cached count larger
-// than the prompt it is part of - or a negative one - has to price as
-// something rather than as a refund.
-func TestModelCostClampsAnImpossibleCachedCount(t *testing.T) {
-	m := Model{InputMicrosPerMTok: 2_500_000, CachedInputMicrosPerMTok: 250_000}
-	if got := m.Cost(1_000_000, 4_000_000, 0); got != 250_000 {
-		t.Errorf("Cost of an over-large cached count = %d, want the whole prompt "+
-			"at the cached rate, 250000", got)
-	}
-	if got := m.Cost(1_000_000, -1, 0); got != 2_500_000 {
-		t.Errorf("Cost of a negative cached count = %d, want the whole prompt "+
-			"at the input rate, 2500000", got)
+		// A long prompt is charged the dearer prices for all of it, cached
+		// part and answer included. At the threshold: 50,000 at 0.10, 50,000
+		// cached at 0.01, a million out at 0.50.
+		{"a long prompt at the threshold", long,
+			Tokens{Input: 100_000, CachedInput: 50_000, Output: 1_000_000}, 5_000 + 500 + 500_000},
+		// One token over: 50,001 at 0.50, 50,000 cached at 0.05, a million out
+		// at 2.50.
+		{"a long prompt one token over", long,
+			Tokens{Input: 100_001, CachedInput: 50_000, Output: 1_000_000}, 25_000 + 2_500 + 2_500_000},
+
+		// Cached tokens are charged at their own rate, and are part of the
+		// prompt, not added to it. A million-token prompt, 800,000 of it
+		// cached: 200,000 at 2.50 and 800,000 at 0.25 per million.
+		{"cached input at its own rate", cached,
+			Tokens{Input: 1_000_000, CachedInput: 800_000}, 500_000 + 200_000},
+		// The same prompt priced as if none of it had been cached. If the two
+		// ever come out equal, the discount is not applied.
+		{"the same prompt uncached", cached, Tokens{Input: 1_000_000}, 2_500_000},
+		// Zero means "not stated", not "free".
+		{"cached input with no cached rate", plain,
+			Tokens{Input: 1_000_000, CachedInput: 800_000}, 2_500_000},
+		// The counts come off somebody else's response body, so an impossible
+		// one has to price as something rather than as a refund.
+		{"more cached than the prompt", Model{InputMicrosPerMTok: 2_500_000, CachedInputMicrosPerMTok: 250_000},
+			Tokens{Input: 1_000_000, CachedInput: 4_000_000}, 250_000},
+		{"a negative cached count", Model{InputMicrosPerMTok: 2_500_000, CachedInputMicrosPerMTok: 250_000},
+			Tokens{Input: 1_000_000, CachedInput: -1}, 2_500_000},
+
+		// A write to the cache costs more than the input price, and is part
+		// of the prompt, as a read is. 100,000 at 2.00, 600,000 cached at 0.20,
+		// 300,000 written at 2.50.
+		{"a cache write at its own rate", writes,
+			Tokens{Input: 1_000_000, CachedInput: 600_000, CacheWrite: 300_000}, 200_000 + 120_000 + 750_000},
+		// Unstated, a write costs the input price, as on a provider that
+		// charges nothing more for one.
+		{"a cache write with no write rate", unstatedWrites,
+			Tokens{Input: 1_000_000, CacheWrite: 1_000_000}, 2_000_000},
+		{"a long prompt's write at the long rate", Model{
+			InputMicrosPerMTok: 100_000, CacheWriteMicrosPerMTok: 125_000,
+			LongPrompt: &PriceTier{
+				AboveTokens: 100_000, InputMicrosPerMTok: 500_000, CacheWriteMicrosPerMTok: 625_000,
+			},
+		}, Tokens{Input: 200_000, CacheWrite: 200_000}, 125_000},
+		// Reads and writes together cannot be more than the prompt: the
+		// 200,000 left after the reads are charged at the write rate.
+		{"more reads and writes than the prompt", Model{
+			InputMicrosPerMTok: 1_000_000, CachedInputMicrosPerMTok: 100_000,
+			CacheWriteMicrosPerMTok: 1_250_000,
+		}, Tokens{Input: 1_000_000, CachedInput: 800_000, CacheWrite: 900_000}, 80_000 + 250_000},
+		{"a negative write count", Model{
+			InputMicrosPerMTok: 1_000_000, CachedInputMicrosPerMTok: 100_000,
+			CacheWriteMicrosPerMTok: 1_250_000,
+		}, Tokens{Input: 1_000_000, CacheWrite: -5}, 1_000_000},
+	} {
+		if got := tc.model.Cost(tc.used); got != tc.want {
+			t.Errorf("%s: Cost = %d, want %d", tc.name, got, tc.want)
+		}
 	}
 }
 

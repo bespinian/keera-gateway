@@ -10,7 +10,7 @@ import (
 // completion request it became.
 func decodeMessages(t *testing.T, in string) map[string]any {
 	t.Helper()
-	raw, err := anthropicShape{}.decode([]byte(in))
+	raw, err := decodeRaw(anthropicShape{}, in)
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -19,6 +19,15 @@ func decodeMessages(t *testing.T, in string) map[string]any {
 		t.Fatalf("the translated request is not valid JSON: %v", err)
 	}
 	return out
+}
+
+// decodeRaw is a shape's translation of in, written out.
+func decodeRaw(sh shape, in string) ([]byte, error) {
+	b, err := sh.decodeBody([]byte(in))
+	if err != nil {
+		return nil, err
+	}
+	return b.encode(), nil
 }
 
 // messagesOf pulls the translated messages array out as a list of maps.
@@ -338,7 +347,7 @@ func TestDecodeRejectsWhatItCannotTranslate(t *testing.T) {
 		"not an object": `[]`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := (anthropicShape{}).decode([]byte(in)); err == nil {
+			if _, err := (anthropicShape{}).decodeBody([]byte(in)); err == nil {
 				t.Error("the request was accepted; it should have been refused with a reason")
 			}
 		})

@@ -192,9 +192,14 @@ func (s *Store) Listen(ctx context.Context, channel string, fn func()) error {
 // row is what pgx's Row and Rows have in common: one Scan.
 type row interface{ Scan(dest ...any) error }
 
-// collect reads every row with scan. No rows gives an empty slice rather than
-// nil, so a list encodes as [] in JSON.
-func collect[T any](rows pgx.Rows, scan func(row) (T, error)) ([]T, error) {
+// queryAll runs a query and reads every row with scan. No rows gives an empty
+// slice rather than nil, so a list encodes as [] in JSON.
+func queryAll[T any](ctx context.Context, pool *pgxpool.Pool, scan func(row) (T, error),
+	sql string, args ...any) ([]T, error) {
+	rows, err := pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (T, error) { return scan(r) })
 }
 

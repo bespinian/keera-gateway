@@ -29,8 +29,9 @@ services:
       KEERA_SANDBOXES_FILE: /etc/keera/sandboxes.yaml
       KEERA_LOG_FORMAT: ${KEERA_LOG_FORMAT:-}
       KEERA_LOG_LEVEL: ${KEERA_LOG_LEVEL:-}
-      # Encrypts the API keys administrators type into the control panel. Required:
-      # the gateway does not start without it. See docs/providers.md.
+      # Encrypts the API keys administrators type into the control panel, and
+      # the sign-in refresh tokens. Required: the gateway does not start
+      # without it. See docs/install.md.
       KEERA_SECRET_KEY: ${KEERA_SECRET_KEY:?set KEERA_SECRET_KEY in .env - see .env.example}
       # Reads /metrics and nothing else, so a scrape configuration does not
       # have to hold the operator key. Empty leaves the route to operators.
@@ -51,6 +52,7 @@ services:
       # this container, so only `make dev` reads them. See .env.example.
       KEERA_CURRENCY: ${KEERA_CURRENCY:-}
       KEERA_UPSTREAM_DENY: ${KEERA_UPSTREAM_DENY:-}
+      KEERA_UPSTREAM_PRIVATE: ${KEERA_UPSTREAM_PRIVATE:-}
       KEERA_REDIS_URL: ${KEERA_REDIS_URL:-}
       KEERA_REDIS_PREFIX: ${KEERA_REDIS_PREFIX:-}
       KEERA_UI: ${KEERA_UI:-}
@@ -80,6 +82,9 @@ services:
       # The email domains each provider may vouch for, required with several.
       # "*" is for a provider that proves every address itself, like Google.
       KEERA_OIDC_GOOGLE_DOMAINS: ${KEERA_OIDC_GOOGLE_DOMAINS:-}
+      # Lets somebody whose sign-in matches no organisation create one. Only
+      # for a provider that proves every address itself. See docs/sso.md.
+      KEERA_OIDC_GOOGLE_SIGNUP: ${KEERA_OIDC_GOOGLE_SIGNUP:-}
       KEERA_OIDC_ENTRA_ISSUER: ${KEERA_OIDC_ENTRA_ISSUER:-}
       KEERA_OIDC_ENTRA_CLIENT_ID: ${KEERA_OIDC_ENTRA_CLIENT_ID:-}
       KEERA_OIDC_ENTRA_CLIENT_SECRET: ${KEERA_OIDC_ENTRA_CLIENT_SECRET:-}
@@ -93,10 +98,35 @@ services:
       KEERA_OIDC_ENTRA_ADMIN_GROUPS: ${KEERA_OIDC_ENTRA_ADMIN_GROUPS:-}
       KEERA_OIDC_ENTRA_OPERATOR_GROUPS: ${KEERA_OIDC_ENTRA_OPERATOR_GROUPS:-}
       KEERA_OIDC_ENTRA_DOMAINS: ${KEERA_OIDC_ENTRA_DOMAINS:-}
+      KEERA_OIDC_ENTRA_SIGNUP: ${KEERA_OIDC_ENTRA_SIGNUP:-}
       KEERA_OPERATORS: ${KEERA_OPERATORS:-}
       # Accounts that sign in with a passkey instead of a directory. Needs
       # KEERA_PUBLIC_URL on https, or on http://localhost. See docs/sso.md.
       KEERA_PASSKEYS: ${KEERA_PASSKEYS:-}
+      # Lets Claude Code on a Claude Team or Enterprise plan through, paid by
+      # the plan. Off by default. See docs/subscriptions.md.
+      KEERA_CLAUDE_SUBSCRIPTIONS: ${KEERA_CLAUDE_SUBSCRIPTIONS:-}
+      # The deployment's own provider keys, billed to the organisations that
+      # use them, and card payments for them. See docs/billing.md.
+      KEERA_PROVIDER_ANTHROPIC_API_KEY: ${KEERA_PROVIDER_ANTHROPIC_API_KEY:-}
+      KEERA_PROVIDER_ANTHROPIC_DISCOUNT: ${KEERA_PROVIDER_ANTHROPIC_DISCOUNT:-}
+      KEERA_PROVIDER_OPENAI_API_KEY: ${KEERA_PROVIDER_OPENAI_API_KEY:-}
+      KEERA_PROVIDER_OPENAI_DISCOUNT: ${KEERA_PROVIDER_OPENAI_DISCOUNT:-}
+      KEERA_PROVIDER_INFOMANIAK_API_KEY: ${KEERA_PROVIDER_INFOMANIAK_API_KEY:-}
+      KEERA_PROVIDER_INFOMANIAK_DISCOUNT: ${KEERA_PROVIDER_INFOMANIAK_DISCOUNT:-}
+      KEERA_PROVIDER_INFOMANIAK_PRODUCT_ID: ${KEERA_PROVIDER_INFOMANIAK_PRODUCT_ID:-}
+      KEERA_PROVIDER_STEPPING_STONE_API_KEY: ${KEERA_PROVIDER_STEPPING_STONE_API_KEY:-}
+      KEERA_PROVIDER_STEPPING_STONE_DISCOUNT: ${KEERA_PROVIDER_STEPPING_STONE_DISCOUNT:-}
+      KEERA_PROVIDER_PHOENIQS_API_KEY: ${KEERA_PROVIDER_PHOENIQS_API_KEY:-}
+      KEERA_PROVIDER_PHOENIQS_DISCOUNT: ${KEERA_PROVIDER_PHOENIQS_DISCOUNT:-}
+      KEERA_PROVIDER_CSCS_API_KEY: ${KEERA_PROVIDER_CSCS_API_KEY:-}
+      KEERA_PROVIDER_CSCS_DISCOUNT: ${KEERA_PROVIDER_CSCS_DISCOUNT:-}
+      KEERA_POSTFINANCE_SPACE_ID: ${KEERA_POSTFINANCE_SPACE_ID:-}
+      KEERA_POSTFINANCE_USER_ID: ${KEERA_POSTFINANCE_USER_ID:-}
+      KEERA_POSTFINANCE_AUTH_KEY: ${KEERA_POSTFINANCE_AUTH_KEY:-}
+      KEERA_POSTFINANCE_URL: ${KEERA_POSTFINANCE_URL:-}
+      KEERA_BILLING_CHF_PER_USD: ${KEERA_BILLING_CHF_PER_USD:-}
+      KEERA_BILLING_VAT: ${KEERA_BILLING_VAT:-}
       # The gateway as a browser sees it. It is also what the panel's My
       # clients screen tells a developer to point their editor at, with /api on
       # the end. Empty leaves both to the Host header.

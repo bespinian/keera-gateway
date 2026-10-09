@@ -3,6 +3,7 @@ package gateway
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -16,7 +17,7 @@ func TestTextReachesTheBackendAsTheClientWroteIt(t *testing.T) {
 		`{"role":"user","content":` + text + `},` +
 		`{"role":"assistant","content":[{"type":"text","text":` + text + `}]},` +
 		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","content":` + text + `}]}]}`
-	raw, err := anthropicShape{}.decode([]byte(in))
+	raw, err := decodeRaw(anthropicShape{}, in)
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -41,7 +42,7 @@ func TestTextTheBackendMightRefuseIsCleanedUp(t *testing.T) {
 	// they did when every text was decoded.
 	in := "{\"model\":\"m\",\"messages\":[{\"role\":\"user\",\"content\":\"a\xffb\"}," +
 		`{"role":"assistant","content":"c\ud800d"},{"role":"user","content":"e🙂f"}]}`
-	raw, err := anthropicShape{}.decode([]byte(in))
+	raw, err := decodeRaw(anthropicShape{}, in)
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -53,7 +54,7 @@ func TestTextTheBackendMightRefuseIsCleanedUp(t *testing.T) {
 		got = append(got, m["content"].(string))
 	}
 	want := []string{"a�b", "c�d", "e🙂f"}
-	if !equalStrings(got, want) {
+	if !slices.Equal(got, want) {
 		t.Errorf("contents = %q, want %q", got, want)
 	}
 }
@@ -74,7 +75,7 @@ func TestContentThatIsNotTextIsStillRefused(t *testing.T) {
 	// Text is no longer decoded, so its type is checked on its own.
 	for _, content := range []string{`5`, `[{"type":"text","text":5}]`, `{"text":"x"}`} {
 		in := `{"model":"m","messages":[{"role":"user","content":` + content + `}]}`
-		_, err := anthropicShape{}.decode([]byte(in))
+		_, err := anthropicShape{}.decodeBody([]byte(in))
 		if err == nil || !strings.Contains(err.Error(), "must be a string or an array") {
 			t.Errorf("content %s: error = %v, want a refusal", content, err)
 		}

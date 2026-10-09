@@ -30,6 +30,7 @@ type modelFlags struct {
 	priceIn        float64
 	priceOut       float64
 	priceCached    float64
+	priceWrite     float64
 	apiKey         string
 	noAPIKey       bool
 	subscription   bool
@@ -63,6 +64,9 @@ func registerModelFlags(fs *flag.FlagSet) *modelFlags {
 	fs.Float64Var(&f.priceOut, "price-out", -1, "output price per million tokens")
 	fs.Float64Var(&f.priceCached, "price-cached", -1,
 		"price per million input tokens the provider served from its own prompt cache "+
+			"(left out, they are charged at --price-in)")
+	fs.Float64Var(&f.priceWrite, "price-cache-write", -1,
+		"price per million input tokens the provider wrote to its own prompt cache "+
 			"(left out, they are charged at --price-in)")
 	fs.StringVar(&f.apiKey, "api-key", "",
 		"credential to store encrypted; @path reads a file and @- reads stdin")
@@ -131,6 +135,7 @@ func applyModelFlags(m catalog.Model, f *modelFlags) catalog.Model {
 	setPrice(&m.InputMicrosPerMTok, f.priceIn)
 	setPrice(&m.OutputMicrosPerMTok, f.priceOut)
 	setPrice(&m.CachedInputMicrosPerMTok, f.priceCached)
+	setPrice(&m.CacheWriteMicrosPerMTok, f.priceWrite)
 	if f.subscription {
 		m.Subscription = true
 	}
@@ -151,6 +156,8 @@ func clearModelValues(m catalog.Model) catalog.Model {
 	m.InputMicrosPerMTok = nil
 	m.OutputMicrosPerMTok = nil
 	m.CachedInputMicrosPerMTok = nil
+	m.CacheWriteMicrosPerMTok = nil
+	m.LongPrompt = nil
 	m.MaxContext = nil
 	return m
 }
@@ -191,7 +198,7 @@ func credential(apiKey string, noAPIKey bool) (*string, error) {
 // `add` and a file.
 func declared(m policy.Model) catalog.Model {
 	in, outPrice, maxContext := m.InputMicrosPerMTok, m.OutputMicrosPerMTok, m.MaxContext
-	cachedPrice := m.CachedInputMicrosPerMTok
+	cachedPrice, writePrice := m.CachedInputMicrosPerMTok, m.CacheWriteMicrosPerMTok
 	return catalog.Model{
 		Alias:        m.Alias,
 		Kind:         string(m.Kind),
@@ -204,6 +211,8 @@ func declared(m policy.Model) catalog.Model {
 		InputMicrosPerMTok:       &in,
 		OutputMicrosPerMTok:      &outPrice,
 		CachedInputMicrosPerMTok: &cachedPrice,
+		CacheWriteMicrosPerMTok:  &writePrice,
+		LongPrompt:               m.LongPrompt,
 		MaxContext:               &maxContext,
 		ReleaseDate:              m.ReleaseDate,
 		Location:                 m.Location,
@@ -251,10 +260,8 @@ func modelCmd(ctx context.Context, args []string) error {
 		}
 	}
 	switch r.verb {
-	case "add":
-		return r.add(ctx)
-	case "set":
-		return r.set(ctx)
+	case "add", "set":
+		return r.put(ctx)
 	case "enable", "disable":
 		return r.toggle(ctx)
 	case "check":
@@ -282,25 +289,18 @@ func (r *modelRun) providers() error {
 
 func modelAlias(m policy.Model) string { return m.Alias }
 
-func (r *modelRun) add(ctx context.Context) error {
+// put is 'add' and 'set'. The endpoint replaces the entry, so 'set' starts
+// from the stored one to keep what was not given.
+func (r *modelRun) put(ctx context.Context) error {
 	alias := r.fs.Arg(0)
-	if err := alreadyExists(ctx, r.aliasRun, alias, modelAlias); err != nil {
-		return err
-	}
-	return r.save(ctx, alias, catalog.Model{Alias: alias})
-}
-
-func (r *modelRun) set(ctx context.Context) error {
-	if !changesSomething(r.fs) {
-		return nothingToChange("model set")
-	}
-	// The endpoint replaces the entry, so read it first to keep what was not
-	// given.
-	current, err := r.find(ctx, r.fs.Arg(0))
+	current, err := startPut(ctx, r.aliasRun, alias, policy.Model{}, modelAlias)
 	if err != nil {
 		return err
 	}
-	return r.save(ctx, current.Alias, declared(current))
+	if r.verb == "add" {
+		return r.save(ctx, alias, catalog.Model{Alias: alias})
+	}
+	return r.save(ctx, alias, declared(current))
 }
 
 // save applies the flags to m, validates it and writes it to the
@@ -464,13 +464,20 @@ func printProviders(w *table) {
 		// The description goes last: a trailing cell is not padded, so a long
 		// one does not push the other columns out of line.
 		w.header(fmt.Sprintf(
-			"  MODEL\tRELEASED\tCONTEXT\tIN/MTOK\tCACHED/MTOK\tOUT/MTOK (%s)\tDESCRIPTION", p.Currency))
+			"  MODEL\tRELEASED\tCONTEXT\tIN/MTOK\tCACHED/MTOK\tWRITE/MTOK\tOUT/MTOK (%s)\t"+
+				"DESCRIPTION", p.Currency))
 		for _, m := range p.Models {
-			_, _ = fmt.Fprintf(w, "  %s\t%s\t%d\t%s\t%s\t%s\t%s\n", m.ID, dash(m.ReleaseDate),
+			_, _ = fmt.Fprintf(w, "  %s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\n", m.ID, dash(m.ReleaseDate),
 				m.MaxContext,
 				policy.FormatMicros(m.InputMicrosPerMTok),
-				cachedPrice(m.CachedInputMicrosPerMTok),
+				optionalPrice(m.CachedInputMicrosPerMTok),
+				optionalPrice(m.CacheWriteMicrosPerMTok),
 				policy.FormatMicros(m.OutputMicrosPerMTok), m.Description)
+		}
+		for _, m := range p.Models {
+			if m.LongPrompt != nil {
+				_, _ = fmt.Fprintf(w, "  %s: %s\n", m.ID, longPromptPrices(*m.LongPrompt))
+			}
 		}
 		if p.Note != "" {
 			_, _ = fmt.Fprintf(w, "  %s\n", p.Note)
@@ -485,19 +492,27 @@ func printModels(w *table, models []policy.Model) {
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			m.Alias, m.Kind, m.BackendModel, dash(m.Provider), dash(m.Location),
 			dash(m.ReleaseDate), strings.Join(m.Backends, ","),
-			policy.FormatMicros(m.InputMicrosPerMTok), cachedPrice(m.CachedInputMicrosPerMTok),
+			policy.FormatMicros(m.InputMicrosPerMTok), optionalPrice(m.CachedInputMicrosPerMTok),
 			policy.FormatMicros(m.OutputMicrosPerMTok),
 			credentialSource(m), yesNo(m.Enabled))
 	}
 }
 
-// cachedPrice is the cached-input column. A dash rather than 0.00 when no rate
-// is stated, because those tokens are charged at the input price, not free.
-func cachedPrice(micros int64) string {
+// optionalPrice is a cached-input or cache-write price. A dash rather than 0.00
+// when no rate is stated, because those tokens are charged at the input price,
+// not free.
+func optionalPrice(micros int64) string {
 	if micros == 0 {
 		return "-"
 	}
 	return policy.FormatMicros(micros)
+}
+
+// longPromptPrices says what a long prompt costs instead, per million tokens.
+func longPromptPrices(t policy.PriceTier) string {
+	return fmt.Sprintf("over %d tokens, %s in, %s cached, %s written, %s out", t.AboveTokens,
+		policy.FormatMicros(t.InputMicrosPerMTok), optionalPrice(t.CachedInputMicrosPerMTok),
+		optionalPrice(t.CacheWriteMicrosPerMTok), policy.FormatMicros(t.OutputMicrosPerMTok))
 }
 
 func printModel(w *table, m policy.Model) {
@@ -533,6 +548,14 @@ func printModel(w *table, m policy.Model) {
 	} else {
 		show(w, "cached in/mtok", "(not stated - charged at the input price)")
 	}
+	if m.CacheWriteMicrosPerMTok > 0 {
+		show(w, "cache write/mtok", policy.FormatMicros(m.CacheWriteMicrosPerMTok))
+	} else {
+		show(w, "cache write/mtok", "(not stated - charged at the input price)")
+	}
+	if m.LongPrompt != nil {
+		show(w, "long prompts", longPromptPrices(*m.LongPrompt))
+	}
 	show(w, "credential", credentialSource(m))
 	if m.Subscription {
 		show(w, "paid by", "each caller's own Claude subscription; the prices only say "+
@@ -547,6 +570,8 @@ func credentialSource(m policy.Model) string {
 	switch {
 	case m.Subscription:
 		return "caller's Claude sign-in"
+	case m.PlatformKey:
+		return "the deployment's " + m.Provider + " key, billed"
 	case m.HasAPIKey:
 		return "stored"
 	}

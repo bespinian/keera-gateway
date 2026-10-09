@@ -13,7 +13,7 @@ import (
 
 func patternFilter(rules ...policy.FilterRule) policy.Filter {
 	return policy.Filter{
-		OrgID: "org", Alias: "rules", Mode: policy.FilterModePattern,
+		OrgID: "org_1", Alias: "redact", Mode: policy.FilterModePattern,
 		Rules: rules, UpdatedAt: time.Unix(1, 0),
 	}
 }
@@ -242,7 +242,7 @@ func TestPatternFilterRedactsWithoutTouchingABackend(t *testing.T) {
 		return "[]"
 	}, nil)
 	h.src.filters = map[string]policy.Filter{
-		"org_1/redact": patternFilterFor("org_1", "redact",
+		"org_1/redact": patternFilter(
 			policy.FilterRule{Pattern: `\bhunter2\b`, Replace: "[CREDENTIAL]"}),
 	}
 
@@ -282,7 +282,7 @@ func TestPatternFilterRedactsWithoutTouchingABackend(t *testing.T) {
 func TestPatternFilterRefusalStopsTheRequest(t *testing.T) {
 	h := filterHarness(t, func([]string) string { return "[]" }, nil)
 	h.src.filters = map[string]policy.Filter{
-		"org_1/redact": patternFilterFor("org_1", "redact", policy.FilterRule{
+		"org_1/redact": patternFilter(policy.FilterRule{
 			Pattern: `(?i)\bexport all customers\b`, Refuse: true,
 			Reason: "that moves the customer list out of the organisation",
 		}),
@@ -309,7 +309,7 @@ func TestPatternFilterInShadowChangesNothing(t *testing.T) {
 	// the rules run, what they would have done is recorded, and the request is
 	// forwarded exactly as it was sent.
 	h := filterHarness(t, func([]string) string { return "[]" }, nil)
-	f := patternFilterFor("org_1", "redact",
+	f := patternFilter(
 		policy.FilterRule{Pattern: `\bhunter2\b`, Replace: "[CREDENTIAL]"})
 	f.Shadow = true
 	h.src.filters = map[string]policy.Filter{"org_1/redact": f}
@@ -339,7 +339,7 @@ func TestPatternFilterWithBrokenRulesRefusesEverything(t *testing.T) {
 	// client should retry.
 	h := filterHarness(t, func([]string) string { return "[]" }, nil)
 	h.src.filters = map[string]policy.Filter{
-		"org_1/redact": patternFilterFor("org_1", "redact",
+		"org_1/redact": patternFilter(
 			policy.FilterRule{Pattern: `([`, Replace: "x"}),
 	}
 
@@ -352,13 +352,6 @@ func TestPatternFilterWithBrokenRulesRefusesEverything(t *testing.T) {
 	case sent := <-h.upstreamBodies:
 		t.Fatalf("the request was forwarded with a broken filter in front of it: %s", sent)
 	default:
-	}
-}
-
-func patternFilterFor(org, alias string, rules ...policy.FilterRule) policy.Filter {
-	return policy.Filter{
-		OrgID: org, Alias: alias, Mode: policy.FilterModePattern,
-		Rules: rules, UpdatedAt: time.Unix(1, 0),
 	}
 }
 

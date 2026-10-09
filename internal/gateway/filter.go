@@ -123,6 +123,8 @@ type filterRun struct {
 	// micros is what the filter models spent, charged even when a later filter
 	// fails and for shadow filters: the generation happened.
 	micros int64
+	// bills is the filter models' calls on the deployment's key.
+	bills []policy.BillLine
 	// runs is one row per filter that ran, for the filter log.
 	runs []store.FilterRun
 	// wall is how long the chain waited for filter models. It is taken off the
@@ -265,6 +267,7 @@ func (s *Server) chainFilter(ctx context.Context, run *filterRun, orgID, alias s
 	out, cost, err := s.runOne(ctx, f, m, texts)
 	took := time.Since(start)
 	run.micros += cost.micros
+	run.bills = append(run.bills, cost.bills...)
 	run.wall += took
 	if err != nil {
 		if ctx.Err() != nil {
@@ -425,6 +428,7 @@ func (e *filterTooLargeError) Error() string { return e.msg }
 // filterCost is what one run of a filter's model came to, beside its answer.
 type filterCost struct {
 	micros int64
+	bills  []policy.BillLine
 	// confidence is the share of probability a gate's verdict took against the
 	// other verdict, from 0 to 1. Zero means unknown: a rewrite filter, or a
 	// backend without logprobs. Only a filter check reports it. See choice.go.
@@ -464,23 +468,26 @@ func (s *Server) runFilter(ctx context.Context, f policy.Filter, m policy.Model,
 	logprobs := gate && s.readsLogprobs(m)
 	ask := guardQuestion{instruction: instruction, input: input, outputTokens: outputTokens,
 		timeout: filterTimeout, limit: maxFilterResponseBytes, subject: "the filter's model"}
-	raw, status, err := s.askGuard(ctx, m, ask, logprobs)
-	if err == nil && logprobs && rejectsLogprobs(status) {
+	// The cost is kept whatever the answer: an unusable one still used the
+	// GPU.
+	var cost filterCost
+	ans, err := s.askGuard(ctx, m, ask, logprobs)
+	cost.micros, cost.bills = ans.micros, ans.bills
+	if err == nil && logprobs && rejectsLogprobs(ans.status) {
 		// As a router does: remember it, and ask again for the words only.
 		s.dropLogprobs(m)
-		raw, status, err = s.askGuard(ctx, m, ask, false)
+		ans, err = s.askGuard(ctx, m, ask, false)
+		cost.micros += ans.micros
+		cost.bills = append(cost.bills, ans.bills...)
 	}
 	if err != nil {
-		return nil, filterCost{}, err
+		return nil, cost, err
 	}
-	if status >= 300 {
-		return nil, filterCost{}, errors.New("its model answered " +
-			upstreamComplaint(raw, status))
+	raw := ans.raw
+	if ans.status >= 300 {
+		return nil, cost, errors.New("its model answered " +
+			upstreamComplaint(raw, ans.status))
 	}
-
-	// The cost is read before the answer is judged: an unusable answer still
-	// used the GPU.
-	cost := filterCost{micros: guardCost(m, raw)}
 
 	if gate {
 		cost.confidence, err = parseGateReply(raw)
@@ -504,41 +511,78 @@ type guardQuestion struct {
 	subject string
 }
 
+// guardAnswer is a guard model's whole answer, whatever its status, and what
+// asking cost.
+type guardAnswer struct {
+	raw    []byte
+	status int
+	micros int64
+	bills  []policy.BillLine
+}
+
 // askGuard sends a filter's or a router's model one question, and reads back
-// the whole answer, whatever its status.
+// the whole answer. The cost is set even when it fails: a model on the
+// deployment's key may have been charged for an answer that never arrived.
 func (s *Server) askGuard(ctx context.Context, m policy.Model, q guardQuestion, logprobs bool,
-) ([]byte, int, error) {
+) (guardAnswer, error) {
 	payload, err := guardRequest(m, q.instruction, q.input, q.outputTokens, logprobs)
 	if err != nil {
-		return nil, 0, err
+		return guardAnswer{}, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, q.timeout)
 	defer cancel()
 
+	// Most a call on the deployment's key may have cost, when its usage
+	// record never arrives.
+	unreported := func() guardAnswer {
+		var a guardAnswer
+		if m.PlatformKey {
+			a.micros, a.bills = answerCost(m, unreportedTokens(len(payload), q.outputTokens))
+		}
+		return a
+	}
 	resp, err := s.send(ctx, m, outbound{path: "/chat/completions", payload: payload})
 	if err != nil {
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, 0, fmt.Errorf("%s did not answer within %s", q.subject, q.timeout)
+		var a guardAnswer
+		if !undelivered(err) {
+			a = unreported()
 		}
-		return nil, 0, fmt.Errorf("%s could not be reached: %w", q.subject, err)
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return a, fmt.Errorf("%s did not answer within %s", q.subject, q.timeout)
+		}
+		return a, fmt.Errorf("%s could not be reached: %w", q.subject, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	// Cut JSON would only fail later as a confusing parse error.
 	raw, err := readCapped(resp.Body, q.limit)
 	if err != nil {
-		return nil, 0, fmt.Errorf("reading the answer of %s failed: %w", q.subject, err)
+		a := unreported()
+		if resp.StatusCode >= 300 {
+			a = guardAnswer{}
+		}
+		return a, fmt.Errorf("reading the answer of %s failed: %w", q.subject, err)
 	}
-	return raw, resp.StatusCode, nil
+	a := guardAnswer{raw: raw, status: resp.StatusCode}
+	if resp.StatusCode < 300 {
+		if u := usageFromResponse(raw); u != nil {
+			a.micros, a.bills = answerCost(m, u.tokens())
+		} else {
+			a = unreported()
+			a.raw, a.status = raw, resp.StatusCode
+		}
+	}
+	return a, nil
 }
 
-// guardCost is what a filter's or a router's model charged for one answer,
-// read from its usage record.
-func guardCost(m policy.Model, raw []byte) int64 {
-	if u := usageFromResponse(raw); u != nil {
-		return m.Cost(u.InputTokens, u.cached(), u.OutputTokens)
+// answerCost is what a model charged for one answer, and its bill line when
+// that model is on the deployment's key.
+func answerCost(m policy.Model, used policy.Tokens) (int64, []policy.BillLine) {
+	micros := m.Cost(used)
+	if line, ok := m.Bill(used); ok && used.Input+used.Output > 0 {
+		return micros, []policy.BillLine{line}
 	}
-	return 0
+	return micros, nil
 }
 
 // guardRequest builds the chat request a filter or a router sends its own

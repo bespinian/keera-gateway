@@ -71,7 +71,7 @@ func deleteUserSessions(ctx context.Context, db querier, userID string) error {
 // lookup already filters on expiry, so this only keeps the tables small.
 func (s *Store) PurgeExpired(ctx context.Context) error {
 	for _, table := range []string{"sessions", "login_flows", "cli_codes", "cli_tokens",
-		"passkey_links", "passkey_challenges"} {
+		"passkey_links", "passkey_challenges", "signups"} {
 		if _, err := s.pool.Exec(ctx,
 			"DELETE FROM "+table+" WHERE expires_at < now()"); err != nil {
 			return err

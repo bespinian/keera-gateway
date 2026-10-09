@@ -98,25 +98,16 @@ uses the model for.
 
 ## Where it runs
 
-Before the filters:
-
-1. authenticate, rate-limit, budget
-2. **the router**, choosing the destination
-3. refuse the request if it is too long for every model it may go to
-4. the filters, in the order the hierarchy gives them
-5. the standing system prompt is prepended
-6. hosted tools are removed, if the guardrail blocks them
-7. the output ceiling is clamped
-8. forward
+A router runs after the budget check, because deciding costs money, and before
+the filters. [What happens to one request](gateway.md#what-happens-to-one-request)
+has the whole order. A [size router](#routing-by-size) costs nothing but runs in
+the same step.
 
 The router reads what the client sent, before any redaction. So **the deciding
 model should be served locally**, just like a filter's. It must also be on the
 organisation's allow-list, if it has one: otherwise the router is refused with
 a 400 `model_not_allowed`, and narrowing the list so that it drops off is
 refused with a 409 `router_model_not_allowed`.
-
-It runs after the budget check because deciding costs money. A
-[size router](#routing-by-size) costs nothing but runs in the same step.
 
 ## When it cannot decide
 
@@ -270,8 +261,8 @@ small model and be refused with a 400 `context_length_exceeded`.
 The three tiers, in the order they are tried:
 
 1. it can hold the request, and the request is under its ceiling
-2. it can hold the request, and the request is over its ceiling - more model
-   than wanted, which costs more but works
+2. it can hold the request, and the request is over its ceiling - a smaller
+   model than wanted, used when every one meant for this size is down
 3. it cannot hold the request at all
 
 Within a tier: smallest ceiling first, the destination without a ceiling last,
@@ -293,16 +284,12 @@ is ever first choice. Both are refused when the router is saved.
 A ceiling no higher than the one before it makes its destination first choice
 for nothing. This is allowed, but `keera router check` warns about it.
 
-### What it shares with the other cheap modes
+### When a destination is down
 
-Destinations are tried until one answers, a 4xx is not failed over, nothing
-fails over once an answer has started, and the next destination up is the
-fallback. See [what counts as a failure](#what-counts-as-a-failure).
-
-So if the preferred destination is down, a larger one serves the request. It
-costs more but is not refused. This shows as `fallback` on the router's screen,
-and means the same as on a [measured router](#what-it-looks-like-afterwards-1):
-the ranking was wrong.
+It fails over like [the fallback router](#what-counts-as-a-failure). So if the
+preferred destination is down, a larger one serves the request. It costs more
+but is not refused, and shows as `fallback`
+([What is recorded](#what-is-recorded)).
 
 ## The fallback router
 
@@ -354,30 +341,6 @@ The cost is **time**: each failed destination adds wait before the next one is
 tried. It is recorded in `router_ms`, the same column as a deciding router's
 generation.
 
-### What it looks like afterwards
-
-| Outcome    | On a router that decides       | On a fallback router           |
-| ---------- | ------------------------------ | ------------------------------ |
-| `chose`    | the decision was made and kept | the first destination answered |
-| `fallback` | it could not decide            | a later destination answered   |
-| `error`    | it could not place the request | every destination failed       |
-
-When every destination fails, the client gets the last destination's own
-response. If that one could not be reached at all, or did not answer in time,
-the client gets the gateway's 502 `upstream_unavailable` instead.
-
-Answers carry the same header, and `(fallback)` means the same thing. When
-every destination failed, the header says so:
-
-```
-X-Keera-Router: ha -> keera-local
-X-Keera-Router: ha -> hosted-frontier (fallback)
-X-Keera-Router: ha -> hosted-frontier (every destination failed)
-```
-
-The failed attempts are stored on the request's row, even when a later
-destination answered.
-
 ### The state to watch for
 
 **A chain quietly running on its second destination.** Every request succeeds,
@@ -410,9 +373,9 @@ keera router add frontier --mode latency \
   --description "either region, whichever is answering"
 ```
 
-Otherwise they work like a fallback router: destinations are tried until one
-answers, a 4xx is not failed over, nothing fails over once an answer has
-started, and there is no deciding model, instruction or fallback destination.
+Otherwise they work like a fallback router, and
+[fail over the same way](#what-counts-as-a-failure). There is no deciding model,
+instruction or fallback destination.
 
 ### Which of the two
 
@@ -444,18 +407,6 @@ started, and there is no deciding model, instruction or fallback destination.
   requests in flight.
 - **Ties go to the written order**, so a new router behaves like a fallback
   router until it has measured something.
-
-### What it looks like afterwards
-
-| Outcome    | On a fallback router           | On a latency or least-busy router        |
-| ---------- | ------------------------------ | ---------------------------------------- |
-| `chose`    | the first destination answered | the destination it ranked first answered |
-| `fallback` | a later destination answered   | a lower-ranked destination answered      |
-| `error`    | every destination failed       | every destination failed                 |
-
-Here `fallback` means the ranking was wrong, not that a destination is down. A
-few percent is re-probing at work. A quarter means a destination is failing
-while measuring well.
 
 `keera router check pool` is the fallback router's check with one more column:
 what the router measured for each destination and the position that gives it.
@@ -508,58 +459,29 @@ It also lists destinations that were not offered, and destinations with no
 description.
 
 A check calls the backend directly, with the data plane's credentials. It is not
-rate-limited, budgeted or billed and writes no usage row - but it does put real
-requests on the GPUs: at least three for a router that decides, since a sample
+rate-limited or budgeted and writes no usage row. On the deployment's own
+provider key it needs credit and is billed ([billing.md](billing.md)). It does
+put real requests on the GPUs: at least three for a router that decides, since a sample
 whose lettered answer cannot be read is asked again for a name, and one per
 destination for the other modes.
-
-## What it is doing
-
-Each router has its own screen: `/routers/<alias>` in the panel,
-`keera router report <alias>` in a terminal.
-
-A router's failures are silent. Every request still gets a 200:
-
-- **Too eager**: paying the large model's price to rename variables.
-- **Too shy**: prompts a guardrail meant to keep in the cluster leave it.
-- **Stopped deciding**: every request goes to the fallback, and still pays for a
-  generation.
-- **Running on the second destination**: a fallback router whose first
-  destination is down.
-
-The screen shows, over a time window:
-
-| Figure                                        | What it tells you                                                                           |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| requests placed                               | whether anything uses it; the shares below mean nothing without it                          |
-| decided / fell back / could not place         | whether it still decides - or, on a fallback router, whether its first choice still answers |
-| **the split between its destinations**        | whether it routes at all, or always picks the same model                                    |
-| what each destination cost                    | whether the savings are what justified the router                                           |
-| each destination's median time to first token | whether cheaper answers made developers wait longer                                         |
-| what deciding added, p50 and p95              | the wait it adds; on a fallback router, the time the failed attempts took                   |
-
-The split is the main figure.
-
-The same figures are on `/metrics`, labelled by router, organisation, outcome
-and destination: `keera_router_decisions_total`,
-`keera_router_cost_micros_total` and `keera_router_duration_seconds`. Alert on a
-rising fallback rate.
-
-**Nothing the router read is stored.** Each request's usage row records which
-router placed it, whether it decided and how long deciding took. So a router's
-report only reaches back as far as `KEERA_USAGE_RETENTION`.
 
 ## What a client can see
 
 The answer's `model` field names **the model that answered**, not the router.
 
 Answers also carry `X-Keera-Router`, so a developer can see which model the
-router picked:
+router picked. A request refused before it was sent on, such as one the router
+could not decide, does not carry it:
 
 ```
 X-Keera-Router: auto -> keera-frontier
 X-Keera-Router: auto -> keera-speed (fallback)
+X-Keera-Router: ha -> hosted-frontier (every destination failed)
 ```
+
+When every destination fails, the client gets the last destination's own
+response. If that one could not be reached at all, or did not answer in time,
+the client gets the gateway's 502 `upstream_unavailable` instead.
 
 ## Who owns what
 
@@ -601,16 +523,57 @@ organisation.
 
 ## What is recorded
 
+Each router has its own screen: `/routers/<alias>` in the panel,
+`keera router report <alias>` in a terminal.
+
+A router's failures are silent. Every request still gets a 200:
+
+- **Too eager**: paying the large model's price to rename variables.
+- **Too shy**: prompts a guardrail meant to keep in the cluster leave it.
+- **Stopped deciding**: every request goes to the fallback, and still pays for a
+  generation.
+- **Running on the second destination**: a fallback router whose first
+  destination is down.
+
+The screen shows, over a time window:
+
+| Figure                                        | What it tells you                                                                           |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| requests placed                               | whether anything uses it; the shares below mean nothing without it                          |
+| decided / fell back / could not place         | whether it still decides - or, on a fallback router, whether its first choice still answers |
+| **the split between its destinations**        | whether it routes at all, or always picks the same model                                    |
+| what each destination cost                    | whether the savings are what justified the router                                           |
+| each destination's median time to first token | whether cheaper answers made developers wait longer                                         |
+| what deciding added, p50 and p95              | the wait it adds; on a fallback router, the time the failed attempts took                   |
+
+The split is the main figure. Each request has one of three outcomes:
+
+| Outcome    | Instruction router             | Fallback router                | Size, latency or least-busy router    |
+| ---------- | ------------------------------ | ------------------------------ | ------------------------------------- |
+| `chose`    | the decision was made and kept | the first destination answered | the destination ranked first answered |
+| `fallback` | it could not decide            | a later destination answered   | a lower-ranked destination answered   |
+| `error`    | it could not place the request | every destination failed       | every destination failed              |
+
+Outside an instruction router, `fallback` means the ranking was wrong. On a
+latency or least-busy router a few percent is re-probing at work; a quarter
+means a destination is failing while measuring well.
+
+The same figures are on `/metrics`, labelled by router, organisation, outcome
+and destination: `keera_router_decisions_total`,
+`keera_router_cost_micros_total` and `keera_router_duration_seconds`. Alert on a
+rising fallback rate.
+
+**Nothing the router read is stored.** Also recorded:
+
 - `router.put`, `router.delete` and `router.check` in the audit log, with who
   did it and in which organisation. The `router.put` entry holds the
   instruction, destinations, ceilings and fallback.
 - One row per request in the usage log: the router, whether it decided, and what
-  deciding added to the wait. The destination is that row's `alias`.
+  deciding added to the wait. The destination is that row's `alias`. So a
+  router's report only reaches back as far as `KEERA_USAGE_RETENTION`.
 - What deciding spent, added to the request's `cost_micros` and charged to the
   same budgets - also when the request fell back or was refused. Only
   `instruction` spends anything here.
-- On a fallback router, every destination that was tried and did not answer, on
-  the request's row - also when a later one answered.
-- `keera_router_decisions_total`, `keera_router_cost_micros_total` and
-  `keera_router_duration_seconds` on `/metrics`.
-- Answers carry `X-Keera-Router`.
+- Every destination that was tried and did not answer, on the request's row -
+  also when a later one answered.
+- Answers carry `X-Keera-Router` ([What a client can see](#what-a-client-can-see)).

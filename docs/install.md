@@ -52,38 +52,39 @@ new organisations start with, which are files.
 
 ### Worth setting on any real deployment
 
-| Variable                | Default     | What it is                                                                                                                                                                                            |
-| ----------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `KEERA_METRICS_TOKEN`   | unset       | Reads `/metrics` and nothing else. Must differ from the operator key.                                                                                                                                 |
-| `KEERA_PUBLIC_URL`      | Host header | The gateway's address as a browser sees it. Used for the sign-out redirect, by **My clients**, and for the panel link in a refusal. Unset, a refusal has no link. Required with single sign-on. |
-| `KEERA_MODELS_FILE`     | unset       | The models each new organisation starts with. Existing organisations are not changed.                                                                                                                 |
-| `KEERA_USAGE_RETENTION` | for ever    | How long usage events, ended sandboxes and ended keys are kept. See [sizing.md](sizing.md).                                                                                                           |
-| `KEERA_AUDIT_RETENTION` | for ever    | How long audit entries are kept.                                                                                                                                                                      |
-| `KEERA_CURRENCY`        | `CHF`       | The label on every money figure. Amounts are stored as integer micro-units.                                                                                                                           |
-| `KEERA_UPSTREAM_DENY`   | see below   | Addresses the gateway never connects to. See [Where the gateway may connect](#where-the-gateway-may-connect).                                                                                         |
+| Variable                 | Default     | What it is                                                                                                                                                                                                        |
+| ------------------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `KEERA_METRICS_TOKEN`    | unset       | Reads `/metrics` and nothing else. Must differ from the operator key.                                                                                                                                             |
+| `KEERA_PUBLIC_URL`       | Host header | The gateway's address as a browser sees it. Used for the sign-out redirect, by **My clients**, and for the panel link in a refusal. Unset, a refusal has no link. Required with single sign-on and with payments. |
+| `KEERA_MODELS_FILE`      | unset       | The models each new organisation starts with. Existing organisations are not changed.                                                                                                                             |
+| `KEERA_USAGE_RETENTION`  | for ever    | How long usage events, ended sandboxes and ended keys are kept. See [Retention and sizing](#retention-and-sizing).                                                                                                |
+| `KEERA_AUDIT_RETENTION`  | for ever    | How long audit entries are kept.                                                                                                                                                                                  |
+| `KEERA_CURRENCY`         | `CHF`       | The label on every money figure. Amounts are stored as integer micro-units.                                                                                                                                       |
+| `KEERA_UPSTREAM_DENY`    | see below   | Addresses the gateway never connects to. See [Where the gateway may connect](#where-the-gateway-may-connect).                                                                                                     |
+| `KEERA_UPSTREAM_PRIVATE` | `all`       | Host names inside the network that organisations may reach. Required with sign-up. See [Where the gateway may connect](#where-the-gateway-may-connect).                                                           |
 
 ### Everything else
 
-| Variable                        | Default             | What it is                                                                          |
-| ------------------------------- | ------------------- | ----------------------------------------------------------------------------------- |
-| `KEERA_ADDR`                    | `:8080`             | The one listener.                                                                   |
-| `KEERA_UI`                      | `true`              | Serve the control panel at `/`.                                                     |
-| `KEERA_MAX_DB_CONNS`            | `16`                | Postgres pool size.                                                                 |
-| `KEERA_LOG_LEVEL`               | `info`              | `debug`, `info`, `warn` or `error`.                                                 |
-| `KEERA_LOG_FORMAT`              | `text`              | `text` or `json`.                                                                   |
-| `KEERA_MAX_BODY_BYTES`          | `33554432` (32 MiB) | Largest request body, in bytes. Coding agents send large contexts.                  |
-| `KEERA_MAX_RESPONSE_BYTES`      | `67108864` (64 MiB) | Largest buffered upstream response, and largest streamed event, in bytes.           |
-| `KEERA_UPSTREAM_HEADER_TIMEOUT` | `2m`                | How long a backend may take to _start_ answering. Does not limit the answer itself. |
-| `KEERA_CACHE_TTL`               | `30s`               | How long a checked key is reused. Models, filters and the rest reload every minute. |
-| `KEERA_REDIS_URL`               | unset               | Shares rate-limit buckets between replicas. Unset, they are per process. See below. |
-| `KEERA_REDIS_PREFIX`            | `keera`             | Key prefix, so two deployments can share one Redis.                                 |
-| `KEERA_SPEND_REFRESH`           | `10s`               | How stale a budget may be.                                                          |
-| `KEERA_SESSION_GAP`             | `30m`               | Idle time that separates one task from the next. See [sessions.md](sessions.md).    |
-| `KEERA_SECURE_COOKIES`          | follows the scheme  | Marks the session cookie `Secure`. On when `KEERA_PUBLIC_URL` is https.             |
+| Variable                        | Default             | What it is                                                                           |
+| ------------------------------- | ------------------- | ------------------------------------------------------------------------------------ |
+| `KEERA_ADDR`                    | `:8080`             | The one listener.                                                                    |
+| `KEERA_UI`                      | `true`              | Serve the control panel at `/`.                                                      |
+| `KEERA_MAX_DB_CONNS`            | `16`                | Postgres pool size.                                                                  |
+| `KEERA_LOG_LEVEL`               | `info`              | `debug`, `info`, `warn` or `error`.                                                  |
+| `KEERA_LOG_FORMAT`              | `text`              | `text` or `json`.                                                                    |
+| `KEERA_MAX_BODY_BYTES`          | `33554432` (32 MiB) | Largest request body, in bytes. Coding agents send large contexts.                   |
+| `KEERA_MAX_RESPONSE_BYTES`      | `67108864` (64 MiB) | Largest buffered upstream response, and largest streamed event, in bytes.            |
+| `KEERA_UPSTREAM_HEADER_TIMEOUT` | `2m`                | How long a backend may take to _start_ answering. 15m on the deployment's own keys.  |
+| `KEERA_CACHE_TTL`               | `30s`               | How long a checked key is reused. Models, filters and the rest reload every minute.  |
+| `KEERA_REDIS_URL`               | unset               | Shares rate-limit buckets between replicas. Unset, they are per process. See below.  |
+| `KEERA_REDIS_PREFIX`            | `keera`             | Key prefix, so two deployments can share one Redis.                                  |
+| `KEERA_SPEND_REFRESH`           | `10s`               | How stale a budget may be.                                                           |
+| `KEERA_SESSION_GAP`             | `30m`               | Idle time that separates one task from the next. See [sessions.md](sessions.md).     |
+| `KEERA_SECURE_COOKIES`          | follows the scheme  | Marks the session cookie `Secure`. On when `KEERA_PUBLIC_URL` is https.              |
+| `KEERA_CLAUDE_SUBSCRIPTIONS`    | `false`             | Lets Claude Code on a Claude plan through. See [subscriptions.md](subscriptions.md). |
 
 Retention below `24h` is refused: deleted rows cannot be recovered, and a
-typo like `10m` would delete the day's billing data. A session gap below `1m`
-is refused too.
+typo like `10m` would delete the day's billing data.
 
 Sizes are a plain number of bytes. Durations take `h`, `m` and `s`. On/off
 settings take `true`/`false`, `yes`/`no`, `on`/`off` or `1`/`0`. A number,
@@ -96,7 +97,9 @@ less, and a zero or negative `KEERA_CACHE_TTL`, `KEERA_SPEND_REFRESH` or
 Some values stop the start instead, with a message that names the setting.
 Among them: a `KEERA_LOG_LEVEL` or `KEERA_LOG_FORMAT` not listed above, a
 `KEERA_REDIS_URL` that is not a Redis URL, a `KEERA_UPSTREAM_DENY` entry that
-is not an address or a prefix, a `KEERA_METRICS_TOKEN` equal to the operator key, and a `KEERA_OIDC_<N>_DEFAULT_ROLE` other than `admin` or
+is not an address or a prefix, a `KEERA_METRICS_TOKEN` equal to the operator key, a
+subscription model in `KEERA_MODELS_FILE` while `KEERA_CLAUDE_SUBSCRIPTIONS` is
+off, and a `KEERA_OIDC_<N>_DEFAULT_ROLE` other than `admin` or
 `member`. The single sign-on, passkey and sandbox settings below have checks
 of their own, which their sections and [sso.md](sso.md) and
 [sandboxes.md](sandboxes.md#configuration) describe.
@@ -109,44 +112,52 @@ the gateway's own host. It is a comma-separated list of addresses and prefixes.
 The default is
 
 ```text
-127.0.0.0/8,::1/128,169.254.0.0/16,fe80::/10,0.0.0.0/8,::/128,fd00:ec2::254/128
+127.0.0.0/8,::1/128,169.254.0.0/16,fe80::/10,0.0.0.0/8,::/128,fd00:ec2::254/128,100.100.100.200/32,168.63.129.16/32
 ```
 
 That is loopback, link-local (where cloud metadata services answer), the
-unspecified address and AWS's IPv6 metadata address. Private ranges are
-allowed, because that is where a self-hosted inference plane runs.
+unspecified address, AWS's IPv6 metadata address, Alibaba Cloud's metadata
+address and Azure's WireServer. Private ranges are allowed, because that is
+where a self-hosted inference plane runs.
 
 - **A backend on the same host**, such as vLLM on `127.0.0.1`: set the list
   without the two loopback entries. `make dev` does this.
 - **Organisations you do not trust with your network**: add your private ranges,
   such as `10.0.0.0/8`. A model the gateway must still reach then needs an
-  address outside them.
+  address outside them. An organisation that
+  [signed itself up](sso.md#what-a-new-organisation-can-use) is kept from
+  private ranges until it has paid, whatever this list says.
 - `none` turns the check off.
+
+`KEERA_UPSTREAM_PRIVATE` limits what organisations reach inside the network.
+Set it to the host names they may use there, such as `keera-engine`. Every
+other private address is then blocked for every organisation, even through a
+public name that resolves into the network. `none` blocks the whole private
+network, and `all` allows it, which is the default. With
+[sign-up](sso.md#letting-people-sign-up) on, the gateway does not start until it
+is set, because anyone who signs up runs an organisation. If you set
+`HTTPS_PROXY` to a private address, name the proxy host too.
 
 The check applies to the address a name resolves to, so a DNS name that points
 at a blocked address is blocked too. Behind `HTTPS_PROXY`, the gateway only
 connects to the proxy, and the proxy has to do this filtering. The gateway does
 not follow redirects from a backend or an MCP server.
 
+### Provider keys of the deployment's own
+
+`KEERA_PROVIDER_<NAME>_API_KEY` gives every organisation's models of that
+provider the deployment's key, and bills them for it. Without one, each
+organisation enters its own key. [billing.md](billing.md) lists the settings.
+
+With `KEERA_POSTFINANCE_SPACE_ID`, `KEERA_POSTFINANCE_USER_ID` and
+`KEERA_POSTFINANCE_AUTH_KEY`, organisations pay for those keys in advance, by
+card through PostFinance Checkout. [billing.md](billing.md#pay-in-advance)
+lists these settings too.
+
 ### Rate limits with more than one replica
 
-The token buckets behind `rpm` and `tpm` live in each gateway process. With
-two replicas, a limit of 600 per minute lets up to 1,200 through. Budgets are
-not affected: they reconcile through Postgres and are the exact spending
-control.
-
-Set `KEERA_REDIS_URL` (`redis://host:6379/0`, or `rediss://` for TLS) to move
-the buckets into Redis. The limit then holds however many replicas run. Only
-the buckets are stored there: no guardrail, spend, session or prompt.
-
-Use a single Redis endpoint, standalone or managed, not Redis Cluster. Each
-request checks its organisation's, project's and key's buckets in one script, and
-Redis Cluster refuses a script whose keys are in different slots. Redis holds
-two small fields per scope that is currently sending traffic.
-
-If Redis cannot be reached, the gateway keeps running. It logs the error,
-counts it in `keera_ratelimit_fallback_total`, and falls back to its own
-buckets. See [gateway.md](gateway.md).
+Rate limits are kept per replica unless `KEERA_REDIS_URL` is set. See
+[Rate limits across replicas](gateway.md#rate-limits-across-replicas).
 
 ### Single sign-on
 
@@ -155,10 +166,13 @@ buckets. See [gateway.md](gateway.md).
 `KEERA_OIDC_<N>_CLIENT_SECRET`, `KEERA_OIDC_<N>_LABEL`,
 `KEERA_OIDC_<N>_SCOPES`, `KEERA_OIDC_<N>_GROUPS_CLAIM`,
 `KEERA_OIDC_<N>_ADMIN_GROUPS`, `KEERA_OIDC_<N>_OPERATOR_GROUPS`,
-`KEERA_OIDC_<N>_DEFAULT_ROLE` (`admin` or `member`) and
+`KEERA_OIDC_<N>_DEFAULT_ROLE` (`admin` or `member`),
 `KEERA_OIDC_<N>_DOMAINS`, the email domains
-that provider may sign people in with (`*` for any). Nothing is shared between
-providers. With several, each needs its domains.
+that provider may sign people in with (`*` for any), and
+`KEERA_OIDC_<N>_SIGNUP` (`false` unless set), which lets somebody whose
+sign-in matches no organisation create one (see
+[Letting people sign up](sso.md#letting-people-sign-up)). Nothing is shared
+between providers. With several, each needs its domains.
 
 `KEERA_OPERATORS` lists the addresses that are operators, whichever provider
 signs them in. SSO needs `KEERA_PUBLIC_URL`: the provider sends the browser back
@@ -191,38 +205,9 @@ forge sandboxes clone from. They are listed in
 
 ## Single host with compose
 
-```sh
-cd compose
-cp .env.example .env         # then set KEERA_OPERATOR_KEY and KEERA_SECRET_KEY
-
-# No GPU (llama.cpp; chat only, no tool calls):
-podman compose up -d --build
-podman compose logs -f keera-engine
-
-# A GPU host (vLLM):
-sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml   # once, on the host
-podman compose -f compose.yaml -f compose.gpu.yaml up -d --build
-```
-
-On a GPU host, pass the same `-f` flags to every later `podman compose` call.
-Without them, compose acts on llama.cpp rather than the vLLM that is running.
-
-`compose.yaml` passes the settings on this page from `.env` to the gateway,
-with three exceptions:
-
-- The database, the published port and the catalogue files are fixed in the
-  file. `KEERA_ADDR` is not passed.
-- Single sign-on has blocks only for providers named `google` and `entra`.
-  Another name needs its own block.
-- The sandbox settings are left out. The compose gateway cannot run sandboxes,
-  so only `make dev` reads them. See [run-locally.md](run-locally.md).
-
-Some settings only exist in compose, such as `KEERA_BIND` (the address the
-port is published on) and the inference engine's model and image. They are in
-`.env.example` and [compose/README.md](../compose/README.md).
-
-The gateway is up at once. It applies its schema on start and waits only for
-Postgres.
+[compose/README.md](../compose/README.md) runs it, and lists which settings
+`compose.yaml` passes on and the few that only compose has, such as
+`KEERA_BIND`.
 
 ## The other shapes
 
@@ -231,14 +216,12 @@ not in this repository. They read the same settings as above. Only the image
 they run is built here:
 
 ```sh
-go mod vendor        # after cloning, and again whenever go.mod changes
 make image GATEWAY_IMAGE=<registry>/keera-gateway:0.1.0 VERSION=0.1.0
 podman push <registry>/keera-gateway:0.1.0
 ```
 
-The vendor directory is not committed. Without it, the build writes its own,
-which needs network access. With it, the build works offline, but an old one
-breaks the build.
+Run `go mod vendor` first; [run-locally.md](run-locally.md#building) explains
+why and lists the other build steps.
 
 `VERSION` is what the binary reports. Without it, the image says the tag when
 the commit has one, and `devel` otherwise, followed by the short commit, and
@@ -383,9 +366,8 @@ written to the audit log, so you can show when a model last worked.
 
 ## Publishing it
 
-Port 8080 carries the panel, the control API, the inference API and sandbox
-attach. There is no second port to firewall; only the operator key and a
-session cookie protect the control side. So:
+One port carries the control side and the inference side, and only credentials
+keep them apart ([gateway.md](gateway.md#one-listener-four-surfaces)). So:
 
 - **Put a TLS terminator in front.** None of these deployments terminates TLS.
 - **Turn off response buffering** on the proxy, and set a read timeout longer
@@ -397,10 +379,7 @@ session cookie protect the control side. So:
 - **Set up single sign-on or passkeys** before anyone else can reach the panel.
   Without either, the only way in is the operator key, which can change every
   guardrail, and every audit entry reads `operator key`.
-
-Set `KEERA_PUBLIC_URL` to the panel's public address. The sign-out redirect
-uses it, and **My clients** gives developers that address with `/api`
-appended.
+- **Set `KEERA_PUBLIC_URL`** to the public address.
 
 ## Backups
 
@@ -412,7 +391,51 @@ its node. If you need a recovery objective, run Postgres the way the rest of
 the cluster does (an operator, or a managed service) and set
 `db.enabled=false`.
 
-See [sizing.md](sizing.md) for what grows and how fast.
+## Retention and sizing
+
+Most tables grow with the number of customers. These grow with use:
+
+| Table          | One row per                               |
+| -------------- | ----------------------------------------- |
+| `usage_events` | inference request                         |
+| `filter_runs`  | filter run, per request                   |
+| `tool_calls`   | MCP tool call                             |
+| `sandboxes`    | sandbox lent out                          |
+| `api_keys`     | key, and one more for each sandbox        |
+| `audit_log`    | administrative action, so it grows slowly |
+
+`usage_events` is the request log, the source of every report and the billing
+record. A row is ids, counts and a latency breakdown of a few hundred bytes. No
+prompt or completion text is stored.
+
+```sh
+KEERA_USAGE_RETENTION=8760h    # a year
+KEERA_AUDIT_RETENTION=17520h   # two years
+```
+
+**Both default to for ever, on purpose.** Billing reads usage and compliance
+reads the audit log, so the gateway deletes neither unless told to. At start-up
+it logs the windows, or `no retention window is configured`.
+
+Past the usage window, the gateway deletes usage events, filter runs, tool
+calls and closed budget windows. It also deletes sandboxes that ended, and keys
+revoked or expired, with their guardrails. A key that a sandbox still names
+stays. Billing rows and payments are kept ([billing.md](billing.md)).
+
+The request log, the session report and every chart read `usage_events`, so
+they reach back only as far as the window. Retention runs hourly, deletes 5,000
+rows at a time so it does not block the replicas, and logs how many rows went.
+
+To size the database, run a representative week, read
+`SELECT pg_size_pretty(pg_total_relation_size('usage_events'));` and multiply
+by the window. The indexes are a large share of it. Rows follow tasks × calls
+per task, not the number of developers: a coding agent makes thirty or forty
+calls per instruction. [sessions.md](sessions.md) shows your ratio.
+
+A gateway's memory depends on how many organisations, keys, models and the
+like there are, not on traffic. Per request it holds the body, and a
+non-streamed answer whole; a rewrite filter's answer is held whole up to
+32 MiB. Size Postgres for replicas × `KEERA_MAX_DB_CONNS` connections.
 
 ## Upgrading
 

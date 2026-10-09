@@ -250,8 +250,16 @@ func sanitizeReason(s string) string {
 		}
 		b.WriteRune(r)
 	}
-	if truncated {
-		return b.String() + "…"
+	if !truncated {
+		return b.String()
 	}
-	return b.String()
+	// Room is made for the ellipsis, so the cap holds for what is shown.
+	out := b.String()
+	for len(out)+len(ellipsis) > policy.MaxRefusalReasonBytes {
+		_, size := utf8.DecodeLastRuneInString(out)
+		out = out[:len(out)-size]
+	}
+	return strings.TrimRight(out, " ") + ellipsis
 }
+
+const ellipsis = "…"

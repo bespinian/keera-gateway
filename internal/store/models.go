@@ -13,16 +13,26 @@ import (
 // The release date is read as text, so an unstated one is simply empty.
 const modelColumns = `SELECT alias, org_id, kind, backends, backend_model, provider,
 	description, input_micros_per_mtok, output_micros_per_mtok, cached_input_micros_per_mtok,
-	max_context, coalesce(to_char(release_date, 'YYYY-MM-DD'), ''), location,
+	cache_write_micros_per_mtok, long_prompt_tokens, long_input_micros_per_mtok,
+	long_output_micros_per_mtok, long_cached_input_micros_per_mtok,
+	long_cache_write_micros_per_mtok, max_context, coalesce(to_char(release_date, 'YYYY-MM-DD'), ''), location,
 	api_key_ct, subscription, enabled`
 
 func scanModel(r row) (policy.Model, error) {
-	var m policy.Model
+	var (
+		m    policy.Model
+		long policy.PriceTier
+	)
 	if err := r.Scan(&m.Alias, &m.OrgID, &m.Kind, &m.Backends, &m.BackendModel, &m.Provider,
 		&m.Description, &m.InputMicrosPerMTok, &m.OutputMicrosPerMTok, &m.CachedInputMicrosPerMTok,
-		&m.MaxContext, &m.ReleaseDate, &m.Location, &m.APIKeyCiphertext, &m.Subscription,
+		&m.CacheWriteMicrosPerMTok, &long.AboveTokens, &long.InputMicrosPerMTok,
+		&long.OutputMicrosPerMTok, &long.CachedInputMicrosPerMTok,
+		&long.CacheWriteMicrosPerMTok, &m.MaxContext, &m.ReleaseDate, &m.Location, &m.APIKeyCiphertext, &m.Subscription,
 		&m.Enabled); err != nil {
 		return policy.Model{}, err
+	}
+	if long.AboveTokens > 0 {
+		m.LongPrompt = &long
 	}
 	m.HasAPIKey = len(m.APIKeyCiphertext) > 0
 	return m, nil
@@ -30,20 +40,12 @@ func scanModel(r row) (policy.Model, error) {
 
 // LoadModels reads every organisation's models.
 func (s *Store) LoadModels(ctx context.Context) ([]policy.Model, error) {
-	return s.queryModels(ctx, modelColumns+" FROM models ORDER BY org_id, alias")
+	return queryAll(ctx, s.pool, scanModel, modelColumns+" FROM models ORDER BY org_id, alias")
 }
 
 // ListModels reads one organisation's models.
 func (s *Store) ListModels(ctx context.Context, orgID string) ([]policy.Model, error) {
-	return s.queryModels(ctx, modelColumns+" FROM models WHERE org_id = $1 ORDER BY alias", orgID)
-}
-
-func (s *Store) queryModels(ctx context.Context, sql string, args ...any) ([]policy.Model, error) {
-	rows, err := s.pool.Query(ctx, sql, args...)
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, scanModel)
+	return queryAll(ctx, s.pool, scanModel, modelColumns+" FROM models WHERE org_id = $1 ORDER BY alias", orgID)
 }
 
 // Model reads one of an organisation's models, or ErrNotFound.
@@ -72,22 +74,38 @@ type querier interface {
 }
 
 func upsertModel(ctx context.Context, db querier, m policy.Model) error {
+	var long policy.PriceTier
+	if m.LongPrompt != nil {
+		long = *m.LongPrompt
+	}
 	_, err := db.Exec(ctx, `INSERT INTO models (alias, org_id, kind, backends, backend_model,
 		provider, description, input_micros_per_mtok, output_micros_per_mtok,
-		cached_input_micros_per_mtok, max_context, release_date, location,
-		subscription, enabled, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NULLIF($12, '')::date,$13,$14,$15, now())
+		cached_input_micros_per_mtok, cache_write_micros_per_mtok, long_prompt_tokens,
+		long_input_micros_per_mtok, long_output_micros_per_mtok,
+		long_cached_input_micros_per_mtok, long_cache_write_micros_per_mtok, max_context,
+		release_date, location, subscription, enabled, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
+			NULLIF($18, '')::date, $19,$20,$21, now())
 		ON CONFLICT (org_id, alias) DO UPDATE SET kind = EXCLUDED.kind, backends = EXCLUDED.backends,
 			backend_model = EXCLUDED.backend_model, provider = EXCLUDED.provider,
 			description = EXCLUDED.description,
 			input_micros_per_mtok = EXCLUDED.input_micros_per_mtok,
 			output_micros_per_mtok = EXCLUDED.output_micros_per_mtok,
 			cached_input_micros_per_mtok = EXCLUDED.cached_input_micros_per_mtok,
+			cache_write_micros_per_mtok = EXCLUDED.cache_write_micros_per_mtok,
+			long_prompt_tokens = EXCLUDED.long_prompt_tokens,
+			long_input_micros_per_mtok = EXCLUDED.long_input_micros_per_mtok,
+			long_output_micros_per_mtok = EXCLUDED.long_output_micros_per_mtok,
+			long_cached_input_micros_per_mtok = EXCLUDED.long_cached_input_micros_per_mtok,
+			long_cache_write_micros_per_mtok = EXCLUDED.long_cache_write_micros_per_mtok,
 			max_context = EXCLUDED.max_context, release_date = EXCLUDED.release_date,
 			location = EXCLUDED.location, subscription = EXCLUDED.subscription,
 			enabled = EXCLUDED.enabled, updated_at = now()`,
 		m.Alias, m.OrgID, string(m.Kind), m.Backends, m.BackendModel, m.Provider, m.Description,
-		m.InputMicrosPerMTok, m.OutputMicrosPerMTok, m.CachedInputMicrosPerMTok, m.MaxContext,
+		m.InputMicrosPerMTok, m.OutputMicrosPerMTok, m.CachedInputMicrosPerMTok,
+		m.CacheWriteMicrosPerMTok, long.AboveTokens, long.InputMicrosPerMTok,
+		long.OutputMicrosPerMTok, long.CachedInputMicrosPerMTok,
+		long.CacheWriteMicrosPerMTok, m.MaxContext,
 		m.ReleaseDate, m.Location, m.Subscription, m.Enabled)
 	return err
 }

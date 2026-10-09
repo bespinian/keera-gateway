@@ -134,6 +134,32 @@ func TestMessagesGoToAnthropicInTheirOwnAPI(t *testing.T) {
 	}
 }
 
+// Each API reports cache writes in its own field, and Anthropic's, unlike the
+// other two, outside the input count.
+func TestEveryDialectReadsTheCacheWrites(t *testing.T) {
+	for name, tc := range map[string]struct {
+		usage func([]byte) *tokenUsage
+		raw   string
+	}{
+		"chat": {usageFromResponse, `{"usage":{"prompt_tokens":1000,"completion_tokens":5,` +
+			`"prompt_tokens_details":{"cached_tokens":600,"cache_write_tokens":300}}}`},
+		"responses": {responsesDialect{}.usage, `{"usage":{"input_tokens":1000,` +
+			`"input_tokens_details":{"cached_tokens":600,"cache_write_tokens":300},` +
+			`"output_tokens":5}}`},
+		"messages": {anthropicDialect{}.usage, `{"usage":{"input_tokens":100,` +
+			`"cache_read_input_tokens":600,"cache_creation_input_tokens":300,` +
+			`"output_tokens":5}}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := tc.usage([]byte(tc.raw)).tokens()
+			want := policy.Tokens{Input: 1000, CachedInput: 600, CacheWrite: 300, Output: 5}
+			if got != want {
+				t.Errorf("tokens = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
 func TestNativeMessagesStillPassTheGuardrails(t *testing.T) {
 	h, seen := providerHarness(t, "anthropic", "claude-opus-5", jsonBackend(anthropicAnswer),
 		guarded("obey the org", 2048))
@@ -179,7 +205,7 @@ func TestNativeMessagesStillPassTheGuardrails(t *testing.T) {
 func TestAFilterRewritesANativeRequestInItsOwnShape(t *testing.T) {
 	h, seen := providerHarness(t, "anthropic", "claude-opus-5", jsonBackend(anthropicAnswer), nil)
 	h.src.filters = map[string]policy.Filter{
-		"org_1/redact": patternFilterFor("org_1", "redact",
+		"org_1/redact": patternFilter(
 			policy.FilterRule{Pattern: `\bhunter2\b`, Replace: "[CREDENTIAL]"}),
 	}
 	h.src.resolved[testKey].Filters = []string{"redact"}
@@ -202,6 +228,57 @@ func TestAFilterRewritesANativeRequestInItsOwnShape(t *testing.T) {
 	}
 	if !strings.Contains(got.body, `"cache_control"`) {
 		t.Errorf("the rewrite dropped the client's cache marker: %s", got.body)
+	}
+}
+
+func TestAKeyInOtherCaseCannotCarryTextPastAFilter(t *testing.T) {
+	// The filters read the client's own body, looking "content" up as it is
+	// spelled. The fallback is sent a translation, which reads "Content" as
+	// content too, so the text would reach it unfiltered.
+	for _, tc := range []struct{ provider, path, body string }{
+		{"anthropic", "/v1/messages", `{"model":"ha","max_tokens":64,` +
+			`"messages":[{"role":"user","Content":"hunter2"}]}`},
+		{"anthropic", "/v1/messages", `{"model":"ha","max_tokens":64,` +
+			`"messages":[{"role":"user","content":[{"Type":"text","Text":"hunter2"}]}]}`},
+		{"anthropic", "/v1/messages", `{"model":"ha","max_tokens":64,"System":"hunter2",` +
+			`"messages":[{"role":"user","content":"hi"}]}`},
+		{"anthropic", "/v1/messages", `{"model":"ha","max_tokens":64,"messages":[{"role":"user",` +
+			`"content":[{"type":"tool_result","tool_use_id":"t1","Content":"hunter2"}]}]}`},
+		{"openai", "/v1/responses", `{"model":"ha","Input":"hunter2"}`},
+		{"openai", "/v1/responses", `{"model":"ha","input":[{"type":"message","role":"user",` +
+			`"Content":"hunter2"}]}`},
+		{"openai", "/v1/responses", `{"model":"ha","input":[{"type":"function_call_output",` +
+			`"Type":"message","role":"user","content":"hunter2","call_id":"c1","output":"ok"}]}`},
+	} {
+		backend := func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/v1/chat/completions" {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			jsonBackend(`{"choices":[{"message":{"content":"hi"},"finish_reason":"stop"}],`+
+				`"usage":{"prompt_tokens":10,"completion_tokens":5}}`)(w, r)
+		}
+		h, seen := providerHarness(t, tc.provider, "frontier-model", backend, nil)
+		h.src.routers = map[string]policy.Router{"org_1/ha": {
+			OrgID: "org_1", Alias: "ha", Mode: policy.RouterModeFallback,
+			Destinations: []string{"keera-frontier", "keera-code"},
+		}}
+		h.src.filters = map[string]policy.Filter{
+			"org_1/redact": patternFilter(
+				policy.FilterRule{Pattern: `\bhunter2\b`, Replace: "[CREDENTIAL]"}),
+		}
+		h.src.resolved[testKey].Filters = []string{"redact"}
+
+		resp := h.post(t, tc.path, tc.body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", tc.body, resp.StatusCode)
+		}
+		for len(seen) > 0 {
+			if got := <-seen; strings.Contains(got.body, "hunter2") {
+				t.Errorf("%s: %s was sent %s", tc.body, got.path, got.body)
+			}
+		}
 	}
 }
 

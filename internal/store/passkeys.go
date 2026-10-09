@@ -63,12 +63,8 @@ func (s *Store) PasskeyByID(ctx context.Context, id string) (Passkey, error) {
 
 // ListPasskeys returns one person's passkeys, oldest first.
 func (s *Store) ListPasskeys(ctx context.Context, userID string) ([]Passkey, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+passkeyColumns+`
+	return queryAll(ctx, s.pool, scanPasskey, `SELECT `+passkeyColumns+`
 		FROM passkeys WHERE user_id = $1 ORDER BY created_at, id`, userID)
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, scanPasskey)
 }
 
 // UsePasskey records a sign-in with its new signature counter.

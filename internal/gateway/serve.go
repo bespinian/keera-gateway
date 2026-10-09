@@ -1,14 +1,19 @@
 package gateway
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/bespinian/keera-gateway/internal/connect"
 	"github.com/bespinian/keera-gateway/internal/httpx"
@@ -60,12 +65,24 @@ type call struct {
 
 	stream        bool
 	injectedUsage bool
+
+	// received is the size of the body the client sent.
+	received int
+	// held is what the request holds of the organisation's credit until it
+	// ends. See creditHold.
+	held int64
 }
 
 // hookMicros is what the request's router and filters spent on their own
 // models.
 func (c *call) hookMicros() int64 {
 	return c.filters.micros + c.decision.micros
+}
+
+// hookBills is the calls the request's router and filters made on the
+// deployment's key.
+func (c *call) hookBills() []policy.BillLine {
+	return slices.Concat(c.filters.bills, c.decision.bills)
 }
 
 // serve is everything after authentication: enforce, forward, account.
@@ -86,6 +103,9 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, res *policy.Resol
 	if !ok {
 		return
 	}
+	c.received = len(raw)
+	// Given back once the request has been charged, whichever way it ends.
+	defer func() { s.budgets.ReleaseCredit(c.res.Key.OrgID, c.held) }()
 	// The gateway's own work starts here. Everything before is the client
 	// sending its body, and a slow link should not count as gateway overhead.
 	c.work = time.Now()
@@ -95,7 +115,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, res *policy.Resol
 	// fraction of a millisecond, and one bar says that more clearly than five.
 	tr.open(store.SpanAdmit, "")
 	b, ok := s.decode(c, raw)
-	if !ok || !s.target(c, b) || !s.admit(c) {
+	if !ok || !s.target(c, b) || !s.admit(c, b) {
 		return
 	}
 	tr.seal("")
@@ -154,17 +174,20 @@ func readBody(w http.ResponseWriter, r *http.Request, limit int64,
 // something needs the OpenAI shape (see translate). Until then b is nil.
 func (s *Server) decode(c *call, raw []byte) (*body, bool) {
 	d := c.surf.dialect
-	if d == nil {
-		var err error
-		if raw, err = c.surf.shape.decode(raw); err != nil {
-			s.refuse(c, invalidBody(err.Error()))
-			return nil, false
-		}
-	}
 	b, err := parseBody(raw)
 	if err != nil {
 		s.refuse(c, invalidBody(err.Error()))
 		return nil, false
+	}
+	// A backend that reads "true" or 1 as true would stream an answer the
+	// gateway reads as a whole one, without the usage record it adds to a
+	// stream, and the request would go unbilled.
+	if _, ok := b.boolean("stream"); !ok {
+		if raw, present := b.value("stream"); present &&
+			!bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			s.refuse(c, invalidBody("the 'stream' field must be true or false"))
+			return nil, false
+		}
 	}
 	// Set before anything can refuse, so a session cut short by a budget
 	// shows the refusal too.
@@ -195,14 +218,7 @@ func (s *Server) translate(c *call, b *body) (*body, bool) {
 
 // openAIBody turns the client's own body into the OpenAI shape.
 func openAIBody(c *call) (*body, error) {
-	if d, ok := c.surf.shape.(bodyDecoder); ok {
-		return d.decodeBody(c.native.encode())
-	}
-	raw, err := c.surf.shape.decode(c.native.encode())
-	if err != nil {
-		return nil, err
-	}
-	return parseBody(raw)
+	return c.surf.shape.decodeBody(c.native.encode())
 }
 
 // invalidBody is the refusal for a body the gateway cannot use.
@@ -270,6 +286,17 @@ func (s *Server) target(c *call, b *body) bool {
 		})
 		return false
 	}
+	// No model's name has a control character, and a NUL byte is one Postgres
+	// refuses to store.
+	if !printable(alias) {
+		s.refuse(c, refusal{
+			status: http.StatusNotFound,
+			typ:    "invalid_request_error", code: "model_not_found",
+			msg: "the 'model' field holds a control character or invalid UTF-8; no model's " +
+				"name does - send one of the models from /v1/models",
+		})
+		return false
+	}
 	c.ev.Alias = alias
 	c.alias = alias
 
@@ -289,6 +316,15 @@ func (s *Server) target(c *call, b *body) bool {
 		// A subscription key may have named the model by another name.
 		c.alias, c.ev.Alias = model.Alias, model.Alias
 	}
+	if !c.routed && model.Locked {
+		s.refuse(c, refusal{
+			status: http.StatusForbidden,
+			typ:    "permission_error", code: "org_limited",
+			msg: "the model '" + alias + "' " + lockedReason(model) + ", and " +
+				policy.LockedMessage,
+		})
+		return false
+	}
 	if !c.routed && len(model.Backends) == 0 {
 		s.refuse(c, refusal{
 			status: http.StatusServiceUnavailable,
@@ -307,12 +343,27 @@ func (s *Server) target(c *call, b *body) bool {
 	return true
 }
 
-// admit checks the rate limits and the budgets.
-func (s *Server) admit(c *call) bool {
+// admit checks the rate limits, the credit and the budgets.
+func (s *Server) admit(c *call, b *body) bool {
 	c.now = time.Now()
 	if ref, ok := s.checkRates(c.res, c.now); !ok {
 		s.refuse(c, ref)
 		return false
+	}
+	if s.onKey(c) {
+		if b == nil {
+			b = c.native
+		}
+		var err error
+		if c.held, err = s.budgets.HoldCredit(c.res.Key.OrgID, s.creditHold(c, b)); err != nil {
+			s.refuse(c, refusal{
+				status: http.StatusPaymentRequired,
+				typ:    "insufficient_quota", code: "credit_exhausted",
+				msg:    err.Error(),
+				advise: true,
+			})
+			return false
+		}
 	}
 	// A subscription pays for the model, so only filters can spend the
 	// organisation's money, and without them no budget applies.
@@ -449,6 +500,19 @@ func (s *Server) useNative(c *call, b *body) (*body, bool) {
 	}
 	if !native {
 		c.native = nil
+		return b, true
+	}
+	if slices.ContainsFunc(c.chain, func(m policy.Model) bool {
+		return m.PlatformKey && speaksNative(d, m)
+	}) {
+		if why := d.onKey(c.native); why != "" {
+			s.refuse(c, refusal{
+				status: http.StatusBadRequest,
+				typ:    "invalid_request_error", code: "unsupported_parameter",
+				msg: why,
+			})
+			return nil, false
+		}
 	}
 	return b, true
 }
@@ -526,7 +590,9 @@ func (s *Server) prepare(c *call, b *body) bool {
 			}
 		}
 	}
-	if c.res.BlockHostedTools {
+	// On the deployment's key they always go: the provider charges for them
+	// apart from tokens, and that is not billed.
+	if c.res.BlockHostedTools || c.chainOnKey() {
 		// On chat completions a hosted search is a field rather than a tool.
 		removed := []string{}
 		if b != nil && b.remove("web_search_options") {
@@ -536,6 +602,27 @@ func (s *Server) prepare(c *call, b *body) bool {
 			removed = append(removed, c.surf.dialect.stripHostedTools(c.native)...)
 		}
 		removedToolsHeader(c.w, removed)
+	}
+	if c.chainOnKey() {
+		var removed []string
+		for _, sent := range []*body{b, c.native} {
+			if sent != nil {
+				removed = append(removed, stripPremium(sent)...)
+			}
+		}
+		// Every organisation shares the deployment's OpenAI account, so a chat
+		// completion is not stored there either. The Responses dialect turns
+		// store off itself, where leaving it out would mean on.
+		if b != nil {
+			if on, _ := b.boolean("store"); on {
+				b.remove("store")
+				removed = append(removed, "store")
+			}
+		}
+		if len(removed) > 0 {
+			removed = slices.Compact(slices.Sorted(slices.Values(removed)))
+			c.w.Header().Set("X-Keera-Removed-Fields", strings.Join(removed, ", "))
+		}
 	}
 	// Embeddings have no output length to limit.
 	if c.res.MaxOutputTokens > 0 && c.surf.kind != policy.KindEmbedding {
@@ -567,7 +654,13 @@ func (s *Server) prepare(c *call, b *body) bool {
 
 // answer forwards the request, serves what comes back, and accounts for it.
 func (s *Server) answer(c *call, b *body) {
-	fw := s.forward(c.r.Context(), c.chain, c.outbound(b), c.tr)
+	ctx := c.r.Context()
+	if c.keepsReading() {
+		var cancel context.CancelFunc
+		ctx, cancel = outlast(ctx, readOnFor)
+		defer cancel()
+	}
+	fw := s.forward(ctx, c.chain, c.outbound(b), c.tr)
 	// The destination is busy until the last token has been served, so it is
 	// released only when this returns, on every path.
 	defer fw.done()
@@ -575,7 +668,7 @@ func (s *Server) answer(c *call, b *body) {
 	if fw.resp != nil {
 		defer func() { _ = fw.resp.Body.Close() }()
 	}
-	if c.r.Context().Err() != nil {
+	if c.r.Context().Err() != nil && !c.keepsReading() {
 		s.hungUp(c, "before the model answered", fw.note())
 		return
 	}
@@ -587,6 +680,11 @@ func (s *Server) answer(c *call, b *body) {
 		s.settleRouter(c, fw)
 	}
 	if fw.err != nil {
+		// A request that reached the provider may have been charged for,
+		// even if no answer came back in time.
+		if !undelivered(fw.err) {
+			s.billUnreported(c, b)
+		}
 		s.upstreamUnreachable(c, fw)
 		return
 	}
@@ -614,19 +712,20 @@ func (s *Server) answer(c *call, b *body) {
 				return c.surf.shape.pipe(dst, flush, src, c.alias, c.injectedUsage,
 					s.opts.MaxResponseBytes)
 			})
-	case native:
-		s.relayNativeBuffered(c, resp, answered)
 	default:
-		s.relayBuffered(c, resp, answered)
+		s.relayBuffered(c, resp, answered, native)
 	}
 
+	if resp.StatusCode < 400 {
+		s.billUnreported(c, b)
+	}
 	c.ev.Canceled = c.r.Context().Err() != nil
 	c.ev.Latency = time.Since(c.tr.start)
 	// Added last, so it adds to whatever went wrong later instead of being
 	// overwritten. If the request succeeded further down the chain, this is
 	// the only sign anything failed.
 	c.ev.Error = appendNote(c.ev.Error, fw.note())
-	s.finish(c.ev, c.model, c.res, c.now, c.hookMicros(), c.tr)
+	s.finish(c.ev, c.model, c.res, c.now, c.hookMicros(), c.hookBills(), c.tr)
 }
 
 // outbound encodes the request for one destination: in the client's own API
@@ -644,6 +743,49 @@ func (c *call) outbound(b *body) func(policy.Model) outbound {
 		b.setString("model", m.BackendModel)
 		return outbound{path: c.surf.path, payload: b.encode()}
 	}
+}
+
+// readOnFor is how long a request on the deployment's key goes on being
+// read after its client left: long enough for a model to finish its answer.
+const readOnFor = 15 * time.Minute
+
+// chainOnKey says a model the request may be sent to is on the deployment's
+// key.
+func (c *call) chainOnKey() bool {
+	return slices.ContainsFunc(c.chain, func(m policy.Model) bool { return m.PlatformKey })
+}
+
+// keepsReading says the answer is read to the end even if the client leaves.
+// A provider charges the deployment for what it generated, and only the end
+// of the answer says how much that was. Cutting it short would leave an
+// estimate that misses what was never streamed, such as reasoning.
+func (c *call) keepsReading() bool { return c.chainOnKey() }
+
+// outlast is a context that ends grace after parent does, rather than with
+// it. The returned cancel ends it at once.
+func outlast(parent context.Context, grace time.Duration) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
+	stop := context.AfterFunc(parent, func() { time.AfterFunc(grace, cancel) })
+	return ctx, func() {
+		stop()
+		cancel()
+	}
+}
+
+// afterHangUp writes to the client until it has gone, and then drops what
+// is written, so a stream is read to its usage record all the same.
+type afterHangUp struct {
+	w    io.Writer
+	gone bool
+}
+
+func (a *afterHangUp) Write(p []byte) (int, error) {
+	if !a.gone {
+		if _, err := a.w.Write(p); err != nil {
+			a.gone = true
+		}
+	}
+	return len(p), nil
 }
 
 // settleRouter records what a trying router's attempts came to, and names the
@@ -673,7 +815,7 @@ func (s *Server) upstreamUnreachable(c *call, fw forwarded) {
 	c.ev.Error = appendNote("the inference plane could not be reached: "+fw.err.Error(),
 		fw.note())
 	c.ev.Latency = time.Since(c.tr.start)
-	s.finish(c.ev, c.model, c.res, c.now, c.hookMicros(), c.tr)
+	s.finish(c.ev, c.model, c.res, c.now, c.hookMicros(), c.hookBills(), c.tr)
 }
 
 // relayStream pipes a streamed answer to the client through pipe, which
@@ -682,9 +824,13 @@ func (s *Server) relayStream(c *call, resp *http.Response, answered time.Time, p
 	pipe func(dst io.Writer, flush func(), src io.Reader) (streamStats, error),
 ) {
 	c.w.WriteHeader(resp.StatusCode)
-	src := &flushBeforeRead{src: resp.Body, flusher: http.NewResponseController(c.w)}
-	stats, err := pipe(c.w, src.later, src)
-	src.now()
+	var dst io.Writer = c.w
+	if c.keepsReading() {
+		dst = &afterHangUp{w: c.w}
+	}
+	stream := &flushBeforeRead{src: resp.Body, dst: dst, flusher: http.NewResponseController(c.w)}
+	stats, err := pipe(stream, stream.later, stream)
+	stream.now()
 	if !stats.firstAt.IsZero() {
 		c.ev.TTFT = stats.firstAt.Sub(c.tr.start)
 		// Waiting for the first token (queues, cold starts) and streaming the
@@ -716,25 +862,34 @@ func (s *Server) relayStream(c *call, resp *http.Response, answered time.Time, p
 }
 
 // relayBuffered reads a whole answer, translates it into the client's shape
-// and writes it.
-func (s *Server) relayBuffered(c *call, resp *http.Response, answered time.Time) {
+// and writes it out. An answer in the client's own API, native, is only given
+// the alias as its model.
+func (s *Server) relayBuffered(c *call, resp *http.Response, answered time.Time, native bool) {
 	body, ok := s.readAnswer(c, resp, answered)
 	if !ok {
 		return
 	}
 	// Token counts are read before translation, from what the plane sent.
 	var usage *tokenUsage
-	if resp.StatusCode < 300 {
-		usage = usageFromResponse(body)
+	out, status := body, resp.StatusCode
+	if native {
+		if status < 300 {
+			usage = c.surf.dialect.usage(body)
+			out = renameIn(body, "", c.alias)
+		}
+	} else {
+		if status < 300 {
+			usage = usageFromResponse(body)
+		}
+		// The shape picks the status, because a success it cannot translate
+		// has to become an error.
+		out, status = c.surf.shape.encode(body, c.alias, status)
+		if ct := c.surf.shape.contentType(); ct != "" {
+			c.w.Header().Set("Content-Type", ct)
+		}
 	}
-	// The shape picks the status, because a success it cannot translate has
-	// to become an error.
-	out, status := c.surf.shape.encode(body, c.alias, resp.StatusCode)
 	if msg := bufferedError(body, resp.StatusCode, status); msg != "" {
 		c.ev.Error = msg
-	}
-	if ct := c.surf.shape.contentType(); ct != "" {
-		c.w.Header().Set("Content-Type", ct)
 	}
 	c.ev.Status = status
 	c.w.WriteHeader(status)
@@ -748,6 +903,14 @@ func (s *Server) relayBuffered(c *call, resp *http.Response, answered time.Time)
 	if usage != nil {
 		setUsage(&c.ev, usage)
 	}
+}
+
+// printable reports whether s is valid UTF-8 without control characters.
+func printable(s string) bool {
+	if !utf8.ValidString(s) {
+		return false
+	}
+	return !strings.ContainsFunc(s, unicode.IsControl)
 }
 
 // modelNotFound is the one answer for a model that is missing and for one the
@@ -807,6 +970,8 @@ func bufferedError(body []byte, upstream, status int) string {
 func setUsage(ev *store.Event, u *tokenUsage) {
 	ev.InputTokens = u.InputTokens
 	ev.CachedInputTokens = u.cached()
+	ev.CacheWriteTokens = u.InputDetails.CacheWriteTokens
+	ev.CacheWriteHourTokens = u.InputDetails.CacheWriteHourTokens
 	ev.OutputTokens = u.OutputTokens
 }
 
@@ -817,10 +982,14 @@ func setUsage(ev *store.Event, u *tokenUsage) {
 // token columns stay the answering model's own. It was already charged to the
 // budgets when it was spent.
 func (s *Server) finish(ev store.Event, model policy.Model, res *policy.Resolved,
-	now time.Time, hookMicros int64, tr *trace,
+	now time.Time, hookMicros int64, hookBills []policy.BillLine, tr *trace,
 ) {
 	ev.Spans = tr.steps("")
-	ev.CostMicros = model.Cost(ev.InputTokens, ev.CachedInputTokens, ev.OutputTokens)
+	used := policy.Tokens{Input: ev.InputTokens, CachedInput: ev.CachedInputTokens,
+		CacheWrite: ev.CacheWriteTokens, CacheWriteHour: ev.CacheWriteHourTokens,
+		Output: ev.OutputTokens}
+	cost, bills := answerCost(model, used)
+	ev.CostMicros, ev.Bills = cost, append(hookBills, bills...)
 	// A subscription paid for this. What it would have cost on the API is kept
 	// to compare against, and charged to no budget.
 	if model.Subscription {
@@ -838,7 +1007,7 @@ func (s *Server) finish(ev store.Event, model policy.Model, res *policy.Resolved
 		// a bucket told it is minutes younger than it is refills too much.
 		s.limiter.ChargeAll(reqs, tokens, time.Now())
 	}
-	s.sink.Record(ev)
+	s.record(ev)
 	s.metrics.Observe(ev.Alias, ev.OrgID, ev.Status, ev.Latency.Seconds(),
 		ev.InputTokens+ev.OutputTokens)
 	// Feeds the latency router. Only real answers count, because a fast

@@ -286,7 +286,7 @@ func scanAgentSession(r row) (AgentSession, error) {
 // order q asks for.
 func (s *Store) AgentSessions(ctx context.Context, q AgentSessionQuery) ([]AgentSession, error) {
 	q.setDefaults()
-	rows, err := s.pool.Query(ctx, sessionCTE+`
+	return queryAll(ctx, s.pool, scanAgentSession, sessionCTE+`
 		SELECT session_key, id, started_at, ended_at, requests, ok, failed, refused,
 		       interrupted, input_tokens, output_tokens, cost_micros,
 		       ttft_median_ms, models, project_id, user_id, key_id, last_status, last_error
@@ -295,10 +295,6 @@ func (s *Store) AgentSessions(ctx context.Context, q AgentSessionQuery) ([]Agent
 		ORDER BY `+sessionOrder[q.Sort]+`
 		LIMIT $12`,
 		append(q.args(), q.Before, q.Limit)...)
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, scanAgentSession)
 }
 
 // AgentSessionTotals is what a window of sessions adds up to, over the whole
@@ -423,7 +419,7 @@ func (s *Store) sessionStart(ctx context.Context, orgID, key string, ts time.Tim
 // Every row before start is excluded, so the session to keep is run 1.
 func (s *Store) agentSessionRequests(ctx context.Context, orgID, key string,
 	start time.Time, gap time.Duration) ([]Request, error) {
-	rows, err := s.pool.Query(ctx, `
+	return queryAll(ctx, s.pool, scanRequest, `
 		WITH ev AS (
 		    SELECT *, EXTRACT(EPOCH FROM (ts - lag(ts) OVER (ORDER BY ts, id))) AS gap
 		    FROM usage_events
@@ -437,8 +433,4 @@ func (s *Store) agentSessionRequests(ctx context.Context, orgID, key string,
 		)
 		SELECT `+requestColumns+` FROM runs WHERE run = 1 ORDER BY ts, id`,
 		orgID, key, start, gap.Seconds())
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, scanRequest)
 }

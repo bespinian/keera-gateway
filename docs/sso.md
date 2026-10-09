@@ -278,15 +278,18 @@ same one, could take over the account and its role.
 1. A user already linked to that provider's subject.
 2. An organisation whose `email_domain` matches the address's domain. With
    several providers, only a provider allowed that domain gets this far.
-3. The only organisation, if there is exactly one.
-4. Otherwise refuse.
+3. With sign-up on that provider, the sign-up screen. See
+   [Letting people sign up](#letting-people-sign-up).
+4. The only organisation, if there is exactly one. Skipped when any provider
+   allows sign-up.
+5. Otherwise refuse.
 
-On a compose deployment with one organisation, step 3 applies. So **every**
+On a compose deployment with one organisation, step 4 applies. So **every**
 directory user who passes the consent screen joins that organisation with the
 default role. Restrict the consent screen to your own directory to keep that to
 your own staff.
 
-**On the hosted deployment, avoid step 3.** It stops applying once there is a
+**On the hosted deployment, avoid step 4.** It stops applying once there is a
 second organisation, but until then a new customer's first sign-in lands in the
 existing organisation. Give every organisation its domain before you create
 the second one:
@@ -311,6 +314,71 @@ curl -X PATCH https://keera.example.ch/control/v1/orgs/<org-id> \
   -H 'Content-Type: application/json' \
   -d '{"email_domain":"yourdomain.ch"}'
 ```
+
+## Letting people sign up
+
+By default, somebody whose sign-in matches no organisation is refused, and an
+operator creates one for them. On a public deployment, people can do this
+themselves:
+
+```sh
+KEERA_OIDC_GOOGLE_SIGNUP=true
+```
+
+Set it only on a provider that proves every address itself, such as Google with
+`KEERA_OIDC_GOOGLE_DOMAINS=*`. If such a provider vouches for any domain, a
+sign-in without `email_verified: true` is refused. Passkeys never sign anybody
+up. The gateway refuses to start if any provider also sets `ADMIN_GROUPS`: that
+group decides the administrator role for the whole gateway, so the person who
+created an organisation would lose the role at their next sign-in. It also
+refuses to start until `KEERA_UPSTREAM_PRIVATE` says what inside your network
+an organisation may reach. See
+[install.md](install.md#where-the-gateway-may-connect).
+
+A sign-in that matches no organisation then lands on a screen that offers:
+
+- **Create an organisation.** The person names it and becomes its
+  administrator. If the name is taken, their address is added to it, so a
+  stranger cannot find out which customers you have. Rename it with
+  `keera org set`.
+- **Join an invitation.** If an organisation added the address with
+  `keera user add`, the screen offers to join it, with the role it was given.
+  It is never joined without asking: an administrator of an organisation
+  without a domain can add any address.
+
+The new organisation gets no email domain. Set one with `keera org set`
+once you know the customer. `keera login` cannot sign up: it says to open the
+panel first.
+
+### What a new organisation can use
+
+Anyone with a Google account can now be an administrator. So an organisation
+made this way starts **limited**, and gets nothing that costs you money or
+reaches your network:
+
+| Works at once                                                   | Waits                                               |
+| --------------------------------------------------------------- | --------------------------------------------------- |
+| Models on your provider keys, paid from credit in advance       | Models inside your network, such as Keera Engine    |
+| Models and MCP servers on public addresses, with their own keys | MCP servers inside your network                     |
+|                                                                 | Sandboxes                                           |
+|                                                                 | Models on your provider keys, without card payments |
+
+A request for something that waits is refused with `org_limited`, and
+`/v1/models` does not list it. The gateway also checks the address it connects
+to, so a public name that points into your network does not get through
+either.
+
+The limit lifts with the organisation's first card payment (see
+[billing.md](billing.md)). After that, it reaches only the hosts inside your
+network that `KEERA_UPSTREAM_PRIVATE` names. Credit an operator grants does not lift it. An
+operator can also lift it at any time:
+
+```sh
+keera org set <org-id> --lift-limit
+```
+
+On the panel, that is **Organisations → Lift limit**. `keera org list` marks
+limited organisations.
 
 ## Signing in
 
@@ -549,31 +617,33 @@ gateway whose only way in is passkeys, `--provider` can be left out.
 
 ## When it does not work
 
-| Symptom                                                        | Cause                                                                                                                                        |
-| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Gateway will not start, "discovering the identity provider"    | An issuer is wrong, or the container cannot reach it. The message names which one.                                                           |
-| `redirect_uri_mismatch`                                        | The console URI and `<KEERA_PUBLIC_URL>/control/auth/callback` differ, often `127.0.0.1` against `localhost`.                                |
-| No sign-on button on the panel                                 | An issuer and a client ID are both needed; one is empty.                                                                                     |
-| Boot fails asking for a client secret                          | An issuer and client ID are set without the secret. The message names the provider.                                                          |
-| "a sign-in has to name one of…"                                | Several providers are configured and the link named none. Start from the panel, not the URL.                                                 |
-| "started in another browser or tab"                            | The callback came to a browser that did not start the sign-in, or to another address than the panel's. Start again from `KEERA_PUBLIC_URL`.  |
-| Signed in, but everything is read-only                         | You have the default role. Ask an administrator for `keera user role <you> admin`, or, if the provider has admin groups, to be added to one. |
-| The panel will not let anybody change a role                   | `KEERA_OIDC_<NAME>_ADMIN_GROUPS` is set on some provider, so the directory decides. Change the group, or unset it on every provider.         |
-| The panel refuses the operator role                            | It always does. `KEERA_OPERATORS` or `KEERA_OIDC_<NAME>_OPERATOR_GROUPS` grants it.                                                          |
-| "no organisation matches …"                                    | There are two or more organisations and none has your email domain. Set it, as above.                                                        |
-| "that email domain belongs to another organisation"            | Each domain belongs to one organisation. `keera org list` shows which; clear it there first.                                                 |
-| "cannot be used with … sign-in"                                | The provider is only allowed some domains (`KEERA_OIDC_<NAME>_DOMAINS`), and the address is at another. Sign in through its own provider.    |
-| "is not a verified address"                                    | The directory marks the email unverified (`email_verified` is false). Verify it there. A missing claim is accepted.                          |
-| "in too many groups"                                           | Entra group overage. Use app roles, or grant the role by address. See above.                                                                 |
-| "already belongs to an account linked to a different identity" | That address signed in first through another provider, or as someone else. See [One person, one provider](#one-person-one-provider).         |
-| Entra: "returned no email claim"                               | Add `email` as an optional ID-token claim on the app registration.                                                                           |
-| `keera login`: "has no identity provider configured"           | The gateway has none. Use `KEERA_OPERATOR_KEY`, or configure one as above.                                                                   |
-| `keera login`: "has to come back to a loopback address"        | The command line is older than the gateway, or something rewrote its redirect. Rebuild it.                                                   |
-| `keera login`: the browser signs in and nothing happens        | The browser is not on the same machine as the command, usually because of ssh. See above.                                                    |
-| A command says "your sign-in is no longer valid"               | It expired, a role change ended it, or someone ran `keera logout --all`. Run `keera login` again.                                            |
-| Entra: "did not match the issuer URL returned by provider"     | The issuer is `.../common/v2.0`, which answers discovery with a templated `{tenantid}` that matches nothing. Use the tenant ID.              |
-| Boot fails with "KEERA_PASSKEYS: passkeys need …"              | `KEERA_PUBLIC_URL` is unset, plain http on a name other than `localhost`, or an IP address. Browsers refuse passkeys there.                  |
-| "this set-up link has expired, was already used, or …"         | Links work once, for 24 hours, and a new one replaces the last. Ask for a new one: `keera user passkey-link <email>`.                        |
-| "a directory account does not get passkeys"                    | That person signs in through an identity provider. That is how leaving the directory locks them out.                                         |
-| "that passkey was not accepted"                                | The passkey was removed, belongs to a disabled person, or is for another host name. The gateway log says which.                              |
-| The browser says the passkey prompt failed with SecurityError  | The panel is open at an address other than `KEERA_PUBLIC_URL`, such as `127.0.0.1` instead of `localhost`.                                   |
+| Symptom                                                        | Cause                                                                                                                                                            |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gateway will not start, "discovering the identity provider"    | An issuer is wrong, or the container cannot reach it. The message names which one.                                                                               |
+| `redirect_uri_mismatch`                                        | The console URI and `<KEERA_PUBLIC_URL>/control/auth/callback` differ, often `127.0.0.1` against `localhost`.                                                    |
+| No sign-on button on the panel                                 | An issuer and a client ID are both needed; one is empty.                                                                                                         |
+| Boot fails asking for a client secret                          | An issuer and client ID are set without the secret. The message names the provider.                                                                              |
+| "a sign-in has to name one of…"                                | Several providers are configured and the link named none. Start from the panel, not the URL.                                                                     |
+| "started in another browser or tab"                            | The callback came to a browser that did not start the sign-in, or to another address than the panel's. Start again from `KEERA_PUBLIC_URL`.                      |
+| Signed in, but everything is read-only                         | You have the default role. Ask an administrator for `keera user role <you> admin`, or, if the provider has admin groups, to be added to one.                     |
+| The panel will not let anybody change a role                   | `KEERA_OIDC_<NAME>_ADMIN_GROUPS` is set on some provider, so the directory decides. Change the group, or unset it on every provider.                             |
+| The panel refuses the operator role                            | It always does. `KEERA_OPERATORS` or `KEERA_OIDC_<NAME>_OPERATOR_GROUPS` grants it.                                                                              |
+| "no organisation matches …"                                    | There are two or more organisations and none has your email domain. Set it, as above, or let people [sign up](#letting-people-sign-up).                          |
+| "SIGNUP and … ADMIN_GROUPS cannot both be set"                 | Sign-up makes the creator an administrator, and an admin group would take that away. Use one or the other.                                                       |
+| A request is refused with `org_limited`                        | The organisation signed up and has not paid yet. See [What a new organisation can use](#what-a-new-organisation-can-use).                                        |
+| "that email domain belongs to another organisation"            | Each domain belongs to one organisation. `keera org list` shows which; clear it there first.                                                                     |
+| "cannot be used with … sign-in"                                | The provider is only allowed some domains (`KEERA_OIDC_<NAME>_DOMAINS`), and the address is at another. Sign in through its own provider.                        |
+| "is not a verified address"                                    | The directory marks the email unverified (`email_verified` is false). Verify it there. A missing claim is accepted, except on a sign-up provider for any domain. |
+| "in too many groups"                                           | Entra group overage. Use app roles, or grant the role by address. See above.                                                                                     |
+| "already belongs to an account linked to a different identity" | That address signed in first through another provider, or as someone else. See [One person, one provider](#one-person-one-provider).                             |
+| Entra: "returned no email claim"                               | Add `email` as an optional ID-token claim on the app registration.                                                                                               |
+| `keera login`: "has no identity provider configured"           | The gateway has none. Use `KEERA_OPERATOR_KEY`, or configure one as above.                                                                                       |
+| `keera login`: "has to come back to a loopback address"        | The command line is older than the gateway, or something rewrote its redirect. Rebuild it.                                                                       |
+| `keera login`: the browser signs in and nothing happens        | The browser is not on the same machine as the command, usually because of ssh. See above.                                                                        |
+| A command says "your sign-in is no longer valid"               | It expired, a role change ended it, or someone ran `keera logout --all`. Run `keera login` again.                                                                |
+| Entra: "did not match the issuer URL returned by provider"     | The issuer is `.../common/v2.0`, which answers discovery with a templated `{tenantid}` that matches nothing. Use the tenant ID.                                  |
+| Boot fails with "KEERA_PASSKEYS: passkeys need …"              | `KEERA_PUBLIC_URL` is unset, plain http on a name other than `localhost`, or an IP address. Browsers refuse passkeys there.                                      |
+| "this set-up link has expired, was already used, or …"         | Links work once, for 24 hours, and a new one replaces the last. Ask for a new one: `keera user passkey-link <email>`.                                            |
+| "a directory account does not get passkeys"                    | That person signs in through an identity provider. That is how leaving the directory locks them out.                                                             |
+| "that passkey was not accepted"                                | The passkey was removed, belongs to a disabled person, or is for another host name. The gateway log says which.                                                  |
+| The browser says the passkey prompt failed with SecurityError  | The panel is open at an address other than `KEERA_PUBLIC_URL`, such as `127.0.0.1` instead of `localhost`.                                                       |

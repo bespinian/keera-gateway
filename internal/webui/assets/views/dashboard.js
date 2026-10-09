@@ -29,7 +29,7 @@ export async function dashboardView(ctx) {
     const setup = await api.setup(ctx.orgID).catch(() => null);
     if (setup && setup.requests === 0) {
       ctx.setSubtitle("First run");
-      return firstRun(ctx, setup);
+      return h("div", {}, limitedNote(ctx), firstRun(ctx, setup));
     }
   }
 
@@ -165,6 +165,7 @@ export async function dashboardView(ctx) {
   const wrap = h(
     "div",
     {},
+    limitedNote(ctx),
     header,
     tiles,
     h("div", { style: { marginTop: "16px" } }, chartCard),
@@ -192,6 +193,31 @@ export async function dashboardView(ctx) {
     );
   }
   return wrap;
+}
+
+// limitedNote says what an organisation that signed itself up cannot use
+// yet, and what changes that.
+function limitedNote(ctx) {
+  const me = ctx.state.me;
+  // Members meet it only as a refusal, which says the same.
+  if (!me.org_limited || ctx.orgID !== me.org_id || !isAdmin(ctx)) return null;
+  return h(
+    "div",
+    { class: "banner banner-info" },
+    "This organisation is new, so the models and MCP servers inside this " +
+      "deployment's network, and sandboxes, are not open to it yet. ",
+    me.payments
+      ? [
+          "They open with your first ",
+          h(
+            "a",
+            { href: "/billing", onClick: go(ctx, "/billing") },
+            "credit purchase",
+          ),
+          ".",
+        ]
+      : "An operator can open them for you.",
+  );
 }
 
 // failureLink is the failed count as the way in to the failures behind it: the

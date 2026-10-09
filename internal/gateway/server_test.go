@@ -107,15 +107,47 @@ func (f *fakeSource) Models(orgID string) []policy.Model {
 }
 
 type fakeBudgets struct {
-	err     error
-	mu      sync.Mutex
-	charged int64
+	err error
+	// creditErr is what AllowCredit answers, and credited what was taken
+	// from the credit.
+	creditErr error
+	mu        sync.Mutex
+	charged   int64
+	credited  int64
+	// held is what requests hold of the credit now, and mostHeld the most
+	// they ever held at once.
+	held, mostHeld int64
 	// spent is what Spent reports for every window, which is enough for the
 	// header assertions: what varies in them is the limit, not the ledger.
 	spent int64
 }
 
 func (f *fakeBudgets) Allow([]policy.Scope, time.Time) error { return f.err }
+
+func (f *fakeBudgets) AllowCredit(string) error { return f.creditErr }
+
+func (f *fakeBudgets) HoldCredit(_ string, micros int64) (int64, error) {
+	if f.creditErr != nil {
+		return 0, f.creditErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.held += micros
+	f.mostHeld = max(f.mostHeld, f.held)
+	return micros, nil
+}
+
+func (f *fakeBudgets) ReleaseCredit(_ string, micros int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.held -= micros
+}
+
+func (f *fakeBudgets) ChargeCredit(_ string, micros int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.credited += micros
+}
 
 func (f *fakeBudgets) Spent(policy.ScopeType, string, policy.Period, time.Time) int64 {
 	f.mu.Lock()
@@ -309,12 +341,11 @@ func sseBackend(chunks ...string) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		rc := http.NewResponseController(w)
-		for _, c := range chunks {
-			_, _ = io.WriteString(w, "data: "+c+"\n\n")
+		// One event at a time, as a backend streams them.
+		for ev := range strings.SplitAfterSeq(sseStream(chunks...), "\n\n") {
+			_, _ = io.WriteString(w, ev)
 			_ = rc.Flush()
 		}
-		_, _ = io.WriteString(w, "data: [DONE]\n\n")
-		_ = rc.Flush()
 	}
 }
 
@@ -1545,24 +1576,25 @@ func TestOverheadIsNotRecordedForARefusal(t *testing.T) {
 	}
 }
 
-// A provider that served part of the prompt from its own cache charges a
-// fraction of the input price for that part, and the row has to say the same
-// number its console will. Before the gateway read this field, a coding agent
-// resending a stable context every turn was billed several times over for it.
-func TestChatCompletionChargesTheCachedPartOfThePromptAtItsOwnRate(t *testing.T) {
+// A provider charges what it served from its prompt cache, and what it wrote
+// there, at their own rates. The row has to carry both counts, or it cannot
+// say the same number the provider's console will. The prices themselves are
+// tested in policy.
+func TestChatCompletionRecordsCacheReadsAndWrites(t *testing.T) {
 	models := map[string]policy.Model{
 		"keera-code": {
 			Alias: "keera-code", Kind: policy.KindChat, BackendModel: "served-name",
-			// 1.00 in, a tenth of that for what came out of the cache, 4.00 out.
+			// 1.00 in, 0.10 read from the cache, 1.25 written to it, 4.00 out.
 			InputMicrosPerMTok:       1_000_000,
 			CachedInputMicrosPerMTok: 100_000,
+			CacheWriteMicrosPerMTok:  1_250_000,
 			OutputMicrosPerMTok:      4_000_000,
 			MaxContext:               65536, Enabled: true,
 		},
 	}
 	h := newHarness(t, jsonBackend(`{"id":"1","choices":[{"message":{"content":"hi"}}],`+
 		`"usage":{"prompt_tokens":1000,"completion_tokens":500,"total_tokens":1500,`+
-		`"prompt_tokens_details":{"cached_tokens":900}}}`), models, nil)
+		`"prompt_tokens_details":{"cached_tokens":600,"cache_write_tokens":300}}}`), models, nil)
 
 	if resp := h.post(t, "/v1/chat/completions",
 		`{"model":"keera-code","messages":[]}`); resp.StatusCode != http.StatusOK {
@@ -1570,45 +1602,20 @@ func TestChatCompletionChargesTheCachedPartOfThePromptAtItsOwnRate(t *testing.T)
 	}
 
 	ev := h.sink.last(t)
-	// The prompt count stays the whole prompt: the cached part is a share of
-	// it, not a third column to be added to it.
-	if ev.InputTokens != 1000 || ev.CachedInputTokens != 900 || ev.OutputTokens != 500 {
-		t.Errorf("tokens = %d in (%d cached) / %d out, want 1000 (900) / 500",
-			ev.InputTokens, ev.CachedInputTokens, ev.OutputTokens)
+	// The prompt count stays the whole prompt: the cached and written parts
+	// are shares of it, not columns to be added to it.
+	if ev.InputTokens != 1000 || ev.CachedInputTokens != 600 || ev.CacheWriteTokens != 300 ||
+		ev.OutputTokens != 500 {
+		t.Errorf("tokens = %d in (%d read, %d written) / %d out, want 1000 (600, 300) / 500",
+			ev.InputTokens, ev.CachedInputTokens, ev.CacheWriteTokens, ev.OutputTokens)
 	}
-	// 100 in at 1.00/M, 900 cached at 0.10/M, 500 out at 4.00/M.
-	if want := int64(100 + 90 + 2000); ev.CostMicros != want {
+	// 100 in at 1.00/M, 600 read at 0.10/M, 300 written at 1.25/M, 500 out
+	// at 4.00/M.
+	if want := int64(100 + 60 + 375 + 2000); ev.CostMicros != want {
 		t.Errorf("cost = %d, want %d", ev.CostMicros, want)
-	}
-	// What the same request cost before the discount was read, which is the
-	// number this test exists to stop coming back.
-	if ev.CostMicros == int64(1000+2000) {
-		t.Error("the whole prompt was charged at the input price; the cached rate was ignored")
 	}
 	if h.budgets.total() != ev.CostMicros {
 		t.Errorf("charged %d against budgets, want %d", h.budgets.total(), ev.CostMicros)
-	}
-}
-
-// A model with no cached rate charges those tokens at the input price, so a
-// forgotten rate errs high.
-func TestChatCompletionChargesCachedTokensAtTheInputRateWhenNoneIsStated(t *testing.T) {
-	h := newHarness(t, jsonBackend(`{"id":"1","choices":[{"message":{"content":"hi"}}],`+
-		`"usage":{"prompt_tokens":1000,"completion_tokens":500,`+
-		`"prompt_tokens_details":{"cached_tokens":900}}}`), nil, nil)
-
-	if resp := h.post(t, "/v1/chat/completions",
-		`{"model":"keera-code","messages":[]}`); resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-
-	ev := h.sink.last(t)
-	if ev.CachedInputTokens != 900 {
-		t.Errorf("cached tokens = %d, want them recorded at 900 even unpriced",
-			ev.CachedInputTokens)
-	}
-	if want := int64(1000 + 2000); ev.CostMicros != want {
-		t.Errorf("cost = %d, want the full input price %d", ev.CostMicros, want)
 	}
 }
 

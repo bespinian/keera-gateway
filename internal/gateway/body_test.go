@@ -50,6 +50,52 @@ func TestParseBodyRejectsWhatIsNotARequest(t *testing.T) {
 	}
 }
 
+func TestParseBodyRefusesAReadKeyInOtherCase(t *testing.T) {
+	for _, in := range []string{
+		`{"model":"m","Messages":[]}`,
+		`{"messages":[],"MESSAGES":[]}`,
+		`{"model":"m","Max_Tokens":100000}`,
+		"{\"\u017fystem\":\"x\"}", // ſ folds like s
+	} {
+		if _, err := parseBody([]byte(in)); err == nil {
+			t.Errorf("parseBody(%s) accepted a key the gateway would not read", in)
+		}
+	}
+	// A key the gateway does not read is the client's own business.
+	if _, err := parseBody([]byte(`{"model":"m","chatTemplate":"x","Foo":1}`)); err != nil {
+		t.Errorf("parseBody refused a key it does not read: %v", err)
+	}
+}
+
+func TestEveryRequestFieldTheGatewayDecodesIsChecked(t *testing.T) {
+	// A field missing from readNames could be smuggled past the filters in
+	// other case, so a new field in a request struct must be added there too.
+	var walk func(reflect.Type)
+	walk = func(t2 reflect.Type) {
+		for t2.Kind() == reflect.Pointer || t2.Kind() == reflect.Slice {
+			t2 = t2.Elem()
+		}
+		if t2.Kind() != reflect.Struct {
+			return
+		}
+		for f := range t2.Fields() {
+			name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+			if name == "" || name == "-" {
+				continue
+			}
+			if readNames[foldKey(name)] != name {
+				t.Errorf("%s.%s is decoded as %q, which readNames does not list",
+					t2.Name(), f.Name, name)
+			}
+			walk(f.Type)
+		}
+	}
+	for _, v := range []any{anthropicRequest{}, anthropicBlock{}, responsesRequest{}, responsesItem{},
+		responsesPart{}} {
+		walk(reflect.TypeOf(v))
+	}
+}
+
 func TestBodyAccessors(t *testing.T) {
 	b, err := parseBody([]byte(`{"model":"m","stream":true,"max_tokens":128,"n":null}`))
 	if err != nil {

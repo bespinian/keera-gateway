@@ -52,7 +52,8 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 	}
 	out := []modelEntry{}
 	for _, m := range s.src.Models(res.Key.OrgID) {
-		if m.Enabled && res.MayUse(m) {
+		// A locked model would only refuse, so a client is not offered it.
+		if m.Enabled && !m.Locked && res.MayUse(m) {
 			out = append(out, modelEntryOf(m))
 		}
 	}

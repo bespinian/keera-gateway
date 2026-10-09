@@ -1,22 +1,54 @@
 package control
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bespinian/keera-gateway/internal/authn"
 	"github.com/bespinian/keera-gateway/internal/connect"
 	"github.com/bespinian/keera-gateway/internal/gateway"
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/metrics"
+	"github.com/bespinian/keera-gateway/internal/store"
 )
 
 const testOperatorKey = "an-operator-key-long-enough-to-be-real"
+
+// testStore opens the database in KEERA_TEST_DATABASE_URL, or skips the test
+// without one. It empties the request log, spend, every organisation and the
+// tables named, so a test starts from nothing it did not write.
+func testStore(t *testing.T, tables ...string) (*store.Store, context.Context) {
+	t.Helper()
+	dsn := os.Getenv("KEERA_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set KEERA_TEST_DATABASE_URL to run the control-plane tests that need one")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	t.Cleanup(cancel)
+
+	st, err := store.Open(ctx, dsn, 8)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(st.Close)
+	if _, err := st.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	all := append([]string{"usage_events", "spend", "orgs"}, tables...)
+	if _, err := st.Pool().Exec(ctx,
+		"TRUNCATE "+strings.Join(all, ", ")+" RESTART IDENTITY CASCADE"); err != nil {
+		t.Fatalf("truncate: %v", err)
+	}
+	return st, ctx
+}
 
 // newServer builds a control server with no store behind it. That is enough to
 // exercise the credential and CSRF paths, which decide whether a request ever

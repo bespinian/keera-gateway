@@ -42,7 +42,8 @@ Every other setting is in docs/install.md.
 A hosted model's API key is set on the model - in the control panel, or with
 'keera model set <alias> --api-key @-', which reads it from stdin rather than a
 shell history - and stored encrypted with KEERA_SECRET_KEY. See
-docs/providers.md.
+docs/providers.md. KEERA_PROVIDER_<NAME>_API_KEY sets the deployment's own key
+for a provider instead, and bills its use. See docs/billing.md.
 `
 
 // Run dispatches one invocation. It returns an error rather than exiting, so

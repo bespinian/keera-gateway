@@ -4,13 +4,16 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
@@ -32,8 +35,14 @@ type Event struct {
 	// prompt cache at a lower price. It lets a row be checked against an
 	// invoice. Zero for self-hosted models, which cache nothing.
 	CachedInputTokens int
-	OutputTokens      int
-	CostMicros        int64
+	// CacheWriteTokens is the part of InputTokens the provider wrote to its
+	// prompt cache, which some charge more for.
+	CacheWriteTokens int
+	// CacheWriteHourTokens is the part of CacheWriteTokens kept for an hour.
+	// It is not stored: it only prices the request.
+	CacheWriteHourTokens int
+	OutputTokens         int
+	CostMicros           int64
 	// ListCostMicros is what a request a subscription paid for would have
 	// cost at the model's API prices. No budget is charged it.
 	ListCostMicros int64
@@ -72,28 +81,95 @@ type Event struct {
 	// Tool is set on a tool call through the MCP proxy. The event is then
 	// written to tool_calls rather than usage_events. See mcp.go.
 	Tool *ToolCall
+	// Bills is every call this event made to a model on the deployment's
+	// own provider key. Each is a row in billing_lines.
+	Bills []policy.BillLine
+	// BillsOnly is a check's calls: billed, but not a request, so no usage
+	// row is written for it.
+	BillsOnly bool
 }
 
 // maxErrorBytes bounds the message kept on a usage row. Upstreams may answer
 // with a stack trace or the whole prompt, and a reader only needs the start.
 const maxErrorBytes = 1000
 
+// LostEvents is what WriteEvents returns when Postgres refused some events
+// even on their own. The others were written.
+type LostEvents struct {
+	N   int
+	Err error
+}
+
+func (e *LostEvents) Error() string {
+	return fmt.Sprintf("%d usage events could not be written: %v", e.N, e.Err)
+}
+
+func (e *LostEvents) Unwrap() error { return e.Err }
+
 // WriteEvents inserts a batch of usage events and their filter runs, adds
 // their cost to the spend roll-up, and announces that the log has grown, all
 // in one round trip. pg_notify with no listener does nothing.
 //
-// Spend is summed per window here rather than upserted per event. A batch has
-// hundreds of events but touches only a few spend rows, and one upsert per
-// event held locks on those busy rows until the batch committed.
+// A batch is one transaction, so a single row Postgres refuses would lose
+// every other request's usage and bills with it. When Postgres refuses a
+// batch, nothing of it was written, so each event is written again on its
+// own. An event refused on its own still has its bills written, without its
+// usage row.
 func (s *Store) WriteEvents(ctx context.Context, events []Event) error {
 	if len(events) == 0 {
 		return nil
 	}
+	for i := range events {
+		events[i].clean()
+	}
+	err := s.writeBatch(ctx, events)
+	if !refused(err) {
+		return err
+	}
+	lost := &LostEvents{Err: err}
+	for _, e := range events {
+		err := s.writeBatch(ctx, []Event{e})
+		if !refused(err) {
+			if err != nil {
+				return err
+			}
+			continue
+		}
+		lost.N++
+		if len(e.Bills) > 0 && !e.BillsOnly {
+			e.BillsOnly, e.Plan = true, nil
+			if err := s.writeBatch(ctx, []Event{e}); err != nil && !refused(err) {
+				return err
+			}
+		}
+	}
+	if lost.N > 0 {
+		return lost
+	}
+	return nil
+}
+
+// refused reports whether Postgres itself refused a write. A batch is one
+// transaction, so nothing of a refused one was written.
+func refused(err error) bool {
+	_, ok := errors.AsType[*pgconn.PgError](err)
+	return ok
+}
+
+// writeBatch writes events in one round trip.
+//
+// Spend is summed per window here rather than upserted per event. A batch has
+// hundreds of events but touches only a few spend rows, and one upsert per
+// event held locks on those busy rows until the batch committed.
+func (s *Store) writeBatch(ctx context.Context, events []Event) error {
 	batch := &pgx.Batch{}
 	spend := make(map[spendKey]int64)
 	plans := make(map[string]policy.PlanUsage)
 	for _, e := range events {
-		queueEvent(batch, e)
+		if !e.BillsOnly {
+			queueEvent(batch, e)
+		}
+		queueBills(batch, e)
 		if e.Plan != nil && e.KeyID != "" && !e.Plan.UpdatedAt.Before(plans[e.KeyID].UpdatedAt) {
 			plans[e.KeyID] = *e.Plan
 		}
@@ -111,9 +187,43 @@ func (s *Store) WriteEvents(ctx context.Context, events []Event) error {
 			DO UPDATE SET micros = spend.micros + EXCLUDED.micros`,
 			string(k.scopeType), k.scopeID, string(k.period), k.start, spend[k])
 	}
+	queueCredit(batch, events)
 	queuePlans(batch, plans)
 	batch.Queue("SELECT pg_notify($1, '')", EventsChannel)
 	return s.pool.SendBatch(ctx, batch).Close()
+}
+
+// clean makes every text an event carries fit for Postgres, which refuses a
+// NUL byte or invalid UTF-8 in text and JSON. Much of it is what a client or
+// an upstream sent, such as the model name or an error message.
+func (e *Event) clean() {
+	for _, s := range []*string{&e.Alias, &e.Client, &e.Error, &e.SessionKey, &e.Router} {
+		*s = cleanText(*s)
+	}
+	if e.Tool != nil {
+		e.Tool.Server, e.Tool.Tool = cleanText(e.Tool.Server), cleanText(e.Tool.Tool)
+	}
+	for i := range e.FilterRuns {
+		e.FilterRuns[i].Filter = cleanText(e.FilterRuns[i].Filter)
+	}
+	for i := range e.Spans {
+		e.Spans[i].Of, e.Spans[i].Note = cleanText(e.Spans[i].Of), cleanText(e.Spans[i].Note)
+	}
+	for i := range e.Bills {
+		e.Bills[i].Alias = cleanText(e.Bills[i].Alias)
+		e.Bills[i].BackendModel = cleanText(e.Bills[i].BackendModel)
+	}
+}
+
+// cleanText drops NUL bytes and replaces invalid UTF-8.
+func cleanText(s string) string {
+	if strings.IndexByte(s, 0) >= 0 {
+		s = strings.ReplaceAll(s, "\x00", "")
+	}
+	if !utf8.ValidString(s) {
+		s = strings.ToValidUTF8(s, "�")
+	}
+	return s
 }
 
 // queueEvent adds one event's usage row and its filter runs to the batch.
@@ -123,14 +233,15 @@ func queueEvent(batch *pgx.Batch, e Event) {
 		return
 	}
 	batch.Queue(`INSERT INTO usage_events (ts, org_id, project_id, user_id, key_id, alias,
-		client, input_tokens, cached_input_tokens, output_tokens, cost_micros, list_cost_micros,
-		status, latency_ms, ttft_ms, stream, estimated, canceled, error, session_key, router,
-		router_outcome, router_ms, spans)
+		client, input_tokens, cached_input_tokens, cache_write_tokens, output_tokens, cost_micros,
+		list_cost_micros, status, latency_ms, ttft_ms, stream, estimated, canceled, error,
+		session_key, router, router_outcome, router_ms, spans)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
-		$22,$23,$24)`,
+		$22,$23,$24,$25)`,
 		e.TS, e.OrgID, nullable(e.ProjectID), nullable(e.UserID), nullable(e.KeyID), e.Alias,
 		nullable(e.Client),
-		e.InputTokens, e.CachedInputTokens, e.OutputTokens, e.CostMicros, e.ListCostMicros,
+		e.InputTokens, e.CachedInputTokens, e.CacheWriteTokens, e.OutputTokens, e.CostMicros,
+		e.ListCostMicros,
 		e.Status,
 		e.Latency.Milliseconds(), e.TTFT.Milliseconds(), e.Stream, e.Estimated, e.Canceled,
 		nullable(truncate(e.Error, maxErrorBytes)), nullable(e.SessionKey),
@@ -214,18 +325,16 @@ type SpendRow struct {
 // LoadSpend reads every spend row for the currently open day and month
 // windows. The gateway refreshes its budget view from this.
 func (s *Store) LoadSpend(ctx context.Context, now time.Time) ([]SpendRow, error) {
-	rows, err := s.pool.Query(ctx, `SELECT scope_type, scope_id, period, period_start, micros
+	return queryAll(ctx, s.pool, scanSpendRow, `SELECT scope_type, scope_id, period, period_start, micros
 		FROM spend WHERE (period = 'day' AND period_start = $1)
 		           OR (period = 'month' AND period_start = $2)`,
 		policy.PeriodDay.Start(now), policy.PeriodMonth.Start(now))
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, func(r row) (SpendRow, error) {
-		var sr SpendRow
-		err := r.Scan(&sr.ScopeType, &sr.ScopeID, &sr.Period, &sr.PeriodStart, &sr.Micros)
-		return sr, err
-	})
+}
+
+func scanSpendRow(r row) (SpendRow, error) {
+	var sr SpendRow
+	err := r.Scan(&sr.ScopeType, &sr.ScopeID, &sr.Period, &sr.PeriodStart, &sr.Micros)
+	return sr, err
 }
 
 // UsageBucket is one row of an aggregated usage report.
@@ -353,16 +462,14 @@ func (s *Store) Usage(ctx context.Context, q UsageQuery) ([]UsageBucket, error) 
 		WHERE ts >= $1 AND ts < $2 AND ($3 = '' OR org_id = $3)` +
 		q.narrow("", 3) + `
 		GROUP BY ` + group + having + ` ORDER BY ` + order
-	rows, err := s.pool.Query(ctx, sql, append([]any{q.From, q.To, q.OrgID}, q.args()...)...)
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, func(r row) (UsageBucket, error) {
-		var b UsageBucket
-		err := r.Scan(&b.Group, &b.OrgID, &b.Requests, &b.InputTokens, &b.OutputTokens,
-			&b.CostMicros, &b.SubscriptionMicros)
-		return b, err
-	})
+	return queryAll(ctx, s.pool, scanUsageBucket, sql, append([]any{q.From, q.To, q.OrgID}, q.args()...)...)
+}
+
+func scanUsageBucket(r row) (UsageBucket, error) {
+	var b UsageBucket
+	err := r.Scan(&b.Group, &b.OrgID, &b.Requests, &b.InputTokens, &b.OutputTokens,
+		&b.CostMicros, &b.SubscriptionMicros)
+	return b, err
 }
 
 // Audit appends one control-plane action to the audit log. The gateway path
@@ -416,7 +523,7 @@ type AuditQuery struct {
 // else sees only their own organisation's entries.
 func (s *Store) ListAudit(ctx context.Context, q AuditQuery) ([]AuditEntry, error) {
 	q.Limit = pageLimit(q.Limit, 100, 5000)
-	rows, err := s.pool.Query(ctx, `SELECT id, ts, actor, action, COALESCE(target_type,''),
+	return queryAll(ctx, s.pool, scanAuditEntry, `SELECT id, ts, actor, action, COALESCE(target_type,''),
 		COALESCE(target_id,''), detail FROM audit_log
 		WHERE ($1 = '' OR org_id = $1)
 		  AND ($2 = '' OR actor = $2)
@@ -426,14 +533,12 @@ func (s *Store) ListAudit(ctx context.Context, q AuditQuery) ([]AuditEntry, erro
 		  AND ($6 = 0 OR id < $6)
 		ORDER BY id DESC LIMIT $7`,
 		q.OrgID, q.Actor, q.Action, nullableTime(q.From), nullableTime(q.To), q.Before, q.Limit)
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, func(r row) (AuditEntry, error) {
-		var a AuditEntry
-		err := r.Scan(&a.ID, &a.TS, &a.Actor, &a.Action, &a.TargetType, &a.TargetID, &a.Detail)
-		return a, err
-	})
+}
+
+func scanAuditEntry(r row) (AuditEntry, error) {
+	var a AuditEntry
+	err := r.Scan(&a.ID, &a.TS, &a.Actor, &a.Action, &a.TargetType, &a.TargetID, &a.Detail)
+	return a, err
 }
 
 // AuditFacets is what the log can be filtered by: the actions and actors that

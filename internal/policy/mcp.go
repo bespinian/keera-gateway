@@ -29,7 +29,11 @@ type MCPServer struct {
 	// HasAPIKey tells the control panel a credential is stored, and nothing
 	// more about it.
 	HasAPIKey bool `json:"has_api_key,omitempty"`
-	Enabled   bool `json:"enabled"`
+	// Limited and Locked are a model's, for an MCP server: the organisation
+	// has not paid yet, and the server is inside the deployment's network.
+	Limited bool `json:"-"`
+	Locked  bool `json:"-"`
+	Enabled bool `json:"enabled"`
 }
 
 // maxToolNameLen is the longest tool name MCP allows.

@@ -36,11 +36,7 @@ type passkeyEnv struct {
 
 func newPasskeyEnv(t *testing.T, domain string) *passkeyEnv {
 	t.Helper()
-	st, ctx := streamStore(t)
-	if _, err := st.Pool().Exec(ctx,
-		"TRUNCATE users, sessions, login_flows, cli_codes, cli_tokens RESTART IDENTITY CASCADE"); err != nil {
-		t.Fatal(err)
-	}
+	st, ctx := testStore(t, "users", "sessions", "login_flows", "cli_codes", "cli_tokens")
 	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_1", Name: "Example Bank", EmailDomain: domain},
 		store.OrgTemplate{}); err != nil {
 		t.Fatal(err)
@@ -124,15 +120,15 @@ func decode[T any](t *testing.T, v any) T {
 	return out
 }
 
-// createPasskeyAccount adds a person as the operator and returns the token of
-// their set-up link.
-func (e *passkeyEnv) createPasskeyAccount(email string) (string, string) {
+// createPasskeyAccount adds ada@example.ch as the operator and returns her id
+// and the token of her set-up link.
+func (e *passkeyEnv) createPasskeyAccount() (string, string) {
 	e.t.Helper()
 	status, out := e.browser().do("POST", "/v1/users", map[string]string{
-		"org_id": "org_1", "email": email, "sign_in": "passkey",
+		"org_id": "org_1", "email": "ada@example.ch", "sign_in": "passkey",
 	}, "operator")
 	if status != http.StatusCreated {
-		e.t.Fatalf("creating %s: %d %v", email, status, out)
+		e.t.Fatalf("creating the account: %d %v", status, out)
 	}
 	link := decode[passkeyLinkOut](e.t, out["passkey_link"])
 	prefix := passkeyOrigin + "/#passkey-setup="
@@ -195,7 +191,7 @@ func mustDecode(t *testing.T, s string) string {
 
 func TestAPasskeyAccountSetsUpAndSignsIn(t *testing.T) {
 	e := newPasskeyEnv(t, "")
-	userID, token := e.createPasskeyAccount("ada@example.ch")
+	userID, token := e.createPasskeyAccount()
 	a := passkeytest.New(passkeyOrigin, "localhost")
 
 	b, status, out := e.setUp(token, a)
@@ -233,7 +229,7 @@ func TestAPasskeyAccountSetsUpAndSignsIn(t *testing.T) {
 
 func TestASecondPasskeyIsAddedWhileSignedIn(t *testing.T) {
 	e := newPasskeyEnv(t, "")
-	_, token := e.createPasskeyAccount("ada@example.ch")
+	_, token := e.createPasskeyAccount()
 	first := passkeytest.New(passkeyOrigin, "localhost")
 	b, status, out := e.setUp(token, first)
 	if status != http.StatusOK {
@@ -283,7 +279,7 @@ func TestASecondPasskeyIsAddedWhileSignedIn(t *testing.T) {
 // operator role, whatever is stored.
 func TestAPasskeySignInDropsTheOperatorRole(t *testing.T) {
 	e := newPasskeyEnv(t, "")
-	userID, token := e.createPasskeyAccount("ada@example.ch")
+	userID, token := e.createPasskeyAccount()
 	a := passkeytest.New(passkeyOrigin, "localhost")
 	if _, status, out := e.setUp(token, a); status != http.StatusOK {
 		t.Fatalf("set-up: %d %v", status, out)
@@ -357,7 +353,7 @@ func TestAnAdministratorKeepsToTheirDomain(t *testing.T) {
 // to a page of this gateway.
 func TestAPasskeySignInGoesOnToWhereThePersonWasGoing(t *testing.T) {
 	e := newPasskeyEnv(t, "")
-	_, token := e.createPasskeyAccount("ada@example.ch")
+	_, token := e.createPasskeyAccount()
 	a := passkeytest.New(passkeyOrigin, "localhost")
 	if _, status, out := e.setUp(token, a); status != http.StatusOK {
 		t.Fatalf("set-up: %d %v", status, out)
@@ -376,7 +372,7 @@ func TestAPasskeySignInGoesOnToWhereThePersonWasGoing(t *testing.T) {
 
 func TestADisabledPersonCannotSignInWithAPasskey(t *testing.T) {
 	e := newPasskeyEnv(t, "")
-	userID, token := e.createPasskeyAccount("ada@example.ch")
+	userID, token := e.createPasskeyAccount()
 	a := passkeytest.New(passkeyOrigin, "localhost")
 	if _, status, out := e.setUp(token, a); status != http.StatusOK {
 		t.Fatalf("set-up: %d %v", status, out)
@@ -398,7 +394,7 @@ func TestADisabledPersonCannotSignInWithAPasskey(t *testing.T) {
 
 func TestTheCommandLineSignsInWithAPasskey(t *testing.T) {
 	e := newPasskeyEnv(t, "")
-	_, token := e.createPasskeyAccount("ada@example.ch")
+	_, token := e.createPasskeyAccount()
 	a := passkeytest.New(passkeyOrigin, "localhost")
 	if _, status, out := e.setUp(token, a); status != http.StatusOK {
 		t.Fatalf("set-up: %d %v", status, out)
@@ -460,7 +456,7 @@ func TestThePasskeyRoutesTakeOnlyJSON(t *testing.T) {
 // sign-in: not an old session, and not a command-line token.
 func TestAddingAPasskeyNeedsARecentBrowserSignIn(t *testing.T) {
 	e := newPasskeyEnv(t, "")
-	userID, token := e.createPasskeyAccount("ada@example.ch")
+	userID, token := e.createPasskeyAccount()
 	b, status, out := e.setUp(token, passkeytest.New(passkeyOrigin, "localhost"))
 	if status != http.StatusOK {
 		t.Fatalf("set-up: %d %v", status, out)

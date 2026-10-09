@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -12,12 +13,13 @@ import (
 )
 
 // sizeRouter places between the two destinations the router harness serves,
-// with the small one bounded and the large one taking whatever is above it.
-func sizeRouter(ceiling int) policy.Router {
+// with the small one bounded at 100 tokens and the large one taking whatever is
+// above it.
+func sizeRouter() policy.Router {
 	return policy.Router{
 		OrgID: "org_1", Alias: "bysize", Mode: policy.RouterModeSize,
 		Destinations: []string{"keera-small", "keera-large"},
-		Ceilings:     map[string]int{"keera-small": ceiling},
+		Ceilings:     map[string]int{"keera-small": 100},
 	}
 }
 
@@ -38,7 +40,7 @@ func ofTokens(t *testing.T, n int) string {
 }
 
 func TestSizeRouterPlacesASmallRequestOnTheSmallModel(t *testing.T) {
-	h := routerHarness(t, picks(""), sizeRouter(100), nil)
+	h := routerHarness(t, picks(""), sizeRouter(), nil)
 
 	resp := h.post(t, "/v1/chat/completions", ofTokens(t, 10))
 	if resp.StatusCode != http.StatusOK {
@@ -64,7 +66,7 @@ func TestSizeRouterPlacesASmallRequestOnTheSmallModel(t *testing.T) {
 }
 
 func TestSizeRouterPlacesALargeRequestAboveTheCeiling(t *testing.T) {
-	h := routerHarness(t, picks(""), sizeRouter(100), nil)
+	h := routerHarness(t, picks(""), sizeRouter(), nil)
 
 	resp := h.post(t, "/v1/chat/completions", ofTokens(t, 500))
 	if resp.StatusCode != http.StatusOK {
@@ -79,7 +81,7 @@ func TestSizeRouterCannotBeTalkedIntoADestination(t *testing.T) {
 	// The claim that separates this mode from an instruction router. A prompt
 	// naming the model it wants is a prompt a few words longer, and nothing
 	// else.
-	h := routerHarness(t, picks(""), sizeRouter(100), nil)
+	h := routerHarness(t, picks(""), sizeRouter(), nil)
 
 	resp := h.post(t, "/v1/chat/completions",
 		`{"model":"bysize","messages":[{"role":"user","content":`+
@@ -96,7 +98,7 @@ func TestSizeRouterFallsThroughToTheNextDestinationUp(t *testing.T) {
 	// The preferred destination being down must not refuse the request. More
 	// model than it needed is a price; no answer at all is a department
 	// offline.
-	h := routerHarness(t, picks(""), sizeRouter(100), nil)
+	h := routerHarness(t, picks(""), sizeRouter(), nil)
 	m := h.src.models["keera-small"]
 	m.Enabled = false
 	h.src.models["keera-small"] = m
@@ -135,7 +137,7 @@ func TestSizeRouterRanksADestinationThatCannotHoldItLast(t *testing.T) {
 }
 
 func TestSizeRouterRefusesWhenNoDestinationCanBeServed(t *testing.T) {
-	h := routerHarness(t, picks(""), sizeRouter(100), nil)
+	h := routerHarness(t, picks(""), sizeRouter(), nil)
 	for _, alias := range []string{"keera-small", "keera-large"} {
 		m := h.src.models[alias]
 		m.Enabled = false
@@ -157,7 +159,7 @@ func TestSizeRouterAllowsItsDestinationsLikeAnyOther(t *testing.T) {
 	// different: a key narrowed to it has nothing else in its allow-list.
 	res := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"},
 		&policy.Limits{AllowedModels: []string{"bysize"}}, nil, nil)
-	h := routerHarness(t, picks(""), sizeRouter(100), res)
+	h := routerHarness(t, picks(""), sizeRouter(), res)
 
 	resp := h.post(t, "/v1/chat/completions", ofTokens(t, 10))
 	if resp.StatusCode != http.StatusOK {
@@ -210,7 +212,7 @@ func TestSizeBandsCallOutADestinationNothingReaches(t *testing.T) {
 	}
 
 	warnings := sizeWarnings(rt, bands, nil)
-	if !containsText(warnings, "never the first choice") {
+	if !anyContains(warnings, "never the first choice") {
 		t.Errorf("warnings = %q, want the unreachable destination called out", warnings)
 	}
 }
@@ -223,7 +225,7 @@ func TestSizeWarningsCatchACeilingLargerThanTheContext(t *testing.T) {
 	models := map[string]policy.Model{"small": {Alias: "small", MaxContext: 8192}}
 	warnings := sizeWarnings(rt, sizeBands(rt, rt.Destinations), models)
 
-	if !containsText(warnings, "its context holds") {
+	if !anyContains(warnings, "its context holds") {
 		t.Errorf("warnings = %q, want the ceiling compared against the context", warnings)
 	}
 }
@@ -231,7 +233,7 @@ func TestSizeWarningsCatchACeilingLargerThanTheContext(t *testing.T) {
 func TestSizeWarningsCatchARouterThatSortsNothing(t *testing.T) {
 	rt := policy.Router{Destinations: []string{"only"}}
 	warnings := sizeWarnings(rt, sizeBands(rt, rt.Destinations), nil)
-	if !containsText(warnings, "same destination whatever its size") {
+	if !anyContains(warnings, "same destination whatever its size") {
 		t.Errorf("warnings = %q, want a router that places everything on one model "+
 			"called out", warnings)
 	}
@@ -246,11 +248,7 @@ func TestEstimateTokensCountsOnlyTheText(t *testing.T) {
 	}
 }
 
-func containsText(list []string, want string) bool {
-	for _, s := range list {
-		if strings.Contains(s, want) {
-			return true
-		}
-	}
-	return false
+// anyContains reports whether any string in list contains want.
+func anyContains(list []string, want string) bool {
+	return slices.ContainsFunc(list, func(s string) bool { return strings.Contains(s, want) })
 }

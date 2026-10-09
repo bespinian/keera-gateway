@@ -22,6 +22,7 @@ import (
 
 	"github.com/bespinian/keera-gateway/internal/auth"
 	"github.com/bespinian/keera-gateway/internal/authn"
+	"github.com/bespinian/keera-gateway/internal/catalog"
 	"github.com/bespinian/keera-gateway/internal/gateway"
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/metrics"
@@ -73,6 +74,18 @@ type Options struct {
 	// Template is what every new organisation starts with, from
 	// KEERA_MODELS_FILE and KEERA_SANDBOXES_FILE.
 	Template store.OrgTemplate
+	// SandboxImages are the image prefixes an administrator may give a class,
+	// besides the template's images. See mayUseImage.
+	SandboxImages []string
+	// Platform is the deployment's own provider keys. A model they cover
+	// takes no key of its own, and is billed.
+	Platform catalog.Platform
+	// Payments takes payments for those keys in advance. Nil means
+	// organisations do not pay in advance.
+	Payments *Payments
+	// ClaudeSubscriptions allows subscription models and keys. Off, neither
+	// can be created, and the gateway refuses the ones already there.
+	ClaudeSubscriptions bool
 }
 
 // handler is a route that has already been authenticated.
@@ -169,6 +182,16 @@ func (s *Server) Handler() http.Handler {
 		s.throttle("passkey_setup_options", signInRPM, signInThrottled, s.passkeySetupOptions))
 	mux.Handle("POST "+httpx.ControlPrefix+"/auth/passkey/setup",
 		s.throttle("passkey_setup", signInRPM, signInThrottled, s.passkeySetup))
+	// The sign-up screen, after a sign-in that matched no organisation.
+	mux.Handle("GET "+httpx.ControlPrefix+"/auth/signup",
+		s.throttle("signup_info", signInRPM, signInThrottled, s.signupInfo))
+	mux.Handle("POST "+httpx.ControlPrefix+"/auth/signup",
+		s.throttle("signup", signInRPM, signInThrottled, s.completeSignup))
+	// PostFinance Checkout saying a transaction changed. It proves nothing, so
+	// it is only a reason to read the transaction back; see payments.go.
+	mux.Handle("POST "+httpx.ControlPrefix+"/billing/postfinance",
+		s.throttle("postfinance", webhookRPM, "too many webhook calls from this address",
+			s.postFinanceWebhook))
 	route("POST /auth/logout", s.logout)
 
 	route("GET /v1/me", s.me)
@@ -245,6 +268,14 @@ func (s *Server) Handler() http.Handler {
 	route("GET /v1/overview", s.overview)
 	route("GET /v1/map", s.trafficMap)
 	route("GET /v1/usage", s.usage)
+	route("GET /v1/billing", s.billing)
+	// Credit paid in advance for the deployment's provider keys.
+	route("GET /v1/billing/account", s.creditAccount)
+	route("PATCH /v1/billing/account", s.updateCreditAccount)
+	route("DELETE /v1/billing/account/card", s.forgetCard)
+	route("POST /v1/billing/topups", s.createTopUp)
+	route("GET /v1/billing/payments", s.listPayments)
+	route("POST /v1/billing/grants", s.grantCredit)
 	route("GET /v1/audit", s.audit)
 	route("GET /v1/requests", s.requests)
 	// The request log grouped into tasks. A session is named by the id of any
@@ -324,6 +355,8 @@ func safeMethod(m string) bool {
 const (
 	signInRPM = 10
 	flowRPM   = 30
+	// webhookRPM is far above what one payment provider sends.
+	webhookRPM = 600
 )
 
 // BucketIdle is how long a rate-limit bucket outlives its last use. The

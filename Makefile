@@ -247,8 +247,22 @@ TIER ?= cpu
 DEV_COMPOSE := -f compose/compose.yaml \
 	$(if $(filter gpu,$(TIER)),-f compose/compose.gpu.yaml) -f compose/compose.dev.yaml
 
+# The development catalogue is compose/models.yaml with the backend on
+# loopback: keera-engine resolves only inside the compose network, and here the
+# gateway runs on the host. `make dev` and `podman compose up` share one
+# database, so an organisation made under one keeps that one's address.
+DEV_MODELS := $(BUILD_DIR)/models.dev.yaml
+
+$(DEV_MODELS): compose/models.yaml
+	@mkdir -p $(@D)
+	@sed 's|http://keera-engine:8000/v1|http://127.0.0.1:8000/v1|' $< > $@.tmp
+	@grep -q 'http://127.0.0.1:8000/v1' $@.tmp || { \
+		echo "$< no longer names http://keera-engine:8000/v1; update DEV_MODELS in the Makefile" >&2; \
+		rm -f $@.tmp; exit 1; }
+	@mv $@.tmp $@
+
 .PHONY: dev
-dev: dev-env dev-backends
+dev: dev-env dev-backends $(DEV_MODELS)
 	@command -v $(AIR) >/dev/null 2>&1 || { \
 		echo "air is not on PATH. Install it with:"; \
 		echo "  go install github.com/air-verse/air@latest"; \
@@ -268,10 +282,10 @@ dev: dev-env dev-backends
 	@# DefaultUpstreamDeny in internal/gateway/egress.go.
 	@set -a; . ./$(DEV_ENV); set +a; \
 		KEERA_DATABASE_URL='postgres://keera:keera@127.0.0.1:5432/keera?sslmode=disable' \
-		KEERA_MODELS_FILE="$${KEERA_MODELS_FILE:-compose/models.dev.yaml}" \
+		KEERA_MODELS_FILE="$${KEERA_MODELS_FILE:-$(DEV_MODELS)}" \
 		KEERA_SANDBOXES_FILE="$${KEERA_SANDBOXES_FILE:-compose/sandboxes.yaml}" \
 		KEERA_SANDBOX_PUBLIC_URL="$${KEERA_SANDBOX_DRIVER:+$${KEERA_SANDBOX_PUBLIC_URL:-http://host.containers.internal:8080}}" \
-		KEERA_UPSTREAM_DENY="$${KEERA_UPSTREAM_DENY:-169.254.0.0/16,fe80::/10,0.0.0.0/8,::/128,fd00:ec2::254/128}" \
+		KEERA_UPSTREAM_DENY="$${KEERA_UPSTREAM_DENY:-169.254.0.0/16,fe80::/10,0.0.0.0/8,::/128,fd00:ec2::254/128,100.100.100.200/32,168.63.129.16/32}" \
 		KEERA_LOG_FORMAT=text KEERA_LOG_LEVEL=debug \
 		$(AIR)
 

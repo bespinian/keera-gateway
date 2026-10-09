@@ -100,6 +100,14 @@ type Model struct {
 	// coding agent's prompt is mostly cached, so charging the full input price
 	// overstates cost a lot. Zero means "not stated": see cachedInputMicros.
 	CachedInputMicrosPerMTok int64 `json:"cached_input_micros_per_mtok"`
+	// CacheWriteMicrosPerMTok is the price of an input token the provider
+	// wrote to its prompt cache, which Anthropic and OpenAI charge more for.
+	// Zero means the input price: see cacheWriteMicros.
+	CacheWriteMicrosPerMTok int64 `json:"cache_write_micros_per_mtok"`
+	// LongPrompt prices a request whose prompt is longer than its threshold,
+	// for a provider that charges more for one, as Anthropic does for
+	// claude-haiku-5-5. Nil means one price for every length.
+	LongPrompt *PriceTier `json:"long_prompt,omitempty"`
 	// MaxContext is advertised on /v1/models, and a request that cannot fit in
 	// it is refused. Without the tokeniser the check counts the least a request
 	// can be, so a request near the limit is left to the inference plane.
@@ -125,7 +133,22 @@ type Model struct {
 	// own, and the prices only say what the request would cost on the API.
 	// See docs/subscriptions.md.
 	Subscription bool `json:"subscription,omitempty"`
-	Enabled      bool `json:"enabled"`
+	// PlatformKey says the deployment holds the key for this model's
+	// provider, so the organisation sets none. The model is then sent to the
+	// provider's own endpoint at its list prices, and billed. See
+	// docs/billing.md.
+	PlatformKey bool `json:"platform_key,omitempty"`
+	// Billing is how a model on the deployment's key is billed. The registry
+	// sets it, and it never leaves the gateway: it holds the discount.
+	Billing *Billing `json:"-"`
+	// Limited says the organisation signed itself up and has not paid yet.
+	// The gateway then connects only to public addresses for it. Locked says
+	// it may not use this model at all yet: the model runs inside the
+	// deployment's network, or would be billed after the fact. The registry
+	// sets both. See docs/sso.md.
+	Limited bool `json:"-"`
+	Locked  bool `json:"-"`
+	Enabled bool `json:"enabled"`
 }
 
 // Key names the model across every tenant: its organisation and its alias.
@@ -136,19 +159,76 @@ func (m Model) Key() string { return ModelKey(m.OrgID, m.Alias) }
 // ModelKey is Key for a model known only by its organisation and alias.
 func ModelKey(orgID, alias string) string { return orgID + "/" + alias }
 
+// Tokens is what one answer used, as the provider reported it.
+type Tokens struct {
+	Input int
+	// CachedInput and CacheWrite are parts of Input, not added to it: that is
+	// how providers report them.
+	CachedInput int
+	CacheWrite  int
+	// CacheWriteHour is the part of CacheWrite kept for an hour rather than
+	// five minutes. Anthropic, the only provider that reports it, charges it
+	// at twice the input price.
+	CacheWriteHour int
+	Output         int
+}
+
+// clamped keeps the cache counts inside the input count. The counts come from
+// a provider's response, and a bad one must not produce a negative cost and
+// refund a budget.
+func (t Tokens) clamped() Tokens {
+	t.CachedInput = min(max(t.CachedInput, 0), t.Input)
+	t.CacheWrite = min(max(t.CacheWrite, 0), t.Input-t.CachedInput)
+	t.CacheWriteHour = min(max(t.CacheWriteHour, 0), t.CacheWrite)
+	return t
+}
+
 // Cost returns what the given token counts cost, in micro-units.
-// cachedInputTokens is part of inputTokens, not added to it: that is how
-// providers report it.
-func (m Model) Cost(inputTokens, cachedInputTokens, outputTokens int) int64 {
+func (m Model) Cost(t Tokens) int64 {
 	const perM = 1_000_000
-	// The counts come from a provider's response. Clamp them so a bad cached
-	// count cannot produce a negative cost and refund a budget.
-	cached := min(max(cachedInputTokens, 0), inputTokens)
-	// Divide once at the end: dividing each term would floor three times and
+	t = t.clamped()
+	p := m.prices(t.Input)
+	// Divide once at the end: dividing each term would floor four times and
 	// always round the total down further.
-	return (int64(inputTokens-cached)*m.InputMicrosPerMTok +
-		int64(cached)*m.cachedInputMicros() +
-		int64(outputTokens)*m.OutputMicrosPerMTok) / perM
+	return (int64(t.Input-t.CachedInput-t.CacheWrite)*p.InputMicrosPerMTok +
+		int64(t.CachedInput)*p.cachedInputMicros() +
+		int64(t.CacheWrite-t.CacheWriteHour)*p.cacheWriteMicros() +
+		int64(t.CacheWriteHour)*2*p.InputMicrosPerMTok +
+		int64(t.Output)*p.OutputMicrosPerMTok) / perM
+}
+
+// prices is what a request with a prompt of inputTokens is charged at.
+func (m Model) prices(inputTokens int) PriceTier {
+	if t := m.LongPrompt; t != nil && inputTokens > t.AboveTokens {
+		return *t
+	}
+	return PriceTier{
+		InputMicrosPerMTok:       m.InputMicrosPerMTok,
+		OutputMicrosPerMTok:      m.OutputMicrosPerMTok,
+		CachedInputMicrosPerMTok: m.CachedInputMicrosPerMTok,
+		CacheWriteMicrosPerMTok:  m.CacheWriteMicrosPerMTok,
+	}
+}
+
+// PriceTier is what a request with a long prompt costs instead of a model's
+// own prices. The prompt is every input token, cached or not, which is how
+// providers measure it.
+type PriceTier struct {
+	// AboveTokens is the longest prompt still charged the model's own prices.
+	AboveTokens              int   `json:"above_tokens" yaml:"above_tokens"`
+	InputMicrosPerMTok       int64 `json:"input_micros_per_mtok" yaml:"input_micros_per_mtok"`
+	OutputMicrosPerMTok      int64 `json:"output_micros_per_mtok" yaml:"output_micros_per_mtok"`
+	CachedInputMicrosPerMTok int64 `json:"cached_input_micros_per_mtok" yaml:"cached_input_micros_per_mtok"`
+	CacheWriteMicrosPerMTok  int64 `json:"cache_write_micros_per_mtok" yaml:"cache_write_micros_per_mtok"`
+}
+
+// Check says what is wrong with a tier, or nil when nothing is.
+func (t PriceTier) Check() error {
+	if t.AboveTokens <= 0 {
+		return errors.New("long_prompt needs above_tokens, the longest prompt " +
+			"charged the normal prices")
+	}
+	return nil
 }
 
 // cachedInputMicros is the rate for one cached input token: the stated rate, or
@@ -156,11 +236,21 @@ func (m Model) Cost(inputTokens, cachedInputTokens, outputTokens int) int64 {
 //
 // Here zero means "not stated", not "free": a forgotten price should err high
 // rather than drop most of every prompt out of every budget.
-func (m Model) cachedInputMicros() int64 {
-	if m.CachedInputMicrosPerMTok == 0 {
-		return m.InputMicrosPerMTok
+func (t PriceTier) cachedInputMicros() int64 {
+	if t.CachedInputMicrosPerMTok == 0 {
+		return t.InputMicrosPerMTok
 	}
-	return m.CachedInputMicrosPerMTok
+	return t.CachedInputMicrosPerMTok
+}
+
+// cacheWriteMicros is the rate for one input token written to the cache: the
+// stated rate, or the input rate when none is stated, as for a provider that
+// charges nothing extra for a write.
+func (t PriceTier) cacheWriteMicros() int64 {
+	if t.CacheWriteMicrosPerMTok == 0 {
+		return t.InputMicrosPerMTok
+	}
+	return t.CacheWriteMicrosPerMTok
 }
 
 // Filter is a guardrail that reads a prompt before it is forwarded, and may

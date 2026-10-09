@@ -21,7 +21,19 @@ the gateway. Each request then carries two credentials:
 Claude Code sends `X-Keera-Key` from `ANTHROPIC_CUSTOM_HEADERS`. The sign-in
 token says nothing about who it belongs to, so the key is what tells Keera.
 
-## 1. Add a subscription model
+## 1. Turn it on
+
+Claude subscriptions are off by default. The operator turns them on:
+
+```sh
+KEERA_CLAUDE_SUBSCRIPTIONS=true
+```
+
+While they are off, nobody can add a subscription model or issue a
+subscription key, and the gateway refuses the ones that already exist. A
+catalogue file with a subscription model stops the start.
+
+## 2. Add a subscription model
 
 An administrator adds one model per Claude model the plan should reach:
 
@@ -61,7 +73,7 @@ model. The date at the end does not matter.
 
 If the organisation's guardrails list allowed models, add the new ones there.
 
-## 2. Send everyone's Claude Code through Keera
+## 3. Send everyone's Claude Code through Keera
 
 An Owner of the Claude organisation sets the address for everyone, in the
 claude.ai admin console under **Admin Settings > Claude Code > Managed
@@ -101,7 +113,7 @@ These are controls on the person's machine, not a security boundary. Someone
 on an unmanaged laptop can get around them. Test the setup with one account
 before rolling it out.
 
-## 3. Each person, once per machine
+## 4. Each person, once per machine
 
 Only an administrator issues keys. So first, an administrator issues each
 member one subscription key per machine:
@@ -251,6 +263,7 @@ for the rest.
 | 401    | carries a Claude sign-in but no Keera key            | Run `keera login`, then `keera connect claude-code --subscription`. |
 | 401    | this is a subscription key                           | The key went in `Authorization`. It belongs in `X-Keera-Key`.       |
 | 401    | carries no Claude sign-in (`missing_claude_sign_in`) | Run `/login` in Claude Code, and unset `ANTHROPIC_AUTH_TOKEN`.      |
+| 403    | `subscriptions_off`                                  | The operator has not set `KEERA_CLAUDE_SUBSCRIPTIONS=true`.         |
 | 400    | `subscription_model`                                 | Only the Messages API reaches a subscription model.                 |
 | 404    | `model_not_found`                                    | A subscription key named an organisation model, or the reverse.     |
 | 404    | `model_not_found`                                    | Claude Code named a Claude model no subscription model serves.      |

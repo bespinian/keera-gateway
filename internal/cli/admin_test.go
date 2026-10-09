@@ -558,94 +558,69 @@ func TestKeyRotateSendsAMemberWithARevokedKeyToAnAdministrator(t *testing.T) {
 	}
 }
 
-func TestKeyRotateResolvesANameAmongTheKeysThatStillWork(t *testing.T) {
-	quiet(t)
-	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
-		// The shape an organisation is in after one rotation: two keys with the
-		// same name, one of them revoked.
-		"GET /v1/keys": map[string]any{"data": []map[string]any{
-			{
-				"id": "key_gone", "org_id": "org_1", "name": "laptop",
-				"created_at": "2026-01-01T00:00:00Z", "revoked_at": "2026-02-01T00:00:00Z",
-			},
-			{"id": "key_live", "org_id": "org_1", "name": "laptop", "created_at": "2026-02-01T00:00:00Z"},
-		}},
-		"POST /v1/keys/key_live/rotate": map[string]any{"id": "key_new", "key": "keera_sk_new"},
-	})
+// keyVerbs are the verbs that act on one key named by id or name, with the
+// call each makes, under /v1/keys/<id>.
+var keyVerbs = []struct {
+	verb, method, suffix string
+	reply                map[string]any
+}{
+	{"rotate", "POST", "/rotate", map[string]any{"id": "key_new", "key": "keera_sk_new"}},
+	{"revoke", "DELETE", "", map[string]any{}},
+}
 
-	if err := keyCmd(context.Background(), []string{"rotate", "laptop", "--yes"}); err != nil {
-		t.Fatal(err)
-	}
-	if !f.called("POST", "/v1/keys/key_live/rotate") {
-		t.Error("rotate did not pick the key that still works")
+func TestKeyRotateAndRevokeResolveANameAmongTheKeysThatStillWork(t *testing.T) {
+	for _, tc := range keyVerbs {
+		t.Run(tc.verb, func(t *testing.T) {
+			quiet(t)
+			f := newFakeControl(t, map[string]any{
+				"GET /v1/orgs": oneOrg,
+				// The shape an organisation is in after one rotation: two keys
+				// with the same name, one of them revoked.
+				"GET /v1/keys": map[string]any{"data": []map[string]any{
+					{
+						"id": "key_gone", "org_id": "org_1", "name": "laptop",
+						"created_at": "2026-01-01T00:00:00Z", "revoked_at": "2026-02-01T00:00:00Z",
+					},
+					{"id": "key_live", "org_id": "org_1", "name": "laptop", "created_at": "2026-02-01T00:00:00Z"},
+				}},
+				tc.method + " /v1/keys/key_live" + tc.suffix: tc.reply,
+			})
+
+			if err := keyCmd(context.Background(), []string{tc.verb, "laptop", "--yes"}); err != nil {
+				t.Fatal(err)
+			}
+			if !f.called(tc.method, "/v1/keys/key_live"+tc.suffix) {
+				t.Errorf("%s did not pick the key that still works", tc.verb)
+			}
+		})
 	}
 }
 
-func TestKeyRotateRefusesAnAmbiguousName(t *testing.T) {
-	quiet(t)
-	newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
-		"GET /v1/keys": map[string]any{"data": []map[string]any{
-			{"id": "key_a", "org_id": "org_1", "name": "laptop", "created_at": "2026-01-01T00:00:00Z"},
-			{"id": "key_b", "org_id": "org_1", "name": "laptop", "created_at": "2026-02-01T00:00:00Z"},
-		}},
-	})
+func TestKeyRotateAndRevokeRefuseAnAmbiguousName(t *testing.T) {
+	for _, tc := range keyVerbs {
+		t.Run(tc.verb, func(t *testing.T) {
+			quiet(t)
+			f := newFakeControl(t, map[string]any{
+				"GET /v1/orgs": oneOrg,
+				"GET /v1/keys": map[string]any{"data": []map[string]any{
+					{"id": "key_a", "org_id": "org_1", "name": "laptop", "created_at": "2026-01-01T00:00:00Z"},
+					{"id": "key_b", "org_id": "org_1", "name": "laptop", "created_at": "2026-02-01T00:00:00Z"},
+				}},
+			})
 
-	err := keyCmd(context.Background(), []string{"rotate", "laptop"})
-	if err == nil {
-		t.Fatal("rotate picked one of two keys with the same name")
-	}
-	for _, want := range []string{"key_a", "key_b"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("the error does not name %s to choose between: %v", want, err)
-		}
-	}
-}
-
-func TestKeyRevokeResolvesANameAmongTheKeysThatStillWork(t *testing.T) {
-	quiet(t)
-	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
-		"GET /v1/keys": map[string]any{"data": []map[string]any{
-			{
-				"id": "key_gone", "org_id": "org_1", "name": "laptop",
-				"created_at": "2026-01-01T00:00:00Z", "revoked_at": "2026-02-01T00:00:00Z",
-			},
-			{"id": "key_live", "org_id": "org_1", "name": "laptop", "created_at": "2026-02-01T00:00:00Z"},
-		}},
-		"DELETE /v1/keys/key_live": map[string]any{},
-	})
-
-	if err := keyCmd(context.Background(), []string{"revoke", "laptop", "--yes"}); err != nil {
-		t.Fatal(err)
-	}
-	if !f.called("DELETE", "/v1/keys/key_live") {
-		t.Error("revoke did not pick the key that still works")
-	}
-}
-
-func TestKeyRevokeRefusesAnAmbiguousName(t *testing.T) {
-	quiet(t)
-	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
-		"GET /v1/keys": map[string]any{"data": []map[string]any{
-			{"id": "key_a", "org_id": "org_1", "name": "laptop", "created_at": "2026-01-01T00:00:00Z"},
-			{"id": "key_b", "org_id": "org_1", "name": "laptop", "created_at": "2026-02-01T00:00:00Z"},
-		}},
-	})
-
-	err := keyCmd(context.Background(), []string{"revoke", "laptop"})
-	if err == nil {
-		t.Fatal("revoke picked one of two keys with the same name")
-	}
-	for _, want := range []string{"key_a", "key_b"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("the error does not name %s to choose between: %v", want, err)
-		}
-	}
-	if f.called("DELETE", "/v1/keys/key_a") || f.called("DELETE", "/v1/keys/key_b") {
-		t.Error("a key was revoked despite the name matching two")
+			err := keyCmd(context.Background(), []string{tc.verb, "laptop"})
+			if err == nil {
+				t.Fatalf("%s picked one of two keys with the same name", tc.verb)
+			}
+			for _, want := range []string{"key_a", "key_b"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the error does not name %s to choose between: %v", want, err)
+				}
+				if f.called(tc.method, "/v1/keys/"+want+tc.suffix) {
+					t.Errorf("%s acted on %s despite the name matching two", tc.verb, want)
+				}
+			}
+		})
 	}
 }
 
@@ -724,52 +699,57 @@ func TestModelAddFillsInTheProviderDefaults(t *testing.T) {
 	}
 }
 
-func TestModelAddRefusesAModelThatExists(t *testing.T) {
-	quiet(t)
-	newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
-		"GET /v1/models": map[string]any{"data": []map[string]any{
-			{"alias": "keera-speed", "backends": []string{"http://vllm:8000/v1"}, "backend_model": "qwen"},
-		}},
-	})
+// 'set' changes the price it is given and keeps the rest. The endpoint
+// replaces the whole entry, so a field the CLI forgot to restate is a field
+// that is gone: a dropped cached-input rate charges cached tokens at full
+// price.
+func TestModelSetChangesWhatItIsGivenAndKeepsTheRest(t *testing.T) {
+	stored := map[string]any{
+		"alias": "keera-speed", "kind": "chat",
+		"backends":      []string{"http://vllm-a:8000/v1", "http://vllm-b:8000/v1"},
+		"backend_model": "qwen3-8b", "max_context": 32768,
+		"input_micros_per_mtok": 100_000, "output_micros_per_mtok": 300_000,
+		"cached_input_micros_per_mtok": 50_000,
+		"enabled":                      true,
+	}
+	for _, tc := range []struct {
+		flag, value, field string
+		want               int
+	}{
+		{"--price-in", "1", "input_micros_per_mtok", 1_000_000},
+		{"--price-out", "0.5", "output_micros_per_mtok", 500_000},
+		{"--price-cached", "0.4", "cached_input_micros_per_mtok", 400_000},
+	} {
+		t.Run(tc.flag, func(t *testing.T) {
+			quiet(t)
+			f := newFakeControl(t, map[string]any{
+				"GET /v1/orgs":               oneOrg,
+				"GET /v1/models":             map[string]any{"data": []map[string]any{stored}},
+				"PUT /v1/models/keera-speed": map[string]any{"alias": "keera-speed"},
+			})
 
-	err := modelCmd(context.Background(), []string{"add", "keera-speed", "--backend", "http://vllm:8000/v1", "--backend-model", "qwen"})
-	if err == nil || !strings.Contains(err.Error(), "keera model set") {
-		t.Fatalf("error = %v, want it to point at keera model set", err)
-	}
-}
-
-func TestModelSetKeepsWhatItWasNotGiven(t *testing.T) {
-	quiet(t)
-	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
-		"GET /v1/models": map[string]any{"data": []map[string]any{{
-			"alias": "keera-speed", "kind": "chat",
-			"backends":      []string{"http://vllm-a:8000/v1", "http://vllm-b:8000/v1"},
-			"backend_model": "qwen3-8b", "max_context": 32768,
-			"input_micros_per_mtok": 100_000, "output_micros_per_mtok": 300_000,
-			"enabled": true,
-		}}},
-		"PUT /v1/models/keera-speed": map[string]any{"alias": "keera-speed"},
-	})
-
-	if err := modelCmd(context.Background(), []string{"set", "keera-speed", "--price-out", "0.5"}); err != nil {
-		t.Fatal(err)
-	}
-	body := f.request("PUT", "/v1/models/keera-speed").body
-	if body["output_micros_per_mtok"] != float64(500_000) {
-		t.Errorf("output price = %v, want 500000", body["output_micros_per_mtok"])
-	}
-	// Everything else has to survive: the endpoint replaces the entry.
-	if body["input_micros_per_mtok"] != float64(100_000) {
-		t.Errorf("input price = %v, want it left alone", body["input_micros_per_mtok"])
-	}
-	if len(body["backends"].([]any)) != 2 {
-		t.Errorf("backends = %v, want both left alone", body["backends"])
-	}
-	if body["backend_model"] != "qwen3-8b" || body["max_context"] != float64(32768) ||
-		body["enabled"] != true {
-		t.Errorf("set changed a field it was not given: %v", body)
+			if err := modelCmd(context.Background(),
+				[]string{"set", "keera-speed", tc.flag, tc.value}); err != nil {
+				t.Fatal(err)
+			}
+			body := f.request("PUT", "/v1/models/keera-speed").body
+			for _, field := range []string{"input_micros_per_mtok", "output_micros_per_mtok",
+				"cached_input_micros_per_mtok", "max_context"} {
+				want := stored[field].(int)
+				if field == tc.field {
+					want = tc.want
+				}
+				if body[field] != float64(want) {
+					t.Errorf("%s = %v, want %d", field, body[field], want)
+				}
+			}
+			if len(body["backends"].([]any)) != 2 {
+				t.Errorf("backends = %v, want both left alone", body["backends"])
+			}
+			if body["backend_model"] != "qwen3-8b" || body["enabled"] != true {
+				t.Errorf("set changed a field it was not given: %v", body)
+			}
+		})
 	}
 }
 
@@ -1125,36 +1105,6 @@ func TestFilterAddSendsTheModelAndTheInstruction(t *testing.T) {
 	}
 }
 
-func TestFilterSetChangesOneFieldAndKeepsTheRest(t *testing.T) {
-	quiet(t)
-	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
-		"GET /v1/filters": map[string]any{"data": []map[string]any{{
-			"alias": "redact-secrets", "model": "keera-guard",
-			"prompt": "Remove credentials.", "description": "the original",
-		}}},
-		"PUT /v1/filters/redact-secrets": map[string]any{"alias": "redact-secrets"},
-	})
-
-	if err := Run(context.Background(), []string{"filter", "set", "redact-secrets",
-		"--model", "keera-guard-2"}); err != nil {
-		t.Fatalf("filter set: %v", err)
-	}
-
-	req := f.request("PUT", "/v1/filters/redact-secrets")
-	if req.body["model"] != "keera-guard-2" {
-		t.Errorf("model = %v, want the new alias", req.body["model"])
-	}
-	if req.body["prompt"] != "Remove credentials." {
-		t.Errorf("prompt = %v; changing the model must not clear the instruction",
-			req.body["prompt"])
-	}
-	if req.body["description"] != "the original" {
-		t.Errorf("description = %v; it was not mentioned and must be kept",
-			req.body["description"])
-	}
-}
-
 // An empty --description clears it, on every command that has one, and a set
 // with nothing to change writes nothing.
 func TestSetClearsADescriptionAndRefusesNothing(t *testing.T) {
@@ -1189,37 +1139,62 @@ func TestSetClearsADescriptionAndRefusesNothing(t *testing.T) {
 	}
 }
 
-// edit and update are other names for set, so they keep what is not given too.
-func TestFilterAndRouterEditAndUpdateKeepTheRest(t *testing.T) {
-	for _, verb := range []string{"edit", "update"} {
-		t.Run(verb, func(t *testing.T) {
+// set, and edit and update, its other names, change what they are given and
+// keep the rest. Shadow has two flags so that a set naming neither does not
+// switch a shadow filter to enforcing. And --enforce moves nothing else: what
+// the shadow run measured is what goes live.
+func TestFilterAndRouterSetKeepTheRest(t *testing.T) {
+	filter := map[string]any{
+		"alias": "redact-secrets", "model": "keera-guard",
+		"prompt": "Remove credentials.", "description": "the original", "shadow": true,
+	}
+	changes := []struct {
+		flags []string
+		want  map[string]any
+	}{
+		{[]string{"--model", "keera-guard-2"}, map[string]any{"model": "keera-guard-2"}},
+		{[]string{"--description", "changed"}, map[string]any{"description": "changed"}},
+		{[]string{"--enforce"}, map[string]any{"shadow": false}},
+	}
+	for _, verb := range []string{"set", "edit", "update"} {
+		for _, c := range changes {
+			t.Run("filter "+verb+" "+c.flags[0], func(t *testing.T) {
+				quiet(t)
+				f := newFakeControl(t, map[string]any{
+					"GET /v1/orgs":                   oneOrg,
+					"GET /v1/filters":                map[string]any{"data": []map[string]any{filter}},
+					"PUT /v1/filters/redact-secrets": map[string]any{"alias": "redact-secrets"},
+				})
+				args := append([]string{"filter", verb, "redact-secrets"}, c.flags...)
+				if err := Run(context.Background(), args); err != nil {
+					t.Fatal(err)
+				}
+				body := f.request("PUT", "/v1/filters/redact-secrets").body
+				for _, field := range []string{"model", "prompt", "description", "shadow"} {
+					want, changed := c.want[field]
+					if !changed {
+						want = filter[field]
+					}
+					if body[field] != want {
+						t.Errorf("%s = %v, want %v", field, body[field], want)
+					}
+				}
+			})
+		}
+
+		t.Run("router "+verb, func(t *testing.T) {
 			quiet(t)
 			f := newFakeControl(t, map[string]any{
 				"GET /v1/orgs": oneOrg,
-				"GET /v1/filters": map[string]any{"data": []map[string]any{{
-					"alias": "redact-secrets", "model": "keera-guard",
-					"prompt": "Remove credentials.", "description": "the original",
-				}}},
-				"PUT /v1/filters/redact-secrets": map[string]any{"alias": "redact-secrets"},
 				"GET /v1/routers": map[string]any{"data": []map[string]any{{
 					"alias": "auto", "model": "keera-speed", "destinations": []string{"a", "b"},
 					"prompt": "Pick one.", "description": "the original",
 				}}},
 				"PUT /v1/routers/auto": map[string]any{"alias": "auto"},
 			})
-
-			if err := Run(context.Background(), []string{"filter", verb, "redact-secrets",
-				"--model", "keera-guard-2"}); err != nil {
-				t.Fatalf("filter %s: %v", verb, err)
-			}
-			if req := f.request("PUT", "/v1/filters/redact-secrets"); req.body["prompt"] != "Remove credentials." ||
-				req.body["description"] != "the original" {
-				t.Errorf("filter %s dropped what was not given: %v", verb, req.body)
-			}
-
 			if err := Run(context.Background(), []string{"router", verb, "auto",
 				"--description", "changed"}); err != nil {
-				t.Fatalf("router %s: %v", verb, err)
+				t.Fatal(err)
 			}
 			if req := f.request("PUT", "/v1/routers/auto"); req.body["prompt"] != "Pick one." ||
 				req.body["model"] != "keera-speed" {
@@ -1243,54 +1218,6 @@ func TestFilterAddInShadowSaysSo(t *testing.T) {
 	}
 	if req := f.request("PUT", "/v1/filters/redact-secrets"); req.body["shadow"] != true {
 		t.Errorf("shadow = %v, want the filter written not enforcing", req.body["shadow"])
-	}
-}
-
-func TestFilterSetKeepsShadowWhenNeitherFlagIsGiven(t *testing.T) {
-	quiet(t)
-	// Why there are two flags: a `set` naming neither must not switch a
-	// shadow filter to enforcing.
-	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
-		"GET /v1/filters": map[string]any{"data": []map[string]any{{
-			"alias": "redact-secrets", "model": "keera-guard",
-			"prompt": "Remove credentials.", "shadow": true,
-		}}},
-		"PUT /v1/filters/redact-secrets": map[string]any{"alias": "redact-secrets"},
-	})
-
-	if err := Run(context.Background(), []string{"filter", "set", "redact-secrets",
-		"--description", "now with a description"}); err != nil {
-		t.Fatalf("filter set: %v", err)
-	}
-	if req := f.request("PUT", "/v1/filters/redact-secrets"); req.body["shadow"] != true {
-		t.Errorf("shadow = %v; a field nobody mentioned must be kept", req.body["shadow"])
-	}
-}
-
-func TestFilterSetEnforceTakesItOutOfShadow(t *testing.T) {
-	quiet(t)
-	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
-		"GET /v1/filters": map[string]any{"data": []map[string]any{{
-			"alias": "redact-secrets", "model": "keera-guard",
-			"prompt": "Remove credentials.", "shadow": true,
-		}}},
-		"PUT /v1/filters/redact-secrets": map[string]any{"alias": "redact-secrets"},
-	})
-
-	if err := Run(context.Background(), []string{"filter", "set", "redact-secrets",
-		"--enforce"}); err != nil {
-		t.Fatalf("filter set --enforce: %v", err)
-	}
-	req := f.request("PUT", "/v1/filters/redact-secrets")
-	if req.body["shadow"] != false {
-		t.Errorf("shadow = %v, want it enforcing", req.body["shadow"])
-	}
-	// And nothing else moved: what the week in shadow measured is what goes
-	// live, which it would not be if promoting also rewrote the instruction.
-	if req.body["prompt"] != "Remove credentials." {
-		t.Errorf("prompt = %v, want the instruction that was measured", req.body["prompt"])
 	}
 }
 
@@ -1389,69 +1316,6 @@ func TestPolicySetClearsFiltersOnlyWithItsOwnFlag(t *testing.T) {
 	}
 	if got, present := f.request("PUT", "/v1/guardrails/project/project_1").body["filters"]; present {
 		t.Errorf("filters = %v, want them gone", got)
-	}
-}
-
-// The cached-input rate is set like the other prices, and survives a change
-// to something else. Dropping it would charge cached tokens at full price.
-func TestModelSetTakesTheCachedInputPrice(t *testing.T) {
-	quiet(t)
-	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
-		"GET /v1/models": map[string]any{"data": []map[string]any{{
-			"alias": "keera-frontier", "kind": "chat",
-			"backends":      []string{"https://api.openai.com/v1"},
-			"backend_model": "gpt-5.1", "max_context": 400_000,
-			"input_micros_per_mtok": 1_250_000, "output_micros_per_mtok": 10_000_000,
-			"cached_input_micros_per_mtok": 125_000,
-			"location":                     "usa", "enabled": true,
-		}}},
-		"PUT /v1/models/keera-frontier": map[string]any{"alias": "keera-frontier"},
-	})
-
-	if err := modelCmd(context.Background(),
-		[]string{"set", "keera-frontier", "--price-cached", "0.4"}); err != nil {
-		t.Fatal(err)
-	}
-	body := f.request("PUT", "/v1/models/keera-frontier").body
-	if body["cached_input_micros_per_mtok"] != float64(400_000) {
-		t.Errorf("cached price = %v, want 400000", body["cached_input_micros_per_mtok"])
-	}
-	if body["input_micros_per_mtok"] != float64(1_250_000) {
-		t.Errorf("input price = %v, want it left alone", body["input_micros_per_mtok"])
-	}
-
-}
-
-// And the other way round: changing the input price must not drop the cached
-// rate the entry already carried. The endpoint replaces the whole entry, so a
-// field the CLI forgot to restate is a field that is gone.
-func TestModelSetKeepsTheCachedInputPriceItWasNotGiven(t *testing.T) {
-	quiet(t)
-	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
-		"GET /v1/models": map[string]any{"data": []map[string]any{{
-			"alias": "keera-frontier", "kind": "chat",
-			"backends":      []string{"https://api.openai.com/v1"},
-			"backend_model": "gpt-5.1", "max_context": 400_000,
-			"input_micros_per_mtok": 1_250_000, "output_micros_per_mtok": 10_000_000,
-			"cached_input_micros_per_mtok": 125_000,
-			"location":                     "usa", "enabled": true,
-		}}},
-		"PUT /v1/models/keera-frontier": map[string]any{"alias": "keera-frontier"},
-	})
-
-	if err := modelCmd(context.Background(),
-		[]string{"set", "keera-frontier", "--price-in", "1"}); err != nil {
-		t.Fatal(err)
-	}
-	body := f.request("PUT", "/v1/models/keera-frontier").body
-	if body["cached_input_micros_per_mtok"] != float64(125_000) {
-		t.Errorf("cached price = %v, want the stored 125000 left alone",
-			body["cached_input_micros_per_mtok"])
-	}
-	if body["input_micros_per_mtok"] != float64(1_000_000) {
-		t.Errorf("input price = %v, want the new 1000000", body["input_micros_per_mtok"])
 	}
 }
 
@@ -1810,11 +1674,13 @@ func TestAddRefusesAnAliasThatExists(t *testing.T) {
 		"GET /v1/filters":     existing,
 		"GET /v1/routers":     existing,
 		"GET /v1/mcp-servers": existing,
+		"GET /v1/models":      existing,
 	})
 	for _, args := range [][]string{
 		{"filter", "add", "a", "--mode", "pattern", "--rules", "x => y"},
 		{"router", "add", "a", "--mode", "fallback", "--destinations", "b,c"},
 		{"mcp", "add", "a", "--endpoint", "https://mcp.example.ch"},
+		{"model", "add", "a", "--backend", "http://vllm:8000/v1", "--backend-model", "qwen"},
 	} {
 		err := Run(context.Background(), args)
 		if err == nil || !strings.Contains(err.Error(), "keera "+args[0]+" set a") {

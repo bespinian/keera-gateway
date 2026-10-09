@@ -267,11 +267,17 @@ this mode.
 number and also a timestamp in nanoseconds. `keera filter check` names the rule
 that touched the sample source code, which is the one to narrow.
 
-### What it costs
+### What it costs, and what does not apply
 
 Nothing. Its runs are on the filter log and on `/metrics` like any other, with a
-cost of zero and negligible latency. What this document says about cost applies
-to `rewrite` and `gate` only.
+cost of zero and negligible latency. A check of it touches no backend.
+
+It has no model, no instruction and no answer, so these parts of this page are
+about `rewrite` and `gate` only: [Choosing and sizing the
+model](#choosing-and-sizing-the-model), [Cost and latency](#cost-and-latency),
+[Writing an instruction](#writing-an-instruction), and the model and context
+rows of [Failing closed](#failing-closed). It fails closed only when its rules
+will not compile.
 
 ## Failing closed
 
@@ -287,8 +293,8 @@ this.
 | the conversation will not fit through its model's context                                 | 413    |
 | a pattern filter's rules will not compile                                                 | 502    |
 
-A pattern filter has no model, no answer and no context, so the middle rows do
-not apply to it.
+A request with no text at all, such as a chat of only images, runs no filter,
+so a filter that is missing or broken does not refuse it either.
 
 A filter [in shadow](#shadow-rolling-one-out) that cannot run refuses nothing:
 the run is recorded as `error` and the request goes on.
@@ -389,24 +395,12 @@ keera guardrail set project <project-id> --filters redact-names
 The organisation pays nothing for the first, and only the project that needs the
 second pays for it.
 
-Within one request, the order is:
-
-1. authenticate, rate-limit, budget
-2. the [router](routers.md), if the client named one
-3. refuse the request if it is too long for every model it may go to
-4. **filters**, in the order above
-5. the standing system prompt is prepended
-6. hosted tools are removed, if the guardrail blocks them
-7. the output ceiling is clamped
-8. forward
-
-Filters run before step 5 so the administrator's system prompt is never handed
-to a small model that is allowed to edit it.
+Filters run after the router and before the standing system prompt is added,
+so the administrator's own wording is never handed to a small model that may
+edit it. [What happens to one request](gateway.md#what-happens-to-one-request)
+has the whole order.
 
 ## Choosing and sizing the model
-
-This section does not apply to a [pattern filter](#pattern-filters), which has
-no model.
 
 Point a `rewrite` or `gate` filter at a chat model, ideally a fast local one.
 Its generation is added to every request the guardrail covers.
@@ -430,9 +424,6 @@ The instruction is capped at 16 KiB.
 
 ## Cost and latency
 
-**This section is about `rewrite` and `gate`.** A
-[pattern filter](#pattern-filters) generates nothing.
-
 A model filter means a second generation on every request it guards:
 
 - **Latency.** The filter's whole generation finishes before the request is
@@ -448,16 +439,13 @@ A `rewrite` filter may write output tokens in proportion to the request. A
 that is the difference between a filter that dominates the request and one that
 barely shows.
 
-Failed runs and shadow runs are charged too. A pattern filter is never charged.
+Failed runs and shadow runs are charged too.
 
 `keera filter check` reports what one run cost and how long it took. The
 filter's own screen reports the latency it added at p50 and p95, and its share
 of the bill.
 
 ## Writing an instruction
-
-This is for `rewrite` and `gate`. A [pattern filter](#pattern-filters) has rules
-instead.
 
 Write about the text, not about the gateway. In both modes, half of the
 instruction is about what _not_ to do.
@@ -543,42 +531,13 @@ Nothing is scored as a pass. The check does point out the two clear mistakes: a
 filter that left the planted secret alone, and a filter that touched the code.
 
 A check of a model filter goes straight to the backend, with the credentials the
-data plane uses. It is not rate-limited, budgeted or billed and writes no usage
-row, but it does put real requests on the GPUs: one for a rewrite filter, two
+data plane uses. It is not rate-limited or budgeted and writes no usage row. On
+the deployment's own provider key it needs credit and is billed
+([billing.md](billing.md)). It does put real requests on the GPUs: one for a rewrite filter, two
 for a gate, one per half of the sample. A gate whose backend refuses logprobs is
-asked again without them. A check of a pattern filter touches nothing and costs
-nothing.
+asked again without them.
 
 A check of a filter in shadow still runs it, and says so.
-
-## What it is doing
-
-Each filter has its own screen: `/filters/<alias>` in the panel,
-`keera filter report <alias>` at a terminal. Over a time window, it shows:
-
-| Figure                                             | What it answers                                                                                  |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| runs, and the share of the organisation's requests | Is it firing on everything, or on nothing? The other rates mean little without it                |
-| the pass / rewrite / refuse / could-not-run split  | What does it do when it fires?                                                                   |
-| segments shown, segments changed                   | Is the instruction too eager? Two changed out of forty is normal; thirty-eight is rewriting work |
-| added latency, p50 and p95                         | How long does each request wait for it?                                                          |
-| its spend, against the organisation's              | What share of the bill is it? Zero for a pattern filter                                          |
-| the refusal rate **by project**                    | Who is affected?                                                                                 |
-
-The last row matters most. Four percent across an organisation can be a whole
-working day for the one project it lands on.
-
-The same figures are on `/metrics`, labelled by filter, organisation, outcome
-and shadow: `keera_filter_runs_total`, `keera_filter_cost_micros_total` and
-`keera_filter_duration_seconds`. Alert on a filter that starts refusing.
-
-**Nothing a filter read or wrote is stored.** Each run keeps only the mode,
-whether it was enforcing, the outcome, how long it took, what it spent, and how
-many segments it was shown and changed. Which rule fired is not kept either; it
-appears only in `keera filter check`, against the sample.
-
-The filter log is kept as long as the usage log and purged by the same cutoff
-(`KEERA_USAGE_RETENTION`).
 
 ## Who owns what
 
@@ -600,16 +559,40 @@ and the level that applied each one.
 
 ## What is recorded
 
+Each filter has its own screen: `/filters/<alias>` in the panel,
+`keera filter report <alias>` at a terminal. Over a time window, it shows:
+
+| Figure                                             | What it answers                                                                                  |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| runs, and the share of the organisation's requests | Is it firing on everything, or on nothing? The other rates mean little without it                |
+| the pass / rewrite / refuse / could-not-run split  | What does it do when it fires?                                                                   |
+| segments shown, segments changed                   | Is the instruction too eager? Two changed out of forty is normal; thirty-eight is rewriting work |
+| added latency, p50 and p95                         | How long does each request wait for it?                                                          |
+| its spend, against the organisation's              | What share of the bill is it?                                                                    |
+| the refusal rate **by project**                    | Who is affected?                                                                                 |
+
+The last row matters most. Four percent across an organisation can be a whole
+working day for the one project it lands on.
+
+The same figures are on `/metrics`, labelled by filter, organisation, outcome
+and shadow: `keera_filter_runs_total`, `keera_filter_cost_micros_total` and
+`keera_filter_duration_seconds`. Alert on a filter that starts refusing.
+
+**Nothing a filter read or wrote is stored**, apart from the one-line reason a
+refusal gives, which is kept as the request's error. The filter log keeps one
+row per filter per request: the mode, whether it was enforcing, the outcome, how
+long it took, what it spent, and how many segments it was shown and changed.
+Which rule fired is not kept either; it appears only in `keera filter check`,
+against the sample. The log is kept as long as the usage log
+(`KEERA_USAGE_RETENTION`).
+
+Also recorded:
+
 - `filter.put`, `filter.delete` and `filter.check` in the audit log, with who
   did it and in which organisation. The `filter.put` entry includes the
   instruction or rules, the mode and whether it enforces.
 - `guardrail.put` carries the filters a guardrail names.
 - Every refusal a filter caused is a usage event with its status.
-- One row per filter per request in the filter log: the mode, whether it was
-  enforcing, the outcome, the latency, the cost, and the number of segments
-  shown and changed. Nothing about the text.
-- `keera_filter_runs_total`, `keera_filter_cost_micros_total` and
-  `keera_filter_duration_seconds` on `/metrics`.
-- Answers carry `X-Keera-Filters`, naming every filter that acted on the
-  request in the order they ran, gates included. Filters in shadow are not
-  named.
+- Answers to model requests carry `X-Keera-Filters`, naming every filter that
+  acted on the request in the order they ran, gates included. Filters in
+  shadow are not named. Tool calls through MCP do not carry it.

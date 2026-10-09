@@ -165,26 +165,13 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, p *authn.Princ
 // from the inference plane. Members see their own traffic
 // on My access.
 func (s *Server) requests(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if !s.requireAdmin(w, p) {
-		return
-	}
-	orgID, from, to, ok := s.reportScope(w, r, p)
+	rq, from, to, ok := s.requestQuery(w, r, p)
 	if !ok {
 		return
 	}
-	sc, ok := s.entityScope(w, r, orgID)
-	if !ok {
-		return
-	}
+	orgID := rq.OrgID
 	q := r.URL.Query()
-	rq := store.RequestQuery{
-		OrgID:       orgID,
-		ReportScope: sc,
-		From:        from,
-		To:          to,
-		Outcome:     store.Outcome(q.Get("outcome")),
-	}
-	rq.Status, rq.StatusClass = parseStatus(q.Get("status"))
+	rq.From, rq.To = from, to
 	rq.Limit, rq.Before = page(q)
 
 	names, err := s.groupNames(r.Context(), orgID)
@@ -235,6 +222,30 @@ func (s *Server) requests(w http.ResponseWriter, r *http.Request, p *authn.Princ
 		out["next_before"] = rows[len(rows)-1].ID
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// requestQuery is what the request log and its stream share: an administrator
+// only, the organisation and entity narrowed to, and the outcome and status
+// filters. The window is returned apart, because the stream has none. It
+// returns false once it has answered with an error.
+func (s *Server) requestQuery(w http.ResponseWriter, r *http.Request, p *authn.Principal) (
+	rq store.RequestQuery, from, to time.Time, ok bool,
+) {
+	if !s.requireAdmin(w, p) {
+		return rq, from, to, false
+	}
+	orgID, from, to, ok := s.reportScope(w, r, p)
+	if !ok {
+		return rq, from, to, false
+	}
+	sc, ok := s.entityScope(w, r, orgID)
+	if !ok {
+		return rq, from, to, false
+	}
+	q := r.URL.Query()
+	rq = store.RequestQuery{OrgID: orgID, ReportScope: sc, Outcome: store.Outcome(q.Get("outcome"))}
+	rq.Status, rq.StatusClass = parseStatus(q.Get("status"))
+	return rq, from, to, true
 }
 
 // parseStatus reads the log's status filter: one exact status ("402") or a

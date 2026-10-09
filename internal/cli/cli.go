@@ -67,6 +67,8 @@ func Run(ctx context.Context, args []string) error {
 		return facetCmd(ctx, "budget", rest)
 	case "usage":
 		return usageCmd(ctx, rest)
+	case "billing":
+		return billingCmd(ctx, rest)
 	case "failures":
 		return failuresCmd(ctx, rest)
 	case "session":

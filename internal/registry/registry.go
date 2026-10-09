@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/auth"
+	"github.com/bespinian/keera-gateway/internal/catalog"
 	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/secret"
 	"github.com/bespinian/keera-gateway/internal/store"
@@ -38,6 +39,12 @@ type Options struct {
 	// Secrets opens the credentials stored against models and MCP servers.
 	// It is required.
 	Secrets *secret.Box
+	// Platform is the deployment's own provider keys. A model they cover is
+	// sent with that key, to the provider's endpoint, at its list prices.
+	Platform catalog.Platform
+	// Prepaid says organisations pay for those keys in advance, so one
+	// without credit cannot use them.
+	Prepaid bool
 }
 
 // The defaults of the settings behind Options. internal/config reads them
@@ -72,6 +79,8 @@ type Source interface {
 	LoadRouters(ctx context.Context) ([]policy.Router, error)
 	LoadMCPServers(ctx context.Context) ([]policy.MCPServer, error)
 	LoadSpend(ctx context.Context, now time.Time) ([]store.SpendRow, error)
+	LoadCredit(ctx context.Context) ([]store.CreditRow, error)
+	LimitedOrgs(ctx context.Context) ([]string, error)
 	Listen(ctx context.Context, channel string, fn func()) error
 }
 
@@ -118,7 +127,7 @@ func New(ctx context.Context, st Source, opts Options, log *slog.Logger) (*Regis
 		opts:    opts,
 		log:     log,
 		keys:    make(map[string]entry),
-		budgets: newBudgets(),
+		budgets: newBudgets(opts.Prepaid),
 		lookups: make(chan struct{}, maxLookups),
 	}
 	if err := r.refreshAll(ctx); err != nil {
@@ -188,10 +197,18 @@ func (r *Registry) Invalidate() { r.gen.Add(1) }
 // are read one after another, so a failure part way leaves the rest as they
 // were until the next pass.
 func (r *Registry) refreshAll(ctx context.Context) error {
-	if err := r.refreshModels(ctx); err != nil {
+	ids, err := r.store.LimitedOrgs(ctx)
+	if err != nil {
 		return err
 	}
-	if err := r.refreshMCP(ctx); err != nil {
+	limited := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		limited[id] = true
+	}
+	if err := r.refreshModels(ctx, limited); err != nil {
+		return err
+	}
+	if err := r.refreshMCP(ctx, limited); err != nil {
 		return err
 	}
 	if err := r.refreshFilters(ctx); err != nil {
@@ -264,19 +281,60 @@ func sortedValues[T any](byAlias map[string]T) []T {
 	return out
 }
 
-func (r *Registry) refreshModels(ctx context.Context) error {
+func (r *Registry) refreshModels(ctx context.Context, limited map[string]bool) error {
 	return reload(ctx, &r.models, r.store.LoadModels, func(m *policy.Model) (string, string) {
-		if len(m.APIKeyCiphertext) > 0 {
+		if r.opts.Platform.Covers(*m) {
+			r.usePlatformKey(m)
+		} else if len(m.APIKeyCiphertext) > 0 {
 			m.APIKey = r.open(ModelSecretName(m.OrgID, m.Alias), m.APIKeyCiphertext)
+		}
+		if limited[m.OrgID] {
+			m.Limited = true
+			m.Locked = !r.openToLimited(*m)
 		}
 		return m.OrgID, m.Alias
 	})
 }
 
-func (r *Registry) refreshMCP(ctx context.Context) error {
+// openToLimited reports whether an organisation that signed itself up and has
+// not paid yet may use a model: one billed from its credit before it is used,
+// or one on a public address, which costs this deployment nothing. A model on
+// the deployment's key without payments would be billed after the fact, to
+// somebody nobody knows, so it waits too.
+func (r *Registry) openToLimited(m policy.Model) bool {
+	if m.PlatformKey {
+		return r.opts.Prepaid
+	}
+	return m.Hosting() == policy.HostedExternal
+}
+
+// usePlatformKey sends a model with the deployment's own key for its
+// provider. A key the organisation stored before is never sent then: the
+// endpoint is the provider's, not the one it was entered for.
+//
+// The endpoint and prices are set again here, not only when the model is
+// saved, so a row written before the key was configured cannot send the key
+// elsewhere or bill below list price.
+func (r *Registry) usePlatformKey(m *policy.Model) {
+	if err := r.opts.Platform.Lock(m); err != nil {
+		// Left without a key, so the provider refuses it and nothing is
+		// sent unbilled.
+		r.log.Error("a model cannot use this deployment's provider key",
+			"org", m.OrgID, "model", m.Alias, "error", err)
+		return
+	}
+	m.APIKey = r.opts.Platform[m.Provider].APIKey
+	m.Billing = r.opts.Platform.Billing(m.Provider)
+}
+
+func (r *Registry) refreshMCP(ctx context.Context, limited map[string]bool) error {
 	return reload(ctx, &r.mcp, r.store.LoadMCPServers, func(m *policy.MCPServer) (string, string) {
 		if len(m.APIKeyCiphertext) > 0 {
 			m.APIKey = r.open(MCPSecretName(m.OrgID, m.Alias), m.APIKeyCiphertext)
+		}
+		if limited[m.OrgID] {
+			m.Limited = true
+			m.Locked = policy.HostingOf(m.URL) != policy.HostedExternal
 		}
 		return m.OrgID, m.Alias
 	})
@@ -320,6 +378,21 @@ func (r *Registry) refreshSpend(ctx context.Context) error {
 		return err
 	}
 	r.budgets.reconcile(rows)
+	return r.RefreshCredit(ctx)
+}
+
+// RefreshCredit reads every organisation's credit now. The control plane
+// calls it when a payment comes in, so the organisation does not wait for
+// the next refresh.
+func (r *Registry) RefreshCredit(ctx context.Context) error {
+	if !r.opts.Prepaid {
+		return nil
+	}
+	rows, err := r.store.LoadCredit(ctx)
+	if err != nil {
+		return err
+	}
+	r.budgets.reconcileCredit(rows)
 	return nil
 }
 

@@ -242,6 +242,9 @@ func (s *Server) probeModels(ctx context.Context, d *Diagnosis, enabled []policy
 		}
 		result := s.opts.Gateway.CheckModel(ctx, live)
 		switch {
+		case result.NoCredit:
+			d.add(area, m.Alias+" (probe)", VerdictWarn,
+				"not called: "+result.Error, "add credit under Billing")
 		case !result.Reachable:
 			d.add(area, m.Alias+" (probe)", VerdictFail,
 				"the backend could not be reached: "+result.Error,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -13,7 +14,7 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// sseEvent is one event read back off a Messages stream.
+// sseEvent is one event read back off a Messages or Responses stream.
 type sseEvent struct {
 	name    string
 	payload map[string]any
@@ -22,7 +23,7 @@ type sseEvent struct {
 // readMessagesStream parses a Messages stream into its events. It is
 // deliberately strict about the framing - an event with no name or unparseable
 // data is a stream a client's SDK would reject.
-func readMessagesStream(t *testing.T, raw string) []sseEvent {
+func readEvents(t *testing.T, raw string) []sseEvent {
 	t.Helper()
 	var out []sseEvent
 	for block := range strings.SplitSeq(strings.TrimSpace(raw), "\n\n") {
@@ -71,7 +72,7 @@ func pipeMessages(t *testing.T, chunks ...string) []sseEvent {
 	if err != nil {
 		t.Fatalf("pipe: %v", err)
 	}
-	return readMessagesStream(t, buf.String())
+	return readEvents(t, buf.String())
 }
 
 func TestMessagesStreamOpensAndClosesTheMessage(t *testing.T) {
@@ -92,7 +93,7 @@ func TestMessagesStreamOpensAndClosesTheMessage(t *testing.T) {
 		"content_block_delta", "content_block_delta",
 		"content_block_stop", "message_delta", "message_stop",
 	}
-	if got := names(events); !equalStrings(got, want) {
+	if got := names(events); !slices.Equal(got, want) {
 		t.Fatalf("events = %v,\nwant %v", got, want)
 	}
 
@@ -173,7 +174,7 @@ func TestMessagesStreamBuildsToolUseBlocks(t *testing.T) {
 		"content_block_start", "content_block_delta", "content_block_delta", // tool
 		"content_block_stop", "message_delta", "message_stop",
 	}
-	if got := names(events); !equalStrings(got, want) {
+	if got := names(events); !slices.Equal(got, want) {
 		t.Fatalf("events = %v,\nwant %v", got, want)
 	}
 
@@ -220,7 +221,7 @@ func TestMessagesStreamSeparatesParallelToolCalls(t *testing.T) {
 		}
 		ids = append(ids, e.payload["content_block"].(map[string]any)["id"].(string))
 	}
-	if !equalStrings(ids, []string{"call_1", "call_2"}) {
+	if !slices.Equal(ids, []string{"call_1", "call_2"}) {
 		t.Errorf("tool blocks = %v, want one per call", ids)
 	}
 	// Two opens, two closes, and no block left open at the end.
@@ -248,7 +249,7 @@ func TestMessagesStreamClosesATruncatedStream(t *testing.T) {
 		strings.NewReader(partial), "keera-code", true, DefaultMaxResponseBytes); err != nil {
 		t.Fatalf("pipe: %v", err)
 	}
-	events := readMessagesStream(t, buf.String())
+	events := readEvents(t, buf.String())
 	last := events[len(events)-1]
 	if last.name != "message_stop" {
 		t.Errorf("the stream ends with %q, want message_stop", last.name)
@@ -259,7 +260,7 @@ func TestMessagesStreamIsWellFormedWithNoContentAtAll(t *testing.T) {
 	// An upstream that answered with an empty stream still has to produce a
 	// message a client can parse and discard.
 	events := pipeMessages(t)
-	if got := names(events); !equalStrings(got, []string{"message_start", "message_delta", "message_stop"}) {
+	if got := names(events); !slices.Equal(got, []string{"message_start", "message_delta", "message_stop"}) {
 		t.Errorf("events = %v, want an empty but complete message", got)
 	}
 }
@@ -287,18 +288,6 @@ func TestMessagesStreamReportsUsageForBilling(t *testing.T) {
 	if stats.firstAt.IsZero() {
 		t.Error("time to first token was not recorded")
 	}
-}
-
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // ------------------------------------------------------- through the gateway
@@ -384,7 +373,7 @@ func TestMessagesSurfaceStreamsEndToEnd(t *testing.T) {
 	if got := resp.Header.Get("X-Accel-Buffering"); got != "no" {
 		t.Errorf("X-Accel-Buffering = %q, want \"no\" - an ingress buffers the stream without it", got)
 	}
-	events := readMessagesStream(t, string(body))
+	events := readEvents(t, string(body))
 	if len(events) == 0 || events[0].name != "message_start" {
 		t.Fatalf("the stream does not open a message:\n%s", body)
 	}
@@ -568,7 +557,7 @@ func TestMessagesStreamPingsWhileTheUpstreamIsSilent(t *testing.T) {
 		t.Fatalf("pipe: %v", err)
 	}
 
-	events := readMessagesStream(t, buf.String())
+	events := readEvents(t, buf.String())
 	if len(events) == 0 || events[0].name != "ping" {
 		t.Fatalf("the silence carried no ping; the client would see a dead connection:\n%v",
 			names(events))
@@ -582,7 +571,7 @@ func TestMessagesStreamPingsWhileTheUpstreamIsSilent(t *testing.T) {
 	}
 	want := []string{"message_start", "content_block_start", "content_block_delta",
 		"content_block_stop", "message_delta", "message_stop"}
-	if !equalStrings(turn, want) {
+	if !slices.Equal(turn, want) {
 		t.Errorf("events without the pings = %v,\nwant %v", turn, want)
 	}
 }

@@ -22,29 +22,10 @@ import (
 func (responsesShape) pipe(dst io.Writer, flush func(), src io.Reader, alias string,
 	_ bool, limit int64,
 ) (streamStats, error) {
-	var stats streamStats
-	st := &responsesStream{
-		alias: alias, respID: id.New("resp"), createdAt: time.Now().Unix(), open: -1,
-	}
-	st.send = func(b []byte) error {
-		if stats.firstAt.IsZero() {
-			stats.firstAt = time.Now()
-		}
-		if _, err := dst.Write(b); err != nil {
-			return err
-		}
-		flush()
-		return nil
-	}
-	readErr := scanSSE(src, limit, st.chunk)
-	// The response is closed even after an upstream failure, so a client does
-	// not wait for an end that never comes.
-	finishErr := st.finish()
-	stats.usage, stats.deltas = st.usage, st.deltas
-	if readErr != nil {
-		return stats, readErr
-	}
-	return stats, finishErr
+	return pipeEvents(dst, flush, src, limit, 0, func(send func([]byte) error) eventStream {
+		return &responsesStream{alias: alias, respID: id.New("resp"), createdAt: time.Now().Unix(),
+			blocks: blocks{open: -1}, send: send}
+	})
 }
 
 // responsesStream is the state a chat completion stream has to be read against
@@ -60,15 +41,12 @@ type responsesStream struct {
 	// done is every finished output item, for the event that closes the
 	// response.
 	done []any
-	// open is the output index of the item under way, or -1. Items open and
-	// close in sequence, as blocks do on the Messages surface.
-	open     int
-	itemID   string
-	isTool   bool
-	openTool int // upstream tool_call index behind the open item
-	callID   string
-	name     string
-	text     strings.Builder
+	// blocks is the output item under way.
+	blocks
+	itemID string
+	callID string
+	name   string
+	text   strings.Builder
 
 	chatChunks
 }
@@ -82,13 +60,8 @@ func (s *responsesStream) textDelta(text string) error {
 	if err := s.start(); err != nil {
 		return err
 	}
-	if s.open < 0 || s.isTool {
-		if err := s.closeItem(); err != nil {
-			return err
-		}
-		if err := s.openMessage(); err != nil {
-			return err
-		}
+	if err := s.enter(false, 0, s.closeItem, s.openMessage); err != nil {
+		return err
 	}
 	s.deltas++
 	s.text.WriteString(text)
@@ -102,13 +75,10 @@ func (s *responsesStream) toolDelta(index int, tc oaiToolCallDelta) error {
 	if err := s.start(); err != nil {
 		return err
 	}
-	if s.open < 0 || !s.isTool || s.openTool != index {
-		if err := s.closeItem(); err != nil {
-			return err
-		}
-		if err := s.openCall(index, tc.ID, tc.Function.Name); err != nil {
-			return err
-		}
+	if err := s.enter(true, index, s.closeItem, func() error {
+		return s.openCall(index, tc.ID, tc.Function.Name)
+	}); err != nil {
+		return err
 	}
 	if tc.Function.Arguments == "" {
 		return nil
@@ -167,7 +137,7 @@ func (s *responsesStream) openMessage() error {
 }
 
 func (s *responsesStream) openCall(upstreamIndex int, upstreamID, name string) error {
-	s.open, s.isTool, s.openTool, s.itemID = len(s.done), true, upstreamIndex, id.New("fc")
+	s.open, s.isTool, s.tool, s.itemID = len(s.done), true, upstreamIndex, id.New("fc")
 	s.callID, s.name = callID(upstreamID), name
 	s.text.Reset()
 	return s.emit("response.output_item.added", map[string]any{
@@ -235,11 +205,5 @@ func (s *responsesStream) emit(name string, payload map[string]any) error {
 	if err != nil {
 		return err
 	}
-	buf := make([]byte, 0, len(name)+len(data)+20)
-	buf = append(buf, "event: "...)
-	buf = append(buf, name...)
-	buf = append(buf, "\ndata: "...)
-	buf = append(buf, data...)
-	buf = append(buf, '\n', '\n')
-	return s.send(buf)
+	return s.send(frame(name, data))
 }

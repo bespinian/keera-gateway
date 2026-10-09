@@ -37,6 +37,47 @@ func connect(t *testing.T, idp *oidctest.IDP, mapping RoleMapping) *OIDC {
 	return o
 }
 
+func TestASignUpProviderForAnyDomainMustProveTheAddress(t *testing.T) {
+	// Anyone it signs in may take an invitation sent to the address, so an
+	// address the provider does not vouch for is refused.
+	for _, tc := range []struct {
+		domains []string
+		ok      bool
+	}{
+		{nil, false},
+		{[]string{AnyDomain}, false},
+		{[]string{"example.ch"}, true},
+	} {
+		idp := oidctest.New(t)
+		o, err := NewOIDC(context.Background(), OIDCConfig{
+			Name: "test", IssuerURL: idp.URL, ClientID: "keera", ClientSecret: "secret",
+			RedirectURL: "https://keera.example.ch/auth/callback",
+			Mapping:     RoleMapping{Default: RoleMember}, Domains: tc.domains, SignUp: true,
+		}, idp.Client())
+		if err != nil {
+			t.Fatal(err)
+		}
+		flow := NewFlow()
+		idp.Claims = func(m map[string]any) {
+			m["nonce"] = flow.Nonce
+			delete(m, "email_verified")
+		}
+		_, err = o.Exchange(context.Background(), "the-code", flow)
+		if (err == nil) != tc.ok {
+			t.Errorf("domains %v without email_verified: err = %v, want accepted %v",
+				tc.domains, err, tc.ok)
+		}
+		idp.Claims = func(m map[string]any) {
+			m["nonce"] = flow.Nonce
+			m["email_verified"] = true
+		}
+		flow = NewFlow()
+		if _, err := o.Exchange(context.Background(), "the-code", flow); err != nil {
+			t.Errorf("domains %v with a verified address: %v", tc.domains, err)
+		}
+	}
+}
+
 func TestAuthCodeURLCarriesStateAndPKCE(t *testing.T) {
 	idp := oidctest.New(t)
 	o := connect(t, idp, RoleMapping{Default: RoleMember})

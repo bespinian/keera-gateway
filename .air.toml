@@ -14,7 +14,10 @@ tmp_dir = "build/air"
 env_files = []
 
 [build]
-  cmd = "go build -trimpath -o ./build/air/keera-gateway ./cmd/keera-gateway"
+  # The catalogue the gateway reads is generated from compose/models.yaml, so
+  # an edit there has to reach build/ before the restart reads it.
+  pre_cmd = ["make -s build/models.dev.yaml"]
+  cmd ="go build -trimpath -o ./build/air/keera-gateway ./cmd/keera-gateway"
   bin = "./build/air/keera-gateway"
   args_bin = ["serve"]
 

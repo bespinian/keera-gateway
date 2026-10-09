@@ -122,6 +122,10 @@ export const api = {
 
   // Passkeys. The /auth routes work before anybody has signed in, and take
   // a JSON body even when it is empty.
+  // The sign-up screen, after a sign-in that matched no organisation.
+  signupInfo: () => get("/auth/signup"),
+  completeSignup: (body) => request("POST", "/auth/signup", body),
+
   passkeySignInOptions: (flow, next) =>
     request("POST", "/auth/passkey/options", {
       flow: flow || "",
@@ -159,6 +163,8 @@ export const api = {
       name,
       email_domain: emailDomain,
     }),
+  liftOrgLimit: (id) =>
+    request("PATCH", `/v1/orgs/${encodeURIComponent(id)}`, { limited: false }),
   deleteOrg: (id) => request("DELETE", `/v1/orgs/${encodeURIComponent(id)}`),
 
   projects: (orgID) => get("/v1/projects" + query({ org_id: orgID })),
@@ -381,6 +387,29 @@ export const api = {
   usage: (orgID, groupBy, since) =>
     get("/v1/usage" + query({ org_id: orgID, group_by: groupBy, since })),
   audit: (params) => get("/v1/audit" + query(params)),
+  // One month's bill for the deployment's own provider keys. The provider
+  // cost and the margin are only in an operator's answer.
+  billing: (orgID, month) =>
+    get("/v1/billing" + query({ org_id: orgID, month })),
+  // The credit an organisation pays in advance, its card and its payments.
+  creditAccount: (orgID) =>
+    get("/v1/billing/account" + query({ org_id: orgID })),
+  updateCredit: (orgID, change) =>
+    request("PATCH", "/v1/billing/account" + query({ org_id: orgID }), change),
+  forgetCard: (orgID) =>
+    request("DELETE", "/v1/billing/account/card" + query({ org_id: orgID })),
+  // Starts a payment. The answer's url is PostFinance's payment page.
+  topUp: (orgID, amountMicros, saveCard) =>
+    request("POST", "/v1/billing/topups" + query({ org_id: orgID }), {
+      amount_micros: amountMicros,
+      save_card: saveCard,
+    }),
+  grantCredit: (orgID, amountMicros, note) =>
+    request("POST", "/v1/billing/grants", {
+      org_id: orgID,
+      amount_micros: amountMicros,
+      note,
+    }),
   // The event log: every recorded request, narrowed to a project, a key, a model,
   // a person or a status - or to none of them, which is the Requests screen.
   requests: (params) => get("/v1/requests" + query(params)),

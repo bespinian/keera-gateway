@@ -752,17 +752,27 @@ function footer(msg, ctx, byAlias) {
       model &&
       (model.input_micros_per_mtok || model.output_micros_per_mtok)
     ) {
-      // The same sum as policy.Model.Cost: cached tokens are part of the
-      // prompt, at the cached rate, or the input rate when none is set.
+      // The same sum as policy.Model.Cost: cache reads and writes are part of
+      // the prompt, each at its own rate, or the input rate when none is set.
+      // A prompt over the long-prompt threshold is charged those prices.
       const input = msg.usage.prompt_tokens || 0;
       const details = msg.usage.prompt_tokens_details || {};
       const cached = Math.min(Math.max(details.cached_tokens || 0, 0), input);
+      const written = Math.min(
+        Math.max(details.cache_write_tokens || 0, 0),
+        input - cached,
+      );
+      const long = model.long_prompt;
+      const rates = long && input > long.above_tokens ? long : model;
       const cachedRate =
-        model.cached_input_micros_per_mtok || model.input_micros_per_mtok;
+        rates.cached_input_micros_per_mtok || rates.input_micros_per_mtok;
+      const writeRate =
+        rates.cache_write_micros_per_mtok || rates.input_micros_per_mtok;
       const cost = Math.floor(
-        ((input - cached) * model.input_micros_per_mtok +
+        ((input - cached - written) * rates.input_micros_per_mtok +
           cached * cachedRate +
-          (msg.usage.completion_tokens || 0) * model.output_micros_per_mtok) /
+          written * writeRate +
+          (msg.usage.completion_tokens || 0) * rates.output_micros_per_mtok) /
           1e6,
       );
       bits.push(money(cost, ctx.currency));

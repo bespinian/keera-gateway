@@ -185,6 +185,10 @@ build. The response header `X-Keera-Removed-Tools` names what was removed.
 `--allow-hosted-tools` stops a level blocking them. Once a level blocks hosted
 tools, no level below can unblock them.
 
+A model on the deployment's own provider key ([billing.md](billing.md)) never
+gets hosted tools, whatever the guardrail says. The provider charges for them
+on top of tokens, and Keera does not bill that.
+
 ## Limits
 
 - **One identity upstream.** The server sees the same credential for every key:

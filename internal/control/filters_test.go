@@ -2,7 +2,6 @@ package control
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/policy"
-	"github.com/bespinian/keera-gateway/internal/store"
 )
 
 func TestReaderModelRefusal(t *testing.T) {
@@ -53,32 +51,6 @@ func TestReaderModelRefusal(t *testing.T) {
 
 /* ------------------------------------------------------ the pattern filter */
 
-// filterStore is routerStore with the filters table cleared as well, so that
-// what these write is the only thing in it.
-func filterStore(t *testing.T) (*store.Store, context.Context) {
-	t.Helper()
-	st, ctx := routerStore(t)
-	if _, err := st.Pool().Exec(ctx, "TRUNCATE filters CASCADE"); err != nil {
-		t.Fatalf("truncate filters: %v", err)
-	}
-	return st, ctx
-}
-
-func putFilterTo(t *testing.T, srv *Server, alias string, body map[string]any) (int, string) {
-	t.Helper()
-	raw, err := json.Marshal(body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest(http.MethodPut,
-		httpx.ControlPrefix+"/v1/filters/"+alias+"?org_id=org_1", bytes.NewReader(raw))
-	req.Header.Set("Authorization", "Bearer "+testOperatorKey)
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(w, req)
-	return w.Code, w.Body.String()
-}
-
 // patternBody is a whole pattern filter: rules, and nothing that would read
 // the request with a model.
 func patternBody() map[string]any {
@@ -94,9 +66,9 @@ func patternBody() map[string]any {
 }
 
 func TestPutFilterWritesAPatternFilter(t *testing.T) {
-	st, ctx := filterStore(t)
+	st, ctx := routerStore(t)
 
-	if code, out := putFilterTo(t, routerServer(ctx, t, st), "redact-keys",
+	if code, out := putTo(t, routerServer(ctx, t, st), "/v1/filters/redact-keys",
 		patternBody()); code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", code, out)
 	}
@@ -128,7 +100,7 @@ func TestPutFilterWritesAPatternFilter(t *testing.T) {
 }
 
 func TestPutFilterRefusesAPatternFilterThatCouldNotRun(t *testing.T) {
-	st, ctx := filterStore(t)
+	st, ctx := routerStore(t)
 	srv := routerServer(ctx, t, st)
 
 	tests := []struct {
@@ -183,7 +155,7 @@ func TestPutFilterRefusesAPatternFilterThatCouldNotRun(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			body := patternBody()
 			tc.edit(body)
-			code, out := putFilterTo(t, srv, "redact-keys", body)
+			code, out := putTo(t, srv, "/v1/filters/redact-keys", body)
 			if code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400 - %s: %s", code, tc.why, out)
 			}
@@ -194,14 +166,14 @@ func TestPutFilterRefusesAPatternFilterThatCouldNotRun(t *testing.T) {
 func TestPutFilterRefusesRulesOnAFilterThatReadsWithAModel(t *testing.T) {
 	// Rules on a rewrite or gate filter are a list nothing applies, and one an
 	// administrator would later read as the thing the filter does.
-	st, ctx := filterStore(t)
+	st, ctx := routerStore(t)
 	srv := routerServer(ctx, t, st)
 
 	for _, mode := range []policy.FilterMode{
 		policy.FilterModeRewrite, policy.FilterModeGate,
 	} {
 		t.Run(string(mode), func(t *testing.T) {
-			code, out := putFilterTo(t, srv, "redact", map[string]any{
+			code, out := putTo(t, srv, "/v1/filters/redact", map[string]any{
 				"mode":   string(mode),
 				"model":  "keera-picker",
 				"prompt": "Replace every credential with [CREDENTIAL].",
@@ -218,10 +190,10 @@ func TestAPatternFilterIsNotStrandedByAnAllowList(t *testing.T) {
 	// It runs no model, so there is nothing for an allow-list to strand it
 	// outside of - and it is the one filter that could never carry a request
 	// anywhere, because its rules are applied in this process.
-	st, ctx := filterStore(t)
+	st, ctx := routerStore(t)
 	srv := routerServer(ctx, t, st)
 
-	if code, out := putFilterTo(t, srv, "redact-keys", patternBody()); code != http.StatusOK {
+	if code, out := putTo(t, srv, "/v1/filters/redact-keys", patternBody()); code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", code, out)
 	}
 

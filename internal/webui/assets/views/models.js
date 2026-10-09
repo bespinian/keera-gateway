@@ -636,12 +636,28 @@ function viewModel(ctx, m) {
                   "input is charged again."
                 : ""),
       ),
+      m.long_prompt
+        ? readRow(
+            `Price for long prompts (${ctx.currency})`,
+            h(
+              "span",
+              { class: "nowrap" },
+              `${money(m.long_prompt.input_micros_per_mtok, "")} in · ` +
+                `${money(m.long_prompt.output_micros_per_mtok, "")} out`,
+            ),
+            `What a request costs instead when its prompt is over ` +
+              `${num(m.long_prompt.above_tokens)} tokens.`,
+          )
+        : null,
       m.subscription
         ? readRow(
             "Paid by",
             pill("Claude subscription", "good"),
-            "Only Claude Code signed in to a Claude plan can use it. Set it " +
-              "up with: keera connect claude-code --subscription",
+            ctx.state.me.claude_subscriptions
+              ? "Only Claude Code signed in to a Claude plan can use it. Set " +
+                  "it up with: keera connect claude-code --subscription"
+              : "This deployment does not take Claude subscriptions, so the " +
+                  "gateway refuses this model.",
           )
         : null,
     ),
@@ -902,6 +918,16 @@ const PRESET_FIELDS = [
         ? String(m.cached_input_micros_per_mtok / 1e6)
         : null,
   },
+  {
+    key: "priceWrite",
+    label: "list cache-write price",
+    fromModel: true,
+    numeric: true,
+    of: (p, m) =>
+      m && m.cache_write_micros_per_mtok
+        ? String(m.cache_write_micros_per_mtok / 1e6)
+        : null,
+  },
 ];
 
 // pick is a provider and one of its models to start from, as the provider
@@ -957,6 +983,7 @@ function editModel(ctx, existing, providers, pick) {
   const priceIn = priceInput(m.input_micros_per_mtok);
   const priceOut = priceInput(m.output_micros_per_mtok);
   const priceCached = priceInput(m.cached_input_micros_per_mtok);
+  const priceWrite = priceInput(m.cache_write_micros_per_mtok);
   // The fields a provider can fill in, by the names PRESET_FIELDS knows them
   // by.
   const fields = {
@@ -970,6 +997,7 @@ function editModel(ctx, existing, providers, pick) {
     priceIn,
     priceOut,
     priceCached,
+    priceWrite,
   };
   setKinds(kind, KINDS, m.kind || "chat");
 
@@ -1133,10 +1161,10 @@ function editModel(ctx, existing, providers, pick) {
         marks.priceOut,
       ),
     ),
-    // On its own row rather than squeezed beside the two above, because it is
-    // the one price that needs a sentence next to it: left blank it is not a
-    // rate of nothing, it is no rate at all, and those tokens are then charged
-    // at the input price.
+    // On their own row rather than squeezed beside the two above, because
+    // they are the prices that need a sentence next to them: left blank they
+    // are not a rate of nothing, they are no rate at all, and those tokens
+    // are then charged at the input price.
     h(
       "div",
       { class: "field-row" },
@@ -1153,6 +1181,19 @@ function editModel(ctx, existing, providers, pick) {
             "price. Self-hosted models do not need it.",
         ),
         marks.priceCached,
+      ),
+      h(
+        "div",
+        { class: "field" },
+        h("label", {}, `Cache write price / Mtok (${ctx.currency})`),
+        priceWrite,
+        h(
+          "div",
+          { class: "hint" },
+          "What a hosted provider charges for prompt tokens it writes to " +
+            "its cache. If blank, they are charged at the input price.",
+        ),
+        marks.priceWrite,
       ),
     ),
   );
@@ -1223,9 +1264,41 @@ function editModel(ctx, existing, providers, pick) {
   const anthropicChosen = () =>
     state.hosted && !!state.place && state.place.p?.name === "anthropic";
   const paidByClaudePlan = () => anthropicChosen() && subscription.checked;
+  // The form has no fields for a long prompt's prices. A model the table
+  // knows takes the table's, and any other keeps its own while it names the
+  // same backend model.
+  const longPrompt = () => {
+    const { m: known } = state.preset || {};
+    if (state.hosted && known) return known.long_prompt || null;
+    if (existing && backendModel.value.trim() === existing.backend_model)
+      return existing.long_prompt || null;
+    return null;
+  };
+  // The operator holds the key for this provider. The model is sent to the
+  // provider's own endpoint at its list prices, so those are not asked.
+  const onPlatformKey = () =>
+    state.hosted && !!state.place && !!state.place.p?.platform_key;
+  const platformNote = h(
+    "div",
+    { class: "field" },
+    h("label", {}, "API key"),
+    h(
+      "div",
+      { class: "hint" },
+      "Provided by Keera directly. Use is billed to your organisation at " +
+        "the provider's list prices.",
+    ),
+  );
+  // A deployment without Claude subscriptions offers none. A model that is
+  // one still shows the box, so it can be turned back into an ordinary one.
+  const offersSubscription =
+    !!ctx.state.me.claude_subscriptions || !!m.subscription;
   const paintSubscription = () => {
-    subscriptionField.hidden = !anthropicChosen();
-    keyField.hidden = paidByClaudePlan();
+    const platform = onPlatformKey() && !paidByClaudePlan();
+    subscriptionField.hidden = !anthropicChosen() || !offersSubscription;
+    keyField.hidden = paidByClaudePlan() || platform;
+    platformNote.hidden = !platform;
+    productSlot.hidden = platform;
   };
   subscription.addEventListener("change", paintSubscription);
 
@@ -1267,6 +1340,7 @@ function editModel(ctx, existing, providers, pick) {
     // answer: a hosted model takes a provider, a model and a key, and the key
     // is the only one of the three that is not on the screen already.
     keyField,
+    platformNote,
     slot,
     h(
       "div",
@@ -1300,8 +1374,12 @@ function editModel(ctx, existing, providers, pick) {
         // not a field left blank - it is the one question the form asked
         // instead of showing a URL.
         const preset = state.hosted ? state.preset : null;
+        // The control plane sets the endpoint itself.
+        const platform = onPlatformKey() && !paidByClaudePlan();
+        if (platform && preset) list.splice(0, list.length, preset.p.endpoint);
         if (
           preset &&
+          !platform &&
           preset.p.needs_product_id &&
           !state.overridden.has("backends") &&
           !list.length
@@ -1338,7 +1416,7 @@ function editModel(ctx, existing, providers, pick) {
           // one to go: sending "" on every save would wipe it.
           const paidByPlan = paidByClaudePlan();
           let credential;
-          if (paidByPlan) credential = undefined;
+          if (paidByPlan || platform) credential = undefined;
           else if (clearKey && clearKey.checked) credential = "";
           else if (apiKey.value) credential = apiKey.value;
 
@@ -1360,6 +1438,8 @@ function editModel(ctx, existing, providers, pick) {
             input_micros_per_mtok: toMicros(priceIn.value),
             output_micros_per_mtok: toMicros(priceOut.value),
             cached_input_micros_per_mtok: toMicros(priceCached.value),
+            cache_write_micros_per_mtok: toMicros(priceWrite.value),
+            long_prompt: longPrompt(),
             subscription: paidByPlan,
             enabled: enabled.checked,
           };
@@ -1517,6 +1597,9 @@ function providerAnswers(p, known, currency) {
       !!known &&
       !!known.cached_input_micros_per_mtok &&
       p.currency === currency,
+    // The same for a provider that charges nothing extra for a cache write.
+    priceWrite:
+      !!known && !!known.cache_write_micros_per_mtok && p.currency === currency,
   };
 }
 
@@ -1679,6 +1762,13 @@ function hostedFields(ctx, providers, form) {
     if (!state.hosted || !p) return null;
     const fixed = providerAnswers(p, m, ctx.currency);
     for (const key of state.overridden) fixed[key] = false;
+    // On the operator's key, the control plane sets the endpoint and the list
+    // prices whatever is sent, so they cannot be overridden here either.
+    if (p.platform_key) {
+      fixed.backends = true;
+      for (const key of ["priceIn", "priceOut", "priceCached", "priceWrite"])
+        fixed[key] = !!m;
+    }
     return fixed;
   };
 

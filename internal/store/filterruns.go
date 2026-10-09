@@ -106,18 +106,10 @@ func filterStatTargets(s *FilterStat) []any {
 // filters exist, and a zero row would not prove the filter never ran.
 func (s *Store) FilterStats(ctx context.Context, orgID string, from, to time.Time) (
 	map[string]FilterStat, error) {
-	rows, err := s.pool.Query(ctx, `SELECT filter, `+filterStatColumns+`
+	stats, err := queryAll(ctx, s.pool, scanFilterStat, `SELECT filter, `+filterStatColumns+`
 		FROM filter_runs
 		WHERE ts >= $1 AND ts < $2 AND org_id = $3
 		GROUP BY filter`, from, to, orgID)
-	if err != nil {
-		return nil, err
-	}
-	stats, err := collect(rows, func(r row) (FilterStat, error) {
-		var st FilterStat
-		err := r.Scan(append([]any{&st.Filter}, filterStatTargets(&st)...)...)
-		return st, err
-	})
 	if err != nil {
 		return nil, err
 	}
@@ -126,6 +118,12 @@ func (s *Store) FilterStats(ctx context.Context, orgID string, from, to time.Tim
 		out[st.Filter] = st
 	}
 	return out, nil
+}
+
+func scanFilterStat(r row) (FilterStat, error) {
+	var st FilterStat
+	err := r.Scan(append([]any{&st.Filter}, filterStatTargets(&st)...)...)
+	return st, err
 }
 
 // FilterPoint is one bucket of a filter's chart.
@@ -197,7 +195,7 @@ func (s *Store) FilterReportFor(ctx context.Context, orgID, alias string,
 // quiet ones included, so a filter that stopped running shows as a gap.
 func (s *Store) filterSeries(ctx context.Context, orgID, alias string,
 	from, to time.Time, bucket string) ([]FilterPoint, error) {
-	rows, err := s.pool.Query(ctx, `
+	return queryAll(ctx, s.pool, scanFilterPoint, `
 		WITH buckets AS (
 		    SELECT generate_series(
 		        date_trunc($5, $1::timestamptz),
@@ -215,20 +213,18 @@ func (s *Store) filterSeries(ctx context.Context, orgID, alias string,
 		    AND f.ts >= $1 AND f.ts < $2
 		    AND f.org_id = $3 AND f.filter = $4
 		GROUP BY b.at ORDER BY b.at`, from, to, orgID, alias, bucket)
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, func(r row) (FilterPoint, error) {
-		var p FilterPoint
-		err := r.Scan(&p.At, &p.Runs, &p.Refused, &p.Errors, &p.Rewrote, &p.CostMicros)
-		return p, err
-	})
+}
+
+func scanFilterPoint(r row) (FilterPoint, error) {
+	var p FilterPoint
+	err := r.Scan(&p.At, &p.Runs, &p.Refused, &p.Errors, &p.Rewrote, &p.CostMicros)
+	return p, err
 }
 
 // filterProjects is one filter's runs split by project, most refused first.
 func (s *Store) filterProjects(ctx context.Context, orgID, alias string,
 	from, to time.Time) ([]FilterProjectRow, error) {
-	rows, err := s.pool.Query(ctx, `
+	return queryAll(ctx, s.pool, scanFilterProjectRow, `
 		SELECT COALESCE(project_id, ''), count(*),
 		       `+countOf("outcome", FilterRefuse)+`,
 		       `+countOf("outcome", FilterRewrite)+`,
@@ -238,12 +234,10 @@ func (s *Store) filterProjects(ctx context.Context, orgID, alias string,
 		WHERE ts >= $1 AND ts < $2 AND org_id = $3 AND filter = $4
 		GROUP BY 1
 		ORDER BY 3 DESC, 2 DESC`, from, to, orgID, alias)
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, func(r row) (FilterProjectRow, error) {
-		var t FilterProjectRow
-		err := r.Scan(&t.ProjectID, &t.Runs, &t.Refused, &t.Rewrote, &t.Errors, &t.CostMicros)
-		return t, err
-	})
+}
+
+func scanFilterProjectRow(r row) (FilterProjectRow, error) {
+	var t FilterProjectRow
+	err := r.Scan(&t.ProjectID, &t.Runs, &t.Refused, &t.Rewrote, &t.Errors, &t.CostMicros)
+	return t, err
 }

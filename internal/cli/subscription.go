@@ -30,6 +30,11 @@ import (
 // a new key; a member takes over one an administrator issued them. See
 // docs/subscriptions.md.
 
+// errSubscriptionsOff is what --subscription says on a deployment that does
+// not take Claude subscriptions.
+var errSubscriptionsOff = errors.New("this deployment does not take Claude subscriptions; " +
+	"run 'keera connect claude-code' without --subscription to use a Keera key instead")
+
 // subscriptionSetup is what one `connect --subscription` was asked for.
 type subscriptionSetup struct {
 	org, project, model string
@@ -42,6 +47,9 @@ func connectSubscription(ctx context.Context, c *client, in subscriptionSetup) e
 	me, err := whoami(ctx, c)
 	if err != nil {
 		return err
+	}
+	if !me.ClaudeSubscriptions {
+		return errSubscriptionsOff
 	}
 	if me.UserID == "" {
 		// The operator key wins over a sign-in, so signing in alone is not enough.

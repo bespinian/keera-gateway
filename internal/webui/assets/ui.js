@@ -221,6 +221,7 @@ export const icons = {
     "M3 4.5h18v6H3zM3 13.5h18v6H3zM6.5 7.5h.01M6.5 16.5h.01M10 7.5h7M10 16.5h7",
   cloud: "M18 10h-1.3A6 6 0 1 0 9 19h9a4.5 4.5 0 0 0 0-9z",
   usage: "M3 3v18h18M7 15l4-5 3 3 5-7",
+  billing: "M6 2h12v20l-3-2-3 2-3-2-3 2zM9 7h6M9 11h6M9 15h4",
   audit:
     "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M9 13h6M9 17h4",
   orgs: "M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M9 13h.01M9 17h.01M15 9h.01M15 13h.01M15 17h.01",

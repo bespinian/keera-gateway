@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -30,25 +29,7 @@ import (
 
 func sandboxStore(t *testing.T) (*store.Store, context.Context) {
 	t.Helper()
-	dsn := os.Getenv("KEERA_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("set KEERA_TEST_DATABASE_URL to run the control-plane tests that need one")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	t.Cleanup(cancel)
-
-	st, err := store.Open(ctx, dsn, 4)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(st.Close)
-	if _, err := st.Migrate(ctx); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	if _, err := st.Pool().Exec(ctx, `TRUNCATE sandboxes, sandbox_classes, guardrails,
-		api_keys, users, projects, orgs RESTART IDENTITY CASCADE`); err != nil {
-		t.Fatalf("truncate: %v", err)
-	}
+	st, ctx := testStore(t, "sandboxes", "sandbox_classes", "guardrails", "api_keys", "users", "projects")
 	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_1", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
@@ -352,6 +333,40 @@ func TestSandboxHonoursProjectGuardrail(t *testing.T) {
 	}
 }
 
+// A sandbox is a machine of the deployment's, so an organisation that signed
+// itself up gets one only once it has paid, or an operator lifts the limit.
+func TestALimitedOrganisationGetsNoSandbox(t *testing.T) {
+	st, ctx := sandboxStore(t)
+	limited := true
+	if _, err := st.UpdateOrg(ctx, "org_1", store.OrgChange{Limited: &limited}); err != nil {
+		t.Fatalf("UpdateOrg: %v", err)
+	}
+	m := sandbox.NewManager(st, stubDriver{}, sandbox.ManagerOptions{
+		Log: slog.New(slog.DiscardHandler),
+	})
+	ts := sandboxServer(t, st, m)
+	body := map[string]any{
+		"org_id": "org_1", "name": "first", "class": "standard",
+		"authorized_keys": []string{"ssh-ed25519 AAAA test"},
+	}
+	var envelope struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if code := call(t, ts, http.MethodPost, httpx.ControlPrefix+"/v1/sandboxes", body, &envelope); code != http.StatusForbidden || envelope.Error.Code != "org_limited" {
+		t.Fatalf("status = %d, code %q; want 403 org_limited", code, envelope.Error.Code)
+	}
+
+	lifted := false
+	if _, err := st.UpdateOrg(ctx, "org_1", store.OrgChange{Limited: &lifted}); err != nil {
+		t.Fatalf("UpdateOrg: %v", err)
+	}
+	if code := call(t, ts, http.MethodPost, httpx.ControlPrefix+"/v1/sandboxes", body, nil); code != http.StatusCreated {
+		t.Errorf("after the limit was lifted: status = %d, want 201", code)
+	}
+}
+
 func TestSandboxVisibilityAndAttachRules(t *testing.T) {
 	st, ctx := sandboxStore(t)
 
@@ -530,4 +545,60 @@ func (stubDriver) Extend(context.Context, sandbox.Ref, time.Time) error {
 func (stubDriver) Terminate(context.Context, sandbox.Ref) error { return nil }
 func (stubDriver) Dial(context.Context, sandbox.Ref, int) (net.Conn, error) {
 	return nil, sandbox.ErrNotReady
+}
+
+func TestImageUnderAllowsTagsAndPathsOfAPrefix(t *testing.T) {
+	prefixes := []string{"registry.example.ch/sandbox", "registry.example.ch/team/"}
+	for image, want := range map[string]bool{
+		"registry.example.ch/sandbox":              true,
+		"registry.example.ch/sandbox:2":            true,
+		"registry.example.ch/sandbox@sha256:abc":   true,
+		"registry.example.ch/team/python:3":        true,
+		"registry.example.ch/sandbox-private:1":    false,
+		"registry.example.ch/sandbox/private:1":    false,
+		"registry.example.ch/other:1":              false,
+		"evil.example/registry.example.ch/sandbox": false,
+	} {
+		if got := imageUnder(image, prefixes); got != want {
+			t.Errorf("imageUnder(%q) = %v, want %v", image, got, want)
+		}
+	}
+}
+
+// Sandbox pods pull with the deployment's registry credentials, so an
+// administrator could otherwise run another tenant's private image.
+func TestAnAdministratorPicksOnlyAllowedImages(t *testing.T) {
+	st, _ := sandboxStore(t)
+	srv := New(st, nil, nil, nil, Options{
+		OperatorKey: testOperatorKey, Currency: "CHF",
+		Template:      store.OrgTemplate{SandboxClasses: []policy.SandboxClass{{Image: "example/sandbox:2"}}},
+		SandboxImages: []string{"registry.example.ch/team/"},
+	}, slog.New(slog.DiscardHandler))
+
+	put := func(p *authn.Principal, name, image string) int {
+		raw, _ := json.Marshal(map[string]any{"image": image})
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodPut,
+			"/v1/sandbox-classes/"+name+"?org_id=org_1", bytes.NewReader(raw))
+		r.SetPathValue("name", name)
+		w := httptest.NewRecorder()
+		srv.putSandboxClass(w, r, p)
+		return w.Code
+	}
+	admin, operator := &authnPrincipalAdmin, &authn.Principal{Via: authn.MethodOperatorKey}
+	for image, want := range map[string]int{
+		"example/sandbox:2":                 http.StatusOK,
+		"registry.example.ch/team/python:3": http.StatusOK,
+		"registry.example.ch/private:1":     http.StatusForbidden,
+	} {
+		if code := put(admin, "scratch", image); code != want {
+			t.Errorf("an administrator giving %s: %d, want %d", image, code, want)
+		}
+	}
+	// An operator may give any image, and the class may keep it.
+	if code := put(operator, "custom", "registry.example.ch/private:1"); code != http.StatusOK {
+		t.Fatalf("an operator giving any image: %d", code)
+	}
+	if code := put(admin, "custom", "registry.example.ch/private:1"); code != http.StatusOK {
+		t.Errorf("an administrator keeping a class's image: %d", code)
+	}
 }

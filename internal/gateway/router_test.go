@@ -41,49 +41,22 @@ func routerHarness(t *testing.T, decide func(segments []string) string,
 		plane = kind[0]
 	}
 
-	backend := func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		var sent struct {
-			Model    string `json:"model"`
-			Logprobs bool   `json:"logprobs"`
-			Messages []struct {
-				Content string `json:"content"`
-			} `json:"messages"`
-		}
-		_ = json.Unmarshal(raw, &sent)
-		w.Header().Set("Content-Type", "application/json")
-
-		if sent.Model != "picker-served" {
-			_, _ = io.WriteString(w, `{"id":"1","choices":[{"message":{"content":"hi"}}],`+
-				`"usage":{"prompt_tokens":10,"completion_tokens":5}}`)
-			return
-		}
-		var segments []string
-		if len(sent.Messages) > 1 {
-			_ = json.Unmarshal([]byte(sent.Messages[1].Content), &segments)
-		}
+	backend := guardBackend("picker-served", func(c guardCall) string {
 		// The same model can be both a router's and a filter's, and on the
 		// wire the only thing that tells the two calls apart is the format the
 		// gateway appended to the instruction. A gate is asked for a verdict,
 		// so it is given one; everything else is the routing decision.
-		answer := decide(segments)
-		if len(sent.Messages) > 0 && strings.Contains(sent.Messages[0].Content, "ALLOW") {
+		answer := decide(c.segments)
+		if strings.Contains(c.instruction, "ALLOW") {
 			answer = "ALLOW"
 		}
-		var instruction string
-		if len(sent.Messages) > 0 {
-			instruction = sent.Messages[0].Content
-		}
-		if sent.Logprobs && plane == servesLogprobs {
-			if body, ok := lettered(instruction, answer); ok {
-				_, _ = io.WriteString(w, body)
-				return
+		if c.logprobs && plane == servesLogprobs {
+			if body, ok := lettered(c.instruction, answer); ok {
+				return body
 			}
 		}
-		reply, _ := json.Marshal(answer)
-		_, _ = io.WriteString(w, `{"id":"2","choices":[{"message":{"content":`+string(reply)+
-			`}}],"usage":{"prompt_tokens":50,"completion_tokens":2}}`)
-	}
+		return chatAnswer(answer, 50, 2)
+	}, jsonBackend(hiAnswer))
 
 	if resolved == nil {
 		resolved = policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"}, nil, nil, nil)
@@ -924,7 +897,7 @@ func TestTheInFlightCountIsGivenBackWhenTheRequestIsOver(t *testing.T) {
 	// works for an hour and then stops moving traffic.
 	now := time.Now()
 	for _, alias := range []string{"keera-small", "keera-large"} {
-		if got := h.srv.load.read(alias, now).inflight; got != 0 {
+		if got := h.srv.load.read(policy.ModelKey("org_1", alias), now).inflight; got != 0 {
 			t.Errorf("%s has %d requests in flight after all of them finished",
 				alias, got)
 		}

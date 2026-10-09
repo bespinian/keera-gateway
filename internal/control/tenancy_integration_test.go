@@ -39,11 +39,7 @@ type tenants struct {
 
 func twoTenants(t *testing.T) tenants {
 	t.Helper()
-	st, ctx := streamStore(t)
-	if _, err := st.Pool().Exec(ctx,
-		"TRUNCATE users, sessions, audit_log RESTART IDENTITY CASCADE"); err != nil {
-		t.Fatalf("emptying the tables: %v", err)
-	}
+	st, ctx := testStore(t, "users", "sessions", "audit_log")
 
 	for _, org := range []struct{ id, name string }{
 		{"org_a", "Example Bank"}, {"org_b", "Another Customer"},
@@ -708,6 +704,7 @@ func (tn tenants) create(p *authn.Principal, body string) *httptest.ResponseReco
 
 func TestASubscriptionKeyAlwaysBelongsToSomebody(t *testing.T) {
 	tn := twoTenants(t)
+	tn.srv.opts.ClaudeSubscriptions = true
 	carol := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleAdmin,
 		OrgID: "org_a", UserID: "user_carol"}
 

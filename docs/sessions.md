@@ -46,20 +46,11 @@ curl http://127.0.0.1:8080/api/v1/chat/completions \
 The value is hashed, so the client's own conversation id is not stored. Which of
 the three headers carries it makes no difference to the key.
 
-**There is no standard for this.** The closest options, and why they do not fit:
-
-- Neither the OpenAI API nor the Anthropic Messages API has a field for the
-  conversation. The nearest is a _person_ - OpenAI's `user` field, Anthropic's
-  `metadata.user_id` - and grouping by person would put every task a developer
-  ever ran into one session.
-- W3C Trace Context has the wrong shape. `traceparent` names a trace, and tools
-  that give each completion its own trace would make every request its own task.
-- OpenTelemetry's GenAI conventions name the concept, `gen_ai.conversation.id`,
-  but only as a span attribute, not on the wire.
-- The OpenAI Responses API's `conversation` and `previous_response_id` name a
-  conversation stored at OpenAI, which the gateway cannot see. A client that
-  sends only the new turn with them looks like a new task on every request,
-  unless it states a session.
+**There is no standard for this.** Neither the OpenAI nor the Anthropic API has
+a field for the conversation; their `user` fields name a person, which would
+put every task a developer ran into one session. Trace ids do not fit either.
+A Responses client that sends only the new turn, with `previous_response_id`,
+looks like a new task on every request unless it states a session.
 
 **The client must compute a stated id per conversation.** A constant in a static
 configuration - the same `X-Session-Id` on every request - merges that key's
@@ -122,8 +113,9 @@ stated or inferred.
 
 An agent sandbox avoids the problem: it is exactly one task, so it sends its own
 id in `X-Keera-Session`. The gateway configures Pi and Claude Code to do so; an
-image that adds another agent has to configure it. See
-[sandboxes.md](sandboxes.md).
+image that adds another agent has to configure it. The sandbox's session key is
+computed once at creation, the same way as per request, so a sandbox and its
+task can be read side by side. See [sandboxes.md](sandboxes.md).
 
 ## How the grouping is computed
 
@@ -196,18 +188,11 @@ request in the task: that column, the first column of `keera failures`, or the
 
 ### The API
 
-```
-GET /control/v1/sessions      ?org_id&from&to&since&sort&unhappy&alias&project_id&key_id&user_id&key&limit&before
-GET /control/v1/sessions/{id}  where {id} is any request in the session
-```
-
-`key` is a session key, as the list returns it: it narrows the list to one
-conversation. Both return `gap_seconds`, the threshold used for the grouping.
-`format=csv` on the list exports up to 5000 sessions of the filtered window, one
-row per session.
-
-Paging with `before` works only with the default order. Under a ranking the
-cursor would skip rows without warning.
+`GET /control/v1/sessions` takes the same filters as the command, and `key` to
+narrow it to one conversation. `GET /control/v1/sessions/{id}` takes any request
+in the session. Both return `gap_seconds`, the gap used. `format=csv` on the
+list exports up to 5000 sessions. Paging with `before` works only in the default
+order.
 
 ## Narrowing, and the one filter that is not what it looks like
 

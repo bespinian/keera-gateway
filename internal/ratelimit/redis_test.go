@@ -193,6 +193,14 @@ func replica(t *testing.T, rdb *redis.Client, prefix string) *Redis {
 	return NewRedis(rdb, New(), RedisOptions{Prefix: prefix, Timeout: 5 * time.Second}, nil)
 }
 
+func TestRedisKeepsTheLimiterContract(t *testing.T) {
+	rdb, _ := redisFor(t)
+	testContract(t, func(t *testing.T) limiter {
+		_, prefix := redisFor(t)
+		return replica(t, rdb, prefix)
+	})
+}
+
 func TestRedisSpendsOneAllowanceAcrossReplicas(t *testing.T) {
 	// The whole point. Two gateways, one limit of 10: between them they get
 	// ten requests, not ten each.
@@ -222,76 +230,6 @@ func TestRedisSpendsOneAllowanceAcrossReplicas(t *testing.T) {
 	}
 	if b.Admit(reqs, now.Add(6*time.Second)) == -1 {
 		t.Error("six seconds bought a second request; the refill is being applied per replica")
-	}
-}
-
-func TestRedisAdmitChargesEveryLevelOrNone(t *testing.T) {
-	// The same rule the in-memory limiter keeps, now across a round trip: an
-	// org must not pay for requests its project refused.
-	rdb, prefix := redisFor(t)
-	r := replica(t, rdb, prefix)
-	now := time.Now()
-	reqs := []Requirement{
-		{Key: "org:o1|rpm", PerMinute: 600, Take: true},
-		{Key: "project:t1|rpm", PerMinute: 2, Take: true},
-	}
-
-	for i := range 2 {
-		if got := r.Admit(reqs, now); got != -1 {
-			t.Fatalf("request %d: Admit = %d, want -1", i, got)
-		}
-	}
-	for range 20 {
-		if got := r.Admit(reqs, now); got != 1 {
-			t.Fatalf("Admit = %d, want 1 - the project's limit is what binds", got)
-		}
-	}
-	if got := r.Remaining("org:o1|rpm", 600, now); got != 598 {
-		t.Errorf("the org has %d of 600 left, want 598: it was charged for requests "+
-			"the project refused", got)
-	}
-}
-
-func TestRedisReportsTheOutermostLimitThatBinds(t *testing.T) {
-	// The index has to be an index into the caller's requirements, including
-	// the unlimited ones that are never sent to Redis at all.
-	rdb, prefix := redisFor(t)
-	r := replica(t, rdb, prefix)
-	now := time.Now()
-	reqs := []Requirement{
-		{Key: "org|tpm", PerMinute: 0},
-		{Key: "org|rpm", PerMinute: 1, Take: true},
-		{Key: "key|rpm", PerMinute: 1, Take: true},
-	}
-	if got := r.Admit(reqs, now); got != -1 {
-		t.Fatalf("Admit = %d, want -1", got)
-	}
-	if got := r.Admit(reqs, now); got != 1 {
-		t.Errorf("Admit = %d, want 1 - the org is checked before the key, and the "+
-			"unlimited requirement still occupies index 0", got)
-	}
-}
-
-func TestRedisChargeCanOverdrawSoOneHugeRequestIsPaidForLater(t *testing.T) {
-	rdb, prefix := redisFor(t)
-	r := replica(t, rdb, prefix)
-	now := time.Now()
-	inCredit := func(at time.Time) bool {
-		return r.Admit([]Requirement{{Key: "org|tpm", PerMinute: 1000}}, at) < 0
-	}
-
-	if !inCredit(now) {
-		t.Fatal("a fresh bucket should admit a request")
-	}
-	charge(r, "org|tpm", 1000, 5000, now)
-	if inCredit(now) {
-		t.Error("the bucket is overdrawn and should refuse")
-	}
-	if inCredit(now.Add(2 * time.Minute)) {
-		t.Error("the debt was forgiven too early")
-	}
-	if !inCredit(now.Add(5 * time.Minute)) {
-		t.Error("the debt was never repaid")
 	}
 }
 
@@ -363,27 +301,6 @@ func TestRedisChargeFromOneReplicaBindsTheOther(t *testing.T) {
 	charge(a, "org|tpm", 1000, 5000, now)
 	if got := b.Admit([]Requirement{{Key: "org|tpm", PerMinute: 1000}}, now); got != 0 {
 		t.Errorf("Admit = %d, want 0: the other replica did not see the charge", got)
-	}
-}
-
-func TestRedisRetryReportsWhenTheNextRequestFits(t *testing.T) {
-	rdb, prefix := redisFor(t)
-	r := replica(t, rdb, prefix)
-	now := time.Now()
-	reqs := []Requirement{{Key: "org|rpm", PerMinute: 60, Take: true}}
-	for range 60 {
-		r.Admit(reqs, now)
-	}
-	if got := r.Admit(reqs, now); got != 0 {
-		t.Fatalf("Admit = %d, want 0 - the burst should be spent", got)
-	}
-
-	d := r.Retry("org|rpm", 60, now)
-	if d <= 0 {
-		t.Fatalf("Retry = %v, want a positive wait", d)
-	}
-	if got := r.Admit(reqs, now.Add(d+10*time.Millisecond)); got != -1 {
-		t.Errorf("waiting the advertised %v was not enough", d)
 	}
 }
 

@@ -10,8 +10,10 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/auth"
@@ -29,6 +31,15 @@ type Budgeter interface {
 	// Spent reports what one budget window has been charged so far. It feeds
 	// the budget headers, so a client sees a limit coming before it is refused.
 	Spent(t policy.ScopeType, id string, p policy.Period, now time.Time) int64
+	// AllowCredit reports whether an organisation may use the deployment's
+	// provider keys, which it may pay for in advance. See docs/billing.md.
+	AllowCredit(orgID string) error
+	// HoldCredit is AllowCredit for a request, which holds the most it may
+	// cost until ReleaseCredit. It returns what it held.
+	HoldCredit(orgID string, micros int64) (int64, error)
+	ReleaseCredit(orgID string, micros int64)
+	// ChargeCredit takes a request's use of those keys from the credit.
+	ChargeCredit(orgID string, micros int64)
 }
 
 // Limiter is the token buckets a request is decided against.
@@ -71,6 +82,10 @@ type Options struct {
 	// UpstreamDeny is the addresses the gateway never connects to. Nil denies
 	// nothing; the setting's default is DefaultUpstreamDeny. See egress.go.
 	UpstreamDeny []netip.Prefix
+	// LimitPrivate keeps every organisation from addresses inside the network,
+	// except through the names in PrivateHosts. See egress.go.
+	LimitPrivate bool
+	PrivateHosts []string
 	// Currency labels the budget headers. All money is integer micro-units of
 	// it.
 	Currency string
@@ -78,6 +93,9 @@ type Options struct {
 	// set, a refusal says where to go and look. Without a panel, it says
 	// nothing rather than name an address that does not answer.
 	PanelURL string
+	// ClaudeSubscriptions lets subscription keys through. Off, they are
+	// refused, and so is every subscription model, which only they reach.
+	ClaudeSubscriptions bool
 }
 
 // The defaults of the settings behind Options. internal/config reads them
@@ -111,8 +129,19 @@ type Server struct {
 	sink    Sink
 	metrics *metrics.Registry
 	client  *http.Client
-	log     *slog.Logger
-	opts    Options
+	// publicClient is client for an organisation that signed itself up and
+	// has not paid yet: it also refuses private addresses, so such an
+	// organisation cannot reach the deployment's own network, even through a
+	// public name that resolves into it.
+	publicClient *http.Client
+	// keyClient is the client for a model on the deployment's key. A hosted
+	// provider sends nothing until a whole answer is done, and gives up on
+	// one that runs too long itself, so it is given as long as the gateway
+	// reads an answer whose client left. Cutting it short would lose an
+	// answer the deployment pays for.
+	keyClient *http.Client
+	log       *slog.Logger
+	opts      Options
 
 	rr sync.Map // model key -> *atomic.Uint64, for round-robin over backends
 	// load is what this process has seen of each destination, for the
@@ -132,8 +161,6 @@ type Server struct {
 func New(src policy.Source, budgets Budgeter, limiter Limiter, sink Sink,
 	m *metrics.Registry, opts Options, log *slog.Logger) *Server {
 	opts.setDefaults()
-	dialer := &net.Dialer{Timeout: dialTimeout, KeepAlive: 30 * time.Second,
-		Control: denyDial(opts.UpstreamDeny)}
 	return &Server{
 		src:     src,
 		budgets: budgets,
@@ -143,25 +170,70 @@ func New(src policy.Source, budgets Budgeter, limiter Limiter, sink Sink,
 		log:     log,
 		opts:    opts,
 		load:    newLoads(),
-		client: &http.Client{
-			// No client timeout: a stream may run longer than any value worth
-			// setting. The request context cancels it when the client leaves.
-			Transport: &http.Transport{
-				Proxy:               http.ProxyFromEnvironment,
-				DialContext:         dialer.DialContext,
-				MaxIdleConns:        512,
-				MaxIdleConnsPerHost: 256,
-				IdleConnTimeout:     90 * time.Second,
-				ForceAttemptHTTP2:   true,
-				// Compression would buffer, which defeats streaming.
-				DisableCompression:    true,
-				ResponseHeaderTimeout: opts.UpstreamHeaderTimeout,
-			},
-			// A redirect is answered, not followed. Followed, it would take the
-			// request and its credential to an address nobody configured.
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		},
+		client:  upstreamClient(opts, orgDial(opts)),
+		publicClient: upstreamClient(opts, newDialer(
+			denyDial(append(slices.Clone(opts.UpstreamDeny), privateRanges...),
+				"this organisation can only reach public addresses until it has bought credit once"),
+		).DialContext),
+		keyClient: upstreamClient(withHeaderTimeout(opts, readOnFor),
+			newDialer(denyDial(opts.UpstreamDeny, "KEERA_UPSTREAM_DENY blocks it")).DialContext),
 	}
+}
+
+// orgDial is how an organisation's requests connect, as KEERA_UPSTREAM_DENY
+// and KEERA_UPSTREAM_PRIVATE say.
+func orgDial(opts Options) func(context.Context, string, string) (net.Conn, error) {
+	if opts.LimitPrivate {
+		return privateDial(opts.UpstreamDeny, opts.PrivateHosts)
+	}
+	return newDialer(denyDial(opts.UpstreamDeny, "KEERA_UPSTREAM_DENY blocks it")).DialContext
+}
+
+func newDialer(deny func(string, string, syscall.RawConn) error) *net.Dialer {
+	return &net.Dialer{Timeout: dialTimeout, KeepAlive: 30 * time.Second, Control: deny}
+}
+
+func withHeaderTimeout(opts Options, d time.Duration) Options {
+	opts.UpstreamHeaderTimeout = d
+	return opts
+}
+
+// upstreamClient is the client requests leave through, connecting with dial.
+func upstreamClient(opts Options, dial func(context.Context, string, string) (net.Conn, error)) *http.Client {
+	return &http.Client{
+		// No client timeout: a stream may run longer than any value worth
+		// setting. The request context cancels it when the client leaves.
+		Transport: &http.Transport{
+			Proxy:               http.ProxyFromEnvironment,
+			DialContext:         dial,
+			MaxIdleConns:        512,
+			MaxIdleConnsPerHost: 256,
+			IdleConnTimeout:     90 * time.Second,
+			ForceAttemptHTTP2:   true,
+			// Compression would buffer, which defeats streaming.
+			DisableCompression:    true,
+			ResponseHeaderTimeout: opts.UpstreamHeaderTimeout,
+		},
+		// A redirect is answered, not followed. Followed, it would take the
+		// request and its credential to an address nobody configured.
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+}
+
+// modelClient is the client a request to m leaves through.
+func (s *Server) modelClient(m policy.Model) *http.Client {
+	if m.PlatformKey {
+		return s.keyClient
+	}
+	return s.clientFor(m.Limited)
+}
+
+// clientFor is the client for a request of an organisation, limited or not.
+func (s *Server) clientFor(limited bool) *http.Client {
+	if limited {
+		return s.publicClient
+	}
+	return s.client
 }
 
 // Handler returns the inference routes. They carry httpx.InferencePrefix, so
@@ -213,9 +285,13 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, sh shape) 
 	case claudeSignIn(r):
 		// Claude Code signed in to a Claude plan, and pointed here without a
 		// Keera key: the administrator set the address for everyone.
-		sh.writeError(w, http.StatusUnauthorized, "invalid_request_error", "missing_api_key",
-			"this request carries a Claude sign-in but no Keera key; to use Claude Code "+
-				"through Keera Gateway, "+connectHint)
+		msg := "this request carries a Claude sign-in but no Keera key; to use Claude Code " +
+			"through Keera Gateway, " + connectHint
+		if !s.opts.ClaudeSubscriptions {
+			msg = "this request carries a Claude sign-in, and " + subscriptionsOff +
+				"; to use a Keera key instead, run `keera connect claude-code`"
+		}
+		sh.writeError(w, http.StatusUnauthorized, "invalid_request_error", "missing_api_key", msg)
 		return nil, false
 	default:
 		presented, err = auth.FromHeader(r.Header.Get("Authorization"))
@@ -236,6 +312,10 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, sh shape) 
 	}
 	res, err := s.src.Resolve(r.Context(), presented)
 	switch {
+	case err == nil && res.Key.Subscription() && !s.opts.ClaudeSubscriptions:
+		sh.writeError(w, http.StatusForbidden, "permission_error", "subscriptions_off",
+			"this is a subscription key, and "+subscriptionsOff)
+		return nil, false
 	case err == nil && res.Key.Subscription() && !inHeader:
 		// Without the header, Authorization holds this key, so there is no
 		// Claude sign-in to forward.

@@ -401,6 +401,25 @@ func checkProviderModel(t *testing.T, p Provider, m ProviderModel, seenDescripti
 		t.Errorf("%s is priced %d/%d; a defaulted price of 0 escapes every budget",
 			m.ID, m.InputMicrosPerMTok, m.OutputMicrosPerMTok)
 	}
+	if long := m.LongPrompt; long != nil {
+		switch {
+		case long.Check() != nil || long.AboveTokens >= m.MaxContext:
+			t.Errorf("%s's long prompts start at %d tokens, which no prompt in its "+
+				"%d-token context can reach", m.ID, long.AboveTokens, m.MaxContext)
+		case long.InputMicrosPerMTok < m.InputMicrosPerMTok ||
+			long.OutputMicrosPerMTok < m.OutputMicrosPerMTok ||
+			long.CachedInputMicrosPerMTok < m.CachedInputMicrosPerMTok ||
+			long.CacheWriteMicrosPerMTok < m.CacheWriteMicrosPerMTok:
+			// Providers charge more for a long prompt, never less.
+			t.Errorf("%s's long-prompt prices %+v are below its own", m.ID, *long)
+		}
+	}
+	if m.CacheWriteMicrosPerMTok != 0 && m.CacheWriteMicrosPerMTok <= m.InputMicrosPerMTok {
+		// A write rate is only stated when it is a surcharge; zero already
+		// means the input price.
+		t.Errorf("%s's cache-write rate %d is not above its input rate %d",
+			m.ID, m.CacheWriteMicrosPerMTok, m.InputMicrosPerMTok)
+	}
 	switch {
 	case p.CachedInput && m.CachedInputMicrosPerMTok <= 0:
 		// Without it, cached tokens cost up to ten times the console's price.
@@ -434,6 +453,10 @@ models:
 	if m.CachedInputMicrosPerMTok <= 0 || m.CachedInputMicrosPerMTok >= m.InputMicrosPerMTok {
 		t.Errorf("cached rate = %d against an input rate of %d, want the provider's "+
 			"discounted one", m.CachedInputMicrosPerMTok, m.InputMicrosPerMTok)
+	}
+	if m.CacheWriteMicrosPerMTok <= m.InputMicrosPerMTok {
+		t.Errorf("cache-write rate = %d against an input rate of %d, want the "+
+			"provider's surcharge", m.CacheWriteMicrosPerMTok, m.InputMicrosPerMTok)
 	}
 
 	overridden, err := parseModelFile([]byte(`
@@ -470,7 +493,7 @@ models:
 	if got := models[0].CachedInputMicrosPerMTok; got != 0 {
 		t.Errorf("cached rate = %d, want 0 - unstated, and charged at the input price", got)
 	}
-	if got := models[0].Cost(1000, 1000, 0); got != 1000 {
+	if got := models[0].Cost(policy.Tokens{Input: 1000, CachedInput: 1000}); got != 1000 {
 		t.Errorf("cost of a wholly cached prompt = %d, want it charged at the input "+
 			"price, 1000", got)
 	}
@@ -705,5 +728,48 @@ models:
 	}
 	if p := models[0].InputMicrosPerMTok; p != 1_000_000 {
 		t.Errorf("input price = %d, want claude-haiku-4-5's", p)
+	}
+}
+
+// A model priced by prompt length brings its long-prompt prices with it, and
+// the copy is the entry's own: changing it leaves the table alone.
+func TestProviderFillsInTheLongPromptPrices(t *testing.T) {
+	file := []byte(`
+models:
+  - alias: keera-light
+    provider: anthropic
+    backend_model: claude-haiku-5-5
+`)
+	models, err := parseModelFile(file)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	long := models[0].LongPrompt
+	if long == nil || long.AboveTokens != 100_000 ||
+		long.InputMicrosPerMTok <= models[0].InputMicrosPerMTok {
+		t.Fatalf("long prompt = %+v, want the table's dearer prices past 100k tokens", long)
+	}
+	long.InputMicrosPerMTok = 0
+	again, err := parseModelFile(file)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if again[0].LongPrompt.InputMicrosPerMTok == 0 {
+		t.Error("changing one entry's long-prompt prices changed the table")
+	}
+}
+
+// A long-prompt tier without a threshold would charge every prompt its prices.
+func TestALongPromptNeedsAThreshold(t *testing.T) {
+	_, err := parseModelFile([]byte(`
+models:
+  - alias: local
+    backends: [http://vllm:8000/v1]
+    backend_model: local
+    long_prompt:
+      input_micros_per_mtok: 1
+`))
+	if err == nil || !strings.Contains(err.Error(), "above_tokens") {
+		t.Errorf("err = %v, want one naming above_tokens", err)
 	}
 }

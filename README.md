@@ -45,17 +45,9 @@ request, logs it and passes it on.
                                       Postgres and your SIEM
 ```
 
-Everything runs on one port, `:8080`, split by path:
-
-- `/api` - inference and MCP servers
-- `/` - the control panel
-- `/control` - administration
-- `/sandbox` - attaching to a sandbox
-- `/metrics`, `/healthz` and `/readyz` - Prometheus and the health probes
-
-Authentication, not the network, keeps the inference side and the control side
-apart. To split them on the network as well, put a proxy in front that
-publishes only `/api`.
+Everything runs on one port, `:8080`, split by path: inference under `/api`,
+administration under `/control`, and the control panel at `/`. See
+[docs/gateway.md](docs/gateway.md#one-listener-four-surfaces).
 
 The gateway speaks three APIs, all with the same guardrails, accounting and
 audit:
@@ -74,37 +66,14 @@ provider, a client changes one variable.
 ```sh
 cd compose
 cp .env.example .env    # then set KEERA_OPERATOR_KEY and KEERA_SECRET_KEY
-
-# A laptop or any host without a GPU (llama.cpp; no tool calls):
 podman compose up -d --build
-
-# A GPU host (vLLM):
-podman compose -f compose.yaml -f compose.gpu.yaml up -d --build
 ```
 
-On the first start the inference container downloads model weights and stays
-unready for several minutes. Do not restart it. The CPU tier cannot do tool
-calls, so it cannot demo a coding agent. See
-[compose/README.md](compose/README.md).
-
-Then issue a key and use it:
-
-```sh
-export KEERA_OPERATOR_KEY=…              # the same value as in .env
-export KEERA_CONTROL_URL=http://127.0.0.1:8080
-keera org create "Example Bank"
-keera project create "Payments Platform"
-KEY=$(keera key create --project <project> --name laptop)
-
-curl http://127.0.0.1:8080/api/v1/chat/completions \
-  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
-  -d '{"model":"keera-speed","messages":[{"role":"user","content":"What is Kubernetes?"}]}'
-```
-
-Or open the control panel at <http://127.0.0.1:8080> and sign in with the
-operator key. **Dashboard** shows a first-run checklist.
-[docs/install.md](docs/install.md) covers every setting, the first run and
-troubleshooting.
+That runs the gateway, Postgres and a CPU model on one host.
+[compose/README.md](compose/README.md) covers the GPU tier and what the CPU tier
+cannot do. [First run](docs/install.md#first-run) issues a first key and sends
+a request, and [docs/install.md](docs/install.md) covers every setting.
+[docs/run-locally.md](docs/run-locally.md) is the development loop.
 
 `keera doctor` checks the deployment's configuration and an organisation's
 catalogue. It lists what is missing and what is declared but not enforced, and
@@ -198,8 +167,14 @@ file that new organisations start from. Prompts sent to them leave your infrastr
 them. [docs/providers.md](docs/providers.md)
 
 **Claude subscriptions** let a Claude Team or Enterprise plan pay for Claude
-Code, while Keera applies the guardrails and shows each person's usage.
+Code, while Keera applies the guardrails and shows each person's usage. They
+are off unless `KEERA_CLAUDE_SUBSCRIPTIONS` is set.
 [docs/subscriptions.md](docs/subscriptions.md)
+
+**Billing** lets a deployment hold its own key for a hosted provider. Every
+organisation then uses that key, and is billed at the provider's list price:
+each month, or in advance by card through PostFinance Checkout.
+[docs/billing.md](docs/billing.md)
 
 **The panel** has these screens, among others:
 

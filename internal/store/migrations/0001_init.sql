@@ -16,7 +16,11 @@ CREATE TABLE orgs (
     -- lands in the right organisation without anybody being invited by hand.
     -- Null in a dedicated or on-premises deployment, where there is only one
     -- organisation.
-    email_domain text
+    email_domain text,
+    -- Set on an organisation somebody created by signing up. It keeps the
+    -- deployment's own machines out of reach until the organisation has paid
+    -- once, or an operator lifts it. See docs/sso.md.
+    limited boolean NOT NULL DEFAULT false
 );
 CREATE UNIQUE INDEX orgs_email_domain_key
     ON orgs (lower(email_domain)) WHERE email_domain IS NOT NULL;
@@ -181,9 +185,20 @@ CREATE TABLE models (
     -- What the provider served from its own prompt cache is billed at a
     -- fraction of the input price - a tenth at OpenAI and at Anthropic, less on
     -- some models. Zero is "not stated", which the gateway charges at the full
-    -- input price. See policy.Model.cachedInputMicros for why this one price
-    -- reads a zero that way.
+    -- input price. See policy.PriceTier.cachedInputMicros for why this one
+    -- price reads a zero that way.
     cached_input_micros_per_mtok bigint NOT NULL DEFAULT 0,
+    -- What the provider wrote to its prompt cache is billed above the input
+    -- price at Anthropic and on OpenAI's newer models. Zero is the input price.
+    cache_write_micros_per_mtok bigint NOT NULL DEFAULT 0,
+    -- What a request costs instead when its prompt is longer than
+    -- long_prompt_tokens, as at Anthropic for claude-haiku-5-5. Zero tokens
+    -- means one price for every length.
+    long_prompt_tokens     int NOT NULL DEFAULT 0 CHECK (long_prompt_tokens >= 0),
+    long_input_micros_per_mtok        bigint NOT NULL DEFAULT 0,
+    long_output_micros_per_mtok       bigint NOT NULL DEFAULT 0,
+    long_cached_input_micros_per_mtok bigint NOT NULL DEFAULT 0,
+    long_cache_write_micros_per_mtok  bigint NOT NULL DEFAULT 0,
     max_context            int NOT NULL DEFAULT 0,
     -- A credential for somebody else's endpoint, set from the control panel or
     -- the CLI. Encrypted with a key that lives only in the gateway's
@@ -493,6 +508,9 @@ CREATE TABLE usage_events (
     -- The part of the prompt the provider served from its own cache, kept so a
     -- row can be reconciled against an invoice rather than only believed.
     cached_input_tokens int NOT NULL DEFAULT 0,
+    -- The part of the prompt the provider wrote to its cache, for the same
+    -- reason.
+    cache_write_tokens int NOT NULL DEFAULT 0,
     cost_micros       bigint NOT NULL DEFAULT 0,
     -- What a request a subscription paid for would have cost at the model's
     -- API prices. It is never charged to a budget. Zero on every other row.
@@ -733,6 +751,101 @@ CREATE TABLE tool_calls (
 -- The tool calls of one organisation inside a window, which every reading of
 -- this table is.
 CREATE INDEX tool_calls_org_ts_idx ON tool_calls (org_id, ts);
+
+-- One billable call to a model on the deployment's own provider key: the
+-- request's model, or a filter's or a router's. See docs/billing.md.
+--
+-- A table of its own, so the bill does not depend on how a usage row adds up
+-- its cost. Retention leaves it alone, and it outlives the organisation, so
+-- the last invoice can still be written.
+CREATE TABLE billing_lines (
+    id                  bigserial PRIMARY KEY,
+    ts                  timestamptz NOT NULL,
+    org_id              text NOT NULL,
+    -- The organisation's alias, and the provider's model behind it.
+    alias               text NOT NULL,
+    provider            text NOT NULL,
+    backend_model       text NOT NULL,
+    -- The provider's, which its list prices are in. Nothing is converted.
+    currency            text NOT NULL,
+    input_tokens        int NOT NULL DEFAULT 0,
+    cached_input_tokens int NOT NULL DEFAULT 0,
+    cache_write_tokens  int NOT NULL DEFAULT 0,
+    output_tokens       int NOT NULL DEFAULT 0,
+    -- What the organisation is billed, at list price.
+    micros              bigint NOT NULL DEFAULT 0,
+    -- What the provider charges the deployment. Only operators see it.
+    provider_micros     bigint NOT NULL DEFAULT 0,
+    -- What it took from the organisation's credit, in CHF. Zero on a
+    -- deployment without payments.
+    credit_micros       bigint NOT NULL DEFAULT 0
+);
+CREATE INDEX billing_lines_ts_idx ON billing_lines (ts);
+CREATE INDEX billing_lines_org_ts_idx ON billing_lines (org_id, ts);
+
+-- An organisation's credit for the deployment's provider keys, in CHF, which
+-- it pays in advance. See docs/billing.md.
+--
+-- The balance is kept up to date rather than summed, so the gateway reads it
+-- in one query: payments add to it, and the usage writer takes each billing
+-- line's credit_micros from it in the same batch as the line. No foreign key,
+-- like billing_lines: a usage batch must not fail because an organisation was
+-- deleted while it was in the buffer.
+CREATE TABLE credit_accounts (
+    org_id              text PRIMARY KEY,
+    balance_micros      bigint NOT NULL DEFAULT 0,
+    -- Automatic top-up: when the balance falls below topup_below_micros, the
+    -- saved card is charged topup_micros. Zero is off.
+    topup_below_micros  bigint NOT NULL DEFAULT 0,
+    topup_micros        bigint NOT NULL DEFAULT 0,
+    -- The saved card: PostFinance's token for it, and how to show it. Never
+    -- the card itself.
+    card_token          bigint,
+    card_label          text,
+    card_expires        timestamptz,
+    -- Why the last automatic top-up failed. It stops further tries until an
+    -- administrator saves a card or tops up by hand.
+    topup_error         text,
+    -- Set by an operator for an organisation billed by invoice: it may use
+    -- the keys without credit.
+    invoiced            boolean NOT NULL DEFAULT false,
+    updated_at          timestamptz NOT NULL DEFAULT now()
+);
+
+-- Money into a credit account: a payment by card, or credit an operator
+-- granted. Kept for good, like billing_lines, because it is the record of what
+-- was paid.
+CREATE TABLE payments (
+    id             text PRIMARY KEY,
+    org_id         text NOT NULL,
+    ts             timestamptz NOT NULL DEFAULT now(),
+    -- topup: an administrator paid on the payment page. auto: the saved card
+    -- was charged. grant: an operator added credit, or took some away.
+    kind           text NOT NULL CHECK (kind IN ('topup', 'auto', 'grant')),
+    -- What the payment adds to the credit, in CHF, without VAT. A grant may
+    -- be negative.
+    micros         bigint NOT NULL,
+    -- The VAT charged on top, in CHF.
+    vat_micros     bigint NOT NULL DEFAULT 0,
+    state          text NOT NULL CHECK (state IN ('pending', 'paid', 'failed')),
+    -- Whether paying it saves the card for automatic top-ups.
+    save_card      boolean NOT NULL DEFAULT false,
+    -- PostFinance's transaction. Null on a grant, and on a payment whose
+    -- transaction was never created.
+    transaction_id bigint UNIQUE,
+    -- Who started it: a person, the operator key, or the automatic top-up.
+    actor          text NOT NULL,
+    -- A grant's reason, or why a payment failed.
+    note           text,
+    settled_at     timestamptz
+);
+CREATE INDEX payments_org_ts_idx ON payments (org_id, ts);
+-- Pending payments are looked at again until they settle.
+CREATE INDEX payments_pending_idx ON payments (ts) WHERE state = 'pending';
+-- At most one automatic top-up per organisation is under way, however many
+-- replicas notice the low balance at once.
+CREATE UNIQUE INDEX payments_one_auto_idx ON payments (org_id)
+    WHERE kind = 'auto' AND state = 'pending';
 -- The calls of one key inside a window, which is how a session's calls are
 -- found when the client named none.
 CREATE INDEX tool_calls_key_ts_idx ON tool_calls (key_id, ts);
@@ -835,6 +948,31 @@ CREATE TABLE login_flows (
     expires_at  timestamptz NOT NULL
 );
 CREATE INDEX login_flows_expires_at_idx ON login_flows (expires_at);
+
+-- A sign-in that matched no organisation, waiting for the person to create
+-- one or accept an invitation. The identity provider has already vouched for
+-- them; this keeps what it said until they choose, for a few minutes.
+CREATE TABLE signups (
+    -- The hash of the token in the browser's cookie, as for sessions.
+    token_hash    bytea PRIMARY KEY,
+    -- The id the person's account gets. It is fixed here, because the
+    -- refresh token below is sealed against it.
+    user_id       text NOT NULL,
+    provider      text NOT NULL,
+    external_id   text NOT NULL,
+    email         text NOT NULL,
+    -- The role the identity provider's answer maps to. Groups are not kept,
+    -- so it is worked out at the sign-in.
+    role          text NOT NULL,
+    refresh_token bytea,
+    -- The organisation that added this address, if one did. The person may
+    -- join it or create their own.
+    invited_org   text REFERENCES orgs (id) ON DELETE SET NULL,
+    redirect_to   text NOT NULL DEFAULT '',
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    expires_at    timestamptz NOT NULL
+);
+CREATE INDEX signups_expires_at_idx ON signups (expires_at);
 
 -- The one-time code the browser carries to the loopback listener.
 --

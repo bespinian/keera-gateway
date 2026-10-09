@@ -136,26 +136,13 @@ func (s *Server) Run(ctx context.Context) {
 //
 // Administrator-only, like the request log.
 func (s *Server) requestStream(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if !s.requireAdmin(w, p) {
-		return
-	}
-	orgID, _, _, ok := s.reportScope(w, r, p)
+	rq, _, _, ok := s.requestQuery(w, r, p)
 	if !ok {
 		return
 	}
-	sc, ok := s.entityScope(w, r, orgID)
-	if !ok {
-		return
-	}
-
+	orgID := rq.OrgID
 	q := r.URL.Query()
-	rq := store.RequestQuery{
-		OrgID:       orgID,
-		ReportScope: sc,
-		Outcome:     store.Outcome(q.Get("outcome")),
-		Limit:       streamRows,
-	}
-	rq.Status, rq.StatusClass = parseStatus(q.Get("status"))
+	rq.Limit = streamRows
 	rq.After, _ = strconv.ParseInt(q.Get("after"), 10, 64)
 	ctx := r.Context()
 	if rq.After <= 0 {

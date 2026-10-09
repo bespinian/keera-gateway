@@ -27,11 +27,14 @@ func keyFor(t *testing.T, keyID, body string, kind policy.Kind, headers ...strin
 	return sessionKey(r, keyID, kind, b.firstUserMessage)
 }
 
-// stated is keyFor with the gateway's own header set, which is what most of
-// these tests mean by "the client named it".
-func stated(t *testing.T, keyID, body, id string) string {
+// goBody is a chat that opens with "go".
+const goBody = `{"model":"keera-code","messages":[{"role":"user","content":"go"}]}`
+
+// stated is keyFor for goBody with the gateway's own header set, which is what
+// most of these tests mean by "the client named it".
+func stated(t *testing.T, keyID, id string) string {
 	t.Helper()
-	return keyFor(t, keyID, body, policy.KindChat, httpx.SessionHeader, id)
+	return keyFor(t, keyID, goBody, policy.KindChat, httpx.SessionHeader, id)
 }
 
 // The property the whole report rests on: every call an agent makes working
@@ -91,18 +94,17 @@ func TestOneTasksCallsShareASessionKey(t *testing.T) {
 
 // A client that knows which conversation it is on is not guessed about.
 func TestAClientCanNameItsOwnSession(t *testing.T) {
-	body := `{"model":"keera-code","messages":[{"role":"user","content":"go"}]}`
-	named := stated(t, "key_1", body, "task-42")
+	named := stated(t, "key_1", "task-42")
 	if !store.StatedSession(named) {
 		t.Errorf("%q does not read as a key the client stated", named)
 	}
 	// The header wins over the conversation, so two tasks that open with the
 	// same word stay apart.
-	if same := stated(t, "key_1", body, "task-43"); same == named {
+	if same := stated(t, "key_1", "task-43"); same == named {
 		t.Error("two stated sessions with the same opening prompt hash to one")
 	}
 	// And the same stated id from another key is still another session.
-	if other := stated(t, "key_2", body, "task-42"); other == named {
+	if other := stated(t, "key_2", "task-42"); other == named {
 		t.Error("one key can name another key's session")
 	}
 	// What is stored is a hash of the id, not the id: a client is free to put
@@ -117,11 +119,10 @@ func TestAClientCanNameItsOwnSession(t *testing.T) {
 // Which of them a client sends is a fact about how that client was written, and
 // a task cut in half by a spelling would be worse than no header at all.
 func TestEveryConventionForNamingASessionIsReadAsOne(t *testing.T) {
-	body := `{"model":"keera-code","messages":[{"role":"user","content":"go"}]}`
-	want := stated(t, "key_1", body, "task-42")
+	want := stated(t, "key_1", "task-42")
 
 	for _, name := range []string{"X-Keera-Session", "X-Session-Id", "Helicone-Session-Id"} {
-		got := keyFor(t, "key_1", body, policy.KindChat, name, "task-42")
+		got := keyFor(t, "key_1", goBody, policy.KindChat, name, "task-42")
 		if got != want {
 			t.Errorf("%s gives session %q, and X-Keera-Session gives %q; the same "+
 				"conversation must not depend on which header a client happens to "+
@@ -134,7 +135,7 @@ func TestEveryConventionForNamingASessionIsReadAsOne(t *testing.T) {
 
 	// A request carrying two of them is a client and a proxy both having an
 	// opinion. This gateway's own header is the one to believe.
-	both := keyFor(t, "key_1", body, policy.KindChat,
+	both := keyFor(t, "key_1", goBody, policy.KindChat,
 		"X-Keera-Session", "task-42", "X-Session-Id", "something-else")
 	if both != want {
 		t.Errorf("with both headers set the session is %q, want the one this "+
@@ -144,11 +145,11 @@ func TestEveryConventionForNamingASessionIsReadAsOne(t *testing.T) {
 	// A header that is present but empty is not a client naming anything, and
 	// must fall through to the conversation rather than putting every request
 	// that carries it into one session.
-	empty := keyFor(t, "key_1", body, policy.KindChat, "X-Session-Id", "   ")
+	empty := keyFor(t, "key_1", goBody, policy.KindChat, "X-Session-Id", "   ")
 	if store.StatedSession(empty) {
 		t.Errorf("an empty session header was read as a stated session (%q)", empty)
 	}
-	if empty != keyFor(t, "key_1", body, policy.KindChat) {
+	if empty != keyFor(t, "key_1", goBody, policy.KindChat) {
 		t.Error("an empty session header changed the derived session")
 	}
 }
@@ -345,13 +346,9 @@ func TestTheOpeningOfAnUntranslatedBodyIsTheTranslations(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseBody: %v", err)
 			}
-			raw, err := tc.surf.shape.decode([]byte(tc.body))
+			translated, err := tc.surf.shape.decodeBody([]byte(tc.body))
 			if err != nil {
 				t.Fatalf("decode: %v", err)
-			}
-			translated, err := parseBody(raw)
-			if err != nil {
-				t.Fatalf("parseBody(translated): %v", err)
 			}
 			want, wantOK := translated.firstUserMessage()
 			got, gotOK := tc.surf.dialect.opening(native)

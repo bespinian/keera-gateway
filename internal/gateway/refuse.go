@@ -50,9 +50,10 @@ func (s *Server) refuse(c *call, ref refusal) {
 	// Set here, not by the callers, so no refusal after a router or a filter
 	// drops what they already charged to the budgets.
 	ev.CostMicros = c.hookMicros()
+	ev.Bills = c.hookBills()
 	// The step the request was stopped in is closed and named by the code.
 	ev.Spans = c.tr.steps(ref.code)
-	s.sink.Record(ev)
+	s.record(ev)
 	s.metrics.Observe(metricModel(s.src, ev.OrgID, ev.Alias), ev.OrgID, ev.Status, ev.Latency.Seconds(), 0)
 }
 
@@ -69,8 +70,9 @@ func (s *Server) hungUp(c *call, while, note string) {
 	ev.Error = appendNote(appendNote(ev.Error, "the client hung up "+while), note)
 	ev.Latency = time.Since(c.tr.start)
 	ev.CostMicros = c.hookMicros()
+	ev.Bills = c.hookBills()
 	ev.Spans = c.tr.steps("client_closed")
-	s.sink.Record(ev)
+	s.record(ev)
 	s.metrics.Observe(ev.Alias, ev.OrgID, ev.Status, ev.Latency.Seconds(), 0)
 }
 

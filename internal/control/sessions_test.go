@@ -109,7 +109,7 @@ type sessionList struct {
 }
 
 func TestSessionsReportTasksWithTheWindowsTotalsAboveThem(t *testing.T) {
-	st, _ := streamStore(t)
+	st, _ := testStore(t)
 	from, to := sessionFixture(t, st)
 	ts := sessionServer(t, st)
 
@@ -162,7 +162,7 @@ func TestSessionsReportTasksWithTheWindowsTotalsAboveThem(t *testing.T) {
 }
 
 func TestSessionsNarrowAndRankAndPage(t *testing.T) {
-	st, _ := streamStore(t)
+	st, _ := testStore(t)
 	from, to := sessionFixture(t, st)
 	ts := sessionServer(t, st)
 	window := "org_id=org_1&from=" + from.Format(time.RFC3339) + "&to=" + to.Format(time.RFC3339)
@@ -220,7 +220,7 @@ func TestSessionsNarrowAndRankAndPage(t *testing.T) {
 }
 
 func TestOneSessionIsReachedFromAnyRequestInIt(t *testing.T) {
-	st, _ := streamStore(t)
+	st, _ := testStore(t)
 	from, to := sessionFixture(t, st)
 	ts := sessionServer(t, st)
 

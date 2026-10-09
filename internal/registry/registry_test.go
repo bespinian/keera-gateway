@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/auth"
+	"github.com/bespinian/keera-gateway/internal/catalog"
 	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
@@ -41,6 +42,8 @@ type source struct {
 	routers []policy.Router
 	mcp     []policy.MCPServer
 	spend   []store.SpendRow
+	credit  []store.CreditRow
+	limited []string
 
 	// loadErr, while set, is what every catalogue read returns.
 	loadErr error
@@ -110,6 +113,18 @@ func (s *source) LoadSpend(context.Context, time.Time) ([]store.SpendRow, error)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.spend, s.loadErr
+}
+
+func (s *source) LoadCredit(context.Context) ([]store.CreditRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.credit, s.loadErr
+}
+
+func (s *source) LimitedOrgs(context.Context) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.limited, s.loadErr
 }
 
 func (s *source) Listen(ctx context.Context, _ string, fn func()) error {
@@ -624,6 +639,57 @@ func TestAnOrganisationSeesItsOwnModelsAndNoOtherTenants(t *testing.T) {
 	}
 	if want := []string{"org_1/fast", "org_1/private"}; !slices.Equal(got, want) {
 		t.Errorf("org_1 lists %v, want %v", got, want)
+	}
+}
+
+func TestALimitedOrganisationUsesOnlyWhatCostsTheDeploymentNothing(t *testing.T) {
+	models := func() []policy.Model {
+		return []policy.Model{
+			{OrgID: "org_new", Alias: "engine", Backends: []string{"http://keera-engine:8000/v1"}},
+			{OrgID: "org_new", Alias: "rebound", Backends: []string{"http://10.0.0.5:8000/v1"}},
+			{OrgID: "org_new", Alias: "own-key", Backends: []string{"https://api.example.com/v1"}},
+			{OrgID: "org_new", Alias: "billed", Provider: "anthropic", BackendModel: "claude-haiku-5-5"},
+			{OrgID: "org_paid", Alias: "engine", Backends: []string{"http://keera-engine:8000/v1"}},
+		}
+	}
+	platform := catalog.Platform{"anthropic": {APIKey: "sk-platform"}}
+
+	for _, tc := range []struct {
+		prepaid bool
+		open    []string
+	}{
+		{prepaid: true, open: []string{"own-key", "billed"}},
+		// Without payments, the deployment's key is billed afterwards, to
+		// whoever signed up.
+		{prepaid: false, open: []string{"own-key"}},
+	} {
+		s := newSource()
+		s.models = models()
+		s.mcp = []policy.MCPServer{
+			{OrgID: "org_new", Alias: "inside", URL: "http://tools.svc/mcp"},
+			{OrgID: "org_new", Alias: "outside", URL: "https://mcp.example.com/mcp"},
+		}
+		s.limited = []string{"org_new"}
+		r := newRegistry(t, s, Options{Platform: platform, Prepaid: tc.prepaid})
+
+		for _, m := range r.Models("org_new") {
+			if !m.Limited {
+				t.Errorf("prepaid=%v: %s is not marked limited", tc.prepaid, m.Alias)
+			}
+			if want := !slices.Contains(tc.open, m.Alias); m.Locked != want {
+				t.Errorf("prepaid=%v: %s locked = %v, want %v", tc.prepaid, m.Alias, m.Locked, want)
+			}
+		}
+		if m, _ := r.Model("org_paid", "engine"); m.Limited || m.Locked {
+			t.Error("an organisation that is not limited has its engine model held back")
+		}
+		if m, _ := r.MCPServer("org_new", "inside"); !m.Locked {
+			t.Error("a limited organisation reaches an MCP server inside the network")
+		}
+		if m, _ := r.MCPServer("org_new", "outside"); m.Locked || !m.Limited {
+			t.Errorf("the public MCP server: locked %v, limited %v; want open and limited",
+				m.Locked, m.Limited)
+		}
 	}
 }
 

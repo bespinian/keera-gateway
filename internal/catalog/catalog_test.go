@@ -79,6 +79,13 @@ func TestParseRejectsWhatWouldFailSilentlyAtRuntime(t *testing.T) {
 			wantErr: "served-model-name",
 		},
 		{
+			// The control API refuses it too, so a file cannot seed an
+			// organisation with a model nobody could save again.
+			name:    "a backend that is not http",
+			in:      "models:\n  - alias: a\n    backends: [\"file:///etc/passwd\"]\n    backend_model: m",
+			wantErr: "not an http or https address",
+		},
+		{
 			name:    "a duplicate alias",
 			in:      "models:\n  - alias: a\n    backends: [\"http://x/v1\"]\n    backend_model: m\n  - alias: a\n    backends: [\"http://y/v1\"]\n    backend_model: n",
 			wantErr: "declared twice",

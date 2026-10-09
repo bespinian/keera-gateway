@@ -28,7 +28,7 @@ type File struct {
 //
 // The fields a provider can fill in are pointers, so a stated zero differs from
 // no value: an input or output price of 0 means unbilled, not "use the
-// provider's price". A cached price of 0 means the full input price.
+// provider's price". A cached or cache-write price of 0 means the input price.
 type Model struct {
 	Alias string `yaml:"alias"`
 	Kind  string `yaml:"kind"`
@@ -53,7 +53,15 @@ type Model struct {
 	// provider's prompt cache. Without it, and without a provider rate, cached
 	// tokens cost the full input price.
 	CachedInputMicrosPerMTok *int64 `yaml:"cached_input_micros_per_mtok"`
-	MaxContext               *int   `yaml:"max_context"`
+	// CacheWriteMicrosPerMTok prices an input token the provider wrote to its
+	// prompt cache. Without it, and without a provider rate, a write costs
+	// the input price.
+	CacheWriteMicrosPerMTok *int64 `yaml:"cache_write_micros_per_mtok"`
+	// LongPrompt is what a request costs instead when its prompt is longer
+	// than above_tokens. A provider fills it in for a model priced by prompt
+	// length.
+	LongPrompt *policy.PriceTier `yaml:"long_prompt"`
+	MaxContext *int              `yaml:"max_context"`
 	// ReleaseDate is the day the model came out, as YYYY-MM-DD. A provider
 	// fills it in for the models it knows.
 	ReleaseDate string `yaml:"release_date"`
@@ -175,6 +183,11 @@ func ParseModel(m Model) (policy.Model, error) {
 		return policy.Model{}, fmt.Errorf("release_date %q must be a day written as "+
 			"YYYY-MM-DD", m.ReleaseDate)
 	}
+	if m.LongPrompt != nil {
+		if err := m.LongPrompt.Check(); err != nil {
+			return policy.Model{}, err
+		}
+	}
 	kind := policy.Kind(m.Kind)
 	if kind == "" {
 		kind = policy.KindChat
@@ -193,6 +206,8 @@ func ParseModel(m Model) (policy.Model, error) {
 		InputMicrosPerMTok:       deref(m.InputMicrosPerMTok),
 		OutputMicrosPerMTok:      deref(m.OutputMicrosPerMTok),
 		CachedInputMicrosPerMTok: deref(m.CachedInputMicrosPerMTok),
+		CacheWriteMicrosPerMTok:  deref(m.CacheWriteMicrosPerMTok),
+		LongPrompt:               m.LongPrompt,
 		MaxContext:               deref(m.MaxContext),
 		ReleaseDate:              m.ReleaseDate,
 		Location:                 m.Location,

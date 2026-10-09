@@ -105,17 +105,8 @@ func (r *routerRun) put(ctx context.Context) error {
 	alias := r.fs.Arg(0)
 	// 'set' starts from the stored router, so what is not given is kept. 'add'
 	// starts from nothing, and the control plane refuses what is missing.
-	rt := policy.Router{Alias: alias}
-	if r.verb == "set" {
-		if !changesSomething(r.fs) {
-			return nothingToChange("router set")
-		}
-		existing, err := r.find(ctx, alias)
-		if err != nil {
-			return err
-		}
-		rt = existing
-	} else if err := alreadyExists(ctx, r.aliasRun, alias, routerAlias); err != nil {
+	rt, err := startPut(ctx, r.aliasRun, alias, policy.Router{Alias: alias}, routerAlias)
+	if err != nil {
 		return err
 	}
 	if err := r.apply(&rt); err != nil {

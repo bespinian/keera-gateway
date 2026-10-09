@@ -120,6 +120,7 @@ type routeDecision struct {
 	// micros is what the decision cost. It is charged on every outcome, so a
 	// client cannot make the router free by making it fail.
 	micros int64
+	bills  []policy.BillLine
 	// took is how long the decision added to the request. Like a filter's
 	// time, it is taken off the gateway's own overhead metric.
 	took time.Duration
@@ -164,7 +165,7 @@ func (s *Server) route(ctx context.Context, rt policy.Router, b *body, kind poli
 	start := time.Now()
 	chose, err := s.decide(ctx, rt, m, texts)
 	d.took = time.Since(start)
-	d.micros = chose.micros
+	d.micros, d.bills = chose.micros, chose.bills
 	if err != nil {
 		if ctx.Err() != nil {
 			return d, nil // the client hung up; serve will notice
@@ -233,6 +234,8 @@ func chatProblem(m policy.Model, found bool) string {
 		return "is not one of this organisation's models"
 	case !m.Enabled:
 		return "is disabled"
+	case m.Locked:
+		return lockedReason(m) + ", and " + policy.LockedMessage
 	case m.Kind != policy.KindChat:
 		return "is a " + string(m.Kind) + " model, and only a chat model reads text and answers in words"
 	case len(m.Backends) == 0:
@@ -320,6 +323,7 @@ type decision struct {
 	// micros is what the call cost, set on every outcome: an unusable answer
 	// still used the GPU.
 	micros int64
+	bills  []policy.BillLine
 }
 
 // unreadable marks an answer that could not be used, as opposed to one that
@@ -359,6 +363,7 @@ func (s *Server) decide(ctx context.Context, rt policy.Router, m policy.Model, t
 		s.dropLogprobs(m)
 		retry, retryErr := s.decideOnce(ctx, rt, m, offered, texts, false)
 		retry.micros += d.micros
+		retry.bills = append(retry.bills, d.bills...)
 		return retry, retryErr
 	}
 	if err == nil && d.confidence == 0 {
@@ -393,25 +398,26 @@ func (s *Server) decideOnce(ctx context.Context, rt policy.Router, m policy.Mode
 		}
 	}
 
-	raw, status, err := s.askGuard(ctx, m, guardQuestion{
+	ans, err := s.askGuard(ctx, m, guardQuestion{
 		instruction: instruction, input: input, outputTokens: outputTokens,
 		timeout: routerTimeout, limit: maxRouterResponseBytes,
 		subject: "the model it decides with",
 	}, byLetter)
+	// The cost is kept whatever the answer, as a filter's is.
+	var d decision
+	d.micros, d.bills = ans.micros, ans.bills
 	if err != nil {
-		return decision{}, err
+		return d, err
 	}
-	if status >= 300 {
-		err := errors.New("the model it decides with answered " + upstreamComplaint(raw, status))
-		if rejectsLogprobs(status) {
-			return decision{}, &unreadable{err: err}
+	if ans.status >= 300 {
+		err := errors.New("the model it decides with answered " +
+			upstreamComplaint(ans.raw, ans.status))
+		if rejectsLogprobs(ans.status) {
+			return d, &unreadable{err: err}
 		}
-		return decision{}, err
+		return d, err
 	}
-
-	// The cost is read before the answer is judged, as a filter's is.
-	d := decision{micros: guardCost(m, raw)}
-	d.alias, d.confidence, err = readDecision(raw, offered, byLetter)
+	d.alias, d.confidence, err = readDecision(ans.raw, offered, byLetter)
 	return d, err
 }
 
@@ -564,4 +570,13 @@ func routerHeader(w http.ResponseWriter, d routeDecision, router string) {
 		value += " (every destination failed)"
 	}
 	w.Header().Set("X-Keera-Router", value)
+}
+
+// lockedReason says why a limited organisation may not use a model yet, in
+// words that follow its name.
+func lockedReason(m policy.Model) string {
+	if m.PlatformKey {
+		return "is billed after use on this deployment's key"
+	}
+	return "runs inside this deployment's network"
 }

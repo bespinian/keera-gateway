@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -145,7 +146,7 @@ func lastToolCall(t *testing.T, h *harness) store.Event {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		for _, ev := range slicesReverse(h.sink.all()) {
+		for _, ev := range slices.Backward(h.sink.all()) {
 			if ev.Tool != nil {
 				return ev
 			}
@@ -154,14 +155,6 @@ func lastToolCall(t *testing.T, h *harness) store.Event {
 	}
 	t.Fatal("no tool call was recorded")
 	return store.Event{}
-}
-
-func slicesReverse(in []store.Event) []store.Event {
-	out := make([]store.Event, len(in))
-	for i, e := range in {
-		out[len(in)-1-i] = e
-	}
-	return out
 }
 
 func TestMCPProxyPresentsTheServersCredentialNotTheKey(t *testing.T) {
@@ -289,11 +282,27 @@ func TestMCPCallIsCheckedAsTheServerWillReadIt(t *testing.T) {
 	}
 }
 
+func TestMCPCallWithAKeySpelledInOtherCaseIsNotForwarded(t *testing.T) {
+	// A server that decodes with encoding/json reads "Name" as name, and the
+	// last of the two wins: it would run a tool nobody checked.
+	h, fake := mcpHarness(t, allowing("github/search_code"))
+
+	_, body := h.rpc(t, `{"jsonrpc":"2.0","id":6,"method":"tools/call",`+
+		`"params":{"name":"search_code","Name":"create_issue","arguments":{}}}`)
+	var answer rpcMessage
+	if err := json.Unmarshal([]byte(body), &answer); err != nil || answer.Error == nil {
+		t.Errorf("answer = %s, want a JSON-RPC error", body)
+	}
+	if n := len(fake.received()); n != 0 {
+		t.Errorf("the server received %d requests", n)
+	}
+}
+
 func TestFiltersReadAToolCallsArguments(t *testing.T) {
 	res := allowing("github")
 	res.Filters = []string{"redact"}
 	h, fake := mcpHarness(t, res)
-	h.src.filters = map[string]policy.Filter{"org_1/redact": patternFilterFor("org_1", "redact",
+	h.src.filters = map[string]policy.Filter{"org_1/redact": patternFilter(
 		policy.FilterRule{Pattern: `\bhunter2\b`, Replace: "[CREDENTIAL]"},
 		policy.FilterRule{Pattern: `BEGIN PRIVATE KEY`, Refuse: true, Reason: "a private key"})}
 
@@ -505,7 +514,7 @@ func TestAFilteredArgumentDoesNotLeaveInAHeader(t *testing.T) {
 	res := allowing("github")
 	res.Filters = []string{"redact"}
 	h, fake := mcpHarness(t, res)
-	h.src.filters = map[string]policy.Filter{"org_1/redact": patternFilterFor("org_1", "redact",
+	h.src.filters = map[string]policy.Filter{"org_1/redact": patternFilter(
 		policy.FilterRule{Pattern: `hunter2`, Replace: "[CREDENTIAL]"})}
 
 	h.rpc(t, `{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"login",`+
@@ -596,13 +605,49 @@ func TestABudgetStopsAToolCallOnlyWhenFiltersRun(t *testing.T) {
 	res := allowing("github")
 	res.Filters = []string{"redact"}
 	h, fake = mcpHarness(t, res)
-	h.src.filters = map[string]policy.Filter{"org_1/redact": patternFilterFor("org_1", "redact",
+	h.src.filters = map[string]policy.Filter{"org_1/redact": patternFilter(
 		policy.FilterRule{Pattern: `x`, Replace: "y"})}
 	h.budgets.err = errors.New("the organisation is over its budget")
 	_, body := h.rpc(t, call)
 	if !strings.Contains(body, "over its budget") || len(fake.received()) != 0 {
 		t.Errorf("answer = %s, want the call stopped by the budget before its filters ran", body)
 	}
+}
+
+// A tool call's filters on the deployment's key hold credit as a request's do,
+// until the call is recorded, so calls made together cannot all spend it.
+func TestAToolCallsFiltersOnTheDeploymentsKeyHoldCredit(t *testing.T) {
+	res := allowing("github")
+	res.Filters = []string{"redact"}
+	h := filterHarness(t, redactor, res)
+	onPlatformKey(h, "keera-guard")
+
+	heldWhileRunning := make(chan int64, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		h.budgets.mu.Lock()
+		heldWhileRunning <- h.budgets.held
+		h.budgets.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":{"content":[]}}`)
+	}))
+	t.Cleanup(upstream.Close)
+	h.src.mcp = map[string]policy.MCPServer{"github": {
+		Alias: "github", URL: upstream.URL + "/mcp", Enabled: true,
+	}}
+
+	h.rpc(t, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_issue",`+
+		`"arguments":{"body":"use hunter2"}}}`)
+	if held := <-heldWhileRunning; held <= 0 {
+		t.Errorf("held while the tool ran = %d, want the filter's cost", held)
+	}
+	if ev := lastToolCall(t, h); len(ev.Bills) != 1 {
+		t.Errorf("bills = %+v, want the filter's", ev.Bills)
+	}
+	waitFor(t, "the hold to be given back", func() bool {
+		h.budgets.mu.Lock()
+		defer h.budgets.mu.Unlock()
+		return h.budgets.held == 0
+	})
 }
 
 func TestAKeyWithSomeToolsOnlyReachesTheTools(t *testing.T) {

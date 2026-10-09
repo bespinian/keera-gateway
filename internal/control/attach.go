@@ -86,8 +86,8 @@ func (s *Server) attach(w http.ResponseWriter, r *http.Request, p *authn.Princip
 	// Seeing a sandbox is not enough to open a shell in it. See canAttach.
 	if !canAttach(p, sb) {
 		forbid(w, "that sandbox belongs to somebody else; an administrator can see it and "+
-			"can delete it, and opening a shell in it is the owner's alone - it holds their "+
-			"working copy")
+			"terminate it, but only its owner or an operator can open a shell in it - it "+
+			"holds the owner's working copy")
 		return
 	}
 

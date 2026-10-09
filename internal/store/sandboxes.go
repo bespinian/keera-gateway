@@ -51,21 +51,13 @@ func scanSandboxClass(r row) (policy.SandboxClass, error) {
 // Unlike models they are not cached, because only the control API and the
 // sandbox manager read them, and both already talk to Postgres.
 func (s *Store) LoadSandboxClasses(ctx context.Context) ([]policy.SandboxClass, error) {
-	rows, err := s.pool.Query(ctx, sandboxClassColumns+" FROM sandbox_classes ORDER BY org_id, name")
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, scanSandboxClass)
+	return queryAll(ctx, s.pool, scanSandboxClass, sandboxClassColumns+" FROM sandbox_classes ORDER BY org_id, name")
 }
 
 // ListSandboxClasses reads one organisation's classes.
 func (s *Store) ListSandboxClasses(ctx context.Context, orgID string) ([]policy.SandboxClass, error) {
-	rows, err := s.pool.Query(ctx,
+	return queryAll(ctx, s.pool, scanSandboxClass,
 		sandboxClassColumns+" FROM sandbox_classes WHERE org_id = $1 ORDER BY name", orgID)
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, scanSandboxClass)
 }
 
 // SandboxClass reads one of an organisation's classes, or ErrNotFound.
@@ -227,11 +219,7 @@ func (s *Store) sandboxWhere(ctx context.Context, rest string, args ...any) (San
 
 // sandboxesWhere reads every sandbox the rest of the query picks.
 func (s *Store) sandboxesWhere(ctx context.Context, rest string, args ...any) ([]Sandbox, error) {
-	rows, err := s.pool.Query(ctx, sandboxColumns+" FROM sandboxes "+rest, args...)
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, scanSandbox)
+	return queryAll(ctx, s.pool, scanSandbox, sandboxColumns+" FROM sandboxes "+rest, args...)
 }
 
 // CreateSandbox inserts one row.
@@ -543,7 +531,7 @@ func (s *Store) SandboxUsageBy(ctx context.Context, orgID, groupBy string, from,
 	if orgID == "" && group == sandboxGroupColumns["class"] {
 		org, by = "s.org_id", "1, 2"
 	}
-	rows, err := s.pool.Query(ctx, `
+	return queryAll(ctx, s.pool, scanSandboxUsage, `
 		SELECT `+group+` AS k, `+org+`,
 		       count(*),
 		       COALESCE(sum(s.running_seconds), 0),
@@ -553,12 +541,10 @@ func (s *Store) SandboxUsageBy(ctx context.Context, orgID, groupBy string, from,
 		WHERE s.created_at >= $1 AND s.created_at < $2 AND ($3 = '' OR s.org_id = $3)
 		GROUP BY `+by+`
 		ORDER BY 4 DESC`, from, to, orgID)
-	if err != nil {
-		return nil, err
-	}
-	return collect(rows, func(r row) (SandboxUsage, error) {
-		var u SandboxUsage
-		err := r.Scan(&u.Key, &u.OrgID, &u.Count, &u.Running, &u.CoreSeconds, &u.Live)
-		return u, err
-	})
+}
+
+func scanSandboxUsage(r row) (SandboxUsage, error) {
+	var u SandboxUsage
+	err := r.Scan(&u.Key, &u.OrgID, &u.Count, &u.Running, &u.CoreSeconds, &u.Live)
+	return u, err
 }

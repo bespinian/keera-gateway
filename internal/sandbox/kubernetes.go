@@ -102,6 +102,8 @@ func NewKubernetes(ctx context.Context, opts KubernetesOptions) (*Kubernetes, er
 	}
 	k := &Kubernetes{c: c, opts: opts, log: opts.Log}
 
+	// Listing one Sandbox stands in for discovery: it proves at once that the
+	// API server answers, the CRD is installed and the account may use it.
 	var probe struct {
 		Items []struct{} `json:"items"`
 	}
