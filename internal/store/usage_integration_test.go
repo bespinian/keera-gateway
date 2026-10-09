@@ -543,7 +543,7 @@ func TestFlowsCountsOneWindowFourWays(t *testing.T) {
 		t.Fatalf("WriteEvents: %v", err)
 	}
 
-	rep, err := st.Flows(ctx, f.orgID, day.Add(-time.Hour), day.Add(time.Hour))
+	rep, err := st.Flows(ctx, f.orgID, "", day.Add(-time.Hour), day.Add(time.Hour))
 	if err != nil {
 		t.Fatalf("Flows: %v", err)
 	}
@@ -601,7 +601,7 @@ func TestFlowsOverAnEmptyWindow(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
 
-	rep, err := st.Flows(ctx, f.orgID, time.Now().Add(-time.Hour), time.Now())
+	rep, err := st.Flows(ctx, f.orgID, "", time.Now().Add(-time.Hour), time.Now())
 	if err != nil {
 		t.Fatalf("Flows: %v", err)
 	}

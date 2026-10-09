@@ -198,54 +198,43 @@ const routes = [
     view: usageView,
   },
 
+  // The event log, read three ways. Everyone reads these: an administrator
+  // the whole organisation's traffic, a member only that of their own keys.
+  //
+  // The map leads because it answers "what is this" rather than "what
+  // happened", which is the first question somebody new to a deployment has.
+  {
+    path: "/map",
+    group: "Activity",
+    label: "Live map",
+    icon: "map",
+    view: mapView,
+  },
+  // The log grouped into the tasks its requests were made for: one row per
+  // task rather than per call. The calls behind any row are a click away.
+  {
+    path: "/sessions",
+    group: "Activity",
+    label: "Sessions",
+    icon: "sessions",
+    view: sessionsView,
+    detail: { label: "Session", view: sessionDetailView },
+  },
+  // The same log, one row per call: served, refused, interrupted and failed.
+  {
+    path: "/requests",
+    group: "Activity",
+    label: "Requests",
+    icon: "requests",
+    view: requestsView,
+  },
+
   {
     path: "/users",
     group: "Administration",
     label: "Users",
     icon: "people",
     view: peopleView,
-    admin: true,
-  },
-
-  // The deployment drawn rather than listed: what is pointed at this gateway,
-  // what it forwards to, and which of those are outside the building. It leads
-  // the three screens made of the event log because it is the one that answers
-  // "what is this" rather than "what happened" - which is the first question
-  // somebody who has just been handed a deployment actually has.
-  {
-    path: "/map",
-    group: "Administration",
-    label: "Live map",
-    icon: "map",
-    view: mapView,
-    admin: true,
-  },
-
-  // The event log grouped into the tasks its requests were made for: one row
-  // per task rather than per call. It leads the pair because the task is the
-  // unit anybody works in, and the calls behind any row are a click away.
-  //
-  // Administration rather than Organisation, like the log below it: the rows
-  // name other people's keys and carry error text written by the inference
-  // plane. A member investigating their own calls has them on My access.
-  {
-    path: "/sessions",
-    group: "Administration",
-    label: "Sessions",
-    icon: "sessions",
-    view: sessionsView,
-    admin: true,
-    detail: { label: "Session", view: sessionDetailView },
-  },
-  // The same log, one row per call: served, refused, interrupted and failed.
-  // It is what the dashboard's numbers are counted from, and where a reader
-  // ends up once they know which task they are asking about.
-  {
-    path: "/requests",
-    group: "Administration",
-    label: "Requests",
-    icon: "requests",
-    view: requestsView,
     admin: true,
   },
   {

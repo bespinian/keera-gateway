@@ -28,8 +28,16 @@ import {
   icons,
   liveControl,
 } from "../ui.js";
-import { outcomeMeaning, statusLabel, oneLine } from "../status.js";
+import { outcomeMeaning, oneLine } from "../status.js";
 import { flameChart } from "../flame.js";
+import {
+  currentOutcome,
+  narrowRow,
+  outcomeSeg,
+  ranking,
+  rankedNote,
+  readNarrowing,
+} from "./logfilters.js";
 
 const PAGE = 100;
 
@@ -39,188 +47,13 @@ const PAGE = 100;
 // question is about the next thirty seconds rather than the last hour.
 const LIVE_KEY = "keera.requests.live";
 
+// The ranking, remembered apart from the session list's, which offers others.
+const SORT_KEY = "keera.requests.sort";
+
 // How long a row that has just arrived is marked as new. Long enough to catch
 // the eye of somebody looking elsewhere on the screen, short enough that a log
 // nobody is watching is not a wall of highlights when they come back.
 const FRESH_MS = 4000;
-
-// The lenses on the log, widest first. "All" leads because the first question
-// is what has been happening rather than what went wrong: a log that opens on
-// the failures cannot tell somebody that their agent's calls arrived and were
-// served, which half the time is the answer.
-const OUTCOMES = [
-  { key: "", label: "All", of: (c) => c.total },
-  { key: "ok", label: "Served", of: (c) => c.ok },
-  { key: "failed", label: "Failed", of: (c) => c.failed },
-  { key: "refused", label: "Refused", of: (c) => c.refused },
-  { key: "interrupted", label: "Interrupted", of: (c) => c.interrupted },
-];
-
-// The outcome is remembered on its own, because it is the one lens both callers
-// have and because the dashboard's failure count sets it directly.
-const OUTCOME_KEY = "keera.requests.outcome";
-
-// What the log can be narrowed by on a screen that carries the filters: the
-// query parameter, the facet the counts arrive under, how a value is written
-// for a reader, and - for the one filter that is asked in more than one size -
-// how its list is drawn. They are one list so that reading them, drawing them
-// and clearing them cannot fall out of step with each other.
-const NARROWINGS = [
-  { param: "alias", facet: "models", label: "Every model", aria: "Model" },
-  {
-    param: "project_id",
-    facet: "projects",
-    label: "Every project",
-    aria: "Project",
-    name: (v, names) => names.projects[v] || v,
-  },
-  {
-    param: "key_id",
-    facet: "keys",
-    label: "Every key",
-    aria: "Key",
-    name: (v, names) => names.keys[v] || v,
-  },
-  {
-    param: "user_id",
-    facet: "users",
-    label: "Everyone",
-    aria: "User",
-    name: (v, names) => names.users[v] || v,
-  },
-  {
-    param: "status",
-    facet: "statuses",
-    label: "Every status",
-    aria: "Status",
-    name: statusFilterLabel,
-    options: statusOptions,
-  },
-];
-
-// The status classes, offered above the exact statuses.
-//
-// The same reader asks this filter in two sizes within a minute: "which of
-// these was the 402" is one code, and "did anything fail this afternoon" is
-// all of 5XX at once, asked by somebody who does not know which code their
-// backends answer with.
-//
-// The value is what the control plane reads as a class, and `holds` is the
-// same division over the facet counts, so a class is offered with how many
-// rows carry it exactly as an exact status is.
-const STATUS_CLASSES = [
-  { value: "5xx", label: "Server errors (5XX)", holds: (s) => s >= 500 },
-  {
-    value: "4xx",
-    label: "Client errors (4XX)",
-    holds: (s) => s >= 400 && s < 500,
-  },
-  { value: "2xx", label: "Answered (2XX)", holds: (s) => s >= 200 && s < 300 },
-];
-
-// statusFilterLabel names one status filter with no row beside it to read: a
-// class by what it holds, an exact status by its number and what that means.
-function statusFilterLabel(v) {
-  const cls = STATUS_CLASSES.find((c) => c.value === v);
-  return cls ? cls.label : `${v} - ${statusLabel(Number(v))}`;
-}
-
-// statusOptions draws the two sizes as two groups. A reader looking for "the
-// server errors" should not have to read a list of codes to work out whether
-// one of them is the whole class they meant, and a reader looking for the 402
-// should not have to scroll past the classes to find it.
-//
-// A class is listed only when the window holds something in it, which the
-// outcome lens above already narrows: under "Failed" there is nothing but 5XX,
-// and offering 4XX there would be offering a filter that selects nothing.
-function statusOptions(counts, selected) {
-  const groups = STATUS_CLASSES.map((c) => ({
-    ...c,
-    count: counts.reduce(
-      (n, f) => (c.holds(Number(f.value)) ? n + Number(f.count) : n),
-      0,
-    ),
-  })).filter((c) => c.count > 0 || c.value === selected);
-
-  const exact = counts.map((c) =>
-    h(
-      "option",
-      { value: c.value, selected: c.value === selected },
-      `${statusFilterLabel(c.value)} (${num(c.count)})`,
-    ),
-  );
-  // A status that is selected and no longer occurs - one picked under "All" and
-  // still selected under "Failed" - stays in the list and says so. A select
-  // showing nothing selected is a filter nobody can see they have applied.
-  if (
-    selected &&
-    !groups.some((c) => c.value === selected) &&
-    !counts.some((c) => c.value === selected)
-  ) {
-    exact.unshift(
-      h(
-        "option",
-        { value: selected, selected: true },
-        `${statusFilterLabel(selected)} (0)`,
-      ),
-    );
-  }
-
-  return [
-    groups.length
-      ? h(
-          "optgroup",
-          { label: "Groups" },
-          groups.map((c) =>
-            h(
-              "option",
-              { value: c.value, selected: c.value === selected },
-              `${c.label} (${num(c.count)})`,
-            ),
-          ),
-        )
-      : null,
-    exact.length ? h("optgroup", { label: "Exact status" }, exact) : null,
-  ].filter(Boolean);
-}
-
-const narrowKey = (param) => "keera.requests." + param;
-
-function readNarrowing() {
-  const out = {};
-  for (const n of NARROWINGS)
-    out[n.param] = sessionStorage.getItem(narrowKey(n.param)) || "";
-  return out;
-}
-
-function clearNarrowing() {
-  for (const n of NARROWINGS) sessionStorage.removeItem(narrowKey(n.param));
-}
-
-/** setOutcome is the dashboard's failure count, and the failure pill on an
- *  entity's chart, pointing the log at the rows they counted - on this screen
- *  or on the one they send the reader to. */
-export function setOutcome(outcome) {
-  sessionStorage.setItem(OUTCOME_KEY, outcome);
-}
-
-/** openFailed points this log at the failed rows and nothing else, for the
- *  dashboard's failure count.
- *
- *  It clears the narrowing where setOutcome leaves it alone. The count on that
- *  pill is over the whole organisation, and a model or a key still selected
- *  from somebody's last visit would put a smaller number under a pill that had
- *  just promised them a bigger one. */
-export function openFailed() {
-  setOutcome("failed");
-  clearNarrowing();
-}
-
-/** currentOutcome is which lens the log is being read through, for a screen
- *  that says something about it around the section rather than inside it. */
-export function currentOutcome() {
-  return sessionStorage.getItem(OUTCOME_KEY) || "";
-}
 
 /** requestLog is the section itself.
  *
@@ -254,8 +87,9 @@ export async function requestLog(
     live = false,
   },
 ) {
-  const outcome = sessionStorage.getItem(OUTCOME_KEY) || "";
-  const narrowed = filters ? readNarrowing() : {};
+  const outcome = currentOutcome();
+  const narrowed = filters ? readNarrowing(ctx, { status: true }) : {};
+  const rank = ranking(ctx, SORT_KEY);
   // The scope wins over the narrowing: a project's own screen is about that project
   // whatever was last picked on the dashboard.
   const params = {
@@ -263,6 +97,7 @@ export async function requestLog(
     since,
     limit: PAGE,
     outcome,
+    sort: rank.by,
     ...narrowed,
     ...scope,
     facets: filters ? "1" : "",
@@ -299,64 +134,33 @@ export async function requestLog(
     projects: res.project_names || {},
     users: res.user_names || {},
   };
-  const anyNarrowed = NARROWINGS.some((n) => narrowed[n.param]);
+  const anyNarrowed = Object.values(narrowed).some(Boolean);
 
   const wrap = h("div", { style: { marginTop: "24px" } });
 
   // The counts are held rather than only drawn, because the stream below sends
-  // fresh ones with every batch of rows. They are the control plane's own count
-  // over the window each time and never a running total accumulated here: a
-  // number beside "All" that drifted from the one a reload would show is worse
-  // than a number that only changes when the reader asks for it.
-  const shown = { ...counts };
-  const tallies = new Map();
-  const seg = h(
-    "div",
-    { class: "seg" },
-    OUTCOMES.map((oc) => {
-      const tally = h("span", { class: "faint" }, num(oc.of(counts)));
-      const button = h(
-        "button",
-        {
-          "aria-pressed": String(oc.key === outcome),
-          disabled: oc.key !== outcome && oc.of(counts) === 0,
-          onClick: () => {
-            setOutcome(oc.key);
-            ctx.reload();
+  // fresh ones with every batch of rows.
+  const seg = outcomeSeg(ctx, outcome, counts);
+
+  // New rows arrive in time order, so a ranked log is not watched: a request
+  // that just arrived has no place in a list of the most expensive ones until
+  // the control plane ranks it.
+  const watch =
+    live && rank.by === ""
+      ? liveControl({
+          key: LIVE_KEY,
+          label: "Watch for new requests",
+          titles: {
+            live: "Live: new requests appear here. Click to stop.",
+            connecting:
+              "Reconnecting to the request log. Click to stop watching.",
+            paused: "Paused. Click to see new requests live.",
+            stopped:
+              "The stream stopped and could not reconnect. Click to try again, " +
+              "or reload the page.",
           },
-        },
-        oc.label,
-        " ",
-        tally,
-      );
-      tallies.set(oc, { button, tally });
-      return button;
-    }),
-  );
-
-  function retally(next) {
-    Object.assign(shown, next);
-    for (const [oc, { button, tally }] of tallies) {
-      tally.textContent = num(oc.of(shown));
-      button.disabled = oc.key !== outcome && oc.of(shown) === 0;
-    }
-  }
-
-  const watch = live
-    ? liveControl({
-        key: LIVE_KEY,
-        label: "Watch for new requests",
-        titles: {
-          live: "Live: new requests appear here. Click to stop.",
-          connecting:
-            "Reconnecting to the request log. Click to stop watching.",
-          paused: "Paused. Click to see new requests live.",
-          stopped:
-            "The stream stopped and could not reconnect. Click to try again, " +
-            "or reload the page.",
-        },
-      })
-    : null;
+        })
+      : null;
   wrap.append(
     h(
       "div",
@@ -364,7 +168,7 @@ export async function requestLog(
       title ? h("h2", {}, title) : null,
       lead,
       h("div", { style: { flex: 1 } }),
-      seg,
+      seg.el,
       watch ? watch.el : null,
       h(
         "button",
@@ -379,33 +183,8 @@ export async function requestLog(
     ),
   );
 
-  // The narrowing keeps what it has when the outcome or the range changes,
-  // because "now show me that project's failures" is the next thing somebody asks
-  // rather than a mistake. A selection that matches nothing under the new
-  // outcome says so below, and Clear is right beside it.
   if (filters) {
-    wrap.append(
-      h(
-        "div",
-        { class: "row", style: { margin: "12px 0", flexWrap: "wrap" } },
-        NARROWINGS.map((n) =>
-          narrowSelect(ctx, n, narrowed[n.param], facets[n.facet] || [], names),
-        ),
-        anyNarrowed
-          ? h(
-              "button",
-              {
-                class: "btn btn-quiet btn-sm",
-                onClick: () => {
-                  clearNarrowing();
-                  ctx.reload();
-                },
-              },
-              "Clear",
-            )
-          : null,
-      ),
-    );
+    wrap.append(narrowRow(ctx, narrowed, facets, names, { status: true }));
   }
 
   // Both empty states still watch. An empty log is the screen most likely to be
@@ -434,7 +213,7 @@ export async function requestLog(
   }
 
   const log = rows.length
-    ? requestTable(ctx, rows, names, currency, hide)
+    ? requestTable(ctx, rows, names, currency, hide, { rank })
     : null;
   wrap.append(
     log ||
@@ -451,9 +230,13 @@ export async function requestLog(
       ),
   );
 
+  if (rows.length === PAGE && rank.by !== "") {
+    wrap.append(rankedNote(PAGE, "requests"));
+  }
+
   // Paging appends rather than replaces, so somebody reading backwards through
   // an incident keeps what they have already read on the screen.
-  if (rows.length === PAGE) {
+  if (rows.length === PAGE && rank.by === "") {
     let before = res.next_before;
     const more = h(
       "button",
@@ -466,7 +249,7 @@ export async function requestLog(
             const next = await api.requests({ ...params, before });
             const page = next.data || [];
             wrap.insertBefore(
-              requestTable(ctx, page, names, currency, hide),
+              requestTable(ctx, page, names, currency, hide, { rank }),
               moreWrap,
             );
             before = next.next_before;
@@ -554,7 +337,7 @@ export async function requestLog(
 
     function arrived(payload) {
       if (payload.next_after) listen.after = payload.next_after;
-      if (payload.outcomes) retally(payload.outcomes);
+      if (payload.outcomes) seg.retally(payload.outcomes);
       // Labels travel only when a row named something this screen opened too
       // early to know about - a key issued a minute ago, whose first request is
       // exactly what somebody is watching for.
@@ -594,68 +377,21 @@ export async function requestLog(
   }
 }
 
-// narrowSelect is one filter, listing only the values that occur in the window
-// and how many rows each holds. A deployment with two hundred keys has four
-// that made a request this week, and the other hundred and ninety-six are
-// something to search through.
-//
-// A value that is selected but no longer occurs - a model picked under "all"
-// and still selected under "failed" - is kept and marked, because a select
-// that silently shows nothing is a filter nobody can see they have applied.
-//
-// A filter that groups its values draws its own list: the status one is the
-// only such filter, and it owns both halves of what it offers.
-function narrowSelect(ctx, n, selected, counts, names) {
-  const label = (v) => (n.name ? n.name(v, names) : v);
-  const options = n.options
-    ? n.options(counts, selected)
-    : counts.map((c) =>
-        h(
-          "option",
-          { value: c.value, selected: c.value === selected },
-          `${label(c.value)} (${num(c.count)})`,
-        ),
-      );
-  if (!n.options && selected && !counts.some((c) => c.value === selected)) {
-    options.unshift(
-      h(
-        "option",
-        { value: selected, selected: true },
-        `${label(selected)} (0)`,
-      ),
-    );
-  }
-  return h(
-    "select",
-    {
-      class: "select",
-      style: { width: "auto" },
-      "aria-label": n.aria,
-      disabled: options.length === 0,
-      onChange: (e) => {
-        sessionStorage.setItem(narrowKey(n.param), e.target.value);
-        ctx.reload();
-      },
-    },
-    h("option", { value: "" }, n.label),
-    options,
-  );
-}
-
 /** requestTable is a page of the log, and is exported for the one screen that
  *  holds request rows without having asked this section for them: a session,
  *  which is a task's own calls read from beginning to end. They are the same
  *  rows and so they are the same table - the same columns, the same outcome
  *  wording, the same dialog behind View.
  *
- *  `opts` is merged into the table's own options, which is how that screen asks
- *  for the one thing it needs differently: its rows are read oldest first,
- *  because a task is read forwards. */
+ *  `opts` is merged into the table's own options. The log passes its ranking
+ *  there, because it holds one page of many. A session holds all its rows and
+ *  sorts them in place, oldest first, because a task is read forwards. */
 export function requestTable(ctx, rows, names, currency, hide, opts = {}) {
   const columns = [
     {
       label: "When",
       shrink: true,
+      rank: "",
       sortKey: (q) => new Date(q.ts).getTime(),
       sortDir: "desc",
       cell: (q) =>
@@ -749,6 +485,7 @@ export function requestTable(ctx, rows, names, currency, hide, opts = {}) {
       label: "Tokens",
       num: true,
       shrink: true,
+      rank: "tokens",
       sortKey: (q) => q.input_tokens + q.output_tokens,
       sortDir: "desc",
       cell: (q) =>
@@ -764,6 +501,7 @@ export function requestTable(ctx, rows, names, currency, hide, opts = {}) {
       label: `Cost (${currency})`,
       num: true,
       shrink: true,
+      rank: "cost",
       sortKey: (q) => q.cost_micros || null,
       sortDir: "desc",
       cell: (q) =>
@@ -785,6 +523,7 @@ export function requestTable(ctx, rows, names, currency, hide, opts = {}) {
       label: "First token",
       num: true,
       shrink: true,
+      rank: "ttft",
       sortKey: (q) => q.ttft_ms || null,
       sortDir: "desc",
       cell: (q) =>

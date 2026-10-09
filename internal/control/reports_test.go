@@ -284,21 +284,39 @@ func TestRequestsCSVCarriesTheMessageAndTheNames(t *testing.T) {
 	}
 }
 
-// The request log names other people's keys and carries error text written by
-// the inference plane. A member reads their own requests on My access; this
-// screen is for whoever runs the organisation.
-func TestRequestsAreAdministratorOnly(t *testing.T) {
+// A member reads the request log too, but only the requests of their own
+// keys. Naming someone else is refused, not quietly answered with their own.
+func TestAMemberCannotReadSomebodyElsesRequests(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, httpx.ControlPrefix+"/v1/requests?project_id=project_1", nil)
-
-	s.requests(w, r, &authn.Principal{Role: authn.RoleMember, OrgID: "org_1"})
-
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", w.Code)
+	for name, h := range map[string]handler{
+		"the log":    s.requests,
+		"the stream": s.requestStream,
+		"sessions":   s.sessions,
+	} {
+		w := invoke(h, member("org_1"), http.MethodGet, "/v1/requests?user_id=user_other", "")
+		if w.Code != http.StatusForbidden {
+			t.Errorf("%s answered a member asking for someone else %d, want 403", name, w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "their own keys") {
+			t.Errorf("%s said %q, want it to say what a member may read", name, w.Body.String())
+		}
 	}
-	if !strings.Contains(w.Body.String(), "only an administrator") {
-		t.Errorf("body = %q, want it to say who may read one", w.Body.String())
+}
+
+// Without a person behind it there are no keys of one's own to narrow to.
+func TestAMemberWithoutAUserReadsNoRequests(t *testing.T) {
+	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
+	nobody := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleMember, OrgID: "org_1"}
+	for name, h := range map[string]handler{
+		"the log":     s.requests,
+		"the stream":  s.requestStream,
+		"sessions":    s.sessions,
+		"one session": s.session,
+		"the map":     s.trafficMap,
+	} {
+		if w := invoke(h, nobody, http.MethodGet, "/v1/requests", ""); w.Code != http.StatusForbidden {
+			t.Errorf("%s answered %d, want 403", name, w.Code)
+		}
 	}
 }
 

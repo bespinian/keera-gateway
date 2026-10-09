@@ -134,7 +134,7 @@ func (s *Server) Run(ctx context.Context) {
 // has. Without it the stream starts at the end of the log, rather than
 // replaying what the reader is already looking at.
 //
-// Administrator-only, like the request log.
+// A member gets only their own requests, like the request log.
 func (s *Server) requestStream(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	rq, _, _, ok := s.requestQuery(w, r, p)
 	if !ok {
@@ -360,7 +360,7 @@ func (s *Server) sendRequests(ctx context.Context, w http.ResponseWriter,
 func (s *Server) countOutcomes(ctx context.Context, rq store.RequestQuery, settled int64,
 	tally *outcomeTally, since string) (store.RequestOutcomes, error) {
 	q := store.RequestQuery{
-		OrgID: rq.OrgID, ReportScope: rq.ReportScope,
+		OrgID: rq.OrgID, ReportScope: rq.ReportScope, Holder: rq.Holder,
 		Status: rq.Status, StatusClass: rq.StatusClass,
 	}
 	now := time.Now()

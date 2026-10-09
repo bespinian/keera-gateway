@@ -14,19 +14,6 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// The map names other people's clients and every model in the organisation,
-// which is the request log's audience and not a member's.
-func TestTheMapIsForAdministrators(t *testing.T) {
-	s := newServer()
-	member := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleMember, OrgID: "org_1"}
-
-	w := httptest.NewRecorder()
-	s.trafficMap(w, httptest.NewRequest(http.MethodGet, httpx.ControlPrefix+"/v1/map", nil), member)
-	if w.Code != http.StatusForbidden {
-		t.Errorf("status = %d for a member, want 403", w.Code)
-	}
-}
-
 // What a model's box says about where it runs. The map is for the
 // organisation's administrators, who see its backends on the Models screen too.
 func TestAModelsBoxNamesWhereItRuns(t *testing.T) {

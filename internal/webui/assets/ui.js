@@ -822,13 +822,18 @@ function toggleBox(t, checked, onChange) {
  *                 option is "All", which keeps every row.
  *    sortBy       the label of the column to sort by before anybody asks
  *    sortDir      "asc" (the default) or "desc"
+ *    rank         { by, set } - for a list the control plane ranks, because
+ *                 only part of it is here. A column with a `rank` gets a
+ *                 header that calls set(rank), and the one whose rank is `by`
+ *                 is marked. Rows are drawn in the order given.
  *    rowClass     (row) => string - a class for that row's <tr>, for a table
  *                 whose rows are not all the same age or the same kind
  *    emptyTitle / emptyBody
  *
  *  A column with a sortKey gets a header that sorts by it. Searching and
- *  sorting both happen here rather than in the control plane: every screen
- *  using this already holds its whole list.
+ *  sorting both happen here rather than in the control plane: most screens
+ *  using this hold their whole list. One that pages passes `rank` instead, and
+ *  its sortKeys are ignored: sorting one page would rank the wrong rows.
  *
  *  A column with a `width` gets that width instead of one measured from its
  *  contents, which is what keeps a column still on a screen that redraws the
@@ -870,7 +875,9 @@ export function table(columns, rows, opts = {}) {
     q: "",
     on: toggles.map((t) => !!t.on),
     picked: choices.map(() => ""),
-    sort: columns.find((c) => c.sortKey && c.label === opts.sortBy) || null,
+    sort: opts.rank
+      ? null
+      : columns.find((c) => c.sortKey && c.label === opts.sortBy) || null,
     dir: opts.sortDir === "desc" ? -1 : 1,
   };
 
@@ -886,6 +893,7 @@ export function table(columns, rows, opts = {}) {
       class: cellClass(c),
       style: c.width ? { width: c.width } : null,
     };
+    if (opts.rank) return rankHead(c, attrs, opts.rank);
     if (!c.sortKey) return h("th", attrs, c.label);
     const arrow = h("span", { class: "sort-arrow", "aria-hidden": "true" });
     const th = h(
@@ -1041,6 +1049,36 @@ export function table(columns, rows, opts = {}) {
   // to the first - the search they typed, the column they sorted by.
   el.redraw = draw;
   return el;
+}
+
+/** rankHead is a header for a list the control plane ranks. Every ranking is
+ *  largest first, so a second click has nothing to turn round. */
+function rankHead(c, attrs, rank) {
+  if (c.rank === undefined) return h("th", attrs, c.label);
+  const active = c.rank === rank.by;
+  return h(
+    "th",
+    { ...attrs, "aria-sort": active ? "descending" : null },
+    h(
+      "button",
+      {
+        class: "th-sort",
+        title:
+          c.rank === ""
+            ? "Newest first"
+            : `Sort by ${c.label.toLowerCase()}, highest first`,
+        onClick: () => {
+          if (!active) rank.set(c.rank);
+        },
+      },
+      c.label,
+      h(
+        "span",
+        { class: "sort-arrow", "aria-hidden": "true" },
+        active ? "↓" : "",
+      ),
+    ),
+  );
 }
 
 function cellClass(c) {

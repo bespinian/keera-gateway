@@ -764,6 +764,45 @@ func TestRequestFiltersOfferOnlyWhatOccurred(t *testing.T) {
 	}
 }
 
+// The log ranks the window, not the page: the most expensive request of the
+// week is first even when it is not among the newest.
+func TestRequestsRankTheWholeWindow(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	if err := st.WriteEvents(ctx, []Event{
+		{TS: now.Add(-5 * time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
+			Status: 200, CostMicros: 9000, InputTokens: 10, TTFT: time.Second},
+		{TS: now.Add(-4 * time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
+			Status: 200, CostMicros: 10, InputTokens: 5000, TTFT: 100 * time.Millisecond},
+		{TS: now.Add(-3 * time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
+			Status: 200, CostMicros: 20, InputTokens: 20, TTFT: 8 * time.Second},
+		{TS: now.Add(-time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
+			Status: 200, CostMicros: 30, InputTokens: 30, TTFT: 200 * time.Millisecond},
+	}); err != nil {
+		t.Fatalf("WriteEvents: %v", err)
+	}
+
+	for _, tc := range []struct {
+		sort Sort
+		want func(Request) bool
+	}{
+		{SortRecent, func(r Request) bool { return r.CostMicros == 30 }},
+		{SortCost, func(r Request) bool { return r.CostMicros == 9000 }},
+		{SortTokens, func(r Request) bool { return r.InputTokens == 5000 }},
+		{SortFirstToken, func(r Request) bool { return r.TTFTMS == 8000 }},
+	} {
+		got, err := st.Requests(ctx, RequestQuery{OrgID: f.orgID, Sort: tc.sort, Limit: 1})
+		if err != nil {
+			t.Fatalf("Requests(%q): %v", tc.sort, err)
+		}
+		if len(got) != 1 || !tc.want(got[0]) {
+			t.Errorf("%q puts %+v first", tc.sort, got)
+		}
+	}
+}
+
 // The cached share of a prompt is charged at its own rate, so a row that lost
 // it is a row whose cost cannot be arrived at from the counts beside it -
 // which is the state somebody reconciling against a provider's invoice is

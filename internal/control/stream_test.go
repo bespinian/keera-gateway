@@ -168,14 +168,13 @@ func TestRequestStreamCarriesARowCommittedAfterANewerOne(t *testing.T) {
 	awaitAlias(t, events, "keera-late")
 }
 
-func TestRequestStreamIsAdministratorOnly(t *testing.T) {
-	// The rows name other people's keys and carry text the inference plane
-	// wrote, so this is held to what the log itself is held to - and it is a
-	// separate route, which is exactly how such a check gets forgotten.
+func TestRequestStreamKeepsAMemberInTheirOwnOrganisation(t *testing.T) {
+	// A separate route from the log, which is exactly how such a check gets
+	// forgotten.
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
-	w := invoke(s.requestStream, member("org_1"), http.MethodGet, "/v1/requests/stream?org_id=org_1", "")
+	w := invoke(s.requestStream, member("org_1"), http.MethodGet, "/v1/requests/stream?org_id=org_2", "")
 	if w.Code != http.StatusForbidden {
-		t.Errorf("status = %d for a member, want 403", w.Code)
+		t.Errorf("status = %d for a member naming another organisation, want 403", w.Code)
 	}
 }
 

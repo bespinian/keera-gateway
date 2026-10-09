@@ -9,12 +9,12 @@
 // The screen is the shared log section and nothing else, so the counts here
 // and on a project's or a key's own page can never disagree.
 //
-// Administrator-only, like the audit log: the rows name other people's keys
-// and carry text the inference plane wrote. A member reading their own traffic
-// has it on My access.
+// An administrator reads the whole organisation's log, a member only the
+// requests of their own keys.
 
 import { h, RANGES, currentRange, rangePicker } from "../ui.js";
-import { requestLog, currentOutcome } from "./requestlog.js";
+import { requestLog } from "./requestlog.js";
+import { currentOutcome } from "./logfilters.js";
 
 export async function requestsView(ctx) {
   const since = currentRange();

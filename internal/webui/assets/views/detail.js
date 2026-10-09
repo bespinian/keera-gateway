@@ -39,8 +39,9 @@ import {
   plural,
 } from "../ui.js";
 import { areaChart, barList } from "../chart.js";
-import { requestLog, setOutcome } from "./requestlog.js";
-import { sessionLog, setUnhappy } from "./sessions.js";
+import { requestLog } from "./requestlog.js";
+import { setOutcome } from "./logfilters.js";
+import { sessionLog } from "./sessions.js";
 import { modelsCell, summarise } from "./guardrails.js";
 import { openModel } from "./models.js";
 import {
@@ -580,7 +581,7 @@ async function screen(ctx, spec) {
 
 // failureJump is the failed count as the way to the failed rows, which on this
 // screen are a scroll away rather than a page away. Under a session log it
-// shows the sessions with problems.
+// shows the sessions holding a failed request.
 function failureJump(ctx, text, sessions) {
   if (!isAdmin(ctx)) {
     return h(
@@ -595,11 +596,10 @@ function failureJump(ctx, text, sessions) {
     {
       class: "pill pill-bad pill-button",
       title: sessions
-        ? "Show only the sessions with problems below"
+        ? "Show only the sessions with a failed request below"
         : "Show only the failed requests below",
       onClick: () => {
-        if (sessions) setUnhappy(true);
-        else setOutcome("failed");
+        setOutcome("failed");
         ctx.reload();
       },
     },

@@ -1,6 +1,7 @@
 package control
 
 import (
+	"cmp"
 	"context"
 	"encoding/csv"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -161,9 +163,9 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, p *authn.Princ
 // requests is the event log: one row per request, whatever happened to it,
 // narrowed to the entity whose screen is asking.
 //
-// Administrator-only: the rows name other people's keys and carry messages
-// from the inference plane. Members see their own traffic
-// on My access.
+// An administrator reads the whole organisation's. A member reads only the
+// requests made with their own keys: the rows carry messages from the
+// inference plane, which are nobody else's business.
 func (s *Server) requests(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	rq, from, to, ok := s.requestQuery(w, r, p)
 	if !ok {
@@ -172,7 +174,13 @@ func (s *Server) requests(w http.ResponseWriter, r *http.Request, p *authn.Princ
 	orgID := rq.OrgID
 	q := r.URL.Query()
 	rq.From, rq.To = from, to
+	if rq.Sort, ok = parseSort(w, q, store.RequestSorts()); !ok {
+		return
+	}
 	rq.Limit, rq.Before = page(q)
+	if rq.Sort != store.SortRecent {
+		rq.Before = 0
+	}
 
 	names, err := s.groupNames(r.Context(), orgID)
 	if err != nil {
@@ -218,20 +226,42 @@ func (s *Server) requests(w http.ResponseWriter, r *http.Request, p *authn.Princ
 			out["filters"] = facets
 		}
 	}
-	if len(rows) > 0 {
+	if len(rows) > 0 && rq.Sort == store.SortRecent {
 		out["next_before"] = rows[len(rows)-1].ID
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-// requestQuery is what the request log and its stream share: an administrator
-// only, the organisation and entity narrowed to, and the outcome and status
-// filters. The window is returned apart, because the stream has none. It
-// returns false once it has answered with an error.
+// parseSort reads a log's ranking, one of offered. "recent" and nothing at
+// all are the default. One it does not offer is refused rather than ignored.
+//
+// Paging works only under the default order: a cursor from one order would
+// drop rows in another, and whoever ranks by cost wants the top of the list.
+func parseSort(w http.ResponseWriter, v url.Values, offered []store.Sort) (store.Sort, bool) {
+	sort := store.Sort(v.Get("sort"))
+	if sort == "recent" {
+		sort = store.SortRecent
+	}
+	if slices.Contains(offered, sort) {
+		return sort, true
+	}
+	names := make([]string, len(offered))
+	for i, o := range offered {
+		names[i] = cmp.Or(string(o), "recent")
+	}
+	badRequest(w, "sort must be one of "+strings.Join(names, ", "))
+	return "", false
+}
+
+// requestQuery is what the request log and its stream share: whose requests
+// the caller may read, the organisation and entity narrowed to, and the
+// outcome and status filters. The window is returned apart, because the
+// stream has none. It returns false once it has answered with an error.
 func (s *Server) requestQuery(w http.ResponseWriter, r *http.Request, p *authn.Principal) (
 	rq store.RequestQuery, from, to time.Time, ok bool,
 ) {
-	if !s.requireAdmin(w, p) {
+	holder, ok := s.trafficHolder(w, p, r.URL.Query().Get("user_id"))
+	if !ok {
 		return rq, from, to, false
 	}
 	orgID, from, to, ok := s.reportScope(w, r, p)
@@ -243,9 +273,29 @@ func (s *Server) requestQuery(w http.ResponseWriter, r *http.Request, p *authn.P
 		return rq, from, to, false
 	}
 	q := r.URL.Query()
-	rq = store.RequestQuery{OrgID: orgID, ReportScope: sc, Outcome: store.Outcome(q.Get("outcome"))}
+	rq = store.RequestQuery{OrgID: orgID, ReportScope: sc, Holder: holder,
+		Outcome: store.Outcome(q.Get("outcome"))}
 	rq.Status, rq.StatusClass = parseStatus(q.Get("status"))
 	return rq, from, to, true
+}
+
+// trafficHolder is whose requests p may read one by one: empty for an
+// administrator, who reads everyone's in the organisation, and the member
+// themselves for a member, who reads those made with their own keys.
+//
+// A member who names someone else is refused rather than shown their own, so
+// a request never does something other than what it says. It comes before
+// any read, so a member cannot probe who exists.
+func (s *Server) trafficHolder(w http.ResponseWriter, p *authn.Principal,
+	named string) (string, bool) {
+	if p.CanAdminOrg(p.OrgID) {
+		return "", true
+	}
+	if p.UserID == "" || (named != "" && named != p.UserID) {
+		forbid(w, "a member can only see the requests made with their own keys")
+		return "", false
+	}
+	return p.UserID, true
 }
 
 // parseStatus reads the log's status filter: one exact status ("402") or a

@@ -131,33 +131,45 @@ type AgentSession struct {
 // Duration is how long the session ran.
 func (a AgentSession) Duration() time.Duration { return a.EndedAt.Sub(a.StartedAt) }
 
-// AgentSessionSort is the order a list of sessions is read in.
-type AgentSessionSort string
+// Sort is the order a log is read in: the request log or the session list.
+// Each offers its own rankings; a ranking a list does not offer reads as
+// SortRecent.
+type Sort string
 
 // The rankings put the most expensive, the longest-running and the slowest
-// tasks first, where a list by time would bury them.
+// first, where a list by time would bury them.
 const (
 	// SortRecent is newest first, which is what a screen opens on.
-	SortRecent AgentSessionSort = ""
+	SortRecent Sort = ""
 	// SortCost is the most expensive first.
-	SortCost AgentSessionSort = "cost"
-	// SortRequests is the most requests first.
-	SortRequests AgentSessionSort = "requests"
-	// SortDuration is the longest-running first.
-	SortDuration AgentSessionSort = "duration"
+	SortCost Sort = "cost"
+	// SortTokens is the most tokens first, read and written together.
+	SortTokens Sort = "tokens"
+	// SortRequests is the most requests first. Sessions only.
+	SortRequests Sort = "requests"
+	// SortDuration is the longest-running first. Sessions only.
+	SortDuration Sort = "duration"
+	// SortFirstToken is the slowest first token first. Requests only.
+	SortFirstToken Sort = "ttft"
 	// sortOldest is internal. AgentSessionAt uses it to find one session by its
 	// start with the same query that lists them all.
-	sortOldest AgentSessionSort = "oldest"
+	sortOldest Sort = "oldest"
 )
 
 // sessionOrder maps a sort to its ORDER BY, which keeps the caller's string out
 // of the SQL text.
-var sessionOrder = map[AgentSessionSort]string{
+var sessionOrder = map[Sort]string{
 	SortRecent:   "started_at DESC, id DESC",
 	sortOldest:   "started_at ASC, id ASC",
 	SortCost:     "cost_micros DESC, started_at DESC",
+	SortTokens:   "input_tokens + output_tokens DESC, started_at DESC",
 	SortRequests: "requests DESC, started_at DESC",
 	SortDuration: "(ended_at - started_at) DESC, started_at DESC",
+}
+
+// SessionSorts are the rankings the session list offers.
+func SessionSorts() []Sort {
+	return []Sort{SortRecent, SortCost, SortTokens, SortRequests, SortDuration}
 }
 
 // AgentSessionQuery narrows the session report. The zero value is "this
@@ -172,16 +184,20 @@ type AgentSessionQuery struct {
 	ReportScope
 	// Key narrows to one conversation.
 	Key string
-	// Unhappy keeps only the sessions with a failure, a refusal or an
-	// interrupted answer.
-	Unhappy bool
+	// Holder keeps the list to the sessions of one person's keys, whatever
+	// else is narrowed. It is how a member reads it. Unlike UserID, it also
+	// narrows the filter choices.
+	Holder string
+	// Outcome keeps the sessions holding at least one request with that
+	// outcome. OutcomeOK keeps those where every request was served.
+	Outcome Outcome
 
 	From time.Time
 	To   time.Time
 	// Gap is the idle threshold. The caller always sets it: the control
 	// server owns the deployment's value.
 	Gap  time.Duration
-	Sort AgentSessionSort
+	Sort Sort
 	// Before pages backwards on the id of the session's first request. It only
 	// works as a cursor under SortRecent, where id order and time order match;
 	// under a ranking it would skip rows.
@@ -211,8 +227,9 @@ func (q *AgentSessionQuery) setDefaults() {
 // Rows are ordered by (ts, id), so ties always cut the same way. `SELECT *` in
 // `ev` avoids a second column list to keep in step with requestColumns.
 //
-// It takes $1..$10: org, from, to, gap seconds, key, project, user, key id, alias,
-// unhappy. What follows it supplies its own parameters from $11 on.
+// It takes $1..$9: org, from, to, gap seconds, key, project, user, key id and
+// alias. What follows it supplies its own parameters from $10 on, and reads the
+// outcome from sessionOutcomes on `grouped`.
 var sessionCTE = `
 	WITH ev AS (
 	    SELECT *, EXTRACT(EPOCH FROM (ts - lag(ts)
@@ -260,13 +277,41 @@ var sessionCTE = `
 	    GROUP BY session_key, run
 	    HAVING ($2::timestamptz IS NULL OR max(ts) >= $2)
 	       AND bool_or($9 = '' OR alias = $9)
-	       AND (NOT $10 OR bool_or(` + outcomeClauses[OutcomeUnhappy] + `))
 	)`
 
-// args returns the ten values sessionCTE reads, in the order it numbers them.
+// sessionOutcomes maps an outcome to its condition on a session, which keeps
+// the caller's string out of the SQL text. A session holds requests of every
+// outcome, so it matches one when it holds a request with it, and is served
+// when it holds no other.
+var sessionOutcomes = map[Outcome]string{
+	OutcomeAny:         "TRUE",
+	OutcomeOK:          "failed + refused + interrupted = 0",
+	OutcomeUnhappy:     "failed + refused + interrupted > 0",
+	OutcomeFailed:      "failed > 0",
+	OutcomeRefused:     "refused > 0",
+	OutcomeInterrupted: "interrupted > 0",
+}
+
+// matched is the sessions of q's outcome, as one more CTE after sessionCTE.
+func (q AgentSessionQuery) matched() string {
+	cond, ok := sessionOutcomes[q.Outcome]
+	if !ok {
+		cond = sessionOutcomes[OutcomeAny]
+	}
+	return `,
+	matched AS (SELECT * FROM grouped WHERE ` + cond + `)`
+}
+
+// args returns the nine values sessionCTE reads, in the order it numbers them.
+// The holder takes the place of the person: a member who names anybody else
+// is refused before the query is built.
 func (q AgentSessionQuery) args() []any {
+	user := q.UserID
+	if q.Holder != "" {
+		user = q.Holder
+	}
 	return []any{q.OrgID, nullableTime(q.From), nullableTime(q.To), q.Gap.Seconds(),
-		q.Key, q.ProjectID, q.UserID, q.KeyID, q.Alias, q.Unhappy}
+		q.Key, q.ProjectID, user, q.KeyID, q.Alias}
 }
 
 func scanAgentSession(r row) (AgentSession, error) {
@@ -286,14 +331,14 @@ func scanAgentSession(r row) (AgentSession, error) {
 // order q asks for.
 func (s *Store) AgentSessions(ctx context.Context, q AgentSessionQuery) ([]AgentSession, error) {
 	q.setDefaults()
-	return queryAll(ctx, s.pool, scanAgentSession, sessionCTE+`
+	return queryAll(ctx, s.pool, scanAgentSession, sessionCTE+q.matched()+`
 		SELECT session_key, id, started_at, ended_at, requests, ok, failed, refused,
 		       interrupted, input_tokens, output_tokens, cost_micros,
 		       ttft_median_ms, models, project_id, user_id, key_id, last_status, last_error
-		FROM grouped
-		WHERE ($11 = 0 OR id < $11)
+		FROM matched
+		WHERE ($10 = 0 OR id < $10)
 		ORDER BY `+sessionOrder[q.Sort]+`
-		LIMIT $12`,
+		LIMIT $11`,
 		append(q.args(), q.Before, q.Limit)...)
 }
 
@@ -316,6 +361,10 @@ type AgentSessionTotals struct {
 	// opening.
 	LongestRequests int64 `json:"longest_requests"`
 	CostliestMicros int64 `json:"costliest_micros"`
+	// Outcomes counts the sessions by outcome, whichever outcome q asks for,
+	// so the screen can offer each with its count. The rest of these totals
+	// are over the outcome asked for.
+	Outcomes RequestOutcomes `json:"outcomes"`
 }
 
 // AgentSessionSummary counts the sessions in one window.
@@ -327,7 +376,8 @@ func (s *Store) AgentSessionSummary(ctx context.Context,
 	q AgentSessionQuery) (AgentSessionTotals, error) {
 	q.setDefaults()
 	var t AgentSessionTotals
-	err := s.pool.QueryRow(ctx, sessionCTE+`
+	o := &t.Outcomes
+	err := s.pool.QueryRow(ctx, sessionCTE+q.matched()+`
 		SELECT count(*),
 		       count(*) FILTER (WHERE failed + refused + interrupted > 0),
 		       COALESCE(sum(requests), 0),
@@ -339,12 +389,51 @@ func (s *Store) AgentSessionSummary(ctx context.Context,
 		           (ORDER BY EXTRACT(EPOCH FROM (ended_at - started_at)) * 1000)), 0)::bigint,
 		       COALESCE(round(percentile_cont(0.5) WITHIN GROUP (ORDER BY cost_micros)), 0)::bigint,
 		       COALESCE(max(requests), 0),
-		       COALESCE(max(cost_micros), 0)
-		FROM grouped`, q.args()...).Scan(&t.Sessions, &t.Unhappy, &t.Requests,
+		       COALESCE(max(cost_micros), 0),
+		       (SELECT count(*) FROM grouped),
+		       (SELECT count(*) FILTER (WHERE `+sessionOutcomes[OutcomeOK]+`) FROM grouped),
+		       (SELECT count(*) FILTER (WHERE `+sessionOutcomes[OutcomeFailed]+`) FROM grouped),
+		       (SELECT count(*) FILTER (WHERE `+sessionOutcomes[OutcomeRefused]+`) FROM grouped),
+		       (SELECT count(*) FILTER (WHERE `+sessionOutcomes[OutcomeInterrupted]+`) FROM grouped)
+		FROM matched`, q.args()...).Scan(&t.Sessions, &t.Unhappy, &t.Requests,
 		&t.InputTokens, &t.OutputTokens, &t.CostMicros,
 		&t.MedianRequests, &t.MedianDurationMS, &t.MedianCostMicros,
-		&t.LongestRequests, &t.CostliestMicros)
+		&t.LongestRequests, &t.CostliestMicros,
+		&o.Total, &o.OK, &o.Failed, &o.Refused, &o.Interrupted)
 	return t, err
+}
+
+// AgentSessionFilters counts the sessions in the window by model, key, project
+// and person, as RequestFilters counts the requests. A session that used two
+// models counts under both.
+//
+// Only the tenant, the holder, the outcome and the time bounds of q are read,
+// so the screen still offers the other values after one is picked.
+func (s *Store) AgentSessionFilters(ctx context.Context,
+	q AgentSessionQuery) (RequestFacets, error) {
+	q.setDefaults()
+	q.ReportScope = ReportScope{}
+	f := RequestFacets{
+		Models:   []FacetCount{},
+		Keys:     []FacetCount{},
+		Projects: []FacetCount{},
+		Users:    []FacetCount{},
+	}
+	rows, err := s.pool.Query(ctx, sessionCTE+q.matched()+`
+		SELECT 'model' AS facet, m AS value, count(*) FROM matched, unnest(models) AS m
+		    GROUP BY m
+		UNION ALL
+		SELECT 'key', key_id, count(*) FROM matched WHERE key_id <> '' GROUP BY key_id
+		UNION ALL
+		SELECT 'project', project_id, count(*) FROM matched WHERE project_id <> '' GROUP BY project_id
+		UNION ALL
+		SELECT 'user', user_id, count(*) FROM matched WHERE user_id <> '' GROUP BY user_id
+		ORDER BY facet, 3 DESC, value`, q.args()...)
+	if err != nil {
+		return f, err
+	}
+	err = readFacets(rows, f.add)
+	return f, err
 }
 
 // AgentSessionAt is the session holding any one of its requests, together with

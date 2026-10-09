@@ -2,6 +2,7 @@ package control
 
 import (
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -16,27 +17,14 @@ import (
 // were made for. "This task cost 1.20, made 41 calls and took 11 minutes" is
 // what a budget talk needs, and it shows an agent going round in circles.
 //
-// Administrator-only, like the request log: the rows name other people's keys
-// and carry text from the inference plane.
-
-// sessionSorts maps the orderings this API offers to the store's, so a
-// caller's string never reaches the query.
-//
-// Paging works only under the default order: a cursor from one order would
-// drop rows in another, and whoever sorts by cost wants the top of the list.
-var sessionSorts = map[string]store.AgentSessionSort{
-	"":         store.SortRecent,
-	"recent":   store.SortRecent,
-	"cost":     store.SortCost,
-	"requests": store.SortRequests,
-	"duration": store.SortDuration,
-}
+// A member sees only the sessions of their own keys, like the request log.
 
 // sessionQuery reads the narrowing every session report takes.
 func (s *Server) sessionQuery(w http.ResponseWriter, r *http.Request,
 	p *authn.Principal) (store.AgentSessionQuery, bool) {
 	var q store.AgentSessionQuery
-	if !s.requireAdmin(w, p) {
+	holder, ok := s.trafficHolder(w, p, r.URL.Query().Get("user_id"))
+	if !ok {
 		return q, false
 	}
 	orgID, from, to, ok := s.reportScope(w, r, p)
@@ -48,20 +36,24 @@ func (s *Server) sessionQuery(w http.ResponseWriter, r *http.Request,
 		return q, false
 	}
 	v := r.URL.Query()
-	sort, known := sessionSorts[v.Get("sort")]
-	if !known {
-		badRequest(w, "sort must be one of recent, cost, requests or duration")
+	sort, ok := parseSort(w, v, store.SessionSorts())
+	if !ok {
 		return q, false
 	}
 	q = store.AgentSessionQuery{
 		OrgID:       orgID,
 		ReportScope: sc,
+		Holder:      holder,
 		Key:         v.Get("key"),
-		Unhappy:     httpx.Flag(v, "unhappy"),
+		Outcome:     store.Outcome(v.Get("outcome")),
 		From:        from,
 		To:          to,
 		Gap:         s.opts.SessionGap,
 		Sort:        sort,
+	}
+	// Older keera commands ask for the sessions with problems this way.
+	if q.Outcome == store.OutcomeAny && httpx.Flag(v, "unhappy") {
+		q.Outcome = store.OutcomeUnhappy
 	}
 	var before int64
 	q.Limit, before = page(v)
@@ -114,6 +106,16 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request, p *authn.Princ
 			return
 		}
 		out["totals"] = totals
+
+		// The filter choices, only when asked for, as on the request log.
+		if httpx.Flag(r.URL.Query(), "facets") {
+			facets, err := s.st.AgentSessionFilters(r.Context(), q)
+			if err != nil {
+				s.fail(w, err)
+				return
+			}
+			out["filters"] = facets
+		}
 	}
 	if len(rows) > 0 && q.Sort == store.SortRecent {
 		out["next_before"] = rows[len(rows)-1].ID
@@ -127,7 +129,8 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request, p *authn.Princ
 // The id in the path may be any request in the session, because readers come
 // from a row in the request log.
 func (s *Server) session(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if !s.requireAdmin(w, p) {
+	holder, ok := s.trafficHolder(w, p, "")
+	if !ok {
 		return
 	}
 	orgID, ok := s.scopeOrg(w, p, r.URL.Query().Get("org_id"))
@@ -142,6 +145,15 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request, p *authn.Princi
 	session, requests, err := s.st.AgentSessionAt(r.Context(), orgID, id, s.opts.SessionGap)
 	if err != nil {
 		s.fail(w, err)
+		return
+	}
+	// A session is one key's, but a key can change hands. A member sees it
+	// only if every request in it was theirs; anything else is not found, as
+	// another tenant's would be.
+	if holder != "" && slices.ContainsFunc(requests, func(q store.Request) bool {
+		return q.UserID != holder
+	}) {
+		s.fail(w, store.ErrNotFound)
 		return
 	}
 	// An operator reading across tenants gets every tenant's names, as in

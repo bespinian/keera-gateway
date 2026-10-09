@@ -23,7 +23,7 @@ func sessionCmd(ctx context.Context, args []string) error {
 	}
 	r := newCmdRun("session", args, "orgs", "json")
 	fs := r.fs
-	sort := fs.String("sort", "cost", "cost, requests, duration or recent")
+	sort := fs.String("sort", "cost", "cost, tokens, requests, duration or recent")
 	alias := fs.String("model", "", "only the sessions that used one model")
 	w := registerWho(fs)
 	unhappy := fs.Bool("unhappy", false, "only the sessions with problems")
@@ -59,7 +59,7 @@ func sessionList(ctx context.Context, c *client, sq sessionQuery, asJSON bool) e
 		return err
 	}
 	if sq.unhappy {
-		q.Set("unhappy", "1")
+		q.Set("outcome", string(store.OutcomeUnhappy))
 	}
 
 	var res sessionsResponse

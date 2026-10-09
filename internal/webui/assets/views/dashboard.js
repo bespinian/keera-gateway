@@ -16,7 +16,7 @@ import {
 } from "../ui.js";
 import { areaChart, barList } from "../chart.js";
 import { firstRun } from "./firstrun.js";
-import { openFailed } from "./requestlog.js";
+import { openFailed } from "./logfilters.js";
 import { orgNameOf } from "./orgs.js";
 
 export async function dashboardView(ctx) {

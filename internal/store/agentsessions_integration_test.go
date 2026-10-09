@@ -349,7 +349,7 @@ func TestSessionsRankByWhatMakesOneWorthOpening(t *testing.T) {
 			if err := st.WriteEvents(ctx, []Event{{
 				TS: at.Add(time.Duration(i) * spacing), OrgID: f.orgID, KeyID: f.keyID,
 				Alias: "keera-code", SessionKey: DerivedSessionKey(key), Status: 200,
-				CostMicros: micros, Latency: time.Second,
+				CostMicros: micros, InputTokens: 100, Latency: time.Second,
 			}}); err != nil {
 				t.Fatalf("WriteEvents: %v", err)
 			}
@@ -361,10 +361,11 @@ func TestSessionsRankByWhatMakesOneWorthOpening(t *testing.T) {
 
 	window := AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID, From: now.Add(-24 * time.Hour), To: now.Add(time.Hour)}
 	for _, tc := range []struct {
-		sort AgentSessionSort
+		sort Sort
 		want string
 	}{
 		{SortCost, "expensive0000000"},
+		{SortTokens, "runaway000000000"},
 		{SortRequests, "runaway000000000"},
 		{SortDuration, "runaway000000000"},
 		{SortRecent, "ordinary00000000"},
@@ -410,6 +411,109 @@ func TestSessionsRankByWhatMakesOneWorthOpening(t *testing.T) {
 	}
 }
 
+// A session is read through the same lenses as a request: one that holds a
+// failure is among the failed, and only one where everything was served is
+// served. The counts beside each lens and the filter choices cover the window.
+func TestSessionsNarrowByOutcomeAndOfferWhatOccurred(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	write := func(key, user, alias string, statuses ...int) {
+		for i, status := range statuses {
+			if err := st.WriteEvents(ctx, []Event{{
+				TS: now.Add(-3*time.Hour + time.Duration(i)*time.Minute), OrgID: f.orgID,
+				ProjectID: f.projectID, KeyID: f.keyID, UserID: user, Alias: alias,
+				SessionKey: DerivedSessionKey(key), Status: status, CostMicros: 10,
+			}}); err != nil {
+				t.Fatalf("WriteEvents: %v", err)
+			}
+		}
+	}
+	write("clean00000000000", "user_1", "keera-code", 200, 200)
+	write("failing000000000", "user_1", "keera-code", 200, 500, 200)
+	write("refused000000000", "user_2", "keera-fast", 402)
+
+	window := AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID,
+		From: now.Add(-24 * time.Hour), To: now.Add(time.Hour)}
+	for _, tc := range []struct {
+		outcome Outcome
+		want    int
+	}{
+		{OutcomeAny, 3},
+		{OutcomeOK, 1},
+		{OutcomeFailed, 1},
+		{OutcomeRefused, 1},
+		{OutcomeInterrupted, 0},
+		{OutcomeUnhappy, 2},
+	} {
+		q := window
+		q.Outcome = tc.outcome
+		got, err := st.AgentSessions(ctx, q)
+		if err != nil {
+			t.Fatalf("AgentSessions(%q): %v", tc.outcome, err)
+		}
+		if len(got) != tc.want {
+			t.Errorf("%d sessions under %q, want %d", len(got), tc.outcome, tc.want)
+		}
+	}
+
+	// The totals follow the lens, and the counts beside the lenses do not: a
+	// lens that only counted itself could not say where else to look.
+	failed := window
+	failed.Outcome = OutcomeFailed
+	totals, err := st.AgentSessionSummary(ctx, failed)
+	if err != nil {
+		t.Fatalf("AgentSessionSummary: %v", err)
+	}
+	if totals.Sessions != 1 || totals.Requests != 3 {
+		t.Errorf("totals under failed = %d sessions, %d calls, want 1 and 3",
+			totals.Sessions, totals.Requests)
+	}
+	want := RequestOutcomes{Total: 3, OK: 1, Failed: 1, Refused: 1}
+	if totals.Outcomes != want {
+		t.Errorf("outcome counts = %+v, want %+v", totals.Outcomes, want)
+	}
+
+	// The choices ignore what is already narrowed to, so picking one model
+	// still offers the other.
+	picked := window
+	picked.Alias = "keera-code"
+	facets, err := st.AgentSessionFilters(ctx, picked)
+	if err != nil {
+		t.Fatalf("AgentSessionFilters: %v", err)
+	}
+	if len(facets.Models) != 2 || facets.Models[0] != (FacetCount{"keera-code", 2}) {
+		t.Errorf("models = %+v, want keera-code with 2 sessions, then keera-fast",
+			facets.Models)
+	}
+	if len(facets.Users) != 2 || len(facets.Keys) != 1 || facets.Keys[0].Count != 3 {
+		t.Errorf("facets = %+v, want both people and the one key with 3 sessions", facets)
+	}
+	if facets.Statuses != nil {
+		t.Errorf("statuses = %+v, want none: a session has no single status", facets.Statuses)
+	}
+
+	// A member's choices are their own, whatever else is asked.
+	mine := window
+	mine.Holder = "user_2"
+	facets, err = st.AgentSessionFilters(ctx, mine)
+	if err != nil {
+		t.Fatalf("AgentSessionFilters(holder): %v", err)
+	}
+	if len(facets.Users) != 1 || facets.Users[0].Value != "user_2" {
+		t.Errorf("a member is offered %+v, want only themselves", facets.Users)
+	}
+	mine.UserID = "user_1"
+	got, err := st.AgentSessions(ctx, mine)
+	if err != nil {
+		t.Fatalf("AgentSessions(holder): %v", err)
+	}
+	if len(got) != 1 || got[0].UserID != "user_2" {
+		t.Errorf("a member reads %+v, want only their own session", got)
+	}
+}
+
 // Every session report is one tenant's, and narrows to one project, key or person
 // the way every other report over this log does.
 func TestSessionsStayInsideOneTenantAndNarrowToOneEntity(t *testing.T) {
@@ -447,7 +551,7 @@ func TestSessionsStayInsideOneTenantAndNarrowToOneEntity(t *testing.T) {
 		{"this key", AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID, KeyID: f.keyID}, 1},
 		{"this person", AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID, UserID: "user_1"}, 1},
 		{"one conversation", AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID, Key: DerivedSessionKey("ours000000000000")}, 1},
-		{"only the unhappy ones", AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID, Unhappy: true}, 0},
+		{"only the unhappy ones", AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID, Outcome: OutcomeUnhappy}, 0},
 	} {
 		got, err := st.AgentSessions(ctx, tc.q)
 		if err != nil {
@@ -466,7 +570,7 @@ func TestSessionsStayInsideOneTenantAndNarrowToOneEntity(t *testing.T) {
 	if len(all) != 2 {
 		t.Errorf("%d sessions across every tenant, want 2", len(all))
 	}
-	failing, err := st.AgentSessions(ctx, AgentSessionQuery{Gap: DefaultSessionGap, Unhappy: true})
+	failing, err := st.AgentSessions(ctx, AgentSessionQuery{Gap: DefaultSessionGap, Outcome: OutcomeUnhappy})
 	if err != nil {
 		t.Fatalf("AgentSessions(unhappy): %v", err)
 	}

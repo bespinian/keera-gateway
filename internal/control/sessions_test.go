@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bespinian/keera-gateway/internal/authn"
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
@@ -176,7 +175,10 @@ func TestSessionsNarrowAndRankAndPage(t *testing.T) {
 		{"one model", "&alias=keera-speed", 1},
 		{"a model nothing used", "&alias=keera-frontier", 0},
 		{"only the unhappy ones", "&unhappy=1", 1},
+		{"only the refused ones", "&outcome=refused", 1},
+		{"only the served ones", "&outcome=ok", 1},
 		{"ranked by cost", "&sort=cost", 2},
+		{"ranked by tokens", "&sort=tokens", 2},
 		{"ranked by how many calls", "&sort=requests", 2},
 	} {
 		var got sessionList
@@ -211,11 +213,58 @@ func TestSessionsNarrowAndRankAndPage(t *testing.T) {
 		t.Errorf("page two carries totals again: %+v", next.Totals)
 	}
 
+	// A ranked page offers no cursor: it would page through another order.
+	var ranked sessionList
+	if code := getJSON(t, ts, httpx.ControlPrefix+"/v1/sessions?"+window+"&limit=1&sort=cost", &ranked); code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", code)
+	}
+	if ranked.NextBefore != 0 {
+		t.Errorf("a ranked page carries the cursor %d", ranked.NextBefore)
+	}
+
 	// And a ranking nobody offers is a refusal rather than a silent fallback to
 	// the default, which would be a screen sorted by something other than what
-	// it says.
-	if code := getJSON(t, ts, httpx.ControlPrefix+"/v1/sessions?"+window+"&sort=whatever", nil); code != http.StatusBadRequest {
-		t.Errorf("an unknown sort answered %d, want 400", code)
+	// it says. The request log's rankings are not the session list's.
+	for _, sort := range []string{"whatever", "ttft"} {
+		if code := getJSON(t, ts, httpx.ControlPrefix+"/v1/sessions?"+window+"&sort="+sort, nil); code != http.StatusBadRequest {
+			t.Errorf("sort=%s answered %d, want 400", sort, code)
+		}
+	}
+}
+
+// The request log ranks the way the session list does, and offers the same
+// filter choices beside it.
+func TestRequestsAndSessionsRankAndNarrowAlike(t *testing.T) {
+	st, _ := testStore(t)
+	from, to := sessionFixture(t, st)
+	ts := sessionServer(t, st)
+	window := "org_id=org_1&from=" + from.Format(time.RFC3339) + "&to=" + to.Format(time.RFC3339)
+
+	var log struct {
+		Data       []store.Request `json:"data"`
+		NextBefore int64           `json:"next_before"`
+	}
+	if code := getJSON(t, ts, httpx.ControlPrefix+"/v1/requests?"+window+"&sort=cost&limit=1", &log); code != http.StatusOK {
+		t.Fatalf("the request log answered %d", code)
+	}
+	if len(log.Data) != 1 || log.Data[0].CostMicros != 1000 || log.NextBefore != 0 {
+		t.Errorf("ranked by cost = %+v with cursor %d, want a 1000 and no cursor",
+			log.Data, log.NextBefore)
+	}
+	for _, sort := range []string{"whatever", "duration"} {
+		if code := getJSON(t, ts, httpx.ControlPrefix+"/v1/requests?"+window+"&sort="+sort, nil); code != http.StatusBadRequest {
+			t.Errorf("sort=%s answered %d, want 400", sort, code)
+		}
+	}
+
+	var sessions struct {
+		Filters store.RequestFacets `json:"filters"`
+	}
+	if code := getJSON(t, ts, httpx.ControlPrefix+"/v1/sessions?"+window+"&facets=1&alias=keera-speed", &sessions); code != http.StatusOK {
+		t.Fatalf("the session list answered %d", code)
+	}
+	if len(sessions.Filters.Models) != 2 || len(sessions.Filters.Keys) != 1 {
+		t.Errorf("session filters = %+v, want both models and the one key", sessions.Filters)
 	}
 }
 
@@ -285,24 +334,6 @@ func TestOneSessionIsReachedFromAnyRequestInIt(t *testing.T) {
 	}
 	if code := getJSON(t, ts, httpx.ControlPrefix+"/v1/sessions/not-a-number?org_id=org_1", nil); code != http.StatusBadRequest {
 		t.Errorf("an id that is not a number answered %d, want 400", code)
-	}
-}
-
-// Administrator-only, exactly like the request log these are built from: the
-// rows name other people's keys and carry text the inference plane wrote.
-func TestAMemberCannotReadTheSessionLog(t *testing.T) {
-	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
-	member := &authn.Principal{Role: authn.RoleMember, OrgID: "org_1"}
-
-	for name, route := range map[string]handler{
-		"the list":    s.sessions,
-		"one of them": s.session,
-	} {
-		w := httptest.NewRecorder()
-		route(w, httptest.NewRequest(http.MethodGet, httpx.ControlPrefix+"/v1/sessions", nil), member)
-		if w.Code != http.StatusForbidden {
-			t.Errorf("%s answered a member %d, want 403", name, w.Code)
-		}
 	}
 }
 

@@ -6,8 +6,8 @@
 // number nobody can act on and "one franc twenty a task, eleven minutes,
 // forty-one calls" is what goes into a budget conversation.
 //
-// The screen leads with the totals and offers rankings rather than only time,
-// because the row worth opening is never the most recent one: it is the task
+// The screen leads with the totals and ranks by any of its numbers, not only
+// by time, because the row worth opening is never the most recent one: it is the task
 // that cost four francs, or the one that made four hundred calls and finished
 // nothing.
 //
@@ -43,31 +43,28 @@ import {
 } from "../ui.js";
 import { outcomeMeaning, outcomeOf, oneLine } from "../status.js";
 import { requestTable, showRequest } from "./requestlog.js";
+import {
+  currentOutcome,
+  narrowRow,
+  outcomeSeg,
+  ranking,
+  rankedNote,
+  readNarrowing,
+} from "./logfilters.js";
 import { toolCallTable } from "./tools.js";
 
 const PAGE = 100;
 
-// The rankings, and what each of them is for. They are the reason this screen
-// exists rather than a nicety on top of it, so they sit next to the range
-// picker rather than behind a menu.
-const SORTS = [
-  { key: "", label: "Recent", long: "Newest first" },
-  { key: "cost", label: "Cost", long: "The sessions that cost the most" },
-  {
-    key: "requests",
-    label: "Requests",
-    long: "The sessions that made the most requests",
-  },
-  { key: "duration", label: "Time", long: "The sessions that ran the longest" },
-];
-
+// The ranking, remembered apart from the request log's, which offers others.
 const SORT_KEY = "keera.sessions.sort";
-const UNHAPPY_KEY = "keera.sessions.unhappy";
+
+const NO_COUNTS = { total: 0, ok: 0, failed: 0, refused: 0, interrupted: 0 };
 
 export async function sessionsView(ctx) {
   const since = currentRange();
-  const sort = sessionStorage.getItem(SORT_KEY) || "";
-  const unhappy = sessionStorage.getItem(UNHAPPY_KEY) === "1";
+  const outcome = currentOutcome();
+  const narrowed = readNarrowing(ctx);
+  const rank = ranking(ctx, SORT_KEY);
   const range = RANGES.find((r) => r.since === since);
   ctx.setSubtitle(range ? range.long : "");
 
@@ -75,8 +72,10 @@ export async function sessionsView(ctx) {
     org_id: ctx.orgID,
     since,
     limit: PAGE,
-    sort,
-    unhappy: unhappy ? "1" : "",
+    sort: rank.by,
+    outcome,
+    ...narrowed,
+    facets: "1",
   };
   const res = await api.sessions(params);
   const rows = res.data || [];
@@ -87,19 +86,20 @@ export async function sessionsView(ctx) {
     projects: res.project_names || {},
     users: res.user_names || {},
   };
+  const anyNarrowed = Object.values(narrowed).some(Boolean);
 
   const wrap = h("div", {});
 
   wrap.append(
     h(
       "div",
-      { class: "row", style: { marginBottom: "16px", flexWrap: "wrap" } },
+      { class: "section-head" },
       rangePicker(ctx, since),
-      sortSeg(ctx, sort),
       h("div", { style: { flex: 1 } }),
-      troubleButton(ctx, unhappy),
+      outcomeSeg(ctx, outcome, totals.outcomes || NO_COUNTS).el,
       csvButton(params),
     ),
+    narrowRow(ctx, narrowed, res.filters || {}, names),
   );
 
   wrap.append(totalTiles(totals, currency));
@@ -109,11 +109,11 @@ export async function sessionsView(ctx) {
       h(
         "div",
         { class: "card", style: { marginTop: "16px" } },
-        unhappy
+        outcome || anyNarrowed
           ? empty(
-              "No sessions with problems in this window",
-              "Every session in this range succeeded. Turn off With " +
-                "problems to see them.",
+              "No sessions match these filters",
+              "Clear some filters, pick a different outcome, or widen the " +
+                "range.",
             )
           : empty(
               "No sessions in this window",
@@ -131,36 +131,31 @@ export async function sessionsView(ctx) {
     h(
       "div",
       { style: { marginTop: "16px" } },
-      sessionTable(ctx, rows, names, currency),
+      sessionTable(ctx, rows, names, currency, {}, rank),
     ),
   );
-
-  // Paging appends rather than replaces, so somebody reading down a window
-  // keeps what they have already read on the screen. It is offered only under
-  // the default ordering: under a ranking the cursor would be a cursor over
-  // another order, and "page two of the most expensive tasks" is not a question
-  // anybody asks - whoever sorted by cost wanted the top of that list.
-  if (rows.length === PAGE && sort === "") {
-    wrap.append(
-      pager(params, res, (page) => sessionTable(ctx, page, names, currency)),
-    );
-  }
-
+  wrap.append(
+    more(params, res, rows, rank, (page) =>
+      sessionTable(ctx, page, names, currency, {}, rank),
+    ),
+  );
   wrap.append(hint(res.gap_seconds));
   return wrap;
 }
 
 /** sessionLog is the session list for one project, key or model, drawn below
- *  that thing's charts. The range comes from the screen it sits on. */
+ *  that thing's charts. The range comes from the screen it sits on. Like the
+ *  request log there, it takes the outcome and the ranking but no narrowing:
+ *  the screen it sits on is already narrowed. */
 export async function sessionLog(ctx, { scope = {}, since, hide = {} }) {
-  const sort = sessionStorage.getItem(SORT_KEY) || "";
-  const unhappy = sessionStorage.getItem(UNHAPPY_KEY) === "1";
+  const outcome = currentOutcome();
+  const rank = ranking(ctx, SORT_KEY);
   const params = {
     org_id: ctx.orgID,
     since,
     limit: PAGE,
-    sort,
-    unhappy: unhappy ? "1" : "",
+    sort: rank.by,
+    outcome,
     ...scope,
   };
 
@@ -181,6 +176,7 @@ export async function sessionLog(ctx, { scope = {}, since, hide = {} }) {
   }
 
   const rows = res.data || [];
+  const counts = (res.totals && res.totals.outcomes) || NO_COUNTS;
   const currency = res.currency || ctx.currency;
   const names = {
     keys: res.key_names || {},
@@ -191,11 +187,15 @@ export async function sessionLog(ctx, { scope = {}, since, hide = {} }) {
   const wrap = h(
     "div",
     { style: { marginTop: "24px" } },
-    sectionHead("Sessions", [
-      sortSeg(ctx, sort),
-      troubleButton(ctx, unhappy),
-      csvButton(params),
-    ]),
+    sectionHead(
+      "Sessions",
+      h(
+        "div",
+        { class: "row" },
+        outcomeSeg(ctx, outcome, counts).el,
+        csvButton(params),
+      ),
+    ),
   );
 
   if (!rows.length) {
@@ -203,10 +203,10 @@ export async function sessionLog(ctx, { scope = {}, since, hide = {} }) {
       h(
         "div",
         { class: "card", style: { marginTop: "12px" } },
-        unhappy
+        outcome
           ? empty(
-              "No sessions with problems in this window",
-              "Turn off With problems to see every session.",
+              "No sessions match this filter",
+              "Pick a different outcome above, or widen the range.",
             )
           : empty(
               "No sessions in this window",
@@ -222,59 +222,26 @@ export async function sessionLog(ctx, { scope = {}, since, hide = {} }) {
     h(
       "div",
       { style: { marginTop: "12px" } },
-      sessionTable(ctx, rows, names, currency, hide),
+      sessionTable(ctx, rows, names, currency, hide, rank),
     ),
   );
-  if (rows.length === PAGE && sort === "") {
-    wrap.append(
-      pager(params, res, (page) =>
-        sessionTable(ctx, page, names, currency, hide),
-      ),
-    );
-  }
+  wrap.append(
+    more(params, res, rows, rank, (page) =>
+      sessionTable(ctx, page, names, currency, hide, rank),
+    ),
+  );
   return wrap;
 }
 
-/** setUnhappy narrows the session lists to the sessions with problems. */
-export function setUnhappy(on) {
-  sessionStorage.setItem(UNHAPPY_KEY, on ? "1" : "0");
-}
-
-function sortSeg(ctx, sort) {
-  return h(
-    "div",
-    { class: "seg" },
-    SORTS.map((sc) =>
-      h(
-        "button",
-        {
-          "aria-pressed": String(sc.key === sort),
-          title: sc.long,
-          onClick: () => {
-            sessionStorage.setItem(SORT_KEY, sc.key);
-            ctx.reload();
-          },
-        },
-        sc.label,
-      ),
-    ),
-  );
-}
-
-function troubleButton(ctx, unhappy) {
-  return h(
-    "button",
-    {
-      class: "btn btn-sm",
-      "aria-pressed": String(unhappy),
-      title: "Only sessions with a failure, a refusal or an interrupted answer",
-      onClick: () => {
-        setUnhappy(!unhappy);
-        ctx.reload();
-      },
-    },
-    "With problems",
-  );
+// more is what follows a full page: the pager in time order, and a note under
+// a ranking. Paging appends rather than replaces, so somebody reading down a
+// window keeps what they have already read on the screen. Under a ranking the
+// cursor would be a cursor over another order, and whoever ranked by cost
+// wanted the top of that list.
+function more(params, res, rows, rank, render) {
+  if (rows.length < PAGE) return null;
+  if (rank.by !== "") return rankedNote(PAGE, "sessions");
+  return pager(params, res, render);
 }
 
 function csvButton(params) {
@@ -371,7 +338,7 @@ function totalTiles(t, currency) {
   );
 }
 
-function sessionTable(ctx, rows, names, currency, hide = {}) {
+function sessionTable(ctx, rows, names, currency, hide, rank) {
   const columns = [
     {
       // The conversation, as the gateway hashed it. It is the only name a
@@ -439,6 +406,7 @@ function sessionTable(ctx, rows, names, currency, hide = {}) {
     {
       label: "Started",
       shrink: true,
+      rank: "",
       sortKey: (a) => new Date(a.started_at).getTime(),
       sortDir: "desc",
       cell: (a) =>
@@ -452,6 +420,7 @@ function sessionTable(ctx, rows, names, currency, hide = {}) {
       label: "Took",
       num: true,
       shrink: true,
+      rank: "duration",
       sortKey: (a) => new Date(a.ended_at) - new Date(a.started_at),
       sortDir: "desc",
       cell: (a) =>
@@ -465,6 +434,7 @@ function sessionTable(ctx, rows, names, currency, hide = {}) {
       label: "Requests",
       num: true,
       shrink: true,
+      rank: "requests",
       sortKey: (a) => a.requests,
       sortDir: "desc",
       cell: (a) => h("span", { class: "nowrap" }, num(a.requests)),
@@ -473,6 +443,7 @@ function sessionTable(ctx, rows, names, currency, hide = {}) {
       label: "Tokens",
       num: true,
       shrink: true,
+      rank: "tokens",
       sortKey: (a) => a.input_tokens + a.output_tokens,
       sortDir: "desc",
       cell: (a) =>
@@ -486,6 +457,7 @@ function sessionTable(ctx, rows, names, currency, hide = {}) {
       label: `Cost (${currency})`,
       num: true,
       shrink: true,
+      rank: "cost",
       sortKey: (a) => a.cost_micros || null,
       sortDir: "desc",
       cell: (a) =>
@@ -523,6 +495,7 @@ function sessionTable(ctx, rows, names, currency, hide = {}) {
       `${names.users[a.user_id] || ""} ${names.keys[a.key_id] || a.key_id || ""} ` +
       `${names.projects[a.project_id] || ""}`,
     searchLabel: "these sessions",
+    rank,
     emptyTitle: "Nothing here",
   });
 }

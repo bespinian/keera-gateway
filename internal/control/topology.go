@@ -17,8 +17,7 @@ import (
 // customer's boundary. A model in the cluster and one at a hosted provider
 // are one row apart in the catalogue, but mean very different things.
 //
-// Administrator-only, like the request log: it shows every client and model in
-// the organisation. Members see their own traffic on My access.
+// A member sees the traffic of their own keys, like the request log.
 
 // mapClient is one thing that has been calling the gateway.
 //
@@ -38,8 +37,8 @@ type mapModel struct {
 	Kind    string `json:"kind"`
 	Enabled bool   `json:"enabled"`
 	Hosting string `json:"hosting"`
-	// Endpoint is the host serving it. The map is for administrators, who see
-	// it on the Models screen as well.
+	// Endpoint is the host serving it. Only administrators get it, as on the
+	// Models screen.
 	Endpoint string `json:"endpoint,omitempty"`
 	// Retired marks traffic to an alias the catalogue no longer has. The
 	// traffic was real, so it is drawn, but where it went is unknown.
@@ -50,7 +49,8 @@ type mapModel struct {
 // trafficMap serves the map: the catalogue as nodes, the window as numbers on
 // them, and the traffic between them as edges.
 func (s *Server) trafficMap(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if !s.requireAdmin(w, p) {
+	holder, ok := s.trafficHolder(w, p, "")
+	if !ok {
 		return
 	}
 	orgID, from, to, ok := s.reportOrg(w, r, p)
@@ -58,7 +58,7 @@ func (s *Server) trafficMap(w http.ResponseWriter, r *http.Request, p *authn.Pri
 		return
 	}
 	ctx := r.Context()
-	rep, err := s.st.Flows(ctx, orgID, from, to)
+	rep, err := s.st.Flows(ctx, orgID, holder, from, to)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -75,7 +75,11 @@ func (s *Server) trafficMap(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	seen := make(map[string]bool, len(models))
 	for _, m := range models {
 		seen[m.Alias] = true
-		out = append(out, modelNode(m, rep.Models[m.Alias]))
+		n := modelNode(m, rep.Models[m.Alias])
+		if holder != "" {
+			n.Endpoint = ""
+		}
+		out = append(out, n)
 	}
 	for alias, cell := range rep.Models {
 		if seen[alias] {

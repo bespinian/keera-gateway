@@ -60,12 +60,12 @@ type FlowReport struct {
 }
 
 // Flows aggregates one organisation's window into the four readings the map
-// draws.
+// draws. A holder keeps it to the requests of that person's keys.
 //
 // GROUPING SETS does it in one pass. The coarser rows are computed by the
 // database, not summed here, because a median cannot be added up from the
 // medians of its parts.
-func (s *Store) Flows(ctx context.Context, orgID string, from, to time.Time) (FlowReport, error) {
+func (s *Store) Flows(ctx context.Context, orgID, holder string, from, to time.Time) (FlowReport, error) {
 	rep := FlowReport{
 		Clients: map[string]Cell{},
 		Models:  map[string]Cell{},
@@ -78,9 +78,9 @@ func (s *Store) Flows(ctx context.Context, orgID string, from, to time.Time) (Fl
 		SELECT COALESCE(client, ''), COALESCE(alias, ''),
 		       grouping(client), grouping(alias), `+cellColumns+`
 		FROM usage_events
-		WHERE ts >= $1 AND ts < $2 AND org_id = $3
+		WHERE ts >= $1 AND ts < $2 AND org_id = $3 AND ($4 = '' OR user_id = $4)
 		GROUP BY GROUPING SETS ((client, alias), (client), (alias), ())`,
-		from, to, orgID)
+		from, to, orgID, holder)
 	if err != nil {
 		return rep, err
 	}

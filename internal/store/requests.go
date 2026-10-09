@@ -130,6 +130,10 @@ func scanRequest(r row) (Request, error) {
 type RequestQuery struct {
 	OrgID string
 	ReportScope
+	// Holder keeps the log to the requests of one person's keys, whatever
+	// else is narrowed. It is how a member reads the log. Unlike UserID, it
+	// also narrows the filter choices, which would otherwise count everyone's.
+	Holder  string
 	Outcome Outcome
 	// Status matches one exact status.
 	Status int
@@ -147,11 +151,28 @@ type RequestQuery struct {
 	After int64
 	// Skip leaves out rows a live reader already has. A reader that reads
 	// past After again, for rows that were committed late, needs it.
-	Skip  []int64
+	Skip []int64
+	// Sort is SortRecent, SortCost, SortTokens or SortFirstToken. Before only
+	// pages under SortRecent, where id order and time order match.
+	Sort  Sort
 	Limit int
 }
 
-// where is the condition on everything in q but the outcome, on $1 to $12.
+// requestOrder maps a sort to its ORDER BY, which keeps the caller's string out
+// of the SQL text.
+var requestOrder = map[Sort]string{
+	SortRecent:     "id DESC",
+	SortCost:       "cost_micros DESC, id DESC",
+	SortTokens:     "input_tokens + output_tokens DESC, id DESC",
+	SortFirstToken: "ttft_ms DESC, id DESC",
+}
+
+// RequestSorts are the rankings the request log offers.
+func RequestSorts() []Sort {
+	return []Sort{SortRecent, SortCost, SortTokens, SortFirstToken}
+}
+
+// where is the condition on everything in q but the outcome, on $1 to $13.
 func (q RequestQuery) where() string {
 	return `($1 = '' OR org_id = $1)
 		  AND ($2::timestamptz IS NULL OR ts >= $2)
@@ -160,23 +181,29 @@ func (q RequestQuery) where() string {
 		  AND ($5 = 0 OR status / 100 = $5)
 		  AND ($6 = 0 OR id < $6)
 		  AND ($7 = 0 OR id > $7)
-		  AND ($8::bigint[] IS NULL OR id <> ALL($8))` + q.narrow("", 8)
+		  AND ($8::bigint[] IS NULL OR id <> ALL($8))
+		  AND ($9 = '' OR user_id = $9)` + q.narrow("", 9)
 }
 
 // whereArgs are the values where refers to.
 func (q RequestQuery) whereArgs() []any {
 	return append([]any{q.OrgID, nullableTime(q.From), nullableTime(q.To), q.Status,
-		q.StatusClass, q.Before, q.After, q.Skip}, q.args()...)
+		q.StatusClass, q.Before, q.After, q.Skip, q.Holder}, q.args()...)
 }
 
-// Requests returns the matching rows, newest first.
+// Requests returns the matching rows in the order q asks for, newest first by
+// default.
 //
 // An empty OrgID means every tenant, which only an operator ever asks for.
 func (s *Store) Requests(ctx context.Context, q RequestQuery) ([]Request, error) {
+	order, ok := requestOrder[q.Sort]
+	if !ok {
+		order = requestOrder[SortRecent]
+	}
 	return queryAll(ctx, s.pool, scanRequest, `SELECT `+requestColumns+`
 		FROM usage_events
 		WHERE `+outcomeClause(q.Outcome)+` AND `+q.where()+`
-		ORDER BY id DESC LIMIT $13`,
+		ORDER BY `+order+` LIMIT $14`,
 		append(q.whereArgs(), pageLimit(q.Limit, 100, 5000))...)
 }
 
@@ -243,18 +270,35 @@ func readFacets(rows pgx.Rows, add func(facet string, c FacetCount)) error {
 // its count. They are read from the log rather than listed from the roster,
 // so only values that made requests are offered.
 //
-// There is no total: the outcome counts already carry one.
+// There is no total: the outcome counts already carry one. The session list
+// reads the same facets but statuses, which belong to a request.
 type RequestFacets struct {
 	Models   []FacetCount `json:"models"`
 	Keys     []FacetCount `json:"keys"`
 	Projects []FacetCount `json:"projects"`
 	Users    []FacetCount `json:"users"`
-	Statuses []FacetCount `json:"statuses"`
+	Statuses []FacetCount `json:"statuses,omitempty"`
+}
+
+// add files one counted value under its facet.
+func (f *RequestFacets) add(facet string, c FacetCount) {
+	switch facet {
+	case "model":
+		f.Models = append(f.Models, c)
+	case "key":
+		f.Keys = append(f.Keys, c)
+	case "project":
+		f.Projects = append(f.Projects, c)
+	case "user":
+		f.Users = append(f.Users, c)
+	case "status":
+		f.Statuses = append(f.Statuses, c)
+	}
 }
 
 // RequestFilters counts the window by model, key, project, person and status.
 //
-// Only the tenant, the outcome and the time bounds of q are read, so the
+// Only the tenant, the holder, the outcome and the time bounds of q are read, so the
 // screen still offers the other values after one is picked. A model picked
 // after a project can then match nothing, and the screen says so.
 func (s *Store) RequestFilters(ctx context.Context, q RequestQuery) (RequestFacets, error) {
@@ -275,6 +319,7 @@ func (s *Store) RequestFilters(ctx context.Context, q RequestQuery) (RequestFace
 		      AND ($1 = '' OR org_id = $1)
 		      AND ($2::timestamptz IS NULL OR ts >= $2)
 		      AND ($3::timestamptz IS NULL OR ts < $3)
+		      AND ($4 = '' OR user_id = $4)
 		)
 		SELECT 'model' AS facet, alias AS value, count(*) FROM matching
 		    WHERE alias <> '' GROUP BY alias
@@ -287,24 +332,11 @@ func (s *Store) RequestFilters(ctx context.Context, q RequestQuery) (RequestFace
 		UNION ALL
 		SELECT 'status', status::text, count(*) FROM matching GROUP BY status
 		ORDER BY facet, 3 DESC, value`,
-		q.OrgID, nullableTime(q.From), nullableTime(q.To))
+		q.OrgID, nullableTime(q.From), nullableTime(q.To), q.Holder)
 	if err != nil {
 		return f, err
 	}
-	err = readFacets(rows, func(facet string, c FacetCount) {
-		switch facet {
-		case "model":
-			f.Models = append(f.Models, c)
-		case "key":
-			f.Keys = append(f.Keys, c)
-		case "project":
-			f.Projects = append(f.Projects, c)
-		case "user":
-			f.Users = append(f.Users, c)
-		case "status":
-			f.Statuses = append(f.Statuses, c)
-		}
-	})
+	err = readFacets(rows, f.add)
 	return f, err
 }
 

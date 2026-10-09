@@ -1027,14 +1027,18 @@ function gatewayFace(scene, c) {
   };
 }
 
+/** hostingLabel says where a model runs without naming its host. A member is
+ *  not sent the host, so this is what they read in its place. */
+function hostingLabel(hosting) {
+  if (hosting === "internal") return "your own network";
+  if (hosting === "external") return "a hosted provider";
+  return "";
+}
+
 function modelFace(n, c) {
   // Where it runs, in the place a client box puts its spend: on this screen
   // that is the more important half of what a model is.
-  const where = n.endpoint
-    ? n.endpoint
-    : n.hosting === "internal"
-      ? "your own network"
-      : "not known";
+  const where = n.endpoint || hostingLabel(n.hosting) || "not known";
   return {
     title: n.label,
     value: n.cell.ttft_median_ms ? String(n.cell.ttft_median_ms) : "-",
@@ -1141,7 +1145,9 @@ function showTip(tip, canvas, n, currency, orgName) {
     rows.push([
       "Runs at",
       n.endpoint ||
-        (n.retired ? `no longer one of ${orgName}'s models` : "no backend"),
+        (n.retired
+          ? `no longer one of ${orgName}'s models`
+          : hostingLabel(n.hosting) || "no backend"),
     ]);
     rows.push([
       "Prompts",

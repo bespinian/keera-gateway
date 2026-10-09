@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -725,5 +726,79 @@ func TestASubscriptionKeyAlwaysBelongsToSomebody(t *testing.T) {
 	}
 	if w := tn.create(carol, `{"org_id":"org_a","user_id":"user_bob","kind":"pro"}`); w.Code != http.StatusBadRequest {
 		t.Errorf("an unknown kind: %d %s", w.Code, w.Body)
+	}
+}
+
+// A member reads the request log, its sessions and the map, but only for the
+// requests of their own keys. The filter choices are counted the same way, or
+// they would tell a member whose keys were busy.
+func TestAMemberSeesOnlyTheTrafficOfTheirOwnKeys(t *testing.T) {
+	tn := twoTenants(t)
+	now := time.Now()
+	if err := tn.srv.st.WriteEvents(tn.ctx, []store.Event{
+		{TS: now.Add(-2 * time.Minute), OrgID: "org_a", UserID: "user_alice", KeyID: "key_alice",
+			Alias: "keera-code", Client: "claude-code", Status: 200, SessionKey: "p-alice"},
+		{TS: now.Add(-time.Minute), OrgID: "org_a", UserID: "user_bob", KeyID: "key_bob",
+			Alias: "keera-chat", Client: "codex", Status: 500, SessionKey: "p-bob"},
+	}); err != nil {
+		t.Fatalf("WriteEvents: %v", err)
+	}
+	alice := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleMember,
+		OrgID: "org_a", UserID: "user_alice"}
+	carol := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleAdmin,
+		OrgID: "org_a", UserID: "user_carol"}
+
+	read := func(h handler, p *authn.Principal, target string) (int, map[string]any) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, httpx.ControlPrefix+target, nil).WithContext(tn.ctx)
+		path, _, _ := strings.Cut(target, "?")
+		r.SetPathValue("id", path[strings.LastIndex(path, "/")+1:])
+		h(w, r, p)
+		var out map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &out)
+		return w.Code, out
+	}
+	count := func(out map[string]any, field string) int {
+		rows, _ := out[field].([]any)
+		return len(rows)
+	}
+
+	_, log := read(tn.srv.requests, alice, "/v1/requests?facets=1")
+	if n := count(log, "data"); n != 1 {
+		t.Errorf("alice reads %d requests, want only her own", n)
+	}
+	facets, _ := log["filters"].(map[string]any)
+	if keys, _ := facets["keys"].([]any); len(keys) != 1 {
+		t.Errorf("alice is offered %d keys to filter by, want only her own", len(keys))
+	}
+	if _, all := read(tn.srv.requests, carol, "/v1/requests"); count(all, "data") != 2 {
+		t.Errorf("an administrator reads %d requests, want everyone's", count(all, "data"))
+	}
+
+	_, sessions := read(tn.srv.sessions, alice, "/v1/sessions")
+	if n := count(sessions, "data"); n != 1 {
+		t.Fatalf("alice reads %d sessions, want only her own", n)
+	}
+	var bobs float64
+	_, everyone := read(tn.srv.sessions, carol, "/v1/sessions")
+	for _, row := range everyone["data"].([]any) {
+		if s := row.(map[string]any); s["user_id"] == "user_bob" {
+			bobs = s["id"].(float64)
+		}
+	}
+	if bobs == 0 {
+		t.Fatal("an administrator does not see bob's session")
+	}
+	if code, _ := read(tn.srv.session, alice, fmt.Sprintf("/v1/sessions/%d", int64(bobs))); code != http.StatusNotFound {
+		t.Errorf("alice opening bob's session got %d, want 404", code)
+	}
+
+	_, m := read(tn.srv.trafficMap, alice, "/v1/map")
+	if n := count(m, "clients"); n != 1 {
+		t.Errorf("alice's map draws %d clients, want only her own", n)
+	}
+	if gw, _ := m["gateway"].(map[string]any); gw["requests"] != float64(1) {
+		t.Errorf("alice's map counts %v requests, want her one", gw["requests"])
 	}
 }
