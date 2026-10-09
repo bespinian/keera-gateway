@@ -183,7 +183,7 @@ each month, or in advance by card through PostFinance Checkout.
 - **Sessions** - the same log, grouped into tasks.
 - **My access** - the developer's own view.
 
-Every project, key, model, filter and router has its own screen with the same four
+Every project, key, model, user, filter and router has its own screen with the same four
 numbers. `keera usage`, `keera failures`, `keera session list`,
 `keera filter report` and `keera router report` show the same reports in a
 terminal.

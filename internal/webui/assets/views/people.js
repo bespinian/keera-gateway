@@ -15,6 +15,7 @@ import {
   showError,
   plural,
   field,
+  rowLink,
 } from "../ui.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
 import { userPasskeys, showPasskeyLink } from "./passkeys.js";
@@ -44,7 +45,7 @@ const ROLES = [
 // column.
 const ASSIGNABLE = ROLES.filter((r) => r.key !== "operator");
 
-const TONE = { operator: "accent", admin: "good", member: "" };
+export const TONE = { operator: "accent", admin: "good", member: "" };
 
 // isPasskeyAccount mirrors authn.IsPasskeyAccount: the account signs in with
 // passkeys, not through a directory.
@@ -75,7 +76,7 @@ function headline(me, canAssign) {
 }
 
 /** signsInWith is the line under a person's address. */
-function signsInWith(u) {
+export function signsInWith(u) {
   if (isPasskeyAccount(u)) return "signs in with a passkey";
   if (u.external_id) return "linked to " + u.external_id;
   return "not linked to an identity yet";
@@ -123,7 +124,12 @@ export async function peopleView(ctx) {
             h(
               "div",
               { class: "row", style: { gap: "8px" } },
-              h("strong", {}, u.email),
+              rowLink(
+                ctx,
+                "/users/" + encodeURIComponent(u.id),
+                u.email,
+                "This user's traffic, spend and keys",
+              ),
               u.disabled_at ? pill("Disabled", "bad") : null,
             ),
             h(
@@ -244,7 +250,7 @@ export async function peopleView(ctx) {
   return h("div", {}, head, rows);
 }
 
-function roleLabel(role) {
+export function roleLabel(role) {
   const r = ROLES.find((x) => x.key === role);
   return r ? r.label : role;
 }
@@ -353,7 +359,7 @@ function addPerson(ctx) {
   });
 }
 
-function changeRole(ctx, user) {
+export function changeRole(ctx, user) {
   const role = roleSelect(user.role);
   const err = h("div");
   modal({
@@ -393,7 +399,7 @@ function changeRole(ctx, user) {
   });
 }
 
-function disablePerson(ctx, user) {
+export function disablePerson(ctx, user) {
   confirm({
     title: `Disable ${user.email}?`,
     body: h(
@@ -485,7 +491,7 @@ function switchToPasskey(ctx, user) {
   });
 }
 
-function enablePerson(ctx, user) {
+export function enablePerson(ctx, user) {
   confirm({
     title: `Enable ${user.email}?`,
     body: isPasskeyAccount(user)

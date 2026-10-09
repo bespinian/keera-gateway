@@ -28,6 +28,7 @@ import {
   projectDetailView,
   keyDetailView,
   modelDetailView,
+  userDetailView,
 } from "./views/detail.js";
 
 const root = document.getElementById("root");
@@ -236,6 +237,7 @@ const routes = [
     icon: "people",
     view: peopleView,
     admin: true,
+    detail: { label: "User", view: userDetailView },
   },
   {
     path: "/audit",

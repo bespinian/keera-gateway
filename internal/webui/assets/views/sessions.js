@@ -40,6 +40,7 @@ import {
   crumb,
   gone,
   sectionHead,
+  isAdmin,
 } from "../ui.js";
 import { outcomeMeaning, outcomeOf, oneLine } from "../status.js";
 import { requestTable, showRequest } from "./requestlog.js";
@@ -388,20 +389,32 @@ function sessionTable(ctx, rows, names, currency, hide, rank) {
       sortKey: (a) =>
         names.users[a.user_id] || names.keys[a.key_id] || a.key_id || null,
       cell: (a) =>
-        a.key_id
+        // The person's own screen where there is one to open, which only an
+        // administrator has.
+        a.user_id && isAdmin(ctx)
           ? h(
               "a",
               {
                 class: "nowrap",
-                href: "/keys/" + encodeURIComponent(a.key_id),
-                title: names.projects[a.project_id]
-                  ? "in " + names.projects[a.project_id]
-                  : null,
-                onClick: go(ctx, "/keys/" + encodeURIComponent(a.key_id)),
+                href: "/users/" + encodeURIComponent(a.user_id),
+                onClick: go(ctx, "/users/" + encodeURIComponent(a.user_id)),
               },
-              names.users[a.user_id] || names.keys[a.key_id] || a.key_id,
+              names.users[a.user_id] || a.user_id,
             )
-          : h("span", { class: "faint" }, "no key"),
+          : a.key_id
+            ? h(
+                "a",
+                {
+                  class: "nowrap",
+                  href: "/keys/" + encodeURIComponent(a.key_id),
+                  title: names.projects[a.project_id]
+                    ? "in " + names.projects[a.project_id]
+                    : null,
+                  onClick: go(ctx, "/keys/" + encodeURIComponent(a.key_id)),
+                },
+                names.users[a.user_id] || names.keys[a.key_id] || a.key_id,
+              )
+            : h("span", { class: "faint" }, "no key"),
     },
     {
       label: "Started",
@@ -617,7 +630,20 @@ export async function sessionDetailView(ctx) {
               names.projects[s.project_id] || s.project_id,
             )
           : null,
-        s.user_id ? pill(names.users[s.user_id] || s.user_id) : null,
+        s.user_id && isAdmin(ctx)
+          ? h(
+              "a",
+              {
+                class: "pill pill-button",
+                href: "/users/" + encodeURIComponent(s.user_id),
+                title: "Open this user",
+                onClick: go(ctx, "/users/" + encodeURIComponent(s.user_id)),
+              },
+              names.users[s.user_id] || s.user_id,
+            )
+          : s.user_id
+            ? pill(names.users[s.user_id] || s.user_id)
+            : null,
         (s.models || []).map((m) =>
           h(
             "a",

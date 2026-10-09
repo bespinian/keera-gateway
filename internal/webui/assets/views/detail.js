@@ -1,5 +1,5 @@
-// One project, one key, one model - the dashboard narrowed to it, and the
-// requests or sessions behind the numbers.
+// One project, one key, one model, one user - the dashboard narrowed to it,
+// and the requests or sessions behind the numbers.
 //
 // The list screens answer "what exists and what is it configured to do". They
 // cannot answer the question somebody arrives with, which is always about one
@@ -8,8 +8,8 @@
 // over a narrower set of rows, plus the rows themselves - because a chart says
 // when something changed and only the log says what changed.
 //
-// All three are the same screen with a different scope, so whoever learns to
-// read one has learned to read the other two and the totals cannot drift
+// All four are the same screen with a different scope, so whoever learns to
+// read one has learned to read the others and the totals cannot drift
 // apart.
 
 import { api } from "../api.js";
@@ -53,6 +53,14 @@ import {
 } from "./keys.js";
 import { openProject } from "./projects.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
+import {
+  TONE,
+  roleLabel,
+  signsInWith,
+  changeRole,
+  disablePerson,
+  enablePerson,
+} from "./people.js";
 
 /* ------------------------------------------------------------------ projects */
 
@@ -215,7 +223,21 @@ export async function keyDetailView(ctx) {
             project ? project.name : key.project_id,
           )
         : pill("Deleted"),
-      person ? pill(person.email) : null,
+      // Only an administrator has the Users screen to open.
+      person && isAdmin(ctx)
+        ? h(
+            "a",
+            {
+              class: "pill pill-button",
+              href: "/users/" + encodeURIComponent(person.id),
+              title: "Open this key's user",
+              onClick: go(ctx, "/users/" + encodeURIComponent(person.id)),
+            },
+            person.email,
+          )
+        : person
+          ? pill(person.email)
+          : null,
     ],
     actions: [
       h(
@@ -429,9 +451,149 @@ export async function modelDetailView(ctx) {
   });
 }
 
+/* ------------------------------------------------------------------ users */
+
+export async function userDetailView(ctx) {
+  const [usersRes, keysRes] = await Promise.all([
+    api.users(ctx.orgID),
+    api.keys(ctx.orgID).catch(() => ({ data: [] })),
+  ]);
+  const user = (usersRes.data || []).find((u) => u.id === ctx.param);
+
+  if (!user) {
+    return gone(
+      ctx,
+      "/users",
+      "Users",
+      "No such user",
+      "No user has this id, or they belong to another organisation.",
+    );
+  }
+
+  const keys = (keysRes.data || []).filter(
+    (k) => k.user_id === user.id && stateOf(k) === "active",
+  );
+  // The same rules as the row on the Users screen: nobody edits themselves,
+  // an operator's role comes from the configuration, and a role from the
+  // directory is changed there.
+  const editable = user.id !== ctx.state.me.user_id && user.role !== "operator";
+  const canAssign = !ctx.state.me.roles_from_directory;
+
+  return screen(ctx, {
+    back: { path: "/users", label: "Users" },
+    title: user.email,
+    identity: signsInWith(user),
+    scope: { user_id: user.id },
+    // A person's traffic reads best as the tasks they ran.
+    sessions: true,
+    hide: { who: true },
+    meta: [
+      pill(roleLabel(user.role), TONE[user.role] || ""),
+      user.disabled_at ? pill("Disabled", "bad") : null,
+      pill(`${num(keys.length)} active ${plural(keys.length, "key")}`),
+    ],
+    actions: editable
+      ? [
+          canAssign && !user.disabled_at
+            ? h(
+                "button",
+                {
+                  class: "btn",
+                  title: "Edit this user's role",
+                  onClick: () => changeRole(ctx, user),
+                },
+                icon(icons.pencil),
+                "Role",
+              )
+            : null,
+          user.disabled_at
+            ? h(
+                "button",
+                { class: "btn", onClick: () => enablePerson(ctx, user) },
+                "Enable",
+              )
+            : h(
+                "button",
+                {
+                  class: "btn btn-danger",
+                  onClick: () => disablePerson(ctx, user),
+                },
+                "Disable",
+              ),
+        ]
+      : [],
+    panels: (o, names) => [
+      barPanel(
+        "Models by tokens",
+        o.top_models,
+        (r) => r.group || "unknown model",
+        (r) => r.input_tokens + r.output_tokens,
+        1,
+      ),
+      barPanel(
+        "Keys by spend",
+        o.top_keys,
+        (r) => names.keys[r.group] || r.group || "No key",
+        (r) => r.cost_micros || r.requests,
+        3,
+        ctx.currency,
+      ),
+    ],
+    aside: h(
+      "div",
+      { class: "card" },
+      h("div", { class: "card-head" }, h("h2", {}, "This user")),
+      h(
+        "div",
+        { class: "card-body" },
+        facts([
+          [
+            "Added",
+            h(
+              "span",
+              { class: "muted", title: dateTime(user.created_at) },
+              date(user.created_at),
+            ),
+          ],
+          user.disabled_at
+            ? [
+                "Disabled",
+                h(
+                  "span",
+                  { class: "muted", title: dateTime(user.disabled_at) },
+                  date(user.disabled_at),
+                ),
+              ]
+            : null,
+          [
+            "Active keys",
+            keys.length
+              ? h(
+                  "div",
+                  { class: "stack" },
+                  keys.map((k) =>
+                    h(
+                      "a",
+                      {
+                        href: "/keys/" + encodeURIComponent(k.id),
+                        onClick: go(ctx, "/keys/" + encodeURIComponent(k.id)),
+                      },
+                      k.name,
+                    ),
+                  ),
+                )
+              : h("span", { class: "faint" }, "none"),
+          ],
+        ]),
+      ),
+    ),
+    note: "Counts the requests made with this user's keys.",
+  });
+}
+
 /* ----------------------------------------------------------- the scaffold */
 
-// screen draws all three. Everything above the chart is what makes this entity
+// screen draws all four. Everything above the chart is what makes this entity
 // that entity; everything from the chart down is the same report every time.
 async function screen(ctx, spec) {
   const since = currentRange();
