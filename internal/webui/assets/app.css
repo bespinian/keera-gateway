@@ -25,8 +25,8 @@
   --text: #17171a;
   --muted: #6b6a66;
   --faint: #93918b;
-  --accent: #2d4ea0;
-  --accent-soft: #eaeffb;
+  --accent: #1f5bc8;
+  --accent-soft: #e8effc;
   --accent-fg: #ffffff;
   --good: #1c7a4d;
   --good-soft: #e6f4ec;
@@ -34,7 +34,7 @@
   --warn-soft: #fbf0dd;
   --bad: #a92a20;
   --bad-soft: #fbeae8;
-  --s1: #2d4ea0;
+  --s1: #1f5bc8;
   --s2: #1c7a4d;
   --s3: #9a5b00;
   --s4: #7b3fa0;
@@ -64,16 +64,16 @@
     --text: #ececef;
     --muted: #9c9ba4;
     --faint: #74737c;
-    --accent: #849dee;
-    --accent-soft: #1e2438;
-    --accent-fg: #10131c;
+    --accent: #7ea8ff;
+    --accent-soft: #1a2440;
+    --accent-fg: #0d1322;
     --good: #57cb90;
     --good-soft: #16281f;
     --warn: #dfa445;
     --warn-soft: #2a2113;
     --bad: #ef7b70;
     --bad-soft: #2c1917;
-    --s1: #849dee;
+    --s1: #7ea8ff;
     --s2: #57cb90;
     --s3: #dfa445;
     --s4: #c193da;
@@ -94,16 +94,16 @@
   --text: #ececef;
   --muted: #9c9ba4;
   --faint: #74737c;
-  --accent: #849dee;
-  --accent-soft: #1e2438;
-  --accent-fg: #10131c;
+  --accent: #7ea8ff;
+  --accent-soft: #1a2440;
+  --accent-fg: #0d1322;
   --good: #57cb90;
   --good-soft: #16281f;
   --warn: #dfa445;
   --warn-soft: #2a2113;
   --bad: #ef7b70;
   --bad-soft: #2c1917;
-  --s1: #849dee;
+  --s1: #7ea8ff;
   --s2: #57cb90;
   --s3: #dfa445;
   --s4: #c193da;
@@ -323,9 +323,21 @@ code,
   text-decoration: none;
 }
 .nav-item[aria-current="page"] {
+  position: relative;
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 600;
+}
+/* A bar on the sidebar's edge, beside the current page. */
+.nav-item[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: 7px;
+  bottom: 7px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
 }
 .nav-item svg {
   width: 16px;
@@ -2018,6 +2030,7 @@ a.pill-button:hover {
 .banner {
   padding: 10px 13px;
   border-radius: var(--radius-sm);
+  box-shadow: inset 3px 0 0 currentColor;
   font-size: 12.5px;
   margin-bottom: 16px;
   line-height: 1.5;
@@ -2163,6 +2176,9 @@ a.pill-button:hover {
   .nav-collapsed .nav-item {
     justify-content: center;
     padding: 8px 0;
+  }
+  .nav-collapsed .nav-item[aria-current="page"]::before {
+    left: -10px;
   }
   .nav-collapsed .nav-collapse svg {
     transform: rotate(180deg);

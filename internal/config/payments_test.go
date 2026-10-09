@@ -1,6 +1,7 @@
 package config
 
 import (
+	"maps"
 	"strings"
 	"testing"
 )
@@ -57,9 +58,7 @@ func TestAPaymentSettingThatCannotWorkStopsTheStart(t *testing.T) {
 	}
 	with := func(kv ...string) map[string]string {
 		out := map[string]string{}
-		for k, v := range account {
-			out[k] = v
-		}
+		maps.Copy(out, account)
 		for i := 0; i < len(kv); i += 2 {
 			out[kv[i]] = kv[i+1]
 		}

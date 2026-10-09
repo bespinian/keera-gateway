@@ -766,7 +766,7 @@ function palette() {
     strong: v("--border-strong", "#d2cfc8"),
     surface: v("--surface", "#ffffff"),
     surface2: v("--surface-2", "#fafaf9"),
-    accent: v("--accent", "#2d4ea0"),
+    accent: v("--accent", "#1f5bc8"),
     good: v("--good", "#1c7a4d"),
     warn: v("--warn", "#9a5b00"),
     warnSoft: v("--warn-soft", "#fbf0dd"),

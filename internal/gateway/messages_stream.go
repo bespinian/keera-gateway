@@ -29,7 +29,7 @@ func (anthropicShape) pipe(dst io.Writer, flush func(), src io.Reader, alias str
 ) (streamStats, error) {
 	return pipeEvents(dst, flush, src, limit, anthropicPingInterval,
 		func(send func([]byte) error) eventStream {
-			return &messagesStream{alias: alias, msgID: id.New("msg"), blocks: blocks{open: -1}, send: send}
+			return &messagesStream{alias: alias, msgID: id.New("msg"), open: -1, send: send}
 		})
 }
 

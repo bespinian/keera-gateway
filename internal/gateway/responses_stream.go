@@ -24,7 +24,7 @@ func (responsesShape) pipe(dst io.Writer, flush func(), src io.Reader, alias str
 ) (streamStats, error) {
 	return pipeEvents(dst, flush, src, limit, 0, func(send func([]byte) error) eventStream {
 		return &responsesStream{alias: alias, respID: id.New("resp"), createdAt: time.Now().Unix(),
-			blocks: blocks{open: -1}, send: send}
+			open: -1, send: send}
 	})
 }
 
