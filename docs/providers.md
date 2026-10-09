@@ -34,7 +34,7 @@ Each new organisation gets a copy of the models in the file. See
 models:
   - alias: keera-frontier
     provider: anthropic
-    backend_model: claude-opus-5
+    backend_model: claude-opus-5-5
     description: >-
       Hosted outside this cluster and expensive. Design, multi-step reasoning
       and whole-system questions. Must not be sent client data.
@@ -104,7 +104,7 @@ administrators can add a model from it to an organisation. See
 ### On the command line
 
 ```sh
-keera model add keera-frontier --provider anthropic --backend-model claude-opus-5
+keera model add keera-frontier --provider anthropic --backend-model claude-opus-5-5
 keera model set keera-frontier --api-key @-      # reads the key from stdin
 
 # Infomaniak, which also needs the product id its address carries.
@@ -249,12 +249,12 @@ and output.
 A catalogue entry can set its own:
 
 ```yaml
-    long_prompt:
-      above_tokens: 100000
-      input_micros_per_mtok: 500000
-      output_micros_per_mtok: 2500000
-      cached_input_micros_per_mtok: 50000
-      cache_write_micros_per_mtok: 625000
+long_prompt:
+  above_tokens: 100000
+  input_micros_per_mtok: 500000
+  output_micros_per_mtok: 2500000
+  cached_input_micros_per_mtok: 50000
+  cache_write_micros_per_mtok: 625000
 ```
 
 `keera model list --json` (as `long_prompt`) and the control panel show them. The CLI has no flags for

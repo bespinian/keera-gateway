@@ -28,10 +28,15 @@ func billingCmd(ctx context.Context, args []string) error {
 	// The bill and the payments are reports, which span every organisation
 	// the caller can see unless told one. The other verbs act on one.
 	org := "org"
-	if v := verbAsked("billing", args); v == "" || v == "report" || v == "payments" {
+	v := verbAsked("billing", args)
+	if v == "" || v == "report" || v == "payments" {
 		org = "orgs"
 	}
 	r := &billingRun{cmdRun: newCmdRun("billing", args, org, "json")}
+	// An operator grants credit to one organisation, so it has to be named.
+	if v == "grant" || v == "invoiced" {
+		r.fs.Lookup("org").Usage = "organisation id (required)"
+	}
 	r.fs.StringVar(&r.month, "month", "", "the month to bill, as YYYY-MM (default: this month)")
 	r.fs.Float64Var(&r.amount, "amount", 0, "an amount in CHF, such as 100")
 	r.fs.Float64Var(&r.below, "below", 0, "the balance in CHF that starts an automatic top-up")

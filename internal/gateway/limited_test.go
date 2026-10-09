@@ -41,8 +41,10 @@ func TestALockedModelIsRefusedAndNotOffered(t *testing.T) {
 	default:
 	}
 
-	// The test backend is on the loopback, which is not a private range, so
-	// an open model of a limited organisation still reaches it.
+	// The test backend is on the loopback, which a limited organisation may
+	// not reach. This test is about what it is offered, so it dials as an
+	// organisation that is not limited.
+	h.srv.publicClient = h.srv.client
 	if resp := h.post(t, "/v1/chat/completions", `{"model":"own-key","messages":[]}`); resp.StatusCode != http.StatusOK {
 		t.Errorf("an open model of a limited organisation: status = %d, want 200", resp.StatusCode)
 	}
@@ -65,6 +67,17 @@ func TestALockedModelIsRefusedAndNotOffered(t *testing.T) {
 	if len(out.Data) != 1 || out.Data[0].ID != "own-key" {
 		t.Errorf("/v1/models lists %+v, want only own-key", out.Data)
 	}
+
+	req, _ = http.NewRequest(http.MethodGet, h.url("/v1/models/engine"), nil)
+	req.Header.Set("Authorization", "Bearer "+testKey)
+	one, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = one.Body.Close()
+	if one.StatusCode != http.StatusNotFound {
+		t.Errorf("/v1/models/engine: status = %d, want 404", one.StatusCode)
+	}
 }
 
 func TestALimitedOrganisationCannotDialAPrivateAddress(t *testing.T) {
@@ -83,9 +96,11 @@ func TestALimitedOrganisationCannotDialAPrivateAddress(t *testing.T) {
 	}
 	// The client is told only that the plane could not be reached; the
 	// reason is the dialler's.
-	_, err := h.srv.clientFor(true).Get("http://10.255.255.1:9/")
-	if err == nil || !strings.Contains(err.Error(), "public addresses") {
-		t.Errorf("dialling a private address: %v, want it refused", err)
+	for _, u := range []string{"http://10.255.255.1:9/", "http://127.0.0.1:1/"} {
+		_, err := h.srv.clientFor(true).Get(u)
+		if err == nil || !strings.Contains(err.Error(), "public addresses") {
+			t.Errorf("dialling %s: %v, want it refused", u, err)
+		}
 	}
 	// Everyone else keeps reaching a self-hosted plane on a private address.
 	if h.srv.clientFor(false) == h.srv.clientFor(true) {

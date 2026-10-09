@@ -39,8 +39,9 @@ stays unready for several minutes. Do not restart it.
 
 ## Configuration
 
-Everything is an environment variable, except the models and sandbox classes
-new organisations start with, which are files.
+Everything is an environment variable, except a few files: the models and
+sandbox classes new organisations start with, and the
+[Git credentials for sandboxes](sandboxes.md#configuration).
 
 ### Required
 
@@ -84,7 +85,7 @@ new organisations start with, which are files.
 | `KEERA_CLAUDE_SUBSCRIPTIONS`    | `false`             | Lets Claude Code on a Claude plan through. See [subscriptions.md](subscriptions.md). |
 
 Retention below `24h` is refused: deleted rows cannot be recovered, and a
-typo like `10m` would delete the day's billing data.
+typo like `10m` would delete the day's request log.
 
 Sizes are a plain number of bytes. Durations take `h`, `m` and `s`. On/off
 settings take `true`/`false`, `yes`/`no`, `on`/`off` or `1`/`0`. A number,
@@ -121,7 +122,9 @@ address and Azure's WireServer. Private ranges are allowed, because that is
 where a self-hosted inference plane runs.
 
 - **A backend on the same host**, such as vLLM on `127.0.0.1`: set the list
-  without the two loopback entries. `make dev` does this.
+  without the two loopback entries. `make dev` does this. Loopback counts as
+  inside the network, so with `KEERA_UPSTREAM_PRIVATE` set, name it there too,
+  such as `127.0.0.1`.
 - **Organisations you do not trust with your network**: add your private ranges,
   such as `10.0.0.0/8`. A model the gateway must still reach then needs an
   address outside them. An organisation that
@@ -395,17 +398,17 @@ the cluster does (an operator, or a managed service) and set
 
 Most tables grow with the number of customers. These grow with use:
 
-| Table          | One row per                               |
-| -------------- | ----------------------------------------- |
-| `usage_events` | inference request                         |
-| `filter_runs`  | filter run, per request                   |
-| `tool_calls`   | MCP tool call                             |
-| `sandboxes`    | sandbox lent out                          |
-| `api_keys`     | key, and one more for each sandbox        |
-| `audit_log`    | administrative action, so it grows slowly |
+| Table           | One row per                               |
+| --------------- | ----------------------------------------- |
+| `usage_events`  | inference request                         |
+| `filter_runs`   | filter run, per request                   |
+| `tool_calls`    | MCP tool call                             |
+| `sandboxes`     | sandbox lent out                          |
+| `api_keys`      | key, and one more for each sandbox        |
+| `billing_lines` | billable call, on the deployment's keys   |
+| `audit_log`     | administrative action, so it grows slowly |
 
-`usage_events` is the request log, the source of every report and the billing
-record. A row is ids, counts and a latency breakdown of a few hundred bytes. No
+`usage_events` is the request log and the source of every report. A row is ids, counts and a latency breakdown of a few hundred bytes. No
 prompt or completion text is stored.
 
 ```sh
@@ -413,14 +416,14 @@ KEERA_USAGE_RETENTION=8760h    # a year
 KEERA_AUDIT_RETENTION=17520h   # two years
 ```
 
-**Both default to for ever, on purpose.** Billing reads usage and compliance
+**Both default to for ever, on purpose.** Reports read usage and compliance
 reads the audit log, so the gateway deletes neither unless told to. At start-up
 it logs the windows, or `no retention window is configured`.
 
 Past the usage window, the gateway deletes usage events, filter runs, tool
 calls and closed budget windows. It also deletes sandboxes that ended, and keys
 revoked or expired, with their guardrails. A key that a sandbox still names
-stays. Billing rows and payments are kept ([billing.md](billing.md)).
+stays. Billing rows and payments are never deleted ([billing.md](billing.md)).
 
 The request log, the session report and every chart read `usage_events`, so
 they reach back only as far as the window. Retention runs hourly, deletes 5,000

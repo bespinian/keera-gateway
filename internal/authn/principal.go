@@ -23,8 +23,8 @@ const (
 	// RoleAdmin runs one organisation: its projects, guardrails, keys and people,
 	// and its models, MCP servers, filters, routers and sandbox classes.
 	RoleAdmin Role = "admin"
-	// RoleMember sees their organisation's usage, rotates and revokes their
-	// own keys and changes no policy.
+	// RoleMember sees their organisation's usage and their own requests,
+	// sessions and map, manages their own keys and changes no policy.
 	RoleMember Role = "member"
 )
 

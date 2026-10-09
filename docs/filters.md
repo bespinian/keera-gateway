@@ -288,6 +288,7 @@ this.
 | ----------------------------------------------------------------------------------------- | ------ |
 | the guardrail names a filter that no longer exists                                        | 503    |
 | its model is missing, disabled, not a chat model, a subscription model, or has no backend | 503    |
+| its model is [locked until the organisation pays](sso.md#what-a-new-organisation-can-use) | 503    |
 | its model was reached but the answer was unusable, or it errored                          | 502    |
 | a gate answered neither `ALLOW` nor `REFUSED`, in word or in token                        | 502    |
 | the conversation will not fit through its model's context                                 | 413    |

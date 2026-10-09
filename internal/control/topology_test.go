@@ -14,8 +14,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// What a model's box says about where it runs. The map is for the
-// organisation's administrators, who see its backends on the Models screen too.
+// What a model's box says about where it runs. Administrators see its backend,
+// as on the Models screen; a member's map leaves it out.
 func TestAModelsBoxNamesWhereItRuns(t *testing.T) {
 	inside := policy.Model{OrgID: "org_1", Alias: "keera-code", Backends: []string{"http://vllm:8000/v1"}}
 	outside := policy.Model{OrgID: "org_1", Alias: "keera-frontier", Backends: []string{"https://api.anthropic.com/v1"}}

@@ -130,7 +130,8 @@ place to send the request.
 A router cannot decide when:
 
 - its model is missing, disabled, not a chat model, a subscription model, or
-  has no backend
+  has no backend, or is
+  [locked until the organisation pays](sso.md#what-a-new-organisation-can-use)
 - none of its destinations can be served
 - its model errored, timed out, or answered nothing
 - its answer names none of its destinations
@@ -253,10 +254,11 @@ request goes to the destination with the smallest ceiling it fits under.
 
 ### The one thing only it gets right
 
-It is the only mode that checks whether a request fits. A destination whose
+It is the only mode that chooses by whether a request fits. A destination whose
 `max_context` cannot hold the request is ranked **behind every destination that
-can**, whatever the ceilings say. Otherwise a long conversation could reach the
-small model and be refused with a 400 `context_length_exceeded`.
+can**, whatever the ceilings say. The other modes may send a long conversation
+to a small model, which then refuses it itself. The gateway refuses a request
+only when [no destination can hold it](gateway.md#requests-too-long-for-the-model).
 
 The three tiers, in the order they are tried:
 

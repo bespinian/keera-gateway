@@ -127,9 +127,10 @@ it.
 
 The Nix build fetches the Go modules itself and checks them against
 `vendorHash` in `flake.nix`. When `go.mod` changes, set it to
-`pkgs.lib.fakeHash`, build, and copy the hash Nix prints. `make notices`,
-`make dist` and `make image` use `vendor/`, which is not committed. Run
-`go mod vendor` after cloning and again whenever `go.mod` changes. `make image`
+`pkgs.lib.fakeHash`, build, and copy the hash Nix prints. Once `vendor/`
+exists, every Go command builds from it, so `make build` and `make test` too.
+It is not committed. Run `go mod vendor` after cloning and again whenever
+`go.mod` changes. `make image`
 vendors the modules itself only when `vendor/` is missing, so an old one breaks
 its build too.
 

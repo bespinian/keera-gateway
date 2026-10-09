@@ -118,16 +118,23 @@ func (s *Store) UpdateCredit(ctx context.Context, orgID string, c CreditSettings
 // forget it too. Zero when there was none. The automatic top-up goes with it,
 // so saving the next card does not start it again unasked.
 func (s *Store) ForgetCard(ctx context.Context, orgID string) (int64, error) {
+	return forgetCard(ctx, s.pool, orgID)
+}
+
+func forgetCard(ctx context.Context, q querier, orgID string) (int64, error) {
 	var token *int64
-	err := s.pool.QueryRow(ctx, `
+	err := q.QueryRow(ctx, `
 		UPDATE credit_accounts a SET card_token = NULL, card_label = NULL,
 			card_expires = NULL, topup_below_micros = 0, topup_micros = 0, updated_at = now()
 		FROM (SELECT org_id, card_token FROM credit_accounts WHERE org_id = $1) old
 		WHERE a.org_id = old.org_id RETURNING old.card_token`, orgID).Scan(&token)
-	if errors.Is(err, pgx.ErrNoRows) || token == nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, nil
 	}
-	return *token, err
+	if err != nil || token == nil {
+		return 0, err
+	}
+	return *token, nil
 }
 
 // DueTopUps lists the accounts whose balance has fallen below their automatic

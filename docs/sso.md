@@ -339,8 +339,8 @@ A sign-in that matches no organisation then lands on a screen that offers:
 
 - **Create an organisation.** The person names it and becomes its
   administrator. If the name is taken, their address is added to it, so a
-  stranger cannot find out which customers you have. Rename it with
-  `keera org set`.
+  stranger cannot find out which customers you have. An operator can rename
+  it with `keera org set`.
 - **Join an invitation.** If an organisation added the address with
   `keera user add`, the screen offers to join it, with the role it was given.
   It is never joined without asking: an administrator of an organisation

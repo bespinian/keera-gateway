@@ -225,8 +225,16 @@ func TestADeletedOrganisationsCardIsNotCharged(t *testing.T) {
 		TopUpBelowMicros: &below, TopUpMicros: &amount}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DeleteOrg(ctx, f.orgID); err != nil {
+	gone, err := st.DeleteOrg(ctx, f.orgID)
+	if err != nil {
 		t.Fatalf("DeleteOrg: %v", err)
+	}
+	// The token is handed back so PostFinance forgets the card too.
+	if gone.CardToken != 7 {
+		t.Errorf("card token = %d, want 7", gone.CardToken)
+	}
+	if a, _ := st.CreditAccount(ctx, f.orgID); a.CardToken != 0 || a.Card != nil {
+		t.Errorf("account = %+v, want the card gone", a)
 	}
 	if list, err := st.DueTopUps(ctx, 10); err != nil || len(list) != 0 {
 		t.Errorf("due = %+v, %v; want none", list, err)

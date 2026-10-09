@@ -474,8 +474,8 @@ func proxyTo(ctx context.Context, c *client, org, ref string, port int,
 	return nil
 }
 
-// upgradeProtocol is the token the attach surface expects. It is copied from
-// the control plane rather than imported, so `keera` does not link the gateway.
+// upgradeProtocol is the token the attach surface expects. It has to match
+// the one in internal/control/attach.go.
 const upgradeProtocol = "keera-sandbox/1"
 
 // dialUpgrade performs the HTTP upgrade by hand. http.Client cannot: it reads

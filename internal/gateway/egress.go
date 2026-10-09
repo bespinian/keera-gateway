@@ -30,10 +30,15 @@ const DefaultUpstreamDeny = "127.0.0.0/8,::1/128,169.254.0.0/16,fe80::/10,0.0.0.
 	"fd00:ec2::254/128,100.100.100.200/32,168.63.129.16/32"
 
 // privateRanges are the addresses inside a network: private, carrier-grade
-// NAT and unique local IPv6. A limited organisation is kept from all of them,
-// and with KEERA_UPSTREAM_PRIVATE every organisation is kept from all but
-// the hosts it names.
+// NAT, unique local IPv6, and loopback and link-local, which an operator may
+// have taken off the deny list for a backend on the same host. A limited
+// organisation is kept from all of them, and with KEERA_UPSTREAM_PRIVATE every
+// organisation is kept from all but the hosts it names.
 var privateRanges = []netip.Prefix{
+	netip.MustParsePrefix("127.0.0.0/8"),
+	netip.MustParsePrefix("::1/128"),
+	netip.MustParsePrefix("169.254.0.0/16"),
+	netip.MustParsePrefix("fe80::/10"),
 	netip.MustParsePrefix("10.0.0.0/8"),
 	netip.MustParsePrefix("172.16.0.0/12"),
 	netip.MustParsePrefix("192.168.0.0/16"),

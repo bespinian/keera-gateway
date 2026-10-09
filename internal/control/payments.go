@@ -368,7 +368,8 @@ func (s *Server) grantCredit(w http.ResponseWriter, r *http.Request, p *authn.Pr
 
 // postFinanceWebhook is told by PostFinance that a transaction changed. The
 // call is not trusted: it only says which transaction to read back over the
-// authenticated API, and only one of a pending payment of Keera's is read.
+// authenticated API, and only one of a pending or failed payment of Keera's
+// is read: a payment given up on can still be paid late.
 func (s *Server) postFinanceWebhook(w http.ResponseWriter, r *http.Request) {
 	pay := s.opts.Payments
 	if pay == nil {

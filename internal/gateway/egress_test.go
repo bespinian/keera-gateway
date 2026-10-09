@@ -76,7 +76,10 @@ func TestOnlyTheNamedHostsReachThePrivateNetwork(t *testing.T) {
 		}
 		return err != nil && strings.Contains(err.Error(), "KEERA_UPSTREAM_PRIVATE")
 	}
-	for _, addr := range []string{"10.0.0.7:8000", "192.168.1.2:443", "100.64.0.1:80", "[fd12::1]:80"} {
+	// Loopback and link-local are inside the network too, even when the deny
+	// list leaves them open for a backend on the same host.
+	for _, addr := range []string{"10.0.0.7:8000", "192.168.1.2:443", "100.64.0.1:80", "[fd12::1]:80",
+		"127.0.0.1:5432", "[::1]:8080", "169.254.169.254:80"} {
 		if !blocked(addr) {
 			t.Errorf("%s was not blocked", addr)
 		}

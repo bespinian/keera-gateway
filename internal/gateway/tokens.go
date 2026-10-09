@@ -7,9 +7,10 @@ import "github.com/bespinian/keera-gateway/internal/policy"
 // through that should not pass, low where a high guess would refuse one that
 // fits.
 
-// bytesPerToken sizes a filter's output allowance, a size router's choice and
-// count_tokens. It is pessimistic on purpose, since all of them want to
-// over-estimate.
+// bytesPerToken sizes what wants a high guess: a filter's output allowance,
+// whether a filter's or router's model can hold the text, a size router's
+// choice, the credit a request holds, what a call with no usage record is
+// billed, and count_tokens.
 const bytesPerToken = 3
 
 // bytesPerTokenAtMost is more bytes than a token of real text takes. English
@@ -17,7 +18,7 @@ const bytesPerToken = 3
 // uses it, so it never refuses a request that fits.
 const bytesPerTokenAtMost = 5
 
-// estimateTokens estimates a request's size the way the filters do. It
+// estimateTokens estimates a request's size from its text. It
 // over-estimates, which sends a borderline request to the larger model.
 //
 // It counts only text, so images are not counted. That understates the

@@ -163,6 +163,9 @@ func (s *Server) deleteOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		s.fail(w, err)
 		return
 	}
+	if gone.CardToken != 0 && s.opts.Payments != nil {
+		s.deleteToken(r.Context(), s.opts.Payments, gone.CardToken)
+	}
 	s.auditf(r, p, orgID, "org.delete", "org", orgID, gone)
 	// Every key of the tenant is gone, so the gateways must drop them now.
 	s.changed(r)

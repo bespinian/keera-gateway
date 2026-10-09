@@ -88,8 +88,8 @@ When no usage record comes back, the call is billed the most it may have used:
 its whole body as prompt and its whole output ceiling as answer. This happens
 when the answer is too large to read (`KEERA_MAX_RESPONSE_BYTES`), when the
 provider takes longer than the gateway waits, or when it sends no record. It
-applies to the calls of filters and routers too. The row is marked as an
-estimate, and the gateway logs a warning.
+applies to the calls of filters and routers too. The request's usage row is
+marked as an estimate, and the gateway logs a warning.
 
 ## The monthly report
 
@@ -230,7 +230,8 @@ report.
 
 PostFinance calls the webhook when a transaction changes. The call proves
 nothing, so Keera only takes it as a reason to read the transaction back over
-the authenticated API. Only a transaction of a pending Keera payment is read.
+the authenticated API. Only a transaction of a pending or failed Keera payment
+is read, so one paid after Keera gave up on it is still credited.
 A payment counts as paid in PostFinance's state **Fulfill**, and only if the
 amount and currency are the ones Keera asked for.
 
@@ -251,7 +252,8 @@ and the log names its transaction, so someone can look it up in PostFinance.
   organisations together. Give each organisation a budget and rate limits, so
   one cannot use up the key for the rest.
 - **Keep the rows.** `KEERA_USAGE_RETENTION` does not delete billing rows or
-  payments, and neither does deleting an organisation. Back up the database.
+  payments, and neither does deleting an organisation. That removes only its
+  saved card, here and at PostFinance. Back up the database.
 - **Running requests hold credit.** A request is charged when it ends. Until
   then, it holds the most it may cost: its whole body as prompt, plus its
   output ceiling (64,000 tokens if it sets none), at the dearest model it may

@@ -43,8 +43,8 @@ models:
 # put a budget on the projects that may use it.
 #  - alias: keera-frontier
 #    provider: anthropic
-#    backend_model: claude-opus-5
-#    # Left out, this would be the provider's own sentence about claude-opus-5,
+#    backend_model: claude-opus-5-5
+#    # Left out, this would be the provider's own sentence about claude-opus-5-5,
 #    # which is enough for a router to choose on. Written here because what the
 #    # model is is Anthropic's fact and what the alias is for is yours.
 #    description: >-

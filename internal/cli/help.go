@@ -454,9 +454,9 @@ var commands = []command{
 				prose: "A pattern filter's --rules are one rule per line: an expression, '=>', " +
 					"then what each match becomes - or 'REFUSE: why' to drop the request. " +
 					"@path reads them from a file.\n\n" +
-					"  (?i)\\bsk-[a-z0-9]{20,}\\b         => [CREDENTIAL]\n" +
-					"  \\b[A-Z]{2}\\d{2}[A-Z0-9]{10,28}\\b => [IBAN]\n" +
-					"  (?i)\\bexport all customers\\b    => REFUSE: that moves the customer list out\n\n" +
+					"  (?i)\\bsk-[a-z0-9]{20,}\\b                  => [CREDENTIAL]\n" +
+					"  \\b[A-Z]{2}\\d{2}(?:[ ]?[A-Z0-9]{4}){2,7}\\b => [IBAN]\n" +
+					"  (?i)\\bexport all customers\\b              => REFUSE: that moves the customer list out\n\n" +
 					"With --shadow the filter runs and enforces nothing: the request is " +
 					"forwarded as it was sent whatever the filter answered, and 'report' says " +
 					"what it would have done. That is how an instruction is tuned against a " +

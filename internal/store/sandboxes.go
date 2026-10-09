@@ -14,8 +14,8 @@ import (
 // models, and a log of the machines actually lent out.
 //
 // A sandbox row is kept after the machine is gone, because its cost, owner and
-// repository still matter later. So the log grows: retention does not delete
-// it.
+// repository still matter later. Usage retention deletes it with the rest of
+// the usage.
 
 // liveSandbox is the condition for a sandbox that still holds resources. It
 // matches Sandbox.Live. An expired sandbox is one: it keeps its volume until

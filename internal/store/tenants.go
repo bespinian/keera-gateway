@@ -233,6 +233,9 @@ type DeletedOrg struct {
 	Keys     int    `json:"keys"`
 	// LiveSandboxes is set only when the delete was refused for them.
 	LiveSandboxes int `json:"live_sandboxes,omitempty"`
+	// CardToken is the saved card the delete removed, zero for none, so
+	// PostFinance can forget it too.
+	CardToken int64 `json:"-"`
 }
 
 // ErrOrgHasSandboxes refuses to delete an organisation whose sandboxes still
@@ -245,8 +248,9 @@ var ErrOrgHasSandboxes = errors.New("store: the organisation still has live sand
 // Everything else goes through the foreign keys. Guardrails and spend are
 // cleared first, while the project and key ids that name them still exist.
 //
-// Usage events and the audit log stay: finance invoices from them, and the
-// audit log must keep the record of this deletion.
+// Usage events, the credit account and the audit log stay: finance invoices
+// from them, and the audit log must keep the record of this deletion. The
+// saved card goes, so nobody can charge it again.
 func (s *Store) DeleteOrg(ctx context.Context, orgID string) (DeletedOrg, error) {
 	var gone DeletedOrg
 	tx, err := s.pool.Begin(ctx)
@@ -281,6 +285,9 @@ func (s *Store) DeleteOrg(ctx context.Context, orgID string) (DeletedOrg, error)
 		OR (scope_type = 'project' AND scope_id IN (SELECT id FROM projects WHERE org_id = $1))
 		OR (scope_type = 'key'     AND scope_id IN (SELECT id FROM api_keys WHERE org_id = $1))`
 	if err := deleteScoped(ctx, tx, scoped, orgID); err != nil {
+		return gone, err
+	}
+	if gone.CardToken, err = forgetCard(ctx, tx, orgID); err != nil {
 		return gone, err
 	}
 	if _, err := tx.Exec(ctx, "DELETE FROM orgs WHERE id = $1", orgID); err != nil {

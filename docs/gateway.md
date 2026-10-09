@@ -251,8 +251,8 @@ A client that hangs up before any answer still gets a row, with status 499 and
 marked as cancelled, in the field `canceled`. It carries what the router and the
 filters had spent by then, so hanging up never makes them free.
 
-If you put an ingress in front, turn off response buffering and set a read
-timeout longer than the longest completion. Most controllers buffer by default.
+An ingress in front has to stream too; see
+[Publishing it](install.md#publishing-it).
 
 ## Caching
 
@@ -327,7 +327,9 @@ Other response headers:
 
 ## Errors
 
-Errors come in the shape of the API that was called. The codes:
+Errors come in the shape of the API that was called. The Messages API has no
+field for a code, so its errors carry only a type that follows the status, such
+as `billing_error` for 402. The other APIs carry these codes:
 
 | Status | Code                                                                                                                     |
 | ------ | ------------------------------------------------------------------------------------------------------------------------ |
@@ -376,8 +378,8 @@ and [mcp.md](mcp.md#the-tool-call-log).
   rejects is an error the client sees.
 - **It does not retry.** A model with several backends takes them in turn,
   round-robin, and moves to the next one only when it cannot connect, so a
-  request reaches at most one. A router moves on to its next destination when
-  one cannot be reached, is too slow to start answering, or answers 5xx. Nothing
+  request reaches at most one. A fallback router moves on to its next
+  destination [when one fails](routers.md#what-counts-as-a-failure). Nothing
   sends the same request to the same model twice.
 
 ## Failure modes worth knowing
