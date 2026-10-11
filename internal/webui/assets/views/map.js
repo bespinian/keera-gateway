@@ -144,14 +144,6 @@ export async function mapView(ctx) {
     { class: "map-page" },
     head,
     holder,
-    legend(),
-    h(
-      "div",
-      { class: "hint" },
-      "A request refused by a guardrail stops at the gateway and never " +
-        "reaches a model. Unrecognised clients show as Unidentified; they " +
-        "can name themselves with an X-Keera-Client header.",
-    ),
     modelReport(ctx, scene, currency),
     clientReport(scene, currency),
   );
@@ -1361,22 +1353,6 @@ function refresh(ctx, { since, scene, painter }) {
     }
   }, 30000);
   ctx.onTeardown(() => clearInterval(timer));
-}
-
-/* --------------------------------------------------------------- controls */
-
-function legend() {
-  const mark = (cls, label) =>
-    h("span", { class: "map-key" }, h("i", { class: cls }), label);
-  return h(
-    "div",
-    { class: "map-legend" },
-    mark("map-key-ok", "Served"),
-    mark("map-key-refused", "Refused at the gateway"),
-    mark("map-key-failed", "Failed upstream"),
-    mark("map-key-inside", "Served from your network"),
-    mark("map-key-outside", "Served by an external provider"),
-  );
 }
 
 /* ---------------------------------------------------------------- reports */
