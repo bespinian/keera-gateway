@@ -216,9 +216,9 @@ func TestConnectUsesTheGatewayThatAnswered(t *testing.T) {
 	newFakeControl(t, connectRoutes("https://keera.example.ch/api/", nil))
 
 	got := captured(t, func() error {
-		return connectCmd(context.Background(), []string{"openai"})
+		return connectCmd(context.Background(), []string{"curl"})
 	})
-	if !strings.Contains(got, "export OPENAI_BASE_URL=https://keera.example.ch/api/v1") {
+	if !strings.Contains(got, "curl https://keera.example.ch/api/v1/chat/completions") {
 		t.Errorf("the declared gateway was not used, or its trailing slash survived:\n%s", got)
 	}
 }
@@ -230,7 +230,7 @@ func TestConnectSaysSoWhenNoGatewayAddressIsKnown(t *testing.T) {
 	quiet(t)
 	newFakeControl(t, connectRoutes("", nil))
 
-	err := connectCmd(context.Background(), []string{"openai"})
+	err := connectCmd(context.Background(), []string{"curl"})
 	if err == nil || !strings.Contains(err.Error(), "KEERA_PUBLIC_URL") {
 		t.Errorf("error = %v, want it to name the setting that fixes this", err)
 	}
@@ -244,7 +244,7 @@ func TestConnectWithNoClientListsThem(t *testing.T) {
 	got := captured(t, func() error {
 		return connectCmd(context.Background(), nil)
 	})
-	for _, want := range []string{"opencode", "claude-code", "openai", "keera-code", "auto"} {
+	for _, want := range []string{"opencode", "claude-code", "curl", "keera-code", "auto"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the listing does not mention %s:\n%s", want, got)
 		}

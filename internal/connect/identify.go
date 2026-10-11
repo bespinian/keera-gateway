@@ -23,15 +23,10 @@ const maxClientName = 32
 
 // agents maps User-Agent product tokens to client keys.
 //
-// The first four have no label because the connect catalogue names them, so a
-// client is called the same on every screen. The rest are clients Keera does
-// not configure but can recognise. An unknown client falls back to its own
-// product token.
-//
-// The catalogue's last entry, openai, is not here on purpose. It is a setup
-// that any OpenAI-compatible tool reads, not one client, so its requests are
-// filed under the tool that sends them: Aider, the OpenAI SDK, curl. A client
-// that states "openai" is the OpenAI SDK, like the SDK's own User-Agent.
+// The first four and curl have no label because the connect catalogue names
+// them, so a client is called the same on every screen. The rest are clients
+// Keera does not configure but can recognise. An unknown client falls back to
+// its own product token.
 var agents = []struct {
 	key   string
 	label string
@@ -58,7 +53,7 @@ var agents = []struct {
 		products: []string{"anthropic", "anthropic-sdk-python", "anthropic-ai-sdk"}},
 	{key: "langchain", label: "LangChain", generic: true,
 		products: []string{"langchain", "langchainjs"}},
-	{key: "curl", label: "curl", generic: true, products: []string{"curl"}},
+	{key: "curl", generic: true, products: []string{"curl"}},
 	{key: "python", label: "Python", generic: true,
 		products: []string{"python-requests", "python-httpx", "python-urllib3", "httpx", "urllib3"}},
 	{key: "node", label: "Node", generic: true,

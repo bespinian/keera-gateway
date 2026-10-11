@@ -30,9 +30,9 @@ func TestTitleIsTheLabelAModelPickerShows(t *testing.T) {
 var one = []Model{{Alias: "keera-code"}}
 
 func TestRenderTrimsATrailingSlashFromTheBase(t *testing.T) {
-	c, _ := Find(Clients(), "openai")
+	c, _ := Find(Clients(), "curl")
 	got := c.Render("https://keera.example.ch///", one)
-	if !strings.Contains(got, "export OPENAI_BASE_URL=https://keera.example.ch/v1") {
+	if !strings.Contains(got, "curl https://keera.example.ch/v1/chat/completions") {
 		t.Errorf("base URL not normalised:\n%s", got)
 	}
 }
@@ -86,10 +86,10 @@ func TestEveryClientIsCompleteEnoughToRender(t *testing.T) {
 			t.Errorf("%s's template names neither {{models}} nor {{aliases}}", c.Key)
 		}
 	}
-	// The OpenAI-compatible entry is the one that answers for a client nobody
-	// wrote an entry for, so its absence is a regression rather than a choice.
-	if _, found := Find(Clients(), "openai"); !found {
-		t.Error("the catalogue has no OpenAI-compatible entry")
+	// The cURL entry is the one that answers for a client nobody wrote an
+	// entry for, so its absence is a regression rather than a choice.
+	if _, found := Find(Clients(), "curl"); !found {
+		t.Error("the catalogue has no cURL entry")
 	}
 }
 
@@ -154,8 +154,8 @@ func TestTOMLTemplatesRenderToTOML(t *testing.T) {
 	}
 }
 
-// A client configured by a file says which file, and one configured by the
-// environment says nothing rather than guessing at a shell profile.
+// A client configured by a file says which file, and one run from the shell
+// says nothing rather than guessing at a shell profile.
 func TestAFileClientNamesItsFile(t *testing.T) {
 	for _, key := range []string{"opencode", "pi", "codex"} {
 		c, found := Find(Clients(), key)
@@ -166,10 +166,10 @@ func TestAFileClientNamesItsFile(t *testing.T) {
 			t.Errorf("%s is configured by a file but names none", key)
 		}
 	}
-	for _, key := range []string{"claude-code", "openai"} {
+	for _, key := range []string{"claude-code", "curl"} {
 		c, _ := Find(Clients(), key)
 		if c.Path != "" {
-			t.Errorf("%s names the file %q, but it is configured by environment variables",
+			t.Errorf("%s names the file %q, but it is run from the shell",
 				key, c.Path)
 		}
 	}

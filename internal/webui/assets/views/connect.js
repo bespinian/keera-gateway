@@ -333,7 +333,6 @@ async function addClient(ctx, catalogue, keys, button) {
 const clientMarks = {
   "claude-code": () => providerMark("anthropic"),
   codex: () => providerMark("openai"),
-  openai: () => providerMark("openai"),
   opencode: () => clientMark("opencode"),
   pi: () => clientMark("pi"),
 };

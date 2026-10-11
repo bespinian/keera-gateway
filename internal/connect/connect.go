@@ -166,8 +166,8 @@ func Find(clients []Client, key string) (Client, bool) {
 // everyone else.
 func Clients() []Client { return slices.Clone(clients) }
 
-// The last entry is the base URL and the key alone, which is all any other
-// OpenAI-compatible client needs.
+// The last entry is a plain request with cURL. Its address and key are all any
+// other OpenAI-compatible client needs.
 var clients = []Client{
 	{
 		Key:   "pi",
@@ -284,22 +284,19 @@ wire_api = "responses"`,
 			"starts with another of the models above.",
 	},
 	{
-		Key:   "openai",
-		Label: "Anything OpenAI-compatible",
-		About: "Any tool that takes an OpenAI base URL and key.",
-		// No file: where the two variables go depends on the client.
+		Key:   "curl",
+		Label: "cURL",
+		About: "A first request from the shell, over the OpenAI API.",
+		// No file: it is one command.
 		Lang: "sh",
-		Template: `# Keera Gateway speaks the OpenAI API. Most clients need only these two
-# settings and a model name. The key can use: {{aliases}}.
-export OPENAI_BASE_URL={{base}}/v1
-export OPENAI_API_KEY=$KEERA_API_KEY
-
-# Test it from the shell first:
-curl "$OPENAI_BASE_URL/chat/completions" \
-  -H "Authorization: Bearer $OPENAI_API_KEY" \
+		Template: `# Keera Gateway speaks the OpenAI API at {{base}}/v1.
+# The key can use: {{aliases}}.
+curl {{base}}/v1/chat/completions \
+  -H "Authorization: Bearer $KEERA_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"model":"{{alias}}","messages":[{"role":"user","content":"Hello"}]}'`,
-		Run: "Start anything that reads `OPENAI_BASE_URL` (the official SDKs, Aider, your " +
-			"own scripts) with one of the models above.",
+		Note: "Any other tool that takes an OpenAI base URL and key works the same way: " +
+			"use the address above that ends in `/v1`, the key, and one of the models above.",
+		Run: "Run it in a shell where `KEERA_API_KEY` is set. The answer comes back as JSON.",
 	},
 }
