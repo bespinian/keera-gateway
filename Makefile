@@ -247,17 +247,19 @@ TIER ?= cpu
 DEV_COMPOSE := -f compose/compose.yaml \
 	$(if $(filter gpu,$(TIER)),-f compose/compose.gpu.yaml) -f compose/compose.dev.yaml
 
-# The development catalogue is compose/models.yaml with the backend on
-# loopback: keera-engine resolves only inside the compose network, and here the
-# gateway runs on the host. `make dev` and `podman compose up` share one
-# database, so an organisation made under one keeps that one's address.
+# The development catalogue is compose/models.yaml with the backends on
+# loopback: keera-engine and keera-decider resolve only inside the compose
+# network, and here the gateway runs on the host. `make dev` and `podman
+# compose up` share one database, so an organisation made under one keeps
+# that one's address.
 DEV_MODELS := $(BUILD_DIR)/models.dev.yaml
 
 $(DEV_MODELS): compose/models.yaml
 	@mkdir -p $(@D)
-	@sed 's|http://keera-engine:8000/v1|http://127.0.0.1:8000/v1|' $< > $@.tmp
-	@grep -q 'http://127.0.0.1:8000/v1' $@.tmp || { \
-		echo "$< no longer names http://keera-engine:8000/v1; update DEV_MODELS in the Makefile" >&2; \
+	@sed -e 's|http://keera-engine:8000/v1|http://127.0.0.1:8000/v1|' \
+		-e 's|http://keera-decider:8000/v1|http://127.0.0.1:8001/v1|' $< > $@.tmp
+	@grep -q 'http://127.0.0.1:8000/v1' $@.tmp && grep -q 'http://127.0.0.1:8001/v1' $@.tmp || { \
+		echo "$< no longer names keera-engine:8000 and keera-decider:8000; update DEV_MODELS in the Makefile" >&2; \
 		rm -f $@.tmp; exit 1; }
 	@mv $@.tmp $@
 
@@ -337,7 +339,7 @@ dev-env:
 
 .PHONY: dev-backends
 dev-backends:
-	@$(COMPOSE) $(DEV_COMPOSE) up -d keera-db keera-engine
+	@$(COMPOSE) $(DEV_COMPOSE) up -d keera-db keera-engine keera-decider
 	@# A containerised gateway from an earlier `podman compose up` would still be
 	@# holding :8080, which air is about to want.
 	@$(COMPOSE) $(DEV_COMPOSE) stop keera-gateway >/dev/null 2>&1 || true

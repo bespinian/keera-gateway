@@ -29,6 +29,25 @@ models:
     input_micros_per_mtok: 0
     output_micros_per_mtok: 0
 
+  # Keera Decider: Laya, a classifier served by laya-serve. A decision model
+  # answers a question with a probability per answer and writes no text, so
+  # only routers and gate filters use it, and no client can name it. See
+  # docs/routers.md#decision-models.
+  - alias: keera-decider
+    kind: decision
+    backends:
+      - http://keera-decider:8000/v1
+    # The Laya checkpoint: english, multilingual or typed-decisions.
+    backend_model: english
+    # Sent to Laya as max_len, so it reads exactly what the gateway measured.
+    # On a CPU, 2048 tokens take about five seconds and 512 about one. A gate
+    # refuses a longer request, and a router sends it to its fallback.
+    max_context: 2048
+    description: >-
+      Decides, does not write. A classifier for routers and gate filters.
+    input_micros_per_mtok: 0
+    output_micros_per_mtok: 0
+
 # A hosted model, for the work a small local model cannot do - or for evaluating
 # one before there are GPUs to run anything on. `provider` fills in the endpoint,
 # the context window, the list prices, a description, the release date and the

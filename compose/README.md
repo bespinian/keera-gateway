@@ -1,7 +1,7 @@
 # Keera on podman compose
 
-Three containers on one host: Keera Gateway, an inference backend and Postgres.
-Use it on a single machine or a laptop.
+Four containers on one host: Keera Gateway, an inference backend, Keera
+Decider and Postgres. Use it on a single machine or a laptop.
 
 This is a **single-host development and demo deployment**. There is no TLS and
 no ingress. Port 8080 is bound to loopback until you change `KEERA_BIND`.
@@ -85,8 +85,8 @@ on the same card; the unquantised 14B needs a 48 GB card (g6e.xlarge).
 - **Port 8080 carries the panel, the control API and the inference API**
   ([gateway.md](../docs/gateway.md#one-listener-four-surfaces)). Put a TLS
   terminator in front before you change `KEERA_BIND`.
-- **Port 8000 is not published on purpose.** Neither vLLM's nor llama.cpp's
-  OpenAI server has authentication, so reaching one directly skips the
+- **Port 8000 is not published on purpose.** vLLM, llama.cpp and `laya-serve`
+  have no authentication by default, so reaching one directly skips the
   gateway's keys, budgets and audit. For the same reason the llama.cpp tier
   runs with `--no-webui`.
 - **`.env` reaches the gateway only through `compose.yaml`.** Compose passes
@@ -110,6 +110,26 @@ on the same card; the unquantised 14B needs a 48 GB card (g6e.xlarge).
   it; this works because vLLM's `/health` uses the same port and path as
   llama.cpp's. Only the scalar keys (`start_period` and similar) are safe to
   override.
+
+## Keera Decider
+
+`keera-decider` runs [Laya](https://huggingface.co/convaiinnovations/laya), a
+421M classifier, with its own server, `laya-serve`, on CPU. Laya publishes no
+image, so `decider/Containerfile` installs it. The first start downloads about
+0.8 GB into the `decider-cache` volume.
+
+It is a [decision model](../docs/routers.md#decision-models): routers and gate
+filters can decide with it, and it writes no text. For example:
+
+```sh
+keera router add auto --model keera-decider \
+  --destinations keera-speed,keera-frontier --fallback keera-speed \
+  --prompt "Which model should answer this request?"
+```
+
+`backend_model` in `models.yaml` picks the checkpoint: `english`,
+`multilingual` or `typed-decisions`. Add it to `LAYA_MODELS` in the
+Containerfile too, or `laya-serve` loads it on the first request.
 
 ## Sandboxes do not work in this shape
 

@@ -1,0 +1,16 @@
+# Keera Decider: Laya's own server, laya-serve, on CPU. Laya publishes no
+# image, so this installs it. The gateway speaks its /v1/systemone endpoint to
+# models of kind decision; see docs/routers.md#decision-models.
+FROM docker.io/library/python:3.12-slim
+
+# The CPU build of torch, so the image does not carry 3 GB of CUDA libraries
+# for a model that answers in a fifth of a second on a CPU.
+RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu \
+    torch==2.14.1+cpu "laya[serve]==0.4.1"
+
+ENV HF_HOME=/root/.cache/huggingface \
+    LAYA_DEVICE=cpu \
+    LAYA_PRELOAD=1 \
+    LAYA_MODELS=english
+EXPOSE 8000
+CMD ["laya-serve"]

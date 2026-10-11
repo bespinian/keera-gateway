@@ -218,6 +218,31 @@ services:
       retries: 6
       start_period: 120s
 
+  # Keera Decider: Laya, a 421M classifier, served by its own laya-serve. It
+  # answers routers and gate filters in one forward pass on a CPU, and writes
+  # no text. models.yaml lists it as a decision model. See
+  # docs/routers.md#decision-models.
+  #
+  # laya-serve has no authentication unless LAYA_API_KEY is set, so, like
+  # keera-engine, it is not published.
+  keera-decider:
+    build: decider
+    image: localhost/keera-decider:latest
+    restart: unless-stopped
+    volumes:
+      - decider-cache:/root/.cache/huggingface
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://localhost:8000/health")
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      # The first start downloads about 0.8 GB of weights.
+      start_period: 300s
+
   keera-db:
     # The major version is pinned: the volume is mounted where Postgres 18
     # keeps its data, and a new major cannot read an old one's files anyway.
@@ -238,3 +263,4 @@ services:
 volumes:
   llama-cache:
   pgdata:
+  decider-cache:
