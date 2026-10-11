@@ -6,9 +6,9 @@
 // under one chart has learned to read it everywhere.
 //
 // The two callers differ in one thing. An entity's screen arrives already
-// narrowed and offers no narrowing of its own; the Requests screen is narrowed
-// to nothing, so it carries the filters. Everything else, down to the dialog
-// behind a row's View button, is shared.
+// narrowed and offers only the outcome buttons; the Requests screen is narrowed
+// to nothing, so it carries the filters instead, status among them. Everything
+// else, down to the dialog behind a row's View button, is shared.
 
 import { api } from "../api.js";
 import {
@@ -59,22 +59,24 @@ const FRESH_MS = 4000;
  *
  *  `scope` is what the caller is already about ({ project_id }, { key_id },
  *  { alias }) and is fixed; `filters` asks for the narrowing controls, which
- *  only a screen with no scope of its own has any use for. `hide` drops the
- *  columns that would repeat the scope in every row.
+ *  only a screen with no scope of its own has any use for, in place of the
+ *  outcome buttons. `hide` drops the columns that would repeat the scope in
+ *  every row.
  *
  *  `title` is the heading over the section, which the screen that is nothing
  *  but this section passes empty - its own page title already says Requests,
- *  and the same word twice reads as two things. `lead` is whatever that screen
- *  puts where the heading was, which is its range picker.
+ *  and the same word twice reads as two things. `trail` is what that screen
+ *  puts at the right end of the controls, which is its range picker, where
+ *  the live map has it too.
  *
  *  `live` watches the log while it is on the screen, so a request recorded now
  *  appears now. It is asked for rather than assumed, because it costs an open
  *  connection for as long as the screen is up.
  *
- *  It leads with the counts by outcome rather than with the rows: "four
- *  hundred requests, two of them refused" and "four hundred requests, three
- *  hundred of them refused" are the same first page of a table and completely
- *  different afternoons. */
+ *  It leads with the counts, by outcome or by status, rather than with the
+ *  rows: "four hundred requests, two of them refused" and "four hundred
+ *  requests, three hundred of them refused" are the same first page of a table
+ *  and completely different afternoons. */
 export async function requestLog(
   ctx,
   {
@@ -83,12 +85,12 @@ export async function requestLog(
     hide = {},
     filters = false,
     title = "Requests",
-    lead = null,
+    trail = null,
     live = false,
   },
 ) {
-  const outcome = currentOutcome();
-  const narrowed = filters ? readNarrowing(ctx, { status: true }) : {};
+  const outcome = filters ? "" : currentOutcome();
+  const narrowed = filters ? readNarrowing(ctx) : {};
   const rank = ranking(ctx, SORT_KEY);
   // The scope wins over the narrowing: a project's own screen is about that project
   // whatever was last picked on the dashboard.
@@ -140,7 +142,7 @@ export async function requestLog(
 
   // The counts are held rather than only drawn, because the stream below sends
   // fresh ones with every batch of rows.
-  const seg = outcomeSeg(ctx, outcome, counts);
+  const seg = filters ? null : outcomeSeg(ctx, outcome, counts);
 
   // New rows arrive in time order, so a ranked log is not watched: a request
   // that just arrived has no place in a list of the most expensive ones until
@@ -166,10 +168,10 @@ export async function requestLog(
       "div",
       { class: "section-head" },
       title ? h("h2", {}, title) : null,
-      lead,
       h("div", { style: { flex: 1 } }),
-      seg.el,
+      seg ? seg.el : null,
       watch ? watch.el : null,
+      trail,
       h(
         "button",
         {
@@ -184,7 +186,7 @@ export async function requestLog(
   );
 
   if (filters) {
-    wrap.append(narrowRow(ctx, narrowed, facets, names, { status: true }));
+    wrap.append(narrowRow(ctx, narrowed, facets, names));
   }
 
   // Both empty states still watch. An empty log is the screen most likely to be
@@ -222,9 +224,9 @@ export async function requestLog(
         { class: "card" },
         empty(
           "Nothing matches this filter",
-          filters && anyNarrowed
-            ? "Nothing matches all the filters above. Clear some, pick a " +
-                "different outcome, or widen the range."
+          filters
+            ? "Nothing matches all the filters above. Clear some, or widen " +
+                "the range."
             : "Pick a different outcome above, or widen the range.",
         ),
       ),
@@ -337,7 +339,7 @@ export async function requestLog(
 
     function arrived(payload) {
       if (payload.next_after) listen.after = payload.next_after;
-      if (payload.outcomes) seg.retally(payload.outcomes);
+      if (seg && payload.outcomes) seg.retally(payload.outcomes);
       // Labels travel only when a row named something this screen opened too
       // early to know about - a key issued a minute ago, whose first request is
       // exactly what somebody is watching for.
@@ -556,10 +558,6 @@ export function requestTable(ctx, rows, names, currency, hide, opts = {}) {
   ].filter(Boolean);
 
   return table(columns, rows, {
-    search: (q) =>
-      `${q.alias} ${q.status} ${q.error || ""} ` +
-      `${names.keys[q.key_id] || q.key_id || ""} ${names.projects[q.project_id] || ""}`,
-    searchLabel: "these requests",
     emptyTitle: "Nothing here",
     // A row that arrived while the reader was looking at the screen. It is
     // marked rather than announced: the count above already changed, and what

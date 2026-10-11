@@ -146,7 +146,7 @@ export async function auditView(ctx) {
         "aria-label": "Action",
         onChange: (e) => set("action", e.target.value),
       },
-      h("option", { value: "" }, "Every action"),
+      h("option", { value: "" }, "All actions"),
       facets.actions.map((a) =>
         h("option", { value: a, selected: a === filter.action }, label(a)),
       ),

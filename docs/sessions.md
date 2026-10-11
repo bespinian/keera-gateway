@@ -156,24 +156,28 @@ it started.
 sees every session in the organisation. A member sees only the sessions of
 their own keys, and so do the live map and the request log.
 
-The screen starts with per-session figures for the window. Each is a median, with
-the maximum below it. Click **Cost**, **Tokens**, **Requests** or **Took** above
-the table to rank the whole window by it, highest first, and **Started** to go
-back to the newest first. The ranking is the point of the screen: the row worth
+Click **Cost**, **Tokens**, **Requests** or **Took** above the table to rank the
+whole window by it, highest first, and **Started** to go back to the newest
+first. The ranking is the point of the screen: the row worth
 reading is rarely the latest one.
 
 The Sessions and Requests screens filter and sort the same way, and a filter set
 on one carries over to the other:
 
-- **Outcome**: All, Served, Failed, Refused or Interrupted, each with its count.
-  On Sessions, Failed means the sessions with at least one failed request, and
+- **Model, project, key, person and status**: each lists only what occurs in
+  the window, with its count. Status takes one code, such as 402, or a group,
+  such as all 5XX. A session's status is the status of its last request, so
+  each session falls under one status.
+- **Outcome**: the request and session lists on a project's, key's or model's
+  page filter by All, Served, Failed, Refused or Interrupted instead. For
+  sessions, Failed means the sessions with at least one failed request, and
   Served the sessions where every request was served.
-- **Model, project, key and person**: each lists only what occurs in the window.
-  Requests can also be filtered by status.
 - **Sorting**: clicking a number column ranks the whole window on the server,
   not just the rows on screen. Requests rank by **Tokens**, **Cost** or **First
   token**. **Load more** and Requests' **Live** work only in time order, so a
   ranking shows the top 100. Narrow it to see others.
+- **Live**: with it on, the Sessions screen updates as requests arrive, every
+  few seconds at most, in any order.
 
 Opening a session shows its four numbers, every request in order, and a strip
 with one bar per request, sized by cost and coloured by outcome. Forty even bars is an
@@ -205,7 +209,8 @@ request in the task: that column, the first column of `keera failures`, or the
 
 `GET /control/v1/sessions` takes the same filters as the command, `key` to
 narrow it to one conversation, `outcome` (`ok`, `failed`, `refused`,
-`interrupted` or `unhappy`), and `sort` (`recent`, `cost`, `tokens`, `requests`
+`interrupted` or `unhappy`), `status` (the last request's status, such as
+`402`, or a class, such as `5xx`), and `sort` (`recent`, `cost`, `tokens`, `requests`
 or `duration`). `facets=1` adds the filter choices with their counts, as on
 `GET /control/v1/requests`, whose `sort` is `recent`, `cost`, `tokens` or `ttft`. `GET /control/v1/sessions/{id}` takes any request
 in the session. Both return `gap_seconds`, the gap used. `format=csv` on the

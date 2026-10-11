@@ -14,8 +14,9 @@ import { statusLabel } from "../status.js";
 // the failures cannot tell somebody that their agent's calls arrived and were
 // served, which half the time is the answer.
 //
-// On the session list a lens keeps the tasks holding at least one such
-// request, and "Served" the tasks where every request was.
+// On the session list of a project, key or model, a lens keeps the tasks
+// holding at least one such request, and "Served" the tasks where every
+// request was.
 const OUTCOMES = [
   { key: "", label: "All", of: (c) => c.total },
   { key: "ok", label: "Served", of: (c) => c.ok },
@@ -24,8 +25,9 @@ const OUTCOMES = [
   { key: "interrupted", label: "Interrupted", of: (c) => c.interrupted },
 ];
 
-// The outcome is remembered on its own, because it is the one lens an entity's
-// screen has too, and because the dashboard's failure count sets it directly.
+// The outcome is remembered on its own. Only the log and the session list on
+// a project's, key's or model's screen offer it; the Requests and Sessions
+// screens filter by status instead.
 const OUTCOME_KEY = "keera.log.outcome";
 
 // What a log can be narrowed by on a screen that carries the filters: the
@@ -34,38 +36,38 @@ const OUTCOME_KEY = "keera.log.outcome";
 // how its list is drawn. They are one list so that reading them, drawing them
 // and clearing them cannot fall out of step with each other.
 //
-// Status belongs to a request, so the session list has no status filter.
+// On the session list, a session's status is the status of its last request,
+// the one its "Ended" column shows.
 const NARROWINGS = [
-  { param: "alias", facet: "models", label: "Every model", aria: "Model" },
+  { param: "alias", facet: "models", label: "All models", aria: "Model" },
   {
     param: "project_id",
     facet: "projects",
-    label: "Every project",
+    label: "All projects",
     aria: "Project",
     name: (v, names) => names.projects[v] || v,
   },
   {
     param: "key_id",
     facet: "keys",
-    label: "Every key",
+    label: "All keys",
     aria: "Key",
     name: (v, names) => names.keys[v] || v,
   },
   {
     param: "user_id",
     facet: "users",
-    label: "Everyone",
+    label: "All users",
     aria: "User",
     name: (v, names) => names.users[v] || v,
   },
   {
     param: "status",
     facet: "statuses",
-    label: "Every status",
+    label: "All statuses",
     aria: "Status",
     name: statusFilterLabel,
     options: statusOptions,
-    requestsOnly: true,
   },
 ];
 
@@ -101,9 +103,8 @@ function statusFilterLabel(v) {
 // one of them is the whole class they meant, and a reader looking for the 402
 // should not have to scroll past the classes to find it.
 //
-// A class is listed only when the window holds something in it, which the
-// outcome lens above already narrows: under "Failed" there is nothing but 5XX,
-// and offering 4XX there would be offering a filter that selects nothing.
+// A class is listed only when the window holds something in it: offering 4XX
+// in a window without one would be offering a filter that selects nothing.
 function statusOptions(counts, selected) {
   const groups = STATUS_CLASSES.map((c) => ({
     ...c,
@@ -120,8 +121,8 @@ function statusOptions(counts, selected) {
       `${statusFilterLabel(c.value)} (${num(c.count)})`,
     ),
   );
-  // A status that is selected and no longer occurs - one picked under "All" and
-  // still selected under "Failed" - stays in the list and says so. A select
+  // A status that is selected and no longer occurs - one picked in a wider
+  // range - stays in the list and says so. A select
   // showing nothing selected is a filter nobody can see they have applied.
   if (
     selected &&
@@ -156,22 +157,20 @@ function statusOptions(counts, selected) {
 }
 
 /** narrowings is what this reader may narrow this log by. A member reads only
- *  their own requests, so "Everyone" would offer one person: them. */
-function narrowings(ctx, { status = false } = {}) {
+ *  their own requests, so "All users" would offer one person: them. */
+function narrowings(ctx) {
   return NARROWINGS.filter(
-    (n) =>
-      (n.param !== "user_id" || ctx.state.me.can_admin_org) &&
-      (status || !n.requestsOnly),
+    (n) => n.param !== "user_id" || ctx.state.me.can_admin_org,
   );
 }
 
 const narrowKey = (param) => "keera.log." + param;
 
 /** readNarrowing is what the reader last narrowed a log by, as query
- *  parameters. `status` asks for the status filter too. */
-export function readNarrowing(ctx, opts) {
+ *  parameters. */
+export function readNarrowing(ctx) {
   const out = {};
-  for (const n of narrowings(ctx, opts))
+  for (const n of narrowings(ctx))
     out[n.param] = sessionStorage.getItem(narrowKey(n.param)) || "";
   return out;
 }
@@ -180,23 +179,22 @@ function clearNarrowing() {
   for (const n of NARROWINGS) sessionStorage.removeItem(narrowKey(n.param));
 }
 
-/** setOutcome is the dashboard's failure count, and the failure pill on an
- *  entity's chart, pointing the log at the rows they counted - on this screen
- *  or on the one they send the reader to. */
+/** setOutcome is the failure pill on an entity's chart, pointing the log
+ *  below it at the rows it counted. */
 export function setOutcome(outcome) {
   sessionStorage.setItem(OUTCOME_KEY, outcome);
 }
 
-/** openFailed points the log at the failed rows and nothing else, for the
- *  dashboard's failure count.
+/** openFailed points the Requests screen at the server errors and nothing
+ *  else, for the dashboard's failure count, which counts the same 5XX rows.
  *
- *  It clears the narrowing where setOutcome leaves it alone. The count on that
- *  pill is over the whole organisation, and a model or a key still selected
- *  from somebody's last visit would put a smaller number under a pill that had
- *  just promised them a bigger one. */
+ *  It clears the rest of the narrowing. The count on that pill is over the
+ *  whole organisation, and a model or a key still selected from somebody's
+ *  last visit would put a smaller number under a pill that had just promised
+ *  them a bigger one. */
 export function openFailed() {
-  setOutcome("failed");
   clearNarrowing();
+  sessionStorage.setItem(narrowKey("status"), "5xx");
 }
 
 /** currentOutcome is which lens the log is being read through. */
@@ -250,12 +248,12 @@ export function outcomeSeg(ctx, outcome, counts) {
 /** narrowRow is the filters a screen with no scope of its own carries, and the
  *  Clear beside them once any is set.
  *
- *  The narrowing keeps what it has when the outcome or the range changes,
+ *  Each filter keeps what it has when another one or the range changes,
  *  because "now show me that project's failures" is the next thing somebody
- *  asks rather than a mistake. A selection that matches nothing under the new
- *  outcome says so below, and Clear is right beside it. */
-export function narrowRow(ctx, narrowed, facets, names, opts) {
-  const list = narrowings(ctx, opts);
+ *  asks rather than a mistake. A combination that matches nothing says so
+ *  below, and Clear is right beside it. */
+export function narrowRow(ctx, narrowed, facets, names) {
+  const list = narrowings(ctx);
   return h(
     "div",
     { class: "row", style: { margin: "12px 0", flexWrap: "wrap" } },
@@ -307,13 +305,17 @@ export function rankedNote(count, what) {
 // that made a request this week, and the other hundred and ninety-six are
 // something to search through.
 //
-// A value that is selected but no longer occurs - a model picked under "all"
-// and still selected under "failed" - is kept and marked, because a select
+// A value that is selected but no longer occurs - a model picked under one
+// status and still selected under another - is kept and marked, because a select
 // that silently shows nothing is a filter nobody can see they have applied.
+//
+// A filter with one value or none filters nothing, so it is left out, as on
+// every other list. One that is set stays, so it can be seen and cleared.
 //
 // A filter that groups its values draws its own list: the status one is the
 // only such filter, and it owns both halves of what it offers.
 function narrowSelect(ctx, n, selected, counts, names) {
+  if (!selected && counts.length < 2) return null;
   const label = (v) => (n.name ? n.name(v, names) : v);
   const options = n.options
     ? n.options(counts, selected)
@@ -339,7 +341,6 @@ function narrowSelect(ctx, n, selected, counts, names) {
       class: "select",
       style: { width: "auto" },
       "aria-label": n.aria,
-      disabled: options.length === 0,
       onChange: (e) => {
         sessionStorage.setItem(narrowKey(n.param), e.target.value);
         ctx.reload();

@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -490,8 +491,29 @@ func TestSessionsNarrowByOutcomeAndOfferWhatOccurred(t *testing.T) {
 	if len(facets.Users) != 2 || len(facets.Keys) != 1 || facets.Keys[0].Count != 3 {
 		t.Errorf("facets = %+v, want both people and the one key with 3 sessions", facets)
 	}
-	if facets.Statuses != nil {
-		t.Errorf("statuses = %+v, want none: a session has no single status", facets.Statuses)
+	// A session's status is how it ended, so the one that failed midway and
+	// then recovered counts under 200.
+	wantStatuses := []FacetCount{{"200", 2}, {"402", 1}}
+	if !slices.Equal(facets.Statuses, wantStatuses) {
+		t.Errorf("statuses = %+v, want %+v", facets.Statuses, wantStatuses)
+	}
+	for _, tc := range []struct {
+		status, class, want int
+	}{
+		{402, 0, 1},
+		{0, 2, 2},
+		{0, 5, 0},
+	} {
+		q := window
+		q.Status, q.StatusClass = tc.status, tc.class
+		got, err := st.AgentSessions(ctx, q)
+		if err != nil {
+			t.Fatalf("AgentSessions(status %d, class %d): %v", tc.status, tc.class, err)
+		}
+		if len(got) != tc.want {
+			t.Errorf("%d sessions ended with status %d / class %d, want %d",
+				len(got), tc.status, tc.class, tc.want)
+		}
 	}
 
 	// A member's choices are their own, whatever else is asked.

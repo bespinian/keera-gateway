@@ -51,6 +51,7 @@ func (s *Server) sessionQuery(w http.ResponseWriter, r *http.Request,
 		Gap:         s.opts.SessionGap,
 		Sort:        sort,
 	}
+	q.Status, q.StatusClass = parseStatus(v.Get("status"))
 	// Older keera commands ask for the sessions with problems this way.
 	if q.Outcome == store.OutcomeAny && httpx.Flag(v, "unhappy") {
 		q.Outcome = store.OutcomeUnhappy

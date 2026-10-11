@@ -6,10 +6,9 @@
 // number nobody can act on and "one franc twenty a task, eleven minutes,
 // forty-one calls" is what goes into a budget conversation.
 //
-// The screen leads with the totals and ranks by any of its numbers, not only
-// by time, because the row worth opening is never the most recent one: it is the task
-// that cost four francs, or the one that made four hundred calls and finished
-// nothing.
+// The screen ranks by any of its numbers, not only by time, because the row
+// worth opening is never the most recent one: it is the task that cost four
+// francs, or the one that made four hundred calls and finished nothing.
 //
 // A session is grouped, not stored. The gateway records a hash of the
 // conversation on every request and this screen cuts those into runs wherever
@@ -41,6 +40,7 @@ import {
   gone,
   sectionHead,
   isAdmin,
+  liveControl,
 } from "../ui.js";
 import { outcomeMeaning, outcomeOf, oneLine } from "../status.js";
 import { requestTable, showRequest } from "./requestlog.js";
@@ -56,6 +56,16 @@ import { toolCallTable } from "./tools.js";
 
 const PAGE = 100;
 
+// The most sessions a refresh asks for, which is the most the control plane
+// sends in one page.
+const MAX_ROWS = 5000;
+
+// How often a live screen asks for the sessions again, at most.
+const REFRESH_MS = 3000;
+
+// Whether the screen is watched, remembered apart from the request log's.
+const LIVE_KEY = "keera.sessions.live";
+
 // The ranking, remembered apart from the request log's, which offers others.
 const SORT_KEY = "keera.sessions.sort";
 
@@ -63,7 +73,6 @@ const NO_COUNTS = { total: 0, ok: 0, failed: 0, refused: 0, interrupted: 0 };
 
 export async function sessionsView(ctx) {
   const since = currentRange();
-  const outcome = currentOutcome();
   const narrowed = readNarrowing(ctx);
   const rank = ranking(ctx, SORT_KEY);
   const range = RANGES.find((r) => r.since === since);
@@ -74,13 +83,11 @@ export async function sessionsView(ctx) {
     since,
     limit: PAGE,
     sort: rank.by,
-    outcome,
     ...narrowed,
     facets: "1",
   };
   const res = await api.sessions(params);
   const rows = res.data || [];
-  const totals = res.totals || {};
   const currency = res.currency || ctx.currency;
   const names = {
     keys: res.key_names || {},
@@ -89,32 +96,42 @@ export async function sessionsView(ctx) {
   };
   const anyNarrowed = Object.values(narrowed).some(Boolean);
 
+  const watch = liveControl({
+    key: LIVE_KEY,
+    label: "Watch for new sessions",
+    titles: {
+      live: "Live: sessions update as requests arrive. Click to stop.",
+      connecting: "Reconnecting to the request log. Click to stop watching.",
+      paused: "Paused. Click to see sessions update live.",
+      stopped:
+        "The stream stopped and could not reconnect. Click to try again, " +
+        "or reload the page.",
+    },
+  });
+
   const wrap = h("div", {});
 
   wrap.append(
     h(
       "div",
       { class: "section-head" },
-      rangePicker(ctx, since),
       h("div", { style: { flex: 1 } }),
-      outcomeSeg(ctx, outcome, totals.outcomes || NO_COUNTS).el,
+      watch.el,
+      rangePicker(ctx, since),
       csvButton(params),
     ),
     narrowRow(ctx, narrowed, res.filters || {}, names),
   );
-
-  wrap.append(totalTiles(totals, currency));
 
   if (!rows.length) {
     wrap.append(
       h(
         "div",
         { class: "card", style: { marginTop: "16px" } },
-        outcome || anyNarrowed
+        anyNarrowed
           ? empty(
               "No sessions match these filters",
-              "Clear some filters, pick a different outcome, or widen the " +
-                "range.",
+              "Clear some filters or widen the range.",
             )
           : empty(
               "No sessions in this window",
@@ -125,23 +142,120 @@ export async function sessionsView(ctx) {
       ),
     );
     wrap.append(hint(res.gap_seconds));
+    // There is no table to update, so the first session redraws the screen.
+    // A request outside any session, such as an embedding, does not.
+    follow(ctx, watch, since, narrowed, async () => {
+      const next = await api.sessions({ ...params, facets: "" });
+      if ((next.data || []).length) ctx.reload();
+    });
     return wrap;
   }
 
-  wrap.append(
-    h(
-      "div",
-      { style: { marginTop: "16px" } },
-      sessionTable(ctx, rows, names, currency, {}, rank),
-    ),
-  );
-  wrap.append(
-    more(params, res, rows, rank, (page) =>
-      sessionTable(ctx, page, names, currency, {}, rank),
-    ),
-  );
+  const list = sessionTable(ctx, rows, names, currency, {}, rank);
+  const tail = h("div", {}, more(params, rows, rank, list));
+  wrap.append(h("div", { style: { marginTop: "16px" } }, list), tail);
   wrap.append(hint(res.gap_seconds));
+
+  follow(ctx, watch, since, narrowed, async () => {
+    // Ask again for as many sessions as are on the screen, so a reader who
+    // loaded more pages keeps them.
+    const limit =
+      rank.by === "" ? Math.min(Math.max(rows.length, PAGE), MAX_ROWS) : PAGE;
+    const next = await api.sessions({ ...params, limit, facets: "" });
+    Object.assign(names.keys, next.key_names || {});
+    Object.assign(names.projects, next.project_names || {});
+    Object.assign(names.users, next.user_names || {});
+    rows.splice(0, rows.length, ...(next.data || []));
+    list.redraw();
+    tail.replaceChildren(...[more(params, rows, rank, list)].filter(Boolean));
+  });
   return wrap;
+}
+
+// follow runs update whenever a request is recorded that could change what
+// this screen shows.
+//
+// A session is not stored, so there is nothing to stream. The request stream
+// says when to look again, and update asks the control plane for the sessions,
+// which also keeps any ranking right. It runs at most once every REFRESH_MS,
+// so an agent making a call a second costs one query per interval, not one per
+// call.
+function follow(ctx, watch, since, narrowed, update) {
+  // The status is left out: a new request can move a session into or out of a
+  // status, so the stream must see requests of every status.
+  const listen = { org_id: ctx.orgID, since, ...narrowed, status: "" };
+
+  let source = null;
+  let gone = false;
+  let busy = false;
+  let again = false;
+  const close = () => {
+    if (source) source.close();
+    source = null;
+  };
+  ctx.onTeardown(() => {
+    gone = true;
+    close();
+  });
+
+  async function refresh() {
+    if (gone) return;
+    if (busy) {
+      again = true;
+      return;
+    }
+    busy = true;
+    try {
+      await update();
+    } catch {
+      // What is on the screen stays. The next request tries again.
+    }
+    setTimeout(() => {
+      busy = false;
+      if (again) {
+        again = false;
+        refresh();
+      }
+    }, REFRESH_MS);
+  }
+
+  const open = () => {
+    close();
+    watch.state("connecting");
+    // The stream starts at the end of the log. Requests made while it was
+    // closed are picked up by the refresh once it is open again.
+    let first = true;
+    source = api.requestStream(listen);
+    source.addEventListener("requests", (e) => {
+      watch.state("live");
+      if ((JSON.parse(e.data).data || []).length) refresh();
+    });
+    source.addEventListener("open", () => {
+      watch.state("live");
+      if (!first) refresh();
+      first = false;
+    });
+    source.addEventListener("error", () => {
+      watch.state(
+        source && source.readyState === EventSource.CLOSED
+          ? "stopped"
+          : "connecting",
+      );
+    });
+  };
+
+  watch.onChange((on) => {
+    if (!on) {
+      close();
+      watch.state("paused");
+      return;
+    }
+    // A reader who turns Live back on wants what happened while it was off.
+    open();
+    refresh();
+  });
+  if (watch.on) open();
+  else watch.state("paused");
 }
 
 /** sessionLog is the session list for one project, key or model, drawn below
@@ -219,17 +333,10 @@ export async function sessionLog(ctx, { scope = {}, since, hide = {} }) {
     return wrap;
   }
 
+  const list = sessionTable(ctx, rows, names, currency, hide, rank);
   wrap.append(
-    h(
-      "div",
-      { style: { marginTop: "12px" } },
-      sessionTable(ctx, rows, names, currency, hide, rank),
-    ),
-  );
-  wrap.append(
-    more(params, res, rows, rank, (page) =>
-      sessionTable(ctx, page, names, currency, hide, rank),
-    ),
+    h("div", { style: { marginTop: "12px" } }, list),
+    more(params, rows, rank, list),
   );
   return wrap;
 }
@@ -239,10 +346,10 @@ export async function sessionLog(ctx, { scope = {}, since, hide = {} }) {
 // window keeps what they have already read on the screen. Under a ranking the
 // cursor would be a cursor over another order, and whoever ranked by cost
 // wanted the top of that list.
-function more(params, res, rows, rank, render) {
+function more(params, rows, rank, list) {
   if (rows.length < PAGE) return null;
   if (rank.by !== "") return rankedNote(PAGE, "sessions");
-  return pager(params, res, render);
+  return pager(params, rows, list);
 }
 
 function csvButton(params) {
@@ -258,9 +365,10 @@ function csvButton(params) {
   );
 }
 
-// pager loads the next page and draws it above itself.
-function pager(params, res, render) {
-  let before = res.next_before;
+// pager loads the next page into the table above it. The cursor is the
+// oldest session on the screen, which is also what the control plane would
+// have sent as next_before.
+function pager(params, rows, list) {
   const moreWrap = h("div", {
     style: { marginTop: "12px", textAlign: "center" },
   });
@@ -272,10 +380,11 @@ function pager(params, res, render) {
         more.disabled = true;
         more.textContent = "Loading…";
         try {
+          const before = rows[rows.length - 1].id;
           const next = await api.sessions({ ...params, before });
           const page = next.data || [];
-          moreWrap.before(render(page));
-          before = next.next_before;
+          rows.push(...page);
+          list.redraw();
           if (page.length < PAGE) {
             moreWrap.replaceChildren(
               h("div", { class: "hint" }, "That is the whole window."),
@@ -294,49 +403,6 @@ function pager(params, res, render) {
   );
   moreWrap.append(more);
   return moreWrap;
-}
-
-// totalTiles is what the window amounts to, per task.
-//
-// Every figure here is a median rather than a mean, and the maximum is written
-// under it. A window holding one task that made four hundred calls has an
-// average that describes none of the other thirty-nine, and the pair - the
-// ordinary task, and how far the worst one went - is what says whether there is
-// anything on this screen worth opening.
-function totalTiles(t, currency) {
-  const tasks = t.sessions || 0;
-  return h(
-    "div",
-    { class: "grid grid-4" },
-    stat(
-      "Sessions",
-      compact(tasks),
-      null,
-      t.unhappy ? `${num(t.unhappy)} with problems` : "none with problems",
-    ),
-    stat(
-      "Spend",
-      money(t.cost_micros, ""),
-      currency,
-      tasks ? `${money(t.median_cost_micros, "")} median per session` : null,
-    ),
-    stat(
-      "Requests per session",
-      num(t.median_requests),
-      null,
-      tasks
-        ? `longest ${num(t.longest_requests)} · ${compact(t.requests)} in all`
-        : null,
-    ),
-    stat(
-      "Time per session",
-      duration(t.median_duration_ms),
-      null,
-      tasks
-        ? `${compact(t.input_tokens + t.output_tokens)} tokens in all`
-        : null,
-    ),
-  );
 }
 
 function sessionTable(ctx, rows, names, currency, hide, rank) {
@@ -503,11 +569,6 @@ function sessionTable(ctx, rows, names, currency, hide, rank) {
   ];
 
   return table(columns.filter(Boolean), rows, {
-    search: (a) =>
-      `${a.key} ${(a.models || []).join(" ")} ${a.last_error || ""} ` +
-      `${names.users[a.user_id] || ""} ${names.keys[a.key_id] || a.key_id || ""} ` +
-      `${names.projects[a.project_id] || ""}`,
-    searchLabel: "these sessions",
     rank,
     emptyTitle: "Nothing here",
   });
@@ -760,7 +821,14 @@ export async function sessionDetailView(ctx) {
           names,
           currency,
           { key: true, project: true },
-          { sortBy: "When", sortDir: "asc" },
+          {
+            sortBy: "When",
+            sortDir: "asc",
+            // The log has filters on the server. A session is loaded whole, so
+            // searching it here sees every request it made.
+            search: (q) => `${q.alias} ${q.status} ${q.error || ""}`,
+            searchLabel: "these requests",
+          },
         ),
       ),
     ),

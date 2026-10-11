@@ -191,6 +191,11 @@ type AgentSessionQuery struct {
 	// Outcome keeps the sessions holding at least one request with that
 	// outcome. OutcomeOK keeps those where every request was served.
 	Outcome Outcome
+	// Status and StatusClass match how the session ended: the status of its
+	// last request, exactly or by its first digit. Unlike the outcome, this
+	// puts each session under one value only.
+	Status      int
+	StatusClass int
 
 	From time.Time
 	To   time.Time
@@ -228,8 +233,8 @@ func (q *AgentSessionQuery) setDefaults() {
 // `ev` avoids a second column list to keep in step with requestColumns.
 //
 // It takes $1..$9: org, from, to, gap seconds, key, project, user, key id and
-// alias. What follows it supplies its own parameters from $10 on, and reads the
-// outcome from sessionOutcomes on `grouped`.
+// alias. matched takes $10 and $11, the status filters. What follows supplies
+// its own parameters from $12 on.
 var sessionCTE = `
 	WITH ev AS (
 	    SELECT *, EXTRACT(EPOCH FROM (ts - lag(ts)
@@ -292,17 +297,21 @@ var sessionOutcomes = map[Outcome]string{
 	OutcomeInterrupted: "interrupted > 0",
 }
 
-// matched is the sessions of q's outcome, as one more CTE after sessionCTE.
+// matched is the sessions of q's outcome and status, as one more CTE after
+// sessionCTE.
 func (q AgentSessionQuery) matched() string {
 	cond, ok := sessionOutcomes[q.Outcome]
 	if !ok {
 		cond = sessionOutcomes[OutcomeAny]
 	}
 	return `,
-	matched AS (SELECT * FROM grouped WHERE ` + cond + `)`
+	matched AS (SELECT * FROM grouped WHERE ` + cond + `
+	    AND ($10 = 0 OR last_status = $10)
+	    AND ($11 = 0 OR last_status / 100 = $11))`
 }
 
-// args returns the nine values sessionCTE reads, in the order it numbers them.
+// args returns the values sessionCTE and matched read, in the order they
+// number them.
 // The holder takes the place of the person: a member who names anybody else
 // is refused before the query is built.
 func (q AgentSessionQuery) args() []any {
@@ -311,7 +320,7 @@ func (q AgentSessionQuery) args() []any {
 		user = q.Holder
 	}
 	return []any{q.OrgID, nullableTime(q.From), nullableTime(q.To), q.Gap.Seconds(),
-		q.Key, q.ProjectID, user, q.KeyID, q.Alias}
+		q.Key, q.ProjectID, user, q.KeyID, q.Alias, q.Status, q.StatusClass}
 }
 
 func scanAgentSession(r row) (AgentSession, error) {
@@ -336,9 +345,9 @@ func (s *Store) AgentSessions(ctx context.Context, q AgentSessionQuery) ([]Agent
 		       interrupted, input_tokens, output_tokens, cost_micros,
 		       ttft_median_ms, models, project_id, user_id, key_id, last_status, last_error
 		FROM matched
-		WHERE ($10 = 0 OR id < $10)
+		WHERE ($12 = 0 OR id < $12)
 		ORDER BY `+sessionOrder[q.Sort]+`
-		LIMIT $11`,
+		LIMIT $13`,
 		append(q.args(), q.Before, q.Limit)...)
 }
 
@@ -403,9 +412,9 @@ func (s *Store) AgentSessionSummary(ctx context.Context,
 	return t, err
 }
 
-// AgentSessionFilters counts the sessions in the window by model, key, project
-// and person, as RequestFilters counts the requests. A session that used two
-// models counts under both.
+// AgentSessionFilters counts the sessions in the window by model, key, project,
+// person and last status, as RequestFilters counts the requests. A session that
+// used two models counts under both.
 //
 // Only the tenant, the holder, the outcome and the time bounds of q are read,
 // so the screen still offers the other values after one is picked.
@@ -413,11 +422,13 @@ func (s *Store) AgentSessionFilters(ctx context.Context,
 	q AgentSessionQuery) (RequestFacets, error) {
 	q.setDefaults()
 	q.ReportScope = ReportScope{}
+	q.Status, q.StatusClass = 0, 0
 	f := RequestFacets{
 		Models:   []FacetCount{},
 		Keys:     []FacetCount{},
 		Projects: []FacetCount{},
 		Users:    []FacetCount{},
+		Statuses: []FacetCount{},
 	}
 	rows, err := s.pool.Query(ctx, sessionCTE+q.matched()+`
 		SELECT 'model' AS facet, m AS value, count(*) FROM matched, unnest(models) AS m
@@ -428,6 +439,8 @@ func (s *Store) AgentSessionFilters(ctx context.Context,
 		SELECT 'project', project_id, count(*) FROM matched WHERE project_id <> '' GROUP BY project_id
 		UNION ALL
 		SELECT 'user', user_id, count(*) FROM matched WHERE user_id <> '' GROUP BY user_id
+		UNION ALL
+		SELECT 'status', last_status::text, count(*) FROM matched GROUP BY last_status
 		ORDER BY facet, 3 DESC, value`, q.args()...)
 	if err != nil {
 		return f, err

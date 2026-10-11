@@ -271,7 +271,7 @@ func readFacets(rows pgx.Rows, add func(facet string, c FacetCount)) error {
 // so only values that made requests are offered.
 //
 // There is no total: the outcome counts already carry one. The session list
-// reads the same facets but statuses, which belong to a request.
+// reads the same facets, with each session's last status as its status.
 type RequestFacets struct {
 	Models   []FacetCount `json:"models"`
 	Keys     []FacetCount `json:"keys"`

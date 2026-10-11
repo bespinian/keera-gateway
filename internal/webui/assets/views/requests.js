@@ -14,7 +14,7 @@
 
 import { h, RANGES, currentRange, rangePicker } from "../ui.js";
 import { requestLog } from "./requestlog.js";
-import { currentOutcome } from "./logfilters.js";
+import { readNarrowing } from "./logfilters.js";
 
 export async function requestsView(ctx) {
   const since = currentRange();
@@ -29,10 +29,10 @@ export async function requestsView(ctx) {
     // reloading every few seconds to learn that is a reader polling the
     // deployment by hand.
     live: true,
-    // The page title already says Requests. The heading's place goes to the
-    // range picker, which is the one control the section does not own.
+    // The page title already says Requests. The range picker is the one
+    // control the section does not own.
     title: "",
-    lead: rangePicker(ctx, since),
+    trail: rangePicker(ctx, since),
   });
   // The section is written to sit under a chart. Here it is the screen.
   log.style.marginTop = "0";
@@ -44,38 +44,34 @@ export async function requestsView(ctx) {
     h(
       "div",
       { class: "hint", style: { marginTop: "16px" } },
-      advice(currentOutcome()),
+      advice(readNarrowing(ctx).status),
     ),
   );
 }
 
-// advice is what to do with what is on the screen. Each of these is a different
-// person's problem, and the log is the only place that ever says whose.
-function advice(outcome) {
-  switch (outcome) {
-    case "ok":
+// advice is what to do with what is on the screen, by the class of the status
+// filtered to. Each of these is a different person's problem, and the log is
+// the only place that ever says whose.
+function advice(status) {
+  switch ((status || "").charAt(0)) {
+    case "2":
       return (
         "Forwarded and answered. Look for slow first tokens, or keys that " +
-        "spend more than expected."
+        "spend more than expected. A row marked Interrupted stopped while " +
+        "streaming: usually the client hung up, which needs no action."
       );
-    case "failed":
+    case "5":
       return (
         "The request got a 5xx: the backend did not answer, or the gateway " +
         "had nowhere to send it. Each row shows the message. If only one " +
         "model fails, look at its backends."
       );
-    case "refused":
+    case "4":
       return (
         "The request got a 4xx. Mostly a guardrail stopped it: change the " +
         "budget or rate limit on the project or key, or tell the developer which " +
         "model to use. A 400 or 413 is a request that could not be taken; " +
         "each row shows why."
-      );
-    case "interrupted":
-      return (
-        "The answer stopped while streaming. Usually the client hung up, " +
-        "which needs no action. If one model keeps doing this, its backend is " +
-        "dropping connections."
       );
     default:
       return (
