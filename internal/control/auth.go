@@ -31,8 +31,8 @@ const loginCookie = "keera_login"
 // it never matches a real person.
 const operatorKeyExternalID = authn.ReservedProvider + ":operator-key"
 
-// authConfig tells the panel how to offer signing in, before anybody has.
-func (s *Server) authConfig(w http.ResponseWriter, _ *http.Request) {
+// providerList names the configured identity providers for the panel.
+func (s *Server) providerList() []map[string]any {
 	providers := make([]map[string]any, 0, len(s.opts.Providers))
 	for _, p := range s.opts.Providers {
 		providers = append(providers, map[string]any{
@@ -41,10 +41,15 @@ func (s *Server) authConfig(w http.ResponseWriter, _ *http.Request) {
 			"signup": p.SignUp(),
 		})
 	}
+	return providers
+}
+
+// authConfig tells the panel how to offer signing in, before anybody has.
+func (s *Server) authConfig(w http.ResponseWriter, _ *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"sso": s.opts.Providers.Enabled(),
 		// One button per provider.
-		"providers": providers,
+		"providers": s.providerList(),
 		"passkeys":  s.opts.Passkeys != nil,
 	})
 }
@@ -516,6 +521,8 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request, p *authn.Principal) 
 		"currency":            s.opts.Currency,
 		"csrf":                p.CSRF,
 		"sso":                 s.opts.Providers.Enabled(),
+		// So the Users screen can name the provider each person signs in with.
+		"providers": s.providerList(),
 		// True when a directory group decides roles. The panel then shows
 		// roles instead of offering to change them.
 		"roles_from_directory": s.opts.Providers.AdminFromDirectory(),

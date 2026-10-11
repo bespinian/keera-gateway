@@ -16,6 +16,7 @@ import {
   plural,
   field,
   rowLink,
+  idpMark,
 } from "../ui.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
 import { userPasskeys, showPasskeyLink } from "./passkeys.js";
@@ -82,6 +83,23 @@ export function signsInWith(u) {
   return "not linked to an identity yet";
 }
 
+/** identityProvider is the logo and name of where a person signs in, or
+ *  null before they are linked to an identity. */
+function identityProvider(me, u) {
+  if (isPasskeyAccount(u)) return [passkeyMark(), "Passkey"];
+  // The provider is the part of the external ID before the first colon.
+  const name = (u.external_id || "").split(":")[0];
+  if (!name || name === "keera") return null;
+  const p = (me.providers || []).find((x) => x.name === name);
+  return [idpMark(name), p ? p.label : name];
+}
+
+function passkeyMark() {
+  const svg = icon(icons.passkey);
+  svg.classList.add("provider-mark");
+  return svg;
+}
+
 export async function peopleView(ctx) {
   const canOperate = ctx.state.me.unrestricted;
   if (!ctx.orgID && canOperate) return chooseOrg(ctx, "Users");
@@ -138,6 +156,20 @@ export async function peopleView(ctx) {
               signsInWith(u),
             ),
           ),
+      },
+      {
+        label: "Identity provider",
+        shrink: true,
+        sortKey: (u) => {
+          const p = identityProvider(ctx.state.me, u);
+          return p ? p[1] : null;
+        },
+        cell: (u) => {
+          const p = identityProvider(ctx.state.me, u);
+          return p
+            ? h("span", { class: "row nowrap", style: { gap: "6px" } }, ...p)
+            : h("span", { class: "faint" }, "-");
+        },
       },
       {
         // Widest role first: the question asked of this screen is who has more
@@ -232,6 +264,7 @@ export async function peopleView(ctx) {
         [
           u.email,
           u.external_id || "",
+          (identityProvider(ctx.state.me, u) || [])[1] || "",
           roleLabel(u.role),
           u.disabled_at ? "disabled" : "",
         ].join(" "),
