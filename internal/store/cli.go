@@ -43,10 +43,13 @@ type CLITokenUser struct {
 	Directory Directory
 }
 
-// CreateCLIToken stores a token under its hash.
+// CreateCLIToken stores a token under its hash, and notes that its person
+// signed in.
 func (s *Store) CreateCLIToken(ctx context.Context, hash []byte, userID string,
 	expires time.Time) error {
-	_, err := s.pool.Exec(ctx, `INSERT INTO cli_tokens (id, user_id, expires_at)
+	_, err := s.pool.Exec(ctx, `WITH signed_in AS (
+			UPDATE users SET signed_in_at = now() WHERE id = $2)
+		INSERT INTO cli_tokens (id, user_id, expires_at)
 		VALUES ($1,$2,$3)`, hash, userID, expires)
 	return err
 }

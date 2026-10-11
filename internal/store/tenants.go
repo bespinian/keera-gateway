@@ -54,6 +54,9 @@ type User struct {
 	// DisabledAt is when this person was turned off. A disabled person cannot
 	// sign in and has no working key.
 	DisabledAt *time.Time `json:"disabled_at,omitempty"`
+	// LastActiveAt is the later of this person's last sign-in and their last
+	// request through one of their keys. Only ListUsers fills it in.
+	LastActiveAt *time.Time `json:"last_active_at,omitempty"`
 }
 
 // Disabled reports whether this person has been turned off.
@@ -485,8 +488,15 @@ func (s *Store) AddUser(ctx context.Context, newID, orgID, email, externalID, ro
 // ListUsers returns the users of one org. An empty orgID means every
 // organisation, as for projects.
 func (s *Store) ListUsers(ctx context.Context, orgID string) ([]User, error) {
-	return queryAll(ctx, s.pool, scanUser, `SELECT `+userColumns+`
-		FROM users WHERE ($1 = '' OR org_id = $1) ORDER BY email`, orgID)
+	// GREATEST skips nulls, so either one alone is enough. usage_events is
+	// indexed on (user_id, ts), so the newest request is one index read.
+	return queryAll(ctx, s.pool, func(r row) (User, error) {
+		var u User
+		err := r.Scan(append(userTargets(&u), &u.LastActiveAt)...)
+		return u, err
+	}, `SELECT `+userColumnsOf("u.")+`, GREATEST(u.signed_in_at,
+			(SELECT max(e.ts) FROM usage_events e WHERE e.user_id = u.id))
+		FROM users u WHERE ($1 = '' OR u.org_id = $1) ORDER BY u.email`, orgID)
 }
 
 // DisableUser turns a person off: it revokes every key attributed to them,

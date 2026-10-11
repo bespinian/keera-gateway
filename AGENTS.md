@@ -81,6 +81,11 @@ Run `make check` before handing work back.
 - Tests live beside the code. Tests that need Postgres or Redis skip without
   `KEERA_TEST_DATABASE_URL` / `KEERA_TEST_REDIS_URL`.
 - Secrets are never logged and keys are never stored in plaintext.
+- `internal/store/migrations` holds one file per release that changes the
+  schema, such as `0002_v0.5.0.sql`. A schema change goes in the file of the
+  next release, which is created with the first change. Once a release has
+  shipped, its file is never edited: the gateway runs each file once and
+  remembers it by name.
 - The CLI paints its output only when the stream is a terminal, and the words
   say the same thing without the colour. Paint through `style`/`styleErr` in
   `internal/cli/style.go`, and write table rows to `*table`, which measures a

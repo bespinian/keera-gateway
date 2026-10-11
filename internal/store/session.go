@@ -15,10 +15,13 @@ type Session struct {
 	ExpiresAt time.Time
 }
 
-// CreateSession stores a session under the hash of its cookie value.
+// CreateSession stores a session under the hash of its cookie value, and
+// notes that its person signed in.
 func (s *Store) CreateSession(ctx context.Context, hash []byte, userID, csrf string,
 	expires time.Time) error {
-	_, err := s.pool.Exec(ctx, `INSERT INTO sessions (id, user_id, csrf, expires_at)
+	_, err := s.pool.Exec(ctx, `WITH signed_in AS (
+			UPDATE users SET signed_in_at = now() WHERE id = $2)
+		INSERT INTO sessions (id, user_id, csrf, expires_at)
 		VALUES ($1,$2,$3,$4)`, hash, userID, csrf, expires)
 	return err
 }

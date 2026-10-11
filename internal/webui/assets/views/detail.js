@@ -561,6 +561,21 @@ export async function userDetailView(ctx) {
               date(user.created_at),
             ),
           ],
+          [
+            "Last active",
+            user.last_active_at
+              ? h(
+                  "span",
+                  {
+                    class: "muted",
+                    title:
+                      dateTime(user.last_active_at) +
+                      " - last sign-in or request through one of their keys",
+                  },
+                  ago(user.last_active_at),
+                )
+              : h("span", { class: "faint" }, "never"),
+          ],
           user.disabled_at
             ? [
                 "Disabled",

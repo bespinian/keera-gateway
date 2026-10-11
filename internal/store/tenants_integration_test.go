@@ -481,3 +481,61 @@ func TestAKeyWithoutAProjectGoesInTheOldestOne(t *testing.T) {
 		t.Errorf("CreateKey with no projects = %v, want ErrNoProject", err)
 	}
 }
+
+func TestListUsersSaysWhenEachPersonWasLastActive(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+
+	idle, err := st.AddUser(ctx, "user_idle", f.orgID, "idle@example.ch", "", "member")
+	if err != nil {
+		t.Fatalf("AddUser: %v", err)
+	}
+	busy, err := st.AddUser(ctx, "user_busy", f.orgID, "busy@example.ch", "", "member")
+	if err != nil {
+		t.Fatalf("AddUser: %v", err)
+	}
+	if err := st.CreateCLIToken(ctx, []byte("cli-token-hash-00000000000000001"), busy.ID,
+		time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("CreateCLIToken: %v", err)
+	}
+	// A request after the sign-in is the later of the two, so it is what shows.
+	later := time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond)
+	if err := st.WriteEvents(ctx, []Event{{TS: later, OrgID: f.orgID, ProjectID: f.projectID,
+		UserID: busy.ID, KeyID: f.keyID, Alias: "keera-code", Status: 200}}); err != nil {
+		t.Fatalf("WriteEvents: %v", err)
+	}
+
+	users, err := st.ListUsers(ctx, f.orgID)
+	if err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+	for _, u := range users {
+		switch u.ID {
+		case idle.ID:
+			if u.LastActiveAt != nil {
+				t.Errorf("someone who never signed in or sent anything was active at %v",
+					u.LastActiveAt)
+			}
+		case busy.ID:
+			if u.LastActiveAt == nil || !u.LastActiveAt.Equal(later) {
+				t.Errorf("last active = %v, want their latest request at %v",
+					u.LastActiveAt, later)
+			}
+		}
+	}
+
+	// Signing in alone counts too.
+	if err := st.CreateSession(ctx, []byte("session-hash-000000000000000009!"), idle.ID, "csrf",
+		time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	users, err = st.ListUsers(ctx, f.orgID)
+	if err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+	for _, u := range users {
+		if u.ID == idle.ID && u.LastActiveAt == nil {
+			t.Error("a sign-in to the panel did not count as activity")
+		}
+	}
+}

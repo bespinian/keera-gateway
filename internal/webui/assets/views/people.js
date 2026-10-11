@@ -180,6 +180,28 @@ export async function peopleView(ctx) {
         cell: (u) => pill(roleLabel(u.role), TONE[u.role] || ""),
       },
       {
+        // The later of their last sign-in and their last request through one
+        // of their keys: an agent working all week counts, not only the panel.
+        label: "Last active",
+        shrink: true,
+        sortKey: (u) =>
+          u.last_active_at ? new Date(u.last_active_at).getTime() : null,
+        sortDir: "desc",
+        cell: (u) =>
+          u.last_active_at
+            ? h(
+                "span",
+                {
+                  class: "muted nowrap",
+                  title:
+                    dateTime(u.last_active_at) +
+                    " - last sign-in or request through one of their keys",
+                },
+                ago(u.last_active_at),
+              )
+            : h("span", { class: "faint nowrap" }, "never"),
+      },
+      {
         label: "Added",
         shrink: true,
         sortKey: (u) =>
