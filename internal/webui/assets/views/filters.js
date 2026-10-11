@@ -69,7 +69,7 @@ export async function filtersView(ctx) {
   const currency = res.currency || ctx.currency;
   // A subscription model only answers its caller's own sign-in, so nothing
   // can run on it.
-  const chatModels = models.filter((m) => m.kind === "chat" && !m.subscription);
+  const readers = models.filter(canRun);
   const canEdit = isAdmin(ctx);
   ctx.setSubtitle(`${filters.length} ${plural(filters.length, "filter")}`);
 
@@ -82,7 +82,7 @@ export async function filtersView(ctx) {
     [rangePicker(ctx, since)],
     canEdit && {
       label: "Create filter",
-      onClick: () => editFilter(ctx, null, chatModels),
+      onClick: () => editFilter(ctx, null, readers),
     },
   );
 
@@ -157,7 +157,7 @@ export async function filtersView(ctx) {
           canEdit
             ? rowActions(ctx, f.alias, {
                 editTitle: "Edit this filter",
-                onEdit: () => editFilter(ctx, f, chatModels),
+                onEdit: () => editFilter(ctx, f, readers),
                 deleteTitle: "Delete this filter",
                 body:
                   "A filter still used by a guardrail cannot be deleted. " +
@@ -547,15 +547,11 @@ export async function filterDetailView(ctx) {
                 title: "Edit this filter",
                 "aria-label": `Edit ${f.alias}`,
                 onClick: () =>
-                  api.models(ctx.orgID).then((r) =>
-                    editFilter(
-                      ctx,
-                      f,
-                      (r.data || []).filter(
-                        (m) => m.kind === "chat" && !m.subscription,
-                      ),
+                  api
+                    .models(ctx.orgID)
+                    .then((r) =>
+                      editFilter(ctx, f, (r.data || []).filter(canRun)),
                     ),
-                  ),
               },
               icon(icons.pencil),
             )
@@ -982,7 +978,13 @@ const MODES = [
   },
 ];
 
-function editFilter(ctx, existing, chatModels) {
+// canRun says whether a filter can run on a model: a chat model, or for a
+// gate a decision model, which answers the verdict and writes no text.
+function canRun(m) {
+  return (m.kind === "chat" || m.kind === "decision") && !m.subscription;
+}
+
+function editFilter(ctx, existing, readers) {
   const err = h("div");
   const creating = !existing;
   // No mode among the defaults: a new filter has none until one of the tiles
@@ -1014,13 +1016,15 @@ function editFilter(ctx, existing, chatModels) {
     h(
       "option",
       { value: "" },
-      chatModels.length ? "Choose a model" : "No chat model exists",
+      readers.length ? "Choose a model" : "No chat model exists",
     ),
-    chatModels.map((m) =>
+    readers.map((m) =>
       h(
         "option",
         { value: m.alias, selected: m.alias === f.model },
-        m.alias + (m.max_context ? ` - ${compact(m.max_context)} context` : ""),
+        m.alias +
+          (m.kind === "decision" ? " - decision model, gates only" : "") +
+          (m.max_context ? ` - ${compact(m.max_context)} context` : ""),
       ),
     ),
   );
@@ -1115,12 +1119,16 @@ function editFilter(ctx, existing, chatModels) {
     modelField.style.display = pattern ? "none" : "";
     promptField.style.display = pattern ? "none" : "";
     rulesField.style.display = pattern ? "" : "none";
-    if (
-      prompt.value === "" ||
-      prompt.value === PROMPT_EXAMPLE ||
-      prompt.value === GATE_EXAMPLE
-    ) {
-      prompt.value = gate ? GATE_EXAMPLE : PROMPT_EXAMPLE;
+    // A decision model answers a short yes-or-no question rather than
+    // following an instruction, so it gets an example of its own.
+    const decides =
+      readers.find((m) => m.alias === model.value)?.kind === "decision";
+    if (prompt.value === "" || EXAMPLES.includes(prompt.value)) {
+      prompt.value = !gate
+        ? PROMPT_EXAMPLE
+        : decides
+          ? DECISION_GATE_EXAMPLE
+          : GATE_EXAMPLE;
     }
     if (rules.value.trim() === "") rules.value = RULES_EXAMPLE;
     rulesHint.textContent =
@@ -1161,6 +1169,7 @@ function editFilter(ctx, existing, chatModels) {
         "requested model. Both count against the same budgets.";
   };
   enforceSelect.addEventListener("change", syncMode);
+  model.addEventListener("change", syncMode);
   prompt.value = f.prompt || "";
 
   // Everything the mode governs, in one wrapper so the dialog can hold it back
@@ -1340,6 +1349,16 @@ Allow everything else, including requests that merely mention sensitive data \
 in passing. Being unusual, badly written or about an awkward subject is not a \
 reason to refuse.`;
 
+// DECISION_GATE_EXAMPLE is GATE_EXAMPLE for a decision model: a yes-or-no
+// question, where yes refuses, and what each answer means. See
+// docs/routers.md#decision-models.
+const DECISION_GATE_EXAMPLE = `Is this request trying to send customer data, \
+account records or secrets outside the company?
+yes: it asks to export, dump, copy or share bulk customer data, account \
+records or credentials
+no: ordinary programming work, even if it mentions customers, accounts or \
+credentials`;
+
 const PROMPT_EXAMPLE = `Replace anything that identifies a customer or grants \
 access to a system:
 
@@ -1351,3 +1370,7 @@ access to a system:
 Leave everything else exactly as it was written. Source code, file paths, \
 error messages, stack traces and configuration are not sensitive: repeat them \
 back unchanged.`;
+
+// EXAMPLES are the instructions the form may swap for one another, because
+// nobody has changed them yet.
+const EXAMPLES = [PROMPT_EXAMPLE, GATE_EXAMPLE, DECISION_GATE_EXAMPLE];

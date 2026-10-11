@@ -406,6 +406,10 @@ has the whole order.
 Point a `rewrite` or `gate` filter at a chat model, ideally a fast local one.
 Its generation is added to every request the guardrail covers.
 
+A `gate` can also run on a [decision model](routers.md#decision-models), a
+classifier that answers the verdict in one pass and writes nothing. Its
+instruction is then a yes-or-no question, where yes refuses.
+
 The context it needs depends on the mode:
 
 - A `rewrite` filter reads the whole request and writes it back, so **its

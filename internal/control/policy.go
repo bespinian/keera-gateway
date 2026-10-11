@@ -566,7 +566,7 @@ func normalizeModel(m *policy.Model) string {
 		m.Kind = policy.KindChat
 	}
 	if !m.Kind.Valid() {
-		return "'kind' must be chat, completion or embedding"
+		return "'kind' must be chat, completion, embedding or decision"
 	}
 	// The provider must be one this build knows, because the gateway reads
 	// it to choose how to talk to the backend. Its defaults are not applied

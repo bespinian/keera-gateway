@@ -680,6 +680,11 @@ function surfaceOf(kind) {
       return "Answers /api/v1/completions.";
     case "embedding":
       return "Answers /api/v1/embeddings.";
+    case "decision":
+      return (
+        "Answers no client. Routers and gate filters decide with it, " +
+        "on its /v1/systemone endpoint."
+      );
     default:
       return null;
   }
@@ -801,7 +806,7 @@ function report(probe, kind) {
   });
 }
 
-const KINDS = ["chat", "completion", "embedding"];
+const KINDS = ["chat", "completion", "embedding", "decision"];
 
 // What a per-customer endpoint carries in place of the part only the
 // organisation knows. It is the same text internal/catalog/providers.go writes.

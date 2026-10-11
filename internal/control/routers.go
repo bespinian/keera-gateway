@@ -135,7 +135,7 @@ func (s *Server) putRouter(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	if !s.checkRouterAlias(w, r, orgID, rt.Alias) {
 		return
 	}
-	if rt.Decides() && !s.checkReaderModel(w, r, orgID, rt.Model, routerReader) {
+	if rt.Decides() && !s.checkReaderModel(w, r, orgID, rt.Model, routerReader, true) {
 		return
 	}
 	if rt.Sizes() && !checkCeilings(w, rt) {

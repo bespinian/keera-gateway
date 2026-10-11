@@ -34,7 +34,7 @@ func routerCmd(ctx context.Context, args []string) error {
 			"much text is in it; 'fallback', 'latency' and 'least-busy' try the destinations "+
 			"until one answers, in the order written, fastest first, or emptiest first "+
 			"(default: instruction)")
-	fs.StringVar(&r.model, "model", "", "the model that makes the decision - a fast local one")
+	fs.StringVar(&r.model, "model", "", "the model that makes the decision - a fast local one, or a decision model")
 	fs.StringVar(&r.destinations, "destinations", "",
 		"comma-separated models this router may choose between; on a fallback router, in the "+
 			"order to try them, on a latency or least-busy router, the order to break a "+

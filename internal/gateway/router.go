@@ -187,7 +187,7 @@ func (s *Server) deciderModel(rt policy.Router, texts []string) (policy.Model, s
 		// anyway would spend a generation on a guess.
 		return m, "the request carried no text to read"
 	}
-	if why := chatProblem(m, ok); why != "" {
+	if why := readerProblem(m, ok, true); why != "" {
 		return m, "the model it decides with, '" + rt.Model + "', " + why
 	}
 	return m, ""
@@ -245,6 +245,20 @@ func chatProblem(m policy.Model, found bool) string {
 		return "is paid by each person's own Claude subscription, so the gateway cannot send it anything of its own"
 	}
 	return ""
+}
+
+// readerProblem is chatProblem for the model a filter or a router reads
+// with. A decision model can also be one, when all it is asked is a choice: a
+// router's, or a gate's.
+func readerProblem(m policy.Model, found, choice bool) string {
+	if found && m.Kind == policy.KindDecision {
+		if !choice {
+			return "is a decision model: it answers a question and writes no text, so it " +
+				"cannot rewrite a request; use it for a gate"
+		}
+		m.Kind = policy.KindChat
+	}
+	return chatProblem(m, found)
 }
 
 // settle records what a trying router's attempts came to, once they are over.
@@ -351,9 +365,12 @@ func (s *Server) decide(ctx context.Context, rt policy.Router, m policy.Model, t
 			"there was nothing to choose between")
 	}
 
-	byLetter := labelled(offered) && s.readsLogprobs(m)
+	// A decision model always answers with a distribution, so there is no
+	// other way to ask it.
+	decides := m.Kind == policy.KindDecision
+	byLetter := labelled(offered) && (decides || s.readsLogprobs(m))
 	d, err := s.decideOnce(ctx, rt, m, offered, texts, byLetter)
-	if !byLetter {
+	if !byLetter || decides {
 		return d, err
 	}
 
@@ -398,11 +415,16 @@ func (s *Server) decideOnce(ctx context.Context, rt policy.Router, m policy.Mode
 		}
 	}
 
-	ans, err := s.askGuard(ctx, m, guardQuestion{
+	ask := guardQuestion{
 		instruction: instruction, input: input, outputTokens: outputTokens,
 		timeout: routerTimeout, limit: maxRouterResponseBytes,
 		subject: "the model it decides with",
-	}, byLetter)
+	}
+	if byLetter {
+		q := s.routerDecision(rt.OrgID, rt.Prompt, offered)
+		ask.decision = &q
+	}
+	ans, err := s.askGuard(ctx, m, ask, byLetter)
 	// The cost is kept whatever the answer, as a filter's is.
 	var d decision
 	d.micros, d.bills = ans.micros, ans.bills

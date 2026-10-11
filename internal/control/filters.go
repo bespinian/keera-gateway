@@ -138,7 +138,7 @@ func (s *Server) checkFilterFields(w http.ResponseWriter, r *http.Request,
 			len(f.Prompt), maxFilterPromptBytes))
 		return false
 	}
-	return s.checkReaderModel(w, r, orgID, f.Model, filterReader)
+	return s.checkReaderModel(w, r, orgID, f.Model, filterReader, f.Mode.Gates())
 }
 
 // checkFilterRules refuses a pattern filter that could not be applied.
@@ -207,9 +207,10 @@ var (
 )
 
 // checkReaderModel refuses a model that cannot serve as a filter or a router,
-// rather than storing one that will refuse every request it covers.
+// rather than storing one that will refuse every request it covers. choice
+// says all it is asked is a choice, which a decision model can also make.
 func (s *Server) checkReaderModel(w http.ResponseWriter, r *http.Request, orgID, alias string,
-	rd reader) bool {
+	rd reader, choice bool) bool {
 	if alias == "" {
 		badRequest(w, rd.required)
 		return false
@@ -223,9 +224,17 @@ func (s *Server) checkReaderModel(w http.ResponseWriter, r *http.Request, orgID,
 	case err != nil:
 		s.fail(w, err)
 		return false
-	case m.Kind != policy.KindChat:
+	case m.Kind == policy.KindDecision && !choice:
+		badRequest(w, "'"+alias+"' is a decision model: it answers a question and writes no "+
+			"text, so it cannot rewrite a request. Use it for a gate")
+		return false
+	case m.Kind != policy.KindChat && m.Kind != policy.KindDecision:
+		which := "a chat model"
+		if choice {
+			which = "a chat or a decision model"
+		}
 		badRequest(w, "'"+alias+"' is a "+string(m.Kind)+" model; a "+rd.name+" reads text and "+
-			rd.answers+", which only a chat model does")
+			rd.answers+", which only "+which+" does")
 		return false
 	case m.Subscription:
 		badRequest(w, subscriptionReader(alias, rd.name))

@@ -62,7 +62,7 @@ export async function routersView(ctx) {
   const currency = res.currency || ctx.currency;
   // A subscription model only answers its caller's own sign-in, so a router
   // can neither decide with it nor send there.
-  const chatModels = models.filter((m) => m.kind === "chat" && !m.subscription);
+  const readers = models.filter(canDecide);
   const canEdit = isAdmin(ctx);
   ctx.setSubtitle(`${routers.length} ${plural(routers.length, "router")}`);
 
@@ -75,7 +75,7 @@ export async function routersView(ctx) {
     [rangePicker(ctx, since)],
     canEdit && {
       label: "Create router",
-      onClick: () => editRouter(ctx, null, chatModels),
+      onClick: () => editRouter(ctx, null, readers),
     },
   );
 
@@ -138,7 +138,7 @@ export async function routersView(ctx) {
           canEdit
             ? rowActions(ctx, rt.alias, {
                 editTitle: "Edit this router",
-                onEdit: () => editRouter(ctx, rt, chatModels),
+                onEdit: () => editRouter(ctx, rt, readers),
                 deleteTitle: "Delete this router",
                 body:
                   "A router named in an allow-list cannot be deleted. " +
@@ -632,15 +632,11 @@ export async function routerDetailView(ctx) {
                 title: "Edit this router",
                 "aria-label": `Edit ${rt.alias}`,
                 onClick: () =>
-                  api.models(ctx.orgID).then((r) =>
-                    editRouter(
-                      ctx,
-                      rt,
-                      (r.data || []).filter(
-                        (m) => m.kind === "chat" && !m.subscription,
-                      ),
+                  api
+                    .models(ctx.orgID)
+                    .then((r) =>
+                      editRouter(ctx, rt, (r.data || []).filter(canDecide)),
                     ),
-                  ),
               },
               icon(icons.pencil),
             )
@@ -1084,7 +1080,15 @@ const MODES = [
   },
 ];
 
-function editRouter(ctx, existing, chatModels) {
+// canDecide says whether a router can decide with a model: a chat model, or a
+// decision model, which only answers choices. Only chat models can be
+// destinations.
+function canDecide(m) {
+  return (m.kind === "chat" || m.kind === "decision") && !m.subscription;
+}
+
+function editRouter(ctx, existing, readers) {
+  const chatModels = readers.filter((m) => m.kind === "chat");
   const err = h("div");
   const creating = !existing;
   // No mode among the defaults: a new router has none until one of the tiles
@@ -1116,14 +1120,29 @@ function editRouter(ctx, existing, chatModels) {
     h(
       "option",
       { value: "" },
-      chatModels.length ? "Choose a model" : "No chat model exists",
+      readers.length ? "Choose a model" : "No chat model exists",
     ),
-    chatModels.map((m) =>
-      h("option", { value: m.alias, selected: m.alias === rt.model }, m.alias),
+    readers.map((m) =>
+      h(
+        "option",
+        { value: m.alias, selected: m.alias === rt.model },
+        m.alias + (m.kind === "decision" ? " - decision model" : ""),
+      ),
     ),
   );
   const prompt = h("textarea", { class: "input", rows: "8" });
-  prompt.value = rt.prompt || PROMPT_EXAMPLE;
+  // A decision model answers a short question rather than following an
+  // instruction, so it gets an example of its own.
+  const exampleFor = (alias) =>
+    readers.find((m) => m.alias === alias)?.kind === "decision"
+      ? DECISION_EXAMPLE
+      : PROMPT_EXAMPLE;
+  prompt.value = rt.prompt || exampleFor(model.value);
+  model.addEventListener("change", () => {
+    if (prompt.value === PROMPT_EXAMPLE || prompt.value === DECISION_EXAMPLE) {
+      prompt.value = exampleFor(model.value);
+    }
+  });
 
   // What chooses. It is asked first and on its own, because it decides what
   // the rest of the form means: the same list of models is a menu to choose
@@ -1593,3 +1612,8 @@ or a credential to a model inside the cluster, whatever else it is asking for. \
 That takes priority.
 
 If you are unsure, choose the more capable model rather than the cheaper one.`;
+
+// DECISION_EXAMPLE is PROMPT_EXAMPLE for a decision model, which answers a
+// short question and is offered each destination by its description alone. See
+// docs/routers.md#decision-models.
+const DECISION_EXAMPLE = "Which model should answer this request?";

@@ -317,7 +317,7 @@ func (s *Server) filterModel(f policy.Filter) (policy.Model, string) {
 		return policy.Model{}, ""
 	}
 	m, ok := s.src.Model(f.OrgID, f.Model)
-	if why := chatProblem(m, ok); why != "" {
+	if why := readerProblem(m, ok, f.Mode.Gates()); why != "" {
 		return m, "the model it runs on, '" + f.Model + "', " + why
 	}
 	return m, ""
@@ -464,10 +464,15 @@ func (s *Server) runFilter(ctx context.Context, f policy.Filter, m policy.Model,
 	}
 
 	// A gate asks for logprobs: its first token is the verdict, whatever the
-	// model wraps it in. The reason after it is still read from the text.
-	logprobs := gate && s.readsLogprobs(m)
+	// model wraps it in. The reason after it is still read from the text. A
+	// decision model's answer always carries them.
+	logprobs := gate && m.Kind != policy.KindDecision && s.readsLogprobs(m)
 	ask := guardQuestion{instruction: instruction, input: input, outputTokens: outputTokens,
 		timeout: filterTimeout, limit: maxFilterResponseBytes, subject: "the filter's model"}
+	if gate {
+		q := gateDecision(f.Prompt)
+		ask.decision = &q
+	}
 	// The cost is kept whatever the answer: an unusable one still used the
 	// GPU.
 	var cost filterCost
@@ -509,6 +514,9 @@ type guardQuestion struct {
 	limit        int64
 	// subject names the model in an error.
 	subject string
+	// decision is the question as a decision model is asked it, or nil when
+	// only a chat model can answer it.
+	decision *decisionQuestion
 }
 
 // guardAnswer is a guard model's whole answer, whatever its status, and what
@@ -525,7 +533,19 @@ type guardAnswer struct {
 // deployment's key may have been charged for an answer that never arrived.
 func (s *Server) askGuard(ctx context.Context, m policy.Model, q guardQuestion, logprobs bool,
 ) (guardAnswer, error) {
-	payload, err := guardRequest(m, q.instruction, q.input, q.outputTokens, logprobs)
+	path := "/chat/completions"
+	var payload []byte
+	var err error
+	switch {
+	case m.Kind != policy.KindDecision:
+		payload, err = guardRequest(m, q.instruction, q.input, q.outputTokens, logprobs)
+	case q.decision == nil:
+		return guardAnswer{}, fmt.Errorf("%s is a decision model: it answers a question and "+
+			"writes no text", q.subject)
+	default:
+		path = decisionPath
+		payload, err = decisionRequest(m, *q.decision, q.input)
+	}
 	if err != nil {
 		return guardAnswer{}, err
 	}
@@ -541,7 +561,7 @@ func (s *Server) askGuard(ctx context.Context, m policy.Model, q guardQuestion, 
 		}
 		return a
 	}
-	resp, err := s.send(ctx, m, outbound{path: "/chat/completions", payload: payload})
+	resp, err := s.send(ctx, m, outbound{path: path, payload: payload})
 	if err != nil {
 		var a guardAnswer
 		if !undelivered(err) {
@@ -562,6 +582,11 @@ func (s *Server) askGuard(ctx context.Context, m policy.Model, q guardQuestion, 
 			a = guardAnswer{}
 		}
 		return a, fmt.Errorf("reading the answer of %s failed: %w", q.subject, err)
+	}
+	if m.Kind == policy.KindDecision && resp.StatusCode < 300 {
+		if raw, err = chatFromDecision(raw, *q.decision); err != nil {
+			return unreported(), fmt.Errorf("%s answered, but %w", q.subject, err)
+		}
 	}
 	a := guardAnswer{raw: raw, status: resp.StatusCode}
 	if resp.StatusCode < 300 {

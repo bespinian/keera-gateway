@@ -186,7 +186,7 @@ func routerCheckProblem(rt policy.Router, destinations []string, m policy.Model,
 		return "only one of this router's destinations can be reached ('" +
 			destinations[0] + "'), so there is no decision left for it to make"
 	}
-	if why := chatProblem(m, found); why != "" {
+	if why := readerProblem(m, found, true); why != "" {
 		return "the model '" + rt.Model + "' " + why + ", so this router could not decide anything"
 	}
 	return ""

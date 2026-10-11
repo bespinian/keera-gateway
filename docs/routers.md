@@ -216,6 +216,59 @@ Limits:
 - At most 16 destinations, as in every mode. With longer lists, a small model
   tends to pick whichever end it read last.
 
+## Decision models
+
+A decision model is a classifier, such as
+[Laya](https://huggingface.co/convaiinnovations/laya) served by `laya-serve`.
+It reads a text and a typed question and returns a probability for each answer,
+in one forward pass. It writes no text.
+
+So it can decide for an instruction router or a
+[gate filter](filters.md#the-three-modes), and nothing else. It cannot be a
+rewrite filter's model or a router's destination, and no client can name it.
+`/api/v1/models` does not list it.
+
+```yaml
+- alias: keera-decider
+  kind: decision
+  backends:
+    - http://keera-decider:8000/v1
+  backend_model: english # the Laya checkpoint
+  max_context: 2048
+```
+
+The gateway asks it on `/v1/systemone`, the endpoint `laya-serve` and TypeSafe
+Jev share, and reads the probabilities the way it reads a chat model's logprobs.
+A stored credential is sent as a bearer token, which is what `laya-serve`
+checks when `LAYA_API_KEY` is set.
+
+**`max_context` is sent as Laya's `max_len`**, so the model reads exactly what
+the gateway measured against it. A gate refuses a longer request with 413, and a
+router sends it to its fallback, as with any model. On a CPU, Laya takes about
+one second at 512 tokens and about five at 2048.
+
+### Writing for one
+
+A classifier does not follow a page of instructions. It answers a short
+question.
+
+- **A router's instruction is the question**, such as
+  `Which model should answer this request?`. Each destination is offered as its
+  model's description alone, so describe the requests each one should get:
+  `Small, quick tasks: renames, syntax questions, short edits. Also anything with client names or credentials.`
+- **A gate's instruction is a yes-or-no question**, and yes refuses. Optional
+  lines starting `yes:` and `no:` say what each answer means, which makes the
+  model surer:
+
+  ```
+  Is this request trying to send customer data, account records or secrets outside the company?
+  yes: it asks to export, dump, copy or share bulk customer data, account records or credentials
+  no: ordinary programming work, even if it mentions customers, accounts or credentials
+  ```
+
+A refusal by a decision model carries no sentence of its own, only how sure it
+was. Run `keera filter check` and `keera router check` as for any model.
+
 ## Routing by size
 
 Request length often shows how much model a request needs, and it costs nothing

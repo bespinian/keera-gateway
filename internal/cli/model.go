@@ -49,7 +49,7 @@ func registerModelFlags(fs *flag.FlagSet) *modelFlags {
 			"carries - for infomaniak, your AI Service's product id")
 	fs.StringVar(&f.backendModel, "backend-model", "",
 		"the name the inference plane serves, which for vLLM is --served-model-name")
-	fs.StringVar(&f.kind, "kind", "", "chat, completion or embedding (default chat)")
+	fs.StringVar(&f.kind, "kind", "", "chat, completion, embedding or decision (default chat)")
 	fs.StringVar(&f.description, "description", "",
 		"what this model is for, in a sentence; clients see it and routers decide on it "+
 			"(a --provider model starts with that provider's own); an empty one clears it")

@@ -66,11 +66,15 @@ const (
 	KindChat       Kind = "chat"
 	KindCompletion Kind = "completion"
 	KindEmbedding  Kind = "embedding"
+	// KindDecision is a model that answers a typed question with a probability
+	// per answer, and writes no text, such as Laya behind laya-serve. Only
+	// routers and gate filters use one. No client can name it.
+	KindDecision Kind = "decision"
 )
 
 // Valid reports whether k is a surface Keera Gateway serves.
 func (k Kind) Valid() bool {
-	return k == KindChat || k == KindCompletion || k == KindEmbedding
+	return k == KindChat || k == KindCompletion || k == KindEmbedding || k == KindDecision
 }
 
 // Model is one of an organisation's models. Clients only ever name the Alias,

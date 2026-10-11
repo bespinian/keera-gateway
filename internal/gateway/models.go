@@ -53,7 +53,8 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 	out := []modelEntry{}
 	for _, m := range s.src.Models(res.Key.OrgID) {
 		// A locked model would only refuse, so a client is not offered it.
-		if m.Enabled && !m.Locked && res.MayUse(m) {
+		// Nor a decision model, which answers only routers and gates.
+		if m.Enabled && !m.Locked && m.Kind != policy.KindDecision && res.MayUse(m) {
 			out = append(out, modelEntryOf(m))
 		}
 	}
@@ -93,7 +94,8 @@ type named struct {
 
 // callable decides what a key may name as its model: a model it may use, or
 // else one of its organisation's routers. kind narrows it to one API surface,
-// and empty accepts any. Routers answer only chat.
+// and empty accepts any. Routers answer only chat, and a decision model no
+// client at all.
 //
 // Every route that takes a model name asks here, so they all agree. What is
 // missing and what is forbidden are both "not found", so other projects'
@@ -105,7 +107,8 @@ func (s *Server) callable(res *policy.Resolved, alias string, kind policy.Kind) 
 	// A model is looked up first. The control plane refuses a router named
 	// like a model, and a model named like a router, so the two rarely meet.
 	if m, found := s.findModel(res.Key, alias); found {
-		ok := m.Enabled && (kind == "" || m.Kind == kind) && res.MayUse(m)
+		ok := m.Enabled && m.Kind != policy.KindDecision && (kind == "" || m.Kind == kind) &&
+			res.MayUse(m)
 		return named{model: m}, ok
 	}
 	if kind != "" && kind != policy.KindChat {

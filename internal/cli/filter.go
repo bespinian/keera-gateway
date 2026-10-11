@@ -31,7 +31,7 @@ func filterCmd(ctx context.Context, args []string) error {
 	r := &filterRun{aliasRun: newAliasRun("filter", "filters", "filter", args)}
 	fs := r.fs
 	fs.DurationVar(&r.since, "since", reportWindow, reportSinceUsage)
-	fs.StringVar(&r.model, "model", "", "the model the filter runs on")
+	fs.StringVar(&r.model, "model", "", "the model the filter runs on; a gate may run on a decision model")
 	fs.StringVar(&r.mode, "mode", "",
 		"rewrite (a model edits the request and lets it go), gate (a model judges only "+
 			"whether it may go), or pattern (a list of rules is applied, with no model)")

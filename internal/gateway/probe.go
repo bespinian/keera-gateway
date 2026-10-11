@@ -90,6 +90,8 @@ func (s *Server) CheckModel(ctx context.Context, m policy.Model) Probe {
 		return s.checkEmbedding(ctx, m, p)
 	case policy.KindCompletion:
 		return s.checkCompletion(ctx, m, p)
+	case policy.KindDecision:
+		return s.checkDecision(ctx, m, p)
 	default:
 		return s.checkChat(ctx, m, p)
 	}
@@ -243,6 +245,44 @@ func servedWarnings(p Probe, m policy.Model) []string {
 			"inference plane's --served-model-name.", p.Served, m.BackendModel)}
 	}
 	return nil
+}
+
+// decisionProbe is the question a decision model's check asks. The answer
+// is obvious, so a wrong one says the model is not reading what it is sent.
+var decisionProbe = decisionQuestion{Type: "choice",
+	Instructions: "Which language is this text written in?",
+	Criteria:     map[string]string{"A": "English", "B": "Go source code"}}
+
+// checkDecision asks a decision model one question with an obvious answer.
+// There is no stream or tool call to ask about: routers and gates read one
+// answer, and that is all such a model gives.
+func (s *Server) checkDecision(ctx context.Context, m policy.Model, p Probe) Probe {
+	start := time.Now()
+	resp := s.probeCall(ctx, m, decisionPath,
+		decisionBody(m, decisionProbe, []string{"func Add(a, b int) int { return a + b }"}), &p)
+	if resp == nil {
+		return p
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, ok := s.probeBody(resp, &p)
+	if !ok {
+		return p
+	}
+	p.TotalMS = time.Since(start).Milliseconds()
+	raw, err := chatFromDecision(body, decisionProbe)
+	if err != nil {
+		p.Error = "the backend answered 200, but " + err.Error()
+		return p
+	}
+	letter, share, _ := readChoice(raw, len(decisionProbe.Criteria))
+	p.Sample = fmt.Sprintf("%s (%.0f%% sure)", decisionProbe.Criteria[string(routerLabels[letter])],
+		share*100)
+	if letter != 1 {
+		p.Error = "it took Go source code for English: the model is not reading what it is sent"
+		return p
+	}
+	p.OK = true
+	return p
 }
 
 func (s *Server) checkCompletion(ctx context.Context, m policy.Model, p Probe) Probe {
