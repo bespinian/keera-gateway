@@ -827,8 +827,17 @@ func (s *Server) listKeys(w http.ResponseWriter, r *http.Request, p *authn.Princ
 	if !ok {
 		return
 	}
-	// Spend uses the same window as the projects screen, so the two agree.
+	// By default, spend uses the same window as the projects screen, so the
+	// two agree. The keys screen sends ?since from its range picker.
 	since := policy.PeriodMonth.Start(time.Now())
+	if q.Get("since") != "" {
+		from, _, err := timeRange("", "", q.Get("since"))
+		if err != nil {
+			badRequest(w, err.Error())
+			return
+		}
+		since = from
+	}
 	keys, err := s.st.KeySummaries(r.Context(), store.KeyQuery{
 		OrgID: orgID, ProjectID: q.Get("project_id"), Since: since,
 	})

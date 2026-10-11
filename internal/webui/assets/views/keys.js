@@ -22,6 +22,9 @@ import {
   field,
   code,
   secretField,
+  currentRange,
+  rangePicker,
+  RANGES,
 } from "../ui.js";
 import { openGuardrails, ceilingsFor, summarise } from "./guardrails.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
@@ -34,9 +37,11 @@ export async function keysView(ctx) {
   if (!ctx.orgID && ctx.state.me.unrestricted)
     return chooseOrg(ctx, "API keys");
 
+  const since = currentRange();
+  const range = RANGES.find((r) => r.since === since) || RANGES[1];
   const [keysRes, projectsRes, modelsRes, usersRes, clients] =
     await Promise.all([
-      api.keys(ctx.orgID),
+      api.keys(ctx.orgID, { since }),
       api.projects(ctx.orgID).catch(() => ({ data: [] })),
       api.models(ctx.orgID).catch(() => ({ data: [] })),
       // Who a key can be attributed to. A deployment with no identity provider
@@ -51,6 +56,7 @@ export async function keysView(ctx) {
   const users = usersRes.data || [];
   const models = (modelsRes.data || []).filter((m) => m.enabled !== false);
   const projectNames = Object.fromEntries(projects.map((t) => [t.id, t.name]));
+  const userEmails = Object.fromEntries(users.map((u) => [u.id, u.email]));
   const canEdit = isAdmin(ctx);
   // Only an administrator issues keys, so each has the project and guardrails
   // they chose. A member renames, rotates and revokes their own.
@@ -76,6 +82,7 @@ export async function keysView(ctx) {
             "its guardrails. An administrator sets them.",
     ),
     h("div", { style: { flex: 1 } }),
+    rangePicker(ctx, since),
     canEdit
       ? h(
           "button",
@@ -135,6 +142,16 @@ export async function keysView(ctx) {
             ? h("span", {}, projectNames[k.project_id] || k.project_id)
             : h("span", { class: "faint" }, "deleted project"),
       },
+      // A deployment with no identity provider has nobody to attribute a key
+      // to, so the column would only ever say so.
+      users.length
+        ? {
+            label: "User",
+            sortKey: (k) =>
+              k.user_id ? userEmails[k.user_id] || k.user_id : null,
+            cell: (k) => userCell(ctx, k, userEmails),
+          }
+        : null,
       {
         // Active first, because a list of keys is read to find the live ones.
         label: "Status",
@@ -159,10 +176,14 @@ export async function keysView(ctx) {
                 { class: "muted nowrap", title: dateTime(k.last_used_at) },
                 ago(k.last_used_at),
               )
-            : h("span", { class: "faint nowrap" }, "not this month"),
+            : h(
+                "span",
+                { class: "faint nowrap" },
+                `not in the ${range.long.toLowerCase()}`,
+              ),
       },
       {
-        label: "This month",
+        label: range.long,
         num: true,
         shrink: true,
         sortKey: (k) => k.requests || null,
@@ -303,7 +324,7 @@ export async function keysView(ctx) {
               : null,
           ),
       },
-    ],
+    ].filter(Boolean),
     keys,
     {
       emptyTitle: "No keys yet",
@@ -314,8 +335,40 @@ export async function keysView(ctx) {
       // can get long. Searching it by name is how anybody actually arrives at a
       // row, since that is what the name is for.
       search: (k) =>
-        [k.name, k.prefix, projectNames[k.project_id] || ""].join(" "),
+        [
+          k.name,
+          k.prefix,
+          projectNames[k.project_id] || "",
+          userEmails[k.user_id] || "",
+        ].join(" "),
       searchLabel: "keys",
+      choices: [
+        {
+          label: "Projects",
+          options: byLabel(
+            keys.filter((k) => k.project_id),
+            (k) => k.project_id,
+            (k) => projectNames[k.project_id] || k.project_id,
+          ),
+          test: (k, v) => k.project_id === v,
+        },
+        {
+          label: "Users",
+          options: [
+            ...byLabel(
+              keys.filter((k) => k.user_id),
+              (k) => k.user_id,
+              (k) => userEmails[k.user_id] || k.user_id,
+            ),
+            // The shared keys an administrator issued for a pipeline.
+            ...(keys.some((k) => !k.user_id)
+              ? [{ value: NOBODY, label: "No user" }]
+              : []),
+          ],
+          test: (k, v) => (k.user_id || NOBODY) === v,
+        },
+        // A dropdown with one choice filters nothing.
+      ].filter((c) => c.options.length > 1),
       // Off by default: a revoked key is nobody's working key any more, and the
       // list is read to find one that works. It stays one click away, because a
       // revoked key is still the answer to "what happened to mine". An expired
@@ -331,6 +384,33 @@ export async function keysView(ctx) {
   );
 
   return h("div", {}, head, rows);
+}
+
+// userCell is whose key k is. Only an administrator has a user's page to open.
+function userCell(ctx, k, userEmails) {
+  if (!k.user_id) return h("span", { class: "faint" }, "none");
+  const email = userEmails[k.user_id] || k.user_id;
+  return isAdmin(ctx)
+    ? rowLink(
+        ctx,
+        "/users/" + encodeURIComponent(k.user_id),
+        email,
+        "This user's keys and usage",
+      )
+    : h("span", {}, email);
+}
+
+// NOBODY is the user filter's value for a key attributed to nobody. No user id
+// looks like it.
+const NOBODY = "-";
+
+// byLabel is the distinct values of rows as dropdown options, sorted by label.
+function byLabel(rows, value, label) {
+  const seen = new Map();
+  for (const r of rows) seen.set(value(r), label(r));
+  return [...seen]
+    .map(([v, l]) => ({ value: v, label: l }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 }
 
 // canRevoke reports whether the reader may rename, revoke or rotate this key. An administrator

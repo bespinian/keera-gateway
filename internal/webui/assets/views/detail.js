@@ -279,6 +279,12 @@ export async function keyDetailView(ctx) {
           { class: "card-body" },
           facts([
             ["Prefix", h("span", { class: "mono muted" }, key.prefix + "…")],
+            [
+              "User",
+              person
+                ? h("span", { class: "muted" }, person.email)
+                : h("span", { class: "faint" }, "none"),
+            ],
             ["Issued", h("span", { class: "muted" }, date(key.created_at))],
             [
               "Expires",

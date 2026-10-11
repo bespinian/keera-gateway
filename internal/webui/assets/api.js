@@ -196,7 +196,8 @@ export const api = {
   // own keys, the limits above them, and what has been refused lately.
   access: () => get("/v1/access"),
 
-  keys: (orgID) => get("/v1/keys" + query({ org_id: orgID })),
+  keys: (orgID, { since } = {}) =>
+    get("/v1/keys" + query({ org_id: orgID, since })),
   createKey: (payload) => request("POST", "/v1/keys", payload),
   renameKey: (id, name) =>
     request("PATCH", `/v1/keys/${encodeURIComponent(id)}`, { name }),
