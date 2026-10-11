@@ -172,7 +172,7 @@ export async function auditView(ctx) {
     h(
       "button",
       {
-        class: "btn btn-sm",
+        class: "btn",
         style: { marginLeft: "8px" },
         title: "Download all matching entries as CSV",
         onClick: () =>

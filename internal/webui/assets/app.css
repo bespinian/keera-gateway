@@ -502,6 +502,12 @@ code,
   border-color: var(--accent);
   color: var(--accent);
 }
+/* The Live switch sits beside a range picker, so it takes the segmented
+   control's size rather than a button's. */
+.btn-live {
+  padding: 5px 11px;
+  font-size: 12.5px;
+}
 .btn svg {
   width: 15px;
   height: 15px;

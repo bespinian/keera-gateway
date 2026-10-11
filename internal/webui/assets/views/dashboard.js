@@ -45,6 +45,7 @@ export async function dashboardView(ctx) {
   const header = h(
     "div",
     { class: "row", style: { marginBottom: "16px" } },
+    h("div", { style: { flex: 1 } }),
     rangePicker(ctx, since),
   );
 

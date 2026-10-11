@@ -586,7 +586,7 @@ export function liveControl({ key, label, titles, words = {} }) {
   const button = h(
     "button",
     {
-      class: "btn btn-sm",
+      class: "btn btn-live",
       type: "button",
       "aria-pressed": String(on),
       "aria-label": label,

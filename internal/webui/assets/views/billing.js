@@ -115,7 +115,7 @@ async function billSection(ctx) {
     h(
       "button",
       {
-        class: "btn btn-sm",
+        class: "btn",
         title: "Download this bill as CSV",
         onClick: () =>
           api.download("/v1/billing", { org_id: ctx.orgID, month }),

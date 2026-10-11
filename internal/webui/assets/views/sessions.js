@@ -249,7 +249,7 @@ function csvButton(params) {
   return h(
     "button",
     {
-      class: "btn btn-sm",
+      class: "btn",
       title: "Download the matching sessions as CSV, one row each",
       onClick: () => api.download("/v1/sessions", params),
     },

@@ -92,7 +92,7 @@ export async function usageView(ctx) {
     h(
       "button",
       {
-        class: "btn btn-sm",
+        class: "btn",
         style: { marginLeft: "8px" },
         title: "Download this report as CSV",
         onClick: () =>

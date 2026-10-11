@@ -173,7 +173,7 @@ export async function requestLog(
       h(
         "button",
         {
-          class: "btn btn-sm",
+          class: "btn",
           title: "Download all matching requests as CSV",
           onClick: () => api.download("/v1/requests", params),
         },
