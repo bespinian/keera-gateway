@@ -19,12 +19,14 @@ import (
 
 // Flag descriptions that several commands share word for word.
 const (
-	orgUsage = "organisation id (default: your own; an operator's only one)"
-	// orgsUsage is --org on a report, which spans every organisation the
-	// caller can see unless told one.
-	orgsUsage = "restrict to one organisation (default: every one you can see)"
+	orgUsage  = "organisation, by name or id"
 	jsonUsage = "print raw JSON"
 	yesUsage  = "do not ask for confirmation"
+
+	// The flags of the reports.
+	sinceUsage = "how far back to look"
+	limitUsage = "how many to print"
+	modelUsage = "restrict to one model"
 )
 
 // out renders v as a table via render, or as JSON when --json was given.
@@ -152,13 +154,28 @@ func handOver(secret, said string) {
 	fmt.Fprintf(os.Stderr, "\n%s %s\n", said, styleErr.warn("This is the only time it is shown."))
 }
 
-// resolveOrg fills in the organisation when there is only one, which is the
-// case in every dedicated and on-premises deployment.
+// resolveOrg turns the organisation given, by name or id, into its id. When
+// none was given and there is only one, it is that one, which is the case in
+// every dedicated and on-premises deployment.
 func resolveOrg(ctx context.Context, c *client, given string) (string, error) {
-	if given != "" {
+	// Anything shaped like an id is passed on unchanged, so the common case
+	// needs no lookup.
+	if strings.HasPrefix(given, "org_") {
 		return given, nil
 	}
-	return theOnlyOrg(ctx, c, "pass --org <id>")
+	if given == "" {
+		return theOnlyOrg(ctx, c, "choose one with: keera org switch <org>")
+	}
+	orgs, err := list[store.Org](ctx, c, "/v1/orgs")
+	if err != nil {
+		return "", err
+	}
+	for _, o := range orgs {
+		if o.ID == given || strings.EqualFold(o.Name, given) {
+			return o.ID, nil
+		}
+	}
+	return "", notFound("organisation", given, "", "org")
 }
 
 // who narrows a report to one project, key or person, each given the way the
@@ -231,8 +248,7 @@ func userID(ctx context.Context, c *client, org, given string) (string, error) {
 }
 
 // theOnlyOrg is the organisation a command means when it was not told one.
-// howToSay tells the caller how to name one instead, because not every
-// command has a --org flag.
+// howToSay tells the caller how to name one instead.
 func theOnlyOrg(ctx context.Context, c *client, howToSay string) (string, error) {
 	orgs, err := list[store.Org](ctx, c, "/v1/orgs")
 	if err != nil {

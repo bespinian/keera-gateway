@@ -17,11 +17,10 @@ import {
   num,
   compact,
   ms,
-  empty,
   toast,
   field,
 } from "../ui.js";
-import { keyModels, noKey, usableKeys } from "./connect.js";
+import { keyModels, noKey, noModel, usableKeys } from "./connect.js";
 
 /** session outlives a route change, so stepping over to Usage to look at what a
  *  message cost and stepping back does not throw the conversation away. It does
@@ -41,7 +40,7 @@ export async function playgroundView(ctx) {
   // be one they may spend.
   const a = await api.access();
   const keys = usableKeys(a);
-  if (!keys.length) return noKey(ctx, a, "Messages are sent with");
+  if (!keys.length) return noKey(ctx, a);
   if (!keys.some((k) => k.id === session.keyID)) session.keyID = keys[0].id;
   const key = keys.find((k) => k.id === session.keyID);
 
@@ -54,11 +53,8 @@ export async function playgroundView(ctx) {
     return h(
       "div",
       { class: "card" },
-      keyPicker(ctx, keys),
-      empty(
-        "This key can call no chat model",
-        "Its guardrails allow no model that serves chat. Choose another key.",
-      ),
+      h("div", { class: "card-body" }, keyPicker(ctx, keys)),
+      noModel(),
     );
   }
   if (!models.some((m) => m.alias === session.model))
@@ -500,7 +496,7 @@ function subtitle(model) {
   // model answers is not decided until the message has been read, so what is
   // worth saying is that it will be decided at all.
   if (model.router) {
-    return "a router: it picks the model";
+    return "A router: it picks the model";
   }
   const bits = [model.backend_model];
   if (model.max_context)

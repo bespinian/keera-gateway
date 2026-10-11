@@ -17,6 +17,8 @@ import {
   icon,
   icons,
   empty,
+  num,
+  plural,
   RANGES as SHARED_RANGES,
   rangePicker,
 } from "../ui.js";
@@ -68,6 +70,7 @@ const LABELS = {
   "passkey.delete": "Passkey removed",
   "user.passkey_link": "Passkey set-up link created",
   "guardrail.put": "Guardrails changed",
+  "guardrail.allow_model": "Model allowed by the organisation",
   "model.put": "Model saved",
   "model.check": "Model checked",
   "model.delete": "Model deleted",
@@ -135,35 +138,9 @@ export async function auditView(ctx) {
     ctx.reload();
   };
 
-  const controls = h(
+  const head = h(
     "div",
-    { class: "row", style: { marginBottom: "16px" } },
-    h(
-      "select",
-      {
-        class: "select",
-        style: { width: "auto" },
-        "aria-label": "Action",
-        onChange: (e) => set("action", e.target.value),
-      },
-      h("option", { value: "" }, "All actions"),
-      facets.actions.map((a) =>
-        h("option", { value: a, selected: a === filter.action }, label(a)),
-      ),
-    ),
-    h(
-      "select",
-      {
-        class: "select",
-        style: { width: "auto" },
-        "aria-label": "Who",
-        onChange: (e) => set("actor", e.target.value),
-      },
-      h("option", { value: "" }, "Anybody"),
-      facets.actors.map((a) =>
-        h("option", { value: a, selected: a === filter.actor }, a),
-      ),
-    ),
+    { class: "section-head" },
     h("div", { style: { flex: 1 } }),
     rangePicker(ctx, filter.since, {
       ranges: RANGES,
@@ -173,7 +150,6 @@ export async function auditView(ctx) {
       "button",
       {
         class: "btn",
-        style: { marginLeft: "8px" },
         title: "Download all matching entries as CSV",
         onClick: () =>
           api.download("/v1/audit", {
@@ -188,24 +164,69 @@ export async function auditView(ctx) {
     ),
   );
 
+  // The filters sit on their own row under the head, as on Requests and
+  // Sessions, with Clear beside them once one is set.
   const active = filter.action || filter.actor;
-  const body = entries.length
-    ? auditTable(entries)
-    : h(
-        "div",
-        { class: "card" },
-        empty(
-          active ? "Nothing matches this filter" : "Nothing recorded yet",
-          active
-            ? "Widen the range, or clear the filter."
-            : "Changes made in the panel, the CLI or the API show up here.",
-        ),
-      );
+  const filters = h(
+    "div",
+    { class: "row", style: { margin: "12px 0", flexWrap: "wrap" } },
+    choose("Action", "All actions", facets.actions, filter.action, label, (v) =>
+      set("action", v),
+    ),
+    choose(
+      "User",
+      "All users",
+      facets.actors,
+      filter.actor,
+      (a) => a,
+      (v) => set("actor", v),
+    ),
+    active
+      ? h(
+          "button",
+          {
+            class: "btn btn-quiet btn-sm",
+            onClick: () => {
+              sessionStorage.removeItem("keera.audit.action");
+              sessionStorage.removeItem("keera.audit.actor");
+              ctx.reload();
+            },
+          },
+          "Clear",
+        )
+      : null,
+  );
 
-  const wrap = h("div", {}, controls, body);
+  const list = entries.length ? auditTable(entries) : null;
+  const body =
+    list ||
+    h(
+      "div",
+      { class: "card" },
+      active
+        ? empty(
+            "Nothing matches these filters",
+            filter.since
+              ? "Clear the filters, or pick a longer period."
+              : "Clear the filters.",
+          )
+        : filter.since
+          ? empty(
+              "Nothing recorded in this period",
+              "Pick a longer period. Changes made in the panel, the CLI or " +
+                "the API show up here.",
+            )
+          : empty(
+              "Nothing recorded yet",
+              "Changes made in the panel, the CLI or the API show up here.",
+            ),
+    );
 
-  // Paging appends rather than replacing, so somebody reading backwards
-  // through a day keeps everything they have already read on the screen.
+  const wrap = h("div", {}, head, filters, body);
+
+  // Paging adds to the one table rather than replacing it, so somebody reading
+  // backwards through a day keeps everything they have already read on the
+  // screen.
   if (entries.length === PAGE) {
     let before = res.next_before;
     const more = h(
@@ -225,7 +246,8 @@ export async function auditView(ctx) {
               since: filter.since,
             });
             const rows = next.data || [];
-            wrap.insertBefore(auditTable(rows), moreWrap);
+            entries.push(...rows);
+            list.redraw();
             before = next.next_before;
             if (rows.length < PAGE) {
               moreWrap.replaceChildren(
@@ -267,8 +289,31 @@ export async function auditView(ctx) {
   return wrap;
 }
 
+// choose is one filter. Like the request log's, it is left out when it has
+// fewer than two values to pick from, unless one is set and needs clearing.
+function choose(aria, all, values, selected, name, onPick) {
+  if (!selected && values.length < 2) return null;
+  const options =
+    values.includes(selected) || !selected ? values : [selected, ...values];
+  return h(
+    "select",
+    {
+      class: "select",
+      style: { width: "auto" },
+      "aria-label": aria,
+      onChange: (e) => onPick(e.target.value),
+    },
+    h("option", { value: "" }, all),
+    options.map((v) =>
+      h("option", { value: v, selected: v === selected }, name(v)),
+    ),
+  );
+}
+
 function describe(filter, count) {
-  const bits = [`${count === 100 ? "100+" : count} entries`];
+  const bits = [
+    `${count === PAGE ? PAGE + "+" : num(count)} ${plural(count, "entry", "entries")}`,
+  ];
   const range = RANGES.find((r) => r.since === filter.since);
   if (range) bits.push(range.since ? `last ${range.label}` : "all time");
   if (filter.action) bits.push(label(filter.action));
@@ -283,7 +328,11 @@ function auditTable(entries) {
         label: "When",
         shrink: true,
         cell: (e) =>
-          h("span", { class: "muted nowrap", title: e.ts }, ago(e.ts)),
+          h(
+            "span",
+            { class: "muted nowrap", title: dateTime(e.ts) },
+            ago(e.ts),
+          ),
       },
       {
         label: "Who",
@@ -333,7 +382,7 @@ function auditTable(entries) {
                   title: "Show details",
                   onClick: () =>
                     modal({
-                      title: e.action,
+                      title: label(e.action),
                       subtitle: `${e.actor} · ${dateTime(e.ts)}`,
                       body: h(
                         "pre",

@@ -52,21 +52,22 @@ type sandboxRun struct {
 }
 
 func sandboxCmd(ctx context.Context, args []string) error {
-	// 'usage' is a report, which spans every organisation the caller can see
-	// unless told one.
-	org := "org"
-	if verbAsked("sandbox", args) == "usage" {
-		org = "orgs"
+	// ssh runs 'proxy' from a ProxyCommand, which names the organisation so
+	// that switching to another later does not break it.
+	shared := []string{"yes", "json"}
+	if verbAsked("sandbox", args) == "proxy" {
+		shared = append(shared, "org")
 	}
-	r := &sandboxRun{cmdRun: newCmdRun("sandbox", args, org, "yes", "json")}
+	r := &sandboxRun{cmdRun: newCmdRun("sandbox", args, shared...)}
 	fs := r.fs
-	fs.StringVar(&r.project, "project", "", "project the sandbox belongs to, by name or id. A new sandbox without it goes in the "+
-		"organisation's oldest project; a list without it shows every project. Its key is in "+
-		"that project, so the budget, the rate limit and the allowed models are the project's")
-	fs.StringVar(&r.class, "class", "", "which machine to ask for, or on 'list' which to show; "+
-		"'keera sandbox classes' lists them")
-	fs.StringVar(&r.purpose, "purpose", "", "'engineer' - a machine you work in - or 'agent' - one task's; "+
-		"on 'list', which to show")
+	fs.StringVar(&r.project, "project", "", "project the sandbox belongs to, by name or id; without it, "+
+		"the organisation's oldest. Its key is in that project, so the budget, the rate limit "+
+		"and the allowed models are the project's")
+	fs.StringVar(&r.class, "class", "", "which machine to ask for; 'keera sandbox classes' lists them")
+	fs.StringVar(&r.purpose, "purpose", "", "'engineer' - a machine you work in - or 'agent' - one task's")
+	r.reword("list", "project", "only the sandboxes of one project, by name or id")
+	r.reword("list", "class", "only the sandboxes of one class")
+	r.reword("list", "purpose", "only the sandboxes for one purpose: engineer or agent")
 	fs.DurationVar(&r.ttl, "ttl", 0, "how long it lives; the class's default if not given")
 	fs.StringVar(&r.repo, "repo", "", "repository to check out into it")
 	fs.StringVar(&r.branch, "branch", "", "branch to check out")
@@ -76,8 +77,8 @@ func sandboxCmd(ctx context.Context, args []string) error {
 		"a file holding the public key that may open a shell in it, such as "+
 			"~/.ssh/id_ed25519.pub (default: every *.pub file in ~/.ssh)")
 	fs.BoolVar(&r.all, "all", false, "include sandboxes that have finished")
-	fs.StringVar(&r.by, "by", "class", "group 'usage' by class, project or user")
-	fs.DurationVar(&r.since, "since", reportWindow, "how far back 'usage' looks")
+	fs.StringVar(&r.by, "by", "class", "group by: class, project or user")
+	fs.DurationVar(&r.since, "since", reportWindow, sinceUsage)
 	if done, err := r.parse(); done {
 		return err
 	}
@@ -262,8 +263,8 @@ func (r *sandboxRun) suspendOrResume(ctx context.Context) error {
 	return out(r.asJSON, res, func(w *table) { printSandbox(w, res) })
 }
 
-// usage spans every organisation the caller can see unless --org names one,
-// as 'keera usage' does.
+// usage spans every organisation the caller can see unless one is chosen, as
+// 'keera usage' does.
 func (r *sandboxRun) usage(ctx context.Context) error {
 	q, err := reportQuery(ctx, r.c, r.org, nil, r.since, map[string]string{"group_by": r.by})
 	if err != nil {

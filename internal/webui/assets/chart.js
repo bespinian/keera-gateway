@@ -4,7 +4,7 @@
 // library would be the largest dependency in a binary whose whole pitch is that
 // it has almost none.
 
-import { h, svg, compact, money, num } from "./ui.js";
+import { h, svg, compact, money, num, empty } from "./ui.js";
 
 const PAD = { top: 12, right: 8, bottom: 22, left: 42 };
 
@@ -23,7 +23,7 @@ export function areaChart(
 ) {
   const holder = h("div", { class: "chart-holder" });
   if (!points || points.length === 0) {
-    holder.append(h("div", { class: "empty" }, "No requests in this period."));
+    holder.append(empty("No requests in this period"));
     return holder;
   }
 
@@ -250,14 +250,14 @@ export function barList(
   { label, value, currency, colorIndex = 0, color: colorFor } = {},
 ) {
   if (!rows || rows.length === 0) {
-    return h("div", { class: "empty" }, "Nothing recorded yet.");
+    return empty("Nothing recorded yet");
   }
-  const max = Math.max(...rows.map((r) => Math.abs(value(r))), 1);
+  const max = Math.max(...rows.map((r) => Math.abs(value(r) || 0)), 1);
   return h(
     "div",
     { class: "bars" },
     rows.map((r, i) => {
-      const v = value(r);
+      const v = value(r) || 0;
       // Ranked lists are categorical, so position picks the colour. A list
       // whose rows mean something - an outcome split, say - passes `color`
       // instead, so a row keeps its colour when the rows above it drop out.
@@ -282,7 +282,7 @@ export function barList(
         h(
           "div",
           { class: "nowrap muted" },
-          currency ? money(r.cost_micros, currency) : compact(v),
+          currency ? money(v, currency) : compact(v),
         ),
       );
     }),

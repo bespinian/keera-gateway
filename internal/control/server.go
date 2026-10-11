@@ -195,6 +195,8 @@ func (s *Server) Handler() http.Handler {
 	route("POST /auth/logout", s.logout)
 
 	route("GET /v1/me", s.me)
+	// Moves the caller's sign-in to another organisation they are in.
+	route("POST /v1/me/org", s.switchOrg)
 	// The one read shaped for the developer: their own keys, limits and
 	// refusals.
 	route("GET /v1/access", s.access)
@@ -474,7 +476,7 @@ func (s *Server) scopeOrg(w http.ResponseWriter, p *authn.Principal, requested s
 
 // orgRequired is what an operator looking at every organisation at once is
 // told by a route that needs one.
-const orgRequired = "choose an organisation: pass org_id, or --org on the command line"
+const orgRequired = "choose an organisation: pass org_id, or run 'keera org switch' first"
 
 // requireOrg is scopeOrg for a route that needs exactly one organisation. An
 // operator looking at all of them at once is told msg.

@@ -75,20 +75,20 @@ const NARROWINGS = [
 //
 // The same reader asks this filter in two sizes within a minute: "which of
 // these was the 402" is one code, and "did anything fail this afternoon" is
-// all of 5XX at once, asked by somebody who does not know which code their
+// all of 5xx at once, asked by somebody who does not know which code their
 // backends answer with.
 //
 // The value is what the control plane reads as a class, and `holds` is the
 // same division over the facet counts, so a class is offered with how many
 // rows carry it exactly as an exact status is.
 const STATUS_CLASSES = [
-  { value: "5xx", label: "Server errors (5XX)", holds: (s) => s >= 500 },
+  { value: "5xx", label: "Server errors (5xx)", holds: (s) => s >= 500 },
   {
     value: "4xx",
-    label: "Client errors (4XX)",
+    label: "Client errors (4xx)",
     holds: (s) => s >= 400 && s < 500,
   },
-  { value: "2xx", label: "Answered (2XX)", holds: (s) => s >= 200 && s < 300 },
+  { value: "2xx", label: "Served (2xx)", holds: (s) => s >= 200 && s < 300 },
 ];
 
 // statusFilterLabel names one status filter with no row beside it to read: a
@@ -103,7 +103,7 @@ function statusFilterLabel(v) {
 // one of them is the whole class they meant, and a reader looking for the 402
 // should not have to scroll past the classes to find it.
 //
-// A class is listed only when the window holds something in it: offering 4XX
+// A class is listed only when the window holds something in it: offering 4xx
 // in a window without one would be offering a filter that selects nothing.
 function statusOptions(counts, selected) {
   const groups = STATUS_CLASSES.map((c) => ({
@@ -186,7 +186,7 @@ export function setOutcome(outcome) {
 }
 
 /** openFailed points the Requests screen at the server errors and nothing
- *  else, for the dashboard's failure count, which counts the same 5XX rows.
+ *  else, for the dashboard's failure count, which counts the same 5xx rows.
  *
  *  It clears the rest of the narrowing. The count on that pill is over the
  *  whole organisation, and a model or a key still selected from somebody's
@@ -295,7 +295,7 @@ export function rankedNote(count, what) {
   return h(
     "div",
     { class: "hint", style: { marginTop: "12px", textAlign: "center" } },
-    `The top ${num(count)} ${what}. Narrow the filters or the range to see ` +
+    `The top ${num(count)} ${what}. Narrow the filters or the period to see ` +
       "others, or sort by time to page through all of them.",
   );
 }

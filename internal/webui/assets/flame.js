@@ -11,7 +11,7 @@
 // them are real: a chart that closed the gaps would hide the one thing it was
 // opened for.
 
-import { h } from "./ui.js";
+import { h, ms } from "./ui.js";
 
 // What each step is, in the words somebody reading their own request would use,
 // and which of the four things a request's time can go on it belongs to.
@@ -111,7 +111,8 @@ function micros(v) {
   if (n < 1000) return n + " µs";
   if (n < 10000) return (n / 1000).toFixed(1) + " ms";
   if (n < 1000000) return Math.round(n / 1000) + " ms";
-  return (n / 1000000).toFixed(n < 10000000 ? 2 : 1) + " s";
+  // Seconds as ms() writes them, so a step reads like the total above it.
+  return ms(n / 1000);
 }
 
 // pct writes one bar's geometry. Three decimals is a tenth of a pixel on any

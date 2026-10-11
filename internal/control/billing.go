@@ -66,12 +66,16 @@ func (s *Server) billing(w http.ResponseWriter, r *http.Request, p *authn.Princi
 		totals = addTotal(totals, row, operator)
 	}
 	month := from.Format("2006-01")
+	// What came out of prepaid credit only means something on a deployment
+	// that takes payments.
+	payments := s.opts.Payments != nil
 	if q.Get("format") == "csv" {
-		billingCSV(w, month, lines, operator)
+		billingCSV(w, month, lines, operator, payments)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"month": month, "from": from, "to": to, "data": lines, "totals": totals,
+		"payments": payments,
 	})
 }
 
@@ -115,10 +119,13 @@ func parseMonth(raw string, now time.Time) (time.Time, error) {
 	return t, nil
 }
 
-func billingCSV(w http.ResponseWriter, month string, lines []billingLine, operator bool) {
+func billingCSV(w http.ResponseWriter, month string, lines []billingLine, operator, payments bool) {
 	cw := beginCSV(w, "keera-billing-"+month+".csv")
 	head := []string{"month", "org_id", "org_name", "provider", "model", "currency", "calls",
 		"input_tokens", "cached_input_tokens", "cache_write_tokens", "output_tokens", "amount"}
+	if payments {
+		head = append(head, "from_credit_chf")
+	}
 	if operator {
 		head = append(head, "provider_cost", "margin")
 	}
@@ -131,6 +138,9 @@ func billingCSV(w http.ResponseWriter, month string, lines []billingLine, operat
 			strconv.FormatInt(l.CacheWriteTokens, 10),
 			strconv.FormatInt(l.OutputTokens, 10),
 			policy.FormatMicros(l.Micros)}
+		if payments {
+			rec = append(rec, policy.FormatMicros(l.CreditMicros))
+		}
 		if operator {
 			rec = append(rec, policy.FormatMicros(*l.ProviderMicros), policy.FormatMicros(*l.MarginMicros))
 		}

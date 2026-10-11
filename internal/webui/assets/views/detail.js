@@ -22,6 +22,7 @@ import {
   go,
   compact,
   num,
+  listPrice,
   money,
   ms,
   ago,
@@ -37,21 +38,26 @@ import {
   gone,
   isAdmin,
   plural,
+  pct,
 } from "../ui.js";
 import { areaChart, barList } from "../chart.js";
 import { requestLog } from "./requestlog.js";
 import { setOutcome } from "./logfilters.js";
 import { sessionLog } from "./sessions.js";
 import { modelsCell, summarise } from "./guardrails.js";
-import { openModel } from "./models.js";
+import { openModel, checkModel } from "./models.js";
 import {
   canRevoke,
   confirmRevoke,
+  confirmRotate,
+  renameKey,
+  inPeriod,
+  NO_USER,
   openKey,
   statePill,
   stateOf,
 } from "./keys.js";
-import { openProject } from "./projects.js";
+import { openProject, editProject, deleteProject } from "./projects.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
 import {
   TONE,
@@ -93,7 +99,7 @@ export async function projectDetailView(ctx) {
     back: { path: "/projects", label: "Projects" },
     title: project.name,
     identity: project.id,
-    note: project.description,
+    description: project.description,
     scope: { project_id: project.id },
     hide: { project: true },
     meta: [
@@ -114,6 +120,31 @@ export async function projectDetailView(ctx) {
         icon(icons.sliders),
         canEdit ? "Guardrails" : "View guardrails",
       ),
+      canEdit
+        ? h(
+            "button",
+            {
+              class: "btn",
+              title: "Edit this project",
+              onClick: () => editProject(ctx, project),
+            },
+            icon(icons.pencil),
+            "Edit",
+          )
+        : null,
+      canEdit
+        ? h(
+            "button",
+            {
+              class: "btn btn-danger",
+              title: "Delete this project",
+              onClick: () =>
+                deleteProject(ctx, project, () => ctx.navigate("/projects")),
+            },
+            icon(icons.trash),
+            "Delete",
+          )
+        : null,
     ],
     panels: (o, names) => [
       barPanel(
@@ -124,10 +155,10 @@ export async function projectDetailView(ctx) {
         1,
       ),
       barPanel(
-        "Keys by spend",
+        "Keys by cost",
         o.top_keys,
         (r) => names.keys[r.group] || r.group || "No key",
-        (r) => r.cost_micros || r.requests,
+        (r) => r.cost_micros,
         3,
         ctx.currency,
       ),
@@ -149,11 +180,7 @@ export async function projectDetailView(ctx) {
                   { class: "muted" },
                   summarise(project.limits).join(" · "),
                 )
-              : h(
-                  "span",
-                  { class: "faint" },
-                  "inherited from the organisation",
-                ),
+              : h("span", { class: "faint" }, `Inherited from ${orgName}`),
           ],
           ["Created", h("span", { class: "muted" }, date(project.created_at))],
         ]),
@@ -169,8 +196,11 @@ export async function projectDetailView(ctx) {
 /* ------------------------------------------------------------------- keys */
 
 export async function keyDetailView(ctx) {
+  // Read over the picker's period, so Last used covers the same span as the
+  // numbers below it.
+  const since = currentRange();
   const [keysRes, projectsRes, usersRes] = await Promise.all([
-    api.keys(ctx.orgID),
+    api.keys(ctx.orgID, { since }),
     api.projects(ctx.orgID).catch(() => ({ data: [] })),
     api.users(ctx.orgID).catch(() => ({ data: [] })),
   ]);
@@ -222,7 +252,7 @@ export async function keyDetailView(ctx) {
             },
             project ? project.name : key.project_id,
           )
-        : pill("Deleted"),
+        : pill("Deleted project"),
       // Only an administrator has the Users screen to open.
       person && isAdmin(ctx)
         ? h(
@@ -251,12 +281,46 @@ export async function keyDetailView(ctx) {
         icon(icons.sliders),
         canEdit ? "Guardrails" : "View guardrails",
       ),
+      canRevoke(ctx, key)
+        ? h(
+            "button",
+            {
+              class: "btn",
+              title: "Rename this key",
+              onClick: () => renameKey(ctx, key),
+            },
+            icon(icons.pencil),
+            "Rename",
+          )
+        : null,
+      // The old key is revoked by the rotation, so the screen moves to the
+      // new one.
+      canRevoke(ctx, key) && state !== "revoked"
+        ? h(
+            "button",
+            {
+              class: "btn",
+              title: "Replace this key with a new one",
+              onClick: () =>
+                confirmRotate(ctx, key, {
+                  done: (created) =>
+                    ctx.navigate("/keys/" + encodeURIComponent(created.id)),
+                }),
+            },
+            "Rotate",
+          )
+        : null,
       canRevoke(ctx, key) && state === "active"
         ? h(
             "button",
             {
               class: "btn btn-danger",
-              onClick: () => confirmRevoke(key, () => ctx.navigate("/keys")),
+              onClick: () =>
+                confirmRevoke(
+                  key,
+                  () => ctx.navigate("/keys"),
+                  inPeriod(since),
+                ),
             },
             "Revoke",
           )
@@ -283,7 +347,7 @@ export async function keyDetailView(ctx) {
               "User",
               person
                 ? h("span", { class: "muted" }, person.email)
-                : h("span", { class: "faint" }, "none"),
+                : h("span", { class: "faint" }, NO_USER),
             ],
             ["Issued", h("span", { class: "muted" }, date(key.created_at))],
             [
@@ -300,7 +364,7 @@ export async function keyDetailView(ctx) {
                     { class: "muted", title: dateTime(key.last_used_at) },
                     ago(key.last_used_at),
                   )
-                : h("span", { class: "faint" }, "not this month"),
+                : h("span", { class: "faint" }, `not ${inPeriod(since)}`),
             ],
             [
               "Guardrails",
@@ -310,7 +374,11 @@ export async function keyDetailView(ctx) {
                     { class: "muted" },
                     summarise(key.limits).join(" · "),
                   )
-                : h("span", { class: "faint" }, "the project's"),
+                : h(
+                    "span",
+                    { class: "faint" },
+                    `Inherited from ${project ? project.name : orgNameOf(ctx, key.org_id)}`,
+                  ),
             ],
           ]),
         ),
@@ -371,24 +439,45 @@ export async function modelDetailView(ctx) {
               "aria-label": canEdit ? "Edit model" : null,
               onClick: () => openModel(ctx, model),
             },
-            canEdit ? icon(icons.pencil) : [icon(icons.models), "View model"],
+            canEdit
+              ? [icon(icons.pencil), "Edit"]
+              : [icon(icons.models), "View model"],
           ),
+          canEdit
+            ? h(
+                "button",
+                {
+                  class: "btn",
+                  title: "Send a test request to this model's backend",
+                  onClick: async (e) => {
+                    const button = e.currentTarget;
+                    button.disabled = true;
+                    try {
+                      await checkModel(model);
+                    } finally {
+                      button.disabled = false;
+                    }
+                  },
+                },
+                "Check",
+              )
+            : null,
         ]
       : [],
     panels: (o, names) => [
       barPanel(
-        "Projects by spend",
+        "Projects by cost",
         o.top_projects,
         (r) => names.projects[r.group] || r.group || "No project",
-        (r) => r.cost_micros || r.requests,
+        (r) => r.cost_micros,
         0,
         ctx.currency,
       ),
       barPanel(
-        "Keys by spend",
+        "Keys by cost",
         o.top_keys,
         (r) => names.keys[r.group] || r.group || "No key",
-        (r) => r.cost_micros || r.requests,
+        (r) => r.cost_micros,
         3,
         ctx.currency,
       ),
@@ -441,8 +530,8 @@ export async function modelDetailView(ctx) {
                   ? h(
                       "span",
                       { class: "muted nowrap" },
-                      `${money(model.input_micros_per_mtok, "")} in · ` +
-                        `${money(model.output_micros_per_mtok, "")} out`,
+                      `${listPrice(model.input_micros_per_mtok, "")} in · ` +
+                        `${listPrice(model.output_micros_per_mtok, "")} out`,
                     )
                   : h("span", { class: "faint" }, "not billed"),
               ],
@@ -537,10 +626,10 @@ export async function userDetailView(ctx) {
         1,
       ),
       barPanel(
-        "Keys by spend",
+        "Keys by cost",
         o.top_keys,
         (r) => names.keys[r.group] || r.group || "No key",
-        (r) => r.cost_micros || r.requests,
+        (r) => r.cost_micros,
         3,
         ctx.currency,
       ),
@@ -616,6 +705,8 @@ export async function userDetailView(ctx) {
 
 // screen draws all four. Everything above the chart is what makes this entity
 // that entity; everything from the chart down is the same report every time.
+// spec.description is what the thing says about itself, under the header;
+// spec.note is how to read the numbers, at the bottom.
 async function screen(ctx, spec) {
   const since = currentRange();
   const res = await api.overview(ctx.orgID, since, spec.scope);
@@ -643,9 +734,13 @@ async function screen(ctx, spec) {
   );
 
   const wrap = h("div", {}, head);
-  if (spec.note) {
+  if (spec.description) {
     wrap.append(
-      h("p", { class: "muted", style: { margin: "0 0 16px" } }, spec.note),
+      h(
+        "p",
+        { class: "muted", style: { margin: "0 0 16px" } },
+        spec.description,
+      ),
     );
   }
   if (spec.banner) {
@@ -658,7 +753,6 @@ async function screen(ctx, spec) {
     );
   }
 
-  const failRate = o.requests ? (o.failed / o.requests) * 100 : 0;
   wrap.append(
     h(
       "div",
@@ -675,7 +769,7 @@ async function screen(ctx, spec) {
         null,
         `${compact(o.input_tokens)} in · ${compact(o.output_tokens)} out`,
       ),
-      stat("Spend", money(o.cost_micros, ""), currency),
+      stat("Cost", money(o.cost_micros, ""), currency),
       stat(
         "First token",
         ms(o.ttft_median_ms),
@@ -704,7 +798,7 @@ async function screen(ctx, spec) {
           o.failed > 0
             ? failureJump(
                 ctx,
-                `${num(o.failed)} failed (${failRate.toFixed(1)}%)`,
+                `${num(o.failed)} failed (${pct(o.failed, o.requests)})`,
                 spec.sessions,
               )
             : h(
@@ -719,10 +813,10 @@ async function screen(ctx, spec) {
           { class: "card-body" },
           o.requests === 0
             ? empty(
-                "Nothing recorded in this window",
+                "Nothing recorded in this period",
                 spec.sessions
-                  ? "Widen the range."
-                  : "Widen the range, or see the refused requests below.",
+                  ? "Pick a longer period."
+                  : "Pick a longer period, or see the refused requests below.",
               )
             : areaChart(o.series, { currency, bucket: o.bucket }),
         ),

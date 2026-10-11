@@ -52,6 +52,8 @@ func newFakeControl(t *testing.T, handlers map[string]any) *fakeControl {
 	t.Cleanup(srv.Close)
 	t.Setenv("KEERA_CONTROL_URL", srv.URL)
 	t.Setenv("KEERA_OPERATOR_KEY", "test-operator-key")
+	// No organisation is chosen unless a test chooses one.
+	t.Setenv("KEERA_ORG", "")
 	return f
 }
 
@@ -258,7 +260,7 @@ func TestOrgSetNamesTheArgumentWhenThereAreSeveral(t *testing.T) {
 
 	// Not "pass --org <id>": this command has no such flag.
 	err := Run(context.Background(), []string{"org", "set", "--domain", "example.ch"})
-	if err == nil || !strings.Contains(err.Error(), "keera org set <org-id>") {
+	if err == nil || !strings.Contains(err.Error(), "keera org set <org>") {
 		t.Fatalf("error = %v, want it to name the argument", err)
 	}
 }
@@ -1141,7 +1143,7 @@ func TestSetClearsADescriptionAndRefusesNothing(t *testing.T) {
 
 // set, and edit and update, its other names, change what they are given and
 // keep the rest. Shadow has two flags so that a set naming neither does not
-// switch a shadow filter to enforcing. And --enforce moves nothing else: what
+// switch a shadow filter to enforcing. And --no-shadow moves nothing else: what
 // the shadow run measured is what goes live.
 func TestFilterAndRouterSetKeepTheRest(t *testing.T) {
 	filter := map[string]any{
@@ -1154,7 +1156,7 @@ func TestFilterAndRouterSetKeepTheRest(t *testing.T) {
 	}{
 		{[]string{"--model", "keera-guard-2"}, map[string]any{"model": "keera-guard-2"}},
 		{[]string{"--description", "changed"}, map[string]any{"description": "changed"}},
-		{[]string{"--enforce"}, map[string]any{"shadow": false}},
+		{[]string{"--no-shadow"}, map[string]any{"shadow": false}},
 	}
 	for _, verb := range []string{"set", "edit", "update"} {
 		for _, c := range changes {
@@ -1204,20 +1206,31 @@ func TestFilterAndRouterSetKeepTheRest(t *testing.T) {
 	}
 }
 
-func TestFilterAddInShadowSaysSo(t *testing.T) {
-	quiet(t)
-	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs":                   oneOrg,
-		"GET /v1/filters":                map[string]any{"data": []any{}},
-		"PUT /v1/filters/redact-secrets": map[string]any{"alias": "redact-secrets"},
-	})
+// A new filter starts in shadow, as it does in the panel, and --no-shadow
+// enforces from the start.
+func TestFilterAddStartsInShadow(t *testing.T) {
+	for _, tc := range []struct {
+		flags []string
+		want  bool
+	}{
+		{nil, true},
+		{[]string{"--no-shadow"}, false},
+	} {
+		quiet(t)
+		f := newFakeControl(t, map[string]any{
+			"GET /v1/orgs":                   oneOrg,
+			"GET /v1/filters":                map[string]any{"data": []any{}},
+			"PUT /v1/filters/redact-secrets": map[string]any{"alias": "redact-secrets"},
+		})
 
-	if err := Run(context.Background(), []string{"filter", "add", "redact-secrets",
-		"--model", "keera-guard", "--prompt", "Remove credentials.", "--shadow"}); err != nil {
-		t.Fatalf("filter add --shadow: %v", err)
-	}
-	if req := f.request("PUT", "/v1/filters/redact-secrets"); req.body["shadow"] != true {
-		t.Errorf("shadow = %v, want the filter written not enforcing", req.body["shadow"])
+		args := append([]string{"filter", "add", "redact-secrets",
+			"--model", "keera-guard", "--prompt", "Remove credentials."}, tc.flags...)
+		if err := Run(context.Background(), args); err != nil {
+			t.Fatalf("filter add %v: %v", tc.flags, err)
+		}
+		if req := f.request("PUT", "/v1/filters/redact-secrets"); req.body["shadow"] != tc.want {
+			t.Errorf("filter add %v: shadow = %v, want %v", tc.flags, req.body["shadow"], tc.want)
+		}
 	}
 }
 
@@ -1378,8 +1391,8 @@ func TestAnOrganisationsGuardrailNeedsNoID(t *testing.T) {
 	}
 }
 
-// With several organisations, --org names one, whichever verb it follows.
-func TestModelOrgFlagPicksOneOfSeveralOrganisations(t *testing.T) {
+// With several organisations, the chosen one is the one a command acts on.
+func TestModelListUsesTheChosenOrganisation(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
 		"GET /v1/me": map[string]any{"role": "operator"},
@@ -1389,7 +1402,8 @@ func TestModelOrgFlagPicksOneOfSeveralOrganisations(t *testing.T) {
 		"GET /v1/models": map[string]any{"data": []map[string]any{}},
 	})
 
-	if err := modelCmd(context.Background(), []string{"list", "--org", "org_b"}); err != nil {
+	t.Setenv("KEERA_ORG", "org_b")
+	if err := modelCmd(context.Background(), []string{"list"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.request("GET", "/v1/models").query; got != "org_id=org_b" {
@@ -1555,7 +1569,7 @@ func TestGuardrailTakesAProjectByName(t *testing.T) {
 	}
 }
 
-// With several organisations, --org says which one a name is looked up in.
+// With several organisations, the chosen one is where a name is looked up.
 func TestGuardrailTakesAProjectByNameInOneOfSeveralOrgs(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
@@ -1569,10 +1583,11 @@ func TestGuardrailTakesAProjectByNameInOneOfSeveralOrgs(t *testing.T) {
 		"GET /v1/guardrails/project/project_1/effective": map[string]any{},
 	})
 	if err := Run(context.Background(), []string{"budget", "project", "payments"}); err == nil ||
-		!strings.Contains(err.Error(), "--org") {
-		t.Errorf("without --org = %v, want to be told to pass it", err)
+		!strings.Contains(err.Error(), "keera org switch") {
+		t.Errorf("without a chosen organisation = %v, want to be told to choose one", err)
 	}
-	if err := Run(context.Background(), []string{"budget", "project", "payments", "--org", "org_1",
+	t.Setenv("KEERA_ORG", "org_1")
+	if err := Run(context.Background(), []string{"budget", "project", "payments",
 		"--budget", "500"}); err != nil {
 		t.Fatal(err)
 	}
@@ -1778,13 +1793,14 @@ func TestALeadingFlagIsTheListing(t *testing.T) {
 	f := newFakeControl(t, map[string]any{
 		"GET /v1/projects": map[string]any{"data": []any{}},
 	})
-	if err := Run(context.Background(), []string{"project", "--org", "org_1"}); err != nil {
+	t.Setenv("KEERA_ORG", "org_1")
+	if err := Run(context.Background(), []string{"project", "--json"}); err != nil {
 		t.Fatal(err)
 	}
 	f.request("GET", "/v1/projects")
-	err := Run(context.Background(), []string{"guardrail", "--org", "org_1"})
+	err := Run(context.Background(), []string{"guardrail", "--json"})
 	if err == nil || !strings.Contains(err.Error(), "needs a subcommand") {
-		t.Errorf("guardrail --org: err = %v, want it to ask for a subcommand", err)
+		t.Errorf("guardrail --json: err = %v, want it to ask for a subcommand", err)
 	}
 }
 
@@ -1812,5 +1828,130 @@ func TestShortDuration(t *testing.T) {
 		if got := shortDuration(d); got != want {
 			t.Errorf("shortDuration(%v) = %q, want %q", d, got, want)
 		}
+	}
+}
+
+// An organisation is named by its name wherever a command takes one, as a
+// project, a key and a person are.
+func TestOrgCommandsTakeAName(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/orgs":              oneOrg,
+		"PATCH /v1/orgs/org_1":      map[string]any{"id": "org_1", "name": "Example Bank AG"},
+		"DELETE /v1/orgs/org_1":     map[string]any{"id": "org_1"},
+		"PATCH /v1/billing/account": map[string]any{"org_id": "org_1", "invoiced": true},
+	})
+	for _, args := range [][]string{
+		{"org", "set", "example bank", "--name", "Example Bank AG"},
+		{"org", "delete", "Example Bank", "--yes"},
+		{"billing", "invoiced", "--org", "Example Bank"},
+	} {
+		if err := Run(context.Background(), args); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+	}
+	f.request("PATCH", "/v1/orgs/org_1")
+	f.request("DELETE", "/v1/orgs/org_1")
+	if q := f.request("PATCH", "/v1/billing/account").query; !strings.Contains(q, "org_id=org_1") {
+		t.Errorf("invoiced went to %q, want org_1", q)
+	}
+}
+
+// 'invoiced' is switched off with --off, as 'auto-topup' is.
+func TestBillingInvoicedOff(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"PATCH /v1/billing/account": map[string]any{"org_id": "org_1"},
+	})
+	if err := Run(context.Background(), []string{"billing", "invoiced", "--org", "org_1", "--off"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.request("PATCH", "/v1/billing/account").body["invoiced"]; got != false {
+		t.Errorf("invoiced = %v, want false", got)
+	}
+}
+
+// Forgetting the card asks first, as the panel does, and --yes skips that.
+func TestBillingForgetCardConfirms(t *testing.T) {
+	account := map[string]any{"payments": true, "account": map[string]any{
+		"org_id": "org_1", "card": map[string]any{"label": "Visa 4242"},
+	}}
+
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/billing/account":         account,
+		"DELETE /v1/billing/account/card": nil,
+	})
+	stdin(t, "no\n")
+	t.Setenv("KEERA_ORG", "org_1")
+	if err := Run(context.Background(), []string{"billing", "forget-card"}); err == nil {
+		t.Error("a wrong answer forgot the card")
+	}
+	if f.called("DELETE", "/v1/billing/account/card") {
+		t.Error("the card was deleted without a confirmation")
+	}
+
+	if err := Run(context.Background(), []string{"billing", "forget-card", "--yes"}); err != nil {
+		t.Fatal(err)
+	}
+	f.request("DELETE", "/v1/billing/account/card")
+}
+
+// stdin makes text what the command reads from the terminal.
+func stdin(t *testing.T, text string) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = w.WriteString(text)
+	_ = w.Close()
+	old := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = old; _ = r.Close() })
+}
+
+// Each part of a guardrail is cleared by its own --no- flag, so no word is
+// reserved that a model or a tool could be called.
+func TestGuardrailClearsWithNoFlags(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/guardrails/org/org_1": map[string]any{
+			"allowed_models": []string{"keera-speed"}, "block_hosted_tools": true,
+		},
+		"PUT /v1/guardrails/org/org_1": map[string]any{},
+	})
+	if err := Run(context.Background(), []string{"guardrail", "set", "org", "org_1",
+		"--no-models", "--no-block-hosted-tools"}); err != nil {
+		t.Fatal(err)
+	}
+	body := f.request("PUT", "/v1/guardrails/org/org_1").body
+	if body["allowed_models"] != nil || body["block_hosted_tools"] != nil {
+		t.Errorf("sent %v, want both cleared", body)
+	}
+
+	err := Run(context.Background(), []string{"guardrail", "set", "org", "org_1",
+		"--models", "any", "--no-models"})
+	if err == nil || !strings.Contains(err.Error(), "opposites") {
+		t.Errorf("--models with --no-models: err = %v, want opposites", err)
+	}
+}
+
+// 'keera usage' narrows to a project, a key, a person or a model, as the other
+// reports do.
+func TestUsageNarrowsLikeTheOtherReports(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/orgs":     oneOrg,
+		"GET /v1/projects": paymentsProject,
+		"GET /v1/usage":    map[string]any{"data": []any{}},
+	})
+	if err := Run(context.Background(), []string{"usage", "--project", "payments",
+		"--model", "keera-speed"}); err != nil {
+		t.Fatal(err)
+	}
+	q := f.request("GET", "/v1/usage").query
+	if !strings.Contains(q, "project_id=project_1") || !strings.Contains(q, "alias=keera-speed") {
+		t.Errorf("usage query = %q, want the project and the model", q)
 	}
 }

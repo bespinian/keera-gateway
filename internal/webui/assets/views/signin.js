@@ -7,7 +7,15 @@
 
 import { api, ApiError } from "../api.js";
 import { getPasskey, passkeysSupported } from "../webauthn.js";
-import { h, replace, icon, icons, brandMark, idpMark } from "../ui.js";
+import {
+  h,
+  replace,
+  icon,
+  icons,
+  brandMark,
+  idpMark,
+  showError,
+} from "../ui.js";
 
 /** passkeySignInFlow is the sign-in `keera login --provider passkey` started,
  *  if this page was opened for one. It comes after the #, so it never reaches
@@ -44,7 +52,11 @@ export async function signIn(root, onSignedIn) {
     e.preventDefault();
     replace(message);
     const value = keyInput.value.trim();
-    if (!value) return;
+    if (!value) {
+      showError(message, "Enter the operator key.");
+      keyInput.focus();
+      return;
+    }
     button.disabled = true;
     button.textContent = "Signing in…";
     try {
@@ -110,14 +122,19 @@ export async function signIn(root, onSignedIn) {
 
   const cliFlow = passkeySignInFlow();
   const passkeyButton = (primary) => {
+    const supported = passkeysSupported();
+    const label = (text) => [icon(icons.passkey), text];
     const b = h(
       "button",
       {
         class: "btn" + (primary ? " btn-primary" : ""),
         style: { width: "100%", justifyContent: "center" },
+        disabled: !supported,
+        title: supported ? null : "This browser does not support passkeys",
         onClick: async () => {
           replace(message);
           b.disabled = true;
+          replace(b, label("Signing in…"));
           try {
             const opts = await api.passkeySignInOptions(cliFlow, next);
             const credential = await getPasskey(opts.options);
@@ -139,14 +156,23 @@ export async function signIn(root, onSignedIn) {
               ),
             );
             b.disabled = false;
+            replace(b, label("Sign in with a passkey"));
           }
         },
       },
-      icon(icons.passkey),
-      "Sign in with a passkey",
+      label("Sign in with a passkey"),
     );
-    if (!passkeysSupported()) b.disabled = true;
-    return b;
+    // A disabled button shows no tooltip in some browsers, so the reason is
+    // also written under it.
+    if (supported) return b;
+    return [
+      b,
+      h(
+        "div",
+        { class: "hint", style: { textAlign: "center" } },
+        "This browser does not support passkeys.",
+      ),
+    ];
   };
 
   if (cliFlow) {
@@ -193,7 +219,7 @@ export async function signIn(root, onSignedIn) {
               href: api.loginURL({ provider: p.name, next }),
             },
             idpMark(p.name) || icon(icons.signout),
-            "Continue with " + (p.label || p.name),
+            "Sign in with " + (p.label || p.name),
           ),
         ),
         config.passkeys ? passkeyButton(false) : null,
@@ -208,7 +234,7 @@ export async function signIn(root, onSignedIn) {
           ? "Sign in with your identity provider or a passkey. "
           : "Sign in with your identity provider. ") +
           (signUpWith
-            ? "New here? Continue with " +
+            ? "New here? Sign in with " +
               (signUpWith.label || signUpWith.name) +
               " to create an organisation."
             : "If you cannot, ask your administrator."),

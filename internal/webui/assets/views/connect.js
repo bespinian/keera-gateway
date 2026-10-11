@@ -211,7 +211,7 @@ export async function clientsView(ctx) {
     { class: "stack" },
     head,
     // Without a key there is nothing to add, so the reason comes first.
-    keys.length ? null : noKey(ctx, a, "A client connects with"),
+    keys.length ? null : noKey(ctx, a),
     list,
   );
 }
@@ -247,13 +247,7 @@ async function addClient(ctx, catalogue, keys, button) {
     const usable = keyModels(targets, state.key.allowed_models);
     models.replaceChildren(...modelList(usable));
     steps.replaceChildren(
-      usable.length
-        ? instructions(ctx, state, usable)
-        : empty(
-            "This key can use no chat model",
-            "Its guardrails allow no model that serves chat. Choose another " +
-              "key, or ask an administrator.",
-          ),
+      usable.length ? instructions(ctx, state, usable) : noModel(),
     );
   };
 
@@ -356,36 +350,50 @@ function modelList(models) {
 }
 
 /** noKey explains why the reader has no key to use, and where to get one.
- *  lead says what the key is for, as in "A client connects with". */
-export function noKey(ctx, a, lead) {
+ *  My access, My clients and the playground all show it, so the same
+ *  situation reads the same on each. */
+export function noKey(ctx, a) {
   if (a.anonymous || (a.operator_key && !(a.keys || []).length)) {
     return h(
       "div",
       { class: "card" },
       empty(
-        "The operator key has no API keys",
-        `${lead} one of your own API keys. Sign in with your identity ` +
-          "provider to use yours.",
+        "You signed in with the operator key",
+        "It is not a person, so it has no API keys, project or budget. Sign " +
+          "in with your identity provider to see yours.",
       ),
     );
   }
-  const canIssue = isAdmin(ctx);
+  // A key issued without a user still works, but nothing links it to the
+  // reader, so it is not counted here.
+  const unlinked =
+    "A key you already have may not be linked to you. It still works, but " +
+    "it does not show here.";
   return h(
     "div",
     { class: "card" },
     empty(
       "You have no active API key",
-      canIssue
+      isAdmin(ctx)
         ? h(
             "span",
             {},
-            `${lead} one of your own keys. Issue one on `,
+            "Issue one on ",
             h("a", { href: "/keys", onClick: go(ctx, "/keys") }, "API keys"),
-            ".",
+            ". " + unlinked,
           )
-        : `${lead} one of your own keys. Ask an administrator for a key ` +
-            "in your name.",
+        : "Ask an administrator for a key in your name. " + unlinked,
     ),
+  );
+}
+
+/** noModel is what a key that can call no chat model shows, on My clients and
+ *  in the playground. */
+export function noModel() {
+  return empty(
+    "This key can use no chat model",
+    "Its guardrails allow no model that serves chat. Choose another key, or " +
+      "ask an administrator.",
   );
 }
 

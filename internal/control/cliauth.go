@@ -213,7 +213,7 @@ func (s *Server) cliTokenTTL(r *http.Request, user store.User) (time.Duration, e
 	if s.directoryOf(user) == nil {
 		return authn.CLITokenTTL, nil
 	}
-	linked, err := s.st.HasRefreshToken(r.Context(), user.ID)
+	linked, err := s.st.HasRefreshToken(r.Context(), user.ExternalID)
 	if err != nil || linked {
 		return authn.CLITokenTTL, err
 	}

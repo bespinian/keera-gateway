@@ -32,7 +32,7 @@ type userRun struct {
 }
 
 func userCmd(ctx context.Context, args []string) error {
-	r := &userRun{cmdRun: newCmdRun("user", args, "org", "yes", "json")}
+	r := &userRun{cmdRun: newCmdRun("user", args, "yes", "json")}
 	fs := r.fs
 	fs.StringVar(&r.addRole, "role", "member", "member or admin")
 	fs.StringVar(&r.externalID, "external-id", "",
@@ -81,7 +81,7 @@ func (r *userRun) add(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	email := strings.TrimSpace(r.fs.Arg(0))
+	email := strings.ToLower(strings.TrimSpace(r.fs.Arg(0)))
 	// The endpoint refuses somebody already here too. Asking first names
 	// their current role and the command that changes it.
 	switch existing, err := findUser(ctx, r.c, orgID, email); {
@@ -147,23 +147,36 @@ func (r *userRun) list(ctx context.Context) error {
 			printNone(w, "people", "keera user add <email>")
 			return
 		}
-		w.header("ID\tEMAIL\tROLE\tSTATE\tIDP SUBJECT\tCREATED")
+		// The same columns as the panel's Users screen. The subject itself is
+		// in --json.
+		w.header("ID\tEMAIL\tROLE\tSTATE\tSIGNS IN WITH\tLAST ACTIVE\tADDED")
 		for _, u := range users {
-			subject := u.ExternalID
-			switch {
-			case subject == "":
-				subject = "(never signed in)"
-			case authn.IsPasskeyAccount(subject):
-				subject = "(passkey)"
-			}
 			state := statusWord("active")
 			if u.Disabled() {
 				state = statusWord("disabled") + " " + u.DisabledAt.Format(time.DateOnly)
 			}
-			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-				u.ID, u.Email, u.Role, state, subject, u.CreatedAt.Format(time.DateOnly))
+			active := "never"
+			if u.LastActiveAt != nil {
+				active = u.LastActiveAt.Local().Format(time.DateOnly)
+			}
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				u.ID, u.Email, u.Role, state, signsInWith(u.ExternalID), statusWord(active),
+				u.CreatedAt.Format(time.DateOnly))
 		}
 	})
+}
+
+// signsInWith names where a person signs in: the identity provider from the
+// part of their subject before the first colon, or a passkey.
+func signsInWith(subject string) string {
+	provider, _, _ := strings.Cut(subject, ":")
+	switch {
+	case authn.IsPasskeyAccount(subject):
+		return "passkey"
+	case provider == "" || provider == "keera":
+		return "(never signed in)"
+	}
+	return provider
 }
 
 func (r *userRun) role(ctx context.Context) error {
@@ -199,6 +212,9 @@ func (r *userRun) disable(ctx context.Context) error {
 		lines := []string{
 			"  they cannot sign in, and are signed out everywhere",
 			"  every key attributed to them is revoked, for good",
+		}
+		if authn.IsPasskeyAccount(user.ExternalID) {
+			lines = append(lines, "  their passkeys are removed")
 		}
 		if me, err := whoami(ctx, r.c); err == nil && me.Sandboxes {
 			lines = append(lines, "  their agent sandboxes and any not started yet are terminated; "+
@@ -252,6 +268,12 @@ func (r *userRun) enable(ctx context.Context) error {
 		return err
 	}
 	return out(r.asJSON, raw, func(w *table) {
+		if authn.IsPasskeyAccount(user.ExternalID) {
+			_, _ = fmt.Fprintf(w, "%s is enabled. Their old keys stay revoked, and their "+
+				"passkeys are gone. Send them a new set-up link:\n  %s\n",
+				res.Email, style.cmd("keera user passkey-link "+res.Email))
+			return
+		}
 		_, _ = fmt.Fprintf(w, "%s can sign in again. Their old keys stay revoked.\n", res.Email)
 	})
 }

@@ -38,15 +38,18 @@ type createdKey struct {
 }
 
 func keyCmd(ctx context.Context, args []string) error {
-	r := &keyRun{cmdRun: newCmdRun("key", args, "org", "yes", "json")}
+	r := &keyRun{cmdRun: newCmdRun("key", args, "yes", "json")}
 	fs := r.fs
-	fs.StringVar(&r.project, "project", "", "project, by name or id. A new key without it goes in the organisation's oldest project; "+
-		"a list without it shows every project")
+	fs.StringVar(&r.project, "project", "",
+		"project, by name or id; without it, the organisation's oldest project")
+	r.reword("list", "project", "only the keys of one project, by name or id")
 	fs.StringVar(&r.user, "user", "", "the person this key belongs to, by email or id")
 	fs.StringVar(&r.name, "name", "", "what this key is called; what it is for, in a few words")
 	fs.StringVar(&r.expires, "expires", "",
 		"how long the key lasts, such as 720h, or 'never'. A new key lasts "+defaultKeyLife+
-			" (90 days) unless told otherwise; a rotated key keeps the old one's lifetime")
+			" (90 days) unless told otherwise")
+	r.reword("rotate", "expires", "how long the new key lasts, such as 720h, or 'never' "+
+		"(default: the old key's lifetime)")
 	fs.BoolVar(&r.subscription, "subscription", false,
 		"a key that reaches only subscription models, for Claude Code signed in to a Claude plan")
 	if done, err := r.parse(); done {
@@ -72,6 +75,11 @@ func (r *keyRun) create(ctx context.Context) error {
 			return errors.New("give the name once: as the argument or with --name")
 		}
 		r.name = r.fs.Arg(0)
+	}
+	// Required, as in the panel: a key without a name is a row nobody can
+	// identify later.
+	if strings.TrimSpace(r.name) == "" {
+		return errors.New("name the key after what it is for, such as: keera key create \"Ada's laptop\"")
 	}
 	orgID, err := resolveOrg(ctx, r.c, r.org)
 	if err != nil {
@@ -137,7 +145,8 @@ func (r *keyRun) list(ctx context.Context) error {
 		// Last use decides whether a key is safe to revoke, so it is a column.
 		w.header("ID\tNAME\tPREFIX\tKIND\tPROJECT\tSTATE\tLAST USED\tCLAUDE PLAN USED")
 		for _, k := range keys {
-			last := "never"
+			// The control plane reads use since the start of the month.
+			last := "not this month"
 			if k.LastUsedAt != nil {
 				last = k.LastUsedAt.Format(time.DateOnly)
 			}
@@ -276,10 +285,11 @@ func keyNamed(k store.KeySummary) (named, noun string) {
 	return k.Name, "name"
 }
 
-// lastUsed says when a key was last used, for a prompt about it.
+// lastUsed says when a key was last used, for a prompt about it. The control
+// plane only reads use since the start of the month, so no use is not "never".
 func lastUsed(k store.KeySummary) string {
 	if k.LastUsedAt == nil {
-		return "  it has never been used"
+		return "  it has not been used this month"
 	}
 	return "  it was last used " + k.LastUsedAt.Format(time.DateOnly)
 }

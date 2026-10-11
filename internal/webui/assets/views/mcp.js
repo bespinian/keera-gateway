@@ -17,6 +17,7 @@ import {
   showError,
   field,
   aliasProblem,
+  takenProblem,
   currentRange,
   rangePicker,
   bytes,
@@ -69,7 +70,7 @@ export async function mcpView(ctx) {
 
   const columns = [
     {
-      label: "Server",
+      label: "Alias",
       sortKey: (m) => m.alias,
       cell: (m) =>
         h(
@@ -135,7 +136,6 @@ export async function mcpView(ctx) {
             "To pause it instead, disable it.",
           confirmLabel: "Delete server",
           remove: () => api.deleteMCPServer(m.alias, m.org_id),
-          removed: "MCP server deleted",
         }),
     });
   }
@@ -153,7 +153,7 @@ export async function mcpView(ctx) {
 
   const gap = { marginTop: "28px" };
   wrap.append(
-    sectionHead("Tools", "each tool's calls in this window", gap),
+    sectionHead("Tools", "each tool's calls in this period", gap),
     table(
       [
         {
@@ -171,19 +171,19 @@ export async function mcpView(ctx) {
           label: "Failed",
           num: true,
           sortKey: (t) => t.failed,
-          cell: (t) => num(t.failed),
+          cell: (t) => countPill(t.failed, "bad"),
         },
         {
           label: "Not allowed",
           num: true,
           sortKey: (t) => t.denied,
-          cell: (t) => num(t.denied),
+          cell: (t) => countPill(t.denied, "warn"),
         },
         {
           label: "Refused",
           num: true,
           sortKey: (t) => t.refused,
-          cell: (t) => num(t.refused),
+          cell: (t) => countPill(t.refused, "warn"),
         },
         {
           label: "Average",
@@ -208,17 +208,23 @@ export async function mcpView(ctx) {
       {
         sortBy: "Calls",
         sortDir: "desc",
-        emptyTitle: "No tool calls in this window",
+        emptyTitle: "No tool calls in this period",
         emptyBody:
           "Point a client at a server address above, with a Keera key.",
       },
     ),
     sectionHead("Latest calls", "newest first, at most 100", gap),
     toolCallTable(calls, {
-      emptyBody: "Nothing has called a tool in this window.",
+      emptyBody: "Nothing has called a tool in this period.",
     }),
   );
   return wrap;
+}
+
+// countPill is a count that matters only when it is not zero, so zero fades
+// out and anything else stands out.
+function countPill(n, tone) {
+  return n ? pill(num(n), tone) : h("span", { class: "faint" }, "-");
 }
 
 // callsOf is how many calls one server's tools had.
@@ -332,6 +338,18 @@ function editServer(ctx, existing) {
             const button = e.currentTarget;
             button.disabled = true;
             try {
+              if (!existing) {
+                const taken = takenProblem(
+                  (await api.mcpServers(orgID)).data,
+                  name,
+                  "MCP server",
+                );
+                if (taken) {
+                  showError(err, taken);
+                  button.disabled = false;
+                  return;
+                }
+              }
               await api.putMCPServer(
                 name,
                 {

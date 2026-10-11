@@ -115,6 +115,8 @@ function query(params) {
 export const api = {
   authConfig: () => get("/auth/config"),
   me: () => get("/v1/me"),
+  // Moves this session to another organisation the person is in.
+  switchOrg: (orgID) => request("POST", "/v1/me/org", { org_id: orgID }),
   localSignIn: (key) => request("POST", "/auth/local", { key }),
   signOut: () => request("POST", "/auth/logout"),
   // Signing in with a provider is a page the browser goes to, not a call.

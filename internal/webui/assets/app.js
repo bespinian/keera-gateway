@@ -66,14 +66,14 @@ const routes = [
   {
     path: "/access",
     group: "You",
-    label: "My Access",
+    label: "My access",
     icon: "access",
     view: accessView,
   },
   {
     path: "/clients",
     group: "You",
-    label: "My Clients",
+    label: "My clients",
     icon: "connect",
     view: clientsView,
   },
@@ -101,7 +101,7 @@ const routes = [
   {
     path: "/keys",
     group: "Organisation",
-    label: "API Keys",
+    label: "API keys",
     icon: "keys",
     view: keysView,
     detail: { label: "API key", view: keyDetailView },
@@ -389,7 +389,7 @@ function cycleTheme() {
   const next = order[(order.indexOf(currentTheme()) + 1) % order.length];
   localStorage.setItem("keera.theme", next);
   applyTheme(next);
-  toast(`Theme: ${next}`);
+  toast(`Theme: ${next[0].toUpperCase() + next.slice(1)}`);
 }
 
 /* ---------------------------------------------------------------- shell */
@@ -652,8 +652,8 @@ function topbar() {
     h("div", { class: "spacer" }),
   );
 
-  // Only an operator sees more than one organisation, so the switcher only
-  // exists for them.
+  // An operator looks at any organisation from one session. Someone in
+  // several moves their session instead, because their role differs in each.
   if (state.me.unrestricted && state.orgs.length > 0) {
     const select = h(
       "select",
@@ -662,6 +662,7 @@ function topbar() {
         style: { width: "auto" },
         "aria-label": "Organisation",
         onChange: async (e) => {
+          leaveDetail();
           await setOrg(e.target.value);
           renderRoute();
         },
@@ -672,6 +673,25 @@ function topbar() {
       ),
     );
     bar.append(select);
+  } else if (state.me.orgs) {
+    bar.append(
+      h(
+        "select",
+        {
+          class: "select",
+          style: { width: "auto" },
+          "aria-label": "Organisation",
+          onChange: (e) => switchOrg(e.target),
+        },
+        state.me.orgs.map((o) =>
+          h(
+            "option",
+            { value: o.id, selected: o.id === state.me.org_id },
+            o.invited ? `${o.name} (invitation)` : o.name,
+          ),
+        ),
+      ),
+    );
   } else if (state.me.org_name) {
     bar.append(h("span", { class: "pill" }, state.me.org_name));
   }
@@ -708,6 +728,11 @@ function setTitle(title, sub) {
  *  allows very few of those per origin. */
 let teardowns = [];
 
+/** rendering counts renderRoute calls. A screen still loading when the reader
+ *  moves on finishes into a page that is no longer its own, so what it
+ *  registers then is undone at once and what it drew is dropped. */
+let rendering = 0;
+
 function tearDown() {
   const pending = teardowns;
   teardowns = [];
@@ -723,6 +748,7 @@ function tearDown() {
 
 async function renderRoute() {
   tearDown();
+  const gen = ++rendering;
   const available = visibleRoutes();
   const { route, param } = matchRoute(available, location.pathname);
 
@@ -762,7 +788,7 @@ async function renderRoute() {
     setSubtitle: (s) => setTitle(title, s),
     /** onTeardown registers work to undo when this screen goes away - on a
      *  reload, or on navigation to another one. */
-    onTeardown: (fn) => teardowns.push(fn),
+    onTeardown: (fn) => (gen === rendering ? teardowns.push(fn) : fn()),
     /** setTitle is for a screen whose heading is the thing it is showing rather
      *  than the name of the screen - one project is called by its own name, not
      *  "Project". */
@@ -773,8 +799,10 @@ async function renderRoute() {
   };
   try {
     const view = await route.view(ctx);
+    if (gen !== rendering) return;
     replace(outlet, view);
   } catch (err) {
+    if (gen !== rendering) return;
     if (err instanceof ApiError && err.status === 401) {
       return boot(); // the session expired underneath us
     }
@@ -881,6 +909,30 @@ async function loadSetup() {
   } catch {
     state.setup = {};
   }
+}
+
+/** switchOrg moves the session to the organisation select names, which
+ *  changes who this person is there, so the whole panel starts again. */
+async function switchOrg(select) {
+  select.disabled = true;
+  try {
+    await api.switchOrg(select.value);
+  } catch (err) {
+    select.value = state.me.org_id;
+    select.disabled = false;
+    toast(err.message || "Could not switch the organisation.", "bad");
+    return;
+  }
+  leaveDetail();
+  await boot();
+}
+
+/** leaveDetail moves a detail screen back to its list before the organisation
+ *  changes, because the thing it shows belongs to the old one. Both switchers
+ *  keep the reader on the screen they were on otherwise. */
+function leaveDetail() {
+  const { route } = matchRoute(visibleRoutes(), location.pathname);
+  if (route.parent) history.replaceState({}, "", route.parent.path);
 }
 
 /** setOrg changes which organisation every screen is about, and redraws the

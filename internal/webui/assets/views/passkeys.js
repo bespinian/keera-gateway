@@ -54,12 +54,7 @@ export async function passkeySetupView(root, token, onDone) {
     return;
   }
 
-  const name = h("input", {
-    class: "input",
-    id: "passkey-name",
-    value: deviceName(),
-    maxlength: 64,
-  });
+  const name = nameInput();
   const button = h(
     "button",
     {
@@ -101,22 +96,7 @@ export async function passkeySetupView(root, token, onDone) {
       "A passkey lets you sign in with your fingerprint, face or device PIN. " +
         "There is no password.",
     ),
-    h(
-      "form",
-      { onSubmit: submit },
-      h(
-        "div",
-        { class: "field" },
-        h("label", { for: "passkey-name" }, "Name"),
-        name,
-        h(
-          "div",
-          { class: "hint" },
-          "So you can tell your passkeys apart later.",
-        ),
-      ),
-      button,
-    ),
+    h("form", { onSubmit: submit }, nameField(name), button),
   );
 }
 
@@ -125,6 +105,7 @@ export async function passkeySetupView(root, token, onDone) {
 export function managePasskeys() {
   const err = h("div");
   const list = h("div");
+  const name = nameInput();
 
   const draw = async () => {
     let keys;
@@ -158,7 +139,7 @@ export function managePasskeys() {
     try {
       const opts = await api.ownPasskeyOptions();
       const credential = await createPasskey(opts.options);
-      await api.addPasskey(opts.challenge_id, deviceName(), credential);
+      await api.addPasskey(opts.challenge_id, name.value.trim(), credential);
       toast("Passkey added", "good");
       draw();
     } catch (ex) {
@@ -171,14 +152,20 @@ export function managePasskeys() {
   modal({
     title: "Your passkeys",
     subtitle: "Add one on each device you sign in from.",
-    body: h("div", {}, err, list),
+    body: h(
+      "div",
+      {},
+      err,
+      list,
+      h("div", { style: { marginTop: "16px" } }, nameField(name)),
+    ),
     actions: (close) => [
       h("button", { class: "btn", onClick: close }, "Close"),
       h(
         "button",
         { class: "btn btn-primary", onClick: add },
-        icon(icons.plus),
-        "Add a passkey on this device",
+        icon(icons.passkey),
+        "Add passkey",
       ),
     ],
   });
@@ -269,6 +256,26 @@ export function showPasskeyLink(email, link) {
       h("button", { class: "btn btn-primary", onClick: close }, "Done"),
     ],
   });
+}
+
+// nameInput is the name a new passkey gets, prefilled with this device's.
+function nameInput() {
+  return h("input", {
+    class: "input",
+    id: "passkey-name",
+    value: deviceName(),
+    maxlength: 64,
+  });
+}
+
+function nameField(input) {
+  return h(
+    "div",
+    { class: "field" },
+    h("label", { for: "passkey-name" }, "Name"),
+    input,
+    h("div", { class: "hint" }, "So you can tell your passkeys apart later."),
+  );
 }
 
 // removeButton removes one passkey, after asking, and then redraws the list.

@@ -22,58 +22,72 @@ func (d Directory) Due(now time.Time, every time.Duration) bool {
 	return d.Linked && now.Sub(d.CheckedAt) >= every
 }
 
-// directoryColumns reads Directory from a query that joins users as u.
-const directoryColumns = `u.refresh_token IS NOT NULL,
-	COALESCE(u.directory_checked_at, 'epoch'::timestamptz)`
+// directoryColumns reads Directory from a query that joins users as u and
+// identityJoin.
+const directoryColumns = `i.refresh_token IS NOT NULL,
+	COALESCE(i.directory_checked_at, 'epoch'::timestamptz)`
 
-// RecordDirectoryCheck notes that the directory just vouched for someone and
-// keeps the refresh token it returned, sealed. Nil keeps the stored one:
+// identityJoin brings in what the directory said about the identity of the
+// users row u. Every row of one person shares it.
+const identityJoin = ` LEFT JOIN identities i ON i.external_id = u.external_id`
+
+// RecordDirectoryCheck notes that the directory just vouched for an identity
+// and keeps the refresh token it returned, sealed. Nil keeps the stored one:
 // Google hands one out only the first time a person consents.
-func (s *Store) RecordDirectoryCheck(ctx context.Context, userID string, sealed []byte) error {
-	return s.execOne(ctx, `UPDATE users
-		SET refresh_token = COALESCE($2, refresh_token), directory_checked_at = now()
-		WHERE id = $1`, userID, sealed)
+func (s *Store) RecordDirectoryCheck(ctx context.Context, externalID string, sealed []byte) error {
+	_, err := s.pool.Exec(ctx, `INSERT INTO identities (external_id, refresh_token, directory_checked_at)
+		VALUES ($1, $2, now())
+		ON CONFLICT (external_id) DO UPDATE
+		SET refresh_token = COALESCE(EXCLUDED.refresh_token, identities.refresh_token),
+			directory_checked_at = now()`, externalID, sealed)
+	return err
 }
 
-// ClaimDirectoryCheck takes the next check of someone's directory, if one is
-// due, and returns the sealed refresh token to make it with. Only one caller
-// wins: a provider that rotates refresh tokens refuses the second use of one,
-// and that refusal would sign the person out.
-func (s *Store) ClaimDirectoryCheck(ctx context.Context, userID string,
+// ClaimDirectoryCheck takes the next check of an identity's directory, if one
+// is due, and returns the sealed refresh token to make it with. Only one
+// caller wins: a provider that rotates refresh tokens refuses the second use
+// of one, and that refusal would sign the person out.
+func (s *Store) ClaimDirectoryCheck(ctx context.Context, externalID string,
 	checkedBefore time.Time) ([]byte, bool, error) {
 	var sealed []byte
-	err := s.pool.QueryRow(ctx, `UPDATE users SET directory_checked_at = now()
-		WHERE id = $1 AND refresh_token IS NOT NULL
+	err := s.pool.QueryRow(ctx, `UPDATE identities SET directory_checked_at = now()
+		WHERE external_id = $1 AND refresh_token IS NOT NULL
 		AND COALESCE(directory_checked_at, 'epoch'::timestamptz) < $2
-		RETURNING refresh_token`, userID, checkedBefore).Scan(&sealed)
+		RETURNING refresh_token`, externalID, checkedBefore).Scan(&sealed)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
 	}
 	return sealed, err == nil, err
 }
 
-// EndDirectoryLink drops someone's refresh token and every sign-in they hold,
-// for when their directory no longer vouches for them.
-func (s *Store) EndDirectoryLink(ctx context.Context, userID string) error {
+// EndDirectoryLink drops an identity's refresh token and every sign-in it
+// holds, in every organisation, for when its directory no longer vouches for
+// it.
+func (s *Store) EndDirectoryLink(ctx context.Context, externalID string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, "UPDATE users SET refresh_token = NULL WHERE id = $1", userID); err != nil {
+	if _, err := tx.Exec(ctx, "UPDATE identities SET refresh_token = NULL WHERE external_id = $1",
+		externalID); err != nil {
 		return err
 	}
-	if err := deleteUserSessions(ctx, tx, userID); err != nil {
+	if err := deleteSessionsWhere(ctx, tx, "SELECT id FROM users WHERE external_id = $1",
+		externalID); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 
-// HasRefreshToken reports whether the directory can be asked about someone
-// again without them signing in.
-func (s *Store) HasRefreshToken(ctx context.Context, userID string) (bool, error) {
+// HasRefreshToken reports whether the directory can be asked about an
+// identity again without the person signing in.
+func (s *Store) HasRefreshToken(ctx context.Context, externalID string) (bool, error) {
 	var linked bool
-	err := s.pool.QueryRow(ctx, "SELECT refresh_token IS NOT NULL FROM users WHERE id = $1",
-		userID).Scan(&linked)
-	return linked, notFound(err)
+	err := s.pool.QueryRow(ctx, "SELECT refresh_token IS NOT NULL FROM identities WHERE external_id = $1",
+		externalID).Scan(&linked)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return linked, err
 }

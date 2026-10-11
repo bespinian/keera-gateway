@@ -12,7 +12,7 @@ import {
   modal,
   toast,
   pill,
-  money,
+  listPrice,
   num,
   compact,
   ms,
@@ -22,6 +22,7 @@ import {
   providerMark,
   showError,
   aliasProblem,
+  takenProblem,
   locationName,
   releaseDay,
   readRow,
@@ -36,6 +37,7 @@ import {
   rowActions,
   code,
   verdictPill,
+  listHead,
 } from "../ui.js";
 
 // usersOfModel names the filters and routers that use a model, for the
@@ -76,43 +78,31 @@ export async function modelsView(ctx) {
   const providers = canAdd ? await presets() : [];
   ctx.setSubtitle(`${models.length} ${plural(models.length, "model")}`);
 
-  const head = h(
-    "div",
-    { class: "row", style: { marginBottom: "16px" } },
-    h(
-      "div",
-      { class: "muted" },
-      "Clients use a model's alias, not the backend model id or URL. So the " +
-        "backend can change without any client changes. Each model belongs " +
-        "to one organisation.",
-    ),
-    h("div", { style: { flex: 1 } }),
-    rangePicker(ctx, since),
-    // Everyone can browse it. Only a page that can add a model has fetched
-    // the providers, so only there can an empty list hide it.
-    !canAdd || providers.length
-      ? h(
-          "a",
-          {
-            class: "btn",
-            href: "/provider-models",
-            title: "Every model the hosted providers offer",
-            onClick: go(ctx, "/provider-models"),
-          },
-          "Model catalogue",
-        )
-      : null,
-    canAdd
-      ? h(
-          "button",
-          {
-            class: "btn btn-primary",
-            onClick: () => editModel(ctx, null, providers),
-          },
-          icon(icons.plus),
-          "Add model",
-        )
-      : null,
+  const head = listHead(
+    "Clients use a model's alias, not the backend model or URL. So the " +
+      "backend can change without any client changes. Each model belongs " +
+      "to one organisation.",
+    [
+      rangePicker(ctx, since),
+      // Everyone can browse it. Only a page that can add a model has fetched
+      // the providers, so only there can an empty list hide it.
+      !canAdd || providers.length
+        ? h(
+            "a",
+            {
+              class: "btn",
+              href: "/provider-models",
+              title: "Every model the hosted providers offer",
+              onClick: go(ctx, "/provider-models"),
+            },
+            "Model catalogue",
+          )
+        : null,
+    ],
+    canAdd && {
+      label: "Add model",
+      onClick: () => editModel(ctx, null, providers),
+    },
   );
 
   const rows = table(
@@ -156,7 +146,7 @@ export async function modelsView(ctx) {
         // nothing stops an address of your own from pointing anywhere.
         label: "Provider",
         shrink: true,
-        sortKey: (m) => m.provider || "",
+        sortKey: (m) => providerName(m.provider),
         cell: (m) =>
           m.provider
             ? h(
@@ -171,7 +161,10 @@ export async function modelsView(ctx) {
                 // which is the whole of what it is for - so the word stays: a
                 // logo is not a label, and a provider this build has no mark
                 // for has to read the same as one it does.
-                pill([providerMark(m.provider), m.provider], "warn"),
+                pill(
+                  [providerMark(m.provider), providerName(m.provider)],
+                  "warn",
+                ),
               )
             : h("span", { class: "faint" }, "-"),
       },
@@ -208,7 +201,7 @@ export async function modelsView(ctx) {
         cell: (m) => ttftCell(stats[m.alias]),
       },
       {
-        label: "Price / Mtok",
+        label: `Price / Mtok (${ctx.currency})`,
         num: true,
         shrink: true,
         // By what a prompt costs, which is the number a catalogue is read for.
@@ -219,7 +212,7 @@ export async function modelsView(ctx) {
             ? h(
                 "span",
                 { class: "nowrap muted" },
-                `${money(m.input_micros_per_mtok, "")} in · ${money(m.output_micros_per_mtok, "")} out`,
+                `${listPrice(m.input_micros_per_mtok, "")} in · ${listPrice(m.output_micros_per_mtok, "")} out`,
               )
             : h("span", { class: "faint" }, "not billed"),
       },
@@ -232,12 +225,12 @@ export async function modelsView(ctx) {
         shrink: true,
         sortKey: (m) => (m.enabled ? 1 : 0),
         cell: (m) =>
-          h(
-            "div",
-            { class: "stack" },
-            m.enabled ? pill("Enabled", "good") : pill("Disabled", "warn"),
-            isAdmin(ctx) ? healthCell(m) : null,
-          ),
+          m.enabled ? pill("Enabled", "good") : pill("Disabled", "warn"),
+      },
+      isAdmin(ctx) && {
+        label: "Check",
+        shrink: true,
+        cell: (m) => healthCell(m),
       },
       {
         label: "",
@@ -263,13 +256,15 @@ export async function modelsView(ctx) {
             editTitle: "What this model serves, and on what",
             onEdit: () => editModel(ctx, m, providers),
             deleteTitle: "Delete this model",
+            // The same warnings `keera model delete` gives.
             body: async () =>
-              "Clients that still use this model will get 404s. " +
-              "Disable it instead to keep its reports." +
-              (await usersOfModel(m)),
+              "Clients that still use this model will be refused, and " +
+              "guardrails that allow only this model stop allowing anything." +
+              (await usersOfModel(m)) +
+              (m.has_api_key ? " Its stored credential is removed." : "") +
+              " Usage history and the audit log are kept.",
             confirmLabel: "Delete model",
             remove: () => api.deleteModel(m.alias, m.org_id),
-            removed: "Model deleted",
           });
         },
       },
@@ -291,6 +286,7 @@ export async function modelsView(ctx) {
           m.backend_model,
           m.kind,
           m.provider || "",
+          providerName(m.provider),
           m.location || "",
           locationName(m.location),
           ...(m.backends || []),
@@ -332,7 +328,7 @@ export async function providerModelsView(ctx) {
   // Prices are in the provider's own currency, which is not always this
   // deployment's.
   const price = (v, p) =>
-    v ? h("span", { class: "nowrap" }, money(v, p.currency)) : dash();
+    v ? h("span", { class: "nowrap" }, listPrice(v, p.currency)) : dash();
 
   const head = h(
     "div",
@@ -369,8 +365,8 @@ export async function providerModelsView(ctx) {
       {
         label: "Provider",
         shrink: true,
-        sortKey: (r) => r.p.name,
-        cell: (r) => pill([providerMark(r.p.name), r.p.name]),
+        sortKey: (r) => providerName(r.p.name),
+        cell: (r) => pill([providerMark(r.p.name), providerName(r.p.name)]),
       },
       {
         label: "Location",
@@ -406,6 +402,13 @@ export async function providerModelsView(ctx) {
         shrink: true,
         sortKey: (r) => r.m.cached_input_micros_per_mtok || null,
         cell: (r) => price(r.m.cached_input_micros_per_mtok, r.p),
+      },
+      {
+        label: "Cache write",
+        num: true,
+        shrink: true,
+        sortKey: (r) => r.m.cache_write_micros_per_mtok || null,
+        cell: (r) => price(r.m.cache_write_micros_per_mtok, r.p),
       },
       {
         label: "Output",
@@ -460,14 +463,21 @@ export async function providerModelsView(ctx) {
       sortBy: "Released",
       sortDir: "desc",
       search: (r) =>
-        [r.m.id, r.m.description, r.p.name, locationName(r.p.location)].join(
-          " ",
-        ),
+        [
+          r.m.id,
+          r.m.description,
+          r.p.name,
+          providerName(r.p.name),
+          locationName(r.p.location),
+        ].join(" "),
       searchLabel: "models",
       choices: [
         {
           label: "Providers",
-          options: providers.map((p) => ({ value: p.name, label: p.name })),
+          options: providers.map((p) => ({
+            value: p.name,
+            label: providerName(p.name),
+          })),
           test: (r, v) => r.p.name === v,
         },
         {
@@ -481,7 +491,7 @@ export async function providerModelsView(ctx) {
           label: "Kinds",
           options: KINDS.filter((k) =>
             providers.some((p) => (p.kinds || []).includes(k)),
-          ).map((k) => ({ value: k, label: k })),
+          ).map((k) => ({ value: k, label: kindName(k) })),
           test: (r, v) => (r.p.kinds || []).includes(v),
         },
         // A dropdown with one choice filters nothing.
@@ -565,7 +575,7 @@ function viewModel(ctx, m) {
         "The name clients use. The backend behind it can change without " +
           "client changes.",
       ),
-      readRow("Kind", pill(m.kind), surfaceOf(m.kind)),
+      readRow("Kind", pill(kindName(m.kind)), surfaceOf(m.kind)),
       readRow(
         "What it is for",
         m.description
@@ -623,8 +633,8 @@ function viewModel(ctx, m) {
           ? h(
               "span",
               { class: "nowrap" },
-              `${money(m.input_micros_per_mtok, "")} in · ` +
-                `${money(m.output_micros_per_mtok, "")} out`,
+              `${listPrice(m.input_micros_per_mtok, "")} in · ` +
+                `${listPrice(m.output_micros_per_mtok, "")} out`,
             )
           : h("span", { class: "muted" }, "not billed"),
         m.subscription
@@ -642,8 +652,8 @@ function viewModel(ctx, m) {
             h(
               "span",
               { class: "nowrap" },
-              `${money(m.long_prompt.input_micros_per_mtok, "")} in · ` +
-                `${money(m.long_prompt.output_micros_per_mtok, "")} out`,
+              `${listPrice(m.long_prompt.input_micros_per_mtok, "")} in · ` +
+                `${listPrice(m.long_prompt.output_micros_per_mtok, "")} out`,
             ),
             `What a request costs instead when its prompt is over ` +
               `${num(m.long_prompt.above_tokens)} tokens.`,
@@ -654,8 +664,12 @@ function viewModel(ctx, m) {
             "Paid by",
             pill("Claude subscription", "good"),
             ctx.state.me.claude_subscriptions
-              ? "Only Claude Code signed in to a Claude plan can use it. Set " +
-                  "it up with: keera connect claude-code --subscription"
+              ? [
+                  "Only Claude Code signed in to a Claude plan can use it. " +
+                    "Set it up with ",
+                  h("code", {}, "keera connect claude-code --subscription"),
+                  ".",
+                ]
               : "This deployment does not take Claude subscriptions, so the " +
                   "gateway refuses this model.",
           )
@@ -692,13 +706,21 @@ function surfaceOf(kind) {
 
 // healthCell is the check button and, once it has run, its verdict in place.
 function healthCell(m) {
-  const cell = checkButton(
+  return checkButton(
     "Send a test request to this model's backend",
     () => api.checkModel(m.alias, m.org_id),
     (probe) => verdict(probe, m.kind),
   );
-  cell.style.marginTop = "4px";
-  return cell;
+}
+
+// checkModel runs the check and opens its report, for the model's own screen,
+// which has room for the report but not for a verdict pill.
+export async function checkModel(m) {
+  try {
+    report(await api.checkModel(m.alias, m.org_id), m.kind);
+  } catch (ex) {
+    toast(ex.message, "bad");
+  }
 }
 
 // verdict is the pill, and the whole report behind it. The pill has to be
@@ -733,7 +755,10 @@ function report(probe, kind) {
     ...(chat
       ? [
           ["Streamed", probe.streamed ? "yes" : "no"],
-          ["Tool call in `tool_calls`", probe.tool_calls ? "yes" : "no"],
+          [
+            ["Tool call in ", h("code", {}, "tool_calls")],
+            probe.tool_calls ? "yes" : "no",
+          ],
         ]
       : []),
     ["Model the backend served", probe.served_model || "-"],
@@ -803,10 +828,43 @@ function report(probe, kind) {
           "does run one real request.",
       ),
     ),
+    actions: (close) => [
+      h("button", { class: "btn", onClick: close }, "Close"),
+    ],
   });
 }
 
 const KINDS = ["chat", "completion", "embedding", "decision"];
+
+// kindName is a kind as a person reads it. The value stays lowercase on the
+// wire and in catalogue files.
+function kindName(kind) {
+  return (
+    {
+      chat: "Chat",
+      completion: "Completion",
+      embedding: "Embedding",
+      decision: "Decision",
+    }[kind] || kind
+  );
+}
+
+// PROVIDER_NAMES are the hosted providers as they write their own names. The
+// control plane only sends the lowercase key.
+const PROVIDER_NAMES = {
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  infomaniak: "Infomaniak",
+  "stepping-stone": "stepping stone",
+  phoeniqs: "Phoeniqs",
+  cscs: "CSCS",
+};
+
+// providerName is a hosted provider's display name. One this build does not
+// know keeps its key, which is still the name it was configured with.
+export function providerName(name) {
+  return PROVIDER_NAMES[name] || name || "";
+}
 
 // What a per-customer endpoint carries in place of the part only the
 // organisation knows. It is the same text internal/catalog/providers.go writes.
@@ -862,7 +920,7 @@ function productIDOf(p, backends) {
 const PRESET_FIELDS = [
   {
     key: "backendModel",
-    label: "model id",
+    label: "model ID",
     fromModel: true,
     of: (p, m) => (m ? m.id : null),
     // A dated id is the same model, so it overrides nothing.
@@ -1391,8 +1449,8 @@ function editModel(ctx, existing, providers, pick) {
         ) {
           showError(
             err,
-            `${preset.p.name} gives each customer their own address. ` +
-              "Fill in the product id.",
+            `${providerName(preset.p.name)} gives each customer their own ` +
+              "address. Fill in the product ID.",
           );
           return;
         }
@@ -1403,7 +1461,7 @@ function editModel(ctx, existing, providers, pick) {
           showError(
             err,
             state.hosted
-              ? "Enter the alias, and the model id and endpoint under " +
+              ? "Enter the alias, and the backend model and backends under " +
                   "Advanced options."
               : "Enter an alias, a backend model and at least one backend.",
           );
@@ -1417,6 +1475,19 @@ function editModel(ctx, existing, providers, pick) {
         }
         e.target.disabled = true;
         try {
+          if (!existing) {
+            const taken = takenProblem(
+              (await api.models(orgID)).data,
+              alias.value.trim(),
+              "model",
+            );
+            if (taken) {
+              showError(err, taken);
+              alias.focus();
+              e.target.disabled = false;
+              return;
+            }
+          }
           // Absent unless the administrator typed one or asked for the stored
           // one to go: sending "" on every save would wipe it.
           const paidByPlan = paidByClaudePlan();
@@ -1458,12 +1529,6 @@ function editModel(ctx, existing, providers, pick) {
           );
           close();
           toast(existing ? "Model saved" : "Model added", "good");
-          if (!existing)
-            await allowNewModel(
-              orgID,
-              orgNameOf(ctx, orgID),
-              declaration.alias,
-            );
           ctx.reload();
         } catch (ex) {
           showError(err, ex.message);
@@ -1510,26 +1575,6 @@ function editModel(ctx, existing, providers, pick) {
   if (waiting) hosted.querySelector("button.tile").focus();
 }
 
-// allowNewModel adds a model an organisation just added to its own allow
-// list, if it keeps one. Adding a model means wanting to use it, and without
-// this it would start switched off.
-async function allowNewModel(orgID, orgName, alias) {
-  try {
-    const limits = await api.guardrails("org", orgID);
-    const list = limits && limits.allowed_models;
-    if (!list || list.includes(alias)) return;
-    await api.putGuardrails("org", orgID, {
-      ...limits,
-      allowed_models: [...list, alias],
-    });
-  } catch {
-    toast(
-      `${alias} is not in ${orgName}'s guardrail. Add it there to use it.`,
-      "bad",
-    );
-  }
-}
-
 // presets reads the hosted endpoints this build knows. It is a convenience, so
 // it degrades to none rather than taking the screen down with it.
 async function presets() {
@@ -1545,7 +1590,9 @@ async function presets() {
 // from the form to the save.
 function setKinds(select, kinds, selected) {
   const list = kinds && kinds.length ? kinds : KINDS;
-  select.replaceChildren(...list.map((k) => h("option", { value: k }, k)));
+  select.replaceChildren(
+    ...list.map((k) => h("option", { value: k }, kindName(k))),
+  );
   select.value = list.includes(selected) ? selected : list[0];
 }
 
@@ -1663,7 +1710,11 @@ function hostedFields(ctx, providers, form) {
       name: "Self-hosted",
       what: "Your own inference server, such as vLLM, Ollama or Keera Engine.",
     },
-    ...providers.map((p) => ({ p, name: p.name, what: p.summary })),
+    ...providers.map((p) => ({
+      p,
+      name: providerName(p.name),
+      what: p.summary,
+    })),
   ];
   // A place's mark: the provider's own logo where this build has one, a cloud
   // where it does not, and a rack of machines for a plane of your own. Drawn
@@ -2059,7 +2110,7 @@ function hostedFields(ctx, providers, form) {
 // paintPresets keeps the line under each filled-in field true: which provider
 // the value came from while it still holds, and what it replaced once it does
 // not. It is the whole of the explanation a disabled field gets, so it is
-// written for one: "anthropic's endpoint" says why the box cannot be typed in.
+// written for one: "Anthropic's endpoint" says why the box cannot be typed in.
 function paintPresets(preset, fields, marks, state) {
   for (const f of PRESET_FIELDS) {
     const line = marks[f.key];
@@ -2071,12 +2122,13 @@ function paintPresets(preset, fields, marks, state) {
       line.replaceChildren();
       continue;
     }
+    const who = providerName(preset.p.name);
     line.replaceChildren(
       sameValue(f, fields[f.key].value, def, preset.m)
-        ? `${preset.p.name}'s ${f.label}.`
+        ? `${who}'s ${f.label}.`
         : f.prose
-          ? `Replaces ${preset.p.name}'s own ${f.label}.`
-          : `Overrides ${preset.p.name}'s ${f.label} of ${def}.`,
+          ? `Replaces ${who}'s own ${f.label}.`
+          : `Overrides ${who}'s ${f.label} of ${def}.`,
     );
   }
 }

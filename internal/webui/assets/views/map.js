@@ -35,6 +35,7 @@ import {
   rangePicker,
   go,
   liveControl,
+  sectionHead,
 } from "../ui.js";
 
 // How the boxes are sized. Fixed rather than measured: a map whose boxes are as
@@ -82,7 +83,7 @@ const MAX_SPAWN = 48;
 const MAX_PACKETS = 400;
 
 export async function mapView(ctx) {
-  if (!ctx.orgID) return chooseOrg(ctx, "Traffic maps");
+  if (!ctx.orgID) return chooseOrg(ctx, "Live maps");
   const since = currentRange();
   const range = RANGES.find((r) => r.since === since) || RANGES[0];
   ctx.setSubtitle(range.long);
@@ -108,7 +109,7 @@ export async function mapView(ctx) {
     titles: {
       live: "Live: requests cross the map as they happen. Click to pause.",
       connecting: "Reconnecting. Click to stop.",
-      paused: "Paused. The numbers cover the selected window.",
+      paused: "Paused. The numbers cover the selected period.",
       stopped:
         "The live stream stopped. Click to try again, or reload the page.",
     },
@@ -124,7 +125,7 @@ export async function mapView(ctx) {
       h(
         "div",
         { class: "hint" },
-        "Boxes show who called in this window and where requests can go. " +
+        "Boxes show who called in this period and where requests can go. " +
           "Packets are live requests.",
       ),
     ),
@@ -163,7 +164,7 @@ function sceneFrom(data) {
     (data.clients || []).map((c) => ({
       kind: "client",
       key: c.key,
-      label: c.label || "Unidentified",
+      label: c.label || "Unidentified client",
       cell: cellOf(c),
       pulse: 0,
     })),
@@ -301,11 +302,11 @@ function describe(scene) {
     scene.clients.length +
     " client types calling this gateway, " +
     scene.inside.length +
-    " models inside your infrastructure and " +
+    " models inside your network and " +
     out +
     " at external providers. " +
     tokenShare(scene) +
-    "% of tokens in this window left your infrastructure."
+    "% of tokens in this period left your network."
   );
 }
 
@@ -820,13 +821,13 @@ function bands(g, scene, c, currency) {
   g.textBaseline = "alphabetic";
   g.font = "600 11px " + c.font;
   g.fillStyle = c.muted;
-  g.fillText("YOUR INFRASTRUCTURE", 6, 16);
+  g.fillText("YOUR NETWORK", 6, 16);
   g.fillStyle = c.warn;
-  g.fillText("LEAVES YOUR INFRASTRUCTURE", 6, geo.lineY + 26);
+  g.fillText("LEAVES YOUR NETWORK", 6, geo.lineY + 26);
 
   const note = scene.outside.length
     ? tokenShare(scene) +
-      "% of tokens in this window, " +
+      "% of tokens in this period, " +
       money(outsideCost(scene), currency) +
       " spent outside"
     : "Nothing leaves: every model is served from your own network";
@@ -1012,7 +1013,7 @@ function gatewayFace(scene, c) {
     note:
       (scene.gateway.sub ? scene.gateway.sub + " · " : "") +
       compact(scene.total.requests) +
-      " in window · " +
+      " in period · " +
       compact(scene.total.refused) +
       " refused",
     tone: c.accent,
@@ -1028,15 +1029,13 @@ function hostingLabel(hosting) {
 }
 
 function modelFace(n, c) {
-  // Where it runs, in the place a client box puts its spend: on this screen
+  // Where it runs, in the place a client box puts its cost: on this screen
   // that is the more important half of what a model is.
   const where = n.endpoint || hostingLabel(n.hosting) || "not known";
   return {
     title: n.label,
-    value: n.cell.ttft_median_ms ? String(n.cell.ttft_median_ms) : "-",
-    unit: n.cell.ttft_median_ms
-      ? "ms to first token"
-      : "nothing in this window",
+    value: ms(n.cell.ttft_median_ms),
+    unit: n.cell.ttft_median_ms ? "to first token" : "nothing in this period",
     note: where + " · " + compact(n.cell.requests) + " req",
     tone:
       n.hosting === "external"
@@ -1144,9 +1143,9 @@ function showTip(tip, canvas, n, currency, orgName) {
     rows.push([
       "Prompts",
       n.hosting === "external"
-        ? "leave your infrastructure"
+        ? "leave your network"
         : n.hosting === "internal"
-          ? "stay in your infrastructure"
+          ? "stay in your network"
           : "unknown",
     ]);
     if (n.kindName) rows.push(["Surface", n.kindName]);
@@ -1156,12 +1155,12 @@ function showTip(tip, canvas, n, currency, orgName) {
   if (n.folded)
     rows.push(["Folded together", n.rest.map((r) => r.label).join(", ")]);
   rows.push(["Requests", num(n.cell.requests)]);
-  rows.push(["Tokens", num(n.cell.input_tokens + n.cell.output_tokens)]);
-  rows.push(["Spend", money(n.cell.cost_micros, currency)]);
+  rows.push(["Tokens", compact(n.cell.input_tokens + n.cell.output_tokens)]);
+  rows.push(["Cost", money(n.cell.cost_micros, currency)]);
   if (n.cell.ttft_median_ms)
     rows.push(["Median first token", ms(n.cell.ttft_median_ms)]);
   if (n.cell.refused) rows.push(["Refused", num(n.cell.refused)]);
-  if (n.cell.failed) rows.push(["Failed upstream", num(n.cell.failed)]);
+  if (n.cell.failed) rows.push(["Failed", num(n.cell.failed)]);
   if (target(n)) rows.push(["", "Click to open"]);
 
   tip.replaceChildren(
@@ -1289,7 +1288,7 @@ function clientNode(scene, key) {
   const node = {
     kind: "client",
     key,
-    label: key || "Unidentified",
+    label: key || "Unidentified client",
     cell: cellOf({}),
     pulse: 0,
     x: 0,
@@ -1364,8 +1363,8 @@ function modelReport(ctx, scene, currency) {
   if (!rows.length) {
     return h(
       "div",
-      { class: "stack" },
-      h("h2", {}, "Every model, and where it runs"),
+      {},
+      sectionHead("Every model, and where it runs"),
       h(
         "div",
         { class: "card" },
@@ -1378,8 +1377,8 @@ function modelReport(ctx, scene, currency) {
   }
   return h(
     "div",
-    { class: "stack" },
-    h("h2", {}, "Every model, and where it runs"),
+    {},
+    sectionHead("Every model, and where it runs"),
     table(
       [
         {
@@ -1403,7 +1402,7 @@ function modelReport(ctx, scene, currency) {
             m.hosting === "external"
               ? h("span", { class: "pill pill-warn" }, "Leave your network")
               : m.hosting === "internal"
-                ? h("span", { class: "pill pill-good" }, "Stay inside")
+                ? h("span", { class: "pill pill-good" }, "Stay in your network")
                 : h("span", { class: "pill" }, "Unknown"),
         },
         {
@@ -1433,12 +1432,12 @@ function modelReport(ctx, scene, currency) {
               : h("span", { class: "faint" }, "-"),
         },
         {
-          label: "Spend",
+          label: `Cost (${currency})`,
           num: true,
           shrink: true,
           sortDir: "desc",
           sortKey: (m) => m.cell.cost_micros,
-          cell: (m) => money(m.cell.cost_micros, currency),
+          cell: (m) => money(m.cell.cost_micros, ""),
         },
       ],
       rows,
@@ -1459,13 +1458,13 @@ function clientReport(scene, currency) {
   if (!rows.length) {
     return h(
       "div",
-      { class: "stack" },
-      h("h2", {}, "Every client that called"),
+      {},
+      sectionHead("Every client that called"),
       h(
         "div",
         { class: "card" },
         empty(
-          "Nothing has called in this window",
+          "Nothing has called in this period",
           "Connect an editor under My clients. It shows here after its " +
             "first request.",
         ),
@@ -1474,8 +1473,8 @@ function clientReport(scene, currency) {
   }
   return h(
     "div",
-    { class: "stack" },
-    h("h2", {}, "Every client that called"),
+    {},
+    sectionHead("Every client that called"),
     table(
       [
         { label: "Client", sortKey: (c) => c.label, cell: (c) => c.label },
@@ -1493,7 +1492,7 @@ function clientReport(scene, currency) {
           shrink: true,
           sortDir: "desc",
           sortKey: (c) => c.cell.input_tokens + c.cell.output_tokens,
-          cell: (c) => num(c.cell.input_tokens + c.cell.output_tokens),
+          cell: (c) => compact(c.cell.input_tokens + c.cell.output_tokens),
         },
         {
           label: "Refused",
@@ -1507,12 +1506,12 @@ function clientReport(scene, currency) {
               : h("span", { class: "faint" }, "0"),
         },
         {
-          label: "Spend",
+          label: `Cost (${currency})`,
           num: true,
           shrink: true,
           sortDir: "desc",
           sortKey: (c) => c.cell.cost_micros,
-          cell: (c) => money(c.cell.cost_micros, currency),
+          cell: (c) => money(c.cell.cost_micros, ""),
         },
       ],
       rows,

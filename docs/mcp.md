@@ -28,7 +28,7 @@ these headers, so they must say what the body says.
 A server belongs to one organisation, like a model. Only that organisation's
 keys reach it, and its administrators add, change and remove it. Two
 organisations can each have a `github`. An operator with several organisations
-passes `--org <id>`.
+picks one with `keera org switch <org>`.
 
 On the command line:
 
@@ -83,7 +83,7 @@ keera guardrail set project <project-id> --tools github/search_code
 ```
 
 An entry is a server alias, for all its tools, or `alias/tool` for one tool.
-`--tools any` clears a level's list.
+`--no-tools` clears a level's list.
 Each level narrows the one above: a tool must be on every level's list. Here
 the project may call only `github/search_code`. The project's list does not name
 `jira/search`, and it names no other github tool. A level that sets no list
@@ -182,7 +182,7 @@ memory tools, and OpenAI's shell, local shell, computer use and apply-patch
 tools. Every other tool type is removed, including ones released after this
 build. The response header `X-Keera-Removed-Tools` names what was removed.
 
-`--allow-hosted-tools` stops a level blocking them. Once a level blocks hosted
+`--no-block-hosted-tools` stops a level blocking them. Once a level blocks hosted
 tools, no level below can unblock them.
 
 A model on the deployment's own provider key ([billing.md](billing.md)) never

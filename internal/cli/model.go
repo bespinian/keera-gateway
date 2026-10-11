@@ -52,7 +52,7 @@ func registerModelFlags(fs *flag.FlagSet) *modelFlags {
 	fs.StringVar(&f.kind, "kind", "", "chat, completion, embedding or decision (default chat)")
 	fs.StringVar(&f.description, "description", "",
 		"what this model is for, in a sentence; clients see it and routers decide on it "+
-			"(a --provider model starts with that provider's own); an empty one clears it")
+			"(a --provider model starts with that provider's own)")
 	fs.IntVar(&f.maxContext, "max-context", -1, "context window: advertised to clients, and a request that cannot fit is refused")
 	fs.StringVar(&f.releaseDate, "release-date", "",
 		"the day the model came out, as YYYY-MM-DD (a --provider model starts with that provider's own)")
@@ -239,6 +239,8 @@ func modelCmd(ctx context.Context, args []string) error {
 	r := &modelRun{aliasRun: newAliasRun("model", "models", "model", args)}
 	r.f = registerModelFlags(r.fs)
 	r.fs.BoolVar(&r.f.disabled, "disabled", false, disabledUsage)
+	r.reword("set", "description", "what this model is for, in a sentence; an empty one clears it")
+	r.reword("set", "kind", "chat, completion, embedding or decision")
 	if done, err := r.parse(); done {
 		return err
 	}

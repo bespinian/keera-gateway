@@ -103,6 +103,9 @@ func loginCmd(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if me, err = backToOrg(ctx, c, me); err != nil {
+		return err
+	}
 
 	fmt.Printf("Signed in to %s as %s.\n", c.base, describe(me))
 	// saveSignIn made this the default gateway.
@@ -115,6 +118,25 @@ func loginCmd(ctx context.Context, args []string) error {
 			"shell, and it wins. Unset it to run commands as yourself."))
 	}
 	return nil
+}
+
+// backToOrg puts a new sign-in in the organisation this machine was last in,
+// as the browser does, and remembers where it now is. An organisation the
+// person is no longer in is forgotten.
+func backToOrg(ctx context.Context, c *client, me identity) (identity, error) {
+	if me.Unrestricted {
+		// An operator's choice is only kept here, and still stands.
+		return me, nil
+	}
+	if last := c.org; c.orgFrom == "keera org switch" && last != me.OrgID {
+		if err := c.do(ctx, "POST", "/v1/me/org", map[string]string{"org_id": last}, nil); err != nil {
+			fmt.Fprintf(os.Stderr, "Could not go back to the organisation this machine was last in "+
+				"(%v).\n", err)
+		} else if me, err = whoami(ctx, c); err != nil {
+			return me, err
+		}
+	}
+	return me, saveOrg(c.base, me.OrgID)
 }
 
 // logoutCmd ends this machine's sign-in, and with --all every one this person
@@ -180,6 +202,13 @@ func whoamiCmd(ctx context.Context, args []string) error {
 	// A machine can be signed in to several gateways, so say why this one.
 	fmt.Printf("That address came from %s.\n", c.baseFrom)
 	switch {
+	case me.Unrestricted && c.org != "":
+		fmt.Printf("Commands act on organisation %s, chosen by %s.\n", c.org, c.orgFrom)
+	case len(me.Orgs) > 1:
+		fmt.Printf("You are in %d organisations; 'keera org switch' moves to another.\n",
+			len(me.Orgs))
+	}
+	switch {
 	case c.key != "":
 		fmt.Println("Signed in with KEERA_OPERATOR_KEY, which is the deployment's own credential.")
 	case !c.signedIn.ExpiresAt.IsZero():
@@ -197,10 +226,23 @@ type identity struct {
 	OrgID   string `json:"org_id"`
 	OrgName string `json:"org_name"`
 	Via     string `json:"via"`
+	// Unrestricted is true of an operator, who sees every organisation.
+	Unrestricted bool `json:"unrestricted"`
+	// Orgs are the organisations this person can switch to, when there are
+	// several.
+	Orgs []membership `json:"orgs,omitempty"`
 	// Sandboxes is whether the deployment lends out sandboxes.
 	Sandboxes bool `json:"sandboxes"`
 	// ClaudeSubscriptions is whether it takes Claude subscriptions.
 	ClaudeSubscriptions bool `json:"claude_subscriptions"`
+}
+
+// membership is one organisation a person is in, or was invited to.
+type membership struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Role    string `json:"role"`
+	Invited bool   `json:"invited,omitempty"`
 }
 
 func whoami(ctx context.Context, c *client) (identity, error) {

@@ -24,9 +24,10 @@ const (
 )
 
 // guardrailFlags are the flags of 'keera guardrail'. Numbers use -1 for "not
-// given" and 0 for "unlimited"; lists take 'any' to clear them.
+// given" and 0 for "unlimited"; everything else is cleared by its --no- flag.
 type guardrailFlags struct {
 	models           string
+	noModels         bool
 	rpm              int
 	tpm              int
 	maxOut           int
@@ -37,19 +38,23 @@ type guardrailFlags struct {
 	filters          string
 	noFilters        bool
 	tools            string
+	noTools          bool
 	blockHosted      bool
-	allowHosted      bool
+	noBlockHosted    bool
 	maxSandboxes     int
 	maxSandboxTTL    time.Duration
 	sandboxClasses   string
+	noSandboxClasses bool
 	maxSandboxCPU    float64
 	maxSandboxMemory int
 	repos            string
+	noRepos          bool
 }
 
 func registerGuardrailFlags(fs *flag.FlagSet) *guardrailFlags {
 	f := &guardrailFlags{}
-	fs.StringVar(&f.models, "models", "", "comma-separated models this scope may use ('any' to clear)")
+	fs.StringVar(&f.models, "models", "", "comma-separated models this scope may use")
+	fs.BoolVar(&f.noModels, "no-models", false, "stop this scope limiting the models; an outer level still does")
 	fs.IntVar(&f.rpm, "rpm", -1, rpmUsage)
 	fs.IntVar(&f.tpm, "tpm", -1, tpmUsage)
 	fs.IntVar(&f.maxOut, "max-output-tokens", -1, maxOutUsage)
@@ -62,10 +67,11 @@ func registerGuardrailFlags(fs *flag.FlagSet) *guardrailFlags {
 		"comma-separated filters every request through this scope passes through")
 	fs.BoolVar(&f.noFilters, "no-filters", false, "stop this scope applying any filter of its own")
 	fs.StringVar(&f.tools, "tools", "",
-		"comma-separated MCP tools this scope may call: a server, or server/tool ('any' to clear)")
+		"comma-separated MCP tools this scope may call: a server, or server/tool")
+	fs.BoolVar(&f.noTools, "no-tools", false, "stop this scope limiting the tools; an outer level still does")
 	fs.BoolVar(&f.blockHosted, "block-hosted-tools", false,
 		"take the tools a hosted provider runs itself, such as web search, out of every request")
-	fs.BoolVar(&f.allowHosted, "allow-hosted-tools", false,
+	fs.BoolVar(&f.noBlockHosted, "no-block-hosted-tools", false,
 		"stop this scope blocking hosted tools; an outer level that blocks them still does")
 	fs.IntVar(&f.maxSandboxes, "max-sandboxes", -1,
 		"how many sandboxes this scope may run at once (0 for unlimited); the sandbox "+
@@ -73,20 +79,26 @@ func registerGuardrailFlags(fs *flag.FlagSet) *guardrailFlags {
 	fs.DurationVar(&f.maxSandboxTTL, "max-sandbox-ttl", -1,
 		"longest lifetime any one of them may be given (0 for unlimited)")
 	fs.StringVar(&f.sandboxClasses, "sandbox-classes", "",
-		"comma-separated sandbox classes this scope may use ('any' to clear)")
+		"comma-separated sandbox classes this scope may use")
+	fs.BoolVar(&f.noSandboxClasses, "no-sandbox-classes", false,
+		"stop this scope limiting the sandbox classes; an outer level still does")
 	fs.Float64Var(&f.maxSandboxCPU, "max-sandbox-cpu", -1,
 		"largest sandbox this scope may run, in cores (0 for unlimited)")
 	fs.IntVar(&f.maxSandboxMemory, "max-sandbox-memory", -1,
 		"largest sandbox this scope may run, in mebibytes (0 for unlimited)")
 	fs.StringVar(&f.repos, "repos", "",
 		"comma-separated repositories sandboxes may check out: owner, owner/name, or '*' "+
-			"for all ('any' to clear); on an organisation, operators only")
+			"for all; on an organisation, operators only")
+	fs.BoolVar(&f.noRepos, "no-repos", false,
+		"stop this scope limiting the repositories; an outer level still does")
 	return f
 }
 
 // apply writes the flags that were given into lim and leaves the rest alone.
 func (f *guardrailFlags) apply(lim *policy.Limits) error {
-	setList(&lim.AllowedModels, f.models)
+	if err := setList(&lim.AllowedModels, "models", f.models, f.noModels); err != nil {
+		return err
+	}
 	setInt(&lim.RPM, f.rpm)
 	setInt(&lim.TPM, f.tpm)
 	setInt(&lim.MaxOutputTokens, f.maxOut)
@@ -94,9 +106,11 @@ func (f *guardrailFlags) apply(lim *policy.Limits) error {
 	if err := setPeriod(&lim.BudgetPeriod, f.period); err != nil {
 		return err
 	}
-	// The prompt and the filters are cleared by their own flags rather than
-	// by a reserved word, which nobody could then use as a prompt or an alias.
+	// Each part is cleared by its own flag rather than by a reserved word,
+	// which nobody could then use as a prompt or an alias.
 	switch {
+	case f.noSystemPrompt && f.systemPrompt != "":
+		return opposites("system-prompt", "no-system-prompt")
 	case f.noSystemPrompt:
 		lim.SystemPrompt = nil
 	case f.systemPrompt != "":
@@ -108,19 +122,23 @@ func (f *guardrailFlags) apply(lim *policy.Limits) error {
 	}
 	// Clearing this scope's filters does not lift those an outer level applies.
 	switch {
+	case f.noFilters && f.filters != "":
+		return opposites("filters", "no-filters")
 	case f.noFilters:
 		lim.Filters = nil
 	case f.filters != "":
 		lim.Filters = splitList(f.filters)
 	}
-	setList(&lim.AllowedTools, f.tools)
+	if err := setList(&lim.AllowedTools, "tools", f.tools, f.noTools); err != nil {
+		return err
+	}
 	switch {
-	case f.blockHosted && f.allowHosted:
-		return opposites("block-hosted-tools", "allow-hosted-tools")
+	case f.blockHosted && f.noBlockHosted:
+		return opposites("block-hosted-tools", "no-block-hosted-tools")
 	case f.blockHosted:
 		yes := true
 		lim.BlockHostedTools = &yes
-	case f.allowHosted:
+	case f.noBlockHosted:
 		lim.BlockHostedTools = nil
 	}
 	setInt(&lim.MaxSandboxes, f.maxSandboxes)
@@ -131,23 +149,26 @@ func (f *guardrailFlags) apply(lim *policy.Limits) error {
 	if f.maxSandboxTTL >= 0 {
 		setInt(&lim.MaxSandboxTTLSeconds, int(f.maxSandboxTTL.Seconds()))
 	}
-	setList(&lim.SandboxClasses, f.sandboxClasses)
-	setList(&lim.AllowedRepos, f.repos)
-	return nil
+	if err := setList(&lim.SandboxClasses, "sandbox-classes", f.sandboxClasses, f.noSandboxClasses); err != nil {
+		return err
+	}
+	return setList(&lim.AllowedRepos, "repos", f.repos, f.noRepos)
 }
 
-// setList applies a comma-separated list flag, where 'any' clears the list
-// and an empty value means "not given".
-func setList(dst *[]string, v string) {
-	switch v {
-	case "":
-	case "any":
+// setList applies a comma-separated list flag and its --no- flag, which
+// clears the list. An empty value means "not given".
+func setList(dst *[]string, name, v string, clear bool) error {
+	switch {
+	case clear && v != "":
+		return opposites(name, "no-"+name)
+	case clear:
 		*dst = nil
-	default:
-		// Never nil, which would read as "any": a list of only commas names
-		// nothing.
+	case v != "":
+		// Never nil, which would read as "no limit": a list of only commas
+		// names nothing.
 		*dst = append([]string{}, splitList(v)...)
 	}
+	return nil
 }
 
 // micros converts whole currency units to millionths. It rounds, because
@@ -182,7 +203,7 @@ func setPeriod(dst **policy.Period, given string) error {
 }
 
 func guardrailCmd(ctx context.Context, args []string) error {
-	r := newCmdRun("guardrail", args, "org", "json")
+	r := newCmdRun("guardrail", args, "json")
 	f := registerGuardrailFlags(r.fs)
 	if done, err := r.parse(); done {
 		return err
@@ -226,10 +247,10 @@ func scopeArgs(ctx context.Context, c *client, fs *flag.FlagSet, org string) (st
 	scope, given := fs.Arg(0), fs.Arg(1)
 	switch policy.ScopeType(scope) {
 	case policy.ScopeOrg:
-		if given != "" {
-			return scope, given, nil
+		if given == "" {
+			given = org
 		}
-		orgID, err := resolveOrg(ctx, c, org)
+		orgID, err := resolveOrg(ctx, c, given)
 		return scope, orgID, err
 	case policy.ScopeProject, policy.ScopeKey:
 		if given == "" {
@@ -275,7 +296,7 @@ var facetAll = []string{"models", "rates", "spend", "prompt", "filters", "tools"
 var facetFields = map[string][]string{"limit": {"rates"}, "budget": {"spend"}}
 
 func facetCmd(ctx context.Context, name string, args []string) error {
-	r := newCmdRun(name, args, "org", "json")
+	r := newCmdRun(name, args, "json")
 	f := registerGuardrailFlags(r.fs)
 	// Help comes first, then the other facet's flags, named by the command
 	// that takes them, before parse refuses them less helpfully.

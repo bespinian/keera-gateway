@@ -84,6 +84,15 @@ export function money(micros, currency) {
   return currency ? `${s} ${currency}` : s;
 }
 
+/** listPrice renders a price per million tokens exactly, as `keera model list`
+ *  does. It is what gets billed, so 0.125 must not read as 0.13. */
+export function listPrice(micros, currency) {
+  let s = ((micros || 0) / 1e6).toFixed(6).replace(/0+$/, "");
+  const decimals = s.length - s.indexOf(".") - 1;
+  if (decimals < 2) s += "0".repeat(2 - decimals);
+  return currency ? `${s} ${currency}` : s;
+}
+
 export function ms(v) {
   if (!v) return "-";
   return v >= 1000
@@ -111,11 +120,18 @@ export function plural(n, word, many = word + "s") {
  *  number nobody reads as eleven and a half minutes. */
 export function duration(msValue) {
   const secs = Math.round((msValue || 0) / 1000);
-  if (secs < 60) return secs + "s";
+  if (secs < 60) return secs + " s";
   const mins = Math.floor(secs / 60);
-  if (mins < 60) return mins + "m" + (secs % 60 ? " " + (secs % 60) + "s" : "");
+  if (mins < 60)
+    return mins + " min" + (secs % 60 ? " " + (secs % 60) + " s" : "");
   const hours = Math.floor(mins / 60);
-  return hours + "h" + (mins % 60 ? " " + (mins % 60) + "m" : "");
+  return hours + " h" + (mins % 60 ? " " + (mins % 60) + " min" : "");
+}
+
+/** tokens is a request's tokens in and out, the same way on every screen. */
+export function tokens(inTokens, outTokens) {
+  if (!inTokens && !outTokens) return "-";
+  return `${compact(inTokens)} in · ${compact(outTokens)} out`;
 }
 
 export function dateTime(iso) {
@@ -1279,7 +1295,7 @@ export function confirm({
 export function rowActions(
   ctx,
   name,
-  { editTitle, onEdit, deleteTitle, body, confirmLabel, remove, removed },
+  { editTitle, onEdit, deleteTitle, body, confirmLabel, remove },
 ) {
   return h(
     "div",
@@ -1308,7 +1324,7 @@ export function rowActions(
             danger: true,
             onConfirm: async () => {
               await remove();
-              toast(removed, "good");
+              toast(`${name} deleted`, "good");
               ctx.reload();
             },
           }),
@@ -1430,6 +1446,15 @@ export function showError(host, message) {
 export function aliasProblem(alias) {
   if (!alias) return "An alias is required. It is the name clients use.";
   return nameProblem(alias, 64, "An alias");
+}
+
+/** takenProblem refuses an alias the organisation already has. Saving is a
+ *  PUT, which replaces what is there, so without it "add" would quietly
+ *  overwrite the entry of that name. The CLI refuses the same way. */
+export function takenProblem(entries, alias, noun) {
+  return (entries || []).some((e) => e.alias === alias)
+    ? `The ${noun} ${alias} already exists. Change it from its row instead.`
+    : "";
 }
 
 /** sandboxNameProblem mirrors policy.ValidSandboxName: the alias rule, but at

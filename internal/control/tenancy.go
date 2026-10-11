@@ -155,7 +155,7 @@ func (s *Server) deleteOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	if errors.Is(err, store.ErrOrgHasSandboxes) {
 		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "org_has_sandboxes",
 			fmt.Sprintf("%s still has %d live sandbox(es); terminate them first "+
-				"(keera sandbox list --org %s), so none keeps running after its "+
+				"(KEERA_ORG=%s keera sandbox list), so none keeps running after its "+
 				"organisation is gone", gone.Name, gone.LiveSandboxes, orgID))
 		return
 	}
@@ -373,7 +373,9 @@ func (s *Server) addUser(w http.ResponseWriter, r *http.Request, p *authn.Princi
 	if !readJSON(w, r, &in) {
 		return
 	}
-	email := strings.TrimSpace(in.Email)
+	// Lowercased because identity providers' addresses are, and a sign-in
+	// finds this row by exact match.
+	email := strings.ToLower(strings.TrimSpace(in.Email))
 	if email == "" {
 		badRequest(w, "'email' is required")
 		return
@@ -407,8 +409,22 @@ func (s *Server) addUser(w http.ResponseWriter, r *http.Request, p *authn.Princi
 	userID := id.New("user")
 	externalID := in.ExternalID
 	passkey := false
-	switch in.SignIn {
-	case "", "sso":
+	// Not said means the way this gateway signs people in: its identity
+	// provider, or passkeys when it has none.
+	signIn := in.SignIn
+	if signIn == "" {
+		signIn = "sso"
+		if !s.opts.Providers.Enabled() && s.opts.Passkeys != nil {
+			signIn = authn.PasskeyProvider
+		}
+	}
+	switch signIn {
+	case "sso":
+		if !s.opts.Providers.Enabled() {
+			badRequest(w, "this gateway has no identity provider, so nobody could sign in "+
+				"to that account; add a passkey account instead")
+			return
+		}
 	case authn.PasskeyProvider:
 		if s.passkeysOff(w) {
 			return
@@ -436,7 +452,7 @@ func (s *Server) addUser(w http.ResponseWriter, r *http.Request, p *authn.Princi
 		return
 	case errors.Is(err, store.ErrExternalIDTaken):
 		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "external_id_taken",
-			"another person already has that 'external_id'")
+			"someone in this organisation already has that 'external_id'")
 		return
 	case err != nil:
 		s.fail(w, err)

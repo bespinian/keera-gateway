@@ -63,7 +63,10 @@ every 15 minutes after, so a person removed from it is demoted within 15
 minutes. The panel _no longer
 lets you change roles_, because the next sign-in would undo the change. With
 several directories, admin groups on one provider are enough to make the
-directory decide for the whole gateway.
+directory decide for the whole gateway. It decides only in the organisation the
+person's address lands in (see
+[Which organisation a sign-in lands in](#which-organisation-a-sign-in-lands-in)).
+In any other organisation they are in, they keep the role it gave them.
 
 **If unset, Keera decides.** Everyone starts with
 `KEERA_OIDC_<NAME>_DEFAULT_ROLE` (`member` unless set to `admin`), and an operator or administrator promotes
@@ -75,10 +78,9 @@ keera user role alice@example.ch admin
 
 The change is audited, signs the person out everywhere so the new role applies
 at once, and stays until someone changes it. You can also add a person before
-their first sign-in with `keera user add alice@example.ch --role admin`; their
-identity takes over that row when they first sign in, if the sign-in lands in
-that row's organisation (see
-[Which organisation a sign-in lands in](#which-organisation-a-sign-in-lands-in)).
+their first sign-in with `keera user add alice@example.ch --role admin`. Their
+identity takes over that row when a sign-in lands in its organisation, or when
+they switch to it (see [Several organisations](#several-organisations)).
 
 This is the only option on Google Workspace.
 
@@ -265,17 +267,25 @@ off everyone who signed in through it. The button label comes from the name
 An identity is stored as `<provider>:<subject>`, because a subject is only
 unique within its directory.
 
-A row an administrator created in advance has no subject yet. The first sign-in
-with a matching address takes it over, if it lands in that row's organisation. A row that already has _another_
-subject, from another provider or the same one, is refused instead. Otherwise
-anyone who gets the same address, through a weaker directory or by reuse in the
-same one, could take over the account and its role.
+A person keeps the provider they first signed in with, in every organisation.
+A sign-in with the same address through another provider is refused, and the
+error names the one to use. Otherwise anyone who gets the same address, through
+a weaker directory, could become them. Two identities that already shared an
+address before this rule keep working. A passkey account is its own identity,
+in one organisation.
+
+A row an administrator created in advance has no subject yet. The person's
+identity takes it over when they first land in that row's organisation. A row
+that already has _another_ subject, from another provider or the same one, is
+refused instead.
 
 ## Which organisation a sign-in lands in
 
 `orgFor` in `internal/control/auth.go` checks in this order:
 
-1. A user already linked to that provider's subject.
+1. The organisations the person is already in: the one this browser was last
+   in, else the one they used last. See
+   [Several organisations](#several-organisations).
 2. An organisation whose `email_domain` matches the address's domain. With
    several providers, only a provider allowed that domain gets this far.
 3. With sign-up on that provider, the sign-up screen. See
@@ -296,7 +306,7 @@ the second one:
 
 ```sh
 keera org create "Another Bank" --domain anotherbank.ch
-keera org set <org-id> --domain yourdomain.ch   # the one that was there first
+keera org set <org> --domain yourdomain.ch   # the one that was there first
 ```
 
 You can leave out the id while there is only one organisation. `keera org list`
@@ -304,7 +314,7 @@ shows each domain. Domains are unique: a second organisation claiming the same
 one is refused.
 
 Setting a domain moves nobody. It is only read on a first sign-in, so existing
-users stay where they are. `keera org set <org-id> --no-domain` removes it.
+users stay where they are. `keera org set <org> --no-domain` removes it.
 
 The same through the control API:
 
@@ -314,6 +324,37 @@ curl -X PATCH https://keera.example.ch/control/v1/orgs/<org-id> \
   -H 'Content-Type: application/json' \
   -d '{"email_domain":"yourdomain.ch"}'
 ```
+
+## Several organisations
+
+A person can be in several organisations, with a role in each. Each
+organisation adds them, in the panel or with `keera user add`. That is an
+invitation until they first land there.
+
+In the panel, someone in more than one sees a menu instead of the
+organisation's name at the top. Choosing an organisation moves the session
+there, and choosing an invitation joins it. On the command line:
+
+```sh
+keera org list                 # yours, and the ones that invited you
+keera org switch "Example Bank"
+KEERA_ORG=org_123 keera usage  # one shell or pipeline
+```
+
+A browser remembers the organisation it was last in, and a new sign-in lands
+there. Elsewhere it lands in the one used last. `keera login` goes back to the
+one that machine was last in. Every command acts on that organisation, so none
+takes `--org`. The exceptions are `keera billing grant` and
+`keera billing invoiced`, where an operator names it each time.
+
+An operator works in every organisation, so `keera org switch` only chooses the
+one commands act on, and `keera org switch --all` goes back to all of them.
+The operator role goes wherever the person goes.
+
+Disabling a person or changing their role acts in one organisation. Leaving
+the directory or `keera logout --all` ends their sign-ins in all of them. Each
+switch is in the audit log as `auth.switch_org`, in the organisation switched
+to.
 
 ## Letting people sign up
 
@@ -374,7 +415,7 @@ network that `KEERA_UPSTREAM_PRIVATE` names. Credit an operator grants does not 
 operator can also lift it at any time:
 
 ```sh
-keera org set <org-id> --lift-limit
+keera org set <org> --lift-limit
 ```
 
 On the panel, that is **Organisations → Lift limit**. `keera org list` marks
@@ -480,7 +521,8 @@ returns, encrypted with `KEERA_SECRET_KEY`, and spends it every 15 minutes
 while the person is active.
 
 - If the directory refuses, because the person was removed or disabled or
-  revoked Keera's access, all their sessions and `keera login` tokens end.
+  revoked Keera's access, all their sessions and `keera login` tokens end, in
+  every organisation they are in.
 - If it answers, the role is applied again, as at sign-in.
 - If it cannot be reached, the person stays signed in, and the next request
   asks again 15 minutes later.
@@ -502,7 +544,8 @@ those. So disable them in Keera as well:
 keera user disable ada@example.ch
 ```
 
-Or use **Users → Disable** in the panel. Immediately:
+Or use **Users → Disable** in the panel. It acts in one organisation: someone in
+several is disabled in each. Immediately:
 
 - they cannot sign in, and all their sessions and `keera login` tokens end
 - every key attributed to them is revoked for good

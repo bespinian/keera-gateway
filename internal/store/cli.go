@@ -59,7 +59,7 @@ func (s *Store) CreateCLIToken(ctx context.Context, hash []byte, userID string,
 func (s *Store) LookupCLIToken(ctx context.Context, hash []byte) (CLITokenUser, error) {
 	var tu CLITokenUser
 	err := s.pool.QueryRow(ctx, `SELECT `+userColumnsOf("u.")+`, `+directoryColumns+`
-		FROM cli_tokens t JOIN users u ON u.id = t.user_id
+		FROM cli_tokens t JOIN users u ON u.id = t.user_id`+identityJoin+`
 		WHERE t.id = $1 AND t.expires_at > now() AND u.disabled_at IS NULL`, hash,
 	).Scan(append(userTargets(&tu.User), &tu.Directory.Linked, &tu.Directory.CheckedAt)...)
 	return tu, notFound(err)

@@ -16,34 +16,25 @@ import {
   plural,
   field,
   pill,
+  listHead,
 } from "../ui.js";
 
 export async function orgsView(ctx) {
   const orgs = (await api.orgs()).data || [];
   ctx.setSubtitle(`${orgs.length} ${plural(orgs.length, "organisation")}`);
 
-  const head = h(
-    "div",
-    { class: "row", style: { marginBottom: "16px" } },
-    h(
-      "div",
-      { class: "muted" },
-      "A dedicated or on-premises deployment has exactly one. It needs no " +
-        "email domain, because everyone who signs in joins it.",
-    ),
-    h("div", { style: { flex: 1 } }),
-    h(
-      "button",
-      { class: "btn btn-primary", onClick: () => newOrg(ctx) },
-      icon(icons.plus),
-      "Create organisation",
-    ),
+  const head = listHead(
+    "A dedicated or on-premises deployment has exactly one. It needs no " +
+      "email domain, because everyone who signs in joins it.",
+    null,
+    { label: "Create organisation", onClick: () => newOrg(ctx) },
   );
 
   const rows = table(
     [
       {
         label: "Organisation",
+        sortKey: (o) => o.name,
         cell: (o) =>
           h(
             "div",
@@ -63,6 +54,7 @@ export async function orgsView(ctx) {
       },
       {
         label: "Email domain",
+        sortKey: (o) => o.email_domain || null,
         cell: (o) =>
           o.email_domain
             ? h("span", { class: "mono" }, o.email_domain)
@@ -71,6 +63,9 @@ export async function orgsView(ctx) {
       {
         label: "Created",
         shrink: true,
+        sortKey: (o) =>
+          o.created_at ? new Date(o.created_at).getTime() : null,
+        sortDir: "desc",
         cell: (o) => h("span", { class: "muted nowrap" }, date(o.created_at)),
       },
       {
@@ -116,33 +111,19 @@ export async function orgsView(ctx) {
               },
               "Switch to",
             ),
-            // Deleting your own organisation would take your user row and your
-            // session with it, so the button is shown disabled rather than hidden:
-            // an operator who came looking for it deserves the reason.
-            o.id === ctx.state.me.org_id
-              ? h(
-                  "button",
-                  {
-                    class: "btn btn-sm btn-danger",
-                    disabled: true,
-                    title:
-                      `You are signed in to ${o.name}. ` +
-                      "Delete it as an operator in another organisation, or " +
-                      "run keera org delete with KEERA_OPERATOR_KEY set.",
-                    "aria-label": `Delete ${o.name}`,
-                  },
-                  icon(icons.trash),
-                )
-              : h(
-                  "button",
-                  {
-                    class: "btn btn-sm btn-danger",
-                    title: "Delete this organisation",
-                    "aria-label": `Delete ${o.name}`,
-                    onClick: () => deleteOrg(ctx, o),
-                  },
-                  icon(icons.trash),
-                ),
+            h(
+              "button",
+              {
+                class: "btn btn-sm btn-danger",
+                title: "Delete this organisation",
+                "aria-label": `Delete ${o.name}`,
+                onClick: () =>
+                  o.id === ctx.state.me.org_id
+                    ? cannotDeleteOwn(o)
+                    : deleteOrg(ctx, o),
+              },
+              icon(icons.trash),
+            ),
           ),
       },
     ],
@@ -150,6 +131,8 @@ export async function orgsView(ctx) {
     {
       emptyTitle: "No organisations yet",
       emptyBody: "Create one per customer.",
+      search: (o) => [o.name, o.id, o.email_domain || ""].join(" "),
+      searchLabel: "organisations",
     },
   );
 
@@ -279,8 +262,8 @@ function orgSettings(ctx, org) {
   modal({
     title: `Edit ${org.name}`,
     body: h(
-      "div",
-      {},
+      "form",
+      { onSubmit: (e) => e.preventDefault() },
       err,
       field("Name", name, "Must differ from every other organisation's name."),
       field(
@@ -323,6 +306,29 @@ function orgSettings(ctx, org) {
         },
         "Save",
       ),
+    ],
+  });
+}
+
+// cannotDeleteOwn explains why the operator's own organisation cannot be
+// deleted from here: it would take their user row and their session with it.
+// The button still opens this rather than being hidden or disabled, because an
+// operator who came looking for it deserves the reason and the way round it.
+function cannotDeleteOwn(org) {
+  modal({
+    title: `Delete ${org.name}?`,
+    body: h(
+      "div",
+      { class: "muted" },
+      `You are signed in to ${org.name}, so you cannot delete it here. ` +
+        "Delete it as an operator in another organisation, or run ",
+      h("code", {}, "keera org delete"),
+      " with ",
+      h("code", {}, "KEERA_OPERATOR_KEY"),
+      " set.",
+    ),
+    actions: (close) => [
+      h("button", { class: "btn", onClick: close }, "Close"),
     ],
   });
 }

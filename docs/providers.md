@@ -114,8 +114,8 @@ keera model add keera-swiss --provider infomaniak --product-id 100234 \
 
 Use `@-`: a key passed as a flag value ends up in the shell history.
 
-An administrator adds the model to their own organisation. An operator passes
-`--org <id>`, unless there is only one organisation.
+The model goes in the organisation the CLI works in. See
+[Several organisations](sso.md#several-organisations).
 
 ## Where the credential lives
 

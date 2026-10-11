@@ -72,15 +72,14 @@ your own inference plane, or a provider reached with the organisation's own
 key.
 
 An administrator adds one in the panel (**Models → Add model**) or with
-`keera model add <alias>`. The CLI uses their own organisation, so they never
-pass `--org`. An operator picks the organisation in the panel, or passes
-`--org <id>` when there is more than one.
+`keera model add <alias>`. Both act on the organisation the person works in.
+An operator picks one in the panel, or with `keera org switch <org>`.
 
 A new organisation starts with a copy of each model in the catalogue file
 (`KEERA_MODELS_FILE`). The copies are the organisation's own: its
 administrators change, disable or remove them like any other model. Changing
 the file later does not touch organisations that already exist. To add the
-file's models to one, run `keera model apply <file> --org <id>`.
+file's models to one, switch to it and run `keera model apply <file>`.
 
 The file holds no API keys. After a new organisation is created, its
 administrator stores the key for each hosted model.
@@ -171,6 +170,11 @@ The exceptions:
   what it inherits but may not drop it.
 - **Only the organisation grants repositories** to sandboxes. A project can only
   narrow the list; a key cannot set it.
+
+When an organisation's guardrail lists allowed models, a model the organisation
+adds is put on that list, whether it was added in the panel, with
+`keera model add` or with `keera model apply`. Projects and keys that list
+models keep their own lists.
 
 A budget with no period is a monthly one. Budgets reset on UTC boundaries in
 every deployment.

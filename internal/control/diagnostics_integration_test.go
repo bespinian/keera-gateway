@@ -180,7 +180,7 @@ func TestDoctorCatchesAFilterPointingAtNothing(t *testing.T) {
 }
 
 func TestEffectiveGuardrailsCollapseTheChain(t *testing.T) {
-	// The question 'guardrail get' could never answer: what actually holds
+	// The question 'guardrail show' could never answer: what actually holds
 	// this key, given that it sets nothing itself.
 	srv, st := diagnosed(t)
 	ctx := t.Context()

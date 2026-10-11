@@ -24,7 +24,8 @@ const testOperatorKey = "an-operator-key-long-enough-to-be-real"
 
 // testStore opens the database in KEERA_TEST_DATABASE_URL, or skips the test
 // without one. It empties the request log, spend, every organisation and the
-// tables named, so a test starts from nothing it did not write.
+// tables named, so a test starts from nothing it did not write. Identities
+// are emptied too: they outlive the users rows that orgs takes with it.
 func testStore(t *testing.T, tables ...string) (*store.Store, context.Context) {
 	t.Helper()
 	dsn := os.Getenv("KEERA_TEST_DATABASE_URL")
@@ -42,7 +43,7 @@ func testStore(t *testing.T, tables ...string) (*store.Store, context.Context) {
 	if _, err := st.Migrate(ctx); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	all := append([]string{"usage_events", "spend", "orgs"}, tables...)
+	all := append([]string{"usage_events", "spend", "orgs", "identities"}, tables...)
 	if _, err := st.Pool().Exec(ctx,
 		"TRUNCATE "+strings.Join(all, ", ")+" RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatalf("truncate: %v", err)

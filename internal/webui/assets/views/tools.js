@@ -5,7 +5,7 @@
 // of it, how long it took and how much went each way - which is enough to see
 // an agent looping on one tool, or sending four megabytes to a chat channel.
 
-import { h, table, pill, ms, bytes, dateTime } from "../ui.js";
+import { h, table, pill, ms, bytes, dateTime, ago } from "../ui.js";
 
 // OUTCOMES are the words a tool call ends in, and how each is drawn.
 const OUTCOMES = {
@@ -18,7 +18,13 @@ const OUTCOMES = {
 };
 
 function toolOutcome(outcome) {
-  const [label, tone] = OUTCOMES[outcome] || [outcome, ""];
+  // An outcome this panel does not know yet is still shown as a word.
+  const [label, tone] = OUTCOMES[outcome] || [
+    outcome
+      ? outcome[0].toUpperCase() + outcome.slice(1).replace(/_/g, " ")
+      : "",
+    "",
+  ];
   return pill(label, tone);
 }
 
@@ -29,7 +35,12 @@ export function toolCallTable(rows, opts = {}) {
       {
         label: "When",
         sortKey: (t) => t.ts,
-        cell: (t) => h("span", { class: "nowrap muted" }, dateTime(t.ts)),
+        cell: (t) =>
+          h(
+            "span",
+            { class: "muted nowrap", title: dateTime(t.ts) },
+            ago(t.ts),
+          ),
       },
       {
         label: "Tool",
@@ -54,7 +65,7 @@ export function toolCallTable(rows, opts = {}) {
           ),
       },
       {
-        label: "Time",
+        label: "Took",
         num: true,
         shrink: true,
         sortKey: (t) => t.latency_ms,

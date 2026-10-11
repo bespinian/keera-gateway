@@ -21,7 +21,7 @@ type filterRun struct {
 	model       string
 	mode        string
 	shadow      bool
-	enforce     bool
+	noShadow    bool
 	prompt      string
 	rules       string
 	description string
@@ -30,7 +30,7 @@ type filterRun struct {
 func filterCmd(ctx context.Context, args []string) error {
 	r := &filterRun{aliasRun: newAliasRun("filter", "filters", "filter", args)}
 	fs := r.fs
-	fs.DurationVar(&r.since, "since", reportWindow, reportSinceUsage)
+	fs.DurationVar(&r.since, "since", reportWindow, sinceUsage)
 	fs.StringVar(&r.model, "model", "", "the model the filter runs on; a gate may run on a decision model")
 	fs.StringVar(&r.mode, "mode", "",
 		"rewrite (a model edits the request and lets it go), gate (a model judges only "+
@@ -40,18 +40,21 @@ func filterCmd(ctx context.Context, args []string) error {
 	// switching it off.
 	fs.BoolVar(&r.shadow, "shadow", false,
 		"run the filter and enforce nothing; what it would have done is recorded")
-	fs.BoolVar(&r.enforce, "enforce", false, "act on what the filter answers (the default)")
+	fs.BoolVar(&r.noShadow, "no-shadow", false, "act on what the filter answers")
+	r.reword("add", "no-shadow", "act on what the filter answers from the start, rather than "+
+		"starting in shadow")
 	fs.StringVar(&r.prompt, "prompt", "", "the instruction its model is given; @path reads a file")
 	fs.StringVar(&r.rules, "rules", "",
 		"a pattern filter's rules, one per line: an expression, '=>', then what each match "+
 			"becomes - or 'REFUSE: why' to drop the request. @path reads a file")
-	fs.StringVar(&r.description, "description", "", "what this filter is for, for whoever reads the list; an empty one clears it")
+	fs.StringVar(&r.description, "description", "", "what this filter is for, for whoever reads the list")
+	r.reword("set", "description", "what this filter is for, for whoever reads the list; an empty one clears it")
 
 	if done, err := r.parse(); done {
 		return err
 	}
-	if r.shadow && r.enforce {
-		return opposites("shadow", "enforce")
+	if r.shadow && r.noShadow {
+		return opposites("shadow", "no-shadow")
 	}
 	if !policy.FilterMode(r.mode).Valid() {
 		return fmt.Errorf("--mode is %q; it is 'rewrite' (a model edits the request and lets "+
@@ -101,8 +104,10 @@ func (r *filterRun) delete(ctx context.Context) error {
 func (r *filterRun) put(ctx context.Context) error {
 	alias := r.fs.Arg(0)
 	// 'set' starts from the stored filter, so what is not given is kept. 'add'
-	// starts from nothing, and the control plane refuses what is missing.
-	f, err := startPut(ctx, r.aliasRun, alias, policy.Filter{Alias: alias}, filterAlias)
+	// starts from nothing, and the control plane refuses what is missing. A
+	// new filter starts in shadow, as in the panel: nobody's first instruction
+	// is right, and live traffic is a costly place to find that out.
+	f, err := startPut(ctx, r.aliasRun, alias, policy.Filter{Alias: alias, Shadow: true}, filterAlias)
 	if err != nil {
 		return err
 	}
@@ -123,7 +128,7 @@ func (r *filterRun) apply(f *policy.Filter) error {
 	if r.mode != "" {
 		f.Mode = policy.FilterMode(r.mode)
 	}
-	if r.shadow || r.enforce {
+	if r.shadow || r.noShadow {
 		f.Shadow = r.shadow
 	}
 	// A filter that changes kind keeps nothing of the other kind: the endpoint
@@ -420,7 +425,7 @@ func noRunsReason(res filterReportResponse) string {
 		return "No filter of this alias exists in this organisation."
 	}
 	return "Either no guardrail applies it, or nothing it covers was called. " +
-		"'keera guardrail get' on a scope says which filters it applies."
+		"'keera guardrail show' on a scope says which filters it applies."
 }
 
 // errorConsequence says what a filter that could not run did to the request:

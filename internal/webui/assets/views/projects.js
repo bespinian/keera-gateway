@@ -18,6 +18,8 @@ import {
   isAdmin,
   plural,
   field,
+  listHead,
+  pct,
 } from "../ui.js";
 import {
   openGuardrails,
@@ -44,19 +46,12 @@ export async function projectsView(ctx) {
   const orgID = ctx.orgID || ctx.state.me.org_id;
   const orgName = orgNameOf(ctx, orgID);
 
-  const head = h(
-    "div",
-    { class: "row", style: { marginBottom: "16px" } },
-    h(
-      "div",
-      { class: "muted" },
-      canEdit
-        ? "A project's guardrails apply to every key in it. They can narrow what " +
-            "the organisation allows, never widen it."
-        : "A project's guardrails apply to every key in it. Open a project to see " +
-            "them. An administrator sets them.",
-    ),
-    h("div", { class: "spacer", style: { flex: 1 } }),
+  const head = listHead(
+    canEdit
+      ? "A project's guardrails apply to every key in it. They can narrow what " +
+          "the organisation allows, never widen it."
+      : "A project's guardrails apply to every key in it. Open a project to see " +
+          "them. An administrator sets them.",
     // The organisation's own guardrails are the ceiling every row here is held
     // inside, and its system prompt reaches every request every member makes.
     // A member is subject to both, so both are theirs to read.
@@ -79,15 +74,7 @@ export async function projectsView(ctx) {
       "Organisation guardrails",
     ),
     canEdit
-      ? h(
-          "button",
-          {
-            class: "btn btn-primary",
-            onClick: () => newProject(ctx),
-          },
-          icon(icons.plus),
-          "Create project",
-        )
+      ? { label: "Create project", onClick: () => newProject(ctx) }
       : null,
   );
 
@@ -98,6 +85,7 @@ export async function projectsView(ctx) {
         // it spent doing it, and the requests behind both. The button at the end
         // of the row stays what this screen is for, which is the guardrails.
         label: "Name",
+        sortKey: (t) => t.name,
         cell: (t) =>
           h(
             "div",
@@ -106,7 +94,7 @@ export async function projectsView(ctx) {
               ctx,
               "/projects/" + encodeURIComponent(t.id),
               t.name,
-              "This project's traffic, spend and requests",
+              "This project's traffic, cost and requests",
             ),
             h(
               "span",
@@ -120,7 +108,7 @@ export async function projectsView(ctx) {
         cell: (t) =>
           t.description
             ? h("span", { class: "muted" }, t.description)
-            : h("span", { class: "faint" }, "—"),
+            : h("span", { class: "faint" }, "-"),
       },
       { label: "Models", cell: (t) => modelsCell(t.limits) },
       {
@@ -129,11 +117,16 @@ export async function projectsView(ctx) {
           const bits = summarise(t.limits);
           return bits.length
             ? h("span", { class: "muted nowrap" }, bits.join(" · "))
-            : h("span", { class: "faint" }, "inherited");
+            : h("span", { class: "faint" }, "Inherited");
         },
       },
       {
         label: "Budget",
+        // How much of its budget a project has used, so the ones about to run
+        // out come first. One without a budget has nothing to run out of.
+        sortKey: (t) =>
+          t.budget_micros ? t.spend_micros / t.budget_micros : null,
+        sortDir: "desc",
         cell: (t) => {
           if (!t.budget_micros) {
             return h(
@@ -159,7 +152,7 @@ export async function projectsView(ctx) {
               h(
                 "span",
                 { class: "muted nowrap", style: { fontSize: "11.5px" } },
-                `${Math.round(frac * 100)}%`,
+                pct(t.spend_micros, t.budget_micros),
               ),
             ),
             h(
@@ -174,6 +167,8 @@ export async function projectsView(ctx) {
         label: "Keys",
         num: true,
         shrink: true,
+        sortKey: (t) => t.active_keys || 0,
+        sortDir: "desc",
         cell: (t) => num(t.active_keys),
       },
       {
@@ -231,6 +226,8 @@ export async function projectsView(ctx) {
       emptyTitle: "No projects yet",
       emptyBody:
         "Create one per product or group of people, then set its guardrails.",
+      search: (t) => [t.name, t.id, t.description || ""].join(" "),
+      searchLabel: "projects",
     },
   );
 
@@ -305,13 +302,13 @@ function newProject(ctx) {
 // rename is safe in a way renaming things usually is not - which is worth saying
 // in the dialog, because an administrator looking at a month of reports has no
 // reason to assume it.
-function editProject(ctx, project) {
+export function editProject(ctx, project) {
   const { name, description } = projectFields(project);
   const err = h("div");
   modal({
     title: `Edit ${project.name}`,
     subtitle:
-      "Keys, guardrails and spend stay with the project. Reports use a new " +
+      "Keys, guardrails and costs stay with the project. Reports use a new " +
       "name from now on. The old name stays in the audit log.",
     body: h(
       "form",
@@ -361,8 +358,9 @@ function editProject(ctx, project) {
 // same sentence as an error.
 //
 // Where it can go ahead, the guardrails are the part worth naming: they are the
-// only thing in a project that is not recoverable from somewhere else.
-function deleteProject(ctx, project) {
+// only thing in a project that is not recoverable from somewhere else. done
+// runs after the delete; the project's own screen uses it to leave.
+export function deleteProject(ctx, project, done = () => ctx.reload()) {
   const live = project.active_keys || 0;
   if (live) {
     const them = plural(live, "it", "them");
@@ -387,7 +385,7 @@ function deleteProject(ctx, project) {
               ctx.navigate("/keys");
             },
           },
-          "Show keys",
+          "Go to API keys",
         ),
       ],
     });
@@ -403,7 +401,7 @@ function deleteProject(ctx, project) {
     onConfirm: async () => {
       await api.deleteProject(project.id);
       toast(`${project.name} deleted`, "good");
-      ctx.reload();
+      done();
     },
   });
 }

@@ -21,14 +21,14 @@ func sessionCmd(ctx context.Context, args []string) error {
 			args = append([]string{"show"}, args...)
 		}
 	}
-	r := newCmdRun("session", args, "orgs", "json")
+	r := newCmdRun("session", args, "json")
 	fs := r.fs
 	sort := fs.String("sort", "cost", "cost, tokens, requests, duration or recent")
-	alias := fs.String("model", "", "only the sessions that used one model")
+	alias := fs.String("model", "", modelUsage)
 	w := registerWho(fs)
 	unhappy := fs.Bool("unhappy", false, "only the sessions with problems")
-	since := fs.Duration("since", reportWindow, "how far back to look")
-	limit := fs.Int("limit", reportLimit, "how many to print")
+	since := fs.Duration("since", reportWindow, sinceUsage)
+	limit := fs.Int("limit", reportLimit, limitUsage)
 	if done, err := r.parse(); done {
 		return err
 	}
@@ -131,12 +131,14 @@ func sessionShow(ctx context.Context, c *client, arg, org string, asJSON bool) e
 }
 
 type sessionResponse struct {
-	Session      store.AgentSession `json:"session"`
-	Requests     []store.Request    `json:"requests"`
-	Currency     string             `json:"currency"`
-	KeyNames     map[string]string  `json:"key_names"`
-	ProjectNames map[string]string  `json:"project_names"`
-	UserNames    map[string]string  `json:"user_names"`
+	Session      store.AgentSession  `json:"session"`
+	Requests     []store.Request     `json:"requests"`
+	ToolCalls    []store.ToolCallRow `json:"tool_calls"`
+	Currency     string              `json:"currency"`
+	GapSeconds   int64               `json:"gap_seconds"`
+	KeyNames     map[string]string   `json:"key_names"`
+	ProjectNames map[string]string   `json:"project_names"`
+	UserNames    map[string]string   `json:"user_names"`
 }
 
 func printSession(w *table, res sessionResponse) {
@@ -163,6 +165,12 @@ func printSession(w *table, res sessionResponse) {
 		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%dms\t%s\n",
 			r.ID, r.TS.Local().Format("15:04:05"), dash(r.Alias), httpStatus(r.Status),
 			policy.FormatMicros(r.CostMicros), r.TTFTMS, oneLine(r.Error))
+	}
+
+	// What the agent did between its requests, through the MCP servers.
+	if len(res.ToolCalls) > 0 {
+		_, _ = fmt.Fprintln(w)
+		printToolCalls(w, res.ToolCalls)
 	}
 }
 

@@ -28,7 +28,7 @@ type routerRun struct {
 func routerCmd(ctx context.Context, args []string) error {
 	r := &routerRun{aliasRun: newAliasRun("router", "routers", "router", args)}
 	fs := r.fs
-	fs.DurationVar(&r.since, "since", reportWindow, reportSinceUsage)
+	fs.DurationVar(&r.since, "since", reportWindow, sinceUsage)
 	fs.StringVar(&r.mode, "mode", "",
 		"what chooses: 'instruction' reads the request with a model; 'size' places it by how "+
 			"much text is in it; 'fallback', 'latency' and 'least-busy' try the destinations "+
@@ -47,7 +47,8 @@ func routerCmd(ctx context.Context, args []string) error {
 	fs.BoolVar(&r.noFallback, "no-fallback", false,
 		"refuse a request the router cannot place, rather than sending it to a fallback")
 	fs.StringVar(&r.prompt, "prompt", "", "the instruction the deciding model is given; @path reads a file")
-	fs.StringVar(&r.description, "description", "", "what this router is for, for whoever reads the list; an empty one clears it")
+	fs.StringVar(&r.description, "description", "", "what this router is for, for whoever reads the list")
+	r.reword("set", "description", "what this router is for, for whoever reads the list; an empty one clears it")
 
 	if done, err := r.parse(); done {
 		return err

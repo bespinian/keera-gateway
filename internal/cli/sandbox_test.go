@@ -45,7 +45,8 @@ func TestSandboxApplyPutsEveryClassInTheFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := sandboxCmd(context.Background(), []string{"apply", path, "--org", "org_1"}); err != nil {
+	t.Setenv("KEERA_ORG", "org_1")
+	if err := sandboxCmd(context.Background(), []string{"apply", path}); err != nil {
 		t.Fatal(err)
 	}
 	req := f.request("PUT", "/v1/sandbox-classes/standard")
@@ -66,8 +67,9 @@ func TestSandboxDeleteClassDeletesTheOrganisationsClass(t *testing.T) {
 			"name": "standard", "deleted": true, "live_sandboxes": 2,
 		},
 	})
+	t.Setenv("KEERA_ORG", "org_1")
 	if err := sandboxCmd(context.Background(),
-		[]string{"delete-class", "standard", "--org", "org_1", "--yes"}); err != nil {
+		[]string{"delete-class", "standard", "--yes"}); err != nil {
 		t.Fatal(err)
 	}
 	if req := f.request("DELETE", "/v1/sandbox-classes/standard"); req.query != "org_id=org_1" {
@@ -143,8 +145,8 @@ func TestProxyCommandNamesTheGateway(t *testing.T) {
 	}
 }
 
-// Sandbox usage is a report: without --org it spans every organisation the
-// caller can see, so an operator with several is not asked to pick one.
+// Sandbox usage is a report: with no organisation chosen it spans every one
+// the caller can see, so an operator with several is not asked to pick one.
 func TestSandboxUsageSpansEveryOrganisationWithoutOrg(t *testing.T) {
 	f := newFakeControl(t, map[string]any{
 		"GET /v1/me": map[string]any{"role": "operator"},
@@ -166,15 +168,9 @@ func TestSandboxUsageSpansEveryOrganisationWithoutOrg(t *testing.T) {
 		t.Errorf("the rows do not name their organisation:\n%s", said)
 	}
 
-	capture(t, "sandbox", "usage", "--org", "org_b")
+	t.Setenv("KEERA_ORG", "org_b")
+	capture(t, "sandbox", "usage")
 	if q := f.seen[len(f.seen)-1].query; !strings.Contains(q, "org_id=org_b") {
 		t.Errorf("query = %q, want org_b", q)
-	}
-	// The flag says so, on this verb only.
-	if help := capture(t, "help", "sandbox", "usage"); !strings.Contains(help, "every one you can") {
-		t.Errorf("--org on 'usage' does not say it spans every organisation:\n%s", help)
-	}
-	if help := capture(t, "help", "sandbox", "list"); strings.Contains(help, "every one you can") {
-		t.Errorf("--org on 'list' says it spans every organisation:\n%s", help)
 	}
 }

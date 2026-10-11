@@ -416,6 +416,19 @@ func TestOnlyAnOperatorLinksAPersonToASubject(t *testing.T) {
 	}
 }
 
+// On a gateway with no identity provider, an account that signs in through one
+// could never be used, so adding one is refused rather than left to wait.
+func TestNoIdentityProviderAccountWithoutAnIdentityProvider(t *testing.T) {
+	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
+	for _, signIn := range []string{"", "sso"} {
+		w := invoke(s.addUser, admin("org_1"), http.MethodPost, "/v1/users",
+			`{"org_id":"org_1","email":"a@example.ch","sign_in":"`+signIn+`"}`)
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "passkey") {
+			t.Errorf("sign_in %q: status = %d %s; want 400 pointing at passkeys", signIn, w.Code, w.Body)
+		}
+	}
+}
+
 // Without Claude subscriptions, an administrator cannot issue a key for them.
 func TestNoSubscriptionKeyWhileSubscriptionsAreOff(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))

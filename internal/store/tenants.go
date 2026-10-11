@@ -465,7 +465,8 @@ func (s *Store) DeleteProject(ctx context.Context, projectID string) (DeletedPro
 // changes through SetUserRole, and their subject only at sign-in.
 var ErrUserExists = errors.New("store: that address is already in the organisation")
 
-// ErrExternalIDTaken is returned when another person already has the subject.
+// ErrExternalIDTaken is returned when someone in the organisation already has
+// the subject.
 var ErrExternalIDTaken = errors.New("store: that subject already belongs to another person")
 
 // AddUser creates a person, so they are placed in the right organisation

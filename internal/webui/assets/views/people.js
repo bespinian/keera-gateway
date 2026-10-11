@@ -1,4 +1,4 @@
-// People: who can sign in, and what they may do.
+// Users: who can sign in, and what they may do.
 
 import { api } from "../api.js";
 import {
@@ -17,6 +17,7 @@ import {
   field,
   rowLink,
   idpMark,
+  listHead,
 } from "../ui.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
 import { userPasskeys, showPasskeyLink } from "./passkeys.js";
@@ -30,7 +31,7 @@ const ROLES = [
   {
     key: "admin",
     label: "Administrator",
-    note: "Manages the organisation: people, projects, keys, guardrails, models, MCP servers, filters, routers and sandbox classes.",
+    note: "Manages the organisation: users, projects, keys, guardrails, models, MCP servers, filters, routers and sandbox classes.",
   },
   {
     key: "operator",
@@ -53,16 +54,16 @@ export const TONE = { operator: "accent", admin: "good", member: "" };
 const isPasskeyAccount = (u) =>
   (u.external_id || "").startsWith("keera:passkey:");
 
-/** headline says how people get in and where their roles come from. */
+/** headline says how users get in and where their roles come from. */
 function headline(me, canAssign) {
   if (!me.sso && me.passkeys)
     return (
-      "People sign in with a passkey. Add someone to get a set-up link " +
+      "Users sign in with a passkey. Add a user to get a set-up link " +
       "for them."
     );
   if (!me.sso)
     return (
-      "Nobody can sign in until single sign-on is set up. People added " +
+      "Nobody can sign in until single sign-on is set up. Users added " +
       "here are linked to their identity when they first sign in."
     );
   if (canAssign)
@@ -117,18 +118,10 @@ export async function peopleView(ctx) {
       : `${active} active of ${users.length}`,
   );
 
-  const head = h(
-    "div",
-    { class: "row", style: { marginBottom: "16px" } },
-    h("div", { class: "muted" }, headline(ctx.state.me, canAssign)),
-    h("div", { style: { flex: 1 } }),
-    h(
-      "button",
-      { class: "btn btn-primary", onClick: () => addPerson(ctx) },
-      icon(icons.plus),
-      "Add user",
-    ),
-  );
+  const head = listHead(headline(ctx.state.me, canAssign), null, {
+    label: "Add user",
+    onClick: () => addPerson(ctx),
+  });
 
   const rows = table(
     [
@@ -146,7 +139,7 @@ export async function peopleView(ctx) {
                 ctx,
                 "/users/" + encodeURIComponent(u.id),
                 u.email,
-                "This user's traffic, spend and keys",
+                "This user's traffic, cost and keys",
               ),
               u.disabled_at ? pill("Disabled", "bad") : null,
             ),
@@ -280,7 +273,7 @@ export async function peopleView(ctx) {
     ],
     users,
     {
-      emptyTitle: "Nobody yet",
+      emptyTitle: "No users yet",
       emptyBody: "Users appear here the first time they sign in.",
       search: (u) =>
         [
@@ -336,7 +329,7 @@ function addPerson(ctx) {
     { class: "select" },
     h(
       "option",
-      { value: "", selected: Boolean(ctx.state.me.sso) },
+      { value: "sso", selected: Boolean(ctx.state.me.sso) },
       "Their identity provider",
     ),
     h("option", { value: "passkey", selected: !ctx.state.me.sso }, "A passkey"),
@@ -389,13 +382,13 @@ function addPerson(ctx) {
             if (!email.value.trim()) return email.focus();
             e.target.disabled = true;
             try {
-              const passkey =
-                ctx.state.me.passkeys && signIn.value === "passkey";
+              // Left empty, the control plane picks the way this gateway
+              // signs people in, as it does for `keera user add`.
               const user = await api.addUser(
                 ctx.orgID || ctx.state.me.org_id,
-                email.value.trim().toLowerCase(),
+                email.value.trim(),
                 role.value,
-                passkey ? "passkey" : "",
+                ctx.state.me.passkeys ? signIn.value : "",
               );
               close();
               toast("User added", "good");
@@ -420,8 +413,8 @@ export function changeRole(ctx, user) {
   modal({
     title: `Role for ${user.email}`,
     body: h(
-      "div",
-      {},
+      "form",
+      { onSubmit: (e) => e.preventDefault() },
       err,
       field(
         "Role",
@@ -460,7 +453,7 @@ export function disablePerson(ctx, user) {
     body: h(
       "div",
       {},
-      h("p", {}, "Use this when someone leaves. At once:"),
+      h("p", {}, "Use this when a user leaves. At once:"),
       h(
         "ul",
         {},

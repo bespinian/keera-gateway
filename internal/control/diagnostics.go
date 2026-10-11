@@ -82,8 +82,8 @@ func (s *Server) diagnostics(w http.ResponseWriter, r *http.Request, p *authn.Pr
 	// so it is for the same people: that organisation's administrators.
 	probe := httpx.Flag(r.URL.Query(), "probe")
 	if probe && orgID == "" {
-		needOrg(w, "a probe calls one organisation's models: pass org_id, or --org on the "+
-			"command line")
+		needOrg(w, "a probe calls one organisation's models: pass org_id, or choose one "+
+			"with 'keera org switch'")
 		return
 	}
 	if probe && !p.CanAdminOrg(orgID) {
@@ -167,7 +167,7 @@ func (s *Server) checkCatalogue(ctx context.Context, d *Diagnosis, orgID string,
 		return // an operator looking at every organisation at once
 	}
 	const area = "Models"
-	org := orgFlag(p, orgID)
+	org := orgEnv(p, orgID)
 
 	models, err := s.st.ListModels(ctx, orgID)
 	if err != nil {
@@ -188,13 +188,13 @@ func (s *Server) checkCatalogue(ctx context.Context, d *Diagnosis, orgID string,
 		d.add(area, "Catalogue", VerdictFail,
 			fmt.Sprintf("%d declared, none enabled: every inference request is refused",
 				len(models)),
-			"add one with 'keera model add <alias> --backend <url>"+org+"', or --provider "+
+			"add one with '"+org+"keera model add <alias> --backend <url>', or --provider "+
 				"for a hosted one")
 	case len(chat) == 0:
 		d.add(area, "Catalogue", VerdictWarn,
 			fmt.Sprintf("%d enabled, none of them chat: no coding agent can use this "+
 				"deployment", len(enabled)),
-			"add a chat model with 'keera model add <alias> --backend <url>"+org+"'")
+			"add a chat model with '"+org+"keera model add <alias> --backend <url>'")
 	default:
 		d.add(area, "Catalogue", VerdictOK,
 			fmt.Sprintf("%d enabled, %d of them chat", len(enabled), len(chat)), "")
@@ -222,7 +222,7 @@ func (s *Server) checkCatalogue(ctx context.Context, d *Diagnosis, orgID string,
 
 // modelFix says how to change a model.
 func modelFix(m policy.Model, flags string, p *authn.Principal) string {
-	return "'keera model set " + m.Alias + " " + flags + orgFlag(p, m.OrgID) + "'"
+	return "'" + orgEnv(p, m.OrgID) + "keera model set " + m.Alias + " " + flags + "'"
 }
 
 // probeModels calls each enabled model. It catches a vLLM parser that does
@@ -281,7 +281,7 @@ func (s *Server) checkTenancy(ctx context.Context, d *Diagnosis, orgID string, p
 	case setup.Keys == 0:
 		d.add(area, "API keys", VerdictWarn, "no key has been issued, so nothing can call this "+
 			"deployment yet",
-			"issue one with 'keera key create --project <project> --name <what for>"+orgFlag(p, orgID)+"'")
+			"issue one with '"+orgEnv(p, orgID)+"keera key create --project <project> --name <what for>'")
 	default:
 		d.add(area, "API keys", VerdictOK, fmt.Sprintf("%d active", setup.Keys), "")
 	}
@@ -331,7 +331,7 @@ func (s *Server) checkHooks(ctx context.Context, d *Diagnosis, orgID string, p *
 			enabled[m.Alias] = true
 		}
 	}
-	org := orgFlag(p, orgID)
+	org := orgEnv(p, orgID)
 	s.checkFilters(ctx, d, orgID, org, enabled)
 	s.checkRouters(ctx, d, orgID, org, enabled)
 }
@@ -348,12 +348,12 @@ func (s *Server) checkFilters(ctx context.Context, d *Diagnosis, orgID, org stri
 			d.add("Filters", f.Alias, VerdictFail,
 				"runs on '"+f.Model+"', which is not enabled; a filter that cannot run "+
 					"refuses every request it covers",
-				"point it at an enabled model with 'keera filter set "+f.Alias+
-					" --model <alias>"+org+"'")
+				"point it at an enabled model with '"+org+"keera filter set "+f.Alias+
+					" --model <alias>'")
 		case f.Shadow:
 			d.add("Filters", f.Alias, VerdictWarn,
 				"in shadow: it runs, it costs what it costs, and it enforces nothing",
-				"turn it on with 'keera filter set "+f.Alias+" --enforce"+org+"'")
+				"turn it on with '"+org+"keera filter set "+f.Alias+" --no-shadow'")
 		default:
 			d.add("Filters", f.Alias, VerdictOK, string(f.Mode)+", enforcing", "")
 		}
@@ -376,8 +376,8 @@ func (s *Server) checkRouters(ctx context.Context, d *Diagnosis, orgID, org stri
 		case len(dead) == len(rt.Destinations) && len(dead) > 0:
 			d.add("Routers", rt.Alias, VerdictFail,
 				"none of its destinations is an enabled model: "+strings.Join(dead, ", "),
-				"point it at enabled models with 'keera router set "+rt.Alias+
-					" --destinations <a,b>"+org+"'")
+				"point it at enabled models with '"+org+"keera router set "+rt.Alias+
+					" --destinations <a,b>'")
 		case len(dead) > 0:
 			// Not fatal, since the router uses what is left. Still worth
 			// saying, because a router's failures are silent.
@@ -387,7 +387,7 @@ func (s *Server) checkRouters(ctx context.Context, d *Diagnosis, orgID, org stri
 		case rt.Decides() && !enabled[rt.Model]:
 			d.add("Routers", rt.Alias, VerdictFail,
 				"reads requests with '"+rt.Model+"', which is not an enabled model",
-				"point it at one with 'keera router set "+rt.Alias+" --model <alias>"+org+"'")
+				"point it at one with '"+org+"keera router set "+rt.Alias+" --model <alias>'")
 		default:
 			d.add("Routers", rt.Alias, VerdictOK,
 				fmt.Sprintf("%s, %d destinations", rt.Mode, len(rt.Destinations)), "")
@@ -420,11 +420,12 @@ func (s *Server) checkSandboxes(ctx context.Context, d *Diagnosis, orgID string)
 	d.add(area, "Driver", VerdictOK, fmt.Sprintf("%d classes", len(classes)), "")
 }
 
-// orgFlag is the --org a suggested command needs. Only an operator names the
-// organisation; anyone else's is their own.
-func orgFlag(p *authn.Principal, orgID string) string {
+// orgEnv is what a suggested command needs in front of it to act on orgID.
+// Only an operator names the organisation; anyone else's is their own. Most
+// commands have no --org, but every one reads KEERA_ORG.
+func orgEnv(p *authn.Principal, orgID string) string {
 	if p.Unrestricted() {
-		return " --org " + orgID
+		return "KEERA_ORG=" + orgID + " "
 	}
 	return ""
 }

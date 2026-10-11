@@ -18,12 +18,12 @@ import {
   empty,
   modal,
   go,
-  compact,
   num,
   money,
   ms,
   ago,
   dateTime,
+  tokens,
   icon,
   icons,
   liveControl,
@@ -54,6 +54,9 @@ const SORT_KEY = "keera.requests.sort";
 // the eye of somebody looking elsewhere on the screen, short enough that a log
 // nobody is watching is not a wall of highlights when they come back.
 const FRESH_MS = 4000;
+
+// How often a ranked log asks for its page again while live, at most.
+const REFRESH_MS = 3000;
 
 /** requestLog is the section itself.
  *
@@ -144,25 +147,21 @@ export async function requestLog(
   // fresh ones with every batch of rows.
   const seg = filters ? null : outcomeSeg(ctx, outcome, counts);
 
-  // New rows arrive in time order, so a ranked log is not watched: a request
-  // that just arrived has no place in a list of the most expensive ones until
-  // the control plane ranks it.
-  const watch =
-    live && rank.by === ""
-      ? liveControl({
-          key: LIVE_KEY,
-          label: "Watch for new requests",
-          titles: {
-            live: "Live: new requests appear here. Click to stop.",
-            connecting:
-              "Reconnecting to the request log. Click to stop watching.",
-            paused: "Paused. Click to see new requests live.",
-            stopped:
-              "The stream stopped and could not reconnect. Click to try again, " +
-              "or reload the page.",
-          },
-        })
-      : null;
+  const watch = live
+    ? liveControl({
+        key: LIVE_KEY,
+        label: "Watch for new requests",
+        titles: {
+          live: "Live: new requests appear here. Click to stop.",
+          connecting:
+            "Reconnecting to the request log. Click to stop watching.",
+          paused: "Paused. Click to see new requests live.",
+          stopped:
+            "The stream stopped and could not reconnect. Click to try again, " +
+            "or reload the page.",
+        },
+      })
+    : null;
   wrap.append(
     h(
       "div",
@@ -200,13 +199,12 @@ export async function requestLog(
         { class: "card" },
         empty(
           watch && watch.on
-            ? "No requests yet in this window"
-            : "No requests in this window",
+            ? "No requests yet in this period"
+            : "No requests in this period",
           watch && watch.on
-            ? "Nothing recorded in this range. New requests appear here as " +
-                "they arrive."
-            : "Nothing recorded in this range. Widen it, or check that a " +
-                "client points at this gateway.",
+            ? "New requests appear here as they arrive."
+            : "Pick a longer period, or check that a client points at this " +
+                "gateway.",
         ),
       ),
     );
@@ -225,9 +223,9 @@ export async function requestLog(
         empty(
           "Nothing matches this filter",
           filters
-            ? "Nothing matches all the filters above. Clear some, or widen " +
-                "the range."
-            : "Pick a different outcome above, or widen the range.",
+            ? "Nothing matches all the filters above. Clear some, or pick a " +
+                "longer period."
+            : "Pick a different outcome above, or a longer period.",
         ),
       ),
   );
@@ -236,8 +234,9 @@ export async function requestLog(
     wrap.append(rankedNote(PAGE, "requests"));
   }
 
-  // Paging appends rather than replaces, so somebody reading backwards through
-  // an incident keeps what they have already read on the screen.
+  // Paging adds to the one table rather than replacing it, so somebody reading
+  // backwards through an incident keeps what they have already read on the
+  // screen.
   if (rows.length === PAGE && rank.by === "") {
     let before = res.next_before;
     const more = h(
@@ -250,14 +249,15 @@ export async function requestLog(
           try {
             const next = await api.requests({ ...params, before });
             const page = next.data || [];
-            wrap.insertBefore(
-              requestTable(ctx, page, names, currency, hide, { rank }),
-              moreWrap,
-            );
+            Object.assign(names.keys, next.key_names || {});
+            Object.assign(names.projects, next.project_names || {});
+            Object.assign(names.users, next.user_names || {});
+            rows.push(...page);
+            log.redraw();
             before = next.next_before;
             if (page.length < PAGE) {
               moreWrap.replaceChildren(
-                h("div", { class: "hint" }, "That is the whole window."),
+                h("div", { class: "hint" }, "That is the whole period."),
               );
               return;
             }
@@ -291,9 +291,10 @@ export async function requestLog(
    *  table, or null when there is nothing on screen to add a row to.
    *
    *  The declaration is hoisted to the top of its scope, which is what lets
-   *  the empty-window path above call it before this line. */
+   *  the empty-period path above call it before this line. */
   function attachLive(log) {
     if (!watch) return;
+    const ranked = rank.by !== "";
 
     // The stream takes the narrowing and not the paging: what it is for is the
     // rows past the newest one on the screen, and `after` is that row. A screen
@@ -305,15 +306,51 @@ export async function requestLog(
       outcome,
       ...narrowed,
       ...scope,
-      after: rows.length ? rows[0].id : 0,
+      // A ranked page's first row is not the newest, so it starts at the end.
+      after: rows.length && !ranked ? rows[0].id : 0,
     };
 
     let source = null;
+    let gone = false;
     const close = () => {
       if (source) source.close();
       source = null;
     };
-    ctx.onTeardown(close);
+    ctx.onTeardown(() => {
+      gone = true;
+      close();
+    });
+
+    // A ranked page is asked for again rather than added to: where a new
+    // request belongs in it is for the control plane to say. It runs at most
+    // once every REFRESH_MS, so a busy log costs one query per interval.
+    let busy = false;
+    let again = false;
+    async function rerank() {
+      if (gone) return;
+      if (busy) {
+        again = true;
+        return;
+      }
+      busy = true;
+      try {
+        const next = await api.requests({ ...params, facets: "" });
+        Object.assign(names.keys, next.key_names || {});
+        Object.assign(names.projects, next.project_names || {});
+        Object.assign(names.users, next.user_names || {});
+        rows.splice(0, rows.length, ...(next.data || []));
+        log.redraw();
+      } catch {
+        // What is on the screen stays. The next request tries again.
+      }
+      setTimeout(() => {
+        busy = false;
+        if (again) {
+          again = false;
+          rerank();
+        }
+      }, REFRESH_MS);
+    }
 
     const open = () => {
       close();
@@ -350,10 +387,14 @@ export async function requestLog(
       const fresh = payload.data || [];
       if (!fresh.length) return;
       if (!log) {
-        // There is no table to put these in - the window was empty, or nothing
+        // There is no table to put these in - the period was empty, or nothing
         // matched. Drawing the screen again is what turns it into the one this
         // reader now wants, and it happens once.
         ctx.reload();
+        return;
+      }
+      if (ranked) {
+        rerank();
         return;
       }
       // The table reads newest first. A row that was committed late is older
@@ -466,7 +507,7 @@ export function requestTable(ctx, rows, names, currency, hide, opts = {}) {
                   },
                   names.keys[q.key_id] || q.key_id,
                 )
-              : h("span", { class: "faint" }, "no key"),
+              : h("span", { class: "faint" }, "No key"),
         },
     hide.project
       ? null
@@ -481,7 +522,7 @@ export function requestTable(ctx, rows, names, currency, hide, opts = {}) {
                   { class: "muted nowrap" },
                   names.projects[q.project_id] || q.project_id,
                 )
-              : h("span", { class: "faint" }, "none"),
+              : h("span", { class: "faint" }, "No project"),
         },
     {
       label: "Tokens",
@@ -495,7 +536,7 @@ export function requestTable(ctx, rows, names, currency, hide, opts = {}) {
           ? h(
               "span",
               { class: "nowrap muted" },
-              `${compact(q.input_tokens)} · ${compact(q.output_tokens)}`,
+              tokens(q.input_tokens, q.output_tokens),
             )
           : h("span", { class: "faint" }, "-"),
     },
@@ -586,7 +627,7 @@ export function showRequest(ctx, q, names, currency) {
     ["Status", `${q.status} - ${label}`],
     [
       "Key",
-      q.key_id ? `${names.keys[q.key_id] || q.key_id} (${q.key_id})` : "no key",
+      q.key_id ? `${names.keys[q.key_id] || q.key_id} (${q.key_id})` : "No key",
     ],
     [
       "Project",

@@ -33,6 +33,7 @@ import {
   duration,
   ago,
   dateTime,
+  tokens,
   RANGES,
   currentRange,
   rangePicker,
@@ -131,13 +132,13 @@ export async function sessionsView(ctx) {
         anyNarrowed
           ? empty(
               "No sessions match these filters",
-              "Clear some filters or widen the range.",
+              "Clear some filters or pick a longer period.",
             )
           : empty(
-              "No sessions in this window",
+              "No sessions in this period",
               "A session is a conversation with a coding agent. Requests " +
                 "without one, such as embeddings, are only in the request log. " +
-                "Try a wider range.",
+                "Try a longer period.",
             ),
       ),
     );
@@ -321,12 +322,12 @@ export async function sessionLog(ctx, { scope = {}, since, hide = {} }) {
         outcome
           ? empty(
               "No sessions match this filter",
-              "Pick a different outcome above, or widen the range.",
+              "Pick a different outcome above, or a longer period.",
             )
           : empty(
-              "No sessions in this window",
+              "No sessions in this period",
               "Requests without a conversation, such as embeddings, are not " +
-                "grouped into sessions. Try a wider range.",
+                "grouped into sessions. Try a longer period.",
             ),
       ),
     );
@@ -336,7 +337,7 @@ export async function sessionLog(ctx, { scope = {}, since, hide = {} }) {
   const list = sessionTable(ctx, rows, names, currency, hide, rank);
   wrap.append(
     h("div", { style: { marginTop: "12px" } }, list),
-    more(params, rows, rank, list),
+    ...[more(params, rows, rank, list)].filter(Boolean),
   );
   return wrap;
 }
@@ -387,7 +388,7 @@ function pager(params, rows, list) {
           list.redraw();
           if (page.length < PAGE) {
             moreWrap.replaceChildren(
-              h("div", { class: "hint" }, "That is the whole window."),
+              h("div", { class: "hint" }, "That is the whole period."),
             );
             return;
           }
@@ -440,7 +441,7 @@ function sessionTable(ctx, rows, names, currency, hide, rank) {
           h(
             "span",
             { class: "faint mono", style: { fontSize: "11px" } },
-            (a.models || []).join(", ") || "no model",
+            (a.models || []).join(", ") || "No model",
           ),
         ),
     },
@@ -480,7 +481,7 @@ function sessionTable(ctx, rows, names, currency, hide, rank) {
                 },
                 names.users[a.user_id] || names.keys[a.key_id] || a.key_id,
               )
-            : h("span", { class: "faint" }, "no key"),
+            : h("span", { class: "faint" }, "No key"),
     },
     {
       label: "Started",
@@ -529,7 +530,7 @@ function sessionTable(ctx, rows, names, currency, hide, rank) {
         h(
           "span",
           { class: "nowrap muted" },
-          `${compact(a.input_tokens)} · ${compact(a.output_tokens)}`,
+          tokens(a.input_tokens, a.output_tokens),
         ),
     },
     {
@@ -753,7 +754,7 @@ export async function sessionDetailView(ctx) {
         "Tokens",
         compact(s.input_tokens + s.output_tokens),
         null,
-        `${compact(s.input_tokens)} in · ${compact(s.output_tokens)} out`,
+        tokens(s.input_tokens, s.output_tokens),
       ),
       stat(
         "Cost",
@@ -885,8 +886,8 @@ function turnStrip(ctx, requests, names, currency) {
         style: { height: Math.max(6, Math.round(share * 60)) + "px" },
         title:
           `Request ${i + 1} of ${requests.length} · ${q.alias || "no model"} · ` +
-          `${outcomeMeaning(q)[0]} · ${money(q.cost_micros, currency)} · ` +
-          `${ms(q.ttft_ms)} to the first token`,
+          `${outcomeMeaning(q)[0]} · ${money(q.cost_micros, currency)}` +
+          (q.ttft_ms ? ` · ${ms(q.ttft_ms)} to the first token` : ""),
         "aria-label": `Request ${i + 1}, ${outcomeOf(q)}`,
         onClick: () => showRequest(ctx, q, names, currency),
       });

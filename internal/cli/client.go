@@ -29,7 +29,11 @@ type client struct {
 	// signedIn is what `keera login` stored for this gateway, used when no
 	// operator key is set. See credentials.go.
 	signedIn signIn
-	http     *http.Client
+	// org is the organisation commands act on when they name none, and
+	// orgFrom what chose it. Empty means none was chosen.
+	org     string
+	orgFrom string
+	http    *http.Client
 }
 
 // urlFlag is the global --url, which Run takes off the arguments before any
@@ -72,6 +76,11 @@ func newClient() *client {
 	}
 	if c.key == "" {
 		c.signedIn = creds.Gateways[gatewayKey(base)]
+	}
+	if org := os.Getenv("KEERA_ORG"); org != "" {
+		c.org, c.orgFrom = org, "KEERA_ORG"
+	} else if org := creds.Orgs[gatewayKey(base)]; org != "" {
+		c.org, c.orgFrom = org, "keera org switch"
 	}
 	return c
 }

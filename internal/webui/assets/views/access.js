@@ -15,7 +15,6 @@
 import { api } from "../api.js";
 import {
   h,
-  isAdmin,
   replace,
   table,
   meter,
@@ -27,9 +26,11 @@ import {
   empty,
   go,
   plural,
+  sectionHead,
 } from "../ui.js";
 import { oneLine, statusMeaning } from "../status.js";
 import { canRevoke, confirmRevoke, statePill } from "./keys.js";
+import { noKey } from "./connect.js";
 
 // Each level of the hierarchy as the person held by it would name it. They know
 // they are in an organisation and a project; the ids are for quoting to whoever
@@ -50,17 +51,7 @@ export async function accessView(ctx) {
 
   // anonymous is the operator key sent as a header. In the panel it signs in
   // as a stand-in user instead, which the server marks as operator_key.
-  if (a.anonymous) {
-    return h(
-      "div",
-      { class: "card" },
-      empty(
-        "This is the operator key",
-        "The operator key is not a person, so it has no keys, project or " +
-          "budget. Sign in with your identity provider to see yours.",
-      ),
-    );
-  }
+  if (a.anonymous) return noKey(ctx, a);
 
   const keys = a.keys || [];
   const live = keys.filter((k) => k.state === "active");
@@ -87,50 +78,9 @@ export async function accessView(ctx) {
     );
   }
 
-  if (a.operator_key && !keys.length) {
-    wrap.append(
-      h(
-        "div",
-        { class: "card" },
-        empty(
-          "You signed in with the operator key",
-          "It is not a person, so it has no project or budget of its own. Sign " +
-            "in with your identity provider to see your own access.",
-        ),
-      ),
-    );
-  } else if (!keys.length) {
-    // The way out of this state depends on whether the reader can issue one
-    // themselves. Only an administrator can; a member has to ask one.
-    wrap.append(
-      h(
-        "div",
-        { class: "card" },
-        empty(
-          "No key is linked to you",
-          isAdmin(ctx)
-            ? h(
-                "span",
-                {},
-                "Issue one on ",
-                h(
-                  "a",
-                  {
-                    href: "/keys",
-                    onClick: go(ctx, "/keys"),
-                  },
-                  "API keys",
-                ),
-                ". A key you already have may not be linked to you. It still " +
-                  "works, but it does not show here.",
-              )
-            : "A key is linked to a person when it is issued. Yours may not be " +
-                "linked to you. It still works, but it does not show here. Ask " +
-                "an administrator for a new key in your name.",
-        ),
-      ),
-    );
-  }
+  // The same card as on My clients and in the playground, so the operator key
+  // and a missing key read the same on all three.
+  if (!keys.length) wrap.append(noKey(ctx, a));
 
   // Off by default, for the reason it is off on the API keys screen: this
   // screen is read to find out whether a key still works, and a revoked one is
@@ -162,15 +112,16 @@ export async function accessView(ctx) {
     );
   }
 
+  // The keys are cards, not table rows, so this draws the same toolbar box
+  // table()'s toggles do rather than going through table().
   if (keys.length && keys.some((k) => k.state === "revoked")) {
     wrap.append(
       h(
         "div",
-        { class: "row", style: { marginBottom: "12px" } },
-        h("div", { style: { flex: 1 } }),
+        { class: "toolbar" },
         h(
           "label",
-          { class: "row-tight faint", style: { fontSize: "12px" } },
+          { class: "row-tight" },
           h("input", {
             type: "checkbox",
             checked: showRevoked,
@@ -181,6 +132,7 @@ export async function accessView(ctx) {
           }),
           "Show revoked",
         ),
+        h("div", { style: { flex: 1 } }),
       ),
     );
   }
@@ -221,7 +173,7 @@ export async function accessView(ctx) {
 }
 
 function summary(live, currency) {
-  if (!live.length) return "no active key";
+  if (!live.length) return "No active key";
   const spend = live.reduce((a, k) => a + (k.spend_micros || 0), 0);
   return (
     `${live.length} active ${plural(live.length, "key")} · ` +
@@ -238,7 +190,7 @@ function keyCard(k, currency, ctx) {
       "Project",
       k.project_name ||
         k.project_id ||
-        h("span", { class: "faint" }, "deleted project"),
+        h("span", { class: "faint" }, "No project"),
     ),
     fact(
       "Last used",
@@ -257,8 +209,7 @@ function keyCard(k, currency, ctx) {
       h(
         "span",
         {},
-        num(k.requests || 0),
-        " req · ",
+        `${num(k.requests || 0)} ${plural(k.requests || 0, "request")} · `,
         money(k.spend_micros, currency),
       ),
     ),
@@ -525,13 +476,9 @@ function rateChips(sc) {
 function refusalsCard(refusals, keys) {
   const keyName = Object.fromEntries(keys.map((k) => [k.id, k.name]));
 
-  const head = h(
-    "div",
-    { class: "row", style: { margin: "24px 0 12px" } },
-    h("h2", {}, "Recent refusals and failures"),
-    h("div", { style: { flex: 1 } }),
-    h("span", { class: "muted", style: { fontSize: "11.5px" } }, "last 7 days"),
-  );
+  const head = sectionHead("Recent refusals and failures", "last 7 days", {
+    marginTop: "24px",
+  });
 
   const rows = table(
     [

@@ -71,7 +71,8 @@ whatever its settings say. A subscription key that names one, such as
 `claude-haiku-4-5-20251001`, reaches the subscription model with that backend
 model. The date at the end does not matter.
 
-If the organisation's guardrails list allowed models, add the new ones there.
+If the organisation's guardrails list allowed models, the new ones are added
+there. Projects and keys with their own lists still need them added.
 
 ## 3. Send everyone's Claude Code through Keera
 

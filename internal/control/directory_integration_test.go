@@ -63,8 +63,8 @@ func signedInThroughADirectory(t *testing.T, refreshToken string) directorySetup
 	t.Cleanup(ts.Close)
 
 	if refreshToken != "" {
-		sealed := box.Seal(refreshTokenName(user.ID), refreshToken)
-		if err := st.RecordDirectoryCheck(ctx, user.ID, sealed); err != nil {
+		sealed := box.Seal(refreshTokenName(user.ExternalID), refreshToken)
+		if err := st.RecordDirectoryCheck(ctx, user.ExternalID, sealed); err != nil {
 			t.Fatalf("storing the refresh token: %v", err)
 		}
 	}
@@ -79,8 +79,8 @@ func signedInThroughADirectory(t *testing.T, refreshToken string) directorySetup
 func (d directorySetup) makeDue(t *testing.T) {
 	t.Helper()
 	if _, err := d.st.Pool().Exec(context.Background(),
-		"UPDATE users SET directory_checked_at = now() - interval '1 hour' WHERE id = $1",
-		d.user.ID); err != nil {
+		"UPDATE identities SET directory_checked_at = now() - interval '1 hour' WHERE external_id = $1",
+		d.user.ExternalID); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -98,7 +98,7 @@ func TestADirectoryThatRefusesEndsEverySignIn(t *testing.T) {
 	if got := asToken(t, d.ts, d.token, nil); got != http.StatusUnauthorized {
 		t.Errorf("status = %d on the next request, want 401", got)
 	}
-	if linked, _ := d.st.HasRefreshToken(context.Background(), d.user.ID); linked {
+	if linked, _ := d.st.HasRefreshToken(context.Background(), d.user.ExternalID); linked {
 		t.Error("the refresh token is still stored")
 	}
 }

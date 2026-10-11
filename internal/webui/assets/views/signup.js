@@ -4,7 +4,7 @@
 // address to it.
 
 import { api, ApiError } from "../api.js";
-import { h, replace, brandMark } from "../ui.js";
+import { h, replace, brandMark, showError } from "../ui.js";
 
 /** signUpFlow reports whether this page was opened for a sign-up. */
 export function signUpFlow() {
@@ -30,7 +30,15 @@ export async function signUp(root, onSignedIn) {
         { class: "banner banner-bad" },
         err instanceof ApiError ? err.message : "This sign-up cannot be read.",
       ),
-      h("a", { class: "btn", href: "/" }, "Sign in again"),
+      h(
+        "a",
+        {
+          class: "btn",
+          href: "/",
+          style: { width: "100%", justifyContent: "center" },
+        },
+        "Go to sign-in",
+      ),
     );
     return;
   }
@@ -82,6 +90,7 @@ export async function signUp(root, onSignedIn) {
         e.preventDefault();
         const name = nameInput.value.trim();
         if (!name) {
+          showError(message, "Enter a name for your organisation.");
           nameInput.focus();
           return;
         }

@@ -29,6 +29,7 @@ import {
   icon,
   icons,
   aliasProblem,
+  takenProblem,
   showError,
   currentRange,
   rangePicker,
@@ -42,6 +43,8 @@ import {
   rowActions,
   listHead,
   verdictPill,
+  sectionHead,
+  empty,
 } from "../ui.js";
 import { barList } from "../chart.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
@@ -84,6 +87,7 @@ export async function routersView(ctx) {
     [
       {
         label: "Alias",
+        sortKey: (rt) => rt.alias,
         cell: (rt) =>
           rowLink(
             ctx,
@@ -98,6 +102,7 @@ export async function routersView(ctx) {
       {
         label: "Mode",
         shrink: true,
+        sortKey: (rt) => modeName(modeOf(rt)),
         cell: (rt) => modeCell(rt, known),
       },
       // Where this router may send a prompt. Only the first few are named,
@@ -106,13 +111,17 @@ export async function routersView(ctx) {
       {
         label: "Destinations",
         shrink: true,
+        sortKey: (rt) => (rt.destinations || []).length || null,
+        sortDir: "desc",
         cell: (rt) => destinationsCell(rt, known),
       },
       // Where it has actually been sending traffic. Without this a row says
       // what a router is meant to do and nothing about whether it does it.
       {
-        label: "In this window",
+        label: "In this period",
         shrink: true,
+        sortKey: (rt) => stats[rt.alias]?.requests || null,
+        sortDir: "desc",
         cell: (rt) => trafficCell(stats[rt.alias], currency),
       },
       // The column the alias was widening to fill. Without it the first
@@ -121,37 +130,35 @@ export async function routersView(ctx) {
       // for in the space that was empty.
       {
         label: "Description",
+        sortKey: (rt) => rt.description || null,
         cell: (rt) =>
           rt.description
             ? h("span", { class: "muted clamp-2" }, rt.description)
             : h("span", { class: "faint" }, "-"),
       },
-      {
+      canEdit && {
         label: "Check",
         shrink: true,
-        cell: (rt) => (canEdit ? checkCell(ctx, rt) : null),
+        cell: (rt) => checkCell(ctx, rt),
       },
-      {
+      canEdit && {
         label: "",
         shrink: true,
         cell: (rt) =>
-          canEdit
-            ? rowActions(ctx, rt.alias, {
-                editTitle: "Edit this router",
-                onEdit: () => editRouter(ctx, rt, readers),
-                deleteTitle: "Delete this router",
-                body:
-                  "A router named in an allow-list cannot be deleted. " +
-                  "Take it off those allow-lists first; the error lists " +
-                  "them. Clients still using the alias will be told the " +
-                  "model does not exist.",
-                confirmLabel: "Delete router",
-                remove: () => api.deleteRouter(ctx.orgID, rt.alias),
-                removed: "Router deleted",
-              })
-            : null,
+          rowActions(ctx, rt.alias, {
+            editTitle: "Edit this router",
+            onEdit: () => editRouter(ctx, rt, readers),
+            deleteTitle: "Delete this router",
+            body:
+              "A router named in an allow-list cannot be deleted. " +
+              "Take it off those allow-lists first; the error lists " +
+              "them. Clients still using the alias will be told the " +
+              "model does not exist.",
+            confirmLabel: "Delete router",
+            remove: () => api.deleteRouter(ctx.orgID, rt.alias),
+          }),
       },
-    ],
+    ].filter(Boolean),
     routers,
     {
       emptyTitle: "No routers yet",
@@ -175,6 +182,11 @@ function decides(rt) {
 // modeOf is the mode, with the one a router saved before modes existed meant.
 function modeOf(rt) {
   return rt.mode || "instruction";
+}
+
+// modeName is a mode as the dialog's tiles name it.
+function modeName(mode) {
+  return (MODES.find((m) => m.value === mode) || { name: mode }).name;
 }
 
 // measures reports whether this router's order is something the gateway worked
@@ -237,20 +249,20 @@ function modeCell(rt, known) {
     return h(
       "span",
       { title: "places each request by " + ordersBy(rt) },
-      pill("size", "good"),
+      pill(modeName("size"), "good"),
     );
   }
   if (!decides(rt)) {
     return h(
       "span",
       { title: "tries its destinations in the order of " + ordersBy(rt) },
-      pill(modeOf(rt)),
+      pill(modeName(modeOf(rt))),
     );
   }
   return h(
     "div",
     { class: "row-tight" },
-    pill("instruction", "accent"),
+    pill(modeName("instruction"), "accent"),
     known.has(rt.model)
       ? h("span", { class: "mono muted" }, rt.model)
       : h(
@@ -308,7 +320,7 @@ function fallbackPill(rt) {
   return h("span", { class: "pill mono" }, "→ " + rt.fallback);
 }
 
-// trafficCell is what this router did with the window's requests, in the room a
+// trafficCell is what this router did with the period's requests, in the room a
 // row has: how many it placed, and how much of that was placed without a
 // decision. The split between destinations is on the router's own screen.
 function trafficCell(st, currency) {
@@ -326,7 +338,7 @@ function trafficCell(st, currency) {
       h("span", { class: "nowrap" }, compact(st.requests), " placed"),
       undecided > 0
         ? pill(
-            `${(rate * 100).toFixed(1)}% undecided`,
+            `${pct(undecided, st.requests)} undecided`,
             rate >= 0.25 ? "bad" : "warn",
           )
         : null,
@@ -447,7 +459,7 @@ function report(ctx, probe) {
       (probe.chain || []).length
         ? h(
             "div",
-            { class: "card", style: { marginTop: "12px" } },
+            { style: { marginTop: "12px" } },
             table(
               [
                 {
@@ -658,7 +670,7 @@ export async function routerDetailView(ctx) {
         "Placed",
         compact(placed),
         null,
-        placed ? "requests to this router" : "no requests in this window",
+        placed ? "requests to this router" : "no requests in this period",
       ),
       stat(
         rt && measures(rt)
@@ -681,7 +693,7 @@ export async function routerDetailView(ctx) {
         `p95 ${ms(rep.decision_p95_ms || 0)}, added per request`,
       ),
       stat(
-        "Spend",
+        "Cost",
         money(rep.total ? rep.total.cost_micros || 0 : 0, ""),
         currency,
         "destinations' cost, decisions included",
@@ -711,10 +723,13 @@ export async function routerDetailView(ctx) {
           { class: "card-body" },
           (rep.destinations || []).length
             ? barList(rep.destinations, {
-                label: (d) => d.alias || "(no model)",
+                label: (d) => d.alias || "No model",
                 value: (d) => d.requests,
               })
-            : h("div", { class: "empty" }, "Nothing placed in this window."),
+            : empty(
+                "Nothing placed",
+                "No request used this router in this period.",
+              ),
         ),
       ),
       h(
@@ -730,12 +745,15 @@ export async function routerDetailView(ctx) {
           { class: "card-body" },
           (rep.destinations || []).length
             ? barList(rep.destinations, {
-                label: (d) => d.alias || "(no model)",
+                label: (d) => d.alias || "No model",
                 value: (d) => d.cost_micros,
                 currency,
                 colorIndex: 2,
               })
-            : h("div", { class: "empty" }, "Nothing charged in this window."),
+            : empty(
+                "Nothing charged",
+                "No request through this router cost anything in this period.",
+              ),
         ),
       ),
     ),
@@ -745,34 +763,37 @@ export async function routerDetailView(ctx) {
     wrap.append(
       h(
         "div",
-        { class: "card", style: { marginTop: "16px" } },
-        h("div", { class: "card-head" }, h("h2", {}, "Each destination")),
+        { style: { marginTop: "20px" } },
+        sectionHead("Each destination"),
         table(
           [
             {
               label: "Model",
-              cell: (d) =>
-                h("span", { class: "mono" }, d.alias || "(no model)"),
+              cell: (d) => h("span", { class: "mono" }, d.alias || "No model"),
             },
             {
               label: "Requests",
               shrink: true,
+              num: true,
               cell: (d) => num(d.requests),
             },
             {
               label: "Share",
               shrink: true,
+              num: true,
               cell: (d) => pct(d.requests, placed),
             },
             {
               label: "Tokens",
               shrink: true,
+              num: true,
               cell: (d) => compact(d.input_tokens + d.output_tokens),
             },
             {
-              label: "Spend",
+              label: `Cost (${currency})`,
               shrink: true,
-              cell: (d) => money(d.cost_micros, currency),
+              num: true,
+              cell: (d) => money(d.cost_micros, ""),
             },
             // The reason a cheap destination is not always the right one. A
             // router that halved the bill and doubled what a developer waits
@@ -780,11 +801,13 @@ export async function routerDetailView(ctx) {
             {
               label: "Median wait",
               shrink: true,
+              num: true,
               cell: (d) => ms(d.ttft_median_ms),
             },
             {
               label: "Refused",
               shrink: true,
+              num: true,
               cell: (d) =>
                 d.refused
                   ? pill(num(d.refused), "warn")
@@ -793,6 +816,7 @@ export async function routerDetailView(ctx) {
             {
               label: "Failed",
               shrink: true,
+              num: true,
               cell: (d) =>
                 d.failed
                   ? pill(num(d.failed), "bad")
@@ -823,7 +847,9 @@ export async function routerDetailView(ctx) {
             rt.description ? ["Description", rt.description] : null,
             [
               "Mode",
-              decides(rt) ? pill("instruction", "accent") : pill(modeOf(rt)),
+              decides(rt)
+                ? pill(modeName("instruction"), "accent")
+                : pill(modeName(modeOf(rt))),
             ],
             decides(rt)
               ? ["Runs on", h("span", { class: "mono" }, rt.model)]
@@ -888,15 +914,8 @@ export async function routerDetailView(ctx) {
           // fallback router has none - the list above is the whole of it.
           decides(rt)
             ? h(
-                "pre",
-                {
-                  class: "key-value",
-                  style: {
-                    whiteSpace: "pre-wrap",
-                    userSelect: "text",
-                    marginTop: "12px",
-                  },
-                },
+                "div",
+                { class: "prompt-text", style: { marginTop: "12px" } },
                 rt.prompt || "",
               )
             : null,
@@ -927,7 +946,7 @@ function detailBanners(rep, rt, placed) {
       h(
         "div",
         { class: "banner banner-info" },
-        "No requests used this router in this window. Clients reach it by " +
+        "No requests used this router in this period. Clients reach it by " +
           "using its alias as the model name, so either nobody has the alias " +
           "or nobody called.",
       ),
@@ -946,18 +965,18 @@ function detailBanners(rep, rt, placed) {
         "div",
         { class: "banner banner-bad" },
         banded
-          ? "No request in this window was served by the destination its " +
+          ? "No request in this period was served by the destination its " +
               "size was meant for. Each one waited for it to fail and was " +
               "served by a larger one. Check the destinations."
           : ranked
             ? "The destination this router ranked first never answered in this " +
-              "window. Each request waited for it to fail and was served " +
+              "period. Each request waited for it to fail and was served " +
               "further down. The ranking is not working."
             : chained
-              ? "The first destination never answered in this window. Each " +
+              ? "The first destination never answered in this period. Each " +
                 "request waited for it to fail and was served further down. " +
                 "Check it."
-              : "This router made no decision in this window. It still costs a " +
+              : "This router made no decision in this period. It still costs a " +
                 "generation per request. Check it and the model it decides with.",
       ),
     );
@@ -1271,6 +1290,9 @@ function editRouter(ctx, existing, readers) {
   // off the inputs, so unticking a destination and ticking it again does not
   // lose the number that was typed against it.
   const ceilings = { ...(rt.ceilings || {}) };
+  // Boxes holding something that is not a ceiling. Saving refuses them, as
+  // `keera router` does, rather than reading them as "no ceiling".
+  const badCeilings = new Set();
   const ceilingList = h("div", { class: "stack", style: { gap: "4px" } });
   const ceilingHint = h("div", { class: "hint" });
   // What each row says beside its box, kept by destination. The words follow
@@ -1315,14 +1337,16 @@ function editRouter(ctx, existing, readers) {
           placeholder: "no ceiling",
           value: ceilings[alias] ? tokens(ceilings[alias]) : "",
           onInput: () => {
+            // The CLI's form: whole tokens, where 'k' means a thousand.
             const raw = box.value.trim().toLowerCase();
-            const n = raw.endsWith("k")
-              ? Number(raw.slice(0, -1)) * 1000
-              : Number(raw);
-            if (raw === "" || !Number.isFinite(n) || n <= 0) {
-              delete ceilings[alias];
+            const m = /^(\d+)(k?)$/.exec(raw);
+            const n = m ? Number(m[1]) * (m[2] ? 1000 : 1) : 0;
+            badCeilings.delete(alias);
+            if (n > 0) {
+              ceilings[alias] = n;
             } else {
-              ceilings[alias] = Math.round(n);
+              delete ceilings[alias];
+              if (raw !== "") badCeilings.add(alias);
             }
             syncCeilingNotes();
           },
@@ -1537,8 +1561,30 @@ function editRouter(ctx, existing, readers) {
           alias.focus();
           return;
         }
+        const bad = bySize() ? picked.find((a) => badCeilings.has(a)) : null;
+        if (bad) {
+          showError(
+            err,
+            `The ceiling on ${bad} is not a number of tokens. Write 4000 ` +
+              "or 4k, or leave it empty for no ceiling.",
+          );
+          return;
+        }
         button.disabled = true;
         try {
+          if (creating) {
+            const taken = takenProblem(
+              (await api.routers(ctx.orgID)).data,
+              alias.value.trim(),
+              "router",
+            );
+            if (taken) {
+              showError(err, taken);
+              alias.focus();
+              button.disabled = false;
+              return;
+            }
+          }
           await api.putRouter(ctx.orgID, alias.value.trim(), {
             mode: chosen,
             // A router that reads nothing carries nothing that would decide

@@ -467,7 +467,7 @@ function render(
         "Requests asking for more are capped to this, not refused.",
         ceilingNote(ceilings, "max_output_tokens", compact),
       ]),
-      section("Spend"),
+      section("Cost"),
       field(
         `Budget (${ctx.currency})`,
         h("div", { class: "field-row" }, budget, period),

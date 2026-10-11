@@ -19,6 +19,7 @@ import {
   showError,
   sectionHead,
   dateTime,
+  plural,
 } from "../ui.js";
 
 // thisMonth is the current month as YYYY-MM, in UTC like the bill.
@@ -135,7 +136,7 @@ async function billSection(ctx) {
               { class: "stack" },
               r.org_name
                 ? h("span", {}, r.org_name)
-                : h("span", { class: "faint" }, "deleted"),
+                : h("span", { class: "faint" }, "Deleted"),
               h(
                 "span",
                 { class: "mono faint", style: { fontSize: "11px" } },
@@ -232,7 +233,10 @@ async function billSection(ctx) {
   ].filter(Boolean);
 
   const body = table(columns, rows, {
-    emptyTitle: "Nothing billed this month",
+    emptyTitle:
+      month === now
+        ? "Nothing billed this month"
+        : `Nothing billed in ${monthName(month)}`,
     emptyBody:
       "Calls to models on this deployment's own provider keys appear here.",
   });
@@ -247,7 +251,11 @@ async function billSection(ctx) {
         { class: "card-body row" },
         h("strong", {}, `Total ${t.currency}`),
         h("div", { style: { flex: 1 } }),
-        h("span", { class: "muted" }, `${num(t.calls)} calls`),
+        h(
+          "span",
+          { class: "muted" },
+          `${num(t.calls)} ${plural(t.calls, "call")}`,
+        ),
         operator
           ? h(
               "span",
@@ -296,6 +304,11 @@ const kindLabels = {
 
 const stateTones = { paid: "good", pending: "warn", failed: "bad" };
 
+// stateLabel capitalises a payment's state, as every other status pill is.
+function stateLabel(state) {
+  return state ? state[0].toUpperCase() + state.slice(1) : "";
+}
+
 async function creditSection(ctx) {
   const res = await api.creditAccount(ctx.orgID);
   if (!res.payments) return null;
@@ -326,18 +339,18 @@ async function creditSection(ctx) {
       money(a.balance_micros, CHF),
       null,
       a.invoiced
-        ? "Billed by invoice: the keys work without credit."
+        ? "billed by invoice, no credit needed"
         : low
-          ? "Used up: models on this deployment's keys are refused."
-          : "Paid in advance, for models on this deployment's keys.",
+          ? "used up: calls are refused"
+          : "paid in advance",
     ),
     stat(
       "Automatic top-up",
       a.topup_micros ? money(a.topup_micros, CHF) : "Off",
       null,
       a.topup_micros
-        ? `Charged to the saved card when the credit falls below ${money(a.topup_below_micros, CHF)}.`
-        : "Charge the saved card when the credit runs low.",
+        ? `when the credit falls below ${money(a.topup_below_micros, CHF)}`
+        : "charges the saved card when credit runs low",
     ),
     stat(
       "Card",
@@ -345,9 +358,9 @@ async function creditSection(ctx) {
       null,
       a.card
         ? a.card.expires
-          ? `Expires ${new Date(a.card.expires).toLocaleDateString(undefined, { month: "2-digit", year: "2-digit" })}.`
-          : "Saved at PostFinance, not here."
-        : "Tick “Save the card” when you add credit.",
+          ? `expires ${new Date(a.card.expires).toLocaleDateString(undefined, { month: "2-digit", year: "2-digit" })}`
+          : "saved at PostFinance, not here"
+        : "save one when you add credit",
     ),
   );
 
@@ -400,13 +413,20 @@ async function creditSection(ctx) {
             title: a.invoiced
               ? "Make this organisation pay in advance again"
               : "Let this organisation use the keys without credit, and bill it by invoice",
-            onClick: async () => {
-              await api.updateCredit(ctx.orgID, { invoiced: !a.invoiced });
-              toast(
-                a.invoiced ? "Pays in advance again" : "Billed by invoice",
-                "good",
-              );
-              ctx.reload();
+            onClick: async (e) => {
+              const button = e.currentTarget;
+              button.disabled = true;
+              try {
+                await api.updateCredit(ctx.orgID, { invoiced: !a.invoiced });
+                toast(
+                  a.invoiced ? "Pays in advance again" : "Billed by invoice",
+                  "good",
+                );
+                ctx.reload();
+              } catch (ex) {
+                toast(ex.message, "bad");
+                button.disabled = false;
+              }
             },
           },
           a.invoiced ? "Stop invoicing" : "Bill by invoice",
@@ -460,7 +480,7 @@ async function creditSection(ctx) {
       },
       {
         label: "State",
-        cell: (p) => pill(p.state, stateTones[p.state]),
+        cell: (p) => pill(stateLabel(p.state), stateTones[p.state]),
       },
       { label: "By", cell: (p) => h("span", { class: "muted" }, p.actor) },
     ],
@@ -568,7 +588,10 @@ function addCredit(ctx, res) {
           class: "btn btn-primary",
           onClick: async (e) => {
             const m = chf(amount.value);
-            if (Number.isNaN(m)) return amount.focus();
+            if (Number.isNaN(m)) {
+              showError(err, "Enter an amount in francs.");
+              return amount.focus();
+            }
             const button = e.currentTarget;
             button.disabled = true;
             showError(err, "");
@@ -650,8 +673,14 @@ function autoTopUp(ctx, a) {
                   topup_micros: chf(amount.value),
                 }
               : { topup_below_micros: 0, topup_micros: 0 };
-            if (Number.isNaN(change.topup_below_micros)) return below.focus();
-            if (Number.isNaN(change.topup_micros)) return amount.focus();
+            if (Number.isNaN(change.topup_below_micros)) {
+              showError(err, "Enter the amount to top up below, in francs.");
+              return below.focus();
+            }
+            if (Number.isNaN(change.topup_micros)) {
+              showError(err, "Enter the amount to charge, in francs.");
+              return amount.focus();
+            }
             const button = e.currentTarget;
             button.disabled = true;
             try {
@@ -697,8 +726,14 @@ function grant(ctx) {
           class: "btn btn-primary",
           onClick: async (e) => {
             const m = chf(amount.value);
-            if (Number.isNaN(m) || m === 0) return amount.focus();
-            if (!note.value.trim()) return note.focus();
+            if (Number.isNaN(m) || m === 0) {
+              showError(err, "Enter an amount in francs, other than 0.");
+              return amount.focus();
+            }
+            if (!note.value.trim()) {
+              showError(err, "Say why, for the organisation's payments.");
+              return note.focus();
+            }
             const button = e.currentTarget;
             button.disabled = true;
             try {

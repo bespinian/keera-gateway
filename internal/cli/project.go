@@ -18,11 +18,11 @@ type projectRun struct {
 }
 
 func projectCmd(ctx context.Context, args []string) error {
-	r := &projectRun{cmdRun: newCmdRun("project", args, "org", "yes", "json")}
+	r := &projectRun{cmdRun: newCmdRun("project", args, "yes", "json")}
 	fs := r.fs
 	fs.StringVar(&r.name, "name", "", "the project's new name")
-	fs.StringVar(&r.description, "description", "",
-		"what the project is for; an empty one clears it")
+	fs.StringVar(&r.description, "description", "", "what the project is for")
+	r.reword("set", "description", "what the project is for; an empty one clears it")
 	if done, err := r.parse(); done {
 		return err
 	}

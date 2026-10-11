@@ -276,17 +276,22 @@ type placement struct {
 }
 
 // orgFor decides which tenant a sign-in belongs to: where the person already
-// is, else the organisation of their email domain. After that, a provider
-// that allows sign-up sends the person to choose; otherwise they land in the
-// only organisation there is. Anything else is refused, because the wrong
-// tenant is worse than none.
+// is, and of several the one they used last, else the organisation of their
+// email domain. After that, a provider that allows sign-up sends the person to
+// choose; otherwise they land in the only organisation there is. Anything else
+// is refused, because the wrong tenant is worse than none.
 //
 // An invitation is never joined without asking: anyone who administers an
 // organisation without a domain can add any address to it.
 func (s *Server) orgFor(r *http.Request, provider *authn.OIDC, identity authn.Identity) (placement, error) {
-	if u, err := s.st.UserByExternalID(r.Context(), identity.ExternalID()); err == nil {
-		return placement{orgID: u.OrgID}, nil
-	} else if !errors.Is(err, store.ErrNotFound) {
+	ms, err := s.st.Memberships(r.Context(), identity.ExternalID(), "", false)
+	if err != nil {
+		return placement{}, err
+	}
+	if len(ms) > 0 {
+		return placement{orgID: lastOrg(r, ms)}, nil
+	}
+	if err := s.sameIdentity(r.Context(), identity); err != nil {
 		return placement{}, err
 	}
 	if org, err := s.st.OrgByEmailDomain(r.Context(), identity.Domain()); err == nil {
@@ -385,10 +390,27 @@ func (s *Server) operatorKeyOrg(ctx context.Context) (string, error) {
 
 // syncRole updates a stored role to what this sign-in says, for the part the
 // identity provider decides. See roleAtSignIn.
+//
+// The operator role is the person's wherever they are. The admin role is the
+// directory's only in the organisation its addresses land in: in any other,
+// the directory of one tenant would decide who runs another. There, the role
+// the organisation gave stands, and a former operator becomes a member.
 func (s *Server) syncRole(r *http.Request, user *store.User, role authn.Role) error {
 	want, change := roleAtSignIn(user.Role, role, s.opts.Providers.AdminFromDirectory())
 	if !change {
 		return nil
+	}
+	if want != authn.RoleOperator {
+		home, err := s.directoryOrg(r.Context(), user.Email)
+		if err != nil {
+			return err
+		}
+		if home != user.OrgID {
+			if user.Role != string(authn.RoleOperator) {
+				return nil
+			}
+			want = authn.RoleMember
+		}
 	}
 	if err := s.st.SetUserRole(r.Context(), user.ID, string(want)); err != nil {
 		return err
@@ -429,6 +451,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, user store
 		Secure:   s.opts.SecureCookies,
 		SameSite: http.SameSiteLaxMode,
 	})
+	http.SetCookie(w, s.rememberOrg(user.OrgID))
 	return nil
 }
 
@@ -462,11 +485,11 @@ func (s *Server) sessionPrincipal(r *http.Request) (*authn.Principal, error) {
 // logout ends the session, and returns the identity provider's own sign-out
 // URL when it has one.
 func (s *Server) logout(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	// ?all ends every session and CLI token of this person, including this
-	// one: the answer to a lost laptop.
+	// ?all ends every session and CLI token of this person, in every
+	// organisation and including this one: the answer to a lost laptop.
 	switch {
 	case httpx.Flag(r.URL.Query(), "all") && p.UserID != "":
-		if err := s.st.DeleteUserSessions(r.Context(), p.UserID); err != nil {
+		if err := s.st.DeletePersonSessions(r.Context(), p.UserID); err != nil {
 			s.fail(w, err)
 			return
 		}
@@ -543,6 +566,11 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request, p *authn.Principal) 
 		// this is one, which has passkeys to manage.
 		"passkeys":        s.opts.Passkeys != nil,
 		"passkey_account": s.isPasskeyAccount(r, p.UserID),
+	}
+	// The organisations this person can switch to. A failed read leaves them
+	// out: the panel then shows only the current one.
+	if orgs, err := s.orgsOf(r.Context(), p); err == nil && len(orgs) > 1 {
+		out["orgs"] = orgs
 	}
 	if p.OrgID != "" {
 		// A failed read leaves both out: they are only for display.

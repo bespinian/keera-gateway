@@ -42,7 +42,7 @@ func (s *Store) LookupSession(ctx context.Context, hash []byte) (SessionUser, er
 		&su.Session.ExpiresAt}, userTargets(&su.User)...)
 	err := s.pool.QueryRow(ctx, `SELECT s.user_id, s.csrf, s.created_at, s.expires_at,
 		`+userColumnsOf("u.")+`, `+directoryColumns+`
-		FROM sessions s JOIN users u ON u.id = s.user_id
+		FROM sessions s JOIN users u ON u.id = s.user_id`+identityJoin+`
 		WHERE s.id = $1 AND s.expires_at > now() AND u.disabled_at IS NULL`, hash,
 	).Scan(append(dest, &su.Directory.Linked, &su.Directory.CheckedAt)...)
 	return su, notFound(err)
@@ -62,12 +62,42 @@ func (s *Store) DeleteUserSessions(ctx context.Context, userID string) error {
 }
 
 func deleteUserSessions(ctx context.Context, db querier, userID string) error {
+	return deleteSessionsWhere(ctx, db, "SELECT $1::text", userID)
+}
+
+// DeletePersonSessions signs a person out everywhere, in every organisation
+// they are in: the answer to a lost laptop.
+func (s *Store) DeletePersonSessions(ctx context.Context, userID string) error {
+	return deleteSessionsWhere(ctx, s.pool, `SELECT id FROM users WHERE id = $1
+		OR external_id = (SELECT external_id FROM users WHERE id = $1)`, userID)
+}
+
+// deleteSessionsWhere ends the sign-ins of the users rows users selects.
+func deleteSessionsWhere(ctx context.Context, db querier, users string, args ...any) error {
 	for _, table := range []string{"sessions", "cli_codes", "cli_tokens"} {
-		if _, err := db.Exec(ctx, "DELETE FROM "+table+" WHERE user_id = $1", userID); err != nil {
+		if _, err := db.Exec(ctx, "DELETE FROM "+table+" WHERE user_id IN ("+users+")",
+			args...); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// MoveSession points a browser's session at another of its person's rows,
+// which puts it in that row's organisation, and notes the sign-in there.
+func (s *Store) MoveSession(ctx context.Context, hash []byte, userID string) error {
+	return s.moveSignIn(ctx, "sessions", hash, userID)
+}
+
+// MoveCLIToken is MoveSession for a command line's token.
+func (s *Store) MoveCLIToken(ctx context.Context, hash []byte, userID string) error {
+	return s.moveSignIn(ctx, "cli_tokens", hash, userID)
+}
+
+func (s *Store) moveSignIn(ctx context.Context, table string, hash []byte, userID string) error {
+	return s.execOne(ctx, `WITH signed_in AS (
+			UPDATE users SET signed_in_at = now() WHERE id = $2)
+		UPDATE `+table+` SET user_id = $2 WHERE id = $1 AND expires_at > now()`, hash, userID)
 }
 
 // PurgeExpired removes sessions and login flows that have run out. Every
@@ -144,11 +174,88 @@ func (s *Store) LoginFlowByState(ctx context.Context, state string) (LoginFlow, 
 		FROM login_flows WHERE state = $1 AND expires_at > now()`, state))
 }
 
-// UserByExternalID finds the person behind an identity provider's subject
-// claim.
+// UserByExternalID finds the row of an identity its person used last. A
+// person in several organisations has one row in each.
 func (s *Store) UserByExternalID(ctx context.Context, externalID string) (User, error) {
-	u, err := scanUser(s.pool.QueryRow(ctx,
-		`SELECT `+userColumns+` FROM users WHERE external_id = $1`, externalID))
+	u, err := scanUser(s.pool.QueryRow(ctx, `SELECT `+userColumns+` FROM users
+		WHERE external_id = $1
+		ORDER BY signed_in_at DESC NULLS LAST, created_at, id LIMIT 1`, externalID))
+	return u, notFound(err)
+}
+
+// Membership is one organisation a person is in, or has been invited to.
+type Membership struct {
+	UserID  string `json:"user_id"`
+	OrgID   string `json:"id"`
+	OrgName string `json:"name"`
+	Role    string `json:"role"`
+	// Invited means the organisation added the person's address and no
+	// identity has taken that row yet. Switching to it takes it.
+	Invited  bool `json:"invited,omitempty"`
+	Disabled bool `json:"-"`
+}
+
+// Memberships lists the organisations of an identity, the one used last
+// first. With invitations, the rows other organisations made for email and
+// nobody has taken yet are listed too; disabled ones are no invitation.
+func (s *Store) Memberships(ctx context.Context, externalID, email string,
+	invitations bool) ([]Membership, error) {
+	rows, err := s.pool.Query(ctx, `SELECT u.id, u.org_id, o.name, u.role,
+			COALESCE(u.external_id, '') = '', u.disabled_at IS NOT NULL
+		FROM users u JOIN orgs o ON o.id = u.org_id
+		WHERE u.external_id = $1
+			OR ($2 AND u.email = $3 AND COALESCE(u.external_id, '') = '' AND u.disabled_at IS NULL)
+		ORDER BY u.signed_in_at DESC NULLS LAST, o.name, o.id`, externalID, invitations, email)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Membership
+	for rows.Next() {
+		var m Membership
+		if err := rows.Scan(&m.UserID, &m.OrgID, &m.OrgName, &m.Role, &m.Invited,
+			&m.Disabled); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// ExternalIDsFor lists the identities rows at an address are linked to.
+func (s *Store) ExternalIDsFor(ctx context.Context, email string) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT external_id FROM users
+		WHERE email = $1 AND COALESCE(external_id, '') <> ''`, email)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var ext string
+		if err := rows.Scan(&ext); err != nil {
+			return nil, err
+		}
+		out = append(out, ext)
+	}
+	return out, rows.Err()
+}
+
+// AcceptInvitation links an identity to the row an organisation made for its
+// address. The row's role stands. ErrNotFound means there is no such row, or
+// it was withdrawn or taken meanwhile.
+func (s *Store) AcceptInvitation(ctx context.Context, orgID, email, externalID string) (User, error) {
+	return takeInvitation(ctx, s.pool, orgID, email, externalID)
+}
+
+func takeInvitation(ctx context.Context, db querier, orgID, email, externalID string) (User, error) {
+	u, err := scanUser(db.QueryRow(ctx, `UPDATE users SET external_id = $3
+		WHERE org_id = $1 AND email = $2 AND COALESCE(external_id, '') = ''
+			AND disabled_at IS NULL
+		RETURNING `+userColumns, orgID, email, externalID))
+	if isUnique(err) {
+		return u, ErrEmailTaken
+	}
 	return u, notFound(err)
 }
 
@@ -212,8 +319,9 @@ type Link struct {
 // one.
 var ErrEmailTaken = errors.New("store: that address already belongs to a different identity")
 
-// LinkUser creates or updates the person behind an identity, matching first on
-// the provider's subject and then on the email address.
+// LinkUser creates or updates the person behind an identity in one
+// organisation, matching first on the provider's subject and then on the
+// email address.
 //
 // The email match lets an organisation create its people in advance: the
 // first sign-in adopts the row instead of adding a duplicate. A row that
@@ -221,21 +329,25 @@ var ErrEmailTaken = errors.New("store: that address already belongs to a differe
 // another directory's user, or a reused address, take over the account and
 // its role.
 func (s *Store) LinkUser(ctx context.Context, newID string, l Link) (User, error) {
-	if u, err := s.UserByExternalID(ctx, l.ExternalID); err == nil {
+	u, err := scanUser(s.pool.QueryRow(ctx, `SELECT `+userColumns+` FROM users
+		WHERE org_id = $1 AND external_id = $2`, l.OrgID, l.ExternalID))
+	if err == nil {
 		if !strings.EqualFold(u.Email, l.Email) {
-			if _, err := s.pool.Exec(ctx, "UPDATE users SET email = $2 WHERE id = $1", u.ID, l.Email); err != nil {
+			// Every organisation the person is in follows the directory.
+			if _, err := s.pool.Exec(ctx, "UPDATE users SET email = $2 WHERE external_id = $1",
+				l.ExternalID, l.Email); err != nil {
 				return u, err
 			}
 			u.Email = l.Email
 		}
 		return u, nil
-	} else if !errors.Is(err, ErrNotFound) {
+	} else if !errors.Is(notFound(err), ErrNotFound) {
 		return User{}, err
 	}
 
 	// The guard is in the conflict clause, not a separate read, so two
 	// sign-ins racing on one address cannot both pass it.
-	u, err := scanUser(s.pool.QueryRow(ctx, `INSERT INTO users (id, org_id, email, external_id, role)
+	u, err = scanUser(s.pool.QueryRow(ctx, `INSERT INTO users (id, org_id, email, external_id, role)
 		VALUES ($1,$2,$3,$4,$5)
 		ON CONFLICT (org_id, email) DO UPDATE SET external_id = EXCLUDED.external_id
 		WHERE users.external_id IS NULL OR users.external_id = ''

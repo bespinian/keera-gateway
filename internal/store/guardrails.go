@@ -203,3 +203,18 @@ func (s *Store) DeleteFilter(ctx context.Context, orgID, alias string) error {
 func (s *Store) FilterUsers(ctx context.Context, orgID, alias string) ([]GuardrailRef, error) {
 	return s.scopesNaming(ctx, "$2 = ANY (p.filters)", orgID, alias)
 }
+
+// AllowInOrg adds alias to an organisation's allowed models, if its guardrail
+// keeps that list. Adding a model means wanting to use it; without this it
+// would start out refused. It reports whether the list changed.
+func (s *Store) AllowInOrg(ctx context.Context, orgID, alias string) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `UPDATE guardrails
+		SET allowed_models = array_append(allowed_models, $2)
+		WHERE scope_type = $3 AND scope_id = $1
+		  AND allowed_models IS NOT NULL AND NOT ($2 = ANY (allowed_models))`,
+		orgID, alias, string(policy.ScopeOrg))
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}

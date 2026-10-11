@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -12,15 +11,15 @@ import (
 // create one or to accept an invitation. See docs/sso.md.
 type Signup struct {
 	TokenHash []byte
-	// UserID is the id the account gets. The refresh token is sealed
-	// against it.
+	// UserID is the id the account gets.
 	UserID     string
 	Provider   string
 	ExternalID string
 	Email      string
 	// Role is what the identity provider's answer maps to.
 	Role string
-	// RefreshToken is sealed, or nil when the provider issued none.
+	// RefreshToken is sealed against ExternalID, or nil when the provider
+	// issued none.
 	RefreshToken []byte
 	// InvitedOrg is the organisation that added this address, or empty.
 	// InvitedOrgName is its name, read with it.
@@ -130,18 +129,10 @@ func (s *Store) JoinInvitation(ctx context.Context, hash []byte) (Signup, User, 
 	if su.InvitedOrg == "" {
 		return su, User{}, ErrNotFound
 	}
-	u, err := scanUser(tx.QueryRow(ctx, `UPDATE users SET external_id = $3
-		WHERE org_id = $1 AND email = $2 AND (external_id IS NULL OR external_id = '')
-			AND disabled_at IS NULL
-		RETURNING `+userColumns, su.InvitedOrg, su.Email, su.ExternalID))
-	if errors.Is(err, pgx.ErrNoRows) {
-		// The invitation was withdrawn, or somebody else took it meanwhile.
-		return su, User{}, ErrNotFound
-	}
-	if isUnique(err) {
-		return su, User{}, ErrEmailTaken
-	}
+	u, err := takeInvitation(ctx, tx, su.InvitedOrg, su.Email, su.ExternalID)
 	if err != nil {
+		// ErrNotFound: the invitation was withdrawn, or somebody else took it
+		// meanwhile.
 		return su, User{}, err
 	}
 	return su, u, tx.Commit(ctx)

@@ -258,6 +258,7 @@ The command reads these settings:
 | `KEERA_CONTROL_URL`  | the gateway last signed in          | The gateway to talk to. `--url` wins over it. With neither and no sign-in, `https://gateway.keera.ch`. |
 | `KEERA_OPERATOR_KEY` | unset                               | The operator key to act with. Wins over a stored sign-in.                                              |
 | `KEERA_CONFIG_DIR`   | `keera` in the user's config folder | Where `credentials.json` is kept, for a shared account or a pipeline.                                  |
+| `KEERA_ORG`          | the one `keera org switch` chose    | The organisation commands act on. Wins over `keera org switch`.                                        |
 
 ## First run
 
@@ -266,12 +267,12 @@ export KEERA_OPERATOR_KEY=…
 export KEERA_CONTROL_URL=http://127.0.0.1:8080
 
 keera org create "Example Bank"
-keera project create "Payments Platform"     # --org only with several organisations
+keera project create "Payments Platform"     # with several: keera org switch first
 KEY=$(keera key create --project <project> --name "a developer's laptop")
 ```
 
 Organisation names are unique, ignoring case. An operator renames one with
-`keera org set <org-id> --name "Example Bank AG"`, or the pencil on the
+`keera org set <org> --name "Example Bank AG"`, or the pencil on the
 organisations screen. Everything refers to it by id, so nothing else changes.
 
 Every key is in a project. A new organisation starts with one project, called
@@ -446,9 +447,8 @@ The gateway applies its schema on start, so an upgrade is a new image and a
 restart. Also:
 
 - **The catalogue files only seed new organisations.** A change to one does not
-  reach an organisation that already exists. Use
-  `keera model apply <file> --org <id>` or
-  `keera sandbox apply <file> --org <id>` for that.
+  reach an organisation that already exists. Use `keera org switch <org>`, then
+  `keera model apply <file>` or `keera sandbox apply <file>`, for that.
 - **Run `keera model check` afterwards** if anything on the inference side
   changed.
 

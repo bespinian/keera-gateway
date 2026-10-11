@@ -488,6 +488,19 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 	// The model marshals without its credential.
 	s.auditf(r, p, orgID, "model.put", "model", m.Alias, m)
 
+	// Done here rather than in a client, so the panel, 'keera model add' and
+	// 'keera model apply' all leave a new model usable.
+	if !found {
+		allowed, err := s.st.AllowInOrg(r.Context(), orgID, m.Alias)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		if allowed {
+			s.auditf(r, p, orgID, "guardrail.allow_model", string(policy.ScopeOrg), orgID, m.Alias)
+		}
+	}
+
 	// A model on the deployment's key keeps no key of its own: it would never
 	// be used, and would be sent to wherever the model points if the
 	// deployment's key were taken away.

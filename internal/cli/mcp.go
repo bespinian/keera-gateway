@@ -27,7 +27,7 @@ func registerMCPFlags(fs *flag.FlagSet) *mcpFlags {
 	f := &mcpFlags{}
 	// Not --url, which every command already reads as the gateway to talk to.
 	fs.StringVar(&f.endpoint, "endpoint", "", "the server's Streamable HTTP endpoint")
-	fs.StringVar(&f.description, "description", "", "what the server is for, in a sentence; an empty one clears it")
+	fs.StringVar(&f.description, "description", "", "what the server is for, in a sentence")
 	fs.StringVar(&f.authHeader, "auth-header", "",
 		"header the credential goes in (default: Authorization, as a bearer token)")
 	fs.StringVar(&f.apiKey, "api-key", "",
@@ -51,6 +51,7 @@ func mcpCmd(ctx context.Context, args []string) error {
 	m.addHint += " --endpoint <url>"
 	m.f, m.calls = registerMCPFlags(m.fs), registerCallFlags(m.fs)
 	m.fs.BoolVar(&m.f.disabled, "disabled", false, "add the server without serving it yet")
+	m.reword("set", "description", "what the server is for, in a sentence; an empty one clears it")
 	if done, err := m.parse(); done {
 		return err
 	}
@@ -158,8 +159,8 @@ func registerCallFlags(fs *flag.FlagSet) *callFlags {
 	fs.StringVar(&f.server, "server", "", "restrict to one MCP server")
 	fs.StringVar(&f.tool, "tool", "", "restrict to one tool")
 	f.who = registerWho(fs)
-	fs.DurationVar(&f.since, "since", reportWindow, "how far back to look")
-	fs.IntVar(&f.limit, "limit", reportLimit, "how many calls to print")
+	fs.DurationVar(&f.since, "since", reportWindow, sinceUsage)
+	fs.IntVar(&f.limit, "limit", reportLimit, limitUsage)
 	fs.BoolVar(&f.summary, "summary", false, "add up the calls of each tool instead")
 	return f
 }

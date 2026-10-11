@@ -31,6 +31,7 @@ import {
   icon,
   icons,
   aliasProblem,
+  takenProblem,
   showError,
   currentRange,
   rangePicker,
@@ -48,8 +49,8 @@ import {
 } from "../ui.js";
 import { areaChart, barList } from "../chart.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
-// A filter's own screen is an entity's own screen, so it takes the window
-// picker the project, key and model screens use - and the window itself, which is
+// A filter's own screen is an entity's own screen, so it takes the period
+// picker the project, key and model screens use - and the period itself, which is
 // shared between them: arriving here from a project showing this afternoon and
 // being given the last thirty days would answer a question nobody asked.
 import { facts } from "./detail.js";
@@ -91,6 +92,7 @@ export async function filtersView(ctx) {
     [
       {
         label: "Alias",
+        sortKey: (f) => f.alias,
         cell: (f) =>
           rowLink(
             ctx,
@@ -102,11 +104,13 @@ export async function filtersView(ctx) {
       {
         label: "Mode",
         shrink: true,
+        sortKey: (f) => modeName(f),
         cell: (f) => h("div", { class: "row-tight" }, modePills(f)),
       },
       {
         label: "Runs on",
         shrink: true,
+        sortKey: (f) => (usesModel(f) ? f.model : null),
         cell: (f) => {
           // A pattern filter runs no model. An empty cell would read as one
           // somebody had not finished setting, so it says what it holds
@@ -134,41 +138,41 @@ export async function filtersView(ctx) {
       // do; nothing here said whether it fires on everything or on nothing, and
       // an instruction cannot be tuned against an intention.
       {
-        label: "In this window",
+        label: "In this period",
         shrink: true,
+        sortKey: (f) => stats[f.alias]?.runs || null,
+        sortDir: "desc",
         cell: (f) => trafficCell(stats[f.alias], currency),
       },
       {
         label: "Description",
+        sortKey: (f) => f.description || null,
         cell: (f) =>
           f.description
             ? h("span", { class: "muted clamp-2" }, f.description)
             : h("span", { class: "faint" }, "-"),
       },
-      {
+      canEdit && {
         label: "Check",
         shrink: true,
-        cell: (f) => (canEdit ? checkCell(ctx, f) : null),
+        cell: (f) => checkCell(ctx, f),
       },
-      {
+      canEdit && {
         label: "",
         shrink: true,
         cell: (f) =>
-          canEdit
-            ? rowActions(ctx, f.alias, {
-                editTitle: "Edit this filter",
-                onEdit: () => editFilter(ctx, f, readers),
-                deleteTitle: "Delete this filter",
-                body:
-                  "A filter still used by a guardrail cannot be deleted. " +
-                  "Take it off those guardrails first; the error lists them.",
-                confirmLabel: "Delete filter",
-                remove: () => api.deleteFilter(ctx.orgID, f.alias),
-                removed: "Filter deleted",
-              })
-            : null,
+          rowActions(ctx, f.alias, {
+            editTitle: "Edit this filter",
+            onEdit: () => editFilter(ctx, f, readers),
+            deleteTitle: "Delete this filter",
+            body:
+              "A filter still used by a guardrail cannot be deleted. " +
+              "Take it off those guardrails first; the error lists them.",
+            confirmLabel: "Delete filter",
+            remove: () => api.deleteFilter(ctx.orgID, f.alias),
+          }),
       },
-    ],
+    ].filter(Boolean),
     filters,
     {
       emptyTitle: "No filters yet",
@@ -194,17 +198,23 @@ function usesModel(f) {
   return mode(f) !== "pattern";
 }
 
+// modeName is the mode as the dialog's tiles name it.
+function modeName(f) {
+  return MODES.find((m) => m.value === mode(f)).name;
+}
+
 // modePills are the mode and, when it applies, the thing that matters more than
-// the mode: that the filter is enforcing nothing. A row that says "gate" for a
+// the mode: that the filter is enforcing nothing. A row that says "Gate" for a
 // filter in shadow reads as a guardrail, and it is not one.
 function modePills(f) {
   const tone = { gate: "accent", pattern: "good" }[mode(f)] || "";
-  return [pill(mode(f), tone), f.shadow ? pill("Shadow", "warn") : null].filter(
-    Boolean,
-  );
+  return [
+    pill(modeName(f), tone),
+    f.shadow ? pill("Shadow", "warn") : null,
+  ].filter(Boolean);
 }
 
-// trafficCell is what this filter did to the window's requests, in the room a
+// trafficCell is what this filter did to the period's requests, in the room a
 // row has: how often it ran, how much of that was a refusal, and what each run
 // cost the request waiting for it. The rest is on the filter's own screen,
 // which the alias in the first column opens.
@@ -224,7 +234,7 @@ function trafficCell(st, currency) {
       st.errors > 0
         ? pill(`${num(st.errors)} could not run`, "bad")
         : st.refused > 0
-          ? pill(`${(refusalRate * 100).toFixed(1)}% refused`, tone)
+          ? pill(`${pct(st.refused, st.runs)} refused`, tone)
           : null,
     ),
     h(
@@ -473,6 +483,9 @@ function report(ctx, probe) {
           )
         : null,
     ),
+    actions: (close) => [
+      h("button", { class: "btn", onClick: close }, "Close"),
+    ],
   });
 }
 
@@ -576,7 +589,7 @@ export async function filterDetailView(ctx) {
         null,
         rep.requests
           ? `${pct(rep.runs, rep.requests)} of ${compact(rep.requests)} requests`
-          : "no requests in this window",
+          : "no requests in this period",
       ),
       stat(
         f && f.shadow ? "Would refuse" : "Refused",
@@ -594,7 +607,7 @@ export async function filterDetailView(ctx) {
         `p95 ${ms(rep.latency_p95_ms || 0)}, per request`,
       ),
       stat(
-        "Spend",
+        "Cost",
         money(rep.cost_micros || 0, ""),
         currency,
         rep.org_cost_micros
@@ -639,10 +652,10 @@ export async function filterDetailView(ctx) {
                 { currency, bucket: rep.bucket },
               )
             : empty(
-                "Nothing ran in this window",
+                "Nothing ran in this period",
                 f
                   ? "No guardrail uses this filter, or nothing it covers was " +
-                      "called. Widen the range or check the project's guardrails."
+                      "called. Widen the period or check the project's guardrails."
                   : "This filter no longer exists.",
               ),
         ),
@@ -679,7 +692,7 @@ export async function filterDetailView(ctx) {
               )
             : empty(
                 "Nothing to show",
-                "No run of this filter is in this window.",
+                "No run of this filter is in this period.",
               ),
         ),
       ),
@@ -851,7 +864,7 @@ function detailBanners(rep, f) {
         "div",
         { class: "banner banner-warn", style },
         `${num(rep.shadowed)} of these runs were in shadow: the filter was ` +
-          "switched during this window, so the refusal rate mixes both modes.",
+          "switched during this period, so the refusal rate mixes both modes.",
       ),
     );
   }
@@ -929,11 +942,11 @@ function projectTable(ctx, projects, names, currency) {
             : h("span", { class: "faint" }, "-"),
       },
       {
-        label: "Spend",
+        label: `Cost (${currency})`,
         shrink: true,
         num: true,
         cell: (t) =>
-          h("span", { class: "nowrap muted" }, money(t.cost_micros, currency)),
+          h("span", { class: "nowrap muted" }, money(t.cost_micros, "")),
       },
     ],
     projects,
@@ -941,9 +954,6 @@ function projectTable(ctx, projects, names, currency) {
   );
 }
 
-// pct is one count against another, which is how these numbers are compared -
-// this project against that one, this week against last. "4.1%" compares at a
-// glance where "173 of 4,219" does not.
 // identity is the subtitle under a filter's alias: what it does and what it does
 // it on, with the one thing that outranks both when it applies.
 function identity(f) {
@@ -1224,6 +1234,19 @@ function editFilter(ctx, existing, readers) {
         }
         button.disabled = true;
         try {
+          if (creating) {
+            const taken = takenProblem(
+              (await api.filters(ctx.orgID)).data,
+              alias.value.trim(),
+              "filter",
+            );
+            if (taken) {
+              showError(err, taken);
+              alias.focus();
+              button.disabled = false;
+              return;
+            }
+          }
           const pattern = chosen === "pattern";
           // Only the fields this mode carries are sent. The others stay in the
           // form, so switching back and forth loses nothing that was typed -
@@ -1294,34 +1317,59 @@ function formatRules(list) {
     .join("\n");
 }
 
-// parseRules is lenient in the same places the command line is: blank lines and
-// '#' comments are skipped, and the arrow is found at its last occurrence
-// because the left side is an expression and the right side is a literal.
+// parseRules reads the text the way `keera filter --rules` does, line for line:
+// blank lines and '#' comments are skipped, and the arrow is found at its last
+// occurrence because the left side is an expression and the right side is a
+// literal. A line without an arrow is refused rather than read as "delete every
+// match", which is what a typo would otherwise do.
 //
-// Nothing is validated here. The control plane compiles every expression and is
-// the only place that check can be trusted, so a bad rule comes back as the
-// banner at the top of this form rather than as a second opinion in the
-// browser.
+// The expressions are not checked here. The control plane compiles them and is
+// the only place that check can be trusted, so a bad one comes back as the
+// banner at the top of this form.
 function parseRules(text) {
-  return text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "" && !line.startsWith("#"))
-    .map((line) => {
-      const at = line.lastIndexOf("=>");
-      if (at < 0) return { pattern: line, replace: "" };
-      const pattern = line.slice(0, at).trim();
-      const answer = line.slice(at + 2).trim();
-      const refusal = /^REFUSED?\b[:\s]*/i.exec(answer);
-      if (refusal) {
-        return {
-          pattern,
-          refuse: true,
-          reason: answer.slice(refusal[0].length),
-        };
-      }
-      return { pattern, replace: answer };
-    });
+  const out = [];
+  text.split("\n").forEach((raw, i) => {
+    const line = raw.trim();
+    if (line === "" || line.startsWith("#")) return;
+    const at = line.lastIndexOf("=>");
+    if (at < 0) {
+      throw new Error(
+        `Line ${i + 1} has no "=>". A rule is an expression, then "=>", then ` +
+          `what each match becomes, or "REFUSE" to drop the request: ${line}`,
+      );
+    }
+    const pattern = line.slice(0, at).trim();
+    const answer = line.slice(at + 2).trim();
+    const reason = cutRefusal(answer);
+    out.push(
+      reason === null
+        ? { pattern, replace: answer }
+        : { pattern, refuse: true, reason },
+    );
+  });
+  if (!out.length) {
+    throw new Error(
+      'Add at least one rule: an expression, then "=>", then what each match becomes.',
+    );
+  }
+  return out;
+}
+
+// cutRefusal mirrors the CLI's: REFUSE or REFUSED, alone or followed by ':' or
+// a space and the sentence the sender is given. It returns null for a
+// replacement, even one that only starts with the word.
+function cutRefusal(s) {
+  if (s.slice(0, 6).toUpperCase() !== "REFUSE") return null;
+  let rest = s.slice(6);
+  if (rest === "") return "";
+  if (rest[0] === "D" || rest[0] === "d") {
+    rest = rest.slice(1);
+    if (rest === "") return "";
+  }
+  for (const sep of [":", " ", "\t"]) {
+    if (rest.startsWith(sep)) return rest.slice(1).trim();
+  }
+  return null;
 }
 
 // RULES_EXAMPLE is a starting point, and the half of redaction a model was

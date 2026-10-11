@@ -260,7 +260,7 @@ func TestUsageComesFromTheRegistry(t *testing.T) {
 		{[]string{"filter", "add"}, "usage: keera filter add <alias>"},
 		{[]string{"router", "delete", "a", "b"}, "usage: keera router delete <alias>"},
 		{[]string{"usage", "project"}, "usage: keera usage"},
-		{[]string{"guardrail", "get"}, "usage: keera guardrail get <scope> [<id>]"},
+		{[]string{"guardrail", "show"}, "usage: keera guardrail show <scope> [<id>]"},
 		{[]string{"limit"}, "usage: keera limit <scope> [<id>]"},
 		{[]string{"key", "create", "a", "b"}, "usage: keera key create [<name>]"},
 	} {

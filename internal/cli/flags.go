@@ -22,18 +22,23 @@ type cmdRun struct {
 	// rest is args without the verb.
 	rest []string
 
+	// org is the organisation the command acts on: --org where a command
+	// has it, else the one 'keera org switch' chose, else empty.
+	org string
+
 	// The flags many commands share, declared when newCmdRun is asked to.
-	org    string
-	yes    bool
-	asJSON bool
+	orgFlag string
+	yes     bool
+	asJSON  bool
 }
 
 // newCmdRun takes the verb off args, when cmd has verbs, and declares the
-// shared flags named: "org", "yes" and "json". "orgs" is --org on a report,
-// which spans every organisation the caller can see unless told one.
+// shared flags named: "org", "yes" and "json". Few commands have --org: the
+// others act on the organisation 'keera org switch' chose.
 func newCmdRun(cmd string, args []string, shared ...string) *cmdRun {
 	entry, _ := find(cmd)
 	r := &cmdRun{c: newClient(), cmd: cmd, hasVerbs: len(entry.subs) > 0, args: args, rest: args}
+	r.org = r.c.org
 	if r.hasVerbs {
 		r.verb, r.rest = split(args)
 	}
@@ -41,9 +46,7 @@ func newCmdRun(cmd string, args []string, shared ...string) *cmdRun {
 	for _, name := range shared {
 		switch name {
 		case "org":
-			r.fs.StringVar(&r.org, "org", "", orgUsage)
-		case "orgs":
-			r.fs.StringVar(&r.org, "org", "", orgsUsage)
+			r.fs.StringVar(&r.orgFlag, "org", "", orgUsage)
 		case "yes":
 			r.fs.BoolVar(&r.yes, "yes", false, yesUsage)
 		case "json":
@@ -51,6 +54,15 @@ func newCmdRun(cmd string, args []string, shared ...string) *cmdRun {
 		}
 	}
 	return r
+}
+
+// reword gives a flag another description on one verb, where it means more
+// or less there than on the others. Help prints the description of the verb
+// asked about, so 'add' does not offer to clear what it creates.
+func (r *cmdRun) reword(verb, name, usage string) {
+	if verbAsked(r.cmd, r.args) == verb {
+		r.fs.Lookup(name).Usage = usage
+	}
 }
 
 // parse reads the verb and the flags. done means there is nothing left to
@@ -63,6 +75,9 @@ func (r *cmdRun) parse() (done bool, err error) {
 		r.verb, err = parseVerb(r.fs, r.cmd, r.verb, r.rest)
 	} else {
 		err = parseCmd(r.fs, r.cmd, r.args)
+	}
+	if r.orgFlag != "" {
+		r.org = r.orgFlag
 	}
 	return err != nil, err
 }

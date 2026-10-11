@@ -12,16 +12,22 @@ import (
 )
 
 func usageCmd(ctx context.Context, args []string) error {
-	r := newCmdRun("usage", args, "orgs", "json")
+	r := newCmdRun("usage", args, "json")
 	fs := r.fs
-	groupBy := fs.String("by", "model", "group by: model, client, project, key, user, day or org")
-	since := fs.Duration("since", reportWindow, "how far back to report")
+	// The same defaults as the panel's Usage screen, so both give the same
+	// totals when asked nothing.
+	groupBy := fs.String("by", "project", "group by: model, client, project, key, user, day or org")
+	alias := fs.String("model", "", modelUsage)
+	w := registerWho(fs)
+	since := fs.Duration("since", 30*24*time.Hour, sinceUsage)
 	if done, err := r.parse(); done {
 		return err
 	}
 	c := r.c
 
-	q, err := reportQuery(ctx, c, r.org, nil, *since, map[string]string{"group_by": *groupBy})
+	q, err := reportQuery(ctx, c, r.org, w, *since, map[string]string{
+		"group_by": *groupBy, "alias": *alias,
+	})
 	if err != nil {
 		return err
 	}
@@ -78,14 +84,14 @@ func (res usageResponse) label(groupBy, group string) string {
 // The backend's message is printed beside the model and the key, because only
 // its wording says whose problem a failure is.
 func failuresCmd(ctx context.Context, args []string) error {
-	r := newCmdRun("failures", args, "orgs", "json")
+	r := newCmdRun("failures", args, "json")
 	fs := r.fs
 	kind := fs.String("kind", "failed", "failed, refused, interrupted or all")
-	alias := fs.String("model", "", "restrict to one model")
+	alias := fs.String("model", "", modelUsage)
 	w := registerWho(fs)
 	status := fs.Int("status", 0, "restrict to one status")
-	since := fs.Duration("since", reportWindow, "how far back to look")
-	limit := fs.Int("limit", reportLimit, "how many to print")
+	since := fs.Duration("since", reportWindow, sinceUsage)
+	limit := fs.Int("limit", reportLimit, limitUsage)
 	if done, err := r.parse(); done {
 		return err
 	}

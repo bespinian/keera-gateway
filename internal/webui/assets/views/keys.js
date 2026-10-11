@@ -25,6 +25,9 @@ import {
   currentRange,
   rangePicker,
   RANGES,
+  listHead,
+  plural,
+  pct,
 } from "../ui.js";
 import { openGuardrails, ceilingsFor, summarise } from "./guardrails.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
@@ -38,7 +41,7 @@ export async function keysView(ctx) {
     return chooseOrg(ctx, "API keys");
 
   const since = currentRange();
-  const range = RANGES.find((r) => r.since === since) || RANGES[1];
+  const range = rangeOf(since);
   const [keysRes, projectsRes, modelsRes, usersRes, clients] =
     await Promise.all([
       api.keys(ctx.orgID, { since }),
@@ -66,33 +69,21 @@ export async function keysView(ctx) {
   const live = keys.filter((k) => stateOf(k) === "active").length;
   ctx.setSubtitle(`${live} active of ${keys.length}`);
 
-  const head = h(
-    "div",
-    { class: "row", style: { marginBottom: "16px" } },
-    h(
-      "div",
-      { class: "muted" },
-      canEdit
-        ? "A key is shown only once, when it is issued. It is not stored."
-        : canRotateOwn
-          ? "A key is shown only once, when it is issued. An administrator " +
-            "issues keys and sets their guardrails. You can rename, rotate or " +
-            "revoke your own."
-          : "A key is shown only once, when it is issued. Open a key to see " +
-            "its guardrails. An administrator sets them.",
-    ),
-    h("div", { style: { flex: 1 } }),
+  const head = listHead(
+    canEdit
+      ? "A key is shown only once, when it is issued. It is not stored."
+      : canRotateOwn
+        ? "A key is shown only once, when it is issued. An administrator " +
+          "issues keys and sets their guardrails. You can rename, rotate or " +
+          "revoke your own."
+        : "A key is shown only once, when it is issued. Open a key to see " +
+          "its guardrails. An administrator sets them.",
     rangePicker(ctx, since),
     canEdit
-      ? h(
-          "button",
-          {
-            class: "btn btn-primary",
-            onClick: () => issueKey(ctx, projects, users, clients),
-          },
-          icon(icons.plus),
-          "Issue key",
-        )
+      ? {
+          label: "Issue key",
+          onClick: () => issueKey(ctx, projects, users, clients),
+        }
       : null,
   );
 
@@ -112,7 +103,7 @@ export async function keysView(ctx) {
               ctx,
               "/keys/" + encodeURIComponent(k.id),
               k.name,
-              "This key's traffic, spend and requests",
+              "This key's traffic, cost and requests",
             ),
             h(
               "span",
@@ -140,7 +131,7 @@ export async function keysView(ctx) {
         cell: (k) =>
           k.project_id
             ? h("span", {}, projectNames[k.project_id] || k.project_id)
-            : h("span", { class: "faint" }, "deleted project"),
+            : h("span", { class: "faint" }, "Deleted project"),
       },
       // A deployment with no identity provider has nobody to attribute a key
       // to, so the column would only ever say so.
@@ -176,11 +167,7 @@ export async function keysView(ctx) {
                 { class: "muted nowrap", title: dateTime(k.last_used_at) },
                 ago(k.last_used_at),
               )
-            : h(
-                "span",
-                { class: "faint nowrap" },
-                `not in the ${range.long.toLowerCase()}`,
-              ),
+            : h("span", { class: "faint nowrap" }, `not ${inPeriod(since)}`),
       },
       {
         label: range.long,
@@ -227,7 +214,8 @@ export async function keysView(ctx) {
             );
           }
           if (k.limits && k.limits.allowed_models) {
-            bits.unshift(`${k.limits.allowed_models.length} model`);
+            const n = k.limits.allowed_models.length;
+            bits.unshift(n ? `${n} ${plural(n, "model")}` : "No models");
           }
           return bits.length
             ? h(
@@ -235,11 +223,7 @@ export async function keysView(ctx) {
                 { class: "muted nowrap", style: { fontSize: "11.5px" } },
                 bits.join(" · "),
               )
-            : h(
-                "span",
-                { class: "faint" },
-                k.project_id ? "project's" : `${orgNameOf(ctx, k.org_id)}'s`,
-              );
+            : h("span", { class: "faint" }, "Inherited");
         },
       },
       {
@@ -293,21 +277,7 @@ export async function keysView(ctx) {
                   {
                     class: "btn btn-sm",
                     title: "Replace this key with a new one",
-                    onClick: () =>
-                      confirm({
-                        title: k.name
-                          ? `Rotate ${k.name}?`
-                          : "Rotate this key?",
-                        body:
-                          `A new key replaces ${k.name}, with the same project, ` +
-                          "person and guardrails. The old key stops working " +
-                          "at once, so update its clients with the new one.",
-                        confirmLabel: "Rotate",
-                        onConfirm: async () => {
-                          const created = await api.rotateKey(k.id);
-                          showSecret(ctx, created, clients);
-                        },
-                      }),
+                    onClick: () => confirmRotate(ctx, k, { clients }),
                   },
                   "Rotate",
                 )
@@ -317,7 +287,8 @@ export async function keysView(ctx) {
                   "button",
                   {
                     class: "btn btn-sm btn-danger",
-                    onClick: () => confirmRevoke(k, ctx.reload),
+                    onClick: () =>
+                      confirmRevoke(k, ctx.reload, inPeriod(since)),
                   },
                   "Revoke",
                 )
@@ -362,7 +333,7 @@ export async function keysView(ctx) {
             ),
             // The shared keys an administrator issued for a pipeline.
             ...(keys.some((k) => !k.user_id)
-              ? [{ value: NOBODY, label: "No user" }]
+              ? [{ value: NOBODY, label: NO_USER }]
               : []),
           ],
           test: (k, v) => (k.user_id || NOBODY) === v,
@@ -388,7 +359,7 @@ export async function keysView(ctx) {
 
 // userCell is whose key k is. Only an administrator has a user's page to open.
 function userCell(ctx, k, userEmails) {
-  if (!k.user_id) return h("span", { class: "faint" }, "none");
+  if (!k.user_id) return h("span", { class: "faint" }, NO_USER);
   const email = userEmails[k.user_id] || k.user_id;
   return isAdmin(ctx)
     ? rowLink(
@@ -403,6 +374,20 @@ function userCell(ctx, k, userEmails) {
 // NOBODY is the user filter's value for a key attributed to nobody. No user id
 // looks like it.
 const NOBODY = "-";
+
+// NO_USER is what every screen shows for a key attributed to nobody.
+export const NO_USER = "No user";
+
+// rangeOf is the picker's entry for since.
+function rangeOf(since) {
+  return RANGES.find((r) => r.since === since) || RANGES[1];
+}
+
+// inPeriod is the period last_used_at covers when the keys were read with
+// since, worded to follow "used" or "not".
+export function inPeriod(since) {
+  return `in the ${rangeOf(since).long.toLowerCase()}`;
+}
 
 // byLabel is the distinct values of rows as dropdown options, sorted by label.
 function byLabel(rows, value, label) {
@@ -429,21 +414,23 @@ export function canRevoke(ctx, k) {
 }
 
 // revokeBody says what revoking this particular key would actually break, which
-// is a different sentence for a key in daily use and one nobody has ever used.
-export function revokeBody(k) {
+// is a different sentence for a key in daily use and one nobody has used.
+// period is the span last_used_at covers, which depends on how the keys were
+// read: My access reads this month.
+export function revokeBody(k, period = "this month") {
   const base =
     `Clients using ${k.name} stop working within a second. ` +
     "You cannot undo this. To replace the key instead, rotate it.";
-  if (!k.last_used_at) return base + " This key has not been used this month.";
+  if (!k.last_used_at) return base + ` This key has not been used ${period}.`;
   return base;
 }
 
 // confirmRevoke asks before revoking a key, then runs done. Every screen that
 // shows a live key offers this, and it should read the same on each.
-export function confirmRevoke(k, done) {
+export function confirmRevoke(k, done, period) {
   confirm({
     title: k.name ? `Revoke ${k.name}?` : "Revoke this key?",
-    body: revokeBody(k),
+    body: revokeBody(k, period),
     confirmLabel: "Revoke",
     danger: true,
     onConfirm: async () => {
@@ -491,8 +478,32 @@ export async function openKey(ctx, key, models, projectName, canEdit) {
   });
 }
 
+// confirmRotate asks before replacing a key with a new one, then shows the new
+// secret. done gets the new key once it exists; a screen about the old key
+// uses it to move to the new one. clients is loaded here if not given.
+export function confirmRotate(ctx, k, { clients, done } = {}) {
+  confirm({
+    title: k.name ? `Rotate ${k.name}?` : "Rotate this key?",
+    body:
+      `A new key replaces ${k.name}, with the same project, user and ` +
+      "guardrails. The old key stops working at once, so update its clients " +
+      "with the new one.",
+    confirmLabel: "Rotate",
+    danger: true,
+    onConfirm: async () => {
+      const created = await api.rotateKey(k.id);
+      if (done) done(created);
+      showSecret(
+        ctx,
+        created,
+        clients || (await loadClients().catch(() => [])),
+      );
+    },
+  });
+}
+
 // renameKey changes what a key is called and nothing else.
-function renameKey(ctx, k) {
+export function renameKey(ctx, k) {
   const name = h("input", { class: "input", value: k.name, autofocus: true });
   const err = h("div");
   modal({
@@ -562,7 +573,7 @@ function issueKey(ctx, projects, users, clients) {
               ctx.navigate("/projects");
             },
           },
-          "Go to Projects",
+          "Go to projects",
         ),
       ],
     });
@@ -586,7 +597,7 @@ function issueKey(ctx, projects, users, clients) {
   const person = h(
     "select",
     { class: "select" },
-    h("option", { value: "" }, "Nobody in particular"),
+    h("option", { value: "" }, NO_USER),
     users.map((u) => h("option", { value: u.id }, u.email)),
   );
   // Each span carries the day it lands on: "90 days" is not a date anybody can
@@ -801,10 +812,8 @@ async function showSecret(ctx, created, clients) {
 function planUsed(plan) {
   if (!plan) return null;
   const parts = [];
-  if (plan.five_hour != null)
-    parts.push(`5h ${Math.round(plan.five_hour * 100)}%`);
-  if (plan.seven_day != null)
-    parts.push(`7d ${Math.round(plan.seven_day * 100)}%`);
+  if (plan.five_hour != null) parts.push(`5h ${pct(plan.five_hour, 1)}`);
+  if (plan.seven_day != null) parts.push(`7d ${pct(plan.seven_day, 1)}`);
   if (!parts.length) return null;
   const limited = plan.status === "rejected";
   return h(

@@ -8,6 +8,7 @@ import {
   num,
   money,
   ms,
+  tokens,
   go,
   RANGES,
   currentRange,
@@ -29,7 +30,7 @@ export async function dashboardView(ctx) {
     const setup = await api.setup(ctx.orgID).catch(() => null);
     if (setup && setup.requests === 0) {
       ctx.setSubtitle("First run");
-      return h("div", {}, limitedNote(ctx), firstRun(ctx, setup));
+      return firstRun(ctx, setup);
     }
   }
 
@@ -62,12 +63,12 @@ export async function dashboardView(ctx) {
       "Tokens",
       compact(o.input_tokens + o.output_tokens),
       null,
-      `${compact(o.input_tokens)} in · ${compact(o.output_tokens)} out`,
+      tokens(o.input_tokens, o.output_tokens),
     ),
-    // What Claude plans paid for is not spend, so it is said beside it rather
-    // than added to it.
+    // What Claude plans paid for is not part of the cost, so it is said
+    // beside it rather than added to it.
     stat(
-      "Spend",
+      "Cost",
       money(o.cost_micros, ""),
       currency,
       o.subscription_micros
@@ -120,7 +121,7 @@ export async function dashboardView(ctx) {
       h(
         "div",
         { class: "card-head" },
-        h("h2", {}, "Projects by spend"),
+        h("h2", {}, "Projects by cost"),
         h("div", { class: "spacer" }),
         h(
           "a",
@@ -133,7 +134,7 @@ export async function dashboardView(ctx) {
         { class: "card-body" },
         barList(o.top_projects, {
           label: (r) => names[r.group] || (r.group ? r.group : "No project"),
-          value: (r) => r.cost_micros || r.requests,
+          value: (r) => r.cost_micros,
           currency,
         }),
       ),
@@ -166,7 +167,6 @@ export async function dashboardView(ctx) {
   const wrap = h(
     "div",
     {},
-    limitedNote(ctx),
     header,
     tiles,
     h("div", { style: { marginTop: "16px" } }, chartCard),
@@ -194,31 +194,6 @@ export async function dashboardView(ctx) {
     );
   }
   return wrap;
-}
-
-// limitedNote says what an organisation that signed itself up cannot use
-// yet, and what changes that.
-function limitedNote(ctx) {
-  const me = ctx.state.me;
-  // Members meet it only as a refusal, which says the same.
-  if (!me.org_limited || ctx.orgID !== me.org_id || !isAdmin(ctx)) return null;
-  return h(
-    "div",
-    { class: "banner banner-info" },
-    "This organisation is new, so the models and MCP servers inside this " +
-      "deployment's network, and sandboxes, are not open to it yet. ",
-    me.payments
-      ? [
-          "They open with your first ",
-          h(
-            "a",
-            { href: "/billing", onClick: go(ctx, "/billing") },
-            "credit purchase",
-          ),
-          ".",
-        ]
-      : "An operator can open them for you.",
-  );
 }
 
 // failureLink is the failed count as the way in to the failures behind it: the

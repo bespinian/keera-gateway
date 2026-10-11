@@ -22,6 +22,7 @@ type orgRun struct {
 	domain    string
 	noDomain  bool
 	liftLimit bool
+	all       bool
 }
 
 func orgCmd(ctx context.Context, args []string) error {
@@ -34,6 +35,8 @@ func orgCmd(ctx context.Context, args []string) error {
 	fs.BoolVar(&r.liftLimit, "lift-limit", false,
 		"open the models and MCP servers inside this deployment's network, and sandboxes, "+
 			"to an organisation that signed up")
+	fs.BoolVar(&r.all, "all", false,
+		"act on every organisation again, rather than on one (operators)")
 	if done, err := r.parse(); done {
 		return err
 	}
@@ -44,6 +47,8 @@ func orgCmd(ctx context.Context, args []string) error {
 		return r.set(ctx)
 	case "delete":
 		return r.delete(ctx)
+	case "switch":
+		return r.switchTo(ctx)
 	default:
 		return r.list(ctx)
 	}
@@ -79,15 +84,17 @@ func (r *orgRun) set(ctx context.Context) error {
 	if r.domain != "" && r.noDomain {
 		return opposites("domain", "no-domain")
 	}
-	// The id may be left off while there is only one organisation, which is
+	// The organisation may be left off while there is only one, which is
 	// exactly when the domain has to be set.
-	orgID := r.fs.Arg(0)
-	if orgID == "" {
-		only, err := theOnlyOrg(ctx, r.c, "name the one to change: keera org set <org-id>")
-		if err != nil {
-			return err
-		}
-		orgID = only
+	var orgID string
+	var err error
+	if r.fs.Arg(0) == "" {
+		orgID, err = theOnlyOrg(ctx, r.c, "name the one to change: keera org set <org>")
+	} else {
+		orgID, err = resolveOrg(ctx, r.c, r.fs.Arg(0))
+	}
+	if err != nil {
+		return err
 	}
 	change := map[string]any{}
 	if r.liftLimit {
@@ -122,6 +129,13 @@ func (r *orgRun) set(ctx context.Context) error {
 }
 
 func (r *orgRun) list(ctx context.Context) error {
+	me, err := whoami(ctx, r.c)
+	if err != nil {
+		return err
+	}
+	if !me.Unrestricted {
+		return r.listMine(me)
+	}
 	orgs, err := list[store.Org](ctx, r.c, "/v1/orgs")
 	if err != nil {
 		return err
@@ -139,14 +153,129 @@ func (r *orgRun) list(ctx context.Context) error {
 			if o.Limited {
 				name += " " + style.warn("(limited)")
 			}
+			if o.ID == r.c.org {
+				name += " " + style.ok("(active)")
+			}
 			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 				o.ID, name, orNotSet(o.EmailDomain), o.CreatedAt.Format(time.DateOnly))
 		}
 	})
 }
 
+// listMine lists the organisations a person is in, and the ones that
+// invited them.
+func (r *orgRun) listMine(me identity) error {
+	orgs := myOrgs(me)
+	return out(r.asJSON, orgs, func(w *table) {
+		w.header("ID\tNAME\tROLE")
+		for _, o := range orgs {
+			name, role := o.Name, o.Role
+			if o.ID == me.OrgID {
+				name += " " + style.ok("(active)")
+			}
+			if o.Invited {
+				role += " " + style.muted("(invitation)")
+			}
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", o.ID, name, role)
+		}
+	})
+}
+
+// myOrgs is every organisation a person can switch to. /v1/me lists them only
+// when there are several.
+func myOrgs(me identity) []membership {
+	if len(me.Orgs) > 0 {
+		return me.Orgs
+	}
+	if me.OrgID == "" {
+		return nil
+	}
+	return []membership{{ID: me.OrgID, Name: me.OrgName, Role: me.Role}}
+}
+
+// switchTo chooses the organisation later commands act on. A person in
+// several moves their sign-in there, because their role differs in each. An
+// operator sees every one, so the choice is only remembered here.
+func (r *orgRun) switchTo(ctx context.Context) error {
+	given := r.fs.Arg(0)
+	if given == "" && !r.all {
+		return errors.New("usage: keera org switch <org>; 'keera org list' shows them")
+	}
+	me, err := whoami(ctx, r.c)
+	if err != nil {
+		return err
+	}
+	if r.all {
+		if !me.Unrestricted {
+			return errors.New("only an operator acts on every organisation at once")
+		}
+		if err := saveOrg(r.c.base, ""); err != nil {
+			return err
+		}
+		fmt.Println("Commands now act on every organisation, and ask for one where they need it.")
+		r.warnAboutEnv()
+		return nil
+	}
+
+	if me.Unrestricted {
+		orgs, err := list[store.Org](ctx, r.c, "/v1/orgs")
+		if err != nil {
+			return err
+		}
+		i := slices.IndexFunc(orgs, func(o store.Org) bool {
+			return o.ID == given || strings.EqualFold(o.Name, given)
+		})
+		if i < 0 {
+			return notFound("organisation", given, "", "org")
+		}
+		if err := saveOrg(r.c.base, orgs[i].ID); err != nil {
+			return err
+		}
+		fmt.Printf("Commands now act on %s.\n", orgs[i].Name)
+		r.warnAboutEnv()
+		return nil
+	}
+
+	mine := myOrgs(me)
+	i := slices.IndexFunc(mine, func(o membership) bool {
+		return o.ID == given || strings.EqualFold(o.Name, given)
+	})
+	if i < 0 {
+		return notFound("organisation", given, "", "org")
+	}
+	var res struct {
+		OrgID   string `json:"org_id"`
+		OrgName string `json:"org_name"`
+		Role    string `json:"role"`
+	}
+	if err := r.c.do(ctx, "POST", "/v1/me/org", map[string]string{"org_id": mine[i].ID}, &res); err != nil {
+		return err
+	}
+	if err := saveOrg(r.c.base, res.OrgID); err != nil {
+		return err
+	}
+	if mine[i].Invited {
+		fmt.Printf("Joined %s as %s.\n", res.OrgName, res.Role)
+	} else {
+		fmt.Printf("Now in %s as %s.\n", res.OrgName, res.Role)
+	}
+	r.warnAboutEnv()
+	return nil
+}
+
+// warnAboutEnv says when KEERA_ORG overrides the choice just made.
+func (r *orgRun) warnAboutEnv() {
+	if os.Getenv("KEERA_ORG") != "" {
+		fmt.Fprintln(os.Stderr, styleErr.warn("\nNote: KEERA_ORG is set in this shell, and it "+
+			"wins. Unset it to use this choice."))
+	}
+}
+
 func (r *orgRun) delete(ctx context.Context) error {
-	orgID := r.fs.Arg(0)
+	orgID, err := resolveOrg(ctx, r.c, r.fs.Arg(0))
+	if err != nil {
+		return err
+	}
 	if !r.yes {
 		if err := confirmOrgDelete(ctx, r.c, orgID); err != nil {
 			return err
@@ -156,6 +285,11 @@ func (r *orgRun) delete(ctx context.Context) error {
 	raw, err := keepRaw(ctx, r.c, "DELETE", "/v1/orgs/"+url.PathEscape(orgID), nil, &gone)
 	if err != nil {
 		return err
+	}
+	if r.c.org == gone.ID && r.c.orgFrom == "keera org switch" {
+		if err := saveOrg(r.c.base, ""); err != nil {
+			return err
+		}
 	}
 	return out(r.asJSON, raw, func(w *table) {
 		_, _ = fmt.Fprintf(w, "deleted %s (%s)\t%s, %s, %s\n", gone.ID, gone.Name,
@@ -251,7 +385,8 @@ func confirmOrgDelete(ctx context.Context, c *client, orgID string) error {
 	// control plane.
 	if live, err := list[store.Sandbox](ctx, c, inOrg("/v1/sandboxes", orgID)); err == nil && len(live) > 0 {
 		return fmt.Errorf("%s still has %s; terminate them first "+
-			"(keera sandbox list --org %s)", org.Name, plural(len(live), "live sandbox", "live sandboxes"), orgID)
+			"(keera org switch %s, then keera sandbox list)", org.Name,
+			plural(len(live), "live sandbox", "live sandboxes"), orgID)
 	}
 
 	return confirm(fmt.Sprintf("Deleting %s (%s) removes:", org.Name, org.ID), []string{

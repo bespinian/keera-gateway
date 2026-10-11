@@ -99,7 +99,7 @@ var commands = []command{
 		name:    "doctor",
 		summary: "check a deployment end to end and say what is missing",
 		args:    "[flags]",
-		flags:   []string{"probe", "org", "json"},
+		flags:   []string{"probe", "json"},
 		prose: "One command for \"why does this not work\". It reads the deployment's " +
 			"configuration and an organisation's models and says what is missing, with the thing to do " +
 			"about each. It changes nothing, so it is safe against live traffic.\n\n" +
@@ -123,19 +123,29 @@ var commands = []command{
 			"refused rather than put in one - so it is set on every organisation before the " +
 			"second one exists, including the one that was there first. Through a provider " +
 			"with KEERA_OIDC_<NAME>_SIGNUP, such a person creates an organisation of their own " +
-			"instead.",
+			"instead.\n\n" +
+			"Every other command acts on one organisation: the one 'org switch' chose. A " +
+			"person can be in several, with a role in each. KEERA_ORG chooses one for a " +
+			"single shell or a pipeline. An organisation is named by its name or its id, " +
+			"wherever a command takes one.",
 		subs: []subcommand{
 			{name: "create", aliases: []string{"add", "new"}, args: "<name>", summary: "create an organisation",
 				flags: []string{"domain", "json"}},
-			{name: "list", aliases: []string{"ls"}, summary: "every organisation", flags: []string{"json"}},
-			{name: "set", aliases: []string{"edit", "update", "rename"}, args: "[<org-id>]", summary: "rename it, or set the email domain whose sign-ins land in it",
+			{name: "list", aliases: []string{"ls"}, summary: "the organisations you can work in", flags: []string{"json"}},
+			{name: "switch", aliases: []string{"use"}, args: "[<org>]", summary: "work in another organisation",
+				flags: []string{"all"},
+				prose: "Takes an id or a name. You keep the role you have there, and choosing an " +
+					"organisation that invited you joins it. The browser keeps its own choice. " +
+					"An operator works in every organisation, so for them it only sets the one " +
+					"commands act on, and --all goes back to every one."},
+			{name: "set", aliases: []string{"edit", "update", "rename"}, args: "[<org>]", summary: "rename it, or set the email domain whose sign-ins land in it",
 				flags: []string{"name", "domain", "no-domain", "lift-limit", "json"},
 				prose: "Names are unique, ignoring case. Everything refers to an organisation " +
 					"by its id, so a rename changes only what it is called. The old name stays " +
 					"in the audit log. An organisation somebody created by signing up is " +
 					"limited until it buys credit: --lift-limit opens the models and MCP servers " +
 					"inside this deployment's network, and sandboxes, to it sooner."},
-			{name: "delete", aliases: []string{"rm", "remove"}, args: "<org-id>", summary: "delete an organisation and everything in it",
+			{name: "delete", aliases: []string{"rm", "remove"}, args: "<org>", summary: "delete an organisation and everything in it",
 				flags: []string{"yes", "json"},
 				prose: "Refused while any of its sandboxes is still live: terminate them first, " +
 					"so no machine keeps running after its organisation is gone."},
@@ -143,6 +153,7 @@ var commands = []command{
 		examples: []string{
 			`keera org create "Example Bank" --domain example.ch`,
 			`keera org set org_123 --name "Example Bank AG"`,
+			`keera org switch "Example Bank"`,
 		},
 	},
 	{
@@ -157,17 +168,17 @@ var commands = []command{
 			"project. An organisation with no projects cannot have keys.",
 		subs: []subcommand{
 			{name: "create", aliases: []string{"add", "new"}, args: "<name>", summary: "create a project",
-				flags: []string{"org", "description", "json"}},
-			{name: "list", aliases: []string{"ls"}, summary: "every project", flags: []string{"org", "json"}},
+				flags: []string{"description", "json"}},
+			{name: "list", aliases: []string{"ls"}, summary: "every project", flags: []string{"json"}},
 			{name: "set", aliases: []string{"edit", "update", "rename"}, args: "<project>",
 				summary: "rename a project or change its description",
-				flags:   []string{"org", "name", "description", "json"},
+				flags:   []string{"name", "description", "json"},
 				prose: "Names are unique in an organisation. The name is a label: keys, " +
 					"guardrails, spend and every usage row hold the project by its id, so a " +
 					"rename changes only what reports are headed. The old name stays in the " +
 					"audit log."},
 			{name: "delete", aliases: []string{"rm", "remove"}, args: "<project>", summary: "delete a project whose keys are all revoked",
-				flags: []string{"org", "yes", "json"},
+				flags: []string{"yes", "json"},
 				prose: "Refused while any key in the project is not revoked, expired ones " +
 					"included: deleting it would take those credentials with it. Revoke them first. A key cannot change " +
 					"project, so issue a new one in another project for anything that still " +
@@ -187,27 +198,28 @@ var commands = []command{
 			"'user role' is refused: the next sign-in would undo it.",
 		subs: []subcommand{
 			{name: "add", aliases: []string{"create", "invite", "new"}, args: "<email>", summary: "add a person",
-				flags: []string{"org", "role", "external-id", "passkey", "json"},
-				prose: "With --passkey, they sign in with a passkey instead of an identity " +
-					"provider, and the command prints a set-up link to send them. This needs " +
-					"KEERA_PASSKEYS on the gateway. An administrator can only use their " +
-					"organisation's email domain."},
-			{name: "list", aliases: []string{"ls"}, summary: "everyone in the organisation", flags: []string{"org", "json"}},
+				flags: []string{"role", "external-id", "passkey", "json"},
+				prose: "They sign in through the identity provider. With --passkey, or on a " +
+					"gateway with no identity provider, they sign in with a passkey instead, " +
+					"and the command prints a set-up link to send them. Passkeys need " +
+					"KEERA_PASSKEYS on the gateway, and an administrator can only add passkey " +
+					"accounts at their organisation's email domain."},
+			{name: "list", aliases: []string{"ls"}, summary: "everyone in the organisation", flags: []string{"json"}},
 			{name: "role", aliases: []string{"set-role"}, args: "<email-or-id> <member|admin>",
 				summary: "change what a person may do; signs them out",
-				flags:   []string{"org", "json"}},
+				flags:   []string{"json"}},
 			{name: "disable", aliases: []string{"offboard"}, args: "<email-or-id>",
 				summary: "turn a person off, for when they leave",
-				flags:   []string{"org", "yes", "json"},
+				flags:   []string{"yes", "json"},
 				prose: "They are signed out and their keys revoked; leaving the directory alone " +
 					"does not revoke keys. See docs/sso.md."},
 			{name: "enable", args: "<email-or-id>", summary: "let a disabled person sign in again",
-				flags: []string{"org", "json"},
+				flags: []string{"json"},
 				prose: "Their old keys stay revoked, so they start with none. Their passkeys " +
 					"are gone too: send them a new set-up link."},
 			{name: "passkey-link", aliases: []string{"passkey"}, args: "<email-or-id>",
 				summary: "a new set-up link, to add a passkey",
-				flags:   []string{"org", "json"},
+				flags:   []string{"json"},
 				prose: "For a new device, or after a lost passkey. It works once, for 24 hours, " +
 					"and replaces any earlier link. Someone who has not signed in yet becomes " +
 					"a passkey account. A directory account is refused: leaving the directory " +
@@ -224,10 +236,9 @@ var commands = []command{
 			"A key is shown once, when it is created. Nothing can print it again.",
 		subs: []subcommand{
 			{name: "create", aliases: []string{"add", "new"}, args: "[<name>]", summary: "issue an API key",
-				flags: []string{"org", "project", "user", "name", "expires", "subscription", "json"},
-				prose: "The name says what the key is for. The panel, the reports and the audit " +
-					"log show it in place of the key, so a key without one is a row nobody " +
-					"can identify later.\n\n" +
+				flags: []string{"project", "user", "name", "expires", "subscription", "json"},
+				prose: "The name, which is required, says what the key is for. The panel, the " +
+					"reports and the audit log show it in place of the key.\n\n" +
 					"--subscription issues a key for Claude Code signed in to a Claude plan. It " +
 					"reaches only subscription models, which that plan pays for. For a member, " +
 					"issue one with --user; their 'keera connect claude-code --subscription' " +
@@ -239,16 +250,16 @@ var commands = []command{
 				examples: []string{
 					`keera key create --project payments --user ada@example.ch --name "Ada's laptop"`,
 				}},
-			{name: "list", aliases: []string{"ls"}, summary: "every key", flags: []string{"org", "project", "json"}},
+			{name: "list", aliases: []string{"ls"}, summary: "every key", flags: []string{"project", "json"}},
 			{name: "set", aliases: []string{"edit", "update", "rename"}, args: "<key>",
 				summary: "rename a key",
-				flags:   []string{"org", "name", "json"},
+				flags:   []string{"name", "json"},
 				prose: "The name is only a label. The key, its guardrails and its usage stay " +
 					"as they are. The old name stays in the audit log. A member may rename " +
 					"their own keys; an administrator any key in the organisation.",
 				examples: []string{`keera key set "Ada's laptop" --name "Ada's old laptop"`}},
 			{name: "revoke", aliases: []string{"delete", "rm", "remove"}, args: "<key>", summary: "stop a key working",
-				flags: []string{"org", "yes", "json"},
+				flags: []string{"yes", "json"},
 				prose: "A name finds the working key with that name in this organisation. " +
 					"Where more than one has it, the ids are listed rather than one of them " +
 					"picked. An id out of 'keera key list' names a key outright, and with " +
@@ -259,7 +270,7 @@ var commands = []command{
 			},
 			{name: "rotate", args: "<key>",
 				summary: "replace a key with an identical one and revoke it",
-				flags:   []string{"org", "name", "expires", "yes", "json"},
+				flags:   []string{"name", "expires", "yes", "json"},
 				prose: "For a key that has leaked, and for the ordinary rotation a policy asks " +
 					"for. A name finds the working key with that name; an id out of " +
 					"'keera key list' names a key outright. --name and --expires override " +
@@ -279,8 +290,7 @@ var commands = []command{
 			"inference URL. That is what lets the model behind an alias be swapped without any " +
 			"developer changing anything.\n\n" +
 			"Models belong to an organisation, and only it can call them. Its administrators " +
-			"add, change and remove them. Only an operator with several organisations " +
-			"needs --org.\n\n" +
+			"add, change and remove them.\n\n" +
 			"A new organisation starts with a copy of each model in the catalogue file " +
 			"(KEERA_MODELS_FILE). The copies are its own, to change or remove like any " +
 			"other. 'keera model apply' adds the models of a file to an organisation that " +
@@ -290,9 +300,9 @@ var commands = []command{
 			"choosing between destinations - so a router whose models have no descriptions is " +
 			"choosing between bare aliases.",
 		subs: []subcommand{
-			{name: "list", aliases: []string{"ls"}, summary: "the models you can use", flags: []string{"org", "json"}},
+			{name: "list", aliases: []string{"ls"}, summary: "the models you can use", flags: []string{"json"}},
 			{name: "add", aliases: []string{"create", "new"}, args: "<alias>", summary: "add a model",
-				flags: []string{"org", "provider", "backend", "product-id", "backend-model", "kind",
+				flags: []string{"provider", "backend", "product-id", "backend-model", "kind",
 					"description", "max-context", "release-date", "location",
 					"price-in", "price-out", "price-cached", "price-cache-write",
 					"api-key", "subscription", "disabled", "json"},
@@ -309,22 +319,22 @@ var commands = []command{
 						"    --backend-model claude-opus-5-5 --subscription",
 				}},
 			{name: "set", aliases: []string{"edit", "update"}, args: "<alias>", summary: "change any of those on an existing model",
-				flags: []string{"org", "provider", "backend", "product-id", "backend-model", "kind",
+				flags: []string{"provider", "backend", "product-id", "backend-model", "kind",
 					"description", "max-context", "release-date", "location",
 					"price-in", "price-out", "price-cached", "price-cache-write",
 					"api-key", "no-api-key", "subscription", "no-subscription", "json"}},
-			{name: "enable", args: "<alias>", summary: "serve this model", flags: []string{"org", "json"}},
+			{name: "enable", args: "<alias>", summary: "serve this model", flags: []string{"json"}},
 			{name: "disable", args: "<alias>", summary: "stop serving it, keeping its declaration",
-				flags: []string{"org", "json"}},
+				flags: []string{"json"}},
 			{name: "check", aliases: []string{"probe", "test"}, args: "<alias>", summary: "probe the live backend end to end",
-				flags: []string{"org", "json"},
+				flags: []string{"json"},
 				prose: "The test for the failure that quietly breaks coding agents: a backend " +
 					"answering 200 with prose in 'content' where a tool call was asked for, " +
 					"which is what a vLLM parser that does not match its model produces.",
 			},
-			{name: "delete", aliases: []string{"rm", "remove"}, args: "<alias>", summary: "remove a model", flags: []string{"org", "yes", "json"}},
+			{name: "delete", aliases: []string{"rm", "remove"}, args: "<alias>", summary: "remove a model", flags: []string{"yes", "json"}},
 			{name: "apply", args: "<file>", summary: "add or update every model a catalogue file declares",
-				flags: []string{"org", "json"}},
+				flags: []string{"json"}},
 			{name: "validate", aliases: []string{"lint"}, args: "<file>", summary: "validate a catalogue file without a server",
 				flags: []string{"json"}},
 			{name: "providers", summary: "hosted endpoints a model can name, and their models",
@@ -343,12 +353,11 @@ var commands = []command{
 			"--tools github/search_code,jira'. A server's alias allows all its tools; " +
 			"alias/tool allows one.\n\n" +
 			"A server belongs to one organisation, and only its keys reach it. Its " +
-			"administrators add, change and remove it. Only an operator with several " +
-			"organisations needs --org.",
+			"administrators add, change and remove it.",
 		subs: []subcommand{
-			{name: "list", aliases: []string{"ls"}, summary: "the MCP servers", flags: []string{"org", "json"}},
+			{name: "list", aliases: []string{"ls"}, summary: "the MCP servers", flags: []string{"json"}},
 			{name: "add", aliases: []string{"create", "new"}, args: "<alias>", summary: "add an MCP server",
-				flags: []string{"org", "endpoint", "description", "auth-header", "api-key",
+				flags: []string{"endpoint", "description", "auth-header", "api-key",
 					"disabled", "json"},
 				examples: []string{
 					"keera mcp add github --endpoint https://api.githubcopilot.com/mcp/ \\\n" +
@@ -356,18 +365,20 @@ var commands = []command{
 				}},
 			{name: "set", aliases: []string{"edit", "update"}, args: "<alias>",
 				summary: "change any of those on an existing server",
-				flags: []string{"org", "endpoint", "description", "auth-header", "api-key",
+				flags: []string{"endpoint", "description", "auth-header", "api-key",
 					"no-api-key", "json"}},
-			{name: "enable", args: "<alias>", summary: "serve this server", flags: []string{"org", "json"}},
+			{name: "enable", args: "<alias>", summary: "serve this server", flags: []string{"json"}},
 			{name: "disable", args: "<alias>", summary: "stop serving it, keeping its declaration",
-				flags: []string{"org", "json"}},
+				flags: []string{"json"}},
 			{name: "delete", aliases: []string{"rm", "remove"}, args: "<alias>", summary: "remove a server",
-				flags: []string{"org", "yes", "json"}},
+				flags: []string{"yes", "json"}},
 			{name: "calls", summary: "the tool-call log: which tool, what came of it, how much went each way",
-				flags:    []string{"org", "server", "tool", "project", "key", "user", "since", "limit", "summary", "json"},
+				flags:    []string{"server", "tool", "project", "key", "user", "since", "limit", "summary", "json"},
 				examples: []string{"keera mcp calls --since 1h", "keera mcp calls --summary --since 168h"}},
 			{name: "connect", args: "<alias>", summary: "how to point Claude Code, Codex and others at a server",
-				flags: []string{"org"}},
+				prose: "Prints the lines each client needs. They read the key from " +
+					"KEERA_API_KEY, so no key is written into a file.",
+				examples: []string{"keera mcp connect github"}},
 		},
 	},
 	{
@@ -381,15 +392,16 @@ var commands = []command{
 			"is the ceiling a key's fits inside. So a scope that sets nothing is not " +
 			"unlimited - it is whatever holds it. 'guardrail effective' says which level " +
 			"each number came from, and is the thing to read before changing one.\n\n" +
-			"'keera limit' and 'keera budget' set one part of a guardrail each.\n\n" +
-			"For an organisation the id may be left out: it is then --org, or your own. A " +
+			"'keera limit' and 'keera budget' set one part of a guardrail each. A --no- flag " +
+			"clears that part on this scope, so the level above decides it again.\n\n" +
+			"For an organisation the name or id may be left out: it is then the one you are in. A " +
 			"project or key named by its name is looked up in that organisation too.",
 		subs: []subcommand{
-			{name: "get", aliases: []string{"show"}, args: "<scope> [<id>]", summary: "what this one scope sets; scope is org, project or key",
-				flags: []string{"org", "json"}},
+			{name: "show", aliases: []string{"get"}, args: "<scope> [<id>]", summary: "what this one scope sets; scope is org, project or key",
+				flags: []string{"json"}},
 			{name: "effective", args: "<scope> [<id>]",
 				summary: "what a request actually meets, and which level decided each part",
-				flags:   []string{"org", "json"},
+				flags:   []string{"json"},
 				prose: "The chain collapsed the way the gateway collapses it, with the level " +
 					"that decided each value named beside it.\n\n" +
 					"Allow-lists intersect; the output-token ceiling takes the minimum. Rate " +
@@ -398,10 +410,11 @@ var commands = []command{
 				examples: []string{"keera guardrail effective key key_06g9…"},
 			},
 			{name: "set", aliases: []string{"edit", "update"}, args: "<scope> [<id>]", summary: "set any of them on a scope",
-				flags: []string{"org", "models", "rpm", "tpm", "max-output-tokens", "budget", "period",
-					"system-prompt", "no-system-prompt", "filters", "no-filters", "tools",
-					"block-hosted-tools", "allow-hosted-tools", "max-sandboxes",
-					"max-sandbox-ttl", "sandbox-classes", "max-sandbox-cpu", "max-sandbox-memory", "repos", "json"},
+				flags: []string{"models", "no-models", "rpm", "tpm", "max-output-tokens", "budget", "period",
+					"system-prompt", "no-system-prompt", "filters", "no-filters", "tools", "no-tools",
+					"block-hosted-tools", "no-block-hosted-tools", "max-sandboxes",
+					"max-sandbox-ttl", "sandbox-classes", "no-sandbox-classes", "max-sandbox-cpu",
+					"max-sandbox-memory", "repos", "no-repos", "json"},
 				examples: []string{
 					"keera guardrail set project project_1 --models keera-speed --rpm 120 \\\n" +
 						"    --budget 500 --period month",
@@ -413,7 +426,7 @@ var commands = []command{
 		aliases: []string{"limits"},
 		summary: "a scope's rate limits, on their own",
 		args:    "<scope> [<id>] [flags]",
-		flags:   []string{"org", "rpm", "tpm", "max-output-tokens", "json"},
+		flags:   []string{"rpm", "tpm", "max-output-tokens", "json"},
 		prose: "The rate-limiting part of 'guardrail set', and nothing else. Same object, " +
 			"same scopes, same nesting - fewer flags to read.\n\n" +
 			"With no flags it prints what is in force, and which level set it.",
@@ -427,7 +440,7 @@ var commands = []command{
 		aliases: []string{"budgets"},
 		summary: "a scope's budget, on its own",
 		args:    "<scope> [<id>] [flags]",
-		flags:   []string{"org", "budget", "period", "json"},
+		flags:   []string{"budget", "period", "json"},
 		prose: "The spending part of 'guardrail set', and nothing else. Spend past a budget " +
 			"is refused with 402, not 429: a client reading it as \"slow down\" would retry " +
 			"against a limit that only moves when the period rolls over.\n\n" +
@@ -447,36 +460,36 @@ var commands = []command{
 			"the request; --mode pattern applies --rules in the gateway and costs nothing. " +
 			"See docs/filters.md.",
 		subs: []subcommand{
-			{name: "list", aliases: []string{"ls"}, summary: "this organisation's filters", flags: []string{"org", "json"}},
+			{name: "list", aliases: []string{"ls"}, summary: "this organisation's filters", flags: []string{"json"}},
 			{name: "add", aliases: []string{"create", "new"}, args: "<alias>", summary: "add a filter",
-				flags: []string{"org", "mode", "model", "prompt", "rules", "description",
-					"shadow", "enforce", "json"},
+				flags: []string{"mode", "model", "prompt", "rules", "description",
+					"no-shadow", "json"},
 				prose: "A pattern filter's --rules are one rule per line: an expression, '=>', " +
 					"then what each match becomes - or 'REFUSE: why' to drop the request. " +
 					"@path reads them from a file.\n\n" +
 					"  (?i)\\bsk-[a-z0-9]{20,}\\b                  => [CREDENTIAL]\n" +
 					"  \\b[A-Z]{2}\\d{2}(?:[ ]?[A-Z0-9]{4}){2,7}\\b => [IBAN]\n" +
 					"  (?i)\\bexport all customers\\b              => REFUSE: that moves the customer list out\n\n" +
-					"With --shadow the filter runs and enforces nothing: the request is " +
-					"forwarded as it was sent whatever the filter answered, and 'report' says " +
-					"what it would have done. That is how an instruction is tuned against a " +
-					"week of an organisation's own traffic rather than against three sample " +
-					"segments. --enforce turns it back on; the answers do not change, only " +
-					"whether they are acted on.",
+					"A new filter starts in shadow: it runs and enforces nothing, the request " +
+					"is forwarded as it was sent, and 'report' says what it would have done. " +
+					"That is how an instruction is tuned against a week of an organisation's " +
+					"own traffic rather than against three sample segments. 'set --no-shadow' " +
+					"turns it on; the answers do not change, only whether they are acted on. " +
+					"--no-shadow on 'add' enforces from the start.",
 				examples: []string{
 					"keera filter add redact-keys --mode pattern --rules @redact.rules",
 					"keera filter add no-client-data --mode gate --model keera-speed \\\n" +
-						"    --prompt 'Refuse anything naming a client.' --shadow",
+						"    --prompt 'Refuse anything naming a client.'",
 				}},
 			{name: "set", aliases: []string{"edit", "update"}, args: "<alias>", summary: "change any of those on an existing filter",
-				flags: []string{"org", "mode", "model", "prompt", "rules", "description",
-					"shadow", "enforce", "json"}},
+				flags: []string{"mode", "model", "prompt", "rules", "description",
+					"shadow", "no-shadow", "json"}},
 			{name: "check", aliases: []string{"probe", "test"}, args: "<alias>", summary: "run it over a sample and show what it did",
-				flags: []string{"org", "json"}},
+				flags: []string{"json"}},
 			{name: "report", aliases: []string{"stats"}, args: "<alias>", summary: "what it has done to real traffic",
-				flags: []string{"org", "since", "json"}},
+				flags: []string{"since", "json"}},
 			{name: "delete", aliases: []string{"rm", "remove"}, args: "<alias>", summary: "remove a filter",
-				flags: []string{"org", "yes", "json"}},
+				flags: []string{"yes", "json"}},
 		},
 	},
 	{
@@ -487,9 +500,9 @@ var commands = []command{
 			"instruction (the default, a small model reads the request), size, fallback, " +
 			"latency and least-busy. See docs/routers.md.",
 		subs: []subcommand{
-			{name: "list", aliases: []string{"ls"}, summary: "this organisation's routers", flags: []string{"org", "json"}},
+			{name: "list", aliases: []string{"ls"}, summary: "this organisation's routers", flags: []string{"json"}},
 			{name: "add", aliases: []string{"create", "new"}, args: "<alias>", summary: "add a router",
-				flags: []string{"org", "mode", "destinations", "description", "model", "prompt",
+				flags: []string{"mode", "destinations", "description", "model", "prompt",
 					"fallback", "no-fallback", "json"},
 				prose: "With --fallback a request the router cannot place goes to a named " +
 					"destination anyway; with --no-fallback it is refused. Neither is the " +
@@ -502,17 +515,17 @@ var commands = []command{
 					"keera router add bysize --mode size --destinations keera-speed:4k,keera-frontier",
 				}},
 			{name: "set", aliases: []string{"edit", "update"}, args: "<alias>", summary: "change any of those on an existing router",
-				flags: []string{"org", "mode", "destinations", "description", "model", "prompt",
+				flags: []string{"mode", "destinations", "description", "model", "prompt",
 					"fallback", "no-fallback", "json"}},
 			{name: "check", aliases: []string{"probe", "test"}, args: "<alias>", summary: "put sample prompts through it and show where each went",
-				flags: []string{"org", "json"},
+				flags: []string{"json"},
 				prose: "On a router that reads nothing, it asks each destination in turn " +
 					"whether it is there and in what order it would be tried.",
 			},
 			{name: "report", aliases: []string{"stats"}, args: "<alias>", summary: "where it has sent real traffic",
-				flags: []string{"org", "since", "json"}},
+				flags: []string{"since", "json"}},
 			{name: "delete", aliases: []string{"rm", "remove"}, args: "<alias>", summary: "remove a router",
-				flags: []string{"org", "yes", "json"}},
+				flags: []string{"yes", "json"}},
 		},
 	},
 	{
@@ -524,49 +537,54 @@ var commands = []command{
 			"'sandbox agent' starts one task's machine that ends by pushing a branch. " +
 			"See docs/sandboxes.md.",
 		subs: []subcommand{
-			{name: "classes", summary: "the machines this organisation offers", flags: []string{"org", "json"}},
+			{name: "classes", summary: "the machines this organisation offers", flags: []string{"json"}},
 			{name: "apply", args: "<file>", summary: "add or update every class a catalogue file declares",
-				flags: []string{"org", "json"}},
+				flags: []string{"json"}},
 			{name: "delete-class", aliases: []string{"remove-class", "rm-class"}, args: "<name>",
 				summary: "remove a class; sandboxes already running on it keep working",
-				flags:   []string{"org", "yes", "json"}},
+				flags:   []string{"yes", "json"}},
 			{name: "create", aliases: []string{"add", "up", "new"}, args: "<name>", summary: "start one",
-				flags: []string{"org", "project", "class", "purpose", "ttl", "repo", "branch",
+				flags: []string{"project", "class", "purpose", "ttl", "repo", "branch",
 					"task", "ssh-key", "json"}},
 			{name: "agent", args: "<name>", summary: "start one for an agent",
-				flags: []string{"org", "project", "class", "ttl", "repo", "branch", "task", "json"}},
+				flags: []string{"project", "class", "ttl", "repo", "branch", "task", "json"}},
 			{name: "list", aliases: []string{"ls"}, summary: "what is running",
-				flags: []string{"org", "project", "class", "purpose", "all", "json"}},
-			{name: "show", aliases: []string{"get"}, args: "<name>", summary: "one sandbox in full", flags: []string{"org", "json"}},
+				flags: []string{"project", "class", "purpose", "all", "json"}},
+			{name: "show", aliases: []string{"get"}, args: "<name>", summary: "one sandbox in full", flags: []string{"json"}},
 			{name: "ssh", args: "<name> [-- <command>]", summary: "open a shell in it",
-				flags: []string{"org"}},
+				prose: "Runs your own ssh, with your keys and agent, through the gateway. " +
+					"With a command after --, it runs that and exits with its status.",
+				examples: []string{"keera sandbox ssh box", "keera sandbox ssh box -- git status"}},
 			{name: "config", summary: "the ~/.ssh/config block, so any editor can attach",
-				flags: []string{"org"}},
+				prose: "Prints the block on stdout, to append to ~/.ssh/config. Then plain ssh, " +
+					"VS Code's Remote-SSH and JetBrains Gateway reach every sandbox you own.",
+				examples: []string{"keera sandbox config >> ~/.ssh/config"}},
 			{name: "proxy", args: "<name>", summary: "the attach surface, for ssh's ProxyCommand",
 				flags: []string{"org", "port"}},
 			{name: "extend", args: "<name>", summary: "push its expiry out again",
-				flags: []string{"org", "ttl", "json"}},
+				flags: []string{"ttl", "json"}},
 			{name: "suspend", args: "<name>", summary: "release its compute, keep its disk",
-				flags: []string{"org", "json"}},
+				flags: []string{"json"}},
 			{name: "resume", args: "<name>", summary: "start it again where it left off",
-				flags: []string{"org", "json"},
+				flags: []string{"json"},
 				prose: "A suspended sandbox starts again as it was. An expired one also gets a " +
 					"new API key, a new repository credential and the class's default lifetime, " +
 					"because its old ones were revoked when it expired."},
 			{name: "terminate", aliases: []string{"delete", "rm", "remove", "down"}, args: "<name>", summary: "end it and take its volume with it",
-				flags: []string{"org", "yes", "json"}},
+				flags: []string{"yes", "json"}},
 			{name: "usage", summary: "what sandboxes have cost",
-				flags: []string{"org", "by", "since", "json"}},
+				flags: []string{"by", "since", "json"}},
 		},
 	},
 	{
 		name:    "usage",
 		summary: "usage and cost, grouped however you ask",
 		args:    "[flags]",
-		flags:   []string{"by", "since", "org", "json"},
+		flags:   []string{"by", "model", "project", "key", "user", "since", "json"},
 		examples: []string{
-			"keera usage --by project",
-			"keera usage --by user --since 720h",
+			"keera usage --by model",
+			"keera usage --by user --since 168h",
+			"keera usage --by key --project payments",
 		},
 	},
 	{
@@ -579,41 +597,45 @@ var commands = []command{
 			"See docs/billing.md.",
 		subs: []subcommand{
 			{name: "report", aliases: []string{"list", "ls"}, summary: "one month's bill",
-				flags: []string{"month", "org", "json"},
+				flags: []string{"month", "json"},
 				prose: "Each currency is summed on its own; nothing is converted. Operators " +
 					"also see what the provider charges and the margin. 'keera billing' on " +
 					"its own is this.",
 				examples: []string{"keera billing", "keera billing --month 2026-09 --json"}},
 			{name: "credit", aliases: []string{"balance", "account"},
 				summary: "the balance, the saved card, the automatic top-up and the latest payments",
-				flags:   []string{"org", "json"}},
+				flags:   []string{"json"}},
 			{name: "topup", aliases: []string{"pay"},
 				summary: "pay for credit: prints the payment page to open",
-				flags:   []string{"amount", "save-card", "org", "json"},
+				flags:   []string{"amount", "save-card", "json"},
 				prose: "VAT is added on top, if the deployment charges it. The credit is added " +
 					"once PostFinance says the payment went through. --save-card keeps the card " +
 					"for automatic top-ups, and replaces a card saved before.",
 				examples: []string{"keera billing topup --amount 100 --save-card"}},
 			{name: "auto-topup", summary: "charge the saved card when the balance runs low",
-				flags:    []string{"below", "amount", "off", "org", "json"},
+				flags:    []string{"below", "amount", "off", "json"},
 				examples: []string{"keera billing auto-topup --below 50 --amount 200", "keera billing auto-topup --off"},
 				prose: "When a charge fails, no other is tried until the setting is saved " +
 					"again or someone tops up by hand."},
 			{name: "forget-card", aliases: []string{"remove-card"},
 				summary: "remove the saved card, which stops the automatic top-up",
-				flags:   []string{"org"}},
+				flags:   []string{"yes"},
+				prose: "The card is removed here and at PostFinance. 'keera billing topup " +
+					"--save-card' saves a new one."},
 			{name: "payments", summary: "the payments, newest first",
-				flags: []string{"limit", "org", "json"}},
+				flags: []string{"limit", "json"}},
 			{name: "grant", summary: "add credit without a payment, or take some away (operators)",
 				flags: []string{"amount", "note", "org", "json"},
 				prose: "For a trial, a refund, or money that came by bank transfer. A negative " +
 					"--amount takes credit away. --note is required: it says why, and is shown to " +
 					"the organisation.",
-				examples: []string{`keera billing grant --org org_123 --amount 50 --note "trial"`}},
-			{name: "invoiced", args: "<on|off>",
+				examples: []string{`keera billing grant --org "Example Bank" --amount 50 --note "trial"`}},
+			{name: "invoiced",
 				summary: "let an organisation use the keys without credit (operators)",
-				flags:   []string{"org", "json"},
-				prose:   "For an organisation billed by invoice instead. Its use is still metered."},
+				flags:   []string{"org", "off", "json"},
+				prose:   "For an organisation billed by invoice instead. Its use is still metered.",
+				examples: []string{`keera billing invoiced --org "Example Bank"`,
+					`keera billing invoiced --org "Example Bank" --off`}},
 		},
 	},
 	{
@@ -621,7 +643,7 @@ var commands = []command{
 		aliases: []string{"failure"},
 		summary: "the calls that did not deliver, and what the backend said",
 		args:    "[flags]",
-		flags:   []string{"kind", "model", "project", "key", "user", "status", "since", "limit", "org", "json"},
+		flags:   []string{"kind", "model", "project", "key", "user", "status", "since", "limit", "json"},
 		prose: "Each row shows the backend's own message beside the model and the key. The " +
 			"status says a call failed; the message says whose problem it is.",
 	},
@@ -638,12 +660,12 @@ var commands = []command{
 		subs: []subcommand{
 			{name: "list", aliases: []string{"ls"}, summary: "one row per task, the costliest first",
 				flags: []string{"sort", "unhappy", "model", "project", "key", "user", "since", "limit",
-					"org", "json"},
+					"json"},
 				prose: "The first column is the id of the task's first request. 'keera session " +
 					"show' takes it. --user takes an email or an id."},
 			{name: "show", aliases: []string{"get"}, args: "<request-id>",
 				summary: "one task from beginning to end, named by any request in it",
-				flags:   []string{"org", "json"},
+				flags:   []string{"json"},
 				prose: "The id is any request in the task: the first column of 'keera session " +
 					"list' or 'keera failures'. 'keera session <id>' is short for it."},
 		},
@@ -652,7 +674,7 @@ var commands = []command{
 		name:    "connect",
 		summary: "the finished configuration for an editor",
 		args:    "[<client>] [flags]",
-		flags:   []string{"key", "org", "subscription", "model", "project", "json"},
+		flags:   []string{"key", "subscription", "model", "project", "json"},
 		prose: "Prints an editor's configuration on stdout and the instructions on stderr, so " +
 			"it can be redirected into the file it names. With no client it lists the ones " +
 			"this deployment can configure. --subscription sets up Claude Code on a Claude " +
@@ -766,7 +788,7 @@ func subHelpText(fs *flag.FlagSet, c command, sub subcommand) string {
 	writeFlags(&b, fs, sub.flags)
 	writeExamples(&b, sub.examples)
 	// The command's prose explains the idea, so point back at it.
-	fmt.Fprintf(&b, "\nWhat a %s is: %s\n", c.name, style.cmd("keera help "+c.name))
+	fmt.Fprintf(&b, "\nMore about 'keera %s': %s\n", c.name, style.cmd("keera help "+c.name))
 	return b.String()
 }
 

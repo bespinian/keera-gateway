@@ -37,7 +37,7 @@ func (s *Server) startSignup(w http.ResponseWriter, r *http.Request, provider *a
 	userID := id.New("user")
 	var sealed []byte
 	if identity.RefreshToken != "" {
-		sealed = s.opts.Secrets.Seal(refreshTokenName(userID), identity.RefreshToken)
+		sealed = s.opts.Secrets.Seal(refreshTokenName(identity.ExternalID()), identity.RefreshToken)
 	}
 	token := auth.RandomToken()
 	if err := s.st.CreateSignup(r.Context(), store.Signup{
@@ -47,8 +47,8 @@ func (s *Server) startSignup(w http.ResponseWriter, r *http.Request, provider *a
 		ExternalID: identity.ExternalID(),
 		Email:      identity.Email,
 		Role:       string(provider.Mapping().RoleFor(identity.Email, identity.Groups)),
-		// Sealed against the account it will belong to, so it never opens
-		// as anybody else's.
+		// Sealed against the identity it belongs to, so it never opens as
+		// anybody else's.
 		RefreshToken: sealed,
 		InvitedOrg:   invited,
 		RedirectTo:   redirectTo,
@@ -160,7 +160,7 @@ func (s *Server) completeSignup(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, s.signupStateCookie("", -1))
 
-	if err := s.st.RecordDirectoryCheck(r.Context(), user.ID, su.RefreshToken); err != nil {
+	if err := s.st.RecordDirectoryCheck(r.Context(), user.ExternalID, su.RefreshToken); err != nil {
 		s.log.Error("storing a refresh token", "user", user.ID, "error", err)
 	}
 	if in.Join {

@@ -238,8 +238,8 @@ keera sandbox apply sandboxes.yaml
 It checks the whole file first, then sets each class it names. Classes the file
 does not name are left alone. A class is removed in the panel, or with
 `keera sandbox delete-class <name>`. Sandboxes already running on it keep
-working. An administrator's commands use their own organisation. An operator
-adds `--org <id>` when there is more than one.
+working. The commands act on the organisation the CLI works in. See
+[Several organisations](sso.md#several-organisations).
 
 A field left out gets a default:
 

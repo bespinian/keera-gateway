@@ -7,6 +7,7 @@ import {
   num,
   compact,
   money,
+  plural,
   icon,
   icons,
   RANGES as SHARED_RANGES,
@@ -62,7 +63,7 @@ export async function usageView(ctx) {
 
   // Only served requests count here: a refused or failed one costs nothing.
   ctx.setSubtitle(
-    `${num(requests)} served requests · ${money(total, res.currency)}`,
+    `${num(requests)} served ${plural(requests, "request")} · ${money(total, res.currency)}`,
   );
 
   const controls = h(
@@ -93,7 +94,6 @@ export async function usageView(ctx) {
       "button",
       {
         class: "btn",
-        style: { marginLeft: "8px" },
         title: "Download this report as CSV",
         onClick: () =>
           api.download("/v1/usage", {
@@ -252,7 +252,11 @@ export async function usageView(ctx) {
           { class: "card-body row" },
           h("strong", {}, "Total"),
           h("div", { style: { flex: 1 } }),
-          h("span", { class: "muted" }, `${num(requests)} served requests`),
+          h(
+            "span",
+            { class: "muted" },
+            `${num(requests)} served ${plural(requests, "request")}`,
+          ),
           h("strong", {}, money(total, res.currency)),
         ),
       )

@@ -96,7 +96,7 @@ marked as an estimate, and the gateway logs a warning.
 ```sh
 keera billing                      # this month, your organisation
 keera billing --month 2026-09
-keera billing --month 2026-09 --org <id>   # operators
+keera org switch <org> && keera billing   # operators: one organisation
 ```
 
 One row per organisation and provider model, with calls, tokens and the amount.
@@ -179,7 +179,8 @@ Keera never sees the card. Afterwards PostFinance sends them back to the
 panel. The credit is added once PostFinance says the payment went through.
 
 `keera billing credit` shows the balance, the saved card, the automatic
-top-up and the latest payments. `keera billing payments` lists every payment.
+top-up and the latest payments. `keera billing payments` lists the latest 50
+payments, or as many as `--limit` says.
 
 A payment is from CHF 10 to CHF 10,000, in whole centimes. VAT is added on
 top.
@@ -213,18 +214,18 @@ turns the automatic top-up off. Saving a new card replaces the old one.
 ### For operators
 
 ```sh
-keera billing grant --org <id> --amount 50 --note "trial"
-keera billing invoiced on --org <id>
+keera billing grant --org <org> --amount 50 --note "trial"
+keera billing invoiced --org <org>
 ```
 
 A grant adds credit without a payment, for a trial, a refund or a bank
 transfer. A negative amount takes credit away. The note is shown to the
 organisation. A grant does not lift the limit of an organisation that signed
-up; `keera org set <id> --lift-limit` does.
+up; `keera org set <org> --lift-limit` does.
 
 An organisation **billed by invoice** may use the keys without credit. Its use
 is still metered, and its credit goes below zero. Bill it from the monthly
-report.
+report. `--off` makes it pay in advance again.
 
 ### How a payment is confirmed
 

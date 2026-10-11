@@ -320,10 +320,11 @@ The gateway also enforces:
 
 ## Shadow: rolling one out
 
-`--shadow`, or **Acts on its answer → Shadow** in the panel, runs the filter on
-every request its guardrails cover but enforces nothing. The rewrite is
-discarded, the refusal does not happen, the request is forwarded as the client
-sent it, and what the filter _would_ have done is recorded.
+A new filter starts in shadow, from the panel and from `keera filter add`
+(`--no-shadow` enforces from the start). In shadow, the filter runs on every
+request its guardrails cover but enforces nothing. The rewrite is discarded,
+the refusal does not happen, the request is forwarded as the client sent it,
+and what the filter _would_ have done is recorded.
 
 Both ways an instruction goes wrong are quiet:
 
@@ -338,11 +339,11 @@ cannot tell you the _rate_ on real traffic: one request in a thousand, or one in
 three. Shadow measures that before anyone depends on the filter.
 
 ```sh
-keera filter add redact-secrets --model keera-guard --prompt @redact.txt --shadow
+keera filter add redact-secrets --model keera-guard --prompt @redact.txt
 keera guardrail set project <project-id> --filters redact-secrets
 # a week later
 keera filter report redact-secrets --since 168h
-keera filter set redact-secrets --enforce
+keera filter set redact-secrets --no-shadow
 ```
 
 Leaving shadow only changes whether the answer is acted on. The mode,

@@ -95,7 +95,7 @@ type aliasRun struct {
 // commands share. The caller declares its own, then calls parse.
 func newAliasRun(cmd, kind, noun string, args []string) *aliasRun {
 	return &aliasRun{
-		cmdRun: newCmdRun(cmd, args, "org", "yes", "json"),
+		cmdRun: newCmdRun(cmd, args, "yes", "json"),
 		kind:   kind, noun: noun, addHint: "keera " + cmd + " add <alias>",
 	}
 }
@@ -168,9 +168,6 @@ func reportAlias[T any](ctx context.Context, a *aliasRun, since time.Duration,
 	}
 	return out(a.asJSON, res, func(w *table) { print(w, alias, since, res) })
 }
-
-// reportSinceUsage is --since on a command with a 'report' verb.
-const reportSinceUsage = "how far back 'report' looks"
 
 // putAlias writes an entry and prints what was stored.
 func putAlias[T any](ctx context.Context, a *aliasRun, alias string, body any,

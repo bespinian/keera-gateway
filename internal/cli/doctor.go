@@ -17,7 +17,7 @@ import (
 )
 
 func doctorCmd(ctx context.Context, args []string) error {
-	r := newCmdRun("doctor", args, "org", "json")
+	r := newCmdRun("doctor", args, "json")
 	fs := r.fs
 	probe := fs.Bool("probe", false,
 		"put a real request through every enabled model; costs a generation each")

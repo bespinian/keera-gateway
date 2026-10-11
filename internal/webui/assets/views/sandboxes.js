@@ -45,18 +45,31 @@ import {
   isAdmin,
   sandboxNameProblem,
   listHead,
+  sectionHead,
 } from "../ui.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
 import { oldestProject } from "./projects.js";
+
+// showFinished is whether the list includes finished sandboxes. It lasts
+// while the screen is open, so a reload keeps it and leaving resets it, like
+// "Show revoked" on keys.
+let showFinished = false;
 
 export async function sandboxesView(ctx) {
   // A sandbox belongs to an organisation, because its quota and its bill do.
   if (!ctx.orgID) return chooseOrg(ctx, "Sandboxes");
 
+  // Navigation changes the path before the old screen is torn down; a reload
+  // does not.
+  const here = location.pathname;
+  ctx.onTeardown(() => {
+    if (location.pathname !== here) showFinished = false;
+  });
+
   const me = ctx.state.me;
   const canAdmin = isAdmin(ctx);
   const [list, cat, projects] = await Promise.all([
-    api.sandboxes(ctx.orgID, { all: showAll() }),
+    api.sandboxes(ctx.orgID, { all: showFinished }),
     api.sandboxClasses(ctx.orgID),
     // Only an administrator may put a sandbox on a project, so only an
     // administrator's dialog needs the list. A member's sandbox goes in the
@@ -123,9 +136,13 @@ export async function sandboxesView(ctx) {
 function head(ctx, classes, driver, limits, canAdmin, projects) {
   const usable = classes.filter((c) => allowed(c, limits, driver));
   return listHead(
-    "A sandbox is a machine for one task or one working day, with the " +
-      "toolchain installed and its own API key. It expires on its own. Only " +
-      "its owner can open a shell in it, with 'keera sandbox ssh <name>'.",
+    [
+      "A sandbox is a machine for one task or one working day, with the " +
+        "toolchain installed and its own API key. It expires on its own. Only " +
+        "its owner can open a shell in it, with ",
+      h("code", {}, "keera sandbox ssh <name>"),
+      ".",
+    ],
     [],
     usable.length
       ? {
@@ -215,7 +232,9 @@ function listCard(ctx, sandboxes, canAdmin, me, driver) {
           h(
             "div",
             {},
-            h("span", { class: "muted" }, s.owner || "—"),
+            s.owner
+              ? h("span", { class: "muted" }, s.owner)
+              : h("span", { class: "faint" }, "No user"),
             // The project, where there is one. It belongs beside the owner rather
             // than in a column of its own: what it answers is "whose is this",
             // and a project is the other half of that - it is the budget the
@@ -264,16 +283,21 @@ function listCard(ctx, sandboxes, canAdmin, me, driver) {
       toggles: [
         {
           label: "Show finished",
-          on: showAll(),
-          onChange: (v) => setShowAll(v, ctx),
+          on: showFinished,
+          onChange: (v) => {
+            showFinished = v;
+            ctx.reload();
+          },
         },
       ],
       sortBy: "Expires",
       rowClass: (s) => (isLive(s) ? "" : "row-faint"),
       emptyTitle: "No sandboxes yet",
-      emptyBody:
-        "Start one with Create sandbox, or with " +
-        "'keera sandbox create <name> --class <class>'.",
+      emptyBody: [
+        "Start one with Create sandbox, or with ",
+        h("code", {}, "keera sandbox create <name> --class <class>"),
+        ".",
+      ],
     },
   );
 }
@@ -284,19 +308,16 @@ function classCard(ctx, classes, driver) {
   return h(
     "div",
     { class: "stack", style: { gap: "10px" } },
-    h(
-      "h2",
-      { style: { marginBottom: "0" } },
-      "Classes",
-      h("span", { class: "faint" }, ` — the machines ${orgNameOf(ctx)} offers`),
-    ),
+    sectionHead("Classes", `the machines ${orgNameOf(ctx)} offers`, {
+      margin: "0",
+    }),
     canEdit && classes.length
       ? h(
           "div",
           { class: "hint" },
-          "To add or change classes, run 'keera sandbox apply <file> --org " +
-            ctx.orgID +
-            "'.",
+          "To add or change classes, run ",
+          h("code", {}, `KEERA_ORG=${ctx.orgID} keera sandbox apply <file>`),
+          ".",
         )
       : null,
     table(
@@ -336,7 +357,7 @@ function classCard(ctx, classes, driver) {
           cell: (c) =>
             c.disk_mib
               ? h("span", { class: "mono" }, gib(c.disk_mib))
-              : h("span", { class: "faint" }, "none"),
+              : h("span", { class: "faint" }, "-"),
         },
         {
           label: "Lifetime",
@@ -356,7 +377,7 @@ function classCard(ctx, classes, driver) {
           cell: (c) =>
             c.warm
               ? h("span", { class: "mono" }, num(c.warm))
-              : h("span", { class: "faint" }, "—"),
+              : h("span", { class: "faint" }, "-"),
         },
         {
           label: "",
@@ -380,11 +401,12 @@ function classCard(ctx, classes, driver) {
       {
         emptyTitle: "No sandbox classes yet",
         emptyBody: canEdit
-          ? "A new organisation starts with the classes in " +
-            "KEERA_SANDBOXES_FILE. To add classes to this one, run " +
-            "'keera sandbox apply <file> --org " +
-            ctx.orgID +
-            "'."
+          ? [
+              "A new organisation starts with the classes in " +
+                "KEERA_SANDBOXES_FILE. To add classes to this one, run ",
+              h("code", {}, `KEERA_ORG=${ctx.orgID} keera sandbox apply <file>`),
+              ".",
+            ]
           : "An administrator of this organisation adds them.",
       },
     ),
@@ -400,14 +422,17 @@ function delivers(driver, isolation) {
 /** isolationCell says both what a class asks for and whether it can be given. */
 function isolationCell(c, driver) {
   if (delivers(driver, c.isolation))
-    return pill(c.isolation, c.isolation === "vm" ? "good" : "");
+    return pill(
+      isolationLabel(c.isolation),
+      c.isolation === "vm" ? "good" : "",
+    );
   // A class this deployment cannot deliver is refused at creation rather than
   // quietly run at a weaker tier, so saying so here is the difference between
   // a confusing refusal later and a configuration change now.
   return h(
     "div",
     { class: "row-tight" },
-    pill(c.isolation, "warn"),
+    pill(isolationLabel(c.isolation), "warn"),
     h(
       "span",
       {
@@ -442,7 +467,9 @@ function actions(ctx, s, canAdmin, me, driver) {
         "Resume",
       ),
     );
-  } else if (s.state === "ready") {
+  } else if (s.state === "ready" && s.purpose !== "agent") {
+    // An agent's sandbox runs its task to the end, so the control plane
+    // refuses to suspend it.
     btns.push(
       h(
         "button",
@@ -558,7 +585,9 @@ function terminateSandbox(ctx, s) {
       h(
         "div",
         { class: "faint" },
-        "Its API key is revoked. Its cost stays in 'keera sandbox usage'.",
+        "Its API key is revoked. Its cost stays in ",
+        h("code", {}, "keera sandbox usage"),
+        ".",
       ),
     ),
     confirmLabel: "Terminate",
@@ -573,7 +602,7 @@ function terminateSandbox(ctx, s) {
 
 function removeClass(ctx, c) {
   confirm({
-    title: `Delete the class ${c.name}?`,
+    title: `Delete ${c.name}?`,
     body: h(
       "div",
       {},
@@ -601,12 +630,12 @@ function newSandbox(ctx, classes, limits, projects) {
   const name = h("input", { class: "input", placeholder: "fix-login" });
   const cls = h(
     "select",
-    { class: "input" },
+    { class: "select" },
     ...classes.map((c) =>
       h(
         "option",
         { value: c.name },
-        `${c.name} — ${sizeOf(c.cpu_millis, c.memory_mib)}, ${c.isolation}`,
+        `${c.name} · ${sizeOf(c.cpu_millis, c.memory_mib)}, ${c.isolation}`,
       ),
     ),
   );
@@ -619,7 +648,7 @@ function newSandbox(ctx, classes, limits, projects) {
   const first = oldestProject(projects);
   const project = h(
     "select",
-    { class: "input" },
+    { class: "select" },
     ...projects.map((t) =>
       h("option", { value: t.id, selected: t.id === first }, t.name),
     ),
@@ -650,12 +679,11 @@ function newSandbox(ctx, classes, limits, projects) {
       "form",
       {},
       err,
-      field(
-        "Name",
-        name,
-        "Lowercase letters, digits and hyphens. It becomes the hostname: " +
-          "keera sandbox ssh <name>.",
-      ),
+      field("Name", name, [
+        "Lowercase letters, digits and hyphens. It becomes the hostname: ",
+        h("code", {}, "keera sandbox ssh <name>"),
+        ".",
+      ]),
       field("Class", cls),
       projects.length
         ? field(
@@ -666,12 +694,11 @@ function newSandbox(ctx, classes, limits, projects) {
               "fewer classes or a shorter lifetime than shown here.",
           )
         : null,
-      field(
-        "Your ssh public key (required)",
-        key,
-        "The key that can open a shell in it. 'keera sandbox create' sends " +
-          "yours from ~/.ssh automatically.",
-      ),
+      field("Your SSH public key", key, [
+        "The key that can open a shell in it. ",
+        h("code", {}, "keera sandbox create"),
+        " sends yours from ~/.ssh automatically.",
+      ]),
       // Nil or empty allows no repository, and a project can only narrow it.
       repos.length
         ? field(
@@ -713,9 +740,12 @@ function newSandbox(ctx, classes, limits, projects) {
               [
                 keys.length
                   ? ""
-                  : "Paste an ssh public key. Without one, nobody can open " +
-                    "a shell in this sandbox. 'cat ~/.ssh/id_ed25519.pub' " +
-                    "prints yours.",
+                  : [
+                      "Paste an SSH public key. Without one, nobody can open " +
+                        "a shell in this sandbox. ",
+                      h("code", {}, "cat ~/.ssh/id_ed25519.pub"),
+                      " prints yours.",
+                    ],
                 key,
               ],
             ]) {
@@ -771,6 +801,11 @@ function isLive(s) {
     ["pending", "ready", "suspended", "expired"].includes(s.state) ||
     (s.state === "failed" && s.purpose === "engineer")
   );
+}
+
+// isolationLabel is a tier as a pill shows it.
+function isolationLabel(isolation) {
+  return isolation === "vm" ? "VM" : stateLabel(isolation || "standard");
 }
 
 // stateLabel capitalises a state, as every other status pill here is.
@@ -859,26 +894,4 @@ function allowed(c, limits, driver) {
     return false;
   }
   return true;
-}
-
-/** setShowAll remembers the choice and asks for the list again.
- *
- *  Per-viewer and per-browser, which is right for a view preference: whether
- *  somebody wants to see finished sandboxes is a fact about how they are
- *  reading the screen, not about the deployment. */
-function setShowAll(on, ctx) {
-  try {
-    localStorage.setItem("keera.sandboxes.all", on ? "1" : "0");
-  } catch {
-    /* a browser with site data blocked still gets the default */
-  }
-  ctx.reload();
-}
-
-function showAll() {
-  try {
-    return localStorage.getItem("keera.sandboxes.all") === "1";
-  } catch {
-    return false;
-  }
 }

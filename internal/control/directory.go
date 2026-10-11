@@ -21,9 +21,9 @@ import (
 // directoryCheckTimeout bounds the one request that pays for a check.
 const directoryCheckTimeout = 10 * time.Second
 
-// refreshTokenName is what a person's refresh token is sealed under, so a
-// ciphertext copied to another row does not open.
-func refreshTokenName(userID string) string { return "refresh-token:" + userID }
+// refreshTokenName is what an identity's refresh token is sealed under, so a
+// ciphertext copied to another identity does not open.
+func refreshTokenName(externalID string) string { return "refresh-token:" + externalID }
 
 // directoryOf is the identity provider that vouches for a person, or nil for
 // an account no directory knows: the operator key's stand-in, or a passkey
@@ -41,9 +41,9 @@ func (s *Server) directoryOf(user store.User) *authn.OIDC {
 func (s *Server) rememberDirectory(r *http.Request, user store.User, refreshToken string) {
 	var sealed []byte
 	if refreshToken != "" {
-		sealed = s.opts.Secrets.Seal(refreshTokenName(user.ID), refreshToken)
+		sealed = s.opts.Secrets.Seal(refreshTokenName(user.ExternalID), refreshToken)
 	}
-	if err := s.st.RecordDirectoryCheck(r.Context(), user.ID, sealed); err != nil {
+	if err := s.st.RecordDirectoryCheck(r.Context(), user.ExternalID, sealed); err != nil {
 		s.log.Error("storing a refresh token", "user", user.ID, "error", err)
 	}
 }
@@ -69,12 +69,13 @@ func (s *Server) checkDirectory(r *http.Request, user store.User, d store.Direct
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), directoryCheckTimeout)
 	defer cancel()
 	r = r.WithContext(ctx)
-	sealed, claimed, err := s.st.ClaimDirectoryCheck(ctx, user.ID, now.Add(-authn.DirectoryCheckEvery))
+	sealed, claimed, err := s.st.ClaimDirectoryCheck(ctx, user.ExternalID,
+		now.Add(-authn.DirectoryCheckEvery))
 	if err != nil || !claimed {
 		// Another request is asking right now, or just did.
 		return user, true
 	}
-	refreshToken, err := s.opts.Secrets.Open(refreshTokenName(user.ID), sealed)
+	refreshToken, err := s.opts.Secrets.Open(refreshTokenName(user.ExternalID), sealed)
 	if err != nil {
 		s.log.Error("opening a refresh token", "user", user.ID, "error", err)
 		return user, true
@@ -86,8 +87,8 @@ func (s *Server) checkDirectory(r *http.Request, user store.User, d store.Direct
 	if err != nil {
 		return user, s.directoryFailed(r, user, err)
 	}
-	sealed = s.opts.Secrets.Seal(refreshTokenName(user.ID), identity.RefreshToken)
-	if err := s.st.RecordDirectoryCheck(ctx, user.ID, sealed); err != nil {
+	sealed = s.opts.Secrets.Seal(refreshTokenName(user.ExternalID), identity.RefreshToken)
+	if err := s.st.RecordDirectoryCheck(ctx, user.ExternalID, sealed); err != nil {
 		s.log.Error("storing a refreshed token", "user", user.ID, "error", err)
 	}
 	if !fresh {
@@ -114,7 +115,7 @@ func (s *Server) directoryFailed(r *http.Request, user store.User, err error) bo
 			"user", user.ID, "error", err)
 		return true
 	}
-	if err := s.st.EndDirectoryLink(r.Context(), user.ID); err != nil {
+	if err := s.st.EndDirectoryLink(r.Context(), user.ExternalID); err != nil {
 		s.log.Error("ending the sign-ins of someone the directory refused",
 			"user", user.ID, "error", err)
 		// Refuse this request all the same: the directory has spoken.

@@ -24,6 +24,9 @@ type credentials struct {
 	// The last `keera login` sets it, so one login line is a whole setup.
 	// `keera whoami` says which gateway is in use and why.
 	Default string `json:"default,omitempty"`
+	// Orgs is the organisation commands act on at each gateway, keyed like
+	// Gateways. 'keera org switch' sets it.
+	Orgs map[string]string `json:"orgs,omitempty"`
 }
 
 // signIn is one gateway's sign-in.
@@ -97,6 +100,24 @@ func saveSignIn(base string, cred signIn) error {
 	return writeCredentials(c)
 }
 
+// saveOrg records the organisation commands act on at a gateway. Empty
+// forgets it.
+func saveOrg(base, orgID string) error {
+	c, err := loadCredentials()
+	if err != nil {
+		return err
+	}
+	if c.Orgs == nil {
+		c.Orgs = map[string]string{}
+	}
+	if orgID == "" {
+		delete(c.Orgs, gatewayKey(base))
+	} else {
+		c.Orgs[gatewayKey(base)] = orgID
+	}
+	return writeCredentials(c)
+}
+
 // forgetSignIn removes one gateway's sign-in, and the default with it when it
 // pointed here, so later commands do not go where they cannot sign in.
 func forgetSignIn(base string) error {
@@ -105,6 +126,7 @@ func forgetSignIn(base string) error {
 		return err
 	}
 	delete(c.Gateways, gatewayKey(base))
+	delete(c.Orgs, gatewayKey(base))
 	if c.Default == gatewayKey(base) {
 		c.Default = ""
 		// If exactly one gateway is left, it becomes the default. With more,

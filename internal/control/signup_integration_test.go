@@ -193,7 +193,7 @@ func TestASignInMatchingNoOrganisationCreatesOne(t *testing.T) {
 	if !org.Limited || org.Name != "Example Bank (ada@new.example)" || org.EmailDomain != "" {
 		t.Errorf("organisation = %+v, want a limited one with a unique name and no domain", org)
 	}
-	if linked, _ := s.st.HasRefreshToken(ctx, user.ID); !linked {
+	if linked, _ := s.st.HasRefreshToken(ctx, user.ExternalID); !linked {
 		t.Error("the refresh token was not kept, so the directory is never asked again")
 	}
 
