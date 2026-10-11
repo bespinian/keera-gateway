@@ -387,9 +387,8 @@ func appendReading(note, reading string) string {
 
 // routerReportResponse is what /v1/routers/{alias}/report answers with.
 type routerReportResponse struct {
-	Router   *policy.Router     `json:"router"`
-	Report   store.RouterReport `json:"report"`
-	Currency string             `json:"currency"`
+	Router *policy.Router     `json:"router"`
+	Report store.RouterReport `json:"report"`
 }
 
 // printRouterReport is where a router has been sending traffic. The split

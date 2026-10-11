@@ -36,9 +36,6 @@ const (
 	maxTopUp = 10_000_000_000
 )
 
-// creditCurrency is what credit is held and paid in.
-const creditCurrency = "CHF"
-
 // payments answers for a route that needs payments, and says so on a
 // deployment without them.
 func (s *Server) payments(w http.ResponseWriter) *Payments {
@@ -82,7 +79,6 @@ func (s *Server) creditAccount(w http.ResponseWriter, r *http.Request, p *authn.
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"payments":         true,
-		"currency":         creditCurrency,
 		"vat_percent":      payment.Percent(pay.VATBP),
 		"min_topup_micros": minTopUp,
 		"max_topup_micros": maxTopUp,
@@ -295,7 +291,7 @@ func transactionFor(pm store.Payment, email string, vatBP int64) payment.NewTran
 		item.Taxes = []payment.Tax{{Rate: payment.Percent(vatBP), Title: "VAT"}}
 	}
 	return payment.NewTransaction{
-		Currency: creditCurrency, LineItems: []payment.LineItem{item},
+		Currency: policy.Currency, LineItems: []payment.LineItem{item},
 		CustomerID: pm.OrgID, CustomerEmailAddress: email, MerchantReference: pm.ID,
 		CompletionBehavior: "COMPLETE_IMMEDIATELY",
 		MetaData:           map[string]string{"org_id": pm.OrgID, "payment_id": pm.ID},
@@ -479,7 +475,7 @@ func (s *Server) settleWith(ctx context.Context, pm store.Payment, tx payment.Tr
 // paidInFull reports whether a transaction is for what the payment asked.
 func paidInFull(pm store.Payment, tx payment.Transaction) bool {
 	cents := int64(math.Round(tx.AuthorizationAmount * 100))
-	return tx.Currency == creditCurrency && cents == (pm.Micros+pm.VATMicros)/10_000
+	return tx.Currency == policy.Currency && cents == (pm.Micros+pm.VATMicros)/10_000
 }
 
 // refreshCredit lets this replica's gateway see a balance that changed. The

@@ -24,6 +24,7 @@ import {
   num,
   listPrice,
   money,
+  amount,
   ms,
   ago,
   date,
@@ -160,7 +161,7 @@ export async function projectDetailView(ctx) {
         (r) => names.keys[r.group] || r.group || "No key",
         (r) => r.cost_micros,
         3,
-        ctx.currency,
+        true,
       ),
     ],
     aside: h(
@@ -471,7 +472,7 @@ export async function modelDetailView(ctx) {
         (r) => names.projects[r.group] || r.group || "No project",
         (r) => r.cost_micros,
         0,
-        ctx.currency,
+        true,
       ),
       barPanel(
         "Keys by cost",
@@ -479,7 +480,7 @@ export async function modelDetailView(ctx) {
         (r) => names.keys[r.group] || r.group || "No key",
         (r) => r.cost_micros,
         3,
-        ctx.currency,
+        true,
       ),
     ],
     aside: model
@@ -525,13 +526,13 @@ export async function modelDetailView(ctx) {
                     ),
               ],
               [
-                `Price / Mtok (${ctx.currency})`,
+                "Price / Mtok (CHF)",
                 model.input_micros_per_mtok || model.output_micros_per_mtok
                   ? h(
                       "span",
                       { class: "muted nowrap" },
-                      `${listPrice(model.input_micros_per_mtok, "")} in · ` +
-                        `${listPrice(model.output_micros_per_mtok, "")} out`,
+                      `${listPrice(model.input_micros_per_mtok)} in · ` +
+                        `${listPrice(model.output_micros_per_mtok)} out`,
                     )
                   : h("span", { class: "faint" }, "not billed"),
               ],
@@ -631,7 +632,7 @@ export async function userDetailView(ctx) {
         (r) => names.keys[r.group] || r.group || "No key",
         (r) => r.cost_micros,
         3,
-        ctx.currency,
+        true,
       ),
     ],
     aside: h(
@@ -711,7 +712,6 @@ async function screen(ctx, spec) {
   const since = currentRange();
   const res = await api.overview(ctx.orgID, since, spec.scope);
   const o = res.overview;
-  const currency = res.currency || ctx.currency;
   const names = {
     projects: res.project_names || {},
     keys: res.key_names || {},
@@ -769,7 +769,7 @@ async function screen(ctx, spec) {
         null,
         `${compact(o.input_tokens)} in · ${compact(o.output_tokens)} out`,
       ),
-      stat("Cost", money(o.cost_micros, ""), currency),
+      stat("Cost", amount(o.cost_micros), "CHF"),
       stat(
         "First token",
         ms(o.ttft_median_ms),
@@ -818,7 +818,7 @@ async function screen(ctx, spec) {
                   ? "Pick a longer period."
                   : "Pick a longer period, or see the refused requests below.",
               )
-            : areaChart(o.series, { currency, bucket: o.bucket }),
+            : areaChart(o.series, { bucket: o.bucket }),
         ),
       ),
     ),
@@ -885,7 +885,7 @@ function failureJump(ctx, text, sessions) {
   );
 }
 
-function barPanel(title, rows, label, value, colorIndex, currency) {
+function barPanel(title, rows, label, value, colorIndex, cost) {
   return h(
     "div",
     { class: "card" },
@@ -893,7 +893,7 @@ function barPanel(title, rows, label, value, colorIndex, currency) {
     h(
       "div",
       { class: "card-body" },
-      barList(rows || [], { label, value, colorIndex, currency }),
+      barList(rows || [], { label, value, colorIndex, cost }),
     ),
   );
 }
@@ -919,9 +919,7 @@ export function facts(rows) {
 
 function budgetPill(ctx, project) {
   if (!project.budget_micros) {
-    return pill(
-      `${money(project.spend_micros, ctx.currency)} this month, no budget`,
-    );
+    return pill(`${money(project.spend_micros)} this month, no budget`);
   }
   const frac = project.spend_micros / project.budget_micros;
   const tone = frac >= 1 ? "bad" : frac >= 0.8 ? "warn" : "";
@@ -929,7 +927,7 @@ function budgetPill(ctx, project) {
     "span",
     { class: "pill" },
     meter(frac, tone),
-    `${money(project.spend_micros, "")} of ${money(project.budget_micros, ctx.currency)} per ${project.period}`,
+    `${amount(project.spend_micros)} of ${money(project.budget_micros)} per ${project.period}`,
   );
 }
 

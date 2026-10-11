@@ -45,8 +45,7 @@ type Options struct {
 	// does not need the operator key. Empty leaves /metrics to operators.
 	MetricsToken string
 	// Secrets seals the credentials of hosted models and MCP servers.
-	Secrets  *secret.Box
-	Currency string
+	Secrets *secret.Box
 	// Providers are the identity providers, in the order the sign-in screen
 	// shows them. With none and no passkeys, the operator key is the only way
 	// in.

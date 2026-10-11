@@ -41,7 +41,7 @@ func signedInAtATerminal(t *testing.T, verifier string) (*httptest.Server, strin
 		t.Fatalf("recording the code: %v", err)
 	}
 
-	srv := New(st, nil, nil, nil, Options{OperatorKey: testOperatorKey, Currency: "CHF"},
+	srv := New(st, nil, nil, nil, Options{OperatorKey: testOperatorKey},
 		slog.New(slog.DiscardHandler))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)

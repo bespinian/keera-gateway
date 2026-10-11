@@ -26,6 +26,7 @@ import {
   h,
   compact,
   money,
+  amount,
   ms,
   num,
   table,
@@ -89,7 +90,6 @@ export async function mapView(ctx) {
   ctx.setSubtitle(range.long);
 
   const data = await api.trafficMap(ctx.orgID, since);
-  const currency = data.currency || ctx.currency;
 
   const scene = sceneFrom(data);
   const canvas = h("canvas", {
@@ -134,7 +134,7 @@ export async function mapView(ctx) {
     rangePicker(ctx, since),
   );
 
-  const painter = paint(ctx, canvas, tip, scene, currency);
+  const painter = paint(ctx, canvas, tip, scene);
   ctx.onTeardown(painter.stop);
 
   watch(ctx, { since, scene, painter, live });
@@ -145,8 +145,8 @@ export async function mapView(ctx) {
     { class: "map-page" },
     head,
     holder,
-    modelReport(ctx, scene, currency),
-    clientReport(scene, currency),
+    modelReport(ctx, scene),
+    clientReport(scene),
   );
 }
 
@@ -462,7 +462,7 @@ function span(c) {
  *  the pointer does to it. It hands back the three things the rest of the
  *  screen needs - a way to put a request on the map, a way to say the numbers
  *  moved, and a way to stop. */
-function paint(ctx, canvas, tip, scene, currency) {
+function paint(ctx, canvas, tip, scene) {
   const g2 = canvas.getContext("2d");
   const packets = [];
   let colors = palette();
@@ -541,7 +541,7 @@ function paint(ctx, canvas, tip, scene, currency) {
     last = now;
     if (advance(dt) || dirty) {
       dirty = false;
-      render(g2, scene, colors, packets, hover, currency);
+      render(g2, scene, colors, packets, hover);
     }
   }
 
@@ -678,7 +678,7 @@ function paint(ctx, canvas, tip, scene, currency) {
     hover = found;
     dirty = true;
     canvas.style.cursor = found && target(found) ? "pointer" : "default";
-    if (found) showTip(tip, canvas, found, currency, orgNameOf(ctx));
+    if (found) showTip(tip, canvas, found, orgNameOf(ctx));
     else tip.hidden = true;
   };
   const onLeave = () => {
@@ -776,23 +776,22 @@ function palette() {
 
 /* ----------------------------------------------------------------- render */
 
-function render(g, scene, c, packets, hover, currency) {
+function render(g, scene, c, packets, hover) {
   const geo = scene.geometry;
   if (!geo) return;
   g.clearRect(0, 0, geo.width, scene.height);
 
-  bands(g, scene, c, currency);
+  bands(g, scene, c);
   lines(g, scene, c, hover);
   for (const p of packets) drawPacket(g, scene, p, c);
-  for (const n of scene.clients)
-    box(g, n, c, hover, clientFace(n, currency, c));
+  for (const n of scene.clients) box(g, n, c, hover, clientFace(n, c));
   box(g, scene.gateway, c, hover, gatewayFace(scene, c));
   for (const n of [...scene.inside, ...scene.outside])
     box(g, n, c, hover, modelFace(n, c));
 }
 
 /** bands draws the two halves of the world and the boundary between them. */
-function bands(g, scene, c, currency) {
+function bands(g, scene, c) {
   const geo = scene.geometry;
 
   // Outside is tinted, because "this part of the picture is not yours" has to
@@ -828,7 +827,7 @@ function bands(g, scene, c, currency) {
   const note = scene.outside.length
     ? tokenShare(scene) +
       "% of tokens in this period, " +
-      money(outsideCost(scene), currency) +
+      money(outsideCost(scene)) +
       " spent outside"
     : "Nothing leaves: every model is served from your own network";
   g.font = "12px " + c.font;
@@ -991,13 +990,13 @@ function rows(n) {
  *  palette: the two themes are not each other's inverse, and a hand-picked
  *  mid-tone that reads well on white is a smudge on the dark one. A model's
  *  tone is also the boundary's - green for what stays, amber for what leaves. */
-function clientFace(n, currency, c) {
+function clientFace(n, c) {
   return {
     title: n.label,
     value: compact(n.cell.requests),
     unit: "requests",
     note:
-      money(n.cell.cost_micros, currency) +
+      money(n.cell.cost_micros) +
       " · " +
       compact(n.cell.input_tokens + n.cell.output_tokens) +
       " tokens",
@@ -1130,7 +1129,7 @@ function fit(g, text, max) {
 
 /* ---------------------------------------------------------------- tooltip */
 
-function showTip(tip, canvas, n, currency, orgName) {
+function showTip(tip, canvas, n, orgName) {
   const rows = [];
   if (n.kind === "model") {
     rows.push([
@@ -1156,7 +1155,7 @@ function showTip(tip, canvas, n, currency, orgName) {
     rows.push(["Folded together", n.rest.map((r) => r.label).join(", ")]);
   rows.push(["Requests", num(n.cell.requests)]);
   rows.push(["Tokens", compact(n.cell.input_tokens + n.cell.output_tokens)]);
-  rows.push(["Cost", money(n.cell.cost_micros, currency)]);
+  rows.push(["Cost", money(n.cell.cost_micros)]);
   if (n.cell.ttft_median_ms)
     rows.push(["Median first token", ms(n.cell.ttft_median_ms)]);
   if (n.cell.refused) rows.push(["Refused", num(n.cell.refused)]);
@@ -1358,7 +1357,7 @@ function refresh(ctx, { since, scene, painter }) {
 
 /** modelReport is the picture as a table: every model, not only the ones that
  *  fitted on the canvas, and readable by everything a canvas is not. */
-function modelReport(ctx, scene, currency) {
+function modelReport(ctx, scene) {
   const rows = scene.models;
   if (!rows.length) {
     return h(
@@ -1432,12 +1431,12 @@ function modelReport(ctx, scene, currency) {
               : h("span", { class: "faint" }, "-"),
         },
         {
-          label: `Cost (${currency})`,
+          label: "Cost (CHF)",
           num: true,
           shrink: true,
           sortDir: "desc",
           sortKey: (m) => m.cell.cost_micros,
-          cell: (m) => money(m.cell.cost_micros, ""),
+          cell: (m) => amount(m.cell.cost_micros),
         },
       ],
       rows,
@@ -1449,7 +1448,7 @@ function modelReport(ctx, scene, currency) {
 /** clientReport is the other column of the picture as a table. It is separate
  *  from the one above because they are not the same list: one is what this
  *  deployment offers, the other is who took it up. */
-function clientReport(scene, currency) {
+function clientReport(scene) {
   const rows = [];
   for (const c of scene.clients) {
     if (c.rest) rows.push(...c.rest);
@@ -1506,12 +1505,12 @@ function clientReport(scene, currency) {
               : h("span", { class: "faint" }, "0"),
         },
         {
-          label: `Cost (${currency})`,
+          label: "Cost (CHF)",
           num: true,
           shrink: true,
           sortDir: "desc",
           sortKey: (c) => c.cell.cost_micros,
-          cell: (c) => money(c.cell.cost_micros, ""),
+          cell: (c) => amount(c.cell.cost_micros),
         },
       ],
       rows,

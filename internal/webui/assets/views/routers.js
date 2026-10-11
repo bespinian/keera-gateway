@@ -25,6 +25,7 @@ import {
   compact,
   num,
   money,
+  amount,
   ms,
   icon,
   icons,
@@ -62,7 +63,6 @@ export async function routersView(ctx) {
   ]);
   const routers = res.data || [];
   const stats = res.stats || {};
-  const currency = res.currency || ctx.currency;
   // A subscription model only answers its caller's own sign-in, so a router
   // can neither decide with it nor send there.
   const readers = models.filter(canDecide);
@@ -122,7 +122,7 @@ export async function routersView(ctx) {
         shrink: true,
         sortKey: (rt) => stats[rt.alias]?.requests || null,
         sortDir: "desc",
-        cell: (rt) => trafficCell(stats[rt.alias], currency),
+        cell: (rt) => trafficCell(stats[rt.alias]),
       },
       // The column the alias was widening to fill. Without it the first
       // column takes every pixel the rest do not, so a six-character alias
@@ -323,7 +323,7 @@ function fallbackPill(rt) {
 // trafficCell is what this router did with the period's requests, in the room a
 // row has: how many it placed, and how much of that was placed without a
 // decision. The split between destinations is on the router's own screen.
-function trafficCell(st, currency) {
+function trafficCell(st) {
   if (!st || !st.requests) {
     return h("span", { class: "faint nowrap" }, "no traffic");
   }
@@ -346,7 +346,7 @@ function trafficCell(st, currency) {
     h(
       "div",
       { class: "faint nowrap", style: { fontSize: "11.5px" } },
-      money(st.cost_micros, currency),
+      money(st.cost_micros),
       " spent, deciding and filters included",
     ),
   );
@@ -451,7 +451,7 @@ function report(ctx, probe) {
         probe.cost_micros
           ? [
               "Cost of these runs",
-              money(probe.cost_micros, ctx.currency) +
+              money(probe.cost_micros) +
                 " - each request to this router pays a share of this on top",
             ]
           : null,
@@ -576,7 +576,6 @@ export async function routerDetailView(ctx) {
   const res = await api.routerReport(ctx.orgID, ctx.param, since);
   const rep = res.report || {};
   const rt = res.router || null;
-  const currency = res.currency || ctx.currency;
   const canEdit = isAdmin(ctx);
   const placed = rep.total ? rep.total.requests || 0 : 0;
 
@@ -694,8 +693,8 @@ export async function routerDetailView(ctx) {
       ),
       stat(
         "Cost",
-        money(rep.total ? rep.total.cost_micros || 0 : 0, ""),
-        currency,
+        amount(rep.total ? rep.total.cost_micros || 0 : 0),
+        "CHF",
         "destinations' cost, decisions included",
       ),
     ),
@@ -747,7 +746,7 @@ export async function routerDetailView(ctx) {
             ? barList(rep.destinations, {
                 label: (d) => d.alias || "No model",
                 value: (d) => d.cost_micros,
-                currency,
+                cost: true,
                 colorIndex: 2,
               })
             : empty(
@@ -790,10 +789,10 @@ export async function routerDetailView(ctx) {
               cell: (d) => compact(d.input_tokens + d.output_tokens),
             },
             {
-              label: `Cost (${currency})`,
+              label: "Cost (CHF)",
               shrink: true,
               num: true,
-              cell: (d) => money(d.cost_micros, ""),
+              cell: (d) => amount(d.cost_micros),
             },
             // The reason a cheap destination is not always the right one. A
             // router that halved the bill and doubled what a developer waits

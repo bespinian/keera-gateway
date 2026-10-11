@@ -342,7 +342,6 @@ type filterReportResponse struct {
 	Filter       *policy.Filter     `json:"filter"`
 	Report       store.FilterReport `json:"report"`
 	ProjectNames map[string]string  `json:"project_names"`
-	Currency     string             `json:"currency"`
 }
 
 // printFilterReport is what a filter has been doing, in the order people ask:

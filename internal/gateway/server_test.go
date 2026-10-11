@@ -1120,7 +1120,7 @@ func TestLimitHeadersRideEveryAnswer(t *testing.T) {
 	// time the gateway mentions one is the refusal, the first they know of a
 	// budget is the moment their agent stops.
 	h := newHarnessWith(t, jsonBackend(`{"usage":{"prompt_tokens":1,"completion_tokens":1}}`),
-		nil, budgeted(), Options{Currency: "CHF"})
+		nil, budgeted(), Options{})
 	h.budgets.spent = 400_000
 
 	resp := h.post(t, "/v1/chat/completions", `{"model":"keera-code","messages":[]}`)
@@ -1131,7 +1131,6 @@ func TestLimitHeadersRideEveryAnswer(t *testing.T) {
 		"X-Keera-Budget-Scope":           "org",
 		"X-Keera-Budget-Limit":           "1.00",
 		"X-Keera-Budget-Remaining":       "0.60",
-		"X-Keera-Budget-Currency":        "CHF",
 		"X-RateLimit-Limit-Requests":     "10",
 		"X-RateLimit-Remaining-Requests": "9",
 	} {

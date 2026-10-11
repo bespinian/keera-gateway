@@ -92,9 +92,9 @@ func TestInfomaniaksEndpointTakesTheDeploymentsProductID(t *testing.T) {
 	}
 }
 
-func TestBillingIsInTheProvidersCurrency(t *testing.T) {
-	b := Platform{"cscs": {APIKey: "sk", DiscountBP: 500}}.Billing("cscs")
-	if b.Provider != "cscs" || b.Currency != "CHF" || b.DiscountBP != 500 {
+func TestBillingCarriesTheKeysDiscountAndCredit(t *testing.T) {
+	b := Platform{"cscs": {APIKey: "sk", DiscountBP: 500, Credit: true}}.Billing("cscs")
+	if b.Provider != "cscs" || b.DiscountBP != 500 || !b.Credit {
 		t.Errorf("billing = %+v", b)
 	}
 }

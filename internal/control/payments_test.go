@@ -131,7 +131,7 @@ func paymentServer(ctx context.Context, t *testing.T, st *store.Store, pf *fakeP
 		t.Fatal(err)
 	}
 	s := New(st, reg, nil, nil, Options{
-		OperatorKey: testOperatorKey, Currency: "CHF", Secrets: box, Platform: testPlatform,
+		OperatorKey: testOperatorKey, Secrets: box, Platform: testPlatform,
 		PublicURL: "https://keera.example",
 		Payments: &Payments{
 			Client: payment.New(payment.Settings{URL: pf.URL, SpaceID: 4711, UserID: "1",

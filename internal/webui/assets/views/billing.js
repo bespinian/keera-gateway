@@ -60,18 +60,15 @@ async function billSection(ctx) {
   const month = stored && stored <= now ? stored : now;
   const res = await api.billing(ctx.orgID, month);
   const rows = res.data || [];
-  const totals = res.totals || [];
+  // Without a line there is nothing to total.
+  const total = rows.length ? res.total : null;
   // The API sends the provider cost and the margin to operators only.
   const operator = ctx.state.me.unrestricted;
   const allOrgs = operator && !ctx.orgID;
   const payments = ctx.state.me.payments;
 
   if (!payments || allOrgs) {
-    ctx.setSubtitle(
-      totals.length
-        ? totals.map((t) => money(t.micros, t.currency)).join(" · ")
-        : monthName(month),
-    );
+    ctx.setSubtitle(total ? money(total.micros) : monthName(month));
   }
 
   const go = (m) => {
@@ -199,7 +196,7 @@ async function billSection(ctx) {
     {
       label: "Amount",
       num: true,
-      cell: (r) => h("strong", {}, money(r.micros, r.currency)),
+      cell: (r) => h("strong", {}, money(r.micros)),
       sortKey: (r) => r.micros,
       sortDir: "desc",
     },
@@ -207,7 +204,7 @@ async function billSection(ctx) {
       ? {
           label: "From credit",
           num: true,
-          cell: (r) => money(r.credit_micros, "CHF"),
+          cell: (r) => money(r.credit_micros),
           sortKey: (r) => r.credit_micros,
           sortDir: "desc",
         }
@@ -216,7 +213,7 @@ async function billSection(ctx) {
       ? {
           label: "Provider cost",
           num: true,
-          cell: (r) => money(r.provider_micros, r.currency),
+          cell: (r) => money(r.provider_micros),
           sortKey: (r) => r.provider_micros,
           sortDir: "desc",
         }
@@ -225,7 +222,7 @@ async function billSection(ctx) {
       ? {
           label: "Margin",
           num: true,
-          cell: (r) => money(r.margin_micros, r.currency),
+          cell: (r) => money(r.margin_micros),
           sortKey: (r) => r.margin_micros,
           sortDir: "desc",
         }
@@ -241,38 +238,37 @@ async function billSection(ctx) {
       "Calls to models on this deployment's own provider keys appear here.",
   });
 
-  // One total per currency: CHF and USD are never added together.
-  const foot = totals.map((t) =>
+  const foot =
+    total &&
     h(
       "div",
       { class: "card", style: { marginTop: "12px" } },
       h(
         "div",
         { class: "card-body row" },
-        h("strong", {}, `Total ${t.currency}`),
+        h("strong", {}, "Total"),
         h("div", { style: { flex: 1 } }),
         h(
           "span",
           { class: "muted" },
-          `${num(t.calls)} ${plural(t.calls, "call")}`,
+          `${num(total.calls)} ${plural(total.calls, "call")}`,
         ),
         operator
           ? h(
               "span",
               { class: "muted" },
-              `cost ${money(t.provider_micros, t.currency)} · margin ${money(t.margin_micros, t.currency)}`,
+              `cost ${money(total.provider_micros)} · margin ${money(total.margin_micros)}`,
             )
           : null,
-        h("strong", {}, money(t.micros, t.currency)),
+        h("strong", {}, money(total.micros)),
       ),
-    ),
-  );
+    );
 
   const note = h(
     "div",
     { class: "hint", style: { marginTop: "14px" } },
     "Calls to models on this deployment's provider keys, at the provider's " +
-      "list price. Months are in UTC. Each currency is summed on its own.",
+      "list price, in CHF. Months are in UTC.",
   );
 
   return h(
@@ -285,8 +281,6 @@ async function billSection(ctx) {
     note,
   );
 }
-
-const CHF = "CHF";
 
 // chf reads an amount typed in francs as micros, or NaN.
 function chf(input) {
@@ -315,7 +309,7 @@ async function creditSection(ctx) {
   const a = res.account;
   const recent = res.recent || [];
   const operator = ctx.state.me.unrestricted;
-  ctx.setSubtitle(`${money(a.balance_micros, CHF)} credit`);
+  ctx.setSubtitle(`${money(a.balance_micros)} credit`);
 
   // Back from PostFinance's payment page: say how it went.
   const params = new URLSearchParams(location.search);
@@ -336,7 +330,7 @@ async function creditSection(ctx) {
     { class: "grid grid-3" },
     stat(
       "Credit",
-      money(a.balance_micros, CHF),
+      money(a.balance_micros),
       null,
       a.invoiced
         ? "billed by invoice, no credit needed"
@@ -346,10 +340,10 @@ async function creditSection(ctx) {
     ),
     stat(
       "Automatic top-up",
-      a.topup_micros ? money(a.topup_micros, CHF) : "Off",
+      a.topup_micros ? money(a.topup_micros) : "Off",
       null,
       a.topup_micros
-        ? `when the credit falls below ${money(a.topup_below_micros, CHF)}`
+        ? `when the credit falls below ${money(a.topup_below_micros)}`
         : "charges the saved card when credit runs low",
     ),
     stat(
@@ -470,13 +464,13 @@ async function creditSection(ctx) {
       {
         label: "Credit",
         num: true,
-        cell: (p) => h("strong", {}, money(p.micros, CHF)),
+        cell: (p) => h("strong", {}, money(p.micros)),
         sortKey: (p) => p.micros,
       },
       {
         label: "VAT",
         num: true,
-        cell: (p) => (p.vat_micros ? money(p.vat_micros, CHF) : "-"),
+        cell: (p) => (p.vat_micros ? money(p.vat_micros) : "-"),
       },
       {
         label: "State",
@@ -511,7 +505,7 @@ function returnBanner(ctx, p, a) {
     return h(
       "div",
       { class: "banner banner-good", style: { marginBottom: "16px" } },
-      `Thank you: ${money(p.micros, CHF)} was added. The credit is now ${money(a.balance_micros, CHF)}.`,
+      `Thank you: ${money(p.micros)} was added. The credit is now ${money(a.balance_micros)}.`,
     );
   }
   if (p.state === "failed") {
@@ -556,8 +550,8 @@ function addCredit(ctx, res) {
     total.textContent = Number.isNaN(m)
       ? ""
       : vat
-        ? `With ${vat}% VAT you pay ${money(m + Math.round((m * vat) / 100 / 10000) * 10000, CHF)}.`
-        : `You pay ${money(m, CHF)}.`;
+        ? `With ${vat}% VAT you pay ${money(m + Math.round((m * vat) / 100 / 10000) * 10000)}.`
+        : `You pay ${money(m)}.`;
   };
   amount.addEventListener("input", showTotal);
   showTotal();
@@ -570,7 +564,7 @@ function addCredit(ctx, res) {
       "form",
       { onSubmit: (e) => e.preventDefault() },
       err,
-      field(`Credit in ${CHF}`, amount, total),
+      field("Credit in CHF", amount, total),
       h(
         "label",
         { class: "row-tight" },
@@ -630,8 +624,8 @@ function autoTopUp(ctx, a) {
   const fields = h(
     "div",
     {},
-    field(`When the credit falls below (${CHF})`, below),
-    field(`Charge the saved card (${CHF})`, amount, "VAT is added on top."),
+    field("When the credit falls below (CHF)", below),
+    field("Charge the saved card (CHF)", amount, "VAT is added on top."),
   );
   const sync = () => {
     for (const el of [below, amount]) el.disabled = !on.checked;
@@ -715,7 +709,7 @@ function grant(ctx) {
       "form",
       { onSubmit: (e) => e.preventDefault() },
       err,
-      field(`Credit in ${CHF}`, amount, "Below 0 takes credit away."),
+      field("Credit in CHF", amount, "Below 0 takes credit away."),
       field("Why", note, "The organisation sees this in its payments."),
     ),
     actions: (close) => [

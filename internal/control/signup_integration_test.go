@@ -58,7 +58,7 @@ func signupServer(t *testing.T, signUp bool) signupSetup {
 		t.Fatal(err)
 	}
 	srv := New(st, reg, nil, nil, Options{
-		OperatorKey: testOperatorKey, Currency: "CHF", Secrets: box,
+		OperatorKey: testOperatorKey, Secrets: box,
 		Providers: authn.Providers{provider},
 	}, slog.New(slog.DiscardHandler))
 	ts := httptest.NewServer(srv.Handler())

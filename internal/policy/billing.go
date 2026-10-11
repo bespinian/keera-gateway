@@ -1,20 +1,20 @@
 package policy
 
+// Currency is what every price, budget, bill and credit is in.
+const Currency = "CHF"
+
 // Billing is how calls to a model on the deployment's own provider key are
 // billed: the organisation pays the list price, and the deployment pays the
 // provider that less its discount.
 type Billing struct {
 	Provider string
-	// Currency is the provider's, which the list prices are quoted in.
-	Currency string
 	// DiscountBP is the provider's discount on its list price, in basis
 	// points: 1250 is 12.5%.
 	DiscountBP int64
-	// CreditRate converts the list price into the credit organisations pay
-	// in advance: CHF micros per micro-unit of Currency, times a million. A
-	// rate of 800_000 turns USD 1.00 into CHF 0.80. Zero takes nothing from
-	// the credit, which is how it is without payments. See docs/billing.md.
-	CreditRate int64
+	// Credit says organisations pay in advance, so each call takes its list
+	// price from their credit. It is false without payments. See
+	// docs/billing.md.
+	Credit bool
 }
 
 // BillLine is one billable call to a model on the deployment's key.
@@ -23,7 +23,6 @@ type BillLine struct {
 	Alias        string
 	Provider     string
 	BackendModel string
-	Currency     string
 	InputTokens  int
 	// CachedInputTokens and CacheWriteTokens are parts of InputTokens, as
 	// providers report them.
@@ -34,7 +33,7 @@ type BillLine struct {
 	Micros int64
 	// ProviderMicros is what the provider charges the deployment for it.
 	ProviderMicros int64
-	// CreditMicros is what it takes from the organisation's credit, in CHF.
+	// CreditMicros is what it takes from the organisation's credit.
 	CreditMicros int64
 }
 
@@ -46,18 +45,21 @@ func (m Model) Bill(t Tokens) (BillLine, bool) {
 	}
 	t = t.clamped()
 	micros := m.Cost(t)
+	var credit int64
+	if m.Billing.Credit {
+		credit = micros
+	}
 	return BillLine{
 		Alias:             m.Alias,
 		Provider:          m.Billing.Provider,
 		BackendModel:      m.BackendModel,
-		Currency:          m.Billing.Currency,
 		InputTokens:       t.Input,
 		CachedInputTokens: t.CachedInput,
 		CacheWriteTokens:  t.CacheWrite,
 		OutputTokens:      t.Output,
 		Micros:            micros,
 		ProviderMicros:    micros * (10_000 - m.Billing.DiscountBP) / 10_000,
-		CreditMicros:      micros * m.Billing.CreditRate / 1_000_000,
+		CreditMicros:      credit,
 	}, true
 }
 

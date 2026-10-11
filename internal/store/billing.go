@@ -14,10 +14,10 @@ import (
 func queueBills(batch *pgx.Batch, e Event) {
 	for _, b := range e.Bills {
 		batch.Queue(`INSERT INTO billing_lines (ts, org_id, alias, provider, backend_model,
-			currency, input_tokens, cached_input_tokens, cache_write_tokens, output_tokens,
+			input_tokens, cached_input_tokens, cache_write_tokens, output_tokens,
 			micros, provider_micros, credit_micros)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-			e.TS, e.OrgID, b.Alias, b.Provider, b.BackendModel, b.Currency,
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+			e.TS, e.OrgID, b.Alias, b.Provider, b.BackendModel,
 			b.InputTokens, b.CachedInputTokens, b.CacheWriteTokens, b.OutputTokens,
 			b.Micros, b.ProviderMicros, b.CreditMicros)
 	}
@@ -50,7 +50,6 @@ type BillingRow struct {
 	OrgName           string `json:"org_name"`
 	Provider          string `json:"provider"`
 	BackendModel      string `json:"backend_model"`
-	Currency          string `json:"currency"`
 	Calls             int64  `json:"calls"`
 	InputTokens       int64  `json:"input_tokens"`
 	CachedInputTokens int64  `json:"cached_input_tokens"`
@@ -61,7 +60,7 @@ type BillingRow struct {
 	// ProviderMicros is what the provider charges the deployment. The
 	// control API shows it only to operators.
 	ProviderMicros int64 `json:"-"`
-	// CreditMicros is what the use took from the credit, in CHF.
+	// CreditMicros is what the use took from the credit.
 	CreditMicros int64 `json:"credit_micros"`
 }
 
@@ -69,20 +68,20 @@ type BillingRow struct {
 // provider model. An empty orgID reads every organisation.
 func (s *Store) Billing(ctx context.Context, orgID string, from, to time.Time) ([]BillingRow, error) {
 	return queryAll(ctx, s.pool, scanBillingRow, `
-		SELECT b.org_id, coalesce(o.name, ''), b.provider, b.backend_model, b.currency,
+		SELECT b.org_id, coalesce(o.name, ''), b.provider, b.backend_model,
 		       count(*), sum(b.input_tokens), sum(b.cached_input_tokens),
 		       sum(b.cache_write_tokens), sum(b.output_tokens), sum(b.micros), sum(b.provider_micros),
 		       sum(b.credit_micros)
 		FROM billing_lines b LEFT JOIN orgs o ON o.id = b.org_id
 		WHERE b.ts >= $1 AND b.ts < $2 AND ($3 = '' OR b.org_id = $3)
-		GROUP BY b.org_id, o.name, b.provider, b.backend_model, b.currency
+		GROUP BY b.org_id, o.name, b.provider, b.backend_model
 		ORDER BY coalesce(o.name, ''), b.org_id, b.provider, b.backend_model`,
 		from, to, orgID)
 }
 
 func scanBillingRow(r row) (BillingRow, error) {
 	var b BillingRow
-	err := r.Scan(&b.OrgID, &b.OrgName, &b.Provider, &b.BackendModel, &b.Currency,
+	err := r.Scan(&b.OrgID, &b.OrgName, &b.Provider, &b.BackendModel,
 		&b.Calls, &b.InputTokens, &b.CachedInputTokens, &b.CacheWriteTokens,
 		&b.OutputTokens,
 		&b.Micros, &b.ProviderMicros, &b.CreditMicros)

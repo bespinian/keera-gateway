@@ -22,6 +22,7 @@ import {
   date,
   dateTime,
   money,
+  amount,
   num,
   empty,
   go,
@@ -47,7 +48,6 @@ function whose(sc) {
 
 export async function accessView(ctx) {
   const a = await api.access();
-  const currency = a.currency || ctx.currency;
 
   // anonymous is the operator key sent as a header. In the panel it signs in
   // as a stand-in user instead, which the server marks as operator_key.
@@ -56,7 +56,7 @@ export async function accessView(ctx) {
   const keys = a.keys || [];
   const live = keys.filter((k) => k.state === "active");
   const refusals = a.refusals || [];
-  ctx.setSubtitle(summary(live, currency));
+  ctx.setSubtitle(summary(live));
 
   const wrap = h("div", {});
 
@@ -99,7 +99,7 @@ export async function accessView(ctx) {
     replace(
       cards,
       shown.length
-        ? shown.map((k) => keyCard(k, currency, ctx))
+        ? shown.map((k) => keyCard(k, ctx))
         : h(
             "div",
             { class: "card" },
@@ -172,17 +172,17 @@ export async function accessView(ctx) {
   return wrap;
 }
 
-function summary(live, currency) {
+function summary(live) {
   if (!live.length) return "No active key";
   const spend = live.reduce((a, k) => a + (k.spend_micros || 0), 0);
   return (
     `${live.length} active ${plural(live.length, "key")} · ` +
-    `${money(spend, currency)} this month`
+    `${money(spend)} this month`
   );
 }
 
 // keyCard is one key and everything that decides whether it works.
-function keyCard(k, currency, ctx) {
+function keyCard(k, ctx) {
   const facts = h(
     "div",
     { class: "row", style: { gap: "24px", flexWrap: "wrap" } },
@@ -210,7 +210,7 @@ function keyCard(k, currency, ctx) {
         "span",
         {},
         `${num(k.requests || 0)} ${plural(k.requests || 0, "request")} · `,
-        money(k.spend_micros, currency),
+        money(k.spend_micros),
       ),
     ),
   );
@@ -225,7 +225,7 @@ function keyCard(k, currency, ctx) {
       h(
         "div",
         { class: "stack", style: { gap: "10px", marginTop: "16px" } },
-        bound.map((sc) => scopeRow(sc, currency)),
+        bound.map((sc) => scopeRow(sc)),
       ),
     );
   } else {
@@ -418,7 +418,7 @@ function hasLimit(sc) {
 
 // scopeRow is one level of the hierarchy: what it allows, what is left of it,
 // and when it lifts. A developer who can see this does not have to ask.
-function scopeRow(sc, currency) {
+function scopeRow(sc) {
   const who = whose(sc);
 
   const head = h(
@@ -449,7 +449,7 @@ function scopeRow(sc, currency) {
       h(
         "span",
         { class: "muted", style: { fontSize: "11.5px" } },
-        `${money(sc.spend_micros, "")} of ${money(sc.budget_micros, currency)} per ${sc.period}`,
+        `${amount(sc.spend_micros)} of ${money(sc.budget_micros)} per ${sc.period}`,
         sc.resets_at ? ` · resets ${date(sc.resets_at)}` : "",
         frac >= 1 ? " · used up, so requests are refused until it resets" : "",
       ),

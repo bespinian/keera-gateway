@@ -862,7 +862,7 @@ func (s *Server) listKeys(w http.ResponseWriter, r *http.Request, p *authn.Princ
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"data": keys, "currency": s.opts.Currency, "since": since,
+		"data": keys, "since": since,
 	})
 }
 

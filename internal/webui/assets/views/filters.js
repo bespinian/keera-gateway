@@ -26,6 +26,7 @@ import {
   compact,
   num,
   money,
+  amount,
   ms,
   dateTime,
   icon,
@@ -67,7 +68,6 @@ export async function filtersView(ctx) {
   ]);
   const filters = res.data || [];
   const stats = res.stats || {};
-  const currency = res.currency || ctx.currency;
   // A subscription model only answers its caller's own sign-in, so nothing
   // can run on it.
   const readers = models.filter(canRun);
@@ -142,7 +142,7 @@ export async function filtersView(ctx) {
         shrink: true,
         sortKey: (f) => stats[f.alias]?.runs || null,
         sortDir: "desc",
-        cell: (f) => trafficCell(stats[f.alias], currency),
+        cell: (f) => trafficCell(stats[f.alias]),
       },
       {
         label: "Description",
@@ -218,7 +218,7 @@ function modePills(f) {
 // row has: how often it ran, how much of that was a refusal, and what each run
 // cost the request waiting for it. The rest is on the filter's own screen,
 // which the alias in the first column opens.
-function trafficCell(st, currency) {
+function trafficCell(st) {
   if (!st || !st.runs) {
     return h("span", { class: "faint nowrap" }, "no traffic");
   }
@@ -242,7 +242,7 @@ function trafficCell(st, currency) {
       { class: "faint nowrap", style: { fontSize: "11.5px" } },
       ms(st.latency_median_ms),
       " added · ",
-      money(st.cost_micros, currency),
+      money(st.cost_micros),
     ),
   );
 }
@@ -476,7 +476,7 @@ function report(ctx, probe) {
             probe.cost_micros
               ? [
                   " and cost ",
-                  money(probe.cost_micros, ctx.currency),
+                  money(probe.cost_micros),
                   ". Every request it covers pays this on top.",
                 ]
               : ". Every request it covers waits this long on top.",
@@ -507,7 +507,6 @@ export async function filterDetailView(ctx) {
   const res = await api.filterReport(ctx.orgID, ctx.param, since);
   const rep = res.report || {};
   const f = res.filter || null;
-  const currency = res.currency || ctx.currency;
   const projectNames = res.project_names || {};
   const canEdit = isAdmin(ctx);
 
@@ -608,8 +607,8 @@ export async function filterDetailView(ctx) {
       ),
       stat(
         "Cost",
-        money(rep.cost_micros || 0, ""),
-        currency,
+        amount(rep.cost_micros || 0),
+        "CHF",
         rep.org_cost_micros
           ? `${pct(rep.cost_micros, rep.org_cost_micros)} of the organisation's bill`
           : "nothing charged yet",
@@ -649,7 +648,7 @@ export async function filterDetailView(ctx) {
                   tokens: 0,
                   cost_micros: p.cost_micros,
                 })),
-                { currency, bucket: rep.bucket },
+                { bucket: rep.bucket },
               )
             : empty(
                 "Nothing ran in this period",
@@ -715,7 +714,7 @@ export async function filterDetailView(ctx) {
             "refusals by project",
           ),
         ),
-        projectTable(ctx, rep.projects, projectNames, currency),
+        projectTable(ctx, rep.projects, projectNames),
       ),
     );
   }
@@ -892,7 +891,7 @@ function outcomeRows(rep) {
   ].filter((r) => r.value > 0);
 }
 
-function projectTable(ctx, projects, names, currency) {
+function projectTable(ctx, projects, names) {
   return table(
     [
       {
@@ -942,11 +941,11 @@ function projectTable(ctx, projects, names, currency) {
             : h("span", { class: "faint" }, "-"),
       },
       {
-        label: `Cost (${currency})`,
+        label: "Cost (CHF)",
         shrink: true,
         num: true,
         cell: (t) =>
-          h("span", { class: "nowrap muted" }, money(t.cost_micros, "")),
+          h("span", { class: "nowrap muted" }, amount(t.cost_micros)),
       },
     ],
     projects,

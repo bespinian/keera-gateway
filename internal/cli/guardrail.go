@@ -19,7 +19,7 @@ const (
 	rpmUsage    = "requests per minute (0 for unlimited)"
 	tpmUsage    = "tokens per minute (0 for unlimited)"
 	maxOutUsage = "cap on generated tokens per request (0 for unlimited)"
-	budgetUsage = "budget per period, in whole currency units (0 for unlimited)"
+	budgetUsage = "budget per period, in CHF (0 for unlimited)"
 	periodUsage = "budget period: day or month"
 )
 
@@ -171,11 +171,11 @@ func setList(dst *[]string, name, v string, clear bool) error {
 	return nil
 }
 
-// micros converts whole currency units to millionths. It rounds, because
+// micros converts francs to millionths. It rounds, because
 // 2.01 is 2009999.99... as a float and truncating it would lose a millionth.
 func micros(units float64) int64 { return int64(math.Round(units * 1_000_000)) }
 
-// setBudget sets a budget given in whole currency units; 0 removes it.
+// setBudget sets a budget given in CHF; 0 removes it.
 func setBudget(dst **int64, amount float64) {
 	// Negative is the flag's default, for not given, as in setInt.
 	if amount < 0 {

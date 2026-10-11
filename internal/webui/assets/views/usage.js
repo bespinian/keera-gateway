@@ -7,6 +7,7 @@ import {
   num,
   compact,
   money,
+  amount,
   plural,
   icon,
   icons,
@@ -63,7 +64,7 @@ export async function usageView(ctx) {
 
   // Only served requests count here: a refused or failed one costs nothing.
   ctx.setSubtitle(
-    `${num(requests)} served ${plural(requests, "request")} · ${money(total, res.currency)}`,
+    `${num(requests)} served ${plural(requests, "request")} · ${money(total)}`,
   );
 
   const controls = h(
@@ -224,10 +225,10 @@ export async function usageView(ctx) {
         sortDir: "desc",
       },
       {
-        label: `Cost (${res.currency})`,
+        label: "Cost (CHF)",
         width: "16%",
         num: true,
-        cell: (r) => h("strong", {}, money(r.cost_micros, "")),
+        cell: (r) => h("strong", {}, amount(r.cost_micros)),
         sortKey: (r) => r.cost_micros,
         sortDir: "desc",
       },
@@ -257,7 +258,7 @@ export async function usageView(ctx) {
             { class: "muted" },
             `${num(requests)} served ${plural(requests, "request")}`,
           ),
-          h("strong", {}, money(total, res.currency)),
+          h("strong", {}, money(total)),
         ),
       )
     : null;

@@ -29,6 +29,7 @@ import {
   num,
   compact,
   money,
+  amount,
   ms,
   duration,
   ago,
@@ -89,7 +90,6 @@ export async function sessionsView(ctx) {
   };
   const res = await api.sessions(params);
   const rows = res.data || [];
-  const currency = res.currency || ctx.currency;
   const names = {
     keys: res.key_names || {},
     projects: res.project_names || {},
@@ -152,7 +152,7 @@ export async function sessionsView(ctx) {
     return wrap;
   }
 
-  const list = sessionTable(ctx, rows, names, currency, {}, rank);
+  const list = sessionTable(ctx, rows, names, {}, rank);
   const tail = h("div", {}, more(params, rows, rank, list));
   wrap.append(h("div", { style: { marginTop: "16px" } }, list), tail);
   wrap.append(hint(res.gap_seconds));
@@ -293,7 +293,6 @@ export async function sessionLog(ctx, { scope = {}, since, hide = {} }) {
 
   const rows = res.data || [];
   const counts = (res.totals && res.totals.outcomes) || NO_COUNTS;
-  const currency = res.currency || ctx.currency;
   const names = {
     keys: res.key_names || {},
     projects: res.project_names || {},
@@ -334,7 +333,7 @@ export async function sessionLog(ctx, { scope = {}, since, hide = {} }) {
     return wrap;
   }
 
-  const list = sessionTable(ctx, rows, names, currency, hide, rank);
+  const list = sessionTable(ctx, rows, names, hide, rank);
   wrap.append(
     h("div", { style: { marginTop: "12px" } }, list),
     ...[more(params, rows, rank, list)].filter(Boolean),
@@ -406,7 +405,7 @@ function pager(params, rows, list) {
   return moreWrap;
 }
 
-function sessionTable(ctx, rows, names, currency, hide, rank) {
+function sessionTable(ctx, rows, names, hide, rank) {
   const columns = [
     {
       // The conversation, as the gateway hashed it. It is the only name a
@@ -534,7 +533,7 @@ function sessionTable(ctx, rows, names, currency, hide, rank) {
         ),
     },
     {
-      label: `Cost (${currency})`,
+      label: "Cost (CHF)",
       num: true,
       shrink: true,
       rank: "cost",
@@ -542,7 +541,7 @@ function sessionTable(ctx, rows, names, currency, hide, rank) {
       sortDir: "desc",
       cell: (a) =>
         a.cost_micros
-          ? h("span", { class: "nowrap" }, money(a.cost_micros, ""))
+          ? h("span", { class: "nowrap" }, amount(a.cost_micros))
           : h("span", { class: "faint" }, "-"),
     },
     {
@@ -640,7 +639,6 @@ export async function sessionDetailView(ctx) {
 
   const s = res.session;
   const requests = res.requests || [];
-  const currency = res.currency || ctx.currency;
   const names = {
     keys: res.key_names || {},
     projects: res.project_names || {},
@@ -758,9 +756,9 @@ export async function sessionDetailView(ctx) {
       ),
       stat(
         "Cost",
-        money(s.cost_micros, ""),
-        currency,
-        `${money(Math.round(s.cost_micros / Math.max(1, s.requests)), "")} a request`,
+        amount(s.cost_micros),
+        "CHF",
+        `${amount(Math.round(s.cost_micros / Math.max(1, s.requests)))} a request`,
       ),
     ),
   );
@@ -787,7 +785,7 @@ export async function sessionDetailView(ctx) {
           "div",
           { class: "card-body" },
           requests.length
-            ? turnStrip(ctx, requests, names, currency)
+            ? turnStrip(ctx, requests, names)
             : empty("Nothing recorded", "Its requests are no longer stored."),
         ),
       ),
@@ -820,7 +818,6 @@ export async function sessionDetailView(ctx) {
           ctx,
           requests,
           names,
-          currency,
           { key: true, project: true },
           {
             sortBy: "When",
@@ -872,7 +869,7 @@ export async function sessionDetailView(ctx) {
 // Cost rather than latency, because cost is what the reader came for and a
 // refused call has no latency worth drawing. A call that cost nothing still
 // gets a bar tall enough to click.
-function turnStrip(ctx, requests, names, currency) {
+function turnStrip(ctx, requests, names) {
   const max = Math.max(...requests.map((q) => q.cost_micros || 0), 1);
   return h(
     "div",
@@ -886,10 +883,10 @@ function turnStrip(ctx, requests, names, currency) {
         style: { height: Math.max(6, Math.round(share * 60)) + "px" },
         title:
           `Request ${i + 1} of ${requests.length} · ${q.alias || "no model"} · ` +
-          `${outcomeMeaning(q)[0]} · ${money(q.cost_micros, currency)}` +
+          `${outcomeMeaning(q)[0]} · ${money(q.cost_micros)}` +
           (q.ttft_ms ? ` · ${ms(q.ttft_ms)} to the first token` : ""),
         "aria-label": `Request ${i + 1}, ${outcomeOf(q)}`,
-        onClick: () => showRequest(ctx, q, names, currency),
+        onClick: () => showRequest(ctx, q, names),
       });
     }),
   );

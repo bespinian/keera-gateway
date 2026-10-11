@@ -80,7 +80,6 @@ func TestLoadDefaultsAreWhatTheDocumentationSays(t *testing.T) {
 		{"upstream header timeout", c.UpstreamHeaderTimeout, 2 * time.Minute},
 		{"cache lifetime", c.CacheTTL, 30 * time.Second},
 		{"spend refresh", c.SpendRefresh, 10 * time.Second},
-		{"currency", c.Currency, "CHF"},
 		{"redis key prefix", c.RedisPrefix, "keera"},
 		// Retention off by default: a gateway must not start quietly deleting
 		// the billing history of a deployment that never asked it to.

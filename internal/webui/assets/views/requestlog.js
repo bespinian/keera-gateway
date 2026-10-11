@@ -20,6 +20,7 @@ import {
   go,
   num,
   money,
+  amount,
   ms,
   ago,
   dateTime,
@@ -133,7 +134,6 @@ export async function requestLog(
     interrupted: 0,
   };
   const facets = res.filters || {};
-  const currency = res.currency || ctx.currency;
   const names = {
     keys: res.key_names || {},
     projects: res.project_names || {},
@@ -213,7 +213,7 @@ export async function requestLog(
   }
 
   const log = rows.length
-    ? requestTable(ctx, rows, names, currency, hide, { rank })
+    ? requestTable(ctx, rows, names, hide, { rank })
     : null;
   wrap.append(
     log ||
@@ -429,7 +429,7 @@ export async function requestLog(
  *  `opts` is merged into the table's own options. The log passes its ranking
  *  there, because it holds one page of many. A session holds all its rows and
  *  sorts them in place, oldest first, because a task is read forwards. */
-export function requestTable(ctx, rows, names, currency, hide, opts = {}) {
+export function requestTable(ctx, rows, names, hide, opts = {}) {
   const columns = [
     {
       label: "When",
@@ -541,7 +541,7 @@ export function requestTable(ctx, rows, names, currency, hide, opts = {}) {
           : h("span", { class: "faint" }, "-"),
     },
     {
-      label: `Cost (${currency})`,
+      label: "Cost (CHF)",
       num: true,
       shrink: true,
       rank: "cost",
@@ -552,7 +552,7 @@ export function requestTable(ctx, rows, names, currency, hide, opts = {}) {
           ? h(
               "span",
               { class: "nowrap" },
-              money(q.cost_micros, ""),
+              amount(q.cost_micros),
               // An estimate is marked, because the number beside it will be
               // reconciled against an invoice by somebody who was not here.
               q.estimated ? h("span", { class: "faint" }, "~") : null,
@@ -591,7 +591,7 @@ export function requestTable(ctx, rows, names, currency, hide, opts = {}) {
           {
             class: "btn btn-sm",
             title: "Request details",
-            onClick: () => showRequest(ctx, q, names, currency),
+            onClick: () => showRequest(ctx, q, names),
           },
           "View",
         ),
@@ -617,7 +617,7 @@ export function requestTable(ctx, rows, names, currency, hide, opts = {}) {
 // its reader wants - so the dialog offers it rather than leaving them to find
 // the Sessions screen and rebuild a filter that would not have found this row
 // anyway.
-export function showRequest(ctx, q, names, currency) {
+export function showRequest(ctx, q, names) {
   const [label, tone, why] = outcomeMeaning(q);
   const recorded = [
     ["Model", q.alias || "-"],
@@ -653,10 +653,7 @@ export function showRequest(ctx, q, names, currency) {
       "Output tokens",
       num(q.output_tokens) + (q.estimated ? " (estimated)" : ""),
     ],
-    [
-      "Cost",
-      money(q.cost_micros, currency) + (q.estimated ? " (estimated)" : ""),
-    ],
+    ["Cost", money(q.cost_micros) + (q.estimated ? " (estimated)" : "")],
     ["First token", ms(q.ttft_ms)],
     ["Took", ms(q.latency_ms)],
     ["Streamed", q.stream ? "yes" : "no"],

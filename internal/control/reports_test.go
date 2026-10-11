@@ -48,7 +48,7 @@ func TestGroupLabelsResolveEveryGrouping(t *testing.T) {
 // name, the id it resolves and the money - not the pretty-printed money the
 // panel shows.
 func TestUsageCSVCarriesNamesIdsAndCost(t *testing.T) {
-	s := New(nil, nil, nil, nil, Options{Currency: "CHF"}, slog.New(slog.DiscardHandler))
+	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	w := httptest.NewRecorder()
 	from := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
@@ -72,8 +72,8 @@ func TestUsageCSVCarriesNamesIdsAndCost(t *testing.T) {
 	if len(rows) != 3 {
 		t.Fatalf("got %d rows, want a header and two", len(rows))
 	}
-	if rows[0][0] != "project" || rows[0][5] != "cost_chf" {
-		t.Errorf("header = %v, want it named by the grouping and the currency", rows[0])
+	if rows[0][0] != "project" || rows[0][5] != "cost" {
+		t.Errorf("header = %v, want it named by the grouping", rows[0])
 	}
 	if rows[1][0] != "Payments Platform" || rows[1][1] != "project_1" {
 		t.Errorf("row = %v, want both the name and the id it resolves", rows[1])
@@ -351,7 +351,7 @@ func TestEntityScopeReadsTheIdsAsGiven(t *testing.T) {
 // and half of what is in it - the message, and the names an administrator chose
 // - is written by somebody else.
 func TestRequestsCSVCarriesTheNumbersAndEscapesTheWording(t *testing.T) {
-	s := New(nil, nil, nil, nil, Options{Currency: "CHF"}, slog.New(slog.DiscardHandler))
+	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	w := httptest.NewRecorder()
 	ts := time.Date(2026, 9, 6, 14, 30, 0, 0, time.UTC)
 
@@ -376,8 +376,8 @@ func TestRequestsCSVCarriesTheNumbersAndEscapesTheWording(t *testing.T) {
 	if len(rows) != 3 {
 		t.Fatalf("got %d rows, want a header and two", len(rows))
 	}
-	if rows[0][10] != "cost_chf" {
-		t.Errorf("header = %v, want the cost column named by the currency", rows[0])
+	if rows[0][10] != "cost" {
+		t.Errorf("header = %v, want the cost in the eleventh column", rows[0])
 	}
 	if rows[1][8] != "1000" || rows[1][9] != "200" || rows[1][10] != "2.50" {
 		t.Errorf("row = %v, want the tokens and the cost that explain each other", rows[1])

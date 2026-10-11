@@ -18,9 +18,9 @@ type PlatformKey struct {
 	// DiscountBP is the discount the provider gives on its list price, in
 	// basis points: 1250 is 12.5%.
 	DiscountBP int64
-	// CreditRate is what one unit of the provider's currency takes from an
-	// organisation's credit, in CHF, times a million. Zero without payments.
-	CreditRate int64
+	// Credit says each call takes its list price from the organisation's
+	// credit. It is false without payments.
+	Credit bool
 }
 
 // Platform is the deployment's provider keys, by provider name.
@@ -75,11 +75,9 @@ func (p Platform) Lock(m *policy.Model) error {
 
 // Billing is how a model of this provider is billed on the deployment's key.
 func (p Platform) Billing(provider string) *policy.Billing {
-	prov, _ := ProviderByName(provider)
 	return &policy.Billing{
 		Provider:   provider,
-		Currency:   prov.Currency,
 		DiscountBP: p[provider].DiscountBP,
-		CreditRate: p[provider].CreditRate,
+		Credit:     p[provider].Credit,
 	}
 }

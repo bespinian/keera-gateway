@@ -47,7 +47,7 @@ func sandboxStore(t *testing.T) (*store.Store, context.Context) {
 func sandboxServer(t *testing.T, st *store.Store, m *sandbox.Manager) *httptest.Server {
 	t.Helper()
 	srv := New(st, nil, nil, nil, Options{
-		OperatorKey: testOperatorKey, Currency: "CHF", Sandboxes: m,
+		OperatorKey: testOperatorKey, Sandboxes: m,
 	}, slog.New(slog.DiscardHandler))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
@@ -570,7 +570,7 @@ func TestImageUnderAllowsTagsAndPathsOfAPrefix(t *testing.T) {
 func TestAnAdministratorPicksOnlyAllowedImages(t *testing.T) {
 	st, _ := sandboxStore(t)
 	srv := New(st, nil, nil, nil, Options{
-		OperatorKey: testOperatorKey, Currency: "CHF",
+		OperatorKey:   testOperatorKey,
 		Template:      store.OrgTemplate{SandboxClasses: []policy.SandboxClass{{Image: "example/sandbox:2"}}},
 		SandboxImages: []string{"registry.example.ch/team/"},
 	}, slog.New(slog.DiscardHandler))

@@ -31,19 +31,11 @@ type Provider struct {
 	// Location is where the provider serves its models, and so where prompts
 	// go: ch or usa. It is the default for every model declared against it.
 	Location string `json:"location"`
-	// Currency the prices are quoted in, which may differ from the one this
-	// deployment accounts in (see docs/providers.md).
-	Currency string `json:"currency"`
 	// Kinds are the API surfaces the endpoint serves.
 	Kinds  []policy.Kind   `json:"kinds"`
 	Models []ProviderModel `json:"models"`
 	// Summary is the provider in one line, for the panel's provider tile.
-	// Caveats belong in Note.
 	Summary string `json:"summary"`
-	// Note is what an administrator needs to know before using it, shown by
-	// `keera model providers` and in the control panel. It gives each rough
-	// edge in a sentence; docs/providers.md has the long form.
-	Note string `json:"note"`
 }
 
 // ProviderModel is one model the provider serves, with the numbers a catalogue
@@ -78,9 +70,9 @@ type ProviderModel struct {
 
 // providers is the built-in table.
 //
-// Prices are micro-units per million tokens at each provider's list price, in
-// its currency. They are a starting point for showback, and an entry can
-// override them.
+// Prices are micro-units of CHF per million tokens, at each provider's list
+// price. They are a starting point for showback, and an entry can override
+// them.
 //
 // Release dates are the day each model came out, from its maker's own
 // announcement. An FP8 build takes the day of the model it was made from.
@@ -100,273 +92,244 @@ var providers = []Provider{{
 	Endpoint:    "https://api.anthropic.com/v1",
 	CachedInput: true,
 	Location:    "usa",
-	Currency:    "USD",
 	Kinds:       []policy.Kind{policy.KindChat},
 	// Descriptions are written for a router's choice: how fast, how dear and
 	// how thorough each model is. Where it runs depends on the deployment,
 	// so they do not say.
 	Models: []ProviderModel{{
 		ID: "claude-opus-5-5", MaxContext: 1_000_000, ReleaseDate: "2026-09-22",
-		InputMicrosPerMTok: 4_000_000, OutputMicrosPerMTok: 20_000_000,
-		CachedInputMicrosPerMTok: 200_000,
-		CacheWriteMicrosPerMTok:  5_000_000,
+		InputMicrosPerMTok: 3_680_000, OutputMicrosPerMTok: 18_400_000,
+		CachedInputMicrosPerMTok: 184_000,
+		CacheWriteMicrosPerMTok:  4_600_000,
 		Description: "most capable of its range and the one to reach for " +
 			"first - thorough on long, hard work, at a middling speed",
 	}, {
 		ID: "claude-sonnet-5-5", MaxContext: 1_000_000, ReleaseDate: "2026-09-28",
-		InputMicrosPerMTok: 2_000_000, OutputMicrosPerMTok: 10_000_000,
-		CachedInputMicrosPerMTok: 100_000,
-		CacheWriteMicrosPerMTok:  2_500_000,
+		InputMicrosPerMTok: 1_840_000, OutputMicrosPerMTok: 9_200_000,
+		CachedInputMicrosPerMTok: 92_000,
+		CacheWriteMicrosPerMTok:  2_300_000,
 		Description:              "capable, quick and mid-priced - the middle option",
 	}, {
 		ID: "claude-haiku-5-5", MaxContext: 1_000_000, ReleaseDate: "2026-10-07",
-		InputMicrosPerMTok: 100_000, OutputMicrosPerMTok: 500_000,
-		CachedInputMicrosPerMTok: 10_000,
-		CacheWriteMicrosPerMTok:  125_000,
+		InputMicrosPerMTok: 92_000, OutputMicrosPerMTok: 460_000,
+		CachedInputMicrosPerMTok: 9_200,
+		CacheWriteMicrosPerMTok:  115_000,
 		// Anthropic charges five times as much for a prompt over 100k tokens.
 		LongPrompt: &policy.PriceTier{
 			AboveTokens:        100_000,
-			InputMicrosPerMTok: 500_000, OutputMicrosPerMTok: 2_500_000,
-			CachedInputMicrosPerMTok: 50_000,
-			CacheWriteMicrosPerMTok:  625_000,
+			InputMicrosPerMTok: 460_000, OutputMicrosPerMTok: 2_300_000,
+			CachedInputMicrosPerMTok: 46_000,
+			CacheWriteMicrosPerMTok:  575_000,
 		},
 		Description: "fastest, cheapest and lightest of its range - short, " +
 			"simple, high-volume work; five times dearer past 100k tokens",
 	}, {
 		ID: "claude-fable-5-1", MaxContext: 1_000_000, ReleaseDate: "2026-09-01",
-		InputMicrosPerMTok: 10_000_000, OutputMicrosPerMTok: 50_000_000,
-		CachedInputMicrosPerMTok: 250_000,
-		CacheWriteMicrosPerMTok:  12_500_000,
+		InputMicrosPerMTok: 9_200_000, OutputMicrosPerMTok: 46_000_000,
+		CachedInputMicrosPerMTok: 230_000,
+		CacheWriteMicrosPerMTok:  11_500_000,
 		Description:              "powerful, slow and dear, and stronger at prose than at code",
 	}, {
 		ID: "claude-sonnet-5", MaxContext: 1_000_000, ReleaseDate: "2026-06-30",
-		InputMicrosPerMTok: 2_000_000, OutputMicrosPerMTok: 10_000_000,
-		CachedInputMicrosPerMTok: 200_000,
-		CacheWriteMicrosPerMTok:  2_500_000,
+		InputMicrosPerMTok: 1_840_000, OutputMicrosPerMTok: 9_200_000,
+		CachedInputMicrosPerMTok: 184_000,
+		CacheWriteMicrosPerMTok:  2_300_000,
 		Description: "the middle option before claude-sonnet-5-5, at the same " +
 			"price but twice as dear for cached input",
 	}, {
 		ID: "claude-haiku-4-5", Snapshot: "claude-haiku-4-5-20251001",
 		MaxContext: 200_000, ReleaseDate: "2025-10-15",
-		InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 5_000_000,
-		CachedInputMicrosPerMTok: 100_000,
-		CacheWriteMicrosPerMTok:  1_250_000,
+		InputMicrosPerMTok: 920_000, OutputMicrosPerMTok: 4_600_000,
+		CachedInputMicrosPerMTok: 92_000,
+		CacheWriteMicrosPerMTok:  1_150_000,
 		Description: "previous generation's lightest - short, simple work, " +
 			"dearer than claude-haiku-5-5 and over a shorter context",
 	}, {
 		ID: "claude-opus-5", MaxContext: 1_000_000, ReleaseDate: "2026-07-24",
-		InputMicrosPerMTok: 5_000_000, OutputMicrosPerMTok: 25_000_000,
-		CachedInputMicrosPerMTok: 500_000,
-		CacheWriteMicrosPerMTok:  6_250_000,
+		InputMicrosPerMTok: 4_600_000, OutputMicrosPerMTok: 23_000_000,
+		CachedInputMicrosPerMTok: 460_000,
+		CacheWriteMicrosPerMTok:  5_750_000,
 		Description: "the powerful one before claude-opus-5-5 - as thorough " +
 			"on hard problems, and dearer than what replaced it",
 	}, {
 		ID: "claude-opus-4-8", MaxContext: 1_000_000, ReleaseDate: "2026-05-28",
-		InputMicrosPerMTok: 5_000_000, OutputMicrosPerMTok: 25_000_000,
-		CachedInputMicrosPerMTok: 500_000,
-		CacheWriteMicrosPerMTok:  6_250_000,
+		InputMicrosPerMTok: 4_600_000, OutputMicrosPerMTok: 23_000_000,
+		CachedInputMicrosPerMTok: 460_000,
+		CacheWriteMicrosPerMTok:  5_750_000,
 		Description: "two generations back, and the most powerful of them - " +
 			"thorough on hard problems, slow and dear",
 	}, {
 		ID: "claude-sonnet-4-6", MaxContext: 1_000_000, ReleaseDate: "2026-02-17",
-		InputMicrosPerMTok: 3_000_000, OutputMicrosPerMTok: 15_000_000,
-		CachedInputMicrosPerMTok: 300_000,
-		CacheWriteMicrosPerMTok:  3_750_000,
+		InputMicrosPerMTok: 2_760_000, OutputMicrosPerMTok: 13_800_000,
+		CachedInputMicrosPerMTok: 276_000,
+		CacheWriteMicrosPerMTok:  3_450_000,
 		Description:              "previous generation's middle option - capable and mid-priced",
 	}},
-	Note: "Prompts leave your infrastructure. " +
-		"Messages clients such as Claude Code reach Anthropic's own API, where " +
-		"prompt caching and thinking work. Every other client goes through the " +
-		"OpenAI-compatible layer, where caching does not, so it pays full price " +
-		"for every resent context. " +
-		"A cache write is charged at the five-minute cache's rate, 25% above " +
-		"the input price; a one-hour cache write costs twice the input price, " +
-		"so it is billed low. " +
-		"Server tools such as web search run at Anthropic, out of sight of " +
-		"filters; a guardrail that blocks hosted tools removes them.",
 }, {
-	Name:    "openai",
-	Summary: "OpenAI's own GPT models, on the API they are released on.",
-	// OpenAI's own API. The Note says where it differs from what the gateway
-	// sends.
+	Name:        "openai",
+	Summary:     "OpenAI's own GPT models, on the API they are released on.",
 	Endpoint:    "https://api.openai.com/v1",
 	CachedInput: true,
 	Location:    "usa",
-	Currency:    "USD",
 	Kinds:       []policy.Kind{policy.KindChat},
 	// Past 272k input tokens, OpenAI charges twice as much for input and one
 	// and a half times as much for output on its newer models. From gpt-5.6
 	// on, a cache write costs a quarter more than input; before, nothing more.
 	Models: []ProviderModel{{
 		ID: "gpt-6-astra", MaxContext: 1_050_000, ReleaseDate: "2026-09-03",
-		InputMicrosPerMTok: 10_000_000, OutputMicrosPerMTok: 50_000_000,
-		CachedInputMicrosPerMTok: 1_000_000,
-		CacheWriteMicrosPerMTok:  12_500_000,
+		InputMicrosPerMTok: 9_200_000, OutputMicrosPerMTok: 46_000_000,
+		CachedInputMicrosPerMTok: 920_000,
+		CacheWriteMicrosPerMTok:  11_500_000,
 		LongPrompt: &policy.PriceTier{
 			AboveTokens:        272_000,
-			InputMicrosPerMTok: 20_000_000, OutputMicrosPerMTok: 75_000_000,
-			CachedInputMicrosPerMTok: 2_000_000,
-			CacheWriteMicrosPerMTok:  25_000_000,
+			InputMicrosPerMTok: 18_400_000, OutputMicrosPerMTok: 69_000_000,
+			CachedInputMicrosPerMTok: 1_840_000,
+			CacheWriteMicrosPerMTok:  23_000_000,
 		},
 		Description: "most powerful and dearest here - thorough on the hardest " +
 			"problems, over a million-token context",
 	}, {
 		ID: "gpt-6.1-sol", MaxContext: 1_050_000, ReleaseDate: "2026-09-29",
-		InputMicrosPerMTok: 2_000_000, OutputMicrosPerMTok: 10_000_000,
-		CachedInputMicrosPerMTok: 100_000,
-		CacheWriteMicrosPerMTok:  2_500_000,
+		InputMicrosPerMTok: 1_840_000, OutputMicrosPerMTok: 9_200_000,
+		CachedInputMicrosPerMTok: 92_000,
+		CacheWriteMicrosPerMTok:  2_300_000,
 		LongPrompt: &policy.PriceTier{
 			AboveTokens:        272_000,
-			InputMicrosPerMTok: 4_000_000, OutputMicrosPerMTok: 15_000_000,
-			CachedInputMicrosPerMTok: 200_000,
-			CacheWriteMicrosPerMTok:  5_000_000,
+			InputMicrosPerMTok: 3_680_000, OutputMicrosPerMTok: 13_800_000,
+			CachedInputMicrosPerMTok: 184_000,
+			CacheWriteMicrosPerMTok:  4_600_000,
 		},
 		Description: "nearly as powerful at a fifth of the price - hard code and " +
 			"agent work without the top price",
 	}, {
 		ID: "gpt-6-sol", MaxContext: 1_050_000, ReleaseDate: "2026-09-22",
-		InputMicrosPerMTok: 2_000_000, OutputMicrosPerMTok: 10_000_000,
-		CachedInputMicrosPerMTok: 200_000,
-		CacheWriteMicrosPerMTok:  2_500_000,
+		InputMicrosPerMTok: 1_840_000, OutputMicrosPerMTok: 9_200_000,
+		CachedInputMicrosPerMTok: 184_000,
+		CacheWriteMicrosPerMTok:  2_300_000,
 		LongPrompt: &policy.PriceTier{
 			AboveTokens:        272_000,
-			InputMicrosPerMTok: 4_000_000, OutputMicrosPerMTok: 15_000_000,
-			CachedInputMicrosPerMTok: 400_000,
-			CacheWriteMicrosPerMTok:  5_000_000,
+			InputMicrosPerMTok: 3_680_000, OutputMicrosPerMTok: 13_800_000,
+			CachedInputMicrosPerMTok: 368_000,
+			CacheWriteMicrosPerMTok:  4_600_000,
 		},
 		Description: "the version before gpt-6.1-sol at the same price - less " +
 			"accurate on hard work",
 	}, {
 		ID: "gpt-6-luna", MaxContext: 1_050_000, ReleaseDate: "2026-09-22",
-		InputMicrosPerMTok: 100_000, OutputMicrosPerMTok: 500_000,
-		CachedInputMicrosPerMTok: 10_000,
-		CacheWriteMicrosPerMTok:  125_000,
+		InputMicrosPerMTok: 92_000, OutputMicrosPerMTok: 460_000,
+		CachedInputMicrosPerMTok: 9_200,
+		CacheWriteMicrosPerMTok:  115_000,
 		LongPrompt: &policy.PriceTier{
 			AboveTokens:        272_000,
-			InputMicrosPerMTok: 200_000, OutputMicrosPerMTok: 750_000,
-			CachedInputMicrosPerMTok: 20_000,
-			CacheWriteMicrosPerMTok:  250_000,
+			InputMicrosPerMTok: 184_000, OutputMicrosPerMTok: 690_000,
+			CachedInputMicrosPerMTok: 18_400,
+			CacheWriteMicrosPerMTok:  230_000,
 		},
 		Description: "fastest, cheapest and lightest here - short, simple, " +
 			"high-volume work over a very long context",
 	}, {
 		ID: "gpt-5.6-sol", MaxContext: 1_050_000, ReleaseDate: "2026-07-09",
-		InputMicrosPerMTok: 4_000_000, OutputMicrosPerMTok: 20_000_000,
-		CachedInputMicrosPerMTok: 400_000,
-		CacheWriteMicrosPerMTok:  5_000_000,
+		InputMicrosPerMTok: 3_680_000, OutputMicrosPerMTok: 18_400_000,
+		CachedInputMicrosPerMTok: 368_000,
+		CacheWriteMicrosPerMTok:  4_600_000,
 		LongPrompt: &policy.PriceTier{
 			AboveTokens:        272_000,
-			InputMicrosPerMTok: 8_000_000, OutputMicrosPerMTok: 30_000_000,
-			CachedInputMicrosPerMTok: 800_000,
-			CacheWriteMicrosPerMTok:  10_000_000,
+			InputMicrosPerMTok: 7_360_000, OutputMicrosPerMTok: 27_600_000,
+			CachedInputMicrosPerMTok: 736_000,
+			CacheWriteMicrosPerMTok:  9_200_000,
 		},
 		Description: "previous generation's most powerful - hard work, at twice " +
 			"the price of gpt-6.1-sol",
 	}, {
 		ID: "gpt-5.6-terra", MaxContext: 1_050_000, ReleaseDate: "2026-07-09",
-		InputMicrosPerMTok: 2_000_000, OutputMicrosPerMTok: 12_000_000,
-		CachedInputMicrosPerMTok: 200_000,
-		CacheWriteMicrosPerMTok:  2_500_000,
+		InputMicrosPerMTok: 1_840_000, OutputMicrosPerMTok: 11_040_000,
+		CachedInputMicrosPerMTok: 184_000,
+		CacheWriteMicrosPerMTok:  2_300_000,
 		LongPrompt: &policy.PriceTier{
 			AboveTokens:        272_000,
-			InputMicrosPerMTok: 4_000_000, OutputMicrosPerMTok: 18_000_000,
-			CachedInputMicrosPerMTok: 400_000,
-			CacheWriteMicrosPerMTok:  5_000_000,
+			InputMicrosPerMTok: 3_680_000, OutputMicrosPerMTok: 16_560_000,
+			CachedInputMicrosPerMTok: 368_000,
+			CacheWriteMicrosPerMTok:  4_600_000,
 		},
 		Description: "previous generation's middle option - capable, quick enough " +
 			"and mid-priced",
 	}, {
 		ID: "gpt-5.6-luna", MaxContext: 1_050_000, ReleaseDate: "2026-07-09",
-		InputMicrosPerMTok: 200_000, OutputMicrosPerMTok: 1_200_000,
-		CachedInputMicrosPerMTok: 20_000,
-		CacheWriteMicrosPerMTok:  250_000,
+		InputMicrosPerMTok: 184_000, OutputMicrosPerMTok: 1_104_000,
+		CachedInputMicrosPerMTok: 18_400,
+		CacheWriteMicrosPerMTok:  230_000,
 		LongPrompt: &policy.PriceTier{
 			AboveTokens:        272_000,
-			InputMicrosPerMTok: 400_000, OutputMicrosPerMTok: 1_800_000,
-			CachedInputMicrosPerMTok: 40_000,
-			CacheWriteMicrosPerMTok:  500_000,
+			InputMicrosPerMTok: 368_000, OutputMicrosPerMTok: 1_656_000,
+			CachedInputMicrosPerMTok: 36_800,
+			CacheWriteMicrosPerMTok:  460_000,
 		},
 		Description: "previous generation's lightest - short, simple work, at " +
 			"twice the price of gpt-6-luna",
 	}, {
 		ID: "gpt-5.5", MaxContext: 1_050_000, ReleaseDate: "2026-04-24",
-		InputMicrosPerMTok: 5_000_000, OutputMicrosPerMTok: 30_000_000,
-		CachedInputMicrosPerMTok: 500_000,
+		InputMicrosPerMTok: 4_600_000, OutputMicrosPerMTok: 27_600_000,
+		CachedInputMicrosPerMTok: 460_000,
 		LongPrompt: &policy.PriceTier{
 			AboveTokens:        272_000,
-			InputMicrosPerMTok: 10_000_000, OutputMicrosPerMTok: 45_000_000,
-			CachedInputMicrosPerMTok: 1_000_000,
+			InputMicrosPerMTok: 9_200_000, OutputMicrosPerMTok: 41_400_000,
+			CachedInputMicrosPerMTok: 920_000,
 		},
 		Description: "older top model - thorough on hard problems, slow and dear",
 	}, {
 		ID: "gpt-5.4", MaxContext: 1_050_000, ReleaseDate: "2026-03-05",
-		InputMicrosPerMTok: 2_500_000, OutputMicrosPerMTok: 15_000_000,
-		CachedInputMicrosPerMTok: 250_000,
+		InputMicrosPerMTok: 2_300_000, OutputMicrosPerMTok: 13_800_000,
+		CachedInputMicrosPerMTok: 230_000,
 		LongPrompt: &policy.PriceTier{
 			AboveTokens:        272_000,
-			InputMicrosPerMTok: 5_000_000, OutputMicrosPerMTok: 22_500_000,
-			CachedInputMicrosPerMTok: 500_000,
+			InputMicrosPerMTok: 4_600_000, OutputMicrosPerMTok: 20_700_000,
+			CachedInputMicrosPerMTok: 460_000,
 		},
 		Description: "older middle option - capable and mid-priced",
 	}, {
 		ID: "gpt-5.4-mini", MaxContext: 400_000, ReleaseDate: "2026-03-17",
-		InputMicrosPerMTok: 750_000, OutputMicrosPerMTok: 4_500_000,
-		CachedInputMicrosPerMTok: 75_000,
+		InputMicrosPerMTok: 690_000, OutputMicrosPerMTok: 4_140_000,
+		CachedInputMicrosPerMTok: 69_000,
 		Description: "middling power, quick and cheap - some reasoning, without " +
 			"the flagship's price",
 	}, {
 		ID: "gpt-5.4-nano", MaxContext: 400_000, ReleaseDate: "2026-03-17",
-		InputMicrosPerMTok: 200_000, OutputMicrosPerMTok: 1_250_000,
-		CachedInputMicrosPerMTok: 20_000,
+		InputMicrosPerMTok: 184_000, OutputMicrosPerMTok: 1_150_000,
+		CachedInputMicrosPerMTok: 18_400,
 		Description:              "fast, cheap and light - short, simple, high-volume work",
 	}, {
 		ID: "gpt-5.2", MaxContext: 400_000, ReleaseDate: "2025-12-11",
-		InputMicrosPerMTok: 1_750_000, OutputMicrosPerMTok: 14_000_000,
-		CachedInputMicrosPerMTok: 175_000,
+		InputMicrosPerMTok: 1_610_000, OutputMicrosPerMTok: 12_880_000,
+		CachedInputMicrosPerMTok: 161_000,
 		Description:              "older mid-range model - capable, slow and mid-priced",
 	}, {
 		ID: "gpt-5.1", MaxContext: 400_000, ReleaseDate: "2025-11-13",
-		InputMicrosPerMTok: 1_250_000, OutputMicrosPerMTok: 10_000_000,
-		CachedInputMicrosPerMTok: 125_000,
+		InputMicrosPerMTok: 1_150_000, OutputMicrosPerMTok: 9_200_000,
+		CachedInputMicrosPerMTok: 115_000,
 		Description: "older flagship - slow and thorough, and it reasons at " +
 			"length before answering",
 	}, {
 		ID: "gpt-4.1", MaxContext: 1_047_576, ReleaseDate: "2025-04-14",
-		InputMicrosPerMTok: 2_000_000, OutputMicrosPerMTok: 8_000_000,
-		CachedInputMicrosPerMTok: 500_000,
+		InputMicrosPerMTok: 1_840_000, OutputMicrosPerMTok: 7_360_000,
+		CachedInputMicrosPerMTok: 460_000,
 		Description: "capable, quick and mid-priced, answering without reasoning " +
 			"first, over very long inputs",
 	}, {
 		ID: "gpt-4.1-mini", MaxContext: 1_047_576, ReleaseDate: "2025-04-14",
-		InputMicrosPerMTok: 400_000, OutputMicrosPerMTok: 1_600_000,
-		CachedInputMicrosPerMTok: 100_000,
+		InputMicrosPerMTok: 368_000, OutputMicrosPerMTok: 1_472_000,
+		CachedInputMicrosPerMTok: 92_000,
 		Description:              "light, quick and cheap, over very long inputs",
 	}, {
 		ID: "gpt-4o", MaxContext: 128_000, ReleaseDate: "2024-05-13",
-		InputMicrosPerMTok: 2_500_000, OutputMicrosPerMTok: 10_000_000,
-		CachedInputMicrosPerMTok: 1_250_000,
+		InputMicrosPerMTok: 2_300_000, OutputMicrosPerMTok: 9_200_000,
+		CachedInputMicrosPerMTok: 1_150_000,
 		Description:              "middling power, quick and no reasoning step - ordinary work",
 	}, {
 		ID: "gpt-4o-mini", MaxContext: 128_000, ReleaseDate: "2024-07-18",
-		InputMicrosPerMTok: 150_000, OutputMicrosPerMTok: 600_000,
-		CachedInputMicrosPerMTok: 75_000,
+		InputMicrosPerMTok: 138_000, OutputMicrosPerMTok: 552_000,
+		CachedInputMicrosPerMTok: 69_000,
 		Description:              "fast, cheap and light - short, simple work",
 	}},
-	Note: "Prompts leave your infrastructure. " +
-		"Prompt caching works, and cached input is charged at the cached rate. " +
-		"From gpt-5.6 on, a cache write costs 25% more than input, and is " +
-		"charged so. " +
-		"Responses clients such as Codex reach OpenAI's Responses API. " +
-		"Reasoning tokens are billed as output, and the request log cannot " +
-		"show them apart. " +
-		"Every chat model gets max_completion_tokens instead of max_tokens, and " +
-		"the reasoning models (all but gpt-4 and older) get no temperature or top_p. " +
-		"Built-in tools such as web search run at OpenAI, out of sight of " +
-		"filters; a guardrail that blocks hosted tools removes them. " +
-		"The gpt-6 and gpt-5.6 models, gpt-5.5 and gpt-5.4 cost more above " +
-		"272k input tokens, and are charged so. " +
-		"gpt-5.6-sol is on a promotional price until at least 21 November 2026. " +
-		"gpt-5.1 and gpt-5.4-nano shut down on 1 April 2027.",
 }, {
 	Name:    "infomaniak",
 	Summary: "Open-weight models, served in Switzerland.",
@@ -374,7 +337,6 @@ var providers = []Provider{{
 	Endpoint:       "https://api.infomaniak.com/2/ai/{product_id}/openai/v1",
 	NeedsProductID: true,
 	Location:       "ch",
-	Currency:       "CHF",
 	Kinds:          []policy.Kind{policy.KindChat},
 	// Ids are the upstream names, capitals and all, as the endpoint expects.
 	Models: []ProviderModel{{
@@ -413,24 +375,12 @@ var providers = []Provider{{
 		Description: "small, quick and cheap - chatbots, short edits and " +
 			"everyday questions",
 	}},
-	Note: "Prompts leave your infrastructure, but stay in Switzerland. " +
-		"The endpoint is per customer: a model needs your AI Service's product " +
-		"id as well as a key, both in the Infomaniak console under AI Tools. " +
-		"Model ids are the upstream names, with capitals. " +
-		"Kimi-K2.6, Qwen3.5-397B and Apertus-v1.5-70B are in beta, and " +
-		"Infomaniak can withdraw them without notice. " +
-		"No cached-input rate is published, so every input token costs the " +
-		"input price. " +
-		"Only chat models are listed: declare an embedding model with no " +
-		"provider, its full address, its location and its prices. " +
-		"Prices are in CHF.",
 }, {
 	Name:        "stepping-stone",
 	Summary:     "Open-weight models, served in Switzerland.",
 	Endpoint:    "https://llm.stoney-cloud.com/v1",
 	CachedInput: true,
 	Location:    "ch",
-	Currency:    "CHF",
 	Kinds:       []policy.Kind{policy.KindChat},
 	// Ids are the upstream names, capitals and all, as the endpoint expects.
 	// The Nemotron id is spelled as stepping stone's own documentation calls
@@ -512,21 +462,11 @@ var providers = []Provider{{
 		Description: "document parsing: turns images of pages into text, tables " +
 			"and formulas - not for chat or code",
 	}},
-	Note: "Prompts leave your infrastructure, but stay in Switzerland. " +
-		"Each model has its own API key. " +
-		"The cached-input rates are listed, but stepping stone bills them only " +
-		"from about the end of October 2026; until then a cached prompt costs " +
-		"more on the invoice than in Keera. " +
-		"Model ids are the upstream names, with capitals. " +
-		"Only chat and OCR models are listed: declare an embedding model with " +
-		"no provider, its address, its location and its prices. " +
-		"Prices are in CHF.",
 }, {
 	Name:     "phoeniqs",
 	Summary:  "Open-weight models, served in Switzerland.",
 	Endpoint: "https://maas.phoeniqs.com/v1",
 	Location: "ch",
-	Currency: "CHF",
 	Kinds:    []policy.Kind{policy.KindChat},
 	// Ids are Phoeniqs's own names. One keeps its name when the model behind
 	// it gets a minor upgrade, so the release dates are those of the models
@@ -611,22 +551,11 @@ var providers = []Provider{{
 		Description: "document parsing: turns images of pages into text, tables " +
 			"and formulas - not for chat or code",
 	}},
-	Note: "Prompts leave your infrastructure, but stay in Switzerland. " +
-		"Model ids are Phoeniqs's own names, such as inference-glm5. An id " +
-		"stays the same when the model behind it gets a minor upgrade, so " +
-		"the model can change under it. " +
-		"No cached-input rate is published, so every input token costs the " +
-		"input price. " +
-		"Only chat, vision and document-parsing models are listed: declare an " +
-		"embedding model with no provider, its address, its location and its " +
-		"prices. " +
-		"Prices are in CHF.",
 }, {
 	Name:     "cscs",
 	Summary:  "Open-weight models at the Swiss National Supercomputing Centre.",
 	Endpoint: "https://api.inference.cscs.ch/v1",
 	Location: "ch",
-	Currency: "CHF",
 	Kinds:    []policy.Kind{policy.KindChat},
 	// Ids are the upstream names, capitals and all, as the endpoint expects.
 	// A -thinking id is the same weights with reasoning on and tool calls off,
@@ -682,18 +611,6 @@ var providers = []Provider{{
 		Description: "previous small Apertus at the price of Apertus-v1.5-8B, " +
 			"over a short context",
 	}},
-	Note: "Prompts leave your infrastructure, but stay in Switzerland. " +
-		"A key needs a CSCS project with an inference resource, and is made in " +
-		"the CSCS Inference API UI. " +
-		"The prices are CSCS's pay-per-use fees for academia. " +
-		"No cached-input rate is published, so every input token costs the " +
-		"input price. " +
-		"The -thinking Apertus models take no tool calls, so coding agents " +
-		"fail on them. " +
-		"Model ids are the upstream names, with capitals. " +
-		"The service runs from one site, so expect pauses for incidents and " +
-		"maintenance. " +
-		"Prices are in CHF.",
 }}
 
 // Providers returns a copy of the built-in table, so a caller cannot edit the

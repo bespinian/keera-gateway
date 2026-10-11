@@ -19,7 +19,7 @@ func TestAccessSaysTheOperatorKeyIsNobody(t *testing.T) {
 	// deployment with nothing in it - and reaching for a person's rows would
 	// reach for a person who is not there.
 	s := New(nil, nil, nil, nil, Options{
-		OperatorKey: testOperatorKey, Currency: "CHF",
+		OperatorKey: testOperatorKey,
 	}, slog.New(slog.DiscardHandler))
 
 	r := httptest.NewRequest(http.MethodGet, httpx.ControlPrefix+"/v1/access", nil)
@@ -32,7 +32,6 @@ func TestAccessSaysTheOperatorKeyIsNobody(t *testing.T) {
 	}
 	var got struct {
 		Anonymous bool              `json:"anonymous"`
-		Currency  string            `json:"currency"`
 		Keys      []json.RawMessage `json:"keys"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
@@ -40,9 +39,6 @@ func TestAccessSaysTheOperatorKeyIsNobody(t *testing.T) {
 	}
 	if !got.Anonymous {
 		t.Error("the operator key is not a person and the screen has to say so")
-	}
-	if got.Currency != "CHF" {
-		t.Errorf("currency = %q, want CHF", got.Currency)
 	}
 	if got.Keys == nil {
 		t.Error("keys must be an empty list rather than null, which renders as a broken screen")

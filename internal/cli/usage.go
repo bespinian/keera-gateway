@@ -41,7 +41,7 @@ func usageCmd(ctx context.Context, args []string) error {
 			return
 		}
 		w.header(fmt.Sprintf("%s\tREQUESTS\tIN\tOUT\tCOST (%s)",
-			strings.ToUpper(*groupBy), res.Currency))
+			strings.ToUpper(*groupBy), policy.Currency))
 		var totalCost int64
 		for _, b := range res.Data {
 			group := res.label(*groupBy, b.Group)
@@ -57,7 +57,6 @@ func usageCmd(ctx context.Context, args []string) error {
 }
 
 type usageResponse struct {
-	Currency     string              `json:"currency"`
 	Data         []store.UsageBucket `json:"data"`
 	ProjectNames map[string]string   `json:"project_names"`
 	KeyNames     map[string]string   `json:"key_names"`

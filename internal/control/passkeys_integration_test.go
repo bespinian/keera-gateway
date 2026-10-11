@@ -46,7 +46,7 @@ func newPasskeyEnv(t *testing.T, domain string) *passkeyEnv {
 		t.Fatal(err)
 	}
 	srv := New(st, nil, nil, nil, Options{
-		OperatorKey: testOperatorKey, Currency: "CHF", Passkeys: rp, PublicURL: passkeyOrigin,
+		OperatorKey: testOperatorKey, Passkeys: rp, PublicURL: passkeyOrigin,
 	}, slog.New(slog.DiscardHandler))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)

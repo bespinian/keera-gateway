@@ -50,7 +50,6 @@ services:
       # setting in docs/install.md is listed here. Empty keeps the default.
       # The sandbox settings are left out: the podman driver cannot run inside
       # this container, so only `make dev` reads them. See .env.example.
-      KEERA_CURRENCY: ${KEERA_CURRENCY:-}
       KEERA_UPSTREAM_DENY: ${KEERA_UPSTREAM_DENY:-}
       KEERA_UPSTREAM_PRIVATE: ${KEERA_UPSTREAM_PRIVATE:-}
       KEERA_REDIS_URL: ${KEERA_REDIS_URL:-}
@@ -125,7 +124,6 @@ services:
       KEERA_POSTFINANCE_USER_ID: ${KEERA_POSTFINANCE_USER_ID:-}
       KEERA_POSTFINANCE_AUTH_KEY: ${KEERA_POSTFINANCE_AUTH_KEY:-}
       KEERA_POSTFINANCE_URL: ${KEERA_POSTFINANCE_URL:-}
-      KEERA_BILLING_CHF_PER_USD: ${KEERA_BILLING_CHF_PER_USD:-}
       KEERA_BILLING_VAT: ${KEERA_BILLING_VAT:-}
       # The gateway as a browser sees it. It is also what the panel's My
       # clients screen tells a developer to point their editor at, with /api on

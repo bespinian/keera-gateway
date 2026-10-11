@@ -305,11 +305,10 @@ headers when some level has an `rpm`. They describe only the tightest level:
 
 | Header                           | What it holds                        |
 | -------------------------------- | ------------------------------------ |
-| `X-Keera-Budget-Remaining`       | what is left to spend                |
+| `X-Keera-Budget-Remaining`       | what is left to spend, in CHF        |
 | `X-Keera-Budget-Limit`           | the budget                           |
 | `X-Keera-Budget-Reset`           | when it resets, in RFC 3339          |
 | `X-Keera-Budget-Scope`           | the level: `org`, `project` or `key` |
-| `X-Keera-Budget-Currency`        | the currency, from `KEERA_CURRENCY`  |
 | `X-RateLimit-Limit-Requests`     | the `rpm`                            |
 | `X-RateLimit-Remaining-Requests` | requests left in the bucket          |
 | `X-Keera-RateLimit-Scope`        | the level: `org`, `project` or `key` |

@@ -105,9 +105,8 @@ func (s *Server) trafficMap(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	})
 
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"from":     from,
-		"to":       to,
-		"currency": s.opts.Currency,
+		"from": from,
+		"to":   to,
 		// The address in the middle of the drawing, which every arrow passes
 		// through.
 		"gateway_url": s.gatewayURL(r),

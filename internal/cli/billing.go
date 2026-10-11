@@ -92,10 +92,10 @@ func (r *billingRun) report(ctx context.Context) error {
 }
 
 type billingResponse struct {
-	Month    string         `json:"month"`
-	Payments bool           `json:"payments"`
-	Data     []billingRow   `json:"data"`
-	Totals   []billingTotal `json:"totals"`
+	Month    string       `json:"month"`
+	Payments bool         `json:"payments"`
+	Data     []billingRow `json:"data"`
+	Total    billingTotal `json:"total"`
 }
 
 type billingRow struct {
@@ -106,7 +106,6 @@ type billingRow struct {
 }
 
 type billingTotal struct {
-	Currency       string `json:"currency"`
 	Calls          int64  `json:"calls"`
 	Micros         int64  `json:"micros"`
 	ProviderMicros *int64 `json:"provider_micros"`
@@ -135,35 +134,27 @@ func printBilling(w *table, res billingResponse) {
 		_, _ = fmt.Fprintf(w, "%s\t%s/%s\t%d\t%d\t%d\t%d\t%d\t%s", org, b.Provider,
 			b.BackendModel, b.Calls, b.InputTokens, b.CachedInputTokens, b.CacheWriteTokens,
 			b.OutputTokens,
-			money(b.Micros, b.Currency))
+			chf(b.Micros))
 		if res.Payments {
 			_, _ = fmt.Fprintf(w, "\t%s", chf(b.CreditMicros))
 		}
 		if operator {
-			_, _ = fmt.Fprintf(w, "\t%s\t%s", money(*b.ProviderMicros, b.Currency),
-				money(*b.MarginMicros, b.Currency))
+			_, _ = fmt.Fprintf(w, "\t%s\t%s", chf(*b.ProviderMicros), chf(*b.MarginMicros))
 		}
 		_, _ = fmt.Fprintln(w)
 	}
-	for _, t := range res.Totals {
-		_, _ = fmt.Fprintf(w, "total %s\t\t%d\t\t\t\t\t%s", res.Month, t.Calls,
-			money(t.Micros, t.Currency))
-		if res.Payments {
-			_, _ = fmt.Fprint(w, "\t")
-		}
-		if operator {
-			_, _ = fmt.Fprintf(w, "\t%s\t%s", money(*t.ProviderMicros, t.Currency),
-				money(*t.MarginMicros, t.Currency))
-		}
-		_, _ = fmt.Fprintln(w)
+	t := res.Total
+	_, _ = fmt.Fprintf(w, "total %s\t\t%d\t\t\t\t\t%s", res.Month, t.Calls, chf(t.Micros))
+	if res.Payments {
+		_, _ = fmt.Fprint(w, "\t")
 	}
+	if operator {
+		_, _ = fmt.Fprintf(w, "\t%s\t%s", chf(*t.ProviderMicros), chf(*t.MarginMicros))
+	}
+	_, _ = fmt.Fprintln(w)
 }
 
-func money(micros int64, currency string) string {
-	return currency + " " + policy.FormatMicros(micros)
-}
-
-func chf(micros int64) string { return money(micros, "CHF") }
+func chf(micros int64) string { return policy.Currency + " " + policy.FormatMicros(micros) }
 
 // creditResponse is GET /v1/billing/account.
 type creditResponse struct {

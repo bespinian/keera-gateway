@@ -33,7 +33,7 @@ func routerServer(ctx context.Context, t *testing.T, st *store.Store) *Server {
 	if err != nil {
 		t.Fatalf("registry.New: %v", err)
 	}
-	return New(st, reg, nil, nil, Options{OperatorKey: testOperatorKey, Currency: "CHF"},
+	return New(st, reg, nil, nil, Options{OperatorKey: testOperatorKey},
 		slog.New(slog.DiscardHandler))
 }
 

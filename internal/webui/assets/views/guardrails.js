@@ -468,15 +468,11 @@ function render(
         ceilingNote(ceilings, "max_output_tokens", compact),
       ]),
       section("Cost"),
-      field(
-        `Budget (${ctx.currency})`,
-        h("div", { class: "field-row" }, budget, period),
-        [
-          "Past this, requests get a 402 until the period resets. A busy " +
-            "scope can overshoot slightly.",
-          ceilingNote(ceilings, "budget_micros", (v) => money(v, ctx.currency)),
-        ],
-      ),
+      field("Budget (CHF)", h("div", { class: "field-row" }, budget, period), [
+        "Past this, requests get a 402 until the period resets. A busy " +
+          "scope can overshoot slightly.",
+        ceilingNote(ceilings, "budget_micros", money),
+      ]),
       section("Every request", "Applied to each request."),
       field("System prompt", systemPrompt, [
         "Added before the messages on every chat request. The " +
@@ -666,7 +662,7 @@ function renderReadOnly(
       ),
       readRow(
         "Budget",
-        budgetsValue(levels, ctx.currency),
+        budgetsValue(levels),
         "Each budget applies on its own. Past any of them, requests are " +
           "refused until the period resets.",
       ),
@@ -801,7 +797,7 @@ function tightest(levels, field, fmt) {
 /** budgetsValue lists a budget per level rather than one number. Budgets are
  *  the one limit that is not collapsed: an organisation's 10,000 and a project's
  *  1,000 are two caps that both have to hold, not one. */
-function budgetsValue(levels, currency) {
+function budgetsValue(levels) {
   const said = levels.filter((lv) => lv.limits && lv.limits.budget_micros);
   if (!said.length) return h("span", { class: "muted" }, "no budget");
   return h(
@@ -811,7 +807,7 @@ function budgetsValue(levels, currency) {
       h(
         "span",
         {},
-        `${money(lv.limits.budget_micros, currency)} per ${lv.limits.budget_period || "month"}`,
+        `${money(lv.limits.budget_micros)} per ${lv.limits.budget_period || "month"}`,
         h("span", { class: "hint-origin" }, ` - set by ${lv.label}`),
       ),
     ),
@@ -917,13 +913,13 @@ function ceilingSummary(ctx, ceilings) {
       i > 0 ? ", then " : null,
       h("strong", {}, c.label),
       ": ",
-      describe(c.limits, ctx.currency),
+      describe(c.limits),
     ]),
     ". Values here can only narrow this.",
   );
 }
 
-function describe(lim, currency) {
+function describe(lim) {
   const bits = [];
   if (lim.allowed_models) {
     const n = lim.allowed_models.length;
@@ -934,7 +930,7 @@ function describe(lim, currency) {
   if (lim.max_output_tokens) bits.push(`${compact(lim.max_output_tokens)} out`);
   if (lim.budget_micros) {
     bits.push(
-      `${money(lim.budget_micros, currency)} per ${lim.budget_period || "month"}`,
+      `${money(lim.budget_micros)} per ${lim.budget_period || "month"}`,
     );
   }
   if (lim.system_prompt) bits.push("a system prompt");

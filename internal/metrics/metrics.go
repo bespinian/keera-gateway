@@ -201,7 +201,7 @@ func (r *Registry) render(w io.Writer) {
 	filters.counter("keera_filter_runs_total", "Filter runs, by what the filter did.",
 		func(s *series) int64 { return s.count.Load() })
 	filters.counter("keera_filter_cost_micros_total",
-		"What filter models spent, in micro-units of the billing currency.",
+		"What filter models spent, in micro-units of CHF.",
 		func(s *series) int64 { return s.sum.Load() })
 	filters.histogram("keera_filter_duration_seconds",
 		"What a filter added to the request that waited for it.")
@@ -210,7 +210,7 @@ func (r *Registry) render(w io.Writer) {
 	routers.counter("keera_router_decisions_total", "Routing decisions, by where they sent the request.",
 		func(s *series) int64 { return s.count.Load() })
 	routers.counter("keera_router_cost_micros_total",
-		"What deciding cost, in micro-units of the billing currency.",
+		"What deciding cost, in micro-units of CHF.",
 		func(s *series) int64 { return s.sum.Load() })
 	routers.histogram("keera_router_duration_seconds",
 		"What deciding added to the request that waited for it.")

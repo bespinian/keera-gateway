@@ -70,7 +70,7 @@ func sessionFixture(t *testing.T, st *store.Store) (from, to time.Time) {
 
 func sessionServer(t *testing.T, st *store.Store) *httptest.Server {
 	t.Helper()
-	srv := New(st, nil, nil, nil, Options{OperatorKey: testOperatorKey, Currency: "CHF"},
+	srv := New(st, nil, nil, nil, Options{OperatorKey: testOperatorKey},
 		slog.New(slog.DiscardHandler))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
@@ -102,7 +102,6 @@ type sessionList struct {
 	Data       []store.AgentSession     `json:"data"`
 	Totals     store.AgentSessionTotals `json:"totals"`
 	GapSeconds int64                    `json:"gap_seconds"`
-	Currency   string                   `json:"currency"`
 	NextBefore int64                    `json:"next_before"`
 	KeyNames   map[string]string        `json:"key_names"`
 }
@@ -134,9 +133,6 @@ func TestSessionsReportTasksWithTheWindowsTotalsAboveThem(t *testing.T) {
 	// from one that cuts them at an hour.
 	if got.GapSeconds != int64(store.DefaultSessionGap.Seconds()) {
 		t.Errorf("gap = %ds, want the deployment's %s", got.GapSeconds, store.DefaultSessionGap)
-	}
-	if got.Currency != "CHF" {
-		t.Errorf("currency = %q, want CHF", got.Currency)
 	}
 	// Ids alone are not something anybody can act on.
 	if got.KeyNames == nil {
@@ -342,7 +338,7 @@ func TestOneSessionIsReachedFromAnyRequestInIt(t *testing.T) {
 
 // A month of agent work is divided by tasks in a spreadsheet, not in a browser.
 func TestSessionsCSVCarriesTheCostPerTask(t *testing.T) {
-	s := New(nil, nil, nil, nil, Options{Currency: "CHF"}, slog.New(slog.DiscardHandler))
+	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	w := httptest.NewRecorder()
 	start := time.Date(2026, 9, 9, 9, 0, 0, 0, time.UTC)
 

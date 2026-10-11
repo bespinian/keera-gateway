@@ -92,7 +92,6 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request, p *authn.Princ
 	}
 	out := map[string]any{
 		"from": q.From, "to": q.To, "data": rows,
-		"currency": s.opts.Currency,
 		// The gap that produced this grouping. Without it a reader cannot
 		// tell tasks cut at ten minutes from tasks cut at an hour.
 		"gap_seconds": int64(q.Gap.Seconds()),
@@ -175,7 +174,6 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request, p *authn.Princi
 		"session":     session,
 		"requests":    requests,
 		"tool_calls":  tools,
-		"currency":    s.opts.Currency,
 		"gap_seconds": int64(s.opts.SessionGap.Seconds()),
 	}
 	names.addTo(out)
@@ -190,7 +188,7 @@ func (s *Server) sessionsCSV(w http.ResponseWriter, rows []store.AgentSession,
 	cw := beginCSV(w, "keera-sessions-"+time.Now().Format("2006-01-02")+".csv")
 	_ = cw.Write([]string{"started", "ended", "minutes", "requests", "ok", "failed",
 		"refused", "interrupted", "models", "key", "key_id", "project", "user",
-		"input_tokens", "output_tokens", "cost_" + strings.ToLower(s.opts.Currency),
+		"input_tokens", "output_tokens", "cost",
 		"last_status", "last_error", "session_id", "named_by_client"})
 	for _, a := range rows {
 		_ = cw.Write([]string{

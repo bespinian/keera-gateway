@@ -25,7 +25,7 @@ func TestWriteEventsTakesTheCredit(t *testing.T) {
 	f := newFixture(t, st, ctx)
 	bill := func(credit int64) []policy.BillLine {
 		return []policy.BillLine{{Alias: "fast", Provider: "anthropic", BackendModel: "claude-haiku-4-5",
-			Currency: "USD", Micros: credit * 2, CreditMicros: credit}}
+			Micros: credit * 2, CreditMicros: credit}}
 	}
 	if _, err := st.Grant(ctx, Payment{ID: id.New("pay"), OrgID: f.orgID,
 		Micros: 10_000_000, Actor: "operator", Note: "trial"}); err != nil {
@@ -63,7 +63,7 @@ func TestACheckIsBilledWithoutAUsageRow(t *testing.T) {
 	now := time.Now()
 	if err := st.WriteEvents(ctx, []Event{{TS: now, OrgID: f.orgID, BillsOnly: true,
 		Bills: []policy.BillLine{{Alias: "fast", Provider: "anthropic",
-			BackendModel: "claude-haiku-4-5", Currency: "USD", Micros: 20, CreditMicros: 10}}},
+			BackendModel: "claude-haiku-4-5", Micros: 20, CreditMicros: 10}}},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}

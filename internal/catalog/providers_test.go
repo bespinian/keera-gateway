@@ -354,8 +354,8 @@ func checkProvider(t *testing.T, p Provider) {
 		// The data plane appends the path, so this would double the slash.
 		t.Errorf("endpoint %q has a trailing slash", p.Endpoint)
 	}
-	if p.Currency == "" || len(p.Kinds) == 0 || len(p.Models) == 0 {
-		t.Errorf("entry = %+v, want a currency, a kind and a model", p)
+	if len(p.Kinds) == 0 || len(p.Models) == 0 {
+		t.Errorf("entry = %+v, want a kind and a model", p)
 	}
 	// Every model declared against it takes this location, so it must be one
 	// the catalogue accepts, and it must not claim to be the deployment's own.
@@ -726,7 +726,7 @@ models:
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if p := models[0].InputMicrosPerMTok; p != 1_000_000 {
+	if p := models[0].InputMicrosPerMTok; p != 920_000 {
 		t.Errorf("input price = %d, want claude-haiku-4-5's", p)
 	}
 }

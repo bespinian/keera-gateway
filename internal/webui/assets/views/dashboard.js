@@ -7,6 +7,7 @@ import {
   compact,
   num,
   money,
+  amount,
   ms,
   tokens,
   go,
@@ -36,7 +37,6 @@ export async function dashboardView(ctx) {
 
   const res = await api.overview(ctx.orgID, since);
   const o = res.overview;
-  const currency = res.currency;
   const names = res.project_names || {};
 
   ctx.setSubtitle(rangeLabel(since));
@@ -69,10 +69,10 @@ export async function dashboardView(ctx) {
     // beside it rather than added to it.
     stat(
       "Cost",
-      money(o.cost_micros, ""),
-      currency,
+      amount(o.cost_micros),
+      "CHF",
       o.subscription_micros
-        ? `+ ${money(o.subscription_micros, currency)} covered by Claude plans`
+        ? `+ ${money(o.subscription_micros)} covered by Claude plans`
         : null,
     ),
     stat("First token", ms(o.ttft_median_ms), null, `p95 ${ms(o.ttft_p95_ms)}`),
@@ -105,11 +105,7 @@ export async function dashboardView(ctx) {
             "No failures",
           ),
     ),
-    h(
-      "div",
-      { class: "card-body" },
-      areaChart(o.series, { currency, bucket: o.bucket }),
-    ),
+    h("div", { class: "card-body" }, areaChart(o.series, { bucket: o.bucket })),
   );
 
   const panels = h(
@@ -135,7 +131,7 @@ export async function dashboardView(ctx) {
         barList(o.top_projects, {
           label: (r) => names[r.group] || (r.group ? r.group : "No project"),
           value: (r) => r.cost_micros,
-          currency,
+          cost: true,
         }),
       ),
     ),

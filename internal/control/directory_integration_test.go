@@ -56,7 +56,7 @@ func signedInThroughADirectory(t *testing.T, refreshToken string) directorySetup
 		t.Fatal(err)
 	}
 	srv := New(st, nil, nil, nil, Options{
-		OperatorKey: testOperatorKey, Currency: "CHF", Secrets: box,
+		OperatorKey: testOperatorKey, Secrets: box,
 		Providers: authn.Providers{provider},
 	}, slog.New(slog.DiscardHandler))
 	ts := httptest.NewServer(srv.Handler())

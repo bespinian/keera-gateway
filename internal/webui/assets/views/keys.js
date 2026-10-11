@@ -64,7 +64,6 @@ export async function keysView(ctx) {
   // Only an administrator issues keys, so each has the project and guardrails
   // they chose. A member renames, rotates and revokes their own.
   const canRotateOwn = !canEdit && ctx.state.me.can_manage_own_keys;
-  const currency = keysRes.currency || ctx.currency;
 
   const live = keys.filter((k) => stateOf(k) === "active").length;
   ctx.setSubtitle(`${live} active of ${keys.length}`);
@@ -184,7 +183,7 @@ export async function keysView(ctx) {
                 h(
                   "span",
                   { class: "faint nowrap", style: { fontSize: "11.5px" } },
-                  money(k.spend_micros, currency),
+                  money(k.spend_micros),
                 ),
                 k.subscription_micros
                   ? h(
@@ -196,7 +195,7 @@ export async function keysView(ctx) {
                           "What the Claude plan paid for, at API prices. " +
                           "No budget is charged it.",
                       },
-                      `${money(k.subscription_micros, currency)} on the plan`,
+                      `${money(k.subscription_micros)} on the plan`,
                     )
                   : null,
                 planUsed(k.plan),
@@ -210,7 +209,7 @@ export async function keysView(ctx) {
           const bits = summarise(k.limits || {});
           if (k.limits && k.limits.budget_micros) {
             bits.push(
-              `${money(k.limits.budget_micros, currency)}/${k.limits.budget_period || "month"}`,
+              `${money(k.limits.budget_micros)}/${k.limits.budget_period || "month"}`,
             );
           }
           if (k.limits && k.limits.allowed_models) {

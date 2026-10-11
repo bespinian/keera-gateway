@@ -81,10 +81,6 @@ type Config struct {
 	// changing it re-cuts past sessions too. See docs/sessions.md.
 	SessionGap time.Duration
 
-	// Currency is a label carried into reports. All money is stored as integer
-	// micro-units of it.
-	Currency string
-
 	// Platform is the deployment's own provider keys. An organisation's
 	// models of such a provider use it and are billed for it. See
 	// docs/billing.md.
@@ -148,7 +144,6 @@ func Load() (Config, error) {
 		UsageRetention:        envDuration("KEERA_USAGE_RETENTION", 0),
 		AuditRetention:        envDuration("KEERA_AUDIT_RETENTION", 0),
 		SessionGap:            envDuration("KEERA_SESSION_GAP", store.DefaultSessionGap),
-		Currency:              env("KEERA_CURRENCY", "CHF"),
 		RedisPrefix:           env("KEERA_REDIS_PREFIX", ratelimit.DefaultRedisPrefix),
 		Sandbox:               sandboxConfig(),
 		UI:                    envBool("KEERA_UI", true),

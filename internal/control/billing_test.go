@@ -44,7 +44,7 @@ func platformServer(ctx context.Context, t *testing.T, st *store.Store) *Server 
 		t.Fatal(err)
 	}
 	return New(st, platformRegistry(ctx, t, st), nil, nil, Options{OperatorKey: testOperatorKey,
-		Currency: "CHF", Secrets: box, Platform: testPlatform}, slog.New(slog.DiscardHandler))
+		Secrets: box, Platform: testPlatform}, slog.New(slog.DiscardHandler))
 }
 
 const haiku = `{"provider":"anthropic","backend_model":"claude-haiku-4-5",
@@ -170,7 +170,7 @@ func TestTheMarginIsForOperatorsOnly(t *testing.T) {
 	s := platformServer(ctx, t, st)
 	sept := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
 	line := policy.BillLine{Alias: "fast", Provider: "anthropic", BackendModel: "claude-haiku-4-5",
-		Currency: "USD", InputTokens: 1000, OutputTokens: 100, Micros: 1500, ProviderMicros: 1200}
+		InputTokens: 1000, OutputTokens: 100, Micros: 1500, ProviderMicros: 1200}
 	events := []store.Event{
 		{TS: sept, OrgID: "org_1", Alias: "fast", Status: 200, Bills: []policy.BillLine{line, line}},
 		{TS: sept, OrgID: "org_2", Alias: "fast", Status: 200, Bills: []policy.BillLine{line}},
@@ -218,14 +218,14 @@ func TestTheMarginIsForOperatorsOnly(t *testing.T) {
 	if rows := out["data"].([]any); len(rows) != 2 {
 		t.Fatalf("operator rows = %v, want both organisations", rows)
 	}
-	total := out["totals"].([]any)[0].(map[string]any)
+	total := out["total"].(map[string]any)
 	if total["micros"] != 4500.0 || total["provider_micros"] != 3600.0 || total["margin_micros"] != 900.0 {
 		t.Errorf("total = %v", total)
 	}
 
 	w = invoke(s.billing, operator(), http.MethodGet, "/v1/billing?month=2026-09&format=csv", "")
 	if !strings.Contains(w.Body.String(), "provider_cost,margin") ||
-		!strings.Contains(w.Body.String(), "2026-09,org_1,Example Bank,anthropic,claude-haiku-4-5,USD,2,2000,0,0,200,0.003,0.0024,0.0006") {
+		!strings.Contains(w.Body.String(), "2026-09,org_1,Example Bank,anthropic,claude-haiku-4-5,2,2000,0,0,200,0.003,0.0024,0.0006") {
 		t.Errorf("csv = %s", w.Body)
 	}
 	if w := invoke(s.billing, operator(), http.MethodGet, "/v1/billing?month=september", ""); w.Code != http.StatusBadRequest {

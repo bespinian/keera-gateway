@@ -20,9 +20,8 @@ type billingLine struct {
 	MarginMicros   *int64 `json:"margin_micros,omitempty"`
 }
 
-// billingTotal is the bill summed per currency. Nothing is converted.
+// billingTotal is the whole bill.
 type billingTotal struct {
-	Currency       string `json:"currency"`
 	Calls          int64  `json:"calls"`
 	Micros         int64  `json:"micros"`
 	ProviderMicros *int64 `json:"provider_micros,omitempty"`
@@ -56,14 +55,14 @@ func (s *Server) billing(w http.ResponseWriter, r *http.Request, p *authn.Princi
 	}
 	operator := p.Unrestricted()
 	lines := make([]billingLine, 0, len(rows))
-	var totals []billingTotal
+	var total billingTotal
 	for _, row := range rows {
 		line := billingLine{BillingRow: row}
 		if operator {
 			line.ProviderMicros, line.MarginMicros = costAndMargin(row.Micros, row.ProviderMicros)
 		}
 		lines = append(lines, line)
-		totals = addTotal(totals, row, operator)
+		total.add(row, operator)
 	}
 	month := from.Format("2006-01")
 	// What came out of prepaid credit only means something on a deployment
@@ -74,7 +73,7 @@ func (s *Server) billing(w http.ResponseWriter, r *http.Request, p *authn.Princi
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"month": month, "from": from, "to": to, "data": lines, "totals": totals,
+		"month": month, "from": from, "to": to, "data": lines, "total": total,
 		"payments": payments,
 	})
 }
@@ -84,16 +83,8 @@ func costAndMargin(micros, providerMicros int64) (*int64, *int64) {
 	return &providerMicros, &margin
 }
 
-// addTotal adds one row to the total of its currency.
-func addTotal(totals []billingTotal, row store.BillingRow, operator bool) []billingTotal {
-	i := 0
-	for i < len(totals) && totals[i].Currency != row.Currency {
-		i++
-	}
-	if i == len(totals) {
-		totals = append(totals, billingTotal{Currency: row.Currency})
-	}
-	t := &totals[i]
+// add adds one row to the total.
+func (t *billingTotal) add(row store.BillingRow, operator bool) {
 	t.Calls += row.Calls
 	t.Micros += row.Micros
 	if operator {
@@ -103,7 +94,6 @@ func addTotal(totals []billingTotal, row store.BillingRow, operator bool) []bill
 		}
 		t.ProviderMicros, t.MarginMicros = costAndMargin(t.Micros, cost+row.ProviderMicros)
 	}
-	return totals
 }
 
 // parseMonth reads a month written as YYYY-MM, in UTC like the budgets.
@@ -121,17 +111,17 @@ func parseMonth(raw string, now time.Time) (time.Time, error) {
 
 func billingCSV(w http.ResponseWriter, month string, lines []billingLine, operator, payments bool) {
 	cw := beginCSV(w, "keera-billing-"+month+".csv")
-	head := []string{"month", "org_id", "org_name", "provider", "model", "currency", "calls",
+	head := []string{"month", "org_id", "org_name", "provider", "model", "calls",
 		"input_tokens", "cached_input_tokens", "cache_write_tokens", "output_tokens", "amount"}
 	if payments {
-		head = append(head, "from_credit_chf")
+		head = append(head, "from_credit")
 	}
 	if operator {
 		head = append(head, "provider_cost", "margin")
 	}
 	_ = cw.Write(head)
 	for _, l := range lines {
-		rec := []string{month, l.OrgID, l.OrgName, l.Provider, l.BackendModel, l.Currency,
+		rec := []string{month, l.OrgID, l.OrgName, l.Provider, l.BackendModel,
 			strconv.FormatInt(l.Calls, 10),
 			strconv.FormatInt(l.InputTokens, 10),
 			strconv.FormatInt(l.CachedInputTokens, 10),

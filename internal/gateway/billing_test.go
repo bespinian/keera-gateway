@@ -16,8 +16,7 @@ import (
 // onPlatformKey puts one of the harness's models on the deployment's key.
 func onPlatformKey(h *harness, alias string) {
 	m := h.src.models[alias]
-	m.Billing = &policy.Billing{Provider: "anthropic", Currency: "USD", DiscountBP: 2000,
-		CreditRate: 500_000}
+	m.Billing = &policy.Billing{Provider: "anthropic", DiscountBP: 2000, Credit: true}
 	m.PlatformKey = true
 	h.src.models[alias] = m
 }
@@ -36,7 +35,7 @@ func TestARequestToAModelOnTheDeploymentsKeyIsBilled(t *testing.T) {
 	// 10 in at 1.00 and 5 out at 4.00, less 20% for the provider.
 	b := ev.Bills[0]
 	if b.Alias != "keera-code" || b.InputTokens != 10 || b.OutputTokens != 5 ||
-		b.Micros != 30 || b.ProviderMicros != 24 || b.Currency != "USD" {
+		b.Micros != 30 || b.ProviderMicros != 24 {
 		t.Errorf("bill = %+v", b)
 	}
 }
@@ -78,14 +77,14 @@ func TestACallOnTheDeploymentsKeyTakesTheCredit(t *testing.T) {
 	h.post(t, "/v1/chat/completions",
 		`{"model":"keera-code","messages":[{"role":"user","content":"hunter2"}]}`)
 
-	// USD 30 micros at CHF 0.50 a dollar.
-	if b := h.sink.last(t).Bills[0]; b.CreditMicros != 15 {
-		t.Errorf("credit = %d, want 15", b.CreditMicros)
+	// The list price, 30 micros.
+	if b := h.sink.last(t).Bills[0]; b.CreditMicros != 30 {
+		t.Errorf("credit = %d, want 30", b.CreditMicros)
 	}
 	h.budgets.mu.Lock()
 	defer h.budgets.mu.Unlock()
-	if h.budgets.credited != 15 {
-		t.Errorf("credited = %d, want 15", h.budgets.credited)
+	if h.budgets.credited != 30 {
+		t.Errorf("credited = %d, want 30", h.budgets.credited)
 	}
 }
 

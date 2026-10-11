@@ -66,7 +66,7 @@ func membershipServer(t *testing.T, adminGroups bool) orgsSetup {
 		t.Fatal(err)
 	}
 	srv := New(st, nil, nil, nil, Options{
-		OperatorKey: testOperatorKey, Currency: "CHF", Secrets: box, Providers: providers,
+		OperatorKey: testOperatorKey, Secrets: box, Providers: providers,
 	}, slog.New(slog.DiscardHandler))
 	s.ts = httptest.NewServer(srv.Handler())
 	t.Cleanup(s.ts.Close)

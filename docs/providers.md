@@ -172,17 +172,14 @@ Read both before you offer a hosted model to anyone.
 
 ## What the prices are, and are not
 
-The provider table holds each provider's published list price, in its own
-currency, as micro-units per million tokens. Use it as a starting point for
+The provider table holds each provider's published list price, in CHF, as
+micro-units per million tokens. Use it as a starting point for
 showback, not as a contract.
 
 Each model has four prices: input, output, cached input (an input token the
 provider served from its prompt cache) and cache write (an input token the
 provider wrote to it).
 
-- **The currency may not be yours.** Anthropic and OpenAI are in USD, Infomaniak,
-  stepping stone, Phoeniqs and CSCS in CHF. Nothing is converted. Override the prices on the
-  entry.
 - **List price is not your price.** Put a negotiated rate, a discount or an
   internal cross-charge on the entry. A model on the deployment's own key is
   the exception: it is always billed at list price ([billing.md](billing.md)).
@@ -276,10 +273,6 @@ Must not be sent client data."
 ```
 
 ## Known rough edges
-
-`keera model providers`, and the panel next to each provider, show what to
-know about each one: pricing quirks, model ids, beta models and what the table
-leaves out. Below is what those notes do not say.
 
 ### Anthropic and OpenAI requests are forwarded as they are
 

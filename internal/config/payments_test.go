@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// A PostFinance Checkout account switches payments on, and with it what each
-// provider's calls take from the credit, in francs.
+// A PostFinance Checkout account switches payments on, and with it each
+// provider key's calls take from the credit.
 func TestAPostFinanceAccountSwitchesPaymentsOn(t *testing.T) {
 	c, err := loadWith(t, valid(map[string]string{
 		"KEERA_PUBLIC_URL":                 "https://keera.example",
@@ -16,7 +16,6 @@ func TestAPostFinanceAccountSwitchesPaymentsOn(t *testing.T) {
 		"KEERA_POSTFINANCE_SPACE_ID":       "4711",
 		"KEERA_POSTFINANCE_USER_ID":        "123456",
 		"KEERA_POSTFINANCE_AUTH_KEY":       "c2VjcmV0",
-		"KEERA_BILLING_CHF_PER_USD":        "0.8",
 		"KEERA_BILLING_VAT":                "8.1",
 	}))
 	if err != nil {
@@ -30,11 +29,8 @@ func TestAPostFinanceAccountSwitchesPaymentsOn(t *testing.T) {
 		string(p.PostFinance.AuthKey) != "secret" || p.VATBP != 810 {
 		t.Errorf("payments = %+v", p)
 	}
-	if got := c.Platform["anthropic"].CreditRate; got != 800_000 {
-		t.Errorf("a dollar takes %d from the credit, want CHF 0.80", got)
-	}
-	if got := c.Platform["cscs"].CreditRate; got != 1_000_000 {
-		t.Errorf("a franc takes %d from the credit, want CHF 1.00", got)
+	if !c.Platform["anthropic"].Credit || !c.Platform["cscs"].Credit {
+		t.Errorf("platform = %+v, want every key to take from the credit", c.Platform)
 	}
 }
 
@@ -43,8 +39,8 @@ func TestWithoutAnAccountNothingIsTakenFromTheCredit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if c.Payments != nil || c.Platform["cscs"].CreditRate != 0 {
-		t.Errorf("payments = %+v, rate %d; want none", c.Payments, c.Platform["cscs"].CreditRate)
+	if c.Payments != nil || c.Platform["cscs"].Credit {
+		t.Errorf("payments = %+v, credit %t; want none", c.Payments, c.Platform["cscs"].Credit)
 	}
 }
 
@@ -70,17 +66,13 @@ func TestAPaymentSettingThatCannotWorkStopsTheStart(t *testing.T) {
 		want string
 	}{
 		{"half an account", map[string]string{"KEERA_POSTFINANCE_SPACE_ID": "1"}, "all three"},
-		{"rate without an account", map[string]string{"KEERA_BILLING_CHF_PER_USD": "0.8"},
-			"KEERA_BILLING_CHF_PER_USD does nothing"},
+		{"VAT without an account", map[string]string{"KEERA_BILLING_VAT": "8.1"},
+			"KEERA_BILLING_VAT does nothing"},
 		{"space not a number", with("KEERA_POSTFINANCE_SPACE_ID", "main"), "KEERA_POSTFINANCE_SPACE_ID"},
 		{"key not base64", with("KEERA_POSTFINANCE_AUTH_KEY", "not base64!"), "base64"},
 		{"no provider key", with("KEERA_PROVIDER_CSCS_API_KEY", ""), "KEERA_PROVIDER_<NAME>_API_KEY"},
 		{"no https address", with("KEERA_PUBLIC_URL", "http://keera.example"), "KEERA_PUBLIC_URL"},
 		{"not this machine", with("KEERA_PUBLIC_URL", "http://localhost.example:8080"), "KEERA_PUBLIC_URL"},
-		{"dollars without a rate", with("KEERA_PROVIDER_ANTHROPIC_API_KEY", "sk"),
-			"KEERA_BILLING_CHF_PER_USD is required"},
-		{"rate not a number", with("KEERA_PROVIDER_ANTHROPIC_API_KEY", "sk",
-			"KEERA_BILLING_CHF_PER_USD", "eighty"), "0.80"},
 		{"VAT out of range", with("KEERA_BILLING_VAT", "120"), "KEERA_BILLING_VAT"},
 	}
 	for _, tt := range tests {

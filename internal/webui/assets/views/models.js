@@ -201,7 +201,7 @@ export async function modelsView(ctx) {
         cell: (m) => ttftCell(stats[m.alias]),
       },
       {
-        label: `Price / Mtok (${ctx.currency})`,
+        label: "Price / Mtok (CHF)",
         num: true,
         shrink: true,
         // By what a prompt costs, which is the number a catalogue is read for.
@@ -212,7 +212,7 @@ export async function modelsView(ctx) {
             ? h(
                 "span",
                 { class: "nowrap muted" },
-                `${listPrice(m.input_micros_per_mtok, "")} in · ${listPrice(m.output_micros_per_mtok, "")} out`,
+                `${listPrice(m.input_micros_per_mtok)} in · ${listPrice(m.output_micros_per_mtok)} out`,
               )
             : h("span", { class: "faint" }, "not billed"),
       },
@@ -325,10 +325,8 @@ export async function providerModelsView(ctx) {
       `${providers.length} ${plural(providers.length, "provider")}`,
   );
 
-  // Prices are in the provider's own currency, which is not always this
-  // deployment's.
-  const price = (v, p) =>
-    v ? h("span", { class: "nowrap" }, listPrice(v, p.currency)) : dash();
+  const price = (v) =>
+    v ? h("span", { class: "nowrap" }, `${listPrice(v)} CHF`) : dash();
 
   const head = h(
     "div",
@@ -338,7 +336,7 @@ export async function providerModelsView(ctx) {
       "div",
       { class: "muted", style: { marginBottom: "16px" } },
       "The models the hosted providers offer. Prices are list prices per " +
-        "million tokens, in the provider's currency. With a hosted " +
+        "million tokens, in CHF. With a hosted " +
         "provider, prompts leave your infrastructure.",
     ),
   );
@@ -394,28 +392,28 @@ export async function providerModelsView(ctx) {
         num: true,
         shrink: true,
         sortKey: (r) => r.m.input_micros_per_mtok || null,
-        cell: (r) => price(r.m.input_micros_per_mtok, r.p),
+        cell: (r) => price(r.m.input_micros_per_mtok),
       },
       {
         label: "Cached input",
         num: true,
         shrink: true,
         sortKey: (r) => r.m.cached_input_micros_per_mtok || null,
-        cell: (r) => price(r.m.cached_input_micros_per_mtok, r.p),
+        cell: (r) => price(r.m.cached_input_micros_per_mtok),
       },
       {
         label: "Cache write",
         num: true,
         shrink: true,
         sortKey: (r) => r.m.cache_write_micros_per_mtok || null,
-        cell: (r) => price(r.m.cache_write_micros_per_mtok, r.p),
+        cell: (r) => price(r.m.cache_write_micros_per_mtok),
       },
       {
         label: "Output",
         num: true,
         shrink: true,
         sortKey: (r) => r.m.output_micros_per_mtok || null,
-        cell: (r) => price(r.m.output_micros_per_mtok, r.p),
+        cell: (r) => price(r.m.output_micros_per_mtok),
       },
       {
         label: "In use as",
@@ -628,13 +626,13 @@ function viewModel(ctx, m) {
         ),
       ),
       readRow(
-        `Price per million tokens (${ctx.currency})`,
+        "Price per million tokens (CHF)",
         m.input_micros_per_mtok || m.output_micros_per_mtok
           ? h(
               "span",
               { class: "nowrap" },
-              `${listPrice(m.input_micros_per_mtok, "")} in · ` +
-                `${listPrice(m.output_micros_per_mtok, "")} out`,
+              `${listPrice(m.input_micros_per_mtok)} in · ` +
+                `${listPrice(m.output_micros_per_mtok)} out`,
             )
           : h("span", { class: "muted" }, "not billed"),
         m.subscription
@@ -648,12 +646,12 @@ function viewModel(ctx, m) {
       ),
       m.long_prompt
         ? readRow(
-            `Price for long prompts (${ctx.currency})`,
+            "Price for long prompts (CHF)",
             h(
               "span",
               { class: "nowrap" },
-              `${listPrice(m.long_prompt.input_micros_per_mtok, "")} in · ` +
-                `${listPrice(m.long_prompt.output_micros_per_mtok, "")} out`,
+              `${listPrice(m.long_prompt.input_micros_per_mtok)} in · ` +
+                `${listPrice(m.long_prompt.output_micros_per_mtok)} out`,
             ),
             `What a request costs instead when its prompt is over ` +
               `${num(m.long_prompt.above_tokens)} tokens.`,
@@ -915,8 +913,8 @@ function productIDOf(p, backends) {
 
 // What a provider's table fills in. Each of these keeps a line under its input
 // naming where the value came from, and - once it has been edited - the value
-// it replaced, for the hosted cases that still show these fields: a model this
-// build cannot price, and one priced in the wrong currency.
+// it replaced, for the hosted case that still shows these fields: a model this
+// build cannot price.
 const PRESET_FIELDS = [
   {
     key: "backendModel",
@@ -1212,14 +1210,14 @@ function editModel(ctx, existing, providers, pick) {
       h(
         "div",
         { class: "field" },
-        h("label", {}, `Input price / Mtok (${ctx.currency})`),
+        h("label", {}, "Input price / Mtok (CHF)"),
         priceIn,
         marks.priceIn,
       ),
       h(
         "div",
         { class: "field" },
-        h("label", {}, `Output price / Mtok (${ctx.currency})`),
+        h("label", {}, "Output price / Mtok (CHF)"),
         priceOut,
         marks.priceOut,
       ),
@@ -1234,7 +1232,7 @@ function editModel(ctx, existing, providers, pick) {
       h(
         "div",
         { class: "field" },
-        h("label", {}, `Cached input price / Mtok (${ctx.currency})`),
+        h("label", {}, "Cached input price / Mtok (CHF)"),
         priceCached,
         h(
           "div",
@@ -1248,7 +1246,7 @@ function editModel(ctx, existing, providers, pick) {
       h(
         "div",
         { class: "field" },
-        h("label", {}, `Cache write price / Mtok (${ctx.currency})`),
+        h("label", {}, "Cache write price / Mtok (CHF)"),
         priceWrite,
         h(
           "div",
@@ -1348,8 +1346,7 @@ function editModel(ctx, existing, providers, pick) {
     h(
       "div",
       { class: "hint" },
-      "Provided by Keera directly. Use is billed to your organisation at " +
-        "the provider's list prices.",
+      "Provided by Keera directly. Use is billed to your organisation.",
     ),
   );
   // A deployment without Claude subscriptions offers none. A model that is
@@ -1622,10 +1619,8 @@ function isModel(mm, id) {
 // so.
 //
 // The rest are nobody else's to fill. A model this build has no entry for has
-// no context window and no prices in the table, so it has none to show; and a
-// provider quoting a currency this deployment does not account in has two
-// prices that are the wrong number until somebody converts them.
-function providerAnswers(p, known, currency) {
+// no context window and no prices in the table, so it has none to show.
+function providerAnswers(p, known) {
   return {
     backends: true,
     location: true,
@@ -1640,18 +1635,14 @@ function providerAnswers(p, known, currency) {
     kind: (p.kinds || []).length === 1,
     backendModel: !!known,
     maxContext: !!known,
-    priceIn: !!known && p.currency === currency,
-    priceOut: !!known && p.currency === currency,
+    priceIn: !!known,
+    priceOut: !!known,
     // A provider that publishes no cached-input rate has not answered this
     // one: it is left live, and left blank those tokens are charged at the
     // input price.
-    priceCached:
-      !!known &&
-      !!known.cached_input_micros_per_mtok &&
-      p.currency === currency,
+    priceCached: !!known && !!known.cached_input_micros_per_mtok,
     // The same for a provider that charges nothing extra for a cache write.
-    priceWrite:
-      !!known && !!known.cache_write_micros_per_mtok && p.currency === currency,
+    priceWrite: !!known && !!known.cache_write_micros_per_mtok,
   };
 }
 
@@ -1701,9 +1692,7 @@ function hostedFields(ctx, providers, form) {
   // and having no provider table behind it is the whole difference.
   //
   // Each carries one line: what a provider is, in its own table's words, and
-  // what an inference plane of your own is in the panel's. The caveats - the
-  // prices, what an endpoint does not do - are the provider's note, which the
-  // form shows the moment the tile is clicked.
+  // what an inference plane of your own is in the panel's.
   const places = [
     {
       p: null,
@@ -1750,7 +1739,7 @@ function hostedFields(ctx, providers, form) {
     ),
   );
   // What follows a hosted provider: which of its models this alias serves, and
-  // what is worth knowing about the endpoint before that is answered.
+  // a word when this build does not know the one picked.
   const block = h("div", { hidden: true }, field("Model", model), note);
   // Its own place in the form, far from the block above, so hiding that block
   // is not what hides it - see choose().
@@ -1760,8 +1749,6 @@ function hostedFields(ctx, providers, form) {
 
   const chosen = () => (state.place ? state.place.p : null);
 
-  // A provider's warnings are about its endpoint, so they are worth reading
-  // before a model is picked rather than after.
   const paintNote = () => {
     const p = chosen();
     if (!p) return;
@@ -1770,18 +1757,6 @@ function hostedFields(ctx, providers, form) {
     // does not lose what somebody typed.
     productIDField.hidden = !p.needs_product_id;
     const lines = [];
-    if (p.note) lines.push(h("div", { class: "banner banner-warn" }, p.note));
-    if (p.currency !== ctx.currency) {
-      lines.push(
-        h(
-          "div",
-          { class: "banner banner-warn" },
-          `Priced in ${p.currency}, but this deployment uses ` +
-            `${ctx.currency}. Convert the prices under Advanced options, or ` +
-            `budgets for this model will be wrong.`,
-        ),
-      );
-    }
     if (state.preset && !state.preset.m) {
       lines.push(
         h(
@@ -1816,7 +1791,7 @@ function hostedFields(ctx, providers, form) {
   const answered = () => {
     const { p, m } = state.preset || {};
     if (!state.hosted || !p) return null;
-    const fixed = providerAnswers(p, m, ctx.currency);
+    const fixed = providerAnswers(p, m);
     for (const key of state.overridden) fixed[key] = false;
     // On the operator's key, the control plane sets the endpoint and the list
     // prices whatever is sent, so they cannot be overridden here either.
@@ -1929,8 +1904,7 @@ function hostedFields(ctx, providers, form) {
     ),
   );
   const chosenRow = h("div", { class: "tile-chosen", hidden: true });
-  // What to weigh before clicking one of them, and only then: once a provider
-  // is chosen its own note says the same thing in its own words, and over the
+  // What to weigh before clicking one of them, and only then: over the
   // self-hosted row it is a caution about a choice that was not made.
   const caution = h(
     "div",

@@ -72,7 +72,6 @@ func sessionList(ctx context.Context, c *client, sq sessionQuery, asJSON bool) e
 type sessionsResponse struct {
 	Data       []store.AgentSession     `json:"data"`
 	Totals     store.AgentSessionTotals `json:"totals"`
-	Currency   string                   `json:"currency"`
 	GapSeconds int64                    `json:"gap_seconds"`
 	KeyNames   map[string]string        `json:"key_names"`
 	UserNames  map[string]string        `json:"user_names"`
@@ -84,7 +83,7 @@ func printSessions(w *table, res sessionsResponse, since time.Duration) {
 		return
 	}
 	w.header(fmt.Sprintf("SESSION\tSTARTED\tTOOK\tREQUESTS\tMODELS\tWHO\tCOST (%s)\tENDED",
-		res.Currency))
+		policy.Currency))
 	for _, s := range res.Data {
 		who := res.UserNames[s.UserID]
 		if who == "" {
@@ -104,9 +103,9 @@ func printSessions(w *table, res sessionsResponse, since time.Duration) {
 		t.Sessions, t.Requests, shortDuration(since), len(res.Data))
 	_, _ = fmt.Fprintf(w, "middle session: %d requests, %s, %s %s\n",
 		t.MedianRequests, shortDuration(time.Duration(t.MedianDurationMS)*time.Millisecond),
-		policy.FormatMicros(t.MedianCostMicros), res.Currency)
+		policy.FormatMicros(t.MedianCostMicros), policy.Currency)
 	_, _ = fmt.Fprintf(w, "worst session: %d requests, %s %s; %d of %d had problems\n",
-		t.LongestRequests, policy.FormatMicros(t.CostliestMicros), res.Currency,
+		t.LongestRequests, policy.FormatMicros(t.CostliestMicros), policy.Currency,
 		t.Unhappy, t.Sessions)
 	_, _ = fmt.Fprintf(w, "grouped by conversation, cut after %s idle\n",
 		shortDuration(time.Duration(res.GapSeconds)*time.Second))
@@ -134,7 +133,6 @@ type sessionResponse struct {
 	Session      store.AgentSession  `json:"session"`
 	Requests     []store.Request     `json:"requests"`
 	ToolCalls    []store.ToolCallRow `json:"tool_calls"`
-	Currency     string              `json:"currency"`
 	GapSeconds   int64               `json:"gap_seconds"`
 	KeyNames     map[string]string   `json:"key_names"`
 	ProjectNames map[string]string   `json:"project_names"`
@@ -152,7 +150,7 @@ func printSession(w *table, res sessionResponse) {
 	show(w, "project", dash(labelled(res.ProjectNames, s.ProjectID)))
 	show(w, "who", dash(labelled(res.UserNames, s.UserID)))
 	_, _ = fmt.Fprintf(w, "tokens\t%d in, %d out\n", s.InputTokens, s.OutputTokens)
-	_, _ = fmt.Fprintf(w, "cost\t%s %s\n", policy.FormatMicros(s.CostMicros), res.Currency)
+	_, _ = fmt.Fprintf(w, "cost\t%s %s\n", policy.FormatMicros(s.CostMicros), policy.Currency)
 	show(w, "ended", endedAs(s))
 	if s.LastError != "" {
 		show(w, "message", oneLine(s.LastError))
@@ -160,7 +158,7 @@ func printSession(w *table, res sessionResponse) {
 
 	// Oldest first: a task that went wrong is read from its beginning.
 	_, _ = fmt.Fprintln(w)
-	w.header(fmt.Sprintf("REQUEST\tWHEN\tMODEL\tSTATUS\tCOST (%s)\tFIRST TOKEN\tMESSAGE", res.Currency))
+	w.header(fmt.Sprintf("REQUEST\tWHEN\tMODEL\tSTATUS\tCOST (%s)\tFIRST TOKEN\tMESSAGE", policy.Currency))
 	for _, r := range res.Requests {
 		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%dms\t%s\n",
 			r.ID, r.TS.Local().Format("15:04:05"), dash(r.Alias), httpStatus(r.Status),

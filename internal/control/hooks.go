@@ -34,7 +34,6 @@ func (s *Server) writeHookList(w http.ResponseWriter, r *http.Request, data any,
 			return
 		}
 		out["stats"], out["from"], out["to"] = st, from, to
-		out["currency"] = s.opts.Currency
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
@@ -61,7 +60,7 @@ func hookReport[R, H any](s *Server, w http.ResponseWriter, r *http.Request, p *
 		s.fail(w, err)
 		return nil, "", false
 	}
-	out = map[string]any{"report": rep, "currency": s.opts.Currency}
+	out = map[string]any{"report": rep}
 	h, err := hook(r.Context(), orgID, alias)
 	switch {
 	case err == nil:

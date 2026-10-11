@@ -60,7 +60,7 @@ func registerModelFlags(fs *flag.FlagSet) *modelFlags {
 		"where the model runs, such as ch, usa or onprem (default: the provider's; "+
 			"without one, onprem for a backend inside your network)")
 	fs.Float64Var(&f.priceIn, "price-in", -1,
-		"input price per million tokens, in whole currency units (0 for unbilled)")
+		"input price per million tokens, in CHF (0 for unbilled)")
 	fs.Float64Var(&f.priceOut, "price-out", -1, "output price per million tokens")
 	fs.Float64Var(&f.priceCached, "price-cached", -1,
 		"price per million input tokens the provider served from its own prompt cache "+
@@ -162,7 +162,7 @@ func clearModelValues(m catalog.Model) catalog.Model {
 	return m
 }
 
-// setPrice applies a price flag, given in whole currency units per million
+// setPrice applies a price flag, given in CHF per million
 // tokens, where -1 means "not given".
 func setPrice(dst **int64, units float64) {
 	if units >= 0 {
@@ -467,7 +467,7 @@ func printProviders(w *table) {
 		// one does not push the other columns out of line.
 		w.header(fmt.Sprintf(
 			"  MODEL\tRELEASED\tCONTEXT\tIN/MTOK\tCACHED/MTOK\tWRITE/MTOK\tOUT/MTOK (%s)\t"+
-				"DESCRIPTION", p.Currency))
+				"DESCRIPTION", policy.Currency))
 		for _, m := range p.Models {
 			_, _ = fmt.Fprintf(w, "  %s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\n", m.ID, dash(m.ReleaseDate),
 				m.MaxContext,
@@ -480,9 +480,6 @@ func printProviders(w *table) {
 			if m.LongPrompt != nil {
 				_, _ = fmt.Fprintf(w, "  %s: %s\n", m.ID, longPromptPrices(*m.LongPrompt))
 			}
-		}
-		if p.Note != "" {
-			_, _ = fmt.Fprintf(w, "  %s\n", p.Note)
 		}
 	}
 }

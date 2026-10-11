@@ -82,7 +82,7 @@ func twoTenants(t *testing.T) tenants {
 	}
 
 	return tenants{
-		srv: New(st, reg, nil, nil, Options{OperatorKey: testOperatorKey, Currency: "CHF"},
+		srv: New(st, reg, nil, nil, Options{OperatorKey: testOperatorKey},
 			slog.New(slog.DiscardHandler)),
 		ctx: ctx,
 	}

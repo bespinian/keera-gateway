@@ -7,7 +7,7 @@ func TestAModelOnTheDeploymentsKeyIsBilledAtListPriceLessTheDiscount(t *testing.
 		Alias: "frontier", BackendModel: "claude-opus-5-5",
 		InputMicrosPerMTok: 4_000_000, OutputMicrosPerMTok: 20_000_000,
 		CachedInputMicrosPerMTok: 400_000,
-		Billing:                  &Billing{Provider: "anthropic", Currency: "USD", DiscountBP: 1500},
+		Billing:                  &Billing{Provider: "anthropic", DiscountBP: 1500},
 	}
 	line, ok := m.Bill(Tokens{Input: 1_000_000, CachedInput: 500_000, Output: 100_000})
 	if !ok {
@@ -19,7 +19,7 @@ func TestAModelOnTheDeploymentsKeyIsBilledAtListPriceLessTheDiscount(t *testing.
 		t.Errorf("billed %d, provider %d; want %d and %d", line.Micros, line.ProviderMicros,
 			want, want*85/100)
 	}
-	if line.Alias != "frontier" || line.Provider != "anthropic" || line.Currency != "USD" ||
+	if line.Alias != "frontier" || line.Provider != "anthropic" ||
 		line.BackendModel != "claude-opus-5-5" || line.CachedInputTokens != 500_000 {
 		t.Errorf("line = %+v", line)
 	}
@@ -28,7 +28,7 @@ func TestAModelOnTheDeploymentsKeyIsBilledAtListPriceLessTheDiscount(t *testing.
 func TestABillLineCarriesTheCacheWrites(t *testing.T) {
 	m := Model{
 		InputMicrosPerMTok: 4_000_000, CacheWriteMicrosPerMTok: 5_000_000,
-		Billing: &Billing{Provider: "anthropic", Currency: "USD"},
+		Billing: &Billing{Provider: "anthropic"},
 	}
 	line, _ := m.Bill(Tokens{Input: 1_000_000, CacheWrite: 1_000_000})
 	if line.CacheWriteTokens != 1_000_000 || line.Micros != 5_000_000 {
@@ -47,16 +47,16 @@ func TestOnlyTheDeploymentsKeyIsBilled(t *testing.T) {
 	}
 }
 
-func TestABillLineTakesTheCreditInFrancs(t *testing.T) {
+func TestABillLineTakesTheListPriceFromTheCredit(t *testing.T) {
 	m := Model{
 		InputMicrosPerMTok: 4_000_000,
-		Billing:            &Billing{Provider: "anthropic", Currency: "USD", CreditRate: 800_000},
+		Billing:            &Billing{Provider: "anthropic", Credit: true},
 	}
 	line, _ := m.Bill(Tokens{Input: 1_000_000})
-	if line.Micros != 4_000_000 || line.CreditMicros != 3_200_000 {
-		t.Errorf("billed %d, credit %d; want USD 4.00 and CHF 3.20", line.Micros, line.CreditMicros)
+	if line.Micros != 4_000_000 || line.CreditMicros != 4_000_000 {
+		t.Errorf("billed %d, credit %d; want 4.00 and 4.00", line.Micros, line.CreditMicros)
 	}
-	m.Billing.CreditRate = 0
+	m.Billing.Credit = false
 	if line, _ := m.Bill(Tokens{Input: 1_000_000}); line.CreditMicros != 0 {
 		t.Errorf("without payments the credit is charged %d", line.CreditMicros)
 	}

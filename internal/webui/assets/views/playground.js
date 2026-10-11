@@ -771,7 +771,7 @@ function footer(msg, ctx, byAlias) {
           (msg.usage.completion_tokens || 0) * rates.output_micros_per_mtok) /
           1e6,
       );
-      bits.push(money(cost, ctx.currency));
+      bits.push(money(cost));
     }
   }
   if (msg.ttft) bits.push(ms(msg.ttft) + " to first token");

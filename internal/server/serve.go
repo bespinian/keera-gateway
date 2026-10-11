@@ -78,7 +78,6 @@ func serve(ctx context.Context) error {
 		UpstreamDeny:          cfg.UpstreamDeny,
 		LimitPrivate:          cfg.LimitPrivate,
 		PrivateHosts:          cfg.PrivateHosts,
-		Currency:              cfg.Currency,
 		PanelURL:              panelURL(cfg),
 		ClaudeSubscriptions:   cfg.ClaudeSubscriptions,
 	}, log)
@@ -106,7 +105,6 @@ func serve(ctx context.Context) error {
 		OperatorKey:         cfg.OperatorKey,
 		MetricsToken:        cfg.MetricsToken,
 		Secrets:             secrets,
-		Currency:            cfg.Currency,
 		Providers:           providers,
 		Passkeys:            passkeys,
 		ServeUI:             cfg.UI,

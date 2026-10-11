@@ -143,7 +143,6 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request, p *authn.Princ
 		return
 	}
 	out := map[string]any{
-		"currency":      s.opts.Currency,
 		"project_names": names,
 		"overview":      o,
 	}
@@ -202,7 +201,6 @@ func (s *Server) requests(w http.ResponseWriter, r *http.Request, p *authn.Princ
 	}
 	out := map[string]any{
 		"from": from, "to": to, "data": rows,
-		"currency": s.opts.Currency,
 	}
 	names.addTo(out)
 	// Only the first page carries the counts: they do not change while paging,
@@ -320,7 +318,7 @@ func (s *Server) requestsCSV(w http.ResponseWriter, rows []store.Request, names 
 	_ = cw.Write([]string{
 		"timestamp", "model", "status", "error", "key", "key_id",
 		"project", "user", "input_tokens", "output_tokens",
-		"cost_" + strings.ToLower(s.opts.Currency),
+		"cost",
 		"latency_ms", "ttft_ms", "stream", "estimated", "canceled",
 	})
 	for _, q := range rows {
@@ -371,8 +369,7 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request, p *authn.Principa
 		return
 	}
 	out := map[string]any{
-		"from": from, "to": to, "currency": s.opts.Currency,
-		"data": buckets,
+		"from": from, "to": to, "data": buckets,
 	}
 	names.addTo(out)
 	// Client names come from the rows, not the database, so they are built
@@ -457,7 +454,7 @@ func (s *Server) usageCSV(w http.ResponseWriter, orgID, groupBy string, from, to
 	cw := beginCSV(w, filename)
 	_ = cw.Write([]string{
 		groupBy, groupBy + "_id", "requests", "input_tokens",
-		"output_tokens", "cost_" + strings.ToLower(s.opts.Currency), "org_id", "from", "to",
+		"output_tokens", "cost", "org_id", "from", "to",
 	})
 	for _, b := range buckets {
 		org := orgID

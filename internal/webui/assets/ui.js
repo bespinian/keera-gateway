@@ -71,9 +71,15 @@ export function compact(n) {
   return numberFmt.format(n);
 }
 
-/** money renders integer micro-units. Small amounts keep their digits: a
- *  per-request cost rounded to two decimals reads as a bug, not as a number. */
-export function money(micros, currency) {
+/** money renders integer micro-units of CHF, with the currency. */
+export function money(micros) {
+  return `${amount(micros)} CHF`;
+}
+
+/** amount renders integer micro-units without the currency, for where it is
+ *  said once nearby. Small amounts keep their digits: a per-request cost
+ *  rounded to two decimals reads as a bug, not as a number. */
+export function amount(micros) {
   const v = (micros || 0) / 1e6;
   let s;
   if (v === 0) s = "0.00";
@@ -81,16 +87,16 @@ export function money(micros, currency) {
   else s = String(Number(v.toPrecision(2)));
   if (!s.includes(".")) s += ".00";
   else if (s.split(".")[1].length < 2) s += "0";
-  return currency ? `${s} ${currency}` : s;
+  return s;
 }
 
 /** listPrice renders a price per million tokens exactly, as `keera model list`
  *  does. It is what gets billed, so 0.125 must not read as 0.13. */
-export function listPrice(micros, currency) {
+export function listPrice(micros) {
   let s = ((micros || 0) / 1e6).toFixed(6).replace(/0+$/, "");
   const decimals = s.length - s.indexOf(".") - 1;
   if (decimals < 2) s += "0".repeat(2 - decimals);
-  return currency ? `${s} ${currency}` : s;
+  return s;
 }
 
 export function ms(v) {

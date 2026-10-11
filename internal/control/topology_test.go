@@ -76,7 +76,7 @@ func TestTheMapDrawsTheCatalogueAndTheTrafficTogether(t *testing.T) {
 		t.Fatalf("WriteEvents: %v", err)
 	}
 
-	srv := New(st, nil, nil, nil, Options{OperatorKey: testOperatorKey, Currency: "CHF"},
+	srv := New(st, nil, nil, nil, Options{OperatorKey: testOperatorKey},
 		slog.New(slog.DiscardHandler))
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()

@@ -778,7 +778,6 @@ async function renderRoute() {
   const ctx = {
     state,
     orgID: state.orgID,
-    currency: state.me.currency || "",
     reload: renderRoute,
     navigate,
     setOrg,

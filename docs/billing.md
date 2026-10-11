@@ -99,9 +99,8 @@ keera billing --month 2026-09
 keera org switch <org> && keera billing   # operators: one organisation
 ```
 
-One row per organisation and provider model, with calls, tokens and the amount.
-Each currency is summed on its own. Anthropic and OpenAI are in USD, the Swiss
-providers in CHF. Nothing is converted.
+One row per organisation and provider model, with calls, tokens and the amount
+in CHF.
 
 Administrators see their own organisation. Operators see every organisation,
 and also the provider cost and the margin. The margin is never shown to anyone
@@ -139,25 +138,20 @@ subscription models.
 KEERA_POSTFINANCE_SPACE_ID=4711
 KEERA_POSTFINANCE_USER_ID=123456
 KEERA_POSTFINANCE_AUTH_KEY=...          # the authentication key, as shown
-KEERA_BILLING_CHF_PER_USD=0.80          # for Anthropic and OpenAI, which price in USD
 KEERA_BILLING_VAT=8.1                   # optional
 ```
 
-| Setting                      | What it does                                                                                                         |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `KEERA_POSTFINANCE_SPACE_ID` | Your space in PostFinance Checkout. All three settings switch payments on.                                           |
-| `KEERA_POSTFINANCE_USER_ID`  | The application user's id.                                                                                           |
-| `KEERA_POSTFINANCE_AUTH_KEY` | The application user's authentication key, in base64 as PostFinance shows it.                                        |
-| `KEERA_BILLING_CHF_PER_USD`  | How many francs one dollar takes from the credit. Required when a provider key is for a provider that prices in USD. |
-| `KEERA_BILLING_VAT`          | VAT added on top of each payment, in percent, such as `8.1`. Default 0. It applies to every organisation alike.      |
-| `KEERA_POSTFINANCE_URL`      | The API's address. Default `https://checkout.postfinance.ch`, which serves test spaces too.                          |
+| Setting                      | What it does                                                                                                    |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `KEERA_POSTFINANCE_SPACE_ID` | Your space in PostFinance Checkout. All three settings switch payments on.                                      |
+| `KEERA_POSTFINANCE_USER_ID`  | The application user's id.                                                                                      |
+| `KEERA_POSTFINANCE_AUTH_KEY` | The application user's authentication key, in base64 as PostFinance shows it.                                   |
+| `KEERA_BILLING_VAT`          | VAT added on top of each payment, in percent, such as `8.1`. Default 0. It applies to every organisation alike. |
+| `KEERA_POSTFINANCE_URL`      | The API's address. Default `https://checkout.postfinance.ch`, which serves test spaces too.                     |
 
 Payments also need at least one `KEERA_PROVIDER_<NAME>_API_KEY`, and
 `KEERA_PUBLIC_URL` set to an `https` address: PostFinance sends people back
 there after they pay. On your own machine, `http://localhost` works too.
-
-A new exchange rate applies once the gateway restarts with it. Each billing
-line keeps the credit it took, so a new rate does not change old lines.
 
 ### Turning it on
 

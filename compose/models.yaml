@@ -23,7 +23,7 @@ models:
     description: >-
       Fast and served inside this cluster. Short edits, syntax questions,
       renames, commit messages and everyday work.
-    # Micro-units of KEERA_CURRENCY per million tokens. 0 means the model is not
+    # Micro-units of CHF per million tokens. 0 means the model is not
     # billed, which is what a dedicated or on-premises deployment wants - there
     # the numbers are for showback, not for an invoice.
     input_micros_per_mtok: 0

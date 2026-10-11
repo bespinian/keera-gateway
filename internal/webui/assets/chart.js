@@ -17,10 +17,7 @@ const MIN_W = 280;
  * areaChart draws requests over time with failures as a baseline bar.
  * points: [{ at, requests, tokens, cost_micros, errors }]
  */
-export function areaChart(
-  points,
-  { height = 190, currency = "", bucket = "day" } = {},
-) {
+export function areaChart(points, { height = 190, bucket = "day" } = {}) {
   const holder = h("div", { class: "chart-holder" });
   if (!points || points.length === 0) {
     holder.append(empty("No requests in this period"));
@@ -40,7 +37,7 @@ export function areaChart(
     const w = Math.max(MIN_W, Math.round(width));
     if (w === drawnAt) return;
     drawnAt = w;
-    const plot = paint(data, w, height, { currency, bucket, tip });
+    const plot = paint(data, w, height, { bucket, tip });
     const old = holder.querySelector("svg.chart");
     if (old) {
       // Whatever the pointer was over is gone with the shape it was over.
@@ -62,7 +59,7 @@ export function areaChart(
 }
 
 /** paint draws the chart itself at a given pixel size. */
-function paint(data, W, H, { currency, bucket, tip }) {
+function paint(data, W, H, { bucket, tip }) {
   const innerW = W - PAD.left - PAD.right;
   const innerH = H - PAD.top - PAD.bottom;
 
@@ -155,7 +152,7 @@ function paint(data, W, H, { currency, bucket, tip }) {
           h(
             "div",
             { class: "muted" },
-            money(p.cost_micros, currency) +
+            money(p.cost_micros) +
               (p.errors ? ` · ${num(p.errors)} failed` : ""),
           ),
         );
@@ -247,7 +244,7 @@ function niceCeil(v) {
  */
 export function barList(
   rows,
-  { label, value, currency, colorIndex = 0, color: colorFor } = {},
+  { label, value, cost = false, colorIndex = 0, color: colorFor } = {},
 ) {
   if (!rows || rows.length === 0) {
     return empty("Nothing recorded yet");
@@ -279,11 +276,7 @@ export function barList(
           }),
           h("div", { class: "bar-label" }, label(r)),
         ),
-        h(
-          "div",
-          { class: "nowrap muted" },
-          currency ? money(v, currency) : compact(v),
-        ),
+        h("div", { class: "nowrap muted" }, cost ? money(v) : compact(v)),
       );
     }),
   );

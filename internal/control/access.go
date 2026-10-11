@@ -62,7 +62,6 @@ func (s *Server) access(w http.ResponseWriter, r *http.Request, p *authn.Princip
 	out := map[string]any{
 		"email":       p.Email,
 		"role":        p.Role,
-		"currency":    s.opts.Currency,
 		"gateway_url": s.gatewayURL(r),
 		"keys":        []accessKey{},
 		"refusals":    []store.Refusal{},

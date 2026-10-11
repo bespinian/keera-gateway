@@ -86,9 +86,6 @@ type Options struct {
 	// except through the names in PrivateHosts. See egress.go.
 	LimitPrivate bool
 	PrivateHosts []string
-	// Currency labels the budget headers. All money is integer micro-units of
-	// it.
-	Currency string
 	// PanelURL is the control panel as a developer's browser reaches it. When
 	// set, a refusal says where to go and look. Without a panel, it says
 	// nothing rather than name an address that does not answer.

@@ -191,9 +191,6 @@ func (s *Server) budgetHeaders(h http.Header, res *policy.Resolved, now time.Tim
 	h.Set("X-Keera-Budget-Limit", policy.FormatMicros(tightest.BudgetMicros))
 	h.Set("X-Keera-Budget-Remaining", policy.FormatMicros(left))
 	h.Set("X-Keera-Budget-Reset", tightest.Period.Next(now).Format(time.RFC3339))
-	if s.opts.Currency != "" {
-		h.Set("X-Keera-Budget-Currency", s.opts.Currency)
-	}
 }
 
 // rateHeaders uses the OpenAI header names, so clients that already read them

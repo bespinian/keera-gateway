@@ -29,7 +29,7 @@ func TestRequestStreamCarriesARequestAsItIsRecorded(t *testing.T) {
 		t.Fatalf("CreateOrg: %v", err)
 	}
 
-	srv := New(st, nil, nil, nil, Options{OperatorKey: testOperatorKey, Currency: "CHF"},
+	srv := New(st, nil, nil, nil, Options{OperatorKey: testOperatorKey},
 		slog.New(slog.DiscardHandler))
 	listen, stopListening := context.WithCancel(ctx)
 	defer stopListening()
@@ -105,7 +105,7 @@ func TestRequestStreamCarriesARowCommittedAfterANewerOne(t *testing.T) {
 	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_1", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
-	srv := New(st, nil, nil, nil, Options{OperatorKey: testOperatorKey, Currency: "CHF"},
+	srv := New(st, nil, nil, nil, Options{OperatorKey: testOperatorKey},
 		slog.New(slog.DiscardHandler))
 	listen, stopListening := context.WithCancel(ctx)
 	defer stopListening()

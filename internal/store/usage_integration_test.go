@@ -742,7 +742,7 @@ func TestOneEventPostgresRefusesDoesNotLoseTheBatch(t *testing.T) {
 	f := newFixture(t, st, ctx)
 	now := time.Now().UTC()
 	bill := []policy.BillLine{{Alias: "keera-code", Provider: "anthropic",
-		BackendModel: "claude-opus-5", Currency: "USD", InputTokens: 10, Micros: 100,
+		BackendModel: "claude-opus-5", InputTokens: 10, Micros: 100,
 		CreditMicros: 80}}
 
 	err := st.WriteEvents(ctx, []Event{
