@@ -14,9 +14,10 @@ import (
 // outside world from the provider's side, where no guardrail of this gateway
 // sees what went where.
 //
-// A guardrail with block_hosted_tools takes them out of a request before it
-// is forwarded. The model answers without them, as it would if the client had
-// never offered them. The ones kept are the tools the client runs itself.
+// On the deployment's own provider key they are taken out of a request before
+// it is forwarded, as the provider charges for them apart from tokens. The
+// model answers without them, as it would if the client had never offered
+// them. The ones kept are the tools the client runs itself.
 //
 // What is kept is a list, not what is taken out: a hosted tool released next
 // month is one this build has never heard of, and it is taken out too.

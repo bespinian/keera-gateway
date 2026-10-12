@@ -169,25 +169,19 @@ outcome, and `keera_tool_call_duration_seconds` times them.
 
 Anthropic and OpenAI can run tools on their side: web search, URL fetch, code
 execution, remote MCP servers. The provider makes those calls, so the gateway
-never sees them.
+never sees them, and the allow-list above does not apply to them.
 
-```sh
-keera guardrail set org <org-id> --block-hosted-tools
-```
-
-removes those tools from every request before it is forwarded, including
-Anthropic's `mcp_servers` and OpenAI's `web_search_options`. Tools the client
-runs itself are kept: its own functions, Anthropic's bash, editor, computer and
-memory tools, and OpenAI's shell, local shell, computer use and apply-patch
-tools. Every other tool type is removed, including ones released after this
-build. The response header `X-Keera-Removed-Tools` names what was removed.
-
-`--no-block-hosted-tools` stops a level blocking them. Once a level blocks hosted
-tools, no level below can unblock them.
-
-A model on the deployment's own provider key ([billing.md](billing.md)) never
-gets hosted tools, whatever the guardrail says. The provider charges for them
+On a model with the organisation's own key, they are passed on as sent. On a
+model with the deployment's own provider key ([billing.md](billing.md)), they
+are removed from every request before it is forwarded, including Anthropic's
+`mcp_servers` and OpenAI's `web_search_options`. The provider charges for them
 on top of tokens, and Keera does not bill that.
+
+Tools the client runs itself are kept: its own functions, Anthropic's bash,
+editor, computer and memory tools, and OpenAI's shell, local shell, computer
+use and apply-patch tools. Every other tool type is removed, including ones
+released after this build. The response header `X-Keera-Removed-Tools` names
+what was removed.
 
 ## Limits
 

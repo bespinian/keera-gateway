@@ -454,12 +454,11 @@ func TestLimitsIsZeroCountsEveryField(t *testing.T) {
 	if !(Limits{}).IsZero() {
 		t.Error("the empty guardrail is not zero")
 	}
-	yes, one := true, 1
+	one := 1
 	for name, l := range map[string]Limits{
-		"allowed tools":      {AllowedTools: []string{"github"}},
-		"block hosted tools": {BlockHostedTools: &yes},
-		"max sandboxes":      {SandboxLimits: SandboxLimits{MaxSandboxes: &one}},
-		"allowed repos":      {SandboxLimits: SandboxLimits{AllowedRepos: []string{"bankb"}}},
+		"allowed tools": {AllowedTools: []string{"github"}},
+		"max sandboxes": {SandboxLimits: SandboxLimits{MaxSandboxes: &one}},
+		"allowed repos": {SandboxLimits: SandboxLimits{AllowedRepos: []string{"bankb"}}},
 	} {
 		if l.IsZero() {
 			t.Errorf("a guardrail with only %s counts as none", name)

@@ -276,17 +276,59 @@ func TestHostedToolsAreTakenOutOnTheDeploymentsKey(t *testing.T) {
 
 	resp := h.post(t, "/v1/messages", `{"model":"keera-frontier","max_tokens":64,`+
 		`"tools":[{"name":"read_file","input_schema":{"type":"object"}},`+
-		`{"type":"web_search_20250305","name":"web_search"}],`+
+		`{"type":"web_search_20250305","name":"web_search"},`+
+		`{"type":"bash_20250124","name":"bash"}],`+
+		`"tool_choice":{"type":"tool","name":"web_search"},`+
+		`"mcp_servers":[{"type":"url","url":"https://evil.example/mcp","name":"x"}],`+
 		`"messages":[{"role":"user","content":"hi"}]}`)
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d: %s", resp.StatusCode, body)
 	}
 	got := nextSeen(t, seen).body
-	if strings.Contains(got, "web_search") || !strings.Contains(got, "read_file") {
+	for _, gone := range []string{"web_search", "mcp_servers", "evil.example", "tool_choice"} {
+		if strings.Contains(got, gone) {
+			t.Errorf("%s reached Anthropic: %s", gone, got)
+		}
+	}
+	for _, kept := range []string{"read_file", "bash_20250124"} {
+		if !strings.Contains(got, kept) {
+			t.Errorf("the client's own tool %s was taken out: %s", kept, got)
+		}
+	}
+	if h := resp.Header.Get("X-Keera-Removed-Tools"); h != "web_search, mcp_servers" {
+		t.Errorf("X-Keera-Removed-Tools = %q", h)
+	}
+}
+
+func TestHostedToolsAreTakenOutOfAResponsesRequestOnTheDeploymentsKey(t *testing.T) {
+	h, seen := providerHarness(t, "openai", "gpt-5.5",
+		jsonBackend(`{"model":"gpt-5.5","usage":{"input_tokens":1,"output_tokens":1}}`), nil)
+	onPlatformKey(h, "keera-frontier")
+
+	h.post(t, "/v1/responses", `{"model":"keera-frontier","input":"hi",`+
+		`"tools":[{"type":"function","name":"shell","parameters":{}},{"type":"web_search"},`+
+		`{"type":"mcp","server_label":"x","server_url":"https://evil.example/mcp"}],`+
+		`"tool_choice":{"type":"web_search"}}`)
+	got := nextSeen(t, seen).body
+	if strings.Contains(got, "web_search") || strings.Contains(got, "evil.example") ||
+		!strings.Contains(got, `"shell"`) {
 		t.Errorf("forwarded = %s", got)
 	}
-	if h := resp.Header.Get("X-Keera-Removed-Tools"); h != "web_search" {
+}
+
+// On the organisation's own key the provider bills the organisation, so its
+// tools are left alone.
+func TestHostedToolsAreKeptOnTheOrganisationsKey(t *testing.T) {
+	h, seen := providerHarness(t, "anthropic", "claude-opus-5", jsonBackend(anthropicAnswer), nil)
+
+	resp := h.post(t, "/v1/messages", `{"model":"keera-frontier","max_tokens":64,`+
+		`"tools":[{"type":"web_search_20250305","name":"web_search"}],`+
+		`"messages":[{"role":"user","content":"hi"}]}`)
+	if got := nextSeen(t, seen).body; !strings.Contains(got, "web_search") {
+		t.Errorf("forwarded = %s", got)
+	}
+	if h := resp.Header.Get("X-Keera-Removed-Tools"); h != "" {
 		t.Errorf("X-Keera-Removed-Tools = %q", h)
 	}
 }

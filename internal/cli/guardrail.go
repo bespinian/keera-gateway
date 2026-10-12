@@ -39,8 +39,6 @@ type guardrailFlags struct {
 	noFilters        bool
 	tools            string
 	noTools          bool
-	blockHosted      bool
-	noBlockHosted    bool
 	maxSandboxes     int
 	maxSandboxTTL    time.Duration
 	sandboxClasses   string
@@ -69,10 +67,6 @@ func registerGuardrailFlags(fs *flag.FlagSet) *guardrailFlags {
 	fs.StringVar(&f.tools, "tools", "",
 		"comma-separated MCP tools this scope may call: a server, or server/tool")
 	fs.BoolVar(&f.noTools, "no-tools", false, "stop this scope limiting the tools; an outer level still does")
-	fs.BoolVar(&f.blockHosted, "block-hosted-tools", false,
-		"take the tools a hosted provider runs itself, such as web search, out of every request")
-	fs.BoolVar(&f.noBlockHosted, "no-block-hosted-tools", false,
-		"stop this scope blocking hosted tools; an outer level that blocks them still does")
 	fs.IntVar(&f.maxSandboxes, "max-sandboxes", -1,
 		"how many sandboxes this scope may run at once (0 for unlimited); the sandbox "+
 			"flags are for an organisation or a project, not a key")
@@ -131,15 +125,6 @@ func (f *guardrailFlags) apply(lim *policy.Limits) error {
 	}
 	if err := setList(&lim.AllowedTools, "tools", f.tools, f.noTools); err != nil {
 		return err
-	}
-	switch {
-	case f.blockHosted && f.noBlockHosted:
-		return opposites("block-hosted-tools", "no-block-hosted-tools")
-	case f.blockHosted:
-		yes := true
-		lim.BlockHostedTools = &yes
-	case f.noBlockHosted:
-		lim.BlockHostedTools = nil
 	}
 	setInt(&lim.MaxSandboxes, f.maxSandboxes)
 	setInt(&lim.MaxSandboxMemory, f.maxSandboxMemory)
@@ -400,14 +385,6 @@ func printEffectiveTools(w *table, eff control.Effective) {
 		showFrom(w, "mcp tools", joinedOr(eff.AllowedTools, "(none)"),
 			narrowedBy(eff, func(l policy.Limits) bool { return l.AllowedTools != nil }))
 	}
-	if eff.BlockHostedTools {
-		showFrom(w, "hosted tools", "blocked",
-			joinedFrom(eff, func(l policy.Limits) bool {
-				return l.BlockHostedTools != nil && *l.BlockHostedTools
-			}))
-	} else {
-		showFrom(w, "hosted tools", "(allowed)", "")
-	}
 }
 
 // showFrom writes one row of the effective report.
@@ -587,11 +564,6 @@ func printLimits(w *table, lim policy.Limits) {
 		show(w, "filters", strings.Join(lim.Filters, ","))
 	}
 	show(w, "mcp tools", joinedOr(lim.AllowedTools, "(all)"))
-	if lim.BlockHostedTools != nil && *lim.BlockHostedTools {
-		show(w, "hosted tools", "blocked")
-	} else {
-		show(w, "hosted tools", "(not blocked here)")
-	}
 	if lim.SystemPrompt == nil {
 		show(w, "system prompt", "(none)")
 	} else {

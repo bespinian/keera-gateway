@@ -42,15 +42,6 @@ func TestNoToolAllowListAllowsEverything(t *testing.T) {
 	}
 }
 
-func TestBlockingHostedToolsCannotBeUndoneBelow(t *testing.T) {
-	yes, no := true, false
-	r := Resolve(Key{ID: "k", OrgID: "o", ProjectID: "t"},
-		&Limits{BlockHostedTools: &yes}, &Limits{BlockHostedTools: &no}, nil)
-	if !r.BlockHostedTools {
-		t.Error("a project switched hosted tools back on under its organisation")
-	}
-}
-
 func TestToolEntries(t *testing.T) {
 	for entry, want := range map[string]bool{
 		"github":              true,

@@ -1944,16 +1944,16 @@ func TestGuardrailClearsWithNoFlags(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
 		"GET /v1/guardrails/org/org_1": map[string]any{
-			"allowed_models": []string{"keera-speed"}, "block_hosted_tools": true,
+			"allowed_models": []string{"keera-speed"}, "allowed_tools": []string{"github"},
 		},
 		"PUT /v1/guardrails/org/org_1": map[string]any{},
 	})
 	if err := Run(context.Background(), []string{"guardrail", "set", "org", "org_1",
-		"--no-models", "--no-block-hosted-tools"}); err != nil {
+		"--no-models", "--no-tools"}); err != nil {
 		t.Fatal(err)
 	}
 	body := f.request("PUT", "/v1/guardrails/org/org_1").body
-	if body["allowed_models"] != nil || body["block_hosted_tools"] != nil {
+	if body["allowed_models"] != nil || body["allowed_tools"] != nil {
 		t.Errorf("sent %v, want both cleared", body)
 	}
 

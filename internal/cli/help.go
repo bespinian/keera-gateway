@@ -413,9 +413,8 @@ var commands = []command{
 			{name: "set", aliases: []string{"edit", "update"}, args: "<scope> [<id>]", summary: "set any of them on a scope",
 				flags: []string{"models", "no-models", "rpm", "tpm", "max-output-tokens", "budget", "period",
 					"system-prompt", "no-system-prompt", "filters", "no-filters", "tools", "no-tools",
-					"block-hosted-tools", "no-block-hosted-tools", "max-sandboxes",
-					"max-sandbox-ttl", "sandbox-classes", "no-sandbox-classes", "max-sandbox-cpu",
-					"max-sandbox-memory", "repos", "no-repos", "json"},
+					"max-sandboxes", "max-sandbox-ttl", "sandbox-classes", "no-sandbox-classes",
+					"max-sandbox-cpu", "max-sandbox-memory", "repos", "no-repos", "json"},
 				examples: []string{
 					"keera guardrail set project project_1 --models keera-speed --rpm 120 \\\n" +
 						"    --budget 500 --period month",

@@ -624,11 +624,6 @@ type Limits struct {
 	// a server's alias for all of its tools, or 'alias/tool' for one. Nil
 	// inherits; see Resolved.AllowsTool.
 	AllowedTools []string `json:"allowed_tools"`
-	// BlockHostedTools takes out of a request the tools a hosted provider runs
-	// on its own servers, such as web search or a remote MCP server, which
-	// reach the outside world where no guardrail can see. Once a level sets
-	// it, no level below can unset it.
-	BlockHostedTools *bool `json:"block_hosted_tools,omitempty"`
 	// SandboxLimits is embedded so a policy row stays one flat object in JSON,
 	// SQL and on the command line.
 	SandboxLimits
@@ -710,8 +705,6 @@ type Resolved struct {
 	Filters []string
 	// AllowedTools nil means every tool of every MCP server of the organisation.
 	AllowedTools []string
-	// BlockHostedTools says a request's hosted tools are taken out.
-	BlockHostedTools bool
 	// Scopes runs outermost first: org, project if any, then the key. Rate
 	// limits and budgets are enforced at every level.
 	Scopes []Scope
@@ -744,8 +737,7 @@ func (r *Resolved) MayRoute(alias string) bool {
 //   - Budgets and rate limits are kept per level and checked separately. An
 //     org cap of 10,000 and a project cap of 1,000 must both hold.
 //   - System prompts concatenate outermost first, because text does not narrow.
-//   - Filters add up level by level, and hosted tools stay blocked once any
-//     level blocks them.
+//   - Filters add up level by level.
 //   - Only the organisation grants repositories; the levels below narrow them.
 func Resolve(key Key, org, project, own *Limits) *Resolved {
 	r := &Resolved{Key: key}
@@ -785,7 +777,6 @@ func (r *Resolved) narrow(lim *Limits, top bool) {
 	r.SystemPrompt = joinPrompts(r.SystemPrompt, deref(lim.SystemPrompt))
 	r.Filters = appendFilters(r.Filters, lim.Filters)
 	r.AllowedTools = intersectTools(r.AllowedTools, lim.AllowedTools)
-	r.BlockHostedTools = r.BlockHostedTools || deref(lim.BlockHostedTools)
 	r.Sandbox.narrow(lim, top)
 }
 

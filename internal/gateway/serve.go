@@ -603,9 +603,9 @@ func (s *Server) prepare(c *call, b *body) bool {
 			}
 		}
 	}
-	// On the deployment's key they always go: the provider charges for them
-	// apart from tokens, and that is not billed.
-	if c.res.BlockHostedTools || c.chainOnKey() {
+	// Hosted tools are taken out on the deployment's key: the provider charges
+	// for them apart from tokens, and that is not billed.
+	if c.chainOnKey() {
 		// On chat completions a hosted search is a field rather than a tool.
 		removed := []string{}
 		if b != nil && b.remove("web_search_options") {

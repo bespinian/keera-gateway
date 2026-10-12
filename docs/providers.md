@@ -279,7 +279,7 @@ Must not be sent client data."
 **Messages clients reach Anthropic's own API.** A request to `/api/v1/messages`
 (what Claude Code sends) is forwarded to Anthropic's `/v1/messages` without
 being translated. The guardrails still apply to it in its own shape: filter
-rewrites, the system prompt, the output ceiling and blocked hosted tools.
+rewrites, the system prompt and the output ceiling.
 Prompt caching and thinking work, and cached input is charged at the cached
 rate. The key is sent as `x-api-key`, and the client's `anthropic-version` and
 `anthropic-beta` headers are passed on. An egress proxy in front of Anthropic

@@ -237,7 +237,7 @@ func TestAToolAllowListMustNameRealServers(t *testing.T) {
 		t.Errorf("allowing another organisation's server got %d: %s", w.Code, w.Body)
 	}
 	w = tn.call(tn.srv.putGuardrails, carol, "PUT", "/v1/guardrails/org/org_a",
-		`{"allowed_tools":["github/search_code"],"block_hosted_tools":true}`, path)
+		`{"allowed_tools":["github/search_code"]}`, path)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", w.Code, w.Body)
 	}
@@ -246,7 +246,7 @@ func TestAToolAllowListMustNameRealServers(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &eff); err != nil {
 		t.Fatal(err)
 	}
-	if len(eff.AllowedTools) != 1 || !eff.BlockHostedTools {
+	if len(eff.AllowedTools) != 1 {
 		t.Errorf("effective = %+v", eff)
 	}
 }

@@ -368,57 +368,6 @@ func TestAServerTheKeyMayNotUseDoesNotExist(t *testing.T) {
 	}
 }
 
-func TestHostedToolsAreTakenOutWhenBlocked(t *testing.T) {
-	yes := true
-	res := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
-		&policy.Limits{BlockHostedTools: &yes}, nil, nil)
-	h, seen := providerHarness(t, "anthropic", "claude-opus-5", jsonBackend(anthropicAnswer), res)
-
-	resp := h.post(t, "/v1/messages", `{"model":"keera-frontier","max_tokens":64,`+
-		`"tools":[{"name":"read_file","input_schema":{"type":"object"}},`+
-		`{"type":"web_search_20250305","name":"web_search"},`+
-		`{"type":"bash_20250124","name":"bash"}],`+
-		`"tool_choice":{"type":"tool","name":"web_search"},`+
-		`"mcp_servers":[{"type":"url","url":"https://evil.example/mcp","name":"x"}],`+
-		`"messages":[{"role":"user","content":"hi"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("status = %d: %s", resp.StatusCode, body)
-	}
-	got := nextSeen(t, seen).body
-	for _, gone := range []string{"web_search", "mcp_servers", "evil.example", "tool_choice"} {
-		if strings.Contains(got, gone) {
-			t.Errorf("%s reached Anthropic: %s", gone, got)
-		}
-	}
-	for _, kept := range []string{"read_file", "bash_20250124"} {
-		if !strings.Contains(got, kept) {
-			t.Errorf("the client's own tool %s was taken out: %s", kept, got)
-		}
-	}
-	if h := resp.Header.Get("X-Keera-Removed-Tools"); h != "web_search, mcp_servers" {
-		t.Errorf("X-Keera-Removed-Tools = %q", h)
-	}
-}
-
-func TestHostedToolsAreTakenOutOfAResponsesRequest(t *testing.T) {
-	yes := true
-	res := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
-		&policy.Limits{BlockHostedTools: &yes}, nil, nil)
-	h, seen := providerHarness(t, "openai", "gpt-5.5",
-		jsonBackend(`{"model":"gpt-5.5","usage":{"input_tokens":1,"output_tokens":1}}`), res)
-
-	h.post(t, "/v1/responses", `{"model":"keera-frontier","input":"hi",`+
-		`"tools":[{"type":"function","name":"shell","parameters":{}},{"type":"web_search"},`+
-		`{"type":"mcp","server_label":"x","server_url":"https://evil.example/mcp"}],`+
-		`"tool_choice":{"type":"web_search"}}`)
-	got := nextSeen(t, seen).body
-	if strings.Contains(got, "web_search") || strings.Contains(got, "evil.example") ||
-		!strings.Contains(got, `"shell"`) {
-		t.Errorf("forwarded = %s", got)
-	}
-}
-
 func TestAToolCallWithoutAnIDIsNotForwarded(t *testing.T) {
 	// Sent as a notification, a call would get no answer to trim or record,
 	// and a lenient server would run it unchecked.

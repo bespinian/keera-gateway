@@ -159,7 +159,7 @@ Three levels: organisation, project, key. A guardrail can attach at any of them.
 
 The combining rule is **restrict-only**. A level can narrow what it inherits but
 never widen it. Allow-lists intersect; the output-token ceiling takes the
-minimum; once a level blocks hosted tools, the levels below cannot unblock them.
+minimum.
 
 The exceptions:
 
@@ -201,9 +201,8 @@ counts against its rate limits and budgets, and shows in its usage.
 5. **Filters**, outermost level first: each may rewrite the request or refuse it,
    with a model and an instruction or with a list of expressions.
 6. Prepend the standing system prompt (chat requests only; a completion has no
-   place for one), take out hosted tools if the guardrail blocks them or the
-   model is on the deployment's key ([billing.md](billing.md)), and clamp the
-   output ceiling.
+   place for one), take out hosted tools if the model is on the deployment's
+   key ([billing.md](billing.md)), and clamp the output ceiling.
    For a subscription model the prompt goes after Claude Code's own system
    blocks instead; see [subscriptions.md](subscriptions.md#what-is-sent-to-anthropic).
 7. Forward, stream the answer back, and record what it cost.
@@ -326,7 +325,7 @@ Other response headers:
 | `X-Keera-Model`          | the alias that answered; behind a router, the destination it chose                        |
 | `X-Keera-Router`         | the router and where it sent the request ([routers.md](routers.md#what-a-client-can-see)) |
 | `X-Keera-Filters`        | the filters that acted on the request ([filters.md](filters.md#what-is-recorded))         |
-| `X-Keera-Removed-Tools`  | the hosted tools a guardrail took out ([mcp.md](mcp.md#hosted-tools))                     |
+| `X-Keera-Removed-Tools`  | the hosted tools taken out on the deployment's key ([mcp.md](mcp.md#hosted-tools))        |
 | `X-Keera-Removed-Fields` | the fields that cost extra, taken out on the deployment's key ([billing.md](billing.md))  |
 | `X-Request-Id`           | the request's id; one the client sends is kept                                            |
 

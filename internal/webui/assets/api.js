@@ -211,10 +211,6 @@ export const api = {
     get(
       `/v1/guardrails/${encodeURIComponent(scope)}/${encodeURIComponent(id)}`,
     ),
-  effectiveGuardrails: (scope, id) =>
-    get(
-      `/v1/guardrails/${encodeURIComponent(scope)}/${encodeURIComponent(id)}/effective`,
-    ),
   putGuardrails: (scope, id, limits) =>
     request(
       "PUT",

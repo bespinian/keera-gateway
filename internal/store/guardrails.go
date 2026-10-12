@@ -15,8 +15,7 @@ import (
 var limitFields = []string{"allowed_models", "max_output_tokens", "rpm", "tpm",
 	"budget_micros", "budget_period", "system_prompt", "filters",
 	"max_sandboxes", "max_sandbox_ttl_seconds", "sandbox_classes",
-	"max_sandbox_cpu_millis", "max_sandbox_memory_mib", "allowed_tools", "block_hosted_tools",
-	"allowed_repos"}
+	"max_sandbox_cpu_millis", "max_sandbox_memory_mib", "allowed_tools", "allowed_repos"}
 
 // limitColumns is a guardrail row as policy.Limits holds it, read from a table
 // aliased p.
@@ -49,8 +48,7 @@ func limitTargets(lim *policy.Limits, period **string) []any {
 	return []any{&lim.AllowedModels, &lim.MaxOutputTokens, &lim.RPM, &lim.TPM,
 		&lim.BudgetMicros, period, &lim.SystemPrompt, &lim.Filters,
 		&lim.MaxSandboxes, &lim.MaxSandboxTTLSeconds, &lim.SandboxClasses,
-		&lim.MaxSandboxCPU, &lim.MaxSandboxMemory, &lim.AllowedTools, &lim.BlockHostedTools,
-		&lim.AllowedRepos}
+		&lim.MaxSandboxCPU, &lim.MaxSandboxMemory, &lim.AllowedTools, &lim.AllowedRepos}
 }
 
 // limitValues is what putGuardrailSQL writes, in limitFields' order.
@@ -58,8 +56,7 @@ func limitValues(lim policy.Limits) []any {
 	return []any{lim.AllowedModels, lim.MaxOutputTokens, lim.RPM, lim.TPM,
 		lim.BudgetMicros, periodStr(lim.BudgetPeriod), lim.SystemPrompt, lim.Filters,
 		lim.MaxSandboxes, lim.MaxSandboxTTLSeconds, lim.SandboxClasses,
-		lim.MaxSandboxCPU, lim.MaxSandboxMemory, lim.AllowedTools, lim.BlockHostedTools,
-		lim.AllowedRepos}
+		lim.MaxSandboxCPU, lim.MaxSandboxMemory, lim.AllowedTools, lim.AllowedRepos}
 }
 
 // GetGuardrail reads the limits attached to one scope.

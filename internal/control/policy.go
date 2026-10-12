@@ -156,10 +156,9 @@ type Effective struct {
 	SystemPrompt    string   `json:"system_prompt,omitempty"`
 	Filters         []string `json:"filters,omitempty"`
 	// AllowedTools nil means every tool of every MCP server.
-	AllowedTools     []string               `json:"allowed_tools"`
-	BlockHostedTools bool                   `json:"block_hosted_tools,omitempty"`
-	Scopes           []policy.Scope         `json:"scopes"`
-	Sandbox          policy.ResolvedSandbox `json:"sandbox"`
+	AllowedTools []string               `json:"allowed_tools"`
+	Scopes       []policy.Scope         `json:"scopes"`
+	Sandbox      policy.ResolvedSandbox `json:"sandbox"`
 }
 
 // effectiveGuardrails answers with the whole chain above a scope, combined the
@@ -235,15 +234,14 @@ func (s *Server) effective(ctx context.Context, scope policy.ScopeType, scopeID 
 
 	out := Effective{
 		Scope: scope, ID: scopeID,
-		Levels:           []EffectiveLevel{s.effectiveLevel(ctx, policy.ScopeOrg, orgID, org)},
-		AllowedModels:    res.AllowedModels,
-		MaxOutputTokens:  res.MaxOutputTokens,
-		SystemPrompt:     res.SystemPrompt,
-		Filters:          res.Filters,
-		AllowedTools:     res.AllowedTools,
-		BlockHostedTools: res.BlockHostedTools,
-		Scopes:           res.Scopes,
-		Sandbox:          res.Sandbox,
+		Levels:          []EffectiveLevel{s.effectiveLevel(ctx, policy.ScopeOrg, orgID, org)},
+		AllowedModels:   res.AllowedModels,
+		MaxOutputTokens: res.MaxOutputTokens,
+		SystemPrompt:    res.SystemPrompt,
+		Filters:         res.Filters,
+		AllowedTools:    res.AllowedTools,
+		Scopes:          res.Scopes,
+		Sandbox:         res.Sandbox,
 	}
 	if project != nil {
 		out.Levels = append(out.Levels, s.effectiveLevel(ctx, policy.ScopeProject, projectID, *project))

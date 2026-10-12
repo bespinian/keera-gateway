@@ -21,3 +21,7 @@ CREATE INDEX usage_events_request_id_idx ON usage_events (request_id)
     WHERE request_id IS NOT NULL;
 CREATE INDEX usage_events_client_request_id_idx ON usage_events (client_request_id)
     WHERE client_request_id IS NOT NULL;
+
+-- Hosted tools are no longer a guardrail. They are taken out on the
+-- deployment's own provider key, and kept on an organisation's own.
+ALTER TABLE guardrails DROP COLUMN block_hosted_tools;

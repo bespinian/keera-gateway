@@ -187,7 +187,6 @@ const OWNED_HERE = new Set([
   "budget_micros",
   "budget_period",
   "allowed_tools",
-  "block_hosted_tools",
 ]);
 
 function render(
@@ -259,10 +258,6 @@ function render(
     placeholder: "github/search_code, jira",
     value: (lim.allowed_tools || []).join(", "),
     style: { display: lim.allowed_tools ? "" : "none", marginTop: "6px" },
-  });
-  const blockHosted = h("input", {
-    type: "checkbox",
-    checked: !!lim.block_hosted_tools,
   });
 
   const rpm = numberInput(lim.rpm);
@@ -432,24 +427,6 @@ function render(
       err,
       h("p", { class: "muted", style: { marginTop: 0 } }, meta.lead),
       ceilingSummary(ctx, ceilings),
-      section("Access", "Which models and routers this scope may reach."),
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "Models"),
-        h(
-          "label",
-          { class: "row-tight" },
-          allowAll,
-          `Every model of ${orgNameOf(ctx, orgID)}`,
-        ),
-        modelList,
-        h(
-          "div",
-          { class: "hint" },
-          "Removing one takes effect on the next request.",
-        ),
-      ),
       section("Rate limits"),
       h(
         "div",
@@ -499,6 +476,24 @@ function render(
         ),
       ),
       orderField,
+      section("Access", "Which models and routers this scope may reach."),
+      h(
+        "div",
+        { class: "field" },
+        h("label", {}, "Models"),
+        h(
+          "label",
+          { class: "row-tight" },
+          allowAll,
+          `Every model of ${orgNameOf(ctx, orgID)}`,
+        ),
+        modelList,
+        h(
+          "div",
+          { class: "hint" },
+          "Removing one takes effect on the next request.",
+        ),
+      ),
       section("Tools", "What agents may use besides models."),
       h(
         "div",
@@ -516,23 +511,6 @@ function render(
           { class: "hint" },
           "A server alias allows all its tools; alias/tool allows one. " +
             "Tools left out are hidden from the agent and refused if called.",
-        ),
-      ),
-      h(
-        "div",
-        { class: "field" },
-        h(
-          "label",
-          { class: "row-tight" },
-          blockHosted,
-          "Take hosted tools out of every request",
-        ),
-        h(
-          "div",
-          { class: "hint" },
-          "Web search, URL fetch or remote MCP servers that Anthropic or " +
-            "OpenAI run on their side, out of reach of any guardrail. If an " +
-            "outer level removes them, this cannot add them back.",
         ),
       ),
     ),
@@ -580,7 +558,6 @@ function render(
                 .map((t) => t.trim())
                 .filter(Boolean);
             }
-            if (blockHosted.checked) out.block_hosted_tools = true;
             const b = parseFloat(budget.value);
             if (Number.isFinite(b) && b > 0) {
               out.budget_micros = Math.round(b * 1e6);
@@ -636,11 +613,6 @@ function renderReadOnly(
         { class: "muted", style: { marginTop: 0 } },
         meta.readLead || meta.lead,
       ),
-      readRow(
-        "Models",
-        modelsValue(levels, models, orgName),
-        narrowedBy(levels),
-      ),
       h(
         "div",
         { class: "field-row" },
@@ -678,15 +650,15 @@ function renderReadOnly(
           "cannot run, the request is refused, unless it is in shadow.",
       ),
       readRow(
+        "Models",
+        modelsValue(levels, models, orgName),
+        narrowedBy(levels),
+      ),
+      readRow(
         "MCP tools",
         toolsValue(levels),
         "Each level can only narrow the one above. Tools left out are " +
           "hidden from your agent and refused if called.",
-      ),
-      readRow(
-        "Hosted tools",
-        hostedValue(levels),
-        "Web search and similar tools the provider runs on its side.",
       ),
     ),
     actions: (close) => [
@@ -720,13 +692,6 @@ function toolsValue(levels) {
       ),
     ),
   );
-}
-
-/** hostedValue says whether hosted tools are taken out, and by which level. */
-function hostedValue(levels) {
-  const by = levels.find((lv) => lv.limits && lv.limits.block_hosted_tools);
-  if (!by) return h("span", { class: "muted" }, "Allowed");
-  return h("span", {}, `Taken out, by ${by.label}`);
 }
 
 /** effectiveModels is the allow-list every level has agreed on. Allow-lists
