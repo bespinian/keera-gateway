@@ -40,6 +40,7 @@ func serve(ctx context.Context) error {
 		return err
 	}
 	log := newLogger(cfg)
+	setMemoryLimit(log)
 
 	st, err := store.Open(ctx, cfg.DatabaseURL, cfg.MaxDBConns)
 	if err != nil {

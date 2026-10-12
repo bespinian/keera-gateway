@@ -437,10 +437,14 @@ by the window. The indexes are a large share of it. Rows follow tasks × calls
 per task, not the number of developers: a coding agent makes thirty or forty
 calls per instruction. [sessions.md](sessions.md) shows your ratio.
 
-A gateway's memory depends on how many organisations, keys, models and the
-like there are, not on traffic. Per request it holds the body, and a
-non-streamed answer whole; a rewrite filter's answer is held whole up to
-32 MiB. Size Postgres for replicas × `KEERA_MAX_DB_CONNS` connections.
+A gateway's memory grows with how many organisations, keys, models and the
+like there are, and with the requests in flight. Per request it holds the body
+(up to `KEERA_MAX_BODY_BYTES`), and a non-streamed answer whole; a rewrite
+filter's answer is held whole up to 32 MiB. A client has two minutes to send
+its body. Give the container a memory limit: the gateway reads it from cgroup
+v2 and keeps its heap under nine tenths of it, collecting harder near the limit
+rather than being killed. `GOMEMLIMIT` overrides that. Size Postgres for
+replicas × `KEERA_MAX_DB_CONNS` connections.
 
 Background jobs, such as the sandbox sweep, retention and payments, run on one
 replica per interval, whichever asks first.

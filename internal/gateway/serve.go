@@ -152,12 +152,23 @@ func (s *Server) receive(c *call) ([]byte, bool) {
 	})
 }
 
+// bodyReadTimeout bounds how long a client may take to send its request.
+// Without it, a client that sends a large body slowly holds its memory for as
+// long as it likes.
+const bodyReadTimeout = 2 * time.Minute
+
 // readBody reads a request body of at most limit bytes. A body over the limit
 // is answered by tooLarge, in the caller's own shape. Any other error is a
 // client that went away mid-upload, which needs no answer.
 func readBody(w http.ResponseWriter, r *http.Request, limit int64,
 	tooLarge func(msg string),
 ) ([]byte, bool) {
+	// The deadline is lifted again after: the connection is still read while
+	// the answer streams, to notice the client hanging up. Not every writer
+	// supports a deadline, which is fine.
+	rc := http.NewResponseController(w)
+	_ = rc.SetReadDeadline(time.Now().Add(bodyReadTimeout))
+	defer func() { _ = rc.SetReadDeadline(time.Time{}) }()
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
 	if err == nil {
 		return raw, true
