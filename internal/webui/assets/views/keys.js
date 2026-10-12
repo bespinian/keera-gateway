@@ -1,7 +1,7 @@
 // API keys - issuing one, seeing what is live, renaming one, and taking one
 // away.
 
-import { api, chatTargets } from "../api.js";
+import { api } from "../api.js";
 import {
   h,
   table,
@@ -20,7 +20,6 @@ import {
   showError,
   isAdmin,
   field,
-  code,
   secretField,
   currentRange,
   rangePicker,
@@ -32,7 +31,6 @@ import {
 import { openGuardrails, ceilingsFor, summarise } from "./guardrails.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
 import { oldestProject } from "./projects.js";
-import { loadClients, defaultBase, keyModels } from "./connect.js";
 
 export async function keysView(ctx) {
   // Keys, models and people all belong to one organisation, so an operator
@@ -42,18 +40,14 @@ export async function keysView(ctx) {
 
   const since = currentRange();
   const range = rangeOf(since);
-  const [keysRes, projectsRes, modelsRes, usersRes, clients] =
-    await Promise.all([
-      api.keys(ctx.orgID, { since }),
-      api.projects(ctx.orgID).catch(() => ({ data: [] })),
-      api.models(ctx.orgID).catch(() => ({ data: [] })),
-      // Who a key can be attributed to. A deployment with no identity provider
-      // has nobody here, and the field is left out rather than shown empty.
-      api.users(ctx.orgID).catch(() => ({ data: [] })),
-      // The client catalogue, so that the configuration handed over with a key
-      // is the same one My clients hands out.
-      loadClients().catch(() => []),
-    ]);
+  const [keysRes, projectsRes, modelsRes, usersRes] = await Promise.all([
+    api.keys(ctx.orgID, { since }),
+    api.projects(ctx.orgID).catch(() => ({ data: [] })),
+    api.models(ctx.orgID).catch(() => ({ data: [] })),
+    // Who a key can be attributed to. A deployment with no identity provider
+    // has nobody here, and the field is left out rather than shown empty.
+    api.users(ctx.orgID).catch(() => ({ data: [] })),
+  ]);
   const keys = keysRes.data || [];
   const projects = projectsRes.data || [];
   const users = usersRes.data || [];
@@ -81,7 +75,7 @@ export async function keysView(ctx) {
     canEdit
       ? {
           label: "Issue key",
-          onClick: () => issueKey(ctx, projects, users, clients),
+          onClick: () => issueKey(ctx, projects, users),
         }
       : null,
   );
@@ -276,7 +270,7 @@ export async function keysView(ctx) {
                   {
                     class: "btn btn-sm",
                     title: "Replace this key with a new one",
-                    onClick: () => confirmRotate(ctx, k, { clients }),
+                    onClick: () => confirmRotate(ctx, k),
                   },
                   "Rotate",
                 )
@@ -479,8 +473,8 @@ export async function openKey(ctx, key, models, projectName, canEdit) {
 
 // confirmRotate asks before replacing a key with a new one, then shows the new
 // secret. done gets the new key once it exists; a screen about the old key
-// uses it to move to the new one. clients is loaded here if not given.
-export function confirmRotate(ctx, k, { clients, done } = {}) {
+// uses it to move to the new one.
+export function confirmRotate(ctx, k, { done } = {}) {
   confirm({
     title: k.name ? `Rotate ${k.name}?` : "Rotate this key?",
     body:
@@ -492,11 +486,7 @@ export function confirmRotate(ctx, k, { clients, done } = {}) {
     onConfirm: async () => {
       const created = await api.rotateKey(k.id);
       if (done) done(created);
-      showSecret(
-        ctx,
-        created,
-        clients || (await loadClients().catch(() => [])),
-      );
+      showSecret(ctx, created);
     },
   });
 }
@@ -551,7 +541,7 @@ const EXPIRIES = [
   { value: "", label: "Never" },
 ];
 
-function issueKey(ctx, projects, users, clients) {
+function issueKey(ctx, projects, users) {
   // Every key is in a project, so with none there is nothing to issue yet.
   if (!projects.length) {
     const close = modal({
@@ -667,7 +657,7 @@ function issueKey(ctx, projects, users, clients) {
                 expires_in: expiry.value,
               });
               close();
-              showSecret(ctx, created, clients);
+              showSecret(ctx, created);
             } catch (ex) {
               showError(err, ex.message);
               button.disabled = false;
@@ -680,113 +670,16 @@ function issueKey(ctx, projects, users, clients) {
   });
 }
 
-/** issuedModels is the chat models and routers a key may call. An allow-list
- *  of null means every one. */
-async function issuedModels(created) {
-  const [targets, effective] = await Promise.all([
-    chatTargets(created.org_id),
-    api.effectiveGuardrails("key", created.id),
-  ]);
-  return effective.allowed_models == null
-    ? targets
-    : keyModels(targets, effective.allowed_models);
-}
-
-// showSecret is the only moment the key exists outside the developer's machine,
-// so it is also the only useful moment to hand over the configuration that
-// contains it. Sending somebody to My clients afterwards sends them to a
-// screen where the key is gone forever and the file has a blank in it.
-async function showSecret(ctx, created, clients) {
-  // Read before the dialog opens. Failing to read them still shows the key,
-  // which is what matters here.
-  const chat =
-    created.kind === "subscription"
-      ? []
-      : await issuedModels(created).catch(() => []);
-  const base = defaultBase(ctx);
-
+// showSecret shows a new key, the only time it can be seen.
+function showSecret(ctx, created) {
   const body = h(
     "div",
-    {},
-    h(
-      "div",
-      { class: "field" },
-      h("label", {}, "The key"),
-      secretField(created.key, "The issued API key"),
-      h(
-        "div",
-        { class: "hint" },
-        "Set it as ",
-        h("code", {}, "KEERA_API_KEY"),
-        " in the developer's shell profile.",
-      ),
-    ),
+    { class: "field" },
+    h("label", {}, "The key"),
+    secretField(created.key, "The issued API key"),
   );
 
-  if (chat.length && clients.length) {
-    const client = h(
-      "select",
-      { class: "select" },
-      clients.map((c) => h("option", { value: c.key }, c.label)),
-    );
-    const out = h("div");
-
-    const draw = () => {
-      const c = clients.find((x) => x.key === client.value) || clients[0];
-      // The key is substituted in rather than left as an environment
-      // reference: this is being handed over with the secret, once.
-      const config = c
-        .config(base, chat)
-        .replaceAll(
-          /\{env:KEERA_API_KEY\}|\$\{KEERA_API_KEY\}|\$KEERA_API_KEY/g,
-          created.key,
-        );
-      // Filtered, because this is replaceChildren and not h: a client with no
-      // note would otherwise put the string "null" under its config block.
-      out.replaceChildren(
-        ...[
-          h(
-            "p",
-            { class: "muted" },
-            c.path
-              ? [
-                  "Save this as ",
-                  h("code", {}, c.path),
-                  ". If the file exists, merge these settings into it. ",
-                ]
-              : "Add these to the developer's shell profile. ",
-            "It sets up every model this key can use: ",
-            chat.map((m) => m.alias).join(", "),
-            ".",
-          ),
-          code(config),
-          c.note ? h("p", { class: "muted" }, c.note()) : null,
-        ].filter(Boolean),
-      );
-    };
-    client.addEventListener("change", draw);
-    draw();
-
-    body.append(
-      h(
-        "div",
-        { class: "field", style: { marginBottom: 0 } },
-        h("label", {}, "Client"),
-        client,
-      ),
-      h("div", { style: { marginTop: "12px" } }, out),
-      h(
-        "div",
-        { class: "hint", style: { marginTop: "12px" } },
-        "This contains the key in plain text. For a file without it, use ",
-        h("strong", {}, "Connect client"),
-        " under My clients, which reads it from the environment.",
-      ),
-    );
-  }
-
   modal({
-    wide: true,
     title: "Key issued",
     subtitle: "Shown only this once. It is not stored.",
     body,
