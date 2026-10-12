@@ -16,7 +16,7 @@ import (
 // onPlatformKey puts one of the harness's models on the deployment's key.
 func onPlatformKey(h *harness, alias string) {
 	m := h.src.models[alias]
-	m.Billing = &policy.Billing{Provider: "anthropic", DiscountBP: 2000, Credit: true}
+	m.Billing = &policy.Billing{Provider: "anthropic", Credit: true}
 	m.PlatformKey = true
 	h.src.models[alias] = m
 }
@@ -32,10 +32,10 @@ func TestARequestToAModelOnTheDeploymentsKeyIsBilled(t *testing.T) {
 	if len(ev.Bills) != 1 {
 		t.Fatalf("bills = %+v, want the request's only: the filter's model is the organisation's own", ev.Bills)
 	}
-	// 10 in at 1.00 and 5 out at 4.00, less 20% for the provider.
+	// 10 in at 1.00 and 5 out at 4.00.
 	b := ev.Bills[0]
 	if b.Alias != "keera-code" || b.InputTokens != 10 || b.OutputTokens != 5 ||
-		b.Micros != 30 || b.ProviderMicros != 24 {
+		b.Micros != 30 || b.ProviderMicros != 30 {
 		t.Errorf("bill = %+v", b)
 	}
 }

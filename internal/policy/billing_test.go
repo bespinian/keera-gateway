@@ -2,12 +2,12 @@ package policy
 
 import "testing"
 
-func TestAModelOnTheDeploymentsKeyIsBilledAtListPriceLessTheDiscount(t *testing.T) {
+func TestAModelOnTheDeploymentsKeyIsBilledAtListPrice(t *testing.T) {
 	m := Model{
 		Alias: "frontier", BackendModel: "claude-opus-5-5",
 		InputMicrosPerMTok: 4_000_000, OutputMicrosPerMTok: 20_000_000,
 		CachedInputMicrosPerMTok: 400_000,
-		Billing:                  &Billing{Provider: "anthropic", DiscountBP: 1500},
+		Billing:                  &Billing{Provider: "anthropic"},
 	}
 	line, ok := m.Bill(Tokens{Input: 1_000_000, CachedInput: 500_000, Output: 100_000})
 	if !ok {
@@ -15,9 +15,8 @@ func TestAModelOnTheDeploymentsKeyIsBilledAtListPriceLessTheDiscount(t *testing.
 	}
 	// 500k uncached at 4.00, 500k cached at 0.40, 100k out at 20.00.
 	const want = 2_000_000 + 200_000 + 2_000_000
-	if line.Micros != want || line.ProviderMicros != want*85/100 {
-		t.Errorf("billed %d, provider %d; want %d and %d", line.Micros, line.ProviderMicros,
-			want, want*85/100)
+	if line.Micros != want || line.ProviderMicros != want {
+		t.Errorf("billed %d, provider %d; want %d for both", line.Micros, line.ProviderMicros, want)
 	}
 	if line.Alias != "frontier" || line.Provider != "anthropic" ||
 		line.BackendModel != "claude-opus-5-5" || line.CachedInputTokens != 500_000 {

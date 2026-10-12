@@ -18,7 +18,7 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-var testPlatform = catalog.Platform{"anthropic": {APIKey: "sk-deployment", DiscountBP: 2000}}
+var testPlatform = catalog.Platform{"anthropic": {APIKey: "sk-deployment"}}
 
 // platformRegistry is the registry of a deployment that holds the Anthropic
 // key, loaded from st as it is now.
@@ -76,7 +76,7 @@ func TestAModelOnTheDeploymentsKeyTakesNoKeyAndListPrices(t *testing.T) {
 
 	// The registry sends it with the deployment's key, and bills it.
 	m, _ := platformRegistry(ctx, t, st).Model("org_1", "fast")
-	if m.APIKey != "sk-deployment" || m.Billing == nil || m.Billing.DiscountBP != 2000 {
+	if m.APIKey != "sk-deployment" || m.Billing == nil || m.Billing.Provider != "anthropic" {
 		t.Errorf("served = key %q, billing %+v", m.APIKey, m.Billing)
 	}
 

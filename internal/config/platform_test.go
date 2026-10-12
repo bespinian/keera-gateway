@@ -7,17 +7,16 @@ import (
 	"github.com/bespinian/keera-gateway/internal/catalog"
 )
 
-func TestAProviderKeyIsReadWithItsDiscount(t *testing.T) {
+func TestAProviderKeyIsRead(t *testing.T) {
 	c, err := loadWith(t, valid(map[string]string{
 		"KEERA_PROVIDER_ANTHROPIC_API_KEY":      "sk-ant-test",
-		"KEERA_PROVIDER_ANTHROPIC_DISCOUNT":     "12.5",
 		"KEERA_PROVIDER_STEPPING_STONE_API_KEY": "sk-ss-test",
 	}))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	want := catalog.Platform{
-		"anthropic":      {APIKey: "sk-ant-test", DiscountBP: 1250},
+		"anthropic":      {APIKey: "sk-ant-test"},
 		"stepping-stone": {APIKey: "sk-ss-test"},
 	}
 	if len(c.Platform) != len(want) {
@@ -48,12 +47,10 @@ func TestAProviderKeySettingThatCannotWorkStopsTheStart(t *testing.T) {
 	}{
 		{"misspelt provider", map[string]string{"KEERA_PROVIDER_ANTROPIC_API_KEY": "sk"},
 			"KEERA_PROVIDER_ANTROPIC_API_KEY"},
-		{"discount without a key", map[string]string{"KEERA_PROVIDER_OPENAI_DISCOUNT": "10"},
-			"KEERA_PROVIDER_OPENAI_API_KEY"},
-		{"discount above 100", map[string]string{"KEERA_PROVIDER_OPENAI_API_KEY": "sk",
-			"KEERA_PROVIDER_OPENAI_DISCOUNT": "120"}, "percentage"},
-		{"discount that is no number", map[string]string{"KEERA_PROVIDER_OPENAI_API_KEY": "sk",
-			"KEERA_PROVIDER_OPENAI_DISCOUNT": "ten"}, "percentage"},
+		{"discount, which is no setting", map[string]string{"KEERA_PROVIDER_OPENAI_API_KEY": "sk",
+			"KEERA_PROVIDER_OPENAI_DISCOUNT": "10"}, "KEERA_PROVIDER_OPENAI_DISCOUNT"},
+		{"product id without a key", map[string]string{
+			"KEERA_PROVIDER_INFOMANIAK_PRODUCT_ID": "1"}, "KEERA_PROVIDER_INFOMANIAK_API_KEY"},
 		{"Infomaniak without a product id", map[string]string{
 			"KEERA_PROVIDER_INFOMANIAK_API_KEY": "sk"}, "KEERA_PROVIDER_INFOMANIAK_PRODUCT_ID"},
 		{"product id where none is needed", map[string]string{

@@ -2,10 +2,8 @@ package config
 
 import (
 	"fmt"
-	"math"
 	"os"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/bespinian/keera-gateway/internal/catalog"
@@ -15,7 +13,6 @@ import (
 const (
 	platformAPIKey    = "API_KEY"
 	platformProductID = "PRODUCT_ID"
-	platformDiscount  = "DISCOUNT"
 )
 
 // platformKeys reads the deployment's own provider keys, such as
@@ -25,14 +22,13 @@ func platformKeys() (catalog.Platform, error) {
 	known := []string{}
 	for _, p := range catalog.Providers() {
 		prefix := catalog.EnvPrefix(p.Name)
-		for _, s := range []string{platformAPIKey, platformProductID, platformDiscount} {
+		for _, s := range []string{platformAPIKey, platformProductID} {
 			known = append(known, prefix+s)
 		}
 		key := env(prefix+platformAPIKey, "")
 		productID := env(prefix+platformProductID, "")
-		discount := env(prefix+platformDiscount, "")
 		if key == "" {
-			if productID != "" || discount != "" {
+			if productID != "" {
 				return nil, fmt.Errorf("%s is not set, so the other %s settings do nothing",
 					prefix+platformAPIKey, prefix+"*")
 			}
@@ -49,11 +45,7 @@ func platformKeys() (catalog.Platform, error) {
 			return nil, fmt.Errorf("%s must be letters, digits, hyphens and underscores",
 				prefix+platformProductID)
 		}
-		bp, err := discountBP(discount)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", prefix+platformDiscount, err)
-		}
-		out[p.Name] = catalog.PlatformKey{APIKey: key, ProductID: productID, DiscountBP: bp}
+		out[p.Name] = catalog.PlatformKey{APIKey: key, ProductID: productID}
 	}
 	// A misspelt provider name would otherwise leave every model of it
 	// waiting for a key nobody can enter.
@@ -66,18 +58,6 @@ func platformKeys() (catalog.Platform, error) {
 		}
 	}
 	return out, nil
-}
-
-// discountBP reads a percentage, such as 12.5, as basis points.
-func discountBP(raw string) (int64, error) {
-	if raw == "" {
-		return 0, nil
-	}
-	pct, err := strconv.ParseFloat(strings.TrimSuffix(raw, "%"), 64)
-	if err != nil || pct < 0 || pct > 100 {
-		return 0, fmt.Errorf("%q must be a percentage from 0 to 100, such as 12.5", raw)
-	}
-	return int64(math.Round(pct * 100)), nil
 }
 
 // validPathSegment reports whether s is safe to put into a URL path.

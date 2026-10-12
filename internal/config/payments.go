@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/base64"
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"strconv"
@@ -76,7 +77,16 @@ func payments(platform catalog.Platform, publicURL string) (*Payments, error) {
 }
 
 // percentBP reads a percentage, such as 8.1, as basis points.
-func percentBP(raw string) (int64, error) { return discountBP(raw) }
+func percentBP(raw string) (int64, error) {
+	if raw == "" {
+		return 0, nil
+	}
+	pct, err := strconv.ParseFloat(strings.TrimSuffix(raw, "%"), 64)
+	if err != nil || pct < 0 || pct > 100 {
+		return 0, fmt.Errorf("%q must be a percentage from 0 to 100, such as 8.1", raw)
+	}
+	return int64(math.Round(pct * 100)), nil
+}
 
 // onThisMachine reports whether an http address is this machine, as in the
 // development loop. Only the person's own browser is sent back there, and it

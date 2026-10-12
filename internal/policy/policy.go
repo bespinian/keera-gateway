@@ -143,7 +143,7 @@ type Model struct {
 	// docs/billing.md.
 	PlatformKey bool `json:"platform_key,omitempty"`
 	// Billing is how a model on the deployment's key is billed. The registry
-	// sets it, and it never leaves the gateway: it holds the discount.
+	// sets it, and it never leaves the gateway.
 	Billing *Billing `json:"-"`
 	// Limited says the organisation signed itself up and has not paid yet.
 	// The gateway then connects only to public addresses for it. Locked says

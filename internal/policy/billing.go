@@ -4,13 +4,9 @@ package policy
 const Currency = "CHF"
 
 // Billing is how calls to a model on the deployment's own provider key are
-// billed: the organisation pays the list price, and the deployment pays the
-// provider that less its discount.
+// billed: the organisation pays the list price.
 type Billing struct {
 	Provider string
-	// DiscountBP is the provider's discount on its list price, in basis
-	// points: 1250 is 12.5%.
-	DiscountBP int64
 	// Credit says organisations pay in advance, so each call takes its list
 	// price from their credit. It is false without payments. See
 	// docs/billing.md.
@@ -58,7 +54,7 @@ func (m Model) Bill(t Tokens) (BillLine, bool) {
 		CacheWriteTokens:  t.CacheWrite,
 		OutputTokens:      t.Output,
 		Micros:            micros,
-		ProviderMicros:    micros * (10_000 - m.Billing.DiscountBP) / 10_000,
+		ProviderMicros:    micros,
 		CreditMicros:      credit,
 	}, true
 }

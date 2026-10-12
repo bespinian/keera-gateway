@@ -4,8 +4,7 @@ A deployment can hold its own API key for a hosted provider. Every
 organisation's models of that provider then use that key, and the deployment
 bills each organisation for what it used, at the provider's list price.
 
-This is how a public instance resells a provider: you buy at a discount and
-bill the list price. Without such a key, nothing changes: each organisation
+This is how a public instance resells a provider. Without such a key, nothing changes: each organisation
 enters its own key, as described in [providers.md](providers.md).
 
 With a PostFinance Checkout account, organisations also
@@ -15,7 +14,6 @@ With a PostFinance Checkout account, organisations also
 
 ```sh
 KEERA_PROVIDER_ANTHROPIC_API_KEY=sk-ant-...
-KEERA_PROVIDER_ANTHROPIC_DISCOUNT=15        # optional, in percent
 ```
 
 The variables are named after the provider: `KEERA_PROVIDER_<NAME>_API_KEY`,
@@ -23,11 +21,10 @@ with the name in capitals and hyphens as underscores, such as
 `KEERA_PROVIDER_STEPPING_STONE_API_KEY`. `keera model providers` lists the
 names.
 
-| Setting                                | What it does                                                                                                     |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `KEERA_PROVIDER_<NAME>_API_KEY`        | The deployment's key at that provider.                                                                           |
-| `KEERA_PROVIDER_<NAME>_DISCOUNT`       | Your discount on the list price, in percent, such as `12.5`. It sets the provider cost operators see. Default 0. |
-| `KEERA_PROVIDER_INFOMANIAK_PRODUCT_ID` | Required with an Infomaniak key: the product id of your AI Service.                                              |
+| Setting                                | What it does                                                        |
+| -------------------------------------- | ------------------------------------------------------------------- |
+| `KEERA_PROVIDER_<NAME>_API_KEY`        | The deployment's key at that provider.                              |
+| `KEERA_PROVIDER_INFOMANIAK_PRODUCT_ID` | Required with an Infomaniak key: the product id of your AI Service. |
 
 A misspelt `KEERA_PROVIDER_*` setting stops the start, so a key never quietly
 goes unused.
