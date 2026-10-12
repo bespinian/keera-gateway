@@ -198,7 +198,7 @@ provider's console.
 
 stepping stone publishes a cache rate too. The gateway charges it for whatever
 the response reports as cached, although stepping stone bills it only from
-about the end of October 2026 (`keera model providers` says so).
+about the end of October 2026.
 
 Infomaniak, Phoeniqs and CSCS publish no cache discount. Their cached column is empty and every
 input token is charged at the input price. That is correct, not a gap.
@@ -301,8 +301,9 @@ for a temperature gets the default.
 
 ### Also worth knowing
 
-- **A promotional price ends.** After `gpt-5.6-sol`'s promotion, the table's
-  price is too low until a new build, or until you set the price yourself.
+- **A promotional price ends.** `gpt-5.6-sol` has one until at least 21
+  November 2026. After that, the table's price is too low until a new build, or
+  until you set the price yourself.
 - **Upstream model ids are not aliases.** Infomaniak, stepping stone and CSCS
   use names with capitals, such as `swiss-ai/Apertus-v1.5-70B`. Choose your own
   alias; the panel suggests a lowercase one.

@@ -99,7 +99,8 @@ A server where the key may call no tool answers 404, like a model it may not
 use. A [subscription key](subscriptions.md#what-a-subscription-key-can-do)
 is refused by every server: with a 401 `subscription_key` when it is sent in
 `Authorization`, and with a 404 `mcp_server_not_found` when it is sent in
-`X-Keera-Key`. Because the list depends on the key, a list the server marks `public` for
+`X-Keera-Key`. While `KEERA_CLAUDE_SUBSCRIPTIONS` is off, both get a 403
+`subscriptions_off`. Because the list depends on the key, a list the server marks `public` for
 caching is passed on as `private`.
 
 A key that may call only some of a server's tools reaches only its tools. The

@@ -70,8 +70,9 @@ hyphens, at most 40 characters, because it becomes a hostname in the cluster.
 An engineer's sandbox needs an ssh public key: `keera sandbox create` sends the
 ones in `~/.ssh`, or the one in the file `--ssh-key` names, such as
 `--ssh-key ~/.ssh/work.pub`. An agent's needs both `--repo`
-and `--task`. Through the API, `env` adds variables for the first start. It
-cannot name a `KEERA_` variable: those are the gateway's.
+and `--task`. Through the API, `env` adds variables for the sandbox's life,
+until a resume after it expired drops them. It cannot name a `KEERA_` variable:
+those are the gateway's.
 
 ## Agent-in-sandbox, not sandbox-as-a-tool
 

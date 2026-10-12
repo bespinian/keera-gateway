@@ -16,14 +16,15 @@ leaves the containers running, so later starts are instant.
 1. **`dev-env`** - on a fresh clone, generates `compose/.env` with new
    credentials, like the NixOS unit does on first boot. An existing `.env` is
    left alone.
-2. **`dev-backends`** - starts `keera-db` and `keera-engine` in podman, stops
-   any gateway container holding port 8080, and waits for Postgres.
-3. **air** - builds and runs the gateway on the host against those two, with
+2. **`dev-backends`** - starts `keera-db`, `keera-engine` and `keera-decider`
+   in podman, stops any gateway container holding port 8080, and waits for
+   Postgres.
+3. **air** - builds and runs the gateway on the host against those three, with
    debug logging on. Each new organisation starts with the models in
    `build/models.dev.yaml` and the sandbox classes in `compose/sandboxes.yaml`,
    unless `.env` names other files. `make dev` writes `build/models.dev.yaml`
-   from `compose/models.yaml`, with the backend at `127.0.0.1` instead of
-   `keera-engine`. An organisation
+   from `compose/models.yaml`, with the backends at `127.0.0.1:8000` and
+   `127.0.0.1:8001` instead of `keera-engine` and `keera-decider`. An organisation
    that already exists keeps its own. When `KEERA_SANDBOX_DRIVER` is set,
    `KEERA_SANDBOX_PUBLIC_URL` defaults to `http://host.containers.internal:8080`.
 

@@ -69,7 +69,7 @@ remote endpoint without any developer changing anything.
 Every model belongs to one organisation. Only that organisation can call it,
 and its administrators add, change and remove it. The backend can be any URL:
 your own inference plane, or a provider reached with the organisation's own
-key.
+key or the deployment's ([billing.md](billing.md)).
 
 An administrator adds one in the panel (**Models → Add model**) or with
 `keera model add <alias>`. Both act on the organisation the person works in.
@@ -82,7 +82,8 @@ the file later does not touch organisations that already exist. To add the
 file's models to one, switch to it and run `keera model apply <file>`.
 
 The file holds no API keys. After a new organisation is created, its
-administrator stores the key for each hosted model.
+administrator stores the key for each hosted model, unless the deployment holds
+that provider's key.
 
 Each organisation has its own aliases, so two organisations can each have a
 `fast`. The gateway looks up the `model` field in the organisation's models
@@ -405,8 +406,8 @@ and [mcp.md](mcp.md#the-tool-call-log).
 silent: the endpoint answers 200, the model writes prose, and the agent never
 edits a file. This happens when the vLLM tool-call parser does not match the
 model: the call comes back as text in `content` and `tool_calls` stays empty.
-`keera model check` catches it. Run it on every change of model, quantisation or
-vLLM version.
+[`keera model check`](install.md#keera-model-check-is-the-acceptance-test)
+catches it. Run it on every change of model, quantisation or vLLM version.
 
 **The inference backend has no authentication.** Neither vLLM's nor llama.cpp's
 OpenAI server has any. Anything that reaches port 8000 directly gets a model

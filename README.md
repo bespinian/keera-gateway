@@ -168,7 +168,7 @@ them. [docs/providers.md](docs/providers.md)
 
 **Claude subscriptions** let a Claude Team or Enterprise plan pay for Claude
 Code, while Keera applies the guardrails and shows each person's usage. They
-are off unless `KEERA_CLAUDE_SUBSCRIPTIONS` is set.
+are off unless `KEERA_CLAUDE_SUBSCRIPTIONS` is turned on.
 [docs/subscriptions.md](docs/subscriptions.md)
 
 **Billing** lets a deployment hold its own key for a hosted provider. Every

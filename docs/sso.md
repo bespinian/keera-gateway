@@ -222,7 +222,6 @@ KEERA_OIDC_ENTRA_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0
 KEERA_OIDC_ENTRA_CLIENT_ID=<from the Entra admin center>
 KEERA_OIDC_ENTRA_CLIENT_SECRET=<from the Entra admin center>
 KEERA_OIDC_ENTRA_GROUPS_CLAIM=roles
-KEERA_OIDC_ENTRA_ADMIN_GROUPS=keera-admins
 KEERA_OIDC_ENTRA_DOMAINS=anotherbank.ch
 
 KEERA_PUBLIC_URL=https://keera.example.ch
@@ -244,10 +243,11 @@ A sign-in with an address outside the list is refused.
 itself, such as Google. Never use it for Entra, where the tenant admin sets the
 address.
 
-`KEERA_OIDC_ENTRA_ADMIN_GROUPS` is set per provider, but it applies to the
+`KEERA_OIDC_<NAME>_ADMIN_GROUPS` is set per provider, but it applies to the
 **whole gateway**, Google users included. Google sends no groups, so nobody
-signing in through Google could ever become an administrator. If one of your
-customers uses Google, leave that line out.
+signing in through Google could ever become an administrator. That is why the
+example leaves it out. With [sign-up](#letting-people-sign-up) on, the gateway
+refuses to start with it.
 
 **One callback serves every provider.** Keera recognises a sign-in by its state,
 not by the callback address. Each provider's client registration must still list
@@ -345,7 +345,8 @@ A browser remembers the organisation it was last in, and a new sign-in lands
 there. Elsewhere it lands in the one used last. `keera login` goes back to the
 one that machine was last in. Every command acts on that organisation, so none
 takes `--org`. The exceptions are `keera billing grant` and
-`keera billing invoiced`, where an operator names it each time.
+`keera billing invoiced`, where an operator names it each time, and
+`keera sandbox proxy`, which `keera sandbox config` writes into the ssh config.
 
 An operator works in every organisation, so `keera org switch` only chooses the
 one commands act on, and `keera org switch --all` goes back to all of them.

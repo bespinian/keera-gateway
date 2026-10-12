@@ -237,7 +237,7 @@ var commands = []command{
 		subs: []subcommand{
 			{name: "create", aliases: []string{"add", "new"}, args: "[<name>]", summary: "issue an API key",
 				flags: []string{"project", "user", "name", "expires", "subscription", "json"},
-				prose: "The name, which is required, says what the key is for. The panel, the " +
+				prose: "A name, as the argument or --name, is required. It says what the key is for. The panel, the " +
 					"reports and the audit log show it in place of the key.\n\n" +
 					"--subscription issues a key for Claude Code signed in to a Claude plan. It " +
 					"reaches only subscription models, which that plan pays for. For a member, " +

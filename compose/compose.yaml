@@ -47,7 +47,8 @@ services:
       # what has already been recorded.
       KEERA_SESSION_GAP: ${KEERA_SESSION_GAP:-}
       # Compose passes on only the variables this file names, so every other
-      # setting in docs/install.md is listed here. Empty keeps the default.
+      # setting in docs/install.md is listed here, except KEERA_ADDR. Empty
+      # keeps the default.
       # The sandbox settings are left out: the podman driver cannot run inside
       # this container, so only `make dev` reads them. See .env.example.
       KEERA_UPSTREAM_DENY: ${KEERA_UPSTREAM_DENY:-}
