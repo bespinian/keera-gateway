@@ -485,16 +485,22 @@ func printProviders(w *table) {
 }
 
 func printModels(w *table, models []policy.Model) {
-	w.header("ALIAS\tKIND\tBACKEND MODEL\tPROVIDER\tLOCATION\tRELEASED\tBACKENDS\t" +
-		"IN/MTOK\tCACHED/MTOK\tOUT/MTOK\tCREDENTIAL\tENABLED")
+	w.header("ALIAS\tKIND\tBACKEND MODEL\tPROVIDER\tLOCATION\tRELEASED\t" +
+		"IN/MTOK\tCACHED/MTOK\tOUT/MTOK\tSTATUS")
 	for _, m := range models {
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			m.Alias, m.Kind, m.BackendModel, dash(m.Provider), dash(m.Location),
-			dash(m.ReleaseDate), strings.Join(m.Backends, ","),
+			dash(m.ReleaseDate),
 			policy.FormatMicros(m.InputMicrosPerMTok), optionalPrice(m.CachedInputMicrosPerMTok),
-			policy.FormatMicros(m.OutputMicrosPerMTok),
-			credentialSource(m), yesNo(m.Enabled))
+			policy.FormatMicros(m.OutputMicrosPerMTok), enabledStatus(m.Enabled))
 	}
+}
+
+func enabledStatus(enabled bool) string {
+	if enabled {
+		return statusWord("enabled")
+	}
+	return statusWord("disabled")
 }
 
 // optionalPrice is a cached-input or cache-write price. A dash rather than 0.00
