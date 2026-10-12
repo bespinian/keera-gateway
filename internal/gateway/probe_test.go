@@ -86,6 +86,36 @@ func TestCheckModelReportsAModelThatCallsNoTool(t *testing.T) {
 	}
 }
 
+// vLLM started without tool calling refuses every request that offers tools.
+// Clients that send none still work, so the check passes with a note instead
+// of calling the model unusable.
+func TestCheckModelWarnsWhenTheBackendRefusesTools(t *testing.T) {
+	plain := sseBackend(`{"model":"keera-code","choices":[{"delta":{"content":"Hello"}}]}`)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), `"tools"`) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"error":{"message":"\"auto\" tool choice requires `+
+				`--enable-auto-tool-choice and --tool-call-parser to be set"}}`)
+			return
+		}
+		plain(w, r)
+	}))
+	defer upstream.Close()
+
+	p := probeServer(t).CheckModel(context.Background(), chatAlias(upstream.URL))
+	if !p.OK {
+		t.Fatalf("a backend that answers without tools should pass: %s", p.Error)
+	}
+	if !p.ToolsOff || p.ToolCalls {
+		t.Errorf("tools_off=%v tool_calls=%v, want true and false", p.ToolsOff, p.ToolCalls)
+	}
+	if !anyContains(p.Warnings, "--enable-auto-tool-choice") {
+		t.Errorf("warnings = %v, want one naming --enable-auto-tool-choice", p.Warnings)
+	}
+}
+
 // A buffered answer is usable but wrong for an editor, so it passes with a note
 // rather than failing. The distinction matters: an operator who is told this is
 // broken will go looking for a fault that is not there.

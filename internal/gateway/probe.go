@@ -36,6 +36,10 @@ type Probe struct {
 	// ToolCallAsText means the model called the tool and the parser returned
 	// it as prose: the misconfiguration worth naming.
 	ToolCallAsText bool `json:"tool_call_as_text"`
+	// ToolsOff means the backend refuses any request that offers tools, as
+	// vLLM does without --enable-auto-tool-choice. Clients that send no tools
+	// still work, so the check asked again without them.
+	ToolsOff bool `json:"tools_off,omitempty"`
 	// Served is the model id the backend answered with. It catches a
 	// backend_model the inference plane does not serve.
 	Served     string `json:"served_model,omitempty"`
@@ -50,7 +54,7 @@ type Probe struct {
 	// organisation has no credit for it, so it was not called.
 	NoCredit bool `json:"no_credit,omitempty"`
 	// OK is the summary: it answered, and a chat model made a usable tool
-	// call.
+	// call, or its backend refuses tools and plain chat works (ToolsOff).
 	OK bool `json:"ok"`
 }
 
@@ -114,18 +118,15 @@ var toolProbe = []map[string]any{{
 
 func (s *Server) checkChat(ctx context.Context, m policy.Model, p Probe) Probe {
 	start := time.Now()
-	resp := s.probeCall(ctx, m, "/chat/completions", map[string]any{
-		"model": m.BackendModel,
-		"messages": []map[string]string{{
-			"role":    "user",
-			"content": "Is the build for the pipeline named 'release' passing? Use the tool.",
-		}},
-		"tools":       toolProbe,
-		"tool_choice": "auto",
-		"stream":      true,
-		"max_tokens":  128,
-		"temperature": 0,
-	}, &p)
+	resp := s.probeCall(ctx, m, "/chat/completions", chatProbe(m, true), &p)
+	if resp == nil && toolsOff(p) {
+		// Clients may never send tools, so a backend that refuses them is not
+		// broken for everyone. Asking again without them says whether it
+		// answers at all.
+		p = Probe{Alias: p.Alias, ToolsOff: true}
+		start = time.Now()
+		resp = s.probeCall(ctx, m, "/chat/completions", chatProbe(m, false), &p)
+	}
 	if resp == nil {
 		return p
 	}
@@ -162,6 +163,10 @@ func (s *Server) checkChat(ctx context.Context, m policy.Model, p Probe) Probe {
 	}
 
 	switch {
+	case p.ToolsOff && text == "":
+		p.Error = "the backend answered 200 but the reply was empty"
+	case p.ToolsOff:
+		p.OK = true
 	case p.ToolCallAsText:
 		p.Error = "the model produced a tool call as text: `tool_calls` was empty while the " +
 			"function name appeared in `content`. The vLLM tool-call parser does not match " +
@@ -174,6 +179,32 @@ func (s *Server) checkChat(ctx context.Context, m policy.Model, p Probe) Probe {
 	}
 	p.Warnings = chatWarnings(p, m)
 	return p
+}
+
+// chatProbe is the chat check's request: the tool question, or, for a
+// backend that refuses tools, a plain one.
+func chatProbe(m policy.Model, tools bool) map[string]any {
+	ask := "Is the build for the pipeline named 'release' passing? Use the tool."
+	if !tools {
+		ask = "Say hello in one word."
+	}
+	body := map[string]any{
+		"model":       m.BackendModel,
+		"messages":    []map[string]string{{"role": "user", "content": ask}},
+		"stream":      true,
+		"max_tokens":  128,
+		"temperature": 0,
+	}
+	if tools {
+		body["tools"], body["tool_choice"] = toolProbe, "auto"
+	}
+	return body
+}
+
+// toolsOff reports vLLM's refusal of a request that offers tools when it was
+// started without tool calling.
+func toolsOff(p Probe) bool {
+	return p.Status == http.StatusBadRequest && strings.Contains(p.Error, "--enable-auto-tool-choice")
 }
 
 // probeMessage is the part of a chat message, or of a streamed delta, that a
@@ -230,6 +261,12 @@ func (r *probeReply) scan(chunk []byte) {
 // otherwise passed. None of these is a failure on its own.
 func chatWarnings(p Probe, m policy.Model) []string {
 	var out []string
+	if p.ToolsOff {
+		out = append(out, "the backend refuses requests that offer tools, so coding agents "+
+			"and other clients that use tools get a 400. Plain chat works. To allow tools, "+
+			"start vLLM with --enable-auto-tool-choice and a --tool-call-parser that "+
+			"matches this model.")
+	}
 	if p.OK && !p.Streamed {
 		out = append(out, "the backend did not stream. Editors show a completion token by "+
 			"token; buffered, it arrives all at once at the end.")

@@ -366,6 +366,10 @@ the model a tool and a question only that tool can answer. It reports whether
 the call came back in `tool_calls`, whether the response streamed, and whether
 the backend answered as the model the alias names.
 
+A vLLM started without `--enable-auto-tool-choice` refuses every request that
+offers tools. The check then asks again without them and passes with a warning,
+since plain chat still works. Coding agents still do not.
+
 Run it after every change of model, quantisation or vLLM version. Each check is
 written to the audit log, so you can show when a model last worked.
 
@@ -474,7 +478,7 @@ keera doctor --probe    # and put a real request through every enabled model
 
 `--probe` runs `keera model check` against each enabled model. This catches a
 backend that answers 200 with prose when a tool call was asked for. It costs
-one generation per model, so only the organisation's administrators can run it.
+one generation per model, two when the backend refuses tools, so only the organisation's administrators can run it.
 
 A failing check exits non-zero, so `keera doctor` can be the last step of an
 install script.

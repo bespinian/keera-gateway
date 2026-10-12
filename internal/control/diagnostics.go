@@ -241,6 +241,8 @@ func (s *Server) probeModels(ctx context.Context, d *Diagnosis, enabled []policy
 			continue
 		}
 		result := s.opts.Gateway.CheckModel(ctx, live)
+		// The check treats a model without a kind as chat, and so does this.
+		chat := m.Kind == policy.KindChat || m.Kind == ""
 		switch {
 		case result.NoCredit:
 			d.add(area, m.Alias+" (probe)", VerdictWarn,
@@ -254,13 +256,25 @@ func (s *Server) probeModels(ctx context.Context, d *Diagnosis, enabled []policy
 				"the model called a tool and the parser returned it as prose; coding "+
 					"agents will not work against this",
 				"match vLLM's --tool-call-parser to this model")
-		case !result.ToolCalls && m.Kind == policy.KindChat:
+		case result.ToolsOff && result.OK:
+			d.add(area, m.Alias+" (probe)", VerdictWarn,
+				"answers, but refuses requests that offer tools; coding agents will "+
+					"not work against this",
+				"start vLLM with --enable-auto-tool-choice and a matching --tool-call-parser")
+		case !result.OK && chat && result.Status < 300 && !result.ToolsOff:
 			d.add(area, m.Alias+" (probe)", VerdictWarn,
 				"answered, but produced no tool call when asked for one",
 				"check the tool-call parser; agents need this to work")
-		default:
+		case !result.OK:
+			d.add(area, m.Alias+" (probe)", VerdictFail,
+				"the check failed: "+result.Error,
+				"run 'keera model check "+m.Alias+"' for the details")
+		case chat:
 			d.add(area, m.Alias+" (probe)", VerdictOK,
 				fmt.Sprintf("answered in %dms, tool calls work", result.TTFTMillis), "")
+		default:
+			d.add(area, m.Alias+" (probe)", VerdictOK,
+				fmt.Sprintf("answered in %dms", result.TTFTMillis), "")
 		}
 	}
 }

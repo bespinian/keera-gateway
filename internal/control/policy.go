@@ -748,7 +748,8 @@ func (s *Server) checkModel(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	// Kept, so an operator can later show when a model last worked.
 	s.auditf(r, p, orgID, "model.check", "model", alias, map[string]any{
 		"ok": probe.OK, "status": probe.Status, "tool_calls": probe.ToolCalls,
-		"tool_call_as_text": probe.ToolCallAsText, "error": probe.Error,
+		"tool_call_as_text": probe.ToolCallAsText, "tools_off": probe.ToolsOff,
+		"error": probe.Error,
 	})
 	httpx.WriteJSON(w, http.StatusOK, probe)
 }

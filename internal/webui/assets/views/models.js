@@ -731,9 +731,11 @@ function verdict(probe, kind) {
       : "good"
     : "bad";
   const label = probe.ok
-    ? (probe.warnings || []).length
-      ? "Working, with notes"
-      : "Working"
+    ? probe.tools_off
+      ? "No tool calls"
+      : (probe.warnings || []).length
+        ? "Working, with notes"
+        : "Working"
     : probe.tool_call_as_text
       ? "Tool calls broken"
       : probe.reachable
@@ -755,7 +757,11 @@ function report(probe, kind) {
           ["Streamed", probe.streamed ? "yes" : "no"],
           [
             ["Tool call in ", h("code", {}, "tool_calls")],
-            probe.tool_calls ? "yes" : "no",
+            probe.tools_off
+              ? "turned off on the backend"
+              : probe.tool_calls
+                ? "yes"
+                : "no",
           ],
         ]
       : []),
@@ -768,7 +774,7 @@ function report(probe, kind) {
     wide: true,
     title: `Check - ${probe.alias}`,
     subtitle: probe.ok
-      ? chat
+      ? chat && !probe.tools_off
         ? "The model answered and produced a usable tool call."
         : "The model answered."
       : chat
@@ -782,7 +788,7 @@ function report(probe, kind) {
         : h(
             "div",
             { class: "banner banner-good" },
-            chat
+            chat && !probe.tools_off
               ? "Reachable, streaming, and the tool call came back in a form " +
                   "clients can use."
               : "Reachable, and the answer came back in a form clients can use.",

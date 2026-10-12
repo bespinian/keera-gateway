@@ -518,7 +518,7 @@ rate-limited or budgeted and writes no usage row. On the deployment's own
 provider key it needs credit and is billed ([billing.md](billing.md)). It does
 put real requests on the GPUs: at least three for a router that decides, since a sample
 whose lettered answer cannot be read is asked again for a name, and one per
-destination for the other modes.
+destination for the other modes (two when a backend refuses tools).
 
 ## What a client can see
 

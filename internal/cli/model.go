@@ -334,11 +334,14 @@ func (r *modelRun) toggle(ctx context.Context) error {
 
 func (r *modelRun) check(ctx context.Context) error {
 	alias := r.fs.Arg(0)
-	if _, err := r.find(ctx, alias); err != nil {
+	m, err := r.find(ctx, alias)
+	if err != nil {
 		return err
 	}
-	return checkProbe(ctx, r.c, r.path(alias, "/check"), "the model "+alias,
-		r.asJSON, printProbe, func(p gateway.Probe) bool { return p.OK })
+	chat := m.Kind == policy.KindChat || m.Kind == ""
+	return checkProbe(ctx, r.c, r.path(alias, "/check"), "the model "+alias, r.asJSON,
+		func(w *table, p gateway.Probe) { printProbe(w, p, chat) },
+		func(p gateway.Probe) bool { return p.OK })
 }
 
 func (r *modelRun) apply(ctx context.Context) error {
@@ -583,7 +586,9 @@ func credentialSource(m policy.Model) string {
 	return "-"
 }
 
-func printProbe(w *table, p gateway.Probe) {
+// printProbe leaves out streaming and tool calls for a model that is not chat:
+// its check sends one plain request.
+func printProbe(w *table, p gateway.Probe, chat bool) {
 	show(w, "alias", p.Alias)
 	if p.Backend != "" {
 		show(w, "backend", p.Backend)
@@ -593,11 +598,16 @@ func printProbe(w *table, p gateway.Probe) {
 	} else {
 		show(w, "reachable", yesNo(false))
 	}
-	show(w, "streamed", yesNo(p.Streamed))
-	if p.ToolCallAsText {
-		show(w, "tool calls", "returned as text - the backend's tool parser does not match this model")
-	} else {
-		show(w, "tool calls", yesNo(p.ToolCalls))
+	if chat {
+		show(w, "streamed", yesNo(p.Streamed))
+		switch {
+		case p.ToolCallAsText:
+			show(w, "tool calls", "returned as text - the backend's tool parser does not match this model")
+		case p.ToolsOff:
+			show(w, "tool calls", "turned off on the backend")
+		default:
+			show(w, "tool calls", yesNo(p.ToolCalls))
+		}
 	}
 	if p.Served != "" {
 		show(w, "served model", p.Served)
