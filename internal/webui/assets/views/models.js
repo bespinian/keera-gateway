@@ -324,7 +324,7 @@ export async function providerModelsView(ctx) {
   );
 
   const price = (v) =>
-    v ? h("span", { class: "nowrap" }, `${listPrice(v)} CHF`) : dash();
+    v ? h("span", { class: "nowrap" }, listPrice(v)) : dash();
 
   const head = h(
     "div",
@@ -333,9 +333,9 @@ export async function providerModelsView(ctx) {
     h(
       "div",
       { class: "muted", style: { marginBottom: "16px" } },
-      "The models the hosted providers offer. Prices are list prices per " +
-        "million tokens, in CHF. With a hosted " +
-        "provider, prompts leave your infrastructure.",
+      "The models the hosted providers offer. Prices are list prices in " +
+        "CHF per million tokens (Mtok). With a hosted provider, prompts " +
+        "leave your infrastructure.",
     ),
   );
 
@@ -386,28 +386,28 @@ export async function providerModelsView(ctx) {
         cell: (r) => (r.m.max_context ? compact(r.m.max_context) : dash()),
       },
       {
-        label: "Input",
+        label: "Input / Mtok",
         num: true,
         shrink: true,
         sortKey: (r) => r.m.input_micros_per_mtok || null,
         cell: (r) => price(r.m.input_micros_per_mtok),
       },
       {
-        label: "Cached input",
+        label: "Cached input / Mtok",
         num: true,
         shrink: true,
         sortKey: (r) => r.m.cached_input_micros_per_mtok || null,
         cell: (r) => price(r.m.cached_input_micros_per_mtok),
       },
       {
-        label: "Cache write",
+        label: "Cache write / Mtok",
         num: true,
         shrink: true,
         sortKey: (r) => r.m.cache_write_micros_per_mtok || null,
         cell: (r) => price(r.m.cache_write_micros_per_mtok),
       },
       {
-        label: "Output",
+        label: "Output / Mtok",
         num: true,
         shrink: true,
         sortKey: (r) => r.m.output_micros_per_mtok || null,
