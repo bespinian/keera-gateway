@@ -1,7 +1,7 @@
 // Package connect holds the configuration a developer needs to point a coding
 // agent at a Keera Gateway.
 //
-// The control panel's Clients screen and `keera connect` both read
+// The control panel's Connect client dialog and `keera connect` both read
 // this one catalogue, so they hand out the same configuration. Each block is a
 // template; the caller fills in the gateway address and the models a key may
 // call, with their limits.

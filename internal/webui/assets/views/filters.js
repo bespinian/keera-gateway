@@ -1301,7 +1301,7 @@ function fill(el, ...children) {
 }
 
 // formatRules and parseRules are the text form of a pattern filter's rules, and
-// deliberately the same form `keera filter --rules` reads and prints: a list
+// deliberately the same form `keera filter add --rules` reads and prints: a list
 // kept in a file should paste into this box unchanged.
 function formatRules(list) {
   const rules = list || [];
@@ -1316,7 +1316,7 @@ function formatRules(list) {
     .join("\n");
 }
 
-// parseRules reads the text the way `keera filter --rules` does, line for line:
+// parseRules reads the text the way `keera filter add --rules` does, line for line:
 // blank lines and '#' comments are skipped, and the arrow is found at its last
 // occurrence because the left side is an expression and the right side is a
 // literal. A line without an arrow is refused rather than read as "delete every

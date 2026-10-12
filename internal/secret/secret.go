@@ -1,9 +1,10 @@
 // Package secret encrypts the credentials Keera Gateway has to read back.
 //
 // Keys Keera issues are stored only as hashes. A hosted provider's API key
-// and an MCP server's credential have to be sent on every request, so they
-// are the reversible secrets in the database, sealed with a key that lives
-// only in the process environment. A database dump then holds ciphertext, not
+// and an MCP server's credential have to be sent on every request, and a
+// sign-in's refresh token is kept to ask the directory again. They are the
+// reversible secrets in the database, sealed with a key that lives only in
+// the process environment. A database dump then holds ciphertext, not
 // a working credential.
 package secret
 
@@ -29,8 +30,8 @@ func New(key string) (*Box, error) {
 		return nil, errors.New("the encryption key is too short to be one; generate one with: openssl rand -hex 32")
 	}
 	// Domain separation: the same value used elsewhere yields a different key.
-	// It seals MCP credentials too; the label predates them, and changing it
-	// would make every stored credential unreadable.
+	// It seals MCP credentials and refresh tokens too; the label predates
+	// them, and changing it would make every stored credential unreadable.
 	sum := sha256.Sum256([]byte("keera-model-credential-v1|" + key))
 	block, err := aes.NewCipher(sum[:])
 	if err != nil {

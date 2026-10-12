@@ -69,8 +69,8 @@ func (s *Server) trafficMap(w http.ResponseWriter, r *http.Request, p *authn.Pri
 		return
 	}
 
-	// Every catalogue model is drawn, even one nobody called: a quiet hosted
-	// model is still a way out of the building.
+	// Every one of the organisation's models is drawn, even one nobody called:
+	// a quiet hosted model is still a way out of the building.
 	out := make([]mapModel, 0, len(models))
 	seen := make(map[string]bool, len(models))
 	for _, m := range models {

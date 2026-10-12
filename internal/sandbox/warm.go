@@ -80,7 +80,7 @@ type warmPoolSpec struct {
 	TemplateRef warmTemplateRef `json:"sandboxTemplateRef"`
 	// UpdateStrategy is OnReplenish. Recreate would empty the pool whenever a
 	// class changes. The cost is that some sandboxes run the old image for a
-	// while; each row records the image it actually ran.
+	// while, though each row records the class's image at creation.
 	UpdateStrategy *warmUpdateStrategy `json:"updateStrategy,omitempty"`
 }
 

@@ -183,9 +183,9 @@ type CreateRequest struct {
 	// Limits is the caller's resolved sandbox guardrail: the organisation's,
 	// narrowed by the project's.
 	Limits policy.ResolvedSandbox
-	// Env is extra environment from the caller, for the first start only. It
-	// cannot name a KEERA_ variable, or a caller could point a sandbox at
-	// another endpoint.
+	// Env is extra environment from the caller, kept for the sandbox's life
+	// until a resume after it expired. It cannot name a KEERA_ variable, or a
+	// caller could point a sandbox at another endpoint.
 	Env map[string]string
 }
 
