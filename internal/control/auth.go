@@ -15,6 +15,7 @@ import (
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/id"
 	"github.com/bespinian/keera-gateway/internal/policy"
+	"github.com/bespinian/keera-gateway/internal/registry"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
@@ -384,7 +385,7 @@ func (s *Server) operatorKeyOrg(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	s.announce(ctx)
+	s.announce(ctx, registry.AnyChange)
 	return org.ID, nil
 }
 

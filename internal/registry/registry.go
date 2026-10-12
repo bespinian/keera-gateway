@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -81,7 +82,28 @@ type Source interface {
 	LoadSpend(ctx context.Context, now time.Time) ([]store.SpendRow, error)
 	LoadCredit(ctx context.Context) ([]store.CreditRow, error)
 	LimitedOrgs(ctx context.Context) ([]string, error)
-	Listen(ctx context.Context, channel string, fn func()) error
+	Listen(ctx context.Context, channel string, fn func(payload string)) error
+}
+
+// Change is what a policy notify carries: what changed, so each replica drops
+// no more than it must. AnyChange, and anything this version does not know,
+// means anything may have.
+type Change string
+
+// AnyChange drops every cached key and reloads models, filters, routers and
+// MCP servers.
+const AnyChange Change = ""
+
+const keyChange = "key:"
+
+// KeyChange is a change to one key only, such as its creation or revocation.
+// It drops that key alone and reloads nothing: a sandbox starting or stopping
+// must not cost every active key a query.
+func KeyChange(id string) Change { return Change(keyChange + id) }
+
+func (c Change) key() (string, bool) {
+	id, ok := strings.CutPrefix(string(c), keyChange)
+	return id, ok && id != ""
 }
 
 type entry struct {
@@ -110,6 +132,13 @@ type Registry struct {
 	// gen is bumped on every control-plane change. Entries from an older
 	// generation are ignored, which drops them all without walking the map.
 	gen atomic.Uint64
+	// drops is bumped, under mu, each time one key is dropped. A query that
+	// started before is not cached, since it may have read the old row.
+	drops uint64
+
+	// reload asks for a full reload. It holds one request, so a burst of
+	// changes costs one reload, not one each.
+	reload chan struct{}
 
 	inflight sync.Map // string -> *call
 	// lookups holds a slot for each key query running, up to maxLookups.
@@ -129,6 +158,7 @@ func New(ctx context.Context, st Source, opts Options, log *slog.Logger) (*Regis
 		keys:    make(map[string]entry),
 		budgets: newBudgets(opts.Prepaid),
 		lookups: make(chan struct{}, maxLookups),
+		reload:  make(chan struct{}, 1),
 	}
 	if err := r.refreshAll(ctx); err != nil {
 		return nil, err
@@ -142,13 +172,16 @@ func New(ctx context.Context, st Source, opts Options, log *slog.Logger) (*Regis
 // Run keeps the caches fresh until ctx is cancelled.
 func (r *Registry) Run(ctx context.Context) {
 	var wg sync.WaitGroup
-	wg.Go(func() { r.loop(ctx, refreshEvery, r.refreshAll) })
-	wg.Go(func() { r.loop(ctx, r.opts.SpendRefresh, r.refreshSpend) })
+	wg.Go(func() { r.loop(ctx, refreshEvery, r.reload, r.refreshAll) })
+	wg.Go(func() { r.loop(ctx, r.opts.SpendRefresh, nil, r.refreshSpend) })
 	wg.Go(func() { r.listen(ctx) })
 	wg.Wait()
 }
 
-func (r *Registry) loop(ctx context.Context, every time.Duration, fn func(context.Context) error) {
+// loop runs fn every so often, and also when asked on now.
+func (r *Registry) loop(ctx context.Context, every time.Duration, now <-chan struct{},
+	fn func(context.Context) error,
+) {
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
@@ -156,9 +189,10 @@ func (r *Registry) loop(ctx context.Context, every time.Duration, fn func(contex
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := fn(ctx); err != nil && ctx.Err() == nil {
-				r.log.Warn("registry refresh failed", "error", err)
-			}
+		case <-now:
+		}
+		if err := fn(ctx); err != nil && ctx.Err() == nil {
+			r.log.Warn("registry refresh failed", "error", err)
 		}
 	}
 }
@@ -178,18 +212,48 @@ func (r *Registry) listen(ctx context.Context) {
 	}
 }
 
+// listenOnce reloads on its own goroutine, not here, so a burst of
+// notifications is not a queue of reloads, and a revoked key behind it is
+// dropped at once.
 func (r *Registry) listenOnce(ctx context.Context) error {
-	return r.store.Listen(ctx, store.NotifyChannel, func() {
-		r.Invalidate()
-		if err := r.refreshAll(ctx); err != nil {
-			r.log.Warn("refresh after notify failed", "error", err)
+	return r.store.Listen(ctx, store.NotifyChannel, func(payload string) {
+		c := Change(payload)
+		r.Forget(c)
+		if _, ok := c.key(); !ok {
+			select {
+			case r.reload <- struct{}{}:
+			default:
+			}
 		}
 	})
 }
 
-// Invalidate drops every cached key. Called on notify, and directly by the
-// control plane when both listeners live in the same process.
+// Forget drops the cached keys a change makes stale. It is called on notify,
+// and directly by the control plane, so its own process does not wait for the
+// notification.
+func (r *Registry) Forget(c Change) {
+	if id, ok := c.key(); ok {
+		r.dropKey(id)
+		return
+	}
+	r.Invalidate()
+}
+
+// Invalidate drops every cached key.
 func (r *Registry) Invalidate() { r.gen.Add(1) }
+
+// dropKey drops one key's entry. Unknown keys are cached by hash only, so
+// one that turns valid waits out NegativeTTL, which is short.
+func (r *Registry) dropKey(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.drops++
+	for k, e := range r.keys {
+		if e.resolved != nil && e.resolved.Key.ID == id {
+			delete(r.keys, k)
+		}
+	}
+}
 
 // refreshAll reloads models, filters and routers in one pass. They name each
 // other, so renewing only part of the chain could refuse a request for a link
@@ -433,7 +497,8 @@ func (r *Registry) Resolve(ctx context.Context, presented string) (*policy.Resol
 	ck := string(hash)
 	gen := r.gen.Load()
 
-	if e, ok := r.lookupCache(ck, gen); ok {
+	e, drops, ok := r.lookupCache(ck, gen)
+	if ok {
 		return e.resolved, e.err
 	}
 
@@ -455,34 +520,36 @@ func (r *Registry) Resolve(ctx context.Context, presented string) (*policy.Resol
 	}
 	// The query runs on its own context: others may be waiting on it, and
 	// the first caller hanging up must not fail them all.
-	go r.lookup(context.WithoutCancel(ctx), hash, ck, gen, c)
+	go r.lookup(context.WithoutCancel(ctx), hash, ck, gen, drops, c)
 	return wait(ctx, c)
 }
 
 // lookupTimeout bounds a shared key query, which no caller can cancel.
 const lookupTimeout = 10 * time.Second
 
-func (r *Registry) lookup(ctx context.Context, hash []byte, ck string, gen uint64, c *call) {
+func (r *Registry) lookup(ctx context.Context, hash []byte, ck string, gen, drops uint64, c *call) {
 	defer func() { <-r.lookups }()
 	defer r.inflight.Delete(ck)
 	defer close(c.done)
 	// A query that finished between the check in Resolve and LoadOrStore has
 	// already cached its answer, because remember runs before Delete.
-	if e, ok := r.lookupCache(ck, gen); ok {
+	if e, _, ok := r.lookupCache(ck, gen); ok {
 		c.resolved, c.err = e.resolved, e.err
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
 	defer cancel()
 	c.resolved, c.err = r.store.LookupKey(ctx, hash)
-	r.remember(ck, gen, c)
+	r.remember(ck, gen, drops, c)
 }
 
-func (r *Registry) lookupCache(ck string, gen uint64) (entry, bool) {
+// lookupCache also returns the drop count it saw, for a query that follows.
+func (r *Registry) lookupCache(ck string, gen uint64) (entry, uint64, bool) {
 	r.mu.RLock()
 	e, ok := r.keys[ck]
+	drops := r.drops
 	r.mu.RUnlock()
-	return e, ok && e.gen == gen && time.Now().Before(e.expires)
+	return e, drops, ok && e.gen == gen && time.Now().Before(e.expires)
 }
 
 func wait(ctx context.Context, c *call) (*policy.Resolved, error) {
@@ -495,8 +562,9 @@ func wait(ctx context.Context, c *call) (*policy.Resolved, error) {
 }
 
 // remember caches an answer, never a database failure: an outage must not pin
-// a rejection in memory.
-func (r *Registry) remember(ck string, gen uint64, c *call) {
+// a rejection in memory. Nor an answer read before a key was dropped, which
+// may be that key as it was.
+func (r *Registry) remember(ck string, gen, drops uint64, c *call) {
 	if c.err != nil && !isKeyRejection(c.err) {
 		return
 	}
@@ -505,8 +573,11 @@ func (r *Registry) remember(ck string, gen uint64, c *call) {
 		ttl = r.opts.NegativeTTL
 	}
 	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.drops != drops {
+		return
+	}
 	r.keys[ck] = entry{resolved: c.resolved, err: c.err, expires: time.Now().Add(ttl), gen: gen}
-	r.mu.Unlock()
 }
 
 func isKeyRejection(err error) bool {

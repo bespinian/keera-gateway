@@ -169,7 +169,7 @@ func TestNotifyReachesAListener(t *testing.T) {
 		t.Fatalf("LISTEN: %v", err)
 	}
 
-	if err := st.Notify(ctx); err != nil {
+	if err := st.Notify(ctx, "key:k1"); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -180,5 +180,8 @@ func TestNotifyReachesAListener(t *testing.T) {
 	}
 	if n.Channel != NotifyChannel {
 		t.Errorf("notification arrived on %q, want %q", n.Channel, NotifyChannel)
+	}
+	if n.Payload != "key:k1" {
+		t.Errorf("payload = %q, want key:k1", n.Payload)
 	}
 }

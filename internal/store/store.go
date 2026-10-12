@@ -158,19 +158,21 @@ func applyMigration(ctx context.Context, conn *pgxpool.Conn, name string) error 
 	return tx.Commit(ctx)
 }
 
-// Notify tells every replica to drop its cached policy.
-func (s *Store) Notify(ctx context.Context) error {
-	_, err := s.pool.Exec(ctx, "SELECT pg_notify($1, '')", NotifyChannel)
+// Notify tells every replica to drop its cached policy. The payload says what
+// changed, as registry.Change spells it.
+func (s *Store) Notify(ctx context.Context, payload string) error {
+	_, err := s.pool.Exec(ctx, "SELECT pg_notify($1, $2)", NotifyChannel, payload)
 	return err
 }
 
-// Listen holds a dedicated connection on a notify channel and calls fn for
-// every notification. It returns the error that ended the subscription.
+// Listen holds a dedicated connection on a notify channel and calls fn with
+// the payload of every notification. It returns the error that ended the
+// subscription.
 //
 // It tries once and does not reconnect, because each caller handles a lost
 // connection its own way. The connection is held outside the pool for as long
 // as the subscription lasts, so callers should be few and long-lived.
-func (s *Store) Listen(ctx context.Context, channel string, fn func()) error {
+func (s *Store) Listen(ctx context.Context, channel string, fn func(payload string)) error {
 	conn, err := s.pool.Acquire(ctx)
 	if err != nil {
 		return err
@@ -182,10 +184,11 @@ func (s *Store) Listen(ctx context.Context, channel string, fn func()) error {
 		return err
 	}
 	for {
-		if _, err := conn.Conn().WaitForNotification(ctx); err != nil {
+		n, err := conn.Conn().WaitForNotification(ctx)
+		if err != nil {
 			return err
 		}
-		fn()
+		fn(n.Payload)
 	}
 }
 

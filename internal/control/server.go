@@ -594,16 +594,25 @@ func (s *Server) writeMetrics(w http.ResponseWriter) {
 // changed tells every gateway replica to drop its cached policy. The local
 // registry is cleared directly, so a single process does not wait for its own
 // notification.
-func (s *Server) changed(r *http.Request) { s.announce(r.Context()) }
+func (s *Server) changed(r *http.Request) { s.announce(r.Context(), registry.AnyChange) }
+
+// keyChanged is changed for a change to one key only.
+func (s *Server) keyChanged(r *http.Request, keyID string) {
+	s.announce(r.Context(), registry.KeyChange(keyID))
+}
 
 // announce is changed for a caller without a request.
-func (s *Server) announce(ctx context.Context) { Announce(ctx, s.reg, s.st, s.log) }
+func (s *Server) announce(ctx context.Context, c registry.Change) {
+	Announce(ctx, s.reg, s.st, s.log, c)
+}
 
 // Announce is changed for code outside the control plane, such as the sandbox
 // manager, which is built before the Server is.
-func Announce(ctx context.Context, reg *registry.Registry, st *store.Store, log *slog.Logger) {
-	reg.Invalidate()
-	if err := st.Notify(ctx); err != nil {
+func Announce(ctx context.Context, reg *registry.Registry, st *store.Store, log *slog.Logger,
+	c registry.Change,
+) {
+	reg.Forget(c)
+	if err := st.Notify(ctx, string(c)); err != nil {
 		log.Warn("announcing a policy change failed", "error", err)
 	}
 }

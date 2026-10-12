@@ -562,8 +562,10 @@ func buildSandboxes(ctx context.Context, st *store.Store, reg *registry.Registry
 		Git:         git,
 		// A new sandbox key must work on every replica at once, and a revoked
 		// one must stop at once, not a cache lifetime later.
-		OnChange: func() { control.Announce(context.WithoutCancel(ctx), reg, st, log) },
-		Log:      log,
+		OnKeyChange: func(keyID string) {
+			control.Announce(context.WithoutCancel(ctx), reg, st, log, registry.KeyChange(keyID))
+		},
+		Log: log,
 	}), nil
 }
 

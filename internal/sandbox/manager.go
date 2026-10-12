@@ -49,11 +49,11 @@ type ManagerOptions struct {
 	// Git mints the credential a sandbox checks out with. Nil makes asking
 	// for a repository a clear refusal.
 	Git GitMinter
-	// OnChange is called after a key is minted or revoked, so the gateway's
-	// cache drops it at once. Otherwise a new sandbox could not make requests
-	// for its first few seconds.
-	OnChange func()
-	Log      *slog.Logger
+	// OnKeyChange is called with a key's id after it is minted or revoked,
+	// so the gateway's cache drops it at once. Otherwise a new sandbox could
+	// not make requests for its first few seconds.
+	OnKeyChange func(keyID string)
+	Log         *slog.Logger
 }
 
 // GitMinter issues the credential a sandbox checks out with. internal/forge
@@ -261,7 +261,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (store.Sandbox,
 	}
 	// The key is usable from now on, so the cache must drop before the
 	// sandbox starts.
-	m.changed()
+	m.changed(keyID)
 
 	status, err := m.driver.Create(ctx, specFor(ref, class, req, env, expires))
 	if err != nil {
@@ -554,7 +554,7 @@ func (m *Manager) undoStart(ctx context.Context, keyID string, git *GitCredentia
 			m.log.Warn("sandbox: revoking the key of a sandbox that did not start failed",
 				"key_id", keyID, "error", err)
 		}
-		m.changed()
+		m.changed(keyID)
 		m.revokeCredential(ctx, git.Repo, git.ID)
 	}
 }
@@ -789,7 +789,7 @@ func (m *Manager) revive(ctx context.Context, sb store.Sandbox, limits policy.Re
 		}
 		return err
 	}
-	m.changed()
+	m.changed(keyID)
 
 	err = m.driver.Revive(ctx, specFor(refOf(sb), machine, req, env, expires))
 	if err != nil {
@@ -1178,12 +1178,12 @@ func (m *Manager) revokeKey(ctx context.Context, sb store.Sandbox) {
 		m.log.Warn("sandbox: revoking a sandbox's key failed", "sandbox", sb.ID,
 			"key_id", sb.KeyID, "state", sb.State, "error", err)
 	}
-	m.changed()
+	m.changed(sb.KeyID)
 }
 
-func (m *Manager) changed() {
-	if m.opts.OnChange != nil {
-		m.opts.OnChange()
+func (m *Manager) changed(keyID string) {
+	if m.opts.OnKeyChange != nil {
+		m.opts.OnKeyChange(keyID)
 	}
 }
 

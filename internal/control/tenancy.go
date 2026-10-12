@@ -744,7 +744,7 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		"org_id": info.OrgID, "project_id": info.ProjectID, "user_id": info.UserID,
 		"name": info.Name, "prefix": info.Prefix, "kind": info.Kind,
 	})
-	s.changed(r)
+	s.keyChanged(r, info.ID)
 
 	// The secret is returned exactly once. Nothing stores it, so nobody can
 	// read a developer's key later.
@@ -799,7 +799,7 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		"replaced": oldID, "project_id": info.ProjectID, "user_id": info.UserID,
 		"name": info.Name, "prefix": info.Prefix, "kind": info.Kind,
 	})
-	s.changed(r)
+	s.keyChanged(r, oldID)
 
 	// The secret is returned exactly once, as on create.
 	httpx.WriteJSON(w, http.StatusCreated, struct {
@@ -933,6 +933,6 @@ func (s *Server) revokeKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	// The holder tells a member revoking their own leaked key apart from an
 	// administrator taking someone's access away.
 	s.auditf(r, p, owner, "key.revoke", "key", keyID, map[string]any{"user_id": holder})
-	s.changed(r)
+	s.keyChanged(r, keyID)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"id": keyID, "revoked": true})
 }

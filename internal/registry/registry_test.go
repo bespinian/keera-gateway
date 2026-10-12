@@ -51,7 +51,7 @@ type source struct {
 	// let in to race the first.
 	beforeLookup func()
 
-	notify func()
+	notify func(string)
 }
 
 func newSource() *source {
@@ -127,7 +127,7 @@ func (s *source) LimitedOrgs(context.Context) ([]string, error) {
 	return s.limited, s.loadErr
 }
 
-func (s *source) Listen(ctx context.Context, _ string, fn func()) error {
+func (s *source) Listen(ctx context.Context, _ string, fn func(string)) error {
 	s.mu.Lock()
 	s.notify = fn
 	s.mu.Unlock()
@@ -136,12 +136,12 @@ func (s *source) Listen(ctx context.Context, _ string, fn func()) error {
 }
 
 // announce is a control-plane write telling the gateway to drop what it has.
-func (s *source) announce() {
+func (s *source) announce(c Change) {
 	s.mu.Lock()
 	fn := s.notify
 	s.mu.Unlock()
 	if fn != nil {
-		fn()
+		fn(string(c))
 	}
 }
 
@@ -275,13 +275,44 @@ func TestANotifyFromTheControlPlaneDropsEveryCachedKey(t *testing.T) {
 	before := s.calls()
 
 	s.reject(testKey("sk-live"), policy.ErrKeyRevoked)
-	s.announce()
+	s.announce(AnyChange)
 
 	if _, err := r.Resolve(ctx, testKey("sk-live")); !errors.Is(err, policy.ErrKeyRevoked) {
 		t.Errorf("error = %v, want the key refused after the announcement", err)
 	}
 	if s.calls() <= before {
 		t.Error("the key was answered from the cache after a notify dropped it")
+	}
+}
+
+func TestAKeyChangeDropsThatKeyAlone(t *testing.T) {
+	// A sandbox mints and revokes a key each time it starts and stops. If that
+	// dropped every key, each one in use would cost a query on every replica.
+	s := newSource()
+	revoked := &policy.Resolved{Key: policy.Key{ID: "key_1", OrgID: "org_1"}}
+	kept := &policy.Resolved{Key: policy.Key{ID: "key_2", OrgID: "org_1"}}
+	s.set(testKey("sk-one"), revoked)
+	s.set(testKey("sk-two"), kept)
+	r := newRegistry(t, s, Options{TTL: time.Hour})
+
+	for _, k := range []string{"sk-one", "sk-two"} {
+		if _, err := r.Resolve(t.Context(), testKey(k)); err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+	}
+	before := s.calls()
+
+	s.reject(testKey("sk-one"), policy.ErrKeyRevoked)
+	r.Forget(KeyChange("key_1"))
+
+	if _, err := r.Resolve(t.Context(), testKey("sk-one")); !errors.Is(err, policy.ErrKeyRevoked) {
+		t.Errorf("error = %v, want the dropped key refused as revoked", err)
+	}
+	if _, err := r.Resolve(t.Context(), testKey("sk-two")); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got := s.calls() - before; got != 1 {
+		t.Errorf("%d lookups after one key changed, want 1: the other key was dropped too", got)
 	}
 }
 

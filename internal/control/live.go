@@ -116,7 +116,7 @@ func (s *Server) Run(ctx context.Context) {
 	}
 	for ctx.Err() == nil {
 		s.feed.wake()
-		if err := s.st.Listen(ctx, store.EventsChannel, s.feed.wake); err != nil &&
+		if err := s.st.Listen(ctx, store.EventsChannel, func(string) { s.feed.wake() }); err != nil &&
 			ctx.Err() == nil {
 			s.log.Warn("the usage-event listener dropped", "error", err)
 			select {

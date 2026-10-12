@@ -17,6 +17,7 @@ import (
 	"github.com/bespinian/keera-gateway/internal/id"
 	"github.com/bespinian/keera-gateway/internal/payment"
 	"github.com/bespinian/keera-gateway/internal/policy"
+	"github.com/bespinian/keera-gateway/internal/registry"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
@@ -463,7 +464,7 @@ func (s *Server) settleWith(ctx context.Context, pm store.Payment, tx payment.Tr
 	if settled.State == store.PaymentPaid {
 		// A first payment lifts a signed-up organisation's limit, which
 		// changes what its models may reach.
-		s.announce(ctx)
+		s.announce(ctx, registry.AnyChange)
 	}
 	if err := s.st.Audit(ctx, "payments", settled.OrgID, "billing.payment."+string(settled.State),
 		"payment", settled.ID, map[string]any{"micros": settled.Micros, "note": settled.Note}); err != nil {
