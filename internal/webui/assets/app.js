@@ -248,7 +248,7 @@ const routes = [
     admin: true,
   },
   // What the deployment bills for its own provider keys. Administrators see
-  // their organisation's bill, operators every one and the margin. Not shown
+  // their organisation's bill, operators every one. Not shown
   // on a deployment without such a key: there is nothing to bill.
   {
     path: "/billing",

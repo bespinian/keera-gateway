@@ -62,7 +62,6 @@ async function billSection(ctx) {
   const rows = res.data || [];
   // Without a line there is nothing to total.
   const total = rows.length ? res.total : null;
-  // The API sends the provider cost and the margin to operators only.
   const operator = ctx.state.me.unrestricted;
   const allOrgs = operator && !ctx.orgID;
   const payments = ctx.state.me.payments;
@@ -209,24 +208,6 @@ async function billSection(ctx) {
           sortDir: "desc",
         }
       : null,
-    operator
-      ? {
-          label: "Provider cost",
-          num: true,
-          cell: (r) => money(r.provider_micros),
-          sortKey: (r) => r.provider_micros,
-          sortDir: "desc",
-        }
-      : null,
-    operator
-      ? {
-          label: "Margin",
-          num: true,
-          cell: (r) => money(r.margin_micros),
-          sortKey: (r) => r.margin_micros,
-          sortDir: "desc",
-        }
-      : null,
   ].filter(Boolean);
 
   const body = table(columns, rows, {
@@ -253,13 +234,6 @@ async function billSection(ctx) {
           { class: "muted" },
           `${num(total.calls)} ${plural(total.calls, "call")}`,
         ),
-        operator
-          ? h(
-              "span",
-              { class: "muted" },
-              `cost ${money(total.provider_micros)} · margin ${money(total.margin_micros)}`,
-            )
-          : null,
         h("strong", {}, money(total.micros)),
       ),
     );

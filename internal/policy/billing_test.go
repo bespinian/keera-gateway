@@ -15,8 +15,8 @@ func TestAModelOnTheDeploymentsKeyIsBilledAtListPrice(t *testing.T) {
 	}
 	// 500k uncached at 4.00, 500k cached at 0.40, 100k out at 20.00.
 	const want = 2_000_000 + 200_000 + 2_000_000
-	if line.Micros != want || line.ProviderMicros != want {
-		t.Errorf("billed %d, provider %d; want %d for both", line.Micros, line.ProviderMicros, want)
+	if line.Micros != want {
+		t.Errorf("billed %d, want %d", line.Micros, want)
 	}
 	if line.Alias != "frontier" || line.Provider != "anthropic" ||
 		line.BackendModel != "claude-opus-5-5" || line.CachedInputTokens != 500_000 {

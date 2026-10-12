@@ -157,9 +157,8 @@ func TestTheProviderListSaysWhichKeysTheDeploymentHolds(t *testing.T) {
 	}
 }
 
-// Administrators read their own organisation's bill. Only operators see what
-// the provider charges, and so the margin.
-func TestTheMarginIsForOperatorsOnly(t *testing.T) {
+// Administrators read their own organisation's bill. Operators read every one.
+func TestAdministratorsReadOnlyTheirOwnBill(t *testing.T) {
 	st, ctx := routerStore(t)
 	if _, err := st.Pool().Exec(ctx, "TRUNCATE billing_lines"); err != nil {
 		t.Fatal(err)
@@ -170,7 +169,7 @@ func TestTheMarginIsForOperatorsOnly(t *testing.T) {
 	s := platformServer(ctx, t, st)
 	sept := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
 	line := policy.BillLine{Alias: "fast", Provider: "anthropic", BackendModel: "claude-haiku-4-5",
-		InputTokens: 1000, OutputTokens: 100, Micros: 1500, ProviderMicros: 1200}
+		InputTokens: 1000, OutputTokens: 100, Micros: 1500}
 	events := []store.Event{
 		{TS: sept, OrgID: "org_1", Alias: "fast", Status: 200, Bills: []policy.BillLine{line, line}},
 		{TS: sept, OrgID: "org_2", Alias: "fast", Status: 200, Bills: []policy.BillLine{line}},
@@ -194,9 +193,6 @@ func TestTheMarginIsForOperatorsOnly(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", w.Code, w.Body)
 	}
-	if strings.Contains(w.Body.String(), "provider_micros") || strings.Contains(w.Body.String(), "margin") {
-		t.Errorf("an administrator sees the provider cost: %s", w.Body)
-	}
 	out := read(t, w)
 	rows := out["data"].([]any)
 	if len(rows) != 1 {
@@ -219,13 +215,12 @@ func TestTheMarginIsForOperatorsOnly(t *testing.T) {
 		t.Fatalf("operator rows = %v, want both organisations", rows)
 	}
 	total := out["total"].(map[string]any)
-	if total["micros"] != 4500.0 || total["provider_micros"] != 3600.0 || total["margin_micros"] != 900.0 {
+	if total["micros"] != 4500.0 || total["calls"] != 3.0 {
 		t.Errorf("total = %v", total)
 	}
 
 	w = invoke(s.billing, operator(), http.MethodGet, "/v1/billing?month=2026-09&format=csv", "")
-	if !strings.Contains(w.Body.String(), "provider_cost,margin") ||
-		!strings.Contains(w.Body.String(), "2026-09,org_1,Example Bank,anthropic,claude-haiku-4-5,2,2000,0,0,200,0.003,0.0024,0.0006") {
+	if !strings.Contains(w.Body.String(), "2026-09,org_1,Example Bank,anthropic,claude-haiku-4-5,2,2000,0,0,200,0.003\n") {
 		t.Errorf("csv = %s", w.Body)
 	}
 	if w := invoke(s.billing, operator(), http.MethodGet, "/v1/billing?month=september", ""); w.Code != http.StatusBadRequest {

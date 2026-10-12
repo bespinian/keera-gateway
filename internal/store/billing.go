@@ -15,11 +15,11 @@ func queueBills(batch *pgx.Batch, e Event) {
 	for _, b := range e.Bills {
 		batch.Queue(`INSERT INTO billing_lines (ts, org_id, alias, provider, backend_model,
 			input_tokens, cached_input_tokens, cache_write_tokens, output_tokens,
-			micros, provider_micros, credit_micros)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+			micros, credit_micros)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
 			e.TS, e.OrgID, b.Alias, b.Provider, b.BackendModel,
 			b.InputTokens, b.CachedInputTokens, b.CacheWriteTokens, b.OutputTokens,
-			b.Micros, b.ProviderMicros, b.CreditMicros)
+			b.Micros, b.CreditMicros)
 	}
 }
 
@@ -57,9 +57,6 @@ type BillingRow struct {
 	OutputTokens      int64  `json:"output_tokens"`
 	// Micros is what the organisation is billed.
 	Micros int64 `json:"micros"`
-	// ProviderMicros is what the provider charges the deployment. The
-	// control API shows it only to operators.
-	ProviderMicros int64 `json:"-"`
 	// CreditMicros is what the use took from the credit.
 	CreditMicros int64 `json:"credit_micros"`
 }
@@ -70,7 +67,7 @@ func (s *Store) Billing(ctx context.Context, orgID string, from, to time.Time) (
 	return queryAll(ctx, s.pool, scanBillingRow, `
 		SELECT b.org_id, coalesce(o.name, ''), b.provider, b.backend_model,
 		       count(*), sum(b.input_tokens), sum(b.cached_input_tokens),
-		       sum(b.cache_write_tokens), sum(b.output_tokens), sum(b.micros), sum(b.provider_micros),
+		       sum(b.cache_write_tokens), sum(b.output_tokens), sum(b.micros),
 		       sum(b.credit_micros)
 		FROM billing_lines b LEFT JOIN orgs o ON o.id = b.org_id
 		WHERE b.ts >= $1 AND b.ts < $2 AND ($3 = '' OR b.org_id = $3)
@@ -84,6 +81,6 @@ func scanBillingRow(r row) (BillingRow, error) {
 	err := r.Scan(&b.OrgID, &b.OrgName, &b.Provider, &b.BackendModel,
 		&b.Calls, &b.InputTokens, &b.CachedInputTokens, &b.CacheWriteTokens,
 		&b.OutputTokens,
-		&b.Micros, &b.ProviderMicros, &b.CreditMicros)
+		&b.Micros, &b.CreditMicros)
 	return b, err
 }

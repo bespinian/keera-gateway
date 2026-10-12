@@ -35,7 +35,7 @@ func TestARequestToAModelOnTheDeploymentsKeyIsBilled(t *testing.T) {
 	// 10 in at 1.00 and 5 out at 4.00.
 	b := ev.Bills[0]
 	if b.Alias != "keera-code" || b.InputTokens != 10 || b.OutputTokens != 5 ||
-		b.Micros != 30 || b.ProviderMicros != 30 {
+		b.Micros != 30 {
 		t.Errorf("bill = %+v", b)
 	}
 }

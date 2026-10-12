@@ -12,27 +12,17 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// billingLine is one row of the monthly bill. What the provider charges, and
-// so the margin, is shown to operators only.
-type billingLine struct {
-	store.BillingRow
-	ProviderMicros *int64 `json:"provider_micros,omitempty"`
-	MarginMicros   *int64 `json:"margin_micros,omitempty"`
-}
-
 // billingTotal is the whole bill.
 type billingTotal struct {
-	Calls          int64  `json:"calls"`
-	Micros         int64  `json:"micros"`
-	ProviderMicros *int64 `json:"provider_micros,omitempty"`
-	MarginMicros   *int64 `json:"margin_micros,omitempty"`
+	Calls  int64 `json:"calls"`
+	Micros int64 `json:"micros"`
 }
 
 // billing is one month of use of the deployment's own provider keys, per
 // organisation and provider model, at list price. See docs/billing.md.
 //
 // Administrators read their own organisation's. Operators read any, or all at
-// once, and also see what the providers charge.
+// once.
 func (s *Server) billing(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	if !s.requireAdmin(w, p) {
 		return
@@ -53,47 +43,23 @@ func (s *Server) billing(w http.ResponseWriter, r *http.Request, p *authn.Princi
 		s.fail(w, err)
 		return
 	}
-	operator := p.Unrestricted()
-	lines := make([]billingLine, 0, len(rows))
 	var total billingTotal
 	for _, row := range rows {
-		line := billingLine{BillingRow: row}
-		if operator {
-			line.ProviderMicros, line.MarginMicros = costAndMargin(row.Micros, row.ProviderMicros)
-		}
-		lines = append(lines, line)
-		total.add(row, operator)
+		total.Calls += row.Calls
+		total.Micros += row.Micros
 	}
 	month := from.Format("2006-01")
 	// What came out of prepaid credit only means something on a deployment
 	// that takes payments.
 	payments := s.opts.Payments != nil
 	if q.Get("format") == "csv" {
-		billingCSV(w, month, lines, operator, payments)
+		billingCSV(w, month, rows, payments)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"month": month, "from": from, "to": to, "data": lines, "total": total,
+		"month": month, "from": from, "to": to, "data": rows, "total": total,
 		"payments": payments,
 	})
-}
-
-func costAndMargin(micros, providerMicros int64) (*int64, *int64) {
-	margin := micros - providerMicros
-	return &providerMicros, &margin
-}
-
-// add adds one row to the total.
-func (t *billingTotal) add(row store.BillingRow, operator bool) {
-	t.Calls += row.Calls
-	t.Micros += row.Micros
-	if operator {
-		var cost int64
-		if t.ProviderMicros != nil {
-			cost = *t.ProviderMicros
-		}
-		t.ProviderMicros, t.MarginMicros = costAndMargin(t.Micros, cost+row.ProviderMicros)
-	}
 }
 
 // parseMonth reads a month written as YYYY-MM, in UTC like the budgets.
@@ -109,15 +75,12 @@ func parseMonth(raw string, now time.Time) (time.Time, error) {
 	return t, nil
 }
 
-func billingCSV(w http.ResponseWriter, month string, lines []billingLine, operator, payments bool) {
+func billingCSV(w http.ResponseWriter, month string, lines []store.BillingRow, payments bool) {
 	cw := beginCSV(w, "keera-billing-"+month+".csv")
 	head := []string{"month", "org_id", "org_name", "provider", "model", "calls",
 		"input_tokens", "cached_input_tokens", "cache_write_tokens", "output_tokens", "amount"}
 	if payments {
 		head = append(head, "from_credit")
-	}
-	if operator {
-		head = append(head, "provider_cost", "margin")
 	}
 	_ = cw.Write(head)
 	for _, l := range lines {
@@ -130,9 +93,6 @@ func billingCSV(w http.ResponseWriter, month string, lines []billingLine, operat
 			policy.FormatMicros(l.Micros)}
 		if payments {
 			rec = append(rec, policy.FormatMicros(l.CreditMicros))
-		}
-		if operator {
-			rec = append(rec, policy.FormatMicros(*l.ProviderMicros), policy.FormatMicros(*l.MarginMicros))
 		}
 		_ = cw.Write(rec)
 	}

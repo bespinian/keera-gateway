@@ -27,8 +27,6 @@ type BillLine struct {
 	OutputTokens      int
 	// Micros is what the organisation is billed, at list price.
 	Micros int64
-	// ProviderMicros is what the provider charges the deployment for it.
-	ProviderMicros int64
 	// CreditMicros is what it takes from the organisation's credit.
 	CreditMicros int64
 }
@@ -54,7 +52,6 @@ func (m Model) Bill(t Tokens) (BillLine, bool) {
 		CacheWriteTokens:  t.CacheWrite,
 		OutputTokens:      t.Output,
 		Micros:            micros,
-		ProviderMicros:    micros,
 		CreditMicros:      credit,
 	}, true
 }

@@ -92,24 +92,15 @@ func (r *billingRun) report(ctx context.Context) error {
 }
 
 type billingResponse struct {
-	Month    string       `json:"month"`
-	Payments bool         `json:"payments"`
-	Data     []billingRow `json:"data"`
-	Total    billingTotal `json:"total"`
-}
-
-type billingRow struct {
-	store.BillingRow
-	// Only an operator is sent these two.
-	ProviderMicros *int64 `json:"provider_micros"`
-	MarginMicros   *int64 `json:"margin_micros"`
+	Month    string             `json:"month"`
+	Payments bool               `json:"payments"`
+	Data     []store.BillingRow `json:"data"`
+	Total    billingTotal       `json:"total"`
 }
 
 type billingTotal struct {
-	Calls          int64  `json:"calls"`
-	Micros         int64  `json:"micros"`
-	ProviderMicros *int64 `json:"provider_micros"`
-	MarginMicros   *int64 `json:"margin_micros"`
+	Calls  int64 `json:"calls"`
+	Micros int64 `json:"micros"`
 }
 
 func printBilling(w *table, res billingResponse) {
@@ -117,13 +108,9 @@ func printBilling(w *table, res billingResponse) {
 		printNone(w, "use of this deployment's provider keys in "+res.Month, "")
 		return
 	}
-	operator := res.Data[0].ProviderMicros != nil
 	head := "ORG\tMODEL\tCALLS\tIN\tCACHED\tWRITTEN\tOUT\tAMOUNT"
 	if res.Payments {
 		head += "\tFROM CREDIT"
-	}
-	if operator {
-		head += "\tPROVIDER COST\tMARGIN"
 	}
 	w.header(head)
 	for _, b := range res.Data {
@@ -138,19 +125,10 @@ func printBilling(w *table, res billingResponse) {
 		if res.Payments {
 			_, _ = fmt.Fprintf(w, "\t%s", chf(b.CreditMicros))
 		}
-		if operator {
-			_, _ = fmt.Fprintf(w, "\t%s\t%s", chf(*b.ProviderMicros), chf(*b.MarginMicros))
-		}
 		_, _ = fmt.Fprintln(w)
 	}
 	t := res.Total
 	_, _ = fmt.Fprintf(w, "total %s\t\t%d\t\t\t\t\t%s", res.Month, t.Calls, chf(t.Micros))
-	if res.Payments {
-		_, _ = fmt.Fprint(w, "\t")
-	}
-	if operator {
-		_, _ = fmt.Fprintf(w, "\t%s\t%s", chf(*t.ProviderMicros), chf(*t.MarginMicros))
-	}
 	_, _ = fmt.Fprintln(w)
 }
 

@@ -598,9 +598,8 @@ var commands = []command{
 			"See docs/billing.md.",
 		subs: []subcommand{
 			{name: "report", aliases: []string{"list", "ls"}, summary: "one month's bill",
-				flags: []string{"month", "json"},
-				prose: "Amounts are in CHF. Operators also see what the provider charges " +
-					"and the margin. 'keera billing' on its own is this.",
+				flags:    []string{"month", "json"},
+				prose:    "Amounts are in CHF. 'keera billing' on its own is this.",
 				examples: []string{"keera billing", "keera billing --month 2026-09 --json"}},
 			{name: "credit", aliases: []string{"balance", "account"},
 				summary: "the balance, the saved card, the automatic top-up and the latest payments",

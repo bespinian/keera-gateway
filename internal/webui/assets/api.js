@@ -390,8 +390,7 @@ export const api = {
   usage: (orgID, groupBy, since) =>
     get("/v1/usage" + query({ org_id: orgID, group_by: groupBy, since })),
   audit: (params) => get("/v1/audit" + query(params)),
-  // One month's bill for the deployment's own provider keys. The provider
-  // cost and the margin are only in an operator's answer.
+  // One month's bill for the deployment's own provider keys.
   billing: (orgID, month) =>
     get("/v1/billing" + query({ org_id: orgID, month })),
   // The credit an organisation pays in advance, its card and its payments.

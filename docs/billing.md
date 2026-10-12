@@ -99,9 +99,7 @@ keera org switch <org> && keera billing   # operators: one organisation
 One row per organisation and provider model, with calls, tokens and the amount
 in CHF.
 
-Administrators see their own organisation. Operators see every organisation,
-and also the provider cost and the margin. The margin is never shown to anyone
-else.
+Administrators see their own organisation. Operators see every organisation.
 
 The same report is at `GET /control/v1/billing?month=2026-09`, and as CSV with
 `&format=csv`. Months are UTC, like budgets.
