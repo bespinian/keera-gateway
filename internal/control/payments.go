@@ -505,6 +505,13 @@ func (s *Server) RunPayments(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			// One replica at a time, so a payment is not asked after twice.
+			if ok, err := s.st.TakeTurn(ctx, "payments", paymentsEvery); !ok {
+				if err != nil && ctx.Err() == nil {
+					s.log.Warn("asking whether to look at payments failed", "error", err)
+				}
+				continue
+			}
 			s.topUpDue(ctx)
 			s.settlePending(ctx, time.Now())
 		}

@@ -136,7 +136,7 @@ func serve(ctx context.Context) error {
 	wg.Go(func() { retain(bg, st, cfg, log) })
 	// Its own loop, because it talks to a cluster and the cache sweep must
 	// never wait on one.
-	wg.Go(func() { sweepSandboxes(bg, sandboxes) })
+	wg.Go(func() { sweepSandboxes(bg, sandboxes, st, log) })
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
@@ -407,6 +407,9 @@ func sweep(ctx context.Context, reg *registry.Registry, limiter limiter,
 			// One sign-in bucket per address, unbounded for the same reason.
 			ctl.Sweep(now)
 			// Every lookup filters on expiry anyway, so a failure only logs.
+			if !myTurn(ctx, st, log, "purge-expired", time.Minute) {
+				continue
+			}
 			if err := st.PurgeExpired(ctx); err != nil && ctx.Err() == nil {
 				log.Warn("purging expired sessions failed", "error", err)
 			}
@@ -449,6 +452,9 @@ func retain(ctx context.Context, st *store.Store, cfg config.Config, log *slog.L
 // purgeOld deletes the usage events and audit entries past their windows, and
 // the sandboxes and keys that ended before the usage window.
 func purgeOld(ctx context.Context, st *store.Store, cfg config.Config, log *slog.Logger) {
+	if !myTurn(ctx, st, log, "retention", retentionInterval) {
+		return
+	}
 	now := time.Now()
 	if cfg.UsageRetention > 0 {
 		n, err := st.PurgeUsage(ctx, now.Add(-cfg.UsageRetention))
@@ -611,24 +617,41 @@ func buildSandboxDriver(ctx context.Context, cfg config.Config, log *slog.Logger
 // be cluster calls for nothing.
 const sandboxSweepInterval = time.Minute
 
-// sweepSandboxes runs the sandbox reconcile loop.
-func sweepSandboxes(ctx context.Context, m *sandbox.Manager) {
+// sweepSandboxes runs the sandbox reconcile loop, on one replica at a time.
+func sweepSandboxes(ctx context.Context, m *sandbox.Manager, st *store.Store, log *slog.Logger) {
 	if m == nil {
 		return
+	}
+	run := func(now time.Time) {
+		if myTurn(ctx, st, log, "sandbox-sweep", sandboxSweepInterval) {
+			m.Sweep(ctx, now)
+		}
 	}
 	t := time.NewTicker(sandboxSweepInterval)
 	defer t.Stop()
 	// Once right away, so a restarted gateway reconciles what it left running
 	// and tears down what expired while it was down.
-	m.Sweep(ctx, time.Now())
+	run(time.Now())
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case now := <-t.C:
-			m.Sweep(ctx, now)
+			run(now)
 		}
 	}
+}
+
+// myTurn reports whether this replica runs a background job now. See
+// store.TakeTurn.
+func myTurn(ctx context.Context, st *store.Store, log *slog.Logger, job string,
+	every time.Duration,
+) bool {
+	ok, err := st.TakeTurn(ctx, job, every)
+	if err != nil && ctx.Err() == nil {
+		log.Warn("asking whether to run a background job failed", "job", job, "error", err)
+	}
+	return ok
 }
 
 // panelURL is where a refusal points the developer: empty unless the

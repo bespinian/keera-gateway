@@ -442,6 +442,9 @@ like there are, not on traffic. Per request it holds the body, and a
 non-streamed answer whole; a rewrite filter's answer is held whole up to
 32 MiB. Size Postgres for replicas × `KEERA_MAX_DB_CONNS` connections.
 
+Background jobs, such as the sandbox sweep, retention and payments, run on one
+replica per interval, whichever asks first.
+
 ## Upgrading
 
 The gateway applies its schema on start, so an upgrade is a new image and a
