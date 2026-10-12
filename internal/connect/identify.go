@@ -23,9 +23,9 @@ const maxClientName = 32
 
 // agents maps User-Agent product tokens to client keys.
 //
-// The first four and curl have no label because the connect catalogue names
-// them, so a client is called the same on every screen. The rest are clients
-// Keera does not configure but can recognise. An unknown client falls back to
+// The first four, curl and python have no label because the connect catalogue
+// names them, so a client is called the same on every screen. The rest are
+// clients Keera does not configure but can recognise. An unknown client falls back to
 // its own product token.
 var agents = []struct {
 	key   string
@@ -54,7 +54,7 @@ var agents = []struct {
 	{key: "langchain", label: "LangChain", generic: true,
 		products: []string{"langchain", "langchainjs"}},
 	{key: "curl", generic: true, products: []string{"curl"}},
-	{key: "python", label: "Python", generic: true,
+	{key: "python", generic: true,
 		products: []string{"python-requests", "python-httpx", "python-urllib3", "httpx", "urllib3"}},
 	{key: "node", label: "Node", generic: true,
 		products: []string{"node", "node-fetch", "undici", "axios"}},

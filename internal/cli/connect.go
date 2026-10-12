@@ -289,11 +289,14 @@ func printConnect(c connect.Client, own *ownKey, models []policy.Model, base str
 		fmt.Fprintln(os.Stderr, "   or ask whoever administers this deployment for one.")
 	}
 
-	if c.Path != "" {
+	switch {
+	case strings.HasPrefix(c.Path, "~/"):
 		fmt.Fprintf(os.Stderr, "\n%s This goes in %s. If that file exists already, merge\n",
 			styleErr.head("2."), c.Path)
 		fmt.Fprintln(os.Stderr, "   these keys into it rather than replacing it:")
-	} else {
+	case c.Path != "":
+		fmt.Fprintf(os.Stderr, "\n%s Save this as %s:\n", styleErr.head("2."), c.Path)
+	default:
 		fmt.Fprintln(os.Stderr, "\n"+styleErr.head("2.")+" These go in your shell profile, so "+
 			"every client on the machine")
 		fmt.Fprintln(os.Stderr, "   picks them up:")

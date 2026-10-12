@@ -22,9 +22,11 @@ type Client struct {
 	// About says in one line what the client is, for the panel's picker.
 	About string `json:"about"`
 	// Path is the file the configuration belongs in. It is empty for a client
-	// configured by environment variables.
+	// configured by environment variables. A path under ~ is a config that
+	// may exist already; any other is a new file in the current directory.
 	Path string `json:"path,omitempty"`
-	// Lang is how a renderer should highlight the block: json, toml or sh.
+	// Lang is how a renderer should highlight the block: json, toml, sh or
+	// python.
 	Lang string `json:"lang"`
 	// Template is the block. It carries {{base}}, {{models}}, {{aliases}}
 	// (every alias, comma-separated) and {{alias}} (the first, the default),
@@ -282,6 +284,28 @@ wire_api = "responses"`,
 			"`[section]`. TOML reads anything below a section as part of it.",
 		Run: "Run `codex` in your project. It starts with {{alias}}. `codex -m <name>` " +
 			"starts with another of the models above.",
+	},
+	{
+		Key:   "python",
+		Label: "Python",
+		About: "Your own code, with OpenAI's Python library.",
+		Path:  "hello.py",
+		Lang:  "python",
+		Template: `# pip install openai
+import os
+from openai import OpenAI
+
+# Keera Gateway speaks the OpenAI API at {{base}}/v1.
+client = OpenAI(base_url="{{base}}/v1", api_key=os.environ["KEERA_API_KEY"])
+
+# The key can use: {{aliases}}.
+reply = client.chat.completions.create(
+    model="{{alias}}",
+    messages=[{"role": "user", "content": "Hello"}],
+)
+print(reply.choices[0].message.content)`,
+		Note: "Reports list its requests under OpenAI SDK, the library that sends them.",
+		Run:  "Run `python hello.py`. The answer is printed.",
 	},
 	{
 		Key:   "curl",

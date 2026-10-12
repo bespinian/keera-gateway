@@ -2,6 +2,7 @@ package connect
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -73,7 +74,7 @@ func TestEveryClientIsCompleteEnoughToRender(t *testing.T) {
 		if c.Key == "" || c.Label == "" || c.About == "" || c.Template == "" || c.Run == "" {
 			t.Errorf("%q is missing a key, label, about, template or run", c.Key)
 		}
-		if c.Lang != "json" && c.Lang != "toml" && c.Lang != "sh" {
+		if !slices.Contains([]string{"json", "toml", "sh", "python"}, c.Lang) {
 			t.Errorf("%s has lang %q, which no renderer highlights", c.Key, c.Lang)
 		}
 		// Every block has to name the gateway and the key's models. One that

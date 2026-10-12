@@ -329,6 +329,7 @@ const clientMarks = {
   codex: () => providerMark("openai"),
   opencode: () => clientMark("opencode"),
   pi: () => clientMark("pi"),
+  python: () => clientMark("python"),
 };
 
 /** modelList names the models a configuration sets up, with their windows. */
@@ -437,8 +438,12 @@ function instructions(ctx, state, models) {
             ? [
                 "Save this as ",
                 h("code", {}, client.path),
-                ". If the file exists, merge these settings into it instead " +
-                  "of replacing it.",
+                // A path outside the home directory is a new file, so there
+                // is nothing to merge into.
+                client.path.startsWith("~/")
+                  ? ". If the file exists, merge these settings into it " +
+                    "instead of replacing it."
+                  : ".",
               ]
             : "Add these to your shell profile, so every client on the " +
                 "machine picks them up.",
