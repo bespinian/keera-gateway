@@ -291,7 +291,7 @@ func machineKey(ctx context.Context, c *client, orgID string, me identity, proje
 					"another project, and replacing it keeps that project; to move it, revoke it "+
 					"first with: keera key revoke %s, then run this again", k.ID, k.ID)
 			}
-			rotated, err := rotateKey(ctx, c, k.ID, "", "")
+			rotated, err := rotateKey(ctx, c, k.ID, "", nil)
 			return rotated.createdKey, &keys[i], err
 		}
 		if unclaimed == nil && !isMachineKeyName(k.Name) {
@@ -305,7 +305,7 @@ func machineKey(ctx context.Context, c *client, orgID string, me identity, proje
 				"--subscription --user %s --name \"%s's Claude Code\", then run this again",
 				me.Email, strings.Split(me.Email, "@")[0])
 		}
-		rotated, err := rotateKey(ctx, c, unclaimed.ID, name, "")
+		rotated, err := rotateKey(ctx, c, unclaimed.ID, name, nil)
 		return rotated.createdKey, unclaimed, err
 	}
 	var created createdKey

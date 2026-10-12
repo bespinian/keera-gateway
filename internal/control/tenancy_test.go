@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bespinian/keera-gateway/internal/authn"
 	"github.com/bespinian/keera-gateway/internal/httpx"
@@ -436,5 +437,38 @@ func TestNoSubscriptionKeyWhileSubscriptionsAreOff(t *testing.T) {
 		`{"org_id":"org_1","user_id":"user_1","kind":"subscription"}`)
 	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "KEERA_CLAUDE_SUBSCRIPTIONS") {
 		t.Errorf("status = %d %s; want 400 naming the setting", w.Code, w.Body)
+	}
+}
+
+// A key lasts for a lifetime from now or until a moment, never both, and a
+// moment already past would issue a key that is dead on arrival.
+func TestKeyExpiry(t *testing.T) {
+	future := time.Now().Add(48 * time.Hour)
+	past := time.Now().Add(-time.Hour)
+	for _, tc := range []struct {
+		in     string
+		at     *time.Time
+		ok     bool
+		expiry bool
+	}{
+		{"", nil, true, false},
+		{"720h", nil, true, true},
+		{"", &future, true, true},
+		{"-1h", nil, false, false},
+		{"720h", &future, false, false},
+		{"", &past, false, false},
+	} {
+		w := httptest.NewRecorder()
+		got, ok := keyExpiry(w, tc.in, tc.at)
+		if ok != tc.ok || (got != nil) != tc.expiry {
+			t.Errorf("keyExpiry(%q, %v) = %v, %v; want ok %v, expiry %v",
+				tc.in, tc.at, got, ok, tc.ok, tc.expiry)
+		}
+		if !ok && w.Code != http.StatusBadRequest {
+			t.Errorf("keyExpiry(%q, %v) answered %d, want 400", tc.in, tc.at, w.Code)
+		}
+	}
+	if got, _ := keyExpiry(httptest.NewRecorder(), "", &future); !got.Equal(future) {
+		t.Errorf("expires_at = %v, want %v", got, future)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"strings"
@@ -46,10 +47,10 @@ func keyCmd(ctx context.Context, args []string) error {
 	fs.StringVar(&r.user, "user", "", "the person this key belongs to, by email or id")
 	fs.StringVar(&r.name, "name", "", "what this key is called; what it is for, in a few words")
 	fs.StringVar(&r.expires, "expires", "",
-		"how long the key lasts, such as 720h, or 'never'. A new key lasts "+defaultKeyLife+
-			" (90 days) unless told otherwise")
-	r.reword("rotate", "expires", "how long the new key lasts, such as 720h, or 'never' "+
-		"(default: the old key's lifetime)")
+		"how long the key lasts, such as 720h, the last day it works, such as 2026-12-31, "+
+			"or 'never'. A new key lasts "+defaultKeyLife+" (90 days) unless told otherwise")
+	r.reword("rotate", "expires", "how long the new key lasts, such as 720h, or the last day "+
+		"it works, such as 2026-12-31 (default: the old key's lifetime)")
 	fs.BoolVar(&r.subscription, "subscription", false,
 		"a key that reaches only subscription models, for Claude Code signed in to a Claude plan")
 	if done, err := r.parse(); done {
@@ -104,7 +105,9 @@ func (r *keyRun) create(ctx context.Context) error {
 		req["expires_in"] = defaultKeyLife
 	case "never":
 	default:
-		req["expires_in"] = r.expires
+		if err := setExpiry(req, r.expires); err != nil {
+			return err
+		}
 	}
 	if r.subscription {
 		req["kind"] = string(policy.KeySubscription)
@@ -222,6 +225,11 @@ func (r *keyRun) rotate(ctx context.Context) error {
 		return errors.New("--expires never is for 'keera key create'; a rotated key keeps " +
 			"the old one's lifetime unless --expires gives another")
 	}
+	// Checked before the prompt, so a mistyped day does not cost a confirmation.
+	expiry := map[string]string{}
+	if err := setExpiry(expiry, r.expires); err != nil {
+		return err
+	}
 	old, err := r.find(ctx)
 	if err != nil {
 		return err
@@ -235,7 +243,7 @@ func (r *keyRun) rotate(ctx context.Context) error {
 			return err
 		}
 	}
-	created, err := rotateKey(ctx, r.c, old.ID, r.name, r.expires)
+	created, err := rotateKey(ctx, r.c, old.ID, r.name, expiry)
 	if err != nil {
 		return err
 	}
@@ -329,12 +337,31 @@ type rotatedKey struct {
 // rotateKey replaces a key with one carrying the same project, owner and
 // guardrails, then revokes the old one. The control plane does it in one
 // transaction, so it never leaves both keys live or drops the key's limits.
-// An empty name or expires keeps the old key's.
-func rotateKey(ctx context.Context, c *client, keyID, name, expires string) (rotatedKey, error) {
+// An empty name or expiry keeps the old key's. expiry holds what setExpiry
+// wrote.
+func rotateKey(ctx context.Context, c *client, keyID, name string, expiry map[string]string) (rotatedKey, error) {
+	req := map[string]string{"name": name, "expires_in": ""}
+	maps.Copy(req, expiry)
 	var rotated rotatedKey
-	err := c.do(ctx, "POST", "/v1/keys/"+url.PathEscape(keyID)+"/rotate",
-		map[string]string{"name": name, "expires_in": expires}, &rotated)
+	err := c.do(ctx, "POST", "/v1/keys/"+url.PathEscape(keyID)+"/rotate", req, &rotated)
 	return rotated, err
+}
+
+// setExpiry puts --expires into a key request. A lifetime such as 720h goes
+// as it is. A day such as 2026-12-31 is the last day the key works, so it
+// expires at the end of that day, in local time.
+func setExpiry(req map[string]string, expires string) error {
+	day, err := time.ParseInLocation(time.DateOnly, expires, time.Local)
+	if err != nil {
+		req["expires_in"] = expires
+		return nil
+	}
+	end := day.AddDate(0, 0, 1).Add(-time.Second)
+	if !end.After(time.Now()) {
+		return fmt.Errorf("--expires %s has already passed; give a day from today on", expires)
+	}
+	req["expires_at"] = end.Format(time.RFC3339)
+	return nil
 }
 
 // findKey resolves an id or a name to a key.

@@ -243,8 +243,9 @@ var commands = []command{
 					"reaches only subscription models, which that plan pays for. For a member, " +
 					"issue one with --user; their 'keera connect claude-code --subscription' " +
 					"then takes it over for their machine.\n\n" +
-					"A new key lasts 90 days unless --expires says otherwise; --expires never " +
-					"makes one that does not expire.\n\n" +
+					"A new key lasts 90 days unless --expires says otherwise. --expires 720h " +
+					"gives it another lifetime, --expires 2026-12-31 makes that the last day " +
+					"it works, and --expires never makes one that does not expire.\n\n" +
 					"Only an administrator issues keys. A member renames, rotates and revokes " +
 					"their own.",
 				examples: []string{

@@ -1770,6 +1770,34 @@ func TestKeyCreateExpiresByDefault(t *testing.T) {
 	}
 }
 
+// A day for --expires is the last day the key works, so the key lasts to the
+// end of it. A day already gone is refused before anything is sent.
+func TestKeyCreateExpiresOnADay(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/orgs":  oneOrg,
+		"POST /v1/keys": map[string]any{"id": "key_1", "key": "keera_sk_new"},
+	})
+	day := time.Now().AddDate(0, 1, 0).Format(time.DateOnly)
+	if err := keyCmd(context.Background(), []string{"create", "laptop", "--expires", day}); err != nil {
+		t.Fatal(err)
+	}
+	sent := f.request("POST", "/v1/keys").body
+	raw, _ := sent["expires_at"].(string)
+	at, err := time.Parse(time.RFC3339, raw)
+	if err != nil || sent["expires_in"] != nil {
+		t.Fatalf("sent %v, want only expires_at", sent)
+	}
+	if at.Local().Format(time.DateOnly) != day || at.Local().Hour() != 23 {
+		t.Errorf("expires_at = %v, want the end of %s", at.Local(), day)
+	}
+
+	past := time.Now().AddDate(0, 0, -1).Format(time.DateOnly)
+	if err := keyCmd(context.Background(), []string{"create", "laptop", "--expires", past}); err == nil {
+		t.Error("create accepted a day that has already passed")
+	}
+}
+
 // --json prints the control API's answer whole, not the fields a table needs.
 func TestDeleteJSONKeepsWhatTheServerSaid(t *testing.T) {
 	newFakeControl(t, map[string]any{

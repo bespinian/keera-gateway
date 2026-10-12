@@ -662,6 +662,7 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		Name      string         `json:"name"`
 		Kind      policy.KeyKind `json:"kind"`
 		ExpiresIn string         `json:"expires_in"`
+		ExpiresAt *time.Time     `json:"expires_at"`
 	}
 	if !readJSON(w, r, &in) {
 		return
@@ -722,7 +723,7 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		ID: id.New("key"), OrgID: orgID, ProjectID: in.ProjectID, UserID: in.UserID, Name: in.Name,
 		Kind: in.Kind,
 	}
-	if info.ExpiresAt, ok = expiresIn(w, in.ExpiresIn); !ok {
+	if info.ExpiresAt, ok = keyExpiry(w, in.ExpiresIn, in.ExpiresAt); !ok {
 		return
 	}
 
@@ -761,8 +762,9 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 // key an administrator issued for 30 days is not rotated into one for years.
 func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	var in struct {
-		Name      string `json:"name"`
-		ExpiresIn string `json:"expires_in"`
+		Name      string     `json:"name"`
+		ExpiresIn string     `json:"expires_in"`
+		ExpiresAt *time.Time `json:"expires_at"`
 	}
 	if !readJSON(w, r, &in) {
 		return
@@ -772,13 +774,13 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	if !ok {
 		return
 	}
-	if in.ExpiresIn != "" && !p.CanAdminOrg(owner) {
+	if (in.ExpiresIn != "" || in.ExpiresAt != nil) && !p.CanAdminOrg(owner) {
 		forbid(w, "a member cannot choose how long a key lasts; "+
 			"the new key keeps the old one's lifetime")
 		return
 	}
 	next := store.KeyInfo{ID: id.New("key"), Name: strings.TrimSpace(in.Name)}
-	if next.ExpiresAt, ok = expiresIn(w, in.ExpiresIn); !ok {
+	if next.ExpiresAt, ok = keyExpiry(w, in.ExpiresIn, in.ExpiresAt); !ok {
 		return
 	}
 	secret, hash, prefix := auth.Generate()
@@ -892,8 +894,20 @@ func (s *Server) keyToManage(w http.ResponseWriter, r *http.Request, p *authn.Pr
 	return owner, holder, true
 }
 
-// expiresIn reads a key's 'expires_in'. Empty means the key does not expire.
-func expiresIn(w http.ResponseWriter, in string) (*time.Time, bool) {
+// keyExpiry reads when a key expires: 'expires_in' is a lifetime from now,
+// 'expires_at' a moment. Neither means the key does not expire.
+func keyExpiry(w http.ResponseWriter, in string, at *time.Time) (*time.Time, bool) {
+	if at != nil {
+		if in != "" {
+			badRequest(w, "send 'expires_in' or 'expires_at', not both")
+			return nil, false
+		}
+		if !at.After(time.Now()) {
+			badRequest(w, "'expires_at' must be in the future")
+			return nil, false
+		}
+		return at, true
+	}
 	if in == "" {
 		return nil, true
 	}

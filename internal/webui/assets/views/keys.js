@@ -535,13 +535,28 @@ export function renameKey(ctx, k) {
   });
 }
 
-// The expiries a key can be issued with, longest-lived last.
+// The expiries a key can be issued with, longest-lived last. "date" asks for
+// the last day the key works.
 const EXPIRIES = [
   { value: "720h", label: "30 days", hours: 720 },
   { value: "2160h", label: "90 days", hours: 2160 },
   { value: "8760h", label: "1 year", hours: 8760 },
+  { value: "date", label: "Custom date" },
   { value: "", label: "Never" },
 ];
+
+// localDay is a day as a date input writes it, in local time.
+function localDay(d) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// endOfDay is the last second of a YYYY-MM-DD day in local time, so a key
+// picked to expire on a day still works all of that day.
+function endOfDay(day) {
+  const [y, m, d] = day.split("-").map(Number);
+  return new Date(y, m - 1, d, 23, 59, 59);
+}
 
 function issueKey(ctx, projects, users) {
   // Every key is in a project, so with none there is nothing to issue yet.
@@ -606,6 +621,21 @@ function issueKey(ctx, projects, users) {
       ),
     ),
   );
+  const lastDay = h("input", {
+    class: "input",
+    type: "date",
+    min: localDay(new Date()),
+    value: localDay(new Date(Date.now() + 2160 * 3600e3)),
+  });
+  const lastDayField = field(
+    "Last day",
+    lastDay,
+    "The key works until the end of this day.",
+  );
+  lastDayField.hidden = true;
+  expiry.addEventListener("change", () => {
+    lastDayField.hidden = expiry.value !== "date";
+  });
   const err = h("div");
 
   modal({
@@ -639,6 +669,7 @@ function issueKey(ctx, projects, users) {
           )
         : null,
       field("Expires", expiry),
+      lastDayField,
     ),
     actions: (close) => [
       h("button", { class: "btn", onClick: close }, "Cancel"),
@@ -648,6 +679,11 @@ function issueKey(ctx, projects, users) {
           class: "btn btn-primary",
           onClick: async (e) => {
             if (!name.value.trim()) return name.focus();
+            let lifetime = { expires_in: expiry.value };
+            if (expiry.value === "date") {
+              if (!lastDay.value) return lastDay.focus();
+              lifetime = { expires_at: endOfDay(lastDay.value) };
+            }
             const button = e.currentTarget;
             button.disabled = true;
             try {
@@ -656,7 +692,7 @@ function issueKey(ctx, projects, users) {
                 project_id: project.value,
                 user_id: person.value,
                 name: name.value.trim(),
-                expires_in: expiry.value,
+                ...lifetime,
               });
               close();
               showSecret(ctx, created);
