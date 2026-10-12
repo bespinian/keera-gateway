@@ -48,6 +48,9 @@ UsePAM no
 # What a developer actually needs from this: a shell, an editor's remote
 # server, scp, and ports forwarded back to their laptop.
 AllowTcpForwarding yes
+# An agent forwarded into a machine that runs a model's output would sign with
+# the developer's keys.
+AllowAgentForwarding no
 PermitTunnel no
 X11Forwarding no
 Subsystem sftp internal-sftp

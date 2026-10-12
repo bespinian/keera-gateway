@@ -408,6 +408,8 @@ func sshInto(ctx context.Context, c *client, org, name string, rest []string) er
 		// Otherwise ssh warns about the above on every connection, which
 		// teaches people to ignore ssh warnings.
 		"-o", "LogLevel=ERROR",
+		// The image refuses it too, but one built before that would not.
+		"-o", "ForwardAgent=no",
 		sandboxUser + "@" + sb.Name,
 	}, rest...)
 
@@ -600,6 +602,7 @@ func writeSSHConfig(base, orgID string) error {
 	fmt.Printf("  StrictHostKeyChecking no\n")
 	fmt.Printf("  UserKnownHostsFile /dev/null\n")
 	fmt.Printf("  LogLevel ERROR\n")
+	fmt.Printf("  ForwardAgent no\n")
 	fmt.Fprintf(os.Stderr, "\nThe ProxyCommand carries the connection over this gateway's own "+
 		"port, so there is no second address to publish and no jump host. It signs in "+
 		"the way every other keera command does.\n")
