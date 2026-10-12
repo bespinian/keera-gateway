@@ -52,6 +52,7 @@ const LABELS = {
   "auth.sign_in": "Signed in",
   "auth.cli_token": "Signed in from the command line",
   "auth.directory_check": "Changed by the directory",
+  "auth.switch_org": "Switched organisation",
   "org.create": "Organisation created",
   "org.update": "Organisation changed",
   "org.delete": "Organisation deleted",
@@ -94,6 +95,12 @@ const LABELS = {
   "sandbox.attach": "Sandbox attached to",
   "sandbox_class.put": "Sandbox class saved",
   "sandbox_class.delete": "Sandbox class deleted",
+  "billing.account.update": "Billing settings changed",
+  "billing.card.remove": "Saved card removed",
+  "billing.topup": "Top-up started",
+  "billing.grant": "Credit granted",
+  "billing.payment.paid": "Payment received",
+  "billing.payment.failed": "Payment failed",
 };
 
 /** label is what to show for an action id. */
