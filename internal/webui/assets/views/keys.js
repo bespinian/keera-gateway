@@ -75,7 +75,9 @@ export async function keysView(ctx) {
     canEdit
       ? {
           label: "Issue key",
-          onClick: () => issueKey(ctx, projects, users),
+          // A disabled person cannot be given a key, so they are not offered.
+          onClick: () =>
+            issueKey(ctx, projects, users.filter((u) => !u.disabled_at)),
         }
       : null,
   );
