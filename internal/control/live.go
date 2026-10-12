@@ -19,8 +19,9 @@ import (
 // Polling would make every open tab a query per interval, whether or not
 // anything happened. Instead, the write path announces each batch of usage
 // events on store.EventsChannel. One listener per process picks that up and
-// tells every open stream to look. The notice carries no data: each stream
-// asks its own question, narrowed to what its reader may see.
+// tells the open streams of the organisations it names to look. The notice
+// carries nothing else: each stream asks its own question, narrowed to what
+// its reader may see.
 
 const (
 	// streamTick bounds how often one stream queries the database. Notices
@@ -50,8 +51,10 @@ const (
 // There is one listener, not one per reader, because each listener holds a
 // Postgres connection.
 type requestFeed struct {
-	mu   sync.Mutex
-	subs map[chan struct{}]struct{}
+	mu sync.Mutex
+	// subs holds each stream's organisation, or "" for one that reads every
+	// organisation.
+	subs map[chan struct{}]string
 	// closing is closed on shutdown. It is how a response that never ends by
 	// itself is told to end.
 	closing chan struct{}
@@ -60,17 +63,18 @@ type requestFeed struct {
 
 func newRequestFeed() *requestFeed {
 	return &requestFeed{
-		subs:    make(map[chan struct{}]struct{}),
+		subs:    make(map[chan struct{}]string),
 		closing: make(chan struct{}),
 	}
 }
 
-// watch subscribes. It returns the channel that ticks when the log grows and
-// the function that unsubscribes, which the caller must call.
-func (f *requestFeed) watch() (<-chan struct{}, func()) {
+// watch subscribes to one organisation's requests, or every organisation's
+// for "". It returns the channel that ticks when the log grows and the
+// function that unsubscribes, which the caller must call.
+func (f *requestFeed) watch(orgID string) (<-chan struct{}, func()) {
 	ch := make(chan struct{}, 1)
 	f.mu.Lock()
-	f.subs[ch] = struct{}{}
+	f.subs[ch] = orgID
 	f.mu.Unlock()
 
 	var once sync.Once
@@ -90,14 +94,20 @@ func (f *requestFeed) watch() (<-chan struct{}, func()) {
 // grace period. The browser reconnects to the next process by itself.
 func (s *Server) Drain() { s.feed.once.Do(func() { close(s.feed.closing) }) }
 
-// wake tells every stream that there is something new to look for.
+// wake tells the streams of the organisations a payload names that there is
+// something new to look for. Without a payload it tells every stream, so a
+// stream that reads every organisation is told of any.
 //
 // It never blocks. Each channel holds one tick, and a second would say the
 // same: a stream reads everything past its own cursor in one look.
-func (f *requestFeed) wake() {
+func (f *requestFeed) wake(payload string) {
+	orgs, all := store.EventOrgs(payload)
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	for ch := range f.subs {
+	for ch, org := range f.subs {
+		if !all && org != "" && !slices.Contains(orgs, org) {
+			continue
+		}
 		select {
 		case ch <- struct{}{}:
 		default:
@@ -115,8 +125,8 @@ func (s *Server) Run(ctx context.Context) {
 		return
 	}
 	for ctx.Err() == nil {
-		s.feed.wake()
-		if err := s.st.Listen(ctx, store.EventsChannel, func(string) { s.feed.wake() }); err != nil &&
+		s.feed.wake("")
+		if err := s.st.Listen(ctx, store.EventsChannel, s.feed.wake); err != nil &&
 			ctx.Err() == nil {
 			s.log.Warn("the usage-event listener dropped", "error", err)
 			select {
@@ -185,7 +195,7 @@ func (s *Server) streamRequests(ctx context.Context, w http.ResponseWriter,
 	w.WriteHeader(http.StatusOK)
 	_ = rc.Flush()
 
-	ticks, stop := s.feed.watch()
+	ticks, stop := s.feed.watch(orgID)
 	defer stop()
 
 	poll := time.NewTicker(streamTick)

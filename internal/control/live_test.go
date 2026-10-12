@@ -15,12 +15,12 @@ import (
 
 func TestFeedWakesEveryOpenStream(t *testing.T) {
 	f := newRequestFeed()
-	first, stopFirst := f.watch()
-	second, stopSecond := f.watch()
+	first, stopFirst := f.watch("")
+	second, stopSecond := f.watch("")
 	defer stopFirst()
 	defer stopSecond()
 
-	f.wake()
+	f.wake("")
 	for i, ch := range []<-chan struct{}{first, second} {
 		select {
 		case <-ch:
@@ -30,17 +30,37 @@ func TestFeedWakesEveryOpenStream(t *testing.T) {
 	}
 }
 
+func TestFeedWakesOnlyTheOrganisationsNamed(t *testing.T) {
+	// A batch for one organisation must not cost every other organisation's
+	// open tabs a query each.
+	f := newRequestFeed()
+	mine, stopMine := f.watch("org-a")
+	other, stopOther := f.watch("org-b")
+	every, stopEvery := f.watch("")
+	defer stopMine()
+	defer stopOther()
+	defer stopEvery()
+
+	f.wake("org-c,org-a")
+	if len(mine) != 1 || len(every) != 1 {
+		t.Error("a stream of an organisation named, or of every organisation, was not woken")
+	}
+	if len(other) != 0 {
+		t.Error("a stream of an organisation not named was woken")
+	}
+}
+
 func TestFeedCollapsesABurstIntoOneCue(t *testing.T) {
 	// A busy deployment writes several batches a second. Each cue costs the
 	// stream that receives it a query, and the second one would ask exactly the
 	// question the first already answers - the cursor it reads from picks up
 	// everything since the last look however many batches that was.
 	f := newRequestFeed()
-	ch, stop := f.watch()
+	ch, stop := f.watch("")
 	defer stop()
 
 	for range 50 {
-		f.wake()
+		f.wake("")
 	}
 	if len(ch) != 1 {
 		t.Errorf("%d cues queued after 50 notifications, want 1", len(ch))
@@ -58,7 +78,7 @@ func TestFeedForgetsAStreamThatHasGone(t *testing.T) {
 	// closed the tab is a channel nobody will ever receive from, and the map
 	// entry that keeps it is the leak.
 	f := newRequestFeed()
-	_, stop := f.watch()
+	_, stop := f.watch("")
 	if got := len(f.subs); got != 1 {
 		t.Fatalf("%d subscribers after one watch, want 1", got)
 	}
@@ -69,7 +89,7 @@ func TestFeedForgetsAStreamThatHasGone(t *testing.T) {
 	// Twice, because a handler that both returns and is cancelled must not be
 	// able to delete a later reader's subscription.
 	stop()
-	f.wake()
+	f.wake("")
 }
 
 func TestDrainEndsEveryStreamAndIsSafeTwice(t *testing.T) {

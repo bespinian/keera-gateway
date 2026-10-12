@@ -189,7 +189,9 @@ func (s *Store) writeBatch(ctx context.Context, events []Event) error {
 	}
 	queueCredit(batch, events)
 	queuePlans(batch, plans)
-	batch.Queue("SELECT pg_notify($1, '')", EventsChannel)
+	if payload, ok := eventsPayload(events); ok {
+		batch.Queue("SELECT pg_notify($1, $2)", EventsChannel, payload)
+	}
 	return s.pool.SendBatch(ctx, batch).Close()
 }
 

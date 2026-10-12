@@ -636,6 +636,17 @@ export function liveControl({ key, label, titles, words = {} }) {
     button.setAttribute("aria-pressed", String(control.on));
     if (listener) listener(control.on);
   });
+  // A hidden tab lets its stream go, because each open stream costs the
+  // control plane a query whenever its organisation makes a request. The
+  // screens pick up from where they stopped when the tab is shown again.
+  const onVisibility = () => {
+    if (!button.isConnected) {
+      document.removeEventListener("visibilitychange", onVisibility);
+      return;
+    }
+    if (control.on && listener) listener(!document.hidden);
+  };
+  document.addEventListener("visibilitychange", onVisibility);
   return control;
 }
 

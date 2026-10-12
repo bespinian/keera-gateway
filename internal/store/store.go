@@ -26,11 +26,47 @@ var migrations embed.FS
 const NotifyChannel = "keera_policy"
 
 // EventsChannel says that a batch of usage events was written, so a panel
-// watching the request log sees new requests quickly.
+// watching the request log sees new requests quickly. The payload names the
+// organisations the batch wrote requests for; EventOrgs reads it.
 //
 // It is separate from NotifyChannel because it fires several times a second,
 // and a policy notification makes every replica drop its whole cache.
 const EventsChannel = "keera_events"
+
+// eventsPayloadMax keeps the payload well under the 8000 bytes Postgres
+// allows. A batch for more organisations than fit sends none, which wakes
+// every stream.
+const eventsPayloadMax = 4000
+
+// eventsPayload names the organisations events wrote requests for. ok is
+// false when they wrote none, so there is nothing to announce.
+func eventsPayload(events []Event) (payload string, ok bool) {
+	var b strings.Builder
+	seen := make(map[string]bool)
+	for _, e := range events {
+		if e.BillsOnly || seen[e.OrgID] {
+			continue
+		}
+		seen[e.OrgID] = true
+		if b.Len() > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(e.OrgID)
+	}
+	if b.Len() > eventsPayloadMax {
+		return "", true
+	}
+	return b.String(), len(seen) > 0
+}
+
+// EventOrgs reads an EventsChannel payload. all says every organisation may
+// have new requests, for a payload that names none.
+func EventOrgs(payload string) (orgs []string, all bool) {
+	if payload == "" {
+		return nil, true
+	}
+	return strings.Split(payload, ","), false
+}
 
 // ErrNotFound is returned when a lookup matches no row.
 var ErrNotFound = errors.New("store: not found")
