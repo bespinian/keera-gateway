@@ -777,7 +777,7 @@ export function listHead(intro, controls, add) {
   return h(
     "div",
     { class: "detail-head" },
-    h("div", { class: "muted" }, intro),
+    intro ? h("div", { class: "muted" }, intro) : null,
     h(
       "div",
       { class: "row", style: { flexWrap: "wrap" } },

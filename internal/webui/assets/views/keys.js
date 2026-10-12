@@ -64,7 +64,7 @@ export async function keysView(ctx) {
 
   const head = listHead(
     canEdit
-      ? "A key is shown only once, when it is issued. It is not stored."
+      ? null
       : canRotateOwn
         ? "A key is shown only once, when it is issued. An administrator " +
           "issues keys and sets their guardrails. You can rename, rotate or " +

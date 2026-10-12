@@ -901,18 +901,16 @@ function hint(gapSeconds, detail) {
   const gap = duration((gapSeconds || 0) * 1000);
   const how =
     `Requests belong to one session when they share a conversation and are less than ` +
-    `${gap} apart. `;
+    `${gap} apart.`;
   return h(
     "div",
     { class: "hint", style: { marginTop: "16px" } },
     detail
       ? how +
-          "A conversation is matched by a hash of its opening prompt, or of " +
+          " A conversation is matched by a hash of its opening prompt, or of " +
           "an id the client sent. The prompt is not stored and cannot be " +
           "recovered from the hash. If a client changes its opening prompt, a " +
           "new session starts."
-      : how +
-          "Grouping is computed each time you open this screen, so changing " +
-          "the gap re-groups past sessions too.",
+      : how,
   );
 }

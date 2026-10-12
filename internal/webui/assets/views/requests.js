@@ -37,15 +37,12 @@ export async function requestsView(ctx) {
   // The section is written to sit under a chart. Here it is the screen.
   log.style.marginTop = "0";
 
+  const tip = advice(readNarrowing(ctx).status);
   return h(
     "div",
     {},
     log,
-    h(
-      "div",
-      { class: "hint", style: { marginTop: "16px" } },
-      advice(readNarrowing(ctx).status),
-    ),
+    tip && h("div", { class: "hint", style: { marginTop: "16px" } }, tip),
   );
 }
 
@@ -74,10 +71,6 @@ function advice(status) {
         "each row shows why."
       );
     default:
-      return (
-        "Every request: served, refused, interrupted or failed. With Live " +
-        "on, new ones appear as they arrive. Open a row for its details, or " +
-        "export the list as CSV."
-      );
+      return null;
   }
 }

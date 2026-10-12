@@ -79,9 +79,7 @@ export async function modelsView(ctx) {
   ctx.setSubtitle(`${models.length} ${plural(models.length, "model")}`);
 
   const head = listHead(
-    "Clients use a model's alias, not the backend model or URL. So the " +
-      "backend can change without any client changes. Each model belongs " +
-      "to one organisation.",
+    null,
     [
       rangePicker(ctx, since),
       // Everyone can browse it. Only a page that can add a model has fetched
