@@ -11,3 +11,13 @@ CREATE TABLE job_runs (
     job    text PRIMARY KEY,
     ran_at timestamptz NOT NULL
 );
+
+-- A request's id, and the client's own when it sent one, so a request someone
+-- reports by either id can be found. Rows written before this have neither.
+-- Each is indexed on its own, as a search by id ignores the time window.
+ALTER TABLE usage_events ADD COLUMN request_id text;
+ALTER TABLE usage_events ADD COLUMN client_request_id text;
+CREATE INDEX usage_events_request_id_idx ON usage_events (request_id)
+    WHERE request_id IS NOT NULL;
+CREATE INDEX usage_events_client_request_id_idx ON usage_events (client_request_id)
+    WHERE client_request_id IS NOT NULL;

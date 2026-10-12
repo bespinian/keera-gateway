@@ -330,6 +330,19 @@ Other response headers:
 | `X-Keera-Removed-Fields` | the fields that cost extra, taken out on the deployment's key ([billing.md](billing.md))  |
 | `X-Request-Id`           | the request's id; one the client sends is kept                                            |
 
+### Naming a request yourself
+
+A client can also send its own id in `X-Client-Request-Id`, as OpenAI's API
+allows. Unlike `X-Request-Id`, the client knows it even when no answer comes
+back. The gateway writes it to its log as `client_request_id`, next to
+`request_id`, and sends it on to OpenAI models, so OpenAI's support can find the
+request too. Requests that filters and routers send for a request don't carry
+it. An id that is not ASCII or is longer than 512 characters is ignored. OpenAI
+would answer it with a 400.
+
+Both ids are kept with the request. The Requests screen finds a request by
+either one, in any period, and its details show them.
+
 ## Errors
 
 Errors come in the shape of the API that was called. The Messages API has no

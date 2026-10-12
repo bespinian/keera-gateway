@@ -699,7 +699,7 @@ func (x *mcpExchange) unreachable(err error) {
 		return
 	}
 	x.s.log.Error("MCP server unreachable", "server", x.srv.Alias, "error", err,
-		"request_id", httpx.RequestID(x.r.Context()))
+		httpx.LogIDs(x.r.Context()))
 	msg := "the MCP server '" + x.srv.Alias + "' could not be reached"
 	x.failPending(msg + ": " + err.Error())
 	httpx.WriteError(x.w, http.StatusBadGateway, "server_error", "mcp_unavailable", msg)

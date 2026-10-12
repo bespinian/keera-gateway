@@ -246,17 +246,18 @@ export function outcomeSeg(ctx, outcome, counts) {
 }
 
 /** narrowRow is the filters a screen with no scope of its own carries, and the
- *  Clear beside them once any is set.
+ *  Clear beside them once any is set. `lead` is drawn before the filters.
  *
  *  Each filter keeps what it has when another one or the range changes,
  *  because "now show me that project's failures" is the next thing somebody
  *  asks rather than a mistake. A combination that matches nothing says so
  *  below, and Clear is right beside it. */
-export function narrowRow(ctx, narrowed, facets, names) {
+export function narrowRow(ctx, narrowed, facets, names, lead = null) {
   const list = narrowings(ctx);
   return h(
     "div",
     { class: "row", style: { margin: "12px 0", flexWrap: "wrap" } },
+    lead,
     list.map((n) =>
       narrowSelect(ctx, n, narrowed[n.param], facets[n.facet] || [], names),
     ),

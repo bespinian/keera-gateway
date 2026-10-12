@@ -340,7 +340,7 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, sh shape) 
 		return nil, false
 	default:
 		s.log.Error("resolving key failed", "error", err,
-			"request_id", httpx.RequestID(r.Context()))
+			httpx.LogIDs(r.Context()))
 		sh.writeError(w, http.StatusServiceUnavailable, "server_error", "control_plane_unavailable",
 			"the control plane is unavailable")
 	}

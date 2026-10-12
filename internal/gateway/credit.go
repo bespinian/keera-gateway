@@ -111,7 +111,7 @@ func (s *Server) billUnreported(c *call, b *body) {
 	c.ev.InputTokens, c.ev.OutputTokens, c.ev.Estimated = t.Input, t.Output, true
 	s.log.Warn("a request on the deployment's key came back without a usage record; "+
 		"it is billed the most it may have used", "model", c.alias,
-		"request_id", httpx.RequestID(c.r.Context()))
+		httpx.LogIDs(c.r.Context()))
 }
 
 // stripPremium takes out the fields that make a provider charge more per

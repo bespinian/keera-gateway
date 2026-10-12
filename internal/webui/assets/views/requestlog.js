@@ -51,6 +51,9 @@ const LIVE_KEY = "keera.requests.live";
 // The ranking, remembered apart from the session list's, which offers others.
 const SORT_KEY = "keera.requests.sort";
 
+// The request id searched for, remembered like the filters beside it.
+const ID_KEY = "keera.requests.id";
+
 // How long a row that has just arrived is marked as new. Long enough to catch
 // the eye of somebody looking elsewhere on the screen, short enough that a log
 // nobody is watching is not a wall of highlights when they come back.
@@ -95,6 +98,7 @@ export async function requestLog(
 ) {
   const outcome = filters ? "" : currentOutcome();
   const narrowed = filters ? readNarrowing(ctx) : {};
+  const searchedID = filters ? sessionStorage.getItem(ID_KEY) || "" : "";
   const rank = ranking(ctx, SORT_KEY);
   // The scope wins over the narrowing: a project's own screen is about that project
   // whatever was last picked on the dashboard.
@@ -106,6 +110,7 @@ export async function requestLog(
     sort: rank.by,
     ...narrowed,
     ...scope,
+    request_id: searchedID,
     facets: filters ? "1" : "",
   };
 
@@ -139,7 +144,7 @@ export async function requestLog(
     projects: res.project_names || {},
     users: res.user_names || {},
   };
-  const anyNarrowed = Object.values(narrowed).some(Boolean);
+  const anyNarrowed = Object.values(narrowed).some(Boolean) || !!searchedID;
 
   const wrap = h("div", { style: { marginTop: "24px" } });
 
@@ -185,7 +190,9 @@ export async function requestLog(
   );
 
   if (filters) {
-    wrap.append(narrowRow(ctx, narrowed, facets, names));
+    wrap.append(
+      narrowRow(ctx, narrowed, facets, names, idSearch(ctx, searchedID)),
+    );
   }
 
   // Both empty states still watch. An empty log is the screen most likely to be
@@ -220,13 +227,19 @@ export async function requestLog(
       h(
         "div",
         { class: "card" },
-        empty(
-          "Nothing matches this filter",
-          filters
-            ? "Nothing matches all the filters above. Clear some, or pick a " +
-                "longer period."
-            : "Pick a different outcome above, or a longer period.",
-        ),
+        searchedID
+          ? empty(
+              "No request has this id",
+              "Check the id. Every period is searched, but the other " +
+                "filters still apply.",
+            )
+          : empty(
+              "Nothing matches this filter",
+              filters
+                ? "Nothing matches all the filters above. Clear some, or pick a " +
+                    "longer period."
+                : "Pick a different outcome above, or a longer period.",
+            ),
       ),
   );
 
@@ -608,6 +621,29 @@ export function requestTable(ctx, rows, names, hide, opts = {}) {
   });
 }
 
+// idSearch finds a request by the id it was answered with, or by the client's
+// own. It searches every period: someone holding an id rarely knows the day.
+function idSearch(ctx, value) {
+  const apply = (e) => {
+    const id = e.target.value.trim();
+    if (id === value) return;
+    sessionStorage.setItem(ID_KEY, id);
+    ctx.reload();
+  };
+  return h("input", {
+    class: "input toolbar-search",
+    type: "search",
+    placeholder: "Find by request id",
+    "aria-label": "Find by request id",
+    autocomplete: "off",
+    spellcheck: "false",
+    value,
+    onChange: apply,
+    // The clear button of a search box fires this, and no change event.
+    onSearch: apply,
+  });
+}
+
 // showRequest is one request in full - the row expanded into every field the
 // gateway recorded, with the message shown whole and selectable because what is
 // done with it is pasting it into a message to somebody else.
@@ -635,6 +671,10 @@ export function showRequest(ctx, q, names) {
     ],
     ["Who", q.user_id ? names.users[q.user_id] || q.user_id : "-"],
     ["When", dateTime(q.ts)],
+    // Rows from before v0.7.0 have no id.
+    ["Request id", q.request_id || "-"],
+    // Most clients send no id of their own, so the line would mostly say none.
+    q.client_request_id ? ["Client request id", q.client_request_id] : null,
     [
       "Input tokens",
       num(q.input_tokens) +
@@ -658,7 +698,7 @@ export function showRequest(ctx, q, names) {
     ["Took", ms(q.latency_ms)],
     ["Streamed", q.stream ? "yes" : "no"],
     ["Client hung up", q.canceled ? "yes" : "no"],
-  ];
+  ].filter(Boolean);
   const session = q.session_key
     ? (close) =>
         h(

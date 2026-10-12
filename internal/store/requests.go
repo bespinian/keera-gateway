@@ -103,6 +103,10 @@ type Request struct {
 	// Spans is where the latency went, step by step. It is loaded with the row
 	// so opening a slow request needs no second round trip.
 	Spans []Span `json:"spans,omitempty"`
+	// RequestID is the id the gateway answered with, and ClientRequestID the
+	// client's own. Rows written before v0.7.0 have neither.
+	RequestID       string `json:"request_id,omitempty"`
+	ClientRequestID string `json:"client_request_id,omitempty"`
 }
 
 // requestColumns is the select list every reading of a request row shares, so
@@ -112,7 +116,7 @@ const requestColumns = `id, ts, alias, status, COALESCE(error, ''),
 	COALESCE(client, ''), input_tokens, cached_input_tokens, cache_write_tokens,
 	output_tokens, cost_micros,
 	latency_ms, ttft_ms, stream, estimated, canceled, COALESCE(session_key, ''),
-	spans`
+	spans, COALESCE(request_id, ''), COALESCE(client_request_id, '')`
 
 func scanRequest(r row) (Request, error) {
 	var q Request
@@ -121,7 +125,7 @@ func scanRequest(r row) (Request, error) {
 		&q.InputTokens, &q.CachedInputTokens, &q.CacheWriteTokens, &q.OutputTokens,
 		&q.CostMicros,
 		&q.LatencyMS, &q.TTFTMS, &q.Stream, &q.Estimated, &q.Canceled, &q.SessionKey,
-		&q.Spans)
+		&q.Spans, &q.RequestID, &q.ClientRequestID)
 	return q, err
 }
 
@@ -133,8 +137,11 @@ type RequestQuery struct {
 	// Holder keeps the log to the requests of one person's keys, whatever
 	// else is narrowed. It is how a member reads the log. Unlike UserID, it
 	// also narrows the filter choices, which would otherwise count everyone's.
-	Holder  string
-	Outcome Outcome
+	Holder string
+	// RequestID finds the requests with this id, or with this id of the
+	// client's own.
+	RequestID string
+	Outcome   Outcome
 	// Status matches one exact status.
 	Status int
 	// StatusClass matches a whole class of statuses by its first digit: 5 for
@@ -172,9 +179,10 @@ func RequestSorts() []Sort {
 	return []Sort{SortRecent, SortCost, SortTokens, SortFirstToken}
 }
 
-// where is the condition on everything in q but the outcome, on $1 to $13.
+// where is the condition on everything in q but the outcome, on $1 to $14.
 func (q RequestQuery) where() string {
 	return `($1 = '' OR org_id = $1)
+		  AND ($14 = '' OR request_id = $14 OR client_request_id = $14)
 		  AND ($2::timestamptz IS NULL OR ts >= $2)
 		  AND ($3::timestamptz IS NULL OR ts < $3)
 		  AND ($4 = 0 OR status = $4)
@@ -187,8 +195,8 @@ func (q RequestQuery) where() string {
 
 // whereArgs are the values where refers to.
 func (q RequestQuery) whereArgs() []any {
-	return append([]any{q.OrgID, nullableTime(q.From), nullableTime(q.To), q.Status,
-		q.StatusClass, q.Before, q.After, q.Skip, q.Holder}, q.args()...)
+	return append(append([]any{q.OrgID, nullableTime(q.From), nullableTime(q.To), q.Status,
+		q.StatusClass, q.Before, q.After, q.Skip, q.Holder}, q.args()...), q.RequestID)
 }
 
 // Requests returns the matching rows in the order q asks for, newest first by
@@ -203,7 +211,7 @@ func (s *Store) Requests(ctx context.Context, q RequestQuery) ([]Request, error)
 	return queryAll(ctx, s.pool, scanRequest, `SELECT `+requestColumns+`
 		FROM usage_events
 		WHERE `+outcomeClause(q.Outcome)+` AND `+q.where()+`
-		ORDER BY `+order+` LIMIT $14`,
+		ORDER BY `+order+` LIMIT $15`,
 		append(q.whereArgs(), pageLimit(q.Limit, 100, 5000))...)
 }
 

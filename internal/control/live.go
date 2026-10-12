@@ -371,7 +371,7 @@ func (s *Server) countOutcomes(ctx context.Context, rq store.RequestQuery, settl
 	tally *outcomeTally, since string) (store.RequestOutcomes, error) {
 	q := store.RequestQuery{
 		OrgID: rq.OrgID, ReportScope: rq.ReportScope, Holder: rq.Holder,
-		Status: rq.Status, StatusClass: rq.StatusClass,
+		Status: rq.Status, StatusClass: rq.StatusClass, RequestID: rq.RequestID,
 	}
 	now := time.Now()
 	switch {
@@ -380,7 +380,10 @@ func (s *Server) countOutcomes(ctx context.Context, rq store.RequestQuery, settl
 		// counts the last 24 hours. The error cannot happen: reportScope
 		// already checked this string.
 		whole := q
-		whole.From, _, _ = timeRange("", "", since)
+		// A search by id has no window, as on the request log.
+		if q.RequestID == "" {
+			whole.From, _, _ = timeRange("", "", since)
+		}
 		whole.Before = settled + 1
 		base, err := s.st.Outcomes(ctx, whole)
 		if err != nil {

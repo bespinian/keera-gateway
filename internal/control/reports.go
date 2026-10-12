@@ -173,6 +173,11 @@ func (s *Server) requests(w http.ResponseWriter, r *http.Request, p *authn.Princ
 	orgID := rq.OrgID
 	q := r.URL.Query()
 	rq.From, rq.To = from, to
+	// An id names a request whenever it was made. Someone holding one rarely
+	// knows the day, and the period picked for browsing would hide it.
+	if rq.RequestID != "" {
+		rq.From, rq.To = time.Time{}, time.Time{}
+	}
 	if rq.Sort, ok = parseSort(w, q, store.RequestSorts()); !ok {
 		return
 	}
@@ -272,7 +277,8 @@ func (s *Server) requestQuery(w http.ResponseWriter, r *http.Request, p *authn.P
 	}
 	q := r.URL.Query()
 	rq = store.RequestQuery{OrgID: orgID, ReportScope: sc, Holder: holder,
-		Outcome: store.Outcome(q.Get("outcome"))}
+		Outcome:   store.Outcome(q.Get("outcome")),
+		RequestID: strings.TrimSpace(q.Get("request_id"))}
 	rq.Status, rq.StatusClass = parseStatus(q.Get("status"))
 	return rq, from, to, true
 }

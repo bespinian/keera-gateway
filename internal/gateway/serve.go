@@ -96,7 +96,9 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, res *policy.Resol
 		TS: tr.start, OrgID: res.Key.OrgID, ProjectID: res.Key.ProjectID, UserID: res.Key.UserID,
 		KeyID: res.Key.ID, Scopes: res.Scopes,
 		// Read now, before the headers are replaced by the ones the backend gets.
-		Client: connect.Identify(r.Header.Get(connect.ClientHeader), r.UserAgent()),
+		Client:          connect.Identify(r.Header.Get(connect.ClientHeader), r.UserAgent()),
+		RequestID:       httpx.RequestID(r.Context()),
+		ClientRequestID: httpx.ClientRequestID(r.Context()),
 	}}
 
 	raw, ok := s.receive(c)
@@ -388,7 +390,7 @@ func (s *Server) admit(c *call, b *body) bool {
 	if _, ok := errors.AsType[*policy.ErrBudgetExceeded](err); !ok {
 		// The budgeter should only ever say yes or no, so anything else is a bug.
 		s.log.Error("unexpected budget error", "error", err,
-			"request_id", httpx.RequestID(c.r.Context()))
+			httpx.LogIDs(c.r.Context()))
 	}
 	// 402 rather than 429: a client that reads "slow down" would retry against
 	// a limit that does not lift until the period rolls over.
@@ -742,6 +744,7 @@ func (s *Server) answer(c *call, b *body) {
 // outbound encodes the request for one destination: in the client's own API
 // for the provider whose API it is, translated for every other.
 func (c *call) outbound(b *body) func(policy.Model) outbound {
+	clientID := httpx.ClientRequestID(c.r.Context())
 	return func(m policy.Model) outbound {
 		if c.native != nil && speaksNative(c.surf.dialect, m) {
 			c.native.setString("model", m.BackendModel)
@@ -749,10 +752,11 @@ func (c *call) outbound(b *body) func(policy.Model) outbound {
 			if m.Subscription {
 				auth = subscriptionAuth(c.r.Header)
 			}
-			return outbound{path: c.surf.dialect.path(), payload: c.native.encode(), auth: auth}
+			return outbound{path: c.surf.dialect.path(), payload: c.native.encode(),
+				auth: auth, clientID: clientID}
 		}
 		b.setString("model", m.BackendModel)
-		return outbound{path: c.surf.path, payload: b.encode()}
+		return outbound{path: c.surf.path, payload: b.encode(), clientID: clientID}
 	}
 }
 
@@ -816,7 +820,7 @@ func (s *Server) settleRouter(c *call, fw forwarded) {
 // It counts nothing on keera_upstream_errors_total: send already has.
 func (s *Server) upstreamUnreachable(c *call, fw forwarded) {
 	s.log.Error("inference plane unreachable", "error", fw.err, "model", c.alias,
-		"request_id", httpx.RequestID(c.r.Context()))
+		httpx.LogIDs(c.r.Context()))
 	s.limitHeaders(c.w, c.res, c.now)
 	c.surf.shape.writeError(c.w, http.StatusBadGateway, "server_error", "upstream_unavailable",
 		"the inference plane could not be reached")
@@ -854,7 +858,7 @@ func (s *Server) relayStream(c *call, resp *http.Response, answered time.Time, p
 	}
 	if err != nil && c.r.Context().Err() == nil {
 		s.log.Warn("stream ended early", "error", err, "model", c.alias,
-			"request_id", httpx.RequestID(c.r.Context()))
+			httpx.LogIDs(c.r.Context()))
 		// The status stays the 200 already sent. The message is what tells a
 		// cut-off stream from a finished one.
 		c.ev.Error = "the stream ended before the model was done: " + err.Error()

@@ -76,3 +76,54 @@ func TestMiddlewareKeepsTheClientsOwnID(t *testing.T) {
 			"survive, or nothing correlates", got)
 	}
 }
+
+// OpenAI takes any ASCII up to 512 characters as X-Client-Request-Id. The id
+// is also logged and sent on as a header, so control characters are dropped.
+func TestClientRequestIDTakesWhatOpenAITakes(t *testing.T) {
+	tests := []struct {
+		name, presented string
+		kept            bool
+	}{
+		{"a uuid", "3f2504e0-4f89-11d3-9a0c-0305e82c3301", true},
+		{"a trace id with a space", "batch 7/job 12", true},
+		{"exactly as long as one may be", strings.Repeat("a", maxClientRequestIDLen), true},
+		{"longer than OpenAI takes", strings.Repeat("a", maxClientRequestIDLen+1), false},
+		{"a header split", "id\r\nX-Keera-Model: other", false},
+		{"a tab", "id\t1", false},
+		{"not ascii", "réquête", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := clientRequestID(tc.presented)
+			if (got != "") != tc.kept || (tc.kept && got != tc.presented) {
+				t.Errorf("clientRequestID(%q) = %q, want kept = %v", tc.presented, got, tc.kept)
+			}
+		})
+	}
+}
+
+// The client's own id sits next to the request id, so a log line can be found
+// by either. It never replaces the request id.
+func TestTheClientsRequestIDIsLoggedBesideOurs(t *testing.T) {
+	var buf strings.Builder
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	h := Middleware(log, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	r.Header.Set("X-Request-Id", "req_from-the-ingress")
+	r.Header.Set(ClientRequestIDHeader, "job-12")
+	h.ServeHTTP(w, r)
+
+	line := buf.String()
+	for _, want := range []string{"request_id=req_from-the-ingress", "client_request_id=job-12"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("log line %q lacks %s", line, want)
+		}
+	}
+	if got := w.Header().Get("X-Request-Id"); got != "req_from-the-ingress" {
+		t.Errorf("X-Request-Id = %q, want the ingress's id kept", got)
+	}
+}

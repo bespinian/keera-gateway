@@ -449,3 +449,33 @@ func TestRenameModelChangesOnlyTheModelField(t *testing.T) {
 		}
 	}
 }
+
+// OpenAI records a client's X-Client-Request-Id, so its support can find a
+// request whose answer never arrived. Other backends are not sent it.
+func TestTheClientsRequestIDGoesOnlyToOpenAI(t *testing.T) {
+	h, seen := providerHarness(t, "openai", "gpt-5.5",
+		jsonBackend(`{"model":"gpt-5.5","choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}`), nil)
+
+	for alias, want := range map[string]string{"keera-frontier": "job-12", "keera-code": ""} {
+		req, _ := http.NewRequest(http.MethodPost, h.url("/v1/chat/completions"), strings.NewReader(
+			`{"model":"`+alias+`","messages":[{"role":"user","content":"hi"}]}`))
+		req.Header.Set("Authorization", "Bearer "+testKey)
+		req.Header.Set("X-Client-Request-Id", "job-12")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if got := nextSeen(t, seen).header.Get("X-Client-Request-Id"); got != want {
+			t.Errorf("%s was sent X-Client-Request-Id %q, want %q", alias, got, want)
+		}
+		// Whatever the model, the usage row keeps both ids, so the request
+		// can be found by either.
+		ev := h.sink.last(t)
+		if ev.RequestID != resp.Header.Get("X-Request-Id") || ev.ClientRequestID != "job-12" {
+			t.Errorf("%s: row has ids %q and %q, want %q and job-12", alias,
+				ev.RequestID, ev.ClientRequestID, resp.Header.Get("X-Request-Id"))
+		}
+	}
+}

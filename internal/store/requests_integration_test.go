@@ -842,3 +842,47 @@ func TestRequestsCarryTheCachedShareOfThePrompt(t *testing.T) {
 			rows[1].InputTokens, rows[1].CachedInputTokens)
 	}
 }
+
+// Someone reporting a request quotes one id: the one the gateway answered
+// with, or the client's own. Either finds the row, and the row carries both.
+func TestARequestIsFoundByEitherID(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	if err := st.WriteEvents(ctx, []Event{
+		{TS: now.Add(-time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
+			Status: 200, RequestID: "req_1", ClientRequestID: "job-12"},
+		{TS: now.Add(-time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
+			Status: 200, RequestID: "req_2"},
+		{TS: now.Add(-time.Hour), OrgID: "org_2", KeyID: "key_9", Alias: "keera-code",
+			Status: 200, RequestID: "req_3", ClientRequestID: "job-12"},
+	}); err != nil {
+		t.Fatalf("WriteEvents: %v", err)
+	}
+
+	for _, id := range []string{"req_1", "job-12"} {
+		rows, err := st.Requests(ctx, RequestQuery{OrgID: f.orgID, RequestID: id})
+		if err != nil {
+			t.Fatalf("Requests: %v", err)
+		}
+		if len(rows) != 1 || rows[0].RequestID != "req_1" || rows[0].ClientRequestID != "job-12" {
+			t.Errorf("by %s: rows = %+v, want this tenant's req_1 with both ids", id, rows)
+		}
+		counts, err := st.Outcomes(ctx, RequestQuery{OrgID: f.orgID, RequestID: id})
+		if err != nil {
+			t.Fatalf("Outcomes: %v", err)
+		}
+		if counts.Total != 1 {
+			t.Errorf("by %s: counted %d, want the one row the log shows", id, counts.Total)
+		}
+	}
+
+	rows, err := st.Requests(ctx, RequestQuery{OrgID: f.orgID, RequestID: "req_2"})
+	if err != nil {
+		t.Fatalf("Requests: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ClientRequestID != "" {
+		t.Errorf("rows = %+v, want req_2 with no client id", rows)
+	}
+}

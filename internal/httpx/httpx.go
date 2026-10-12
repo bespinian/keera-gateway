@@ -42,13 +42,38 @@ const SessionHeader = "X-Keera-Session"
 
 type ctxKey int
 
-const requestIDKey ctxKey = iota
+const (
+	requestIDKey ctxKey = iota
+	clientRequestIDKey
+)
 
 // RequestID returns the id assigned to r, for logs and for correlating a client
 // report with a usage row.
 func RequestID(ctx context.Context) string {
 	v, _ := ctx.Value(requestIDKey).(string)
 	return v
+}
+
+// ClientRequestIDHeader is OpenAI's header for an id the client picks itself.
+// Unlike X-Request-Id, the client knows it even when no answer comes back.
+const ClientRequestIDHeader = "X-Client-Request-Id"
+
+// ClientRequestID returns the id the client sent in ClientRequestIDHeader, or
+// "" when it sent none or one that was not valid.
+func ClientRequestID(ctx context.Context) string {
+	v, _ := ctx.Value(clientRequestIDKey).(string)
+	return v
+}
+
+// LogIDs names the request in a log line: by its id, and by the client's own
+// when it sent one.
+func LogIDs(ctx context.Context) slog.Attr {
+	rid := slog.String("request_id", RequestID(ctx))
+	if cid := ClientRequestID(ctx); cid != "" {
+		// A group without a key is written as its fields, side by side.
+		return slog.Group("", rid, slog.String("client_request_id", cid))
+	}
+	return rid
 }
 
 // APIError is the error envelope. It matches the OpenAI shape, because that is
@@ -147,6 +172,27 @@ func requestID(presented string) string {
 	return presented
 }
 
+// maxClientRequestIDLen is the longest X-Client-Request-Id OpenAI accepts.
+const maxClientRequestIDLen = 512
+
+// clientRequestID accepts a client's X-Client-Request-Id, or returns "".
+//
+// OpenAI takes any ASCII up to 512 characters and refuses the request
+// otherwise. Here an invalid one is dropped instead, as most models behind the
+// gateway never read it. Control characters are dropped too, since the id is
+// written to the log and sent on as a header.
+func clientRequestID(presented string) string {
+	if len(presented) > maxClientRequestIDLen {
+		return ""
+	}
+	for i := range len(presented) {
+		if c := presented[i]; c < ' ' || c > '~' {
+			return ""
+		}
+	}
+	return presented
+}
+
 // Middleware assigns a request id, logs the outcome, and turns a panic into a
 // 500 rather than a dropped connection.
 func Middleware(log *slog.Logger, next http.Handler) http.Handler {
@@ -160,21 +206,25 @@ func Middleware(log *slog.Logger, next http.Handler) http.Handler {
 		// as HTML would run where the session cookie lives. Every route states
 		// its own media type.
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		r = r.WithContext(context.WithValue(r.Context(), requestIDKey, rid))
+		ctx := context.WithValue(r.Context(), requestIDKey, rid)
+		if cid := clientRequestID(r.Header.Get(ClientRequestIDHeader)); cid != "" {
+			ctx = context.WithValue(ctx, clientRequestIDKey, cid)
+		}
+		r = r.WithContext(ctx)
 
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		start := time.Now()
 
 		defer func() {
 			if p := recover(); p != nil {
-				log.Error("panic serving request", "error", p, "request_id", rid,
+				log.Error("panic serving request", "error", p, LogIDs(r.Context()),
 					"path", r.URL.Path, "stack", string(debug.Stack()))
 				if !rec.wrote {
 					WriteError(rec, http.StatusInternalServerError, "server_error", "", "internal error")
 				}
 			}
 			log.Debug("request", "method", r.Method, "path", r.URL.Path,
-				"status", rec.status, "duration", time.Since(start), "request_id", rid)
+				"status", rec.status, "duration", time.Since(start), LogIDs(r.Context()))
 		}()
 
 		next.ServeHTTP(rec, r)

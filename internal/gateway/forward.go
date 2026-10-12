@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
@@ -105,6 +106,9 @@ type outbound struct {
 	// API needs besides the body. Nil sends the credential as a bearer token,
 	// which is what every OpenAI-shaped endpoint takes.
 	auth func(h http.Header, credential string)
+	// clientID is the client's X-Client-Request-Id. Only the client's own
+	// request carries it: one a filter or router sends is another request.
+	clientID string
 }
 
 // forward sends the request to the first destination that can answer it.
@@ -209,6 +213,11 @@ func (s *Server) send(ctx context.Context, model policy.Model, out outbound) (*h
 			out.auth(req.Header, model.APIKey)
 		} else {
 			setCredential(req.Header, "", model.APIKey)
+		}
+		// OpenAI records the client's id, so its support can find a request
+		// whose answer never arrived. Other providers have no such header.
+		if out.clientID != "" && model.Provider == "openai" {
+			req.Header.Set(httpx.ClientRequestIDHeader, out.clientID)
 		}
 		resp, err := s.modelClient(model).Do(req)
 		if err == nil {
