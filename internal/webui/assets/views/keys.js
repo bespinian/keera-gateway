@@ -558,7 +558,11 @@ function endOfDay(day) {
   return new Date(y, m - 1, d, 23, 59, 59);
 }
 
-function issueKey(ctx, projects, users) {
+// issueKey asks for a new key. last holds the project and expiry of the key
+// issued just before, when the form is opened again with "Issue another". The
+// user is not carried over: the next key is usually somebody else's, and a key
+// given to the wrong person quietly counts as theirs.
+function issueKey(ctx, projects, users, last = {}) {
   // Every key is in a project, so with none there is nothing to issue yet.
   if (!projects.length) {
     const close = modal({
@@ -592,7 +596,9 @@ function issueKey(ctx, projects, users) {
   });
   // The oldest project is picked, as the control plane does for a key that
   // names none.
-  const first = oldestProject(projects);
+  const first = projects.some((t) => t.id === last.project)
+    ? last.project
+    : oldestProject(projects);
   const project = h(
     "select",
     { class: "select" },
@@ -614,25 +620,29 @@ function issueKey(ctx, projects, users) {
     EXPIRIES.map(({ value, label, hours }) =>
       h(
         "option",
-        { value, selected: value === "2160h" },
+        { value, selected: value === (last.expiry ?? "2160h") },
         hours
           ? `${label} (${date(new Date(Date.now() + hours * 3600e3))})`
           : label,
       ),
     ),
   );
+  const today = localDay(new Date());
   const lastDay = h("input", {
     class: "input",
     type: "date",
-    min: localDay(new Date()),
-    value: localDay(new Date(Date.now() + 2160 * 3600e3)),
+    min: today,
+    value:
+      last.lastDay >= today
+        ? last.lastDay
+        : localDay(new Date(Date.now() + 2160 * 3600e3)),
   });
   const lastDayField = field(
     "Last day",
     lastDay,
     "The key works until the end of this day.",
   );
-  lastDayField.hidden = true;
+  lastDayField.hidden = expiry.value !== "date";
   expiry.addEventListener("change", () => {
     lastDayField.hidden = expiry.value !== "date";
   });
@@ -695,7 +705,13 @@ function issueKey(ctx, projects, users) {
                 ...lifetime,
               });
               close();
-              showSecret(ctx, created);
+              showSecret(ctx, created, () =>
+                issueKey(ctx, projects, users, {
+                  project: project.value,
+                  expiry: expiry.value,
+                  lastDay: lastDay.value,
+                }),
+              );
             } catch (ex) {
               showError(err, ex.message);
               button.disabled = false;
@@ -708,8 +724,9 @@ function issueKey(ctx, projects, users) {
   });
 }
 
-// showSecret shows a new key, the only time it can be seen.
-function showSecret(ctx, created) {
+// showSecret shows a new key, the only time it can be seen. again, when given,
+// opens the form for another key like this one.
+function showSecret(ctx, created, again) {
   const body = h(
     "div",
     { class: "field" },
@@ -722,6 +739,21 @@ function showSecret(ctx, created) {
     subtitle: "Shown only this once. It is not stored.",
     body,
     actions: (close) => [
+      again
+        ? h(
+            "button",
+            {
+              class: "btn",
+              title: "Same project and expiry",
+              onClick: () => {
+                close();
+                ctx.reload();
+                again();
+              },
+            },
+            "Issue another",
+          )
+        : null,
       h(
         "button",
         {
