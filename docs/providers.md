@@ -42,8 +42,8 @@ models:
 
 `provider` fills in every field the entry leaves out: the endpoint, the context
 window, the prices (input, output, cached input, cache write, and the dearer
-ones for a long prompt where the provider charges more), a description, the release date and
-the location. The providers are `anthropic`, `openai`,
+ones for a long prompt where the provider charges more), a display name, a
+description, the release date and the location. The providers are `anthropic`, `openai`,
 `infomaniak`, `stepping-stone`, `phoeniqs` and `cscs`; `keera model providers`
 lists them with their models. For a `backend_model` not in that table, the entry
 must set `input_micros_per_mtok` and `output_micros_per_mtok` itself. A model
@@ -94,7 +94,7 @@ later opens the same tile with the same values.
 Infomaniak also asks for a product id and builds the endpoint from it.
 
 **Models → Model catalogue** lists every model the providers offer, with its
-release date, location, context window and list prices, as `keera model
+name, release date, location, context window and list prices, as `keera model
 providers` does. You can search it, filter it by provider, and sort it by any
 column. **Add** opens the same form with the provider and the model already
 picked. Everyone can see the list. Operators and

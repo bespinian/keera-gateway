@@ -128,7 +128,7 @@ export async function modelsView(ctx) {
             h(
               "span",
               { class: "faint", style: { fontSize: "11.5px" } },
-              "serves " + m.backend_model,
+              "serves " + servedName(m),
             ),
           ),
       },
@@ -282,6 +282,7 @@ export async function modelsView(ctx) {
         [
           m.alias,
           m.backend_model,
+          m.display_name || "",
           m.kind,
           m.provider || "",
           providerName(m.provider),
@@ -336,12 +337,14 @@ export async function providerModelsView(ctx) {
     [
       {
         label: "Model",
-        sortKey: (r) => r.m.id,
+        sortKey: (r) => r.m.display_name || r.m.id,
         cell: (r) =>
           h(
             "div",
             { class: "stack" },
-            h("span", { class: "mono" }, r.m.id),
+            r.m.display_name
+              ? h("span", {}, r.m.display_name)
+              : h("span", { class: "mono" }, r.m.id),
             r.m.description
               ? h(
                   "span",
@@ -454,6 +457,7 @@ export async function providerModelsView(ctx) {
       search: (r) =>
         [
           r.m.id,
+          r.m.display_name || "",
           r.m.description,
           r.p.name,
           providerName(r.p.name),
@@ -574,7 +578,14 @@ function viewModel(ctx, m) {
       ),
       readRow(
         "Model it serves",
-        h("span", { class: "mono" }, m.backend_model),
+        m.display_name
+          ? h(
+              "span",
+              {},
+              m.display_name,
+              h("span", { class: "mono muted" }, ` - ${m.backend_model}`),
+            )
+          : h("span", { class: "mono" }, m.backend_model),
         "The model the backend runs.",
       ),
       h(
@@ -861,6 +872,11 @@ export function providerName(name) {
   return PROVIDER_NAMES[name] || name || "";
 }
 
+// servedName is what a model serves, by its name for people when it has one.
+export function servedName(m) {
+  return m.display_name || m.backend_model;
+}
+
 // What a per-customer endpoint carries in place of the part only the
 // organisation knows. It is the same text internal/catalog/providers.go writes.
 const PRODUCT_ID = "{product_id}";
@@ -932,6 +948,12 @@ const PRESET_FIELDS = [
     // is for. It is a starting point, and the point of it is being edited.
     prose: true,
     of: (p, m) => (m && m.description ? m.description : null),
+  },
+  {
+    key: "displayName",
+    label: "display name",
+    fromModel: true,
+    of: (p, m) => (m && m.display_name ? m.display_name : null),
   },
   {
     key: "backends",
@@ -1022,6 +1044,11 @@ function editModel(ctx, existing, providers, pick) {
     value: m.max_context || "",
     placeholder: "0",
   });
+  const displayName = h("input", {
+    class: "input",
+    value: m.display_name || "",
+    placeholder: "Qwen3 Coder Next",
+  });
   const description = h("input", {
     class: "input",
     value: m.description || "",
@@ -1047,6 +1074,7 @@ function editModel(ctx, existing, providers, pick) {
   const fields = {
     kind,
     backendModel,
+    displayName,
     description,
     backends,
     maxContext,
@@ -1130,15 +1158,27 @@ function editModel(ctx, existing, providers, pick) {
     {},
     h(
       "div",
-      { class: "field" },
-      h("label", {}, "Backend model"),
-      backendModel,
+      { class: "field-row" },
       h(
         "div",
-        { class: "hint" },
-        "The model name the backend serves, e.g. vLLM's --served-model-name.",
+        { class: "field" },
+        h("label", {}, "Backend model"),
+        backendModel,
+        h(
+          "div",
+          { class: "hint" },
+          "The model name the backend serves, e.g. vLLM's --served-model-name.",
+        ),
+        marks.backendModel,
       ),
-      marks.backendModel,
+      h(
+        "div",
+        { class: "field" },
+        h("label", {}, "Display name"),
+        displayName,
+        h("div", { class: "hint" }, "The model's name for people."),
+        marks.displayName,
+      ),
     ),
     h(
       "div",
@@ -1500,6 +1540,7 @@ function editModel(ctx, existing, providers, pick) {
             // next edit of this model tell the two apart.
             provider: state.hosted && state.preset ? state.preset.p.name : "",
             max_context: parseInt(maxContext.value, 10) || 0,
+            display_name: displayName.value.trim(),
             description: description.value.trim(),
             release_date: releaseDate.value,
             // Left empty, the control plane fills in the provider's, or
@@ -1622,6 +1663,7 @@ function providerAnswers(p, known) {
     backends: true,
     location: true,
     releaseDate: !!known && !!known.release_date,
+    displayName: !!known && !!known.display_name,
     // The description is deliberately not here. The table fills it in like
     // everything else, and then it is the administrator's: a provider's
     // sentence says what the model is, and what this organisation means by the
@@ -1839,7 +1881,13 @@ function hostedFields(ctx, providers, form) {
   const fillModels = () => {
     const p = chosen();
     model.replaceChildren(
-      ...p.models.map((mm, i) => h("option", { value: String(i) }, mm.id)),
+      ...p.models.map((mm, i) =>
+        h(
+          "option",
+          { value: String(i), title: mm.id },
+          mm.display_name || mm.id,
+        ),
+      ),
       // A model released after this binary was built is still one this
       // catalogue entry can serve; it just has to be named and priced by hand.
       h("option", { value: "other" }, "custom"),

@@ -17,6 +17,9 @@ type modelEntry struct {
 	// MaxContext is not part of the OpenAI shape, but clients that know to
 	// look for it can size a request without being told out of band.
 	MaxContext int `json:"max_context,omitempty"`
+	// DisplayName is the model's name for people, as Anthropic's API calls
+	// it.
+	DisplayName string `json:"display_name,omitempty"`
 	// Description says what the model is for, so a person choosing has
 	// more to go on than the name.
 	Description string `json:"description,omitempty"`
@@ -30,7 +33,8 @@ type modelEntry struct {
 func modelEntryOf(m policy.Model) modelEntry {
 	return modelEntry{
 		ID: m.Alias, Object: "model", Created: created(m), OwnedBy: "keera",
-		MaxContext: m.MaxContext, Description: m.Description, Location: m.Location,
+		MaxContext: m.MaxContext, DisplayName: m.DisplayName, Description: m.Description,
+		Location: m.Location,
 	}
 }
 

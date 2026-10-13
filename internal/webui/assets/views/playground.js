@@ -498,7 +498,7 @@ function subtitle(model) {
   if (model.router) {
     return "A router: it picks the model";
   }
-  const bits = [model.backend_model];
+  const bits = [model.display_name || model.backend_model];
   if (model.max_context)
     bits.push(compact(model.max_context) + " token context");
   return bits.filter(Boolean).join(" · ");

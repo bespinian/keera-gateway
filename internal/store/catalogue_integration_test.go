@@ -56,6 +56,7 @@ func TestModelCatalogueRoundTrip(t *testing.T) {
 		},
 		MaxContext: 65536, Enabled: true,
 		Provider: "anthropic", ReleaseDate: "2026-07-24", Location: "usa",
+		DisplayName: "Qwen2.5 Coder 32B",
 	}
 	if err := st.UpsertModel(ctx, m); err != nil {
 		t.Fatalf("UpsertModel: %v", err)
@@ -81,7 +82,7 @@ func TestModelCatalogueRoundTrip(t *testing.T) {
 		t.Errorf("long prompt = %+v, want the stored %+v", got.LongPrompt, *m.LongPrompt)
 	}
 	if !slices.Equal(got.Backends, m.Backends) || got.MaxContext != m.MaxContext ||
-		got.OutputMicrosPerMTok != m.OutputMicrosPerMTok {
+		got.OutputMicrosPerMTok != m.OutputMicrosPerMTok || got.DisplayName != m.DisplayName {
 		t.Errorf("Model = %+v, want %+v", got, m)
 	}
 	if got.HasAPIKey {

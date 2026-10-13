@@ -46,7 +46,7 @@ import { requestLog } from "./requestlog.js";
 import { setOutcome } from "./logfilters.js";
 import { sessionLog } from "./sessions.js";
 import { modelsCell, summarise } from "./guardrails.js";
-import { openModel, checkModel } from "./models.js";
+import { openModel, checkModel, servedName } from "./models.js";
 import {
   canRevoke,
   confirmRevoke,
@@ -404,7 +404,7 @@ export async function modelDetailView(ctx) {
     title: ctx.param,
     mono: true,
     identity: model
-      ? "serves " + model.backend_model
+      ? "serves " + servedName(model)
       : `not one of ${orgNameOf(ctx)}'s models`,
     scope: { alias: ctx.param },
     hide: { model: true },
@@ -498,7 +498,18 @@ export async function modelDetailView(ctx) {
             facts([
               [
                 "Serves",
-                h("span", { class: "mono muted" }, model.backend_model),
+                model.display_name
+                  ? h(
+                      "span",
+                      {},
+                      model.display_name,
+                      h(
+                        "span",
+                        { class: "mono muted" },
+                        ` - ${model.backend_model}`,
+                      ),
+                    )
+                  : h("span", { class: "mono muted" }, model.backend_model),
               ],
               [
                 "Backends",

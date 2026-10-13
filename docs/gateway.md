@@ -61,6 +61,9 @@ remote endpoint without any developer changing anything.
   on the internet must say where it is. Clients see it on `/v1/models`.
 - `release_date` is the day the model came out, as `YYYY-MM-DD`. A provider
   fills it in for the models it knows. `/v1/models` gives it as `created`.
+- `display_name` is the model's name for people, such as `Claude Haiku 5.5`.
+  A provider fills it in for the models it knows. The panel shows it, and
+  `/v1/models` gives it as `display_name`. Clients still name the alias.
 - An alias is lowercase letters, digits and interior hyphens, because it appears
   in the client configurations `keera connect` prints. A model's alias may also
   hold slashes, to name the provider, as in `anthropic/claude-sonnet-4-5`.

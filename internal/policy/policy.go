@@ -92,6 +92,9 @@ type Model struct {
 	// that provider's own API untranslated, and to fix the few fields OpenAI
 	// refuses. An edit screen reads it to show the provider's values.
 	Provider string `json:"provider,omitempty"`
+	// DisplayName is the model's name for people, such as Claude Haiku 5.5.
+	// Clients name the alias; this is only shown.
+	DisplayName string `json:"display_name,omitempty"`
 	// Description says what the model is for. Clients see it on /v1/models,
 	// and a Router reads it when choosing.
 	Description string `json:"description,omitempty"`

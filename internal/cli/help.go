@@ -304,7 +304,7 @@ var commands = []command{
 			{name: "list", aliases: []string{"ls"}, summary: "the models you can use", flags: []string{"json"}},
 			{name: "add", aliases: []string{"create", "new"}, args: "<alias>", summary: "add a model",
 				flags: []string{"provider", "backend", "product-id", "backend-model", "kind",
-					"description", "max-context", "release-date", "location",
+					"display-name", "description", "max-context", "release-date", "location",
 					"price-in", "price-out", "price-cached", "price-cache-write",
 					"api-key", "subscription", "disabled", "json"},
 				prose: "--subscription makes each caller's own Claude subscription pay. The " +
@@ -321,7 +321,7 @@ var commands = []command{
 				}},
 			{name: "set", aliases: []string{"edit", "update"}, args: "<alias>", summary: "change any of those on an existing model",
 				flags: []string{"provider", "backend", "product-id", "backend-model", "kind",
-					"description", "max-context", "release-date", "location",
+					"display-name", "description", "max-context", "release-date", "location",
 					"price-in", "price-out", "price-cached", "price-cache-write",
 					"api-key", "no-api-key", "subscription", "no-subscription", "json"}},
 			{name: "enable", args: "<alias>", summary: "serve this model", flags: []string{"json"}},

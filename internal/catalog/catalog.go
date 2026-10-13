@@ -32,10 +32,13 @@ type File struct {
 type Model struct {
 	Alias string `yaml:"alias"`
 	Kind  string `yaml:"kind"`
+	// DisplayName is the model's name for people, such as Claude Haiku 5.5.
+	// Clients name the alias; this is only shown.
+	DisplayName string `yaml:"display_name"`
 	// Provider names a hosted endpoint Keera Gateway knows (see `keera model
-	// providers`). It fills in the backend, context window, prices,
-	// description, release date and location. The entry may override any of
-	// them.
+	// providers`). It fills in the backend, context window, prices, display
+	// name, description, release date and location. The entry may override
+	// any of them.
 	Provider string   `yaml:"provider"`
 	Backends []string `yaml:"backends"`
 	// ProductID fills the hole in a per-customer endpoint, such as the product
@@ -154,8 +157,10 @@ func ParseModel(m Model) (policy.Model, error) {
 			"interior hyphens and slashes: it is rendered into the client configurations `keera connect` "+
 			"prints, which quote none of it", m.Alias)
 	}
-	// Trimmed first, so a blank description gets the provider's default.
+	// Trimmed first, so a blank description or name gets the provider's
+	// default.
 	m.Description = strings.TrimSpace(m.Description)
+	m.DisplayName = strings.TrimSpace(m.DisplayName)
 	m.ProductID = strings.TrimSpace(m.ProductID)
 	m.ReleaseDate = strings.TrimSpace(m.ReleaseDate)
 	m.Location = strings.ToLower(strings.TrimSpace(m.Location))
@@ -202,6 +207,7 @@ func ParseModel(m Model) (policy.Model, error) {
 		BackendModel: m.BackendModel,
 		// Kept so an editor can tell which values came from the provider.
 		Provider:                 m.Provider,
+		DisplayName:              m.DisplayName,
 		Description:              m.Description,
 		InputMicrosPerMTok:       deref(m.InputMicrosPerMTok),
 		OutputMicrosPerMTok:      deref(m.OutputMicrosPerMTok),

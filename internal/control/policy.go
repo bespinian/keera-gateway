@@ -603,6 +603,7 @@ func normalizeModel(m *policy.Model) string {
 		m.Location = loc
 	}
 	m.ReleaseDate = strings.TrimSpace(m.ReleaseDate)
+	m.DisplayName = strings.TrimSpace(m.DisplayName)
 	switch {
 	case !policy.ValidLocation(m.Location):
 		return "'location' must be a short lowercase name, such as ch, usa or onprem"

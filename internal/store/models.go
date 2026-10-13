@@ -12,7 +12,7 @@ import (
 
 // The release date is read as text, so an unstated one is simply empty.
 const modelColumns = `SELECT alias, org_id, kind, backends, backend_model, provider,
-	description, input_micros_per_mtok, output_micros_per_mtok, cached_input_micros_per_mtok,
+	display_name, description, input_micros_per_mtok, output_micros_per_mtok, cached_input_micros_per_mtok,
 	cache_write_micros_per_mtok, long_prompt_tokens, long_input_micros_per_mtok,
 	long_output_micros_per_mtok, long_cached_input_micros_per_mtok,
 	long_cache_write_micros_per_mtok, max_context, coalesce(to_char(release_date, 'YYYY-MM-DD'), ''), location,
@@ -24,7 +24,7 @@ func scanModel(r row) (policy.Model, error) {
 		long policy.PriceTier
 	)
 	if err := r.Scan(&m.Alias, &m.OrgID, &m.Kind, &m.Backends, &m.BackendModel, &m.Provider,
-		&m.Description, &m.InputMicrosPerMTok, &m.OutputMicrosPerMTok, &m.CachedInputMicrosPerMTok,
+		&m.DisplayName, &m.Description, &m.InputMicrosPerMTok, &m.OutputMicrosPerMTok, &m.CachedInputMicrosPerMTok,
 		&m.CacheWriteMicrosPerMTok, &long.AboveTokens, &long.InputMicrosPerMTok,
 		&long.OutputMicrosPerMTok, &long.CachedInputMicrosPerMTok,
 		&long.CacheWriteMicrosPerMTok, &m.MaxContext, &m.ReleaseDate, &m.Location, &m.APIKeyCiphertext, &m.Subscription,
@@ -83,12 +83,12 @@ func upsertModel(ctx context.Context, db querier, m policy.Model) error {
 		cached_input_micros_per_mtok, cache_write_micros_per_mtok, long_prompt_tokens,
 		long_input_micros_per_mtok, long_output_micros_per_mtok,
 		long_cached_input_micros_per_mtok, long_cache_write_micros_per_mtok, max_context,
-		release_date, location, subscription, enabled, updated_at)
+		release_date, location, subscription, enabled, display_name, updated_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
-			NULLIF($18, '')::date, $19,$20,$21, now())
+			NULLIF($18, '')::date, $19,$20,$21,$22, now())
 		ON CONFLICT (org_id, alias) DO UPDATE SET kind = EXCLUDED.kind, backends = EXCLUDED.backends,
 			backend_model = EXCLUDED.backend_model, provider = EXCLUDED.provider,
-			description = EXCLUDED.description,
+			display_name = EXCLUDED.display_name, description = EXCLUDED.description,
 			input_micros_per_mtok = EXCLUDED.input_micros_per_mtok,
 			output_micros_per_mtok = EXCLUDED.output_micros_per_mtok,
 			cached_input_micros_per_mtok = EXCLUDED.cached_input_micros_per_mtok,
@@ -106,7 +106,7 @@ func upsertModel(ctx context.Context, db querier, m policy.Model) error {
 		m.CacheWriteMicrosPerMTok, long.AboveTokens, long.InputMicrosPerMTok,
 		long.OutputMicrosPerMTok, long.CachedInputMicrosPerMTok,
 		long.CacheWriteMicrosPerMTok, m.MaxContext,
-		m.ReleaseDate, m.Location, m.Subscription, m.Enabled)
+		m.ReleaseDate, m.Location, m.Subscription, m.Enabled, m.DisplayName)
 	return err
 }
 

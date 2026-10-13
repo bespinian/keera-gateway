@@ -21,8 +21,11 @@ type modelFlags struct {
 	productID    string
 	backendModel string
 	kind         string
+	displayName  string
 	description  string
-	// describe is whether --description was given, so an empty one clears.
+	// named and describe are whether --display-name and --description were
+	// given, so an empty one clears.
+	named          bool
 	describe       bool
 	maxContext     int
 	releaseDate    string
@@ -41,8 +44,8 @@ type modelFlags struct {
 func registerModelFlags(fs *flag.FlagSet) *modelFlags {
 	f := &modelFlags{}
 	fs.StringVar(&f.provider, "provider", "",
-		"hosted provider filling in the endpoint, context window, prices, description, "+
-			"release date and location")
+		"hosted provider filling in the endpoint, context window, prices, display name, "+
+			"description, release date and location")
 	fs.Var(&f.backends, "backend", "an OpenAI-compatible base URL; repeat it for several")
 	fs.StringVar(&f.productID, "product-id", "",
 		"for a provider that serves each customer at their own address, the id its endpoint "+
@@ -50,6 +53,9 @@ func registerModelFlags(fs *flag.FlagSet) *modelFlags {
 	fs.StringVar(&f.backendModel, "backend-model", "",
 		"the name the inference plane serves, which for vLLM is --served-model-name")
 	fs.StringVar(&f.kind, "kind", "", "chat, completion, embedding or decision (default chat)")
+	fs.StringVar(&f.displayName, "display-name", "",
+		"the model's name for people, such as \"Claude Haiku 5.5\" "+
+			"(a --provider model starts with that provider's own)")
 	fs.StringVar(&f.description, "description", "",
 		"what this model is for, in a sentence; clients see it and routers decide on it "+
 			"(a --provider model starts with that provider's own)")
@@ -104,11 +110,13 @@ func applyModelFlags(m catalog.Model, f *modelFlags) catalog.Model {
 		}
 	}
 	if f.backendModel != "" {
-		// Another model has its own release date, and with a provider its own
-		// prices, context window and description, which the provider fills in
-		// again. Without a provider only the date goes: nothing would refill
-		// the prices, and a model with none is billed at nothing.
+		// Another model has its own name and release date, and with a
+		// provider its own prices, context window and description, which the
+		// provider fills in again. Without a provider only the name and date
+		// go: nothing would refill the prices, and a model with none is billed
+		// at nothing.
 		if f.backendModel != m.BackendModel {
+			m.DisplayName = ""
 			m.ReleaseDate = ""
 			if m.Provider != "" {
 				m = clearModelValues(m)
@@ -118,6 +126,9 @@ func applyModelFlags(m catalog.Model, f *modelFlags) catalog.Model {
 	}
 	if f.kind != "" {
 		m.Kind = f.kind
+	}
+	if f.named {
+		m.DisplayName = f.displayName
 	}
 	if f.describe {
 		m.Description = f.description
@@ -151,6 +162,7 @@ func applyModelFlags(m catalog.Model, f *modelFlags) catalog.Model {
 // clearModelValues empties what a provider's table fills in for one model, so
 // the table fills it in again for another.
 func clearModelValues(m catalog.Model) catalog.Model {
+	m.DisplayName = ""
 	m.Description = ""
 	m.ReleaseDate = ""
 	m.InputMicrosPerMTok = nil
@@ -207,6 +219,7 @@ func declared(m policy.Model) catalog.Model {
 		// Kept so changing one field does not drop the provider. Its values are
 		// already filled in, so expanding it again changes nothing.
 		Provider:                 m.Provider,
+		DisplayName:              m.DisplayName,
 		Description:              m.Description,
 		InputMicrosPerMTok:       &in,
 		OutputMicrosPerMTok:      &outPrice,
@@ -239,11 +252,14 @@ func modelCmd(ctx context.Context, args []string) error {
 	r := &modelRun{aliasRun: newAliasRun("model", "models", "model", args)}
 	r.f = registerModelFlags(r.fs)
 	r.fs.BoolVar(&r.f.disabled, "disabled", false, disabledUsage)
+	r.reword("set", "display-name", "the model's name for people; an empty one clears it, "+
+		"or goes back to the provider's")
 	r.reword("set", "description", "what this model is for, in a sentence; an empty one clears it")
 	r.reword("set", "kind", "chat, completion, embedding or decision")
 	if done, err := r.parse(); done {
 		return err
 	}
+	r.f.named = given(r.fs, "display-name")
 	r.f.describe = given(r.fs, "description")
 
 	// These two need no server, so a catalogue can be checked in CI.
@@ -469,10 +485,11 @@ func printProviders(w *table) {
 		// The description goes last: a trailing cell is not padded, so a long
 		// one does not push the other columns out of line.
 		w.header(fmt.Sprintf(
-			"  MODEL\tRELEASED\tCONTEXT\tIN/MTOK\tCACHED/MTOK\tWRITE/MTOK\tOUT/MTOK (%s)\t"+
-				"DESCRIPTION", policy.Currency))
+			"  MODEL\tNAME\tRELEASED\tCONTEXT\tIN/MTOK\tCACHED/MTOK\tWRITE/MTOK\t"+
+				"OUT/MTOK (%s)\tDESCRIPTION", policy.Currency))
 		for _, m := range p.Models {
-			_, _ = fmt.Fprintf(w, "  %s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\n", m.ID, dash(m.ReleaseDate),
+			_, _ = fmt.Fprintf(w, "  %s\t%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\n", m.ID,
+				dash(m.DisplayName), dash(m.ReleaseDate),
 				m.MaxContext,
 				policy.FormatMicros(m.InputMicrosPerMTok),
 				optionalPrice(m.CachedInputMicrosPerMTok),
@@ -488,11 +505,11 @@ func printProviders(w *table) {
 }
 
 func printModels(w *table, models []policy.Model) {
-	w.header("ALIAS\tKIND\tBACKEND MODEL\tPROVIDER\tLOCATION\tRELEASED\t" +
+	w.header("ALIAS\tNAME\tKIND\tBACKEND MODEL\tPROVIDER\tLOCATION\tRELEASED\t" +
 		"IN/MTOK\tCACHED/MTOK\tOUT/MTOK\tSTATUS")
 	for _, m := range models {
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			m.Alias, m.Kind, m.BackendModel, dash(m.Provider), dash(m.Location),
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			m.Alias, dash(m.DisplayName), m.Kind, m.BackendModel, dash(m.Provider), dash(m.Location),
 			dash(m.ReleaseDate),
 			policy.FormatMicros(m.InputMicrosPerMTok), optionalPrice(m.CachedInputMicrosPerMTok),
 			policy.FormatMicros(m.OutputMicrosPerMTok), enabledStatus(m.Enabled))
@@ -527,6 +544,9 @@ func printModel(w *table, m policy.Model) {
 	show(w, "alias", m.Alias)
 	show(w, "kind", m.Kind)
 	show(w, "backend model", m.BackendModel)
+	if m.DisplayName != "" {
+		show(w, "display name", m.DisplayName)
+	}
 	show(w, "backends", strings.Join(m.Backends, ", "))
 	if m.Provider != "" {
 		show(w, "provider", m.Provider)

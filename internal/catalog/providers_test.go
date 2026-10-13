@@ -329,12 +329,18 @@ func TestProviderTableIsUsable(t *testing.T) {
 			seenName[p.Name] = true
 			checkProvider(t, p)
 			seenModel, seenDescription := map[string]bool{}, map[string]bool{}
+			seenDisplayName := map[string]bool{}
 			for _, m := range p.Models {
 				checkProviderModel(t, p, m, seenDescription)
 				if seenModel[m.ID] {
 					t.Errorf("model %q appears twice; the second entry is unreachable", m.ID)
 				}
 				seenModel[m.ID] = true
+				// The panel's model list shows only the name.
+				if seenDisplayName[m.DisplayName] {
+					t.Errorf("%s repeats another model's display name %q", m.ID, m.DisplayName)
+				}
+				seenDisplayName[m.DisplayName] = true
 			}
 		})
 	}
@@ -394,6 +400,9 @@ func checkProviderModel(t *testing.T, p Provider, m ProviderModel, seenDescripti
 			"the two apart", m.ID)
 	}
 	seenDescription[m.Description] = true
+	if m.DisplayName == "" || strings.TrimSpace(m.DisplayName) != m.DisplayName {
+		t.Errorf("%s has no display name, so people see its id", m.ID)
+	}
 	if m.ReleaseDate != "" && !policy.ValidReleaseDate(m.ReleaseDate) {
 		t.Errorf("%s's release date %q is not YYYY-MM-DD", m.ID, m.ReleaseDate)
 	}
@@ -712,6 +721,33 @@ models:
 	}
 	if got := models[1].ReleaseDate; got != "2026-03-01" {
 		t.Errorf("release date = %q, want the declared 2026-03-01", got)
+	}
+}
+
+func TestDisplayNameComesFromTheTable(t *testing.T) {
+	models, err := parseModelFile([]byte(`
+models:
+  - alias: haiku
+    provider: anthropic
+    backend_model: claude-haiku-5-5
+  - alias: dated
+    provider: anthropic
+    backend_model: claude-haiku-4-5-20251001
+  - alias: renamed
+    provider: anthropic
+    backend_model: claude-haiku-5-5
+    display_name: " Haiku "
+  - alias: keera-code
+    backends: ["http://keera-code:8000/v1"]
+    backend_model: keera-code
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	for i, want := range []string{"Claude Haiku 5.5", "Claude Haiku 4.5", "Haiku", ""} {
+		if got := models[i].DisplayName; got != want {
+			t.Errorf("%s: display name = %q, want %q", models[i].Alias, got, want)
+		}
 	}
 }
 

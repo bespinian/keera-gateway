@@ -41,8 +41,10 @@ type Provider struct {
 // ProviderModel is one model the provider serves, with the numbers a catalogue
 // entry would otherwise have to state by hand.
 type ProviderModel struct {
-	ID         string `json:"id"`
-	MaxContext int    `json:"max_context"`
+	ID string `json:"id"`
+	// DisplayName is the model's name for people, such as Claude Haiku 5.5.
+	DisplayName string `json:"display_name"`
+	MaxContext  int    `json:"max_context"`
 	// ReleaseDate is the day the model came out, as YYYY-MM-DD, or empty when
 	// it is not known.
 	ReleaseDate         string `json:"release_date,omitempty"`
@@ -97,20 +99,23 @@ var providers = []Provider{{
 	// how thorough each model is. Where it runs depends on the deployment,
 	// so they do not say.
 	Models: []ProviderModel{{
-		ID: "claude-opus-5-5", MaxContext: 1_000_000, ReleaseDate: "2026-09-22",
+		ID: "claude-opus-5-5", DisplayName: "Claude Opus 5.5",
+		MaxContext: 1_000_000, ReleaseDate: "2026-09-22",
 		InputMicrosPerMTok: 3_680_000, OutputMicrosPerMTok: 18_400_000,
 		CachedInputMicrosPerMTok: 184_000,
 		CacheWriteMicrosPerMTok:  4_600_000,
 		Description: "most capable of its range and the one to reach for " +
 			"first - thorough on long, hard work, at a middling speed",
 	}, {
-		ID: "claude-sonnet-5-5", MaxContext: 1_000_000, ReleaseDate: "2026-09-28",
+		ID: "claude-sonnet-5-5", DisplayName: "Claude Sonnet 5.5",
+		MaxContext: 1_000_000, ReleaseDate: "2026-09-28",
 		InputMicrosPerMTok: 1_840_000, OutputMicrosPerMTok: 9_200_000,
 		CachedInputMicrosPerMTok: 92_000,
 		CacheWriteMicrosPerMTok:  2_300_000,
 		Description:              "capable, quick and mid-priced - the middle option",
 	}, {
-		ID: "claude-haiku-5-5", MaxContext: 1_000_000, ReleaseDate: "2026-10-07",
+		ID: "claude-haiku-5-5", DisplayName: "Claude Haiku 5.5",
+		MaxContext: 1_000_000, ReleaseDate: "2026-10-07",
 		InputMicrosPerMTok: 92_000, OutputMicrosPerMTok: 460_000,
 		CachedInputMicrosPerMTok: 9_200,
 		CacheWriteMicrosPerMTok:  115_000,
@@ -124,20 +129,23 @@ var providers = []Provider{{
 		Description: "fastest, cheapest and lightest of its range - short, " +
 			"simple, high-volume work; five times dearer past 100k tokens",
 	}, {
-		ID: "claude-fable-5-1", MaxContext: 1_000_000, ReleaseDate: "2026-09-01",
+		ID: "claude-fable-5-1", DisplayName: "Claude Fable 5.1",
+		MaxContext: 1_000_000, ReleaseDate: "2026-09-01",
 		InputMicrosPerMTok: 9_200_000, OutputMicrosPerMTok: 46_000_000,
 		CachedInputMicrosPerMTok: 230_000,
 		CacheWriteMicrosPerMTok:  11_500_000,
 		Description:              "powerful, slow and dear, and stronger at prose than at code",
 	}, {
-		ID: "claude-sonnet-5", MaxContext: 1_000_000, ReleaseDate: "2026-06-30",
+		ID: "claude-sonnet-5", DisplayName: "Claude Sonnet 5",
+		MaxContext: 1_000_000, ReleaseDate: "2026-06-30",
 		InputMicrosPerMTok: 1_840_000, OutputMicrosPerMTok: 9_200_000,
 		CachedInputMicrosPerMTok: 184_000,
 		CacheWriteMicrosPerMTok:  2_300_000,
 		Description: "the middle option before claude-sonnet-5-5, at the same " +
 			"price but twice as dear for cached input",
 	}, {
-		ID: "claude-haiku-4-5", Snapshot: "claude-haiku-4-5-20251001",
+		ID: "claude-haiku-4-5", DisplayName: "Claude Haiku 4.5",
+		Snapshot:   "claude-haiku-4-5-20251001",
 		MaxContext: 200_000, ReleaseDate: "2025-10-15",
 		InputMicrosPerMTok: 920_000, OutputMicrosPerMTok: 4_600_000,
 		CachedInputMicrosPerMTok: 92_000,
@@ -145,21 +153,24 @@ var providers = []Provider{{
 		Description: "previous generation's lightest - short, simple work, " +
 			"dearer than claude-haiku-5-5 and over a shorter context",
 	}, {
-		ID: "claude-opus-5", MaxContext: 1_000_000, ReleaseDate: "2026-07-24",
+		ID: "claude-opus-5", DisplayName: "Claude Opus 5",
+		MaxContext: 1_000_000, ReleaseDate: "2026-07-24",
 		InputMicrosPerMTok: 4_600_000, OutputMicrosPerMTok: 23_000_000,
 		CachedInputMicrosPerMTok: 460_000,
 		CacheWriteMicrosPerMTok:  5_750_000,
 		Description: "the powerful one before claude-opus-5-5 - as thorough " +
 			"on hard problems, and dearer than what replaced it",
 	}, {
-		ID: "claude-opus-4-8", MaxContext: 1_000_000, ReleaseDate: "2026-05-28",
+		ID: "claude-opus-4-8", DisplayName: "Claude Opus 4.8",
+		MaxContext: 1_000_000, ReleaseDate: "2026-05-28",
 		InputMicrosPerMTok: 4_600_000, OutputMicrosPerMTok: 23_000_000,
 		CachedInputMicrosPerMTok: 460_000,
 		CacheWriteMicrosPerMTok:  5_750_000,
 		Description: "two generations back, and the most powerful of them - " +
 			"thorough on hard problems, slow and dear",
 	}, {
-		ID: "claude-sonnet-4-6", MaxContext: 1_000_000, ReleaseDate: "2026-02-17",
+		ID: "claude-sonnet-4-6", DisplayName: "Claude Sonnet 4.6",
+		MaxContext: 1_000_000, ReleaseDate: "2026-02-17",
 		InputMicrosPerMTok: 2_760_000, OutputMicrosPerMTok: 13_800_000,
 		CachedInputMicrosPerMTok: 276_000,
 		CacheWriteMicrosPerMTok:  3_450_000,
@@ -176,7 +187,8 @@ var providers = []Provider{{
 	// and a half times as much for output on its newer models. From gpt-5.6
 	// on, a cache write costs a quarter more than input; before, nothing more.
 	Models: []ProviderModel{{
-		ID: "gpt-6-astra", MaxContext: 1_050_000, ReleaseDate: "2026-09-03",
+		ID: "gpt-6-astra", DisplayName: "GPT-6 Astra",
+		MaxContext: 1_050_000, ReleaseDate: "2026-09-03",
 		InputMicrosPerMTok: 9_200_000, OutputMicrosPerMTok: 46_000_000,
 		CachedInputMicrosPerMTok: 920_000,
 		CacheWriteMicrosPerMTok:  11_500_000,
@@ -189,7 +201,8 @@ var providers = []Provider{{
 		Description: "most powerful and dearest here - thorough on the hardest " +
 			"problems, over a million-token context",
 	}, {
-		ID: "gpt-6.1-sol", MaxContext: 1_050_000, ReleaseDate: "2026-09-29",
+		ID: "gpt-6.1-sol", DisplayName: "GPT-6.1 Sol",
+		MaxContext: 1_050_000, ReleaseDate: "2026-09-29",
 		InputMicrosPerMTok: 1_840_000, OutputMicrosPerMTok: 9_200_000,
 		CachedInputMicrosPerMTok: 92_000,
 		CacheWriteMicrosPerMTok:  2_300_000,
@@ -202,7 +215,8 @@ var providers = []Provider{{
 		Description: "nearly as powerful at a fifth of the price - hard code and " +
 			"agent work without the top price",
 	}, {
-		ID: "gpt-6-sol", MaxContext: 1_050_000, ReleaseDate: "2026-09-22",
+		ID: "gpt-6-sol", DisplayName: "GPT-6 Sol",
+		MaxContext: 1_050_000, ReleaseDate: "2026-09-22",
 		InputMicrosPerMTok: 1_840_000, OutputMicrosPerMTok: 9_200_000,
 		CachedInputMicrosPerMTok: 184_000,
 		CacheWriteMicrosPerMTok:  2_300_000,
@@ -215,7 +229,8 @@ var providers = []Provider{{
 		Description: "the version before gpt-6.1-sol at the same price - less " +
 			"accurate on hard work",
 	}, {
-		ID: "gpt-6-luna", MaxContext: 1_050_000, ReleaseDate: "2026-09-22",
+		ID: "gpt-6-luna", DisplayName: "GPT-6 Luna",
+		MaxContext: 1_050_000, ReleaseDate: "2026-09-22",
 		InputMicrosPerMTok: 92_000, OutputMicrosPerMTok: 460_000,
 		CachedInputMicrosPerMTok: 9_200,
 		CacheWriteMicrosPerMTok:  115_000,
@@ -228,7 +243,8 @@ var providers = []Provider{{
 		Description: "fastest, cheapest and lightest here - short, simple, " +
 			"high-volume work over a very long context",
 	}, {
-		ID: "gpt-5.6-sol", MaxContext: 1_050_000, ReleaseDate: "2026-07-09",
+		ID: "gpt-5.6-sol", DisplayName: "GPT-5.6 Sol",
+		MaxContext: 1_050_000, ReleaseDate: "2026-07-09",
 		InputMicrosPerMTok: 3_680_000, OutputMicrosPerMTok: 18_400_000,
 		CachedInputMicrosPerMTok: 368_000,
 		CacheWriteMicrosPerMTok:  4_600_000,
@@ -241,7 +257,8 @@ var providers = []Provider{{
 		Description: "previous generation's most powerful - hard work, at twice " +
 			"the price of gpt-6.1-sol",
 	}, {
-		ID: "gpt-5.6-terra", MaxContext: 1_050_000, ReleaseDate: "2026-07-09",
+		ID: "gpt-5.6-terra", DisplayName: "GPT-5.6 Terra",
+		MaxContext: 1_050_000, ReleaseDate: "2026-07-09",
 		InputMicrosPerMTok: 1_840_000, OutputMicrosPerMTok: 11_040_000,
 		CachedInputMicrosPerMTok: 184_000,
 		CacheWriteMicrosPerMTok:  2_300_000,
@@ -254,7 +271,8 @@ var providers = []Provider{{
 		Description: "previous generation's middle option - capable, quick enough " +
 			"and mid-priced",
 	}, {
-		ID: "gpt-5.6-luna", MaxContext: 1_050_000, ReleaseDate: "2026-07-09",
+		ID: "gpt-5.6-luna", DisplayName: "GPT-5.6 Luna",
+		MaxContext: 1_050_000, ReleaseDate: "2026-07-09",
 		InputMicrosPerMTok: 184_000, OutputMicrosPerMTok: 1_104_000,
 		CachedInputMicrosPerMTok: 18_400,
 		CacheWriteMicrosPerMTok:  230_000,
@@ -267,7 +285,8 @@ var providers = []Provider{{
 		Description: "previous generation's lightest - short, simple work, at " +
 			"twice the price of gpt-6-luna",
 	}, {
-		ID: "gpt-5.5", MaxContext: 1_050_000, ReleaseDate: "2026-04-24",
+		ID: "gpt-5.5", DisplayName: "GPT-5.5",
+		MaxContext: 1_050_000, ReleaseDate: "2026-04-24",
 		InputMicrosPerMTok: 4_600_000, OutputMicrosPerMTok: 27_600_000,
 		CachedInputMicrosPerMTok: 460_000,
 		LongPrompt: &policy.PriceTier{
@@ -277,7 +296,8 @@ var providers = []Provider{{
 		},
 		Description: "older top model - thorough on hard problems, slow and dear",
 	}, {
-		ID: "gpt-5.4", MaxContext: 1_050_000, ReleaseDate: "2026-03-05",
+		ID: "gpt-5.4", DisplayName: "GPT-5.4",
+		MaxContext: 1_050_000, ReleaseDate: "2026-03-05",
 		InputMicrosPerMTok: 2_300_000, OutputMicrosPerMTok: 13_800_000,
 		CachedInputMicrosPerMTok: 230_000,
 		LongPrompt: &policy.PriceTier{
@@ -287,45 +307,53 @@ var providers = []Provider{{
 		},
 		Description: "older middle option - capable and mid-priced",
 	}, {
-		ID: "gpt-5.4-mini", MaxContext: 400_000, ReleaseDate: "2026-03-17",
+		ID: "gpt-5.4-mini", DisplayName: "GPT-5.4 mini",
+		MaxContext: 400_000, ReleaseDate: "2026-03-17",
 		InputMicrosPerMTok: 690_000, OutputMicrosPerMTok: 4_140_000,
 		CachedInputMicrosPerMTok: 69_000,
 		Description: "middling power, quick and cheap - some reasoning, without " +
 			"the flagship's price",
 	}, {
-		ID: "gpt-5.4-nano", MaxContext: 400_000, ReleaseDate: "2026-03-17",
+		ID: "gpt-5.4-nano", DisplayName: "GPT-5.4 nano",
+		MaxContext: 400_000, ReleaseDate: "2026-03-17",
 		InputMicrosPerMTok: 184_000, OutputMicrosPerMTok: 1_150_000,
 		CachedInputMicrosPerMTok: 18_400,
 		Description:              "fast, cheap and light - short, simple, high-volume work",
 	}, {
-		ID: "gpt-5.2", MaxContext: 400_000, ReleaseDate: "2025-12-11",
+		ID: "gpt-5.2", DisplayName: "GPT-5.2",
+		MaxContext: 400_000, ReleaseDate: "2025-12-11",
 		InputMicrosPerMTok: 1_610_000, OutputMicrosPerMTok: 12_880_000,
 		CachedInputMicrosPerMTok: 161_000,
 		Description:              "older mid-range model - capable, slow and mid-priced",
 	}, {
-		ID: "gpt-5.1", MaxContext: 400_000, ReleaseDate: "2025-11-13",
+		ID: "gpt-5.1", DisplayName: "GPT-5.1",
+		MaxContext: 400_000, ReleaseDate: "2025-11-13",
 		InputMicrosPerMTok: 1_150_000, OutputMicrosPerMTok: 9_200_000,
 		CachedInputMicrosPerMTok: 115_000,
 		Description: "older flagship - slow and thorough, and it reasons at " +
 			"length before answering",
 	}, {
-		ID: "gpt-4.1", MaxContext: 1_047_576, ReleaseDate: "2025-04-14",
+		ID: "gpt-4.1", DisplayName: "GPT-4.1",
+		MaxContext: 1_047_576, ReleaseDate: "2025-04-14",
 		InputMicrosPerMTok: 1_840_000, OutputMicrosPerMTok: 7_360_000,
 		CachedInputMicrosPerMTok: 460_000,
 		Description: "capable, quick and mid-priced, answering without reasoning " +
 			"first, over very long inputs",
 	}, {
-		ID: "gpt-4.1-mini", MaxContext: 1_047_576, ReleaseDate: "2025-04-14",
+		ID: "gpt-4.1-mini", DisplayName: "GPT-4.1 mini",
+		MaxContext: 1_047_576, ReleaseDate: "2025-04-14",
 		InputMicrosPerMTok: 368_000, OutputMicrosPerMTok: 1_472_000,
 		CachedInputMicrosPerMTok: 92_000,
 		Description:              "light, quick and cheap, over very long inputs",
 	}, {
-		ID: "gpt-4o", MaxContext: 128_000, ReleaseDate: "2024-05-13",
+		ID: "gpt-4o", DisplayName: "GPT-4o",
+		MaxContext: 128_000, ReleaseDate: "2024-05-13",
 		InputMicrosPerMTok: 2_300_000, OutputMicrosPerMTok: 9_200_000,
 		CachedInputMicrosPerMTok: 1_150_000,
 		Description:              "middling power, quick and no reasoning step - ordinary work",
 	}, {
-		ID: "gpt-4o-mini", MaxContext: 128_000, ReleaseDate: "2024-07-18",
+		ID: "gpt-4o-mini", DisplayName: "GPT-4o mini",
+		MaxContext: 128_000, ReleaseDate: "2024-07-18",
 		InputMicrosPerMTok: 138_000, OutputMicrosPerMTok: 552_000,
 		CachedInputMicrosPerMTok: 69_000,
 		Description:              "fast, cheap and light - short, simple work",
@@ -340,37 +368,44 @@ var providers = []Provider{{
 	Kinds:          []policy.Kind{policy.KindChat},
 	// Ids are the upstream names, capitals and all, as the endpoint expects.
 	Models: []ProviderModel{{
-		ID: "Qwen/Qwen3.5-397B-A17B-FP8", MaxContext: 200_000, ReleaseDate: "2026-02-16",
+		ID: "Qwen/Qwen3.5-397B-A17B-FP8", DisplayName: "Qwen3.5 397B A17B FP8",
+		MaxContext: 200_000, ReleaseDate: "2026-02-16",
 		InputMicrosPerMTok: 800_000, OutputMicrosPerMTok: 3_600_000,
 		Description: "the most powerful here - hard reasoning, planning and " +
 			"tool use, and the dearest",
 	}, {
-		ID: "Qwen/Qwen3.5-122B-A10B-FP8", MaxContext: 200_000, ReleaseDate: "2026-02-24",
+		ID: "Qwen/Qwen3.5-122B-A10B-FP8", DisplayName: "Qwen3.5 122B A10B FP8",
+		MaxContext: 200_000, ReleaseDate: "2026-02-24",
 		InputMicrosPerMTok: 400_000, OutputMicrosPerMTok: 3_200_000,
 		Description: "nearly as capable, quicker and cheaper - long-context " +
 			"reasoning without the top price",
 	}, {
-		ID: "moonshotai/Kimi-K2.6", MaxContext: 256_000, ReleaseDate: "2026-04-20",
+		ID: "moonshotai/Kimi-K2.6", DisplayName: "Kimi K2.6",
+		MaxContext: 256_000, ReleaseDate: "2026-04-20",
 		InputMicrosPerMTok: 600_000, OutputMicrosPerMTok: 3_000_000,
 		Description: "strongest here at code and agent work, mid-priced, over a " +
 			"very long context",
 	}, {
-		ID: "mistralai/Mistral-Small-4-119B-2603", MaxContext: 256_000, ReleaseDate: "2026-03-16",
+		ID: "mistralai/Mistral-Small-4-119B-2603", DisplayName: "Mistral Small 4",
+		MaxContext: 256_000, ReleaseDate: "2026-03-16",
 		InputMicrosPerMTok: 200_000, OutputMicrosPerMTok: 750_000,
 		Description: "capable and cheap, over a long context - plain " +
 			"instructions or longer reasoning",
 	}, {
-		ID: "swiss-ai/Apertus-v1.5-70B", MaxContext: 100_000, ReleaseDate: "2026-07-24",
+		ID: "swiss-ai/Apertus-v1.5-70B", DisplayName: "Apertus v1.5 70B",
+		MaxContext: 100_000, ReleaseDate: "2026-07-24",
 		InputMicrosPerMTok: 700_000, OutputMicrosPerMTok: 2_500_000,
 		Description: "middling power and mid-priced, with open weights and open " +
 			"training data - auditable work",
 	}, {
-		ID: "google/gemma-4-31B-it", MaxContext: 100_000, ReleaseDate: "2026-04-02",
+		ID: "google/gemma-4-31B-it", DisplayName: "Gemma 4 31B",
+		MaxContext: 100_000, ReleaseDate: "2026-04-02",
 		InputMicrosPerMTok: 200_000, OutputMicrosPerMTok: 400_000,
 		Description: "middling power, quick and cheap - document analysis, " +
 			"chatbots and ordinary code",
 	}, {
-		ID: "mistralai/Ministral-3-14B-Instruct-2512", MaxContext: 100_000, ReleaseDate: "2025-12-02",
+		ID: "mistralai/Ministral-3-14B-Instruct-2512", DisplayName: "Ministral 3 14B",
+		MaxContext: 100_000, ReleaseDate: "2025-12-02",
 		InputMicrosPerMTok: 300_000, OutputMicrosPerMTok: 400_000,
 		Description: "small, quick and cheap - chatbots, short edits and " +
 			"everyday questions",
@@ -386,77 +421,90 @@ var providers = []Provider{{
 	// The Nemotron id is spelled as stepping stone's own documentation calls
 	// it, with NVIDIA in capitals.
 	Models: []ProviderModel{{
-		ID: "MiniMaxAI/MiniMax-M2.5", MaxContext: 192_000, ReleaseDate: "2026-02-12",
+		ID: "MiniMaxAI/MiniMax-M2.5", DisplayName: "MiniMax M2.5",
+		MaxContext: 192_000, ReleaseDate: "2026-02-12",
 		InputMicrosPerMTok: 1_940_000, OutputMicrosPerMTok: 9_700_000,
 		CachedInputMicrosPerMTok: 291_000,
 		Description: "the most capable and dearest here - long code and agent " +
 			"tasks that need many steps",
 	}, {
-		ID: "NVIDIA/NVIDIA-Nemotron-3-Super-120B-A12B", MaxContext: 128_000, ReleaseDate: "2026-03-11",
+		ID: "NVIDIA/NVIDIA-Nemotron-3-Super-120B-A12B", DisplayName: "Nemotron 3 Super",
+		MaxContext: 128_000, ReleaseDate: "2026-03-11",
 		InputMicrosPerMTok: 2_000_000, OutputMicrosPerMTok: 5_000_000,
 		CachedInputMicrosPerMTok: 300_000,
 		Description: "large reasoning model with the highest input price here - " +
 			"hard problems over a mid-length context",
 	}, {
-		ID: "deepseek-ai/DeepSeek-V4-Flash-0731", MaxContext: 512_000, ReleaseDate: "2026-07-31",
+		ID: "deepseek-ai/DeepSeek-V4-Flash-0731", DisplayName: "DeepSeek V4 Flash",
+		MaxContext: 512_000, ReleaseDate: "2026-07-31",
 		InputMicrosPerMTok: 450_000, OutputMicrosPerMTok: 1_800_000,
 		CachedInputMicrosPerMTok: 67_500,
 		Description: "capable, quick and cheap, over the longest context here - " +
 			"large codebases and long documents",
 	}, {
-		ID: "Qwen/Qwen3-Coder-Next", MaxContext: 256_000, ReleaseDate: "2026-02-03",
+		ID: "Qwen/Qwen3-Coder-Next", DisplayName: "Qwen3 Coder Next",
+		MaxContext: 256_000, ReleaseDate: "2026-02-03",
 		InputMicrosPerMTok: 340_000, OutputMicrosPerMTok: 1_700_000,
 		CachedInputMicrosPerMTok: 51_000,
 		Description: "made for code - quick and cheap at edits, code questions " +
 			"and agent tool calls",
 	}, {
-		ID: "zai-org/GLM-5.3-Flash", MaxContext: 256_000, ReleaseDate: "2026-08-26",
+		ID: "zai-org/GLM-5.3-Flash", DisplayName: "GLM-5.3 Flash",
+		MaxContext: 256_000, ReleaseDate: "2026-08-26",
 		InputMicrosPerMTok: 300_000, OutputMicrosPerMTok: 1_500_000,
 		CachedInputMicrosPerMTok: 45_000,
 		Description: "quick and cheap all-rounder over a long context - code, " +
 			"reasoning and tool use",
 	}, {
-		ID: "openai/gpt-oss-120b", MaxContext: 128_000, ReleaseDate: "2025-08-05",
+		ID: "openai/gpt-oss-120b", DisplayName: "gpt-oss-120b",
+		MaxContext: 128_000, ReleaseDate: "2025-08-05",
 		InputMicrosPerMTok: 400_000, OutputMicrosPerMTok: 1_600_000,
 		CachedInputMicrosPerMTok: 60_000,
 		Description: "middling power, quick and cheap, and reasons before it " +
 			"answers - everyday work and tool use",
 	}, {
-		ID: "Qwen/Qwen3.8-27B", MaxContext: 256_000, ReleaseDate: "2026-08-14",
+		ID: "Qwen/Qwen3.8-27B", DisplayName: "Qwen3.8 27B",
+		MaxContext: 256_000, ReleaseDate: "2026-08-14",
 		InputMicrosPerMTok: 250_000, OutputMicrosPerMTok: 1_500_000,
 		CachedInputMicrosPerMTok: 37_500,
 		Description: "small and cheap, capable for its size - ordinary code and " +
 			"questions over a long context",
 	}, {
-		ID: "google/gemma-4-31B-it", MaxContext: 160_000, ReleaseDate: "2026-04-02",
+		ID: "google/gemma-4-31B-it", DisplayName: "Gemma 4 31B",
+		MaxContext: 160_000, ReleaseDate: "2026-04-02",
 		InputMicrosPerMTok: 250_000, OutputMicrosPerMTok: 1_000_000,
 		CachedInputMicrosPerMTok: 37_500,
 		Description: "middling power, quick and cheap - document analysis, " +
 			"chatbots and ordinary code",
 	}, {
-		ID: "Qwen/Qwen3.5-35B-A3B-FP8", MaxContext: 128_000, ReleaseDate: "2026-02-24",
+		ID: "Qwen/Qwen3.5-35B-A3B-FP8", DisplayName: "Qwen3.5 35B A3B FP8",
+		MaxContext: 128_000, ReleaseDate: "2026-02-24",
 		InputMicrosPerMTok: 170_000, OutputMicrosPerMTok: 1_000_000,
 		CachedInputMicrosPerMTok: 25_500,
 		Description:              "fast and cheap, light on reasoning - high-volume, simple work",
 	}, {
-		ID: "apertus-ai/Apertus-v1.5-8B", MaxContext: 128_000, ReleaseDate: "2026-07-24",
+		ID: "apertus-ai/Apertus-v1.5-8B", DisplayName: "Apertus v1.5 8B",
+		MaxContext: 128_000, ReleaseDate: "2026-07-24",
 		InputMicrosPerMTok: 120_000, OutputMicrosPerMTok: 580_000,
 		CachedInputMicrosPerMTok: 3_000,
 		Description: "the smallest and cheapest chat model here, with open weights " +
 			"and open training data - simple work",
 	}, {
-		ID: "allenai/olmOCR-2-7B", MaxContext: 8_000, ReleaseDate: "2025-10-22",
+		ID: "allenai/olmOCR-2-7B", DisplayName: "olmOCR 2",
+		MaxContext: 8_000, ReleaseDate: "2025-10-22",
 		InputMicrosPerMTok: 60_000, OutputMicrosPerMTok: 290_000,
 		CachedInputMicrosPerMTok: 9_000,
 		Description:              "OCR: turns images of pages into text - not for chat or code",
 	}, {
-		ID: "lightonai/LightOnOCR-2-1B", MaxContext: 16_000, ReleaseDate: "2026-01-19",
+		ID: "lightonai/LightOnOCR-2-1B", DisplayName: "LightOnOCR 2",
+		MaxContext: 16_000, ReleaseDate: "2026-01-19",
 		InputMicrosPerMTok: 20_000, OutputMicrosPerMTok: 60_000,
 		CachedInputMicrosPerMTok: 3_000,
 		Description: "small, fast OCR: reads the text off images of pages - not " +
 			"for chat or code",
 	}, {
-		ID: "opendatalab/MinerU2.5-2509-1.2B", MaxContext: 16_000, ReleaseDate: "2025-09-19",
+		ID: "opendatalab/MinerU2.5-2509-1.2B", DisplayName: "MinerU 2.5",
+		MaxContext: 16_000, ReleaseDate: "2025-09-19",
 		InputMicrosPerMTok: 20_000, OutputMicrosPerMTok: 60_000,
 		CachedInputMicrosPerMTok: 3_000,
 		Description: "document parsing: turns images of pages into text, tables " +
@@ -473,80 +521,96 @@ var providers = []Provider{{
 	// served on 2026-10-08: GLM-5.2 for inference-glm5, GLM-5.3-Flash for
 	// inference-glm5-flash and MinerU2.5-Pro-2605 for inference-miner-u25.
 	Models: []ProviderModel{{
-		ID: "inference-glm5", MaxContext: 131_072, ReleaseDate: "2026-08-28",
+		ID: "inference-glm5", DisplayName: "GLM-5",
+		MaxContext: 131_072, ReleaseDate: "2026-08-28",
 		InputMicrosPerMTok: 1_077_000, OutputMicrosPerMTok: 3_386_000,
 		Description: "the most capable and dearest here - long agent sessions, " +
 			"hard code and terminal work",
 	}, {
-		ID: "inference-deepseek-v32", MaxContext: 163_840, ReleaseDate: "2025-12-01",
+		ID: "inference-deepseek-v32", DisplayName: "DeepSeek V3.2",
+		MaxContext: 163_840, ReleaseDate: "2025-12-01",
 		InputMicrosPerMTok: 615_600, OutputMicrosPerMTok: 1_846_900,
 		Description: "large reasoning model, mid-priced - hard questions and " +
 			"planning over a long context",
 	}, {
-		ID: "inference-qwen3-vl-235b", MaxContext: 128_000, ReleaseDate: "2025-09-23",
+		ID: "inference-qwen3-vl-235b", DisplayName: "Qwen3 VL 235B",
+		MaxContext: 128_000, ReleaseDate: "2025-09-23",
 		InputMicrosPerMTok: 700_300, OutputMicrosPerMTok: 2_000_000,
 		Description: "large and mid-priced, and reads images as well as text - " +
 			"screenshots, diagrams and scans",
 	}, {
-		ID: "inference-deepseek-v4-flash", MaxContext: 1_000_000, ReleaseDate: "2026-07-31",
+		ID: "inference-deepseek-v4-flash", DisplayName: "DeepSeek V4 Flash",
+		MaxContext: 1_000_000, ReleaseDate: "2026-07-31",
 		InputMicrosPerMTok: 146_200, OutputMicrosPerMTok: 392_500,
 		Description: "capable, quick and cheap, over a million-token context - " +
 			"large codebases and long documents",
 	}, {
-		ID: "inference-glm5-flash", MaxContext: 1_000_000, ReleaseDate: "2026-08-26",
+		ID: "inference-glm5-flash", DisplayName: "GLM-5 Flash",
+		MaxContext: 1_000_000, ReleaseDate: "2026-08-26",
 		InputMicrosPerMTok: 123_000, OutputMicrosPerMTok: 410_000,
 		Description: "quick and cheap all-rounder over a million-token context - " +
 			"code, reasoning and tool use",
 	}, {
-		ID: "inference-apertus-v15-70b", MaxContext: 262_144, ReleaseDate: "2026-07-24",
+		ID: "inference-apertus-v15-70b", DisplayName: "Apertus v1.5 70B",
+		MaxContext: 262_144, ReleaseDate: "2026-07-24",
 		InputMicrosPerMTok: 619_500, OutputMicrosPerMTok: 2_220_100,
 		Description: "middling power and mid-priced, with open weights and open " +
 			"training data - auditable work",
 	}, {
-		ID: "inference-gpt-oss-120b", MaxContext: 131_072, ReleaseDate: "2025-08-05",
+		ID: "inference-gpt-oss-120b", DisplayName: "gpt-oss-120b",
+		MaxContext: 131_072, ReleaseDate: "2025-08-05",
 		InputMicrosPerMTok: 115_400, OutputMicrosPerMTok: 461_700,
 		Description: "middling power, quick and cheap, and reasons before it " +
 			"answers - everyday work and tool use",
 	}, {
-		ID: "inference-llama4-maverick", MaxContext: 1_048_576, ReleaseDate: "2025-04-05",
+		ID: "inference-llama4-maverick", DisplayName: "Llama 4 Maverick",
+		MaxContext: 1_048_576, ReleaseDate: "2025-04-05",
 		InputMicrosPerMTok: 269_300, OutputMicrosPerMTok: 1_077_300,
 		Description: "middling power and cheap, reads up to four images a prompt, " +
 			"over a million-token context",
 	}, {
-		ID: "inference-gemma4-31b", MaxContext: 131_072, ReleaseDate: "2026-04-02",
+		ID: "inference-gemma4-31b", DisplayName: "Gemma 4 31B",
+		MaxContext: 131_072, ReleaseDate: "2026-04-02",
 		InputMicrosPerMTok: 118_000, OutputMicrosPerMTok: 325_000,
 		Description: "middling power, quick and cheap, reads images too - " +
 			"documents, chatbots and ordinary code",
 	}, {
-		ID: "inference-llama4-scout-17b", MaxContext: 62_256, ReleaseDate: "2025-04-05",
+		ID: "inference-llama4-scout-17b", DisplayName: "Llama 4 Scout",
+		MaxContext: 62_256, ReleaseDate: "2025-04-05",
 		InputMicrosPerMTok: 192_400, OutputMicrosPerMTok: 638_700,
 		Description: "light, quick and cheap, reads images too, over a short context",
 	}, {
-		ID: "inference-qwq-32b", MaxContext: 32_768, ReleaseDate: "2025-03-06",
+		ID: "inference-qwq-32b", DisplayName: "QwQ 32B",
+		MaxContext: 32_768, ReleaseDate: "2025-03-06",
 		InputMicrosPerMTok: 923_400, OutputMicrosPerMTok: 923_400,
 		Description: "older reasoning model that thinks at length over a short " +
 			"context - dear for what it does",
 	}, {
-		ID: "inference-qwen3-8b", MaxContext: 40_960, ReleaseDate: "2025-04-29",
+		ID: "inference-qwen3-8b", DisplayName: "Qwen3 8B",
+		MaxContext: 40_960, ReleaseDate: "2025-04-29",
 		InputMicrosPerMTok: 26_900, OutputMicrosPerMTok: 106_200,
 		Description: "the cheapest chat model here, small and quick, with a " +
 			"thinking mode - simple work",
 	}, {
-		ID: "inference-granite-33-8b", MaxContext: 32_768, ReleaseDate: "2025-04-16",
+		ID: "inference-granite-33-8b", DisplayName: "Granite 3.3 8B",
+		MaxContext: 32_768, ReleaseDate: "2025-04-16",
 		InputMicrosPerMTok: 153_900, OutputMicrosPerMTok: 153_900,
 		Description: "small and cheap, follows plain instructions - short, simple tasks",
 	}, {
-		ID: "inference-mistral-v03-7b", MaxContext: 32_768, ReleaseDate: "2024-05-22",
+		ID: "inference-mistral-v03-7b", DisplayName: "Mistral 7B v0.3",
+		MaxContext: 32_768, ReleaseDate: "2024-05-22",
 		InputMicrosPerMTok: 153_900, OutputMicrosPerMTok: 153_900,
 		Description: "small, old and cheap, for chat in many languages - short, " +
 			"simple tasks",
 	}, {
-		ID: "inference-granite-vision-2b", MaxContext: 8_192, ReleaseDate: "2025-02-26",
+		ID: "inference-granite-vision-2b", DisplayName: "Granite Vision 3.2 2B",
+		MaxContext: 8_192, ReleaseDate: "2025-02-26",
 		InputMicrosPerMTok: 77_000, OutputMicrosPerMTok: 77_000,
 		Description: "tiny vision model: describes images and reads charts - not " +
 			"for chat or code",
 	}, {
-		ID: "inference-miner-u25", MaxContext: 8_192, ReleaseDate: "2026-05-21",
+		ID: "inference-miner-u25", DisplayName: "MinerU 2.5",
+		MaxContext: 8_192, ReleaseDate: "2026-05-21",
 		InputMicrosPerMTok: 380_000, OutputMicrosPerMTok: 230_000,
 		Description: "document parsing: turns images of pages into text, tables " +
 			"and formulas - not for chat or code",
@@ -561,52 +625,62 @@ var providers = []Provider{{
 	// A -thinking id is the same weights with reasoning on and tool calls off,
 	// so it keeps the release date of its model.
 	Models: []ProviderModel{{
-		ID: "moonshotai/Kimi-K2.7-Code", MaxContext: 262_144, ReleaseDate: "2026-06-12",
+		ID: "moonshotai/Kimi-K2.7-Code", DisplayName: "Kimi K2.7 Code",
+		MaxContext: 262_144, ReleaseDate: "2026-06-12",
 		InputMicrosPerMTok: 1_300_000, OutputMicrosPerMTok: 6_050_000,
 		Description: "made for code and the one to reach for first - long agent " +
 			"sessions over many files, reads images too",
 	}, {
-		ID: "zai-org/GLM-5.2", MaxContext: 976_000, ReleaseDate: "2026-08-28",
+		ID: "zai-org/GLM-5.2", DisplayName: "GLM-5.2",
+		MaxContext: 976_000, ReleaseDate: "2026-08-28",
 		InputMicrosPerMTok: 6_360_000, OutputMicrosPerMTok: 27_310_000,
 		Description: "capable all-rounder over the longest context here, and by " +
 			"far the dearest - about five times Kimi's price",
 	}, {
-		ID: "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16", MaxContext: 262_144, ReleaseDate: "2026-03-11",
+		ID: "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16", DisplayName: "Nemotron 3 Super BF16",
+		MaxContext: 262_144, ReleaseDate: "2026-03-11",
 		InputMicrosPerMTok: 300_000, OutputMicrosPerMTok: 1_490_000,
 		Description: "large reasoning model, quick and cheap - hard questions and " +
 			"tool use over a long context",
 	}, {
-		ID: "google/gemma-4-31B-it", MaxContext: 262_144, ReleaseDate: "2026-04-02",
+		ID: "google/gemma-4-31B-it", DisplayName: "Gemma 4 31B",
+		MaxContext: 262_144, ReleaseDate: "2026-04-02",
 		InputMicrosPerMTok: 60_000, OutputMicrosPerMTok: 420_000,
 		Description: "middling power, quick and very cheap, reads images too - " +
 			"documents, chatbots and ordinary code",
 	}, {
-		ID: "swiss-ai/Apertus-v1.5-70B", MaxContext: 262_144, ReleaseDate: "2026-07-24",
+		ID: "swiss-ai/Apertus-v1.5-70B", DisplayName: "Apertus v1.5 70B",
+		MaxContext: 262_144, ReleaseDate: "2026-07-24",
 		InputMicrosPerMTok: 60_000, OutputMicrosPerMTok: 400_000,
 		Description: "middling power and very cheap, with open weights and open " +
 			"training data - auditable work",
 	}, {
-		ID: "swiss-ai/Apertus-v1.5-70B-thinking", MaxContext: 262_144, ReleaseDate: "2026-07-24",
+		ID: "swiss-ai/Apertus-v1.5-70B-thinking", DisplayName: "Apertus v1.5 70B Thinking",
+		MaxContext: 262_144, ReleaseDate: "2026-07-24",
 		InputMicrosPerMTok: 60_000, OutputMicrosPerMTok: 400_000,
 		Description: "Apertus-v1.5-70B reasoning before it answers, with no tool " +
 			"calls - hard questions, not agents",
 	}, {
-		ID: "swiss-ai/Apertus-v1.5-8B", MaxContext: 262_144, ReleaseDate: "2026-07-24",
+		ID: "swiss-ai/Apertus-v1.5-8B", DisplayName: "Apertus v1.5 8B",
+		MaxContext: 262_144, ReleaseDate: "2026-07-24",
 		InputMicrosPerMTok: 10_000, OutputMicrosPerMTok: 40_000,
 		Description: "the smallest and cheapest here, with open weights and open " +
 			"training data - simple work",
 	}, {
-		ID: "swiss-ai/Apertus-v1.5-8B-thinking", MaxContext: 262_144, ReleaseDate: "2026-07-24",
+		ID: "swiss-ai/Apertus-v1.5-8B-thinking", DisplayName: "Apertus v1.5 8B Thinking",
+		MaxContext: 262_144, ReleaseDate: "2026-07-24",
 		InputMicrosPerMTok: 10_000, OutputMicrosPerMTok: 40_000,
 		Description: "Apertus-v1.5-8B reasoning before it answers, with no tool " +
 			"calls - simple questions, not agents",
 	}, {
-		ID: "swiss-ai/Apertus-70B-Instruct-2509", MaxContext: 64_000, ReleaseDate: "2025-09-02",
+		ID: "swiss-ai/Apertus-70B-Instruct-2509", DisplayName: "Apertus 70B",
+		MaxContext: 64_000, ReleaseDate: "2025-09-02",
 		InputMicrosPerMTok: 60_000, OutputMicrosPerMTok: 400_000,
 		Description: "previous Apertus at the price of Apertus-v1.5-70B, over a " +
 			"shorter context - weaker at tool use",
 	}, {
-		ID: "swiss-ai/Apertus-8B-Instruct-2509", MaxContext: 32_768, ReleaseDate: "2025-09-02",
+		ID: "swiss-ai/Apertus-8B-Instruct-2509", DisplayName: "Apertus 8B",
+		MaxContext: 32_768, ReleaseDate: "2025-09-02",
 		InputMicrosPerMTok: 10_000, OutputMicrosPerMTok: 40_000,
 		Description: "previous small Apertus at the price of Apertus-v1.5-8B, " +
 			"over a short context",
@@ -796,6 +870,9 @@ func fillFromTable(m Model, known ProviderModel) Model {
 	}
 	if m.Description == "" {
 		m.Description = known.Description
+	}
+	if m.DisplayName == "" {
+		m.DisplayName = known.DisplayName
 	}
 	if m.ReleaseDate == "" {
 		m.ReleaseDate = known.ReleaseDate
