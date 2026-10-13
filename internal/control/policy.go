@@ -419,8 +419,9 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 	m := body.Model
 	m.Alias = r.PathValue("alias")
 	m.OrgID = orgID
-	if !policy.ValidAlias(m.Alias) {
-		badRequest(w, badAlias(m.Alias))
+	if !policy.ValidModelAlias(m.Alias) {
+		badRequest(w, "'"+m.Alias+"' is not a usable alias; use lowercase letters, digits, "+
+			"inner hyphens and slashes, such as 'anthropic/claude-sonnet-4-5'")
 		return
 	}
 	credential := ""

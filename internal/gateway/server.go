@@ -252,7 +252,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET "+httpx.InferencePrefix+"/mcp/{alias}", s.mcpForward)
 	mux.HandleFunc("DELETE "+httpx.InferencePrefix+"/mcp/{alias}", s.mcpForward)
 	mux.HandleFunc("GET "+httpx.InferencePrefix+"/v1/models", s.listModels)
-	mux.HandleFunc("GET "+httpx.InferencePrefix+"/v1/models/{alias}", s.getModel)
+	// The rest of the path, because a model alias may hold a slash, as in
+	// "anthropic/claude-sonnet-4-5", and not every client escapes it.
+	mux.HandleFunc("GET "+httpx.InferencePrefix+"/v1/models/{alias...}", s.getModel)
 	// A warm-up probe some Anthropic-shaped clients send. The path is doubled
 	// because the client appends /api/hello to a base URL that already ends
 	// in /api. Answering it keeps a meaningless 404 out of the access log.

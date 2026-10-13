@@ -1478,6 +1478,21 @@ export function aliasProblem(alias) {
   return nameProblem(alias, 64, "An alias");
 }
 
+/** modelAliasProblem is aliasProblem for a model, which may also carry its
+ *  provider's name, as in "anthropic/claude-sonnet-4-5". It mirrors
+ *  policy.ValidModelAlias: each part between slashes has the alias shape. */
+export function modelAliasProblem(alias) {
+  if (!alias) return "An alias is required. It is the name clients use.";
+  if (alias.length > 64) return "An alias is at most 64 characters.";
+  if (alias.split("/").some((part) => nameProblem(part, 64, "An alias"))) {
+    return (
+      "Use only lowercase letters, digits, hyphens and slashes, as in " +
+      "anthropic/claude-sonnet-4-5. A part cannot start or end with a hyphen."
+    );
+  }
+  return "";
+}
+
 /** takenProblem refuses an alias the organisation already has. Saving is a
  *  PUT, which replaces what is there, so without it "add" would quietly
  *  overwrite the entry of that name. The CLI refuses the same way. */

@@ -21,7 +21,7 @@ import {
   rowLink,
   providerMark,
   showError,
-  aliasProblem,
+  modelAliasProblem,
   takenProblem,
   locationName,
   releaseDay,
@@ -1468,7 +1468,7 @@ function editModel(ctx, existing, providers, pick) {
           );
           return;
         }
-        const problem = aliasProblem(alias.value.trim());
+        const problem = modelAliasProblem(alias.value.trim());
         if (problem) {
           showError(err, problem);
           alias.focus();

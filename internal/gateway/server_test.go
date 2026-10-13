@@ -812,6 +812,32 @@ func TestAKeyOfAnotherOrganisationDoesNotReachTheDefaultModels(t *testing.T) {
 	}
 }
 
+// A model alias may carry its provider's name, and clients put it into the
+// path unescaped as often as escaped.
+func TestGetModelTakesAnAliasWithASlash(t *testing.T) {
+	models := map[string]policy.Model{
+		"anthropic/claude-sonnet-4-5": {Alias: "anthropic/claude-sonnet-4-5",
+			Kind: policy.KindChat, BackendModel: "a", Enabled: true},
+	}
+	h := newHarness(t, jsonBackend(`{}`), models, nil)
+	for _, path := range []string{
+		"/v1/models/anthropic/claude-sonnet-4-5", "/v1/models/anthropic%2Fclaude-sonnet-4-5",
+	} {
+		req, _ := http.NewRequest(http.MethodGet, h.url(path), nil)
+		req.Header.Set("Authorization", "Bearer "+testKey)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got modelEntry
+		_ = json.NewDecoder(resp.Body).Decode(&got)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || got.ID != "anthropic/claude-sonnet-4-5" {
+			t.Errorf("%s: status %d, id %q, want 200 and the alias", path, resp.StatusCode, got.ID)
+		}
+	}
+}
+
 func TestListModelsShowsOnlyWhatTheKeyMayUse(t *testing.T) {
 	restricted := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"},
 		&policy.Limits{AllowedModels: []string{"keera-code"}}, nil, nil)

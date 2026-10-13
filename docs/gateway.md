@@ -62,7 +62,8 @@ remote endpoint without any developer changing anything.
 - `release_date` is the day the model came out, as `YYYY-MM-DD`. A provider
   fills it in for the models it knows. `/v1/models` gives it as `created`.
 - An alias is lowercase letters, digits and interior hyphens, because it appears
-  in the client configurations `keera connect` prints.
+  in the client configurations `keera connect` prints. A model's alias may also
+  hold slashes, to name the provider, as in `anthropic/claude-sonnet-4-5`.
 
 ## Models belong to an organisation
 

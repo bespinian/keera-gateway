@@ -149,9 +149,9 @@ func ParseModel(m Model) (policy.Model, error) {
 	switch {
 	case m.Alias == "":
 		return policy.Model{}, fmt.Errorf("alias is required")
-	case !policy.ValidAlias(m.Alias):
-		return policy.Model{}, fmt.Errorf("alias %q must be lowercase letters, digits and "+
-			"interior hyphens: it is rendered into the client configurations `keera connect` "+
+	case !policy.ValidModelAlias(m.Alias):
+		return policy.Model{}, fmt.Errorf("alias %q must be lowercase letters, digits, "+
+			"interior hyphens and slashes: it is rendered into the client configurations `keera connect` "+
 			"prints, which quote none of it", m.Alias)
 	}
 	// Trimmed first, so a blank description gets the provider's default.

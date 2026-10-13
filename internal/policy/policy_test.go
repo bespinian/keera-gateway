@@ -309,6 +309,22 @@ func TestValidAlias(t *testing.T) {
 	}
 }
 
+func TestValidModelAlias(t *testing.T) {
+	for _, alias := range []string{"keera-code", "anthropic/claude-sonnet-4-5", "a/b/c"} {
+		if !ValidModelAlias(alias) {
+			t.Errorf("ValidModelAlias(%q) = false, want true", alias)
+		}
+	}
+	for _, alias := range []string{
+		"", "/claude", "anthropic/", "anthropic//claude", "Anthropic/claude",
+		"anthropic/-claude", "anthropic/claude;id", strings.Repeat("a/", 32) + "a",
+	} {
+		if ValidModelAlias(alias) {
+			t.Errorf("ValidModelAlias(%q) = true, want false", alias)
+		}
+	}
+}
+
 func TestAFilterWithNoModeWrittenDownIsARewriteFilter(t *testing.T) {
 	// Every filter that existed before there were two modes rewrote, so the
 	// zero value has to mean that: a stored row read back without a mode must

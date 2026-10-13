@@ -568,6 +568,21 @@ const MaxDestinations = 16
 // class is written unquoted into command lines.
 func ValidAlias(s string) bool { return validName(s, maxAliasLen) }
 
+// ValidModelAlias reports whether s can name a model. A model may also carry
+// its provider's name, as in "anthropic/claude-sonnet-4-5", so each part
+// between slashes has the alias shape.
+func ValidModelAlias(s string) bool {
+	if len(s) > maxAliasLen {
+		return false
+	}
+	for part := range strings.SplitSeq(s, "/") {
+		if !validName(part, maxAliasLen) {
+			return false
+		}
+	}
+	return true
+}
+
 // LocationOnPrem is the location of a model the deployment serves itself.
 const LocationOnPrem = "onprem"
 
