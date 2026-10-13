@@ -46,7 +46,11 @@ func newFakePostFinance(t *testing.T) *fakePostFinance {
 		f.next++
 		id := f.next
 		f.created[id] = in
-		amount, _ := in.LineItems[0].AmountIncludingTax.Float64()
+		var amount float64
+		for _, item := range in.LineItems {
+			v, _ := item.AmountIncludingTax.Float64()
+			amount += v
+		}
 		tx := payment.Transaction{ID: id, State: "PENDING", Currency: in.Currency,
 			AuthorizationAmount: amount, CustomerID: in.CustomerID,
 			MerchantReference: in.MerchantReference}
@@ -212,9 +216,10 @@ func TestATopUpIsCreditedOnceWhenPostFinanceSaysItIsPaid(t *testing.T) {
 	if started.URL != fmt.Sprintf("https://checkout.postfinance.ch/pay/%d", id) {
 		t.Errorf("url = %q", started.URL)
 	}
-	// CHF 100 plus 8.1% VAT, for this organisation, saving the card, and
-	// back to the panel afterwards.
-	if string(sent.LineItems[0].AmountIncludingTax) != "108.10" || sent.Currency != "CHF" ||
+	// CHF 100 plus 8.1% VAT and a fee of CHF 1.73, for this organisation,
+	// saving the card, and back to the panel afterwards.
+	if len(sent.LineItems) != 2 || string(sent.LineItems[0].AmountIncludingTax) != "108.10" ||
+		string(sent.LineItems[1].AmountIncludingTax) != "1.73" || sent.Currency != "CHF" ||
 		sent.CustomerID != "org_1" || sent.TokenizationMode != payment.SaveCard ||
 		sent.SuccessURL != "https://keera.example/billing?payment="+started.Payment.ID ||
 		sent.MerchantReference != started.Payment.ID {
@@ -515,5 +520,21 @@ func TestWithoutPaymentsTheAccountSaysSo(t *testing.T) {
 	if w := invoke(s.createTopUp, admin("org_1"), http.MethodPost, "/v1/billing/topups",
 		`{"amount_micros":100000000}`); w.Code != http.StatusConflict {
 		t.Errorf("top-up: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestTheFeeIsEighteenCentimesPlusAPercentageOfAtLeastTwentyCentimes(t *testing.T) {
+	for micros, want := range map[int64]int64{
+		10_000_000:     380_000,     // 0.155 is below the least
+		12_900_000:     380_000,     // 0.19995
+		20_000_000:     490_000,     // 0.31
+		33_000_000:     690_000,     // 0.5115 rounds down
+		33_300_000:     700_000,     // 0.51615 rounds up
+		100_000_000:    1_730_000,   // 1.55
+		10_000_000_000: 155_180_000, // 155
+	} {
+		if got := feeOn(micros); got != want {
+			t.Errorf("feeOn(%d) = %d, want %d", micros, got, want)
+		}
 	}
 }

@@ -223,7 +223,7 @@ func printPayments(w *table, list []store.Payment, orgNames map[string]string) {
 		printNone(w, "payments", "keera billing topup --amount 100")
 		return
 	}
-	head := "WHEN\tKIND\tAMOUNT\tVAT\tSTATE\tBY\tNOTE"
+	head := "WHEN\tKIND\tAMOUNT\tVAT\tFEE\tSTATE\tBY\tNOTE"
 	if orgNames != nil {
 		head = "ORG\t" + head
 	}
@@ -232,8 +232,8 @@ func printPayments(w *table, list []store.Payment, orgNames map[string]string) {
 		if orgNames != nil {
 			_, _ = fmt.Fprintf(w, "%s\t", labelled(orgNames, p.OrgID))
 		}
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", p.TS.Local().Format("2006-01-02 15:04"),
-			p.Kind, chf(p.Micros), chf(p.VATMicros), p.State, p.Actor, dash(p.Note))
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", p.TS.Local().Format("2006-01-02 15:04"),
+			p.Kind, chf(p.Micros), chf(p.VATMicros), chf(p.FeeMicros), p.State, p.Actor, dash(p.Note))
 	}
 }
 
@@ -266,8 +266,10 @@ func (r *billingRun) topUp(ctx context.Context) error {
 		return out(true, res, nil)
 	}
 	// The address alone on stdout, so it can go straight to a browser.
-	fmt.Fprintf(os.Stderr, "Pay %s plus %s VAT on PostFinance Checkout. The credit is added "+
-		"once the payment is through:\n", chf(res.Payment.Micros), chf(res.Payment.VATMicros))
+	pm := res.Payment
+	fmt.Fprintf(os.Stderr, "Pay %s: %s credit, %s VAT and a %s transaction fee, on PostFinance "+
+		"Checkout. The credit is added once the payment is through:\n",
+		chf(pm.Micros+pm.VATMicros+pm.FeeMicros), chf(pm.Micros), chf(pm.VATMicros), chf(pm.FeeMicros))
 	fmt.Println(res.URL)
 	return nil
 }

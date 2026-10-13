@@ -181,12 +181,14 @@ const (
 
 // Payment is money into a credit account.
 type Payment struct {
-	ID        string       `json:"id"`
-	OrgID     string       `json:"org_id"`
-	TS        time.Time    `json:"ts"`
-	Kind      PaymentKind  `json:"kind"`
-	Micros    int64        `json:"micros"`
-	VATMicros int64        `json:"vat_micros"`
+	ID        string      `json:"id"`
+	OrgID     string      `json:"org_id"`
+	TS        time.Time   `json:"ts"`
+	Kind      PaymentKind `json:"kind"`
+	Micros    int64       `json:"micros"`
+	VATMicros int64       `json:"vat_micros"`
+	// FeeMicros is the transaction fee charged on top. It is not credited.
+	FeeMicros int64        `json:"fee_micros"`
 	State     PaymentState `json:"state"`
 	SaveCard  bool         `json:"save_card,omitempty"`
 	// TransactionID is PostFinance's, zero on a grant.
@@ -196,7 +198,7 @@ type Payment struct {
 	SettledAt     *time.Time `json:"settled_at,omitempty"`
 }
 
-const paymentColumns = `id, org_id, ts, kind, micros, vat_micros, state, save_card,
+const paymentColumns = `id, org_id, ts, kind, micros, vat_micros, fee_micros, state, save_card,
 	transaction_id, actor, note, settled_at`
 
 func scanPayment(r row) (Payment, error) {
@@ -205,7 +207,7 @@ func scanPayment(r row) (Payment, error) {
 		tx   *int64
 		note *string
 	)
-	err := r.Scan(&p.ID, &p.OrgID, &p.TS, &p.Kind, &p.Micros, &p.VATMicros, &p.State,
+	err := r.Scan(&p.ID, &p.OrgID, &p.TS, &p.Kind, &p.Micros, &p.VATMicros, &p.FeeMicros, &p.State,
 		&p.SaveCard, &tx, &p.Actor, &note, &p.SettledAt)
 	if tx != nil {
 		p.TransactionID = *tx
@@ -223,8 +225,8 @@ var ErrTopUpUnderway = errors.New("store: an automatic top-up is under way")
 // CreatePayment records a payment that has not been paid yet.
 func (s *Store) CreatePayment(ctx context.Context, p Payment) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO payments (id, org_id, kind, micros, vat_micros,
-		state, save_card, actor) VALUES ($1,$2,$3,$4,$5,'pending',$6,$7)`,
-		p.ID, p.OrgID, p.Kind, p.Micros, p.VATMicros, p.SaveCard, p.Actor)
+		fee_micros, state, save_card, actor) VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8)`,
+		p.ID, p.OrgID, p.Kind, p.Micros, p.VATMicros, p.FeeMicros, p.SaveCard, p.Actor)
 	if uniqueOn(err, "payments_one_auto_idx") {
 		return ErrTopUpUnderway
 	}

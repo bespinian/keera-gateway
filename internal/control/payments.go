@@ -30,11 +30,20 @@ type Payments struct {
 	VATBP int64
 }
 
-// The bounds of one payment, in CHF micros. The lower keeps the card fee
-// small next to the amount; the upper catches a typo before a card does.
+// The bounds of one payment, in CHF micros. The upper catches a typo before a
+// card does.
 const (
-	minTopUp = 10_000_000
+	minTopUp = 1_000_000
 	maxTopUp = 10_000_000_000
+)
+
+// The transaction fee on every card payment, for what the payment costs: CHF
+// 0.18 plus 1.55% of the credit, the percentage at least CHF 0.20. It is paid
+// on top and not credited.
+const (
+	feeFixed   = 180_000
+	feeBP      = 155
+	feeMinPart = 200_000
 )
 
 // payments answers for a route that needs payments, and says so on a
@@ -81,6 +90,9 @@ func (s *Server) creditAccount(w http.ResponseWriter, r *http.Request, p *authn.
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"payments":         true,
 		"vat_percent":      payment.Percent(pay.VATBP),
+		"fee_fixed_micros": feeFixed,
+		"fee_bp":           feeBP,
+		"fee_min_micros":   feeMinPart,
 		"min_topup_micros": minTopUp,
 		"max_topup_micros": maxTopUp,
 		"account":          a,
@@ -239,7 +251,8 @@ func (s *Server) createTopUp(w http.ResponseWriter, r *http.Request, p *authn.Pr
 	}
 	pm := store.Payment{
 		ID: id.New("pay"), OrgID: orgID, Kind: store.PaymentTopUp, Micros: in.AmountMicros,
-		VATMicros: vatOn(in.AmountMicros, pay.VATBP), SaveCard: in.SaveCard, Actor: p.Actor(),
+		VATMicros: vatOn(in.AmountMicros, pay.VATBP), FeeMicros: feeOn(in.AmountMicros),
+		SaveCard: in.SaveCard, Actor: p.Actor(),
 		State: store.PaymentPending,
 	}
 	if err := s.st.CreatePayment(r.Context(), pm); err != nil {
@@ -271,7 +284,7 @@ func (s *Server) createTopUp(w http.ResponseWriter, r *http.Request, p *authn.Pr
 		return
 	}
 	s.auditf(r, p, orgID, "billing.topup", "payment", pm.ID, map[string]any{
-		"micros": pm.Micros, "save_card": pm.SaveCard,
+		"micros": pm.Micros, "fee_micros": pm.FeeMicros, "save_card": pm.SaveCard,
 	})
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"payment": pm, "url": page})
 }
@@ -279,6 +292,12 @@ func (s *Server) createTopUp(w http.ResponseWriter, r *http.Request, p *authn.Pr
 // vatOn is the VAT on an amount, to the centime.
 func vatOn(micros, bp int64) int64 {
 	return int64(math.Round(float64(micros)*float64(bp)/10_000/10_000)) * 10_000
+}
+
+// feeOn is the transaction fee on an amount, to the centime.
+func feeOn(micros int64) int64 {
+	part := max(micros*feeBP/10_000, feeMinPart)
+	return feeFixed + (part+5_000)/10_000*10_000
 }
 
 // transactionFor is the PostFinance transaction that pays for a payment.
@@ -291,8 +310,16 @@ func transactionFor(pm store.Payment, email string, vatBP int64) payment.NewTran
 	if vatBP > 0 {
 		item.Taxes = []payment.Tax{{Rate: payment.Percent(vatBP), Title: "VAT"}}
 	}
+	items := []payment.LineItem{item}
+	// A payment started before the fee has none.
+	if pm.FeeMicros > 0 {
+		items = append(items, payment.LineItem{
+			Name: "Transaction fee", Quantity: 1, Type: "FEE",
+			AmountIncludingTax: payment.Amount(pm.FeeMicros), UniqueID: "fee",
+		})
+	}
 	return payment.NewTransaction{
-		Currency: policy.Currency, LineItems: []payment.LineItem{item},
+		Currency: policy.Currency, LineItems: items,
 		CustomerID: pm.OrgID, CustomerEmailAddress: email, MerchantReference: pm.ID,
 		CompletionBehavior: "COMPLETE_IMMEDIATELY",
 		MetaData:           map[string]string{"org_id": pm.OrgID, "payment_id": pm.ID},
@@ -476,7 +503,7 @@ func (s *Server) settleWith(ctx context.Context, pm store.Payment, tx payment.Tr
 // paidInFull reports whether a transaction is for what the payment asked.
 func paidInFull(pm store.Payment, tx payment.Transaction) bool {
 	cents := int64(math.Round(tx.AuthorizationAmount * 100))
-	return tx.Currency == policy.Currency && cents == (pm.Micros+pm.VATMicros)/10_000
+	return tx.Currency == policy.Currency && cents == (pm.Micros+pm.VATMicros+pm.FeeMicros)/10_000
 }
 
 // refreshCredit lets this replica's gateway see a balance that changed. The
@@ -538,7 +565,8 @@ func (s *Server) autoTopUp(ctx context.Context, a store.CreditAccount) {
 	pay := s.opts.Payments
 	pm := store.Payment{
 		ID: id.New("pay"), OrgID: a.OrgID, Kind: store.PaymentAuto, Micros: a.TopUpMicros,
-		VATMicros: vatOn(a.TopUpMicros, pay.VATBP), Actor: "automatic top-up",
+		VATMicros: vatOn(a.TopUpMicros, pay.VATBP), FeeMicros: feeOn(a.TopUpMicros),
+		Actor: "automatic top-up",
 		State: store.PaymentPending,
 	}
 	switch err := s.st.CreatePayment(ctx, pm); {

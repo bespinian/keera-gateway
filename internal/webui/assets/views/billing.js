@@ -447,6 +447,11 @@ async function creditSection(ctx) {
         cell: (p) => (p.vat_micros ? money(p.vat_micros) : "-"),
       },
       {
+        label: "Fee",
+        num: true,
+        cell: (p) => (p.fee_micros ? money(p.fee_micros) : "-"),
+      },
+      {
         label: "State",
         cell: (p) => pill(stateLabel(p.state), stateTones[p.state]),
       },
@@ -518,14 +523,27 @@ function addCredit(ctx, res) {
     inputmode: "decimal",
   });
   const save = h("input", { type: "checkbox", checked: !a.card });
-  const total = h("div", { class: "hint" });
+  const total = h("div", { class: "price-sum" });
+  // The same sums as the server's vatOn and feeOn, to the centime.
+  const vatOn = (m) => Math.round((m * vat) / 100 / 10000) * 10000;
+  const feeOn = (m) =>
+    res.fee_fixed_micros +
+    Math.round(
+      Math.max(Math.floor((m * res.fee_bp) / 10000), res.fee_min_micros) /
+        10000,
+    ) *
+      10000;
   const showTotal = () => {
     const m = chf(amount.value);
-    total.textContent = Number.isNaN(m)
-      ? ""
-      : vat
-        ? `With ${vat}% VAT you pay ${money(m + Math.round((m * vat) / 100 / 10000) * 10000)}.`
-        : `You pay ${money(m)}.`;
+    total.hidden = Number.isNaN(m);
+    if (total.hidden) return;
+    const fee = feeOn(m);
+    total.replaceChildren(
+      h("span", {}, "Transaction fee"),
+      h("span", { class: "num" }, money(fee)),
+      h("strong", {}, vat ? `Total, with ${vat}% VAT` : "Total"),
+      h("strong", { class: "num" }, money(m + vatOn(m) + fee)),
+    );
   };
   amount.addEventListener("input", showTotal);
   showTotal();
@@ -599,7 +617,11 @@ function autoTopUp(ctx, a) {
     "div",
     {},
     field("When the credit falls below (CHF)", below),
-    field("Charge the saved card (CHF)", amount, "VAT is added on top."),
+    field(
+      "Charge the saved card (CHF)",
+      amount,
+      "VAT and a transaction fee are added on top.",
+    ),
   );
   const sync = () => {
     for (const el of [below, amount]) el.disabled = !on.checked;

@@ -606,7 +606,8 @@ var commands = []command{
 			{name: "topup", aliases: []string{"pay"},
 				summary: "pay for credit: prints the payment page to open",
 				flags:   []string{"amount", "save-card", "json"},
-				prose: "VAT is added on top, if the deployment charges it. The credit is added " +
+				prose: "VAT, if the deployment charges it, and a transaction fee are added on " +
+					"top. The fee is not credited. The credit is added " +
 					"once PostFinance says the payment went through. --save-card keeps the card " +
 					"for automatic top-ups, and replaces a card saved before.",
 				examples: []string{"keera billing topup --amount 100 --save-card"}},

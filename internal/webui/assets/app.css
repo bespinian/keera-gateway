@@ -675,6 +675,27 @@ input[type="checkbox"]:disabled {
   color: var(--muted);
   line-height: 1.45;
 }
+/* What a payment adds up to, under the amount. It is what the person is
+   about to pay, so it reads as body text rather than as a footnote. */
+.price-sum {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 16px;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-size: 13px;
+  color: var(--text);
+}
+.price-sum[hidden] {
+  display: none;
+}
+.price-sum .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .field-row {
   display: grid;
   grid-template-columns: 1fr 1fr;

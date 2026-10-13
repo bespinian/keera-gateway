@@ -171,8 +171,12 @@ panel. The credit is added once PostFinance says the payment went through.
 top-up and the latest payments. `keera billing payments` lists the latest 50
 payments, or as many as `--limit` says.
 
-A payment is from CHF 10 to CHF 10,000, in whole centimes. VAT is added on
-top.
+A payment is from CHF 1 to CHF 10,000, in whole centimes. VAT and a
+transaction fee are added on top. The fee is CHF 0.18 plus 1.55% of the
+credit, with the 1.55% at least CHF 0.20: CHF 0.38 on CHF 10, CHF 1.73 on
+CHF 100. It pays for the
+payment and is not added to the credit. The panel shows the fee and the total
+under the amount. Automatic top-ups carry the fee too.
 
 An organisation somebody created by signing up is limited until its first
 payment, which opens the models and MCP servers inside your network and
