@@ -129,13 +129,17 @@ a router falls back from such a model to a local one, the local one gets the
 translation. Without a router or a local fallback, the request is not
 translated at all, so the provider checks it rather than the gateway.
 
-- `POST /api/v1/messages/count_tokens` is answered by the gateway with an
-  estimate that errs high. It is never forwarded, because that would send the
-  prompt to Anthropic without passing its filters.
-- A Responses request with `previous_response_id` or `conversation` continues a
-  conversation stored at OpenAI. Only OpenAI's own models can read it, so any
-  other model refuses it with a 400. So does an OpenAI model on the
-  deployment's own key ([billing.md](billing.md)).
+`POST /api/v1/messages/count_tokens` is answered by the gateway with an
+estimate that errs high. It is never forwarded, because that would send the
+prompt to Anthropic without passing its filters.
+
+**The Responses API is served stateless only.** The client sends the whole
+conversation in `input` every time. There is no `/api/v1/conversations`, and no
+route to read, cancel or delete a stored response. A request with
+`previous_response_id` or `conversation` continues a conversation stored at
+OpenAI, so only an OpenAI model on the organisation's own key accepts it. Any
+other model refuses it with a 400, and so does an OpenAI model on the
+deployment's own key ([billing.md](billing.md)).
 
 The hosted providers in `internal/catalog/providers.go` are **not** adapters.
 They are a table of defaults - endpoint, context window, prices,
