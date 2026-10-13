@@ -472,7 +472,7 @@ func TestWhoMayDoWhatWithCredit(t *testing.T) {
 			http.MethodPost, "/v1/billing/topups?org_id=org_1", `{"amount_micros":100000000}`),
 			http.StatusForbidden},
 		{"too little", invoke(s.createTopUp, admin("org_1"), http.MethodPost,
-			"/v1/billing/topups", `{"amount_micros":5000000}`), http.StatusBadRequest},
+			"/v1/billing/topups", `{"amount_micros":500000}`), http.StatusBadRequest},
 		{"half a centime", invoke(s.createTopUp, admin("org_1"), http.MethodPost,
 			"/v1/billing/topups", `{"amount_micros":10005000}`), http.StatusBadRequest},
 		{"an admin cannot grant", invoke(s.grantCredit, admin("org_1"), http.MethodPost,
