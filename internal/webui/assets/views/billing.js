@@ -518,7 +518,7 @@ function addCredit(ctx, res) {
     type: "number",
     min: res.min_topup_micros / 1e6,
     max: res.max_topup_micros / 1e6,
-    step: "0.01",
+    step: "1",
     value: "100",
     inputmode: "decimal",
   });
@@ -602,14 +602,14 @@ function autoTopUp(ctx, a) {
   const below = h("input", {
     class: "input",
     type: "number",
-    step: "0.01",
+    step: "1",
     inputmode: "decimal",
     value: a.topup_below_micros ? a.topup_below_micros / 1e6 : "50",
   });
   const amount = h("input", {
     class: "input",
     type: "number",
-    step: "0.01",
+    step: "1",
     inputmode: "decimal",
     value: a.topup_micros ? a.topup_micros / 1e6 : "200",
   });
@@ -694,7 +694,7 @@ function grant(ctx) {
   const amount = h("input", {
     class: "input",
     type: "number",
-    step: "0.01",
+    step: "1",
     inputmode: "decimal",
   });
   const note = h("input", { class: "input", placeholder: "Trial" });
