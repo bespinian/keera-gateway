@@ -441,7 +441,9 @@ instruction or fallback destination.
 - **`latency` averages time to first token**, weighted so the last half minute
   counts about twice as much as the half minute before. Use it when the
   destinations differ - regions, providers, hardware - because queue depths
-  cannot be compared across machines of different speed.
+  cannot be compared across machines of different speed. The first token is
+  the first one the model wrote - text, reasoning or a tool call - not an
+  event that only opens the stream, which some providers send at once.
 
 ### What it measures, and what it does not
 

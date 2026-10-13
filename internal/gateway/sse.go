@@ -76,8 +76,10 @@ type streamStats struct {
 	// deltas counts chunks with generated content. vLLM sends one per token,
 	// so this estimates the output when no usage record came.
 	deltas int
-	// firstAt is when the first event reached the client: the wait a
-	// developer actually feels.
+	// firstAt is when the first token the model wrote reached the gateway's
+	// client: text, reasoning or a tool call. Events that only open the
+	// answer, such as one naming the role, come before any token and do not
+	// count.
 	firstAt time.Time
 	// partial says usage was pieced together from a stream that ended early,
 	// so the row is an estimate.
@@ -187,6 +189,9 @@ type ssePipe struct {
 	stats     streamStats
 	event     []byte
 	usageOnly bool
+	// generated says the event being gathered, or one before it, carries a
+	// token. Once it is set, no chunk is decoded for it again.
+	generated bool
 }
 
 // add takes one line into the current event, and forwards the event once it
@@ -202,6 +207,7 @@ func (p *ssePipe) add(line []byte) error {
 		payload := bytes.TrimSpace(trimmed[len(dataPrefix):])
 		if !bytes.Equal(payload, doneMarker) {
 			inspect(payload, &p.stats, &p.usageOnly)
+			p.generated = p.generated || generated(payload)
 		}
 	}
 	if len(p.event) > maxEventBytes {
@@ -217,7 +223,7 @@ func (p *ssePipe) emit() error {
 		return nil
 	}
 	if !p.usageOnly || !p.dropUsage {
-		if p.stats.firstAt.IsZero() {
+		if p.generated && p.stats.firstAt.IsZero() {
 			p.stats.firstAt = time.Now()
 		}
 		out := p.event
@@ -255,6 +261,35 @@ func inspect(payload []byte, stats *streamStats, usageOnly *bool) {
 	}
 	stats.usage = chunk.Usage
 	*usageOnly = len(chunk.Choices) == 0
+}
+
+// generated reports whether a chat or text completion chunk carries a token
+// the model wrote. Reasoning counts: the model has started, even if the
+// client shows only the answer. vLLM and llama.cpp name it reasoning_content,
+// others reasoning.
+func generated(payload []byte) bool {
+	var chunk struct {
+		Choices []struct {
+			Text  string `json:"text"`
+			Delta struct {
+				Content          string            `json:"content"`
+				ReasoningContent string            `json:"reasoning_content"`
+				Reasoning        string            `json:"reasoning"`
+				ToolCalls        []json.RawMessage `json:"tool_calls"`
+			} `json:"delta"`
+		} `json:"choices"`
+	}
+	// A field of an unexpected type fails the decode but leaves the rest
+	// read, so the error is not a verdict.
+	_ = json.Unmarshal(payload, &chunk)
+	for _, c := range chunk.Choices {
+		d := c.Delta
+		if c.Text != "" || d.Content != "" || d.ReasoningContent != "" || d.Reasoning != "" ||
+			len(d.ToolCalls) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // hasUsage reports whether payload has a usage key with a value other than
@@ -419,6 +454,9 @@ type chatChunks struct {
 	finishReason string
 	usage        *tokenUsage
 	deltas       int
+	// firstAt is when the first token arrived. A translation drops reasoning,
+	// so this can be earlier than the first event the client is sent.
+	firstAt time.Time
 }
 
 // fold reads one chunk: it keeps the usage record and the finish reason, and
@@ -426,6 +464,9 @@ type chatChunks struct {
 func (c *chatChunks) fold(payload []byte, text func(string) error,
 	tool func(index int, tc oaiToolCallDelta) error,
 ) error {
+	if c.firstAt.IsZero() && generated(payload) {
+		c.firstAt = time.Now()
+	}
 	var chunk oaiStreamChunk
 	if json.Unmarshal(payload, &chunk) != nil {
 		// An unreadable chunk is skipped: the rest of the turn is still worth

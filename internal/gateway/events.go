@@ -16,7 +16,7 @@ type eventStream interface {
 	chunk(payload []byte) error
 	// finish closes the stream, after the last chunk or a failure.
 	finish() error
-	counts() (usage *tokenUsage, deltas int)
+	counts() (usage *tokenUsage, deltas int, firstAt time.Time)
 }
 
 // pipeEvents forwards a chat completion stream as the events of the stream
@@ -43,15 +43,17 @@ func pipeEvents(dst io.Writer, flush func(), src io.Reader, limit int64, every t
 	}
 	writeErr := out.stop()
 
-	stats := streamStats{firstAt: out.firstAt}
-	stats.usage, stats.deltas = st.counts()
+	var stats streamStats
+	stats.usage, stats.deltas, stats.firstAt = st.counts()
 	if writeErr != nil {
 		return stats, writeErr
 	}
 	return stats, readErr
 }
 
-func (c *chatChunks) counts() (*tokenUsage, int) { return c.usage, c.deltas }
+func (c *chatChunks) counts() (*tokenUsage, int, time.Time) {
+	return c.usage, c.deltas, c.firstAt
+}
 
 // frame is one server-sent event.
 func frame(name string, data []byte) []byte {
@@ -97,9 +99,8 @@ type pinger struct {
 
 	mu    sync.Mutex
 	timer *time.Timer
-	// last is when anything was last written, and firstAt when the first
-	// event was: the wait a developer feels.
-	last, firstAt time.Time
+	// last is when anything was last written.
+	last time.Time
 	// err is the first failed write. Nothing is written after it.
 	err     error
 	stopped bool
@@ -124,9 +125,6 @@ func (p *pinger) write(ev []byte) error {
 		return p.err
 	}
 	p.last = time.Now()
-	if p.firstAt.IsZero() {
-		p.firstAt = p.last
-	}
 	if _, p.err = p.dst.Write(ev); p.err != nil {
 		return p.err
 	}

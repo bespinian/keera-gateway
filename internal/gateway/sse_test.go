@@ -137,13 +137,93 @@ func TestPipeSSEReportsAWriteFailure(t *testing.T) {
 	}
 }
 
-func TestPipeSSERecordsWhenTheFirstEventReachedTheClient(t *testing.T) {
+func TestPipeSSERecordsWhenTheFirstTokenReachedTheClient(t *testing.T) {
 	stats, err := pipeSSE(io.Discard, func() {}, strings.NewReader(sseStream(deltaChunk)), "", true, DefaultMaxResponseBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if stats.firstAt.IsZero() {
 		t.Error("firstAt was not set; time-to-first-token would be unreportable")
+	}
+}
+
+// afterPause reads r, but only once pause has passed: an upstream that opens
+// the answer at once and writes its first token later.
+type afterPause struct {
+	r      io.Reader
+	pause  time.Duration
+	paused bool
+}
+
+func (a *afterPause) Read(p []byte) (int, error) {
+	if !a.paused {
+		time.Sleep(a.pause)
+		a.paused = true
+	}
+	return a.r.Read(p)
+}
+
+// paused reads the first part at once, and each after it once pause has
+// passed.
+func paused(pause time.Duration, parts ...string) io.Reader {
+	rs := []io.Reader{strings.NewReader(parts[0])}
+	for _, p := range parts[1:] {
+		rs = append(rs, &afterPause{r: strings.NewReader(p), pause: pause})
+	}
+	return io.MultiReader(rs...)
+}
+
+const pause = 50 * time.Millisecond
+
+func TestPipeSSEDoesNotCountTheOpeningAsTheFirstToken(t *testing.T) {
+	// A role chunk and a keep-alive can come long before the model writes
+	// anything. Counting them made the first token look faster than the
+	// client saw it.
+	opening := ": keep-alive\n\n" +
+		`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}` + "\n\n"
+	start := time.Now()
+	stats, err := pipeSSE(io.Discard, func() {}, paused(pause, opening, sseStream(deltaChunk)),
+		"", true, DefaultMaxResponseBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := stats.firstAt.Sub(start); got < pause {
+		t.Errorf("first token after %v, want at least %v: the opening was counted", got, pause)
+	}
+}
+
+func TestPipeSSEWithoutTokensHasNoFirstToken(t *testing.T) {
+	in := sseStream(`{"choices":[{"index":0,"delta":{"role":"assistant"}}]}`,
+		`{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`)
+	stats, err := pipeSSE(io.Discard, func() {}, strings.NewReader(in), "", true, DefaultMaxResponseBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stats.firstAt.IsZero() {
+		t.Error("a stream with no token has a first token")
+	}
+}
+
+func TestGeneratedTellsTokensFromTheOpeningAndTheEnd(t *testing.T) {
+	for _, tc := range []struct {
+		chunk string
+		want  bool
+	}{
+		{`{"choices":[{"delta":{"role":"assistant","content":""}}]}`, false},
+		{`{"choices":[{"delta":{"content":null}}]}`, false},
+		{`{"choices":[{"delta":{},"finish_reason":"stop"}]}`, false},
+		{`{"choices":[],"usage":{"prompt_tokens":1}}`, false},
+		{`{"choices":[{"delta":{"content":"hi"}}]}`, true},
+		{`{"choices":[{"delta":{"reasoning_content":"hm"}}]}`, true},
+		{`{"choices":[{"delta":{"reasoning":"hm"}}]}`, true},
+		{`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1"}]}}]}`, true},
+		{`{"choices":[{"text":"hi"}]}`, true},
+		// A provider's own extension of another type does not hide the token.
+		{`{"choices":[{"delta":{"content":"hi","refusal":{}}}],"usage":"?"}`, true},
+	} {
+		if got := generated([]byte(tc.chunk)); got != tc.want {
+			t.Errorf("generated(%s) = %v, want %v", tc.chunk, got, tc.want)
+		}
 	}
 }
 

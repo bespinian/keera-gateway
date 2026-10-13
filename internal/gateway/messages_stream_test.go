@@ -290,6 +290,27 @@ func TestMessagesStreamReportsUsageForBilling(t *testing.T) {
 	}
 }
 
+func TestATranslatedStreamCountsReasoningAsTheFirstToken(t *testing.T) {
+	// The translation drops reasoning, so the client's first event is the
+	// text. The model started earlier, and that is what the first token is.
+	start := time.Now()
+	stats, err := anthropicShape{}.pipe(io.Discard, func() {}, paused(pause,
+		"data: "+`{"choices":[{"delta":{"role":"assistant"}}]}`+"\n\n",
+		"data: "+`{"choices":[{"delta":{"reasoning_content":"hm"}}]}`+"\n\n",
+		sseStream(`{"choices":[{"delta":{"content":"a"}}]}`),
+	), "keera-code", true, DefaultMaxResponseBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := stats.firstAt.Sub(start)
+	if got < pause {
+		t.Errorf("first token after %v, want at least %v: the role chunk was counted", got, pause)
+	}
+	if got >= 2*pause {
+		t.Errorf("first token after %v, want under %v: the reasoning was not counted", got, 2*pause)
+	}
+}
+
 // ------------------------------------------------------- through the gateway
 
 func TestMessagesSurfaceEnforcesTheSamePolicyAsChat(t *testing.T) {

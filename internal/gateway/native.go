@@ -115,8 +115,12 @@ func pipeNative(dst io.Writer, flush func(), src io.Reader, ns nativeStream,
 				out = append(out, '\n', '\n')
 			}
 		}
+		// The deltas are what the model wrote, reasoning included. Events
+		// before them, such as message_start, only open the answer.
 		if stats.firstAt.IsZero() {
-			stats.firstAt = time.Now()
+			if _, n, _ := ns.counts(); n > 0 {
+				stats.firstAt = time.Now()
+			}
 		}
 		_, err := dst.Write(out)
 		flush()

@@ -351,6 +351,24 @@ func TestANativeStreamCutShortKeepsItsInputCount(t *testing.T) {
 	}
 }
 
+func TestANativeStreamDoesNotCountMessageStartAsTheFirstToken(t *testing.T) {
+	// Anthropic opens the message, and pings, before the model writes.
+	opening := `data: {"type":"message_start","message":{"model":"m",` +
+		`"usage":{"input_tokens":4,"output_tokens":1}}}` + "\n\n" +
+		`data: {"type":"ping"}` + "\n\n"
+	rest := `data: {"type":"content_block_delta","index":0,` +
+		`"delta":{"type":"thinking_delta","thinking":"hm"}}` + "\n\n"
+	start := time.Now()
+	stats, err := pipeNative(io.Discard, func() {}, paused(pause, opening, rest),
+		anthropicDialect{}.stream("keera-frontier"), DefaultMaxResponseBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := stats.firstAt.Sub(start); got < pause {
+		t.Errorf("first token after %v, want at least %v: message_start was counted", got, pause)
+	}
+}
+
 func TestAFallbackFromAnthropicToALocalModelIsTranslated(t *testing.T) {
 	backend := func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/messages" {
