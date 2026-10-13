@@ -88,8 +88,10 @@ pick one.
 
 For a provider, you enter the model names and the API key. The endpoint,
 context window and prices are filled in and folded away
-under **Advanced options**. The model remembers its provider, so editing it
-later opens the same tile with the same values.
+under **Advanced options**. The panel offers only the models in the table; add
+a newer one with `keera model add` or a catalogue file. The model remembers its provider, so editing it
+later opens the same tile with the same values. The provider cannot be changed
+there; add a new model instead.
 
 Infomaniak also asks for a product id and builds the endpoint from it.
 

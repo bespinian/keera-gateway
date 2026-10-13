@@ -1489,9 +1489,9 @@ function editModel(ctx, existing, providers, pick) {
           return;
         }
         if (!alias.value.trim() || !backendModel.value.trim() || !list.length) {
-          // Under a provider the only way to get here is `custom`: the table
-          // answers both of those fields for a model it knows, and a model it
-          // does not is named and addressed inside the fold.
+          // Under a provider the only way to get here is editing a model the
+          // table does not know: the table answers both of those fields for
+          // one it does, and the other is named and addressed inside the fold.
           showError(
             err,
             state.hosted
@@ -1878,6 +1878,10 @@ function hostedFields(ctx, providers, form) {
     slot.replaceChildren(fold);
   };
 
+  // The stored model of an entry the table does not know, read before any
+  // provider writes over the field.
+  const unknownModel =
+    initial && !initial.m ? fields.backendModel.value.trim() : null;
   const fillModels = () => {
     const p = chosen();
     model.replaceChildren(
@@ -1888,9 +1892,12 @@ function hostedFields(ctx, providers, form) {
           mm.display_name || mm.id,
         ),
       ),
-      // A model released after this binary was built is still one this
-      // catalogue entry can serve; it just has to be named and priced by hand.
-      h("option", { value: "other" }, "custom"),
+      // Only the table's models are offered. A model this build does not know
+      // is added with the CLI or a catalogue file, and one being edited keeps
+      // its own entry here so the dialog can still show it.
+      ...(unknownModel && p === initial.p
+        ? [h("option", { value: "other" }, unknownModel)]
+        : []),
     );
     // The first of them, rather than a "choose a model" nobody would leave
     // standing: picking a provider then fills the form in, and the list is
@@ -1994,7 +2001,9 @@ function hostedFields(ctx, providers, form) {
         place.what ? h("span", { class: "tile-what" }, place.what) : null,
       ),
       h("div", { class: "spacer" }),
-      change,
+      // Where a model runs is settled when it is added. Moving it elsewhere
+      // is a new model.
+      ...(existing ? [] : [change]),
     );
     showTiles(false);
     block.hidden = !place.p;
@@ -2004,8 +2013,8 @@ function hostedFields(ctx, providers, form) {
   // model runs has changed, so the model list is rebuilt and nothing is filled
   // in again until a model is named. The values already in the fields stay -
   // they are the administrator's now, and clearing a form somebody has filled
-  // in is never the helpful reading. With the provider goes the reason any of
-  // them was disabled.
+  // in is never the helpful reading - except what a provider filled in.
+  // With the provider goes the reason any of them was disabled.
   const choose = (place) => {
     // The tile that is already pressed is the way back from the tiles and
     // nothing more. Rebuilding the list under it would throw away the model
@@ -2015,6 +2024,7 @@ function hostedFields(ctx, providers, form) {
       change.focus();
       return;
     }
+    const previous = state.preset;
     state.place = place;
     state.hosted = !!place.p;
     state.preset = null;
@@ -2027,9 +2037,20 @@ function hostedFields(ctx, providers, form) {
       applyModel();
     } else {
       productIDField.hidden = true;
+      // What the provider filled in is about its own model, which this one is
+      // not. What somebody typed is theirs and stays.
+      if (previous) {
+        for (const f of PRESET_FIELDS) {
+          const def = f.of(previous.p, previous.m, state);
+          const now = fields[f.key].value;
+          if (def !== null && sameValue(f, now, def, previous.m)) {
+            fields[f.key].value = "";
+          }
+        }
+      }
+      if (!state.aliasDirty) alias.value = "";
       // Where the model runs is the question these tiles answer, so the
-      // location follows it. The release date stays: a model you host
-      // yourself may well be one a provider also serves.
+      // location follows it.
       fields.location.value = "onprem";
       paintMachinery();
       setKinds(fields.kind, KINDS, fields.kind.value);
