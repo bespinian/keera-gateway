@@ -466,7 +466,8 @@ more on one that does not, plus a second or two for a microVM.
 Warm pools fix this. They are opt-in twice - `KEERA_SANDBOX_WARM` for the
 deployment, `warm:` per class - because every warm sandbox holds its class's
 full CPU and memory all the time, used by nobody. The operator sets the first,
-and each organisation's administrators set the second.
+and each organisation's administrators set the second. An organisation that
+signed itself up gets no pool until its first payment, like its sandboxes.
 
 Only an engineer's sandbox comes from a pool. A pool member is started before
 anybody asks, as an engineer's sandbox that is ready once sshd answers. An agent

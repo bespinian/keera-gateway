@@ -1214,19 +1214,17 @@ func (m *Manager) reconcilePools(ctx context.Context) {
 		})
 		return
 	}
-	classes, err := m.st.LoadSandboxClasses(ctx)
+	// A class with no warm pool, or of an organisation that has not paid yet,
+	// is left out of keep, so PrunePools deletes a pool it had once. Asking
+	// for its deletion every minute would be two needless API calls per class
+	// and organisation.
+	classes, err := m.st.WarmSandboxClasses(ctx)
 	if err != nil {
 		m.log.Warn("sandbox: reading the catalogue to reconcile warm pools failed", "error", err)
 		return
 	}
 	keep := make(map[string]bool, len(classes))
 	for _, c := range classes {
-		// A class with no warm pool is left out of keep, so PrunePools deletes
-		// a pool it had once. Asking for its deletion every minute would be
-		// two needless API calls per class and organisation.
-		if c.Warm <= 0 {
-			continue
-		}
 		keep[poolKey(c.OrgID, c.Name)] = true
 		if err := pooler.EnsurePool(ctx, c); err != nil {
 			// Not fatal: a pool that already exists keeps serving claims, and

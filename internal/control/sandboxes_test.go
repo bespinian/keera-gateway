@@ -565,6 +565,62 @@ func TestImageUnderAllowsTagsAndPathsOfAPrefix(t *testing.T) {
 	}
 }
 
+// A warm pool holds the deployment's machines whether used or not, so an
+// organisation that signed itself up may not ask for one before it pays.
+func TestALimitedOrganisationGetsNoWarmPool(t *testing.T) {
+	st, ctx := sandboxStore(t)
+	limited := true
+	if _, err := st.UpdateOrg(ctx, "org_1", store.OrgChange{Limited: &limited}); err != nil {
+		t.Fatalf("UpdateOrg: %v", err)
+	}
+	// What a class copied from the template looks like.
+	copied := policy.SandboxClass{
+		OrgID: "org_1", Name: "copied", Image: "example/sandbox:1",
+		Isolation: policy.IsolationIsolated, CPU: 4000, Memory: 16384,
+		DefaultTTL: 4 * time.Hour, MaxTTL: 24 * time.Hour, Warm: 2,
+	}
+	if err := st.UpsertSandboxClass(ctx, &copied); err != nil {
+		t.Fatalf("UpsertSandboxClass: %v", err)
+	}
+	srv := New(st, nil, nil, nil, Options{
+		OperatorKey: testOperatorKey,
+		Template:    store.OrgTemplate{SandboxClasses: []policy.SandboxClass{{Image: "example/sandbox:1"}}},
+	}, slog.New(slog.DiscardHandler))
+
+	put := func(name string, warm int) int {
+		raw, _ := json.Marshal(map[string]any{"image": "example/sandbox:1", "warm": warm})
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodPut,
+			"/v1/sandbox-classes/"+name+"?org_id=org_1", bytes.NewReader(raw))
+		r.SetPathValue("name", name)
+		w := httptest.NewRecorder()
+		srv.putSandboxClass(w, r, &authnPrincipalAdmin)
+		return w.Code
+	}
+	for _, c := range []struct {
+		name string
+		warm int
+		want int
+	}{
+		{"pool", 2, http.StatusForbidden},
+		{"standard", 1, http.StatusForbidden},
+		{"standard", 0, http.StatusOK},
+		{"copied", 2, http.StatusOK},
+		{"copied", 3, http.StatusForbidden},
+	} {
+		if code := put(c.name, c.warm); code != c.want {
+			t.Errorf("%s with warm %d: %d, want %d", c.name, c.warm, code, c.want)
+		}
+	}
+
+	paid := false
+	if _, err := st.UpdateOrg(ctx, "org_1", store.OrgChange{Limited: &paid}); err != nil {
+		t.Fatalf("UpdateOrg: %v", err)
+	}
+	if code := put("pool", 2); code != http.StatusOK {
+		t.Errorf("after paying, a warm pool: %d, want 200", code)
+	}
+}
+
 // Sandbox pods pull with the deployment's registry credentials, so an
 // administrator could otherwise run another tenant's private image.
 func TestAnAdministratorPicksOnlyAllowedImages(t *testing.T) {

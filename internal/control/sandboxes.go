@@ -90,6 +90,18 @@ func (s *Server) putSandboxClass(w http.ResponseWriter, r *http.Request, p *auth
 		return
 	}
 	class.OrgID = orgID
+	if class.Warm > 0 {
+		ok, err := s.mayKeepWarm(r.Context(), class)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		if !ok {
+			httpx.WriteError(w, http.StatusForbidden, "permission_error", "org_limited",
+				"a warm pool holds this deployment's machines, and "+policy.LockedMessage)
+			return
+		}
+	}
 	if !p.Unrestricted() {
 		ok, err := s.mayUseImage(r.Context(), class)
 		if err != nil {
@@ -131,6 +143,22 @@ func (s *Server) mayUseImage(ctx context.Context, class policy.SandboxClass) (bo
 		return false, nil
 	}
 	return err == nil && old.Image == class.Image, err
+}
+
+// mayKeepWarm reports whether a class may have its warm pool. An organisation
+// that signed itself up gets none until its first payment, as with sandboxes.
+// It may keep the pool a class was copied with, so a class read can still be
+// written back; the sweep makes no pool for it either way.
+func (s *Server) mayKeepWarm(ctx context.Context, class policy.SandboxClass) (bool, error) {
+	org, err := s.st.OrgByID(ctx, class.OrgID)
+	if err != nil || !org.Limited {
+		return err == nil, err
+	}
+	old, err := s.st.SandboxClass(ctx, class.OrgID, class.Name)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	return err == nil && class.Warm <= old.Warm, err
 }
 
 // imageUnder reports whether image is one of prefixes, a tag or digest of

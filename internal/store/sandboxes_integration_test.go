@@ -76,14 +76,48 @@ func TestSandboxClassRoundTrip(t *testing.T) {
 	if list, _ := st.ListSandboxClasses(ctx, "org_1"); len(list) != 1 {
 		t.Errorf("org_1 lists %d classes, want its one", len(list))
 	}
-	if all, _ := st.LoadSandboxClasses(ctx); len(all) != 2 {
-		t.Errorf("every organisation's classes are %d, want 2", len(all))
-	}
 	if err := st.DeleteSandboxClass(ctx, "org_2", "standard"); err != nil {
 		t.Fatalf("DeleteSandboxClass: %v", err)
 	}
 	if _, err := st.SandboxClass(ctx, "org_1", "standard"); err != nil {
 		t.Errorf("removing org_2's class removed org_1's: %v", err)
+	}
+}
+
+// A warm pool holds the deployment's machines, so an organisation that signed
+// itself up gets none until it pays.
+func TestWarmSandboxClassesLeaveOutUnpaidOrganisations(t *testing.T) {
+	st, ctx := db(t)
+	anOrg(t, st, ctx, "org_1")
+	if _, err := st.CreateOrg(ctx, Org{ID: "org_2", Name: "org_2", Limited: true}, OrgTemplate{}); err != nil {
+		t.Fatalf("CreateOrg: %v", err)
+	}
+	warm := func(orgID, name string, n int) {
+		c := newSandboxClass(t, st, ctx, orgID, name)
+		c.Warm = n
+		if err := st.UpsertSandboxClass(ctx, &c); err != nil {
+			t.Fatalf("UpsertSandboxClass: %v", err)
+		}
+	}
+	warm("org_1", "standard", 2)
+	warm("org_1", "cold", 0)
+	warm("org_2", "standard", 2)
+
+	got, err := st.WarmSandboxClasses(ctx)
+	if err != nil {
+		t.Fatalf("WarmSandboxClasses: %v", err)
+	}
+	if len(got) != 1 || got[0].OrgID != "org_1" || got[0].Name != "standard" {
+		t.Errorf("warm classes = %+v, want org_1's standard alone", got)
+	}
+
+	// The first payment lifts the limit, and the next sweep makes the pool.
+	paid := false
+	if _, err := st.UpdateOrg(ctx, "org_2", OrgChange{Limited: &paid}); err != nil {
+		t.Fatalf("UpdateOrg: %v", err)
+	}
+	if got, _ := st.WarmSandboxClasses(ctx); len(got) != 2 {
+		t.Errorf("after paying, warm classes are %d, want 2", len(got))
 	}
 }
 

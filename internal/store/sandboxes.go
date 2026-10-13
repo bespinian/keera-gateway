@@ -47,11 +47,15 @@ func scanSandboxClass(r row) (policy.SandboxClass, error) {
 	return c, nil
 }
 
-// LoadSandboxClasses reads every organisation's classes, for the warm pools.
+// WarmSandboxClasses reads the classes that should have a warm pool, across
+// every organisation. One that signed itself up has none until its first
+// payment, because a pool holds the deployment's machines whether used or not.
 // Unlike models they are not cached, because only the control API and the
 // sandbox manager read them, and both already talk to Postgres.
-func (s *Store) LoadSandboxClasses(ctx context.Context) ([]policy.SandboxClass, error) {
-	return queryAll(ctx, s.pool, scanSandboxClass, sandboxClassColumns+" FROM sandbox_classes ORDER BY org_id, name")
+func (s *Store) WarmSandboxClasses(ctx context.Context) ([]policy.SandboxClass, error) {
+	return queryAll(ctx, s.pool, scanSandboxClass, sandboxClassColumns+` FROM sandbox_classes
+		WHERE warm > 0 AND org_id IN (SELECT id FROM orgs WHERE NOT limited)
+		ORDER BY org_id, name`)
 }
 
 // ListSandboxClasses reads one organisation's classes.
