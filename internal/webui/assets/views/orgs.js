@@ -131,6 +131,8 @@ export async function orgsView(ctx) {
     {
       emptyTitle: "No organisations yet",
       emptyBody: "Create one per customer.",
+      sortBy: "Created",
+      sortDir: "desc",
       search: (o) => [o.name, o.id, o.email_domain || ""].join(" "),
       searchLabel: "organisations",
     },
