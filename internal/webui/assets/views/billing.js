@@ -238,13 +238,6 @@ async function billSection(ctx) {
       ),
     );
 
-  const note = h(
-    "div",
-    { class: "hint", style: { marginTop: "14px" } },
-    "Calls to models on this deployment's provider keys, at the provider's " +
-      "list price, in CHF. Months are in UTC.",
-  );
-
   return h(
     "div",
     {},
@@ -252,7 +245,6 @@ async function billSection(ctx) {
     controls,
     body,
     foot,
-    note,
   );
 }
 
