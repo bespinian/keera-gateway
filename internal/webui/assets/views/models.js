@@ -324,19 +324,12 @@ export async function providerModelsView(ctx) {
   );
 
   const price = (v) =>
-    v ? h("span", { class: "nowrap" }, listPrice(v)) : dash();
+    v ? h("span", { class: "nowrap" }, "CHF " + listPrice(v)) : dash();
 
   const head = h(
     "div",
     { class: "detail-head" },
     crumb(ctx, "/models", "Models"),
-    h(
-      "div",
-      { class: "muted", style: { marginBottom: "16px" } },
-      "The models the hosted providers offer. Prices are list prices in " +
-        "CHF per million tokens (Mtok). With a hosted provider, prompts " +
-        "leave your infrastructure.",
-    ),
   );
 
   const list = table(
