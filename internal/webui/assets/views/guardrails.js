@@ -268,7 +268,7 @@ function render(
     type: "number",
     min: "0",
     step: "0.01",
-    placeholder: "unlimited",
+    placeholder: "not set here",
     value: lim.budget_micros ? lim.budget_micros / 1e6 : "",
   });
   // A filter is chosen from the organisation's list rather than typed, because
@@ -420,7 +420,8 @@ function render(
   modal({
     wide: true,
     title: `${meta.title} - ${name}`,
-    subtitle: "Leave a field empty for unlimited.",
+    subtitle:
+      "Leave a field empty to set no limit here; a level above still applies.",
     body: h(
       "form",
       {},
@@ -523,7 +524,7 @@ function render(
           onClick: async (e) => {
             const button = e.currentTarget;
             button.disabled = true;
-            // A PUT replaces the whole guardrail, and this dialog shows eight
+            // A PUT replaces the whole guardrail, and this dialog shows nine
             // of its fields. Everything else it holds - the sandbox half, set
             // from the command line - is carried through unchanged, so saving
             // a budget here does not quietly drop a sandbox quota set there.
@@ -989,7 +990,7 @@ function numberInput(value) {
     type: "number",
     min: "0",
     step: "1",
-    placeholder: "unlimited",
+    placeholder: "not set here",
     value: value || "",
   });
 }

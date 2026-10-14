@@ -16,15 +16,15 @@ import (
 
 // Flag descriptions that 'guardrail set', 'limit' and 'budget' share.
 const (
-	rpmUsage    = "requests per minute (0 for unlimited)"
-	tpmUsage    = "tokens per minute (0 for unlimited)"
-	maxOutUsage = "cap on generated tokens per request (0 for unlimited)"
-	budgetUsage = "budget per period, in CHF (0 for unlimited)"
+	rpmUsage    = "requests per minute (0 clears it)"
+	tpmUsage    = "tokens per minute (0 clears it)"
+	maxOutUsage = "cap on generated tokens per request (0 clears it)"
+	budgetUsage = "budget per period, in CHF (0 clears it)"
 	periodUsage = "budget period: day or month"
 )
 
 // guardrailFlags are the flags of 'keera guardrail'. Numbers use -1 for "not
-// given" and 0 for "unlimited"; everything else is cleared by its --no- flag.
+// given" and 0 to clear the field; everything else is cleared by its --no- flag.
 type guardrailFlags struct {
 	models           string
 	noModels         bool
@@ -68,23 +68,24 @@ func registerGuardrailFlags(fs *flag.FlagSet) *guardrailFlags {
 		"comma-separated MCP tools this scope may call: a server, or server/tool")
 	fs.BoolVar(&f.noTools, "no-tools", false, "stop this scope limiting the tools; an outer level still does")
 	fs.IntVar(&f.maxSandboxes, "max-sandboxes", -1,
-		"how many sandboxes this scope may run at once (0 for unlimited); the sandbox "+
+		"how many sandboxes this scope may run at once (0 clears it); the sandbox "+
 			"flags are for an organisation or a project, not a key")
 	fs.DurationVar(&f.maxSandboxTTL, "max-sandbox-ttl", -1,
-		"longest lifetime any one of them may be given (0 for unlimited)")
+		"longest lifetime any one of them may be given (0 clears it)")
 	fs.StringVar(&f.sandboxClasses, "sandbox-classes", "",
 		"comma-separated sandbox classes this scope may use")
 	fs.BoolVar(&f.noSandboxClasses, "no-sandbox-classes", false,
 		"stop this scope limiting the sandbox classes; an outer level still does")
 	fs.Float64Var(&f.maxSandboxCPU, "max-sandbox-cpu", -1,
-		"largest sandbox this scope may run, in cores (0 for unlimited)")
+		"largest sandbox this scope may run, in cores (0 clears it)")
 	fs.IntVar(&f.maxSandboxMemory, "max-sandbox-memory", -1,
-		"largest sandbox this scope may run, in mebibytes (0 for unlimited)")
+		"largest sandbox this scope may run, in mebibytes (0 clears it)")
 	fs.StringVar(&f.repos, "repos", "",
 		"comma-separated repositories sandboxes may check out: owner, owner/name, or '*' "+
 			"for all; on an organisation, operators only")
 	fs.BoolVar(&f.noRepos, "no-repos", false,
-		"stop this scope limiting the repositories; an outer level still does")
+		"clear this scope's repositories: on an organisation that allows none, "+
+			"on a project it leaves the organisation's list")
 	return f
 }
 
@@ -214,13 +215,13 @@ func guardrailCmd(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		return out(r.asJSON, lim, func(w *table) { printLimits(w, lim) })
+		return out(r.asJSON, lim, func(w *table) { printLimits(w, lim, scope) })
 	default:
 		var lim policy.Limits
 		if err := c.do(ctx, "GET", guardrailPath(scope, scopeID), nil, &lim); err != nil {
 			return err
 		}
-		return out(r.asJSON, lim, func(w *table) { printLimits(w, lim) })
+		return out(r.asJSON, lim, func(w *table) { printLimits(w, lim, scope) })
 	}
 }
 
@@ -544,13 +545,19 @@ func levelLabel(l control.EffectiveLevel) string {
 	return string(l.Type) + " " + l.Name
 }
 
-func printLimits(w *table, lim policy.Limits) {
-	show(w, "models", joinedOr(lim.AllowedModels, "(all)"))
-	show(w, "max output tokens", orUnlimited(lim.MaxOutputTokens))
-	show(w, "requests/min", orUnlimited(lim.RPM))
-	show(w, "tokens/min", orUnlimited(lim.TPM))
+// notSet is what a scope's own guardrail shows for a field it leaves to the
+// levels around it. "unlimited" would be wrong: an outer level may still set it.
+const notSet = "(not set here)"
+
+// printLimits shows one scope's own guardrail, not what applies there; that is
+// 'guardrail effective'.
+func printLimits(w *table, lim policy.Limits, scope string) {
+	show(w, "models", joinedOr(lim.AllowedModels, notSet))
+	show(w, "max output tokens", notSetHere(lim.MaxOutputTokens))
+	show(w, "requests/min", notSetHere(lim.RPM))
+	show(w, "tokens/min", notSetHere(lim.TPM))
 	if lim.BudgetMicros == nil {
-		show(w, "budget", "(unlimited)")
+		show(w, "budget", notSet)
 	} else {
 		p := policy.PeriodMonth
 		if lim.BudgetPeriod != nil {
@@ -563,27 +570,39 @@ func printLimits(w *table, lim policy.Limits) {
 	} else {
 		show(w, "filters", strings.Join(lim.Filters, ","))
 	}
-	show(w, "mcp tools", joinedOr(lim.AllowedTools, "(all)"))
+	show(w, "mcp tools", joinedOr(lim.AllowedTools, notSet))
 	if lim.SystemPrompt == nil {
 		show(w, "system prompt", "(none)")
 	} else {
 		// One line; --json has the whole text.
 		show(w, "system prompt", firstLine(*lim.SystemPrompt))
 	}
-	show(w, "sandbox classes", joinedOr(lim.SandboxClasses, "(all)"))
-	show(w, "repositories", joinedOr(lim.AllowedRepos, "(inherited)"))
-	show(w, "max sandboxes", orUnlimited(lim.MaxSandboxes))
+	show(w, "sandbox classes", joinedOr(lim.SandboxClasses, notSet))
+	// Only the organisation grants repositories, so there nothing set is none.
+	noRepos := notSet
+	if scope == string(policy.ScopeOrg) {
+		noRepos = "(none)"
+	}
+	show(w, "repositories", joinedOr(lim.AllowedRepos, noRepos))
+	show(w, "max sandboxes", notSetHere(lim.MaxSandboxes))
 	if lim.MaxSandboxTTLSeconds == nil {
-		show(w, "max sandbox lifetime", "(unlimited)")
+		show(w, "max sandbox lifetime", notSet)
 	} else {
 		show(w, "max sandbox lifetime",
 			shortDuration(time.Duration(*lim.MaxSandboxTTLSeconds)*time.Second))
 	}
 	if lim.MaxSandboxCPU == nil && lim.MaxSandboxMemory == nil {
-		show(w, "max sandbox size", "(unlimited)")
+		show(w, "max sandbox size", notSet)
 	} else {
 		show(w, "max sandbox size", maxSize(derefInt(lim.MaxSandboxCPU), derefInt(lim.MaxSandboxMemory)))
 	}
+}
+
+func notSetHere(p *int) any {
+	if p == nil {
+		return notSet
+	}
+	return *p
 }
 
 // maxSize is a ceiling on a sandbox's size, in cores and mebibytes, the units

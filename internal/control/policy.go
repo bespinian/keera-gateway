@@ -312,12 +312,12 @@ func (s *Server) putGuardrails(w http.ResponseWriter, r *http.Request, p *authn.
 		{"max_output_tokens", lim.MaxOutputTokens}, {"rpm", lim.RPM}, {"tpm", lim.TPM},
 	} {
 		if f.v != nil && *f.v < 0 {
-			badRequest(w, "'"+f.name+"' cannot be negative; omit it for unlimited")
+			badRequest(w, "'"+f.name+"' cannot be negative; omit it to set no limit here")
 			return
 		}
 	}
 	if lim.BudgetMicros != nil && *lim.BudgetMicros < 0 {
-		badRequest(w, "'budget_micros' cannot be negative; omit it for unlimited")
+		badRequest(w, "'budget_micros' cannot be negative; omit it to set no limit here")
 		return
 	}
 	if err := s.st.PutGuardrail(r.Context(), scope, scopeID, lim); err != nil {

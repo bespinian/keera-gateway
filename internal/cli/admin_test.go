@@ -1673,7 +1673,7 @@ func TestMaxSizeShowsEitherPartAlone(t *testing.T) {
 	var w strings.Builder
 	tw := newTable(&w)
 	memory := 8192
-	printLimits(tw, policy.Limits{MaxSandboxMemory: &memory})
+	printLimits(tw, policy.Limits{MaxSandboxMemory: &memory}, "project")
 	_ = tw.Flush()
 	if !strings.Contains(w.String(), "any CPU, 8Gi") {
 		t.Errorf("a memory-only limit was not shown:\n%s", w.String())

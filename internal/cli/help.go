@@ -393,8 +393,9 @@ var commands = []command{
 			"is the ceiling a key's fits inside. So a scope that sets nothing is not " +
 			"unlimited - it is whatever holds it. 'guardrail effective' says which level " +
 			"each number came from, and is the thing to read before changing one.\n\n" +
-			"'keera limit' and 'keera budget' set one part of a guardrail each. A --no- flag " +
-			"clears that part on this scope, so the level above decides it again.\n\n" +
+			"'keera limit' and 'keera budget' set one part of a guardrail each. A 0 clears " +
+			"that part on this scope, so the level above decides it again. 'guardrail set' " +
+			"clears a list or the prompt with its --no- flag.\n\n" +
 			"For an organisation the name or id may be left out: it is then the one you are in. A " +
 			"project or key named by its name is looked up in that organisation too.",
 		subs: []subcommand{

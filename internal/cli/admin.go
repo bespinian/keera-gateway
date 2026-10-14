@@ -299,7 +299,7 @@ func textOrFile(v string) (string, error) {
 	return strings.TrimSpace(string(b)), nil
 }
 
-// setInt applies a flag that uses -1 for "not given" and 0 for "unlimited".
+// setInt applies a flag that uses -1 for "not given" and 0 to clear the field.
 func setInt(dst **int, v int) {
 	switch {
 	case v < 0:
@@ -407,13 +407,6 @@ func share(part, whole int64) string {
 func derefInt(p *int) int {
 	if p == nil {
 		return 0
-	}
-	return *p
-}
-
-func orUnlimited(p *int) any {
-	if p == nil {
-		return "(unlimited)"
 	}
 	return *p
 }
