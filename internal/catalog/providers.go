@@ -839,28 +839,40 @@ func applyProvider(m Model) (Model, error) {
 	if m.Location == "" {
 		m.Location = p.Location
 	}
-	if kind := policy.Kind(m.Kind); kind != "" && !slices.Contains(p.Kinds, kind) {
-		return m, fmt.Errorf("provider %s serves only %s, not %q",
-			p.Name, p.kindNames(), m.Kind)
-	}
-	if m.BackendModel == "" {
-		// The caller's own check reports it, in terms of this provider.
-		return m, nil
+	priced := m.InputMicrosPerMTok != nil && m.OutputMicrosPerMTok != nil
+	if err := p.Check(policy.Kind(m.Kind), m.BackendModel, priced); err != nil {
+		return m, err
 	}
 	known, isKnown := p.Model(m.BackendModel)
-	if !isKnown {
-		// A model newer than this build must be priced by hand: a model that
-		// silently costs nothing is one no budget can hold.
-		if m.InputMicrosPerMTok == nil || m.OutputMicrosPerMTok == nil {
-			return m, fmt.Errorf("%s is not in the Keera Gateway price table for %s "+
-				"(it knows: %s); "+
-				"state input_micros_per_mtok and output_micros_per_mtok for it - "+
-				"0 to declare the model unbilled, which no budget can then hold",
-				m.BackendModel, p.Name, p.modelIDs())
-		}
+	if m.BackendModel == "" || !isKnown {
 		return m, nil
 	}
 	return fillFromTable(m, known), nil
+}
+
+// Check refuses a model the provider cannot serve or this build cannot bill:
+// a kind the provider has no endpoint for, or a model missing from the price
+// table that states no prices of its own. Catalogue files and the control API
+// both run it, so neither accepts what the other refuses.
+func (p Provider) Check(kind policy.Kind, backendModel string, priced bool) error {
+	if kind != "" && !slices.Contains(p.Kinds, kind) {
+		return fmt.Errorf("provider %s serves only %s, not %q",
+			p.Name, p.kindNames(), kind)
+	}
+	if backendModel == "" {
+		// The caller's own check reports it, in terms of this provider.
+		return nil
+	}
+	// A model newer than this build must be priced by hand: a model that
+	// silently costs nothing is one no budget can hold.
+	if _, known := p.Model(backendModel); !known && !priced {
+		return fmt.Errorf("%s is not in the Keera Gateway price table for %s "+
+			"(it knows: %s); "+
+			"state input_micros_per_mtok and output_micros_per_mtok for it - "+
+			"0 to declare the model unbilled, which no budget can then hold",
+			backendModel, p.Name, p.modelIDs())
+	}
+	return nil
 }
 
 // fillFromTable sets each value the entry left out to the table's.

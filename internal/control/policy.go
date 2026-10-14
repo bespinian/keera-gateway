@@ -412,11 +412,22 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 		// Enabled nil means not said: a new model starts enabled, and an
 		// existing one keeps what it was.
 		Enabled *bool `json:"enabled"`
+		// The two prices shadow the model's, so a price left out can be told
+		// from one set to 0.
+		InputMicrosPerMTok  *int64 `json:"input_micros_per_mtok"`
+		OutputMicrosPerMTok *int64 `json:"output_micros_per_mtok"`
 	}
 	if !readJSON(w, r, &body) {
 		return
 	}
 	m := body.Model
+	priced := body.InputMicrosPerMTok != nil && body.OutputMicrosPerMTok != nil
+	if body.InputMicrosPerMTok != nil {
+		m.InputMicrosPerMTok = *body.InputMicrosPerMTok
+	}
+	if body.OutputMicrosPerMTok != nil {
+		m.OutputMicrosPerMTok = *body.OutputMicrosPerMTok
+	}
 	m.Alias = r.PathValue("alias")
 	m.OrgID = orgID
 	if !policy.ValidModelAlias(m.Alias) {
@@ -441,8 +452,9 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 			badRequest(w, err.Error())
 			return
 		}
+		priced = true
 	}
-	if msg := normalizeModel(&m); msg != "" {
+	if msg := normalizeModel(&m, priced); msg != "" {
 		badRequest(w, msg)
 		return
 	}
@@ -569,8 +581,8 @@ func badAlias(alias string) string {
 }
 
 // normalizeModel fills in a model's defaults and says what is wrong with it,
-// or "" when nothing is.
-func normalizeModel(m *policy.Model) string {
+// or "" when nothing is. Priced says the caller stated both prices.
+func normalizeModel(m *policy.Model, priced bool) string {
 	if err := m.CheckBackend(); err != nil {
 		return err.Error()
 	}
@@ -583,11 +595,17 @@ func normalizeModel(m *policy.Model) string {
 	// The provider must be one this build knows, because the gateway reads
 	// it to choose how to talk to the backend. Its defaults are not applied
 	// here: the caller sends every value, and may have changed any of them.
+	// What it can serve and bill is checked as for a catalogue file.
 	m.Provider = strings.ToLower(strings.TrimSpace(m.Provider))
 	provider, known := catalog.ProviderByName(m.Provider)
 	if m.Provider != "" && !known {
 		return "unknown provider " + strconv.Quote(m.Provider) + "; Keera Gateway knows: " +
 			catalog.ProviderNames()
+	}
+	if known {
+		if err := provider.Check(m.Kind, m.BackendModel, priced); err != nil {
+			return err.Error()
+		}
 	}
 	// Every model runs somewhere, so an unstated location is the provider's,
 	// or read off the backend, as for a catalogue file.

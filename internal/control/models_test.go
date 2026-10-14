@@ -250,3 +250,15 @@ func TestNoSubscriptionModelWhileSubscriptionsAreOff(t *testing.T) {
 		t.Errorf("status = %d %s; want 400 naming the setting", w.Code, w.Body)
 	}
 }
+
+// A model the price table does not know is billed at what the request says,
+// so a request that says nothing is refused, as a catalogue file is.
+func TestAnUnknownProviderModelMustStateItsPrices(t *testing.T) {
+	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
+	w := callModel(s.putModel, admin("org_1"), http.MethodPut, "next", "?org_id=org_1",
+		`{"kind":"chat","provider":"anthropic","backends":["https://api.anthropic.com/v1"],
+		"backend_model":"claude-next","enabled":true}`)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "price table") {
+		t.Errorf("status = %d %s; want 400 asking for prices", w.Code, w.Body)
+	}
+}

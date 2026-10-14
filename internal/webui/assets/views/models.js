@@ -1546,8 +1546,10 @@ function editModel(ctx, existing, providers, pick) {
             // Left empty, the control plane fills in the provider's, or
             // onprem.
             location: location.value.trim().toLowerCase(),
-            input_micros_per_mtok: toMicros(priceIn.value),
-            output_micros_per_mtok: toMicros(priceOut.value),
+            // Left empty, these two are sent as unset, so a model the price
+            // table does not know is refused rather than saved unbilled.
+            input_micros_per_mtok: statedMicros(priceIn.value),
+            output_micros_per_mtok: statedMicros(priceOut.value),
             cached_input_micros_per_mtok: toMicros(priceCached.value),
             cache_write_micros_per_mtok: toMicros(priceWrite.value),
             long_prompt: longPrompt(),
@@ -2196,4 +2198,9 @@ function priceInput(v, disabled) {
 function toMicros(v) {
   const n = parseFloat(v);
   return Number.isFinite(n) && n > 0 ? Math.round(n * 1e6) : 0;
+}
+
+// statedMicros is toMicros, or null for an empty field.
+function statedMicros(v) {
+  return String(v).trim() === "" ? null : toMicros(v);
 }
