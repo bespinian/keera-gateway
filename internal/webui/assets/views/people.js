@@ -323,15 +323,18 @@ function addPerson(ctx) {
   const canAssign = !ctx.state.me.roles_from_directory;
   const role = roleSelect("member");
   const err = h("div");
-  // Without a directory a passkey is the only way in, so it is the default.
+  // Without a directory a passkey is the only way in, so it is the only
+  // choice: the API refuses the other.
   const signIn = h(
     "select",
     { class: "select" },
-    h(
-      "option",
-      { value: "sso", selected: Boolean(ctx.state.me.sso) },
-      "Their identity provider",
-    ),
+    ctx.state.me.sso
+      ? h(
+          "option",
+          { value: "sso", selected: true },
+          "Their identity provider",
+        )
+      : null,
     h("option", { value: "passkey", selected: !ctx.state.me.sso }, "A passkey"),
   );
 

@@ -1128,6 +1128,14 @@ function editFilter(ctx, existing, readers) {
     modelField.style.display = pattern ? "none" : "";
     promptField.style.display = pattern ? "none" : "";
     rulesField.style.display = pattern ? "" : "none";
+    // A decision model writes no text, so only a gate can run on one: the
+    // API refuses it for a rewrite.
+    for (const opt of model.options) {
+      const decision =
+        readers.find((m) => m.alias === opt.value)?.kind === "decision";
+      opt.hidden = opt.disabled = decision && !gate;
+      if (opt.disabled && opt.selected) model.value = "";
+    }
     // A decision model answers a short yes-or-no question rather than
     // following an instruction, so it gets an example of its own.
     const decides =

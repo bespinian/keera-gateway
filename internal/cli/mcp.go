@@ -29,7 +29,7 @@ func registerMCPFlags(fs *flag.FlagSet) *mcpFlags {
 	fs.StringVar(&f.endpoint, "endpoint", "", "the server's Streamable HTTP endpoint")
 	fs.StringVar(&f.description, "description", "", "what the server is for, in a sentence")
 	fs.StringVar(&f.authHeader, "auth-header", "",
-		"header the credential goes in (default: Authorization, as a bearer token)")
+		"header the credential goes in, as it is; empty sends it as a bearer token in Authorization")
 	fs.StringVar(&f.apiKey, "api-key", "",
 		"credential to store encrypted; @path reads a file and @- reads stdin")
 	fs.BoolVar(&f.noAPIKey, "no-api-key", false, "remove the stored credential")

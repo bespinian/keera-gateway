@@ -259,10 +259,9 @@ function editServer(ctx, existing) {
   const description = input(m.description, {
     placeholder: "Issues and pull requests",
   });
-  const authHeader = input(m.auth_header, {
-    class: "input mono",
-    placeholder: "Authorization",
-  });
+  // No placeholder: naming Authorization here sends the value without
+  // "Bearer ", which is not what an empty field does.
+  const authHeader = input(m.auth_header, { class: "input mono" });
 
   // Write-only, as on a model: the control plane never sends a credential
   // back, so an empty field leaves the stored one alone.
@@ -286,7 +285,7 @@ function editServer(ctx, existing) {
     { onSubmit: (e) => e.preventDefault() },
     err,
     field("Alias", alias, "Used in the address clients connect to."),
-    field("Address", url, "The server's Streamable HTTP endpoint."),
+    field("Endpoint", url, "The server's Streamable HTTP address."),
     field("Description", description, "What the server is for, in a sentence."),
     field(
       "Credential",
@@ -309,7 +308,8 @@ function editServer(ctx, existing) {
       "Header",
       authHeader,
       "The header for the credential. Empty sends it as a bearer token in " +
-        "Authorization. Any other header gets the value as is.",
+        "Authorization. A header named here, Authorization too, gets the value " +
+        "as is.",
     ),
     h("label", { class: "row-tight" }, enabled, "Serve this server"),
   );
