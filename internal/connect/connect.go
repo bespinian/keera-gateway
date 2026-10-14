@@ -8,6 +8,8 @@
 package connect
 
 import (
+	"cmp"
+	"encoding/json"
 	"slices"
 	"strconv"
 	"strings"
@@ -46,6 +48,8 @@ type Client struct {
 // Model is one model or router a configuration names.
 type Model struct {
 	Alias string `json:"alias"`
+	// Name is its name for people, or empty to make one from the alias.
+	Name string `json:"name,omitempty"`
 	// MaxContext is its window, or zero for the default. A router has none.
 	MaxContext int `json:"max_context,omitempty"`
 }
@@ -114,10 +118,21 @@ func fill(text string, m Model) string {
 	window, output := Limits(m.MaxContext)
 	return strings.NewReplacer(
 		"{{alias}}", m.Alias,
-		"{{name}}", Title(m.Alias),
+		"{{name}}", jsonText(cmp.Or(m.Name, Title(m.Alias))),
 		"{{context}}", strconv.Itoa(window),
 		"{{output}}", strconv.Itoa(output),
 	).Replace(text)
+}
+
+// jsonText escapes a name for the JSON string every template puts {{name}} in.
+// An administrator types a display name, so it may hold a quote.
+func jsonText(s string) string {
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(s)
+	out := strings.TrimSuffix(b.String(), "\n")
+	return out[1 : len(out)-1]
 }
 
 func first(models []Model) Model {

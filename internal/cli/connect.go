@@ -118,7 +118,7 @@ func connectCmd(ctx context.Context, args []string) error {
 			"path":   client.Path,
 			"config": client.Render(gatewayURL, connectList(models)),
 			"run":    client.RunText(connectList(models)),
-			"note":   client.Note,
+			"note":   client.NoteText(),
 		}
 		if own != nil {
 			res["key"] = own.Name
@@ -229,7 +229,8 @@ func keyModels(chat []policy.Model, allowed []string) []policy.Model {
 func connectList(models []policy.Model) []connect.Model {
 	out := make([]connect.Model, 0, len(models))
 	for _, m := range models {
-		out = append(out, connect.Model{Alias: m.Alias, MaxContext: m.MaxContext})
+		out = append(out, connect.Model{Alias: m.Alias, Name: m.DisplayName,
+			MaxContext: m.MaxContext})
 	}
 	return out
 }

@@ -352,3 +352,21 @@ func TestNoClientPinsATemperature(t *testing.T) {
 		}
 	}
 }
+
+// A model's display name is what a picker shows, even one with a quote in it.
+func TestADisplayNameIsTheModelsName(t *testing.T) {
+	named := []Model{{Alias: "fast", Name: `Fast "and" cheap`}}
+	for _, c := range Clients() {
+		if c.Lang != "json" || !strings.Contains(c.Entry, "{{name}}") {
+			continue
+		}
+		rendered := c.Render("https://keera.example.ch", named)
+		if !strings.Contains(rendered, `Fast \"and\" cheap`) {
+			t.Errorf("%s does not name the model by its display name:\n%s", c.Key, rendered)
+		}
+		var doc map[string]any
+		if err := json.Unmarshal([]byte(rendered), &doc); err != nil {
+			t.Errorf("%s does not render valid JSON: %v\n%s", c.Key, err, rendered)
+		}
+	}
+}

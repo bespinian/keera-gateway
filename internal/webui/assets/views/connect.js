@@ -65,9 +65,11 @@ function limits(maxContext) {
 function fill(text, m) {
   const { context, output } = limits((m && m.max_context) || 0);
   const alias = (m && m.alias) || "";
+  // {{name}} sits in a JSON string, and a display name may hold a quote.
+  const name = JSON.stringify((m && m.display_name) || title(alias)).slice(1, -1);
   return String(text || "")
     .replaceAll("{{alias}}", alias)
-    .replaceAll("{{name}}", title(alias))
+    .replaceAll("{{name}}", name)
     .replaceAll("{{context}}", String(context))
     .replaceAll("{{output}}", String(output));
 }
