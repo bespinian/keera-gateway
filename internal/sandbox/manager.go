@@ -25,8 +25,9 @@ import (
 
 // The manager sits between the control plane and the driver. It resolves the
 // class, applies the guardrail, clamps the lifetime, mints the key, writes the
-// row, calls the driver, and undoes all of it if the driver fails. The control
-// plane only authenticates the caller and returns JSON.
+// row and calls the driver. If the driver fails, it revokes the key and the
+// repository credential and marks the row failed. The control plane only
+// authenticates the caller and returns JSON.
 //
 // It also runs the sweep, which ends sandboxes whose time is up and keeps the
 // running-time column current.
@@ -191,8 +192,8 @@ type CreateRequest struct {
 
 // Create makes one sandbox.
 //
-// Every check runs before anything is created, so a refusal leaves no API key
-// or half-made pod behind.
+// A refusal leaves nothing live behind: a key or repository credential made
+// before a later check refuses is revoked at once.
 func (m *Manager) Create(ctx context.Context, req CreateRequest) (store.Sandbox, error) {
 	if req.Purpose == "" {
 		req.Purpose = policy.PurposeEngineer

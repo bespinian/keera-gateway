@@ -493,9 +493,9 @@ func sandboxContainer(spec Spec) kubeContainer {
 		SecurityContext: &kubeCtrSecurity{
 			AllowPrivilegeEscalation: new(false),
 			Capabilities:             &kubeCaps{Drop: []string{"ALL"}},
-			// The root filesystem stays writable: people install packages
-			// and builds write to /usr/local. The isolation tier holds the
-			// boundary.
+			// The root filesystem stays writable wherever the sandbox user
+			// has rights, such as home and /tmp. The isolation tier holds
+			// the boundary.
 		},
 		// Ready when sshd answers. The image starts sshd last, after home is
 		// set up and the repository checked out, so this also means setup is

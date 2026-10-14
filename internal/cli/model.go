@@ -369,8 +369,8 @@ func (r *modelRun) apply(ctx context.Context) error {
 		return err
 	}
 	// One model at a time, as the endpoint takes them. The file is validated
-	// first, so a stop halfway is the control plane going away, and a re-run
-	// is safe.
+	// first, so a stop halfway is the control plane going away or refusing one
+	// model, such as a name taken by a router, and a re-run is safe.
 	for i, m := range models {
 		m.OrgID = r.orgID
 		if err := r.c.do(ctx, "PUT", r.path(m.Alias, ""), modelPut{Model: m}, &models[i]); err != nil {

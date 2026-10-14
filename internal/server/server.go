@@ -37,7 +37,7 @@ required:
   KEERA_OPERATOR_KEY    credential for the control API
   KEERA_SECRET_KEY      encrypts API keys set in the panel (openssl rand -hex 32)
 
-Every other setting is in docs/install.md.
+Every other setting is in docs/install.md and the pages it links.
 
 A hosted model's API key is set on the model - in the control panel, or with
 'keera model set <alias> --api-key @-', which reads it from stdin rather than a

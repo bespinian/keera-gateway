@@ -21,7 +21,7 @@
 // What is deliberately not here is a way in. An administrator can see every
 // sandbox in the organisation and terminate one, because the quota and the bill
 // are theirs, and cannot open a shell in one. Attaching is
-// `keera sandbox ssh`, for the owner alone.
+// `keera sandbox ssh`, for the owner and operators.
 
 import { api } from "../api.js";
 import {
@@ -108,7 +108,7 @@ export async function sandboxesView(ctx) {
         "Running now",
         num(running),
         null,
-        "the rest are suspended or expired",
+        "the rest are starting, suspended, expired or failed",
       ),
       // Core-seconds rather than wall time, because two minutes of thirty-two
       // cores is not two minutes of two - and this is the number a chargeback
@@ -621,7 +621,7 @@ function removeClass(ctx, c) {
 
 /** newSandbox is the create dialog.
  *
- *  It asks for four things and no more. The ssh key is the one that would
+ *  It asks for no more than a sandbox needs. The ssh key is the one that would
  *  otherwise be a surprise: a sandbox with nothing in authorized_keys is one
  *  nobody can open a shell in, so the field is required for an engineer's
  *  sandbox and the dialog says why rather than letting the control plane

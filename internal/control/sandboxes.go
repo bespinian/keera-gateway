@@ -264,9 +264,9 @@ func (s *Server) getSandbox(w http.ResponseWriter, r *http.Request, p *authn.Pri
 }
 
 // mayHandleSandbox is the rule for reading and changing a sandbox. An
-// administrator may see, terminate, suspend and extend any sandbox in their
-// organisation, as those are quota and cost decisions. A member may do that
-// with their own. Getting inside one is stricter: see canAttach.
+// administrator may see, terminate, suspend, resume and extend any sandbox in
+// their organisation, as those are quota and cost decisions. A member may do
+// that with their own. Getting inside one is stricter: see canAttach.
 func mayHandleSandbox(p *authn.Principal, sb store.Sandbox) bool {
 	return p.CanAdminOrg(sb.OrgID) || (sb.UserID != "" && sb.UserID == p.UserID)
 }

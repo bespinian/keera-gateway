@@ -91,8 +91,8 @@ export async function dashboardView(ctx) {
           // answer: the failed rows on the request log, with the model, the key
           // and what the backend said. The window it opens on is the one being
           // read here, so nobody has to rebuild the filter they arrived with.
-          // Only for a reader who can open them - a member is sent nowhere rather
-          // than somewhere that would refuse them.
+          // Only for an administrator - a member's log holds only their own
+          // keys' requests, not the organisation's failures counted here.
           failureLink(
             ctx,
             h("span", { class: "dot" }),
@@ -193,9 +193,9 @@ export async function dashboardView(ctx) {
 }
 
 // failureLink is the failed count as the way in to the failures behind it: the
-// request log, opened on the failed rows rather than on all of them. Whoever
-// cannot read that log gets the same count as a plain pill - a link to a screen
-// the control plane would refuse them is worse than no link.
+// request log, opened on the failed rows rather than on all of them. A member
+// gets the same count as a plain pill: their log holds only their own keys'
+// requests, so a link would open on rows that do not add up to the count.
 //
 // It is a real link rather than a button, so that it opens in a new tab like
 // anything else somebody wants to keep beside the dashboard.

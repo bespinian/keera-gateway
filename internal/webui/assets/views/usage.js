@@ -62,7 +62,8 @@ export async function usageView(ctx) {
   const total = rows.reduce((a, r) => a + r.cost_micros, 0);
   const requests = rows.reduce((a, r) => a + r.requests, 0);
 
-  // Only served requests count here: a refused or failed one costs nothing.
+  // Only served requests are counted, but the cost adds up every row: a
+  // refused or failed one can still have paid for a filter or router call.
   ctx.setSubtitle(
     `${num(requests)} served ${plural(requests, "request")} · ${money(total)}`,
   );

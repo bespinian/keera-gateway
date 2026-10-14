@@ -36,8 +36,8 @@ type Redis struct {
 	resting time.Time
 }
 
-// Reporter counts the decisions made locally because Redis could not be
-// reached. An interface, so this package depends on nothing.
+// Reporter counts the admissions and token charges made locally because Redis
+// could not be reached. An interface, so this package depends on nothing.
 type Reporter interface {
 	RateLimitFallback()
 }
@@ -361,8 +361,8 @@ func (r *Redis) extrapolate(key string, perMinute int, now time.Time) (float64, 
 	return min(t, burst), true
 }
 
-// degrade records that a decision was made locally because Redis could not
-// answer it. The gateway keeps serving: Redis is optional coordination, and
+// degrade records that an admission or charge was made locally because Redis
+// could not answer it. The gateway keeps serving: Redis is optional coordination, and
 // the exact control is the budget in Postgres. The log says the limits are per
 // replica until Redis is back.
 func (r *Redis) degrade(doing string, err error) {
@@ -388,8 +388,8 @@ func (r *Redis) degrade(doing string, err error) {
 		"doing", doing, "error", err)
 }
 
-// skip reports whether Redis failed so recently that this decision is made
-// locally without trying it. Such a decision is counted as a fallback too.
+// skip reports whether Redis failed so recently that this admission or charge
+// is made locally without trying it. It is counted as a fallback too.
 func (r *Redis) skip() bool {
 	r.mu.Lock()
 	resting := time.Now().Before(r.resting)

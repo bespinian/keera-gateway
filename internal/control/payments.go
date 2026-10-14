@@ -519,9 +519,9 @@ func (s *Server) refreshCredit(ctx context.Context) {
 const paymentsEvery = 30 * time.Second
 
 // RunPayments charges the saved cards of accounts that ran low, and settles
-// payments whose webhook never came, until ctx ends. Every replica runs it:
-// an organisation has at most one automatic top-up under way, and a payment
-// is credited once, whichever replica gets there first.
+// payments whose webhook never came, until ctx ends. Every replica runs it,
+// but they take turns, so each round one replica looks. A payment is still
+// credited once, whether the webhook or this check gets there first.
 func (s *Server) RunPayments(ctx context.Context) {
 	if s.opts.Payments == nil {
 		return

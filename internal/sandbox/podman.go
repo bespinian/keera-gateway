@@ -18,8 +18,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// The podman driver runs sandboxes on a single host, for a gateway that runs as
-// a process there (`make dev`, a NixOS service) and has podman but no cluster.
+// The podman driver runs sandboxes on a single host, for local development and
+// tests: a gateway that runs as a process there (`make dev`) and has podman.
 // The compose gateway runs in a container and cannot use it.
 //
 // It is the weaker driver, on purpose and openly:

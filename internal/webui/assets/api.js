@@ -122,12 +122,12 @@ export const api = {
   // Signing in with a provider is a page the browser goes to, not a call.
   loginURL: (params) => url("/auth/login" + query(params)),
 
-  // Passkeys. The /auth routes work before anybody has signed in, and take
-  // a JSON body even when it is empty.
   // The sign-up screen, after a sign-in that matched no organisation.
   signupInfo: () => get("/auth/signup"),
   completeSignup: (body) => request("POST", "/auth/signup", body),
 
+  // Passkeys. The /auth routes work before anybody has signed in, and take
+  // a JSON body even when it is empty.
   passkeySignInOptions: (flow, next) =>
     request("POST", "/auth/passkey/options", {
       flow: flow || "",
@@ -414,8 +414,8 @@ export const api = {
 
   // The same log grouped into the tasks its requests were made for: one row
   // per session rather than per call. It takes the project, key, model and person
-  // narrowing of requests(), but no outcome or status. It adds `sort` and
-  // `unhappy`, because this screen is opened for the ranking - the task that
+  // narrowing of requests(), and its outcome and status. It adds `sort`,
+  // because this screen is opened for the ranking - the task that
   // cost four francs, the one that made four hundred calls - and a log
   // ordered by time buries both.
   sessions: (params) => get("/v1/sessions" + query(params)),

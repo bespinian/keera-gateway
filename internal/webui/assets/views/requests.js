@@ -1,4 +1,4 @@
-// Requests: the whole event log, read across the deployment.
+// Requests: the event log, every request rather than only the failures.
 //
 // This is where the dashboard's numbers came from. The charts say when
 // something changed and this says what changed - which model, whose key, which

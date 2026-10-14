@@ -8,9 +8,9 @@
 //
 // Everything is behind Driver, with two implementations. The Kubernetes driver
 // writes Sandbox objects for the agent-sandbox controller
-// (sigs.k8s.io/agent-sandbox). The podman driver runs local containers for a
-// gateway that runs as a process on a single host, such as `make dev` or a
-// NixOS service; it has weaker isolation and no warm pool.
+// (sigs.k8s.io/agent-sandbox). The podman driver runs local containers for
+// development and tests, such as `make dev`; it has weaker isolation and no
+// warm pool.
 //
 // # No client-go
 //

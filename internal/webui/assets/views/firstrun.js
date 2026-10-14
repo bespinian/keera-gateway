@@ -55,9 +55,9 @@ export function firstRun(ctx, setup) {
       title: "Issue a key and connect a client",
       done: setup.keys > 0,
       body:
-        "Usage and limits are tracked per key. A key goes in the default " +
-        "project unless you pick another. The panel gives you a ready " +
-        "editor configuration with it.",
+        "Usage and limits are tracked per key. A key goes in the " +
+        "organisation's first project unless you pick another. The panel " +
+        "gives you a ready editor configuration with it.",
       action:
         setup.orgs > 0 && admin
           ? { label: "Go to API keys", run: () => ctx.navigate("/keys") }

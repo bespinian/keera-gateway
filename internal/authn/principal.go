@@ -48,8 +48,8 @@ const (
 	MethodOperatorKey Method = "operator_key"
 	MethodSession     Method = "session"
 	// MethodCLI is the same identity as a session, but sent in a header
-	// rather than a cookie. It is its own method so that only it may skip the
-	// cross-site checks a cookie needs.
+	// rather than a cookie. It is its own method so that, unlike a session, it
+	// skips the cross-site checks a cookie needs.
 	MethodCLI Method = "cli"
 )
 

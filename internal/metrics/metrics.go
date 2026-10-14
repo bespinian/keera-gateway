@@ -63,8 +63,8 @@ type Registry struct {
 	// family's label names above.
 	requests map[string]*series
 	inflight atomic.Int64
-	// rlFallback counts rate-limit decisions made locally because Redis was
-	// unreachable. Anything but zero means the limits bind per replica.
+	// rlFallback counts rate-limit admissions and token charges made locally
+	// because Redis was unreachable. Anything but zero means the limits bind per replica.
 	rlFallback   atomic.Int64
 	upstreamErrs map[string]*series
 	overhead     map[string]*series
@@ -157,7 +157,8 @@ func (r *Registry) UpstreamError(model, org string) {
 	r.seriesIn(r.upstreamErrs, nil, model, org).count.Add(1)
 }
 
-// RateLimitFallback records a rate-limit decision that Redis could not answer.
+// RateLimitFallback records an admission or token charge that Redis could not
+// answer.
 func (r *Registry) RateLimitFallback() { r.rlFallback.Add(1) }
 
 // InflightAdd tracks concurrent upstream requests, which shows whether the
@@ -190,7 +191,7 @@ func (r *Registry) render(w io.Writer) {
 		func(s *series) int64 { return s.count.Load() })
 
 	header(w, "keera_ratelimit_fallback_total",
-		"Rate-limit decisions made locally because Redis was unreachable.", "counter")
+		"Rate-limit admissions and token charges made locally because Redis was unreachable.", "counter")
 	_, _ = fmt.Fprintf(w, "keera_ratelimit_fallback_total %d\n", r.rlFallback.Load())
 
 	overhead := keyed{w: w, labels: overheadLabels, m: r.overhead}

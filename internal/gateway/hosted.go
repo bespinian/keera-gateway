@@ -22,8 +22,9 @@ import (
 // What is kept is a list, not what is taken out: a hosted tool released next
 // month is one this build has never heard of, and it is taken out too.
 
-// clientTools are the tool types the client runs, by prefix. An Anthropic
-// tool with no type is one the client declared, like a function.
+// anthropicClientTools and openAIClientTools are the tool types the client
+// runs, by type, or by prefix for entries ending in '_'. An Anthropic tool
+// with no type is one the client declared, like a function.
 var (
 	anthropicClientTools = []string{"custom", "bash_", "text_editor_", "computer_", "memory_"}
 	openAIClientTools    = []string{"function", "custom", "local_shell", "computer_use_preview",

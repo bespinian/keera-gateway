@@ -205,7 +205,7 @@ func (m *mcpRun) toolCalls(ctx context.Context) error {
 	})
 }
 
-// mcpConnect prints how to point the common clients at one server through
+// connect prints how to point the common clients at one server through
 // the gateway. The key stays in the environment, as it does for 'keera
 // connect'.
 func (m *mcpRun) connect(ctx context.Context) error {

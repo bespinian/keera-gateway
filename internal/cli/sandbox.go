@@ -292,8 +292,8 @@ func (r *sandboxRun) apply(ctx context.Context) error {
 		return err
 	}
 	// One class at a time, as the endpoint takes them. The file is checked
-	// first, so a stop halfway is the control plane going away, and a re-run
-	// is safe.
+	// first, so a stop halfway is the control plane going away or refusing one
+	// class, such as its image, and a re-run is safe.
 	classes := make([]policy.SandboxClass, len(entries))
 	for i, e := range entries {
 		path := aliasPath("sandbox-classes", orgID, e.Name, "")
