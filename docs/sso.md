@@ -167,8 +167,11 @@ Users screen.
    secret ID. The value is shown only once. Note the expiry: Entra secrets last
    at most 24 months, and an expired secret fails every sign-in.
 5. **Token configuration → Add optional claim**, token type **ID**, and add
-   `email`. Entra does not always put an email in the ID token, and Keera
-   refuses an identity without one.
+   `email` and `xms_edov`. Entra does not always put an email in the ID token,
+   and Keera refuses an identity without one. Entra sends no `email_verified`;
+   `xms_edov` says whether the tenant owns the address's domain, and Keera reads
+   it instead. If the list does not offer it, add it under
+   `optionalClaims.idToken` in the **Manifest**.
 6. Roles, if the directory should decide them instead of Keera. Use **App
    roles**, not groups:
 
@@ -369,12 +372,12 @@ KEERA_OIDC_GOOGLE_SIGNUP=true
 
 Set it only on a provider that proves every address itself, such as Google with
 `KEERA_OIDC_GOOGLE_DOMAINS=*`. If such a provider vouches for any domain, a
-sign-in without `email_verified: true` is refused. Passkeys never sign anybody
-up. The gateway refuses to start if any provider also sets `ADMIN_GROUPS`: that
-group decides the administrator role for the whole gateway, so the person who
-created an organisation would lose the role at their next sign-in. It also
-refuses to start until `KEERA_UPSTREAM_PRIVATE` says what inside your network
-an organisation may reach. See
+sign-in without `email_verified: true` (Entra: `xms_edov`) is refused. Passkeys
+never sign anybody up. The gateway refuses to start if any provider also sets
+`ADMIN_GROUPS`: that group decides the administrator role for the whole gateway,
+so the person who created an organisation would lose the role at their next
+sign-in. It also refuses to start until `KEERA_UPSTREAM_PRIVATE` says what
+inside your network an organisation may reach. See
 [install.md](install.md#where-the-gateway-may-connect).
 
 A sign-in that matches no organisation then lands on a screen that offers:
@@ -677,7 +680,7 @@ gateway whose only way in is passkeys, `--provider` can be left out.
 | A request is refused with `org_limited`                        | The organisation signed up and has not paid yet. See [What a new organisation can use](#what-a-new-organisation-can-use).                                        |
 | "that email domain belongs to another organisation"            | Each domain belongs to one organisation. `keera org list` shows which; clear it there first.                                                                     |
 | "cannot be used with … sign-in"                                | The provider is only allowed some domains (`KEERA_OIDC_<NAME>_DOMAINS`), and the address is at another. Sign in through its own provider.                        |
-| "is not a verified address"                                    | The directory marks the email unverified (`email_verified` is false). Verify it there. A missing claim is accepted, except on a sign-up provider for any domain. |
+| "is not a verified address"                                    | `email_verified` (Entra: `xms_edov`) is false. Verify the email in the directory. A missing claim is accepted, except on a sign-up provider for any domain.      |
 | "in too many groups"                                           | Entra group overage. Use app roles, or grant the role by address. See above.                                                                                     |
 | "already belongs to an account linked to a different identity" | That address signed in first through another provider, or as someone else. See [One person, one provider](#one-person-one-provider).                             |
 | Entra: "returned no email claim"                               | Add `email` as an optional ID-token claim on the app registration.                                                                                               |

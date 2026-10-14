@@ -275,6 +275,38 @@ func TestExchangeAcceptsAVerifiedOrUnstatedEmail(t *testing.T) {
 	}
 }
 
+// Entra sends no email_verified. Its optional xms_edov claim says whether the
+// tenant owns the address's domain, and stands in for it.
+func TestExchangeReadsEntrasVerifiedClaim(t *testing.T) {
+	idp := oidctest.New(t)
+	o, err := NewOIDC(context.Background(), OIDCConfig{
+		Name: "test", IssuerURL: idp.URL, ClientID: "keera", ClientSecret: "secret",
+		RedirectURL: "https://keera.example.ch/auth/callback",
+		Mapping:     RoleMapping{Default: RoleMember}, Domains: []string{AnyDomain}, SignUp: true,
+	}, idp.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		claim any
+		ok    bool
+	}{
+		{true, true}, {"true", true}, {"1", true}, {1.0, true},
+		{false, false}, {"false", false}, {"0", false}, {0.0, false},
+	} {
+		flow := NewFlow()
+		idp.Claims = func(m map[string]any) {
+			m["nonce"] = flow.Nonce
+			delete(m, "email_verified")
+			m["xms_edov"] = tc.claim
+		}
+		_, err := o.Exchange(context.Background(), "the-code", flow)
+		if (err == nil) != tc.ok {
+			t.Errorf("xms_edov=%v (%T): err = %v, want accepted %v", tc.claim, tc.claim, err, tc.ok)
+		}
+	}
+}
+
 // On a hosted deployment a customer's directory admin can give anyone any
 // address. A provider is only trusted for its own domains, so that address
 // cannot place its user in another tenant or make them an operator.

@@ -461,7 +461,7 @@ func (o *OIDC) checkIdentity(id Identity, claims map[string]any, groupsClaim str
 	// The email picks the organisation and can name an operator, so it must not be
 	// one the directory calls unverified. A missing claim is trusted: most
 	// enterprise providers issue none.
-	verified, present := boolClaim(claims, "email_verified")
+	verified, present := emailVerified(claims)
 	if present && !verified {
 		return fmt.Errorf("the identity provider says %s is not a verified "+
 			"address, and Keera places a sign-in in an organisation by its email domain; "+
@@ -472,7 +472,7 @@ func (o *OIDC) checkIdentity(id Identity, claims map[string]any, groupsClaim str
 	if !present && o.cfg.SignUp && o.cfg.vouchesForAll() {
 		return fmt.Errorf("%s sign-in allows sign-up for any address, so it must prove "+
 			"each one, and the identity provider did not say %s is verified; send the "+
-			"email_verified claim, or limit this provider to its own domains", o.cfg.Label(), id.Email)
+			"email_verified or xms_edov claim, or limit this provider to its own domains", o.cfg.Label(), id.Email)
 	}
 	return nil
 }
@@ -513,6 +513,16 @@ func hasClaimOverage(claims map[string]any, key string) bool {
 	return ok
 }
 
+// emailVerified reads whether the provider vouches for the email address.
+// Entra sends no email_verified; its optional xms_edov claim says whether the
+// tenant owns the address's domain.
+func emailVerified(claims map[string]any) (value, present bool) {
+	if v, ok := boolClaim(claims, "email_verified"); ok {
+		return v, true
+	}
+	return boolClaim(claims, "xms_edov")
+}
+
 // boolClaim reads a claim that is a boolean in the specification and a string
 // in some providers. It also reports whether the claim was present, because
 // absent (not tracked) and false (failed) mean different things.
@@ -521,7 +531,10 @@ func boolClaim(claims map[string]any, key string) (value, present bool) {
 	case bool:
 		return v, true
 	case string:
-		return strings.EqualFold(strings.TrimSpace(v), "true"), true
+		v = strings.TrimSpace(v)
+		return strings.EqualFold(v, "true") || v == "1", true
+	case float64:
+		return v == 1, true
 	default:
 		return false, false
 	}
