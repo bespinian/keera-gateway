@@ -79,11 +79,9 @@ type routerInput struct {
 	Destinations []string          `json:"destinations"`
 	// Ceilings is a size router's configuration: the largest request each
 	// destination should get, in estimated tokens.
-	Ceilings map[string]int `json:"ceilings"`
-	// Fallback is a pointer so that leaving it out is not the same as
-	// clearing it.
-	Fallback    *string `json:"fallback"`
-	Description string  `json:"description"`
+	Ceilings    map[string]int `json:"ceilings"`
+	Fallback    string         `json:"fallback"`
+	Description string         `json:"description"`
 }
 
 // router turns the request into a router, trimmed and with duplicates removed.
@@ -94,10 +92,8 @@ func (in routerInput) router(orgID, alias string) policy.Router {
 		Mode:        in.Mode,
 		Model:       strings.TrimSpace(in.Model),
 		Prompt:      strings.TrimSpace(in.Prompt),
+		Fallback:    strings.TrimSpace(in.Fallback),
 		Description: strings.TrimSpace(in.Description),
-	}
-	if in.Fallback != nil {
-		rt.Fallback = strings.TrimSpace(*in.Fallback)
 	}
 	for dest, n := range in.Ceilings {
 		// A ceiling of zero means no ceiling, so only positive ones are kept.
