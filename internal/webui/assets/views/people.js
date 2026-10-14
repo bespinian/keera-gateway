@@ -66,11 +66,7 @@ function headline(me, canAssign) {
       "Nobody can sign in until single sign-on is set up. Users added " +
       "here are linked to their identity when they first sign in."
     );
-  if (canAssign)
-    return (
-      "Roles set here stay until you change them. The operator role is " +
-      "set in the gateway's configuration."
-    );
+  if (canAssign) return null;
   return (
     "Roles come from a group in the identity provider, read at every " +
     "sign-in. Change them in the directory."

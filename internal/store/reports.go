@@ -375,6 +375,12 @@ type Setup struct {
 	Routers    int64 `json:"routers"`
 	Sandboxes  int64 `json:"sandboxes"`
 	MCPServers int64 `json:"mcp_servers"`
+	// Credits counts the money ever put into credit, paid or granted. The
+	// first run stays until there is some.
+	Credits int64 `json:"credits"`
+	// Invoiced says the organisation is billed by invoice, so it needs no
+	// credit. Always false across every organisation.
+	Invoiced bool `json:"invoiced"`
 }
 
 // SetupState counts the objects a first run has to create. An empty orgID
@@ -393,10 +399,25 @@ func (s *Store) SetupState(ctx context.Context, orgID string) (Setup, error) {
 		(SELECT count(*) FROM routers WHERE $1 = '' OR org_id = $1),
 		-- Classes, not running machines, so the screen stays when none is up.
 		(SELECT count(*) FROM sandbox_classes WHERE $1 = '' OR org_id = $1),
-		(SELECT count(*) FROM mcp_servers WHERE $1 = '' OR org_id = $1)`, orgID,
+		(SELECT count(*) FROM mcp_servers WHERE $1 = '' OR org_id = $1),
+		(SELECT count(*) FROM payments WHERE ($1 = '' OR org_id = $1)
+			AND state = 'paid' AND micros > 0),
+		EXISTS (SELECT 1 FROM credit_accounts WHERE org_id = $1 AND invoiced)`, orgID,
 	).Scan(&st.Orgs, &st.Keys, &st.Models, &st.People, &st.Requests,
-		&st.Filters, &st.Routers, &st.Sandboxes, &st.MCPServers)
+		&st.Filters, &st.Routers, &st.Sandboxes, &st.MCPServers, &st.Credits,
+		&st.Invoiced)
 	return st, err
+}
+
+// AnyUsed reports whether any of keyIDs has ever made a request.
+func (s *Store) AnyUsed(ctx context.Context, orgID string, keyIDs []string) (bool, error) {
+	if len(keyIDs) == 0 {
+		return false, nil
+	}
+	var used bool
+	err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM usage_events
+		WHERE org_id = $1 AND key_id = ANY($2))`, orgID, keyIDs).Scan(&used)
+	return used, err
 }
 
 // Refusal is one request the gateway turned away. The status is the reason:

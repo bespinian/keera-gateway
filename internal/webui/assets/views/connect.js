@@ -204,18 +204,34 @@ export async function clientsView(ctx) {
       emptyTitle: "No client has called in this window",
       emptyBody: canAdd
         ? "Use Connect client to set one up."
-        : "You need an API key to set one up.",
+        : [
+            "You need an ",
+            h("a", { href: "/keys", onClick: go(ctx, "/keys") }, "API key"),
+            " to set one up.",
+          ],
     },
   );
 
-  return h(
-    "div",
-    { class: "stack" },
-    head,
-    // Without a key there is nothing to add, so the reason comes first.
-    keys.length ? null : noKey(ctx, a),
-    list,
-  );
+  return h("div", { class: "stack" }, head, list);
+}
+
+/** openConnectClient opens Connect client from another screen, which has not
+ *  read the catalogue or the reader's keys. Without a key of their own or a
+ *  client to offer, My clients says why. */
+export async function openConnectClient(ctx, button) {
+  button.disabled = true;
+  let catalogue, a;
+  try {
+    [catalogue, a] = await Promise.all([loadClients(), api.access()]);
+  } catch (err) {
+    toast(err.message, "bad");
+    return;
+  } finally {
+    button.disabled = false;
+  }
+  const keys = usableKeys(a);
+  if (!keys.length || !catalogue.length) return ctx.navigate("/clients");
+  addClient(ctx, catalogue, keys, button);
 }
 
 /** addClient asks which client to set up, then shows its setup for one of the
@@ -353,8 +369,8 @@ function modelList(models) {
 }
 
 /** noKey explains why the reader has no key to use, and where to get one.
- *  My access, My clients and the playground all show it, so the same
- *  situation reads the same on each. */
+ *  My access and the playground both show it, so the same situation reads
+ *  the same on each. */
 export function noKey(ctx, a) {
   if (a.anonymous || (a.operator_key && !(a.keys || []).length)) {
     return h(

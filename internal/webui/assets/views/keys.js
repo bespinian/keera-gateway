@@ -558,10 +558,30 @@ function endOfDay(day) {
   return new Date(y, m - 1, d, 23, 59, 59);
 }
 
+// openIssueKey opens the form from another screen, which has not read the
+// projects and people it offers. An operator looking at every organisation
+// picks one on the keys screen first. The key is the reader's own unless they
+// pick someone else: Getting started opens it, and only a key of their own
+// works on My clients and in the playground.
+export async function openIssueKey(ctx) {
+  if (!ctx.orgID && ctx.state.me.unrestricted) return ctx.navigate("/keys");
+  const [projectsRes, usersRes] = await Promise.all([
+    api.projects(ctx.orgID).catch(() => ({ data: [] })),
+    api.users(ctx.orgID).catch(() => ({ data: [] })),
+  ]);
+  issueKey(
+    ctx,
+    projectsRes.data || [],
+    (usersRes.data || []).filter((u) => !u.disabled_at),
+    { user: ctx.state.me.user_id },
+  );
+}
+
 // issueKey asks for a new key. last holds the project and expiry of the key
 // issued just before, when the form is opened again with "Issue another". The
 // user is not carried over: the next key is usually somebody else's, and a key
-// given to the wrong person quietly counts as theirs.
+// given to the wrong person quietly counts as theirs. last.user preselects
+// one only for openIssueKey.
 function issueKey(ctx, projects, users, last = {}) {
   // Every key is in a project, so with none there is nothing to issue yet.
   if (!projects.length) {
@@ -610,7 +630,9 @@ function issueKey(ctx, projects, users, last = {}) {
     "select",
     { class: "select" },
     h("option", { value: "" }, NO_USER),
-    users.map((u) => h("option", { value: u.id }, u.email)),
+    users.map((u) =>
+      h("option", { value: u.id, selected: u.id === last.user }, u.email),
+    ),
   );
   // Each span carries the day it lands on: "90 days" is not a date anybody can
   // hold in their head, and the choice is easier to make beside the calendar.

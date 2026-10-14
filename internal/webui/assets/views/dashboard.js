@@ -17,7 +17,12 @@ import {
   isAdmin,
 } from "../ui.js";
 import { areaChart, barList } from "../chart.js";
-import { firstRun } from "./firstrun.js";
+import {
+  firstRun,
+  firstRunDue,
+  memberRun,
+  memberRunDue,
+} from "./firstrun.js";
 import { openFailed } from "./logfilters.js";
 import { orgNameOf } from "./orgs.js";
 
@@ -26,14 +31,32 @@ export async function dashboardView(ctx) {
 
   // Before anything has traffic, a dashboard of zeroes is not the screen
   // anybody needs. The checklist replaces it until the deployment is actually
-  // carrying requests, and then never appears again.
+  // carrying requests and, with card payments, until the organisation has
+  // had credit.
   if (isAdmin(ctx)) {
     const setup = await api.setup(ctx.orgID).catch(() => null);
-    if (setup && setup.requests === 0) {
-      ctx.setSubtitle("First run");
-      return firstRun(ctx, setup);
+    // The sidebar names this screen from the same counts, read when the panel
+    // loaded. A step done since then renames it.
+    if (setup) ctx.setSetup(setup);
+    if (firstRunDue(ctx, setup)) {
+      ctx.setTitle("Getting started");
+      const askCredit =
+        ctx.state.me.payments && ctx.orgID && !setup.credits && !setup.invoiced;
+      const credit = askCredit
+        ? await api.creditAccount(ctx.orgID).catch(() => null)
+        : null;
+      return firstRun(ctx, setup, credit);
+    }
+  } else {
+    // A member's guide follows their own keys, not the organisation's.
+    const access = await api.access().catch(() => null);
+    if (access) ctx.setAccess(access);
+    if (memberRunDue(ctx, access)) {
+      ctx.setTitle("Getting started");
+      return memberRun(ctx, access);
     }
   }
+  ctx.setTitle("Dashboard");
 
   const res = await api.overview(ctx.orgID, since);
   const o = res.overview;

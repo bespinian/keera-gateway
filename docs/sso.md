@@ -407,9 +407,11 @@ reaches your network:
 |                                                                 | Models on your provider keys, without card payments |
 
 A request for something that waits is refused with `org_limited`, and
-`/v1/models` does not list it. A banner on every screen of the panel names what
-waits. The gateway also checks the address it connects to, so a public name that
-points into your network does not get through either.
+`/v1/models` does not list it. With card payments, the panel's first-run
+checklist asks for credit (see [install.md](install.md#first-run)). Without
+them, a banner on every screen names what waits. The gateway also checks the
+address it connects to, so a public name that points into your network does
+not get through either.
 
 The limit lifts with the organisation's first payment (see
 [billing.md](billing.md)). After that, it reaches only the hosts inside your

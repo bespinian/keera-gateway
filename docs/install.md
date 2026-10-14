@@ -345,7 +345,12 @@ keera guardrail effective key <key-id>    # what a request with this key meets
 ```
 
 Or open the panel at `http://127.0.0.1:8080` and sign in with the operator
-key. On an empty deployment, **Dashboard** shows a first-run checklist.
+key. On an empty deployment, **Getting started** takes the place of
+**Dashboard** and shows a first-run checklist. It stays until the first request
+has been served and, with [card payments](billing.md#pay-in-advance), until the
+organisation has had credit, paid or granted, or is billed by invoice. A member
+gets a short guide of their own: get the key's secret, then connect a client.
+It stays until one of their keys has made a request.
 
 ### In a script, and on a screen
 

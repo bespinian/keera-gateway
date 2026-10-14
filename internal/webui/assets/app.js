@@ -1,11 +1,21 @@
 // The Keera Gateway control panel: boot, shell and routing.
 
 import { api, setCsrf, ApiError } from "./api.js";
-import { h, icon, icons, brandMark, clear, replace, toast } from "./ui.js";
+import {
+  h,
+  icon,
+  icons,
+  brandMark,
+  clear,
+  replace,
+  toast,
+  isAdmin,
+} from "./ui.js";
 import { signIn, passkeySignInFlow } from "./views/signin.js";
 import { signUp, signUpFlow } from "./views/signup.js";
 import { passkeySetupView, managePasskeys } from "./views/passkeys.js";
 import { dashboardView } from "./views/dashboard.js";
+import { firstRunDue, memberRunDue } from "./views/firstrun.js";
 import { projectsView } from "./views/projects.js";
 import { keysView } from "./views/keys.js";
 import { modelsView, providerModelsView } from "./views/models.js";
@@ -41,6 +51,9 @@ const state = {
    *  reads, and the four that decide whether Filters, Routers, MCP and
    *  Sandboxes are on the sidebar at all. */
   setup: {},
+  /** access is a member's own keys, from /v1/access, which decide whether
+   *  their getting started guide is due. Null for an administrator. */
+  access: null,
   /** orgID is which organisation the panel is looking at. For anyone bound to
    *  one it is theirs; an operator can switch. */
   orgID: "",
@@ -500,6 +513,47 @@ function moreItem() {
   );
 }
 
+/** navItem is one screen's entry in the sidebar. */
+function navItem(r) {
+  return h(
+    "a",
+    {
+      class: "nav-item" + (r.highlight ? " nav-highlight" : ""),
+      href: r.path,
+      // The only label left once the sidebar is collapsed, and on the three
+      // folded-away screens the place to say what they are for: somebody who
+      // has just revealed "Filters" has by definition not used one.
+      title: r.about ? `${r.label} - ${r.about}` : r.label,
+      dataset: { path: r.path },
+      onClick: (e) => {
+        e.preventDefault();
+        navigate(r.path);
+      },
+    },
+    icon(icons[r.icon]),
+    h("span", { class: "nav-text" }, r.label),
+  );
+}
+
+/** markHome names the first screen after what it shows: the first-run
+ *  checklist until the organisation is set up, then the dashboard. The
+ *  checklist is drawn out in the sidebar, so it is not missed. */
+function markHome() {
+  const home = routes[0];
+  const ctx = { state, orgID: state.orgID };
+  const due =
+    firstRunDue(ctx, state.setup) || memberRunDue(ctx, state.access);
+  home.label = due ? "Getting started" : "Dashboard";
+  home.icon = due ? "start" : "dashboard";
+  home.highlight = due;
+  const el = document.querySelector('.nav-item[data-path="/"]');
+  if (!el) return;
+  const next = navItem(home);
+  if (el.hasAttribute("aria-current"))
+    next.setAttribute("aria-current", "page");
+  el.replaceWith(next);
+}
+
 function renderShell() {
   outlet = h("div", { class: "content" });
   topbarHost = h("div");
@@ -533,27 +587,7 @@ function renderShell() {
         "div",
         { class: "nav-group" },
         group ? h("div", { class: "nav-label" }, group) : null,
-        items.map((r) =>
-          h(
-            "a",
-            {
-              class: "nav-item",
-              href: r.path,
-              // The only label left once the sidebar is collapsed, and on the
-              // three folded-away screens the place to say what they are for:
-              // somebody who has just revealed "Filters" has by definition not
-              // used one.
-              title: r.about ? `${r.label} - ${r.about}` : r.label,
-              dataset: { path: r.path },
-              onClick: (e) => {
-                e.preventDefault();
-                navigate(r.path);
-              },
-            },
-            icon(icons[r.icon]),
-            h("span", { class: "nav-text" }, r.label),
-          ),
-        ),
+        items.map(navItem),
         group === "Organisation" ? moreItem() : null,
       ),
     ),
@@ -747,24 +781,14 @@ function tearDown() {
 }
 
 /** limitedNotice tells the people of an organisation that signed itself up
- *  that some features wait for its first payment, before a refusal is the
- *  first to say so. */
+ *  that some features are not open to it, before a refusal is the first to
+ *  say so. With card payments, the first run's credit step says it instead. */
 function limitedNotice() {
   if (!state.me.org_limited || state.orgID !== state.me.org_id) return null;
-  const banner = (text) =>
-    h(
-      "div",
-      { class: "banner banner-info", style: { marginBottom: "16px" } },
-      text,
-    );
-  if (state.me.payments) {
-    return banner(
-      "This organisation needs credit before it can use all features.",
-    );
-  }
-  // Without card payments there is no credit to buy: only an operator can
-  // lift the limit.
-  return banner(
+  if (state.me.payments) return null;
+  return h(
+    "div",
+    { class: "banner banner-info", style: { marginBottom: "16px" } },
     "This organisation is new. " +
       (state.me.billing
         ? "Models on this deployment's provider keys, models and MCP " +
@@ -808,6 +832,17 @@ async function renderRoute() {
     state,
     orgID: state.orgID,
     reload: renderRoute,
+    /** setSetup takes counts a screen has read again, so the sidebar follows
+     *  a step done since the panel loaded. */
+    setSetup: (setup) => {
+      state.setup = setup;
+      markHome();
+    },
+    /** setAccess does the same for a member's guide. */
+    setAccess: (access) => {
+      state.access = access;
+      markHome();
+    },
     navigate,
     setOrg,
     /** param is the one path segment a detail screen was opened with: the project
@@ -937,6 +972,10 @@ async function loadSetup() {
   } catch {
     state.setup = {};
   }
+  state.access = isAdmin({ state })
+    ? null
+    : await api.access().catch(() => null);
+  markHome();
 }
 
 /** switchOrg moves the session to the organisation select names, which

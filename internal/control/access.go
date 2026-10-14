@@ -114,6 +114,15 @@ func (s *Server) access(w http.ResponseWriter, r *http.Request, p *authn.Princip
 	}
 	out["refusals"] = refusals
 
+	// Ever, not this month: the panel's getting started guide ends with the
+	// first request and must not come back when a month turns.
+	used, err := s.st.AnyUsed(r.Context(), p.OrgID, keyIDs)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	out["used"] = used
+
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 

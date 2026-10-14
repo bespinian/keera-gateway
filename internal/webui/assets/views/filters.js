@@ -75,11 +75,7 @@ export async function filtersView(ctx) {
   ctx.setSubtitle(`${filters.length} ${plural(filters.length, "filter")}`);
 
   const head = listHead(
-    "A filter checks each request its guardrails cover before it is " +
-      "forwarded. Rewrite and gate use a small model, so each request is " +
-      "generated twice. Run that model in your own infrastructure: a hosted " +
-      "one receives the prompt before anything is redacted. Pattern uses " +
-      "regular expressions in the gateway and costs nothing.",
+    null,
     [rangePicker(ctx, since)],
     canEdit && {
       label: "Create filter",
@@ -177,8 +173,8 @@ export async function filtersView(ctx) {
     {
       emptyTitle: "No filters yet",
       emptyBody:
-        "Requests are forwarded as sent. Create a filter to keep something " +
-        "from reaching the model.",
+        "Filters can block or rewrite prompts for improved privacy and " +
+        "security.",
     },
   );
 

@@ -502,7 +502,7 @@ function returnBanner(ctx, p, a) {
   );
 }
 
-function addCredit(ctx, res) {
+export function addCredit(ctx, res) {
   const a = res.account;
   const vat = Number(res.vat_percent || 0);
   const amount = h("input", {

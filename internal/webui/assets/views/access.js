@@ -25,7 +25,6 @@ import {
   amount,
   num,
   empty,
-  go,
   plural,
   sectionHead,
 } from "../ui.js";
@@ -145,29 +144,6 @@ export async function accessView(ctx) {
   if (refusals.length) {
     wrap.append(refusalsCard(refusals, keys));
   }
-
-  wrap.append(
-    h(
-      "div",
-      { class: "hint", style: { marginTop: "16px" } },
-      "Your editor sends to ",
-      h("code", {}, a.gateway_url || "the gateway"),
-      ". Ready-made configuration is on ",
-      h(
-        "a",
-        {
-          href: "/clients",
-          onClick: go(ctx, "/clients"),
-        },
-        "My clients",
-      ),
-      ". Each response reports what is left in the ",
-      h("code", {}, "X-Keera-Budget-Remaining"),
-      " and ",
-      h("code", {}, "X-RateLimit-Remaining-Requests"),
-      " headers.",
-    ),
-  );
 
   return wrap;
 }

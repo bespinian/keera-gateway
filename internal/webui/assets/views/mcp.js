@@ -57,10 +57,7 @@ export async function mcpView(ctx) {
   ctx.setSubtitle(`${servers.length} ${plural(servers.length, "server")}`);
 
   const head = listHead(
-    "Agents call a server's tools through the gateway with their Keera " +
-      "key. They see only the tools their guardrails allow, filters check " +
-      "each call, the server's credential stays on the gateway, and every " +
-      "call is logged without its content.",
+    null,
     canEdit ? [rangePicker(ctx, since)] : [],
     canEdit && {
       label: "Add MCP server",
@@ -143,8 +140,8 @@ export async function mcpView(ctx) {
   const list = table(columns, servers, {
     emptyTitle: "No MCP servers yet",
     emptyBody: canEdit
-      ? "Add one. Its tools use the same keys, allow-lists, filters and log " +
-        "as models."
+      ? "MCP servers hold tools your models and agents can use when " +
+        "fulfilling your tasks."
       : "An administrator adds them.",
   });
 

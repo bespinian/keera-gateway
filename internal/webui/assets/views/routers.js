@@ -70,11 +70,7 @@ export async function routersView(ctx) {
   ctx.setSubtitle(`${routers.length} ${plural(routers.length, "router")}`);
 
   const head = listHead(
-    "A router picks which model answers a request. A model reads it, " +
-      "its size decides, or the destinations are tried until one answers: " +
-      "in the listed order, fastest first or least busy first. Clients use " +
-      "the router's alias as the model name. A router that reads requests " +
-      "should use a fast local model.",
+    null,
     [rangePicker(ctx, since)],
     canEdit && {
       label: "Create router",
@@ -163,9 +159,8 @@ export async function routersView(ctx) {
     {
       emptyTitle: "No routers yet",
       emptyBody:
-        "Each request goes to the model the client named, and fails if that " +
-        "model fails. Create a router to send most requests to a smaller model, " +
-        "keep some inside the cluster, or fall back when a model is down.",
+        "Routers send your request to the model best suited to answer it. " +
+        "Different routing strategies are available.",
     },
   );
 
