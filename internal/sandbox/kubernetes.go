@@ -94,7 +94,13 @@ func NewKubernetes(ctx context.Context, opts KubernetesOptions) (*Kubernetes, er
 		opts.Log = slog.Default()
 	}
 	if opts.Namespace == "" {
+		// Allowed, so an install that never set it still starts, but said
+		// out loud: in the gateway's own namespace, whoever reads its pods
+		// reads every sandbox's key.
 		opts.Namespace = inClusterNamespace()
+		opts.Log.Warn("KEERA_SANDBOX_NAMESPACE is not set, so sandboxes run in the "+
+			"gateway's namespace, where anyone who can read pods can read their API keys; "+
+			"give them a namespace of their own", "namespace", opts.Namespace)
 	}
 	c, err := newKubeClient(opts.Kube)
 	if err != nil {

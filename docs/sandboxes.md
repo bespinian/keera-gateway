@@ -557,7 +557,7 @@ namespace. See [What is actually enforced](#what-is-actually-enforced).
 | ---------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `KEERA_SANDBOX_DRIVER`             | -                                             | `kubernetes`, `podman`, or unset for no sandboxes, and no Sandboxes screen in the panel              |
 | `KEERA_SANDBOXES_FILE`             | -                                             | the classes each new organisation starts with                                                        |
-| `KEERA_SANDBOX_NAMESPACE`          | the gateway's, or `default` outside a cluster | where sandboxes run on Kubernetes. Should not be the gateway's - see above                           |
+| `KEERA_SANDBOX_NAMESPACE`          | the gateway's                                 | where sandboxes run on Kubernetes. Should not be the gateway's, so unset logs a warning              |
 | `KEERA_SANDBOX_RUNTIME_STANDARD`   | -                                             | the runtime for the standard tier, if not the default: a RuntimeClass, or on podman `crun` or `runc` |
 | `KEERA_SANDBOX_RUNTIME_ISOLATED`   | -                                             | the gVisor RuntimeClass, or `runsc` on podman. Unset makes that tier unavailable                     |
 | `KEERA_SANDBOX_RUNTIME_VM`         | -                                             | the Kata RuntimeClass, or `krun` on podman. Unset makes that tier unavailable                        |
