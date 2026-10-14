@@ -409,21 +409,22 @@ reaches your network:
 |                                                                 | Models on your provider keys, without card payments |
 
 A request for something that waits is refused with `org_limited`, and
-`/v1/models` does not list it. The gateway also checks the address it connects
-to, so a public name that points into your network does not get through
-either.
+`/v1/models` does not list it. A banner on every screen of the panel names what
+waits. The gateway also checks the address it connects to, so a public name that
+points into your network does not get through either.
 
-The limit lifts with the organisation's first card payment (see
+The limit lifts with the organisation's first payment (see
 [billing.md](billing.md)). After that, it reaches only the hosts inside your
-network that `KEERA_UPSTREAM_PRIVATE` names. Credit an operator grants does not lift it. An
-operator can also lift it at any time:
+network that `KEERA_UPSTREAM_PRIVATE` names. Credit an operator grants does not
+lift it. An operator can also lift it at any time:
 
 ```sh
 keera org set <org> --lift-limit
 ```
 
 On the panel, that is **Organisations → Lift limit**. `keera org list` marks
-limited organisations.
+limited organisations. An operator can set an organisation back to limited with
+`PATCH /control/v1/orgs/{id}` and `{"limited": true}`.
 
 ## Signing in
 

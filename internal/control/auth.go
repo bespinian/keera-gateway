@@ -576,7 +576,8 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request, p *authn.Principal) 
 		// A failed read leaves both out: they are only for display.
 		if org, err := s.st.OrgByID(r.Context(), p.OrgID); err == nil {
 			out["org_name"] = org.Name
-			// The panel says what a limited organisation cannot use yet.
+			// The panel says on every screen what a limited organisation
+			// cannot use yet.
 			out["org_limited"] = org.Limited
 		}
 	}

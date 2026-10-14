@@ -143,8 +143,10 @@ var commands = []command{
 				prose: "Names are unique, ignoring case. Everything refers to an organisation " +
 					"by its id, so a rename changes only what it is called. The old name stays " +
 					"in the audit log. An organisation somebody created by signing up is " +
-					"limited until it buys credit: --lift-limit opens the models and MCP servers " +
-					"inside this deployment's network, and sandboxes, to it sooner."},
+					"limited until it buys credit, or until an operator lifts the limit. " +
+					"--lift-limit opens the models and MCP servers inside this deployment's " +
+					"network, and sandboxes. Without card payments it also opens the models " +
+					"on the deployment's own provider keys."},
 			{name: "delete", aliases: []string{"rm", "remove"}, args: "<org>", summary: "delete an organisation and everything in it",
 				flags: []string{"yes", "json"},
 				prose: "Refused while any of its sandboxes is still live: terminate them first, " +

@@ -170,7 +170,7 @@ func New(src policy.Source, budgets Budgeter, limiter Limiter, sink Sink,
 		client:  upstreamClient(opts, orgDial(opts)),
 		publicClient: upstreamClient(opts, newDialer(
 			denyDial(append(slices.Clone(opts.UpstreamDeny), privateRanges...),
-				"this organisation can only reach public addresses until it has bought credit once"),
+				"this organisation can only reach public addresses until its limit is lifted"),
 		).DialContext),
 		keyClient: upstreamClient(withHeaderTimeout(opts, readOnFor),
 			newDialer(denyDial(opts.UpstreamDeny, "KEERA_UPSTREAM_DENY blocks it")).DialContext),

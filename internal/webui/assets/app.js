@@ -746,6 +746,35 @@ function tearDown() {
   }
 }
 
+/** limitedNotice tells the people of an organisation that signed itself up
+ *  that some features wait for its first payment, before a refusal is the
+ *  first to say so. */
+function limitedNotice() {
+  if (!state.me.org_limited || state.orgID !== state.me.org_id) return null;
+  const banner = (text) =>
+    h(
+      "div",
+      { class: "banner banner-info", style: { marginBottom: "16px" } },
+      text,
+    );
+  if (state.me.payments) {
+    return banner(
+      "This organisation needs credit before it can use all features.",
+    );
+  }
+  // Without card payments there is no credit to buy: only an operator can
+  // lift the limit.
+  return banner(
+    "This organisation is new. " +
+      (state.me.billing
+        ? "Models on this deployment's provider keys, models and MCP " +
+          "servers inside the network, such as Keera Engine, and sandboxes"
+        : "Models inside the network, such as Keera Engine, MCP servers " +
+          "inside the network, and sandboxes") +
+      " are not open to it yet. An operator can lift this.",
+  );
+}
+
 async function renderRoute() {
   tearDown();
   const gen = ++rendering;
@@ -799,7 +828,7 @@ async function renderRoute() {
   try {
     const view = await route.view(ctx);
     if (gen !== rendering) return;
-    replace(outlet, view);
+    replace(outlet, limitedNotice(), view);
   } catch (err) {
     if (gen !== rendering) return;
     if (err instanceof ApiError && err.status === 401) {

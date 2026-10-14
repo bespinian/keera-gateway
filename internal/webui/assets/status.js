@@ -13,7 +13,12 @@ const STATUS = {
     "Budget spent",
     "A budget that covers the key is used up for this period.",
   ],
-  403: ["Refused by a filter", "A filter on the key refused the request."],
+  // Not only filters answer 403: a model a new organisation cannot use yet
+  // does too, and the row keeps only the message, not the code.
+  403: [
+    "Refused",
+    "A filter refused the request, or the key may not use this model yet.",
+  ],
   404: [
     "Model unavailable",
     "The key may not use this model, or no backend serves it.",

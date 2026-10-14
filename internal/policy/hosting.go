@@ -54,9 +54,7 @@ func HostingOf(raw string) Hosting {
 
 // LockedMessage is what a signed-up organisation that has not paid yet is told
 // about a model or MCP server it may not use yet.
-const LockedMessage = "this organisation was created by signing up, and until it has bought " +
-	"credit once it can only use models billed from its credit and services on public " +
-	"addresses; an operator can also lift the limit"
+const LockedMessage = "this organisation needs to buy credit before it can use all features"
 
 // LocationFromBackends is the location of a model that states none and names
 // no provider. A backend inside the network is onprem. A URL outside it does

@@ -213,15 +213,23 @@ function liftLimit(ctx, org) {
       h(
         "p",
         {},
-        "Somebody created this organisation by signing up. Until it buys " +
-          "credit, it can only use models billed from its credit and services " +
-          "on public addresses.",
+        ctx.state.me.payments
+          ? "Somebody created this organisation by signing up. Until it buys " +
+              "credit, it can only use models billed from its credit and " +
+              "services on public addresses."
+          : "Somebody created this organisation by signing up. Until the " +
+              "limit is lifted, it can only use services on public addresses " +
+              "with keys of its own.",
       ),
       h(
         "p",
         {},
         "Lifting the limit opens the models and MCP servers inside this " +
-          "deployment's network, and sandboxes. Only do this for a customer you know.",
+          "deployment's network, and sandboxes" +
+          (ctx.state.me.payments || !ctx.state.me.billing
+            ? ". "
+            : ", and models on this deployment's provider keys. ") +
+          "Only do this for a customer you know.",
       ),
     ),
     actions: (close) => [
