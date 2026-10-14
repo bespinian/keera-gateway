@@ -28,10 +28,10 @@ The panel shows one named button per provider. See
 [Several directories at once](#several-directories-at-once).
 
 The identity provider sends the browser back to
-`<KEERA_PUBLIC_URL>/control/auth/callback`, so SSO needs `KEERA_PUBLIC_URL`.
-The gateway refuses to start without it as soon as `KEERA_OIDC_PROVIDERS`
-names a provider, even one whose settings are not filled in yet. Register that
-address as the redirect URI with each provider.
+`<KEERA_PUBLIC_URL>/control/auth/callback`, so SSO needs `KEERA_PUBLIC_URL`. The
+gateway refuses to start without it as soon as `KEERA_OIDC_PROVIDERS` names a
+provider, even one whose settings are not filled in yet. Register that address
+as the redirect URI with each provider.
 
 ## Where a role comes from
 
@@ -44,9 +44,9 @@ an admin group. Nothing else does: the panel does not offer it,
 to an operator, and `KEERA_OIDC_<NAME>_DEFAULT_ROLE` cannot be `operator`.
 
 The operator role spans organisations, so you can see who holds it by reading
-the configuration. An administrator runs one organisation, including its
-models, MCP servers, filters, routers and sandbox classes. Remove a person
-from the group, and they are demoted within 15 minutes (see
+the configuration. An administrator runs one organisation, including its models,
+MCP servers, filters, routers and sandbox classes. Remove a person from the
+group, and they are demoted within 15 minutes (see
 [Asking the directory again](#asking-the-directory-again)). Remove an address
 from `KEERA_OPERATORS`, and they are demoted at the next directory check after
 the restart.
@@ -58,19 +58,18 @@ the restart.
 | set                              | whoever is in the group                              | the directory                                                                   |
 | unset                            | whoever an operator or another administrator says so | `keera user role`, the panel's **Users** screen, `PATCH /control/v1/users/{id}` |
 
-**If set, the directory decides.** The group is read at every sign-in and
-every 15 minutes after, so a person removed from it is demoted within 15
-minutes. The panel _no longer
-lets you change roles_, because the next sign-in would undo the change. With
-several directories, admin groups on one provider are enough to make the
-directory decide for the whole gateway. It decides only in the organisation the
-person's address lands in (see
+**If set, the directory decides.** The group is read at every sign-in and every
+15 minutes after, so a person removed from it is demoted within 15 minutes. The
+panel _no longer lets you change roles_, because the next sign-in would undo the
+change. With several directories, admin groups on one provider are enough to
+make the directory decide for the whole gateway. It decides only in the
+organisation the person's address lands in (see
 [Which organisation a sign-in lands in](#which-organisation-a-sign-in-lands-in)).
 In any other organisation they are in, they keep the role it gave them.
 
 **If unset, Keera decides.** Everyone starts with
-`KEERA_OIDC_<NAME>_DEFAULT_ROLE` (`member` unless set to `admin`), and an operator or administrator promotes
-them:
+`KEERA_OIDC_<NAME>_DEFAULT_ROLE` (`member` unless set to `admin`), and an
+operator or administrator promotes them:
 
 ```sh
 keera user role alice@example.ch admin
@@ -90,9 +89,9 @@ This is the only option on Google Workspace.
 the Admin SDK, which Keera does not call. So the group lists match nothing on
 Google. Leave both unset.
 
-Setting admin groups on Google leaves you with no administrators
-and no way to make one: the directory never grants the role, and the panel can
-no longer grant it. The gateway warns about this at start-up.
+Setting admin groups on Google leaves you with no administrators and no way to
+make one: the directory never grants the role, and the panel can no longer grant
+it. The gateway warns about this at start-up.
 
 **Entra sends groups as object GUIDs** (`11111111-2222-…`, not `keera-admins`),
 unless the group was synced from Active Directory with a `sAMAccountName`. For a
@@ -239,8 +238,8 @@ customer make operators.
 the organisation, and an address can name an operator. A customer's directory
 admin can give any user any address, including another customer's or yours. So
 `KEERA_OIDC_<NAME>_DOMAINS` lists the domains that provider may sign people in
-with, and the gateway refuses to start with several providers if one has none.
-A sign-in with an address outside the list is refused.
+with, and the gateway refuses to start with several providers if one has none. A
+sign-in with an address outside the list is refused.
 
 `*` allows every domain. Use it only for a provider that proves each address
 itself, such as Google. Never use it for Entra, where the tenant admin sets the
@@ -257,12 +256,12 @@ not by the callback address. Each provider's client registration must still list
 `<KEERA_PUBLIC_URL>/control/auth/callback`.
 
 A **name** matches `[a-z0-9][a-z0-9-]*`. `keera` and `passkey` are reserved for
-the gateway's own sign-ins. Do not rename a provider: the name is
-part of the sign-in URL and of every identity it creates, so renaming it cuts
-off everyone who signed in through it. The button label comes from the name
-(`google`, `workspace` and `gsuite` show Google; `entra`, `entraid`, `azure`,
-`azuread`, `microsoft` and `m365` show Microsoft; `okta` shows Okta and
-`keycloak` Keycloak; any other name is shown capitalised) or from
+the gateway's own sign-ins. Do not rename a provider: the name is part of the
+sign-in URL and of every identity it creates, so renaming it cuts off everyone
+who signed in through it. The button label comes from the name (`google`,
+`workspace` and `gsuite` show Google; `entra`, `entraid`, `azure`, `azuread`,
+`microsoft` and `m365` show Microsoft; `okta` shows Okta and `keycloak`
+Keycloak; any other name is shown capitalised) or from
 `KEERA_OIDC_<NAME>_LABEL`.
 
 ### One person, one provider
@@ -270,12 +269,12 @@ off everyone who signed in through it. The button label comes from the name
 An identity is stored as `<provider>:<subject>`, because a subject is only
 unique within its directory.
 
-A person keeps the provider they first signed in with, in every organisation.
-A sign-in with the same address through another provider is refused, and the
-error names the one to use. Otherwise anyone who gets the same address, through
-a weaker directory, could become them. Two identities that already shared an
-address before this rule keep working. A passkey account is its own identity,
-in one organisation.
+A person keeps the provider they first signed in with, in every organisation. A
+sign-in with the same address through another provider is refused, and the error
+names the one to use. Otherwise anyone who gets the same address, through a
+weaker directory, could become them. Two identities that already shared an
+address before this rule keep working. A passkey account is its own identity, in
+one organisation.
 
 A row an administrator created in advance has no subject yet. The person's
 identity takes it over when they first land in that row's organisation. A row
@@ -286,8 +285,8 @@ refused instead.
 
 `orgFor` in `internal/control/auth.go` checks in this order:
 
-1. The organisations the person is already in: the one this browser was last
-   in, else the one they used last. See
+1. The organisations the person is already in: the one this browser was last in,
+   else the one they used last. See
    [Several organisations](#several-organisations).
 2. An organisation whose `email_domain` matches the address's domain. With
    several providers, only a provider allowed that domain gets this far.
@@ -304,8 +303,8 @@ your own staff.
 
 **On the hosted deployment, avoid step 4.** It stops applying once there is a
 second organisation, but until then a new customer's first sign-in lands in the
-existing organisation. Give every organisation its domain before you create
-the second one:
+existing organisation. Give every organisation its domain before you create the
+second one:
 
 ```sh
 keera org create "Another Bank" --domain anotherbank.ch
@@ -330,13 +329,13 @@ curl -X PATCH https://keera.example.ch/control/v1/orgs/<org-id> \
 
 ## Several organisations
 
-A person can be in several organisations, with a role in each. Each
-organisation adds them, in the panel or with `keera user add`. That is an
-invitation until they first land there.
+A person can be in several organisations, with a role in each. Each organisation
+adds them, in the panel or with `keera user add`. That is an invitation until
+they first land there.
 
-In the panel, someone in more than one sees a menu instead of the
-organisation's name at the top. Choosing an organisation moves the session
-there, and choosing an invitation joins it. On the command line:
+In the panel, someone in more than one sees a menu instead of the organisation's
+name at the top. Choosing an organisation moves the session there, and choosing
+an invitation joins it. On the command line:
 
 ```sh
 keera org list                 # yours, and the ones that invited you
@@ -352,11 +351,11 @@ takes `--org`. The exceptions are `keera billing grant` and
 `keera sandbox proxy`, which `keera sandbox config` writes into the ssh config.
 
 An operator works in every organisation, so `keera org switch` only chooses the
-one commands act on, and `keera org switch --all` goes back to all of them.
-The operator role goes wherever the person goes.
+one commands act on, and `keera org switch --all` goes back to all of them. The
+operator role goes wherever the person goes.
 
-Disabling a person or changing their role acts in one organisation. Leaving
-the directory or `keera logout --all` ends their sign-ins in all of them. Each
+Disabling a person or changing their role acts in one organisation. Leaving the
+directory or `keera logout --all` ends their sign-ins in all of them. Each
 switch is in the audit log as `auth.switch_org`, in the organisation switched
 to.
 
@@ -382,18 +381,17 @@ inside your network an organisation may reach. See
 
 A sign-in that matches no organisation then lands on a screen that offers:
 
-- **Create an organisation.** The person names it and becomes its
-  administrator. If the name is taken, their address is added to it, so a
-  stranger cannot find out which customers you have. An operator can rename
-  it with `keera org set`.
+- **Create an organisation.** The person names it and becomes its administrator.
+  If the name is taken, their address is added to it, so a stranger cannot find
+  out which customers you have. An operator can rename it with `keera org set`.
 - **Join an invitation.** If an organisation added the address with
-  `keera user add`, the screen offers to join it, with the role it was given.
-  It is never joined without asking: an administrator of an organisation
-  without a domain can add any address.
+  `keera user add`, the screen offers to join it, with the role it was given. It
+  is never joined without asking: an administrator of an organisation without a
+  domain can add any address.
 
-The new organisation gets no email domain. Set one with `keera org set`
-once you know the customer. `keera login` cannot sign up: it says to open the
-panel first.
+The new organisation gets no email domain. Set one with `keera org set` once you
+know the customer. `keera login` cannot sign up: it says to open the panel
+first.
 
 ### What a new organisation can use
 
@@ -449,29 +447,29 @@ there and the cookie has to be on that address.
 keera login --url https://keera.example.ch    # --provider, where there are several
 ```
 
-It opens a browser, the directory signs the person in as for the panel, and
-the command gets a credential for that person. Commands then run as them: their
-role decides what is allowed, `keera usage` shows their organisation, and the
-audit log records their address.
+It opens a browser, the directory signs the person in as for the panel, and the
+command gets a credential for that person. Commands then run as them: their role
+decides what is allowed, `keera usage` shows their organisation, and the audit
+log records their address.
 
 The credential is written to `keera/credentials.json` in the user's
 configuration directory (mode 0600), one entry per gateway. That is `~/.config`
-on Linux, `~/Library/Application Support` on macOS and `%AppData%` on Windows. With `KEERA_CONFIG_DIR` set, the file is `$KEERA_CONFIG_DIR/credentials.json`. The gateway you signed
-in to becomes the default for later commands, so nothing needs to go in a shell
-profile.
+on Linux, `~/Library/Application Support` on macOS and `%AppData%` on Windows.
+With `KEERA_CONFIG_DIR` set, the file is `$KEERA_CONFIG_DIR/credentials.json`.
+The gateway you signed in to becomes the default for later commands, so nothing
+needs to go in a shell profile.
 
-You can be signed in to several deployments at once. A command picks the
-gateway in this order: `--url`, then `KEERA_CONTROL_URL`, then the gateway last
-signed in to, then the built-in default `https://gateway.keera.ch`.
-`keera whoami` shows which address is used and why. If `keera logout` removes
-the default, the one sign-in left becomes the default; with several left, there
-is none.
+You can be signed in to several deployments at once. A command picks the gateway
+in this order: `--url`, then `KEERA_CONTROL_URL`, then the gateway last signed
+in to, then the built-in default `https://gateway.keera.ch`. `keera whoami`
+shows which address is used and why. If `keera logout` removes the default, the
+one sign-in left becomes the default; with several left, there is none.
 
 The credential lasts 30 days, or 12 hours where the provider gives Keera no
 refresh token (see [Asking the directory again](#asking-the-directory-again)).
-`keera logout` ends it sooner,
-`keera logout --all` ends every sign-in of the account everywhere, and
-`keera whoami` shows which credential on this machine is in use.
+`keera logout` ends it sooner, `keera logout --all` ends every sign-in of the
+account everywhere, and `keera whoami` shows which credential on this machine is
+in use.
 
 **`KEERA_OPERATOR_KEY` still wins where it is set**, since someone exported it
 on purpose. `keera login` warns when it finds one. The operator key is still the
@@ -522,22 +520,21 @@ authorised redirect URI in each provider's console, and `KEERA_PUBLIC_URL`.
 
 A session lasts 12 hours and a `keera login` token 30 days. So Keera does not
 only read the directory at sign-in: it keeps the refresh token the sign-in
-returns, encrypted with `KEERA_SECRET_KEY`, and spends it every 15 minutes
-while the person is active.
+returns, encrypted with `KEERA_SECRET_KEY`, and spends it every 15 minutes while
+the person is active.
 
 - If the directory refuses, because the person was removed or disabled or
   revoked Keera's access, all their sessions and `keera login` tokens end, in
   every organisation they are in.
 - If it answers, the role is applied again, as at sign-in.
-- If it cannot be reached, the person stays signed in, and the next request
-  asks again 15 minutes later.
+- If it cannot be reached, the person stays signed in, and the next request asks
+  again 15 minutes later.
 
-When `KEERA_OIDC_<NAME>_SCOPES` is unset, Keera asks for `offline_access`,
-which is what gets a refresh token from most providers. On Google it asks for
-offline access instead, as Google expects. If your provider refuses
-`offline_access`, set the scopes without it. Without a refresh token, the
-directory is only read at sign-in, and a `keera login` token lasts 12 hours
-instead of 30 days.
+When `KEERA_OIDC_<NAME>_SCOPES` is unset, Keera asks for `offline_access`, which
+is what gets a refresh token from most providers. On Google it asks for offline
+access instead, as Google expects. If your provider refuses `offline_access`,
+set the scopes without it. Without a refresh token, the directory is only read
+at sign-in, and a `keera login` token lasts 12 hours instead of 30 days.
 
 ## When someone leaves
 
@@ -561,20 +558,19 @@ several is disabled in each. Immediately:
 - the repository credentials those sandboxes held are revoked
 
 Usage, sandboxes and audit entries keep their name. The panel hides disabled
-people until you tick **Show disabled**. `keera user enable` lets
-them back in without keys: the old ones stay revoked. An administrator can
-disable anyone in their organisation except themselves. Nobody can disable an
-operator this way; take them out of `KEERA_OPERATORS` or the operator group
-instead.
+people until you tick **Show disabled**. `keera user enable` lets them back in
+without keys: the old ones stay revoked. An administrator can disable anyone in
+their organisation except themselves. Nobody can disable an operator this way;
+take them out of `KEERA_OPERATORS` or the operator group instead.
 
 Keys attributed to nobody, such as a build pipeline's, are not affected. Give a
 key a `--user` when a person is behind it.
 
 ## Passkeys
 
-A passkey signs someone in with their fingerprint, face or device PIN, without
-a directory. Use it for people who have no account in your identity provider,
-or for a deployment with no identity provider at all. It is off by default:
+A passkey signs someone in with their fingerprint, face or device PIN, without a
+directory. Use it for people who have no account in your identity provider, or
+for a deployment with no identity provider at all. It is off by default:
 
 ```sh
 KEERA_PASSKEYS=true
@@ -582,9 +578,9 @@ KEERA_PUBLIC_URL=https://keera.example.ch
 ```
 
 A passkey belongs to the host name in `KEERA_PUBLIC_URL`. Browsers allow
-passkeys only on https, or on `http://localhost`, and never on an IP address,
-so the gateway refuses to start otherwise. **Do not change the host name
-later**: every passkey stops working, and each person needs a new set-up link.
+passkeys only on https, or on `http://localhost`, and never on an IP address, so
+the gateway refuses to start otherwise. **Do not change the host name later**:
+every passkey stops working, and each person needs a new set-up link.
 
 ### Adding someone
 
@@ -601,7 +597,8 @@ Opening it creates the passkey and signs the person in.
 
 Once signed in, a person adds a passkey for each device under the key button
 next to their address. That needs a browser sign-in from the last 15 minutes, so
-a stolen session cannot plant a passkey of its own. They can remove one, but not their last.
+a stolen session cannot plant a passkey of its own. They can remove one, but not
+their last.
 
 For a lost device, or a new device with no passkey on it yet, an administrator
 sends a new link:
@@ -614,8 +611,8 @@ On the panel, that is **Users → Passkeys → Get set-up link**. The same scree
 lists a person's passkeys and removes one. Removing someone else's passkey also
 signs them out everywhere.
 
-A person who was added but has not signed in yet can be moved to passkeys
-with the same command, or **Use a passkey** on the panel.
+A person who was added but has not signed in yet can be moved to passkeys with
+the same command, or **Use a passkey** on the panel.
 
 ### What keeps passkeys from weakening single sign-on
 
@@ -630,16 +627,16 @@ with the same command, or **Use a passkey** on the panel.
   administrator typed it. So `KEERA_OPERATORS` does not apply to it, and a
   passkey sign-in drops the operator role if the row somehow has it. Operators
   sign in through a directory, or with the operator key.
-- **An administrator can only use their own domain.** If the organisation has
-  an email domain, an administrator can only create passkey accounts at it. An
+- **An administrator can only use their own domain.** If the organisation has an
+  email domain, an administrator can only create passkey accounts at it. An
   operator can use any address.
 - **Admin groups still decide.** Where `KEERA_OIDC_<NAME>_ADMIN_GROUPS` is set,
   a passkey account can only be a member, as no directory group speaks for it.
 
 Each sign-in checks that the passkey verified the person (PIN or biometrics),
-that the page asking was this gateway's own, and that the passkey's counter
-did not go backwards. The last one catches a copied hardware key. Synced
-passkeys always report zero, which is fine.
+that the page asking was this gateway's own, and that the passkey's counter did
+not go backwards. The last one catches a copied hardware key. Synced passkeys
+always report zero, which is fine.
 
 ### With no identity provider
 
