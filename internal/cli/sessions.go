@@ -118,6 +118,10 @@ func sessionShow(ctx context.Context, c *client, arg, org string, asJSON bool) e
 		return fmt.Errorf("a session is named by the id of one of its requests")
 	}
 
+	org, err = orgIfGiven(ctx, c, org)
+	if err != nil {
+		return err
+	}
 	path := fmt.Sprintf("/v1/sessions/%d", requestID)
 	if org != "" {
 		path = inOrg(path, org)

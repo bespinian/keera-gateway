@@ -85,3 +85,37 @@ func TestSessionTakesAnIdWithoutShow(t *testing.T) {
 	}
 	f.request("GET", "/v1/sessions/4711")
 }
+
+// KEERA_ORG may name an organisation, as --org may, so a report sends the id
+// it belongs to rather than the name.
+func TestReportsTakeAnOrganisationByName(t *testing.T) {
+	quiet(t)
+	for _, c := range []struct {
+		path string
+		run  func(context.Context, []string) error
+		args []string
+	}{
+		{"/v1/usage", usageCmd, nil},
+		{"/v1/billing", billingCmd, nil},
+		{"/v1/billing/payments", billingCmd, []string{"payments"}},
+		{"/v1/diagnostics", doctorCmd, nil},
+		{"/v1/sessions/4711", sessionCmd, []string{"show", "4711"}},
+	} {
+		f := newFakeControl(t, map[string]any{
+			"GET /v1/orgs":             oneOrg,
+			"GET /v1/usage":            map[string]any{"data": []any{}},
+			"GET /v1/billing":          map[string]any{"data": []any{}},
+			"GET /v1/billing/payments": map[string]any{"data": []any{}},
+			"GET /v1/diagnostics":      map[string]any{"checks": []any{}},
+			"GET /v1/sessions/4711":    map[string]any{},
+		})
+		t.Setenv("KEERA_ORG", "example bank")
+		if err := c.run(context.Background(), c.args); err != nil {
+			t.Fatal(err)
+		}
+		q, _ := url.ParseQuery(f.request("GET", c.path).query)
+		if got := q.Get("org_id"); got != "org_1" {
+			t.Errorf("%s: org_id = %q, want the id the name belongs to", c.path, got)
+		}
+	}
+}

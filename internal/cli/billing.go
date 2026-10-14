@@ -82,8 +82,12 @@ func (r *billingRun) account(ctx context.Context, path string) (string, error) {
 }
 
 func (r *billingRun) report(ctx context.Context) error {
+	org, err := orgIfGiven(ctx, r.c, r.org)
+	if err != nil {
+		return err
+	}
 	q := url.Values{}
-	setIfGiven(q, map[string]string{"org_id": r.org, "month": r.month})
+	setIfGiven(q, map[string]string{"org_id": org, "month": r.month})
 	var res billingResponse
 	if err := r.c.do(ctx, "GET", "/v1/billing?"+q.Encode(), nil, &res); err != nil {
 		return err
@@ -375,8 +379,12 @@ func (r *billingRun) invoiced(ctx context.Context) error {
 }
 
 func (r *billingRun) payments(ctx context.Context) error {
+	org, err := orgIfGiven(ctx, r.c, r.org)
+	if err != nil {
+		return err
+	}
 	q := url.Values{}
-	setIfGiven(q, map[string]string{"org_id": r.org, "limit": strconv.Itoa(r.limit)})
+	setIfGiven(q, map[string]string{"org_id": org, "limit": strconv.Itoa(r.limit)})
 	payments, err := list[store.Payment](ctx, r.c, "/v1/billing/payments?"+q.Encode())
 	if err != nil {
 		return err

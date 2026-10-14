@@ -83,6 +83,10 @@ const reportLimit = 50
 func reportQuery(ctx context.Context, c *client, org string, w *who, since time.Duration,
 	extra map[string]string,
 ) (url.Values, error) {
+	org, err := orgIfGiven(ctx, c, org)
+	if err != nil {
+		return nil, err
+	}
 	q := url.Values{"from": {sinceParam(since)}}
 	setIfGiven(q, map[string]string{"org_id": org})
 	setIfGiven(q, extra)
@@ -176,6 +180,15 @@ func resolveOrg(ctx context.Context, c *client, given string) (string, error) {
 		}
 	}
 	return "", notFound("organisation", given, "", "org")
+}
+
+// orgIfGiven is resolveOrg for a report, which spans every organisation the
+// caller may see when none was given, so only a given one is looked up.
+func orgIfGiven(ctx context.Context, c *client, given string) (string, error) {
+	if given == "" {
+		return "", nil
+	}
+	return resolveOrg(ctx, c, given)
 }
 
 // who narrows a report to one project, key or person, each given the way the

@@ -32,8 +32,12 @@ func doctorCmd(ctx context.Context, args []string) error {
 	}
 	// An organisation is optional: without one, the checks that need it are
 	// skipped.
-	if r.org != "" {
-		q.Set("org_id", r.org)
+	org, err := orgIfGiven(ctx, c, r.org)
+	if err != nil {
+		return err
+	}
+	if org != "" {
+		q.Set("org_id", org)
 	} else if only, err := theOnlyOrg(ctx, c, ""); err == nil && only != "" {
 		q.Set("org_id", only)
 	}
