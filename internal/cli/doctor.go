@@ -51,9 +51,12 @@ func doctorCmd(ctx context.Context, args []string) error {
 		return err
 	}
 	if r.asJSON {
-		return out(true, d, nil)
+		if err := out(true, d, nil); err != nil {
+			return err
+		}
+	} else {
+		printDiagnosis(c.base, d)
 	}
-	printDiagnosis(c.base, d)
 
 	// A failed check fails the command, so an install script can end with it.
 	// Warnings do not: a deployment with warnings still works.
