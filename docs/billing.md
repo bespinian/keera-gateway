@@ -27,7 +27,8 @@ names.
 | `KEERA_PROVIDER_INFOMANIAK_PRODUCT_ID` | Required with an Infomaniak key: the product id of your AI Service. |
 
 A misspelt `KEERA_PROVIDER_*` setting stops the start, so a key never quietly
-goes unused.
+goes unused. So does a product id without its key, or for a provider that takes
+none.
 
 ## What changes for a model of that provider
 
@@ -97,7 +98,8 @@ keera org switch <org> && keera billing   # operators: one organisation
 ```
 
 One row per organisation and provider model, with calls, tokens and the amount
-in CHF.
+in CHF. With [payments](#pay-in-advance) on, a last column says how much of the
+amount was taken from prepaid credit.
 
 Administrators see their own organisation. Operators see every organisation.
 
@@ -148,6 +150,10 @@ Payments also need at least one `KEERA_PROVIDER_<NAME>_API_KEY`, and
 `KEERA_PUBLIC_URL` set to an `https` address: PostFinance sends people back
 there after they pay. On your own machine, `http://localhost` works too.
 
+A setting that cannot work stops the start: only some of the three
+`KEERA_POSTFINANCE_*` settings, `KEERA_POSTFINANCE_URL` or `KEERA_BILLING_VAT`
+without them, a space id that is not a number, or a VAT that cannot be read.
+
 ### Turning it on
 
 An organisation that never paid has no credit. So when you switch payments on,
@@ -194,8 +200,8 @@ keera billing auto-topup --below 50 --amount 200
 When the credit falls below CHF 50, the saved card is charged CHF 200, without
 anyone on the payment page. The amount must be at least the threshold, so one
 charge lifts the credit above it. A card is charged at most once every 10
-minutes, so a burst of traffic is not paid off by a run of charges. Each
-replica checks every 30 seconds.
+minutes, so a burst of traffic is not paid off by a run of charges. Every 30
+seconds, one replica checks.
 
 When a charge is declined, no other is tried. The panel shows why. Saving the
 automatic top-up again, or adding credit by hand, tries again. When
@@ -230,7 +236,7 @@ A payment counts as paid in PostFinance's state **Fulfill**, and only if the
 amount and currency are the ones Keera asked for.
 
 A lost webhook does not lose a payment. Opening **Billing** looks up the
-latest payments at once. Every 30 seconds, each replica also looks up the
+organisation's recent pending payments at once. Every 30 seconds, one replica also looks up the
 payments pending for more than a minute, for a day. A payment still open after
 that stays pending, and only its webhook settles it, so one paid late is still
 credited. An automatic top-up that has not ended after a day is marked failed,

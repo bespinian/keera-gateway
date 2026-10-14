@@ -22,7 +22,7 @@ GPUs or on Swiss ones.
   [release](https://github.com/bespinian/keera-gateway/releases) has it for
   Linux, macOS and Windows.
 - **A single-host deployment** - compose files that run the gateway, its
-  database and Keera Engine on one machine. This is also the development loop.
+  database, Keera Engine and Keera Decider on one machine. This is also the development loop.
 
 Every tool that calls a model uses the same address. The gateway checks each
 request, logs it and passes it on.
@@ -46,7 +46,8 @@ request, logs it and passes it on.
 ```
 
 Everything runs on one port, `:8080`, split by path: inference under `/api`,
-administration under `/control`, and the control panel at `/`. See
+administration under `/control`, sandbox attach under `/sandbox`, and the
+control panel at `/`. See
 [docs/gateway.md](docs/gateway.md#one-listener-four-surfaces).
 
 The gateway speaks three APIs, all with the same guardrails, accounting and
@@ -69,7 +70,7 @@ cp .env.example .env    # then set KEERA_OPERATOR_KEY and KEERA_SECRET_KEY
 podman compose up -d --build
 ```
 
-That runs the gateway, Postgres and a CPU model on one host.
+That runs the gateway, Postgres, a CPU model and a decision model on one host.
 [compose/README.md](compose/README.md) covers the GPU tier and what the CPU tier
 cannot do. [First run](docs/install.md#first-run) issues a first key and sends
 a request, and [docs/install.md](docs/install.md) covers every setting.

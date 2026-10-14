@@ -53,15 +53,15 @@ sandbox classes new organisations start with, and the
 
 ### Worth setting on any real deployment
 
-| Variable                 | Default     | What it is                                                                                                                                                                                                        |
-| ------------------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `KEERA_METRICS_TOKEN`    | unset       | Reads `/metrics` and nothing else. Must differ from the operator key.                                                                                                                                             |
-| `KEERA_PUBLIC_URL`       | Host header | The gateway's address as a browser sees it. Used for the sign-out redirect, by **My clients**, and for the panel link in a refusal. Unset, a refusal has no link. Required with single sign-on and with payments. |
-| `KEERA_MODELS_FILE`      | unset       | The models each new organisation starts with. Existing organisations are not changed.                                                                                                                             |
-| `KEERA_USAGE_RETENTION`  | for ever    | How long usage events, ended sandboxes and ended keys are kept. See [Retention and sizing](#retention-and-sizing).                                                                                                |
-| `KEERA_AUDIT_RETENTION`  | for ever    | How long audit entries are kept.                                                                                                                                                                                  |
-| `KEERA_UPSTREAM_DENY`    | see below   | Addresses the gateway never connects to. See [Where the gateway may connect](#where-the-gateway-may-connect).                                                                                                     |
-| `KEERA_UPSTREAM_PRIVATE` | `all`       | Host names inside the network that organisations may reach. Required with sign-up. See [Where the gateway may connect](#where-the-gateway-may-connect).                                                           |
+| Variable                 | Default     | What it is                                                                                                                                                                                                             |
+| ------------------------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `KEERA_METRICS_TOKEN`    | unset       | Reads `/metrics` and nothing else. Must differ from the operator key.                                                                                                                                                  |
+| `KEERA_PUBLIC_URL`       | Host header | The gateway's address as a browser sees it. Used for the sign-out redirect, by **My clients**, and for the panel link in a refusal. Unset, a refusal has no link. Required with single sign-on, passkeys and payments. |
+| `KEERA_MODELS_FILE`      | unset       | The models each new organisation starts with. Existing organisations are not changed.                                                                                                                                  |
+| `KEERA_USAGE_RETENTION`  | for ever    | How long usage events, ended sandboxes and ended keys are kept. See [Retention and sizing](#retention-and-sizing).                                                                                                     |
+| `KEERA_AUDIT_RETENTION`  | for ever    | How long audit entries are kept.                                                                                                                                                                                       |
+| `KEERA_UPSTREAM_DENY`    | see below   | Addresses the gateway never connects to. See [Where the gateway may connect](#where-the-gateway-may-connect).                                                                                                          |
+| `KEERA_UPSTREAM_PRIVATE` | `all`       | Host names inside the network that organisations may reach. Required with sign-up. See [Where the gateway may connect](#where-the-gateway-may-connect).                                                                |
 
 ### Everything else
 
@@ -79,7 +79,7 @@ sandbox classes new organisations start with, and the
 | `KEERA_REDIS_URL`               | unset               | Shares rate-limit buckets between replicas. Unset, they are per process. See below.  |
 | `KEERA_REDIS_PREFIX`            | `keera`             | Key prefix, so two deployments can share one Redis.                                  |
 | `KEERA_SPEND_REFRESH`           | `10s`               | How stale a budget may be.                                                           |
-| `KEERA_SESSION_GAP`             | `30m`               | Idle time that separates one task from the next. See [sessions.md](sessions.md).     |
+| `KEERA_SESSION_GAP`             | `30m`               | Idle time between two tasks; at least `1m`. See [sessions.md](sessions.md).          |
 | `KEERA_SECURE_COOKIES`          | follows the scheme  | Marks the session cookie `Secure`. On when `KEERA_PUBLIC_URL` is https.              |
 | `KEERA_CLAUDE_SUBSCRIPTIONS`    | `false`             | Lets Claude Code on a Claude plan through. See [subscriptions.md](subscriptions.md). |
 
@@ -100,9 +100,10 @@ Among them: a `KEERA_LOG_LEVEL` or `KEERA_LOG_FORMAT` not listed above, a
 is not an address or a prefix, a `KEERA_METRICS_TOKEN` equal to the operator key, a
 subscription model in `KEERA_MODELS_FILE` while `KEERA_CLAUDE_SUBSCRIPTIONS` is
 off, and a `KEERA_OIDC_<N>_DEFAULT_ROLE` other than `admin` or
-`member`. The single sign-on, passkey and sandbox settings below have checks
-of their own, which their sections and [sso.md](sso.md) and
-[sandboxes.md](sandboxes.md#configuration) describe.
+`member`. The single sign-on, passkey, sandbox and payment settings have checks
+of their own, which their sections, [sso.md](sso.md),
+[sandboxes.md](sandboxes.md#configuration) and
+[billing.md](billing.md#set-it-up) describe.
 
 ### Where the gateway may connect
 
@@ -182,7 +183,8 @@ to `<KEERA_PUBLIC_URL>/control/auth/callback`. See [sso.md](sso.md).
 
 `KEERA_PASSKEYS` (`false` unless set) lets administrators create accounts that
 sign in with a passkey instead of a directory. It needs `KEERA_PUBLIC_URL` on
-https, or on `http://localhost`. See [Passkeys](sso.md#passkeys).
+https, or on `http://localhost` or `http://<name>.localhost`, with a host name,
+not an IP address. See [Passkeys](sso.md#passkeys).
 
 Discovery runs at start-up, so a wrong issuer URL stops the gateway with the URL
 in the error, instead of breaking sign-in later. [sso.md](sso.md) is the
@@ -195,9 +197,10 @@ driver is for local development and tests, not for production. While the
 driver is unset, the other `KEERA_SANDBOX_*` settings are ignored (a stray one
 does not stop the start) and the panel hides sandboxes.
 
-`KEERA_SANDBOXES_FILE` is read either way: it holds the classes new
-organisations start with, so they are there once a driver is set. A missing or
-invalid file stops the start.
+`KEERA_SANDBOXES_FILE` and `KEERA_SANDBOX_IMAGES` are read either way. The file
+holds the classes new organisations start with, so they are there once a driver
+is set, and an administrator can save a class with an allowed image before
+then. A missing or invalid file stops the start.
 
 The other settings are `KEERA_SANDBOX_*`: the namespace, the runtime per
 isolation tier (a RuntimeClass on Kubernetes, an OCI runtime such as `runsc` on
@@ -218,8 +221,8 @@ not in this repository. They read the same settings as above. Only the image
 they run is built here:
 
 ```sh
-make image GATEWAY_IMAGE=<registry>/keera-gateway:0.1.0 VERSION=0.1.0
-podman push <registry>/keera-gateway:0.1.0
+make image GATEWAY_IMAGE=<registry>/keera-gateway:v0.1.0 VERSION=v0.1.0
+podman push <registry>/keera-gateway:v0.1.0
 ```
 
 Run `go mod vendor` first; [run-locally.md](run-locally.md#building) explains

@@ -232,8 +232,8 @@ dist: notices
 	@echo "wrote $$(ls $(DIST_DIR)/*.tar.gz | wc -l) archives and SHA256SUMS to $(DIST_DIR)"
 
 # The development loop. The server runs on the host under air, so a save
-# rebuilds and restarts it in about a second, while Postgres and the inference
-# backend stay in containers behind it. ^C stops the gateway and leaves those
+# rebuilds and restarts it in about a second, while Postgres, the inference
+# backend and Keera Decider stay in containers behind it. ^C stops the gateway and leaves those
 # up, which makes every start after the first instant; `make dev-down` stops
 # them.
 AIR ?= air

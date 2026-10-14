@@ -138,6 +138,9 @@ keera mcp calls --since 1h
 keera mcp calls --summary --since 168h
 ```
 
+The log is for administrators. A member sees their own tool calls in
+[`keera session show`](sessions.md).
+
 Each call is one row: server, tool, outcome, time, bytes sent and received, the
 key, and the error if any. The outcomes are:
 

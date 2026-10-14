@@ -263,6 +263,11 @@ A client that hangs up before any answer still gets a row, with status 499 and
 marked as cancelled, in the field `canceled`. It carries what the router and the
 filters had spent by then, so hanging up never makes them free.
 
+On the deployment's own provider key, the gateway reads the answer to the end
+even after the client hangs up. The row then has the real token counts and the
+provider's status, still marked as cancelled
+([billing.md](billing.md#what-is-billed)).
+
 An ingress in front has to stream too; see
 [Publishing it](install.md#publishing-it).
 
@@ -331,12 +336,12 @@ Other response headers:
 
 | Header                   | What it holds                                                                             |
 | ------------------------ | ----------------------------------------------------------------------------------------- |
-| `X-Keera-Model`          | the alias that answered; behind a router, the destination it chose                        |
+| `X-Keera-Model`          | the alias that answered; behind a router, the destination that answered                   |
 | `X-Keera-Router`         | the router and where it sent the request ([routers.md](routers.md#what-a-client-can-see)) |
 | `X-Keera-Filters`        | the filters that acted on the request ([filters.md](filters.md#what-is-recorded))         |
 | `X-Keera-Removed-Tools`  | the hosted tools taken out on the deployment's key ([mcp.md](mcp.md#hosted-tools))        |
 | `X-Keera-Removed-Fields` | the fields that cost extra, taken out on the deployment's key ([billing.md](billing.md))  |
-| `X-Request-Id`           | the request's id; one the client sends is kept                                            |
+| `X-Request-Id`           | the request's id; one the client sends is kept if it is up to 64 of `A-Z a-z 0-9 . _ : -` |
 
 ### Naming a request yourself
 
@@ -345,7 +350,8 @@ allows. Unlike `X-Request-Id`, the client knows it even when no answer comes
 back. The gateway writes it to its log as `client_request_id`, next to
 `request_id`, and sends it on to OpenAI models, so OpenAI's support can find the
 request too. Requests that filters and routers send for a request don't carry
-it. An id that is not ASCII or is longer than 512 characters is ignored. OpenAI
+it. An id that is not printable ASCII or is longer than 512 characters is
+ignored. OpenAI
 would answer it with a 400.
 
 Both ids are kept with the request. The Requests screen finds a request by
@@ -382,8 +388,8 @@ organisation.
 | `keera_request_duration_seconds` | model, org, status | wall time of a request                                                           |
 | `keera_gateway_overhead_seconds` | model, org         | time the gateway added, not counting filters and routers                         |
 | `keera_upstream_errors_total`    | model, org         | a model not reached or too slow to start answering, or a 5xx a router moved past |
-| `keera_inflight_requests`        |                    | requests waiting for the inference plane to answer                               |
-| `keera_ratelimit_fallback_total` |                    | rate-limit decisions made without Redis                                          |
+| `keera_inflight_requests`        |                    | requests waiting for the inference plane to start answering                      |
+| `keera_ratelimit_fallback_total` |                    | rate-limit admissions and token charges made without Redis                       |
 
 Filters, routers and MCP tool calls have their own metrics, listed in
 [filters.md](filters.md#what-is-recorded), [routers.md](routers.md#what-is-recorded)

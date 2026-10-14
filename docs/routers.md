@@ -129,8 +129,9 @@ place to send the request.
 
 A router cannot decide when:
 
-- its model is missing, disabled, not a chat model, a subscription model, or
-  has no backend, or is
+- its model is missing, disabled, not a chat or
+  [decision model](#decision-models), a subscription model, or has no backend,
+  or is
   [locked until the organisation pays](sso.md#what-a-new-organisation-can-use)
 - none of its destinations can be served
 - its model errored, timed out, or answered nothing

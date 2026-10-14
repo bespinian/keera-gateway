@@ -2,7 +2,8 @@
 #
 # The gateway runs on the host here rather than in a container, which is the
 # whole point - a save rebuilds and restarts it in about a second, while
-# Postgres and the inference backend stay up in containers behind it.
+# Postgres, the inference backend and Keera Decider stay up in containers
+# behind it.
 
 root = "."
 # Under the one directory every other build target writes to, so air's binary

@@ -376,7 +376,9 @@ var commands = []command{
 			{name: "delete", aliases: []string{"rm", "remove"}, args: "<alias>", summary: "remove a server",
 				flags: []string{"yes", "json"}},
 			{name: "calls", summary: "the tool-call log: which tool, what came of it, how much went each way",
-				flags:    []string{"server", "tool", "project", "key", "user", "since", "limit", "summary", "json"},
+				flags: []string{"server", "tool", "project", "key", "user", "since", "limit", "summary", "json"},
+				prose: "For administrators. A member sees the tool calls of their own sessions " +
+					"in 'keera session show'.",
 				examples: []string{"keera mcp calls --since 1h", "keera mcp calls --summary --since 168h"}},
 			{name: "connect", args: "<alias>", summary: "how to point Claude Code, Codex and others at a server",
 				prose: "Prints the lines each client needs. They read the key from " +

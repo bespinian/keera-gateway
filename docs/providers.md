@@ -226,6 +226,8 @@ Anthropic, and OpenAI from `gpt-5.6` on, charge 25% more than the input price
 for the part of the prompt they write to their cache. Both report how much that
 was, as part of the prompt like a cache read. The gateway charges it at the
 cache-write rate. The table has the rate for every model that charges one.
+Anthropic also reports writes kept for an hour instead of five minutes; those
+are charged at twice the input price.
 
 Like the cached price, a cache-write price of zero means none was set, and
 those tokens are charged at the input price. That is right for the providers
@@ -290,9 +292,12 @@ Enterprise plan can pay instead; see [subscriptions.md](subscriptions.md).
 
 **Responses clients reach OpenAI's own API.** A request to `/api/v1/responses`
 (what Codex sends) is forwarded to OpenAI's `/v1/responses` with its reasoning
-items. Besides the guardrails, as for Anthropic, the only change is that a
-reasoning model gets no `temperature` or `top_p`. An egress proxy in front of
-OpenAI must pass `/v1/responses` as well as `/v1/chat/completions`.
+items. With the organisation's own key, the only change besides the
+guardrails, as for Anthropic, is that a reasoning model gets no `temperature`
+or `top_p`. The deployment's key changes more
+([billing.md](billing.md#what-changes-for-a-model-of-that-provider)). An
+egress proxy in front of OpenAI must pass `/v1/responses` as well as
+`/v1/chat/completions`.
 
 **The OpenAI reasoning models take no temperature.** Every OpenAI model whose
 id does not start with `gpt-4`, `gpt-3` or `chatgpt-` refuses `max_tokens`, and
@@ -303,9 +308,6 @@ for a temperature gets the default.
 
 ### Also worth knowing
 
-- **A promotional price ends.** `gpt-5.6-sol` has one until at least 21
-  November 2026. After that, the table's price is too low until a new build, or
-  until you set the price yourself.
 - **Upstream model ids are not aliases.** Infomaniak, stepping stone and CSCS
   use names with capitals, such as `swiss-ai/Apertus-v1.5-70B`. Choose your own
   alias; the panel suggests a lowercase one.

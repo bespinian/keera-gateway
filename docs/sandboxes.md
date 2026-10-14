@@ -425,8 +425,8 @@ getting a new token.
 lasts a working day. Git in the sandbox asks `git-credential-keera`, which keeps
 the current token. When it has five minutes left, the helper gets a new one from
 `POST /sandbox/v1/git-credential` with the sandbox's own key. That route takes
-10 requests a minute per client address, and sandboxes that reach the gateway
-from the same address share it. When the forge gives no token, it answers 409
+10 requests a minute per client address on each gateway replica, and sandboxes
+that reach the gateway from the same address share it. When the forge gives no token, it answers 409
 `no_git_credential`. The gateway revokes the replaced token where the forge
 allows it. The helper only answers for the repository's own host, so a
 submodule on another host never sees the token. A resumed sandbox keeps the token the helper last got, unless the gateway
@@ -607,7 +607,7 @@ The gateway configures Pi, not the image. The manager renders
 **It lists every model the sandbox's own key may reach** - the organisation's
 allow-list narrowed by the project's - not just one model the deployment picked.
 Listing models the key is refused for would end prompts in refusals. Listing
-only one would hide the rest. Embedding models are left out.
+only one would hide the rest. Only chat models are listed.
 
 **The key is not in that file.** The file names `${KEERA_API_KEY}`, which Pi
 expands from the environment.
@@ -685,7 +685,7 @@ that replaces the entrypoint has to handle them itself.
 | `KEERA_BASE_URL`                                  | The gateway's inference address. Also as `OPENAI_BASE_URL` (with `/v1`) and `ANTHROPIC_BASE_URL`. |
 | `KEERA_MODEL`                                     | The first chat model the key may reach. Also as `ANTHROPIC_MODEL`.                                |
 | `KEERA_SANDBOX_ID`, `_NAME`, `_CLASS`, `_PURPOSE` | Which sandbox this is.                                                                            |
-| `KEERA_SANDBOX_EXPIRES`                           | When it ends, in RFC 3339.                                                                        |
+| `KEERA_SANDBOX_EXPIRES`                           | When it ends, in RFC 3339, as set at creation or the last resume. `extend` does not update it.    |
 | `KEERA_AUTHORIZED_KEYS`                           | The ssh public keys that may log in, one per line.                                                |
 | `KEERA_SESSION`                                   | An agent sandbox's session id. Also in `ANTHROPIC_CUSTOM_HEADERS`.                                |
 | `KEERA_TASK`                                      | The agent's task, when one was given.                                                             |

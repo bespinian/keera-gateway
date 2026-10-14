@@ -2,7 +2,7 @@
 
 The development loop runs the gateway on your host under
 [air](https://github.com/air-verse/air), which rebuilds and restarts it about a
-second after each save. Postgres and the inference backend run in containers.
+second after each save. Postgres, the inference backend and Keera Decider run in containers.
 
 ```sh
 make dev

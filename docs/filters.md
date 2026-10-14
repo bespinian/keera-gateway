@@ -222,7 +222,7 @@ the last four digits. Write two rules, or use a `rewrite` filter.
 **A rule either replaces or refuses, never both.**
 
 **A refusing rule's sentence is the administrator's own**, so it is the same
-every time. It is capped at 240 bytes.
+every time. A reason longer than 240 bytes is refused.
 
 **Rules run in the order written, and each sees what the one before it left.**
 So a specific rule placed above a broad one wins:
@@ -246,6 +246,8 @@ offline.
 | an expression that matches the empty string, like `x*` | it would insert its replacement between every character                |
 | a rule that both replaces and refuses                  | a rule does one or the other                                           |
 | a reason on a rule that does not refuse                | a replacing rule gives the sender no sentence                          |
+| an empty expression                                    | a rule needs something to match                                        |
+| a reason longer than 240 bytes                         | the sender reads it in an error message                                |
 | no rules at all                                        | it would look like it works while doing nothing                        |
 | a model or an instruction                              | nothing here reads prose, and a model on it would look like it decides |
 
@@ -284,15 +286,15 @@ will not compile.
 A filter that cannot run refuses the request. There is no setting to change
 this.
 
-| Situation                                                                                 | Status |
-| ----------------------------------------------------------------------------------------- | ------ |
-| the guardrail names a filter that no longer exists                                        | 503    |
-| its model is missing, disabled, not a chat model, a subscription model, or has no backend | 503    |
-| its model is [locked until the organisation pays](sso.md#what-a-new-organisation-can-use) | 503    |
-| its model was reached but the answer was unusable, or it errored                          | 502    |
-| a gate answered neither `ALLOW` nor `REFUSED`, in word or in token                        | 502    |
-| the conversation will not fit through its model's context                                 | 413    |
-| a pattern filter's rules will not compile                                                 | 502    |
+| Situation                                                                                                                    | Status |
+| ---------------------------------------------------------------------------------------------------------------------------- | ------ |
+| the guardrail names a filter that no longer exists                                                                           | 503    |
+| its model is missing, disabled, not a chat model (or, for a gate, a decision model), a subscription model, or has no backend | 503    |
+| its model is [locked until the organisation pays](sso.md#what-a-new-organisation-can-use)                                    | 503    |
+| its model was reached but the answer was unusable, or it errored                                                             | 502    |
+| a gate answered neither `ALLOW` nor `REFUSED`, in word or in token                                                           | 502    |
+| the conversation will not fit through its model's context                                                                    | 413    |
+| a pattern filter's rules will not compile                                                                                    | 502    |
 
 A request with no text at all, such as a chat of only images, runs no filter,
 so a filter that is missing or broken does not refuse it either.
@@ -321,7 +323,8 @@ The gateway also enforces:
 ## Shadow: rolling one out
 
 A new filter starts in shadow, from the panel and from `keera filter add`
-(`--no-shadow` enforces from the start). In shadow, the filter runs on every
+(`--no-shadow` enforces from the start). The control API is the exception: a
+`PUT /control/v1/filters/{alias}` without `"shadow": true` enforces. In shadow, the filter runs on every
 request its guardrails cover but enforces nothing. The rewrite is discarded,
 the refusal does not happen, the request is forwarded as the client sent it,
 and what the filter _would_ have done is recorded.
@@ -339,7 +342,7 @@ cannot tell you the _rate_ on real traffic: one request in a thousand, or one in
 three. Shadow measures that before anyone depends on the filter.
 
 ```sh
-keera filter add redact-secrets --model keera-guard --prompt @redact.txt
+keera filter add redact-secrets --model keera-speed --prompt @redact.txt
 keera guardrail set project <project-id> --filters redact-secrets
 # a week later
 keera filter report redact-secrets --since 168h
@@ -389,7 +392,7 @@ does not save tokens, since the segments stay the same length. For example:
 
 ```sh
 keera filter add redact-keys --mode pattern --rules @redact.rules
-keera filter add redact-names --model keera-guard --prompt @names.txt
+keera filter add redact-names --model keera-speed --prompt @names.txt
 keera guardrail set org <org-id> --filters redact-keys
 keera guardrail set project <project-id> --filters redact-names
 ```
@@ -533,8 +536,10 @@ so there is nothing to show. The function is then run on its own, and a rule
 that would refuse it is still named. The result is exact: the rules do the
 same thing to the same text every time.
 
-Nothing is scored as a pass. The check does point out the two clear mistakes: a
-filter that left the planted secret alone, and a filter that touched the code.
+Nothing is scored as a pass. The check does point out clear mistakes, such as a
+filter that left the planted secret alone, a filter that touched the code, a
+gate that let the secret through or refused the code, and pattern rules that
+matched nothing in the sample.
 
 A check of a model filter goes straight to the backend, with the credentials the
 data plane uses. It is not rate-limited or budgeted and writes no usage row. On
