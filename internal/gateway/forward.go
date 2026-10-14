@@ -147,7 +147,10 @@ func (s *Server) forward(ctx context.Context, chain []policy.Model,
 		// names the model that answered.
 		tr.since(store.SpanUpstream, m.Alias, began, attemptNote(resp, err))
 
-		if err != nil || (resp != nil && resp.StatusCode >= 500) {
+		// A client that hung up is not the destination's fault. A filter's
+		// timeout is: that ends the context with a deadline, not a cancel.
+		gone := errors.Is(ctx.Err(), context.Canceled)
+		if (err != nil && !gone) || (resp != nil && resp.StatusCode >= 500) {
 			// Recorded even on the last attempt, so a measured router ranks it
 			// last for a while. Stamped now, not at the start, so a long dial
 			// timeout does not shorten the penalty. See loadPenalty.

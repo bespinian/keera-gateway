@@ -121,8 +121,8 @@ const (
 )
 
 // RouterDestination is where one router sent its traffic over a window, and
-// what happened there. Requests the router refused have no destination; they
-// are counted in RouterReport.Errored.
+// what happened there. Requests that ended in an error, refused or failed at
+// every destination, are left out; they are counted in RouterReport.Errored.
 type RouterDestination struct {
 	Alias string `json:"alias"`
 	Cell

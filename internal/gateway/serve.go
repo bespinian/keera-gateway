@@ -681,6 +681,11 @@ func (s *Server) answer(c *call, b *body) {
 	if fw.resp != nil {
 		defer func() { _ = fw.resp.Body.Close() }()
 	}
+	// Settled before the hang-up check, so a row the client left early still
+	// says how the router's attempts ended.
+	if c.routed {
+		s.settleRouter(c, fw)
+	}
 	if c.r.Context().Err() != nil && !c.keepsReading() {
 		s.hungUp(c, "before the model answered", fw.note())
 		return
@@ -689,9 +694,6 @@ func (s *Server) answer(c *call, b *body) {
 	// its tokens, its price, its name in the answer.
 	c.model, c.alias = fw.model, fw.model.Alias
 	c.ev.Alias = c.alias
-	if c.routed {
-		s.settleRouter(c, fw)
-	}
 	if fw.err != nil {
 		// A request that reached the provider may have been charged for,
 		// even if no answer came back in time.
@@ -739,6 +741,14 @@ func (s *Server) answer(c *call, b *body) {
 	// the only sign anything failed.
 	c.ev.Error = appendNote(c.ev.Error, fw.note())
 	s.finish(c.ev, c.model, c.res, c.now, c.hookMicros(), c.hookBills(), c.tr)
+	// Feeds the latency router. Only real answers count, because a fast
+	// refusal would post the best score. The time lost on destinations that
+	// failed first is not this one's, so it is taken out. Stamped with the
+	// current time, not the start, so a long stream does not expire the
+	// reading at once.
+	if c.ev.Status < 400 && !c.ev.Canceled {
+		s.load.observe(c.model.Key(), c.ev.TTFT-fw.wasted, time.Now())
+	}
 }
 
 // outbound encodes the request for one destination: in the client's own API
@@ -804,7 +814,8 @@ func (a *afterHangUp) Write(p []byte) (int, error) {
 }
 
 // settleRouter records what a trying router's attempts came to, and names the
-// router in a header. Both are set only once a model has been reached.
+// router in a header. Both are set once the attempts are over, whether a model
+// answered or every destination failed.
 func (s *Server) settleRouter(c *call, fw forwarded) {
 	if !c.router.Decides() {
 		c.decision.settle(fw)
@@ -1025,12 +1036,6 @@ func (s *Server) finish(ev store.Event, model policy.Model, res *policy.Resolved
 	s.record(ev)
 	s.metrics.Observe(ev.Alias, ev.OrgID, ev.Status, ev.Latency.Seconds(),
 		ev.InputTokens+ev.OutputTokens)
-	// Feeds the latency router. Only real answers count, because a fast
-	// refusal would post the best score. Stamped with the current time, not
-	// the start, so a long stream does not expire the reading at once.
-	if ev.Status < 400 && !ev.Canceled {
-		s.load.observe(model.Key(), ev.TTFT, time.Now())
-	}
 }
 
 // clampOutputTokens holds a request to the guardrail's ceiling rather than

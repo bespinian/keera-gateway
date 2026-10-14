@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -518,8 +519,7 @@ func TestRouterWindowKeepsTheNewestSegments(t *testing.T) {
 // their own; everything else answers normally.
 func chainHarness(t *testing.T, rt policy.Router, down map[string]int) *harness {
 	t.Helper()
-
-	backend := func(w http.ResponseWriter, r *http.Request) {
+	return chainHarnessWith(t, rt, func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		var sent struct {
 			Model string `json:"model"`
@@ -533,8 +533,12 @@ func chainHarness(t *testing.T, rt policy.Router, down map[string]int) *harness 
 		}
 		_, _ = io.WriteString(w, `{"id":"1","choices":[{"message":{"content":"hi"}}],`+
 			`"usage":{"prompt_tokens":10,"completion_tokens":5}}`)
-	}
+	})
+}
 
+// chainHarnessWith is chainHarness in front of a backend of the test's own.
+func chainHarnessWith(t *testing.T, rt policy.Router, backend http.HandlerFunc) *harness {
+	t.Helper()
 	models := map[string]policy.Model{
 		"keera-small": {
 			OrgID: "org_1", Alias: "keera-small", Kind: policy.KindChat, BackendModel: "small-served",
@@ -858,6 +862,65 @@ func TestAMeasuredRouterStillFailsOverToWhatItRankedSecond(t *testing.T) {
 	if !h.srv.load.read("org_1/keera-large", time.Now()).failing {
 		t.Error("a destination that answered 503 is still being ranked on its latency; " +
 			"the next request would be sent to it too")
+	}
+}
+
+func TestTheLatencyReadingLeavesOutTimeLostOnFailedDestinations(t *testing.T) {
+	const lost = 300 * time.Millisecond
+	h := chainHarnessWith(t, chainRouter(), func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(string(raw), "small-served") {
+			time.Sleep(lost)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, `{"error":{"message":"no capacity"}}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"id":"1","choices":[{"message":{"content":"hi"}}],`+
+			`"usage":{"prompt_tokens":10,"completion_tokens":5}}`)
+	})
+
+	if resp := h.post(t, "/v1/chat/completions",
+		`{"model":"ha","messages":[{"role":"user","content":"hello"}]}`); resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	// The destination that rescued the request answered at once. Charging it
+	// the first one's wait would rank it as slow.
+	r := h.srv.load.read("org_1/keera-large", time.Now())
+	if !r.known || r.latency >= lost {
+		t.Errorf("keera-large measured %v (known %v), want less than the %v lost on keera-small",
+			r.latency, r.known, lost)
+	}
+}
+
+func TestARouterRowSaysHowItEndedWhenTheClientHangsUpFirst(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	h := chainHarnessWith(t, chainRouter(), func(_ http.ResponseWriter, r *http.Request) {
+		cancel()
+		<-r.Context().Done()
+	})
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, h.url("/v1/chat/completions"),
+		strings.NewReader(`{"model":"ha","messages":[{"role":"user","content":"hello"}]}`))
+	req.Header.Set("Authorization", "Bearer "+testKey)
+	if resp, err := http.DefaultClient.Do(req); err == nil {
+		_ = resp.Body.Close()
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for h.sink.count() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	// No destination answered, so the first one did not either: 'chose' would
+	// count this as the router getting what it wanted.
+	if ev := h.sink.last(t); ev.RouterOutcome != store.RouterError {
+		t.Errorf("outcome = %q, want %q", ev.RouterOutcome, store.RouterError)
+	}
+	// The client left, the destination did not fail: a measured router must
+	// not rank it last for it.
+	if r := h.srv.load.read("org_1/keera-small", time.Now()); r.failing {
+		t.Error("keera-small is marked failing because the client hung up")
 	}
 }
 
