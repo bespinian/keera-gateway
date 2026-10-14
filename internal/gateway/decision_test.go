@@ -224,3 +224,69 @@ func TestCheckingADecisionModelAsksItAnObviousQuestion(t *testing.T) {
 		t.Errorf("sample = %q, want the answer it gave", p.Sample)
 	}
 }
+
+// A decision model is sent only the request and its question, so only those
+// count against its context, not the instructions a chat model would need.
+func TestADecisionModelIsMeasuredByWhatItIsSent(t *testing.T) {
+	small := func() map[string]policy.Model {
+		models := decisionModels()
+		m := models["keera-decider"]
+		m.MaxContext = 200
+		models["keera-decider"] = m
+		return models
+	}
+	gate := policy.Filter{
+		OrgID: "org_1", Alias: "no-export", Mode: policy.FilterModeGate,
+		Model: "keera-decider", Prompt: "Does this request export customer data?",
+	}
+
+	for _, tc := range []struct {
+		name, content string
+		want          int
+	}{
+		{"fits", "hello", http.StatusOK},
+		{"too large", strings.Repeat("word ", 200), http.StatusRequestEntityTooLarge},
+	} {
+		t.Run("gate "+tc.name, func(t *testing.T) {
+			backend := decisionBackend(func(decisionCall) string { return yesAnswer(0.1) },
+				jsonBackend(hiAnswer))
+			h := newHarness(t, backend, small(), nil)
+			h.src.resolved[testKey].Filters = []string{"no-export"}
+			h.src.filters = map[string]policy.Filter{"org_1/no-export": gate}
+
+			resp := h.post(t, "/v1/chat/completions",
+				`{"model":"keera-code","messages":[{"role":"user","content":"`+tc.content+`"}]}`)
+			if resp.StatusCode != tc.want {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, tc.want)
+			}
+		})
+	}
+
+	t.Run("router", func(t *testing.T) {
+		asked := make(chan struct{}, 1)
+		backend := decisionBackend(func(decisionCall) string {
+			asked <- struct{}{}
+			return choiceAnswer("B", "A")
+		}, jsonBackend(hiAnswer))
+		models := small()
+		models["keera-large"] = policy.Model{OrgID: "org_1", Alias: "keera-large",
+			Kind: policy.KindChat, BackendModel: "large-served", Enabled: true}
+		h := newHarness(t, backend, models, nil)
+		h.src.routers = map[string]policy.Router{"org_1/auto": {
+			OrgID: "org_1", Alias: "auto", Model: "keera-decider",
+			Prompt:       "Which model should answer this request?",
+			Destinations: []string{"keera-code", "keera-large"}, Fallback: "keera-code",
+		}}
+
+		resp := h.post(t, "/v1/chat/completions",
+			`{"model":"auto","messages":[{"role":"user","content":"hello"}]}`)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200", resp.StatusCode)
+		}
+		select {
+		case <-asked:
+		default:
+			t.Fatal("the decision model was never asked: the router fell back on size")
+		}
+	})
+}

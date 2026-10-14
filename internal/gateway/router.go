@@ -407,14 +407,6 @@ func (s *Server) decideOnce(ctx context.Context, rt policy.Router, m policy.Mode
 	instruction := strings.TrimSpace(rt.Prompt) +
 		"\n" + fmt.Sprintf(protocol, s.destinationList(rt.OrgID, offered, byLetter))
 
-	if m.MaxContext > 0 {
-		inputTokens := promptTokens(input, instruction)
-		if inputTokens+outputTokens > m.MaxContext {
-			return decision{}, fmt.Errorf("the request is about %d tokens of text and the model "+
-				"it decides with, '%s', has a context of %d", inputTokens, m.Alias, m.MaxContext)
-		}
-	}
-
 	ask := guardQuestion{
 		instruction: instruction, input: input, outputTokens: outputTokens,
 		timeout: routerTimeout, limit: maxRouterResponseBytes,
@@ -423,6 +415,12 @@ func (s *Server) decideOnce(ctx context.Context, rt policy.Router, m policy.Mode
 	if byLetter {
 		q := s.routerDecision(rt.OrgID, rt.Prompt, offered)
 		ask.decision = &q
+	}
+	if m.MaxContext > 0 {
+		if sent, answer := ask.tokens(m); sent+answer > m.MaxContext {
+			return decision{}, fmt.Errorf("the request is about %d tokens of text and the model "+
+				"it decides with, '%s', has a context of %d", sent, m.Alias, m.MaxContext)
+		}
 	}
 	ans, err := s.askGuard(ctx, m, ask, byLetter)
 	// The cost is kept whatever the answer, as a filter's is.

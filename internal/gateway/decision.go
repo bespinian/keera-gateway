@@ -36,6 +36,15 @@ type decisionQuestion struct {
 	Criteria     map[string]string `json:"criteria,omitempty"`
 }
 
+// text is all the question's words, to measure what a decision model is sent.
+func (q decisionQuestion) text() string {
+	parts := []string{q.Instructions}
+	for _, c := range q.Criteria {
+		parts = append(parts, c)
+	}
+	return strings.Join(parts, "\n")
+}
+
 // gateDecision is a gate's instruction as a yes-or-no question, where yes
 // refuses. Lines starting 'yes:' and 'no:' say what each answer means; a
 // classifier is surer with them, and the rest is the question.

@@ -454,11 +454,16 @@ func (s *Server) runFilter(ctx context.Context, f policy.Filter, m policy.Model,
 	instruction := strings.TrimSpace(f.Prompt) +
 		"\n" + fmt.Sprintf(protocol, len(texts), len(texts))
 
+	ask := guardQuestion{instruction: instruction, input: input, outputTokens: outputTokens,
+		timeout: filterTimeout, limit: maxFilterResponseBytes, subject: "the filter's model"}
+	if gate {
+		q := gateDecision(f.Prompt)
+		ask.decision = &q
+	}
 	if m.MaxContext > 0 {
-		inputTokens := promptTokens(input, instruction)
-		if inputTokens+outputTokens > m.MaxContext {
+		if sent, answer := ask.tokens(m); sent+answer > m.MaxContext {
 			return nil, filterCost{}, &filterTooLargeError{
-				msg: filterTooLargeMessage(f, m, inputTokens),
+				msg: filterTooLargeMessage(f, m, sent),
 			}
 		}
 	}
@@ -467,12 +472,6 @@ func (s *Server) runFilter(ctx context.Context, f policy.Filter, m policy.Model,
 	// model wraps it in. The reason after it is still read from the text. A
 	// decision model's answer always carries them.
 	logprobs := gate && m.Kind != policy.KindDecision && s.readsLogprobs(m)
-	ask := guardQuestion{instruction: instruction, input: input, outputTokens: outputTokens,
-		timeout: filterTimeout, limit: maxFilterResponseBytes, subject: "the filter's model"}
-	if gate {
-		q := gateDecision(f.Prompt)
-		ask.decision = &q
-	}
 	// The cost is kept whatever the answer: an unusable one still used the
 	// GPU.
 	var cost filterCost
@@ -517,6 +516,16 @@ type guardQuestion struct {
 	// decision is the question as a decision model is asked it, or nil when
 	// only a chat model can answer it.
 	decision *decisionQuestion
+}
+
+// tokens is about how much of m's context the question takes: what is sent,
+// and the room kept for the answer. A decision model is sent only the input
+// and its question, and writes no text.
+func (q guardQuestion) tokens(m policy.Model) (sent, answer int) {
+	if m.Kind == policy.KindDecision && q.decision != nil {
+		return promptTokens(q.input, q.decision.text()), 0
+	}
+	return promptTokens(q.input, q.instruction), q.outputTokens
 }
 
 // guardAnswer is a guard model's whole answer, whatever its status, and what
