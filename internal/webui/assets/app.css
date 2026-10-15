@@ -779,8 +779,8 @@ input[type="checkbox"]:disabled {
    one. It is here for the filter and router modes, where the fields below have
    almost nothing in common from one mode to the next: a dialog that asks which
    mode last is a dialog that is mostly hidden until it is answered. It is here
-   for a model's provider too, where the tile carries the provider's own logo.
-   Tiles also have room for the sentence an <option> had to leave out. */
+   for a client too, where the tile can carry its maker's logo. Tiles also have
+   room for the sentence an <option> had to leave out. */
 .tiles {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));

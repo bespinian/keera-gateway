@@ -82,26 +82,25 @@ same shape (for example an egress proxy that mirrors the path), write
 
 ### In the panel
 
-**Models → Add model** first asks where the model runs: one tile per provider,
-and one for your own inference plane. The rest of the form appears after you
-pick one.
+**Models → Add model** opens the model catalogue. It lists every model the
+providers offer, with its name, release date, location, context window and list
+prices, as `keera model providers` does. You can search it, filter it by
+provider, and sort it by any column. Operators and administrators add a model
+from it to an organisation. Everyone else opens it with **Model catalogue** and
+can only browse it. See
+[Models belong to an organisation](gateway.md#models-belong-to-an-organisation).
 
-For a provider, you enter the model names and the API key. The endpoint,
-context window and prices are filled in and folded away
-under **Advanced options**. The panel offers only the models in the table; add
-a newer one with `keera model add` or a catalogue file. The model remembers its provider, so editing it
-later opens the same tile with the same values. The provider cannot be changed
-there; add a new model instead.
+**Add** on a row opens the form with the provider and the model already picked.
+You enter the alias and the API key. The endpoint, context window and prices
+are filled in and folded away under **Advanced options**. The panel offers only
+the models in the table; add a newer one with `keera model add` or a catalogue
+file. The model remembers its provider, and editing it later opens the same
+values. The provider cannot be changed there; add a new model instead.
 
 Infomaniak also asks for a product id and builds the endpoint from it.
 
-**Models → Model catalogue** lists every model the providers offer, with its
-name, release date, location, context window and list prices, as `keera model
-providers` does. You can search it, filter it by provider, and sort it by any
-column. **Add** opens the same form with the provider and the model already
-picked. Everyone can see the list. Operators and
-administrators can add a model from it to an organisation. See
-[Models belong to an organisation](gateway.md#models-belong-to-an-organisation).
+**Self-hosted model**, above the catalogue, opens the same form for your own
+inference server. You enter the endpoint, context window and prices yourself.
 
 ### On the command line
 

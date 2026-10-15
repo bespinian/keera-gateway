@@ -78,13 +78,13 @@ export async function modelsView(ctx) {
   const providers = canAdd ? await presets() : [];
   ctx.setSubtitle(`${models.length} ${plural(models.length, "model")}`);
 
+  // A model is added from the catalogue, which also offers a self-hosted one.
+  // Everyone else can still browse it.
   const head = listHead(
     null,
     [
       rangePicker(ctx, since),
-      // Everyone can browse it. Only a page that can add a model has fetched
-      // the providers, so only there can an empty list hide it.
-      !canAdd || providers.length
+      !canAdd
         ? h(
             "a",
             {
@@ -99,7 +99,7 @@ export async function modelsView(ctx) {
     ],
     canAdd && {
       label: "Add model",
-      onClick: () => editModel(ctx, null, providers),
+      onClick: go(ctx, "/provider-models"),
     },
   );
 
@@ -298,9 +298,10 @@ export async function modelsView(ctx) {
 }
 
 // providerModelsView lists every model the hosted providers offer, with what
-// it costs and whether this organisation already serves it. Everyone can read it; an
-// administrator can also add a model from it, which opens the usual form with
-// the provider and the model already picked.
+// it costs and whether this organisation already serves it. Everyone can read
+// it. It is also where an administrator adds a model: a row opens the form
+// with the provider and the model already picked, and the button above opens
+// it for a self-hosted one.
 export async function providerModelsView(ctx) {
   const canEdit = canAddModel(ctx);
   const [providers, models] = await Promise.all([
@@ -327,10 +328,30 @@ export async function providerModelsView(ctx) {
   const price = (v) =>
     v ? h("span", { class: "nowrap" }, "CHF " + listPrice(v)) : dash();
 
+  // A model on your own inference server is in no provider's table, so it is
+  // added from here rather than from a row.
   const head = h(
     "div",
     { class: "detail-head" },
     crumb(ctx, "/models", "Models"),
+    canEdit
+      ? h(
+          "div",
+          { class: "row", style: { justifyContent: "flex-end" } },
+          h(
+            "button",
+            {
+              class: "btn",
+              title:
+                "A model on your own inference server, such as vLLM, " +
+                "Ollama or Keera Engine",
+              onClick: () => editModel(ctx, null, providers, null),
+            },
+            icon(icons.selfHosted),
+            "Self-hosted model",
+          ),
+        )
+      : null,
   );
 
   const list = table(
@@ -1010,8 +1031,8 @@ const PRESET_FIELDS = [
   },
 ];
 
-// pick is a provider and one of its models to start from, as the provider
-// models screen offers them. It only applies to a new model.
+// pick is where a new model runs, as the catalogue offers it: a provider and
+// one of its models, or null for a self-hosted one.
 function editModel(ctx, existing, providers, pick) {
   const m = existing || { kind: "chat", enabled: true, backends: [] };
   const err = h("div");
@@ -1116,9 +1137,8 @@ function editModel(ctx, existing, providers, pick) {
   // of the provider's answers this entry had already written over before the
   // dialog opened - those stay the administrator's to edit.
   const state = {
-    // Which tile is pressed: an inference plane of your own, one of the
-    // providers, or none at all on a new model - which is what holds the rest
-    // of the form back until the question is answered.
+    // Where the model runs: an inference plane of your own, or one of the
+    // providers.
     place: null,
     preset: null,
     hosted: false,
@@ -1310,15 +1330,11 @@ function editModel(ctx, existing, providers, pick) {
     productSlot,
     machinery,
     alias,
-    // An entry that already exists has answered the question, even when
-    // the answer is "an inference plane of my own": its tile is the one
-    // pressed, and the form below it is filled in.
     existing: !!existing,
     // Whether this is already a hosted model, which is a thing the entry
     // says rather than a thing to guess from its backend URL.
     initial: existing ? presetOf(providers, existing) : null,
-    // A tile has been clicked, so there is a form to fill in now.
-    onPick: () => reveal(),
+    pick: existing ? null : pick,
   });
 
   const keyField = h(
@@ -1399,10 +1415,8 @@ function editModel(ctx, existing, providers, pick) {
   };
   subscription.addEventListener("change", paintSubscription);
 
-  // Everything the tiles govern, in one wrapper the dialog can hold back until
-  // one of them is clicked. On a new model that is most of the form: where it
-  // runs decides whether these fields are questions at all, or a provider's
-  // answers folded away.
+  // Everything below where the model runs: that decides whether these fields
+  // are questions at all, or a provider's answers folded away.
   const rest = h(
     "div",
     {},
@@ -1452,11 +1466,7 @@ function editModel(ctx, existing, providers, pick) {
     ),
   );
 
-  // Save is built out here rather than in the footer's callback, because the
-  // tiles turn it on: there is nothing to save before one is clicked, and an
-  // Add model button beside four unanswered tiles is one inviting somebody to
-  // skip the question. It closes the dialog through the handle modal hands
-  // back.
+  // Save closes the dialog through the handle modal hands back.
   let close;
   const saveButton = h(
     "button",
@@ -1576,40 +1586,17 @@ function editModel(ctx, existing, providers, pick) {
     !existing ? "Add model" : "Save",
   );
 
-  const reveal = () => {
-    rest.hidden = false;
-    saveButton.hidden = false;
-    saveButton.disabled = false;
-    paintSubscription();
-  };
   paintSubscription();
-  if (hosted && pick && !existing) hosted.pick(pick.p, pick.m);
-  // Held back only where there is a choice to make: a build that knows no
-  // providers has no tiles, and a model that already exists has answered.
-  const waiting = !!hosted && !state.place;
-  rest.hidden = waiting;
-  saveButton.hidden = waiting;
-  saveButton.disabled = waiting;
 
   close = modal({
     wide: true,
     title: existing ? `Edit ${m.alias}` : "Add model",
-    subtitle: waiting
-      ? "Start with where it runs. A hosted provider fills in the " +
-        "endpoint, context window and prices. For self-hosted, you enter " +
-        "them."
-      : null,
     body: h("form", { onSubmit: (e) => e.preventDefault() }, err, hosted, rest),
     actions: (dismiss) => [
       h("button", { class: "btn", onClick: dismiss }, "Cancel"),
       saveButton,
     ],
   });
-
-  // The keyboard starts on the tiles. The dialog's own rule - the first field
-  // somebody can type in - finds nothing on a new model, because until a tile
-  // is clicked there is nothing below them to type in.
-  if (waiting) hosted.querySelector("button.tile").focus();
 }
 
 // presets reads the hosted endpoints this build knows. It is a convenience, so
@@ -1687,17 +1674,10 @@ function providerAnswers(p, known) {
   };
 }
 
-// hostedFields is the top of the form: where the model runs. Every place it
-// can run is a tile - an inference plane of your own, and each hosted endpoint
-// Keera Gateway already knows - because a provider is recognised by its mark
-// before its name is read, and a tile has room for the sentence an <option>
-// had to leave out.
-//
-// It is asked first and on its own, the way a filter's mode is: the answer
-// decides what the rest of the form means, and an Add model button beside an
-// unanswered question is one inviting somebody to skip it. Once a tile is
-// clicked it collapses to a single row with the way back to the others, so the
-// choice stays on the screen without the other tiles staying with it.
+// hostedFields is the top of the form: where the model runs, as one row with
+// the provider's mark. It is chosen before the form opens - in the catalogue
+// for a new model, and when it was added for an existing one - so it is shown
+// here and not asked.
 //
 // Choosing a provider is meant to be the whole job - a provider, a model, a
 // key - so everything it implies is filled in, disabled and folded away under
@@ -1723,15 +1703,12 @@ function hostedFields(ctx, providers, form) {
     alias,
     existing,
     initial,
-    onPick,
+    pick,
   } = form;
 
   const note = h("div");
-  // The places a model can run, in the order the tiles offer them: your own
-  // inference plane first, because it is the one Keera exists for, then the
-  // providers in the table's own order. A place with no `p` is that first one,
-  // and having no provider table behind it is the whole difference.
-  //
+  // The places a model can run. A place with no `p` is your own inference
+  // plane, and having no provider table behind it is the whole difference.
   // Each carries one line: what a provider is, in its own table's words, and
   // what an inference plane of your own is in the panel's.
   const places = [
@@ -1747,9 +1724,7 @@ function hostedFields(ctx, providers, form) {
     })),
   ];
   // A place's mark: the provider's own logo where this build has one, a cloud
-  // where it does not, and a rack of machines for a plane of your own. Drawn
-  // afresh each time rather than kept, because the tile and the row that
-  // replaces it show the same mark and one node cannot be in both.
+  // where it does not, and a rack of machines for a plane of your own.
   const markOf = (place) =>
     place.p
       ? providerMark(place.p.name) || icon(icons.cloud)
@@ -1782,8 +1757,8 @@ function hostedFields(ctx, providers, form) {
   // What follows a hosted provider: which of its models this alias serves, and
   // a word when this build does not know the one picked.
   const block = h("div", { hidden: true }, field("Model", model), note);
-  // Its own place in the form, far from the block above, so hiding that block
-  // is not what hides it - see choose().
+  // Its own place in the form, just above the API key, far from the block
+  // above.
   if (productSlot) productSlot.replaceChildren(productIDField);
   const summary = h("summary", {}, "Advanced options");
   const fold = h("details", { class: "fold" }, summary);
@@ -1793,9 +1768,7 @@ function hostedFields(ctx, providers, form) {
   const paintNote = () => {
     const p = chosen();
     if (!p) return;
-    // Asked for only where there is a hole in the address to fill. The value
-    // is kept while it is hidden, so going back to the tiles and returning
-    // does not lose what somebody typed.
+    // Asked for only where there is a hole in the address to fill.
     productIDField.hidden = !p.needs_product_id;
     const lines = [];
     if (state.preset && !state.preset.m) {
@@ -1939,137 +1912,25 @@ function hostedFields(ctx, providers, form) {
 
   model.addEventListener("change", applyModel);
 
-  const tiles = h(
-    "div",
-    { class: "tiles" },
-    places.map((place) =>
-      h(
-        "button",
-        {
-          class: "tile",
-          type: "button",
-          "aria-pressed": "false",
-          onClick: () => choose(place),
-        },
-        h("span", { class: "tile-mark" }, markOf(place)),
-        h("span", { class: "tile-name" }, place.name),
-        place.what ? h("span", { class: "tile-what" }, place.what) : null,
-      ),
-    ),
-  );
-  const chosenRow = h("div", { class: "tile-chosen", hidden: true });
-  // What to weigh before clicking one of them, and only then: over the
-  // self-hosted row it is a caution about a choice that was not made.
-  const caution = h(
-    "div",
-    { class: "hint" },
-    "With a hosted provider, prompts leave your infrastructure. Read " +
-      "docs/providers.md first, and set budgets for the projects that use it.",
-  );
-  const showTiles = (show) => {
-    tiles.hidden = !show;
-    caution.hidden = !show;
-    chosenRow.hidden = show;
-  };
-  // The way back to the tiles. What is in the fields stays there until another
-  // tile is clicked: going to look at the others costs nothing.
-  const change = h(
-    "button",
-    {
-      class: "btn btn-sm",
-      type: "button",
-      onClick: () => {
-        showTiles(true);
-        tiles.firstChild.focus();
-      },
-    },
-    "Change",
-  );
-
-  // paint is the choice as the form shows it: which tile is pressed, the row
-  // that stands in for them all, and whether there is a model to pick below
-  // it. It changes nothing else, which is what lets an entry being edited open
-  // on its own provider without a default being written over anything.
-  const paint = (place) => {
-    tiles.childNodes.forEach((tile, i) => {
-      tile.setAttribute("aria-pressed", String(places[i] === place));
-    });
-    chosenRow.replaceChildren(
-      markOf(place),
-      h(
-        "div",
-        { class: "stack", style: { gap: "1px" } },
-        h("span", { class: "tile-name" }, place.name),
-        place.what ? h("span", { class: "tile-what" }, place.what) : null,
-      ),
-      h("div", { class: "spacer" }),
-      // Where a model runs is settled when it is added. Moving it elsewhere
-      // is a new model.
-      ...(existing ? [] : [change]),
-    );
-    showTiles(false);
-    block.hidden = !place.p;
-  };
-
-  // choose is a tile being clicked, which is more than painting it: where the
-  // model runs has changed, so the model list is rebuilt and nothing is filled
-  // in again until a model is named. The values already in the fields stay -
-  // they are the administrator's now, and clearing a form somebody has filled
-  // in is never the helpful reading - except what a provider filled in.
-  // With the provider goes the reason any of them was disabled.
-  const choose = (place) => {
-    // The tile that is already pressed is the way back from the tiles and
-    // nothing more. Rebuilding the list under it would throw away the model
-    // this entry names, which is what somebody went to look at the others for.
-    if (place === state.place) {
-      paint(place);
-      change.focus();
-      return;
-    }
-    const previous = state.preset;
+  // choose settles where a new model runs. A provider comes with the model
+  // picked in the catalogue, or its first one: a provider, a model and a key is
+  // the whole job, and two of the three are answered already.
+  const choose = (place, mm) => {
     state.place = place;
     state.hosted = !!place.p;
-    state.preset = null;
-    state.overridden.clear();
-    paint(place);
     if (place.p) {
-      // Its first model comes with it: a provider, a model and a key is the
-      // whole job, and two of the three are answered by the click.
       fillModels();
+      const i = mm ? place.p.models.findIndex((x) => x.id === mm.id) : -1;
+      if (i >= 0) model.value = String(i);
       applyModel();
     } else {
-      productIDField.hidden = true;
-      // What the provider filled in is about its own model, which this one is
-      // not. What somebody typed is theirs and stays.
-      if (previous) {
-        for (const f of PRESET_FIELDS) {
-          const def = f.of(previous.p, previous.m, state);
-          const now = fields[f.key].value;
-          if (def !== null && sameValue(f, now, def, previous.m)) {
-            fields[f.key].value = "";
-          }
-        }
-      }
-      if (!state.aliasDirty) alias.value = "";
-      // Where the model runs is the question these tiles answer, so the
-      // location follows it.
       fields.location.value = "onprem";
       paintMachinery();
-      setKinds(fields.kind, KINDS, fields.kind.value);
-      paintPresets(null, fields, marks, state);
-      note.replaceChildren();
     }
-    if (onPick) onPick();
-    // Where the cursor lands is the point of asking this first: the model
-    // list, which is the next question a provider asks, or the alias, which is
-    // the first thing left to type for a plane of your own.
-    if (place.p) model.focus();
-    else if (!alias.value && !alias.disabled) alias.focus();
-    else change.focus();
   };
 
-  // A model that already names a provider opens on that provider's tile, with
-  // its own stored values untouched: an entry may override anything the table
+  // A model that already names a provider opens on that provider, with its
+  // own stored values untouched: an entry may override anything the table
   // filled in, and the one thing this form must not do is write a default back
   // over an override on the way to changing a description.
   if (initial) {
@@ -2115,38 +1976,38 @@ function hostedFields(ctx, providers, form) {
       state.overridden.add("kind");
     }
     paintPresets(initial, fields, marks, state);
-    paint(state.place);
     paintMachinery("auto");
     paintNote();
   } else if (existing) {
-    // An entry naming no provider is one that runs on a plane of your own.
-    // That is an answer, so its tile is pressed and the form below it is the
-    // form for it - nothing is reset, because there is nothing to choose.
+    // An entry naming no provider runs on a plane of your own. Nothing is
+    // reset, because there is nothing to choose.
     state.place = places[0];
-    paint(state.place);
+  } else {
+    const picked = pick && places.find((x) => x.p && x.p.name === pick.p.name);
+    choose(picked || places[0], pick && pick.m);
   }
+  block.hidden = !state.place.p;
 
-  const el = h(
+  // Where a model runs is settled when it is added. Moving it elsewhere is a
+  // new model, so this is a row and not a choice.
+  const place = state.place;
+  return h(
     "div",
     { class: "field" },
     h("label", {}, "Where the model runs"),
-    tiles,
-    chosenRow,
-    caution,
+    h(
+      "div",
+      { class: "tile-chosen" },
+      markOf(place),
+      h(
+        "div",
+        { class: "stack", style: { gap: "1px" } },
+        h("span", { class: "tile-name" }, place.name),
+        place.what ? h("span", { class: "tile-what" }, place.what) : null,
+      ),
+    ),
     block,
   );
-  // pick presses a provider's tile and selects one of its models, as if
-  // somebody had clicked both.
-  el.pick = (p, mm) => {
-    const place = places.find((x) => x.p && x.p.name === p.name);
-    if (!place) return;
-    choose(place);
-    const i = place.p.models.findIndex((x) => x.id === mm.id);
-    if (i < 0) return;
-    model.value = String(i);
-    applyModel();
-  };
-  return el;
 }
 
 // paintPresets keeps the line under each filled-in field true: which provider
