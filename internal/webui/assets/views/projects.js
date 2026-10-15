@@ -9,7 +9,6 @@ import {
   confirm,
   toast,
   money,
-  amount,
   num,
   meter,
   icon,
@@ -159,7 +158,7 @@ export async function projectsView(ctx) {
             h(
               "span",
               { class: "muted", style: { fontSize: "11.5px" } },
-              `${amount(t.spend_micros)} of ${money(t.budget_micros)} per ${t.period}`,
+              `${money(t.spend_micros)} of ${money(t.budget_micros)} per ${t.period}`,
             ),
           );
         },

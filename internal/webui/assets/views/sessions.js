@@ -30,6 +30,7 @@ import {
   compact,
   money,
   amount,
+  moneyStat,
   ms,
   duration,
   ago,
@@ -754,11 +755,10 @@ export async function sessionDetailView(ctx) {
         null,
         tokens(s.input_tokens, s.output_tokens),
       ),
-      stat(
+      moneyStat(
         "Cost",
-        amount(s.cost_micros),
-        "CHF",
-        `${amount(Math.round(s.cost_micros / Math.max(1, s.requests)))} a request`,
+        s.cost_micros,
+        `${money(Math.round(s.cost_micros / Math.max(1, s.requests)))} a request`,
       ),
     ),
   );

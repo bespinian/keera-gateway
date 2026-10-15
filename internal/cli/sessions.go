@@ -101,11 +101,11 @@ func printSessions(w *table, res sessionsResponse, since time.Duration) {
 	t := res.Totals
 	_, _ = fmt.Fprintf(w, "\n%d sessions over %d requests in the last %s; showing %d\n",
 		t.Sessions, t.Requests, shortDuration(since), len(res.Data))
-	_, _ = fmt.Fprintf(w, "middle session: %d requests, %s, %s %s\n",
+	_, _ = fmt.Fprintf(w, "middle session: %d requests, %s, %s\n",
 		t.MedianRequests, shortDuration(time.Duration(t.MedianDurationMS)*time.Millisecond),
-		policy.FormatMicros(t.MedianCostMicros), policy.Currency)
-	_, _ = fmt.Fprintf(w, "worst session: %d requests, %s %s; %d of %d had problems\n",
-		t.LongestRequests, policy.FormatMicros(t.CostliestMicros), policy.Currency,
+		policy.FormatMoney(t.MedianCostMicros))
+	_, _ = fmt.Fprintf(w, "worst session: %d requests, %s; %d of %d had problems\n",
+		t.LongestRequests, policy.FormatMoney(t.CostliestMicros),
 		t.Unhappy, t.Sessions)
 	_, _ = fmt.Fprintf(w, "grouped by conversation, cut after %s idle\n",
 		shortDuration(time.Duration(res.GapSeconds)*time.Second))
@@ -154,7 +154,7 @@ func printSession(w *table, res sessionResponse) {
 	show(w, "project", dash(labelled(res.ProjectNames, s.ProjectID)))
 	show(w, "who", dash(labelled(res.UserNames, s.UserID)))
 	_, _ = fmt.Fprintf(w, "tokens\t%d in, %d out\n", s.InputTokens, s.OutputTokens)
-	_, _ = fmt.Fprintf(w, "cost\t%s %s\n", policy.FormatMicros(s.CostMicros), policy.Currency)
+	show(w, "cost", policy.FormatMoney(s.CostMicros))
 	show(w, "ended", endedAs(s))
 	if s.LastError != "" {
 		show(w, "message", oneLine(s.LastError))

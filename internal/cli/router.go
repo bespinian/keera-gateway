@@ -306,7 +306,7 @@ func printRouterProbe(w *table, p gateway.RouterProbe) {
 		show(w, "took", fmt.Sprintf("%dms", p.TotalMS))
 	}
 	if p.CostMicros > 0 {
-		show(w, "cost of these runs", policy.FormatMicros(p.CostMicros))
+		show(w, "cost of these runs", policy.FormatMoney(p.CostMicros))
 	}
 	if p.Error != "" {
 		show(w, "error", p.Error)
@@ -426,14 +426,14 @@ func printRouterReport(w *table, name string, since time.Duration,
 	}
 	show(w, "deciding cost", fmt.Sprintf("%dms median, %dms p95",
 		rep.DecisionMedianMS, rep.DecisionP95MS))
-	show(w, "spend", policy.FormatMicros(rep.Total.CostMicros)+
+	show(w, "spend", policy.FormatMoney(rep.Total.CostMicros)+
 		" (the destinations' bill, with the decisions in it)")
 
 	if len(rep.Destinations) == 0 {
 		return
 	}
 	_, _ = fmt.Fprintln(w)
-	w.header("DESTINATION\tREQUESTS\tSHARE\tTOKENS\tSPEND\tMEDIAN TTFT")
+	w.header("DESTINATION\tREQUESTS\tSHARE\tTOKENS\tSPEND (" + policy.Currency + ")\tMEDIAN TTFT")
 	for _, d := range rep.Destinations {
 		_, _ = fmt.Fprintf(w, "%s\t%d\t%s\t%d\t%s\t%dms\n",
 			d.Alias, d.Requests, share(d.Requests, rep.Total.Requests),

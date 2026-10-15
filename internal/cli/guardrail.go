@@ -426,7 +426,7 @@ func printEffectiveSpend(w *table, eff control.Effective) {
 			continue
 		}
 		limited = true
-		showFrom(w, "budget", policy.FormatMicros(s.BudgetMicros)+" per "+string(s.Period),
+		showFrom(w, "budget", policy.FormatMoney(s.BudgetMicros)+" per "+string(s.Period),
 			levelName(eff, string(s.Type), s.ID))
 	}
 	if !limited {
@@ -563,7 +563,7 @@ func printLimits(w *table, lim policy.Limits, scope string) {
 		if lim.BudgetPeriod != nil {
 			p = *lim.BudgetPeriod
 		}
-		show(w, "budget", policy.FormatMicros(*lim.BudgetMicros)+" per "+string(p))
+		show(w, "budget", policy.FormatMoney(*lim.BudgetMicros)+" per "+string(p))
 	}
 	if len(lim.Filters) == 0 {
 		show(w, "filters", "(none)")

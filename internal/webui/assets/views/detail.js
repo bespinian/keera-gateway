@@ -24,7 +24,7 @@ import {
   num,
   listPrice,
   money,
-  amount,
+  moneyStat,
   ms,
   ago,
   date,
@@ -780,7 +780,7 @@ async function screen(ctx, spec) {
         null,
         `${compact(o.input_tokens)} in · ${compact(o.output_tokens)} out`,
       ),
-      stat("Cost", amount(o.cost_micros), "CHF"),
+      moneyStat("Cost", o.cost_micros),
       stat(
         "First token",
         ms(o.ttft_median_ms),
@@ -938,7 +938,7 @@ function budgetPill(ctx, project) {
     "span",
     { class: "pill" },
     meter(frac, tone),
-    `${amount(project.spend_micros)} of ${money(project.budget_micros)} per ${project.period}`,
+    `${money(project.spend_micros)} of ${money(project.budget_micros)} per ${project.period}`,
   );
 }
 

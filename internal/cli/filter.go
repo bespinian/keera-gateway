@@ -258,7 +258,7 @@ func printFilterProbe(w *table, p gateway.FilterProbe) {
 		show(w, "cost of one run", "nothing - no model runs, so there is nothing to charge "+
 			"and nothing added to the wait")
 	case p.CostMicros > 0:
-		show(w, "cost of one run", policy.FormatMicros(p.CostMicros))
+		show(w, "cost of one run", policy.FormatMoney(p.CostMicros))
 	}
 	// Which rules fired, so a pattern filter doing the wrong thing names the line.
 	for _, hit := range p.Hits {
@@ -380,14 +380,14 @@ func printFilterReport(w *table, name string, since time.Duration,
 	show(w, "added latency", fmt.Sprintf("%dms median, %dms p95",
 		rep.LatencyMedianMS, rep.LatencyP95MS))
 	show(w, "spend", fmt.Sprintf("%s of the organisation's %s (%s)",
-		policy.FormatMicros(rep.CostMicros), policy.FormatMicros(rep.OrgCostMicros),
+		policy.FormatMoney(rep.CostMicros), policy.FormatMoney(rep.OrgCostMicros),
 		share(rep.CostMicros, rep.OrgCostMicros)))
 
 	if len(rep.Projects) == 0 {
 		return
 	}
 	_, _ = fmt.Fprintln(w)
-	w.header("PROJECT\tRUNS\tREFUSED\tRATE\tREWROTE\tFAILED\tSPEND")
+	w.header("PROJECT\tRUNS\tREFUSED\tRATE\tREWROTE\tFAILED\tSPEND (" + policy.Currency + ")")
 	for _, t := range rep.Projects {
 		label := t.ProjectID
 		if name, ok := res.ProjectNames[t.ProjectID]; ok && name != "" {

@@ -567,17 +567,17 @@ func printModel(w *table, m policy.Model) {
 	} else {
 		show(w, "max context", "(not advertised)")
 	}
-	show(w, "in/mtok", policy.FormatMicros(m.InputMicrosPerMTok))
-	show(w, "out/mtok", policy.FormatMicros(m.OutputMicrosPerMTok))
+	show(w, "in/mtok", policy.FormatMoney(m.InputMicrosPerMTok))
+	show(w, "out/mtok", policy.FormatMoney(m.OutputMicrosPerMTok))
 	// In words rather than 0.00: an unstated rate is charged at the input
 	// price, not free.
 	if m.CachedInputMicrosPerMTok > 0 {
-		show(w, "cached in/mtok", policy.FormatMicros(m.CachedInputMicrosPerMTok))
+		show(w, "cached in/mtok", policy.FormatMoney(m.CachedInputMicrosPerMTok))
 	} else {
 		show(w, "cached in/mtok", "(not stated - charged at the input price)")
 	}
 	if m.CacheWriteMicrosPerMTok > 0 {
-		show(w, "cache write/mtok", policy.FormatMicros(m.CacheWriteMicrosPerMTok))
+		show(w, "cache write/mtok", policy.FormatMoney(m.CacheWriteMicrosPerMTok))
 	} else {
 		show(w, "cache write/mtok", "(not stated - charged at the input price)")
 	}

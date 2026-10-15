@@ -71,9 +71,9 @@ export function compact(n) {
   return numberFmt.format(n);
 }
 
-/** money renders integer micro-units of CHF, with the currency. */
+/** money renders integer micro-units of CHF, with the currency first: CHF 3.00. */
 export function money(micros) {
-  return `${amount(micros)} CHF`;
+  return `CHF ${amount(micros)}`;
 }
 
 /** amount renders integer micro-units without the currency, for where it is
@@ -821,16 +821,28 @@ export function pct(part, whole) {
 }
 
 export function stat(label, value, unit, note) {
+  return statCard(
+    label,
+    [value, unit ? h("span", { class: "unit" }, unit) : null],
+    note,
+  );
+}
+
+/** moneyStat is a stat for an amount, with the currency first as in money. */
+export function moneyStat(label, micros, note) {
+  return statCard(
+    label,
+    [h("span", { class: "unit unit-first" }, "CHF"), amount(micros)],
+    note,
+  );
+}
+
+function statCard(label, value, note) {
   return h(
     "div",
     { class: "card stat" },
     h("div", { class: "stat-label" }, label),
-    h(
-      "div",
-      { class: "stat-value" },
-      value,
-      unit ? h("span", { class: "unit" }, unit) : null,
-    ),
+    h("div", { class: "stat-value" }, ...value),
     note ? h("div", { class: "stat-note" }, note) : null,
   );
 }

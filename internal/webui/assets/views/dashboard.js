@@ -7,7 +7,7 @@ import {
   compact,
   num,
   money,
-  amount,
+  moneyStat,
   ms,
   tokens,
   go,
@@ -90,10 +90,9 @@ export async function dashboardView(ctx) {
     ),
     // What Claude plans paid for is not part of the cost, so it is said
     // beside it rather than added to it.
-    stat(
+    moneyStat(
       "Cost",
-      amount(o.cost_micros),
-      "CHF",
+      o.cost_micros,
       o.subscription_micros
         ? `+ ${money(o.subscription_micros)} covered by Claude plans`
         : null,

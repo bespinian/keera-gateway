@@ -22,7 +22,6 @@ import {
   date,
   dateTime,
   money,
-  amount,
   num,
   empty,
   plural,
@@ -425,7 +424,7 @@ function scopeRow(sc) {
       h(
         "span",
         { class: "muted", style: { fontSize: "11.5px" } },
-        `${amount(sc.spend_micros)} of ${money(sc.budget_micros)} per ${sc.period}`,
+        `${money(sc.spend_micros)} of ${money(sc.budget_micros)} per ${sc.period}`,
         sc.resets_at ? ` · resets ${date(sc.resets_at)}` : "",
         frac >= 1 ? " · used up, so requests are refused until it resets" : "",
       ),

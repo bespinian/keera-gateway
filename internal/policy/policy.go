@@ -876,7 +876,7 @@ type ErrBudgetExceeded struct {
 func (e *ErrBudgetExceeded) Error() string {
 	msg := fmt.Sprintf("%s has spent its %s budget: %s of %s",
 		e.Scope.Type.Possessive(), e.Scope.Period,
-		FormatMicros(e.Spent), FormatMicros(e.Budget))
+		FormatMoney(e.Spent), FormatMoney(e.Budget))
 	if !e.ResetsAt.IsZero() {
 		msg += ". It resets on " + e.ResetsAt.UTC().Format("2 January 2006") + " (UTC)"
 	}
@@ -910,6 +910,12 @@ func FormatMicros(micros int64) string {
 	default:
 		return s
 	}
+}
+
+// FormatMoney is FormatMicros with the currency first: CHF 3.00. A table whose
+// header names the currency uses FormatMicros instead.
+func FormatMoney(micros int64) string {
+	return Currency + " " + FormatMicros(micros)
 }
 
 // Errors returned by a Source.

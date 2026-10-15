@@ -932,6 +932,9 @@ input[type="checkbox"]:disabled {
   color: var(--muted);
   margin-left: 3px;
 }
+.stat-value .unit-first {
+  margin: 0 3px 0 0;
+}
 .stat-note {
   font-size: 12px;
   color: var(--muted);

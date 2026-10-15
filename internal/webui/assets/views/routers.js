@@ -26,6 +26,7 @@ import {
   num,
   money,
   amount,
+  moneyStat,
   ms,
   icon,
   icons,
@@ -686,10 +687,9 @@ export async function routerDetailView(ctx) {
         null,
         `p95 ${ms(rep.decision_p95_ms || 0)}, added per request`,
       ),
-      stat(
+      moneyStat(
         "Cost",
-        amount(rep.total ? rep.total.cost_micros || 0 : 0),
-        "CHF",
+        rep.total ? rep.total.cost_micros || 0 : 0,
         "destinations' cost, decisions included",
       ),
     ),

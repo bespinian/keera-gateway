@@ -27,6 +27,7 @@ import {
   num,
   money,
   amount,
+  moneyStat,
   ms,
   dateTime,
   icon,
@@ -601,10 +602,9 @@ export async function filterDetailView(ctx) {
         null,
         `p95 ${ms(rep.latency_p95_ms || 0)}, per request`,
       ),
-      stat(
+      moneyStat(
         "Cost",
-        amount(rep.cost_micros || 0),
-        "CHF",
+        rep.cost_micros || 0,
         rep.org_cost_micros
           ? `${pct(rep.cost_micros, rep.org_cost_micros)} of the organisation's bill`
           : "nothing charged yet",

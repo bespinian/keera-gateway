@@ -125,18 +125,16 @@ func printBilling(w *table, res billingResponse) {
 		_, _ = fmt.Fprintf(w, "%s\t%s/%s\t%d\t%d\t%d\t%d\t%d\t%s", org, b.Provider,
 			b.BackendModel, b.Calls, b.InputTokens, b.CachedInputTokens, b.CacheWriteTokens,
 			b.OutputTokens,
-			chf(b.Micros))
+			policy.FormatMoney(b.Micros))
 		if res.Payments {
-			_, _ = fmt.Fprintf(w, "\t%s", chf(b.CreditMicros))
+			_, _ = fmt.Fprintf(w, "\t%s", policy.FormatMoney(b.CreditMicros))
 		}
 		_, _ = fmt.Fprintln(w)
 	}
 	t := res.Total
-	_, _ = fmt.Fprintf(w, "total %s\t\t%d\t\t\t\t\t%s", res.Month, t.Calls, chf(t.Micros))
+	_, _ = fmt.Fprintf(w, "total %s\t\t%d\t\t\t\t\t%s", res.Month, t.Calls, policy.FormatMoney(t.Micros))
 	_, _ = fmt.Fprintln(w)
 }
-
-func chf(micros int64) string { return policy.Currency + " " + policy.FormatMicros(micros) }
 
 // creditResponse is GET /v1/billing/account.
 type creditResponse struct {
@@ -193,14 +191,14 @@ func (r *billingRun) credit(ctx context.Context) error {
 
 func printCredit(w *table, res creditResponse) {
 	a := res.Account
-	show(w, "balance", chf(a.BalanceMicros))
+	show(w, "balance", policy.FormatMoney(a.BalanceMicros))
 	if a.Invoiced {
 		show(w, "billed", "by invoice: it may use the keys without credit")
 	}
 	if a.TopUpMicros == 0 {
 		show(w, "automatic top-up", "off")
 	} else {
-		show(w, "automatic top-up", chf(a.TopUpMicros)+" when below "+chf(a.TopUpBelowMicros))
+		show(w, "automatic top-up", policy.FormatMoney(a.TopUpMicros)+" when below "+policy.FormatMoney(a.TopUpBelowMicros))
 	}
 	if a.Card != nil {
 		card := a.Card.Label
@@ -237,7 +235,7 @@ func printPayments(w *table, list []store.Payment, orgNames map[string]string) {
 			_, _ = fmt.Fprintf(w, "%s\t", labelled(orgNames, p.OrgID))
 		}
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", p.TS.Local().Format("2006-01-02 15:04"),
-			p.Kind, chf(p.Micros), chf(p.VATMicros), chf(p.FeeMicros), p.State, p.Actor, dash(p.Note))
+			p.Kind, policy.FormatMoney(p.Micros), policy.FormatMoney(p.VATMicros), policy.FormatMoney(p.FeeMicros), p.State, p.Actor, dash(p.Note))
 	}
 }
 
@@ -273,7 +271,7 @@ func (r *billingRun) topUp(ctx context.Context) error {
 	pm := res.Payment
 	fmt.Fprintf(os.Stderr, "Pay %s: %s credit, %s VAT and a %s transaction fee, on PostFinance "+
 		"Checkout. The credit is added once the payment is through:\n",
-		chf(pm.Micros+pm.VATMicros+pm.FeeMicros), chf(pm.Micros), chf(pm.VATMicros), chf(pm.FeeMicros))
+		policy.FormatMoney(pm.Micros+pm.VATMicros+pm.FeeMicros), policy.FormatMoney(pm.Micros), policy.FormatMoney(pm.VATMicros), policy.FormatMoney(pm.FeeMicros))
 	fmt.Println(res.URL)
 	return nil
 }
@@ -304,7 +302,7 @@ func (r *billingRun) autoTopUp(ctx context.Context) error {
 			return
 		}
 		_, _ = fmt.Fprintf(w, "Below %s, the saved card is charged %s.\n",
-			chf(a.TopUpBelowMicros), chf(a.TopUpMicros))
+			policy.FormatMoney(a.TopUpBelowMicros), policy.FormatMoney(a.TopUpMicros))
 		if a.Card == nil {
 			_, _ = fmt.Fprintln(w, style.warn("There is no saved card yet: "+
 				"'keera billing topup --save-card' saves one."))
@@ -351,7 +349,7 @@ func (r *billingRun) grant(ctx context.Context) error {
 		return err
 	}
 	return out(r.asJSON, p, func(w *table) {
-		_, _ = fmt.Fprintf(w, "Granted %s to %s.\n", chf(p.Micros), p.OrgID)
+		_, _ = fmt.Fprintf(w, "Granted %s to %s.\n", policy.FormatMoney(p.Micros), p.OrgID)
 	})
 }
 
