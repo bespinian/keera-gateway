@@ -312,7 +312,7 @@ func TestSetupStateCountsWhatAFirstRunHasToCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SetupState: %v", err)
 	}
-	want := Setup{Orgs: 1, Keys: 1, Models: 1, People: 1, Requests: 1}
+	want := Setup{Orgs: 1, Keys: 1, Models: 1, Requests: 1}
 	if got != want {
 		t.Errorf("SetupState = %+v, want %+v", got, want)
 	}

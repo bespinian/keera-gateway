@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	keeraid "github.com/bespinian/keera-gateway/internal/id"
 	"github.com/bespinian/keera-gateway/internal/policy"
@@ -190,7 +189,7 @@ func orgConflict(err error) error {
 }
 
 // OrgChange is what UpdateOrg changes. A nil field is left as it is, and an
-// empty EmailDomain clears it.
+// empty EmailDomain clears it. Like CreateOrg, it stores the domain as given.
 type OrgChange struct {
 	Name        *string
 	EmailDomain *string
@@ -204,7 +203,7 @@ type OrgChange struct {
 func (s *Store) UpdateOrg(ctx context.Context, orgID string, c OrgChange) (Org, error) {
 	var domain *string
 	if c.EmailDomain != nil {
-		domain = nullable(strings.TrimSpace(*c.EmailDomain))
+		domain = nullable(*c.EmailDomain)
 	}
 	o, err := scanOrg(s.pool.QueryRow(ctx, `UPDATE orgs SET
 			name = COALESCE($2, name),
@@ -256,47 +255,42 @@ var ErrOrgHasSandboxes = errors.New("store: the organisation still has live sand
 // saved card goes, so nobody can charge it again.
 func (s *Store) DeleteOrg(ctx context.Context, orgID string) (DeletedOrg, error) {
 	var gone DeletedOrg
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return gone, err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `SELECT o.name,
+				(SELECT count(*) FROM projects WHERE org_id = o.id),
+				(SELECT count(*) FROM users    WHERE org_id = o.id),
+				(SELECT count(*) FROM api_keys WHERE org_id = o.id)
+			FROM orgs o WHERE o.id = $1 FOR UPDATE`, orgID,
+		).Scan(&gone.Name, &gone.Projects, &gone.Users, &gone.Keys)
+		if err != nil {
+			return notFound(err)
+		}
+		gone.ID = orgID
 
-	err = tx.QueryRow(ctx, `SELECT o.name,
-			(SELECT count(*) FROM projects WHERE org_id = o.id),
-			(SELECT count(*) FROM users    WHERE org_id = o.id),
-			(SELECT count(*) FROM api_keys WHERE org_id = o.id)
-		FROM orgs o WHERE o.id = $1 FOR UPDATE`, orgID,
-	).Scan(&gone.Name, &gone.Projects, &gone.Users, &gone.Keys)
-	if err != nil {
-		return gone, notFound(err)
-	}
-	gone.ID = orgID
+		// The row lock above holds off a sandbox being created meanwhile: its
+		// insert has to lock the same row.
+		if err := tx.QueryRow(ctx, "SELECT count(*) FROM sandboxes WHERE org_id = $1 AND "+liveSandbox,
+			orgID).Scan(&gone.LiveSandboxes); err != nil {
+			return err
+		}
+		if gone.LiveSandboxes > 0 {
+			return ErrOrgHasSandboxes
+		}
 
-	// The row lock above holds off a sandbox being created meanwhile: its
-	// insert has to lock the same row.
-	if err := tx.QueryRow(ctx, "SELECT count(*) FROM sandboxes WHERE org_id = $1 AND "+liveSandbox,
-		orgID).Scan(&gone.LiveSandboxes); err != nil {
-		return gone, err
-	}
-	if gone.LiveSandboxes > 0 {
-		return gone, ErrOrgHasSandboxes
-	}
-
-	// An organisation spans three scopes, and each is named explicitly.
-	const scoped = `(scope_type = 'org'     AND scope_id = $1)
-		OR (scope_type = 'project' AND scope_id IN (SELECT id FROM projects WHERE org_id = $1))
-		OR (scope_type = 'key'     AND scope_id IN (SELECT id FROM api_keys WHERE org_id = $1))`
-	if err := deleteScoped(ctx, tx, scoped, orgID); err != nil {
-		return gone, err
-	}
-	if gone.CardToken, err = forgetCard(ctx, tx, orgID); err != nil {
-		return gone, err
-	}
-	if _, err := tx.Exec(ctx, "DELETE FROM orgs WHERE id = $1", orgID); err != nil {
-		return gone, err
-	}
-	return gone, tx.Commit(ctx)
+		// An organisation spans three scopes, and each is named explicitly.
+		const scoped = `(scope_type = 'org'     AND scope_id = $1)
+			OR (scope_type = 'project' AND scope_id IN (SELECT id FROM projects WHERE org_id = $1))
+			OR (scope_type = 'key'     AND scope_id IN (SELECT id FROM api_keys WHERE org_id = $1))`
+		if err := deleteScoped(ctx, tx, scoped, orgID); err != nil {
+			return err
+		}
+		if gone.CardToken, err = forgetCard(ctx, tx, orgID); err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, "DELETE FROM orgs WHERE id = $1", orgID)
+		return err
+	})
+	return gone, err
 }
 
 // deleteScoped clears the guardrails and spend rows that match where. Those
@@ -418,46 +412,41 @@ func (s *Store) FirstProject(ctx context.Context, orgID string) (string, error) 
 // Guardrails and spend have no foreign key, so they are cleared here.
 func (s *Store) DeleteProject(ctx context.Context, projectID string) (DeletedProject, error) {
 	var gone DeletedProject
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return gone, err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx,
+			"SELECT org_id, name FROM projects WHERE id = $1 FOR UPDATE", projectID,
+		).Scan(&gone.OrgID, &gone.Name)
+		if err != nil {
+			return notFound(err)
+		}
+		gone.ID = projectID
 
-	err = tx.QueryRow(ctx,
-		"SELECT org_id, name FROM projects WHERE id = $1 FOR UPDATE", projectID,
-	).Scan(&gone.OrgID, &gone.Name)
-	if err != nil {
-		return gone, notFound(err)
-	}
-	gone.ID = projectID
+		rows, err := tx.Query(ctx, `SELECT name FROM api_keys
+			WHERE project_id = $1 AND revoked_at IS NULL ORDER BY name`, projectID)
+		if err != nil {
+			return err
+		}
+		live, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return err
+		}
+		if len(live) > 0 {
+			return &ProjectInUseError{Project: gone.Name, Keys: live}
+		}
 
-	rows, err := tx.Query(ctx, `SELECT name FROM api_keys
-		WHERE project_id = $1 AND revoked_at IS NULL ORDER BY name`, projectID)
-	if err != nil {
-		return gone, err
-	}
-	live, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		return gone, err
-	}
-	if len(live) > 0 {
-		return gone, &ProjectInUseError{Project: gone.Name, Keys: live}
-	}
-
-	if err := deleteScoped(ctx, tx, "scope_type = 'project' AND scope_id = $1", projectID); err != nil {
-		return gone, err
-	}
-	// The foreign key would detach them too; this is here for the count.
-	tag, err := tx.Exec(ctx, "UPDATE api_keys SET project_id = NULL WHERE project_id = $1", projectID)
-	if err != nil {
-		return gone, err
-	}
-	gone.DetachedKeys = int(tag.RowsAffected())
-	if _, err := tx.Exec(ctx, "DELETE FROM projects WHERE id = $1", projectID); err != nil {
-		return gone, err
-	}
-	return gone, tx.Commit(ctx)
+		if err := deleteScoped(ctx, tx, "scope_type = 'project' AND scope_id = $1", projectID); err != nil {
+			return err
+		}
+		// The foreign key would detach them too; this is here for the count.
+		tag, err := tx.Exec(ctx, "UPDATE api_keys SET project_id = NULL WHERE project_id = $1", projectID)
+		if err != nil {
+			return err
+		}
+		gone.DetachedKeys = int(tag.RowsAffected())
+		_, err = tx.Exec(ctx, "DELETE FROM projects WHERE id = $1", projectID)
+		return err
+	})
+	return gone, err
 }
 
 // ErrUserExists is returned when the organisation already has someone with
@@ -507,35 +496,33 @@ func (s *Store) ListUsers(ctx context.Context, orgID string) ([]User, error) {
 // Disabling somebody twice keeps the first date, and still revokes any key
 // issued in between.
 func (s *Store) DisableUser(ctx context.Context, userID string) (int, error) {
-	tx, err := s.pool.Begin(ctx)
+	var revoked int
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx,
+			"UPDATE users SET disabled_at = COALESCE(disabled_at, now()) WHERE id = $1", userID)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		tag, err = tx.Exec(ctx,
+			"UPDATE api_keys SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL", userID)
+		if err != nil {
+			return err
+		}
+		revoked = int(tag.RowsAffected())
+		if err := deleteUserSessions(ctx, tx, userID); err != nil {
+			return err
+		}
+		// Like keys, passkeys do not come back with 'enable': a new set-up link
+		// does.
+		return deletePasskeys(ctx, tx, userID)
+	})
 	if err != nil {
 		return 0, err
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	tag, err := tx.Exec(ctx,
-		"UPDATE users SET disabled_at = COALESCE(disabled_at, now()) WHERE id = $1", userID)
-	if err != nil {
-		return 0, err
-	}
-	if tag.RowsAffected() == 0 {
-		return 0, ErrNotFound
-	}
-	tag, err = tx.Exec(ctx,
-		"UPDATE api_keys SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL", userID)
-	if err != nil {
-		return 0, err
-	}
-	revoked := int(tag.RowsAffected())
-	if err := deleteUserSessions(ctx, tx, userID); err != nil {
-		return 0, err
-	}
-	// Like keys, passkeys do not come back with 'enable': a new set-up link
-	// does.
-	if err := deletePasskeys(ctx, tx, userID); err != nil {
-		return 0, err
-	}
-	return revoked, tx.Commit(ctx)
+	return revoked, nil
 }
 
 // EnableUser lets a disabled person sign in again. Their old keys stay
@@ -566,8 +553,7 @@ func insertKey(ctx context.Context, db querier, k KeyInfo, hash []byte) (KeyInfo
 		k.ID, k.OrgID, nullable(k.ProjectID), nullable(k.UserID), k.Name, hash, k.Prefix,
 		string(k.Kind), k.ExpiresAt,
 	).Scan(&k.ProjectID, &k.CreatedAt)
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.ConstraintName == "api_keys_project_check" {
+	if violates(err, "api_keys_project_check") {
 		return k, ErrNoProject
 	}
 	return k, err

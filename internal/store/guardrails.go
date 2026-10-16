@@ -153,10 +153,7 @@ func (s *Store) ListFilters(ctx context.Context, orgID string) ([]policy.Filter,
 func (s *Store) Filter(ctx context.Context, orgID, alias string) (policy.Filter, error) {
 	f, err := scanFilter(s.pool.QueryRow(ctx,
 		filterColumns+" FROM filters WHERE org_id = $1 AND alias = $2", orgID, alias))
-	if err != nil {
-		return policy.Filter{}, notFound(err)
-	}
-	return f, nil
+	return f, notFound(err)
 }
 
 // UpsertFilter creates or replaces one filter.

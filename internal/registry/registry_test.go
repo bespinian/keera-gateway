@@ -238,7 +238,7 @@ func TestARevokedKeyStopsWorkingWhenTheControlPlaneSaysSo(t *testing.T) {
 	}
 
 	s.reject(testKey("sk-live"), policy.ErrKeyRevoked)
-	r.Invalidate()
+	r.Forget(AnyChange)
 
 	if _, err := r.Resolve(t.Context(), testKey("sk-live")); !errors.Is(err, policy.ErrKeyRevoked) {
 		t.Errorf("error = %v, want the key to be refused as revoked", err)
@@ -572,7 +572,7 @@ func TestSweepForgetsWhatIsExpiredAndWhatIsStale(t *testing.T) {
 	if n := r2.cached(); n != 1 {
 		t.Fatalf("cached %d entries, want 1", n)
 	}
-	r2.Invalidate()
+	r2.Forget(AnyChange)
 	r2.Sweep()
 	if n := r2.cached(); n != 0 {
 		t.Errorf("cached %d entries after invalidating and sweeping, want 0", n)

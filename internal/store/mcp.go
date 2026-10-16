@@ -37,10 +37,7 @@ func (s *Store) ListMCPServers(ctx context.Context, orgID string) ([]policy.MCPS
 func (s *Store) MCPServer(ctx context.Context, orgID, alias string) (policy.MCPServer, error) {
 	m, err := scanMCPServer(s.pool.QueryRow(ctx,
 		mcpColumns+" FROM mcp_servers WHERE org_id = $1 AND alias = $2", orgID, alias))
-	if err != nil {
-		return policy.MCPServer{}, notFound(err)
-	}
-	return m, nil
+	return m, notFound(err)
 }
 
 // UpsertMCPServer creates or replaces one of an organisation's servers. Like

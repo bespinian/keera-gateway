@@ -2,6 +2,7 @@ package policy
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -215,11 +216,8 @@ type SandboxLimits struct {
 	AllowedRepos []string `json:"allowed_repos"`
 }
 
-// IsZero reports whether l sets nothing.
-func (l SandboxLimits) IsZero() bool {
-	return l.MaxSandboxes == nil && l.MaxSandboxTTLSeconds == nil && l.SandboxClasses == nil &&
-		l.MaxSandboxCPU == nil && l.MaxSandboxMemory == nil && l.AllowedRepos == nil
-}
+// IsZero reports whether l sets nothing. See Limits.IsZero.
+func (l SandboxLimits) IsZero() bool { return reflect.DeepEqual(l, SandboxLimits{}) }
 
 // ResolvedSandbox is the sandbox half of Resolved, with every level's limits
 // combined.
@@ -310,31 +308,13 @@ func repoCovers(pattern, path string) bool {
 	return path == pattern || strings.HasPrefix(path, pattern+"/")
 }
 
-// narrowRepos combines two levels' repository lists. What is left is what
-// both allow: of two entries where one covers the other, the narrower. Nil cur
-// allows nothing, so a lower level cannot add to it.
+// narrowRepos combines two levels' repository lists. Nil cur allows nothing,
+// so a lower level cannot add to it.
 func narrowRepos(cur, next []string) []string {
 	if cur == nil || next == nil {
 		return cur
 	}
-	out := []string{}
-	for _, a := range cur {
-		for _, b := range next {
-			var keep string
-			switch {
-			case repoCovers(a, b):
-				keep = b
-			case repoCovers(b, a):
-				keep = a
-			default:
-				continue
-			}
-			if !slices.Contains(out, keep) {
-				out = append(out, keep)
-			}
-		}
-	}
-	return out
+	return narrowList(cur, next, repoCovers)
 }
 
 // millis renders millicores as cores.

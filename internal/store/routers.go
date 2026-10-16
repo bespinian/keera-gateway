@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
@@ -54,10 +52,7 @@ func (s *Store) ListRouters(ctx context.Context, orgID string) ([]policy.Router,
 func (s *Store) Router(ctx context.Context, orgID, alias string) (policy.Router, error) {
 	rt, err := scanRouter(s.pool.QueryRow(ctx,
 		routerColumns+" FROM routers WHERE org_id = $1 AND alias = $2", orgID, alias))
-	if err != nil {
-		return policy.Router{}, notFound(err)
-	}
-	return rt, nil
+	return rt, notFound(err)
 }
 
 // UpsertRouter creates or replaces one router.
@@ -205,7 +200,9 @@ type RouterStat struct {
 func (s *Store) RouterStats(ctx context.Context, orgID string, from, to time.Time) (
 	map[string]RouterStat, error,
 ) {
-	rows, err := s.pool.Query(ctx, `
+	return queryMap(ctx, s.pool, func(st *RouterStat) []any {
+		return []any{&st.Requests, &st.Chose, &st.FellBack, &st.Errored, &st.CostMicros}
+	}, `
 		SELECT router, count(*),
 		       `+countOf("router_outcome", RouterChose)+`,
 		       `+countOf("router_outcome", RouterFellBack)+`,
@@ -214,22 +211,4 @@ func (s *Store) RouterStats(ctx context.Context, orgID string, from, to time.Tim
 		FROM usage_events
 		WHERE ts >= $1 AND ts < $2 AND org_id = $3 AND router IS NOT NULL
 		GROUP BY router`, from, to, orgID)
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]RouterStat{}
-	var (
-		alias string
-		st    RouterStat
-	)
-	_, err = pgx.ForEachRow(rows,
-		[]any{&alias, &st.Requests, &st.Chose, &st.FellBack, &st.Errored, &st.CostMicros},
-		func() error {
-			out[alias] = st
-			return nil
-		})
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }

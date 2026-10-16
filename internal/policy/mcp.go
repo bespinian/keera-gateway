@@ -77,32 +77,9 @@ func (r *Resolved) AllowsServer(server string) bool {
 }
 
 // intersectTools narrows a tool allow-list. An entry is a whole server or one
-// of its tools, so the intersection keeps the narrower of two entries that
-// overlap: a server and one of its tools meet in the tool.
+// of its tools, so a server and one of its tools meet in the tool.
 func intersectTools(cur, next []string) []string {
-	switch {
-	case next == nil:
-		return cur
-	case cur == nil:
-		return slices.Clone(next)
-	}
-	out := make([]string, 0, min(len(cur), len(next)))
-	add := func(e string) {
-		if !slices.Contains(out, e) {
-			out = append(out, e)
-		}
-	}
-	for _, a := range cur {
-		for _, b := range next {
-			switch {
-			case a == b:
-				add(a)
-			case !strings.Contains(a, "/") && strings.HasPrefix(b, a+"/"):
-				add(b)
-			case !strings.Contains(b, "/") && strings.HasPrefix(a, b+"/"):
-				add(a)
-			}
-		}
-	}
-	return out
+	return narrowAllowList(cur, next, func(a, b string) bool {
+		return a == b || (!strings.Contains(a, "/") && strings.HasPrefix(b, a+"/"))
+	})
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // Passkey is a WebAuthn credential of one person.
@@ -84,28 +86,23 @@ var ErrLastPasskey = errors.New("store: that is the person's only passkey")
 // one. The owner's row is locked first, so two removals at once cannot both
 // pass the count.
 func (s *Store) DeletePasskey(ctx context.Context, id string, keepOne bool) error {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var left int
+		err := tx.QueryRow(ctx, `SELECT count(*) FROM passkeys WHERE user_id =
+			(SELECT u.id FROM users u JOIN passkeys p ON p.user_id = u.id
+			 WHERE p.id = $1 FOR UPDATE OF u)`, id).Scan(&left)
+		if err != nil {
+			return err
+		}
+		if left == 0 {
+			return ErrNotFound
+		}
+		if keepOne && left <= 1 {
+			return ErrLastPasskey
+		}
+		_, err = tx.Exec(ctx, "DELETE FROM passkeys WHERE id = $1", id)
 		return err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	var left int
-	err = tx.QueryRow(ctx, `SELECT count(*) FROM passkeys WHERE user_id =
-		(SELECT u.id FROM users u JOIN passkeys p ON p.user_id = u.id
-		 WHERE p.id = $1 FOR UPDATE OF u)`, id).Scan(&left)
-	if err != nil {
-		return err
-	}
-	if left == 0 {
-		return ErrNotFound
-	}
-	if keepOne && left <= 1 {
-		return ErrLastPasskey
-	}
-	if _, err := tx.Exec(ctx, "DELETE FROM passkeys WHERE id = $1", id); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	})
 }
 
 // ErrDirectoryAccount is returned for a person whose identity comes from a
@@ -132,19 +129,14 @@ func (s *Store) MakePasskeyAccount(ctx context.Context, userID, externalID strin
 // link replaces the last, so only the newest one handed out works.
 func (s *Store) CreatePasskeyLink(ctx context.Context, hash []byte, userID string,
 	expires time.Time) error {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "DELETE FROM passkey_links WHERE user_id = $1", userID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO passkey_links (id, user_id, expires_at)
+			VALUES ($1,$2,$3)`, hash, userID, expires)
 		return err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, "DELETE FROM passkey_links WHERE user_id = $1", userID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(ctx, `INSERT INTO passkey_links (id, user_id, expires_at)
-		VALUES ($1,$2,$3)`, hash, userID, expires); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	})
 }
 
 // PasskeyLinkUser reads whose a set-up link is, without using it up, so a

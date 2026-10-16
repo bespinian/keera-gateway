@@ -68,10 +68,7 @@ func (s *Store) ListSandboxClasses(ctx context.Context, orgID string) ([]policy.
 func (s *Store) SandboxClass(ctx context.Context, orgID, name string) (policy.SandboxClass, error) {
 	c, err := scanSandboxClass(s.pool.QueryRow(ctx,
 		sandboxClassColumns+" FROM sandbox_classes WHERE org_id = $1 AND name = $2", orgID, name))
-	if err != nil {
-		return policy.SandboxClass{}, notFound(err)
-	}
-	return c, nil
+	return c, notFound(err)
 }
 
 // UpsertSandboxClass creates or replaces one of an organisation's classes. It
@@ -215,10 +212,7 @@ func scanSandbox(r row) (Sandbox, error) {
 // sandboxWhere reads the one sandbox the rest of the query picks.
 func (s *Store) sandboxWhere(ctx context.Context, rest string, args ...any) (Sandbox, error) {
 	sb, err := scanSandbox(s.pool.QueryRow(ctx, sandboxColumns+" FROM sandboxes "+rest, args...))
-	if err != nil {
-		return Sandbox{}, notFound(err)
-	}
-	return sb, nil
+	return sb, notFound(err)
 }
 
 // sandboxesWhere reads every sandbox the rest of the query picks.

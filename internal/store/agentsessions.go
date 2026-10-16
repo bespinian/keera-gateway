@@ -423,30 +423,12 @@ func (s *Store) AgentSessionFilters(ctx context.Context,
 	q.setDefaults()
 	q.ReportScope = ReportScope{}
 	q.Status, q.StatusClass = 0, 0
-	f := RequestFacets{
-		Models:   []FacetCount{},
-		Keys:     []FacetCount{},
-		Projects: []FacetCount{},
-		Users:    []FacetCount{},
-		Statuses: []FacetCount{},
-	}
-	rows, err := s.pool.Query(ctx, sessionCTE+q.matched()+`
+	return s.facets(ctx, sessionCTE+q.matched()+`
 		SELECT 'model' AS facet, m AS value, count(*) FROM matched, unnest(models) AS m
-		    GROUP BY m
-		UNION ALL
-		SELECT 'key', key_id, count(*) FROM matched WHERE key_id <> '' GROUP BY key_id
-		UNION ALL
-		SELECT 'project', project_id, count(*) FROM matched WHERE project_id <> '' GROUP BY project_id
-		UNION ALL
-		SELECT 'user', user_id, count(*) FROM matched WHERE user_id <> '' GROUP BY user_id
+		    GROUP BY m`+holderFacets("matched")+`
 		UNION ALL
 		SELECT 'status', last_status::text, count(*) FROM matched GROUP BY last_status
 		ORDER BY facet, 3 DESC, value`, q.args()...)
-	if err != nil {
-		return f, err
-	}
-	err = readFacets(rows, f.add)
-	return f, err
 }
 
 // AgentSessionAt is the session holding any one of its requests, together with

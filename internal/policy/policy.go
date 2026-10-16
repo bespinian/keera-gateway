@@ -690,11 +690,6 @@ type Key struct {
 // Subscription reports whether the key only reaches subscription models.
 func (k Key) Subscription() bool { return k.Kind == KeySubscription }
 
-// Reaches reports whether a key of this kind may call m at all, before its
-// guardrails are asked. A subscription model takes only a subscription key,
-// because only that key's requests carry the caller's sign-in.
-func (k Key) Reaches(m Model) bool { return k.Subscription() == m.Subscription }
-
 // PlanUsage is how much of a Claude plan's usage limit is used, as Anthropic
 // reports it on each answer. Utilisation is a fraction from 0 to 1.
 type PlanUsage struct {
@@ -736,8 +731,11 @@ func (r *Resolved) AllowsModel(alias string) bool {
 }
 
 // MayUse reports whether the key may call m: its kind reaches m, and its
-// guardrails allow it.
-func (r *Resolved) MayUse(m Model) bool { return r.Key.Reaches(m) && r.AllowsModel(m.Alias) }
+// guardrails allow it. A subscription model takes only a subscription key,
+// because only that key's requests carry the caller's sign-in.
+func (r *Resolved) MayUse(m Model) bool {
+	return r.Key.Subscription() == m.Subscription && r.AllowsModel(m.Alias)
+}
 
 // MayRoute reports whether the key may name the router alias. The allow-list
 // covers the router, not its destinations: allowing a router allows where it
@@ -800,16 +798,38 @@ func (r *Resolved) narrow(lim *Limits, top bool) {
 
 // intersect narrows an allow-list. A nil list means unrestricted, not empty.
 func intersect(cur, next []string) []string {
+	return narrowAllowList(cur, next, func(a, b string) bool { return a == b })
+}
+
+// narrowAllowList narrows an allow-list where nil means unrestricted.
+func narrowAllowList(cur, next []string, covers func(a, b string) bool) []string {
 	switch {
 	case next == nil:
 		return cur
 	case cur == nil:
 		return slices.Clone(next)
 	}
-	out := make([]string, 0, min(len(cur), len(next)))
+	return narrowList(cur, next, covers)
+}
+
+// narrowList keeps what both lists allow: of two entries where one covers the
+// other, the narrower.
+func narrowList(cur, next []string, covers func(a, b string) bool) []string {
+	out := []string{}
 	for _, a := range cur {
-		if slices.Contains(next, a) {
-			out = append(out, a)
+		for _, b := range next {
+			var keep string
+			switch {
+			case covers(a, b):
+				keep = b
+			case covers(b, a):
+				keep = a
+			default:
+				continue
+			}
+			if !slices.Contains(out, keep) {
+				out = append(out, keep)
+			}
 		}
 	}
 	return out

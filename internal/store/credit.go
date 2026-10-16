@@ -241,22 +241,21 @@ func (s *Store) SetTransaction(ctx context.Context, paymentID string, transactio
 
 // Grant adds credit without a payment, or takes some away. It is paid at
 // once.
-func (s *Store) Grant(ctx context.Context, p Payment) (Payment, error) {
-	tx, err := s.pool.Begin(ctx)
+func (s *Store) Grant(ctx context.Context, p Payment) (out Payment, err error) {
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		out, err = scanPayment(tx.QueryRow(ctx, `INSERT INTO payments (id, org_id, kind, micros,
+			state, actor, note, settled_at) VALUES ($1,$2,$3,$4,'paid',$5,$6,now())
+			RETURNING `+paymentColumns, p.ID, p.OrgID, PaymentGrant, p.Micros, p.Actor,
+			nullable(p.Note)))
+		if err != nil {
+			return err
+		}
+		return addCredit(ctx, tx, p.OrgID, p.Micros)
+	})
 	if err != nil {
 		return Payment{}, err
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	out, err := scanPayment(tx.QueryRow(ctx, `INSERT INTO payments (id, org_id, kind, micros,
-		state, actor, note, settled_at) VALUES ($1,$2,'grant',$3,'paid',$4,$5,now())
-		RETURNING `+paymentColumns, p.ID, p.OrgID, p.Micros, p.Actor, nullable(p.Note)))
-	if err != nil {
-		return Payment{}, err
-	}
-	if err := addCredit(ctx, tx, p.OrgID, p.Micros); err != nil {
-		return Payment{}, err
-	}
-	return out, tx.Commit(ctx)
+	return out, nil
 }
 
 func addCredit(ctx context.Context, tx pgx.Tx, orgID string, micros int64) error {
@@ -291,59 +290,65 @@ type Settlement struct {
 func (s *Store) Settle(ctx context.Context, paymentID string, how Settlement) (
 	p Payment, settled bool, oldToken int64, err error,
 ) {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return Payment{}, false, 0, err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
 	state := PaymentFailed
 	if how.Paid {
 		state = PaymentPaid
 	}
-	p, err = scanPayment(tx.QueryRow(ctx, `UPDATE payments SET state = $2, note = $3,
-		settled_at = now() WHERE id = $1 AND (state = 'pending' OR (state = 'failed' AND $4))
-		RETURNING `+paymentColumns,
-		paymentID, state, nullable(how.Note), how.Paid))
-	if errors.Is(err, pgx.ErrNoRows) {
-		p, err = s.Payment(ctx, paymentID)
-		return p, false, 0, err
-	}
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		p, err = scanPayment(tx.QueryRow(ctx, `UPDATE payments SET state = $2, note = $3,
+			settled_at = now() WHERE id = $1 AND (state = 'pending' OR (state = 'failed' AND $4))
+			RETURNING `+paymentColumns,
+			paymentID, state, nullable(how.Note), how.Paid))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		settled = true
+		switch {
+		case how.Paid:
+			if err := addCredit(ctx, tx, p.OrgID, p.Micros); err != nil {
+				return err
+			}
+			// Paying once lifts the limit a signed-up organisation starts with.
+			// A grant does not: it is not money from the organisation.
+			if _, err := tx.Exec(ctx, "UPDATE orgs SET limited = false WHERE id = $1 AND limited",
+				p.OrgID); err != nil {
+				return err
+			}
+			var old *int64
+			if err := tx.QueryRow(ctx, `UPDATE credit_accounts SET topup_error = NULL
+				WHERE org_id = $1 RETURNING card_token`, p.OrgID).Scan(&old); err != nil {
+				return err
+			}
+			if how.Card != nil && how.Token != 0 {
+				if _, err := tx.Exec(ctx, `UPDATE credit_accounts SET card_token = $2,
+					card_label = $3, card_expires = $4 WHERE org_id = $1`,
+					p.OrgID, how.Token, how.Card.Label, how.Card.Expires); err != nil {
+					return err
+				}
+				if old != nil && *old != how.Token {
+					oldToken = *old
+				}
+			}
+		case p.Kind == PaymentAuto && !how.Retry:
+			if _, err := tx.Exec(ctx, `UPDATE credit_accounts SET topup_error = $2
+				WHERE org_id = $1`, p.OrgID, how.Note); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return Payment{}, false, 0, err
 	}
-	switch {
-	case how.Paid:
-		if err := addCredit(ctx, tx, p.OrgID, p.Micros); err != nil {
-			return Payment{}, false, 0, err
-		}
-		// Paying once lifts the limit a signed-up organisation starts with.
-		// A grant does not: it is not money from the organisation.
-		if _, err := tx.Exec(ctx, "UPDATE orgs SET limited = false WHERE id = $1 AND limited",
-			p.OrgID); err != nil {
-			return Payment{}, false, 0, err
-		}
-		var old *int64
-		if err := tx.QueryRow(ctx, `UPDATE credit_accounts SET topup_error = NULL
-			WHERE org_id = $1 RETURNING card_token`, p.OrgID).Scan(&old); err != nil {
-			return Payment{}, false, 0, err
-		}
-		if how.Card != nil && how.Token != 0 {
-			if _, err := tx.Exec(ctx, `UPDATE credit_accounts SET card_token = $2,
-				card_label = $3, card_expires = $4 WHERE org_id = $1`,
-				p.OrgID, how.Token, how.Card.Label, how.Card.Expires); err != nil {
-				return Payment{}, false, 0, err
-			}
-			if old != nil && *old != how.Token {
-				oldToken = *old
-			}
-		}
-	case p.Kind == PaymentAuto && !how.Retry:
-		if _, err := tx.Exec(ctx, `UPDATE credit_accounts SET topup_error = $2
-			WHERE org_id = $1`, p.OrgID, how.Note); err != nil {
-			return Payment{}, false, 0, err
-		}
+	if !settled {
+		// It had ended already.
+		p, err = s.Payment(ctx, paymentID)
+		return p, false, 0, err
 	}
-	return p, true, oldToken, tx.Commit(ctx)
+	return p, true, oldToken, nil
 }
 
 // Payment reads one payment.

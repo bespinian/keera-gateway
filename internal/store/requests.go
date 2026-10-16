@@ -260,17 +260,40 @@ type FacetCount struct {
 	Count int64  `json:"count"`
 }
 
-// readFacets calls add for every (facet, value, count) row.
-func readFacets(rows pgx.Rows, add func(facet string, c FacetCount)) error {
+// holderFacets counts table's rows by key, project and person, for a facet
+// query to append to its own branches.
+func holderFacets(table string) string {
+	return `
+		UNION ALL
+		SELECT 'key', key_id, count(*) FROM ` + table + ` WHERE key_id <> '' GROUP BY key_id
+		UNION ALL
+		SELECT 'project', project_id, count(*) FROM ` + table + ` WHERE project_id <> '' GROUP BY project_id
+		UNION ALL
+		SELECT 'user', user_id, count(*) FROM ` + table + ` WHERE user_id <> '' GROUP BY user_id`
+}
+
+// facets runs a facet query, every facet starting empty rather than null.
+func (s *Store) facets(ctx context.Context, sql string, args ...any) (RequestFacets, error) {
+	f := RequestFacets{
+		Models:   []FacetCount{},
+		Keys:     []FacetCount{},
+		Projects: []FacetCount{},
+		Users:    []FacetCount{},
+		Statuses: []FacetCount{},
+	}
+	rows, err := s.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return f, err
+	}
 	var (
 		facet string
 		c     FacetCount
 	)
-	_, err := pgx.ForEachRow(rows, []any{&facet, &c.Value, &c.Count}, func() error {
-		add(facet, c)
+	_, err = pgx.ForEachRow(rows, []any{&facet, &c.Value, &c.Count}, func() error {
+		f.add(facet, c)
 		return nil
 	})
-	return err
+	return f, err
 }
 
 // RequestFacets is what the request log can be narrowed by, over the whole
@@ -310,14 +333,7 @@ func (f *RequestFacets) add(facet string, c FacetCount) {
 // screen still offers the other values after one is picked. A model picked
 // after a project can then match nothing, and the screen says so.
 func (s *Store) RequestFilters(ctx context.Context, q RequestQuery) (RequestFacets, error) {
-	f := RequestFacets{
-		Models:   []FacetCount{},
-		Keys:     []FacetCount{},
-		Projects: []FacetCount{},
-		Users:    []FacetCount{},
-		Statuses: []FacetCount{},
-	}
-	rows, err := s.pool.Query(ctx, `
+	return s.facets(ctx, `
 		WITH matching AS (
 		    SELECT alias, COALESCE(key_id, '') AS key_id,
 		           COALESCE(project_id, '') AS project_id, COALESCE(user_id, '') AS user_id,
@@ -330,22 +346,11 @@ func (s *Store) RequestFilters(ctx context.Context, q RequestQuery) (RequestFace
 		      AND ($4 = '' OR user_id = $4)
 		)
 		SELECT 'model' AS facet, alias AS value, count(*) FROM matching
-		    WHERE alias <> '' GROUP BY alias
-		UNION ALL
-		SELECT 'key', key_id, count(*) FROM matching WHERE key_id <> '' GROUP BY key_id
-		UNION ALL
-		SELECT 'project', project_id, count(*) FROM matching WHERE project_id <> '' GROUP BY project_id
-		UNION ALL
-		SELECT 'user', user_id, count(*) FROM matching WHERE user_id <> '' GROUP BY user_id
+		    WHERE alias <> '' GROUP BY alias`+holderFacets("matching")+`
 		UNION ALL
 		SELECT 'status', status::text, count(*) FROM matching GROUP BY status
 		ORDER BY facet, 3 DESC, value`,
 		q.OrgID, nullableTime(q.From), nullableTime(q.To), q.Holder)
-	if err != nil {
-		return f, err
-	}
-	err = readFacets(rows, f.add)
-	return f, err
 }
 
 // LatestEventID is the highest id in the log, or zero when it is empty. A live

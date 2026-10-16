@@ -64,20 +64,14 @@ func (s *Store) ClaimDirectoryCheck(ctx context.Context, externalID string,
 // holds, in every organisation, for when its directory no longer vouches for
 // it.
 func (s *Store) EndDirectoryLink(ctx context.Context, externalID string) error {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, "UPDATE identities SET refresh_token = NULL WHERE external_id = $1",
-		externalID); err != nil {
-		return err
-	}
-	if err := deleteSessionsWhere(ctx, tx, "SELECT id FROM users WHERE external_id = $1",
-		externalID); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "UPDATE identities SET refresh_token = NULL WHERE external_id = $1",
+			externalID); err != nil {
+			return err
+		}
+		return deleteSessionsWhere(ctx, tx, "SELECT id FROM users WHERE external_id = $1",
+			externalID)
+	})
 }
 
 // HasRefreshToken reports whether the directory can be asked about an

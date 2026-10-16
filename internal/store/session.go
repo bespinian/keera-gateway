@@ -5,14 +5,14 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // Session is one signed-in browser.
 type Session struct {
-	UserID    string
 	CSRF      string
 	CreatedAt time.Time
-	ExpiresAt time.Time
 }
 
 // CreateSession stores a session under the hash of its cookie value, and
@@ -38,9 +38,8 @@ type SessionUser struct {
 // disabled person, is reported as missing, so no caller has to check either.
 func (s *Store) LookupSession(ctx context.Context, hash []byte) (SessionUser, error) {
 	var su SessionUser
-	dest := append([]any{&su.Session.UserID, &su.Session.CSRF, &su.Session.CreatedAt,
-		&su.Session.ExpiresAt}, userTargets(&su.User)...)
-	err := s.pool.QueryRow(ctx, `SELECT s.user_id, s.csrf, s.created_at, s.expires_at,
+	dest := append([]any{&su.Session.CSRF, &su.Session.CreatedAt}, userTargets(&su.User)...)
+	err := s.pool.QueryRow(ctx, `SELECT s.csrf, s.created_at,
 		`+userColumnsOf("u.")+`, `+directoryColumns+`
 		FROM sessions s JOIN users u ON u.id = s.user_id`+identityJoin+`
 		WHERE s.id = $1 AND s.expires_at > now() AND u.disabled_at IS NULL`, hash,
@@ -200,26 +199,16 @@ type Membership struct {
 // nobody has taken yet are listed too; disabled ones are no invitation.
 func (s *Store) Memberships(ctx context.Context, externalID, email string,
 	invitations bool) ([]Membership, error) {
-	rows, err := s.pool.Query(ctx, `SELECT u.id, u.org_id, o.name, u.role,
+	return queryAll(ctx, s.pool, func(r row) (Membership, error) {
+		var m Membership
+		err := r.Scan(&m.UserID, &m.OrgID, &m.OrgName, &m.Role, &m.Invited, &m.Disabled)
+		return m, err
+	}, `SELECT u.id, u.org_id, o.name, u.role,
 			COALESCE(u.external_id, '') = '', u.disabled_at IS NOT NULL
 		FROM users u JOIN orgs o ON o.id = u.org_id
 		WHERE u.external_id = $1
 			OR ($2 AND u.email = $3 AND COALESCE(u.external_id, '') = '' AND u.disabled_at IS NULL)
 		ORDER BY u.signed_in_at DESC NULLS LAST, o.name, o.id`, externalID, invitations, email)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []Membership
-	for rows.Next() {
-		var m Membership
-		if err := rows.Scan(&m.UserID, &m.OrgID, &m.OrgName, &m.Role, &m.Invited,
-			&m.Disabled); err != nil {
-			return nil, err
-		}
-		out = append(out, m)
-	}
-	return out, rows.Err()
 }
 
 // ExternalIDsFor lists the identities rows at an address are linked to.
@@ -229,16 +218,7 @@ func (s *Store) ExternalIDsFor(ctx context.Context, email string) ([]string, err
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var ext string
-		if err := rows.Scan(&ext); err != nil {
-			return nil, err
-		}
-		out = append(out, ext)
-	}
-	return out, rows.Err()
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
 // AcceptInvitation links an identity to the row an organisation made for its

@@ -4,8 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
@@ -264,21 +262,8 @@ func (s *Store) UserEmails(ctx context.Context, orgID string) (map[string]string
 }
 
 // names runs an (id, name) query and returns it as a map.
-func (s *Store) names(ctx context.Context, sql, orgID string) (map[string]string, error) {
-	rows, err := s.pool.Query(ctx, sql, orgID)
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]string{}
-	var id, name string
-	_, err = pgx.ForEachRow(rows, []any{&id, &name}, func() error {
-		out[id] = name
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
+func (s *Store) names(ctx context.Context, sql string, args ...any) (map[string]string, error) {
+	return queryMap(ctx, s.pool, func(name *string) []any { return []any{name} }, sql, args...)
 }
 
 // KeySummary is an issued key with what the keys screen shows next to it: its
@@ -367,7 +352,6 @@ type Setup struct {
 	Orgs     int64 `json:"orgs"`
 	Keys     int64 `json:"keys"`
 	Models   int64 `json:"models"`
-	People   int64 `json:"people"`
 	Requests int64 `json:"requests"`
 	// Filters, Routers, Sandboxes and MCP servers are optional. The panel
 	// hides their screens until there is at least one.
@@ -391,7 +375,6 @@ func (s *Store) SetupState(ctx context.Context, orgID string) (Setup, error) {
 		(SELECT count(*) FROM orgs),
 		(SELECT count(*) FROM api_keys WHERE ($1 = '' OR org_id = $1) AND revoked_at IS NULL),
 		(SELECT count(*) FROM models WHERE enabled AND ($1 = '' OR org_id = $1)),
-		(SELECT count(*) FROM users  WHERE $1 = '' OR org_id = $1),
 		-- 1 once anything was served, as counting it all would read the
 		-- whole usage log on every panel load.
 		(SELECT count(*) FROM (SELECT 1 FROM usage_events WHERE $1 = '' OR org_id = $1 LIMIT 1) AS served),
@@ -403,7 +386,7 @@ func (s *Store) SetupState(ctx context.Context, orgID string) (Setup, error) {
 		(SELECT count(*) FROM payments WHERE ($1 = '' OR org_id = $1)
 			AND state = 'paid' AND micros > 0),
 		EXISTS (SELECT 1 FROM credit_accounts WHERE org_id = $1 AND invoiced)`, orgID,
-	).Scan(&st.Orgs, &st.Keys, &st.Models, &st.People, &st.Requests,
+	).Scan(&st.Orgs, &st.Keys, &st.Models, &st.Requests,
 		&st.Filters, &st.Routers, &st.Sandboxes, &st.MCPServers, &st.Credits,
 		&st.Invoiced)
 	return st, err

@@ -254,6 +254,29 @@ func queryAll[T any](ctx context.Context, pool *pgxpool.Pool, scan func(row) (T,
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (T, error) { return scan(r) })
 }
 
+// queryMap runs a query whose first column is a key and the rest what targets
+// points at, and returns its rows by key.
+func queryMap[V any](ctx context.Context, pool *pgxpool.Pool, targets func(*V) []any,
+	sql string, args ...any) (map[string]V, error) {
+	rows, err := pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]V{}
+	var (
+		key string
+		v   V
+	)
+	_, err = pgx.ForEachRow(rows, append([]any{&key}, targets(&v)...), func() error {
+		out[key] = v
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // execOne runs a statement that should touch a row, and returns ErrNotFound if
 // it touched none.
 func (s *Store) execOne(ctx context.Context, sql string, args ...any) error {
@@ -280,22 +303,26 @@ func notFound(err error) error {
 // exist. Every org_id is a foreign key into orgs that cascades on delete, so
 // this is the only way one of them fails.
 func IsMissingOrg(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23503" &&
-		strings.HasSuffix(pgErr.ConstraintName, "_org_id_fkey")
+	e, ok := errors.AsType[*pgconn.PgError](err)
+	return ok && e.Code == "23503" && strings.HasSuffix(e.ConstraintName, "_org_id_fkey")
 }
 
 // isUnique reports whether err is a unique violation.
 func isUnique(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+	e, ok := errors.AsType[*pgconn.PgError](err)
+	return ok && e.Code == "23505"
 }
 
 // uniqueOn reports whether err is a unique violation of the named constraint,
 // for a table with more than one.
 func uniqueOn(err error, constraint string) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == constraint
+	return isUnique(err) && violates(err, constraint)
+}
+
+// violates reports whether err broke the named constraint.
+func violates(err error, constraint string) bool {
+	e, ok := errors.AsType[*pgconn.PgError](err)
+	return ok && e.ConstraintName == constraint
 }
 
 // nullable stores an empty string as NULL.

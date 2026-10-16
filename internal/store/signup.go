@@ -86,54 +86,58 @@ func takeSignup(ctx context.Context, tx pgx.Tx, hash []byte) (Signup, error) {
 // each create one.
 func (s *Store) SignUp(ctx context.Context, hash []byte, o Org, tmpl OrgTemplate) (
 	Signup, Org, User, error) {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return Signup{}, o, User{}, err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	su, err := takeSignup(ctx, tx, hash)
+	var (
+		su Signup
+		u  User
+	)
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		if su, err = takeSignup(ctx, tx, hash); err != nil {
+			return err
+		}
+		if o, err = createOrg(ctx, tx, o, tmpl); err != nil {
+			return err
+		}
+		role := "admin"
+		if su.Role == "operator" {
+			role = su.Role
+		}
+		u, err = scanUser(tx.QueryRow(ctx, `INSERT INTO users (id, org_id, email, external_id, role)
+			VALUES ($1,$2,$3,$4,$5) RETURNING `+userColumns,
+			su.UserID, o.ID, su.Email, su.ExternalID, role))
+		if isUnique(err) {
+			return ErrEmailTaken
+		}
+		return err
+	})
 	if err != nil {
 		return su, o, User{}, err
 	}
-	if o, err = createOrg(ctx, tx, o, tmpl); err != nil {
-		return su, o, User{}, err
-	}
-	role := "admin"
-	if su.Role == "operator" {
-		role = su.Role
-	}
-	u, err := scanUser(tx.QueryRow(ctx, `INSERT INTO users (id, org_id, email, external_id, role)
-		VALUES ($1,$2,$3,$4,$5) RETURNING `+userColumns,
-		su.UserID, o.ID, su.Email, su.ExternalID, role))
-	if isUnique(err) {
-		return su, o, User{}, ErrEmailTaken
-	}
-	if err != nil {
-		return su, o, User{}, err
-	}
-	return su, o, u, tx.Commit(ctx)
+	return su, o, u, nil
 }
 
 // JoinInvitation uses a sign-up to take the row the inviting organisation
 // made for the person. The role is the one that row was given.
 func (s *Store) JoinInvitation(ctx context.Context, hash []byte) (Signup, User, error) {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return Signup{}, User{}, err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	su, err := takeSignup(ctx, tx, hash)
-	if err != nil {
-		return su, User{}, err
-	}
-	if su.InvitedOrg == "" {
-		return su, User{}, ErrNotFound
-	}
-	u, err := takeInvitation(ctx, tx, su.InvitedOrg, su.Email, su.ExternalID)
-	if err != nil {
+	var (
+		su Signup
+		u  User
+	)
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		if su, err = takeSignup(ctx, tx, hash); err != nil {
+			return err
+		}
+		if su.InvitedOrg == "" {
+			return ErrNotFound
+		}
 		// ErrNotFound: the invitation was withdrawn, or somebody else took it
 		// meanwhile.
+		u, err = takeInvitation(ctx, tx, su.InvitedOrg, su.Email, su.ExternalID)
+		return err
+	})
+	if err != nil {
 		return su, User{}, err
 	}
-	return su, u, tx.Commit(ctx)
+	return su, u, nil
 }

@@ -236,11 +236,9 @@ func (r *Registry) Forget(c Change) {
 		r.dropKey(id)
 		return
 	}
-	r.Invalidate()
+	// Every cached key is dropped by moving on a generation.
+	r.gen.Add(1)
 }
-
-// Invalidate drops every cached key.
-func (r *Registry) Invalidate() { r.gen.Add(1) }
 
 // dropKey drops one key's entry. Unknown keys are cached by hash only, so
 // one that turns valid waits out NegativeTTL, which is short.
@@ -324,10 +322,15 @@ func reload[T any](ctx context.Context, into *atomic.Pointer[map[string]map[stri
 	return nil
 }
 
+// find looks one thing up in an index reload built.
+func find[T any](index *atomic.Pointer[map[string]map[string]T], orgID, alias string) (T, bool) {
+	v, ok := (*index.Load())[orgID][alias]
+	return v, ok
+}
+
 // Router implements policy.Source.
 func (r *Registry) Router(orgID, alias string) (policy.Router, bool) {
-	rt, ok := (*r.routers.Load())[orgID][alias]
-	return rt, ok
+	return find(&r.routers, orgID, alias)
 }
 
 // Routers implements policy.Source.
@@ -411,8 +414,7 @@ func MCPSecretName(orgID, alias string) string { return "mcp:" + orgID + ":" + a
 
 // MCPServer implements policy.Source.
 func (r *Registry) MCPServer(orgID, alias string) (policy.MCPServer, bool) {
-	m, ok := (*r.mcp.Load())[orgID][alias]
-	return m, ok
+	return find(&r.mcp, orgID, alias)
 }
 
 // ModelSecretName is what a model's credential is sealed against. It carries
@@ -462,8 +464,7 @@ func (r *Registry) RefreshCredit(ctx context.Context) error {
 
 // Model implements policy.Source.
 func (r *Registry) Model(orgID, alias string) (policy.Model, bool) {
-	m, ok := (*r.models.Load())[orgID][alias]
-	return m, ok
+	return find(&r.models, orgID, alias)
 }
 
 // Models implements policy.Source.

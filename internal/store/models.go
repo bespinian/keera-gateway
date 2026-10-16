@@ -52,10 +52,7 @@ func (s *Store) ListModels(ctx context.Context, orgID string) ([]policy.Model, e
 func (s *Store) Model(ctx context.Context, orgID, alias string) (policy.Model, error) {
 	m, err := scanModel(s.pool.QueryRow(ctx,
 		modelColumns+" FROM models WHERE org_id = $1 AND alias = $2", orgID, alias))
-	if err != nil {
-		return policy.Model{}, notFound(err)
-	}
-	return m, nil
+	return m, notFound(err)
 }
 
 // UpsertModel creates or replaces one of an organisation's models.
@@ -134,28 +131,13 @@ type ModelStat struct {
 func (s *Store) ModelStats(ctx context.Context, orgID string, from, to time.Time) (
 	map[string]ModelStat, error,
 ) {
-	rows, err := s.pool.Query(ctx, `
+	return queryMap(ctx, s.pool, func(st *ModelStat) []any {
+		return []any{&st.TTFTMedianMS, &st.TTFTP95MS}
+	}, `
 		SELECT alias,
 		       round(percentile_cont(0.5) WITHIN GROUP (ORDER BY ttft_ms))::bigint,
 		       round(percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms))::bigint
 		FROM usage_events
 		WHERE ts >= $1 AND ts < $2 AND org_id = $3 AND ttft_ms > 0
 		GROUP BY alias`, from, to, orgID)
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]ModelStat{}
-	var (
-		alias string
-		st    ModelStat
-	)
-	_, err = pgx.ForEachRow(rows, []any{&alias, &st.TTFTMedianMS, &st.TTFTP95MS},
-		func() error {
-			out[alias] = st
-			return nil
-		})
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }
