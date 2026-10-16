@@ -42,6 +42,9 @@ func (s *Server) playgroundChat(w http.ResponseWriter, r *http.Request, p *authn
 	case errors.Is(err, policy.ErrKeyExpired):
 		forbid(w, "this API key has expired; choose another one")
 		return
+	case errors.Is(err, policy.ErrKeyPending):
+		forbid(w, "this API key is not activated yet; activate it first")
+		return
 	case err != nil:
 		s.fail(w, err)
 		return

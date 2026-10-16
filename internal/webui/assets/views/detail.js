@@ -50,13 +50,18 @@ import { sessionLog } from "./sessions.js";
 import { modelsCell, summarise } from "./guardrails.js";
 import { openModel, checkModel, servedName } from "./models.js";
 import {
+  activateButton,
+  canActivate,
   canRevoke,
+  canRotate,
   confirmRevoke,
   confirmRotate,
   renameKey,
   inPeriod,
+  isLive,
   NO_USER,
   openKey,
+  prefixOf,
   statePill,
   stateOf,
 } from "./keys.js";
@@ -232,7 +237,7 @@ export async function keyDetailView(ctx) {
   return screen(ctx, {
     back: { path: "/keys", label: "API keys" },
     title: key.name,
-    identity: key.prefix + "…",
+    identity: prefixOf(key),
     scope: { key_id: key.id },
     // A key is one person or one pipeline, so its traffic reads best as the
     // tasks it ran rather than as single requests.
@@ -296,9 +301,12 @@ export async function keyDetailView(ctx) {
             "Rename",
           )
         : null,
+      state === "pending" && canActivate(ctx, key)
+        ? activateButton(ctx, key)
+        : null,
       // The old key is revoked by the rotation, so the screen moves to the
       // new one.
-      canRevoke(ctx, key) && state !== "revoked"
+      canRevoke(ctx, key) && canRotate(key)
         ? h(
             "button",
             {
@@ -313,7 +321,7 @@ export async function keyDetailView(ctx) {
             "Rotate",
           )
         : null,
-      canRevoke(ctx, key) && state === "active"
+      canRevoke(ctx, key) && isLive(key)
         ? h(
             "button",
             {

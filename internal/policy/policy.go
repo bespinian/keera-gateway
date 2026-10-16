@@ -971,6 +971,9 @@ var (
 	ErrUnknownKey = errors.New("policy: unknown key")
 	ErrKeyExpired = errors.New("policy: key expired")
 	ErrKeyRevoked = errors.New("policy: key revoked")
+	// ErrKeyPending is a key nobody has activated yet. It has no secret, so
+	// only something that names it by id, such as the playground, meets it.
+	ErrKeyPending = errors.New("policy: key not activated")
 )
 
 // Source is what the gateway needs from the control plane. It is an interface

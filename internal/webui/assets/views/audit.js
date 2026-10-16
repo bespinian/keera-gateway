@@ -71,6 +71,7 @@ const LABELS = {
   "key.rename": "API key renamed",
   "key.revoke": "API key revoked",
   "key.rotate": "API key rotated",
+  "key.activate": "API key activated",
   "passkey.create": "Passkey added",
   "passkey.delete": "Passkey removed",
   "user.passkey_link": "Passkey set-up link created",

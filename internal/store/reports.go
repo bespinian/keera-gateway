@@ -298,11 +298,9 @@ type KeyQuery struct {
 // traffic since q.Since, in one query to avoid N+1.
 func (s *Store) KeySummaries(ctx context.Context, q KeyQuery) ([]KeySummary, error) {
 	return queryAll(ctx, s.pool, scanKeySummary, `
-		SELECT k.id, k.org_id, COALESCE(k.project_id,''), COALESCE(k.user_id,''),
-		       k.name, k.prefix, k.created_at, k.expires_at, k.revoked_at,
-		       `+limitColumns+`,
+		SELECT `+keyColumnsOf("k.")+`, `+limitColumns+`,
 		       u.last_used_at, COALESCE(u.requests, 0), COALESCE(u.micros, 0),
-		       COALESCE(u.list_micros, 0), k.kind, pu.five_hour, pu.five_hour_resets_at,
+		       COALESCE(u.list_micros, 0), pu.five_hour, pu.five_hour_resets_at,
 		       pu.seven_day, pu.seven_day_resets_at, pu.status, pu.updated_at
 		FROM api_keys k
 		LEFT JOIN guardrails p ON p.scope_type = 'key' AND p.scope_id = k.id
@@ -326,11 +324,9 @@ func scanKeySummary(r row) (KeySummary, error) {
 		status   *string
 		reported *time.Time
 	)
-	dest := []any{&k.ID, &k.OrgID, &k.ProjectID, &k.UserID, &k.Name, &k.Prefix,
-		&k.CreatedAt, &k.ExpiresAt, &k.RevokedAt}
-	dest = append(dest, limitTargets(&k.Limits, &period)...)
+	dest := append(keyTargets(&k.KeyInfo), limitTargets(&k.Limits, &period)...)
 	dest = append(dest, &k.LastUsedAt, &k.Requests, &k.SpendMicros, &k.SubscriptionMicros,
-		&k.Kind, &plan.FiveHour, &plan.FiveHourResetsAt, &plan.SevenDay, &plan.SevenDayResetsAt,
+		&plan.FiveHour, &plan.FiveHourResetsAt, &plan.SevenDay, &plan.SevenDayResetsAt,
 		&status, &reported)
 	if err := r.Scan(dest...); err != nil {
 		return KeySummary{}, err

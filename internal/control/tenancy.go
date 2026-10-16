@@ -687,6 +687,9 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		Kind      policy.KeyKind `json:"kind"`
 		ExpiresIn string         `json:"expires_in"`
 		ExpiresAt *time.Time     `json:"expires_at"`
+		// Pending leaves the key for the person it is for to activate. Until
+		// then it has no secret, so the administrator never sees it.
+		Pending bool `json:"pending"`
 	}
 	if !readJSON(w, r, &in) {
 		return
@@ -725,6 +728,11 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 			"attributed to them; name them in 'user_id'")
 		return
 	}
+	if in.Pending && in.UserID == "" {
+		badRequest(w, "a pending key is activated by the person it is for, so name them "+
+			"in 'user_id'")
+		return
+	}
 	// The person a key is attributed to is who its spend is reported under,
 	// so it must be someone in this organisation.
 	if in.UserID != "" {
@@ -751,8 +759,11 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		return
 	}
 
-	secret, hash, prefix := auth.Generate()
-	info.Prefix = prefix
+	var secret string
+	var hash []byte
+	if !in.Pending {
+		secret, hash, info.Prefix = auth.Generate()
+	}
 	info, err := s.st.CreateKey(r.Context(), info, hash)
 	if errors.Is(err, store.ErrNoProject) {
 		noProject(w)
@@ -766,13 +777,63 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	// it is part of the record.
 	s.auditf(r, p, orgID, "key.create", "key", info.ID, map[string]any{
 		"org_id": info.OrgID, "project_id": info.ProjectID, "user_id": info.UserID,
-		"name": info.Name, "prefix": info.Prefix, "kind": info.Kind,
+		"name": info.Name, "prefix": info.Prefix, "kind": info.Kind, "pending": info.Pending,
 	})
 	s.keyChanged(r, info.ID)
 
 	// The secret is returned exactly once. Nothing stores it, so nobody can
-	// read a developer's key later.
+	// read a developer's key later. A pending key has none yet.
 	httpx.WriteJSON(w, http.StatusCreated, struct {
+		store.KeyInfo
+		Key string `json:"key,omitempty"`
+	}{KeyInfo: info, Key: secret})
+}
+
+// activateKey gives a pending key its secret and returns it, exactly once.
+// The key's holder may do it, and so may an administrator, who could rotate
+// the key anyway. An optional 'name' renames it in the same step, which is
+// how `keera connect` names a key after the machine that holds it.
+func (s *Server) activateKey(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
+	var in struct {
+		Name string `json:"name"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	keyID := r.PathValue("id")
+	o, ok := s.keyOwner(w, r, p, keyID)
+	if !ok {
+		return
+	}
+	if !p.CanManageKeyFor(o.OrgID, o.UserID) {
+		forbid(w, "only the person this key is for, or an administrator, can activate it")
+		return
+	}
+	secret, hash, prefix := auth.Generate()
+	info, err := s.st.ActivateKey(r.Context(), keyID, strings.TrimSpace(in.Name), hash, prefix)
+	switch {
+	case errors.Is(err, store.ErrKeyRevoked):
+		conflict(w, "key_revoked",
+			"that key was revoked, so it cannot be activated; ask for a new one")
+		return
+	case errors.Is(err, store.ErrKeyLapsed):
+		conflict(w, "key_expired",
+			"that key expired before it was activated; ask for a new one")
+		return
+	case errors.Is(err, store.ErrKeyActive):
+		conflict(w, "key_active",
+			"that key is already activated, and its secret was shown then; rotate it "+
+				"to get a new secret")
+		return
+	case err != nil:
+		s.fail(w, err)
+		return
+	}
+	s.auditf(r, p, o.OrgID, "key.activate", "key", info.ID, map[string]any{
+		"user_id": info.UserID, "name": info.Name, "prefix": info.Prefix,
+	})
+	s.keyChanged(r, info.ID)
+	httpx.WriteJSON(w, http.StatusOK, struct {
 		store.KeyInfo
 		Key string `json:"key"`
 	}{KeyInfo: info, Key: secret})
@@ -811,8 +872,13 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	next.Prefix = prefix
 	info, err := s.st.RotateKey(r.Context(), oldID, next, hash)
 	if errors.Is(err, store.ErrKeyRevoked) {
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "key_revoked",
+		conflict(w, "key_revoked",
 			"that key was already revoked, so there is nothing to rotate; issue a new one")
+		return
+	}
+	if errors.Is(err, store.ErrKeyPending) {
+		conflict(w, "key_pending",
+			"that key is not activated yet, so it has no secret to replace; activate it instead")
 		return
 	}
 	if err != nil {
@@ -892,23 +958,28 @@ func (s *Server) listKeys(w http.ResponseWriter, r *http.Request, p *authn.Princ
 	})
 }
 
-// keyToManage reads whose key keyID is, and checks the caller may verb it.
-// Another tenant's key answers 404, not 403, so ids cannot be probed. Inside
-// their organisation a member can already see every key, so they are told
-// whose key it is rather than "not found".
-func (s *Server) keyToManage(w http.ResponseWriter, r *http.Request, p *authn.Principal,
-	keyID, verb string,
-) (owner, holder string, ok bool) {
+// keyOwner reads whose key keyID is. Another tenant's key answers 404.
+func (s *Server) keyOwner(w http.ResponseWriter, r *http.Request, p *authn.Principal,
+	keyID string) (store.KeyOwner, bool) {
 	o, err := s.st.KeyOwnerOf(r.Context(), keyID)
 	if err != nil {
 		s.fail(w, err)
+		return o, false
+	}
+	return o, s.requireOwnerRead(w, p, o.OrgID)
+}
+
+// keyToManage reads whose key keyID is, and checks the caller may verb it.
+// Inside their organisation a member can already see every key, so they are
+// told whose key it is rather than "not found".
+func (s *Server) keyToManage(w http.ResponseWriter, r *http.Request, p *authn.Principal,
+	keyID, verb string,
+) (owner, holder string, ok bool) {
+	o, ok := s.keyOwner(w, r, p, keyID)
+	if !ok {
 		return "", "", false
 	}
 	owner, holder = o.OrgID, o.UserID
-	if !p.CanReadOrg(owner) {
-		s.fail(w, store.ErrNotFound)
-		return "", "", false
-	}
 	if !p.CanManageKeyFor(owner, holder) {
 		forbid(w, "a member can only "+verb+" a key attributed to themselves; "+
 			"somebody else's, or one attributed to nobody, is for an "+

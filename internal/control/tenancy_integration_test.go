@@ -207,6 +207,57 @@ func TestAMemberRotatesTheirOwnKeyAndItKeepsItsLimits(t *testing.T) {
 	}
 }
 
+// A key left for its holder has no secret until they activate it, so the
+// administrator who issued it never sees one. The holder may activate it even
+// without the right to rotate their own keys.
+func TestAPendingKeyIsActivatedByItsHolderOnce(t *testing.T) {
+	tn := twoTenants(t)
+	carol := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleAdmin,
+		OrgID: "org_a", UserID: "user_carol"}
+	alice := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleMember,
+		OrgID: "org_a", UserID: "user_alice"}
+	bob := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleMember,
+		OrgID: "org_a", UserID: "user_bob"}
+
+	if w := tn.create(carol, `{"org_id":"org_a","name":"ci","pending":true}`); w.Code != http.StatusBadRequest {
+		t.Errorf("a pending key for nobody: %d %s", w.Code, w.Body)
+	}
+	w := tn.create(carol, `{"org_id":"org_a","user_id":"user_alice","name":"alice's laptop","pending":true}`)
+	var issued struct {
+		store.KeyInfo
+		Key string `json:"key"`
+	}
+	if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &issued) != nil ||
+		!issued.Pending || issued.Key != "" || issued.Prefix != "" {
+		t.Fatalf("issuing a pending key: %d %s", w.Code, w.Body)
+	}
+	activate := func(p *authn.Principal) *httptest.ResponseRecorder {
+		return tn.call(tn.srv.activateKey, p, http.MethodPost, "/v1/keys/"+issued.ID+"/activate",
+			`{}`, map[string]string{"id": issued.ID})
+	}
+	rotate := tn.call(tn.srv.rotateKey, alice, http.MethodPost, "/v1/keys/"+issued.ID+"/rotate",
+		`{}`, map[string]string{"id": issued.ID})
+	if rotate.Code != http.StatusConflict {
+		t.Errorf("rotating a pending key = %d, want 409", rotate.Code)
+	}
+	if w := activate(bob); w.Code != http.StatusForbidden {
+		t.Errorf("a colleague activating it = %d, want 403", w.Code)
+	}
+
+	w = activate(alice)
+	var active struct {
+		store.KeyInfo
+		Key string `json:"key"`
+	}
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &active) != nil ||
+		active.Key == "" || active.Pending || active.Prefix == "" {
+		t.Fatalf("activating her own key: %d %s", w.Code, w.Body)
+	}
+	if w := activate(alice); w.Code != http.StatusConflict {
+		t.Errorf("activating it twice = %d, want 409", w.Code)
+	}
+}
+
 // Whoever may revoke a key may rename it: a member their own, an
 // administrator any in their organisation, an operator any at all.
 func TestKeysAreRenamedByWhoeverMayRevokeThem(t *testing.T) {

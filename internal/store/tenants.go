@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -100,47 +99,64 @@ type KeyInfo struct {
 	CreatedAt time.Time      `json:"created_at"`
 	ExpiresAt *time.Time     `json:"expires_at,omitempty"`
 	RevokedAt *time.Time     `json:"revoked_at,omitempty"`
+	// Pending is a key waiting to be activated. It has no secret and no
+	// prefix until then.
+	Pending bool `json:"pending,omitempty"`
 }
 
-// State is the one word a screen shows for a key at now: revoked, expired or
-// active. Revocation wins over expiry, because somebody did it on purpose.
+// keyColumnsOf is the select list keyTargets fills, in its order, with each
+// column prefixed by table, as in userColumnsOf.
+func keyColumnsOf(table string) string {
+	return fmt.Sprintf(`%[1]sid, %[1]sorg_id, COALESCE(%[1]sproject_id,''),
+	COALESCE(%[1]suser_id,''), %[1]sname, %[1]sprefix, %[1]skind, %[1]screated_at,
+	%[1]sexpires_at, %[1]srevoked_at, %[1]skey_hash IS NULL`, table)
+}
+
+// keyTargets points at the fields keyColumnsOf fills, in its order.
+func keyTargets(k *KeyInfo) []any {
+	return []any{&k.ID, &k.OrgID, &k.ProjectID, &k.UserID, &k.Name, &k.Prefix, &k.Kind,
+		&k.CreatedAt, &k.ExpiresAt, &k.RevokedAt, &k.Pending}
+}
+
+// State is the one word a screen shows for a key at now: revoked, expired,
+// pending or active. Revocation wins over expiry, because somebody did it on
+// purpose.
 func (k KeyInfo) State(now time.Time) string {
 	switch {
 	case k.RevokedAt != nil:
 		return "revoked"
 	case k.ExpiresAt != nil && k.ExpiresAt.Before(now):
 		return "expired"
+	case k.Pending:
+		return "pending"
 	default:
 		return "active"
 	}
 }
 
 // OrgTemplate is what a new organisation starts with: a copy of each model
-// and sandbox class, from the catalogue files.
+// and sandbox class, from the template files.
 type OrgTemplate struct {
 	Models         []policy.Model
 	SandboxClasses []policy.SandboxClass
 }
 
 // CreateOrg inserts an organisation, with its email domain if o has one, and
-// what it starts with. It is one transaction, so an organisation never exists
+// what it starts with. The domain is stored as given, so the caller cleans it
+// with policy.CleanEmailDomain. It is one transaction, so an organisation never exists
 // without its template.
 func (s *Store) CreateOrg(ctx context.Context, o Org, tmpl OrgTemplate) (Org, error) {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return o, err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if o, err = createOrg(ctx, tx, o, tmpl); err != nil {
-		return o, err
-	}
-	return o, tx.Commit(ctx)
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		o, err = createOrg(ctx, tx, o, tmpl)
+		return err
+	})
+	return o, err
 }
 
 // createOrg is CreateOrg inside a transaction the caller commits.
 func createOrg(ctx context.Context, tx pgx.Tx, o Org, tmpl OrgTemplate) (Org, error) {
 	id := o.ID
-	o.EmailDomain = strings.TrimSpace(o.EmailDomain)
 	domain := nullable(o.EmailDomain)
 	// The domain is set in the same insert, so a taken one creates nothing.
 	// Setting it afterwards left an organisation behind that a retry then
@@ -529,6 +545,7 @@ func (s *Store) EnableUser(ctx context.Context, userID string) error {
 }
 
 // CreateKey stores an issued key. The caller holds the only copy of the secret.
+// A nil hash stores a pending key, which ActivateKey gives its secret later.
 func (s *Store) CreateKey(ctx context.Context, k KeyInfo, hash []byte) (KeyInfo, error) {
 	return insertKey(ctx, s.pool, k, hash)
 }
@@ -541,6 +558,7 @@ func insertKey(ctx context.Context, db querier, k KeyInfo, hash []byte) (KeyInfo
 	if k.Kind == "" {
 		k.Kind = policy.KeyStandard
 	}
+	k.Pending = hash == nil
 	err := db.QueryRow(ctx, `INSERT INTO api_keys
 		(id, org_id, project_id, user_id, name, key_hash, prefix, kind, expires_at)
 		VALUES ($1, $2,
@@ -576,6 +594,52 @@ func (s *Store) RenameKey(ctx context.Context, id, name string) (old string, err
 // rotate.
 var ErrKeyRevoked = errors.New("store: the key was already revoked")
 
+// ErrKeyPending is a key that has no secret yet, so it is activated rather
+// than rotated.
+var ErrKeyPending = errors.New("store: the key is not activated yet")
+
+// ErrKeyActive is a key that was activated already. Its secret was shown
+// then, so a second activation would be a rotation in disguise.
+var ErrKeyActive = errors.New("store: the key is already activated")
+
+// ErrKeyLapsed is a pending key whose expiry passed before it was activated.
+// A secret for it would be refused at once.
+var ErrKeyLapsed = errors.New("store: the key expired before it was activated")
+
+// ActivateKey gives a pending key its secret, and a new name when name is
+// not empty. It returns the key as it now is.
+//
+// The update only matches a pending key, so two activations racing each
+// other cannot both get a secret.
+func (s *Store) ActivateKey(ctx context.Context, id, name string, hash []byte, prefix string,
+) (KeyInfo, error) {
+	var k KeyInfo
+	err := s.pool.QueryRow(ctx, `UPDATE api_keys
+		SET key_hash = $2, prefix = $3, name = COALESCE(NULLIF($4, ''), name)
+		WHERE id = $1 AND key_hash IS NULL AND revoked_at IS NULL
+			AND (expires_at IS NULL OR expires_at > now())
+		RETURNING `+keyColumnsOf(""), id, hash, prefix, name,
+	).Scan(keyTargets(&k)...)
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return k, err
+	}
+	// Nothing matched: say why, so the caller is told what to do instead.
+	var pending, revoked, lapsed bool
+	err = s.pool.QueryRow(ctx, `SELECT key_hash IS NULL, revoked_at IS NOT NULL,
+		expires_at IS NOT NULL AND expires_at <= now()
+		FROM api_keys WHERE id = $1`, id).Scan(&pending, &revoked, &lapsed)
+	switch {
+	case err != nil:
+		return KeyInfo{}, notFound(err)
+	case revoked:
+		return KeyInfo{}, ErrKeyRevoked
+	case pending && lapsed:
+		return KeyInfo{}, ErrKeyLapsed
+	default:
+		return KeyInfo{}, ErrKeyActive
+	}
+}
+
 // RotateKey replaces the key oldID with next, in one transaction: next gets
 // the old key's organisation, project, person, kind and own guardrails, and the old key
 // is revoked. An empty next.Name keeps the old name. A nil next.ExpiresAt
@@ -584,45 +648,43 @@ var ErrKeyRevoked = errors.New("store: the key was already revoked")
 // Doing it in steps can leave both keys live, or a new key without the old
 // one's limits, which quietly loosens a guardrail.
 func (s *Store) RotateKey(ctx context.Context, oldID string, next KeyInfo, hash []byte) (KeyInfo, error) {
-	tx, err := s.pool.Begin(ctx)
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var old KeyInfo
+		err := tx.QueryRow(ctx, `SELECT `+keyColumnsOf("")+` FROM api_keys
+			WHERE id = $1 FOR UPDATE`, oldID).Scan(keyTargets(&old)...)
+		if err != nil {
+			return notFound(err)
+		}
+		if old.RevokedAt != nil {
+			return ErrKeyRevoked
+		}
+		if old.Pending {
+			return ErrKeyPending
+		}
+		next.OrgID, next.ProjectID, next.UserID, next.Kind = old.OrgID, old.ProjectID, old.UserID, old.Kind
+		if next.Name == "" {
+			next.Name = old.Name
+		}
+		// The lifetime, not the date: a key rotated a week before it lapses should
+		// not be replaced by one that lapses in a week.
+		if next.ExpiresAt == nil && old.ExpiresAt != nil {
+			t := time.Now().Add(max(old.ExpiresAt.Sub(old.CreatedAt).Round(time.Hour), time.Hour))
+			next.ExpiresAt = &t
+		}
+
+		if next, err = insertKey(ctx, tx, next, hash); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, copyKeyGuardrailSQL, oldID, next.ID); err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, "UPDATE api_keys SET revoked_at = now() WHERE id = $1", oldID)
+		return err
+	})
 	if err != nil {
 		return KeyInfo{}, err
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	var old KeyInfo
-	err = tx.QueryRow(ctx, `SELECT org_id, COALESCE(project_id,''), COALESCE(user_id,''), name,
-		kind, created_at, expires_at, revoked_at FROM api_keys WHERE id = $1 FOR UPDATE`, oldID,
-	).Scan(&old.OrgID, &old.ProjectID, &old.UserID, &old.Name, &old.Kind, &old.CreatedAt,
-		&old.ExpiresAt, &old.RevokedAt)
-	if err != nil {
-		return KeyInfo{}, notFound(err)
-	}
-	if old.RevokedAt != nil {
-		return KeyInfo{}, ErrKeyRevoked
-	}
-	next.OrgID, next.ProjectID, next.UserID, next.Kind = old.OrgID, old.ProjectID, old.UserID, old.Kind
-	if next.Name == "" {
-		next.Name = old.Name
-	}
-	// The lifetime, not the date: a key rotated a week before it lapses should
-	// not be replaced by one that lapses in a week.
-	if next.ExpiresAt == nil && old.ExpiresAt != nil {
-		t := time.Now().Add(max(old.ExpiresAt.Sub(old.CreatedAt).Round(time.Hour), time.Hour))
-		next.ExpiresAt = &t
-	}
-
-	if next, err = insertKey(ctx, tx, next, hash); err != nil {
-		return KeyInfo{}, err
-	}
-	if _, err := tx.Exec(ctx, copyKeyGuardrailSQL, oldID, next.ID); err != nil {
-		return KeyInfo{}, err
-	}
-	if _, err := tx.Exec(ctx,
-		"UPDATE api_keys SET revoked_at = now() WHERE id = $1", oldID); err != nil {
-		return KeyInfo{}, err
-	}
-	return next, tx.Commit(ctx)
+	return next, nil
 }
 
 // LookupKey finds a key by the hash of what the client presented, with the
@@ -648,7 +710,8 @@ func (s *Store) lookupKey(ctx context.Context, where string, arg any) (*policy.R
 	// disabling somebody revokes their keys.
 	rows, err := s.pool.Query(ctx, `
 		SELECT k.id, k.org_id, COALESCE(pr.id,''), COALESCE(k.user_id,''), k.kind,
-		       k.expires_at, COALESCE(k.revoked_at, u.disabled_at), p.scope_type, `+limitColumns+`
+		       k.expires_at, COALESCE(k.revoked_at, u.disabled_at), k.key_hash IS NULL,
+		       p.scope_type, `+limitColumns+`
 		FROM api_keys k
 		LEFT JOIN users u ON u.id = k.user_id
 		LEFT JOIN projects pr ON pr.id = k.project_id AND pr.org_id = k.org_id
@@ -666,7 +729,7 @@ func (s *Store) lookupKey(ctx context.Context, where string, arg any) (*policy.R
 		key                  policy.Key
 		expires, revoked     *time.Time
 		orgL, projectL, ownL *policy.Limits
-		found                bool
+		found, pending       bool
 	)
 	for rows.Next() {
 		var (
@@ -675,7 +738,7 @@ func (s *Store) lookupKey(ctx context.Context, where string, arg any) (*policy.R
 			period    *string
 		)
 		dest := append([]any{&key.ID, &key.OrgID, &key.ProjectID, &key.UserID, &key.Kind,
-			&expires, &revoked, &scopeType}, limitTargets(&lim, &period)...)
+			&expires, &revoked, &pending, &scopeType}, limitTargets(&lim, &period)...)
 		if err := rows.Scan(dest...); err != nil {
 			return nil, err
 		}
@@ -703,6 +766,8 @@ func (s *Store) lookupKey(ctx context.Context, where string, arg any) (*policy.R
 		return nil, policy.ErrKeyRevoked
 	case expires != nil && expires.Before(time.Now()):
 		return nil, policy.ErrKeyExpired
+	case pending:
+		return nil, policy.ErrKeyPending
 	}
 	return policy.Resolve(key, orgL, projectL, ownL), nil
 }

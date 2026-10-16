@@ -30,7 +30,13 @@ import {
   banner,
 } from "../ui.js";
 import { oneLine, statusMeaning } from "../status.js";
-import { canRevoke, confirmRevoke, statePill } from "./keys.js";
+import {
+  activateButton,
+  canRevoke,
+  confirmRevoke,
+  prefixOf,
+  statePill,
+} from "./keys.js";
 import { noKey } from "./connect.js";
 
 // Each level of the hierarchy as the person held by it would name it. They know
@@ -272,14 +278,17 @@ function keyCard(k, ctx) {
         h(
           "span",
           { class: "faint mono", style: { fontSize: "11px" } },
-          k.prefix + "…",
+          prefixOf(k),
         ),
       ),
-      h("div", { class: "spacer", style: { flex: 1 } }),
+      h("div", { class: "spacer" }),
       statePill(k.state),
+      // A pending key is the reader's to activate, whatever else they may do
+      // with their keys.
+      k.state === "pending" ? activateButton(ctx, k, "btn btn-sm") : null,
       // Only a key that still works can be taken away, and only the state
       // above says whether this one does.
-      k.state === "active" && canRevoke(ctx, k)
+      (k.state === "active" || k.state === "pending") && canRevoke(ctx, k)
         ? h(
             "button",
             {

@@ -117,13 +117,13 @@ before rolling it out.
 ## 4. Each person, once per machine
 
 Only an administrator issues keys. So first, an administrator issues each
-member one subscription key per machine:
+member one subscription key per machine, left for them to activate:
 
 ```sh
-keera key create --subscription --user ada@example.ch --name "Ada's Claude Code"
+keera key create --subscription --pending --user ada@example.ch --name "Ada's Claude Code"
 ```
 
-The key itself is not needed. Nobody has to pass it on.
+It has no secret until the member activates it, so nobody has to pass it on.
 
 When the address comes from the claude.ai admin console, run `claude` and
 `/login` first, and approve the managed settings. Claude Code then has a copy

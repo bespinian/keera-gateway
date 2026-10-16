@@ -225,3 +225,68 @@ func TestLookupKeyByIDMatchesTheHashLookup(t *testing.T) {
 		t.Errorf("revoked key: err = %v, want ErrKeyRevoked", err)
 	}
 }
+
+// A pending key has no secret, so nothing can use it until it is activated,
+// and it is activated once.
+func TestActivateKeyGivesAPendingKeyItsSecretOnce(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+
+	created, err := st.CreateKey(ctx, KeyInfo{
+		ID: "key_pending", OrgID: f.orgID, Name: "Ada's laptop",
+	}, nil)
+	if err != nil {
+		t.Fatalf("CreateKey: %v", err)
+	}
+	if !created.Pending || created.State(time.Now()) != "pending" {
+		t.Errorf("created %+v, want a pending key", created)
+	}
+	if _, err := st.LookupKeyByID(ctx, "key_pending"); !errors.Is(err, policy.ErrKeyPending) {
+		t.Errorf("pending key by id: err = %v, want ErrKeyPending", err)
+	}
+	if _, err := st.RotateKey(ctx, "key_pending", KeyInfo{ID: "key_rotated"},
+		[]byte("hash-rotated-0000000000000000000")); !errors.Is(err, ErrKeyPending) {
+		t.Errorf("rotating a pending key: err = %v, want ErrKeyPending", err)
+	}
+
+	hash := []byte("hash-activated-00000000000000000")
+	active, err := st.ActivateKey(ctx, "key_pending", "claude-code on laptop", hash, "keera_sk_act")
+	if err != nil {
+		t.Fatalf("ActivateKey: %v", err)
+	}
+	if active.Pending || active.Prefix != "keera_sk_act" || active.Name != "claude-code on laptop" ||
+		active.ProjectID == "" {
+		t.Errorf("activated %+v, want the new prefix and name, in a project", active)
+	}
+	if res, err := st.LookupKey(ctx, hash); err != nil || res.Key.ID != "key_pending" {
+		t.Errorf("LookupKey after activation: %v, %v", res, err)
+	}
+	if _, err := st.ActivateKey(ctx, "key_pending", "", []byte("hash-again-000000000000000000000"),
+		"keera_sk_again"); !errors.Is(err, ErrKeyActive) {
+		t.Errorf("activating twice: err = %v, want ErrKeyActive", err)
+	}
+
+	if _, err := st.CreateKey(ctx, KeyInfo{ID: "key_gone", OrgID: f.orgID, Name: "gone"}, nil); err != nil {
+		t.Fatalf("CreateKey: %v", err)
+	}
+	if err := st.RevokeKey(ctx, "key_gone"); err != nil {
+		t.Fatalf("RevokeKey: %v", err)
+	}
+	if _, err := st.ActivateKey(ctx, "key_gone", "", []byte("hash-gone-0000000000000000000000"),
+		"keera_sk_gone"); !errors.Is(err, ErrKeyRevoked) {
+		t.Errorf("activating a revoked key: err = %v, want ErrKeyRevoked", err)
+	}
+	past := time.Now().Add(-time.Hour)
+	if _, err := st.CreateKey(ctx, KeyInfo{ID: "key_lapsed", OrgID: f.orgID, Name: "lapsed",
+		ExpiresAt: &past}, nil); err != nil {
+		t.Fatalf("CreateKey: %v", err)
+	}
+	if _, err := st.ActivateKey(ctx, "key_lapsed", "", []byte("hash-lapsed-00000000000000000000"),
+		"keera_sk_lapsed"); !errors.Is(err, ErrKeyLapsed) {
+		t.Errorf("activating an expired key: err = %v, want ErrKeyLapsed", err)
+	}
+	if _, err := st.ActivateKey(ctx, "key_nobody", "", []byte("hash-nobody-00000000000000000000"),
+		"keera_sk_nobody"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("activating an unknown key: err = %v, want ErrNotFound", err)
+	}
+}

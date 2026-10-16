@@ -173,6 +173,7 @@ export const api = {
   renameKey: (id, name) => request("PATCH", path`/v1/keys/${id}`, { name }),
   revokeKey: (id) => request("DELETE", path`/v1/keys/${id}`),
   rotateKey: (id) => request("POST", path`/v1/keys/${id}/rotate`, {}),
+  activateKey: (id) => request("POST", path`/v1/keys/${id}/activate`, {}),
 
   guardrails: (scope, id) => get(path`/v1/guardrails/${scope}/${id}`),
   putGuardrails: (scope, id, limits) =>

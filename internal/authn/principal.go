@@ -108,27 +108,22 @@ func (p *Principal) CanAdminOrg(orgID string) bool {
 	return p.Unrestricted() || (p.Role == RoleAdmin && p.inOrg(orgID))
 }
 
-// CanManageKeyFor reports whether the principal may rename, rotate or revoke a
-// key in an organisation, attributed to userID (empty means nobody in
-// particular).
+// CanManageKeyFor reports whether the principal may activate, rename, rotate
+// or revoke a key in an organisation, attributed to userID (empty means nobody
+// in particular).
 //
 // Only an administrator issues keys, so every key is one they shaped: its
-// project, kind and guardrails. A member may rename, rotate or revoke the keys
-// attributed to them, which replaces or stops a leaked key without waiting for
-// an administrator, but changes nothing else. A key attributed to nobody, such
-// as a pipeline's, stays an administrator's.
+// project, kind and guardrails. A member may activate, rename, rotate or
+// revoke the keys attributed to them, which replaces or stops a leaked key
+// without waiting for an administrator, but changes nothing else. A key
+// attributed to nobody, such as a pipeline's, stays an administrator's.
 func (p *Principal) CanManageKeyFor(orgID, userID string) bool {
-	return p.CanAdminOrg(orgID) || p.isMemberFor(orgID, userID)
+	return p.CanAdminOrg(orgID) ||
+		(p.Role == RoleMember && p.inOrg(orgID) && p.UserID != "" && userID == p.UserID)
 }
 
 func (p *Principal) inOrg(orgID string) bool {
 	return orgID != "" && orgID == p.OrgID
-}
-
-// isMemberFor reports whether p is a member of orgID acting for themselves.
-func (p *Principal) isMemberFor(orgID, userID string) bool {
-	return p.Role == RoleMember && p.inOrg(orgID) &&
-		p.UserID != "" && userID == p.UserID
 }
 
 // ScopeOrg resolves which organisation a request applies to.

@@ -1984,3 +1984,71 @@ func TestUsageNarrowsLikeTheOtherReports(t *testing.T) {
 		t.Errorf("usage query = %q, want the project and the model", q)
 	}
 }
+
+// A key issued by a person is theirs unless they say otherwise, so it shows on
+// their own screens.
+func TestKeyCreateIsTheCallersByDefault(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/me":    map[string]any{"user_id": "user_me", "role": "admin", "org_id": "org_1"},
+		"GET /v1/orgs":  oneOrg,
+		"POST /v1/keys": map[string]any{"id": "key_1", "key": "sk-keera-secret"},
+	})
+
+	if err := keyCmd(context.Background(), []string{"create", "laptop"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.request("POST", "/v1/keys").body["user_id"]; got != "user_me" {
+		t.Errorf("user_id sent = %v, want the caller's", got)
+	}
+
+	if err := keyCmd(context.Background(), []string{"create", "pipeline", "--no-user"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, set := f.seen[len(f.seen)-1].body["user_id"]; set {
+		t.Errorf("--no-user sent user_id %v", got)
+	}
+}
+
+// A pending key is left for its holder, so no secret comes back to print.
+func TestKeyCreatePendingNeedsAPersonAndPrintsNoSecret(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/orgs": oneOrg,
+		"GET /v1/users": map[string]any{"data": []map[string]any{
+			{"id": "user_1", "org_id": "org_1", "email": "alice@example.com", "role": "member"},
+		}},
+		"POST /v1/keys": map[string]any{"id": "key_1", "user_id": "user_1", "pending": true},
+	})
+
+	if err := keyCmd(context.Background(),
+		[]string{"create", "laptop", "--user", "alice@example.com", "--pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.request("POST", "/v1/keys").body["pending"]; got != true {
+		t.Errorf("pending sent = %v, want true", got)
+	}
+
+	err := keyCmd(context.Background(), []string{"create", "ci", "--no-user", "--pending"})
+	if err == nil || !strings.Contains(err.Error(), "--user") {
+		t.Errorf("err = %v, want a pending key to need a person", err)
+	}
+}
+
+func TestKeyActivateAsksTheControlPlane(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/orgs": oneOrg,
+		"GET /v1/keys": map[string]any{"data": []map[string]any{
+			{"id": "key_p", "org_id": "org_1", "user_id": "user_1", "name": "laptop", "pending": true},
+		}},
+		"POST /v1/keys/key_p/activate": map[string]any{"id": "key_p", "key": "keera_sk_new"},
+	})
+
+	if err := keyCmd(context.Background(), []string{"activate", "laptop"}); err != nil {
+		t.Fatal(err)
+	}
+	if !f.called("POST", "/v1/keys/key_p/activate") {
+		t.Errorf("the key was not activated: %v", f.seen)
+	}
+}

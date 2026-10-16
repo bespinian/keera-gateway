@@ -572,7 +572,8 @@ func (r *Registry) remember(ck string, gen, drops uint64, c *call) {
 func isKeyRejection(err error) bool {
 	return errors.Is(err, policy.ErrUnknownKey) ||
 		errors.Is(err, policy.ErrKeyRevoked) ||
-		errors.Is(err, policy.ErrKeyExpired)
+		errors.Is(err, policy.ErrKeyExpired) ||
+		errors.Is(err, policy.ErrKeyPending)
 }
 
 // Sweep drops expired entries. Without it the key map would grow with every

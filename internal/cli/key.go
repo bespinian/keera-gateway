@@ -25,6 +25,10 @@ type keyRun struct {
 	expires string
 	// subscription issues a key for Claude Code signed in to a Claude plan.
 	subscription bool
+	// noUser issues a key attributed to nobody, such as a pipeline's.
+	noUser bool
+	// pending leaves the key for its holder to activate.
+	pending bool
 }
 
 // defaultKeyLife is how long a new key lasts unless --expires says otherwise.
@@ -32,10 +36,11 @@ type keyRun struct {
 // nobody chose.
 const defaultKeyLife = "2160h"
 
-// createdKey is a new key as the control API returns it, secret included.
+// createdKey is a new key as the control API returns it, secret included. A
+// pending key has no secret yet.
 type createdKey struct {
 	store.KeyInfo
-	Key string `json:"key"`
+	Key string `json:"key,omitempty"`
 }
 
 func keyCmd(ctx context.Context, args []string) error {
@@ -44,7 +49,12 @@ func keyCmd(ctx context.Context, args []string) error {
 	fs.StringVar(&r.project, "project", "",
 		"project, by name or id; without it, the organisation's oldest project")
 	r.reword("list", "project", "only the keys of one project, by name or id")
-	fs.StringVar(&r.user, "user", "", "the person this key belongs to, by email or id")
+	fs.StringVar(&r.user, "user", "",
+		"the person this key belongs to, by email or id (default: you)")
+	fs.BoolVar(&r.noUser, "no-user", false,
+		"a key that belongs to nobody, such as a pipeline's")
+	fs.BoolVar(&r.pending, "pending", false,
+		"leave the key for the person it belongs to to activate; only they see its secret")
 	fs.StringVar(&r.name, "name", "", "what this key is called; what it is for, in a few words")
 	fs.StringVar(&r.expires, "expires", "",
 		"how long the key lasts, such as 720h, the last day it works, such as 2026-12-31, "+
@@ -63,6 +73,8 @@ func keyCmd(ctx context.Context, args []string) error {
 		return r.revoke(ctx)
 	case "rotate":
 		return r.rotate(ctx)
+	case "activate":
+		return r.activate(ctx)
 	case "set":
 		return r.set(ctx)
 	default:
@@ -90,14 +102,20 @@ func (r *keyRun) create(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	req := map[string]string{"org_id": orgID, "project_id": project, "name": r.name}
-	// A key with a person on it is what makes `keera usage --by user` work.
-	if r.user != "" {
-		owner, err := findUser(ctx, r.c, orgID, r.user)
-		if err != nil {
-			return err
-		}
+	req := map[string]any{"org_id": orgID, "project_id": project, "name": r.name,
+		"pending": r.pending}
+	// A key with a person on it is what makes `keera usage --by user` work,
+	// and what puts it on that person's own screens.
+	owner, err := r.owner(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	if owner.ID != "" {
 		req["user_id"] = owner.ID
+	}
+	if r.pending && owner.ID == "" {
+		return errors.New("--pending leaves the key for the person it belongs to; " +
+			"name them with --user")
 	}
 	// The control API reads no expiry as a key that never expires.
 	switch r.expires {
@@ -105,9 +123,11 @@ func (r *keyRun) create(ctx context.Context) error {
 		req["expires_in"] = defaultKeyLife
 	case "never":
 	default:
-		if err := setExpiry(req, r.expires); err != nil {
+		field, v, err := expiryField(r.expires)
+		if err != nil {
 			return err
 		}
+		req[field] = v
 	}
 	if r.subscription {
 		req["kind"] = string(policy.KeySubscription)
@@ -119,8 +139,62 @@ func (r *keyRun) create(ctx context.Context) error {
 	if r.asJSON {
 		return out(true, created, nil)
 	}
+	if created.Pending {
+		fmt.Printf("key %s created for %s. It has no secret until they activate it: in the "+
+			"panel, or with 'keera key activate %s'.\n", created.ID, owner.Email, created.ID)
+		return nil
+	}
 	handOver(created.Key, fmt.Sprintf("key %s created for %s.", created.ID, orgID))
 	return nil
+}
+
+// owner is the person a new key belongs to: --user, or else the caller, so
+// the key shows on their own screens. --no-user, and the operator key, which
+// is nobody, give a key that belongs to nobody.
+func (r *keyRun) owner(ctx context.Context, orgID string) (store.User, error) {
+	switch {
+	case r.noUser && r.user != "":
+		return store.User{}, opposites("user", "no-user")
+	case r.noUser:
+		return store.User{}, nil
+	case r.user != "":
+		return findUser(ctx, r.c, orgID, r.user)
+	}
+	me, err := whoami(ctx, r.c)
+	if err != nil {
+		return store.User{}, err
+	}
+	// An operator working in another organisation is not a person there.
+	if me.UserID == "" || me.OrgID != orgID {
+		return store.User{}, nil
+	}
+	return store.User{ID: me.UserID, Email: me.Email}, nil
+}
+
+// activate gives a pending key its secret and prints it, once.
+func (r *keyRun) activate(ctx context.Context) error {
+	k, err := r.find(ctx)
+	if err != nil {
+		return err
+	}
+	created, err := activateKey(ctx, r.c, k.ID, "")
+	if err != nil {
+		return err
+	}
+	if r.asJSON {
+		return out(true, created, nil)
+	}
+	handOver(created.Key, fmt.Sprintf("key %s (%s) is activated.", created.ID, created.Name))
+	return nil
+}
+
+// activateKey gives a pending key its secret. A name renames it in the same
+// step; an empty one keeps its name.
+func activateKey(ctx context.Context, c *client, keyID, name string) (createdKey, error) {
+	var created createdKey
+	err := c.do(ctx, "POST", "/v1/keys/"+url.PathEscape(keyID)+"/activate",
+		map[string]string{"name": name}, &created)
+	return created, err
 }
 
 func (r *keyRun) list(ctx context.Context) error {
@@ -153,8 +227,12 @@ func (r *keyRun) list(ctx context.Context) error {
 			if k.LastUsedAt != nil {
 				last = k.LastUsedAt.Format(time.DateOnly)
 			}
-			_, _ = fmt.Fprintf(w, "%s\t%s\t%s…\t%s\t%s\t%s\t%s\t%s\n",
-				k.ID, k.Name, k.Prefix, dash(string(k.Kind)), dash(k.ProjectID),
+			prefix := "-"
+			if k.Prefix != "" {
+				prefix = k.Prefix + "…"
+			}
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				k.ID, k.Name, prefix, dash(string(k.Kind)), dash(k.ProjectID),
 				statusWord(k.State(time.Now())), statusWord(last), planText(k.Plan))
 		}
 	})
@@ -226,10 +304,11 @@ func (r *keyRun) rotate(ctx context.Context) error {
 			"the old one's lifetime unless --expires gives another")
 	}
 	// Checked before the prompt, so a mistyped day does not cost a confirmation.
-	expiry := map[string]string{}
-	if err := setExpiry(expiry, r.expires); err != nil {
+	field, v, err := expiryField(r.expires)
+	if err != nil {
 		return err
 	}
+	expiry := map[string]string{field: v}
 	old, err := r.find(ctx)
 	if err != nil {
 		return err
@@ -237,6 +316,10 @@ func (r *keyRun) rotate(ctx context.Context) error {
 	if old.RevokedAt != nil {
 		return fmt.Errorf("%s was already revoked on %s; there is nothing to rotate - %s",
 			old.ID, old.RevokedAt.Format(time.DateOnly), freshKeyHint(ctx, r.c, old.ProjectID, old.Name))
+	}
+	if old.Pending {
+		return fmt.Errorf("%s is not activated yet, so it has no secret to replace; "+
+			"activate it with: keera key activate %s", old.ID, old.ID)
 	}
 	if !r.yes {
 		if err := confirmKeyRotate(old); err != nil {
@@ -337,8 +420,8 @@ type rotatedKey struct {
 // rotateKey replaces a key with one carrying the same project, owner and
 // guardrails, then revokes the old one. The control plane does it in one
 // transaction, so it never leaves both keys live or drops the key's limits.
-// An empty name or expiry keeps the old key's. expiry holds what setExpiry
-// wrote.
+// An empty name or expiry keeps the old key's. expiry holds what expiryField
+// gave.
 func rotateKey(ctx context.Context, c *client, keyID, name string, expiry map[string]string) (rotatedKey, error) {
 	req := map[string]string{"name": name, "expires_in": ""}
 	maps.Copy(req, expiry)
@@ -347,21 +430,19 @@ func rotateKey(ctx context.Context, c *client, keyID, name string, expiry map[st
 	return rotated, err
 }
 
-// setExpiry puts --expires into a key request. A lifetime such as 720h goes
-// as it is. A day such as 2026-12-31 is the last day the key works, so it
-// expires at the end of that day, in local time.
-func setExpiry(req map[string]string, expires string) error {
+// expiryField is --expires as a key request carries it. A lifetime such as
+// 720h goes as it is. A day such as 2026-12-31 is the last day the key works,
+// so it expires at the end of that day, in local time.
+func expiryField(expires string) (field, value string, err error) {
 	day, err := time.ParseInLocation(time.DateOnly, expires, time.Local)
 	if err != nil {
-		req["expires_in"] = expires
-		return nil
+		return "expires_in", expires, nil
 	}
 	end := day.AddDate(0, 0, 1).Add(-time.Second)
 	if !end.After(time.Now()) {
-		return fmt.Errorf("--expires %s has already passed; give a day from today on", expires)
+		return "", "", fmt.Errorf("--expires %s has already passed; give a day from today on", expires)
 	}
-	req["expires_at"] = end.Format(time.RFC3339)
-	return nil
+	return "expires_at", end.Format(time.RFC3339), nil
 }
 
 // findKey resolves an id or a name to a key.

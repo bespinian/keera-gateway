@@ -56,7 +56,6 @@ export async function keysView(ctx) {
   const canEdit = isAdmin(ctx);
   // Only an administrator issues keys, so each has the project and guardrails
   // they chose. A member renames, rotates and revokes their own.
-  const canRotateOwn = !canEdit && ctx.state.me.can_manage_own_keys;
 
   const live = keys.filter((k) => stateOf(k) === "active").length;
   ctx.setSubtitle(`${live} active of ${keys.length}`);
@@ -64,12 +63,9 @@ export async function keysView(ctx) {
   const head = listHead(
     canEdit
       ? null
-      : canRotateOwn
-        ? "A key is shown only once, when it is issued. An administrator " +
+      : "A key is shown only once, when it is issued. An administrator " +
           "issues keys and sets their guardrails. You can rename, rotate or " +
-          "revoke your own."
-        : "A key is shown only once, when it is issued. Open a key to see " +
-          "its guardrails. An administrator sets them.",
+          "revoke your own.",
     rangePicker(ctx, since),
     canEdit
       ? {
@@ -102,7 +98,7 @@ export async function keysView(ctx) {
             h(
               "span",
               { class: "faint mono", style: { fontSize: "11px" } },
-              k.prefix + "…",
+              prefixOf(k),
             ),
             k.kind === "subscription"
               ? h(
@@ -141,7 +137,8 @@ export async function keysView(ctx) {
         // Active first, because a list of keys is read to find the live ones.
         label: "Status",
         shrink: true,
-        sortKey: (k) => ({ active: 0, expired: 1, revoked: 2 })[stateOf(k)],
+        sortKey: (k) =>
+          ({ active: 0, pending: 1, expired: 2, revoked: 3 })[stateOf(k)],
         cell: (k) => statePill(stateOf(k)),
       },
       {
@@ -247,20 +244,19 @@ export async function keysView(ctx) {
             // Any key can be renamed, revoked ones too: their name still
             // heads their usage history.
             canRevoke(ctx, k)
-              ? h(
-                  "button",
-                  {
-                    class: "btn btn-sm",
-                    title: "Rename this key",
-                    "aria-label": `Rename ${k.name}`,
-                    onClick: () => renameKey(ctx, k),
-                  },
-                  icon(icons.pencil),
+              ? iconButton(
+                  icons.pencil,
+                  "Rename this key",
+                  () => renameKey(ctx, k),
+                  { label: `Rename ${k.name}` },
                 )
+              : null,
+            canActivate(ctx, k) && stateOf(k) === "pending"
+              ? activateButton(ctx, k, "btn btn-sm")
               : null,
             // An expired key can be rotated too. A member cannot issue a new
             // one, so this is how they get going again.
-            canRevoke(ctx, k) && stateOf(k) !== "revoked"
+            canRevoke(ctx, k) && canRotate(k)
               ? h(
                   "button",
                   {
@@ -271,7 +267,7 @@ export async function keysView(ctx) {
                   "Rotate",
                 )
               : null,
-            canRevoke(ctx, k) && stateOf(k) === "active"
+            canRevoke(ctx, k) && isLive(k)
               ? h(
                   "button",
                   {
@@ -390,18 +386,14 @@ function byLabel(rows, value, label) {
 // than merely not belong to somebody else.
 export function canRevoke(ctx, k) {
   if (isAdmin(ctx)) return true;
-  return (
-    !!ctx.state.me.can_manage_own_keys &&
-    !!k.user_id &&
-    k.user_id === ctx.state.me.user_id
-  );
+  return !!k.user_id && k.user_id === ctx.state.me.user_id;
 }
 
 // revokeBody says what revoking this particular key would actually break, which
 // is a different sentence for a key in daily use and one nobody has used.
 // period is the span last_used_at covers, which depends on how the keys were
 // read: My access reads this month.
-export function revokeBody(k, period = "this month") {
+function revokeBody(k, period = "this month") {
   const base =
     `Clients using ${k.name} stop working within a second. ` +
     "You cannot undo this. To replace the key instead, rotate it.";
@@ -429,13 +421,69 @@ export function confirmRevoke(k, done, period) {
 export function statePill(state) {
   if (state === "revoked") return pill("Revoked", "bad");
   if (state === "expired") return pill("Expired", "warn");
+  if (state === "pending") return pill("Not activated", "warn");
   return pill("Active", "good");
 }
 
+// stateOf is the same word store.KeyInfo.State gives on the server.
 export function stateOf(k) {
   if (k.revoked_at) return "revoked";
   if (k.expires_at && new Date(k.expires_at) < new Date()) return "expired";
+  if (k.pending) return "pending";
   return "active";
+}
+
+// isLive is a key that works, or will once it is activated: what revoking
+// takes away.
+export function isLive(k) {
+  const state = stateOf(k);
+  return state === "active" || state === "pending";
+}
+
+// canRotate is whether a key has a secret to replace. A pending key has none
+// yet, so it is activated instead.
+export function canRotate(k) {
+  const state = stateOf(k);
+  return state !== "revoked" && state !== "pending";
+}
+
+// prefixOf is how a key is shown where its secret would be.
+export function prefixOf(k) {
+  return k.pending ? "no secret yet" : k.prefix + "…";
+}
+
+// canActivate reports whether the reader may activate this pending key: the
+// person it is for, or an administrator, who could rotate it anyway. A member
+// who may not rotate their own keys can still activate one: it was left for
+// them.
+export function canActivate(ctx, k) {
+  return isAdmin(ctx) || (!!k.user_id && k.user_id === ctx.state.me.user_id);
+}
+
+// activateKey gives a pending key its secret and shows it, once. button is
+// held disabled meanwhile.
+export async function activateKey(ctx, k, button) {
+  button.disabled = true;
+  try {
+    const created = await api.activateKey(k.id);
+    showSecret(ctx, created, null, "Key activated");
+  } catch (ex) {
+    toast(ex.message, "bad");
+    button.disabled = false;
+  }
+}
+
+// activateButton is the button that activates a pending key.
+export function activateButton(ctx, k, cls = "btn") {
+  return h(
+    "button",
+    {
+      class: cls + " btn-primary",
+      title: "Create this key's secret and see it once",
+      onClick: (e) => activateKey(ctx, k, e.currentTarget),
+    },
+    "Activate",
+  );
 }
 
 // openKey opens this one key's limits with its project's and its organisation's
@@ -750,6 +798,50 @@ function showSecret(ctx, created, again) {
             "Issue another",
           )
         : null,
+      h(
+        "button",
+        {
+          class: "btn btn-primary",
+          onClick: () => {
+            close();
+            ctx.reload();
+          },
+        },
+        "Done",
+      ),
+    ],
+  });
+}
+
+// showPending says what happens to a key left for its holder to activate.
+function showPending(ctx, created, email, again) {
+  modal({
+    title: "Key issued",
+    subtitle: "It has no secret yet, so nobody has seen it.",
+    body: h(
+      "p",
+      { class: "muted" },
+      email ? h("strong", {}, email) : "Its user",
+      " activates it on their Dashboard or ",
+      h("strong", {}, "My access"),
+      ", or with ",
+      h("code", {}, "keera connect claude-code"),
+      ", and sees its secret once. Until then it does not work.",
+    ),
+    actions: (close) => [
+      h(
+        "button",
+        {
+          class: "btn",
+          title: "Same project and expiry",
+          onClick: () => {
+            close();
+            ctx.reload();
+            again();
+          },
+        },
+        "Issue another",
+      ),
       h(
         "button",
         {

@@ -13,7 +13,7 @@
 import { h, icon, icons, pill, isAdmin } from "../ui.js";
 import { addCredit } from "./billing.js";
 import { openConnectClient, usableKeys } from "./connect.js";
-import { confirmRotate, openIssueKey } from "./keys.js";
+import { activateKey, confirmRotate, openIssueKey } from "./keys.js";
 import { newOrg, orgNameOf } from "./orgs.js";
 
 /** firstRunDue reports whether the checklist replaces the dashboard, from the
@@ -158,46 +158,32 @@ export function memberRunDue(ctx, access) {
 
 /** memberRun is the guide for a member: from signing in to a working editor.
  *  An administrator issues the key, so the member's first task is to hold its
- *  secret, which only the administrator has seen. */
+ *  secret: by activating the key, or, for one the administrator activated, by
+ *  rotating it. */
 export function memberRun(ctx, access) {
   const keys = usableKeys(access);
   const key = keys[0];
-  const canRotate = !!ctx.state.me.can_manage_own_keys;
+  const pending = (access.keys || []).find((k) => k.state === "pending");
 
   const steps = [
-    {
-      title: "Get your API key",
-      icon: icons.keys,
-      done: keys.length > 0,
-      body: !key
-        ? "An administrator issues keys. Ask them for one in your name."
-        : keys.length > 1
-          ? "Your keys are ready. Their secrets were shown only to the " +
-            "administrator who issued them. " +
-            (canRotate
-              ? "If you don't have one, rotate it on API keys."
-              : "If you don't have one, ask them to rotate it.")
-          : [
-              "Your key ",
-              h("strong", {}, key.name),
-              " is ready. Its secret was shown only to the administrator " +
-                "who issued it. " +
-                (canRotate
-                  ? "If you don't have it, rotate the key to get a new one."
-                  : "If you don't have it, ask them to rotate the key."),
-            ],
-      // A key that is ready still needs its secret, so the button stays.
-      keepAction: true,
-      action:
-        key && canRotate
-          ? keys.length > 1
-            ? { label: "Go to API keys", run: () => ctx.navigate("/keys") }
-            : {
-                label: "Rotate key",
-                run: () => confirmRotate(ctx, key),
-              }
-          : null,
-    },
+    pending && !key
+      ? {
+          title: "Activate your API key",
+          icon: icons.keys,
+          done: false,
+          body: [
+            "An administrator issued you the key ",
+            h("strong", {}, pending.name),
+            ". Activate it to see its secret, once. For Claude Code, ",
+            h("code", {}, "keera connect claude-code"),
+            " activates it and sets Claude Code up in one step.",
+          ],
+          action: {
+            label: "Activate key",
+            run: (e) => activateKey(ctx, pending, e.currentTarget),
+          },
+        }
+      : getKeyStep(keys, key, ctx),
     {
       title: "Send your first request",
       icon: icons.connect,
@@ -217,6 +203,39 @@ export function memberRun(ctx, access) {
     },
   ];
   return stepList(steps);
+}
+
+/** getKeyStep is the first step of a member's guide when they have no key to
+ *  activate: an active key whose secret they may not have, or none. */
+function getKeyStep(keys, key, ctx) {
+  return {
+    title: "Get your API key",
+    icon: icons.keys,
+    done: keys.length > 0,
+    body: !key
+      ? "An administrator issues keys. Ask them for one in your name."
+      : keys.length > 1
+        ? "Your keys are ready. Their secrets were shown only to the " +
+          "administrator who issued them. If you don't have one, rotate " +
+          "it on API keys."
+        : [
+            "Your key ",
+            h("strong", {}, key.name),
+            " is ready. Its secret was shown only to the administrator " +
+              "who issued it. If you don't have it, rotate the key to get a " +
+              "new one.",
+          ],
+    // A key that is ready still needs its secret, so the button stays.
+    keepAction: true,
+    action: key
+      ? keys.length > 1
+        ? { label: "Go to API keys", run: () => ctx.navigate("/keys") }
+        : {
+            label: "Rotate key",
+            run: () => confirmRotate(ctx, key),
+          }
+      : null,
+  };
 }
 
 /** stepList draws a guide's steps, with the next one to do drawn out. */

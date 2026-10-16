@@ -253,26 +253,33 @@ var commands = []command{
 		aliases: []string{"keys"},
 		summary: "API keys, and who they belong to",
 		prose: "The budget, the rate limit and every line of the audit trail are attributed to " +
-			"the key that made the call. --user attributes it to a person as well, which is " +
-			"the only thing that makes 'keera usage --by user' say anything.\n\n" +
-			"A key is shown once, when it is created. Nothing can print it again.",
+			"the key that made the call. A key also belongs to a person: you, unless --user " +
+			"names someone else or --no-user nobody. That is what makes 'keera usage --by " +
+			"user' say anything, and what puts the key on its holder's own screens.\n\n" +
+			"A key's secret is shown once, when it is activated. Nothing can print it again.",
 		subs: []subcommand{
 			{name: "create", args: "[<name>]", summary: "issue an API key",
-				flags: []string{"project", "user", "name", "expires", "subscription", "json"},
+				flags: []string{"project", "user", "no-user", "pending", "name", "expires",
+					"subscription", "json"},
 				prose: "A name, as the argument or --name, is required. It says what the key is for. The panel, the " +
 					"reports and the audit log show it in place of the key.\n\n" +
-					"--subscription issues a key for Claude Code signed in to a Claude plan. It " +
-					"reaches only subscription models, which that plan pays for. For a member, " +
-					"issue one with --user; their 'keera connect claude-code --subscription' " +
-					"then takes it over for their machine.\n\n" +
-					"A new key lasts 90 days unless --expires says otherwise. --expires 720h " +
-					"gives it another lifetime, --expires 2026-12-31 makes that the last day " +
-					"it works, and --expires never makes one that does not expire.\n\n" +
-					"Only an administrator issues keys. A member renames, rotates and revokes " +
-					"their own.",
+					"A key is activated when it is created, and its secret printed. With " +
+					"--pending it is left for the person it belongs to instead: it has no " +
+					"secret until they activate it, so only they ever see it.\n\n" +
+					"For a member's --subscription key, add --user; their 'keera connect " +
+					"claude-code --subscription' takes it over. See docs/subscriptions.md.\n\n" +
+					"Only an administrator issues keys. A member activates, renames, rotates " +
+					"and revokes their own.",
 				examples: []string{
-					`keera key create --project payments --user ada@example.ch --name "Ada's laptop"`,
+					`keera key create --project payments --user ada@example.ch --name "Ada's laptop" --pending`,
+					`keera key create --no-user --name "CI pipeline"`,
 				}},
+			{name: "activate", args: "<key>", summary: "give a pending key its secret, and print it once",
+				flags: []string{"json"},
+				prose: "For a key issued with --pending. The person it belongs to activates it, " +
+					"and so may an administrator. 'keera connect claude-code' activates one " +
+					"for you when you have one.",
+				examples: []string{`keera key activate "Ada's laptop"`}},
 			{name: "list", summary: "every key", flags: []string{"project", "json"}},
 			{name: "set", aliases: []string{"rename"}, args: "<key>",
 				summary: "rename a key",
