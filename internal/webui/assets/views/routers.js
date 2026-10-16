@@ -168,9 +168,10 @@ export async function routersView(ctx) {
 
 // decides reports whether this router chooses by reading the request. A router
 // saved before modes existed says nothing, and that means the only thing it
-// could have been.
+// could have been. With one destination there is nothing to choose, so the
+// gateway sends every request there without asking.
 function decides(rt) {
-  return modeOf(rt) === "instruction";
+  return modeOf(rt) === "instruction" && (rt.destinations || []).length > 1;
 }
 
 // modeOf is the mode, with the one a router saved before modes existed meant.
@@ -1415,11 +1416,13 @@ function editRouter(ctx, existing, readers) {
     // Each variant says only what this mode does with the list. That a key
     // allowed the router is allowed everywhere it sends is the same sentence
     // in all three, so it is said once, in the subtitle.
+    // One destination is allowed in every mode: clients get a name that
+    // stays the same when the model behind it changes.
     destinationsHint.textContent = reads()
-      ? "At least two."
+      ? "With only one, every request goes there and nothing is asked."
       : bySize()
-        ? "At least two, each with the largest request it should be given."
-        : "At least two, tried until one answers.";
+        ? "Each with the largest request it should be given."
+        : "Tried until one answers. One is enough to give a model a lasting name.";
     if (bySize()) {
       costBanner.textContent =
         "Costs nothing: it counts the request's tokens without reading " +

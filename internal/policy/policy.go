@@ -426,7 +426,8 @@ type Router struct {
 	// Model makes the decision on an instruction router. It should be fast and
 	// run inside the same infrastructure: it runs on every request, and a
 	// hosted one sends the prompt out before deciding whether it may leave.
-	// Only an instruction router has Model and Prompt.
+	// Only an instruction router has Model and Prompt. With one destination it
+	// keeps them but does not ask.
 	Model  string `json:"model"`
 	Prompt string `json:"prompt"`
 	// Destinations are the models this router may choose between, in the order
@@ -515,8 +516,10 @@ func (m RouterMode) Valid() bool { return m == "" || slices.Contains(routerModes
 // instruction router does, and only it has Model, Prompt and Fallback.
 func (m RouterMode) Decides() bool { return m == "" || m == RouterModeInstruction }
 
-// Decides reports whether this router asks a model to choose.
-func (r Router) Decides() bool { return r.Mode.Decides() }
+// Decides reports whether this router asks a model to choose. An instruction
+// router with one destination has nothing to choose, so it sends every request
+// there without asking.
+func (r Router) Decides() bool { return r.Mode.Decides() && len(r.Destinations) > 1 }
 
 // Measures reports whether this mode orders destinations by what this process
 // observed rather than the written order. Such an order is not worth recording

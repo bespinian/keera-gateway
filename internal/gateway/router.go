@@ -193,8 +193,16 @@ func (s *Server) deciderModel(rt policy.Router, texts []string) (policy.Model, s
 // router. See loads.order.
 func (s *Server) chain(rt policy.Router) (routeDecision, *refusal) {
 	d := routeDecision{outcome: store.RouterChose}
-	d.chain = s.offeredDestinations(rt)
+	var dropped []string
+	d.chain, dropped = s.sortDestinations(rt)
 	s.orderByLoad(rt, d.chain)
+	if len(d.chain) == 0 && rt.Mode.Decides() && !rt.Refuses() {
+		// An instruction router with one destination asks no model. Its
+		// fallback can only be that destination, so this refuses the request,
+		// with the reason the destination was dropped.
+		d.why = "its destination " + strings.Join(dropped, "; ")
+		return s.routerFallback(rt, d)
+	}
 	if len(d.chain) == 0 {
 		// Nowhere to try: none of the destinations exists, is enabled, is a
 		// chat model and has a backend.
@@ -254,8 +262,8 @@ func readerProblem(m policy.Model, found, choice bool) string {
 
 // settle records what a trying router's attempts came to, once they are over.
 //
-// The first destination answering is 'chose', a later one is 'fallback', and
-// none is 'error'; then the client gets the last destination's own failure.
+// The first destination answering is 'chose', a later one or the router's
+// fallback is 'fallback', and none is 'error'; then the client gets the last destination's own failure.
 // The failed attempts' time is added to the decision's, since that is what the
 // router added.
 func (d *routeDecision) settle(f forwarded) {
@@ -264,7 +272,7 @@ func (d *routeDecision) settle(f forwarded) {
 	switch {
 	case f.err != nil, f.resp != nil && f.resp.StatusCode >= 500:
 		d.outcome = store.RouterError
-	case f.at > 0:
+	case f.at > 0, d.outcome == store.RouterFellBack:
 		d.outcome = store.RouterFellBack
 	default:
 		d.outcome = store.RouterChose

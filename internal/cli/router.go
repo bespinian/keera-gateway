@@ -152,14 +152,14 @@ func (r *routerRun) apply(rt *policy.Router) error {
 	}
 	// A router that changes mode keeps nothing the new mode does not use: the
 	// endpoint refuses, say, a fallback router that carries a deciding model.
-	if !rt.Decides() {
+	if !rt.Mode.Decides() {
 		rt.Model, rt.Prompt, rt.Fallback = "", "", ""
 	}
 	if !rt.Sizes() {
 		rt.Ceilings = nil
 	}
 	if r.prompt != "" {
-		if !rt.Decides() {
+		if !rt.Mode.Decides() {
 			return fmt.Errorf("--prompt is for a router that decides with a model; a %s "+
 				"router is given none, and what orders its destinations is %s",
 				rt.Mode, cliOrdersBy(rt.Mode))

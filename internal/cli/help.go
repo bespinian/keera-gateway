@@ -515,7 +515,8 @@ var commands = []command{
 		summary: "which model answers a request",
 		prose: "A router chooses which model answers a request that names it. The modes are " +
 			"instruction (the default, a small model reads the request), size, fallback, " +
-			"latency and least-busy. See docs/routers.md.",
+			"latency and least-busy. One destination is enough: it gives a model a name " +
+			"that stays when the model behind it changes. See docs/routers.md.",
 		subs: []subcommand{
 			{name: "list", summary: "this organisation's routers", flags: []string{"json"}},
 			{name: "add", args: "<alias>", summary: "add a router",

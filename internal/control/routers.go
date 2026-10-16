@@ -131,7 +131,9 @@ func (s *Server) putRouter(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	if !s.checkRouterAlias(w, r, orgID, rt.Alias) {
 		return
 	}
-	if rt.Decides() && !s.checkReaderModel(w, r, orgID, rt.Model, routerReader, true) {
+	// Checked on a one-destination router too, which decides as soon as it
+	// has a second.
+	if rt.Mode.Decides() && !s.checkReaderModel(w, r, orgID, rt.Model, routerReader, true) {
 		return
 	}
 	if rt.Sizes() && !checkCeilings(w, rt) {
@@ -161,21 +163,16 @@ func routerProblem(rt policy.Router) string {
 		return "'mode' must be instruction, size, fallback, latency or least-busy, not '" +
 			string(rt.Mode) + "'"
 	case len(rt.Ceilings) > 0 && !rt.Sizes():
-		return "'ceilings' is set, and this is a " + string(rt.Mode) + " router: what orders its " +
-			"destinations is " + ordersBy(rt.Mode) + ", and nothing there reads the size of " +
-			"a request. Use 'mode': 'size' for a router that does"
+		return "'ceilings' only works on a router with 'mode': 'size'"
 	}
 	if msg := leftoverProblem(rt); msg != "" {
 		return msg
 	}
 	switch {
-	case rt.Decides() && rt.Prompt == "":
-		return "'prompt' is required; it is the instruction the deciding model is given, and a " +
-			"router without one would be shown a list of models on every request with " +
-			"nothing to choose between them by"
+	case rt.Mode.Decides() && rt.Prompt == "":
+		return "'prompt' is required: it tells the deciding model how to choose a destination"
 	case len(rt.Prompt) > maxRouterPromptBytes:
-		return fmt.Sprintf("'prompt' is %d bytes; the limit is %d, because this text is sent to "+
-			"the deciding model on every request that names this router",
+		return fmt.Sprintf("'prompt' is %d bytes; the limit is %d, since it is sent with every request",
 			len(rt.Prompt), maxRouterPromptBytes)
 	}
 	return destinationCountProblem(rt)
@@ -185,52 +182,39 @@ func routerProblem(rt policy.Router) string {
 // nothing. None of them would do anything, but a reader would take them as the
 // reason its traffic goes where it goes.
 func leftoverProblem(rt policy.Router) string {
-	if rt.Decides() {
+	if rt.Mode.Decides() {
 		return ""
 	}
 	mode := "a " + string(rt.Mode) + " router"
 	switch {
 	case rt.Model != "":
-		return "'model' is set, and this is " + mode + ": " + readsNothing(rt.Mode) + ", so there " +
-			"is no deciding model. Its destinations are tried until one of them " +
-			"answers, and what orders them is " + ordersBy(rt.Mode)
+		return "'model' must be empty: " + mode + " has no deciding model"
 	case rt.Prompt != "":
-		return "'prompt' is set, and this is " + mode + ": " + readsNothing(rt.Mode) + ", so there " +
-			"is nothing an instruction would be given to"
+		return "'prompt' must be empty: " + mode + " has no deciding model to give it to"
 	case rt.Fallback != "":
-		return "'fallback' is set, and this is " + mode + ": its whole list is the " +
-			"fallback, since the next destination is what happens when one fails. " +
-			"Put '" + rt.Fallback + "' in 'destinations' instead"
+		return "'fallback' must be empty: " + mode + " already tries its destinations in turn, " +
+			"so put '" + rt.Fallback + "' in 'destinations'"
 	}
 	return ""
 }
 
-// destinationCountProblem refuses a router with too few or too many
-// destinations, in the words that fit its mode.
+// destinationCountProblem refuses a router with no destinations or too many,
+// in the words that fit its mode. One is enough: it gives clients a name that
+// stays the same while the model behind it changes.
 func destinationCountProblem(rt policy.Router) string {
 	n := len(rt.Destinations)
 	switch {
-	case n < 2 && rt.Decides():
-		return "'destinations' needs at least two models; a router with one has no decision to " +
-			"make and would charge a generation per request to reach a conclusion that " +
-			"was already written down"
-	case n < 2 && rt.Sizes():
-		return "'destinations' needs at least two models; a size router with one places every " +
-			"request on it whatever its size, which is that model's own alias with a " +
-			"step in front of it"
-	case n < 2:
-		return "'destinations' needs at least two models; a " + string(rt.Mode) + " router with one " +
-			"has nothing to choose between and nothing to fall back to, and is a slower " +
-			"way of writing that model's own alias in the client"
+	case n == 0:
+		return "'destinations' needs at least one model to send requests to"
 	case n > policy.MaxDestinations && rt.Decides():
-		return fmt.Sprintf("'destinations' names %d models; the limit is %d. The list is put to "+
-			"a small model as a choice to make in one word, and a list longer than this "+
-			"is one it answers by naming whichever end of it it read last",
+		// A small model asked to pick one word from a longer list tends to
+		// name whichever end of it it read last.
+		return fmt.Sprintf("'destinations' names %d models; the limit is %d, "+
+			"since a longer list is too much for the deciding model to choose from",
 			n, policy.MaxDestinations)
 	case n > policy.MaxDestinations:
-		return fmt.Sprintf("'destinations' names %d models; the limit is %d. Each one this "+
-			"router tries is a wait the client is already spending, so a chain this long "+
-			"is a request that times out rather than one that finds an answer",
+		return fmt.Sprintf("'destinations' names %d models; the limit is %d, "+
+			"since each one tried adds to the client's wait",
 			n, policy.MaxDestinations)
 	}
 	return ""

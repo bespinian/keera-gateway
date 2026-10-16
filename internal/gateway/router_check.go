@@ -198,6 +198,11 @@ func routerCheckProblem(rt policy.Router, destinations []string, m policy.Model,
 // itself a measurement, so two checks a minute apart may differ.
 func (s *Server) checkChain(ctx context.Context, rt policy.Router) RouterProbe {
 	p := RouterProbe{Alias: rt.Alias, Mode: rt.Mode}
+	if rt.Mode.Decides() {
+		// An instruction router with one destination tries it like a fallback
+		// router would, and Mode says which kind of check this is.
+		p.Mode = policy.RouterModeFallback
+	}
 	p.Destinations, p.Dropped = s.sortDestinations(rt)
 	// Ranked once, so the whole check describes one ranking.
 	s.orderByLoad(rt, p.Destinations)

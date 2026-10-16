@@ -15,16 +15,8 @@ import (
 // It is asked before anything is spent, so a router that might pick such a
 // model counts even if it would pick another.
 func (s *Server) onKey(c *call) bool {
-	return len(s.keyModels(c)) > 0 || s.filtersOnKey(c.res.Key.OrgID, c.res.Filters)
-}
-
-// keyModels is the models on the deployment's key a request may be answered
-// by, or decided with.
-func (s *Server) keyModels(c *call) []policy.Model {
-	if m, ok := s.keyDecider(c); ok {
-		return append(s.keyAnswerers(c), m)
-	}
-	return s.keyAnswerers(c)
+	_, decider := s.keyDecider(c)
+	return decider || len(s.keyAnswerers(c)) > 0 || s.filtersOnKey(c.res.Key.OrgID, c.res.Filters)
 }
 
 // keyAnswerers is the models on the deployment's key a request may be
@@ -46,9 +38,9 @@ func (s *Server) keyAnswerers(c *call) []policy.Model {
 }
 
 // keyDecider is the model a request's router decides with, when it is on the
-// deployment's key.
+// deployment's key. A router that asks no model has none.
 func (s *Server) keyDecider(c *call) (policy.Model, bool) {
-	if !c.routed {
+	if !c.routed || !c.router.Decides() {
 		return policy.Model{}, false
 	}
 	return s.keyModel(c.res.Key.OrgID, c.router.Model)

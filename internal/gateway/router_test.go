@@ -244,6 +244,56 @@ func TestRouterWillNotSendToAModelItWasNotOffered(t *testing.T) {
 
 // A prompt arguing for a destination is data, not an instruction - and the
 // clean-up that reads a name out of a sentence must not be the way in.
+// An instruction router with one destination has nothing to choose, so its
+// model is never asked and every request goes straight there.
+func TestRouterWithOneDestinationDoesNotDecide(t *testing.T) {
+	rt := autoRouter()
+	rt.Destinations, rt.Fallback = []string{"keera-large"}, ""
+	h := routerHarness(t, picks("keera-small"), rt, nil)
+
+	resp := h.post(t, "/v1/chat/completions",
+		`{"model":"auto","messages":[{"role":"user","content":"plan a migration"}]}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if forwarded := string(<-h.upstreamBodies); !strings.Contains(forwarded, "large-served") {
+		t.Errorf("the first request upstream was not to the destination: %s", forwarded)
+	}
+	if n := len(h.upstreamBodies); n != 0 {
+		t.Errorf("%d further requests were sent; the deciding model should not be asked", n)
+	}
+	if ev := h.sink.last(t); ev.Alias != "keera-large" || ev.RouterOutcome != store.RouterChose {
+		t.Errorf("alias/outcome = %q/%q, want keera-large/chose", ev.Alias, ev.RouterOutcome)
+	}
+}
+
+// Asking no model does not take away the fallback: when the one destination
+// cannot answer, the request goes there, as it would after a failed decision.
+func TestRouterWithOneDestinationFallsBackWhenItCannotAnswer(t *testing.T) {
+	rt := autoRouter()
+	rt.Destinations = []string{"keera-large"}
+	h := routerHarness(t, picks("keera-large"), rt, nil)
+	large := h.src.models["keera-large"]
+	large.Enabled = false
+	h.src.models["keera-large"] = large
+
+	resp := h.post(t, "/v1/chat/completions",
+		`{"model":"auto","messages":[{"role":"user","content":"plan a migration"}]}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 by way of the fallback", resp.StatusCode)
+	}
+	if forwarded := string(<-h.upstreamBodies); !strings.Contains(forwarded, "small-served") {
+		t.Errorf("the request was not sent to the fallback: %s", forwarded)
+	}
+	ev := h.sink.last(t)
+	if ev.Alias != "keera-small" || ev.RouterOutcome != store.RouterFellBack {
+		t.Errorf("alias/outcome = %q/%q, want keera-small/fallback", ev.Alias, ev.RouterOutcome)
+	}
+	if !strings.Contains(ev.Error, "keera-large is disabled") {
+		t.Errorf("error = %q, want it to say why the destination was passed over", ev.Error)
+	}
+}
+
 func TestRouterIgnoresTwoDestinationsNamedAtOnce(t *testing.T) {
 	h := routerHarness(t, picks("either keera-small or keera-large would do"), autoRouter(), nil)
 

@@ -103,6 +103,47 @@ func TestPutRouterWritesAWholeOne(t *testing.T) {
 	}
 }
 
+// A router with one destination is a name for that model which stays the same
+// when the model behind it changes. Every mode takes one.
+func TestPutRouterTakesOneDestination(t *testing.T) {
+	st, ctx := routerStore(t)
+	srv := routerServer(ctx, t, st)
+
+	modes := append([]policy.RouterMode{policy.RouterModeInstruction, policy.RouterModeSize},
+		chainModes...)
+	for _, mode := range modes {
+		t.Run(string(mode), func(t *testing.T) {
+			body := map[string]any{"mode": string(mode), "destinations": []string{"keera-small"}}
+			if mode.Decides() {
+				body["model"], body["prompt"] = "keera-picker", "Choose one."
+			}
+			if code, out := putTo(t, srv, "/v1/routers/coding", body); code != http.StatusOK {
+				t.Fatalf("status = %d, want 200: %s", code, out)
+			}
+			saved, err := st.Router(ctx, "org_1", "coding")
+			if err != nil {
+				t.Fatalf("Router: %v", err)
+			}
+			if saved.Decides() {
+				t.Errorf("a router with one destination decides: %+v", saved)
+			}
+		})
+	}
+	t.Run("no destination", func(t *testing.T) {
+		body := map[string]any{"mode": "fallback", "destinations": []string{}}
+		if code, out := putTo(t, srv, "/v1/routers/coding", body); code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400: %s", code, out)
+		}
+	})
+	t.Run("a deciding model that does not exist", func(t *testing.T) {
+		body := map[string]any{"destinations": []string{"keera-small"}, "model": "keera-huge",
+			"prompt": "Choose one."}
+		if code, out := putTo(t, srv, "/v1/routers/coding", body); code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400: %s", code, out)
+		}
+	})
+}
+
 func TestPutRouterRefusesWhatWouldLookLikeItWorked(t *testing.T) {
 	st, ctx := routerStore(t)
 	srv := routerServer(ctx, t, st)
@@ -112,12 +153,6 @@ func TestPutRouterRefusesWhatWouldLookLikeItWorked(t *testing.T) {
 		why  string
 		edit func(map[string]any)
 	}{
-		{
-			"one destination",
-			"a router with nothing to choose between charges a generation per request " +
-				"to reach a conclusion that was already written down",
-			func(b map[string]any) { b["destinations"] = []string{"keera-small"} },
-		},
 		{
 			"a destination that is not in the catalogue",
 			"it would be dropped from the choice, so the router would silently be " +
@@ -317,7 +352,6 @@ func TestPutRouterRefusesARouterThatTriesInTurnAndDecidesSomething(t *testing.T)
 		{"a deciding model", func(b map[string]any) { b["model"] = "keera-picker" }},
 		{"an instruction", func(b map[string]any) { b["prompt"] = "choose wisely" }},
 		{"a fallback destination", func(b map[string]any) { b["fallback"] = "keera-small" }},
-		{"one destination", func(b map[string]any) { b["destinations"] = []string{"keera-small"} }},
 		{"a destination that cannot answer a chat request", func(b map[string]any) {
 			b["destinations"] = []string{"keera-small", "keera-embed"}
 		}},
@@ -448,14 +482,6 @@ func TestPutRouterRefusesASizeRouterThatCouldNotPlaceEveryRequest(t *testing.T) 
 			"a fallback destination",
 			"the next destination up is the fallback, as it is on every mode that tries",
 			func(b map[string]any) { b["fallback"] = "keera-small" },
-		},
-		{
-			"one destination",
-			"it would place every request on that model whatever its size",
-			func(b map[string]any) {
-				b["destinations"] = []string{"keera-small"}
-				b["ceilings"] = map[string]int{}
-			},
 		},
 	}
 	for _, tc := range tests {

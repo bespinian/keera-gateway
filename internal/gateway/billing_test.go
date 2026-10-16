@@ -123,6 +123,22 @@ func TestCreditDoesNotStopTheOrganisationsOwnModels(t *testing.T) {
 	}
 }
 
+// A router with one destination never asks its model, so that model being on
+// the deployment's key costs nothing and needs no credit.
+func TestCreditDoesNotStopARouterWhoseModelIsNeverAsked(t *testing.T) {
+	rt := autoRouter()
+	rt.Destinations = []string{"keera-large"}
+	h := routerHarness(t, picks("keera-large"), rt, nil)
+	onPlatformKey(h, "keera-picker")
+	h.budgets.creditErr = &policy.ErrNoCredit{}
+
+	resp := h.post(t, "/v1/chat/completions",
+		`{"model":"auto","messages":[{"role":"user","content":"plan a migration"}]}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
 // waitFor polls until done holds, and fails the test if it never does.
 func waitFor(t *testing.T, what string, done func() bool) {
 	t.Helper()

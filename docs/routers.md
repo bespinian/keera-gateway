@@ -17,6 +17,12 @@ There are five modes:
 Only `instruction` reads what the request says. The other four put the
 destinations in an order and try them until one answers.
 
+A router may have a single destination. That gives clients a name that stays
+the same when the model behind it changes. An `instruction` router with one
+destination sends every request there without asking its model. Its fallback
+can only be that same destination, so when it cannot answer, the request is
+refused with a 503.
+
 Most of this page is about `instruction` routers. The other modes have their own
 sections - [routing by size](#routing-by-size),
 [the fallback router](#the-fallback-router) and
@@ -543,27 +549,19 @@ the client gets the gateway's 502 `upstream_unavailable` instead.
 
 ## Who owns what
 
-A router belongs to one organisation, and its administrators write it. It can
-send to the organisation's models: 2 to 16 of them, in every mode.
-Two organisations can each have a router with the same name; they are different
-routers.
+A router belongs to one organisation, and can send to 1 to 16 of its models, in
+every mode. Who may write and read it, and what its alias may be, is the same as
+for a filter; see
+[Models that filters and routers run on](gateway.md#models-that-filters-and-routers-run-on).
 
 Router aliases share one namespace with model aliases, because clients use both
 in the same field, so the two cannot share an alias. Creating a router over the
 alias of one of the organisation's models is refused, and so is adding a model
 under a router's alias.
 
-The alias is the router's identity: lowercase letters, digits and interior
-hyphens. It cannot change. To rename, create a new router and move the clients.
-
 Deleting a router that an allow-list still names is refused with a 409
 `router_in_use`, and the refusal lists the scopes. Take it off those
 allow-lists first.
-
-Members cannot create or change routers, but they can read them, instruction
-included. The Routers screen, each router's screen, `GET /control/v1/routers`
-and `GET /control/v1/routers/{alias}/report` are open to anyone signed in to the
-organisation.
 
 ## Where a router is not
 
