@@ -3,8 +3,10 @@ package gateway
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"net/http"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -607,7 +609,13 @@ type anthropicUsageIO struct {
 // upstream error into a Messages error.
 func (anthropicShape) encode(raw []byte, alias string, status int) ([]byte, int) {
 	if status >= 300 {
-		return anthropicErrorBody(status, upstreamErrorMessage(raw, status)), status
+		msg := upstreamErrorMessage(raw, status)
+		if status == http.StatusBadRequest {
+			if overflow := contextOverflow(raw); overflow != "" {
+				msg = overflow
+			}
+		}
+		return anthropicErrorBody(status, msg), status
 	}
 	var in oaiCompletion
 	if err := json.Unmarshal(raw, &in); err != nil || len(in.Choices) == 0 {
@@ -769,6 +777,70 @@ func upstreamText(raw []byte) string {
 		return text
 	}
 	return ""
+}
+
+// A backend's refusal of a request too long for its context, in its own words.
+var (
+	// vLLM, when the prompt fits but not with max_tokens: "(32000 > 32768 - 18000)".
+	vllmOutputTooLong = regexp.MustCompile(`\((\d+) > (\d+) - (\d+)\)`)
+	// Older vLLM, either way.
+	vllmRequested = regexp.MustCompile(`maximum context length is (\d+) tokens.*` +
+		`\((\d+) in the messages, (\d+) in the completion\)`)
+	// vLLM, when the prompt alone does not fit.
+	vllmPromptTooLong = regexp.MustCompile(`maximum context length is (\d+) tokens\. ` +
+		`However, your request has (\d+) input tokens`)
+)
+
+// contextOverflow rewrites a backend's refusal of a request too long for its
+// context into the Messages API's words, or returns "" for any other error.
+//
+// Claude Code compacts the conversation when it reads "prompt is too long",
+// and lowers max_tokens and tries again when it reads the other sentence.
+// vLLM and llama.cpp say neither, and without this the session just stops.
+func contextOverflow(raw []byte) string {
+	var envelope struct {
+		Error struct {
+			Type string `json:"type"`
+			Code any    `json:"code"`
+			// llama.cpp names the numbers.
+			PromptTokens int `json:"n_prompt_tokens"`
+			Context      int `json:"n_ctx"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(raw, &envelope)
+	e := envelope.Error
+	msg := upstreamText(raw)
+	num := func(s string) int { n, _ := strconv.Atoi(s); return n }
+
+	if m := vllmOutputTooLong.FindStringSubmatch(msg); m != nil {
+		return overflowMessage(num(m[3]), num(m[1]), num(m[2]))
+	}
+	if m := vllmRequested.FindStringSubmatch(msg); m != nil {
+		return overflowMessage(num(m[2]), num(m[3]), num(m[1]))
+	}
+	if m := vllmPromptTooLong.FindStringSubmatch(msg); m != nil {
+		return overflowMessage(num(m[2]), 0, num(m[1]))
+	}
+	if e.Type == "exceed_context_size_error" && e.PromptTokens > 0 && e.Context > 0 {
+		return overflowMessage(e.PromptTokens, 0, e.Context)
+	}
+	// Without numbers the words alone still tell the client what to do.
+	if e.Type == "exceed_context_size_error" || e.Code == "context_length_exceeded" ||
+		strings.Contains(msg, "exceeds the available context size") {
+		return "prompt is too long: " + msg
+	}
+	return ""
+}
+
+// overflowMessage says, as the Messages API does, that input tokens and
+// maxTokens of output do not fit in window. maxTokens is 0 when the input
+// alone is too long.
+func overflowMessage(input, maxTokens, window int) string {
+	if maxTokens <= 0 || input >= window {
+		return fmt.Sprintf("prompt is too long: %d tokens > %d maximum", input, window)
+	}
+	return fmt.Sprintf("input length and `max_tokens` exceed context limit: %d + %d > %d, "+
+		"decrease input length or `max_tokens` and try again", input, maxTokens, window)
 }
 
 // writeError renders a refusal the gateway generated itself. The OpenAI type

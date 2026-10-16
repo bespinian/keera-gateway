@@ -720,6 +720,29 @@ func TestUpstreamErrorsArePassedThroughUnchanged(t *testing.T) {
 	}
 }
 
+func TestAProvidersRetryHeadersReachTheClient(t *testing.T) {
+	// A client told 429 or 529 without them can only guess when to try again,
+	// and every organisation on a shared key guessing at once makes it worse.
+	backend := func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "7")
+		w.Header().Set("X-Should-Retry", "true")
+		w.WriteHeader(529)
+		_, _ = io.WriteString(w, `{"error":{"message":"overloaded"}}`)
+	}
+	h := newHarness(t, backend, nil, nil)
+	resp := h.post(t, "/v1/chat/completions", `{"model":"keera-code","messages":[]}`)
+	if resp.StatusCode != 529 {
+		t.Fatalf("status = %d, want the upstream's 529", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Retry-After"); got != "7" {
+		t.Errorf("Retry-After = %q, want the provider's 7", got)
+	}
+	if got := resp.Header.Get("X-Should-Retry"); got != "true" {
+		t.Errorf("X-Should-Retry = %q, want the provider's true", got)
+	}
+}
+
 func TestOutputCeilingIsAppliedToTheForwardedRequest(t *testing.T) {
 	capped := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"},
 		&policy.Limits{MaxOutputTokens: func() *int { n := 256; return &n }()}, nil, nil)

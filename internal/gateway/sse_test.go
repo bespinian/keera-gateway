@@ -26,6 +26,8 @@ func sseStream(chunks ...string) string {
 const (
 	deltaChunk = `{"id":"1","choices":[{"index":0,"delta":{"content":"x"}}]}`
 	usageChunk = `{"id":"1","choices":[],"usage":{"prompt_tokens":100,"completion_tokens":7,"total_tokens":107}}`
+	// stopChunk ends a whole answer. A translated stream without one failed.
+	stopChunk = `{"id":"1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`
 )
 
 func TestPipeSSEDropsTheUsageChunkTheGatewayAskedFor(t *testing.T) {
@@ -430,7 +432,7 @@ func TestAPingReachesTheClientWhileTheUpstreamWaits(t *testing.T) {
 	w := &signalFlusher{ResponseWriter: httptest.NewRecorder(), flushed: make(chan struct{})}
 	stalled := stallUntil(w.flushed)
 	f := &flushBeforeRead{
-		src:     io.MultiReader(stalled, strings.NewReader(sseStream(deltaChunk))),
+		src:     io.MultiReader(stalled, strings.NewReader(sseStream(deltaChunk, stopChunk))),
 		dst:     w,
 		flusher: http.NewResponseController(w),
 	}

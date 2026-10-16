@@ -132,11 +132,11 @@ const planHeaderPrefix = "Anthropic-Ratelimit-Unified-"
 
 // passPlanHeaders hands Anthropic's plan headers to the client. Claude Code
 // reads them to show the plan's limits and to tell a plan limit from a passing
-// throttle, and retries on the two retry headers.
+// throttle. The retry headers are passed for every model; see
+// copyResponseHeaders.
 func passPlanHeaders(w http.ResponseWriter, upstream http.Header) {
 	for name, values := range upstream {
-		if strings.HasPrefix(name, planHeaderPrefix) || name == "Retry-After" ||
-			name == "X-Should-Retry" {
+		if strings.HasPrefix(name, planHeaderPrefix) {
 			w.Header()[name] = values
 		}
 	}

@@ -14,8 +14,12 @@ import (
 type eventStream interface {
 	// chunk folds one upstream chunk into the stream.
 	chunk(payload []byte) error
-	// finish closes the stream, after the last chunk or a failure.
-	finish() error
+	// finish closes the stream, after the last chunk or a failure. cut is why
+	// the upstream stream ended without a whole answer, or nil.
+	finish(cut error) error
+	// failure is why a stream that was read to its end is still not a whole
+	// answer, or nil.
+	failure() error
 	counts() (usage *tokenUsage, deltas int, firstAt time.Time)
 }
 
@@ -33,11 +37,13 @@ func pipeEvents(dst io.Writer, flush func(), src io.Reader, limit int64, every t
 	st := newStream(out.write)
 
 	readErr := scanSSE(src, limit, st.chunk)
+	if readErr == nil {
+		readErr = st.failure()
+	}
 	// The stream is closed even after an upstream failure: a client waiting
-	// for its end would hang, which is worse than a short turn. A client that
-	// is gone is sent nothing more.
+	// for its end would hang. A client that is gone is sent nothing more.
 	if !out.failed() {
-		if err := st.finish(); err != nil && readErr == nil {
+		if err := st.finish(readErr); err != nil && readErr == nil {
 			readErr = err
 		}
 	}
@@ -53,6 +59,25 @@ func pipeEvents(dst io.Writer, flush func(), src io.Reader, limit int64, every t
 
 func (c *chatChunks) counts() (*tokenUsage, int, time.Time) {
 	return c.usage, c.deltas, c.firstAt
+}
+
+// streamFailure is an upstream stream that ended without a whole answer. Its
+// message can be shown to the client.
+type streamFailure struct{ msg string }
+
+func (f streamFailure) Error() string { return f.msg }
+
+// failure reports an error the upstream sent in place of a chunk, and a stream
+// that stopped before it said why it stopped. Every backend ends a whole
+// answer with a finish reason.
+func (c *chatChunks) failure() error {
+	switch {
+	case c.upstreamErr != "":
+		return streamFailure{"the model failed while answering: " + c.upstreamErr}
+	case c.finishReason == "":
+		return streamFailure{"the model's answer stopped before it was finished"}
+	}
+	return nil
 }
 
 // frame is one server-sent event.

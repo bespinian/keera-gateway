@@ -433,6 +433,8 @@ type oaiStreamChunk struct {
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *tokenUsage `json:"usage"`
+	// Error is what vLLM sends in place of a chunk when generation fails.
+	Error json.RawMessage `json:"error"`
 }
 
 // oaiToolCallDelta is one fragment of a streamed tool call.
@@ -456,6 +458,8 @@ type chatChunks struct {
 	// firstAt is when the first token arrived. A translation drops reasoning,
 	// so this can be earlier than the first event the client is sent.
 	firstAt time.Time
+	// upstreamErr is the message of an error the upstream sent mid-stream.
+	upstreamErr string
 }
 
 // fold reads one chunk: it keeps the usage record and the finish reason, and
@@ -474,6 +478,10 @@ func (c *chatChunks) fold(payload []byte, text func(string) error,
 	}
 	if chunk.Usage != nil {
 		c.usage = chunk.Usage
+	}
+	if len(chunk.Error) > 0 && !bytes.Equal(chunk.Error, []byte("null")) {
+		c.upstreamErr = upstreamText(payload)
+		return nil
 	}
 	if len(chunk.Choices) == 0 {
 		// The usage-only chunk. Its numbers go into the closing event.

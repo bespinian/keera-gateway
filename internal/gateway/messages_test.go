@@ -478,8 +478,8 @@ func TestEncodeTranslatesAnUpstreamError(t *testing.T) {
 	// refusals by matching on it, and rewriting it would break that recovery
 	// while keeping the status that looks like it should have worked.
 	body, status := anthropicShape{}.encode(
-		[]byte(`{"error":{"message":"This model's maximum context length is 8192 tokens",`+
-			`"type":"invalid_request_error","code":"context_length_exceeded"}}`),
+		[]byte(`{"error":{"message":"temperature must be at most 2",`+
+			`"type":"invalid_request_error","code":"invalid_value"}}`),
 		"keera-code", 400)
 	if status != 400 {
 		t.Fatalf("status = %d, want 400", status)
@@ -498,8 +498,59 @@ func TestEncodeTranslatesAnUpstreamError(t *testing.T) {
 	if out.Type != "error" || out.Error.Type != "invalid_request_error" {
 		t.Errorf("envelope = %#v, want a Messages error envelope", out)
 	}
-	if !strings.Contains(out.Error.Message, "maximum context length is 8192") {
+	if out.Error.Message != "temperature must be at most 2" {
 		t.Errorf("message = %q, want the upstream wording unchanged", out.Error.Message)
+	}
+}
+
+func TestEncodeWordsAContextOverflowAsTheMessagesAPIDoes(t *testing.T) {
+	// Claude Code compacts on "prompt is too long" and lowers max_tokens on
+	// the other sentence. A backend's own words for the same thing stop the
+	// session instead.
+	for _, tc := range []struct{ name, upstream, want string }{
+		{"vllm, prompt alone",
+			`{"error":{"message":"This model's maximum context length is 32768 tokens. ` +
+				`However, your request has 40000 input tokens. Please reduce the length of ` +
+				`the input messages.","type":"BadRequestError","code":400}}`,
+			"prompt is too long: 40000 tokens > 32768 maximum"},
+		{"vllm, with max_tokens",
+			`{"error":{"message":"'max_tokens' or 'max_completion_tokens' is too large: ` +
+				`32000. This model's maximum context length is 32768 tokens and your request ` +
+				`has 18000 input tokens (32000 > 32768 - 18000).","type":"BadRequestError"}}`,
+			"input length and `max_tokens` exceed context limit: 18000 + 32000 > 32768, " +
+				"decrease input length or `max_tokens` and try again"},
+		{"older vllm",
+			`{"message":"This model's maximum context length is 16384 tokens. However, you ` +
+				`requested 20000 tokens (4000 in the messages, 16000 in the completion)."}`,
+			"input length and `max_tokens` exceed context limit: 4000 + 16000 > 16384, " +
+				"decrease input length or `max_tokens` and try again"},
+		{"llama.cpp",
+			`{"error":{"code":400,"message":"the request exceeds the available context size, ` +
+				`try increasing it","type":"exceed_context_size_error","n_prompt_tokens":20000,` +
+				`"n_ctx":16384}}`,
+			"prompt is too long: 20000 tokens > 16384 maximum"},
+		{"older llama.cpp",
+			`{"error":{"code":400,"message":"the request exceeds the available context size. ` +
+				`try increasing the context size or enable context shift"}}`,
+			"prompt is too long: the request exceeds the available context size. " +
+				"try increasing the context size or enable context shift"},
+	} {
+		body, status := anthropicShape{}.encode([]byte(tc.upstream), "keera-code", 400)
+		var out struct {
+			Error struct {
+				Type    string `json:"type"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if status != 400 || out.Error.Type != "invalid_request_error" {
+			t.Errorf("%s: %d %s, want 400 invalid_request_error", tc.name, status, out.Error.Type)
+		}
+		if out.Error.Message != tc.want {
+			t.Errorf("%s: message = %q\nwant %q", tc.name, out.Error.Message, tc.want)
+		}
 	}
 }
 

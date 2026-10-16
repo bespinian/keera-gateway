@@ -259,9 +259,17 @@ func undelivered(err error) bool {
 
 // copyResponseHeaders forwards what the client needs and adds what an SSE
 // stream needs to survive an ingress.
+//
+// The retry headers are passed from every upstream. Without them, a client
+// told 429 or 529 can only guess when to try again.
 func copyResponseHeaders(w http.ResponseWriter, resp *http.Response, alias string, streaming bool) {
 	if ct := resp.Header.Get("Content-Type"); ct != "" {
 		w.Header().Set("Content-Type", forwardableContentType(ct))
+	}
+	for _, name := range []string{"Retry-After", "X-Should-Retry"} {
+		if v := resp.Header.Values(name); len(v) > 0 {
+			w.Header()[name] = v
+		}
 	}
 	w.Header().Set("X-Keera-Model", alias)
 	if streaming {

@@ -136,7 +136,7 @@ func TestMessagesStreamNeverForwardsTheUsageChunk(t *testing.T) {
 	// belong in message_delta, and a stray chunk with an empty choices array
 	// is not an event the protocol has.
 	events := pipeMessages(t,
-		`{"choices":[{"delta":{"content":"x"}}]}`,
+		`{"choices":[{"delta":{"content":"x"}}]}`, stopChunk,
 		`{"choices":[],"usage":{"prompt_tokens":4,"completion_tokens":1,"total_tokens":5}}`,
 	)
 	for _, e := range events {
@@ -239,27 +239,49 @@ func TestMessagesStreamSeparatesParallelToolCalls(t *testing.T) {
 	}
 }
 
-func TestMessagesStreamClosesATruncatedStream(t *testing.T) {
-	// The inference plane died mid-generation. A client left waiting for
-	// message_stop hangs on a turn that is already over, which is worse than a
-	// turn that ended short.
-	var buf bytes.Buffer
-	partial := "data: {\"choices\":[{\"delta\":{\"content\":\"half\"}}]}\n\n"
-	if _, err := (anthropicShape{}).pipe(&buf, func() {},
-		strings.NewReader(partial), "keera-code", true, DefaultMaxResponseBytes); err != nil {
-		t.Fatalf("pipe: %v", err)
-	}
-	events := readEvents(t, buf.String())
-	last := events[len(events)-1]
-	if last.name != "message_stop" {
-		t.Errorf("the stream ends with %q, want message_stop", last.name)
+func TestMessagesStreamEndsAFailedStreamWithAnError(t *testing.T) {
+	// The inference plane died mid-generation, or said so in the stream. Closed
+	// with message_stop, the turn would read as finished, with a tool call cut
+	// short in it. An error event ends the stream too, so the client does not
+	// hang, and tells it to try again.
+	for name, upstream := range map[string]string{
+		"cut off": "data: " + `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1",` +
+			`"function":{"name":"write","arguments":"{\"content\":\"half"}}]}}]}` + "\n\n",
+		"error chunk": sseStream(`{"choices":[{"delta":{"content":"half"}}]}`,
+			`{"error":{"message":"CUDA out of memory","type":"InternalServerError","code":500}}`),
+		"empty": sseStream(),
+	} {
+		var buf bytes.Buffer
+		_, err := anthropicShape{}.pipe(&buf, func() {}, strings.NewReader(upstream),
+			"keera-code", true, DefaultMaxResponseBytes)
+		if err == nil {
+			t.Errorf("%s: pipe reported no failure, so the row would look like a whole answer", name)
+		}
+		events := readEvents(t, buf.String())
+		last := events[len(events)-1]
+		if last.name != "error" {
+			t.Errorf("%s: the stream ends with %q, want error", name, last.name)
+			continue
+		}
+		e := last.payload["error"].(map[string]any)
+		if last.payload["type"] != "error" || e["type"] != "overloaded_error" {
+			t.Errorf("%s: error event = %v, want an overloaded_error envelope", name, last.payload)
+		}
+		for _, ev := range events {
+			if ev.name == "message_delta" || ev.name == "message_stop" {
+				t.Errorf("%s: the failed stream carried %s", name, ev.name)
+			}
+		}
+		if name == "error chunk" && !strings.Contains(e["message"].(string), "CUDA out of memory") {
+			t.Errorf("%s: message = %q, want the upstream's", name, e["message"])
+		}
 	}
 }
 
 func TestMessagesStreamIsWellFormedWithNoContentAtAll(t *testing.T) {
-	// An upstream that answered with an empty stream still has to produce a
-	// message a client can parse and discard.
-	events := pipeMessages(t)
+	// An upstream that finished without a word still has to produce a message
+	// a client can parse and discard.
+	events := pipeMessages(t, stopChunk)
 	if got := names(events); !slices.Equal(got, []string{"message_start", "message_delta", "message_stop"}) {
 		t.Errorf("events = %v, want an empty but complete message", got)
 	}
@@ -269,7 +291,7 @@ func TestMessagesStreamReportsUsageForBilling(t *testing.T) {
 	var buf bytes.Buffer
 	stats, err := anthropicShape{}.pipe(&buf, func() {}, strings.NewReader(sseStream(
 		`{"choices":[{"delta":{"content":"a"}}]}`,
-		`{"choices":[{"delta":{"content":"b"}}]}`,
+		`{"choices":[{"delta":{"content":"b"}}]}`, stopChunk,
 		`{"choices":[],"usage":{"prompt_tokens":40,"completion_tokens":2,"total_tokens":42}}`,
 	)), "keera-code", true, DefaultMaxResponseBytes)
 	if err != nil {
@@ -297,7 +319,7 @@ func TestATranslatedStreamCountsReasoningAsTheFirstToken(t *testing.T) {
 	stats, err := anthropicShape{}.pipe(io.Discard, func() {}, paused(pause,
 		"data: "+`{"choices":[{"delta":{"role":"assistant"}}]}`+"\n\n",
 		"data: "+`{"choices":[{"delta":{"reasoning_content":"hm"}}]}`+"\n\n",
-		sseStream(`{"choices":[{"delta":{"content":"a"}}]}`),
+		sseStream(`{"choices":[{"delta":{"content":"a"}}]}`, stopChunk),
 	), "keera-code", true, DefaultMaxResponseBytes)
 	if err != nil {
 		t.Fatal(err)
@@ -570,7 +592,7 @@ func TestMessagesStreamPingsWhileTheUpstreamIsSilent(t *testing.T) {
 	// A source that stalls before it says anything, then answers.
 	src := io.MultiReader(
 		&slowReader{delay: 60 * time.Millisecond},
-		strings.NewReader(sseStream(`{"choices":[{"delta":{"content":"x"}}]}`)),
+		strings.NewReader(sseStream(`{"choices":[{"delta":{"content":"x"}}]}`, stopChunk)),
 	)
 
 	var buf syncBuffer

@@ -181,7 +181,8 @@ func (s *responsesStream) closeItem() error {
 }
 
 // finish closes the response, with the usage record the last chunk carried.
-func (s *responsesStream) finish() error {
+// A failed stream is closed the same way, as a shorter answer.
+func (s *responsesStream) finish(error) error {
 	if err := s.start(); err != nil {
 		return err
 	}

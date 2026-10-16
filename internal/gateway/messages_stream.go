@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"strconv"
 	"time"
@@ -134,8 +135,22 @@ func (s *messagesStream) closeBlock() error {
 	})
 }
 
-// finish closes the message.
-func (s *messagesStream) finish() error {
+// finish closes the message, or ends the stream with an error if the upstream
+// failed. A failure closed as a message would read as a finished turn, with
+// any tool call in it cut short.
+func (s *messagesStream) finish(cut error) error {
+	if cut != nil {
+		msg := "the connection to the model broke before the answer was finished"
+		if f, ok := errors.AsType[streamFailure](cut); ok {
+			msg = f.msg
+		}
+		// overloaded_error, because the request was fine and trying it again
+		// is the remedy.
+		return s.emit("error", map[string]any{
+			"type":  "error",
+			"error": map[string]string{"type": "overloaded_error", "message": msg},
+		})
+	}
 	// Even an empty stream must be a whole message, starting with
 	// message_start.
 	if err := s.start(); err != nil {

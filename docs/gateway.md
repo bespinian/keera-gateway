@@ -243,6 +243,12 @@ The refusal uses the wording clients act on. The code is
 `prompt is too long: N tokens > M maximum`, which makes Claude Code compact the
 conversation. A backend's own refusal says neither, and the agent stops.
 
+So on the Messages API, vLLM's and llama.cpp's refusals are reworded too. A
+prompt that is too long gets the same sentence. A prompt that fits, but not with
+its `max_tokens`, gets Anthropic's
+``input length and `max_tokens` exceed context limit: N + K > M``, on which
+Claude Code lowers `max_tokens` and tries again.
+
 A model with no `max_context` is not checked. Embedding and completion inputs
 are checked one by one, since each has to fit on its own.
 
@@ -252,21 +258,23 @@ A coding agent keeps one response open for minutes. So the gateway limits only
 how long the inference plane may take to _start_ responding
 (`KEERA_UPSTREAM_HEADER_TIMEOUT`, two minutes by default), never the response
 itself. A router uses the same timeout to decide that a destination did not
-answer in time. A model on the deployment's own provider key gets 15 minutes
-instead ([billing.md](billing.md#what-is-billed)).
+answer in time. A model on the deployment's own provider key gets longer
+([billing.md](billing.md#what-is-billed)).
 
 Usage is recorded once per request, when it ends, from the token counts the
 inference plane reported. If the client disconnects before those arrive, the
-request is charged on an estimate and marked as estimated.
+request is charged on an estimate and marked as estimated. On the deployment's
+own provider key, the gateway reads on to the real counts instead
+([billing.md](billing.md#what-is-billed)).
+
+A translated Messages stream that breaks off, because the backend stopped or
+sent an error, ends with an `error` event of type `overloaded_error` instead of
+`message_stop`. Closed as a message, it would read as a finished turn, with any
+tool call in it cut short.
 
 A client that hangs up before any answer still gets a row, with status 499 and
 marked as cancelled, in the field `canceled`. It carries what the router and the
 filters had spent by then, so hanging up never makes them free.
-
-On the deployment's own provider key, the gateway reads the answer to the end
-even after the client hangs up. The row then has the real token counts and the
-provider's status, still marked as cancelled
-([billing.md](billing.md#what-is-billed)).
 
 An ingress in front has to stream too; see
 [Publishing it](install.md#publishing-it).
@@ -330,7 +338,8 @@ headers when some level has an `rpm`. They describe only the tightest level:
 
 A `tpm` limit has no header. When a limit is hit, the message says which limit
 and its value. A rate limit answers 429 with `Retry-After`. A budget answers
-402, and its message gives the day it resets.
+402, and its message gives the day it resets. When the provider itself refuses,
+its `Retry-After` and `X-Should-Retry` are passed on.
 
 Other response headers:
 

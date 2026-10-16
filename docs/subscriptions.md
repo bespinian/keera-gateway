@@ -241,8 +241,9 @@ system prompt goes after Claude Code's own, not before: Anthropic removes
 Claude Code's first block only when it comes first, and the request should
 reach Anthropic as Claude Code built it.
 
-Anthropic's plan headers (`anthropic-ratelimit-unified-*`, `retry-after` and
-`x-should-retry`) are passed back, so Claude Code shows the plan's limits.
+Anthropic's plan headers (`anthropic-ratelimit-unified-*`) are passed back, so
+Claude Code shows the plan's limits. So are `retry-after` and `x-should-retry`,
+as for every model.
 
 ## What changes for Claude Code
 
