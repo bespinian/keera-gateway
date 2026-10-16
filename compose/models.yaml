@@ -51,7 +51,7 @@ models:
 # A hosted model, for the work a small local model cannot do - or for evaluating
 # one before there are GPUs to run anything on. `provider` fills in the endpoint,
 # the context window, the list prices, a description, the release date and the
-# location; run `keera model providers` to see what it knows. Uncomment and
+# location; run `keera model catalogue` to see what it knows. Uncomment and
 # restart. Each new organisation then gets the model, and its administrator
 # stores the key:
 #

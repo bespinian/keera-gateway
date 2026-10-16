@@ -27,11 +27,11 @@ sandbox base image.
 | `internal/auth`      | API key hashing and verification.                          |
 | `internal/webui`     | The control panel, embedded in the server binary.          |
 | `internal/policy`    | The tenancy model and how limits combine.                  |
-| `internal/catalog`   | The catalogue files and the hosted-provider table.         |
+| `internal/catalog`   | The template files and the hosted-provider catalogue.      |
 | `internal/registry`  | The gateway's in-memory view of the control plane.         |
 | `internal/sandbox`   | The machines it lends out: two drivers, and the manager.   |
 | `internal/forge`     | Short-lived repository credentials, from GitHub or GitLab. |
-| `internal/connect`   | The client catalogue the panel and `keera connect` share.  |
+| `internal/connect`   | The client list the panel and `keera connect` share.       |
 | `internal/ratelimit` | Request and token rate limiting.                           |
 | `internal/usage`     | The usage recorder behind billing and reports.             |
 | `internal/payment`   | Prepaid credit by card, through PostFinance Checkout.      |

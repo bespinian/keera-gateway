@@ -229,7 +229,7 @@ func TestThePlaygroundNeedsAKeyOfTheCallersOwn(t *testing.T) {
 }
 
 // The panel's "add a hosted model" list comes from the same table the
-// catalogue file is parsed against. Everyone may read it, but only someone who
+// template file is parsed against. Everyone may read it, but only someone who
 // can add a model sees the endpoints.
 func TestProvidersAreServedWithoutSecrets(t *testing.T) {
 	s := newServer()

@@ -195,7 +195,7 @@ func prepareStore(ctx context.Context, st *store.Store, log *slog.Logger) error 
 }
 
 // loadTemplate reads what every new organisation starts with: the models and
-// the sandbox classes in the catalogue files.
+// the sandbox classes in the template files.
 func loadTemplate(cfg config.Config, log *slog.Logger) (store.OrgTemplate, error) {
 	var t store.OrgTemplate
 	if cfg.ModelsFile == "" {

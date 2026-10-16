@@ -252,7 +252,7 @@ func TestNoSubscriptionModelWhileSubscriptionsAreOff(t *testing.T) {
 }
 
 // A model the price table does not know is billed at what the request says,
-// so a request that says nothing is refused, as a catalogue file is.
+// so a request that says nothing is refused, as a template file is.
 func TestAnUnknownProviderModelMustStateItsPrices(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	w := callModel(s.putModel, admin("org_1"), http.MethodPut, "next", "?org_id=org_1",

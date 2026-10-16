@@ -104,6 +104,26 @@ one records an error and lets them through. A router leaves the model out of its
 choice, or falls back or refuses when it was the model that decides.
 The delete confirmation lists them first.
 
+### Template files
+
+A new organisation starts with a copy of each model in the template file
+(`KEERA_MODELS_FILE`). That includes the one called "Keera" that the first
+operator sign-in creates on an empty deployment. The copies are the
+organisation's own: its administrators change, disable or remove them like any
+other model. Changing the file later does not touch organisations that already
+exist. To add the file's models to one, switch to it and run
+`keera model apply <file>`. `keera model validate <file>` checks a file without
+a server.
+
+`KEERA_SANDBOXES_FILE` works the same way for
+[sandbox classes](sandboxes.md#classes), with `keera sandbox apply <file>`.
+
+The file holds no API keys. After a new organisation is created, its
+administrator stores the key for each hosted model
+([Where the credential lives](providers.md#where-the-credential-lives)), unless
+the deployment holds that provider's key. `keera model apply` keeps a key that
+is already stored.
+
 ## Three request shapes
 
 The data plane serves the OpenAI API at `/api/v1/chat/completions`,

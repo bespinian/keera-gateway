@@ -578,7 +578,7 @@ func notSetHere(p *int) any {
 }
 
 // maxSize is a ceiling on a sandbox's size, in cores and mebibytes, the units
-// the catalogue file and the flags use. Either part may be unset.
+// the template file and the flags use. Either part may be unset.
 func maxSize(cpuMillis, memoryMiB int) string {
 	cpu, memory := "any CPU", "any memory"
 	if cpuMillis > 0 {

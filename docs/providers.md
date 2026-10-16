@@ -25,10 +25,10 @@ arrives.
 
 ## How to declare one
 
-### In the catalogue file
+### In a template file
 
 Each new organisation gets a copy of the models in the file. See
-[gateway.md](gateway.md#models-belong-to-an-organisation).
+[Template files](gateway.md#template-files).
 
 ```yaml
 models:
@@ -40,23 +40,27 @@ models:
       and whole-system questions. Must not be sent client data.
 ```
 
+The `description` is what a
+[router decides on](routers.md#descriptions-are-what-a-router-decides-on).
+Without one, the model gets the provider's, which cannot say where the model
+runs, since an entry may point at an egress proxy or a sovereign endpoint. So
+write your own, as here.
+
 `provider` fills in every field the entry leaves out: the endpoint, the context
 window, the prices (input, output, cached input, cache write, and the dearer
 ones for a long prompt where the provider charges more), a display name, a
 description, the release date and the location. The providers are `anthropic`, `openai`,
-`infomaniak`, `stepping-stone`, `phoeniqs` and `cscs`; `keera model providers`
+`infomaniak`, `stepping-stone`, `phoeniqs` and `cscs`; `keera model catalogue`
 lists them with their models. For a `backend_model` not in that table, the entry
 must set `input_micros_per_mtok` and `output_micros_per_mtok` itself. A model
 the table names without a date, such as `claude-haiku-4-5`, may also be named by
 its dated id, `claude-haiku-4-5-20251001`.
 
-The location is where the provider serves its models: `ch` for Infomaniak,
-stepping stone, Phoeniqs and CSCS, `usa` for Anthropic and OpenAI. A model with
-no provider is `onprem` when its backend is inside your network: a service name,
-a private address or the loopback. A backend on the internet does not say which country
-it is in, so an entry for one must set `location` itself.
+The [location](gateway.md#the-alias-is-the-api-contract) is where the provider
+serves its models: `ch` for Infomaniak, stepping stone, Phoeniqs and CSCS, `usa`
+for Anthropic and OpenAI.
 
-The entry always wins over the provider table. So you can point
+The entry always wins over the catalogue. So you can point
 `provider: anthropic` at a corporate egress proxy or a sovereign endpoint, or
 set your internal price. If that endpoint runs somewhere else, set `location`
 too.
@@ -84,23 +88,28 @@ same shape (for example an egress proxy that mirrors the path), write
 
 **Models → Add model** opens the model catalogue. It lists every model the
 providers offer, with its name, release date, location, context window and list
-prices, as `keera model providers` does. You can search it, filter it by
+prices, as `keera model catalogue` does. You can search it, filter it by
 provider, and sort it by any column. Operators and administrators add a model
 from it to an organisation. Everyone else opens it with **Model catalogue** and
 can only browse it. See
 [Models belong to an organisation](gateway.md#models-belong-to-an-organisation).
 
 **Add** on a row opens the form with the provider and the model already picked.
-You enter the alias and the API key. The endpoint, context window and prices
+You enter the alias and the provider key. The endpoint, context window and prices
 are filled in and folded away under **Advanced options**. The panel offers only
-the models in the table; add a newer one with `keera model add` or a catalogue
+the models in the table; add a newer one with `keera model add` or a template
 file. The model remembers its provider, and editing it later opens the same
 values. The provider cannot be changed there; add a new model instead.
 
 Infomaniak also asks for a product id and builds the endpoint from it.
 
 **Self-hosted model**, above the catalogue, opens the same form for your own
-inference server. You enter the endpoint, context window and prices yourself.
+inference server. It asks for the alias, a description, the backend URL, the
+backend model, the context window, the input and output prices and, if the
+server needs one, a provider key. The rest is under **Advanced options**. Left
+empty there, the kind is chat, the model is enabled, and the location is
+`onprem` for a backend inside your network. A backend outside it needs a
+location.
 
 ### On the command line
 
@@ -173,20 +182,18 @@ Read both before you offer a hosted model to anyone.
 
 ## What the prices are, and are not
 
-The provider table holds each provider's published list price, in CHF, as
-micro-units per million tokens. Use it as a starting point for
-showback, not as a contract.
+The catalogue holds each provider's published list price, in CHF, as
+micro-units per million tokens. Use it as a starting point for showback, not as
+a contract.
 
 Each model has four prices: input, output, cached input (an input token the
 provider served from its prompt cache) and cache write (an input token the
 provider wrote to it).
 
-- **List price is not your price.** Put a negotiated rate, a discount or an
-  internal cross-charge on the entry. A model on the deployment's own key is
-  the exception: it is always billed at list price ([billing.md](billing.md)).
-
-The prices go stale. They are a table in a Go file, not a live feed. The comment
-above the table says when they were last checked.
+List price is not your price, so put a negotiated rate, a discount or an
+internal cross-charge on the entry. A model on the deployment's own key is the
+exception: it is always billed at list price ([billing.md](billing.md)). The
+prices go stale; see [billing.md](billing.md#keep-in-mind).
 
 ### Cached input
 
@@ -246,7 +253,7 @@ holds both sets of prices for such a model, and the gateway charges the whole
 request at the dearer ones past the threshold: input, cached input, cache write
 and output.
 
-A catalogue entry can set its own:
+A model entry can set its own:
 
 ```yaml
 long_prompt:

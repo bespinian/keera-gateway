@@ -73,7 +73,7 @@ export function firstRun(ctx, setup, credit) {
       action: admin
         ? {
             label: "Open model catalogue",
-            run: () => ctx.navigate("/provider-models"),
+            run: () => ctx.navigate("/catalogue"),
           }
         : null,
       skipped: !admin,

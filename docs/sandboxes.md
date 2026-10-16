@@ -185,7 +185,7 @@ An organisation somebody created by signing up gets no sandbox until it has
 paid once, or an operator lifts its limit. See
 [What a new organisation can use](sso.md#what-a-new-organisation-can-use).
 
-## The catalogue
+## Classes
 
 A class name is an API contract. People type it, commit it into repository
 config and get used to it. It is lowercase letters, digits and interior
@@ -196,15 +196,17 @@ Each class belongs to one organisation, like a model. Only its people and
 agents can ask for it, and two organisations can each have a `standard`.
 
 Sandbox pods pull their image with the deployment's registry credentials. So
-an administrator may only give a class an image of a class from the catalogue
-file, one under a prefix in `KEERA_SANDBOX_IMAGES`, or the image the class
-already has. Any other image needs an operator.
+an administrator may only give a class an image of a class in the template
+file (`KEERA_SANDBOXES_FILE`), one `KEERA_SANDBOX_IMAGES` allows, or the image the class
+already has. Any other image needs an operator. An entry in
+`KEERA_SANDBOX_IMAGES` that ends in `/` allows every image under it. Any other
+entry allows only that image, with any tag or digest.
 
 ```yaml
 # KEERA_SANDBOXES_FILE
 sandboxes:
   - name: standard
-    description: The repo toolchain, an editor server, an agent.
+    description: The repo toolchain and an agent.
     image: registry.internal/keera/sandbox-base:1
     isolation: isolated # standard | isolated | vm
     cpu: "4" # or 4000m
@@ -225,10 +227,8 @@ sandboxes:
     purposes: [agent]
 ```
 
-The file is a template, like the model file. A new organisation starts with a
-copy of each class it declares. The copies are the organisation's own: its
-administrators can change or remove them. Changing the file later does not touch
-organisations that already exist.
+The file is a [template](gateway.md#template-files): it only seeds new
+organisations, which then own their copies.
 
 An administrator adds or changes classes with a file in the same format:
 
@@ -587,7 +587,7 @@ does.
 
 `sandbox/Containerfile` builds a base image. A deployment builds its own on top,
 with the languages, language servers, internal certificates and agent its
-engineers need, and names that image in the catalogue. Build it with
+engineers need, and names that image in its classes. Build it with
 `make sandbox-image`, or `podman build -t <tag> sandbox`: the build context is
 the `sandbox/` directory, not the repository root.
 

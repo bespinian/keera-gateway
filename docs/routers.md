@@ -99,7 +99,7 @@ Write the descriptions before the router. Without them the router chooses
 between bare aliases, and `keera router check` warns about it.
 
 A model from a hosted provider starts with the provider's description
-(`keera model providers` lists them). Rewrite it to say what this deployment
+(`keera model catalogue` lists them). Rewrite it to say what this deployment
 uses the model for.
 
 ## Where it runs

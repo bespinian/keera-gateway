@@ -18,7 +18,7 @@ KEERA_PROVIDER_ANTHROPIC_API_KEY=sk-ant-...
 
 The variables are named after the provider: `KEERA_PROVIDER_<NAME>_API_KEY`,
 with the name in capitals and hyphens as underscores, such as
-`KEERA_PROVIDER_STEPPING_STONE_API_KEY`. `keera model providers` lists the
+`KEERA_PROVIDER_STEPPING_STONE_API_KEY`. `keera model catalogue` lists the
 names.
 
 | Setting                                | What it does                                                        |
@@ -42,7 +42,7 @@ none.
   table, including the dearer ones for a long prompt
   ([providers.md](providers.md#long-prompts)). The organisation cannot change
   them. Its budgets and reports use them too.
-- **Only models in the price table.** A model id the table does not know cannot
+- **Only models in the catalogue.** A model id the catalogue does not know cannot
   be priced, so it is refused. A model saved before the key was set is sent
   without a key, and the gateway logs why.
 - **No hosted tools.** Tools the provider runs itself, such as web search or

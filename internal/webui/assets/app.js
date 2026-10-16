@@ -22,7 +22,7 @@ import { dashboardView } from "./views/dashboard.js";
 import { firstRunDue, memberRunDue } from "./views/firstrun.js";
 import { projectsView } from "./views/projects.js";
 import { keysView } from "./views/keys.js";
-import { modelsView, providerModelsView } from "./views/models.js";
+import { modelsView, catalogueView } from "./views/models.js";
 import { filtersView, filterDetailView } from "./views/filters.js";
 import { routersView, routerDetailView } from "./views/routers.js";
 import { sandboxesView } from "./views/sandboxes.js";

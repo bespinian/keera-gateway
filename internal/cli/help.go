@@ -314,14 +314,12 @@ var commands = []command{
 			"developer changing anything.\n\n" +
 			"Models belong to an organisation, and only it can call them. Its administrators " +
 			"add, change and remove them.\n\n" +
-			"A new organisation starts with a copy of each model in the catalogue file " +
+			"A new organisation starts with a copy of each model in the template file " +
 			"(KEERA_MODELS_FILE). The copies are its own, to change or remove like any " +
 			"other. 'keera model apply' adds the models of a file to an organisation that " +
 			"already exists.\n\n" +
-			"--description is a sentence saying what a model is for. Clients see it on " +
-			"/v1/models, and it is what a router is told about the model when the router is " +
-			"choosing between destinations - so a router whose models have no descriptions is " +
-			"choosing between bare aliases.",
+			"--description says what a model is for. Clients see it, and a router reads it " +
+			"to choose between models. See docs/routers.md.",
 		subs: []subcommand{
 			{name: "list", summary: "the models you can use", flags: []string{"json"}},
 			{name: "add", args: "<alias>", summary: "add a model",
@@ -352,12 +350,13 @@ var commands = []command{
 					"which is what a vLLM parser that does not match its model produces.",
 			},
 			{name: "delete", args: "<alias>", summary: "remove a model", flags: []string{"yes", "json"}},
-			{name: "apply", args: "<file>", summary: "add or update every model a catalogue file declares",
+			{name: "apply", args: "<file>", summary: "add or update every model a template file declares",
 				flags: []string{"json"}},
-			{name: "validate", aliases: []string{"lint"}, args: "<file>", summary: "validate a catalogue file without a server",
+			{name: "validate", aliases: []string{"lint"}, args: "<file>", summary: "validate a template file without a server",
 				flags: []string{"json"}},
-			{name: "providers", summary: "hosted endpoints a model can name, and their models",
-				flags: []string{"json"}},
+			{name: "catalogue",
+				summary: "the model catalogue: hosted providers and the models they offer",
+				flags:   []string{"json"}},
 		},
 	},
 	{

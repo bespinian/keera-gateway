@@ -74,7 +74,7 @@ func (m Model) LocationFromBackends() (string, error) {
 }
 
 // CheckBackend says what is wrong with where a model is sent and what it
-// asks for there, or nil when nothing is. The control API and catalogue files
+// asks for there, or nil when nothing is. The control API and template files
 // share it, so both refuse the same entries.
 func (m Model) CheckBackend() error {
 	switch {

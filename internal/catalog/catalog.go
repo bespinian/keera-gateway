@@ -1,4 +1,4 @@
-// Package catalog reads the catalogue files, and knows the hosted providers a
+// Package catalog reads the template files, and knows the hosted providers a
 // model can name.
 //
 // The model file is a template: every new organisation starts with a copy of each
@@ -36,7 +36,7 @@ type Model struct {
 	// Clients name the alias; this is only shown.
 	DisplayName string `yaml:"display_name"`
 	// Provider names a hosted endpoint Keera Gateway knows (see `keera model
-	// providers`). It fills in the backend, context window, prices, display
+	// catalogue`). It fills in the backend, context window, prices, display
 	// name, description, release date and location. The entry may override
 	// any of them.
 	Provider string   `yaml:"provider"`
@@ -109,7 +109,7 @@ func parseModelFile(raw []byte) ([]policy.Model, error) {
 	return parseEntries(f.Models, "models", "alias", func(m Model) string { return m.Alias }, ParseModel)
 }
 
-// decodeStrict reads a catalogue file and refuses a field it does not know. A
+// decodeStrict reads a template file and refuses a field it does not know. A
 // misspelt field would otherwise be dropped without a word, and whoever set it
 // would think it took effect.
 func decodeStrict(raw []byte, out any) error {
@@ -121,7 +121,7 @@ func decodeStrict(raw []byte, out any) error {
 	return nil
 }
 
-// parseEntries parses each entry of a catalogue file and refuses a name used
+// parseEntries parses each entry of a template file and refuses a name used
 // twice. Errors name the entry by index, and by name when it has one.
 func parseEntries[E, T any](entries []E, list, field string, name func(E) string, parse func(E) (T, error)) ([]T, error) {
 	seen := make(map[string]bool, len(entries))
@@ -264,7 +264,7 @@ func checkBackend(m Model) error {
 			"and this entry names no provider; put the id in the backend URL instead")
 	case len(m.Backends) > 0 && m.BackendModel == "" && m.Provider != "":
 		return fmt.Errorf("backend_model is required - for the %s provider it is "+
-			"the model id, which `keera model providers` lists", m.Provider)
+			"the model id, which `keera model catalogue` lists", m.Provider)
 	}
 	return policy.Model{Backends: m.Backends, BackendModel: m.BackendModel}.CheckBackend()
 }

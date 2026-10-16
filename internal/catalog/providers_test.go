@@ -143,7 +143,7 @@ func TestProviderRejectsWhatWouldFailSilentlyAtRuntime(t *testing.T) {
 		{
 			name:    "no model id",
 			in:      "models:\n  - alias: a\n    provider: anthropic",
-			wantErr: "model providers",
+			wantErr: "model catalogue",
 		},
 		{
 			// A model newer than this binary can be used, but not for free:

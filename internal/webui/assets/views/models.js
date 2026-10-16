@@ -89,9 +89,9 @@ export async function modelsView(ctx) {
             "a",
             {
               class: "btn",
-              href: "/provider-models",
+              href: "/catalogue",
               title: "Every model the hosted providers offer",
-              onClick: go(ctx, "/provider-models"),
+              onClick: go(ctx, "/catalogue"),
             },
             "Model catalogue",
           )
@@ -99,7 +99,7 @@ export async function modelsView(ctx) {
     ],
     canAdd && {
       label: "Add model",
-      onClick: go(ctx, "/provider-models"),
+      onClick: go(ctx, "/catalogue"),
     },
   );
 
@@ -290,12 +290,12 @@ export async function modelsView(ctx) {
   return h("div", {}, head, rows);
 }
 
-// providerModelsView lists every model the hosted providers offer, with what
-// it costs and whether this organisation already serves it. Everyone can read
-// it. It is also where an administrator adds a model: a row opens the form
+// catalogueView is the model catalogue: every model the hosted providers
+// offer, with what it costs and whether this organisation already serves it.
+// Everyone can read it. It is also where an administrator adds a model: a row opens the form
 // with the provider and the model already picked, and the button above opens
 // it for a self-hosted one.
-export async function providerModelsView(ctx) {
+export async function catalogueView(ctx) {
   const canEdit = canAddModel(ctx);
   const [providers, models] = await Promise.all([
     presets(),
@@ -847,7 +847,7 @@ function report(probe, kind) {
 const KINDS = ["chat", "completion", "embedding", "decision"];
 
 // kindName is a kind as a person reads it. The value stays lowercase on the
-// wire and in catalogue files.
+// wire and in template files.
 function kindName(kind) {
   return (
     {
@@ -1776,7 +1776,7 @@ function hostedFields(ctx, providers, form) {
         ),
       ),
       // Only the table's models are offered. A model this build does not know
-      // is added with the CLI or a catalogue file, and one being edited keeps
+      // is added with the CLI or a template file, and one being edited keeps
       // its own entry here so the dialog can still show it.
       ...(unknownModel && p === initial.p
         ? [h("option", { value: "other" }, unknownModel)]

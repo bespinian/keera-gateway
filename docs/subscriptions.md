@@ -31,7 +31,7 @@ KEERA_CLAUDE_SUBSCRIPTIONS=true
 
 While they are off, nobody can add a subscription model or issue a
 subscription key, and the gateway refuses the ones that already exist. A
-catalogue file with a subscription model stops the start.
+template file with a subscription model stops the start.
 
 ## 2. Add a subscription model
 
@@ -44,7 +44,7 @@ keera model add claude-haiku --provider anthropic \
     --backend-model claude-haiku-4-5 --subscription
 ```
 
-In a catalogue file:
+In a template file:
 
 ```yaml
 models:

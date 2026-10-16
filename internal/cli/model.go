@@ -205,7 +205,7 @@ func credential(apiKey string, noAPIKey bool) (*string, error) {
 	return nil, nil
 }
 
-// declared turns a stored model back into catalogue-file form, so `set` can
+// declared turns a stored model back into template-file form, so `set` can
 // change one field and send the whole entry through the same validation as
 // `add` and a file.
 func declared(m policy.Model) catalog.Model {
@@ -266,8 +266,8 @@ func modelCmd(ctx context.Context, args []string) error {
 	switch r.verb {
 	case "validate":
 		return r.validate()
-	case "providers":
-		return r.providers()
+	case "catalogue":
+		return r.catalogue()
 	}
 
 	// apply picks the organisation once the file has been read, so a bad file
@@ -301,7 +301,7 @@ func (r *modelRun) validate() error {
 	return out(r.asJSON, models, func(w *table) { printModels(w, models) })
 }
 
-func (r *modelRun) providers() error {
+func (r *modelRun) catalogue() error {
 	return out(r.asJSON, catalog.Providers(), printProviders)
 }
 
