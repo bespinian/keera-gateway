@@ -31,11 +31,10 @@ type Budgeter interface {
 	// Spent reports what one budget window has been charged so far. It feeds
 	// the budget headers, so a client sees a limit coming before it is refused.
 	Spent(t policy.ScopeType, id string, p policy.Period, now time.Time) int64
-	// AllowCredit reports whether an organisation may use the deployment's
-	// provider keys, which it may pay for in advance. See docs/billing.md.
-	AllowCredit(orgID string) error
-	// HoldCredit is AllowCredit for a request, which holds the most it may
-	// cost until ReleaseCredit. It returns what it held.
+	// HoldCredit reports whether an organisation may use the deployment's
+	// provider keys, which it may pay for in advance (see docs/billing.md),
+	// and holds the most a request may cost until ReleaseCredit. It returns
+	// what it held.
 	HoldCredit(orgID string, micros int64) (int64, error)
 	ReleaseCredit(orgID string, micros int64)
 	// ChargeCredit takes a request's use of those keys from the credit.

@@ -29,9 +29,6 @@ func TestAPostFinanceAccountSwitchesPaymentsOn(t *testing.T) {
 		string(p.PostFinance.AuthKey) != "secret" || p.VATBP != 810 {
 		t.Errorf("payments = %+v", p)
 	}
-	if !c.Platform["anthropic"].Credit || !c.Platform["cscs"].Credit {
-		t.Errorf("platform = %+v, want every key to take from the credit", c.Platform)
-	}
 }
 
 func TestWithoutAnAccountNothingIsTakenFromTheCredit(t *testing.T) {
@@ -39,8 +36,8 @@ func TestWithoutAnAccountNothingIsTakenFromTheCredit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if c.Payments != nil || c.Platform["cscs"].Credit {
-		t.Errorf("payments = %+v, credit %t; want none", c.Payments, c.Platform["cscs"].Credit)
+	if c.Payments != nil {
+		t.Errorf("payments = %+v, want none", c.Payments)
 	}
 }
 

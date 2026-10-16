@@ -24,8 +24,7 @@ import (
 // Payments is how organisations pay for the deployment's provider keys in
 // advance, by card through PostFinance Checkout. See docs/billing.md.
 type Payments struct {
-	Client  *payment.Client
-	SpaceID int64
+	Client *payment.Client
 	// VATBP is the VAT added to every payment, in basis points.
 	VATBP int64
 }
@@ -249,12 +248,8 @@ func (s *Server) createTopUp(w http.ResponseWriter, r *http.Request, p *authn.Pr
 		badRequest(w, "'amount_micros': "+msg)
 		return
 	}
-	pm := store.Payment{
-		ID: id.New("pay"), OrgID: orgID, Kind: store.PaymentTopUp, Micros: in.AmountMicros,
-		VATMicros: vatOn(in.AmountMicros, pay.VATBP), FeeMicros: feeOn(in.AmountMicros),
-		SaveCard: in.SaveCard, Actor: p.Actor(),
-		State: store.PaymentPending,
-	}
+	pm := pay.newPayment(orgID, store.PaymentTopUp, in.AmountMicros, p.Actor())
+	pm.SaveCard = in.SaveCard
 	if err := s.st.CreatePayment(r.Context(), pm); err != nil {
 		s.fail(w, err)
 		return
@@ -265,20 +260,14 @@ func (s *Server) createTopUp(w http.ResponseWriter, r *http.Request, p *authn.Pr
 	if in.SaveCard {
 		t.TokenizationMode = payment.SaveCard
 	}
-	tx, err := pay.Client.Create(r.Context(), t)
-	if err == nil {
-		pm.TransactionID = tx.ID
-		err = s.st.SetTransaction(r.Context(), pm.ID, tx.ID)
-	}
+	tx, err := s.startTransaction(r.Context(), &pm, t)
 	var page string
 	if err == nil {
 		page, err = pay.Client.PaymentPageURL(r.Context(), tx.ID)
 	}
 	if err != nil {
 		s.log.Error("starting a payment failed", "payment", pm.ID, "error", err)
-		_, _, _, _ = s.st.Settle(r.Context(), pm.ID, store.Settlement{
-			Note: "PostFinance Checkout could not start the payment",
-		})
+		_ = s.settleFailed(r.Context(), pm, "PostFinance Checkout could not start the payment", false)
 		httpx.WriteError(w, http.StatusBadGateway, "server_error", "payment_unavailable",
 			"PostFinance Checkout could not start the payment; nothing was charged. Try again in a moment")
 		return
@@ -287,6 +276,28 @@ func (s *Server) createTopUp(w http.ResponseWriter, r *http.Request, p *authn.Pr
 		"micros": pm.Micros, "fee_micros": pm.FeeMicros, "save_card": pm.SaveCard,
 	})
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"payment": pm, "url": page})
+}
+
+// newPayment is a pending payment of micros, with its VAT and fee.
+func (pay *Payments) newPayment(orgID string, kind store.PaymentKind, micros int64,
+	actor string) store.Payment {
+	return store.Payment{
+		ID: id.New("pay"), OrgID: orgID, Kind: kind, Micros: micros,
+		VATMicros: vatOn(micros, pay.VATBP), FeeMicros: feeOn(micros),
+		Actor: actor, State: store.PaymentPending,
+	}
+}
+
+// startTransaction creates the PostFinance transaction t for pm, and ties
+// the two together.
+func (s *Server) startTransaction(ctx context.Context, pm *store.Payment,
+	t payment.NewTransaction) (payment.Transaction, error) {
+	tx, err := s.opts.Payments.Client.Create(ctx, t)
+	if err != nil {
+		return tx, err
+	}
+	pm.TransactionID = tx.ID
+	return tx, s.st.SetTransaction(ctx, pm.ID, tx.ID)
 }
 
 // vatOn is the VAT on an amount, to the centime.
@@ -410,7 +421,7 @@ func (s *Server) postFinanceWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Anything else is acknowledged, so PostFinance does not keep sending it.
-	if in.Entity != "Transaction" || in.SpaceID != pay.SpaceID {
+	if in.Entity != "Transaction" || in.SpaceID != pay.Client.SpaceID() {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
@@ -563,12 +574,7 @@ func (s *Server) topUpDue(ctx context.Context) {
 // autoTopUp charges an account's saved card its top-up.
 func (s *Server) autoTopUp(ctx context.Context, a store.CreditAccount) {
 	pay := s.opts.Payments
-	pm := store.Payment{
-		ID: id.New("pay"), OrgID: a.OrgID, Kind: store.PaymentAuto, Micros: a.TopUpMicros,
-		VATMicros: vatOn(a.TopUpMicros, pay.VATBP), FeeMicros: feeOn(a.TopUpMicros),
-		Actor: "automatic top-up",
-		State: store.PaymentPending,
-	}
+	pm := pay.newPayment(a.OrgID, store.PaymentAuto, a.TopUpMicros, "automatic top-up")
 	switch err := s.st.CreatePayment(ctx, pm); {
 	case errors.Is(err, store.ErrTopUpUnderway):
 		return
@@ -578,17 +584,11 @@ func (s *Server) autoTopUp(ctx context.Context, a store.CreditAccount) {
 	}
 	t := transactionFor(pm, "", pay.VATBP)
 	t.Token, t.CustomersPresence = a.CardToken, "NOT_PRESENT"
-	tx, err := pay.Client.Create(ctx, t)
-	if err == nil {
-		pm.TransactionID = tx.ID
-		err = s.st.SetTransaction(ctx, pm.ID, tx.ID)
-	}
+	tx, err := s.startTransaction(ctx, &pm, t)
 	if err != nil {
 		s.log.Warn("an automatic top-up could not start; it is tried again", "org_id", a.OrgID,
 			"error", err)
-		_, _, _, _ = s.st.Settle(ctx, pm.ID, store.Settlement{
-			Note: "PostFinance Checkout could not be reached", Retry: true,
-		})
+		_ = s.settleFailed(ctx, pm, "PostFinance Checkout could not be reached", true)
 		return
 	}
 	charged, err := pay.Client.Charge(ctx, tx.ID)
@@ -596,7 +596,7 @@ func (s *Server) autoTopUp(ctx context.Context, a store.CreditAccount) {
 		// PostFinance refused to charge the card at all, so nothing was
 		// charged, and trying again would be refused again.
 		s.log.Warn("PostFinance refused an automatic top-up", "org_id", a.OrgID, "error", err)
-		if _, err := s.settleFailed(ctx, pm, "PostFinance refused to charge the saved card"); err != nil {
+		if err := s.settleFailed(ctx, pm, "PostFinance refused to charge the saved card", false); err != nil {
 			s.log.Warn("settling an automatic top-up failed", "payment", pm.ID, "error", err)
 		}
 		return
@@ -650,8 +650,8 @@ func (s *Server) settlePending(ctx context.Context, now time.Time) {
 		if !tx.Paid() && !tx.Failed() && age > lookUpFor {
 			s.log.Error("an automatic top-up has not ended after a day; no other is tried "+
 				"until an administrator acts", "payment", pm.ID, "transaction", tx.ID, "state", tx.State)
-			if _, err := s.settleFailed(ctx, pm, "it did not end within a day; look up "+
-				"transaction "+strconv.FormatInt(tx.ID, 10)+" in PostFinance Checkout"); err != nil {
+			if err := s.settleFailed(ctx, pm, "it did not end within a day; look up "+
+				"transaction "+strconv.FormatInt(tx.ID, 10)+" in PostFinance Checkout", false); err != nil {
 				s.log.Warn("settling a payment failed", "payment", pm.ID, "error", err)
 			}
 			continue
@@ -663,11 +663,12 @@ func (s *Server) settlePending(ctx context.Context, now time.Time) {
 }
 
 // settleFailed ends a payment as failed. A failed automatic top-up stops the
-// next until someone acts.
-func (s *Server) settleFailed(ctx context.Context, pm store.Payment, note string) (store.Payment, error) {
-	settled, ended, _, err := s.st.Settle(ctx, pm.ID, store.Settlement{Note: note})
-	if err == nil && ended {
+// next until someone acts, unless retry says the card was not at fault. Only
+// that changes the account, so only then is the gateway told.
+func (s *Server) settleFailed(ctx context.Context, pm store.Payment, note string, retry bool) error {
+	_, settled, _, err := s.st.Settle(ctx, pm.ID, store.Settlement{Note: note, Retry: retry})
+	if err == nil && settled && pm.Kind == store.PaymentAuto && !retry {
 		s.refreshCredit(ctx)
 	}
-	return settled, err
+	return err
 }

@@ -108,7 +108,7 @@ func (f *fakeSource) Models(orgID string) []policy.Model {
 
 type fakeBudgets struct {
 	err error
-	// creditErr is what AllowCredit answers, and credited what was taken
+	// creditErr is what HoldCredit answers, and credited what was taken
 	// from the credit.
 	creditErr error
 	mu        sync.Mutex
@@ -123,8 +123,6 @@ type fakeBudgets struct {
 }
 
 func (f *fakeBudgets) Allow([]policy.Scope, time.Time) error { return f.err }
-
-func (f *fakeBudgets) AllowCredit(string) error { return f.creditErr }
 
 func (f *fakeBudgets) HoldCredit(_ string, micros int64) (int64, error) {
 	if f.creditErr != nil {

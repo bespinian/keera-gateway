@@ -52,11 +52,12 @@ func New(s Settings) *Client {
 	return &Client{s: s, http: &http.Client{Timeout: 30 * time.Second}}
 }
 
-// The ways a transaction can save the card for later charges.
-const (
-	// SaveCard keeps the card, and offers it on the payment page next time.
-	SaveCard = "FORCE_CREATION_WITH_ONE_CLICK_PAYMENT"
-)
+// SpaceID is the space the client creates transactions in.
+func (c *Client) SpaceID() int64 { return c.s.SpaceID }
+
+// SaveCard is the tokenization mode that keeps the card, and offers it on the
+// payment page next time.
+const SaveCard = "FORCE_CREATION_WITH_ONE_CLICK_PAYMENT"
 
 // LineItem is what a transaction is for.
 type LineItem struct {
@@ -93,7 +94,6 @@ type NewTransaction struct {
 	Token              int64             `json:"token,omitempty"`
 	CustomersPresence  string            `json:"customersPresence,omitempty"`
 	CompletionBehavior string            `json:"completionBehavior"`
-	Language           string            `json:"language,omitempty"`
 	MetaData           map[string]string `json:"metaData,omitempty"`
 }
 
@@ -148,15 +148,19 @@ func (c *Client) Create(ctx context.Context, t NewTransaction) (Transaction, err
 // Get reads a transaction.
 func (c *Client) Get(ctx context.Context, id int64) (Transaction, error) {
 	var out Transaction
-	err := c.do(ctx, http.MethodGet, "/payment/transactions/"+strconv.FormatInt(id, 10), nil, &out)
+	err := c.do(ctx, http.MethodGet, txPath(id), nil, &out)
 	return out, err
+}
+
+// txPath is the API path of one transaction.
+func txPath(id int64) string {
+	return "/payment/transactions/" + strconv.FormatInt(id, 10)
 }
 
 // PaymentPageURL is where to send the customer to pay a transaction.
 func (c *Client) PaymentPageURL(ctx context.Context, id int64) (string, error) {
 	var raw []byte
-	err := c.do(ctx, http.MethodGet,
-		"/payment/transactions/"+strconv.FormatInt(id, 10)+"/payment-page-url", nil, &raw)
+	err := c.do(ctx, http.MethodGet, txPath(id)+"/payment-page-url", nil, &raw)
 	if err != nil {
 		return "", err
 	}
@@ -170,8 +174,7 @@ func (c *Client) PaymentPageURL(ctx context.Context, id int64) (string, error) {
 // Charge processes a transaction on a saved card, without the customer.
 func (c *Client) Charge(ctx context.Context, id int64) (Transaction, error) {
 	var out Transaction
-	err := c.do(ctx, http.MethodPost,
-		"/payment/transactions/"+strconv.FormatInt(id, 10)+"/process-without-interaction", nil, &out)
+	err := c.do(ctx, http.MethodPost, txPath(id)+"/process-without-interaction", nil, &out)
 	return out, err
 }
 

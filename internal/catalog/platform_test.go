@@ -85,10 +85,3 @@ func TestInfomaniaksEndpointTakesTheDeploymentsProductID(t *testing.T) {
 		t.Errorf("backend = %s, want %s", m.Backends[0], want)
 	}
 }
-
-func TestBillingCarriesTheKeysCredit(t *testing.T) {
-	b := Platform{"cscs": {APIKey: "sk", Credit: true}}.Billing("cscs")
-	if b.Provider != "cscs" || !b.Credit {
-		t.Errorf("billing = %+v", b)
-	}
-}

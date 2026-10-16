@@ -118,22 +118,23 @@ func TestConcurrentChargeAndAllow(_ *testing.T) {
 // keys until it pays, unless it is billed by invoice.
 func TestAnOrganisationWithoutCreditIsRefused(t *testing.T) {
 	b := newBudgets(true)
-	if _, ok := errors.AsType[*policy.ErrNoCredit](b.AllowCredit("org_new")); !ok {
+	_, err := b.HoldCredit("org_new", 0)
+	if _, ok := errors.AsType[*policy.ErrNoCredit](err); !ok {
 		t.Error("an organisation that never paid was let in")
 	}
 	b.reconcileCredit([]store.CreditRow{
 		{OrgID: "org_paid", BalanceMicros: 5_000_000},
 		{OrgID: "org_invoiced", BalanceMicros: -20_000_000, Invoiced: true},
 	})
-	if err := b.AllowCredit("org_paid"); err != nil {
+	if _, err := b.HoldCredit("org_paid", 0); err != nil {
 		t.Errorf("an organisation with CHF 5.00 was refused: %v", err)
 	}
-	if err := b.AllowCredit("org_invoiced"); err != nil {
+	if _, err := b.HoldCredit("org_invoiced", 0); err != nil {
 		t.Errorf("an organisation billed by invoice was refused: %v", err)
 	}
 	// Spent locally before the next reconcile.
 	b.ChargeCredit("org_paid", 5_000_000)
-	err := b.AllowCredit("org_paid")
+	_, err = b.HoldCredit("org_paid", 0)
 	if e, ok := errors.AsType[*policy.ErrNoCredit](err); !ok || e.BalanceMicros != 0 {
 		t.Errorf("after spending it all: %v", err)
 	}
@@ -142,7 +143,7 @@ func TestAnOrganisationWithoutCreditIsRefused(t *testing.T) {
 func TestWithoutPaymentsCreditIsNotChecked(t *testing.T) {
 	b := newBudgets(false)
 	b.ChargeCredit("org_a", 1_000_000)
-	if err := b.AllowCredit("org_a"); err != nil {
+	if _, err := b.HoldCredit("org_a", 0); err != nil {
 		t.Errorf("refused without payments: %v", err)
 	}
 }
@@ -164,7 +165,7 @@ func TestRunningRequestsHoldTheCredit(t *testing.T) {
 		t.Fatalf("second hold: %v", err)
 	}
 	b.reconcileCredit([]store.CreditRow{{OrgID: "org_a", BalanceMicros: 5_000_000}})
-	err = b.AllowCredit("org_a")
+	_, err = b.HoldCredit("org_a", 0)
 	if e, ok := errors.AsType[*policy.ErrNoCredit](err); !ok || e.HeldMicros != 6_000_000 {
 		t.Fatalf("with all of it held: %v", err)
 	}
@@ -173,7 +174,7 @@ func TestRunningRequestsHoldTheCredit(t *testing.T) {
 	}
 
 	b.ReleaseCredit("org_a", first)
-	if err := b.AllowCredit("org_a"); err != nil {
+	if _, err := b.HoldCredit("org_a", 0); err != nil {
 		t.Errorf("after one request ended: %v", err)
 	}
 	b.ReleaseCredit("org_a", second)

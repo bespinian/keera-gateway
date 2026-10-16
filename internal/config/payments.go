@@ -63,10 +63,6 @@ func payments(platform catalog.Platform, publicURL string) (*Payments, error) {
 	if err != nil {
 		return nil, fmt.Errorf("KEERA_BILLING_VAT: %w", err)
 	}
-	for name, k := range platform {
-		k.Credit = true
-		platform[name] = k
-	}
 	return &Payments{
 		PostFinance: payment.Settings{
 			URL:     env("KEERA_POSTFINANCE_URL", payment.DefaultURL),

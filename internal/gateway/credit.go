@@ -214,7 +214,8 @@ func (s *Server) checkCredit(org string, models ...policy.Model) string {
 	if !slices.ContainsFunc(models, func(m policy.Model) bool { return m.PlatformKey }) {
 		return ""
 	}
-	if err := s.budgets.AllowCredit(org); err != nil {
+	// Holding nothing only asks whether the organisation has credit.
+	if _, err := s.budgets.HoldCredit(org, 0); err != nil {
 		return err.Error()
 	}
 	return ""

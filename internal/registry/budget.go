@@ -123,17 +123,11 @@ func (b *Budgets) spent(t policy.ScopeType, id string, p policy.Period, now time
 	return w.micros
 }
 
-// AllowCredit reports whether an organisation may use the deployment's
-// provider keys: it has credit left that no running request holds, or is
-// billed by invoice. Without payments, every organisation may.
-func (b *Budgets) AllowCredit(orgID string) error {
-	_, err := b.HoldCredit(orgID, 0)
-	return err
-}
-
-// HoldCredit admits a request to the deployment's keys, as AllowCredit does,
-// and holds the most it may cost until ReleaseCredit. It returns what it
-// held, which is what to release.
+// HoldCredit admits a request to the deployment's keys, and holds the most it
+// may cost until ReleaseCredit. It returns what it held, which is what to
+// release. An organisation is admitted when it has credit left that no
+// running request holds, or is billed by invoice. Without payments, every
+// organisation is.
 //
 // Without a hold, a request is only charged when it ends, so any number of
 // requests started together would all see the same credit.

@@ -388,7 +388,7 @@ func (r *Registry) usePlatformKey(m *policy.Model) {
 		return
 	}
 	m.APIKey = r.opts.Platform[m.Provider].APIKey
-	m.Billing = r.opts.Platform.Billing(m.Provider)
+	m.Billing = &policy.Billing{Provider: m.Provider, Credit: r.opts.Prepaid}
 }
 
 func (r *Registry) refreshMCP(ctx context.Context, limited map[string]bool) error {

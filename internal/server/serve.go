@@ -668,8 +668,7 @@ func buildPayments(cfg config.Config) *control.Payments {
 		return nil
 	}
 	return &control.Payments{
-		Client:  payment.New(cfg.Payments.PostFinance),
-		SpaceID: cfg.Payments.PostFinance.SpaceID,
-		VATBP:   cfg.Payments.VATBP,
+		Client: payment.New(cfg.Payments.PostFinance),
+		VATBP:  cfg.Payments.VATBP,
 	}
 }

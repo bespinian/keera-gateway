@@ -140,7 +140,7 @@ func paymentServer(ctx context.Context, t *testing.T, st *store.Store, pf *fakeP
 		Payments: &Payments{
 			Client: payment.New(payment.Settings{URL: pf.URL, SpaceID: 4711, UserID: "1",
 				AuthKey: []byte("key")}),
-			SpaceID: 4711, VATBP: 810,
+			VATBP: 810,
 		},
 	}, slog.New(slog.DiscardHandler))
 	return s, reg
@@ -199,7 +199,7 @@ func TestATopUpIsCreditedOnceWhenPostFinanceSaysItIsPaid(t *testing.T) {
 	pf := newFakePostFinance(t)
 	s, reg := paymentServer(ctx, t, st, pf)
 
-	if err := reg.Budgets().AllowCredit("org_1"); err == nil {
+	if _, err := reg.Budgets().HoldCredit("org_1", 0); err == nil {
 		t.Fatal("an organisation that never paid may use the deployment's keys")
 	}
 	w := invoke(s.createTopUp, admin("org_1"), http.MethodPost, "/v1/billing/topups",
@@ -240,7 +240,7 @@ func TestATopUpIsCreditedOnceWhenPostFinanceSaysItIsPaid(t *testing.T) {
 		v.Account.Card.Label != "Visa •••• 4821" || v.Recent[0].State != store.PaymentPaid {
 		t.Errorf("account = %+v", v)
 	}
-	if err := reg.Budgets().AllowCredit("org_1"); err != nil {
+	if _, err := reg.Budgets().HoldCredit("org_1", 0); err != nil {
 		t.Errorf("refused after paying: %v", err)
 	}
 }
@@ -494,7 +494,7 @@ func TestWhoMayDoWhatWithCredit(t *testing.T) {
 			t.Errorf("%s: %d, want %d: %s", tt.name, tt.w.Code, tt.want, tt.w.Body)
 		}
 	}
-	if err := reg.Budgets().AllowCredit("org_1"); err != nil {
+	if _, err := reg.Budgets().HoldCredit("org_1", 0); err != nil {
 		t.Errorf("refused after a grant: %v", err)
 	}
 	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_2", Name: "Another Bank"}, store.OrgTemplate{}); err != nil {
@@ -505,7 +505,7 @@ func TestWhoMayDoWhatWithCredit(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("invoiced: %d %s", w.Code, w.Body)
 	}
-	if err := reg.Budgets().AllowCredit("org_2"); err != nil {
+	if _, err := reg.Budgets().HoldCredit("org_2", 0); err != nil {
 		t.Errorf("an organisation billed by invoice was refused: %v", err)
 	}
 }

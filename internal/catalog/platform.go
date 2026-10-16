@@ -15,19 +15,10 @@ type PlatformKey struct {
 	// ProductID completes the endpoint of a provider that needs one, such as
 	// Infomaniak.
 	ProductID string
-	// Credit says each call takes its list price from the organisation's
-	// credit. It is false without payments.
-	Credit bool
 }
 
 // Platform is the deployment's provider keys, by provider name.
 type Platform map[string]PlatformKey
-
-// EnvPrefix is the start of every environment variable for a provider's
-// platform key, such as KEERA_PROVIDER_STEPPING_STONE_.
-func EnvPrefix(provider string) string {
-	return "KEERA_PROVIDER_" + strings.ToUpper(strings.ReplaceAll(provider, "-", "_")) + "_"
-}
 
 // Has reports whether the deployment holds the key for a provider.
 func (p Platform) Has(provider string) bool {
@@ -68,12 +59,4 @@ func (p Platform) Lock(m *policy.Model) error {
 	m.LongPrompt = known.longPrompt()
 	m.PlatformKey = true
 	return nil
-}
-
-// Billing is how a model of this provider is billed on the deployment's key.
-func (p Platform) Billing(provider string) *policy.Billing {
-	return &policy.Billing{
-		Provider: provider,
-		Credit:   p[provider].Credit,
-	}
 }
