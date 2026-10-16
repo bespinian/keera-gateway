@@ -3,7 +3,6 @@ package gateway
 import (
 	"cmp"
 	"encoding/json"
-	"net/http"
 	"slices"
 	"strings"
 )
@@ -112,12 +111,4 @@ func (anthropicDialect) stripHostedTools(b *body) []string {
 
 func (responsesDialect) stripHostedTools(b *body) []string {
 	return stripTools(b, openAIClientTools)
-}
-
-// removedToolsHeader names what was taken out of a request, so a developer
-// whose agent stopped searching the web can find out why.
-func removedToolsHeader(w http.ResponseWriter, removed []string) {
-	if len(removed) > 0 {
-		w.Header().Set("X-Keera-Removed-Tools", strings.Join(removed, ", "))
-	}
 }

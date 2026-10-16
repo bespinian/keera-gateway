@@ -155,7 +155,17 @@ func (anthropicShape) decodeBody(raw []byte) (*body, error) {
 		return nil, err
 	}
 	out := map[string]any{}
-	addSampling(out, in)
+	// max_tokens is required by the Messages API, so it is nearly always
+	// here, and it is what the guardrail ceiling clamps in serve.
+	addSampling(out, in.MaxTokens, in.Stream, in.Temperature, in.TopP)
+	if in.TopK != nil {
+		// Not an OpenAI field. vLLM accepts it as an extension, and other
+		// backends ignore it.
+		out["top_k"] = *in.TopK
+	}
+	if len(in.StopSequences) > 0 {
+		out["stop"] = in.StopSequences
+	}
 	if tools := convertTools(in.Tools); len(tools) > 0 {
 		out["tools"] = tools
 	}
@@ -199,29 +209,20 @@ func convertMessages(in anthropicRequest) ([]chatMessage, error) {
 	return msgs, nil
 }
 
-// addSampling copies the output limit and the sampling settings.
-func addSampling(out map[string]any, in anthropicRequest) {
-	// max_tokens is required by the Messages API, so it is nearly always
-	// here, and it is what the guardrail ceiling clamps in serve.
-	if in.MaxTokens != nil {
-		out["max_tokens"] = *in.MaxTokens
+// addSampling copies the output limit and the sampling settings that both
+// native APIs share with chat completions.
+func addSampling(out map[string]any, maxTokens *int, stream bool, temperature, topP *float64) {
+	if maxTokens != nil {
+		out["max_tokens"] = *maxTokens
 	}
-	if in.Stream {
+	if stream {
 		out["stream"] = true
 	}
-	if in.Temperature != nil {
-		out["temperature"] = *in.Temperature
+	if temperature != nil {
+		out["temperature"] = *temperature
 	}
-	if in.TopP != nil {
-		out["top_p"] = *in.TopP
-	}
-	if in.TopK != nil {
-		// Not an OpenAI field. vLLM accepts it as an extension, and other
-		// backends ignore it.
-		out["top_k"] = *in.TopK
-	}
-	if len(in.StopSequences) > 0 {
-		out["stop"] = in.StopSequences
+	if topP != nil {
+		out["top_p"] = *topP
 	}
 }
 
@@ -475,6 +476,25 @@ func openingOfChat(msgs []chatMessage) (json.RawMessage, bool) {
 		}
 	}
 	return nil, false
+}
+
+// openingIn is the first user message in an array of a native API's
+// messages, each turned into chat messages by convert. One convert cannot read
+// is passed over.
+func openingIn(raw json.RawMessage, convert func([]byte) ([]chatMessage, error)) (json.RawMessage, bool) {
+	var (
+		opening json.RawMessage
+		found   bool
+	)
+	eachElement(raw, func(elem []byte) bool {
+		msgs, err := convert(elem)
+		if err != nil {
+			return true
+		}
+		opening, found = openingOfChat(msgs)
+		return !found
+	})
+	return opening, found
 }
 
 // appendContent writes the content: the text, or the parts.

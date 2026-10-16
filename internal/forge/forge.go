@@ -90,10 +90,15 @@ func badRepo(raw string) error {
 		"https or ssh address the forge shows for cloning", raw)}
 }
 
-// on checks that a repository is on the forge this deployment mints for, and
-// returns its path on that forge. A forge served under a path, such as
-// https://example.ch/gitlab, has that path taken off.
-func (r repo) on(web *url.URL) (repo, error) {
+// repoOn reads a repository address and checks it is on the forge this
+// deployment mints for, at web. It returns the path on that forge: a forge
+// served under a path, such as https://example.ch/gitlab, has that path taken
+// off.
+func repoOn(raw string, web *url.URL) (repo, error) {
+	r, err := parseRepo(raw)
+	if err != nil {
+		return repo{}, err
+	}
 	if !strings.EqualFold(r.host, web.Hostname()) {
 		return repo{}, sandbox.Refuse("%s is on %s, and this deployment mints repository "+
 			"credentials for %s only", r.path, r.host, web.Hostname())
@@ -102,15 +107,6 @@ func (r repo) on(web *url.URL) (repo, error) {
 		r.path = strings.TrimPrefix(r.path, prefix+"/")
 	}
 	return r, nil
-}
-
-// repoOn reads a repository address as a path on the forge at web.
-func repoOn(raw string, web *url.URL) (repo, error) {
-	r, err := parseRepo(raw)
-	if err != nil {
-		return repo{}, err
-	}
-	return r.on(web)
 }
 
 // target reads the repository a request is for, as a path on this forge, and
@@ -122,7 +118,7 @@ func target(req sandbox.GitRequest, web *url.URL) (repo, error) {
 		return repo{}, err
 	}
 	if req.Allow == nil {
-		return repo{}, &sandbox.ErrRefused{Reason: "no repository is allowed for this sandbox"}
+		return repo{}, sandbox.Refuse("no repository is allowed for this sandbox")
 	}
 	if err := req.Allow(r.path); err != nil {
 		return repo{}, err

@@ -9,6 +9,7 @@ import (
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/ratelimit"
+	"github.com/bespinian/keera-gateway/internal/store"
 )
 
 // refusal is a request the gateway will not forward.
@@ -46,34 +47,33 @@ func (s *Server) refuse(c *call, ref refusal) {
 	// The status says a guardrail stopped the request; the message says which
 	// one and what it was set to.
 	ev.Error = ref.msg
+	// The step the request was stopped in is closed and named by the code.
+	s.closeEarly(c, ev, ref.code, metricModel(s.src, ev.OrgID, ev.Alias))
+}
+
+// closeEarly records a request that ended before a model answered it. The row
+// carries what the router and the filters spent, so no early end drops what
+// they already charged to the budgets.
+func (s *Server) closeEarly(c *call, ev store.Event, step, metricAlias string) {
 	ev.Latency = time.Since(c.tr.start)
-	// Set here, not by the callers, so no refusal after a router or a filter
-	// drops what they already charged to the budgets.
 	ev.CostMicros = c.hookMicros()
 	ev.Bills = c.hookBills()
-	// The step the request was stopped in is closed and named by the code.
-	ev.Spans = c.tr.steps(ref.code)
+	ev.Spans = c.tr.steps(step)
 	s.record(ev)
-	s.metrics.Observe(metricModel(s.src, ev.OrgID, ev.Alias), ev.OrgID, ev.Status, ev.Latency.Seconds(), 0)
+	s.metrics.Observe(metricAlias, ev.OrgID, ev.Status, ev.Latency.Seconds(), 0)
 }
 
 // statusClientClosed is the status of a request the client gave up on before
 // it was answered. Nothing was sent back; 499 is the name nginx gives that.
 const statusClientClosed = 499
 
-// hungUp records a request whose client left before it was answered. The row
-// carries what the router and the filters spent, so the spend table keeps it.
+// hungUp records a request whose client left before it was answered.
 func (s *Server) hungUp(c *call, while, note string) {
 	ev := c.ev
 	ev.Status = statusClientClosed
 	ev.Canceled = true
 	ev.Error = appendNote(appendNote(ev.Error, "the client hung up "+while), note)
-	ev.Latency = time.Since(c.tr.start)
-	ev.CostMicros = c.hookMicros()
-	ev.Bills = c.hookBills()
-	ev.Spans = c.tr.steps("client_closed")
-	s.record(ev)
-	s.metrics.Observe(ev.Alias, ev.OrgID, ev.Status, ev.Latency.Seconds(), 0)
+	s.closeEarly(c, ev, "client_closed", ev.Alias)
 }
 
 // unknownModel is the model label a refusal carries when the model it names is

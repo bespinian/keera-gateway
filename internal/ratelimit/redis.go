@@ -101,16 +101,30 @@ func NewRedis(rdb redis.Scripter, local *Limiter, opts RedisOptions, log *slog.L
 	return r
 }
 
-// admitSource refills every bucket in the batch, decides them all, and charges
-// the Take ones only if all of them held. It is one script so it is one atomic
-// decision, as Limiter.Admit is under its lock.
+// refillSource starts both scripts. refill reads one bucket and adds what
+// has dripped in since it was last written, without capping it at the burst.
+// It returns the tokens and the time to store with them.
 //
 // The clock comes from the caller, not Redis TIME, so the arithmetic matches
 // the in-memory limiter and stays testable. A negative elapsed time is ignored,
 // and the stored time never moves back, so an earlier clock - another
 // replica's, or a long request charged late - can cost some refill but never
 // mint tokens.
-const admitSource = `
+const refillSource = `
+local function refill(key, now, perSec, burst)
+  local h = redis.call('HMGET', key, 't', 'ts')
+  if not h[1] then return burst, now end
+  local t, ts = tonumber(h[1]), now
+  local elapsed = (now - tonumber(h[2])) / 1000
+  if elapsed > 0 then t = t + elapsed * perSec else ts = tonumber(h[2]) end
+  return t, ts
+end
+`
+
+// admitSource refills every bucket in the batch, decides them all, and charges
+// the Take ones only if all of them held. It is one script so it is one atomic
+// decision, as Limiter.Admit is under its lock.
+const admitSource = refillSource + `
 local now = tonumber(ARGV[1])
 local n = #KEYS
 local live, order, ttl, ts = {}, {}, {}, {}
@@ -123,15 +137,7 @@ for i = 1, n do
   local t = live[key]
   if t == nil then
     order[#order + 1] = key
-    local h = redis.call('HMGET', key, 't', 'ts')
-    ts[key] = now
-    if h[1] then
-      t = tonumber(h[1])
-      local elapsed = (now - tonumber(h[2])) / 1000
-      if elapsed > 0 then t = t + elapsed * perSec else ts[key] = tonumber(h[2]) end
-    else
-      t = burst
-    end
+    t, ts[key] = refill(key, now, perSec, burst)
   end
   if t > burst then t = burst end
   live[key] = t
@@ -174,7 +180,7 @@ return out
 // chargeSource takes an amount known only once the request is over from
 // every bucket in KEYS, in one round trip. Like the in-memory bucket each may
 // go negative, so the requests that follow pay for a very large one.
-const chargeSource = `
+const chargeSource = refillSource + `
 local now = tonumber(ARGV[1])
 local n = tonumber(ARGV[2]) / 1000
 local out = {}
@@ -182,16 +188,7 @@ local out = {}
 for i = 1, #KEYS do
   local perSec = tonumber(ARGV[2 * i + 1])
   local burst = tonumber(ARGV[2 * i + 2])
-  local t
-  local ts = now
-  local h = redis.call('HMGET', KEYS[i], 't', 'ts')
-  if h[1] then
-    t = tonumber(h[1])
-    local elapsed = (now - tonumber(h[2])) / 1000
-    if elapsed > 0 then t = t + elapsed * perSec else ts = tonumber(h[2]) end
-  else
-    t = burst
-  end
+  local t, ts = refill(KEYS[i], now, perSec, burst)
   if t > burst then t = burst end
   t = t - n
 
@@ -214,7 +211,7 @@ var (
 // Admit decides one request against every requirement at once, in Redis. It
 // returns the index into reqs of the first failed requirement, or -1.
 func (r *Redis) Admit(reqs []Requirement, now time.Time) int {
-	keys, args, at := r.admitArgs(reqs, now)
+	keys, args, at := r.bucketArgs(reqs, []any{now.UnixMilli()}, true)
 	if len(keys) == 0 {
 		return -1
 	}
@@ -237,21 +234,24 @@ func (r *Redis) Admit(reqs []Requirement, now time.Time) int {
 	return -1
 }
 
-// admitArgs builds the script's keys and arguments. Unlimited requirements are
-// left out, so at maps each key back to its index in reqs.
-func (r *Redis) admitArgs(reqs []Requirement, now time.Time) (keys []string, args []any, at []int) {
-	args = append(args, now.UnixMilli())
+// bucketArgs adds each limited requirement's key and rate to args, and, when
+// admitting, the unit it takes. Unlimited requirements are left out, so at
+// maps each key back to its index in reqs.
+func (r *Redis) bucketArgs(reqs []Requirement, args []any, admit bool) (keys []string, _ []any, at []int) {
 	for i, req := range reqs {
 		if req.PerMinute <= 0 {
 			continue
 		}
 		perSec, burst := rate(req.PerMinute)
-		take := 0
-		if req.Take {
-			take = 1
-		}
 		keys = append(keys, r.key(req.Key))
-		args = append(args, perSec, burst, take)
+		args = append(args, perSec, burst)
+		if admit {
+			take := 0
+			if req.Take {
+				take = 1
+			}
+			args = append(args, take)
+		}
 		at = append(at, i)
 	}
 	return keys, args, at
@@ -263,16 +263,7 @@ func (r *Redis) ChargeAll(reqs []Requirement, n float64, now time.Time) {
 	if n == 0 {
 		return
 	}
-	var keys []string
-	args := []any{now.UnixMilli(), n * 1000}
-	for _, req := range reqs {
-		if req.PerMinute <= 0 {
-			continue
-		}
-		perSec, burst := rate(req.PerMinute)
-		keys = append(keys, r.key(req.Key))
-		args = append(args, perSec, burst)
-	}
+	keys, args, _ := r.bucketArgs(reqs, []any{now.UnixMilli(), n * 1000}, false)
 	if len(keys) == 0 {
 		return
 	}

@@ -54,20 +54,15 @@ func TestParseRepo(t *testing.T) {
 
 func TestRepoOn(t *testing.T) {
 	web, _ := url.Parse("https://example.ch/gitlab")
-	r, err := parseRepo("https://example.ch/gitlab/group/app.git")
-	if err != nil {
-		t.Fatal(err)
-	}
-	r, err = r.on(web)
+	r, err := repoOn("https://example.ch/gitlab/group/app.git", web)
 	if err != nil || r.path != "group/app" {
-		t.Fatalf("on = %q, %v; want group/app", r.path, err)
+		t.Fatalf("repoOn = %q, %v; want group/app", r.path, err)
 	}
 	if got := r.cloneURL(web); got != "https://example.ch/gitlab/group/app.git" {
 		t.Errorf("cloneURL = %s", got)
 	}
-	other, _ := parseRepo("https://github.com/acme/app")
 	var refused *sandbox.ErrRefused
-	if _, err := other.on(web); !errors.As(err, &refused) {
+	if _, err := repoOn("https://github.com/acme/app", web); !errors.As(err, &refused) {
 		t.Errorf("a repository on another host was not refused: %v", err)
 	}
 }

@@ -238,22 +238,22 @@ func TestHistogramBucketsAreCumulativeAndEndAtTheCount(t *testing.T) {
 		{
 			name:    "keera_request_duration_seconds",
 			labels:  `model="gpt-oss",org="org_1",status="200"`,
-			buckets: Buckets, want: 6,
+			buckets: latencyBuckets, want: 6,
 		},
 		{
 			name:    "keera_gateway_overhead_seconds",
 			labels:  `model="gpt-oss",org="org_1"`,
-			buckets: OverheadBuckets, want: 4,
+			buckets: overheadBuckets, want: 4,
 		},
 		{
 			name:    "keera_filter_duration_seconds",
 			labels:  `filter="pii",org="org_1",outcome="rewrote",shadow="true"`,
-			buckets: Buckets, want: 3,
+			buckets: latencyBuckets, want: 3,
 		},
 		{
 			name:    "keera_router_duration_seconds",
 			labels:  `router="cheap-first",org="org_1",outcome="decided",destination="gpt-oss"`,
-			buckets: Buckets, want: 2,
+			buckets: latencyBuckets, want: 2,
 		},
 	}
 	for _, h := range histograms {

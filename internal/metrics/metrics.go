@@ -14,25 +14,24 @@ import (
 	"sync/atomic"
 )
 
-// Buckets are the latency buckets, in seconds. They reach far up because a
-// streamed completion can run for minutes.
-var Buckets = []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300}
+// latencyBuckets are in seconds. They reach far up because a streamed
+// completion can run for minutes.
+var latencyBuckets = []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300}
 
-// OverheadBuckets measure the gateway's own work, which is tens of
-// microseconds when it goes well. With Buckets every request would land in the
-// first bucket. The top is far above normal, because a slow request is what
-// this is here to show.
-var OverheadBuckets = []float64{
+// overheadBuckets measure the gateway's own work, which is tens of
+// microseconds when it goes well. With latencyBuckets every request would land
+// in the first bucket. The top is far above normal, because a slow request is
+// what this is here to show.
+var overheadBuckets = []float64{
 	0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 1,
 }
 
 // Label names of each keyed family, in the order their values are joined.
 var (
-	requestLabels  = []string{"model", "org", "status"}
-	overheadLabels = []string{"model", "org"}
-	upstreamLabels = []string{"model", "org"}
-	filterLabels   = []string{"filter", "org", "outcome", "shadow"}
-	routerLabels   = []string{"router", "org", "outcome", "destination"}
+	requestLabels = []string{"model", "org", "status"}
+	modelLabels   = []string{"model", "org"}
+	filterLabels  = []string{"filter", "org", "outcome", "shadow"}
+	routerLabels  = []string{"router", "org", "outcome", "destination"}
 	// A tool's name is not a label: a client can send any name, and series are
 	// never cleaned up.
 	toolLabels = []string{"server", "org", "outcome"}
@@ -111,7 +110,7 @@ func (r *Registry) seriesIn(m map[string]*series, buckets []float64, values ...s
 
 // Observe records one finished request.
 func (r *Registry) Observe(model, org string, status int, seconds float64, tokens int) {
-	r.seriesIn(r.requests, Buckets, model, org, strconv.Itoa(status)).
+	r.seriesIn(r.requests, latencyBuckets, model, org, strconv.Itoa(status)).
 		observe(seconds, int64(tokens))
 }
 
@@ -124,7 +123,7 @@ func (r *Registry) Observe(model, org string, status int, seconds float64, token
 // own metric and would otherwise make a new guardrail look like a slow gateway. Refusals are not recorded:
 // they never made an upstream call.
 func (r *Registry) Overhead(model, org string, seconds float64) {
-	r.seriesIn(r.overhead, OverheadBuckets, model, org).observe(seconds, 0)
+	r.seriesIn(r.overhead, overheadBuckets, model, org).observe(seconds, 0)
 }
 
 // FilterRun records one filter's pass over one request. shadow is a label so
@@ -132,7 +131,7 @@ func (r *Registry) Overhead(model, org string, seconds float64) {
 func (r *Registry) FilterRun(filter, org, outcome string, shadow bool,
 	seconds float64, micros int64,
 ) {
-	r.seriesIn(r.filters, Buckets, filter, org, outcome, strconv.FormatBool(shadow)).
+	r.seriesIn(r.filters, latencyBuckets, filter, org, outcome, strconv.FormatBool(shadow)).
 		observe(seconds, micros)
 }
 
@@ -141,13 +140,13 @@ func (r *Registry) FilterRun(filter, org, outcome string, shadow bool,
 func (r *Registry) RouterRun(router, org, outcome, dest string,
 	seconds float64, micros int64,
 ) {
-	r.seriesIn(r.routers, Buckets, router, org, outcome, dest).
+	r.seriesIn(r.routers, latencyBuckets, router, org, outcome, dest).
 		observe(seconds, micros)
 }
 
 // ToolCall records one MCP tool call through the gateway.
 func (r *Registry) ToolCall(server, org, outcome string, seconds float64) {
-	r.seriesIn(r.tools, Buckets, server, org, outcome).observe(seconds, 0)
+	r.seriesIn(r.tools, latencyBuckets, server, org, outcome).observe(seconds, 0)
 }
 
 // UpstreamError records one failed attempt at a model: a backend that could not
@@ -174,51 +173,54 @@ func (r *Registry) Write(w io.Writer) {
 	_, _ = w.Write(buf.Bytes())
 }
 
+func (s *series) countValue() int64 { return s.count.Load() }
+func (s *series) sumValue() int64   { return s.sum.Load() }
+
 func (r *Registry) render(w io.Writer) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	requests := keyed{w: w, labels: requestLabels, m: r.requests}
 	requests.counter("keera_requests_total", "Inference requests handled by the gateway.",
-		func(s *series) int64 { return s.count.Load() })
+		(*series).countValue)
 	requests.counter("keera_tokens_total", "Input plus output tokens.",
-		func(s *series) int64 { return s.sum.Load() })
+		(*series).sumValue)
 	requests.histogram("keera_request_duration_seconds", "Wall time of an inference request.")
 
-	upstream := keyed{w: w, labels: upstreamLabels, m: r.upstreamErrs}
+	upstream := keyed{w: w, labels: modelLabels, m: r.upstreamErrs}
 	upstream.counter("keera_upstream_errors_total",
 		"Failed attempts at a model: a backend not reached or too slow to answer, or a 5xx a router moved past.",
-		func(s *series) int64 { return s.count.Load() })
+		(*series).countValue)
 
 	header(w, "keera_ratelimit_fallback_total",
 		"Rate-limit admissions and token charges made locally because Redis was unreachable.", "counter")
 	_, _ = fmt.Fprintf(w, "keera_ratelimit_fallback_total %d\n", r.rlFallback.Load())
 
-	overhead := keyed{w: w, labels: overheadLabels, m: r.overhead}
+	overhead := keyed{w: w, labels: modelLabels, m: r.overhead}
 	overhead.histogram("keera_gateway_overhead_seconds",
 		"Time the gateway added ahead of the inference plane, excluding filters and routers.")
 
 	filters := keyed{w: w, labels: filterLabels, m: r.filters}
 	filters.counter("keera_filter_runs_total", "Filter runs, by what the filter did.",
-		func(s *series) int64 { return s.count.Load() })
+		(*series).countValue)
 	filters.counter("keera_filter_cost_micros_total",
 		"What filter models spent, in micro-units of CHF.",
-		func(s *series) int64 { return s.sum.Load() })
+		(*series).sumValue)
 	filters.histogram("keera_filter_duration_seconds",
 		"What a filter added to the request that waited for it.")
 
 	routers := keyed{w: w, labels: routerLabels, m: r.routers}
 	routers.counter("keera_router_decisions_total", "Routing decisions, by where they sent the request.",
-		func(s *series) int64 { return s.count.Load() })
+		(*series).countValue)
 	routers.counter("keera_router_cost_micros_total",
 		"What deciding cost, in micro-units of CHF.",
-		func(s *series) int64 { return s.sum.Load() })
+		(*series).sumValue)
 	routers.histogram("keera_router_duration_seconds",
 		"What deciding added to the request that waited for it.")
 
 	tools := keyed{w: w, labels: toolLabels, m: r.tools}
 	tools.counter("keera_tool_calls_total", "MCP tool calls through the gateway, by outcome.",
-		func(s *series) int64 { return s.count.Load() })
+		(*series).countValue)
 	tools.histogram("keera_tool_call_duration_seconds", "Wall time of an MCP tool call.")
 
 	header(w, "keera_inflight_requests", "Requests waiting for the inference plane to start answering.", "gauge")

@@ -252,55 +252,53 @@ func (s *Server) chainFilter(ctx context.Context, run *filterRun, orgID, alias s
 		return nil, filterUnavailable(alias,
 			"no filter of that alias exists in this organisation any more"), true
 	}
+	var (
+		outcome store.FilterOutcome
+		took    time.Duration
+		cost    filterCost
+		changed int
+	)
+	// Every outcome is recorded, a shadow filter's too: a broken shadow filter
+	// measures nothing, and nothing else would show it.
 	m, broken := s.filterModel(f)
 	if broken != "" {
-		// Recorded for shadow filters too: a broken shadow filter measures
-		// nothing, and nothing else would show it.
-		s.noteFilter(run, f, store.FilterError, 0, 0, len(texts), 0, tr)
-		if f.Enforces() {
-			return nil, filterUnavailable(alias, broken), true
-		}
-		return nil, nil, false
-	}
-
-	start := time.Now()
-	out, cost, err := s.runOne(ctx, f, m, texts)
-	took := time.Since(start)
-	run.micros += cost.micros
-	run.bills = append(run.bills, cost.bills...)
-	run.wall += took
-	if err != nil {
-		if ctx.Err() != nil {
+		outcome, ref = store.FilterError, filterUnavailable(alias, broken)
+	} else {
+		start := time.Now()
+		var err error
+		out, cost, err = s.runOne(ctx, f, m, texts)
+		took = time.Since(start)
+		run.micros += cost.micros
+		run.bills = append(run.bills, cost.bills...)
+		run.wall += took
+		if err != nil && ctx.Err() != nil {
 			return nil, nil, true // the client hung up; serve will notice
 		}
 		// A filter that said no is the guardrail working; one that broke is a
 		// deployment that is not ready. They must answer differently, or a
 		// client retries the second forever.
-		if refused, ok := errors.AsType[*filterRefusedError](err); ok {
-			s.noteFilter(run, f, store.FilterRefuse, took, cost.micros, len(texts), 0, tr)
-			if !f.Enforces() {
-				return nil, nil, false
+		refused, isRefusal := errors.AsType[*filterRefusedError](err)
+		switch {
+		case isRefusal:
+			outcome, ref = store.FilterRefuse, filterRefused(f, refused.reason)
+		case err != nil:
+			outcome, ref = store.FilterError, filterFailed(f, err)
+		default:
+			outcome = store.FilterPass
+			if changed = changedSegments(texts, out); changed > 0 {
+				outcome = store.FilterRewrite
 			}
-			return nil, filterRefused(f, refused.reason), true
 		}
-		s.noteFilter(run, f, store.FilterError, took, cost.micros, len(texts), 0, tr)
-		// A shadow filter that cannot run lets the request through: a
-		// measurement must never take a department offline.
-		if !f.Enforces() {
-			return nil, nil, false
-		}
-		return nil, filterFailed(f, err), true
-	}
-
-	changed := changedSegments(texts, out)
-	outcome := store.FilterPass
-	if changed > 0 {
-		outcome = store.FilterRewrite
 	}
 	s.noteFilter(run, f, outcome, took, cost.micros, len(texts), changed, tr)
-	if !f.Enforces() {
-		// A shadow rewrite did not happen, so later filters see the old text.
+	if f.Shadow {
+		// A shadow filter never stops the chain: a measurement must never take
+		// a department offline. Its rewrite did not happen either, so later
+		// filters see the old text.
 		return nil, nil, false
+	}
+	if ref != nil {
+		return nil, ref, true
 	}
 	run.applied = append(run.applied, f.Alias)
 	if changed == 0 {
@@ -487,17 +485,16 @@ func (s *Server) runFilter(ctx context.Context, f policy.Filter, m policy.Model,
 	if err != nil {
 		return nil, cost, err
 	}
-	raw := ans.raw
 	if ans.status >= 300 {
 		return nil, cost, errors.New("its model answered " +
-			upstreamComplaint(raw, ans.status))
+			upstreamComplaint(ans.raw, ans.status))
 	}
 
 	if gate {
-		cost.confidence, err = parseGateReply(raw)
+		cost.confidence, err = parseGateReply(ans.raw)
 		return nil, cost, err
 	}
-	out, err := parseFilterReply(raw, texts)
+	out, err := parseFilterReply(ans.raw, texts)
 	if err != nil {
 		return nil, cost, err
 	}
@@ -671,11 +668,9 @@ func filterTooLargeMessage(f policy.Filter, m policy.Model, inputTokens int) str
 		inputTokens, f.Alias, m.Alias, m.MaxContext)
 }
 
-// filterHeader names the enforcing filters a request went through, in order,
-// so a developer can see their prompt was changed or judged, and by what.
-func filterHeader(w http.ResponseWriter, applied []string) {
-	if len(applied) == 0 {
-		return
+// listHeader sets a header to values, when there are any.
+func listHeader(w http.ResponseWriter, name string, values []string) {
+	if len(values) > 0 {
+		w.Header().Set(name, strings.Join(values, ", "))
 	}
-	w.Header().Set("X-Keera-Filters", strings.Join(applied, ", "))
 }

@@ -26,26 +26,16 @@ func (anthropicDialect) path() string { return "/messages" }
 
 func (anthropicDialect) opening(b *body) (json.RawMessage, bool) {
 	raw, _ := b.value("messages")
-	var (
-		opening json.RawMessage
-		found   bool
-	)
-	eachElement(raw, func(elem []byte) bool {
+	return openingIn(raw, func(elem []byte) ([]chatMessage, error) {
 		var m struct {
 			Role    string          `json:"role"`
 			Content json.RawMessage `json:"content"`
 		}
-		if json.Unmarshal(elem, &m) != nil {
-			return true
+		if err := json.Unmarshal(elem, &m); err != nil {
+			return nil, err
 		}
-		msgs, err := convertMessage(m.Role, m.Content)
-		if err != nil {
-			return true
-		}
-		opening, found = openingOfChat(msgs)
-		return !found
+		return convertMessage(m.Role, m.Content)
 	})
-	return opening, found
 }
 
 // text is the system prompt, and the text and tool results of every turn.
@@ -219,13 +209,19 @@ func (u anthropicUsage) tokens() *tokenUsage {
 	t.InputDetails.CachedTokens = u.CacheReadTokens
 	t.InputDetails.CacheWriteTokens = u.CacheCreationTokens
 	t.InputDetails.CacheWriteHourTokens = u.CacheCreation.HourTokens
-	t.TotalTokens = t.InputTokens + t.OutputTokens
 	return t
 }
 
-func (anthropicDialect) usage(raw []byte) *tokenUsage {
+func (anthropicDialect) usage(raw []byte) *tokenUsage { return usageOf[anthropicUsage](raw) }
+
+// usageOf reads the usage record at the top of a whole answer, in the shape
+// U of the answer's API.
+func usageOf[U any, P interface {
+	*U
+	tokens() *tokenUsage
+}](raw []byte) *tokenUsage {
 	var doc struct {
-		Usage *anthropicUsage `json:"usage"`
+		Usage P `json:"usage"`
 	}
 	if json.Unmarshal(raw, &doc) != nil || doc.Usage == nil {
 		return nil

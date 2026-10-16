@@ -30,7 +30,6 @@ const maxEventBytes = 1 << 20
 type tokenUsage struct {
 	InputTokens  int `json:"prompt_tokens"`
 	OutputTokens int `json:"completion_tokens"`
-	TotalTokens  int `json:"total_tokens"`
 	// InputDetails says how much of the prompt the provider served from its
 	// cache, which is charged at a lower price, and how much it wrote to it,
 	// which may be charged at a higher one. See policy.Model.Cost.

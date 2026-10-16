@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -118,10 +117,13 @@ func runPattern(c compiled, texts []string) ([]string, []patternHit, error) {
 			}
 			matches += found
 			if cr.rule.Refuse {
-				// Stop here: the request is going nowhere.
+				// Stop here: the request is going nowhere. The reason is the
+				// administrator's wording, but it is bounded like a model's
+				// because it goes the same way, into an error body and a
+				// usage row.
 				return nil, append(hits, patternHit{
 					Rule: cr.rule.Pattern, Matches: matches, Refused: true,
-				}), &filterRefusedError{reason: ruleReason(cr.rule)}
+				}), &filterRefusedError{reason: sanitizeReason(cr.rule.Reason)}
 			}
 			// Literal, not expanded: see policy.FilterRule.Replace.
 			out[i] = cr.re.ReplaceAllLiteralString(s, cr.rule.Replace)
@@ -133,13 +135,6 @@ func runPattern(c compiled, texts []string) ([]string, []patternHit, error) {
 	return out, hits, nil
 }
 
-// ruleReason is the sentence a refusing rule gives the sender. It is the
-// administrator's wording, but it is bounded like a model's because it goes
-// the same way, into an error body and a usage row.
-func ruleReason(r policy.FilterRule) string {
-	return sanitizeReason(r.Reason)
-}
-
 /* ------------------------------------------------------------ checking one */
 
 // patternCheckWarnings says what a pattern filter that ran still got wrong:
@@ -147,14 +142,10 @@ func ruleReason(r policy.FilterRule) string {
 // second, it names the rule.
 func patternCheckWarnings(out []string, hits []patternHit, codeHits []patternHit) []string {
 	var warnings []string
-	joined := strings.Join(out[:2], "\n")
-	for _, secret := range checkSecrets {
-		if strings.Contains(joined, secret) {
-			warnings = append(warnings, "the sample credential or account number came back "+
-				"untouched. The filter ran, but no rule in it matches what it was given to "+
-				"remove.")
-			break
-		}
+	if leftSecret(out) {
+		warnings = append(warnings, "the sample credential or account number came back "+
+			"untouched. The filter ran, but no rule in it matches what it was given to "+
+			"remove.")
 	}
 	for _, hit := range codeHits {
 		warnings = append(warnings, "the rule "+quoteRule(hit.Rule)+" matched the sample "+

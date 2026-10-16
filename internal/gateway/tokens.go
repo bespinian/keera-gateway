@@ -47,8 +47,12 @@ func leastTokens(texts []string, kind policy.Kind) int {
 	return total / bytesPerTokenAtMost
 }
 
+// bytesPerTokenTypical is the usual rule of thumb for code. It sits between
+// the two above because estimateInputTokens counts the whole JSON body, not
+// just its text, and the envelope already makes that a slight over-estimate.
+const bytesPerTokenTypical = 4
+
 // estimateInputTokens is used only when a client disconnected before the
-// upstream reported real counts. Four bytes per token is the usual rule of
-// thumb for code, and the JSON envelope makes it a slight over-estimate, which
-// is the right way to err for a guardrail.
-func estimateInputTokens(payload []byte) int { return len(payload) / 4 }
+// upstream reported real counts. It errs a little high, which is the right
+// way to err for a guardrail.
+func estimateInputTokens(payload []byte) int { return len(payload) / bytesPerTokenTypical }

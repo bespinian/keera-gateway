@@ -149,8 +149,21 @@ func serve(ctx context.Context) error {
 	// Ending the streams when shutdown begins avoids waiting out the grace.
 	srv.RegisterOnShutdown(ctl.Drain)
 
-	if err := serveUntilDone(ctx, srv, cfg.Addr, log); err != nil {
+	// Serve until the listener fails or it is time to shut down.
+	errs := make(chan error, 1)
+	go func() {
+		log.Info("listening", "addr", cfg.Addr, "panel", "/",
+			"inference", httpx.InferencePrefix, "control", httpx.ControlPrefix,
+			"sandbox", httpx.SandboxPrefix)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errs <- fmt.Errorf("listener: %w", err)
+		}
+	}()
+	select {
+	case err := <-errs:
 		return err
+	case <-ctx.Done():
+		log.Info("shutting down", "grace", shutdownGrace)
 	}
 
 	shutCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownGrace)
@@ -308,21 +321,6 @@ func warnGoogleGroups(p *authn.OIDC, log *slog.Logger) {
 	}
 }
 
-// serveUntilDone serves until the listener fails or ctx is done. It returns
-// the listener's error, or nil when it is time to shut down.
-func serveUntilDone(ctx context.Context, srv *http.Server, addr string, log *slog.Logger) error {
-	errs := make(chan error, 1)
-	go func() { errs <- listen(srv, addr, log) }()
-
-	select {
-	case err := <-errs:
-		return err
-	case <-ctx.Done():
-		log.Info("shutting down", "grace", shutdownGrace)
-		return nil
-	}
-}
-
 // routes is the listener's routing table: inference and MCP under
 // httpx.InferencePrefix, and everything else - the panel, the control API
 // and the sandbox attach surface - under the control handler, so a
@@ -335,16 +333,6 @@ func routes(gw *gateway.Server, ctl *control.Server) http.Handler {
 	mux.Handle(httpx.InferencePrefix+"/", gw.Handler())
 	mux.Handle("/", ctl.Handler())
 	return mux
-}
-
-func listen(srv *http.Server, addr string, log *slog.Logger) error {
-	log.Info("listening", "addr", addr, "panel", "/",
-		"inference", httpx.InferencePrefix, "control", httpx.ControlPrefix,
-		"sandbox", httpx.SandboxPrefix)
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("listener: %w", err)
-	}
-	return nil
 }
 
 // limiter is the token buckets plus the sweep that bounds their memory.
@@ -391,24 +379,35 @@ func buildLimiter(ctx context.Context, cfg config.Config, mreg *metrics.Registry
 // one entry per token anyone has ever sent.
 func sweep(ctx context.Context, reg *registry.Registry, limiter limiter,
 	ctl *control.Server, st *store.Store, log *slog.Logger) {
-	t := time.NewTicker(time.Minute)
+	every(ctx, time.Minute, false, func(now time.Time) {
+		reg.Sweep()
+		limiter.Sweep(control.BucketIdle, now)
+		// One sign-in bucket per address, unbounded for the same reason.
+		ctl.Sweep(now)
+		// Every lookup filters on expiry anyway, so a failure only logs.
+		if !myTurn(ctx, st, log, "purge-expired", time.Minute) {
+			return
+		}
+		if err := st.PurgeExpired(ctx); err != nil && ctx.Err() == nil {
+			log.Warn("purging expired sessions failed", "error", err)
+		}
+	})
+}
+
+// every runs fn every d until ctx is done, and once at the start too when
+// first is set.
+func every(ctx context.Context, d time.Duration, first bool, fn func(time.Time)) {
+	if first {
+		fn(time.Now())
+	}
+	t := time.NewTicker(d)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case now := <-t.C:
-			reg.Sweep()
-			limiter.Sweep(control.BucketIdle, now)
-			// One sign-in bucket per address, unbounded for the same reason.
-			ctl.Sweep(now)
-			// Every lookup filters on expiry anyway, so a failure only logs.
-			if !myTurn(ctx, st, log, "purge-expired", time.Minute) {
-				continue
-			}
-			if err := st.PurgeExpired(ctx); err != nil && ctx.Err() == nil {
-				log.Warn("purging expired sessions failed", "error", err)
-			}
+			fn(now)
 		}
 	}
 }
@@ -430,19 +429,9 @@ func retain(ctx context.Context, st *store.Store, cfg config.Config, log *slog.L
 	log.Info("retention configured", "usage", retentionLabel(cfg.UsageRetention),
 		"audit", retentionLabel(cfg.AuditRetention))
 
-	// Once at start, so a deployment that was down catches up now and a wrong
-	// window shows in the log right away.
-	purgeOld(ctx, st, cfg, log)
-	t := time.NewTicker(retentionInterval)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			purgeOld(ctx, st, cfg, log)
-		}
-	}
+	// Once at start too, so a deployment that was down catches up now and a
+	// wrong window shows in the log right away.
+	every(ctx, retentionInterval, true, func(time.Time) { purgeOld(ctx, st, cfg, log) })
 }
 
 // purgeOld deletes the usage events and audit entries past their windows, and
@@ -485,9 +474,8 @@ func retentionLabel(d time.Duration) string {
 
 func newLogger(cfg config.Config) *slog.Logger {
 	var level slog.Level
-	if err := level.UnmarshalText([]byte(cfg.LogLevel)); err != nil {
-		level = slog.LevelInfo
-	}
+	// Config refused any level slog does not know.
+	_ = level.UnmarshalText([]byte(cfg.LogLevel))
 	opts := &slog.HandlerOptions{Level: level}
 	if cfg.LogFormat == "json" {
 		return slog.New(slog.NewJSONHandler(os.Stderr, opts))
@@ -620,24 +608,13 @@ func sweepSandboxes(ctx context.Context, m *sandbox.Manager, st *store.Store, lo
 	if m == nil {
 		return
 	}
-	run := func(now time.Time) {
+	// Once right away too, so a restarted gateway reconciles what it left
+	// running and tears down what expired while it was down.
+	every(ctx, sandboxSweepInterval, true, func(now time.Time) {
 		if myTurn(ctx, st, log, "sandbox-sweep", sandboxSweepInterval) {
 			m.Sweep(ctx, now)
 		}
-	}
-	t := time.NewTicker(sandboxSweepInterval)
-	defer t.Stop()
-	// Once right away, so a restarted gateway reconciles what it left running
-	// and tears down what expired while it was down.
-	run(time.Now())
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case now := <-t.C:
-			run(now)
-		}
-	}
+	})
 }
 
 // myTurn reports whether this replica runs a background job now. See

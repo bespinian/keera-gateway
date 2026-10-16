@@ -138,13 +138,10 @@ func (s *Server) CheckRouter(ctx context.Context, rt policy.Router) RouterProbe 
 		return p
 	}
 
-	// Only reachable destinations are offered, exactly as on a real request.
-	offered := rt
-	offered.Destinations = p.Destinations
-
 	start := time.Now()
 	for _, sample := range routerCheckSample {
-		chose, err := s.decide(ctx, offered, m, []string{sample.prompt})
+		// decide offers only the reachable destinations, as on a real request.
+		chose, err := s.decide(ctx, rt, m, []string{sample.prompt})
 		p.CostMicros += chose.micros
 		s.billCheck(rt.OrgID, chose.bills)
 		d := RouterDecision{Prompt: sample.prompt, Asks: sample.asks}

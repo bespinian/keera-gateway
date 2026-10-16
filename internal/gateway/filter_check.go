@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -93,6 +94,13 @@ var (
 
 // checkSecrets are the strings a passing filter must not have left behind.
 var checkSecrets = []string{"wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY", "CH93 0076 2011 6238 5295 7"}
+
+// leftSecret reports whether a filter's output of the sample still carries
+// one of checkSecrets.
+func leftSecret(out []string) bool {
+	joined := strings.Join(out[:2], "\n")
+	return slices.ContainsFunc(checkSecrets, func(s string) bool { return strings.Contains(joined, s) })
+}
 
 // CheckFilter runs one filter over a fixed sample and reports what it did.
 //
@@ -273,14 +281,10 @@ func gateWarnings(verdicts []FilterVerdict) []string {
 // filterWarnings says what a run that worked mechanically still got wrong.
 func filterWarnings(out []string) []string {
 	var warnings []string
-	joined := strings.Join(out[:2], "\n")
-	for _, secret := range checkSecrets {
-		if strings.Contains(joined, secret) {
-			warnings = append(warnings, "the sample credential or account number came back "+
-				"untouched. The filter ran, but this instruction did not remove what it was "+
-				"given to remove.")
-			break
-		}
+	if leftSecret(out) {
+		warnings = append(warnings, "the sample credential or account number came back "+
+			"untouched. The filter ran, but this instruction did not remove what it was "+
+			"given to remove.")
 	}
 	if len(out) > 2 && out[2] != filterCheckSample[2] {
 		warnings = append(warnings, "the sample function was rewritten. A filter that edits "+

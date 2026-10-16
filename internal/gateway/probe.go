@@ -294,18 +294,11 @@ var decisionProbe = decisionQuestion{Type: "choice",
 // There is no stream or tool call to ask about: routers and gates read one
 // answer, and that is all such a model gives.
 func (s *Server) checkDecision(ctx context.Context, m policy.Model, p Probe) Probe {
-	start := time.Now()
-	resp := s.probeCall(ctx, m, decisionPath,
+	body, ok := s.probeAnswer(ctx, m, decisionPath,
 		decisionBody(m, decisionProbe, []string{"func Add(a, b int) int { return a + b }"}), &p)
-	if resp == nil {
-		return p
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, ok := s.probeBody(resp, &p)
 	if !ok {
 		return p
 	}
-	p.TotalMS = time.Since(start).Milliseconds()
 	raw, err := chatFromDecision(body, decisionProbe)
 	if err != nil {
 		p.Error = "the backend answered 200, but " + err.Error()
@@ -323,19 +316,12 @@ func (s *Server) checkDecision(ctx context.Context, m policy.Model, p Probe) Pro
 }
 
 func (s *Server) checkCompletion(ctx context.Context, m policy.Model, p Probe) Probe {
-	start := time.Now()
-	resp := s.probeCall(ctx, m, "/completions", map[string]any{
+	body, ok := s.probeAnswer(ctx, m, "/completions", map[string]any{
 		"model": m.BackendModel, "prompt": "func hello() {", "max_tokens": 16, "stream": false,
 	}, &p)
-	if resp == nil {
-		return p
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, ok := s.probeBody(resp, &p)
 	if !ok {
 		return p
 	}
-	p.TotalMS = time.Since(start).Milliseconds()
 	var out struct {
 		Model   string `json:"model"`
 		Choices []struct {
@@ -357,18 +343,11 @@ func (s *Server) checkCompletion(ctx context.Context, m policy.Model, p Probe) P
 }
 
 func (s *Server) checkEmbedding(ctx context.Context, m policy.Model, p Probe) Probe {
-	start := time.Now()
-	resp := s.probeCall(ctx, m, "/embeddings",
+	body, ok := s.probeAnswer(ctx, m, "/embeddings",
 		map[string]any{"model": m.BackendModel, "input": "keera"}, &p)
-	if resp == nil {
-		return p
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, ok := s.probeBody(resp, &p)
 	if !ok {
 		return p
 	}
-	p.TotalMS = time.Since(start).Milliseconds()
 	var out struct {
 		Model string `json:"model"`
 		Data  []struct {
@@ -423,6 +402,25 @@ func (s *Server) probeCall(ctx context.Context, m policy.Model, path string,
 		return nil
 	}
 	return resp
+}
+
+// probeAnswer sends a check's request and reads the whole answer, timing
+// both. It returns false when the check is already over, with p.Error saying
+// why.
+func (s *Server) probeAnswer(ctx context.Context, m policy.Model, path string,
+	request map[string]any, p *Probe) ([]byte, bool) {
+	start := time.Now()
+	resp := s.probeCall(ctx, m, path, request, p)
+	if resp == nil {
+		return nil, false
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, ok := s.probeBody(resp, p)
+	if !ok {
+		return nil, false
+	}
+	p.TotalMS = time.Since(start).Milliseconds()
+	return body, true
 }
 
 // probeBody reads a whole answer, or says in p why it could not.

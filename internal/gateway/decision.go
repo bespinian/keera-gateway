@@ -76,7 +76,7 @@ func (s *Server) routerDecision(orgID, prompt string, offered []string) decision
 		Criteria: make(map[string]string, len(offered))}
 	for i, alias := range offered {
 		about := alias
-		if m, ok := s.serveable(orgID, alias); ok && m.Description != "" {
+		if m, _ := s.src.Model(orgID, alias); m.Description != "" {
 			about = m.Description
 		}
 		q.Criteria[string(routerLabels[i])] = about

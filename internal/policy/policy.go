@@ -400,10 +400,6 @@ func (r FilterRule) Valid() error {
 	return nil
 }
 
-// Enforces reports whether this filter's answer is acted on. A shadow filter's
-// is only recorded.
-func (f Filter) Enforces() bool { return !f.Shadow }
-
 // Router decides which model answers a request. A Filter changes a request; a
 // router changes where it goes.
 //

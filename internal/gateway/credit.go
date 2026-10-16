@@ -99,15 +99,7 @@ func (s *Server) billUnreported(c *call, b *body) {
 	if !c.model.PlatformKey || c.ev.InputTokens+c.ev.OutputTokens > 0 {
 		return
 	}
-	out := 0
-	if c.surf.kind != policy.KindEmbedding {
-		sent := b
-		if sent == nil {
-			sent = c.native
-		}
-		out = outputCeiling(sent, c.res.MaxOutputTokens)
-	}
-	t := unreportedTokens(c.received, out)
+	t := unreportedTokens(c.received, c.outputTokens(c.sent(b)))
 	c.ev.InputTokens, c.ev.OutputTokens, c.ev.Estimated = t.Input, t.Output, true
 	s.log.Warn("a request on the deployment's key came back without a usage record; "+
 		"it is billed the most it may have used", "model", c.alias,
@@ -155,11 +147,7 @@ const mostOutputTokens = 10_000_000
 // body by each filter on the key. It errs high, and is given back when the
 // request has been charged.
 func (s *Server) creditHold(c *call, b *body) int64 {
-	in := c.received / bytesPerToken
-	out := 0
-	if c.surf.kind != policy.KindEmbedding {
-		out = outputCeiling(b, c.res.MaxOutputTokens)
-	}
+	in, out := c.received/bytesPerToken, c.outputTokens(b)
 	var most int64
 	for _, m := range s.keyAnswerers(c) {
 		if line, ok := m.Bill(policy.Tokens{Input: in, Output: out}); ok {
@@ -186,6 +174,15 @@ func (s *Server) filtersHold(org string, filters []string, in int) int64 {
 		}
 	}
 	return most
+}
+
+// outputTokens is the most a request may write: its output ceiling, or
+// nothing for an embedding.
+func (c *call) outputTokens(b *body) int {
+	if c.surf.kind == policy.KindEmbedding {
+		return 0
+	}
+	return outputCeiling(b, c.res.MaxOutputTokens)
 }
 
 // outputCeiling is the most output tokens a request asks for, held to the

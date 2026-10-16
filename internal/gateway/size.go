@@ -1,8 +1,10 @@
 package gateway
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"math"
+	"slices"
 	"strconv"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
@@ -54,16 +56,15 @@ func (s *Server) sized(rt policy.Router, b *body, kind policy.Kind) (routeDecisi
 		alias   string
 		tier    sizeTier
 		ceiling int
-		at      int
 	}
 	var order []ranked
-	for i, alias := range rt.Destinations {
+	for _, alias := range rt.Destinations {
 		m, ok := s.serveable(rt.OrgID, alias)
 		if !ok {
 			continue
 		}
 		ceiling, bounded := rt.Ceiling(alias)
-		r := ranked{alias: alias, ceiling: ceiling, at: i, tier: sizeFits}
+		r := ranked{alias: alias, ceiling: ceiling, tier: sizeFits}
 		switch {
 		case m.MaxContext > 0 && tokens > m.MaxContext:
 			r.tier = sizeTooLarge
@@ -79,21 +80,9 @@ func (s *Server) sized(rt policy.Router, b *body, kind policy.Kind) (routeDecisi
 			"one - every one is missing, disabled, of another kind, or has no backend", rt.Alias))
 	}
 
-	// Tier first, then the smallest ceiling (the cheaper model), then the
-	// written order. No ceiling sorts after every bounded one: it takes what
-	// nothing else would.
-	sort.SliceStable(order, func(i, j int) bool {
-		a, c := order[i], order[j]
-		if a.tier != c.tier {
-			return a.tier < c.tier
-		}
-		if (a.ceiling == 0) != (c.ceiling == 0) {
-			return c.ceiling == 0
-		}
-		if a.ceiling != c.ceiling {
-			return a.ceiling < c.ceiling
-		}
-		return a.at < c.at
+	// Tier first, then by ceiling, then the written order.
+	slices.SortStableFunc(order, func(a, c ranked) int {
+		return cmp.Or(cmp.Compare(a.tier, c.tier), byCeiling(a.ceiling, c.ceiling))
 	})
 
 	for _, r := range order {
@@ -101,6 +90,19 @@ func (s *Server) sized(rt policy.Router, b *body, kind policy.Kind) (routeDecisi
 	}
 	d.alias = d.chain[0]
 	return d, nil
+}
+
+// byCeiling puts the smallest ceiling (the cheaper model) first. No ceiling
+// sorts after every bounded one: it takes what nothing else would. A stable
+// sort leaves a tie in the written order.
+func byCeiling(a, b int) int {
+	if a == 0 {
+		a = math.MaxInt
+	}
+	if b == 0 {
+		b = math.MaxInt
+	}
+	return cmp.Compare(a, b)
 }
 
 /* ------------------------------------------------------------ checking one */
@@ -126,23 +128,13 @@ func sizeBands(rt policy.Router, aliases []string) []sizeBand {
 	type entry struct {
 		alias   string
 		ceiling int
-		at      int
 	}
 	order := make([]entry, 0, len(aliases))
-	for i, alias := range aliases {
+	for _, alias := range aliases {
 		ceiling, _ := rt.Ceiling(alias)
-		order = append(order, entry{alias: alias, ceiling: ceiling, at: i})
+		order = append(order, entry{alias: alias, ceiling: ceiling})
 	}
-	sort.SliceStable(order, func(i, j int) bool {
-		a, b := order[i], order[j]
-		if (a.ceiling == 0) != (b.ceiling == 0) {
-			return b.ceiling == 0
-		}
-		if a.ceiling != b.ceiling {
-			return a.ceiling < b.ceiling
-		}
-		return a.at < b.at
-	})
+	slices.SortStableFunc(order, func(a, b entry) int { return byCeiling(a.ceiling, b.ceiling) })
 
 	out := make([]sizeBand, 0, len(order))
 	floor := 0

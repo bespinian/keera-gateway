@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"bytes"
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -181,54 +180,43 @@ func (s *Server) mcpPost(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	out, forward := x.inspect(raw)
-	if !forward {
-		return
+	if out, ok := x.inspect(raw); ok {
+		x.forward(http.MethodPost, out)
 	}
-	resp, err := s.mcpSend(r.Context(), x.srv, http.MethodPost, out, x.header)
-	if err != nil {
-		x.unreachable(err)
-		return
-	}
-	defer func() { _ = resp.Body.Close() }()
-	x.relay(resp)
 }
 
 // mcpForward carries a GET, which opens the server's own event stream, or a
 // DELETE, which ends a session. Neither has a body to inspect.
 func (s *Server) mcpForward(w http.ResponseWriter, r *http.Request) {
-	x, ok := s.mcpBegin(w, r)
-	if !ok {
+	if x, ok := s.mcpBegin(w, r); ok {
+		x.forward(r.Method, nil)
+	}
+}
+
+// forward sends one request to the server, with the client's headers it may
+// see and the server's credential, and relays the answer.
+func (x *mcpExchange) forward(method string, payload []byte) {
+	var body io.Reader
+	if payload != nil {
+		body = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequestWithContext(x.r.Context(), method, x.srv.URL, body)
+	if err != nil {
+		x.unreachable(err)
 		return
 	}
-	resp, err := s.mcpSend(r.Context(), x.srv, r.Method, nil, x.header)
+	req.Header = x.header.Clone()
+	if payload != nil && req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	setCredential(req.Header, x.srv.AuthHeader, x.srv.APIKey)
+	resp, err := x.s.clientFor(x.srv.Limited).Do(req)
 	if err != nil {
 		x.unreachable(err)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
 	x.relay(resp)
-}
-
-// mcpSend sends one request to the server, with the client's headers it may
-// see and the server's credential.
-func (s *Server) mcpSend(ctx context.Context, srv policy.MCPServer, method string,
-	payload []byte, header http.Header,
-) (*http.Response, error) {
-	var body io.Reader
-	if payload != nil {
-		body = bytes.NewReader(payload)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, srv.URL, body)
-	if err != nil {
-		return nil, err
-	}
-	req.Header = header.Clone()
-	if payload != nil && req.Header.Get("Content-Type") == "" {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	setCredential(req.Header, srv.AuthHeader, srv.APIKey)
-	return s.clientFor(srv.Limited).Do(req)
 }
 
 // ----------------------------------------------------------- the way out
@@ -247,30 +235,22 @@ func (x *mcpExchange) inspect(raw []byte) (out []byte, forward bool) {
 	}
 	var msg rpcMessage
 	if json.Unmarshal(trimmed, &msg) != nil {
-		x.writeRPC(rpcMessage{JSONRPC: "2.0", ID: json.RawMessage("null"),
-			Error: &rpcError{Code: rpcParseError, Message: "the body is not a JSON-RPC message"}})
+		x.rpcFail(http.StatusOK, nil, rpcParseError, "the body is not a JSON-RPC message")
 		return nil, false
 	}
-	if refuseUnanswerable(x, msg) || !x.headersMatch(msg) {
+	if x.refuseUnanswerable(msg) || !x.headersMatch(msg) || !x.mayRequest(msg) {
 		return nil, false
 	}
-	if msg.isRequest() {
-		if !x.mayRequest(msg) {
+	if msg.isRequest() && msg.Method == "tools/call" {
+		if !x.toolCall(&msg) {
 			return nil, false
 		}
-		switch msg.Method {
-		case "tools/call":
-			if !x.toolCall(&msg) {
-				return nil, false
-			}
-		case "tools/list", "initialize":
-			x.pending[idKey(msg.ID)] = &pendingRPC{method: msg.Method, start: time.Now()}
-		}
+	} else {
+		x.await(msg)
 	}
 	encoded, err := json.Marshal(msg)
 	if err != nil {
-		x.writeRPC(rpcMessage{JSONRPC: "2.0", ID: msg.ID,
-			Error: &rpcError{Code: rpcParseError, Message: "the message could not be re-encoded"}})
+		x.rpcFail(http.StatusOK, msg.ID, rpcParseError, "the message could not be re-encoded")
 		return nil, false
 	}
 	return encoded, true
@@ -282,62 +262,57 @@ func (x *mcpExchange) inspect(raw []byte) (out []byte, forward bool) {
 func (x *mcpExchange) inspectBatch(raw []byte) ([]byte, bool) {
 	var msgs []rpcMessage
 	if json.Unmarshal(raw, &msgs) != nil {
-		x.writeRPC(rpcMessage{JSONRPC: "2.0", ID: json.RawMessage("null"),
-			Error: &rpcError{Code: rpcParseError, Message: "the body is not a JSON-RPC batch"}})
+		x.rpcFail(http.StatusOK, nil, rpcParseError, "the body is not a JSON-RPC batch")
 		return nil, false
 	}
 	for _, m := range msgs {
-		if refuseUnanswerable(x, m) {
+		if x.refuseUnanswerable(m) || !x.mayRequest(m) {
 			return nil, false
 		}
-		if m.isRequest() && !x.mayRequest(m) {
+		if m.isRequest() && m.Method == "tools/call" {
+			x.rpcFail(http.StatusOK, m.ID, rpcInvalidParams, "the gateway takes a tool call only "+
+				"on its own, not in a batch; send it as a request of its own")
 			return nil, false
 		}
-		switch {
-		case m.isRequest() && m.Method == "tools/call":
-			x.writeRPC(rpcMessage{JSONRPC: "2.0", ID: m.ID, Error: &rpcError{
-				Code: rpcInvalidParams, Message: "the gateway takes a tool call only on its own, " +
-					"not in a batch; send it as a request of its own",
-			}})
-			return nil, false
-		case m.isRequest() && (m.Method == "tools/list" || m.Method == "initialize"):
-			x.pending[idKey(m.ID)] = &pendingRPC{method: m.Method, start: time.Now()}
-		}
+		x.await(m)
 	}
 	encoded, err := json.Marshal(msgs)
 	if err != nil {
-		x.writeRPC(rpcMessage{JSONRPC: "2.0", ID: json.RawMessage("null"),
-			Error: &rpcError{Code: rpcParseError, Message: "the batch could not be re-encoded"}})
+		x.rpcFail(http.StatusOK, nil, rpcParseError, "the batch could not be re-encoded")
 		return nil, false
 	}
 	return encoded, true
 }
 
+// await notes a request whose answer the gateway reads on the way back.
+func (x *mcpExchange) await(m rpcMessage) {
+	if m.isRequest() && (m.Method == "tools/list" || m.Method == "initialize") {
+		x.pending[idKey(m.ID)] = &pendingRPC{method: m.Method, start: time.Now()}
+	}
+}
+
 // mayRequest refuses a request a key that may call only some of the server's
-// tools may not send. It reports whether the request may go on.
+// tools may not send. It reports whether the message may go on.
 func (x *mcpExchange) mayRequest(m rpcMessage) bool {
-	if x.res.AllowsWholeServer(x.srv.Alias) || slices.Contains(partialMethods, m.Method) {
+	if !m.isRequest() || x.res.AllowsWholeServer(x.srv.Alias) ||
+		slices.Contains(partialMethods, m.Method) {
 		return true
 	}
-	x.writeRPC(rpcMessage{JSONRPC: "2.0", ID: m.ID, Error: &rpcError{
-		Code: rpcMethodNotFound, Message: x.s.advise("Method not found: " + m.Method +
-			". This key may call only some of the tools of '" + x.srv.Alias +
-			"', so the gateway does not forward " + m.Method + " to it"),
-	}})
+	x.rpcFail(http.StatusOK, m.ID, rpcMethodNotFound, x.s.advise("Method not found: "+m.Method+
+		". This key may call only some of the tools of '"+x.srv.Alias+
+		"', so the gateway does not forward "+m.Method+" to it"))
 	return false
 }
 
 // refuseUnanswerable refuses a tool call sent as a notification, without an
 // id. It would get no answer to trim or record, and a server that ran it
 // anyway would run a tool nobody checked. It reports whether it answered.
-func refuseUnanswerable(x *mcpExchange, m rpcMessage) bool {
+func (x *mcpExchange) refuseUnanswerable(m rpcMessage) bool {
 	if m.Method != "tools/call" || len(m.ID) > 0 {
 		return false
 	}
-	x.writeRPC(rpcMessage{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &rpcError{
-		Code: rpcInvalidParams, Message: "a tool call needs an id; the gateway does not forward " +
-			"one sent as a notification",
-	}})
+	x.rpcFail(http.StatusOK, nil, rpcInvalidParams, "a tool call needs an id; the gateway "+
+		"does not forward one sent as a notification")
 	return true
 }
 
@@ -358,12 +333,7 @@ func (x *mcpExchange) headersMatch(msg rpcMessage) bool {
 	if why == "" {
 		return true
 	}
-	id := msg.ID
-	if len(id) == 0 {
-		id = json.RawMessage("null")
-	}
-	x.writeRPCStatus(http.StatusBadRequest, rpcMessage{JSONRPC: "2.0", ID: id,
-		Error: &rpcError{Code: rpcHeaderMismatch, Message: "Header mismatch: " + why}})
+	x.rpcFail(http.StatusBadRequest, msg.ID, rpcHeaderMismatch, "Header mismatch: "+why)
 	return false
 }
 
@@ -493,9 +463,7 @@ func (x *mcpExchange) toolCall(msg *rpcMessage) bool {
 		p.tool = name
 	}
 	if err != nil {
-		x.writeRPC(rpcMessage{JSONRPC: "2.0", ID: msg.ID, Error: &rpcError{
-			Code: rpcInvalidParams, Message: "the tool call could not be read: " + err.Error(),
-		}})
+		x.rpcFail(http.StatusOK, msg.ID, rpcInvalidParams, "the tool call could not be read: "+err.Error())
 		return false
 	}
 	args, _ := params.value("arguments")
@@ -506,9 +474,7 @@ func (x *mcpExchange) toolCall(msg *rpcMessage) bool {
 	if !x.res.AllowsTool(x.srv.Alias, p.tool) {
 		why := "Unknown tool: " + p.tool + ". This key may not call '" + x.srv.Alias + "/" +
 			p.tool + "' through the gateway"
-		x.writeRPC(rpcMessage{JSONRPC: "2.0", ID: msg.ID, Error: &rpcError{
-			Code: rpcInvalidParams, Message: x.s.advise(why),
-		}})
+		x.rpcFail(http.StatusOK, msg.ID, rpcInvalidParams, x.s.advise(why))
 		x.record(p, store.ToolDenied, why, 0)
 		return false
 	}
@@ -516,8 +482,7 @@ func (x *mcpExchange) toolCall(msg *rpcMessage) bool {
 	held, ref, ok := x.admit(len(args))
 	x.held += held
 	if !ok {
-		x.writeRPC(rpcMessage{JSONRPC: "2.0", ID: msg.ID, Result: toolErrorResult(x.s.advise(ref.msg))})
-		x.record(p, store.ToolDenied, ref.msg, 0)
+		x.toolFailed(p, msg.ID, store.ToolDenied, ref.msg)
 		return false
 	}
 
@@ -534,8 +499,7 @@ func (x *mcpExchange) toolCall(msg *rpcMessage) bool {
 			if ref.code != "filter_refused" {
 				outcome = store.ToolNoResult
 			}
-			x.writeRPC(rpcMessage{JSONRPC: "2.0", ID: msg.ID, Result: toolErrorResult(x.s.advise(ref.msg))})
-			x.record(p, outcome, ref.msg, 0)
+			x.toolFailed(p, msg.ID, outcome, ref.msg)
 			return false
 		}
 		if x.r.Context().Err() != nil {
@@ -620,20 +584,25 @@ func (x *mcpExchange) admit(argBytes int) (int64, refusal, bool) {
 	return held, refusal{}, true
 }
 
-// toolErrorResult is a tool result that tells the model the call failed.
-func toolErrorResult(text string) json.RawMessage {
-	raw, _ := json.Marshal(map[string]any{
-		"content": []map[string]string{{"type": "text", "text": text}},
+// toolFailed answers a tool call with a result that tells the model the call
+// failed and why, and records it.
+func (x *mcpExchange) toolFailed(p *pendingRPC, id json.RawMessage, outcome store.ToolOutcome, why string) {
+	result, _ := json.Marshal(map[string]any{
+		"content": []map[string]string{{"type": "text", "text": x.s.advise(why)}},
 		"isError": true,
 	})
-	return raw
+	httpx.WriteJSON(x.w, http.StatusOK, rpcMessage{JSONRPC: "2.0", ID: id, Result: result})
+	x.record(p, outcome, why, 0)
 }
 
-// writeRPC answers the client's POST with one message of the gateway's own.
-func (x *mcpExchange) writeRPC(msg rpcMessage) { x.writeRPCStatus(http.StatusOK, msg) }
-
-func (x *mcpExchange) writeRPCStatus(status int, msg rpcMessage) {
-	httpx.WriteJSON(x.w, status, msg)
+// rpcFail answers the client's POST with a JSON-RPC error of the gateway's
+// own. A message without an id is answered with a null one, as JSON-RPC asks.
+func (x *mcpExchange) rpcFail(status int, id json.RawMessage, code int, msg string) {
+	if len(id) == 0 {
+		id = json.RawMessage("null")
+	}
+	httpx.WriteJSON(x.w, status, rpcMessage{JSONRPC: "2.0", ID: id,
+		Error: &rpcError{Code: code, Message: msg}})
 }
 
 // ------------------------------------------------------------ the way back

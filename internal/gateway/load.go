@@ -223,11 +223,12 @@ func (l *loads) describe(mode policy.RouterMode, key string) string {
 	}
 	r := l.read(key, time.Now())
 	var out string
-	if mode == policy.RouterModeLeastBusy {
+	switch {
+	case mode == policy.RouterModeLeastBusy:
 		out = strconv.FormatInt(r.inflight, 10) + " in flight"
-	} else if r.known {
+	case r.known:
 		out = r.latency.Round(time.Millisecond).String() + " to first token, lately"
-	} else {
+	default:
 		out = "nothing measured recently"
 	}
 	if r.failing {

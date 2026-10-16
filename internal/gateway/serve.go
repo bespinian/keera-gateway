@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -71,6 +70,15 @@ type call struct {
 	// held is what the request holds of the organisation's credit until it
 	// ends. See creditHold.
 	held int64
+}
+
+// sent is the body that goes out: the OpenAI-shaped one, or the client's own
+// when nothing is translated.
+func (c *call) sent(b *body) *body {
+	if b != nil {
+		return b
+	}
+	return c.native
 }
 
 // hookMicros is what the request's router and filters spent on their own
@@ -195,9 +203,8 @@ func (s *Server) decode(c *call, raw []byte) (*body, bool) {
 	// A backend that reads "true" or 1 as true would stream an answer the
 	// gateway reads as a whole one, without the usage record it adds to a
 	// stream, and the request would go unbilled.
-	if _, ok := b.boolean("stream"); !ok {
-		if raw, present := b.value("stream"); present &&
-			!bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+	if _, present := b.value("stream"); present {
+		if _, ok := b.boolean("stream"); !ok {
 			s.refuse(c, invalidBody("the 'stream' field must be true or false"))
 			return nil, false
 		}
@@ -275,11 +282,7 @@ func notRebuilt(err error) *refusal {
 func (s *Server) target(c *call, b *body) bool {
 	// Before the translation, the model is read from the client's own API,
 	// which names it in the same field.
-	sent := b
-	if sent == nil {
-		sent = c.native
-	}
-	alias, hasAlias := sent.str("model")
+	alias, hasAlias := c.sent(b).str("model")
 	if !hasAlias || alias == "" {
 		s.refuse(c, refusal{
 			status: http.StatusBadRequest,
@@ -364,11 +367,8 @@ func (s *Server) admit(c *call, b *body) bool {
 		return false
 	}
 	if s.onKey(c) {
-		if b == nil {
-			b = c.native
-		}
 		var err error
-		if c.held, err = s.budgets.HoldCredit(c.res.Key.OrgID, s.creditHold(c, b)); err != nil {
+		if c.held, err = s.budgets.HoldCredit(c.res.Key.OrgID, s.creditHold(c, c.sent(b))); err != nil {
 			s.refuse(c, refusal{
 				status: http.StatusPaymentRequired,
 				typ:    "insufficient_quota", code: "credit_exhausted",
@@ -562,7 +562,9 @@ func (s *Server) useFilters(c *call, b *body) bool {
 			return false
 		}
 	}
-	filterHeader(c.w, run.applied)
+	// Names the enforcing filters in order, so a developer can see their
+	// prompt was changed or judged, and by what.
+	listHeader(c.w, "X-Keera-Filters", run.applied)
 	return true
 }
 
@@ -603,24 +605,24 @@ func (s *Server) prepare(c *call, b *body) bool {
 			}
 		}
 	}
-	// Hosted tools are taken out on the deployment's key: the provider charges
-	// for them apart from tokens, and that is not billed.
 	if c.chainOnKey() {
+		// Hosted tools are taken out on the deployment's key: the provider
+		// charges for them apart from tokens, and that is not billed. The header
+		// tells a developer whose agent stopped searching the web why.
+		var tools []string
 		// On chat completions a hosted search is a field rather than a tool.
-		removed := []string{}
 		if b != nil && b.remove("web_search_options") {
-			removed = append(removed, "web_search_options")
+			tools = append(tools, "web_search_options")
 		}
 		if c.native != nil {
-			removed = append(removed, c.surf.dialect.stripHostedTools(c.native)...)
+			tools = append(tools, c.surf.dialect.stripHostedTools(c.native)...)
 		}
-		removedToolsHeader(c.w, removed)
-	}
-	if c.chainOnKey() {
-		var removed []string
+		listHeader(c.w, "X-Keera-Removed-Tools", tools)
+
+		var fields []string
 		for _, sent := range []*body{b, c.native} {
 			if sent != nil {
-				removed = append(removed, stripPremium(sent)...)
+				fields = append(fields, stripPremium(sent)...)
 			}
 		}
 		// Every organisation shares the deployment's OpenAI account, so a chat
@@ -629,13 +631,10 @@ func (s *Server) prepare(c *call, b *body) bool {
 		if b != nil {
 			if on, _ := b.boolean("store"); on {
 				b.remove("store")
-				removed = append(removed, "store")
+				fields = append(fields, "store")
 			}
 		}
-		if len(removed) > 0 {
-			removed = slices.Compact(slices.Sorted(slices.Values(removed)))
-			c.w.Header().Set("X-Keera-Removed-Fields", strings.Join(removed, ", "))
-		}
+		listHeader(c.w, "X-Keera-Removed-Fields", slices.Compact(slices.Sorted(slices.Values(fields))))
 	}
 	// Embeddings have no output length to limit.
 	if c.res.MaxOutputTokens > 0 && c.surf.kind != policy.KindEmbedding {
@@ -647,11 +646,7 @@ func (s *Server) prepare(c *call, b *body) bool {
 		}
 	}
 	// Both APIs that can go untranslated name it as the OpenAI shape does.
-	sent := b
-	if sent == nil {
-		sent = c.native
-	}
-	c.stream, _ = sent.boolean("stream")
+	c.stream, _ = c.sent(b).boolean("stream")
 	if c.stream && b != nil {
 		c.injectedUsage = b.ensureUsageInStream()
 	}
@@ -668,7 +663,7 @@ func (s *Server) prepare(c *call, b *body) bool {
 // answer forwards the request, serves what comes back, and accounts for it.
 func (s *Server) answer(c *call, b *body) {
 	ctx := c.r.Context()
-	if c.keepsReading() {
+	if c.chainOnKey() {
 		var cancel context.CancelFunc
 		ctx, cancel = outlast(ctx, readOnFor)
 		defer cancel()
@@ -686,7 +681,7 @@ func (s *Server) answer(c *call, b *body) {
 	if c.routed {
 		s.settleRouter(c, fw)
 	}
-	if c.r.Context().Err() != nil && !c.keepsReading() {
+	if c.r.Context().Err() != nil && !c.chainOnKey() {
 		s.hungUp(c, "before the model answered", fw.note())
 		return
 	}
@@ -740,7 +735,7 @@ func (s *Server) answer(c *call, b *body) {
 	// overwritten. If the request succeeded further down the chain, this is
 	// the only sign anything failed.
 	c.ev.Error = appendNote(c.ev.Error, fw.note())
-	s.finish(c.ev, c.model, c.res, c.now, c.hookMicros(), c.hookBills(), c.tr)
+	s.finish(c)
 	// Feeds the latency router. Only real answers count, because a fast
 	// refusal would post the best score. The time lost on destinations that
 	// failed first is not this one's, so it is taken out. Stamped with the
@@ -776,15 +771,14 @@ const readOnFor = 15 * time.Minute
 
 // chainOnKey says a model the request may be sent to is on the deployment's
 // key.
+//
+// Such an answer is read to the end even if the client leaves. A provider
+// charges the deployment for what it generated, and only the end of the
+// answer says how much that was. Cutting it short would leave an estimate
+// that misses what was never streamed, such as reasoning.
 func (c *call) chainOnKey() bool {
 	return slices.ContainsFunc(c.chain, func(m policy.Model) bool { return m.PlatformKey })
 }
-
-// keepsReading says the answer is read to the end even if the client leaves.
-// A provider charges the deployment for what it generated, and only the end
-// of the answer says how much that was. Cutting it short would leave an
-// estimate that misses what was never streamed, such as reasoning.
-func (c *call) keepsReading() bool { return c.chainOnKey() }
 
 // outlast is a context that ends grace after parent does, rather than with
 // it. The returned cancel ends it at once.
@@ -841,7 +835,7 @@ func (s *Server) upstreamUnreachable(c *call, fw forwarded) {
 	c.ev.Error = appendNote("the inference plane could not be reached: "+fw.err.Error(),
 		fw.note())
 	c.ev.Latency = time.Since(c.tr.start)
-	s.finish(c.ev, c.model, c.res, c.now, c.hookMicros(), c.hookBills(), c.tr)
+	s.finish(c)
 }
 
 // relayStream pipes a streamed answer to the client through pipe, which
@@ -851,7 +845,7 @@ func (s *Server) relayStream(c *call, resp *http.Response, answered time.Time, p
 ) {
 	c.w.WriteHeader(resp.StatusCode)
 	var dst io.Writer = c.w
-	if c.keepsReading() {
+	if c.chainOnKey() {
 		dst = &afterHangUp{w: c.w}
 	}
 	stream := &flushBeforeRead{src: resp.Body, dst: dst, flusher: http.NewResponseController(c.w)}
@@ -1003,30 +997,29 @@ func setUsage(ev *store.Event, u *tokenUsage) {
 
 // finish charges the request and records it.
 //
-// hookMicros is what the filters and the router spent. It is added to the
-// row's cost so a guardrail cannot spend budget without showing up, while the
-// token columns stay the answering model's own. It was already charged to the
-// budgets when it was spent.
-func (s *Server) finish(ev store.Event, model policy.Model, res *policy.Resolved,
-	now time.Time, hookMicros int64, hookBills []policy.BillLine, tr *trace,
-) {
-	ev.Spans = tr.steps("")
+// What the filters and the router spent is added to the row's cost so a
+// guardrail cannot spend budget without showing up, while the token columns
+// stay the answering model's own. It was already charged to the budgets when
+// it was spent.
+func (s *Server) finish(c *call) {
+	ev := c.ev
+	ev.Spans = c.tr.steps("")
 	used := policy.Tokens{Input: ev.InputTokens, CachedInput: ev.CachedInputTokens,
 		CacheWrite: ev.CacheWriteTokens, CacheWriteHour: ev.CacheWriteHourTokens,
 		Output: ev.OutputTokens}
-	cost, bills := answerCost(model, used)
-	ev.CostMicros, ev.Bills = cost, append(hookBills, bills...)
+	cost, bills := answerCost(c.model, used)
+	ev.CostMicros, ev.Bills = cost, append(c.hookBills(), bills...)
 	// A subscription paid for this. What it would have cost on the API is kept
 	// to compare against, and charged to no budget.
-	if model.Subscription {
+	if c.model.Subscription {
 		ev.ListCostMicros, ev.CostMicros = ev.CostMicros, 0
 	}
-	s.budgets.Charge(res.Scopes, ev.CostMicros, now)
-	ev.CostMicros += hookMicros
+	s.budgets.Charge(c.res.Scopes, ev.CostMicros, c.now)
+	ev.CostMicros += c.hookMicros()
 
 	if tokens := float64(ev.InputTokens + ev.OutputTokens); tokens > 0 {
-		reqs := make([]ratelimit.Requirement, 0, len(res.Scopes))
-		for _, sc := range res.Scopes {
+		reqs := make([]ratelimit.Requirement, 0, len(c.res.Scopes))
+		for _, sc := range c.res.Scopes {
 			reqs = append(reqs, tpmBucket(sc))
 		}
 		// Charged as of now, not the start: a stream can run for minutes, and

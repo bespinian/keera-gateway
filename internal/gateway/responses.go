@@ -93,18 +93,7 @@ func (responsesShape) decodeBody(raw []byte) (*body, error) {
 		return nil, err
 	}
 	out := map[string]any{}
-	if in.MaxOutputTokens != nil {
-		out["max_tokens"] = *in.MaxOutputTokens
-	}
-	if in.Stream {
-		out["stream"] = true
-	}
-	if in.Temperature != nil {
-		out["temperature"] = *in.Temperature
-	}
-	if in.TopP != nil {
-		out["top_p"] = *in.TopP
-	}
+	addSampling(out, in.MaxOutputTokens, in.Stream, in.Temperature, in.TopP)
 	if tools := responsesTools(in.Tools); len(tools) > 0 {
 		out["tools"] = tools
 		if tc, ok := responsesToolChoice(in.ToolChoice); ok {
@@ -333,8 +322,7 @@ func newResponsesUsage(u *tokenUsage) *responsesUsage {
 }
 
 func (u *responsesUsage) tokens() *tokenUsage {
-	t := &tokenUsage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
-		TotalTokens: u.InputTokens + u.OutputTokens}
+	t := &tokenUsage{InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}
 	t.InputDetails.CachedTokens = u.InputTokensDetails.CachedTokens
 	t.InputDetails.CacheWriteTokens = u.InputTokensDetails.CacheWriteTokens
 	return t
@@ -435,23 +423,13 @@ func (responsesDialect) opening(b *body) (json.RawMessage, bool) {
 		text, err := textOf(t)
 		return json.RawMessage(text), err == nil
 	}
-	var (
-		opening json.RawMessage
-		found   bool
-	)
-	eachElement(raw, func(elem []byte) bool {
+	return openingIn(raw, func(elem []byte) ([]chatMessage, error) {
 		var it responsesItem
-		if json.Unmarshal(elem, &it) != nil {
-			return true
+		if err := json.Unmarshal(elem, &it); err != nil {
+			return nil, err
 		}
-		msgs, err := addItem(nil, it)
-		if err != nil {
-			return true
-		}
-		opening, found = openingOfChat(msgs)
-		return !found
+		return addItem(nil, it)
 	})
-	return opening, found
 }
 
 // text is the instructions, and the text of every message and tool output in
@@ -548,15 +526,7 @@ func (responsesDialect) onKey(b *body) string {
 // auth is the bearer token every OpenAI endpoint takes.
 func (responsesDialect) auth(http.Header) func(http.Header, string) { return nil }
 
-func (responsesDialect) usage(raw []byte) *tokenUsage {
-	var doc struct {
-		Usage *responsesUsage `json:"usage"`
-	}
-	if json.Unmarshal(raw, &doc) != nil || doc.Usage == nil {
-		return nil
-	}
-	return doc.Usage.tokens()
-}
+func (responsesDialect) usage(raw []byte) *tokenUsage { return usageOf[responsesUsage](raw) }
 
 func (responsesDialect) stream(alias string) nativeStream {
 	return &responsesNativeStream{alias: alias}
