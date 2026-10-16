@@ -145,14 +145,36 @@ func parseBackend(raw string) (*url.URL, bool) {
 	return u, u.Host != ""
 }
 
+// InsideNetwork are the addresses inside a network, not on the public
+// internet: loopback, "this network" and the unspecified address, link-local,
+// private, carrier-grade NAT (which Tailscale uses), unique local IPv6, and
+// multicast. A backend on one is hosted inside, and the gateway's dialers keep
+// an organisation from them when it may not reach inside. See
+// internal/gateway/egress.go.
+var InsideNetwork = []netip.Prefix{
+	netip.MustParsePrefix("127.0.0.0/8"),
+	netip.MustParsePrefix("::1/128"),
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("::/128"),
+	netip.MustParsePrefix("169.254.0.0/16"),
+	netip.MustParsePrefix("fe80::/10"),
+	netip.MustParsePrefix("10.0.0.0/8"),
+	netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.168.0.0/16"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("fc00::/7"),
+	netip.MustParsePrefix("224.0.0.0/4"),
+	netip.MustParsePrefix("ff00::/8"),
+}
+
+// addrHosting classifies an address. A prefix never contains an address with
+// a zone, or an IPv4 address written as IPv6, so both are taken off first.
 func addrHosting(addr netip.Addr) Hosting {
-	switch {
-	case addr.IsLoopback(), addr.IsPrivate(), addr.IsUnspecified(),
-		addr.IsLinkLocalUnicast(), addr.IsLinkLocalMulticast(),
-		// Carrier-grade NAT, which Tailscale addresses use. It is not
-		// routable on the public internet either.
-		addr.Is4() && addr.As4()[0] == 100 && addr.As4()[1] >= 64 && addr.As4()[1] <= 127:
-		return HostedInternal
+	addr = addr.WithZone("").Unmap()
+	for _, p := range InsideNetwork {
+		if p.Contains(addr) {
+			return HostedInternal
+		}
 	}
 	return HostedExternal
 }

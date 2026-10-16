@@ -66,7 +66,7 @@ func TestOnlyTheNamedHostsReachThePrivateNetwork(t *testing.T) {
 	if err != nil || !limit || len(hosts) != 2 || hosts[0] != "keera-engine" {
 		t.Fatalf("ParsePrivateHosts = %v, %v, %v", limit, hosts, err)
 	}
-	dial := privateDial(nil, hosts)
+	dial := privateDial(newDialer(nil), nil, hosts)
 	blocked := func(addr string) bool {
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()

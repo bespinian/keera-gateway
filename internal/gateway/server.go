@@ -157,45 +157,38 @@ type Server struct {
 func New(src policy.Source, budgets Budgeter, limiter Limiter, sink Sink,
 	m *metrics.Registry, opts Options, log *slog.Logger) *Server {
 	opts.setDefaults()
-	return &Server{
-		src:     src,
-		budgets: budgets,
-		limiter: limiter,
-		sink:    sink,
-		metrics: m,
-		log:     log,
-		opts:    opts,
-		load:    newLoads(),
-		client:  upstreamClient(opts, orgDial(opts)),
-		publicClient: upstreamClient(opts, newDialer(
-			denyDial(append(slices.Clone(opts.UpstreamDeny), privateRanges...),
-				"this organisation can only reach public addresses until its limit is lifted"),
-		).DialContext),
-		keyClient: upstreamClient(withHeaderTimeout(opts, readOnFor),
-			newDialer(denyDial(opts.UpstreamDeny, "KEERA_UPSTREAM_DENY blocks it")).DialContext),
-	}
-}
-
-// orgDial is how an organisation's requests connect, as KEERA_UPSTREAM_DENY
-// and KEERA_UPSTREAM_PRIVATE say.
-func orgDial(opts Options) func(context.Context, string, string) (net.Conn, error) {
+	// An organisation's requests connect as KEERA_UPSTREAM_DENY and
+	// KEERA_UPSTREAM_PRIVATE say.
+	open := newDialer(denyDial(opts.UpstreamDeny, "KEERA_UPSTREAM_DENY blocks it"))
+	orgDial := open.DialContext
 	if opts.LimitPrivate {
-		return privateDial(opts.UpstreamDeny, opts.PrivateHosts)
+		orgDial = privateDial(open, opts.UpstreamDeny, opts.PrivateHosts)
 	}
-	return newDialer(denyDial(opts.UpstreamDeny, "KEERA_UPSTREAM_DENY blocks it")).DialContext
+	// A limited organisation reaches only the public internet.
+	public := newDialer(denyDial(append(slices.Clone(opts.UpstreamDeny), policy.InsideNetwork...),
+		"this organisation can only reach public addresses until its limit is lifted")).DialContext
+	return &Server{
+		src:          src,
+		budgets:      budgets,
+		limiter:      limiter,
+		sink:         sink,
+		metrics:      m,
+		log:          log,
+		opts:         opts,
+		load:         newLoads(),
+		client:       upstreamClient(opts.UpstreamHeaderTimeout, orgDial),
+		publicClient: upstreamClient(opts.UpstreamHeaderTimeout, public),
+		keyClient:    upstreamClient(readOnFor, open.DialContext),
+	}
 }
 
 func newDialer(deny func(string, string, syscall.RawConn) error) *net.Dialer {
 	return &net.Dialer{Timeout: dialTimeout, KeepAlive: 30 * time.Second, Control: deny}
 }
 
-func withHeaderTimeout(opts Options, d time.Duration) Options {
-	opts.UpstreamHeaderTimeout = d
-	return opts
-}
-
 // upstreamClient is the client requests leave through, connecting with dial.
-func upstreamClient(opts Options, dial func(context.Context, string, string) (net.Conn, error)) *http.Client {
+func upstreamClient(headerTimeout time.Duration,
+	dial func(context.Context, string, string) (net.Conn, error)) *http.Client {
 	return &http.Client{
 		// No client timeout: a stream may run longer than any value worth
 		// setting. The request context cancels it when the client leaves.
@@ -208,7 +201,7 @@ func upstreamClient(opts Options, dial func(context.Context, string, string) (ne
 			ForceAttemptHTTP2:   true,
 			// Compression would buffer, which defeats streaming.
 			DisableCompression:    true,
-			ResponseHeaderTimeout: opts.UpstreamHeaderTimeout,
+			ResponseHeaderTimeout: headerTimeout,
 		},
 		// A redirect is answered, not followed. Followed, it would take the
 		// request and its credential to an address nobody configured.

@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+
+	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
 // The addresses the gateway will not connect to.
@@ -28,23 +30,6 @@ import (
 // where a self-hosted inference plane is. KEERA_UPSTREAM_PRIVATE narrows them.
 const DefaultUpstreamDeny = "127.0.0.0/8,::1/128,169.254.0.0/16,fe80::/10,0.0.0.0/8,::/128," +
 	"fd00:ec2::254/128,100.100.100.200/32,168.63.129.16/32"
-
-// privateRanges are the addresses inside a network: private, carrier-grade
-// NAT, unique local IPv6, and loopback and link-local, which an operator may
-// have taken off the deny list for a backend on the same host. A limited
-// organisation is kept from all of them, and with KEERA_UPSTREAM_PRIVATE every
-// organisation is kept from all but the hosts it names.
-var privateRanges = []netip.Prefix{
-	netip.MustParsePrefix("127.0.0.0/8"),
-	netip.MustParsePrefix("::1/128"),
-	netip.MustParsePrefix("169.254.0.0/16"),
-	netip.MustParsePrefix("fe80::/10"),
-	netip.MustParsePrefix("10.0.0.0/8"),
-	netip.MustParsePrefix("172.16.0.0/12"),
-	netip.MustParsePrefix("192.168.0.0/16"),
-	netip.MustParsePrefix("100.64.0.0/10"),
-	netip.MustParsePrefix("fc00::/7"),
-}
 
 // ParseUpstreamDeny reads a comma-separated list of addresses and prefixes.
 // "none" denies nothing.
@@ -99,19 +84,21 @@ func ParsePrivateHosts(s string) (limit bool, hosts []string, err error) {
 	return true, hosts, nil
 }
 
-// privateDial dials the hosts named in hosts with deny, and every other host
-// with the private ranges denied too.
+// privateDial dials the hosts named in hosts with open, which applies deny,
+// and every other host with policy.InsideNetwork denied too. That includes
+// loopback and link-local, which an operator may have taken off the deny list
+// for a backend on the same host.
 //
 // The name is checked before DNS, and the address after it. A name an
 // organisation controls cannot be one of these, so it cannot resolve into
 // the network.
-func privateDial(deny []netip.Prefix, hosts []string) func(context.Context, string, string) (net.Conn, error) {
-	open := newDialer(denyDial(deny, "KEERA_UPSTREAM_DENY blocks it"))
+func privateDial(open *net.Dialer, deny []netip.Prefix, hosts []string,
+) func(context.Context, string, string) (net.Conn, error) {
 	why := "organisations may not reach addresses inside this network"
 	if len(hosts) > 0 {
 		why = "inside this network, organisations may only reach " + strings.Join(hosts, ", ")
 	}
-	closed := newDialer(denyDial(append(slices.Clone(deny), privateRanges...),
+	closed := newDialer(denyDial(append(slices.Clone(deny), policy.InsideNetwork...),
 		why+"; see KEERA_UPSTREAM_PRIVATE"))
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		host, _, err := net.SplitHostPort(addr)
