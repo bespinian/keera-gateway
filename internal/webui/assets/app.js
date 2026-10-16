@@ -744,20 +744,30 @@ function tearDown() {
 
 /** limitedNotice tells the people of an organisation that signed itself up
  *  that some features are not open to it, before a refusal is the first to
- *  say so. With card payments, the first run's credit step says it instead. */
+ *  say so. While the first run asks an administrator for credit, its credit
+ *  step says it instead. Granted credit ticks that step off but does not lift
+ *  the limit, so the banner comes back then. */
 function limitedNotice() {
   if (!state.me.org_limited || state.orgID !== state.me.org_id) return null;
-  if (state.me.payments) return null;
-  return h(
-    "div",
-    { class: "banner banner-info", style: { marginBottom: "16px" } },
+  const asksCredit =
+    state.me.payments &&
+    state.me.can_admin_org &&
+    !state.setup.credits &&
+    !state.setup.invoiced;
+  if (asksCredit) return null;
+  return banner(
+    "info",
+    { style: { marginBottom: "16px" } },
     "This organisation is new. " +
       (state.me.billing
         ? "Models on this deployment's provider keys, models and MCP " +
           "servers inside the network, such as Keera Engine, and sandboxes"
         : "Models inside the network, such as Keera Engine, MCP servers " +
           "inside the network, and sandboxes") +
-      " are not open to it yet. An operator can lift this.",
+      " are not open to it yet. " +
+      (state.me.payments
+        ? "Its first card payment opens them."
+        : "An operator can lift this."),
   );
 }
 
