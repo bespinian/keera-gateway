@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net"
 	"net/url"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -37,8 +38,9 @@ const (
 	sandboxAPIPath    = "/apis/" + sandboxAPIGroup + "/" + sandboxAPIVersion
 )
 
-// The labels on every object this driver writes. They let a platform engineer
-// see whose sandbox is on a node without a login to the panel.
+// The labels on every object a driver writes, Kubernetes objects and podman
+// containers alike. They let a platform engineer see whose sandbox it is
+// without a login to the panel.
 const (
 	labelManagedBy = "app.kubernetes.io/managed-by"
 	labelName      = "app.kubernetes.io/name"
@@ -131,10 +133,7 @@ func (k *Kubernetes) Name() string { return "kubernetes" }
 // Capabilities reports what this driver does. The isolation tier comes from
 // the runtime mapping, so the driver cannot claim a tier it cannot deliver.
 func (k *Kubernetes) Capabilities() Capabilities {
-	return Capabilities{
-		Isolation: strongestIsolation(k.opts.Runtimes), Tiers: mappedTiers(k.opts.Runtimes),
-		Warm: k.opts.Warm,
-	}
+	return capabilitiesFor(k.opts.Runtimes, k.opts.Warm)
 }
 
 // collection is the path of the sandboxes in the namespace.
@@ -143,8 +142,11 @@ func (k *Kubernetes) collection() string {
 }
 
 // object is the path of one Sandbox.
-func (k *Kubernetes) object(ref Ref) string {
-	return k.collection() + "/" + url.PathEscape(objectName(ref))
+func (k *Kubernetes) object(ref Ref) string { return k.sandboxPath(objectName(ref)) }
+
+// sandboxPath is the path of the Sandbox with this name.
+func (k *Kubernetes) sandboxPath(name string) string {
+	return k.collection() + "/" + url.PathEscape(name)
 }
 
 // objectName is the Kubernetes name for a sandbox: the developer's name plus
@@ -213,7 +215,7 @@ type kubePod struct {
 	SecurityContext              *kubePodSecurity `json:"securityContext,omitempty"`
 	Containers                   []kubeContainer  `json:"containers"`
 	Volumes                      []kubeVolume     `json:"volumes,omitempty"`
-	ImagePullSecrets             []kubeLocalRef   `json:"imagePullSecrets,omitempty"`
+	ImagePullSecrets             []kubeNameRef    `json:"imagePullSecrets,omitempty"`
 	// RestartPolicy is Never, so a sandbox whose process died shows as
 	// finished instead of quietly restarting into an empty shell.
 	RestartPolicy string `json:"restartPolicy,omitempty"`
@@ -293,7 +295,8 @@ type kubeEmptyDir struct {
 	SizeLimit string `json:"sizeLimit,omitempty"`
 }
 
-type kubeLocalRef struct {
+// kubeNameRef points at another object by name.
+type kubeNameRef struct {
 	Name string `json:"name"`
 }
 
@@ -363,8 +366,8 @@ func (k *Kubernetes) Create(ctx context.Context, spec Spec) (Status, error) {
 }
 
 // labelsFor is the label set on every object for a sandbox, shared with the
-// claim path so the two cannot drift.
-func (k *Kubernetes) labelsFor(spec Spec) map[string]string {
+// claim path and podman so they cannot drift.
+func labelsFor(spec Spec) map[string]string {
 	labels := map[string]string{
 		labelManagedBy: "keera",
 		labelName:      "keera-sandbox",
@@ -381,7 +384,7 @@ func (k *Kubernetes) labelsFor(spec Spec) map[string]string {
 	return labels
 }
 
-func (k *Kubernetes) annotationsFor(spec Spec) map[string]string {
+func annotationsFor(spec Spec) map[string]string {
 	annotations := map[string]string{}
 	if spec.Owner != "" {
 		annotations[annotationOwner] = spec.Owner
@@ -412,7 +415,7 @@ func volumeClaimsFor(class policy.SandboxClass, storageClass string,
 // build is the Sandbox object for a spec. Warm pool templates use it too, so
 // warm and cold sandboxes are the same machine.
 func (k *Kubernetes) build(spec Spec, runtimeClass string) *kubeSandbox {
-	labels := k.labelsFor(spec)
+	labels := labelsFor(spec)
 
 	pod := kubePod{
 		ServiceAccountName: k.opts.ServiceAccount,
@@ -433,7 +436,7 @@ func (k *Kubernetes) build(spec Spec, runtimeClass string) *kubeSandbox {
 		pod.RuntimeClassName = &runtimeClass
 	}
 	for _, name := range k.opts.ImagePullSecrets {
-		pod.ImagePullSecrets = append(pod.ImagePullSecrets, kubeLocalRef{Name: name})
+		pod.ImagePullSecrets = append(pod.ImagePullSecrets, kubeNameRef{Name: name})
 	}
 
 	obj := &kubeSandbox{
@@ -443,7 +446,7 @@ func (k *Kubernetes) build(spec Spec, runtimeClass string) *kubeSandbox {
 			Name:        objectName(spec.Ref),
 			Namespace:   k.opts.Namespace,
 			Labels:      labels,
-			Annotations: k.annotationsFor(spec),
+			Annotations: annotationsFor(spec),
 		},
 		Spec: kubeSpec{
 			OperatingMode: "Running",
@@ -669,20 +672,15 @@ func (k *Kubernetes) setMode(ctx context.Context, ref Ref, mode string) error {
 // For a claim it moves the claim's own lifetime: deleting the claim is what
 // returns the sandbox, so the claim must not end before its Sandbox.
 func (k *Kubernetes) Extend(ctx context.Context, ref Ref, until time.Time) error {
-	path, patch := k.object(ref), map[string]any{
-		"spec": map[string]any{"shutdownTime": formatExpiry(until)},
-	}
+	end := formatExpiry(until)
 	if ref.Claimed() {
-		path = k.claimPath(ref)
-		patch = map[string]any{
-			"spec": map[string]any{
-				"lifecycle": map[string]any{
-					"shutdownTime": formatExpiry(until),
-				},
-			},
-		}
+		patch := map[string]any{"spec": map[string]any{
+			"lifecycle": map[string]any{"shutdownTime": end},
+		}}
+		return kubeNotFound(k.c.patch(ctx, k.claimPath(ref), patch))
 	}
-	return kubeNotFound(k.c.patch(ctx, path, patch))
+	patch := map[string]any{"spec": map[string]any{"shutdownTime": end}}
+	return kubeNotFound(k.c.patch(ctx, k.object(ref), patch))
 }
 
 // Terminate removes the sandbox and, through owner references, its pod,
@@ -729,15 +727,10 @@ func envList(env map[string]string) []kubeEnv {
 	if len(env) == 0 {
 		return nil
 	}
-	names := make([]string, 0, len(env))
-	for k := range env {
-		names = append(names, k)
-	}
+	out := make([]kubeEnv, 0, len(env))
 	// Sorted, so the same spec always gives the same pod template and the
 	// controller sees no change.
-	sort.Strings(names)
-	out := make([]kubeEnv, 0, len(names))
-	for _, n := range names {
+	for _, n := range slices.Sorted(maps.Keys(env)) {
 		out = append(out, kubeEnv{Name: n, Value: env[n]})
 	}
 	return out
@@ -776,12 +769,12 @@ func nullableString(s string) *string {
 // An unbound claim is ErrNotReady, not ErrNotFound: the claim exists and the
 // pool has not answered yet, so the answer is "wait", not "gone".
 func (k *Kubernetes) boundSandbox(ctx context.Context, ref Ref) (string, error) {
-	var c sandboxClaim
-	if err := k.c.get(ctx, k.claimPath(ref), &c); err != nil {
-		return "", kubeNotFound(err)
+	c, err := k.claim(ctx, ref)
+	if err != nil {
+		return "", err
 	}
 	if c.Status.Sandbox.Name == "" {
 		return "", fmt.Errorf("%w: the claim has not been bound to a sandbox yet", ErrNotReady)
 	}
-	return k.collection() + "/" + url.PathEscape(c.Status.Sandbox.Name), nil
+	return k.sandboxPath(c.Status.Sandbox.Name), nil
 }

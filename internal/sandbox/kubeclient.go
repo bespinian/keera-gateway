@@ -75,8 +75,6 @@ func newKubeClient(cfg KubeConfig) (*kubeClient, error) {
 		c.token = cfg.Token
 	} else {
 		c.tokenPath = serviceAccountDir + "/token"
-	}
-	if c.tokenPath != "" {
 		if err := c.readToken(); err != nil {
 			return nil, fmt.Errorf("reading the service account token: %w", err)
 		}
@@ -157,11 +155,6 @@ func (c *kubeClient) bearer() string {
 	return c.token
 }
 
-// kubeStatus is the error body the API server returns.
-type kubeStatus struct {
-	Message string `json:"message"`
-}
-
 // kubeError is a refusal from the API server.
 type kubeError struct {
 	Status int
@@ -234,7 +227,9 @@ func (c *kubeClient) do(ctx context.Context, method, path, contentType string, i
 		return err
 	}
 	if resp.StatusCode >= 300 {
-		var st kubeStatus
+		var st struct {
+			Message string `json:"message"`
+		}
 		_ = json.Unmarshal(raw, &st)
 		return &kubeError{Status: resp.StatusCode, Msg: st.Message, Path: path}
 	}
@@ -262,7 +257,7 @@ func (c *kubeClient) patch(ctx context.Context, path string, in any) error {
 // delete uses foreground propagation, so a sandbox reported as terminated
 // already has its pod on the way out.
 func (c *kubeClient) delete(ctx context.Context, path string) error {
-	return c.do(ctx, http.MethodDelete, path, "application/json",
+	return c.do(ctx, http.MethodDelete, path, "",
 		map[string]any{
 			"apiVersion":        "meta.k8s.io/v1",
 			"kind":              "DeleteOptions",

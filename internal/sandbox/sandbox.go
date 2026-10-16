@@ -187,13 +187,13 @@ func ValidPort(p int) bool {
 	return p >= PortForwardMin && p <= PortForwardMax
 }
 
-// DialTimeout bounds one connection attempt to a sandbox. It is short because
+// dialTimeout bounds one connection attempt to a sandbox. It is short because
 // the sandbox is close by and a developer is waiting at a terminal.
-const DialTimeout = 10 * time.Second
+const dialTimeout = 10 * time.Second
 
 // dialSandbox connects to addr, which serves the given port of the sandbox.
 func dialSandbox(ctx context.Context, ref Ref, port int, addr string) (net.Conn, error) {
-	d := net.Dialer{Timeout: DialTimeout}
+	d := net.Dialer{Timeout: dialTimeout}
 	conn, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("reaching sandbox %s on port %d: %w", ref.Name, port, err)
@@ -201,28 +201,17 @@ func dialSandbox(ctx context.Context, ref Ref, port int, addr string) (net.Conn,
 	return conn, nil
 }
 
-// strongestIsolation is the strongest tier with a runtime mapped to it.
-// Deriving it from the mapping means a driver cannot claim a tier it has no
-// runtime for.
-func strongestIsolation(runtimes map[policy.Isolation]string) policy.Isolation {
-	best := policy.IsolationStandard
-	for _, tier := range policy.Isolations {
-		if runtimes[tier] != "" {
-			best = tier
-		}
-	}
-	return best
-}
-
-// mappedTiers is every tier runtimes can deliver, weakest first.
-func mappedTiers(runtimes map[policy.Isolation]string) []policy.Isolation {
+// capabilitiesFor is what a driver with these runtimes can deliver. Deriving
+// it from the mapping means a driver cannot claim a tier it has no runtime for.
+func capabilitiesFor(runtimes map[policy.Isolation]string, warm bool) Capabilities {
 	tiers := []policy.Isolation{policy.IsolationStandard}
 	for _, tier := range policy.Isolations {
 		if tier != policy.IsolationStandard && runtimes[tier] != "" {
 			tiers = append(tiers, tier)
 		}
 	}
-	return tiers
+	// policy.Isolations is weakest first, so the last tier is the strongest.
+	return Capabilities{Isolation: tiers[len(tiers)-1], Tiers: tiers, Warm: warm}
 }
 
 // runtimeFor is the runtime a class runs on with the given driver. The

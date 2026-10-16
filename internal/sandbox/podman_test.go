@@ -46,7 +46,7 @@ func TestPodmanLabelsWhoseSandboxItIs(t *testing.T) {
 	spec := Spec{ID: "sbx_1", Name: "desk", Owner: "ada@example.com", Org: "org_1", Project: "prj_1"}
 	args, _ := p.runArgs(spec, "")
 	for _, label := range []string{
-		podmanLabelOwner + "=ada@example.com", podmanLabelOrg + "=org_1", podmanLabelProject + "=prj_1",
+		annotationOwner + "=ada@example.com", labelOrg + "=org_1", labelProject + "=prj_1",
 	} {
 		if !slices.Contains(args, label) {
 			t.Errorf("no label %s: %v", label, args)

@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -77,28 +79,13 @@ func (p *Podman) Name() string { return "podman" }
 // Capabilities reports what this driver does: no warm pool, and the
 // strongest isolation tier with a runtime mapped.
 func (p *Podman) Capabilities() Capabilities {
-	return Capabilities{
-		Isolation: strongestIsolation(p.opts.Runtimes), Tiers: mappedTiers(p.opts.Runtimes),
-	}
+	return capabilitiesFor(p.opts.Runtimes, false)
 }
 
 // containerName and volumeName depend only on the Ref, so a restarted gateway
 // finds what it left running.
 func containerName(ref Ref) string { return "keera-sbx-" + objectName(ref) }
 func volumeName(ref Ref) string    { return "keera-home-" + objectName(ref) }
-
-// The labels on every container, for an operator reading `podman ps`. They
-// are the only record of a sandbox outside the database, so they say whose it
-// is as the Kubernetes labels do.
-const (
-	podmanLabelID      = "keera.sandbox.id"
-	podmanLabelName    = "keera.sandbox.name"
-	podmanLabelOwner   = "keera.sandbox.owner"
-	podmanLabelOrg     = "keera.sandbox.org"
-	podmanLabelProject = "keera.sandbox.project"
-	podmanLabelClass   = "keera.sandbox.class"
-	podmanLabelPurpose = "keera.sandbox.purpose"
-)
 
 // Create starts one container.
 func (p *Podman) Create(ctx context.Context, spec Spec) (Status, error) {
@@ -132,18 +119,12 @@ func (p *Podman) runArgs(spec Spec, runtime string) (args, env []string) {
 	if p.opts.Network != "" {
 		args = append(args, "--network", p.opts.Network)
 	}
-	args = append(args,
-		"--label", podmanLabelID+"="+spec.ID,
-		"--label", podmanLabelName+"="+spec.Name,
-		"--label", podmanLabelClass+"="+spec.Class.Name,
-		"--label", podmanLabelPurpose+"="+string(spec.Purpose),
-	)
-	for _, l := range [][2]string{
-		{podmanLabelOwner, spec.Owner}, {podmanLabelOrg, spec.Org}, {podmanLabelProject, spec.Project},
-	} {
-		if l[1] != "" {
-			args = append(args, "--label", l[0]+"="+l[1])
-		}
+	// The Kubernetes labels and owner annotation. They are the only record of
+	// a sandbox outside the database.
+	labels := labelsFor(spec)
+	maps.Copy(labels, annotationsFor(spec))
+	for _, name := range slices.Sorted(maps.Keys(labels)) {
+		args = append(args, "--label", name+"="+labels[name])
 	}
 	if spec.Class.CPU > 0 {
 		args = append(args, "--cpus", strconv.FormatFloat(float64(spec.Class.CPU)/1000, 'f', 2, 64))
@@ -221,16 +202,14 @@ func (p *Podman) Status(ctx context.Context, ref Ref) (Status, error) {
 	}
 	st.State, st.Detail = podmanState(in)
 	st.Exited = in.State.Status == "exited" && in.State.ExitCode == 0
-	if st.State == policy.SandboxReady && in.Config.Labels[podmanLabelPurpose] != string(policy.PurposeAgent) &&
+	if st.State == policy.SandboxReady && in.Config.Labels[labelPurpose] != string(policy.PurposeAgent) &&
 		!p.sshdListens(ctx, ref) {
 		st.State, st.Detail = policy.SandboxPending, "setting up; sshd is not listening yet"
 	}
 	return st, nil
 }
 
-// sshdListens stands in for the Kubernetes readiness probe. The entrypoint
-// starts sshd last, so a running container is only ready once sshd answers:
-// before that, the repository may still be checking out.
+// sshdListens stands in for the Kubernetes readiness probe.
 //
 // It dials from the host, so the image needs no shell for it. A connection
 // alone proves nothing, since rootless podman's port forwarder accepts one
@@ -303,7 +282,7 @@ func (p *Podman) Revive(ctx context.Context, spec Spec) error {
 	if _, err := p.run(ctx, "volume", "inspect", volumeName(spec.Ref)); err != nil {
 		return podmanNotFound(err)
 	}
-	if err := p.removeContainer(ctx, containerName(spec.Ref)); err != nil && !isNoSuchContainer(err) {
+	if err := p.removeContainer(ctx, containerName(spec.Ref)); err != nil {
 		return err
 	}
 	_, err := p.Create(ctx, spec)
@@ -322,7 +301,7 @@ func (p *Podman) Extend(ctx context.Context, ref Ref, _ time.Time) error {
 
 // Terminate removes the container and its volume.
 func (p *Podman) Terminate(ctx context.Context, ref Ref) error {
-	if err := p.removeContainer(ctx, containerName(ref)); err != nil && !isNoSuchContainer(err) {
+	if err := p.removeContainer(ctx, containerName(ref)); err != nil {
 		return err
 	}
 	// The volume is named, so `podman rm --volumes` would leave it. Without
@@ -334,9 +313,12 @@ func (p *Podman) Terminate(ctx context.Context, ref Ref) error {
 	return nil
 }
 
+// removeContainer removes a container, and counts one already gone as removed.
 func (p *Podman) removeContainer(ctx context.Context, name string) error {
-	_, err := p.run(ctx, "rm", "--force", "--time", "20", name)
-	return err
+	if _, err := p.run(ctx, "rm", "--force", "--time", "20", name); err != nil && !isNoSuchContainer(err) {
+		return err
+	}
+	return nil
 }
 
 // Dial connects to the host port the container's port is published on. Like

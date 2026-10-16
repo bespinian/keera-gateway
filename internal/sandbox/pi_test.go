@@ -48,7 +48,6 @@ func TestPiConfigAgreesWithTheConnectCatalogue(t *testing.T) {
 }
 
 func TestPiConfigListsEveryReachableModel(t *testing.T) {
-	m := &Manager{}
 	models := []policy.Model{
 		{Alias: "keera-speed", Kind: policy.KindChat, MaxContext: 16384, Enabled: true},
 		{Alias: "keera-code", Kind: policy.KindChat, MaxContext: 0, Enabled: true},
@@ -64,7 +63,7 @@ func TestPiConfigListsEveryReachableModel(t *testing.T) {
 			} `json:"models"`
 		} `json:"providers"`
 	}
-	raw := m.piConfig("http://keera-gateway:8080/api", models, "")
+	raw := piConfig("http://keera-gateway:8080/api", models, "")
 	if err := json.Unmarshal([]byte(raw), &got); err != nil {
 		t.Fatalf("not valid JSON: %v\n%s", err, raw)
 	}
@@ -91,12 +90,11 @@ func TestPiConfigListsEveryReachableModel(t *testing.T) {
 }
 
 func TestPiConfigIsEmptyWithNothingToSay(t *testing.T) {
-	m := &Manager{}
-	if got := m.piConfig("", []policy.Model{{Alias: "a"}}, ""); got != "" {
+	if got := piConfig("", []policy.Model{{Alias: "a"}}, ""); got != "" {
 		t.Error("a sandbox with no gateway address should get no configuration " +
 			"rather than one pointing nowhere")
 	}
-	if got := m.piConfig("http://x/api", nil, ""); got != "" {
+	if got := piConfig("http://x/api", nil, ""); got != "" {
 		t.Error("a key that can reach nothing should get no configuration rather " +
 			"than an empty picker")
 	}
@@ -104,21 +102,20 @@ func TestPiConfigIsEmptyWithNothingToSay(t *testing.T) {
 
 // An agent's sandbox sends its own id, so its task is one session.
 func TestPiConfigSendsTheAgentSession(t *testing.T) {
-	m := &Manager{}
 	models := []policy.Model{{Alias: "keera-code", Kind: policy.KindChat, Enabled: true}}
 	var got struct {
 		Providers map[string]struct {
 			Headers map[string]string `json:"headers"`
 		} `json:"providers"`
 	}
-	raw := m.piConfig("http://x/api", models, "sbx_1")
+	raw := piConfig("http://x/api", models, "sbx_1")
 	if err := json.Unmarshal([]byte(raw), &got); err != nil {
 		t.Fatalf("not valid JSON: %v\n%s", err, raw)
 	}
 	if h := got.Providers[piProvider].Headers["X-Keera-Session"]; h != "sbx_1" {
 		t.Errorf("X-Keera-Session = %q, want sbx_1", h)
 	}
-	if raw := m.piConfig("http://x/api", models, ""); strings.Contains(raw, "headers") {
+	if raw := piConfig("http://x/api", models, ""); strings.Contains(raw, "headers") {
 		t.Errorf("an engineer's sandbox got a session header:\n%s", raw)
 	}
 }

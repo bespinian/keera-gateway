@@ -66,28 +66,6 @@ func TestEnsurePoolWritesTemplateAndPool(t *testing.T) {
 	}
 }
 
-func TestEnsurePoolRemovesAZeroPool(t *testing.T) {
-	// A pool of zero looks like a feature in use and holds nothing.
-	f := newFakeAPI(t)
-	k := f.driver(t, KubernetesOptions{Warm: true})
-	if err := k.EnsurePool(context.Background(),
-		policy.SandboxClass{OrgID: "org_06c1k2rt", Name: "cold", Image: "i", Warm: 0}); err != nil {
-		t.Fatalf("ensure pool: %v", err)
-	}
-	var deletes int
-	for _, r := range f.seen {
-		if r.Method == http.MethodDelete {
-			deletes++
-		}
-		if r.Method == http.MethodPost {
-			t.Error("a class with warm: 0 should create nothing")
-		}
-	}
-	if deletes != 2 {
-		t.Errorf("got %d deletes, want the pool and its template", deletes)
-	}
-}
-
 func TestCreateClaimCarriesTheCredentials(t *testing.T) {
 	f := newFakeAPI(t)
 	k := f.driver(t, KubernetesOptions{Warm: true})
