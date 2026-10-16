@@ -781,7 +781,7 @@ func fillProductID(p Provider, backends []string, productID string) ([]string, e
 	case productID != "" && !p.NeedsProductID:
 		return nil, fmt.Errorf("the %s provider serves everybody at the same address and "+
 			"takes no product_id", p.Name)
-	case productID != "" && !validProductID(productID):
+	case productID != "" && !ValidProductID(productID):
 		// It goes into a URL path, where a slash or space would build a
 		// different working-looking address.
 		return nil, fmt.Errorf("product_id %q must be letters, digits, hyphens and "+
@@ -806,8 +806,8 @@ func fillProductID(p Provider, backends []string, productID string) ([]string, e
 	return filled, nil
 }
 
-// validProductID reports whether an id is safe to put into a URL path.
-func validProductID(id string) bool {
+// ValidProductID reports whether an id is safe to put into a URL path.
+func ValidProductID(id string) bool {
 	for _, r := range id {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',

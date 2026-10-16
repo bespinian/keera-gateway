@@ -42,16 +42,23 @@ func RandomToken() string {
 	return base64.RawURLEncoding.EncodeToString(raw[:])
 }
 
-// keyLen is the length of every key Generate makes.
-var keyLen = len(Prefix) + base64.RawURLEncoding.EncodedLen(32)
-
 // WellFormed reports whether key has the shape Generate gives every key. A
 // token that does not cannot be a key, so it is refused without a query.
 func WellFormed(key string) bool {
-	if len(key) != keyLen || !strings.HasPrefix(key, Prefix) {
+	rest, ok := strings.CutPrefix(key, Prefix)
+	return ok && Encoded32(rest)
+}
+
+// encoded32Len is the length of 32 bytes in unpadded base64url.
+var encoded32Len = base64.RawURLEncoding.EncodedLen(32)
+
+// Encoded32 reports whether s has the shape RandomToken gives: 32 bytes in
+// unpadded base64url.
+func Encoded32(s string) bool {
+	if len(s) != encoded32Len {
 		return false
 	}
-	for _, c := range key[len(Prefix):] {
+	for _, c := range s {
 		switch {
 		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9', c == '-', c == '_':
 		default:
@@ -61,7 +68,11 @@ func WellFormed(key string) bool {
 	return true
 }
 
-// Hash returns the value stored in api_keys.key_hash for key.
+// Hash returns the value stored for a secret token: an API key, a session, a
+// command-line token or code, or a passkey link.
+//
+// SHA-256 rather than a password hash: each token is random, so there is no
+// dictionary to defend against, and this runs on every request.
 func Hash(key string) []byte {
 	sum := sha256.Sum256([]byte(key))
 	return sum[:]

@@ -119,9 +119,10 @@ type Config struct {
 	// them. With none and no passkeys, the operator key is the only way in.
 	OIDC []authn.OIDCConfig
 	// Passkeys lets administrators create accounts that sign in with a
-	// passkey instead of a directory. Off by default: such an account does
-	// not leave when someone leaves the directory. See docs/sso.md.
-	Passkeys bool
+	// passkey instead of a directory, and is nil when they are off. Off by
+	// default: such an account does not leave when someone leaves the
+	// directory. See docs/sso.md.
+	Passkeys *authn.RelyingParty
 }
 
 // Load reads the environment.
@@ -151,10 +152,18 @@ func Load() (Config, error) {
 		PublicURL:             strings.TrimRight(env("KEERA_PUBLIC_URL", ""), "/"),
 	}
 	c.OIDC = oidcProviders(c.PublicURL)
-	c.Passkeys = envBool("KEERA_PASSKEYS", false)
 	c.SecureCookies = envBool("KEERA_SECURE_COOKIES", c.servedOverHTTPS())
 	if err := c.validate(); err != nil {
 		return c, err
+	}
+	// A passkey is bound to the public URL's host name, so a URL a browser
+	// runs no WebAuthn on stops the start.
+	if envBool("KEERA_PASSKEYS", false) {
+		rp, err := authn.NewRelyingParty(c.PublicURL)
+		if err != nil {
+			return c, fmt.Errorf("KEERA_PASSKEYS: %w", err)
+		}
+		c.Passkeys = rp
 	}
 	deny, err := gateway.ParseUpstreamDeny(env("KEERA_UPSTREAM_DENY", gateway.DefaultUpstreamDeny))
 	if err != nil {
@@ -188,35 +197,11 @@ func (c Config) servedOverHTTPS() bool {
 }
 
 func (c Config) validate() error {
-	if err := c.validateCredentials(); err != nil {
-		return err
-	}
-	if err := c.validateLogging(); err != nil {
-		return err
-	}
-	if err := c.validateRetention(); err != nil {
-		return err
-	}
-	if err := c.validateSessionGap(); err != nil {
-		return err
-	}
-	if err := c.Sandbox.validate(); err != nil {
-		return err
-	}
-	if err := c.validateOIDC(); err != nil {
-		return err
-	}
-	return c.validatePasskeys()
-}
-
-// validatePasskeys checks the public URL is one a browser runs WebAuthn on,
-// since a passkey is bound to its host name.
-func (c Config) validatePasskeys() error {
-	if !c.Passkeys {
-		return nil
-	}
-	if _, err := authn.NewRelyingParty(c.PublicURL); err != nil {
-		return fmt.Errorf("KEERA_PASSKEYS: %w", err)
+	for _, check := range []func() error{c.validateCredentials, c.validateLogging,
+		c.validateRetention, c.validateSessionGap, c.Sandbox.validate, c.validateOIDC} {
+		if err := check(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -425,8 +410,12 @@ func providerFrom(prefix, name, redirect string, operators []string) authn.OIDCC
 
 // OIDCEnvPrefix is how every setting of the named provider starts:
 // "acme-ad" reads KEERA_OIDC_ACME_AD_*.
-func OIDCEnvPrefix(name string) string {
-	return "KEERA_OIDC_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_"
+func OIDCEnvPrefix(name string) string { return envPrefix("OIDC", name) }
+
+// envPrefix is how the settings of one named thing in a group start, such as
+// KEERA_PROVIDER_STEPPING_STONE_.
+func envPrefix(group, name string) string {
+	return "KEERA_" + group + "_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_"
 }
 
 // providerLabel is what the sign-in button says when no label is set. People

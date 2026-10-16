@@ -9,7 +9,7 @@ import (
 	"github.com/bespinian/keera-gateway/internal/catalog"
 )
 
-// The settings a provider's platform key takes, after its EnvPrefix.
+// The settings a provider's platform key takes, after its envPrefix.
 const (
 	platformAPIKey    = "API_KEY"
 	platformProductID = "PRODUCT_ID"
@@ -21,7 +21,7 @@ func platformKeys() (catalog.Platform, error) {
 	out := catalog.Platform{}
 	known := []string{}
 	for _, p := range catalog.Providers() {
-		prefix := catalog.EnvPrefix(p.Name)
+		prefix := envPrefix("PROVIDER", p.Name)
 		for _, s := range []string{platformAPIKey, platformProductID} {
 			known = append(known, prefix+s)
 		}
@@ -41,7 +41,7 @@ func platformKeys() (catalog.Platform, error) {
 		case !p.NeedsProductID && productID != "":
 			return nil, fmt.Errorf("%s does nothing: %s serves everybody at the same address",
 				prefix+platformProductID, p.Name)
-		case productID != "" && !validPathSegment(productID):
+		case productID != "" && !catalog.ValidProductID(productID):
 			return nil, fmt.Errorf("%s must be letters, digits, hyphens and underscores",
 				prefix+platformProductID)
 		}
@@ -58,12 +58,4 @@ func platformKeys() (catalog.Platform, error) {
 		}
 	}
 	return out, nil
-}
-
-// validPathSegment reports whether s is safe to put into a URL path.
-func validPathSegment(s string) bool {
-	return !strings.ContainsFunc(s, func(r rune) bool {
-		return (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') &&
-			r != '-' && r != '_'
-	})
 }

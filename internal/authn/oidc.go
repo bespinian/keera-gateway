@@ -160,11 +160,9 @@ type OIDC struct {
 }
 
 // NewOIDC discovers the provider's metadata. It does so once at start-up, so a
-// typo in the issuer URL stops the gateway rather than the first sign-in.
+// typo in the issuer URL stops the gateway rather than the first sign-in. cfg
+// has passed Validate: config checks every provider before anything starts.
 func NewOIDC(ctx context.Context, cfg OIDCConfig, client *http.Client) (*OIDC, error) {
-	if err := cfg.Validate(); err != nil {
-		return nil, err
-	}
 	if !cfg.Configured() {
 		return nil, nil
 	}

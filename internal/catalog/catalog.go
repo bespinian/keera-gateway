@@ -19,8 +19,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// File is the on-disk shape.
-type File struct {
+// file is the on-disk shape.
+type file struct {
 	Models []Model `yaml:"models"`
 }
 
@@ -78,23 +78,28 @@ type Model struct {
 	Disabled     bool `yaml:"disabled"`
 }
 
-// LoadModels reads and validates a model catalogue file.
+// LoadModels reads and validates a model template file.
 func LoadModels(path string) ([]policy.Model, error) {
+	return load(path, parseModelFile)
+}
+
+// load reads a template file and parses it, naming the file in any error.
+func load[T any](path string, parse func([]byte) ([]T, error)) ([]T, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	models, err := parseModelFile(raw)
+	entries, err := parse(raw)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	return models, nil
+	return entries, nil
 }
 
-// parseModelFile reads and validates a model catalogue file, and returns its
+// parseModelFile reads and validates a model template file, and returns its
 // models.
 func parseModelFile(raw []byte) ([]policy.Model, error) {
-	var f File
+	var f file
 	if err := decodeStrict(raw, &f); err != nil {
 		return nil, fmt.Errorf("parse catalogue: %w", err)
 	}

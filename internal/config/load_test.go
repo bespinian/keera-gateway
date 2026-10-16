@@ -629,14 +629,14 @@ func TestPasskeysNeedAPublicURLABrowserAccepts(t *testing.T) {
 		c, err := loadWith(t, valid(map[string]string{
 			"KEERA_PASSKEYS": "true", "KEERA_PUBLIC_URL": url,
 		}))
-		if ok && (err != nil || !c.Passkeys) {
+		if ok && (err != nil || c.Passkeys == nil) {
 			t.Errorf("%q: %v, passkeys %v; want them on", url, err, c.Passkeys)
 		}
 		if !ok && (err == nil || !strings.Contains(err.Error(), "KEERA_PASSKEYS")) {
 			t.Errorf("%q: error = %v, want one naming KEERA_PASSKEYS", url, err)
 		}
 	}
-	if c, err := loadWith(t, valid(nil)); err != nil || c.Passkeys {
+	if c, err := loadWith(t, valid(nil)); err != nil || c.Passkeys != nil {
 		t.Errorf("passkeys = %v, %v; want them off by default", c.Passkeys, err)
 	}
 }

@@ -2,7 +2,6 @@ package catalog
 
 import (
 	"fmt"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -14,8 +13,8 @@ import (
 // The sandbox catalogue works like the model catalogue: the file is a template,
 // and each new organisation gets its own copy of every class in it.
 
-// SandboxFile is the on-disk shape.
-type SandboxFile struct {
+// sandboxFile is the on-disk shape.
+type sandboxFile struct {
 	Sandboxes []Sandbox `yaml:"sandboxes"`
 }
 
@@ -65,7 +64,7 @@ const (
 )
 
 func parseSandboxFile(raw []byte) ([]policy.SandboxClass, error) {
-	var f SandboxFile
+	var f sandboxFile
 	if err := decodeStrict(raw, &f); err != nil {
 		return nil, fmt.Errorf("parse sandbox catalogue: %w", err)
 	}
@@ -290,17 +289,9 @@ func parseTTL(raw string, def time.Duration) (time.Duration, error) {
 	return d, nil
 }
 
-// LoadSandboxes reads and validates a sandbox catalogue file. Like the model
+// LoadSandboxes reads and validates a sandbox template file. Like the model
 // file it is a template: each new organisation starts with a copy of every
 // class it declares.
 func LoadSandboxes(path string) ([]policy.SandboxClass, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	classes, err := parseSandboxFile(raw)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	return classes, nil
+	return load(path, parseSandboxFile)
 }

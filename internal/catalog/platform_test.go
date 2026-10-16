@@ -7,12 +7,6 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-func TestTheProviderKeySettingsAreNamedAfterTheProvider(t *testing.T) {
-	if got := EnvPrefix("stepping-stone"); got != "KEERA_PROVIDER_STEPPING_STONE_" {
-		t.Errorf("prefix = %q", got)
-	}
-}
-
 // A model on the deployment's key goes to the provider's own endpoint at its
 // list prices, whatever the organisation wrote.
 func TestAModelOnTheDeploymentsKeyIsLockedToTheProvider(t *testing.T) {
