@@ -80,7 +80,9 @@ segments.
 A Messages or Responses request forwarded untranslated to its own provider (see
 [gateway.md](gateway.md#three-request-shapes)) is filtered in its own shape.
 Thinking blocks are never shown to a filter: Anthropic signs them and refuses
-one that was changed.
+one that was changed. Only the text a filter changed is written back; every
+other byte of the request goes on as the client sent it, so the provider's
+prompt cache still matches.
 
 Tool results are covered. For a coding agent, that is where file contents
 travel.

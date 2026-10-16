@@ -231,6 +231,64 @@ func TestAFilterRewritesANativeRequestInItsOwnShape(t *testing.T) {
 	}
 }
 
+func TestAFilterRewriteChangesOnlyTheTextItRewrote(t *testing.T) {
+	// Encoding the body again would sort the keys of every earlier turn, the
+	// model's own tool inputs included. The provider's prompt cache would
+	// miss from the first of them, and a thinking block next to an edited
+	// turn may be refused.
+	messages := `[{"role":"user","content":"read <a> & b"},` +
+		`{"role":"assistant","content":[` +
+		`{"type":"thinking","thinking":"ok","signature":"c2ln"},` +
+		`{"type":"tool_use","id":"t1","name":"edit","input":` +
+		`{"file_path":"/x","old_string":"a","new_string":"b","n":1.50}}]},` +
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1",` +
+		`"content":"found hunter2 in .env"}]}]`
+	b, err := parseBody([]byte(`{"model":"m","messages":` + messages + `}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := anthropicDialect{}.text(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	texts := doc.texts()
+	out := make([]string, len(texts))
+	for i, s := range texts {
+		out[i] = strings.ReplaceAll(s, "hunter2", "[CREDENTIAL]")
+	}
+	if err := doc.apply(b, out); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := b.value("messages")
+	if want := strings.Replace(messages, "hunter2", "[CREDENTIAL]", 1); string(got) != want {
+		t.Errorf("messages after the rewrite:\n%s\nwant only the secret changed:\n%s", got, want)
+	}
+}
+
+func TestARewriteOfABodyWithAKeyTwiceKeepsOnlyTheFilteredOne(t *testing.T) {
+	// The filters read the last copy of a key. A provider that reads the first
+	// would get text no filter saw, so such a body is encoded again whole.
+	b, err := parseBody([]byte(`{"model":"m","messages":[{"role":"user",` +
+		`"content":"hunter2 one","content":"hunter2 two"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := anthropicDialect{}.text(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := append([]string(nil), doc.texts()...)
+	for i, s := range out {
+		out[i] = strings.ReplaceAll(s, "hunter2", "[CREDENTIAL]")
+	}
+	if err := doc.apply(b, out); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := b.value("messages"); strings.Contains(string(got), "hunter2") {
+		t.Errorf("unfiltered text survived the rewrite: %s", got)
+	}
+}
+
 func TestAKeyInOtherCaseCannotCarryTextPastAFilter(t *testing.T) {
 	// The filters read the client's own body, looking "content" up as it is
 	// spelled. The fallback is sent a translation, which reads "Content" as

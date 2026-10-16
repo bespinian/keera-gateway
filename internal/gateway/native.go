@@ -3,9 +3,11 @@ package gateway
 import (
 	"bytes"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
@@ -254,14 +256,18 @@ func modelValue(raw []byte) (start, end int, ok bool) {
 // as they do in the Messages and Responses APIs. It decodes only the fields
 // that hold text, and writes back only those.
 type treeDoc struct {
-	roots  map[string]any
+	roots map[string]any
+	// raws is each root as it came, for apply to edit.
+	raws   map[string][]byte
 	values []string
 	set    []func(string)
 	// err is the first misspelled key the walk met. See checkKeys.
 	err error
 }
 
-func newTreeDoc() *treeDoc { return &treeDoc{roots: map[string]any{}} }
+func newTreeDoc() *treeDoc {
+	return &treeDoc{roots: map[string]any{}, raws: map[string][]byte{}}
+}
 
 // root decodes one field, keeping numbers as they were written. A missing or
 // null field is nil.
@@ -277,6 +283,7 @@ func (d *treeDoc) root(b *body, field string) (any, error) {
 		return nil, errors.New("the '" + field + "' field could not be read")
 	}
 	d.roots[field] = v
+	d.raws[field] = raw
 	return v, nil
 }
 
@@ -303,13 +310,139 @@ func (d *treeDoc) apply(b *body, replaced []string) error {
 		set(replaced[i])
 	}
 	for field, v := range d.roots {
-		encoded, err := json.Marshal(v)
+		encoded, err := patchStrings(d.raws[field], v)
 		if err != nil {
 			return err
 		}
 		b.set(field, encoded)
 	}
 	return nil
+}
+
+// patchStrings writes into raw the strings that differ in v, the value raw
+// decodes to after a filter's rewrite, and leaves every other byte as it came.
+//
+// Encoding v again would sort every object's keys, the model's own tool
+// inputs in earlier turns included. Those turns would then reach the provider
+// changed: its prompt cache would miss from the first of them, and Anthropic
+// may refuse or drop a thinking block next to an edited turn.
+//
+// A raw it cannot map, such as one with a key twice, is encoded again whole,
+// which also keeps one copy of the key: the one the filters read.
+func patchStrings(raw []byte, v any) ([]byte, error) {
+	var edits []stringEdit
+	root, err := spansOf(jsontext.NewDecoder(bytes.NewReader(raw)))
+	if err != nil || !changedStrings(v, root, &edits) {
+		return json.Marshal(v)
+	}
+	slices.SortFunc(edits, func(a, b stringEdit) int { return a.start - b.start })
+	out := make([]byte, 0, len(raw))
+	last := 0
+	for _, e := range edits {
+		out = append(out, raw[last:e.start]...)
+		out = appendQuoted(out, e.value)
+		last = e.end
+	}
+	return append(out, raw[last:]...), nil
+}
+
+// rawNode is where one value sits in the bytes it was decoded from.
+type rawNode struct {
+	kind jsontext.Kind
+	// start and end bound a scalar, quotes included. str is a string's value.
+	start, end int
+	str        string
+	members    map[string]*rawNode
+	elems      []*rawNode
+}
+
+// stringEdit is one string to write over raw[start:end].
+type stringEdit struct {
+	start, end int
+	value      string
+}
+
+// spansOf maps the next value dec reads. The decoder refuses a key that comes
+// twice in one object, which is what sends such a raw to be encoded whole.
+func spansOf(dec *jsontext.Decoder) (*rawNode, error) {
+	switch dec.PeekKind() {
+	case '{', '[':
+		tok, err := dec.ReadToken()
+		if err != nil {
+			return nil, err
+		}
+		n := &rawNode{kind: tok.Kind(), members: map[string]*rawNode{}}
+		for k := dec.PeekKind(); k != '}' && k != ']'; k = dec.PeekKind() {
+			var name string
+			if n.kind == '{' {
+				tok, err := dec.ReadToken()
+				if err != nil {
+					return nil, err
+				}
+				name = tok.String()
+			}
+			child, err := spansOf(dec)
+			if err != nil {
+				return nil, err
+			}
+			if n.kind == '{' {
+				n.members[name] = child
+			} else {
+				n.elems = append(n.elems, child)
+			}
+		}
+		if _, err := dec.ReadToken(); err != nil {
+			return nil, err
+		}
+		return n, nil
+	}
+	val, err := dec.ReadValue()
+	if err != nil {
+		return nil, err
+	}
+	end := int(dec.InputOffset())
+	n := &rawNode{kind: val.Kind(), start: end - len(val), end: end}
+	if n.kind == '"' {
+		s, err := jsontext.AppendUnquote(nil, val)
+		if err != nil {
+			return nil, err
+		}
+		n.str = string(s)
+	}
+	return n, nil
+}
+
+// changedStrings collects the strings in v that differ from those at n. It
+// returns false when v is not shaped like n, which a filter never causes.
+func changedStrings(v any, n *rawNode, edits *[]stringEdit) bool {
+	switch v := v.(type) {
+	case string:
+		if n.kind != '"' {
+			return false
+		}
+		if v != n.str {
+			*edits = append(*edits, stringEdit{n.start, n.end, v})
+		}
+	case map[string]any:
+		if n.kind != '{' || len(n.members) != len(v) {
+			return false
+		}
+		for k, e := range v {
+			if c, ok := n.members[k]; !ok || !changedStrings(e, c, edits) {
+				return false
+			}
+		}
+	case []any:
+		if n.kind != '[' || len(n.elems) != len(v) {
+			return false
+		}
+		for i, e := range v {
+			if !changedStrings(e, n.elems[i], edits) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // objects is the objects in a decoded array, skipping anything else. It
