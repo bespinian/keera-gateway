@@ -173,41 +173,38 @@ func (m *mcpRun) toolCalls(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	none := "tool calls in the last " + shortDuration(f.since)
 	if f.summary {
 		q.Set("summary", "1")
-		var res struct {
-			Data []store.ToolSummary `json:"data"`
-		}
-		if err := c.do(ctx, "GET", "/v1/tool-calls?"+q.Encode(), nil, &res); err != nil {
+		rows, err := list[store.ToolSummary](ctx, c, "/v1/tool-calls?"+q.Encode())
+		if err != nil {
 			return err
 		}
-		return out(m.asJSON, res.Data, func(w *table) {
-			if len(res.Data) == 0 {
-				printNone(w, "tool calls in the last "+shortDuration(f.since), "")
+		return out(m.asJSON, rows, func(w *table) {
+			if len(rows) == 0 {
+				printNone(w, none, "")
 				return
 			}
-			printToolSummary(w, res.Data)
+			printToolSummary(w, rows)
 		})
 	}
 	q.Set("limit", strconv.Itoa(f.limit))
-	var res struct {
-		Data []store.ToolCallRow `json:"data"`
-	}
-	if err := c.do(ctx, "GET", "/v1/tool-calls?"+q.Encode(), nil, &res); err != nil {
+	rows, err := list[store.ToolCallRow](ctx, c, "/v1/tool-calls?"+q.Encode())
+	if err != nil {
 		return err
 	}
-	return out(m.asJSON, res.Data, func(w *table) {
-		if len(res.Data) == 0 {
-			printNone(w, "tool calls in the last "+shortDuration(f.since), "")
+	return out(m.asJSON, rows, func(w *table) {
+		if len(rows) == 0 {
+			printNone(w, none, "")
 			return
 		}
-		printToolCalls(w, res.Data)
+		printToolCalls(w, rows)
 	})
 }
 
 // connect prints how to point the common clients at one server through
-// the gateway. The key stays in the environment, as it does for 'keera
-// connect'.
+// the gateway. Codex and an mcp.json read the key from the environment; the
+// Claude Code line has the shell expand it, so Claude Code stores it.
 func (m *mcpRun) connect(ctx context.Context) error {
 	alias := m.fs.Arg(0)
 	if _, err := m.find(ctx, alias); err != nil {
@@ -251,9 +248,7 @@ func printMCPServers(w *table, servers []policy.MCPServer) {
 func printMCPServer(w *table, m policy.MCPServer) {
 	show(w, "alias", m.Alias)
 	show(w, "endpoint", m.URL)
-	if m.Description != "" {
-		show(w, "description", m.Description)
-	}
+	showIfSet(w, "description", m.Description)
 	header := m.AuthHeader
 	if header == "" {
 		header = "Authorization (bearer)"

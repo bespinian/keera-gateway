@@ -95,7 +95,7 @@ type aliasRun struct {
 // commands share. The caller declares its own, then calls parse.
 func newAliasRun(cmd, kind, noun string, args []string) *aliasRun {
 	return &aliasRun{
-		cmdRun: newCmdRun(cmd, args, "yes", "json"),
+		cmdRun: newCmdRun(cmd, args),
 		kind:   kind, noun: noun, addHint: "keera " + cmd + " add <alias>",
 	}
 }

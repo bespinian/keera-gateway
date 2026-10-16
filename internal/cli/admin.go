@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -130,6 +131,42 @@ func notFound(noun, name, orgID, cmd string) error {
 	return notFoundError(fmt.Sprintf("no %s %q%s (see: keera %s list)", noun, name, where, cmd))
 }
 
+// findIn picks the entry given names: by id, or else by name, ignoring case.
+func findIn[T any](entries []T, given string, idName func(T) (string, string)) (T, bool) {
+	given = strings.TrimSpace(given)
+	for _, byName := range []bool{false, true} {
+		for _, e := range entries {
+			id, name := idName(e)
+			if (!byName && id == given) || (byName && strings.EqualFold(name, given)) {
+				return e, true
+			}
+		}
+	}
+	var zero T
+	return zero, false
+}
+
+// findNamed lists path in one organisation and picks the entry given names, as
+// findIn does. noun and cmd word the error when there is none. org is resolved
+// as resolveOrg does.
+func findNamed[T any](ctx context.Context, c *client, org, given, path, noun, cmd string,
+	idName func(T) (string, string),
+) (T, error) {
+	var zero T
+	orgID, err := resolveOrg(ctx, c, org)
+	if err != nil {
+		return zero, err
+	}
+	entries, err := list[T](ctx, c, inOrg(path, orgID))
+	if err != nil {
+		return zero, err
+	}
+	if e, ok := findIn(entries, given, idName); ok {
+		return e, nil
+	}
+	return zero, notFound(noun, given, orgID, cmd)
+}
+
 // keepRaw sends a request and decodes the answer into v. It returns the
 // answer as it came, so --json prints everything the control API said rather
 // than only the fields a table shows.
@@ -174,10 +211,8 @@ func resolveOrg(ctx context.Context, c *client, given string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	for _, o := range orgs {
-		if o.ID == given || strings.EqualFold(o.Name, given) {
-			return o.ID, nil
-		}
+	if o, ok := findIn(orgs, given, func(o store.Org) (string, string) { return o.ID, o.Name }); ok {
+		return o.ID, nil
 	}
 	return "", notFound("organisation", given, "", "org")
 }
@@ -341,6 +376,13 @@ func show(w *table, name string, v any) {
 	_, _ = fmt.Fprintf(w, "%s\t%v\n", name, v)
 }
 
+// showIfSet writes a row only when there is something to show.
+func showIfSet(w *table, name, v string) {
+	if v != "" {
+		show(w, name, v)
+	}
+}
+
 // firstLine renders a multi-line value as the one line a table has room for.
 func firstLine(s string) string {
 	line, rest, cut := strings.Cut(s, "\n")
@@ -361,18 +403,10 @@ func oneLine(s string) string {
 	if r := []rune(s); len(r) > 100 {
 		return string(r[:99]) + "…"
 	}
-	if s == "" {
-		return "-"
-	}
-	return s
+	return dash(s)
 }
 
-func dash(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
-}
+func dash(s string) string { return cmp.Or(s, "-") }
 
 // yesNo is how every table says yes or no, painted like a state.
 func yesNo(b bool) string {

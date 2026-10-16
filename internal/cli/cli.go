@@ -113,33 +113,46 @@ func Fail(err error) {
 	fmt.Fprintln(os.Stderr, styleErr.bad("keera:"), err)
 }
 
-// takeURL moves the global --url from the arguments into urlFlag. Taking it
-// here means no command can forget to declare it.
+// takeURL moves the global --url from the arguments into urlFlag.
 func takeURL(args []string) ([]string, error) {
+	return takeGlobal(args, "url", func(v string) error {
+		if v == "" {
+			return errors.New("--url needs an address, such as --url https://keera.example.ch")
+		}
+		urlFlag = v
+		if !strings.Contains(v, "://") {
+			// People type a bare host, and deployments are served over https.
+			urlFlag = "https://" + v
+		}
+		return nil
+	})
+}
+
+// takeGlobal moves a global flag, as --name value or --name=value, out of the
+// arguments and hands each value to set. Taking it here means no command can
+// forget to declare it. It stops at "--": what follows belongs to the command
+// being run, as in `keera sandbox ssh box -- git status`.
+func takeGlobal(args []string, name string, set func(string) error) ([]string, error) {
 	out := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
+		value := ""
 		switch {
-		case arg == "--url" || arg == "-url":
-			if i+1 >= len(args) {
-				return nil, errors.New("--url needs an address, such as " +
-					"--url https://keera.example.ch")
-			}
-			i++
-			urlFlag = args[i]
-		case strings.HasPrefix(arg, "--url=") || strings.HasPrefix(arg, "-url="):
-			urlFlag = arg[strings.Index(arg, "=")+1:]
 		case arg == "--":
-			// What follows belongs to the command being run, as in
-			// `keera sandbox ssh box -- git status`.
 			return append(out, args[i:]...), nil
+		case arg == "--"+name || arg == "-"+name:
+			if i+1 < len(args) {
+				i++
+				value = args[i]
+			}
+		case strings.HasPrefix(arg, "--"+name+"=") || strings.HasPrefix(arg, "-"+name+"="):
+			value = arg[strings.Index(arg, "=")+1:]
 		default:
 			out = append(out, arg)
 			continue
 		}
-		if urlFlag != "" && !strings.Contains(urlFlag, "://") {
-			// People type a bare host, and deployments are served over https.
-			urlFlag = "https://" + urlFlag
+		if err := set(value); err != nil {
+			return nil, err
 		}
 	}
 	return out, nil

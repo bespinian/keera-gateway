@@ -52,13 +52,7 @@ type sandboxRun struct {
 }
 
 func sandboxCmd(ctx context.Context, args []string) error {
-	// ssh runs 'proxy' from a ProxyCommand, which names the organisation so
-	// that switching to another later does not break it.
-	shared := []string{"yes", "json"}
-	if verbAsked("sandbox", args) == "proxy" {
-		shared = append(shared, "org")
-	}
-	r := &sandboxRun{cmdRun: newCmdRun("sandbox", args, shared...)}
+	r := &sandboxRun{cmdRun: newCmdRun("sandbox", args)}
 	fs := r.fs
 	fs.StringVar(&r.project, "project", "", "project the sandbox belongs to, by name or id; without it, "+
 		"the organisation's oldest. Its key is in that project, so the budget, the rate limit "+
@@ -398,20 +392,11 @@ func sshInto(ctx context.Context, c *client, org, name string, rest []string) er
 	if err != nil {
 		return err
 	}
-	args := append([]string{
-		"-o", "ProxyCommand=" + proxyCommand(self, c.base, sb.ID, sb.OrgID),
-		// No host key is worth pinning: it belongs to the image, so every
-		// sandbox from that image shares it. The gateway has already
-		// authenticated and encrypted the connection.
-		"-o", "StrictHostKeyChecking=no",
-		"-o", "UserKnownHostsFile=/dev/null",
-		// Otherwise ssh warns about the above on every connection, which
-		// teaches people to ignore ssh warnings.
-		"-o", "LogLevel=ERROR",
-		// The image refuses it too, but one built before that would not.
-		"-o", "ForwardAgent=no",
-		sandboxUser + "@" + sb.Name,
-	}, rest...)
+	var args []string
+	for _, o := range sshOptions(proxyCommand(self, c.base, sb.ID, sb.OrgID)) {
+		args = append(args, "-o", o[0]+"="+o[1])
+	}
+	args = append(append(args, sandboxUser+"@"+sb.Name), rest...)
 
 	cmd := exec.CommandContext(ctx, "ssh", args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
@@ -423,6 +408,24 @@ func sshInto(ctx context.Context, c *client, org, name string, rest []string) er
 		return fmt.Errorf("running ssh: %w", err)
 	}
 	return nil
+}
+
+// sshOptions are the ssh options that reach a sandbox through proxy. `sandbox
+// ssh` passes them with -o and `sandbox config` prints them as a block.
+func sshOptions(proxy string) [][2]string {
+	return [][2]string{
+		{"ProxyCommand", proxy},
+		// No host key is worth pinning: it belongs to the image, so every
+		// sandbox from that image shares it. The gateway has already
+		// authenticated and encrypted the connection.
+		{"StrictHostKeyChecking", "no"},
+		{"UserKnownHostsFile", "/dev/null"},
+		// Otherwise ssh warns about the above on every connection, which
+		// teaches people to ignore ssh warnings.
+		{"LogLevel", "ERROR"},
+		// The image refuses it too, but one built before that would not.
+		{"ForwardAgent", "no"},
+	}
 }
 
 // proxyCommand is the ProxyCommand that reaches one sandbox through the
@@ -594,15 +597,13 @@ func writeSSHConfig(base, orgID string) error {
 	}
 	path := filepath.Join("~", ".ssh", "config")
 	fmt.Fprintf(os.Stderr, "Append this to %s. Then 'ssh %s<name>' reaches any sandbox you "+
-		"own, and so does VS Code's Remote-SSH and JetBrains Gateway - they need an ssh "+
+		"own in this organisation, and so does VS Code's Remote-SSH and JetBrains Gateway - they need an ssh "+
 		"transport and nothing else.\n\n", path, sshHostPrefix)
 	fmt.Printf("Host %s*\n", sshHostPrefix)
 	fmt.Printf("  User %s\n", sandboxUser)
-	fmt.Printf("  ProxyCommand %s\n", proxyCommand(self, base, "%n", orgID))
-	fmt.Printf("  StrictHostKeyChecking no\n")
-	fmt.Printf("  UserKnownHostsFile /dev/null\n")
-	fmt.Printf("  LogLevel ERROR\n")
-	fmt.Printf("  ForwardAgent no\n")
+	for _, o := range sshOptions(proxyCommand(self, base, "%n", orgID)) {
+		fmt.Printf("  %s %s\n", o[0], o[1])
+	}
 	fmt.Fprintf(os.Stderr, "\nThe ProxyCommand carries the connection over this gateway's own "+
 		"port, so there is no second address to publish and no jump host. It signs in "+
 		"the way every other keera command does.\n")
@@ -651,13 +652,6 @@ func printSandbox(w *table, sb store.Sandbox) {
 		ranFor(sb.RunningSeconds), ranFor(sb.CoreSeconds()))
 	if sb.Purpose == policy.PurposeEngineer && sb.State == policy.SandboxReady {
 		_, _ = fmt.Fprintf(w, "\nkeera sandbox ssh %s\n", sb.Name)
-	}
-}
-
-// showIfSet writes a row only when there is something to show.
-func showIfSet(w *table, name, v string) {
-	if v != "" {
-		show(w, name, v)
 	}
 }
 

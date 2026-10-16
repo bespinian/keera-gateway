@@ -610,9 +610,7 @@ func credentialSource(m policy.Model) string {
 // its check sends one plain request.
 func printProbe(w *table, p gateway.Probe, chat bool) {
 	show(w, "alias", p.Alias)
-	if p.Backend != "" {
-		show(w, "backend", p.Backend)
-	}
+	showIfSet(w, "backend", p.Backend)
 	if p.Reachable {
 		show(w, "reachable", fmt.Sprintf("%s (HTTP %d)", yesNo(true), p.Status))
 	} else {
@@ -629,9 +627,7 @@ func printProbe(w *table, p gateway.Probe, chat bool) {
 			show(w, "tool calls", yesNo(p.ToolCalls))
 		}
 	}
-	if p.Served != "" {
-		show(w, "served model", p.Served)
-	}
+	showIfSet(w, "served model", p.Served)
 	if p.TTFTMillis > 0 {
 		show(w, "first token", fmt.Sprintf("%dms", p.TTFTMillis))
 	}
@@ -641,9 +637,7 @@ func printProbe(w *table, p gateway.Probe, chat bool) {
 	for _, warning := range p.Warnings {
 		show(w, "warning", warning)
 	}
-	if p.Error != "" {
-		show(w, "error", p.Error)
-	}
+	showIfSet(w, "error", p.Error)
 	if !p.OK && p.Sample != "" {
 		show(w, "sample", firstLine(p.Sample))
 	}

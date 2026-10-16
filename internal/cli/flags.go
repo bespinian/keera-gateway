@@ -26,16 +26,17 @@ type cmdRun struct {
 	// has it, else the one 'keera org switch' chose, else empty.
 	org string
 
-	// The flags many commands share, declared when newCmdRun is asked to.
+	// The flags many commands share. Every command declares them, and help.go
+	// says which verbs take them.
 	orgFlag string
 	yes     bool
 	asJSON  bool
 }
 
 // newCmdRun takes the verb off args, when cmd has verbs, and declares the
-// shared flags named: "org", "yes" and "json". Few commands have --org: the
-// others act on the organisation 'keera org switch' chose.
-func newCmdRun(cmd string, args []string, shared ...string) *cmdRun {
+// shared flags --org, --yes and --json. Few verbs take --org: the others act
+// on the organisation 'keera org switch' chose.
+func newCmdRun(cmd string, args []string) *cmdRun {
 	entry, _ := find(cmd)
 	r := &cmdRun{c: newClient(), cmd: cmd, hasVerbs: len(entry.subs) > 0, args: args, rest: args}
 	r.org = r.c.org
@@ -43,16 +44,9 @@ func newCmdRun(cmd string, args []string, shared ...string) *cmdRun {
 		r.verb, r.rest = split(args)
 	}
 	r.fs = flag.NewFlagSet(cmd, flag.ContinueOnError)
-	for _, name := range shared {
-		switch name {
-		case "org":
-			r.fs.StringVar(&r.orgFlag, "org", "", orgUsage)
-		case "yes":
-			r.fs.BoolVar(&r.yes, "yes", false, yesUsage)
-		case "json":
-			r.fs.BoolVar(&r.asJSON, "json", false, jsonUsage)
-		}
-	}
+	r.fs.StringVar(&r.orgFlag, "org", "", orgUsage)
+	r.fs.BoolVar(&r.yes, "yes", false, yesUsage)
+	r.fs.BoolVar(&r.asJSON, "json", false, jsonUsage)
 	return r
 }
 

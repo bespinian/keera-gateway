@@ -8,25 +8,20 @@ import (
 )
 
 // confirm says what is about to happen, one line each under a heading, then
-// asks as confirmTyping does. A line meant as a bullet starts with two spaces.
-func confirm(title string, lines []string, noun, want, undone string) error {
-	fmt.Fprintln(os.Stderr, styleErr.head(title))
-	for _, line := range lines {
-		fmt.Fprintln(os.Stderr, line)
-	}
-	return confirmTyping(noun, want, undone)
-}
-
-// confirmTyping makes somebody type a thing's name back before something
-// irreversible happens to it. A reflex "y" does not catch the wrong row;
-// typing the name does.
+// makes somebody type a thing's name back before something irreversible
+// happens to it. A reflex "y" does not catch the wrong row; typing the name
+// does. A line meant as a bullet starts with two spaces.
 //
 // noun is what the name is called ("alias", "name"), and undone says what did
 // not happen when the answer is wrong.
 //
 // The prompt goes to stderr, like the lines before it, so stdout carries only
 // the result: `delete --json` stays valid JSON.
-func confirmTyping(noun, want, undone string) error {
+func confirm(title string, lines []string, noun, want, undone string) error {
+	fmt.Fprintln(os.Stderr, styleErr.head(title))
+	for _, line := range lines {
+		fmt.Fprintln(os.Stderr, line)
+	}
 	fmt.Fprintf(os.Stderr, "\n%s ", styleErr.head("Type the "+noun+" to confirm:"))
 	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil {

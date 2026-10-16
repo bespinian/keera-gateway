@@ -18,7 +18,7 @@ import (
 // binary, so an older CLI cannot hand out a configuration the deployment has
 // moved on from.
 func connectCmd(ctx context.Context, args []string) error {
-	r := newCmdRun("connect", args, "json")
+	r := newCmdRun("connect", args)
 	fs := r.fs
 	key := fs.String("key", "",
 		"the API key whose models to configure, by name or id (default: your first active key)")

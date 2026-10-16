@@ -11,6 +11,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -94,36 +95,25 @@ func isTerminal(f *os.File) bool {
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
-// takeColorMode reads --color off the arguments, as takeURL does --url.
+// takeColorMode reads --color, and --no-color, off the arguments.
 func takeColorMode(args []string) ([]string, error) {
-	out := make([]string, 0, len(args))
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "--":
-			// Everything after it belongs to whatever this command runs.
-			return append(out, args[i:]...), nil
-		case arg == "--no-color" || arg == "-no-color":
-			colorMode = "never"
-		case arg == "--color" || arg == "-color":
-			if i+1 >= len(args) {
-				return nil, badColor("")
-			}
-			i++
-			colorMode = args[i]
-		case strings.HasPrefix(arg, "--color=") || strings.HasPrefix(arg, "-color="):
-			colorMode = arg[strings.Index(arg, "=")+1:]
-		default:
-			out = append(out, arg)
-			continue
+	args = slices.Clone(args)
+	for i, arg := range args {
+		if arg == "--" {
+			break
 		}
-		switch colorMode {
-		case "auto", "always", "never":
-		default:
-			return nil, badColor(colorMode)
+		if arg == "--no-color" || arg == "-no-color" {
+			args[i] = "--color=never"
 		}
 	}
-	return out, nil
+	return takeGlobal(args, "color", func(v string) error {
+		switch v {
+		case "auto", "always", "never":
+			colorMode = v
+			return nil
+		}
+		return badColor(v)
+	})
 }
 
 // badColor is what --color says to a word it does not have.

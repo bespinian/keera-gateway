@@ -254,17 +254,13 @@ func printRouter(w *table, rt policy.Router) {
 	if !rt.Decides() {
 		printRouterOrder(w, rt)
 		show(w, "cannot place", fallbackLabel(rt))
-		if rt.Description != "" {
-			show(w, "description", rt.Description)
-		}
+		showIfSet(w, "description", rt.Description)
 		return
 	}
 	show(w, "decides with", rt.Model)
 	show(w, "destinations", strings.Join(rt.Destinations, ", "))
 	show(w, "cannot decide", fallbackLabel(rt))
-	if rt.Description != "" {
-		show(w, "description", rt.Description)
-	}
+	showIfSet(w, "description", rt.Description)
 	// The instruction is the router, so it is printed whole.
 	printBlock(w, "instruction", strings.Split(rt.Prompt, "\n"))
 }
@@ -290,9 +286,7 @@ func printRouterOrder(w *table, rt policy.Router) {
 
 func printRouterProbe(w *table, p gateway.RouterProbe) {
 	show(w, "router", p.Alias)
-	if p.Model != "" {
-		show(w, "decides with", p.Model)
-	}
+	showIfSet(w, "decides with", p.Model)
 	if p.Mode.Sizes() {
 		show(w, "places between", strings.Join(p.Destinations, ", "))
 	} else {
@@ -308,9 +302,7 @@ func printRouterProbe(w *table, p gateway.RouterProbe) {
 	if p.CostMicros > 0 {
 		show(w, "cost of these runs", policy.FormatMoney(p.CostMicros))
 	}
-	if p.Error != "" {
-		show(w, "error", p.Error)
-	}
+	showIfSet(w, "error", p.Error)
 	for _, warning := range p.Warnings {
 		show(w, "warning", warning)
 	}

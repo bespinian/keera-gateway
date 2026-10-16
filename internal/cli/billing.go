@@ -25,20 +25,12 @@ type billingRun struct {
 }
 
 func billingCmd(ctx context.Context, args []string) error {
+	r := &billingRun{cmdRun: newCmdRun("billing", args)}
 	// An operator moves another organisation's money with grant and
 	// invoiced, so those name it every time rather than trusting whichever
 	// organisation is chosen. Every other verb acts on the chosen one.
-	shared := []string{"json"}
-	switch verbAsked("billing", args) {
-	case "grant", "invoiced":
-		shared = append(shared, "org")
-	case "forget-card":
-		shared = append(shared, "yes")
-	}
-	r := &billingRun{cmdRun: newCmdRun("billing", args, shared...)}
-	if f := r.fs.Lookup("org"); f != nil {
-		f.Usage = "organisation, by name or id (required)"
-	}
+	r.reword("grant", "org", "organisation, by name or id (required)")
+	r.reword("invoiced", "org", "organisation, by name or id (required)")
 	r.fs.StringVar(&r.month, "month", "", "the month to bill, as YYYY-MM (default: this month)")
 	r.fs.Float64Var(&r.amount, "amount", 0, "an amount in CHF, such as 100")
 	r.fs.Float64Var(&r.below, "below", 0, "the balance in CHF that starts an automatic top-up")
@@ -47,7 +39,7 @@ func billingCmd(ctx context.Context, args []string) error {
 	r.fs.BoolVar(&r.saveCard, "save-card", false,
 		"keep the card for automatic top-ups and the next payment")
 	r.fs.StringVar(&r.note, "note", "", "why, shown in the organisation's payments")
-	r.fs.IntVar(&r.limit, "limit", 50, limitUsage)
+	r.fs.IntVar(&r.limit, "limit", reportLimit, limitUsage)
 	if done, err := r.parse(); done {
 		return err
 	}
@@ -146,17 +138,10 @@ type creditResponse struct {
 // confirmForget names the card and what stops with it, as the panel does,
 // and makes the administrator confirm. PostFinance forgets it too, so it
 // cannot be put back.
-func (r *billingRun) confirmForget(ctx context.Context) error {
-	path, err := r.account(ctx, "/v1/billing/account")
+func (r *billingRun) confirmForget(ctx context.Context, orgID string) error {
+	res, err := r.creditAccount(ctx, orgID)
 	if err != nil {
 		return err
-	}
-	var res creditResponse
-	if err := r.c.do(ctx, "GET", path, nil, &res); err != nil {
-		return err
-	}
-	if !res.Payments {
-		return errNoPayments
 	}
 	if res.Account.Card == nil {
 		return errors.New("there is no saved card to forget")
@@ -174,17 +159,26 @@ func (r *billingRun) confirmForget(ctx context.Context) error {
 var errNoPayments = errors.New("this deployment takes no payments: nobody pays in advance " +
 	"(see docs/billing.md)")
 
+// creditAccount reads one organisation's credit account.
+func (r *billingRun) creditAccount(ctx context.Context, orgID string) (creditResponse, error) {
+	var res creditResponse
+	if err := r.c.do(ctx, "GET", inOrg("/v1/billing/account", orgID), nil, &res); err != nil {
+		return res, err
+	}
+	if !res.Payments {
+		return res, errNoPayments
+	}
+	return res, nil
+}
+
 func (r *billingRun) credit(ctx context.Context) error {
-	path, err := r.account(ctx, "/v1/billing/account")
+	orgID, err := resolveOrg(ctx, r.c, r.org)
 	if err != nil {
 		return err
 	}
-	var res creditResponse
-	if err := r.c.do(ctx, "GET", path, nil, &res); err != nil {
+	res, err := r.creditAccount(ctx, orgID)
+	if err != nil {
 		return err
-	}
-	if !res.Payments {
-		return errNoPayments
 	}
 	return out(r.asJSON, res, func(w *table) { printCredit(w, res) })
 }
@@ -311,16 +305,16 @@ func (r *billingRun) autoTopUp(ctx context.Context) error {
 }
 
 func (r *billingRun) forgetCard(ctx context.Context) error {
-	path, err := r.account(ctx, "/v1/billing/account/card")
+	orgID, err := resolveOrg(ctx, r.c, r.org)
 	if err != nil {
 		return err
 	}
 	if !r.yes {
-		if err := r.confirmForget(ctx); err != nil {
+		if err := r.confirmForget(ctx, orgID); err != nil {
 			return err
 		}
 	}
-	if err := r.c.do(ctx, "DELETE", path, nil, nil); err != nil {
+	if err := r.c.do(ctx, "DELETE", inOrg("/v1/billing/account/card", orgID), nil, nil); err != nil {
 		return err
 	}
 	fmt.Println("The saved card is forgotten, and the automatic top-up stops with it.")

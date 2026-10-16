@@ -116,13 +116,8 @@ func (f *guardrailFlags) apply(lim *policy.Limits) error {
 		lim.SystemPrompt = &text
 	}
 	// Clearing this scope's filters does not lift those an outer level applies.
-	switch {
-	case f.noFilters && f.filters != "":
-		return opposites("filters", "no-filters")
-	case f.noFilters:
-		lim.Filters = nil
-	case f.filters != "":
-		lim.Filters = splitList(f.filters)
+	if err := setList(&lim.Filters, "filters", f.filters, f.noFilters); err != nil {
+		return err
 	}
 	if err := setList(&lim.AllowedTools, "tools", f.tools, f.noTools); err != nil {
 		return err
@@ -189,7 +184,7 @@ func setPeriod(dst **policy.Period, given string) error {
 }
 
 func guardrailCmd(ctx context.Context, args []string) error {
-	r := newCmdRun("guardrail", args, "json")
+	r := newCmdRun("guardrail", args)
 	f := registerGuardrailFlags(r.fs)
 	if done, err := r.parse(); done {
 		return err
@@ -206,7 +201,7 @@ func guardrailCmd(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		return out(r.asJSON, eff, func(w *table) { printEffective(w, eff, facetAll) })
+		return out(r.asJSON, eff, func(w *table) { printEffective(w, eff, nil) })
 	case "set":
 		if !changesSomething(r.fs) {
 			return nothingToChange("guardrail set")
@@ -275,14 +270,11 @@ func updateLimits(ctx context.Context, c *client, scope, scopeID string,
 // as 'guardrail set', of which help.go lets each take its own. With no flags
 // it reports rather than writes, because `keera limit project project_1` is a question.
 
-// facetAll is every part of the effective report, in the order it prints.
-var facetAll = []string{"models", "rates", "spend", "prompt", "filters", "tools", "sandboxes"}
-
 // facetFields are the parts of the effective report each facet prints.
 var facetFields = map[string][]string{"limit": {"rates"}, "budget": {"spend"}}
 
 func facetCmd(ctx context.Context, name string, args []string) error {
-	r := newCmdRun(name, args, "json")
+	r := newCmdRun(name, args)
 	f := registerGuardrailFlags(r.fs)
 	// Help comes first, then the other facet's flags, named by the command
 	// that takes them, before parse refuses them less helpfully.
@@ -351,40 +343,30 @@ func effectiveFor(ctx context.Context, c *client, scope, scopeID string) (contro
 	return eff, err
 }
 
-// printEffective says what actually holds a scope. Every row names the level
-// that decided it, so nobody changes the number on the wrong scope.
-func printEffective(w *table, eff control.Effective, fields []string) {
-	want := func(f string) bool { return slices.Contains(fields, f) }
-	w.header("WHAT\tIN FORCE\tFROM")
-	if want("models") {
-		printEffectiveModels(w, eff)
-	}
-	if want("rates") {
-		printEffectiveRates(w, eff)
-	}
-	if want("spend") {
-		printEffectiveSpend(w, eff)
-	}
-	if want("prompt") {
-		printEffectivePrompt(w, eff)
-	}
-	if want("filters") {
-		printEffectiveFilters(w, eff)
-	}
-	if want("tools") {
-		printEffectiveTools(w, eff)
-	}
-	if want("sandboxes") {
-		printEffectiveSandboxes(w, eff)
-	}
+// effectiveParts are the parts of the effective report, in the order they
+// print.
+var effectiveParts = []struct {
+	name  string
+	print func(*table, control.Effective)
+}{
+	{"models", printEffectiveModels},
+	{"rates", printEffectiveRates},
+	{"spend", printEffectiveSpend},
+	{"prompt", printEffectivePrompt},
+	{"filters", printEffectiveFilters},
+	{"tools", printEffectiveTools},
+	{"sandboxes", printEffectiveSandboxes},
 }
 
-func printEffectiveTools(w *table, eff control.Effective) {
-	if eff.AllowedTools == nil {
-		showFrom(w, "mcp tools", "(every tool of every MCP server)", "")
-	} else {
-		showFrom(w, "mcp tools", joinedOr(eff.AllowedTools, "(none)"),
-			narrowedBy(eff, func(l policy.Limits) bool { return l.AllowedTools != nil }))
+// printEffective says what actually holds a scope. Every row names the level
+// that decided it, so nobody changes the number on the wrong scope. It prints
+// the named parts, or every part when fields is nil.
+func printEffective(w *table, eff control.Effective, fields []string) {
+	w.header("WHAT\tIN FORCE\tFROM")
+	for _, part := range effectiveParts {
+		if fields == nil || slices.Contains(fields, part.name) {
+			part.print(w, eff)
+		}
 	}
 }
 
@@ -397,12 +379,17 @@ func showFrom(w *table, name string, v any, from string) {
 	_, _ = fmt.Fprintf(w, "%s\t%v\tset by %s\n", name, v, from)
 }
 
-func printEffectiveModels(w *table, eff control.Effective) {
-	if eff.AllowedModels == nil {
-		showFrom(w, "models", "(every enabled model)", "")
-		return
+// showSet writes a row that some level set, or what holds when none did.
+func showSet(w *table, name, unset string, set bool, v any, from string) {
+	if !set {
+		v, from = unset, ""
 	}
-	showFrom(w, "models", strings.Join(eff.AllowedModels, ","),
+	showFrom(w, name, v, from)
+}
+
+func printEffectiveModels(w *table, eff control.Effective) {
+	showSet(w, "models", "(every enabled model)", eff.AllowedModels != nil,
+		strings.Join(eff.AllowedModels, ","),
 		narrowedBy(eff, func(l policy.Limits) bool { return l.AllowedModels != nil }))
 }
 
@@ -410,11 +397,8 @@ func printEffectiveRates(w *table, eff control.Effective) {
 	// Rate limits are enforced at every level, so the tightest one binds.
 	showTightest(w, eff, "requests/min", func(s policy.Scope) int { return s.RPM })
 	showTightest(w, eff, "tokens/min", func(s policy.Scope) int { return s.TPM })
-	if eff.MaxOutputTokens == 0 {
-		showFrom(w, "max output tokens", "(unlimited)", "")
-		return
-	}
-	showFrom(w, "max output tokens", eff.MaxOutputTokens,
+	showSet(w, "max output tokens", "(unlimited)", eff.MaxOutputTokens != 0,
+		eff.MaxOutputTokens,
 		narrowedBy(eff, func(l policy.Limits) bool { return l.MaxOutputTokens != nil }))
 }
 
@@ -435,56 +419,44 @@ func printEffectiveSpend(w *table, eff control.Effective) {
 }
 
 func printEffectivePrompt(w *table, eff control.Effective) {
-	if eff.SystemPrompt == "" {
-		showFrom(w, "system prompt", "(none)", "")
-		return
-	}
-	showFrom(w, "system prompt", firstLine(eff.SystemPrompt),
+	showSet(w, "system prompt", "(none)", eff.SystemPrompt != "",
+		firstLine(eff.SystemPrompt),
 		joinedFrom(eff, func(l policy.Limits) bool { return l.SystemPrompt != nil }))
 }
 
 func printEffectiveFilters(w *table, eff control.Effective) {
-	if len(eff.Filters) == 0 {
-		showFrom(w, "filters", "(none)", "")
-		return
-	}
-	showFrom(w, "filters", strings.Join(eff.Filters, ","),
+	showSet(w, "filters", "(none)", len(eff.Filters) > 0,
+		strings.Join(eff.Filters, ","),
 		joinedFrom(eff, func(l policy.Limits) bool { return len(l.Filters) > 0 }))
+}
+
+func printEffectiveTools(w *table, eff control.Effective) {
+	showSet(w, "mcp tools", "(every tool of every MCP server)", eff.AllowedTools != nil,
+		joinedOr(eff.AllowedTools, "(none)"),
+		narrowedBy(eff, func(l policy.Limits) bool { return l.AllowedTools != nil }))
 }
 
 func printEffectiveSandboxes(w *table, eff control.Effective) {
 	sb := eff.Sandbox
-	if sb.SandboxClasses == nil {
-		showFrom(w, "sandbox classes", "(every class)", "")
-	} else {
-		showFrom(w, "sandbox classes", strings.Join(sb.SandboxClasses, ","),
-			narrowedBy(eff, func(l policy.Limits) bool { return l.SandboxClasses != nil }))
-	}
-	if sb.AllowedRepos == nil {
-		showFrom(w, "repositories", "(none)", "")
-	} else {
-		showFrom(w, "repositories", strings.Join(sb.AllowedRepos, ","),
-			narrowedBy(eff, func(l policy.Limits) bool { return l.AllowedRepos != nil }))
-	}
-	if sb.MaxSandboxes == 0 {
-		showFrom(w, "max sandboxes", "(unlimited)", "")
-	} else {
-		showFrom(w, "max sandboxes", sb.MaxSandboxes,
-			narrowedBy(eff, func(l policy.Limits) bool { return l.MaxSandboxes != nil }))
-	}
+	showSet(w, "sandbox classes", "(every class)", sb.SandboxClasses != nil,
+		strings.Join(sb.SandboxClasses, ","),
+		narrowedBy(eff, func(l policy.Limits) bool { return l.SandboxClasses != nil }))
+	showSet(w, "repositories", "(none)", sb.AllowedRepos != nil,
+		strings.Join(sb.AllowedRepos, ","),
+		narrowedBy(eff, func(l policy.Limits) bool { return l.AllowedRepos != nil }))
+	showSet(w, "max sandboxes", "(unlimited)", sb.MaxSandboxes != 0,
+		sb.MaxSandboxes,
+		narrowedBy(eff, func(l policy.Limits) bool { return l.MaxSandboxes != nil }))
 	if sb.MaxSandboxTTLSeconds > 0 {
 		showFrom(w, "max sandbox lifetime",
 			shortDuration(time.Duration(sb.MaxSandboxTTLSeconds)*time.Second),
 			narrowedBy(eff, func(l policy.Limits) bool { return l.MaxSandboxTTLSeconds != nil }))
 	}
-	if sb.MaxSandboxCPU == 0 && sb.MaxSandboxMemory == 0 {
-		showFrom(w, "max sandbox size", "(unlimited)", "")
-	} else {
-		showFrom(w, "max sandbox size", maxSize(sb.MaxSandboxCPU, sb.MaxSandboxMemory),
-			narrowedBy(eff, func(l policy.Limits) bool {
-				return l.MaxSandboxCPU != nil || l.MaxSandboxMemory != nil
-			}))
-	}
+	showSet(w, "max sandbox size", "(unlimited)", sb.MaxSandboxCPU != 0 || sb.MaxSandboxMemory != 0,
+		maxSize(sb.MaxSandboxCPU, sb.MaxSandboxMemory),
+		narrowedBy(eff, func(l policy.Limits) bool {
+			return l.MaxSandboxCPU != nil || l.MaxSandboxMemory != nil
+		}))
 }
 
 func showTightest(w *table, eff control.Effective, name string,

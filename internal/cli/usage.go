@@ -12,7 +12,7 @@ import (
 )
 
 func usageCmd(ctx context.Context, args []string) error {
-	r := newCmdRun("usage", args, "json")
+	r := newCmdRun("usage", args)
 	fs := r.fs
 	// The same defaults as the panel's Usage screen, so both give the same
 	// totals when asked nothing.
@@ -83,7 +83,7 @@ func (res usageResponse) label(groupBy, group string) string {
 // The backend's message is printed beside the model and the key, because only
 // its wording says whose problem a failure is.
 func failuresCmd(ctx context.Context, args []string) error {
-	r := newCmdRun("failures", args, "json")
+	r := newCmdRun("failures", args)
 	fs := r.fs
 	kind := fs.String("kind", "failed", "failed, refused, interrupted or all")
 	alias := fs.String("model", "", modelUsage)
@@ -149,13 +149,9 @@ func printFailures(w *table, res failuresResponse, o store.Outcome, since time.D
 	// The request id opens the whole task: keera session show <id>.
 	w.header("REQUEST\tWHEN\tMODEL\tSTATUS\tKEY\tMESSAGE")
 	for _, f := range res.Data {
-		key := f.KeyID
-		if name, ok := res.KeyNames[f.KeyID]; ok && name != "" {
-			key = name
-		}
 		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\n",
 			f.ID, f.TS.Local().Format("2006-01-02 15:04:05"), dash(f.Alias),
-			httpStatus(f.Status), dash(key), oneLine(f.Error))
+			httpStatus(f.Status), dash(labelled(res.KeyNames, f.KeyID)), oneLine(f.Error))
 	}
 	// The counts cover the whole window, not just the page printed.
 	if total := res.matched(o); total > int64(len(res.Data)) {

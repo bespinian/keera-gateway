@@ -219,9 +219,7 @@ func printFilter(w *table, f policy.Filter) {
 	if f.Shadow {
 		show(w, "enforcing", "no - it runs, and the request goes on as it was sent")
 	}
-	if f.Description != "" {
-		show(w, "description", f.Description)
-	}
+	showIfSet(w, "description", f.Description)
 	// The instruction or the rules are the filter, so they are printed whole,
 	// the rules in the form --rules reads.
 	if !f.UsesModel() {
@@ -242,9 +240,7 @@ func printBlock(w *table, name string, lines []string) {
 func printFilterProbe(w *table, p gateway.FilterProbe) {
 	show(w, "filter", p.Alias)
 	show(w, "mode", p.Mode)
-	if p.Model != "" {
-		show(w, "model", p.Model)
-	}
+	showIfSet(w, "model", p.Model)
 	if p.Shadow {
 		show(w, "enforcing", "no - this filter is in shadow, so nothing below is acted on")
 	}
@@ -271,9 +267,7 @@ func printFilterProbe(w *table, p gateway.FilterProbe) {
 		}
 		_, _ = fmt.Fprintf(w, "rule\t%s (%s)\n", hit.Rule, what)
 	}
-	if p.Error != "" {
-		show(w, "error", p.Error)
-	}
+	showIfSet(w, "error", p.Error)
 	// A refusal is an answer, not a fault, and nothing was rewritten under it.
 	if p.Refused {
 		reason := p.Refusal

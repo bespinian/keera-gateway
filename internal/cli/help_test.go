@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"flag"
 	"io"
 	"os"
 	"strings"
@@ -40,20 +41,37 @@ func capture(t *testing.T, args ...string) string {
 	return out
 }
 
-// TestEveryFlagIsDocumented is the drift guard. helpText prints flags a
-// command declares and the registry does not claim under "Other flags", so
-// the check is that no command has any.
+// TestEveryFlagIsDocumented is the drift guard: a flag a command declares and
+// no verb claims is one nobody can use.
 func TestEveryFlagIsDocumented(t *testing.T) {
+	old := printHelp
+	t.Cleanup(func() { printHelp = old })
 	for _, c := range commands {
 		if len(c.subs) == 0 {
 			continue // its flags are on the command itself, checked below
 		}
 		t.Run(c.name, func(t *testing.T) {
-			out := capture(t, c.name, "--help")
-			if strings.Contains(out, "Other flags:") {
-				t.Errorf("keera %s declares flags no subcommand in help.go claims:\n%s",
-					c.name, out[strings.Index(out, "Other flags:"):])
+			var fs *flag.FlagSet
+			printHelp = func(f *flag.FlagSet, _, _ string) error { fs = f; return nil }
+			if err := Run(context.Background(), []string{c.name, "--help"}); err != nil {
+				t.Fatal(err)
 			}
+			if fs == nil {
+				t.Skip("declares no flags")
+			}
+			// Declared on every command; the verbs that take them claim them.
+			claimed := map[string]bool{"org": true, "yes": true, "json": true}
+			for _, s := range c.subs {
+				for _, name := range s.flags {
+					claimed[name] = true
+				}
+			}
+			fs.VisitAll(func(f *flag.Flag) {
+				if !claimed[f.Name] {
+					t.Errorf("keera %s declares --%s, which no subcommand in help.go claims",
+						c.name, f.Name)
+				}
+			})
 		})
 	}
 }
@@ -267,6 +285,22 @@ func TestUsageComesFromTheRegistry(t *testing.T) {
 		err := Run(context.Background(), tc.args)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("keera %s: err = %v, want %q", strings.Join(tc.args, " "), err, tc.want)
+		}
+	}
+}
+
+// TestVerbSpellingsAreUnique guards commonAliases: a spelling two verbs of one
+// command share would run whichever comes first.
+func TestVerbSpellingsAreUnique(t *testing.T) {
+	for _, c := range commands {
+		seen := map[string]string{}
+		for _, s := range c.subs {
+			for _, spelling := range append([]string{s.name}, s.otherNames()...) {
+				if other, taken := seen[spelling]; taken {
+					t.Errorf("keera %s: %q is both %s and %s", c.name, spelling, other, s.name)
+				}
+				seen[spelling] = s.name
+			}
 		}
 	}
 }

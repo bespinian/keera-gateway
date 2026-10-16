@@ -21,7 +21,7 @@ func sessionCmd(ctx context.Context, args []string) error {
 			args = append([]string{"show"}, args...)
 		}
 	}
-	r := newCmdRun("session", args, "json")
+	r := newCmdRun("session", args)
 	fs := r.fs
 	sort := fs.String("sort", "cost", "cost, tokens, requests, duration or recent")
 	alias := fs.String("model", "", modelUsage)
@@ -36,37 +36,24 @@ func sessionCmd(ctx context.Context, args []string) error {
 	if r.verb == "show" {
 		return sessionShow(ctx, c, fs.Arg(0), r.org, r.asJSON)
 	}
-	return sessionList(ctx, c, sessionQuery{org: r.org, sort: *sort, alias: *alias, who: w,
-		unhappy: *unhappy, since: *since, limit: *limit}, r.asJSON)
-}
 
-type sessionQuery struct {
-	org, sort, alias string
-	who              *who
-	unhappy          bool
-	since            time.Duration
-	limit            int
-}
-
-// sessionList reports calls, minutes and cost per task rather than per
-// request, because nobody decides how many calls a task takes. It sorts by
-// cost by default: the row worth reading is the task that cost the most.
-func sessionList(ctx context.Context, c *client, sq sessionQuery, asJSON bool) error {
-	q, err := reportQuery(ctx, c, sq.org, sq.who, sq.since, map[string]string{
-		"sort": sq.sort, "limit": strconv.Itoa(sq.limit), "alias": sq.alias,
+	// The list reports calls, minutes and cost per task rather than per
+	// request, because nobody decides how many calls a task takes. It sorts by
+	// cost by default: the row worth reading is the task that cost the most.
+	q, err := reportQuery(ctx, c, r.org, w, *since, map[string]string{
+		"sort": *sort, "limit": strconv.Itoa(*limit), "alias": *alias,
 	})
 	if err != nil {
 		return err
 	}
-	if sq.unhappy {
+	if *unhappy {
 		q.Set("outcome", string(store.OutcomeUnhappy))
 	}
-
 	var res sessionsResponse
 	if err := c.do(ctx, "GET", "/v1/sessions?"+q.Encode(), nil, &res); err != nil {
 		return err
 	}
-	return out(asJSON, res, func(w *table) { printSessions(w, res, sq.since) })
+	return out(r.asJSON, res, func(t *table) { printSessions(t, res, *since) })
 }
 
 type sessionsResponse struct {

@@ -32,7 +32,7 @@ type userRun struct {
 }
 
 func userCmd(ctx context.Context, args []string) error {
-	r := &userRun{cmdRun: newCmdRun("user", args, "yes", "json")}
+	r := &userRun{cmdRun: newCmdRun("user", args)}
 	fs := r.fs
 	fs.StringVar(&r.addRole, "role", "member", "member or admin")
 	fs.StringVar(&r.externalID, "external-id", "",
@@ -295,19 +295,6 @@ func checkRole(role string) error {
 // findUser resolves an email address or an id to a person. org is resolved
 // as resolveOrg does.
 func findUser(ctx context.Context, c *client, org, who string) (store.User, error) {
-	orgID, err := resolveOrg(ctx, c, org)
-	if err != nil {
-		return store.User{}, err
-	}
-	users, err := list[store.User](ctx, c, inOrg("/v1/users", orgID))
-	if err != nil {
-		return store.User{}, err
-	}
-	want := strings.ToLower(strings.TrimSpace(who))
-	for _, u := range users {
-		if u.ID == who || strings.ToLower(u.Email) == want {
-			return u, nil
-		}
-	}
-	return store.User{}, notFound("person", who, orgID, "user")
+	return findNamed(ctx, c, org, who, "/v1/users", "person", "user",
+		func(u store.User) (string, string) { return u.ID, u.Email })
 }

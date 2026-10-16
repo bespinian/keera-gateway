@@ -39,7 +39,7 @@ type createdKey struct {
 }
 
 func keyCmd(ctx context.Context, args []string) error {
-	r := &keyRun{cmdRun: newCmdRun("key", args, "yes", "json")}
+	r := &keyRun{cmdRun: newCmdRun("key", args)}
 	fs := r.fs
 	fs.StringVar(&r.project, "project", "",
 		"project, by name or id; without it, the organisation's oldest project")

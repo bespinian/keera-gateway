@@ -1,12 +1,12 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"net/url"
 	"os"
-	"slices"
 	"strings"
 	"time"
 
@@ -26,7 +26,7 @@ type orgRun struct {
 }
 
 func orgCmd(ctx context.Context, args []string) error {
-	r := &orgRun{cmdRun: newCmdRun("org", args, "yes", "json")}
+	r := &orgRun{cmdRun: newCmdRun("org", args)}
 	fs := r.fs
 	fs.StringVar(&r.name, "name", "", "the organisation's new name")
 	fs.StringVar(&r.domain, "domain", "",
@@ -65,7 +65,7 @@ func (r *orgRun) create(ctx context.Context) error {
 		return err
 	}
 	if err := out(r.asJSON, org, func(w *table) {
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", org.ID, org.Name, orNotSet(org.EmailDomain))
+		orgRow(w, org)
 	}); err != nil {
 		return err
 	}
@@ -115,7 +115,7 @@ func (r *orgRun) set(ctx context.Context) error {
 		return err
 	}
 	return out(r.asJSON, org, func(w *table) {
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", org.ID, org.Name, orNotSet(org.EmailDomain))
+		orgRow(w, org)
 		if _, ok := change["email_domain"]; ok {
 			// Only a first sign-in reads the domain, so nobody already here moves.
 			_, _ = fmt.Fprintln(w, "\nThis decides where a first sign-in lands. "+
@@ -222,25 +222,21 @@ func (r *orgRun) switchTo(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		i := slices.IndexFunc(orgs, func(o store.Org) bool {
-			return o.ID == given || strings.EqualFold(o.Name, given)
-		})
-		if i < 0 {
+		org, ok := findIn(orgs, given, func(o store.Org) (string, string) { return o.ID, o.Name })
+		if !ok {
 			return notFound("organisation", given, "", "org")
 		}
-		if err := saveOrg(r.c.base, orgs[i].ID); err != nil {
+		if err := saveOrg(r.c.base, org.ID); err != nil {
 			return err
 		}
-		fmt.Printf("Commands now act on %s.\n", orgs[i].Name)
+		fmt.Printf("Commands now act on %s.\n", org.Name)
 		r.warnAboutEnv()
 		return nil
 	}
 
 	mine := myOrgs(me)
-	i := slices.IndexFunc(mine, func(o membership) bool {
-		return o.ID == given || strings.EqualFold(o.Name, given)
-	})
-	if i < 0 {
+	m, ok := findIn(mine, given, func(o membership) (string, string) { return o.ID, o.Name })
+	if !ok {
 		return notFound("organisation", given, "", "org")
 	}
 	var res struct {
@@ -248,13 +244,13 @@ func (r *orgRun) switchTo(ctx context.Context) error {
 		OrgName string `json:"org_name"`
 		Role    string `json:"role"`
 	}
-	if err := r.c.do(ctx, "POST", "/v1/me/org", map[string]string{"org_id": mine[i].ID}, &res); err != nil {
+	if err := r.c.do(ctx, "POST", "/v1/me/org", map[string]string{"org_id": m.ID}, &res); err != nil {
 		return err
 	}
 	if err := saveOrg(r.c.base, res.OrgID); err != nil {
 		return err
 	}
-	if mine[i].Invited {
+	if m.Invited {
 		fmt.Printf("Joined %s as %s.\n", res.OrgName, res.Role)
 	} else {
 		fmt.Printf("Now in %s as %s.\n", res.OrgName, res.Role)
@@ -335,13 +331,13 @@ func warnAboutDomains(ctx context.Context, c *client) {
 	fmt.Fprintln(os.Stderr, "Anyone who has signed in before keeps the organisation they are in.")
 }
 
-// orNotSet renders an empty email domain as something a table can show.
-func orNotSet(domain string) string {
-	if domain == "" {
-		return "not set"
-	}
-	return domain
+// orgRow writes the row that create and set answer with.
+func orgRow(w *table, o store.Org) {
+	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", o.ID, o.Name, orNotSet(o.EmailDomain))
 }
+
+// orNotSet renders an empty email domain as something a table can show.
+func orNotSet(domain string) string { return cmp.Or(domain, "not set") }
 
 // deletedOrg is what DELETE /v1/orgs/{id} reports it removed, as far as the
 // table shows it.
@@ -361,11 +357,10 @@ func confirmOrgDelete(ctx context.Context, c *client, orgID string) error {
 	if err != nil {
 		return err
 	}
-	i := slices.IndexFunc(orgs, func(o store.Org) bool { return o.ID == orgID })
-	if i < 0 {
+	org, ok := findIn(orgs, orgID, func(o store.Org) (string, string) { return o.ID, o.Name })
+	if !ok {
 		return notFound("organisation", orgID, "", "org")
 	}
-	org := orgs[i]
 
 	// Three extra reads, only when asking, so the prompt can say how much goes.
 	projects, err := list[store.Project](ctx, c, inOrg("/v1/projects", orgID))

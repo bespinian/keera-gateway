@@ -186,7 +186,7 @@ func logoutCmd(ctx context.Context, args []string) error {
 
 // whoamiCmd says who the credential in use belongs to, and which gateway.
 func whoamiCmd(ctx context.Context, args []string) error {
-	r := newCmdRun("whoami", args, "json")
+	r := newCmdRun("whoami", args)
 	if done, err := r.parse(); done {
 		return err
 	}

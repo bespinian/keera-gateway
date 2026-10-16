@@ -18,7 +18,7 @@ type projectRun struct {
 }
 
 func projectCmd(ctx context.Context, args []string) error {
-	r := &projectRun{cmdRun: newCmdRun("project", args, "yes", "json")}
+	r := &projectRun{cmdRun: newCmdRun("project", args)}
 	fs := r.fs
 	fs.StringVar(&r.name, "name", "", "the project's new name")
 	fs.StringVar(&r.description, "description", "", "what the project is for")
@@ -49,9 +49,12 @@ func (r *projectRun) create(ctx context.Context) error {
 		&project); err != nil {
 		return err
 	}
-	return out(r.asJSON, project, func(w *table) {
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", project.ID, project.Name, dash(project.Description))
-	})
+	return out(r.asJSON, project, func(w *table) { projectRow(w, project) })
+}
+
+// projectRow writes one project as a table row.
+func projectRow(w *table, t store.Project) {
+	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", t.ID, t.Name, dash(t.Description))
 }
 
 func (r *projectRun) list(ctx context.Context) error {
@@ -70,7 +73,7 @@ func (r *projectRun) list(ctx context.Context) error {
 		}
 		w.header("ID\tNAME\tDESCRIPTION")
 		for _, t := range projects {
-			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", t.ID, t.Name, dash(t.Description))
+			projectRow(w, t)
 		}
 	})
 }
@@ -97,9 +100,7 @@ func (r *projectRun) set(ctx context.Context) error {
 		change, &changed); err != nil {
 		return err
 	}
-	return out(r.asJSON, changed, func(w *table) {
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", changed.ID, changed.Name, dash(changed.Description))
-	})
+	return out(r.asJSON, changed, func(w *table) { projectRow(w, changed) })
 }
 
 func (r *projectRun) delete(ctx context.Context) error {
@@ -141,25 +142,8 @@ type deletedProject struct {
 // a project named like an id still resolves to itself. org is resolved as
 // resolveOrg does.
 func findProject(ctx context.Context, c *client, org, given string) (store.Project, error) {
-	orgID, err := resolveOrg(ctx, c, org)
-	if err != nil {
-		return store.Project{}, err
-	}
-	projects, err := list[store.Project](ctx, c, inOrg("/v1/projects", orgID))
-	if err != nil {
-		return store.Project{}, err
-	}
-	for _, t := range projects {
-		if t.ID == given {
-			return t, nil
-		}
-	}
-	for _, t := range projects {
-		if strings.EqualFold(t.Name, given) {
-			return t, nil
-		}
-	}
-	return store.Project{}, notFound("project", given, orgID, "project")
+	return findNamed(ctx, c, org, given, "/v1/projects", "project", "project",
+		func(p store.Project) (string, string) { return p.ID, p.Name })
 }
 
 // confirmProjectDelete says what the deletion takes with it and makes the
