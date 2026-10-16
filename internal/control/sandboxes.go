@@ -55,8 +55,9 @@ func orgLimited(w http.ResponseWriter, why, orgName string) {
 /* --------------------------------------------------------------- the catalogue */
 
 // listSandboxClasses is readable by anyone in the organisation: a developer
-// needs the class names to ask for a machine. The caller's own limits come
-// with it, so a client can grey out what they may not use.
+// needs the class names to ask for a machine. The limits of the project a
+// sandbox lands in by default come with it, so a client can grey out what
+// creating one there would refuse.
 func (s *Server) listSandboxClasses(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	orgID, ok := s.queryOrg(w, r, p)
 	if !ok {
@@ -78,7 +79,14 @@ func (s *Server) listSandboxClasses(w http.ResponseWriter, r *http.Request, p *a
 			"tiers":     caps.Tiers,
 		}
 	}
-	limits, err := s.sandboxLimits(r.Context(), orgID, "")
+	// The project a sandbox lands in when none is named, so its guardrail
+	// counts too: creating one there applies it.
+	projectID, err := s.st.FirstProject(r.Context(), orgID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		s.fail(w, err)
+		return
+	}
+	limits, err := s.sandboxLimits(r.Context(), orgID, projectID)
 	if err != nil {
 		s.fail(w, err)
 		return
