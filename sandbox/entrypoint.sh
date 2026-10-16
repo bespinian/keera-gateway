@@ -233,11 +233,7 @@ checkout() {
   # somebody's time every single sandbox. `git fetch --unshallow` gets the rest.
   # set -e does not apply inside the $(...) that calls this, so each failure
   # returns on its own. git's output goes to stderr: stdout is the directory.
-  if [ -n "${KEERA_BRANCH:-}" ]; then
-    git clone --depth 1 --branch "$KEERA_BRANCH" "$KEERA_REPO" "$dir" >&2 || return 1
-  else
-    git clone --depth 1 "$KEERA_REPO" "$dir" >&2 || return 1
-  fi
+  git clone --depth 1 ${KEERA_BRANCH:+--branch "$KEERA_BRANCH"} "$KEERA_REPO" "$dir" >&2 || return 1
   echo "$dir"
 }
 
@@ -265,15 +261,13 @@ fi
 # not started at all: the pod's readiness is the agent having started, and its
 # exit is the sandbox's.
 if [ "$KEERA_SANDBOX_PURPOSE" = "agent" ]; then
-  [ -n "${KEERA_TASK:-}" ] || die "this is an agent sandbox and KEERA_TASK is empty"
   exec /usr/local/bin/keera-agent "${WORKDIR:-$HOME/work}"
 fi
 
 # ------------------------------------------------------------------- sshd
 #
-# Started last, which is deliberate: both drivers call a sandbox ready only
-# once this port answers, so everything above has finished by the time the
-# gateway reports the sandbox ready. "Ready" then means what a developer means
-# by it rather than "the container started".
+# Started last: both drivers call a sandbox ready once this port answers, so
+# ready means everything above has finished, not just that the container
+# started.
 log "ready; sshd is listening on 2222"
 exec /usr/sbin/sshd -D -e -f /etc/ssh/keera/sshd_config

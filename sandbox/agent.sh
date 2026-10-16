@@ -26,7 +26,6 @@ if [ -d .git ]; then
   BASE="$(git rev-parse HEAD)"
 else
   log "no repository here; the agent will work on an empty directory"
-  BASE=""
 fi
 
 # ------------------------------------------------------------------- run it
@@ -102,6 +101,6 @@ git -c user.name="${KEERA_GIT_AUTHOR_NAME:-Keera agent}" \
 log "pushing $BRANCH"
 git push --set-upstream origin "$BRANCH"
 
-log "pushed $BRANCH ($(git rev-list --count "${BASE:-HEAD}..HEAD") commit(s))"
+log "pushed $BRANCH ($(git rev-list --count "$BASE..HEAD") commit(s))"
 log "open a merge request from $BRANCH; nothing else left this sandbox"
 exit "$STATUS"

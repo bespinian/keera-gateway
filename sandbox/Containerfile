@@ -85,24 +85,18 @@ RUN addgroup -g 1000 keera \
 
 # sshd needs somewhere to write its runtime state, and a host key.
 #
-# The host key is generated at build time and is therefore the same for every
-# sandbox from this image, which would be alarming anywhere else and is fine
-# here: the host key is not what proves which sandbox you reach. The connection
-# goes through the gateway's attach surface, which is TLS to an
-# already-authenticated caller, and out the other side to an address the
-# gateway dialled itself. That is why `keera sandbox ssh` and `keera sandbox
-# config` turn host-key checking off.
+# The host key is the same for every sandbox from this image. That is fine:
+# the connection goes through the gateway's authenticated attach surface to an
+# address the gateway dialled itself, so the host key proves nothing. That is
+# why `keera sandbox ssh` and `keera sandbox config` turn host-key checking off.
 RUN mkdir -p /run/sshd /etc/ssh/keera \
  && ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/keera/ssh_host_ed25519_key \
  && chown -R 1000:1000 /run/sshd /etc/ssh/keera
 
-COPY sshd_config /etc/ssh/keera/sshd_config
-COPY entrypoint.sh /usr/local/bin/keera-sandbox
-COPY agent.sh /usr/local/bin/keera-agent
-COPY git-credential-keera /usr/local/bin/git-credential-keera
-RUN chmod 0755 /usr/local/bin/keera-sandbox /usr/local/bin/keera-agent \
-      /usr/local/bin/git-credential-keera \
- && chmod 0644 /etc/ssh/keera/sshd_config
+COPY --chmod=0644 sshd_config /etc/ssh/keera/sshd_config
+COPY --chmod=0755 entrypoint.sh /usr/local/bin/keera-sandbox
+COPY --chmod=0755 agent.sh /usr/local/bin/keera-agent
+COPY --chmod=0755 git-credential-keera /usr/local/bin/git-credential-keera
 
 USER 1000
 WORKDIR /home/keera
