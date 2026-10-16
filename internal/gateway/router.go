@@ -226,7 +226,7 @@ func chatProblem(m policy.Model, found bool) string {
 	case !m.Enabled:
 		return "is disabled"
 	case m.Locked:
-		return lockedReason(m) + ", and " + policy.LockedMessage
+		return lockedReason(m) + "; " + policy.LockedMessage(m.OrgName)
 	case m.Kind != policy.KindChat:
 		return "is a " + string(m.Kind) + " model, and only a chat model reads text and answers in words"
 	case len(m.Backends) == 0:
@@ -586,5 +586,5 @@ func lockedReason(m policy.Model) string {
 	if m.PlatformKey {
 		return "is billed after use on this deployment's key"
 	}
-	return "runs inside this deployment's network"
+	return "runs in a private network"
 }

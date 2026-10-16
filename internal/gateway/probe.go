@@ -80,9 +80,8 @@ func (s *Server) CheckModel(ctx context.Context, m policy.Model) Probe {
 		p.Error = "this model is paid by each person's own Claude subscription, so the " +
 			"gateway holds no credential to check it with; send it a message from Claude Code"
 		return p
-	}
-	if m.Locked {
-		p.Error = "this model " + lockedReason(m) + ", and " + policy.LockedMessage
+	case m.Locked:
+		p.Error = "this model " + lockedReason(m) + "; " + policy.LockedMessage(m.OrgName)
 		return p
 	}
 	if why := s.checkCredit(m.OrgID, m); why != "" {

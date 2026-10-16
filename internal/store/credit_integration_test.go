@@ -256,7 +256,7 @@ func TestTheFirstPaymentLiftsTheLimit(t *testing.T) {
 	}
 	isLimited := func() bool {
 		t.Helper()
-		ids, err := st.LimitedOrgs(ctx)
+		names, err := st.LimitedOrgs(ctx)
 		if err != nil {
 			t.Fatalf("LimitedOrgs: %v", err)
 		}
@@ -264,8 +264,8 @@ func TestTheFirstPaymentLiftsTheLimit(t *testing.T) {
 		if err != nil {
 			t.Fatalf("OrgByID: %v", err)
 		}
-		if org.Limited != (len(ids) == 1 && ids[0] == f.orgID) {
-			t.Fatalf("the organisation says limited %v, the list says %v", org.Limited, ids)
+		if org.Limited != (len(names) == 1 && names[f.orgID] == org.Name) {
+			t.Fatalf("the organisation says limited %v, the list says %v", org.Limited, names)
 		}
 		return org.Limited
 	}

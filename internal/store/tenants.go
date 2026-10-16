@@ -215,14 +215,11 @@ func (s *Store) UpdateOrg(ctx context.Context, orgID string, c OrgChange) (Org, 
 	return o, notFound(orgConflict(err))
 }
 
-// LimitedOrgs lists the organisations that are still limited, for the
-// gateway to hold their models to what they may use.
-func (s *Store) LimitedOrgs(ctx context.Context) ([]string, error) {
-	rows, err := s.pool.Query(ctx, "SELECT id FROM orgs WHERE limited")
-	if err != nil {
-		return nil, err
-	}
-	return pgx.CollectRows(rows, pgx.RowTo[string])
+// LimitedOrgs maps each organisation that is still limited to its name, for
+// the gateway to hold their models to what they may use, and to say whose
+// they are when it refuses one.
+func (s *Store) LimitedOrgs(ctx context.Context) (map[string]string, error) {
+	return s.names(ctx, "SELECT id, name FROM orgs WHERE limited")
 }
 
 // DeletedOrg is what a deletion took with it. The counts are read in the same

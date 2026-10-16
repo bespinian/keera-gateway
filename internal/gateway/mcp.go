@@ -141,7 +141,7 @@ func (s *Server) mcpBegin(w http.ResponseWriter, r *http.Request) (*mcpExchange,
 	}
 	if srv.Locked {
 		httpx.WriteError(w, http.StatusForbidden, "permission_error", "org_limited",
-			"the MCP server '"+alias+"' is inside this deployment's network, and "+policy.LockedMessage)
+			"the MCP server '"+alias+"' is in a private network; "+policy.LockedMessage(srv.OrgName))
 		return nil, false
 	}
 	x := &mcpExchange{

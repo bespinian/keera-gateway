@@ -43,7 +43,7 @@ type source struct {
 	mcp     []policy.MCPServer
 	spend   []store.SpendRow
 	credit  []store.CreditRow
-	limited []string
+	limited map[string]string
 
 	// loadErr, while set, is what every catalogue read returns.
 	loadErr error
@@ -121,7 +121,7 @@ func (s *source) LoadCredit(context.Context) ([]store.CreditRow, error) {
 	return s.credit, s.loadErr
 }
 
-func (s *source) LimitedOrgs(context.Context) ([]string, error) {
+func (s *source) LimitedOrgs(context.Context) (map[string]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.limited, s.loadErr
@@ -700,16 +700,20 @@ func TestALimitedOrganisationUsesOnlyWhatCostsTheDeploymentNothing(t *testing.T)
 			{OrgID: "org_new", Alias: "inside", URL: "http://tools.svc/mcp"},
 			{OrgID: "org_new", Alias: "outside", URL: "https://mcp.example.com/mcp"},
 		}
-		s.limited = []string{"org_new"}
+		s.limited = map[string]string{"org_new": "Example Bank"}
 		r := newRegistry(t, s, Options{Platform: platform, Prepaid: tc.prepaid})
 
 		for _, m := range r.Models("org_new") {
-			if !m.Limited {
-				t.Errorf("prepaid=%v: %s is not marked limited", tc.prepaid, m.Alias)
+			if !m.Limited || m.OrgName != "Example Bank" {
+				t.Errorf("prepaid=%v: %s is not marked limited for its organisation: %v, %q",
+					tc.prepaid, m.Alias, m.Limited, m.OrgName)
 			}
 			if want := !slices.Contains(tc.open, m.Alias); m.Locked != want {
 				t.Errorf("prepaid=%v: %s locked = %v, want %v", tc.prepaid, m.Alias, m.Locked, want)
 			}
+		}
+		if m, _ := r.Model("org_new", "billed"); m.Billing == nil || m.Billing.Credit != tc.prepaid {
+			t.Errorf("prepaid=%v: billing = %+v, want credit %v", tc.prepaid, m.Billing, tc.prepaid)
 		}
 		if m, _ := r.Model("org_paid", "engine"); m.Limited || m.Locked {
 			t.Error("an organisation that is not limited has its engine model held back")

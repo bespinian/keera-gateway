@@ -336,8 +336,8 @@ func (s *Server) target(c *call, b *body) bool {
 		s.refuse(c, refusal{
 			status: http.StatusForbidden,
 			typ:    "permission_error", code: "org_limited",
-			msg: "the model '" + alias + "' " + lockedReason(model) + ", and " +
-				policy.LockedMessage,
+			msg: "the model '" + alias + "' " + lockedReason(model) + "; " +
+				policy.LockedMessage(model.OrgName),
 		})
 		return false
 	}

@@ -45,6 +45,13 @@ func (s *Server) withSandboxes(next handler) handler {
 	}
 }
 
+// orgLimited refuses what an organisation that signed itself up may only do
+// once it has paid. why says what it would use of the deployment's.
+func orgLimited(w http.ResponseWriter, why, orgName string) {
+	httpx.WriteError(w, http.StatusForbidden, "permission_error", "org_limited",
+		why+"; "+policy.LockedMessage(orgName))
+}
+
 /* --------------------------------------------------------------- the catalogue */
 
 // listSandboxClasses is readable by anyone in the organisation: a developer
@@ -106,8 +113,7 @@ func (s *Server) putSandboxClass(w http.ResponseWriter, r *http.Request, p *auth
 			return
 		}
 		if !ok {
-			httpx.WriteError(w, http.StatusForbidden, "permission_error", "org_limited",
-				"a warm pool holds this deployment's machines, and "+policy.LockedMessage)
+			orgLimited(w, "a warm pool holds this deployment's machines", s.orgName(r.Context(), orgID))
 			return
 		}
 	}
@@ -362,8 +368,7 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request, p *authn.
 		s.fail(w, err)
 		return
 	} else if org.Limited {
-		httpx.WriteError(w, http.StatusForbidden, "permission_error", "org_limited",
-			"sandboxes run on this deployment's machines, and "+policy.LockedMessage)
+		orgLimited(w, "sandboxes run on this deployment's machines", org.Name)
 		return
 	}
 	limits, err := s.sandboxLimits(r.Context(), orgID, in.ProjectID)

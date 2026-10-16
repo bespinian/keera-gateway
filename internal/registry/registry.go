@@ -81,7 +81,7 @@ type Source interface {
 	LoadMCPServers(ctx context.Context) ([]policy.MCPServer, error)
 	LoadSpend(ctx context.Context, now time.Time) ([]store.SpendRow, error)
 	LoadCredit(ctx context.Context) ([]store.CreditRow, error)
-	LimitedOrgs(ctx context.Context) ([]string, error)
+	LimitedOrgs(ctx context.Context) (map[string]string, error)
 	Listen(ctx context.Context, channel string, fn func(payload string)) error
 }
 
@@ -259,13 +259,9 @@ func (r *Registry) dropKey(id string) {
 // are read one after another, so a failure part way leaves the rest as they
 // were until the next pass.
 func (r *Registry) refreshAll(ctx context.Context) error {
-	ids, err := r.store.LimitedOrgs(ctx)
+	limited, err := r.store.LimitedOrgs(ctx)
 	if err != nil {
 		return err
-	}
-	limited := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		limited[id] = true
 	}
 	if err := r.refreshModels(ctx, limited); err != nil {
 		return err
@@ -273,28 +269,19 @@ func (r *Registry) refreshAll(ctx context.Context) error {
 	if err := r.refreshMCP(ctx, limited); err != nil {
 		return err
 	}
-	if err := r.refreshFilters(ctx); err != nil {
+	if err := reload(ctx, &r.filters, r.store.LoadFilters, func(f *policy.Filter) (string, string) {
+		return f.OrgID, f.Alias
+	}); err != nil {
 		return err
 	}
-	return r.refreshRouters(ctx)
-}
-
-func (r *Registry) refreshFilters(ctx context.Context) error {
-	return reload(ctx, &r.filters, r.store.LoadFilters, func(f *policy.Filter) (string, string) {
-		return f.OrgID, f.Alias
+	return reload(ctx, &r.routers, r.store.LoadRouters, func(rt *policy.Router) (string, string) {
+		return rt.OrgID, rt.Alias
 	})
 }
 
 // Filter implements policy.Source.
 func (r *Registry) Filter(orgID, alias string) (policy.Filter, bool) {
-	f, ok := (*r.filters.Load())[orgID][alias]
-	return f, ok
-}
-
-func (r *Registry) refreshRouters(ctx context.Context) error {
-	return reload(ctx, &r.routers, r.store.LoadRouters, func(rt *policy.Router) (string, string) {
-		return rt.OrgID, rt.Alias
-	})
+	return find(&r.filters, orgID, alias)
 }
 
 // reload loads one kind of thing and swaps in a new index of it, by org and
@@ -348,15 +335,16 @@ func sortedValues[T any](byAlias map[string]T) []T {
 	return out
 }
 
-func (r *Registry) refreshModels(ctx context.Context, limited map[string]bool) error {
+// limited maps each limited organisation to its name.
+func (r *Registry) refreshModels(ctx context.Context, limited map[string]string) error {
 	return reload(ctx, &r.models, r.store.LoadModels, func(m *policy.Model) (string, string) {
 		if r.opts.Platform.Covers(*m) {
 			r.usePlatformKey(m)
 		} else if len(m.APIKeyCiphertext) > 0 {
 			m.APIKey = r.open(ModelSecretName(m.OrgID, m.Alias), m.APIKeyCiphertext)
 		}
-		if limited[m.OrgID] {
-			m.Limited = true
+		if name, ok := limited[m.OrgID]; ok {
+			m.Limited, m.OrgName = true, name
 			m.Locked = !r.openToLimited(*m)
 		}
 		return m.OrgID, m.Alias
@@ -394,13 +382,13 @@ func (r *Registry) usePlatformKey(m *policy.Model) {
 	m.Billing = &policy.Billing{Provider: m.Provider, Credit: r.opts.Prepaid}
 }
 
-func (r *Registry) refreshMCP(ctx context.Context, limited map[string]bool) error {
+func (r *Registry) refreshMCP(ctx context.Context, limited map[string]string) error {
 	return reload(ctx, &r.mcp, r.store.LoadMCPServers, func(m *policy.MCPServer) (string, string) {
 		if len(m.APIKeyCiphertext) > 0 {
 			m.APIKey = r.open(MCPSecretName(m.OrgID, m.Alias), m.APIKeyCiphertext)
 		}
-		if limited[m.OrgID] {
-			m.Limited = true
+		if name, ok := limited[m.OrgID]; ok {
+			m.Limited, m.OrgName = true, name
 			m.Locked = policy.HostingOf(m.URL) != policy.HostedExternal
 		}
 		return m.OrgID, m.Alias

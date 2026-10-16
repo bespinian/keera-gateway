@@ -153,10 +153,12 @@ type Model struct {
 	// The gateway then connects only to public addresses for it. Locked says
 	// it may not use this model at all yet: the model runs inside the
 	// deployment's network, or would be billed after the fact. The registry
-	// sets both. See docs/sso.md.
-	Limited bool `json:"-"`
-	Locked  bool `json:"-"`
-	Enabled bool `json:"enabled"`
+	// sets both, and OrgName with them, so a refusal can name the
+	// organisation. See docs/sso.md.
+	Limited bool   `json:"-"`
+	Locked  bool   `json:"-"`
+	OrgName string `json:"-"`
+	Enabled bool   `json:"enabled"`
 }
 
 // Key names the model across every tenant: its organisation and its alias.
