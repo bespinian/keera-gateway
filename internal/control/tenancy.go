@@ -404,6 +404,14 @@ func (s *Server) addUser(w http.ResponseWriter, r *http.Request, p *authn.Princi
 			"person is linked to their identity on their first sign-in")
 		return
 	}
+	// Sign-in looks a person up by provider and subject together, so a bare
+	// subject would never match, and the sign-in would be refused.
+	if provider, subject, _ := strings.Cut(in.ExternalID, ":"); in.ExternalID != "" &&
+		(provider == "" || subject == "") {
+		badRequest(w, "'external_id' is the identity provider's name and the person's "+
+			"subject there, as <provider>:<subject>, such as google:1234567890")
+		return
+	}
 	role := authn.Role(in.Role)
 	if in.Role == "" {
 		role = authn.RoleMember

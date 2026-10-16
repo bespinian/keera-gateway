@@ -36,7 +36,8 @@ func userCmd(ctx context.Context, args []string) error {
 	fs := r.fs
 	fs.StringVar(&r.addRole, "role", "member", "member or admin")
 	fs.StringVar(&r.externalID, "external-id", "",
-		"the identity provider's subject, when it is known before the first sign-in")
+		"operators only: the person's id at the identity provider, as <provider>:<subject>, "+
+			"when it is known before their first sign-in")
 	fs.BoolVar(&r.passkey, "passkey", false,
 		"they sign in with a passkey instead of an identity provider; prints their set-up link")
 	if done, err := r.parse(); done {
