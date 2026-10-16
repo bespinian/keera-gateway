@@ -51,14 +51,10 @@ import {
   banner,
 } from "../ui.js";
 import { barList } from "../chart.js";
-import { chooseOrg, orgNameOf } from "./orgs.js";
+import { orgNameOf } from "./orgs.js";
 import { facts } from "./detail.js";
 
 export async function routersView(ctx) {
-  // A router is one organisation's judgement about which of its requests
-  // deserve which model. Like everything else, it belongs to one.
-  if (!ctx.orgID) return chooseOrg(ctx, "Routers");
-
   const since = currentRange();
   const [res, models] = await Promise.all([
     api.routers(ctx.orgID, { stats: true, since }),
@@ -550,8 +546,6 @@ function report(ctx, probe) {
 /* ------------------------------------------------------------ one router */
 
 export async function routerDetailView(ctx) {
-  if (!ctx.orgID) return chooseOrg(ctx, "Routers");
-
   const since = currentRange();
   const res = await api.routerReport(ctx.orgID, ctx.param, since);
   const rep = res.report || {};

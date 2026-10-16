@@ -61,7 +61,7 @@ import {
   stateOf,
 } from "./keys.js";
 import { openProject, editProject, deleteProject } from "./projects.js";
-import { chooseOrg, orgNameOf } from "./orgs.js";
+import { orgNameOf } from "./orgs.js";
 import {
   TONE,
   roleLabel,
@@ -396,7 +396,6 @@ export async function keyDetailView(ctx) {
 /* ----------------------------------------------------------------- models */
 
 export async function modelDetailView(ctx) {
-  if (!ctx.orgID) return chooseOrg(ctx, "Models");
   const models = (await api.models(ctx.orgID)).data || [];
   const model = models.find((m) => m.alias === ctx.param);
   const canEdit = model ? isAdmin(ctx) : false;

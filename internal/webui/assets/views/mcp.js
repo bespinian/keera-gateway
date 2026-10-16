@@ -27,13 +27,11 @@ import {
   formModal,
 } from "../ui.js";
 import { toolCallTable } from "./tools.js";
-import { chooseOrg } from "./orgs.js";
 
 // mcpView is the MCP page: the servers the gateway stands in front of, the
 // address a client is given for each, and - for an administrator - what each
 // tool has been called for and the latest calls.
 export async function mcpView(ctx) {
-  if (!ctx.orgID) return chooseOrg(ctx, "MCP servers");
   const canEdit = isAdmin(ctx);
   const since = currentRange();
   const [servers, connect, summary, calls] = await Promise.all([

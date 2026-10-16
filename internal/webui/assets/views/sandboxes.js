@@ -48,7 +48,7 @@ import {
   formModal,
   capitalise,
 } from "../ui.js";
-import { chooseOrg, orgNameOf } from "./orgs.js";
+import { orgNameOf } from "./orgs.js";
 import { oldestProject } from "./projects.js";
 
 // showFinished is whether the list includes finished sandboxes. It lasts
@@ -57,9 +57,6 @@ import { oldestProject } from "./projects.js";
 let showFinished = false;
 
 export async function sandboxesView(ctx) {
-  // A sandbox belongs to an organisation, because its quota and its bill do.
-  if (!ctx.orgID) return chooseOrg(ctx, "Sandboxes");
-
   // Navigation changes the path before the old screen is torn down; a reload
   // does not.
   const here = location.pathname;

@@ -33,15 +33,10 @@ import {
   rangeOf,
 } from "../ui.js";
 import { openGuardrails, ceilingsFor, summarise } from "./guardrails.js";
-import { chooseOrg, orgNameOf } from "./orgs.js";
+import { orgNameOf } from "./orgs.js";
 import { oldestProject } from "./projects.js";
 
 export async function keysView(ctx) {
-  // Keys, models and people all belong to one organisation, so an operator
-  // looking at every organisation picks one before anything is read.
-  if (!ctx.orgID && ctx.state.me.unrestricted)
-    return chooseOrg(ctx, "API keys");
-
   const since = currentRange();
   const range = rangeOf(since, RANGES[1]);
   const [keysRes, projectsRes, modelsRes, usersRes] = await Promise.all([

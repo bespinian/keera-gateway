@@ -29,12 +29,9 @@ import {
   modelsCell,
   summarise,
 } from "./guardrails.js";
-import { chooseOrg, orgNameOf } from "./orgs.js";
+import { orgNameOf } from "./orgs.js";
 
 export async function projectsView(ctx) {
-  if (!ctx.orgID && ctx.state.me.unrestricted)
-    return chooseOrg(ctx, "Projects");
-
   const [projectsRes, modelsRes] = await Promise.all([
     api.projects(ctx.orgID),
     api.models(ctx.orgID),

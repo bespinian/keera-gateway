@@ -5,7 +5,7 @@
 // models are.
 
 import { api } from "../api.js";
-import { chooseOrg, orgNameOf } from "./orgs.js";
+import { orgNameOf } from "./orgs.js";
 import {
   h,
   table,
@@ -68,7 +68,6 @@ function canAddModel(ctx) {
 }
 
 export async function modelsView(ctx) {
-  if (!ctx.orgID) return chooseOrg(ctx, "Models");
   const since = currentRange();
   const res = await api.models(ctx.orgID, { stats: true, since });
   const models = res.data || [];

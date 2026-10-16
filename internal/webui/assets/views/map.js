@@ -21,7 +21,7 @@
 // not an animation of an average.
 
 import { api } from "../api.js";
-import { chooseOrg, orgNameOf } from "./orgs.js";
+import { orgNameOf } from "./orgs.js";
 import { outcomeOf } from "../status.js";
 import {
   h,
@@ -88,10 +88,8 @@ const MAX_SPAWN = 48;
 const MAX_PACKETS = 400;
 
 export async function mapView(ctx) {
-  if (!ctx.orgID) return chooseOrg(ctx, "Live maps");
   const since = currentRange();
-  const range = RANGES.find((r) => r.since === since) || RANGES[0];
-  ctx.setSubtitle(range.long);
+  ctx.setSubtitle(rangeOf(since, RANGES[0]).long);
 
   const data = await api.trafficMap(ctx.orgID, since);
 

@@ -53,7 +53,7 @@ import {
   banner,
 } from "../ui.js";
 import { areaChart, barList } from "../chart.js";
-import { chooseOrg, orgNameOf } from "./orgs.js";
+import { orgNameOf } from "./orgs.js";
 // A filter's own screen is an entity's own screen, so it takes the period
 // picker the project, key and model screens use - and the period itself, which is
 // shared between them: arriving here from a project showing this afternoon and
@@ -61,10 +61,6 @@ import { chooseOrg, orgNameOf } from "./orgs.js";
 import { facts } from "./detail.js";
 
 export async function filtersView(ctx) {
-  // A filter is one organisation's judgement about what its own requests may
-  // carry. Like everything else, it belongs to one.
-  if (!ctx.orgID) return chooseOrg(ctx, "Filters");
-
   const since = currentRange();
   const [res, models] = await Promise.all([
     api.filters(ctx.orgID, { stats: true, since }),
@@ -484,10 +480,6 @@ function report(ctx, probe) {
 // people arrive - which project is living with the refusals. An instruction
 // cannot be tuned against three sample segments.
 export async function filterDetailView(ctx) {
-  // A filter belongs to one organisation, as the list does: an operator looking
-  // at every tenant at once has not said whose filter this is.
-  if (!ctx.orgID) return chooseOrg(ctx, "Filters");
-
   const since = currentRange();
   const res = await api.filterReport(ctx.orgID, ctx.param, since);
   const rep = res.report || {};

@@ -36,7 +36,7 @@ import { requestsView } from "./views/requests.js";
 import { mapView } from "./views/map.js";
 import { sessionsView, sessionDetailView } from "./views/sessions.js";
 import { peopleView } from "./views/people.js";
-import { orgsView } from "./views/orgs.js";
+import { orgsView, chooseOrg } from "./views/orgs.js";
 import { billingView } from "./views/billing.js";
 import {
   projectDetailView,
@@ -63,23 +63,20 @@ const state = {
   orgID: "",
 };
 
-/** routes is the whole panel, in sidebar order. The list stays flat - routing,
- *  the fallback route and the aria-current sweep all walk this one array - and
- *  `group` folds it into labelled blocks at the point of rendering.
+/** routes is the whole panel, in sidebar order and widest audience first. The
+ *  list stays flat, so routing walks one array; `group` folds it into blocks
+ *  when the sidebar is drawn.
  *
- *  A `detail` on an entry is that screen's row opened up: /projects lists the
- *  projects, /projects/project_1 is one of them. It hangs off the list route so that who
- *  may see it, and which sidebar entry lights up, are decided once for both.
+ *  `perOrg` marks a screen whose contents belong to one organisation, and is
+ *  what they are called when an operator has to pick one first.
  *
- *  The order is by audience, widest first: the screens shaped for members lead,
- *  then the ones for whoever runs the organisation, then the ones only an
- *  administrator or an operator can see. */
+ *  A `detail` is one row of that screen opened up: /projects/project_1 is one
+ *  of /projects. Who may see it, and which entry lights up, follow the list. */
 const routes = [
   { path: "/", label: "Dashboard", icon: "dashboard", view: dashboardView },
 
-  // The screens a developer rather than an administrator comes here for. For a
-  // member these are the only ones that answer a question they actually have,
-  // so they come before anything that member could only read.
+  // What a developer comes here for. They come first, as for a member they
+  // are the only screens that answer a question they have.
   {
     path: "/access",
     group: "You",
@@ -105,14 +102,15 @@ const routes = [
     view: playgroundView,
   },
 
-  // What the organisation is made of, and the report over it. Usage belongs
-  // with them: it is the organisation's spend, not the reader's own.
+  // What the organisation is made of. Usage is here, as it is the
+  // organisation's spend, not the reader's.
   {
     path: "/projects",
     group: "Organisation",
     label: "Projects",
     icon: "projects",
     view: projectsView,
+    perOrg: "Projects",
     detail: { label: "Project", view: projectDetailView },
   },
   {
@@ -121,6 +119,7 @@ const routes = [
     label: "API keys",
     icon: "keys",
     view: keysView,
+    perOrg: "API keys",
     detail: { label: "API key", view: keyDetailView },
   },
   {
@@ -129,80 +128,67 @@ const routes = [
     label: "Models",
     icon: "models",
     view: modelsView,
-    detail: { label: "Model", view: modelDetailView },
+    perOrg: "Models",
+    detail: { label: "Model", view: modelDetailView, perOrg: "Models" },
   },
   // Every model the hosted providers offer, to pick one to add. It is opened
   // from Models rather than the sidebar, so `under` lights up Models instead.
   {
-    path: "/provider-models",
+    path: "/catalogue",
     group: "Organisation",
     label: "Model catalogue",
     icon: "models",
-    view: providerModelsView,
+    view: catalogueView,
     under: "/models",
   },
-  // Filters sit next to the catalogue because that is what they are made of -
-  // a model and an instruction - and next to the guardrails they belong to,
-  // which are reached from Projects and API keys either side of them.
+  // Filters and routers are each a model and an instruction, so they follow
+  // the models.
   {
     path: "/filters",
     group: "Organisation",
     label: "Filters",
     icon: "filters",
     view: filtersView,
-    // Folded away until this deployment has one. See advancedShown: a first
-    // deployment has sixteen screens and needs nine, and a filter is not a
-    // thing anybody sets up before they have a reason to.
+    perOrg: "Filters",
+    // Folded away until this deployment has one. See advancedShown.
     advanced: "filters",
     about: "Checks requests, and can redact or refuse them.",
-    // A filter has its own screen for the same reason a project and a model do:
-    // it is a thing with traffic. It is the only guardrail that runs a model on
-    // every request it covers, spends money on each one and refuses some of
-    // them, and none of that fits in a row.
-    detail: { label: "Filter", view: filterDetailView },
+    // Its own screen, because what it did to the traffic does not fit in a row.
+    detail: { label: "Filter", view: filterDetailView, perOrg: "Filters" },
   },
-  // Routers sit after Filters because they are the same shape of thing - a
-  // model and an instruction, run before the request reaches its model - and
-  // read most easily as the pair they are. A filter changes the request; a
-  // router changes which model answers it.
   {
     path: "/routers",
     group: "Organisation",
     label: "Routers",
     icon: "routers",
     view: routersView,
+    perOrg: "Routers",
     advanced: "routers",
     about: "Picks the model for each request.",
-    // A router has its own screen because the one number that says whether it
-    // works is a split: which destinations it has been choosing, and how
-    // often. Every request it places is answered either way, so nothing else
-    // in the panel would ever show a router that had stopped deciding.
-    detail: { label: "Router", view: routerDetailView },
+    // Its own screen, for the split between its destinations: the one number
+    // that shows a router has stopped deciding.
+    detail: { label: "Router", view: routerDetailView, perOrg: "Routers" },
   },
-  // MCP servers sit after the two hooks: like them they are something a
-  // request passes through on its way out.
+  // Like filters and routers, something a request passes through.
   {
     path: "/mcp",
     group: "Organisation",
     label: "MCP",
     icon: "mcp",
     view: mcpView,
+    perOrg: "MCP servers",
     advanced: "mcp_servers",
     about: "Tools for agents, behind the same keys and guardrails.",
   },
-  // Sandboxes sit after the guardrails: the classes are a catalogue like the
-  // models, and the quota is a guardrail like the rest. What the machines cost
-  // is in `keera sandbox usage`, not the usage screen.
-  //
-  // Not under "You", despite being a thing a developer asks for. A member sees
-  // their own and an administrator sees all of them, so splitting it in two
-  // would have been two screens showing the same table.
+  // Not under "You": a member sees their own sandboxes and an administrator
+  // all of them, in the same table.
   {
     path: "/sandboxes",
     group: "Organisation",
     label: "Sandboxes",
     icon: "sandboxes",
     view: sandboxesView,
+    perOrg: "Sandboxes",
     advanced: "sandboxes",
     // Not shown at all without a driver: there is nothing to lend out.
     needs: "sandboxes",
@@ -216,20 +202,18 @@ const routes = [
     view: usageView,
   },
 
-  // The event log, read three ways. Everyone reads these: an administrator
-  // the whole organisation's traffic, a member only that of their own keys.
-  //
-  // The map leads because it answers "what is this" rather than "what
-  // happened", which is the first question somebody new to a deployment has.
+  // The event log, read three ways: an administrator sees the organisation's
+  // traffic, a member that of their own keys. The map leads, as it shows what
+  // the deployment is.
   {
     path: "/map",
     group: "Activity",
     label: "Live map",
     icon: "map",
     view: mapView,
+    perOrg: "Live maps",
   },
-  // The log grouped into the tasks its requests were made for: one row per
-  // task rather than per call. The calls behind any row are a click away.
+  // The log grouped by task, one row each.
   {
     path: "/sessions",
     group: "Activity",
@@ -253,6 +237,7 @@ const routes = [
     label: "Users",
     icon: "people",
     view: peopleView,
+    perOrg: "Users",
     admin: true,
     detail: { label: "User", view: userDetailView },
   },
@@ -837,8 +822,14 @@ async function renderRoute() {
       setTitle(t, s);
     },
   };
+  // Everything on these screens belongs to one organisation, so an operator
+  // looking at all of them picks one first.
+  const perOrg = route.parent ? route.detail.perOrg : route.perOrg;
   try {
-    const view = await route.view(ctx);
+    const view =
+      perOrg && !state.orgID && state.me.unrestricted
+        ? chooseOrg(ctx, perOrg)
+        : await route.view(ctx);
     if (gen !== rendering) return;
     replace(outlet, limitedNotice(), view);
   } catch (err) {

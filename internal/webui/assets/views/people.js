@@ -20,7 +20,7 @@ import {
   dash,
   formModal,
 } from "../ui.js";
-import { chooseOrg, orgNameOf } from "./orgs.js";
+import { orgNameOf } from "./orgs.js";
 import { userPasskeys, showPasskeyLink } from "./passkeys.js";
 
 const ROLES = [
@@ -99,9 +99,6 @@ function passkeyMark() {
 }
 
 export async function peopleView(ctx) {
-  const canOperate = ctx.state.me.unrestricted;
-  if (!ctx.orgID && canOperate) return chooseOrg(ctx, "Users");
-
   const users = (await api.users(ctx.orgID)).data || [];
   // Whether a role can be changed here at all. It cannot when a group decides
   // the administrator role: the directory reapplies its answer on the next
