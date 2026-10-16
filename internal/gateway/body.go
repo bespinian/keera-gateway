@@ -430,11 +430,14 @@ func eachElement(raw json.RawMessage, fn func(elem []byte) bool) {
 // usage-only chunk is removed on the way back, because a client that never
 // asked for it may not cope with a chunk that has no choices.
 func (b *body) ensureUsageInStream() (injected bool) {
-	opts := map[string]json.RawMessage{}
-	if raw, ok := b.fields["stream_options"]; ok {
-		if err := json.Unmarshal(raw, &opts); err != nil {
-			opts = map[string]json.RawMessage{}
+	var opts map[string]json.RawMessage
+	if raw, ok := b.value("stream_options"); ok {
+		if json.Unmarshal(raw, &opts) != nil {
+			opts = nil
 		}
+	}
+	if opts == nil {
+		opts = map[string]json.RawMessage{}
 	}
 	if inc, ok := opts["include_usage"]; ok {
 		var v bool

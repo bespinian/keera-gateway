@@ -143,6 +143,11 @@ func TestEnsureUsageInStream(t *testing.T) {
 			wantInjected: true,
 		},
 		{
+			name:         "a null stream_options reads as absent",
+			in:           `{"model":"m","stream":true,"stream_options":null}`,
+			wantInjected: true,
+		},
+		{
 			name:         "other stream_options survive",
 			in:           `{"model":"m","stream":true,"stream_options":{"continuous_usage_stats":true}}`,
 			wantInjected: true,
