@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"flag"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -172,5 +173,27 @@ func TestSandboxUsageSpansEveryOrganisationWithoutOrg(t *testing.T) {
 	capture(t, "sandbox", "usage")
 	if q := f.seen[len(f.seen)-1].query; !strings.Contains(q, "org_id=org_b") {
 		t.Errorf("query = %q, want org_b", q)
+	}
+}
+
+// An IPv6 literal is bracketed once, not again around the brackets the URL
+// already has.
+func TestDialAddressAddsTheSchemesPort(t *testing.T) {
+	cases := map[string]string{
+		"https://gateway.example":      "gateway.example:443",
+		"http://gateway.example":       "gateway.example:80",
+		"https://gateway.example:8443": "gateway.example:8443",
+		"https://[::1]":                "[::1]:443",
+		"http://[::1]":                 "[::1]:80",
+		"http://[::1]:8080":            "[::1]:8080",
+	}
+	for in, want := range cases {
+		u, err := url.Parse(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := dialAddress(u); got != want {
+			t.Errorf("dialAddress(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

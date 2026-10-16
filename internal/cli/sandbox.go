@@ -507,6 +507,9 @@ func dialUpgrade(ctx context.Context, c *client, endpoint string) (net.Conn, err
 	if err != nil {
 		return nil, fmt.Errorf("reaching the gateway at %s: %w", c.base, err)
 	}
+	// A dialled connection no longer watches the context, so close it on
+	// cancellation to make Ctrl-C immediate, during the upgrade and after.
+	context.AfterFunc(ctx, func() { _ = conn.Close() })
 	if err := req.Write(conn); err != nil {
 		_ = conn.Close()
 		return nil, err
@@ -527,46 +530,31 @@ func dialUpgrade(ctx context.Context, c *client, endpoint string) (net.Conn, err
 	return &bufferedConn{Conn: conn, r: br}, nil
 }
 
-// dialFor opens the transport for one URL, TLS or not.
+// dialFor opens the transport for one URL, TLS or not. Verification uses the
+// system roots as everywhere else; a hand-rolled dial is where that gets left
+// off by mistake.
 func dialFor(ctx context.Context, u *url.URL) (net.Conn, error) {
-	host := u.Host
-	if u.Port() == "" {
-		if u.Scheme == "https" {
-			host = net.JoinHostPort(host, "443")
-		} else {
-			host = net.JoinHostPort(host, "80")
-		}
-	}
 	d := net.Dialer{Timeout: 15 * time.Second}
 	if u.Scheme != "https" {
-		return d.DialContext(ctx, "tcp", host)
+		return d.DialContext(ctx, "tcp", dialAddress(u))
 	}
-	return tlsDial(ctx, &d, host, u.Hostname())
+	td := tls.Dialer{NetDialer: &d, Config: &tls.Config{
+		ServerName: u.Hostname(),
+		MinVersion: tls.VersionTLS12,
+	}}
+	return td.DialContext(ctx, "tcp", dialAddress(u))
 }
 
-// tlsDial opens a TLS connection for the attach surface, which takes the
-// connection over after the 101. Verification uses the system roots as
-// everywhere else; a hand-rolled dial is where that gets left off by mistake.
-func tlsDial(ctx context.Context, d *net.Dialer, address, serverName string) (net.Conn, error) {
-	conn, err := tls.DialWithDialer(d, "tcp", address, &tls.Config{
-		ServerName: serverName,
-		MinVersion: tls.VersionTLS12,
-	})
-	if err != nil {
-		return nil, err
+// dialAddress is the host and port to dial for a URL, with the scheme's port
+// when the URL names none.
+func dialAddress(u *url.URL) string {
+	if u.Port() != "" {
+		return u.Host
 	}
-	// DialWithDialer ignores the context, so close on cancellation to make
-	// Ctrl-C immediate.
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(deadline)
+	if u.Scheme == "https" {
+		return net.JoinHostPort(u.Hostname(), "443")
 	}
-	go func() {
-		<-ctx.Done()
-		if ctx.Err() != nil {
-			_ = conn.SetDeadline(time.Now())
-		}
-	}()
-	return conn, nil
+	return net.JoinHostPort(u.Hostname(), "80")
 }
 
 // refusal renders what the gateway said into one line for a terminal.
