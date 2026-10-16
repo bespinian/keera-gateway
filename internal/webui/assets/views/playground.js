@@ -11,6 +11,7 @@ import {
   h,
   icon,
   icons,
+  iconButton,
   replace,
   copyText,
   money,
@@ -19,6 +20,7 @@ import {
   ms,
   toast,
   field,
+  banner,
 } from "../ui.js";
 import { keyModels, noKey, noModel, usableKeys } from "./connect.js";
 
@@ -247,7 +249,7 @@ function chat(ctx, keys, key, models) {
     { class: "chat-bar" },
     keyPicker(ctx, keys, () => abort && abort.abort()),
     modelSelect,
-    h("div", { style: { flex: 1 } }),
+    h("div", { class: "spacer" }),
     h(
       "button",
       {
@@ -698,23 +700,17 @@ function messageEl(msg, ctx, byAlias) {
       "div",
       { class: "msg-head" },
       h("span", { class: "mono msg-model" }, msg.model),
-      h("div", { style: { flex: 1 } }),
+      h("div", { class: "spacer" }),
       !msg.streaming && msg.content
-        ? h(
-            "button",
-            {
-              class: "btn btn-quiet btn-sm",
-              title: "Copy",
-              "aria-label": "Copy the reply",
-              onClick: () => copyText(msg.content),
-            },
-            icon(icons.copy),
-          )
+        ? iconButton(icons.copy, "Copy", () => copyText(msg.content), {
+            quiet: true,
+            label: "Copy the reply",
+          })
         : null,
     ),
     msg.reasoning ? reasoningEl(msg) : null,
     body,
-    msg.error ? h("div", { class: "banner banner-bad" }, msg.error) : null,
+    msg.error ? banner("bad", msg.error) : null,
     msg.stopped ? h("div", { class: "faint msg-foot" }, "Stopped.") : null,
     !msg.streaming && !msg.error ? footer(msg, ctx, byAlias) : null,
   );

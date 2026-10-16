@@ -34,20 +34,12 @@ export function svg(tag, props, ...children) {
     if (k.startsWith("on")) el.addEventListener(k.slice(2).toLowerCase(), v);
     else el.setAttribute(k, v);
   }
-  for (const c of children.flat(4)) {
-    if (c === null || c === undefined || c === false) continue;
-    el.append(c instanceof Node ? c : document.createTextNode(String(c)));
-  }
-  return el;
-}
-
-export function clear(el) {
-  while (el.firstChild) el.removeChild(el.firstChild);
+  append(el, children);
   return el;
 }
 
 export function replace(el, ...children) {
-  clear(el);
+  el.replaceChildren();
   append(el, children);
   return el;
 }
@@ -117,6 +109,12 @@ export function bytes(n) {
  *  many is word + "s" unless given, for words like "sandbox" that differ. */
 export function plural(n, word, many = word + "s") {
   return n === 1 ? word : many;
+}
+
+/** capitalise gives a word a capital first letter, as a pill or a label
+ *  shows it. */
+export function capitalise(word) {
+  return word ? word[0].toUpperCase() + word.slice(1) : "";
 }
 
 /** duration is how long something ran, in the units somebody would say it in.
@@ -561,16 +559,41 @@ export const RANGES = [
   { label: "30d", since: "720h", long: "Last 30 days" },
 ];
 
+/** rangeOf is the entry in RANGES for since, or fallback when none matches. */
+export function rangeOf(since, fallback) {
+  return RANGES.find((r) => r.since === since) || fallback;
+}
+
+/* --------------------------------------------------------------- storage */
+
+/** remembered is a setting kept for this tab, or with lasting for every visit,
+ *  or null. A browser can refuse storage, which reads as nothing kept. */
+export function remembered(key, { lasting } = {}) {
+  try {
+    return (lasting ? localStorage : sessionStorage).getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+/** remember keeps a setting, or forgets it when value is null. A browser that
+ *  refuses storage still gets the change; it just does not last. */
+export function remember(key, value, { lasting } = {}) {
+  try {
+    const store = lasting ? localStorage : sessionStorage;
+    if (value === null) store.removeItem(key);
+    else store.setItem(key, value);
+  } catch {
+    // Nothing to do: the setting holds until the page reloads.
+  }
+}
+
 /** currentRange is the window in force. Screens read it rather than a default
  *  of their own; DEFAULT_RANGE is the one they all start on. */
 const DEFAULT_RANGE = "168h";
 
 export function currentRange() {
-  try {
-    return sessionStorage.getItem("keera.range") || DEFAULT_RANGE;
-  } catch {
-    return DEFAULT_RANGE;
-  }
+  return remembered("keera.range") || DEFAULT_RANGE;
 }
 
 /** rangePicker is the segmented control that sets it. ctx.reload() re-renders
@@ -594,12 +617,7 @@ export function rangePicker(
           "aria-pressed": String(r.since === since),
           title: r.long,
           onClick: () => {
-            try {
-              sessionStorage.setItem(key, r.since);
-            } catch {
-              // A browser that refuses storage still gets the new window; it
-              // just does not carry to the next screen.
-            }
+            remember(key, r.since);
             ctx.reload();
           },
         },
@@ -620,7 +638,7 @@ export function rangePicker(
  *  screen reader, titles say what each state means, and words, if given,
  *  change the button's text with the state. */
 export function liveControl({ key, label, titles, words = {} }) {
-  const on = sessionStorage.getItem(key) !== "off";
+  const on = remembered(key) !== "off";
   const blip = h("span", { class: "blip" });
   const text = h("span", {}, "Live");
   const button = h(
@@ -650,7 +668,7 @@ export function liveControl({ key, label, titles, words = {} }) {
   };
   button.addEventListener("click", () => {
     control.on = !control.on;
-    sessionStorage.setItem(key, control.on ? "on" : "off");
+    remember(key, control.on ? "on" : "off");
     button.setAttribute("aria-pressed", String(control.on));
     if (listener) listener(control.on);
   });
@@ -668,16 +686,100 @@ export function liveControl({ key, label, titles, words = {} }) {
   return control;
 }
 
+/** followRequests keeps the request stream open while a liveControl is on,
+ *  and shows on the control whether it is connecting, live or stopped.
+ *
+ *  stream opens the EventSource, and is called again on every reconnect, so
+ *  it can carry the newest position. onRequests gets each batch it sends.
+ *  onResume, if given, runs when requests may have been missed: when the
+ *  control is turned back on, and when a dropped stream comes back. */
+export function followRequests(ctx, control, stream, { onRequests, onResume }) {
+  let source = null;
+  const close = () => {
+    if (source) source.close();
+    source = null;
+  };
+  ctx.onTeardown(close);
+
+  const open = () => {
+    close();
+    control.state("connecting");
+    let first = true;
+    source = stream();
+    source.addEventListener("open", () => {
+      control.state("live");
+      if (!first && onResume) onResume();
+      first = false;
+    });
+    source.addEventListener("requests", (e) => {
+      control.state("live");
+      onRequests(JSON.parse(e.data));
+    });
+    // An EventSource retries a dropped connection on its own and gives up
+    // only on a response it was refused - an expired session, a role that may
+    // no longer read this. Both are worth saying, and they are different
+    // sentences.
+    source.addEventListener("error", () => {
+      control.state(
+        source && source.readyState === EventSource.CLOSED
+          ? "stopped"
+          : "connecting",
+      );
+    });
+  };
+
+  control.onChange((on) => {
+    if (!on) {
+      close();
+      control.state("paused");
+      return;
+    }
+    open();
+    if (onResume) onResume();
+  });
+  if (control.on) open();
+  else control.state("paused");
+}
+
+/** throttled runs fn at most once every ms. A call while it waits is not
+ *  lost: fn runs once more when the wait is over. A failure is swallowed, so
+ *  what is on the screen stays and the next call tries again. stop ends it,
+ *  for a screen that has gone. */
+export function throttled(fn, ms) {
+  let busy = false;
+  let again = false;
+  let stopped = false;
+  async function run() {
+    if (stopped) return;
+    if (busy) {
+      again = true;
+      return;
+    }
+    busy = true;
+    try {
+      await fn();
+    } catch {
+      // Left as it is. The next call tries again.
+    }
+    setTimeout(() => {
+      busy = false;
+      if (again) {
+        again = false;
+        run();
+      }
+    }, ms);
+  }
+  run.stop = () => (stopped = true);
+  return run;
+}
+
 export function pill(text, tone) {
   return h("span", { class: "pill" + (tone ? " pill-" + tone : "") }, text);
 }
 
-/** rowLink is a row's name, as the way in to that row's own screen.
- *
- *  A table here has no whole-row click - a row that opens on five screens and
- *  is inert on four is a worse affordance than none - so the name carries it
- *  instead. It reads as the name it already was and behaves as the link every
- *  reader tries first. */
+/** rowLink is a row's name, as the way in to that row's own screen. Tables
+ *  have no whole-row click, because a row that opens on some screens and not
+ *  on others is worse than none, so the name is the link. */
 export function rowLink(ctx, path, text, title) {
   return h(
     "a",
@@ -708,9 +810,10 @@ export function isAdmin(ctx) {
 }
 
 /** checkButton is a Check button with its verdict beside it once it has run.
- *  run asks the control plane, and render draws what came back. The result is
- *  not kept: a check is a statement about right now. */
-export function checkButton(title, run, render) {
+ *  run asks the control plane, and verdict reads what came back as
+ *  { label, tone, title, open }: a pill that opens the full report. The result
+ *  is not kept: a check is a statement about right now. */
+export function checkButton(title, run, verdict) {
   const slot = h("span");
   const button = h(
     "button",
@@ -728,7 +831,7 @@ export function checkButton(title, run, render) {
           ),
         );
         try {
-          slot.replaceChildren(render(await run()));
+          slot.replaceChildren(verdictPill(verdict(await run())));
         } catch (ex) {
           slot.replaceChildren(
             h("span", { class: "pill pill-bad" }, "Check failed"),
@@ -744,11 +847,10 @@ export function checkButton(title, run, render) {
   return h("div", { class: "row-tight" }, button, slot);
 }
 
-/** verdictPill is what a check found, as a pill that opens the full report. */
-export function verdictPill(label, tone, title, onClick) {
+function verdictPill({ label, tone, title, open }) {
   return h(
     "button",
-    { class: "pill pill-" + tone + " pill-button", title, onClick },
+    { class: "pill pill-" + tone + " pill-button", title, onClick: open },
     h("span", { class: "dot" }),
     label,
   );
@@ -775,6 +877,85 @@ export function gone(ctx, path, label, title, body) {
   );
 }
 
+/** detailHead is the strip atop one thing's screen: the way back to its list,
+ *  what it is as chips, then its controls on the right. */
+export function detailHead(ctx, [path, label], chips, controls) {
+  return h(
+    "div",
+    { class: "detail-head" },
+    crumb(ctx, path, label),
+    h(
+      "div",
+      { class: "row", style: { flexWrap: "wrap" } },
+      h("div", { class: "wrap-chips" }, chips),
+      h("div", { class: "spacer" }),
+      controls,
+    ),
+  );
+}
+
+/** busyButton is a button that is off while run works. A failure is toasted. */
+export function busyButton(props, label, run) {
+  const button = h(
+    "button",
+    {
+      class: "btn",
+      ...props,
+      onClick: async () => {
+        button.disabled = true;
+        try {
+          await run();
+        } catch (ex) {
+          toast(ex.message, "bad");
+        } finally {
+          button.disabled = false;
+        }
+      },
+    },
+    label,
+  );
+  return button;
+}
+
+/** iconButton is a small button that shows only an icon. title is its
+ *  tooltip and, unless label says otherwise, what a screen reader reads. Any
+ *  other option is set on the button as it is. */
+export function iconButton(
+  glyph,
+  title,
+  onClick,
+  { quiet, danger, cls, label = title, ...attrs } = {},
+) {
+  const classes = [
+    "btn",
+    quiet && "btn-quiet",
+    "btn-sm",
+    danger && "btn-danger",
+  ];
+  return h(
+    "button",
+    {
+      class: [...classes, cls].filter(Boolean).join(" "),
+      title,
+      "aria-label": label,
+      onClick,
+      ...attrs,
+    },
+    icon(glyph),
+  );
+}
+
+/** csvButton is the button that saves what a screen lists as a CSV file.
+ *  title says what the file holds. */
+export function csvButton(title, download) {
+  return h(
+    "button",
+    { class: "btn", title, onClick: download },
+    icon(icons.download),
+    "CSV",
+  );
+}
+
 /** listHead is the strip above a list: what the list is, then its controls
  *  and the button that adds one. add is { label, onClick }, or null when the
  *  reader cannot add. */
@@ -786,7 +967,7 @@ export function listHead(intro, controls, add) {
     h(
       "div",
       { class: "row", style: { flexWrap: "wrap" } },
-      h("div", { style: { flex: 1 } }),
+      h("div", { class: "spacer" }),
       controls,
       add
         ? h(
@@ -807,7 +988,7 @@ export function sectionHead(title, note, style) {
     "div",
     { class: "section-head", style },
     h("h2", {}, title),
-    h("div", { style: { flex: 1 } }),
+    h("div", { class: "spacer" }),
     typeof note === "string" ? h("span", { class: "faint" }, note) : note,
   );
 }
@@ -820,12 +1001,9 @@ export function pct(part, whole) {
   return `${(frac * 100).toFixed(frac > 0 && frac < 0.001 ? 3 : 1)}%`;
 }
 
-export function stat(label, value, unit, note) {
-  return statCard(
-    label,
-    [value, unit ? h("span", { class: "unit" }, unit) : null],
-    note,
-  );
+/** stat is a figure with its label. value may be an array, to add a unit. */
+export function stat(label, value, note) {
+  return statCard(label, [value], note);
 }
 
 /** moneyStat is a stat for an amount, with the currency first as in money. */
@@ -845,6 +1023,61 @@ function statCard(label, value, note) {
     h("div", { class: "stat-value" }, ...value),
     note ? h("div", { class: "stat-note" }, note) : null,
   );
+}
+
+/** loadMore is the button under a log that adds the next page to the same
+ *  table, so whoever reads backwards keeps what they have read. next fetches
+ *  and adds a page and returns how many rows came; fewer than size is the end,
+ *  which end says. */
+export function loadMore(size, next, end) {
+  const label = `Load ${size} more`;
+  const wrap = h("div", { style: { marginTop: "12px", textAlign: "center" } });
+  const more = h(
+    "button",
+    {
+      class: "btn",
+      onClick: async () => {
+        more.disabled = true;
+        more.textContent = "Loading…";
+        try {
+          if ((await next()) < size) {
+            wrap.replaceChildren(h("div", { class: "hint" }, end));
+            return;
+          }
+        } catch (ex) {
+          wrap.append(banner("bad", ex.message));
+        } finally {
+          more.disabled = false;
+          more.textContent = label;
+        }
+      },
+    },
+    label,
+  );
+  wrap.append(more);
+  return wrap;
+}
+
+/** trafficSummary is a row's traffic in two lines: how many, with a pill when
+ *  something needs a look, then a faint note. A count of zero is no traffic. */
+export function trafficSummary(count, noun, flag, note) {
+  if (!count) return h("span", { class: "faint nowrap" }, "no traffic");
+  return h(
+    "div",
+    { class: "stack" },
+    h(
+      "div",
+      { class: "row-tight" },
+      h("span", { class: "nowrap" }, compact(count), " ", noun),
+      flag,
+    ),
+    h("div", { class: "faint nowrap small" }, note),
+  );
+}
+
+/** dash stands in for a value there is none of. */
+export function dash() {
+  return h("span", { class: "faint" }, "-");
 }
 
 export function empty(title, body) {
@@ -928,7 +1161,7 @@ export function table(columns, rows, opts = {}) {
         "div",
         { class: "toolbar" },
         fetches.map((t) => toggleBox(t, !!t.on, (v) => t.onChange(v))),
-        h("div", { style: { flex: 1 } }),
+        h("div", { class: "spacer" }),
       ),
       card,
     );
@@ -946,8 +1179,7 @@ export function table(columns, rows, opts = {}) {
 
   const body = h("tbody");
   const count = h("span", {
-    class: "faint nowrap",
-    style: { fontSize: "11.5px" },
+    class: "faint nowrap small",
   });
   const sortable = new Map();
 
@@ -1089,7 +1321,7 @@ export function table(columns, rows, opts = {}) {
           if (t.onChange) t.onChange(v);
         }),
       ),
-      h("div", { style: { flex: 1 } }),
+      h("div", { class: "spacer" }),
       count,
     );
   }
@@ -1181,7 +1413,10 @@ export function modal({ title, subtitle, body, actions, wide }) {
   // Focus goes back where it came from. A dialog that drops a keyboard user at
   // the top of the document on close has taken their place in the page away.
   const opener = document.activeElement;
+  let open = true;
   const close = () => {
+    if (!open) return;
+    open = false;
     overlay.remove();
     document.removeEventListener("keydown", onKey, true);
     if (opener && opener.isConnected) opener.focus();
@@ -1292,11 +1527,65 @@ function trapTab(card, e) {
   }
 }
 
-/** confirm asks before something irreversible.
- *
- *  A refused or failed action is shown in the dialog rather than swallowed: the
- *  whole point of this dialog is that the thing behind it cannot be undone, so
- *  "it did not happen" has to be as visible as "it did". */
+/** formModal is a dialog that does one thing with its primary button.
+ *  submit(close) does it, and returns false to keep the dialog open, as after
+ *  focusing an empty field. A failure, or a thrown { message } of text or
+ *  nodes, shows in the dialog. Once done the dialog closes, toasts done (text,
+ *  or a function of what submit returned) and reloads ctx, each if given.
+ *  Returns { close, button }. */
+export function formModal({
+  title,
+  subtitle,
+  wide,
+  body,
+  submitLabel = "Save",
+  danger,
+  submit,
+  done,
+  ctx,
+}) {
+  const err = h("div");
+  body.prepend(err);
+  let button;
+  const close = modal({
+    title,
+    subtitle,
+    wide,
+    body,
+    actions: (close) => [
+      h("button", { class: "btn", onClick: close }, "Cancel"),
+      (button = h(
+        "button",
+        {
+          class: "btn " + (danger ? "btn-danger" : "btn-primary"),
+          onClick: async () => {
+            button.disabled = true;
+            showError(err, "");
+            try {
+              const result = await submit(close);
+              if (result === false) {
+                button.disabled = false;
+                return;
+              }
+              close();
+              const said = typeof done === "function" ? done(result) : done;
+              if (said) toast(said, "good");
+              if (ctx) ctx.reload();
+            } catch (ex) {
+              showError(err, (ex && ex.message) || "That did not work.");
+              button.disabled = false;
+            }
+          },
+        },
+        submitLabel,
+      )),
+    ],
+  });
+  return { close, button };
+}
+
+/** confirm asks before something irreversible. A refused or failed action
+ *  shows in the dialog, so "it did not happen" is as visible as "it did". */
 export function confirm({
   title,
   body,
@@ -1304,33 +1593,12 @@ export function confirm({
   danger,
   onConfirm,
 }) {
-  const err = h("div");
-  modal({
+  formModal({
     title,
-    body: h("div", {}, err, h("div", { class: "muted" }, body)),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Cancel"),
-      h(
-        "button",
-        {
-          class: "btn " + (danger ? "btn-danger" : "btn-primary"),
-          onClick: async (e) => {
-            const button = e.currentTarget;
-            button.disabled = true;
-            showError(err, "");
-            try {
-              await onConfirm();
-              close();
-            } catch (ex) {
-              showError(err, (ex && ex.message) || "That did not work.");
-            } finally {
-              button.disabled = false;
-            }
-          },
-        },
-        confirmLabel,
-      ),
-    ],
+    body: h("div", {}, h("div", { class: "muted" }, body)),
+    submitLabel: confirmLabel,
+    danger,
+    submit: onConfirm,
   });
 }
 
@@ -1347,36 +1615,25 @@ export function rowActions(
   return h(
     "div",
     { class: "row-tight" },
-    h(
-      "button",
-      {
-        class: "btn btn-sm",
-        title: editTitle,
-        "aria-label": `Edit ${name}`,
-        onClick: () => onEdit(),
-      },
-      icon(icons.pencil),
-    ),
-    h(
-      "button",
-      {
-        class: "btn btn-sm btn-danger",
-        title: deleteTitle,
-        "aria-label": `Delete ${name}`,
-        onClick: async () =>
-          confirm({
-            title: `Delete ${name}?`,
-            body: typeof body === "function" ? await body() : body,
-            confirmLabel,
-            danger: true,
-            onConfirm: async () => {
-              await remove();
-              toast(`${name} deleted`, "good");
-              ctx.reload();
-            },
-          }),
-      },
-      icon(icons.trash),
+    iconButton(icons.pencil, editTitle, () => onEdit(), {
+      label: `Edit ${name}`,
+    }),
+    iconButton(
+      icons.trash,
+      deleteTitle,
+      async () =>
+        confirm({
+          title: `Delete ${name}?`,
+          body: typeof body === "function" ? await body() : body,
+          confirmLabel,
+          danger: true,
+          onConfirm: async () => {
+            await remove();
+            toast(`${name} deleted`, "good");
+            ctx.reload();
+          },
+        }),
+      { danger: true, label: `Delete ${name}` },
     ),
   );
 }
@@ -1416,16 +1673,7 @@ export function code(text) {
   return h(
     "div",
     { class: "code" },
-    h(
-      "button",
-      {
-        class: "btn btn-sm code-copy",
-        title: "Copy",
-        "aria-label": "Copy",
-        onClick: () => copyText(text),
-      },
-      icon(icons.copy),
-    ),
+    iconButton(icons.copy, "Copy", () => copyText(text), { cls: "code-copy" }),
     h("pre", {}, h("code", {}, text)),
   );
 }
@@ -1455,6 +1703,17 @@ export function secretField(value, ariaLabel) {
   );
 }
 
+/** banner is a coloured note. tone is bad, warn, info or good. Attributes,
+ *  such as a style, may come before the children as a plain object. */
+export function banner(tone, ...children) {
+  const first = children[0];
+  const props =
+    first && Object.getPrototypeOf(first) === Object.prototype
+      ? children.shift()
+      : {};
+  return h("div", { ...props, class: `banner banner-${tone}` }, ...children);
+}
+
 /** showError puts a failure where the person who caused it is looking.
  *
  *  Every dialog renders its errors into a host element at the top of the body,
@@ -1471,7 +1730,7 @@ export function showError(host, message) {
     replace(host);
     return;
   }
-  replace(host, h("div", { class: "banner banner-bad" }, message));
+  replace(host, banner("bad", message));
   // "nearest" so a dialog that already shows the banner does not jump, and
   // guarded because jsdom and very old browsers have neither.
   if (host.scrollIntoView) {
@@ -1607,14 +1866,20 @@ function markOf(m) {
   return (m.mark && m.mark()) || icon(m.icon);
 }
 
-/** field renders a labelled control. */
-export function field(label, input, hint) {
+/** field renders a labelled control. hint may be a .hint element the caller
+ *  keeps to change later, and extra goes below it. */
+export function field(label, input, hint, ...extra) {
   return h(
     "div",
     { class: "field" },
     h("label", { for: input.id || null }, label),
     input,
-    hint ? h("div", { class: "hint" }, hint) : null,
+    hint instanceof Element && hint.classList.contains("hint")
+      ? hint
+      : hint
+        ? h("div", { class: "hint" }, hint)
+        : null,
+    extra,
   );
 }
 

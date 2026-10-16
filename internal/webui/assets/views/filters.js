@@ -17,7 +17,6 @@ import {
   h,
   table,
   modal,
-  toast,
   pill,
   stat,
   meter,
@@ -34,10 +33,8 @@ import {
   icons,
   aliasProblem,
   takenProblem,
-  showError,
   currentRange,
   rangePicker,
-  crumb,
   isAdmin,
   checkButton,
   plural,
@@ -46,8 +43,14 @@ import {
   modeTiles,
   rowActions,
   listHead,
-  verdictPill,
   sectionHead,
+  dash,
+  replace,
+  trafficSummary,
+  formModal,
+  detailHead,
+  busyButton,
+  banner,
 } from "../ui.js";
 import { areaChart, barList } from "../chart.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
@@ -147,7 +150,7 @@ export async function filtersView(ctx) {
         cell: (f) =>
           f.description
             ? h("span", { class: "muted clamp-2" }, f.description)
-            : h("span", { class: "faint" }, "-"),
+            : dash(),
       },
       canEdit && {
         label: "Check",
@@ -216,31 +219,18 @@ function modePills(f) {
 // cost the request waiting for it. The rest is on the filter's own screen,
 // which the alias in the first column opens.
 function trafficCell(st) {
-  if (!st || !st.runs) {
-    return h("span", { class: "faint nowrap" }, "no traffic");
-  }
+  if (!st || !st.runs) return trafficSummary(0);
   const refusalRate = st.refused / st.runs;
   const tone = st.errors > 0 ? "bad" : refusalRate >= 0.05 ? "warn" : "";
-  return h(
-    "div",
-    { class: "stack", style: { gap: "3px" } },
-    h(
-      "div",
-      { class: "row-tight" },
-      h("span", { class: "nowrap" }, compact(st.runs), " runs"),
-      st.errors > 0
-        ? pill(`${num(st.errors)} could not run`, "bad")
-        : st.refused > 0
-          ? pill(`${pct(st.refused, st.runs)} refused`, tone)
-          : null,
-    ),
-    h(
-      "div",
-      { class: "faint nowrap", style: { fontSize: "11.5px" } },
-      ms(st.latency_median_ms),
-      " added · ",
-      money(st.cost_micros),
-    ),
+  return trafficSummary(
+    st.runs,
+    "runs",
+    st.errors > 0
+      ? pill(`${num(st.errors)} could not run`, "bad")
+      : st.refused > 0
+        ? pill(`${pct(st.refused, st.runs)} refused`, tone)
+        : null,
+    [ms(st.latency_median_ms), " added · ", money(st.cost_micros)],
   );
 }
 
@@ -270,9 +260,12 @@ function verdict(ctx, probe) {
       : warned
         ? "Working, with notes"
         : "Working";
-  return verdictPill(label, tone, "What the filter did to the sample", () =>
-    report(ctx, probe),
-  );
+  return {
+    label,
+    tone,
+    title: "What the filter did to the sample",
+    open: () => report(ctx, probe),
+  };
 }
 
 // report shows the sample as it went in and as it came back.
@@ -305,19 +298,17 @@ function report(ctx, probe) {
       // would not have happened, and a refusal read as real is the one
       // misreading of this dialog that would cost somebody an afternoon.
       probe.shadow
-        ? h(
-            "div",
-            { class: "banner banner-warn" },
+        ? banner(
+            "warn",
             "This filter is in shadow. Nothing below would be acted on: " +
               "requests go on as sent.",
           )
         : null,
       probe.error
-        ? h("div", { class: "banner banner-bad" }, probe.error)
+        ? banner("bad", probe.error)
         : probe.refused
-          ? h(
-              "div",
-              { class: "banner banner-warn" },
+          ? banner(
+              "warn",
               h(
                 "div",
                 {},
@@ -336,14 +327,11 @@ function report(ctx, probe) {
                   "refusal may be right. But this run cannot show a rewrite.",
               ),
             )
-          : h(
-              "div",
-              { class: "banner banner-good" },
+          : banner(
+              "good",
               "It answered in the expected format and returned the whole sample.",
             ),
-      (probe.warnings || []).map((w) =>
-        h("div", { class: "banner banner-warn" }, w),
-      ),
+      (probe.warnings || []).map((w) => banner("warn", w)),
       (probe.verdicts || []).map((v) =>
         h(
           "div",
@@ -512,40 +500,21 @@ export async function filterDetailView(ctx) {
   const wrap = h(
     "div",
     {},
-    h(
-      "div",
-      { class: "detail-head" },
-      crumb(ctx, "/filters", "Filters"),
-      h(
-        "div",
-        { class: "row", style: { flexWrap: "wrap" } },
-        h(
-          "div",
-          { class: "wrap-chips" },
-          f ? modePills(f) : [pill(`Deleted from ${orgNameOf(ctx)}`, "warn")],
-          f && f.model ? pill("Runs on " + f.model) : null,
-        ),
-        h("div", { style: { flex: 1 } }),
+    detailHead(
+      ctx,
+      ["/filters", "Filters"],
+      [
+        f ? modePills(f) : pill(`Deleted from ${orgNameOf(ctx)}`, "warn"),
+        f && f.model ? pill("Runs on " + f.model) : null,
+      ],
+      [
         rangePicker(ctx, since),
         f && canEdit
-          ? h(
-              "button",
-              {
-                class: "btn",
-                title: "Run this filter on a sample",
-                onClick: async (e) => {
-                  const button = e.currentTarget;
-                  button.disabled = true;
-                  try {
-                    report(ctx, await api.checkFilter(ctx.orgID, f.alias));
-                  } catch (ex) {
-                    toast(ex.message, "bad");
-                  } finally {
-                    button.disabled = false;
-                  }
-                },
-              },
+          ? busyButton(
+              { title: "Run this filter on a sample" },
               "Check",
+              async () =>
+                report(ctx, await api.checkFilter(ctx.orgID, f.alias)),
             )
           : null,
         f && canEdit
@@ -565,7 +534,7 @@ export async function filterDetailView(ctx) {
               icon(icons.pencil),
             )
           : null,
-      ),
+      ],
     ),
   );
 
@@ -582,7 +551,6 @@ export async function filterDetailView(ctx) {
       stat(
         "Fired",
         compact(rep.runs || 0),
-        null,
         rep.requests
           ? `${pct(rep.runs, rep.requests)} of ${compact(rep.requests)} requests`
           : "no requests in this period",
@@ -590,7 +558,6 @@ export async function filterDetailView(ctx) {
       stat(
         f && f.shadow ? "Would refuse" : "Refused",
         pct(rep.refused, rep.runs),
-        null,
         rep.refused
           ? `${num(rep.refused)} ${plural(rep.refused, "request")} ` +
               (f && f.shadow ? "would have been dropped" : "dropped")
@@ -599,7 +566,6 @@ export async function filterDetailView(ctx) {
       stat(
         "Added wait",
         ms(rep.latency_median_ms || 0),
-        null,
         `p95 ${ms(rep.latency_p95_ms || 0)}, per request`,
       ),
       moneyStat(
@@ -704,11 +670,7 @@ export async function filterDetailView(ctx) {
         { style: { marginTop: "20px" } },
         sectionHead(
           "Who it happened to",
-          h(
-            "span",
-            { class: "faint", style: { fontSize: "11.5px" } },
-            "refusals by project",
-          ),
+          h("span", { class: "faint small" }, "refusals by project"),
         ),
         projectTable(ctx, rep.projects, projectNames),
       ),
@@ -761,7 +723,7 @@ export async function filterDetailView(ctx) {
                 "Description",
                 f.description
                   ? h("span", { class: "muted" }, f.description)
-                  : h("span", { class: "faint" }, "-"),
+                  : dash(),
               ],
               [
                 "Last changed",
@@ -810,18 +772,18 @@ function detailBanners(rep, f) {
   const style = { marginBottom: "16px" };
   if (!f) {
     out.push(
-      h(
-        "div",
-        { class: "banner banner-warn", style },
+      banner(
+        "warn",
+        { style },
         "This filter no longer exists. Below is the traffic it saw before " +
           "it was deleted.",
       ),
     );
   } else if (f.shadow) {
     out.push(
-      h(
-        "div",
-        { class: "banner banner-info", style },
+      banner(
+        "info",
+        { style },
         h(
           "div",
           {},
@@ -841,9 +803,9 @@ function detailBanners(rep, f) {
   }
   if (rep.errors > 0) {
     out.push(
-      h(
-        "div",
-        { class: "banner banner-bad", style },
+      banner(
+        "bad",
+        { style },
         `${num(rep.errors)} ${plural(rep.errors, "run")} failed. ` +
           (f && f.shadow
             ? "In shadow those requests were still forwarded, but they are " +
@@ -855,9 +817,9 @@ function detailBanners(rep, f) {
   }
   if (rep.shadowed > 0 && rep.shadowed < rep.runs) {
     out.push(
-      h(
-        "div",
-        { class: "banner banner-warn", style },
+      banner(
+        "warn",
+        { style },
         `${num(rep.shadowed)} of these runs were in shadow: the filter was ` +
           "switched during this period, so the refusal rate mixes both modes.",
       ),
@@ -934,7 +896,7 @@ function projectTable(ctx, projects, names) {
         cell: (t) =>
           t.errors
             ? h("span", { class: "pill pill-bad" }, num(t.errors))
-            : h("span", { class: "faint" }, "-"),
+            : dash(),
       },
       {
         label: "Cost (CHF)",
@@ -990,7 +952,6 @@ function canRun(m) {
 }
 
 function editFilter(ctx, existing, readers) {
-  const err = h("div");
   const creating = !existing;
   // No mode among the defaults: a new filter has none until one of the tiles
   // is clicked, and a default here would be the answer to the one question
@@ -1063,7 +1024,7 @@ function editFilter(ctx, existing, readers) {
   // example rather than somebody's own writing.
   const modelHint = h("div", { class: "hint" });
   const promptHint = h("div", { class: "hint" });
-  const costBanner = h("div", { class: "banner banner-info" });
+  const costBanner = banner("info");
   // A pattern filter's rules, in the same text form the command line reads and
   // prints, so a list written in one place pastes into the other. A row of
   // inputs per rule would be worse at what this is for: reading a list and
@@ -1109,14 +1070,18 @@ function editFilter(ctx, existing, readers) {
   const modelField = h("div", { class: "field" });
   const promptField = h("div", { class: "field" });
   const rulesField = h("div", { class: "field" });
-  fill(modelField, h("label", {}, "Runs on"), model, modelHint);
+  replace(modelField, h("label", {}, "Runs on"), model, modelHint);
+  // Save, once the dialog is up. The tiles turn it on.
+  let saveButton = null;
   const syncMode = () => {
     // Nothing below the tiles until one of them is chosen, Save included:
     // there is nothing to save yet, and a Save button beside three unanswered
     // tiles is one inviting somebody to skip the question.
     rest.hidden = chosen === null;
-    saveButton.hidden = chosen === null;
-    saveButton.disabled = chosen === null;
+    if (saveButton) {
+      saveButton.hidden = chosen === null;
+      saveButton.disabled = chosen === null;
+    }
     if (chosen === null) return;
     const gate = chosen === "gate";
     const pattern = chosen === "pattern";
@@ -1204,104 +1169,59 @@ function editFilter(ctx, existing, readers) {
       field("Description", description),
     ),
     modelField,
-    h(
-      "div",
-      { class: "field" },
-      h("label", {}, "Acts on its answer"),
-      enforceSelect,
-      enforceHint,
-    ),
-    fill(promptField, h("label", {}, "Instruction"), prompt, promptHint),
-    fill(rulesField, h("label", {}, "Rules"), rules, rulesHint),
+    field("Acts on its answer", enforceSelect, enforceHint),
+    replace(promptField, h("label", {}, "Instruction"), prompt, promptHint),
+    replace(rulesField, h("label", {}, "Rules"), rules, rulesHint),
     costBanner,
-  );
-
-  // Save is built out here rather than in the footer's callback, because the
-  // tiles turn it on: syncMode holds it back until a mode is chosen. It closes
-  // the dialog through the handle modal hands back.
-  let close;
-  const saveButton = h(
-    "button",
-    {
-      class: "btn btn-primary",
-      onClick: async (e) => {
-        const button = e.currentTarget;
-        // Checked before the request rather than after it: an empty alias
-        // addresses no filter, so the write would not reach the handler that
-        // could say so.
-        const problem = aliasProblem(alias.value.trim());
-        if (problem) {
-          showError(err, problem);
-          alias.focus();
-          return;
-        }
-        button.disabled = true;
-        try {
-          if (creating) {
-            const taken = takenProblem(
-              (await api.filters(ctx.orgID)).data,
-              alias.value.trim(),
-              "filter",
-            );
-            if (taken) {
-              showError(err, taken);
-              alias.focus();
-              button.disabled = false;
-              return;
-            }
-          }
-          const pattern = chosen === "pattern";
-          // Only the fields this mode carries are sent. The others stay in the
-          // form, so switching back and forth loses nothing that was typed -
-          // but sending them would be refused, and rightly.
-          await api.putFilter(ctx.orgID, alias.value.trim(), {
-            model: pattern ? "" : model.value,
-            mode: chosen,
-            shadow: enforceSelect.value === "shadow",
-            prompt: pattern ? "" : prompt.value,
-            rules: pattern ? parseRules(rules.value) : [],
-            description: description.value.trim(),
-          });
-          close();
-          toast(creating ? "Filter created" : "Filter saved", "good");
-          ctx.reload();
-        } catch (ex) {
-          showError(err, ex.message);
-          button.disabled = false;
-        }
-      },
-    },
-    creating ? "Create filter" : "Save",
   );
 
   if (creating) syncMode();
   else choose(chosen);
 
-  close = modal({
+  ({ button: saveButton } = formModal({
     wide: true,
     title: creating ? "Create filter" : `Edit ${f.alias}`,
     subtitle: creating
       ? "Choose what it does first; the rest of the form depends on it. " +
         "Every request its guardrails cover goes through it."
       : "Every request its guardrails cover goes through it.",
-    body: h("form", {}, err, modeField, rest),
-    actions: (dismiss) => [
-      h("button", { class: "btn", onClick: dismiss }, "Cancel"),
-      saveButton,
-    ],
-  });
-
+    body: h("form", {}, modeField, rest),
+    submitLabel: creating ? "Create filter" : "Save",
+    done: creating ? "Filter created" : "Filter saved",
+    ctx,
+    submit: async () => {
+      // Checked before the request: an empty alias addresses no filter, so
+      // the write would not reach the handler that could say so.
+      const problem =
+        aliasProblem(alias.value.trim()) ||
+        (creating &&
+          takenProblem(
+            (await api.filters(ctx.orgID)).data,
+            alias.value.trim(),
+            "filter",
+          ));
+      if (problem) {
+        alias.focus();
+        throw new Error(problem);
+      }
+      const pattern = chosen === "pattern";
+      // Only the fields this mode carries are sent. The others stay in the
+      // form, so switching back and forth loses nothing that was typed.
+      await api.putFilter(ctx.orgID, alias.value.trim(), {
+        model: pattern ? "" : model.value,
+        mode: chosen,
+        shadow: enforceSelect.value === "shadow",
+        prompt: pattern ? "" : prompt.value,
+        rules: pattern ? parseRules(rules.value) : [],
+        description: description.value.trim(),
+      });
+    },
+  }));
+  syncMode(); // again, now that Save is there
   // The keyboard starts on the tiles. The dialog's own rule - the first field
   // somebody can type in - finds nothing on a new filter, because until a mode
   // is chosen there is nothing to type in.
   if (creating) tiles.firstChild.focus();
-}
-
-// fill puts children into an existing element, so that a field the form shows
-// and hides can be built where it is declared and rendered where it belongs.
-function fill(el, ...children) {
-  el.replaceChildren(...children);
-  return el;
 }
 
 // formatRules and parseRules are the text form of a pattern filter's rules, and

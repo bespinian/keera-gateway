@@ -7,16 +7,16 @@ import {
   h,
   table,
   modal,
-  toast,
   date,
-  icon,
   icons,
+  iconButton,
   empty,
-  showError,
   plural,
   field,
   pill,
   listHead,
+  formModal,
+  banner,
 } from "../ui.js";
 
 export async function orgsView(ctx) {
@@ -87,15 +87,11 @@ export async function orgsView(ctx) {
                   "Lift limit",
                 )
               : null,
-            h(
-              "button",
-              {
-                class: "btn btn-sm",
-                title: "Edit this organisation",
-                "aria-label": `Edit ${o.name}`,
-                onClick: () => orgSettings(ctx, o),
-              },
-              icon(icons.pencil),
+            iconButton(
+              icons.pencil,
+              "Edit this organisation",
+              () => orgSettings(ctx, o),
+              { label: `Edit ${o.name}` },
             ),
             // Not an edit: this one does not show anything, it changes which
             // organisation every other screen in the panel is about.
@@ -111,18 +107,14 @@ export async function orgsView(ctx) {
               },
               "Switch to",
             ),
-            h(
-              "button",
-              {
-                class: "btn btn-sm btn-danger",
-                title: "Delete this organisation",
-                "aria-label": `Delete ${o.name}`,
-                onClick: () =>
-                  o.id === ctx.state.me.org_id
-                    ? cannotDeleteOwn(o)
-                    : deleteOrg(ctx, o),
-              },
-              icon(icons.trash),
+            iconButton(
+              icons.trash,
+              "Delete this organisation",
+              () =>
+                o.id === ctx.state.me.org_id
+                  ? cannotDeleteOwn(o)
+                  : deleteOrg(ctx, o),
+              { danger: true, label: `Delete ${o.name}` },
             ),
           ),
       },
@@ -150,13 +142,11 @@ export function newOrg(ctx, { switchTo = false } = {}) {
     autofocus: true,
   });
   const domain = h("input", { class: "input", placeholder: "example.ch" });
-  const err = h("div");
-  modal({
+  formModal({
     title: "Create organisation",
     body: h(
       "form",
       { onSubmit: (e) => e.preventDefault() },
-      err,
       field("Name", name),
       field(
         "Email domain",
@@ -164,52 +154,32 @@ export function newOrg(ctx, { switchTo = false } = {}) {
         "Optional. New users who sign in from this domain join here.",
       ),
     ),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Cancel"),
-      h(
-        "button",
-        {
-          class: "btn btn-primary",
-          onClick: async (e) => {
-            if (!name.value.trim()) return name.focus();
-            const button = e.currentTarget;
-            button.disabled = true;
-            try {
-              const org = await api.createOrg(
-                name.value.trim(),
-                domain.value.trim(),
-              );
-              // The shell's copy of the tenant list feeds the org switcher in
-              // the topbar, and reload() re-renders that without re-fetching
-              // it. Appended rather than re-read: the list is ordered by
-              // creation, so this one belongs at the end.
-              (ctx.state.orgs = ctx.state.orgs || []).push(org);
-              if (switchTo) await ctx.setOrg(org.id);
-              close();
-              toast("Organisation created", "good");
-              ctx.reload();
-            } catch (ex) {
-              showError(err, ex.message);
-              button.disabled = false;
-            }
-          },
-        },
-        "Create organisation",
-      ),
-    ],
+    submitLabel: "Create organisation",
+    done: "Organisation created",
+    ctx,
+    submit: async () => {
+      if (!name.value.trim()) {
+        name.focus();
+        return false;
+      }
+      const org = await api.createOrg(name.value.trim(), domain.value.trim());
+      // The topbar's switcher reads the shell's copy of the list, which
+      // reload() does not fetch again. The list is ordered by creation, so
+      // this one goes at the end.
+      (ctx.state.orgs = ctx.state.orgs || []).push(org);
+      if (switchTo) await ctx.setOrg(org.id);
+    },
   });
 }
 
 // liftLimit opens to an organisation that signed itself up what it would
 // otherwise get with its first payment.
 function liftLimit(ctx, org) {
-  const err = h("div");
-  modal({
+  formModal({
     title: `Lift the limit of ${org.name}`,
     body: h(
       "div",
       {},
-      err,
       h(
         "p",
         {},
@@ -232,32 +202,14 @@ function liftLimit(ctx, org) {
           "Only do this for a customer you know.",
       ),
     ),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Cancel"),
-      h(
-        "button",
-        {
-          class: "btn btn-primary",
-          onClick: async (e) => {
-            e.target.disabled = true;
-            try {
-              const saved = await api.liftOrgLimit(org.id);
-              const i = (ctx.state.orgs || []).findIndex(
-                (o) => o.id === org.id,
-              );
-              if (i >= 0) ctx.state.orgs[i] = saved;
-              close();
-              toast("Limit lifted", "good");
-              ctx.reload();
-            } catch (ex) {
-              showError(err, ex.message);
-              e.target.disabled = false;
-            }
-          },
-        },
-        "Lift limit",
-      ),
-    ],
+    submitLabel: "Lift limit",
+    done: "Limit lifted",
+    ctx,
+    submit: async () => {
+      const saved = await api.liftOrgLimit(org.id);
+      const i = (ctx.state.orgs || []).findIndex((o) => o.id === org.id);
+      if (i >= 0) ctx.state.orgs[i] = saved;
+    },
   });
 }
 
@@ -268,13 +220,11 @@ function orgSettings(ctx, org) {
     value: org.email_domain || "",
     placeholder: "example.ch",
   });
-  const err = h("div");
-  modal({
+  formModal({
     title: `Edit ${org.name}`,
     body: h(
       "form",
       { onSubmit: (e) => e.preventDefault() },
-      err,
       field("Name", name, "Must differ from every other organisation's name."),
       field(
         "Email domain",
@@ -282,41 +232,24 @@ function orgSettings(ctx, org) {
         "Leave empty to clear it. Existing users stay where they are.",
       ),
     ),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Cancel"),
-      h(
-        "button",
-        {
-          class: "btn btn-primary",
-          onClick: async (e) => {
-            if (!name.value.trim()) return name.focus();
-            e.target.disabled = true;
-            try {
-              const saved = await api.updateOrg(
-                org.id,
-                name.value.trim(),
-                domain.value.trim(),
-              );
-              // The topbar's switcher reads the shell's copy of the list,
-              // which reload() does not fetch again.
-              const i = (ctx.state.orgs || []).findIndex(
-                (o) => o.id === org.id,
-              );
-              if (i >= 0) ctx.state.orgs[i] = saved;
-              if (org.id === ctx.state.me.org_id)
-                ctx.state.me.org_name = saved.name;
-              close();
-              toast("Organisation saved", "good");
-              ctx.reload();
-            } catch (ex) {
-              showError(err, ex.message);
-              e.target.disabled = false;
-            }
-          },
-        },
-        "Save",
-      ),
-    ],
+    done: "Organisation saved",
+    ctx,
+    submit: async () => {
+      if (!name.value.trim()) {
+        name.focus();
+        return false;
+      }
+      const saved = await api.updateOrg(
+        org.id,
+        name.value.trim(),
+        domain.value.trim(),
+      );
+      // The topbar's switcher reads the shell's copy of the list, which
+      // reload() does not fetch again.
+      const i = (ctx.state.orgs || []).findIndex((o) => o.id === org.id);
+      if (i >= 0) ctx.state.orgs[i] = saved;
+      if (org.id === ctx.state.me.org_id) ctx.state.me.org_name = saved.name;
+    },
   });
 }
 
@@ -348,7 +281,6 @@ function cannotDeleteOwn(org) {
 // and then makes them type the organisation's name - an id is easy to click by
 // mistake in a table of ten, a name is not.
 function deleteOrg(ctx, org) {
-  const err = h("div");
   const summary = h("div", { class: "muted" }, "Counting what it holds…");
   const name = h("input", {
     class: "input",
@@ -356,49 +288,16 @@ function deleteOrg(ctx, org) {
     autocomplete: "off",
     disabled: true,
     onInput: () => {
-      go.disabled = name.value.trim() !== org.name;
+      button.disabled = name.value.trim() !== org.name;
     },
   });
-  const go = h(
-    "button",
-    {
-      class: "btn btn-danger",
-      disabled: true,
-      onClick: async (e) => {
-        const button = e.currentTarget;
-        button.disabled = true;
-        showError(err, "");
-        try {
-          const gone = await api.deleteOrg(org.id);
-          // The shell's copy of the tenant list feeds the org switcher in the
-          // topbar, and reload() re-renders that without re-fetching it.
-          ctx.state.orgs = (ctx.state.orgs || []).filter(
-            (o) => o.id !== org.id,
-          );
-          if (ctx.state.orgID === org.id) {
-            await ctx.setOrg(ctx.state.orgs[0]?.id || "");
-          }
-          close();
-          toast(`${gone.name || org.name} deleted`, "good");
-          ctx.reload();
-        } catch (ex) {
-          showError(err, ex.message);
-          button.disabled = false;
-        }
-      },
-    },
-    "Delete organisation",
-  );
-
-  const close = modal({
+  const { button } = formModal({
     title: `Delete ${org.name}?`,
     body: h(
       "form",
       { onSubmit: (e) => e.preventDefault() },
-      err,
-      h(
-        "div",
-        { class: "banner banner-bad" },
+      banner(
+        "bad",
         "This cannot be undone. Usage history and the audit log are kept " +
           "for reports. Everything else is deleted.",
       ),
@@ -410,11 +309,22 @@ function deleteOrg(ctx, org) {
         name,
       ),
     ),
-    actions: (dismiss) => [
-      h("button", { class: "btn", onClick: dismiss }, "Cancel"),
-      go,
-    ],
+    submitLabel: "Delete organisation",
+    danger: true,
+    done: (gone) => `${gone.name || org.name} deleted`,
+    ctx,
+    submit: async () => {
+      const gone = await api.deleteOrg(org.id);
+      // The topbar's switcher reads the shell's copy of the list, which
+      // reload() does not fetch again.
+      ctx.state.orgs = (ctx.state.orgs || []).filter((o) => o.id !== org.id);
+      if (ctx.state.orgID === org.id) {
+        await ctx.setOrg(ctx.state.orgs[0]?.id || "");
+      }
+      return gone;
+    },
   });
+  button.disabled = true;
 
   // Loaded after the modal is up so the operator is not left staring at a
   // spinner, and failing softly: not knowing the counts is no reason to block a

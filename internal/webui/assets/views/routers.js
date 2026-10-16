@@ -18,7 +18,6 @@ import {
   h,
   table,
   modal,
-  toast,
   pill,
   stat,
   rowLink,
@@ -32,10 +31,8 @@ import {
   icons,
   aliasProblem,
   takenProblem,
-  showError,
   currentRange,
   rangePicker,
-  crumb,
   isAdmin,
   checkButton,
   plural,
@@ -44,9 +41,14 @@ import {
   modeTiles,
   rowActions,
   listHead,
-  verdictPill,
   sectionHead,
   empty,
+  dash,
+  trafficSummary,
+  formModal,
+  detailHead,
+  busyButton,
+  banner,
 } from "../ui.js";
 import { barList } from "../chart.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
@@ -131,7 +133,7 @@ export async function routersView(ctx) {
         cell: (rt) =>
           rt.description
             ? h("span", { class: "muted clamp-2" }, rt.description)
-            : h("span", { class: "faint" }, "-"),
+            : dash(),
       },
       canEdit && {
         label: "Check",
@@ -277,7 +279,7 @@ function modeCell(rt, known) {
 function destinationsCell(rt, known) {
   const destinations = rt.destinations || [];
   if (destinations.length === 0) {
-    return h("span", { class: "faint" }, "-");
+    return dash();
   }
   const shown = destinations.slice(0, 3);
   const more = destinations.length - shown.length;
@@ -320,31 +322,19 @@ function fallbackPill(rt) {
 // row has: how many it placed, and how much of that was placed without a
 // decision. The split between destinations is on the router's own screen.
 function trafficCell(st) {
-  if (!st || !st.requests) {
-    return h("span", { class: "faint nowrap" }, "no traffic");
-  }
+  if (!st || !st.requests) return trafficSummary(0);
   const undecided = (st.fell_back || 0) + (st.errored || 0);
   const rate = undecided / st.requests;
-  return h(
-    "div",
-    { class: "stack", style: { gap: "3px" } },
-    h(
-      "div",
-      { class: "row-tight" },
-      h("span", { class: "nowrap" }, compact(st.requests), " placed"),
-      undecided > 0
-        ? pill(
-            `${pct(undecided, st.requests)} undecided`,
-            rate >= 0.25 ? "bad" : "warn",
-          )
-        : null,
-    ),
-    h(
-      "div",
-      { class: "faint nowrap", style: { fontSize: "11.5px" } },
-      money(st.cost_micros),
-      " spent, deciding and filters included",
-    ),
+  return trafficSummary(
+    st.requests,
+    "placed",
+    undecided > 0
+      ? pill(
+          `${pct(undecided, st.requests)} undecided`,
+          rate >= 0.25 ? "bad" : "warn",
+        )
+      : null,
+    [money(st.cost_micros), " spent, deciding and filters included"],
   );
 }
 
@@ -370,9 +360,12 @@ function verdict(ctx, probe) {
     : warned
       ? "Working, with notes"
       : "Working";
-  return verdictPill(label, tone, "Where the router sent each sample", () =>
-    report(ctx, probe),
-  );
+  return {
+    label,
+    tone,
+    title: "Where the router sent each sample",
+    open: () => report(ctx, probe),
+  };
 }
 
 // report shows each sample prompt and the model the router chose for it.
@@ -408,12 +401,8 @@ function report(ctx, probe) {
     body: h(
       "div",
       {},
-      probe.error
-        ? h("div", { class: "banner banner-bad" }, probe.error)
-        : null,
-      (probe.warnings || []).map((warning) =>
-        h("div", { class: "banner banner-warn" }, warning),
-      ),
+      probe.error ? banner("bad", probe.error) : null,
+      (probe.warnings || []).map((warning) => banner("warn", warning)),
       facts([
         probe.model
           ? ["Runs on", h("span", { class: "mono" }, probe.model)]
@@ -484,8 +473,7 @@ function report(ctx, probe) {
                 {
                   label: "Took",
                   shrink: true,
-                  cell: (hop) =>
-                    hop.ms ? ms(hop.ms) : h("span", { class: "faint" }, "-"),
+                  cell: (hop) => (hop.ms ? ms(hop.ms) : dash()),
                 },
                 // What the router measured of this destination, on the two
                 // modes where the position above is a measurement rather than
@@ -498,15 +486,13 @@ function report(ctx, probe) {
                       cell: (hop) =>
                         hop.reading
                           ? h("span", { class: "muted" }, hop.reading)
-                          : h("span", { class: "faint" }, "-"),
+                          : dash(),
                     }
                   : null,
                 {
                   label: "Note",
                   cell: (hop) =>
-                    hop.note
-                      ? h("span", { class: "muted" }, hop.note)
-                      : h("span", { class: "faint" }, "-"),
+                    hop.note ? h("span", { class: "muted" }, hop.note) : dash(),
                 },
               ].filter(Boolean),
               probe.chain,
@@ -549,9 +535,7 @@ function report(ctx, probe) {
                 { class: "mono muted", style: { whiteSpace: "pre-wrap" } },
                 d.prompt,
               ),
-              d.error
-                ? h("div", { class: "banner banner-bad" }, d.error)
-                : null,
+              d.error ? banner("bad", d.error) : null,
             ),
           ),
         ),
@@ -580,55 +564,34 @@ export async function routerDetailView(ctx) {
   const wrap = h(
     "div",
     {},
-    h(
-      "div",
-      { class: "detail-head" },
-      crumb(ctx, "/routers", "Routers"),
-      h(
-        "div",
-        { class: "row", style: { flexWrap: "wrap" } },
-        h(
-          "div",
-          { class: "wrap-chips" },
-          rt
-            ? [
-                pill(
-                  decides(rt)
-                    ? "Decides with " + rt.model
-                    : sizes(rt)
-                      ? "Places " +
-                        (rt.destinations || []).length +
-                        " destinations by size"
-                      : "Tries " +
-                        (rt.destinations || []).length +
-                        " destinations, " +
-                        (measures(rt) ? "by " + ordersBy(rt) : "in order"),
-                ),
-                fallbackPill(rt),
-              ]
-            : [pill(`Deleted from ${orgNameOf(ctx)}`, "warn")],
-        ),
-        h("div", { style: { flex: 1 } }),
+    detailHead(
+      ctx,
+      ["/routers", "Routers"],
+      rt
+        ? [
+            pill(
+              decides(rt)
+                ? "Decides with " + rt.model
+                : sizes(rt)
+                  ? "Places " +
+                    (rt.destinations || []).length +
+                    " destinations by size"
+                  : "Tries " +
+                    (rt.destinations || []).length +
+                    " destinations, " +
+                    (measures(rt) ? "by " + ordersBy(rt) : "in order"),
+            ),
+            fallbackPill(rt),
+          ]
+        : pill(`Deleted from ${orgNameOf(ctx)}`, "warn"),
+      [
         rangePicker(ctx, since),
         rt && canEdit
-          ? h(
-              "button",
-              {
-                class: "btn",
-                title: "Test this router with sample prompts",
-                onClick: async (e) => {
-                  const button = e.currentTarget;
-                  button.disabled = true;
-                  try {
-                    report(ctx, await api.checkRouter(ctx.orgID, rt.alias));
-                  } catch (ex) {
-                    toast(ex.message, "bad");
-                  } finally {
-                    button.disabled = false;
-                  }
-                },
-              },
+          ? busyButton(
+              { title: "Test this router with sample prompts" },
               "Check",
+              async () =>
+                report(ctx, await api.checkRouter(ctx.orgID, rt.alias)),
             )
           : null,
         rt && canEdit
@@ -648,7 +611,7 @@ export async function routerDetailView(ctx) {
               icon(icons.pencil),
             )
           : null,
-      ),
+      ],
     ),
   );
 
@@ -664,7 +627,6 @@ export async function routerDetailView(ctx) {
       stat(
         "Placed",
         compact(placed),
-        null,
         placed ? "requests to this router" : "no requests in this period",
       ),
       stat(
@@ -674,7 +636,6 @@ export async function routerDetailView(ctx) {
             ? "First choice"
             : "Decided",
         pct(rep.chose, placed),
-        null,
         chosenNote(rt, rep),
       ),
       // What the router added to the wait, which is a generation on one that
@@ -684,7 +645,6 @@ export async function routerDetailView(ctx) {
       stat(
         rt && !decides(rt) ? "Lost to failover" : "Deciding cost",
         ms(rep.decision_median_ms || 0),
-        null,
         `p95 ${ms(rep.decision_p95_ms || 0)}, added per request`,
       ),
       moneyStat(
@@ -802,19 +762,13 @@ export async function routerDetailView(ctx) {
               label: "Refused",
               shrink: true,
               num: true,
-              cell: (d) =>
-                d.refused
-                  ? pill(num(d.refused), "warn")
-                  : h("span", { class: "faint" }, "-"),
+              cell: (d) => (d.refused ? pill(num(d.refused), "warn") : dash()),
             },
             {
               label: "Failed",
               shrink: true,
               num: true,
-              cell: (d) =>
-                d.failed
-                  ? pill(num(d.failed), "bad")
-                  : h("span", { class: "faint" }, "-"),
+              cell: (d) => (d.failed ? pill(num(d.failed), "bad") : dash()),
             },
           ],
           rep.destinations,
@@ -927,9 +881,8 @@ function detailBanners(rep, rt, placed) {
   const out = [];
   if (!rt) {
     out.push(
-      h(
-        "div",
-        { class: "banner banner-warn" },
+      banner(
+        "warn",
         "This router no longer exists. Below is the traffic it placed " +
           "before. Clients still using it are told the model does not exist.",
       ),
@@ -937,9 +890,8 @@ function detailBanners(rep, rt, placed) {
   }
   if (!placed) {
     out.push(
-      h(
-        "div",
-        { class: "banner banner-info" },
+      banner(
+        "info",
         "No requests used this router in this period. Clients reach it by " +
           "using its alias as the model name, so either nobody has the alias " +
           "or nobody called.",
@@ -955,9 +907,8 @@ function detailBanners(rep, rt, placed) {
   // was answered - by something else.
   if (rep.chose === 0) {
     out.push(
-      h(
-        "div",
-        { class: "banner banner-bad" },
+      banner(
+        "bad",
         banded
           ? "No request in this period was served by the destination its " +
               "size was meant for. Each one waited for it to fail and was " +
@@ -976,9 +927,8 @@ function detailBanners(rep, rt, placed) {
     );
   } else if (rep.fell_back > 0 && rep.fell_back / placed >= 0.1) {
     out.push(
-      h(
-        "div",
-        { class: "banner banner-warn" },
+      banner(
+        "warn",
         banded
           ? `${pct(rep.fell_back, placed)} of these requests were served by a ` +
               "larger destination after the one for their size failed. Not an " +
@@ -997,9 +947,8 @@ function detailBanners(rep, rt, placed) {
   }
   if (rep.errored > 0) {
     out.push(
-      h(
-        "div",
-        { class: "banner banner-bad" },
+      banner(
+        "bad",
         chained
           ? `${num(rep.errored)} ${plural(rep.errored, "request")} ran out of ` +
               "destinations: every model failed, and the client got the last " +
@@ -1015,9 +964,8 @@ function detailBanners(rep, rt, placed) {
   const destinations = rep.destinations || [];
   if (!chained && rep.chose > 0 && destinations.length === 1 && placed >= 20) {
     out.push(
-      h(
-        "div",
-        { class: "banner banner-warn" },
+      banner(
+        "warn",
         `Every request went to ${destinations[0].alias}. The router costs a ` +
           "generation per request for the same result as naming that model " +
           "directly.",
@@ -1102,7 +1050,6 @@ function canDecide(m) {
 
 function editRouter(ctx, existing, readers) {
   const chatModels = readers.filter((m) => m.kind === "chat");
-  const err = h("div");
   const creating = !existing;
   // No mode among the defaults: a new router has none until one of the tiles
   // is clicked, and a default here would be the answer to the one question
@@ -1252,7 +1199,7 @@ function editRouter(ctx, existing, readers) {
           i === 0
             ? pill("Tried first", "good")
             : h("span", { class: "faint" }, "if the ones above fail"),
-          h("div", { style: { flex: 1 } }),
+          h("div", { class: "spacer" }),
           h(
             "button",
             {
@@ -1358,10 +1305,8 @@ function editRouter(ctx, existing, readers) {
     );
     syncCeilingNotes();
   };
-  const ceilingField = h(
-    "div",
-    { class: "field" },
-    h("label", {}, "Up to this many input tokens"),
+  const ceilingField = field(
+    "Up to this many input tokens",
     ceilingList,
     ceilingHint,
   );
@@ -1439,24 +1384,22 @@ function editRouter(ctx, existing, readers) {
       "descriptions are added for you.",
   );
   const orderHint = h("div", { class: "hint" });
-  const orderField = h(
-    "div",
-    { class: "field" },
-    h("label", {}, "In this order"),
-    order,
-    orderHint,
-  );
+  const orderField = field("In this order", order, orderHint);
   const destinationsLabel = h("label", {}, "Chooses between");
   const destinationsHint = h("div", { class: "hint" });
-  const costBanner = h("div", { class: "banner banner-info" });
+  const costBanner = banner("info");
 
+  // Save, once the dialog is up. The tiles turn it on.
+  let saveButton = null;
   const syncMode = () => {
     // Nothing below the tiles until one of them is chosen, Save included:
     // there is nothing to save yet, and a Save button beside five unanswered
     // tiles is one inviting somebody to skip the question.
     rest.hidden = chosen === null;
-    saveButton.hidden = chosen === null;
-    saveButton.disabled = chosen === null;
+    if (saveButton) {
+      saveButton.hidden = chosen === null;
+      saveButton.disabled = chosen === null;
+    }
     if (chosen === null) return;
     for (const el of [modelField, fallbackField, promptField]) {
       el.hidden = !reads();
@@ -1536,98 +1479,66 @@ function editRouter(ctx, existing, readers) {
     costBanner,
   );
 
-  // Save is built out here rather than in the footer's callback, because the
-  // tiles turn it on: syncMode holds it back until a mode is chosen. It closes
-  // the dialog through the handle modal hands back.
-  let close;
-  const saveButton = h(
-    "button",
-    {
-      class: "btn btn-primary",
-      onClick: async (e) => {
-        const button = e.currentTarget;
-        // Checked before the request rather than after it: an empty alias
-        // addresses no router, so the write would not reach the handler that
-        // could say so.
-        const problem = aliasProblem(alias.value.trim());
-        if (problem) {
-          showError(err, problem);
-          alias.focus();
-          return;
-        }
-        const bad = bySize() ? picked.find((a) => badCeilings.has(a)) : null;
-        if (bad) {
-          showError(
-            err,
-            `The ceiling on ${bad} is not a number of tokens. Write 4000 ` +
-              "or 4k, or leave it empty for no ceiling.",
-          );
-          return;
-        }
-        button.disabled = true;
-        try {
-          if (creating) {
-            const taken = takenProblem(
-              (await api.routers(ctx.orgID)).data,
-              alias.value.trim(),
-              "router",
-            );
-            if (taken) {
-              showError(err, taken);
-              alias.focus();
-              button.disabled = false;
-              return;
-            }
-          }
-          await api.putRouter(ctx.orgID, alias.value.trim(), {
-            mode: chosen,
-            // A router that reads nothing carries nothing that would decide
-            // for it. Sending what the form still holds would save a deciding
-            // model on a router that never asks it anything, which is a thing
-            // somebody would later read as the reason its traffic goes where
-            // it goes.
-            model: reads() ? model.value : "",
-            prompt: reads() ? prompt.value : "",
-            destinations: [...picked],
-            ceilings: bySize()
-              ? Object.fromEntries(
-                  picked
-                    .filter((alias) => ceilings[alias])
-                    .map((alias) => [alias, ceilings[alias]]),
-                )
-              : {},
-            fallback: reads() ? fallback.value : "",
-            description: description.value.trim(),
-          });
-          close();
-          toast(creating ? "Router created" : "Router saved", "good");
-          ctx.reload();
-        } catch (ex) {
-          showError(err, ex.message);
-          button.disabled = false;
-        }
-      },
-    },
-    creating ? "Create router" : "Save",
-  );
-
   if (creating) syncMode();
   else choose(chosen);
 
-  close = modal({
+  ({ button: saveButton } = formModal({
     wide: true,
     title: creating ? "Create router" : `Edit ${rt.alias}`,
     subtitle: creating
       ? "Choose how it picks first; the rest of the form depends on it. A " +
         "key allowed to use this router can reach all its destinations."
       : "A key allowed to use this router can reach all its destinations.",
-    body: h("form", {}, err, modeField, rest),
-    actions: (dismiss) => [
-      h("button", { class: "btn", onClick: dismiss }, "Cancel"),
-      saveButton,
-    ],
-  });
-
+    body: h("form", {}, modeField, rest),
+    submitLabel: creating ? "Create router" : "Save",
+    done: creating ? "Router created" : "Router saved",
+    ctx,
+    submit: async () => {
+      // Checked before the request: an empty alias addresses no router, so
+      // the write would not reach the handler that could say so.
+      const problem = aliasProblem(alias.value.trim());
+      if (problem) {
+        alias.focus();
+        throw new Error(problem);
+      }
+      const bad = bySize() ? picked.find((a) => badCeilings.has(a)) : null;
+      if (bad) {
+        throw new Error(
+          `The ceiling on ${bad} is not a number of tokens. Write 4000 ` +
+            "or 4k, or leave it empty for no ceiling.",
+        );
+      }
+      if (creating) {
+        const taken = takenProblem(
+          (await api.routers(ctx.orgID)).data,
+          alias.value.trim(),
+          "router",
+        );
+        if (taken) {
+          alias.focus();
+          throw new Error(taken);
+        }
+      }
+      await api.putRouter(ctx.orgID, alias.value.trim(), {
+        mode: chosen,
+        // A router that reads nothing carries nothing that would decide for
+        // it, so a deciding model the form still holds is not saved.
+        model: reads() ? model.value : "",
+        prompt: reads() ? prompt.value : "",
+        destinations: [...picked],
+        ceilings: bySize()
+          ? Object.fromEntries(
+              picked
+                .filter((alias) => ceilings[alias])
+                .map((alias) => [alias, ceilings[alias]]),
+            )
+          : {},
+        fallback: reads() ? fallback.value : "",
+        description: description.value.trim(),
+      });
+    },
+  }));
+  syncMode(); // again, now that Save is there
   // The keyboard starts on the tiles. The dialog's own rule - the first field
   // somebody can type in - finds nothing on a new router, because until a mode
   // is chosen there is nothing to type in.

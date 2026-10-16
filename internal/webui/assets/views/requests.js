@@ -12,14 +12,13 @@
 // An administrator reads the whole organisation's log, a member only the
 // requests of their own keys.
 
-import { h, RANGES, currentRange, rangePicker } from "../ui.js";
+import { h, currentRange, rangePicker, rangeOf } from "../ui.js";
 import { requestLog } from "./requestlog.js";
 import { readNarrowing } from "./logfilters.js";
 
 export async function requestsView(ctx) {
   const since = currentRange();
-  const range = RANGES.find((r) => r.since === since);
-  ctx.setSubtitle(range ? range.long : "");
+  ctx.setSubtitle(rangeOf(since)?.long || "");
 
   const log = await requestLog(ctx, {
     since,

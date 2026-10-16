@@ -24,8 +24,6 @@ import {
   empty,
   rowLink,
   go,
-  icon,
-  icons,
   num,
   compact,
   money,
@@ -36,14 +34,20 @@ import {
   ago,
   dateTime,
   tokens,
-  RANGES,
   currentRange,
   rangePicker,
-  crumb,
   gone,
   sectionHead,
   isAdmin,
   liveControl,
+  dash,
+  loadMore,
+  detailHead,
+  banner,
+  csvButton,
+  rangeOf,
+  followRequests,
+  throttled,
 } from "../ui.js";
 import { outcomeMeaning, outcomeOf, oneLine } from "../status.js";
 import { requestTable, showRequest } from "./requestlog.js";
@@ -54,6 +58,8 @@ import {
   ranking,
   rankedNote,
   readNarrowing,
+  namesFrom,
+  addNames,
 } from "./logfilters.js";
 import { toolCallTable } from "./tools.js";
 
@@ -78,8 +84,7 @@ export async function sessionsView(ctx) {
   const since = currentRange();
   const narrowed = readNarrowing(ctx);
   const rank = ranking(ctx, SORT_KEY);
-  const range = RANGES.find((r) => r.since === since);
-  ctx.setSubtitle(range ? range.long : "");
+  ctx.setSubtitle(rangeOf(since)?.long || "");
 
   const params = {
     org_id: ctx.orgID,
@@ -91,11 +96,7 @@ export async function sessionsView(ctx) {
   };
   const res = await api.sessions(params);
   const rows = res.data || [];
-  const names = {
-    keys: res.key_names || {},
-    projects: res.project_names || {},
-    users: res.user_names || {},
-  };
+  const names = namesFrom(res);
   const anyNarrowed = Object.values(narrowed).some(Boolean);
 
   const watch = liveControl({
@@ -117,10 +118,10 @@ export async function sessionsView(ctx) {
     h(
       "div",
       { class: "section-head" },
-      h("div", { style: { flex: 1 } }),
+      h("div", { class: "spacer" }),
       watch.el,
       rangePicker(ctx, since),
-      csvButton(params),
+      sessionsCSV(params),
     ),
     narrowRow(ctx, narrowed, res.filters || {}, names),
   );
@@ -164,9 +165,7 @@ export async function sessionsView(ctx) {
     const limit =
       rank.by === "" ? Math.min(Math.max(rows.length, PAGE), MAX_ROWS) : PAGE;
     const next = await api.sessions({ ...params, limit, facets: "" });
-    Object.assign(names.keys, next.key_names || {});
-    Object.assign(names.projects, next.project_names || {});
-    Object.assign(names.users, next.user_names || {});
+    addNames(names, next);
     rows.splice(0, rows.length, ...(next.data || []));
     list.redraw();
     tail.replaceChildren(...[more(params, rows, rank, list)].filter(Boolean));
@@ -186,78 +185,16 @@ function follow(ctx, watch, since, narrowed, update) {
   // The status is left out: a new request can move a session into or out of a
   // status, so the stream must see requests of every status.
   const listen = { org_id: ctx.orgID, since, ...narrowed, status: "" };
-
-  let source = null;
-  let gone = false;
-  let busy = false;
-  let again = false;
-  const close = () => {
-    if (source) source.close();
-    source = null;
-  };
-  ctx.onTeardown(() => {
-    gone = true;
-    close();
+  const refresh = throttled(update, REFRESH_MS);
+  ctx.onTeardown(refresh.stop);
+  // The stream starts at the end of the log. Requests made while it was
+  // closed are picked up by the refresh once it is open again.
+  followRequests(ctx, watch, () => api.requestStream(listen), {
+    onRequests: (payload) => {
+      if ((payload.data || []).length) refresh();
+    },
+    onResume: refresh,
   });
-
-  async function refresh() {
-    if (gone) return;
-    if (busy) {
-      again = true;
-      return;
-    }
-    busy = true;
-    try {
-      await update();
-    } catch {
-      // What is on the screen stays. The next request tries again.
-    }
-    setTimeout(() => {
-      busy = false;
-      if (again) {
-        again = false;
-        refresh();
-      }
-    }, REFRESH_MS);
-  }
-
-  const open = () => {
-    close();
-    watch.state("connecting");
-    // The stream starts at the end of the log. Requests made while it was
-    // closed are picked up by the refresh once it is open again.
-    let first = true;
-    source = api.requestStream(listen);
-    source.addEventListener("requests", (e) => {
-      watch.state("live");
-      if ((JSON.parse(e.data).data || []).length) refresh();
-    });
-    source.addEventListener("open", () => {
-      watch.state("live");
-      if (!first) refresh();
-      first = false;
-    });
-    source.addEventListener("error", () => {
-      watch.state(
-        source && source.readyState === EventSource.CLOSED
-          ? "stopped"
-          : "connecting",
-      );
-    });
-  };
-
-  watch.onChange((on) => {
-    if (!on) {
-      close();
-      watch.state("paused");
-      return;
-    }
-    // A reader who turns Live back on wants what happened while it was off.
-    open();
-    refresh();
-  });
-  if (watch.on) open();
-  else watch.state("paused");
 }
 
 /** sessionLog is the session list for one project, key or model, drawn below
@@ -284,21 +221,13 @@ export async function sessionLog(ctx, { scope = {}, since, hide = {} }) {
     return h(
       "div",
       { style: { marginTop: "24px" } },
-      h(
-        "div",
-        { class: "banner banner-bad" },
-        err.message || "The sessions could not be read.",
-      ),
+      banner("bad", err.message || "The sessions could not be read."),
     );
   }
 
   const rows = res.data || [];
   const counts = (res.totals && res.totals.outcomes) || NO_COUNTS;
-  const names = {
-    keys: res.key_names || {},
-    projects: res.project_names || {},
-    users: res.user_names || {},
-  };
+  const names = namesFrom(res);
 
   const wrap = h(
     "div",
@@ -309,7 +238,7 @@ export async function sessionLog(ctx, { scope = {}, since, hide = {} }) {
         "div",
         { class: "row" },
         outcomeSeg(ctx, outcome, counts).el,
-        csvButton(params),
+        sessionsCSV(params),
       ),
     ),
   );
@@ -353,16 +282,9 @@ function more(params, rows, rank, list) {
   return pager(params, rows, list);
 }
 
-function csvButton(params) {
-  return h(
-    "button",
-    {
-      class: "btn",
-      title: "Download the matching sessions as CSV, one row each",
-      onClick: () => api.download("/v1/sessions", params),
-    },
-    icon(icons.download),
-    "CSV",
+function sessionsCSV(params) {
+  return csvButton("Download the matching sessions as CSV, one row each", () =>
+    api.download("/v1/sessions", params),
   );
 }
 
@@ -370,40 +292,18 @@ function csvButton(params) {
 // oldest session on the screen, which is also what the control plane would
 // have sent as next_before.
 function pager(params, rows, list) {
-  const moreWrap = h("div", {
-    style: { marginTop: "12px", textAlign: "center" },
-  });
-  const more = h(
-    "button",
-    {
-      class: "btn",
-      onClick: async () => {
-        more.disabled = true;
-        more.textContent = "Loading…";
-        try {
-          const before = rows[rows.length - 1].id;
-          const next = await api.sessions({ ...params, before });
-          const page = next.data || [];
-          rows.push(...page);
-          list.redraw();
-          if (page.length < PAGE) {
-            moreWrap.replaceChildren(
-              h("div", { class: "hint" }, "That is the whole period."),
-            );
-            return;
-          }
-        } catch (ex) {
-          moreWrap.append(h("div", { class: "banner banner-bad" }, ex.message));
-        } finally {
-          more.disabled = false;
-          more.textContent = `Load ${PAGE} more`;
-        }
-      },
+  return loadMore(
+    PAGE,
+    async () => {
+      const before = rows[rows.length - 1].id;
+      const next = await api.sessions({ ...params, before });
+      const page = next.data || [];
+      rows.push(...page);
+      list.redraw();
+      return page.length;
     },
-    `Load ${PAGE} more`,
+    "That is the whole period.",
   );
-  moreWrap.append(more);
-  return moreWrap;
 }
 
 function sessionTable(ctx, rows, names, hide, rank) {
@@ -543,7 +443,7 @@ function sessionTable(ctx, rows, names, hide, rank) {
       cell: (a) =>
         a.cost_micros
           ? h("span", { class: "nowrap" }, amount(a.cost_micros))
-          : h("span", { class: "faint" }, "-"),
+          : dash(),
     },
     {
       // How the task ended, which is the first thing asked about one that
@@ -607,13 +507,12 @@ function endedCell(a) {
       ? h(
           "span",
           {
-            class: "muted",
-            style: { fontSize: "11.5px" },
+            class: "muted small",
             title: a.last_error,
           },
           oneLine(a.last_error, 70),
         )
-      : h("span", { class: "faint", style: { fontSize: "11.5px" } }, why),
+      : h("span", { class: "faint small" }, why),
   );
 }
 
@@ -622,7 +521,7 @@ function endedCell(a) {
 export async function sessionDetailView(ctx) {
   let res;
   try {
-    res = await api.session(ctx.param, ctx.orgID);
+    res = await api.session(ctx.orgID, ctx.param);
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
       ctx.setTitle("Session", "");
@@ -640,11 +539,7 @@ export async function sessionDetailView(ctx) {
 
   const s = res.session;
   const requests = res.requests || [];
-  const names = {
-    keys: res.key_names || {},
-    projects: res.project_names || {},
-    users: res.user_names || {},
-  };
+  const names = namesFrom(res);
   const [label, tone] = outcomeMeaning({
     status: s.last_status,
     error: s.last_error,
@@ -653,79 +548,49 @@ export async function sessionDetailView(ctx) {
 
   ctx.setTitle("Session", s.key);
 
-  const head = h(
-    "div",
-    { class: "detail-head" },
-    crumb(ctx, "/sessions", "Sessions"),
+  const link = (path, text, title) =>
     h(
-      "div",
-      { class: "row", style: { flexWrap: "wrap" } },
-      h(
-        "div",
-        { class: "wrap-chips" },
-        pill(label, tone),
-        s.key_id
-          ? h(
-              "a",
-              {
-                class: "pill pill-button",
-                href: "/keys/" + encodeURIComponent(s.key_id),
-                title: "Open this key",
-                onClick: go(ctx, "/keys/" + encodeURIComponent(s.key_id)),
-              },
-              names.keys[s.key_id] || s.key_id,
-            )
-          : pill("No key"),
-        s.project_id
-          ? h(
-              "a",
-              {
-                class: "pill pill-button",
-                href: "/projects/" + encodeURIComponent(s.project_id),
-                title: "Open this project",
-                onClick: go(
-                  ctx,
-                  "/projects/" + encodeURIComponent(s.project_id),
-                ),
-              },
-              names.projects[s.project_id] || s.project_id,
-            )
+      "a",
+      { class: "pill pill-button", href: path, title, onClick: go(ctx, path) },
+      text,
+    );
+  const head = detailHead(
+    ctx,
+    ["/sessions", "Sessions"],
+    [
+      pill(label, tone),
+      s.key_id
+        ? link(
+            "/keys/" + encodeURIComponent(s.key_id),
+            names.keys[s.key_id] || s.key_id,
+            "Open this key",
+          )
+        : pill("No key"),
+      s.project_id
+        ? link(
+            "/projects/" + encodeURIComponent(s.project_id),
+            names.projects[s.project_id] || s.project_id,
+            "Open this project",
+          )
+        : null,
+      s.user_id && isAdmin(ctx)
+        ? link(
+            "/users/" + encodeURIComponent(s.user_id),
+            names.users[s.user_id] || s.user_id,
+            "Open this user",
+          )
+        : s.user_id
+          ? pill(names.users[s.user_id] || s.user_id)
           : null,
-        s.user_id && isAdmin(ctx)
-          ? h(
-              "a",
-              {
-                class: "pill pill-button",
-                href: "/users/" + encodeURIComponent(s.user_id),
-                title: "Open this user",
-                onClick: go(ctx, "/users/" + encodeURIComponent(s.user_id)),
-              },
-              names.users[s.user_id] || s.user_id,
-            )
-          : s.user_id
-            ? pill(names.users[s.user_id] || s.user_id)
-            : null,
-        (s.models || []).map((m) =>
-          h(
-            "a",
-            {
-              class: "pill pill-button",
-              href: "/models/" + encodeURIComponent(m),
-              onClick: go(ctx, "/models/" + encodeURIComponent(m)),
-            },
-            m,
-          ),
-        ),
-        pill(
-          s.stated ? "Named by the client" : "Inferred from the opening prompt",
-        ),
+      (s.models || []).map((m) => link("/models/" + encodeURIComponent(m), m)),
+      pill(
+        s.stated ? "Named by the client" : "Inferred from the opening prompt",
       ),
-      h("div", { style: { flex: 1 } }),
-      h(
-        "span",
-        { class: "muted nowrap", title: dateTime(s.started_at) },
-        dateTime(s.started_at),
-      ),
+    ],
+    h(
+      "span",
+      { class: "muted nowrap", title: dateTime(s.started_at) },
+      dateTime(s.started_at),
     ),
   );
 
@@ -738,13 +603,11 @@ export async function sessionDetailView(ctx) {
       stat(
         "Requests",
         num(s.requests),
-        null,
         s.ok === s.requests ? "all served" : `${num(s.ok)} served`,
       ),
       stat(
         "Took",
         duration(ran),
-        null,
         s.requests > 1
           ? `${duration(ran / Math.max(1, s.requests - 1))} between requests on average`
           : "one request",
@@ -752,7 +615,6 @@ export async function sessionDetailView(ctx) {
       stat(
         "Tokens",
         compact(s.input_tokens + s.output_tokens),
-        null,
         tokens(s.input_tokens, s.output_tokens),
       ),
       moneyStat(
@@ -777,7 +639,7 @@ export async function sessionDetailView(ctx) {
           h("div", { class: "spacer" }),
           h(
             "span",
-            { class: "faint", style: { fontSize: "11.5px" } },
+            { class: "faint small" },
             "each bar is one request, by what it cost",
           ),
         ),
@@ -794,9 +656,9 @@ export async function sessionDetailView(ctx) {
 
   if (s.last_error) {
     wrap.append(
-      h(
-        "div",
-        { class: "banner banner-warn", style: { marginTop: "16px" } },
+      banner(
+        "warn",
+        { style: { marginTop: "16px" } },
         h("strong", {}, "How this session ended: "),
         s.last_error,
       ),

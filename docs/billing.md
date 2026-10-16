@@ -32,7 +32,7 @@ none.
 
 ## What changes for a model of that provider
 
-- **No key of its own.** The panel hides the API key field, and the control API
+- **No key of its own.** The panel hides the provider key field, and the control API
   refuses one. A key the organisation stored before is removed the next time
   the model is saved, and is never sent.
 - **The provider's own endpoint.** The backend is always the provider's

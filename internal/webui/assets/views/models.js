@@ -20,7 +20,6 @@ import {
   icons,
   rowLink,
   providerMark,
-  showError,
   modelAliasProblem,
   takenProblem,
   locationName,
@@ -36,8 +35,10 @@ import {
   field,
   rowActions,
   code,
-  verdictPill,
   listHead,
+  dash,
+  formModal,
+  banner,
 } from "../ui.js";
 
 // usersOfModel names the filters and routers that use a model, for the
@@ -125,11 +126,7 @@ export async function modelsView(ctx) {
                 "This model's traffic and latency",
               ),
             ),
-            h(
-              "span",
-              { class: "faint", style: { fontSize: "11.5px" } },
-              "serves " + servedName(m),
-            ),
+            h("span", { class: "faint small" }, "serves " + servedName(m)),
           ),
       },
       {
@@ -164,7 +161,7 @@ export async function modelsView(ctx) {
                   "warn",
                 ),
               )
-            : h("span", { class: "faint" }, "-"),
+            : dash(),
       },
       {
         label: "Location",
@@ -185,10 +182,7 @@ export async function modelsView(ctx) {
         shrink: true,
         sortKey: (m) => m.max_context || null,
         sortDir: "desc",
-        cell: (m) =>
-          m.max_context
-            ? compact(m.max_context)
-            : h("span", { class: "faint" }, "-"),
+        cell: (m) => (m.max_context ? compact(m.max_context) : dash()),
       },
       {
         // The same median as on the model's own screen, over the same window.
@@ -262,7 +256,7 @@ export async function modelsView(ctx) {
               (m.has_api_key ? " Its stored credential is removed." : "") +
               " Usage history and the audit log are kept.",
             confirmLabel: "Delete model",
-            remove: () => api.deleteModel(m.alias, m.org_id),
+            remove: () => api.deleteModel(m.org_id, m.alias),
           });
         },
       },
@@ -367,11 +361,7 @@ export async function providerModelsView(ctx) {
               ? h("span", {}, r.m.display_name)
               : h("span", { class: "mono" }, r.m.id),
             r.m.description
-              ? h(
-                  "span",
-                  { class: "faint", style: { fontSize: "11.5px" } },
-                  r.m.description,
-                )
+              ? h("span", { class: "faint small" }, r.m.description)
               : null,
           ),
       },
@@ -522,10 +512,6 @@ export async function providerModelsView(ctx) {
   return h("div", {}, head, list);
 }
 
-function dash() {
-  return h("span", { class: "faint" }, "-");
-}
-
 // locationCell is where a model runs, with the code it is stored as on hover.
 function locationCell(loc) {
   if (!loc) return dash();
@@ -548,11 +534,7 @@ function ttftCell(st) {
     "div",
     { class: "stack nowrap" },
     h("span", {}, ms(st.ttft_median_ms)),
-    h(
-      "span",
-      { class: "faint", style: { fontSize: "11.5px" } },
-      `p95 ${ms(st.ttft_p95_ms)}`,
-    ),
+    h("span", { class: "faint small" }, `p95 ${ms(st.ttft_p95_ms)}`),
   );
 }
 
@@ -729,7 +711,7 @@ function surfaceOf(kind) {
 function healthCell(m) {
   return checkButton(
     "Send a test request to this model's backend",
-    () => api.checkModel(m.alias, m.org_id),
+    () => api.checkModel(m.org_id, m.alias),
     (probe) => verdict(probe, m.kind),
   );
 }
@@ -738,7 +720,7 @@ function healthCell(m) {
 // which has room for the report but not for a verdict pill.
 export async function checkModel(m) {
   try {
-    report(await api.checkModel(m.alias, m.org_id), m.kind);
+    report(await api.checkModel(m.org_id, m.alias), m.kind);
   } catch (ex) {
     toast(ex.message, "bad");
   }
@@ -764,7 +746,12 @@ function verdict(probe, kind) {
       : probe.reachable
         ? "Answering, unusable"
         : "Unreachable";
-  return verdictPill(label, tone, "The full report", () => report(probe, kind));
+  return {
+    label,
+    tone,
+    title: "The full report",
+    open: () => report(probe, kind),
+  };
 }
 
 // Only a chat check streams and asks for a tool call. A completion or
@@ -807,18 +794,15 @@ function report(probe, kind) {
       "div",
       {},
       probe.error
-        ? h("div", { class: "banner banner-bad" }, probe.error)
-        : h(
-            "div",
-            { class: "banner banner-good" },
+        ? banner("bad", probe.error)
+        : banner(
+            "good",
             chat && !probe.tools_off
               ? "Reachable, streaming, and the tool call came back in a form " +
                   "clients can use."
               : "Reachable, and the answer came back in a form clients can use.",
           ),
-      (probe.warnings || []).map((wmsg) =>
-        h("div", { class: "banner banner-warn" }, wmsg),
-      ),
+      (probe.warnings || []).map((wmsg) => banner("warn", wmsg)),
       h(
         "div",
         { class: "table-wrap", style: { marginTop: "12px" } },
@@ -889,7 +873,7 @@ const PROVIDER_NAMES = {
 
 // providerName is a hosted provider's display name. One this build does not
 // know keeps its key, which is still the name it was configured with.
-export function providerName(name) {
+function providerName(name) {
   return PROVIDER_NAMES[name] || name || "";
 }
 
@@ -1035,7 +1019,6 @@ const PRESET_FIELDS = [
 // one of its models, or null for a self-hosted one.
 function editModel(ctx, existing, providers, pick) {
   const m = existing || { kind: "chat", enabled: true, backends: [] };
-  const err = h("div");
   // Whose model this is: an existing one keeps its owner, and a new one is the
   // organisation's in view.
   const orgID = existing ? existing.org_id : ctx.orgID;
@@ -1083,7 +1066,7 @@ function editModel(ctx, existing, providers, pick) {
   const location = h("input", {
     class: "input",
     value: m.location || "",
-    placeholder: "onprem",
+    placeholder: "from the backend URL",
     list: "model-locations",
   });
   const priceIn = priceInput(m.input_micros_per_mtok);
@@ -1168,66 +1151,56 @@ function editModel(ctx, existing, providers, pick) {
     );
   }
 
-  // Everything that describes the backend rather than the alias. It lives in
-  // one group so that choosing a hosted provider can take it off the screen:
-  // somebody pointing a model at Anthropic is not deciding what a backend URL
-  // is, and being asked to look at one is what made that job feel harder than
-  // it is.
-  const machinery = h(
+  // The fields that describe the backend rather than the alias, in two groups.
+  // basics is what a self-hosted model cannot do without, so it stays on the
+  // screen for one. extras has a default or does not matter to most models,
+  // so it is folded away under Advanced options. A hosted model's provider
+  // answers both, so both are folded away for it. See layout.
+  const basics = h(
     "div",
     {},
-    h(
-      "div",
-      { class: "field-row" },
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "Backend model"),
-        backendModel,
-        h(
-          "div",
-          { class: "hint" },
-          "The model name the backend serves, e.g. vLLM's --served-model-name.",
-        ),
-        marks.backendModel,
-      ),
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "Display name"),
-        displayName,
-        h("div", { class: "hint" }, "The model's name for people."),
-        marks.displayName,
-      ),
-    ),
-    h(
-      "div",
-      { class: "field" },
-      h("label", {}, "Backends"),
+    field(
+      "Backend URL",
       backends,
-      h(
-        "div",
-        { class: "hint" },
-        "One base URL per line. Several are used in turn.",
-      ),
+      "One per line. Several are used in turn.",
       marks.backends,
     ),
     h(
       "div",
       { class: "field-row" },
-      field("Kind", kind),
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "Context window"),
+      field(
+        "Backend model",
+        backendModel,
+        "The model name the backend serves, e.g. vLLM's --served-model-name.",
+        marks.backendModel,
+      ),
+      field(
+        "Context window",
         maxContext,
-        h(
-          "div",
-          { class: "hint" },
-          "Advertised to clients. A request that cannot fit is refused.",
-        ),
+        "Advertised to clients. A request that cannot fit is refused.",
         marks.maxContext,
       ),
+    ),
+    h(
+      "div",
+      { class: "field-row" },
+      field("Input price / Mtok (CHF)", priceIn, null, marks.priceIn),
+      field("Output price / Mtok (CHF)", priceOut, null, marks.priceOut),
+    ),
+  );
+  const extras = h(
+    "div",
+    {},
+    h(
+      "div",
+      { class: "field-row" },
+      field(
+        "Display name",
+        displayName,
+        "The model's name for people.",
+        marks.displayName,
+      ),
+      field("Kind", kind),
     ),
     h(
       "div",
@@ -1248,87 +1221,86 @@ function editModel(ctx, existing, providers, pick) {
         h(
           "div",
           { class: "hint" },
-          "Where the model runs, such as ch, usa or onprem. Clients see it.",
+          "Where the model runs, such as ch or usa. Clients see it. Left " +
+            "empty, a backend inside your network is onprem.",
         ),
         marks.location,
       ),
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "Release date"),
+      field(
+        "Release date",
         releaseDate,
-        h("div", { class: "hint" }, "The day the model came out."),
+        "The day the model came out.",
         marks.releaseDate,
       ),
     ),
+    // Left blank, these are not a rate of nothing but no rate at all: those
+    // tokens are then charged at the input price.
     h(
       "div",
       { class: "field-row" },
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "Input price / Mtok (CHF)"),
-        priceIn,
-        marks.priceIn,
-      ),
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "Output price / Mtok (CHF)"),
-        priceOut,
-        marks.priceOut,
-      ),
-    ),
-    // On their own row rather than squeezed beside the two above, because
-    // they are the prices that need a sentence next to them: left blank they
-    // are not a rate of nothing, they are no rate at all, and those tokens
-    // are then charged at the input price.
-    h(
-      "div",
-      { class: "field-row" },
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "Cached input price / Mtok (CHF)"),
+      field(
+        "Cached input price / Mtok (CHF)",
         priceCached,
-        h(
-          "div",
-          { class: "hint" },
-          "What a hosted provider charges for prompt tokens served from " +
-            "its cache. If blank, they are charged at the full input " +
-            "price. Self-hosted models do not need it.",
-        ),
+        "For prompt tokens a hosted provider serves from its cache. If " +
+          "blank, they are charged at the input price.",
         marks.priceCached,
       ),
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "Cache write price / Mtok (CHF)"),
+      field(
+        "Cache write price / Mtok (CHF)",
         priceWrite,
-        h(
-          "div",
-          { class: "hint" },
-          "What a hosted provider charges for prompt tokens it writes to " +
-            "its cache. If blank, they are charged at the input price.",
-        ),
+        "For prompt tokens a hosted provider writes to its cache. If " +
+          "blank, they are charged at the input price.",
         marks.priceWrite,
       ),
     ),
+    h(
+      "div",
+      { class: "field" },
+      h("label", { class: "row-tight" }, enabled, "Enabled"),
+      h(
+        "div",
+        { class: "hint" },
+        "When off, requests are refused as if the model did not exist. " +
+          "Its history is kept.",
+      ),
+    ),
   );
-  // Where that group sits: inline while the model points at an inference plane
-  // of your own, gone once a provider has filled it in.
-  const slot = h("div", {}, machinery);
+  // Where the two groups sit. slot holds basics inline, advanced holds the
+  // fold.
+  const slot = h("div", {});
+  const summary = h("summary", {}, "Advanced options");
+  const fold = h("details", { class: "fold" }, summary);
+  const advanced = h("div", {});
+  // layout puts the groups in place: "self" for a model on your own inference
+  // server, "hosted" once a provider has answered for it, and null between
+  // choosing a provider and a model, when there is nothing to show.
+  //
+  // `open` is true or false to set the fold, undefined to leave it as it was,
+  // and "auto" for a fold appearing: closed, unless it was already open.
+  const layout = (how, open) => {
+    if (open === "auto") open = advanced.contains(fold) && fold.open;
+    if (!how) {
+      slot.replaceChildren();
+      advanced.replaceChildren();
+      return;
+    }
+    const hosted = how === "hosted";
+    slot.replaceChildren(...(hosted ? [] : [basics]));
+    fold.replaceChildren(summary, ...(hosted ? [basics] : []), extras);
+    if (open !== undefined) fold.open = open;
+    advanced.replaceChildren(fold);
+  };
+  layout("self");
   // Where the product id sits, for the one provider that asks for one: just
-  // above the API key, which is the other half of the same answer.
+  // above the provider key, which is the other half of the same answer.
   const productSlot = h("div", {});
 
   const hosted = hostedFields(ctx, providers, {
     fields,
     marks,
     state,
-    slot,
+    layout,
     productSlot,
-    machinery,
     alias,
     existing: !!existing,
     // Whether this is already a hosted model, which is a thing the entry
@@ -1340,7 +1312,7 @@ function editModel(ctx, existing, providers, pick) {
   const keyField = h(
     "div",
     { class: "field" },
-    h("label", {}, "API key"),
+    h("label", {}, "Provider key"),
     apiKey,
     h(
       "div",
@@ -1395,7 +1367,7 @@ function editModel(ctx, existing, providers, pick) {
   const platformNote = h(
     "div",
     { class: "field" },
-    h("label", {}, "API key"),
+    h("label", {}, "Provider key"),
     h(
       "div",
       { class: "hint" },
@@ -1426,176 +1398,133 @@ function editModel(ctx, existing, providers, pick) {
       "The name clients use. Changing it breaks them." +
         ` Only ${orgNameOf(ctx)} can use this model.`,
     ),
-    // Under the alias, and outside the machinery below, for two reasons. It
-    // is the one field on this form addressed to a reader rather than to the
-    // inference plane, so it belongs with the name rather than among the
-    // addresses and prices - and the machinery is folded away for a hosted
-    // model whose provider answered for it, which is the model a router most
-    // needs described.
-    h(
-      "div",
-      { class: "field" },
-      h("label", {}, "Description"),
+    // Under the alias, and outside the backend fields below, for two
+    // reasons. It is the one field on this form addressed to a reader rather
+    // than to the inference plane, so it belongs with the name - and the
+    // backend fields are folded away for a hosted model whose provider
+    // answered for them, which is the model a router most needs described.
+    field(
+      "Description",
       description,
-      h(
-        "div",
-        { class: "hint" },
-        "One sentence: what it is good at and where it runs. Routers " +
-          "use this to choose a model.",
-      ),
+      "One sentence: what it is good at and where it runs. Routers " +
+        "use this to choose a model.",
       marks.description,
     ),
     productSlot,
     subscriptionField,
-    // Above the fold below it, because it is a question rather than an
-    // answer: a hosted model takes a provider, a model and a key, and the key
-    // is the only one of the three that is not on the screen already.
+    // Above the fold, because it is a question rather than an answer: a
+    // hosted model takes a provider, a model and a key, and the key is the
+    // only one of the three that is not on the screen already.
+    slot,
     keyField,
     platformNote,
-    slot,
-    h(
-      "div",
-      { class: "field" },
-      h("label", { class: "row-tight" }, enabled, "Enabled"),
-      h(
-        "div",
-        { class: "hint" },
-        "When off, requests are refused as if the model did not exist. " +
-          "Its history is kept.",
-      ),
-    ),
-  );
-
-  // Save closes the dialog through the handle modal hands back.
-  let close;
-  const saveButton = h(
-    "button",
-    {
-      class: "btn btn-primary",
-      onClick: async (e) => {
-        const list = backends.value
-          .split("\n")
-          .map((s) => s.trim())
-          .filter(Boolean);
-        // Said on its own, because for this provider an empty backend is
-        // not a field left blank - it is the one question the form asked
-        // instead of showing a URL.
-        const preset = state.hosted ? state.preset : null;
-        // The control plane sets the endpoint itself.
-        const platform = onPlatformKey() && !paidByClaudePlan();
-        if (platform && preset) list.splice(0, list.length, preset.p.endpoint);
-        if (
-          preset &&
-          !platform &&
-          preset.p.needs_product_id &&
-          !state.overridden.has("backends") &&
-          !list.length
-        ) {
-          showError(
-            err,
-            `${providerName(preset.p.name)} gives each customer their own ` +
-              "address. Fill in the product ID.",
-          );
-          return;
-        }
-        if (!alias.value.trim() || !backendModel.value.trim() || !list.length) {
-          // Under a provider the only way to get here is editing a model the
-          // table does not know: the table answers both of those fields for
-          // one it does, and the other is named and addressed inside the fold.
-          showError(
-            err,
-            state.hosted
-              ? "Enter the alias, and the backend model and backends under " +
-                  "Advanced options."
-              : "Enter an alias, a backend model and at least one backend.",
-          );
-          return;
-        }
-        const problem = modelAliasProblem(alias.value.trim());
-        if (problem) {
-          showError(err, problem);
-          alias.focus();
-          return;
-        }
-        e.target.disabled = true;
-        try {
-          if (!existing) {
-            const taken = takenProblem(
-              (await api.models(orgID)).data,
-              alias.value.trim(),
-              "model",
-            );
-            if (taken) {
-              showError(err, taken);
-              alias.focus();
-              e.target.disabled = false;
-              return;
-            }
-          }
-          // Absent unless the administrator typed one or asked for the stored
-          // one to go: sending "" on every save would wipe it.
-          const paidByPlan = paidByClaudePlan();
-          let credential;
-          if (paidByPlan || platform) credential = undefined;
-          else if (clearKey && clearKey.checked) credential = "";
-          else if (apiKey.value) credential = apiKey.value;
-
-          const declaration = {
-            alias: alias.value.trim(),
-            kind: kind.value,
-            backends: list,
-            backend_model: backendModel.value.trim(),
-            // What the fields below are: this provider's answers, or
-            // nobody's but the administrator's. Saving it is what lets the
-            // next edit of this model tell the two apart.
-            provider: state.hosted && state.preset ? state.preset.p.name : "",
-            max_context: parseInt(maxContext.value, 10) || 0,
-            display_name: displayName.value.trim(),
-            description: description.value.trim(),
-            release_date: releaseDate.value,
-            // Left empty, the control plane fills in the provider's, or
-            // onprem.
-            location: location.value.trim().toLowerCase(),
-            // Left empty, these two are sent as unset, so a model the price
-            // table does not know is refused rather than saved unbilled.
-            input_micros_per_mtok: statedMicros(priceIn.value),
-            output_micros_per_mtok: statedMicros(priceOut.value),
-            cached_input_micros_per_mtok: toMicros(priceCached.value),
-            cache_write_micros_per_mtok: toMicros(priceWrite.value),
-            long_prompt: longPrompt(),
-            subscription: paidByPlan,
-            enabled: enabled.checked,
-          };
-          await api.putModel(
-            declaration.alias,
-            {
-              ...declaration,
-              ...(credential === undefined ? {} : { api_key: credential }),
-            },
-            orgID,
-          );
-          close();
-          toast(existing ? "Model saved" : "Model added", "good");
-          ctx.reload();
-        } catch (ex) {
-          showError(err, ex.message);
-          e.target.disabled = false;
-        }
-      },
-    },
-    !existing ? "Add model" : "Save",
+    advanced,
   );
 
   paintSubscription();
 
-  close = modal({
+  formModal({
     wide: true,
     title: existing ? `Edit ${m.alias}` : "Add model",
-    body: h("form", { onSubmit: (e) => e.preventDefault() }, err, hosted, rest),
-    actions: (dismiss) => [
-      h("button", { class: "btn", onClick: dismiss }, "Cancel"),
-      saveButton,
-    ],
+    body: h("form", { onSubmit: (e) => e.preventDefault() }, hosted, rest),
+    submitLabel: existing ? "Save" : "Add model",
+    done: existing ? "Model saved" : "Model added",
+    ctx,
+    submit: async () => {
+      const list = backends.value
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      // Said on its own, because for this provider an empty backend is not a
+      // field left blank - it is the one question the form asked instead of
+      // showing a URL.
+      const preset = state.hosted ? state.preset : null;
+      // The control plane sets the endpoint itself.
+      const platform = onPlatformKey() && !paidByClaudePlan();
+      if (platform && preset) list.splice(0, list.length, preset.p.endpoint);
+      if (
+        preset &&
+        !platform &&
+        preset.p.needs_product_id &&
+        !state.overridden.has("backends") &&
+        !list.length
+      ) {
+        throw new Error(
+          `${providerName(preset.p.name)} gives each customer their own ` +
+            "address. Fill in the product ID.",
+        );
+      }
+      if (!alias.value.trim() || !backendModel.value.trim() || !list.length) {
+        // Under a provider the only way to get here is editing a model the
+        // table does not know: the table answers both of those fields for one
+        // it does, and the other is named and addressed inside the fold.
+        throw new Error(
+          state.hosted
+            ? "Enter the alias, and the backend model and backends under " +
+                "Advanced options."
+            : "Enter an alias, a backend model and at least one backend.",
+        );
+      }
+      const problem =
+        modelAliasProblem(alias.value.trim()) ||
+        (!existing &&
+          takenProblem(
+            (await api.models(orgID)).data,
+            alias.value.trim(),
+            "model",
+          ));
+      if (problem) {
+        alias.focus();
+        throw new Error(problem);
+      }
+      // Absent unless the administrator typed one or asked for the stored one
+      // to go: sending "" on every save would wipe it.
+      const paidByPlan = paidByClaudePlan();
+      let credential;
+      if (paidByPlan || platform) credential = undefined;
+      else if (clearKey && clearKey.checked) credential = "";
+      else if (apiKey.value) credential = apiKey.value;
+
+      const declaration = {
+        alias: alias.value.trim(),
+        kind: kind.value,
+        backends: list,
+        backend_model: backendModel.value.trim(),
+        // What the fields below are: this provider's answers, or nobody's but
+        // the administrator's. Saving it is what lets the next edit of this
+        // model tell the two apart.
+        provider: state.hosted && state.preset ? state.preset.p.name : "",
+        max_context: parseInt(maxContext.value, 10) || 0,
+        display_name: displayName.value.trim(),
+        description: description.value.trim(),
+        release_date: releaseDate.value,
+        // Left empty, the control plane fills in the provider's, or onprem.
+        location: location.value.trim().toLowerCase(),
+        // Left empty, these two are sent as unset, so a model the price table
+        // does not know is refused rather than saved unbilled.
+        input_micros_per_mtok: statedMicros(priceIn.value),
+        output_micros_per_mtok: statedMicros(priceOut.value),
+        cached_input_micros_per_mtok: toMicros(priceCached.value),
+        cache_write_micros_per_mtok: toMicros(priceWrite.value),
+        long_prompt: longPrompt(),
+        subscription: paidByPlan,
+        enabled: enabled.checked,
+      };
+      try {
+        await api.putModel(orgID, declaration.alias, {
+          ...declaration,
+          ...(credential === undefined ? {} : { api_key: credential }),
+        });
+      } catch (ex) {
+        // A backend outside the network needs a location, and that field is
+        // folded away. Focused once the error is shown.
+        if (/location/i.test(ex.message) && advanced.contains(fold)) {
+          fold.open = true;
+          setTimeout(() => location.focus());
+        }
+        throw ex;
+      }
+    },
   });
 }
 
@@ -1697,9 +1626,8 @@ function hostedFields(ctx, providers, form) {
     fields,
     marks,
     state,
-    slot,
+    layout,
     productSlot,
-    machinery,
     alias,
     existing,
     initial,
@@ -1760,8 +1688,6 @@ function hostedFields(ctx, providers, form) {
   // Its own place in the form, just above the API key, far from the block
   // above.
   if (productSlot) productSlot.replaceChildren(productIDField);
-  const summary = h("summary", {}, "Advanced options");
-  const fold = h("details", { class: "fold" }, summary);
 
   const chosen = () => (state.place ? state.place.p : null);
 
@@ -1773,9 +1699,8 @@ function hostedFields(ctx, providers, form) {
     const lines = [];
     if (state.preset && !state.preset.m) {
       lines.push(
-        h(
-          "div",
-          { class: "banner banner-info" },
+        banner(
+          "info",
           "This build does not know that model. Enter its context window " +
             "and prices under Advanced options. Blank or zero means no price. " +
             "A cached-input price of zero means the input price.",
@@ -1829,28 +1754,12 @@ function hostedFields(ctx, providers, form) {
     return fixed;
   };
 
-  // Where the machinery sits: inline while the model points at an inference
-  // plane of your own, folded away once a provider has answered for it, and
-  // off the screen between choosing a provider and choosing a model, when
-  // there is nothing to read or fill in.
-  //
-  // `open` is true or false to state the fold, undefined to leave it as the
-  // administrator left it, and "auto" for a fold appearing: start closed, and
-  // leave one already on the screen as it was.
+  // Lays the fields out for where the model runs. Between choosing a provider
+  // and choosing a model there is nothing to read or fill in.
   const paintMachinery = (open) => {
     const fixed = paintLocks();
-    if (state.hosted && !state.preset) {
-      slot.replaceChildren();
-      return;
-    }
-    if (!fixed) {
-      slot.replaceChildren(machinery);
-      return;
-    }
-    if (open === "auto") open = slot.contains(fold) && fold.open;
-    fold.replaceChildren(summary, machinery);
-    if (open !== undefined) fold.open = open;
-    slot.replaceChildren(fold);
+    if (state.hosted && !state.preset) layout(null);
+    else layout(fixed ? "hosted" : "self", open);
   };
 
   // The stored model of an entry the table does not know, read before any
@@ -1924,7 +1833,8 @@ function hostedFields(ctx, providers, form) {
       if (i >= 0) model.value = String(i);
       applyModel();
     } else {
-      fields.location.value = "onprem";
+      // The location is left empty: the control plane works it out from the
+      // backend URL.
       paintMachinery();
     }
   };

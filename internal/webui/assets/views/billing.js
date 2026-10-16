@@ -10,16 +10,21 @@ import {
   money,
   icon,
   icons,
+  iconButton,
   stat,
   pill,
-  modal,
   confirm,
   toast,
   field,
-  showError,
   sectionHead,
   dateTime,
   plural,
+  remembered,
+  remember,
+  formModal,
+  banner,
+  csvButton,
+  capitalise,
 } from "../ui.js";
 
 // thisMonth is the current month as YYYY-MM, in UTC like the bill.
@@ -56,7 +61,7 @@ export async function billingView(ctx) {
 
 async function billSection(ctx) {
   const now = thisMonth();
-  const stored = sessionStorage.getItem("keera.billing.month");
+  const stored = remembered("keera.billing.month");
   const month = stored && stored <= now ? stored : now;
   const res = await api.billing(ctx.orgID, month);
   const rows = res.data || [];
@@ -71,23 +76,14 @@ async function billSection(ctx) {
   }
 
   const go = (m) => {
-    sessionStorage.setItem("keera.billing.month", m);
+    remember("keera.billing.month", m);
     ctx.reload();
   };
 
   const controls = h(
     "div",
     { class: "row", style: { marginBottom: "16px" } },
-    h(
-      "button",
-      {
-        class: "btn btn-sm",
-        title: "Previous month",
-        "aria-label": "Previous month",
-        onClick: () => go(shift(month, -1)),
-      },
-      icon(icons.back),
-    ),
+    iconButton(icons.back, "Previous month", () => go(shift(month, -1))),
     h(
       "strong",
       { style: { minWidth: "130px", textAlign: "center" } },
@@ -108,17 +104,9 @@ async function billSection(ctx) {
         icon(icons.back),
       ),
     ),
-    h("div", { style: { flex: 1 } }),
-    h(
-      "button",
-      {
-        class: "btn",
-        title: "Download this bill as CSV",
-        onClick: () =>
-          api.download("/v1/billing", { org_id: ctx.orgID, month }),
-      },
-      icon(icons.download),
-      "CSV",
+    h("div", { class: "spacer" }),
+    csvButton("Download this bill as CSV", () =>
+      api.download("/v1/billing", { org_id: ctx.orgID, month }),
     ),
   );
 
@@ -228,7 +216,7 @@ async function billSection(ctx) {
         "div",
         { class: "card-body row" },
         h("strong", {}, "Total"),
-        h("div", { style: { flex: 1 } }),
+        h("div", { class: "spacer" }),
         h(
           "span",
           { class: "muted" },
@@ -264,11 +252,6 @@ const kindLabels = {
 
 const stateTones = { paid: "good", pending: "warn", failed: "bad" };
 
-// stateLabel capitalises a payment's state, as every other status pill is.
-function stateLabel(state) {
-  return state ? state[0].toUpperCase() + state.slice(1) : "";
-}
-
 async function creditSection(ctx) {
   const res = await api.creditAccount(ctx.orgID);
   if (!res.payments) return null;
@@ -285,7 +268,7 @@ async function creditSection(ctx) {
     const p = recent.find((r) => r.id === returned);
     back = returnBanner(ctx, p, a);
     if (!p || p.state !== "pending") {
-      sessionStorage.removeItem("keera.billing.wait");
+      remember("keera.billing.wait", null);
       history.replaceState({}, "", location.pathname);
     }
   }
@@ -297,7 +280,6 @@ async function creditSection(ctx) {
     stat(
       "Credit",
       money(a.balance_micros),
-      null,
       a.invoiced
         ? "billed by invoice, no credit needed"
         : low
@@ -307,7 +289,6 @@ async function creditSection(ctx) {
     stat(
       "Automatic top-up",
       a.topup_micros ? money(a.topup_micros) : "Off",
-      null,
       a.topup_micros
         ? `when the credit falls below ${money(a.topup_below_micros)}`
         : "charges the saved card when credit runs low",
@@ -315,7 +296,6 @@ async function creditSection(ctx) {
     stat(
       "Card",
       a.card ? a.card.label : "None",
-      null,
       a.card
         ? a.card.expires
           ? `expires ${new Date(a.card.expires).toLocaleDateString(undefined, { month: "2-digit", year: "2-digit" })}`
@@ -361,7 +341,7 @@ async function creditSection(ctx) {
           "Forget card",
         )
       : null,
-    h("div", { style: { flex: 1 } }),
+    h("div", { class: "spacer" }),
     operator
       ? h("button", { class: "btn", onClick: () => grant(ctx) }, "Grant credit")
       : null,
@@ -395,9 +375,9 @@ async function creditSection(ctx) {
   );
 
   const failed = a.topup_error
-    ? h(
-        "div",
-        { class: "banner banner-warn", style: { marginTop: "16px" } },
+    ? banner(
+        "warn",
+        { style: { marginTop: "16px" } },
         `The last automatic top-up failed: ${a.topup_error} ` +
           "No other is tried until you save the automatic top-up again or add credit by hand.",
       )
@@ -445,7 +425,7 @@ async function creditSection(ctx) {
       },
       {
         label: "State",
-        cell: (p) => pill(stateLabel(p.state), stateTones[p.state]),
+        cell: (p) => pill(capitalise(p.state), stateTones[p.state]),
       },
       { label: "By", cell: (p) => h("span", { class: "muted" }, p.actor) },
     ],
@@ -473,31 +453,31 @@ async function creditSection(ctx) {
 function returnBanner(ctx, p, a) {
   if (!p) return null;
   if (p.state === "paid") {
-    return h(
-      "div",
-      { class: "banner banner-good", style: { marginBottom: "16px" } },
+    return banner(
+      "good",
+      { style: { marginBottom: "16px" } },
       `Thank you: ${money(p.micros)} was added. The credit is now ${money(a.balance_micros)}.`,
     );
   }
   if (p.state === "failed") {
-    return h(
-      "div",
-      { class: "banner banner-bad", style: { marginBottom: "16px" } },
+    return banner(
+      "bad",
+      { style: { marginBottom: "16px" } },
       `The payment did not go through: ${p.note || "nothing was charged"}.`,
     );
   }
-  const tries = Number(sessionStorage.getItem("keera.billing.wait") || 0);
+  const tries = Number(remembered("keera.billing.wait") || 0);
   if (tries < 10) {
-    sessionStorage.setItem("keera.billing.wait", String(tries + 1));
+    remember("keera.billing.wait", String(tries + 1));
     const timer = setTimeout(() => ctx.reload(), 3000);
     ctx.onTeardown(() => clearTimeout(timer));
   } else {
-    sessionStorage.removeItem("keera.billing.wait");
+    remember("keera.billing.wait", null);
     history.replaceState({}, "", location.pathname);
   }
-  return h(
-    "div",
-    { class: "banner banner-info", style: { marginBottom: "16px" } },
+  return banner(
+    "info",
+    { style: { marginBottom: "16px" } },
     "PostFinance is still confirming the payment. The credit is added as soon as it is through.",
   );
 }
@@ -539,15 +519,13 @@ export function addCredit(ctx, res) {
   };
   amount.addEventListener("input", showTotal);
   showTotal();
-  const err = h("div");
-  modal({
+  formModal({
     title: "Add credit",
     subtitle:
       "You pay on PostFinance Checkout, by card, TWINT or PostFinance Pay.",
     body: h(
       "form",
       { onSubmit: (e) => e.preventDefault() },
-      err,
       field("Credit in CHF", amount, total),
       h(
         "label",
@@ -558,34 +536,20 @@ export function addCredit(ctx, res) {
           : "Save the card for automatic top-ups",
       ),
     ),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Cancel"),
-      h(
-        "button",
-        {
-          class: "btn btn-primary",
-          onClick: async (e) => {
-            const m = chf(amount.value);
-            if (Number.isNaN(m)) {
-              showError(err, "Enter an amount in francs.");
-              return amount.focus();
-            }
-            const button = e.currentTarget;
-            button.disabled = true;
-            showError(err, "");
-            try {
-              const started = await api.topUp(ctx.orgID, m, save.checked);
-              sessionStorage.removeItem("keera.billing.wait");
-              location.assign(started.url);
-            } catch (ex) {
-              showError(err, ex.message);
-              button.disabled = false;
-            }
-          },
-        },
-        "Continue to payment",
-      ),
-    ],
+    submitLabel: "Continue to payment",
+    submit: async () => {
+      const m = chf(amount.value);
+      if (Number.isNaN(m)) {
+        amount.focus();
+        throw new Error("Enter an amount in francs.");
+      }
+      const started = await api.topUp(ctx.orgID, m, save.checked);
+      remember("keera.billing.wait", null);
+      location.assign(started.url);
+      // The page is leaving. The dialog stays, with its button off, so the
+      // payment cannot be started twice.
+      return new Promise(() => {});
+    },
   });
 }
 
@@ -620,18 +584,16 @@ function autoTopUp(ctx, a) {
   };
   on.addEventListener("change", sync);
   sync();
-  const err = h("div");
-  modal({
+  formModal({
     title: "Automatic top-up",
     body: h(
       "form",
       { onSubmit: (e) => e.preventDefault() },
-      err,
       a.card
         ? null
-        : h(
-            "div",
-            { class: "banner banner-warn", style: { marginBottom: "12px" } },
+        : banner(
+            "warn",
+            { style: { marginBottom: "12px" } },
             "There is no saved card yet. Add credit once with “Save the card” ticked.",
           ),
       h(
@@ -642,43 +604,25 @@ function autoTopUp(ctx, a) {
       ),
       fields,
     ),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Cancel"),
-      h(
-        "button",
-        {
-          class: "btn btn-primary",
-          onClick: async (e) => {
-            const change = on.checked
-              ? {
-                  topup_below_micros: chf(below.value),
-                  topup_micros: chf(amount.value),
-                }
-              : { topup_below_micros: 0, topup_micros: 0 };
-            if (Number.isNaN(change.topup_below_micros)) {
-              showError(err, "Enter the amount to top up below, in francs.");
-              return below.focus();
-            }
-            if (Number.isNaN(change.topup_micros)) {
-              showError(err, "Enter the amount to charge, in francs.");
-              return amount.focus();
-            }
-            const button = e.currentTarget;
-            button.disabled = true;
-            try {
-              await api.updateCredit(ctx.orgID, change);
-              close();
-              toast("Automatic top-up saved", "good");
-              ctx.reload();
-            } catch (ex) {
-              showError(err, ex.message);
-              button.disabled = false;
-            }
-          },
-        },
-        "Save",
-      ),
-    ],
+    done: "Automatic top-up saved",
+    ctx,
+    submit: async () => {
+      const change = on.checked
+        ? {
+            topup_below_micros: chf(below.value),
+            topup_micros: chf(amount.value),
+          }
+        : { topup_below_micros: 0, topup_micros: 0 };
+      if (Number.isNaN(change.topup_below_micros)) {
+        below.focus();
+        throw new Error("Enter the amount to top up below, in francs.");
+      }
+      if (Number.isNaN(change.topup_micros)) {
+        amount.focus();
+        throw new Error("Enter the amount to charge, in francs.");
+      }
+      await api.updateCredit(ctx.orgID, change);
+    },
   });
 }
 
@@ -690,47 +634,28 @@ function grant(ctx) {
     inputmode: "decimal",
   });
   const note = h("input", { class: "input", placeholder: "Trial" });
-  const err = h("div");
-  modal({
+  formModal({
     title: "Grant credit",
     body: h(
       "form",
       { onSubmit: (e) => e.preventDefault() },
-      err,
       field("Credit in CHF", amount, "Below 0 takes credit away."),
       field("Why", note, "The organisation sees this in its payments."),
     ),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Cancel"),
-      h(
-        "button",
-        {
-          class: "btn btn-primary",
-          onClick: async (e) => {
-            const m = chf(amount.value);
-            if (Number.isNaN(m) || m === 0) {
-              showError(err, "Enter an amount in francs, other than 0.");
-              return amount.focus();
-            }
-            if (!note.value.trim()) {
-              showError(err, "Say why, for the organisation's payments.");
-              return note.focus();
-            }
-            const button = e.currentTarget;
-            button.disabled = true;
-            try {
-              await api.grantCredit(ctx.orgID, m, note.value.trim());
-              close();
-              toast("Credit granted", "good");
-              ctx.reload();
-            } catch (ex) {
-              showError(err, ex.message);
-              button.disabled = false;
-            }
-          },
-        },
-        "Grant",
-      ),
-    ],
+    submitLabel: "Grant",
+    done: "Credit granted",
+    ctx,
+    submit: async () => {
+      const m = chf(amount.value);
+      if (Number.isNaN(m) || m === 0) {
+        amount.focus();
+        throw new Error("Enter an amount in francs, other than 0.");
+      }
+      if (!note.value.trim()) {
+        note.focus();
+        throw new Error("Say why, for the organisation's payments.");
+      }
+      await api.grantCredit(ctx.orgID, m, note.value.trim());
+    },
   });
 }

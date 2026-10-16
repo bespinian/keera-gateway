@@ -35,15 +35,17 @@ import {
   rangePicker,
   locationName,
   releaseDay,
-  crumb,
   gone,
   isAdmin,
   plural,
   pct,
+  detailHead,
+  busyButton,
+  banner,
 } from "../ui.js";
 import { areaChart, barList } from "../chart.js";
 import { requestLog } from "./requestlog.js";
-import { setOutcome } from "./logfilters.js";
+import { setOutcome, namesFrom } from "./logfilters.js";
 import { sessionLog } from "./sessions.js";
 import { modelsCell, summarise } from "./guardrails.js";
 import { openModel, checkModel, servedName } from "./models.js";
@@ -445,22 +447,10 @@ export async function modelDetailView(ctx) {
               : [icon(icons.models), "View model"],
           ),
           canEdit
-            ? h(
-                "button",
-                {
-                  class: "btn",
-                  title: "Send a test request to this model's backend",
-                  onClick: async (e) => {
-                    const button = e.currentTarget;
-                    button.disabled = true;
-                    try {
-                      await checkModel(model);
-                    } finally {
-                      button.disabled = false;
-                    }
-                  },
-                },
+            ? busyButton(
+                { title: "Send a test request to this model's backend" },
                 "Check",
+                () => checkModel(model),
               )
             : null,
         ]
@@ -521,8 +511,7 @@ export async function modelDetailView(ctx) {
                         h(
                           "span",
                           {
-                            class: "mono muted",
-                            style: { fontSize: "11.5px" },
+                            class: "mono muted small",
                           },
                           b,
                         ),
@@ -723,26 +712,14 @@ async function screen(ctx, spec) {
   const since = currentRange();
   const res = await api.overview(ctx.orgID, since, spec.scope);
   const o = res.overview;
-  const names = {
-    projects: res.project_names || {},
-    keys: res.key_names || {},
-  };
+  const names = namesFrom(res);
 
   ctx.setTitle(spec.title, spec.identity || "");
 
-  const head = h(
-    "div",
-    { class: "detail-head" },
-    crumb(ctx, spec.back.path, spec.back.label),
-    h(
-      "div",
-      { class: "row", style: { flexWrap: "wrap" } },
-      h("div", { class: "wrap-chips" }, spec.meta.filter(Boolean)),
-      h("div", { style: { flex: 1 } }),
-      rangePicker(ctx, since),
-      spec.actions.filter(Boolean),
-    ),
-  );
+  const head = detailHead(ctx, [spec.back.path, spec.back.label], spec.meta, [
+    rangePicker(ctx, since),
+    spec.actions,
+  ]);
 
   const wrap = h("div", {}, head);
   if (spec.description) {
@@ -756,11 +733,7 @@ async function screen(ctx, spec) {
   }
   if (spec.banner) {
     wrap.append(
-      h(
-        "div",
-        { class: "banner banner-warn", style: { marginBottom: "16px" } },
-        spec.banner,
-      ),
+      banner("warn", { style: { marginBottom: "16px" } }, spec.banner),
     );
   }
 
@@ -771,22 +744,15 @@ async function screen(ctx, spec) {
       stat(
         "Requests",
         compact(o.requests),
-        null,
         o.refused ? `${num(o.refused)} refused` : "none refused",
       ),
       stat(
         "Tokens",
         compact(o.input_tokens + o.output_tokens),
-        null,
         `${compact(o.input_tokens)} in · ${compact(o.output_tokens)} out`,
       ),
       moneyStat("Cost", o.cost_micros),
-      stat(
-        "First token",
-        ms(o.ttft_median_ms),
-        null,
-        `p95 ${ms(o.ttft_p95_ms)}`,
-      ),
+      stat("First token", ms(o.ttft_median_ms), `p95 ${ms(o.ttft_p95_ms)}`),
     ),
   );
 

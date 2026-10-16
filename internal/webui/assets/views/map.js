@@ -22,6 +22,7 @@
 
 import { api } from "../api.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
+import { outcomeOf } from "../status.js";
 import {
   h,
   compact,
@@ -37,6 +38,9 @@ import {
   go,
   liveControl,
   sectionHead,
+  dash,
+  rangeOf,
+  followRequests,
 } from "../ui.js";
 
 // How the boxes are sized. Fixed rather than measured: a map whose boxes are as
@@ -1191,32 +1195,12 @@ function showTip(tip, canvas, n, orgName) {
  *  request, and neither of them is a poll. */
 function watch(ctx, { since, scene, painter, live }) {
   const listen = { org_id: ctx.orgID, since, after: 0 };
-  let source = null;
-  const close = () => {
-    if (source) source.close();
-    source = null;
-  };
-  ctx.onTeardown(close);
-
-  const open = () => {
-    close();
-    live.state("connecting");
-    source = api.requestStream(listen);
-    source.addEventListener("open", () => live.state("live"));
-    source.addEventListener("requests", (e) => {
-      live.state("live");
-      const payload = JSON.parse(e.data);
+  followRequests(ctx, live, () => api.requestStream(listen), {
+    onRequests: (payload) => {
       if (payload.next_after) listen.after = payload.next_after;
       arrived(payload.data || []);
-    });
-    source.addEventListener("error", () => {
-      live.state(
-        source && source.readyState === EventSource.CLOSED
-          ? "stopped"
-          : "connecting",
-      );
-    });
-  };
+    },
+  });
 
   function arrived(rows) {
     // Oldest first, so a batch leaves in the order it happened, and staggered,
@@ -1227,6 +1211,8 @@ function watch(ctx, { since, scene, painter, live }) {
       const client = clientNode(scene, row.client || "");
       const model = modelNode(scene, row.alias);
       count(scene, client, model, row);
+      // Only refused and failed packets look different, so an interrupted
+      // request is drawn as a served one.
       painter.send(client, model, outcomeOf(row), i * 22);
     });
     // Anything past the cap still counts: the numbers on the boxes are the
@@ -1241,10 +1227,6 @@ function watch(ctx, { since, scene, painter, live }) {
     }
     painter.touch();
   }
-
-  live.onChange((on) => (on ? open() : (close(), live.state("paused"))));
-  if (live.on) open();
-  else live.state("paused");
 }
 
 // A refusal is any 4xx, and a failure any 5xx. The dashboard and the request
@@ -1252,12 +1234,6 @@ function watch(ctx, { since, scene, painter, live }) {
 // is.
 function refused(row) {
   return row.status >= 400 && row.status < 500;
-}
-
-function outcomeOf(row) {
-  if (refused(row)) return "refused";
-  if (row.status >= 500) return "failed";
-  return "ok";
 }
 
 /** count folds one live row into the numbers already on the boxes, so the
@@ -1409,7 +1385,7 @@ function modelReport(ctx, scene) {
           cell: (m) =>
             m.endpoint
               ? h("span", { class: "mono muted" }, m.endpoint)
-              : h("span", { class: "faint" }, "-"),
+              : dash(),
         },
         {
           label: "Requests",
@@ -1426,9 +1402,7 @@ function modelReport(ctx, scene) {
           sortDir: "desc",
           sortKey: (m) => m.cell.ttft_median_ms || null,
           cell: (m) =>
-            m.cell.ttft_median_ms
-              ? ms(m.cell.ttft_median_ms)
-              : h("span", { class: "faint" }, "-"),
+            m.cell.ttft_median_ms ? ms(m.cell.ttft_median_ms) : dash(),
         },
         {
           label: "Cost (CHF)",

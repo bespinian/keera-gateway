@@ -20,6 +20,7 @@ import {
   brandMark,
   dateTime,
   secretField,
+  field,
 } from "../ui.js";
 
 /** passkeySetupView is the page a set-up link opens. It adds a passkey to the
@@ -269,13 +270,7 @@ function nameInput() {
 }
 
 function nameField(input) {
-  return h(
-    "div",
-    { class: "field" },
-    h("label", { for: "passkey-name" }, "Name"),
-    input,
-    h("div", { class: "hint" }, "So you can tell your passkeys apart later."),
-  );
+  return field("Name", input, "So you can tell your passkeys apart later.");
 }
 
 // removeButton removes one passkey, after asking, and then redraws the list.

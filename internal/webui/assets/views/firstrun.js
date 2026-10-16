@@ -260,7 +260,7 @@ function stepList(steps) {
             "div",
             { class: "row" },
             h("h2", { style: { marginBottom: "6px" } }, s.title),
-            h("div", { style: { flex: 1 } }),
+            h("div", { class: "spacer" }),
             s.done ? pill("Done", "good") : null,
           ),
           h("p", { class: "muted" }, s.body),

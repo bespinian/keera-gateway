@@ -15,6 +15,8 @@ import {
   brandMark,
   idpMark,
   showError,
+  field,
+  banner,
 } from "../ui.js";
 
 /** passkeySignInFlow is the sign-in `keera login --provider passkey` started,
@@ -64,13 +66,9 @@ export async function signIn(root, onSignedIn) {
       history.replaceState({}, "", "/");
       await onSignedIn();
     } catch (err) {
-      replace(
+      showError(
         message,
-        h(
-          "div",
-          { class: "banner banner-bad" },
-          err instanceof ApiError ? err.message : "Sign-in failed.",
-        ),
+        err instanceof ApiError ? err.message : "Sign-in failed.",
       );
       button.disabled = false;
       button.textContent = "Sign in with the operator key";
@@ -92,16 +90,10 @@ export async function signIn(root, onSignedIn) {
   const keyForm = h(
     "form",
     { onSubmit: submit },
-    h(
-      "div",
-      { class: "field" },
-      h("label", { for: "operator-key" }, "Operator key"),
+    field(
+      "Operator key",
       keyInput,
-      h(
-        "div",
-        { class: "hint" },
-        "The value of KEERA_OPERATOR_KEY. It signs you in as an operator.",
-      ),
+      "The value of KEERA_OPERATOR_KEY. It signs you in as an operator.",
     ),
     button,
   );
@@ -110,9 +102,7 @@ export async function signIn(root, onSignedIn) {
     "div",
     { class: "signin-card" },
     h("div", { class: "signin-brand" }, brandMark(28), "Keera Gateway"),
-    ssoError
-      ? h("div", { class: "banner banner-bad" }, "Sign-in failed: " + ssoError)
-      : null,
+    ssoError ? banner("bad", "Sign-in failed: " + ssoError) : null,
     message,
   );
 
@@ -147,13 +137,9 @@ export async function signIn(root, onSignedIn) {
             history.replaceState({}, "", res.redirect || "/");
             await onSignedIn();
           } catch (err) {
-            replace(
+            showError(
               message,
-              h(
-                "div",
-                { class: "banner banner-bad" },
-                err.message || "Signing in with a passkey failed.",
-              ),
+              err.message || "Signing in with a passkey failed.",
             );
             b.disabled = false;
             replace(b, label("Sign in with a passkey"));

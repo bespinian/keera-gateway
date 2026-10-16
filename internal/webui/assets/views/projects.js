@@ -13,13 +13,15 @@ import {
   meter,
   icon,
   icons,
+  iconButton,
   rowLink,
-  showError,
   isAdmin,
   plural,
   field,
   listHead,
   pct,
+  dash,
+  formModal,
 } from "../ui.js";
 import {
   openGuardrails,
@@ -106,9 +108,7 @@ export async function projectsView(ctx) {
       {
         label: "Description",
         cell: (t) =>
-          t.description
-            ? h("span", { class: "muted" }, t.description)
-            : h("span", { class: "faint" }, "-"),
+          t.description ? h("span", { class: "muted" }, t.description) : dash(),
       },
       { label: "Models", cell: (t) => modelsCell(t.limits) },
       {
@@ -135,7 +135,7 @@ export async function projectsView(ctx) {
               h("span", { class: "faint" }, "no budget"),
               h(
                 "span",
-                { class: "muted", style: { fontSize: "11.5px" } },
+                { class: "muted small" },
                 money(t.spend_micros) + " this month",
               ),
             );
@@ -151,13 +151,13 @@ export async function projectsView(ctx) {
               meter(frac, tone),
               h(
                 "span",
-                { class: "muted nowrap", style: { fontSize: "11.5px" } },
+                { class: "muted nowrap small" },
                 pct(t.spend_micros, t.budget_micros),
               ),
             ),
             h(
               "span",
-              { class: "muted", style: { fontSize: "11.5px" } },
+              { class: "muted small" },
               `${money(t.spend_micros)} of ${money(t.budget_micros)} per ${t.period}`,
             ),
           );
@@ -195,27 +195,19 @@ export async function projectsView(ctx) {
             // project's own screen and a pencil next to it would be read as
             // editing what that screen shows.
             canEdit
-              ? h(
-                  "button",
-                  {
-                    class: "btn btn-sm",
-                    title: "Edit this project",
-                    "aria-label": `Edit ${t.name}`,
-                    onClick: () => editProject(ctx, t),
-                  },
-                  icon(icons.pencil),
+              ? iconButton(
+                  icons.pencil,
+                  "Edit this project",
+                  () => editProject(ctx, t),
+                  { label: `Edit ${t.name}` },
                 )
               : null,
             canEdit
-              ? h(
-                  "button",
-                  {
-                    class: "btn btn-sm btn-danger",
-                    title: "Delete this project",
-                    "aria-label": `Delete ${t.name}`,
-                    onClick: () => deleteProject(ctx, t),
-                  },
-                  icon(icons.trash),
+              ? iconButton(
+                  icons.trash,
+                  "Delete this project",
+                  () => deleteProject(ctx, t),
+                  { danger: true, label: `Delete ${t.name}` },
                 )
               : null,
           ),
@@ -254,8 +246,7 @@ function projectFields(project) {
 
 function newProject(ctx) {
   const { name, description } = projectFields(null);
-  const err = h("div");
-  modal({
+  formModal({
     title: "Create project",
     subtitle:
       "Usually one per product or group of people, so budgets and reports " +
@@ -263,37 +254,23 @@ function newProject(ctx) {
     body: h(
       "form",
       { onSubmit: (e) => e.preventDefault() },
-      err,
       field("Name", name),
       field("Description", description, "Optional. What the project is for."),
     ),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Cancel"),
-      h(
-        "button",
-        {
-          class: "btn btn-primary",
-          onClick: async (e) => {
-            if (!name.value.trim()) return name.focus();
-            e.target.disabled = true;
-            try {
-              await api.createProject(
-                ctx.orgID || ctx.state.me.org_id,
-                name.value.trim(),
-                description.value.trim(),
-              );
-              close();
-              toast("Project created", "good");
-              ctx.reload();
-            } catch (ex) {
-              showError(err, ex.message);
-              e.target.disabled = false;
-            }
-          },
-        },
-        "Create project",
-      ),
-    ],
+    submitLabel: "Create project",
+    done: "Project created",
+    ctx,
+    submit: async () => {
+      if (!name.value.trim()) {
+        name.focus();
+        return false;
+      }
+      await api.createProject(
+        ctx.orgID || ctx.state.me.org_id,
+        name.value.trim(),
+        description.value.trim(),
+      );
+    },
   });
 }
 
@@ -304,8 +281,7 @@ function newProject(ctx) {
 // reason to assume it.
 export function editProject(ctx, project) {
   const { name, description } = projectFields(project);
-  const err = h("div");
-  modal({
+  formModal({
     title: `Edit ${project.name}`,
     subtitle:
       "Keys, guardrails and costs stay with the project. Reports use a new " +
@@ -313,39 +289,27 @@ export function editProject(ctx, project) {
     body: h(
       "form",
       { onSubmit: (e) => e.preventDefault() },
-      err,
       field("Name", name),
       field("Description", description, "Optional. What the project is for."),
     ),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Cancel"),
-      h(
-        "button",
-        {
-          class: "btn btn-primary",
-          onClick: async (e) => {
-            const next = name.value.trim();
-            if (!next) return name.focus();
-            const change = {};
-            if (next !== project.name) change.name = next;
-            const text = description.value.trim();
-            if (text !== (project.description || "")) change.description = text;
-            if (!Object.keys(change).length) return close();
-            e.target.disabled = true;
-            try {
-              await api.updateProject(project.id, change);
-              close();
-              toast("Project saved", "good");
-              ctx.reload();
-            } catch (ex) {
-              showError(err, ex.message);
-              e.target.disabled = false;
-            }
-          },
-        },
-        "Save",
-      ),
-    ],
+    done: "Project saved",
+    ctx,
+    submit: async (close) => {
+      const next = name.value.trim();
+      if (!next) {
+        name.focus();
+        return false;
+      }
+      const change = {};
+      if (next !== project.name) change.name = next;
+      const text = description.value.trim();
+      if (text !== (project.description || "")) change.description = text;
+      if (!Object.keys(change).length) {
+        close();
+        return false;
+      }
+      await api.updateProject(project.id, change);
+    },
   });
 }
 

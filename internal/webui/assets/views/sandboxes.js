@@ -27,25 +27,26 @@ import { api } from "../api.js";
 import {
   h,
   table,
-  modal,
   confirm,
   toast,
   pill,
   stat,
   field,
-  showError,
   duration,
   dateTime,
   ago,
   compact,
   num,
-  icon,
   icons,
+  iconButton,
   plural,
   isAdmin,
   sandboxNameProblem,
   listHead,
   sectionHead,
+  dash,
+  formModal,
+  capitalise,
 } from "../ui.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
 import { oldestProject } from "./projects.js";
@@ -103,11 +104,10 @@ export async function sandboxesView(ctx) {
     h(
       "div",
       { class: "grid grid-4" },
-      stat("Live", num(live.length), null, limitNote(limits, canAdmin)),
+      stat("Live", num(live.length), limitNote(limits, canAdmin)),
       stat(
         "Running now",
         num(running),
-        null,
         "the rest are starting, suspended, expired or failed",
       ),
       // Core-seconds rather than wall time, because two minutes of thirty-two
@@ -116,14 +116,15 @@ export async function sandboxesView(ctx) {
       // machine it belongs to.
       stat(
         "Compute used",
-        compact(Math.round(coreSeconds / 60)),
-        "core-min",
+        [
+          compact(Math.round(coreSeconds / 60)),
+          h("span", { class: "unit" }, "core-min"),
+        ],
         "over the sandboxes listed",
       ),
       stat(
         "Isolation",
         driver.isolation,
-        null,
         `the strongest the ${driver.name} driver offers`,
       ),
     ),
@@ -173,13 +174,7 @@ function listCard(ctx, sandboxes, canAdmin, me, driver) {
             "div",
             {},
             h("strong", { class: "mono" }, s.name),
-            s.repo
-              ? h(
-                  "div",
-                  { class: "faint", style: { fontSize: "11.5px" } },
-                  s.repo,
-                )
-              : null,
+            s.repo ? h("div", { class: "faint small" }, s.repo) : null,
           ),
         sortKey: (s) => s.name,
       },
@@ -193,16 +188,12 @@ function listCard(ctx, sandboxes, canAdmin, me, driver) {
             h(
               "div",
               { class: "row-tight" },
-              pill(stateLabel(s.state), stateTone(s.state)),
+              pill(capitalise(s.state), stateTone(s.state)),
               s.purpose === "agent" ? pill("Agent", "accent") : null,
             ),
             // Why it is stuck or failed. The other states explain themselves.
             (s.state === "pending" || s.state === "failed") && s.detail
-              ? h(
-                  "div",
-                  { class: "faint", style: { fontSize: "11.5px" } },
-                  s.detail,
-                )
+              ? h("div", { class: "faint small" }, s.detail)
               : null,
           ),
         sortKey: (s) => s.state,
@@ -220,7 +211,7 @@ function listCard(ctx, sandboxes, canAdmin, me, driver) {
             // sandbox, and a row that joined would describe one that never ran.
             h(
               "div",
-              { class: "faint", style: { fontSize: "11.5px" } },
+              { class: "faint small" },
               `${size(s)} · ${s.isolation || "standard"}`,
             ),
           ),
@@ -242,7 +233,7 @@ function listCard(ctx, sandboxes, canAdmin, me, driver) {
             s.project_id
               ? h(
                   "div",
-                  { class: "faint", style: { fontSize: "11.5px" } },
+                  { class: "faint small" },
                   projectName(ctx, s.project_id),
                 )
               : null,
@@ -330,11 +321,7 @@ function classCard(ctx, classes, driver) {
               {},
               h("strong", { class: "mono" }, c.name),
               c.description
-                ? h(
-                    "div",
-                    { class: "faint", style: { fontSize: "11.5px" } },
-                    c.description,
-                  )
+                ? h("div", { class: "faint small" }, c.description)
                 : null,
             ),
         },
@@ -355,9 +342,7 @@ function classCard(ctx, classes, driver) {
           shrink: true,
           num: true,
           cell: (c) =>
-            c.disk_mib
-              ? h("span", { class: "mono" }, gib(c.disk_mib))
-              : h("span", { class: "faint" }, "-"),
+            c.disk_mib ? h("span", { class: "mono" }, gib(c.disk_mib)) : dash(),
         },
         {
           label: "Lifetime",
@@ -375,24 +360,18 @@ function classCard(ctx, classes, driver) {
           shrink: true,
           num: true,
           cell: (c) =>
-            c.warm
-              ? h("span", { class: "mono" }, num(c.warm))
-              : h("span", { class: "faint" }, "-"),
+            c.warm ? h("span", { class: "mono" }, num(c.warm)) : dash(),
         },
         {
           label: "",
           shrink: true,
           cell: (c) =>
             canEdit
-              ? h(
-                  "button",
-                  {
-                    class: "btn btn-sm btn-danger",
-                    title: "Delete this class",
-                    "aria-label": `Delete ${c.name}`,
-                    onClick: () => removeClass(ctx, c),
-                  },
-                  icon(icons.trash),
+              ? iconButton(
+                  icons.trash,
+                  "Delete this class",
+                  () => removeClass(ctx, c),
+                  { danger: true, label: `Delete ${c.name}` },
                 )
               : null,
         },
@@ -501,15 +480,11 @@ function actions(ctx, s, canAdmin, me, driver) {
     );
   }
   btns.push(
-    h(
-      "button",
-      {
-        class: "btn btn-sm btn-danger",
-        title: "Terminate it and delete its files",
-        "aria-label": `Terminate ${s.name}`,
-        onClick: () => terminateSandbox(ctx, s),
-      },
-      icon(icons.trash),
+    iconButton(
+      icons.trash,
+      "Terminate it and delete its files",
+      () => terminateSandbox(ctx, s),
+      { danger: true, label: `Terminate ${s.name}` },
     ),
   );
   return h("div", { class: "row-tight" }, ...btns);
@@ -530,8 +505,7 @@ function extend(ctx, s) {
     class: "input",
     placeholder: "the class's default",
   });
-  const err = h("div");
-  modal({
+  formModal({
     title: `Extend ${s.name}`,
     subtitle:
       "Counted from now, not added to the time left. The same limits as at " +
@@ -539,35 +513,12 @@ function extend(ctx, s) {
     body: h(
       "form",
       {},
-      err,
       field("Lifetime from now", ttl, "Leave empty for the class default."),
     ),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Cancel"),
-      h(
-        "button",
-        {
-          class: "btn btn-primary",
-          onClick: async (e) => {
-            const button = e.currentTarget;
-            button.disabled = true;
-            try {
-              const res = await api.extendSandbox(s.id, ttl.value.trim());
-              close();
-              toast(
-                `${s.name} now expires ${dateTime(res.expires_at)}`,
-                "good",
-              );
-              ctx.reload();
-            } catch (ex) {
-              showError(err, ex.message);
-              button.disabled = false;
-            }
-          },
-        },
-        "Extend",
-      ),
-    ],
+    submitLabel: "Extend",
+    done: (res) => `${s.name} now expires ${dateTime(res.expires_at)}`,
+    ctx,
+    submit: () => api.extendSandbox(s.id, ttl.value.trim()),
   });
 }
 
@@ -612,7 +563,7 @@ function removeClass(ctx, c) {
     confirmLabel: "Delete class",
     danger: true,
     onConfirm: async () => {
-      await api.deleteSandboxClass(c.name, c.org_id);
+      await api.deleteSandboxClass(c.org_id, c.name);
       toast(`${c.name} deleted`, "good");
       ctx.reload();
     },
@@ -668,9 +619,8 @@ function newSandbox(ctx, classes, limits, projects) {
     rows: 3,
     placeholder: "ssh-ed25519 AAAA… you@laptop",
   });
-  const err = h("div");
 
-  modal({
+  formModal({
     title: "Create sandbox",
     subtitle:
       "It gets its own API key, scoped to you and revoked with the sandbox.",
@@ -678,7 +628,6 @@ function newSandbox(ctx, classes, limits, projects) {
     body: h(
       "form",
       {},
-      err,
       field("Name", name, [
         "Lowercase letters, digits and hyphens. It becomes the hostname: ",
         h("code", {}, "keera sandbox ssh <name>"),
@@ -719,66 +668,46 @@ function newSandbox(ctx, classes, limits, projects) {
           : "Leave empty for the class default.",
       ),
     ),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Cancel"),
-      h(
-        "button",
-        {
-          class: "btn btn-primary",
-          onClick: async (e) => {
-            const button = e.currentTarget;
-            // What the control plane would refuse anyway, refused here - so
-            // that the answer arrives beside the field that is wrong instead of
-            // after a round trip, and so that the field gets focus rather than
-            // the reader having to find it.
-            const keys = key.value
-              .split("\n")
-              .map((l) => l.trim())
-              .filter((l) => l && !l.startsWith("#"));
-            for (const check of [
-              [sandboxNameProblem(name.value.trim()), name],
-              [
-                keys.length
-                  ? ""
-                  : [
-                      "Paste an SSH public key. Without one, nobody can open " +
-                        "a shell in this sandbox. ",
-                      h("code", {}, "cat ~/.ssh/id_ed25519.pub"),
-                      " prints yours.",
-                    ],
-                key,
+    submitLabel: "Create sandbox",
+    done: (sb) => `${sb.name} is starting`,
+    ctx,
+    submit: () => {
+      // What the control plane would refuse anyway, refused here, so the
+      // answer arrives beside the wrong field and that field gets focus.
+      const keys = key.value
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l && !l.startsWith("#"));
+      for (const [problem, input] of [
+        [sandboxNameProblem(name.value.trim()), name],
+        [
+          keys.length
+            ? ""
+            : [
+                "Paste an SSH public key. Without one, nobody can open " +
+                  "a shell in this sandbox. ",
+                h("code", {}, "cat ~/.ssh/id_ed25519.pub"),
+                " prints yours.",
               ],
-            ]) {
-              if (check[0]) {
-                showError(err, check[0]);
-                check[1].focus();
-                return;
-              }
-            }
-            button.disabled = true;
-            try {
-              const sb = await api.createSandbox({
-                org_id: ctx.orgID,
-                name: name.value.trim(),
-                class: cls.value,
-                project_id: project.value,
-                repo: repo.value.trim(),
-                branch: branch.value.trim(),
-                ttl: ttl.value.trim(),
-                authorized_keys: keys,
-              });
-              close();
-              toast(`${sb.name} is starting`, "good");
-              ctx.reload();
-            } catch (ex) {
-              showError(err, ex.message);
-              button.disabled = false;
-            }
-          },
-        },
-        "Create sandbox",
-      ),
-    ],
+          key,
+        ],
+      ]) {
+        if (problem) {
+          input.focus();
+          throw { message: problem };
+        }
+      }
+      return api.createSandbox({
+        org_id: ctx.orgID,
+        name: name.value.trim(),
+        class: cls.value,
+        project_id: project.value,
+        repo: repo.value.trim(),
+        branch: branch.value.trim(),
+        ttl: ttl.value.trim(),
+        authorized_keys: keys,
+      });
+    },
   });
 }
 
@@ -805,12 +734,7 @@ function isLive(s) {
 
 // isolationLabel is a tier as a pill shows it.
 function isolationLabel(isolation) {
-  return isolation === "vm" ? "VM" : stateLabel(isolation || "standard");
-}
-
-// stateLabel capitalises a state, as every other status pill here is.
-function stateLabel(state) {
-  return state ? state[0].toUpperCase() + state.slice(1) : "";
+  return isolation === "vm" ? "VM" : capitalise(isolation || "standard");
 }
 
 function stateTone(state) {

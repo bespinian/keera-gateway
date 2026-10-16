@@ -16,6 +16,7 @@ import {
   num,
   icon,
   icons,
+  iconButton,
   rowLink,
   showError,
   isAdmin,
@@ -27,6 +28,9 @@ import {
   listHead,
   plural,
   pct,
+  dash,
+  formModal,
+  rangeOf,
 } from "../ui.js";
 import { openGuardrails, ceilingsFor, summarise } from "./guardrails.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
@@ -39,7 +43,7 @@ export async function keysView(ctx) {
     return chooseOrg(ctx, "API keys");
 
   const since = currentRange();
-  const range = rangeOf(since);
+  const range = rangeOf(since, RANGES[1]);
   const [keysRes, projectsRes, modelsRes, usersRes] = await Promise.all([
     api.keys(ctx.orgID, { since }),
     api.projects(ctx.orgID).catch(() => ({ data: [] })),
@@ -178,15 +182,14 @@ export async function keysView(ctx) {
                 h("span", { class: "nowrap" }, num(k.requests), " req"),
                 h(
                   "span",
-                  { class: "faint nowrap", style: { fontSize: "11.5px" } },
+                  { class: "faint nowrap small" },
                   money(k.spend_micros),
                 ),
                 k.subscription_micros
                   ? h(
                       "span",
                       {
-                        class: "faint nowrap",
-                        style: { fontSize: "11.5px" },
+                        class: "faint nowrap small",
                         title:
                           "What the Claude plan paid for, at API prices. " +
                           "No budget is charged it.",
@@ -196,7 +199,7 @@ export async function keysView(ctx) {
                   : null,
                 planUsed(k.plan),
               )
-            : h("span", { class: "faint" }, "-"),
+            : dash(),
       },
       {
         label: "Guardrails",
@@ -213,11 +216,7 @@ export async function keysView(ctx) {
             bits.unshift(n ? `${n} ${plural(n, "model")}` : "No models");
           }
           return bits.length
-            ? h(
-                "span",
-                { class: "muted nowrap", style: { fontSize: "11.5px" } },
-                bits.join(" · "),
-              )
+            ? h("span", { class: "muted nowrap small" }, bits.join(" · "))
             : h("span", { class: "faint" }, "Inherited");
         },
       },
@@ -373,15 +372,10 @@ const NOBODY = "-";
 // NO_USER is what every screen shows for a key attributed to nobody.
 export const NO_USER = "No user";
 
-// rangeOf is the picker's entry for since.
-function rangeOf(since) {
-  return RANGES.find((r) => r.since === since) || RANGES[1];
-}
-
 // inPeriod is the period last_used_at covers when the keys were read with
 // since, worded to follow "used" or "not".
 export function inPeriod(since) {
-  return `in the ${rangeOf(since).long.toLowerCase()}`;
+  return `in the ${rangeOf(since, RANGES[1]).long.toLowerCase()}`;
 }
 
 // byLabel is the distinct values of rows as dropdown options, sorted by label.
@@ -496,42 +490,30 @@ export function confirmRotate(ctx, k, { done } = {}) {
 // renameKey changes what a key is called and nothing else.
 export function renameKey(ctx, k) {
   const name = h("input", { class: "input", value: k.name, autofocus: true });
-  const err = h("div");
-  modal({
+  formModal({
     title: `Rename ${k.name}`,
     subtitle:
       "The key keeps working as it is. The old name stays in the audit log.",
     body: h(
       "form",
       { onSubmit: (e) => e.preventDefault() },
-      err,
       field("Name", name),
     ),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Cancel"),
-      h(
-        "button",
-        {
-          class: "btn btn-primary",
-          onClick: async (e) => {
-            const next = name.value.trim();
-            if (!next) return name.focus();
-            if (next === k.name) return close();
-            e.target.disabled = true;
-            try {
-              await api.renameKey(k.id, next);
-              close();
-              toast("Key renamed", "good");
-              ctx.reload();
-            } catch (ex) {
-              showError(err, ex.message);
-              e.target.disabled = false;
-            }
-          },
-        },
-        "Rename",
-      ),
-    ],
+    submitLabel: "Rename",
+    done: "Key renamed",
+    ctx,
+    submit: async (close) => {
+      const next = name.value.trim();
+      if (!next) {
+        name.focus();
+        return false;
+      }
+      if (next === k.name) {
+        close();
+        return false;
+      }
+      await api.renameKey(k.id, next);
+    },
   });
 }
 
@@ -668,14 +650,11 @@ function issueKey(ctx, projects, users, last = {}) {
   expiry.addEventListener("change", () => {
     lastDayField.hidden = expiry.value !== "date";
   });
-  const err = h("div");
-
-  modal({
+  formModal({
     title: "Issue key",
     body: h(
       "form",
       {},
-      err,
       field(
         "Name",
         name,
@@ -803,8 +782,7 @@ function planUsed(plan) {
   return h(
     "span",
     {
-      class: (limited ? "" : "faint ") + "nowrap",
-      style: { fontSize: "11.5px" },
+      class: (limited ? "" : "faint ") + "nowrap small",
       title:
         "How much of the Claude plan is used: in the last five hours, and " +
         "in the last seven days.",

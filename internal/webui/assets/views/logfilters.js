@@ -6,8 +6,25 @@
 // narrowed the same way, the choices carry over from one to the other, and
 // both rank by clicking a column.
 
-import { h, num } from "../ui.js";
+import { h, num, remembered, remember } from "../ui.js";
 import { statusLabel } from "../status.js";
+
+/** namesFrom is the id-to-name maps a log response carries, so a table can
+ *  show names where the rows hold ids. */
+export function namesFrom(res) {
+  return {
+    keys: res.key_names || {},
+    projects: res.project_names || {},
+    users: res.user_names || {},
+  };
+}
+
+/** addNames adds the names a later response carries, for the rows it adds. */
+export function addNames(names, res) {
+  for (const [kind, more] of Object.entries(namesFrom(res))) {
+    Object.assign(names[kind], more);
+  }
+}
 
 // The lenses on the log, widest first. "All" leads because the first question
 // is what has been happening rather than what went wrong: a log that opens on
@@ -171,18 +188,18 @@ const narrowKey = (param) => "keera.log." + param;
 export function readNarrowing(ctx) {
   const out = {};
   for (const n of narrowings(ctx))
-    out[n.param] = sessionStorage.getItem(narrowKey(n.param)) || "";
+    out[n.param] = remembered(narrowKey(n.param)) || "";
   return out;
 }
 
 function clearNarrowing() {
-  for (const n of NARROWINGS) sessionStorage.removeItem(narrowKey(n.param));
+  for (const n of NARROWINGS) remember(narrowKey(n.param), null);
 }
 
 /** setOutcome is the failure pill on an entity's chart, pointing the log
  *  below it at the rows it counted. */
 export function setOutcome(outcome) {
-  sessionStorage.setItem(OUTCOME_KEY, outcome);
+  remember(OUTCOME_KEY, outcome);
 }
 
 /** openFailed points the Requests screen at the server errors and nothing
@@ -194,12 +211,12 @@ export function setOutcome(outcome) {
  *  them a bigger one. */
 export function openFailed() {
   clearNarrowing();
-  sessionStorage.setItem(narrowKey("status"), "5xx");
+  remember(narrowKey("status"), "5xx");
 }
 
 /** currentOutcome is which lens the log is being read through. */
 export function currentOutcome() {
-  return sessionStorage.getItem(OUTCOME_KEY) || "";
+  return remembered(OUTCOME_KEY) || "";
 }
 
 /** outcomeSeg is the row of lenses, each with how many rows it holds. A lens
@@ -282,9 +299,9 @@ export function narrowRow(ctx, narrowed, facets, names, lead = null) {
  *  different rankings. */
 export function ranking(ctx, key) {
   return {
-    by: sessionStorage.getItem(key) || "",
+    by: remembered(key) || "",
     set: (by) => {
-      sessionStorage.setItem(key, by);
+      remember(key, by);
       ctx.reload();
     },
   };
@@ -343,7 +360,7 @@ function narrowSelect(ctx, n, selected, counts, names) {
       style: { width: "auto" },
       "aria-label": n.aria,
       onChange: (e) => {
-        sessionStorage.setItem(narrowKey(n.param), e.target.value);
+        remember(narrowKey(n.param), e.target.value);
         ctx.reload();
       },
     },

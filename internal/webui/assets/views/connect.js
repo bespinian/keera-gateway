@@ -31,6 +31,9 @@ import {
   rangePicker,
   listHead,
   code,
+  remembered,
+  remember,
+  capitalise,
 } from "../ui.js";
 
 // The configuration blocks come from the control plane at /control/v1/connect
@@ -275,7 +278,7 @@ async function addClient(ctx, catalogue, keys, button) {
       class: "select",
       onChange: (e) => {
         state.key = keys.find((k) => k.id === e.target.value) || keys[0];
-        localStorage.setItem("keera.connect.key", state.key.id);
+        remember("keera.connect.key", state.key.id, { lasting: true });
         redraw();
       },
     },
@@ -494,7 +497,7 @@ function step(n, title, body) {
  *  The fallback is this page's own origin plus the inference prefix, because
  *  the panel and the inference API are one listener: whatever address reached
  *  this screen reaches the gateway too. */
-export function defaultBase(ctx) {
+function defaultBase(ctx) {
   const declared = ctx.state.me.gateway_url;
   if (declared) return declared.replace(/\/+$/, "");
   return location.origin + "/api";
@@ -512,6 +515,6 @@ function title(alias) {
   return alias
     .split(/[-_.\s]+/)
     .filter(Boolean)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .map(capitalise)
     .join(" ");
 }

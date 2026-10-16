@@ -9,10 +9,11 @@ import {
   money,
   amount,
   plural,
-  icon,
-  icons,
-  RANGES as SHARED_RANGES,
   rangePicker,
+  remembered,
+  remember,
+  RANGES as SHARED_RANGES,
+  csvButton,
 } from "../ui.js";
 import { orgNameOf } from "./orgs.js";
 
@@ -44,9 +45,9 @@ const RANGES = [
 export async function usageView(ctx) {
   const groups =
     !ctx.orgID && ctx.state.me.unrestricted ? [ORG_GROUP, ...GROUPS] : GROUPS;
-  const stored = sessionStorage.getItem("keera.usage.group");
+  const stored = remembered("keera.usage.group");
   const groupBy = groups.some((g) => g.key === stored) ? stored : "project";
-  const since = sessionStorage.getItem("keera.usage.range") || "720h";
+  const since = remembered("keera.usage.range") || "720h";
 
   const res = await api.usage(ctx.orgID, groupBy, since);
   const rows = res.data || [];
@@ -80,7 +81,7 @@ export async function usageView(ctx) {
           {
             "aria-pressed": String(g.key === groupBy),
             onClick: () => {
-              sessionStorage.setItem("keera.usage.group", g.key);
+              remember("keera.usage.group", g.key);
               ctx.reload();
             },
           },
@@ -88,24 +89,16 @@ export async function usageView(ctx) {
         ),
       ),
     ),
-    h("div", { style: { flex: 1 } }),
+    h("div", { class: "spacer" }),
     rangePicker(ctx, since, { ranges: RANGES, key: "keera.usage.range" }),
     // A chargeback is reconciled in a spreadsheet. A report that cannot leave
     // the panel is a report somebody re-types by hand.
-    h(
-      "button",
-      {
-        class: "btn",
-        title: "Download this report as CSV",
-        onClick: () =>
-          api.download("/v1/usage", {
-            org_id: ctx.orgID,
-            group_by: groupBy,
-            since,
-          }),
-      },
-      icon(icons.download),
-      "CSV",
+    csvButton("Download this report as CSV", () =>
+      api.download("/v1/usage", {
+        org_id: ctx.orgID,
+        group_by: groupBy,
+        since,
+      }),
     ),
   );
 
@@ -253,7 +246,7 @@ export async function usageView(ctx) {
           "div",
           { class: "card-body row" },
           h("strong", {}, "Total"),
-          h("div", { style: { flex: 1 } }),
+          h("div", { class: "spacer" }),
           h(
             "span",
             { class: "muted" },

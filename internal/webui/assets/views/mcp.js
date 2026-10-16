@@ -6,15 +6,12 @@ import { api } from "../api.js";
 import {
   h,
   table,
-  modal,
-  toast,
   pill,
   num,
   ms,
-  icon,
   icons,
+  iconButton,
   copyText,
-  showError,
   field,
   aliasProblem,
   takenProblem,
@@ -26,6 +23,8 @@ import {
   rowActions,
   listHead,
   sectionHead,
+  dash,
+  formModal,
 } from "../ui.js";
 import { toolCallTable } from "./tools.js";
 import { chooseOrg } from "./orgs.js";
@@ -75,11 +74,7 @@ export async function mcpView(ctx) {
           { class: "stack" },
           h("strong", { class: "mono" }, m.alias),
           m.description
-            ? h(
-                "span",
-                { class: "faint", style: { fontSize: "11.5px" } },
-                m.description,
-              )
+            ? h("span", { class: "faint small" }, m.description)
             : null,
         ),
     },
@@ -90,15 +85,8 @@ export async function mcpView(ctx) {
           "span",
           { class: "row-tight" },
           h("span", { class: "mono" }, `${base}/mcp/${m.alias}`),
-          h(
-            "button",
-            {
-              class: "btn btn-sm",
-              title: "Copy",
-              "aria-label": "Copy",
-              onClick: () => copyText(`${base}/mcp/${m.alias}`),
-            },
-            icon(icons.copy),
+          iconButton(icons.copy, "Copy", () =>
+            copyText(`${base}/mcp/${m.alias}`),
           ),
         ),
     },
@@ -132,7 +120,7 @@ export async function mcpView(ctx) {
             "Clients lose access to its tools. Its call log is kept. " +
             "To pause it instead, disable it.",
           confirmLabel: "Delete server",
-          remove: () => api.deleteMCPServer(m.alias, m.org_id),
+          remove: () => api.deleteMCPServer(m.org_id, m.alias),
         }),
     });
   }
@@ -221,7 +209,7 @@ export async function mcpView(ctx) {
 // countPill is a count that matters only when it is not zero, so zero fades
 // out and anything else stands out.
 function countPill(n, tone) {
-  return n ? pill(num(n), tone) : h("span", { class: "faint" }, "-");
+  return n ? pill(num(n), tone) : dash();
 }
 
 // callsOf is how many calls one server's tools had.
@@ -275,12 +263,10 @@ function editServer(ctx, existing) {
     type: "checkbox",
     checked: m.enabled !== false,
   });
-  const err = h("div");
 
   const body = h(
     "form",
     { onSubmit: (e) => e.preventDefault() },
-    err,
     field("Alias", alias, "Used in the address clients connect to."),
     field("Endpoint", url, "The server's Streamable HTTP address."),
     field("Description", description, "What the server is for, in a sentence."),
@@ -311,64 +297,38 @@ function editServer(ctx, existing) {
     h("label", { class: "row-tight" }, enabled, "Serve this server"),
   );
 
-  modal({
+  formModal({
     title: existing ? `Edit ${m.alias}` : "Add MCP server",
     body,
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Cancel"),
-      h(
-        "button",
-        {
-          class: "btn btn-primary",
-          onClick: async (e) => {
-            const name = alias.value.trim();
-            const problem = existing ? "" : aliasProblem(name);
-            if (problem) return showError(err, problem);
-            if (!url.value.trim()) {
-              return showError(err, "The server's address is required.");
-            }
-            // Absent unless the administrator typed one or asked for the stored
-            // one to go: sending "" on every save would wipe it.
-            let credential;
-            if (clearKey && clearKey.checked) credential = "";
-            else if (apiKey.value) credential = apiKey.value;
-            const button = e.currentTarget;
-            button.disabled = true;
-            try {
-              if (!existing) {
-                const taken = takenProblem(
-                  (await api.mcpServers(orgID)).data,
-                  name,
-                  "MCP server",
-                );
-                if (taken) {
-                  showError(err, taken);
-                  button.disabled = false;
-                  return;
-                }
-              }
-              await api.putMCPServer(
-                name,
-                {
-                  url: url.value.trim(),
-                  description: description.value.trim(),
-                  auth_header: authHeader.value.trim(),
-                  enabled: enabled.checked,
-                  ...(credential === undefined ? {} : { api_key: credential }),
-                },
-                orgID,
-              );
-              close();
-              toast(existing ? "MCP server saved" : "MCP server added", "good");
-              ctx.reload();
-            } catch (ex) {
-              showError(err, ex.message);
-              button.disabled = false;
-            }
-          },
-        },
-        !existing ? "Add MCP server" : "Save",
-      ),
-    ],
+    submitLabel: existing ? "Save" : "Add MCP server",
+    done: existing ? "MCP server saved" : "MCP server added",
+    ctx,
+    submit: async () => {
+      const name = alias.value.trim();
+      const problem = existing ? "" : aliasProblem(name);
+      if (problem) throw new Error(problem);
+      if (!url.value.trim())
+        throw new Error("The server's address is required.");
+      // Absent unless the administrator typed one or asked for the stored
+      // one to go: sending "" on every save would wipe it.
+      let credential;
+      if (clearKey && clearKey.checked) credential = "";
+      else if (apiKey.value) credential = apiKey.value;
+      if (!existing) {
+        const taken = takenProblem(
+          (await api.mcpServers(orgID)).data,
+          name,
+          "MCP server",
+        );
+        if (taken) throw new Error(taken);
+      }
+      await api.putMCPServer(orgID, name, {
+        url: url.value.trim(),
+        description: description.value.trim(),
+        auth_header: authHeader.value.trim(),
+        enabled: enabled.checked,
+        ...(credential === undefined ? {} : { api_key: credential }),
+      });
+    },
   });
 }

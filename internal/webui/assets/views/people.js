@@ -4,7 +4,6 @@ import { api } from "../api.js";
 import {
   h,
   table,
-  modal,
   toast,
   confirm,
   pill,
@@ -12,12 +11,14 @@ import {
   dateTime,
   icon,
   icons,
-  showError,
+  iconButton,
   plural,
   field,
   rowLink,
   idpMark,
   listHead,
+  dash,
+  formModal,
 } from "../ui.js";
 import { chooseOrg, orgNameOf } from "./orgs.js";
 import { userPasskeys, showPasskeyLink } from "./passkeys.js";
@@ -157,7 +158,7 @@ export async function peopleView(ctx) {
           const p = identityProvider(ctx.state.me, u);
           return p
             ? h("span", { class: "row nowrap", style: { gap: "6px" } }, ...p)
-            : h("span", { class: "faint" }, "-");
+            : dash();
         },
       },
       {
@@ -245,15 +246,11 @@ export async function peopleView(ctx) {
             { class: "row nowrap", style: { gap: "8px" } },
             passkeyButton(ctx, u),
             canAssign && !u.disabled_at
-              ? h(
-                  "button",
-                  {
-                    class: "btn btn-sm",
-                    title: "Edit this user's role",
-                    "aria-label": `Edit the role of ${u.email}`,
-                    onClick: () => changeRole(ctx, u),
-                  },
-                  icon(icons.pencil),
+              ? iconButton(
+                  icons.pencil,
+                  "Edit this user's role",
+                  () => changeRole(ctx, u),
+                  { label: `Edit the role of ${u.email}` },
                 )
               : !canAssign
                 ? h(
@@ -318,7 +315,6 @@ function addPerson(ctx) {
   });
   const canAssign = !ctx.state.me.roles_from_directory;
   const role = roleSelect("member");
-  const err = h("div");
   // Without a directory a passkey is the only way in, so it is the only
   // choice: the API refuses the other.
   const signIn = h(
@@ -334,7 +330,7 @@ function addPerson(ctx) {
     h("option", { value: "passkey", selected: !ctx.state.me.sso }, "A passkey"),
   );
 
-  modal({
+  formModal({
     title: "Add user",
     subtitle: canAssign
       ? ctx.state.me.passkeys
@@ -345,7 +341,6 @@ function addPerson(ctx) {
     body: h(
       "form",
       { onSubmit: (e) => e.preventDefault() },
-      err,
       field("Email", email),
       ctx.state.me.passkeys
         ? field(
@@ -355,94 +350,53 @@ function addPerson(ctx) {
               "it here when they leave. You get a set-up link to send them.",
           )
         : null,
+      // A line each: run together they read as one sentence.
       canAssign
-        ? h(
-            "div",
-            { class: "field" },
-            h("label", {}, "Role"),
+        ? field(
+            "Role",
             role,
-            // A line each. Joined into one run of prose they read as a single
-            // sentence about nobody in particular.
-            h(
-              "div",
-              { class: "hint" },
-              ASSIGNABLE.map((r) => h("div", {}, `${r.label}: ${r.note}`)),
-            ),
+            ASSIGNABLE.map((r) => h("div", {}, `${r.label}: ${r.note}`)),
           )
         : null,
     ),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Cancel"),
-      h(
-        "button",
-        {
-          class: "btn btn-primary",
-          onClick: async (e) => {
-            if (!email.value.trim()) return email.focus();
-            e.target.disabled = true;
-            try {
-              // Left empty, the control plane picks the way this gateway
-              // signs people in, as it does for `keera user add`.
-              const user = await api.addUser(
-                ctx.orgID || ctx.state.me.org_id,
-                email.value.trim(),
-                role.value,
-                ctx.state.me.passkeys ? signIn.value : "",
-              );
-              close();
-              toast("User added", "good");
-              ctx.reload();
-              if (user.passkey_link)
-                showPasskeyLink(user.email, user.passkey_link);
-            } catch (ex) {
-              showError(err, ex.message);
-              e.target.disabled = false;
-            }
-          },
-        },
-        "Add user",
-      ),
-    ],
+    submitLabel: "Add user",
+    done: "User added",
+    ctx,
+    submit: async (close) => {
+      if (!email.value.trim()) {
+        email.focus();
+        return false;
+      }
+      // Left empty, the control plane picks the way this gateway signs
+      // people in, as it does for `keera user add`.
+      const user = await api.addUser(
+        ctx.orgID || ctx.state.me.org_id,
+        email.value.trim(),
+        role.value,
+        ctx.state.me.passkeys ? signIn.value : "",
+      );
+      close();
+      if (user.passkey_link) showPasskeyLink(user.email, user.passkey_link);
+    },
   });
 }
 
 export function changeRole(ctx, user) {
   const role = roleSelect(user.role);
-  const err = h("div");
-  modal({
+  formModal({
     title: `Role for ${user.email}`,
     body: h(
       "form",
       { onSubmit: (e) => e.preventDefault() },
-      err,
       field(
         "Role",
         role,
         "This signs them out everywhere, so the new role applies at once.",
       ),
     ),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Cancel"),
-      h(
-        "button",
-        {
-          class: "btn btn-primary",
-          onClick: async (e) => {
-            e.target.disabled = true;
-            try {
-              await api.setUserRole(user.id, role.value);
-              close();
-              toast("Role saved", "good");
-              ctx.reload();
-            } catch (ex) {
-              showError(err, ex.message);
-              e.target.disabled = false;
-            }
-          },
-        },
-        "Save",
-      ),
-    ],
+    done: "Role saved",
+    ctx,
+    submit: () => api.setUserRole(user.id, role.value),
   });
 }
 

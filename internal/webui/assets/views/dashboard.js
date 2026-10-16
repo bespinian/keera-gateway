@@ -11,10 +11,11 @@ import {
   ms,
   tokens,
   go,
-  RANGES,
   currentRange,
   rangePicker,
   isAdmin,
+  banner,
+  rangeOf,
 } from "../ui.js";
 import { areaChart, barList } from "../chart.js";
 import {
@@ -62,14 +63,14 @@ export async function dashboardView(ctx) {
   const o = res.overview;
   const names = res.project_names || {};
 
-  ctx.setSubtitle(rangeLabel(since));
+  ctx.setSubtitle(rangeOf(since)?.long || "");
 
   const failRate = o.requests ? (o.failed / o.requests) * 100 : 0;
 
   const header = h(
     "div",
     { class: "row", style: { marginBottom: "16px" } },
-    h("div", { style: { flex: 1 } }),
+    h("div", { class: "spacer" }),
     rangePicker(ctx, since),
   );
 
@@ -79,13 +80,11 @@ export async function dashboardView(ctx) {
     stat(
       "Requests",
       compact(o.requests),
-      null,
       o.refused ? `${num(o.refused)} refused` : "none refused",
     ),
     stat(
       "Tokens",
       compact(o.input_tokens + o.output_tokens),
-      null,
       tokens(o.input_tokens, o.output_tokens),
     ),
     // What Claude plans paid for is not part of the cost, so it is said
@@ -97,7 +96,7 @@ export async function dashboardView(ctx) {
         ? `+ ${money(o.subscription_micros)} covered by Claude plans`
         : null,
     ),
-    stat("First token", ms(o.ttft_median_ms), null, `p95 ${ms(o.ttft_p95_ms)}`),
+    stat("First token", ms(o.ttft_median_ms), `p95 ${ms(o.ttft_p95_ms)}`),
   );
 
   const chartCard = h(
@@ -197,9 +196,8 @@ export async function dashboardView(ctx) {
   // four charts is a reader scrolling past them on every pass.
   if (o.requests === 0) {
     wrap.prepend(
-      h(
-        "div",
-        { class: "banner banner-info" },
+      banner(
+        "info",
         isAdmin(ctx)
           ? [
               "No traffic in this period yet. Issue a key under ",
@@ -239,9 +237,4 @@ function failureLink(ctx, ...content) {
     },
     ...content,
   );
-}
-
-function rangeLabel(since) {
-  const r = RANGES.find((x) => x.since === since);
-  return r ? r.long : "";
 }

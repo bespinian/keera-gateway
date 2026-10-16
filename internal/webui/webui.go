@@ -159,12 +159,8 @@ func Handler() http.Handler {
 		if zipped {
 			body, etag = f.gz, f.gzEtag
 		}
+		// ServeContent answers If-None-Match from the ETag set here.
 		setHeaders(w.Header(), f.contentType, etag, zipped)
-
-		if match := r.Header.Get("If-None-Match"); match != "" && strings.Contains(match, etag) {
-			w.WriteHeader(http.StatusNotModified)
-			return
-		}
 		http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(body))
 	})
 }

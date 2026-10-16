@@ -14,13 +14,17 @@ import {
   ago,
   dateTime,
   modal,
-  icon,
-  icons,
   empty,
   num,
   plural,
-  RANGES as SHARED_RANGES,
   rangePicker,
+  dash,
+  remembered,
+  remember,
+  RANGES as SHARED_RANGES,
+  loadMore,
+  banner,
+  csvButton,
 } from "../ui.js";
 
 const TONES = {
@@ -123,9 +127,9 @@ export async function auditView(ctx) {
   // The filter lives in the session rather than the URL: it is a reading
   // position, and it should survive stepping over to another screen and back.
   const filter = {
-    action: sessionStorage.getItem("keera.audit.action") || "",
-    actor: sessionStorage.getItem("keera.audit.actor") || "",
-    since: sessionStorage.getItem("keera.audit.since") ?? "720h",
+    action: remembered("keera.audit.action") || "",
+    actor: remembered("keera.audit.actor") || "",
+    since: remembered("keera.audit.since") ?? "720h",
   };
 
   const res = await api.audit({
@@ -141,33 +145,25 @@ export async function auditView(ctx) {
   ctx.setSubtitle(describe(filter, entries.length));
 
   const set = (key, value) => {
-    sessionStorage.setItem("keera.audit." + key, value);
+    remember("keera.audit." + key, value);
     ctx.reload();
   };
 
   const head = h(
     "div",
     { class: "section-head" },
-    h("div", { style: { flex: 1 } }),
+    h("div", { class: "spacer" }),
     rangePicker(ctx, filter.since, {
       ranges: RANGES,
       key: "keera.audit.since",
     }),
-    h(
-      "button",
-      {
-        class: "btn",
-        title: "Download all matching entries as CSV",
-        onClick: () =>
-          api.download("/v1/audit", {
-            org_id: ctx.orgID,
-            action: filter.action,
-            actor: filter.actor,
-            since: filter.since,
-          }),
-      },
-      icon(icons.download),
-      "CSV",
+    csvButton("Download all matching entries as CSV", () =>
+      api.download("/v1/audit", {
+        org_id: ctx.orgID,
+        action: filter.action,
+        actor: filter.actor,
+        since: filter.since,
+      }),
     ),
   );
 
@@ -194,8 +190,8 @@ export async function auditView(ctx) {
           {
             class: "btn btn-quiet btn-sm",
             onClick: () => {
-              sessionStorage.removeItem("keera.audit.action");
-              sessionStorage.removeItem("keera.audit.actor");
+              remember("keera.audit.action", null);
+              remember("keera.audit.actor", null);
               ctx.reload();
             },
           },
@@ -231,62 +227,36 @@ export async function auditView(ctx) {
 
   const wrap = h("div", {}, head, filters, body);
 
-  // Paging adds to the one table rather than replacing it, so somebody reading
-  // backwards through a day keeps everything they have already read on the
-  // screen.
   if (entries.length === PAGE) {
     let before = res.next_before;
-    const more = h(
-      "button",
-      {
-        class: "btn",
-        onClick: async () => {
-          more.disabled = true;
-          more.textContent = "Loading…";
-          try {
-            const next = await api.audit({
-              org_id: ctx.orgID,
-              limit: PAGE,
-              before,
-              action: filter.action,
-              actor: filter.actor,
-              since: filter.since,
-            });
-            const rows = next.data || [];
-            entries.push(...rows);
-            list.redraw();
-            before = next.next_before;
-            if (rows.length < PAGE) {
-              moreWrap.replaceChildren(
-                h("div", { class: "hint" }, "That is the whole log."),
-              );
-              return;
-            }
-          } catch (ex) {
-            moreWrap.append(
-              h("div", { class: "banner banner-bad" }, ex.message),
-            );
-          } finally {
-            more.disabled = false;
-            more.textContent = `Load ${PAGE} more`;
-          }
+    wrap.append(
+      loadMore(
+        PAGE,
+        async () => {
+          const next = await api.audit({
+            org_id: ctx.orgID,
+            limit: PAGE,
+            before,
+            action: filter.action,
+            actor: filter.actor,
+            since: filter.since,
+          });
+          const rows = next.data || [];
+          entries.push(...rows);
+          list.redraw();
+          before = next.next_before;
+          return rows.length;
         },
-      },
-      `Load ${PAGE} more`,
+        "That is the whole log.",
+      ),
     );
-    const moreWrap = h(
-      "div",
-      { style: { marginTop: "12px", textAlign: "center" } },
-      more,
-    );
-    wrap.append(moreWrap);
   }
 
   if (!ctx.state.me.sso) {
     wrap.append(
-      h(
-        "div",
-        { class: "banner banner-warn", style: { marginTop: "16px" } },
+      banner(
+        "warn",
+        { style: { marginTop: "16px" } },
         "No identity provider is set up, so changes show as " +
           '"operator@localhost" or "operator key", not as a person. Set up ' +
           "single sign-on to see names here.",
@@ -375,7 +345,7 @@ function auditTable(entries) {
                 { class: "mono muted", style: { fontSize: "12px" } },
                 e.target_id,
               )
-            : h("span", { class: "faint" }, "-"),
+            : dash(),
       },
       {
         label: "",

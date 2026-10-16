@@ -5,11 +5,15 @@ import {
   h,
   icon,
   icons,
+  iconButton,
   brandMark,
-  clear,
   replace,
   toast,
   isAdmin,
+  remembered,
+  remember,
+  banner,
+  capitalise,
 } from "./ui.js";
 import { signIn, passkeySignInFlow } from "./views/signin.js";
 import { signUp, signUpFlow } from "./views/signup.js";
@@ -300,7 +304,7 @@ function navGroups(items) {
  *  deployment does not use. Remembered, because somebody who opened them once
  *  is somebody who is setting one up. */
 function advancedShown() {
-  return localStorage.getItem("keera.nav.more") === "shown";
+  return remembered("keera.nav.more", { lasting: true }) === "shown";
 }
 
 /** inUse reports whether the deployment has any of the thing a route is for.
@@ -388,7 +392,7 @@ window.addEventListener("popstate", () => renderRoute());
 /* ---------------------------------------------------------------- theme */
 
 function currentTheme() {
-  return localStorage.getItem("keera.theme") || "system";
+  return remembered("keera.theme", { lasting: true }) || "system";
 }
 
 function applyTheme(theme) {
@@ -400,9 +404,9 @@ function applyTheme(theme) {
 function cycleTheme() {
   const order = ["system", "light", "dark"];
   const next = order[(order.indexOf(currentTheme()) + 1) % order.length];
-  localStorage.setItem("keera.theme", next);
+  remember("keera.theme", next, { lasting: true });
   applyTheme(next);
-  toast(`Theme: ${next[0].toUpperCase() + next.slice(1)}`);
+  toast(`Theme: ${capitalise(next)}`);
 }
 
 /* ---------------------------------------------------------------- shell */
@@ -415,7 +419,7 @@ let collapseButton;
 // The sidebar collapses to a strip of icons. The choice is remembered, because
 // someone who took the room back wants it back on their next visit too.
 function navCollapsed() {
-  return localStorage.getItem("keera.nav") === "collapsed";
+  return remembered("keera.nav", { lasting: true }) === "collapsed";
 }
 
 function applyNavCollapsed(collapsed) {
@@ -428,7 +432,9 @@ function applyNavCollapsed(collapsed) {
 
 function toggleNav() {
   const collapsed = !navCollapsed();
-  localStorage.setItem("keera.nav", collapsed ? "collapsed" : "expanded");
+  remember("keera.nav", collapsed ? "collapsed" : "expanded", {
+    lasting: true,
+  });
   applyNavCollapsed(collapsed);
 }
 
@@ -500,10 +506,9 @@ function moreItem() {
       class: "nav-item nav-more",
       title,
       onClick: () => {
-        localStorage.setItem(
-          "keera.nav.more",
-          advancedShown() ? "hidden" : "shown",
-        );
+        remember("keera.nav.more", advancedShown() ? "hidden" : "shown", {
+          lasting: true,
+        });
         renderShell();
         renderRoute();
       },
@@ -609,27 +614,11 @@ function renderShell() {
           h("div", { class: "account-role" }, state.me.role),
         ),
         state.me.passkey_account
-          ? h(
-              "button",
-              {
-                class: "btn btn-quiet btn-sm",
-                title: "Your passkeys",
-                "aria-label": "Your passkeys",
-                onClick: managePasskeys,
-              },
-              icon(icons.passkey),
-            )
+          ? iconButton(icons.passkey, "Your passkeys", managePasskeys, {
+              quiet: true,
+            })
           : null,
-        h(
-          "button",
-          {
-            class: "btn btn-quiet btn-sm",
-            title: "Sign out",
-            "aria-label": "Sign out",
-            onClick: signOut,
-          },
-          icon(icons.signout),
-        ),
+        iconButton(icons.signout, "Sign out", signOut, { quiet: true }),
       ),
     ),
   );
@@ -662,15 +651,12 @@ function renderTopbar() {
 }
 
 function topbar() {
-  const menu = h(
-    "button",
-    {
-      class: "btn btn-quiet btn-sm nav-toggle",
-      "aria-controls": "sidebar",
-      onClick: () => setDrawer(!drawerOpen),
-    },
-    icon(icons.menu),
-  );
+  // applyDrawerButton keeps the label in step with the drawer.
+  const menu = iconButton(icons.menu, "Menu", () => setDrawer(!drawerOpen), {
+    quiet: true,
+    cls: "nav-toggle",
+    "aria-controls": "sidebar",
+  });
   applyDrawerButton(menu);
 
   const bar = h(
@@ -731,16 +717,7 @@ function topbar() {
   }
 
   bar.append(
-    h(
-      "button",
-      {
-        class: "btn btn-quiet btn-sm",
-        title: "Switch theme",
-        "aria-label": "Switch theme",
-        onClick: cycleTheme,
-      },
-      icon(icons.theme),
-    ),
+    iconButton(icons.theme, "Switch theme", cycleTheme, { quiet: true }),
   );
   return bar;
 }
@@ -871,11 +848,7 @@ async function renderRoute() {
     }
     replace(
       outlet,
-      h(
-        "div",
-        { class: "banner banner-bad" },
-        err.message || "Something went wrong loading this page.",
-      ),
+      banner("bad", err.message || "Something went wrong loading this page."),
     );
   }
 }
@@ -900,7 +873,7 @@ async function signOut() {
 
 async function boot() {
   applyTheme(currentTheme());
-  clear(root);
+  root.replaceChildren();
   root.classList.add("boot");
   root.append(h("div", { class: "boot-mark" }));
 
@@ -927,11 +900,7 @@ async function boot() {
         h(
           "div",
           { class: "signin-card" },
-          h(
-            "div",
-            { class: "banner banner-bad" },
-            err.message || "The control plane is unreachable.",
-          ),
+          banner("bad", err.message || "The control plane is unreachable."),
           h("button", { class: "btn", onClick: boot }, "Try again"),
         ),
       ),
@@ -948,9 +917,8 @@ async function boot() {
     } catch {
       state.orgs = [];
     }
-    const remembered = localStorage.getItem("keera.org") || "";
-    if (remembered && state.orgs.some((o) => o.id === remembered))
-      state.orgID = remembered;
+    const last = remembered("keera.org", { lasting: true }) || "";
+    if (last && state.orgs.some((o) => o.id === last)) state.orgID = last;
     else if (!state.orgID && state.orgs.length === 1)
       state.orgID = state.orgs[0].id;
   }
@@ -1006,8 +974,8 @@ function leaveDetail() {
  *  sidebar for it. The caller then draws the screen. */
 async function setOrg(id) {
   state.orgID = id;
-  if (id) localStorage.setItem("keera.org", id);
-  else localStorage.removeItem("keera.org");
+  if (id) remember("keera.org", id, { lasting: true });
+  else remember("keera.org", null, { lasting: true });
   await loadSetup();
   renderShell();
 }

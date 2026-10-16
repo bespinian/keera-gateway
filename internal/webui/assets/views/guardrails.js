@@ -10,15 +10,15 @@ import { api } from "../api.js";
 import {
   h,
   modal,
-  toast,
   money,
   num,
   compact,
   pill,
-  showError,
   readRow,
   plural,
   field,
+  formModal,
+  banner,
 } from "../ui.js";
 import { orgNameOf } from "./orgs.js";
 
@@ -98,9 +98,8 @@ export async function openGuardrails(
   if (limits === null) {
     modal({
       title: `Guardrails for ${name}`,
-      body: h(
-        "div",
-        { class: "banner banner-bad" },
+      body: banner(
+        "bad",
         "Could not load these guardrails. Saving now would replace them " +
           "with only what this dialog shows. Try again shortly.",
       ),
@@ -189,13 +188,33 @@ const OWNED_HERE = new Set([
   "allowed_tools",
 ]);
 
+// LIMITS names the limits the form and the read-only view both show, in the
+// same words.
+const LIMITS = {
+  rpm: {
+    label: "Requests per minute",
+    hint: "Per gateway replica, unless the replicas share a Redis.",
+  },
+  tpm: {
+    label: "Tokens per minute",
+    hint: "Counted when each request finishes.",
+  },
+  max_output_tokens: {
+    label: "Maximum output tokens per request",
+    hint: "Requests asking for more are capped to this, not refused.",
+  },
+  system_prompt: {
+    label: "System prompt",
+    hint: "Added before the messages on every chat request.",
+  },
+};
+
 function render(
   ctx,
   { scope, id, name, models, filters, ceilings, limits, orgID, orgName },
 ) {
   const meta = SCOPES[scope] || SCOPES.project;
   const lim = limits || {};
-  const err = h("div");
 
   const allowAll = h("input", {
     type: "checkbox",
@@ -228,7 +247,7 @@ function render(
             },
             "router",
           )
-        : h("span", { class: "faint", style: { fontSize: "11.5px" } }, m.kind),
+        : h("span", { class: "faint small" }, m.kind),
       allowedAbove(ceilings, m.alias)
         ? null
         : h("span", { class: "pill pill-warn" }, "Blocked above"),
@@ -321,7 +340,7 @@ function render(
             f.mode === "gate" || f.mode === "pattern" ? f.mode : "rewrite",
           ),
           f.shadow ? pill("Shadow", "warn") : null,
-          h("div", { style: { flex: 1 } }),
+          h("div", { class: "spacer" }),
           h(
             "button",
             {
@@ -383,13 +402,7 @@ function render(
       // attaching a filter in shadow costs this scope a second generation per
       // request and protects it from nothing.
       f.shadow ? pill("Shadow", "warn") : null,
-      f.description
-        ? h(
-            "span",
-            { class: "faint", style: { fontSize: "11.5px" } },
-            f.description,
-          )
-        : null,
+      f.description ? h("span", { class: "faint small" }, f.description) : null,
     );
   });
   renderOrder();
@@ -417,7 +430,7 @@ function render(
     ),
   );
 
-  modal({
+  formModal({
     wide: true,
     title: `${meta.title} - ${name}`,
     subtitle:
@@ -425,24 +438,23 @@ function render(
     body: h(
       "form",
       {},
-      err,
       h("p", { class: "muted", style: { marginTop: 0 } }, meta.lead),
       ceilingSummary(ctx, ceilings),
       section("Rate limits"),
       h(
         "div",
         { class: "field-row" },
-        field("Requests per minute", rpm, [
-          "Per gateway replica, unless the replicas share a Redis.",
+        field(LIMITS.rpm.label, rpm, [
+          LIMITS.rpm.hint,
           ceilingNote(ceilings, "rpm", num),
         ]),
-        field("Tokens per minute", tpm, [
-          "Counted when each request finishes.",
+        field(LIMITS.tpm.label, tpm, [
+          LIMITS.tpm.hint,
           ceilingNote(ceilings, "tpm", compact),
         ]),
       ),
-      field("Maximum output tokens per request", maxOut, [
-        "Requests asking for more are capped to this, not refused.",
+      field(LIMITS.max_output_tokens.label, maxOut, [
+        LIMITS.max_output_tokens.hint,
         ceilingNote(ceilings, "max_output_tokens", compact),
       ]),
       section("Cost"),
@@ -452,9 +464,9 @@ function render(
         ceilingNote(ceilings, "budget_micros", money),
       ]),
       section("Every request", "Applied to each request."),
-      field("System prompt", systemPrompt, [
-        "Added before the messages on every chat request. The " +
-          "organisation's prompt is sent first, then the project's.",
+      field(LIMITS.system_prompt.label, systemPrompt, [
+        LIMITS.system_prompt.hint +
+          " The organisation's prompt is sent first, then the project's.",
         inheritedPrompts(ceilings),
       ]),
       h(
@@ -515,69 +527,50 @@ function render(
         ),
       ),
     ),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Cancel"),
-      h(
-        "button",
-        {
-          class: "btn btn-primary",
-          onClick: async (e) => {
-            const button = e.currentTarget;
-            button.disabled = true;
-            // A PUT replaces the whole guardrail, and this dialog shows nine
-            // of its fields. Everything else it holds - the sandbox half, set
-            // from the command line - is carried through unchanged, so saving
-            // a budget here does not quietly drop a sandbox quota set there.
-            const out = {};
-            for (const [k, v] of Object.entries(lim)) {
-              if (!OWNED_HERE.has(k)) out[k] = v;
-            }
-            if (!allowAll.checked) {
-              // An alias the dialog has no box for, such as a disabled model,
-              // is kept. Nobody unticked it.
-              const shown = new Set(models.map((m) => m.alias));
-              out.allowed_models = [
-                ...boxes
-                  .filter((b) => b.querySelector("input").checked)
-                  .map((b) => b.querySelector("input").value),
-                ...(lim.allowed_models || []).filter((a) => !shown.has(a)),
-              ];
-            }
-            const put = (key, el) => {
-              const v = parseInt(el.value, 10);
-              if (Number.isFinite(v) && v > 0) out[key] = v;
-            };
-            put("rpm", rpm);
-            put("tpm", tpm);
-            put("max_output_tokens", maxOut);
-            const prompt = systemPrompt.value.trim();
-            if (prompt) out.system_prompt = prompt;
-            if (picked.length) out.filters = [...picked];
-            if (!allTools.checked) {
-              out.allowed_tools = toolList.value
-                .split(",")
-                .map((t) => t.trim())
-                .filter(Boolean);
-            }
-            const b = parseFloat(budget.value);
-            if (Number.isFinite(b) && b > 0) {
-              out.budget_micros = Math.round(b * 1e6);
-              out.budget_period = period.value;
-            }
-            try {
-              await api.putGuardrails(scope, id, out);
-              close();
-              toast("Guardrails saved", "good");
-              ctx.reload();
-            } catch (ex) {
-              showError(err, ex.message);
-              button.disabled = false;
-            }
-          },
-        },
-        "Save",
-      ),
-    ],
+    done: "Guardrails saved",
+    ctx,
+    submit: () => {
+      // A PUT replaces the whole guardrail, and this dialog shows nine of its
+      // fields. The rest, such as the sandbox half set from the command line,
+      // is carried through unchanged.
+      const out = {};
+      for (const [k, v] of Object.entries(lim)) {
+        if (!OWNED_HERE.has(k)) out[k] = v;
+      }
+      if (!allowAll.checked) {
+        // An alias the dialog has no box for, such as a disabled model, is
+        // kept. Nobody unticked it.
+        const shown = new Set(models.map((m) => m.alias));
+        out.allowed_models = [
+          ...boxes
+            .filter((b) => b.querySelector("input").checked)
+            .map((b) => b.querySelector("input").value),
+          ...(lim.allowed_models || []).filter((a) => !shown.has(a)),
+        ];
+      }
+      const put = (key, el) => {
+        const v = parseInt(el.value, 10);
+        if (Number.isFinite(v) && v > 0) out[key] = v;
+      };
+      put("rpm", rpm);
+      put("tpm", tpm);
+      put("max_output_tokens", maxOut);
+      const prompt = systemPrompt.value.trim();
+      if (prompt) out.system_prompt = prompt;
+      if (picked.length) out.filters = [...picked];
+      if (!allTools.checked) {
+        out.allowed_tools = toolList.value
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean);
+      }
+      const b = parseFloat(budget.value);
+      if (Number.isFinite(b) && b > 0) {
+        out.budget_micros = Math.round(b * 1e6);
+        out.budget_period = period.value;
+      }
+      return api.putGuardrails(scope, id, out);
+    },
   });
 }
 
@@ -617,22 +610,10 @@ function renderReadOnly(
       h(
         "div",
         { class: "field-row" },
-        readRow(
-          "Requests per minute",
-          tightest(levels, "rpm", num),
-          "Per gateway replica, unless the replicas share a Redis.",
-        ),
-        readRow(
-          "Tokens per minute",
-          tightest(levels, "tpm", compact),
-          "Counted when each request finishes.",
-        ),
+        limitRow(levels, "rpm", num),
+        limitRow(levels, "tpm", compact),
       ),
-      readRow(
-        "Maximum output tokens per request",
-        tightest(levels, "max_output_tokens", compact),
-        "Requests asking for more are capped to this, not refused.",
-      ),
+      limitRow(levels, "max_output_tokens", compact),
       readRow(
         "Budget",
         budgetsValue(levels),
@@ -640,9 +621,9 @@ function renderReadOnly(
           "refused until the period resets.",
       ),
       readRow(
-        "System prompt",
+        LIMITS.system_prompt.label,
         promptsValue(levels),
-        "Added before the messages on every chat request.",
+        LIMITS.system_prompt.hint,
       ),
       readRow(
         "Filters",
@@ -666,6 +647,15 @@ function renderReadOnly(
       h("button", { class: "btn", onClick: close }, "Close"),
     ],
   });
+}
+
+// limitRow is one of LIMITS as it applies after every level.
+function limitRow(levels, key, format) {
+  return readRow(
+    LIMITS[key].label,
+    tightest(levels, key, format),
+    LIMITS[key].hint,
+  );
 }
 
 /** toolsValue is what each level allows of the MCP tools. They narrow each
@@ -871,9 +861,8 @@ function inheritedFilters(ceilings) {
 function ceilingSummary(ctx, ceilings) {
   const said = ceilings.filter((c) => hasAny(c.limits));
   if (!said.length) return null;
-  return h(
-    "div",
-    { class: "banner banner-info" },
+  return banner(
+    "info",
     "Limited by ",
     said.map((c, i) => [
       i > 0 ? ", then " : null,

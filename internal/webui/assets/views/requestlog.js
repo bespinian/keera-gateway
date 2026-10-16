@@ -25,9 +25,15 @@ import {
   ago,
   dateTime,
   tokens,
-  icon,
-  icons,
   liveControl,
+  dash,
+  remembered,
+  remember,
+  loadMore,
+  banner,
+  csvButton,
+  followRequests,
+  throttled,
 } from "../ui.js";
 import { outcomeMeaning, oneLine } from "../status.js";
 import { flameChart } from "../flame.js";
@@ -38,6 +44,8 @@ import {
   ranking,
   rankedNote,
   readNarrowing,
+  namesFrom,
+  addNames,
 } from "./logfilters.js";
 
 const PAGE = 100;
@@ -98,7 +106,7 @@ export async function requestLog(
 ) {
   const outcome = filters ? "" : currentOutcome();
   const narrowed = filters ? readNarrowing(ctx) : {};
-  const searchedID = filters ? sessionStorage.getItem(ID_KEY) || "" : "";
+  const searchedID = filters ? remembered(ID_KEY) || "" : "";
   const rank = ranking(ctx, SORT_KEY);
   // The scope wins over the narrowing: a project's own screen is about that project
   // whatever was last picked on the dashboard.
@@ -122,11 +130,7 @@ export async function requestLog(
     return h(
       "div",
       { style: { marginTop: "24px" } },
-      h(
-        "div",
-        { class: "banner banner-bad" },
-        err.message || "The request log could not be read.",
-      ),
+      banner("bad", err.message || "The request log could not be read."),
     );
   }
 
@@ -139,11 +143,7 @@ export async function requestLog(
     interrupted: 0,
   };
   const facets = res.filters || {};
-  const names = {
-    keys: res.key_names || {},
-    projects: res.project_names || {},
-    users: res.user_names || {},
-  };
+  const names = namesFrom(res);
   const anyNarrowed = Object.values(narrowed).some(Boolean) || !!searchedID;
 
   const wrap = h("div", { style: { marginTop: "24px" } });
@@ -172,19 +172,12 @@ export async function requestLog(
       "div",
       { class: "section-head" },
       title ? h("h2", {}, title) : null,
-      h("div", { style: { flex: 1 } }),
+      h("div", { class: "spacer" }),
       seg ? seg.el : null,
       watch ? watch.el : null,
       trail,
-      h(
-        "button",
-        {
-          class: "btn",
-          title: "Download all matching requests as CSV",
-          onClick: () => api.download("/v1/requests", params),
-        },
-        icon(icons.download),
-        "CSV",
+      csvButton("Download all matching requests as CSV", () =>
+        api.download("/v1/requests", params),
       ),
     ),
   );
@@ -247,51 +240,23 @@ export async function requestLog(
     wrap.append(rankedNote(PAGE, "requests"));
   }
 
-  // Paging adds to the one table rather than replacing it, so somebody reading
-  // backwards through an incident keeps what they have already read on the
-  // screen.
   if (rows.length === PAGE && rank.by === "") {
     let before = res.next_before;
-    const more = h(
-      "button",
-      {
-        class: "btn",
-        onClick: async () => {
-          more.disabled = true;
-          more.textContent = "Loading…";
-          try {
-            const next = await api.requests({ ...params, before });
-            const page = next.data || [];
-            Object.assign(names.keys, next.key_names || {});
-            Object.assign(names.projects, next.project_names || {});
-            Object.assign(names.users, next.user_names || {});
-            rows.push(...page);
-            log.redraw();
-            before = next.next_before;
-            if (page.length < PAGE) {
-              moreWrap.replaceChildren(
-                h("div", { class: "hint" }, "That is the whole period."),
-              );
-              return;
-            }
-          } catch (ex) {
-            moreWrap.append(
-              h("div", { class: "banner banner-bad" }, ex.message),
-            );
-          } finally {
-            more.disabled = false;
-            more.textContent = `Load ${PAGE} more`;
-          }
+    wrap.append(
+      loadMore(
+        PAGE,
+        async () => {
+          const next = await api.requests({ ...params, before });
+          const page = next.data || [];
+          addNames(names, next);
+          rows.push(...page);
+          log.redraw();
+          before = next.next_before;
+          return page.length;
         },
-      },
-      `Load ${PAGE} more`,
+        "That is the whole period.",
+      ),
     );
-    const moreWrap = h(
-      "div",
-      { style: { marginTop: "12px", textAlign: "center" } },
-      more,
-    );
-    wrap.append(moreWrap);
   }
   attachLive(log);
   return wrap;
@@ -323,69 +288,16 @@ export async function requestLog(
       after: rows.length && !ranked ? rows[0].id : 0,
     };
 
-    let source = null;
-    let gone = false;
-    const close = () => {
-      if (source) source.close();
-      source = null;
-    };
-    ctx.onTeardown(() => {
-      gone = true;
-      close();
-    });
-
     // A ranked page is asked for again rather than added to: where a new
     // request belongs in it is for the control plane to say. It runs at most
     // once every REFRESH_MS, so a busy log costs one query per interval.
-    let busy = false;
-    let again = false;
-    async function rerank() {
-      if (gone) return;
-      if (busy) {
-        again = true;
-        return;
-      }
-      busy = true;
-      try {
-        const next = await api.requests({ ...params, facets: "" });
-        Object.assign(names.keys, next.key_names || {});
-        Object.assign(names.projects, next.project_names || {});
-        Object.assign(names.users, next.user_names || {});
-        rows.splice(0, rows.length, ...(next.data || []));
-        log.redraw();
-      } catch {
-        // What is on the screen stays. The next request tries again.
-      }
-      setTimeout(() => {
-        busy = false;
-        if (again) {
-          again = false;
-          rerank();
-        }
-      }, REFRESH_MS);
-    }
-
-    const open = () => {
-      close();
-      watch.state("connecting");
-      source = api.requestStream(listen);
-      source.addEventListener("requests", (e) => {
-        watch.state("live");
-        arrived(JSON.parse(e.data));
-      });
-      source.addEventListener("open", () => watch.state("live"));
-      // An EventSource retries a dropped connection on its own and gives up
-      // only on a response it was refused - an expired session, a role that may
-      // no longer read this. Both are worth saying, and they are different
-      // sentences.
-      source.addEventListener("error", () => {
-        watch.state(
-          source && source.readyState === EventSource.CLOSED
-            ? "stopped"
-            : "connecting",
-        );
-      });
-    };
+    const rerank = throttled(async () => {
+      const next = await api.requests({ ...params, facets: "" });
+      addNames(names, next);
+      rows.splice(0, rows.length, ...(next.data || []));
+      log.redraw();
+    }, REFRESH_MS);
+    ctx.onTeardown(rerank.stop);
 
     function arrived(payload) {
       if (payload.next_after) listen.after = payload.next_after;
@@ -393,9 +305,7 @@ export async function requestLog(
       // Labels travel only when a row named something this screen opened too
       // early to know about - a key issued a minute ago, whose first request is
       // exactly what somebody is watching for.
-      Object.assign(names.keys, payload.key_names || {});
-      Object.assign(names.projects, payload.project_names || {});
-      Object.assign(names.users, payload.user_names || {});
+      addNames(names, payload);
 
       const fresh = payload.data || [];
       if (!fresh.length) return;
@@ -427,9 +337,9 @@ export async function requestLog(
       }, FRESH_MS);
     }
 
-    watch.onChange((on) => (on ? open() : (close(), watch.state("paused"))));
-    if (watch.on) open();
-    else watch.state("paused");
+    followRequests(ctx, watch, () => api.requestStream(listen), {
+      onRequests: arrived,
+    });
   }
 }
 
@@ -460,9 +370,7 @@ export function requestTable(ctx, rows, names, hide, opts = {}) {
           shrink: true,
           sortKey: (q) => q.alias,
           cell: (q) =>
-            q.alias
-              ? h("span", { class: "mono" }, q.alias)
-              : h("span", { class: "faint" }, "-"),
+            q.alias ? h("span", { class: "mono" }, q.alias) : dash(),
         },
     {
       // The outcome and, when there is one, what the client was told. The
@@ -490,8 +398,7 @@ export function requestTable(ctx, rows, names, hide, opts = {}) {
             ? h(
                 "span",
                 {
-                  class: "muted",
-                  style: { fontSize: "11.5px" },
+                  class: "muted small",
                   title: q.error,
                 },
                 oneLine(q.error, 90),
@@ -551,7 +458,7 @@ export function requestTable(ctx, rows, names, hide, opts = {}) {
               { class: "nowrap muted" },
               tokens(q.input_tokens, q.output_tokens),
             )
-          : h("span", { class: "faint" }, "-"),
+          : dash(),
     },
     {
       label: "Cost (CHF)",
@@ -570,7 +477,7 @@ export function requestTable(ctx, rows, names, hide, opts = {}) {
               // reconciled against an invoice by somebody who was not here.
               q.estimated ? h("span", { class: "faint" }, "~") : null,
             )
-          : h("span", { class: "faint" }, "-"),
+          : dash(),
     },
     {
       // First token rather than total: for a coding agent that is the latency
@@ -627,7 +534,7 @@ function idSearch(ctx, value) {
   const apply = (e) => {
     const id = e.target.value.trim();
     if (id === value) return;
-    sessionStorage.setItem(ID_KEY, id);
+    remember(ID_KEY, id);
     ctx.reload();
   };
   return h("input", {

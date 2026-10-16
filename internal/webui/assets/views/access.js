@@ -26,6 +26,8 @@ import {
   empty,
   plural,
   sectionHead,
+  dash,
+  banner,
 } from "../ui.js";
 import { oneLine, statusMeaning } from "../status.js";
 import { canRevoke, confirmRevoke, statePill } from "./keys.js";
@@ -65,9 +67,9 @@ export async function accessView(ctx) {
   );
   if (recent.length) {
     wrap.append(
-      h(
-        "div",
-        { class: "banner banner-warn", style: { marginBottom: "16px" } },
+      banner(
+        "warn",
+        { style: { marginBottom: "16px" } },
         `${num(recent.length)} ${plural(recent.length, "request was", "requests were")} refused or failed in the ` +
           `last 24 hours: ${statusMeaning(recent[0].status)[0].toLowerCase()}` +
           `${recent.some((f) => f.status !== recent[0].status) ? ", among others" : ""}. ` +
@@ -130,7 +132,7 @@ export async function accessView(ctx) {
           }),
           "Show revoked",
         ),
-        h("div", { style: { flex: 1 } }),
+        h("div", { class: "spacer" }),
       ),
     );
   }
@@ -316,7 +318,7 @@ function promptsSection(prompts) {
           { class: "stack", style: { gap: "4px" } },
           h(
             "span",
-            { class: "muted", style: { fontSize: "11.5px" } },
+            { class: "muted small" },
             `${whose(sc)}${sc.name ? ` (${sc.name})` : ""} sends:`,
           ),
           h("div", { class: "prompt-text" }, sc.system_prompt),
@@ -401,7 +403,7 @@ function scopeRow(sc) {
     { class: "row" },
     h("strong", {}, who),
     sc.name ? h("span", { class: "muted" }, sc.name) : null,
-    h("div", { style: { flex: 1 } }),
+    h("div", { class: "spacer" }),
     rateChips(sc),
   );
 
@@ -417,13 +419,13 @@ function scopeRow(sc) {
         meter(frac, tone),
         h(
           "span",
-          { class: "muted nowrap", style: { fontSize: "11.5px" } },
+          { class: "muted nowrap small" },
           `${Math.round(frac * 100)}%`,
         ),
       ),
       h(
         "span",
-        { class: "muted", style: { fontSize: "11.5px" } },
+        { class: "muted small" },
         `${money(sc.spend_micros)} of ${money(sc.budget_micros)} per ${sc.period}`,
         sc.resets_at ? ` · resets ${date(sc.resets_at)}` : "",
         frac >= 1 ? " · used up, so requests are refused until it resets" : "",
@@ -438,11 +440,7 @@ function rateChips(sc) {
   if (sc.rpm > 0) chips.push(`${num(sc.rpm)} req/min`);
   if (sc.tpm > 0) chips.push(`${num(sc.tpm)} tok/min`);
   if (!chips.length) return null;
-  return h(
-    "span",
-    { class: "muted nowrap", style: { fontSize: "11.5px" } },
-    chips.join(" · "),
-  );
+  return h("span", { class: "muted nowrap small" }, chips.join(" · "));
 }
 
 // refusalsCard is the answer to "my agent stopped working this afternoon". The
@@ -482,8 +480,7 @@ function refusalsCard(refusals, keys) {
             h(
               "span",
               {
-                class: "muted",
-                style: { fontSize: "11.5px" },
+                class: "muted small",
                 title: f.error || why,
               },
               f.error ? oneLine(f.error, 160) : why,
@@ -494,10 +491,7 @@ function refusalsCard(refusals, keys) {
       {
         label: "Model",
         shrink: true,
-        cell: (f) =>
-          f.alias
-            ? h("span", { class: "mono" }, f.alias)
-            : h("span", { class: "faint" }, "-"),
+        cell: (f) => (f.alias ? h("span", { class: "mono" }, f.alias) : dash()),
       },
       {
         label: "Key",

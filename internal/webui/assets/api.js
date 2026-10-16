@@ -26,7 +26,10 @@ export function setCsrf(token) {
   csrf = token || "";
 }
 
-async function request(method, path, body) {
+// request sends one call and decodes its answer. raw hands back the response
+// itself, for the one call whose body arrives token by token; a refusal is an
+// ApiError either way.
+async function request(method, path, body, { raw, signal } = {}) {
   const headers = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (csrf && method !== "GET") headers["X-CSRF-Token"] = csrf;
@@ -38,11 +41,14 @@ async function request(method, path, body) {
       headers,
       credentials: "same-origin",
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal,
     });
   } catch (e) {
+    if (e && e.name === "AbortError") throw e;
     throw new ApiError(0, "The control plane is unreachable.");
   }
 
+  if (raw && res.ok) return res;
   if (res.status === 204) return null;
 
   const text = await res.text();
@@ -54,54 +60,18 @@ async function request(method, path, body) {
       payload = null;
     }
   }
-  if (!res.ok) throw failure(res, payload);
+  if (!res.ok) {
+    const err = payload && payload.error ? payload.error : {};
+    throw new ApiError(
+      res.status,
+      err.message || `Request failed (${res.status}).`,
+      err.code,
+    );
+  }
   return payload;
 }
 
-// failure is the ApiError for a response that was not ok, shared so a plain
-// call and a stream report a refusal the same way.
-function failure(res, payload) {
-  const err = payload && payload.error ? payload.error : {};
-  return new ApiError(
-    res.status,
-    err.message || `Request failed (${res.status}).`,
-    err.code,
-  );
-}
-
 const get = (path) => request("GET", path);
-
-// stream posts and hands back the raw response instead of a decoded body, for
-// the one call whose body arrives token by token. A refusal still surfaces as
-// an ApiError, so a caller handles it the same way it handles every other.
-async function stream(path, body, signal) {
-  const headers = { "Content-Type": "application/json" };
-  if (csrf) headers["X-CSRF-Token"] = csrf;
-
-  let res;
-  try {
-    res = await fetch(url(path), {
-      method: "POST",
-      headers,
-      credentials: "same-origin",
-      body: JSON.stringify(body),
-      signal,
-    });
-  } catch (e) {
-    if (e && e.name === "AbortError") throw e;
-    throw new ApiError(0, "The control plane is unreachable.");
-  }
-  if (!res.ok) {
-    let payload = null;
-    try {
-      payload = JSON.parse(await res.text());
-    } catch {
-      payload = null;
-    }
-    throw failure(res, payload);
-  }
-  return res;
-}
 
 function query(params) {
   const q = new URLSearchParams();
@@ -111,6 +81,14 @@ function query(params) {
   const s = q.toString();
   return s ? "?" + s : "";
 }
+
+// path encodes each value put into it, so an id or a name is one segment.
+const path = (strings, ...values) =>
+  strings.reduce((s, part, i) => s + encodeURIComponent(values[i - 1]) + part);
+
+// inOrg is one of an organisation's things, such as a model, by name.
+const inOrg = (orgID, collection, name, rest = "") =>
+  path`/v1/${collection}/${name}` + rest + query({ org_id: orgID });
 
 export const api = {
   authConfig: () => get("/auth/config"),
@@ -152,31 +130,26 @@ export const api = {
       name,
       credential,
     }),
-  deletePasskey: (id) =>
-    request("DELETE", `/v1/passkeys/${encodeURIComponent(id)}`),
+  deletePasskey: (id) => request("DELETE", path`/v1/passkeys/${id}`),
   passkeyLink: (userID) =>
-    request("POST", `/v1/users/${encodeURIComponent(userID)}/passkey-link`),
+    request("POST", path`/v1/users/${userID}/passkey-link`),
 
   orgs: () => get("/v1/orgs"),
   createOrg: (name, emailDomain) =>
     request("POST", "/v1/orgs", { name, email_domain: emailDomain || "" }),
   updateOrg: (id, name, emailDomain) =>
-    request("PATCH", `/v1/orgs/${encodeURIComponent(id)}`, {
-      name,
-      email_domain: emailDomain,
-    }),
+    request("PATCH", path`/v1/orgs/${id}`, { name, email_domain: emailDomain }),
   liftOrgLimit: (id) =>
-    request("PATCH", `/v1/orgs/${encodeURIComponent(id)}`, { limited: false }),
-  deleteOrg: (id) => request("DELETE", `/v1/orgs/${encodeURIComponent(id)}`),
+    request("PATCH", path`/v1/orgs/${id}`, { limited: false }),
+  deleteOrg: (id) => request("DELETE", path`/v1/orgs/${id}`),
 
   projects: (orgID) => get("/v1/projects" + query({ org_id: orgID })),
   createProject: (orgID, name, description) =>
     request("POST", "/v1/projects", { org_id: orgID, name, description }),
   // change holds name, description or both.
   updateProject: (id, change) =>
-    request("PATCH", `/v1/projects/${encodeURIComponent(id)}`, change),
-  deleteProject: (id) =>
-    request("DELETE", `/v1/projects/${encodeURIComponent(id)}`),
+    request("PATCH", path`/v1/projects/${id}`, change),
+  deleteProject: (id) => request("DELETE", path`/v1/projects/${id}`),
 
   users: (orgID) => get("/v1/users" + query({ org_id: orgID })),
   addUser: (orgID, email, role, signIn) =>
@@ -186,201 +159,117 @@ export const api = {
       role,
       sign_in: signIn || "",
     }),
-  setUserRole: (id, role) =>
-    request("PATCH", `/v1/users/${encodeURIComponent(id)}`, { role }),
-  disableUser: (id) =>
-    request("POST", `/v1/users/${encodeURIComponent(id)}/disable`),
-  enableUser: (id) =>
-    request("POST", `/v1/users/${encodeURIComponent(id)}/enable`),
+  setUserRole: (id, role) => request("PATCH", path`/v1/users/${id}`, { role }),
+  disableUser: (id) => request("POST", path`/v1/users/${id}/disable`),
+  enableUser: (id) => request("POST", path`/v1/users/${id}/enable`),
 
   setup: (orgID) => get("/v1/setup" + query({ org_id: orgID })),
-  // The one read shaped for the developer rather than the administrator: their
-  // own keys, the limits above them, and what has been refused lately.
+  // The developer's own keys, the limits above them, and recent refusals.
   access: () => get("/v1/access"),
 
   keys: (orgID, { since } = {}) =>
     get("/v1/keys" + query({ org_id: orgID, since })),
   createKey: (payload) => request("POST", "/v1/keys", payload),
-  renameKey: (id, name) =>
-    request("PATCH", `/v1/keys/${encodeURIComponent(id)}`, { name }),
-  revokeKey: (id) => request("DELETE", `/v1/keys/${encodeURIComponent(id)}`),
-  rotateKey: (id) =>
-    request("POST", `/v1/keys/${encodeURIComponent(id)}/rotate`, {}),
+  renameKey: (id, name) => request("PATCH", path`/v1/keys/${id}`, { name }),
+  revokeKey: (id) => request("DELETE", path`/v1/keys/${id}`),
+  rotateKey: (id) => request("POST", path`/v1/keys/${id}/rotate`, {}),
 
-  guardrails: (scope, id) =>
-    get(
-      `/v1/guardrails/${encodeURIComponent(scope)}/${encodeURIComponent(id)}`,
-    ),
+  guardrails: (scope, id) => get(path`/v1/guardrails/${scope}/${id}`),
   putGuardrails: (scope, id, limits) =>
-    request(
-      "PUT",
-      `/v1/guardrails/${encodeURIComponent(scope)}/${encodeURIComponent(id)}`,
-      limits,
-    ),
+    request("PUT", path`/v1/guardrails/${scope}/${id}`, limits),
 
-  // The organisation's filters. `stats` asks for what each of them has done to
-  // the traffic in the window as well, which the Filters screen wants and the
-  // guardrails dialog does not - a filter's row is not worth much without its
-  // traffic, and a checkbox in a dialog does not need an aggregate over the
-  // usage log behind it.
+  // The organisation's filters. `stats` adds what each did to the traffic in
+  // the window, which only the Filters screen shows.
   filters: (orgID, { stats, since } = {}) =>
     get(
       "/v1/filters" + query({ org_id: orgID, stats: stats ? "1" : "", since }),
     ),
   putFilter: (orgID, alias, filter) =>
-    request(
-      "PUT",
-      `/v1/filters/${encodeURIComponent(alias)}` + query({ org_id: orgID }),
-      filter,
-    ),
+    request("PUT", inOrg(orgID, "filters", alias), filter),
   deleteFilter: (orgID, alias) =>
-    request(
-      "DELETE",
-      `/v1/filters/${encodeURIComponent(alias)}` + query({ org_id: orgID }),
-    ),
+    request("DELETE", inOrg(orgID, "filters", alias)),
   checkFilter: (orgID, alias) =>
-    request(
-      "POST",
-      `/v1/filters/${encodeURIComponent(alias)}/check` +
-        query({ org_id: orgID }),
-    ),
-  // One filter's own screen. A check says what a filter does to three sample
-  // segments; this says what it has been doing to the organisation's own
-  // traffic, which is the only thing an instruction can actually be tuned
-  // against.
+    request("POST", inOrg(orgID, "filters", alias, "/check")),
+  // What one filter has been doing to the organisation's own traffic.
   filterReport: (orgID, alias, since) =>
-    get(
-      `/v1/filters/${encodeURIComponent(alias)}/report` +
-        query({ org_id: orgID, since }),
-    ),
+    get(path`/v1/filters/${alias}/report` + query({ org_id: orgID, since })),
 
-  // The organisation's routers. `stats` asks for where each of them has been
-  // sending traffic as well, which is the only thing that distinguishes a
-  // router doing its job from a router naming one destination on every
-  // request - the traffic is identical in every other respect.
+  // The organisation's routers. `stats` adds where each has been sending
+  // traffic in the window.
   routers: (orgID, { stats, since } = {}) =>
     get(
       "/v1/routers" + query({ org_id: orgID, stats: stats ? "1" : "", since }),
     ),
   putRouter: (orgID, alias, router) =>
-    request(
-      "PUT",
-      `/v1/routers/${encodeURIComponent(alias)}` + query({ org_id: orgID }),
-      router,
-    ),
+    request("PUT", inOrg(orgID, "routers", alias), router),
   deleteRouter: (orgID, alias) =>
-    request(
-      "DELETE",
-      `/v1/routers/${encodeURIComponent(alias)}` + query({ org_id: orgID }),
-    ),
+    request("DELETE", inOrg(orgID, "routers", alias)),
   checkRouter: (orgID, alias) =>
-    request(
-      "POST",
-      `/v1/routers/${encodeURIComponent(alias)}/check` +
-        query({ org_id: orgID }),
-    ),
-  // One router's own screen: where it has actually been sending the requests
-  // that named it, which is the number it is judged by.
+    request("POST", inOrg(orgID, "routers", alias, "/check")),
+  // Where one router has been sending the requests that named it.
   routerReport: (orgID, alias, since) =>
-    get(
-      `/v1/routers/${encodeURIComponent(alias)}/report` +
-        query({ org_id: orgID, since }),
-    ),
+    get(path`/v1/routers/${alias}/report` + query({ org_id: orgID, since })),
 
-  // Sandboxes: the machines this gateway lends out.
-  //
-  // The catalogue read carries three things at once - the classes, what this
-  // deployment's driver can actually deliver, and what the reader's own
-  // guardrail allows - because a screen that offered a class the driver refuses
-  // or the guardrail forbids would be offering something the reader finds out
-  // about only after choosing.
+  // Sandbox classes, with what the driver can deliver and what the reader's
+  // guardrail allows, so a screen offers only what can be had.
   sandboxClasses: (orgID) =>
     get("/v1/sandbox-classes" + query({ org_id: orgID })),
-  deleteSandboxClass: (name, orgID) =>
-    request(
-      "DELETE",
-      `/v1/sandbox-classes/${encodeURIComponent(name)}` +
-        query({ org_id: orgID }),
-    ),
+  deleteSandboxClass: (orgID, name) =>
+    request("DELETE", inOrg(orgID, "sandbox-classes", name)),
 
   sandboxes: (orgID, { all } = {}) =>
     get("/v1/sandboxes" + query({ org_id: orgID, all: all ? "1" : "" })),
   createSandbox: (sandbox) => request("POST", "/v1/sandboxes", sandbox),
   // DELETE is the method; terminate is the word, because the row outlives the
-  // machine and the panel says so everywhere else.
-  terminateSandbox: (id) =>
-    request("DELETE", `/v1/sandboxes/${encodeURIComponent(id)}`),
+  // machine.
+  terminateSandbox: (id) => request("DELETE", path`/v1/sandboxes/${id}`),
   extendSandbox: (id, ttl) =>
-    request("POST", `/v1/sandboxes/${encodeURIComponent(id)}/extend`, { ttl }),
-  suspendSandbox: (id) =>
-    request("POST", `/v1/sandboxes/${encodeURIComponent(id)}/suspend`),
-  resumeSandbox: (id) =>
-    request("POST", `/v1/sandboxes/${encodeURIComponent(id)}/resume`),
+    request("POST", path`/v1/sandboxes/${id}/extend`, { ttl }),
+  suspendSandbox: (id) => request("POST", path`/v1/sandboxes/${id}/suspend`),
+  resumeSandbox: (id) => request("POST", path`/v1/sandboxes/${id}/resume`),
 
-  // The client catalogue: what a developer puts where to point their editor
-  // here. It comes from the control plane rather than from this bundle so that
-  // the panel and `keera connect` cannot hand out configurations that differ.
+  // The client catalogue. It comes from the control plane so the panel and
+  // `keera connect` hand out the same configurations.
   connect: () => get("/v1/connect"),
-  // Which clients called with the reader's own keys in the window, and with
-  // which key.
+  // Which clients called with the reader's own keys in the window.
   clients: (since) => get("/v1/clients" + query({ since })),
 
-  // The organisation's models. The writes take the organisation a model
-  // belongs to. `stats` asks for how fast each has been
-  // answering in the window as well, which only the Models screen shows.
+  // The organisation's models. `stats` adds how fast each has been answering
+  // in the window, which only the Models screen shows.
   models: (orgID, { stats, since } = {}) =>
     get(
       "/v1/models" + query({ org_id: orgID, stats: stats ? "1" : "", since }),
     ),
   providers: () => get("/v1/providers"),
-  putModel: (alias, model, orgID) =>
-    request(
-      "PUT",
-      `/v1/models/${encodeURIComponent(alias)}` + query({ org_id: orgID }),
-      model,
-    ),
-  deleteModel: (alias, orgID) =>
-    request(
-      "DELETE",
-      `/v1/models/${encodeURIComponent(alias)}` + query({ org_id: orgID }),
-    ),
-  checkModel: (alias, orgID) =>
-    request(
-      "POST",
-      `/v1/models/${encodeURIComponent(alias)}/check` +
-        query({ org_id: orgID }),
-    ),
+  putModel: (orgID, alias, model) =>
+    request("PUT", inOrg(orgID, "models", alias), model),
+  deleteModel: (orgID, alias) =>
+    request("DELETE", inOrg(orgID, "models", alias)),
+  checkModel: (orgID, alias) =>
+    request("POST", inOrg(orgID, "models", alias, "/check")),
 
   // The MCP servers the gateway stands in front of, and their tool calls.
   // toolCalls takes { org_id, since, server, tool, summary, limit }.
-  // Like the models, they belong to an organisation.
   mcpServers: (orgID) => get("/v1/mcp-servers" + query({ org_id: orgID })),
-  putMCPServer: (alias, server, orgID) =>
-    request(
-      "PUT",
-      `/v1/mcp-servers/${encodeURIComponent(alias)}` + query({ org_id: orgID }),
-      server,
-    ),
-  deleteMCPServer: (alias, orgID) =>
-    request(
-      "DELETE",
-      `/v1/mcp-servers/${encodeURIComponent(alias)}` + query({ org_id: orgID }),
-    ),
+  putMCPServer: (orgID, alias, server) =>
+    request("PUT", inOrg(orgID, "mcp-servers", alias), server),
+  deleteMCPServer: (orgID, alias) =>
+    request("DELETE", inOrg(orgID, "mcp-servers", alias)),
   toolCalls: (params) => get("/v1/tool-calls" + query(params)),
 
   playground: (keyID, payload, signal) =>
-    stream("/v1/playground/chat" + query({ key_id: keyID }), payload, signal),
+    request("POST", "/v1/playground/chat" + query({ key_id: keyID }), payload, {
+      raw: true,
+      signal,
+    }),
 
-  // The dashboard, and - with a scope of { project_id }, { key_id } or { alias } -
-  // one project's, one key's or one model's own screen. The same report over
-  // fewer rows, so that a number on an entity's page and its share of the
-  // dashboard can never disagree.
+  // The dashboard, or with a scope of { project_id }, { key_id } or { alias }
+  // one entity's screen: the same report over fewer rows, so the two agree.
   overview: (orgID, since, scope) =>
     get("/v1/overview" + query({ org_id: orgID, since, ...scope })),
 
-  // The same window drawn rather than tabulated: the clients calling this
-  // gateway, the models it forwards to, which of those are somebody else's
-  // computer, and how much traffic ran between each pair.
+  // The same window as a map: clients, the models they reach, and the
+  // traffic between each pair.
   trafficMap: (orgID, since) =>
     get("/v1/map" + query({ org_id: orgID, since })),
   usage: (orgID, groupBy, since) =>
@@ -408,43 +297,29 @@ export const api = {
       amount_micros: amountMicros,
       note,
     }),
-  // The event log: every recorded request, narrowed to a project, a key, a model,
-  // a person or a status - or to none of them, which is the Requests screen.
+  // The event log, narrowed to a project, key, model, person or status.
   requests: (params) => get("/v1/requests" + query(params)),
 
-  // The same log grouped into the tasks its requests were made for: one row
-  // per session rather than per call. It takes the project, key, model and person
-  // narrowing of requests(), and its outcome and status. It adds `sort`,
-  // because this screen is opened for the ranking - the task that
-  // cost four francs, the one that made four hundred calls - and a log
-  // ordered by time buries both.
+  // The same log grouped into sessions, one row per task. It takes the
+  // narrowing of requests(), and `sort`.
   sessions: (params) => get("/v1/sessions" + query(params)),
 
-  // One task from beginning to end, named by the id of any request in it.
-  // Any request rather than only the first: that is how a reader arrives, from
-  // a row in the request log, and requiring the opening call would make the row
-  // in front of them the one thing that could not be used to find it.
-  session: (id, orgID) =>
-    get(`/v1/sessions/${encodeURIComponent(id)}` + query({ org_id: orgID })),
+  // One session, named by the id of any request in it.
+  session: (orgID, id) =>
+    get(path`/v1/sessions/${id}` + query({ org_id: orgID })),
 
-  // The same log as it is written. The caller passes the same narrowing it
-  // passed to requests() plus `after`, the newest row it already holds, and
-  // gets an EventSource back - which it must close, because the browser allows
-  // very few open connections per origin and this one never ends on its own.
-  //
-  // It rides the session cookie, exactly as every other read here does. There
-  // is no CSRF token on it because there is nowhere to put one: an EventSource
-  // sets no headers. That is safe for the same reason a GET is - it changes
-  // nothing - and the route it opens is a read like any other.
+  // The log as it is written, from `after` on. The caller must close the
+  // EventSource: browsers allow few connections per origin. It carries no
+  // CSRF token, as an EventSource sets no headers; like any GET it changes
+  // nothing.
   requestStream: (params) =>
     new EventSource(url("/v1/requests/stream" + query(params))),
 
   // download is a GET the browser saves rather than the panel parses. It rides
-  // the session cookie like every other read, so an export needs no second
-  // credential and leaks no key into a URL.
-  download: (path, params) => {
+  // the session cookie, so no key ends up in a URL.
+  download: (route, params) => {
     const a = document.createElement("a");
-    a.href = url(path) + query({ ...params, format: "csv" });
+    a.href = url(route) + query({ ...params, format: "csv" });
     a.rel = "noopener";
     document.body.append(a);
     a.click();

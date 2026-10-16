@@ -4,7 +4,7 @@
 // address to it.
 
 import { api, ApiError } from "../api.js";
-import { h, replace, brandMark, showError } from "../ui.js";
+import { h, replace, brandMark, showError, field, banner } from "../ui.js";
 
 /** signUpFlow reports whether this page was opened for a sign-up. */
 export function signUpFlow() {
@@ -25,9 +25,8 @@ export async function signUp(root, onSignedIn) {
     info = await api.signupInfo();
   } catch (err) {
     card.append(
-      h(
-        "div",
-        { class: "banner banner-bad" },
+      banner(
+        "bad",
         err instanceof ApiError ? err.message : "This sign-up cannot be read.",
       ),
       h(
@@ -45,13 +44,9 @@ export async function signUp(root, onSignedIn) {
 
   const message = h("div");
   const fail = (err) =>
-    replace(
+    showError(
       message,
-      h(
-        "div",
-        { class: "banner banner-bad" },
-        err instanceof ApiError ? err.message : "Something went wrong.",
-      ),
+      err instanceof ApiError ? err.message : "Something went wrong.",
     );
   const finish = async (body, button) => {
     replace(message);
@@ -97,12 +92,10 @@ export async function signUp(root, onSignedIn) {
         finish({ name }, create);
       },
     },
-    h(
-      "div",
-      { class: "field" },
-      h("label", { for: "org-name" }, "Name of your organisation"),
+    field(
+      "Name of your organisation",
       nameInput,
-      h("div", { class: "hint" }, "You become its administrator."),
+      "You become its administrator.",
     ),
     create,
   );
