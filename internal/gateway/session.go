@@ -23,9 +23,12 @@ import (
 //
 // There is no standard: neither the OpenAI nor the Anthropic API has a field
 // for the conversation, and grouping by user would merge all of a developer's
-// tasks. So the three headers used in practice are read as one: ours, the
-// generic X-Session-Id, and Helicone-Session-Id.
-var sessionHeaders = []string{httpx.SessionHeader, "X-Session-Id", "Helicone-Session-Id"}
+// tasks. So the headers used in practice are read as one: ours, the generic
+// X-Session-Id, Helicone-Session-Id, and Claude Code's own. Claude Code sends
+// its session id on every call, its subagents' calls included, and keeps it
+// when it compacts the conversation.
+var sessionHeaders = []string{httpx.SessionHeader, "X-Session-Id", "Helicone-Session-Id",
+	"X-Claude-Code-Session-Id"}
 
 // sessionKey derives the session key for one request, or returns empty for a
 // request that is not part of a conversation.

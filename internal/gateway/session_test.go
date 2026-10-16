@@ -121,7 +121,8 @@ func TestAClientCanNameItsOwnSession(t *testing.T) {
 func TestEveryConventionForNamingASessionIsReadAsOne(t *testing.T) {
 	want := stated(t, "key_1", "task-42")
 
-	for _, name := range []string{"X-Keera-Session", "X-Session-Id", "Helicone-Session-Id"} {
+	for _, name := range []string{"X-Keera-Session", "X-Session-Id", "Helicone-Session-Id",
+		"X-Claude-Code-Session-Id"} {
 		got := keyFor(t, "key_1", goBody, policy.KindChat, name, "task-42")
 		if got != want {
 			t.Errorf("%s gives session %q, and X-Keera-Session gives %q; the same "+

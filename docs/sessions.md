@@ -30,11 +30,12 @@ In order of preference.
 
 A request with any of these headers is in the session that header names.
 
-| Header                | Why it is read                                                                     |
-| --------------------- | ---------------------------------------------------------------------------------- |
-| `X-Keera-Session`     | This gateway's own. It wins if more than one is sent.                              |
-| `X-Session-Id`        | The generic convention.                                                            |
-| `Helicone-Session-Id` | Helicone's proxy groups requests by it, so clients written for such a gateway fit. |
+| Header                     | Why it is read                                                                     |
+| -------------------------- | ---------------------------------------------------------------------------------- |
+| `X-Keera-Session`          | This gateway's own. It wins if more than one is sent.                              |
+| `X-Session-Id`             | The generic convention.                                                            |
+| `Helicone-Session-Id`      | Helicone's proxy groups requests by it, so clients written for such a gateway fit. |
+| `X-Claude-Code-Session-Id` | Claude Code sends it on every call, its subagents' too, so it needs no setup.      |
 
 ```sh
 curl http://127.0.0.1:8080/api/v1/chat/completions \
@@ -44,7 +45,7 @@ curl http://127.0.0.1:8080/api/v1/chat/completions \
 ```
 
 The value is hashed, so the client's own conversation id is not stored. Which of
-the three headers carries it makes no difference to the key.
+the headers carries it makes no difference to the key.
 
 **There is no standard for this.** Neither the OpenAI nor the Anthropic API has
 a field for the conversation; their `user` fields name a person, which would

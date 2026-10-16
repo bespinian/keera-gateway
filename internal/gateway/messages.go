@@ -284,8 +284,11 @@ func systemText(raw json.RawMessage) jsonText {
 // in a user turn; the OpenAI shape wants each as its own "tool" message, placed
 // before any user text so it still follows the assistant turn that called it.
 func convertMessage(role string, content json.RawMessage) ([]chatMessage, error) {
-	if role != "user" && role != "assistant" {
-		return nil, errors.New("'role' must be 'user' or 'assistant'")
+	// A system turn between the others is a beta Claude Code sends
+	// (mid-conversation-system). It stays a system message in its place, as
+	// on the Responses API.
+	if role != "user" && role != "assistant" && role != "system" {
+		return nil, errors.New("'role' must be 'user', 'assistant' or 'system'")
 	}
 	if len(content) == 0 {
 		return nil, errors.New("'content' is required")
@@ -300,8 +303,15 @@ func convertMessage(role string, content json.RawMessage) ([]chatMessage, error)
 		return nil, errors.New("'content' must be a string or an array of content blocks")
 	}
 
-	if role == "assistant" {
+	switch role {
+	case "assistant":
 		return []chatMessage{convertAssistant(blocks)}, nil
+	case "system":
+		text := joinText(blocks)
+		if text == nil {
+			text = emptyText
+		}
+		return []chatMessage{{role: "system", content: text}}, nil
 	}
 	return convertUser(blocks), nil
 }

@@ -77,6 +77,33 @@ func TestDecodeMovesTheSystemPromptIntoTheConversation(t *testing.T) {
 	}
 }
 
+func TestDecodeKeepsASystemTurnInItsPlace(t *testing.T) {
+	// Claude Code sends system turns between the others (the
+	// mid-conversation-system beta). Refusing them refuses every request it
+	// makes.
+	req := decodeMessages(t, `{
+		"model": "keera-code",
+		"max_tokens": 100,
+		"system": "top",
+		"messages": [
+			{"role":"user","content":"hi"},
+			{"role":"system","content":[{"type":"text","text":"env","cache_control":{"type":"ephemeral"}}]},
+			{"role":"assistant","content":"hello"},
+			{"role":"system","content":"later"}
+		]
+	}`)
+
+	msgs := messagesOf(t, req)
+	var got []string
+	for _, m := range msgs {
+		got = append(got, m["role"].(string)+":"+m["content"].(string))
+	}
+	want := []string{"system:top", "user:hi", "system:env", "assistant:hello", "system:later"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("messages = %v, want %v", got, want)
+	}
+}
+
 func TestDecodeKeepsTheGuardrailAbleToGoFirst(t *testing.T) {
 	// The guardrail's system prompt is prepended to the translated body by serve.
 	// This is the property that makes that possible: whatever the client sent,
