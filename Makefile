@@ -314,21 +314,17 @@ sandbox-image:
 # render its own file while either credential is unset - so a first run on a
 # fresh clone generates them. An existing .env is left as it is.
 #
-# The /dev/urandom fallback is for a stock Nix host, which has no openssl. It
-# is written to a temporary file and moved into place, because a half-written
-# .env with empty keys would be taken for a valid one on the next run.
+# The keys come from /dev/urandom, so no openssl is needed. The file is written
+# to a temporary file and moved into place, because a half-written .env with
+# empty keys would be taken for a valid one on the next run.
 .PHONY: dev-env
 dev-env:
 	@if [ ! -f $(DEV_ENV) ]; then \
 		echo "generating $(DEV_ENV) with fresh development credentials"; \
-		if command -v openssl >/dev/null 2>&1; then \
-			operator=$$(openssl rand -hex 32); secret=$$(openssl rand -hex 32); \
-		else \
-			operator=$$(od -An -vtx1 -N32 /dev/urandom | tr -d ' \n'); \
-			secret=$$(od -An -vtx1 -N32 /dev/urandom | tr -d ' \n'); \
-		fi; \
+		operator=$$(od -An -vtx1 -N32 /dev/urandom | tr -d ' \n'); \
+		secret=$$(od -An -vtx1 -N32 /dev/urandom | tr -d ' \n'); \
 		if [ "$${#operator}" -ne 64 ] || [ "$${#secret}" -ne 64 ]; then \
-			echo "could not generate 32 random bytes - install openssl and retry" >&2; \
+			echo "could not read 32 random bytes from /dev/urandom" >&2; \
 			exit 1; \
 		fi; \
 		sed -e "s|^KEERA_OPERATOR_KEY=.*|KEERA_OPERATOR_KEY=$$operator|" \

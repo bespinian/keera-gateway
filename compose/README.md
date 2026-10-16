@@ -85,16 +85,14 @@ on the same card; the unquantised 14B needs a 48 GB card (g6e.xlarge).
 - **Port 8080 carries the panel, the control API and the inference API**
   ([gateway.md](../docs/gateway.md#one-listener-four-surfaces)). Put a TLS
   terminator in front before you change `KEERA_BIND`.
-- **Port 8000 is not published on purpose.** vLLM, llama.cpp and `laya-serve`
-  have no authentication by default, so reaching one directly skips the
-  gateway's keys, budgets and audit. For the same reason the llama.cpp tier
-  runs with `--no-webui`.
-- **`.env` reaches the gateway only through `compose.yaml`.** Compose passes
-  on only the variables the file names. It passes every setting in
-  [docs/install.md](../docs/install.md) except the sandbox ones, and single
-  sign-on only for providers named `google` and `entra`; another name needs its
-  own block. The database, the published port and the catalogue files are fixed
-  in the file, and `KEERA_ADDR` is not passed.
+- **Port 8000 is not published on purpose**: the inference backend has no
+  authentication ([gateway.md](../docs/gateway.md#failure-modes-worth-knowing)).
+  For the same reason the llama.cpp tier runs with `--no-webui`.
+- **Every setting in `.env` reaches the gateway**
+  ([docs/install.md](../docs/install.md) lists them). `compose.yaml` fixes the
+  database, the listen address and the template files, and keeps
+  `KEERA_SANDBOX_DRIVER` empty. A variable exported in your shell but not
+  written in `.env` does not reach it.
 - The gateway image is `FROM scratch`: one static binary, no shell. So its
   healthcheck is `keera-gateway health`, which asks the running server's
   `/readyz` instead of `curl`.
@@ -146,5 +144,5 @@ echo 'KEERA_SANDBOX_DRIVER=podman' >> compose/.env
 make dev
 ```
 
-Only `make dev` reads the sandbox settings in `.env`, and it sets
+Only `make dev` uses the sandbox settings in `.env`, and it sets
 `KEERA_SANDBOX_PUBLIC_URL` for you. See [docs/sandboxes.md](../docs/sandboxes.md).

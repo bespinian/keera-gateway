@@ -1,5 +1,12 @@
 name: keera
 
+# llama.cpp, vLLM and laya-serve all answer /health on port 8000.
+x-http-health: &http-health
+  - CMD
+  - python3
+  - -c
+  - import urllib.request; urllib.request.urlopen("http://localhost:8000/health")
+
 services:
   keera-gateway:
     build:
@@ -20,110 +27,22 @@ services:
       # ",z" relabels for SELinux hosts; harmless elsewhere.
       - ./models.yaml:/etc/keera/models.yaml:ro,z
       - ./sandboxes.yaml:/etc/keera/sandboxes.yaml:ro,z
+    # Every setting in .env reaches the gateway, so a new one needs no edit
+    # here. docs/install.md explains them.
+    env_file: .env
+    # These win over .env.
     environment:
       KEERA_DATABASE_URL: postgres://keera:keera@keera-db:5432/keera?sslmode=disable
       KEERA_OPERATOR_KEY: ${KEERA_OPERATOR_KEY:?set KEERA_OPERATOR_KEY in .env - see .env.example}
+      KEERA_SECRET_KEY: ${KEERA_SECRET_KEY:?set KEERA_SECRET_KEY in .env - see .env.example}
       KEERA_MODELS_FILE: /etc/keera/models.yaml
       # Read even with no sandbox driver, so each new organisation has the
       # classes once one is switched on. See README.md.
       KEERA_SANDBOXES_FILE: /etc/keera/sandboxes.yaml
-      KEERA_LOG_FORMAT: ${KEERA_LOG_FORMAT:-}
-      KEERA_LOG_LEVEL: ${KEERA_LOG_LEVEL:-}
-      # Encrypts the API keys administrators type into the control panel, and
-      # the sign-in refresh tokens. Required: the gateway does not start
-      # without it. See docs/install.md.
-      KEERA_SECRET_KEY: ${KEERA_SECRET_KEY:?set KEERA_SECRET_KEY in .env - see .env.example}
-      # Reads /metrics and nothing else, so a scrape configuration does not
-      # have to hold the operator key. Empty leaves the route to operators.
-      KEERA_METRICS_TOKEN: ${KEERA_METRICS_TOKEN:-}
-      # How long usage and audit entries are kept. Usage retention also deletes
-      # ended sandboxes and revoked or expired keys. Empty is for ever, which
-      # is the deliberate default for billing and audit data.
-      KEERA_USAGE_RETENTION: ${KEERA_USAGE_RETENTION:-}
-      KEERA_AUDIT_RETENTION: ${KEERA_AUDIT_RETENTION:-}
-      # How long an agent conversation may go quiet before the next request on
-      # it is read as a new task. Empty is half an hour. It is a reporting
-      # threshold and nothing is stored per session, so changing it re-cuts
-      # what has already been recorded.
-      KEERA_SESSION_GAP: ${KEERA_SESSION_GAP:-}
-      # Compose passes on only the variables this file names, so every other
-      # setting in docs/install.md is listed here, except KEERA_ADDR. Empty
-      # keeps the default.
-      # The sandbox settings are left out: the podman driver cannot run inside
-      # this container, so only `make dev` reads them. See .env.example.
-      KEERA_UPSTREAM_DENY: ${KEERA_UPSTREAM_DENY:-}
-      KEERA_UPSTREAM_PRIVATE: ${KEERA_UPSTREAM_PRIVATE:-}
-      KEERA_REDIS_URL: ${KEERA_REDIS_URL:-}
-      KEERA_REDIS_PREFIX: ${KEERA_REDIS_PREFIX:-}
-      KEERA_UI: ${KEERA_UI:-}
-      KEERA_SECURE_COOKIES: ${KEERA_SECURE_COOKIES:-}
-      KEERA_CACHE_TTL: ${KEERA_CACHE_TTL:-}
-      KEERA_SPEND_REFRESH: ${KEERA_SPEND_REFRESH:-}
-      KEERA_UPSTREAM_HEADER_TIMEOUT: ${KEERA_UPSTREAM_HEADER_TIMEOUT:-}
-      KEERA_MAX_BODY_BYTES: ${KEERA_MAX_BODY_BYTES:-}
-      KEERA_MAX_RESPONSE_BYTES: ${KEERA_MAX_RESPONSE_BYTES:-}
-      KEERA_MAX_DB_CONNS: ${KEERA_MAX_DB_CONNS:-}
-      # Single sign-on. Without it or passkeys, the panel accepts only the
-      # operator key.
-      # A button per name on the sign-in screen, each configured under
-      # KEERA_OIDC_<NAME>_*. Compose cannot pass through variables it does not
-      # name, so the two blocks below are the ones this file ships with;
-      # another name means another block here. See docs/sso.md.
-      KEERA_OIDC_PROVIDERS: ${KEERA_OIDC_PROVIDERS:-}
-      KEERA_OIDC_GOOGLE_ISSUER: ${KEERA_OIDC_GOOGLE_ISSUER:-}
-      KEERA_OIDC_GOOGLE_CLIENT_ID: ${KEERA_OIDC_GOOGLE_CLIENT_ID:-}
-      KEERA_OIDC_GOOGLE_CLIENT_SECRET: ${KEERA_OIDC_GOOGLE_CLIENT_SECRET:-}
-      KEERA_OIDC_GOOGLE_LABEL: ${KEERA_OIDC_GOOGLE_LABEL:-}
-      KEERA_OIDC_GOOGLE_DEFAULT_ROLE: ${KEERA_OIDC_GOOGLE_DEFAULT_ROLE:-}
-      KEERA_OIDC_GOOGLE_SCOPES: ${KEERA_OIDC_GOOGLE_SCOPES:-}
-      KEERA_OIDC_GOOGLE_GROUPS_CLAIM: ${KEERA_OIDC_GOOGLE_GROUPS_CLAIM:-}
-      KEERA_OIDC_GOOGLE_ADMIN_GROUPS: ${KEERA_OIDC_GOOGLE_ADMIN_GROUPS:-}
-      KEERA_OIDC_GOOGLE_OPERATOR_GROUPS: ${KEERA_OIDC_GOOGLE_OPERATOR_GROUPS:-}
-      # The email domains each provider may vouch for, required with several.
-      # "*" is for a provider that proves every address itself, like Google.
-      KEERA_OIDC_GOOGLE_DOMAINS: ${KEERA_OIDC_GOOGLE_DOMAINS:-}
-      # Lets somebody whose sign-in matches no organisation create one. Only
-      # for a provider that proves every address itself. See docs/sso.md.
-      KEERA_OIDC_GOOGLE_SIGNUP: ${KEERA_OIDC_GOOGLE_SIGNUP:-}
-      KEERA_OIDC_ENTRA_ISSUER: ${KEERA_OIDC_ENTRA_ISSUER:-}
-      KEERA_OIDC_ENTRA_CLIENT_ID: ${KEERA_OIDC_ENTRA_CLIENT_ID:-}
-      KEERA_OIDC_ENTRA_CLIENT_SECRET: ${KEERA_OIDC_ENTRA_CLIENT_SECRET:-}
-      KEERA_OIDC_ENTRA_LABEL: ${KEERA_OIDC_ENTRA_LABEL:-}
-      KEERA_OIDC_ENTRA_DEFAULT_ROLE: ${KEERA_OIDC_ENTRA_DEFAULT_ROLE:-}
-      KEERA_OIDC_ENTRA_SCOPES: ${KEERA_OIDC_ENTRA_SCOPES:-}
-      KEERA_OIDC_ENTRA_GROUPS_CLAIM: ${KEERA_OIDC_ENTRA_GROUPS_CLAIM:-}
-      # Setting this hands the administrator role to the directory for the
-      # whole gateway, and the panel stops offering to change roles. Unset,
-      # administrators are made with `keera user role`. See docs/sso.md.
-      KEERA_OIDC_ENTRA_ADMIN_GROUPS: ${KEERA_OIDC_ENTRA_ADMIN_GROUPS:-}
-      KEERA_OIDC_ENTRA_OPERATOR_GROUPS: ${KEERA_OIDC_ENTRA_OPERATOR_GROUPS:-}
-      KEERA_OIDC_ENTRA_DOMAINS: ${KEERA_OIDC_ENTRA_DOMAINS:-}
-      KEERA_OIDC_ENTRA_SIGNUP: ${KEERA_OIDC_ENTRA_SIGNUP:-}
-      KEERA_OPERATORS: ${KEERA_OPERATORS:-}
-      # Accounts that sign in with a passkey instead of a directory. Needs
-      # KEERA_PUBLIC_URL on https, or on http://localhost. See docs/sso.md.
-      KEERA_PASSKEYS: ${KEERA_PASSKEYS:-}
-      # Lets Claude Code on a Claude Team or Enterprise plan through, paid by
-      # the plan. Off by default. See docs/subscriptions.md.
-      KEERA_CLAUDE_SUBSCRIPTIONS: ${KEERA_CLAUDE_SUBSCRIPTIONS:-}
-      # The deployment's own provider keys, billed to the organisations that
-      # use them, and card payments for them. See docs/billing.md.
-      KEERA_PROVIDER_ANTHROPIC_API_KEY: ${KEERA_PROVIDER_ANTHROPIC_API_KEY:-}
-      KEERA_PROVIDER_OPENAI_API_KEY: ${KEERA_PROVIDER_OPENAI_API_KEY:-}
-      KEERA_PROVIDER_INFOMANIAK_API_KEY: ${KEERA_PROVIDER_INFOMANIAK_API_KEY:-}
-      KEERA_PROVIDER_INFOMANIAK_PRODUCT_ID: ${KEERA_PROVIDER_INFOMANIAK_PRODUCT_ID:-}
-      KEERA_PROVIDER_STEPPING_STONE_API_KEY: ${KEERA_PROVIDER_STEPPING_STONE_API_KEY:-}
-      KEERA_PROVIDER_PHOENIQS_API_KEY: ${KEERA_PROVIDER_PHOENIQS_API_KEY:-}
-      KEERA_PROVIDER_CSCS_API_KEY: ${KEERA_PROVIDER_CSCS_API_KEY:-}
-      KEERA_POSTFINANCE_SPACE_ID: ${KEERA_POSTFINANCE_SPACE_ID:-}
-      KEERA_POSTFINANCE_USER_ID: ${KEERA_POSTFINANCE_USER_ID:-}
-      KEERA_POSTFINANCE_AUTH_KEY: ${KEERA_POSTFINANCE_AUTH_KEY:-}
-      KEERA_POSTFINANCE_URL: ${KEERA_POSTFINANCE_URL:-}
-      KEERA_BILLING_VAT: ${KEERA_BILLING_VAT:-}
-      # The gateway as a browser sees it. It is also what the panel's My
-      # clients screen tells a developer to point their editor at, with /api on
-      # the end. Empty leaves both to the Host header.
-      KEERA_PUBLIC_URL: ${KEERA_PUBLIC_URL:-}
+      # The port above. `make dev` reads the same .env, so these keep its
+      # settings out: the podman driver cannot run inside this container.
+      KEERA_ADDR: ":8080"
+      KEERA_SANDBOX_DRIVER: ""
     healthcheck:
       # A scratch image has no shell and no curl, so the binary asks the
       # running server's /readyz itself.
@@ -198,14 +117,8 @@ services:
     volumes:
       - llama-cache:/models
     healthcheck:
-      # llama.cpp and vLLM both answer /health on 8000, so one check fits both
-      # tiers. compose.gpu.yaml cannot replace `test`: podman-compose 1.6
-      # appends an overridden `test` to the one it replaces and runs neither.
-      test:
-        - CMD
-        - python3
-        - -c
-        - import urllib.request; urllib.request.urlopen("http://localhost:8000/health")
+      # Fits both tiers. compose.gpu.yaml must not replace `test`: see README.md.
+      test: *http-health
       interval: 15s
       timeout: 5s
       retries: 6
@@ -225,11 +138,7 @@ services:
     volumes:
       - decider-cache:/root/.cache/huggingface
     healthcheck:
-      test:
-        - CMD
-        - python3
-        - -c
-        - import urllib.request; urllib.request.urlopen("http://localhost:8000/health")
+      test: *http-health
       interval: 15s
       timeout: 5s
       retries: 6

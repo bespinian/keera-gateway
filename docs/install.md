@@ -135,7 +135,8 @@ where a self-hosted inference plane runs.
 - `none` turns the check off.
 
 `KEERA_UPSTREAM_PRIVATE` limits what organisations reach inside the network.
-Set it to the host names they may use there, such as `keera-engine`. Every
+Set it to the host names they may use there, comma-separated. The models every
+new organisation starts with need `keera-engine,keera-decider`. Every
 other private address is then blocked for every organisation, even through a
 public name that resolves into the network. `none` blocks the whole private
 network, and `all` allows it, which is the default. With
@@ -212,9 +213,8 @@ forge sandboxes clone from. They are listed in
 
 ## Single host with compose
 
-[compose/README.md](../compose/README.md) runs it, and lists which settings
-`compose.yaml` passes on and the few that only compose has, such as
-`KEERA_BIND`.
+[compose/README.md](../compose/README.md) runs it, and says which settings
+`compose.yaml` fixes and the few that only compose has, such as `KEERA_BIND`.
 
 ## The other shapes
 
