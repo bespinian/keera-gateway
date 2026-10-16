@@ -1136,9 +1136,7 @@ function toggleBox(t, checked, onChange) {
  *  contents, which is what keeps a column still on a screen that redraws the
  *  same table over a different grouping.
  *
- *  There is no whole-row click. Every screen with a row worth opening has the
- *  button that opens it, and a row that is clickable on two screens and inert
- *  on four is a worse affordance than none.
+ *  There is no whole-row click; see rowLink.
  */
 export function table(columns, rows, opts = {}) {
   const toggles = opts.toggles || [];

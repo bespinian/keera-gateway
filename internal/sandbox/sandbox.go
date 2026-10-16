@@ -36,9 +36,9 @@ var (
 	// ErrNotFound means the sandbox no longer exists where the driver looks.
 	// Terminate treats it as success.
 	ErrNotFound = errors.New("sandbox: not found")
-	// ErrNotReady means the operation needs a running sandbox, most often an
-	// attach to a suspended one. The control plane turns it into "resume it
-	// first".
+	// ErrNotReady means the operation needs a running sandbox, and the driver
+	// found it not running although its row said it was. The manager refuses
+	// a suspended one itself, before the driver is asked.
 	ErrNotReady = errors.New("sandbox: not ready")
 )
 
@@ -55,9 +55,6 @@ type Ref struct {
 	Name string
 	// Backing says whether the sandbox is a driver-made object or a claim on
 	// a warm pool. Empty means BackingSandbox.
-	//
-	// It is stored on the row rather than derived from configuration, so
-	// turning warm pools off still leaves the old claims addressable.
 	Backing Backing
 }
 
@@ -242,8 +239,7 @@ func noRuntime(c policy.SandboxClass, driver string) error {
 const (
 	homeVolume = "home"
 	homePath   = "/home/keera"
-	// sandboxUID is the user a sandbox runs as. It is fixed rather than taken
-	// from the image, so an image upgrade cannot lock a sandbox out of its
-	// own home volume.
+	// sandboxUID is the user a sandbox runs as. sandbox/Containerfile says
+	// why it is fixed.
 	sandboxUID = 1000
 )

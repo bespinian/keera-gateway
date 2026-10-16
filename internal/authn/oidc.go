@@ -440,9 +440,9 @@ func (o *OIDC) checkIdentity(id Identity, claims map[string]any, groupsClaim str
 	if len(id.Groups) == 0 && o.cfg.Mapping.UsesGroups() && hasClaimOverage(claims, groupsClaim) {
 		return fmt.Errorf("the identity provider replaced the %q claim with a "+
 			"pointer to its directory API because this account is in too many groups, "+
-			"so Keera cannot see the groups that decide this person's role; grant the "+
-			"role by address, or map the roles Keera needs onto app roles and set the "+
-			"groups claim to %q", groupsClaim, "roles")
+			"so Keera cannot see the groups that decide this person's role; map the "+
+			"roles Keera needs onto app roles and set the groups claim to %q",
+			groupsClaim, "roles")
 	}
 	// Without an email there is nothing to attribute an audit entry to, and
 	// nothing to place the person in an organisation with.

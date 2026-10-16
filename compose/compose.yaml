@@ -58,14 +58,8 @@ services:
   # The inference backend: llama.cpp on CPU, so this file runs on a laptop
   # with no GPU. compose.gpu.yaml replaces it with vLLM on a GPU host.
   #
-  # TOOL CALLING DOES NOT WORK ON THIS BACKEND, as measured on image build
-  # b10853-9dcf84e5a in September 2026: nine attempts across Qwen2.5-Coder-1.5B
-  # and 7B GGUFs produced zero OpenAI-shaped `tool_calls`. Every one came back
-  # as prose in `content` - the ToolCallAsText failure internal/gateway/probe.go
-  # names. See compose/README.md. So this is for exercising the gateway - keys,
-  # budgets, streaming, usage accounting, the panel - and not for demonstrating
-  # a coding agent. Re-check with `keera model check keera-speed` on a newer
-  # build.
+  # TOOL CALLING DOES NOT WORK ON THIS BACKEND: calls come back as prose, the
+  # ToolCallAsText failure internal/gateway/probe.go names. See README.md.
   keera-engine:
     image: ${KEERA_LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}
     restart: unless-stopped
@@ -127,7 +121,7 @@ services:
   # Keera Decider: Laya, a 421M classifier, served by its own laya-serve. It
   # answers routers and gate filters in one forward pass on a CPU, and writes
   # no text. models.yaml lists it as a decision model. See
-  # docs/routers.md#decision-models.
+  # docs/gateway.md#decision-models.
   #
   # laya-serve has no authentication unless LAYA_API_KEY is set, so, like
   # keera-engine, it is not published.

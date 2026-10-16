@@ -116,48 +116,25 @@ keera guardrail effective key <key-id>   # and what holds this one key
 keera usage --by project
 ```
 
-`keera limit` and `keera budget` each edit one part of a guardrail: the rate
-limit or the budget.
+**Filters** check what is _in_ a request before it is forwarded: a small model
+removes credentials or client names, or refuses the request, and a list of
+regular expressions catches anything with a fixed shape, such as an API key or
+an IBAN. A new filter starts in shadow, so you can measure it on a week of real
+traffic before it enforces. [docs/filters.md](docs/filters.md)
 
-**Filters** check what is _in_ a request before it is forwarded.
+**Routers** change where a request goes: small tasks to the local model and
+heavy reasoning to a large one, or to the next model when one is down. A client
+names a router where it would name a model. [docs/routers.md](docs/routers.md)
 
-- A **rewrite** filter can remove a credential from a prompt and still let the
-  prompt through.
-- A **gate** filter only allows or blocks.
-- A **pattern** filter matches a list of regular expressions in the gateway.
-  Use it for anything with a fixed shape, such as an API key, a connection
-  string or an IBAN.
+**Sandboxes** are developer machines inside the cluster, each with the
+toolchain, its own API key and an expiry. An agent's sandbox does one task and
+ends by pushing a branch, and where egress is limited, that branch is all that
+leaves it. [docs/sandboxes.md](docs/sandboxes.md)
 
-Rewrite and gate filters run a small model, so they add a second generation to
-every guarded request. Pattern filters cost nothing. Every filter fails closed
-and runs before the standing system prompt is added. `--shadow` tests a filter
-against a week of real traffic before anything depends on it.
-[docs/filters.md](docs/filters.md)
-
-**Routers** change where a request goes. For example, small tasks can go to the
-local model and heavy reasoning to the large one. A client names a router where
-it would name a model. There are five modes: `instruction` (a small local model
-reads the request), `size` (how much text it has), `fallback`, `latency` and
-`least-busy`. Only `instruction` costs a generation. Allowing a router allows
-its destinations; only the destination list decides where a prompt can go. A
-router's failures are silent, because every request still gets an answer, so
-watch the split between its destinations.
-[docs/routers.md](docs/routers.md)
-
-**Sandboxes** are developer machines inside the cluster. Each has the toolchain
-installed, a home directory that can survive a suspend, its own API key that
-is revoked when it ends, and an expiry. On Kubernetes a network policy can limit
-its egress; the podman driver has no egress control. `--purpose agent` creates
-a machine for one task, which ends by pushing a branch. Where egress is
-enforced, that branch is the only thing that leaves it.
-[docs/sandboxes.md](docs/sandboxes.md#what-is-actually-enforced)
-
-**MCP servers** get the same controls as models. An agent calls a server's
-tools through `/api/mcp/<alias>` with its Keera key. It sees only the tools its
-guardrail allows, its filters read what each call sends, the server's
-credential stays on the gateway, and every call is logged without its content.
-A guardrail can also remove the tools Anthropic and OpenAI run on their side,
-such as web search, from every request. [docs/mcp.md](docs/mcp.md)
+**MCP servers** get the same controls as models: an agent calls a server's
+tools through `/api/mcp/<alias>` with its Keera key, sees only the tools its
+guardrail allows, and every call is filtered and logged.
+[docs/mcp.md](docs/mcp.md)
 
 ```sh
 keera mcp add github --endpoint https://api.githubcopilot.com/mcp/ --api-key @-
@@ -166,9 +143,8 @@ keera mcp calls --summary
 ```
 
 **Hosted models** get the same allow-lists, budgets, rate limits and audit as
-any other model. Add them on the panel's **Models** screen, or in the catalogue
-file that new organisations start from. Prompts sent to them leave your infrastructure, so put a guardrail on
-them. [docs/providers.md](docs/providers.md)
+any other model. Prompts sent to them leave your infrastructure, so put a
+guardrail on them. [docs/providers.md](docs/providers.md)
 
 **Claude subscriptions** let a Claude Team or Enterprise plan pay for Claude
 Code, while Keera applies the guardrails and shows each person's usage. They

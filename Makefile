@@ -9,8 +9,7 @@ BUILD_DIR ?= build
 # KEERA_TEST_REDIS_URL point at services of your own.
 PODMAN ?= podman
 COMPOSE ?= podman compose
-# Pinned to the major versions CI runs. compose mounts its volume where
-# Postgres 18 keeps its data, so a newer major would not find it.
+# Pinned to the major versions CI runs.
 PG_IMAGE ?= docker.io/library/postgres:18
 PG_CONTAINER ?= keera-test-pg
 PG_PORT ?= 55432

@@ -57,25 +57,11 @@ fi
 
 # ------------------------------------------------------------- the gateway
 #
-# Everything the gateway set that a person or an agent in here needs.
-#
-# It has to be the whole set rather than the interesting half: a variable that is
-# present in the container's environment and absent from a shell is worse than
-# one missing from both, because a script written against it works when the
-# entrypoint runs it and fails when somebody runs it by hand. So it is every
-# exported variable, the image's PATH and whatever extra the caller asked for
-# included, less the ones below.
-#
-# It is written once, in sshd's own format, and everything else is derived from
-# that file. ~/.ssh/environment is what makes these reach a session at all:
-# an ssh session inherits nothing from the container, and the shell startup
-# files cannot be relied on - a non-interactive `ssh host cmd`, which is what
-# scp and every editor's remote server use, reads ~/.bashrc only on some builds
-# of bash and not on Alpine's. sshd reads this for every session, whatever the
-# shell and whatever the kind. See PermitUserEnvironment in sshd_config.
-#
-# The format is strict: NAME=value, one per line, no quoting and no expansion.
-# So a value with a line break cannot go in.
+# Every exported variable, so a script that works when the entrypoint runs it
+# also works when somebody runs it by hand, less the ones below. It is written
+# once, to ~/.ssh/environment (see PermitUserEnvironment in sshd_config), and
+# everything else is derived from that file. Its format is NAME=value, one per
+# line, with no quoting, so a value with a line break cannot go in.
 #
 # Left out: the shell's own (PWD, OLDPWD, SHLVL), TERM, which is the ssh
 # client's to set, and what only this start uses. The task is the developer's

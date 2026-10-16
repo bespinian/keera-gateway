@@ -456,8 +456,7 @@ type Router struct {
 // instead of using a fallback.
 func (r Router) Refuses() bool { return r.Fallback == "" }
 
-// Offers reports whether alias is a destination this router may choose. Every
-// decision is checked against it, because a model's answer is not trusted.
+// Offers reports whether alias is a destination this router may choose.
 func (r Router) Offers(alias string) bool { return slices.Contains(r.Destinations, alias) }
 
 // RouterMode is what chooses the model that answers a request.

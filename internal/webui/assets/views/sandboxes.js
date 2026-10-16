@@ -136,8 +136,8 @@ function head(ctx, classes, driver, limits, canAdmin, projects) {
   return listHead(
     [
       "A sandbox is a machine for one task or one working day, with the " +
-        "toolchain installed and its own API key. It expires on its own. Only " +
-        "its owner can open a shell in it, with ",
+        "toolchain installed and its own API key. It expires on its own. Its " +
+        "owner, or an operator, opens a shell in it with ",
       h("code", {}, "keera sandbox ssh <name>"),
       ".",
     ],

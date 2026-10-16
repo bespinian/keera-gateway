@@ -1,14 +1,8 @@
 # sshd inside a Keera sandbox.
 #
-# It runs as the sandbox user on 2222 with no privilege separation directory of
-# its own, which is possible because there is exactly one account here and
-# nothing to separate from.
-#
-# 2222 rather than 22 because this process is an ordinary user with every
-# capability dropped, and such a process cannot bind a privileged port - sshd
-# would fail with "Bind to port 22 failed: Permission denied" and the sandbox
-# would exit. The number is never typed by anybody: the gateway dials it, and a
-# developer reaches it through 'keera sandbox ssh'.
+# It runs as the sandbox user, with no privilege separation directory: there is
+# one account and nothing to separate from. Port 2222 rather than 22 is
+# explained at PortSSH in internal/sandbox/sandbox.go.
 #
 # Authentication is by key, and the key is the one the gateway put in
 # authorized_keys when the sandbox was created. Passwords are off and there is
@@ -30,10 +24,10 @@ PidFile /run/sshd/sshd.pid
 # scp and every editor's remote server use, reads ~/.bashrc only on some builds
 # of bash and not on Alpine's.
 #
-# So sshd injects it, for any shell and any kind of session. The usual caution
-# about this option is that a user could set LD_PRELOAD for a privileged login;
-# here the only account is the sandbox's owner, on their own machine, and the
-# file is written by the entrypoint before sshd starts.
+# So sshd injects it from ~/.ssh/environment, for any shell and any kind of
+# session. The usual caution about this option is that a user could set
+# LD_PRELOAD for a privileged login; here the only account is the sandbox's
+# owner, and the entrypoint writes the file before sshd starts.
 PermitUserEnvironment yes
 
 # The only way in.

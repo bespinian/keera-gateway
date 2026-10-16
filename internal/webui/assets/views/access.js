@@ -379,12 +379,10 @@ function filtersSection(scopes) {
     h(
       "div",
       { class: "hint", style: { marginTop: "8px" } },
-      "Each filter checks your request first. Some remove secrets or client " +
-        "data, some only decide whether it may be sent, and some run in " +
-        "shadow and change nothing. The Filters screen shows which. Filters " +
-        "that use a model add latency and cost; pattern filters do not. If " +
-        "an enforcing filter refuses or cannot run, nothing is sent and the " +
-        "error names it.",
+      "Each filter checks your request first: some remove secrets, some " +
+        "only allow or refuse it, and some run in shadow and change nothing. " +
+        "Filters that use a model add latency and cost, and if an enforcing " +
+        "one refuses or cannot run, nothing is sent and the error names it.",
     ),
   );
 }

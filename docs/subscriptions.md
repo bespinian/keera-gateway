@@ -54,8 +54,8 @@ models:
     subscription: true
 ```
 
-In the panel, choose **Anthropic** as where the model runs, then tick **Paid by
-each person's Claude subscription**.
+In the panel, open **Models → Add model**, click **Add** on an Anthropic model,
+then tick **Paid by each person's Claude subscription**.
 
 A subscription model:
 
@@ -64,7 +64,8 @@ A subscription model:
   go through an egress proxy, set `HTTPS_PROXY` on the gateway.
 - stores no API key.
 - answers only the Anthropic Messages API, which Claude Code speaks.
-- cannot be a filter's model, a router's model, or a router destination.
+- cannot be a filter's model, a router's model, or a router destination
+  ([Models that filters and routers run on](gateway.md#models-that-filters-and-routers-run-on)).
 
 Claude Code asks for some background work by Anthropic's own model name,
 whatever its settings say. A subscription key that names one, such as

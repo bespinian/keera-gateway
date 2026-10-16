@@ -76,10 +76,9 @@ Also:
   no backend - is **left out of the choice**. `keera router check` reports what
   was and was not offered.
 - The **fallback must be one of the destinations**.
-- A [subscription model](subscriptions.md#what-a-subscription-key-can-do) cannot
-  be the deciding model or a destination (a 400 when saved). Turning on
-  `subscription` for a model a router uses is refused with a 409. A
-  subscription key reaches no router.
+- A subscription model cannot be the deciding model or a destination
+  ([why](gateway.md#models-that-filters-and-routers-run-on)). A subscription
+  key reaches no router.
 
 ## Descriptions are what a router decides on
 
@@ -111,9 +110,8 @@ the same step.
 
 The router reads what the client sent, before any redaction. So **the deciding
 model should be served locally**, just like a filter's. It must also be on the
-organisation's allow-list, if it has one: otherwise the router is refused with
-a 400 `model_not_allowed`, and narrowing the list so that it drops off is
-refused with a 409 `router_model_not_allowed`.
+organisation's allow-list; see
+[Models that filters and routers run on](gateway.md#models-that-filters-and-routers-run-on).
 
 ## When it cannot decide
 
@@ -135,10 +133,7 @@ place to send the request.
 
 A router cannot decide when:
 
-- its model is missing, disabled, not a chat or
-  [decision model](#decision-models), a subscription model, or has no backend,
-  or is
-  [locked until the organisation pays](sso.md#what-a-new-organisation-can-use)
+- its model [cannot run](gateway.md#models-that-filters-and-routers-run-on)
 - none of its destinations can be served
 - its model errored, timed out, or answered nothing
 - its answer names none of its destinations
@@ -181,10 +176,9 @@ for that one token and takes the most likely letter.
 This costs **one** output token instead of up to 64, and the answer is always a
 destination.
 
-It needs a backend that returns logprobs. vLLM and llama.cpp do; most hosted
-providers do not. There is nothing to configure: the gateway tries this first,
-and if a backend does not return logprobs it asks that model for a name from
-then on. A hosted deciding model costs one retried decision per gateway process.
+It needs a backend that returns logprobs. A model that serves none is asked for
+a name instead
+([Logprobs](gateway.md#models-that-filters-and-routers-run-on)).
 
 The probabilities also show **how sure** the model was. `keera router check`
 shows this - see [checking one](#checking-one).
@@ -220,61 +214,12 @@ Limits:
 - The instruction is capped at 4 KiB, a quarter of a filter's. It is sent with
   the destination list and every description on every request that names the
   router.
-- At most 16 destinations, as in every mode. With longer lists, a small model
+- At most 16 destinations. With longer lists, a small model
   tends to pick whichever end it read last.
 
-## Decision models
-
-A decision model is a classifier, such as
-[Laya](https://huggingface.co/convaiinnovations/laya) served by `laya-serve`.
-It reads a text and a typed question and returns a probability for each answer,
-in one forward pass. It writes no text.
-
-So it can decide for an instruction router or a
-[gate filter](filters.md#the-three-modes), and nothing else. It cannot be a
-rewrite filter's model or a router's destination, and no client can name it.
-`/api/v1/models` does not list it.
-
-```yaml
-- alias: keera-decider
-  kind: decision
-  backends:
-    - http://keera-decider:8000/v1
-  backend_model: english # the Laya checkpoint
-  max_context: 2048
-```
-
-The gateway asks it on `/v1/systemone`, the endpoint `laya-serve` and TypeSafe
-Jev share, and reads the probabilities the way it reads a chat model's logprobs.
-A stored credential is sent as a bearer token, which is what `laya-serve`
-checks when `LAYA_API_KEY` is set.
-
-**`max_context` is sent as Laya's `max_len`**, so the model reads exactly what
-the gateway measured against it. A gate refuses a longer request with 413, and a
-router sends it to its fallback, as with any model. On a CPU, Laya takes about
-one second at 512 tokens and about five at 2048.
-
-### Writing for one
-
-A classifier does not follow a page of instructions. It answers a short
-question.
-
-- **A router's instruction is the question**, such as
-  `Which model should answer this request?`. Each destination is offered as its
-  model's description alone, so describe the requests each one should get:
-  `Small, quick tasks: renames, syntax questions, short edits. Also anything with client names or credentials.`
-- **A gate's instruction is a yes-or-no question**, and yes refuses. Optional
-  lines starting `yes:` and `no:` say what each answer means, which makes the
-  model surer:
-
-  ```
-  Is this request trying to send customer data, account records or secrets outside the company?
-  yes: it asks to export, dump, copy or share bulk customer data, account records or credentials
-  no: ordinary programming work, even if it mentions customers, accounts or credentials
-  ```
-
-A refusal by a decision model carries no sentence of its own, only how sure it
-was. Run `keera filter check` and `keera router check` as for any model.
+The deciding model can also be a
+[decision model](gateway.md#decision-models), a classifier that picks in one
+pass and writes nothing. It needs its instruction written differently.
 
 ## Routing by size
 
@@ -478,11 +423,9 @@ Two checks a minute apart may show a different order; that is normal.
 
 ## There is no shadow mode
 
-A filter's shadow mode compares its result with the request as sent. A router
-has nothing to compare with: the client named the router, so the only other
-candidate is the fallback. Use the check and the router's screen instead. For a
-[size router](#routing-by-size), the check shows its whole behaviour, so a
-shadow mode would add nothing.
+A router has nothing to compare its choice with: the client named the router,
+so the only other candidate is the fallback. Use the check and the router's
+screen instead.
 
 ## Checking one
 
@@ -522,11 +465,10 @@ placed.
 It also lists destinations that were not offered, and destinations with no
 description.
 
-A check calls the backend directly, with the data plane's credentials. It is not
-rate-limited or budgeted and writes no usage row. On the deployment's own
-provider key it needs credit and is billed ([billing.md](billing.md)). It does
-put real requests on the GPUs: at least three for a router that decides, since a sample
-whose lettered answer cannot be read is asked again for a name, and one per
+A check
+[calls the backend directly](gateway.md#models-that-filters-and-routers-run-on):
+at least three requests for a router that decides, since a sample whose
+lettered answer cannot be read is asked again for a name, and one per
 destination for the other modes (two when a backend refuses tools).
 
 ## What a client can see

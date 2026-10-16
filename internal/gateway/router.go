@@ -26,8 +26,8 @@ import (
 //
 //   - It can only choose from its own list. Its model's answer is looked up in
 //     the destinations, because a small model's reply is not to be trusted.
-//   - It runs before the filters, so it reads what the client sent. Its model
-//     must therefore be local.
+//   - It runs before the filters, so it reads what the client sent,
+//     unredacted. Its model should therefore be served locally.
 //   - It costs a generation on every request that names it, which is why what
 //     it reads is bounded. See routerWindowBytes.
 //

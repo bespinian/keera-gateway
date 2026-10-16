@@ -122,19 +122,14 @@ func (s *Server) checkFilterFields(w http.ResponseWriter, r *http.Request,
 	case len(f.Rules) > 0:
 		// The store fills in a missing mode later, so it is named here.
 		mode := cmp.Or(f.Mode, policy.FilterModeRewrite)
-		badRequest(w, "'rules' is set, and this is a "+string(mode)+" filter: it reads the "+
-			"request with a model and an instruction, so there is nothing for a "+
-			"list of expressions to be applied by. Use 'mode': 'pattern' for one "+
-			"that runs rules instead")
+		badRequest(w, "'rules' only works with 'mode': 'pattern'; a "+string(mode)+
+			" filter reads the request with a model and a prompt instead")
 		return false
 	case f.Prompt == "":
-		badRequest(w, "'prompt' is required; it is the instruction the filter's model is given, "+
-			"and a filter without one would read every request the guardrail "+
-			"covers with nothing to judge it against")
+		badRequest(w, "'prompt' is required: it tells the filter's model what to look for")
 		return false
 	case len(f.Prompt) > maxFilterPromptBytes:
-		badRequest(w, fmt.Sprintf("'prompt' is %d bytes; the limit is %d, because this text is "+
-			"sent to the filter's model on every request the guardrail covers",
+		badRequest(w, fmt.Sprintf("'prompt' is %d bytes; the limit is %d, since it is sent with every request",
 			len(f.Prompt), maxFilterPromptBytes))
 		return false
 	}
@@ -148,26 +143,19 @@ func (s *Server) checkFilterFields(w http.ResponseWriter, r *http.Request,
 func checkFilterRules(w http.ResponseWriter, f policy.Filter) bool {
 	switch {
 	case f.Model != "":
-		badRequest(w, "'model' is set, and this is a pattern filter: it applies its rules in the "+
-			"gateway and runs no model at all, which is the whole of what the mode is "+
-			"for. Leave it out, or use 'mode': 'rewrite' for a filter that reads the "+
-			"request with a model")
+		badRequest(w, "'model' must be empty on a pattern filter, which runs no model; "+
+			"use 'mode': 'rewrite' for one that does")
 		return false
 	case f.Prompt != "":
-		badRequest(w, "'prompt' is set, and this is a pattern filter: nothing reads prose, so there "+
-			"is nothing an instruction would be given to. What it applies is 'rules'")
+		badRequest(w, "'prompt' must be empty on a pattern filter, which applies 'rules' instead")
 		return false
 	case len(f.Rules) == 0:
-		badRequest(w, "'rules' is required on a pattern filter; one with none would read every "+
-			"request the guardrail covers and change nothing about any of them, which "+
-			"is not a filter that passes everything - it is a filter somebody thinks "+
-			"is working")
+		// One with none would change nothing, yet look like it works.
+		badRequest(w, "'rules' needs at least one rule on a pattern filter")
 		return false
 	case len(f.Rules) > policy.MaxFilterRules:
-		badRequest(w, fmt.Sprintf("'rules' has %d rules; the limit is %d. Every one of them is "+
-			"matched against every segment of every request the guardrail covers, and "+
-			"a list this long is also past the point where anybody can say what the "+
-			"filter does by reading it", len(f.Rules), policy.MaxFilterRules))
+		badRequest(w, fmt.Sprintf("'rules' has %d rules; the limit is %d, since each one is "+
+			"matched against every request", len(f.Rules), policy.MaxFilterRules))
 		return false
 	}
 	for _, rule := range f.Rules {

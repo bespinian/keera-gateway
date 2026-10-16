@@ -1563,5 +1563,5 @@ If you are unsure, choose the more capable model rather than the cheaper one.`;
 
 // DECISION_EXAMPLE is PROMPT_EXAMPLE for a decision model, which answers a
 // short question and is offered each destination by its description alone. See
-// docs/routers.md#decision-models.
+// docs/gateway.md#decision-models.
 const DECISION_EXAMPLE = "Which model should answer this request?";

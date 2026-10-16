@@ -2,8 +2,8 @@
 //
 // The control plane has three ways in: the operator key, for automation and
 // for a new deployment with no identity provider yet; a browser session, for a
-// person signed in through the identity provider; and a command-line token,
-// for that same person at a terminal.
+// person signed in through the identity provider or with a passkey; and a
+// command-line token, for that same person at a terminal.
 package authn
 
 import (

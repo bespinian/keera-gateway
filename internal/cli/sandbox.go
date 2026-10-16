@@ -337,8 +337,8 @@ func (r *sandboxRun) deleteClass(ctx context.Context) error {
 }
 
 func (r *sandboxRun) classes(ctx context.Context) error {
-	// The organisation is required: the answer carries the caller's own
-	// guardrail, and without it the list would offer classes they may not use.
+	// The organisation is required: the answer carries the guardrail a new
+	// sandbox gets, and without it the list would offer classes it refuses.
 	orgID, err := resolveOrg(ctx, r.c, r.org)
 	if err != nil {
 		return err

@@ -55,8 +55,8 @@ none.
   or `standard_only`. The model answers at its normal speed and price. The
   response header `X-Keera-Removed-Fields` names what was removed.
 - **Nothing stored at OpenAI.** Every organisation shares the deployment's
-  OpenAI account. So a Responses request is sent with `store` off, and one with
-  `previous_response_id`, `conversation` or `background` is refused with a 400. Send the whole conversation in `input` instead.
+  OpenAI account, so a Responses request must carry the whole conversation
+  ([Three request shapes](gateway.md#three-request-shapes)).
 
 A subscription model is not affected: each person's own Claude plan pays for it
 ([subscriptions.md](subscriptions.md)). Self-hosted models are not affected
@@ -75,9 +75,11 @@ is billed at its output ceiling, because it does not read the usage record.
 
 Token counts are the provider's own. When a client hangs up, the gateway goes
 on reading the answer, for up to 15 minutes, until the provider's usage record
-arrives. Otherwise the reasoning a model never streamed would go unbilled. For
-the same reason, a provider gets 15 minutes to start answering, not
-`KEERA_UPSTREAM_HEADER_TIMEOUT`.
+arrives. Otherwise the reasoning a model never streamed would go unbilled. The
+request's row then has the real token counts and the provider's status, still
+marked as cancelled. For the same reason, a provider gets 15 minutes to start
+answering, not `KEERA_UPSTREAM_HEADER_TIMEOUT`.
+
 Cache writes are billed at their own rate, like the rest of Keera's accounting
 ([providers.md](providers.md#cache-writes)), including Anthropic's dearer
 one-hour cache writes.
@@ -229,18 +231,17 @@ report. `--off` makes it pay in advance again.
 ### How a payment is confirmed
 
 PostFinance calls the webhook when a transaction changes. The call proves
-nothing, so Keera only takes it as a reason to read the transaction back over
-the authenticated API. Only a transaction of a pending or failed Keera payment
-is read, so one paid after Keera gave up on it is still credited.
-A payment counts as paid in PostFinance's state **Fulfill**, and only if the
-amount and currency are the ones Keera asked for.
+nothing, so Keera reads the transaction back over the authenticated API. A
+payment counts as paid only in PostFinance's state **Fulfill**, and only with
+the amount and currency Keera asked for. A payment Keera already marked failed
+is still read, so one paid late is still credited.
 
-A lost webhook does not lose a payment. Opening **Billing** looks up the
-organisation's recent pending payments at once. Every 30 seconds, one replica also looks up the
-payments pending for more than a minute, for a day. A payment still open after
-that stays pending, and only its webhook settles it, so one paid late is still
-credited. An automatic top-up that has not ended after a day is marked failed,
-and the log names its transaction, so someone can look it up in PostFinance.
+A lost webhook does not lose a payment. Opening **Billing** checks the
+organisation's recent pending payments at once, and every 30 seconds one
+replica checks those pending for more than a minute, for up to a day. After
+that, only the webhook settles a payment. An automatic top-up still open after
+a day is marked failed, and the log names its transaction, so someone can look
+it up in PostFinance.
 
 ## Keep in mind
 

@@ -29,9 +29,9 @@ On the GPU tier, pass the same `-f` flags to every later `podman compose` call
 the vLLM that is running.
 
 On the first start the weights download into the `llama-cache` volume
-(`hf-cache` on the GPU tier), and the inference container stays unready for
-minutes. Watch the logs; do not restart it. The gateway is up at once. It
-applies its schema on start and waits only for `keera-db`.
+(`hf-cache` on the GPU tier); do not restart the inference container while it
+is unready. The gateway is up at once. It
+waits only for `keera-db`.
 
 Stop with `podman compose down`, using the same `-f` flags you started with.
 Add `-v` to also delete the Postgres and model volumes; the weights then
@@ -74,10 +74,9 @@ on the same card; the unquantised 14B needs a 48 GB card (g6e.xlarge).
 
 ## Notes
 
-- **`models.yaml` is what each new organisation starts with**, whether it comes
-  from `keera org create`, the panel, or signing in with the operator key while
-  no organisation exists yet (that one is called "Keera"). After that, the
-  models are the organisation's own.
+- **`models.yaml` is what each new organisation starts with.** After that, the
+  models are the organisation's own
+  ([Template files](../docs/gateway.md#template-files)).
 - **The backends use the model's own chat template.** Qwen's adds "You are
   Qwen, created by Alibaba Cloud..." when a request has no system message. For
   a standing system prompt, set one on a guardrail:
@@ -116,7 +115,7 @@ on the same card; the unquantised 14B needs a 48 GB card (g6e.xlarge).
 image, so `decider/Containerfile` installs it. The first start downloads about
 0.8 GB into the `decider-cache` volume.
 
-It is a [decision model](../docs/routers.md#decision-models): routers and gate
+It is a [decision model](../docs/gateway.md#decision-models): routers and gate
 filters can decide with it, and it writes no text. For example:
 
 ```sh

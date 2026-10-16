@@ -15,7 +15,7 @@ Two things, and both are needed:
 1. **The conversation.** The gateway puts a `session_key` on every chat request
    it records. Requests with the same key are in the same conversation.
 2. **The idle gap.** A conversation's requests are split wherever more than
-   `KEERA_SESSION_GAP` passed between two of them. Half an hour by default.
+   [`KEERA_SESSION_GAP`](#configuration) passed between two of them.
 
 The gap is needed on its own. A client that opens every task with the same words
 ("continue", "fix the tests") would otherwise have one session weeks long. And a
@@ -118,36 +118,21 @@ image that adds another agent has to configure it. The sandbox's session key is
 computed once at creation, the same way as per request, so a sandbox and its
 task can be read side by side. See [sandboxes.md](sandboxes.md).
 
-## How the grouping is computed
+## Sessions are cut when the report is read
 
-At read time, not at write time. Nothing is stored per session, so the write
-path stays a single insert with no lookup. The read path walks one
-conversation's rows in time order and counts the gaps it passes; that count is
-the session number.
+Nothing is stored per session, so recording a request stays one insert. This
+means:
 
-This means:
+- **The gap can change later.** A new `KEERA_SESSION_GAP` re-cuts every session
+  already recorded.
+- **It works across replicas.** The key depends only on the request, so two
+  gateways serving one conversation write the same one.
+- **A session is named by its first request.** Any request in it leads to it,
+  so one row in the request log opens the whole task.
 
-**The threshold can change later.** Changing `KEERA_SESSION_GAP` re-cuts every
-session already recorded, not only new ones.
-
-**It works across replicas.** Two gateways serving one conversation write the
-same key, because the key depends only on the request.
-
-**A session has no stored id**, so it is named by the id of the request that
-opened it. Any request in it leads to it, so one row in the request log is
-enough to open the whole task.
-
-### The window edge
-
-The walk starts one gap before the window opens, and drops the sessions that
-ended in that extra span. So a session already under way when the window opens
-keeps up to one gap of what came before. Without this, a task that had run for
-ten minutes would show only what its last two minutes cost.
-
-A task that ran for longer than one gap before the window opens is still cut:
-the list shows only its part from one gap before the window. Opening the
-session shows it whole, because that walks its own conversation back to where
-it started.
+A task already under way when the report's window opens keeps up to one gap of
+what came before, so it does not show only its last minutes. Opening the
+session shows it whole.
 
 ## Reading the report
 
@@ -208,15 +193,19 @@ request in the task: that column, the first column of `keera failures`, or the
 
 ### The API
 
-`GET /control/v1/sessions` takes the same filters as the command, `key` to
-narrow it to one conversation, `outcome` (`ok`, `failed`, `refused`,
-`interrupted` or `unhappy`), `status` (the last request's status, such as
-`402`, or a class, such as `5xx`), and `sort` (`recent`, `cost`, `tokens`, `requests`
-or `duration`). `facets=1` adds the filter choices with their counts, as on
-`GET /control/v1/requests`, whose `sort` is `recent`, `cost`, `tokens` or `ttft`. `GET /control/v1/sessions/{id}` takes any request
-in the session. Both return `gap_seconds`, the gap used. `format=csv` on the
-list exports up to 5000 sessions. Paging with `before` works only in the default
-order.
+`GET /control/v1/sessions` takes the same filters as the command, and:
+
+- `key`: one conversation
+- `outcome`: `ok`, `failed`, `refused`, `interrupted` or `unhappy`
+- `status`: the last request's status, such as `402`, or a class, such as `5xx`
+- `sort`: `recent`, `cost`, `tokens`, `requests` or `duration`
+- `facets=1`: the filter choices with their counts, as on
+  `GET /control/v1/requests`
+- `format=csv`: up to 5000 sessions
+- `before`: the next page, in the default order only
+
+`GET /control/v1/sessions/{id}` takes any request in the session. Both return
+`gap_seconds`, the gap used.
 
 ## Narrowing, and the one filter that is not what it looks like
 
@@ -231,34 +220,16 @@ each one whole.
 
 ## What it costs
 
-**On the write path, nothing measurable.** One SHA-256 over the opening message
-per chat request, no lookup, no extra round trip.
-
-**In storage**, seventeen characters per row of `usage_events`, and one partial
-index over the rows that have one.
-
-**On the read path**, the walk. Its cost grows with the number of requests in
-the window, not the number of tasks.
-
-On 400,000 recorded requests, one organisation's 30-day window - 100,000
-requests in 10,000 conversations - takes about 250 ms, and its last 7 days about
-13 ms. The screen makes two walks: one for the page of rows and one for the
-totals over the window, so the totals do not change as somebody scrolls.
-
-The index is `(org_id, session_key, ts)`, partial on the rows that have a key.
-It makes reading _one_ session a range scan over that one conversation: under a
-millisecond, however much traffic the deployment has.
+Recording costs one SHA-256 per chat request and seventeen characters per row.
+Reading walks every request in the window: a 30-day window of 100,000 requests
+takes about 250 ms. Reading one session takes under a millisecond.
 
 ## Configuration
 
-| Variable            | Default | What it does                                                                                                 |
-| ------------------- | ------- | ------------------------------------------------------------------------------------------------------------ |
-| `KEERA_SESSION_GAP` | `30m`   | How long a conversation may go quiet before the next request on it starts a new session. Refused below `1m`. |
-
-Thirty minutes fits how a coding agent is used. Within a task, requests are seconds
-or a minute or two apart. Between tasks there is a meeting, a lunch or a night.
-Much under ten minutes starts splitting one task into several. Much over an hour
-starts joining an afternoon's tasks into one.
-
-Grouping happens when the report is read, so changing this is safe and takes
-effect at once. Read a busy week at two or three values before choosing one.
+`KEERA_SESSION_GAP` is `30m` by default and refused below `1m`. Within a task,
+requests are seconds or a minute or two apart; between tasks there is a
+meeting, a lunch or a night. Much under ten minutes splits one task into
+several, much over an hour joins an afternoon's tasks into one. Sessions are
+cut when they are read, so after a restart a new value applies to every
+recorded request too. Read a busy week at two or three values before choosing
+one.

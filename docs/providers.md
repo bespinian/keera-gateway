@@ -125,7 +125,7 @@ keera model add keera-swiss --provider infomaniak --product-id 100234 \
 Use `@-`: a key passed as a flag value ends up in the shell history.
 
 The model goes in the organisation the CLI works in. See
-[Several organisations](sso.md#several-organisations).
+[Several organisations](gateway.md#several-organisations).
 
 ## Where the credential lives
 
@@ -134,30 +134,24 @@ uses that key and is billed at list price. See [billing.md](billing.md). The
 rest of this section is about keys an organisation enters itself.
 
 The key is stored on the model, encrypted with AES-GCM under
-`KEERA_SECRET_KEY`, so a Postgres dump holds only ciphertext. Set it in the
+[`KEERA_SECRET_KEY`](install.md#required), so a Postgres dump holds only
+ciphertext. Set it in the
 panel or with `keera model set <alias> --api-key @-`. Each model holds its
 organisation's own key. Operators and the organisation's administrators can set
 it.
 
-If you change `KEERA_SECRET_KEY` later, every stored credential becomes
-unreadable and must be entered again.
-
-A catalogue file never holds a key. When an organisation gets a model from the
-file, store its key with the command above. `keera model apply` keeps a key
-that is already stored.
+A model from a [template file](gateway.md#template-files) comes without a key;
+store it with the command above.
 
 A stored key is only sent to the hosts it was entered for. A change that adds a
 backend on another host is refused unless it gives the key again, or removes it
 with `--no-api-key`. Otherwise an administrator could point a model someone
 else set up at a host of their own and read its key.
 
-A model cannot name one of the gateway's environment variables as its key. It
-would let an administrator send any of the gateway's secrets, such as
-`KEERA_SECRET_KEY`, to a server of their choice. The deployment's own provider
-keys are the one exception, and they only ever go to the provider's own
-endpoint ([billing.md](billing.md)).
+The deployment's own provider keys only ever go to the provider's own endpoint
+([billing.md](billing.md)).
 
-An Infomaniak product id is not a secret. It goes in the catalogue entry next to
+An Infomaniak product id is not a secret. It goes in the model's entry next to
 the model id.
 
 ## Put a guardrail on it
@@ -230,7 +224,7 @@ A model in your own infrastructure reports no cache and needs no cached price.
 
 Anthropic, and OpenAI from `gpt-5.6` on, charge 25% more than the input price
 for the part of the prompt they write to their cache. Both report how much that
-was, as part of the prompt like a cache read. The gateway charges it at the
+was, each the way it reports a cache read. The gateway charges it at the
 cache-write rate. The table has the rate for every model that charges one.
 Anthropic also reports writes kept for an hour instead of five minutes; those
 are charged at twice the input price.
@@ -267,50 +261,24 @@ long_prompt:
 `keera model list --json` (as `long_prompt`) and the control panel show them. The CLI has no flags for
 them: `--price-in` and the others change only the normal prices.
 
-## Descriptions
-
-A model declared through a provider starts with that provider's description. It
-is written for the comparison a [router](routers.md) makes: speed, cost,
-thoroughness.
-
-It cannot say where the model runs, because an entry may point
-`provider: anthropic` at an egress proxy or a sovereign endpoint. So rewrite it:
-
-```sh
-keera model set keera-frontier --description \
-  "hosted outside this cluster and expensive; design and multi-step reasoning. \
-Must not be sent client data."
-```
-
 ## Known rough edges
 
 ### Anthropic and OpenAI requests are forwarded as they are
 
-**Messages clients reach Anthropic's own API.** A request to `/api/v1/messages`
-(what Claude Code sends) is forwarded to Anthropic's `/v1/messages` without
-being translated. The guardrails still apply to it in its own shape: filter
-rewrites, the system prompt and the output ceiling.
-Prompt caching and thinking work, and cached input is charged at the cached
-rate. The key is sent as `x-api-key`, and the client's `anthropic-version` and
-`anthropic-beta` headers are passed on. An egress proxy in front of Anthropic
-must pass `/v1/messages` as well as `/v1/chat/completions`. A Claude Team or
-Enterprise plan can pay instead; see [subscriptions.md](subscriptions.md).
+A Messages request to an Anthropic model, and a Responses request to an OpenAI
+model, are forwarded without being translated
+([gateway.md](gateway.md#three-request-shapes)). What that means per provider:
 
-**Responses clients reach OpenAI's own API.** A request to `/api/v1/responses`
-(what Codex sends) is forwarded to OpenAI's `/v1/responses` with its reasoning
-items. With the organisation's own key, the only change besides the
-guardrails, as for Anthropic, is that a reasoning model gets no `temperature`
-or `top_p`. The deployment's key changes more
-([billing.md](billing.md#what-changes-for-a-model-of-that-provider)). An
-egress proxy in front of OpenAI must pass `/v1/responses` as well as
-`/v1/chat/completions`.
-
-**The OpenAI reasoning models take no temperature.** Every OpenAI model whose
-id does not start with `gpt-4`, `gpt-3` or `chatgpt-` refuses `max_tokens`, and
-any `temperature` or `top_p` other than the default. So the gateway sends
-`max_completion_tokens` instead of `max_tokens` to every OpenAI chat model, and
-drops `temperature` and `top_p` for the reasoning models. A client that asked
-for a temperature gets the default.
+- **Anthropic.** The key is sent as `x-api-key`, and the client's
+  `anthropic-version` and `anthropic-beta` headers are passed on. An egress
+  proxy in front of Anthropic must pass `/v1/messages` as well as
+  `/v1/chat/completions`. A Claude Team or Enterprise plan can pay instead; see
+  [subscriptions.md](subscriptions.md).
+- **OpenAI.** An egress proxy must pass `/v1/responses` as well as
+  `/v1/chat/completions`. The deployment's own key changes more
+  ([billing.md](billing.md#what-changes-for-a-model-of-that-provider)). The
+  reasoning models take no `temperature`
+  ([gateway.md](gateway.md#what-it-deliberately-does-not-do)).
 
 ### Also worth knowing
 

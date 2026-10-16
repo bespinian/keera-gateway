@@ -46,31 +46,6 @@ func (s *Server) routerReport(w http.ResponseWriter, r *http.Request, p *authn.P
 	}
 }
 
-// ordersBy says, for the error messages, what orders the destinations of a
-// router that reads nothing.
-func ordersBy(mode policy.RouterMode) string {
-	switch mode {
-	case policy.RouterModeLatency:
-		return "what each of them has lately taken to begin answering, fastest first"
-	case policy.RouterModeLeastBusy:
-		return "how many requests this gateway has in flight against each, emptiest first"
-	case policy.RouterModeSize:
-		return "how much text is in the request, against the ceiling set on each"
-	default:
-		return "the order they are written in"
-	}
-}
-
-// readsNothing says, for the error messages, what a router with no deciding
-// model reads. A size router does read the request's length, so it must not be
-// told it "reads nothing".
-func readsNothing(mode policy.RouterMode) string {
-	if mode.Sizes() {
-		return "it reads how much text is in the request and nothing of what the request says"
-	}
-	return "it reads nothing and decides nothing"
-}
-
 // routerInput is the body of PUT /v1/routers/{alias}.
 type routerInput struct {
 	Mode         policy.RouterMode `json:"mode"`
@@ -239,9 +214,7 @@ func (s *Server) checkRouterAlias(w http.ResponseWriter, r *http.Request, orgID,
 func checkCeilings(w http.ResponseWriter, rt policy.Router) bool {
 	for alias := range rt.Ceilings {
 		if !rt.Offers(alias) {
-			badRequest(w, "'ceilings' sets a ceiling on '"+alias+"', which is not one of this router's "+
-				"destinations. A ceiling is the largest request a destination should be "+
-				"given, so it has to name somewhere this router can send one")
+			badRequest(w, "'ceilings' names '"+alias+"', which is not one of this router's destinations")
 			return false
 		}
 	}
@@ -249,15 +222,12 @@ func checkCeilings(w http.ResponseWriter, rt policy.Router) bool {
 	case 1:
 		return true
 	case 0:
-		badRequest(w, "every destination has a ceiling, so a request larger than all of them has "+
-			"nowhere this router meant to send it. Leave the ceiling off the destination "+
-			"that should take what the others will not - usually the largest model")
+		badRequest(w, "leave the ceiling off one destination, usually the largest model, "+
+			"so the largest requests have somewhere to go")
 		return false
 	default:
-		badRequest(w, "'"+strings.Join(unbounded, "' and '")+"' both have no ceiling, and a router "+
-			"needs exactly one destination that takes what the others will not. Whichever "+
-			"of them comes first would answer every request that reaches it and the rest "+
-			"would never be the first choice for anything")
+		badRequest(w, "exactly one destination may have no ceiling, but '"+
+			strings.Join(unbounded, "' and '")+"' have none")
 		return false
 	}
 }

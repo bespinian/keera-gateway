@@ -20,28 +20,24 @@ leaves the containers running, so later starts are instant.
    in podman, stops any gateway container holding port 8080, and waits for
    Postgres.
 3. **air** - builds and runs the gateway on the host against those three, with
-   debug logging on. Each new organisation starts with the models in
-   `build/models.dev.yaml` and the sandbox classes in `compose/sandboxes.yaml`,
-   unless `.env` names other files. `make dev` writes `build/models.dev.yaml`
-   from `compose/models.yaml`, with the backends at `127.0.0.1:8000` and
-   `127.0.0.1:8001` instead of `keera-engine` and `keera-decider`. An organisation
-   that already exists keeps its own. When `KEERA_SANDBOX_DRIVER` is set,
-   `KEERA_SANDBOX_PUBLIC_URL` defaults to `http://host.containers.internal:8080`.
+   the settings below.
 
 The gateway reads every setting in `compose/.env`, sandbox ones included.
-Three are always overridden, whatever `.env` says:
+`make dev` sets these:
 
-| Setting              | `make dev` sets                               |
-| -------------------- | --------------------------------------------- |
-| `KEERA_DATABASE_URL` | the `keera-db` container, on `127.0.0.1:5432` |
-| `KEERA_LOG_LEVEL`    | `debug`                                       |
-| `KEERA_LOG_FORMAT`   | `text`                                        |
+| Setting                    | `make dev` sets                                                                                                                     | A value in `.env` |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| `KEERA_DATABASE_URL`       | the `keera-db` container, on `127.0.0.1:5432`                                                                                       | is ignored        |
+| `KEERA_LOG_LEVEL`          | `debug`                                                                                                                             | is ignored        |
+| `KEERA_LOG_FORMAT`         | `text`                                                                                                                              | is ignored        |
+| `KEERA_MODELS_FILE`        | `build/models.dev.yaml`, a copy of `compose/models.yaml` with the backends at `127.0.0.1:8000` and `:8001`                          | wins              |
+| `KEERA_SANDBOXES_FILE`     | `compose/sandboxes.yaml`                                                                                                            | wins              |
+| `KEERA_SANDBOX_PUBLIC_URL` | `http://host.containers.internal:8080`, when `KEERA_SANDBOX_DRIVER` is set                                                          | wins              |
+| `KEERA_UPSTREAM_DENY`      | the default list without loopback, because the backends are on `127.0.0.1` ([install.md](install.md#where-the-gateway-may-connect)) | wins              |
 
-`KEERA_MODELS_FILE`, `KEERA_SANDBOXES_FILE`, `KEERA_SANDBOX_PUBLIC_URL` and
-`KEERA_UPSTREAM_DENY` are only defaults: a value in `.env` wins. The deny list
-drops loopback, because the backends are on `127.0.0.1` here
-([install.md](install.md#where-the-gateway-may-connect)). The addresses `make dev` prints assume the default
-`KEERA_ADDR` of `:8080`.
+The two files only seed new organisations
+([Template files](gateway.md#template-files)). The addresses `make dev` prints
+assume the default `KEERA_ADDR` of `:8080`.
 
 Install air once if you do not have it:
 
@@ -56,10 +52,9 @@ make dev            # llama.cpp on the CPU (the default)
 make dev TIER=gpu   # vLLM, needs a GPU
 ```
 
-**Tool calls do not work on the CPU tier.** Replies come back as prose in
-`content` instead of `tool_calls`. Use `TIER=gpu` when working on
-the model probe, filters, routers or anything else that reads `tool_calls`. See
-[compose/README.md](../compose/README.md).
+Use `TIER=gpu` for anything that reads `tool_calls`, such as the model check,
+filters and routers: the CPU tier
+[cannot do tool calls](../compose/README.md#the-cpu-tier-cannot-do-tool-calls).
 
 ## Driving it
 
@@ -117,6 +112,7 @@ rate limiter for the buckets shared through Redis. No fake covers either.
 
 ```sh
 make build          # ./build/keera-gateway and ./build/keera
+make dist           # the keera release archives, to build/dist
 nix build .#keera -o build/result
 ```
 
@@ -126,14 +122,11 @@ notices, the release archives, and air's binary and log from `make dev`.
 `compose/.env`, which `make dev` creates on a fresh clone. `make clean` keeps
 it.
 
-The Nix build fetches the Go modules itself and checks them against
-`vendorHash` in `flake.nix`. When `go.mod` changes, set it to
-`pkgs.lib.fakeHash`, build, and copy the hash Nix prints. Once `vendor/`
-exists, every Go command builds from it, so `make build` and `make test` too.
-It is not committed. Run `go mod vendor` after cloning and again whenever
-`go.mod` changes. `make image`
-vendors the modules itself only when `vendor/` is missing, so an old one breaks
-its build too.
+Run `go mod vendor` after cloning and whenever `go.mod` changes; every Go
+command, `make image` included, builds from `vendor/`. `make image` writes it
+when it is missing, but does not refresh an old one. The Nix build
+checks the modules against `vendorHash` in `flake.nix`: when `go.mod` changes,
+set it to `pkgs.lib.fakeHash`, build, and copy the hash Nix prints.
 
 ```sh
 make image      # the gateway image, tagged localhost/keera-gateway:latest

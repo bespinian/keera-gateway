@@ -45,15 +45,11 @@ credentials and account numbers, a `rewrite` filter on the projects whose prose
 names clients, and a `gate` on the one project with a hosted model. See
 [Ordering and combination](#ordering-and-combination).
 
-A model filter adds a second generation to every request, so deployments
-usually put it on one project rather than on everything.
-
 You can change a filter's mode later, and its fields change with it: `rewrite`
 and `gate` take a model and an instruction, `pattern` takes rules, and neither
 accepts the other's. An instruction also means something different to `rewrite`
-and to `gate`. Change both together, and run `keera filter check`. A gate whose
-instruction is a list of things to redact refuses every request that mentions
-one of them.
+and to `gate` ([For a gate](#for-a-gate)). Change both together, and run
+`keera filter check`.
 
 Whether a filter _enforces_ is separate from its mode - see
 [Shadow](#shadow-rolling-one-out).
@@ -116,8 +112,7 @@ A gate answers either that or the single word `ALLOW`. If neither the word nor
 [the token behind it](#how-a-gates-verdict-is-read) gives a verdict, that is a
 fault, and the request is stopped like any filter that could not run.
 
-A filter [in shadow](#shadow-rolling-one-out) drops nothing. It records the
-refusal it would have made and forwards the request.
+A filter [in shadow](#shadow-rolling-one-out) only records the refusal.
 
 **A rewrite filter refuses only if its instruction says so.** Say when:
 
@@ -155,10 +150,7 @@ What the refusal carries:
   it as "Refused by a filter".
 - **The filter's generation is charged**, as on every outcome.
 
-`keera filter check` shows a refusal as a refusal, not a failure. Its first two
-samples carry a credential and a named client with an account number, so a
-filter written to refuse those will refuse them - but then the run tells you
-nothing about its rewriting. Gates are checked differently; see
+`keera filter check` shows a refusal as a refusal, not a failure; see
 [Checking one](#checking-one).
 
 ### How a gate's verdict is read
@@ -177,11 +169,9 @@ model's prose becomes the sentence the sender sees.
 This does not loosen [failing closed](#failing-closed). A request goes only if
 one of the two readings says so.
 
-It needs a backend that returns logprobs. vLLM and llama.cpp do; most hosted
-providers do not. There is nothing to configure: a gate whose model serves none
-reads the words only. If a backend refuses the request for logprobs with a 4xx,
-the gate asks again without them and stops asking that model from then on, as a
-router does. Rewrite filters do not use it.
+It needs a backend that returns logprobs. A gate whose model serves none reads
+the words only ([Logprobs](gateway.md#models-that-filters-and-routers-run-on)).
+Rewrite filters do not use it.
 
 It also tells the gateway **how sure** the gate was, which
 [`keera filter check`](#checking-one) shows.
@@ -261,11 +251,8 @@ readable; RE2 has no catastrophic backtracking.
 **It cannot read.** A customer's name in an ordinary sentence has no shape. Use
 the other two modes for that.
 
-**It sees the same text as the other modes.** Tool call arguments, images and
-pre-tokenised input are out of reach - see
-[What a filter can reach](#what-a-filter-can-reach-inside-a-request). The whole
-chain shares one extraction, so changing that is a change to the chain, not to
-this mode.
+**It sees the same text as the other modes**; see
+[What a filter can reach](#what-a-filter-can-reach-inside-a-request).
 
 **A broad rule matches broadly.** `\b(?:\d[ -]?){13,19}\b` matches a card
 number and also a timestamp in nanoseconds. `keera filter check` names the rule
@@ -273,36 +260,29 @@ that touched the sample source code, which is the one to narrow.
 
 ### What it costs, and what does not apply
 
-Nothing. Its runs are on the filter log and on `/metrics` like any other, with a
-cost of zero and negligible latency. A check of it touches no backend.
-
-It has no model, no instruction and no answer, so these parts of this page are
-about `rewrite` and `gate` only: [Choosing and sizing the
-model](#choosing-and-sizing-the-model), [Cost and latency](#cost-and-latency),
-[Writing an instruction](#writing-an-instruction), and the model and context
-rows of [Failing closed](#failing-closed). It fails closed only when its rules
-will not compile.
+Nothing. Its runs are logged like any other, at zero cost and negligible
+latency, and a check of it touches no backend. It has no model and no
+instruction, so the sections on those do not apply. It fails closed only when
+its rules will not compile.
 
 ## Failing closed
 
 A filter that cannot run refuses the request. There is no setting to change
 this.
 
-| Situation                                                                                                                    | Status |
-| ---------------------------------------------------------------------------------------------------------------------------- | ------ |
-| the guardrail names a filter that no longer exists                                                                           | 503    |
-| its model is missing, disabled, not a chat model (or, for a gate, a decision model), a subscription model, or has no backend | 503    |
-| its model is [locked until the organisation pays](sso.md#what-a-new-organisation-can-use)                                    | 503    |
-| its model was reached but the answer was unusable, or it errored                                                             | 502    |
-| a gate answered neither `ALLOW` nor `REFUSED`, in word or in token                                                           | 502    |
-| the conversation will not fit through its model's context                                                                    | 413    |
-| a pattern filter's rules will not compile                                                                                    | 502    |
+| Situation                                                                 | Status |
+| ------------------------------------------------------------------------- | ------ |
+| the guardrail names a filter that no longer exists                        | 503    |
+| its model [cannot run](gateway.md#models-that-filters-and-routers-run-on) | 503    |
+| its model was reached but the answer was unusable, or it errored          | 502    |
+| a gate answered neither `ALLOW` nor `REFUSED`, in word or in token        | 502    |
+| the conversation will not fit through its model's context                 | 413    |
+| a pattern filter's rules will not compile                                 | 502    |
 
 A request with no text at all, such as a chat of only images, runs no filter,
 so a filter that is missing or broken does not refuse it either.
 
-A filter [in shadow](#shadow-rolling-one-out) that cannot run refuses nothing:
-the run is recorded as `error` and the request goes on.
+A filter [in shadow](#shadow-rolling-one-out) that cannot run refuses nothing.
 
 Each error names the filter, and each is recorded as a usage event, so it shows
 on the **My access** screen.
@@ -313,14 +293,9 @@ The gateway also enforces:
   lists the guardrails.
 - A guardrail that names a filter the organisation does not have is refused
   when it is written.
-- A filter's model must be on the organisation's allow-list, if it has one.
-  Otherwise the filter is refused with a 400 `model_not_allowed`.
-- Narrowing the organisation's allow-list so that a filter's model drops off
-  it is refused with a 409 `filter_model_not_allowed`. Move the filter to an
-  allowed model first.
-- A [subscription model](subscriptions.md#what-a-subscription-key-can-do)
-  cannot be a filter's model (a 400 when saved), and turning on `subscription`
-  for a model a filter uses is refused with a 409.
+- A filter's model must be on the organisation's allow-list and cannot be a
+  subscription model. See
+  [Models that filters and routers run on](gateway.md#models-that-filters-and-routers-run-on).
 
 ## Shadow: rolling one out
 
@@ -360,14 +335,15 @@ What shadow does not change:
   forwarded, and is charged to the same budgets.
 - **Its place in the chain.** It runs where it would when enforcing, so a
   shadow gate after a redaction filter judges the redacted text. It does not
-  pass on its own rewrite.
+  pass on its own rewrite, and its refusal ends nothing.
 
 What it does change:
 
 - A shadow filter is **not** in `X-Keera-Filters`, which names only what acted
   on the request.
-- A shadow filter that cannot run does not refuse the request. A shadow filter
-  that errors on everything measures nothing, and its screen says so.
+- A shadow filter that cannot run does not refuse the request: the run is
+  recorded as `error` and the request goes on. One that errors on everything
+  measures nothing, and its screen says so.
 
 ## Ordering and combination
 
@@ -382,7 +358,6 @@ Within one level they run in the order that level wrote them: the order of
 arrows move a filter up or down. A filter ticked in that dialog is added last.
 
 A refusal ends the chain. The filters after it do not run and are not charged.
-A refusal by a filter in shadow ends nothing.
 
 Modes mix freely. A gate after a rewrite filter judges the text the rewrite
 left, which is what would actually be sent. That is also why the organisation's
@@ -412,7 +387,7 @@ has the whole order.
 Point a `rewrite` or `gate` filter at a chat model, ideally a fast local one.
 Its generation is added to every request the guardrail covers.
 
-A `gate` can also run on a [decision model](routers.md#decision-models), a
+A `gate` can also run on a [decision model](gateway.md#decision-models), a
 classifier that answers the verdict in one pass and writes nothing. Its
 instruction is then a yes-or-no question, where yes refuses.
 
@@ -450,7 +425,8 @@ A `rewrite` filter may write output tokens in proportion to the request. A
 that is the difference between a filter that dominates the request and one that
 barely shows.
 
-Failed runs and shadow runs are charged too.
+Failed runs and shadow runs are charged too. So a model filter usually goes on
+the projects that need it, not on everything.
 
 `keera filter check` reports what one run cost and how long it took. The
 filter's own screen reports the latency it added at p50 and p95, and its share
@@ -518,7 +494,9 @@ number, and an ordinary Go function that nothing should touch.
 
 **A rewrite filter** gets all three in one request, and both sides of each are
 shown. If the first two come back unchanged, the filter does not do its job. If
-the function changes, the filter will change real code.
+the function changes, the filter will change real code. A filter written to
+refuse credentials or client data refuses the whole sample, and then the run
+tells you nothing about its rewriting.
 
 **A gate** gives one verdict per request, so it is checked twice: once with the
 two sensitive parts, which it should refuse, and once with the function, which
@@ -543,29 +521,18 @@ filter that left the planted secret alone, a filter that touched the code, a
 gate that let the secret through or refused the code, and pattern rules that
 matched nothing in the sample.
 
-A check of a model filter goes straight to the backend, with the credentials the
-data plane uses. It is not rate-limited or budgeted and writes no usage row. On
-the deployment's own provider key it needs credit and is billed
-([billing.md](billing.md)). It does put real requests on the GPUs: one for a rewrite filter, two
-for a gate, one per half of the sample. A gate whose backend refuses logprobs is
-asked again without them.
+A check of a model filter
+[calls the backend directly](gateway.md#models-that-filters-and-routers-run-on):
+one request for a rewrite filter, and two for a gate, one per half of the
+sample.
 
 A check of a filter in shadow still runs it, and says so.
 
 ## Who owns what
 
-A filter belongs to one organisation, and its administrators write it. It runs
-on one of the organisation's models. Two organisations may each have a filter with the same alias; they are
-different filters.
-
-A filter's alias is its identity, like a model's: lowercase letters, digits and
-interior hyphens. It cannot change. For a different alias, create a new filter
-and move the guardrails.
-
-Members cannot create or change filters, but they can read them, instruction
-included. The Filters screen, each filter's screen, `GET /control/v1/filters` and
-`GET /control/v1/filters/{alias}/report` are open to anyone signed in to the
-organisation.
+A filter belongs to one organisation, and runs on one of its models. Who may
+write and read it, and what its alias may be, is the same as for a router; see
+[Models that filters and routers run on](gateway.md#models-that-filters-and-routers-run-on).
 
 **My access** also shows the filters each of the member's keys passes through,
 and the level that applied each one.

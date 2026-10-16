@@ -17,13 +17,9 @@ troubleshooting.
 ## Before you start
 
 **Postgres.** Version 14 or later. The gateway applies its schema on start
-under an advisory lock, so several replicas can start at once. Its two
-notification listeners turn off `idle_session_timeout` for their own sessions,
-so a server-wide timeout does not end them.
-
-**A GPU, to demo a coding agent.** The CPU tier runs the gateway fine but
-cannot produce OpenAI-shaped `tool_calls`, so an agent writes prose instead of
-edits. See [compose/README.md](../compose/README.md).
+under an advisory lock, so several replicas can start at once and no migration
+job is needed. Its two notification listeners turn off `idle_session_timeout`
+for their own sessions, so a server-wide timeout does not end them.
 
 **Two generated credentials:**
 
@@ -36,9 +32,6 @@ The gateway does not start without both. It also refuses an operator key, a
 secret key or a `KEERA_METRICS_TOKEN` shorter than 16 characters, before it
 touches the database.
 
-**Model weights.** The first start downloads them, and the inference container
-stays unready for several minutes. Do not restart it.
-
 ## Configuration
 
 Everything is an environment variable, except a few files: the models and
@@ -47,11 +40,11 @@ sandbox classes new organisations start with, and the
 
 ### Required
 
-| Variable             | What it is                                                                                                                                                                                                                                                                                                                                                                                            |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `KEERA_DATABASE_URL` | Postgres connection string.                                                                                                                                                                                                                                                                                                                                                                           |
-| `KEERA_OPERATOR_KEY` | The credential for the control API and the `keera` command, and the only one not stored in the database. Once an identity provider is set up, people use `keera login` and this key is for automation. See [sso.md](sso.md#signing-in-from-the-command-line).                                                                                                                                         |
-| `KEERA_SECRET_KEY`   | Encrypts the API keys of hosted models and MCP servers saved in the panel, and the sign-in refresh tokens Keera keeps to ask the directory again ([sso.md](sso.md#asking-the-directory-again)). Changing it later makes all of them unreadable: the API keys have to be entered again, and a person's directory is not asked again until they sign in anew. Generate one with `openssl rand -hex 32`. |
+| Variable             | What it is                                                                                                                                                                                                                                                                                                                                                  |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `KEERA_DATABASE_URL` | Postgres connection string.                                                                                                                                                                                                                                                                                                                                 |
+| `KEERA_OPERATOR_KEY` | The credential for the control API and the `keera` command, and the only one not stored in the database. Once an identity provider is set up, people use `keera login` and this key is for automation. See [sso.md](sso.md#signing-in-from-the-command-line).                                                                                               |
+| `KEERA_SECRET_KEY`   | Encrypts the API keys of hosted models and MCP servers saved in the panel, and the sign-in refresh tokens Keera keeps to ask the directory again ([sso.md](sso.md#asking-the-directory-again)). Changing it later makes all of them unreadable: the API keys have to be entered again, and a person's directory is not asked again until they sign in anew. |
 
 ### Worth setting on any real deployment
 
@@ -67,29 +60,30 @@ sandbox classes new organisations start with, and the
 
 ### Everything else
 
-| Variable                        | Default             | What it is                                                                           |
-| ------------------------------- | ------------------- | ------------------------------------------------------------------------------------ |
-| `KEERA_ADDR`                    | `:8080`             | The one listener.                                                                    |
-| `KEERA_UI`                      | `true`              | Serve the control panel at `/`.                                                      |
-| `KEERA_MAX_DB_CONNS`            | `16`                | Postgres pool size.                                                                  |
-| `KEERA_LOG_LEVEL`               | `info`              | `debug`, `info`, `warn` or `error`.                                                  |
-| `KEERA_LOG_FORMAT`              | `text`              | `text` or `json`.                                                                    |
-| `KEERA_MAX_BODY_BYTES`          | `33554432` (32 MiB) | Largest request body, in bytes. Coding agents send large contexts.                   |
-| `KEERA_MAX_RESPONSE_BYTES`      | `67108864` (64 MiB) | Largest buffered upstream response, and largest streamed event, in bytes.            |
-| `KEERA_UPSTREAM_HEADER_TIMEOUT` | `2m`                | How long a backend may take to _start_ answering. 15m on the deployment's own keys.  |
-| `KEERA_CACHE_TTL`               | `30s`               | How long a checked key is reused. Models, filters and the rest reload every minute.  |
-| `KEERA_REDIS_URL`               | unset               | Shares rate-limit buckets between replicas. Unset, they are per process. See below.  |
-| `KEERA_REDIS_PREFIX`            | `keera`             | Key prefix, so two deployments can share one Redis.                                  |
-| `KEERA_SPEND_REFRESH`           | `10s`               | How stale a budget may be.                                                           |
-| `KEERA_SESSION_GAP`             | `30m`               | Idle time between two tasks; at least `1m`. See [sessions.md](sessions.md).          |
-| `KEERA_SECURE_COOKIES`          | follows the scheme  | Marks the session cookie `Secure`. On when `KEERA_PUBLIC_URL` is https.              |
-| `KEERA_CLAUDE_SUBSCRIPTIONS`    | `false`             | Lets Claude Code on a Claude plan through. See [subscriptions.md](subscriptions.md). |
+| Variable                        | Default             | What it is                                                                                                          |
+| ------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `KEERA_ADDR`                    | `:8080`             | The one listener.                                                                                                   |
+| `KEERA_UI`                      | `true`              | Serve the control panel at `/`.                                                                                     |
+| `KEERA_MAX_DB_CONNS`            | `16`                | Postgres pool size.                                                                                                 |
+| `KEERA_LOG_LEVEL`               | `info`              | `debug`, `info`, `warn` or `error`.                                                                                 |
+| `KEERA_LOG_FORMAT`              | `text`              | `text` or `json`.                                                                                                   |
+| `KEERA_MAX_BODY_BYTES`          | `33554432` (32 MiB) | Largest request body, in bytes. Coding agents send large contexts.                                                  |
+| `KEERA_MAX_RESPONSE_BYTES`      | `67108864` (64 MiB) | Largest buffered upstream response, and largest streamed event, in bytes.                                           |
+| `KEERA_UPSTREAM_HEADER_TIMEOUT` | `2m`                | How long a backend may take to _start_ answering. Longer on [the deployment's own keys](billing.md#what-is-billed). |
+| `KEERA_CACHE_TTL`               | `30s`               | How long a checked key is reused. Models, filters and the rest reload every minute.                                 |
+| `KEERA_REDIS_URL`               | unset               | Shares rate-limit buckets between replicas. Unset, they are per process. See below.                                 |
+| `KEERA_REDIS_PREFIX`            | `keera`             | Key prefix, so two deployments can share one Redis.                                                                 |
+| `KEERA_SPEND_REFRESH`           | `10s`               | How stale a budget may be.                                                                                          |
+| `KEERA_SESSION_GAP`             | `30m`               | Idle time between two tasks; at least `1m`. See [sessions.md](sessions.md).                                         |
+| `KEERA_SECURE_COOKIES`          | follows the scheme  | Marks the session cookie `Secure`. On when `KEERA_PUBLIC_URL` is https.                                             |
+| `KEERA_CLAUDE_SUBSCRIPTIONS`    | `false`             | Lets Claude Code on a Claude plan through. See [subscriptions.md](subscriptions.md).                                |
 
 Retention below `24h` is refused: deleted rows cannot be recovered, and a
 typo like `10m` would delete the day's request log.
 
 Sizes are a plain number of bytes. Durations take `h`, `m` and `s`. On/off
-settings take `true`/`false`, `yes`/`no`, `on`/`off` or `1`/`0`. A number,
+settings take `true`/`false`, `yes`/`no`, `on`/`off` or `1`/`0`. Lists, such as
+addresses, groups, domains and scopes, are comma-separated. A number,
 duration or on/off value that cannot be read, such as `64MB`, `365d` or
 `enabled`, is ignored and the default is used. So is a size or count of zero or
 less, and a zero or negative `KEERA_CACHE_TTL`, `KEERA_SPEND_REFRESH` or
@@ -101,7 +95,7 @@ Among them: a `KEERA_LOG_LEVEL` or `KEERA_LOG_FORMAT` not listed above, a
 `KEERA_REDIS_URL` that is not a Redis URL, a `KEERA_UPSTREAM_DENY` entry that
 is not an address or a prefix, a `KEERA_METRICS_TOKEN` equal to the operator key, a
 subscription model in `KEERA_MODELS_FILE` while `KEERA_CLAUDE_SUBSCRIPTIONS` is
-off, and a `KEERA_OIDC_<N>_DEFAULT_ROLE` other than `admin` or
+off, and a `KEERA_OIDC_<NAME>_DEFAULT_ROLE` other than `admin` or
 `member`. The single sign-on, passkey, sandbox and payment settings have checks
 of their own, which their sections, [sso.md](sso.md),
 [sandboxes.md](sandboxes.md#configuration) and
@@ -151,14 +145,9 @@ not follow redirects from a backend or an MCP server.
 
 ### Provider keys of the deployment's own
 
-`KEERA_PROVIDER_<NAME>_API_KEY` gives every organisation's models of that
-provider the deployment's key, and bills them for it. Without one, each
-organisation enters its own key. [billing.md](billing.md) lists the settings.
-
-With `KEERA_POSTFINANCE_SPACE_ID`, `KEERA_POSTFINANCE_USER_ID` and
-`KEERA_POSTFINANCE_AUTH_KEY`, organisations pay for those keys in advance, by
-card through PostFinance Checkout. [billing.md](billing.md#pay-in-advance)
-lists these settings too.
+`KEERA_PROVIDER_<NAME>_API_KEY` gives organisations the deployment's own key for
+that provider, billed at list price, and `KEERA_POSTFINANCE_*` lets them pay in
+advance. See [billing.md](billing.md).
 
 ### Rate limits with more than one replica
 
@@ -167,31 +156,9 @@ Rate limits are kept per replica unless `KEERA_REDIS_URL` is set. See
 
 ### Single sign-on
 
-`KEERA_OIDC_PROVIDERS` is a comma-separated list of provider names. Each name
-`N` reads `KEERA_OIDC_<N>_ISSUER`, `KEERA_OIDC_<N>_CLIENT_ID`,
-`KEERA_OIDC_<N>_CLIENT_SECRET`, `KEERA_OIDC_<N>_LABEL`,
-`KEERA_OIDC_<N>_SCOPES`, `KEERA_OIDC_<N>_GROUPS_CLAIM`,
-`KEERA_OIDC_<N>_ADMIN_GROUPS`, `KEERA_OIDC_<N>_OPERATOR_GROUPS`,
-`KEERA_OIDC_<N>_DEFAULT_ROLE` (`admin` or `member`),
-`KEERA_OIDC_<N>_DOMAINS`, the email domains
-that provider may sign people in with (`*` for any), and
-`KEERA_OIDC_<N>_SIGNUP` (`false` unless set), which lets somebody whose
-sign-in matches no organisation create one (see
-[Letting people sign up](sso.md#letting-people-sign-up)). Nothing is shared
-between providers. With several, each needs its domains.
-
-`KEERA_OPERATORS` lists the addresses that are operators, whichever provider
-signs them in. SSO needs `KEERA_PUBLIC_URL`: the provider sends the browser back
-to `<KEERA_PUBLIC_URL>/control/auth/callback`. See [sso.md](sso.md).
-
-`KEERA_PASSKEYS` (`false` unless set) lets administrators create accounts that
-sign in with a passkey instead of a directory. It needs `KEERA_PUBLIC_URL` on
-https, or on `http://localhost` or `http://<name>.localhost`, with a host name,
-not an IP address. See [Passkeys](sso.md#passkeys).
-
-Discovery runs at start-up, so a wrong issuer URL stops the gateway with the URL
-in the error, instead of breaking sign-in later. [sso.md](sso.md) is the
-walkthrough.
+`KEERA_OIDC_PROVIDERS` names the identity providers, and each reads its own
+`KEERA_OIDC_<NAME>_*`. `KEERA_PASSKEYS` turns on passkeys. Every setting is in
+[sso.md](sso.md#settings).
 
 ### Sandboxes
 
@@ -200,10 +167,11 @@ driver is for local development and tests, not for production. While the
 driver is unset, the other `KEERA_SANDBOX_*` settings are ignored (a stray one
 does not stop the start) and the panel hides sandboxes.
 
-`KEERA_SANDBOXES_FILE` and `KEERA_SANDBOX_IMAGES` are read either way. The file
-holds the classes new organisations start with, so they are there once a driver
-is set, and an administrator can save a class with an allowed image before
-then. A missing or invalid file stops the start.
+`KEERA_SANDBOXES_FILE`, the classes new organisations start with
+([Template files](gateway.md#template-files)), and `KEERA_SANDBOX_IMAGES` are
+read either way. So the classes are there once a driver is set, and an
+administrator can save a class with an allowed image before then. A missing or
+invalid file stops the start.
 
 The other settings are `KEERA_SANDBOX_*`: the namespace, the runtime per
 isolation tier (a RuntimeClass on Kubernetes, an OCI runtime such as `runsc` on
@@ -227,8 +195,8 @@ make image GATEWAY_IMAGE=<registry>/keera-gateway:v0.1.0 VERSION=v0.1.0
 podman push <registry>/keera-gateway:v0.1.0
 ```
 
-Run `go mod vendor` first; [run-locally.md](run-locally.md#building) explains
-why and lists the other build steps.
+A `vendor/` older than `go.mod` breaks the build;
+[run-locally.md](run-locally.md#building) has this and the other build steps.
 
 `VERSION` is what the binary reports. Without it, the image says the tag when
 the commit has one, and `devel` otherwise, followed by the short commit, and
@@ -252,17 +220,38 @@ gh attestation verify keera_v0.1.0_linux_amd64.tar.gz --repo bespinian/keera-gat
 other workflow in the repository. The image is verified the same way, with
 `oci://ghcr.io/bespinian/keera-gateway:<tag>` in place of the file.
 
-`make build` builds it from source. `make dist` builds the release archives
-into `build/dist`.
+To build it from source, see [run-locally.md](run-locally.md#building).
 
 The command reads these settings:
 
-| Variable             | Default                             | What it is                                                                                             |
-| -------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `KEERA_CONTROL_URL`  | the gateway last signed in          | The gateway to talk to. `--url` wins over it. With neither and no sign-in, `https://gateway.keera.ch`. |
-| `KEERA_OPERATOR_KEY` | unset                               | The operator key to act with. Wins over a stored sign-in.                                              |
-| `KEERA_CONFIG_DIR`   | `keera` in the user's config folder | Where `credentials.json` is kept, for a shared account or a pipeline.                                  |
-| `KEERA_ORG`          | the one `keera org switch` chose    | The organisation commands act on. Wins over `keera org switch`.                                        |
+| Variable             | Default                             | What it is                                                                                                                             |
+| -------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `KEERA_CONTROL_URL`  | the gateway last signed in to       | The gateway to talk to. `--url` wins over it.                                                                                          |
+| `KEERA_OPERATOR_KEY` | unset                               | The operator key to act with. Wins over a stored sign-in, since someone exported it on purpose. `keera login` warns when it finds one. |
+| `KEERA_CONFIG_DIR`   | `keera` in the user's config folder | Where `credentials.json` is kept, for a shared account or a pipeline.                                                                  |
+| `KEERA_ORG`          | the one `keera org switch` chose    | The organisation commands act on. Wins over `keera org switch`. See [Several organisations](gateway.md#several-organisations).         |
+
+A command picks the gateway in this order: `--url`, then `KEERA_CONTROL_URL`,
+then the gateway last signed in to, then `https://gateway.keera.ch`. You can be
+signed in to several gateways at once. If `keera logout` removes the default,
+the one sign-in left becomes the default; with several left, there is none.
+`keera whoami` shows which gateway and which credential are used, and why.
+
+[`keera login`](sso.md#signing-in-from-the-command-line) keeps its credentials
+in `keera/credentials.json` in the user's configuration directory (mode 0600),
+one entry per gateway: `~/.config` on Linux, `~/Library/Application Support` on
+macOS and `%AppData%` on Windows. With `KEERA_CONFIG_DIR` set, the file is
+`$KEERA_CONFIG_DIR/credentials.json`.
+
+### In a script, and on a screen
+
+Output is coloured only when it goes to a terminal. The words say the same
+without colour: a failing check reads `FAIL` whether or not it is red.
+
+`--color always` or `CLICOLOR_FORCE=1` forces colour, for example on a CI runner
+with a real console. `--color never`, `--no-color`, `NO_COLOR=1` or `TERM=dumb`
+turns it off, and wins over `CLICOLOR_FORCE`. Listing commands also take
+`--json`, which is never coloured.
 
 ## First run
 
@@ -275,55 +264,10 @@ keera project create "Payments Platform"     # with several: keera org switch fi
 KEY=$(keera key create --project <project> --name "a developer's laptop")
 ```
 
-Organisation names are unique, ignoring case. An operator renames one with
-`keera org set <org> --name "Example Bank AG"`, or the pencil on the
-organisations screen. Everything refers to it by id, so nothing else changes.
-
-Every key is in a project. A new organisation starts with one project, called
-`default`, which is a project like any other. A key created without `--project`
-goes in the organisation's oldest project, and an organisation with no projects
-cannot have keys. A project with keys that are not revoked, expired ones
-included, cannot be deleted. Its revoked keys stay, without a project.
-
-A project has a name, unique in its organisation, and an optional
-description. An administrator changes either with
-`keera project set <project> --name <name> --description <text>`, or the pencil
-on the projects screen. Everything refers to a project by id, so nothing else
-changes.
-
-A key is printed once and never stored. Nobody, not even an operator, can read
-it later. Screens, reports and the audit log show its name instead. A key from
-`keera key create` lasts 90 days, as in the panel. `--expires 720h` gives it
-another lifetime, `--expires 2026-12-31` makes that the last day it works, and
-`--expires never` makes a key that does not expire. The panel offers the same
-choices.
-
-A key's name is only a label, so it can change at any time:
-`keera key set <key> --name <name>`, or the pencil on the **API keys** screen. A member
-can rename their own keys, an administrator any key in their organisation, and
-an operator any key. The old name stays in the audit log.
-
-Only an administrator issues keys. That way every key has the project and
-guardrails an administrator chose for it. A member asks for a first key, and
-from then on rotates it themselves.
-
-`keera key rotate`, or **Rotate** on the **API keys** screen, replaces a key in one
-step. The new key has the same project, owner, lifetime and guardrails, and the
-old key is revoked in the same step. Anyone who may revoke a key may rotate it,
-so members can rotate their own. Only an administrator can give the new key
-another lifetime with `--expires`. An expired key can still be rotated. The old
-key stops working at once, so `keera key rotate` asks you to type the key's name
-first; `--yes` skips that in a script.
-
-```sh
-KEY=$(keera key rotate "a developer's laptop")
-```
-
-A rotated key stops working everywhere it is used. So give each machine its
-own key.
-
-The operator key is for before an identity provider is set up. After that,
-people sign in as themselves with `keera login`.
+Who owns a key, how long it lasts, and how to rotate one or leave it for
+someone to activate: [Keys and projects](gateway.md#keys-and-projects). The
+operator key is for before an identity provider is set up. After that, people
+sign in as themselves with `keera login`.
 
 Then check the deployment works, in this order:
 
@@ -353,16 +297,6 @@ has been served and, with [card payments](billing.md#pay-in-advance), until the
 organisation has had credit, paid or granted, or is billed by invoice. A member
 gets a short guide of their own: get the key's secret, then connect a client.
 It stays until one of their keys has made a request.
-
-### In a script, and on a screen
-
-Output is coloured only when it goes to a terminal. The words say the same
-without colour: a failing check reads `FAIL` whether or not it is red.
-
-`--color always` or `CLICOLOR_FORCE=1` forces colour, for example on a CI runner
-with a real console. `--color never`, `--no-color`, `NO_COLOR=1` or `TERM=dumb`
-turns it off, and wins over `CLICOLOR_FORCE`. Listing commands
-also take `--json`, which is never coloured.
 
 ### `keera model check` is the acceptance test
 
@@ -424,8 +358,9 @@ Most tables grow with the number of customers. These grow with use:
 | `billing_lines` | billable call, on the deployment's keys   |
 | `audit_log`     | administrative action, so it grows slowly |
 
-`usage_events` is the request log and the source of every report. A row is ids, counts and a latency breakdown of a few hundred bytes. No
-prompt or completion text is stored.
+`usage_events` is the request log and the source of every report. A row is
+ids, counts and a latency breakdown of a few hundred bytes. No prompt or
+completion text is stored.
 
 ```sh
 KEERA_USAGE_RETENTION=8760h    # a year
@@ -469,11 +404,13 @@ replica per interval, whichever asks first.
 The gateway applies its schema on start, so an upgrade is a new image and a
 restart. Also:
 
-- **The catalogue files only seed new organisations.** A change to one does not
-  reach an organisation that already exists. Use `keera org switch <org>`, then
-  `keera model apply <file>` or `keera sandbox apply <file>`, for that.
+- **A changed template file does not reach existing organisations.** See
+  [Template files](gateway.md#template-files) for how to apply it to one.
 - **Run `keera model check` afterwards** if anything on the inference side
   changed.
+- **A database created before v0.4.0 cannot be upgraded in place.** Its first
+  schema file changed up to that release, and the gateway runs each file only
+  once. Start from an empty database.
 
 ## When it does not work
 
@@ -489,7 +426,8 @@ keera doctor --probe    # and put a real request through every enabled model
 
 `--probe` runs `keera model check` against each enabled model. This catches a
 backend that answers 200 with prose when a tool call was asked for. It costs
-one generation per model, two when the backend refuses tools, so only the organisation's administrators can run it.
+one generation per model, two when the backend refuses tools, so only the
+organisation's administrators can run it.
 
 A failing check exits non-zero, so `keera doctor` can be the last step of an
 install script.
@@ -501,7 +439,7 @@ install script.
 | Long prompts fail with a 400 from the backend         | `max_context` on the model does not match the backend's window. They have to move together.                                                                                                                                                    |
 | A filter refuses long conversations with 413          | `max_context` on that filter's model is too small for the traffic. A router whose model is too small cannot decide instead: it uses its fallback or answers 503 `router_undecided`. See [filters.md](filters.md) and [routers.md](routers.md). |
 | The agent answers in prose and never edits a file     | Tool calls come back as text. Run `keera model check`. On the CPU tier this is expected.                                                                                                                                                       |
-| The panel shows no sign-on button                     | Both an issuer and a client ID are needed under each name in `KEERA_OIDC_PROVIDERS`. Naming any provider also needs `KEERA_PUBLIC_URL`, or the gateway does not start. See [sso.md](sso.md).                                                   |
+| The panel shows no sign-on button                     | See [sso.md](sso.md#when-it-does-not-work).                                                                                                                                                                                                    |
 | A rate limit admits more than it is set to            | The buckets are per replica unless `KEERA_REDIS_URL` is set. If it is set, check `keera_ratelimit_fallback_total`.                                                                                                                             |
 | Streaming arrives all at once                         | Something in front is buffering the response.                                                                                                                                                                                                  |
 | A developer says their agent stopped this afternoon   | The **Requests** screen filtered to their key, or their **My access** screen. Each refusal is logged with the message the client got.                                                                                                          |

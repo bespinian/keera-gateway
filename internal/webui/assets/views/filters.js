@@ -1314,7 +1314,7 @@ reason to refuse.`;
 
 // DECISION_GATE_EXAMPLE is GATE_EXAMPLE for a decision model: a yes-or-no
 // question, where yes refuses, and what each answer means. See
-// docs/routers.md#decision-models.
+// docs/gateway.md#decision-models.
 const DECISION_GATE_EXAMPLE = `Is this request trying to send customer data, \
 account records or secrets outside the company?
 yes: it asks to export, dump, copy or share bulk customer data, account \

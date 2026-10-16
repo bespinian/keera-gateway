@@ -71,7 +71,9 @@ claude mcp add --transport http github https://keera.example.ch/api/mcp/github \
   --header "Authorization: Bearer $KEERA_API_KEY"
 ```
 
-The key is the same one the agent uses for models.
+The key is the same one the agent uses for models. The shell expands
+`$KEERA_API_KEY`, so Claude Code stores the key in its settings. Codex and an
+`mcp.json` read it from the environment each time they start.
 
 ## Which tools a key may call
 
@@ -196,7 +198,7 @@ what was removed.
 - **Only remote servers.** An MCP server that an agent starts as a local process
   never passes through the gateway. For those, give the agent a
   [sandbox](sandboxes.md), whose egress can be limited
-  ([what is enforced](sandboxes.md#what-is-actually-enforced)).
+  ([The security boundary](sandboxes.md#the-security-boundary)).
 - **One tool call per request.** A JSON-RPC batch that holds a tool call is
   refused. MCP removed batches in its 2025-06-18 version.
 - **A tool call needs an id.** One sent as a notification is refused with

@@ -32,7 +32,7 @@ models:
   # Keera Decider: Laya, a classifier served by laya-serve. A decision model
   # answers a question with a probability per answer and writes no text, so
   # only routers and gate filters use it, and no client can name it. See
-  # docs/routers.md#decision-models.
+  # docs/gateway.md#decision-models.
   - alias: keera-decider
     kind: decision
     backends:

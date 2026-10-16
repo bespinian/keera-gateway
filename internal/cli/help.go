@@ -98,7 +98,7 @@ var commands = []command{
 			"names you. --url also makes that gateway the default for every later command; " +
 			"'keera whoami' says which one is in use. See docs/sso.md.",
 		examples: []string{
-			"keera login                # the hosted gateway",
+			"keera login                # the gateway you last signed in to, else the hosted one",
 			"keera login --url https://keera.example.ch",
 			"keera login --no-browser   # a terminal with no browser on it",
 		},
@@ -401,8 +401,9 @@ var commands = []command{
 					"in 'keera session show'.",
 				examples: []string{"keera mcp calls --since 1h", "keera mcp calls --summary --since 168h"}},
 			{name: "connect", args: "<alias>", summary: "how to point Claude Code, Codex and others at a server",
-				prose: "Prints the lines each client needs. They read the key from " +
-					"KEERA_API_KEY, so no key is written into a file.",
+				prose: "Prints the lines each client needs. Codex and an mcp.json read the key " +
+					"from KEERA_API_KEY when they start. The Claude Code line copies the key " +
+					"into Claude Code's settings, because the shell expands it.",
 				examples: []string{"keera mcp connect github"}},
 		},
 	},

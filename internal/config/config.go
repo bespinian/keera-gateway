@@ -350,7 +350,7 @@ func (c Config) privateHosts() (bool, []string, error) {
 			if p.Configured() && p.SignUp {
 				return false, nil, fmt.Errorf("%sSIGNUP lets anyone create an organisation, "+
 					"so set KEERA_UPSTREAM_PRIVATE to the hosts inside this network they may "+
-					"reach, such as keera-engine, or to none or all", OIDCEnvPrefix(p.Name))
+					"reach, such as keera-engine,keera-decider, or to none or all", OIDCEnvPrefix(p.Name))
 			}
 		}
 		return false, nil, nil

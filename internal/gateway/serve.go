@@ -130,9 +130,8 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, res *policy.Resol
 	}
 	tr.seal("")
 
-	// The router runs before the filters, so it reads what the client sent. A
-	// router after a redaction filter could send a cleaned-up prompt outside
-	// the cluster, so its own model has to be local, like a filter's.
+	// The router runs before the filters, so it reads what the client sent,
+	// unredacted. That is why its model should be served locally.
 	if c.routed {
 		if b, ok = s.translate(c, b); !ok || !s.useRouter(c, b) {
 			return

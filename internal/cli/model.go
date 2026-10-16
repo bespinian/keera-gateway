@@ -70,18 +70,20 @@ func registerModelFlags(fs *flag.FlagSet) *modelFlags {
 	fs.Float64Var(&f.priceOut, "price-out", -1, "output price per million tokens")
 	fs.Float64Var(&f.priceCached, "price-cached", -1,
 		"price per million input tokens the provider served from its own prompt cache "+
-			"(left out, they are charged at --price-in)")
+			"(default: the --provider's rate, else the input price)")
 	fs.Float64Var(&f.priceWrite, "price-cache-write", -1,
 		"price per million input tokens the provider wrote to its own prompt cache "+
-			"(left out, they are charged at --price-in)")
+			"(default: the --provider's rate, else the input price)")
 	fs.StringVar(&f.apiKey, "api-key", "",
-		"credential to store encrypted; @path reads a file and @- reads stdin")
-	fs.BoolVar(&f.noAPIKey, "no-api-key", false, "remove the stored credential")
+		"the provider key the gateway sends to the backend, stored encrypted; @path reads "+
+			"a file and @- reads stdin")
+	fs.BoolVar(&f.noAPIKey, "no-api-key", false, "remove the stored provider key")
 	fs.BoolVar(&f.subscription, "subscription", false,
 		"each caller's own Claude subscription pays; needs --provider anthropic, and takes no "+
 			"API key (see docs/subscriptions.md)")
 	fs.BoolVar(&f.noSubscription, "no-subscription", false,
-		"the organisation pays again, with the model's stored API key")
+		"the organisation pays again; give --api-key too, unless the deployment holds "+
+			"the provider's key")
 	return f
 }
 

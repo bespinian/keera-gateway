@@ -8,10 +8,9 @@ cluster.
 
 ## What it buys
 
-**Egress can be enforced.** A network policy can allow only the gateway, the
-internal registry and the internal Git. A script the agent writes to upload the
-repository then fails. How much this is worth depends on the driver and the
-cluster; see [What is actually enforced](#what-is-actually-enforced).
+**Egress can be limited** to the gateway and a few internal hosts, so a script
+the agent writes to upload the repository fails. How far this holds depends on
+the driver and the cluster; see [The security boundary](#the-security-boundary).
 
 **The API key never lands on a laptop.** Each sandbox gets its own key at
 creation, scoped to whoever asked for it. The key expires with the sandbox,
@@ -29,7 +28,7 @@ it names its own session instead of leaving the gateway to infer it
 | ---------------- | ------------------------------------------------------ | ---------------------------------- |
 | Default lifetime | the class's; 4h if it sets none                        | the class's; 4h if it sets none    |
 | When it expires  | suspended, key revoked, resumable                      | terminated                         |
-| When it is idle  | suspended after `IDLE_SUSPEND` with no connection open | never - it has nothing to wait for |
+| When it is idle  | suspended if `KEERA_SANDBOX_IDLE_SUSPEND` is set       | never - it has nothing to wait for |
 | Session header   | not set                                                | `X-Keera-Session: <sandbox id>`    |
 | Attaching        | ssh, from its owner or an operator                     | nothing attaches                   |
 | How work leaves  | the developer pushes                                   | a branch, pushed by the agent      |
@@ -42,20 +41,14 @@ and repository credential are revoked. It still counts towards the quota and
 keeps its name, because its volume still takes up space. `keera sandbox resume`
 brings it back with a new key, a new repository credential and the class's
 default lifetime, under the guardrails as they are now. The same ssh keys let
-you in. `resume` takes no
-`--ttl`: `extend` the sandbox once it is back. `extend` does not work while it
-is expired. `terminate` frees the volume.
+you in. To change its lifetime, `extend` it after `resume`; `extend` does not
+work while it is expired. `terminate` frees the volume.
 
 **A sandbox that fails is over.** Nothing resumes it. Its key and repository
 credential are revoked at once. An agent's sandbox is also removed. An
 engineer's keeps its volume, in case it holds work, until somebody terminates
 it. Until then it is still live, like an expired one: it counts towards the
 quota, keeps its name and shows in `keera sandbox ls`.
-
-A sandbox whose process exits by itself, with success, is not a failure on
-podman: it shows as suspended, because podman can start it again. On Kubernetes
-the pod is finished and cannot be restarted, so it has failed. Either way, an
-agent's sandbox that exits cleanly has done its task and is removed.
 
 **Idle means no connection.** With `KEERA_SANDBOX_IDLE_SUSPEND` set, an
 engineer's sandbox is suspended once no connection has been open to it for that
@@ -76,22 +69,23 @@ those are the gateway's.
 
 ## Agent-in-sandbox, not sandbox-as-a-tool
 
-The upstream SDK is built for an agent outside that drives a sandbox through
-`Run()` and `Files().Write()`. That sends the source code out through the API on
-every read.
+The SDK of [agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox),
+the controller the Kubernetes driver uses, is built for an agent outside that
+drives a sandbox through `Run()` and `Files().Write()`. That sends the source
+code out through the API on every read.
 
 In Keera the agent runs _inside_.
 `keera sandbox agent <name> --class … --repo … --task …` starts a machine,
 checks out the repository, runs the image's coding agent on the task (Pi in the
-base image), and pushes a branch. Where egress is enforced, only that branch
-leaves; see [What is actually enforced](#what-is-actually-enforced). When the
-agent exits cleanly, the sandbox is terminated. When it fails, its machine is
+base image), and pushes a branch. Where egress is
+[limited](#the-security-boundary), only that branch leaves. When the agent exits
+cleanly, the sandbox is terminated. When it fails, its machine is
 removed too, and the sandbox is marked failed with the reason.
 
 ## Isolation
 
-The upstream controller has no isolation of its own; it uses a `RuntimeClass`.
-So the tier is set per class. The catalogue names the tier, and the deployment
+The agent-sandbox controller has no isolation of its own; it uses a `RuntimeClass`.
+So the tier is set per class. Each class names its tier, and the deployment
 maps each of the three tiers to a runtime name once: a RuntimeClass on
 Kubernetes, an OCI runtime on podman.
 
@@ -133,9 +127,8 @@ Gateway work unmodified**.
 
 sshd listens on **2222**, not 22, because a process with every capability
 dropped cannot bind a privileged port. Nobody types the number: the gateway
-dials it, and a developer goes through the ProxyCommand. The route accepts any
-port from 1024 to 65535. On podman only 2222 is published, so no other port can
-be reached.
+dials it, and a developer goes through the ProxyCommand. Which other ports can
+be reached depends on [the driver](#the-two-drivers).
 
 ```sh
 keera sandbox create fix-login --class standard --repo git@internal:platform/service.git
@@ -240,7 +233,7 @@ It checks the whole file first, then sets each class it names. Classes the file
 does not name are left alone. A class is removed in the panel, or with
 `keera sandbox delete-class <name>`. Sandboxes already running on it keep
 working. The commands act on the organisation the CLI works in. See
-[Several organisations](sso.md#several-organisations).
+[Several organisations](gateway.md#several-organisations).
 
 A field left out gets a default:
 
@@ -271,24 +264,6 @@ lifetimes are gone with it, so it gets those of a class that sets none: 4h when
 resumed or extended without `--ttl`, and at most 24h. The guardrail still
 applies.
 
-## What is actually enforced
-
-|                     | Kubernetes driver                                       | podman driver |
-| ------------------- | ------------------------------------------------------- | ------------- |
-| Network isolation   | a default-deny NetworkPolicy over the sandbox namespace | **none**      |
-| Where it comes from | the Helm chart, `networkPolicy.enabled`                 | -             |
-| Granularity         | one rule for the whole namespace                        | -             |
-
-**A podman sandbox has unrestricted outbound access.** It joins podman's default
-bridge and can reach the internet, the host and the LAN. This is tested:
-`curl https://github.com` from inside one returns 200. Use the single-host
-driver for development, or on a host the deployment already trusts.
-
-**The Kubernetes rule covers the whole namespace and needs a CNI that enforces
-it.** On a network plugin without NetworkPolicy support - flannel without a
-policy plugin, for example - the policy does nothing, and nothing warns you.
-Check it on the cluster.
-
 ## Quotas
 
 Sandbox quotas are fields on the guardrail row. They combine by the usual
@@ -298,10 +273,12 @@ restrict-only rule: the minimum for a ceiling, the intersection for a list.
 keera guardrail set project <project-id> \
   --max-sandboxes 6 \
   --max-sandbox-ttl 8h \
-  --sandbox-classes standard,small \
+  --sandbox-classes standard,agent \
   --max-sandbox-cpu 8 \
   --max-sandbox-memory 32768
 ```
+
+`--max-sandbox-memory` is in MiB, so 32768 is 32 GiB.
 
 `--max-sandboxes` counts every live sandbox: starting, running, suspended,
 expired, and an engineer's that failed. The last two still hold a volume.
@@ -361,12 +338,11 @@ keera sandbox usage --by user
 keera sandbox usage --by class
 ```
 
-Only an administrator can read it. The report counts sandboxes, how many of
-them are live now, how long they ran, and core-seconds, because no single number
+Only an administrator can read it. The report counts sandboxes, how many of them
+are live now, how long they ran, and core-seconds, because no single number
 tells the whole story. A sandbox is counted whole in the window it was created
-in. Forty
-sandboxes that each lived ninety seconds is an agent fleet; one that lived a
-week is somebody who forgot. Core-seconds is what a chargeback uses.
+in. Forty sandboxes that each lived ninety seconds is an agent fleet; one that
+lived a week is somebody who forgot. Core-seconds is what a chargeback uses.
 
 Running time is summed across runs, not derived from timestamps, because a
 sandbox can be suspended and resumed many times. The clock stops as soon as a
@@ -426,11 +402,12 @@ lasts a working day. Git in the sandbox asks `git-credential-keera`, which keeps
 the current token. When it has five minutes left, the helper gets a new one from
 `POST /sandbox/v1/git-credential` with the sandbox's own key. That route takes
 10 requests a minute per client address on each gateway replica, and sandboxes
-that reach the gateway from the same address share it. When the forge gives no token, it answers 409
-`no_git_credential`. The gateway revokes the replaced token where the forge
-allows it. The helper only answers for the repository's own host, so a
-submodule on another host never sees the token. A resumed sandbox keeps the token the helper last got, unless the gateway
-handed it a new one, as it does when an expired sandbox is resumed.
+that reach the gateway from the same address share it. When the forge gives no
+token, it answers 409 `no_git_credential`. The gateway revokes the replaced
+token where the forge allows it. The helper only answers for the repository's
+own host, so a submodule on another host never sees the token. A resumed
+sandbox keeps the token the helper last got, unless the gateway handed it a new
+one, as it does when an expired sandbox is resumed.
 
 **When the sandbox ends, so does access.** Its key is revoked, so it cannot get
 another token. A GitLab token is revoked at once. A GitHub token cannot be
@@ -453,10 +430,8 @@ Setting up GitLab: create a token with the `api` scope for a user, group or
 service account that is a Maintainer of those projects. Project access tokens
 need GitLab Premium on GitLab.com; self-managed GitLab has them on every tier.
 
-**Out.** Push a branch. For an agent sandbox that is the only egress, where
-egress is [enforced](#what-is-actually-enforced). The agent
-runner never writes to a default branch: its output is a proposal, and a person
-opens it.
+**Out.** Push a branch. The agent runner never writes to a default branch: its
+output is a proposal, and a person opens it.
 
 ## Speed, and what it costs to have
 
@@ -505,8 +480,11 @@ development and tests. Use `kubernetes` for real workloads.
 | Suspend/resume     | yes                                               | yes (`stop`/`start`)               |
 | Volumes            | a PVC, or an emptyDir with no `disk`              | a named volume, always, unsized    |
 | Ports reachable    | any from 1024 to 65535                            | 2222 only                          |
-| Clean exit         | failed: a finished pod cannot restart             | suspended: it can start again      |
+| Process exits, 0   | failed: a finished pod cannot restart             | suspended: it can start again      |
 | Whose it is        | org and project labels, owner annotation          | owner, org and project labels      |
+
+The exit row is for an engineer's sandbox whose process ends on its own. An
+agent that finishes is terminated on both.
 
 Expiry is the real difference. On Kubernetes it is `spec.shutdownTime` and the
 cluster enforces it, so **a gateway that crashes and never comes back leaves no
@@ -541,40 +519,48 @@ its pod IP from inside the cluster, which needs no permission. Port-forward
 would let the holder reach any pod in the namespace on any port. So the gateway
 has to run in the cluster where it creates sandboxes.
 
-The egress rule allows DNS, the gateway, and whatever the deployment adds in
-`sandboxes.egress.extra`. **The internet is not on that list**, on purpose.
-Cloning and pushing need the forge, so add its host there. A deployment that
-needs package downloads points its sandboxes at an internal proxy and adds it
-there too. That is also the only way this works on an air-gapped
-site.
+**Egress.** The NetworkPolicy comes from the Helm chart's
+`networkPolicy.enabled`. Its egress rule allows DNS, the gateway, and whatever
+the deployment adds in `sandboxes.egress.extra`. **The internet is not on that
+list**, on purpose. Cloning and pushing need the forge, so add its host there.
+A deployment that needs package downloads points its sandboxes at an internal
+proxy and adds it there too. That is also the only way this works on an
+air-gapped site.
 
-That rule is the only network control, and it is one rule for the whole
-namespace. See [What is actually enforced](#what-is-actually-enforced).
+**The rule covers the whole namespace and needs a CNI that enforces it.** On a
+network plugin without NetworkPolicy support - flannel without a policy plugin,
+for example - the policy does nothing, and nothing warns you. Check it on the
+cluster.
+
+**A podman sandbox has unrestricted outbound access.** It joins podman's default
+bridge and can reach the internet, the host and the LAN. This is tested:
+`curl https://github.com` from inside one returns 200. Use the single-host
+driver for development, or on a host the deployment already trusts.
 
 ## Configuration
 
-| Variable                           | Default                                       | What it does                                                                                         |
-| ---------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `KEERA_SANDBOX_DRIVER`             | -                                             | `kubernetes`, `podman`, or unset for no sandboxes, and no Sandboxes screen in the panel              |
-| `KEERA_SANDBOXES_FILE`             | -                                             | the classes each new organisation starts with                                                        |
-| `KEERA_SANDBOX_NAMESPACE`          | the gateway's                                 | where sandboxes run on Kubernetes. Should not be the gateway's, so unset logs a warning              |
-| `KEERA_SANDBOX_RUNTIME_STANDARD`   | -                                             | the runtime for the standard tier, if not the default: a RuntimeClass, or on podman `crun` or `runc` |
-| `KEERA_SANDBOX_RUNTIME_ISOLATED`   | -                                             | the gVisor RuntimeClass, or `runsc` on podman. Unset makes that tier unavailable                     |
-| `KEERA_SANDBOX_RUNTIME_VM`         | -                                             | the Kata RuntimeClass, or `krun` on podman. Unset makes that tier unavailable                        |
-| `KEERA_SANDBOX_PUBLIC_URL`         | `KEERA_PUBLIC_URL`                            | the gateway **as a sandbox reaches it** - the in-cluster Service, not the ingress                    |
-| `KEERA_SANDBOX_IDLE_SUSPEND`       | off                                           | how long an engineer's sandbox runs with no connection open before it is suspended. Refused below 5m |
-| `KEERA_SANDBOX_STORAGE_CLASS`      | the cluster's                                 | what a home volume is provisioned from                                                               |
-| `KEERA_SANDBOX_SERVICE_ACCOUNT`    | the namespace's                               | what a sandbox pod runs as; its token is never mounted                                               |
-| `KEERA_SANDBOX_IMAGE_PULL_SECRETS` | -                                             | comma-separated, for a sandbox image in a private registry                                           |
-| `KEERA_SANDBOX_IMAGES`             | -                                             | comma-separated image prefixes an administrator may give a class, such as `registry.internal/keera/` |
-| `KEERA_SANDBOX_WARM`               | off                                           | warm pools, which need the upstream extension                                                        |
-| `KEERA_SANDBOX_PODMAN_BINARY`      | `podman`                                      | the single-host driver's command                                                                     |
-| `KEERA_SANDBOX_PODMAN_NETWORK`     | podman's default                              | the network a single-host sandbox joins                                                              |
-| `KEERA_SANDBOX_GIT_FORGE`          | -                                             | `github`, `gitlab`, or unset for sandboxes without a repository                                      |
-| `KEERA_SANDBOX_GIT_URL`            | GitHub.com or GitLab.com                      | GitHub's API (`https://<host>/api/v3` for Enterprise Server), or the GitLab instance                 |
-| `KEERA_SANDBOX_GIT_APP_ID`         | -                                             | the GitHub App's id                                                                                  |
-| `KEERA_SANDBOX_GIT_APP_KEY_FILE`   | -                                             | a file holding the GitHub App's private key                                                          |
-| `KEERA_SANDBOX_GIT_TOKEN_FILE`     | -                                             | a file holding the GitLab token                                                                      |
+| Variable                           | Default                  | What it does                                                                                         |
+| ---------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `KEERA_SANDBOX_DRIVER`             | -                        | `kubernetes`, `podman`, or unset for no sandboxes, and no Sandboxes screen in the panel              |
+| `KEERA_SANDBOXES_FILE`             | -                        | the classes each new organisation starts with                                                        |
+| `KEERA_SANDBOX_NAMESPACE`          | the gateway's            | where sandboxes run on Kubernetes. Should not be the gateway's, so unset logs a warning              |
+| `KEERA_SANDBOX_RUNTIME_STANDARD`   | -                        | the runtime for the standard tier, if not the default: a RuntimeClass, or on podman `crun` or `runc` |
+| `KEERA_SANDBOX_RUNTIME_ISOLATED`   | -                        | the gVisor RuntimeClass, or `runsc` on podman. Unset makes that tier unavailable                     |
+| `KEERA_SANDBOX_RUNTIME_VM`         | -                        | the Kata RuntimeClass, or `krun` on podman. Unset makes that tier unavailable                        |
+| `KEERA_SANDBOX_PUBLIC_URL`         | `KEERA_PUBLIC_URL`       | the gateway **as a sandbox reaches it** - the in-cluster Service, not the ingress                    |
+| `KEERA_SANDBOX_IDLE_SUSPEND`       | off                      | how long an engineer's sandbox runs with no connection open before it is suspended. Refused below 5m |
+| `KEERA_SANDBOX_STORAGE_CLASS`      | the cluster's            | what a home volume is provisioned from                                                               |
+| `KEERA_SANDBOX_SERVICE_ACCOUNT`    | the namespace's          | what a sandbox pod runs as; its token is never mounted                                               |
+| `KEERA_SANDBOX_IMAGE_PULL_SECRETS` | -                        | comma-separated, for a sandbox image in a private registry                                           |
+| `KEERA_SANDBOX_IMAGES`             | -                        | comma-separated image prefixes an administrator may give a class, such as `registry.internal/keera/` |
+| `KEERA_SANDBOX_WARM`               | off                      | warm pools, which need the upstream extension                                                        |
+| `KEERA_SANDBOX_PODMAN_BINARY`      | `podman`                 | the single-host driver's command                                                                     |
+| `KEERA_SANDBOX_PODMAN_NETWORK`     | podman's default         | the network a single-host sandbox joins                                                              |
+| `KEERA_SANDBOX_GIT_FORGE`          | -                        | `github`, `gitlab`, or unset for sandboxes without a repository                                      |
+| `KEERA_SANDBOX_GIT_URL`            | GitHub.com or GitLab.com | GitHub's API (`https://<host>/api/v3` for Enterprise Server), or the GitLab instance                 |
+| `KEERA_SANDBOX_GIT_APP_ID`         | -                        | the GitHub App's id                                                                                  |
+| `KEERA_SANDBOX_GIT_APP_KEY_FILE`   | -                        | a file holding the GitHub App's private key                                                          |
+| `KEERA_SANDBOX_GIT_TOKEN_FILE`     | -                        | a file holding the GitLab token                                                                      |
 
 `KEERA_SANDBOX_PUBLIC_URL` is the one to get right. A sandbox pointed at the
 public name leaves the cluster and comes back through the load balancer to reach
@@ -616,8 +602,8 @@ expands from the environment.
 key included, to `~/.ssh/environment`, because that is how an ssh session gets
 it. The Git helper caches the repository token in `~/.config/keera`. So whoever
 can read a sandbox's volume can read both, until they are revoked: when the
-sandbox expires or ends, or its owner is disabled. A GitHub token revoked this
-way still works for up to an hour.
+sandbox expires or ends, or its owner is disabled
+([GitHub tokens last a little longer](#code-in-work-out)).
 
 Three things must match what `keera connect pi` prints for a laptop: the
 provider name, the API shape, and the credential being a reference, not a
@@ -649,8 +635,7 @@ providers over a configured one when both are available. So `pi` with no
 `--model`, on an image that exports a vendor variable, would send the gateway's
 key to `api.anthropic.com`. Naming the provider stops that. Any tool in a
 sandbox that reads a vendor's variable and ignores its base URL does the same,
-and the egress rule is the only general defence. See
-[What is actually enforced](#what-is-actually-enforced).
+and the [egress rule](#the-security-boundary) is the only general defence.
 
 The environment reaches an ssh session through `~/.ssh/environment` and
 `PermitUserEnvironment`, not a shell startup file. An ssh session inherits
@@ -710,12 +695,6 @@ likely to need a second look: the warm-pool claim's condition names, and whether
 here: the `Suspended` condition is not cleared on resume, so trust `Ready`; and
 `volumeClaimTemplates` cannot change after creation, so a class that grows its
 disk cannot apply that to running sandboxes.
-
-**Kata needs nested virtualisation** on a VM-based node pool, which some
-platform teams will not allow.
-
-**Warm pools cost money all the time.** A pool of two per class on a deployment
-nobody uses is the most likely way for this feature to waste money.
 
 **Keep GPU nodes and sandbox nodes in separate pools**, so a developer filling a
 node with build jobs does not take Keera Engine's GPU. The chart does not

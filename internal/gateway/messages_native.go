@@ -235,7 +235,7 @@ func (anthropicDialect) stream(alias string) nativeStream {
 
 // anthropicStream reads a Messages stream on its way through. Only the event
 // that opens the message and the one that closes it are decoded; the rest are
-// counted by a byte search.
+// only counted.
 type anthropicStream struct {
 	alias string
 	usage anthropicUsage

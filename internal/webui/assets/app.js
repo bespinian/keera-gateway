@@ -91,9 +91,8 @@ const routes = [
     icon: "connect",
     view: clientsView,
   },
-  // The playground verifies that the path an editor will take works. That is a
-  // question the person about to configure an editor has, not a piece of
-  // configuration, so it sits here rather than among the catalogue screens.
+  // The playground checks the path an editor will take, so it sits with the
+  // developer's screens rather than the configuration.
   {
     path: "/playground",
     group: "You",
@@ -249,9 +248,7 @@ const routes = [
     view: auditView,
     admin: true,
   },
-  // What the deployment bills for its own provider keys. Administrators see
-  // their organisation's bill, operators every one. Not shown
-  // on a deployment without such a key: there is nothing to bill.
+  // The bill for the deployment's own provider keys. Not shown without one.
   {
     path: "/billing",
     group: "Administration",

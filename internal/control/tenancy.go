@@ -441,8 +441,12 @@ func (s *Server) addUser(w http.ResponseWriter, r *http.Request, p *authn.Princi
 	switch signIn {
 	case "sso":
 		if !s.opts.Providers.Enabled() {
+			instead := "add a passkey account instead"
+			if s.opts.Passkeys == nil {
+				instead = "configure one, or turn on KEERA_PASSKEYS and add a passkey account"
+			}
 			badRequest(w, "this gateway has no identity provider, so nobody could sign in "+
-				"to that account; add a passkey account instead")
+				"to that account; "+instead)
 			return
 		}
 	case authn.PasskeyProvider:

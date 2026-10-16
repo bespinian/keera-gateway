@@ -35,31 +35,19 @@ services:
       # A 6 GB first download needs more grace than llama.cpp's 1 GB one.
       start_period: 600s
     command:
-      # Qwen2.5-Coder-7B-Instruct-AWQ is ~5.6 GB of weights: 3.4 GB of 4-bit
-      # tensors plus 2.2 GB of fp16 embeddings, which AWQ leaves unquantised and
-      # which are a third of the footprint. At 56 KiB/token of KV cache (28
-      # layers, 4 KV heads) that leaves room for roughly eight 32k sessions on a
-      # 24 GB L4.
-      #
-      # On an Ada card - L4, L40S - `--quantization fp8` over the unquantised
-      # checkpoint is the better trade: ~8.7 GB, W8A8 instead of W4A16, and the
-      # card has the tensor cores for it. No --quantization flag is set here
-      # because vLLM reads it off the checkpoint, which keeps this file correct
-      # whichever model KEERA_GPU_MODEL names.
+      # Sizes, and other models and cards, are in README.md. No --quantization
+      # flag is set: vLLM reads it off the checkpoint, so this file stays
+      # correct whichever model KEERA_GPU_MODEL names.
       - ${KEERA_GPU_MODEL:-Qwen/Qwen2.5-Coder-7B-Instruct-AWQ}
       - --served-model-name
       - keera-speed
       # A fraction of VRAM.
       - --gpu-memory-utilization
       - "0.90"
-      # models.yaml gives keera-speed 16384, which is safe but half of this.
-      # To use the whole window, raise it on each organisation's model:
-      #   keera model set keera-speed --max-context 32768
-      # New organisations still get 16384 from models.yaml.
-      # 32768 is also where
-      # Qwen2.5-Coder's max_position_embeddings sits: the 131k the model card
-      # advertises needs a static YaRN rope_scaling block, which vLLM then
-      # applies to short prompts too and measurably degrades them.
+      # 32768 is where Qwen2.5-Coder's max_position_embeddings sits: the 131k
+      # the model card advertises needs a static YaRN rope_scaling block, which
+      # vLLM then applies to short prompts too and measurably degrades them.
+      # models.yaml says 16384; README.md says how to use the whole window.
       - --max-model-len
       - "32768"
       # The parser has to match the model's tool-call syntax. When it does not,

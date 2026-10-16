@@ -67,10 +67,9 @@ make dist              # the keera command for every release platform, to build/
 nix build .#keera -o build/result  # vendorHash in flake.nix follows go.mod
 ```
 
-Everything those write goes to `build/` - the two binaries, the SBOM, the
-notices, the release archives, and what air rebuilds during `make dev`.
-`make clean` removes it. The exception is `compose/.env`, which `make dev`
-creates on a fresh clone and `make clean` keeps.
+Everything those write goes to `build/`, except `compose/.env`; `make clean`
+removes `build/` and keeps `.env`. See
+[docs/run-locally.md](docs/run-locally.md#building).
 
 Run `make check` before handing work back.
 

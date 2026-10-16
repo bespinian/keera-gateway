@@ -260,9 +260,10 @@ export async function usageView(ctx) {
   const note = h(
     "div",
     { class: "hint", style: { marginTop: "14px" } },
-    "Cost uses the prices set on each model. Only served requests count; " +
-      "refused and failed ones cost nothing and are in Requests. Requests " +
-      "cancelled mid-stream are charged an estimate, and the log marks them.",
+    "Cost uses the prices set on each model. Only served requests are " +
+      "counted, but a refused or failed one can still cost what its filters " +
+      "and router spent. Requests cancelled mid-stream are charged an " +
+      "estimate, and the log marks them.",
   );
 
   return h("div", {}, controls, body, foot, note);

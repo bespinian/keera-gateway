@@ -83,6 +83,9 @@
   }
 }
 
+/* The same tokens, for dark chosen in the panel. One rule cannot both match a
+   media query and a selector, and deciding in a script would show light first:
+   the CSP allows no inline script to run before the page paints. */
 :root[data-theme="dark"] {
   color-scheme: dark;
   --bg: #121215;

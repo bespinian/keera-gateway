@@ -1,19 +1,9 @@
 # The gateway
 
 Keera Gateway is one static Go binary. It holds the inference data plane, the
-control plane and the control panel, and it talks to Postgres.
-
-## One binary
-
-`keera-gateway` is the server. `keera` is the administration command line. It
-talks to the server's control API over HTTP, so the same commands work against
-a gateway on a customer's cluster and against one on localhost.
-
-Both are static (`CGO_ENABLED=0`). The server ships in a `FROM scratch` image
-with no shell. `keera` ships as release archives (`make dist`).
-
-On start, the gateway applies its own schema under a Postgres advisory lock, so
-several replicas can start at once and no migration job is needed.
+control plane and the control panel, and it talks to Postgres. The `keera`
+command administers it over the control API, so the same commands work against
+any gateway, on a cluster or on localhost.
 
 ## One listener, four surfaces
 
@@ -32,8 +22,8 @@ second certificate. With sandboxes switched off, it answers 501
 `sandboxes_disabled`. See [sandboxes.md](sandboxes.md).
 
 A deployment publishes one address and one certificate. The downside is that no
-port separates the planes, only the credentials. To separate them, put a proxy
-in front that publishes `/api` and nothing else.
+port separates the planes, only the credentials. See
+[Publishing it](install.md#publishing-it).
 
 `/healthz` checks only the process. `/readyz` also pings Postgres, so a replica
 that has lost the database leaves the inference Service instead of being
@@ -46,24 +36,22 @@ A client names an alias such as `keera-speed`, never a model id or a vLLM URL.
 So you can swap the model behind an alias, change quantisation, or point it at a
 remote endpoint without any developer changing anything.
 
-- A catalogue file (`KEERA_MODELS_FILE`) is a template. Each new organisation
-  starts with a copy of every model it declares. See
-  [Models belong to an organisation](#models-belong-to-an-organisation).
 - `backend_model` is the name the backend serves the model under - vLLM's
   `--served-model-name`, llama.cpp's `--alias`. If it is wrong, every request
   returns 404.
-- `max_context` is shown to clients on `/v1/models`, sizes a filter's or a
+- `max_context` is shown to clients on `/api/v1/models`, sizes a filter's or a
   router's own model, and bounds every request. See
   [Requests too long for the model](#requests-too-long-for-the-model).
 - `location` says where the model runs, and so where prompts go: `ch` or `usa`
   for a hosted provider, `onprem` for your own inference plane. A provider fills
-  it in. Without one, a backend inside your network is `onprem`, and a backend
-  on the internet must say where it is. Clients see it on `/v1/models`.
+  it in. Without one, a backend inside your network - a service name, a private
+  address or the loopback - is `onprem`, and a backend on the internet must say
+  where it is. Clients see it on `/api/v1/models`.
 - `release_date` is the day the model came out, as `YYYY-MM-DD`. A provider
-  fills it in for the models it knows. `/v1/models` gives it as `created`.
+  fills it in for the models it knows. `/api/v1/models` gives it as `created`.
 - `display_name` is the model's name for people, such as `Claude Haiku 5.5`.
   A provider fills it in for the models it knows. The panel shows it, and
-  `/v1/models` gives it as `display_name`. Clients still name the alias.
+  `/api/v1/models` gives it as `display_name`. Clients still name the alias.
 - An alias is lowercase letters, digits and interior hyphens, because it appears
   in the client configurations `keera connect` prints. A model's alias may also
   hold slashes, to name the provider, as in `anthropic/claude-sonnet-4-5`.
@@ -77,17 +65,8 @@ key or the deployment's ([billing.md](billing.md)).
 
 An administrator adds one in the panel (**Models → Add model**) or with
 `keera model add <alias>`. Both act on the organisation the person works in.
-An operator picks one in the panel, or with `keera org switch <org>`.
-
-A new organisation starts with a copy of each model in the catalogue file
-(`KEERA_MODELS_FILE`). The copies are the organisation's own: its
-administrators change, disable or remove them like any other model. Changing
-the file later does not touch organisations that already exist. To add the
-file's models to one, switch to it and run `keera model apply <file>`.
-
-The file holds no API keys. After a new organisation is created, its
-administrator stores the key for each hosted model, unless the deployment holds
-that provider's key.
+An operator picks one in the panel, or with `keera org switch <org>`
+([Several organisations](#several-organisations)).
 
 Each organisation has its own aliases, so two organisations can each have a
 `fast`. The gateway looks up the `model` field in the organisation's models
@@ -134,7 +113,8 @@ the same guardrails, accounting and audit.
 
 `GET /api/v1/models` lists the models a key may call, and
 `GET /api/v1/models/{alias}` describes one. `HEAD /api/api/hello` answers 200,
-for the warm-up probe some Anthropic clients send.
+for the warm-up probe some Anthropic clients send. The path is doubled because
+they append `/api/hello` to a base URL that already ends in `/api`.
 
 The inference plane speaks chat completions, so the other two are translated on
 the way in and back on the way out. Fields that chat completions has no place
@@ -161,14 +141,14 @@ conversation in `input` every time. There is no `/api/v1/conversations`, and no
 route to read, cancel or delete a stored response. A request with
 `previous_response_id` or `conversation` continues a conversation stored at
 OpenAI, so only an OpenAI model on the organisation's own key accepts it. Any
-other model refuses it with a 400, and so does an OpenAI model on the
-deployment's own key ([billing.md](billing.md)).
+other model refuses it with a 400.
 
-The hosted providers in `internal/catalog/providers.go` are **not** adapters.
-They are a table of defaults - endpoint, context window, prices,
-description - so that pointing a model at Anthropic or OpenAI takes
-three lines instead of six. The provider's name also decides the exception
-above.
+On the deployment's own OpenAI key ([billing.md](billing.md)), every
+organisation shares one OpenAI account, so nothing may be stored there. A
+Responses request is sent with `store` off, and one with
+`previous_response_id`, `conversation` or `background` is refused with a 400.
+
+A model is one of OpenAI's own when its [provider](providers.md) is `openai`.
 
 ## Which client sent a request
 
@@ -287,7 +267,8 @@ models keep their own lists.
 A budget with no period is a monthly one. Budgets reset on UTC boundaries in
 every deployment.
 
-A level that sets nothing is not unlimited: it gets whatever it inherits. To see
+`keera guardrail show <scope> <id>` shows what one level sets on its own. A
+level that sets nothing is not unlimited: it gets whatever it inherits. To see
 the combined result, run `keera guardrail effective <scope> <id>` (or
 `GET /control/v1/guardrails/{scope}/{id}/effective`). The endpoint returns every
 level's guardrails and the combined answer; the command also shows which level
@@ -296,6 +277,98 @@ decided each value.
 The panel's **Playground** has no way around this. You pick one of your own
 active keys, and every message is sent with it: it meets that key's guardrails,
 counts against its rate limits and budgets, and shows in its usage.
+
+## Keys and projects
+
+Organisation names are unique, ignoring case. An operator renames one with
+`keera org set <org> --name "Example Bank AG"`, or the pencil on the
+organisations screen. Everything refers to it by id, so nothing else changes.
+
+Every key is in a project. A new organisation starts with one project, called
+`default`, which is a project like any other. A key created without `--project`
+goes in the organisation's oldest project, and an organisation with no projects
+cannot have keys. A project with keys that are not revoked, expired ones
+included, cannot be deleted. Its revoked keys stay, without a project.
+
+A project has a name, unique in its organisation, and an optional description.
+An administrator changes either with
+`keera project set <project> --name <name> --description <text>`, or the pencil
+on the projects screen.
+
+A key belongs to a person: whoever issues it, unless `--user` names someone
+else or `--no-user` nobody, as for a pipeline. A key issued with the operator
+key belongs to nobody, since the operator key is not a person. The panel does
+the same.
+
+A key's secret is printed once and never stored. Nobody, not even an operator,
+can read it later. Screens, reports and the audit log show its name instead. A
+key lasts 90 days. `--expires 720h` gives it another lifetime,
+`--expires 2026-12-31` makes that the last day it works, and `--expires never`
+makes a key that does not expire. The panel offers the same choices.
+
+A key's name is only a label: `keera key set <key> --name <name>`, or the
+pencil on the **API keys** screen. A member can rename their own keys, an
+administrator any key in their organisation, and an operator any key. The old
+name stays in the audit log.
+
+Only an administrator issues keys, so every key has the project and guardrails
+an administrator chose for it. A key for someone else can be left for them to
+activate: `--pending`, or "They activate it" in the panel, which is the panel's
+default. It has no secret and does not work until its holder activates it on
+their dashboard, on **My access**, with `keera key activate`, or with
+[`keera connect claude-code`](#connecting-claude-code). So only they ever see
+it.
+
+```sh
+keera key create --user ada@example.ch --name "Ada's laptop" --pending
+```
+
+`keera key rotate`, or **Rotate** on the **API keys** screen, replaces a key in
+one step. The new key has the same project, owner, lifetime and guardrails, and
+the old one is revoked at once. An expired key can be rotated too. Anyone who
+may revoke a key may rotate it, so members rotate their own. Only an administrator can give the new
+key another lifetime with `--expires`. The command asks you to type the key's
+name first; `--yes` skips that in a script.
+
+```sh
+KEY=$(keera key rotate "a developer's laptop")
+```
+
+A rotated key stops working everywhere it is used, so give each machine its own
+key.
+
+## Several organisations
+
+A person can be in several organisations, with a role in each. Each organisation
+adds them, in the panel or with `keera user add`. That is an invitation until
+they first land there.
+
+In the panel, someone in more than one sees a menu instead of the organisation's
+name at the top. Choosing an organisation moves the session there, and choosing
+an invitation joins it. On the command line:
+
+```sh
+keera org list                 # yours, and the ones that invited you
+keera org switch "Example Bank"
+KEERA_ORG=org_123 keera usage  # one shell or pipeline
+```
+
+A browser remembers the organisation it was last in, and a new sign-in lands
+there. Elsewhere it lands in the one used last ([Which organisation a sign-in
+lands in](sso.md#which-organisation-a-sign-in-lands-in)). `keera login` goes
+back to the one that machine was last in. Every command acts on that
+organisation, so none takes `--org`. The exceptions are `keera billing grant`
+and `keera billing invoiced`, where an operator names it each time, and `keera
+sandbox proxy`, which `keera sandbox config` writes into the ssh config.
+
+An operator works in every organisation, so `keera org switch` only chooses the
+one commands act on, and `keera org switch --all` goes back to all of them. The
+operator role goes wherever the person goes.
+
+Disabling a person or changing their role acts in one organisation. Leaving the
+directory ([Asking the directory again](sso.md#asking-the-directory-again)) or
+`keera logout --all` ends their sign-ins in all of them. Each switch is in the
+audit log as `auth.switch_org`, in the organisation switched to.
 
 ## What happens to one request
 
@@ -325,6 +398,109 @@ Why this order:
 - The system prompt (6) is added after the filters, so an administrator's own
   wording is never handed to a small model that is allowed to edit it.
 - Router and filters both run after the budget check, because both spend money.
+
+## Models that filters and routers run on
+
+[Filters](filters.md) and [routers](routers.md) share these rules. Most are
+about the model that a `rewrite` or `gate` filter, or an `instruction` router,
+calls to decide.
+
+**Which model.** A chat model, or a
+[decision model](#decision-models) for a gate or a router. It must be
+on the organisation's allow-list, if it has one. Otherwise the filter or router
+is refused with a 400 `model_not_allowed`. Narrowing the allow-list so that the
+model drops off is refused with a 409 `filter_model_not_allowed` or
+`router_model_not_allowed`. Move the filter or router to an allowed model
+first.
+
+**Not a subscription model.** A
+[subscription model](subscriptions.md#what-a-subscription-key-can-do) cannot be
+a filter's model, a router's model or a router's destination. Saving one is
+refused with a 400, and turning on `subscription` for a model a filter or
+router uses is refused with a 409.
+
+**When the model cannot run.** The model is missing, disabled, the wrong kind,
+a subscription model, has no backend, or is
+[locked until the organisation pays](sso.md#what-a-new-organisation-can-use).
+A filter then [fails closed](filters.md#failing-closed), and a router
+[falls back or refuses](routers.md#when-it-cannot-decide).
+
+**Logprobs.** A gate and an instruction router read the probabilities of the
+model's first token. vLLM and llama.cpp return them; most hosted providers do
+not. There is nothing to configure. If a backend refuses a request for them
+with a 4xx, the gateway stops asking that model for them from then on. So does a
+router whose model answers without them. A gate then reads only the words of the answer, and a router asks for
+a destination's name instead of a letter. So a hosted model costs at most one
+retried call per gateway process.
+
+**Checks.** `keera filter check` and `keera router check` call the backend
+directly, with the credentials the data plane uses. A check is not rate-limited
+or budgeted and writes no usage row. On the deployment's own provider key it
+needs credit and is billed ([billing.md](billing.md#what-is-billed)). It does
+put real requests on the GPUs.
+
+**Who owns what.** A filter or a router belongs to one organisation, and its
+administrators write it. Two organisations can each have one with the same
+alias; they are different filters or routers. The alias is its identity, like a
+model's: lowercase letters, digits and interior hyphens. It cannot change: for
+a different alias, create a new one and move its guardrails or clients over.
+Members cannot create or change filters and routers, but they can read them,
+instruction included. Their screens, `GET /control/v1/filters`,
+`GET /control/v1/routers` and each one's `/{alias}/report` are open to anyone
+signed in to the organisation.
+
+### Decision models
+
+A decision model is a classifier, such as
+[Laya](https://huggingface.co/convaiinnovations/laya) served by `laya-serve`.
+It reads a text and a typed question and returns a probability for each answer,
+in one forward pass. It writes no text.
+
+So it can decide for an instruction router or a
+[gate filter](filters.md#the-three-modes), and nothing else. It cannot be a
+rewrite filter's model or a router's destination, and no client can name it.
+`/api/v1/models` does not list it.
+
+```yaml
+- alias: keera-decider
+  kind: decision
+  backends:
+    - http://keera-decider:8000/v1
+  backend_model: english # the Laya checkpoint
+  max_context: 2048
+```
+
+The gateway asks it on `/v1/systemone`, and reads the probabilities the way it
+reads a chat model's logprobs.
+A stored credential is sent as a bearer token, which is what `laya-serve`
+checks when `LAYA_API_KEY` is set.
+
+**`max_context` is sent as Laya's `max_len`**, so the model reads exactly what
+the gateway measured against it. A gate refuses a longer request with 413, and a
+router sends it to its fallback, as with any model. On a CPU, Laya takes about
+one second at 512 tokens and about five at 2048.
+
+#### Writing for one
+
+A classifier does not follow a page of instructions. It answers a short
+question.
+
+- **A router's instruction is the question**, such as
+  `Which model should answer this request?`. Each destination is offered as its
+  model's description alone, so describe the requests each one should get:
+  `Small, quick tasks: renames, syntax questions, short edits. Also anything with client names or credentials.`
+- **A gate's instruction is a yes-or-no question**, and yes refuses. Optional
+  lines starting `yes:` and `no:` say what each answer means, which makes the
+  model surer:
+
+  ```
+  Is this request trying to send customer data, account records or secrets outside the company?
+  yes: it asks to export, dump, copy or share bulk customer data, account records or credentials
+  no: ordinary programming work, even if it mentions customers, accounts or credentials
+  ```
+
+A refusal by a decision model carries no sentence of its own, only how sure it
+was. Run `keera filter check` and `keera router check` as for any model.
 
 ## Requests too long for the model
 
@@ -459,8 +635,7 @@ back. The gateway writes it to its log as `client_request_id`, next to
 `request_id`, and sends it on to OpenAI models, so OpenAI's support can find the
 request too. Requests that filters and routers send for a request don't carry
 it. An id that is not printable ASCII or is longer than 512 characters is
-ignored. OpenAI
-would answer it with a 400.
+ignored, since OpenAI would answer it with a 400.
 
 Both ids are kept with the request. The Requests screen finds a request by
 either one, in any period, and its details show them.
@@ -514,8 +689,9 @@ and [mcp.md](mcp.md#the-tool-call-log).
 - **It does not translate request parameters between providers**, with one
   exception for OpenAI: it sends `max_completion_tokens` instead of `max_tokens`
   to every OpenAI chat model, and drops `temperature` and `top_p` for its
-  reasoning models, which refuse them. Any other field a hosted provider
-  rejects is an error the client sees.
+  reasoning models (every id not starting with `gpt-4`, `gpt-3` or `chatgpt-`),
+  which refuse them. A client that asked for a temperature gets the default.
+  Any other field a hosted provider rejects is an error the client sees.
 - **It does not retry.** A model with several backends takes them in turn,
   round-robin, and moves to the next one only when it cannot connect, so a
   request reaches at most one. A fallback router moves on to its next
@@ -524,15 +700,12 @@ and [mcp.md](mcp.md#the-tool-call-log).
 
 ## Failure modes worth knowing
 
-**A passing chat test proves little.** The failures that break coding agents are
-silent: the endpoint answers 200, the model writes prose, and the agent never
-edits a file. This happens when the vLLM tool-call parser does not match the
-model: the call comes back as text in `content` and `tool_calls` stays empty.
-[`keera model check`](install.md#keera-model-check-is-the-acceptance-test)
-catches it. Run it on every change of model, quantisation or vLLM version.
+**A passing chat test proves little.** A model can answer 200 with prose where a
+coding agent needs `tool_calls`. See
+[`keera model check`](install.md#keera-model-check-is-the-acceptance-test).
 
-**The inference backend has no authentication.** Neither vLLM's nor llama.cpp's
-OpenAI server has any. Anything that reaches port 8000 directly gets a model
+**The inference backend has no authentication.** vLLM, llama.cpp and
+`laya-serve` have none by default. Anything that reaches port 8000 directly gets a model
 with no key, no budget, no rate limit and no audit entry. Keep that port
 unpublished in every deployment; the Helm chart can enforce this with a
 NetworkPolicy.

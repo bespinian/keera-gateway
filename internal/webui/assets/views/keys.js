@@ -199,7 +199,7 @@ export async function keysView(ctx) {
           const bits = summarise(k.limits || {});
           if (k.limits && k.limits.budget_micros) {
             bits.push(
-              `${money(k.limits.budget_micros)}/${k.limits.budget_period || "month"}`,
+              `${money(k.limits.budget_micros)} per ${k.limits.budget_period || "month"}`,
             );
           }
           if (k.limits && k.limits.allowed_models) {

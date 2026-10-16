@@ -196,8 +196,7 @@ export async function projectDetailView(ctx) {
     ),
     note:
       "This project's guardrails apply to every key in it. A project can only " +
-      "narrow what the organisation allows. Refused requests show below and " +
-      "cost nothing.",
+      "narrow what the organisation allows.",
   });
 }
 
@@ -796,12 +795,7 @@ async function screen(ctx, spec) {
           "div",
           { class: "card-body" },
           o.requests === 0
-            ? empty(
-                "Nothing recorded in this period",
-                spec.sessions
-                  ? "Pick a longer period."
-                  : "Pick a longer period, or see the refused requests below.",
-              )
+            ? empty("Nothing recorded in this period", "Pick a longer period.")
             : areaChart(o.series, { bucket: o.bucket }),
         ),
       ),
@@ -823,9 +817,9 @@ async function screen(ctx, spec) {
     );
   }
 
-  // The log is administrator-only: its rows name other people's keys and carry
-  // text the inference plane wrote. A member gets the charts, which are their own organisation's
-  // numbers and nobody's individual traffic.
+  // Only an administrator gets the log here. A member's log holds only their
+  // own keys' requests, which would not match the charts above; it is on the
+  // Requests screen.
   if (isAdmin(ctx)) {
     const log = spec.sessions ? sessionLog : requestLog;
     wrap.append(
