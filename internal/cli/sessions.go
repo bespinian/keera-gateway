@@ -81,7 +81,7 @@ func printSessions(w *table, res sessionsResponse, since time.Duration) {
 			s.ID, s.StartedAt.Local().Format("2006-01-02 15:04"),
 			shortDuration(s.Duration()), s.Requests,
 			dash(strings.Join(s.Models, ",")), dash(who),
-			policy.FormatMicros(s.CostMicros), endedAs(s))
+			policy.FormatAmount(s.CostMicros), endedAs(s))
 	}
 	// Per task, and the middle task rather than the mean: one runaway task
 	// makes an average that describes none of the others.
@@ -153,7 +153,7 @@ func printSession(w *table, res sessionResponse) {
 	for _, r := range res.Requests {
 		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%dms\t%s\n",
 			r.ID, r.TS.Local().Format("15:04:05"), dash(r.Alias), httpStatus(r.Status),
-			policy.FormatMicros(r.CostMicros), r.TTFTMS, oneLine(r.Error))
+			policy.FormatAmount(r.CostMicros), r.TTFTMS, oneLine(r.Error))
 	}
 
 	// What the agent did between its requests, through the MCP servers.

@@ -505,8 +505,8 @@ func printProviders(w *table) {
 }
 
 func printModels(w *table, models []policy.Model) {
-	w.header("ALIAS\tNAME\tKIND\tBACKEND MODEL\tPROVIDER\tLOCATION\tRELEASED\t" +
-		"IN/MTOK\tCACHED/MTOK\tOUT/MTOK\tSTATUS")
+	w.header(fmt.Sprintf("ALIAS\tNAME\tKIND\tBACKEND MODEL\tPROVIDER\tLOCATION\tRELEASED\t"+
+		"IN/MTOK\tCACHED/MTOK\tOUT/MTOK (%s)\tSTATUS", policy.Currency))
 	for _, m := range models {
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			m.Alias, dash(m.DisplayName), m.Kind, m.BackendModel, dash(m.Provider), dash(m.Location),
@@ -535,26 +535,21 @@ func optionalPrice(micros int64) string {
 
 // longPromptPrices says what a long prompt costs instead, per million tokens.
 func longPromptPrices(t policy.PriceTier) string {
-	return fmt.Sprintf("over %d tokens, %s in, %s cached, %s written, %s out", t.AboveTokens,
-		policy.FormatMicros(t.InputMicrosPerMTok), optionalPrice(t.CachedInputMicrosPerMTok),
-		optionalPrice(t.CacheWriteMicrosPerMTok), policy.FormatMicros(t.OutputMicrosPerMTok))
+	return fmt.Sprintf("over %d tokens (%s): %s in, %s cached, %s written, %s out",
+		t.AboveTokens, policy.Currency, policy.FormatMicros(t.InputMicrosPerMTok),
+		optionalPrice(t.CachedInputMicrosPerMTok), optionalPrice(t.CacheWriteMicrosPerMTok),
+		policy.FormatMicros(t.OutputMicrosPerMTok))
 }
 
 func printModel(w *table, m policy.Model) {
 	show(w, "alias", m.Alias)
 	show(w, "kind", m.Kind)
 	show(w, "backend model", m.BackendModel)
-	if m.DisplayName != "" {
-		show(w, "display name", m.DisplayName)
-	}
+	showIfSet(w, "display name", m.DisplayName)
 	show(w, "backends", strings.Join(m.Backends, ", "))
-	if m.Provider != "" {
-		show(w, "provider", m.Provider)
-	}
+	showIfSet(w, "provider", m.Provider)
 	show(w, "location", dash(m.Location))
-	if m.ReleaseDate != "" {
-		show(w, "released", m.ReleaseDate)
-	}
+	showIfSet(w, "released", m.ReleaseDate)
 	// Printed even when missing: without a description a router knows the
 	// model by its alias alone.
 	if m.Description != "" {
@@ -567,17 +562,17 @@ func printModel(w *table, m policy.Model) {
 	} else {
 		show(w, "max context", "(not advertised)")
 	}
-	show(w, "in/mtok", policy.FormatMoney(m.InputMicrosPerMTok))
-	show(w, "out/mtok", policy.FormatMoney(m.OutputMicrosPerMTok))
+	show(w, "in/mtok", policy.FormatPrice(m.InputMicrosPerMTok))
+	show(w, "out/mtok", policy.FormatPrice(m.OutputMicrosPerMTok))
 	// In words rather than 0.00: an unstated rate is charged at the input
 	// price, not free.
 	if m.CachedInputMicrosPerMTok > 0 {
-		show(w, "cached in/mtok", policy.FormatMoney(m.CachedInputMicrosPerMTok))
+		show(w, "cached in/mtok", policy.FormatPrice(m.CachedInputMicrosPerMTok))
 	} else {
 		show(w, "cached in/mtok", "(not stated - charged at the input price)")
 	}
 	if m.CacheWriteMicrosPerMTok > 0 {
-		show(w, "cache write/mtok", policy.FormatMoney(m.CacheWriteMicrosPerMTok))
+		show(w, "cache write/mtok", policy.FormatPrice(m.CacheWriteMicrosPerMTok))
 	} else {
 		show(w, "cache write/mtok", "(not stated - charged at the input price)")
 	}

@@ -70,7 +70,8 @@ export function money(micros) {
 
 /** amount renders integer micro-units without the currency, for where it is
  *  said once nearby. Small amounts keep their digits: a per-request cost
- *  rounded to two decimals reads as a bug, not as a number. */
+ *  rounded to two decimals reads as a bug, not as a number. The CLI rounds
+ *  the same way, in policy.FormatAmount. */
 export function amount(micros) {
   const v = (micros || 0) / 1e6;
   let s;

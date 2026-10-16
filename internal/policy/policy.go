@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"regexp"
 	"slices"
@@ -912,11 +913,31 @@ func (t ScopeType) Possessive() string {
 	}
 }
 
-// FormatMicros renders micro-units for a human. It keeps every significant
-// digit and pads to at least two decimals, because rounding a small cost to two
-// decimals would print "0.00".
+// FormatMicros renders micro-units exactly, padded to at least two decimals.
+// Prices use it, because they are what gets billed, so 0.125 must not read as
+// 0.13. So do exports and headers that a program reads.
 func FormatMicros(micros int64) string {
-	s := strconv.FormatFloat(float64(micros)/1e6, 'f', -1, 64)
+	return twoDecimals(strconv.FormatFloat(float64(micros)/1e6, 'f', -1, 64))
+}
+
+// FormatAmount renders a cost, a budget or a balance for a human, as the panel
+// does: two decimals from 1 up, and two significant digits below, because a
+// per-request cost rounded to two decimals would print "0.00".
+func FormatAmount(micros int64) string {
+	v := float64(micros) / 1e6
+	switch {
+	case micros == 0:
+		return "0.00"
+	case math.Abs(v) >= 1:
+		return strconv.FormatFloat(v, 'f', 2, 64)
+	}
+	// 'g' rounds to significant digits, and may write an exponent, so the
+	// rounded value is written again without one.
+	rounded, _ := strconv.ParseFloat(strconv.FormatFloat(v, 'g', 2, 64), 64)
+	return twoDecimals(strconv.FormatFloat(rounded, 'f', -1, 64))
+}
+
+func twoDecimals(s string) string {
 	dot := strings.IndexByte(s, '.')
 	switch {
 	case dot < 0:
@@ -928,9 +949,15 @@ func FormatMicros(micros int64) string {
 	}
 }
 
-// FormatMoney is FormatMicros with the currency first: CHF 3.00. A table whose
-// header names the currency uses FormatMicros instead.
+// FormatMoney is FormatAmount with the currency first: CHF 3.00. A table
+// whose header names the currency uses FormatAmount instead.
 func FormatMoney(micros int64) string {
+	return Currency + " " + FormatAmount(micros)
+}
+
+// FormatPrice is FormatMicros with the currency first, for a price shown on
+// its own.
+func FormatPrice(micros int64) string {
 	return Currency + " " + FormatMicros(micros)
 }
 

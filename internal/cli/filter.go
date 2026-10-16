@@ -392,7 +392,7 @@ func printFilterReport(w *table, name string, since time.Duration,
 		}
 		_, _ = fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%d\t%d\t%s\n",
 			label, t.Runs, t.Refused, share(t.Refused, t.Runs), t.Rewrote, t.Errors,
-			policy.FormatMicros(t.CostMicros))
+			policy.FormatAmount(t.CostMicros))
 	}
 }
 

@@ -67,11 +67,11 @@ type ErrNoCredit struct {
 
 func (e *ErrNoCredit) Error() string {
 	if e.HeldMicros > 0 {
-		return "your organisation's credit (balance CHF " + FormatMicros(e.BalanceMicros) +
-			") is held by requests still running, which may take up to CHF " +
-			FormatMicros(e.HeldMicros) + "; try again when they end, or an administrator " +
+		return "your organisation's credit (balance " + FormatMoney(e.BalanceMicros) +
+			") is held by requests still running, which may take up to " +
+			FormatMoney(e.HeldMicros) + "; try again when they end, or an administrator " +
 			"can add credit under Billing"
 	}
-	return "your organisation has used up its credit (balance CHF " +
-		FormatMicros(e.BalanceMicros) + "); an administrator can add credit under Billing"
+	return "your organisation has used up its credit (balance " +
+		FormatMoney(e.BalanceMicros) + "); an administrator can add credit under Billing"
 }

@@ -49,10 +49,10 @@ func usageCmd(ctx context.Context, args []string) error {
 				group += " (" + b.OrgID + ")"
 			}
 			_, _ = fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%s\n", group, b.Requests,
-				b.InputTokens, b.OutputTokens, policy.FormatMicros(b.CostMicros))
+				b.InputTokens, b.OutputTokens, policy.FormatAmount(b.CostMicros))
 			totalCost += b.CostMicros
 		}
-		_, _ = fmt.Fprintf(w, "total\t\t\t\t%s\n", policy.FormatMicros(totalCost))
+		_, _ = fmt.Fprintf(w, "total\t\t\t\t%s\n", policy.FormatAmount(totalCost))
 	})
 }
 

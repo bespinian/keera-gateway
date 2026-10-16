@@ -319,7 +319,7 @@ export async function providerModelsView(ctx) {
   );
 
   const price = (v) =>
-    v ? h("span", { class: "nowrap" }, "CHF " + listPrice(v)) : dash();
+    v ? h("span", { class: "nowrap" }, listPrice(v)) : dash();
 
   // A model on your own inference server is in no provider's table, so it is
   // added from here rather than from a row.
@@ -392,28 +392,28 @@ export async function providerModelsView(ctx) {
         cell: (r) => (r.m.max_context ? compact(r.m.max_context) : dash()),
       },
       {
-        label: "Input / Mtok",
+        label: "Input / Mtok (CHF)",
         num: true,
         shrink: true,
         sortKey: (r) => r.m.input_micros_per_mtok || null,
         cell: (r) => price(r.m.input_micros_per_mtok),
       },
       {
-        label: "Cached input / Mtok",
+        label: "Cached input / Mtok (CHF)",
         num: true,
         shrink: true,
         sortKey: (r) => r.m.cached_input_micros_per_mtok || null,
         cell: (r) => price(r.m.cached_input_micros_per_mtok),
       },
       {
-        label: "Cache write / Mtok",
+        label: "Cache write / Mtok (CHF)",
         num: true,
         shrink: true,
         sortKey: (r) => r.m.cache_write_micros_per_mtok || null,
         cell: (r) => price(r.m.cache_write_micros_per_mtok),
       },
       {
-        label: "Output / Mtok",
+        label: "Output / Mtok (CHF)",
         num: true,
         shrink: true,
         sortKey: (r) => r.m.output_micros_per_mtok || null,

@@ -429,7 +429,7 @@ func printRouterReport(w *table, name string, since time.Duration,
 	for _, d := range rep.Destinations {
 		_, _ = fmt.Fprintf(w, "%s\t%d\t%s\t%d\t%s\t%dms\n",
 			d.Alias, d.Requests, share(d.Requests, rep.Total.Requests),
-			d.InputTokens+d.OutputTokens, policy.FormatMicros(d.CostMicros), d.TTFTMedianMS)
+			d.InputTokens+d.OutputTokens, policy.FormatAmount(d.CostMicros), d.TTFTMedianMS)
 	}
 }
 

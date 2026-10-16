@@ -86,6 +86,27 @@ func TestParseRejectsAnUnknownFlag(t *testing.T) {
 	}
 }
 
+// The panel's amount() rounds the same way, so one cost reads the same in
+// both.
+func TestFormatAmountRoundsAsThePanelDoes(t *testing.T) {
+	tests := []struct {
+		micros int64
+		want   string
+	}{
+		{0, "0.00"},
+		{12_345_000, "12.35"},
+		{-2_500_000, "-2.50"},
+		{500_000, "0.50"},
+		{1_234, "0.0012"}, // a per-request cost must not print as 0.00
+		{12, "0.000012"},  // nor as an exponent
+	}
+	for _, tc := range tests {
+		if got := policy.FormatAmount(tc.micros); got != tc.want {
+			t.Errorf("FormatAmount(%d) = %q, want %q", tc.micros, got, tc.want)
+		}
+	}
+}
+
 func TestFormatMicrosKeepsSmallAmountsVisible(t *testing.T) {
 	tests := []struct {
 		micros int64
