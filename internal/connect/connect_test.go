@@ -2,6 +2,7 @@ package connect
 
 import (
 	"encoding/json"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -82,7 +83,8 @@ func TestEveryClientIsCompleteEnoughToRender(t *testing.T) {
 		if !strings.Contains(c.Template, "{{base}}") {
 			t.Errorf("%s's template never uses {{base}}", c.Key)
 		}
-		lists := strings.Contains(c.Template, "{{models}}") && c.Entry != ""
+		lists := strings.Contains(c.Template, "{{models}}") && c.Entry != "" ||
+			strings.Contains(c.Template, "{{claude_env}}")
 		if !lists && !strings.Contains(c.Template, "{{aliases}}") {
 			t.Errorf("%s's template names neither {{models}} nor {{aliases}}", c.Key)
 		}
@@ -109,12 +111,20 @@ func TestJSONTemplatesRenderToValidJSON(t *testing.T) {
 	}
 }
 
-// The key is read from the environment rather than baked in. The panel
-// substitutes the real one into these at the moment a key is issued, and it
-// finds the place to put it by matching these spellings.
+// The key is read from the environment rather than baked in, except where the
+// file cannot read it. Such a block gets the key it is rendered with, or the
+// placeholder.
 func TestConfigsReadTheKeyFromTheEnvironment(t *testing.T) {
 	for _, c := range Clients() {
 		rendered := c.Render("https://keera.example.ch", one)
+		if c.HoldsKey() {
+			if !strings.Contains(rendered, KeyPlaceholder) ||
+				!strings.Contains(c.RenderKey("https://keera.example.ch", "keera_sk_ab…", one),
+					`"keera_sk_ab…"`) {
+				t.Errorf("%s holds the key but does not show it:\n%s", c.Key, rendered)
+			}
+			continue
+		}
 		if !strings.Contains(rendered, "KEERA_API_KEY") {
 			t.Errorf("%s's config never mentions KEERA_API_KEY:\n%s", c.Key, rendered)
 		}
@@ -158,7 +168,7 @@ func TestTOMLTemplatesRenderToTOML(t *testing.T) {
 // A client configured by a file says which file, and one run from the shell
 // says nothing rather than guessing at a shell profile.
 func TestAFileClientNamesItsFile(t *testing.T) {
-	for _, key := range []string{"opencode", "pi", "codex"} {
+	for _, key := range []string{"opencode", "pi", "codex", "claude-code"} {
 		c, found := Find(Clients(), key)
 		if !found {
 			t.Fatalf("no client %s", key)
@@ -167,12 +177,8 @@ func TestAFileClientNamesItsFile(t *testing.T) {
 			t.Errorf("%s is configured by a file but names none", key)
 		}
 	}
-	for _, key := range []string{"claude-code", "curl"} {
-		c, _ := Find(Clients(), key)
-		if c.Path != "" {
-			t.Errorf("%s names the file %q, but it is run from the shell",
-				key, c.Path)
-		}
+	if c, _ := Find(Clients(), "curl"); c.Path != "" {
+		t.Errorf("curl names the file %q, but it is run from the shell", c.Path)
 	}
 }
 
@@ -182,7 +188,7 @@ func TestAFileClientNamesItsFile(t *testing.T) {
 func TestClaudeCodeTakesTheGatewayRoot(t *testing.T) {
 	c, _ := Find(Clients(), "claude-code")
 	rendered := c.Render("https://keera.example.ch", one)
-	if !strings.Contains(rendered, "export ANTHROPIC_BASE_URL=https://keera.example.ch\n") {
+	if !strings.Contains(rendered, `"ANTHROPIC_BASE_URL": "https://keera.example.ch",`) {
 		t.Errorf("the base URL is not the gateway root:\n%s", rendered)
 	}
 }
@@ -267,6 +273,11 @@ func TestFileClientsStateTheSameWindow(t *testing.T) {
 func TestEveryModelOfTheKeyIsConfigured(t *testing.T) {
 	for _, c := range Clients() {
 		rendered := c.Render("https://keera.example.ch", two)
+		if c.Key == "claude-code" {
+			// Claude Code takes one model and switches with /model, so the
+			// rest are named in what to run.
+			rendered += c.RunText(two)
+		}
 		for _, want := range []string{"keera-code", "auto"} {
 			if !strings.Contains(rendered, want) {
 				t.Errorf("%s's config does not name %s:\n%s", c.Key, want, rendered)
@@ -298,8 +309,52 @@ func TestEveryModelOfTheKeyIsConfigured(t *testing.T) {
 	}
 
 	cc, _ := Find(Clients(), "claude-code")
-	if !strings.Contains(cc.Render("https://keera.example.ch", two), "export ANTHROPIC_MODEL=keera-code\n") {
+	if !strings.Contains(cc.Render("https://keera.example.ch", two), `"ANTHROPIC_MODEL": "keera-code",`) {
 		t.Error("claude code does not start with the first model")
+	}
+}
+
+// Claude Code's block is the settings `keera connect claude-code` writes:
+// every family Claude Code asks for by Anthropic's name goes to a model the
+// key may use, a 1M model says so, and each Anthropic model is told apart by
+// every id it goes by.
+func TestClaudeCodeGetsTheSettingsConnectWrites(t *testing.T) {
+	models := []Model{
+		{Alias: "claude-opus", BackendModel: "claude-opus-5-5", Provider: "anthropic",
+			MaxContext: 1_000_000},
+		{Alias: "keera-code", BackendModel: "qwen", MaxContext: 256_000},
+		{Alias: "claude-haiku", BackendModel: "claude-haiku-4-5", Provider: "anthropic",
+			MaxContext: 200_000},
+	}
+	cc, _ := Find(Clients(), "claude-code")
+	var got struct {
+		Env            map[string]string `json:"env"`
+		ModelOverrides map[string]string `json:"modelOverrides"`
+	}
+	rendered := cc.Render("https://keera.example.ch", models)
+	if err := json.Unmarshal([]byte(rendered), &got); err != nil {
+		t.Fatalf("%v\n%s", err, rendered)
+	}
+	for name, want := range map[string]string{
+		"ANTHROPIC_MODEL":                "claude-opus[1m]",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL":   "claude-opus[1m]",
+		"ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-opus[1m]",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  "claude-haiku",
+		"ANTHROPIC_DEFAULT_FABLE_MODEL":  "claude-opus[1m]",
+		"ANTHROPIC_AUTH_TOKEN":           KeyPlaceholder,
+	} {
+		if got.Env[name] != want {
+			t.Errorf("%s = %q, want %q", name, got.Env[name], want)
+		}
+	}
+	// Claude Code knows Haiku 4.5 by its dated id only, so both are written.
+	want := map[string]string{
+		"claude-opus-5-5":           "claude-opus",
+		"claude-haiku-4-5":          "claude-haiku",
+		"claude-haiku-4-5-20251001": "claude-haiku",
+	}
+	if !maps.Equal(got.ModelOverrides, want) {
+		t.Errorf("modelOverrides = %v, want %v", got.ModelOverrides, want)
 	}
 }
 

@@ -695,16 +695,21 @@ var commands = []command{
 	},
 	{
 		name:    "connect",
-		summary: "the finished configuration for an editor",
+		summary: "set an editor up for this gateway",
 		args:    "[<client>] [flags]",
-		flags:   []string{"key", "subscription", "model", "project", "json"},
-		prose: "Prints an editor's configuration on stdout and the instructions on stderr, so " +
-			"it can be redirected into the file it names. With no client it lists the ones " +
-			"this deployment can configure. --subscription sets up Claude Code on a Claude " +
-			"plan; see docs/subscriptions.md.",
+		flags:   []string{"key", "subscription", "model", "project", "print", "json"},
+		prose: "For Claude Code it does everything: it gives this machine a key of its own and " +
+			"writes it into ~/.claude/settings.json, with the gateway's address and the models " +
+			"the key may use. Running it again replaces the machine's key. A pending key of " +
+			"yours is activated for it; without one, an administrator gets a new key, and a " +
+			"member is told what to ask for. --print shows the settings instead. " +
+			"--subscription sets up Claude Code on a Claude plan; see docs/subscriptions.md.\n\n" +
+			"For any other client it prints the configuration on stdout and the instructions " +
+			"on stderr. With no client it lists the ones this deployment can configure.",
 		examples: []string{
+			"keera connect claude-code",
 			"keera connect",
-			"keera connect opencode --key laptop > ~/.config/opencode/opencode.json",
+			"keera connect opencode --key laptop",
 			"keera connect claude-code --subscription",
 		},
 	},

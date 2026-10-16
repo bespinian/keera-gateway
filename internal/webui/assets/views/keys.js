@@ -14,11 +14,9 @@ import {
   dateTime,
   money,
   num,
-  icon,
   icons,
   iconButton,
   rowLink,
-  showError,
   isAdmin,
   field,
   secretField,
@@ -35,6 +33,7 @@ import {
 import { openGuardrails, ceilingsFor, summarise } from "./guardrails.js";
 import { orgNameOf } from "./orgs.js";
 import { oldestProject } from "./projects.js";
+import { openConnectClient } from "./connect.js";
 
 export async function keysView(ctx) {
   const since = currentRange();
@@ -585,9 +584,7 @@ function endOfDay(day) {
 
 // openIssueKey opens the form from another screen, which has not read the
 // projects and people it offers. An operator looking at every organisation
-// picks one on the keys screen first. The key is the reader's own unless they
-// pick someone else: Getting started opens it, and only a key of their own
-// works on My clients and in the playground.
+// picks one on the keys screen first.
 export async function openIssueKey(ctx) {
   if (!ctx.orgID && ctx.state.me.unrestricted) return ctx.navigate("/keys");
   const [projectsRes, usersRes] = await Promise.all([
@@ -598,15 +595,17 @@ export async function openIssueKey(ctx) {
     ctx,
     projectsRes.data || [],
     (usersRes.data || []).filter((u) => !u.disabled_at),
-    { user: ctx.state.me.user_id },
   );
 }
 
 // issueKey asks for a new key. last holds the project and expiry of the key
-// issued just before, when the form is opened again with "Issue another". The
-// user is not carried over: the next key is usually somebody else's, and a key
-// given to the wrong person quietly counts as theirs. last.user preselects
-// one only for openIssueKey.
+// issued just before, when the form is opened again with "Issue another".
+//
+// The key is the reader's own unless they pick someone else, as `keera key
+// create` does: a key that belongs to nobody shows on nobody's My access or My
+// clients, so the person who issued it cannot set a client up with it. The
+// user is not carried over to "Issue another": a key given to the wrong person
+// quietly counts as theirs.
 function issueKey(ctx, projects, users, last = {}) {
   // Every key is in a project, so with none there is nothing to issue yet.
   if (!projects.length) {
@@ -651,14 +650,34 @@ function issueKey(ctx, projects, users, last = {}) {
       h("option", { value: t.id, selected: t.id === first }, t.name),
     ),
   );
+  const me = ctx.state.me.user_id;
   const person = h(
     "select",
     { class: "select" },
     h("option", { value: "" }, NO_USER),
     users.map((u) =>
-      h("option", { value: u.id, selected: u.id === last.user }, u.email),
+      h("option", { value: u.id, selected: u.id === me }, u.email),
     ),
   );
+  // A key for somebody else is theirs to activate by default, so its secret
+  // is only ever on their screen. The administrator can still take it now,
+  // for a person who will be handed it some other way.
+  const activation = h(
+    "select",
+    { class: "select" },
+    h("option", { value: "them" }, "They activate it and see it once"),
+    h("option", { value: "me" }, "I see it now, and hand it over"),
+  );
+  const activationField = field(
+    "Secret",
+    activation,
+    "Until the key is activated it has no secret, and does not work.",
+  );
+  const forSomebodyElse = () => person.value !== "" && person.value !== me;
+  activationField.hidden = !forSomebodyElse();
+  person.addEventListener("change", () => {
+    activationField.hidden = !forSomebodyElse();
+  });
   // Each span carries the day it lands on: "90 days" is not a date anybody can
   // hold in their head, and the choice is easier to make beside the calendar.
   const expiry = h(
@@ -722,67 +741,84 @@ function issueKey(ctx, projects, users, last = {}) {
             ),
           )
         : null,
+      users.length ? activationField : null,
       field("Expires", expiry),
       lastDayField,
     ),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Cancel"),
-      h(
-        "button",
-        {
-          class: "btn btn-primary",
-          onClick: async (e) => {
-            if (!name.value.trim()) return name.focus();
-            let lifetime = { expires_in: expiry.value };
-            if (expiry.value === "date") {
-              if (!lastDay.value) return lastDay.focus();
-              lifetime = { expires_at: endOfDay(lastDay.value) };
-            }
-            const button = e.currentTarget;
-            button.disabled = true;
-            try {
-              const created = await api.createKey({
-                org_id: ctx.orgID || ctx.state.me.org_id,
-                project_id: project.value,
-                user_id: person.value,
-                name: name.value.trim(),
-                ...lifetime,
-              });
-              close();
-              showSecret(ctx, created, () =>
-                issueKey(ctx, projects, users, {
-                  project: project.value,
-                  expiry: expiry.value,
-                  lastDay: lastDay.value,
-                }),
-              );
-            } catch (ex) {
-              showError(err, ex.message);
-              button.disabled = false;
-            }
-          },
-        },
-        "Issue key",
-      ),
-    ],
+    submitLabel: "Issue key",
+    submit: async (close) => {
+      if (!name.value.trim()) {
+        name.focus();
+        return false;
+      }
+      let lifetime = { expires_in: expiry.value };
+      if (expiry.value === "date") {
+        if (!lastDay.value) {
+          lastDay.focus();
+          return false;
+        }
+        lifetime = { expires_at: endOfDay(lastDay.value) };
+      }
+      const created = await api.createKey({
+        org_id: ctx.orgID || ctx.state.me.org_id,
+        project_id: project.value,
+        user_id: person.value,
+        name: name.value.trim(),
+        pending: forSomebodyElse() && activation.value === "them",
+        ...lifetime,
+      });
+      close();
+      const again = () =>
+        issueKey(ctx, projects, users, {
+          project: project.value,
+          expiry: expiry.value,
+          lastDay: lastDay.value,
+        });
+      if (created.pending) {
+        const holder = users.find((u) => u.id === created.user_id);
+        showPending(ctx, created, holder ? holder.email : "", again);
+      } else {
+        showSecret(ctx, created, again);
+      }
+    },
   });
 }
 
-// showSecret shows a new key, the only time it can be seen. again, when given,
-// opens the form for another key like this one.
-function showSecret(ctx, created, again) {
-  const body = h(
-    "div",
-    { class: "field" },
-    h("label", {}, "The key"),
-    secretField(created.key, "The issued API key"),
-  );
+// showSecret shows a key's secret, the only time it can be seen. again, when
+// given, opens the form for another key like this one.
+//
+// The secret is never in the panel again, so a key of the reader's own is set
+// up from here: Connect a client fills it into the setup it shows.
+function showSecret(ctx, created, again, title = "Key issued") {
+  const body = field("The key", secretField(created.key, "The API key"));
+  const own =
+    created.user_id &&
+    created.user_id === ctx.state.me.user_id &&
+    created.kind !== "subscription";
 
   modal({
-    title: "Key issued",
+    title,
     subtitle: "Shown only this once. It is not stored.",
     body,
     actions: (close) => [
+      own
+        ? h(
+            "button",
+            {
+              class: "btn",
+              title: "Set up a client with this key",
+              onClick: (e) => {
+                const button = e.currentTarget;
+                openConnectClient(ctx, button, created).then((opened) => {
+                  if (!opened) return;
+                  close();
+                  ctx.reload();
+                });
+              },
+            },
+            "Connect a client",
+          )
+        : null,
       again
         ? h(
             "button",

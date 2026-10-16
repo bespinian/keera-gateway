@@ -91,84 +91,82 @@ func defaultGateway() string {
 // saveSignIn records a sign-in, leaving other gateways alone, and makes this
 // gateway the default: signing in says clearly which one is meant.
 func saveSignIn(base string, cred signIn) error {
-	c, err := loadCredentials()
-	if err != nil {
-		return err
-	}
-	c.Gateways[gatewayKey(base)] = cred
-	c.Default = gatewayKey(base)
-	return writeCredentials(c)
+	return updateCredentials(func(c *credentials) {
+		c.Gateways[gatewayKey(base)] = cred
+		c.Default = gatewayKey(base)
+	})
 }
 
 // saveOrg records the organisation commands act on at a gateway. Empty
 // forgets it.
 func saveOrg(base, orgID string) error {
-	c, err := loadCredentials()
-	if err != nil {
-		return err
-	}
-	if c.Orgs == nil {
-		c.Orgs = map[string]string{}
-	}
-	if orgID == "" {
-		delete(c.Orgs, gatewayKey(base))
-	} else {
-		c.Orgs[gatewayKey(base)] = orgID
-	}
-	return writeCredentials(c)
+	return updateCredentials(func(c *credentials) {
+		if c.Orgs == nil {
+			c.Orgs = map[string]string{}
+		}
+		if orgID == "" {
+			delete(c.Orgs, gatewayKey(base))
+		} else {
+			c.Orgs[gatewayKey(base)] = orgID
+		}
+	})
 }
 
 // forgetSignIn removes one gateway's sign-in, and the default with it when it
 // pointed here, so later commands do not go where they cannot sign in.
 func forgetSignIn(base string) error {
+	return updateCredentials(func(c *credentials) {
+		delete(c.Gateways, gatewayKey(base))
+		delete(c.Orgs, gatewayKey(base))
+		if c.Default == gatewayKey(base) {
+			c.Default = ""
+			// If exactly one gateway is left, it becomes the default. With more,
+			// picking one would silently change which deployment commands act on.
+			if len(c.Gateways) == 1 {
+				for other := range c.Gateways {
+					c.Default = other
+				}
+			}
+		}
+	})
+}
+
+// updateCredentials loads the credentials file, changes it and writes it back.
+func updateCredentials(change func(*credentials)) error {
 	c, err := loadCredentials()
 	if err != nil {
 		return err
 	}
-	delete(c.Gateways, gatewayKey(base))
-	delete(c.Orgs, gatewayKey(base))
-	if c.Default == gatewayKey(base) {
-		c.Default = ""
-		// If exactly one gateway is left, it becomes the default. With more,
-		// picking one would silently change which deployment commands act on.
-		if len(c.Gateways) == 1 {
-			for other := range c.Gateways {
-				c.Default = other
-			}
-		}
+	change(&c)
+	path, err := credentialsPath()
+	if err != nil {
+		return err
 	}
-	return writeCredentials(c)
+	return writeJSONFile(path, c)
 }
 
-func writeCredentials(c credentials) error {
-	path, err := credentialsPath()
+// writeJSONFile replaces the file at path with v in one step, so nothing ever
+// reads half of it. The new contents are written beside it, so the rename
+// stays on one filesystem and is atomic. The file holds a key, so only its
+// owner may read it.
+func writeJSONFile(path string, v any) error {
+	raw, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	raw, err := json.MarshalIndent(c, "", "  ")
-	if err != nil {
-		return err
-	}
-	return writeFileAtomic(path, append(raw, '\n'), 0o600)
-}
-
-// writeFileAtomic replaces the file at path in one step, so nothing ever reads
-// half of it. The new contents are written beside it, so the rename stays on
-// one filesystem and is atomic.
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*")
 	if err != nil {
 		return err
 	}
 	defer func() { _ = os.Remove(tmp.Name()) }()
-	if err := tmp.Chmod(perm); err != nil {
+	if err := tmp.Chmod(0o600); err != nil {
 		_ = tmp.Close()
 		return err
 	}
-	if _, err := tmp.Write(data); err != nil {
+	if _, err := tmp.Write(append(raw, '\n')); err != nil {
 		_ = tmp.Close()
 		return err
 	}

@@ -10,6 +10,7 @@ package connect
 import (
 	"cmp"
 	"encoding/json"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -32,8 +33,13 @@ type Client struct {
 	Lang string `json:"lang"`
 	// Template is the block. It carries {{base}}, {{models}}, {{aliases}}
 	// (every alias, comma-separated) and {{alias}} (the first, the default),
-	// for Render to fill in.
+	// for Render to fill in. A block that holds the key itself, because its
+	// file cannot read the environment, carries {{key}}. Claude Code's
+	// carries {{claude_env}} and {{claude_overrides}}; see claude.go.
 	Template string `json:"template"`
+	// Names is the other ids each Anthropic model goes by, for
+	// {{claude_overrides}}. See ClaudeNames.
+	Names map[string][]string `json:"names,omitempty"`
 	// Entry is what {{models}} repeats, once per model, joined with commas. It
 	// carries {{alias}}, {{name}} and the two limits, {{context}} and
 	// {{output}}. It is empty for a client that does not list its models.
@@ -52,6 +58,10 @@ type Model struct {
 	Name string `json:"name,omitempty"`
 	// MaxContext is its window, or zero for the default. A router has none.
 	MaxContext int `json:"max_context,omitempty"`
+	// BackendModel and Provider say which model it is, for Claude Code. A
+	// router has neither.
+	BackendModel string `json:"backend_model,omitempty"`
+	Provider     string `json:"provider,omitempty"`
 }
 
 // The limits a client is given.
@@ -89,22 +99,41 @@ func Limits(maxContext int) (window, output int) {
 	return window, output
 }
 
+// KeyPlaceholder stands in a block for a key nobody has given.
+const KeyPlaceholder = "keera_sk_…"
+
 // Render fills in a client's template: base is the gateway as the developer's
 // machine reaches it, and models what the key may call, the default first.
 func (c Client) Render(base string, models []Model) string {
+	return c.RenderKey(base, KeyPlaceholder, models)
+}
+
+// RenderKey is Render with key in a block that holds the key itself.
+func (c Client) RenderKey(base, key string, models []Model) string {
 	entries := make([]string, 0, len(models))
 	for _, m := range models {
 		entries = append(entries, fill(c.Entry, m))
 	}
 	return strings.NewReplacer(
 		"{{base}}", strings.TrimRight(base, "/"),
+		"{{key}}", jsonText(key),
 		"{{models}}", strings.Join(entries, ",\n"),
 		"{{aliases}}", strings.Join(aliases(models), ", "),
+		"{{claude_env}}", claudeEnvLines(models, first(models)),
+		"{{claude_overrides}}", claudeOverridesBlock(models, c.Names),
 	).Replace(fill(c.Template, first(models)))
 }
 
-// RunText is Run with the default model filled in, for a terminal.
-func (c Client) RunText(models []Model) string { return plain(fill(c.Run, first(models))) }
+// HoldsKey says the block holds the key itself, rather than reading it from
+// KEERA_API_KEY.
+func (c Client) HoldsKey() bool { return strings.Contains(c.Template, "{{key}}") }
+
+// RunText is Run with the default model and every alias filled in, for a
+// terminal.
+func (c Client) RunText(models []Model) string {
+	run := fill(c.Run, first(models))
+	return plain(strings.ReplaceAll(run, "{{aliases}}", strings.Join(aliases(models), ", ")))
+}
 
 // NoteText is Note for a terminal.
 func (c Client) NoteText() string { return plain(c.Note) }
@@ -181,7 +210,13 @@ func Find(clients []Client, key string) (Client, bool) {
 
 // Clients is the catalogue. It is a copy, so a caller cannot change it for
 // everyone else.
-func Clients() []Client { return slices.Clone(clients) }
+func Clients() []Client {
+	out := slices.Clone(clients)
+	for i := range out {
+		out[i].Names = maps.Clone(out[i].Names)
+	}
+	return out
+}
 
 // The last entry is a plain request with cURL. Its address and key are all any
 // other OpenAI-compatible client needs.
@@ -247,37 +282,31 @@ var clients = []Client{
 		Key:   "claude-code",
 		Label: "Claude Code",
 		About: "Anthropic's coding agent, over the Messages API.",
-		// No file: settings.json takes the key as a literal, and we have no
-		// key to put in it. The note explains.
-		Lang: "sh",
-		Template: `# Claude Code uses the Anthropic Messages API, which the gateway serves at
-# /api/v1/messages. Claude Code adds /v1/messages itself.
-export ANTHROPIC_BASE_URL={{base}}
-export ANTHROPIC_AUTH_TOKEN=$KEERA_API_KEY
-
-# The key can use: {{aliases}}. Claude Code starts with this one.
-export ANTHROPIC_MODEL={{alias}}
-
-# Turn off Claude Code's telemetry to Anthropic. It holds no prompts, but it
-# should be off here.
-export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-
-# Test it from the shell first:
-curl "$ANTHROPIC_BASE_URL/v1/messages" \
-  -H "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" \
-  -H 'anthropic-version: 2023-06-01' \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"{{alias}}","max_tokens":16,"messages":[{"role":"user","content":"Hello"}]}'`,
-		Note: "To make this permanent, and for background sessions that do not read your " +
-			"shell, put the same variables in the `env` block of `~/.claude/settings.json`. " +
-			"Use the key itself there, because that file does not expand shell variables. " +
-			"To fetch the key from a vault, use the `apiKeyHelper` setting instead. Do not " +
-			"put it in a project's `.claude/settings.json`, which is committed. If your " +
-			"Claude Team or Enterprise plan should pay instead, run `keera login` and then " +
-			"`keera connect claude-code --subscription`.",
+		// The same settings `keera connect claude-code` writes. They hold the
+		// key itself, because settings.json does not read the environment,
+		// and modelOverrides has no environment variable. The base is the
+		// gateway's root: Claude Code adds /v1/messages itself.
+		Path: "~/.claude/settings.json",
+		Lang: "json",
+		Template: `{
+  "env": {
+    "ANTHROPIC_BASE_URL": "{{base}}",
+    "ANTHROPIC_AUTH_TOKEN": "{{key}}",
+{{claude_env}},
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+  }{{claude_overrides}}
+}`,
+		Names: ClaudeNames(),
+		Note: "`keera login` and then `keera connect claude-code` write this for you, with " +
+			"a key of this machine's own. Claude Code asks for Opus, Sonnet, Haiku and " +
+			"Fable by Anthropic's names, so each is pointed at a model the key may use. " +
+			"`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` turns off Claude Code's telemetry " +
+			"to Anthropic. Do not put the key in a project's `.claude/settings.json`, " +
+			"which is committed. If your Claude Team or Enterprise plan should pay " +
+			"instead, run `keera login` and then `keera connect claude-code --subscription`.",
 		Run: "Run `claude` in your project. It starts with {{alias}}. `/model <name>` " +
-			"switches to another of the models above, and `/status` shows which gateway " +
-			"and key it uses.",
+			"switches to another of {{aliases}}, and `/status` shows which gateway and " +
+			"key it uses.",
 	},
 	{
 		Key:   "codex",

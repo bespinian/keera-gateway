@@ -77,13 +77,62 @@ function fill(text, m) {
     .replaceAll("{{output}}", String(output));
 }
 
-/** render fills in a client's block for a key's models, the default first. It
- *  has to agree with connect.Render on the server. */
-function render(c, base, models) {
+/** render fills in a client's block for a key's models, the default first,
+ *  and key into a block that holds it. It has to agree with
+ *  connect.RenderKey on the server. */
+function render(c, base, key, models) {
   return fill(c.template, models[0])
     .replaceAll("{{base}}", String(base || "").replace(/\/+$/, ""))
+    .replaceAll("{{key}}", JSON.stringify(key).slice(1, -1))
     .replaceAll("{{models}}", models.map((m) => fill(c.entry, m)).join(",\n"))
-    .replaceAll("{{aliases}}", models.map((m) => m.alias).join(", "));
+    .replaceAll("{{aliases}}", models.map((m) => m.alias).join(", "))
+    .replaceAll("{{claude_env}}", claudeEnvLines(models, models[0]))
+    .replaceAll(
+      "{{claude_overrides}}",
+      claudeOverridesBlock(models, c.names || {}),
+    );
+}
+
+// Claude Code's model settings, as connect/claude.go writes them. Claude Code
+// asks for each family by Anthropic's name, which the gateway does not know.
+const CLAUDE_FAMILIES = ["opus", "sonnet", "haiku", "fable"];
+
+/** claudeName is a model's name for Claude Code: [1m] tells it the window is
+ *  1M, where it would assume 200K. */
+function claudeName(m) {
+  return m.max_context >= 1000000 ? m.alias + "[1m]" : m.alias;
+}
+
+/** claudeEnvLines points Claude Code at main, and each family at the first
+ *  model that is one, or else at main. */
+function claudeEnvLines(models, main) {
+  const env = [["ANTHROPIC_MODEL", claudeName(main)]];
+  for (const family of CLAUDE_FAMILIES) {
+    const m = models.find((m) => (m.backend_model || "").includes(family));
+    env.push([
+      `ANTHROPIC_DEFAULT_${family.toUpperCase()}_MODEL`,
+      claudeName(m || main),
+    ]);
+  }
+  return env.map(([k, v]) => `    "${k}": ${JSON.stringify(v)}`).join(",\n");
+}
+
+/** claudeOverridesBlock tells Claude Code which Claude model each of
+ *  Anthropic's models is, by every id it goes by. The first alias wins. */
+function claudeOverridesBlock(models, names) {
+  const overrides = {};
+  for (const m of models) {
+    if (m.provider !== "anthropic") continue;
+    for (const id of [m.backend_model, ...(names[m.backend_model] || [])]) {
+      if (id && !(id in overrides)) overrides[id] = m.alias;
+    }
+  }
+  const ids = Object.keys(overrides).sort();
+  if (!ids.length) return "";
+  const lines = ids.map(
+    (id) => `    ${JSON.stringify(id)}: ${JSON.stringify(overrides[id])}`,
+  );
+  return ',\n  "modelOverrides": {\n' + lines.join(",\n") + "\n  }";
 }
 
 // One fetch per page load. A catalogue that changed under a panel already open
@@ -97,15 +146,22 @@ let catalogue;
  *  `config(base, models)` that renders the block, and `run`/`note` that build
  *  the paragraphs either side of it. So no screen rendering one has to know
  *  which client it is looking at. */
-export function loadClients() {
+function loadClients() {
   if (!catalogue) {
     catalogue = api.connect().then(
       (res) =>
         (res.data || []).map((c) => ({
           ...c,
           path: c.path || null,
-          config: (base, models) => render(c, base, models),
-          run: (models) => prose(fill(c.run, models[0])),
+          holdsKey: String(c.template || "").includes("{{key}}"),
+          config: (base, key, models) => render(c, base, key, models),
+          run: (models) =>
+            prose(
+              fill(c.run, models[0]).replaceAll(
+                "{{aliases}}",
+                models.map((m) => m.alias).join(", "),
+              ),
+            ),
           note: c.note ? () => prose(c.note) : null,
         })),
       (err) => {
@@ -220,26 +276,39 @@ export async function clientsView(ctx) {
 
 /** openConnectClient opens Connect client from another screen, which has not
  *  read the catalogue or the reader's keys. Without a key of their own or a
- *  client to offer, My clients says why. */
-export async function openConnectClient(ctx, button) {
+ *  client to offer, My clients says why.
+ *
+ *  created is a key whose secret was just shown, which the setup then fills
+ *  in. It resolves to whether the dialog opened. */
+export async function openConnectClient(ctx, button, created = null) {
   button.disabled = true;
   let catalogue, a;
   try {
     [catalogue, a] = await Promise.all([loadClients(), api.access()]);
   } catch (err) {
     toast(err.message, "bad");
-    return;
+    return false;
   } finally {
     button.disabled = false;
   }
-  const keys = usableKeys(a);
-  if (!keys.length || !catalogue.length) return ctx.navigate("/clients");
-  addClient(ctx, catalogue, keys, button);
+  let keys = usableKeys(a);
+  if (created) keys = keys.filter((k) => k.id === created.id);
+  if (!keys.length || !catalogue.length) {
+    // The secret dialog stays open: leaving it would lose the secret.
+    if (created) {
+      toast("This key can set up no client here.", "bad");
+      return false;
+    }
+    ctx.navigate("/clients");
+    return false;
+  }
+  return addClient(ctx, catalogue, keys, button, created && created.key);
 }
 
 /** addClient asks which client to set up, then shows its setup for one of the
- *  reader's keys. */
-async function addClient(ctx, catalogue, keys, button) {
+ *  reader's keys. secret, when given, is the key's own, shown in the setup
+ *  instead of a placeholder. It resolves to whether the dialog opened. */
+async function addClient(ctx, catalogue, keys, button, secret = null) {
   // Every key here is in the reader's own organisation, so one read covers
   // them all.
   button.disabled = true;
@@ -248,16 +317,17 @@ async function addClient(ctx, catalogue, keys, button) {
     targets = await chatTargets(keys[0].org_id);
   } catch (err) {
     toast(err.message, "bad");
-    return;
+    return false;
   } finally {
     button.disabled = false;
   }
 
-  const remembered = localStorage.getItem("keera.connect.key");
+  const last = remembered("keera.connect.key", { lasting: true });
   const state = {
-    key: keys.find((k) => k.id === remembered) || keys[0],
+    key: keys.find((k) => k.id === last) || keys[0],
     client: null,
     base: defaultBase(ctx),
+    secret,
   };
 
   // Only what depends on the key or the client is rebuilt when they change,
@@ -342,6 +412,7 @@ async function addClient(ctx, catalogue, keys, button) {
     ],
   });
   picker.tiles.firstChild.focus();
+  return true;
 }
 
 // clientMarks are the vendors' own logos, for the clients that have one here.
@@ -420,8 +491,16 @@ export function noModel() {
 }
 
 function instructions(ctx, state, models) {
-  const { client, key, base } = state;
-  const config = client.config(base, models);
+  const { client, key, base, secret } = state;
+  // A block that holds the key shows it by its prefix once its secret is
+  // gone.
+  const config = client.config(base, secret || `${key.prefix}…`, models);
+  const rotate = [
+    "It was shown only once, when it was issued. If you no longer have it, " +
+      "rotate it under ",
+    h("a", { href: "/keys", onClick: go(ctx, "/keys") }, "API keys"),
+    ".",
+  ];
 
   return h(
     "div",
@@ -429,21 +508,48 @@ function instructions(ctx, state, models) {
     step(
       1,
       "Set your key",
-      h(
-        "div",
-        {},
-        h(
-          "p",
-          { class: "muted" },
-          "Add the key ",
-          h("strong", {}, key.name),
-          " to your shell profile. It was shown only once, when it was " +
-            "issued. If you no longer have it, rotate it under ",
-          h("a", { href: "/keys", onClick: go(ctx, "/keys") }, "API keys"),
-          ".",
-        ),
-        code(`export KEERA_API_KEY=${key.prefix}…`),
-      ),
+      client.holdsKey
+        ? h(
+            "p",
+            { class: "muted" },
+            "The settings below hold the key ",
+            h("strong", {}, key.name),
+            ". ",
+            secret
+              ? "It is filled in, and this is the only time it is shown."
+              : [
+                  "Put it in place of ",
+                  h("code", {}, `${key.prefix}…`),
+                  ". ",
+                  ...rotate,
+                ],
+          )
+        : secret
+          ? h(
+              "div",
+              {},
+              h(
+                "p",
+                { class: "muted" },
+                "Add the key ",
+                h("strong", {}, key.name),
+                " to your shell profile. This is the only time it is shown.",
+              ),
+              code(`export KEERA_API_KEY=${secret}`),
+            )
+          : h(
+              "div",
+              {},
+              h(
+                "p",
+                { class: "muted" },
+                "Add the key ",
+                h("strong", {}, key.name),
+                " to your shell profile. ",
+                ...rotate,
+              ),
+              code(`export KEERA_API_KEY=${key.prefix}…`),
+            ),
     ),
 
     step(

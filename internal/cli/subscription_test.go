@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
+	"github.com/bespinian/keera-gateway/internal/store"
 )
 
 func TestSubscriptionEnvMapsEachFamilyToAModel(t *testing.T) {
@@ -32,6 +33,7 @@ func TestSubscriptionEnvMapsEachFamilyToAModel(t *testing.T) {
 		"ANTHROPIC_DEFAULT_OPUS_MODEL":   "claude-opus[1m]",
 		"ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-opus[1m]",
 		"ANTHROPIC_DEFAULT_HAIKU_MODEL":  "claude-haiku",
+		"ANTHROPIC_DEFAULT_FABLE_MODEL":  "claude-opus[1m]",
 		"ENABLE_TOOL_SEARCH":             "true",
 	}
 	if main != "claude-opus" {
@@ -121,12 +123,12 @@ func TestManagedBaseURLReadsEveryManagedSource(t *testing.T) {
 func TestModelOverridesTellClaudeCodeWhichModelEachAliasIs(t *testing.T) {
 	models := []policy.Model{
 		{Alias: "keera-code", BackendModel: "qwen", Kind: policy.KindChat, Enabled: true},
-		{Alias: "claude-haiku", BackendModel: "claude-haiku-4-5", Kind: policy.KindChat,
-			Enabled: true, Subscription: true},
-		{Alias: "claude-opus", BackendModel: "claude-opus-5-5", Kind: policy.KindChat,
-			Enabled: true, Subscription: true},
-		{Alias: "claude-opus-too", BackendModel: "claude-opus-5-5", Kind: policy.KindChat,
-			Enabled: true, Subscription: true},
+		{Alias: "claude-haiku", BackendModel: "claude-haiku-4-5", Provider: "anthropic",
+			Kind: policy.KindChat, Enabled: true, Subscription: true},
+		{Alias: "claude-opus", BackendModel: "claude-opus-5-5", Provider: "anthropic",
+			Kind: policy.KindChat, Enabled: true, Subscription: true},
+		{Alias: "claude-opus-too", BackendModel: "claude-opus-5-5", Provider: "anthropic",
+			Kind: policy.KindChat, Enabled: true, Subscription: true},
 	}
 	// Claude Code knows Haiku 4.5 by its dated id only, so both are written.
 	want := map[string]string{
@@ -134,7 +136,7 @@ func TestModelOverridesTellClaudeCodeWhichModelEachAliasIs(t *testing.T) {
 		"claude-haiku-4-5-20251001": "claude-haiku",
 		"claude-opus-5-5":           "claude-opus",
 	}
-	if got := claudeModelOverrides(models); !maps.Equal(got, want) {
+	if got := claudeModelOverrides(subscriptionModels(models)); !maps.Equal(got, want) {
 		t.Errorf("overrides = %v, want %v", got, want)
 	}
 
@@ -153,7 +155,7 @@ func TestSettingsAreWrittenForTheirOwnerOnly(t *testing.T) {
 		t.Fatalf("a missing file read as %v, %v; want empty settings", settings, err)
 	}
 	setClaudeEnv(settings, map[string]string{}, "keera_sk_new")
-	if err := writeSettings(path, settings); err != nil {
+	if err := writeJSONFile(path, settings); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(path)
@@ -203,6 +205,18 @@ var memberKeys = map[string]any{"data": []map[string]any{
 
 var member = identity{UserID: "user_1", Email: "ada@example.ch", Role: "member", OrgID: "org_1"}
 
+// machineKey plans this machine's key and takes the step.
+func machineKey(ctx context.Context, c *client, orgID string, me identity, project string,
+	kind policy.KeyKind,
+) (createdKey, *store.KeySummary, error) {
+	step, err := planMachineKey(ctx, c, orgID, me, project, kind)
+	if err != nil {
+		return createdKey{}, nil, err
+	}
+	key, err := step.issue(ctx, c)
+	return key, step.replaces, err
+}
+
 // Only an administrator issues keys, so a member's first run takes over the
 // key one issued them. The key another machine holds is left alone, or that
 // machine would stop working.
@@ -215,7 +229,7 @@ func TestMachineKeyTakesOverAMembersIssuedKey(t *testing.T) {
 		},
 	})
 
-	key, replaced, err := machineKey(context.Background(), newClient(), "org_1", member, "")
+	key, replaced, err := machineKey(context.Background(), newClient(), "org_1", member, "", policy.KeySubscription)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +251,7 @@ func TestMachineKeySendsAMemberWithoutAKeyToAnAdministrator(t *testing.T) {
 		"GET /v1/keys": map[string]any{"data": memberKeys["data"].([]map[string]any)[:1]},
 	})
 
-	_, _, err := machineKey(context.Background(), newClient(), "org_1", member, "")
+	_, _, err := machineKey(context.Background(), newClient(), "org_1", member, "", policy.KeySubscription)
 	if err == nil || !strings.Contains(err.Error(), "administrator") ||
 		!strings.Contains(err.Error(), "--user ada@example.ch") {
 		t.Errorf("err = %v, want it to say what to ask an administrator for", err)
@@ -257,7 +271,7 @@ func TestMachineKeyIssuedByAnAdministratorExpires(t *testing.T) {
 	})
 	admin := identity{UserID: "user_1", Email: "ada@example.ch", Role: "admin", OrgID: "org_1"}
 
-	if _, _, err := machineKey(context.Background(), newClient(), "org_1", admin, ""); err != nil {
+	if _, _, err := machineKey(context.Background(), newClient(), "org_1", admin, "", policy.KeySubscription); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.request("POST", "/v1/keys").body["expires_in"]; got != defaultKeyLife {
@@ -285,7 +299,7 @@ func TestSubscriptionSetupStopsWhenTheDeploymentTakesNone(t *testing.T) {
 		"GET /v1/me": map[string]any{"role": "member", "org_id": "org_1", "user_id": "user_1"},
 	})
 
-	err := connectSubscription(context.Background(), newClient(), subscriptionSetup{})
+	err := connectClaude(context.Background(), newClient(), claudeSetup{subscription: true})
 	if !errors.Is(err, errSubscriptionsOff) {
 		t.Errorf("err = %v, want errSubscriptionsOff", err)
 	}

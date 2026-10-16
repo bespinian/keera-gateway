@@ -77,35 +77,38 @@ a request, and [docs/install.md](docs/install.md) covers every setting.
 [docs/run-locally.md](docs/run-locally.md) is the development loop.
 
 `keera doctor` checks the deployment's configuration and an organisation's
-catalogue. It lists what is missing and what is declared but not enforced, and
-what to do about each. With `--probe`, it also checks that every enabled model answers with a
-tool call rather than prose.
+models. It lists what is missing and what is declared but not enforced, and
+what to do about each. With `--probe`, it also checks that every enabled model
+answers with a tool call rather than prose.
 
-A developer signs in with one command. `keera login --url` also makes that
-deployment the default for every later command, so no shell variable is
-needed:
+A developer signs in with one command, which also makes that deployment the
+default for later commands
+([which gateway a command uses](docs/install.md#the-keera-command)):
 
 ```sh
 keera login --url https://keera.example.ch
 ```
 
-`keera connect` prints an editor configuration to stdout and the instructions
-to stderr, so you can redirect it straight into the file it names. It lists
-every model your key may use:
+`keera connect claude-code` sets Claude Code up in one step. It gives this
+machine a key of its own and writes it into `~/.claude/settings.json`, with
+every model the key may use
+([docs/gateway.md](docs/gateway.md#connecting-claude-code)). For other editors,
+`keera connect` prints the configuration to stdout and the instructions to
+stderr:
 
 ```sh
+keera connect claude-code         # Claude Code, ready to run
 keera connect                     # the clients this deployment can configure
-keera connect opencode --key laptop > ~/.config/opencode/opencode.json
+keera connect opencode --key laptop
 ```
 
 ## What it does
 
-**Guardrails, budgets and rate limits.** There are three levels: organisation,
-project and key. A guardrail can attach at any of them. A level can narrow what it
-inherits but never widen it. `keera guardrail effective` shows which level each
-number came from. Clients name an alias like `keera-speed`, never a model id or
-a vLLM URL, so you can swap the model behind an alias without developers
-changing anything. [docs/gateway.md](docs/gateway.md)
+**Guardrails, budgets and rate limits** attach to an organisation, a project or
+a key, and a level can narrow what it inherits but never widen it
+([the tenancy model](docs/gateway.md#the-tenancy-model)). Clients name an alias
+like `keera-speed`, so you can swap the model behind it without developers
+changing anything ([the alias](docs/gateway.md#the-alias-is-the-api-contract)).
 
 ```sh
 keera guardrail set project <project-id> --models keera-speed --rpm 120 --budget 500 --period month

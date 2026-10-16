@@ -180,7 +180,86 @@ says, so it tells what is connected, not who may connect.
 
 `keera usage --by client` adds up usage by client. In the panel, **My
 clients** lists the clients that called with your own keys, and which key each
-one used. Its **Connect client** button shows how to set up a new one.
+one used. Its **Connect client** button shows how to set up a new one. The
+dialog that shows a new key's secret has the same button, with the secret
+already filled in. For Claude Code, `keera connect claude-code` does all of it
+([Connecting Claude Code](#connecting-claude-code)).
+
+## Connecting Claude Code
+
+```sh
+keera login
+keera connect claude-code --model claude-opus
+```
+
+This gives the machine a key of its own and writes it into
+`~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`), so nobody
+copies it. The rest of the file is kept. The key always belongs to a person, so
+the command needs a sign-in and refuses the operator key.
+
+The key is named `claude-code on <hostname> (<id>)`. The id is random and kept
+in keera's configuration directory, so machines that share a hostname keep
+their own keys. The command finds the key by this name, so keep it. In order,
+the command:
+
+- rotates the machine's key if it has one. The key keeps its project,
+  guardrails and lifetime.
+- activates a key left for the person with `--pending`, and names it after the
+  machine.
+- for an administrator, issues a new key, which lasts 90 days like one from
+  `keera key create`. `--project` puts it in a project.
+
+A member with none of these is told what to ask an administrator for.
+
+The file then holds:
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://keera.example.ch/api",
+    "ANTHROPIC_AUTH_TOKEN": "keera_sk_…",
+    "ANTHROPIC_MODEL": "claude-opus[1m]",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus[1m]",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-opus[1m]",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL": "claude-opus[1m]",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+  },
+  "modelOverrides": {
+    "claude-opus-5-5": "claude-opus",
+    "claude-haiku-4-5": "claude-haiku",
+    "claude-haiku-4-5-20251001": "claude-haiku"
+  }
+}
+```
+
+- **Models.** Every enabled chat model and router the key may use. `--model`
+  picks the one Claude Code starts with; without it, the first. Claude Code
+  asks for Opus, Sonnet, Haiku and Fable by Anthropic's names, for background
+  work too, so each is pointed at the model of that family, or at the main one
+  when there is none. Left unset, those requests fail with 404.
+- **`modelOverrides`** tells Claude Code which Claude model each Anthropic alias
+  is, so it knows what the model supports. Without it, Claude Code would send
+  Haiku adaptive thinking, which Haiku refuses. A dated model, such as Haiku
+  4.5, is known only by its dated id, so that one is written too.
+- **`[1m]`** marks a model with a 1M context. Claude Code takes a model it does
+  not know to have 200K, and takes the suffix off before it sends the request.
+- **`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`** keeps Claude Code's telemetry
+  from leaving through anything but the gateway.
+- **`ANTHROPIC_BASE_URL`** is left out, or taken out, when the organisation's
+  managed settings set it already. Claude Code stops fetching the settings from
+  the claude.ai admin console when the person's own settings name an address.
+  The command reads Claude Code's copy of those settings and the
+  `managed-settings.json` files, not MDM profiles or the Windows registry, and
+  warns when they point elsewhere. `claude doctor` shows whether the fetch
+  works, on its `Managed settings (remote)` line.
+
+An `apiKeyHelper` setting makes Claude Code send its key instead, so the
+command warns about one. `--print` prints the same settings instead of writing
+them, for a machine the command does not run on, with the key named in `--key`
+shown by its prefix; put the key itself in its place. The panel's **Connect
+client** shows them too. With a Claude plan, see
+[subscriptions.md](subscriptions.md#4-each-person-once-per-machine).
 
 ## The tenancy model
 

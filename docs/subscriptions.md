@@ -134,67 +134,20 @@ keera login
 keera connect claude-code --subscription --model claude-opus
 ```
 
-This gives the machine its own subscription key, named
-`claude-code on <hostname> (<id>)`. The id is random and kept in keera's
-configuration directory, so machines that share a hostname keep their own
-keys. The command finds the machine's key by this name, so keep it. A member
-takes over a subscription key issued to them that no other machine holds yet,
-and rotates it. An administrator gets a new key, which lasts 90 days like one
-from `keera key create`. Running the command again rotates the key and keeps
-its lifetime. The command writes the key into `~/.claude/settings.json` (or
-`$CLAUDE_CONFIG_DIR/settings.json`), so nobody has to paste it:
+This works as without `--subscription`
+([Connecting Claude Code](gateway.md#connecting-claude-code)): the machine gets
+its own key, written into Claude Code's settings. What changes:
 
-```json
-{
-  "env": {
-    "ANTHROPIC_BASE_URL": "https://keera.example.ch/api",
-    "ANTHROPIC_CUSTOM_HEADERS": "X-Keera-Key: keera_sk_…",
-    "ANTHROPIC_MODEL": "claude-opus[1m]",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus[1m]",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-opus[1m]",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku",
-    "ENABLE_TOOL_SEARCH": "true"
-  },
-  "modelOverrides": {
-    "claude-opus-5-5": "claude-opus",
-    "claude-haiku-4-5": "claude-haiku",
-    "claude-haiku-4-5-20251001": "claude-haiku"
-  }
-}
-```
-
-Claude Code asks for Opus, Sonnet and Haiku models by Anthropic's names. Each is
-pointed at the subscription model of that family, or at the main model when the
-organisation has none. `--model` picks the main model. Without it, the main
-model is the first subscription model by alias.
-
-Claude Code does not know the gateway's aliases. `modelOverrides` tells it
-which Claude model each alias is, so it knows what the model supports and how
-large its context is. Without it, Claude Code would send Haiku adaptive
-thinking, which Haiku refuses. Claude Code knows a dated model, such as Haiku
-4.5, only by its dated id, so that one is written too. Entries for other models
-are kept.
-
-A model newer than the person's Claude Code is not known to it, and is taken
-to have a 200K context. So a model with a 1M context also gets `[1m]` after its
-alias. Claude Code takes it off before it sends the request.
-
-Claude Code also turns tool search off when its address is not Anthropic's.
-Then it sends every tool of every MCP server with each request, which can fill
-the context before the first answer. The gateway sends a subscription request
-on as it is, so `ENABLE_TOOL_SEARCH` turns it back on.
-
-`ANTHROPIC_BASE_URL` is left out, or taken out, when managed settings set it
-already. Claude Code stops fetching the settings from the admin console when the person's own
-settings name an address, so the organisation's settings would no longer
-apply. The command reads Claude Code's copy of the admin console's settings and
-the `managed-settings.json` files. It does not read MDM profiles or the Windows
-registry. `claude doctor` shows whether the fetch works, on its
-`Managed settings (remote)` line.
-
-The rest of the file is kept. Running the command again replaces the machine's
-key. The key keeps the project and guardrails it was issued with. An
-administrator's new key can go in a project with `--project`.
+- The key is a subscription key. Without one to rotate or activate, a member
+  takes over a subscription key issued to them that no other machine holds yet.
+- It goes in `ANTHROPIC_CUSTOM_HEADERS` as `X-Keera-Key: keera_sk_…`, next to
+  the Claude sign-in, instead of in `ANTHROPIC_AUTH_TOKEN`.
+- Only subscription models are written. `--model` picks the main one; without
+  it, the first by alias.
+- `ENABLE_TOOL_SEARCH` is `true`. Claude Code turns tool search off when its
+  address is not Anthropic's, and then sends every tool of every MCP server
+  with each request. The gateway sends a subscription request on as it is, so
+  tool search works through it.
 
 Then run `claude`, and `/login` if it is not signed in to the plan yet.
 `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY` and `apiKeyHelper` must not be set:

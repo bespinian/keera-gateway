@@ -22,13 +22,15 @@ func connectCmd(ctx context.Context, args []string) error {
 	fs := r.fs
 	key := fs.String("key", "",
 		"the API key whose models to configure, by name or id (default: your first active key)")
-	model := fs.String("model", "", "with --subscription, the model Claude Code starts with "+
-		"(default: the first subscription model)")
+	model := fs.String("model", "", "for Claude Code, the model it starts with "+
+		"(default: the first one its key may use)")
 	subscription := fs.Bool("subscription", false,
-		"for Claude Code signed in to a Claude plan: give this machine its own key and "+
-			"write it into ~/.claude/settings.json")
-	project := fs.String("project", "", "with --subscription, the project the new key belongs to "+
-		"(administrators only)")
+		"for Claude Code signed in to a Claude plan: a key that reaches only the models "+
+			"that plan pays for")
+	project := fs.String("project", "", "for Claude Code, the project this machine's new key "+
+		"belongs to (administrators only)")
+	printOnly := fs.Bool("print", false, "for Claude Code, print the settings instead of "+
+		"giving this machine a key and writing them")
 	if done, err := r.parse(); done {
 		return err
 	}
@@ -43,26 +45,34 @@ func connectCmd(ctx context.Context, args []string) error {
 	if err := c.do(ctx, "GET", "/v1/connect", nil, &cat); err != nil {
 		return err
 	}
-	if *subscription {
-		if sub != "claude-code" {
-			return errors.New("--subscription is for Claude Code: keera connect claude-code --subscription")
-		}
-		if *key != "" {
+	if *printOnly && *subscription {
+		return errors.New("--subscription writes its key into Claude Code's settings, " +
+			"which --print does not; give one of them")
+	}
+	if *subscription && sub != "claude-code" {
+		return errors.New("--subscription is for Claude Code: keera connect claude-code --subscription")
+	}
+	if sub == "claude-code" && !*printOnly {
+		switch {
+		case *key != "" && *subscription:
 			return errors.New("--key is not for --subscription, which issues its own key")
-		}
-		if cat.GatewayURL == "" {
+		case *key != "":
+			return errors.New("--key is for --print; without it, this machine gets a key " +
+				"of its own")
+		case cat.GatewayURL == "":
 			return errNoGatewayURL
 		}
-		return connectSubscription(ctx, c, subscriptionSetup{
-			org: r.org, project: *project, model: *model, gatewayURL: cat.GatewayURL, asJSON: r.asJSON,
+		return connectClaude(ctx, c, claudeSetup{
+			org: r.org, project: *project, model: *model, gatewayURL: cat.GatewayURL,
+			asJSON: r.asJSON, subscription: *subscription,
 		})
 	}
 	if *project != "" {
-		return errors.New("--project is for --subscription, which issues a key")
+		return errors.New("--project is for 'keera connect claude-code', which issues a key")
 	}
-	if *model != "" {
-		return errors.New("--model is for --subscription; a configuration lists every model " +
-			"its key may use, so choose the key with --key instead")
+	if *model != "" && sub != "claude-code" {
+		return errors.New("--model is for 'keera connect claude-code'; a configuration lists " +
+			"every model its key may use, so choose the key with --key instead")
 	}
 	orgID, err := resolveOrg(ctx, c, r.org)
 	if err != nil {
@@ -105,6 +115,17 @@ func connectCmd(ctx context.Context, args []string) error {
 		}
 	}
 
+	// Claude Code starts with the first model of the list.
+	if *model != "" {
+		m, ok := findModel(models, *model)
+		if !ok {
+			return fmt.Errorf("no enabled chat model or router %s that this key may use; "+
+				"it may use: %s", *model, strings.Join(aliasesOf(models), ", "))
+		}
+		models = append([]policy.Model{m}, slices.DeleteFunc(slices.Clone(models),
+			func(o policy.Model) bool { return o.Alias == m.Alias })...)
+	}
+
 	// The deployment says where clients reach it. A client pointed anywhere
 	// else would get a 401 that looks like a bad key.
 	gatewayURL := cat.GatewayURL
@@ -116,7 +137,7 @@ func connectCmd(ctx context.Context, args []string) error {
 		res := map[string]any{
 			"client": client.Key, "models": aliasesOf(models), "url": gatewayURL,
 			"path":   client.Path,
-			"config": client.Render(gatewayURL, connectList(models)),
+			"config": client.RenderKey(gatewayURL, shownKey(own), connectList(models)),
 			"run":    client.RunText(connectList(models)),
 			"note":   client.NoteText(),
 		}
@@ -229,10 +250,14 @@ func keyModels(chat []policy.Model, allowed []string) []policy.Model {
 func connectList(models []policy.Model) []connect.Model {
 	out := make([]connect.Model, 0, len(models))
 	for _, m := range models {
-		out = append(out, connect.Model{Alias: m.Alias, Name: m.DisplayName,
-			MaxContext: m.MaxContext})
+		out = append(out, connectModel(m))
 	}
 	return out
+}
+
+func connectModel(m policy.Model) connect.Model {
+	return connect.Model{Alias: m.Alias, Name: m.DisplayName, MaxContext: m.MaxContext,
+		BackendModel: m.BackendModel, Provider: m.Provider}
 }
 
 func aliasesOf(models []policy.Model) []string {
@@ -278,14 +303,19 @@ func printConnect(c connect.Client, own *ownKey, models []policy.Model, base str
 	}
 	fmt.Fprintf(os.Stderr, "%s · %s · %s\n\n", styleErr.head(c.Label), which, base)
 
-	fmt.Fprintln(os.Stderr, styleErr.head("1.")+" The key, which your client reads from the "+
-		"environment:")
+	key := shownKey(own)
+	if c.HoldsKey() {
+		fmt.Fprintf(os.Stderr, "%s The key, which goes in the settings below in place of %s.\n",
+			styleErr.head("1."), key)
+	} else {
+		fmt.Fprintln(os.Stderr, styleErr.head("1.")+" The key, which your client reads from the "+
+			"environment:")
+		fmt.Fprintln(os.Stderr, "     "+styleErr.cmd("export KEERA_API_KEY="+key))
+	}
 	if own != nil {
-		fmt.Fprintln(os.Stderr, "     "+styleErr.cmd("export KEERA_API_KEY="+own.Prefix+"…"))
 		fmt.Fprintf(os.Stderr, "   Use the key %s. It was shown once, when it was issued.\n",
 			own.Name)
 	} else {
-		fmt.Fprintln(os.Stderr, "     "+styleErr.cmd("export KEERA_API_KEY=keera_sk_…"))
 		fmt.Fprintln(os.Stderr, "   Issue one with 'keera key create --user <email> --name <what for>',")
 		fmt.Fprintln(os.Stderr, "   or ask whoever administers this deployment for one.")
 	}
@@ -303,13 +333,22 @@ func printConnect(c connect.Client, own *ownKey, models []policy.Model, base str
 		fmt.Fprintln(os.Stderr, "   picks them up:")
 	}
 	fmt.Fprintln(os.Stderr)
-	fmt.Println(c.Render(base, connectList(models)))
+	fmt.Println(c.RenderKey(base, key, connectList(models)))
 	if c.Note != "" {
 		fmt.Fprintf(os.Stderr, "\n   %s\n", styleErr.muted(wrapAt(c.NoteText(), 0, 3, 76)))
 	}
 
 	fmt.Fprintf(os.Stderr, "\n%s %s\n", styleErr.head("3."),
 		wrapAt(c.RunText(connectList(models)), 0, 3, 76))
+}
+
+// shownKey is how a printed configuration shows the key: by its prefix when
+// it is known, since the secret was shown only once.
+func shownKey(own *ownKey) string {
+	if own != nil {
+		return own.Prefix + "…"
+	}
+	return connect.KeyPlaceholder
 }
 
 // connectRouters reads the organisation's routers as model entries with no

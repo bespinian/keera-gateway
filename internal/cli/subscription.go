@@ -15,113 +15,26 @@ import (
 	"strings"
 
 	"github.com/bespinian/keera-gateway/internal/authn"
-	"github.com/bespinian/keera-gateway/internal/catalog"
+	"github.com/bespinian/keera-gateway/internal/connect"
 	"github.com/bespinian/keera-gateway/internal/gateway"
 	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// Claude Code signed in to a Claude plan.
-//
-// `keera connect claude-code --subscription` gives this machine its own
-// subscription key and writes it into Claude Code's settings, next to the
-// gateway's address. The person never sees or copies the key. Running it again
-// replaces the machine's key instead of adding another. An administrator gets
-// a new key; a member takes over one an administrator issued them. See
-// docs/subscriptions.md.
+// Claude Code signed in to a Claude plan, for `keera connect claude-code
+// --subscription`. See docs/subscriptions.md.
 
 // errSubscriptionsOff is what --subscription says on a deployment that does
 // not take Claude subscriptions.
 var errSubscriptionsOff = errors.New("this deployment does not take Claude subscriptions; " +
 	"run 'keera connect claude-code' without --subscription to use a Keera key instead")
 
-// subscriptionSetup is what one `connect --subscription` was asked for.
-type subscriptionSetup struct {
-	org, project, model string
-	gatewayURL          string
-	asJSON              bool
-}
-
-// connectSubscription sets Claude Code on this machine up for a Claude plan.
-func connectSubscription(ctx context.Context, c *client, in subscriptionSetup) error {
-	me, err := whoami(ctx, c)
-	if err != nil {
-		return err
-	}
-	if !me.ClaudeSubscriptions {
-		return errSubscriptionsOff
-	}
-	if me.UserID == "" {
-		// The operator key wins over a sign-in, so signing in alone is not enough.
-		if c.key != "" {
-			return errors.New("a subscription key belongs to a person, and the operator key is " +
-				"nobody; unset KEERA_OPERATOR_KEY to run this as yourself, and sign in with " +
-				"'keera login' if you have not")
-		}
-		return errors.New("a subscription key belongs to a person, and the operator key is " +
-			"nobody; sign in first with: keera login")
-	}
-	orgID, err := resolveOrg(ctx, c, in.org)
-	if err != nil {
-		return err
-	}
-	models, err := catalogue(ctx, c, orgID)
-	if err != nil {
-		return err
-	}
-	env, alias, err := subscriptionEnv(models, in.model)
-	if err != nil {
-		return err
-	}
-	dir, err := claudeConfigDir()
-	if err != nil {
-		return err
-	}
-	// Claude Code stops fetching the organisation's settings from Anthropic when
-	// the user's own settings name an address. So when managed settings set it
-	// already, it is left to them, and an earlier copy is taken out.
-	managed := managedBaseURL(filepath.Join(dir, "remote-settings.json"), managedSettingsDir())
-	if managed == "" {
-		env["ANTHROPIC_BASE_URL"] = in.gatewayURL
-	} else {
-		env["ANTHROPIC_BASE_URL"] = ""
-	}
-
-	// The settings are read before a key is issued, so a file that cannot be
-	// changed leaves no key behind that nothing holds.
-	path := filepath.Join(dir, "settings.json")
-	settings, err := readSettings(path)
-	if err != nil {
-		return err
-	}
-
-	key, replaced, err := machineKey(ctx, c, orgID, me, in.project)
-	if err != nil {
-		return err
-	}
-	replacedID := ""
-	if replaced != nil {
-		replacedID = replaced.ID
-	}
-	warnings := setClaudeEnv(settings, env, key.Key)
-	setModelOverrides(settings, claudeModelOverrides(models))
-	if managed != "" && strings.TrimRight(managed, "/") != strings.TrimRight(in.gatewayURL, "/") {
-		warnings = append(warnings, "Your organisation's managed settings send Claude Code to "+
-			managed+", not to "+in.gatewayURL+". The key works only if both are this gateway.")
-	}
-	if err := writeSettings(path, settings); err != nil {
-		return fmt.Errorf("the key %s was issued, but %w; run this again to replace it", key.ID, err)
-	}
-
-	if in.asJSON {
-		return out(true, map[string]any{
-			"settings": path, "key_id": key.ID, "replaced": replacedID, "model": alias,
-			"url": in.gatewayURL, "url_managed": managed != "", "warnings": warnings,
-		}, nil)
-	}
-	fmt.Fprintf(os.Stderr, "%s · model %s · %s\n\n", styleErr.head("Claude Code with your Claude plan"),
-		alias, in.gatewayURL)
+// saidKey says what was done to get this machine its key.
+func saidKey(key createdKey, replaced *store.KeySummary) {
 	switch {
+	case replaced != nil && replaced.Pending:
+		fmt.Fprintf(os.Stderr, "Activated your key %s (%s…), which is now this machine's.\n",
+			key.ID, key.Prefix)
 	case replaced != nil && replaced.Name == key.Name:
 		fmt.Fprintf(os.Stderr, "Replaced this machine's key %s with %s (%s…).\n", replaced.ID, key.ID, key.Prefix)
 	case replaced != nil:
@@ -130,26 +43,10 @@ func connectSubscription(ctx context.Context, c *client, in subscriptionSetup) e
 	default:
 		fmt.Fprintf(os.Stderr, "Issued this machine the key %s (%s…).\n", key.ID, key.Prefix)
 	}
-	if managed != "" {
-		fmt.Fprintf(os.Stderr, "Wrote the key and the models into %s. The gateway's address "+
-			"comes from your organisation's managed settings.\n", path)
-	} else {
-		fmt.Fprintf(os.Stderr, "Wrote the gateway, the key and the models into %s.\n", path)
-	}
-	for _, w := range warnings {
-		fmt.Fprintf(os.Stderr, "\n%s\n", styleErr.warn(wrapAt(w, 0, 0, 76)))
-	}
-	fmt.Fprintf(os.Stderr, "\n%s\n", wrapAt("Run 'claude' in your project. If it is not signed in "+
-		"to your Claude plan yet, run '/login' there. '/status' shows the gateway.", 0, 0, 76))
-	return nil
 }
 
-// subscriptionEnv picks the models Claude Code is pointed at, and returns them
-// as settings, with the main one's alias.
-//
-// Claude Code asks for an Opus, a Sonnet or a Haiku model by Anthropic's own
-// names, which the gateway does not know. So each of the three is mapped to
-// the subscription model of that family, or to the main one when there is none.
+// subscriptionEnv picks the subscription models Claude Code is pointed at,
+// and returns them as settings, with the main one's alias.
 func subscriptionEnv(models []policy.Model, named string) (map[string]string, string, error) {
 	subs := subscriptionModels(models)
 	if len(subs) == 0 {
@@ -157,34 +54,33 @@ func subscriptionEnv(models []policy.Model, named string) (map[string]string, st
 			"plan cannot pay for anything here; an administrator adds one with: keera model " +
 			"add claude-opus --provider anthropic --backend-model claude-opus-5-5 --subscription")
 	}
-	main := subs[0]
+	env, alias, ok := claudeModelEnv(subs, named)
+	if !ok {
+		return nil, "", fmt.Errorf("no enabled subscription model %s; this organisation "+
+			"has: %s", named, strings.Join(aliasesOf(subs), ", "))
+	}
+	// Claude Code turns tool search off for any address that is not
+	// Anthropic's, and then sends every tool of every MCP server with each
+	// request. The gateway forwards a subscription request as it is, so tool
+	// search works through it.
+	env["ENABLE_TOOL_SEARCH"] = "true"
+	return env, alias, nil
+}
+
+// claudeModelEnv points Claude Code at models: the one named, or else the
+// first, and returns them as settings with the main one's alias. It reports
+// false when no model is named so. See connect.ClaudeEnv.
+func claudeModelEnv(models []policy.Model, named string) (map[string]string, string, bool) {
+	main := models[0]
 	if named != "" {
-		found, ok := findModel(subs, named)
+		found, ok := findModel(models, named)
 		if !ok {
-			return nil, "", fmt.Errorf("no enabled subscription model %s; this organisation "+
-				"has: %s", named, strings.Join(aliasesOf(subs), ", "))
+			return nil, "", false
 		}
 		main = found
 	}
-	env := map[string]string{
-		"ANTHROPIC_MODEL": claudeCodeName(main),
-		// Claude Code turns tool search off for any address that is not
-		// Anthropic's, and then sends every tool of every MCP server with each
-		// request. The gateway forwards a subscription request as it is, so
-		// tool search works through it.
-		"ENABLE_TOOL_SEARCH": "true",
-	}
-	for _, family := range []string{"opus", "sonnet", "haiku"} {
-		name := claudeCodeName(main)
-		for _, m := range subs {
-			if strings.Contains(m.BackendModel, family) {
-				name = claudeCodeName(m)
-				break
-			}
-		}
-		env["ANTHROPIC_DEFAULT_"+strings.ToUpper(family)+"_MODEL"] = name
-	}
-	return env, main.Alias, nil
+	return connect.ClaudeEnv(connectList(models), connectModel(main)),
+		main.Alias, true
 }
 
 // subscriptionModels is the models a subscription key can reach.
@@ -198,37 +94,10 @@ func subscriptionModels(models []policy.Model) []policy.Model {
 	return subs
 }
 
-// claudeCodeName is the name Claude Code is given for a model. For a model
-// Claude Code does not know, it assumes a 200K context. The [1m] suffix tells
-// it the window is 1M, and Claude Code takes the suffix off before it sends the
-// request.
-func claudeCodeName(m policy.Model) string {
-	if m.MaxContext >= 1_000_000 {
-		return m.Alias + "[1m]"
-	}
-	return m.Alias
-}
-
-// claudeModelOverrides tells Claude Code which Claude model each alias is.
-// Without it, Claude Code does not know the gateway's aliases, and guesses
-// what they support: Haiku would be sent adaptive thinking it then refuses.
-// Claude Code knows a model by Anthropic's id, and a dated model by the dated
-// one, so both are written. The first model by alias wins an id two share.
+// claudeModelOverrides tells Claude Code which Claude model each of models
+// is. See connect.ClaudeOverrides.
 func claudeModelOverrides(models []policy.Model) map[string]string {
-	anthropic, _ := catalog.ProviderByName("anthropic")
-	overrides := map[string]string{}
-	for _, m := range subscriptionModels(models) {
-		ids := []string{m.BackendModel}
-		if known, found := anthropic.Model(m.BackendModel); found {
-			ids = append(ids, known.ID, known.Snapshot)
-		}
-		for _, id := range ids {
-			if _, taken := overrides[id]; !taken && id != "" {
-				overrides[id] = m.Alias
-			}
-		}
-	}
-	return overrides
+	return connect.ClaudeOverrides(connectList(models), connect.ClaudeNames())
 }
 
 // setModelOverrides writes the overrides into the 'modelOverrides' setting,
@@ -246,22 +115,33 @@ func setModelOverrides(settings map[string]any, overrides map[string]string) {
 	}
 }
 
-// machineKey replaces this machine's subscription key, or gets it its first one.
-// It returns the new key and the one it replaced, if any.
+// keyStep is how this machine gets its key: the key it replaces or activates,
+// if any, and the call that does it. It is planned before it is taken, because
+// replacing a key revokes the old one at once.
+type keyStep struct {
+	replaces *store.KeySummary
+	issue    func(ctx context.Context, c *client) (createdKey, error)
+}
+
+// planMachineKey decides how this machine gets its Claude Code key of the
+// given kind, without doing it yet.
 //
-// Only an administrator issues keys. So a member's first run takes over a
-// subscription key an administrator issued them that no machine holds yet,
-// and rotates it to get a secret to write down.
-func machineKey(ctx context.Context, c *client, orgID string, me identity, project string,
-) (createdKey, *store.KeySummary, error) {
+// In order: this machine's own key is rotated; a pending key of the caller's
+// is activated and named after the machine; a member takes over a
+// subscription key an administrator issued them that no machine holds yet;
+// an administrator gets a new key. Only an administrator issues keys, so a
+// member with none of these is sent to one.
+func planMachineKey(ctx context.Context, c *client, orgID string, me identity, project string,
+	kind policy.KeyKind,
+) (keyStep, error) {
 	member := me.Role == string(authn.RoleMember)
 	if member && project != "" {
-		return createdKey{}, nil, errors.New("--project is for administrators; your key keeps " +
+		return keyStep{}, errors.New("--project is for administrators; your key keeps " +
 			"the project an administrator issued it in")
 	}
 	machine, err := machineID()
 	if err != nil {
-		return createdKey{}, nil, err
+		return keyStep{}, err
 	}
 	host, err := os.Hostname()
 	if err != nil || host == "" {
@@ -271,52 +151,75 @@ func machineKey(ctx context.Context, c *client, orgID string, me identity, proje
 	inProject := ""
 	if !member {
 		if inProject, err = projectID(ctx, c, orgID, project); err != nil {
-			return createdKey{}, nil, err
+			return keyStep{}, err
 		}
 	}
 	keys, err := list[store.KeySummary](ctx, c, inOrg("/v1/keys", orgID))
 	if err != nil {
-		return createdKey{}, nil, err
+		return keyStep{}, err
 	}
-	var unclaimed *store.KeySummary
+	activate := func(k *store.KeySummary, name string) keyStep {
+		return keyStep{replaces: k, issue: func(ctx context.Context, c *client) (createdKey, error) {
+			return activateKey(ctx, c, k.ID, name)
+		}}
+	}
+	rotate := func(k *store.KeySummary, name string) keyStep {
+		return keyStep{replaces: k, issue: func(ctx context.Context, c *client) (createdKey, error) {
+			rotated, err := rotateKey(ctx, c, k.ID, name, nil)
+			return rotated.createdKey, err
+		}}
+	}
+	var pending, unclaimed *store.KeySummary
 	for i, k := range keys {
-		if k.UserID != me.UserID || k.Kind != policy.KeySubscription || k.RevokedAt != nil {
+		if k.UserID != me.UserID || k.Kind != kind || k.RevokedAt != nil {
 			continue
 		}
-		if k.Name == name {
+		inOther := project != "" && inProject != k.ProjectID
+		switch {
+		case k.Name == name && inOther:
 			// A rotation keeps the key's project, so a different --project would be
 			// ignored without a word.
-			if project != "" && inProject != k.ProjectID {
-				return createdKey{}, nil, fmt.Errorf("this machine already has the key %s, in "+
-					"another project, and replacing it keeps that project; to move it, revoke it "+
-					"first with: keera key revoke %s, then run this again", k.ID, k.ID)
-			}
-			rotated, err := rotateKey(ctx, c, k.ID, "", nil)
-			return rotated.createdKey, &keys[i], err
-		}
-		if unclaimed == nil && !isMachineKeyName(k.Name) {
+			return keyStep{}, fmt.Errorf("this machine already has the key %s, in "+
+				"another project, and replacing it keeps that project; to move it, revoke it "+
+				"first with: keera key revoke %s, then run this again", k.ID, k.ID)
+		case k.Name == name && k.Pending:
+			return activate(&keys[i], ""), nil
+		case k.Name == name:
+			return rotate(&keys[i], ""), nil
+		case k.Pending && pending == nil && !inOther:
+			pending = &keys[i]
+		case !k.Pending && unclaimed == nil && kind == policy.KeySubscription &&
+			!isMachineKeyName(k.Name):
 			unclaimed = &keys[i]
 		}
 	}
-	if member {
-		if unclaimed == nil {
-			return createdKey{}, nil, fmt.Errorf("you have no subscription key for this machine, "+
-				"and only an administrator can issue one; ask one to run: keera key create "+
-				"--subscription --user %s --name \"%s's Claude Code\", then run this again",
-				me.Email, strings.Split(me.Email, "@")[0])
+	switch {
+	case pending != nil:
+		return activate(pending, name), nil
+	case member && unclaimed != nil:
+		return rotate(unclaimed, name), nil
+	case member:
+		which := ""
+		if kind == policy.KeySubscription {
+			which = " --subscription"
 		}
-		rotated, err := rotateKey(ctx, c, unclaimed.ID, name, nil)
-		return rotated.createdKey, unclaimed, err
+		return keyStep{}, fmt.Errorf("you have no key to activate for this machine, "+
+			"and only an administrator can issue one; ask one to run: keera key create%s "+
+			"--pending --user %s --name \"%s's Claude Code\", then run this again",
+			which, me.Email, strings.Split(me.Email, "@")[0])
 	}
-	var created createdKey
-	err = c.do(ctx, "POST", "/v1/keys", map[string]string{
-		"org_id": orgID, "project_id": inProject, "user_id": me.UserID, "name": name,
-		"kind": string(policy.KeySubscription), "expires_in": defaultKeyLife,
-	}, &created)
-	return created, nil, err
+	return keyStep{issue: func(ctx context.Context, c *client) (createdKey, error) {
+		var created createdKey
+		err := c.do(ctx, "POST", "/v1/keys", map[string]string{
+			"org_id": orgID, "project_id": inProject, "user_id": me.UserID, "name": name,
+			"kind": string(kind), "expires_in": defaultKeyLife,
+		}, &created)
+		return created, err
+	}}, nil
 }
 
-// machineKeyName is the name of a machine's subscription key. The id tells
+// machineKeyName is the name of a machine's Claude Code key, with or without
+// a subscription. The id tells
 // apart machines that share a hostname, such as copies of one VM image, so one
 // never replaces another's key.
 func machineKeyName(host, machine string) string {
@@ -332,7 +235,7 @@ func isMachineKeyName(name string) bool {
 	return machineKeyNameRE.MatchString(name)
 }
 
-// machineID names this machine for its subscription key. It is random, made
+// machineID names this machine for its Claude Code key. It is random, made
 // on first use, and kept next to the sign-in in keera's configuration
 // directory.
 func machineID() (string, error) {
@@ -454,8 +357,10 @@ func readSettings(path string) (map[string]any, error) {
 
 // setClaudeEnv writes the gateway's settings into the 'env' block, and says
 // what else in the file would stop them working. An empty value removes the
-// setting. Other headers in ANTHROPIC_CUSTOM_HEADERS are kept.
-func setClaudeEnv(settings map[string]any, env map[string]string, key string) []string {
+// setting. A subscription key goes in ANTHROPIC_CUSTOM_HEADERS, next to the
+// headers there. Without one, an earlier one is taken out, because the gateway
+// reads that header first.
+func setClaudeEnv(settings map[string]any, env map[string]string, subscriptionKey string) []string {
 	block, _ := settings["env"].(map[string]any)
 	if block == nil {
 		block = map[string]any{}
@@ -477,8 +382,22 @@ func setClaudeEnv(settings map[string]any, env map[string]string, key string) []
 			}
 		}
 	}
-	block["ANTHROPIC_CUSTOM_HEADERS"] = strings.Join(append(headers, gateway.KeyHeader+": "+key), "\n")
+	if subscriptionKey != "" {
+		headers = append(headers, gateway.KeyHeader+": "+subscriptionKey)
+	}
+	if len(headers) == 0 {
+		delete(block, "ANTHROPIC_CUSTOM_HEADERS")
+	} else {
+		block["ANTHROPIC_CUSTOM_HEADERS"] = strings.Join(headers, "\n")
+	}
 
+	if subscriptionKey == "" {
+		if _, set := settings["apiKeyHelper"]; set {
+			return []string{"Remove the 'apiKeyHelper' setting: while it is set, Claude Code " +
+				"sends its key instead of the one written here."}
+		}
+		return nil
+	}
 	// Any of these makes Claude Code send it instead of the Claude sign-in.
 	var warnings []string
 	for _, name := range []string{"ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"} {
@@ -496,21 +415,4 @@ func setClaudeEnv(settings map[string]any, env map[string]string, key string) []
 			"Claude Code sends its key instead of your Claude sign-in.")
 	}
 	return warnings
-}
-
-// writeSettings replaces the file in one step, so Claude Code never reads half
-// of it. The file holds a key, so only its owner may read it.
-func writeSettings(path string, settings map[string]any) error {
-	raw, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return err
-	}
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("creating %s: %w", dir, err)
-	}
-	if err := writeFileAtomic(path, append(raw, '\n'), 0o600); err != nil {
-		return fmt.Errorf("writing %s: %w", path, err)
-	}
-	return nil
 }
