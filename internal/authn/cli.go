@@ -1,7 +1,6 @@
 package authn
 
 import (
-	"crypto/sha256"
 	"encoding/base64"
 	"time"
 
@@ -29,38 +28,27 @@ const (
 	CLICodeTTL = 5 * time.Minute
 )
 
-// NewCLIToken mints a token and the hash stored for it. Only the hash is
-// stored, so a database dump holds no working credentials.
-func NewCLIToken() (token string, hash []byte) {
-	token = CLITokenPrefix + auth.RandomToken()
-	return token, HashCLIToken(token)
+// newSecret mints a random token that starts with prefix, and the hash stored
+// for it. Only the hash is stored, so a database dump holds no working
+// credentials.
+func newSecret(prefix string) (token string, hash []byte) {
+	token = prefix + auth.RandomToken()
+	return token, auth.Hash(token)
 }
 
-// HashCLIToken returns the value stored in cli_tokens.id for token.
-//
-// SHA-256 rather than a password hash: the input is 256 random bits, so there
-// is no dictionary to defend against, and this runs on every command.
-func HashCLIToken(token string) []byte { return sum256(token) }
+// NewCLIToken mints a token and the hash stored for it.
+func NewCLIToken() (token string, hash []byte) { return newSecret(CLITokenPrefix) }
 
 // NewCLICode mints the one-time code the browser carries back to the loopback
 // listener, and the hash stored for it.
-func NewCLICode() (code string, hash []byte) {
-	code = auth.RandomToken()
-	return code, HashCLICode(code)
-}
-
-// HashCLICode returns the value stored in cli_codes.id for code.
-func HashCLICode(code string) []byte { return sum256(code) }
+func NewCLICode() (code string, hash []byte) { return newSecret("") }
 
 // NewSession mints a panel session's cookie value, the hash stored for it,
 // and its CSRF token.
 func NewSession() (token string, hash []byte, csrf string) {
-	token = auth.RandomToken()
-	return token, HashSession(token), auth.RandomToken()
+	token, hash = newSecret("")
+	return token, hash, auth.RandomToken()
 }
-
-// HashSession returns the value stored for a session's cookie value.
-func HashSession(token string) []byte { return sum256(token) }
 
 // CLIChallenge derives the S256 challenge for a verifier.
 //
@@ -72,12 +60,7 @@ func CLIChallenge(verifier string) string { return s256(verifier) }
 // NewCLIVerifier mints the verifier a command line keeps to itself.
 func NewCLIVerifier() string { return auth.RandomToken() }
 
-func sum256(s string) []byte {
-	sum := sha256.Sum256([]byte(s))
-	return sum[:]
-}
-
 // s256 is the PKCE S256 challenge for a verifier.
 func s256(verifier string) string {
-	return base64.RawURLEncoding.EncodeToString(sum256(verifier))
+	return base64.RawURLEncoding.EncodeToString(auth.Hash(verifier))
 }

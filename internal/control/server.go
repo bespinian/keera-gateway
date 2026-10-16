@@ -163,29 +163,29 @@ func (s *Server) Handler() http.Handler {
 	// are throttled per address. /auth/config reads and decides nothing, so it
 	// is not.
 	mux.HandleFunc("GET "+httpx.ControlPrefix+"/auth/config", s.authConfig)
-	mux.Handle("GET "+httpx.ControlPrefix+"/auth/login",
-		s.throttle("login", flowRPM, signInThrottled, s.login))
-	mux.Handle("GET "+httpx.ControlPrefix+"/auth/callback",
-		s.throttle("callback", flowRPM, signInThrottled, s.callback))
-	mux.Handle("POST "+httpx.ControlPrefix+"/auth/local",
-		s.throttle("local", signInRPM, signInThrottled, s.localLogin))
+	// public registers a sign-in route like route does, throttled instead of
+	// authenticated.
+	public := func(pattern, name string, rpm int, h http.HandlerFunc) {
+		method, path, _ := strings.Cut(pattern, " ")
+		mux.Handle(method+" "+httpx.ControlPrefix+path, s.throttle(name, rpm, signInThrottled, h))
+	}
+	public("GET /auth/login", "login", flowRPM, s.login)
+	public("GET /auth/callback", "callback", flowRPM, s.callback)
+	public("POST /auth/local", "local", signInRPM, s.localLogin)
 	// The last step of `keera login`: a one-time code redeemed for a token.
-	mux.Handle("POST "+httpx.ControlPrefix+"/auth/cli/token",
-		s.throttle("cli_token", signInRPM, signInThrottled, s.cliToken))
+	public("POST /auth/cli/token", "cli_token", signInRPM, s.cliToken)
 	// Passkeys: signing in, and adding the first one from a set-up link.
-	mux.Handle("POST "+httpx.ControlPrefix+"/auth/passkey/options",
-		s.throttle("passkey_options", flowRPM, signInThrottled, s.passkeySignInOptions))
-	mux.Handle("POST "+httpx.ControlPrefix+"/auth/passkey/sign-in",
-		s.throttle("passkey_sign_in", signInRPM, signInThrottled, s.passkeySignIn))
-	mux.Handle("POST "+httpx.ControlPrefix+"/auth/passkey/setup/options",
-		s.throttle("passkey_setup_options", signInRPM, signInThrottled, s.passkeySetupOptions))
-	mux.Handle("POST "+httpx.ControlPrefix+"/auth/passkey/setup",
-		s.throttle("passkey_setup", signInRPM, signInThrottled, s.passkeySetup))
+	public("POST /auth/passkey/options", "passkey_options", flowRPM,
+		s.withPasskeysSignedOut(s.passkeySignInOptions))
+	public("POST /auth/passkey/sign-in", "passkey_sign_in", signInRPM,
+		s.withPasskeysSignedOut(s.passkeySignIn))
+	public("POST /auth/passkey/setup/options", "passkey_setup_options", signInRPM,
+		s.withPasskeysSignedOut(s.passkeySetupOptions))
+	public("POST /auth/passkey/setup", "passkey_setup", signInRPM,
+		s.withPasskeysSignedOut(s.passkeySetup))
 	// The sign-up screen, after a sign-in that matched no organisation.
-	mux.Handle("GET "+httpx.ControlPrefix+"/auth/signup",
-		s.throttle("signup_info", signInRPM, signInThrottled, s.signupInfo))
-	mux.Handle("POST "+httpx.ControlPrefix+"/auth/signup",
-		s.throttle("signup", signInRPM, signInThrottled, s.completeSignup))
+	public("GET /auth/signup", "signup_info", signInRPM, s.signupInfo)
+	public("POST /auth/signup", "signup", signInRPM, s.completeSignup)
 	// PostFinance Checkout saying a transaction changed. It proves nothing, so
 	// it is only a reason to read the transaction back; see payments.go.
 	mux.Handle("POST "+httpx.ControlPrefix+"/billing/postfinance",
@@ -291,12 +291,12 @@ func (s *Server) Handler() http.Handler {
 	route("PUT /v1/sandbox-classes/{name}", s.putSandboxClass)
 	route("DELETE /v1/sandbox-classes/{name}", s.deleteSandboxClass)
 	route("GET /v1/sandboxes", s.listSandboxes)
-	route("POST /v1/sandboxes", s.createSandbox)
+	route("POST /v1/sandboxes", s.withSandboxes(s.createSandbox))
 	route("GET /v1/sandboxes/{ref}", s.getSandbox)
-	route("DELETE /v1/sandboxes/{ref}", s.terminateSandbox)
-	route("POST /v1/sandboxes/{ref}/extend", s.extendSandbox)
-	route("POST /v1/sandboxes/{ref}/suspend", s.suspendSandbox)
-	route("POST /v1/sandboxes/{ref}/resume", s.resumeSandbox)
+	route("DELETE /v1/sandboxes/{ref}", s.withSandboxes(s.terminateSandbox))
+	route("POST /v1/sandboxes/{ref}/extend", s.withSandboxes(s.extendSandbox))
+	route("POST /v1/sandboxes/{ref}/suspend", s.withSandboxes(s.suspendSandbox))
+	route("POST /v1/sandboxes/{ref}/resume", s.withSandboxes(s.resumeSandbox))
 	route("GET /v1/sandbox-usage", s.sandboxUsage)
 
 	// A byte stream into a sandbox. It is a path on this listener, not a port
@@ -345,6 +345,14 @@ func (s *Server) withPrincipal(w http.ResponseWriter, r *http.Request,
 		}
 	}
 	next(w, r, p)
+}
+
+// warnUnlessDone logs a failure of background work, unless ctx ended: then
+// the failure is only the shutdown, or the reader leaving.
+func (s *Server) warnUnlessDone(ctx context.Context, msg string, args ...any) {
+	if ctx.Err() == nil {
+		s.log.Warn(msg, args...)
+	}
 }
 
 func safeMethod(m string) bool {
@@ -440,6 +448,12 @@ func badRequest(w http.ResponseWriter, msg string) {
 	httpx.WriteError(w, http.StatusBadRequest, "invalid_request_error", "", msg)
 }
 
+// conflict writes the standard refusal for a request that clashes with what
+// is stored.
+func conflict(w http.ResponseWriter, code, msg string) {
+	httpx.WriteError(w, http.StatusConflict, "invalid_request_error", code, msg)
+}
+
 // readJSON decodes a request body into v, or answers why it could not and
 // returns false.
 func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
@@ -504,7 +518,12 @@ func (s *Server) queryOrg(w http.ResponseWriter, r *http.Request, p *authn.Princ
 // adminOrg is queryOrg for a request that changes something of the
 // organisation's. An administrator who names none changes their own.
 func (s *Server) adminOrg(w http.ResponseWriter, r *http.Request, p *authn.Principal) (string, bool) {
-	orgID, ok := s.queryOrg(w, r, p)
+	return s.orgToAdmin(w, p, r.URL.Query().Get("org_id"))
+}
+
+// orgToAdmin is adminOrg for an organisation named in the body.
+func (s *Server) orgToAdmin(w http.ResponseWriter, p *authn.Principal, requested string) (string, bool) {
+	orgID, ok := s.requireOrg(w, p, requested, orgRequired)
 	return orgID, ok && s.requireOrgAdmin(w, p, orgID)
 }
 
@@ -524,14 +543,21 @@ func (s *Server) requireAdmin(w http.ResponseWriter, p *authn.Principal) bool {
 	return s.requireOrgAdmin(w, p, p.OrgID)
 }
 
-// requireOwnerAdmin is requireOrgAdmin for a thing named by its id. Another
-// tenant's thing answers 404, not 403, so ids cannot be probed.
-func (s *Server) requireOwnerAdmin(w http.ResponseWriter, p *authn.Principal, owner string) bool {
+// requireOwnerRead checks the caller may read the tenant owning a thing named
+// by its id. Another tenant's thing answers 404, not 403, so ids cannot be
+// probed.
+func (s *Server) requireOwnerRead(w http.ResponseWriter, p *authn.Principal, owner string) bool {
 	if !p.CanReadOrg(owner) {
 		s.fail(w, store.ErrNotFound)
 		return false
 	}
-	return s.requireOrgAdmin(w, p, owner)
+	return true
+}
+
+// requireOwnerAdmin is requireOrgAdmin for a thing named by its id, with the
+// same 404 as requireOwnerRead.
+func (s *Server) requireOwnerAdmin(w http.ResponseWriter, p *authn.Principal, owner string) bool {
+	return s.requireOwnerRead(w, p, owner) && s.requireOrgAdmin(w, p, owner)
 }
 
 // queryWindow reads a report's time window from ?from, ?to and ?since.

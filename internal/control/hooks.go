@@ -101,7 +101,7 @@ func (s *Server) deleteUnused(w http.ResponseWriter, r *http.Request, p *authn.P
 		return
 	}
 	if len(refs) > 0 {
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", kind+"_in_use",
+		conflict(w, kind+"_in_use",
 			inUse(alias, scopeList(refs)))
 		return
 	}

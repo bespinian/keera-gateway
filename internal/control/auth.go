@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bespinian/keera-gateway/internal/auth"
 	"github.com/bespinian/keera-gateway/internal/authn"
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/id"
@@ -102,9 +103,16 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 // loginStateCookie sets loginCookie, or with maxAge -1 removes it. Lax is
 // enough: the provider sends the browser back with a plain GET.
 func (s *Server) loginStateCookie(state string, maxAge int) *http.Cookie {
+	return s.cookie(loginCookie, state, httpx.ControlPrefix+"/auth", maxAge, http.SameSiteLaxMode)
+}
+
+// cookie is every cookie the control plane sets: never readable by scripts,
+// and sent only over HTTPS where the deployment is served over it. maxAge -1
+// removes it.
+func (s *Server) cookie(name, value, path string, maxAge int, same http.SameSite) *http.Cookie {
 	return &http.Cookie{
-		Name: loginCookie, Value: state, Path: httpx.ControlPrefix + "/auth", MaxAge: maxAge,
-		HttpOnly: true, Secure: s.opts.SecureCookies, SameSite: http.SameSiteLaxMode,
+		Name: name, Value: value, Path: path, MaxAge: maxAge,
+		HttpOnly: true, Secure: s.opts.SecureCookies, SameSite: same,
 	}
 }
 
@@ -197,29 +205,22 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.rememberDirectory(r, user, identity.RefreshToken)
-	if err := s.startSession(w, r, user); err != nil {
-		s.fail(w, err)
+	s.rememberDirectory(r, user, s.sealRefreshToken(user.ExternalID, identity.RefreshToken))
+	if !s.signedIn(w, r, user, was, flow.CLI(),
+		map[string]any{"via": "sso", "provider": identity.Provider}) {
 		return
 	}
-	entry := map[string]any{"role": user.Role, "via": "sso", "provider": identity.Provider}
-	if flow.CLI() {
-		// Recorded apart, because "signed in at a terminal" is what an
-		// administrator reading the log looks for.
-		entry["client"] = "command line"
-	}
-	if was != "" && was != user.Role {
-		// The directory changed the role. This entry is the only record of it.
-		entry["role_was"] = was
-	}
-	s.auditf(r, &authn.Principal{Via: authn.MethodSession, Email: user.Email, UserID: user.ID},
-		user.OrgID, "auth.sign_in", "user", user.ID, entry)
 
 	if flow.CLI() {
 		// The browser goes on to the port `keera login` waits on. The session
 		// above is created either way, so the browser is signed in to the
 		// panel too.
-		s.handOverToCLI(w, r, flow, user)
+		to, err := s.cliHandOver(r, flow, user)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		http.Redirect(w, r, to, http.StatusFound)
 		return
 	}
 	http.Redirect(w, r, cmp.Or(flow.RedirectTo, "/"), http.StatusFound)
@@ -436,6 +437,34 @@ func roleAtSignIn(stored string, fromIDP authn.Role, adminFromDirectory bool) (a
 	return fromIDP, stored != string(fromIDP)
 }
 
+// signedIn starts a session for someone who just signed in, and logs it with
+// entry. was is their role before, so the log records a change; cli marks a
+// sign-in for the command line.
+func (s *Server) signedIn(w http.ResponseWriter, r *http.Request, user store.User, was string,
+	cli bool, entry map[string]any) bool {
+	if err := s.startSession(w, r, user); err != nil {
+		s.fail(w, err)
+		return false
+	}
+	entry["role"] = user.Role
+	if cli {
+		// Recorded apart, because "signed in at a terminal" is what an
+		// administrator reading the log looks for.
+		entry["client"] = "command line"
+	}
+	if was != "" && was != user.Role {
+		// This entry is the only record of the change.
+		entry["role_was"] = was
+	}
+	s.auditf(r, actorOf(user), user.OrgID, "auth.sign_in", "user", user.ID, entry)
+	return true
+}
+
+// actorOf is the principal a person acts as through their session.
+func actorOf(user store.User) *authn.Principal {
+	return &authn.Principal{Via: authn.MethodSession, Email: user.Email, UserID: user.ID}
+}
+
 // startSession creates a session and sets its cookie.
 func (s *Server) startSession(w http.ResponseWriter, r *http.Request, user store.User) error {
 	token, hash, csrf := authn.NewSession()
@@ -443,15 +472,8 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, user store
 	if err := s.st.CreateSession(r.Context(), hash, user.ID, csrf, expires); err != nil {
 		return err
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    token,
-		Path:     "/",
-		Expires:  expires,
-		HttpOnly: true,
-		Secure:   s.opts.SecureCookies,
-		SameSite: http.SameSiteLaxMode,
-	})
+	http.SetCookie(w, s.cookie(sessionCookie, token, "/", int(authn.SessionTTL.Seconds()),
+		http.SameSiteLaxMode))
 	http.SetCookie(w, s.rememberOrg(user.OrgID))
 	return nil
 }
@@ -462,7 +484,7 @@ func (s *Server) sessionPrincipal(r *http.Request) (*authn.Principal, error) {
 	if err != nil || c.Value == "" {
 		return nil, authn.ErrUnauthenticated
 	}
-	hash := authn.HashSession(c.Value)
+	hash := auth.Hash(c.Value)
 	su, err := s.st.LookupSession(r.Context(), hash)
 	if err != nil {
 		return nil, authn.ErrUnauthenticated
@@ -471,16 +493,23 @@ func (s *Server) sessionPrincipal(r *http.Request) (*authn.Principal, error) {
 	if !ok {
 		return nil, authn.ErrUnauthenticated
 	}
+	p := principalOf(authn.MethodSession, user, hash)
+	p.CSRF = su.Session.CSRF
+	p.SignedInAt = su.Session.CreatedAt
+	return p, nil
+}
+
+// principalOf is the caller a signed-in person is to the routes. hash is the
+// credential they sent, hashed, so signing out can end it.
+func principalOf(via authn.Method, user store.User, hash []byte) *authn.Principal {
 	return &authn.Principal{
-		Via:            authn.MethodSession,
+		Via:            via,
 		UserID:         user.ID,
 		Email:          user.Email,
 		Role:           authn.Role(user.Role),
 		OrgID:          user.OrgID,
-		CSRF:           su.Session.CSRF,
 		CredentialHash: hash,
-		SignedInAt:     su.Session.CreatedAt,
-	}, nil
+	}
 }
 
 // logout ends the session, and returns the identity provider's own sign-out
@@ -505,10 +534,7 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request, p *authn.Princip
 			return
 		}
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookie, Value: "", Path: "/", MaxAge: -1,
-		HttpOnly: true, Secure: s.opts.SecureCookies, SameSite: http.SameSiteLaxMode,
-	})
+	http.SetCookie(w, s.cookie(sessionCookie, "", "/", -1, http.SameSiteLaxMode))
 	var providerLogout string
 	if p := s.providerOf(r, p.UserID); p != nil {
 		providerLogout = p.LogoutURL(s.opts.PublicURL)
@@ -594,11 +620,11 @@ func (s *Server) isPasskeyAccount(r *http.Request, userID string) bool {
 	return err == nil && authn.IsPasskeyAccount(u.ExternalID)
 }
 
-// orgName looks up an organisation's name. A failed read counts as not found:
-// the name is only for display.
-func (s *Server) orgName(ctx context.Context, orgID string) (string, bool) {
-	name, err := s.st.ScopeName(ctx, policy.ScopeOrg, orgID)
-	return name, err == nil
+// orgName looks up an organisation's name, or "" when it cannot be read: the
+// name is only for display.
+func (s *Server) orgName(ctx context.Context, orgID string) string {
+	name, _ := s.st.ScopeName(ctx, policy.ScopeOrg, orgID)
+	return name
 }
 
 // gatewayURL is the inference plane as a developer's client reaches it: the

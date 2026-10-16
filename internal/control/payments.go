@@ -49,7 +49,7 @@ const (
 // deployment without them.
 func (s *Server) payments(w http.ResponseWriter) *Payments {
 	if s.opts.Payments == nil {
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "payments_off",
+		conflict(w, "payments_off",
 			"this deployment takes no payments: nobody pays in advance. See docs/billing.md")
 	}
 	return s.opts.Payments
@@ -561,9 +561,7 @@ func (s *Server) RunPayments(ctx context.Context) {
 func (s *Server) topUpDue(ctx context.Context) {
 	due, err := s.st.DueTopUps(ctx, 20)
 	if err != nil {
-		if ctx.Err() == nil {
-			s.log.Warn("reading the due top-ups failed", "error", err)
-		}
+		s.warnUnlessDone(ctx, "reading the due top-ups failed", "error", err)
 		return
 	}
 	for _, a := range due {
@@ -627,18 +625,14 @@ const (
 func (s *Server) settlePending(ctx context.Context, now time.Time) {
 	list, err := s.st.PendingPayments(ctx, now.Add(-lookUpFor), now.Add(-settleAfter), 50)
 	if err != nil {
-		if ctx.Err() == nil {
-			s.log.Warn("reading the pending payments failed", "error", err)
-		}
+		s.warnUnlessDone(ctx, "reading the pending payments failed", "error", err)
 		return
 	}
 	for _, pm := range list {
 		age := now.Sub(pm.TS)
 		if pm.TransactionID == 0 {
 			if age > unstarted {
-				_, _, _, _ = s.st.Settle(ctx, pm.ID, store.Settlement{
-					Note: "the payment was interrupted before it started", Retry: true,
-				})
+				_ = s.settleFailed(ctx, pm, "the payment was interrupted before it started", true)
 			}
 			continue
 		}

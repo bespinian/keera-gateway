@@ -36,6 +36,15 @@ func (s *Server) requireSandboxes(w http.ResponseWriter) bool {
 	return true
 }
 
+// withSandboxes gates a route on requireSandboxes.
+func (s *Server) withSandboxes(next handler) handler {
+	return func(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
+		if s.requireSandboxes(w) {
+			next(w, r, p)
+		}
+	}
+}
+
 /* --------------------------------------------------------------- the catalogue */
 
 // listSandboxClasses is readable by anyone in the organisation: a developer
@@ -206,17 +215,9 @@ func (s *Server) deleteSandboxClass(w http.ResponseWriter, r *http.Request, p *a
 func (s *Server) sandboxLimits(ctx context.Context, orgID, projectID string) (
 	policy.ResolvedSandbox, error,
 ) {
-	org, err := s.storedLimits(ctx, policy.ScopeOrg, orgID)
+	org, project, err := s.chainLimits(ctx, orgID, projectID)
 	if err != nil {
 		return policy.ResolvedSandbox{}, err
-	}
-	var project *policy.Limits
-	if projectID != "" {
-		lim, err := s.storedLimits(ctx, policy.ScopeProject, projectID)
-		if err != nil {
-			return policy.ResolvedSandbox{}, err
-		}
-		project = &lim
 	}
 	return policy.Resolve(policy.Key{OrgID: orgID, ProjectID: projectID}, &org, project, nil).Sandbox, nil
 }
@@ -309,9 +310,6 @@ func sandboxTTL(w http.ResponseWriter, v string) (time.Duration, bool) {
 }
 
 func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if !s.requireSandboxes(w) {
-		return
-	}
 	var in struct {
 		OrgID     string         `json:"org_id"`
 		ProjectID string         `json:"project_id"`
@@ -398,9 +396,6 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request, p *authn.
 // terminateSandbox ends one sandbox. The route is a DELETE, but the words say
 // terminate, because the row outlives the machine.
 func (s *Server) terminateSandbox(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if !s.requireSandboxes(w) {
-		return
-	}
 	sb, ok := s.sandboxToChange(w, r, p)
 	if !ok {
 		return
@@ -419,9 +414,6 @@ func (s *Server) terminateSandbox(w http.ResponseWriter, r *http.Request, p *aut
 }
 
 func (s *Server) extendSandbox(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if !s.requireSandboxes(w) {
-		return
-	}
 	var in struct {
 		TTL string `json:"ttl"`
 	}
@@ -467,9 +459,6 @@ func (s *Server) resumeSandbox(w http.ResponseWriter, r *http.Request, p *authn.
 func (s *Server) changeSandboxState(w http.ResponseWriter, r *http.Request, p *authn.Principal,
 	action string,
 ) {
-	if !s.requireSandboxes(w) {
-		return
-	}
 	sb, ok := s.sandboxToChange(w, r, p)
 	if !ok {
 		return

@@ -35,13 +35,10 @@ const maxOrgName = 100
 func (s *Server) startSignup(w http.ResponseWriter, r *http.Request, provider *authn.OIDC,
 	identity authn.Identity, invited, redirectTo string) {
 	userID := id.New("user")
-	var sealed []byte
-	if identity.RefreshToken != "" {
-		sealed = s.opts.Secrets.Seal(refreshTokenName(identity.ExternalID()), identity.RefreshToken)
-	}
+	sealed := s.sealRefreshToken(identity.ExternalID(), identity.RefreshToken)
 	token := auth.RandomToken()
 	if err := s.st.CreateSignup(r.Context(), store.Signup{
-		TokenHash:  authn.HashSession(token),
+		TokenHash:  auth.Hash(token),
 		UserID:     userID,
 		Provider:   provider.Name(),
 		ExternalID: identity.ExternalID(),
@@ -62,11 +59,8 @@ func (s *Server) startSignup(w http.ResponseWriter, r *http.Request, provider *a
 
 // signupStateCookie sets signupCookie, or with maxAge -1 removes it.
 func (s *Server) signupStateCookie(token string, maxAge int) *http.Cookie {
-	return &http.Cookie{
-		Name: signupCookie, Value: token, Path: httpx.ControlPrefix + "/auth/signup",
-		MaxAge: maxAge, HttpOnly: true, Secure: s.opts.SecureCookies,
-		SameSite: http.SameSiteStrictMode,
-	}
+	return s.cookie(signupCookie, token, httpx.ControlPrefix+"/auth/signup", maxAge,
+		http.SameSiteStrictMode)
 }
 
 // signupHash reads the sign-up's cookie, or answers that there is none.
@@ -76,7 +70,7 @@ func (s *Server) signupHash(w http.ResponseWriter, r *http.Request) ([]byte, boo
 		signupGone(w)
 		return nil, false
 	}
-	return authn.HashSession(c.Value), true
+	return auth.Hash(c.Value), true
 }
 
 func signupGone(w http.ResponseWriter) {
@@ -144,14 +138,14 @@ func (s *Server) completeSignup(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, store.ErrNotFound) && in.Join:
 		// The sign-up or the invitation is gone. Either way, signing in
 		// again shows what is there now.
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "invitation_gone",
+		conflict(w, "invitation_gone",
 			"that invitation is no longer there, or the sign-up expired; sign in again")
 		return
 	case errors.Is(err, store.ErrNotFound):
 		signupGone(w)
 		return
 	case errors.Is(err, store.ErrEmailTaken):
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "already_signed_up",
+		conflict(w, "already_signed_up",
 			"this sign-in already has an account; sign in again to use it")
 		return
 	case err != nil:
@@ -160,9 +154,7 @@ func (s *Server) completeSignup(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, s.signupStateCookie("", -1))
 
-	if err := s.st.RecordDirectoryCheck(r.Context(), user.ExternalID, su.RefreshToken); err != nil {
-		s.log.Error("storing a refresh token", "user", user.ID, "error", err)
-	}
+	s.rememberDirectory(r, user, su.RefreshToken)
 	if in.Join {
 		// The row's role stands, unless the configuration makes them an
 		// operator.
@@ -171,22 +163,18 @@ func (s *Server) completeSignup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := s.startSession(w, r, user); err != nil {
-		s.fail(w, err)
-		return
-	}
-	actor := &authn.Principal{Via: authn.MethodSession, Email: user.Email, UserID: user.ID}
 	how := "joined"
 	if created != nil {
 		how = "created"
-		s.auditf(r, actor, created.ID, "org.create", "org", created.ID,
+		s.auditf(r, actorOf(user), created.ID, "org.create", "org", created.ID,
 			map[string]any{"name": created.Name, "via": "signup", "limited": created.Limited})
 		// Its models, copied from the template, are for the gateway to serve.
 		s.changed(r)
 	}
-	s.auditf(r, actor, user.OrgID, "auth.sign_in", "user", user.ID, map[string]any{
-		"role": user.Role, "via": "sso", "provider": su.Provider, "signup": how,
-	})
+	if !s.signedIn(w, r, user, "", false,
+		map[string]any{"via": "sso", "provider": su.Provider, "signup": how}) {
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"redirect": cmp.Or(su.RedirectTo, "/")})
 }
 

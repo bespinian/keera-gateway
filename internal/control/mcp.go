@@ -1,7 +1,6 @@
 package control
 
 import (
-	"errors"
 	"net/http"
 	"net/url"
 	"slices"
@@ -70,35 +69,25 @@ func (s *Server) putMCPServer(w http.ResponseWriter, r *http.Request, p *authn.P
 		badRequest(w, msg)
 		return
 	}
-	credential := ""
-	if body.APIKey != nil {
-		credential = strings.TrimSpace(*body.APIKey)
-	}
+	credential := trimmedCredential(body.APIKey)
 	existing, err := s.st.MCPServer(r.Context(), orgID, m.Alias)
-	found := err == nil
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		s.fail(w, err)
+	found, ok := s.replacing(w, err)
+	if !ok {
 		return
 	}
 	if found && existing.HasAPIKey && body.APIKey == nil && !sameOrigins([]string{existing.URL}, []string{m.URL}) {
 		badRequest(w, keyNotMoved("url"))
 		return
 	}
-	switch {
-	case body.Enabled != nil:
-		m.Enabled = *body.Enabled
-	case found:
-		m.Enabled = existing.Enabled
-	default:
-		m.Enabled = true
-	}
+	m.Enabled = enabledAfterPut(body.Enabled, found, existing.Enabled)
 	if err := s.st.UpsertMCPServer(r.Context(), m); err != nil {
 		s.fail(w, err)
 		return
 	}
 	s.auditf(r, p, orgID, "mcp_server.put", "mcp_server", m.Alias, m)
 	if body.APIKey != nil {
-		if err := s.setMCPCredential(r, p, orgID, m.Alias, credential); err != nil {
+		if err := s.setCredential(r, p, orgID, m.Alias, credential, "mcp_server",
+			registry.MCPSecretName, s.st.SetMCPCredential); err != nil {
 			s.fail(w, err)
 			return
 		}
@@ -147,12 +136,6 @@ func validHeaderName(s string) bool {
 		}
 	}
 	return s != ""
-}
-
-// setMCPCredential seals a pasted credential, or clears the stored one.
-func (s *Server) setMCPCredential(r *http.Request, p *authn.Principal, orgID, alias, credential string) error {
-	return s.setCredential(r, p, orgID, alias, credential, "mcp_server",
-		registry.MCPSecretName, s.st.SetMCPCredential)
 }
 
 // deleteMCPServer keeps a server that is still in use: a guardrail naming a

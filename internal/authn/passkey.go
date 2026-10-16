@@ -116,13 +116,7 @@ func (rp *RelyingParty) ID() string { return rp.id }
 func NewPasskeyChallenge() string { return auth.RandomToken() }
 
 // NewPasskeyLink mints the token of a set-up link and the hash stored for it.
-func NewPasskeyLink() (token string, hash []byte) {
-	token = auth.RandomToken()
-	return token, HashPasskeyLink(token)
-}
-
-// HashPasskeyLink returns the value stored in passkey_links.id for token.
-func HashPasskeyLink(token string) []byte { return sum256(token) }
+func NewPasskeyLink() (token string, hash []byte) { return newSecret("") }
 
 // credentialParam and credentialRef are the JSON forms of
 // PublicKeyCredentialParameters and PublicKeyCredentialDescriptor. Binary

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bespinian/keera-gateway/internal/auth"
 	"github.com/bespinian/keera-gateway/internal/authn"
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/store"
@@ -98,31 +99,7 @@ func loopbackRedirect(raw string) (string, error) {
 // validChallenge checks the shape of an S256 challenge: 32 bytes, base64url,
 // unpadded. It is not a security check, since the verifier is checked later
 // anyway. It just fails early, before the person goes to the browser.
-func validChallenge(s string) bool {
-	if len(s) != 43 {
-		return false
-	}
-	for _, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
-		default:
-			return false
-		}
-	}
-	return true
-}
-
-// handOverToCLI ends a command-line sign-in: it creates the one-time code and
-// sends the browser to the port the command line is waiting on.
-func (s *Server) handOverToCLI(w http.ResponseWriter, r *http.Request,
-	flow store.LoginFlow, user store.User) {
-	to, err := s.cliHandOver(r, flow, user)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	http.Redirect(w, r, to, http.StatusFound)
-}
+func validChallenge(s string) bool { return auth.Encoded32(s) }
 
 // cliHandOver creates the one-time code and returns the loopback address to
 // send the browser to with it.
@@ -159,7 +136,7 @@ func (s *Server) cliToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	code, err := s.st.TakeCLICode(r.Context(), authn.HashCLICode(in.Code))
+	code, err := s.st.TakeCLICode(r.Context(), auth.Hash(in.Code))
 	if err != nil {
 		// One message for expired, used and unknown codes, so a guesser
 		// cannot tell which codes were real.
@@ -222,7 +199,7 @@ func (s *Server) cliTokenTTL(r *http.Request, user store.User) (time.Duration, e
 
 // cliPrincipal resolves a command-line token sent as a bearer credential.
 func (s *Server) cliPrincipal(r *http.Request, token string) (*authn.Principal, error) {
-	hash := authn.HashCLIToken(token)
+	hash := auth.Hash(token)
 	tu, err := s.st.LookupCLIToken(r.Context(), hash)
 	if err != nil {
 		return nil, authn.ErrUnauthenticated
@@ -231,13 +208,6 @@ func (s *Server) cliPrincipal(r *http.Request, token string) (*authn.Principal, 
 	if !ok {
 		return nil, authn.ErrUnauthenticated
 	}
-	return &authn.Principal{
-		Via:    authn.MethodCLI,
-		UserID: user.ID,
-		Email:  user.Email,
-		Role:   authn.Role(user.Role),
-		OrgID:  user.OrgID,
-		// No CSRF token: a browser never sends this credential.
-		CredentialHash: hash,
-	}, nil
+	// No CSRF token: a browser never sends this credential.
+	return principalOf(authn.MethodCLI, user, hash), nil
 }

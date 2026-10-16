@@ -30,9 +30,8 @@ func (s *Server) createOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	if !readJSON(w, r, &in) {
 		return
 	}
-	name := strings.TrimSpace(in.Name)
-	if name == "" {
-		badRequest(w, "a non-empty 'name' is required")
+	name, ok := requiredName(w, in.Name)
+	if !ok {
 		return
 	}
 	domain, err := policy.CleanEmailDomain(in.EmailDomain)
@@ -90,13 +89,8 @@ func (s *Server) updateOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		badRequest(w, "send 'name', 'email_domain' or 'limited'; an empty 'email_domain' clears it")
 		return
 	}
-	if in.Name != nil {
-		name := strings.TrimSpace(*in.Name)
-		if name == "" {
-			badRequest(w, "'name' cannot be empty")
-			return
-		}
-		in.Name = &name
+	if !renamed(w, in.Name) {
+		return
 	}
 	if in.EmailDomain != nil {
 		domain, err := policy.CleanEmailDomain(*in.EmailDomain)
@@ -126,10 +120,10 @@ func (s *Server) updateOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 func (s *Server) failOrg(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrOrgNameTaken):
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "org_name_taken",
+		conflict(w, "org_name_taken",
 			"another organisation already has that name")
 	case errors.Is(err, store.ErrDomainTaken):
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "domain_taken",
+		conflict(w, "domain_taken",
 			"that email domain belongs to another organisation; "+
 				"one domain places sign-ins in one organisation, so it can only be set on one")
 	default:
@@ -153,7 +147,7 @@ func (s *Server) deleteOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	}
 	gone, err := s.st.DeleteOrg(r.Context(), orgID)
 	if errors.Is(err, store.ErrOrgHasSandboxes) {
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "org_has_sandboxes",
+		conflict(w, "org_has_sandboxes",
 			fmt.Sprintf("%s still has %d live sandbox(es); terminate them first "+
 				"(KEERA_ORG=%s keera sandbox list), so none keeps running after its "+
 				"organisation is gone", gone.Name, gone.LiveSandboxes, orgID))
@@ -175,6 +169,30 @@ func (s *Server) deleteOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	})
 }
 
+// requiredName trims the name of something new, and refuses one left empty.
+func requiredName(w http.ResponseWriter, name string) (string, bool) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		badRequest(w, "a non-empty 'name' is required")
+		return "", false
+	}
+	return name, true
+}
+
+// renamed trims the new name a change sends, and refuses one left empty. Nil
+// keeps the name.
+func renamed(w http.ResponseWriter, name *string) bool {
+	if name == nil {
+		return true
+	}
+	*name = strings.TrimSpace(*name)
+	if *name == "" {
+		badRequest(w, "'name' cannot be empty")
+		return false
+	}
+	return true
+}
+
 // ------------------------------------------------------------------- projects
 
 func (s *Server) createProject(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
@@ -186,13 +204,12 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request, p *authn.
 	if !readJSON(w, r, &in) {
 		return
 	}
-	name := strings.TrimSpace(in.Name)
-	if name == "" {
-		badRequest(w, "a non-empty 'name' is required")
+	name, ok := requiredName(w, in.Name)
+	if !ok {
 		return
 	}
-	orgID, ok := s.requireOrg(w, p, in.OrgID, orgRequired)
-	if !ok || !s.requireOrgAdmin(w, p, orgID) {
+	orgID, ok := s.orgToAdmin(w, p, in.OrgID)
+	if !ok {
 		return
 	}
 	project, err := s.st.CreateProject(r.Context(), store.Project{
@@ -268,13 +285,8 @@ func (s *Server) updateProject(w http.ResponseWriter, r *http.Request, p *authn.
 		badRequest(w, "send 'name', 'description' or both; an empty 'description' clears it")
 		return
 	}
-	if in.Name != nil {
-		name := strings.TrimSpace(*in.Name)
-		if name == "" {
-			badRequest(w, "'name' cannot be empty")
-			return
-		}
-		in.Name = &name
+	if !renamed(w, in.Name) {
+		return
 	}
 	if in.Description != nil {
 		description := strings.TrimSpace(*in.Description)
@@ -318,14 +330,14 @@ func (s *Server) firstProject(w http.ResponseWriter, r *http.Request, orgID stri
 // noProject refuses a key in an organisation with no projects. Every key is
 // in one, so there can be no keys until a project is created.
 func noProject(w http.ResponseWriter) {
-	httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "project_required",
+	conflict(w, "project_required",
 		"this organisation has no projects, and every key is in one; create a project first")
 }
 
 // projectNameTaken refuses a second project of one name. Two would make
 // every report that names a project ambiguous.
 func projectNameTaken(w http.ResponseWriter, name string) {
-	httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "project_name_taken",
+	conflict(w, "project_name_taken",
 		"another project in this organisation is already called '"+name+"'")
 }
 
@@ -341,7 +353,7 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request, p *authn.
 	}
 	gone, err := s.st.DeleteProject(r.Context(), projectID)
 	if inUse, ok := errors.AsType[*store.ProjectInUseError](err); ok {
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "project_has_keys",
+		conflict(w, "project_has_keys",
 			"revoke the keys of '"+inUse.Project+"' first: "+strings.Join(inUse.Keys, ", "))
 		return
 	}
@@ -380,8 +392,8 @@ func (s *Server) addUser(w http.ResponseWriter, r *http.Request, p *authn.Princi
 		badRequest(w, "'email' is required")
 		return
 	}
-	orgID, ok := s.requireOrg(w, p, in.OrgID, orgRequired)
-	if !ok || !s.requireOrgAdmin(w, p, orgID) {
+	orgID, ok := s.orgToAdmin(w, p, in.OrgID)
+	if !ok {
 		return
 	}
 	// A subject decides whose sign-in becomes this person. An organisation's
@@ -446,12 +458,12 @@ func (s *Server) addUser(w http.ResponseWriter, r *http.Request, p *authn.Princi
 	case errors.Is(err, store.ErrUserExists):
 		// Adding never changes someone who is already here: a role change has
 		// its own checks, and a subject is only ever set by a sign-in.
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "user_exists",
+		conflict(w, "user_exists",
 			email+" is already in this organisation; change their role with "+
 				"PATCH /control/v1/users/{id} or keera user role")
 		return
 	case errors.Is(err, store.ErrExternalIDTaken):
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "external_id_taken",
+		conflict(w, "external_id_taken",
 			"someone in this organisation already has that 'external_id'")
 		return
 	case err != nil:
@@ -507,12 +519,8 @@ func (s *Server) updateUser(w http.ResponseWriter, r *http.Request, p *authn.Pri
 		return
 	}
 	userID := r.PathValue("id")
-	target, err := s.st.UserByID(r.Context(), userID)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	if !s.requireOwnerAdmin(w, p, target.OrgID) {
+	target, ok := s.userToAdminister(w, r, p, userID)
+	if !ok {
 		return
 	}
 	if target.Role == string(authn.RoleOperator) {
@@ -597,17 +605,25 @@ func (s *Server) enableUser(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	})
 }
 
+// userToAdminister reads a person, and checks the caller administers their
+// organisation.
+func (s *Server) userToAdminister(w http.ResponseWriter, r *http.Request, p *authn.Principal,
+	userID string) (store.User, bool) {
+	target, err := s.st.UserByID(r.Context(), userID)
+	if err != nil {
+		s.fail(w, err)
+		return target, false
+	}
+	return target, s.requireOwnerAdmin(w, p, target.OrgID)
+}
+
 // userToSwitch reads the person a disable or an enable is for, and checks the
 // caller may do it.
 func (s *Server) userToSwitch(w http.ResponseWriter, r *http.Request, p *authn.Principal,
 	verb string,
 ) (store.User, bool) {
-	target, err := s.st.UserByID(r.Context(), r.PathValue("id"))
-	if err != nil {
-		s.fail(w, err)
-		return target, false
-	}
-	if !s.requireOwnerAdmin(w, p, target.OrgID) {
+	target, ok := s.userToAdminister(w, r, p, r.PathValue("id"))
+	if !ok {
 		return target, false
 	}
 	if target.ID == p.UserID {

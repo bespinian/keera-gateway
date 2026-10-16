@@ -357,7 +357,7 @@ func (s *Server) checkAllowList(w http.ResponseWriter, r *http.Request,
 // strandedRefusal refuses an allow-list that leaves filters or routers on a
 // model it does not include.
 func strandedRefusal(w http.ResponseWriter, code, what string, stranded []string) {
-	httpx.WriteError(w, http.StatusConflict, "invalid_request_error", code,
+	conflict(w, code,
 		"this allow-list leaves "+strings.Join(stranded, ", ")+" running on a model it does "+
 			"not include. A "+what+" reads a request before anything is redacted from it, so "+
 			"those requests would still go there in full - point the "+what+"s somewhere this "+

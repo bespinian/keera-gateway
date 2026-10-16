@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"strings"
 	"testing"
+
+	"github.com/bespinian/keera-gateway/internal/auth"
 )
 
 // The two sides of the handshake compute the challenge independently - the
@@ -42,7 +44,7 @@ func TestACommandLineTokenSaysWhatItIs(t *testing.T) {
 	if len(hash) != 32 {
 		t.Errorf("hash = %d bytes, want the 32 of a SHA-256", len(hash))
 	}
-	if string(HashCLIToken(token)) != string(hash) {
+	if string(auth.Hash(token)) != string(hash) {
 		t.Error("the stored hash is not the one a presented token resolves to")
 	}
 
@@ -56,7 +58,7 @@ func TestACommandLineTokenSaysWhatItIs(t *testing.T) {
 // stored the way every other credential here is: as a hash, never as itself.
 func TestAOneTimeCodeIsStoredAsAHash(t *testing.T) {
 	code, hash := NewCLICode()
-	if string(HashCLICode(code)) != string(hash) {
+	if string(auth.Hash(code)) != string(hash) {
 		t.Error("the stored hash is not the one a presented code resolves to")
 	}
 	if strings.Contains(string(hash), code) {

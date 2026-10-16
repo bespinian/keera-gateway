@@ -156,9 +156,8 @@ func (s *Server) resolveSandbox(w http.ResponseWriter, r *http.Request, p *authn
 		var named []store.Sandbox
 		if named, err = s.st.LiveSandboxesByName(r.Context(), orgID, ref); err == nil {
 			if sb, err = pickSandbox(p, named); errors.Is(err, errSandboxAmbiguous) {
-				httpx.WriteError(w, http.StatusConflict, "invalid_request_error",
-					"sandbox_ambiguous", fmt.Sprintf("more than one person has a live "+
-						"sandbox called %q; name it by its id (sbx_...)", ref))
+				conflict(w, "sandbox_ambiguous", fmt.Sprintf("more than one person has a "+
+					"live sandbox called %q; name it by its id (sbx_...)", ref))
 				return store.Sandbox{}, false
 			}
 		}
@@ -167,10 +166,9 @@ func (s *Server) resolveSandbox(w http.ResponseWriter, r *http.Request, p *authn
 		s.fail(w, err)
 		return store.Sandbox{}, false
 	}
-	if !p.CanReadOrg(sb.OrgID) {
-		// The same answer as a missing sandbox, so this route does not reveal
-		// other tenants' sandbox names.
-		s.fail(w, store.ErrNotFound)
+	// The same answer as a missing sandbox, so this route does not reveal
+	// other tenants' sandbox names.
+	if !s.requireOwnerRead(w, p, sb.OrgID) {
 		return store.Sandbox{}, false
 	}
 	return sb, true
@@ -332,13 +330,13 @@ func (s *Server) failSandbox(w http.ResponseWriter, err error) {
 	case isRefused && refused.Invalid:
 		badRequest(w, refused.Reason)
 	case isRefused:
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "sandbox_state",
+		conflict(w, "sandbox_state",
 			refused.Reason)
 	case errors.Is(err, sandbox.ErrNotFound):
 		httpx.WriteError(w, http.StatusNotFound, "invalid_request_error", "not_found",
 			"that sandbox is no longer there")
 	case errors.Is(err, sandbox.ErrNotReady):
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "sandbox_not_ready",
+		conflict(w, "sandbox_not_ready",
 			err.Error())
 	default:
 		s.fail(w, err)

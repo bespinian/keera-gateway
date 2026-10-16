@@ -19,39 +19,32 @@ import (
 //
 // A member sees only the sessions of their own keys, like the request log.
 
-// sessionQuery reads the narrowing every session report takes.
+// sessionQuery reads the narrowing every session report takes: the request
+// log's, plus a conversation key and a sort.
 func (s *Server) sessionQuery(w http.ResponseWriter, r *http.Request,
 	p *authn.Principal) (store.AgentSessionQuery, bool) {
-	var q store.AgentSessionQuery
-	holder, ok := s.trafficHolder(w, p, r.URL.Query().Get("user_id"))
+	rq, from, to, ok := s.requestQuery(w, r, p)
 	if !ok {
-		return q, false
-	}
-	orgID, from, to, ok := s.reportScope(w, r, p)
-	if !ok {
-		return q, false
-	}
-	sc, ok := s.entityScope(w, r, orgID)
-	if !ok {
-		return q, false
+		return store.AgentSessionQuery{}, false
 	}
 	v := r.URL.Query()
 	sort, ok := parseSort(w, v, store.SessionSorts())
 	if !ok {
-		return q, false
+		return store.AgentSessionQuery{}, false
 	}
-	q = store.AgentSessionQuery{
-		OrgID:       orgID,
-		ReportScope: sc,
-		Holder:      holder,
+	q := store.AgentSessionQuery{
+		OrgID:       rq.OrgID,
+		ReportScope: rq.ReportScope,
+		Holder:      rq.Holder,
 		Key:         v.Get("key"),
-		Outcome:     store.Outcome(v.Get("outcome")),
+		Outcome:     rq.Outcome,
+		Status:      rq.Status,
+		StatusClass: rq.StatusClass,
 		From:        from,
 		To:          to,
 		Gap:         s.opts.SessionGap,
 		Sort:        sort,
 	}
-	q.Status, q.StatusClass = parseStatus(v.Get("status"))
 	// Older keera commands ask for the sessions with problems this way.
 	if q.Outcome == store.OutcomeAny && httpx.Flag(v, "unhappy") {
 		q.Outcome = store.OutcomeUnhappy

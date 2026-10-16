@@ -26,10 +26,7 @@ const lastOrgCookie = "keera_org"
 const lastOrgMaxAge = 365 * 24 * 60 * 60
 
 func (s *Server) rememberOrg(orgID string) *http.Cookie {
-	return &http.Cookie{
-		Name: lastOrgCookie, Value: orgID, Path: "/", MaxAge: lastOrgMaxAge,
-		HttpOnly: true, Secure: s.opts.SecureCookies, SameSite: http.SameSiteLaxMode,
-	}
+	return s.cookie(lastOrgCookie, orgID, "/", lastOrgMaxAge, http.SameSiteLaxMode)
 }
 
 // lastOrg picks where a sign-in lands among the person's organisations: the
@@ -196,7 +193,7 @@ func (s *Server) switchOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	}
 	switch {
 	case errors.Is(err, store.ErrNotFound), errors.Is(err, store.ErrEmailTaken):
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "invitation_gone",
+		conflict(w, "invitation_gone",
 			"that invitation is no longer there")
 		return
 	case err != nil:

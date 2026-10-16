@@ -150,7 +150,6 @@ func (s *Server) requestStream(w http.ResponseWriter, r *http.Request, p *authn.
 	if !ok {
 		return
 	}
-	orgID := rq.OrgID
 	q := r.URL.Query()
 	rq.Limit = streamRows
 	rq.After, _ = strconv.ParseInt(q.Get("after"), 10, 64)
@@ -163,7 +162,7 @@ func (s *Server) requestStream(w http.ResponseWriter, r *http.Request, p *authn.
 		}
 		rq.After = latest
 	}
-	names, err := s.groupNames(ctx, orgID)
+	names, err := s.groupNames(ctx, rq.OrgID)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -171,13 +170,13 @@ func (s *Server) requestStream(w http.ResponseWriter, r *http.Request, p *authn.
 	// The window is not fixed here: a live row is inside every window, and a
 	// fixed end would stop the stream a second later. Only the counts use it,
 	// and they are recomputed against the clock each time.
-	s.streamRequests(ctx, w, &rq, &names, orgID, q.Get("since"))
+	s.streamRequests(ctx, w, &rq, &names, q.Get("since"))
 }
 
 // streamRequests writes the event stream until the reader leaves or the
 // server shuts down.
 func (s *Server) streamRequests(ctx context.Context, w http.ResponseWriter,
-	rq *store.RequestQuery, names *groupLabels, orgID, since string,
+	rq *store.RequestQuery, names *groupLabels, since string,
 ) {
 	// From here on the body has started, so a failure cannot be a status code.
 	// It ends the stream, and the browser reconnects.
@@ -195,7 +194,7 @@ func (s *Server) streamRequests(ctx context.Context, w http.ResponseWriter,
 	w.WriteHeader(http.StatusOK)
 	_ = rc.Flush()
 
-	ticks, stop := s.feed.watch(orgID)
+	ticks, stop := s.feed.watch(rq.OrgID)
 	defer stop()
 
 	poll := time.NewTicker(streamTick)
@@ -227,7 +226,7 @@ func (s *Server) streamRequests(ctx context.Context, w http.ResponseWriter,
 				continue
 			}
 			grown = false
-			if !s.sendRequests(ctx, w, rc, rq, cur, names, &tally, orgID, since) {
+			if !s.sendRequests(ctx, w, rc, rq, cur, names, &tally, since) {
 				return
 			}
 		}
@@ -314,14 +313,12 @@ type outcomeTally struct {
 // on.
 func (s *Server) sendRequests(ctx context.Context, w http.ResponseWriter,
 	rc *http.ResponseController, rq *store.RequestQuery, cur *liveCursor,
-	names *groupLabels, tally *outcomeTally, orgID, since string) bool {
+	names *groupLabels, tally *outcomeTally, since string) bool {
 	now := time.Now()
 	cur.settle(now)
 	rows, err := s.st.Requests(ctx, cur.query(*rq))
 	if err != nil {
-		if ctx.Err() == nil {
-			s.log.Warn("reading the live request log failed", "error", err)
-		}
+		s.warnUnlessDone(ctx, "reading the live request log failed", "error", err)
 		return false
 	}
 	if len(rows) == 0 {
@@ -331,9 +328,7 @@ func (s *Server) sendRequests(ctx context.Context, w http.ResponseWriter,
 
 	counts, err := s.countOutcomes(ctx, *rq, cur.settled, tally, since)
 	if err != nil {
-		if ctx.Err() == nil {
-			s.log.Warn("counting the live request log failed", "error", err)
-		}
+		s.warnUnlessDone(ctx, "counting the live request log failed", "error", err)
 		return false
 	}
 
@@ -344,7 +339,7 @@ func (s *Server) sendRequests(ctx context.Context, w http.ResponseWriter,
 	// name is not in the labels yet. So the labels are re-read, and sent, only
 	// when a row has an id they cannot name.
 	if unnamed(rows, *names) {
-		fresh, err := s.groupNames(ctx, orgID)
+		fresh, err := s.groupNames(ctx, rq.OrgID)
 		if err == nil {
 			*names = fresh
 			fresh.addTo(out)

@@ -36,13 +36,18 @@ func (s *Server) directoryOf(user store.User) *authn.OIDC {
 	return s.opts.Providers.ByName(name)
 }
 
-// rememberDirectory keeps the refresh token a sign-in returned. A failure is
-// logged, not shown: the sign-in itself worked.
-func (s *Server) rememberDirectory(r *http.Request, user store.User, refreshToken string) {
-	var sealed []byte
-	if refreshToken != "" {
-		sealed = s.opts.Secrets.Seal(refreshTokenName(user.ExternalID), refreshToken)
+// sealRefreshToken seals an identity's refresh token, or returns nil for
+// none, which keeps the one stored.
+func (s *Server) sealRefreshToken(externalID, refreshToken string) []byte {
+	if refreshToken == "" {
+		return nil
 	}
+	return s.opts.Secrets.Seal(refreshTokenName(externalID), refreshToken)
+}
+
+// rememberDirectory keeps the sealed refresh token a sign-in returned. A
+// failure is logged, not shown: the sign-in itself worked.
+func (s *Server) rememberDirectory(r *http.Request, user store.User, sealed []byte) {
 	if err := s.st.RecordDirectoryCheck(r.Context(), user.ExternalID, sealed); err != nil {
 		s.log.Error("storing a refresh token", "user", user.ID, "error", err)
 	}
@@ -87,7 +92,7 @@ func (s *Server) checkDirectory(r *http.Request, user store.User, d store.Direct
 	if err != nil {
 		return user, s.directoryFailed(r, user, err)
 	}
-	sealed = s.opts.Secrets.Seal(refreshTokenName(user.ExternalID), identity.RefreshToken)
+	sealed = s.sealRefreshToken(user.ExternalID, identity.RefreshToken)
 	if err := s.st.RecordDirectoryCheck(ctx, user.ExternalID, sealed); err != nil {
 		s.log.Error("storing a refreshed token", "user", user.ID, "error", err)
 	}
@@ -100,7 +105,7 @@ func (s *Server) checkDirectory(r *http.Request, user store.User, d store.Direct
 		return user, true
 	}
 	if user.Role != was {
-		s.auditf(r, &authn.Principal{Via: authn.MethodSession, Email: user.Email, UserID: user.ID},
+		s.auditf(r, actorOf(user),
 			user.OrgID, "auth.directory_check", "user", user.ID,
 			map[string]any{"role": user.Role, "role_was": was})
 	}
@@ -123,7 +128,7 @@ func (s *Server) directoryFailed(r *http.Request, user store.User, err error) bo
 	}
 	s.log.Info("the directory no longer vouches for someone; their sign-ins ended",
 		"user", user.ID, "reason", err)
-	s.auditf(r, &authn.Principal{Via: authn.MethodSession, Email: user.Email, UserID: user.ID},
+	s.auditf(r, actorOf(user),
 		user.OrgID, "auth.directory_check", "user", user.ID,
 		map[string]any{"signed_out": true})
 	return false

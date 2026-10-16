@@ -256,10 +256,10 @@ func parseSort(w http.ResponseWriter, v url.Values, offered []store.Sort) (store
 	return "", false
 }
 
-// requestQuery is what the request log and its stream share: whose requests
-// the caller may read, the organisation and entity narrowed to, and the
-// outcome and status filters. The window is returned apart, because the
-// stream has none. It returns false once it has answered with an error.
+// requestQuery is what the request log, its stream and the session reports
+// share: whose requests the caller may read, the organisation and entity
+// narrowed to, and the outcome and status filters. The window is returned
+// apart, because the stream has none. It returns false once it has answered with an error.
 func (s *Server) requestQuery(w http.ResponseWriter, r *http.Request, p *authn.Principal) (
 	rq store.RequestQuery, from, to time.Time, ok bool,
 ) {

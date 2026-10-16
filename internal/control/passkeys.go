@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/bespinian/keera-gateway/internal/auth"
 	"github.com/bespinian/keera-gateway/internal/authn"
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/id"
@@ -59,6 +60,24 @@ func (s *Server) passkeysOff(w http.ResponseWriter) bool {
 	httpx.WriteError(w, http.StatusNotImplemented, "invalid_request_error",
 		"passkeys_disabled", "passkeys are off on this gateway; set KEERA_PASSKEYS=true")
 	return true
+}
+
+// withPasskeys runs a route only on a gateway with passkeys on.
+func (s *Server) withPasskeys(next handler) handler {
+	return func(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
+		if !s.passkeysOff(w) {
+			next(w, r, p)
+		}
+	}
+}
+
+// withPasskeysSignedOut is withPasskeys for a route before sign-in.
+func (s *Server) withPasskeysSignedOut(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.passkeysOff(w) {
+			next(w, r)
+		}
+	}
 }
 
 // readPasskeyJSON reads the body of an unauthenticated passkey route. It must
@@ -118,9 +137,6 @@ func (s *Server) newPasskeyFlow(ctx context.Context, cli cliLogin, next string) 
 // passkeySignInOptions starts a passkey sign-in, or continues one that
 // /auth/login started for the command line.
 func (s *Server) passkeySignInOptions(w http.ResponseWriter, r *http.Request) {
-	if s.passkeysOff(w) {
-		return
-	}
 	var in struct {
 		Flow string `json:"flow"`
 		// Next is where the panel goes afterwards, as after single sign-on.
@@ -149,9 +165,6 @@ func (s *Server) passkeySignInOptions(w http.ResponseWriter, r *http.Request) {
 
 // passkeySignIn completes a passkey sign-in.
 func (s *Server) passkeySignIn(w http.ResponseWriter, r *http.Request) {
-	if s.passkeysOff(w) {
-		return
-	}
 	var in struct {
 		Flow       string          `json:"flow"`
 		Credential authn.Assertion `json:"credential"`
@@ -187,19 +200,10 @@ func (s *Server) passkeySignIn(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	if err := s.startSession(w, r, user); err != nil {
-		s.fail(w, err)
+	if !s.signedIn(w, r, user, was, flow.CLI(),
+		map[string]any{"via": "passkey", "passkey": key.Name}) {
 		return
 	}
-	entry := map[string]any{"role": user.Role, "via": "passkey", "passkey": key.Name}
-	if flow.CLI() {
-		entry["client"] = "command line"
-	}
-	if was != user.Role {
-		entry["role_was"] = was
-	}
-	s.auditf(r, &authn.Principal{Via: authn.MethodSession, Email: user.Email, UserID: user.ID},
-		user.OrgID, "auth.sign_in", "user", user.ID, entry)
 
 	// The panel goes where this answer says. For `keera login` that is the
 	// loopback port, as after single sign-on.
@@ -267,16 +271,13 @@ func credentialOf(p store.Passkey) authn.Credential {
 // passkeySetupOptions starts adding a passkey from a set-up link. Nobody is
 // signed in: the link is the credential.
 func (s *Server) passkeySetupOptions(w http.ResponseWriter, r *http.Request) {
-	if s.passkeysOff(w) {
-		return
-	}
 	var in struct {
 		Token string `json:"token"`
 	}
 	if !readPasskeyJSON(w, r, &in) {
 		return
 	}
-	user, err := s.st.PasskeyLinkUser(r.Context(), authn.HashPasskeyLink(in.Token))
+	user, err := s.st.PasskeyLinkUser(r.Context(), auth.Hash(in.Token))
 	if err != nil || !authn.IsPasskeyAccount(user.ExternalID) {
 		unauthorized(w, "invalid_link", passkeyLinkGone)
 		return
@@ -319,9 +320,6 @@ type registration struct {
 // passkeySetup completes a set-up link: it stores the passkey, uses up the
 // link and signs the person in.
 func (s *Server) passkeySetup(w http.ResponseWriter, r *http.Request) {
-	if s.passkeysOff(w) {
-		return
-	}
 	var in struct {
 		registration
 		Token string `json:"token"`
@@ -334,13 +332,13 @@ func (s *Server) passkeySetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := s.st.PasskeyByCredentialID(r.Context(), cred.ID); err == nil {
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "passkey_exists",
+		conflict(w, "passkey_exists",
 			"that passkey is already registered")
 		return
 	}
 	// The link is used up only now, so a cancelled prompt does not cost it.
 	if linkUser, err := s.st.TakePasskeyLink(r.Context(),
-		authn.HashPasskeyLink(in.Token)); err != nil || linkUser != userID {
+		auth.Hash(in.Token)); err != nil || linkUser != userID {
 		unauthorized(w, "invalid_link", passkeyLinkGone)
 		return
 	}
@@ -353,8 +351,7 @@ func (s *Server) passkeySetup(w http.ResponseWriter, r *http.Request) {
 		unauthorized(w, "invalid_link", passkeyLinkGone)
 		return
 	}
-	p := &authn.Principal{Via: authn.MethodSession, Email: user.Email, UserID: user.ID}
-	if _, ok := s.storePasskey(w, r, p, user, cred, in.Name, "set-up link"); !ok {
+	if _, ok := s.storePasskey(w, r, actorOf(user), user, cred, in.Name, "set-up link"); !ok {
 		return
 	}
 	if err := s.syncRole(r, &user, authn.RoleMember); err != nil {
@@ -403,7 +400,7 @@ func (s *Server) storePasskey(w http.ResponseWriter, r *http.Request, p *authn.P
 		SignCount: cred.SignCount,
 	})
 	if errors.Is(err, store.ErrPasskeyTaken) {
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "passkey_exists",
+		conflict(w, "passkey_exists",
 			"that passkey is already registered")
 		return key, false
 	}
@@ -453,9 +450,6 @@ func (s *Server) ownPasskeyAccount(w http.ResponseWriter, r *http.Request,
 // ownPasskeyOptions starts adding a passkey to the caller's own account, for
 // a second device.
 func (s *Server) ownPasskeyOptions(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if s.passkeysOff(w) {
-		return
-	}
 	if user, ok := s.ownPasskeyAccount(w, r, p); ok {
 		s.registrationOptions(w, r, user)
 	}
@@ -463,9 +457,6 @@ func (s *Server) ownPasskeyOptions(w http.ResponseWriter, r *http.Request, p *au
 
 // addOwnPasskey completes it.
 func (s *Server) addOwnPasskey(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if s.passkeysOff(w) {
-		return
-	}
 	var in registration
 	if !readJSON(w, r, &in) {
 		return
@@ -490,21 +481,13 @@ func (s *Server) addOwnPasskey(w http.ResponseWriter, r *http.Request, p *authn.
 // listPasskeys lists one person's passkeys: the caller's own, or with
 // ?user_id someone an administrator looks after.
 func (s *Server) listPasskeys(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if s.passkeysOff(w) {
-		return
-	}
 	userID := cmp.Or(r.URL.Query().Get("user_id"), p.UserID)
 	if userID == "" {
 		badRequest(w, "pass user_id: the operator key has no passkeys of its own")
 		return
 	}
 	if userID != p.UserID {
-		target, err := s.st.UserByID(r.Context(), userID)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		if !s.requireOwnerAdmin(w, p, target.OrgID) {
+		if _, ok := s.userToAdminister(w, r, p, userID); !ok {
 			return
 		}
 	}
@@ -521,9 +504,6 @@ func (s *Server) listPasskeys(w http.ResponseWriter, r *http.Request, p *authn.P
 // in their organisation; that also signs the person out, since whoever held
 // the passkey may be signed in with it.
 func (s *Server) deletePasskey(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if s.passkeysOff(w) {
-		return
-	}
 	key, err := s.st.PasskeyByID(r.Context(), r.PathValue("id"))
 	if err != nil {
 		s.fail(w, err)
@@ -540,7 +520,7 @@ func (s *Server) deletePasskey(w http.ResponseWriter, r *http.Request, p *authn.
 	}
 	err = s.st.DeletePasskey(r.Context(), key.ID, own)
 	if errors.Is(err, store.ErrLastPasskey) {
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "last_passkey",
+		conflict(w, "last_passkey",
 			"this is your only passkey; add another one first, or ask an "+
 				"administrator to remove it")
 		return
@@ -573,15 +553,8 @@ type passkeyLinkOut struct {
 // issuePasskeyLinkRoute hands out a set-up link for a person. It also turns a
 // person who has not signed in yet into a passkey account.
 func (s *Server) issuePasskeyLinkRoute(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	if s.passkeysOff(w) {
-		return
-	}
-	target, err := s.st.UserByID(r.Context(), r.PathValue("id"))
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	if !s.requireOwnerAdmin(w, p, target.OrgID) {
+	target, ok := s.userToAdminister(w, r, p, r.PathValue("id"))
+	if !ok {
 		return
 	}
 	if target.Role == string(authn.RoleOperator) {
@@ -590,16 +563,16 @@ func (s *Server) issuePasskeyLinkRoute(w http.ResponseWriter, r *http.Request, p
 		return
 	}
 	if target.Disabled() {
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "user_disabled",
+		conflict(w, "user_disabled",
 			target.Email+" is disabled; enable them first")
 		return
 	}
 	if !s.mayVouchFor(w, r, p, target.OrgID, target.Email) {
 		return
 	}
-	err = s.st.MakePasskeyAccount(r.Context(), target.ID, authn.PasskeyExternalID(target.ID))
+	err := s.st.MakePasskeyAccount(r.Context(), target.ID, authn.PasskeyExternalID(target.ID))
 	if errors.Is(err, store.ErrDirectoryAccount) {
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "directory_account",
+		conflict(w, "directory_account",
 			target.Email+" signs in through an identity provider, and a directory "+
 				"account does not get passkeys: leaving the directory has to lock them out")
 		return

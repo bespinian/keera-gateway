@@ -83,7 +83,7 @@ func (s *Server) access(w http.ResponseWriter, r *http.Request, p *authn.Princip
 		out["operator_key"] = true
 	}
 
-	orgName, _ := s.orgName(r.Context(), p.OrgID)
+	orgName := s.orgName(r.Context(), p.OrgID)
 	out["org"] = map[string]string{"id": p.OrgID, "name": orgName}
 
 	keys, err := s.st.KeySummaries(r.Context(), store.KeyQuery{

@@ -5,46 +5,39 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"slices"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/bespinian/keera-gateway/internal/authn"
-	"github.com/bespinian/keera-gateway/internal/catalog"
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/policy"
-	"github.com/bespinian/keera-gateway/internal/registry"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// requireScopeRead checks that the scope exists and that the caller may read
-// the tenant owning it. Another tenant's scope answers 404, not 403, so ids
+// guardrailScope reads the scope a guardrail route names, finds the
+// organisation and project above it, and checks that the caller may read it,
+// or with admin change it. Another tenant's scope answers 404, not 403, so ids
 // cannot be probed.
-func (s *Server) requireScopeRead(w http.ResponseWriter, r *http.Request,
-	p *authn.Principal, scope policy.ScopeType, scopeID string) bool {
-	owner, _, err := s.scopeChain(r.Context(), scope, scopeID)
-	if err != nil {
-		s.fail(w, err)
-		return false
-	}
-	if !p.CanReadOrg(owner) {
-		s.fail(w, store.ErrNotFound)
-		return false
-	}
-	return true
-}
-
-func (s *Server) policyScope(w http.ResponseWriter, r *http.Request) (policy.ScopeType, string, bool) {
-	scope := policy.ScopeType(r.PathValue("scope"))
+func (s *Server) guardrailScope(w http.ResponseWriter, r *http.Request, p *authn.Principal,
+	admin bool) (scope policy.ScopeType, scopeID, orgID, projectID string, ok bool) {
+	scope, scopeID = policy.ScopeType(r.PathValue("scope")), r.PathValue("id")
 	switch scope {
 	case policy.ScopeOrg, policy.ScopeProject, policy.ScopeKey:
 	default:
 		badRequest(w, "scope must be one of org, project, key")
-		return "", "", false
+		return
 	}
-	return scope, r.PathValue("id"), true
+	orgID, projectID, err := s.scopeChain(r.Context(), scope, scopeID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if admin {
+		ok = s.requireOwnerAdmin(w, p, orgID)
+	} else {
+		ok = s.requireOwnerRead(w, p, orgID)
+	}
+	return
 }
 
 // storedLimits reads one scope's guardrail. A scope with none has the empty
@@ -55,6 +48,18 @@ func (s *Server) storedLimits(ctx context.Context, scope policy.ScopeType, id st
 		return policy.Limits{}, nil
 	}
 	return lim, err
+}
+
+// chainLimits reads the organisation's guardrail and the project's. project is
+// nil when there is no project.
+func (s *Server) chainLimits(ctx context.Context, orgID, projectID string) (
+	org policy.Limits, project *policy.Limits, err error,
+) {
+	if org, err = s.storedLimits(ctx, policy.ScopeOrg, orgID); err != nil || projectID == "" {
+		return org, nil, err
+	}
+	lim, err := s.storedLimits(ctx, policy.ScopeProject, projectID)
+	return org, &lim, err
 }
 
 // checkAllowedRepos cleans up allowed_repos and checks who may change it.
@@ -119,8 +124,8 @@ func checkSystemPrompt(lim *policy.Limits) (size int, ok bool) {
 }
 
 func (s *Server) getGuardrails(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	scope, scopeID, ok := s.policyScope(w, r)
-	if !ok || !s.requireScopeRead(w, r, p, scope, scopeID) {
+	scope, scopeID, _, _, ok := s.guardrailScope(w, r, p, false)
+	if !ok {
 		return
 	}
 	lim, err := s.storedLimits(r.Context(), scope, scopeID)
@@ -164,11 +169,11 @@ type Effective struct {
 // effectiveGuardrails answers with the whole chain above a scope, combined the
 // way the gateway combines it.
 func (s *Server) effectiveGuardrails(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	scope, scopeID, ok := s.policyScope(w, r)
-	if !ok || !s.requireScopeRead(w, r, p, scope, scopeID) {
+	scope, scopeID, orgID, projectID, ok := s.guardrailScope(w, r, p, false)
+	if !ok {
 		return
 	}
-	out, err := s.effective(r.Context(), scope, scopeID)
+	out, err := s.effective(r.Context(), scope, scopeID, orgID, projectID)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -189,32 +194,22 @@ func (s *Server) scopeChain(ctx context.Context, scope policy.ScopeType, scopeID
 	case policy.ScopeProject:
 		orgID, err := s.st.ProjectOrg(ctx, scopeID)
 		return orgID, scopeID, err
-	default: // policy.ScopeKey; policyScope refuses any other.
+	default: // policy.ScopeKey; guardrailScope refuses any other.
 		o, err := s.st.KeyOwnerOf(ctx, scopeID)
 		return o.OrgID, o.ProjectID, err
 	}
 }
 
-// effective reads every level above a scope and combines them.
-func (s *Server) effective(ctx context.Context, scope policy.ScopeType, scopeID string) (Effective, error) {
-	orgID, projectID, err := s.scopeChain(ctx, scope, scopeID)
+// effective reads every level above a scope and combines them. orgID and
+// projectID are the scope's chain, from scopeChain.
+func (s *Server) effective(ctx context.Context, scope policy.ScopeType,
+	scopeID, orgID, projectID string) (Effective, error) {
+	org, project, err := s.chainLimits(ctx, orgID, projectID)
 	if err != nil {
 		return Effective{}, err
 	}
-	org, err := s.storedLimits(ctx, policy.ScopeOrg, orgID)
-	if err != nil {
-		return Effective{}, err
-	}
-	// The project level exists only when there is a project, and the key level only
-	// when a key was asked about.
-	var project, own *policy.Limits
-	if projectID != "" {
-		lim, err := s.storedLimits(ctx, policy.ScopeProject, projectID)
-		if err != nil {
-			return Effective{}, err
-		}
-		project = &lim
-	}
+	// The key level exists only when a key was asked about.
+	var own *policy.Limits
 	key := policy.Key{OrgID: orgID, ProjectID: projectID}
 	if scope == policy.ScopeKey {
 		lim, err := s.storedLimits(ctx, policy.ScopeKey, scopeID)
@@ -257,24 +252,13 @@ func (s *Server) effective(ctx context.Context, scope policy.ScopeType, scopeID 
 func (s *Server) effectiveLevel(ctx context.Context, t policy.ScopeType, id string,
 	lim policy.Limits,
 ) EffectiveLevel {
-	name, err := s.st.ScopeName(ctx, t, id)
-	if err != nil {
-		name = ""
-	}
+	name, _ := s.st.ScopeName(ctx, t, id)
 	return EffectiveLevel{Type: t, ID: id, Name: name, Limits: lim}
 }
 
 func (s *Server) putGuardrails(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	scope, scopeID, ok := s.policyScope(w, r)
+	scope, scopeID, owner, _, ok := s.guardrailScope(w, r, p, true)
 	if !ok {
-		return
-	}
-	owner, _, err := s.scopeChain(r.Context(), scope, scopeID)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	if !s.requireOwnerAdmin(w, p, owner) {
 		return
 	}
 
@@ -327,462 +311,4 @@ func (s *Server) putGuardrails(w http.ResponseWriter, r *http.Request, p *authn.
 	s.auditf(r, p, owner, "guardrail.put", string(scope), scopeID, lim)
 	s.changed(r)
 	httpx.WriteJSON(w, http.StatusOK, lim)
-}
-
-// -------------------------------------------------------------------- models
-
-// listModels is readable by anyone signed in: a developer needs to know which
-// models exist and their limits.
-//
-// Backend URLs and whether a key is stored are for the organisation's
-// administrators.
-func (s *Server) listModels(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	orgID, ok := s.queryOrg(w, r, p)
-	if !ok {
-		return
-	}
-	models, err := s.st.ListModels(r.Context(), orgID)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	admin := p.CanAdminOrg(orgID)
-	for i := range models {
-		s.markPlatform(&models[i])
-		if !admin {
-			models[i].Backends = nil
-			models[i].HasAPIKey = false
-		}
-		// Already left out of JSON by its tag; cleared as well to be safe.
-		models[i].APIKeyCiphertext = nil
-	}
-	s.writeHookList(w, r, models, func(from, to time.Time) (any, error) {
-		return s.st.ModelStats(r.Context(), orgID, from, to)
-	})
-}
-
-// markPlatform shows a model on the deployment's key as the gateway sends
-// it: to the provider's endpoint, at its list prices. The row may predate the
-// key.
-func (s *Server) markPlatform(m *policy.Model) {
-	if !s.opts.Platform.Covers(*m) {
-		return
-	}
-	// Its own key is never sent, either way. A model the price table does not
-	// know is not on the deployment's key either: the registry sends it
-	// without a key, and logs why.
-	m.HasAPIKey = false
-	_ = s.opts.Platform.Lock(m)
-}
-
-// listProviders serves the hosted providers this binary knows, so adding a
-// hosted model in the panel needs only a model id. It is the same table the
-// catalogue file is read against.
-//
-// Anyone signed in may read it, for the panel's model catalogue. Only someone who
-// can add a model sees where a provider is reached: the form fills it in.
-func (s *Server) listProviders(w http.ResponseWriter, _ *http.Request, p *authn.Principal) {
-	type entry struct {
-		catalog.Provider
-		// PlatformKey says the deployment holds the key, so a model of this
-		// provider takes none.
-		PlatformKey bool `json:"platform_key,omitempty"`
-	}
-	admin := p.CanAdminOrg(p.OrgID)
-	var out []entry
-	for _, prov := range catalog.Providers() {
-		if !admin {
-			prov.Endpoint = ""
-		}
-		out = append(out, entry{Provider: prov, PlatformKey: s.opts.Platform.Has(prov.Name)})
-	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"data": out})
-}
-
-func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	orgID, ok := s.adminOrg(w, r, p)
-	if !ok {
-		return
-	}
-	// The credential is write-only, so it is part of the request and not of
-	// the model. Nil leaves the stored one alone.
-	var body struct {
-		policy.Model
-		APIKey *string `json:"api_key"`
-		// Enabled nil means not said: a new model starts enabled, and an
-		// existing one keeps what it was.
-		Enabled *bool `json:"enabled"`
-		// The two prices shadow the model's, so a price left out can be told
-		// from one set to 0.
-		InputMicrosPerMTok  *int64 `json:"input_micros_per_mtok"`
-		OutputMicrosPerMTok *int64 `json:"output_micros_per_mtok"`
-	}
-	if !readJSON(w, r, &body) {
-		return
-	}
-	m := body.Model
-	priced := body.InputMicrosPerMTok != nil && body.OutputMicrosPerMTok != nil
-	if body.InputMicrosPerMTok != nil {
-		m.InputMicrosPerMTok = *body.InputMicrosPerMTok
-	}
-	if body.OutputMicrosPerMTok != nil {
-		m.OutputMicrosPerMTok = *body.OutputMicrosPerMTok
-	}
-	m.Alias = r.PathValue("alias")
-	m.OrgID = orgID
-	if !policy.ValidModelAlias(m.Alias) {
-		badRequest(w, "'"+m.Alias+"' is not a usable alias; use lowercase letters, digits, "+
-			"inner hyphens and slashes, such as 'anthropic/claude-sonnet-4-5'")
-		return
-	}
-	credential := ""
-	if body.APIKey != nil {
-		credential = strings.TrimSpace(*body.APIKey)
-	}
-	// Locked before the other checks, because it sets the backend they check.
-	m.Provider = strings.ToLower(strings.TrimSpace(m.Provider))
-	platform := s.opts.Platform.Covers(m)
-	if platform {
-		if credential != "" {
-			badRequest(w, "this deployment holds the key for "+m.Provider+", so its models "+
-				"take no API key")
-			return
-		}
-		if err := s.opts.Platform.Lock(&m); err != nil {
-			badRequest(w, err.Error())
-			return
-		}
-		priced = true
-	}
-	if msg := normalizeModel(&m, priced); msg != "" {
-		badRequest(w, msg)
-		return
-	}
-	if m.Subscription && !s.opts.ClaudeSubscriptions {
-		badRequest(w, subscriptionsOff)
-		return
-	}
-	if m.Subscription && credential != "" {
-		badRequest(w, "a subscription model is sent each caller's own Claude sign-in, so it "+
-			"takes no API key")
-		return
-	}
-	if !s.checkModelAlias(w, r, orgID, m.Alias) {
-		return
-	}
-	if m.Subscription && !s.checkSubscriptionUsers(w, r, orgID, m.Alias) {
-		return
-	}
-	existing, err := s.st.Model(r.Context(), orgID, m.Alias)
-	found := err == nil
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		s.fail(w, err)
-		return
-	}
-	if !platform && found && existing.HasAPIKey && body.APIKey == nil &&
-		!sameOrigins(existing.Backends, m.Backends) {
-		badRequest(w, keyNotMoved("backends"))
-		return
-	}
-	switch {
-	case body.Enabled != nil:
-		m.Enabled = *body.Enabled
-	case found:
-		m.Enabled = existing.Enabled
-	default:
-		m.Enabled = true
-	}
-	if err := s.st.UpsertModel(r.Context(), m); err != nil {
-		s.fail(w, err)
-		return
-	}
-	// The model marshals without its credential.
-	s.auditf(r, p, orgID, "model.put", "model", m.Alias, m)
-
-	// Done here rather than in a client, so the panel, 'keera model add' and
-	// 'keera model apply' all leave a new model usable.
-	if !found {
-		allowed, err := s.st.AllowInOrg(r.Context(), orgID, m.Alias)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-		if allowed {
-			s.auditf(r, p, orgID, "guardrail.allow_model", string(policy.ScopeOrg), orgID, m.Alias)
-		}
-	}
-
-	// A model on the deployment's key keeps no key of its own: it would never
-	// be used, and would be sent to wherever the model points if the
-	// deployment's key were taken away.
-	if body.APIKey != nil || (platform && found && existing.HasAPIKey) {
-		if err := s.setModelCredential(r, p, orgID, m.Alias, credential); err != nil {
-			s.fail(w, err)
-			return
-		}
-	}
-	s.changed(r)
-	// Read back, so has_api_key says what is stored and not what this body
-	// happened to mention.
-	stored, err := s.st.Model(r.Context(), orgID, m.Alias)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.markPlatform(&stored)
-	// A model turned into a subscription model keeps no key it will never use.
-	if stored.Subscription && stored.HasAPIKey {
-		if err := s.setModelCredential(r, p, orgID, m.Alias, ""); err != nil {
-			s.fail(w, err)
-			return
-		}
-		s.changed(r)
-		stored.HasAPIKey = false
-	}
-	httpx.WriteJSON(w, http.StatusOK, stored)
-}
-
-// sameOrigins reports whether every address in next is on a host one in prev
-// already was. A stored credential is only ever sent to the hosts it was
-// stored for, so whoever moves a model or a server elsewhere has to give it
-// again: an administrator could otherwise send a key someone else entered to
-// a host of their own.
-func sameOrigins(prev, next []string) bool {
-	origin := func(raw string) string {
-		u, err := url.Parse(strings.TrimSpace(raw))
-		if err != nil {
-			return ""
-		}
-		return strings.ToLower(u.Scheme + "://" + u.Host)
-	}
-	known := map[string]bool{}
-	for _, b := range prev {
-		known[origin(b)] = true
-	}
-	for _, b := range next {
-		if o := origin(b); o == "" || !known[o] {
-			return false
-		}
-	}
-	return true
-}
-
-// keyNotMoved refuses a change that would send the stored credential to a new
-// host.
-func keyNotMoved(field string) string {
-	return "'" + field + "' now names a host the stored API key was never sent to; " +
-		"give 'api_key' again, or \"\" to remove it"
-}
-
-// badAlias refuses an alias that is not one. An alias goes into URLs, command
-// lines and client configurations, which quote none of it.
-func badAlias(alias string) string {
-	return "'" + alias + "' is not a usable alias; use lowercase letters, digits and inner hyphens"
-}
-
-// normalizeModel fills in a model's defaults and says what is wrong with it,
-// or "" when nothing is. Priced says the caller stated both prices.
-func normalizeModel(m *policy.Model, priced bool) string {
-	if err := m.CheckBackend(); err != nil {
-		return err.Error()
-	}
-	if m.Kind == "" {
-		m.Kind = policy.KindChat
-	}
-	if !m.Kind.Valid() {
-		return "'kind' must be chat, completion, embedding or decision"
-	}
-	// The provider must be one this build knows, because the gateway reads
-	// it to choose how to talk to the backend. Its defaults are not applied
-	// here: the caller sends every value, and may have changed any of them.
-	// What it can serve and bill is checked as for a catalogue file.
-	m.Provider = strings.ToLower(strings.TrimSpace(m.Provider))
-	provider, known := catalog.ProviderByName(m.Provider)
-	if m.Provider != "" && !known {
-		return "unknown provider " + strconv.Quote(m.Provider) + "; Keera Gateway knows: " +
-			catalog.ProviderNames()
-	}
-	if known {
-		if err := provider.Check(m.Kind, m.BackendModel, priced); err != nil {
-			return err.Error()
-		}
-	}
-	// Every model runs somewhere, so an unstated location is the provider's,
-	// or read off the backend, as for a catalogue file.
-	m.Location = strings.ToLower(strings.TrimSpace(m.Location))
-	switch {
-	case m.Location == "" && known:
-		m.Location = provider.Location
-	case m.Location == "":
-		loc, err := m.LocationFromBackends()
-		if err != nil {
-			return err.Error()
-		}
-		m.Location = loc
-	}
-	m.ReleaseDate = strings.TrimSpace(m.ReleaseDate)
-	m.DisplayName = strings.TrimSpace(m.DisplayName)
-	switch {
-	case !policy.ValidLocation(m.Location):
-		return "'location' must be a short lowercase name, such as ch, usa or onprem"
-	case m.ReleaseDate != "" && !policy.ValidReleaseDate(m.ReleaseDate):
-		return "'release_date' must be a day written as YYYY-MM-DD"
-	}
-	if m.LongPrompt != nil {
-		if err := m.LongPrompt.Check(); err != nil {
-			return err.Error()
-		}
-	}
-	if err := catalog.CheckSubscription(*m); err != nil {
-		return err.Error()
-	}
-	return ""
-}
-
-// checkModelAlias refuses a new model named like one of the organisation's
-// routers. A model is looked up first, so the router would become
-// unreachable.
-func (s *Server) checkModelAlias(w http.ResponseWriter, r *http.Request, orgID, alias string) bool {
-	switch _, err := s.st.Model(r.Context(), orgID, alias); {
-	case err == nil:
-		return true // an edit
-	case !errors.Is(err, store.ErrNotFound):
-		s.fail(w, err)
-		return false
-	}
-	_, err := s.st.Router(r.Context(), orgID, alias)
-	return !s.aliasTaken(w, err, "'"+alias+"' is already one of this organisation's routers, "+
-		"which a model of the same alias would make unreachable - give this model a "+
-		"different alias")
-}
-
-// checkSubscriptionUsers refuses to make a model a subscription model while a
-// filter or router uses it. Only Claude Code signed in to a Claude plan
-// reaches such a model, so they would fail on every request. It is the other
-// half of the subscription checks in checkReaderModel and
-// checkDestinations, since the writes can come in either order.
-func (s *Server) checkSubscriptionUsers(w http.ResponseWriter, r *http.Request,
-	orgID, alias string) bool {
-	filters, err := s.st.ListFilters(r.Context(), orgID)
-	if err != nil {
-		s.fail(w, err)
-		return false
-	}
-	var users []string
-	for _, f := range filters {
-		if f.UsesModel() && f.Model == alias {
-			users = append(users, "filter '"+f.Alias+"'")
-		}
-	}
-	routers, err := s.st.ListRouters(r.Context(), orgID)
-	if err != nil {
-		s.fail(w, err)
-		return false
-	}
-	for _, rt := range routers {
-		switch {
-		case rt.Decides() && rt.Model == alias:
-			users = append(users, "router '"+rt.Alias+"' (deciding model)")
-		case rt.Offers(alias):
-			users = append(users, "router '"+rt.Alias+"' (destination)")
-		}
-	}
-	if len(users) == 0 {
-		return true
-	}
-	httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "model_in_use",
-		"'"+alias+"' is used by "+strings.Join(users, ", ")+". A subscription model is "+
-			"reached only by Claude Code signed in to a Claude plan, so they would fail - "+
-			"point them at another model first")
-	return false
-}
-
-// aliasTaken refuses an alias that another kind of thing already has, and
-// reports whether it did. err is what looking that thing up returned.
-func (s *Server) aliasTaken(w http.ResponseWriter, err error, msg string) bool {
-	switch {
-	case err == nil:
-		httpx.WriteError(w, http.StatusConflict, "invalid_request_error", "alias_in_use", msg)
-		return true
-	case !errors.Is(err, store.ErrNotFound):
-		s.fail(w, err)
-		return true
-	}
-	return false
-}
-
-// setModelCredential seals a pasted credential, or clears the stored one when
-// the field was emptied.
-func (s *Server) setModelCredential(r *http.Request, p *authn.Principal,
-	orgID, alias, credential string,
-) error {
-	return s.setCredential(r, p, orgID, alias, credential, "model",
-		registry.ModelSecretName, s.st.SetModelCredential)
-}
-
-// setCredential seals a credential for the thing of kind named by alias, or
-// clears it when credential is empty. name is the row's secret name, set the
-// store's setter.
-func (s *Server) setCredential(r *http.Request, p *authn.Principal,
-	orgID, alias, credential, kind string,
-	name func(orgID, alias string) string,
-	set func(ctx context.Context, orgID, alias string, sealed []byte) error,
-) error {
-	var sealed []byte
-	if credential != "" {
-		sealed = s.opts.Secrets.Seal(name(orgID, alias), credential)
-	}
-	if err := set(r.Context(), orgID, alias, sealed); err != nil {
-		return err
-	}
-	action := kind + ".credential.set"
-	if credential == "" {
-		action = kind + ".credential.clear"
-	}
-	// Nothing about the credential goes into the audit log, not even its
-	// length. Who set it and when is the record.
-	s.auditf(r, p, orgID, action, kind, alias, nil)
-	return nil
-}
-
-// checkModel tests one model against its own backends. It is for the
-// organisation's administrators, because it reveals where the model runs and
-// puts load on it.
-//
-// It offers the model a tool and a question only that tool can answer, so a
-// vLLM tool-call parser that does not match the model shows up here.
-func (s *Server) checkModel(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	orgID, ok := s.adminOrg(w, r, p)
-	if !ok {
-		return
-	}
-	alias := r.PathValue("alias")
-	// The registry, not the store: it holds the decrypted credential the data
-	// plane would present.
-	m, found := s.reg.Model(orgID, alias)
-	if !found {
-		s.fail(w, store.ErrNotFound)
-		return
-	}
-	probe := s.opts.Gateway.CheckModel(r.Context(), m)
-	// Kept, so an operator can later show when a model last worked.
-	s.auditf(r, p, orgID, "model.check", "model", alias, map[string]any{
-		"ok": probe.OK, "status": probe.Status, "tool_calls": probe.ToolCalls,
-		"tool_call_as_text": probe.ToolCallAsText, "tools_off": probe.ToolsOff,
-		"error": probe.Error,
-	})
-	httpx.WriteJSON(w, http.StatusOK, probe)
-}
-
-func (s *Server) deleteModel(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	orgID, ok := s.adminOrg(w, r, p)
-	if !ok {
-		return
-	}
-	alias := r.PathValue("alias")
-	if err := s.st.DeleteModel(r.Context(), orgID, alias); err != nil {
-		s.fail(w, err)
-		return
-	}
-	s.deleted(w, r, p, orgID, "model", alias)
 }
