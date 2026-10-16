@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/store"
@@ -366,5 +367,17 @@ func TestPatternCacheKeepsOneEntryPerFilter(t *testing.T) {
 	cache.m.Range(func(any, any) bool { n++; return true })
 	if n != 1 {
 		t.Errorf("the cache holds %d entries for one filter edited three times, want 1", n)
+	}
+}
+
+func TestQuoteRuleCutsBetweenCharacters(t *testing.T) {
+	// 56 bytes, then a two-byte character across the 57-byte cut.
+	rule := strings.Repeat("a", 56) + "ü" + strings.Repeat("b", 10)
+	got := quoteRule(rule)
+	if !utf8.ValidString(got) {
+		t.Fatalf("quoteRule(%q) = %q, not valid UTF-8", rule, got)
+	}
+	if want := "'" + strings.Repeat("a", 56) + "…'"; got != want {
+		t.Fatalf("quoteRule = %q, want %q", got, want)
 	}
 }

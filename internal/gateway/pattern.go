@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
@@ -164,7 +165,11 @@ func patternCheckWarnings(out []string, hits []patternHit, codeHits []patternHit
 // quoteRule renders an expression for a sentence somebody reads.
 func quoteRule(s string) string {
 	if len(s) > 60 {
-		return "'" + s[:57] + "…'"
+		cut := 57
+		for !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		return "'" + s[:cut] + "…'"
 	}
 	return "'" + s + "'"
 }
