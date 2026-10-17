@@ -275,7 +275,7 @@ this.
 | ------------------------------------------------------------------------- | ------ |
 | the guardrail names a filter that no longer exists                        | 503    |
 | its model [cannot run](gateway.md#models-that-filters-and-routers-run-on) | 503    |
-| its model was reached but the answer was unusable, or it errored          | 502    |
+| its model could not be reached, timed out, errored, or answered unusably  | 502    |
 | a gate answered neither `ALLOW` nor `REFUSED`, in word or in token        | 502    |
 | the conversation will not fit through its model's context                 | 413    |
 | a pattern filter's rules will not compile                                 | 502    |

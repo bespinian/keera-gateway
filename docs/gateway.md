@@ -392,8 +392,9 @@ audit log as `auth.switch_org`, in the organisation switched to.
 5. **Filters**, outermost level first: each may rewrite the request or refuse it,
    with a model and an instruction or with a list of expressions.
 6. Prepend the standing system prompt (chat requests only; a completion has no
-   place for one), take out hosted tools if the model is on the deployment's
-   key ([billing.md](billing.md)), and clamp the output ceiling.
+   place for one), take out hosted tools if any model the request may reach is
+   on the deployment's key ([billing.md](billing.md)), and clamp the output
+   ceiling.
    For a subscription model the prompt goes after Claude Code's own system
    blocks instead; see [subscriptions.md](subscriptions.md#what-is-sent-to-anthropic).
 7. Forward, stream the answer back, and record what it cost.

@@ -23,7 +23,7 @@ sandbox base image.
 | `internal/cli`       | The `keera` command: every subcommand and its help.        |
 | `internal/gateway`   | Inference data plane: guardrails, streaming, accounting.   |
 | `internal/control`   | Control plane: tenancy, guardrails, reports, audit.        |
-| `internal/authn`     | Roles, permissions and the OpenID Connect flow.            |
+| `internal/authn`     | Roles, permissions, OpenID Connect, passkeys, CLI sign-in. |
 | `internal/auth`      | API key hashing and verification.                          |
 | `internal/webui`     | The control panel, embedded in the server binary.          |
 | `internal/policy`    | The tenancy model and how limits combine.                  |

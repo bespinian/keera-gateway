@@ -569,6 +569,11 @@ The split is the main figure. Each request has one of three outcomes:
 | `fallback` | it could not decide            | a later destination answered   | a lower-ranked destination answered   |
 | `error`    | it could not place the request | every destination failed       | every destination failed              |
 
+A client that hangs up before any destination answers is also `error`: no
+destination answered, so `chose` would claim a success. The destination is not
+marked as failing for it, so a latency or least-busy router still ranks it as
+before.
+
 Outside an instruction router, `fallback` means the ranking was wrong. On a
 latency or least-busy router a few percent is re-probing at work; a quarter
 means a destination is failing while measuring well.

@@ -123,8 +123,9 @@ notices, the release archives, and air's binary and log from `make dev`.
 it.
 
 Run `go mod vendor` after cloning and whenever `go.mod` changes; every Go
-command, `make image` included, builds from `vendor/`. `make image` writes it
-when it is missing, but does not refresh an old one. The Nix build
+command, `make image` included, builds from `vendor/`. When it is missing,
+`make image` runs `go mod vendor` inside the image build, which needs network
+access and leaves your own `vendor/` missing. It does not refresh an old one. The Nix build
 checks the modules against `vendorHash` in `flake.nix`: when `go.mod` changes,
 set it to `pkgs.lib.fakeHash`, build, and copy the hash Nix prints.
 

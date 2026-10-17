@@ -180,7 +180,8 @@ never sees them, and the allow-list above does not apply to them.
 On a model with the organisation's own key, they are passed on as sent. On a
 model with the deployment's own provider key ([billing.md](billing.md)), they
 are removed from every request before it is forwarded, including Anthropic's
-`mcp_servers` and OpenAI's `web_search_options`. The provider charges for them
+`mcp_servers` and OpenAI's `web_search_options`. Through a router, that happens
+when any model the request may reach is on the deployment's key. The provider charges for them
 on top of tokens, and Keera does not bill that.
 
 Tools the client runs itself are kept: its own functions and namespaces of

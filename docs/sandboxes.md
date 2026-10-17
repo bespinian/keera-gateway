@@ -24,21 +24,22 @@ it names its own session instead of leaving the gateway to infer it
 
 ## Two lifecycles, one substrate
 
-|                  | Engineer                                               | Agent                              |
-| ---------------- | ------------------------------------------------------ | ---------------------------------- |
-| Default lifetime | the class's; 4h if it sets none                        | the class's; 4h if it sets none    |
-| When it expires  | suspended, key revoked, resumable                      | terminated                         |
-| When it is idle  | suspended if `KEERA_SANDBOX_IDLE_SUSPEND` is set       | never - it has nothing to wait for |
-| Session header   | not set                                                | `X-Keera-Session: <sandbox id>`    |
-| Attaching        | ssh, from its owner or an operator                     | nothing attaches                   |
-| How work leaves  | the developer pushes                                   | a branch, pushed by the agent      |
+|                  | Engineer                                         | Agent                              |
+| ---------------- | ------------------------------------------------ | ---------------------------------- |
+| Default lifetime | the class's; 4h if it sets none                  | the class's; 4h if it sets none    |
+| When it expires  | suspended, key revoked, resumable                | terminated                         |
+| When it is idle  | suspended if `KEERA_SANDBOX_IDLE_SUSPEND` is set | never - it has nothing to wait for |
+| Session header   | not set                                          | `X-Keera-Session: <sandbox id>`    |
+| Attaching        | ssh, from its owner or an operator               | nothing attaches                   |
+| How work leaves  | the developer pushes                             | a branch, pushed by the agent      |
 
 An agent sandbox's work is already pushed as a branch, so nothing in it is worth
 keeping. An engineer's sandbox holds unfinished work, so it is kept.
 
 **An expired engineer sandbox keeps its volume and loses its access.** Its key
 and repository credential are revoked. It still counts towards the quota and
-keeps its name, because its volume still takes up space. `keera sandbox resume`
+keeps its name, because its volume still takes up space. On Kubernetes, only a
+class with a `disk` has one; without it, the files are gone. `keera sandbox resume`
 brings it back with a new key, a new repository credential and the class's
 default lifetime, under the guardrails as they are now. The same ssh keys let
 you in. To change its lifetime, `extend` it after `resume`; `extend` does not
@@ -281,7 +282,8 @@ keera guardrail set project <project-id> \
 `--max-sandbox-memory` is in MiB, so 32768 is 32 GiB.
 
 `--max-sandboxes` counts every live sandbox: starting, running, suspended,
-expired, and an engineer's that failed. The last two still hold a volume.
+expired, and an engineer's that failed. The last two still hold a volume, if
+their class has a disk.
 
 A size ceiling **refuses** a request; it does not quietly downgrade it. A scope
 capped at four cores that asks for an eight-core class gets an error, not a

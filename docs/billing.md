@@ -57,6 +57,9 @@ none.
   OpenAI account, so a Responses request must carry the whole conversation
   ([Three request shapes](gateway.md#three-request-shapes)).
 
+Through a router, these apply when any model the request may reach is on the
+deployment's key, whichever one answers it.
+
 A subscription model is not affected: each person's own Claude plan pays for it
 ([subscriptions.md](subscriptions.md)). Self-hosted models are not affected
 either.
@@ -149,8 +152,8 @@ KEERA_BILLING_VAT=8.1                   # optional
 
 Payments also need at least one `KEERA_PROVIDER_<NAME>_API_KEY`, and
 `KEERA_PUBLIC_URL` set to an `https` address: PostFinance sends people back
-there after they pay. On your own machine, `http://localhost` and any
-`*.localhost` name work too.
+there after they pay. On your own machine, `http://localhost`, any
+`*.localhost` name and a loopback address such as `http://127.0.0.1` work too.
 
 A setting that cannot work stops the start: only some of the three
 `KEERA_POSTFINANCE_*` settings, `KEERA_POSTFINANCE_URL` or `KEERA_BILLING_VAT`

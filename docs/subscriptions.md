@@ -214,15 +214,19 @@ for the rest.
 
 ## Errors
 
-| Status | Says                                                 | Means                                                               |
-| ------ | ---------------------------------------------------- | ------------------------------------------------------------------- |
-| 401    | carries a Claude sign-in but no Keera key            | Run `keera login`, then `keera connect claude-code --subscription`. |
-| 401    | this is a subscription key                           | The key went in `Authorization`. It belongs in `X-Keera-Key`.       |
-| 401    | carries no Claude sign-in (`missing_claude_sign_in`) | Run `/login` in Claude Code, and unset `ANTHROPIC_AUTH_TOKEN`.      |
-| 403    | `subscriptions_off`                                  | The operator has not set `KEERA_CLAUDE_SUBSCRIPTIONS=true`.         |
-| 400    | `subscription_model`                                 | Only the Messages API reaches a subscription model.                 |
-| 404    | `model_not_found`                                    | A subscription key named an organisation model, or the reverse.     |
-| 404    | `model_not_found`                                    | Claude Code named a Claude model no subscription model serves.      |
+The Messages API that Claude Code speaks carries no error code, so the table
+quotes the message. The code is what the other APIs would carry.
+
+| Status | Message says                                      | Code                     | Means                                                               |
+| ------ | ------------------------------------------------- | ------------------------ | ------------------------------------------------------------------- |
+| 401    | carries a Claude sign-in but no Keera key         | `missing_api_key`        | Run `keera login`, then `keera connect claude-code --subscription`. |
+| 401    | this is a subscription key ... goes in the header | `subscription_key`       | The key went in `Authorization`. It belongs in `X-Keera-Key`.       |
+| 401    | this request carries no Claude sign-in            | `missing_claude_sign_in` | Run `/login` in Claude Code, and unset `ANTHROPIC_AUTH_TOKEN`.      |
+| 401    | this gateway does not take Claude subscriptions   | `missing_api_key`        | The operator has not set `KEERA_CLAUDE_SUBSCRIPTIONS=true`.         |
+| 403    | this gateway does not take Claude subscriptions   | `subscriptions_off`      | The same, for a subscription key.                                   |
+| 400    | answers only the Anthropic Messages API           | `subscription_model`     | Only the Messages API reaches a subscription model.                 |
+| 404    | does not exist or this key may not use it         | `model_not_found`        | A subscription key named an organisation model, or the reverse.     |
+| 404    | does not exist or this key may not use it         | `model_not_found`        | Claude Code named a Claude model no subscription model serves.      |
 
 `keera model check` cannot check a subscription model, because the gateway
 holds no credential for it. Send it a message from Claude Code instead.
