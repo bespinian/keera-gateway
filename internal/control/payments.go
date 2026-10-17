@@ -102,13 +102,12 @@ func (s *Server) creditAccount(w http.ResponseWriter, r *http.Request, p *authn.
 // settleRecent looks up the pending payments an organisation started in the
 // last hour, at most a few.
 func (s *Server) settleRecent(ctx context.Context, orgID string) {
-	list, err := s.st.ListPayments(ctx, orgID, 5)
+	list, err := s.st.PendingPaymentsOf(ctx, orgID, time.Now().Add(-time.Hour), 5)
 	if err != nil {
 		return
 	}
 	for _, pay := range list {
-		if pay.State == store.PaymentPending && pay.TransactionID != 0 &&
-			time.Since(pay.TS) < time.Hour {
+		if pay.TransactionID != 0 {
 			if err := s.settle(ctx, pay); err != nil {
 				s.log.Warn("reading a payment from PostFinance failed", "payment", pay.ID, "error", err)
 			}

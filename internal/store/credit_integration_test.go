@@ -109,6 +109,33 @@ func TestAPaymentIsCreditedOnce(t *testing.T) {
 	}
 }
 
+// Opening Billing looks up the organisation's own pending payments. Grants,
+// which end at once, must not push a pending top-up out of view.
+func TestPendingPaymentsOfSkipsEndedOnes(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	pending := Payment{ID: id.New("pay"), OrgID: f.orgID, Kind: PaymentTopUp, Micros: 10_000_000}
+	if err := st.CreatePayment(ctx, pending); err != nil {
+		t.Fatalf("CreatePayment: %v", err)
+	}
+	for range 6 {
+		g := Payment{ID: id.New("pay"), OrgID: f.orgID, Kind: PaymentTopUp, Micros: 1_000_000}
+		if err := st.CreatePayment(ctx, g); err != nil {
+			t.Fatalf("CreatePayment: %v", err)
+		}
+		if _, err := st.Settle(ctx, g.ID, Settlement{Paid: true}); err != nil {
+			t.Fatalf("Settle: %v", err)
+		}
+	}
+	got, err := st.PendingPaymentsOf(ctx, f.orgID, time.Now().Add(-time.Hour), 5)
+	if err != nil {
+		t.Fatalf("PendingPaymentsOf: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != pending.ID {
+		t.Errorf("pending = %+v, want the one top-up", got)
+	}
+}
+
 // A new card replaces the saved one, and the old token is handed back so
 // PostFinance forgets it.
 func TestANewCardReplacesTheSavedOne(t *testing.T) {

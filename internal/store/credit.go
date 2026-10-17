@@ -383,6 +383,15 @@ func (s *Store) ListPayments(ctx context.Context, orgID string, limit int) ([]Pa
 		orgID, pageLimit(limit, 50, 500))
 }
 
+// PendingPaymentsOf lists one organisation's payments still pending that
+// started since then, newest first.
+func (s *Store) PendingPaymentsOf(ctx context.Context, orgID string, since time.Time, limit int,
+) ([]Payment, error) {
+	return queryAll(ctx, s.pool, scanPayment, `SELECT `+paymentColumns+` FROM payments
+		WHERE org_id = $1 AND state = 'pending' AND ts >= $2
+		ORDER BY ts DESC LIMIT $3`, orgID, since, limit)
+}
+
 // PendingPayments lists the payments still pending that started between
 // since and before, oldest first, and every automatic top-up still pending
 // from before that.
