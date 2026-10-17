@@ -582,7 +582,9 @@ var commands = []command{
 			{name: "config", summary: "the ~/.ssh/config block, so any editor can attach",
 				prose: "Prints the block on stdout, to append to ~/.ssh/config. Then plain ssh, " +
 					"VS Code's Remote-SSH and JetBrains Gateway reach every sandbox you own in " +
-					"this organisation. Run it again for each other organisation.",
+					"this organisation. The block always matches the same hosts, so ssh uses " +
+					"the first one in the file; for a sandbox in another organisation, use " +
+					"KEERA_ORG=<org> keera sandbox ssh.",
 				examples: []string{"keera sandbox config >> ~/.ssh/config"}},
 			// --org, so a ProxyCommand keeps working after 'keera org switch'.
 			{name: "proxy", args: "<name>", summary: "the attach surface, for ssh's ProxyCommand",

@@ -208,6 +208,29 @@ func (s *Server) cliPrincipal(r *http.Request, token string) (*authn.Principal, 
 	if !ok {
 		return nil, authn.ErrUnauthenticated
 	}
+	if user, err = s.rowInRequestedOrg(r, user); err != nil {
+		return nil, err
+	}
 	// No CSRF token: a browser never sends this credential.
 	return principalOf(authn.MethodCLI, user, hash), nil
+}
+
+// rowInRequestedOrg is the person's row in the organisation a command names
+// with org_id, so it acts there with the role it has there. A token belongs
+// to one row, which 'keera org switch' moves; without this, KEERA_ORG and an
+// ssh ProxyCommand's --org would stop working after a switch.
+//
+// An organisation the person is not in leaves the row as it is, and the route
+// refuses the request.
+func (s *Server) rowInRequestedOrg(r *http.Request, user store.User) (store.User, error) {
+	want := r.URL.Query().Get("org_id")
+	if want == "" || want == user.OrgID || user.ExternalID == "" ||
+		user.Role == string(authn.RoleOperator) {
+		return user, nil
+	}
+	other, err := s.st.UserInOrg(r.Context(), user.ExternalID, want)
+	if errors.Is(err, store.ErrNotFound) {
+		return user, nil
+	}
+	return other, err
 }

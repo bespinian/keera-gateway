@@ -189,6 +189,14 @@ func (s *Store) UserByExternalID(ctx context.Context, externalID string) (User, 
 	return u, notFound(err)
 }
 
+// UserInOrg finds an identity's row in one organisation. A disabled row is
+// not found.
+func (s *Store) UserInOrg(ctx context.Context, externalID, orgID string) (User, error) {
+	u, err := scanUser(s.pool.QueryRow(ctx, `SELECT `+userColumns+` FROM users
+		WHERE external_id = $1 AND org_id = $2 AND disabled_at IS NULL`, externalID, orgID))
+	return u, notFound(err)
+}
+
 // Membership is one organisation a person is in, or has been invited to.
 type Membership struct {
 	UserID  string `json:"user_id"`

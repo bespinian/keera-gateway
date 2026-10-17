@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bespinian/keera-gateway/internal/authn"
 	"github.com/bespinian/keera-gateway/internal/authn/oidctest"
@@ -341,5 +342,53 @@ func TestADirectoryCheckReachesEveryOrganisation(t *testing.T) {
 	s.idps["test"].RefuseRefresh = "invalid_grant"
 	if _, status := s.me(t, session); status != http.StatusUnauthorized {
 		t.Errorf("status at Insurer = %d after the directory refused, want 401", status)
+	}
+}
+
+// A terminal token belongs to one row, which 'keera org switch' moves. A
+// command that names another of the person's organisations acts there, with
+// the role they have there, so KEERA_ORG and an ssh config keep working.
+func TestATerminalTokenActsInTheOrganisationItNames(t *testing.T) {
+	s := membershipServer(t, false)
+	ctx := context.Background()
+	user, err := s.st.AddUser(ctx, "user_a", "org_a", "ada@example.ch", "test:sub-ada", "member")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.st.AddUser(ctx, "user_b", "org_b", "ada@example.ch", "test:sub-ada", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	token, hash := authn.NewCLIToken()
+	if err := s.st.CreateCLIToken(ctx, hash, user.ID, time.Now().Add(authn.CLITokenTTL)); err != nil {
+		t.Fatal(err)
+	}
+	me := func(orgID string) whoAmI {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet,
+			s.ts.URL+httpx.ControlPrefix+"/v1/me?org_id="+orgID, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		res, err := s.ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = res.Body.Close() }()
+		var out whoAmI
+		if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	if got := me("org_b"); got.OrgID != "org_b" || got.Role != "admin" {
+		t.Errorf("naming Insurer: in %s as %s, want Insurer's admin", got.OrgID, got.Role)
+	}
+	if got := me("org_c"); got.OrgID != "org_a" {
+		t.Errorf("naming an organisation they are not in: in %s, want their own", got.OrgID)
+	}
+	if _, err := s.st.DisableUser(ctx, "user_b"); err != nil {
+		t.Fatal(err)
+	}
+	if got := me("org_b"); got.OrgID != "org_a" {
+		t.Errorf("naming Insurer after it disabled them: in %s, want their own", got.OrgID)
 	}
 }
