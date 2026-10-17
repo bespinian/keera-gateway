@@ -446,7 +446,8 @@ signed itself up gets no pool until its first payment, like its sandboxes.
 
 Only an engineer's sandbox comes from a pool. A pool member is started before
 anybody asks, as an engineer's sandbox that is ready once sshd answers. An agent
-runs no sshd, so an agent's sandbox always starts cold.
+runs no sshd, so an agent's sandbox always starts cold, and a class only agents
+may use cannot have a pool.
 
 They need the upstream warm-pool extension (`extensions.agents.x-k8s.io/v1beta1`:
 `SandboxTemplate`, `SandboxWarmPool`, `SandboxClaim`) installed next to the

@@ -102,6 +102,12 @@ func TestWarmSandboxClassesLeaveOutUnpaidOrganisations(t *testing.T) {
 	warm("org_1", "standard", 2)
 	warm("org_1", "cold", 0)
 	warm("org_2", "standard", 2)
+	// Saved before agent-only classes were refused a pool.
+	agents := newSandboxClass(t, st, ctx, "org_1", "agents")
+	agents.Warm, agents.Purposes = 2, []policy.Purpose{policy.PurposeAgent}
+	if err := st.UpsertSandboxClass(ctx, &agents); err != nil {
+		t.Fatalf("UpsertSandboxClass: %v", err)
+	}
 
 	got, err := st.WarmSandboxClasses(ctx)
 	if err != nil {

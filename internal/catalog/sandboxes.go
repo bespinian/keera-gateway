@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -117,6 +118,10 @@ func ParseSandbox(s Sandbox) (policy.SandboxClass, error) {
 		return policy.SandboxClass{}, err
 	}
 	c.Purposes = purposes
+	if c.Warm > 0 && !c.Allows(policy.PurposeEngineer) {
+		return policy.SandboxClass{}, errors.New("warm is only for a class engineers can use: " +
+			"an agent's sandbox never comes from a pool, so the pool would never be used")
+	}
 	return c, nil
 }
 

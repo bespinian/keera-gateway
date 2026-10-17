@@ -142,6 +142,11 @@ func TestParseSandboxesRefusals(t *testing.T) {
 			"holds this class's whole CPU",
 		},
 		{
+			"warm for agents only",
+			"sandboxes:\n  - name: a\n    image: x\n    warm: 1\n    purposes: [agent]\n",
+			"never be used",
+		},
+		{
 			"nonsense cpu",
 			"sandboxes:\n  - name: a\n    image: x\n    cpu: lots\n",
 			"core count",
