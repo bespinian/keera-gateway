@@ -813,6 +813,10 @@ func (s *Server) activateKey(w http.ResponseWriter, r *http.Request, p *authn.Pr
 		forbid(w, "only the person this key is for, or an administrator, can activate it")
 		return
 	}
+	if o.Kind == policy.KeySubscription && !s.opts.ClaudeSubscriptions {
+		badRequest(w, subscriptionsOff)
+		return
+	}
 	secret, hash, prefix := auth.Generate()
 	info, err := s.st.ActivateKey(r.Context(), keyID, strings.TrimSpace(in.Name), hash, prefix)
 	switch {
@@ -859,8 +863,13 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		return
 	}
 	oldID := r.PathValue("id")
-	owner, _, ok := s.keyToManage(w, r, p, oldID, "rotate")
+	o, ok := s.keyToManage(w, r, p, oldID, "rotate")
 	if !ok {
+		return
+	}
+	owner := o.OrgID
+	if o.Kind == policy.KeySubscription && !s.opts.ClaudeSubscriptions {
+		badRequest(w, subscriptionsOff)
 		return
 	}
 	if (in.ExpiresIn != "" || in.ExpiresAt != nil) && !p.CanAdminOrg(owner) {
@@ -918,7 +927,8 @@ func (s *Server) renameKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		return
 	}
 	keyID := r.PathValue("id")
-	owner, holder, ok := s.keyToManage(w, r, p, keyID, "rename")
+	o, ok := s.keyToManage(w, r, p, keyID, "rename")
+	owner, holder := o.OrgID, o.UserID
 	if !ok {
 		return
 	}
@@ -978,19 +988,18 @@ func (s *Server) keyOwner(w http.ResponseWriter, r *http.Request, p *authn.Princ
 // told whose key it is rather than "not found".
 func (s *Server) keyToManage(w http.ResponseWriter, r *http.Request, p *authn.Principal,
 	keyID, verb string,
-) (owner, holder string, ok bool) {
+) (store.KeyOwner, bool) {
 	o, ok := s.keyOwner(w, r, p, keyID)
 	if !ok {
-		return "", "", false
+		return o, false
 	}
-	owner, holder = o.OrgID, o.UserID
-	if !p.CanManageKeyFor(owner, holder) {
+	if !p.CanManageKeyFor(o.OrgID, o.UserID) {
 		forbid(w, "a member can only "+verb+" a key attributed to themselves; "+
 			"somebody else's, or one attributed to nobody, is for an "+
 			"administrator of this organisation")
-		return "", "", false
+		return o, false
 	}
-	return owner, holder, true
+	return o, true
 }
 
 // keyExpiry reads when a key expires: 'expires_in' is a lifetime from now,
@@ -1021,7 +1030,8 @@ func keyExpiry(w http.ResponseWriter, in string, at *time.Time) (*time.Time, boo
 
 func (s *Server) revokeKey(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	keyID := r.PathValue("id")
-	owner, holder, ok := s.keyToManage(w, r, p, keyID, "revoke")
+	o, ok := s.keyToManage(w, r, p, keyID, "revoke")
+	owner, holder := o.OrgID, o.UserID
 	if !ok {
 		return
 	}

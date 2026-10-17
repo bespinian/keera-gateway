@@ -778,6 +778,21 @@ func TestASubscriptionKeyAlwaysBelongsToSomebody(t *testing.T) {
 	if w := tn.create(carol, `{"org_id":"org_a","user_id":"user_bob","kind":"pro"}`); w.Code != http.StatusBadRequest {
 		t.Errorf("an unknown kind: %d %s", w.Code, w.Body)
 	}
+
+	// With subscriptions turned off since, the key it issued gets no secret.
+	tn.srv.opts.ClaudeSubscriptions = false
+	for verb, handler := range map[string]func(http.ResponseWriter, *http.Request, *authn.Principal){
+		"activate": tn.srv.activateKey, "rotate": tn.srv.rotateKey,
+	} {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, httpx.ControlPrefix+"/v1/keys/"+got.ID+"/"+verb,
+			strings.NewReader(`{}`)).WithContext(tn.ctx)
+		r.SetPathValue("id", got.ID)
+		handler(w, r, carol)
+		if w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), `"key":`) {
+			t.Errorf("%s with subscriptions off: %d %s; want 400 and no secret", verb, w.Code, w.Body)
+		}
+	}
 }
 
 // A member reads the request log, its sessions and the map, but only for the

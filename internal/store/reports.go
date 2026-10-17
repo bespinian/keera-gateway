@@ -210,6 +210,7 @@ func (s *Store) ProjectOrg(ctx context.Context, projectID string) (string, error
 // it is for, each empty for none.
 type KeyOwner struct {
 	OrgID, ProjectID, UserID string
+	Kind                     policy.KeyKind
 }
 
 // KeyOwnerOf reads where a key sits. Members may revoke only their own keys,
@@ -218,9 +219,9 @@ type KeyOwner struct {
 func (s *Store) KeyOwnerOf(ctx context.Context, keyID string) (KeyOwner, error) {
 	var o KeyOwner
 	err := s.pool.QueryRow(ctx,
-		"SELECT org_id, COALESCE(project_id,''), COALESCE(user_id,'') FROM api_keys WHERE id = $1",
+		"SELECT org_id, COALESCE(project_id,''), COALESCE(user_id,''), kind FROM api_keys WHERE id = $1",
 		keyID,
-	).Scan(&o.OrgID, &o.ProjectID, &o.UserID)
+	).Scan(&o.OrgID, &o.ProjectID, &o.UserID, &o.Kind)
 	return o, notFound(err)
 }
 

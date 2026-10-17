@@ -107,7 +107,7 @@ func TestTenancyLookupsUsedForAuthorisation(t *testing.T) {
 	// KeyOwnerOf decides whether a member may revoke a key, so the
 	// attribution has to come back exactly as stored. The fixture's key is
 	// attributed to nobody, which is the case that must never read as "mine".
-	want := KeyOwner{OrgID: f.orgID, ProjectID: f.projectID}
+	want := KeyOwner{OrgID: f.orgID, ProjectID: f.projectID, Kind: policy.KeyStandard}
 	if o, err := st.KeyOwnerOf(ctx, f.keyID); err != nil || o != want {
 		t.Errorf("KeyOwnerOf = %+v, %v; want %+v", o, err, want)
 	}
@@ -126,7 +126,8 @@ func TestTenancyLookupsUsedForAuthorisation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FirstProject: %v", err)
 	}
-	want = KeyOwner{OrgID: f.orgID, ProjectID: firstID, UserID: person.ID}
+	want = KeyOwner{OrgID: f.orgID, ProjectID: firstID, UserID: person.ID,
+		Kind: policy.KeyStandard}
 	if o, err := st.KeyOwnerOf(ctx, "key_2"); err != nil || o != want {
 		t.Errorf("KeyOwnerOf = %+v, %v; want %+v", o, err, want)
 	}
