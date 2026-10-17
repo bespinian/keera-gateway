@@ -42,6 +42,17 @@ func serve(ctx context.Context) error {
 	log := newLogger(cfg)
 	setMemoryLimit(log)
 
+	// Read before the database is touched, so a mistake in a file or the key
+	// stops the start before any migration runs.
+	template, err := loadTemplate(cfg, log)
+	if err != nil {
+		return err
+	}
+	secrets, err := buildSecrets(cfg)
+	if err != nil {
+		return err
+	}
+
 	st, err := store.Open(ctx, cfg.DatabaseURL, cfg.MaxDBConns)
 	if err != nil {
 		return err
@@ -49,15 +60,6 @@ func serve(ctx context.Context) error {
 	defer st.Close()
 
 	if err := prepareStore(ctx, st, log); err != nil {
-		return err
-	}
-	template, err := loadTemplate(cfg, log)
-	if err != nil {
-		return err
-	}
-
-	secrets, err := buildSecrets(cfg)
-	if err != nil {
 		return err
 	}
 
