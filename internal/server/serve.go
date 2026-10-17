@@ -208,10 +208,15 @@ func loadTemplate(cfg config.Config, log *slog.Logger) (store.OrgTemplate, error
 			return t, err
 		}
 		names := make([]string, 0, len(models))
-		for _, m := range models {
+		for i, m := range models {
 			if m.Subscription && !cfg.ClaudeSubscriptions {
 				return t, fmt.Errorf("%s: '%s' is paid by Claude subscriptions, which are off; "+
 					"set KEERA_CLAUDE_SUBSCRIPTIONS=true or take it out", cfg.ModelsFile, m.Alias)
+			}
+			// Refused here as the control API refuses it, rather than copied
+			// into every new organisation as a model the gateway cannot bill.
+			if err := cfg.Platform.Lock(&models[i]); err != nil {
+				return t, fmt.Errorf("%s: '%s': %w", cfg.ModelsFile, m.Alias, err)
 			}
 			names = append(names, m.Alias)
 		}
