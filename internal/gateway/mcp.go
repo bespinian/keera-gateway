@@ -536,11 +536,13 @@ func argumentsText(b *body) (textDoc, error) {
 	return d, nil
 }
 
-// addStrings collects every string inside a decoded value.
+// addStrings collects every string inside a decoded value. Keys are read in
+// order, so a filter is shown the same segments in the same order each time.
 func addStrings(d *treeDoc, v any) {
 	switch v := v.(type) {
 	case map[string]any:
-		for k, e := range v {
+		for _, k := range slices.Sorted(maps.Keys(v)) {
+			e := v[k]
 			if s, ok := e.(string); ok {
 				d.add(s, func(n string) { v[k] = n })
 				continue
