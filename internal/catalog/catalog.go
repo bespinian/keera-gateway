@@ -178,36 +178,9 @@ func ParseModel(m Model) (policy.Model, error) {
 	if err := checkBackend(m); err != nil {
 		return policy.Model{}, err
 	}
-	if m.Location == "" {
-		loc, err := policy.Model{Backends: m.Backends}.LocationFromBackends()
-		if err != nil {
-			return policy.Model{}, err
-		}
-		m.Location = loc
-	}
-	switch {
-	case !policy.ValidLocation(m.Location):
-		return policy.Model{}, fmt.Errorf("location %q must be a short lowercase name, "+
-			"such as ch, usa or onprem", m.Location)
-	case m.ReleaseDate != "" && !policy.ValidReleaseDate(m.ReleaseDate):
-		return policy.Model{}, fmt.Errorf("release_date %q must be a day written as "+
-			"YYYY-MM-DD", m.ReleaseDate)
-	}
-	if m.LongPrompt != nil {
-		if err := m.LongPrompt.Check(); err != nil {
-			return policy.Model{}, err
-		}
-	}
-	kind := policy.Kind(m.Kind)
-	if kind == "" {
-		kind = policy.KindChat
-	}
-	if !kind.Valid() {
-		return policy.Model{}, fmt.Errorf("unknown kind %q", m.Kind)
-	}
 	parsed := policy.Model{
 		Alias:        m.Alias,
-		Kind:         kind,
+		Kind:         policy.Kind(m.Kind),
 		Backends:     m.Backends,
 		BackendModel: m.BackendModel,
 		// Kept so an editor can tell which values came from the provider.
@@ -225,10 +198,70 @@ func ParseModel(m Model) (policy.Model, error) {
 		Subscription:             m.Subscription,
 		Enabled:                  !m.Disabled,
 	}
-	if err := CheckSubscription(parsed); err != nil {
+	priced := m.InputMicrosPerMTok != nil && m.OutputMicrosPerMTok != nil
+	if err := CheckModel(&parsed, priced); err != nil {
 		return policy.Model{}, err
 	}
 	return parsed, nil
+}
+
+// CheckModel fills in what a model may leave out and says what is wrong with
+// it. Template files, the command line and the control API all run it, so
+// none accepts what another refuses. priced says both prices were stated.
+//
+// A provider's other defaults are not applied here: the control API is sent
+// every value, and the caller may have changed any of them.
+func CheckModel(m *policy.Model, priced bool) error {
+	if err := m.CheckBackend(); err != nil {
+		return err
+	}
+	if m.Kind == "" {
+		m.Kind = policy.KindChat
+	}
+	if !m.Kind.Valid() {
+		return fmt.Errorf("kind %q must be chat, completion, embedding or decision", m.Kind)
+	}
+	// The gateway reads the provider to choose how to talk to the backend,
+	// so it must be one this build knows.
+	prov, known := provider(m.Provider)
+	switch {
+	case m.Provider != "" && !known:
+		return fmt.Errorf("unknown provider %q; Keera Gateway knows: %s",
+			m.Provider, ProviderNames())
+	case known:
+		if err := prov.Check(m.Kind, m.BackendModel, priced); err != nil {
+			return err
+		}
+	}
+	// Every model runs somewhere: unstated, it is the provider's location, or
+	// read off the backend.
+	m.Location = strings.ToLower(strings.TrimSpace(m.Location))
+	switch {
+	case m.Location == "" && known:
+		m.Location = prov.Location
+	case m.Location == "":
+		loc, err := m.LocationFromBackends()
+		if err != nil {
+			return err
+		}
+		m.Location = loc
+	}
+	m.ReleaseDate = strings.TrimSpace(m.ReleaseDate)
+	m.DisplayName = strings.TrimSpace(m.DisplayName)
+	switch {
+	case !policy.ValidLocation(m.Location):
+		return fmt.Errorf("location %q must be a short lowercase name, "+
+			"such as ch, usa or onprem", m.Location)
+	case m.ReleaseDate != "" && !policy.ValidReleaseDate(m.ReleaseDate):
+		return fmt.Errorf("release_date %q must be a day written as "+
+			"YYYY-MM-DD", m.ReleaseDate)
+	}
+	if m.LongPrompt != nil {
+		if err := m.LongPrompt.Check(); err != nil {
+			return err
+		}
+	}
+	return CheckSubscription(*m)
 }
 
 // CheckSubscription says what is wrong with a subscription model, or nil when
@@ -255,8 +288,8 @@ func CheckSubscription(m policy.Model) error {
 	return nil
 }
 
-// checkBackend checks that an entry says where to send a request and which
-// model to ask for there.
+// checkBackend makes the checks of an entry that only a template file or the
+// command line can fail, before CheckModel makes the rest.
 func checkBackend(m Model) error {
 	switch {
 	case m.ProductID != "" && m.Provider == "":
@@ -266,7 +299,7 @@ func checkBackend(m Model) error {
 		return fmt.Errorf("backend_model is required - for the %s provider it is "+
 			"the model id, which `keera model catalogue` lists", m.Provider)
 	}
-	return policy.Model{Backends: m.Backends, BackendModel: m.BackendModel}.CheckBackend()
+	return nil
 }
 
 func deref[T any](p *T) T {

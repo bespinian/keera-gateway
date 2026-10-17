@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -137,8 +136,10 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 		}
 		priced = true
 	}
-	if msg := normalizeModel(&m, priced); msg != "" {
-		badRequest(w, msg)
+	// putModel has trimmed and lowered the provider already, since
+	// Platform.Covers reads it first.
+	if err := catalog.CheckModel(&m, priced); err != nil {
+		badRequest(w, err.Error())
 		return
 	}
 	if m.Subscription && !s.opts.ClaudeSubscriptions {
@@ -242,65 +243,6 @@ func keyNotMoved(field string) string {
 // lines and client configurations, which quote none of it.
 func badAlias(alias string) string {
 	return "'" + alias + "' is not a usable alias; use lowercase letters, digits and inner hyphens"
-}
-
-// normalizeModel fills in a model's defaults and says what is wrong with it,
-// or "" when nothing is. Priced says the caller stated both prices.
-func normalizeModel(m *policy.Model, priced bool) string {
-	if err := m.CheckBackend(); err != nil {
-		return err.Error()
-	}
-	if m.Kind == "" {
-		m.Kind = policy.KindChat
-	}
-	if !m.Kind.Valid() {
-		return "'kind' must be chat, completion, embedding or decision"
-	}
-	// The provider must be one this build knows, because the gateway reads
-	// it to choose how to talk to the backend. Its defaults are not applied
-	// here: the caller sends every value, and may have changed any of them.
-	// What it can serve and bill is checked as for a template file. putModel
-	// has trimmed and lowered it already, since Platform.Covers reads it first.
-	provider, known := catalog.ProviderByName(m.Provider)
-	if m.Provider != "" && !known {
-		return "unknown provider " + strconv.Quote(m.Provider) + "; Keera Gateway knows: " +
-			catalog.ProviderNames()
-	}
-	if known {
-		if err := provider.Check(m.Kind, m.BackendModel, priced); err != nil {
-			return err.Error()
-		}
-	}
-	// Every model runs somewhere, so an unstated location is the provider's,
-	// or read off the backend, as for a template file.
-	m.Location = strings.ToLower(strings.TrimSpace(m.Location))
-	switch {
-	case m.Location == "" && known:
-		m.Location = provider.Location
-	case m.Location == "":
-		loc, err := m.LocationFromBackends()
-		if err != nil {
-			return err.Error()
-		}
-		m.Location = loc
-	}
-	m.ReleaseDate = strings.TrimSpace(m.ReleaseDate)
-	m.DisplayName = strings.TrimSpace(m.DisplayName)
-	switch {
-	case !policy.ValidLocation(m.Location):
-		return "'location' must be a short lowercase name, such as ch, usa or onprem"
-	case m.ReleaseDate != "" && !policy.ValidReleaseDate(m.ReleaseDate):
-		return "'release_date' must be a day written as YYYY-MM-DD"
-	}
-	if m.LongPrompt != nil {
-		if err := m.LongPrompt.Check(); err != nil {
-			return err.Error()
-		}
-	}
-	if err := catalog.CheckSubscription(*m); err != nil {
-		return err.Error()
-	}
-	return ""
 }
 
 // checkModelAlias refuses a new model named like one of the organisation's

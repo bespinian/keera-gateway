@@ -839,10 +839,6 @@ func applyProvider(m Model) (Model, error) {
 	if m.Location == "" {
 		m.Location = p.Location
 	}
-	priced := m.InputMicrosPerMTok != nil && m.OutputMicrosPerMTok != nil
-	if err := p.Check(policy.Kind(m.Kind), m.BackendModel, priced); err != nil {
-		return m, err
-	}
 	known, isKnown := p.Model(m.BackendModel)
 	if m.BackendModel == "" || !isKnown {
 		return m, nil
