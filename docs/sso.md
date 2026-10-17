@@ -519,6 +519,9 @@ access instead, as Google expects. If your provider refuses `offline_access`,
 set the scopes without it. Without a refresh token, the directory is only read
 at sign-in, and a `keera login` token lasts 12 hours instead of 30 days.
 
+The refresh token is deleted once the person is disabled or removed in every
+organisation they were in.
+
 ## When someone leaves
 
 Removing a person from the directory ends their sessions and `keera login`

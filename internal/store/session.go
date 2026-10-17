@@ -100,7 +100,12 @@ func (s *Store) moveSignIn(ctx context.Context, table string, hash []byte, userI
 }
 
 // PurgeExpired removes sessions and login flows that have run out. Every
-// lookup already filters on expiry, so this only keeps the tables small.
+// lookup already filters on expiry, so this mostly keeps the tables small.
+//
+// It also removes the refresh token of an identity no enabled row uses any
+// more: its organisations deleted it or turned it off. A working directory
+// credential must not outlive the accounts it was kept for. Turned on again,
+// the person signs in again, which stores a new one.
 func (s *Store) PurgeExpired(ctx context.Context) error {
 	for _, table := range []string{"sessions", "login_flows", "cli_codes", "cli_tokens",
 		"passkey_links", "passkey_challenges", "signups"} {
@@ -109,7 +114,9 @@ func (s *Store) PurgeExpired(ctx context.Context) error {
 			return err
 		}
 	}
-	return nil
+	_, err := s.pool.Exec(ctx, `DELETE FROM identities i WHERE NOT EXISTS (
+		SELECT 1 FROM users u WHERE u.external_id = i.external_id AND u.disabled_at IS NULL)`)
+	return err
 }
 
 // LoginFlow is one login in flight.

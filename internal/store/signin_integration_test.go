@@ -298,3 +298,36 @@ func TestLoginFlowRemembersItsProvider(t *testing.T) {
 		t.Errorf("RedirectTo = %q", got.RedirectTo)
 	}
 }
+
+// A refresh token is a working credential for the person's directory. It goes
+// once no enabled row uses it, and not before.
+func TestPurgeExpiredRemovesRefreshTokensNobodyUses(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	kept, err := st.AddUser(ctx, "user_1", f.orgID, "ada@example.ch", "test:sub-1", "member")
+	if err != nil {
+		t.Fatalf("AddUser: %v", err)
+	}
+	gone, err := st.AddUser(ctx, "user_2", f.orgID, "bob@example.ch", "test:sub-2", "member")
+	if err != nil {
+		t.Fatalf("AddUser: %v", err)
+	}
+	for _, u := range []User{kept, gone} {
+		if err := st.RecordDirectoryCheck(ctx, u.ExternalID, []byte("sealed")); err != nil {
+			t.Fatalf("RecordDirectoryCheck: %v", err)
+		}
+	}
+	if _, err := st.DisableUser(ctx, gone.ID); err != nil {
+		t.Fatalf("DisableUser: %v", err)
+	}
+
+	if err := st.PurgeExpired(ctx); err != nil {
+		t.Fatalf("PurgeExpired: %v", err)
+	}
+	if linked, _ := st.HasRefreshToken(ctx, kept.ExternalID); !linked {
+		t.Error("the refresh token of an enabled person was removed")
+	}
+	if linked, _ := st.HasRefreshToken(ctx, gone.ExternalID); linked {
+		t.Error("the refresh token of a disabled person is still stored")
+	}
+}
