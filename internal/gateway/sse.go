@@ -427,8 +427,10 @@ func scanSSE(src io.Reader, limit int64, fn func(payload []byte) error) error {
 type oaiStreamChunk struct {
 	Choices []struct {
 		Delta struct {
-			Content   string             `json:"content"`
-			ToolCalls []oaiToolCallDelta `json:"tool_calls"`
+			Content          string             `json:"content"`
+			ReasoningContent string             `json:"reasoning_content"`
+			Reasoning        string             `json:"reasoning"`
+			ToolCalls        []oaiToolCallDelta `json:"tool_calls"`
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -454,7 +456,9 @@ type oaiToolCallDelta struct {
 type chatChunks struct {
 	finishReason string
 	usage        *tokenUsage
-	deltas       int
+	// deltas counts the chunks the model wrote into, reasoning included,
+	// as the chat pipe does: a client that hangs up is charged on it.
+	deltas int
 	// firstAt is when the first token arrived. A translation drops reasoning,
 	// so this can be earlier than the first event the client is sent.
 	firstAt time.Time
@@ -467,9 +471,6 @@ type chatChunks struct {
 func (c *chatChunks) fold(payload []byte, text func(string) error,
 	tool func(index int, tc oaiToolCallDelta) error,
 ) error {
-	if c.firstAt.IsZero() && generated(payload) {
-		c.firstAt = time.Now()
-	}
 	var chunk oaiStreamChunk
 	if json.Unmarshal(payload, &chunk) != nil {
 		// An unreadable chunk is skipped: the rest of the turn is still worth
@@ -488,6 +489,13 @@ func (c *chatChunks) fold(payload []byte, text func(string) error,
 		return nil
 	}
 	choice := chunk.Choices[0]
+	if d := choice.Delta; d.Content != "" || d.ReasoningContent != "" || d.Reasoning != "" ||
+		len(d.ToolCalls) > 0 {
+		if c.firstAt.IsZero() {
+			c.firstAt = time.Now()
+		}
+		c.deltas++
+	}
 	if choice.FinishReason != "" {
 		c.finishReason = choice.FinishReason
 	}

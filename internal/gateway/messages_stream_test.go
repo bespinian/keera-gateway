@@ -331,6 +331,11 @@ func TestATranslatedStreamCountsReasoningAsTheFirstToken(t *testing.T) {
 	if got >= 2*pause {
 		t.Errorf("first token after %v, want under %v: the reasoning was not counted", got, 2*pause)
 	}
+	// A client that hangs up is charged on the deltas, so reasoning counts
+	// here as it does on the chat API.
+	if stats.deltas != 2 {
+		t.Errorf("deltas = %d, want 2: the reasoning and the text", stats.deltas)
+	}
 }
 
 // ------------------------------------------------------- through the gateway

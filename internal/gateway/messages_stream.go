@@ -181,7 +181,6 @@ func (s *messagesStream) finish(cut error) error {
 // delta sends a content_block_delta event to the open block. It runs once per
 // token, so it is written into a reused buffer rather than marshalled.
 func (s *messagesStream) delta(deltaType, key, value string) error {
-	s.deltas++
 	b := append(s.buf[:0], "event: content_block_delta\ndata: "+
 		`{"type":"content_block_delta","index":`...)
 	b = strconv.AppendInt(b, int64(s.open), 10)

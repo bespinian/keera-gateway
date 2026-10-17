@@ -63,7 +63,6 @@ func (s *responsesStream) textDelta(text string) error {
 	if err := s.enter(false, 0, s.closeItem, s.openMessage); err != nil {
 		return err
 	}
-	s.deltas++
 	s.text.WriteString(text)
 	return s.emit("response.output_text.delta", map[string]any{
 		"item_id": s.itemID, "output_index": s.open, "content_index": 0, "delta": text,
@@ -83,7 +82,6 @@ func (s *responsesStream) toolDelta(index int, tc oaiToolCallDelta) error {
 	if tc.Function.Arguments == "" {
 		return nil
 	}
-	s.deltas++
 	s.text.WriteString(tc.Function.Arguments)
 	return s.emit("response.function_call_arguments.delta", map[string]any{
 		"item_id": s.itemID, "output_index": s.open, "delta": tc.Function.Arguments,
