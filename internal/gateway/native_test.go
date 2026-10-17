@@ -231,6 +231,40 @@ func TestAFilterRewritesANativeRequestInItsOwnShape(t *testing.T) {
 	}
 }
 
+// Every text a provider reads is filtered, including the parts the
+// translation has no place for: a document whose source is text, and a
+// refusal the client sends back.
+func TestAFilterReadsDocumentsAndRefusalsInANativeRequest(t *testing.T) {
+	for _, tc := range []struct{ provider, path, answer, body string }{
+		{"anthropic", "/v1/messages", anthropicAnswer, `{"model":"keera-frontier","max_tokens":64,` +
+			`"messages":[{"role":"user","content":[` +
+			`{"type":"document","source":{"type":"text","media_type":"text/plain","data":"hunter2"}},` +
+			`{"type":"document","source":{"type":"content","content":[{"type":"text","text":"hunter2"}]}},` +
+			`{"type":"text","text":"summarise"}]}]}`},
+		{"openai", "/v1/responses", `{"id":"resp_1","object":"response","status":"completed",` +
+			`"output":[],"usage":{"input_tokens":1,"output_tokens":1}}`,
+			`{"model":"keera-frontier","input":[{"type":"message","role":"assistant",` +
+				`"content":[{"type":"refusal","refusal":"not hunter2"}]},` +
+				`{"type":"message","role":"user","content":"why?"}]}`},
+	} {
+		h, seen := providerHarness(t, tc.provider, "frontier-model", jsonBackend(tc.answer), nil)
+		h.src.filters = map[string]policy.Filter{
+			"org_1/redact": patternFilter(
+				policy.FilterRule{Pattern: `\bhunter2\b`, Replace: "[CREDENTIAL]"}),
+		}
+		h.src.resolved[testKey].Filters = []string{"redact"}
+
+		resp := h.post(t, tc.path, tc.body)
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s: status = %d, want 200: %s", tc.path, resp.StatusCode, body)
+		}
+		if got := nextSeen(t, seen); got.path != tc.path || strings.Contains(got.body, "hunter2") {
+			t.Errorf("%s was sent %s", got.path, got.body)
+		}
+	}
+}
+
 func TestAFilterRewriteChangesOnlyTheTextItRewrote(t *testing.T) {
 	// Encoding the body again would sort the keys of every earlier turn, the
 	// model's own tool inputs included. The provider's prompt cache would
@@ -262,6 +296,35 @@ func TestAFilterRewriteChangesOnlyTheTextItRewrote(t *testing.T) {
 	got, _ := b.value("messages")
 	if want := strings.Replace(messages, "hunter2", "[CREDENTIAL]", 1); string(got) != want {
 		t.Errorf("messages after the rewrite:\n%s\nwant only the secret changed:\n%s", got, want)
+	}
+}
+
+func TestFiltersReadTheOutputOfEveryToolTheClientRuns(t *testing.T) {
+	// These tools are kept on the deployment's key, and their output is
+	// where file contents travel.
+	b, err := parseBody([]byte(`{"model":"m","input":[` +
+		`{"type":"local_shell_call_output","call_id":"c1","output":"hunter2 one"},` +
+		`{"type":"shell_call_output","call_id":"c2","output":[` +
+		`{"stdout":"hunter2 two","stderr":"hunter2 three","outcome":{"type":"exit","exit_code":0}}]},` +
+		`{"type":"apply_patch_call_output","call_id":"c3","status":"completed",` +
+		`"output":"hunter2 four"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := responsesDialect{}.text(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := append([]string(nil), doc.texts()...)
+	for i, s := range out {
+		out[i] = strings.ReplaceAll(s, "hunter2", "[CREDENTIAL]")
+	}
+	if err := doc.apply(b, out); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := b.value("input")
+	if strings.Contains(string(got), "hunter2") || strings.Count(string(got), "[CREDENTIAL]") != 4 {
+		t.Errorf("input after the rewrite: %s", got)
 	}
 }
 

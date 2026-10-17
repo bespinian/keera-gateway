@@ -572,7 +572,8 @@ func (responsesDialect) opening(b *body) (json.RawMessage, bool) {
 }
 
 // text is the instructions, and the text of every message and tool output in
-// the input. Function call arguments are not text, as on the chat surface.
+// the input. Function call arguments and a custom tool's input are not text,
+// as on the chat surface.
 func (responsesDialect) text(b *body) (textDoc, error) {
 	d := newTreeDoc()
 	instructions, err := d.root(b, "instructions")
@@ -591,7 +592,9 @@ func (responsesDialect) text(b *body) (textDoc, error) {
 	}
 	for _, item := range d.objects(input) {
 		field := "content"
-		if item["type"] == "function_call_output" {
+		switch item["type"] {
+		case "function_call_output", "custom_tool_call_output", "local_shell_call_output",
+			"shell_call_output", "apply_patch_call_output":
 			field = "output"
 		}
 		d.addField(item, field)
@@ -599,6 +602,13 @@ func (responsesDialect) text(b *body) (textDoc, error) {
 			switch part["type"] {
 			case "input_text", "output_text", "text":
 				d.addField(part, "text")
+			case "refusal":
+				d.addField(part, "refusal")
+			}
+			// A shell call's output is one entry per command, with no type.
+			if item["type"] == "shell_call_output" {
+				d.addField(part, "stdout")
+				d.addField(part, "stderr")
 			}
 		}
 	}

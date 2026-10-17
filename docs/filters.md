@@ -69,7 +69,7 @@ segments.
 | -------------------------- | --------------------------------------------------------------------------------------------------- |
 | `/api/v1/chat/completions` | each message's `content` when it is a string, and the `text` of each `{"type":"text"}` content part |
 | `/api/v1/messages`         | the `system` prompt, and the text of every message, text block and tool result                      |
-| `/api/v1/responses`        | the `instructions`, and the text of every input message, text part and `function_call_output`       |
+| `/api/v1/responses`        | the `instructions`, and the text of every input message, text part and tool output                  |
 | `/api/v1/completions`      | the `prompt`, or each string in a `prompt` array                                                    |
 | `/api/v1/embeddings`       | the `input`, or each string in an `input` array                                                     |
 
@@ -81,7 +81,7 @@ other byte of the request goes on as the client sent it, so the provider's
 prompt cache still matches.
 
 Tool results are covered. For a coding agent, that is where file contents
-travel.
+travel. So are Messages documents whose source is text.
 
 MCP calls through the gateway are filtered too: every string in the arguments,
 before the call leaves. See [mcp.md](mcp.md#filters).

@@ -79,10 +79,25 @@ func (anthropicDialect) text(b *body) (textDoc, error) {
 	return d, nil
 }
 
-// addTextBlock collects the text of a text block.
+// addTextBlock collects the text of a text block, and of a document whose
+// source is text. The translation drops documents, so only a request
+// forwarded as it is carries one. The Messages and chat extractions share it.
 func addTextBlock(d *treeDoc, block map[string]any) {
-	if block["type"] == "text" {
+	switch block["type"] {
+	case "text":
 		d.addField(block, "text")
+	case "document":
+		for _, src := range d.objects([]any{block["source"]}) {
+			switch src["type"] {
+			case "text":
+				d.addField(src, "data")
+			case "content":
+				d.addField(src, "content")
+				for _, inner := range d.objects(src["content"]) {
+					addTextBlock(d, inner)
+				}
+			}
+		}
 	}
 }
 

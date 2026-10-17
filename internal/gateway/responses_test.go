@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
 // decodeResponses translates a Responses request and returns the chat body.
@@ -572,5 +574,30 @@ func TestAStoredConversationOnlyGoesToOpenAI(t *testing.T) {
 			body, _ := io.ReadAll(resp.Body)
 			t.Errorf("an empty previous_response_id (%s) was refused: %s", empty, body)
 		}
+	}
+}
+
+func TestAFilterReadsACustomToolsOutput(t *testing.T) {
+	// For Codex, apply_patch's output is where file contents travel, as a
+	// function's output is for any other tool. A request OpenAI gets in its own
+	// shape is filtered in that shape.
+	answer := `{"id":"resp_1","object":"response","model":"gpt-5.5","status":"completed",` +
+		`"output":[],"usage":{"input_tokens":10,"output_tokens":5}}`
+	h, seen := providerHarness(t, "openai", "gpt-5.5", jsonBackend(answer), nil)
+	h.src.resolved[testKey].Filters = []string{"redact"}
+	h.src.filters = map[string]policy.Filter{
+		"org_1/redact": patternFilter(policy.FilterRule{Pattern: `\bhunter2\b`, Replace: "[CREDENTIAL]"}),
+	}
+
+	resp := h.post(t, "/v1/responses", `{"model":"keera-frontier","input":[
+		{"type":"custom_tool_call","call_id":"c1","name":"apply_patch","input":"*** Begin Patch"},
+		{"type":"custom_tool_call_output","call_id":"c1","output":"password = hunter2"}]}`)
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d: %s", resp.StatusCode, body)
+	}
+	if sent := nextSeen(t, seen); strings.Contains(sent.body, "hunter2") ||
+		!strings.Contains(sent.body, "[CREDENTIAL]") {
+		t.Errorf("sent = %s, want the output redacted", sent.body)
 	}
 }
