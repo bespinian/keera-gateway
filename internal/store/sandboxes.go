@@ -447,10 +447,12 @@ func (s *Store) LiveSandboxes(ctx context.Context, after string, limit int) ([]S
 }
 
 // accrueRunning adds the time since accounted_at to running_seconds, as of $1,
-// for sandboxes holding compute.
+// for sandboxes holding compute. It stops at expires_at, when a sandbox stops
+// even if no sweep has ended it yet.
 const accrueRunning = `UPDATE sandboxes SET
 		running_seconds = running_seconds +
-			GREATEST(0, EXTRACT(EPOCH FROM ($1::timestamptz - COALESCE(accounted_at, created_at)))::bigint),
+			GREATEST(0, EXTRACT(EPOCH FROM (LEAST($1::timestamptz, COALESCE(expires_at, $1::timestamptz))
+				- COALESCE(accounted_at, created_at)))::bigint),
 		accounted_at = $1
 	WHERE state IN ('pending','ready')`
 
@@ -459,7 +461,7 @@ const accrueRunning = `UPDATE sandboxes SET
 //
 // It is one statement, which keeps it correct across replicas: each sweep adds
 // only the time since accounted_at and moves it forward. The clock is read from
-// the column, so time a gateway was down is still charged.
+// the column, so time a gateway was down is still charged, up to expiry.
 func (s *Store) AccountSandboxes(ctx context.Context, now time.Time) (int64, error) {
 	tag, err := s.pool.Exec(ctx, accrueRunning, now)
 	if err != nil {

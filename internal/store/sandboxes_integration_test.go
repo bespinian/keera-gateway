@@ -335,6 +335,34 @@ func TestAccountSandboxesAccumulates(t *testing.T) {
 	}
 }
 
+// On Kubernetes the controller stops a sandbox at its expiry. Time after it
+// is not charged, even when no sweep ran to end it, such as while the gateway
+// was down.
+func TestAccountSandboxesStopsAtExpiry(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	newSandboxClass(t, st, ctx, f.orgID, "standard")
+	sb := newSandbox(t, st, ctx, f, "expired")
+
+	if err := st.ObserveSandbox(ctx, sb.ID, SandboxObservation{State: policy.SandboxReady}); err != nil {
+		t.Fatalf("ObserveSandbox: %v", err)
+	}
+	if _, err := st.pool.Exec(ctx, `UPDATE sandboxes SET accounted_at = now() - interval '90 seconds',
+		expires_at = now() - interval '30 seconds' WHERE id = $1`, sb.ID); err != nil {
+		t.Fatalf("winding the clock back: %v", err)
+	}
+	if _, err := st.AccountSandboxes(ctx, time.Now()); err != nil {
+		t.Fatalf("AccountSandboxes: %v", err)
+	}
+	got, err := st.Sandbox(ctx, sb.ID)
+	if err != nil {
+		t.Fatalf("Sandbox: %v", err)
+	}
+	if got.RunningSeconds < 55 || got.RunningSeconds > 65 {
+		t.Errorf("running_seconds = %d, want about 60: the time up to expiry", got.RunningSeconds)
+	}
+}
+
 func TestCountLiveSandboxes(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)

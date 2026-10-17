@@ -346,12 +346,12 @@ lived a week is somebody who forgot. Core-seconds is what a chargeback uses.
 
 Running time is summed across runs, not derived from timestamps, because a
 sandbox can be suspended and resumed many times. The clock stops as soon as a
-sandbox is suspended or terminated, not at the next sweep. A podman sandbox
-that stops by itself is only noticed at the next sweep, and is charged until
-then.
+sandbox is suspended or terminated, not at the next sweep, and never runs
+past the sandbox's expiry. A sandbox that stops by itself before then is only
+noticed at the next sweep, and is charged until then.
 
-If the gateway was down, the time it could not observe is still charged,
-because the sandbox was running.
+If the gateway was down, the time it could not observe is still charged up to
+the expiry, because the sandbox was running.
 
 Ended sandboxes are deleted after `KEERA_USAGE_RETENTION`, so `--since` reaches
 back no further than that.
