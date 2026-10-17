@@ -461,6 +461,29 @@ func TestAFallbackFromAnthropicToALocalModelIsTranslated(t *testing.T) {
 	}
 }
 
+// A router that reads nothing does not need the request translated, so a body
+// only the provider can read still reaches it when every destination is that
+// provider's. Here a Responses request carries no input, only the response it
+// continues.
+func TestARouterThatReadsNothingLeavesANativeRequestUntranslated(t *testing.T) {
+	h, seen := providerHarness(t, "openai", "gpt-frontier", jsonBackend(
+		`{"id":"resp_2","object":"response","status":"completed","output":[],`+
+			`"usage":{"input_tokens":10,"output_tokens":5}}`), nil)
+	h.src.routers = map[string]policy.Router{"org_1/ha": {
+		OrgID: "org_1", Alias: "ha", Mode: policy.RouterModeFallback,
+		Destinations: []string{"keera-frontier"},
+	}}
+
+	resp := h.post(t, "/v1/responses", `{"model":"ha","previous_response_id":"resp_1"}`)
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, body)
+	}
+	if got := nextSeen(t, seen); got.path != "/v1/responses" {
+		t.Errorf("sent to %s, want OpenAI's own API", got.path)
+	}
+}
+
 func TestCountTokensIsAnsweredWithoutForwarding(t *testing.T) {
 	// Forwarding would send the prompt to Anthropic past its filters.
 	h, seen := providerHarness(t, "anthropic", "claude-opus-5", jsonBackend(`{}`), nil)

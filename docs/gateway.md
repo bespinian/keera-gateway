@@ -129,8 +129,8 @@ reasoning items at OpenAI. In a coding agent's session, most of the bill is the
 cache. The guardrails still apply: filters read and rewrite the request in its
 own shape, and the system prompt and the output ceiling are written into it. If
 a router falls back from such a model to a local one, the local one gets the
-translation. Without a router or a local fallback, the request is not
-translated at all, so the provider checks it rather than the gateway.
+translation. Without a local fallback or a router that reads the request, it
+is not translated at all, so the provider checks it rather than the gateway.
 
 `POST /api/v1/messages/count_tokens` is answered by the gateway with an
 estimate that errs high. It is never forwarded, because that would send the

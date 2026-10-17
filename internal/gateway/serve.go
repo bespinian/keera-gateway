@@ -131,9 +131,16 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, res *policy.Resol
 	tr.seal("")
 
 	// The router runs before the filters, so it reads what the client sent,
-	// unredacted. That is why its model should be served locally.
+	// unredacted. That is why its model should be served locally. Only a
+	// router that reads the request needs it translated: for the others,
+	// useNative decides once it knows the destinations.
 	if c.routed {
-		if b, ok = s.translate(c, b); !ok || !s.useRouter(c, b) {
+		if c.router.Decides() || c.router.Sizes() {
+			if b, ok = s.translate(c, b); !ok {
+				return
+			}
+		}
+		if !s.useRouter(c, b) {
 			return
 		}
 	}

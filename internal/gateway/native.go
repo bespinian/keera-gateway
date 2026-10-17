@@ -23,9 +23,9 @@ import (
 // forwarded in that API. It still passes every guardrail: the filters read and
 // rewrite it in its own shape, and the system prompt and the output ceiling
 // are written into it in that shape. Every other destination gets it
-// translated, as before. The translation is made only when a router or such a
-// destination needs it: on a long session it costs far more than the rest of
-// the gateway's work.
+// translated, as before. The translation is made only when such a destination,
+// or a router that reads the request, needs it: on a long session it costs far
+// more than the rest of the gateway's work.
 
 // dialect is a client API that one hosted provider serves as its own.
 type dialect interface {
