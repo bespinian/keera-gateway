@@ -40,6 +40,8 @@ type forwarded struct {
 	// wasted is how long those attempts took: time the client waited for
 	// nothing, and on a fallback router what the router cost.
 	wasted time.Duration
+	// sent is when the request went to model, the destination in resp.
+	sent time.Time
 	// release ends the in-flight count of the destination in model, so the
 	// count covers the whole answer. Failed attempts release their own before
 	// moving on. It is nil only when no destination was tried.
@@ -133,6 +135,7 @@ func (s *Server) forward(ctx context.Context, chain []policy.Model,
 		f.model, f.payload, f.at = m, out.payload, i
 
 		began := time.Now()
+		f.sent = began
 		// Two counts over different spans. The metric is this process's own
 		// concurrency and ends at the response line. The load tracker's is the
 		// destination's and lasts until the last token, which is why its

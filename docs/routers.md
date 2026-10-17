@@ -408,7 +408,10 @@ instruction or fallback destination.
   destinations differ - regions, providers, hardware - because queue depths
   cannot be compared across machines of different speed. The first token is
   the first one the model wrote - text, reasoning or a tool call - not an
-  event that only opens the stream, which some providers send at once.
+  event that only opens the stream, which some providers send at once. It is
+  timed from when the destination was sent the request, so filters and failed
+  attempts before it do not count. An answer that is not streamed counts until
+  its end.
 
 ### What it measures, and what it does not
 

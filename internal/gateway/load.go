@@ -102,10 +102,8 @@ func (l *loads) begin(key string) func() {
 
 // observe records how long a destination took to start answering.
 //
-// The input is the request's time to first token, less the time lost on
-// destinations that failed before this one. It still includes gateway
-// overhead and guardrails, which are the same for every destination of a
-// router, so they do not change their order.
+// The input is the time from sending the request to this destination until
+// its first token, or until its whole answer when the client did not stream.
 //
 // Only answers count: a fast refusal would post the best score. Failures are
 // recorded by fail, and a 4xx, being the request's fault, not at all.

@@ -748,12 +748,13 @@ func (s *Server) answer(c *call, b *body) {
 	}
 	s.finish(c)
 	// Feeds the latency router. Only real answers count, because a fast
-	// refusal would post the best score. The time lost on destinations that
-	// failed first is not this one's, so it is taken out. Stamped with the
-	// current time, not the start, so a long stream does not expire the
-	// reading at once.
-	if c.ev.Status < 400 && !c.ev.Canceled {
-		s.load.observe(c.model.Key(), c.ev.TTFT-fw.wasted, time.Now())
+	// refusal would post the best score. It is timed from when this
+	// destination was sent the request, so neither the destinations that
+	// failed first nor the client's upload and the filters count. Stamped
+	// with the current time, not the start, so a long stream does not expire
+	// the reading at once.
+	if c.ev.Status < 400 && !c.ev.Canceled && c.ev.TTFT > 0 {
+		s.load.observe(c.model.Key(), c.tr.start.Add(c.ev.TTFT).Sub(fw.sent), time.Now())
 	}
 }
 
