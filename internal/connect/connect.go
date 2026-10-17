@@ -25,9 +25,9 @@ type Client struct {
 	Label string `json:"label"`
 	// About says in one line what the client is, for the panel's picker.
 	About string `json:"about"`
-	// Path is the file the configuration belongs in. It is empty for a client
-	// configured by environment variables. A path under ~ is a config that
-	// may exist already; any other is a new file in the current directory.
+	// Path is the file the configuration belongs in. It is empty for a block
+	// that is a command to run rather than a file. A path under ~ is a config
+	// that may exist already; any other is a new file in the current directory.
 	Path string `json:"path,omitempty"`
 	// Lang is how a renderer should highlight the block: json, toml, sh or
 	// python.

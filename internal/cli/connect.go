@@ -275,7 +275,7 @@ func listConnect(w *table, clients []connect.Client,
 	for _, c := range clients {
 		where := c.Path
 		if where == "" {
-			where = "(environment variables)"
+			where = "(a command to run)"
 		}
 		_, _ = fmt.Fprintf(w, "%s\t%s\n", c.Key, where)
 	}
@@ -328,9 +328,7 @@ func printConnect(c connect.Client, own *ownKey, models []policy.Model, base str
 	case c.Path != "":
 		fmt.Fprintf(os.Stderr, "\n%s Save this as %s:\n", styleErr.head("2."), c.Path)
 	default:
-		fmt.Fprintln(os.Stderr, "\n"+styleErr.head("2.")+" These go in your shell profile, so "+
-			"every client on the machine")
-		fmt.Fprintln(os.Stderr, "   picks them up:")
+		fmt.Fprintln(os.Stderr, "\n"+styleErr.head("2.")+" Run this in a shell:")
 	}
 	fmt.Fprintln(os.Stderr)
 	fmt.Println(c.RenderKey(base, key, connectList(models)))

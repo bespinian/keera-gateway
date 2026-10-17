@@ -502,8 +502,7 @@ function instructions(ctx, state, block, placeholder) {
                     "instead of replacing it."
                   : ".",
               ]
-            : "Add these to your shell profile, so every client on the " +
-                "machine picks them up.",
+            : "Run this in a shell.",
         ),
         code(config),
         client.note ? h("p", { class: "muted" }, prose(client.note)) : null,
