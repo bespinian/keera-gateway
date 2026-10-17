@@ -57,6 +57,7 @@ const LABELS = {
   "auth.cli_token": "Signed in from the command line",
   "auth.directory_check": "Changed by the directory",
   "auth.switch_org": "Switched organisation",
+  "auth.sign_out_everywhere": "Signed out everywhere",
   "org.create": "Organisation created",
   "org.update": "Organisation changed",
   "org.delete": "Organisation deleted",

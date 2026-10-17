@@ -523,6 +523,9 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request, p *authn.Princip
 			s.fail(w, err)
 			return
 		}
+		// Unlike signing out of one browser, this is what an administrator
+		// looks for after a lost laptop.
+		s.auditf(r, p, p.OrgID, "auth.sign_out_everywhere", "user", p.UserID, nil)
 	case len(p.CredentialHash) > 0 && p.Via == authn.MethodCLI:
 		if err := s.st.DeleteCLIToken(r.Context(), p.CredentialHash); err != nil {
 			s.fail(w, err)
