@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -46,6 +47,24 @@ var outcomeClauses = map[Outcome]string{
 	OutcomeFailed:      "status >= 500",
 	OutcomeRefused:     "status BETWEEN 400 AND 499",
 	OutcomeInterrupted: "status < 400 AND error IS NOT NULL",
+}
+
+// ValidOutcome reports whether o is an outcome a log can ask for.
+func ValidOutcome(o Outcome) bool {
+	_, ok := outcomeClauses[o]
+	return ok
+}
+
+// Outcomes lists the outcomes, for the error a refused one earns.
+func Outcomes() []string {
+	var out []string
+	for o := range outcomeClauses {
+		if o != OutcomeAny {
+			out = append(out, string(o))
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // outcomeClause is the condition for o, or OutcomeAny's for an outcome it does

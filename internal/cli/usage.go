@@ -97,8 +97,12 @@ func failuresCmd(ctx context.Context, args []string) error {
 	c := r.c
 	// 'all' is every request that did not deliver, which the request log
 	// calls unhappy.
-	if *kind == "all" {
+	switch *kind {
+	case "all":
 		*kind = string(store.OutcomeUnhappy)
+	case string(store.OutcomeFailed), string(store.OutcomeRefused), string(store.OutcomeInterrupted):
+	default:
+		return fmt.Errorf("--kind takes failed, refused, interrupted or all, not %q", *kind)
 	}
 	q, err := reportQuery(ctx, c, r.org, w, *since, map[string]string{
 		"outcome": *kind, "facets": "1", "limit": strconv.Itoa(*limit), "alias": *alias,

@@ -276,8 +276,15 @@ func (s *Server) requestQuery(w http.ResponseWriter, r *http.Request, p *authn.P
 		return rq, from, to, false
 	}
 	q := r.URL.Query()
+	outcome := store.Outcome(q.Get("outcome"))
+	// Refused rather than read as every request, so a typo does not list
+	// successes under a heading that says failures.
+	if !store.ValidOutcome(outcome) {
+		badRequest(w, "'outcome' must be one of "+strings.Join(store.Outcomes(), ", "))
+		return rq, from, to, false
+	}
 	rq = store.RequestQuery{OrgID: orgID, ReportScope: sc, Holder: holder,
-		Outcome:   store.Outcome(q.Get("outcome")),
+		Outcome:   outcome,
 		RequestID: strings.TrimSpace(q.Get("request_id"))}
 	rq.Status, rq.StatusClass = parseStatus(q.Get("status"))
 	return rq, from, to, true
