@@ -280,22 +280,31 @@ type Settlement struct {
 	Retry bool
 }
 
+// Settled is what Settle did.
+type Settled struct {
+	Payment Payment
+	// Ended is false when the payment had ended already, so a webhook and a
+	// poll arriving together credit it once.
+	Ended bool
+	// OldToken is the card a newly saved one replaced, for PostFinance to
+	// forget.
+	OldToken int64
+	// Lifted is set when the payment lifted the organisation's limit.
+	Lifted bool
+}
+
 // Settle ends a pending payment. A paid one adds its credit, saves its card
 // if it brought one, clears a failed top-up and lifts the organisation's
 // limit; a failed automatic top-up stops the next. A failed payment that is
 // paid after all, such as a top-up given up on after a day, is credited too.
-// settled is false when the payment had ended already, so a webhook and a
-// poll arriving together credit it once. oldToken is the card a newly saved
-// one replaced, for PostFinance to forget.
-func (s *Store) Settle(ctx context.Context, paymentID string, how Settlement) (
-	p Payment, settled bool, oldToken int64, err error,
-) {
+func (s *Store) Settle(ctx context.Context, paymentID string, how Settlement) (Settled, error) {
 	state := PaymentFailed
 	if how.Paid {
 		state = PaymentPaid
 	}
-	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		p, err = scanPayment(tx.QueryRow(ctx, `UPDATE payments SET state = $2, note = $3,
+	var out Settled
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		p, err := scanPayment(tx.QueryRow(ctx, `UPDATE payments SET state = $2, note = $3,
 			settled_at = now() WHERE id = $1 AND (state = 'pending' OR (state = 'failed' AND $4))
 			RETURNING `+paymentColumns,
 			paymentID, state, nullable(how.Note), how.Paid))
@@ -305,7 +314,7 @@ func (s *Store) Settle(ctx context.Context, paymentID string, how Settlement) (
 		if err != nil {
 			return err
 		}
-		settled = true
+		out.Payment, out.Ended = p, true
 		switch {
 		case how.Paid:
 			if err := addCredit(ctx, tx, p.OrgID, p.Micros); err != nil {
@@ -313,10 +322,12 @@ func (s *Store) Settle(ctx context.Context, paymentID string, how Settlement) (
 			}
 			// Paying once lifts the limit a signed-up organisation starts with.
 			// A grant does not: it is not money from the organisation.
-			if _, err := tx.Exec(ctx, "UPDATE orgs SET limited = false WHERE id = $1 AND limited",
-				p.OrgID); err != nil {
+			tag, err := tx.Exec(ctx, "UPDATE orgs SET limited = false WHERE id = $1 AND limited",
+				p.OrgID)
+			if err != nil {
 				return err
 			}
+			out.Lifted = tag.RowsAffected() > 0
 			var old *int64
 			if err := tx.QueryRow(ctx, `UPDATE credit_accounts SET topup_error = NULL
 				WHERE org_id = $1 RETURNING card_token`, p.OrgID).Scan(&old); err != nil {
@@ -329,7 +340,7 @@ func (s *Store) Settle(ctx context.Context, paymentID string, how Settlement) (
 					return err
 				}
 				if old != nil && *old != how.Token {
-					oldToken = *old
+					out.OldToken = *old
 				}
 			}
 		case p.Kind == PaymentAuto && !how.Retry:
@@ -341,14 +352,13 @@ func (s *Store) Settle(ctx context.Context, paymentID string, how Settlement) (
 		return nil
 	})
 	if err != nil {
-		return Payment{}, false, 0, err
+		return Settled{}, err
 	}
-	if !settled {
+	if !out.Ended {
 		// It had ended already.
-		p, err = s.Payment(ctx, paymentID)
-		return p, false, 0, err
+		out.Payment, err = s.Payment(ctx, paymentID)
 	}
-	return p, true, oldToken, nil
+	return out, err
 }
 
 // Payment reads one payment.

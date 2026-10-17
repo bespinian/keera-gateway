@@ -94,9 +94,9 @@ func TestAPaymentIsCreditedOnce(t *testing.T) {
 	}
 	card := &SavedCard{Label: "Visa •••• 4821"}
 	for i, want := range []bool{true, false} {
-		got, settled, _, err := st.Settle(ctx, p.ID, Settlement{Paid: true, Card: card, Token: 7})
-		if err != nil || settled != want || got.State != PaymentPaid {
-			t.Fatalf("settle %d: %+v settled=%v err=%v", i, got, settled, err)
+		got, err := st.Settle(ctx, p.ID, Settlement{Paid: true, Card: card, Token: 7})
+		if err != nil || got.Ended != want || got.Payment.State != PaymentPaid {
+			t.Fatalf("settle %d: %+v err=%v", i, got, err)
 		}
 	}
 	a, err := st.CreditAccount(ctx, f.orgID)
@@ -120,12 +120,12 @@ func TestANewCardReplacesTheSavedOne(t *testing.T) {
 		if err := st.CreatePayment(ctx, p); err != nil {
 			t.Fatal(err)
 		}
-		_, _, old, err := st.Settle(ctx, p.ID, Settlement{Paid: true,
+		got, err := st.Settle(ctx, p.ID, Settlement{Paid: true,
 			Card: &SavedCard{Label: "card"}, Token: token})
 		if err != nil {
 			t.Fatal(err)
 		}
-		return old
+		return got.OldToken
 	}
 	if old := pay(7); old != 0 {
 		t.Errorf("the first card replaced %d", old)
@@ -167,7 +167,7 @@ func TestAnAccountBelowItsThresholdIsDueATopUp(t *testing.T) {
 	if err := st.CreatePayment(ctx, seed); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := st.Settle(ctx, seed.ID, Settlement{Paid: true,
+	if _, err := st.Settle(ctx, seed.ID, Settlement{Paid: true,
 		Card: &SavedCard{Label: "card"}, Token: 7}); err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestAnAccountBelowItsThresholdIsDueATopUp(t *testing.T) {
 		t.Error("due while a top-up is under way")
 	}
 
-	if _, _, _, err := st.Settle(ctx, auto.ID, Settlement{Note: "card declined"}); err != nil {
+	if _, err := st.Settle(ctx, auto.ID, Settlement{Note: "card declined"}); err != nil {
 		t.Fatal(err)
 	}
 	if a, _ := st.CreditAccount(ctx, f.orgID); a.TopUpError != "card declined" {
@@ -216,7 +216,7 @@ func TestADeletedOrganisationsCardIsNotCharged(t *testing.T) {
 	if err := st.CreatePayment(ctx, p); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := st.Settle(ctx, p.ID, Settlement{Paid: true,
+	if _, err := st.Settle(ctx, p.ID, Settlement{Paid: true,
 		Card: &SavedCard{Label: "card"}, Token: 7}); err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +283,7 @@ func TestTheFirstPaymentLiftsTheLimit(t *testing.T) {
 	if err := st.CreatePayment(ctx, failed); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := st.Settle(ctx, failed.ID, Settlement{Note: "declined"}); err != nil {
+	if _, err := st.Settle(ctx, failed.ID, Settlement{Note: "declined"}); err != nil {
 		t.Fatal(err)
 	}
 	if !isLimited() {
@@ -295,10 +295,20 @@ func TestTheFirstPaymentLiftsTheLimit(t *testing.T) {
 	if err := st.CreatePayment(ctx, paid); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := st.Settle(ctx, paid.ID, Settlement{Paid: true}); err != nil {
-		t.Fatal(err)
+	if got, err := st.Settle(ctx, paid.ID, Settlement{Paid: true}); err != nil || !got.Lifted {
+		t.Fatalf("Settle = %+v, %v; want the limit lifted", got, err)
 	}
 	if isLimited() {
 		t.Error("the organisation is still limited after paying")
+	}
+
+	// Only the first payment lifts it, so only that one has to be announced.
+	again := Payment{ID: id.New("pay"), OrgID: f.orgID, Kind: PaymentTopUp,
+		Micros: 20_000_000, Actor: "ada@example.ch"}
+	if err := st.CreatePayment(ctx, again); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := st.Settle(ctx, again.ID, Settlement{Paid: true}); err != nil || got.Lifted {
+		t.Errorf("Settle = %+v, %v; want nothing lifted the second time", got, err)
 	}
 }

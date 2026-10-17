@@ -491,24 +491,30 @@ func (s *Server) settleWith(ctx context.Context, pm store.Payment, tx payment.Tr
 	default:
 		return nil
 	}
-	settled, ended, oldToken, err := s.st.Settle(ctx, pm.ID, how)
-	if err != nil || !ended {
+	done, err := s.st.Settle(ctx, pm.ID, how)
+	if err != nil || !done.Ended {
 		return err
 	}
-	if oldToken != 0 {
-		s.deleteToken(ctx, pay, oldToken)
+	settled := done.Payment
+	if done.OldToken != 0 {
+		s.deleteToken(ctx, pay, done.OldToken)
 	}
 	s.refreshCredit(ctx)
-	if settled.State == store.PaymentPaid {
-		// A first payment lifts a signed-up organisation's limit, which
-		// changes what its models may reach.
+	if done.Lifted {
+		// Lifting a signed-up organisation's limit changes what its models
+		// may reach. Any other payment changes only the balance.
 		s.announce(ctx, registry.AnyChange)
 	}
+	s.auditPayment(ctx, settled)
+	return nil
+}
+
+// auditPayment records how a payment ended, however it was settled.
+func (s *Server) auditPayment(ctx context.Context, settled store.Payment) {
 	if err := s.st.Audit(ctx, "payments", settled.OrgID, "billing.payment."+string(settled.State),
 		"payment", settled.ID, map[string]any{"micros": settled.Micros, "note": settled.Note}); err != nil {
 		s.log.Warn("writing audit entry failed", "error", err, "action", "billing.payment")
 	}
-	return nil
 }
 
 // paidInFull reports whether a transaction is for what the payment asked.
@@ -657,12 +663,12 @@ func (s *Server) settlePending(ctx context.Context, now time.Time) {
 }
 
 // settleFailed ends a payment as failed. A failed automatic top-up stops the
-// next until someone acts, unless retry says the card was not at fault. Only
-// that changes the account, so only then is the gateway told.
+// next until someone acts, unless retry says the card was not at fault. The
+// balance stays as it was, so the gateway has nothing to read again.
 func (s *Server) settleFailed(ctx context.Context, pm store.Payment, note string, retry bool) error {
-	_, settled, _, err := s.st.Settle(ctx, pm.ID, store.Settlement{Note: note, Retry: retry})
-	if err == nil && settled && pm.Kind == store.PaymentAuto && !retry {
-		s.refreshCredit(ctx)
+	done, err := s.st.Settle(ctx, pm.ID, store.Settlement{Note: note, Retry: retry})
+	if err == nil && done.Ended {
+		s.auditPayment(ctx, done.Payment)
 	}
 	return err
 }
