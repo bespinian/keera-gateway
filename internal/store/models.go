@@ -115,9 +115,10 @@ func (s *Store) SetModelCredential(ctx context.Context, orgID, alias string, sea
 		orgID, alias, sealed)
 }
 
-// DeleteModel removes one of an organisation's models.
+// DeleteModel removes one of an organisation's models, and takes it off the
+// organisation's allow-list, where adding it put it.
 func (s *Store) DeleteModel(ctx context.Context, orgID, alias string) error {
-	return s.execOne(ctx, "DELETE FROM models WHERE org_id = $1 AND alias = $2", orgID, alias)
+	return s.deleteAllowed(ctx, "models", orgID, alias)
 }
 
 // ModelStat is how fast one model has been answering, for the list.

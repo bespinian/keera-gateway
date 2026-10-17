@@ -261,8 +261,11 @@ The exceptions:
 
 When an organisation's guardrail lists allowed models, a model the organisation
 adds is put on that list, whether it was added in the panel, with
-`keera model add` or with `keera model apply`. Projects and keys that list
-models keep their own lists.
+`keera model add` or with `keera model apply`. New routers are added
+[only when the list allows their destinations](routers.md#allowing-a-router-allows-its-destinations).
+Projects and keys that list models keep their own lists. Deleting a model takes
+it off every list in the organisation, so a model added later under the same
+alias is not allowed by accident. A list that named only it allows nothing.
 
 A budget with no period is a monthly one. Budgets reset on UTC boundaries in
 every deployment.

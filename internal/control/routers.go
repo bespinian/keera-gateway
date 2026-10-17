@@ -117,6 +117,11 @@ func (s *Server) putRouter(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	if !s.checkDestinations(w, r, &rt) {
 		return
 	}
+	_, err := s.st.Router(r.Context(), orgID, rt.Alias)
+	found, ok := s.replacing(w, err)
+	if !ok {
+		return
+	}
 
 	saved, err := s.st.UpsertRouter(r.Context(), rt)
 	if err != nil {
@@ -124,8 +129,62 @@ func (s *Server) putRouter(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		return
 	}
 	s.auditf(r, p, orgID, "router.put", "router", rt.Alias, saved)
+	out := SavedRouter{Router: saved}
+	if out.Warning, err = s.allowRouter(r, p, saved, found); err != nil {
+		s.fail(w, err)
+		return
+	}
 	s.changed(r)
-	httpx.WriteJSON(w, http.StatusOK, saved)
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// SavedRouter is what a PUT answers with: the router, and what the
+// organisation's allow-list now does with it, when that is not what an
+// administrator would expect.
+type SavedRouter struct {
+	policy.Router
+	Warning string `json:"warning,omitempty"`
+}
+
+// allowRouter puts a new router on its organisation's allow-list, as a new
+// model is, so it can be called once it is added.
+//
+// Allowing a router allows every destination. So a new router stays off a
+// list that leaves out one of them, and a router already on the list that now
+// sends to such a model opens it. Either way it says so.
+func (s *Server) allowRouter(r *http.Request, p *authn.Principal, rt policy.Router, found bool,
+) (string, error) {
+	lim, err := s.storedLimits(r.Context(), policy.ScopeOrg, rt.OrgID)
+	if err != nil || lim.AllowedModels == nil {
+		return "", err
+	}
+	missing := ""
+	for _, d := range rt.Destinations {
+		if !slices.Contains(lim.AllowedModels, d) {
+			missing = d
+			break
+		}
+	}
+	// A new router can be on the list already: an administrator may name an
+	// alias before anything is added under it.
+	listed := slices.Contains(lim.AllowedModels, rt.Alias)
+	switch {
+	case listed && missing != "":
+		return "the organisation's allow-list names '" + rt.Alias + "', so every key that may " +
+			"call it can now reach '" + missing + "', which the list leaves out. Add '" +
+			missing + "' to the list, or take '" + rt.Alias + "' off it", nil
+	case found || listed:
+		return "", nil
+	case missing != "":
+		return "the organisation's allow-list leaves out '" + missing + "', so the router " +
+			"was not put on it: allowing a router allows every destination. No key can call '" +
+			rt.Alias + "' until the list names it", nil
+	}
+	allowed, err := s.st.AllowInOrg(r.Context(), rt.OrgID, rt.Alias)
+	if allowed {
+		s.auditf(r, p, rt.OrgID, "guardrail.allow_model", string(policy.ScopeOrg), rt.OrgID, rt.Alias)
+	}
+	return "", err
 }
 
 // routerProblem says what is wrong with a router's own fields, or "" when
@@ -286,7 +345,9 @@ func (s *Server) checkDestinations(w http.ResponseWriter, r *http.Request,
 
 // deleteRouter keeps a router that is still in use. Editors that name it are
 // out of sight. What can be seen are the scopes whose allow-list names it:
-// they would be left able to reach nothing.
+// they would be left able to reach nothing. The organisation's own list names
+// every router it allowed when it was added, so there the router is taken off
+// with it, unless it is all the list names.
 func (s *Server) deleteRouter(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	s.deleteUnused(w, r, p, "router", s.st.RouterUsers, s.st.DeleteRouter, func(alias, users string) string {
 		return "the router '" + alias + "' is in the allow-list of " + users +

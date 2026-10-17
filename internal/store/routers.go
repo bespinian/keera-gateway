@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
@@ -86,16 +88,45 @@ func (s *Store) UpsertRouter(ctx context.Context, rt policy.Router) (policy.Rout
 	return rt, err
 }
 
-// DeleteRouter removes one router.
+// DeleteRouter removes one router, and takes it off its organisation's
+// allow-list, where adding it put it.
 func (s *Store) DeleteRouter(ctx context.Context, orgID, alias string) error {
-	return s.execOne(ctx, "DELETE FROM routers WHERE org_id = $1 AND alias = $2", orgID, alias)
+	return s.deleteAllowed(ctx, "routers", orgID, alias)
+}
+
+// deleteAllowed deletes a model or router and takes its alias off every
+// allow-list in the organisation. Left there, the alias would allow whatever
+// is added under it next. A list that named only it allows nothing either
+// way. A router named by a project's or key's list is refused before this.
+func (s *Store) deleteAllowed(ctx context.Context, table, orgID, alias string) error {
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE org_id = $1 AND alias = $2",
+			orgID, alias)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		_, err = tx.Exec(ctx, `UPDATE guardrails p
+			SET allowed_models = array_remove(p.allowed_models, $2)
+			WHERE $2 = ANY (p.allowed_models) AND (
+			     (p.scope_type = 'org' AND p.scope_id = $1)
+			  OR (p.scope_type = 'project' AND p.scope_id IN (SELECT id FROM projects WHERE org_id = $1))
+			  OR (p.scope_type = 'key' AND p.scope_id IN (SELECT id FROM api_keys WHERE org_id = $1)))`,
+			orgID, alias)
+		return err
+	})
 }
 
 // RouterUsers lists the guardrails inside one organisation whose allow-list
 // names a router. It is read before a deletion, as FilterUsers is: those
-// scopes could reach nothing once the router is gone.
+// scopes could reach nothing once the router is gone. The organisation's own
+// list counts only when it names nothing else, because DeleteRouter takes the
+// router off it.
 func (s *Store) RouterUsers(ctx context.Context, orgID, alias string) ([]GuardrailRef, error) {
-	return s.scopesNaming(ctx, "$2 = ANY (p.allowed_models)", orgID, alias)
+	return s.scopesNaming(ctx, `$2 = ANY (p.allowed_models)
+		AND (p.scope_type <> 'org' OR cardinality(p.allowed_models) = 1)`, orgID, alias)
 }
 
 // RouterOutcome is what one routing decision came to: the request went where

@@ -31,6 +31,7 @@ import {
   icons,
   aliasProblem,
   takenProblem,
+  toast,
   currentRange,
   rangePicker,
   isAdmin,
@@ -145,10 +146,11 @@ export async function routersView(ctx) {
             onEdit: () => editRouter(ctx, rt, readers),
             deleteTitle: "Delete this router",
             body:
-              "A router named in an allow-list cannot be deleted. " +
-              "Take it off those allow-lists first; the error lists " +
-              "them. Clients still using the alias will be told the " +
-              "model does not exist.",
+              "Deleting it takes it off the organisation's allow-list. " +
+              "It cannot be deleted while a project's or key's " +
+              "allow-list names it, or while it is all the organisation's " +
+              "list names; the error lists them. Clients still " +
+              "using the alias will be told the model does not exist.",
             confirmLabel: "Delete router",
             remove: () => api.deleteRouter(ctx.orgID, rt.alias),
           }),
@@ -1488,7 +1490,20 @@ function editRouter(ctx, existing, readers) {
       : "A key allowed to use this router can reach all its destinations.",
     body: h("form", {}, modeField, rest),
     submitLabel: creating ? "Create router" : "Save",
-    done: creating ? "Router created" : "Router saved",
+    // Saved either way. The warning says what the organisation's allow-list
+    // now does with the router, and stays up long enough to read.
+    done: (saved) => {
+      const said = creating ? "Router created" : "Router saved";
+      if (!saved || !saved.warning) return said;
+      toast(
+        said +
+          ", but " +
+          saved.warning +
+          ". Change the list in the organisation's Guardrails.",
+        "bad",
+      );
+      return "";
+    },
     ctx,
     submit: async () => {
       // Checked before the request: an empty alias addresses no router, so
@@ -1516,7 +1531,7 @@ function editRouter(ctx, existing, readers) {
           throw new Error(taken);
         }
       }
-      await api.putRouter(ctx.orgID, alias.value.trim(), {
+      return api.putRouter(ctx.orgID, alias.value.trim(), {
         mode: chosen,
         // A router that reads nothing carries nothing that would decide for
         // it, so a deciding model the form still holds is not saved.

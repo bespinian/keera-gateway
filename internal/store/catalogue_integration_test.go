@@ -120,11 +120,35 @@ func TestModelCatalogueRoundTrip(t *testing.T) {
 		t.Errorf("setting a credential on a missing alias gave %v, want ErrNotFound", err)
 	}
 
+	if err := st.PutGuardrail(ctx, policy.ScopeOrg, "org_1", policy.Limits{
+		AllowedModels: []string{"keera-code", "other"},
+	}); err != nil {
+		t.Fatalf("PutGuardrail: %v", err)
+	}
+	if _, err := st.CreateProject(ctx, Project{ID: "project_2", OrgID: "org_1", Name: "Lending"}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	if err := st.PutGuardrail(ctx, policy.ScopeProject, "project_2", policy.Limits{
+		AllowedModels: []string{"keera-code"},
+	}); err != nil {
+		t.Fatalf("PutGuardrail: %v", err)
+	}
 	if err := st.DeleteModel(ctx, "org_1", "keera-code"); err != nil {
 		t.Fatalf("DeleteModel: %v", err)
 	}
 	if _, err := st.Model(ctx, "org_1", "keera-code"); err != ErrNotFound {
 		t.Errorf("Model after delete gave %v, want ErrNotFound", err)
+	}
+	// Left on the list, the alias would allow whatever is added under it next.
+	if lim, _ := st.GetGuardrail(ctx, policy.ScopeOrg, "org_1"); !slices.Equal(lim.AllowedModels,
+		[]string{"other"}) {
+		t.Errorf("allow-list after delete = %v, want [other]", lim.AllowedModels)
+	}
+	// A project's list too, and one that named only it still allows nothing.
+	if lim, _ := st.GetGuardrail(ctx, policy.ScopeProject, "project_2"); lim.AllowedModels == nil ||
+		len(lim.AllowedModels) != 0 {
+		t.Errorf("project allow-list after delete = %#v, want empty, not unrestricted",
+			lim.AllowedModels)
 	}
 	if err := st.DeleteModel(ctx, "org_1", "keera-code"); err != ErrNotFound {
 		t.Errorf("deleting it twice gave %v, want ErrNotFound", err)

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -595,6 +596,157 @@ func TestAOneDestinationRouterStaysOnTheAllowList(t *testing.T) {
 	})
 	if code != http.StatusConflict || !strings.Contains(out, "router_model_not_allowed") {
 		t.Fatalf("narrowing the list past the deciding model: status = %d, want 409: %s", code, out)
+	}
+}
+
+// A new router joins the organisation's allow-list as a new model does, or no
+// key could call it. Only when the list allows every destination: allowing a
+// router allows them all, so otherwise it would open a model the list leaves
+// out.
+func TestANewRouterJoinsAnAllowListThatCoversItsDestinations(t *testing.T) {
+	st, ctx := routerStore(t)
+	srv := routerServer(ctx, t, st)
+	if err := st.PutGuardrail(ctx, policy.ScopeOrg, "org_1", policy.Limits{
+		AllowedModels: []string{"keera-small", "keera-picker"},
+	}); err != nil {
+		t.Fatalf("PutGuardrail: %v", err)
+	}
+	allowed := func() []string {
+		t.Helper()
+		lim, err := st.GetGuardrail(ctx, policy.ScopeOrg, "org_1")
+		if err != nil {
+			t.Fatalf("GetGuardrail: %v", err)
+		}
+		return lim.AllowedModels
+	}
+
+	code, out := putTo(t, srv, "/v1/routers/small", map[string]any{
+		"mode": "fallback", "destinations": []string{"keera-small"},
+	})
+	if code != http.StatusOK || strings.Contains(out, "warning") {
+		t.Fatalf("status = %d, want 200 and no warning: %s", code, out)
+	}
+	if !slices.Contains(allowed(), "small") {
+		t.Errorf("allow-list = %v, want the router on it", allowed())
+	}
+
+	code, out = putTo(t, srv, "/v1/routers/both", map[string]any{
+		"mode": "fallback", "destinations": []string{"keera-small", "keera-large"},
+	})
+	if code != http.StatusOK || !strings.Contains(out, `"warning":"`) ||
+		!strings.Contains(out, "keera-large") {
+		t.Fatalf("status = %d, want 200 and a warning naming keera-large: %s", code, out)
+	}
+	if slices.Contains(allowed(), "both") {
+		t.Errorf("allow-list = %v; the router opens keera-large, which it leaves out", allowed())
+	}
+
+	// An alias the list names before anything is added under it is allowed
+	// already, so the warning says the router opens the model.
+	if err := st.PutGuardrail(ctx, policy.ScopeOrg, "org_1", policy.Limits{
+		AllowedModels: []string{"keera-small", "keera-picker", "early"},
+	}); err != nil {
+		t.Fatalf("PutGuardrail: %v", err)
+	}
+	code, out = putTo(t, srv, "/v1/routers/early", map[string]any{
+		"mode": "fallback", "destinations": []string{"keera-small", "keera-large"},
+	})
+	if code != http.StatusOK || !strings.Contains(out, "can now reach 'keera-large'") {
+		t.Fatalf("status = %d, want 200 and a warning that keera-large is open: %s", code, out)
+	}
+
+	// Saving a router again leaves the list alone, whatever an administrator
+	// did to it in between.
+	if err := st.PutGuardrail(ctx, policy.ScopeOrg, "org_1", policy.Limits{
+		AllowedModels: []string{"keera-small", "keera-picker"},
+	}); err != nil {
+		t.Fatalf("PutGuardrail: %v", err)
+	}
+	if code, out := putTo(t, srv, "/v1/routers/small", map[string]any{
+		"mode": "fallback", "destinations": []string{"keera-small"},
+	}); code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", code, out)
+	}
+	if slices.Contains(allowed(), "small") {
+		t.Errorf("allow-list = %v; saving a router again put it back", allowed())
+	}
+}
+
+// A router on the organisation's allow-list opens every destination, so one
+// that is changed to send to a model the list leaves out is saved with a
+// warning.
+func TestARouterOnTheAllowListWarnsWhenItOpensAModel(t *testing.T) {
+	st, ctx := routerStore(t)
+	srv := routerServer(ctx, t, st)
+	if err := st.PutGuardrail(ctx, policy.ScopeOrg, "org_1", policy.Limits{
+		AllowedModels: []string{"keera-small", "keera-picker"},
+	}); err != nil {
+		t.Fatalf("PutGuardrail: %v", err)
+	}
+	if code, out := putTo(t, srv, "/v1/routers/small", map[string]any{
+		"mode": "fallback", "destinations": []string{"keera-small"},
+	}); code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", code, out)
+	}
+
+	code, out := putTo(t, srv, "/v1/routers/small", map[string]any{
+		"mode": "fallback", "destinations": []string{"keera-small", "keera-large"},
+	})
+	if code != http.StatusOK || !strings.Contains(out, `"warning":"`) ||
+		!strings.Contains(out, "keera-large") {
+		t.Fatalf("status = %d, want 200 and a warning naming keera-large: %s", code, out)
+	}
+}
+
+// Adding a router puts it on the organisation's allow-list, so deleting it
+// takes it off again. Only a list that names nothing else keeps it.
+func TestDeleteRouterTakesItOffTheOrganisationsList(t *testing.T) {
+	st, ctx := routerStore(t)
+	srv := routerServer(ctx, t, st)
+	del := func(alias string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodDelete,
+			httpx.ControlPrefix+"/v1/routers/"+alias+"?org_id=org_1", nil)
+		req.Header.Set("Authorization", "Bearer "+testOperatorKey)
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, req)
+		return w
+	}
+	if err := st.PutGuardrail(ctx, policy.ScopeOrg, "org_1", policy.Limits{
+		AllowedModels: []string{"keera-small", "keera-picker"},
+	}); err != nil {
+		t.Fatalf("PutGuardrail: %v", err)
+	}
+	if code, out := putTo(t, srv, "/v1/routers/small", map[string]any{
+		"mode": "fallback", "destinations": []string{"keera-small"},
+	}); code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", code, out)
+	}
+
+	if w := del("small"); w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	lim, err := st.GetGuardrail(ctx, policy.ScopeOrg, "org_1")
+	if err != nil {
+		t.Fatalf("GetGuardrail: %v", err)
+	}
+	if slices.Contains(lim.AllowedModels, "small") {
+		t.Errorf("allow-list = %v, want the router gone from it", lim.AllowedModels)
+	}
+
+	// A list narrowed to the router would be left reaching nothing.
+	if code, out := putTo(t, srv, "/v1/routers/small", map[string]any{
+		"mode": "fallback", "destinations": []string{"keera-small"},
+	}); code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", code, out)
+	}
+	if err := st.PutGuardrail(ctx, policy.ScopeOrg, "org_1", policy.Limits{
+		AllowedModels: []string{"small"},
+	}); err != nil {
+		t.Fatalf("PutGuardrail: %v", err)
+	}
+	if w := del("small"); w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", w.Code, w.Body.String())
 	}
 }
 

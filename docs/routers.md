@@ -57,6 +57,12 @@ A key that may use `auto` may reach every destination of `auto`, whatever its
 own allow-list says. The setup above needs this: a key narrowed to the router
 has nothing else in its allow-list.
 
+So a new router joins the organisation's allow-list only when that list allows
+all its destinations. Otherwise it would open a model the list leaves out, and
+the router stays off the list until an administrator adds it; the panel and the
+command say that no key can call it yet. Changing a router on the list to send
+to such a model is saved with a warning.
+
 The panel marks routers in an allow-list and shows where they send.
 
 ## The list decides, not the instruction
@@ -508,9 +514,10 @@ in the same field, so the two cannot share an alias. Creating a router over the
 alias of one of the organisation's models is refused, and so is adding a model
 under a router's alias.
 
-Deleting a router that an allow-list still names is refused with a 409
-`router_in_use`, and the refusal lists the scopes. Take it off those
-allow-lists first.
+Deleting a router takes it off the organisation's allow-list. Deleting one that
+a project's or key's allow-list still names, or that is all the organisation's
+list names, is refused with a 409 `router_in_use`, and the refusal lists the
+scopes. Take it off those allow-lists first.
 
 ## Where a router is not
 

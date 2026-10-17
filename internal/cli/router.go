@@ -3,9 +3,11 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/bespinian/keera-gateway/internal/control"
 	"github.com/bespinian/keera-gateway/internal/gateway"
 	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/store"
@@ -98,8 +100,10 @@ func (r *routerRun) delete(ctx context.Context) error {
 	// The control plane guards the scopes that use one, but not the clients:
 	// they name routers in their own configuration, and would get "model not
 	// found".
-	return r.deleteEntry(ctx, rt.Alias,
-		[]string{"  any client still naming it is told the model does not exist"})
+	return r.deleteEntry(ctx, rt.Alias, []string{
+		"  it leaves the organisation's allow-list",
+		"  any client still naming it is told the model does not exist",
+	})
 }
 
 func (r *routerRun) put(ctx context.Context) error {
@@ -113,12 +117,24 @@ func (r *routerRun) put(ctx context.Context) error {
 	if err := r.apply(&rt); err != nil {
 		return err
 	}
-	return putAlias(ctx, r.aliasRun, rt.Alias, map[string]any{
+	var saved control.SavedRouter
+	if err := r.c.do(ctx, "PUT", r.path(rt.Alias, ""), map[string]any{
 		"mode": rt.Mode, "model": rt.Model, "prompt": rt.Prompt,
 		"destinations": rt.Destinations, "ceilings": rt.Ceilings,
 		// Always sent, so that clearing the fallback works.
 		"fallback": rt.Fallback, "description": rt.Description,
-	}, printRouter)
+	}, &saved); err != nil {
+		return err
+	}
+	if err := out(r.asJSON, saved, func(w *table) { printRouter(w, saved.Router) }); err != nil {
+		return err
+	}
+	if saved.Warning != "" && !r.asJSON {
+		fmt.Fprintf(os.Stderr, "\n%s\n", styleErr.warn(wrapAt(saved.Warning+
+			". 'keera guardrail set org <org> --models' sets the whole list, so name "+
+			"every model it should allow.", 0, 0, 76)))
+	}
+	return nil
 }
 
 // apply writes the given flags into rt.
