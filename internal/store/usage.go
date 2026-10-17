@@ -379,7 +379,6 @@ type ReportScope struct {
 	Alias string
 }
 
-// Empty reports whether this scope narrows anything at all.
 func (sc ReportScope) Empty() bool {
 	return sc.ProjectID == "" && sc.KeyID == "" && sc.UserID == "" && sc.Alias == ""
 }
@@ -403,7 +402,6 @@ func (sc ReportScope) narrow(table string, n int) string {
 	return fmt.Sprintf(scopeClause, table, n+1, n+2, n+3, n+4)
 }
 
-// UsageQuery narrows a usage report.
 type UsageQuery struct {
 	OrgID string
 	ReportScope

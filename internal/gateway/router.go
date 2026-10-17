@@ -269,9 +269,9 @@ func readerProblem(m policy.Model, found, choice bool) string {
 // settle records what a trying router's attempts came to, once they are over.
 //
 // The first destination answering is 'chose', a later one or the router's
-// fallback is 'fallback', and none is 'error'; then the client gets the last destination's own failure.
-// The failed attempts' time is added to the decision's, since that is what the
-// router added.
+// fallback is 'fallback', and none is 'error', in which case the client gets
+// the last destination's own failure. The failed attempts' time is added to
+// the decision's, since that is what the router added.
 func (d *routeDecision) settle(f forwarded) {
 	d.alias = f.model.Alias
 	d.took += f.wasted

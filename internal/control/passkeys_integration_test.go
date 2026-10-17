@@ -109,7 +109,6 @@ func (b *browser) me() (int, map[string]any) {
 	return status, me
 }
 
-// decode turns one field of a response back into a typed value.
 func decode[T any](t *testing.T, v any) T {
 	t.Helper()
 	raw, _ := json.Marshal(v)
@@ -159,7 +158,6 @@ func (e *passkeyEnv) setUp(token string, a *passkeytest.Authenticator) (*browser
 	return b, status, out
 }
 
-// signIn signs a fresh browser in with a passkey.
 func (e *passkeyEnv) signIn(a *passkeytest.Authenticator) (*browser, int, map[string]any) {
 	e.t.Helper()
 	return e.signInTo(a, "")

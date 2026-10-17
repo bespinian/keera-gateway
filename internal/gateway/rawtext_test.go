@@ -39,7 +39,7 @@ func TestTextReachesTheBackendAsTheClientWroteIt(t *testing.T) {
 func TestTextTheBackendMightRefuseIsCleanedUp(t *testing.T) {
 	// Bytes that are not UTF-8, and a lone half of a surrogate pair, are valid
 	// enough for the gateway but not for a tokenizer. They become U+FFFD, as
-	// they did when every text was decoded.
+	// decoding would make them.
 	in := "{\"model\":\"m\",\"messages\":[{\"role\":\"user\",\"content\":\"a\xffb\"}," +
 		`{"role":"assistant","content":"c\ud800d"},{"role":"user","content":"e🙂f"}]}`
 	raw, err := decodeRaw(anthropicShape{}, in)
@@ -72,7 +72,7 @@ func TestTextBlocksAreJoinedWithoutLosingTheirEscapes(t *testing.T) {
 }
 
 func TestContentThatIsNotTextIsStillRefused(t *testing.T) {
-	// Text is no longer decoded, so its type is checked on its own.
+	// Text is not decoded, so its type is checked on its own.
 	for _, content := range []string{`5`, `[{"type":"text","text":5}]`, `{"text":"x"}`} {
 		in := `{"model":"m","messages":[{"role":"user","content":` + content + `}]}`
 		_, _, err := anthropicShape{}.decodeBody([]byte(in))

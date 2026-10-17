@@ -11,10 +11,10 @@ import (
 // cgroupMemoryMax is where cgroup v2 shows a container its memory limit.
 const cgroupMemoryMax = "/sys/fs/cgroup/memory.max"
 
-// setMemoryLimit keeps the gateway's memory under its container's limit.
-// Near the limit the garbage collector works harder instead of the kernel
-// killing the process, which a burst of large requests could otherwise cause.
-// A tenth is left for what Go does not count. GOMEMLIMIT, if set, wins.
+// setMemoryLimit keeps the gateway under its container's memory limit, so a
+// burst of large requests makes the garbage collector work harder instead of
+// the kernel killing the process. A tenth is left for memory Go does not
+// count. GOMEMLIMIT, if set, wins.
 func setMemoryLimit(log *slog.Logger) {
 	if os.Getenv("GOMEMLIMIT") != "" {
 		return

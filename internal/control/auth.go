@@ -49,8 +49,7 @@ func (s *Server) providerList() []map[string]any {
 // authConfig tells the panel how to offer signing in, before anybody has.
 func (s *Server) authConfig(w http.ResponseWriter, _ *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"sso": s.opts.Providers.Enabled(),
-		// One button per provider.
+		"sso":       s.opts.Providers.Enabled(),
 		"providers": s.providerList(),
 		"passkeys":  s.opts.Passkeys != nil,
 	})
@@ -497,7 +496,6 @@ func actorOf(user store.User) *authn.Principal {
 	return &authn.Principal{Via: authn.MethodSession, Email: user.Email, UserID: user.ID}
 }
 
-// startSession creates a session and sets its cookie.
 func (s *Server) startSession(w http.ResponseWriter, r *http.Request, user store.User) error {
 	token, hash, csrf := authn.NewSession()
 	expires := time.Now().Add(authn.SessionTTL)
@@ -510,7 +508,6 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, user store
 	return nil
 }
 
-// sessionPrincipal resolves the session cookie.
 func (s *Server) sessionPrincipal(r *http.Request) (*authn.Principal, error) {
 	c, err := r.Cookie(sessionCookie)
 	if err != nil || c.Value == "" {
@@ -555,8 +552,7 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request, p *authn.Princip
 			s.fail(w, err)
 			return
 		}
-		// Unlike signing out of one browser, this is what an administrator
-		// looks for after a lost laptop.
+		// Audited, unlike signing out of one browser.
 		s.auditf(r, p, p.OrgID, "auth.sign_out_everywhere", "user", p.UserID, nil)
 	case len(p.CredentialHash) > 0 && p.Via == authn.MethodCLI:
 		if err := s.st.DeleteCLIToken(r.Context(), p.CredentialHash); err != nil {

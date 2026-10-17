@@ -57,7 +57,6 @@ type User struct {
 	LastActiveAt *time.Time `json:"last_active_at,omitempty"`
 }
 
-// Disabled reports whether this person has been turned off.
 func (u User) Disabled() bool { return u.DisabledAt != nil }
 
 // userColumnsOf is the select list userTargets fills, in its order, with each
@@ -143,8 +142,8 @@ type OrgTemplate struct {
 
 // CreateOrg inserts an organisation, with its email domain if o has one, and
 // what it starts with. The domain is stored as given, so the caller cleans it
-// with policy.CleanEmailDomain. It is one transaction, so an organisation never exists
-// without its template.
+// with policy.CleanEmailDomain. It is one transaction, so an organisation
+// never exists without its template.
 func (s *Store) CreateOrg(ctx context.Context, o Org, tmpl OrgTemplate) (Org, error) {
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
@@ -318,7 +317,6 @@ func deleteScoped(ctx context.Context, tx pgx.Tx, where, id string) error {
 	return nil
 }
 
-// ListOrgs returns every organisation.
 func (s *Store) ListOrgs(ctx context.Context) ([]Org, error) {
 	return queryAll(ctx, s.pool, scanOrg, orgColumns+" FROM orgs ORDER BY created_at")
 }
@@ -334,7 +332,6 @@ func scanOrg(r row) (Org, error) {
 	return o, err
 }
 
-// CreateProject inserts a project.
 func (s *Store) CreateProject(ctx context.Context, p Project) (Project, error) {
 	err := s.pool.QueryRow(ctx,
 		`INSERT INTO projects (id, org_id, name, description) VALUES ($1,$2,$3,$4)
@@ -658,9 +655,9 @@ func (s *Store) ActivateKey(ctx context.Context, id, name string, hash []byte, p
 }
 
 // RotateKey replaces the key oldID with next, in one transaction: next gets
-// the old key's organisation, project, person, kind and own guardrails, and the old key
-// is revoked. An empty next.Name keeps the old name. A nil next.ExpiresAt
-// gives the new key the old key's lifetime, counted from now.
+// the old key's organisation, project, person, kind and own guardrails, and
+// the old key is revoked. An empty next.Name keeps the old name. A nil
+// next.ExpiresAt gives the new key the old key's lifetime, counted from now.
 //
 // Doing it in steps can leave both keys live, or a new key without the old
 // one's limits, which quietly loosens a guardrail.

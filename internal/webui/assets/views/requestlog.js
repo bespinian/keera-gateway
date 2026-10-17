@@ -1,14 +1,8 @@
-// The request log: one row per recorded request, wherever it is being read.
+// The request log: one row per recorded request. It is the whole Requests
+// screen, and each project's, key's and model's screen ends in it.
 //
-// The Requests screen is this section and nothing else, and each project's,
-// key's and model's own screen ends in it. A chart says when something
-// changed and only the log says what changed, so whoever learns to read it
-// under one chart has learned to read it everywhere.
-//
-// The two callers differ in one thing. An entity's screen arrives already
-// narrowed and offers only the outcome buttons; the Requests screen is narrowed
-// to nothing, so it carries the filters instead, status among them. Everything
-// else, down to the dialog behind a row's View button, is shared.
+// An entity's screen is already narrowed and offers only the outcome buttons.
+// The Requests screen carries the filters instead. Everything else is shared.
 
 import { api } from "../api.js";
 import {
@@ -50,21 +44,17 @@ import {
 
 const PAGE = 100;
 
-// Whether the log is being watched, remembered like every other choice this
-// section holds. It defaults to on: somebody who opened the request log opened
-// it to find out what is happening, and the most common version of that
-// question is about the next thirty seconds rather than the last hour.
+// Whether the log is watched live. On by default: people open the log to see
+// what is happening now.
 const LIVE_KEY = "keera.requests.live";
 
-// The ranking, remembered apart from the session list's, which offers others.
+// Remembered apart from the session list's ranking, which offers others.
 const SORT_KEY = "keera.requests.sort";
 
-// The request id searched for, remembered like the filters beside it.
 const ID_KEY = "keera.requests.id";
 
-// How long a row that has just arrived is marked as new. Long enough to catch
-// the eye of somebody looking elsewhere on the screen, short enough that a log
-// nobody is watching is not a wall of highlights when they come back.
+// How long a new row stays marked. Long enough to catch the eye, short enough
+// that a log nobody watched is not a wall of highlights.
 const FRESH_MS = 4000;
 
 // How often a ranked log asks for its page again while live, at most.
@@ -72,26 +62,17 @@ const REFRESH_MS = 3000;
 
 /** requestLog is the section itself.
  *
- *  `scope` is what the caller is already about ({ project_id }, { key_id },
- *  { alias }) and is fixed; `filters` asks for the narrowing controls, which
- *  only a screen with no scope of its own has any use for, in place of the
- *  outcome buttons. `hide` drops the columns that would repeat the scope in
- *  every row.
+ *  `scope` is the fixed thing the caller is about ({ project_id }, { key_id },
+ *  { alias }). `filters` shows the narrowing controls instead of the outcome
+ *  buttons, for a screen with no scope. `hide` drops columns that would repeat
+ *  the scope in every row. `title` is the heading, empty when the page title
+ *  already says it. `trail` goes at the right end of the controls.
  *
- *  `title` is the heading over the section, which the screen that is nothing
- *  but this section passes empty - its own page title already says Requests,
- *  and the same word twice reads as two things. `trail` is what that screen
- *  puts at the right end of the controls, which is its range picker, where
- *  the live map has it too.
+ *  `live` shows new requests as they are recorded. It is opt-in because it
+ *  holds a connection open while the screen is up.
  *
- *  `live` watches the log while it is on the screen, so a request recorded now
- *  appears now. It is asked for rather than assumed, because it costs an open
- *  connection for as long as the screen is up.
- *
- *  It leads with the counts, by outcome or by status, rather than with the
- *  rows: "four hundred requests, two of them refused" and "four hundred
- *  requests, three hundred of them refused" are the same first page of a table
- *  and completely different afternoons. */
+ *  The counts come before the rows: two refusals in four hundred and three
+ *  hundred in four hundred can look the same on the first page. */
 export async function requestLog(
   ctx,
   {
@@ -108,8 +89,8 @@ export async function requestLog(
   const narrowed = filters ? readNarrowing(ctx) : {};
   const searchedID = filters ? remembered(ID_KEY) || "" : "";
   const rank = ranking(ctx, SORT_KEY);
-  // The scope wins over the narrowing: a project's own screen is about that project
-  // whatever was last picked on the dashboard.
+  // The scope wins over the narrowing: a project's screen is about that
+  // project, whatever was last picked on the dashboard.
   const params = {
     org_id: ctx.orgID,
     since,
@@ -148,8 +129,7 @@ export async function requestLog(
 
   const wrap = h("div", { style: { marginTop: "24px" } });
 
-  // The counts are held rather than only drawn, because the stream below sends
-  // fresh ones with every batch of rows.
+  // Kept, not only drawn: the stream sends fresh counts with every batch.
   const seg = filters ? null : outcomeSeg(ctx, outcome, counts);
 
   const watch = live
@@ -188,10 +168,8 @@ export async function requestLog(
     );
   }
 
-  // Both empty states still watch. An empty log is the screen most likely to be
-  // sat in front of waiting - somebody has just pointed an editor here - and
-  // "nothing yet" that stays "nothing yet" after the first request arrives is
-  // the one thing this section must not say.
+  // Both empty states still watch: an empty log is where somebody waits for
+  // their first request, and "nothing yet" must not stay after it arrives.
   if (!counts.total && !anyNarrowed) {
     wrap.append(
       h(
@@ -261,23 +239,18 @@ export async function requestLog(
   attachLive(log);
   return wrap;
 
-  /** attachLive opens the stream and keeps this section up to date from it.
+  /** attachLive keeps this section up to date from the stream. `log` is the
+   *  table, or null when there is none to add rows to.
    *
-   *  Declared inside requestLog because everything it touches belongs to one
-   *  rendering of the section: the rows array the table was built from, the
-   *  counts beside it, the labels the rows are drawn with. `log` is that
-   *  table, or null when there is nothing on screen to add a row to.
-   *
-   *  The declaration is hoisted to the top of its scope, which is what lets
-   *  the empty-period path above call it before this line. */
+   *  It is declared inside requestLog because it works on this rendering's
+   *  rows, counts and labels. Hoisting lets the empty path above call it. */
   function attachLive(log) {
     if (!watch) return;
     const ranked = rank.by !== "";
 
-    // The stream takes the narrowing and not the paging: what it is for is the
-    // rows past the newest one on the screen, and `after` is that row. A screen
-    // with no rows sends nothing and the control plane starts it at the log's
-    // current end, rather than replaying a window nobody asked to see again.
+    // The stream takes the narrowing but not the paging: it sends the rows
+    // after the newest one shown. With no rows, `after` is 0 and the control
+    // plane starts at the log's current end instead of replaying the window.
     const listen = {
       org_id: ctx.orgID,
       since,
@@ -288,9 +261,9 @@ export async function requestLog(
       after: rows.length && !ranked ? rows[0].id : 0,
     };
 
-    // A ranked page is asked for again rather than added to: where a new
-    // request belongs in it is for the control plane to say. It runs at most
-    // once every REFRESH_MS, so a busy log costs one query per interval.
+    // A ranked page is fetched again rather than added to, because the control
+    // plane decides where a new row ranks. Throttled to one query per
+    // REFRESH_MS.
     const rerank = throttled(async () => {
       const next = await api.requests({ ...params, facets: "" });
       addNames(names, next);
@@ -302,17 +275,15 @@ export async function requestLog(
     function arrived(payload) {
       if (payload.next_after) listen.after = payload.next_after;
       if (seg && payload.outcomes) seg.retally(payload.outcomes);
-      // Labels travel only when a row named something this screen opened too
-      // early to know about - a key issued a minute ago, whose first request is
-      // exactly what somebody is watching for.
+      // Labels come only for things newer than this screen, such as a key
+      // issued a minute ago.
       addNames(names, payload);
 
       const fresh = payload.data || [];
       if (!fresh.length) return;
       if (!log) {
-        // There is no table to put these in - the period was empty, or nothing
-        // matched. Drawing the screen again is what turns it into the one this
-        // reader now wants, and it happens once.
+        // No table to add to (empty period or no match): draw the screen
+        // again, once.
         ctx.reload();
         return;
       }
@@ -320,17 +291,16 @@ export async function requestLog(
         rerank();
         return;
       }
-      // The table reads newest first. A row that was committed late is older
-      // than some already shown, so each goes in where its id belongs.
+      // Newest first. A row committed late is older than some already shown,
+      // so each goes in where its id belongs.
       for (const q of fresh) {
         q.fresh = true;
         const at = rows.findIndex((r) => r.id < q.id);
         rows.splice(at < 0 ? rows.length : at, 0, q);
       }
       log.redraw();
-      // The mark comes off after a moment, and the table is drawn again so that
-      // it actually leaves. Left on, a row that arrived an hour ago would light
-      // up again the next time the reader sorted a column.
+      // Remove the mark and redraw. Left on, an old row would light up again
+      // the next time a column is sorted.
       setTimeout(() => {
         for (const q of fresh) delete q.fresh;
         log.redraw();
@@ -343,15 +313,12 @@ export async function requestLog(
   }
 }
 
-/** requestTable is a page of the log, and is exported for the one screen that
- *  holds request rows without having asked this section for them: a session,
- *  which is a task's own calls read from beginning to end. They are the same
- *  rows and so they are the same table - the same columns, the same outcome
- *  wording, the same dialog behind View.
+/** requestTable is a page of the log. A session's screen uses it too, so its
+ *  rows look the same as here.
  *
- *  `opts` is merged into the table's own options. The log passes its ranking
- *  there, because it holds one page of many. A session holds all its rows and
- *  sorts them in place, oldest first, because a task is read forwards. */
+ *  `opts` is merged into the table's options. The log passes its ranking,
+ *  since it holds one page of many. A session holds all its rows and sorts
+ *  them oldest first, because a task is read forwards. */
 export function requestTable(ctx, rows, names, hide, opts = {}) {
   const columns = [
     {
@@ -373,10 +340,8 @@ export function requestTable(ctx, rows, names, hide, opts = {}) {
             q.alias ? h("span", { class: "mono" }, q.alias) : dash(),
         },
     {
-      // The outcome and, when there is one, what the client was told. The
-      // message belongs next to the verdict rather than in a column of its own:
-      // most rows in a request log have none, and an empty column six rows wide
-      // is a column that pushes the numbers off the screen.
+      // The message sits under the outcome, not in its own column: most rows
+      // have none, and an empty column pushes the numbers off the screen.
       label: "Outcome",
       sortKey: (q) => q.status,
       cell: (q) => {
@@ -410,9 +375,7 @@ export function requestTable(ctx, rows, names, hide, opts = {}) {
     hide.key
       ? null
       : {
-          // The key is a link, because "which key was that" is never the last
-          // question: the next one is what else that key has been doing, and that
-          // is one screen over rather than a filter somebody has to rebuild.
+          // A link, because the next question is what else that key did.
           label: "Key",
           shrink: true,
           sortKey: (q) => names.keys[q.key_id] || q.key_id || null,
@@ -473,16 +436,14 @@ export function requestTable(ctx, rows, names, hide, opts = {}) {
               "span",
               { class: "nowrap" },
               amount(q.cost_micros),
-              // An estimate is marked, because the number beside it will be
-              // reconciled against an invoice by somebody who was not here.
+              // Marked, because someone will check it against an invoice.
               q.estimated ? h("span", { class: "faint" }, "~") : null,
             )
           : dash(),
     },
     {
-      // First token rather than total: for a coding agent that is the latency
-      // a developer perceives, and it is what says a model has gone slow rather
-      // than gone down. The total is on hover, and in the row's own dialog.
+      // First token rather than total: that is the wait a developer feels, and
+      // it shows a model gone slow rather than down. The total is on hover.
       label: "First token",
       num: true,
       shrink: true,
@@ -520,9 +481,7 @@ export function requestTable(ctx, rows, names, hide, opts = {}) {
 
   return table(columns, rows, {
     emptyTitle: "Nothing here",
-    // A row that arrived while the reader was looking at the screen. It is
-    // marked rather than announced: the count above already changed, and what
-    // this answers is the smaller question of which line is the new one.
+    // A row that arrived live is marked, so the reader can see which is new.
     rowClass: (q) => (q.fresh ? "row-new" : null),
     ...opts,
   });
@@ -551,22 +510,15 @@ function idSearch(ctx, value) {
   });
 }
 
-// showRequest is one request in full - the row expanded into every field the
-// gateway recorded, with the message shown whole and selectable because what is
-// done with it is pasting it into a message to somebody else.
-//
-// It also carries the way out of it. One call of forty says very little about
-// why the forty were made, and the task this one belonged to is the next thing
-// its reader wants - so the dialog offers it rather than leaving them to find
-// the Sessions screen and rebuild a filter that would not have found this row
-// anyway.
+// showRequest shows every recorded field of one request. The message is whole
+// and selectable, because people paste it to somebody else. It links to the
+// request's session, since one call says little about the task it was part of.
 export function showRequest(ctx, q, names) {
   const [label, tone, why] = outcomeMeaning(q);
   const recorded = [
     ["Model", q.alias || "-"],
-    // The status the client was sent, said in the terms of what actually
-    // happened - a stream that stopped halfway was still sent a 200, and so
-    // was one that finished.
+    // Said with what happened: a stream that stopped halfway was still sent
+    // a 200.
     ["Status", `${q.status} - ${label}`],
     [
       "Key",
@@ -585,9 +537,8 @@ export function showRequest(ctx, q, names) {
     [
       "Input tokens",
       num(q.input_tokens) +
-        // The cached share is what makes the cost reproducible: it is charged
-        // at its own rate, so without it the money on this row cannot be
-        // arrived at from the tokens on it.
+        // Cached tokens have their own rate, so the cost cannot be worked out
+        // without them.
         (q.cached_input_tokens
           ? ` (${num(q.cached_input_tokens)} from the provider's cache)`
           : "") +
@@ -622,10 +573,8 @@ export function showRequest(ctx, q, names) {
         )
     : null;
 
-  // Where the time went, when it was recorded. It goes above the fields because
-  // it is the question the dialog is most often opened with - the row already
-  // said what happened and what it cost, but not which part of the request was
-  // the wait.
+  // Where the time went goes first: it is what the dialog is most often
+  // opened for.
   const steps = flameChart(q.spans, q.latency_ms);
 
   modal({

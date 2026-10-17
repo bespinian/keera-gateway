@@ -25,9 +25,8 @@ import (
 type recorded struct {
 	method string
 	path   string
-	// query is what the command narrowed the call to, for the reports whose
-	// whole behaviour is in it: a window the CLI did not pass on is a report
-	// answering a different question from the one that was asked for.
+	// query is what the command narrowed the call to. For a report it is the
+	// whole behaviour: a window not passed on answers a different question.
 	query string
 	body  map[string]any
 }

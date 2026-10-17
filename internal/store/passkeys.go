@@ -37,7 +37,6 @@ func scanPasskey(r row) (Passkey, error) {
 // ErrPasskeyTaken is returned for a credential id that is already registered.
 var ErrPasskeyTaken = errors.New("store: that passkey is already registered")
 
-// AddPasskey stores a new passkey.
 func (s *Store) AddPasskey(ctx context.Context, p Passkey) (Passkey, error) {
 	out, err := scanPasskey(s.pool.QueryRow(ctx, `INSERT INTO passkeys
 		(id, user_id, name, credential_id, public_key, algorithm, sign_count)
@@ -49,14 +48,12 @@ func (s *Store) AddPasskey(ctx context.Context, p Passkey) (Passkey, error) {
 	return out, err
 }
 
-// PasskeyByCredentialID finds the passkey a sign-in names.
 func (s *Store) PasskeyByCredentialID(ctx context.Context, credentialID []byte) (Passkey, error) {
 	p, err := scanPasskey(s.pool.QueryRow(ctx,
 		`SELECT `+passkeyColumns+` FROM passkeys WHERE credential_id = $1`, credentialID))
 	return p, notFound(err)
 }
 
-// PasskeyByID finds one passkey.
 func (s *Store) PasskeyByID(ctx context.Context, id string) (Passkey, error) {
 	p, err := scanPasskey(s.pool.QueryRow(ctx,
 		`SELECT `+passkeyColumns+` FROM passkeys WHERE id = $1`, id))

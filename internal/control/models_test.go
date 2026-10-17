@@ -15,7 +15,6 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// callModel runs one model handler for alias, as p.
 func callModel(h handler, p *authn.Principal, method, alias, query, body string) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(method, httpx.ControlPrefix+"/v1/models/"+alias+query,

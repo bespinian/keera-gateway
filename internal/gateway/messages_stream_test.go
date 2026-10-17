@@ -20,9 +20,9 @@ type sseEvent struct {
 	payload map[string]any
 }
 
-// readMessagesStream parses a Messages stream into its events. It is
-// deliberately strict about the framing - an event with no name or unparseable
-// data is a stream a client's SDK would reject.
+// readEvents parses a Messages or Responses stream into its events. It is
+// strict about framing: an event with no name or unparseable data is a stream
+// a client's SDK would reject.
 func readEvents(t *testing.T, raw string) []sseEvent {
 	t.Helper()
 	var out []sseEvent
@@ -76,10 +76,8 @@ func pipeMessages(t *testing.T, chunks ...string) []sseEvent {
 }
 
 func TestMessagesStreamOpensAndClosesTheMessage(t *testing.T) {
-	// A chat completion stream is a series of deltas against one implicit
-	// message; a Messages stream is an event protocol with an explicit start
-	// and end. A client waits for message_stop before it considers the turn
-	// over, so every stream has to produce the full envelope.
+	// A client waits for message_stop before it considers the turn over, so
+	// every stream has to produce the full envelope.
 	events := pipeMessages(t,
 		`{"choices":[{"delta":{"role":"assistant","content":""}}]}`,
 		`{"choices":[{"delta":{"content":"Hel"}}]}`,
@@ -131,10 +129,9 @@ func TestMessagesStreamOpensAndClosesTheMessage(t *testing.T) {
 }
 
 func TestMessagesStreamNeverForwardsTheUsageChunk(t *testing.T) {
-	// The gateway asks the inference plane for a usage record the client never
-	// requested. In this shape there is nowhere to forward it to: the numbers
-	// belong in message_delta, and a stray chunk with an empty choices array
-	// is not an event the protocol has.
+	// The gateway asks for a usage record the client never requested. Its
+	// numbers belong in message_delta: a chunk with no choices is not an event
+	// this protocol has.
 	events := pipeMessages(t,
 		`{"choices":[{"delta":{"content":"x"}}]}`, stopChunk,
 		`{"choices":[],"usage":{"prompt_tokens":4,"completion_tokens":1,"total_tokens":5}}`,
@@ -342,9 +339,8 @@ func TestATranslatedStreamCountsReasoningAsTheFirstToken(t *testing.T) {
 
 func TestMessagesSurfaceEnforcesTheSamePolicyAsChat(t *testing.T) {
 	// The point of translating rather than proxying: an Anthropic-shaped
-	// client passes the guardrail, the output ceiling and the accounting that
-	// every other client passes. A surface that went round them would be a
-	// hole in the only thing this product enforces.
+	// client passes the same guardrail, output ceiling and accounting as
+	// every other client.
 	res := policy.Resolve(
 		policy.Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
 		&policy.Limits{
@@ -446,10 +442,8 @@ func TestMessagesSurfaceStreamsEndToEnd(t *testing.T) {
 }
 
 func TestMessagesSurfaceRefusesInItsOwnErrorShape(t *testing.T) {
-	// A refusal a client cannot parse reaches a developer as a blank failure.
-	// The Messages shape names an error differently from the OpenAI one, so
-	// every refusal on this surface has to be translated too - including the
-	// ones the gateway generates before it ever reaches the inference plane.
+	// A refusal a client cannot parse reaches a developer as a blank failure,
+	// so the gateway's own refusals are in the Messages shape too.
 	h := newHarness(t, jsonBackend(`{}`), nil, nil)
 
 	resp := h.post(t, "/v1/messages",
@@ -497,10 +491,8 @@ func TestMessagesSurfaceCannotReachANonChatModel(t *testing.T) {
 }
 
 func TestMessagesSurfaceAcceptsTheApiKeyHeader(t *testing.T) {
-	// Which header a client sends its credential in is a configuration
-	// setting, not a property of the key. A developer who picked the other
-	// variable would otherwise get a 401 whose cause is invisible from inside
-	// their editor.
+	// Which header carries the credential is a client setting, not part of
+	// the key. Picking the other one must not give a 401 nobody can explain.
 	h := newHarness(t, jsonBackend(`{"choices":[{"message":{"content":"hi"},`+
 		`"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`), nil, nil)
 
@@ -586,10 +578,8 @@ func TestConnectionWarmingProbeIsAnswered(t *testing.T) {
 }
 
 func TestMessagesStreamPingsWhileTheUpstreamIsSilent(t *testing.T) {
-	// A client aborts a stream that goes quiet, and the quiet stretch that
-	// matters is before the first token - a long prompt is still being read and
-	// there is nothing to forward. Without a ping in that gap a large context
-	// would look like a dead connection.
+	// A client aborts a stream that goes quiet, and the long quiet is before
+	// the first token, while a big prompt is read. Pings fill that gap.
 	restore := anthropicPingInterval
 	anthropicPingInterval = 5 * time.Millisecond
 	t.Cleanup(func() { anthropicPingInterval = restore })
@@ -659,10 +649,9 @@ func (b *syncBuffer) String() string {
 }
 
 func TestMessagesStreamReadsAToolCallLargerThanTheReadBuffer(t *testing.T) {
-	// The arguments of a real tool call - a file to write, a patch to apply -
-	// arrive as a line longer than one read of the upstream stream. Reading
-	// part of one as a whole chunk would hand the client a fragment of JSON to
-	// assemble, and the tool call would fail inside the agent rather than here.
+	// A real tool call's arguments (a file, a patch) can be a line longer than
+	// one read of the upstream. Reading part of it as a whole chunk would hand
+	// the client broken JSON.
 	args := strings.Repeat("a", 3*readBuffer)
 	quoted, err := json.Marshal(args)
 	if err != nil {

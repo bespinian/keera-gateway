@@ -54,8 +54,9 @@ func (s *Store) DeleteSession(ctx context.Context, hash []byte) error {
 }
 
 // DeleteUserSessions signs one user row out of every browser and machine, in
-// its organisation only, which a role change or a revocation needs. That includes command-line tokens and half-finished
-// command-line sign-ins, since a pending code could still mint a token.
+// its organisation only, which a role change or a revocation needs. That
+// includes command-line tokens and half-finished command-line sign-ins, since a
+// pending code could still mint a token.
 func (s *Store) DeleteUserSessions(ctx context.Context, userID string) error {
 	return deleteUserSessions(ctx, s.pool, userID)
 }
@@ -254,14 +255,12 @@ func takeInvitation(ctx context.Context, db querier, orgID, email, externalID st
 	return u, notFound(err)
 }
 
-// UserByID finds one person.
 func (s *Store) UserByID(ctx context.Context, userID string) (User, error) {
 	u, err := scanUser(s.pool.QueryRow(ctx,
 		`SELECT `+userColumns+` FROM users WHERE id = $1`, userID))
 	return u, notFound(err)
 }
 
-// SetUserRole changes what a person may do.
 func (s *Store) SetUserRole(ctx context.Context, userID, role string) error {
 	return s.execOne(ctx, "UPDATE users SET role = $2 WHERE id = $1", userID, role)
 }
@@ -278,7 +277,6 @@ func (s *Store) OrgByEmailDomain(ctx context.Context, domain string) (Org, error
 	return s.orgWhere(ctx, "WHERE lower(email_domain) = lower($1)", domain)
 }
 
-// OrgByID finds one organisation.
 func (s *Store) OrgByID(ctx context.Context, orgID string) (Org, error) {
 	return s.orgWhere(ctx, "WHERE id = $1", orgID)
 }

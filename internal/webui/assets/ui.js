@@ -1,6 +1,5 @@
-// Small DOM helpers. Enough structure to keep the views declarative, and no
-// more - this is a control panel with ten screens, not an application that
-// needs a rendering framework.
+// Small DOM helpers: enough to keep the views declarative. A control panel
+// this size needs no rendering framework.
 
 /** h builds an element. Children may be nodes, strings, arrays, or null. */
 export function h(tag, props, ...children) {
@@ -52,7 +51,7 @@ export function num(n) {
   return numberFmt.format(Math.round(n || 0));
 }
 
-/** compact renders large counts the way a dashboard should: 1.2M, not 1,203,344. */
+/** compact renders large counts short: 1.2M, not 1,203,344. */
 export function compact(n) {
   n = n || 0;
   const abs = Math.abs(n);
@@ -70,8 +69,8 @@ export function money(micros) {
 
 /** amount renders integer micro-units without the currency, for where it is
  *  said once nearby. Small amounts keep their digits: a per-request cost
- *  rounded to two decimals reads as a bug, not as a number. The CLI rounds
- *  the same way, in policy.FormatAmount. */
+ *  rounded to two decimals reads as a bug. The CLI rounds the same way, in
+ *  policy.FormatAmount. */
 export function amount(micros) {
   const v = (micros || 0) / 1e6;
   let s;
@@ -106,23 +105,18 @@ export function bytes(n) {
   return `${(n / 1e6).toFixed(1)} MB`;
 }
 
-/** plural is the word for n of something: word for one, many for the rest.
- *  many is word + "s" unless given, for words like "sandbox" that differ. */
+/** plural picks word for one and many for the rest. many defaults to
+ *  word + "s", for words like "sandbox" that differ. */
 export function plural(n, word, many = word + "s") {
   return n === 1 ? word : many;
 }
 
-/** capitalise gives a word a capital first letter, as a pill or a label
- *  shows it. */
 export function capitalise(word) {
   return word ? word[0].toUpperCase() + word.slice(1) : "";
 }
 
-/** duration is how long something ran, in the units somebody would say it in.
- *
- *  ms() is for one request, where the interesting range is milliseconds to a
- *  few seconds. A task runs for minutes or for an afternoon, and "690 s" is a
- *  number nobody reads as eleven and a half minutes. */
+/** duration is how long a task ran, in minutes and hours. ms() is for one
+ *  request; nobody reads "690 s" as eleven and a half minutes. */
 export function duration(msValue) {
   const secs = Math.round((msValue || 0) / 1000);
   if (secs < 60) return secs + " s";
@@ -133,7 +127,7 @@ export function duration(msValue) {
   return hours + " h" + (mins % 60 ? " " + (mins % 60) + " min" : "");
 }
 
-/** tokens is a request's tokens in and out, the same way on every screen. */
+/** tokens writes a request's tokens in and out, the same on every screen. */
 export function tokens(inTokens, outTokens) {
   if (!inTokens && !outTokens) return "-";
   return `${compact(inTokens)} in · ${compact(outTokens)} out`;
@@ -172,15 +166,15 @@ export function releaseDay(day) {
   });
 }
 
-/** locationName is where a model runs, in words. An unknown code is shown as
- *  it is, in capitals. */
+/** locationName is where a model runs, in words. An unknown code is shown in
+ *  capitals. */
 export function locationName(loc) {
   const names = { ch: "Switzerland", usa: "USA", onprem: "On-prem" };
   if (!loc) return "-";
   return names[loc] || loc.toUpperCase();
 }
 
-/** ago is what a table wants for "when", with the exact time on hover. */
+/** ago is a relative time for tables, such as "5m ago". */
 export function ago(iso) {
   if (!iso) return "-";
   const secs = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -200,8 +194,8 @@ export function ago(iso) {
 
 /* ------------------------------------------------------------ components */
 
-/** brandMark is the product mark. It points at the same file the browser draws
- *  in the tab, so the logo and the favicon can never drift apart. */
+/** brandMark is the product mark. It uses the favicon file, so the two cannot
+ *  drift apart. */
 export function brandMark(size) {
   return h("img", {
     class: "brand-mark",
@@ -230,7 +224,7 @@ export function icon(path) {
 
 export const icons = {
   dashboard: "M3 13h5v8H3zM10 3h5v18h-5zM17 9h4v12h-4z",
-  // A rocket, for the dashboard while the first run stands in for it.
+  // A rocket, while the first-run checklist stands in for the dashboard.
   start:
     "M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z" +
     "M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z" +
@@ -240,9 +234,9 @@ export const icons = {
     "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z",
   keys: "M21 2l-2 2m-7.6 7.6a5 5 0 1 1-7.1 7.1 5 5 0 0 1 7.1-7.1zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3",
   models: "M12 2l9 5v10l-9 5-9-5V7zM3.3 7L12 12l8.7-5M12 12v10",
-  // The two places a model can run, drawn for the tiles that choose between
-  // them. A rack of machines addressed by a URL you wrote - and a cloud, for a
-  // hosted provider whose own logo this build has none of.
+  // The two places a model can run, for the tiles that choose between them: a
+  // rack for a self-hosted URL, and a cloud for a hosted provider with no logo
+  // here.
   selfHosted:
     "M3 4.5h18v6H3zM3 13.5h18v6H3zM6.5 7.5h.01M6.5 16.5h.01M10 7.5h7M10 16.5h7",
   cloud: "M18 10h-1.3A6 6 0 1 0 9 19h9a4.5 4.5 0 0 0 0-9z",
@@ -266,9 +260,7 @@ export const icons = {
   stop: "M7 7h10v10H7z",
   trash:
     "M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6",
-  // A pencil, for every edit button. The 'rewrite' mark below is a pencil
-  // too, but over lines of text: that one is a filter changing what a request
-  // says.
+  // For every edit button. The 'rewrite' mark below is the filter mode.
   pencil: "M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z",
   sliders:
     "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6",
@@ -276,99 +268,78 @@ export const icons = {
     "M4 17l5-5-5-5M12 19h8M3 3h18a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z",
   terminal: "M4 17l6-6-6-6M12 19h8",
   download: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3",
-  // The guardrail that rewrites rather than refuses: a funnel with a shield.
+  // A funnel with a shield: the guardrail that rewrites rather than refuses.
   filters:
     "M21 4H3l7 8.5V19l4 2v-8.5zM17 3l3.5 1.4v3c0 2.2-1.4 4.2-3.5 5-2.1-.8-3.5-2.8-3.5-5v-3z",
-  // The three things a filter can do to a request, one mark each. Like the
-  // router modes below, they are drawn only on the tiles that pick one, so
-  // each says what the mode does rather than repeating the guardrail's shield.
+  // The three filter modes, drawn only on the tiles that pick one, so each
+  // shows what the mode does.
   //
-  // Rewriting: a pencil over the lines it is going through.
+  // Rewriting: a pencil over lines of text.
   rewrite:
     "M4 7h8M4 12h5M4 17h10" +
     "M19.6 4.4a1.5 1.5 0 0 1 0 2.1l-5.8 5.8-2.8.7.7-2.8 5.8-5.8a1.5 1.5 0 0 1 2.1 0z",
-  // Scales. A gate weighs the request and nothing else happens to it - a
-  // barrier or a door would have been the mark for where it ends up, which is
-  // the same place it started unless the verdict goes against it.
+  // Scales: a gate weighs the request and changes nothing.
   gate:
     "M12 4v17M7.5 21h9M12 7L5 9m7-2l7 2" +
     "M5 9l-2.5 5.5a2.7 2.7 0 0 0 5 0zM19 9l-2.5 5.5a2.7 2.7 0 0 0 5 0z",
-  // A rule, in the brackets a developer reads as one. No model anywhere in it,
-  // and nothing borrowed from the two marks above, which are both a model at
-  // work on lines of text.
+  // Brackets, for a rule. Unlike the two marks above, no model is involved.
   pattern: "M8 5H5v14h3M16 5h3v14h-3M10 9.5h4M10 14.5h4",
-  // The other hook: a path that arrives and leaves by two of three ways, which
-  // is the whole of what a router does - one request in, one of several models
-  // out.
+  // One request in, one of several models out.
   routers: "M4 6h5l4 6h7M20 12l-3-3m3 3l-3 3M9 6l4 12h7",
-  // A plug: what an MCP server is to an agent, a socket its tools come
-  // through.
+  // A plug: the socket an agent's tools come through.
   mcp: "M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4",
-  // The five things a router can choose with, one mark each. They are only
-  // ever drawn on the tiles that pick a mode, where the words beside them do
-  // the naming - so each says what the mode reads, not what it is called.
+  // The five router modes, drawn only on the tiles that pick one, beside
+  // their names. Each shows what the mode reads.
   //
-  // A model reading: lines of text, and the spark of a decision beside them.
+  // A model reading lines of text, with the spark of a decision.
   instruction:
     "M4 6h11M4 11h7M4 16h5" +
     "M17.5 12l1.1 2.4 2.4 1.1-2.4 1.1-1.1 2.4-1.1-2.4-2.4-1.1 2.4-1.1z",
-  // Down the written order. Two chevrons rather than one: the second is where
-  // the request goes when the destination above it does not answer.
+  // Two chevrons: the second is where the request goes when the first does
+  // not answer.
   fallback: "M5 7l7 6 7-6M5 13l7 6 7-6",
-  // A stopwatch, because this mode ranks by time measured rather than promised.
+  // A stopwatch: this mode ranks by measured time.
   latency:
     "M9 2h6M12 2v3.5M20 14a8 8 0 1 1-16 0 8 8 0 0 1 16 0M12 10.5V14l2.5 1.5",
-  // What each destination is carrying: columns of different heights, and the
-  // request goes to the short one.
+  // Columns of different heights: the request goes to the shortest.
   leastBusy: "M3 20h18M7 20v-7M12 20v-12M17 20v-4",
-  // A ruler. This mode measures the request and reads nothing in it.
+  // A ruler: this mode measures the request and reads nothing in it.
   size: "M2 9h20v6H2zM7 9v2.5M12 9v3.5M17 9v2.5",
-  // Sandboxes: a box with a clock face in it. The box is the machine and the
-  // clock is the whole point - what distinguishes this from a virtual machine
-  // is that it goes away by itself - so a plain container mark would have been
-  // the wrong half of the idea.
+  // A box with a clock: a sandbox is a machine that goes away by itself.
   sandboxes:
     "M21 8v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8M3 8l2-4h14l2 4zM3 8h18" +
     "M12 11v3l2 1.5",
   collapse: "M11 17l-5-5 5-5M18 17l-5-5 5-5",
-  // The way back to the list a detail screen was opened from.
   back: "M19 12H5M12 19l-7-7 7-7",
   access:
     "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 3a4 4 0 1 1 0 8 4 4 0 0 1 0-8z",
   people:
     "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0M16 11l2 2 4-4",
-  // The event log: rows, each with its own mark. Not the warning triangle a log
-  // of failures would have carried - most of what is on this screen worked, and
-  // a sidebar that calls the whole traffic a warning is a sidebar that lies.
+  // Rows, not a warning triangle: most requests on this screen worked.
   requests: "M3 6h.01M3 12h.01M3 18h.01M8 6h13M8 12h13M8 18h13",
-  // The request log's rows with a brace around them: this screen is those
-  // rows, grouped into the tasks they were made for. Not a clock and not a
-  // speech bubble - what a session is about is that many calls are one thing.
+  // The request log's rows with a brace: many calls that are one task.
   sessions:
     "M6 4c-1.6 0-2 1-2 2v4c0 1-.4 2-2 2 1.6 0 2 1 2 2v4c0 1 .4 2 2 2" +
     "M10 8h11M10 12h11M10 16h11",
-  // The map: two things on the left, one in the middle, two on the right, and
-  // the lines between them. Not a globe and not a network - what this screen is
-  // about is that the traffic goes through one point and out the other side.
+  // Two on the left, one in the middle, two on the right: traffic passes
+  // through one point.
   map:
     "M4 5.5h3M4 18.5h3M17 5.5h3M17 18.5h3M10.5 12h3" +
     "M7 5.5c3 0 3 6.5 3.5 6.5M7 18.5c3 0 3-6.5 3.5-6.5" +
     "M17 5.5c-3 0-3 6.5-3.5 6.5M17 18.5c-3 0-3-6.5-3.5-6.5",
 };
 
-/** providerMarks are the hosted providers' own logos, as path data rather than
- *  files, for the reason `icons` is: a mark drawn in currentColor follows the
- *  pill it sits in through both themes, which a brand SVG with its own
- *  near-black fill does not. Each keeps the artwork's own viewBox. A mark
- *  about twice as wide as it is tall sets `wide`, so a pill draws it smaller.
- *  A mark whose artwork needs more than one shade has `layers` instead of
- *  `path`: paths that do not overlap, each at its own opacity.
+/** providerMarks are the hosted providers' logos, as path data rather than
+ *  files: drawn in currentColor, a mark follows its pill through both themes.
+ *  Each keeps the artwork's viewBox. A mark about twice as wide as tall sets
+ *  `wide`, so a pill draws it smaller. A mark that needs more than one shade
+ *  has `layers` instead of `path`: paths that do not overlap, each at its own
+ *  opacity.
  *
  *  Keyed by the provider names in internal/catalog/providers.go. A provider
- *  with no mark here is not an error - providerMark draws nothing. The source
- *  artwork is in internal/webui/marks/, outside the embedded assets/ tree so
- *  the binary does not serve a second copy of every logo. A new mark is named
- *  in marks/NOTICE too, which says they are their owners' trademarks. */
+ *  without a mark draws nothing. The source artwork is in internal/webui/marks/,
+ *  outside assets/ so the binary does not serve a second copy. Name a new mark
+ *  in marks/NOTICE too. */
 const providerMarks = {
   anthropic: {
     viewBox: "0 0 35 24",
@@ -376,9 +347,8 @@ const providerMarks = {
   },
   cscs: {
     viewBox: "0 0 76.502 52.377",
-    // The source artwork is five colours, some of them drawn over others.
-    // Each colour is one path here, with what lay under another cut out, so
-    // the shades can be opacities without the overlaps showing through.
+    // The artwork has five overlapping colours. Each is one path here with the
+    // overlaps cut out, so the opacities do not show through.
     layers: [
       {
         opacity: 0.3,
@@ -424,8 +394,8 @@ const providerMarks = {
   },
   "stepping-stone": {
     viewBox: "0 0 49.43 56.77",
-    // The source artwork sat far outside its own viewBox; this one is moved
-    // to the origin and framed tightly.
+    // The source artwork sat far outside its viewBox; this is moved to the
+    // origin and framed tightly.
     path: "m 27.99,10.726574 c 0,0 0.77,0.55 2.08,0.11 1.32,-0.45 3.19,-6.6400002 3.07,-7.6400002 -0.11,-1 -0.33,-2.31999999 -1.97,-2.98999999 -1.65,-0.66 -2.75,0.67 -3.07,1.10999999 -0.33,0.44 -1.21,5.09 -1.65,6.64 -0.44,1.55 1.54,2.7700002 1.54,2.7700002 z m 2.03,-7.7500002 c 0.16,-0.28 0.49,-0.5 0.49,-0.5 0,0 0.5,1.38 0.28,2.38 -0.22,1 -1.65,3.43 -1.65,3.43 0,0 0.71,-5.04 0.88,-5.31 z m 18.71,53.7700002 c -0.44,0.17 -2.42,-0.72 -4.17,-1 -1.75,-0.27 -3.95,0 -3.95,0 l -0.99,-0.77 c 0,0 -0.11,-11.62 -3.35,-20.36 -3.24,-8.74 -7.52,-11.84 -7.52,-11.84 l -0.99,-0.11 c 0,0 -1.1,4.26 -2.52,5.09 -1.43,0.83 -2.75,2.32 -8.45,2.54 -5.71,0.22 -10.1,-1.22 -10.7,-0.94 -0.6,0.28 -2.64,9.57 -3.24,9.79 -0.6,0.22 -1.81,0 -2.08,-0.22 -0.27,-0.22 -0.77,-1.11 -0.77,-1.66 0,-0.55 2.52,-8.07 2.42,-8.85 -0.11,-0.77 -0.22,-1.05 0,-1.33 0.22,-0.28 1.43,-0.33 1.43,-0.33 0,0 7.03,2.32 12.84,1.66 1.92,-0.17 5.49,-0.33 7.13,-2.43 1.65,-2.1 1.87,-4.31 1.87,-4.31 0,0 -0.55,-0.33 -0.77,-0.89 -0.22,-0.55 -0.27,-3.32 -0.33,-4.54 -0.06,-1.21 0.88,-3.87 0.88,-3.87 0,0 -1.32,-1.16 -2.85,-1.11 -1.54,0.06 -4.56,0.33 -7.69,1.99 -3.13,1.66 -3.18,2.55 -3.62,2.77 -0.44,0.22 -2.14,-0.17 -2.31,-0.55 -0.17,-0.39 2.03,-2.66 4.17,-3.43 2.14,-0.78 4.72,-1.66 7.96,-2.0500002 3.24,-0.38 6.15,1.5000002 6.75,1.7100002 0.61,0.22 0.93,0 1.87,0.22 0.93,0.22 1.87,2.6 1.76,3.49 -0.11,0.89 -1.43,5.7 -1.43,5.7 0,0 6.53,7.52 8.56,14.22 2.03,6.69 3.3,17.65 3.3,17.65 0,0 6.97,-0.27 7.35,-0.11 0.38,0.17 -0.11,3.71 -0.55,3.87 z",
   },
 };
@@ -454,14 +424,10 @@ function drawMark(mark) {
   );
 }
 
-/** idpMarks are the identity providers' own logos, on the same terms as
- *  providerMarks. Keyed by the provider names a deployment configures in
- *  KEERA_OIDC_PROVIDERS, which is why the obvious spellings of each vendor all
- *  land on the same artwork: the name is the operator's to choose, and a button
- *  with no mark is all a wrong guess costs.
- *
- *  idpMark returns null for anything unlisted and the button falls back to a
- *  generic icon, because an unrecognisable logo is worse than none. */
+/** idpMarks are the identity providers' logos, like providerMarks. They are
+ *  keyed by the names an operator picks in KEERA_OIDC_PROVIDERS, so the
+ *  obvious spellings of each vendor (idpAliases) share the artwork. A name
+ *  with no mark gets a generic icon. */
 const idpMarks = {
   google: {
     viewBox: "0 0 24 24",
@@ -473,8 +439,6 @@ const idpMarks = {
   },
 };
 
-/** idpAliases map the names an operator might reasonably pick onto the marks
- *  above. */
 const idpAliases = {
   workspace: "google",
   gsuite: "google",
@@ -503,8 +467,8 @@ export function idpMark(name) {
   );
 }
 
-/** clientMarks are the logos of clients that are not a provider's own, on the
- *  same terms as providerMarks. Keyed by the client keys in internal/connect. */
+/** clientMarks are the logos of clients that are not a provider's own, like
+ *  providerMarks. Keyed by the client keys in internal/connect. */
 const clientMarks = {
   opencode: {
     // The artwork's dark tile is left out. The frame is solid and the block
@@ -517,7 +481,7 @@ const clientMarks = {
   },
   pi: {
     // The artwork's three blocks in one shade, so the two that touch become
-    // one shape with a square hole. The margin keeps a solid mark from looking
+    // one shape with a square hole. The margin stops a solid mark looking
     // bigger than the outlined ones beside it.
     viewBox: "100 100 600 600",
     path:
@@ -546,14 +510,11 @@ export function clientMark(key) {
   return drawMark(clientMarks[key]);
 }
 
-/* The reporting window every screen with a picker is looking at.
+/* The reporting window every screen with a picker shows.
  *
- *  One list and one remembered value, shared rather than per screen, because
- *  moving between them is how these screens are read - a filter's refusals this
- *  afternoon next to the project's traffic this afternoon. A picker that reset on
- *  each arrival would make that comparison something the reader sets up twice,
- *  and a screen with a default of its own would answer a different question
- *  than the one asked a click ago. */
+ *  One remembered value shared by all screens, because readers compare them:
+ *  a filter's refusals this afternoon next to the project's traffic this
+ *  afternoon. A picker that reset on each screen would break that. */
 export const RANGES = [
   { label: "24h", since: "24h", long: "Last 24 hours" },
   { label: "7d", since: "168h", long: "Last 7 days" },
@@ -568,7 +529,7 @@ export function rangeOf(since, fallback) {
 /* --------------------------------------------------------------- storage */
 
 /** remembered is a setting kept for this tab, or with lasting for every visit,
- *  or null. A browser can refuse storage, which reads as nothing kept. */
+ *  or null. A browser that refuses storage reads as nothing kept. */
 export function remembered(key, { lasting } = {}) {
   try {
     return (lasting ? localStorage : sessionStorage).getItem(key);
@@ -589,20 +550,18 @@ export function remember(key, value, { lasting } = {}) {
   }
 }
 
-/** currentRange is the window in force. Screens read it rather than a default
- *  of their own; DEFAULT_RANGE is the one they all start on. */
+/** currentRange is the window in force. Screens read it instead of a default
+ *  of their own. */
 const DEFAULT_RANGE = "168h";
 
 export function currentRange() {
   return remembered("keera.range") || DEFAULT_RANGE;
 }
 
-/** rangePicker is the segmented control that sets it. ctx.reload() re-renders
- *  the screen against the new window, which is every screen's whole response to
- *  the change.
+/** rangePicker is the segmented control that sets it, and reloads the screen.
  *
- *  A screen that keeps a window of its own, like Usage or the audit log, passes
- *  its own ranges and the session key it stores the choice under. */
+ *  A screen with a window of its own, like Usage or the audit log, passes its
+ *  own ranges and the session key it stores the choice under. */
 export function rangePicker(
   ctx,
   since,
@@ -628,16 +587,14 @@ export function rangePicker(
   );
 }
 
-/** liveControl is the Live switch on a screen that follows the request log,
- *  and the one thing on it that says whether what is shown is current.
+/** liveControl is the Live switch on a screen that follows the request log.
  *
- *  Its dot tells four states apart: watching, reconnecting, paused by the
- *  reader, or stopped. A screen that has quietly stopped following looks just
- *  like a quiet afternoon, and the reader should not mistake one for the other.
+ *  Its dot shows four states: watching, reconnecting, paused, or stopped. A
+ *  screen that quietly stopped following looks just like a quiet afternoon.
  *
  *  key remembers the choice for the session, label names the button for a
- *  screen reader, titles say what each state means, and words, if given,
- *  change the button's text with the state. */
+ *  screen reader, titles explain each state, and words, if given, change the
+ *  button's text with the state. */
 export function liveControl({ key, label, titles, words = {} }) {
   const on = remembered(key) !== "off";
   const blip = h("span", { class: "blip" });
@@ -673,9 +630,9 @@ export function liveControl({ key, label, titles, words = {} }) {
     button.setAttribute("aria-pressed", String(control.on));
     if (listener) listener(control.on);
   });
-  // A hidden tab lets its stream go, because each open stream costs the
-  // control plane a query whenever its organisation makes a request. The
-  // screens pick up from where they stopped when the tab is shown again.
+  // A hidden tab drops its stream, because each open stream costs the control
+  // plane a query per request in its organisation. Screens pick up where they
+  // stopped when the tab is shown again.
   const onVisibility = () => {
     if (!button.isConnected) {
       document.removeEventListener("visibilitychange", onVisibility);
@@ -716,10 +673,8 @@ export function followRequests(ctx, control, stream, { onRequests, onResume }) {
       control.state("live");
       onRequests(JSON.parse(e.data));
     });
-    // An EventSource retries a dropped connection on its own and gives up
-    // only on a response it was refused - an expired session, a role that may
-    // no longer read this. Both are worth saying, and they are different
-    // sentences.
+    // An EventSource retries a dropped connection by itself and gives up only
+    // when refused, as for an expired session. Those are different states.
     source.addEventListener("error", () => {
       control.state(
         source && source.readyState === EventSource.CLOSED
@@ -743,9 +698,8 @@ export function followRequests(ctx, control, stream, { onRequests, onResume }) {
 }
 
 /** throttled runs fn at most once every ms. A call while it waits is not
- *  lost: fn runs once more when the wait is over. A failure is swallowed, so
- *  what is on the screen stays and the next call tries again. stop ends it,
- *  for a screen that has gone. */
+ *  lost: fn runs once more after the wait. A failure is swallowed, so the
+ *  screen keeps what it shows and the next call tries again. stop ends it. */
 export function throttled(fn, ms) {
   let busy = false;
   let again = false;
@@ -778,9 +732,9 @@ export function pill(text, tone) {
   return h("span", { class: "pill" + (tone ? " pill-" + tone : "") }, text);
 }
 
-/** rowLink is a row's name, as the way in to that row's own screen. Tables
- *  have no whole-row click, because a row that opens on some screens and not
- *  on others is worse than none, so the name is the link. */
+/** rowLink is a row's name as a link to the row's own screen. Tables have no
+ *  whole-row click: rows that open on some screens and not others are worse
+ *  than none. */
 export function rowLink(ctx, path, text, title) {
   return h(
     "a",
@@ -794,9 +748,8 @@ export function rowLink(ctx, path, text, title) {
   );
 }
 
-/** go is the click handler that routes inside the panel rather than reloading
- *  it, for the links that carry their own class instead of rowLink's. The href
- *  is still the real path, so the link opens in a new tab like any other. */
+/** go is a click handler that routes inside the panel instead of reloading
+ *  it. The href is still the real path, so the link opens in a new tab. */
 export function go(ctx, path) {
   return (e) => {
     e.preventDefault();
@@ -811,9 +764,9 @@ export function isAdmin(ctx) {
 }
 
 /** checkButton is a Check button with its verdict beside it once it has run.
- *  run asks the control plane, and verdict reads what came back as
- *  { label, tone, title, open }: a pill that opens the full report. The result
- *  is not kept: a check is a statement about right now. */
+ *  verdict turns what run returns into { label, tone, title, open }: a pill
+ *  that opens the full report. The result is not kept: a check is about right
+ *  now. */
 export function checkButton(title, run, verdict) {
   const slot = h("span");
   const button = h(
@@ -857,7 +810,6 @@ function verdictPill({ label, tone, title, open }) {
   );
 }
 
-/** crumb is the link back to the list a screen belongs to. */
 export function crumb(ctx, path, label) {
   return h(
     "a",
@@ -867,8 +819,7 @@ export function crumb(ctx, path, label) {
   );
 }
 
-/** gone is a detail screen for something that is not there, with the way
- *  back to its list. */
+/** gone is a detail screen for something that is not there. */
 export function gone(ctx, path, label, title, body) {
   return h(
     "div",
@@ -878,8 +829,8 @@ export function gone(ctx, path, label, title, body) {
   );
 }
 
-/** detailHead is the strip atop one thing's screen: the way back to its list,
- *  what it is as chips, then its controls on the right. */
+/** detailHead is the strip atop a detail screen: the link back to its list,
+ *  chips, then controls on the right. */
 export function detailHead(ctx, [path, label], chips, controls) {
   return h(
     "div",
@@ -895,7 +846,7 @@ export function detailHead(ctx, [path, label], chips, controls) {
   );
 }
 
-/** busyButton is a button that is off while run works. A failure is toasted. */
+/** busyButton is disabled while run works. A failure is toasted. */
 export function busyButton(props, label, run) {
   const button = h(
     "button",
@@ -919,8 +870,8 @@ export function busyButton(props, label, run) {
 }
 
 /** iconButton is a small button that shows only an icon. title is its
- *  tooltip and, unless label says otherwise, what a screen reader reads. Any
- *  other option is set on the button as it is. */
+ *  tooltip and, unless label is given, what a screen reader reads. Other
+ *  options are set on the button as they are. */
 export function iconButton(
   glyph,
   title,
@@ -946,8 +897,8 @@ export function iconButton(
   );
 }
 
-/** csvButton is the button that saves what a screen lists as a CSV file.
- *  title says what the file holds. */
+/** csvButton saves what a screen lists as a CSV file. title says what the
+ *  file holds. */
 export function csvButton(title, download) {
   return h(
     "button",
@@ -957,9 +908,8 @@ export function csvButton(title, download) {
   );
 }
 
-/** listHead is the strip above a list: what the list is, then its controls
- *  and the button that adds one. add is { label, onClick }, or null when the
- *  reader cannot add. */
+/** listHead is the strip above a list: an intro, its controls and an add
+ *  button. add is { label, onClick }, or null when the reader cannot add. */
 export function listHead(intro, controls, add) {
   return h(
     "div",
@@ -982,8 +932,8 @@ export function listHead(intro, controls, add) {
   );
 }
 
-/** sectionHead is a heading between a page's tables. A note given as text is
- *  set faint on the right; anything else, such as buttons, goes there as is. */
+/** sectionHead is a heading between a page's tables. A text note is set faint
+ *  on the right; anything else, such as buttons, goes there as is. */
 export function sectionHead(title, note, style) {
   return h(
     "div",
@@ -1007,7 +957,7 @@ export function stat(label, value, note) {
   return statCard(label, [value], note);
 }
 
-/** moneyStat is a stat for an amount, with the currency first as in money. */
+/** moneyStat is a stat for an amount, with the currency first. */
 export function moneyStat(label, micros, note) {
   return statCard(
     label,
@@ -1027,9 +977,8 @@ function statCard(label, value, note) {
 }
 
 /** loadMore is the button under a log that adds the next page to the same
- *  table, so whoever reads backwards keeps what they have read. next fetches
- *  and adds a page and returns how many rows came; fewer than size is the end,
- *  which end says. */
+ *  table, so the reader keeps what they have read. next adds a page and
+ *  returns how many rows came; fewer than size is the end, and shows end. */
 export function loadMore(size, next, end) {
   const label = `Load ${size} more`;
   const wrap = h("div", { style: { marginTop: "12px", textAlign: "center" } });
@@ -1076,7 +1025,6 @@ export function trafficSummary(count, noun, flag, note) {
   );
 }
 
-/** dash stands in for a value there is none of. */
 export function dash() {
   return h("span", { class: "faint" }, "-");
 }
@@ -1085,7 +1033,6 @@ export function empty(title, body) {
   return h("div", { class: "empty" }, h("strong", {}, title), body || null);
 }
 
-/** toggleBox is one of the table toolbar's checkboxes, wherever it is drawn. */
 function toggleBox(t, checked, onChange) {
   return h(
     "label",
@@ -1099,42 +1046,38 @@ function toggleBox(t, checked, onChange) {
   );
 }
 
-/** table renders rows in a card, with the controls a list that grows needs.
+/** table renders rows in a card, with search, filters and sorting.
  *
  *  opts:
  *    search       (row) => string - the text the search box matches against.
- *                 Passing it is what puts the box there.
+ *                 Passing it adds the box.
  *    searchLabel  what is being searched, for the placeholder
  *    toggles      [{ label, test, hidden, on, onChange }] - a checkbox that,
- *                 while it is checked, keeps only the rows test() accepts. A
- *                 toggle with hidden() instead reads the other way round: it
- *                 drops those rows while it is unchecked, which is how a list
- *                 hides its dead rows behind a box labelled for what it brings
- *                 back. `on` is whether it starts checked, and onChange(checked)
- *                 is for the toggle whose rows are not here to filter: the
- *                 caller asks the control plane for a different list, and gets
- *                 the box in the toolbar with every other one.
+ *                 while checked, keeps only the rows test() accepts. With
+ *                 hidden() instead, it drops those rows while unchecked, so a
+ *                 list can hide its dead rows behind a box that brings them
+ *                 back. `on` is whether it starts checked. onChange(checked)
+ *                 is for a toggle whose rows are not here: the caller fetches
+ *                 a different list.
  *    choices      [{ label, options: [{ value, label }], test }] - a dropdown
  *                 that keeps only the rows test(row, value) accepts. Its first
  *                 option is "All", which keeps every row.
- *    sortBy       the label of the column to sort by before anybody asks
+ *    sortBy       the label of the column to sort by at first
  *    sortDir      "asc" (the default) or "desc"
  *    rank         { by, set } - for a list the control plane ranks, because
  *                 only part of it is here. A column with a `rank` gets a
- *                 header that calls set(rank), and the one whose rank is `by`
- *                 is marked. Rows are drawn in the order given.
- *    rowClass     (row) => string - a class for that row's <tr>, for a table
- *                 whose rows are not all the same age or the same kind
+ *                 header that calls set(rank), and the one matching `by` is
+ *                 marked. Rows are drawn in the order given.
+ *    rowClass     (row) => string - a class for that row's <tr>
  *    emptyTitle / emptyBody
  *
  *  A column with a sortKey gets a header that sorts by it. Searching and
- *  sorting both happen here rather than in the control plane: most screens
- *  using this hold their whole list. One that pages passes `rank` instead, and
- *  its sortKeys are ignored: sorting one page would rank the wrong rows.
+ *  sorting happen here, as most screens hold their whole list. One that pages
+ *  passes `rank` instead, and its sortKeys are ignored: sorting one page would
+ *  rank the wrong rows.
  *
- *  A column with a `width` gets that width instead of one measured from its
- *  contents, which is what keeps a column still on a screen that redraws the
- *  same table over a different grouping.
+ *  A column with a `width` keeps that width instead of one measured from its
+ *  contents, so it stays still when the table is redrawn with other rows.
  *
  *  There is no whole-row click; see rowLink.
  */
@@ -1148,9 +1091,8 @@ export function table(columns, rows, opts = {}) {
       { class: "card" },
       empty(opts.emptyTitle || "Nothing here yet", opts.emptyBody),
     );
-    // A toggle that fetches its own list is the one control still worth having
-    // over an empty table, because it is what brings rows back to it. A toggle
-    // that only filters these rows, and the search box, have nothing to work on.
+    // Over an empty table, only a toggle that fetches its own list is kept:
+    // it can bring rows back. The others have nothing to work on.
     const fetches = toggles.filter((t) => t.onChange);
     if (!fetches.length) return card;
     return h(
@@ -1262,8 +1204,7 @@ export function table(columns, rows, opts = {}) {
             ),
           ),
     );
-    // How much of the list is being looked at, but only while that is not all
-    // of it - a count against itself is noise on every screen that has one.
+    // How many rows are shown, but only while that is not all of them.
     count.textContent =
       shown.length === rows.length ? "" : `${shown.length} of ${rows.length}`;
     for (const [c, { th, arrow }] of sortable) {
@@ -1336,17 +1277,15 @@ export function table(columns, rows, opts = {}) {
     ),
   );
   const el = toolbar ? h("div", {}, toolbar, card) : card;
-  // The table carries its own redraw, for the one caller whose rows keep
-  // arriving after it is already on the screen: the request log pushes a row
-  // onto the array it was given and calls this. Going back through table()
-  // instead would build a second table and throw away what the reader had done
-  // to the first - the search they typed, the column they sorted by.
+  // The table carries its own redraw for the request log, which pushes new
+  // rows onto its array and calls this. Calling table() again would build a
+  // new table and lose the reader's search and sort.
   el.redraw = draw;
   return el;
 }
 
 /** rankHead is a header for a list the control plane ranks. Every ranking is
- *  largest first, so a second click has nothing to turn round. */
+ *  largest first, so a second click does not reverse it. */
 function rankHead(c, attrs, rank) {
   if (c.rank === undefined) return h("th", attrs, c.label);
   const active = c.rank === rank.by;
@@ -1381,10 +1320,9 @@ function cellClass(c) {
   );
 }
 
-/** order sorts by one column's key, putting the rows that have no value at the
- *  bottom whichever way the column is pointing. A key that has never been used
- *  is not the oldest one - it is the one the question does not apply to, and
- *  reversing the sort should not march it to the top. */
+/** order sorts by one column's key, with rows that have no value at the bottom
+ *  in either direction. A key never used is not the oldest; the question does
+ *  not apply to it. */
 function order(key, dir) {
   const missing = (v) => v === null || v === undefined || v === "";
   return (a, b) => {
@@ -1402,15 +1340,14 @@ function order(key, dir) {
   };
 }
 
-/** modal opens a dialog. Returns a close function; resolves nothing.
+/** modal opens a dialog and returns a close function.
  *
- *  The actions live in the footer, outside the body's form - so the form's own
- *  submit is wired to the primary action here. Otherwise typing a name and
- *  pressing Enter, which is what everybody does, would do nothing at all. */
+ *  The actions live in the footer, outside the body's form, so the form's
+ *  submit is wired to the primary action here. Otherwise pressing Enter would
+ *  do nothing. */
 export function modal({ title, subtitle, body, actions, wide }) {
   const overlay = h("div", { class: "overlay" });
-  // Focus goes back where it came from. A dialog that drops a keyboard user at
-  // the top of the document on close has taken their place in the page away.
+  // Focus goes back where it came from, so a keyboard user keeps their place.
   const opener = document.activeElement;
   let open = true;
   const close = () => {
@@ -1464,8 +1401,7 @@ export function modal({ title, subtitle, body, actions, wide }) {
   overlay.append(card);
   document.body.append(overlay);
 
-  // Enter anywhere in the body's form runs the primary action, whatever that
-  // dialog's primary action happens to be.
+  // Enter anywhere in the body's form runs the primary action.
   const form = card.querySelector("form");
   const primary = card.querySelector(
     ".modal-foot .btn-primary, .modal-foot .btn-danger",
@@ -1473,7 +1409,7 @@ export function modal({ title, subtitle, body, actions, wide }) {
   if (form && primary) {
     // A browser submits on Enter only if the form has a submit button or a
     // single text field. The real buttons are in the footer, so this hidden
-    // one stands in for them, first so that it is the form's default.
+    // one stands in, first so it is the form's default.
     if (!form.querySelector("[type=submit]")) {
       form.prepend(
         h("button", {
@@ -1490,8 +1426,7 @@ export function modal({ title, subtitle, body, actions, wide }) {
     });
   }
 
-  // The first field somebody can actually type in: a dialog that hides a
-  // section, or disables its fields, must not put the cursor in one of those.
+  // The first field that can be typed in, skipping hidden or disabled ones.
   const first = [
     ...card.querySelectorAll(
       "input:not([type=hidden]), select, textarea, button.btn-primary",
@@ -1501,8 +1436,7 @@ export function modal({ title, subtitle, body, actions, wide }) {
   return close;
 }
 
-/** trapTab keeps Tab inside the dialog, which is what "modal" means to anyone
- *  who is not using a mouse. */
+/** trapTab keeps Tab inside the dialog, for keyboard users. */
 function trapTab(card, e) {
   const items = [
     ...card.querySelectorAll(
@@ -1529,7 +1463,7 @@ function trapTab(card, e) {
 /** formModal is a dialog that does one thing with its primary button.
  *  submit(close) does it, and returns false to keep the dialog open, as after
  *  focusing an empty field. A failure, or a thrown { message } of text or
- *  nodes, shows in the dialog. Once done the dialog closes, toasts done (text,
+ *  nodes, shows in the dialog. On success the dialog closes, toasts done (text,
  *  or a function of what submit returned) and reloads ctx, each if given.
  *  Returns { close, button }. */
 export function formModal({
@@ -1583,8 +1517,8 @@ export function formModal({
   return { close, button };
 }
 
-/** confirm asks before something irreversible. A refused or failed action
- *  shows in the dialog, so "it did not happen" is as visible as "it did". */
+/** confirm asks before something irreversible. A failed action shows in the
+ *  dialog, so a failure is as visible as success. */
 export function confirm({
   title,
   body,
@@ -1601,11 +1535,11 @@ export function confirm({
   });
 }
 
-/** rowActions is a row's edit and delete buttons. Delete asks first, and on
- *  yes runs remove, shows the removed toast and reloads the page.
+/** rowActions is a row's edit and delete buttons. Delete asks first, then
+ *  runs remove, toasts removed and reloads the page.
  *
- *  body may be a function, for a warning that is looked up only when the
- *  button is pressed. */
+ *  body may be a function, for a warning looked up only when the button is
+ *  pressed. */
 export function rowActions(
   ctx,
   name,
@@ -1641,8 +1575,7 @@ let toastHost;
 
 export function toast(message, tone = "") {
   if (!toastHost) {
-    // Announced, because "Key revoked" and every error toast are otherwise
-    // invisible to anyone using a screen reader.
+    // A live region, so screen readers announce toasts.
     toastHost = h("div", {
       class: "toasts",
       role: "status",
@@ -1665,9 +1598,8 @@ export async function copyText(text) {
   }
 }
 
-// code renders something to be copied, with the button that copies it. Every
-// block it is used for is meant to leave the panel and land in a file, so none
-// of them is shown without one.
+// code renders a block to be copied, with its Copy button. Every such block is
+// meant to end up in a file.
 export function code(text) {
   return h(
     "div",
@@ -1687,9 +1619,8 @@ export function secretField(value, ariaLabel) {
       readonly: true,
       value,
       "aria-label": ariaLabel,
-      // Selecting on focus makes copying by hand one click, which is the way
-      // left when the clipboard is unavailable - a panel served over plain
-      // http on anything but localhost has no clipboard at all.
+      // Selecting on focus makes copying by hand easy, for when there is no
+      // clipboard: plain http on anything but localhost has none.
       onFocus: (e) => e.target.select(),
       onClick: (e) => e.target.select(),
     }),
@@ -1713,38 +1644,28 @@ export function banner(tone, ...children) {
   return h("div", { ...props, class: `banner banner-${tone}` }, ...children);
 }
 
-/** showError puts a failure where the person who caused it is looking.
- *
- *  Every dialog renders its errors into a host element at the top of the body,
- *  which is right until the body scrolls - and .modal-body does, at 88vh,
- *  while the buttons live in a footer that does not. A tall dialog then fails
- *  silently: the message is written above the fold of a container the reader is
- *  at the bottom of, the button re-enables, and nothing appears to have
- *  happened.
- *
- *  So setting the message also brings it into view. Passing no message clears
- *  the host, which is what a retry should do before it starts. */
+/** showError shows a failure in a dialog's error host and scrolls it into
+ *  view. The host is at the top of .modal-body, which scrolls, while the
+ *  buttons stay in the footer, so in a tall dialog the message would otherwise
+ *  be out of sight. Passing no message clears the host, as before a retry. */
 export function showError(host, message) {
   if (!message) {
     replace(host);
     return;
   }
   replace(host, banner("bad", message));
-  // "nearest" so a dialog that already shows the banner does not jump, and
-  // guarded because jsdom and very old browsers have neither.
+  // "nearest" so a dialog already showing the banner does not jump. Guarded
+  // because jsdom and very old browsers lack it.
   if (host.scrollIntoView) {
     host.scrollIntoView({ block: "nearest" });
   }
 }
 
-/* aliasProblem is the alias rule, checked here so that a name the control
- *  plane cannot accept is refused where it was typed.
+/* aliasProblem checks the alias rule where the name is typed.
  *
- *  It is not only politeness. An alias is a path segment: every write addresses
- *  its entity by name, so an empty one does not address anything at all, and
- *  the request lands on the collection route - which answers a write with 405
- *  and no message. That is the one bad name the control plane cannot explain,
- *  because it never reaches the handler that knows what was meant.
+ *  An alias is a path segment, so an empty one sends the write to the
+ *  collection route, which answers 405 with no message. The control plane
+ *  cannot explain that one, so it is caught here.
  *
  *  The shape mirrors policy.validName: lowercase letters, digits, and hyphens
  *  that neither open nor close the name. Returns "" when there is no problem. */
@@ -1769,8 +1690,8 @@ export function modelAliasProblem(alias) {
 }
 
 /** takenProblem refuses an alias the organisation already has. Saving is a
- *  PUT, which replaces what is there, so without it "add" would quietly
- *  overwrite the entry of that name. The CLI refuses the same way. */
+ *  PUT, so "add" would otherwise overwrite the entry of that name. The CLI
+ *  refuses the same way. */
 export function takenProblem(entries, alias, noun) {
   return (entries || []).some((e) => e.alias === alias)
     ? `The ${noun} ${alias} already exists. Change it from its row instead.`
@@ -1795,16 +1716,15 @@ function nameProblem(name, max, what) {
   return "";
 }
 
-/** modeTiles asks which mode something works in, as tiles that each carry a
- *  sentence, because an option list that reads like prose is one nobody reads
- *  to the end. Once a mode is chosen the tiles fold into one row with a Change
- *  button, which shows them again.
+/** modeTiles asks which mode something works in, as tiles with a sentence
+ *  each: a long option list goes unread. Once a mode is chosen the tiles fold
+ *  into one row with a Change button.
  *
  *  modes is a list of { value, icon, name, what }, with an optional mark()
- *  that draws a logo in place of the icon. chosen is the starting
- *  value, or null for none. onChoose runs after each choice; the caller decides
- *  where focus goes. choose(value) picks a mode from code, as an edit dialog
- *  does on opening. */
+ *  that draws a logo in place of the icon. chosen is the starting value, or
+ *  null for none. onChoose runs after each choice; the caller decides where
+ *  focus goes. choose(value) picks a mode from code, as an edit dialog does on
+ *  opening. */
 export function modeTiles(modes, chosen, onChoose) {
   const tiles = h(
     "div",

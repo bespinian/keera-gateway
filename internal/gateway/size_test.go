@@ -248,7 +248,6 @@ func TestEstimateTokensCountsOnlyTheText(t *testing.T) {
 	}
 }
 
-// anyContains reports whether any string in list contains want.
 func anyContains(list []string, want string) bool {
 	return slices.ContainsFunc(list, func(s string) bool { return strings.Contains(s, want) })
 }

@@ -35,8 +35,7 @@ import (
 //
 // A filter in shadow enforces nothing. It runs and is recorded, and the
 // request goes on unchanged, even when the filter could not run. It is for
-// trying out an instruction on real traffic first. It still runs, so shadow is
-// not cheaper.
+// trying out an instruction on real traffic first, and costs the same.
 //
 // Every run is recorded as its own row (what it did, how long, what it cost),
 // but never the text. See internal/store/filterruns.go.
@@ -129,8 +128,7 @@ type filterRun struct {
 	runs []store.FilterRun
 	// wall is how long the chain waited for filter models. It is taken off the
 	// gateway's overhead metric, so a guardrail does not look like slowness.
-	wall time.Duration
-	// rewrote says the body was changed.
+	wall    time.Duration
 	rewrote bool
 }
 

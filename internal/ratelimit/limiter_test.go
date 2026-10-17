@@ -52,9 +52,8 @@ func TestLimiterContract(t *testing.T) {
 // empty limiter.
 func testContract(t *testing.T, newLimiter func(t *testing.T) limiter) {
 	t.Run("Admit charges every level or none", func(t *testing.T) {
-		// The org allows plenty and the project almost nothing. Requests
-		// refused by the project must not spend the org's allowance: the org
-		// is what protects the inference plane from every other project.
+		// The org allows plenty and the project almost nothing. Requests the
+		// project refuses must not spend the org's allowance.
 		l := newLimiter(t)
 		now := time.Now()
 		reqs := []Requirement{
@@ -123,9 +122,8 @@ func testContract(t *testing.T, newLimiter func(t *testing.T) limiter) {
 	})
 
 	t.Run("a charge can overdraw, so one huge request is paid for later", func(t *testing.T) {
-		// Token limits are charged after the fact, because the true cost is
-		// not known until the completion finishes. One very large request
-		// should therefore hold back the ones after it.
+		// Token limits are charged after the fact, so one very large request
+		// holds back the ones after it.
 		l := newLimiter(t)
 		now := time.Now()
 		// The token-per-minute question: is the bucket still positive, taking
@@ -179,8 +177,8 @@ func TestChangingTheConfiguredRateRetunesTheBucket(t *testing.T) {
 	for range 100 {
 		l.Allow("k", 600, now)
 	}
-	// Now the guardrail drops to 10/min. The bucket must not still be holding the
-	// larger burst it was allowed a moment ago.
+	// Now the guardrail drops to 10/min. The bucket must not keep the larger
+	// burst.
 	admitted := 0
 	for range 50 {
 		if l.Allow("k", 10, now) {
@@ -226,9 +224,8 @@ func TestConcurrentUse(_ *testing.T) {
 }
 
 func TestSweepKeepsABucketThatWasJustUsed(t *testing.T) {
-	// A bucket created and then used once must carry the time it was made.
-	// Left at the zero time it looks idle since year one, and the next sweep
-	// forgets a limit that is still being enforced.
+	// A new bucket must carry the time it was made. At the zero time it looks
+	// idle since year one, and the next sweep forgets a limit still in use.
 	l := New()
 	now := time.Now()
 	l.Allow("k", 60, now)

@@ -172,9 +172,8 @@ func checkFilterRules(w http.ResponseWriter, f policy.Filter) bool {
 // differ between the two.
 type reader struct {
 	name string
-	// required is the refusal when no model is named, uses ends "this
-	// organisation has no model 'x'; ...", and answers ends "... is a <kind>
-	// model; a <name> reads text and ...".
+	// required is the refusal when no model is named. uses and answers end
+	// the refusals for a missing model and for a model of the wrong kind.
 	required, uses, answers string
 }
 
@@ -299,8 +298,7 @@ func (s *Server) checkFilter(w http.ResponseWriter, r *http.Request, p *authn.Pr
 
 // checkAllowList refuses an organisation allow-list that would leave one of
 // its filters or deciding routers on a model outside it. It is the other half
-// of checkReaderModel, since the two writes can come in
-// either order.
+// of checkReaderModel, since the two writes can come in either order.
 //
 // Only the organisation scope is checked: filters and routers belong to the
 // organisation, and a project's or key's list narrows only that key.
@@ -342,8 +340,6 @@ func (s *Server) checkAllowList(w http.ResponseWriter, r *http.Request,
 	return true
 }
 
-// strandedRefusal refuses an allow-list that leaves filters or routers on a
-// model it does not include.
 func strandedRefusal(w http.ResponseWriter, code, what string, stranded []string) {
 	conflict(w, code,
 		"this allow-list leaves "+strings.Join(stranded, ", ")+" running on a model it does "+

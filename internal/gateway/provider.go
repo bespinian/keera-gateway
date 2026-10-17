@@ -43,7 +43,6 @@ func fitProvider(m policy.Model, path string, payload []byte) []byte {
 	return payload
 }
 
-// fitOpenAI is fitProvider for OpenAI.
 func fitOpenAI(m policy.Model, path string, payload []byte) []byte {
 	b, err := parseBody(payload)
 	if err != nil {

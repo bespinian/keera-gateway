@@ -35,9 +35,8 @@ const (
 // here, not in the gateway, because the sandboxes set it for the agents they
 // run. The value is hashed, so it is never stored as sent.
 //
-// Deriving the session is a guess; the header is a fact. It groups a client
-// exactly, even when it rewrites its history or restarts a task with the same
-// words.
+// A derived session is a guess; the header groups a client exactly, even when
+// it rewrites its history or restarts a task with the same words.
 const SessionHeader = "X-Keera-Session"
 
 type ctxKey int
@@ -88,14 +87,12 @@ type APIError struct {
 // this API is spelled the same way.
 func Flag(q url.Values, name string) bool { return q.Get(name) == "1" }
 
-// WriteError sends an error envelope.
 func WriteError(w http.ResponseWriter, status int, typ, code, msg string) {
 	WriteJSON(w, status, map[string]APIError{
 		"error": {Message: msg, Type: typ, Code: code},
 	})
 }
 
-// WriteJSON sends v as JSON.
 func WriteJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -153,10 +150,10 @@ const maxRequestIDLen = 64
 
 // requestID accepts a client's own request id, or returns "".
 //
-// The id is echoed on the response and written to the log, so a client's
-// report and the log name the same request. As the caller chose it, it must
-// look like an id, with nothing a log or header has to escape. Anything else
-// is replaced, not repaired.
+// The id is echoed on the response and logged, so a client's report and the
+// log name the same request. As the caller chose it, it must look like an id,
+// with nothing a log or header has to escape. Anything else is replaced, not
+// repaired.
 func requestID(presented string) string {
 	if presented == "" || len(presented) > maxRequestIDLen {
 		return ""

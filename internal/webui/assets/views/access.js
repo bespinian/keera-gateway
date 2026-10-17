@@ -1,16 +1,11 @@
-// My access - the developer's own screen.
+// My access - the developer's own screen. It answers what would otherwise be
+// a question to an administrator: do my keys work, how much budget is left,
+// why was I refused, and what may I call.
 //
-// Every other screen here is shaped for whoever administers the deployment.
-// This one answers the four questions that are otherwise a message to an
-// administrator: are my keys still alive, how much budget is left, why was I
-// refused, and what am I allowed to call.
+// It shows only the reader's own keys, even for an administrator.
 //
-// It shows only what belongs to the person reading it. An administrator sees
-// their own keys, not the organisation's, which are two screens away.
-//
-// Revoking is the one write here, because this is where the person is when
-// they need it: a key pasted somewhere it should not be is killed by whoever
-// pasted it, in the second that takes.
+// Revoking is the one write here, so whoever pasted a key somewhere it should
+// not be can kill it at once.
 
 import { api } from "../api.js";
 import {
@@ -39,9 +34,8 @@ import {
 } from "./keys.js";
 import { noKey } from "./connect.js";
 
-// Each level of the hierarchy as the person held by it would name it. They know
-// they are in an organisation and a project; the ids are for quoting to whoever
-// administers them.
+// Each level as the developer would name it. The ids are for quoting to an
+// administrator.
 const SCOPE_NAMES = {
   org: "Your organisation",
   project: "Your project",
@@ -66,8 +60,7 @@ export async function accessView(ctx) {
 
   const wrap = h("div", {});
 
-  // A refusal or failure in the last day is the reason somebody opens this
-  // screen, so it is the first thing on it rather than a table further down.
+  // A recent refusal is why people open this screen, so it comes first.
   const recent = refusals.filter(
     (f) => Date.now() - new Date(f.ts).getTime() < 86400000,
   );
@@ -88,14 +81,10 @@ export async function accessView(ctx) {
   // and a missing key read the same on all three.
   if (!keys.length) wrap.append(noKey(ctx, a));
 
-  // Off by default, for the reason it is off on the API keys screen: this
-  // screen is read to find out whether a key still works, and a revoked one is
-  // the answer to a different question. The box is only there when there is a
-  // revoked key to bring back, since one that filters nothing is noise.
-  //
-  // The state is this render's, not the browser's: the reader ticked it to
-  // check one thing, and the next time they open the screen they are back to
-  // the keys they can actually use.
+  // Revoked keys are hidden by default, as on the API keys screen: people come
+  // here to see which keys work. The box only shows when there is a revoked
+  // key, and it resets on the next visit, since it was ticked to check one
+  // thing.
   const cards = h("div", {});
   let showRevoked = false;
   function drawCards() {
@@ -118,8 +107,8 @@ export async function accessView(ctx) {
     );
   }
 
-  // The keys are cards, not table rows, so this draws the same toolbar box
-  // table()'s toggles do rather than going through table().
+  // The keys are cards, not table rows, so this draws table()'s toolbar box
+  // itself.
   if (keys.length && keys.some((k) => k.state === "revoked")) {
     wrap.append(
       h(
@@ -164,7 +153,6 @@ function summary(live) {
   );
 }
 
-// keyCard is one key and everything that decides whether it works.
 function keyCard(k, ctx) {
   const facts = h(
     "div",
@@ -200,8 +188,7 @@ function keyCard(k, ctx) {
 
   const body = h("div", { class: "card-body" }, facts);
 
-  // The limits, outermost first: that is the order they apply in, and the order
-  // the question "which one stopped me" is answered in.
+  // Outermost limit first, the order they apply in.
   const bound = (k.scopes || []).filter(hasLimit);
   if (bound.length) {
     body.append(
@@ -283,11 +270,9 @@ function keyCard(k, ctx) {
       ),
       h("div", { class: "spacer" }),
       statePill(k.state),
-      // A pending key is the reader's to activate, whatever else they may do
-      // with their keys.
+      // A pending key is always the reader's to activate.
       k.state === "pending" ? activateButton(ctx, k, "btn btn-sm") : null,
-      // Only a key that still works can be taken away, and only the state
-      // above says whether this one does.
+      // Only a key that still works can be revoked.
       (k.state === "active" || k.state === "pending") && canRevoke(ctx, k)
         ? h(
             "button",
@@ -304,15 +289,9 @@ function keyCard(k, ctx) {
   );
 }
 
-// promptsSection is the wording put ahead of this key's messages, in the order
-// it is sent.
-//
-// It is the one thing on this screen that a developer cannot work out from
-// their own traffic: text nobody in their editor wrote is prepended to every
-// chat request they make, and until it is here the only ways to find out were
-// to ask an administrator or to notice the model behaving oddly and guess. It
-// is quoted rather than summarised, because "your project sets a system prompt"
-// answers nothing.
+// promptsSection quotes the text put ahead of this key's messages, in the
+// order it is sent. A developer cannot see it in their own traffic, and "your
+// project sets a system prompt" would answer nothing.
 function promptsSection(prompts) {
   return h(
     "div",
@@ -343,15 +322,10 @@ function promptsSection(prompts) {
   );
 }
 
-// filtersSection names what reads this key's requests on the way out.
-//
-// It belongs on this screen for the same reason the system prompt does, and
-// more urgently: a filter does not add to what the developer wrote, it changes
-// it or stops it. What reaches the model is not what left their editor - or
-// nothing did - and no amount of reading their own traffic would ever tell them
-// so. Only the aliases are here; the mode and the instruction are on the Filters
-// screen, which every member can read for the same reason they can read the
-// system prompt that is put ahead of their messages.
+// filtersSection names the filters that read this key's requests. A filter
+// can change or stop what the developer wrote, which their own traffic never
+// shows. Only the aliases are here; the details are on the Filters screen,
+// which every member can read.
 function filtersSection(scopes) {
   return h(
     "div",
@@ -400,8 +374,7 @@ function hasLimit(sc) {
   return sc.budget_micros > 0 || sc.rpm > 0 || sc.tpm > 0;
 }
 
-// scopeRow is one level of the hierarchy: what it allows, what is left of it,
-// and when it lifts. A developer who can see this does not have to ask.
+// scopeRow is one level: what it allows, what is left, and when it lifts.
 function scopeRow(sc) {
   const who = whose(sc);
 
@@ -450,9 +423,8 @@ function rateChips(sc) {
   return h("span", { class: "muted nowrap small" }, chips.join(" · "));
 }
 
-// refusalsCard is the answer to "my agent stopped working this afternoon". The
-// gateway records a refusal the way it records a completed request, so this is
-// the same log the dashboard counts from rather than a second account of it.
+// refusalsCard answers "my agent stopped working". Refusals are recorded like
+// any request, so this is the same log the dashboard counts from.
 function refusalsCard(refusals, keys) {
   const keyName = Object.fromEntries(keys.map((k) => [k.id, k.name]));
 
@@ -476,10 +448,8 @@ function refusalsCard(refusals, keys) {
         label: "Reason",
         cell: (f) => {
           const [label, why] = statusMeaning(f.status);
-          // The gateway's own sentence when there is one, because it names the
-          // limit that bound and the number behind it - "your project is over its
-          // rate limit of 60 requests per minute" is a different morning from
-          // "rate limit". The standing explanation is the fallback.
+          // The gateway's own message first, because it names the limit and
+          // its number. The standing explanation is the fallback.
           return h(
             "div",
             { class: "stack" },

@@ -6,7 +6,6 @@
 import { api, ApiError } from "../api.js";
 import { h, replace, brandMark, showError, field, banner } from "../ui.js";
 
-/** signUpFlow reports whether this page was opened for a sign-up. */
 export function signUpFlow() {
   return new URLSearchParams(location.search).get("sign_up") === "1";
 }

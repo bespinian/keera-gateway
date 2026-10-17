@@ -9,9 +9,8 @@ import (
 	"unicode/utf8"
 )
 
-// The unhappy requests are what the dashboard's count is opened up into, so
-// what they have to carry is the three things the count cannot say: which model, whose
-// key, and what the client was told.
+// The unhappy requests carry what the dashboard's count cannot say: which
+// model, whose key, and what the client was told.
 func TestUnhappyRequestsCarryWhatTheClientWasTold(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -184,10 +183,8 @@ func TestAnEnormousBackendMessageIsBounded(t *testing.T) {
 	}
 }
 
-// The entity screens exist because a share of the organisation's total is not
-// an answer about one project. What has to hold is that the narrowed report is the
-// same report: this project's requests, tokens, spend and latency, and none of
-// anybody else's.
+// A narrowed report is the same report over fewer rows: this project's
+// requests, tokens, spend and latency, and none of anybody else's.
 func TestOverviewNarrowsToOneEntity(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -289,13 +286,9 @@ func TestOverviewNarrowsToOneEntity(t *testing.T) {
 	}
 }
 
-// The request log is the half of the event log the failure log throws away.
-// "My agent's calls never arrived" is answered by the served rows, and a screen
-// that only holds failures cannot answer it.
 // The breakdown of one request's latency survives the round trip, and a
-// request that has none is told apart from a request whose steps were all of
-// zero length. The panel draws nothing at all for the second, rather than a
-// chart of nothing.
+// request that has none is told apart from one whose steps all took no time.
+// The panel draws nothing for the first, rather than a chart of nothing.
 func TestRequestsCarryWhereTheirTimeWent(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -335,6 +328,8 @@ func TestRequestsCarryWhereTheirTimeWent(t *testing.T) {
 	}
 }
 
+// "My agent's calls never arrived" is answered by the served rows, so the
+// request log keeps them alongside the failures.
 func TestRequestsCarryWhatWasServedAndWhatWasNot(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -541,9 +536,8 @@ func TestWriteEventsAnnouncesThatTheLogGrew(t *testing.T) {
 	}
 }
 
-// The counts are what the log leads with, because "four hundred requests, two
-// refused" and "four hundred requests, three hundred refused" are the same
-// first page of a table and completely different afternoons.
+// The counts cover the whole window: "400 requests, 2 refused" and "400
+// requests, 300 refused" can have the same first page.
 func TestOutcomesCountTheWindowNotThePage(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -586,9 +580,8 @@ func TestOutcomesCountTheWindowNotThePage(t *testing.T) {
 		t.Errorf("counts = %+v, want 3 served, 1 failed, 1 refused, 1 interrupted", c)
 	}
 
-	// A status is not an outcome, so it does narrow them. The total beside
-	// "All" is what the reader compares against the rows on the screen, and a
-	// filter the rows obey and the total does not is a total nobody can use.
+	// A status is not an outcome, so it does narrow them: the total beside
+	// "All" must match the rows on the screen.
 	byStatus := q
 	byStatus.Status = 402
 	only, err := st.Outcomes(ctx, byStatus)
@@ -633,9 +626,9 @@ func TestOutcomesCountTheWindowNotThePage(t *testing.T) {
 	}
 }
 
-// A class of statuses is one filter, because it is one question. "Did anything
-// fail this afternoon" is asked about all of 5XX at once, and the reader asking
-// it does not know which of 500, 502 and 504 their backends answer with.
+// A class of statuses is one filter. "Did anything fail?" is asked about all of
+// 5XX at once, by someone who does not know which of 500, 502 and 504 their
+// backends answer with.
 func TestRequestsNarrowToAClassOfStatuses(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -675,9 +668,8 @@ func TestRequestsNarrowToAClassOfStatuses(t *testing.T) {
 		t.Errorf("5XX = %+v, want only the 503", server)
 	}
 
-	// The counts obey the class for the same reason they obey an exact status:
-	// the total they carry is the one written beside "All" on the screen, and a
-	// total the rows below it disagree with is a total nobody can use.
+	// The counts obey the class, as they obey an exact status, so the total
+	// beside "All" matches the rows below it.
 	c, err := st.Outcomes(ctx, RequestQuery{OrgID: f.orgID, StatusClass: 4})
 	if err != nil {
 		t.Fatalf("Outcomes(4xx): %v", err)
@@ -687,10 +679,8 @@ func TestRequestsNarrowToAClassOfStatuses(t *testing.T) {
 	}
 }
 
-// The facets are the vocabulary of the filters, and they are read from the log
-// rather than from the catalogue: a deployment with two hundred keys has four
-// that made a request this week, and offering the other hundred and ninety-six
-// is offering a list somebody has to search to find the row that matters.
+// The filter choices are read from the log, not the catalogue: of two hundred
+// keys, only the four that made a request this week are worth offering.
 func TestRequestFiltersOfferOnlyWhatOccurred(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -806,10 +796,8 @@ func TestRequestsRankTheWholeWindow(t *testing.T) {
 	}
 }
 
-// The cached share of a prompt is charged at its own rate, so a row that lost
-// it is a row whose cost cannot be arrived at from the counts beside it -
-// which is the state somebody reconciling against a provider's invoice is
-// trying to get out of.
+// The cached share of a prompt is charged at its own rate. Without it, a row's
+// cost cannot be worked out from its counts, or checked against an invoice.
 func TestRequestsCarryTheCachedShareOfThePrompt(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)

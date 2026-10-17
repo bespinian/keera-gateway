@@ -1,5 +1,4 @@
-// API keys - issuing one, seeing what is live, renaming one, and taking one
-// away.
+// API keys: issue, list, rename, rotate and revoke.
 
 import { api } from "../api.js";
 import {
@@ -42,8 +41,7 @@ export async function keysView(ctx) {
     api.keys(ctx.orgID, { since }),
     api.projects(ctx.orgID).catch(() => ({ data: [] })),
     api.models(ctx.orgID).catch(() => ({ data: [] })),
-    // Who a key can be attributed to. A deployment with no identity provider
-    // has nobody here, and the field is left out rather than shown empty.
+    // Empty without an identity provider; the user field is then left out.
     api.users(ctx.orgID).catch(() => ({ data: [] })),
   ]);
   const keys = keysRes.data || [];
@@ -53,8 +51,6 @@ export async function keysView(ctx) {
   const projectNames = Object.fromEntries(projects.map((t) => [t.id, t.name]));
   const userEmails = Object.fromEntries(users.map((u) => [u.id, u.email]));
   const canEdit = isAdmin(ctx);
-  // Only an administrator issues keys, so each has the project and guardrails
-  // they chose. A member renames, rotates and revokes their own.
 
   const live = keys.filter((k) => stateOf(k) === "active").length;
   ctx.setSubtitle(`${live} active of ${keys.length}`);
@@ -79,9 +75,8 @@ export async function keysView(ctx) {
   const rows = table(
     [
       {
-        // The name opens the key's own screen. "Can this be revoked" is answered
-        // by the columns here; "what has it actually been doing" is one request
-        // at a time, and that is a screen rather than a cell.
+        // What a key has been doing is a list of requests, so it gets its own
+        // screen rather than a cell.
         label: "Name",
         sortKey: (k) => k.name,
         cell: (k) =>
@@ -122,8 +117,7 @@ export async function keysView(ctx) {
             ? h("span", {}, projectNames[k.project_id] || k.project_id)
             : h("span", { class: "faint" }, "Deleted project"),
       },
-      // A deployment with no identity provider has nobody to attribute a key
-      // to, so the column would only ever say so.
+      // Without an identity provider this column would always be empty.
       users.length
         ? {
             label: "User",
@@ -141,10 +135,8 @@ export async function keysView(ctx) {
         cell: (k) => statePill(stateOf(k)),
       },
       {
-        // The question anyone actually has about a key is whether revoking it
-        // would break somebody. Created and expires do not answer that; this
-        // does, and a key nothing has touched is called out rather than left as
-        // a date to work out for yourself.
+        // This answers whether revoking the key would break somebody, which
+        // created and expires dates do not.
         label: "Last used",
         shrink: true,
         sortKey: (k) =>
@@ -222,8 +214,7 @@ export async function keysView(ctx) {
             : h("span", { class: "faint" }, "never"),
       },
       {
-        // A key's limits are worth reading whatever state it is in; only
-        // revoking one is about a key that is still working.
+        // Limits are worth reading in any state; revoking needs a live key.
         label: "",
         shrink: true,
         cell: (k) =>
@@ -240,8 +231,7 @@ export async function keysView(ctx) {
               },
               "Guardrails",
             ),
-            // Any key can be renamed, revoked ones too: their name still
-            // heads their usage history.
+            // Revoked keys can be renamed too: the name heads their usage.
             canRevoke(ctx, k)
               ? iconButton(
                   icons.pencil,
@@ -253,8 +243,8 @@ export async function keysView(ctx) {
             canActivate(ctx, k) && stateOf(k) === "pending"
               ? activateButton(ctx, k, "btn btn-sm")
               : null,
-            // An expired key can be rotated too. A member cannot issue a new
-            // one, so this is how they get going again.
+            // Expired keys can be rotated too. A member cannot issue a new key,
+            // so this is how they get going again.
             canRevoke(ctx, k) && canRotate(k)
               ? h(
                   "button",
@@ -286,9 +276,7 @@ export async function keysView(ctx) {
       emptyBody: canEdit
         ? "Issue one to get started. Usage and the audit log are tracked per key."
         : "An administrator issues keys. Usage and the audit log are tracked per key.",
-      // This list grows with however finely the deployment slices its keys, so it
-      // can get long. Searching it by name is how anybody actually arrives at a
-      // row, since that is what the name is for.
+      // The list can get long, and people look for a key by its name.
       search: (k) =>
         [
           k.name,
@@ -324,11 +312,9 @@ export async function keysView(ctx) {
         },
         // A dropdown with one choice filters nothing.
       ].filter((c) => c.options.length > 1),
-      // Off by default: a revoked key is nobody's working key any more, and the
-      // list is read to find one that works. It stays one click away, because a
-      // revoked key is still the answer to "what happened to mine". An expired
-      // one is left in the list either way - it says so in its own row, and it
-      // is not what this box is named after.
+      // Revoked keys are hidden by default, since the list is read to find
+      // working keys. They stay one click away to answer "what happened to
+      // mine". Expired keys always show; their row says so.
       toggles: [
         {
           label: "Show revoked",
@@ -341,7 +327,7 @@ export async function keysView(ctx) {
   return h("div", {}, head, rows);
 }
 
-// userCell is whose key k is. Only an administrator has a user's page to open.
+// Only an administrator has a user's page to open.
 function userCell(ctx, k, userEmails) {
   if (!k.user_id) return h("span", { class: "faint" }, NO_USER);
   const email = userEmails[k.user_id] || k.user_id;
@@ -355,11 +341,11 @@ function userCell(ctx, k, userEmails) {
     : h("span", {}, email);
 }
 
-// NOBODY is the user filter's value for a key attributed to nobody. No user id
-// looks like it.
+// NOBODY is the user filter's value for a key with no user. No user id looks
+// like it.
 const NOBODY = "-";
 
-// NO_USER is what every screen shows for a key attributed to nobody.
+// NO_USER is what every screen shows for a key with no user.
 export const NO_USER = "No user";
 
 // inPeriod is the period last_used_at covers when the keys were read with
@@ -368,7 +354,7 @@ export function inPeriod(since) {
   return `in the ${rangeOf(since, RANGES[1]).long.toLowerCase()}`;
 }
 
-// byLabel is the distinct values of rows as dropdown options, sorted by label.
+// byLabel turns the distinct values of rows into dropdown options.
 function byLabel(rows, value, label) {
   const seen = new Map();
   for (const r of rows) seen.set(value(r), label(r));
@@ -377,21 +363,18 @@ function byLabel(rows, value, label) {
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
-// canRevoke reports whether the reader may rename, revoke or rotate this key. An administrator
-// revokes any of their organisation's; a member revokes one attributed to
-// themselves. A key attributed to nobody
-// is the shared one an administrator issued for a pipeline, so it is nobody's to
-// take away but theirs - which is why the id has to be there and match, rather
-// than merely not belong to somebody else.
+// canRevoke reports whether the reader may rename, revoke or rotate this key.
+// A member may only touch keys of their own. A key with no user is a shared
+// one an administrator issued, so the id must be present and match, not just
+// not belong to somebody else.
 export function canRevoke(ctx, k) {
   if (isAdmin(ctx)) return true;
   return !!k.user_id && k.user_id === ctx.state.me.user_id;
 }
 
-// revokeBody says what revoking this particular key would actually break, which
-// is a different sentence for a key in daily use and one nobody has used.
-// period is the span last_used_at covers, which depends on how the keys were
-// read: My access reads this month.
+// revokeBody says what revoking this key would break. period is the span
+// last_used_at covers, which depends on how the keys were read: My access
+// reads this month.
 function revokeBody(k, period = "this month") {
   const base =
     `Clients using ${k.name} stop working within a second. ` +
@@ -400,8 +383,7 @@ function revokeBody(k, period = "this month") {
   return base;
 }
 
-// confirmRevoke asks before revoking a key, then runs done. Every screen that
-// shows a live key offers this, and it should read the same on each.
+// confirmRevoke is shared so revoking reads the same on every screen.
 export function confirmRevoke(k, done, period) {
   confirm({
     title: k.name ? `Revoke ${k.name}?` : "Revoke this key?",
@@ -416,7 +398,6 @@ export function confirmRevoke(k, done, period) {
   });
 }
 
-// statePill is a key's state as the panel shows it everywhere.
 export function statePill(state) {
   if (state === "revoked") return pill("Revoked", "bad");
   if (state === "expired") return pill("Expired", "warn");
@@ -424,7 +405,7 @@ export function statePill(state) {
   return pill("Active", "good");
 }
 
-// stateOf is the same word store.KeyInfo.State gives on the server.
+// stateOf matches store.KeyInfo.State on the server.
 export function stateOf(k) {
   if (k.revoked_at) return "revoked";
   if (k.expires_at && new Date(k.expires_at) < new Date()) return "expired";
@@ -432,35 +413,29 @@ export function stateOf(k) {
   return "active";
 }
 
-// isLive is a key that works, or will once it is activated: what revoking
-// takes away.
+// isLive is a key that works, or will once activated: what revoking takes away.
 export function isLive(k) {
   const state = stateOf(k);
   return state === "active" || state === "pending";
 }
 
-// canRotate is whether a key has a secret to replace. A pending key has none
-// yet, so it is activated instead.
+// A pending key has no secret to replace yet, so it is activated instead.
 export function canRotate(k) {
   const state = stateOf(k);
   return state !== "revoked" && state !== "pending";
 }
 
-// prefixOf is how a key is shown where its secret would be.
 export function prefixOf(k) {
   return k.pending ? "no secret yet" : k.prefix + "…";
 }
 
-// canActivate reports whether the reader may activate this pending key: the
-// person it is for, or an administrator, who could rotate it anyway. A member
-// who may not rotate their own keys can still activate one: it was left for
-// them.
+// canActivate: the person a pending key is for, or an administrator, who
+// could rotate it anyway.
 export function canActivate(ctx, k) {
   return isAdmin(ctx) || (!!k.user_id && k.user_id === ctx.state.me.user_id);
 }
 
-// activateKey gives a pending key its secret and shows it, once. button is
-// held disabled meanwhile.
+// activateKey gives a pending key its secret and shows it, once.
 export async function activateKey(ctx, k, button) {
   button.disabled = true;
   try {
@@ -472,7 +447,6 @@ export async function activateKey(ctx, k, button) {
   }
 }
 
-// activateButton is the button that activates a pending key.
 export function activateButton(ctx, k, cls = "btn") {
   return h(
     "button",
@@ -485,12 +459,8 @@ export function activateButton(ctx, k, cls = "btn") {
   );
 }
 
-// openKey opens this one key's limits with its project's and its organisation's
-// loaded as the ceiling above them.
-//
-// A member gets the same dialog with nothing to fill in. These limits are the
-// answer to "why was my editor refused", and a key nobody may read is a key
-// whose refusals are a message to an administrator.
+// openKey shows a key's limits, with its project's and organisation's as the
+// ceiling. A member gets it read-only: it answers "why was my editor refused".
 export async function openKey(ctx, key, models, projectName, canEdit) {
   const ceilings = await ceilingsFor("key", {
     orgID: key.org_id,
@@ -509,9 +479,8 @@ export async function openKey(ctx, key, models, projectName, canEdit) {
   });
 }
 
-// confirmRotate asks before replacing a key with a new one, then shows the new
-// secret. done gets the new key once it exists; a screen about the old key
-// uses it to move to the new one.
+// confirmRotate replaces a key and shows the new secret. done gets the new
+// key, so a screen about the old key can move to it.
 export function confirmRotate(ctx, k, { done } = {}) {
   confirm({
     title: k.name ? `Rotate ${k.name}?` : "Rotate this key?",
@@ -529,7 +498,6 @@ export function confirmRotate(ctx, k, { done } = {}) {
   });
 }
 
-// renameKey changes what a key is called and nothing else.
 export function renameKey(ctx, k) {
   const name = h("input", { class: "input", value: k.name, autofocus: true });
   formModal({
@@ -559,8 +527,7 @@ export function renameKey(ctx, k) {
   });
 }
 
-// The expiries a key can be issued with, longest-lived last. "date" asks for
-// the last day the key works.
+// "date" asks for the last day the key works.
 const EXPIRIES = [
   { value: "720h", label: "30 days", hours: 720 },
   { value: "2160h", label: "90 days", hours: 2160 },
@@ -569,22 +536,22 @@ const EXPIRIES = [
   { value: "", label: "Never" },
 ];
 
-// localDay is a day as a date input writes it, in local time.
+// localDay formats d as a date input writes it, in local time.
 function localDay(d) {
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-// endOfDay is the last second of a YYYY-MM-DD day in local time, so a key
-// picked to expire on a day still works all of that day.
+// endOfDay is the last second of a YYYY-MM-DD day, so a key still works all
+// of the day it expires on.
 function endOfDay(day) {
   const [y, m, d] = day.split("-").map(Number);
   return new Date(y, m - 1, d, 23, 59, 59);
 }
 
-// openIssueKey opens the form from another screen, which has not read the
-// projects and people it offers. An operator looking at every organisation
-// picks one on the keys screen first.
+// openIssueKey opens the form from a screen that has not loaded projects and
+// people. An operator viewing every organisation picks one on the keys screen
+// first.
 export async function openIssueKey(ctx) {
   if (!ctx.orgID && ctx.state.me.unrestricted) return ctx.navigate("/keys");
   const [projectsRes, usersRes] = await Promise.all([
@@ -598,14 +565,13 @@ export async function openIssueKey(ctx) {
   );
 }
 
-// issueKey asks for a new key. last holds the project and expiry of the key
-// issued just before, when the form is opened again with "Issue another".
+// issueKey asks for a new key. last holds the project and expiry of the
+// previous key, for "Issue another".
 //
-// The key is the reader's own unless they pick someone else, as `keera key
-// create` does: a key that belongs to nobody shows on nobody's My access or My
-// clients, so the person who issued it cannot set a client up with it. The
-// user is not carried over to "Issue another": a key given to the wrong person
-// quietly counts as theirs.
+// The key is the reader's own by default, as with `keera key create`: a key
+// with no user shows on nobody's My access, so nobody can set a client up
+// with it. The user is not carried over to "Issue another", since a key given
+// to the wrong person quietly counts as theirs.
 function issueKey(ctx, projects, users, last = {}) {
   // Every key is in a project, so with none there is nothing to issue yet.
   if (!projects.length) {
@@ -659,9 +625,8 @@ function issueKey(ctx, projects, users, last = {}) {
       h("option", { value: u.id, selected: u.id === me }, u.email),
     ),
   );
-  // A key for somebody else is theirs to activate by default, so its secret
-  // is only ever on their screen. The administrator can still take it now,
-  // for a person who will be handed it some other way.
+  // A key for somebody else is theirs to activate by default, so only they
+  // see its secret. The administrator can still take it now to hand it over.
   const activation = h(
     "select",
     { class: "select" },
@@ -678,8 +643,7 @@ function issueKey(ctx, projects, users, last = {}) {
   person.addEventListener("change", () => {
     activationField.hidden = !forSomebodyElse();
   });
-  // Each span carries the day it lands on: "90 days" is not a date anybody can
-  // hold in their head, and the choice is easier to make beside the calendar.
+  // Each span shows the day it ends on: "90 days" is hard to picture.
   const expiry = h(
     "select",
     { class: "select" },
@@ -785,10 +749,8 @@ function issueKey(ctx, projects, users, last = {}) {
 }
 
 // showSecret shows a key's secret, the only time it can be seen. again, when
-// given, opens the form for another key like this one.
-//
-// The secret is never in the panel again, so a key of the reader's own is set
-// up from here: Connect a client fills it into the setup it shows.
+// given, opens the form for another key like this one. Because the secret is
+// never shown again, the reader's own key is set up from here.
 function showSecret(ctx, created, again, title = "Key issued") {
   const body = field("The key", secretField(created.key, "The API key"));
   const own =
@@ -849,7 +811,6 @@ function showSecret(ctx, created, again, title = "Key issued") {
   });
 }
 
-// showPending says what happens to a key left for its holder to activate.
 function showPending(ctx, created, email, again) {
   modal({
     title: "Key issued",

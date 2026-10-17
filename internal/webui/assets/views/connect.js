@@ -1,12 +1,9 @@
 // My clients: the coding agents that call Keera Gateway with the reader's
 // keys, and how to add one.
 //
-// Connect client exists because the last mile is where a gateway is actually
-// adopted or quietly abandoned: an organisation has models and keys, and a
-// developer still has to work out which URL, which model and which file. It
-// answers that for each client the deployment supports, with every model the
-// developer's key may call already filled in - so the thing they copy is the
-// thing that works, not a template they have to fill in and get wrong once.
+// Connect client tells a developer which URL, model and file each client
+// needs, with their key's models already filled in, so what they copy works
+// as it is.
 
 import { api, chatTargets } from "../api.js";
 import {
@@ -35,17 +32,13 @@ import {
   remember,
 } from "../ui.js";
 
-// The configuration blocks are filled in by the control plane, at
+// The control plane fills in the configuration blocks, at
 // /control/v1/connect/render, with the same code `keera connect` runs, so the
-// panel and the command line cannot hand a developer two versions of the same
-// file. See internal/connect.
+// panel and the command line always agree. See internal/connect.
 //
-// The prose around a block comes with it. A span in backticks is something to
-// type or a name to find, and is shown as code.
+// The prose around a block comes with it. A span in backticks is shown as code.
 
-// One fetch per page load. A catalogue that changed under a panel already open
-// is picked up on the next reload, which is the same bargain every other list
-// on this screen makes.
+// One fetch per page load. A changed catalogue shows after a reload.
 let catalogue;
 
 /** loadClients reads the client catalogue: what the picker offers, and the
@@ -60,8 +53,7 @@ function loadClients() {
           holdsKey: String(c.template || "").includes("{{key}}"),
         })),
       (err) => {
-        // A failure is not cached: the panel's Reload button, and the next
-        // visit to a screen that needs this, have to be able to try again.
+        // A failure is not cached, so a reload can try again.
         catalogue = null;
         throw err;
       },
@@ -90,9 +82,9 @@ export function keyModels(targets, allowed) {
   return targets.filter((m) => (allowed || []).includes(m.alias));
 }
 
-/** usableKeys is the reader's own keys that work from a client or the
- *  playground. A subscription key works only from Claude Code signed in to a
- *  Claude plan, which `keera connect claude-code --subscription` sets up. */
+/** usableKeys drops subscription keys: they work only from Claude Code
+ *  signed in to a Claude plan, which `keera connect claude-code
+ *  --subscription` sets up. */
 export function usableKeys(a) {
   return (a.keys || []).filter(
     (k) => k.state === "active" && k.kind !== "subscription",
@@ -183,12 +175,11 @@ export async function clientsView(ctx) {
   return h("div", { class: "stack" }, head, list);
 }
 
-/** openConnectClient opens Connect client from another screen, which has not
- *  read the catalogue or the reader's keys. Without a key of their own or a
- *  client to offer, My clients says why.
+/** openConnectClient opens Connect client from another screen. Without a key
+ *  or a client to offer, it goes to My clients, which says why.
  *
- *  created is a key whose secret was just shown, which the setup then fills
- *  in. It resolves to whether the dialog opened. */
+ *  created is a key whose secret was just shown, which the setup fills in. It
+ *  resolves to whether the dialog opened. */
 export async function openConnectClient(ctx, button, created = null) {
   button.disabled = true;
   let catalogue, a;
@@ -215,8 +206,8 @@ export async function openConnectClient(ctx, button, created = null) {
 }
 
 /** addClient asks which client to set up, then shows its setup for one of the
- *  reader's keys. secret, when given, is the key's own, shown in the setup
- *  instead of a placeholder. It resolves to whether the dialog opened. */
+ *  reader's keys. secret, when given, replaces the placeholder. It resolves to
+ *  whether the dialog opened. */
 async function addClient(ctx, catalogue, keys, button, secret = null) {
   // Every key here is in the reader's own organisation, so one read covers
   // them all.
@@ -291,9 +282,8 @@ async function addClient(ctx, catalogue, keys, button, secret = null) {
   );
 
   // The key is the only choice after the client. The models follow from it,
-  // and the gateway address is already in the setup: an operator whose panel
-  // is published under another name sets KEERA_PUBLIC_URL, so that every
-  // panel and `keera connect` agree.
+  // and the gateway address comes from KEERA_PUBLIC_URL, so every panel and
+  // `keera connect` agree.
   const setup = h(
     "div",
     { hidden: true },
@@ -344,7 +334,6 @@ async function addClient(ctx, catalogue, keys, button, secret = null) {
   return true;
 }
 
-// clientMarks are the vendors' own logos, for the clients that have one here.
 const clientMarks = {
   "claude-code": () => providerMark("anthropic"),
   codex: () => providerMark("openai"),
@@ -353,7 +342,6 @@ const clientMarks = {
   python: () => clientMark("python"),
 };
 
-/** modelList names the models a configuration sets up, with their windows. */
 function modelList(models) {
   if (!models.length) return [];
   return [
@@ -371,9 +359,8 @@ function modelList(models) {
   ];
 }
 
-/** noKey explains why the reader has no key to use, and where to get one.
- *  My access and the playground both show it, so the same situation reads
- *  the same on each. */
+/** noKey explains why the reader has no key, and where to get one. Shared by
+ *  My access and the playground. */
 export function noKey(ctx, a) {
   if (a.anonymous || (a.operator_key && !(a.keys || []).length)) {
     return h(
@@ -409,8 +396,7 @@ export function noKey(ctx, a) {
   );
 }
 
-/** noModel is what a key that can call no chat model shows, on My clients and
- *  in the playground. */
+/** noModel is shared by My clients and the playground. */
 export function noModel() {
   return empty(
     "This key can use no chat model",
@@ -527,7 +513,6 @@ function step(n, title, body) {
   );
 }
 
-/** prose renders the catalogue's prose, with each span in backticks as code. */
 function prose(text) {
   return String(text || "")
     .split("`")

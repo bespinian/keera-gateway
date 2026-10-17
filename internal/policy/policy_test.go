@@ -326,9 +326,8 @@ func TestValidModelAlias(t *testing.T) {
 }
 
 func TestAFilterWithNoModeWrittenDownIsARewriteFilter(t *testing.T) {
-	// Every filter that existed before there were two modes rewrote, so the
-	// zero value has to mean that: a stored row read back without a mode must
-	// not turn into something that only ever says no.
+	// Filters stored before there were modes all rewrote, so a row with no
+	// mode must not turn into one that only ever says no.
 	if !FilterMode("").Rewrites() {
 		t.Error("a filter with no mode written down does not rewrite")
 	}
@@ -361,9 +360,8 @@ func TestARouterWithNoFallbackRefusesWhatItCannotPlace(t *testing.T) {
 }
 
 func TestARouterOnlyOffersWhatItsListNames(t *testing.T) {
-	// Offers is what stands between a small model's one-word answer to
-	// somebody else's prose and a request leaving the cluster, so it is
-	// exact: no case folding, no prefixes, no near misses.
+	// Offers stands between a small model's one-word answer and a request
+	// leaving the cluster, so it is exact: no case folding, no prefixes.
 	rt := Router{Destinations: []string{"keera-small", "keera-large"}}
 	for _, alias := range []string{"keera-small", "keera-large"} {
 		if !rt.Offers(alias) {
@@ -379,8 +377,6 @@ func TestARouterOnlyOffersWhatItsListNames(t *testing.T) {
 }
 
 func TestPeriodNextIsWhenABudgetLifts(t *testing.T) {
-	// The one thing a developer refused by a budget needs, and the one thing
-	// "budget exceeded" on its own never says.
 	at := time.Date(2026, 12, 14, 9, 30, 0, 0, time.UTC)
 	if got := PeriodMonth.Next(at); !got.Equal(time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)) {
 		t.Errorf("month rolls to %s, want 2027-01-01", got)
@@ -403,8 +399,7 @@ func TestBudgetRefusalNamesTheScopeAndTheReset(t *testing.T) {
 			t.Errorf("the message does not say %q: %s", want, msg)
 		}
 	}
-	// The id is the tenancy's business, not the developer's: they cannot act on
-	// it and it is noise in an editor's error toast.
+	// The developer cannot act on the id; it is noise in an editor's toast.
 	if strings.Contains(msg, "project_9f2") {
 		t.Errorf("the message quotes an internal id: %s", msg)
 	}
@@ -431,7 +426,7 @@ func TestResolveConcatenatesSystemPrompts(t *testing.T) {
 			org:     &Limits{SystemPrompt: new("Answer in British English.")},
 			project: &Limits{SystemPrompt: new("Never suggest a new dependency.")},
 			// The department administrator cannot drop the organisation's
-			// instruction, which is the whole point of the ordering.
+			// instruction.
 			want: "Answer in British English.\n\nNever suggest a new dependency.",
 		},
 		{

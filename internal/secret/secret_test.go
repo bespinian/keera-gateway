@@ -42,20 +42,17 @@ func TestOpenRefusesWhatItShould(t *testing.T) {
 	}
 	sealed := b.Seal("keera-frontier", "sk-ant-credential")
 
-	// Moved to another alias's row.
 	if _, err := b.Open("keera-speed", sealed); err == nil {
 		t.Error("a ciphertext opened under an alias it was not sealed for")
 	}
 
-	// Tampered with in place.
 	tampered := bytes.Clone(sealed)
 	tampered[len(tampered)-1] ^= 0xff
 	if _, err := b.Open("keera-frontier", tampered); err == nil {
 		t.Error("a modified ciphertext opened")
 	}
 
-	// Sealed under a different key - the case an operator hits after rotating
-	// KEERA_SECRET_KEY, which must fail loudly rather than return rubbish.
+	// After rotating KEERA_SECRET_KEY this must fail loudly, not return rubbish.
 	other, err := New("a-different-key-of-its-own")
 	if err != nil {
 		t.Fatalf("New: %v", err)

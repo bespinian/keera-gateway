@@ -152,8 +152,8 @@ func setList(dst *[]string, name, v string, clear bool) error {
 	return nil
 }
 
-// micros converts francs to millionths. It rounds, because
-// 2.01 is 2009999.99... as a float and truncating it would lose a millionth.
+// micros converts francs to millionths. It rounds: 2.01 is 2009999.99... as
+// a float, and truncating would lose a millionth.
 func micros(units float64) int64 { return int64(math.Round(units * 1_000_000)) }
 
 // setBudget sets a budget given in CHF; 0 removes it.
@@ -266,9 +266,9 @@ func updateLimits(ctx context.Context, c *client, scope, scopeID string,
 }
 
 // A facet is one part of a guardrail on its own: 'keera limit' for the rates
-// and 'keera budget' for the spend. Same scopes, same call and the same flags
-// as 'guardrail set', of which help.go lets each take its own. With no flags
-// it reports rather than writes, because `keera limit project project_1` is a question.
+// and 'keera budget' for the spend. It is 'guardrail set' with only its own
+// flags. With no flags it reports rather than writes, because
+// `keera limit project project_1` is a question.
 
 // facetFields are the parts of the effective report each facet prints.
 var facetFields = map[string][]string{"limit": {"rates"}, "budget": {"spend"}}

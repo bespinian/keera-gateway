@@ -1,24 +1,15 @@
-// The live map: the deployment drawn, with its traffic moving on it.
+// The live map: what is connected to this gateway, and how much of its
+// traffic leaves the network. On a table, a hosted model is a URL somebody has
+// to recognise; here it sits below a line, and every request to it is drawn
+// crossing that line.
 //
-// Every other screen here is a table, because every other question is about
-// time. This one answers the two questions about shape: what is connected to
-// this gateway, and how much of what goes through it leaves the building.
+// A canvas rather than SVG: a busy gateway puts hundreds of packets a minute
+// on screen, and that many DOM nodes stutter. It draws only when something
+// moved.
 //
-// The second is why it is drawn at all. A model served from the cluster and
-// one served by a hosted provider sit one row apart on the Models screen and
-// are worlds apart in what they mean. On a table that difference is a URL
-// somebody has to recognise; here it is a line across the middle of the
-// picture, and every request that crosses it is drawn crossing it.
-//
-// A canvas rather than the inline SVG the dashboard's chart uses: a busy
-// gateway puts hundreds of packets on this screen a minute, and hundreds of
-// appearing and disappearing DOM nodes is a page that stutters. The canvas
-// draws only when something has moved.
-//
-// The numbers on the boxes are the window's, from the same log every other
-// screen reads. What moves between them is the request log as it is written,
-// so a packet crossing the boundary is a request that happened seconds ago and
-// not an animation of an average.
+// The numbers on the boxes come from the same log every other screen reads.
+// The packets are the request log as it is written, not an animation of an
+// average.
 
 import { api } from "../api.js";
 import { orgNameOf } from "./orgs.js";
@@ -43,12 +34,10 @@ import {
   followRequests,
 } from "../ui.js";
 
-// How the boxes are sized. Fixed rather than measured: a map whose boxes are as
-// wide as their longest name is a map that jumps every time a model is added.
+// Fixed sizes rather than measured, so the map does not jump when a model is
+// added.
 const BOX = {
-  // The heights are the three lines a box carries plus the room they need -
-  // see rows() below, which is where they come from and where they have to
-  // stay in step with.
+  // The heights must stay in step with rows() below.
   clientW: 176,
   clientH: 74,
   modelW: 190,
@@ -57,33 +46,26 @@ const BOX = {
   gatewayH: 92,
   gapY: 12,
   pad: 18,
-  // The room between one column and the next. It is not spare space: it is
-  // where the lines are, and a curve with no room to bend in is a corner.
+  // The room the lines between columns need to curve.
   gapX: 40,
 };
 
-// The narrowest the drawing is allowed to be - three columns and the two gaps
-// the lines need. Below this the card scrolls sideways rather than the boxes
-// being squeezed into each other, because a map whose gateway sits on top of
-// its clients has stopped saying anything.
+// Three columns and two gaps. Below this the card scrolls sideways rather
+// than letting the boxes overlap.
 const MIN_WIDTH =
   BOX.pad * 2 + BOX.clientW + BOX.gatewayW + BOX.modelW + BOX.gapX * 2;
 
-// How many boxes a column draws before the rest are folded into one. Past this
-// the picture stops being readable, and the ones folded away are the quiet ones:
-// the report behind the canvas still lists every one of them.
+// Boxes per column before the quietest are folded into one, to keep it
+// readable. The tables below the canvas still list every one.
 const MAX_CLIENTS = 7;
 const MAX_MODELS = 6;
 
-// A packet's speed in pixels per millisecond, and the pause at the gateway
-// where it is authorised, budgeted and filtered. The pause is what makes the
-// gateway look like something the request goes *through* rather than a corner
-// the line happens to turn at.
+// Packet speed in pixels per millisecond, and the pause at the gateway. The
+// pause shows the request going through the gateway, not just past it.
 const SPEED = 0.55;
 const HOLD_MS = 110;
-// The most packets one batch of the stream puts on the screen. A tick can carry
-// two hundred rows; two hundred packets leaving at once reads as a wall rather
-// than as traffic, so the rest are counted and not drawn.
+// Most packets drawn per stream batch. A batch can carry two hundred rows,
+// which would read as a wall; the rest are counted but not drawn.
 const MAX_SPAWN = 48;
 const MAX_PACKETS = 400;
 
@@ -96,9 +78,8 @@ export async function mapView(ctx) {
   const scene = sceneFrom(data);
   const canvas = h("canvas", {
     class: "map-canvas",
-    // A canvas is a picture as far as anything but a mouse is concerned, so it
-    // says what it is - and everything on it is repeated as text underneath,
-    // where it can be read, searched and sorted.
+    // For screen readers. Everything on the canvas is also in the tables
+    // underneath.
     role: "img",
     "aria-label": describe(scene),
   });
@@ -156,11 +137,9 @@ export async function mapView(ctx) {
 
 /** sceneFrom turns the report into the boxes and lines the canvas draws.
  *
- *  The catalogue decides the models, not the traffic: a hosted model nobody has
- *  called this week is still a way out of the building, and leaving it off
- *  because it was quiet would be the one omission this screen cannot afford.
- *  The clients are the other way round - nothing registers a client, it just
- *  arrives with a key - so they are whatever has called. */
+ *  Models come from the catalogue, not the traffic: a quiet hosted model is
+ *  still a way out of the network. Clients are never registered, so they are
+ *  whatever has called. */
 function sceneFrom(data) {
   const clients = fold(
     (data.clients || []).map((c) => ({
@@ -213,15 +192,15 @@ function sceneFrom(data) {
     gateway,
     models,
     total: gateway.cell,
-    // Which client used which model, for the highlight: hovering a client
-    // lights the models it actually reached rather than every line on the map.
+    // Which client used which model, so hovering a client lights only the
+    // models it reached.
     flows: (data.flows || []).map((f) => ({
       client: f.client,
       alias: f.alias,
     })),
     from: data.from,
     to: data.to,
-    // When each live packet arrived, for the rate the gateway shows.
+    // Arrival times of live packets, for the gateway's rate.
     beats: [],
     height: 0,
   };
@@ -241,8 +220,7 @@ function cellOf(c) {
   };
 }
 
-/** fold keeps the busiest and adds up the rest into one box, so that a
- *  deployment with forty models is still a picture. */
+/** fold keeps the busiest and adds up the rest into one box. */
 function fold(list, max, kind) {
   if (list.length <= max) return list;
   const kept = list.slice(0, max - 1);
@@ -269,8 +247,7 @@ function fold(list, max, kind) {
   return kept;
 }
 
-/** index builds the lookups the live stream needs: a row names a client and an
- *  alias, and both have to become a box in constant time. */
+/** index maps a live row's client and alias to their boxes. */
 function index(scene) {
   scene.byClient = new Map();
   for (const c of scene.clients) {
@@ -293,8 +270,7 @@ function hostOf(url) {
   }
 }
 
-/** describe is the whole picture in one sentence, for whoever is not looking at
- *  it. */
+/** describe is the picture in one sentence, for screen readers. */
 function describe(scene) {
   const folded = scene.outside.find((m) => m.folded);
   const out =
@@ -312,8 +288,7 @@ function describe(scene) {
   );
 }
 
-/** tokenShare is the number the whole screen exists for: how much of what went
- *  through this gateway went outside it. */
+/** tokenShare is the percentage of tokens that went outside the network. */
 function tokenShare(scene) {
   let outside = 0;
   for (const m of scene.outside)
@@ -331,13 +306,11 @@ function outsideCost(scene) {
 
 /* ----------------------------------------------------------------- layout */
 
-/** layout places every box for a canvas this wide and returns how tall the
- *  drawing has to be.
+/** layout places every box for a canvas this wide and returns its height.
  *
- *  Two bands, one above the other: everything inside the customer's network,
- *  and the providers outside it. The boundary runs between them across the
- *  whole width, so a line from the gateway to a hosted model has to cross it -
- *  which is the one thing this drawing is for. */
+ *  Two bands: the customer's network above, hosted providers below. The
+ *  boundary runs across the whole width, so every line to a hosted model
+ *  crosses it. */
 function layout(scene, width) {
   const P = BOX.pad;
   const stack = (list, hh) =>
@@ -362,8 +335,8 @@ function layout(scene, width) {
     outsideTop: lineY + 40,
     clientX: P,
     modelX: width - P - BOX.modelW,
-    // Centred, but never at the cost of the room the lines need: on a narrow
-    // card the middle of the canvas is inside one of the columns.
+    // Centred, but never into the room the lines need: on a narrow card the
+    // middle is inside a column.
     gatewayX: Math.min(
       Math.max(
         Math.round((width - BOX.gatewayW) / 2),
@@ -401,7 +374,7 @@ function layout(scene, width) {
   return scene.height;
 }
 
-/** place stacks one column, centred in the band it belongs to. */
+/** place stacks one column, centred in its band. */
 function place(list, x, w, hh, top, bandH) {
   const total = list.length ? list.length * (hh + BOX.gapY) - BOX.gapY : 0;
   let y = Math.round(top + (bandH - total) / 2);
@@ -414,9 +387,9 @@ function place(list, x, w, hh, top, bandH) {
   }
 }
 
-/** legOne and legTwo are the two halves of a request's path. They are computed
- *  from the boxes each time rather than stored, so a relayout cannot leave a
- *  packet travelling to where a box used to be. */
+/** legOne and legTwo are the two halves of a request's path. They are
+ *  computed each time, not stored, so a relayout cannot send a packet to where
+ *  a box used to be. */
 function legOne(node, gateway) {
   return curve(
     node.x + node.w,
@@ -452,18 +425,15 @@ function at(c, t) {
   };
 }
 
-// Straight-line distance is close enough for a curve this shallow, and it is
-// only ever used to decide how long a packet takes to cross it.
+// Straight-line distance is close enough for a curve this shallow, and it
+// only sets how long a packet takes.
 function span(c) {
   return Math.hypot(c.x2 - c.x1, c.y2 - c.y1);
 }
 
 /* ------------------------------------------------------------------ paint */
 
-/** paint owns the canvas: its size, its palette, its animation and everything
- *  the pointer does to it. It hands back the three things the rest of the
- *  screen needs - a way to put a request on the map, a way to say the numbers
- *  moved, and a way to stop. */
+/** paint owns the canvas: its size, palette, animation and pointer. */
 function paint(ctx, canvas, tip, scene) {
   const g2 = canvas.getContext("2d");
   const packets = [];
@@ -479,13 +449,9 @@ function paint(ctx, canvas, tip, scene) {
     const holder = canvas.parentElement;
     const width = Math.max(MIN_WIDTH, Math.floor(holder.clientWidth) - 2);
     const height = layout(scene, width);
-    // How many device pixels one of this drawing's pixels is worth. The screen
-    // density is half of it; the other half is the panel, which scales itself
-    // with `html { zoom }` and stretches a canvas without telling it - a canvas
-    // painted at 1:1 and then enlarged by a tenth is a canvas whose labels are
-    // soft. The card's measured width against its reported width is how much
-    // it is being enlarged by, and where nothing is enlarging it that ratio is
-    // 1 and this changes nothing.
+    // Device pixels per drawing pixel: the screen density times the panel's
+    // `html { zoom }`, which stretches a canvas without telling it and blurs
+    // its labels. Measured width over reported width is that zoom, or 1.
     const stretch = holder.clientWidth
       ? holder.getBoundingClientRect().width / holder.clientWidth
       : 1;
@@ -493,9 +459,8 @@ function paint(ctx, canvas, tip, scene) {
       4,
       Math.max(1, (window.devicePixelRatio || 1) * stretch),
     );
-    // The card is as tall as the canvas, so resizing the canvas resizes what is
-    // being observed. Doing nothing when nothing changed is what keeps that
-    // from being a loop the browser has to break for us.
+    // Resizing the canvas resizes the observed card, so do nothing when
+    // nothing changed, or this loops.
     if (
       canvas.style.width === width + "px" &&
       canvas.style.height === height + "px" &&
@@ -509,8 +474,8 @@ function paint(ctx, canvas, tip, scene) {
     canvas.width = Math.round(width * scale);
     canvas.height = Math.round(height * scale);
     g2.setTransform(scale, 0, 0, scale, 0, 0);
-    // The first of these runs once the view is on the page, which is the first
-    // moment the stylesheet can be read at all.
+    // The first resize runs once the view is on the page, the first moment
+    // the stylesheet can be read.
     colors = palette();
     dirty = true;
   }
@@ -518,10 +483,8 @@ function paint(ctx, canvas, tip, scene) {
   const observer = new ResizeObserver(resize);
   observer.observe(canvas.parentElement);
 
-  // The panel's colours are CSS custom properties and the canvas cannot use
-  // them, so they are read out - once, and again whenever the theme moves
-  // underneath: by the switcher in the topbar, or by the operating system for
-  // anyone who left the panel on "system".
+  // A canvas cannot use CSS custom properties, so the colours are read again
+  // whenever the theme changes, in the topbar or in the operating system.
   const themeWatch = new MutationObserver(() => {
     colors = palette();
     dirty = true;
@@ -547,9 +510,8 @@ function paint(ctx, canvas, tip, scene) {
     }
   }
 
-  /** advance moves every packet and fades every pulse, and reports whether
-   *  anything actually changed - which is what keeps a map nobody is sending
-   *  requests through from repainting sixty times a second. */
+  /** advance moves packets and fades pulses, and reports whether anything
+   *  changed, so an idle map does not repaint every frame. */
   function advance(dt) {
     let moved = false;
     for (const n of boxes(scene)) {
@@ -562,8 +524,8 @@ function paint(ctx, canvas, tip, scene) {
       if (step(packets[i], dt)) packets.splice(i, 1);
       moved = true;
     }
-    // The gateway's headline is a rate, so it changes as packets age out of the
-    // last minute whether or not new ones arrive.
+    // The gateway shows a per-minute rate, which drops as packets age out
+    // even when no new ones arrive.
     const cut = Date.now() - 60000;
     while (scene.beats.length && scene.beats[0] < cut) {
       scene.beats.shift();
@@ -608,10 +570,8 @@ function paint(ctx, canvas, tip, scene) {
         return false;
       }
       case "back": {
-        // The answer, coming home. It is the same path drawn thinner, because
-        // what a reader is being shown is a round trip and not a fire and
-        // forget - and because a model that is answering and a model that has
-        // gone quiet look identical without it.
+        // The answer, drawn thinner on the way back. Without it, a model
+        // that answers and one that has gone quiet look the same.
         const c =
           p.leg === 1
             ? legTwo(scene.gateway, p.model)
@@ -633,13 +593,11 @@ function paint(ctx, canvas, tip, scene) {
     }
   }
 
-  /** send puts one recorded request on the map. */
   function send(client, model, outcome, delay) {
     scene.beats.push(Date.now());
     dirty = true;
     if (still.matches) {
-      // Whoever asked for less movement gets the boxes lighting up and the
-      // numbers changing, and no packets at all.
+      // Reduced motion: light the boxes, but draw no packets.
       client.pulse = 1;
       scene.gateway.pulse = 1;
       if (outcome !== "refused") model.pulse = 1;
@@ -658,10 +616,8 @@ function paint(ctx, canvas, tip, scene) {
     });
   }
 
-  /* The pointer. A box is worth opening - a model has its own screen - and
-     worth explaining, which is a tooltip rather than more text on the canvas:
-     the numbers that fit on a box are the ones worth reading at a glance, and
-     the rest are for whoever asked. */
+  /* The pointer: a click opens a box's screen, hovering shows the numbers
+     that do not fit on the box. */
   function locate(e) {
     const r = canvas.getBoundingClientRect();
     const x = e.clientX - r.left,
@@ -674,8 +630,7 @@ function paint(ctx, canvas, tip, scene) {
 
   const onMove = (e) => {
     const found = locate(e);
-    // Only when the box under the pointer changes: the tooltip is built out of
-    // DOM, and a mouse crossing this screen fires this a hundred times.
+    // Only rebuild the tooltip when the box under the pointer changes.
     if (found === hover) return;
     hover = found;
     dirty = true;
@@ -704,10 +659,8 @@ function paint(ctx, canvas, tip, scene) {
     touch: () => {
       dirty = true;
     },
-    // What the refresh calls when the boxes it is drawing have been replaced.
-    // The packets in flight refer to the old ones, so they go: they are a
-    // second and a half of animation, and the requests behind them are already
-    // counted in the report that has just arrived.
+    // Called when the boxes were replaced. Packets in flight point at the old
+    // boxes, so they are dropped; the new report already counts them.
     reset() {
       packets.length = 0;
       dirty = true;
@@ -725,8 +678,8 @@ function paint(ctx, canvas, tip, scene) {
   };
 }
 
-/** target is where a box leads, or nothing for the boxes that lead nowhere. A
- *  folded box leads nowhere on purpose: it is several things. */
+/** target is where a box leads, or null. A folded box is several things, so
+ *  it leads nowhere. */
 function target(n) {
   if (n.kind === "model" && !n.folded && !n.retired)
     return "/models/" + encodeURIComponent(n.key);
@@ -739,17 +692,13 @@ function boxes(scene) {
 }
 
 /** palette reads the panel's colours out of the stylesheet, because a canvas
- *  cannot use a custom property and this screen must not be the one place with
- *  colours of its own.
+ *  cannot use custom properties.
  *
- *  It reads the root and not the canvas: a view is built before it is put on
- *  the page, and a detached element resolves every custom property to the
- *  empty string - which a canvas context silently ignores, leaving its default
- *  black on black.
- *
- *  Every colour still carries a fallback, because an empty string is one the
- *  canvas ignores rather than refuses. A missing property has to fail as the
- *  wrong shade rather than as an unreadable screen. */
+ *  It reads the root, not the canvas: the view is built before it is on the
+ *  page, and a detached element resolves every property to "", which the
+ *  canvas silently ignores, leaving black on black. The fallbacks are for the
+ *  same reason: a missing property should give the wrong shade, not an
+ *  unreadable screen. */
 function palette() {
   const cs = getComputedStyle(document.documentElement);
   const v = (name, fallback) => cs.getPropertyValue(name).trim() || fallback;
@@ -766,9 +715,8 @@ function palette() {
     warn: v("--warn", "#9a5b00"),
     warnSoft: v("--warn-soft", "#fbf0dd"),
     bad: v("--bad", "#a92a20"),
-    // The panel's fourth series colour, which is what a client is drawn in:
-    // the accent belongs to the gateway, and the good and warning colours have
-    // been spoken for by the boundary.
+    // Clients: the accent is the gateway's, and good and warning belong to
+    // the boundary.
     series: v("--s4", "#7b3fa0"),
     font:
       (document.body && getComputedStyle(document.body).fontFamily) ||
@@ -792,12 +740,11 @@ function render(g, scene, c, packets, hover) {
     box(g, n, c, hover, modelFace(n, c));
 }
 
-/** bands draws the two halves of the world and the boundary between them. */
+/** bands draws the two bands and the boundary between them. */
 function bands(g, scene, c) {
   const geo = scene.geometry;
 
-  // Outside is tinted, because "this part of the picture is not yours" has to
-  // be readable before a single word on it is.
+  // Tinted, so "not your network" reads before any word on it does.
   g.fillStyle = c.warnSoft;
   roundRect(
     g,
@@ -839,10 +786,8 @@ function bands(g, scene, c) {
   g.textAlign = "left";
 }
 
-/** lines draws one link per client and one per model, weighted by how much of
- *  the window's traffic ran along it. Per pair would be truer and unreadable:
- *  what a reader takes from a link is "this one is busy", and a fan of forty
- *  says nothing at all. */
+/** lines draws one link per client and one per model, weighted by traffic.
+ *  One per pair would be truer but unreadable. */
 function lines(g, scene, c, hover) {
   const max = Math.max(
     1,
@@ -878,8 +823,8 @@ function link(g, path, node, scene, c, hover, max, external) {
   g.restore();
 }
 
-/** related decides what a hovered box lights up: itself, the gateway, and - for
- *  a client - the models it actually reached in this window. */
+/** related decides what a hovered box lights up: itself, the gateway, and
+ *  the boxes it exchanged traffic with in this window. */
 function related(node, hover, scene) {
   if (!hover) return true;
   if (hover === node || hover.kind === "gateway") return true;
@@ -900,13 +845,10 @@ function related(node, hover, scene) {
   return false;
 }
 
-/** box draws one node: its name, the one number it is read for, and the line
- *  under it that says what that number is made of. */
 function box(g, n, c, hover, face) {
-  // A model whose backend cannot be classified is marked like one that is
-  // outside, not like one that is inside. It is drawn above the line because
-  // there is no evidence it crossed it - but a screen that promises to say
-  // what leaves must never quietly promise that something stays.
+  // A model whose backend cannot be classified is drawn above the line, as
+  // nothing shows it crossed, but marked like an outside one: this screen must
+  // never wrongly promise that something stays.
   const unsure = n.kind === "model" && n.hosting !== "internal";
   const dim = hover && hover !== n ? 0.55 : 1;
   g.save();
@@ -928,8 +870,7 @@ function box(g, n, c, hover, face) {
   g.fill();
   g.stroke();
 
-  // A stripe on the leading edge, in the colour of what the box is. It is the
-  // only thing on a box that can be seen from across a room.
+  // A stripe on the leading edge, in the colour of the box's kind.
   g.fillStyle = face.tone;
   g.globalAlpha = dim * 0.9;
   roundRect(g, n.x, n.y + 8, 3, n.h - 16, 2);
@@ -944,8 +885,8 @@ function box(g, n, c, hover, face) {
   g.fillStyle = c.text;
   g.fillText(fit(g, face.title, room), left, r.title);
 
-  // The unit shares the number's baseline and takes whatever width the number
-  // left it, so a four-figure count pushes it off rather than through it.
+  // The unit gets the width the number left, so a long number pushes it off
+  // rather than through it.
   g.font = "600 " + r.size + "px " + c.font;
   g.fillStyle = face.value === "-" ? c.faint : c.text;
   g.fillText(face.value, left, r.value);
@@ -959,18 +900,12 @@ function box(g, n, c, hover, face) {
   g.restore();
 }
 
-// The type on a box: a name, the number it is read for with its unit beside it,
-// and the line that says what the number is made of.
+// Font sizes on a box, in pixels.
 const TEXT = { title: 13, value: 17, bigValue: 22, note: 11 };
 
-/** rows is where those three lines sit inside a box.
- *
- *  It is one function rather than three numbers written where they are used,
- *  because they are not three numbers: they are one arrangement, and the last
- *  time they were written separately the count and the line under it were far
- *  enough apart on the tall box to look right and eight pixels apart on the
- *  short one, where they overlapped. Everything is measured up from the bottom
- *  edge, so a box that changes height keeps its footing. */
+/** rows is where a box's three lines of text sit. They are kept together
+ *  because spread out they once overlapped on the short box. They are measured
+ *  up from the bottom edge, so a change in height keeps them in place. */
 function rows(n) {
   const big = n.kind === "gateway";
   return {
@@ -981,17 +916,13 @@ function rows(n) {
   };
 }
 
-/** The one number each kind of box is read for.
+/** The faces show a different number for each kind of box, on purpose: a
+ *  client goes wrong by calling too much, a model by going slow, the gateway
+ *  by refusing things.
  *
- *  Three different numbers, deliberately. What goes wrong with a client is
- *  that it is calling more than expected; with a model, that it has gone slow;
- *  with the gateway, that it is refusing things. A single measure across all
- *  three would answer none of them.
- *
- *  The tone says which kind of thing a box is and comes from the panel's own
- *  palette: the two themes are not each other's inverse, and a hand-picked
- *  mid-tone that reads well on white is a smudge on the dark one. A model's
- *  tone is also the boundary's - green for what stays, amber for what leaves. */
+ *  Tones come from the panel's palette, because a colour picked for the light
+ *  theme smudges on the dark one. A model is green if it stays, amber if it
+ *  leaves. */
 function clientFace(n, c) {
   return {
     title: n.label,
@@ -1021,8 +952,8 @@ function gatewayFace(scene, c) {
   };
 }
 
-/** hostingLabel says where a model runs without naming its host. A member is
- *  not sent the host, so this is what they read in its place. */
+/** hostingLabel says where a model runs without naming its host, which a
+ *  member is not sent. */
 function hostingLabel(hosting) {
   if (hosting === "internal") return "your own network";
   if (hosting === "external") return "a hosted provider";
@@ -1030,8 +961,7 @@ function hostingLabel(hosting) {
 }
 
 function modelFace(n, c) {
-  // Where it runs, in the place a client box puts its cost: on this screen
-  // that is the more important half of what a model is.
+  // Where it runs matters most here, so it takes the place of the cost.
   const where = n.endpoint || hostingLabel(n.hosting) || "not known";
   return {
     title: n.label,
@@ -1047,10 +977,8 @@ function modelFace(n, c) {
   };
 }
 
-/** drawPacket is one request, mid-flight. Its colour is what happened to it,
- *  which is known before it is drawn because the row it came from is already
- *  the finished request - the map is a replay of the last few seconds, not a
- *  guess at the next few. */
+/** drawPacket draws one request in flight. Its colour is its outcome, known
+ *  already because each row is a finished request. */
 function drawPacket(g, scene, p, c) {
   if (p.delay > 0) return;
   const colour =
@@ -1079,7 +1007,7 @@ function drawPacket(g, scene, p, c) {
   const t = Math.max(0, Math.min(1, p.phase === "hold" ? 1 : p.t));
   const back = p.phase === "back";
 
-  // A short tail, so that direction is visible in a still frame.
+  // A short tail shows direction in a still frame.
   g.save();
   g.fillStyle = colour;
   for (let i = 3; i >= 1; i--) {
@@ -1100,9 +1028,8 @@ function drawPacket(g, scene, p, c) {
   g.restore();
 }
 
-// roundRect is written out rather than taken from the context, which has had it
-// only recently: the panel has no build step and no polyfills, and a rounded
-// corner is not worth a blank screen on a browser two versions behind.
+// Written out because the context's own roundRect is recent, and the panel
+// has no build step or polyfills.
 function roundRect(g, x, y, w, h, r) {
   const rad = Math.max(0, Math.min(r, w / 2, h / 2));
   g.beginPath();
@@ -1114,7 +1041,7 @@ function roundRect(g, x, y, w, h, r) {
   g.closePath();
 }
 
-/** fit shortens a string until it is inside the width it was given. */
+/** fit shortens text with an ellipsis until it fits the width. */
 function fit(g, text, max) {
   const s = String(text == null ? "" : text);
   if (max <= 0) return "";
@@ -1174,8 +1101,7 @@ function showTip(tip, canvas, n, orgName) {
   );
   tip.hidden = false;
 
-  // Kept inside the card: a tooltip hanging off the right edge is a tooltip
-  // half of which cannot be read.
+  // Flip to the left rather than hang off the card's right edge.
   const holder = canvas.parentElement;
   const right = n.x + n.w + 12;
   const flip = right + 236 > holder.clientWidth;
@@ -1185,12 +1111,9 @@ function showTip(tip, canvas, n, orgName) {
 
 /* ------------------------------------------------------------------- live */
 
-/** watch is the map's other half: the request log as it is written, turned
- *  into packets.
- *
- *  It is the same stream the Requests screen reads, asked the same way - so a
- *  packet crossing this screen and a row appearing on that one are the same
- *  request, and neither of them is a poll. */
+/** watch turns the request log, as it is written, into packets. It is the
+ *  same stream the Requests screen reads, so a packet here and a row there are
+ *  the same request. */
 function watch(ctx, { since, scene, painter, live }) {
   const listen = { org_id: ctx.orgID, since, after: 0 };
   followRequests(ctx, live, () => api.requestStream(listen), {
@@ -1201,9 +1124,8 @@ function watch(ctx, { since, scene, painter, live }) {
   });
 
   function arrived(rows) {
-    // Oldest first, so a batch leaves in the order it happened, and staggered,
-    // so that a tick carrying forty rows looks like forty requests rather than
-    // one wall of them.
+    // Oldest first and staggered, so a batch of forty looks like forty
+    // requests, not a wall.
     const drawn = rows.slice(0, MAX_SPAWN).reverse();
     drawn.forEach((row, i) => {
       const client = clientNode(scene, row.client || "");
@@ -1213,8 +1135,7 @@ function watch(ctx, { since, scene, painter, live }) {
       // request is drawn as a served one.
       painter.send(client, model, outcomeOf(row), i * 22);
     });
-    // Anything past the cap still counts: the numbers on the boxes are the
-    // window's traffic, not the traffic that happened to be drawn.
+    // Rows past the cap still count towards the numbers.
     for (const row of rows.slice(MAX_SPAWN)) {
       count(
         scene,
@@ -1227,18 +1148,15 @@ function watch(ctx, { since, scene, painter, live }) {
   }
 }
 
-// A refusal is any 4xx, and a failure any 5xx. The dashboard and the request
-// log count the same way, so the map and they cannot disagree about what one
-// is.
+// A refusal is any 4xx and a failure any 5xx, as on the dashboard and in
+// the request log.
 function refused(row) {
   return row.status >= 400 && row.status < 500;
 }
 
-/** count folds one live row into the numbers already on the boxes, so the
- *  totals move with the packets rather than jumping every half minute when the
- *  report behind them is asked again. The medians are left alone: a median is
- *  not something a row can be added to, and the refresh below brings the real
- *  one. */
+/** count adds one live row to the boxes, so totals move with the packets
+ *  instead of jumping at each refresh. Medians cannot be added to; the refresh
+ *  brings them. */
 function count(scene, client, model, row) {
   for (const cell of [client.cell, model.cell, scene.total]) {
     cell.requests += 1;
@@ -1250,11 +1168,9 @@ function count(scene, client, model, row) {
   }
 }
 
-/** clientNode and modelNode find the box a live row belongs to, and make one
- *  where there is none: the first request from an editor nobody had pointed
- *  here before is exactly what somebody watching this screen is watching for,
- *  and it must not have to wait for a reload to appear. The next refresh
- *  replaces the improvised box with the reported one, name and all. */
+/** clientNode and modelNode find the box for a live row, or make one: a new
+ *  client's first request is what people watch this screen for. The next
+ *  refresh replaces it with the reported box. */
 function clientNode(scene, key) {
   const found = scene.byClient.get(key);
   if (found) return found;
@@ -1296,13 +1212,8 @@ function modelNode(scene, alias) {
   return node;
 }
 
-/** refresh asks the report again on a slow timer.
- *
- *  The stream keeps the counts moving, but three of the numbers on this screen
- *  cannot be kept that way: a median is not summed, a model added to the
- *  catalogue is not a request, and a window that slides forward drops traffic
- *  off its back edge. Half a minute is slow enough to cost a deployment nothing
- *  and quick enough that a screen left open on a wall is not lying. */
+/** refresh asks for the report again every half minute. The stream cannot
+ *  keep medians, new models, or traffic sliding out of the window up to date. */
 function refresh(ctx, { since, scene, painter }) {
   const timer = setInterval(async () => {
     if (document.hidden) return;
@@ -1320,8 +1231,8 @@ function refresh(ctx, { since, scene, painter }) {
       index(scene);
       painter.reset();
     } catch {
-      // A refresh that failed is a stale number, not a broken screen. The
-      // stream is what says whether the control plane is still there.
+      // A failed refresh only leaves stale numbers. The stream shows whether
+      // the control plane is gone.
     }
   }, 30000);
   ctx.onTeardown(() => clearInterval(timer));
@@ -1329,8 +1240,7 @@ function refresh(ctx, { since, scene, painter }) {
 
 /* ---------------------------------------------------------------- reports */
 
-/** modelReport is the picture as a table: every model, not only the ones that
- *  fitted on the canvas, and readable by everything a canvas is not. */
+/** modelReport lists every model, not only those that fit on the canvas. */
 function modelReport(ctx, scene) {
   const rows = scene.models;
   if (!rows.length) {
@@ -1417,9 +1327,7 @@ function modelReport(ctx, scene) {
   );
 }
 
-/** clientReport is the other column of the picture as a table. It is separate
- *  from the one above because they are not the same list: one is what this
- *  deployment offers, the other is who took it up. */
+/** clientReport lists every client that called. */
 function clientReport(scene) {
   const rows = [];
   for (const c of scene.clients) {

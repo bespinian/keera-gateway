@@ -27,7 +27,6 @@ type GitLab struct {
 	token string
 }
 
-// GitLabOptions configures the GitLab minter.
 type GitLabOptions struct {
 	// URL is the instance, such as https://gitlab.example.ch. Empty is
 	// GitLab.com.
@@ -38,7 +37,6 @@ type GitLabOptions struct {
 	Token string
 }
 
-// NewGitLab builds the minter.
 func NewGitLab(o GitLabOptions) (*GitLab, error) {
 	web, err := parseBase(o.URL, "https://gitlab.com", "GitLab")
 	if err != nil {

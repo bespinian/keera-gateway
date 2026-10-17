@@ -338,9 +338,9 @@ func hasValue(payload, key []byte) bool {
 // A flush is a system call, and with one per token it was most of the CPU a
 // stream cost. The pipes read through a bufio.Reader, which reads from here
 // only once the events it holds are used up. So when one read brought several
-// events, they go out in one write; when it brought one, it goes out at once,
-// as before. A busy gateway falls behind, reads more per call and so flushes
-// less, which is when it matters.
+// events, they go out in one write; when it brought one, it goes out at once.
+// A busy gateway falls behind, reads more per call and so flushes less, which
+// is when it matters.
 //
 // A ping is written by a timer while the read waits, so the stream's writes
 // and flushes all go through here under one lock, and a flush asked for

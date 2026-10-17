@@ -19,7 +19,6 @@ import (
 // ScopeType names a level of the hierarchy that a policy can attach to.
 type ScopeType string
 
-// The levels of the hierarchy, outermost first.
 const (
 	ScopeOrg     ScopeType = "org"
 	ScopeProject ScopeType = "project"
@@ -29,7 +28,6 @@ const (
 // Period is the window a budget resets on.
 type Period string
 
-// The periods a budget can reset on.
 const (
 	PeriodDay   Period = "day"
 	PeriodMonth Period = "month"
@@ -55,14 +53,12 @@ func (p Period) Next(t time.Time) time.Time {
 	return start.AddDate(0, 0, 1)
 }
 
-// Valid reports whether p is a period Keera Gateway knows how to reset.
 func (p Period) Valid() bool { return p == PeriodDay || p == PeriodMonth }
 
 // Kind is the API surface a model is served on. A chat model cannot be reached
 // through /v1/embeddings and vice versa.
 type Kind string
 
-// The API surfaces a model can be served on.
 const (
 	KindChat       Kind = "chat"
 	KindCompletion Kind = "completion"
@@ -73,7 +69,6 @@ const (
 	KindDecision Kind = "decision"
 )
 
-// Valid reports whether k is a surface Keera Gateway serves.
 func (k Kind) Valid() bool {
 	return k == KindChat || k == KindCompletion || k == KindEmbedding || k == KindDecision
 }
@@ -232,7 +227,6 @@ type PriceTier struct {
 	CacheWriteMicrosPerMTok  int64 `json:"cache_write_micros_per_mtok" yaml:"cache_write_micros_per_mtok"`
 }
 
-// Check says what is wrong with a tier, or nil when nothing is.
 func (t PriceTier) Check() error {
 	if t.AboveTokens <= 0 {
 		return errors.New("long_prompt needs above_tokens, the longest prompt " +
@@ -281,8 +275,7 @@ type Filter struct {
 	// Shadow runs the filter but enforces nothing: the request goes on as sent
 	// and what the filter would have done is recorded. It lets an instruction
 	// be tested on real traffic first. The filter still costs the same.
-	Shadow bool `json:"shadow,omitempty"`
-	// Description tells an administrator what the filter does.
+	Shadow      bool      `json:"shadow,omitempty"`
 	Description string    `json:"description,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -308,23 +301,17 @@ type Filter struct {
 type FilterMode string
 
 const (
-	// FilterModeRewrite edits the request and lets it go.
 	FilterModeRewrite FilterMode = "rewrite"
-	// FilterModeGate lets the request go untouched or refuses it.
-	FilterModeGate FilterMode = "gate"
-	// FilterModePattern applies a list of rules, with no model.
+	FilterModeGate    FilterMode = "gate"
 	FilterModePattern FilterMode = "pattern"
 )
 
-// filterModes is every mode a filter may run in.
 var filterModes = []FilterMode{FilterModeRewrite, FilterModeGate, FilterModePattern}
 
 // Valid reports whether m names a mode. The empty string does: it means
 // rewrite.
 func (m FilterMode) Valid() bool { return m == "" || slices.Contains(filterModes, m) }
 
-// Gates reports whether this filter only judges the request, letting it go
-// untouched or refusing it.
 func (m FilterMode) Gates() bool { return m == FilterModeGate }
 
 // Rewrites reports whether this filter edits the request rather than only
@@ -335,7 +322,6 @@ func (m FilterMode) Rewrites() bool { return !m.Gates() }
 // does not.
 func (m FilterMode) UsesModel() bool { return m != FilterModePattern }
 
-// UsesModel reports whether this filter decides with a model.
 func (f Filter) UsesModel() bool { return f.Mode.UsesModel() }
 
 // ReadsWith is the model this filter reads requests with, or "" for a pattern
@@ -454,8 +440,7 @@ type Router struct {
 	// decide. Empty refuses it. Neither is right in general: a router that
 	// saves money can fall back, one that keeps prompts in the cluster cannot.
 	// See docs/routers.md.
-	Fallback string `json:"fallback,omitempty"`
-	// Description tells an administrator what the router does.
+	Fallback    string    `json:"fallback,omitempty"`
 	Description string    `json:"description,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -465,7 +450,6 @@ type Router struct {
 // instead of using a fallback.
 func (r Router) Refuses() bool { return r.Fallback == "" }
 
-// Offers reports whether alias is a destination this router may choose.
 func (r Router) Offers(alias string) bool { return slices.Contains(r.Destinations, alias) }
 
 // RouterMode is what chooses the model that answers a request.
@@ -493,24 +477,17 @@ func (r Router) Offers(alias string) bool { return slices.Contains(r.Destination
 type RouterMode string
 
 const (
-	// RouterModeInstruction reads the request with a model and sends it where
-	// that model says.
 	RouterModeInstruction RouterMode = "instruction"
-	// RouterModeFallback tries the destinations in order and uses the first
-	// one that answers.
-	RouterModeFallback RouterMode = "fallback"
+	RouterModeFallback    RouterMode = "fallback"
 	// RouterModeLatency tries the destinations fastest first, by how long they
 	// lately took to start answering.
 	RouterModeLatency RouterMode = "latency"
 	// RouterModeLeastBusy tries the destinations emptiest first, by requests
 	// this gateway has in flight against each.
 	RouterModeLeastBusy RouterMode = "least-busy"
-	// RouterModeSize sends the request to the smallest destination meant for
-	// its size that can hold it.
-	RouterModeSize RouterMode = "size"
+	RouterModeSize      RouterMode = "size"
 )
 
-// routerModes is every mode a router may run in.
 var routerModes = []RouterMode{
 	RouterModeInstruction, RouterModeFallback, RouterModeLatency, RouterModeLeastBusy,
 	RouterModeSize,
@@ -547,14 +524,10 @@ func (m RouterMode) Measures() bool {
 	return m == RouterModeLatency || m == RouterModeLeastBusy
 }
 
-// Measures reports whether this router orders destinations by what this
-// process observed.
 func (r Router) Measures() bool { return r.Mode.Measures() }
 
-// Sizes reports whether this mode chooses by how big the request is.
 func (m RouterMode) Sizes() bool { return m == RouterModeSize }
 
-// Sizes reports whether this router chooses by the size of the request.
 func (r Router) Sizes() bool { return r.Mode.Sizes() }
 
 // Ceiling returns the largest request, in estimated tokens, this router gives
@@ -687,7 +660,6 @@ type Scope struct {
 // KeyKind says what a key may reach.
 type KeyKind string
 
-// The kinds of key.
 const (
 	// KeyStandard reaches every model its guardrails allow.
 	KeyStandard KeyKind = "standard"
@@ -746,7 +718,6 @@ type Resolved struct {
 	Sandbox ResolvedSandbox
 }
 
-// AllowsModel reports whether alias is inside the resolved allow-list.
 func (r *Resolved) AllowsModel(alias string) bool {
 	return r.AllowedModels == nil || slices.Contains(r.AllowedModels, alias)
 }
@@ -822,7 +793,6 @@ func intersect(cur, next []string) []string {
 	return narrowAllowList(cur, next, func(a, b string) bool { return a == b })
 }
 
-// narrowAllowList narrows an allow-list where nil means unrestricted.
 func narrowAllowList(cur, next []string, covers func(a, b string) bool) []string {
 	switch {
 	case next == nil:
@@ -1001,7 +971,6 @@ type Source interface {
 	// Resolve maps a presented key to its combined policy. It runs on every
 	// inference request, so implementations should cache.
 	Resolve(ctx context.Context, presented string) (*Resolved, error)
-	// Model looks up one of an organisation's models.
 	Model(orgID, alias string) (Model, bool)
 	// Models lists an organisation's models, for /v1/models.
 	Models(orgID string) []Model
@@ -1014,6 +983,5 @@ type Source interface {
 	Router(orgID, alias string) (Router, bool)
 	// Routers lists an organisation's routers, for /v1/models.
 	Routers(orgID string) []Router
-	// MCPServer looks up one of an organisation's MCP servers.
 	MCPServer(orgID, alias string) (MCPServer, bool)
 }

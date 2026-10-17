@@ -19,18 +19,14 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// The authorization rules that cannot be checked without a database, because
-// what the caller may do depends on a row: who a key belongs to.
+// The authorization rules that depend on a row, such as who a key belongs to.
 //
-// Revoking is where this matters most. It is the one destructive thing a member
-// can do, and it carries two separate refusals that say different things on
-// purpose - a key in another tenant is reported as missing, and a colleague's
-// key inside your own is reported as forbidden with a reason. Getting those the
-// same way round is a working product either way, which is why nothing would
-// have caught it.
+// Revoking matters most. It has two refusals that differ on purpose: a key in
+// another tenant is missing, and a colleague's key in your own is forbidden,
+// with a reason.
 //
-// These skip without KEERA_TEST_DATABASE_URL, exactly as the store's own tests
-// do; `make test-integration` provides one.
+// These skip without KEERA_TEST_DATABASE_URL; `make test-integration` provides
+// one.
 
 // tenants is two organisations with people and keys in them.
 type tenants struct {
@@ -72,10 +68,8 @@ func twoTenants(t *testing.T) tenants {
 		}
 	}
 
-	// A real registry, because a successful revocation announces itself
-	// through one: the whole point of revoking is that every gateway replica
-	// drops the key, and a test with nothing to drop it from would not be
-	// exercising the path a revocation actually takes.
+	// A real registry, because a revocation is announced through it so every
+	// gateway replica drops the key.
 	reg, err := registry.New(ctx, st, registry.Options{}, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("registry.New: %v", err)
@@ -88,8 +82,7 @@ func twoTenants(t *testing.T) tenants {
 	}
 }
 
-// revoke calls the handler directly, so that what is under test is the
-// handler's own authorization and not the router's.
+// revoke calls the handler directly, to test its own authorization.
 func (tn tenants) revoke(p *authn.Principal, keyID string) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodDelete,
@@ -100,9 +93,7 @@ func (tn tenants) revoke(p *authn.Principal, keyID string) *httptest.ResponseRec
 }
 
 func TestAMemberRevokesTheirOwnKeyAndNobodyElses(t *testing.T) {
-	// A member revoking their own key is the whole reason they can revoke at
-	// all: a key that has leaked is killed by the person who noticed, not by
-	// whoever answers the ticket.
+	// A member can revoke their own key, so whoever notices a leak can kill it.
 	tn := twoTenants(t)
 	alice := &authn.Principal{
 		Via: authn.MethodSession, Role: authn.RoleMember, OrgID: "org_a", UserID: "user_alice",
@@ -112,10 +103,8 @@ func TestAMemberRevokesTheirOwnKeyAndNobodyElses(t *testing.T) {
 		t.Fatalf("status = %d revoking her own key, want 200: %s", w.Code, w.Body)
 	}
 
-	// A colleague's is refused, and refused with an explanation rather than a
-	// 404: inside their own organisation a member already sees every key on
-	// the keys screen, so pretending it does not exist would hide nothing and
-	// explain nothing.
+	// A colleague's is refused with a reason, not a 404: a member already sees
+	// every key in their organisation, so a 404 would hide nothing.
 	w := tn.revoke(alice, "key_bob")
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d revoking a colleague's key, want 403", w.Code)
@@ -124,16 +113,14 @@ func TestAMemberRevokesTheirOwnKeyAndNobodyElses(t *testing.T) {
 		t.Errorf("body = %q, want it to say whose key a member may revoke", w.Body.String())
 	}
 
-	// A key attributed to nobody is nobody's to revoke. It is the pipeline's,
-	// and taking it away stops a deployment rather than one laptop.
+	// A key attributed to nobody is a pipeline's, so a member may not revoke it.
 	if w := tn.revoke(alice, "key_orphan"); w.Code != http.StatusForbidden {
 		t.Errorf("status = %d revoking an unattributed key, want 403", w.Code)
 	}
 }
 
 func TestAnAdministratorRevokesAnyKeyInTheirOwnOrganisation(t *testing.T) {
-	// The other half: taking somebody's access away is what an administrator is
-	// for, and it has to work without knowing whose key it was.
+	// An administrator can take anybody's access away.
 	tn := twoTenants(t)
 	carol := &authn.Principal{
 		Via: authn.MethodSession, Role: authn.RoleAdmin, OrgID: "org_a", UserID: "user_carol",
@@ -332,14 +319,9 @@ func TestKeysAreRenamedByWhoeverMayRevokeThem(t *testing.T) {
 }
 
 func TestAKeyInAnotherTenantIsIndistinguishableFromOneThatDoesNotExist(t *testing.T) {
-	// Answering "forbidden" for a key that exists somewhere else and "not
-	// found" for one that exists nowhere turns this route into an oracle: an
-	// administrator of one customer could walk the id space and learn which
-	// keys another customer holds.
-	//
-	// So both are 404, and the same 404. The bodies are compared rather than
-	// just the statuses, because a reason that differed would leak exactly the
-	// same thing the status was made not to.
+	// A key in another tenant and a key that does not exist must get the same
+	// 404, body included. Otherwise an administrator could probe ids to learn
+	// another customer's keys.
 	tn := twoTenants(t)
 
 	callers := []struct {
@@ -376,8 +358,7 @@ func TestAKeyInAnotherTenantIsIndistinguishableFromOneThatDoesNotExist(t *testin
 }
 
 func TestARefusedRevocationLeavesTheKeyWorking(t *testing.T) {
-	// The status is only half of it. A handler that refused and revoked anyway
-	// would pass every check above.
+	// A handler that refused and revoked anyway would pass every check above.
 	tn := twoTenants(t)
 	alice := &authn.Principal{
 		Via: authn.MethodSession, Role: authn.RoleMember, OrgID: "org_a", UserID: "user_alice",
@@ -407,11 +388,8 @@ func TestARefusedRevocationLeavesTheKeyWorking(t *testing.T) {
 }
 
 func TestTheDevelopersOwnScreenShowsOnlyTheirOwnKeys(t *testing.T) {
-	// This screen's doc comment promises that it reads only what belongs to the
-	// caller: a member sees their own keys and nobody else's, and an
-	// administrator reading it sees theirs, not the organisation's. It is the
-	// one screen in the panel shaped for the person using the gateway rather
-	// than for whoever administers it, and it shows spend.
+	// This screen shows only the caller's own keys and spend, for members and
+	// administrators alike.
 	tn := twoTenants(t)
 
 	read := func(p *authn.Principal) map[string]any {
@@ -450,8 +428,8 @@ func TestTheDevelopersOwnScreenShowsOnlyTheirOwnKeys(t *testing.T) {
 		t.Errorf("alice sees %v, want only her own key", got)
 	}
 
-	// An administrator is not exempt. This screen is "mine", not "my
-	// organisation's" - the organisation's keys have a screen of their own.
+	// An administrator is not exempt: the organisation's keys have their own
+	// screen.
 	carol := read(&authn.Principal{
 		Via: authn.MethodSession, Role: authn.RoleAdmin,
 		OrgID: "org_a", UserID: "user_carol", Email: "carol@example.ch",
@@ -461,7 +439,7 @@ func TestTheDevelopersOwnScreenShowsOnlyTheirOwnKeys(t *testing.T) {
 			"hold no keys of their own", got)
 	}
 
-	// And the organisation is the caller's, whoever else exists.
+	// The organisation is the caller's.
 	org, _ := alice["org"].(map[string]any)
 	if org["id"] != "org_a" {
 		t.Errorf("org = %v, want org_a", org)
@@ -469,9 +447,8 @@ func TestTheDevelopersOwnScreenShowsOnlyTheirOwnKeys(t *testing.T) {
 }
 
 func TestTheOperatorKeyHasNoScreenOfItsOwn(t *testing.T) {
-	// It is a shared credential and not a person, so it has no keys and no
-	// spend. Saying so beats an empty screen, which reads as a deployment with
-	// nothing in it.
+	// It is not a person, so it has no keys or spend. Saying so beats an empty
+	// screen.
 	tn := twoTenants(t)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet,
@@ -494,10 +471,9 @@ func TestTheOperatorKeyHasNoScreenOfItsOwn(t *testing.T) {
 }
 
 func TestRevokingIsRecordedAgainstWhoTheKeyBelongedTo(t *testing.T) {
-	// A member killing their own leaked key and an administrator taking
-	// somebody's access away are different events. The attribution goes in the
-	// entry rather than being joined back later, because the row it would be
-	// joined against may have changed by then - or been deleted with the person.
+	// A member revoking their own key and an administrator revoking somebody's
+	// are different events. The entry records who, because the user row may
+	// later change or be deleted.
 	tn := twoTenants(t)
 	carol := &authn.Principal{
 		Via: authn.MethodSession, Role: authn.RoleAdmin, OrgID: "org_a", UserID: "user_carol",
@@ -547,9 +523,8 @@ func (tn tenants) changeProject(h handler, p *authn.Principal, method, body stri
 	return w
 }
 
-// A project names its organisation in a row rather than in the request, so the
-// tenant boundary on these two routes is only as good as that lookup. This is
-// the test that the lookup is made.
+// A project's organisation comes from its row, not the request, so these
+// routes must look it up.
 func TestAProjectIsChangedAndDeletedOnlyInsideItsOwnTenant(t *testing.T) {
 	tn := twoTenants(t)
 	st := tn.srv.st
@@ -562,8 +537,8 @@ func TestAProjectIsChangedAndDeletedOnlyInsideItsOwnTenant(t *testing.T) {
 		}
 	}
 
-	// The other customer's administrator is refused, and refused as missing:
-	// a project id is not something they should be able to confirm exists.
+	// The other customer's administrator is told it is missing, so they cannot
+	// confirm the id exists.
 	w := tn.changeProject(tn.srv.updateProject, admin("org_b"), http.MethodPatch,
 		`{"name":"Ours Now"}`)
 	if w.Code != http.StatusNotFound {
@@ -595,9 +570,8 @@ func TestAProjectIsChangedAndDeletedOnlyInsideItsOwnTenant(t *testing.T) {
 	}
 }
 
-// Deleting a project with a working key in it would take the key with it, so it is
-// refused - and the refusal names the credentials, because that is the part
-// somebody has to deal with before they can try again.
+// Deleting a project with a working key would take the key with it, so it is
+// refused, naming the keys to deal with first.
 func TestDeletingAProjectIsRefusedWhileItHoldsAWorkingKey(t *testing.T) {
 	tn := twoTenants(t)
 	st := tn.srv.st

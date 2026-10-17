@@ -147,7 +147,6 @@ func readChoice(raw []byte, n int) (index int, share float64, ok bool) {
 	return pick(seen, n, func(token string) int { return labelIndex(token, n) })
 }
 
-// The two things a gate's first token can mean.
 const (
 	verdictAllow = iota
 	verdictRefuse

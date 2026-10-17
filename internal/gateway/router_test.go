@@ -173,9 +173,8 @@ func TestRouterSendsTheRequestToTheModelItChose(t *testing.T) {
 	}
 }
 
-// A router is on the hot path for every request that names it, so the answer
-// the client sees has to name the model that answered rather than the router.
-// Otherwise a developer reading a response cannot tell what produced it.
+// The answer names the model that answered, not the router, so a developer
+// reading it can tell what produced it.
 func TestRouterAnswerNamesTheModelThatAnswered(t *testing.T) {
 	h := routerHarness(t, picks("keera-small"), autoRouter(), nil)
 
@@ -242,8 +241,6 @@ func TestRouterWillNotSendToAModelItWasNotOffered(t *testing.T) {
 	}
 }
 
-// A prompt arguing for a destination is data, not an instruction - and the
-// clean-up that reads a name out of a sentence must not be the way in.
 // An instruction router with one destination has nothing to choose, so its
 // model is never asked and every request goes straight there.
 func TestRouterWithOneDestinationDoesNotDecide(t *testing.T) {
@@ -579,10 +576,8 @@ func TestChosenDestination(t *testing.T) {
 	}
 }
 
-// The window is filled from the end, because the question a router answers is
-// what is being asked now - and a decision made on the head of a coding agent's
-// conversation would be a decision about an hour ago, on every request for the
-// rest of the session.
+// The window is filled from the end, because a router answers what is being
+// asked now. The head of a coding agent's conversation is about an hour ago.
 func TestRouterWindowKeepsTheNewestSegments(t *testing.T) {
 	long := strings.Repeat("x", routerWindowBytes)
 	got := routerWindow([]string{long, "the older question", "the newest question"})
@@ -752,8 +747,7 @@ func TestFallbackRouterServesTheLastFailureWhenNothingAnswers(t *testing.T) {
 
 	resp := h.post(t, "/v1/chat/completions",
 		`{"model":"ha","messages":[{"role":"user","content":"hello"}]}`)
-	// The last destination's own answer, rather than something this process
-	// invented over it: it is the truest thing available about why there is no
+	// The last destination's own answer: it says best why there is no
 	// completion.
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500 - what the last destination said", resp.StatusCode)
@@ -1093,8 +1087,7 @@ func TestADecisionAsksForOneTokenAndTheDistributionBehindIt(t *testing.T) {
 }
 
 // A model that answers with a letter no destination has cannot place a
-// request, because only the letters that were offered are looked at. This is
-// the failure that used to be a decision naming nothing.
+// request, because only the letters that were offered are looked at.
 func TestALetterNoDestinationHasFallsBack(t *testing.T) {
 	// The stand-in is asked for a destination it was never offered, so it
 	// letters nothing and writes the name out instead - which, on the lettered

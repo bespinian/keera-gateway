@@ -30,9 +30,9 @@ func filterHarness(t *testing.T, filterReply func(segments []string) string,
 		func(_ string, segments []string) string { return filterReply(segments) }, resolved)
 }
 
-// filterHarnessWith is the same, for the tests where the stand-in has to tell
-// one filter from another. The instruction is the only thing that distinguishes
-// them on the wire, two filters being able to run on the same alias.
+// filterHarnessWith is the same, for tests where the stand-in has to tell
+// filters apart. Two filters can run on the same alias, so only the
+// instruction tells them apart on the wire.
 func filterHarnessWith(t *testing.T, filterReply func(instruction string, segments []string) string,
 	resolved *policy.Resolved,
 ) *harness {
@@ -479,10 +479,9 @@ func TestAFilterRefusalWithoutAReasonStillRefuses(t *testing.T) {
 }
 
 func TestARefusalInEverySegmentIsARefusalAndNotARewrite(t *testing.T) {
-	// The mistake the protocol invites: a filter told to work segment by
-	// segment, and then told it may refuse, refuses each segment. Forwarding
-	// that would replace the whole conversation with the word REFUSED and call
-	// it a rewrite.
+	// The mistake the protocol invites: a filter that may refuse refuses each
+	// segment. Forwarding that would replace the whole conversation with the
+	// word REFUSED.
 	h := filterHarness(t, func(segments []string) string {
 		out := make([]string, len(segments))
 		for i := range out {
@@ -680,10 +679,9 @@ func TestAGateRefusesWithoutForwardingAnything(t *testing.T) {
 func TestAGateCostsAVerdictRatherThanAConversation(t *testing.T) {
 	h := gateHarness(t, func([]string) string { return "ALLOW" })
 
-	// A long conversation: a rewrite filter would be allowed output tokens in
-	// proportion to it, because it has to write the whole thing back. A gate
-	// answers a word however long the request is, and that is the saving the
-	// mode exists for.
+	// A rewrite filter's output allowance grows with the conversation, since it
+	// writes it all back. A gate answers a word however long the request is,
+	// which is the saving the mode exists for.
 	long := strings.Repeat("the quick brown fox jumps over the lazy dog. ", 400)
 	h.post(t, "/v1/chat/completions",
 		`{"model":"keera-code","messages":[{"role":"user","content":`+mustJSON(long)+`}]}`)
@@ -880,9 +878,8 @@ func shadowHarness(t *testing.T, reply func([]string) string) *harness {
 	return h
 }
 
-// filterRuns is the filter log the request wrote, which is where everything
-// about a shadow filter has to show up: it changed nothing about the answer, so
-// the log is the only place its behaviour exists at all.
+// filterRuns is the filter log the request wrote. A shadow filter changes
+// nothing about the answer, so the log is the only place it shows.
 func filterRuns(t *testing.T, h *harness) []store.FilterRun {
 	t.Helper()
 	return h.sink.last(t).FilterRuns
@@ -939,11 +936,9 @@ func TestAShadowFilterDoesNotStopTheRequest(t *testing.T) {
 		{"when it refuses", func([]string) string {
 			return "REFUSED: this asks for an export of the customer table"
 		}, "", store.FilterRefuse},
-		// Everywhere else this refuses the request: a control that can be
-		// turned off by breaking it is not a control. A measurement is not a
-		// control, and one that takes a department offline is not a
-		// measurement anybody would agree to make. The failure is recorded: a
-		// shadow filter that cannot run is measuring nothing.
+		// Everywhere else this refuses the request, but a shadow filter is a
+		// measurement and must not take a department offline. The failure is
+		// still recorded: a shadow filter that cannot run measures nothing.
 		{"when it cannot run", func([]string) string { return "I have redacted it." }, "",
 			store.FilterError},
 		{"when its model is gone", redactor, "keera-vanished", store.FilterError},
@@ -984,9 +979,8 @@ func TestAShadowFilterIsStillCharged(t *testing.T) {
 	h.post(t, "/v1/chat/completions",
 		`{"model":"keera-code","messages":[{"role":"user","content":"hunter2"}]}`)
 
-	// The same 600 micro-units the enforcing filter costs. Shadow buys
-	// knowledge, not a discount: the generation happened, and a filter that
-	// could be made free by not enforcing it would be a filter nobody costed.
+	// The same 600 micro-units the enforcing filter costs: the generation
+	// happened, so shadow is no discount.
 	const filterMicros = 600
 	if h.budgets.charged < filterMicros {
 		t.Errorf("charged = %d, want the shadow filter's spend included",
@@ -999,9 +993,8 @@ func TestAShadowFilterIsStillCharged(t *testing.T) {
 }
 
 func TestAShadowRewriteIsNotHandedToTheNextFilter(t *testing.T) {
-	// A shadow rewrite is a rewrite that did not happen, so the gate after it
-	// has to judge the text that will actually be sent - not the text it would
-	// have been sent if the filter in front had been enforcing.
+	// A shadow rewrite did not happen, so the gate after it has to judge the
+	// text that will actually be sent.
 	resolved := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"}, nil, nil, nil)
 	resolved.Filters = []string{"redact", "escalate"}
 
@@ -1062,8 +1055,8 @@ func TestAFilterRunIsRecordedWithWhatItDid(t *testing.T) {
 	case run.Outcome != store.FilterRewrite:
 		t.Errorf("outcome = %q, want a rewrite", run.Outcome)
 	case run.Segments != 2 || run.Changed != 1:
-		// Counts, and nothing about the text: what makes "this instruction
-		// rewrites most of what it sees" answerable without keeping any of it.
+		// Counts only, never the text, are enough to tell how much an
+		// instruction rewrites.
 		t.Errorf("segments = %d, changed = %d; want 2 shown and the 1 it edited",
 			run.Segments, run.Changed)
 	case run.CostMicros == 0:
@@ -1072,10 +1065,9 @@ func TestAFilterRunIsRecordedWithWhatItDid(t *testing.T) {
 }
 
 func TestAFilterThatChangedNothingIsRecordedAsAPass(t *testing.T) {
-	// The distinction the log exists for. This filter worked and did nothing,
-	// and a filter doing nothing to a department's whole week is either one
-	// that is not needed or an instruction that is not finding what it was
-	// written to find - neither of which "it ran" would ever say.
+	// The distinction the log exists for: this filter worked and changed
+	// nothing. Over a week, that means it is not needed or its instruction
+	// finds nothing, which "it ran" would not say.
 	h := filterHarness(t, redactor, nil)
 
 	h.post(t, "/v1/chat/completions",
@@ -1112,9 +1104,9 @@ func TestAFilterThatBrokeIsRecordedOnTheRequestItRefused(t *testing.T) {
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502", resp.StatusCode)
 	}
-	// An enforcing filter that cannot run refuses everything its guardrails
-	// cover. The count that says so has to live somewhere other than in the
-	// requests it refused, or the only symptom is a department complaining.
+	// An enforcing filter that cannot run refuses everything it covers. The
+	// count must live outside the refused requests, or the only symptom is a
+	// department complaining.
 	runs := filterRuns(t, h)
 	if len(runs) != 1 || runs[0].Outcome != store.FilterError {
 		t.Errorf("runs = %+v, want the failure recorded against the filter", runs)
@@ -1122,9 +1114,8 @@ func TestAFilterThatBrokeIsRecordedOnTheRequestItRefused(t *testing.T) {
 }
 
 func TestARequestWithNoFilterableTextIsForwardedWithoutAFilterRun(t *testing.T) {
-	// The filters were not run, and are not claimed to have run either - a row
-	// saying a filter passed a request it never read would make every rate on
-	// its screen wrong.
+	// The filters did not run, and no row claims they did: a filter that
+	// passed a request it never read would skew every rate on its screen.
 	for _, body := range []string{
 		`{"model":"keera-code","messages":[]}`,
 		`{"model":"keera-code","messages":[{"role":"user","content":[{"type":"image_url",` +
@@ -1154,9 +1145,8 @@ func TestARequestWithNoFilterableTextIsForwardedWithoutAFilterRun(t *testing.T) 
 // distribution, as an inference plane of your own does.
 //
 // reply is what the model writes out; allow is how much of the first token the
-// ALLOW verdict holds, against REFUSED holding the rest. The two are set
-// independently on purpose - a model whose prose and whose first token
-// disagree is the case the reading has to be careful about.
+// ALLOW verdict holds, against REFUSED holding the rest. They are set apart on
+// purpose: a model whose prose and first token disagree is the tricky case.
 func gateHarnessServingLogprobs(t *testing.T, reply string, allow float64) *harness {
 	t.Helper()
 
@@ -1220,10 +1210,9 @@ func TestOnlyAGateAsksForTheDistribution(t *testing.T) {
 	}
 }
 
-// The failure this is for. A small model that writes a sentence instead of the
-// word used to stop the request - a guardrail refusing ordinary work because
-// of how the model it runs on formats an answer. The first token says which
-// verdict it was, whatever it wrapped around it.
+// A small model that writes a sentence instead of the word used to stop the
+// request. The first token says which verdict it meant, whatever it wrapped
+// around it.
 func TestAVerdictIsReadFromTheFirstTokenWhenTheWordsCannotBe(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -1295,9 +1284,8 @@ func TestARefusalReadFromTheFirstTokenStillCarriesASentence(t *testing.T) {
 	}
 }
 
-// The words still decide where they are there. An administrator checked an
-// instruction and put it into production, and what the words mean is not
-// something a distribution gets to overrule.
+// The written word still decides when there is one: it is what the
+// administrator checked before going live.
 func TestTheWrittenVerdictOutranksTheDistribution(t *testing.T) {
 	// It wrote REFUSED, and its first token leans the other way.
 	h := gateHarnessServingLogprobs(t, "REFUSED: a credential", 0.9)

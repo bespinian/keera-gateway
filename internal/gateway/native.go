@@ -20,12 +20,11 @@ import (
 // - and on a coding agent's long session the lost cache is most of the bill.
 //
 // So when a request in one of those APIs goes to its own provider, it is
-// forwarded in that API. It still passes every guardrail: the filters read and
-// rewrite it in its own shape, and the system prompt and the output ceiling
-// are written into it in that shape. Every other destination gets it
-// translated, as before. The translation is made only when such a destination,
-// or a router that reads the request, needs it: on a long session it costs far
-// more than the rest of the gateway's work.
+// forwarded in that API. It still passes every guardrail: the filters, the
+// system prompt and the output ceiling all work on its own shape. Every other
+// destination gets it translated. The translation is made only when such a
+// destination, or a router that reads the request, needs it: on a long session
+// it costs far more than the rest of the gateway's work.
 
 // dialect is a client API that one hosted provider serves as its own.
 type dialect interface {
@@ -157,7 +156,6 @@ func pipeNative(dst io.Writer, flush func(), src io.Reader, ns nativeStream,
 	return stats, err
 }
 
-// errEventTooLarge ends a stream whose one event outgrew what the gateway holds.
 var errEventTooLarge = errors.New("the upstream sent one event larger than the gateway holds")
 
 // renameIn writes the alias as the model name of one object in a document:
@@ -198,7 +196,6 @@ func renameIn(raw []byte, key, alias string) []byte {
 	return out
 }
 
-// modelKey is the start of the model field in an OpenAI answer or chunk.
 var modelKey = []byte(`"model":`)
 
 // renameModel writes the alias as the value of the first model field in an
@@ -297,7 +294,6 @@ func (d *treeDoc) add(s string, set func(string)) {
 	d.set = append(d.set, set)
 }
 
-// addField collects obj[key] when it is a string.
 func (d *treeDoc) addField(obj map[string]any, key string) {
 	if s, ok := obj[key].(string); ok {
 		d.add(s, func(v string) { obj[key] = v })

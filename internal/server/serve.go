@@ -151,7 +151,6 @@ func serve(ctx context.Context) error {
 	// Ending the streams when shutdown begins avoids waiting out the grace.
 	srv.RegisterOnShutdown(ctl.Drain)
 
-	// Serve until the listener fails or it is time to shut down.
 	errs := make(chan error, 1)
 	go func() {
 		log.Info("listening", "addr", cfg.Addr, "panel", "/",
@@ -184,7 +183,6 @@ func serve(ctx context.Context) error {
 	return nil
 }
 
-// prepareStore applies the migrations.
 func prepareStore(ctx context.Context, st *store.Store, log *slog.Logger) error {
 	applied, err := st.Migrate(ctx)
 	if err != nil {
@@ -254,8 +252,7 @@ func loadSandboxTemplate(cfg config.Config, log *slog.Logger) ([]policy.SandboxC
 	return classes, nil
 }
 
-// buildSecrets builds the key that decrypts stored credentials: hosted
-// providers' and MCP servers'. It is
+// buildSecrets builds the key for stored provider and MCP credentials. It is
 // built early, so a bad value fails the start rather than the first request.
 func buildSecrets(cfg config.Config) (*secret.Box, error) {
 	secrets, err := secret.New(cfg.SecretKey)
@@ -265,7 +262,6 @@ func buildSecrets(cfg config.Config) (*secret.Box, error) {
 	return secrets, nil
 }
 
-// buildRegistry loads the control-plane state the gateway serves from.
 func buildRegistry(ctx context.Context, st *store.Store, cfg config.Config,
 	secrets *secret.Box, log *slog.Logger,
 ) (*registry.Registry, error) {
@@ -328,13 +324,9 @@ func warnGoogleGroups(p *authn.OIDC, log *slog.Logger) {
 	}
 }
 
-// routes is the listener's routing table: inference and MCP under
-// httpx.InferencePrefix, and everything else - the panel, the control API
-// and the sandbox attach surface - under the control handler, so a
-// deployment publishes one port.
-//
-// The control handler owns / and the probes. Each handler carries its own
-// middleware, so nothing is wrapped again here.
+// routes sends inference and MCP to the gateway handler and everything else
+// (panel, control API, sandbox attach, probes) to the control handler, so a
+// deployment publishes one port. Each handler brings its own middleware.
 func routes(gw *gateway.Server, ctl *control.Server) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle(httpx.InferencePrefix+"/", gw.Handler())
@@ -349,10 +341,8 @@ type limiter interface {
 }
 
 // buildLimiter returns the rate-limit buckets and a function that releases
-// them.
-//
-// The buckets are in memory unless KEERA_REDIS_URL is set. With Redis, all
-// replicas share one allowance, and the in-memory limiter is the fallback.
+// them. They are in memory unless KEERA_REDIS_URL is set. With Redis, all
+// replicas share one allowance, and memory is the fallback.
 func buildLimiter(ctx context.Context, cfg config.Config, mreg *metrics.Registry,
 	log *slog.Logger,
 ) (limiter, func()) {
@@ -423,10 +413,9 @@ func every(ctx context.Context, d time.Duration, first bool, fn func(time.Time))
 // kept for months, and a big DELETE beside live traffic should be rare.
 const retentionInterval = time.Hour
 
-// retain enforces the retention windows, if any are set.
-//
-// Both default to keeping everything: how long usage and audit rows must be
-// kept is a decision for finance and compliance, not for the gateway.
+// retain enforces the retention windows, if any are set. Both default to
+// keeping everything: how long to keep usage and audit rows is for finance and
+// compliance to decide, not the gateway.
 func retain(ctx context.Context, st *store.Store, cfg config.Config, log *slog.Logger) {
 	if cfg.UsageRetention == 0 && cfg.AuditRetention == 0 {
 		log.Info("no retention window is configured; usage events and audit entries " +
@@ -490,13 +479,10 @@ func newLogger(cfg config.Config) *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, opts))
 }
 
-/* ------------------------------------------------------------------ sandboxes */
-
 // buildSandboxes builds the driver and the manager, or returns nil when no
-// driver is configured.
-//
-// Every failure here fails the start, like OIDC discovery: a missing CRD or a
-// missing podman should show up now, not at the first request.
+// driver is configured. Every failure here fails the start, like OIDC
+// discovery: a missing CRD or podman should show up now, not at the first
+// request.
 func buildSandboxes(ctx context.Context, st *store.Store, reg *registry.Registry,
 	cfg config.Config, log *slog.Logger,
 ) (*sandbox.Manager, error) {
@@ -579,7 +565,6 @@ func buildGitMinter(cfg config.GitConfig) (sandbox.GitMinter, error) {
 	return nil, nil
 }
 
-// buildSandboxDriver builds the configured driver.
 func buildSandboxDriver(ctx context.Context, cfg config.Config, log *slog.Logger) (sandbox.Driver, error) {
 	switch cfg.Sandbox.Driver {
 	case "kubernetes":

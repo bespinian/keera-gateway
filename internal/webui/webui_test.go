@@ -81,16 +81,14 @@ func TestAssetsAreServedWithTheRightType(t *testing.T) {
 	}
 }
 
-// relativeImport matches the module specifiers the panel's own files use. Bare
-// specifiers are nobody's business here: there are none, because there is no
-// build step and nothing to resolve them.
+// relativeImport matches the panel's own imports. There are no bare
+// specifiers: with no build step, nothing could resolve them.
 var relativeImport = regexp.MustCompile(`from\s+"(\.[^"]+)"`)
 
 func TestEveryImportIsEmbedded(t *testing.T) {
-	// A module the panel imports but that did not make it into the binary is a
-	// blank page at run time and nothing at all at build time. The list is
-	// derived from what the sources actually import rather than kept by hand,
-	// because a hand-kept one stops covering the view added after it.
+	// A module missing from the binary is a blank page at run time and no
+	// error at build time. The list comes from the imports themselves, so a
+	// new view is covered without anyone adding it.
 	roots := []string{"assets/app.js"}
 	if err := fs.WalkDir(assets, "assets/views", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -126,10 +124,8 @@ func TestEveryImportIsEmbedded(t *testing.T) {
 // providerMarkKey matches one entry of the providerMarks table in ui.js.
 var providerMarkKey = regexp.MustCompile(`(?m)^  ([a-z0-9]+): \{$`)
 
-// A logo is keyed by the provider name the catalogue knows, and a key that
-// matches none draws nothing: providerMark falls back rather than failing, so a
-// typo here is a mark that silently never appears. The other direction is not
-// checked - a provider with no artwork is a name on its own, which is fine.
+// A mark whose key matches no provider name silently never appears. A
+// provider without a mark is fine: it shows its name.
 func TestEveryProviderMarkNamesAProvider(t *testing.T) {
 	body, err := fs.ReadFile(assets, "assets/ui.js")
 	if err != nil {
@@ -269,9 +265,8 @@ func TestTheTwoBodiesCarryDifferentEntityTags(t *testing.T) {
 }
 
 func TestCompressingTheAssetsIsWorthIt(t *testing.T) {
-	// The panel is loaded in one go - every view is imported by app.js - so
-	// what a cold load costs is the whole of this, and the ratio is the reason
-	// the bodies are held twice in memory.
+	// app.js imports every view, so a cold load fetches all of this. The
+	// saving is why both bodies are kept in memory.
 	var raw, gz int
 	for _, f := range files {
 		raw += len(f.body)
@@ -288,7 +283,6 @@ func TestCompressingTheAssetsIsWorthIt(t *testing.T) {
 	t.Logf("panel: %d bytes raw, %d gzipped", raw, gz)
 }
 
-// mustGunzip opens a gzip stream, failing the test if it is not one.
 func mustGunzip(t *testing.T, body []byte) io.Reader {
 	t.Helper()
 	zr, err := gzip.NewReader(bytes.NewReader(body))

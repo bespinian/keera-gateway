@@ -16,10 +16,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// A usage report grouped by key or by user used to render raw ids, which are
-// exactly the two groupings a manager asks for and exactly the two nobody can
-// read. Everything resolves to a name, and an id with no row behind it says so
-// rather than being shown bare.
+// Every grouping resolves to a name, and an id with no row behind it is shown
+// as it is.
 func TestGroupLabelsResolveEveryGrouping(t *testing.T) {
 	g := groupLabels{
 		projects: map[string]string{"project_1": "Payments Platform"},
@@ -44,9 +42,8 @@ func TestGroupLabelsResolveEveryGrouping(t *testing.T) {
 	}
 }
 
-// A chargeback is reconciled in a spreadsheet, so the export has to carry the
-// name, the id it resolves and the money - not the pretty-printed money the
-// panel shows.
+// A chargeback is reconciled in a spreadsheet, so the export carries the name,
+// the id and the plain amount, not the panel's formatted money.
 func TestUsageCSVCarriesNamesIdsAndCost(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	w := httptest.NewRecorder()
@@ -86,13 +83,9 @@ func TestUsageCSVCarriesNamesIdsAndCost(t *testing.T) {
 	}
 }
 
-// The audit export is the artefact somebody hands to a compliance reader, so
-// the detail has to survive it intact - a summarised audit trail is not one.
 func TestUsageRefusesAnUnknownGrouping(t *testing.T) {
-	// The store maps a grouping it does not know onto its default, so such a
-	// request used to come back 200 - a report built on a grouping other than
-	// the one asked for, with the caller's own string still reflected through
-	// it and into the CSV export's filename. It is a 400 now.
+	// The store falls back to its default grouping, which would answer a
+	// different question and put the caller's string in the CSV filename.
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, `/v1/usage?format=csv&group_by=x.bat%22%3Bx%3D%22`, nil)
@@ -109,10 +102,9 @@ func TestUsageRefusesAnUnknownGrouping(t *testing.T) {
 }
 
 func TestBeginCSVFilenameCannotBeBrokenOutOf(t *testing.T) {
-	// The usage export builds its filename from a caller-supplied grouping.
-	// The handler now refuses an unknown one, and this is the second lock: a
-	// filename carrying a quote must not be able to close the parameter and
-	// add another of its own.
+	// The usage export's filename comes from the caller's grouping. Besides
+	// the handler's check, a quote must not close the parameter and add
+	// another.
 	w := httptest.NewRecorder()
 	beginCSV(w, `x.bat";x="`)
 
@@ -200,8 +192,7 @@ func TestCSVExportsCannotCarryAFormula(t *testing.T) {
 		{"a plain name", "Payments Platform", "Payments Platform"},
 		{"an email address", "first.last@example.ch", "first.last@example.ch"},
 		{"an empty field", "", ""},
-		// The money and the token counts are read as numbers by the reader this
-		// export exists for, so a sign that is arithmetic stays arithmetic.
+		// Money and token counts must still read as numbers, so their sign stays.
 		{"a negative amount", "-2.50", "-2.50"},
 		{"a signed integer", "+12", "+12"},
 	}
@@ -237,17 +228,16 @@ func TestAuditCSVEscapesEveryFieldItIsGiven(t *testing.T) {
 		t.Errorf("row = %q; every field goes through the escape, not just the ones "+
 			"somebody remembered", rows[1])
 	}
-	// The detail is a JSON document, so it starts with a brace and is left
-	// alone - a compliance reader has to be able to parse it back.
+	// The detail is JSON, so it starts with a brace and is left alone for a
+	// compliance reader to parse.
 	if rows[1][5] != `{"system_prompt":"=1+1"}` {
 		t.Errorf("detail = %q, want it intact", rows[1][5])
 	}
 }
 
-// The export exists to be attached to the message that goes to whoever runs the
-// endpoint that produced a failure, so it has to carry the wording they will
-// recognise - and the names beside the ids, since a key id means nothing to
-// anybody outside this deployment.
+// The export goes to whoever runs the failing endpoint, so it carries the
+// message they will recognise, and names beside ids, which mean nothing to
+// them.
 func TestRequestsCSVCarriesTheMessageAndTheNames(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	w := httptest.NewRecorder()
@@ -320,9 +310,8 @@ func TestAMemberWithoutAUserReadsNoRequests(t *testing.T) {
 	}
 }
 
-// The entity screens send an id in a query parameter, so the id is the whole of
-// what stands between one tenant's administrator and another tenant's numbers.
-// An operator has no organisation to check against and reads every one.
+// The entity screens send an id in a query parameter, so checking it is what
+// keeps one tenant out of another's numbers. An operator reads every one.
 func TestEntityScopeReadsTheIdsAsGiven(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	w := httptest.NewRecorder()
@@ -347,9 +336,8 @@ func TestEntityScopeReadsTheIdsAsGiven(t *testing.T) {
 	}
 }
 
-// The export is read in a spreadsheet by whoever administers the deployment,
-// and half of what is in it - the message, and the names an administrator chose
-// - is written by somebody else.
+// The export is opened in a spreadsheet, and the message and the names in it
+// are written by somebody else.
 func TestRequestsCSVCarriesTheNumbersAndEscapesTheWording(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	w := httptest.NewRecorder()
@@ -390,9 +378,8 @@ func TestRequestsCSVCarriesTheNumbersAndEscapesTheWording(t *testing.T) {
 	}
 }
 
-// The log's status filter is asked in two sizes: one code, and a whole class of
-// them. A reader wanting "everything that failed" does not know which of 500,
-// 502 and 504 their own backends answer with, and should not have to.
+// The status filter takes one code or a whole class, so a reader can ask for
+// every 5xx without knowing which ones their backends send.
 func TestParseStatusReadsAClassAsWellAsACode(t *testing.T) {
 	for _, tc := range []struct {
 		in           string
@@ -403,8 +390,7 @@ func TestParseStatusReadsAClassAsWellAsACode(t *testing.T) {
 		{"5xx", 0, 5},
 		{"4XX", 0, 4},
 		{"2xx", 0, 2},
-		// Neither a code nor a class narrows nothing at all, rather than
-		// narrowing to something the reader did not ask for.
+		// Neither a code nor a class: no filter, rather than a wrong one.
 		{"failed", 0, 0},
 		{"9xx", 0, 0},
 		{"xx", 0, 0},

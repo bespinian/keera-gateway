@@ -11,9 +11,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// stepNames is the steps of one request in the order they were recorded, which
-// is what most of these assertions are actually about: the chart is read as a
-// sequence, and a sequence that is out of order is worse than none.
+// stepNames is the steps of one request in the order they were recorded. The
+// chart is read as a sequence, so the order is what most of these tests check.
 func stepNames(spans []store.Span) []string {
 	out := make([]string, 0, len(spans))
 	for _, sp := range spans {
@@ -59,8 +58,7 @@ func TestServedRequestRecordsItsSteps(t *testing.T) {
 
 // The chart is read as a breakdown of the number beside it, so the steps have
 // to start at the moment the latency does, run in order, and end inside it.
-// Bars that overflowed the total, or started before it, would be a chart that
-// invites its reader to distrust the row it is on.
+// Bars outside the total would make the reader distrust the row they are on.
 func TestStepsAddUpToTheRequestTheyAreOn(t *testing.T) {
 	h := newHarness(t, jsonBackend(`{"choices":[{"message":{"content":"hi"}}],
 		"usage":{"prompt_tokens":10,"completion_tokens":5}}`), nil, nil)

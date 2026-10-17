@@ -918,8 +918,7 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	}{KeyInfo: info, Key: secret, Replaced: oldID})
 }
 
-// renameKey changes what a key is called. Whoever may revoke a key may rename
-// it. The name is only a label, so nothing else about the key changes.
+// renameKey is open to whoever may revoke the key.
 func (s *Server) renameKey(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	var in struct {
 		Name string `json:"name"`

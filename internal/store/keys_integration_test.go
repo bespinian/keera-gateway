@@ -146,10 +146,8 @@ func TestLookupKeyRejectsUnknownRevokedAndExpiredKeys(t *testing.T) {
 
 func TestLookupKeyIgnoresAProjectInAnotherOrganisation(t *testing.T) {
 	// The control plane refuses to bind a key to a project outside its own
-	// organisation. This is the second lock on the same door: a row written
-	// another way must resolve as a key with no project - inheriting nothing and
-	// consuming nothing of a tenant it does not belong to - rather than
-	// inheriting the other tenant's guardrails.
+	// organisation. This is the second check: a row written another way must
+	// resolve as a key with no project, not with the other tenant's guardrails.
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
 

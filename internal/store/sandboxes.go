@@ -60,13 +60,11 @@ func (s *Store) WarmSandboxClasses(ctx context.Context) ([]policy.SandboxClass, 
 		ORDER BY org_id, name`)
 }
 
-// ListSandboxClasses reads one organisation's classes.
 func (s *Store) ListSandboxClasses(ctx context.Context, orgID string) ([]policy.SandboxClass, error) {
 	return queryAll(ctx, s.pool, scanSandboxClass,
 		sandboxClassColumns+" FROM sandbox_classes WHERE org_id = $1 ORDER BY name", orgID)
 }
 
-// SandboxClass reads one of an organisation's classes, or ErrNotFound.
 func (s *Store) SandboxClass(ctx context.Context, orgID, name string) (policy.SandboxClass, error) {
 	c, err := scanSandboxClass(s.pool.QueryRow(ctx,
 		sandboxClassColumns+" FROM sandbox_classes WHERE org_id = $1 AND name = $2", orgID, name))
@@ -104,7 +102,6 @@ func upsertSandboxClass(ctx context.Context, db querier, c *policy.SandboxClass)
 	).Scan(&c.CreatedAt, &c.UpdatedAt)
 }
 
-// DeleteSandboxClass removes one of an organisation's classes.
 func (s *Store) DeleteSandboxClass(ctx context.Context, orgID, name string) error {
 	return s.execOne(ctx, "DELETE FROM sandbox_classes WHERE org_id = $1 AND name = $2", orgID, name)
 }
@@ -254,7 +251,6 @@ func (s *Store) CreateSandbox(ctx context.Context, sb Sandbox) (Sandbox, error) 
 // that sandbox is gone.
 var ErrSandboxNameTaken = errors.New("store: this person already has a live sandbox of that name")
 
-// Sandbox reads one row by id.
 func (s *Store) Sandbox(ctx context.Context, id string) (Sandbox, error) {
 	return s.sandboxWhere(ctx, "WHERE id = $1", id)
 }

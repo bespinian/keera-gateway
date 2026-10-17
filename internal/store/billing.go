@@ -58,7 +58,7 @@ type BillingRow struct {
 	OutputTokens      int64  `json:"output_tokens"`
 	// Micros is what the organisation is billed.
 	Micros int64 `json:"micros"`
-	// CreditMicros is what the use took from the credit.
+	// CreditMicros is the part paid from credit.
 	CreditMicros int64 `json:"credit_micros"`
 }
 

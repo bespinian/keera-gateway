@@ -164,8 +164,7 @@ type RequestQuery struct {
 	// client's own.
 	RequestID string
 	Outcome   Outcome
-	// Status matches one exact status.
-	Status int
+	Status    int
 	// StatusClass matches a whole class of statuses by its first digit: 5 for
 	// every server error, 4 for every client error, 2 for every success.
 	StatusClass int
@@ -196,7 +195,6 @@ var requestOrder = map[Sort]string{
 	SortFirstToken: "ttft_ms DESC, id DESC",
 }
 
-// RequestSorts are the rankings the request log offers.
 func RequestSorts() []Sort {
 	return []Sort{SortRecent, SortCost, SortTokens, SortFirstToken}
 }
@@ -266,7 +264,6 @@ func (s *Store) Outcomes(ctx context.Context, q RequestQuery) (RequestOutcomes, 
 	return c, err
 }
 
-// Add sums two sets of counts.
 func (c *RequestOutcomes) Add(d RequestOutcomes) {
 	c.Total += d.Total
 	c.OK += d.OK

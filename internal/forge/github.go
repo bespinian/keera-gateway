@@ -34,7 +34,6 @@ type GitHub struct {
 	key   *rsa.PrivateKey
 }
 
-// GitHubOptions configures the GitHub minter.
 type GitHubOptions struct {
 	// API is the REST API: https://api.github.com, or https://<host>/api/v3
 	// for GitHub Enterprise Server. Empty is GitHub.com.
@@ -45,7 +44,6 @@ type GitHubOptions struct {
 	Key []byte
 }
 
-// NewGitHub builds the minter.
 func NewGitHub(o GitHubOptions) (*GitHub, error) {
 	api, err := parseBase(o.API, "https://api.github.com", "GitHub API")
 	if err != nil {

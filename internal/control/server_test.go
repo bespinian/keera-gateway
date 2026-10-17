@@ -51,9 +51,8 @@ func testStore(t *testing.T, tables ...string) (*store.Store, context.Context) {
 	return st, ctx
 }
 
-// newServer builds a control server with no store behind it. That is enough to
-// exercise the credential and CSRF paths, which decide whether a request ever
-// reaches a handler at all.
+// newServer builds a control server with no store, which is enough for the
+// credential and CSRF paths.
 func newServer() *Server {
 	return New(nil, nil, nil, nil, Options{OperatorKey: testOperatorKey}, slog.New(slog.DiscardHandler))
 }
@@ -265,9 +264,8 @@ func TestProvidersAreServedWithoutSecrets(t *testing.T) {
 	}
 }
 
-// The provider name a model carries is what the panel reads to tell the
-// provider's answers from the operator's, so a name this build does not know is
-// worth a refusal: it would otherwise be stored and silently match nothing.
+// An unknown provider name would be stored and silently match nothing in the
+// panel, so it is refused.
 func TestUnknownProviderIsRefused(t *testing.T) {
 	s := newServer()
 
@@ -288,10 +286,9 @@ func TestUnknownProviderIsRefused(t *testing.T) {
 	}
 }
 
-// The panel puts this URL into the configuration a developer copies into their
-// editor, so a wrong one is a client that cannot connect at all. One listener
-// serves both planes, so it is always the panel's own origin plus /api - the
-// only question is which origin.
+// The panel puts this URL in the configuration a developer copies, so a wrong
+// one cannot connect. One listener serves both planes, so it is always the
+// panel's origin plus /api; the question is which origin.
 func TestGatewayURL(t *testing.T) {
 	tests := []struct {
 		name string
@@ -343,9 +340,8 @@ func TestGatewayURL(t *testing.T) {
 }
 
 func TestAnEmptyOperatorKeyAuthenticatesNobody(t *testing.T) {
-	// Config requires an operator key, but a server built without one must not
-	// have one. Comparing a presented credential against sha256("") would hand
-	// an operator session to whoever sent an empty key first.
+	// A server built without an operator key must not have one. Comparing
+	// against sha256("") would make an empty key the operator.
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 
 	t.Run("the sign-in route refuses an empty key", func(t *testing.T) {
@@ -424,8 +420,8 @@ func TestMetricsTokenReadsMetricsAndNothingElse(t *testing.T) {
 	if w := get("/metrics", scrape); w.Code != http.StatusOK {
 		t.Fatalf("the scrape token got %d on /metrics, want 200", w.Code)
 	}
-	// The whole point is that a scrape configuration holds something that
-	// cannot change a guardrail.
+	// A scrape configuration must hold something that cannot change a
+	// guardrail.
 	if w := get(httpx.ControlPrefix+"/v1/orgs", scrape); w.Code != http.StatusUnauthorized {
 		t.Errorf("the scrape token got %d on /v1/orgs, want 401", w.Code)
 	}
@@ -459,9 +455,9 @@ func TestMetricsWithNoScrapeTokenStaysOperatorOnly(t *testing.T) {
 	}
 }
 
-// The client catalogue is what the panel's My clients screen and
-// `keera connect` both render, so the endpoint has to carry the templates and
-// the gateway address a developer's editor is to use - and no credential.
+// The panel's My clients screen and `keera connect` both render the client
+// catalogue, so it carries the templates and the gateway address, and no
+// credential.
 func TestConnectServesTheClientCatalogueAndTheGatewayAddress(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{
 		OperatorKey: testOperatorKey,
@@ -503,8 +499,8 @@ func TestConnectServesTheClientCatalogueAndTheGatewayAddress(t *testing.T) {
 			t.Errorf("%s came back without its {{base}} placeholder", c.Key)
 		}
 	}
-	// A member configures their own editor, so this is not an admin read. What
-	// it must never carry is a credential.
+	// A member configures their own editor, so they may read it too, still
+	// without a credential.
 	member := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleMember, OrgID: "org_1"}
 	w = httptest.NewRecorder()
 	s.listConnect(w, r, member)

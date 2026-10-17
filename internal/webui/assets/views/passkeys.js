@@ -1,9 +1,8 @@
 // Passkeys: setting one up from a link, your own list, and an administrator's
 // view of someone else's.
 //
-// Only accounts that sign in with passkeys have any. Directory accounts sign
-// in through their identity provider, so that leaving the directory still
-// locks them out.
+// Directory accounts have none: they sign in through their identity
+// provider, so leaving the directory still locks them out.
 
 import { api } from "../api.js";
 import { createPasskey, deviceName } from "../webauthn.js";
@@ -23,8 +22,8 @@ import {
   field,
 } from "../ui.js";
 
-/** passkeySetupView is the page a set-up link opens. It adds a passkey to the
- *  account the link is for, and signs the person in. */
+/** passkeySetupView is the page a set-up link opens. It adds a passkey and
+ *  signs the person in. */
 export async function passkeySetupView(root, token, onDone) {
   root.classList.remove("boot");
   const message = h("div");
@@ -101,8 +100,6 @@ export async function passkeySetupView(root, token, onDone) {
   );
 }
 
-/** managePasskeys is your own list: add one for another device, remove one
- *  you no longer use. */
 export function managePasskeys() {
   const err = h("div");
   const list = h("div");
@@ -173,7 +170,6 @@ export function managePasskeys() {
   draw();
 }
 
-/** userPasskeys is an administrator's view of one person's passkeys. */
 export function userPasskeys(user) {
   const err = h("div");
   const list = h("div");
@@ -259,7 +255,7 @@ export function showPasskeyLink(email, link) {
   });
 }
 
-// nameInput is the name a new passkey gets, prefilled with this device's.
+// nameInput is prefilled with this device's name.
 function nameInput() {
   return h("input", {
     class: "input",
@@ -273,7 +269,6 @@ function nameField(input) {
   return field("Name", input, "So you can tell your passkeys apart later.");
 }
 
-// removeButton removes one passkey, after asking, and then redraws the list.
 function removeButton(k, body, draw) {
   return h(
     "button",

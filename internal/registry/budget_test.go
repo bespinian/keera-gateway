@@ -71,8 +71,7 @@ func TestChargesLandInTheRightPeriodWindow(t *testing.T) {
 
 func TestReconcileReplacesLocalSpendWithTheDatabase(t *testing.T) {
 	// Another replica has been spending too. Reconciling adopts the shared
-	// figure and forgets the local delta, which the recorder has by then
-	// written.
+	// figure and forgets the local delta, which the recorder has written.
 	b := newBudgets(false)
 	now := time.Now()
 	b.Charge(scopes(), 500_000, now)

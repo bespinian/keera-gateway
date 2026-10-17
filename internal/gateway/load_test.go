@@ -8,9 +8,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// order is what the whole file is for, so most of it is tested through order:
-// what is being asserted is not that a number was stored but that a request
-// would go to a particular model because of it.
+// Most of this is tested through order: what matters is not that a number was
+// stored, but where a request would go because of it.
 
 func TestLeastBusyPrefersTheEmptiestDestination(t *testing.T) {
 	l := newLoads()

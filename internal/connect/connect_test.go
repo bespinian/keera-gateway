@@ -26,11 +26,11 @@ func TestTitleIsTheLabelAModelPickerShows(t *testing.T) {
 	}
 }
 
-// A trailing slash on the base URL is what a person correcting the field in the
-// panel leaves behind, and it would otherwise reach a config as "…//v1".
 // one is the single model most tests render with.
 var one = []Model{{Alias: "keera-code"}}
 
+// A person correcting the base URL in the panel leaves a trailing slash
+// behind, which would otherwise reach a config as "…//v1".
 func TestRenderTrimsATrailingSlashFromTheBase(t *testing.T) {
 	c, _ := Find(Clients(), "curl")
 	got := c.Render("https://keera.example.ch///", one)
@@ -39,12 +39,11 @@ func TestRenderTrimsATrailingSlashFromTheBase(t *testing.T) {
 	}
 }
 
-// Every template has to be fully substituted by Render: a placeholder that
-// survives is a configuration a developer copies and has to edit, which is the
-// one thing this package exists to prevent.
 // two is a key that may call a model and a router.
 var two = []Model{{Alias: "keera-code", MaxContext: 32_768}, {Alias: "auto"}}
 
+// A placeholder that survives Render is a config the developer has to edit,
+// which is what this package exists to prevent.
 func TestNoTemplateLeavesAPlaceholderBehind(t *testing.T) {
 	for _, c := range Clients() {
 		for _, text := range map[string]string{
@@ -59,9 +58,8 @@ func TestNoTemplateLeavesAPlaceholderBehind(t *testing.T) {
 	}
 }
 
-// Each entry has to carry enough to be rendered by a caller that knows nothing
-// about which client it is looking at - which is how both the panel and the CLI
-// walk this list.
+// Each entry must carry enough to be rendered by a caller that does not know
+// which client it is, as both the panel and the CLI walk this list.
 func TestEveryClientIsCompleteEnoughToRender(t *testing.T) {
 	if len(Clients()) == 0 {
 		t.Fatal("the catalogue is empty")
@@ -78,8 +76,7 @@ func TestEveryClientIsCompleteEnoughToRender(t *testing.T) {
 		if !slices.Contains([]string{"json", "toml", "sh", "python"}, c.Lang) {
 			t.Errorf("%s has lang %q, which no renderer highlights", c.Key, c.Lang)
 		}
-		// Every block has to name the gateway and the key's models. One that
-		// named neither would be a block that works for nobody in particular.
+		// Every block has to name the gateway and the key's models.
 		if !strings.Contains(c.Template, "{{base}}") {
 			t.Errorf("%s's template never uses {{base}}", c.Key)
 		}
@@ -193,10 +190,9 @@ func TestClaudeCodeTakesTheGatewayRoot(t *testing.T) {
 	}
 }
 
-// The clients a developer might use side by side have to describe the same
-// model. They used not to: one pinned a temperature and the other an output
-// cap, so the same alias behaved differently depending on which editor was
-// open, and neither number came from the deployment.
+// Clients used side by side must describe the same model. They once did not:
+// one pinned a temperature and another an output cap, so an alias behaved
+// differently per editor.
 func TestFileClientsStateTheSameWindow(t *testing.T) {
 	const maxContext = 200_000
 	window, output := Limits(maxContext)
@@ -250,19 +246,16 @@ func TestFileClientsStateTheSameWindow(t *testing.T) {
 	if got, _ := entry["contextWindow"].(float64); int(got) != window {
 		t.Errorf("pi declares context %v, want %d", entry["contextWindow"], window)
 	}
-	// The sandbox image depends on this exact spelling: it writes this template
-	// to ~/.pi/agent/models.json and Pi expands the variable itself, which is
-	// what keeps a sandbox's credential in its environment rather than in a
-	// file on a volume that outlives a suspend. A literal key here would be a
-	// silent change of that property.
+	// The sandbox image writes this template to ~/.pi/agent/models.json and Pi
+	// expands the variable itself. That keeps a sandbox's credential in its
+	// environment, not in a file on a volume that outlives a suspend.
 	if got := p.Providers.Keera.APIKey; got != "${KEERA_API_KEY}" {
 		t.Errorf("pi apiKey = %q; the sandbox image relies on Pi expanding this "+
 			"from the environment", got)
 	}
 
-	// And Pi is not, because its schema does not need one: how long an answer
-	// may be is not something the catalogue records, so nothing here invents it
-	// where it can be left out.
+	// Pi's schema needs no answer length, and the catalogue records none, so
+	// none is invented.
 	if _, stated := entry["maxTokens"]; stated {
 		t.Errorf("pi states an answer length the catalogue does not know: %v", entry["maxTokens"])
 	}
@@ -396,10 +389,8 @@ func TestLimitsFollowTheModelsWindow(t *testing.T) {
 	}
 }
 
-// No entry pins a temperature. It is the one parameter that cannot be
-// defaulted for a catalogue an operator fills in themselves: a reasoning model
-// refuses a request that sets one, and a config that has to be edited before
-// it works is the failure this package exists to prevent.
+// No entry pins a temperature: a reasoning model refuses a request that sets
+// one.
 func TestNoClientPinsATemperature(t *testing.T) {
 	for _, c := range Clients() {
 		if strings.Contains(c.Render("https://keera.example.ch", one), "temperature") {

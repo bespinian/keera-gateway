@@ -139,7 +139,6 @@ func (s *Server) checkDeployment(ctx context.Context, d *Diagnosis, p *authn.Pri
 	}
 }
 
-// checkIdentity checks how people sign in.
 func (s *Server) checkIdentity(d *Diagnosis) {
 	const area = "Deployment"
 	names := s.opts.Providers.Names()
@@ -220,7 +219,6 @@ func (s *Server) checkCatalogue(ctx context.Context, d *Diagnosis, orgID string,
 	}
 }
 
-// modelFix says how to change a model.
 func modelFix(m policy.Model, flags string, p *authn.Principal) string {
 	return "'" + orgEnv(p, m.OrgID) + "keera model set " + m.Alias + " " + flags + "'"
 }
@@ -358,7 +356,6 @@ func (s *Server) checkFilters(ctx context.Context, d *Diagnosis, orgID, org stri
 	for _, f := range filters {
 		switch {
 		case f.UsesModel() && !enabled[f.Model]:
-			// A filter fails closed, so this refuses every request it covers.
 			d.add("Filters", f.Alias, VerdictFail,
 				"runs on '"+f.Model+"', which is not enabled; a filter that cannot run "+
 					"refuses every request it covers",
@@ -409,7 +406,6 @@ func (s *Server) checkRouters(ctx context.Context, d *Diagnosis, orgID, org stri
 	}
 }
 
-// checkSandboxes checks the machines.
 func (s *Server) checkSandboxes(ctx context.Context, d *Diagnosis, orgID string) {
 	const area = "Sandboxes"
 

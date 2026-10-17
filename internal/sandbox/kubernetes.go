@@ -54,7 +54,6 @@ const (
 	annotationOwner = "keera.dev/owner"
 )
 
-// KubernetesOptions configures the driver.
 type KubernetesOptions struct {
 	Kube KubeConfig
 	// Namespace is where sandboxes are created. Keep it separate from the
@@ -79,7 +78,6 @@ type KubernetesOptions struct {
 	Log  *slog.Logger
 }
 
-// Kubernetes is the driver.
 type Kubernetes struct {
 	c    *kubeClient
 	opts KubernetesOptions
@@ -110,8 +108,6 @@ func NewKubernetes(ctx context.Context, opts KubernetesOptions) (*Kubernetes, er
 	}
 	k := &Kubernetes{c: c, opts: opts, log: opts.Log}
 
-	// Listing one Sandbox stands in for discovery: it proves at once that the
-	// API server answers, the CRD is installed and the account may use it.
 	var probe struct {
 		Items []struct{} `json:"items"`
 	}
@@ -127,7 +123,6 @@ func NewKubernetes(ctx context.Context, opts KubernetesOptions) (*Kubernetes, er
 	return k, nil
 }
 
-// Name returns "kubernetes".
 func (k *Kubernetes) Name() string { return "kubernetes" }
 
 // Capabilities reports what this driver does. The isolation tier comes from
@@ -144,7 +139,6 @@ func (k *Kubernetes) collection() string {
 // object is the path of one Sandbox.
 func (k *Kubernetes) object(ref Ref) string { return k.sandboxPath(objectName(ref)) }
 
-// sandboxPath is the path of the Sandbox with this name.
 func (k *Kubernetes) sandboxPath(name string) string {
 	return k.collection() + "/" + url.PathEscape(name)
 }
@@ -295,7 +289,6 @@ type kubeEmptyDir struct {
 	SizeLimit string `json:"sizeLimit,omitempty"`
 }
 
-// kubeNameRef points at another object by name.
 type kubeNameRef struct {
 	Name string `json:"name"`
 }
@@ -478,7 +471,6 @@ func (k *Kubernetes) build(spec Spec, runtimeClass string) *kubeSandbox {
 // too when it hands over the environment.
 const podContainerName = "sandbox"
 
-// sandboxContainer is the one container in a sandbox pod.
 func sandboxContainer(spec Spec) kubeContainer {
 	c := kubeContainer{
 		Name:  podContainerName,
@@ -516,7 +508,6 @@ func sandboxContainer(spec Spec) kubeContainer {
 	return c
 }
 
-// formatExpiry renders an expiry the way the Kubernetes objects hold it.
 func formatExpiry(t time.Time) string {
 	return t.UTC().Format(time.RFC3339)
 }
@@ -535,7 +526,6 @@ func shutdownPolicy(p policy.Purpose) string {
 
 /* ---------------------------------------------------------------- read back */
 
-// Status reads one sandbox.
 func (k *Kubernetes) Status(ctx context.Context, ref Ref) (Status, error) {
 	if ref.Claimed() {
 		return k.claimStatus(ctx, ref)
@@ -618,7 +608,6 @@ func (k *Kubernetes) Suspend(ctx context.Context, ref Ref) error {
 	return k.setMode(ctx, ref, "Suspended")
 }
 
-// Resume starts a suspended sandbox again.
 func (k *Kubernetes) Resume(ctx context.Context, ref Ref) error {
 	return k.setMode(ctx, ref, "Running")
 }
@@ -702,13 +691,11 @@ func (k *Kubernetes) Terminate(ctx context.Context, ref Ref) error {
 
 /* ------------------------------------------------------------------ dialing */
 
-// Dial opens a connection to one port of a running sandbox.
-//
-// It dials the pod IP directly. The port-forward subresource would work from
-// anywhere, but costs an upgrade through the API server per connection and
-// needs pods/portforward, which reaches any pod in the namespace. Dialing
-// directly needs the gateway in the same cluster and the sandbox namespace's
-// NetworkPolicy to admit it, as the Helm chart sets up.
+// Dial connects to the pod IP directly. The port-forward subresource would
+// work from anywhere, but costs an upgrade through the API server per
+// connection and needs pods/portforward, which reaches any pod in the
+// namespace. Dialing directly needs the gateway in the same cluster and the
+// sandbox namespace's NetworkPolicy to admit it, as the Helm chart sets up.
 func (k *Kubernetes) Dial(ctx context.Context, ref Ref, port int) (net.Conn, error) {
 	st, err := k.Status(ctx, ref)
 	if err != nil {

@@ -7,13 +7,10 @@ import (
 	"testing"
 )
 
-// This exposition is hand-rolled rather than produced by a client library, so
-// nothing but these tests stands between a scrape configuration and output a
-// parser rejects. What they check is mostly not the numbers - those are two
-// atomic adds - but the shape: that every family declares itself before its
-// samples, that no series is written twice under one name, and that the
-// histograms are cumulative, which is the one part of this format that is easy
-// to hand-roll wrongly and reports plausible nonsense when you do.
+// The exposition is hand-rolled, so only these tests stand between a scrape and
+// output a parser rejects. They mostly check the shape, not the numbers: every
+// family declares itself before its samples, no series is written twice, and
+// histograms are cumulative, which is easy to get wrong in a plausible way.
 
 // sample is one line of the exposition, already split into the parts a scrape
 // reads it as.
@@ -97,10 +94,8 @@ func parse(t *testing.T, raw string) exposition {
 
 // splitSample separates a sample line into its series and its value.
 //
-// It cannot simply cut at the first space: a label value is arbitrary text in
-// quotes, so "outcome=\"refused: no room\"" is one label and not the end of the
-// series. The split is at the space after the label set, which means finding
-// the brace that closes it without being fooled by one inside a quoted value.
+// It cannot cut at the first space: a quoted label value may hold spaces and
+// braces, so it finds the brace that closes the label set.
 func splitSample(line string) (head, value string, ok bool) {
 	end := -1
 	if open := strings.IndexByte(line, '{'); open >= 0 {
@@ -157,10 +152,8 @@ func render(t *testing.T, r *Registry) exposition {
 }
 
 func TestAnEmptyRegistryIsStillAValidExposition(t *testing.T) {
-	// A gateway that has served nothing is scraped every fifteen seconds from
-	// the moment it starts, and the families with no members at all still have
-	// to declare themselves - otherwise the first scrape after the first
-	// request is the one that introduces them, and a dashboard built before it
+	// A gateway that has served nothing is still scraped, and empty families
+	// must declare themselves, or a dashboard built before the first request
 	// has nothing to draw.
 	e := render(t, New())
 
@@ -206,15 +199,12 @@ func TestEveryFamilyDeclaresItselfBeforeItsSamples(t *testing.T) {
 	}
 }
 
-// The four histograms are written by hand from a per-bucket counter, so the
-// accumulation is this package's own arithmetic rather than a library's. Buckets
-// that are not cumulative still render, still scrape, and quietly report the
-// wrong quantile forever.
+// The histograms are accumulated by hand. Buckets that are not cumulative still
+// scrape, and quietly report the wrong quantile.
 func TestHistogramBucketsAreCumulativeAndEndAtTheCount(t *testing.T) {
 	r := New()
-	// Spread over the range on purpose, including one above the top bound so
-	// that the overflow bucket is not empty: that one is only reachable through
-	// +Inf, and a sum that forgot it would still look plausible.
+	// Spread over the range, with one above the top bound so the +Inf bucket is
+	// not empty: a sum that forgot it would still look plausible.
 	for _, seconds := range []float64{0.01, 0.2, 0.2, 3, 45, 600} {
 		r.Observe("gpt-oss", "org_1", 200, seconds, 10)
 	}
@@ -282,8 +272,7 @@ func TestHistogramBucketsAreCumulativeAndEndAtTheCount(t *testing.T) {
 			if !ok {
 				t.Fatal("no _count")
 			}
-			// This is what makes a histogram one: everything observed is under
-			// +Inf, so the two are the same number by definition.
+			// Everything observed is under +Inf, so the two must be equal.
 			if inf != count {
 				t.Errorf("+Inf = %v but _count = %v; they are the same population", inf, count)
 			}
@@ -295,9 +284,8 @@ func TestHistogramBucketsAreCumulativeAndEndAtTheCount(t *testing.T) {
 }
 
 func TestTheHistogramSumIsStatedInTheUnitItsNamePromises(t *testing.T) {
-	// It is accumulated in microseconds so the counter stays an integer. The
-	// exposition says seconds, because that is what the name says and what a
-	// rate() over it is divided by.
+	// Kept in microseconds so the counter stays an integer, but written in
+	// seconds, as the name says.
 	r := New()
 	r.Overhead("gpt-oss", "org_1", 0.002)
 	r.Overhead("gpt-oss", "org_1", 0.004)
@@ -363,9 +351,9 @@ func TestEachCounterLandsUnderItsOwnLabels(t *testing.T) {
 }
 
 func TestAFallbackIsCountedWhereTheRateLimiterReportsIt(t *testing.T) {
-	// The Redis limiter takes a Reporter rather than this registry, so that the
-	// rate limiter depends on nothing. This is the other side of that
-	// interface, and the only thing making a degraded ceiling visible.
+	// The Redis limiter takes a Reporter rather than this registry, so it
+	// depends on nothing. This is the only thing making a degraded ceiling
+	// visible.
 	var r any = New()
 	reporter, ok := r.(interface{ RateLimitFallback() })
 	if !ok {
@@ -381,11 +369,9 @@ func TestAFallbackIsCountedWhereTheRateLimiterReportsIt(t *testing.T) {
 }
 
 func TestALabelValueCannotBreakOutOfItsQuotes(t *testing.T) {
-	// Aliases and outcomes are checked elsewhere, so nothing here is expected
-	// to arrive with a quote in it. That is exactly why this is worth pinning:
-	// one label written with %s instead of %q would produce a file that no
-	// longer parses, and the failure would show up as a scrape that has gone
-	// quiet rather than as anything pointing here.
+	// Aliases and outcomes are checked elsewhere, so no quote is expected here.
+	// That is why this is pinned: one label written with %s instead of %q
+	// breaks the whole scrape, and nothing would point here.
 	r := New()
 	r.Observe(`a"b`, "org\n1", 200, 0.3, 1)
 	r.FilterRun("pii", "org_1", "refused: said \"no\"", false, 0.1, 0)
@@ -401,10 +387,8 @@ func TestALabelValueCannotBreakOutOfItsQuotes(t *testing.T) {
 }
 
 func TestALabelSetIsOnlyEverOneSeries(t *testing.T) {
-	// The keys are NUL-joined and split apart again to be written. A label
-	// whose value contained the separator would split into the wrong number of
-	// parts and land under a different series than the one it was recorded
-	// against - which is a metric that silently under-counts.
+	// Keys are NUL-joined and split again to be written. A value holding the
+	// separator would land under the wrong series and silently under-count.
 	r := New()
 	r.Observe("gpt\x00oss", "org_1", 200, 0.3, 1)
 

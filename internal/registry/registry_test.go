@@ -19,15 +19,11 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// The registry exists so that nothing on the inference path blocks on Postgres.
-// That is a cache in front of authentication, which makes its failure modes the
-// interesting ones: a cache that is a little stale serves a revoked key, and a
-// cache that remembers the wrong thing can pin a rejection for a key that is
-// perfectly good.
-//
-// The package comment promises two specific things - that a revoked key stops
-// working within a round trip rather than within a cache lifetime, and that a
-// database outage leaves already-known keys working. Both are below.
+// The registry is a cache in front of authentication, so its failure modes
+// matter most: a stale cache serves a revoked key, and one that remembers the
+// wrong thing pins a rejection for a good key. The package comment promises a
+// revoked key stops within a round trip, and an outage leaves known keys
+// working. Both are tested below.
 
 // source is a control plane that answers from memory.
 type source struct {
@@ -161,7 +157,7 @@ func (s *source) reject(key string, err error) {
 	s.keyErr[hashOf(key)] = err
 }
 
-// testKey turns a name into a well-formed key, so tests can name their keys.
+// testKey turns a name into a well-formed key.
 func testKey(name string) string {
 	sum := sha256.Sum256([]byte(name))
 	return auth.Prefix + base64.RawURLEncoding.EncodeToString(sum[:])
@@ -170,16 +166,14 @@ func testKey(name string) string {
 // hashOf is how the store is keyed, which is how the cache is keyed too.
 func hashOf(key string) string { return string(auth.Hash(key)) }
 
-// cached is how many key entries are being held, which is the number Sweep
-// exists to bound.
+// cached is how many key entries are held, the number Sweep bounds.
 func (r *Registry) cached() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return len(r.keys)
 }
 
-// expiryOf is when a cached answer runs out, so that the two lifetimes can be
-// compared without waiting for either.
+// expiryOf lets the two lifetimes be compared without waiting for either.
 func (r *Registry) expiryOf(key string) time.Time {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -200,9 +194,7 @@ func newRegistry(t *testing.T, s *source, opts Options) *Registry {
 }
 
 func TestAResolvedKeyIsReadOnceAndThenServedFromMemory(t *testing.T) {
-	// The whole point: authentication on the inference path costs a map lookup,
-	// not a query. Without this a busy gateway is one database round trip per
-	// request before it has done anything at all.
+	// Authentication on the inference path costs a map lookup, not a query.
 	s := newSource()
 	s.set(testKey("sk-live"), resolved("org_1"))
 	r := newRegistry(t, s, Options{TTL: time.Minute})
@@ -222,10 +214,8 @@ func TestAResolvedKeyIsReadOnceAndThenServedFromMemory(t *testing.T) {
 }
 
 func TestARevokedKeyStopsWorkingWhenTheControlPlaneSaysSo(t *testing.T) {
-	// This is the claim in the package comment, and the reason the cache has a
-	// generation counter at all. Waiting out a TTL would mean a key revoked
-	// because it leaked keeps working for the length of that TTL - which is the
-	// one minute during which it matters.
+	// This is why the cache has a generation counter. Waiting out a TTL would
+	// let a leaked key work for exactly the minute that matters.
 	s := newSource()
 	s.set(testKey("sk-live"), resolved("org_1"))
 	// A TTL long enough that expiry cannot be what invalidates it: if this
@@ -246,9 +236,8 @@ func TestARevokedKeyStopsWorkingWhenTheControlPlaneSaysSo(t *testing.T) {
 }
 
 func TestANotifyFromTheControlPlaneDropsEveryCachedKey(t *testing.T) {
-	// The same thing over the wire rather than in-process: a control plane on
-	// another replica revokes a key and announces it over LISTEN/NOTIFY, and
-	// every gateway has to let go of what it holds.
+	// The same over the wire: a control plane on another replica revokes a key
+	// and announces it over LISTEN/NOTIFY.
 	s := newSource()
 	s.set(testKey("sk-live"), resolved("org_1"))
 	r := newRegistry(t, s, Options{TTL: time.Hour})
@@ -317,10 +306,9 @@ func TestAKeyChangeDropsThatKeyAlone(t *testing.T) {
 }
 
 func TestADatabaseOutageIsNeverCached(t *testing.T) {
-	// The other half of the package comment. A lookup that failed because
-	// Postgres was unreachable says nothing about the key, so caching it would
-	// let a momentary outage pin a rejection in memory for a whole TTL - long
-	// after the database came back.
+	// A lookup that failed because Postgres was unreachable says nothing about
+	// the key. Caching it would pin a rejection for a whole TTL after the
+	// database came back.
 	s := newSource()
 	s.reject(testKey("sk-live"), errors.New("dial tcp: connection refused"))
 	r := newRegistry(t, s, Options{TTL: time.Hour, NegativeTTL: time.Hour})
@@ -340,11 +328,9 @@ func TestADatabaseOutageIsNeverCached(t *testing.T) {
 }
 
 func TestARejectedKeyIsCachedButOnlyBriefly(t *testing.T) {
-	// A rejection is an answer, so it is cached: otherwise a flood of invalid
-	// keys - which is what a public endpoint gets all day - is a flood of
-	// queries. It is cached for less time than a good key, because a rejection
-	// is the answer most likely to have just changed: somebody being handed a
-	// key they are waiting for.
+	// A rejection is cached, or a flood of invalid keys is a flood of queries.
+	// It is cached for less time than a good key, because it is the answer most
+	// likely to change soon: somebody waiting for a key they were just given.
 	for _, err := range []error{policy.ErrUnknownKey, policy.ErrKeyRevoked, policy.ErrKeyExpired} {
 		t.Run(err.Error(), func(t *testing.T) {
 			s := newSource()
@@ -365,14 +351,12 @@ func TestARejectedKeyIsCachedButOnlyBriefly(t *testing.T) {
 }
 
 func TestTheNegativeLifetimeIsShorterThanTheOtherOne(t *testing.T) {
-	// Both are cached, and the difference between them is the whole reason
-	// there are two settings. A refactor that used one lifetime for both would
-	// pass every other test in this file.
+	// A refactor that used one lifetime for both would pass every other test
+	// in this file.
 	s := newSource()
 	s.set(testKey("sk-good"), resolved("org_1"))
 	s.reject(testKey("sk-bad"), policy.ErrUnknownKey)
-	// Long enough that neither expires during the test, so what is being read
-	// is the lifetime that was recorded and not the clock.
+	// Long enough that neither expires during the test.
 	r := newRegistry(t, s, Options{TTL: time.Hour, NegativeTTL: time.Minute})
 
 	if _, err := r.Resolve(t.Context(), testKey("sk-good")); err != nil {
@@ -393,10 +377,8 @@ func TestTheNegativeLifetimeIsShorterThanTheOtherOne(t *testing.T) {
 }
 
 func TestOneMissIsOneQueryHoweverManyAskAtOnce(t *testing.T) {
-	// A fleet of editors starting at once - a morning, or a deployment rolling
-	// - presents the same key from every process at the same moment. Without
-	// the collapse that is one query per request against a database that is
-	// already the thing being protected.
+	// Many editors starting at once present the same key at the same moment.
+	// Without the collapse, that is one query each.
 	s := newSource()
 	s.set(testKey("sk-live"), resolved("org_1"))
 
@@ -448,9 +430,7 @@ func TestOneMissIsOneQueryHoweverManyAskAtOnce(t *testing.T) {
 }
 
 func TestACallerThatGivesUpDoesNotTakeTheOthersWithIt(t *testing.T) {
-	// The collapse makes one caller wait on another's query. A client that
-	// hangs up mid-flight must not then be able to fail the request of everyone
-	// who joined behind it.
+	// A client that hangs up must not fail everyone who joined its query.
 	s := newSource()
 	s.set(testKey("sk-live"), resolved("org_1"))
 	release := make(chan struct{})
@@ -493,8 +473,8 @@ func TestACallerThatGivesUpDoesNotTakeTheOthersWithIt(t *testing.T) {
 }
 
 func TestTheCallerDoingTheWorkCanLeaveWithoutFailingTheOthers(t *testing.T) {
-	// The other way round: the first caller's query is the one everybody
-	// waits on, so its client hanging up must not cancel it.
+	// Everybody waits on the first caller's query, so its client hanging up
+	// must not cancel it.
 	s := newSource()
 	s.set(testKey("sk-live"), resolved("org_1"))
 	release := make(chan struct{})
@@ -540,9 +520,7 @@ func TestTheCallerDoingTheWorkCanLeaveWithoutFailingTheOthers(t *testing.T) {
 }
 
 func TestSweepForgetsWhatIsExpiredAndWhatIsStale(t *testing.T) {
-	// Without it the key map grows with every distinct token ever presented,
-	// which on a public endpoint is every scan. Two things make an entry
-	// collectable: it has run out, or the generation it was minted in is over.
+	// An entry is collectable when it has run out, or its generation is over.
 	s := newSource()
 	s.set(testKey("sk-a"), resolved("org_1"))
 	s.reject(testKey("sk-b"), policy.ErrUnknownKey)
@@ -580,9 +558,8 @@ func TestSweepForgetsWhatIsExpiredAndWhatIsStale(t *testing.T) {
 }
 
 func TestTheCacheIsKeyedByHashAndNotByTheKeyItself(t *testing.T) {
-	// A heap dump of a running gateway is taken by whoever is debugging it and
-	// ends up wherever such things end up. It must not contain working
-	// credentials, so the cache holds what the database holds.
+	// A heap dump must not contain working credentials, so the cache is keyed
+	// by hash, as the database is.
 	s := newSource()
 	s.set(testKey("sk-live-secret-value"), resolved("org_1"))
 	r := newRegistry(t, s, Options{TTL: time.Minute})
@@ -601,9 +578,8 @@ func TestTheCacheIsKeyedByHashAndNotByTheKeyItself(t *testing.T) {
 }
 
 func TestAGatewayDoesNotStartWithoutACatalogue(t *testing.T) {
-	// New loads once before returning, so that a gateway which has started is
-	// a gateway that can serve. Starting anyway would mean the first requests
-	// after a deployment are refused for a model that exists.
+	// Starting without a load would refuse the first requests after a
+	// deployment for a model that exists.
 	s := newSource()
 	s.loadErr = errors.New("connection refused")
 	if _, err := New(t.Context(), s, Options{}, slog.New(slog.DiscardHandler)); err == nil {
@@ -612,9 +588,8 @@ func TestAGatewayDoesNotStartWithoutACatalogue(t *testing.T) {
 }
 
 func TestTheCatalogueIsReplacedWholeOrNotAtAll(t *testing.T) {
-	// A guardrail that names a filter, a router that names a destination and a
-	// filter that names a model are one chain. A refresh that renewed part of
-	// it would leave requests refused for a link that already exists.
+	// Guardrails, filters, routers and models name each other. Renewing part
+	// of the chain would refuse requests for a link that exists.
 	s := newSource()
 	s.models = []policy.Model{{Alias: "small"}}
 	s.filters = []policy.Filter{{OrgID: "org_1", Alias: "pii"}}
@@ -746,13 +721,12 @@ func TestDefaultsAreFilledInForWhateverIsNotSet(t *testing.T) {
 	}
 }
 
-// Keeps the compiler honest about the store still being a Source, which is the
-// only thing that makes any of the above worth running.
+// The tests above only matter while the store is a Source.
 var _ Source = (*store.Store)(nil)
 
 func TestATokenThatCannotBeAKeyCostsNoQuery(t *testing.T) {
-	// Scanners send every token they have. None of them is shaped like a
-	// Keera key, so none of them may reach the database or the cache.
+	// Scanners send tokens that are not shaped like a Keera key. None may
+	// reach the database or the cache.
 	s := newSource()
 	r := newRegistry(t, s, Options{TTL: time.Minute})
 
@@ -770,9 +744,8 @@ func TestATokenThatCannotBeAKeyCostsNoQuery(t *testing.T) {
 }
 
 func TestKeyQueriesNeverTakeMoreThanTheirShareOfThePool(t *testing.T) {
-	// A flood of made-up but well-formed keys is one miss each. The queries
-	// they cause must leave the rest of the pool to usage writes and the
-	// control plane.
+	// A flood of made-up, well-formed keys must leave the rest of the pool to
+	// usage writes and the control plane.
 	s := newSource()
 	release := make(chan struct{})
 	var running, peak atomic.Int32

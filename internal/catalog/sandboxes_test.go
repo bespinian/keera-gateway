@@ -60,9 +60,7 @@ sandboxes:
 		t.Fatalf("parse: %v", err)
 	}
 	c := classes[0]
-	// Not "standard". A catalogue written without thinking about isolation
-	// should get the tier that needs nothing from the hardware and does hold a
-	// boundary, rather than the one every other pod on the node already has.
+	// Not "standard": an unstated isolation still gets a real boundary.
 	if c.Isolation != policy.IsolationIsolated {
 		t.Errorf("default isolation = %q, want isolated", c.Isolation)
 	}
@@ -209,9 +207,7 @@ func TestParseMiB(t *testing.T) {
 		{"16Gi", 16384, true},
 		{"512Mi", 512, true},
 		{"1Ti", 1048576, true},
-		// A bare number is mebibytes, not bytes. The Kubernetes reading would
-		// make "memory: 4096" four kilobytes, which is a class nothing can
-		// schedule and an error nobody would guess at.
+		// A bare number is mebibytes, not bytes as in Kubernetes.
 		{"4096", 4096, true},
 		{"0", 0, false},
 		{"16GB", 0, false},

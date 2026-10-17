@@ -1,25 +1,17 @@
 // Where one request's time went, drawn as a waterfall.
 //
-// Every other reading of a request is a total. The row says it took nine
-// seconds and the dashboard says the model's median is two; neither says which
-// of the things this gateway does was the nine seconds. A filter chain running
-// a second model, a router spending four hundred milliseconds deciding, a
-// fallback waiting out a dial timeout - or the model, in which case there is
-// nothing here to fix.
+// Everywhere else a request is a total. This shows which step took the time:
+// a filter running a second model, a router deciding, a fallback waiting out a
+// timeout, or the model itself.
 //
 // The bars are drawn against the request's own latency, so the gaps between
-// them are real: a chart that closed the gaps would hide the one thing it was
-// opened for.
+// them are real. Closing the gaps would hide what the chart is for.
 
 import { h, ms } from "./ui.js";
 
-// What each step is, in the words somebody reading their own request would use,
-// and which of the four things a request's time can go on it belongs to.
-//
-// The group is what the summary above the chart is built from, and it is the
-// division a reader actually arrives with: is this us, is this the guardrails
-// we turned on, or is this the model. Nothing else about the chart matters if
-// that question needs three screens to answer.
+// Each step in plain words, and which of the four groups its time counts to.
+// The groups make the summary above the chart, which answers the reader's
+// first question: is it the gateway, the guardrails, or the model?
 const STEPS = {
   auth: {
     label: "Authenticating",
@@ -90,8 +82,8 @@ const STEPS = {
   },
 };
 
-// The four groups, in the order they are summarised. Each has the colour its
-// steps are drawn in, so a bar and the figure above it are the same thing.
+// The groups, in summary order. A group's steps are drawn in its colour, so a
+// bar matches its figure in the summary.
 const GROUPS = [
   { key: "client", label: "Client" },
   { key: "gateway", label: "Gateway" },
@@ -101,11 +93,8 @@ const GROUPS = [
 
 /** micros writes a duration recorded in microseconds.
  *
- *  The steps here span five orders of magnitude - an admission is forty
- *  microseconds and a completion is forty seconds - so the unit changes with
- *  the number rather than the whole chart being written in one of them. A chart
- *  in milliseconds rounds half its bars to zero; one in microseconds asks its
- *  reader to count digits to find out whether a model took two seconds. */
+ *  Steps range from forty microseconds to forty seconds, so the unit follows
+ *  the number. In milliseconds alone half the bars would round to zero. */
 function micros(v) {
   const n = Math.max(0, Math.round(v || 0));
   if (n < 1000) return n + " µs";
@@ -115,28 +104,25 @@ function micros(v) {
   return ms(n / 1000);
 }
 
-// pct writes one bar's geometry. Three decimals is a tenth of a pixel on any
-// screen this is read on, and keeps the inline style a person can read in the
-// inspector.
+// pct writes one bar's geometry. Three decimals is a tenth of a pixel, and
+// keeps the inline style readable in the inspector.
 function pct(fraction) {
   return (Math.max(0, Math.min(1, fraction)) * 100).toFixed(3) + "%";
 }
 
-// began is a bar's own sentence, for the pointer: how long the step took and
-// how far into the request it started.
+// began is a bar's tooltip: how long the step took and when it started.
 function began(what, at, took) {
   return at > 0
     ? `${what}: ${micros(took)}, ${micros(at)} into the request`
     : `${what}: ${micros(took)}, at the very start`;
 }
 
-// The notes that mean a step did not do what it was there to do: a destination
-// that could not be reached or failed, a filter whose own model has gone, a
-// router that could not decide. They are drawn as failures wherever they sit,
-// because on a slow request those bars are usually the whole story.
+// The notes that mean a step failed: a destination that could not be reached
+// or failed, a filter whose model is gone, a router that could not decide.
+// They are drawn as failures, because on a slow request they are usually the
+// cause.
 //
-// A filter that refused is not among them: that is the guardrail working, and
-// colouring it as a fault would be the panel disagreeing with it.
+// A filter that refused is not among them: that is the guardrail working.
 const WENT_WRONG = ["unreachable", "could not run", "could not choose"];
 
 function tone(span) {
@@ -152,24 +138,20 @@ function wrong(note) {
   return Number.isFinite(status) && status >= 400;
 }
 
-// name is what one bar is called: the step, and what it was about where that is
-// not the request itself - the model that was asked, the filter that ran.
+// name is a bar's label: the step, plus what it was about, such as the model
+// asked or the filter that ran.
 function name(span) {
   const step = STEPS[span.name];
   const label = step ? step.label : span.name;
   return span.of ? label + " " + span.of : label;
 }
 
-/** flameChart draws the steps of one request, or nothing when there are none.
+/** flameChart draws the steps of one request, or nothing when there are none,
+ *  as for a request recorded before steps were kept.
  *
- *  A request recorded before this gateway kept them has no steps, and so does
- *  one served by a replica that has not been restarted. Neither is worth a
- *  paragraph in a dialog somebody opened to read a different number, so the
- *  section is simply absent.
- *
- *  latencyMS is the request's own total, and is what the bars are scaled
- *  against rather than the last step's end: a chart scaled to its own contents
- *  can never show that they do not account for the whole wait. */
+ *  latencyMS is the request's total. The bars are scaled to it, not to the
+ *  last step's end, so the chart can show steps that do not cover the whole
+ *  wait. */
 export function flameChart(spans, latencyMS) {
   if (!spans || spans.length === 0) return null;
 
@@ -178,12 +160,11 @@ export function flameChart(spans, latencyMS) {
     (end, s) => Math.max(end, (s.at_us || 0) + (s.for_us || 0)),
     0,
   );
-  // The scale is the longer of the two, so a rounding difference between the
-  // latency the row reports in milliseconds and the steps recorded in
-  // microseconds cannot push the final bar off the end of its track.
+  // The longer of the two, so rounding between the latency in milliseconds
+  // and the steps in microseconds cannot push the last bar off its track.
   const total = Math.max(last, Math.round((latencyMS || 0) * 1000), 1);
 
-  // What each group cost between them, which is the line most readers stop at.
+  // Time per group, for the summary line.
   const spent = {};
   for (const s of steps) {
     const step = STEPS[s.name];
@@ -230,8 +211,8 @@ export function flameChart(spans, latencyMS) {
             h("div", {
               class: "flame-bar " + tone(s),
               // A step that took no measurable time still happened, and on a
-              // refusal it is often the one being looked for - so it keeps a
-              // sliver rather than collapsing to nothing.
+              // refusal it is often the one being looked for, so it keeps a
+              // sliver.
               style: {
                 left: pct(at / total),
                 width: pct(Math.max(took / total, 0.005)),

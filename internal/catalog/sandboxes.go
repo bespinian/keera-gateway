@@ -11,9 +11,6 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// The sandbox catalogue works like the model catalogue: the file is a template,
-// and each new organisation gets its own copy of every class in it.
-
 // sandboxFile is the on-disk shape.
 type sandboxFile struct {
 	Sandboxes []Sandbox `yaml:"sandboxes"`

@@ -117,7 +117,6 @@ var internalSuffixes = []string{
 	".lan", ".home.arpa", ".svc", ".cluster.local",
 }
 
-// hostingOf classifies one backend URL and returns the host it classified.
 func hostingOf(raw string) (Hosting, string) {
 	u, ok := parseBackend(raw)
 	if !ok {

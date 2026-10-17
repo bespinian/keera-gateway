@@ -36,7 +36,7 @@ import (
 // errUserDisabled is a passkey sign-in by someone who was disabled.
 var errUserDisabled = errors.New("the account is disabled")
 
-// passkeyNameMax bounds what a person calls a passkey.
+// passkeyNameMax is in runes. A longer name is cut.
 const passkeyNameMax = 64
 
 // passkeyStepUp is how recent a sign-in has to be to add a passkey. A passkey
@@ -62,7 +62,6 @@ func (s *Server) passkeysOff(w http.ResponseWriter) bool {
 	return true
 }
 
-// withPasskeys runs a route only on a gateway with passkeys on.
 func (s *Server) withPasskeys(next handler) handler {
 	return func(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 		if !s.passkeysOff(w) {
@@ -163,7 +162,6 @@ func (s *Server) passkeySignInOptions(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// passkeySignIn completes a passkey sign-in.
 func (s *Server) passkeySignIn(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Flow       string          `json:"flow"`
@@ -285,7 +283,6 @@ func (s *Server) passkeySetupOptions(w http.ResponseWriter, r *http.Request) {
 	s.registrationOptions(w, r, user)
 }
 
-// registrationOptions starts a registration for user.
 func (s *Server) registrationOptions(w http.ResponseWriter, r *http.Request, user store.User) {
 	existing, err := s.st.ListPasskeys(r.Context(), user.ID)
 	if err != nil {

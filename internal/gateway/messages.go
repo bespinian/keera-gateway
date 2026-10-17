@@ -124,7 +124,6 @@ func decodeRequest(raw []byte, in any, api string) error {
 	return errors.New("request body is not a valid " + api + " request: " + err.Error())
 }
 
-// functionTool declares one tool as a chat function.
 func functionTool(name, description string, schema json.RawMessage) oaiTool {
 	if len(schema) == 0 || string(schema) == "null" {
 		schema = emptySchema
@@ -533,7 +532,6 @@ func (m chatMessage) appendContent(dst []byte) []byte {
 	return append(dst, ']')
 }
 
-// appendMessages writes the messages as a JSON array.
 func appendMessages(dst []byte, msgs []chatMessage) []byte {
 	dst = append(dst, '[')
 	for i, m := range msgs {

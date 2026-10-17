@@ -117,7 +117,6 @@ func (s *Server) trafficMap(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	})
 }
 
-// modelNode is one catalogue entry as the map draws it.
 func modelNode(m policy.Model, cell store.Cell) mapModel {
 	return mapModel{
 		Alias:    m.Alias,

@@ -1,20 +1,17 @@
-# What a tag produces: the image a deployment runs, an SBOM of what is inside
-# it, the keera command for Linux, macOS and Windows, and a provenance
-# attestation saying where each came from.
+# What a tag produces: the image, its SBOM, the keera command for Linux, macOS
+# and Windows, and a provenance attestation for each.
 #
-# The attestation is the reason this build happens here rather than on a
-# workstation. actions/attest-build-provenance signs a statement naming the
-# workflow, repository and commit that produced each file, with GitHub's key
-# rather than ours. An image built on a laptop can claim the same thing and
-# nobody downstream can check it.
+# The attestation is why this builds here and not on a workstation:
+# actions/attest-build-provenance signs, with GitHub's key, the workflow,
+# repository and commit that produced each file. A laptop build could claim
+# the same and nobody could check it.
 #
-# The build itself is in release-build.yml, a reusable workflow, so the
-# signature names that file. How it keeps the build from forging its own
-# provenance, which is what SLSA Build L3 asks, is explained there.
+# The build is in release-build.yml, a reusable workflow, so the signature
+# names that file. It explains how the build cannot forge its own provenance
+# (SLSA Build L3).
 #
-# It drives the same `make` targets a developer runs, with GATEWAY_IMAGE pointed
-# at the registry instead of localhost, so there is one definition of how the
-# image is built and CI cannot quietly build a different one.
+# It runs the same `make` targets a developer does, with GATEWAY_IMAGE pointed
+# at the registry, so there is one definition of the image build.
 name: Release
 
 on:

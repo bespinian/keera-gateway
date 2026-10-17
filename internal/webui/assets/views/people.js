@@ -41,10 +41,8 @@ const ROLES = [
   },
 ];
 
-// What this screen may hand out. The operator role is not on it anywhere: it
-// crosses organisations, so it comes from KEERA_OPERATORS or an operator group
-// in the gateway's configuration and from nothing a panel can send. It is still
-// shown in the Role column, because reading who has it is the point of the
+// The operator role crosses organisations, so only the gateway's configuration
+// grants it (KEERA_OPERATORS or an operator group). It still shows in the Role
 // column.
 const ASSIGNABLE = ROLES.filter((r) => r.key !== "operator");
 
@@ -55,7 +53,6 @@ export const TONE = { operator: "accent", admin: "good", member: "" };
 const isPasskeyAccount = (u) =>
   (u.external_id || "").startsWith("keera:passkey:");
 
-/** headline says how users get in and where their roles come from. */
 function headline(me, canAssign) {
   if (!me.sso && me.passkeys)
     return (
@@ -74,7 +71,6 @@ function headline(me, canAssign) {
   );
 }
 
-/** signsInWith is the line under a person's address. */
 export function signsInWith(u) {
   if (isPasskeyAccount(u)) return "signs in with a passkey";
   if (u.external_id) return "linked to " + u.external_id;
@@ -100,10 +96,8 @@ function passkeyMark() {
 
 export async function peopleView(ctx) {
   const users = (await api.users(ctx.orgID)).data || [];
-  // Whether a role can be changed here at all. It cannot when a group decides
-  // the administrator role: the directory reapplies its answer on the next
-  // sign-in, so the screen says where roles come from rather than offering a
-  // control that does not keep.
+  // Not when a group decides roles: the directory reapplies them on the next
+  // sign-in, so a change here would not keep.
   const canAssign = !ctx.state.me.roles_from_directory;
   const active = users.filter((u) => !u.disabled_at).length;
   ctx.setSubtitle(
@@ -159,8 +153,7 @@ export async function peopleView(ctx) {
         },
       },
       {
-        // Widest role first: the question asked of this screen is who has more
-        // than they should, not who has the least.
+        // Widest role first, to show who has more than they should.
         label: "Role",
         shrink: true,
         sortKey: (u) => ({ operator: 0, admin: 1, member: 2 })[u.role] ?? 3,
@@ -208,8 +201,8 @@ export async function peopleView(ctx) {
           if (u.id === ctx.state.me.user_id) {
             return h("span", { class: "faint" }, "you");
           }
-          // An operator holds that role because the configuration says so, and
-          // the next sign-in would put it back, so there is nothing to edit.
+          // The configuration grants the operator role, so there is nothing to
+          // edit.
           if (u.role === "operator") {
             return h(
               "span",
@@ -274,8 +267,8 @@ export async function peopleView(ctx) {
           u.disabled_at ? "disabled" : "",
         ].join(" "),
       searchLabel: "users",
-      // Off by default: someone disabled has left, and is kept only so their
-      // usage and audit entries still have a name.
+      // Off by default: a disabled person has left, and is kept only so their
+      // usage and audit entries have a name.
       toggles: [
         {
           label: "Show disabled",

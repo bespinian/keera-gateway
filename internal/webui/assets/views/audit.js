@@ -1,10 +1,7 @@
 // The audit log: who changed what.
 //
-// This is the compliance artefact of the whole product - the answer to "prove
-// nothing left the cluster and show me who changed the guardrail". So it is
-// filterable, it pages past its first screenful, and it comes out as a file. A
-// log that can only show its most recent two hundred entries is one nobody can
-// answer a question with.
+// It answers compliance questions such as "who changed the guardrail", so it
+// is filterable, pages past its first screenful, and downloads as a file.
 
 import { api } from "../api.js";
 import {
@@ -43,15 +40,9 @@ const TONES = {
   "auth.directory_check": "warn",
 };
 
-// What each action is called on screen. The wire keeps `noun.verb` because
-// that is what filters and exports are written against, but a reader of this
-// log should meet the same words the rest of the panel uses - somebody who has
-// only ever seen "Guardrails" should not have to work out that `guardrail.put`
-// is the same thing.
-//
-// An action with no entry here falls back to its wire id, which is what a
-// deployment running ahead of this panel will show. That is the right failure:
-// an unrecognised entry is still legible, and still filterable.
+// The on-screen words for each action, the same the rest of the panel uses.
+// The wire keeps `noun.verb`, which filters and exports are written against.
+// An action missing here, say from a newer gateway, shows its wire id.
 const LABELS = {
   "auth.sign_in": "Signed in",
   "auth.cli_token": "Signed in from the command line",
@@ -109,15 +100,13 @@ const LABELS = {
   "billing.payment.failed": "Payment failed",
 };
 
-/** label is what to show for an action id. */
 function label(action) {
   return LABELS[action] || action;
 }
 
-// The shared windows plus everything there is, and a window of its own rather
-// than the shared one: the audit log is searched over a period somebody names,
-// not over whatever the dashboard was last showing. The three it shares are not
-// restated, so they cannot drift from the picker every other screen draws.
+// The shared windows plus all time, kept apart from the shared choice: the
+// audit log is searched over a chosen period, not whatever the dashboard last
+// showed. The shared ones are not restated so they cannot drift.
 const RANGES = [
   ...SHARED_RANGES,
   { label: "All", since: "", long: "Everything" },
@@ -126,8 +115,8 @@ const RANGES = [
 const PAGE = 100;
 
 export async function auditView(ctx) {
-  // The filter lives in the session rather than the URL: it is a reading
-  // position, and it should survive stepping over to another screen and back.
+  // Kept in the session rather than the URL, so it survives a visit to
+  // another screen.
   const filter = {
     action: remembered("keera.audit.action") || "",
     actor: remembered("keera.audit.actor") || "",
@@ -268,8 +257,8 @@ export async function auditView(ctx) {
   return wrap;
 }
 
-// choose is one filter. Like the request log's, it is left out when it has
-// fewer than two values to pick from, unless one is set and needs clearing.
+// choose is one filter. It is left out with fewer than two values, unless one
+// is set and needs clearing.
 function choose(aria, all, values, selected, name, onPick) {
   if (!selected && values.length < 2) return null;
   const options =

@@ -1,10 +1,10 @@
 #!/bin/sh
 # Writes the licences of everything compiled into the Keera binaries to stdout.
 #
-# MIT, BSD and Apache-2.0 all ask for their notice to travel with a binary, and
-# a FROM scratch image or a release archive has nothing else to carry it. The
-# list comes from the build graph rather than go.mod, so a module only the tests
-# use is left out and a new dependency cannot be forgotten.
+# MIT, BSD and Apache-2.0 require their notice to ship with a binary, and a
+# FROM scratch image or a release archive has no other place for it. The list
+# comes from the build graph, not go.mod, so test-only modules are left out and
+# a new dependency cannot be forgotten.
 #
 # Run from the repository root, after `go mod vendor`.
 set -eu

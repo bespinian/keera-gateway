@@ -10,10 +10,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// The usage row is what every report is drawn from, so a client that is not on
-// it is a client nothing can ever show. This is the one place the recognition
-// actually happens - what it is worth is tested next door, in the package that
-// owns the table.
+// Every report is drawn from the usage row, so a client missing from it can
+// never be shown. The client table itself is tested in internal/connect.
 func TestTheUsageEventNamesWhatSentTheRequest(t *testing.T) {
 	tests := []struct {
 		name   string

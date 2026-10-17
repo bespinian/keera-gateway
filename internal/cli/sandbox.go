@@ -650,7 +650,6 @@ func printSandboxCreated(w *table, sb store.Sandbox) {
 	if sb.ExpiresAt != nil {
 		show(w, "expires", expiresIn(sb.ExpiresAt))
 	}
-	// It is still starting, so say how to find out when it is ready.
 	_, _ = fmt.Fprintf(w, "\nIt is starting. 'keera sandbox show %s' says when it is ready",
 		sb.Name)
 	if sb.Purpose == policy.PurposeEngineer {

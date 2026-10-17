@@ -97,9 +97,8 @@ func TestPatternRefusalCarriesTheAdministratorsSentence(t *testing.T) {
 }
 
 func TestPatternRefusalStopsTheSweep(t *testing.T) {
-	// The request is going nowhere, so what the rules after it would also have
-	// matched is a count nobody reads. Scanning on would be spending the time
-	// to produce it.
+	// The request is going nowhere, so scanning on would only count matches
+	// nobody reads.
 	c := compileRules([]policy.FilterRule{
 		{Pattern: `\bstop\b`, Refuse: true},
 		{Pattern: `\bafter\b`, Replace: "[LATER]"},
@@ -130,9 +129,9 @@ func TestPatternRefusalReasonIsBounded(t *testing.T) {
 }
 
 func TestPatternWithNoRulesFailsClosed(t *testing.T) {
-	// The control plane refuses to store one, so this is the row written by
-	// something else. A guardrail that passes everything while looking like a
-	// guardrail is worse than one that is plainly broken.
+	// The control plane refuses to store one, so this row was written by
+	// something else. A guardrail that passes everything is worse than one that
+	// is plainly broken.
 	_, _, err := runPattern(compileRules(nil), []string{"anything"})
 	if err == nil {
 		t.Fatal("a pattern filter with no rules must not pass the request")
@@ -174,9 +173,8 @@ func TestPatternCacheRecompilesWhenTheFilterIsWritten(t *testing.T) {
 
 func TestCheckPatternNamesTheRuleThatTouchedTheCode(t *testing.T) {
 	// The third sample is ordinary source. A rule broad enough to match it
-	// will match a developer's real source on every request the guardrail
-	// covers, and the name of the rule is the difference between a warning
-	// somebody can act on and one they cannot.
+	// will match real source on every request, and naming the rule is what
+	// makes the warning something to act on.
 	s := &Server{}
 	f := patternFilter(policy.FilterRule{Pattern: `\bint\b`, Replace: "[NUMBER]"})
 	p := s.checkPattern(f, FilterProbe{Alias: f.Alias, Mode: f.Mode})

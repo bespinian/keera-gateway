@@ -1,9 +1,5 @@
-// The sign-in screen. Single sign-on when an identity provider is configured,
-// and the operator key when it is not - which is how a deployment is set up
-// before its identity provider exists. Where both work, single sign-on is the
-// screen and the operator key is a link under it: it is for setting the
-// deployment up and for one-off operator tasks, not for the people signing in
-// every day.
+// The sign-in screen: single sign-on when an identity provider is configured,
+// and the operator key when not, which is how a new deployment is set up.
 
 import { api, ApiError } from "../api.js";
 import { getPasskey, passkeysSupported } from "../webauthn.js";
@@ -32,13 +28,12 @@ export async function signIn(root, onSignedIn) {
   try {
     config = await api.authConfig();
   } catch {
-    // Fall back to offering the operator key: it is the path that works when
-    // nothing else is configured, which includes "we cannot ask".
+    // Fall back to the operator key, which works when nothing else does.
   }
 
   const params = new URLSearchParams(location.search);
   const ssoError = params.get("sign_in_error");
-  // Where the person was going, kept through any way of signing in.
+  // Where the person was going.
   const next = params.get("next");
 
   const message = h("div");
@@ -106,8 +101,8 @@ export async function signIn(root, onSignedIn) {
     message,
   );
 
-  // focusKey is set when the screen ends up showing the key field, so that the
-  // cursor lands in it once the card is actually in the document.
+  // Set when the key field is shown, so the cursor lands in it once the card
+  // is in the document.
   let focusKey = false;
 
   const cliFlow = passkeySignInFlow();
@@ -173,17 +168,13 @@ export async function signIn(root, onSignedIn) {
       ),
     );
   } else if (config.sso) {
-    // The operator key is how a deployment is set up before its identity
-    // provider exists, and how an operator does the odd task afterwards. Once
-    // single sign-on works it is the wrong door for everyone who is not doing
-    // one of those two things, so it is off this screen entirely: an operator
-    // who needs it comes to ?operator_key=1, and nobody else is offered it.
+    // Once single sign-on works, the operator key is only for setup and the odd
+    // operator task, so it is offered only at ?operator_key=1.
     const operatorKey = params.get("operator_key") === "1";
     focusKey = operatorKey;
 
-    // Each directory is named: somebody with both a work Google account and a
-    // work Microsoft one cannot answer "single sign-on", and picking wrong
-    // lands them in a failed sign-in rather than a different button.
+    // Each directory is named: someone with both a Google and a Microsoft
+    // account cannot answer "single sign-on".
     const providers = config.providers || [];
     const signUpWith = providers.find((p) => p.signup);
 
@@ -195,11 +186,8 @@ export async function signIn(root, onSignedIn) {
           h(
             "a",
             {
-              // The first is the primary button and the rest are plain. It is
-              // not a ranking of directories - there is no way to know which
-              // one a given reader belongs to - but a stack of identical
-              // primary buttons reads as a choice that matters more than this
-              // one does.
+              // Only the first is primary. It is no ranking, but a stack of
+              // primary buttons looks like a weightier choice than it is.
               class: "btn" + (i === 0 ? " btn-primary" : ""),
               style: { width: "100%", justifyContent: "center" },
               href: api.loginURL({ provider: p.name, next }),
@@ -213,9 +201,8 @@ export async function signIn(root, onSignedIn) {
       h(
         "div",
         { class: "signin-note" },
-        // Deliberately not "ask to be put in the right group": on a deployment
-        // whose roles are assigned in Keera there is no group to be put in, and
-        // on Google Workspace there could not be one.
+        // Not "ask to be put in the right group": where roles are assigned in
+        // Keera, or on Google Workspace, there is no such group.
         (config.passkeys
           ? "Sign in with your identity provider or a passkey. "
           : "Sign in with your identity provider. ") +
@@ -230,8 +217,8 @@ export async function signIn(root, onSignedIn) {
         : []),
     );
   } else if (config.passkeys) {
-    // No directory, so the operator key stays on the screen: a passkey
-    // account is never an operator, so this is the only way to be one.
+    // No directory, so the operator key stays: a passkey account is never an
+    // operator.
     card.append(
       h("div", { class: "signin-providers" }, passkeyButton(true)),
       h(

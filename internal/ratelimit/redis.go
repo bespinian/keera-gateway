@@ -353,9 +353,9 @@ func (r *Redis) extrapolate(key string, perMinute int, now time.Time) (float64, 
 }
 
 // degrade records that an admission or charge was made locally because Redis
-// could not answer it. The gateway keeps serving: Redis is optional coordination, and
-// the exact control is the budget in Postgres. The log says the limits are per
-// replica until Redis is back.
+// could not answer it. The gateway keeps serving: Redis is optional
+// coordination, and the exact control is the budget in Postgres. The log says
+// the limits are per replica until Redis is back.
 func (r *Redis) degrade(doing string, err error) {
 	if r.report != nil {
 		r.report.RateLimitFallback()

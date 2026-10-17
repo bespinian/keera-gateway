@@ -309,7 +309,6 @@ func reload[T any](ctx context.Context, into *atomic.Pointer[map[string]map[stri
 	return nil
 }
 
-// find looks one thing up in an index reload built.
 func find[T any](index *atomic.Pointer[map[string]map[string]T], orgID, alias string) (T, bool) {
 	v, ok := (*index.Load())[orgID][alias]
 	return v, ok

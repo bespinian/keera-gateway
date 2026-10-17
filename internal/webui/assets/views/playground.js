@@ -1,10 +1,6 @@
-// The playground: a conversation with one model.
-//
-// The first question anyone asks of a new gateway is whether the models behind
-// it actually answer, and the honest way to find out is to ask one. Messages
-// are sent with one of the reader's own keys, through the same data plane an
-// editor uses. They meet that key's guardrails, come out of its budgets and
-// show in its usage.
+// The playground: a conversation with one model, to check the models answer.
+// Messages go out with one of the reader's own keys, through the same data
+// plane an editor uses, so they meet that key's guardrails, budgets and usage.
 
 import { api, ApiError, chatTargets } from "../api.js";
 import {
@@ -24,10 +20,9 @@ import {
 } from "../ui.js";
 import { keyModels, noKey, noModel, usableKeys } from "./connect.js";
 
-/** session outlives a route change, so stepping over to Usage to look at what a
- *  message cost and stepping back does not throw the conversation away. It does
- *  not outlive a reload: a scratchpad that comes back from the dead days later
- *  is a surprise, not a feature. */
+/** session outlives a route change, so a look at Usage does not lose the
+ *  conversation. It does not outlive a reload on purpose: a chat that comes
+ *  back days later is a surprise. */
 const session = {
   keyID: "",
   model: "",
@@ -38,18 +33,15 @@ const session = {
 };
 
 export async function playgroundView(ctx) {
-  // Only the reader's own keys: a message spends a key's budget, so it has to
-  // be one they may spend.
+  // Only the reader's own keys, because a message spends the key's budget.
   const a = await api.access();
   const keys = usableKeys(a);
   if (!keys.length) return noKey(ctx, a);
   if (!keys.some((k) => k.id === session.keyID)) session.keyID = keys[0].id;
   const key = keys.find((k) => k.id === session.keyID);
 
-  // Routers are offered where the chat models are: this is the one screen in
-  // the panel where somebody can type a prompt and see which model a router
-  // sent it to. Only what the key may call is offered, so the picker cannot
-  // offer a model that only ever answers 404.
+  // Routers are offered too: this is the one screen that shows which model a
+  // router picks. Only what the key may call is offered, so nothing answers 404.
   const models = keyModels(await chatTargets(key.org_id), key.allowed_models);
   if (!models.length) {
     return h(
@@ -65,8 +57,8 @@ export async function playgroundView(ctx) {
   return chat(ctx, keys, key, models);
 }
 
-/** keyPicker chooses the key messages are sent with. Changing it redraws the
- *  screen, because the models on offer depend on it. */
+/** Changing the key redraws the screen, because the models on offer depend
+ *  on it. */
 function keyPicker(ctx, keys, onChange) {
   const el = h(
     "select",
@@ -131,8 +123,7 @@ function chat(ctx, keys, key, models) {
     "aria-label": "Message",
     onInput: () => autosize(input),
     onKeyDown: (e) => {
-      // Enter sends and shift-Enter breaks the line, which is what every chat
-      // client does and therefore what fingers already expect.
+      // Enter sends and shift-Enter breaks the line, as in every chat client.
       if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
         submit();
@@ -309,9 +300,8 @@ function chat(ctx, keys, key, models) {
 
   /* ---------------------------------------------------------- rendering */
 
-  // pinned tracks whether the reader is at the bottom. Dragging a stream's
-  // scrollbar upward to reread something and having it yanked back down on the
-  // next token is the single most irritating thing a chat view can do.
+  // pinned tracks whether the reader is at the bottom, so a reader who
+  // scrolled up to reread is not pulled back down on the next token.
   let pinned = true;
   scroll.addEventListener("scroll", () => {
     pinned = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 40;
@@ -392,11 +382,9 @@ function chat(ctx, keys, key, models) {
     input.disabled = true;
     attachBtn.disabled = true;
 
-    // While tokens arrive the message is redrawn as plain text on an animation
-    // frame rather than per chunk: a fast model emits a chunk per token, and
-    // rebuilding the DOM that often is how a stream turns into a stutter. Only
-    // the two moments that change the message's shape - the first token, and
-    // the first sign of reasoning - cost a rebuild.
+    // While tokens arrive the message is redrawn as plain text once per
+    // animation frame, not per chunk, or a fast model makes the stream stutter.
+    // Only the first token and the first reasoning cost a full rebuild.
     let node = thread.lastElementChild;
     let shape = { waiting: true, reasoning: false };
     let queued = false;
@@ -452,9 +440,8 @@ function chat(ctx, keys, key, models) {
       else
         reply.error =
           (err && err.message) || "The response ended unexpectedly.";
-      // A refused turn never reached the model, so it drops out of the history
-      // rather than leaving a question with no answer behind it - two user
-      // turns in a row is something a chat template is entitled to reject.
+      // A refused turn never reached the model, so it drops out of the history:
+      // a chat template may reject two user turns in a row.
       if (reply.error) ask.unsent = true;
     } finally {
       reply.streaming = false;
@@ -476,8 +463,8 @@ function chat(ctx, keys, key, models) {
       model,
       messages,
       stream: true,
-      // Asking for the usage record explicitly is what makes the gateway pass
-      // it through rather than swallow the chunk it added for its own billing.
+      // Without asking, the gateway swallows the usage chunk it added for its
+      // own billing.
       stream_options: { include_usage: true },
     };
     const temp = parseFloat(session.temperature);
@@ -494,9 +481,8 @@ function chat(ctx, keys, key, models) {
 
 function subtitle(model) {
   if (!model) return "";
-  // A router has no backend model and no context window of its own: which
-  // model answers is not decided until the message has been read, so what is
-  // worth saying is that it will be decided at all.
+  // A router has no model or context window of its own: it picks one only
+  // once it has read the message.
   if (model.router) {
     return "A router: it picks the model";
   }
@@ -506,16 +492,16 @@ function subtitle(model) {
   return bits.filter(Boolean).join(" · ");
 }
 
-/** wireMessages is the conversation as the inference plane should see it:
- *  turns that carry text or images, and nothing that failed. */
+/** wireMessages keeps the turns that carry text or images, and drops any
+ *  that failed. */
 function wireMessages(messages) {
   return messages
     .filter((m) => !m.error && !m.unsent && (m.content || m.images?.length))
     .map((m) => ({ role: m.role, content: wireContent(m.content, m.images) }));
 }
 
-/** wireContent is a turn's content: a plain string, or the OpenAI parts form
- *  when it carries images, which only models that read images accept. */
+/** wireContent uses the OpenAI parts form only for turns with images, which
+ *  only models that read images accept. */
 function wireContent(text, images) {
   if (!images || !images.length) return text;
   const parts = images.map((url) => ({
@@ -531,12 +517,10 @@ function wireContent(text, images) {
 // The formats every API that reads images accepts.
 const imageTypes = "image/png,image/jpeg,image/gif,image/webp";
 
-// Providers scale a larger image down to about this size anyway. Sending more
-// only makes the request bigger, and every image is sent again with each
-// later message of the conversation.
+// Providers scale larger images down to about this size anyway, and every
+// image is sent again with each later message.
 const maxImageSide = 2048;
 
-/** readImage reads a file as a data URL, scaled down to maxImageSide. */
 async function readImage(file) {
   const url = await new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -564,7 +548,6 @@ async function readImage(file) {
 
 /* ------------------------------------------------------------- transport */
 
-/** events yields one decoded chunk per server-sent event. */
 async function* events(stream) {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
@@ -584,8 +567,7 @@ async function* events(stream) {
         try {
           yield JSON.parse(payload);
         } catch {
-          // A chunk that is not JSON is not something to show a person; the
-          // stream carries on and the message stands on what did parse.
+          // A chunk that is not JSON is skipped; the stream carries on.
         }
       }
     }
@@ -716,8 +698,8 @@ function messageEl(msg, ctx, byAlias) {
   );
 }
 
-/** reasoningEl shows a model's thinking, folded away. It is worth having -
- *  a reasoning model that produces nothing else looks broken without it. */
+/** reasoningEl shows a model's thinking, folded away. Without it, a model
+ *  that only reasons looks broken. */
 function reasoningEl(msg) {
   const el = h(
     "details",
@@ -731,10 +713,8 @@ function reasoningEl(msg) {
 function footer(msg, ctx, byAlias) {
   const bits = [];
   if (msg.usage) {
-    // Read off the response body the browser got back from /api/v1/chat/completions
-    // rather than out of a Keera report, so these are the OpenAI field names and
-    // not the input/output the rest of the dashboard reads. The playground is
-    // the one screen whose numbers come straight off the wire.
+    // Read straight off the chat completions response, not a Keera report, so
+    // these are OpenAI field names rather than input/output.
     bits.push(
       `${num(msg.usage.prompt_tokens)} in`,
       `${num(msg.usage.completion_tokens)} out`,
@@ -777,9 +757,8 @@ function footer(msg, ctx, byAlias) {
   return h("div", { class: "msg-foot" }, bits.join(" · "));
 }
 
-/** prose renders a reply. Fenced blocks become code and everything else stays
- *  as typed - every node is built from text, so nothing a model generates is
- *  ever handed to the browser as markup. */
+/** prose renders a reply: fenced blocks become code, the rest stays as typed.
+ *  Every node is built from text, so model output is never parsed as markup. */
 function prose(text) {
   const out = [];
   const parts = String(text).split(/\n?```/);

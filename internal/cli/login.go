@@ -19,11 +19,11 @@ import (
 
 // Signing in at a terminal.
 //
-// KEERA_OPERATOR_KEY is shared, never expires and can do everything, and the
-// audit log cannot say who used it. `keera login` signs a person in through
-// the deployment's identity provider or a passkey instead, and stores a
-// credential that is theirs, carries their role and expires. The operator key stays for
-// automation and for setting up a new deployment.
+// KEERA_OPERATOR_KEY is shared, never expires, can do everything, and the
+// audit log cannot say who used it. `keera login` instead signs a person in
+// through the identity provider or a passkey and stores a credential of their
+// own, with their role and an expiry. The operator key stays for automation
+// and for setting up a new deployment.
 //
 // The flow is RFC 8252's loopback redirect; cliauth.go on the gateway is the
 // other half.

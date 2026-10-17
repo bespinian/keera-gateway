@@ -8,18 +8,16 @@ import (
 	"github.com/bespinian/keera-gateway/internal/auth"
 )
 
-// The two sides of the handshake compute the challenge independently - the
-// command line to publish it, the gateway to check the verifier that redeems the
-// code - so they have to agree, and it has to be the S256 the rest of the flow
-// uses rather than anything resembling it.
+// Both sides compute the challenge on their own - the command line to publish
+// it, the gateway to check the verifier - so they must agree, and on real S256.
 func TestTheProofKeyIsTheSameOnBothSides(t *testing.T) {
 	verifier := NewCLIVerifier()
 	challenge := CLIChallenge(verifier)
 	if CLIChallenge(verifier) != challenge {
 		t.Error("the same verifier produced two challenges")
 	}
-	// 32 bytes, base64url, unpadded - the shape the control plane checks for
-	// before it sends anybody to a browser.
+	// 32 bytes, unpadded base64url: the shape the control plane checks before
+	// it sends anybody to a browser.
 	if len(challenge) != 43 {
 		t.Errorf("challenge = %q (%d characters), want 43", challenge, len(challenge))
 	}
@@ -33,9 +31,8 @@ func TestTheProofKeyIsTheSameOnBothSides(t *testing.T) {
 	}
 }
 
-// A credential that leaks into a log, a bug report or a repository should be
-// recognisable as one at a glance - and as this one rather than as an API key,
-// which admits its holder to something else entirely.
+// A leaked credential should be recognisable at a glance, and as this one
+// rather than an API key, which admits its holder to something else.
 func TestACommandLineTokenSaysWhatItIs(t *testing.T) {
 	token, hash := NewCLIToken()
 	if !strings.HasPrefix(token, CLITokenPrefix) {
@@ -54,8 +51,8 @@ func TestACommandLineTokenSaysWhatItIs(t *testing.T) {
 	}
 }
 
-// The code is short-lived and single-use, but it still crosses a URL, so it is
-// stored the way every other credential here is: as a hash, never as itself.
+// The code is short-lived and single-use, but it crosses a URL, so it is stored
+// as a hash like every other credential here.
 func TestAOneTimeCodeIsStoredAsAHash(t *testing.T) {
 	code, hash := NewCLICode()
 	if string(auth.Hash(code)) != string(hash) {

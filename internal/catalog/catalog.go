@@ -1,9 +1,8 @@
 // Package catalog reads the template files, and knows the hosted providers a
 // model can name.
 //
-// The model file is a template: every new organisation starts with a copy of each
-// model it declares. The copies are the organisation's own, to change or
-// remove like any model it adds itself.
+// The model file is a template: every new organisation starts with a copy of
+// each model it declares, which it may then change or remove like its own.
 package catalog
 
 import (
@@ -96,8 +95,6 @@ func load[T any](path string, parse func([]byte) ([]T, error)) ([]T, error) {
 	return entries, nil
 }
 
-// parseModelFile reads and validates a model template file, and returns its
-// models.
 func parseModelFile(raw []byte) ([]policy.Model, error) {
 	var f file
 	if err := decodeStrict(raw, &f); err != nil {

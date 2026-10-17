@@ -255,9 +255,8 @@ func TestAFilterReportPlotsEveryBucketInTheWindow(t *testing.T) {
 	now := time.Date(2026, 9, 7, 13, 0, 0, 0, time.UTC)
 	filterTraffic(t, st, ctx, f, now)
 
-	// Six hours of a window in which one hour has traffic. A filter that
-	// stopped running is the thing being looked for, and a chart drawn only
-	// from the buckets that have rows hides exactly that.
+	// Six hours, one of them with traffic. A chart drawn only from buckets
+	// with rows would hide a filter that stopped running.
 	rep, err := st.FilterReportFor(ctx, f.orgID, "redact",
 		now.Add(-5*time.Hour), now.Add(time.Hour))
 	if err != nil {
@@ -289,8 +288,8 @@ func TestAFiltersHistoryOutlivesTheFilter(t *testing.T) {
 	now := time.Date(2026, 9, 7, 13, 0, 0, 0, time.UTC)
 	filterTraffic(t, st, ctx, f, now)
 
-	// What was this doing before we removed it is a question asked after the
-	// removal, so the log is not a foreign key into the filters table.
+	// "What did it do before we removed it?" is asked after the removal, so the
+	// log has no foreign key into the filters table.
 	if _, err := st.UpsertFilter(ctx, policy.Filter{
 		OrgID: f.orgID, Alias: "redact", Model: "keera-guard", Prompt: "Redact.",
 	}); err != nil {
@@ -345,9 +344,8 @@ func TestAFilterRemembersWhetherItEnforces(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
 
-	// A filter written without saying enforces, which is what every filter did
-	// before shadow existed: the default cannot be the one that quietly stops
-	// guarding anything.
+	// A filter written without saying enforces, as every filter did before
+	// shadow existed. The default must not quietly stop guarding.
 	saved, err := st.UpsertFilter(ctx, policy.Filter{
 		OrgID: f.orgID, Alias: "redact", Model: "keera-guard", Prompt: "Redact.",
 	})
@@ -400,9 +398,8 @@ func TestRetentionTakesTheFilterLogWithIt(t *testing.T) {
 		t.Fatalf("WriteEvents: %v", err)
 	}
 
-	// A deployment that kept ninety days of requests and forever of what its
-	// filters did to them would be keeping the larger table for the longer
-	// time, to answer questions about requests it can no longer see.
+	// Filter runs go with their requests. Kept longer, the larger table would
+	// answer questions about requests that are gone.
 	if _, err := st.PurgeUsage(ctx, time.Now().Add(-30*24*time.Hour)); err != nil {
 		t.Fatalf("PurgeUsage: %v", err)
 	}

@@ -1,6 +1,6 @@
 // Package gateway is Keera Gateway's inference data plane: it authenticates a
-// request, enforces the guardrails attached to the key that made it, forwards it to
-// the inference plane, and accounts for what it cost.
+// request, enforces the guardrails of its key, forwards it to the inference
+// plane, and accounts for what it cost.
 package gateway
 
 import (
@@ -125,7 +125,7 @@ type Server struct {
 	sink    Sink
 	metrics *metrics.Registry
 	client  *http.Client
-	// publicClient is client for an organisation that signed itself up and
+	// publicClient is the client for an organisation that signed itself up and
 	// has not paid yet: it also refuses private addresses, so such an
 	// organisation cannot reach the deployment's own network, even through a
 	// public name that resolves into it.
@@ -153,7 +153,6 @@ type Server struct {
 	noLogprobs sync.Map // model key -> struct{}
 }
 
-// New builds a gateway.
 func New(src policy.Source, budgets Budgeter, limiter Limiter, sink Sink,
 	m *metrics.Registry, opts Options, log *slog.Logger) *Server {
 	opts.setDefaults()
@@ -217,7 +216,6 @@ func (s *Server) modelClient(m policy.Model) *http.Client {
 	return s.clientFor(m.Limited)
 }
 
-// clientFor is the client for a request of an organisation, limited or not.
 func (s *Server) clientFor(limited bool) *http.Client {
 	if limited {
 		return s.publicClient

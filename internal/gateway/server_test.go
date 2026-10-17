@@ -208,7 +208,7 @@ type harness struct {
 	budgets *fakeBudgets
 	sink    *fakeSink
 	metrics *metrics.Registry
-	// upstream records what the inference plane actually received.
+	// upstreamBodies is what the inference plane received.
 	upstreamBodies chan []byte
 	upstreamAuth   chan string
 	// srv is the gateway behind gw, for the tests that have to reach past the
@@ -295,11 +295,9 @@ func (h *harness) server() *Server {
 		slog.New(slog.DiscardHandler))
 }
 
-// url is the test listener's address for one inference route. A client is
-// given the gateway's origin plus httpx.InferencePrefix as its base URL and
-// appends the path itself, so the tests below name the path a client names and
-// this puts the prefix on - including for /api/hello, where the doubled
-// segment is what an Anthropic-shaped client actually sends.
+// url is the test listener's address for one inference route. Tests name the
+// path a client appends to its base URL, and this adds httpx.InferencePrefix.
+// For /api/hello the doubled segment is what an Anthropic-shaped client sends.
 func (h *harness) url(path string) string {
 	return h.gw.URL + httpx.InferencePrefix + path
 }
@@ -1361,10 +1359,9 @@ func TestAnOverLongAliasIsRefusedWithoutBeingRecordedOrQuoted(t *testing.T) {
 }
 
 func TestUnknownModelsShareOneMetricLabel(t *testing.T) {
-	// A metric label lives as long as the process - nothing sweeps the
-	// exposition the way the key cache and the rate-limit buckets are swept -
-	// so a label taken from 'model' would let any key with no rate limit grow
-	// the registry until the process died.
+	// A metric label lives as long as the process, so a label taken from
+	// 'model' would let any key with no rate limit grow the registry until the
+	// process died.
 	h := newHarness(t, jsonBackend(`{}`), nil, nil)
 
 	for _, alias := range []string{"nope-1", "nope-2", "nope-3"} {
@@ -1603,10 +1600,9 @@ func TestOverheadIsRecordedForAServedRequest(t *testing.T) {
 	}
 }
 
-// A refusal never reached the inference plane, so there is no upstream call for
-// its overhead to be overhead of - its whole latency is already on its usage
-// row. Counting it here would mix "the gateway is slow" with "the gateway said
-// no quickly", and the second is the larger population.
+// A refusal never reached the inference plane, and its whole latency is on its
+// usage row. Counting it here would mix "the gateway is slow" with "the
+// gateway said no quickly", and the second is far more common.
 func TestOverheadIsNotRecordedForARefusal(t *testing.T) {
 	h := newHarness(t, jsonBackend(`{}`), nil, nil)
 

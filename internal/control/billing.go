@@ -12,7 +12,6 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// billingTotal is the whole bill.
 type billingTotal struct {
 	Calls  int64 `json:"calls"`
 	Micros int64 `json:"micros"`

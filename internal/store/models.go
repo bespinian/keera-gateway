@@ -38,17 +38,14 @@ func scanModel(r row) (policy.Model, error) {
 	return m, nil
 }
 
-// LoadModels reads every organisation's models.
 func (s *Store) LoadModels(ctx context.Context) ([]policy.Model, error) {
 	return queryAll(ctx, s.pool, scanModel, modelColumns+" FROM models ORDER BY org_id, alias")
 }
 
-// ListModels reads one organisation's models.
 func (s *Store) ListModels(ctx context.Context, orgID string) ([]policy.Model, error) {
 	return queryAll(ctx, s.pool, scanModel, modelColumns+" FROM models WHERE org_id = $1 ORDER BY alias", orgID)
 }
 
-// Model reads one of an organisation's models, or ErrNotFound.
 func (s *Store) Model(ctx context.Context, orgID, alias string) (policy.Model, error) {
 	m, err := scanModel(s.pool.QueryRow(ctx,
 		modelColumns+" FROM models WHERE org_id = $1 AND alias = $2", orgID, alias))

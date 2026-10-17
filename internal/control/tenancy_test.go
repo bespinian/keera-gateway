@@ -14,17 +14,11 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// Who may do what, checked at the handler rather than at the predicate.
+// Who may do what, checked at the handler. authn tests the predicates; these
+// test that each handler actually asks.
 //
-// The predicates in authn are covered exhaustively by that package's own tests,
-// so what is left - and what these are about - is whether each handler actually
-// asks. A handler that forgot to call CanAdminOrg is not a failing unit test
-// anywhere: it is a passing one in authn, a green build, and an administrator of
-// one customer reading another customer's projects.
-//
-// Every case here refuses before the store is reached, which is why a nil store
-// does not panic. That is itself worth pinning: an authorization check that runs
-// after the read has already done the read.
+// Every case refuses before the store is reached, so a nil store does not
+// panic. A check that runs after the read has already done the read.
 
 // Two people who are not operators, in one organisation. Between them they are
 // every caller who has to be kept inside their own tenant.
@@ -62,10 +56,8 @@ func invoke(h handler, p *authn.Principal, method, target, body string) *httptes
 	return w
 }
 
-// Reading across tenants is the failure that does not announce itself: nothing
-// errors, a screen simply has somebody else's rows on it. Every list route
-// resolves the organisation through one function, and this is what says that
-// none of them skipped it.
+// Reading across tenants fails silently: a screen just shows somebody else's
+// rows. Every list route must resolve the organisation through one function.
 func TestNoListRouteCanBePointedAtAnotherOrganisation(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 
@@ -93,9 +85,8 @@ func TestNoListRouteCanBePointedAtAnotherOrganisation(t *testing.T) {
 	}
 }
 
-// Naming your own organisation is not the same request as naming somebody
-// else's, and only one of them is refused. Without this the test above would
-// pass on a handler that refused every org_id it was given.
+// Naming your own organisation is not refused. Without this, the test above
+// would pass on a handler that refused every org_id.
 func TestNamingYourOwnOrganisationIsNotRefused(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	w := httptest.NewRecorder()
@@ -109,7 +100,7 @@ func TestNamingYourOwnOrganisationIsNotRefused(t *testing.T) {
 		t.Errorf("scoped to %q, want org_mine", got)
 	}
 
-	// And leaving it off gets you your own, rather than everybody's.
+	// Leaving it off gets your own, not everybody's.
 	got, ok = s.scopeOrg(httptest.NewRecorder(), p, "")
 	if !ok || got != "org_mine" {
 		t.Errorf("scopeOrg(\"\") = %q, %v; want the caller's own organisation", got, ok)
@@ -117,9 +108,8 @@ func TestNamingYourOwnOrganisationIsNotRefused(t *testing.T) {
 }
 
 // An organisation's email domain decides which tenant a sign-in lands in, so
-// setting one is how a customer would be handed somebody else's people. It is
-// operator-only for that reason, and an organisation's own administrator is
-// exactly the caller who must not reach it.
+// an administrator setting it could take somebody else's people. Only an
+// operator may.
 func TestOnlyAnOperatorCanChangeAnOrganisationsIdentityMapping(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 
@@ -161,9 +151,8 @@ func TestCreatingAProjectNeedsAnAdministratorOfThatOrganisation(t *testing.T) {
 		}
 	})
 
-	// An administrator of the wrong one is refused earlier, by the scope check,
-	// and the distinction matters: the answer must not depend on the caller
-	// happening to be an administrator somewhere.
+	// An administrator of another one is refused earlier, by the scope check,
+	// so the answer does not depend on being an administrator somewhere.
 	t.Run("an administrator of another organisation", func(t *testing.T) {
 		w := invoke(s.createProject, admin("org_mine"), http.MethodPost, "/v1/projects",
 			`{"org_id":"org_other","name":"Theirs"}`)
@@ -173,10 +162,9 @@ func TestCreatingAProjectNeedsAnAdministratorOfThatOrganisation(t *testing.T) {
 	})
 }
 
-// Changing and deleting a project name the project in the path and nothing else, so
-// the organisation they belong to comes from the row rather than from the
-// request. A caller who administers no organisation is still refused without
-// the read - a nil store here is what says so.
+// Changing and deleting a project name only the project, so its organisation
+// comes from the row. A caller who administers no organisation is refused
+// before the read (the store is nil).
 func TestChangingAProjectNeedsAnAdministrator(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 
@@ -201,9 +189,8 @@ func TestChangingAProjectNeedsAnAdministrator(t *testing.T) {
 	}
 }
 
-// An empty name is a mistake, not a request to clear it - a project with no
-// name is a row nobody can identify on any screen. A change with nothing in
-// it is a mistake too.
+// An empty name is a mistake, not a request to clear it: nobody could tell the
+// project apart. A change with nothing in it is a mistake too.
 func TestChangingAProjectRequiresAName(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	for _, body := range []string{`{"name":""}`, `{"name":"   "}`, `{}`} {
@@ -227,11 +214,8 @@ func TestAnUnscopedCallerMustNameTheOrganisation(t *testing.T) {
 	}
 }
 
-// A session that belongs to no organisation - which is what a person whose
-// tenant was deleted underneath them has - must read nothing rather than
-// everything. The check is "is this caller unrestricted", and an account with an
-// empty org id is not the same thing as an operator even though both have no
-// organisation of their own.
+// A session with no organisation (its tenant was deleted) must read nothing,
+// not everything. An empty org id does not make an account an operator.
 func TestAnAccountAttachedToNoOrganisationReadsNothing(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	orphan := &authn.Principal{
@@ -271,9 +255,8 @@ func TestAnOrganisationsDomainIsCleanedByTheControlPlane(t *testing.T) {
 	}
 }
 
-// Deleting a tenant takes its people and its keys with it. An organisation's
-// own administrator must not be able to reach it, however much else inside that
-// organisation they own.
+// Deleting a tenant takes its people and keys with it, so its own
+// administrator may not.
 func TestDeleteOrgIsOperatorOnly(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 
@@ -288,11 +271,9 @@ func TestDeleteOrgIsOperatorOnly(t *testing.T) {
 	}
 }
 
-// An operator signed in through the panel has a user row and a session inside
-// some organisation. Deleting that one would cascade over both, signing them out
-// mid-request and possibly removing the last operator in the deployment, so the
-// handler refuses before it reaches the store - which is why a nil store here
-// does not panic.
+// An operator signed in through the panel has a user row in some
+// organisation. Deleting it would sign them out mid-request and could remove
+// the last operator, so it is refused before the store (which is nil).
 func TestOperatorCannotDeleteTheirOwnOrg(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	signedIn := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleOperator, OrgID: "org_1"}
@@ -306,10 +287,9 @@ func TestOperatorCannotDeleteTheirOwnOrg(t *testing.T) {
 	}
 }
 
-// Two organisations cannot share a name or a domain. Hitting either is an
-// ordinary mistake, and the generic failure path would answer it with
-// "internal error" and a request id, which names neither what was wrong nor
-// what to change.
+// Two organisations cannot share a name or a domain. That is an ordinary
+// mistake, so it gets a conflict that says what to change, not an internal
+// error.
 func TestATakenNameOrDomainIsAConflict(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	for _, c := range []struct {
@@ -332,12 +312,10 @@ func TestATakenNameOrDomainIsAConflict(t *testing.T) {
 	}
 }
 
-// Only an administrator issues keys, so every key has the project and guardrails
-// one chose for it. A member's own key would have only the organisation's, and
-// step around their project's. They rotate the key they were given instead.
-//
-// The refusal happens before the store is touched, which is why a nil store
-// here does not panic.
+// Only an administrator issues keys, so every key has the project and
+// guardrails one chose. A member's own key would step around their project's.
+// They rotate the key they were given instead. The store is nil: the refusal
+// comes first.
 func TestMemberCannotIssueAKey(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 
@@ -369,11 +347,9 @@ func TestKeysCannotBeIssuedIntoAnotherOrganisation(t *testing.T) {
 	}
 }
 
-// The operator role crosses organisations and owns the model catalogue, so it
-// comes from KEERA_OPERATORS or an operator group - configuration a customer
-// does not hold. No caller grants it through the API, an operator included:
-// otherwise the answer to "who are the operators of this deployment" would be a
-// database query rather than the environment.
+// The operator role crosses organisations, so it comes only from
+// KEERA_OPERATORS or an operator group, which a customer does not control. No
+// caller grants it through the API, an operator included.
 func TestOperatorRoleCannotBeGrantedThroughTheAPI(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 
@@ -387,9 +363,8 @@ func TestOperatorRoleCannotBeGrantedThroughTheAPI(t *testing.T) {
 			t.Errorf("body = %q, want it to name what does grant it", w.Body.String())
 		}
 	})
-	// The store is nil, so this also pins that the refusal comes before the row
-	// is read: whether a role can be granted at all is a property of the
-	// deployment, not of who is being changed.
+	// The store is nil: the refusal comes before the row is read, because it
+	// does not depend on who is being changed.
 	t.Run("set role", func(t *testing.T) {
 		w := invoke(s.updateUser, operator(), http.MethodPatch, "/v1/users/user_1", `{"role":"operator"}`)
 		if w.Code != http.StatusForbidden {
@@ -401,10 +376,9 @@ func TestOperatorRoleCannotBeGrantedThroughTheAPI(t *testing.T) {
 	})
 }
 
-// A subject decides whose sign-in becomes a person. An organisation's own
-// administrator could name somebody from another tenant's directory and pull
-// their first sign-in into this one, so only an operator may set it. The store
-// is nil, so this also pins that the refusal comes before the row is written.
+// A subject decides whose sign-in becomes a person. An administrator could
+// name somebody from another tenant's directory and pull them in, so only an
+// operator may set it. The store is nil: the refusal comes first.
 func TestOnlyAnOperatorLinksAPersonToASubject(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	w := invoke(s.addUser, admin("org_1"), http.MethodPost, "/v1/users",

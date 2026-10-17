@@ -220,10 +220,9 @@ func TestOrgLookupsForASignIn(t *testing.T) {
 	if err := setDomain("nobody", "x.ch"); err != ErrNotFound {
 		t.Errorf("setting a domain on a missing org gave %v, want ErrNotFound", err)
 	}
-	// One domain places sign-ins in one tenant, so the second claim on it is
-	// refused - and told apart from a driver failure, because the operator who
-	// typed it against the wrong organisation is the one who has to hear which
-	// it is.
+	// One domain places sign-ins in one tenant, so a second claim is refused,
+	// with its own error rather than a driver failure, so the operator who
+	// typed it hears which it is.
 	if err := setDomain("org_1", "shared.ch"); err != nil {
 		t.Fatalf("UpdateOrg: %v", err)
 	}
@@ -236,13 +235,10 @@ func TestOrgLookupsForASignIn(t *testing.T) {
 	}
 }
 
-// The one that matters once a deployment has more than one identity provider.
-//
-// Matching on email is what adopts a row an administrator typed in. Left
-// unqualified it would also let a second directory take over a person the first
-// directory already vouched for - and with them, whatever role that person
-// holds. Anyone who can get an address past the weaker of two directories would
-// inherit the account it names in the stronger one.
+// Matching on email adopts a row an administrator typed in. Unqualified, it
+// would also let a second identity provider take over a person the first
+// already vouched for, with their role: an address got past the weaker
+// directory would take the account in the stronger one.
 func TestLinkUserRefusesToTakeOverAnotherProvidersIdentity(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)

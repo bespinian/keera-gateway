@@ -1,5 +1,3 @@
-// The dashboard.
-
 import { api } from "../api.js";
 import {
   h,
@@ -30,10 +28,8 @@ import { orgNameOf } from "./orgs.js";
 export async function dashboardView(ctx) {
   const since = currentRange();
 
-  // Before anything has traffic, a dashboard of zeroes is not the screen
-  // anybody needs. The checklist replaces it until the deployment is actually
-  // carrying requests and, with card payments, until the organisation has
-  // had credit.
+  // A dashboard of zeroes helps nobody. The checklist replaces it until there
+  // is traffic and, with card payments, until the organisation has had credit.
   if (isAdmin(ctx)) {
     const setup = await api.setup(ctx.orgID).catch(() => null);
     // The sidebar names this screen from the same counts, read when the panel
@@ -108,13 +104,7 @@ export async function dashboardView(ctx) {
       h("h2", {}, "Traffic"),
       h("div", { class: "spacer" }),
       o.failed > 0
-        ? // The count is where the question starts, so it is also the way to the
-          // answer: the failed rows on the request log, with the model, the key
-          // and what the backend said. The window it opens on is the one being
-          // read here, so nobody has to rebuild the filter they arrived with.
-          // Only for an administrator - a member's log holds only their own
-          // keys' requests, not the organisation's failures counted here.
-          failureLink(
+        ? failureLink(
             ctx,
             h("span", { class: "dot" }),
             `${num(o.failed)} failed (${failRate.toFixed(1)}%)`,
@@ -190,10 +180,8 @@ export async function dashboardView(ctx) {
     panels,
   );
 
-  // The dashboard is the window counted up, and it stops there. The window
-  // itself - one row per request - is a screen of its own, because a log is
-  // read by narrowing it half a dozen times over and a reader doing that under
-  // four charts is a reader scrolling past them on every pass.
+  // The log itself is a screen of its own: it is read by narrowing it many
+  // times, which is tiresome under four charts.
   if (o.requests === 0) {
     wrap.prepend(
       banner(
@@ -212,13 +200,11 @@ export async function dashboardView(ctx) {
   return wrap;
 }
 
-// failureLink is the failed count as the way in to the failures behind it: the
-// request log, opened on the failed rows rather than on all of them. A member
-// gets the same count as a plain pill: their log holds only their own keys'
-// requests, so a link would open on rows that do not add up to the count.
+// failureLink links the failed count to the failed rows of the request log,
+// over the same window. A member gets a plain pill: their log holds only their
+// own keys' requests, so it would not add up to the count.
 //
-// It is a real link rather than a button, so that it opens in a new tab like
-// anything else somebody wants to keep beside the dashboard.
+// A real link rather than a button, so it can open in a new tab.
 function failureLink(ctx, ...content) {
   if (!isAdmin(ctx)) {
     return h("span", { class: "pill pill-bad" }, ...content);

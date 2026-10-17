@@ -90,7 +90,6 @@ type responsesItem struct {
 	Output json.RawMessage `json:"output"`
 }
 
-// responsesPart is one part of a message's content.
 type responsesPart struct {
 	Type     string   `json:"type"`
 	Text     jsonText `json:"text"`
@@ -162,7 +161,6 @@ func responsesMessages(in responsesRequest) ([]chatMessage, error) {
 	return msgs, nil
 }
 
-// addItem appends one input item to the conversation.
 func addItem(msgs []chatMessage, it responsesItem) ([]chatMessage, error) {
 	switch it.Type {
 	case "", "message":

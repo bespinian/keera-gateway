@@ -88,9 +88,8 @@ func TestPutFilterWritesAPatternFilter(t *testing.T) {
 	if !saved.Rules[1].Refuse || saved.Rules[1].Reason == "" {
 		t.Errorf("rule 1 = %+v, want a refusal carrying its sentence", saved.Rules[1])
 	}
-	// The order is part of what the rules mean - a specific rule above a broad
-	// one is how the broad one gets narrowed - so it has to survive the round
-	// trip through the column.
+	// The order is part of what the rules mean: a specific rule above a broad
+	// one narrows it. So it has to survive the round trip.
 	if saved.Rules[0].Pattern != `(?i)\bsk-[a-z0-9]{16,}\b` {
 		t.Errorf("the rules came back in a different order: %+v", saved.Rules)
 	}
@@ -187,9 +186,8 @@ func TestPutFilterRefusesRulesOnAFilterThatReadsWithAModel(t *testing.T) {
 }
 
 func TestAPatternFilterIsNotStrandedByAnAllowList(t *testing.T) {
-	// It runs no model, so there is nothing for an allow-list to strand it
-	// outside of - and it is the one filter that could never carry a request
-	// anywhere, because its rules are applied in this process.
+	// It runs no model and its rules are applied in this process, so an
+	// allow-list has nothing to keep it from.
 	st, ctx := routerStore(t)
 	srv := routerServer(ctx, t, st)
 

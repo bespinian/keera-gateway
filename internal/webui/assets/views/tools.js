@@ -1,13 +1,11 @@
-// Tool calls: what an agent did through the MCP servers the gateway stands in
-// front of. Shared by a session's own screen and the MCP servers screen.
+// Tool calls an agent made through the gateway's MCP servers. Shared by a
+// session's screen and the MCP servers screen.
 //
-// Nothing about a call's content is kept, so a row says which tool, what came
-// of it, how long it took and how much went each way - which is enough to see
-// an agent looping on one tool, or sending four megabytes to a chat channel.
+// No call content is kept. Which tool, the outcome, the time and the bytes
+// each way are enough to spot an agent looping on one tool.
 
 import { h, table, pill, ms, bytes, dateTime, ago, capitalise } from "../ui.js";
 
-// OUTCOMES are the words a tool call ends in, and how each is drawn.
 const OUTCOMES = {
   ok: ["Answered", "good"],
   tool_error: ["Tool failed", "warn"],
@@ -26,7 +24,6 @@ function toolOutcome(outcome) {
   return pill(label, tone);
 }
 
-// toolCallTable lists tool calls, one row each.
 export function toolCallTable(rows, opts = {}) {
   return table(
     [

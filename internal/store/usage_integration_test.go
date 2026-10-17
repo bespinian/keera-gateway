@@ -86,12 +86,10 @@ func TestWriteEventsRollsUpSpendPerScope(t *testing.T) {
 	}
 }
 
-// One batch can hold events from either side of midnight - the recorder flushes
-// on a timer and does not know about the clock - and a day-period scope has a
-// separate window on each side of it. The roll-up is summed per window before it
-// is written, so this is what says the window is part of what it is summed by
-// and not just the scope: charge both days into one row and a budget would be
-// refusing traffic against yesterday's spend.
+// One batch can hold events from either side of midnight, since the recorder
+// flushes on a timer. A daily budget has a window on each side, so the roll-up
+// must sum by window, not just by scope. Otherwise a budget would refuse
+// traffic against yesterday's spend.
 func TestWriteEventsKeepsSpendWindowsApartWithinOneBatch(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -456,10 +454,8 @@ func TestProjectSummariesReadsTheOpenBudgetWindow(t *testing.T) {
 }
 
 // A summary carries the scope's system prompt, because both screens that read
-// one show it to somebody who is subject to it: a member reading what their
-// project puts ahead of every request they make, and an administrator seeing at a
-// glance which scopes say something at all. Leaving it out of the query made
-// every scope look as though it said nothing.
+// one show it. Leaving it out of the query made every scope look as though it
+// said nothing.
 func TestSummariesCarryTheSystemPrompt(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -515,9 +511,8 @@ func TestSummariesCarryTheSystemPrompt(t *testing.T) {
 	}
 }
 
-// The map's four readings of one window have to be four readings of one window:
-// what is on the boxes, what is on the arrows and what is under the whole
-// drawing must add up, or the picture is drawing an argument with itself.
+// The map's four readings of one window must add up: the boxes, the arrows and
+// the total.
 func TestFlowsCountsOneWindowFourWays(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -585,18 +580,16 @@ func TestFlowsCountsOneWindowFourWays(t *testing.T) {
 		t.Errorf("edges = %v, want the pairs the traffic actually ran between", edges)
 	}
 
-	// The median is the one number that cannot be added up from the others,
-	// which is why it is asked of the database at every level rather than
-	// summed here. keera-code's four timed requests are 0, 200, 300 and 400ms,
-	// and the zero is not a wait anybody had - it is a request that never
-	// streamed - so the median of what is left is 300.
+	// A median cannot be added up from its parts, so the database computes it
+	// at every level. keera-code's timed requests are 0, 200, 300 and 400ms.
+	// The zero is a request that never streamed, so the median of the rest is
+	// 300.
 	if got := rep.Models["keera-code"].TTFTMedianMS; got != 300 {
 		t.Errorf("keera-code's median first token = %dms, want 300", got)
 	}
 }
 
-// Every window has a shape, including the empty one - and a map that cannot
-// draw an empty deployment is a map nobody sees on their first morning.
+// An empty window still has a shape, so a new deployment's map can be drawn.
 func TestFlowsOverAnEmptyWindow(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)

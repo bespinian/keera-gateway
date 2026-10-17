@@ -122,7 +122,6 @@ func (s orgsSetup) me(t *testing.T, session *http.Cookie) (whoAmI, int) {
 	return me, status
 }
 
-// do sends one request as a session, and decodes a 200 into out.
 func (s orgsSetup) do(t *testing.T, method, path, body string, session *http.Cookie, csrf string,
 	out any) (int, []*http.Cookie) {
 	t.Helper()

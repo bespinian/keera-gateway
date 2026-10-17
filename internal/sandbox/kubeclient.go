@@ -31,7 +31,6 @@ const serviceAccountDir = "/var/run/secrets/kubernetes.io/serviceaccount"
 // hour.
 const tokenRefresh = 5 * time.Minute
 
-// kubeClient talks to the Kubernetes API server.
 type kubeClient struct {
 	base string
 	http *http.Client
@@ -95,7 +94,6 @@ func newKubeClient(cfg KubeConfig) (*kubeClient, error) {
 	return c, nil
 }
 
-// kubeTLS is the TLS configuration for the API server.
 func kubeTLS(cfg KubeConfig) (*tls.Config, error) {
 	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: cfg.Insecure} //nolint:gosec // only tests set cfg.Insecure
 	if cfg.Insecure {

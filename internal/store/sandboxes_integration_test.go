@@ -169,9 +169,7 @@ func TestSandboxNameIsUniqueOnlyWhileLive(t *testing.T) {
 		t.Errorf("live count = %d, %v; want the failed sandbox counted", n, err)
 	}
 
-	// Once the first is gone the name is free again. A developer who finishes
-	// with "fix-login" on Tuesday and wants it again on Thursday is asking for
-	// something perfectly reasonable.
+	// Once the first is gone the name is free again.
 	if err := st.ObserveSandbox(ctx, first.ID, SandboxObservation{
 		State: policy.SandboxTerminated, Detail: "terminated",
 	}); err != nil {
@@ -564,10 +562,9 @@ func TestDeletingAnOrgDeletesItsSandboxes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Sandboxes cascade with their organisation, unlike the usage log. The
-	// difference is what each is for: the usage log is what finance invoices
-	// from and outlives the tenant, and a sandbox row describes a machine that
-	// went away with the tenant that owned it.
+	// Sandboxes cascade with their organisation, unlike the usage log. Finance
+	// invoices from the usage log, so it outlives the tenant; a sandbox row
+	// describes a machine that went away with it.
 	if _, err := st.DeleteOrg(ctx, f.orgID); err != nil {
 		t.Fatalf("DeleteOrg: %v", err)
 	}

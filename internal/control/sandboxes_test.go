@@ -20,12 +20,9 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// The sandbox routes against a real database.
-//
-// What is worth covering here is not the driver - internal/sandbox tests that
-// against a stand-in API server - but the two things only this layer decides:
-// who may do what, and what a deployment with no driver says instead of
-// failing obscurely.
+// The sandbox routes against a real database. The driver is tested in
+// internal/sandbox; this covers who may do what, and what a deployment with no
+// driver answers.
 
 func sandboxStore(t *testing.T) (*store.Store, context.Context) {
 	t.Helper()
@@ -54,7 +51,7 @@ func sandboxServer(t *testing.T, st *store.Store, m *sandbox.Manager) *httptest.
 	return ts
 }
 
-// call is getJSON with a method and a body, for the routes that are not GETs.
+// call is getJSON with a method and a body.
 func call(t *testing.T, ts *httptest.Server, method, path string, body, into any) int {
 	t.Helper()
 	var reader *bytes.Reader
@@ -85,8 +82,8 @@ func call(t *testing.T, ts *httptest.Server, method, path string, body, into any
 }
 
 func TestSandboxCatalogueIsReadableWithNoDriver(t *testing.T) {
-	// An operator setting a deployment up wants to see what they have declared
-	// before the driver works, so the catalogue is readable either way.
+	// The catalogue is readable without a driver, so an operator can check it
+	// while setting up.
 	st, _ := sandboxStore(t)
 	ts := sandboxServer(t, st, nil)
 
@@ -106,10 +103,8 @@ func TestSandboxCatalogueIsReadableWithNoDriver(t *testing.T) {
 }
 
 func TestSandboxRoutesRefuseClearlyWithNoDriver(t *testing.T) {
-	// "Not found" on a path a client was told to use is the most confusing of
-	// all possible answers: it reads as a version mismatch, and the truth -
-	// this deployment has sandboxes switched off - is something an operator can
-	// act on.
+	// A 404 would read as a version mismatch. "Sandboxes are off" is something
+	// an operator can act on.
 	st, _ := sandboxStore(t)
 	ts := sandboxServer(t, st, nil)
 
@@ -194,11 +189,9 @@ func TestSandboxClassBelongsToAnOrganisation(t *testing.T) {
 	}
 }
 
-// A sandbox mints a key, and the project on that key decides six things that
-// belong to whoever owns the project: the system prompt every request carries, the
-// budget it is charged to, the rate limit it consumes, the sandbox quota it
-// counts against, and the models it may reach. The foreign key on the column
-// says only that the project exists somewhere.
+// A sandbox mints a key, and the key's project decides its prompt, budget,
+// rate limit, sandbox quota and models. The foreign key only says the project
+// exists somewhere, not that it is this organisation's.
 func TestSandboxRefusesAnotherOrgsProject(t *testing.T) {
 	st, ctx := sandboxStore(t)
 	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_2", Name: "Other Bank"}, store.OrgTemplate{}); err != nil {
@@ -230,8 +223,8 @@ func TestSandboxRefusesAnotherOrgsProject(t *testing.T) {
 	if code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", code)
 	}
-	// And nothing was created on the way to refusing - not the sandbox, and not
-	// the key, which is the one that would have outlived the mistake.
+	// Nothing was created: not the sandbox, and not the key, which would have
+	// outlived the mistake.
 	list, err := st.ListSandboxes(ctx, store.SandboxQuery{All: true})
 	if err != nil {
 		t.Fatalf("ListSandboxes: %v", err)
@@ -248,8 +241,7 @@ func TestSandboxRefusesAnotherOrgsProject(t *testing.T) {
 		t.Errorf("a refused request left %d keys behind", keys)
 	}
 
-	// The organisation's own project is accepted, and the key carries it - which
-	// is the whole point of naming one.
+	// The organisation's own project is accepted, and the key carries it.
 	var sb store.Sandbox
 	if code := call(t, ts, http.MethodPost, httpx.ControlPrefix+"/v1/sandboxes",
 		map[string]any{
@@ -397,8 +389,8 @@ func TestSandboxVisibilityAndAttachRules(t *testing.T) {
 	if !mayHandleSandbox(admin, store.Sandbox{OrgID: "org_1", UserID: theirs.ID}) {
 		t.Error("an administrator should be able to terminate a sandbox in their organisation")
 	}
-	// And may not get inside one. A sandbox holds a working copy of somebody's
-	// source code; "can see the bill" has never implied "can read the desk".
+	// But may not get inside one: it holds somebody's working copy, and seeing
+	// the bill is not reading the code.
 	if canAttach(admin, store.Sandbox{OrgID: "org_1", UserID: theirs.ID}) {
 		t.Error("an administrator should not be able to open a shell in somebody else's sandbox")
 	}
@@ -410,9 +402,8 @@ func TestSandboxVisibilityAndAttachRules(t *testing.T) {
 	if canAttach(member, store.Sandbox{OrgID: "org_1", UserID: theirs.ID}) {
 		t.Error("a person should not be able to attach to a colleague's")
 	}
-	// A sandbox attributed to nobody - one created with the operator key, for a
-	// pipeline - is an operator's. Falling back to "anyone in the organisation"
-	// would make a shared sandbox a shared shell.
+	// A sandbox attributed to nobody (made with the operator key, for a
+	// pipeline) is an operator's, not a shell for the whole organisation.
 	if canAttach(member, store.Sandbox{OrgID: "org_1"}) {
 		t.Error("a sandbox attributed to nobody is not everybody's")
 	}
@@ -427,8 +418,7 @@ func TestAttachRefusesABadPortAndAMissingUpgrade(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateSandbox: %v", err)
 	}
-	// A manager with a driver that can do nothing: what is under test is the
-	// two refusals in front of it.
+	// The driver does nothing: only the two refusals in front of it are tested.
 	m := sandbox.NewManager(st, stubDriver{}, sandbox.ManagerOptions{
 		Log: slog.New(slog.DiscardHandler),
 	})
@@ -480,8 +470,7 @@ func TestSandboxListNarrowsToTheReader(t *testing.T) {
 		t.Fatalf("got %d sandboxes, want 2", len(res.Data))
 	}
 
-	// The list is live sandboxes by default: "what have I got running" is the
-	// question somebody types this to ask.
+	// The list shows live sandboxes by default.
 	if err := st.ObserveSandbox(ctx, "sbx_a", store.SandboxObservation{
 		State: policy.SandboxTerminated,
 	}); err != nil {
@@ -517,13 +506,9 @@ var (
 	}
 )
 
-// stubDriver accepts everything and runs nothing. It exists so that the routes
-// in front of a driver can be tested without a cluster or a container runtime.
-//
-// It reports the strongest isolation tier so that no test is refused for a
-// reason it was not written to be about - a stub that could deliver less than
-// the catalogue asks for would fail every creation with a message about
-// RuntimeClasses.
+// stubDriver accepts everything and runs nothing, so the routes can be tested
+// without a cluster or container runtime. It reports the strongest isolation
+// tier, or every creation would fail on RuntimeClasses.
 type stubDriver struct{}
 
 func (stubDriver) Name() string { return "stub" }

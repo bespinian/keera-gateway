@@ -53,7 +53,6 @@ func escapesSurrogate(raw []byte) bool {
 	return bytes.Contains(raw, []byte(`\ud`)) || bytes.Contains(raw, []byte(`\uD`))
 }
 
-// quoteText makes text from a Go string.
 func quoteText(s string) jsonText {
 	// The error only reports invalid UTF-8, which is replaced either way.
 	t, _ := jsontext.AppendQuote(make([]byte, 0, len(s)+2), s)
@@ -107,7 +106,6 @@ func joinTexts(texts []jsonText) jsonText {
 	return append(out, '"')
 }
 
-// appendQuoted appends s as a JSON string.
 func appendQuoted(dst []byte, s string) []byte {
 	dst, _ = jsontext.AppendQuote(dst, s)
 	return dst

@@ -1,17 +1,11 @@
 // Routers: the hook that chooses which model answers a request.
 //
-// A filter reads a request and changes it. A router reads a request and
-// changes where it goes, so the requests that need the large model get it and
-// a prompt carrying a client's data is not the one that leaves the cluster.
+// A router that goes wrong still returns good answers, just from the wrong
+// model, so its traffic looks like one that works. The split between its
+// destinations is the one number that tells them apart.
 //
-// It earns a screen because every request a router places is answered. A
-// filter that goes wrong edits or refuses somebody's work and somebody
-// complains; a router that goes wrong returns a perfectly good answer out of
-// the wrong model and produces traffic indistinguishable from one that works.
-// The one number that tells them apart is the split between its destinations.
-//
-// The screen also has to make visible that a router is reached by a client
-// naming it: nothing an administrator does here points traffic at one.
+// Clients reach a router by naming it; nothing on this screen points traffic
+// at one.
 
 import { api } from "../api.js";
 import {
@@ -92,18 +86,15 @@ export async function routersView(ctx) {
             "Where this router sent traffic",
           ),
       },
-      // The mode. It is the first thing to know about a row, because every
-      // other column means something different depending on it: a fallback
-      // router's list is an order of preference, not a menu.
+      // The mode comes first, because it changes what the other columns
+      // mean: a fallback router's list is an order, not a menu.
       {
         label: "Mode",
         shrink: true,
         sortKey: (rt) => modeName(modeOf(rt)),
         cell: (rt) => modeCell(rt, known),
       },
-      // Where this router may send a prompt. Only the first few are named,
-      // so a long list does not wrap the row; the full list is on the
-      // router's own screen.
+      // Only the first few are named, so the row does not wrap.
       {
         label: "Destinations",
         shrink: true,
@@ -111,8 +102,7 @@ export async function routersView(ctx) {
         sortDir: "desc",
         cell: (rt) => destinationsCell(rt, known),
       },
-      // Where it has actually been sending traffic. Without this a row says
-      // what a router is meant to do and nothing about whether it does it.
+      // Whether it actually does what it is meant to.
       {
         label: "In this period",
         shrink: true,
@@ -120,10 +110,7 @@ export async function routersView(ctx) {
         sortDir: "desc",
         cell: (rt) => trafficCell(stats[rt.alias]),
       },
-      // The column the alias was widening to fill. Without it the first
-      // column takes every pixel the rest do not, so a six-character alias
-      // sits alone in half a table; with it the row says what the router is
-      // for in the space that was empty.
+      // Without this column the alias column would fill half the table.
       {
         label: "Description",
         sortKey: (rt) => rt.description || null,
@@ -168,63 +155,54 @@ export async function routersView(ctx) {
   return h("div", {}, head, rows);
 }
 
-// decides reports whether this router chooses by reading the request. A router
-// saved before modes existed says nothing, and that means the only thing it
-// could have been. With one destination there is nothing to choose, so the
-// gateway sends every request there without asking.
+// decides reports whether this router chooses by reading the request. With
+// one destination there is nothing to choose, so the gateway does not ask.
 function decides(rt) {
   return modeOf(rt) === "instruction" && (rt.destinations || []).length > 1;
 }
 
-// modeOf is the mode, with the one a router saved before modes existed meant.
+// A router saved before modes existed has none, and was an instruction router.
 function modeOf(rt) {
   return rt.mode || "instruction";
 }
 
-// modeName is a mode as the dialog's tiles name it.
 function modeName(mode) {
   return (MODES.find((m) => m.value === mode) || { name: mode }).name;
 }
 
-// measures reports whether this router's order is something the gateway worked
-// out rather than something somebody wrote. It is the question every screen
-// here has to ask before it prints a list of destinations in order: on these
-// two modes that order is a reading of the last few minutes on one gateway
-// replica, so showing it numbered would be a claim this page cannot make.
+// measures reports whether the gateway works out this router's order. Then
+// the order is a reading of the last few minutes on one replica, so screens
+// must not show it numbered.
 function measures(rt) {
   const mode = modeOf(rt);
   return mode === "latency" || mode === "least-busy";
 }
 
-// sizes reports whether this router chooses by how much text is in the request.
-// It is the odd mode out here: it reads the request like an instruction router,
-// and costs nothing like the three that read nothing at all.
+// sizes reports whether this router chooses by request size. It reads the
+// request like an instruction router, but costs nothing like the others.
 function sizes(rt) {
   return modeOf(rt) === "size";
 }
 
-// ceilingOf is the largest request, in estimated tokens, this router means to
-// give a destination - or null for the one that takes what the rest will not.
+// ceilingOf is the largest request, in estimated tokens, for a destination,
+// or null for the one that takes what the rest will not.
 function ceilingOf(rt, alias) {
   const n = (rt.ceilings || {})[alias];
   return n > 0 ? n : null;
 }
 
-// tokens renders a ceiling the way somebody would have typed it: these get set
-// to round numbers, and '32k' is how they are said.
+// tokens renders a ceiling as it is typed, such as '32k'.
 function tokens(n) {
   return n >= 1000 && n % 1000 === 0 ? n / 1000 + "k" : String(n);
 }
 
-// ordersBy is what puts a router's destinations in the order it tries them, in
-// a clause. It is the sentence that makes the three modes that read nothing
-// tell themselves apart, and it is the only thing that does.
+// ordersBy says, as a clause, how a router orders its destinations. It is the
+// only thing that tells the modes that read nothing apart.
 function ordersBy(rt) {
   return ordersByMode(modeOf(rt));
 }
 
-// ordersByMode is the same sentence taken from a mode alone, for the check,
-// which reports the mode it ran without the router around it.
+// ordersByMode is ordersBy for the check, which reports only the mode.
 function ordersByMode(mode) {
   switch (mode) {
     case "latency":
@@ -238,9 +216,8 @@ function ordersByMode(mode) {
   }
 }
 
-// modeCell is the mode, which is the thing to know before reading any other
-// column on the row, and on an instruction router the model it reads with -
-// which there is no other column for.
+// modeCell shows the mode and, on an instruction router, the model it reads
+// with, which has no column of its own.
 function modeCell(rt, known) {
   if (sizes(rt)) {
     return h(
@@ -271,10 +248,9 @@ function modeCell(rt, known) {
   );
 }
 
-// destinationsCell names where this router may send a request, and counts
-// the ones the organisation can no longer serve. A destination that cannot be
-// reached is quietly left out of the choice, so the count keeps a broken
-// router from looking like one that works.
+// destinationsCell also counts the destinations the organisation no longer
+// has. They are quietly left out of the choice, so without the count a broken
+// router looks like one that works.
 function destinationsCell(rt, known) {
   const destinations = rt.destinations || [];
   if (destinations.length === 0) {
@@ -296,16 +272,12 @@ function destinationsCell(rt, known) {
   );
 }
 
-// fallbackPill says what happens to a request the router cannot place.
+// fallbackPill says what happens to a request the router cannot place. It is
+// shown on the router's own screen, not in the list: whether to fall back or
+// refuse depends on what the router is for.
 //
-// It is on the router's own screen rather than in the list. The two answers
-// are opposites and neither is right in general - one that saves money has
-// somewhere safe to fall back to, one that keeps prompts inside the cluster
-// does not - but that is a decision read while looking at one router, not a
-// column scanned down a table of them.
-//
-// A fallback router has no such setting. By the time it has failed it has
-// tried everywhere, so the client gets the last destination's own answer.
+// A router that tries its destinations has no such setting: when it fails,
+// the client gets the last destination's answer.
 function fallbackPill(rt) {
   if (sizes(rt)) {
     return h("span", { class: "muted nowrap" }, "the next destination up");
@@ -317,9 +289,8 @@ function fallbackPill(rt) {
   return h("span", { class: "pill mono" }, "→ " + rt.fallback);
 }
 
-// trafficCell is what this router did with the period's requests, in the room a
-// row has: how many it placed, and how much of that was placed without a
-// decision. The split between destinations is on the router's own screen.
+// trafficCell shows how many requests were placed and how many without a
+// decision. The split is on the router's own screen.
 function trafficCell(st) {
   if (!st || !st.requests) return trafficSummary(0);
   const undecided = (st.fell_back || 0) + (st.errored || 0);
@@ -338,11 +309,8 @@ function trafficCell(st) {
 }
 
 // checkCell puts three sample prompts through the router and shows where each
-// one went.
-//
-// Nothing about the result is cached, for the reason a filter's check is not: a
-// router is a small model following prose, and where it sent a sample ten
-// minutes ago is not a claim worth showing beside what it will do next.
+// went. The result is not cached: a small model following prose may answer
+// differently next time.
 function checkCell(ctx, rt) {
   return checkButton(
     "Test this router with sample prompts",
@@ -369,11 +337,8 @@ function verdict(ctx, probe) {
 
 // report shows each sample prompt and the model the router chose for it.
 //
-// There is no pass here, for the reason a filter's check has none: whether
-// these are the right destinations for this organisation's work is a judgement
-// only the person reading it can make. What the check does say plainly is the
-// one thing that is wrong in any organisation - a router that answered every
-// sample the same way, which is not a router deciding anything.
+// There is no pass: only the reader can judge whether the choices suit their
+// work. What is always wrong is every sample going the same way.
 function report(ctx, probe) {
   const chained = probe.mode !== "instruction";
   const ranked = probe.mode === "latency" || probe.mode === "least-busy";
@@ -474,11 +439,8 @@ function report(ctx, probe) {
                   shrink: true,
                   cell: (hop) => (hop.ms ? ms(hop.ms) : dash()),
                 },
-                // What the router measured of this destination, on the two
-                // modes where the position above is a measurement rather than
-                // a setting. It is the column that answers the question the
-                // order provokes - why is this one first - and it is absent on
-                // the modes where the answer is that somebody wrote it there.
+                // Why a destination is where it is, on the modes where the
+                // order is measured rather than written.
                 ranked || banded
                   ? {
                       label: banded ? "Takes" : "Reading",
@@ -514,10 +476,8 @@ function report(ctx, probe) {
               d.error
                 ? pill("Could not decide", "bad")
                 : h("span", { class: "pill pill-good mono" }, d.chosen),
-              // How much of the choice that destination took. A sample decided
-              // at 35% went where it went by a hair, which is the state a
-              // destination alone cannot show. Absent where the deciding
-              // model's backend serves no probabilities.
+              // A sample decided at 35% went there by a hair. Absent when
+              // the deciding model's backend serves no probabilities.
               !d.error && d.confidence
                 ? h(
                     "span",
@@ -614,9 +574,8 @@ export async function routerDetailView(ctx) {
 
   for (const banner of detailBanners(rep, rt, placed)) wrap.append(banner);
 
-  // "Placed" leads because every share below it is meaningless without it: a
-  // router that sent its whole traffic to one model over three requests is not
-  // a router that has stopped deciding, it is a router nobody has used yet.
+  // "Placed" leads because the shares mean nothing without it: all of three
+  // requests to one model is not a router that stopped deciding.
   wrap.append(
     h(
       "div",
@@ -635,10 +594,8 @@ export async function routerDetailView(ctx) {
         pct(rep.chose, placed),
         chosenNote(rt, rep),
       ),
-      // What the router added to the wait, which is a generation on one that
-      // reads the request and the destinations that did not answer on one
-      // that tries them. Both are time the client spent before the model that
-      // answered had been asked anything.
+      // The wait the router added: a generation when it reads the request,
+      // or the destinations that did not answer when it tries them.
       stat(
         rt && !decides(rt) ? "Lost to failover" : "Deciding cost",
         ms(rep.decision_median_ms || 0),
@@ -652,9 +609,8 @@ export async function routerDetailView(ctx) {
     ),
   );
 
-  // The split. It is the reason this screen exists: it is the only figure that
-  // distinguishes a router doing its job from an expensive way of hard-coding
-  // one destination, and both produce nothing but successful requests.
+  // The split is the only figure that tells a working router from an
+  // expensive way of hard-coding one destination.
   wrap.append(
     h(
       "div",
@@ -746,9 +702,8 @@ export async function routerDetailView(ctx) {
               num: true,
               cell: (d) => amount(d.cost_micros),
             },
-            // The reason a cheap destination is not always the right one. A
-            // router that halved the bill and doubled what a developer waits
-            // for has not obviously helped anybody.
+            // A cheaper destination that doubles the wait has not obviously
+            // helped.
             {
               label: "Median wait",
               shrink: true,
@@ -811,12 +766,9 @@ export async function routerDetailView(ctx) {
               h(
                 "div",
                 { class: "wrap-chips" },
-                // Numbered only where the number is the configuration. On a
-                // measured router the order here is the tie-break and nothing
-                // more, and printing 1. 2. 3. beside it would be this screen
-                // stating a running order it does not know. On a size router
-                // the ceiling is the configuration, so it goes on the chip:
-                // the list without it says nothing about where anything goes.
+                // Numbered only where the order is the configuration. On a
+                // measured router it is only a tie-break. On a size router
+                // the ceiling goes on the chip instead.
                 (rt.destinations || []).map((alias, i) => {
                   if (sizes(rt)) {
                     const ceiling = ceilingOf(rt, alias);
@@ -853,10 +805,8 @@ export async function routerDetailView(ctx) {
               h("span", { class: "mono" }, `"model": "${rt.alias}"`),
             ],
           ]),
-          // The instruction is the router, so it is shown whole rather than
-          // clamped to a row: it is the one field somebody reading this screen
-          // has to be able to compare against where the traffic went. A
-          // fallback router has none - the list above is the whole of it.
+          // Shown whole, not clamped: the instruction is what readers compare
+          // against where the traffic went.
           decides(rt)
             ? h(
                 "div",
@@ -872,8 +822,7 @@ export async function routerDetailView(ctx) {
   return wrap;
 }
 
-// detailBanners are the things worth saying before any of the numbers, because
-// each of them changes how the numbers should be read.
+// detailBanners come before the numbers, because each changes how they read.
 function detailBanners(rep, rt, placed) {
   const out = [];
   if (!rt) {
@@ -899,9 +848,8 @@ function detailBanners(rep, rt, placed) {
   const chained = rt && !decides(rt);
   const ranked = rt && measures(rt);
   const banded = rt && sizes(rt);
-  // A router that never gets its first answer is the failure this screen
-  // exists for. It is not visible in any request, because every one of them
-  // was answered - by something else.
+  // A router that never gets its first choice is invisible in the requests,
+  // because each one was answered by something else.
   if (rep.chose === 0) {
     out.push(
       banner(
@@ -956,8 +904,8 @@ function detailBanners(rep, rt, placed) {
       ),
     );
   }
-  // One destination taking everything, on enough traffic to mean it. Not an
-  // error, and worth a sentence: it is what a hard-coded alias looks like.
+  // One destination taking everything, on enough traffic to mean it, is a
+  // hard-coded alias in disguise.
   const destinations = rep.destinations || [];
   if (!chained && rep.chose > 0 && destinations.length === 1 && placed >= 20) {
     out.push(
@@ -972,9 +920,8 @@ function detailBanners(rep, rt, placed) {
   return out;
 }
 
-// chosenNote says what the headline share actually counted, which is not the
-// same sentence for the kinds of router even though it is the same number: the
-// router got what it wanted.
+// chosenNote says what the headline share counted, in words that suit each
+// kind of router.
 function chosenNote(rt, rep) {
   if (!rep.chose) {
     if (rt && measures(rt)) return "what it ranked first answered nothing";
@@ -1001,10 +948,8 @@ function identity(rt) {
 
 /* -------------------------------------------------------------- editing one */
 
-// MODES are the five things a router can choose with, as the dialog offers
-// them: a mark, a name, and the whole of what the mode does with the list of
-// destinations. One list, because the tiles that pick a mode and the row that
-// reports the one picked have to say the same thing about it.
+// MODES feeds both the tiles that pick a mode and the rows that name it, so
+// they always agree.
 const MODES = [
   {
     value: "instruction",
@@ -1038,9 +983,8 @@ const MODES = [
   },
 ];
 
-// canDecide says whether a router can decide with a model: a chat model, or a
-// decision model, which only answers choices. Only chat models can be
-// destinations.
+// A decision model only answers choices, so it can decide but never be a
+// destination.
 function canDecide(m) {
   return (m.kind === "chat" || m.kind === "decision") && !m.subscription;
 }
@@ -1048,9 +992,7 @@ function canDecide(m) {
 function editRouter(ctx, existing, readers) {
   const chatModels = readers.filter((m) => m.kind === "chat");
   const creating = !existing;
-  // No mode among the defaults: a new router has none until one of the tiles
-  // is clicked, and a default here would be the answer to the one question
-  // this dialog asks before any other.
+  // No default mode: the dialog asks for it first.
   const rt = existing || {
     alias: "",
     model: "",
@@ -1089,7 +1031,7 @@ function editRouter(ctx, existing, readers) {
   );
   const prompt = h("textarea", { class: "input", rows: "8" });
   // A decision model answers a short question rather than following an
-  // instruction, so it gets an example of its own.
+  // instruction, so it gets its own example.
   const exampleFor = (alias) =>
     readers.find((m) => m.alias === alias)?.kind === "decision"
       ? DECISION_EXAMPLE
@@ -1101,35 +1043,23 @@ function editRouter(ctx, existing, readers) {
     }
   });
 
-  // What chooses. It is asked first and on its own, because it decides what
-  // the rest of the form means: the same list of models is a menu to choose
-  // from on one kind of router, an order of preference on the next and a set
-  // of size bands on the third. As a select halfway down the form it was a
-  // question answered after the fields it governs, most of which were hidden
-  // until it had been.
+  // The mode is asked first, because it decides what the rest of the form
+  // means: the same list is a menu, an order, or a set of size bands.
   let chosen = creating ? null : modeOf(rt);
   const reads = () => chosen === "instruction";
-  // Whether the ceilings are the configuration. A size router's list of
-  // destinations means nothing on its own: without a number beside each,
-  // nothing says where anything goes.
   const bySize = () => chosen === "size";
-  // Whether the running order is something this form sets. On the two measured
-  // modes the list below is still worth ordering - it is what breaks a tie
-  // between destinations the gateway cannot tell apart - but it is no longer
-  // the whole configuration, and the hint has to stop saying that it is.
+  // On the measured modes the order still breaks ties, but it is not the
+  // whole configuration.
   const ranks = () => chosen === "latency" || chosen === "least-busy";
 
-  // Changing the mode keeps the form filled in: the alias, the destinations
-  // and their order mean something under every mode, and what the new mode has
-  // no use for is hidden rather than discarded, so going to look at the other
-  // tiles costs nothing.
+  // Changing the mode hides what the new mode does not use rather than
+  // clearing it, so trying another tile loses nothing.
   const picker = modeTiles(MODES, chosen, (value) => {
     chosen = value;
     syncMode();
-    // Where the cursor lands is the point of asking this first: on a new
-    // router, the first thing left to type; on one being changed, the control
-    // that opened the tiles. Before the dialog is in the document neither
-    // does anything, which is what the first choice of an edit wants.
+    // Focus the alias on a new router, the change control on an edit.
+    // Before the dialog is in the document neither does anything, which is
+    // right for an edit's first choice.
     if (creating && !alias.value) alias.focus();
     else picker.change.focus();
   });
@@ -1142,15 +1072,9 @@ function editRouter(ctx, existing, readers) {
     chosenRow,
   );
 
-  // The destinations, as checkboxes over the catalogue rather than a text
-  // field. The list is the authority on where this router can send a prompt,
-  // so choosing from what exists is the only way to write one that cannot
-  // name a model the organisation does not have.
-  //
-  // They are kept in an array rather than a set because on a fallback router
-  // the order is the entire configuration, and it has to be something
-  // somebody can see and change rather than a side effect of which box was
-  // ticked first.
+  // Checkboxes over the catalogue, so a router cannot name a model the
+  // organisation does not have. An array, not a set: on a fallback router the
+  // order is the configuration and has to be visible and changeable.
   const picked = [...(rt.destinations || [])];
   const fallback = h("select", { class: "select" });
   const syncFallback = () => {
@@ -1168,10 +1092,8 @@ function editRouter(ctx, existing, readers) {
     fallback.value = picked.includes(previous) ? previous : "";
   };
 
-  // The order, shown only when it means something. A fallback router whose
-  // destinations were ticked in the wrong order is a deployment serving every
-  // request out of its second choice, and nothing else on this screen would
-  // say so.
+  // Shown only where the order matters. Ticked in the wrong order, a
+  // fallback router serves everything from its second choice.
   const order = h("div", { class: "stack", style: { gap: "4px" } });
   const renderOrder = () => {
     if (picked.length === 0) {
@@ -1224,19 +1146,16 @@ function editRouter(ctx, existing, readers) {
     );
   };
 
-  // A ceiling per destination, for a size router. Kept here rather than read
-  // off the inputs, so unticking a destination and ticking it again does not
-  // lose the number that was typed against it.
+  // Kept here rather than read off the inputs, so unticking and ticking a
+  // destination again keeps its ceiling.
   const ceilings = { ...(rt.ceilings || {}) };
   // Boxes holding something that is not a ceiling. Saving refuses them, as
   // `keera router` does, rather than reading them as "no ceiling".
   const badCeilings = new Set();
   const ceilingList = h("div", { class: "stack", style: { gap: "4px" } });
   const ceilingHint = h("div", { class: "hint" });
-  // What each row says beside its box, kept by destination. The words follow
-  // the numbers rather than the list of destinations, so they are written on
-  // their own: rebuilding the rows to say them would take the cursor out of
-  // the box somebody is typing into, a digit at a time.
+  // The note beside each box is updated on its own: rebuilding the rows would
+  // take the cursor out of the box being typed into.
   const notes = new Map();
   const syncCeilingNotes = () => {
     for (const [alias, note] of notes) {
@@ -1244,9 +1163,8 @@ function editRouter(ctx, existing, readers) {
         ? "tokens at most"
         : "takes what is larger than every ceiling";
     }
-    // The control plane refuses a router without exactly one unbounded
-    // destination. Saying so here is what stops somebody filling in every box
-    // and being told no at the last step.
+    // The control plane needs exactly one destination without a ceiling.
+    // Saying so here saves being refused at the last step.
     const open = picked.filter((alias) => !ceilings[alias]);
     ceilingHint.textContent =
       open.length === 1
@@ -1335,9 +1253,8 @@ function editRouter(ctx, existing, readers) {
           "div",
           {},
           h("span", { class: "mono" }, m.alias),
-          // The description is what the deciding model is actually told about
-          // this destination, so it is shown here rather than left to be
-          // discovered as a router choosing between bare names.
+          // The description is what the deciding model is told about this
+          // destination.
           m.description
             ? h("div", { class: "hint" }, m.description)
             : h(
@@ -1354,23 +1271,19 @@ function editRouter(ctx, existing, readers) {
   renderOrder();
   renderCeilings();
 
-  // The fields only one kind of router has. They are hidden rather than
-  // disabled, because a form that offers an instruction to a router that reads
-  // nothing is a form inviting somebody to write one and wonder where it went.
+  // Fields only instruction routers have. Hidden rather than disabled, so
+  // nobody writes an instruction that a router then ignores.
   const modelField = field(
     "Runs on",
     model,
-    // Short, but not the short version of a different sentence: where this
-    // model runs is the one thing about it somebody can get wrong without
-    // anything on this screen going red.
+    // Where this model runs can be wrong without anything here going red.
     "A small, fast model. It reads every request before any filter, so " +
       "keep it inside the cluster.",
   );
   const fallbackField = field(
     "When it cannot decide",
     fallback,
-    // Which answer is right is a property of the deployment, not of this
-    // form, so the hint gives the two cases rather than a recommendation.
+    // The right answer depends on the deployment, so the hint gives both.
     "Fall back if the router saves money. Refuse if it keeps prompts " +
       "inside the cluster.",
   );
@@ -1386,12 +1299,10 @@ function editRouter(ctx, existing, readers) {
   const destinationsHint = h("div", { class: "hint" });
   const costBanner = banner("info");
 
-  // Save, once the dialog is up. The tiles turn it on.
+  // Set once the dialog is up. The tiles turn it on.
   let saveButton = null;
   const syncMode = () => {
-    // Nothing below the tiles until one of them is chosen, Save included:
-    // there is nothing to save yet, and a Save button beside five unanswered
-    // tiles is one inviting somebody to skip the question.
+    // Nothing below the tiles, Save included, until one is chosen.
     rest.hidden = chosen === null;
     if (saveButton) {
       saveButton.hidden = chosen === null;
@@ -1402,8 +1313,7 @@ function editRouter(ctx, existing, readers) {
       el.hidden = !reads();
     }
     ceilingField.hidden = !bySize();
-    // A size router's order is the ceilings, so the order list would be a
-    // second answer to the same question - and one this form does not use.
+    // A size router's order is its ceilings.
     orderField.hidden = reads() || bySize();
     orderHint.textContent = ranks()
       ? "Only a tie-break. The gateway reorders these on every request " +
@@ -1415,11 +1325,8 @@ function editRouter(ctx, existing, readers) {
       : bySize()
         ? "Places between"
         : "Tries these";
-    // Each variant says only what this mode does with the list. That a key
-    // allowed the router is allowed everywhere it sends is the same sentence
-    // in all three, so it is said once, in the subtitle.
-    // One destination is allowed in every mode: clients get a name that
-    // stays the same when the model behind it changes.
+    // What applies to every mode is said once, in the subtitle. One
+    // destination is allowed in every mode, to give a model a lasting name.
     destinationsHint.textContent = reads()
       ? "With only one, every request goes there and nothing is asked."
       : bySize()
@@ -1444,9 +1351,8 @@ function editRouter(ctx, existing, readers) {
           "fails before one answers.";
   };
 
-  // Everything the mode governs, in one wrapper so the dialog can hold it back
-  // until there is a mode. The alias is in here too: a router is named for
-  // what it does, and that is easier to name once it has been chosen.
+  // Held back until there is a mode. The alias is here too: a router is
+  // easier to name once it is clear what it does.
   const rest = h(
     "div",
     {},
@@ -1490,8 +1396,8 @@ function editRouter(ctx, existing, readers) {
       : "A key allowed to use this router can reach all its destinations.",
     body: h("form", {}, modeField, rest),
     submitLabel: creating ? "Create router" : "Save",
-    // Saved either way. The warning says what the organisation's allow-list
-    // now does with the router, and stays up long enough to read.
+    // Saved either way. The warning is about the organisation's allow-list,
+    // and stays up long enough to read.
     done: (saved) => {
       const said = creating ? "Router created" : "Router saved";
       if (!saved || !saved.warning) return said;
@@ -1506,8 +1412,8 @@ function editRouter(ctx, existing, readers) {
     },
     ctx,
     submit: async () => {
-      // Checked before the request: an empty alias addresses no router, so
-      // the write would not reach the handler that could say so.
+      // Checked here: an empty alias would not reach the handler that could
+      // say so.
       const problem = aliasProblem(alias.value.trim());
       if (problem) {
         alias.focus();
@@ -1533,8 +1439,7 @@ function editRouter(ctx, existing, readers) {
       }
       return api.putRouter(ctx.orgID, alias.value.trim(), {
         mode: chosen,
-        // A router that reads nothing carries nothing that would decide for
-        // it, so a deciding model the form still holds is not saved.
+        // Leftovers from the instruction mode are not saved.
         model: reads() ? model.value : "",
         prompt: reads() ? prompt.value : "",
         destinations: [...picked],
@@ -1551,17 +1456,13 @@ function editRouter(ctx, existing, readers) {
     },
   }));
   syncMode(); // again, now that Save is there
-  // The keyboard starts on the tiles. The dialog's own rule - the first field
-  // somebody can type in - finds nothing on a new router, because until a mode
-  // is chosen there is nothing to type in.
+  // Until a mode is chosen there is no field to focus, so start on the tiles.
   if (creating) tiles.firstChild.focus();
 }
 
-// PROMPT_EXAMPLE is a starting point rather than a default. It is the shape a
-// routing instruction has to have: name the kinds of request rather than the
-// models, because what each model is for is added from the catalogue - and say
-// which way to err, because the decision is made in one word by a small model
-// and it will be wrong sometimes.
+// PROMPT_EXAMPLE shows the shape an instruction needs: name kinds of request,
+// not models, because the catalogue adds what each model is for. And say which
+// way to err, because a small model deciding in one word is sometimes wrong.
 const PROMPT_EXAMPLE = `Choose the model that suits this request.
 
 Send small, self-contained requests to the cheapest capable model: a rename, a \
@@ -1576,7 +1477,6 @@ That takes priority.
 
 If you are unsure, choose the more capable model rather than the cheaper one.`;
 
-// DECISION_EXAMPLE is PROMPT_EXAMPLE for a decision model, which answers a
-// short question and is offered each destination by its description alone. See
+// A decision model is offered each destination by its description alone. See
 // docs/gateway.md#decision-models.
 const DECISION_EXAMPLE = "Which model should answer this request?";

@@ -88,7 +88,6 @@ func Run(ctx context.Context, args []string) error {
 	case "help", "-h", "--help":
 		return helpCmd(ctx, rest)
 	default:
-		// Suggest the nearest command, or point at the list.
 		if near := suggest(cmd); near != "" {
 			return fmt.Errorf("no command %q; did you mean 'keera %s'?\n"+
 				"Run 'keera' for the whole list", cmd, near)

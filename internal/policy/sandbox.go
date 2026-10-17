@@ -63,10 +63,8 @@ const (
 	PurposeAgent Purpose = "agent"
 )
 
-// Purposes is every purpose.
 var Purposes = []Purpose{PurposeEngineer, PurposeAgent}
 
-// Valid reports whether p names a purpose.
 func (p Purpose) Valid() bool { return slices.Contains(Purposes, p) }
 
 // Attachable reports whether a person may open a shell on this sandbox. Only on
@@ -113,7 +111,6 @@ type SandboxClass struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// Allows reports whether this class may be asked for on behalf of p.
 func (c SandboxClass) Allows(p Purpose) bool {
 	return len(c.Purposes) == 0 || slices.Contains(c.Purposes, p)
 }
@@ -139,7 +136,6 @@ const maxSandboxName = 40
 // adds 15 more.
 const maxClassName = 40
 
-// ValidClassName reports whether s is a name a sandbox class may have.
 func ValidClassName(s string) bool { return validName(s, maxClassName) }
 
 // ValidSandboxName reports whether s is a name a sandbox may have. It becomes
@@ -232,7 +228,6 @@ type ResolvedSandbox struct {
 	AllowedRepos []string `json:"allowed_repos"`
 }
 
-// AllowsClass reports whether name is inside the resolved allow-list.
 func (r ResolvedSandbox) AllowsClass(name string) bool {
 	return r.SandboxClasses == nil || slices.Contains(r.SandboxClasses, name)
 }

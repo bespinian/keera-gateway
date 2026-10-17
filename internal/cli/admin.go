@@ -102,7 +102,6 @@ func reportQuery(ctx context.Context, c *client, org string, w *who, since time.
 	return q, nil
 }
 
-// setIfGiven sets each query parameter that has a value.
 func setIfGiven(q url.Values, params map[string]string) {
 	for name, v := range params {
 		if v != "" {
@@ -376,7 +375,6 @@ func show(w *table, name string, v any) {
 	_, _ = fmt.Fprintf(w, "%s\t%v\n", name, v)
 }
 
-// showIfSet writes a row only when there is something to show.
 func showIfSet(w *table, name, v string) {
 	if v != "" {
 		show(w, name, v)

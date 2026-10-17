@@ -42,7 +42,6 @@ const upgradeProtocol = "keera-sandbox/1"
 // for connections nobody closes, like a laptop put in a bag.
 const attachIdleTimeout = 2 * time.Hour
 
-// attachRoutes registers the surface.
 func (s *Server) attachRoutes(mux *http.ServeMux) {
 	if s.opts.Sandboxes == nil {
 		// Without a driver, the path says so. A 404 would look like a version
@@ -60,7 +59,6 @@ func (s *Server) attachRoutes(mux *http.ServeMux) {
 				"and try again", s.gitCredential))
 }
 
-// attach proxies one connection.
 func (s *Server) attach(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	if !strings.EqualFold(r.Header.Get("Upgrade"), upgradeProtocol) {
 		httpx.WriteError(w, http.StatusUpgradeRequired, "invalid_request_error", "upgrade_required",

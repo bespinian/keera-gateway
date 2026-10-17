@@ -54,9 +54,8 @@ func TestTheMapDrawsTheCatalogueAndTheTrafficTogether(t *testing.T) {
 	for _, m := range []policy.Model{
 		{OrgID: "org_1", Alias: "keera-code", Kind: policy.KindChat, Backends: []string{"http://vllm:8000/v1"},
 			BackendModel: "served-name", Enabled: true},
-		// Enabled, hosted, and deliberately quiet: a way out of the building
-		// that nobody used this week is still a way out of the building, and
-		// leaving it off the map is the one omission this screen cannot afford.
+		// Enabled, hosted, and unused this week. It is still a way out of the
+		// building, so the map must show it.
 		{OrgID: "org_1", Alias: "keera-frontier", Kind: policy.KindChat,
 			Backends:     []string{"https://api.anthropic.com/v1"},
 			BackendModel: "claude-opus-5", Enabled: true},
@@ -125,9 +124,8 @@ func TestTheMapDrawsTheCatalogueAndTheTrafficTogether(t *testing.T) {
 	if len(got.Clients) != 2 {
 		t.Fatalf("clients = %+v, want the two that called", got.Clients)
 	}
-	// Busiest first, so a map with more clients than room draws the ones the
-	// deployment is actually made of - and each is named the way the Connect
-	// screen names it.
+	// Busiest first, so a crowded map draws the ones that matter, each named as
+	// on the Connect screen.
 	if got.Clients[0].Key != "claude-code" || got.Clients[0].Label != "Claude Code" {
 		t.Errorf("the first client is %+v, want Claude Code", got.Clients[0])
 	}
@@ -136,8 +134,8 @@ func TestTheMapDrawsTheCatalogueAndTheTrafficTogether(t *testing.T) {
 	for _, m := range got.Models {
 		byAlias[m.Alias] = m.Hosting + " " + m.Endpoint
 	}
-	// The operator key is an operator, so it sees the internal backend too - what
-	// an organisation's own administrator is shown instead is the case above.
+	// The operator key sees the internal backend too. What an administrator sees
+	// is tested above.
 	if byAlias["keera-code"] != "internal vllm:8000" {
 		t.Errorf("keera-code = %q, want it drawn inside the boundary", byAlias["keera-code"])
 	}

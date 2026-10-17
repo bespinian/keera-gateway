@@ -355,8 +355,8 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request, p *authn.Principa
 		return
 	}
 	groupBy := r.URL.Query().Get("group_by")
-	// An unknown grouping is refused. It used to fall back to the default
-	// while the caller's string was echoed back, even into the CSV filename.
+	// Refused, because a fallback would still echo the caller's string, even
+	// into the CSV filename.
 	if groupBy != "" && !store.ValidGroupBy(groupBy) {
 		badRequest(w, "'group_by' must be one of "+strings.Join(store.GroupBys(), ", "))
 		return
@@ -423,7 +423,6 @@ func (s *Server) groupNames(ctx context.Context, orgID string) (groupLabels, err
 	return g, nil
 }
 
-// addTo puts the labels into a report's response.
 func (g groupLabels) addTo(out map[string]any) {
 	out["project_names"] = g.projects
 	out["key_names"] = g.keys

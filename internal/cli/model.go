@@ -176,8 +176,8 @@ func clearModelValues(m catalog.Model) catalog.Model {
 	return m
 }
 
-// setPrice applies a price flag, given in CHF per million
-// tokens, where -1 means "not given".
+// setPrice applies a price flag in CHF per million tokens, where -1 means
+// "not given".
 func setPrice(dst **int64, units float64) {
 	if units >= 0 {
 		m := micros(units)

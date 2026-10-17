@@ -102,14 +102,13 @@ type Config struct {
 
 	// UI serves the control panel from the listener's root.
 	UI bool
-	// PublicURL is the gateway's origin as a browser sees it. It is used for
-	// the redirect after sign-out, the address under "My clients" and
-	// the panel link in a refusal. Empty uses the request's Host header for
-	// the first two and leaves the link out.
+	// PublicURL is the gateway's origin as a browser sees it, for the
+	// redirect after sign-out, the address under "My clients" and the panel
+	// link in a refusal. Empty uses the request's Host header for the first
+	// two and leaves the link out.
 	PublicURL string
-	// SecureCookies marks the session cookie Secure. It defaults to on when
-	// the public URL is https; turning it off lets a plain-http
-	// demo on localhost sign in.
+	// SecureCookies marks the session cookie Secure. On by default when the
+	// public URL is https; off lets a plain-http demo on localhost sign in.
 	SecureCookies bool
 
 	// Sandbox is the machines this deployment lends out. Off by default.
@@ -119,9 +118,8 @@ type Config struct {
 	// them. With none and no passkeys, the operator key is the only way in.
 	OIDC []authn.OIDCConfig
 	// Passkeys lets administrators create accounts that sign in with a
-	// passkey instead of a directory, and is nil when they are off. Off by
-	// default: such an account does not leave when someone leaves the
-	// directory. See docs/sso.md.
+	// passkey instead of a directory. Nil when off, the default: such an
+	// account stays when its owner leaves the directory. See docs/sso.md.
 	Passkeys *authn.RelyingParty
 }
 
@@ -502,12 +500,10 @@ func envDuration(key string, def time.Duration) time.Duration {
 
 /* ------------------------------------------------------------------ sandboxes */
 
-// SandboxConfig holds the sandbox settings, off by default.
-//
-// A gateway is useful without sandboxes, and one that tried to reach a
-// Kubernetes API server on every start would fail over a feature nobody asked
-// for. Switching them on is one variable; the rest defaults to what the Helm
-// chart installs.
+// SandboxConfig holds the sandbox settings, off by default: a gateway that
+// reached for a Kubernetes API on every start would fail over a feature nobody
+// asked for. Switching them on is one variable; the rest defaults to what the
+// Helm chart installs.
 type SandboxConfig struct {
 	// Driver is "kubernetes", "podman", or empty for no sandboxes.
 	Driver string
@@ -540,10 +536,10 @@ type SandboxConfig struct {
 	// running until it expires.
 	IdleSuspend time.Duration
 
-	// Warm switches warm pools on: a few sandboxes of each class kept started
-	// so asking for one is instant. It is a separate switch because it needs
-	// the agent-sandbox warm-pool extension; without it, every reconcile would
-	// fail over a missing CRD.
+	// Warm keeps a few sandboxes of each class started, so asking for one is
+	// instant. It is its own switch because it needs the agent-sandbox
+	// warm-pool extension; without it every reconcile would fail over a
+	// missing CRD.
 	Warm bool
 
 	// PodmanBinary and PodmanNetwork configure the single-host driver.
@@ -571,7 +567,6 @@ type GitConfig struct {
 	TokenFile string
 }
 
-// Enabled reports whether this deployment lends out sandboxes.
 func (s SandboxConfig) Enabled() bool { return s.Driver != "" }
 
 func sandboxConfig() SandboxConfig {

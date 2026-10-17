@@ -219,9 +219,8 @@ func planMachineKey(ctx context.Context, c *client, orgID string, me identity, p
 }
 
 // machineKeyName is the name of a machine's Claude Code key, with or without
-// a subscription. The id tells
-// apart machines that share a hostname, such as copies of one VM image, so one
-// never replaces another's key.
+// a subscription. The id tells apart machines that share a hostname, such as
+// copies of one VM image, so one never replaces another's key.
 func machineKeyName(host, machine string) string {
 	return "claude-code on " + host + " (" + machine + ")"
 }

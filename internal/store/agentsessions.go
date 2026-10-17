@@ -128,7 +128,6 @@ type AgentSession struct {
 	LastError  string `json:"last_error,omitempty"`
 }
 
-// Duration is how long the session ran.
 func (a AgentSession) Duration() time.Duration { return a.EndedAt.Sub(a.StartedAt) }
 
 // Sort is the order a log is read in: the request log or the session list.
@@ -167,7 +166,6 @@ var sessionOrder = map[Sort]string{
 	SortDuration: "(ended_at - started_at) DESC, started_at DESC",
 }
 
-// SessionSorts are the rankings the session list offers.
 func SessionSorts() []Sort {
 	return []Sort{SortRecent, SortCost, SortTokens, SortRequests, SortDuration}
 }

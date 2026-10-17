@@ -205,7 +205,7 @@ const pause = 50 * time.Millisecond
 
 func TestPipeSSEDoesNotCountTheOpeningAsTheFirstToken(t *testing.T) {
 	// A role chunk and a keep-alive can come long before the model writes
-	// anything. Counting them made the first token look faster than the
+	// anything. Counting them would make the first token look faster than the
 	// client saw it.
 	opening := ": keep-alive\n\n" +
 		`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}` + "\n\n"
@@ -338,10 +338,8 @@ func TestPipeSSEReadsAChunkLargerThanTheReadBuffer(t *testing.T) {
 }
 
 // The cached share of the prompt rides in the same usage chunk, one level
-// down. It is the difference between a streamed request priced the way the
-// provider prices it and one priced at up to ten times that, so a stream that
-// carried the number and a gateway that did not read it is the failure worth
-// a test of its own.
+// down. Missing it would price a streamed request at up to ten times what the
+// provider charges.
 func TestPipeSSEReadsTheCachedShareOfThePrompt(t *testing.T) {
 	const cachedUsageChunk = `{"id":"1","choices":[],"usage":{"prompt_tokens":100,` +
 		`"completion_tokens":7,"total_tokens":107,"prompt_tokens_details":{"cached_tokens":90}}}`

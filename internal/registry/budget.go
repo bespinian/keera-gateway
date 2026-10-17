@@ -36,7 +36,6 @@ type Budgets struct {
 	held map[string]int64
 }
 
-// credit is what the gateway knows of an organisation's credit account.
 type credit struct {
 	balance  int64
 	invoiced bool
@@ -179,7 +178,6 @@ func (b *Budgets) ChargeCredit(orgID string, micros int64) {
 	b.credit[orgID] = c
 }
 
-// reconcileCredit replaces the credit with the database's.
 func (b *Budgets) reconcileCredit(rows []store.CreditRow) {
 	next := make(map[string]credit, len(rows))
 	for _, r := range rows {

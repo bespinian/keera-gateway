@@ -16,10 +16,9 @@ func TestSessionsGroupRequestsIntoTheTasksTheyWereMadeFor(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	conversation := DerivedSessionKey("aaaaaaaaaaaaaaaa")
 
-	// One task: four calls a minute apart that were served, and a fifth the
-	// budget refused. That last one is the whole reason a session carries how
-	// it ended - a task of five calls that stopped on a guardrail is not a task
-	// that finished.
+	// One task: four served calls a minute apart, and a fifth the budget
+	// refused. A session carries how it ended because a task that stopped on a
+	// guardrail did not finish.
 	events := make([]Event, 0, 6)
 	for i := range 4 {
 		events = append(events, Event{

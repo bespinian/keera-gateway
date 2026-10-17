@@ -16,8 +16,7 @@ func TestScopeOrgRefusesRatherThanRewrites(t *testing.T) {
 	if got, err := admin.ScopeOrg("org_a"); err != nil || got != "org_a" {
 		t.Errorf("ScopeOrg(own) = %q, %v", got, err)
 	}
-	// Naming someone else's is refused. Quietly rewriting it to your own would
-	// answer a question nobody asked.
+	// Naming someone else's is refused, not quietly rewritten to your own.
 	if _, err := admin.ScopeOrg("org_b"); !errors.Is(err, ErrForbidden) {
 		t.Errorf("ScopeOrg(other) err = %v, want ErrForbidden", err)
 	}

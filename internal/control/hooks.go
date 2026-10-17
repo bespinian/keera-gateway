@@ -83,8 +83,8 @@ func scopeList(users []store.GuardrailRef) string {
 }
 
 // deleteUnused deletes a filter, router or MCP server that no guardrail uses.
-// One still in use is refused with a 409 naming those guardrails; inUse says
-// why, given the alias and that list. kind names which, as deleted takes it.
+// One still in use is refused with a 409; inUse writes its message from the
+// alias and the guardrails that use it.
 func (s *Server) deleteUnused(w http.ResponseWriter, r *http.Request, p *authn.Principal, kind string,
 	users func(ctx context.Context, orgID, alias string) ([]store.GuardrailRef, error),
 	remove func(ctx context.Context, orgID, alias string) error,

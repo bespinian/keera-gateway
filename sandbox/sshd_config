@@ -1,12 +1,10 @@
 # sshd inside a Keera sandbox.
 #
-# It runs as the sandbox user, with no privilege separation directory: there is
-# one account and nothing to separate from. Port 2222 rather than 22 is
-# explained at PortSSH in internal/sandbox/sandbox.go.
+# It runs as the sandbox user, with no privilege separation: there is one
+# account. Why port 2222 is explained at PortSSH in internal/sandbox/sandbox.go.
 #
-# Authentication is by key, and the key is the one the gateway put in
-# authorized_keys when the sandbox was created. Passwords are off and there is
-# no password to guess: the account has none.
+# Authentication is by the key the gateway put in authorized_keys when the
+# sandbox was created. The account has no password.
 
 Port 2222
 AddressFamily inet
@@ -17,17 +15,15 @@ PidFile /run/sshd/sshd.pid
 
 # What the gateway set, handed to every session.
 #
-# An ssh session does not inherit the container's environment, so without this a
-# developer who opens a shell finds none of it - no gateway address, no API key -
-# and their agent has no idea where anything is. Relying on the shell's own
-# startup files does not work: a non-interactive `ssh host cmd`, which is what
-# scp and every editor's remote server use, reads ~/.bashrc only on some builds
-# of bash and not on Alpine's.
+# An ssh session does not inherit the container's environment, so a shell would
+# have no gateway address and no API key. Shell startup files are not enough: a
+# non-interactive `ssh host cmd`, as scp and editors' remote servers use, reads
+# ~/.bashrc only on some bash builds, not Alpine's.
 #
-# So sshd injects it from ~/.ssh/environment, for any shell and any kind of
-# session. The usual caution about this option is that a user could set
-# LD_PRELOAD for a privileged login; here the only account is the sandbox's
-# owner, and the entrypoint writes the file before sshd starts.
+# So sshd injects it from ~/.ssh/environment for every session. The usual worry,
+# a user setting LD_PRELOAD for a privileged login, does not apply: the only
+# account is the sandbox's owner, and the entrypoint writes the file before sshd
+# starts.
 PermitUserEnvironment yes
 
 # The only way in.
@@ -39,8 +35,7 @@ KbdInteractiveAuthentication no
 PermitRootLogin no
 UsePAM no
 
-# What a developer actually needs from this: a shell, an editor's remote
-# server, scp, and ports forwarded back to their laptop.
+# A shell, an editor's remote server, scp, and ports forwarded to the laptop.
 AllowTcpForwarding yes
 # An agent forwarded into a machine that runs a model's output would sign with
 # the developer's keys.
@@ -49,9 +44,8 @@ PermitTunnel no
 X11Forwarding no
 Subsystem sftp internal-sftp
 
-# The gateway's attach surface has its own idle watchdog measured in hours; this
-# is the finer one, so that a sandbox whose client vanished releases the pty
-# rather than holding it until the connection times out.
+# The gateway's attach surface has an idle watchdog measured in hours. This finer
+# one releases the pty soon after a client vanishes.
 ClientAliveInterval 60
 ClientAliveCountMax 10
 

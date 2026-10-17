@@ -1,11 +1,8 @@
-// Package secret encrypts the credentials Keera Gateway has to read back.
-//
-// Keys Keera issues are stored only as hashes. A hosted provider's API key
-// and an MCP server's credential have to be sent on every request, and a
-// sign-in's refresh token is kept to ask the directory again. They are the
-// reversible secrets in the database, sealed with a key that lives only in
-// the process environment. A database dump then holds ciphertext, not
-// a working credential.
+// Package secret encrypts the credentials Keera Gateway has to read back:
+// hosted provider API keys, MCP server credentials and sign-in refresh
+// tokens. Keys Keera issues are only hashed. The encryption key lives only in
+// the process environment, so a database dump holds ciphertext, not a working
+// credential.
 package secret
 
 import (
@@ -16,7 +13,6 @@ import (
 	"errors"
 )
 
-// Box seals and opens credentials.
 type Box struct {
 	aead cipher.AEAD
 }
@@ -24,14 +20,13 @@ type Box struct {
 // minKeyLen is a floor: hashing does not make a short key harder to guess.
 const minKeyLen = 16
 
-// New builds a Box from the configured key.
 func New(key string) (*Box, error) {
 	if len(key) < minKeyLen {
 		return nil, errors.New("the encryption key is too short to be one; generate one with: openssl rand -hex 32")
 	}
 	// Domain separation: the same value used elsewhere yields a different key.
-	// It seals MCP credentials and refresh tokens too; the label predates
-	// them, and changing it would make every stored credential unreadable.
+	// The label predates MCP credentials and refresh tokens; changing it would
+	// make every stored credential unreadable.
 	sum := sha256.Sum256([]byte("keera-model-credential-v1|" + key))
 	block, err := aes.NewCipher(sum[:])
 	if err != nil {

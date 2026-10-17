@@ -100,7 +100,6 @@ func (s *Store) PurgeAudit(ctx context.Context, before time.Time) (int64, error)
 	return s.purgeBefore(ctx, "audit_log", before)
 }
 
-// purgeBefore deletes a table's rows older than before.
 func (s *Store) purgeBefore(ctx context.Context, table string, before time.Time) (int64, error) {
 	return inBatches(ctx, func() (int64, error) {
 		tag, err := s.pool.Exec(ctx, `DELETE FROM `+table+` WHERE id IN (

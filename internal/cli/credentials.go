@@ -131,7 +131,6 @@ func forgetSignIn(base string) error {
 	})
 }
 
-// updateCredentials loads the credentials file, changes it and writes it back.
 func updateCredentials(change func(*credentials)) error {
 	c, err := loadCredentials()
 	if err != nil {

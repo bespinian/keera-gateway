@@ -1,6 +1,5 @@
-// Organisations - operator only. This is the multi-tenant screen: one row per
-// customer, and the email domain that decides where their people land when they
-// first sign in.
+// Organisations, for the operator only: one row per customer, and the email
+// domain that decides where their people land on first sign-in.
 
 import { api } from "../api.js";
 import {
@@ -93,8 +92,7 @@ export async function orgsView(ctx) {
               () => orgSettings(ctx, o),
               { label: `Edit ${o.name}` },
             ),
-            // Not an edit: this one does not show anything, it changes which
-            // organisation every other screen in the panel is about.
+            // Not an edit: it switches the organisation every screen shows.
             h(
               "button",
               {
@@ -133,8 +131,8 @@ export async function orgsView(ctx) {
   return h("div", {}, head, rows);
 }
 
-// newOrg asks for a new organisation. switchTo moves the panel to it, for the
-// first-run checklist, whose next step would otherwise still say "pick one".
+// newOrg asks for a new organisation. switchTo moves the panel to it, so the
+// first-run checklist's next step does not still say "pick one".
 export function newOrg(ctx, { switchTo = false } = {}) {
   const name = h("input", {
     class: "input",
@@ -164,16 +162,15 @@ export function newOrg(ctx, { switchTo = false } = {}) {
       }
       const org = await api.createOrg(name.value.trim(), domain.value.trim());
       // The topbar's switcher reads the shell's copy of the list, which
-      // reload() does not fetch again. The list is ordered by creation, so
-      // this one goes at the end.
+      // reload() does not fetch again. It is ordered by creation.
       (ctx.state.orgs = ctx.state.orgs || []).push(org);
       if (switchTo) await ctx.setOrg(org.id);
     },
   });
 }
 
-// liftLimit opens to an organisation that signed itself up what it would
-// otherwise get with its first payment.
+// liftLimit gives a self-signed-up organisation what it would otherwise get
+// with its first payment.
 function liftLimit(ctx, org) {
   formModal({
     title: `Lift the limit of ${org.name}`,
@@ -254,9 +251,8 @@ function orgSettings(ctx, org) {
 }
 
 // cannotDeleteOwn explains why the operator's own organisation cannot be
-// deleted from here: it would take their user row and their session with it.
-// The button still opens this rather than being hidden or disabled, because an
-// operator who came looking for it deserves the reason and the way round it.
+// deleted here: it would take their user and session with it. The button opens
+// this rather than being hidden, so the operator learns why and what to do.
 function cannotDeleteOwn(org) {
   modal({
     title: `Delete ${org.name}?`,
@@ -276,10 +272,8 @@ function cannotDeleteOwn(org) {
   });
 }
 
-// deleteOrg destroys a tenant. It is the most damaging thing the panel can do,
-// so the modal loads the real blast radius before it lets anybody act on it,
-// and then makes them type the organisation's name - an id is easy to click by
-// mistake in a table of ten, a name is not.
+// deleteOrg is the most damaging thing the panel can do, so the modal shows
+// what would go and asks for the organisation's name to be typed.
 function deleteOrg(ctx, org) {
   const summary = h("div", { class: "muted" }, "Counting what it holds…");
   const name = h("input", {
@@ -326,9 +320,8 @@ function deleteOrg(ctx, org) {
   });
   button.disabled = true;
 
-  // Loaded after the modal is up so the operator is not left staring at a
-  // spinner, and failing softly: not knowing the counts is no reason to block a
-  // deletion the typed name already confirms.
+  // Loaded after the modal is up, and failing softly: the typed name already
+  // confirms the deletion.
   Promise.all([
     api.projects(org.id).catch(() => ({ data: [] })),
     api.users(org.id).catch(() => ({ data: [] })),
@@ -367,10 +360,9 @@ function deleteOrg(ctx, org) {
   });
 }
 
-/** orgNameOf is the name to show for an organisation: orgID's, or else the
- *  one the panel is looking at. Hints say the name rather than "this
- *  organisation". The fallback is for a name the panel does not have; start
- *  says it opens a sentence. */
+/** orgNameOf is the name of orgID, or else of the organisation in view. The
+ *  fallback is for a name the panel does not have; start says it opens a
+ *  sentence. */
 export function orgNameOf(ctx, orgID, { start = false } = {}) {
   const id = orgID || ctx.orgID || ctx.state.me.org_id;
   const name =
@@ -380,15 +372,9 @@ export function orgNameOf(ctx, orgID, { start = false } = {}) {
   return start ? "This organisation" : "this organisation";
 }
 
-/** chooseOrg is the wall a screen hits when an operator has the switcher on
- *  every organisation at once.
- *
- *  Everything on those screens belongs to one organisation, so they have
- *  nothing to show. The fix is the switcher in the topbar, and a screen that
- *  only names it leaves the reader hunting for it - so the picker is here,
- *  where the wall is.
- *
- *  what is the plural of whatever the screen holds, for the sentence. */
+/** chooseOrg is shown on a screen that needs one organisation while the
+ *  operator views all of them. It carries a picker so nobody hunts for the
+ *  switcher. what is the plural of what the screen holds. */
 export function chooseOrg(ctx, what) {
   const orgs = ctx.state.orgs || [];
   if (!orgs.length) {
@@ -407,8 +393,7 @@ export function chooseOrg(ctx, what) {
     ctx.reload();
   };
 
-  // A handful of tenants is a row of buttons, which is one click. A deployment
-  // with more than that gets the list it can actually work through.
+  // A few organisations get a row of buttons, more get a list.
   let picker;
   if (orgs.length <= 8) {
     picker = h(

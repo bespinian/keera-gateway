@@ -158,8 +158,6 @@ func splitObject(raw []byte) (map[string]json.RawMessage, []string, error) {
 	}
 }
 
-// skipSpace returns the index of the first byte at or after i that is not JSON
-// whitespace.
 func skipSpace(raw []byte, i int) int {
 	for i < len(raw) {
 		switch raw[i] {
@@ -359,16 +357,13 @@ func (b *body) prependSystem(content string) bool {
 	return true
 }
 
-// firstUserMessage returns the content of the first "user" message in a chat
-// request, and reports whether there was one.
+// firstUserMessage returns the raw content of the first "user" message in a
+// chat request. It is the opening prompt, the same on every call of a task, so
+// it works as the task's identity.
 //
-// It is the opening prompt: the same on the first call of a task and on its
-// fortieth, which makes it usable as the task's identity.
-//
-// It steps over each array element without decoding it, and returns the
-// content as its raw span. Elements that are not objects or have no role are
-// skipped, not refused: this only labels a usage row, and must not fail a body
-// the inference plane would accept.
+// Elements that are not objects or have no role are skipped, not refused:
+// this only labels a usage row, and must not fail a body the inference plane
+// would accept.
 func (b *body) firstUserMessage() (json.RawMessage, bool) {
 	raw, ok := b.value("messages")
 	if !ok {

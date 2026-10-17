@@ -14,10 +14,8 @@ import (
 )
 
 func TestAccessSaysTheOperatorKeyIsNobody(t *testing.T) {
-	// The operator key belongs to a deployment, not to a person, so it has no keys
-	// and no budget of its own. Answering with an empty screen would read as a
-	// deployment with nothing in it - and reaching for a person's rows would
-	// reach for a person who is not there.
+	// The operator key is not a person, so it has no keys or budget. An empty
+	// screen would read as a deployment with nothing in it.
 	s := New(nil, nil, nil, nil, Options{
 		OperatorKey: testOperatorKey,
 	}, slog.New(slog.DiscardHandler))
@@ -57,9 +55,8 @@ func TestAllowedModelsIsWhatTheKeyCanActuallyCall(t *testing.T) {
 		want  []string
 	}{
 		{
-			// A nil allow-list means every enabled alias. Resolving it to the
-			// real list is what lets the screen name them instead of saying
-			// "no restriction" and leaving the developer to guess.
+			// A nil allow-list means every enabled alias. The screen names
+			// them rather than saying "no restriction".
 			name:  "no restriction resolves to the catalogue",
 			limit: nil,
 			want:  []string{"keera-code", "keera-frontier"},
@@ -85,10 +82,8 @@ func TestAllowedModelsIsWhatTheKeyCanActuallyCall(t *testing.T) {
 	}
 }
 
-// A developer is shown each level's own wording rather than the joined text the
-// gateway sends. The joined text says what reaches the model; it does not say
-// which of three people to ask about changing it, and that is the question
-// somebody reading this screen actually has.
+// A developer is shown each level's own wording, not the joined text the
+// gateway sends, so they can tell whom to ask about changing it.
 func TestScopeStatesNameEachLevelsOwnPrompt(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 
@@ -96,8 +91,8 @@ func TestScopeStatesNameEachLevelsOwnPrompt(t *testing.T) {
 		fromOrg = "Answer in British English."
 		fromKey = "Prefer the standard library."
 	)
-	// The project sets none, which must read as a level that says nothing rather
-	// than as the level above it repeated.
+	// The project sets none: that must read as nothing, not as the level above
+	// repeated.
 	res := policy.Resolve(
 		policy.Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
 		&policy.Limits{SystemPrompt: new(fromOrg)},

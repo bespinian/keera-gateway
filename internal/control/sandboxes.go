@@ -36,7 +36,6 @@ func (s *Server) requireSandboxes(w http.ResponseWriter) bool {
 	return true
 }
 
-// withSandboxes gates a route on requireSandboxes.
 func (s *Server) withSandboxes(next handler) handler {
 	return func(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 		if s.requireSandboxes(w) {
@@ -95,7 +94,6 @@ func (s *Server) listSandboxClasses(w http.ResponseWriter, r *http.Request, p *a
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-// putSandboxClass creates or replaces one of an organisation's classes.
 func (s *Server) putSandboxClass(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	orgID, ok := s.adminOrg(w, r, p)
 	if !ok {

@@ -196,7 +196,6 @@ type scopeSays struct {
 	filters []string
 }
 
-// saysOf reads what one level adds, or nothing when it adds nothing.
 func saysOf(lim *policy.Limits) scopeSays {
 	if lim == nil {
 		return scopeSays{}

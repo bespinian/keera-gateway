@@ -1,14 +1,9 @@
-// The first run.
-//
-// A fresh deployment has nothing in it, and every screen that needs an
-// organisation points at a switcher that is not rendered until one exists.
-// This is the way out: the things that have to happen, in order, each
-// with the button that does it, each ticking itself off from what the control
-// plane already has.
+// The first-run checklist: the steps a fresh deployment needs, in order, each
+// with its button, each ticked off from what the control plane already has.
 //
 // It replaces the dashboard until the first request has been served and, with
 // card payments, until the organisation has had credit. A member gets a
-// shorter guide of their own, until one of their keys has made a request.
+// shorter guide, until one of their keys has made a request.
 
 import { h, icon, icons, pill, isAdmin } from "../ui.js";
 import { addCredit } from "./billing.js";
@@ -17,7 +12,7 @@ import { activateKey, confirmRotate, openIssueKey } from "./keys.js";
 import { newOrg, orgNameOf } from "./orgs.js";
 
 /** firstRunDue reports whether the checklist replaces the dashboard, from the
- *  counts of /v1/setup. The sidebar asks too, to name the screen after it. */
+ *  counts of /v1/setup. The sidebar uses it to name the screen. */
 export function firstRunDue(ctx, setup) {
   if (!isAdmin(ctx) || !setup) return false;
   if (setup.requests === 0) return true;
@@ -35,8 +30,7 @@ export function firstRun(ctx, setup, credit) {
   const operator = ctx.state.me.unrestricted;
   const admin = isAdmin(ctx);
 
-  // Steps are ordered by what the next one needs, which is also the order a
-  // deployment actually comes up in.
+  // Each step needs the ones before it.
   const steps = [
     {
       title: "Create your organisation",
@@ -52,8 +46,7 @@ export function firstRun(ctx, setup, credit) {
               " holds all your users, models, keys, etc.",
             ]
           : "Your organisation holds all your users, models, keys, etc.",
-      // Only an operator can create one. An administrator arrives at a
-      // deployment that already has theirs, so for them this is already done.
+      // Only an operator can create one. An administrator already has theirs.
       action: operator
         ? {
             label: "Create organisation",
@@ -95,8 +88,8 @@ export function firstRun(ctx, setup, credit) {
     },
   ];
 
-  // Only a deployment that takes card payments asks for credit. An
-  // organisation billed by invoice needs none.
+  // Only with card payments. An organisation billed by invoice needs no
+  // credit.
   if (ctx.state.me.payments) {
     const account = credit && credit.account;
     const limited =
@@ -156,10 +149,9 @@ export function memberRunDue(ctx, access) {
   );
 }
 
-/** memberRun is the guide for a member: from signing in to a working editor.
- *  An administrator issues the key, so the member's first task is to hold its
- *  secret: by activating the key, or, for one the administrator activated, by
- *  rotating it. */
+/** memberRun is a member's guide, from signing in to a working editor. An
+ *  administrator issues the key, so the first step is to get its secret: by
+ *  activating the key, or rotating one already active. */
 export function memberRun(ctx, access) {
   const keys = usableKeys(access);
   const key = keys[0];
@@ -238,7 +230,6 @@ function getKeyStep(keys, key, ctx) {
   };
 }
 
-/** stepList draws a guide's steps, with the next one to do drawn out. */
 function stepList(steps) {
   const nextIndex = steps.findIndex((s) => !s.done && !s.skipped);
   const button = (a, primary) =>
@@ -261,7 +252,6 @@ function stepList(steps) {
             (s.done ? " step-done" : "") +
             (current ? " step-now" : ""),
         },
-        // The number rides on the icon, so the order still reads at a glance.
         h(
           "div",
           { class: "step-icon" },

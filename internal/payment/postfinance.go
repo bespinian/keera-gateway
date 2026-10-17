@@ -43,7 +43,6 @@ type Client struct {
 	http *http.Client
 }
 
-// New builds a client.
 func New(s Settings) *Client {
 	s.URL = strings.TrimRight(s.URL, "/")
 	if s.URL == "" {
@@ -138,21 +137,18 @@ type Card struct {
 	Expires time.Time
 }
 
-// Create creates a transaction.
 func (c *Client) Create(ctx context.Context, t NewTransaction) (Transaction, error) {
 	var out Transaction
 	err := c.do(ctx, http.MethodPost, "/payment/transactions", t, &out)
 	return out, err
 }
 
-// Get reads a transaction.
 func (c *Client) Get(ctx context.Context, id int64) (Transaction, error) {
 	var out Transaction
 	err := c.do(ctx, http.MethodGet, txPath(id), nil, &out)
 	return out, err
 }
 
-// txPath is the API path of one transaction.
 func txPath(id int64) string {
 	return "/payment/transactions/" + strconv.FormatInt(id, 10)
 }

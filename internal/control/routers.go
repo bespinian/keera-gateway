@@ -81,7 +81,6 @@ func (in routerInput) router(orgID, alias string) policy.Router {
 		}
 	}
 	for _, d := range in.Destinations {
-		// A destination named twice is one destination.
 		if d = strings.TrimSpace(d); d != "" && !slices.Contains(rt.Destinations, d) {
 			rt.Destinations = append(rt.Destinations, d)
 		}

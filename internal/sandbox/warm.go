@@ -150,7 +150,6 @@ func warmName(org, class string) string {
 	return "keera-" + shortID(org) + "-" + class
 }
 
-// poolMeta is the metadata on a class's template and pool.
 func (k *Kubernetes) poolMeta(org, class string) kubeMeta {
 	return kubeMeta{
 		Name:      warmName(org, class),
@@ -343,7 +342,6 @@ func (k *Kubernetes) claimStatus(ctx context.Context, ref Ref) (Status, error) {
 	return bound, nil
 }
 
-// claim reads one claim.
 func (k *Kubernetes) claim(ctx context.Context, ref Ref) (sandboxClaim, error) {
 	var c sandboxClaim
 	if err := k.c.get(ctx, k.claimPath(ref), &c); err != nil {

@@ -38,7 +38,6 @@ func scanSignup(r row) (Signup, error) {
 	return su, notFound(err)
 }
 
-// CreateSignup records a sign-up until expires.
 func (s *Store) CreateSignup(ctx context.Context, su Signup, expires time.Time) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO signups (token_hash, user_id, provider,
 		external_id, email, role, refresh_token, invited_org, redirect_to, expires_at)

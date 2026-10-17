@@ -13,8 +13,7 @@ type MCPServer struct {
 	OrgID string `json:"org_id"`
 	Alias string `json:"alias"`
 	// URL is the server's Streamable HTTP endpoint.
-	URL string `json:"url"`
-	// Description says what the server is for.
+	URL         string `json:"url"`
 	Description string `json:"description,omitempty"`
 	// AuthHeader is the header the credential is sent in. Empty is
 	// Authorization, as a bearer token; any other header gets the credential

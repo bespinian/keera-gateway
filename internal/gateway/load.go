@@ -72,7 +72,6 @@ type destLoad struct {
 	failedAt time.Time
 }
 
-// newLoads builds the tracker.
 func newLoads() *loads { return &loads{} }
 
 // get is the per-destination record, made on first use. key is the model's
@@ -150,7 +149,6 @@ type reading struct {
 	failing bool
 }
 
-// read takes one destination's numbers.
 func (l *loads) read(key string, now time.Time) reading {
 	d := l.get(key)
 	r := reading{inflight: d.inflight.Load()}

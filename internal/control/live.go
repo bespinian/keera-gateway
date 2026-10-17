@@ -298,7 +298,6 @@ func (c *liveCursor) forget() {
 	c.sent = slices.DeleteFunc(c.sent, func(id int64) bool { return id <= c.settled })
 }
 
-// outcomeTally is one stream's running outcome counts.
 type outcomeTally struct {
 	// base counts the window up to upTo, a settled id, so no late row can
 	// change it. at is when the whole window was last counted; a zero at

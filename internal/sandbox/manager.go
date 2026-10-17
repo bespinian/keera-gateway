@@ -32,7 +32,6 @@ import (
 // It also runs the sweep, which ends sandboxes whose time is up and keeps the
 // running-time column current.
 
-// ManagerOptions configures the manager.
 type ManagerOptions struct {
 	// PublicURL is the gateway as the sandbox sees it: the base URL its agent
 	// sends inference to, reachable from inside the cluster.
@@ -119,7 +118,6 @@ type Manager struct {
 	pruneOnce sync.Once
 }
 
-// NewManager builds the manager.
 func NewManager(st *store.Store, driver Driver, opts ManagerOptions) *Manager {
 	if opts.Log == nil {
 		opts.Log = slog.Default()
@@ -363,8 +361,8 @@ func clampTTL(class policy.SandboxClass, want time.Duration, limits policy.Resol
 // always be a limit of one.
 //
 // Each count is held to its own level's limit. req.Limits is the tightest of
-// every level, which is right for the project, but a project capped at two must not
-// cap its whole organisation at two.
+// every level, which is right for the project, but a project capped at two
+// must not cap its whole organisation at two.
 func (m *Manager) checkQuota(ctx context.Context, req CreateRequest) error {
 	orgLimit := req.Limits.MaxSandboxes
 	if req.ProjectID != "" {
@@ -585,7 +583,6 @@ func (m *Manager) checkOut(ctx context.Context, env map[string]string, req Creat
 	return cred, nil
 }
 
-// repoEnv tells the sandbox what to check out and how.
 func (m *Manager) repoEnv(env map[string]string, cred GitCredential, branch string) {
 	env["KEERA_REPO"] = cred.Repo
 	if branch != "" {
@@ -1166,7 +1163,6 @@ func (m *Manager) release(ctx context.Context, sb store.Sandbox) {
 	m.revokeGit(ctx, sb)
 }
 
-// stopClock stops a sandbox's running-time accounting.
 func (m *Manager) stopClock(ctx context.Context, sbID string) {
 	if err := m.st.StopAccounting(ctx, sbID, time.Now()); err != nil {
 		m.log.Warn("sandbox: freezing the running clock failed", "sandbox", sbID, "error", err)
@@ -1371,7 +1367,6 @@ func (m *Manager) reachableModels(ctx context.Context, req CreateRequest) []poli
 	return chatModelsFor(resolved, catalogue)
 }
 
-// chatModelsFor is every enabled chat model of catalogue that resolved may use.
 func chatModelsFor(resolved *policy.Resolved, catalogue []policy.Model) []policy.Model {
 	out := make([]policy.Model, 0, len(catalogue))
 	for _, mod := range catalogue {

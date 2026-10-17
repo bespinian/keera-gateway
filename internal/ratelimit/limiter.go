@@ -34,7 +34,6 @@ type Limiter struct {
 	b  map[string]*bucket
 }
 
-// New returns an empty limiter.
 func New() *Limiter { return &Limiter{b: make(map[string]*bucket)} }
 
 // get returns the bucket for key, creating it or retuning it if the configured
@@ -165,8 +164,8 @@ func (l *Limiter) Sweep(idle time.Duration, now time.Time) {
 }
 
 // holds reports whether a bucket with tokens left satisfies a requirement. A
-// Take needs a whole unit. Otherwise any credit will do: ChargeAll puts the bucket
-// into debt, and the next request pays for it.
+// Take needs a whole unit. Otherwise any credit will do: ChargeAll puts the
+// bucket into debt, and the next request pays for it.
 func holds(take bool, tokens float64) bool {
 	if take {
 		return tokens >= 1

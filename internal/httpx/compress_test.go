@@ -142,9 +142,8 @@ func TestAStreamIsNotHeldInTheCompressor(t *testing.T) {
 }
 
 func TestAnAlreadyEncodedResponsePassesThrough(t *testing.T) {
-	// What the panel's embedded assets do: compressed once at startup, served
-	// with their own Content-Encoding. Compressing them again per request is
-	// the whole thing this must not do.
+	// Like the panel's embedded assets: compressed once at startup and served
+	// with their own Content-Encoding. They must not be compressed again.
 	var squeezed bytes.Buffer
 	zw := gzip.NewWriter(&squeezed)
 	_, _ = io.WriteString(zw, strings.Repeat("export const view = () => {};\n", 200))
@@ -208,11 +207,10 @@ func TestTheErrorEnvelopeSurvivesCompression(t *testing.T) {
 }
 
 func TestAPanicStillReachesTheClientAsAnError(t *testing.T) {
-	// The compressor holds a response until it knows whether to gzip it, and
-	// a handler that panics before the threshold has written nothing the
-	// client can use. What it must not do is send that nothing: the middleware
-	// above answers a panic with a 500, and it can only do so while the
-	// response line is still unsent.
+	// A handler that panics before the threshold has written nothing usable,
+	// and the compressor must not send that nothing: the middleware above
+	// answers a panic with a 500, which it can only do while the response line
+	// is still unsent.
 	h := Middleware(slog.New(slog.DiscardHandler), Compress(http.HandlerFunc(
 		func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")

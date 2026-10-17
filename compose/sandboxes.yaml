@@ -1,23 +1,21 @@
 # The sandbox classes each new organisation starts with, for a single-host
 # deployment.
 #
-# A class name is a contract: it is typed on a command line and written into
-# repositories' own configuration, so an administrator can change the image
-# behind it, move it to a stronger isolation tier or give it more memory without
-# anybody editing anything. When an organisation is created it gets a copy of
-# every class here, and the copies are its own to change. An organisation that
-# already exists is not changed.
+# A class name is a contract: people type it and repositories configure it, so
+# an administrator can change its image, isolation tier or memory without
+# anyone editing anything. A new organisation gets a copy of every class here,
+# its own to change. Existing organisations are not changed.
 #
-# It is read even with no KEERA_SANDBOX_DRIVER set; only starting a sandbox
-# needs a driver. Here that is podman, which only runs under `make dev`: see
+# It is read even without KEERA_SANDBOX_DRIVER; only starting a sandbox needs a
+# driver. Here that is podman, which only runs under `make dev`: see
 # "Sandboxes do not work in this shape" in README.md.
 #
-# It is also the worked example the Helm chart's values mirror. The chart is
-# not in this repository: see "The other shapes" in docs/install.md.
+# The Helm chart's values mirror this example. The chart is not in this
+# repository: see "The other shapes" in docs/install.md.
 #
-# On this driver a sandbox has unrestricted outbound network access - the
-# internet, the host and the LAN. The single-host shape is for development
-# and for a host the deployment already trusts. See docs/sandboxes.md, "The
+# On this driver a sandbox has unrestricted outbound network access: the
+# internet, the host and the LAN. The single-host shape is for development and
+# for a host the deployment already trusts. See docs/sandboxes.md, "The
 # security boundary".
 
 sandboxes:
@@ -26,10 +24,9 @@ sandboxes:
     # No image is published for this. Build the base and put your own on top:
     #   podman build -t localhost/keera-sandbox:dev sandbox
     image: localhost/keera-sandbox:dev
-    # On a single host this is whatever OCI runtime KEERA_SANDBOX_RUNTIME_*
-    # names. Most hosts have only runc or crun, so "standard" is the honest
-    # declaration; a host with runsc installed can move this to "isolated" and
-    # set KEERA_SANDBOX_RUNTIME_ISOLATED=runsc.
+    # On a single host this is the OCI runtime KEERA_SANDBOX_RUNTIME_* names.
+    # Most hosts have only runc or crun, so "standard" is honest; a host with
+    # runsc can use "isolated" and set KEERA_SANDBOX_RUNTIME_ISOLATED=runsc.
     isolation: standard
     cpu: "4"
     memory: 8Gi
@@ -44,9 +41,9 @@ sandboxes:
     isolation: standard
     cpu: "2"
     memory: 4Gi
-    # No disk. An agent sandbox exists for one task and pushes a branch at the
-    # end of it, so there is nothing worth keeping - and it is never suspended.
-    # Podman keeps a home volume all the same.
+    # No disk: an agent sandbox pushes a branch at the end of its task, so
+    # nothing is worth keeping, and it is never suspended. Podman keeps a home
+    # volume anyway.
     disk: ""
     default_ttl: 1h
     max_ttl: 4h

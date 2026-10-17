@@ -35,7 +35,6 @@ import (
 	"github.com/bespinian/keera-gateway/internal/webui"
 )
 
-// Options configures the control plane.
 type Options struct {
 	// OperatorKey is the credential for automation, and the way in before
 	// there are users. Empty means there is none, and nothing can sign in
@@ -54,8 +53,7 @@ type Options struct {
 	// off.
 	Passkeys *authn.RelyingParty
 	// ServeUI serves the control panel from this listener's root.
-	ServeUI bool
-	// SecureCookies marks the session cookie Secure.
+	ServeUI       bool
 	SecureCookies bool
 	// PublicURL is this gateway as a browser sees it. It is also the origin
 	// put into the client configurations the panel hands out. Empty falls back
@@ -90,7 +88,6 @@ type Options struct {
 // handler is a route that has already been authenticated.
 type handler func(http.ResponseWriter, *http.Request, *authn.Principal)
 
-// Server is the control listener.
 type Server struct {
 	st       *store.Store
 	reg      *registry.Registry
@@ -117,7 +114,6 @@ type Server struct {
 	feed *requestFeed
 }
 
-// New builds a control server.
 func New(st *store.Store, reg *registry.Registry, m *metrics.Registry, rec *usage.Recorder,
 	opts Options, log *slog.Logger) *Server {
 	opts.SessionGap = cmp.Or(opts.SessionGap, store.DefaultSessionGap)
@@ -251,7 +247,6 @@ func (s *Server) Handler() http.Handler {
 	route("DELETE /v1/models/{alias}", s.deleteModel)
 	route("POST /v1/models/{alias}/check", s.checkModel)
 
-	// MCP servers the gateway stands in front of, and their tool calls.
 	route("GET /v1/mcp-servers", s.listMCPServers)
 	route("PUT /v1/mcp-servers/{alias}", s.putMCPServer)
 	route("DELETE /v1/mcp-servers/{alias}", s.deleteMCPServer)
@@ -374,7 +369,6 @@ const (
 // gateway's limiter sweeps with it too.
 const BucketIdle = 10 * time.Minute
 
-// signInThrottled is what a throttled sign-in route answers.
 const signInThrottled = "too many sign-in attempts from this address; wait a moment and try again"
 
 // throttle limits one unauthenticated route per client address, and answers
@@ -435,23 +429,18 @@ func constantTimeEqual(presented string, want [32]byte) bool {
 	return subtle.ConstantTimeCompare(got[:], want[:]) == 1
 }
 
-// forbid writes the standard refusal for an authorisation failure.
 func forbid(w http.ResponseWriter, msg string) {
 	httpx.WriteError(w, http.StatusForbidden, "invalid_request_error", "forbidden", msg)
 }
 
-// unauthorized writes the standard refusal for a missing or bad credential.
 func unauthorized(w http.ResponseWriter, code, msg string) {
 	httpx.WriteError(w, http.StatusUnauthorized, "invalid_request_error", code, msg)
 }
 
-// badRequest writes the standard refusal for a request that is not valid.
 func badRequest(w http.ResponseWriter, msg string) {
 	httpx.WriteError(w, http.StatusBadRequest, "invalid_request_error", "", msg)
 }
 
-// conflict writes the standard refusal for a request that clashes with what
-// is stored.
 func conflict(w http.ResponseWriter, code, msg string) {
 	httpx.WriteError(w, http.StatusConflict, "invalid_request_error", code, msg)
 }
@@ -507,7 +496,6 @@ func (s *Server) requireOrg(w http.ResponseWriter, p *authn.Principal, requested
 	return orgID, true
 }
 
-// needOrg refuses a request that names no organisation where it needs one.
 func needOrg(w http.ResponseWriter, msg string) {
 	httpx.WriteError(w, http.StatusBadRequest, "invalid_request_error", "org_required", msg)
 }
@@ -529,7 +517,6 @@ func (s *Server) orgToAdmin(w http.ResponseWriter, p *authn.Principal, requested
 	return orgID, ok && s.requireOrgAdmin(w, p, orgID)
 }
 
-// requireOrgAdmin checks that the caller may change an organisation.
 func (s *Server) requireOrgAdmin(w http.ResponseWriter, p *authn.Principal, orgID string) bool {
 	if !p.CanAdminOrg(orgID) {
 		forbid(w, "only an administrator of this organisation can do that")

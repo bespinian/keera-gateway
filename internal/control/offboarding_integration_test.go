@@ -385,7 +385,6 @@ func TestAnExpiredSandboxResumesWithANewKey(t *testing.T) {
 	}
 	oldKey := driver.env["desk"]["KEERA_API_KEY"]
 
-	// Its time runs out.
 	m.Sweep(ctx, sb.ExpiresAt.Add(time.Minute))
 	expired, err := st.Sandbox(ctx, sb.ID)
 	if err != nil || expired.State != policy.SandboxExpired {

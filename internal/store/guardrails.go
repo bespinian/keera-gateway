@@ -59,7 +59,6 @@ func limitValues(lim policy.Limits) []any {
 		lim.MaxSandboxCPU, lim.MaxSandboxMemory, lim.AllowedTools, lim.AllowedRepos}
 }
 
-// GetGuardrail reads the limits attached to one scope.
 func (s *Store) GetGuardrail(ctx context.Context, scopeType policy.ScopeType, scopeID string) (policy.Limits, error) {
 	var (
 		lim    policy.Limits
@@ -76,7 +75,6 @@ func (s *Store) GetGuardrail(ctx context.Context, scopeType policy.ScopeType, sc
 	return lim, nil
 }
 
-// PutGuardrail replaces the limits attached to one scope.
 func (s *Store) PutGuardrail(ctx context.Context, scopeType policy.ScopeType, scopeID string, lim policy.Limits) error {
 	args := append([]any{string(scopeType), scopeID}, limitValues(lim)...)
 	_, err := s.pool.Exec(ctx, putGuardrailSQL, args...)
@@ -143,20 +141,17 @@ func (s *Store) LoadFilters(ctx context.Context) ([]policy.Filter, error) {
 	return queryAll(ctx, s.pool, scanFilter, filterColumns+" FROM filters ORDER BY org_id, alias")
 }
 
-// ListFilters reads one organisation's filters.
 func (s *Store) ListFilters(ctx context.Context, orgID string) ([]policy.Filter, error) {
 	return queryAll(ctx, s.pool, scanFilter,
 		filterColumns+" FROM filters WHERE org_id = $1 ORDER BY alias", orgID)
 }
 
-// Filter reads one filter, or ErrNotFound.
 func (s *Store) Filter(ctx context.Context, orgID, alias string) (policy.Filter, error) {
 	f, err := scanFilter(s.pool.QueryRow(ctx,
 		filterColumns+" FROM filters WHERE org_id = $1 AND alias = $2", orgID, alias))
 	return f, notFound(err)
 }
 
-// UpsertFilter creates or replaces one filter.
 func (s *Store) UpsertFilter(ctx context.Context, f policy.Filter) (policy.Filter, error) {
 	// The one place a missing mode gets its default.
 	if f.Mode == "" {
@@ -185,7 +180,6 @@ func (s *Store) UpsertFilter(ctx context.Context, f policy.Filter) (policy.Filte
 	return f, err
 }
 
-// DeleteFilter removes one filter.
 func (s *Store) DeleteFilter(ctx context.Context, orgID, alias string) error {
 	return s.execOne(ctx, "DELETE FROM filters WHERE org_id = $1 AND alias = $2", orgID, alias)
 }

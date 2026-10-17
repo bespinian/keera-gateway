@@ -1,5 +1,4 @@
-// Projects - the screen where an enterprise administrator sets guardrails per
-// project, which is the reason the panel exists.
+// Projects: where an administrator sets guardrails per project.
 
 import { api } from "../api.js";
 import {
@@ -51,9 +50,8 @@ export async function projectsView(ctx) {
           "the organisation allows, never widen it."
       : "A project's guardrails apply to every key in it. Open a project to see " +
           "them. An administrator sets them.",
-    // The organisation's own guardrails are the ceiling every row here is held
-    // inside, and its system prompt reaches every request every member makes.
-    // A member is subject to both, so both are theirs to read.
+    // The organisation's guardrails cap every project, and its system prompt
+    // reaches every request. A member is subject to both, so may read both.
     h(
       "button",
       {
@@ -80,9 +78,8 @@ export async function projectsView(ctx) {
   const rows = table(
     [
       {
-        // The name opens the project's own screen: what it has been doing, what
-        // it spent doing it, and the requests behind both. The button at the end
-        // of the row stays what this screen is for, which is the guardrails.
+        // The name opens the project's own screen. The button at the end of
+        // the row opens the guardrails.
         label: "Name",
         sortKey: (t) => t.name,
         cell: (t) =>
@@ -119,8 +116,7 @@ export async function projectsView(ctx) {
       },
       {
         label: "Budget",
-        // How much of its budget a project has used, so the ones about to run
-        // out come first. One without a budget has nothing to run out of.
+        // By share of budget used, so the ones about to run out come first.
         sortKey: (t) =>
           t.budget_micros ? t.spend_micros / t.budget_micros : null,
         sortDir: "desc",
@@ -187,10 +183,8 @@ export async function projectsView(ctx) {
               },
               "Guardrails",
             ),
-            // Editing and deleting sit behind the guardrails button rather
-            // than beside the name, because the name is a link to the
-            // project's own screen and a pencil next to it would be read as
-            // editing what that screen shows.
+            // Not beside the name: the name links to the project's screen,
+            // and a pencil there would read as editing that screen.
             canEdit
               ? iconButton(
                   icons.pencil,
@@ -223,7 +217,6 @@ export async function projectsView(ctx) {
   return h("div", {}, head, rows);
 }
 
-// projectFields are the inputs a new project and an edited one share.
 function projectFields(project) {
   const name = h("input", {
     class: "input",
@@ -271,11 +264,8 @@ function newProject(ctx) {
   });
 }
 
-// editProject changes a project's labels and nothing else. Keys, guardrails,
-// spend and every usage row ever written hold the project by its id, so a
-// rename is safe in a way renaming things usually is not - which is worth saying
-// in the dialog, because an administrator looking at a month of reports has no
-// reason to assume it.
+// editProject changes a project's labels only. Everything holds the project by
+// its id, so a rename is safe. The dialog says so, as nobody would assume it.
 export function editProject(ctx, project) {
   const { name, description } = projectFields(project);
   formModal({
@@ -312,15 +302,13 @@ export function editProject(ctx, project) {
 
 // deleteProject removes a project once nothing live is bound to it.
 //
-// The control plane refuses while any key in the project is not revoked, expired
-// ones included, and the row already knows how many that is - so for such a
-// project the button explains why instead of asking to confirm, and offers the
-// way to the keys. That is more use than a red button that comes back with the
-// same sentence as an error.
+// The control plane refuses while any key in it is not revoked, expired ones
+// included. The row knows that count, so the button explains and links to the
+// keys instead of failing with an error.
 //
-// Where it can go ahead, the guardrails are the part worth naming: they are the
-// only thing in a project that is not recoverable from somewhere else. done
-// runs after the delete; the project's own screen uses it to leave.
+// Otherwise the dialog names the guardrails, the only part that cannot be
+// recovered elsewhere. done runs after the delete; the project's own screen
+// uses it to leave.
 export function deleteProject(ctx, project, done = () => ctx.reload()) {
   const live = project.active_keys || 0;
   if (live) {
@@ -367,14 +355,11 @@ export function deleteProject(ctx, project, done = () => ctx.reload()) {
   });
 }
 
-// openProject opens the shared guardrails dialog with the organisation's limits
-// loaded as the ceiling, so the sentence "projects can only narrow" arrives as the
-// actual numbers rather than as a warning.
+// openProject opens the guardrails dialog with the organisation's limits as the
+// ceiling, so "projects can only narrow" shows as real numbers.
 //
-// A member gets the same dialog with nothing to fill in. What a project allows and
-// what it says to the model on their behalf is what they are working inside;
-// the numbers are the answer to "why was I refused", and refusing to show them
-// only turns that into a message to an administrator.
+// A member gets the same dialog read-only: the numbers answer "why was I
+// refused" without asking an administrator.
 export async function openProject(
   ctx,
   project,

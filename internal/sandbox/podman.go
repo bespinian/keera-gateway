@@ -36,7 +36,6 @@ import (
 // The last one is the real difference from Kubernetes, and docs/sandboxes.md
 // says so too.
 
-// PodmanOptions configures the driver.
 type PodmanOptions struct {
 	// Binary is the podman command, "podman" by default.
 	Binary string
@@ -51,7 +50,6 @@ type PodmanOptions struct {
 	Log      *slog.Logger
 }
 
-// Podman is the driver.
 type Podman struct {
 	opts PodmanOptions
 	log  *slog.Logger
@@ -73,7 +71,6 @@ func NewPodman(ctx context.Context, opts PodmanOptions) (*Podman, error) {
 	return p, nil
 }
 
-// Name returns "podman".
 func (p *Podman) Name() string { return "podman" }
 
 // Capabilities reports what this driver does: no warm pool, and the
@@ -87,7 +84,6 @@ func (p *Podman) Capabilities() Capabilities {
 func containerName(ref Ref) string { return "keera-sbx-" + objectName(ref) }
 func volumeName(ref Ref) string    { return "keera-home-" + objectName(ref) }
 
-// Create starts one container.
 func (p *Podman) Create(ctx context.Context, spec Spec) (Status, error) {
 	runtime, err := runtimeFor(spec.Class, p.opts.Runtimes, p.Name())
 	if err != nil {
@@ -172,7 +168,6 @@ type podmanInspect struct {
 	} `json:"Config"`
 }
 
-// inspect reads one container's state and labels.
 func (p *Podman) inspect(ctx context.Context, ref Ref) (podmanInspect, error) {
 	out, err := p.run(ctx, "inspect", "--type", "container", containerName(ref))
 	if err != nil {
@@ -190,7 +185,6 @@ func (p *Podman) inspect(ctx context.Context, ref Ref) (podmanInspect, error) {
 	return items[0], nil
 }
 
-// Status reads one container back.
 func (p *Podman) Status(ctx context.Context, ref Ref) (Status, error) {
 	in, err := p.inspect(ctx, ref)
 	if err != nil {
@@ -266,7 +260,6 @@ func (p *Podman) Suspend(ctx context.Context, ref Ref) error {
 	return podmanNotFound(err)
 }
 
-// Resume starts a stopped container again.
 func (p *Podman) Resume(ctx context.Context, ref Ref) error {
 	_, err := p.run(ctx, "start", containerName(ref))
 	return podmanNotFound(err)

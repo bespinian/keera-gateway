@@ -139,7 +139,6 @@ func TestCreditDoesNotStopARouterWhoseModelIsNeverAsked(t *testing.T) {
 	}
 }
 
-// waitFor polls until done holds, and fails the test if it never does.
 func waitFor(t *testing.T, what string, done func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

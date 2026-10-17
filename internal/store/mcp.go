@@ -23,17 +23,14 @@ func scanMCPServer(r row) (policy.MCPServer, error) {
 	return m, nil
 }
 
-// LoadMCPServers reads every organisation's MCP servers.
 func (s *Store) LoadMCPServers(ctx context.Context) ([]policy.MCPServer, error) {
 	return queryAll(ctx, s.pool, scanMCPServer, mcpColumns+" FROM mcp_servers ORDER BY org_id, alias")
 }
 
-// ListMCPServers reads one organisation's MCP servers.
 func (s *Store) ListMCPServers(ctx context.Context, orgID string) ([]policy.MCPServer, error) {
 	return queryAll(ctx, s.pool, scanMCPServer, mcpColumns+" FROM mcp_servers WHERE org_id = $1 ORDER BY alias", orgID)
 }
 
-// MCPServer reads one of an organisation's servers, or ErrNotFound.
 func (s *Store) MCPServer(ctx context.Context, orgID, alias string) (policy.MCPServer, error) {
 	m, err := scanMCPServer(s.pool.QueryRow(ctx,
 		mcpColumns+" FROM mcp_servers WHERE org_id = $1 AND alias = $2", orgID, alias))
@@ -60,7 +57,6 @@ func (s *Store) SetMCPCredential(ctx context.Context, orgID, alias string, seale
 		orgID, alias, sealed)
 }
 
-// DeleteMCPServer removes one of an organisation's servers.
 func (s *Store) DeleteMCPServer(ctx context.Context, orgID, alias string) error {
 	return s.execOne(ctx, "DELETE FROM mcp_servers WHERE org_id = $1 AND alias = $2", orgID, alias)
 }

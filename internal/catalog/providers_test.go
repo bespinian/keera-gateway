@@ -33,8 +33,8 @@ models:
 	if !m.Enabled || m.Kind != "chat" {
 		t.Errorf("model = %+v, want an enabled chat alias", m)
 	}
-	// The name survives being applied. Every value above is now indistinguishable
-	// from one somebody typed, and this is what still says where they came from.
+	// The name survives: it is all that still says where the values above came
+	// from.
 	if m.Provider != "anthropic" {
 		t.Errorf("Provider = %q, want anthropic", m.Provider)
 	}
@@ -64,9 +64,9 @@ models:
 	if m.MaxContext != 200_000 {
 		t.Errorf("MaxContext = %d, want 200000", m.MaxContext)
 	}
-	// Overridden in every field, and still that provider's model: what the name
-	// records is where the entry was declared against, not that nothing moved.
-	// It is also folded to lower case, so a form matching on it matches.
+	// Overridden in every field, and still that provider's model: the name
+	// records what the entry was declared against. It is folded to lower case,
+	// so a form matching on it matches.
 	if m.Provider != "anthropic" {
 		t.Errorf("Provider = %q, want anthropic", m.Provider)
 	}
@@ -77,12 +77,10 @@ models:
 	}
 }
 
-// A model named through a provider arrives described, because a description is
-// what a router decides between destinations on - see docs/routers.md - and the
-// version of this where every provider model arrives without one is the version
-// where nobody writes fourteen sentences and routers choose between bare
-// aliases. It is a default and not an answer: an entry that writes its own
-// keeps it.
+// A model named through a provider arrives described, because routers choose
+// by description (see docs/routers.md). Without a default, nobody would write
+// them and routers would choose between bare aliases. An entry's own
+// description wins.
 func TestProviderDefaultsADescriptionAnEntryCanRewrite(t *testing.T) {
 	const in = `
 models:
@@ -445,9 +443,8 @@ func checkProviderModel(t *testing.T, p Provider, m ProviderModel, seenDescripti
 	}
 }
 
-// The cached-input rate is filled in like every other number the table knows,
-// and given way on like every other one: a department charged an internal rate
-// for a hosted model is charged it for the cached half of its prompts too.
+// The cached-input rate is filled in and overridden like every other number the
+// table knows: a department with an internal rate pays it for cached tokens too.
 func TestProviderFillsInTheCachedInputRate(t *testing.T) {
 	models, err := parseModelFile([]byte(`
 models:
@@ -483,10 +480,9 @@ models:
 	}
 }
 
-// A model the table has never heard of has to be priced by hand, and the
-// cached rate is the one price that is not required with it: left out, those
-// tokens are charged at the input price, which is too high rather than too
-// low and is what the gateway charged for them before the column existed.
+// A model the table does not know must be priced by hand, but the cached rate
+// is optional: left out, those tokens cost the input price, which errs high
+// rather than low.
 func TestAnUnknownModelNeedsNoCachedRate(t *testing.T) {
 	models, err := parseModelFile([]byte(`
 models:

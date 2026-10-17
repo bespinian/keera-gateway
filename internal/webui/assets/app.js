@@ -47,36 +47,35 @@ import {
 
 const root = document.getElementById("root");
 
-/** state is everything the shell and the views share. */
+/** state is shared by the shell and the views. */
 const state = {
   me: null,
   orgs: [],
-  /** setup is what this organisation has: the counts the first-run checklist
-   *  reads, and the four that decide whether Filters, Routers, MCP and
-   *  Sandboxes are on the sidebar at all. */
+  /** setup holds the organisation's counts. The first-run checklist reads
+   *  them, and four decide whether Filters, Routers, MCP and Sandboxes are on
+   *  the sidebar. */
   setup: {},
   /** access is a member's own keys, from /v1/access, which decide whether
    *  their getting started guide is due. Null for an administrator. */
   access: null,
-  /** orgID is which organisation the panel is looking at. For anyone bound to
-   *  one it is theirs; an operator can switch. */
+  /** orgID is the organisation the panel shows. An operator can switch it. */
   orgID: "",
 };
 
-/** routes is the whole panel, in sidebar order and widest audience first. The
- *  list stays flat, so routing walks one array; `group` folds it into blocks
- *  when the sidebar is drawn.
+/** routes is the whole panel, in sidebar order, widest audience first. The
+ *  list stays flat so routing walks one array; `group` folds it into blocks
+ *  for the sidebar.
  *
- *  `perOrg` marks a screen whose contents belong to one organisation, and is
- *  what they are called when an operator has to pick one first.
+ *  `perOrg` marks a screen that belongs to one organisation, and names its
+ *  contents when an operator has to pick one first.
  *
  *  A `detail` is one row of that screen opened up: /projects/project_1 is one
- *  of /projects. Who may see it, and which entry lights up, follow the list. */
+ *  of /projects. It follows the list for who may see it and what lights up. */
 const routes = [
   { path: "/", label: "Dashboard", icon: "dashboard", view: dashboardView },
 
-  // What a developer comes here for. They come first, as for a member they
-  // are the only screens that answer a question they have.
+  // A developer's screens come first: for a member they are the only ones
+  // that matter.
   {
     path: "/access",
     group: "You",
@@ -91,8 +90,8 @@ const routes = [
     icon: "connect",
     view: clientsView,
   },
-  // The playground checks the path an editor will take, so it sits with the
-  // developer's screens rather than the configuration.
+  // The playground tests the path an editor takes, so it sits with the
+  // developer's screens.
   {
     path: "/playground",
     group: "You",
@@ -101,8 +100,7 @@ const routes = [
     view: playgroundView,
   },
 
-  // What the organisation is made of. Usage is here, as it is the
-  // organisation's spend, not the reader's.
+  // Usage is here because it is the organisation's spend, not the reader's.
   {
     path: "/projects",
     group: "Organisation",
@@ -130,8 +128,8 @@ const routes = [
     perOrg: "Models",
     detail: { label: "Model", view: modelDetailView, perOrg: "Models" },
   },
-  // Every model the hosted providers offer, to pick one to add. It is opened
-  // from Models rather than the sidebar, so `under` lights up Models instead.
+  // Every model the hosted providers offer. It opens from Models, not the
+  // sidebar, so `under` lights up Models.
   {
     path: "/catalogue",
     group: "Organisation",
@@ -152,7 +150,7 @@ const routes = [
     // Folded away until this deployment has one. See advancedShown.
     advanced: "filters",
     about: "Checks requests, and can redact or refuse them.",
-    // Its own screen, because what it did to the traffic does not fit in a row.
+    // Its own screen: what it did to the traffic does not fit in a row.
     detail: { label: "Filter", view: filterDetailView, perOrg: "Filters" },
   },
   {
@@ -164,8 +162,8 @@ const routes = [
     perOrg: "Routers",
     advanced: "routers",
     about: "Picks the model for each request.",
-    // Its own screen, for the split between its destinations: the one number
-    // that shows a router has stopped deciding.
+    // Its own screen, for the split between destinations: the number that
+    // shows a router has stopped deciding.
     detail: { label: "Router", view: routerDetailView, perOrg: "Routers" },
   },
   // Like filters and routers, something a request passes through.
@@ -201,8 +199,8 @@ const routes = [
     view: usageView,
   },
 
-  // The event log, read three ways: an administrator sees the organisation's
-  // traffic, a member that of their own keys. The map leads, as it shows what
+  // The event log, read three ways. An administrator sees the organisation's
+  // traffic, a member only their own keys'. The map leads, as it shows what
   // the deployment is.
   {
     path: "/map",
@@ -269,9 +267,8 @@ const routes = [
   },
 ];
 
-/** navGroups folds the visible routes into the blocks the sidebar draws. A
- *  group whose every entry was filtered out disappears with its label, so an
- *  administrator never sees an empty "Operator" heading. */
+/** navGroups folds the visible routes into sidebar blocks. A group with no
+ *  visible entry disappears with its label, so there is no empty heading. */
 function navGroups(items) {
   const groups = [];
   for (const r of items) {
@@ -282,24 +279,21 @@ function navGroups(items) {
   return groups;
 }
 
-/** advancedShown is whether the reader has asked to see the screens this
- *  deployment does not use. Remembered, because somebody who opened them once
- *  is somebody who is setting one up. */
+/** advancedShown is whether the reader asked to see the screens this
+ *  deployment does not use. Remembered, because someone who opened them once
+ *  is setting one up. */
 function advancedShown() {
   return remembered("keera.nav.more", { lasting: true }) === "shown";
 }
 
-/** inUse reports whether the deployment has any of the thing a route is for.
- *  A screen that has something on it is never hidden, whatever the setting:
- *  what is folded away is the empty screen nobody has asked for yet, not the
- *  filter somebody is running. */
+/** inUse reports whether the deployment has any of what a route is for. A
+ *  screen with something on it is never folded away, whatever the setting. */
 function inUse(route) {
   return (state.setup[route.advanced] || 0) > 0;
 }
 
-/** offered reports whether this deployment has the feature a route is for at
- *  all. A route that is not offered is never shown, not even among the unused
- *  screens moreItem offers. */
+/** offered reports whether this deployment has the feature a route is for. A
+ *  route that is not offered is never shown, not even by moreItem. */
 function offered(route) {
   return !route.needs || Boolean(state.me[route.needs]);
 }
@@ -309,9 +303,8 @@ function visibleRoutes() {
     if (!offered(r)) return false;
     if (r.operator && !state.me.unrestricted) return false;
     if (r.admin && !state.me.can_admin_org) return false;
-    // A link somebody was sent, or a page they bookmarked, opens whatever the
-    // sidebar is showing - otherwise matchRoute would fall back to Dashboard
-    // and the address bar would quietly rewrite itself.
+    // A shared link or a bookmark still opens a folded-away screen. Otherwise
+    // matchRoute would fall back to Dashboard and rewrite the address bar.
     if (
       r.advanced &&
       !advancedShown() &&
@@ -323,20 +316,20 @@ function visibleRoutes() {
   });
 }
 
-/** foldedAway is the advanced screens the sidebar is currently not showing,
- *  which is what moreItem offers by name. */
+/** foldedAway is the advanced screens the sidebar hides, which moreItem
+ *  offers by name. */
 function foldedAway() {
   if (advancedShown()) return [];
   return routes.filter((r) => r.advanced && offered(r) && !inUse(r));
 }
 
-/** matchRoute resolves a path to the screen that draws it.
+/** matchRoute finds the screen for a path.
  *
- *  A detail path is the list path plus one segment, and that segment is what
- *  the screen is given: /projects/project_1, /models/keera-code. It is decoded here
- *  rather than by the view, so a segment cannot be read as more of the path.
+ *  A detail path is the list path plus one segment, which the screen is
+ *  given: /projects/project_1. It is decoded here, not by the view, so it
+ *  cannot be read as more of the path.
  *
- *  Anything that matches nothing falls back to the first screen the reader may
+ *  A path that matches nothing falls back to the first screen the reader may
  *  see. */
 function matchRoute(available, pathname) {
   const exact = available.find((r) => r.path === pathname);
@@ -398,8 +391,8 @@ let topbarHost;
 let shell;
 let collapseButton;
 
-// The sidebar collapses to a strip of icons. The choice is remembered, because
-// someone who took the room back wants it back on their next visit too.
+// The sidebar collapses to a strip of icons. The choice is remembered for the
+// next visit.
 function navCollapsed() {
   return remembered("keera.nav", { lasting: true }) === "collapsed";
 }
@@ -420,20 +413,18 @@ function toggleNav() {
   applyNavCollapsed(collapsed);
 }
 
-/* On a narrow screen the sidebar is a drawer instead: fifteen entries do not
- * make a usable row above the page, so they stay the list they are and the
- * hamburger in the topbar slides them in over it.
+/* On a narrow screen the sidebar is a drawer: fifteen entries make no usable
+ * row above the page, so the topbar's menu button slides the list in.
  *
  * Unlike the collapsed sidebar this is not remembered. A drawer is opened to go
- * somewhere, and arriving is what closes it - by the navigation, the scrim,
- * Escape, or the window becoming wide enough for the sidebar itself. */
+ * somewhere, so navigating closes it, as do the scrim, Escape, and the window
+ * growing wide enough for the sidebar. */
 let drawerOpen = false;
 
 function setDrawer(open) {
   drawerOpen = open;
   if (shell) shell.classList.toggle("nav-open", open);
-  // The button is rebuilt with the topbar on every route, so it is found
-  // rather than held.
+  // The button is rebuilt with the topbar on every route, so look it up.
   const toggle = document.querySelector(".nav-toggle");
   if (toggle) applyDrawerButton(toggle);
 }
@@ -459,17 +450,12 @@ matchMedia("(min-width: 991px)").addEventListener("change", (e) => {
   if (e.matches) closeDrawer();
 });
 
-/** moreItem reveals the screens this deployment does not use yet, and puts
- *  them away again.
+/** moreItem shows or hides the screens this deployment does not use yet.
  *
- *  It names them rather than saying "More", because the whole point is that
- *  somebody who does not know what a router is should be able to decide from
- *  the sidebar whether they want one. Once any of them is in use it stops
- *  offering that one, and when all four are it disappears. */
+ *  It names them rather than saying "More", so someone who does not know what
+ *  a router is can decide from the sidebar whether they want one. A screen in
+ *  use drops out of it, and when all four are in use it disappears. */
 function moreItem() {
-  // Nothing to offer once the deployment uses all four: they are on the
-  // sidebar because they are in use, and an entry that would put them away
-  // again is one nobody wants.
   if (routes.filter((r) => r.advanced && offered(r)).every(inUse)) return null;
 
   const hidden = foldedAway();
@@ -507,9 +493,9 @@ function navItem(r) {
     {
       class: "nav-item" + (r.highlight ? " nav-highlight" : ""),
       href: r.path,
-      // The only label left once the sidebar is collapsed, and on the three
-      // folded-away screens the place to say what they are for: somebody who
-      // has just revealed "Filters" has by definition not used one.
+      // The only label left once the sidebar is collapsed, and on folded-away
+      // screens the place to say what they are for: someone who just revealed
+      // "Filters" has not used one yet.
       title: r.about ? `${r.label} - ${r.about}` : r.label,
       dataset: { path: r.path },
       onClick: (e) => {
@@ -524,7 +510,7 @@ function navItem(r) {
 
 /** markHome names the first screen after what it shows: the first-run
  *  checklist until the organisation is set up, then the dashboard. The
- *  checklist is drawn out in the sidebar, so it is not missed. */
+ *  checklist is highlighted in the sidebar, so it is not missed. */
 function markHome() {
   const home = routes[0];
   const ctx = { state, orgID: state.orgID };
@@ -610,8 +596,8 @@ function renderShell() {
     { class: "shell" },
     nav,
     h("main", { class: "main" }, topbarHost, outlet),
-    // Only ever on screen with the drawer, where it both dims the page and
-    // gives the tap outside the drawer somewhere to land.
+    // Shown only with the drawer: it dims the page and catches the tap
+    // outside the drawer.
     h("div", {
       class: "nav-scrim",
       "aria-hidden": "true",
@@ -624,16 +610,14 @@ function renderShell() {
   root.classList.remove("boot");
 }
 
-// The topbar is rebuilt on every route render rather than once at boot, because
-// what it shows can change underneath it: creating the first organisation is
-// what makes the switcher exist at all, and a switcher that only appears after
-// a browser reload is a switcher the person who needed it never saw.
+// The topbar is rebuilt on every route, not once at boot, because what it
+// shows can change: creating the first organisation is what makes the switcher
+// appear, and it should not need a reload.
 function renderTopbar() {
   replace(topbarHost, topbar());
 }
 
 function topbar() {
-  // applyDrawerButton keeps the label in step with the drawer.
   const menu = iconButton(icons.menu, "Menu", () => setDrawer(!drawerOpen), {
     quiet: true,
     cls: "nav-toggle",
@@ -713,17 +697,16 @@ function setTitle(title, sub) {
 
 /* --------------------------------------------------------------- routing */
 
-/** teardowns are what the screen currently on the outlet has to undo before
- *  another one replaces it. A view that only builds DOM needs none - the DOM
- *  goes when the outlet is cleared. A view that opened something the DOM does
- *  not own, which so far means the request log's live stream, registers it
- *  here: an EventSource nobody closes keeps its connection, and a browser
- *  allows very few of those per origin. */
+/** teardowns are what the current screen must undo before another replaces
+ *  it. A view that only builds DOM needs none. A view that opens something the
+ *  DOM does not own, such as the request log's live stream, registers it here:
+ *  an EventSource nobody closes keeps its connection, and a browser allows
+ *  very few per origin. */
 let teardowns = [];
 
-/** rendering counts renderRoute calls. A screen still loading when the reader
- *  moves on finishes into a page that is no longer its own, so what it
- *  registers then is undone at once and what it drew is dropped. */
+/** rendering counts renderRoute calls. A screen that finishes loading after
+ *  the reader moved on is stale: its teardowns run at once and what it drew
+ *  is dropped. */
 let rendering = 0;
 
 function tearDown() {
@@ -733,17 +716,15 @@ function tearDown() {
     try {
       fn();
     } catch {
-      // A screen that is already gone must not be able to stop the next one
-      // from being drawn.
+      // A screen that is already gone must not stop the next one being drawn.
     }
   }
 }
 
-/** limitedNotice tells the people of an organisation that signed itself up
- *  that some features are not open to it, before a refusal is the first to
- *  say so. While the first run asks an administrator for credit, its credit
- *  step says it instead. Granted credit ticks that step off but does not lift
- *  the limit, so the banner comes back then. */
+/** limitedNotice tells a self-signed-up organisation which features are not
+ *  open to it yet, before a refusal does. While the first run asks an
+ *  administrator for credit, its credit step says it instead. Granted credit
+ *  ticks that step off but does not lift the limit, so the banner returns. */
 function limitedNotice() {
   if (!state.me.org_limited || state.orgID !== state.me.org_id) return null;
   const asksCredit =
@@ -776,9 +757,8 @@ async function renderRoute() {
   const available = visibleRoutes();
   const { route, param } = matchRoute(available, location.pathname);
 
-  // A detail screen lights up the list it belongs to: somebody reading one project
-  // is still under Projects, and a sidebar with nothing marked reads as a screen
-  // that fell out of the panel.
+  // A detail screen lights up its list: someone reading one project is still
+  // under Projects.
   const current = route.under || (route.parent || route).path;
   for (const el of document.querySelectorAll(".nav-item")) {
     el.toggleAttribute("aria-current", el.dataset.path === current);
@@ -804,7 +784,7 @@ async function renderRoute() {
     orgID: state.orgID,
     reload: renderRoute,
     /** setSetup takes counts a screen has read again, so the sidebar follows
-     *  a step done since the panel loaded. */
+     *  steps done since the panel loaded. */
     setSetup: (setup) => {
       state.setup = setup;
       markHome();
@@ -816,23 +796,21 @@ async function renderRoute() {
     },
     navigate,
     setOrg,
-    /** param is the one path segment a detail screen was opened with: the project
-     *  id, the key id, the model alias. It is empty on every other screen. */
+    /** param is the path segment a detail screen was opened with, such as a
+     *  project id or a model alias. Empty on every other screen. */
     param,
     setSubtitle: (s) => setTitle(title, s),
-    /** onTeardown registers work to undo when this screen goes away - on a
-     *  reload, or on navigation to another one. */
+    /** onTeardown registers work to undo when this screen goes away. */
     onTeardown: (fn) => (gen === rendering ? teardowns.push(fn) : fn()),
-    /** setTitle is for a screen whose heading is the thing it is showing rather
-     *  than the name of the screen - one project is called by its own name, not
-     *  "Project". */
+    /** setTitle is for a screen headed by what it shows: one project is
+     *  called by its own name, not "Project". */
     setTitle: (t, s) => {
       title = t;
       setTitle(t, s);
     },
   };
-  // Everything on these screens belongs to one organisation, so an operator
-  // looking at all of them picks one first.
+  // These screens belong to one organisation, so an operator looking at all
+  // of them picks one first.
   const perOrg = route.parent ? route.detail.perOrg : route.perOrg;
   try {
     const view =
@@ -863,8 +841,7 @@ async function signOut() {
       return;
     }
   } catch {
-    // Signing out locally is what matters; a provider that refuses is not a
-    // reason to leave the person looking signed in.
+    // Signing out locally is what matters, even if the provider refuses.
   }
   location.href = "/";
 }
@@ -878,7 +855,7 @@ async function boot() {
   root.append(h("div", { class: "boot-mark" }));
 
   // A set-up link, or a passkey sign-in for `keera login`, comes first: both
-  // are for whoever holds the link, even in a browser already signed in.
+  // are for whoever holds the link, even in a browser that is signed in.
   const setup = location.hash.match(/^#passkey-setup=([A-Za-z0-9_-]+)$/);
   if (setup) return passkeySetupView(root, setup[1], boot);
   if (passkeySignInFlow()) return signIn(root, boot);
@@ -923,17 +900,16 @@ async function boot() {
       state.orgID = state.orgs[0].id;
   }
 
-  // Read before the shell is drawn, because the sidebar is built from it - a
-  // nav that appeared and then grew three entries a moment later would be
-  // worse than one screen too many.
+  // Read before the shell is drawn, because the sidebar is built from it and
+  // should not grow entries a moment after it appears.
   await loadSetup();
   renderShell();
   await renderRoute();
 }
 
-/** loadSetup reads what the chosen organisation has set up, which decides the
- *  optional screens in the sidebar. A failure leaves the counts at zero, which
- *  folds those screens away rather than breaking the panel. */
+/** loadSetup reads what the organisation has set up, which decides the
+ *  optional screens in the sidebar. A failure leaves the counts at zero,
+ *  which folds those screens away rather than breaking the panel. */
 async function loadSetup() {
   try {
     state.setup = await api.setup(state.orgID);
@@ -946,8 +922,8 @@ async function loadSetup() {
   markHome();
 }
 
-/** switchOrg moves the session to the organisation select names, which
- *  changes who this person is there, so the whole panel starts again. */
+/** switchOrg moves the session to the selected organisation. The person's
+ *  role changes with it, so the whole panel starts again. */
 async function switchOrg(select) {
   select.disabled = true;
   try {
@@ -963,15 +939,14 @@ async function switchOrg(select) {
 }
 
 /** leaveDetail moves a detail screen back to its list before the organisation
- *  changes, because the thing it shows belongs to the old one. Both switchers
- *  keep the reader on the screen they were on otherwise. */
+ *  changes, because what it shows belongs to the old one. */
 function leaveDetail() {
   const { route } = matchRoute(visibleRoutes(), location.pathname);
   if (route.parent) history.replaceState({}, "", route.parent.path);
 }
 
-/** setOrg changes which organisation every screen is about, and redraws the
- *  sidebar for it. The caller then draws the screen. */
+/** setOrg changes the organisation every screen is about and redraws the
+ *  sidebar. The caller then draws the screen. */
 async function setOrg(id) {
   state.orgID = id;
   if (id) remember("keera.org", id, { lasting: true });

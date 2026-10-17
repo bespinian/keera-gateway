@@ -1,15 +1,14 @@
 // The dashboard's chart, drawn as inline SVG.
 //
-// Hand-drawn rather than pulled from a library: it is one shape, and a charting
-// library would be the largest dependency in a binary whose whole pitch is that
-// it has almost none.
+// Hand-drawn because it is one shape, and a charting library would be the
+// largest dependency in a binary that has almost none.
 
 import { h, svg, compact, money, num, empty } from "./ui.js";
 
 const PAD = { top: 12, right: 8, bottom: 22, left: 42 };
 
-// The width a chart is drawn at before it is on the page and can be measured.
-// Close enough to a real card that the first paint is not visibly re-laid out.
+// The width to draw at before the chart is on the page and can be measured.
+// Close to a real card, so the first paint does not visibly shift.
 const GUESS_W = 900;
 const MIN_W = 280;
 
@@ -28,10 +27,9 @@ export function areaChart(points, { height = 190, bucket = "day" } = {}) {
   const data = points.length === 1 ? [points[0], { ...points[0] }] : points;
   const tip = h("div", { class: "chart-tip", style: { display: "none" } });
 
-  // The chart is drawn in the pixels it will occupy rather than in a fixed unit
-  // grid the browser then stretches to fit: a stretched grid stretches the axis
-  // labels and the line along with it. A detached element has no width to draw
-  // at, so it is drawn at a plausible one and redrawn once its own is known.
+  // The chart is drawn in real pixels, not a unit grid the browser stretches,
+  // which would stretch the labels and the line too. A detached element has no
+  // width, so it is drawn at a guess and redrawn once its width is known.
   let drawnAt = 0;
   function draw(width) {
     const w = Math.max(MIN_W, Math.round(width));
@@ -50,15 +48,14 @@ export function areaChart(points, { height = 190, bucket = "day" } = {}) {
 
   draw(GUESS_W);
   holder.append(tip);
-  // The chart's height does not follow its width, so redrawing cannot resize
-  // what is being observed, and this needs no guard against feeding itself.
+  // The height does not follow the width, so a redraw cannot trigger another
+  // resize and this needs no loop guard.
   new ResizeObserver((entries) => {
     draw(entries[entries.length - 1].contentRect.width);
   }).observe(holder);
   return holder;
 }
 
-/** paint draws the chart itself at a given pixel size. */
 function paint(data, W, H, { bucket, tip }) {
   const innerW = W - PAD.left - PAD.right;
   const innerH = H - PAD.top - PAD.bottom;
@@ -167,9 +164,8 @@ function paint(data, W, H, { bucket, tip }) {
     });
   });
 
-  // Label as many positions as fit: a date needs about seventy pixels of its
-  // own, and a crowded axis is worth less than a sparse one. The last bucket is
-  // always named, and whatever would have sat on top of it is dropped instead.
+  // Label as many positions as fit: a date needs about seventy pixels. The last
+  // bucket is always named, and a label that would overlap it is dropped.
   const last = data.length - 1;
   const step = Math.max(
     1,
@@ -229,7 +225,7 @@ function bucketLabel(iso, bucket, long) {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-/** niceCeil rounds an axis maximum up to something a human would have chosen. */
+/** niceCeil rounds an axis maximum up to a round number. */
 function niceCeil(v) {
   const mag = Math.pow(10, Math.floor(Math.log10(v)));
   for (const m of [1, 1.5, 2, 3, 5, 10]) {
@@ -255,9 +251,9 @@ export function barList(
     { class: "bars" },
     rows.map((r, i) => {
       const v = value(r) || 0;
-      // Ranked lists are categorical, so position picks the colour. A list
-      // whose rows mean something - an outcome split, say - passes `color`
-      // instead, so a row keeps its colour when the rows above it drop out.
+      // In a ranked list, position picks the colour. A list whose rows mean
+      // something, such as an outcome split, passes `color` instead, so a row
+      // keeps its colour when rows above it drop out.
       const color = colorFor
         ? colorFor(r)
         : `var(--s${((colorIndex + i) % 6) + 1})`;

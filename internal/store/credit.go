@@ -28,7 +28,6 @@ type CreditAccount struct {
 	Invoiced bool `json:"invoiced"`
 }
 
-// SavedCard is how a saved card is shown.
 type SavedCard struct {
 	Label   string     `json:"label"`
 	Expires *time.Time `json:"expires,omitempty"`
@@ -162,7 +161,6 @@ func (s *Store) DueTopUps(ctx context.Context, limit int) ([]CreditAccount, erro
 // PaymentKind says where money came from.
 type PaymentKind string
 
-// The kinds of payment.
 const (
 	PaymentTopUp PaymentKind = "topup"
 	PaymentAuto  PaymentKind = "auto"
@@ -172,7 +170,6 @@ const (
 // PaymentState is how far a payment got.
 type PaymentState string
 
-// The states of a payment.
 const (
 	PaymentPending PaymentState = "pending"
 	PaymentPaid    PaymentState = "paid"
@@ -361,14 +358,12 @@ func (s *Store) Settle(ctx context.Context, paymentID string, how Settlement) (S
 	return out, err
 }
 
-// Payment reads one payment.
 func (s *Store) Payment(ctx context.Context, id string) (Payment, error) {
 	p, err := scanPayment(s.pool.QueryRow(ctx,
 		`SELECT `+paymentColumns+` FROM payments WHERE id = $1`, id))
 	return p, notFound(err)
 }
 
-// PaymentByTransaction finds the payment of a PostFinance transaction.
 func (s *Store) PaymentByTransaction(ctx context.Context, transactionID int64) (Payment, error) {
 	p, err := scanPayment(s.pool.QueryRow(ctx,
 		`SELECT `+paymentColumns+` FROM payments WHERE transaction_id = $1`, transactionID))

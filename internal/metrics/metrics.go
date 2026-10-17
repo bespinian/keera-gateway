@@ -63,7 +63,8 @@ type Registry struct {
 	requests map[string]*series
 	inflight atomic.Int64
 	// rlFallback counts rate-limit admissions and token charges made locally
-	// because Redis was unreachable. Anything but zero means the limits bind per replica.
+	// because Redis was unreachable. Anything but zero means the limits bind
+	// per replica.
 	rlFallback   atomic.Int64
 	upstreamErrs map[string]*series
 	overhead     map[string]*series
@@ -76,7 +77,6 @@ type Registry struct {
 	tools   map[string]*series
 }
 
-// New returns an empty registry.
 func New() *Registry {
 	return &Registry{
 		requests:     make(map[string]*series),
@@ -119,9 +119,9 @@ func (r *Registry) Observe(model, org string, status int, seconds float64, token
 // gateway getting slower.
 //
 // The window runs from the body being read to the upstream call. Filter
-// generation and the router's decision are subtracted, because each has its
-// own metric and would otherwise make a new guardrail look like a slow gateway. Refusals are not recorded:
-// they never made an upstream call.
+// generation and the router's decision are subtracted: each has its own
+// metric, and would otherwise make a new guardrail look like a slow gateway.
+// Refusals are not recorded, as they never made an upstream call.
 func (r *Registry) Overhead(model, org string, seconds float64) {
 	r.seriesIn(r.overhead, overheadBuckets, model, org).observe(seconds, 0)
 }

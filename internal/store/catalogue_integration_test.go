@@ -65,15 +65,13 @@ func TestModelCatalogueRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Model: %v", err)
 	}
-	// The provider is what says the values around it are the provider's
-	// answers rather than the operator's, and a panel that cannot tell goes
-	// back to asking somebody to check them.
+	// The provider marks the values around it as the provider's answers, not
+	// the operator's. Without it the panel asks somebody to check them.
 	if got.Provider != "anthropic" {
 		t.Errorf("Provider = %q, want the provider the entry was declared against", got.Provider)
 	}
-	// This one is the difference between a hosted model's cost here and its
-	// cost in the provider's console, and a column that quietly failed to
-	// round-trip would read as a rate nobody set.
+	// Cache rates make a hosted model's cost here match the provider's
+	// console. A lost column would read as a rate nobody set.
 	if got.CachedInputMicrosPerMTok != 100_000 || got.CacheWriteMicrosPerMTok != 1_250_000 {
 		t.Errorf("cache rates = %d read, %d write, want the stored 100000 and 1250000",
 			got.CachedInputMicrosPerMTok, got.CacheWriteMicrosPerMTok)

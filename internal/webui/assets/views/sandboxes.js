@@ -1,27 +1,11 @@
-// Sandboxes: the machines this gateway lends out.
+// Sandboxes: the machines this gateway lends out. A sandbox belongs to a
+// person in an organisation, uses its quota, and its agent calls the gateway
+// on a key minted for it.
 //
-// Every other screen in this panel is about a request. This one is about a
-// machine, and it belongs here because the machine is where the quota, the
-// bill and the guardrail already are: a sandbox is asked for by a person in an
-// organisation, paid for out of that organisation's capacity, and the agent
-// inside it makes requests on a key this gateway minted.
-//
-// Two things had to be visible rather than derivable, and the layout is built
-// around them.
-//
-// The first is when a sandbox goes away - the property that distinguishes this
-// from a virtual machine. It is a column rather than a detail, written as a
-// time remaining rather than a timestamp, because "in 40m" is what somebody
-// acts on.
-//
-// The second is what a sandbox actually is, which is not what it was asked
-// for: a class can be changed under a running sandbox, so every row shows the
-// machine it was given out of its own row rather than out of the catalogue.
-//
-// What is deliberately not here is a way in. An administrator can see every
-// sandbox in the organisation and terminate one, because the quota and the bill
-// are theirs, and cannot open a shell in one. Attaching is
-// `keera sandbox ssh`, for the owner and operators.
+// There is deliberately no way in from here. An administrator can see and
+// terminate every sandbox, because the quota and the bill are theirs, but
+// cannot open a shell. Attaching is `keera sandbox ssh`, for the owner and
+// operators.
 
 import { api } from "../api.js";
 import {
@@ -51,9 +35,8 @@ import {
 import { orgNameOf } from "./orgs.js";
 import { oldestProject } from "./projects.js";
 
-// showFinished is whether the list includes finished sandboxes. It lasts
-// while the screen is open, so a reload keeps it and leaving resets it, like
-// "Show revoked" on keys.
+// showFinished lasts while the screen is open: a reload keeps it and leaving
+// resets it, like "Show revoked" on keys.
 let showFinished = false;
 
 export async function sandboxesView(ctx) {
@@ -69,10 +52,8 @@ export async function sandboxesView(ctx) {
   const [list, cat, projects] = await Promise.all([
     api.sandboxes(ctx.orgID, { all: showFinished }),
     api.sandboxClasses(ctx.orgID),
-    // Only an administrator may put a sandbox on a project, so only an
-    // administrator's dialog needs the list. A member's sandbox goes in the
-    // organisation's oldest project, and asking them to choose
-    // from a list they cannot use would be a field that only ever refuses.
+    // Only an administrator may pick a project. A member's sandbox goes in
+    // the organisation's oldest project.
     canAdmin
       ? api.projects(ctx.orgID).catch(() => ({ data: [] }))
       : { data: [] },
@@ -107,10 +88,9 @@ export async function sandboxesView(ctx) {
         num(running),
         "the rest are starting, suspended, expired or failed",
       ),
-      // Core-seconds rather than wall time, because two minutes of thirty-two
-      // cores is not two minutes of two - and this is the number a chargeback
-      // uses. The wall time is on each row, where it can be read against the
-      // machine it belongs to.
+      // Core-seconds rather than wall time: two minutes of thirty-two cores is
+      // not two minutes of two, and a chargeback uses this number. Wall time
+      // is on each row.
       stat(
         "Compute used",
         [
@@ -130,7 +110,6 @@ export async function sandboxesView(ctx) {
   );
 }
 
-/** The strip above the table: what a sandbox is, and the button that makes one. */
 function head(ctx, classes, driver, limits, canAdmin, projects) {
   const usable = classes.filter((c) => allowed(c, limits, driver));
   return listHead(
@@ -160,7 +139,6 @@ function limitNote(limits, canAdmin) {
   return `of ${limits.max_sandboxes} allowed here`;
 }
 
-/** The sandboxes themselves. */
 function listCard(ctx, sandboxes, canAdmin, me, driver) {
   return table(
     [
@@ -188,7 +166,7 @@ function listCard(ctx, sandboxes, canAdmin, me, driver) {
               pill(capitalise(s.state), stateTone(s.state)),
               s.purpose === "agent" ? pill("Agent", "accent") : null,
             ),
-            // Why it is stuck or failed. The other states explain themselves.
+            // The other states explain themselves.
             (s.state === "pending" || s.state === "failed") && s.detail
               ? h("div", { class: "faint small" }, s.detail)
               : null,
@@ -203,9 +181,8 @@ function listCard(ctx, sandboxes, canAdmin, me, driver) {
             "div",
             {},
             h("span", { class: "mono muted" }, s.class),
-            // The machine it was actually given, not the machine the class
-            // currently describes. A class can be changed under a running
-            // sandbox, and a row that joined would describe one that never ran.
+            // The machine it was given, not what the class says now: a class
+            // can change under a running sandbox.
             h(
               "div",
               { class: "faint small" },
@@ -223,10 +200,7 @@ function listCard(ctx, sandboxes, canAdmin, me, driver) {
             s.owner
               ? h("span", { class: "muted" }, s.owner)
               : h("span", { class: "faint" }, "No user"),
-            // The project, where there is one. It belongs beside the owner rather
-            // than in a column of its own: what it answers is "whose is this",
-            // and a project is the other half of that - it is the budget the
-            // sandbox is charged to and the guardrail its agent works under.
+            // Beside the owner, because together they say whose it is.
             s.project_id
               ? h(
                   "div",
@@ -246,9 +220,8 @@ function listCard(ctx, sandboxes, canAdmin, me, driver) {
         sortDir: "desc",
       },
       {
-        // The column this screen exists for. A time remaining rather than a
-        // timestamp, because "in 40m" is the form somebody acts on and
-        // "2026-09-14T16:20:00Z" is one they have to do arithmetic on.
+        // Time remaining rather than a timestamp, because "in 40m" is what
+        // somebody acts on.
         label: "Expires",
         shrink: true,
         num: true,
@@ -265,9 +238,8 @@ function listCard(ctx, sandboxes, canAdmin, me, driver) {
     {
       search: (s) => `${s.name} ${s.class} ${s.owner} ${s.repo}`,
       searchLabel: "sandboxes",
-      // Not a filter over the rows here: a finished sandbox is not in this
-      // list until the control plane is asked for it, because the list is
-      // capped and the live ones are what the cap is for.
+      // Not a filter here: finished sandboxes are fetched only when asked
+      // for, because the list is capped and the cap is for the live ones.
       toggles: [
         {
           label: "Show finished",
@@ -290,7 +262,6 @@ function listCard(ctx, sandboxes, canAdmin, me, driver) {
   );
 }
 
-/** The organisation's classes. */
 function classCard(ctx, classes, driver) {
   const canEdit = isAdmin(ctx);
   return h(
@@ -389,22 +360,20 @@ function classCard(ctx, classes, driver) {
   );
 }
 
-/** delivers reports whether the driver has a runtime for this tier. Having a
+/** delivers reports whether the driver has a runtime for this tier. A
  *  stronger one is not enough: each tier needs its own. */
 function delivers(driver, isolation) {
   return (driver.tiers || ["standard"]).includes(isolation || "standard");
 }
 
-/** isolationCell says both what a class asks for and whether it can be given. */
 function isolationCell(c, driver) {
   if (delivers(driver, c.isolation))
     return pill(
       isolationLabel(c.isolation),
       c.isolation === "vm" ? "good" : "",
     );
-  // A class this deployment cannot deliver is refused at creation rather than
-  // quietly run at a weaker tier, so saying so here is the difference between
-  // a confusing refusal later and a configuration change now.
+  // Such a class is refused at creation rather than run at a weaker tier, so
+  // say so here, before anyone tries.
   return h(
     "div",
     { class: "row-tight" },
@@ -567,13 +536,9 @@ function removeClass(ctx, c) {
   });
 }
 
-/** newSandbox is the create dialog.
- *
- *  It asks for no more than a sandbox needs. The ssh key is the one that would
- *  otherwise be a surprise: a sandbox with nothing in authorized_keys is one
- *  nobody can open a shell in, so the field is required for an engineer's
- *  sandbox and the dialog says why rather than letting the control plane
- *  refuse after everything else has been filled in. */
+/** newSandbox is the create dialog. The ssh key is required, because a
+ *  sandbox with an empty authorized_keys cannot be opened, and the dialog says
+ *  so before the control plane would refuse. */
 function newSandbox(ctx, classes, limits, projects) {
   const name = h("input", { class: "input", placeholder: "fix-login" });
   const cls = h(
@@ -587,12 +552,8 @@ function newSandbox(ctx, classes, limits, projects) {
       ),
     ),
   );
-  // Which project the sandbox - and the key minted for it - belongs to.
-  //
-  // It is the field with the most behind it: the project decides the sandbox's
-  // quota, its budget, its rate limit, the system prompt its agent carries and
-  // which models that agent may reach. The oldest project is picked, as the
-  // control plane does for a sandbox that names none.
+  // The project decides the sandbox's quota, budget, rate limit, system prompt
+  // and models. The oldest is picked, as the control plane does by default.
   const first = oldestProject(projects);
   const project = h(
     "select",
@@ -669,8 +630,7 @@ function newSandbox(ctx, classes, limits, projects) {
     done: (sb) => `${sb.name} is starting`,
     ctx,
     submit: () => {
-      // What the control plane would refuse anyway, refused here, so the
-      // answer arrives beside the wrong field and that field gets focus.
+      // Checked here too, so the error shows beside the wrong field.
       const keys = key.value
         .split("\n")
         .map((l) => l.trim())
@@ -710,11 +670,8 @@ function newSandbox(ctx, classes, limits, projects) {
 
 /* ------------------------------------------------------------------ helpers */
 
-/** projectName is a project's name where the screen knows it, and its id otherwise.
- *
- *  A member's list is narrowed to their own sandboxes and they cannot read the
- *  project list, so the id is what they get - which is still better than nothing,
- *  because it is the string their administrator will ask them for. */
+/** projectName falls back to the id, because a member cannot read the
+ *  project list. */
 function projectName(ctx, id) {
   const known = (ctx.state.projects || []).find((t) => t.id === id);
   return known ? known.name : id;
@@ -729,7 +686,6 @@ function isLive(s) {
   );
 }
 
-// isolationLabel is a tier as a pill shows it.
 function isolationLabel(isolation) {
   return isolation === "vm" ? "VM" : capitalise(isolation || "standard");
 }
@@ -760,8 +716,7 @@ function expiryCell(s) {
       ago(s.expires_at),
     );
   }
-  // The last half hour is the one worth colouring: it is the window in which
-  // somebody can still do something about it.
+  // Colour the last half hour, while somebody can still act on it.
   const tone = left < 30 * 60 * 1000 ? "warn" : "";
   return h(
     "span",
@@ -791,8 +746,8 @@ function gib(mib) {
   return mib % 1024 === 0 ? `${mib / 1024}Gi` : `${mib}Mi`;
 }
 
-/** allowed reports whether this reader could actually be given this class, so
- *  the create dialog offers only the ones that would not be refused. */
+/** allowed reports whether this reader could be given this class, so the
+ *  create dialog offers only those. */
 function allowed(c, limits, driver) {
   if (!delivers(driver, c.isolation)) return false;
   if (c.purposes && c.purposes.length && !c.purposes.includes("engineer")) {

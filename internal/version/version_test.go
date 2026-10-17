@@ -7,7 +7,6 @@ import (
 
 const commit = "d1c9ed2fa3ad12be406c6996be72e8f66db0d74f"
 
-// checkout is a build from a checkout of commit.
 func checkout(version string, modified bool) *debug.BuildInfo {
 	m := "false"
 	if modified {

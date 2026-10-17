@@ -28,9 +28,8 @@ import {
 } from "../ui.js";
 import { toolCallTable } from "./tools.js";
 
-// mcpView is the MCP page: the servers the gateway stands in front of, the
-// address a client is given for each, and - for an administrator - what each
-// tool has been called for and the latest calls.
+// mcpView lists the servers and the address a client uses for each. An
+// administrator also sees the tool call counts and the latest calls.
 export async function mcpView(ctx) {
   const canEdit = isAdmin(ctx);
   const since = currentRange();
@@ -204,24 +203,20 @@ export async function mcpView(ctx) {
   return wrap;
 }
 
-// countPill is a count that matters only when it is not zero, so zero fades
-// out and anything else stands out.
+// countPill fades out a zero so any other count stands out.
 function countPill(n, tone) {
   return n ? pill(num(n), tone) : dash();
 }
 
-// callsOf is how many calls one server's tools had.
 function callsOf(summary, alias) {
   return summary
     .filter((t) => t.server === alias)
     .reduce((n, t) => n + t.calls, 0);
 }
 
-// editServer adds a server, or changes one.
 function editServer(ctx, existing) {
   const m = existing || { enabled: true };
-  // An existing server keeps its owner, and a new one is the organisation's
-  // in view.
+  // A new server belongs to the organisation in view.
   const orgID = existing ? existing.org_id : ctx.orgID;
   const input = (value, props = {}) =>
     h("input", {
@@ -246,8 +241,8 @@ function editServer(ctx, existing) {
   // "Bearer ", which is not what an empty field does.
   const authHeader = input(m.auth_header, { class: "input mono" });
 
-  // Write-only, as on a model: the control plane never sends a credential
-  // back, so an empty field leaves the stored one alone.
+  // Write-only: the control plane never sends a credential back, so an empty
+  // field leaves the stored one alone.
   const apiKey = h("input", {
     class: "input",
     type: "password",
@@ -307,8 +302,8 @@ function editServer(ctx, existing) {
       if (problem) throw new Error(problem);
       if (!url.value.trim())
         throw new Error("The server's address is required.");
-      // Absent unless the administrator typed one or asked for the stored
-      // one to go: sending "" on every save would wipe it.
+      // Sent only when typed or cleared: sending "" on every save would wipe
+      // it.
       let credential;
       if (clearKey && clearKey.checked) credential = "";
       else if (apiKey.value) credential = apiKey.value;

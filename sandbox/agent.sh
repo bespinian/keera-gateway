@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
 # Run one coding agent on one task, then push what it did.
 #
-# This is the whole of an agent sandbox's life. It matters less for what it
-# runs - any of three agents, whichever the image has - than for what it does
-# afterwards: a branch and nothing else leaves this machine. That is what makes
-# the network policy around it tight enough to be worth writing, and what gives
-# a reviewer a diff instead of a trust exercise.
+# This is an agent sandbox's whole life. Only a branch leaves this machine,
+# which keeps the network policy tight and gives a reviewer a diff to read.
 set -euo pipefail
 
 WORKDIR="${1:-$HOME/work}"
@@ -16,9 +13,8 @@ die() { log "$*"; exit 1; }
 
 [ -n "${KEERA_TASK:-}" ] || die "KEERA_TASK is empty; there is nothing to do"
 
-# The branch. Named after the sandbox, because the sandbox id is the one string
-# that ties a branch back to what it cost, which model answered, and the task
-# it was carrying out - all of which are on the gateway under that id.
+# Named after the sandbox, because its id ties the branch to its cost, model
+# and task on the gateway.
 BRANCH="keera/${KEERA_SANDBOX_NAME:-agent}-${KEERA_SANDBOX_ID##*_}"
 
 if [ -d .git ]; then
@@ -30,27 +26,20 @@ fi
 
 # ------------------------------------------------------------------- run it
 #
-# Whichever agent is installed, in the order a deployment is most likely to
-# have meant. Each is given the task on stdin or as an argument in its own
-# non-interactive mode; none of them is given a terminal, because there is
-# nobody here.
+# Whichever agent is installed, in its non-interactive mode: there is nobody
+# at a terminal.
 #
-# The session header is already set for Pi and Claude Code. Pi's
-# configuration carries it, and Claude Code reads ANTHROPIC_CUSTOM_HEADERS,
-# both written by the gateway. That makes this task one session in
-# `keera session list` rather than a guess from its opening prompt - see
-# docs/sessions.md. OpenCode is given no configuration here: an image that
-# adds it brings its own, and that decides whether it sends KEERA_SESSION.
+# Pi's configuration and Claude Code's ANTHROPIC_CUSTOM_HEADERS, both written
+# by the gateway, carry the session header, so this task is one session in
+# `keera session list` (see docs/sessions.md). An image that adds OpenCode
+# brings its own configuration, which decides whether it sends KEERA_SESSION.
 run_agent() {
-  # Pi first, because it is the agent this image installs. The other two are
-  # tried after it, so that a deployment which put one into its own image on top
-  # of this base still gets the one it chose.
+  # Pi first, because this image installs it. An image built on this base
+  # that adds another agent still gets it.
   if command -v pi >/dev/null 2>&1; then
     log "running pi on the task"
-    # -p is Pi's headless mode: one prompt, output on stdout, no TUI. -a trusts
-    # the project's own files for this run, which an agent sandbox can afford in
-    # a way a laptop cannot - the machine exists for this one task and is
-    # deleted after it.
+    # -p is Pi's headless mode. -a trusts the project's files, which is safe
+    # here: the machine exists for this one task and is deleted after it.
     pi -p -a ${KEERA_MODEL:+--model "$KEERA_MODEL"} -- "$KEERA_TASK"
     return
   fi
@@ -74,9 +63,9 @@ log "the agent finished with status $STATUS"
 
 # ------------------------------------------------------------------ push it
 #
-# Only if something changed, and only ever as a branch. There is no path here
-# that writes to anybody's default branch: what comes out of a machine that ran
-# a model's output is a proposal, and a human opens it.
+# Only if something changed, and only as a branch, never to a default branch:
+# what comes out of a machine that ran a model's output is a proposal for a
+# human to review.
 if [ ! -d .git ]; then
   log "nothing to push: this sandbox has no repository"
   exit "$STATUS"
@@ -88,10 +77,9 @@ if git diff --cached --quiet; then
   exit "$STATUS"
 fi
 
-# The commit message says what it was asked to do and what did it. The task is
-# the developer's own words, and this is the one place it is deliberately
-# recorded - in their repository, where they can read it, rather than on the
-# gateway, which promises not to keep it.
+# The commit message records the task and what carried it out. This is the one
+# place the task is kept: in the developer's repository, not on the gateway,
+# which promises not to keep it.
 git -c user.name="${KEERA_GIT_AUTHOR_NAME:-Keera agent}" \
     -c user.email="${KEERA_GIT_AUTHOR_EMAIL:-keera-agent@localhost}" \
     commit --quiet --message "$(printf '%s\n\nCarried out in Keera sandbox %s (%s).\nAgent exit status: %s.\n' \

@@ -12,7 +12,6 @@ import (
 
 // eventStream re-emits a chat completion stream in another API's events.
 type eventStream interface {
-	// chunk folds one upstream chunk into the stream.
 	chunk(payload []byte) error
 	// finish closes the stream, after the last chunk or a failure. cut is why
 	// the upstream stream ended without a whole answer, or nil.
@@ -128,8 +127,7 @@ type pinger struct {
 
 	mu    sync.Mutex
 	timer *time.Timer
-	// last is when anything was last written.
-	last time.Time
+	last  time.Time
 	// err is the first failed write. Nothing is written after it.
 	err     error
 	stopped bool

@@ -31,7 +31,6 @@ const KeyHeader = "X-Keera-Key"
 // key starts differently, with sk-ant-api.
 const claudeSignInPrefix = "sk-ant-oat"
 
-// claudeSignIn reports whether the request carries a Claude sign-in.
 func claudeSignIn(r *http.Request) bool {
 	token, err := auth.FromHeader(r.Header.Get("Authorization"))
 	return err == nil && strings.HasPrefix(token, claudeSignInPrefix)

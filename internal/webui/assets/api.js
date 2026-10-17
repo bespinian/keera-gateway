@@ -1,12 +1,10 @@
 // The control API client.
 //
-// Every mutating call carries the session's CSRF token, which comes from
-// /v1/me rather than a cookie - so a page that has not loaded its own identity
-// cannot make a change at all.
+// Every mutating call carries the session's CSRF token. It comes from /v1/me,
+// not a cookie, so a page that has not loaded its identity cannot change
+// anything.
 //
-// The panel is at the root, so every path below is relative to BASE and the
-// places that open a connection or build a link put it on. The paths here then read
-// exactly as the routes do.
+// The paths below are relative to BASE, so they read exactly as the routes do.
 
 const BASE = "/control";
 
@@ -26,9 +24,9 @@ export function setCsrf(token) {
   csrf = token || "";
 }
 
-// request sends one call and decodes its answer. raw hands back the response
-// itself, for the one call whose body arrives token by token; a refusal is an
-// ApiError either way.
+// request sends one call and decodes the answer. raw returns the response
+// itself, for the one call whose body streams. A refusal is an ApiError either
+// way.
 async function request(method, path, body, { raw, signal } = {}) {
   const headers = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -212,7 +210,7 @@ export const api = {
     get(path`/v1/routers/${alias}/report` + query({ org_id: orgID, since })),
 
   // Sandbox classes, with what the driver can deliver and what the reader's
-  // guardrail allows, so a screen offers only what can be had.
+  // guardrail allows, so a screen offers only what is possible.
   sandboxClasses: (orgID) =>
     get("/v1/sandbox-classes" + query({ org_id: orgID })),
   deleteSandboxClass: (orgID, name) =>
@@ -312,13 +310,13 @@ export const api = {
 
   // The log as it is written, from `after` on. The caller must close the
   // EventSource: browsers allow few connections per origin. It carries no
-  // CSRF token, as an EventSource sets no headers; like any GET it changes
+  // CSRF token, since an EventSource sets no headers, and as a GET it changes
   // nothing.
   requestStream: (params) =>
     new EventSource(url("/v1/requests/stream" + query(params))),
 
-  // download is a GET the browser saves rather than the panel parses. It rides
-  // the session cookie, so no key ends up in a URL.
+  // download is a GET the browser saves instead of the panel parsing it. It
+  // uses the session cookie, so no key ends up in a URL.
   download: (route, params) => {
     const a = document.createElement("a");
     a.href = url(route) + query({ ...params, format: "csv" });

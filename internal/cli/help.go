@@ -1,15 +1,11 @@
 package cli
 
-// The help this command line gives.
+// Help is a structure rather than one block of prose, so the answer fits the
+// question: `keera` prints the summaries, `keera help <command>` one section,
+// and `keera help <command> <subcommand>` one verb with only its own flags.
 //
-// Help is a structure rather than one block of prose, so the answer can be
-// the size of the question: `keera` prints the summaries, `keera help
-// <command>` one section, and `keera help <command> <subcommand>` one verb
-// with only its own flags.
-//
-// Flag descriptions live on the FlagSet each command parses with, and
-// printHelp is handed that FlagSet, so each flag is worded once. This file
-// adds which verb reads which flag, which the shared FlagSet cannot say.
+// Flags are described on the FlagSet each command parses with, so each is
+// worded once. This file adds which verb reads which flag.
 
 import (
 	"context"
@@ -804,7 +800,6 @@ func helpText(fs *flag.FlagSet, name, subName string) string {
 	return b.String()
 }
 
-// subHelpText renders one subcommand of c.
 func subHelpText(fs *flag.FlagSet, c command, sub subcommand) string {
 	var b strings.Builder
 	title := "keera " + c.name + " " + sub.name
@@ -820,7 +815,6 @@ func subHelpText(fs *flag.FlagSet, c command, sub subcommand) string {
 	return b.String()
 }
 
-// writeSubList writes a command's verbs, one per line.
 func writeSubList(b *strings.Builder, c command) {
 	b.WriteString("\n" + style.head("Usage:") + "\n")
 	width := 0

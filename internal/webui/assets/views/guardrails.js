@@ -1,10 +1,8 @@
 // The guardrails dialog, for every level that has them.
 //
-// Limits nest: an organisation's are the ceiling a project's must fit inside, and
-// a project's are the ceiling a key's must fit inside. That is the one thing about
-// this screen a person has to hold in their head, so the ceiling is shown
-// against every field rather than described in a sentence and discovered as a
-// number that silently did not take effect.
+// Limits nest: a project's must fit inside its organisation's, and a key's
+// inside its project's. So the ceiling is shown beside every field, rather
+// than found out as a number that silently did not take effect.
 
 import { api } from "../api.js";
 import {
@@ -22,12 +20,8 @@ import {
 } from "../ui.js";
 import { orgNameOf } from "./orgs.js";
 
-// One word for the thing at every level. The dialog used to call itself
-// "Organisation guardrails", "Guardrails" and "Limits" depending on which
-// scope opened it, which made three things out of one: the nesting is the
-// whole point, and a reader cannot see a ceiling and the thing it holds as the
-// same kind of object while they are named differently. The scope is in the
-// dialog's own subtitle, which already says which one is open.
+// One title at every level, so a ceiling and what it holds read as the same
+// kind of thing. The subtitle says which scope is open.
 const SCOPES = {
   org: {
     title: "Guardrails",
@@ -46,8 +40,8 @@ const SCOPES = {
     lead:
       "Applies to this key only. Useful for a key given to a contractor, " +
       "or one that should not use the project's whole budget.",
-    // What to do with the field is not what somebody who cannot set it came
-    // here to read; what holds their key is.
+    // Somebody who cannot edit wants to know what holds their key, not how to
+    // set it.
     readLead:
       "Applies to this key, on top of its project's and organisation's " +
       "guardrails.",
@@ -57,24 +51,18 @@ const SCOPES = {
 /** open shows the dialog for one scope.
  *
  *  ceilings is the chain above this scope, outermost first: [{label, limits}].
- *  It is what makes "unlimited" honest - a key with no rpm of its own is
- *  whatever its project allows.
+ *  It keeps "unlimited" honest: a key with no rpm of its own gets whatever its
+ *  project allows.
  *
- *  canEdit false opens the same guardrails to somebody who may not change
- *  them, which is every member. They are held by these limits, so not being
- *  allowed to set them is a reason to drop the Save button and not a reason to
- *  withhold the numbers. */
+ *  canEdit false shows the limits read-only, as for every member: they are
+ *  held by them, so they still get to see them. */
 export async function openGuardrails(
   ctx,
   { scope, id, name, models, orgID, ceilings = [], canEdit = true },
 ) {
-  // The filters are the organisation's, whatever scope this dialog is for: a
-  // project applies one of its organisation's filters or none at all. The routers
-  // are the organisation's for the same reason, and they are here because they
-  // belong in the allow-list rather than in a section of their own - a client
-  // names a router where it names a model, so "which models may this scope
-  // use" is the question that also answers "may it route", and narrowing the
-  // list to a router is how a scope is made to.
+  // Filters and routers always belong to the organisation, whatever the
+  // scope. Routers go in the allow-list because a client names a router where
+  // it names a model.
   const [limits, filters, routers] = await Promise.all([
     api.guardrails(scope, id).catch(() => null),
     orgID
@@ -90,11 +78,9 @@ export async function openGuardrails(
           .catch(() => [])
       : [],
   ]);
-  // A save replaces the whole guardrail, so an editor opened over limits that
-  // could not be read would write this dialog's fields over the rest of them.
-  // Saying so is the only safe answer; a scope with no guardrail of its own
-  // answers with an empty object rather than an error, so this really is a
-  // failed read and not an empty one.
+  // A save replaces the whole guardrail, so editing limits that could not be
+  // read would wipe the rest. A scope with no guardrail returns an empty
+  // object, so an error here really is a failed read.
   if (limits === null) {
     modal({
       title: `Guardrails for ${name}`,
@@ -114,9 +100,8 @@ export async function openGuardrails(
     scope,
     id,
     name,
-    // Routers are folded into the same list the catalogue's models are, in the
-    // shape this dialog already reads, so that everything below counts and
-    // renders them without knowing which is which.
+    // Routers are shaped like models so the code below need not tell them
+    // apart.
     models: models.concat(
       routers.map((rt) => ({
         alias: rt.alias,
@@ -155,16 +140,9 @@ export async function ceilingsFor(
   return out;
 }
 
-/** section is a band across the dialog.
- *
- *  A guardrail is one object with four unrelated halves in it - what may be
- *  reached, how fast, how much money, what every request passes through - and
- *  as eight fields in a column they read as eight unrelated settings. The
- *  bands are not a change to the object; they are the reason somebody who came
- *  to set a budget can find it without reading the models list first.
- *
- *  The sandbox half of a guardrail has no fields here at all - it is set from
- *  the command line - so there is no band for it rather than an empty one. */
+/** section is a band across the dialog. The bands let somebody find the
+ *  budget without reading the models list first. Sandbox limits are set from
+ *  the command line, so they have no band. */
 function section(title, lead) {
   return h(
     "div",
@@ -174,8 +152,8 @@ function section(title, lead) {
   );
 }
 
-// OWNED_HERE is every field the edit dialog below renders. A guardrail carries
-// more than these, and the ones it does not render have to survive a save.
+// OWNED_HERE is every field the edit dialog renders. Other fields must
+// survive a save.
 const OWNED_HERE = new Set([
   "allowed_models",
   "rpm",
@@ -188,8 +166,7 @@ const OWNED_HERE = new Set([
   "allowed_tools",
 ]);
 
-// LIMITS names the limits the form and the read-only view both show, in the
-// same words.
+// LIMITS is shared so the form and the read-only view use the same words.
 const LIMITS = {
   rpm: {
     label: "Requests per minute",
@@ -234,9 +211,8 @@ function render(
       }),
       h("span", { class: "mono" }, m.alias),
       m.router
-        ? // A router is worth marking, because ticking it is not like ticking a
-          // model: it grants everywhere the router may send, which is the
-          // router's own list and not this one.
+        ? // Ticking a router grants every model it may send to, by its own
+          // list, not this one.
           h(
             "span",
             {
@@ -290,24 +266,18 @@ function render(
     placeholder: "not set here",
     value: lim.budget_micros ? lim.budget_micros / 1e6 : "",
   });
-  // A filter is chosen from the organisation's list rather than typed, because
-  // an alias nothing answers to is a guardrail that refuses every request it
-  // covers - and the control plane refuses to store one for that reason.
+  // Filters are picked from a list, not typed: an unknown alias would refuse
+  // every request, and the control plane refuses to store one.
   //
-  // What is chosen is held in an array rather than read off the boxes when
-  // Save is pressed, because the order they run in is part of the answer and
-  // not something to leave as a side effect of which box was ticked first:
-  // each filter reads what the one before it left behind, so a gate in front
-  // of a rewrite judges the text somebody wrote and the same gate behind it
-  // judges the redacted version. An alias the organisation has since dropped
-  // is left out here, the way the boxes leave it out.
+  // The picks are kept in an array because their order matters: each filter
+  // reads what the one before left, so a gate before a rewrite judges the
+  // original text and after it the redacted text. Aliases the organisation has
+  // since dropped are left out.
   const picked = (lim.filters || []).filter((alias) =>
     (filters || []).some((f) => f.alias === alias),
   );
 
-  // The order, shown once there is an order to get wrong. One filter has
-  // nothing to be ahead of, and what runs before this scope's own filters is
-  // already said under the boxes.
+  // Shown only once two filters are picked.
   const order = h("div", { class: "stack", style: { gap: "4px" } });
   const orderField = field(
     "In this order",
@@ -331,9 +301,8 @@ function render(
           { class: "row-tight" },
           h("span", { class: "faint" }, i + 1 + "."),
           h("span", { class: "mono" }, alias),
-          // The mode again, because it is what this list is ordered by: a gate
-          // is worth putting ahead of the rewrites its refusals would
-          // otherwise have made the organisation pay for.
+          // The mode again, because it decides the order: a gate first saves
+          // paying for rewrites it would refuse anyway.
           h(
             "span",
             { class: f.mode === "gate" ? "pill pill-accent" : "pill" },
@@ -374,8 +343,7 @@ function render(
       value: f.alias,
       checked: picked.includes(f.alias),
       onChange: () => {
-        // A filter ticked now goes to the end, which is the only place for it
-        // that does not move the ones already ordered.
+        // Append, so the ones already ordered do not move.
         if (box.checked) {
           if (!picked.includes(f.alias)) picked.push(f.alias);
         } else {
@@ -390,17 +358,14 @@ function render(
       { class: "row-tight", style: { padding: "3px 0" } },
       box,
       h("span", { class: "mono" }, f.alias),
-      // Which mode it is belongs here rather than only on the Filters screen:
-      // attaching a gate to a scope is a decision to stop some of that scope's
-      // requests, and attaching a rewrite filter is not.
+      // Attaching a gate stops some requests; a rewrite filter does not.
       h(
         "span",
         { class: f.mode === "gate" ? "pill pill-accent" : "pill" },
         f.mode === "gate" || f.mode === "pattern" ? f.mode : "rewrite",
       ),
-      // And whether it enforces at all, which matters more than the mode:
-      // attaching a filter in shadow costs this scope a second generation per
-      // request and protects it from nothing.
+      // A filter in shadow costs a second generation per request and
+      // protects from nothing.
       f.shadow ? pill("Shadow", "warn") : null,
       f.description ? h("span", { class: "faint small" }, f.description) : null,
     );
@@ -530,9 +495,8 @@ function render(
     done: "Guardrails saved",
     ctx,
     submit: () => {
-      // A PUT replaces the whole guardrail, and this dialog shows nine of its
-      // fields. The rest, such as the sandbox half set from the command line,
-      // is carried through unchanged.
+      // A PUT replaces the whole guardrail, so fields this dialog does not
+      // show, such as sandbox limits, are carried through unchanged.
       const out = {};
       for (const [k, v] of Object.entries(lim)) {
         if (!OWNED_HERE.has(k)) out[k] = v;
@@ -579,18 +543,15 @@ function render(
 /** renderReadOnly states what applies to a scope, for somebody who may not
  *  change it.
  *
- *  It is not the form with its inputs disabled. That would hand a member
- *  fields to fill in that do nothing, and it would show them this scope's own
- *  row rather than what a request actually meets - which is every level at
- *  once. So each line here is the answer after the chain has been combined,
- *  with the level that decided it named beside it. */
+ *  It is not the form with inputs disabled: that would show only this scope's
+ *  own values. Each line here is the result of every level combined, with the
+ *  level that decided it named. */
 function renderReadOnly(
   ctx,
   { scope, name, models, filters, ceilings, limits, orgName },
 ) {
   const meta = SCOPES[scope] || SCOPES.project;
-  // Outermost first with this scope last, which is the order limits combine in
-  // and the order the prompts are sent in.
+  // Outermost first: the order limits combine in and prompts are sent in.
   const levels = [...ceilings, { label: name, limits: limits || {} }];
 
   modal({
@@ -649,7 +610,6 @@ function renderReadOnly(
   });
 }
 
-// limitRow is one of LIMITS as it applies after every level.
 function limitRow(levels, key, format) {
   return readRow(
     LIMITS[key].label,
@@ -658,8 +618,8 @@ function limitRow(levels, key, format) {
   );
 }
 
-/** toolsValue is what each level allows of the MCP tools. They narrow each
- *  other, so every level that says anything is shown, outermost first. */
+/** toolsValue shows each level's MCP tool list, outermost first, since they
+ *  narrow each other. */
 function toolsValue(levels) {
   const said = levels.filter((lv) => lv.limits && lv.limits.allowed_tools);
   if (!said.length) {
@@ -685,9 +645,8 @@ function toolsValue(levels) {
   );
 }
 
-/** effectiveModels is the allow-list every level has agreed on. Allow-lists
- *  intersect, so a level can drop a model and never add one; a level that
- *  names none has not restricted anything. */
+/** effectiveModels intersects every level's allow-list. A level that names
+ *  none restricts nothing. */
 function effectiveModels(levels, models) {
   let allowed = null;
   for (const lv of levels) {
@@ -720,17 +679,16 @@ function modelsValue(levels, models, orgName) {
   );
 }
 
-/** narrowedBy names the levels that took something out of the catalogue, so a
- *  short list of models reads as a decision somebody made rather than as
- *  every model the organisation has. */
+/** narrowedBy names the levels that removed models, so a short list reads
+ *  as somebody's decision. */
 function narrowedBy(levels) {
   const said = levels.filter((lv) => lv.limits && lv.limits.allowed_models);
   if (!said.length) return "Every model the organisation has.";
   return `Narrowed by ${said.map((lv) => lv.label).join(", then ")}.`;
 }
 
-/** tightest is the smallest value any level sets for one field. Every level's
- *  value has to hold, so the smallest is the one a request actually meets. */
+/** tightest is the smallest value any level sets for one field: the one a
+ *  request actually meets. */
 function tightest(levels, field, fmt) {
   let value = null;
   let from = "";
@@ -750,9 +708,8 @@ function tightest(levels, field, fmt) {
   );
 }
 
-/** budgetsValue lists a budget per level rather than one number. Budgets are
- *  the one limit that is not collapsed: an organisation's 10,000 and a project's
- *  1,000 are two caps that both have to hold, not one. */
+/** budgetsValue lists a budget per level rather than one number: each
+ *  level's cap has to hold on its own. */
 function budgetsValue(levels) {
   const said = levels.filter((lv) => lv.limits && lv.limits.budget_micros);
   if (!said.length) return h("span", { class: "muted" }, "no budget");
@@ -771,10 +728,8 @@ function budgetsValue(levels) {
 }
 
 /** promptsValue shows each level's wording in full, in the order it is sent.
- *
- *  Every other line here is a number, and a summary of a number is the number.
- *  A system prompt is prose somebody else put into the reader's own requests,
- *  so "a system prompt" would say nothing they could act on. */
+ *  A prompt is text added to the reader's own requests, so only the full text
+ *  tells them anything. */
 function promptsValue(levels) {
   const said = levels.filter((lv) => lv.limits && lv.limits.system_prompt);
   if (!said.length) {
@@ -794,16 +749,12 @@ function promptsValue(levels) {
   );
 }
 
-/** filtersValue lists the filters a request actually passes through.
+/** filtersValue lists the filters a request passes through. Filters add up
+ *  across levels, so this is every level's in run order, each with the level
+ *  that set it.
  *
- *  Filters accumulate rather than collapse, so this is every level's in the
- *  order they run, each named with the level that put it there: which filters
- *  touched a request, and who decided they should.
- *
- *  known is the organisation's filters, for the one thing a guardrail row
- *  cannot say - whether the filter it names is enforcing. A member told their
- *  requests run through a filter that is in shadow has been told the opposite
- *  of what happens. */
+ *  known is the organisation's filters, to say whether each one is enforcing
+ *  or only in shadow. */
 function filtersValue(levels, known) {
   const defs = new Map((known || []).map((f) => [f.alias, f]));
   const seen = [];
@@ -837,9 +788,8 @@ function filtersValue(levels, known) {
   );
 }
 
-/** inheritedFilters names the filters already running above this scope. They
- *  cannot be taken off here, so a form that did not show them would invite an
- *  administrator to add one that is already there. */
+/** inheritedFilters names the filters already running above this scope, so
+ *  an administrator does not add one twice. */
 function inheritedFilters(ceilings) {
   const said = ceilings.filter(
     (c) => c.limits && (c.limits.filters || []).length,
@@ -856,8 +806,7 @@ function inheritedFilters(ceilings) {
 
 /* ------------------------------------------------------------ shared bits */
 
-/** ceilingSummary states what is already true above this scope. Without it,
- *  every field on this form reads as though it is the only thing in the way. */
+/** ceilingSummary states what already applies above this scope. */
 function ceilingSummary(ctx, ceilings) {
   const said = ceilings.filter((c) => hasAny(c.limits));
   if (!said.length) return null;
@@ -895,11 +844,9 @@ function describe(lim) {
   return bits.join(" · ") || "nothing set";
 }
 
-/** inheritedPrompts shows the wording the levels above already send.
- *
- *  Every other field on this form is narrowed by what is above it, and a number
- *  in a hint says enough. A prompt is appended to what is above it, so a project
- *  that cannot read the organisation's wording would write it out again. */
+/** inheritedPrompts shows the prompts the levels above already send. A
+ *  prompt is appended to those, so without seeing them a project would write
+ *  the same wording again. */
 function inheritedPrompts(ceilings) {
   const said = ceilings.filter((c) => c.limits && c.limits.system_prompt);
   if (!said.length) return null;
@@ -950,7 +897,6 @@ function hasAny(lim) {
   );
 }
 
-/** summarise renders a scope's limits for a table cell. */
 export function summarise(lim) {
   const bits = [];
   if (lim.rpm) bits.push(`${num(lim.rpm)}/min`);
@@ -961,7 +907,7 @@ export function summarise(lim) {
   return bits;
 }
 
-/** modelsCell renders an allow-list the way both the projects and keys tables do. */
+/** modelsCell is shared by the projects and keys tables. */
 export function modelsCell(lim) {
   if (!lim || !lim.allowed_models) return h("span", { class: "muted" }, "All");
   return h(

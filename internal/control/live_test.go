@@ -8,10 +8,9 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// The feed is what turns one database notification into every open reader's
-// cue to look. Its whole contract is in three properties, and each of them is a
-// bug somebody would otherwise find in production: everyone is told, a burst is
-// one cue rather than a queue of them, and a reader who has gone is not kept.
+// The feed turns one database notification into a cue for every open reader.
+// It promises three things: everyone is told, a burst is one cue rather than a
+// queue, and a reader who has gone is not kept.
 
 func TestFeedWakesEveryOpenStream(t *testing.T) {
 	f := newRequestFeed()
@@ -51,10 +50,8 @@ func TestFeedWakesOnlyTheOrganisationsNamed(t *testing.T) {
 }
 
 func TestFeedCollapsesABurstIntoOneCue(t *testing.T) {
-	// A busy deployment writes several batches a second. Each cue costs the
-	// stream that receives it a query, and the second one would ask exactly the
-	// question the first already answers - the cursor it reads from picks up
-	// everything since the last look however many batches that was.
+	// A busy deployment writes several batches a second, and each cue costs a
+	// query. One is enough: the cursor picks up everything since the last look.
 	f := newRequestFeed()
 	ch, stop := f.watch("")
 	defer stop()
@@ -74,9 +71,8 @@ func TestFeedCollapsesABurstIntoOneCue(t *testing.T) {
 }
 
 func TestFeedForgetsAStreamThatHasGone(t *testing.T) {
-	// wake sends to every subscriber it holds. One left behind by a reader who
-	// closed the tab is a channel nobody will ever receive from, and the map
-	// entry that keeps it is the leak.
+	// A subscriber left behind by a closed tab is a channel nobody receives
+	// from, and the map entry that keeps it is a leak.
 	f := newRequestFeed()
 	_, stop := f.watch("")
 	if got := len(f.subs); got != 1 {
@@ -93,9 +89,8 @@ func TestFeedForgetsAStreamThatHasGone(t *testing.T) {
 }
 
 func TestDrainEndsEveryStreamAndIsSafeTwice(t *testing.T) {
-	// A graceful shutdown waits for in-flight responses, and one of these
-	// finishes when its reader closes the tab. Without this the listener sits
-	// out its whole grace period every time it is asked to stop.
+	// A graceful shutdown waits for in-flight responses, and a stream only ends
+	// when its tab closes. Without this, every stop waits out the grace period.
 	s := newServer()
 	select {
 	case <-s.feed.closing:
@@ -109,8 +104,8 @@ func TestDrainEndsEveryStreamAndIsSafeTwice(t *testing.T) {
 	default:
 		t.Error("Drain did not end the open streams")
 	}
-	// Shutdown can be reached more than once - a signal, then a listener error.
-	// Closing a closed channel panics, so this is the test that it cannot.
+	// Shutdown can happen twice (a signal, then a listener error), and closing
+	// a closed channel panics.
 	s.Drain()
 }
 

@@ -7,9 +7,8 @@ import (
 )
 
 func TestIsolationValid(t *testing.T) {
-	// The empty string is deliberately not a tier. A class that did not say
-	// would be a class whose isolation is whatever the cluster defaults to,
-	// which is the one property of a sandbox nobody should get by accident.
+	// The empty string is not a tier: nobody should get the cluster's default
+	// isolation by accident.
 	if Isolation("").Valid() {
 		t.Error("the empty string should not be a valid isolation tier")
 	}
@@ -83,8 +82,8 @@ func TestResolvedSandboxAdmits(t *testing.T) {
 		if err == nil {
 			t.Fatal("a class outside the allow-list should be refused")
 		}
-		// The message is read by the developer who was refused, in a terminal,
-		// with no idea a limit existed - so it has to name what they may use.
+		// The refused developer may not know a limit exists, so the message
+		// names what they may use.
 		if !strings.Contains(err.Error(), "small, medium") {
 			t.Errorf("the refusal should say what is allowed instead: %v", err)
 		}
@@ -114,8 +113,8 @@ func TestResolvedSandboxAdmits(t *testing.T) {
 }
 
 func TestResolveSandboxIsRestrictOnly(t *testing.T) {
-	// The whole point of the combining rule: delegating project administration
-	// must not be usable to grant that project more than its organisation allowed.
+	// A project administrator must not grant the project more than its
+	// organisation allowed.
 	org := &Limits{
 		MaxSandboxes:         new(4),
 		MaxSandboxTTLSeconds: new(8 * 3600),
@@ -152,8 +151,7 @@ func TestResolveSandboxIsRestrictOnly(t *testing.T) {
 }
 
 func TestResolveSandboxNarrowsFromNothing(t *testing.T) {
-	// A project may narrow what an organisation left unlimited. Restrict-only is
-	// about the direction, not about whether the outer level said anything.
+	// A project may narrow what an organisation left unlimited.
 	project := &Limits{MaxSandboxes: new(2)}
 	got := Resolve(Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"}, nil, project, nil).Sandbox
 	if got.MaxSandboxes != 2 {
@@ -162,8 +160,7 @@ func TestResolveSandboxNarrowsFromNothing(t *testing.T) {
 }
 
 func TestResolvedSandboxAllowsClass(t *testing.T) {
-	// nil is every class, exactly as a nil AllowedModels is every model - the
-	// identity element rather than the empty set.
+	// nil is every class, as a nil AllowedModels is every model.
 	if !(ResolvedSandbox{}).AllowsClass("anything") {
 		t.Error("a nil allow-list should permit every class")
 	}
@@ -201,8 +198,7 @@ func TestValidSandboxNames(t *testing.T) {
 
 func TestSandboxStateGroupings(t *testing.T) {
 	// Live is what a quota counts; Running is what a bill is computed from.
-	// Suspended is live and not running, which is the whole reason there are
-	// two questions rather than one.
+	// Suspended is live and not running, which is why there are two.
 	if !SandboxSuspended.Live() {
 		t.Error("a suspended sandbox still holds its volume, so it is live")
 	}

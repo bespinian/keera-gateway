@@ -32,7 +32,6 @@ function thisMonth() {
   return new Date().toISOString().slice(0, 7);
 }
 
-// shift moves a YYYY-MM month by n months.
 function shift(month, n) {
   const [y, m] = month.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1 + n, 1)).toISOString().slice(0, 7);
@@ -65,7 +64,6 @@ async function billSection(ctx) {
   const month = stored && stored <= now ? stored : now;
   const res = await api.billing(ctx.orgID, month);
   const rows = res.data || [];
-  // Without a line there is nothing to total.
   const total = rows.length ? res.total : null;
   const operator = ctx.state.me.unrestricted;
   const allOrgs = operator && !ctx.orgID;
@@ -260,7 +258,7 @@ async function creditSection(ctx) {
   const operator = ctx.state.me.unrestricted;
   ctx.setSubtitle(`${money(a.balance_micros)} credit`);
 
-  // Back from PostFinance's payment page: say how it went.
+  // Back from PostFinance's payment page.
   const params = new URLSearchParams(location.search);
   const returned = params.get("payment");
   let back = null;
@@ -448,8 +446,8 @@ async function creditSection(ctx) {
   );
 }
 
-// returnBanner says how a payment went, for someone back from the payment
-// page. A pending one is looked at again for a little while.
+// returnBanner says how a payment went. A pending one is checked again for a
+// little while.
 function returnBanner(ctx, p, a) {
   if (!p) return null;
   if (p.state === "paid") {

@@ -15,11 +15,8 @@ import (
 )
 
 // What `keera doctor` and `keera guardrail effective` answer, against a real
-// database. Both are reports over rows in three tables, so there is nothing
-// left of either of them without one.
-//
-// These skip without KEERA_TEST_DATABASE_URL, as the rest of this package's
-// integration tests do; `make test-integration` provides one.
+// database, since both report over its rows. They skip without
+// KEERA_TEST_DATABASE_URL; `make test-integration` provides one.
 
 // diagnosed brings up a deployment with one organisation, one project, one key
 // and a broken filter in it, and returns the server.
@@ -56,8 +53,7 @@ func diagnose(t *testing.T, srv *Server, p *authn.Principal, query string) Diagn
 	return d
 }
 
-// find returns the check with this name, so a test names what it is about
-// rather than indexing into a list whose order is a rendering decision.
+// find looks a check up by name, because the list's order is only for display.
 func (d Diagnosis) find(name string) (Check, bool) {
 	for _, c := range d.Checks {
 		if c.Name == name {
@@ -68,9 +64,8 @@ func (d Diagnosis) find(name string) (Check, bool) {
 }
 
 func TestDoctorFailsADeploymentThatCanServeNothing(t *testing.T) {
-	// An empty catalogue is the whole deployment refused, so it is a failure
-	// and not something to mention. This is the state every deployment starts
-	// in, and the first thing somebody runs doctor to be told.
+	// An empty catalogue refuses every request, so it is a failure, not a
+	// note. Every deployment starts like this.
 	srv, _ := diagnosed(t)
 	d := diagnose(t, srv, operator(), "?org_id=org_a")
 
@@ -93,8 +88,8 @@ func TestDoctorFailsADeploymentThatCanServeNothing(t *testing.T) {
 }
 
 func TestDoctorNamesWhatTheEnvironmentIsMissing(t *testing.T) {
-	// The ones that are warnings rather than failures: the deployment runs,
-	// and a customer will want each of them.
+	// Warnings, not failures: the deployment runs, but a customer will want
+	// each of them.
 	srv, _ := diagnosed(t)
 	d := diagnose(t, srv, operator(), "")
 
@@ -114,9 +109,8 @@ func TestDoctorNamesWhatTheEnvironmentIsMissing(t *testing.T) {
 }
 
 func TestDoctorTellsAnAdministratorNothingAboutTheDeployment(t *testing.T) {
-	// The environment variables and the inference plane belong to whoever runs
-	// the gateway. An administrator of one tenant is told about their own
-	// organisation and not about the host it is on.
+	// The environment and the inference plane belong to whoever runs the
+	// gateway. A tenant's administrator is told only about their organisation.
 	srv, _ := diagnosed(t)
 	admin := &authn.Principal{
 		Via: authn.MethodSession, Role: authn.RoleAdmin, OrgID: "org_a", UserID: "user_a",
@@ -154,9 +148,8 @@ func TestDoctorLetsOnlyTheOrganisationsAdministratorsProbe(t *testing.T) {
 }
 
 func TestDoctorCatchesAFilterPointingAtNothing(t *testing.T) {
-	// A filter fails closed, so a filter whose model has gone is not a
-	// degraded filter: it is every request it covers, refused. Nothing else
-	// in the product says so until the refusals start.
+	// A filter fails closed, so one whose model has gone refuses every request
+	// it covers. Nothing else says so until the refusals start.
 	srv, st := diagnosed(t)
 	ctx := t.Context()
 	if _, err := st.UpsertFilter(ctx, policy.Filter{
@@ -180,8 +173,7 @@ func TestDoctorCatchesAFilterPointingAtNothing(t *testing.T) {
 }
 
 func TestEffectiveGuardrailsCollapseTheChain(t *testing.T) {
-	// The question 'guardrail show' could never answer: what actually holds
-	// this key, given that it sets nothing itself.
+	// What holds this key, though it sets nothing itself.
 	srv, st := diagnosed(t)
 	ctx := t.Context()
 
@@ -218,8 +210,7 @@ func TestEffectiveGuardrailsCollapseTheChain(t *testing.T) {
 	if len(eff.AllowedModels) != 1 || eff.AllowedModels[0] != "keera-speed" {
 		t.Errorf("allowed models = %v, want the intersection", eff.AllowedModels)
 	}
-	// Every level is reported, because which level set a number is the thing
-	// somebody needs in order to change the right one.
+	// Every level is reported, so somebody can see which one to change.
 	if len(eff.Levels) != 3 {
 		t.Fatalf("levels = %d, want org, project and key", len(eff.Levels))
 	}
@@ -251,9 +242,8 @@ func TestEffectiveGuardrailsCollapseTheChain(t *testing.T) {
 }
 
 func TestEffectiveGuardrailsOnAProjectStopAtTheProject(t *testing.T) {
-	// Asking about a project is asking what holds every key in it, and a key that
-	// does not exist yet holds nothing - so there is no trailing level with no
-	// id in the answer.
+	// Asking about a project means every key in it, so the answer has no
+	// trailing key level without an id.
 	srv, _ := diagnosed(t)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet,

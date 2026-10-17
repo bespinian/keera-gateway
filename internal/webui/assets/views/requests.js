@@ -1,16 +1,9 @@
-// Requests: the event log, every request rather than only the failures.
+// Requests: the log of every request, not only the failures, because "my
+// agent's calls never arrived" is answered by the rows that worked.
 //
-// This is where the dashboard's numbers came from. The charts say when
-// something changed and this says what changed - which model, whose key, which
-// person, and what the backend answered. It holds every request rather than
-// only the ones that went wrong, because "my agent's calls never arrived" is
-// answered by the rows that worked.
-//
-// The screen is the shared log section and nothing else, so the counts here
-// and on a project's or a key's own page can never disagree.
-//
-// An administrator reads the whole organisation's log, a member only the
-// requests of their own keys.
+// The screen is only the shared log section, so its counts always match a
+// project's or a key's own page. An administrator reads the whole
+// organisation's log, a member only the requests of their own keys.
 
 import { h, currentRange, rangePicker, rangeOf } from "../ui.js";
 import { requestLog } from "./requestlog.js";
@@ -23,13 +16,10 @@ export async function requestsView(ctx) {
   const log = await requestLog(ctx, {
     since,
     filters: true,
-    // The screen that is nothing but this log is the one worth watching: what
-    // it is opened to find out is usually what is happening now, and a reader
-    // reloading every few seconds to learn that is a reader polling the
-    // deployment by hand.
+    // People open this screen to see what is happening now, so it refreshes
+    // itself instead of being reloaded by hand.
     live: true,
-    // The page title already says Requests. The range picker is the one
-    // control the section does not own.
+    // The page title already says Requests.
     title: "",
     trail: rangePicker(ctx, since),
   });
@@ -45,9 +35,7 @@ export async function requestsView(ctx) {
   );
 }
 
-// advice is what to do with what is on the screen, by the class of the status
-// filtered to. Each of these is a different person's problem, and the log is
-// the only place that ever says whose.
+// advice says what to do next, by the class of the status filtered to.
 function advice(status) {
   switch ((status || "").charAt(0)) {
     case "2":

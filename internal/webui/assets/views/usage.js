@@ -20,9 +20,7 @@ import { orgNameOf } from "./orgs.js";
 const GROUPS = [
   { key: "project", label: "Project" },
   { key: "model", label: "Model" },
-  // What sent the requests, which is the one grouping that says what is
-  // pointed at this gateway rather than what it is pointed at. The Live map
-  // draws the same rows; this is them added up.
+  // What sent the requests. The Live map draws the same rows.
   { key: "client", label: "Client" },
   { key: "key", label: "Key" },
   { key: "user", label: "User" },
@@ -32,11 +30,10 @@ const GROUPS = [
 // Offered only across every organisation: inside one it is a single row.
 const ORG_GROUP = { key: "org", label: "Organisation" };
 
-// The shared windows plus a quarter, and a window of its own rather than the
-// shared one: a chargeback is read over a month or a quarter, and carrying that
-// back to the dashboard would leave somebody looking at a quarter of traffic
-// where they expected this week's. The three it shares are not restated, so
-// they cannot drift from the picker every other screen draws.
+// The shared windows plus a quarter, kept apart from the shared choice: a
+// chargeback is read over a month or a quarter, and carrying that back to the
+// dashboard would surprise. The shared ones are not restated so they cannot
+// drift.
 const RANGES = [
   ...SHARED_RANGES,
   { label: "90d", since: "2160h", long: "Last 90 days" },
@@ -51,9 +48,8 @@ export async function usageView(ctx) {
 
   const res = await api.usage(ctx.orgID, groupBy, since);
   const rows = res.data || [];
-  // Every grouping resolves to a name, not only projects. A report grouped by key
-  // or by user that shows raw ids is a report nobody can act on, and those two
-  // are exactly what a manager asks for.
+  // Every grouping resolves to a name: a report by key or user with raw ids is
+  // one nobody can act on.
   const names = {
     project: res.project_names || {},
     key: res.key_names || {},
@@ -91,8 +87,7 @@ export async function usageView(ctx) {
     ),
     h("div", { class: "spacer" }),
     rangePicker(ctx, since, { ranges: RANGES, key: "keera.usage.range" }),
-    // A chargeback is reconciled in a spreadsheet. A report that cannot leave
-    // the panel is a report somebody re-types by hand.
+    // A chargeback is reconciled in a spreadsheet.
     csvButton("Download this report as CSV", () =>
       api.download("/v1/usage", {
         org_id: ctx.orgID,
@@ -104,8 +99,8 @@ export async function usageView(ctx) {
 
   const label = (r) => {
     if (!r.group) {
-      // A row with no group is real traffic: a key with no project, or a request
-      // made with the operator key. Naming it beats a dash that reads as a bug.
+      // A row with no group is real traffic: a key with no project, or the
+      // operator key. A dash would read as a bug.
       return h(
         "span",
         { class: "faint" },
@@ -149,8 +144,7 @@ export async function usageView(ctx) {
     }
     const named = names[groupBy] && names[groupBy][r.group];
     if (!named) {
-      // An id with no name behind it is one whose row is gone - a deleted user,
-      // a key from a purged org. Saying so beats showing a bare id.
+      // An id with no name is one whose row is gone, such as a deleted user.
       return h(
         "span",
         { class: "stack" },
@@ -166,9 +160,8 @@ export async function usageView(ctx) {
       "div",
       { class: "stack" },
       h("span", {}, named),
-      // The id under the name, except where they are the same string: an
-      // unrecognised client is shown under the name it gave itself, and
-      // printing that twice reads as a bug.
+      // The id under the name, unless they are the same, as for an
+      // unrecognised client.
       named === r.group
         ? null
         : h(
@@ -181,10 +174,8 @@ export async function usageView(ctx) {
 
   const body = table(
     [
-      // The grouping column is given its width rather than measured from what
-      // is in it: the same table is redrawn over every grouping, and a first
-      // column that resizes under each of them makes the tabs above read as
-      // different reports rather than one asked several ways.
+      // A fixed width, so the first column does not jump when the grouping
+      // changes.
       {
         label: groups.find((g) => g.key === groupBy).label,
         width: "36%",

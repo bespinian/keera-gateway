@@ -501,9 +501,8 @@ func TestEncodeMapsStopReasons(t *testing.T) {
 }
 
 func TestEncodeTranslatesAnUpstreamError(t *testing.T) {
-	// The wording is carried through unchanged: a client recovers from some
-	// refusals by matching on it, and rewriting it would break that recovery
-	// while keeping the status that looks like it should have worked.
+	// The wording is passed through unchanged: some clients recover from a
+	// refusal by matching on it.
 	body, status := anthropicShape{}.encode(
 		[]byte(`{"error":{"message":"temperature must be at most 2",`+
 			`"type":"invalid_request_error","code":"invalid_value"}}`),

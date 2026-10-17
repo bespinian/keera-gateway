@@ -17,17 +17,12 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// What the control plane refuses to write down.
-//
-// None of these is what makes the request path safe - a router whose
-// destinations cannot be reached simply does not offer them, and one whose
-// fallback is nonsense falls back on nothing. They are here because every one
-// of them produces a router that looks like it works: the mistake is silent
-// afterwards and visible now, which is the only moment it is anybody's to see.
+// What the control plane refuses to save. The request path would cope with
+// each of these, but each makes a router that looks like it works, and saving
+// is the only moment the mistake is visible.
 
-// routerServer is a control plane over a real store, with a real registry
-// behind it. The registry is not optional here: writing a router announces the
-// change, and announcing it is the gateway's cache being dropped.
+// routerServer is a control plane over a real store and a real registry,
+// which writing a router has to notify.
 func routerServer(ctx context.Context, t *testing.T, st *store.Store) *Server {
 	t.Helper()
 	reg, err := registry.New(ctx, st, registry.Options{}, slog.New(slog.DiscardHandler))
@@ -205,11 +200,9 @@ func TestPutRouterRefusesWhatWouldLookLikeItWorked(t *testing.T) {
 	}
 }
 
-// A router's name shares the namespace of the catalogue's aliases, because a
-// client names both in the same field. The catalogue wins on the request path,
-// so a router named over an alias would take no traffic at all - which is a
-// mistake worth refusing here rather than leaving to be discovered as a router
-// that does nothing.
+// A client names routers and models in the same field, and the model wins on
+// the request path. A router named like a model would take no traffic, so it
+// is refused.
 func TestPutRouterRefusesAnAliasThatIsAlreadyAModel(t *testing.T) {
 	st, ctx := routerStore(t)
 
@@ -230,9 +223,8 @@ func TestPutRouterRefusesANameAClientCouldNotType(t *testing.T) {
 	}
 }
 
-// A router with no fallback refuses what it cannot place, which is a real
-// choice and not an incomplete router - so an empty fallback is accepted and
-// stored as one.
+// A router with no fallback refuses what it cannot place. That is a real
+// choice, so an empty fallback is accepted.
 func TestPutRouterAcceptsNoFallbackAsADeliberateChoice(t *testing.T) {
 	st, ctx := routerStore(t)
 
@@ -250,9 +242,8 @@ func TestPutRouterAcceptsNoFallbackAsADeliberateChoice(t *testing.T) {
 	}
 }
 
-// Deleting a router is not what takes a client down - the panel cannot see the
-// clients - but it is what takes down a scope whose allow-list was narrowed to
-// it, which is the arrangement that makes a scope route.
+// Deleting a router would leave a scope whose allow-list is narrowed to it
+// reaching nothing.
 func TestDeleteRouterRefusesOneAnAllowListNarrowsTo(t *testing.T) {
 	st, ctx := routerStore(t)
 
@@ -295,10 +286,9 @@ func chainBody() map[string]any {
 	}
 }
 
-// The modes that try their destinations in turn: fallback in the order they
-// were written, latency and least-busy in the order the gateway measured. They
-// are written and refused alike, because nothing about the order is written
-// down here.
+// The modes that try their destinations in turn: fallback in the written
+// order, latency and least-busy in the order the gateway measures. They are
+// saved and refused alike.
 var chainModes = []policy.RouterMode{
 	policy.RouterModeFallback, policy.RouterModeLatency, policy.RouterModeLeastBusy,
 }
@@ -329,8 +319,8 @@ func TestPutRouterWritesARouterThatTriesItsDestinationsInTurn(t *testing.T) {
 				t.Errorf("Measures() = %v for %s; the destinations would be tried in an "+
 					"order nobody asked for", saved.Measures(), mode)
 			}
-			// The order is what a fallback router does and a measured one's
-			// tie-break, so it has to survive a write and a read unchanged.
+			// The order is a fallback router's whole job and a measured one's
+			// tie-break, so it must survive the round trip.
 			if len(saved.Destinations) != 2 || saved.Destinations[0] != "keera-large" {
 				t.Errorf("destinations = %v, want keera-large first", saved.Destinations)
 			}
@@ -338,10 +328,9 @@ func TestPutRouterWritesARouterThatTriesItsDestinationsInTurn(t *testing.T) {
 	}
 }
 
-// A router of these modes carrying a deciding model, an instruction or a
-// fallback destination is refused rather than tidied up. Each of those is a
-// field somebody would later read as the reason this router's traffic goes
-// where it goes, and none of them would be.
+// A router of these modes with a deciding model, an instruction or a fallback
+// is refused, not tidied up: somebody would read those fields as what decides
+// its traffic.
 func TestPutRouterRefusesARouterThatTriesInTurnAndDecidesSomething(t *testing.T) {
 	st, ctx := routerStore(t)
 	srv := routerServer(ctx, t, st)
@@ -378,8 +367,7 @@ func TestPutRouterRefusesARouterThatTriesInTurnAndDecidesSomething(t *testing.T)
 	})
 }
 
-// A router that says nothing about its mode is the router this endpoint
-// accepted before there was anything else to be.
+// A router without a mode gets the original one.
 func TestPutRouterDefaultsToTheModeThatReadsTheRequest(t *testing.T) {
 	st, ctx := routerStore(t)
 
@@ -430,9 +418,8 @@ func TestPutRouterWritesASizeRouter(t *testing.T) {
 		t.Errorf("Unbounded() = %v, want the large model taking what is above every ceiling",
 			got)
 	}
-	// A size router asks no model anything, so it must not come back carrying
-	// one: it is what an administrator would otherwise read off the router's
-	// screen as the thing choosing its destinations.
+	// A size router asks no model, so it must not come back with one that an
+	// administrator would read as choosing its destinations.
 	if saved.Model != "" || saved.Prompt != "" || saved.Fallback != "" {
 		t.Errorf("saved = %+v, want nothing that would decide for it", saved)
 	}
@@ -498,9 +485,8 @@ func TestPutRouterRefusesASizeRouterThatCouldNotPlaceEveryRequest(t *testing.T) 
 }
 
 func TestPutRouterRefusesCeilingsOnAModeThatCannotReadThem(t *testing.T) {
-	// A ceiling on a fallback or instruction router is a number that does
-	// nothing, and one somebody would later read as the reason its traffic
-	// goes where it goes.
+	// A ceiling on a fallback or instruction router does nothing, but would be
+	// read as what decides its traffic.
 	st, ctx := routerStore(t)
 	srv := routerServer(ctx, t, st)
 
@@ -522,8 +508,8 @@ func TestPutRouterRefusesCeilingsOnAModeThatCannotReadThem(t *testing.T) {
 }
 
 func TestPutRouterDropsACeilingOfZero(t *testing.T) {
-	// Zero and no entry are the same statement - take whatever nothing else
-	// will - so a router must not end up with two ways of saying it.
+	// Zero and no entry both mean "take whatever nothing else will", so only
+	// one of them is allowed.
 	st, ctx := routerStore(t)
 	body := sizeBody()
 	body["ceilings"] = map[string]int{"keera-small": 4000, "keera-large": 0}
@@ -600,9 +586,8 @@ func TestAOneDestinationRouterStaysOnTheAllowList(t *testing.T) {
 }
 
 // A new router joins the organisation's allow-list as a new model does, or no
-// key could call it. Only when the list allows every destination: allowing a
-// router allows them all, so otherwise it would open a model the list leaves
-// out.
+// key could call it. But only when the list allows every destination, since
+// allowing a router allows them all.
 func TestANewRouterJoinsAnAllowListThatCoversItsDestinations(t *testing.T) {
 	st, ctx := routerStore(t)
 	srv := routerServer(ctx, t, st)

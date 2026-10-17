@@ -404,9 +404,9 @@ func (s *Server) grantCredit(w http.ResponseWriter, r *http.Request, p *authn.Pr
 }
 
 // postFinanceWebhook is told by PostFinance that a transaction changed. The
-// call is not trusted: it only says which transaction to read back over the
-// authenticated API, and only one of a pending or failed payment of Keera's
-// is read: a payment given up on can still be paid late.
+// call is not trusted: it only names a transaction, which is read back over
+// the authenticated API. Only a pending or failed payment of Keera's is read,
+// since a payment given up on can still be paid late.
 func (s *Server) postFinanceWebhook(w http.ResponseWriter, r *http.Request) {
 	pay := s.opts.Payments
 	if pay == nil {
@@ -552,7 +552,6 @@ func (s *Server) RunPayments(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			// One replica at a time, so a payment is not asked after twice.
 			if ok, err := s.st.TakeTurn(ctx, "payments", paymentsEvery); !ok {
 				if err != nil && ctx.Err() == nil {
 					s.log.Warn("asking whether to look at payments failed", "error", err)
@@ -565,7 +564,6 @@ func (s *Server) RunPayments(ctx context.Context) {
 	}
 }
 
-// topUpDue starts the automatic top-ups that are due.
 func (s *Server) topUpDue(ctx context.Context) {
 	due, err := s.st.DueTopUps(ctx, 20)
 	if err != nil {

@@ -11,10 +11,9 @@ import (
 	"github.com/bespinian/keera-gateway/internal/authn"
 )
 
-// The ?next= parameter is the one place a URL a stranger wrote decides where a
-// browser goes after it has just signed in successfully - which is exactly the
-// moment a redirect off-site is most likely to be trusted. Only a same-site
-// path survives.
+// ?next= lets a URL a stranger wrote decide where a browser goes right after
+// sign-in, when an off-site redirect is most likely to be trusted. Only a
+// same-site path survives.
 func TestSafeRedirectKeepsOnlySameSitePaths(t *testing.T) {
 	for _, tc := range []struct {
 		next string
@@ -24,10 +23,8 @@ func TestSafeRedirectKeepsOnlySameSitePaths(t *testing.T) {
 		{"/usage?by=project", "/usage?by=project"},
 		{"/", "/"},
 		{"", ""},
-		// The protocol-relative form, and the backslash spelling of it. Go
-		// treats a backslash as an ordinary path character and passes it
-		// through untouched; every browser normalises it to "//" and leaves
-		// the site.
+		// The protocol-relative form, and its backslash spelling: Go keeps a
+		// backslash as a path character, but browsers turn it into "//".
 		{"//evil.example", ""},
 		{`/\evil.example`, ""},
 		{`/\/evil.example`, ""},
@@ -36,7 +33,6 @@ func TestSafeRedirectKeepsOnlySameSitePaths(t *testing.T) {
 		{"https://evil.example/", ""},
 		{"http://evil.example/", ""},
 		{"//user@evil.example/", ""},
-		// Not a path at all.
 		{"projects", ""},
 		{"javascript:alert(1)", ""},
 	} {
@@ -46,10 +42,8 @@ func TestSafeRedirectKeepsOnlySameSitePaths(t *testing.T) {
 	}
 }
 
-// A 500 is the one answer whose cause is worth nothing to the caller and
-// everything to the operator. The driver error behind it names tables,
-// constraints and the address of a host the gateway could not reach, so what
-// goes out is the request id and not the reason.
+// The error behind a 500 can name tables, constraints and internal hosts, so
+// the caller gets the request id, not the reason.
 func TestInternalErrorsDoNotLeakTheirCause(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	w := httptest.NewRecorder()
@@ -73,9 +67,8 @@ func TestInternalErrorsDoNotLeakTheirCause(t *testing.T) {
 	}
 }
 
-// Where a group decides the administrator role, the directory is authoritative
-// and every sign-in reapplies it - including the demotion of somebody who has
-// been taken out of the group.
+// Where a group decides the administrator role, every sign-in reapplies it,
+// including a demotion for somebody taken out of the group.
 func TestRoleAtSignInFollowsTheDirectoryWhenGroupsDecide(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -98,13 +91,12 @@ func TestRoleAtSignInFollowsTheDirectoryWhenGroupsDecide(t *testing.T) {
 	}
 }
 
-// Where no group decides it, the administrator role was assigned in Keera and
-// reapplying the default on the next sign-in would silently undo it. Google
-// Workspace issues no groups claim at all, so this is every Google deployment.
+// Where no group decides it, the administrator role was set in Keera, and the
+// next sign-in must not undo it. Google Workspace sends no groups claim, so
+// this is every Google deployment.
 //
-// The operator role is the exception in both directions: it comes from
-// KEERA_OPERATORS or an operator group and nowhere else, so it is granted here
-// and taken away here.
+// The operator role is the exception: it comes only from KEERA_OPERATORS or
+// an operator group, so sign-in both grants and removes it.
 func TestRoleAtSignInKeepsWhatKeeraHoldsWhenNoGroupDecides(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

@@ -43,7 +43,6 @@ func (r Role) Assignable() bool { return r == RoleAdmin || r == RoleMember }
 // Method is how a caller proved who they are.
 type Method string
 
-// The ways a caller can prove who they are.
 const (
 	MethodOperatorKey Method = "operator_key"
 	MethodSession     Method = "session"

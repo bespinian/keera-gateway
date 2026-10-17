@@ -105,8 +105,7 @@ type Status struct {
 	// Address is where the gateway reaches the sandbox: a host or IP, without
 	// a port. Empty while it is not running.
 	Address string
-	// Node is where it is scheduled.
-	Node string
+	Node    string
 	// Exited says the process ended by itself, with success. For an agent's
 	// sandbox that is the task done, and the manager terminates it.
 	Exited bool
@@ -128,7 +127,6 @@ type Driver interface {
 	// Create makes one sandbox and returns its status, usually Pending. It
 	// does not wait for readiness; the caller is an HTTP request.
 	Create(ctx context.Context, spec Spec) (Status, error)
-	// Status reads one sandbox back.
 	Status(ctx context.Context, ref Ref) (Status, error)
 	// Suspend releases the compute and keeps the volume. Resume undoes it.
 	// Both are no-ops on a sandbox already in that state.
@@ -148,7 +146,6 @@ type Driver interface {
 	Dial(ctx context.Context, ref Ref, port int) (net.Conn, error)
 }
 
-// Capabilities is what a driver can do.
 type Capabilities struct {
 	// Isolation is the strongest tier this driver can deliver.
 	Isolation policy.Isolation
@@ -188,7 +185,6 @@ func ValidPort(p int) bool {
 // the sandbox is close by and a developer is waiting at a terminal.
 const dialTimeout = 10 * time.Second
 
-// dialSandbox connects to addr, which serves the given port of the sandbox.
 func dialSandbox(ctx context.Context, ref Ref, port int, addr string) (net.Conn, error) {
 	d := net.Dialer{Timeout: dialTimeout}
 	conn, err := d.DialContext(ctx, "tcp", addr)

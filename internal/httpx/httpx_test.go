@@ -8,10 +8,9 @@ import (
 	"testing"
 )
 
-// A request id is echoed on the response, written to the log and quoted in the
-// message a 500 carries. Honouring the client's own is what lets their report
-// and an operator's log line name the same request; holding it to the shape of
-// an id is what keeps it from being a place to put something else.
+// A request id is echoed on the response, logged and quoted in a 500. Honouring
+// the client's own lets their report and the log name the same request; holding
+// it to the shape of an id keeps it from being a place to put something else.
 func TestRequestIDAcceptsAnIDAndNothingElse(t *testing.T) {
 	tests := []struct {
 		name, presented string

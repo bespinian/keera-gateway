@@ -20,7 +20,6 @@ type PlatformKey struct {
 // Platform is the deployment's provider keys, by provider name.
 type Platform map[string]PlatformKey
 
-// Has reports whether the deployment holds the key for a provider.
 func (p Platform) Has(provider string) bool {
 	_, ok := p[provider]
 	return ok

@@ -212,9 +212,8 @@ func TestUpdateProjectLeavesEverythingThatPointsAtItAlone(t *testing.T) {
 	if _, err := st.UpdateProject(ctx, "project_2", ProjectChange{Name: new("Payments")}); !errors.Is(err, ErrProjectNameTaken) {
 		t.Errorf("renaming onto a name in use = %v, want ErrProjectNameTaken", err)
 	}
-	// Renaming a project to what it is already called is not a collision with
-	// itself. Somebody correcting the capitalisation of one word would meet
-	// that as an error otherwise.
+	// Renaming a project to what it is already called, such as to fix its
+	// capitalisation, is not a collision with itself.
 	if _, err := st.UpdateProject(ctx, f.projectID, ProjectChange{Name: new("Payments")}); err != nil {
 		t.Errorf("renaming a project to its own name: %v", err)
 	}
@@ -223,9 +222,8 @@ func TestUpdateProjectLeavesEverythingThatPointsAtItAlone(t *testing.T) {
 	}
 }
 
-// Deleting a project is refused while a key in it still works, because the foreign
-// key cascades: the alternative to this check is credentials disappearing and a
-// production job finding out.
+// Deleting a project is refused while a key in it still works. The foreign key
+// cascades, so without this check a production job would lose its key.
 func TestDeleteProjectIsRefusedWhileAKeyStillWorks(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)

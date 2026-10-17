@@ -1,16 +1,14 @@
 # How a release is built and attested. release.yml calls this on a `v*` tag;
 # it has no trigger of its own.
 #
-# This is laid out for SLSA Build L3, which asks that the build cannot forge
-# its own provenance. Two things give that:
+# Laid out for SLSA Build L3: the build cannot forge its own provenance.
 #
-# - The jobs that build run our code (make, go, podman) and get no id-token
-#   permission, so nothing they run can ask for a signing token. Only the
-#   provenance jobs get one, and those check out nothing and run only GitHub's
-#   own actions. They are handed the image digest and the archives, and sign
-#   those.
-# - This is a reusable workflow, so the signature names this file rather than
-#   the caller. `gh attestation verify --signer-workflow` checks for it.
+# - The build jobs run our code (make, go, podman) and get no id-token
+#   permission, so nothing they run can get a signing token. Only the
+#   provenance jobs get one, and they check out nothing and run only GitHub's
+#   actions, signing the image digest and archives they are handed.
+# - This is a reusable workflow, so the signature names this file, not the
+#   caller. `gh attestation verify --signer-workflow` checks for it.
 name: Release build
 
 on:
@@ -35,14 +33,13 @@ jobs:
         with:
           go-version-file: go.mod
 
-      # The Containerfile writes the vendor tree itself when the context has
-      # none. Writing it here instead keeps the image build itself offline.
+      # The Containerfile would write the vendor tree itself. Writing it here
+      # keeps the image build offline.
       - name: Vendor dependencies
         run: go mod vendor
 
-      # The image is named after the binary it runs, not after the repository,
-      # so only the owner comes from the environment. ghcr.io takes a lowercase
-      # path and an owner's name need not be one.
+      # The image is named after the binary, so only the owner comes from the
+      # environment. ghcr.io needs a lowercase path, and owner names may not be.
       - name: Name the image
         id: image
         run: |
@@ -50,15 +47,13 @@ jobs:
           echo "name=ghcr.io/$owner/keera-gateway" >> "$GITHUB_OUTPUT"
           echo "ref=ghcr.io/$owner/keera-gateway:${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
 
-      # One target for both: `sbom` depends on `image`, so what it
-      # describes is the image this job is about to push rather than whatever
-      # was tagged last. VERSION is what `keera version` will report, since the
-      # build context carries no .git for the toolchain to stamp from.
+      # `sbom` depends on `image`, so it describes the image this job pushes.
+      # VERSION is what `keera version` reports, since the build context has no
+      # .git for the toolchain to stamp from.
       - name: Build the image and its SBOM
         run: make sbom GATEWAY_IMAGE='${{ steps.image.outputs.ref }}' VERSION="$GITHUB_REF_NAME"
 
-      # --digestfile, because the attestation's subject has to be the digest and
-      # not the tag: a tag can be moved afterwards and a digest cannot.
+      # The attestation's subject must be the digest: a tag can be moved later.
       - name: Push
         id: push
         env:
@@ -95,9 +90,8 @@ jobs:
         with:
           subject-name: ${{ needs.image.outputs.name }}
           subject-digest: ${{ needs.image.outputs.digest }}
-          # Stored next to the image in the registry as well as in this
-          # repository, so `gh attestation verify` and cosign find it from the
-          # image alone - which is all a customer has.
+          # Also stored next to the image, so `gh attestation verify` and cosign
+          # find it from the image alone, which is all a customer has.
           push-to-registry: true
 
   cli:
@@ -138,8 +132,8 @@ jobs:
           name: dist
           path: build/dist
 
-      # Each archive is its own subject, so `gh attestation verify` works on
-      # the one file somebody downloaded.
+      # Each archive is its own subject, so `gh attestation verify` works on a
+      # single downloaded file.
       - name: Attest the build
         uses: actions/attest-build-provenance@v4
         with:
@@ -163,8 +157,8 @@ jobs:
           name: dist
           path: build/dist
 
-      # The tag may or may not already have a release behind it: one pushed from
-      # a workstation has none, one cut from the web interface does.
+      # A tag pushed from a workstation has no release yet; one cut from the web
+      # interface does.
       - name: Publish the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

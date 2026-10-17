@@ -17,7 +17,6 @@ const Prefix = "keera_sk_"
 // it and a log line can be matched to a key without the secret.
 const prefixLen = len(Prefix) + 6
 
-// scheme is the Authorization scheme clients are expected to use.
 const scheme = "bearer"
 
 // ErrMalformed is returned for anything that cannot be a Keera Gateway key.
@@ -25,10 +24,6 @@ var ErrMalformed = errors.New("auth: malformed key")
 
 // Generate returns a new key with the values stored for it: its SHA-256 and its
 // display prefix. The key itself is never stored.
-//
-// SHA-256 rather than a password hash: the key is 256 random bits, so there is
-// no dictionary to defend against, and a slow hash on the hot path would invite
-// denial of service.
 func Generate() (key string, hash []byte, prefix string) {
 	key = Prefix + RandomToken()
 	return key, Hash(key), key[:prefixLen]
@@ -49,7 +44,6 @@ func WellFormed(key string) bool {
 	return ok && Encoded32(rest)
 }
 
-// encoded32Len is the length of 32 bytes in unpadded base64url.
 var encoded32Len = base64.RawURLEncoding.EncodedLen(32)
 
 // Encoded32 reports whether s has the shape RandomToken gives: 32 bytes in
@@ -72,7 +66,8 @@ func Encoded32(s string) bool {
 // command-line token or code, or a passkey link.
 //
 // SHA-256 rather than a password hash: each token is random, so there is no
-// dictionary to defend against, and this runs on every request.
+// dictionary to defend against, and a slow hash on every request would invite
+// denial of service.
 func Hash(key string) []byte {
 	sum := sha256.Sum256([]byte(key))
 	return sum[:]

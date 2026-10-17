@@ -12,27 +12,15 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// Load is where a deployment's mistakes are meant to be caught, and most of
-// what it does is refuse. Every floor below has a comment in config.go saying
-// why it is there - retention deletes rows for good, a five-minute idle suspend
-// would suspend a sandbox somebody is typing into - and a floor whose reason
-// lives only in a comment is a floor that comes back as a default the next time
-// this function is tidied.
-//
-// The other half is the settings nothing names: the secure-cookie flag is
-// inferred rather than configured, so no deployment will ever notice it
-// flipping to insecure.
+// Load is where a deployment's mistakes are caught, and most of what it does
+// is refuse. These tests pin each floor, so a later tidy-up cannot quietly
+// drop one, and the inferred secure-cookie flag, which no deployment would
+// notice flipping to insecure.
 
-// loadWith runs Load against exactly the environment it is given.
-//
-// The KEERA_ variables of whoever is running the tests are cleared first.
-// Otherwise a developer with a gateway configured in their shell - which is
-// every developer who has run `make dev` - would get different results from
-// the same test, and the failure would look like a bug in this package.
-//
-// Clearing is done by setting them empty rather than by unsetting: env() trims
-// and treats blank as absent, so the two are the same thing here, and t.Setenv
-// puts every one of them back when the test ends.
+// loadWith runs Load against exactly env. The caller's own KEERA_ variables
+// are cleared first, so a shell set up for `make dev` cannot change the
+// result. Setting them empty is the same as unsetting for env(), and t.Setenv
+// puts them back afterwards.
 func loadWith(t *testing.T, env map[string]string) (Config, error) {
 	t.Helper()
 	for _, kv := range os.Environ() {
@@ -59,9 +47,8 @@ func valid(extra map[string]string) map[string]string {
 }
 
 func TestLoadDefaultsAreWhatTheDocumentationSays(t *testing.T) {
-	// A deployment that sets only the two required variables gets a working
-	// gateway. These are the numbers the install guide quotes, so they are the
-	// numbers somebody plans a deployment around.
+	// The required variables alone give a working gateway. These are the
+	// defaults the install guide quotes, which deployments are planned on.
 	c, err := loadWith(t, valid(nil))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -86,8 +73,8 @@ func TestLoadDefaultsAreWhatTheDocumentationSays(t *testing.T) {
 		{"usage retention", c.UsageRetention, time.Duration(0)},
 		{"audit retention", c.AuditRetention, time.Duration(0)},
 		{"session gap", c.SessionGap, 30 * time.Minute},
-		// The panel is the reason most deployments have a browser pointed at
-		// this process at all, so it is on unless switched off.
+		// On unless switched off: the panel is why most deployments point a
+		// browser at this process at all.
 		{"the panel", c.UI, true},
 	}
 	for _, tc := range tests {
@@ -125,10 +112,9 @@ func TestACountOfZeroIsTheDefault(t *testing.T) {
 }
 
 func TestLoadNeedsTheTwoThingsItCannotInvent(t *testing.T) {
-	// A database it can reach, a credential for the control plane and a key
-	// for stored credentials. None has a sensible default, and a gateway that
-	// started without the first two would serve nothing and let anybody
-	// administer it.
+	// A database, a control-plane credential and a key for stored
+	// credentials. None has a sensible default, and without the first two a
+	// gateway would serve nothing and let anybody administer it.
 	tests := []struct {
 		name string
 		env  map[string]string
@@ -185,9 +171,8 @@ func TestLoadNeedsTheTwoThingsItCannotInvent(t *testing.T) {
 }
 
 func TestTheScrapeTokenCannotBeTheOperatorKey(t *testing.T) {
-	// The whole point of a separate scrape token is that a Prometheus
-	// configuration does not have to hold the operator key. The same value
-	// under two names would leave it holding one and looking like it did not.
+	// A separate scrape token keeps the operator key out of a Prometheus
+	// configuration. The same value under two names would defeat that.
 	_, err := loadWith(t, valid(map[string]string{
 		"KEERA_METRICS_TOKEN": "an-operator-key-long-enough",
 	}))
@@ -219,9 +204,9 @@ func TestAScrapeTokenIsHeldToTheSameLengthAsTheOperatorKey(t *testing.T) {
 }
 
 func TestRetentionIsRefusedBelowADay(t *testing.T) {
-	// Retention deletes rows that cannot be recovered and every plausible value
-	// is measured in months, so a stray "10m" - which is a plausible typo for
-	// "10mo" - would silently discard the day's billing data.
+	// Retention deletes rows for good and real windows are months, so a stray
+	// "10m", a likely typo for "10mo", would silently discard the day's
+	// billing data.
 	for _, name := range []string{"KEERA_USAGE_RETENTION", "KEERA_AUDIT_RETENTION"} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := loadWith(t, valid(map[string]string{name: "-1h"})); err == nil {
@@ -257,9 +242,8 @@ func TestRetentionIsRefusedBelowADay(t *testing.T) {
 }
 
 func TestASessionGapBelowAMinuteIsTheRequestLog(t *testing.T) {
-	// Sessions exist to group a person's requests into tasks. A gap under a
-	// minute reports every request as its own task, which is the report this
-	// one was added to replace.
+	// Sessions group requests into tasks. Under a minute every request is its
+	// own task, which is just the request log.
 	_, err := loadWith(t, valid(map[string]string{"KEERA_SESSION_GAP": "30s"}))
 	if err == nil {
 		t.Fatal("a thirty-second session gap was accepted")
@@ -279,9 +263,8 @@ func TestASessionGapBelowAMinuteIsTheRequestLog(t *testing.T) {
 }
 
 func TestSandboxSettingsAreOnlyCheckedWhenSandboxesAreOn(t *testing.T) {
-	// A deployment that lends out no sandboxes has no driver, and refusing to
-	// start it over a variable that does nothing would turn a leftover line in
-	// an .env into an outage.
+	// Without a driver the setting does nothing, and refusing to start over it
+	// would turn a leftover line in an .env into an outage.
 	c, err := loadWith(t, valid(map[string]string{"KEERA_SANDBOX_IDLE_SUSPEND": "1s"}))
 	if err != nil {
 		t.Fatalf("a stray sandbox setting stopped a gateway with sandboxes off: %v", err)
@@ -370,13 +353,9 @@ func TestAnUnknownSandboxDriverIsRefused(t *testing.T) {
 }
 
 func TestCookiesAreSecureWheneverTheBrowserWillBeOnHTTPS(t *testing.T) {
-	// Nothing names this setting in a normal deployment: it is inferred from
-	// the address the browser actually uses, because an operator who has put
-	// the panel behind TLS has already said everything they should have to.
-	//
-	// The inference is the security-relevant part. Getting it wrong in the safe
-	// direction breaks a local http deployment loudly; getting it wrong in the
-	// other direction sends a session cookie over plaintext and nothing says so.
+	// A normal deployment never sets this: it is inferred from the public URL.
+	// Wrong in one direction breaks a local http deployment loudly; wrong in
+	// the other sends the session cookie over plaintext and nothing says so.
 	tests := []struct {
 		name string
 		env  map[string]string
@@ -485,11 +464,9 @@ func TestADefaultRoleThatIsNotAdminOrMemberIsRefused(t *testing.T) {
 }
 
 func TestAMalformedNumberFallsBackRatherThanFailing(t *testing.T) {
-	// envInt and envDuration ignore what they cannot parse. That is a decision
-	// worth pinning either way: it means a typo in a tuning variable leaves a
-	// gateway running on the default rather than refusing to start, which is
-	// the right trade for a number that only tunes and the wrong one for the
-	// credentials and floors above, where Load refuses instead.
+	// envInt and envDuration ignore what they cannot parse, so a typo in a
+	// tuning number keeps the default rather than stopping the start. The
+	// credentials and floors above are refused instead.
 	c, err := loadWith(t, valid(map[string]string{
 		"KEERA_MAX_DB_CONNS": "sixteen",
 		"KEERA_CACHE_TTL":    "half a minute",

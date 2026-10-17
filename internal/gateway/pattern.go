@@ -49,7 +49,6 @@ type patternEntry struct {
 	compiled  compiled
 }
 
-// rulesFor returns the compiled rules of one pattern filter.
 func (c *patternCache) rulesFor(f policy.Filter) compiled {
 	key := f.OrgID + "\x00" + f.Alias
 	if got, ok := c.m.Load(key); ok && got.(patternEntry).updatedAt.Equal(f.UpdatedAt) {

@@ -136,8 +136,6 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 		}
 		priced = true
 	}
-	// putModel has trimmed and lowered the provider already, since
-	// Platform.Covers reads it first.
 	if err := catalog.CheckModel(&m, priced); err != nil {
 		badRequest(w, err.Error())
 		return
@@ -341,9 +339,8 @@ func enabledAfterPut(said *bool, found, was bool) bool {
 	return true
 }
 
-// setCredential seals a credential for the thing of kind named by alias, or
-// clears it when credential is empty. name is the row's secret name, set the
-// store's setter.
+// setCredential seals and stores a credential, or clears it when credential
+// is empty. name gives the secret name it is sealed under.
 func (s *Server) setCredential(r *http.Request, p *authn.Principal,
 	orgID, alias, credential, kind string,
 	name func(orgID, alias string) string,

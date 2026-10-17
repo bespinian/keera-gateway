@@ -197,7 +197,6 @@ func NewOIDC(ctx context.Context, cfg OIDCConfig, client *http.Client) (*OIDC, e
 	}, nil
 }
 
-// isGoogle reports whether an issuer is Google's.
 func isGoogle(issuer string) bool {
 	u, err := url.Parse(issuer)
 	return err == nil && u.Host == "accounts.google.com"

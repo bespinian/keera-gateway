@@ -15,12 +15,9 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// The half of a command-line sign-in that does not need an identity provider:
-// the code has been issued, and what happens from there is the exchange and the
-// credential it produces. What these cover is that the token really does
-// authenticate as the person who signed in - with their role and their
-// organisation and not the operator's - and that the two things which must not
-// work do not.
+// The half of a command-line sign-in after the code is issued: the exchange
+// and the token it produces. The token must act as the person who signed in,
+// with their role and organisation, not as the operator.
 
 // signedInAtATerminal is a person with a code waiting to be redeemed, and the
 // server to redeem it against.
@@ -48,7 +45,7 @@ func signedInAtATerminal(t *testing.T, verifier string) (*httptest.Server, strin
 	return ts, code, user
 }
 
-// redeem posts one JSON body to the code-redeeming route, with no credential.
+// redeem posts to the code-redeeming route with no credential.
 func redeem(t *testing.T, ts *httptest.Server, in, out any) int {
 	t.Helper()
 	const path = "/auth/cli/token"
@@ -98,9 +95,8 @@ func asToken(t *testing.T, ts *httptest.Server, token string, out any) int {
 	return res.StatusCode
 }
 
-// The point of the whole feature: what a terminal ends up holding is that
-// person, with their role and their organisation - not the operator key, which
-// is what it would have been holding before.
+// A terminal ends up signed in as the person, with their role and
+// organisation, not with the operator key.
 func TestARedeemedCodeSignsTheTerminalInAsThePerson(t *testing.T) {
 	verifier := authn.NewCLIVerifier()
 	ts, code, user := signedInAtATerminal(t, verifier)
@@ -154,8 +150,8 @@ func TestARedeemedCodeSignsTheTerminalInAsThePerson(t *testing.T) {
 	}
 }
 
-// The code travels in a URL, so it lands in a browser's history and sometimes in
-// a shell's. Redeeming it has to be something that works exactly once.
+// The code travels in a URL, so it lands in browser and shell history. It
+// must work only once.
 func TestACodeCannotBeRedeemedTwice(t *testing.T) {
 	verifier := authn.NewCLIVerifier()
 	ts, code, _ := signedInAtATerminal(t, verifier)
@@ -169,9 +165,8 @@ func TestACodeCannotBeRedeemedTwice(t *testing.T) {
 	}
 }
 
-// Loopback ports are not private: any process on the machine can bind one, and
-// any of them could reach the listener before the one that started the sign-in.
-// The verifier is what that other process does not have.
+// Any process on the machine can bind a loopback port and get the code first.
+// It does not have the verifier.
 func TestACodeIsWorthNothingWithoutTheVerifier(t *testing.T) {
 	verifier := authn.NewCLIVerifier()
 	ts, code, _ := signedInAtATerminal(t, verifier)
@@ -182,8 +177,7 @@ func TestACodeIsWorthNothingWithoutTheVerifier(t *testing.T) {
 	}, nil); status != http.StatusUnauthorized {
 		t.Errorf("redeeming with another process's verifier: status = %d, want 401", status)
 	}
-	// And the code is spent either way, so a guesser gets one attempt rather
-	// than as many as they can make before it expires.
+	// The code is spent either way, so a guesser gets one attempt.
 	if status := redeem(t, ts, map[string]string{
 		"code": code, "verifier": verifier,
 	}, nil); status != http.StatusUnauthorized {

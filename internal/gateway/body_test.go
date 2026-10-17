@@ -227,11 +227,9 @@ func TestClampOutputTokens(t *testing.T) {
 }
 
 func TestClampLeavesNoUnboundedCeilingInTheBody(t *testing.T) {
-	// The bug this guards: max_completion_tokens spelled with an exponent was
-	// unreadable, so the request counted as having named no ceiling at all.
-	// The guardrail's went on as max_tokens and the client's own number was
-	// forwarded beside it, leaving the upstream to decide which of the two it
-	// honoured - and so whether the administrator's limit held.
+	// max_completion_tokens with an exponent used to be unreadable, so the
+	// guardrail's ceiling went on as max_tokens beside the client's own, and
+	// the upstream picked which one to honour.
 	b, err := parseBody([]byte(`{"max_tokens":100,"max_completion_tokens":1e9}`))
 	if err != nil {
 		t.Fatal(err)
@@ -388,10 +386,8 @@ func TestParseBodyFindsFieldBoundariesInAwkwardJSON(t *testing.T) {
 			t.Errorf("parseBody(%s): %v", in, err)
 			continue
 		}
-		// Re-encoding without touching anything has to give back a document
-		// that says exactly what the client's did. It is not byte-for-byte -
-		// encode does not reproduce the whitespace or the key escapes a client
-		// chose - so the two are compared as JSON.
+		// encode does not keep the client's whitespace or key escapes, so the
+		// two are compared as JSON.
 		var want, got any
 		if err := json.Unmarshal([]byte(in), &want); err != nil {
 			t.Fatalf("the test case is not valid JSON: %v", err)
@@ -408,9 +404,8 @@ func TestParseBodyFindsFieldBoundariesInAwkwardJSON(t *testing.T) {
 }
 
 func TestParseBodyKeepsTheLastOfARepeatedField(t *testing.T) {
-	// Which value a repeated key takes is what every JSON reader downstream
-	// will decide too, and a body that arrived with one field is forwarded
-	// with one rather than with the duplicate copied through.
+	// A repeated key takes its last value, as JSON readers downstream do, and
+	// is forwarded once.
 	b, err := parseBody([]byte(`{"model":"first","stream":true,"model":"second"}`))
 	if err != nil {
 		t.Fatal(err)
@@ -424,9 +419,8 @@ func TestParseBodyKeepsTheLastOfARepeatedField(t *testing.T) {
 }
 
 func TestParseBodyRefusesABodyItCannotRead(t *testing.T) {
-	// A body the gateway cannot parse is refused here, with a message naming
-	// where it went wrong, rather than forwarded for the inference plane to
-	// reject in words about a request the client did not send.
+	// A body that does not parse is refused here, saying where it went wrong,
+	// rather than forwarded for the inference plane to reject.
 	for _, in := range []string{
 		`{"model":"m",}`,
 		`{"model":"m"`,
@@ -444,10 +438,8 @@ func TestParseBodyRefusesABodyItCannotRead(t *testing.T) {
 	}
 }
 
-// FuzzParseBody holds the walk to what unmarshalling into a map does. The walk
-// is the gateway's own JSON reader, on the one path every request takes, so the
-// question it has to keep answering is not whether it is plausible but whether
-// it still agrees with the standard library about every body it accepts.
+// FuzzParseBody checks that the walk, the JSON reader every request goes
+// through, agrees with unmarshalling into a map on every body it accepts.
 func FuzzParseBody(f *testing.F) {
 	f.Add(`{"model":"m","messages":[{"role":"user","content":"hi"}],"stream":true}`)
 	f.Add(`{"a":"}\"","b":[1,{"c":null}],"d":{},"e":-1.5e+3}`)

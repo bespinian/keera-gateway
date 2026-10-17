@@ -1,19 +1,12 @@
-// Sessions: the request log grouped into the tasks its requests were made for.
+// Sessions: the request log grouped into tasks. One instruction to an agent
+// is thirty or forty calls, and the cost of a task is what people budget with.
 //
-// Every other screen counts requests, and a request is not the unit anybody
-// works in. A developer gives a coding agent one instruction and the agent
-// makes thirty or forty calls carrying it out, so "four rappen a call" is a
-// number nobody can act on and "one franc twenty a task, eleven minutes,
-// forty-one calls" is what goes into a budget conversation.
+// It ranks by any number, not only time, because the row worth opening is the
+// costly or looping task, not the latest.
 //
-// The screen ranks by any of its numbers, not only by time, because the row
-// worth opening is never the most recent one: it is the task that cost four
-// francs, or the one that made four hundred calls and finished nothing.
-//
-// A session is grouped, not stored. The gateway records a hash of the
-// conversation on every request and this screen cuts those into runs wherever
-// the agent went quiet for longer than the deployment's idle gap. Nothing
-// about any prompt is kept.
+// A session is grouped, not stored: requests share a hash of the conversation
+// and are split wherever the agent was idle longer than the deployment's gap.
+// No prompt is kept.
 
 import { api, ApiError } from "../api.js";
 import {
@@ -65,17 +58,15 @@ import { toolCallTable } from "./tools.js";
 
 const PAGE = 100;
 
-// The most sessions a refresh asks for, which is the most the control plane
-// sends in one page.
+// The most the control plane sends in one page.
 const MAX_ROWS = 5000;
 
-// How often a live screen asks for the sessions again, at most.
+// How often a live screen refreshes, at most.
 const REFRESH_MS = 3000;
 
-// Whether the screen is watched, remembered apart from the request log's.
 const LIVE_KEY = "keera.sessions.live";
 
-// The ranking, remembered apart from the request log's, which offers others.
+// Remembered apart from the request log's ranking, which offers others.
 const SORT_KEY = "keera.sessions.sort";
 
 const NO_COUNTS = { total: 0, ok: 0, failed: 0, refused: 0, interrupted: 0 };
@@ -173,17 +164,11 @@ export async function sessionsView(ctx) {
   return wrap;
 }
 
-// follow runs update whenever a request is recorded that could change what
-// this screen shows.
-//
-// A session is not stored, so there is nothing to stream. The request stream
-// says when to look again, and update asks the control plane for the sessions,
-// which also keeps any ranking right. It runs at most once every REFRESH_MS,
-// so an agent making a call a second costs one query per interval, not one per
-// call.
+// follow runs update whenever a request is recorded that could change this
+// screen. Sessions are not stored, so there is nothing to stream: the request
+// stream says when to fetch them again. Throttled to one query per REFRESH_MS.
 function follow(ctx, watch, since, narrowed, update) {
-  // The status is left out: a new request can move a session into or out of a
-  // status, so the stream must see requests of every status.
+  // No status filter: a new request can move a session into or out of one.
   const listen = { org_id: ctx.orgID, since, ...narrowed, status: "" };
   const refresh = throttled(update, REFRESH_MS);
   ctx.onTeardown(refresh.stop);
@@ -197,10 +182,9 @@ function follow(ctx, watch, since, narrowed, update) {
   });
 }
 
-/** sessionLog is the session list for one project, key or model, drawn below
- *  that thing's charts. The range comes from the screen it sits on. Like the
- *  request log there, it takes the outcome and the ranking but no narrowing:
- *  the screen it sits on is already narrowed. */
+/** sessionLog is the session list below a project's, key's or model's charts.
+ *  It takes the outcome and ranking but no filters, as the screen is already
+ *  narrowed. */
 export async function sessionLog(ctx, { scope = {}, since, hide = {} }) {
   const outcome = currentOutcome();
   const rank = ranking(ctx, SORT_KEY);
@@ -271,11 +255,8 @@ export async function sessionLog(ctx, { scope = {}, since, hide = {} }) {
   return wrap;
 }
 
-// more is what follows a full page: the pager in time order, and a note under
-// a ranking. Paging appends rather than replaces, so somebody reading down a
-// window keeps what they have already read on the screen. Under a ranking the
-// cursor would be a cursor over another order, and whoever ranked by cost
-// wanted the top of that list.
+// more is what follows a full page: the pager in time order, a note under a
+// ranking. The cursor is over time, so it cannot page a ranking.
 function more(params, rows, rank, list) {
   if (rows.length < PAGE) return null;
   if (rank.by !== "") return rankedNote(PAGE, "sessions");
@@ -288,9 +269,8 @@ function sessionsCSV(params) {
   );
 }
 
-// pager loads the next page into the table above it. The cursor is the
-// oldest session on the screen, which is also what the control plane would
-// have sent as next_before.
+// pager appends the next page. The cursor is the oldest session shown, which
+// is what the control plane sends as next_before.
 function pager(params, rows, list) {
   return loadMore(
     PAGE,
@@ -309,15 +289,10 @@ function pager(params, rows, list) {
 function sessionTable(ctx, rows, names, hide, rank) {
   const columns = [
     {
-      // The conversation, as the gateway hashed it. It is the only name a
-      // session has - anything else would mean keeping the prompt that started
-      // it - and it carries the way in, as every other list here does.
-      //
-      // The models it used go underneath rather than in a column of their own:
-      // almost every task uses one, and a narrow column with the same value on
-      // every row pushes the numbers off the screen. A session the client named
-      // itself is marked; an inferred one is not, because that is nearly all of
-      // them.
+      // The hash is the only name a session has; anything else would mean
+      // keeping the prompt. The models go underneath, as almost every task
+      // uses one. Only a session the client named itself is marked, because
+      // nearly all are inferred.
       label: "Session",
       shrink: true,
       sortKey: (a) => a.key,
@@ -346,18 +321,14 @@ function sessionTable(ctx, rows, names, hide, rank) {
         ),
     },
     !hide.who && {
-      // Whose task it was. The person where the key was attributed to one, and
-      // the key itself where it was not - which is the shared key issued for a
-      // pipeline, and is the answer either way. "Which developer's task cost
-      // four francs" is the question this screen is opened with as often as
-      // "which task", and it is one column.
+      // The person the key is attributed to, or else the key, such as a shared
+      // pipeline key.
       label: "Who",
       shrink: true,
       sortKey: (a) =>
         names.users[a.user_id] || names.keys[a.key_id] || a.key_id || null,
       cell: (a) =>
-        // The person's own screen where there is one to open, which only an
-        // administrator has.
+        // Only an administrator has a person's screen to open.
         a.user_id && isAdmin(ctx)
           ? h(
               "a",
@@ -446,9 +417,8 @@ function sessionTable(ctx, rows, names, hide, rank) {
           : dash(),
     },
     {
-      // How the task ended, which is the first thing asked about one that
-      // stopped short. It is here rather than only inside the session, because
-      // that is what saves opening thirty of them to find the one that died.
+      // Shown in the list, so nobody has to open thirty sessions to find the
+      // one that died.
       label: "Ended",
       cell: (a) => endedCell(a),
     },
@@ -475,9 +445,8 @@ function sessionTable(ctx, rows, names, hide, rank) {
   });
 }
 
-// endedCell says how the last call of a task went, in the same words the
-// request log uses for the same row. A task whose final call was refused is not
-// a task that finished.
+// endedCell says how the last call went, in the request log's words. A task
+// whose final call was refused did not finish.
 function endedCell(a) {
   const [label, tone, why] = outcomeMeaning({
     status: a.last_status,
@@ -665,9 +634,7 @@ export async function sessionDetailView(ctx) {
     );
   }
 
-  // The same table the request log draws, because these are the same rows: the
-  // same columns, the same wording for an outcome, the same dialog behind View.
-  // The one thing that differs is the order - a task is read forwards.
+  // The request log's table, but oldest first, because a task is read forwards.
   wrap.append(
     h(
       "div",
@@ -684,8 +651,7 @@ export async function sessionDetailView(ctx) {
           {
             sortBy: "When",
             sortDir: "asc",
-            // The log has filters on the server. A session is loaded whole, so
-            // searching it here sees every request it made.
+            // A session is loaded whole, so searching here sees every request.
             search: (q) => `${q.alias} ${q.status} ${q.error || ""}`,
             searchLabel: "these requests",
           },
@@ -694,8 +660,7 @@ export async function sessionDetailView(ctx) {
     ),
   );
 
-  // What the agent did between its calls, through the MCP servers. Drawn only
-  // when it did something, since most deployments have no servers yet.
+  // Tool calls through the MCP servers, drawn only when there are any.
   const tools = res.tool_calls || [];
   if (tools.length) {
     wrap.append(
@@ -721,16 +686,12 @@ export async function sessionDetailView(ctx) {
   return wrap;
 }
 
-// turnStrip is the task at a glance: one bar per call, in the order they were
-// made, sized by what each cost and coloured by how each went.
+// turnStrip draws one bar per call, in order, sized by cost and coloured by
+// outcome. Even bars mean the agent is working, a tail of identical small ones
+// that it is looping, and a red bar is where it went wrong.
 //
-// Forty even bars is an agent working; a long tail of identical small ones is
-// an agent looping; a red bar two thirds along with nothing sensible after it
-// is where the task went wrong, and clicking it opens that call.
-//
-// Cost rather than latency, because cost is what the reader came for and a
-// refused call has no latency worth drawing. A call that cost nothing still
-// gets a bar tall enough to click.
+// Cost rather than latency, because a refused call has no latency worth
+// drawing. A free call still gets a bar tall enough to click.
 function turnStrip(ctx, requests, names) {
   const max = Math.max(...requests.map((q) => q.cost_micros || 0), 1);
   return h(
@@ -754,11 +715,8 @@ function turnStrip(ctx, requests, names) {
   );
 }
 
-// gone is a session that is not there, said in the terms of why it might not
-// be rather than as a failure to load a page.
-// hint is what this screen is and what it cannot promise, which for a grouping
-// that is inferred rather than stored is worth saying on the screen instead of
-// in a document nobody opens.
+// hint explains on screen how sessions are inferred, and so what they cannot
+// promise.
 function hint(gapSeconds, detail) {
   const gap = duration((gapSeconds || 0) * 1000);
   const how =

@@ -24,9 +24,8 @@ func sessionFixture(t *testing.T, st *store.Store) (from, to time.Time) {
 	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_1", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
-	// The project and the key exist as rows, not only as ids on a usage event:
-	// narrowing a report to one of them is checked against who owns it, which
-	// is what keeps one tenant from reading another's traffic by naming its id.
+	// The project and key are real rows: narrowing a report to one is checked
+	// against who owns it, so a tenant cannot read another's traffic by its id.
 	if _, err := st.CreateProject(ctx, store.Project{ID: "project_1", OrgID: "org_1", Name: "Payments Platform"}); err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
@@ -128,9 +127,8 @@ func TestSessionsReportTasksWithTheWindowsTotalsAboveThem(t *testing.T) {
 		t.Errorf("%d unhappy sessions, want the one that ended on a refusal",
 			got.Totals.Unhappy)
 	}
-	// The threshold that produced this grouping travels with it: a reader who
-	// cannot see it cannot tell a deployment that cuts tasks at ten minutes
-	// from one that cuts them at an hour.
+	// The gap that produced this grouping is sent with it, or a reader could
+	// not tell a ten-minute cut from an hour.
 	if got.GapSeconds != int64(store.DefaultSessionGap.Seconds()) {
 		t.Errorf("gap = %ds, want the deployment's %s", got.GapSeconds, store.DefaultSessionGap)
 	}
@@ -139,8 +137,7 @@ func TestSessionsReportTasksWithTheWindowsTotalsAboveThem(t *testing.T) {
 		t.Error("the report carries no key names")
 	}
 
-	// The task that ended on the refusal says so in the list, which is what
-	// saves opening every session to find the one that died.
+	// The list shows which task ended on a refusal, so nobody has to open each.
 	var refused *store.AgentSession
 	for i := range got.Data {
 		if got.Data[i].LastStatus == 402 {
@@ -221,9 +218,8 @@ func TestSessionsNarrowAndRankAndPage(t *testing.T) {
 		t.Errorf("a ranked page carries the cursor %d", ranked.NextBefore)
 	}
 
-	// And a ranking nobody offers is a refusal rather than a silent fallback to
-	// the default, which would be a screen sorted by something other than what
-	// it says. The request log's rankings are not the session list's.
+	// An unknown ranking is refused, not silently replaced by the default. The
+	// request log's rankings are not the session list's.
 	for _, sort := range []string{"whatever", "ttft"} {
 		if code := getJSON(t, ts, httpx.ControlPrefix+"/v1/sessions?"+window+"&sort="+sort, nil); code != http.StatusBadRequest {
 			t.Errorf("sort=%s answered %d, want 400", sort, code)
@@ -272,8 +268,8 @@ func TestOneSessionIsReachedFromAnyRequestInIt(t *testing.T) {
 	from, to := sessionFixture(t, st)
 	ts := sessionServer(t, st)
 
-	// The rows, as the request log hands them over - which is where a reader
-	// who wants a task actually starts.
+	// The rows, as the request log hands them over: that is where a reader
+	// looking for a task starts.
 	var log struct {
 		Data []store.Request `json:"data"`
 	}

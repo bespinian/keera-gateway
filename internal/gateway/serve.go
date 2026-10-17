@@ -154,7 +154,6 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, res *policy.Resol
 	s.answer(c, b)
 }
 
-// receive reads the request body off the client.
 func (s *Server) receive(c *call) ([]byte, bool) {
 	// Opened rather than timed, so a body refused halfway (over the size cap)
 	// is still drawn as the step it was refused in.
@@ -1007,7 +1006,6 @@ func bufferedError(body []byte, upstream, status int) string {
 	return ""
 }
 
-// setUsage copies a usage record onto the usage row.
 func setUsage(ev *store.Event, u *tokenUsage) {
 	ev.InputTokens = u.InputTokens
 	ev.CachedInputTokens = u.cached()
@@ -1074,7 +1072,6 @@ func clampFields(b *body, limit int, fields ...string) {
 			b.setInt(field, limit)
 		}
 	}
-	// A request without a ceiling gets the guardrail's.
 	if !asked {
 		b.setInt(fields[0], limit)
 	}

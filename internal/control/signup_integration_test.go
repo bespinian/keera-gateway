@@ -108,7 +108,6 @@ func (s signupSetup) signIn(t *testing.T, subject, email string) (string, []*htt
 	return back.Header.Get("Location"), back.Cookies()
 }
 
-// call sends one request to a sign-up route with the cookies given.
 func (s signupSetup) call(t *testing.T, method, body string, cookies []*http.Cookie,
 	out any) (int, []*http.Cookie) {
 	t.Helper()
@@ -197,11 +196,9 @@ func TestASignInMatchingNoOrganisationCreatesOne(t *testing.T) {
 		t.Error("the refresh token was not kept, so the directory is never asked again")
 	}
 
-	// The sign-up is used up.
 	if got, _ := s.call(t, http.MethodPost, `{"name":"Another"}`, []*http.Cookie{signup}, nil); got != http.StatusUnauthorized {
 		t.Errorf("using the sign-up again: status %d, want 401", got)
 	}
-	// And the next sign-in goes straight in.
 	if to, _ := s.signIn(t, "sub-ada", "ada@new.example"); to != "/" {
 		t.Errorf("the next sign-in went to %q, want the panel", to)
 	}

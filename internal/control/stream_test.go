@@ -15,13 +15,11 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// The live request log end to end: a request is recorded on the write path and
-// reaches a reader's open stream without anybody reloading anything.
+// The live request log end to end: a recorded request reaches an open stream
+// without a reload.
 //
-// It runs against a real Postgres because the part worth testing is the part no
-// fake has - the notification the batch write sends, the listener that picks it
-// up, and the cursor the stream reads from. Set KEERA_TEST_DATABASE_URL to run
-// it; without one it skips, exactly as the store's own tests do.
+// It needs a real Postgres (KEERA_TEST_DATABASE_URL), because no fake has the
+// notification, the listener and the cursor that are under test.
 
 func TestRequestStreamCarriesARequestAsItIsRecorded(t *testing.T) {
 	st, ctx := testStore(t)
@@ -57,10 +55,8 @@ func TestRequestStreamCarriesARequestAsItIsRecorded(t *testing.T) {
 		t.Fatalf("Content-Type = %q; a browser will not open anything else as a stream", ct)
 	}
 
-	// The listener has to be on the channel before the write, or the
-	// notification it is waiting for is sent to nobody. Nothing in the response
-	// says when that happened, so the write is retried until it lands - which
-	// is also what the real thing does, one batch at a time.
+	// The listener must be on the channel before the write, or nobody gets the
+	// notification. Nothing says when that happened, so the write is retried.
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
@@ -89,9 +85,8 @@ func TestRequestStreamCarriesARequestAsItIsRecorded(t *testing.T) {
 			"sends the same row again on the next batch",
 			payload.NextAfter, payload.Data[0].ID)
 	}
-	// The counts travel with the rows and are counted over the window rather
-	// than accumulated from what was sent, so the number beside "All" on the
-	// screen cannot drift from the one a reload would show.
+	// The counts are counted over the window, not summed from what was sent,
+	// so they cannot drift from what a reload would show.
 	if payload.Outcomes.Total == 0 || payload.Outcomes.OK == 0 {
 		t.Errorf("outcomes = %+v, want the window counted", payload.Outcomes)
 	}
@@ -169,8 +164,7 @@ func TestRequestStreamCarriesARowCommittedAfterANewerOne(t *testing.T) {
 }
 
 func TestRequestStreamKeepsAMemberInTheirOwnOrganisation(t *testing.T) {
-	// A separate route from the log, which is exactly how such a check gets
-	// forgotten.
+	// A separate route from the log, so its check is easy to forget.
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	w := invoke(s.requestStream, member("org_1"), http.MethodGet, "/v1/requests/stream?org_id=org_2", "")
 	if w.Code != http.StatusForbidden {

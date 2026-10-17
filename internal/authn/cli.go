@@ -7,10 +7,10 @@ import (
 	"github.com/bespinian/keera-gateway/internal/auth"
 )
 
-// The command line signs in through the browser, as the panel does, and keeps
-// the result in a file instead of a cookie. This file holds what the command
-// line and the gateway must agree on: the token format, the handshake's
-// lifetimes and the proof key.
+// The command line signs in through the browser, like the panel, and keeps the
+// result in a file instead of a cookie. This file holds what the command line
+// and the gateway must agree on: the token format, the lifetimes and the proof
+// key.
 
 // CLITokenPrefix starts every command-line token, so a leaked one is easy to
 // spot by eye or by a secret scanner. It differs from auth.Prefix because this
@@ -18,13 +18,13 @@ import (
 const CLITokenPrefix = "keera_cli_"
 
 const (
-	// CLITokenTTL is how long a signed-in terminal stays signed in. Signing in
-	// again costs a browser window, so it is a month rather than a browser
-	// session's twelve hours; a lost laptop still stops working by itself. The
-	// directory is asked again meanwhile, so leaving it ends the token sooner.
+	// CLITokenTTL is how long a terminal stays signed in. Signing in again
+	// costs a browser window, so it is a month, not a panel session's twelve
+	// hours. A lost laptop still stops working by itself, and the directory is
+	// asked again meanwhile, so leaving it ends the token sooner.
 	CLITokenTTL = 30 * 24 * time.Hour
 	// CLICodeTTL bounds the hop from the browser to the loopback listener. It
-	// is minutes because people often leave a consent screen open for a while.
+	// is minutes because people often leave a consent screen open.
 	CLICodeTTL = 5 * time.Minute
 )
 
@@ -36,7 +36,6 @@ func newSecret(prefix string) (token string, hash []byte) {
 	return token, auth.Hash(token)
 }
 
-// NewCLIToken mints a token and the hash stored for it.
 func NewCLIToken() (token string, hash []byte) { return newSecret(CLITokenPrefix) }
 
 // NewCLICode mints the one-time code the browser carries back to the loopback

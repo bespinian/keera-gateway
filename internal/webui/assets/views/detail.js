@@ -1,16 +1,12 @@
 // One project, one key, one model, one user - the dashboard narrowed to it,
 // and the requests or sessions behind the numbers.
 //
-// The list screens answer "what exists and what is it configured to do". They
-// cannot answer the question somebody arrives with, which is always about one
-// thing: this project's spend jumped on Tuesday, this key stopped working this
-// afternoon, this model has gone slow. That is the dashboard's eight numbers
-// over a narrower set of rows, plus the rows themselves - because a chart says
-// when something changed and only the log says what changed.
+// The list screens say what exists. These answer questions about one thing,
+// such as "this key stopped working": the chart says when something changed,
+// the log says what.
 //
-// All four are the same screen with a different scope, so whoever learns to
-// read one has learned to read the others and the totals cannot drift
-// apart.
+// All four are the same screen with a different scope, so they read alike and
+// their totals cannot drift apart.
 
 import { api } from "../api.js";
 import {
@@ -81,8 +77,8 @@ import {
 export async function projectDetailView(ctx) {
   const projectsRes = await api.projects(ctx.orgID);
   const project = (projectsRes.data || []).find((t) => t.id === ctx.param);
-  // The project's own organisation, not the switcher's: with "All
-  // organisations" chosen there is no org to list models for.
+  // The project's own organisation, not the switcher's, which may be "All
+  // organisations".
   const modelsRes = project
     ? await api.models(project.org_id).catch(() => ({ data: [] }))
     : { data: [] };
@@ -238,8 +234,7 @@ export async function keyDetailView(ctx) {
     title: key.name,
     identity: prefixOf(key),
     scope: { key_id: key.id },
-    // A key is one person or one pipeline, so its traffic reads best as the
-    // tasks it ran rather than as single requests.
+    // A key is one person or pipeline, so its traffic reads best as tasks.
     sessions: true,
     hide: { who: true },
     meta: [
@@ -429,9 +424,8 @@ export async function modelDetailView(ctx) {
             : null,
         ]
       : [pill("Deleted", "warn")],
-    // A model that was removed still has traffic behind it, and that traffic is
-    // usually why somebody is here. The screen draws it and says why the
-    // catalogue has nothing to show next to it, rather than refusing to open.
+    // A removed model still has traffic, which is usually why somebody is
+    // here, so the screen still opens and says the model is gone.
     banner: model
       ? null
       : `This alias is no longer one of ${orgNameOf(ctx)}'s models. Requests for it are ` +
@@ -710,10 +704,9 @@ export async function userDetailView(ctx) {
 
 /* ----------------------------------------------------------- the scaffold */
 
-// screen draws all four. Everything above the chart is what makes this entity
-// that entity; everything from the chart down is the same report every time.
-// spec.description is what the thing says about itself, under the header;
-// spec.note is how to read the numbers, at the bottom.
+// screen draws all four. Above the chart is what differs per entity; from the
+// chart down is the same report. spec.description goes under the header,
+// spec.note (how to read the numbers) at the bottom.
 async function screen(ctx, spec) {
   const since = currentRange();
   const res = await api.overview(ctx.orgID, since, spec.scope);
@@ -762,10 +755,8 @@ async function screen(ctx, spec) {
     ),
   );
 
-  // The chart. Its failure count is a way in to the rows rather than a
-  // decoration: on this screen those rows are already below it, so the count
-  // narrows the log in place instead of sending anybody to another screen and
-  // asking them to reconstruct the filter they arrived with.
+  // The chart's failure count narrows the log below in place, rather than
+  // sending the reader to another screen.
   wrap.append(
     h(
       "div",
@@ -818,8 +809,7 @@ async function screen(ctx, spec) {
   }
 
   // Only an administrator gets the log here. A member's log holds only their
-  // own keys' requests, which would not match the charts above; it is on the
-  // Requests screen.
+  // own keys' requests, which would not match the charts above.
   if (isAdmin(ctx)) {
     const log = spec.sessions ? sessionLog : requestLog;
     wrap.append(
@@ -834,9 +824,8 @@ async function screen(ctx, spec) {
   return wrap;
 }
 
-// failureJump is the failed count as the way to the failed rows, which on this
-// screen are a scroll away rather than a page away. Under a session log it
-// shows the sessions holding a failed request.
+// failureJump turns the failed count into a link to the failed rows below.
+// Under a session log it shows the sessions holding a failed request.
 function failureJump(ctx, text, sessions) {
   if (!isAdmin(ctx)) {
     return h(
@@ -909,6 +898,5 @@ function budgetPill(ctx, project) {
   );
 }
 
-// gone is the screen for an id that names nothing. It is an answer rather than
-// an error: the usual way to reach one is a bookmark from before the thing was
-// deleted, and "it is not there any more" is what the reader needs to be told.
+// gone is the screen for an id that names nothing. It is not an error: the
+// usual way here is an old bookmark to something deleted.

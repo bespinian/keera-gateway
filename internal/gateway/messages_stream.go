@@ -50,7 +50,6 @@ type messagesStream struct {
 	chatChunks
 }
 
-// chunk folds one upstream chunk into the stream.
 func (s *messagesStream) chunk(payload []byte) error {
 	return s.fold(payload, s.text, s.toolCall)
 }
@@ -195,7 +194,6 @@ func (s *messagesStream) delta(deltaType, key, value string) error {
 	return s.send(b)
 }
 
-// emit renders one event and hands it to the writer.
 func (s *messagesStream) emit(name string, payload any) error {
 	data, err := json.Marshal(payload)
 	if err != nil {

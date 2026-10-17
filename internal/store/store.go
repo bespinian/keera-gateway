@@ -71,7 +71,6 @@ func EventOrgs(payload string) (orgs []string, all bool) {
 // ErrNotFound is returned when a lookup matches no row.
 var ErrNotFound = errors.New("store: not found")
 
-// Store owns the connection pool.
 type Store struct {
 	pool *pgxpool.Pool
 }
@@ -101,13 +100,11 @@ func Open(ctx context.Context, dsn string, maxConns int32) (*Store, error) {
 	return &Store{pool: pool}, nil
 }
 
-// Close releases the pool.
 func (s *Store) Close() { s.pool.Close() }
 
 // Pool exposes the underlying pool, for tests that set up rows directly.
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
-// Ping reports whether the database is reachable.
 func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
 // Migrate applies any embedded migration the database has not seen. It takes an
@@ -307,7 +304,6 @@ func IsMissingOrg(err error) bool {
 	return ok && e.Code == "23503" && strings.HasSuffix(e.ConstraintName, "_org_id_fkey")
 }
 
-// isUnique reports whether err is a unique violation.
 func isUnique(err error) bool {
 	e, ok := errors.AsType[*pgconn.PgError](err)
 	return ok && e.Code == "23505"
@@ -319,7 +315,6 @@ func uniqueOn(err error, constraint string) bool {
 	return isUnique(err) && violates(err, constraint)
 }
 
-// violates reports whether err broke the named constraint.
 func violates(err error, constraint string) bool {
 	e, ok := errors.AsType[*pgconn.PgError](err)
 	return ok && e.ConstraintName == constraint

@@ -94,7 +94,7 @@ func TestAStatedNameCannotGrowWithoutBound(t *testing.T) {
 
 func TestClientLabelAgreesWithTheCatalogue(t *testing.T) {
 	// The catalogue configures these and the map names them. Two labels for one
-	// client is two clients as far as anybody reading a screen is concerned.
+	// client would read as two clients.
 	for _, c := range Clients() {
 		if got := ClientLabel(c.Key); got != c.Label {
 			t.Errorf("ClientLabel(%q) = %q, but the catalogue calls it %q", c.Key, got, c.Label)
@@ -114,9 +114,8 @@ func TestClientLabelAgreesWithTheCatalogue(t *testing.T) {
 }
 
 func TestEveryAgentIsReachableByItsOwnKey(t *testing.T) {
-	// A key that Identify cannot produce is a row nothing can ever be filed
-	// under - and the stated header is written by hand, so the keys have to be
-	// the names people would state.
+	// A key Identify cannot produce is a row nothing is ever filed under. The
+	// stated header is written by hand, so keys must be names people would type.
 	for _, a := range agents {
 		if got := Identify(a.key, ""); got != a.key {
 			t.Errorf("a client stating %q is filed as %q", a.key, got)

@@ -44,20 +44,17 @@ func (s *Store) LoadRouters(ctx context.Context) ([]policy.Router, error) {
 	return queryAll(ctx, s.pool, scanRouter, routerColumns+" FROM routers ORDER BY org_id, alias")
 }
 
-// ListRouters reads one organisation's routers.
 func (s *Store) ListRouters(ctx context.Context, orgID string) ([]policy.Router, error) {
 	return queryAll(ctx, s.pool, scanRouter,
 		routerColumns+" FROM routers WHERE org_id = $1 ORDER BY alias", orgID)
 }
 
-// Router reads one router, or ErrNotFound.
 func (s *Store) Router(ctx context.Context, orgID, alias string) (policy.Router, error) {
 	rt, err := scanRouter(s.pool.QueryRow(ctx,
 		routerColumns+" FROM routers WHERE org_id = $1 AND alias = $2", orgID, alias))
 	return rt, notFound(err)
 }
 
-// UpsertRouter creates or replaces one router.
 func (s *Store) UpsertRouter(ctx context.Context, rt policy.Router) (policy.Router, error) {
 	// The one place a missing mode gets its default.
 	if rt.Mode == "" {
@@ -174,7 +171,6 @@ type RouterReport struct {
 	DecisionP95MS    int64 `json:"decision_p95_ms"`
 }
 
-// RouterReportFor reads what one router has been doing over a window.
 func (s *Store) RouterReportFor(ctx context.Context, orgID, alias string, from, to time.Time) (
 	RouterReport, error,
 ) {
