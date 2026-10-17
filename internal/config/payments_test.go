@@ -84,7 +84,8 @@ func TestAPaymentSettingThatCannotWorkStopsTheStart(t *testing.T) {
 
 // In the development loop, the browser comes back to this machine over http.
 func TestPaymentsWorkOnThisMachineOverHTTP(t *testing.T) {
-	for _, u := range []string{"http://localhost:8080", "http://127.0.0.1:8080", "http://[::1]:8080"} {
+	for _, u := range []string{"http://localhost:8080", "http://keera.localhost:8080",
+		"http://127.0.0.1:8080", "http://[::1]:8080"} {
 		c, err := loadWith(t, valid(map[string]string{
 			"KEERA_PUBLIC_URL":            u,
 			"KEERA_PROVIDER_CSCS_API_KEY": "sk",

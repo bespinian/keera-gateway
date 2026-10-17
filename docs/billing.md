@@ -149,7 +149,8 @@ KEERA_BILLING_VAT=8.1                   # optional
 
 Payments also need at least one `KEERA_PROVIDER_<NAME>_API_KEY`, and
 `KEERA_PUBLIC_URL` set to an `https` address: PostFinance sends people back
-there after they pay. On your own machine, `http://localhost` works too.
+there after they pay. On your own machine, `http://localhost` and any
+`*.localhost` name work too.
 
 A setting that cannot work stops the start: only some of the three
 `KEERA_POSTFINANCE_*` settings, `KEERA_POSTFINANCE_URL` or `KEERA_BILLING_VAT`

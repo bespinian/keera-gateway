@@ -86,14 +86,15 @@ func percentBP(raw string) (int64, error) {
 
 // onThisMachine reports whether an http address is this machine, as in the
 // development loop. Only the person's own browser is sent back there, and it
-// reaches this machine without TLS.
+// reaches this machine without TLS. Browsers send every *.localhost name
+// there too, as passkeys rely on.
 func onThisMachine(raw string) bool {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "http" {
 		return false
 	}
 	host := u.Hostname()
-	if host == "localhost" {
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
 		return true
 	}
 	ip := net.ParseIP(host)
