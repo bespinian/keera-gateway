@@ -756,7 +756,9 @@ function limitedNotice() {
     "info",
     { style: { marginBottom: "16px" } },
     "This organisation is new. " +
-      (state.me.billing
+      // With payments on, a model on the deployment's keys is paid from
+      // credit before it is used, so it is open already.
+      (state.me.billing && !state.me.payments
         ? "Models on this deployment's provider keys, models and MCP " +
           "servers inside the network, such as Keera Engine, and sandboxes"
         : "Models inside the network, such as Keera Engine, MCP servers " +
