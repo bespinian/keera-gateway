@@ -442,7 +442,9 @@ func TestTheDecidingModelIsToldWhatEachDestinationIsFor(t *testing.T) {
 // than offered and then found unreachable - which would be a fallback waiting
 // to happen on every request that picked it.
 func TestADisabledDestinationIsNotOffered(t *testing.T) {
-	h := routerHarness(t, picks("keera-small"), autoRouter(), nil)
+	rt := autoRouter()
+	rt.Destinations = append(rt.Destinations, "keera-picker")
+	h := routerHarness(t, picks("keera-small"), rt, nil)
 	large := h.src.models["keera-large"]
 	large.Enabled = false
 	h.src.models["keera-large"] = large
@@ -452,8 +454,47 @@ func TestADisabledDestinationIsNotOffered(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	if instruction := string(<-h.upstreamBodies); strings.Contains(instruction, "keera-large") {
-		t.Errorf("a disabled destination was offered: %s", instruction)
+	instruction := string(<-h.upstreamBodies)
+	if !strings.Contains(instruction, "keera-small") || strings.Contains(instruction, "keera-large") {
+		t.Errorf("the instruction does not offer exactly what is enabled: %s", instruction)
+	}
+}
+
+// With only one destination left to offer, there is nothing to choose, so
+// the deciding model is not asked and cannot fail the request.
+func TestRouterWithOneDestinationLeftDoesNotDecide(t *testing.T) {
+	h := routerHarness(t, picks("keera-large"), autoRouter(), nil)
+	large := h.src.models["keera-large"]
+	large.Enabled = false
+	h.src.models["keera-large"] = large
+
+	resp := h.post(t, "/v1/chat/completions",
+		`{"model":"auto","messages":[{"role":"user","content":"hello"}]}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if forwarded := string(<-h.upstreamBodies); !strings.Contains(forwarded, "small-served") {
+		t.Errorf("the first request upstream was not to the one destination left: %s", forwarded)
+	}
+	if n := len(h.upstreamBodies); n != 0 {
+		t.Errorf("%d further requests were sent; the deciding model should not be asked", n)
+	}
+	if ev := h.sink.last(t); ev.Alias != "keera-small" || ev.RouterOutcome != store.RouterChose {
+		t.Errorf("alias/outcome = %q/%q, want keera-small/chose", ev.Alias, ev.RouterOutcome)
+	}
+}
+
+// A request the router cannot read is refused, and recorded as an error
+// rather than as a choice.
+func TestARouterRefusalOfAnUnreadableRequestIsAnError(t *testing.T) {
+	h := routerHarness(t, picks("keera-small"), autoRouter(), nil)
+
+	resp := h.post(t, "/v1/chat/completions", `{"model":"auto","messages":"hello"}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	if ev := h.sink.last(t); ev.RouterOutcome != store.RouterError {
+		t.Errorf("outcome = %q, want error", ev.RouterOutcome)
 	}
 }
 

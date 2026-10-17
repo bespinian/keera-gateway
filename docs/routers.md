@@ -20,8 +20,8 @@ destinations in an order and try them until one answers.
 A router may have a single destination. That gives clients a name that stays
 the same when the model behind it changes. An `instruction` router with one
 destination sends every request there without asking its model. Its fallback
-can only be that same destination, so when it cannot answer, the request is
-refused with a 503.
+can only be that same destination, so when that one cannot be used at all -
+missing, disabled or without a backend - the request is refused with a 503.
 
 Most of this page is about `instruction` routers. The other modes have their own
 sections - [routing by size](#routing-by-size),

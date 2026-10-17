@@ -138,10 +138,16 @@ func (s *Server) route(ctx context.Context, rt policy.Router, b *body, kind poli
 
 	d := routeDecision{outcome: store.RouterChose}
 
-	// The same extraction the filters use, so there is one definition of what
-	// a request's text is.
+	// With one destination left to offer, the choice is made: asking the
+	// model would spend a generation, and could only fail.
+	if offered := s.offeredDestinations(rt); len(offered) == 1 {
+		d.alias, d.chain = offered[0], offered
+		return d, nil
+	}
+
 	doc, err := extractText(b, kind)
 	if err != nil {
+		d.outcome = store.RouterError
 		return d, unreadableBody("'"+rt.Alias+"' is a router: it reads the request to choose "+
 			"which model answers it", err)
 	}
