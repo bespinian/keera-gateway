@@ -17,11 +17,14 @@ one or both. For people no directory vouches for, it can also offer
 Every provider has a name, listed in `KEERA_OIDC_PROVIDERS`. It reads its
 settings from `KEERA_OIDC_<NAME>_*`, with the name in upper case and a hyphen
 as an underscore: `acme-ad` reads `KEERA_OIDC_ACME_AD_*`. Nothing is shared
-between providers. One directory is a list of one:
+between providers. A name in the list without its `ISSUER`, `CLIENT_ID` and
+`CLIENT_SECRET` stops the start. One directory is a list of one:
 
 ```sh
 KEERA_OIDC_PROVIDERS=google
 KEERA_OIDC_GOOGLE_ISSUER=https://accounts.google.com
+KEERA_OIDC_GOOGLE_CLIENT_ID=<from the console>
+KEERA_OIDC_GOOGLE_CLIENT_SECRET=<from the console>
 ```
 
 The panel shows one named button per provider. See
@@ -30,8 +33,7 @@ The panel shows one named button per provider. See
 The identity provider sends the browser back to
 `<KEERA_PUBLIC_URL>/control/auth/callback`, so SSO needs `KEERA_PUBLIC_URL`. The
 gateway refuses to start without it as soon as `KEERA_OIDC_PROVIDERS` names a
-provider, even one whose settings are not filled in yet. Register that address
-as the redirect URI with each provider.
+provider. Register that address as the redirect URI with each provider.
 
 ### Settings
 
@@ -648,7 +650,6 @@ gateway whose only way in is passkeys, `--provider` can be left out.
 | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Gateway will not start, "discovering the identity provider"    | An issuer is wrong, or the container cannot reach it. The message names which one.                                                                          |
 | `redirect_uri_mismatch`                                        | The console URI and `<KEERA_PUBLIC_URL>/control/auth/callback` differ, often `127.0.0.1` against `localhost`.                                               |
-| No sign-on button on the panel                                 | An issuer and a client ID are both needed; one is empty.                                                                                                    |
 | "a sign-in has to name one of…"                                | Several providers are configured and the link named none. Start from the panel, not the URL.                                                                |
 | "started in another browser or tab"                            | The callback came to a browser that did not start the sign-in, or to another address than the panel's. Start again from `KEERA_PUBLIC_URL`.                 |
 | Signed in, but everything is read-only                         | You have the default role. Ask an administrator for `keera user role <you> admin`, or, if the provider has admin groups, to be added to one.                |

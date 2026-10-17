@@ -290,13 +290,21 @@ func (c Config) validateOIDC() error {
 	}
 	seen := map[string]bool{}
 	for _, p := range c.OIDC {
-		if err := p.Validate(); err != nil {
-			return err
-		}
 		if seen[p.Name] {
 			return fmt.Errorf("KEERA_OIDC_PROVIDERS names %q twice", p.Name)
 		}
 		seen[p.Name] = true
+	}
+	for _, p := range c.OIDC {
+		// A provider left out is seen only as its button missing from the
+		// sign-in screen, which is hard to trace back to a typo.
+		if !p.Configured() {
+			return fmt.Errorf("KEERA_OIDC_PROVIDERS names %q, but %sISSUER and %sCLIENT_ID "+
+				"are not both set", p.Name, OIDCEnvPrefix(p.Name), OIDCEnvPrefix(p.Name))
+		}
+		if err := p.Validate(); err != nil {
+			return err
+		}
 		// Not operator: that role comes only from KEERA_OPERATORS or an
 		// operator group, so reading those shows everyone who holds it.
 		if !p.Mapping.Default.Assignable() {
@@ -305,7 +313,7 @@ func (c Config) validateOIDC() error {
 		}
 		// With several directories, one customer's could otherwise give its
 		// users another customer's addresses, or an operator's.
-		if len(c.OIDC) > 1 && p.Configured() && len(p.Domains) == 0 {
+		if len(c.OIDC) > 1 && len(p.Domains) == 0 {
 			return fmt.Errorf("set %sDOMAINS to the email domains the %s "+
 				"identity provider may vouch for, or to %q for one that proves every "+
 				"address itself, such as Google", OIDCEnvPrefix(p.Name), p.Name, authn.AnyDomain)
@@ -321,9 +329,6 @@ func (c Config) validateOIDC() error {
 func (c Config) validateSignUp() error {
 	var signUp, group string
 	for _, p := range c.OIDC {
-		if !p.Configured() {
-			continue
-		}
 		if p.SignUp && signUp == "" {
 			signUp = p.Name
 		}
@@ -347,7 +352,7 @@ func (c Config) privateHosts() (bool, []string, error) {
 	raw := env("KEERA_UPSTREAM_PRIVATE", "")
 	if raw == "" {
 		for _, p := range c.OIDC {
-			if p.Configured() && p.SignUp {
+			if p.SignUp {
 				return false, nil, fmt.Errorf("%sSIGNUP lets anyone create an organisation, "+
 					"so set KEERA_UPSTREAM_PRIVATE to the hosts inside this network they may "+
 					"reach, such as keera-engine,keera-decider, or to none or all", OIDCEnvPrefix(p.Name))

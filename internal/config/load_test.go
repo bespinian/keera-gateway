@@ -448,8 +448,11 @@ func TestAProviderNamedTwiceIsRefused(t *testing.T) {
 	// The name is stored in the external id of every sign-in it writes, so two
 	// providers under one name would file two directories' people together.
 	_, err := loadWith(t, valid(map[string]string{
-		"KEERA_PUBLIC_URL":     "https://keera.example.ch",
-		"KEERA_OIDC_PROVIDERS": "okta,okta",
+		"KEERA_PUBLIC_URL":              "https://keera.example.ch",
+		"KEERA_OIDC_PROVIDERS":          "okta,okta",
+		"KEERA_OIDC_OKTA_ISSUER":        "https://accounts.example.ch",
+		"KEERA_OIDC_OKTA_CLIENT_ID":     "keera",
+		"KEERA_OIDC_OKTA_CLIENT_SECRET": "a-secret",
 	}))
 	if err == nil {
 		t.Fatal("the same provider name was accepted twice")
@@ -545,6 +548,20 @@ func TestOneProviderIsNamedLikeSeveral(t *testing.T) {
 	}
 	if p.Mapping.Default != authn.RoleMember {
 		t.Errorf("default role = %q, want member", p.Mapping.Default)
+	}
+}
+
+// A provider named in the list but not set up would only be missing from the
+// sign-in screen, so it stops the start, as a missing client secret does.
+func TestAProviderListedButNotSetUpIsRefused(t *testing.T) {
+	_, err := loadWith(t, valid(map[string]string{
+		"KEERA_PUBLIC_URL":              "https://keera.example.ch",
+		"KEERA_OIDC_PROVIDERS":          "okta",
+		"KEERA_OIDC_OKTA_ISSUER":        "https://accounts.example.ch",
+		"KEERA_OIDC_OKTA_CLIENT_SECRET": "a-secret",
+	}))
+	if err == nil || !strings.Contains(err.Error(), "KEERA_OIDC_OKTA_CLIENT_ID") {
+		t.Errorf("error = %v, want it to name the missing setting", err)
 	}
 }
 
