@@ -579,6 +579,25 @@ func TestADecidingRouterStaysOnTheAllowList(t *testing.T) {
 	}
 }
 
+// A router with one destination keeps its deciding model, and decides as soon
+// as it is given a second, so the list cannot be narrowed past that model
+// either.
+func TestAOneDestinationRouterStaysOnTheAllowList(t *testing.T) {
+	st, ctx := routerStore(t)
+	srv := routerServer(ctx, t, st)
+	body := validRouter()
+	body["destinations"] = []string{"keera-small"}
+	if code, out := putTo(t, srv, "/v1/routers/solo", body); code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", code, out)
+	}
+	code, out := putTo(t, srv, "/v1/guardrails/org/org_1", map[string]any{
+		"allowed_models": []string{"keera-small", "keera-large"},
+	})
+	if code != http.StatusConflict || !strings.Contains(out, "router_model_not_allowed") {
+		t.Fatalf("narrowing the list past the deciding model: status = %d, want 409: %s", code, out)
+	}
+}
+
 func TestAGuardrailRefusesANegativeLimit(t *testing.T) {
 	// A negative budget would be spent before the first request, and a
 	// negative rate could never be met, so both are refused rather than stored.

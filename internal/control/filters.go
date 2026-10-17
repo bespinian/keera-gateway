@@ -317,7 +317,7 @@ func (s *Server) checkAllowList(w http.ResponseWriter, r *http.Request,
 	var stranded []string
 	for _, f := range filters {
 		// A pattern filter runs no model, so no allow-list can strand it.
-		if f.UsesModel() && !slices.Contains(lim.AllowedModels, f.Model) {
+		if m := f.ReadsWith(); m != "" && !slices.Contains(lim.AllowedModels, m) {
 			stranded = append(stranded, "'"+f.Alias+"' (on "+f.Model+")")
 		}
 	}
@@ -331,7 +331,7 @@ func (s *Server) checkAllowList(w http.ResponseWriter, r *http.Request,
 		return false
 	}
 	for _, rt := range routers {
-		if rt.Decides() && !slices.Contains(lim.AllowedModels, rt.Model) {
+		if m := rt.ReadsWith(); m != "" && !slices.Contains(lim.AllowedModels, m) {
 			stranded = append(stranded, "'"+rt.Alias+"' (on "+rt.Model+")")
 		}
 	}

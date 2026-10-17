@@ -338,6 +338,15 @@ func (m FilterMode) UsesModel() bool { return m != FilterModePattern }
 // UsesModel reports whether this filter decides with a model.
 func (f Filter) UsesModel() bool { return f.Mode.UsesModel() }
 
+// ReadsWith is the model this filter reads requests with, or "" for a pattern
+// filter. The allow-list and subscription checks all ask it.
+func (f Filter) ReadsWith() string {
+	if !f.UsesModel() {
+		return ""
+	}
+	return f.Model
+}
+
 // MaxFilterRules bounds the rules in one pattern filter. Each runs on every
 // segment of every request, and a longer list is too long to read.
 const MaxFilterRules = 64
@@ -519,6 +528,17 @@ func (m RouterMode) Decides() bool { return m == "" || m == RouterModeInstructio
 // router with one destination has nothing to choose, so it sends every request
 // there without asking.
 func (r Router) Decides() bool { return r.Mode.Decides() && len(r.Destinations) > 1 }
+
+// ReadsWith is the model this router reads requests with, or "" for a mode
+// that reads none. An instruction router with one destination keeps its
+// model, because it decides as soon as it has a second, so the allow-list and
+// subscription checks count it.
+func (r Router) ReadsWith() string {
+	if !r.Mode.Decides() {
+		return ""
+	}
+	return r.Model
+}
 
 // Measures reports whether this mode orders destinations by what this process
 // observed rather than the written order. Such an order is not worth recording

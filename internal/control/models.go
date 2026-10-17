@@ -327,7 +327,7 @@ func (s *Server) checkSubscriptionUsers(w http.ResponseWriter, r *http.Request,
 	}
 	var users []string
 	for _, f := range filters {
-		if f.UsesModel() && f.Model == alias {
+		if f.ReadsWith() == alias {
 			users = append(users, "filter '"+f.Alias+"'")
 		}
 	}
@@ -338,7 +338,7 @@ func (s *Server) checkSubscriptionUsers(w http.ResponseWriter, r *http.Request,
 	}
 	for _, rt := range routers {
 		switch {
-		case rt.Mode.Decides() && rt.Model == alias:
+		case rt.ReadsWith() == alias:
 			users = append(users, "router '"+rt.Alias+"' (deciding model)")
 		case rt.Offers(alias):
 			users = append(users, "router '"+rt.Alias+"' (destination)")

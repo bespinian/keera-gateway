@@ -107,7 +107,7 @@ func (s *Server) putRouter(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		return
 	}
 	// Checked on a one-destination router too, which decides as soon as it
-	// has a second.
+	// has a second. See policy.Router.ReadsWith.
 	if rt.Mode.Decides() && !s.checkReaderModel(w, r, orgID, rt.Model, routerReader, true) {
 		return
 	}
