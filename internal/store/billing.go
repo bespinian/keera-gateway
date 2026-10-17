@@ -10,7 +10,8 @@ import (
 )
 
 // queueBills adds an event's billable calls to the batch, so they are written
-// with the event or not at all.
+// with the event. When the event cannot be written, they are written alone:
+// see the bills-only fallback in WriteEvents.
 func queueBills(batch *pgx.Batch, e Event) {
 	for _, b := range e.Bills {
 		batch.Queue(`INSERT INTO billing_lines (ts, org_id, alias, provider, backend_model,

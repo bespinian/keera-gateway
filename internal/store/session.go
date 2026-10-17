@@ -53,8 +53,8 @@ func (s *Store) DeleteSession(ctx context.Context, hash []byte) error {
 	return err
 }
 
-// DeleteUserSessions signs a person out everywhere, which a role change or a
-// revocation needs. That includes command-line tokens and half-finished
+// DeleteUserSessions signs one user row out of every browser and machine, in
+// its organisation only, which a role change or a revocation needs. That includes command-line tokens and half-finished
 // command-line sign-ins, since a pending code could still mint a token.
 func (s *Store) DeleteUserSessions(ctx context.Context, userID string) error {
 	return deleteUserSessions(ctx, s.pool, userID)

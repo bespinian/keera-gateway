@@ -566,10 +566,10 @@ const maxAliasLen = 64
 // between too many picks poorly.
 const MaxDestinations = 16
 
-// ValidAlias reports whether s can name a model, a router, a filter, an MCP
-// server or a sandbox class. They share one shape: clients type models and
-// routers into the same field, an MCP server's alias is part of a URL, and a
-// class is written unquoted into command lines.
+// ValidAlias reports whether s can name a model, a router, a filter or an MCP
+// server. They share one shape: clients type models and routers into the same
+// field, and an MCP server's alias is part of a URL. Sandbox classes have
+// their own rule, ValidClassName.
 func ValidAlias(s string) bool { return validName(s, maxAliasLen) }
 
 // ValidModelAlias reports whether s can name a model. A model may also carry

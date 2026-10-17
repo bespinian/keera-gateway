@@ -12,7 +12,8 @@
 # needs a driver. Here that is podman, which only runs under `make dev`: see
 # "Sandboxes do not work in this shape" in README.md.
 #
-# It is also the worked example the Helm chart's values mirror.
+# It is also the worked example the Helm chart's values mirror. The chart is
+# not in this repository: see "The other shapes" in docs/install.md.
 #
 # On this driver a sandbox has unrestricted outbound network access - the
 # internet, the host and the LAN. The single-host shape is for development

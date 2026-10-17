@@ -147,7 +147,7 @@ What the refusal carries:
   prompt, so it is quoted as the filter's, not the gateway's. It is capped at
   240 bytes and collapsed to one line.
 - **The status is `403`**, not the `502` of a broken filter. **My access** shows
-  it as "Refused by a filter".
+  it as "Refused".
 - **The filter's generation is charged**, as on every outcome.
 
 `keera filter check` shows a refusal as a refusal, not a failure; see

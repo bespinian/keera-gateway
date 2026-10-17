@@ -507,8 +507,9 @@ sandbox is terminated uncleanly.
 
 The cost: **anybody who may read pods in the sandbox namespace may read every
 live sandbox's key**. So sandboxes get their own namespace, not the gateway's.
-The Helm chart creates it, gives the gateway's service account a Role scoped to
-it, and puts a default-deny NetworkPolicy over every pod in it.
+The Helm chart ([not in this repository](install.md#the-other-shapes)) creates
+it, gives the gateway's service account a Role scoped to it, and puts a
+default-deny NetworkPolicy over every pod in it.
 
 The Role is small: Sandboxes and, with warm pools, their templates, pools and
 claims; read-only on the pods, Services, PVCs and events the controller makes.
@@ -581,8 +582,9 @@ The base provides what the gateway depends on: a fixed uid 1000 (the home volume
 uses it as `fsGroup`), sshd, the coding agent, and the entrypoint.
 
 It is Alpine, and the coding agent is **Pi**, pinned. Alpine because its Node is
-24.18 and Pi needs at least 22.19. Pinned because an image is built once and run
-for months, and two sandboxes of the same class must run the same software.
+new enough for Pi (see `sandbox/Containerfile`). Pinned because an image is
+built once and run for months, and two sandboxes of the same class must run the
+same software.
 The version is in `sandbox/pi/package.json`, and `package-lock.json` beside it
 pins every package under Pi. To update, change the version and run
 `npm install --package-lock-only` in that directory.
@@ -670,7 +672,7 @@ that replaces the entrypoint has to handle them itself.
 | `KEERA_BASE_URL`                                  | The gateway's inference address. Also as `OPENAI_BASE_URL` (with `/v1`) and `ANTHROPIC_BASE_URL`. |
 | `KEERA_MODEL`                                     | The first chat model the key may reach. Also as `ANTHROPIC_MODEL`.                                |
 | `KEERA_SANDBOX_ID`, `_NAME`, `_CLASS`, `_PURPOSE` | Which sandbox this is.                                                                            |
-| `KEERA_SANDBOX_EXPIRES`                           | When it ends, in RFC 3339, as set at creation or the last resume. `extend` does not update it.    |
+| `KEERA_SANDBOX_EXPIRES`                           | When it ends, in RFC 3339, as set at creation or when resumed after expiring. `extend` does not.  |
 | `KEERA_AUTHORIZED_KEYS`                           | The ssh public keys that may log in, one per line.                                                |
 | `KEERA_SESSION`                                   | An agent sandbox's session id. Also in `ANTHROPIC_CUSTOM_HEADERS`.                                |
 | `KEERA_TASK`                                      | The agent's task, when one was given.                                                             |

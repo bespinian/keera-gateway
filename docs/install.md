@@ -339,10 +339,10 @@ keep them apart ([gateway.md](gateway.md#one-listener-four-surfaces)). So:
 Postgres holds everything: tenancy, keys, guardrails, the usage log you bill
 from and the audit log.
 
-The Helm chart's Postgres is a single StatefulSet. It does not survive losing
-its node. If you need a recovery objective, run Postgres the way the rest of
-the cluster does (an operator, or a managed service) and set
-`db.enabled=false`.
+A Postgres in a single container or StatefulSet does not survive losing its
+node. If you need a recovery objective, run Postgres the way the rest of the
+cluster does (an operator, or a managed service), and point `KEERA_DATABASE_URL`
+at it.
 
 ## Retention and sizing
 

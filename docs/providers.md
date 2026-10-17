@@ -151,9 +151,6 @@ else set up at a host of their own and read its key.
 The deployment's own provider keys only ever go to the provider's own endpoint
 ([billing.md](billing.md)).
 
-An Infomaniak product id is not a secret. It goes in the model's entry next to
-the model id.
-
 ## Put a guardrail on it
 
 Without a guardrail, every key in the organisation can reach a hosted model. At

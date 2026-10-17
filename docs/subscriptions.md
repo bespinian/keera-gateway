@@ -72,8 +72,8 @@ whatever its settings say. A subscription key that names one, such as
 `claude-haiku-4-5-20251001`, reaches the subscription model with that backend
 model. The date at the end does not matter.
 
-If the organisation's guardrails list allowed models, the new ones are added
-there. Projects and keys with their own lists still need them added.
+The new models join the organisation's allow-list like any other
+([gateway.md](gateway.md#the-tenancy-model)).
 
 ## 3. Send everyone's Claude Code through Keera
 
@@ -157,8 +157,8 @@ when it finds one.
 
 ## What a subscription key can do
 
-- It reaches subscription models only. It cannot spend the organisation's money,
-  because it sits in a settings file in plain text.
+- It reaches subscription models only, because it sits in a settings file in
+  plain text. Only its filters spend the organisation's money.
 - It reaches no router, no MCP server and not the playground.
 - It must be sent in `X-Keera-Key`, next to a Claude sign-in.
 - It always belongs to a person. Disabling the person revokes it.

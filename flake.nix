@@ -22,8 +22,8 @@
 
       keera = pkgs.buildGo127Module rec {
         pname = "keera";
-        # A flake cannot see the git tag, so this says "devel", as `make build`
-        # does. The revision stamped in below says which commit it is.
+        # A flake cannot see the git tag, so this says "devel" even on a tagged
+        # commit. The revision stamped in below says which commit it is.
         version = "devel";
         src = ./.;
         # vendor/ is not committed, so a flake cannot see it: Nix fetches the

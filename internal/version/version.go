@@ -22,8 +22,8 @@ const revisionLength = 7
 
 // String reports the version and the commit the binary was built from, as
 // "v1.2.0+d1c9ed2", "devel+d1c9ed2" or "devel+d1c9ed2-dirty". The same commit
-// reads the same whether it was built by `make build`, `make image`,
-// `make dist` or the flake.
+// reads the same whether it was built by `make build`, `make image` or
+// `make dist`. The flake cannot see tags, so it always says "devel".
 func String() string {
 	info, _ := debug.ReadBuildInfo()
 	return format(release, revision, info)

@@ -98,8 +98,8 @@ operator or administrator promotes them:
 keera user role alice@example.ch admin
 ```
 
-The change is audited, signs the person out everywhere so the new role applies
-at once, and stays until someone changes it. You can also add a person before
+The change is audited, signs the person out of this organisation so the new
+role applies at once, and stays until someone changes it. You can also add a person before
 their first sign-in with `keera user add alice@example.ch --role admin`. Their
 identity takes over that row when a sign-in lands in its organisation, or when
 they switch to it (see [Several organisations](gateway.md#several-organisations)).

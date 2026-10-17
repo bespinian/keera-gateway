@@ -136,7 +136,7 @@ translated at all, so the provider checks it rather than the gateway.
 estimate that errs high. It is never forwarded, because that would send the
 prompt to Anthropic without passing its filters.
 
-**The Responses API is served stateless only.** The client sends the whole
+**The gateway stores no Responses state.** The client sends the whole
 conversation in `input` every time. There is no `/api/v1/conversations`, and no
 route to read, cancel or delete a stored response. A request with
 `previous_response_id` or `conversation` continues a conversation stored at
@@ -670,7 +670,7 @@ organisation.
 | `keera_tokens_total`             | model, org, status | input plus output tokens                                                         |
 | `keera_request_duration_seconds` | model, org, status | wall time of a request                                                           |
 | `keera_gateway_overhead_seconds` | model, org         | time the gateway added, not counting filters and routers                         |
-| `keera_upstream_errors_total`    | model, org         | a model not reached or too slow to start answering, or a 5xx a router moved past |
+| `keera_upstream_errors_total`    | model, org         | each failed attempt: a backend not reached or too slow, or a 5xx a router passed |
 | `keera_inflight_requests`        |                    | requests waiting for the inference plane to start answering                      |
 | `keera_ratelimit_fallback_total` |                    | rate-limit admissions and token charges made without Redis                       |
 
@@ -686,7 +686,7 @@ and [mcp.md](mcp.md#the-tool-call-log).
 - **It is not a distributed trace.** The per-request breakdown in
   `internal/store/spans.go` has no sampling, no collector and no propagation,
   and every step it records happens inside one handler.
-- **It does not translate request parameters between providers**, with two
+- **It does not translate request parameters between providers**, with three
   exceptions. It sends `max_completion_tokens` instead of `max_tokens` to every
   OpenAI chat model, and drops `temperature` and `top_p` for OpenAI's reasoning
   models (every id not starting with `gpt-4`, `gpt-3` or `chatgpt-`). It drops

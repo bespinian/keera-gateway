@@ -47,8 +47,7 @@ none.
   without a key, and the gateway logs why.
 - **No hosted tools.** Tools the provider runs itself, such as web search or
   code execution, are removed from every request
-  ([mcp.md](mcp.md#hosted-tools)). The provider charges for them on top of
-  tokens, and Keera does not bill that.
+  ([mcp.md](mcp.md#hosted-tools)).
 - **No dearer modes.** Fields that make the provider charge more than its list
   price are removed from every request: `speed` (Anthropic's fast mode),
   `inference_geo`, and a `service_tier` other than `auto`, `default`, `flex`
@@ -265,8 +264,8 @@ it up in PostFinance.
   holds. Each replica holds only its own requests, and reads the balance every
   `KEERA_SPEND_REFRESH`. So credit can go slightly below zero.
 - **A router or filter on the keys counts.** A request needs credit when its
-  model, any model its router may choose, or one of its filters' models is on
-  the deployment's keys.
+  model, any model its router may choose, the model its router decides with,
+  or one of its filters' models is on the deployment's keys.
 - **Dropped events are not billed.** If the database is away for longer than
   the usage buffer holds, events are dropped, and their billing rows with them.
   `/readyz` reports the count as `usage_dropped`. Events that carry billing

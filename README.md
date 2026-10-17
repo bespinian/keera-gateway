@@ -56,7 +56,9 @@ audit:
 - the OpenAI API: `/api/v1/chat/completions`, `/api/v1/completions` and
   `/api/v1/embeddings`
 - the Anthropic Messages API, used by Claude Code: `/api/v1/messages`
-- the OpenAI Responses API, used by Codex, stateless only: `/api/v1/responses`
+- the OpenAI Responses API, used by Codex: `/api/v1/responses`. The gateway
+  stores no conversations; see
+  [docs/gateway.md](docs/gateway.md#three-request-shapes).
 
 A Messages request to Anthropic, or a Responses request to OpenAI, is forwarded
 in its own API, so prompt caching and reasoning keep working. To switch
