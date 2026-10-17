@@ -406,7 +406,8 @@ func providerFrom(prefix, name, redirect string, operators []string) authn.OIDCC
 			OperatorGroups: envList(prefix + "OPERATOR_GROUPS"),
 			AdminGroups:    envList(prefix + "ADMIN_GROUPS"),
 			OperatorEmails: operators,
-			Default:        authn.Role(env(prefix+"DEFAULT_ROLE", string(authn.RoleMember))),
+			Default: authn.Role(strings.ToLower(
+				env(prefix+"DEFAULT_ROLE", string(authn.RoleMember)))),
 		},
 		Domains: envList(prefix + "DOMAINS"),
 		SignUp:  envBool(prefix+"SIGNUP", false),

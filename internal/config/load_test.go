@@ -565,6 +565,24 @@ func TestAProviderListedButNotSetUpIsRefused(t *testing.T) {
 	}
 }
 
+// A role is read in any case, as the other settings with fixed values are.
+func TestTheDefaultRoleIsReadInAnyCase(t *testing.T) {
+	c, err := loadWith(t, valid(map[string]string{
+		"KEERA_PUBLIC_URL":              "https://keera.example.ch",
+		"KEERA_OIDC_PROVIDERS":          "okta",
+		"KEERA_OIDC_OKTA_ISSUER":        "https://accounts.example.ch",
+		"KEERA_OIDC_OKTA_CLIENT_ID":     "keera",
+		"KEERA_OIDC_OKTA_CLIENT_SECRET": "a-secret",
+		"KEERA_OIDC_OKTA_DEFAULT_ROLE":  "Admin",
+	}))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.OIDC[0].Mapping.Default != authn.RoleAdmin {
+		t.Errorf("default role = %q, want admin", c.OIDC[0].Mapping.Default)
+	}
+}
+
 // Without a public URL there is no address to send the browser back to.
 func TestSingleSignOnNeedsThePublicURL(t *testing.T) {
 	_, err := loadWith(t, valid(map[string]string{
