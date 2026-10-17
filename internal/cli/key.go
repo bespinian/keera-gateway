@@ -102,8 +102,12 @@ func (r *keyRun) create(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	req := map[string]any{"org_id": orgID, "project_id": project, "name": r.name,
-		"pending": r.pending}
+	req := map[string]any{"org_id": orgID, "project_id": project, "name": r.name}
+	// Sent only when set, so a plain create still works against a v0.9.0
+	// gateway, which refuses fields it does not know.
+	if r.pending {
+		req["pending"] = true
+	}
 	// A key with a person on it is what makes `keera usage --by user` work,
 	// and what puts it on that person's own screens.
 	owner, err := r.owner(ctx, orgID)
