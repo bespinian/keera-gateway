@@ -376,6 +376,9 @@ func (s *Server) grantCredit(w http.ResponseWriter, r *http.Request, p *authn.Pr
 	}
 	in.Note = strings.TrimSpace(in.Note)
 	switch {
+	case in.OrgID == "":
+		badRequest(w, "send the 'org_id' of the organisation to credit")
+		return
 	case in.AmountMicros == 0 || in.AmountMicros < -maxTopUp || in.AmountMicros > maxTopUp:
 		badRequest(w, "'amount_micros' is the credit to add, or below 0 to take away, up to CHF "+
 			policy.FormatMicros(maxTopUp))
