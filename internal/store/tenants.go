@@ -397,7 +397,13 @@ type DeletedProject struct {
 	// DetachedKeys is how many revoked keys stayed behind, no longer naming any
 	// project. They are kept as history.
 	DetachedKeys int `json:"detached_keys"`
+	// LiveSandboxes is set when ErrProjectHasSandboxes refused the delete.
+	LiveSandboxes int `json:"-"`
 }
+
+// ErrProjectHasSandboxes refuses to delete a project whose sandboxes still
+// hold resources. An expired one counts: it can be resumed.
+var ErrProjectHasSandboxes = errors.New("store: the project still has live sandboxes")
 
 // oldestProject selects the oldest project of the organisation named by the
 // parameter orgParam, such as "$1". A key or sandbox that names no project
@@ -433,6 +439,17 @@ func (s *Store) DeleteProject(ctx context.Context, projectID string) (DeletedPro
 			return notFound(err)
 		}
 		gone.ID = projectID
+
+		// A sandbox's project decides its budget, quota and models. The row
+		// lock above holds off one being created meanwhile: its insert checks
+		// the foreign key, which waits for it.
+		if err := tx.QueryRow(ctx, "SELECT count(*) FROM sandboxes WHERE project_id = $1 AND "+liveSandbox,
+			projectID).Scan(&gone.LiveSandboxes); err != nil {
+			return err
+		}
+		if gone.LiveSandboxes > 0 {
+			return ErrProjectHasSandboxes
+		}
 
 		rows, err := tx.Query(ctx, `SELECT name FROM api_keys
 			WHERE project_id = $1 AND revoked_at IS NULL ORDER BY name`, projectID)

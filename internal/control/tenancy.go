@@ -352,6 +352,12 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request, p *authn.
 		return
 	}
 	gone, err := s.st.DeleteProject(r.Context(), projectID)
+	if errors.Is(err, store.ErrProjectHasSandboxes) {
+		conflict(w, "project_has_sandboxes",
+			fmt.Sprintf("'%s' still has %d live sandbox(es), expired ones included; "+
+				"terminate them first", gone.Name, gone.LiveSandboxes))
+		return
+	}
 	if inUse, ok := errors.AsType[*store.ProjectInUseError](err); ok {
 		conflict(w, "project_has_keys",
 			"revoke the keys of '"+inUse.Project+"' first: "+strings.Join(inUse.Keys, ", "))

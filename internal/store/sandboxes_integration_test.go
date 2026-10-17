@@ -551,3 +551,32 @@ func TestDeletingAnOrgDeletesItsSandboxes(t *testing.T) {
 		t.Errorf("got %d sandboxes after the org was deleted", len(list))
 	}
 }
+
+// An expired sandbox's key is revoked, so the key check alone would let its
+// project go. It can still be resumed, and its project decides its budget,
+// quota and models then.
+func TestDeleteProjectIsRefusedWhileASandboxIsLive(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	newSandboxClass(t, st, ctx, f.orgID, "standard")
+	sb := newSandbox(t, st, ctx, f, "parked")
+	if err := st.ObserveSandbox(ctx, sb.ID, SandboxObservation{State: policy.SandboxExpired}); err != nil {
+		t.Fatalf("ObserveSandbox: %v", err)
+	}
+	if err := st.RevokeKey(ctx, f.keyID); err != nil {
+		t.Fatalf("RevokeKey: %v", err)
+	}
+
+	gone, err := st.DeleteProject(ctx, f.projectID)
+	if !errors.Is(err, ErrProjectHasSandboxes) || gone.LiveSandboxes != 1 {
+		t.Fatalf("DeleteProject = %v with %d live, want ErrProjectHasSandboxes with 1",
+			err, gone.LiveSandboxes)
+	}
+
+	if err := st.ObserveSandbox(ctx, sb.ID, SandboxObservation{State: policy.SandboxTerminated}); err != nil {
+		t.Fatalf("ObserveSandbox: %v", err)
+	}
+	if _, err := st.DeleteProject(ctx, f.projectID); err != nil {
+		t.Errorf("DeleteProject once the sandbox is terminated: %v", err)
+	}
+}

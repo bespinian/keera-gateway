@@ -202,7 +202,8 @@ var commands = []command{
 			{name: "delete", args: "<project>", summary: "delete a project whose keys are all revoked",
 				flags: []string{"yes", "json"},
 				prose: "Refused while any key in the project is not revoked, expired ones " +
-					"included: deleting it would take those credentials with it. Revoke them first. A key cannot change " +
+					"included: deleting it would take those credentials with it. Revoke them first. " +
+					"Refused too while a sandbox in it is live, expired ones included. A key cannot change " +
 					"project, so issue a new one in another project for anything that still " +
 					"needs one. Revoked keys stay as history, under no project."},
 		},
