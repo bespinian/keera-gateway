@@ -75,7 +75,7 @@ func TestContentThatIsNotTextIsStillRefused(t *testing.T) {
 	// Text is no longer decoded, so its type is checked on its own.
 	for _, content := range []string{`5`, `[{"type":"text","text":5}]`, `{"text":"x"}`} {
 		in := `{"model":"m","messages":[{"role":"user","content":` + content + `}]}`
-		_, err := anthropicShape{}.decodeBody([]byte(in))
+		_, _, err := anthropicShape{}.decodeBody([]byte(in))
 		if err == nil || !strings.Contains(err.Error(), "must be a string or an array") {
 			t.Errorf("content %s: error = %v, want a refusal", content, err)
 		}

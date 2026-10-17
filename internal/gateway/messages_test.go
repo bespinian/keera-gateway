@@ -23,7 +23,7 @@ func decodeMessages(t *testing.T, in string) map[string]any {
 
 // decodeRaw is a shape's translation of in, written out.
 func decodeRaw(sh shape, in string) ([]byte, error) {
-	b, err := sh.decodeBody([]byte(in))
+	b, _, err := sh.decodeBody([]byte(in))
 	if err != nil {
 		return nil, err
 	}
@@ -374,7 +374,7 @@ func TestDecodeRejectsWhatItCannotTranslate(t *testing.T) {
 		"not an object": `[]`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := (anthropicShape{}).decodeBody([]byte(in)); err == nil {
+			if _, _, err := (anthropicShape{}).decodeBody([]byte(in)); err == nil {
 				t.Error("the request was accepted; it should have been refused with a reason")
 			}
 		})

@@ -70,14 +70,17 @@ func TestParseBodyRefusesAReadKeyInOtherCase(t *testing.T) {
 func TestEveryRequestFieldTheGatewayDecodesIsChecked(t *testing.T) {
 	// A field missing from readNames could be smuggled past the filters in
 	// other case, so a new field in a request struct must be added there too.
+	// A namespace's tools are tools, so a type can hold itself.
+	seen := map[reflect.Type]bool{}
 	var walk func(reflect.Type)
 	walk = func(t2 reflect.Type) {
 		for t2.Kind() == reflect.Pointer || t2.Kind() == reflect.Slice {
 			t2 = t2.Elem()
 		}
-		if t2.Kind() != reflect.Struct {
+		if t2.Kind() != reflect.Struct || seen[t2] {
 			return
 		}
+		seen[t2] = true
 		for f := range t2.Fields() {
 			name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
 			if name == "" || name == "-" {

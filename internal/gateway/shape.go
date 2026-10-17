@@ -39,9 +39,11 @@ var (
 // translated at the edges, so one set of guardrails covers every client. The
 // one exception is a request forwarded to the provider whose own API it is in.
 type shape interface {
-	// decodeBody turns a request in this shape into an OpenAI chat request. The
-	// error is shown to the client, so it says what is wrong with the body.
-	decodeBody(raw []byte) (*body, error)
+	// decodeBody turns a request in this shape into an OpenAI chat request,
+	// and returns the shape to answer it with: the Responses API names each
+	// call the way the request declared its tool. The error is shown to the
+	// client, so it says what is wrong with the body.
+	decodeBody(raw []byte) (*body, shape, error)
 	// encode turns one buffered upstream response into this shape, and returns
 	// the status to answer with. The status in tells an error body from a
 	// completion. The status out may differ, since a success that cannot be
@@ -71,7 +73,10 @@ func (openAIErrors) writeError(w http.ResponseWriter, status int, typ, code, msg
 	httpx.WriteError(w, status, typ, code, msg)
 }
 
-func (openAIShape) decodeBody(raw []byte) (*body, error) { return parseBody(raw) }
+func (sh openAIShape) decodeBody(raw []byte) (*body, shape, error) {
+	b, err := parseBody(raw)
+	return b, sh, err
+}
 
 // encode names the alias as the model: the client was promised the alias,
 // never the backend's name for it.

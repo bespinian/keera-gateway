@@ -87,6 +87,193 @@ func TestResponsesDecodeTranslatesToolsAndFormat(t *testing.T) {
 	}
 }
 
+// codexTools is how Codex declares tools: each MCP server's in a namespace,
+// its subagent tools in another, and apply_patch as a custom tool with a
+// grammar.
+const codexTools = `"tools":[
+	{"type":"function","name":"exec_command","parameters":{"type":"object"}},
+	{"type":"namespace","name":"mcp__demo__","description":"Demo MCP server","tools":[
+		{"type":"function","name":"get_weather","description":"Weather","parameters":{"type":"object"}}]},
+	{"type":"namespace","name":"multi_agent_v1","description":"Subagents","tools":[
+		{"type":"function","name":"spawn_agent","parameters":{"type":"object"}}]},
+	{"type":"custom","name":"apply_patch","description":"Edit files.",
+		"format":{"type":"grammar","syntax":"lark","definition":"start: begin_patch"}},
+	{"type":"web_search"}]`
+
+func TestResponsesDecodeDeclaresNamespacesAndCustomTools(t *testing.T) {
+	// The chat shape has neither, and dropping them would leave Codex without
+	// its MCP tools, its subagents and its way of editing files.
+	req := decodeResponses(t, `{"model":"keera-code","input":"hi",`+codexTools+`,
+		"tool_choice":{"type":"custom","name":"apply_patch"}}`)
+
+	fns := map[string]map[string]any{}
+	for _, tool := range req["tools"].([]any) {
+		fn := tool.(map[string]any)["function"].(map[string]any)
+		fns[fn["name"].(string)] = fn
+	}
+	for _, name := range []string{"exec_command", "mcp__demo__get_weather",
+		"multi_agent_v1__spawn_agent", "apply_patch"} {
+		if fns[name] == nil {
+			t.Errorf("no tool %q in %v", name, req["tools"])
+		}
+	}
+	if len(fns) != 4 {
+		t.Errorf("%d tools, want 4; web search runs on OpenAI's servers", len(fns))
+	}
+	patch := fns["apply_patch"]
+	if props := patch["parameters"].(map[string]any)["properties"].(map[string]any); props["input"] == nil {
+		t.Errorf("apply_patch parameters = %v, want its text as 'input'", patch["parameters"])
+	}
+	if d, _ := patch["description"].(string); !strings.Contains(d, "Edit files.") ||
+		!strings.Contains(d, "lark grammar:\nstart: begin_patch") {
+		t.Errorf("apply_patch description = %q, want the grammar in it", d)
+	}
+	tc := req["tool_choice"].(map[string]any)
+	if tc["function"].(map[string]any)["name"] != "apply_patch" {
+		t.Errorf("tool_choice = %v", tc)
+	}
+}
+
+func TestResponsesDecodeReplaysNamespacedAndCustomCalls(t *testing.T) {
+	req := decodeResponses(t, `{"model":"keera-code","input":[
+		{"role":"user","content":"weather, then fix it"},
+		{"type":"function_call","call_id":"c1","namespace":"mcp__demo__","name":"get_weather",
+			"arguments":"{\"city\":\"Bern\"}"},
+		{"type":"custom_tool_call","call_id":"c2","name":"apply_patch","input":"*** Begin Patch"},
+		{"type":"function_call_output","call_id":"c1","output":"sunny"},
+		{"type":"custom_tool_call_output","call_id":"c2","output":"Done!"}]}`)
+
+	msgs := messagesOf(t, req)
+	calls := msgs[1]["tool_calls"].([]any)
+	if len(calls) != 2 {
+		t.Fatalf("assistant = %v, want both calls", msgs[1])
+	}
+	first := calls[0].(map[string]any)["function"].(map[string]any)
+	second := calls[1].(map[string]any)["function"].(map[string]any)
+	if first["name"] != "mcp__demo__get_weather" {
+		t.Errorf("namespaced call = %v", first)
+	}
+	if second["name"] != "apply_patch" || second["arguments"] != `{"input":"*** Begin Patch"}` {
+		t.Errorf("custom call = %v, want its text as the one argument", second)
+	}
+	if msgs[2]["tool_call_id"] != "c1" || msgs[3]["tool_call_id"] != "c2" || msgs[3]["content"] != "Done!" {
+		t.Errorf("tool outputs = %v, %v", msgs[2], msgs[3])
+	}
+}
+
+func TestResponsesNameCallsAsTheClientDeclaredThem(t *testing.T) {
+	// Codex finds a call's tool by its namespace and name, and runs a custom
+	// tool on its text, so a call named as the chat shape knows it fails there.
+	backend := jsonBackend(`{"choices":[{"message":{"tool_calls":[
+		{"id":"call_1","type":"function","function":{"name":"mcp__demo__get_weather","arguments":"{\"city\":\"Bern\"}"}},
+		{"id":"call_2","type":"function","function":{"name":"apply_patch","arguments":"{\"input\":\"*** Begin Patch\"}"}},
+		{"id":"call_3","type":"function","function":{"name":"exec_command","arguments":"{}"}}]},
+		"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5}}`)
+	h := newHarness(t, backend, nil, nil)
+
+	resp := h.post(t, "/v1/responses", `{"model":"keera-code","input":"hi",`+codexTools+`}`)
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d: %s", resp.StatusCode, body)
+	}
+	var out struct {
+		Output []map[string]any `json:"output"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil || len(out.Output) != 3 {
+		t.Fatalf("output = %s", body)
+	}
+	weather, patch, shell := out.Output[0], out.Output[1], out.Output[2]
+	if weather["type"] != "function_call" || weather["name"] != "get_weather" ||
+		weather["namespace"] != "mcp__demo__" || weather["call_id"] != "call_1" {
+		t.Errorf("namespaced call = %v", weather)
+	}
+	if patch["type"] != "custom_tool_call" || patch["name"] != "apply_patch" ||
+		patch["input"] != "*** Begin Patch" || patch["arguments"] != nil {
+		t.Errorf("custom call = %v", patch)
+	}
+	if _, ok := shell["namespace"]; ok || shell["name"] != "exec_command" {
+		t.Errorf("plain call = %v", shell)
+	}
+}
+
+func TestResponsesStreamNamesCallsAsTheClientDeclaredThem(t *testing.T) {
+	_, sh, err := responsesShape{}.decodeBody([]byte(`{"model":"keera-code","input":"hi",` + codexTools + `}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := strings.NewReader(sseStream(
+		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"apply_patch","arguments":"{\"input\":\"*** Begin"}}]}}]}`,
+		`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":" Patch\"}"}}]}}]}`,
+		`{"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call_2","function":{"name":"mcp__demo__get_weather","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`,
+	))
+	var dst bytes.Buffer
+	if _, err := sh.pipe(&dst, func() {}, src, "keera-code", true, DefaultMaxResponseBytes); err != nil {
+		t.Fatal(err)
+	}
+
+	events := readEvents(t, dst.String())
+	want := []string{
+		"response.created", "response.in_progress",
+		"response.output_item.added",
+		"response.custom_tool_call_input.delta", "response.custom_tool_call_input.delta",
+		"response.custom_tool_call_input.done", "response.output_item.done",
+		"response.output_item.added", "response.function_call_arguments.delta",
+		"response.function_call_arguments.done", "response.output_item.done",
+		"response.completed",
+	}
+	if got := names(events); strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("events =\n%v\nwant\n%v", got, want)
+	}
+	if added := events[2].payload["item"].(map[string]any); added["type"] != "custom_tool_call" {
+		t.Errorf("added = %v", added)
+	}
+	if first := events[3].payload; first["delta"] != "*** Begin" {
+		t.Errorf("first delta = %v, want the text as it arrived", first)
+	}
+	if done := events[5].payload; done["input"] != "*** Begin Patch" {
+		t.Errorf("input done = %v", done)
+	}
+	patch := events[6].payload["item"].(map[string]any)
+	if patch["input"] != "*** Begin Patch" || patch["status"] != "completed" ||
+		patch["id"] != events[2].payload["item"].(map[string]any)["id"] {
+		t.Errorf("finished custom call = %v", patch)
+	}
+	if weather := events[10].payload["item"].(map[string]any); weather["name"] != "get_weather" ||
+		weather["namespace"] != "mcp__demo__" || weather["arguments"] != "{}" {
+		t.Errorf("finished namespaced call = %v", weather)
+	}
+	output := events[11].payload["response"].(map[string]any)["output"].([]any)
+	if len(output) != 2 || output[0].(map[string]any)["type"] != "custom_tool_call" {
+		t.Errorf("completed output = %v", output)
+	}
+}
+
+// A custom tool's text is streamed as its arguments arrive, however they are
+// cut: an escape split across two pieces waits for the rest.
+func TestInputStreamReadsTheTextAsItArrives(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		pieces []string
+		want   []string
+	}{
+		{"plain", []string{`{"input":"ab`, `cd"}`}, []string{"ab", "cd"}},
+		{"spaced opening, cut in two", []string{`{ "inp`, `ut" : "x`, `y"}`}, []string{"", "x", "y"}},
+		{"escape cut", []string{`{"input":"a\`, `nb"}`}, []string{"a", "\nb"}},
+		{"surrogate pair cut", []string{`{"input":"\ud83d`, `\ude00!"}`}, []string{"", "\U0001f600!"}},
+		{"another shape", []string{`{"patch":"x"}`}, []string{""}},
+		{"bare text", []string{`*** Begin Patch`}, []string{""}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var in inputStream
+			for i, p := range tc.pieces {
+				if got := in.read(p); got != tc.want[i] {
+					t.Errorf("piece %d: read %q, want %q", i, got, tc.want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestResponsesEncodeBuildsItems(t *testing.T) {
 	out, status := responsesShape{}.encode([]byte(`{"choices":[{"message":{"content":"done",
 		"tool_calls":[{"id":"call_1","type":"function","function":{"name":"shell","arguments":"{}"}}]},

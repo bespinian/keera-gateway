@@ -122,6 +122,13 @@ for, such as thinking blocks, reasoning items, OpenAI's built-in tools and
 Anthropic's server tools, are dropped. Every answer names the alias as its
 model, never the backend's name for it.
 
+Chat completions has no tool namespaces and no custom tools, which Codex uses
+for its MCP tools, its subagents and `apply_patch`. A tool in a namespace is
+declared on its own, under both names joined by `__`, such as
+`mcp__demo__get_weather`. A custom tool becomes a function that takes its text
+as `input`, with its grammar in the description. The answer names each call
+the way the client declared it.
+
 The exception: a Messages request to a model declared with Anthropic, or a
 Responses request to a model declared with OpenAI, is forwarded as it is.
 Translating it would lose prompt caching and thinking at Anthropic, and

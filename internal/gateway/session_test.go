@@ -347,7 +347,7 @@ func TestTheOpeningOfAnUntranslatedBodyIsTheTranslations(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseBody: %v", err)
 			}
-			translated, err := tc.surf.shape.decodeBody([]byte(tc.body))
+			translated, _, err := tc.surf.shape.decodeBody([]byte(tc.body))
 			if err != nil {
 				t.Fatalf("decode: %v", err)
 			}

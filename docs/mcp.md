@@ -183,9 +183,9 @@ are removed from every request before it is forwarded, including Anthropic's
 `mcp_servers` and OpenAI's `web_search_options`. The provider charges for them
 on top of tokens, and Keera does not bill that.
 
-Tools the client runs itself are kept: its own functions, Anthropic's bash,
-editor, computer and memory tools, and OpenAI's shell, local shell, computer
-use and apply-patch tools. Every other tool type is removed, including ones
+Tools the client runs itself are kept: its own functions and namespaces of
+them, Anthropic's bash, editor, computer and memory tools, and OpenAI's shell,
+local shell, computer use and apply-patch tools. Every other tool type is removed, including ones
 released after this build. The response header `X-Keera-Removed-Tools` names
 what was removed.
 

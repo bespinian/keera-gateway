@@ -21,8 +21,13 @@ import (
 // dropped on the way in: reasoning items, built-in tools such as web search,
 // and settings that only OpenAI's servers act on.
 
-// responsesShape implements shape for `/v1/responses`.
-type responsesShape struct{ openAIErrors }
+// responsesShape implements shape for `/v1/responses`. tools is what the
+// request declared under another name or kind than the chat shape knows it
+// by, so the answer names each call the way the client declared it.
+type responsesShape struct {
+	openAIErrors
+	tools toolNames
+}
 
 // ------------------------------------------------------------------- requests
 
@@ -56,6 +61,15 @@ type responsesTool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	Parameters  json.RawMessage `json:"parameters"`
+	// Format is what a custom tool takes: free text, or text that matches a
+	// grammar.
+	Format *struct {
+		Type       string `json:"type"`
+		Syntax     string `json:"syntax"`
+		Definition string `json:"definition"`
+	} `json:"format"`
+	// Tools are a namespace's own: functions and custom tools.
+	Tools []responsesTool `json:"tools"`
 }
 
 // responsesItem is one item of the input. Items are told apart by `type`, and
@@ -65,12 +79,14 @@ type responsesItem struct {
 	Role    string          `json:"role"`
 	Content json.RawMessage `json:"content"`
 
-	// function_call
+	// function_call and custom_tool_call
 	CallID    string `json:"call_id"`
 	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
 	Arguments string `json:"arguments"`
+	Input     string `json:"input"`
 
-	// function_call_output
+	// function_call_output and custom_tool_call_output
 	Output json.RawMessage `json:"output"`
 }
 
@@ -82,19 +98,21 @@ type responsesPart struct {
 	ImageURL jsonText `json:"image_url"`
 }
 
-// decodeBody turns a Responses request into a chat completion request.
-func (responsesShape) decodeBody(raw []byte) (*body, error) {
+// decodeBody turns a Responses request into a chat completion request, and
+// returns the shape that answers it in the terms of the tools it declared.
+func (responsesShape) decodeBody(raw []byte) (*body, shape, error) {
 	var in responsesRequest
 	if err := decodeRequest(raw, &in, "Responses"); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	msgs, err := responsesMessages(in)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := map[string]any{}
 	addSampling(out, in.MaxOutputTokens, in.Stream, in.Temperature, in.TopP)
-	if tools := responsesTools(in.Tools); len(tools) > 0 {
+	tools, names := responsesTools(in.Tools)
+	if len(tools) > 0 {
 		out["tools"] = tools
 		if tc, ok := responsesToolChoice(in.ToolChoice); ok {
 			out["tool_choice"] = tc
@@ -115,7 +133,8 @@ func (responsesShape) decodeBody(raw []byte) (*body, error) {
 			out["response_format"] = map[string]any{"type": "json_schema", "json_schema": schema}
 		}
 	}
-	return chatBody(in.Model, msgs, out, len(raw))
+	b, err := chatBody(in.Model, msgs, out, len(raw))
+	return b, responsesShape{tools: names}, err
 }
 
 // responsesMessages turns the instructions and the input into chat messages.
@@ -149,30 +168,43 @@ func addItem(msgs []chatMessage, it responsesItem) ([]chatMessage, error) {
 	case "", "message":
 		return addMessageItem(msgs, it)
 	case "function_call":
-		call := oaiToolCall{
-			ID: it.CallID, Type: "function",
-			Function: oaiFunction{Name: it.Name, Arguments: it.Arguments},
+		args := it.Arguments
+		if args == "" {
+			args = "{}"
 		}
-		if call.Function.Arguments == "" {
-			call.Function.Arguments = "{}"
+		return addCall(msgs, it, args), nil
+	case "custom_tool_call":
+		args, err := json.Marshal(map[string]string{"input": it.Input})
+		if err != nil {
+			return nil, err
 		}
-		// Calls made in one turn arrive as separate items. The chat shape wants
-		// them on one assistant message, with whatever text came before them.
-		if n := len(msgs); n > 0 && msgs[n-1].role == "assistant" {
-			msgs[n-1].toolCalls = append(msgs[n-1].toolCalls, call)
-			if msgs[n-1].content.isEmpty() {
-				msgs[n-1].content = nil
-			}
-			return msgs, nil
-		}
-		return append(msgs, chatMessage{role: "assistant", toolCalls: []oaiToolCall{call}}), nil
-	case "function_call_output":
+		return addCall(msgs, it, string(args)), nil
+	case "function_call_output", "custom_tool_call_output":
 		text, _ := responsesContent(it.Output)
 		return append(msgs, chatMessage{role: "tool", toolCallID: it.CallID, content: text}), nil
 	}
 	// Reasoning items, item references and the calls of built-in tools have no
 	// counterpart, and the model answers without them.
 	return msgs, nil
+}
+
+// addCall appends a call the model made, under the name the chat shape knows
+// its tool by.
+func addCall(msgs []chatMessage, it responsesItem, args string) []chatMessage {
+	call := oaiToolCall{
+		ID: it.CallID, Type: "function",
+		Function: oaiFunction{Name: chatToolName(it.Namespace, it.Name), Arguments: args},
+	}
+	// Calls made in one turn arrive as separate items. The chat shape wants
+	// them on one assistant message, with whatever text came before them.
+	if n := len(msgs); n > 0 && msgs[n-1].role == "assistant" {
+		msgs[n-1].toolCalls = append(msgs[n-1].toolCalls, call)
+		if msgs[n-1].content.isEmpty() {
+			msgs[n-1].content = nil
+		}
+		return msgs
+	}
+	return append(msgs, chatMessage{role: "assistant", toolCalls: []oaiToolCall{call}})
 }
 
 // addMessageItem appends a message. The developer role is the system role
@@ -247,17 +279,84 @@ func orEmpty(t jsonText) jsonText {
 	return t
 }
 
-// responsesTools declares the function tools in the chat shape. Built-in tools
-// run on OpenAI's servers, so no other model has them.
-func responsesTools(in []responsesTool) []oaiTool {
+// declaredTool is how the client declared a tool that the chat shape knows by
+// another name or as another kind: inside a namespace, or as a custom tool,
+// which takes text instead of JSON arguments.
+type declaredTool struct {
+	namespace, name string
+	custom          bool
+}
+
+// toolNames maps a tool's name in the chat shape to how it was declared, for
+// the tools that are not plain functions.
+type toolNames map[string]declaredTool
+
+// responsesTools declares the client's tools in the chat shape. The chat shape
+// has neither namespaces nor custom tools, so a namespace's tools are
+// declared on their own, under names that carry the namespace, and a custom
+// tool is a function with its text as the one argument. Codex puts each MCP
+// server's tools and its own subagent tools in a namespace, and declares
+// apply_patch as a custom tool. Built-in tools run on OpenAI's servers, so no
+// other model has them.
+func responsesTools(in []responsesTool) ([]oaiTool, toolNames) {
 	tools := make([]oaiTool, 0, len(in))
+	names := toolNames{}
+	// A name declared twice would be refused by some backends, and its calls
+	// could not be told apart. The first one keeps it.
+	taken := map[string]bool{}
+	add := func(namespace string, t responsesTool) {
+		name := chatToolName(namespace, t.Name)
+		if t.Name == "" || taken[name] {
+			return
+		}
+		switch t.Type {
+		case "function":
+			tools = append(tools, functionTool(name, t.Description, t.Parameters))
+		case "custom":
+			tools = append(tools, customTool(name, t))
+		default:
+			return
+		}
+		taken[name] = true
+		if namespace != "" || t.Type == "custom" {
+			names[name] = declaredTool{namespace: namespace, name: t.Name, custom: t.Type == "custom"}
+		}
+	}
 	for _, t := range in {
-		if t.Type != "function" || t.Name == "" {
+		if t.Type != "namespace" {
+			add("", t)
 			continue
 		}
-		tools = append(tools, functionTool(t.Name, t.Description, t.Parameters))
+		for _, inner := range t.Tools {
+			add(t.Name, inner)
+		}
 	}
-	return tools
+	return tools, names
+}
+
+// chatToolName is the name a tool in a namespace goes by in the chat shape:
+// both names, joined by two underscores. Codex names its MCP namespaces
+// "mcp__server__", so a tool there becomes "mcp__server__tool".
+func chatToolName(namespace, name string) string {
+	if namespace == "" {
+		return name
+	}
+	return strings.TrimRight(namespace, "_") + "__" + strings.TrimLeft(name, "_")
+}
+
+// customSchema is a custom tool's parameters in the chat shape: its text.
+var customSchema = json.RawMessage(`{"type":"object","properties":{"input":{"type":"string"}},` +
+	`"required":["input"],"additionalProperties":false}`)
+
+// customTool declares a custom tool as a function of its text. A grammar the
+// text has to match goes in the description, since the chat shape has no
+// place for one and the model writes better input for seeing it.
+func customTool(name string, t responsesTool) oaiTool {
+	description := t.Description
+	if f := t.Format; f != nil && f.Type == "grammar" && f.Definition != "" {
+		description += "\n\nThe input must match this " + f.Syntax + " grammar:\n" + f.Definition
+	}
+	return functionTool(name, strings.TrimSpace(description), customSchema)
 }
 
 // responsesToolChoice maps the tool choice onto its chat spelling. The strings
@@ -271,13 +370,17 @@ func responsesToolChoice(raw json.RawMessage) (any, bool) {
 		return s, s == "auto" || s == "none" || s == "required"
 	}
 	var named struct {
-		Type string `json:"type"`
-		Name string `json:"name"`
+		Type      string `json:"type"`
+		Name      string `json:"name"`
+		Namespace string `json:"namespace"`
 	}
-	if json.Unmarshal(raw, &named) != nil || named.Type != "function" || named.Name == "" {
+	if json.Unmarshal(raw, &named) != nil || named.Name == "" ||
+		(named.Type != "function" && named.Type != "custom") {
 		return nil, false
 	}
-	return map[string]any{"type": "function", "function": map[string]string{"name": named.Name}}, true
+	return map[string]any{"type": "function", "function": map[string]string{
+		"name": chatToolName(named.Namespace, named.Name),
+	}}, true
 }
 
 // ------------------------------------------------------------------ responses
@@ -348,6 +451,42 @@ func callItem(itemID, status, callID, name, args string) map[string]any {
 	}
 }
 
+// call is the output item for a call the model made, named as the client
+// declared its tool: in its namespace, and as a custom tool call with its
+// text if it is one.
+func (n toolNames) call(status, callID, name, args string) map[string]any {
+	d, ok := n[name]
+	if !ok {
+		return callItem(id.New("fc"), status, callID, name, args)
+	}
+	var item map[string]any
+	if d.custom {
+		item = map[string]any{
+			"type": "custom_tool_call", "id": id.New("ctc"), "status": status,
+			"call_id": callID, "name": d.name, "input": customInput(args),
+		}
+	} else {
+		item = callItem(id.New("fc"), status, callID, d.name, args)
+	}
+	if d.namespace != "" {
+		item["namespace"] = d.namespace
+	}
+	return item
+}
+
+// customInput is the text a custom tool was called with, which the chat shape
+// carries as the call's one argument. A model that wrote the text bare is
+// taken at its word.
+func customInput(args string) string {
+	var a struct {
+		Input *string `json:"input"`
+	}
+	if json.Unmarshal([]byte(args), &a) == nil && a.Input != nil {
+		return *a.Input
+	}
+	return args
+}
+
 // responseStatus maps the chat finish reason onto a response's status and
 // the reason it stopped short, if it did.
 func responseStatus(finish string) (string, any) {
@@ -367,7 +506,7 @@ func callID(s string) string { return upstreamID(s, "call") }
 
 // encode turns a buffered chat completion into a response. Errors use the
 // chat envelope, which this API shares.
-func (responsesShape) encode(raw []byte, alias string, status int) ([]byte, int) {
+func (s responsesShape) encode(raw []byte, alias string, status int) ([]byte, int) {
 	if status >= 300 {
 		return openAIErrorBody(raw, status), status
 	}
@@ -387,7 +526,7 @@ func (responsesShape) encode(raw []byte, alias string, status int) ([]byte, int)
 		out.Output = append(out.Output, messageItem(id.New("msg"), "completed", choice.Message.Content))
 	}
 	for _, tc := range choice.Message.ToolCalls {
-		out.Output = append(out.Output, callItem(id.New("fc"), "completed",
+		out.Output = append(out.Output, s.tools.call("completed",
 			callID(tc.ID), tc.Function.Name, tc.Function.Arguments))
 	}
 	body, err := json.Marshal(out)

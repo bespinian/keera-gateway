@@ -55,12 +55,12 @@ func parseBody(raw []byte) (*body, error) {
 // readNames are the keys the gateway reads in a request: at its top level, in
 // an MCP tool call, and in the messages, blocks and items that hold its text.
 var readNames = foldedNames(
-	"_meta", "arguments", "call_id", "content", "data", "description",
+	"_meta", "arguments", "call_id", "content", "data", "definition", "description",
 	"disable_parallel_tool_use", "format", "id", "image_url", "input", "input_schema",
 	"instructions", "max_completion_tokens", "max_output_tokens", "max_tokens",
-	"media_type", "messages", "model", "name", "output", "parallel_tool_calls",
+	"media_type", "messages", "model", "name", "namespace", "output", "parallel_tool_calls",
 	"parameters", "prompt", "refusal", "role", "schema", "source", "stop_sequences",
-	"stream", "stream_options", "strict", "system", "temperature", "text",
+	"stream", "stream_options", "strict", "syntax", "system", "temperature", "text",
 	"tool_choice", "tool_use_id", "tools", "top_k", "top_p", "type", "url",
 )
 

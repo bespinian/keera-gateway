@@ -141,20 +141,20 @@ var emptySchema = json.RawMessage(`{"type":"object","properties":{}}`)
 
 // decodeBody turns a Messages request into a chat completion request. The
 // body is built field by field, so it need not be parsed again.
-func (anthropicShape) decodeBody(raw []byte) (*body, error) {
+func (sh anthropicShape) decodeBody(raw []byte) (*body, shape, error) {
 	// A missing model is left to serve, which refuses it the same way on
 	// every API.
 	var in anthropicRequest
 	if err := decodeRequest(raw, &in, "Messages"); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(in.Messages) == 0 {
-		return nil, errors.New("the 'messages' field is required and must not be empty")
+		return nil, nil, errors.New("the 'messages' field is required and must not be empty")
 	}
 
 	msgs, err := convertMessages(in)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := map[string]any{}
 	// max_tokens is required by the Messages API, so it is nearly always
@@ -175,7 +175,8 @@ func (anthropicShape) decodeBody(raw []byte) (*body, error) {
 		addToolChoice(out, *in.ToolChoice)
 	}
 
-	return chatBody(in.Model, msgs, out, len(raw))
+	b, err := chatBody(in.Model, msgs, out, len(raw))
+	return b, sh, err
 }
 
 // chatBody builds a chat completion request from its messages and the other

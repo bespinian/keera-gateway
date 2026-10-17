@@ -324,11 +324,12 @@ func TestHostedToolsAreTakenOutOfAResponsesRequestOnTheDeploymentsKey(t *testing
 
 	h.post(t, "/v1/responses", `{"model":"keera-frontier","input":"hi",`+
 		`"tools":[{"type":"function","name":"shell","parameters":{}},{"type":"web_search"},`+
+		`{"type":"namespace","name":"mcp__demo__","tools":[{"type":"function","name":"get"}]},`+
 		`{"type":"mcp","server_label":"x","server_url":"https://evil.example/mcp"}],`+
 		`"tool_choice":{"type":"web_search"}}`)
 	got := nextSeen(t, seen).body
 	if strings.Contains(got, "web_search") || strings.Contains(got, "evil.example") ||
-		!strings.Contains(got, `"shell"`) {
+		!strings.Contains(got, `"shell"`) || !strings.Contains(got, "mcp__demo__") {
 		t.Errorf("forwarded = %s", got)
 	}
 }

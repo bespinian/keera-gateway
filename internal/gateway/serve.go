@@ -242,9 +242,15 @@ func (s *Server) translate(c *call, b *body) (*body, bool) {
 	return b, true
 }
 
-// openAIBody turns the client's own body into the OpenAI shape.
+// openAIBody turns the client's own body into the OpenAI shape, and answers
+// in the shape the request was decoded into, on this call's own copy of the
+// surface.
 func openAIBody(c *call) (*body, error) {
-	return c.surf.shape.decodeBody(c.native.encode())
+	b, sh, err := c.surf.shape.decodeBody(c.native.encode())
+	if err == nil {
+		c.surf.shape = sh
+	}
+	return b, err
 }
 
 // invalidBody is the refusal for a body the gateway cannot use.

@@ -23,11 +23,13 @@ import (
 
 // anthropicClientTools and openAIClientTools are the tool types the client
 // runs, by type, or by prefix for entries ending in '_'. An Anthropic tool
-// with no type is one the client declared, like a function.
+// with no type is one the client declared, like a function. An OpenAI
+// namespace holds only functions and custom tools: Codex puts each MCP server
+// and its own subagent tools in one.
 var (
 	anthropicClientTools = []string{"custom", "bash_", "text_editor_", "computer_", "memory_"}
-	openAIClientTools    = []string{"function", "custom", "local_shell", "computer_use_preview",
-		"shell", "apply_patch"}
+	openAIClientTools    = []string{"function", "custom", "namespace", "local_shell",
+		"computer_use_preview", "shell", "apply_patch"}
 )
 
 // keepsTool reports whether a tool of this type is one the client runs.
