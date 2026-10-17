@@ -177,6 +177,50 @@ func TestResponsesStreamEmitsTheEventSequence(t *testing.T) {
 	}
 }
 
+func TestResponsesStreamFailsAFailedStream(t *testing.T) {
+	// As on the Messages surface: closed as completed, a stream the upstream
+	// cut off would read as a finished turn, with a tool call cut short in it.
+	// response.failed ends the stream too, and tells the client to try again.
+	for name, upstream := range map[string]string{
+		"cut off": "data: " + `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1",` +
+			`"function":{"name":"write","arguments":"{\"content\":\"half"}}]}}]}` + "\n\n",
+		"error chunk": sseStream(`{"choices":[{"delta":{"content":"done"}}]}`,
+			`{"choices":[{"delta":{"content":"half"}}]}`,
+			`{"error":{"message":"CUDA out of memory","type":"InternalServerError","code":500}}`),
+		"empty": sseStream(),
+	} {
+		var buf bytes.Buffer
+		_, err := responsesShape{}.pipe(&buf, func() {}, strings.NewReader(upstream),
+			"keera-code", true, DefaultMaxResponseBytes)
+		if err == nil {
+			t.Errorf("%s: pipe reported no failure, so the row would look like a whole answer", name)
+		}
+		events := readEvents(t, buf.String())
+		last := events[len(events)-1]
+		if last.name != "response.failed" {
+			t.Errorf("%s: the stream ends with %q, want response.failed", name, last.name)
+			continue
+		}
+		resp := last.payload["response"].(map[string]any)
+		e, _ := resp["error"].(map[string]any)
+		if resp["status"] != "failed" || e["code"] != "server_error" {
+			t.Errorf("%s: response = %v, want status failed and a server_error", name, resp)
+		}
+		// The item under way is not whole, so it is neither closed nor output.
+		if out := resp["output"].([]any); len(out) != 0 {
+			t.Errorf("%s: output = %v, want nothing", name, out)
+		}
+		for _, ev := range events {
+			if ev.name == "response.completed" || ev.name == "response.output_item.done" {
+				t.Errorf("%s: the failed stream carried %s", name, ev.name)
+			}
+		}
+		if name == "error chunk" && !strings.Contains(e["message"].(string), "CUDA out of memory") {
+			t.Errorf("%s: message = %q, want the upstream's", name, e["message"])
+		}
+	}
+}
+
 func TestResponsesSurfaceTranslatesForALocalModel(t *testing.T) {
 	h := newHarness(t, jsonBackend(`{"choices":[{"message":{"content":"hi"},"finish_reason":"stop"}],`+
 		`"usage":{"prompt_tokens":1000,"completion_tokens":500}}`), nil, guarded("obey the org", 64))
@@ -275,8 +319,41 @@ func TestNativeResponsesStreamReadsTheUsage(t *testing.T) {
 		t.Errorf("the stream names the backend model: %s", body)
 	}
 	ev := h.sink.last(t)
-	if ev.InputTokens != 30 || ev.OutputTokens != 2 || ev.Estimated {
-		t.Errorf("row = %d in, %d out, estimated %v", ev.InputTokens, ev.OutputTokens, ev.Estimated)
+	if ev.InputTokens != 30 || ev.OutputTokens != 2 || ev.Estimated || ev.Error != "" {
+		t.Errorf("row = %d in, %d out, estimated %v, error %q", ev.InputTokens, ev.OutputTokens,
+			ev.Estimated, ev.Error)
+	}
+}
+
+// The 200 is sent before the provider fails, so the row's error is what tells
+// a failed stream from a finished one.
+func TestAFailedNativeStreamIsRecordedAsFailed(t *testing.T) {
+	for _, tc := range []struct{ provider, model, path, body, events, want string }{
+		{"openai", "gpt-5.5", "/v1/responses", `{"model":"keera-frontier","stream":true,"input":"hi"}`,
+			`{"type":"response.created","response":{"id":"r","status":"in_progress"}}` + "\n\n" +
+				`{"type":"response.failed","response":{"id":"r","status":"failed",` +
+				`"error":{"code":"server_error","message":"it broke"}}}`,
+			"it broke"},
+		{"openai", "gpt-5.5", "/v1/responses", `{"model":"keera-frontier","stream":true,"input":"hi"}`,
+			`{"type":"response.output_text.delta","delta":"hi"}`, "stopped before"},
+		{"anthropic", "claude-opus-5", "/v1/messages", `{"model":"keera-frontier","max_tokens":64,` +
+			`"stream":true,"messages":[{"role":"user","content":"hi"}]}`,
+			`{"type":"message_start","message":{"usage":{"input_tokens":1}}}` + "\n\n" +
+				`{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`,
+			"Overloaded"},
+	} {
+		backend := func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			for e := range strings.SplitSeq(tc.events, "\n\n") {
+				_, _ = io.WriteString(w, "data: "+e+"\n\n")
+			}
+		}
+		h, _ := providerHarness(t, tc.provider, tc.model, backend, nil)
+		resp := h.post(t, tc.path, tc.body)
+		_, _ = io.ReadAll(resp.Body)
+		if ev := h.sink.last(t); !strings.Contains(ev.Error, tc.want) {
+			t.Errorf("%s: error = %q, want it to say %q", tc.provider, ev.Error, tc.want)
+		}
 	}
 }
 

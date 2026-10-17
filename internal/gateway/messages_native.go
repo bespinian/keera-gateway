@@ -243,12 +243,20 @@ type anthropicStream struct {
 	// the input comes when the message opens, the output when it closes.
 	started, ended bool
 	deltas         int
+	// stopped says message_stop arrived. upstreamErr is an error event's
+	// message.
+	stopped     bool
+	upstreamErr string
 }
 
 func (s *anthropicStream) event(payload []byte) []byte {
 	switch eventType(payload) {
 	case "content_block_delta":
 		s.deltas++
+	case "message_stop":
+		s.stopped = true
+	case "error":
+		s.upstreamErr = upstreamText(payload)
 	case "message_start":
 		var ev struct {
 			Message struct {
@@ -270,6 +278,10 @@ func (s *anthropicStream) event(payload []byte) []byte {
 		}
 	}
 	return nil
+}
+
+func (s *anthropicStream) failure() error {
+	return endedFailure(s.upstreamErr, s.stopped)
 }
 
 // counts keeps the input count of a stream cut short, which is exact, and

@@ -102,6 +102,32 @@ func TestPipeSSECountsDeltasForACancelledStream(t *testing.T) {
 	}
 }
 
+// A stream passed on is the client's to judge, but the row has to say when it
+// was no whole answer.
+func TestPipeSSESaysWhenAStreamWasNoWholeAnswer(t *testing.T) {
+	for _, tc := range []struct {
+		in, want string
+	}{
+		{sseStream(deltaChunk, stopChunk, usageChunk), ""},
+		{sseStream(deltaChunk), "stopped before"},
+		{sseStream(deltaChunk, `{"error":{"message":"out of memory"}}`), "out of memory"},
+		// A quoted key inside the text is not the key.
+		{sseStream(`{"choices":[{"delta":{"content":"\"error\": x"}}]}`, stopChunk), ""},
+	} {
+		stats, err := pipeSSE(io.Discard, func() {}, strings.NewReader(tc.in), "", true,
+			DefaultMaxResponseBytes)
+		if err != nil {
+			t.Fatalf("pipeSSE: %v", err)
+		}
+		switch {
+		case tc.want == "" && stats.cut != nil:
+			t.Errorf("%q: cut = %v, want a whole answer", tc.in, stats.cut)
+		case tc.want != "" && (stats.cut == nil || !strings.Contains(stats.cut.Error(), tc.want)):
+			t.Errorf("%q: cut = %v, want %q", tc.in, stats.cut, tc.want)
+		}
+	}
+}
+
 func TestPipeSSEHandlesCRLF(t *testing.T) {
 	in := "data: " + deltaChunk + "\r\n\r\ndata: " + usageChunk + "\r\n\r\ndata: [DONE]\r\n\r\n"
 	var out bytes.Buffer

@@ -18,6 +18,8 @@ var (
 	doneMarker = []byte("[DONE]")
 	usageKey   = []byte(`"usage"`)
 	deltaKey   = []byte(`"delta"`)
+	finishKey  = []byte(`"finish_reason"`)
+	errorKey   = []byte(`"error"`)
 )
 
 // maxEventBytes bounds how much of one server-sent event is held before it is
@@ -83,6 +85,10 @@ type streamStats struct {
 	// partial says usage was pieced together from a stream that ended early,
 	// so the row is an estimate.
 	partial bool
+	// cut is why a stream that was read to its end is still not a whole
+	// answer: the upstream sent an error, or stopped before it said why. A
+	// passed-on stream is the client's to judge, so this is only recorded.
+	cut error
 }
 
 // sseLines reads a server-sent event stream one line at a time.
@@ -171,8 +177,13 @@ func pipeSSE(dst io.Writer, flush func(), src io.Reader, alias string,
 		p.name, _ = json.Marshal(alias)
 	}
 	err := eachLine(src, limit, p.add, p.emit)
+	p.stats.cut = p.failure()
 	return p.stats, err
 }
+
+// failure is why a stream read to its end is still not a whole answer, or
+// nil, as chatChunks.failure decides for a translated one.
+func (p *ssePipe) failure() error { return endedFailure(p.upstreamErr, p.finished) }
 
 // ssePipe is the state of one piped stream: the event being gathered, and
 // what has been learnt so far.
@@ -191,6 +202,11 @@ type ssePipe struct {
 	// generated says the event being gathered, or one before it, carries a
 	// token. Once it is set, no chunk is decoded for it again.
 	generated bool
+	// finished says a chunk gave a finish reason, which every backend sends
+	// at the end of a whole answer. upstreamErr is an error sent in place of
+	// a chunk.
+	finished    bool
+	upstreamErr string
 }
 
 // add takes one line into the current event, and forwards the event once it
@@ -207,6 +223,10 @@ func (p *ssePipe) add(line []byte) error {
 		if !bytes.Equal(payload, doneMarker) {
 			inspect(payload, &p.stats, &p.usageOnly)
 			p.generated = p.generated || generated(payload)
+			p.finished = p.finished || hasValue(payload, finishKey)
+			if hasValue(payload, errorKey) {
+				p.upstreamErr = upstreamText(payload)
+			}
 		}
 	}
 	if len(p.event) > maxEventBytes {
@@ -294,13 +314,21 @@ func generated(payload []byte) bool {
 // hasUsage reports whether payload has a usage key with a value other than
 // null. With include_usage, OpenAI sends "usage":null in every chunk, and
 // only the last one needs decoding.
-func hasUsage(payload []byte) bool {
-	_, after, ok := bytes.Cut(payload, usageKey)
+func hasUsage(payload []byte) bool { return hasValue(payload, usageKey) }
+
+// hasValue reports whether payload has key with a value other than null,
+// without decoding it. Inside a string a quote is escaped, so the quoted key
+// followed by a colon is only ever a key.
+func hasValue(payload, key []byte) bool {
+	_, after, ok := bytes.Cut(payload, key)
 	if !ok {
 		return false
 	}
 	rest := bytes.TrimLeft(after, " \t\r\n")
-	rest = bytes.TrimLeft(bytes.TrimPrefix(rest, []byte(":")), " \t\r\n")
+	if !bytes.HasPrefix(rest, []byte(":")) {
+		return false
+	}
+	rest = bytes.TrimLeft(rest[1:], " \t\r\n")
 	return !bytes.HasPrefix(rest, []byte("null"))
 }
 

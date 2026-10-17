@@ -70,11 +70,15 @@ func (f streamFailure) Error() string { return f.msg }
 // failure reports an error the upstream sent in place of a chunk, and a stream
 // that stopped before it said why it stopped. Every backend ends a whole
 // answer with a finish reason.
-func (c *chatChunks) failure() error {
+func (c *chatChunks) failure() error { return endedFailure(c.upstreamErr, c.finishReason != "") }
+
+// endedFailure is why a stream read to its end is not a whole answer: the
+// error the upstream sent, or no sign that the answer ended.
+func endedFailure(upstreamErr string, ended bool) error {
 	switch {
-	case c.upstreamErr != "":
-		return streamFailure{"the model failed while answering: " + c.upstreamErr}
-	case c.finishReason == "":
+	case upstreamErr != "":
+		return streamFailure{"the model failed while answering: " + upstreamErr}
+	case !ended:
 		return streamFailure{"the model's answer stopped before it was finished"}
 	}
 	return nil

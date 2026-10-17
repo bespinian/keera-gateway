@@ -683,6 +683,9 @@ func (e mcpEvents) event(payload []byte) []byte { return e.x.serverMessage(paylo
 
 func (e mcpEvents) counts() (*tokenUsage, int, bool) { return nil, 0, false }
 
+// failure is nil: an MCP stream has no event that ends it.
+func (e mcpEvents) failure() error { return nil }
+
 // serverMessage reads one message, or a batch, from the server. It returns it
 // rewritten, or nil to send it as it came.
 func (x *mcpExchange) serverMessage(raw []byte) []byte {

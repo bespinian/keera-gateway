@@ -539,30 +539,54 @@ type responsesNativeStream struct {
 	alias  string
 	usage  *tokenUsage
 	deltas int
+	// ended says the response completed, or ended incomplete at a limit.
+	// upstreamErr is the message of an error event or a failed response.
+	ended       bool
+	upstreamErr string
 }
 
 func (s *responsesNativeStream) event(payload []byte) []byte {
 	typ := eventType(payload)
-	if strings.HasSuffix(typ, ".delta") {
+	switch {
+	case strings.HasSuffix(typ, ".delta"):
 		s.deltas++
 		return nil
-	}
-	// The events that carry the whole response: created, completed and the
-	// like.
-	if !strings.HasPrefix(typ, "response.") || strings.Count(typ, ".") != 1 {
+	case typ == "error":
+		s.upstreamErr = upstreamText(payload)
+		return nil
+	case !strings.HasPrefix(typ, "response.") || strings.Count(typ, ".") != 1:
+		// Only the events that carry the whole response are read: created,
+		// completed and the like.
 		return nil
 	}
 	var ev struct {
 		Response struct {
 			Usage *responsesUsage `json:"usage"`
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error"`
 		} `json:"response"`
 	}
-	if json.Unmarshal(payload, &ev) == nil && ev.Response.Usage != nil {
+	decoded := json.Unmarshal(payload, &ev) == nil
+	if decoded && ev.Response.Usage != nil {
 		s.usage = ev.Response.Usage.tokens()
+	}
+	switch typ {
+	case "response.completed", "response.incomplete":
+		s.ended = true
+	case "response.failed":
+		s.upstreamErr = "the response failed"
+		if decoded && ev.Response.Error != nil && ev.Response.Error.Message != "" {
+			s.upstreamErr = ev.Response.Error.Message
+		}
 	}
 	return renameIn(payload, "response", s.alias)
 }
 
 func (s *responsesNativeStream) counts() (*tokenUsage, int, bool) {
 	return s.usage, s.deltas, false
+}
+
+func (s *responsesNativeStream) failure() error {
+	return endedFailure(s.upstreamErr, s.ended)
 }

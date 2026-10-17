@@ -71,6 +71,9 @@ type nativeStream interface {
 	// events that carried generated content. partial says the record was
 	// completed from those events because the stream ended early.
 	counts() (usage *tokenUsage, deltas int, partial bool)
+	// failure is why a stream read to its end is still not a whole answer:
+	// an error event, or no event that ends the answer. Nil otherwise.
+	failure() error
 }
 
 // eventType is the type an event's data names. It is read from the JSON, not
@@ -150,6 +153,7 @@ func pipeNative(dst io.Writer, flush func(), src io.Reader, ns nativeStream,
 		return nil
 	}, emit)
 	stats.usage, stats.deltas, stats.partial = ns.counts()
+	stats.cut = ns.failure()
 	return stats, err
 }
 

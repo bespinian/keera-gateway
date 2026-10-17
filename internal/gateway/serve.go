@@ -863,6 +863,9 @@ func (s *Server) relayStream(c *call, resp *http.Response, answered time.Time, p
 	stream := &flushBeforeRead{src: resp.Body, dst: dst, flusher: http.NewResponseController(c.w)}
 	stats, err := pipe(stream, stream.later, stream)
 	stream.now()
+	if err == nil {
+		err = stats.cut
+	}
 	if !stats.firstAt.IsZero() {
 		c.ev.TTFT = stats.firstAt.Sub(c.tr.start)
 		// Waiting for the first token (queues, cold starts) and streaming the

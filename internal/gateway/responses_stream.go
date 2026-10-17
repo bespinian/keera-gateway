@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"time"
@@ -178,11 +179,24 @@ func (s *responsesStream) closeItem() error {
 	return s.emit("response.output_item.done", map[string]any{"output_index": index, "item": item})
 }
 
-// finish closes the response, with the usage record the last chunk carried.
-// A failed stream is closed the same way, as a shorter answer.
-func (s *responsesStream) finish(error) error {
+// finish closes the response, with the usage record the last chunk carried,
+// or fails it if the upstream failed. A failure closed as a response would
+// read as a finished turn, with any tool call in it cut short. The item under
+// way is left open: it is not whole, so it is not in the output.
+func (s *responsesStream) finish(cut error) error {
 	if err := s.start(); err != nil {
 		return err
+	}
+	if cut != nil {
+		msg := "the connection to the model broke before the answer was finished"
+		if f, ok := errors.AsType[streamFailure](cut); ok {
+			msg = f.msg
+		}
+		failed := s.response("failed", nil)
+		// server_error, because the request was fine and trying it again is
+		// the remedy.
+		failed.Error = map[string]string{"code": "server_error", "message": msg}
+		return s.emit("response.failed", map[string]any{"response": failed})
 	}
 	if err := s.closeItem(); err != nil {
 		return err

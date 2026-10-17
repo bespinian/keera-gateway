@@ -545,10 +545,15 @@ request is charged on an estimate and marked as estimated. On the deployment's
 own provider key, the gateway reads on to the real counts instead
 ([billing.md](billing.md#what-is-billed)).
 
-A translated Messages stream that breaks off, because the backend stopped or
-sent an error, ends with an `error` event of type `overloaded_error` instead of
-`message_stop`. Closed as a message, it would read as a finished turn, with any
-tool call in it cut short.
+A translated stream that breaks off, because the backend stopped or sent an
+error, ends with an error instead of a finished answer: a Messages stream with
+an `error` event of type `overloaded_error` instead of `message_stop`, a
+Responses stream with `response.failed` and the code `server_error` instead of
+`response.completed`. Closed as a finished answer, it would read as a finished
+turn, with any tool call in it cut short. Both tell the client to try again.
+A stream passed on as it came reaches the client unchanged. Either way, the
+request's row keeps the 200 already sent and says in its error why the answer
+was not whole.
 
 A client that hangs up before any answer still gets a row, with status 499 and
 marked as cancelled, in the field `canceled`. It carries what the router and the
