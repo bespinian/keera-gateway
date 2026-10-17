@@ -156,8 +156,8 @@ from the command itself points at the proxy.
 | The owner                  | yes    | yes                                | yes          |
 | Anybody else               | no     | no                                 | no           |
 
-An agent's sandbox runs its task to the end: it cannot be suspended, and once
-it has expired it cannot be resumed.
+An agent's sandbox runs its task to the end: it cannot be suspended or
+resumed, and it is terminated when it expires.
 
 An administrator can see and terminate every sandbox in their organisation,
 because the quota and the bill are theirs. They cannot get inside: a sandbox

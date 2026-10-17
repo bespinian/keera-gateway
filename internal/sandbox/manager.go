@@ -1105,6 +1105,13 @@ func (m *Manager) reconcile(ctx context.Context, sb store.Sandbox, now time.Time
 	if sb.ExpiresAt != nil {
 		status = stillStarting(status, *sb.ExpiresAt, now)
 	}
+	if status.State == policy.SandboxExpired {
+		// The controller saw the lifetime end before the expiry sweep did,
+		// which reads a page at a time. Recorded alone, it would keep its key
+		// and its repository credential, and the sweep skips what is expired.
+		m.endExpired(ctx, sb)
+		return
+	}
 	m.observe(ctx, sb.ID, status)
 
 	// Idle suspension, for an engineer's sandbox. It has to have been ready
