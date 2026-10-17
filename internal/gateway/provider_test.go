@@ -7,7 +7,7 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-func TestFitProviderFixesWhatOpenAIRefuses(t *testing.T) {
+func TestFitProviderFixesWhatProvidersRefuse(t *testing.T) {
 	cases := []struct {
 		name     string
 		provider string
@@ -38,6 +38,26 @@ func TestFitProviderFixesWhatOpenAIRefuses(t *testing.T) {
 	}, {
 		name:     "another provider is left alone",
 		provider: "infomaniak", model: "gpt-5.5", path: "/chat/completions",
+		in:   `{"max_tokens":64,"temperature":0}`,
+		want: map[string]any{"max_tokens": float64(64), "temperature": float64(0)},
+	}, {
+		name:     "a current Claude model gets no sampling",
+		provider: "anthropic", model: "claude-sonnet-5-5", path: "/messages",
+		in:   `{"max_tokens":64,"temperature":0,"top_p":0.9,"top_k":5}`,
+		want: map[string]any{"max_tokens": float64(64)},
+	}, {
+		name:     "so does one on Anthropic's chat completions",
+		provider: "anthropic", model: "claude-haiku-5-5", path: "/chat/completions",
+		in:   `{"max_tokens":64,"temperature":0}`,
+		want: map[string]any{"max_tokens": float64(64)},
+	}, {
+		name:     "an older Claude model keeps its temperature",
+		provider: "anthropic", model: "claude-haiku-4-5-20251001", path: "/messages",
+		in:   `{"max_tokens":64,"temperature":0}`,
+		want: map[string]any{"max_tokens": float64(64), "temperature": float64(0)},
+	}, {
+		name:     "Claude's dated Sonnet 4 keeps its temperature",
+		provider: "anthropic", model: "claude-sonnet-4-20250514", path: "/messages",
 		in:   `{"max_tokens":64,"temperature":0}`,
 		want: map[string]any{"max_tokens": float64(64), "temperature": float64(0)},
 	}}

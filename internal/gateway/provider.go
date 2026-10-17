@@ -17,11 +17,34 @@ import (
 // refused there. Dropping a sampling setting the model would reject anyway
 // changes nothing it could have done.
 //
+// Anthropic's models since Opus 4.7 refuse temperature, top_p and top_k too, or
+// every value but the default, so those are dropped the same way.
+//
 // Every other model's request is returned untouched.
 func fitProvider(m policy.Model, path string, payload []byte) []byte {
-	if m.Provider != "openai" || (path != "/chat/completions" && path != "/responses") {
-		return payload
+	switch {
+	case m.Provider == "openai" && (path == "/chat/completions" || path == "/responses"):
+		return fitOpenAI(m, path, payload)
+	case m.Provider == "anthropic" && (path == "/messages" || path == "/chat/completions") &&
+		!anthropicSamples(m.BackendModel):
+		b, err := parseBody(payload)
+		if err != nil {
+			return payload
+		}
+		changed := false
+		for _, field := range []string{"temperature", "top_p", "top_k"} {
+			changed = b.remove(field) || changed
+		}
+		if !changed {
+			return payload
+		}
+		return b.encode()
 	}
+	return payload
+}
+
+// fitOpenAI is fitProvider for OpenAI.
+func fitOpenAI(m policy.Model, path string, payload []byte) []byte {
 	b, err := parseBody(payload)
 	if err != nil {
 		return payload
@@ -57,4 +80,20 @@ func openAIReasons(model string) bool {
 		}
 	}
 	return true
+}
+
+// anthropicSamples reports whether an Anthropic model still takes sampling
+// settings. It lists the older models that do, so a model newer than this build
+// counts as one that does not: no new model Anthropic releases does.
+func anthropicSamples(model string) bool {
+	for _, older := range []string{
+		"claude-3", "claude-opus-4-0", "claude-opus-4-1", "claude-opus-4-2",
+		"claude-opus-4-5", "claude-opus-4-6", "claude-sonnet-4-0", "claude-sonnet-4-2",
+		"claude-sonnet-4-5", "claude-sonnet-4-6", "claude-haiku-4-5",
+	} {
+		if strings.HasPrefix(model, older) {
+			return true
+		}
+	}
+	return false
 }

@@ -686,12 +686,14 @@ and [mcp.md](mcp.md#the-tool-call-log).
 - **It is not a distributed trace.** The per-request breakdown in
   `internal/store/spans.go` has no sampling, no collector and no propagation,
   and every step it records happens inside one handler.
-- **It does not translate request parameters between providers**, with one
-  exception for OpenAI: it sends `max_completion_tokens` instead of `max_tokens`
-  to every OpenAI chat model, and drops `temperature` and `top_p` for its
-  reasoning models (every id not starting with `gpt-4`, `gpt-3` or `chatgpt-`),
-  which refuse them. A client that asked for a temperature gets the default.
-  Any other field a hosted provider rejects is an error the client sees.
+- **It does not translate request parameters between providers**, with two
+  exceptions. It sends `max_completion_tokens` instead of `max_tokens` to every
+  OpenAI chat model, and drops `temperature` and `top_p` for OpenAI's reasoning
+  models (every id not starting with `gpt-4`, `gpt-3` or `chatgpt-`). It drops
+  `temperature`, `top_p` and `top_k` for Anthropic's models since Opus 4.7.
+  Those models refuse them. A client that asked for a temperature gets the
+  default. Any other field a hosted provider rejects is an error the client
+  sees.
 - **It does not retry.** A model with several backends takes them in turn,
   round-robin, and moves to the next one only when it cannot connect, so a
   request reaches at most one. A fallback router moves on to its next
