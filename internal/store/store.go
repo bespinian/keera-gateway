@@ -360,13 +360,13 @@ func periodStr(p *policy.Period) *string {
 	return &s
 }
 
-// pageLimit is how many rows a list reads: n, or def when n is unset or past
-// max. A cap keeps one request from reading a whole table.
+// pageLimit is how many rows a list reads: n, def when n is unset, and at
+// most max. A cap keeps one request from reading a whole table.
 func pageLimit(n, def, max int) int {
-	if n <= 0 || n > max {
+	if n <= 0 {
 		return def
 	}
-	return n
+	return min(n, max)
 }
 
 // countOf counts the rows whose col is one of vals. The values are this

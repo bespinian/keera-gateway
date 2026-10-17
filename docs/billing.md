@@ -177,7 +177,7 @@ panel. The credit is added once PostFinance says the payment went through.
 
 `keera billing credit` shows the balance, the saved card, the automatic
 top-up and the latest payments. `keera billing payments` lists the latest 50
-payments, or as many as `--limit` says.
+payments, or as many as `--limit` says, up to 500.
 
 A payment is from CHF 1 to CHF 10,000, in whole centimes. VAT and a
 transaction fee are added on top. The fee is CHF 0.18 plus 1.55% of the
