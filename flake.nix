@@ -30,7 +30,7 @@
         # modules itself and checks them against this hash. When go.mod
         # changes, set it to pkgs.lib.fakeHash, build, and copy the hash Nix
         # prints.
-        vendorHash = "sha256-rz1fFVtLBjqx5HtSXukW88QAeeiUp89iQhfo4R2S8co=";
+        vendorHash = "sha256-lnK3S0sJZ2plIiL7AxaUK20/qgK31adqD4KzAp1aG1Q=";
         subPackages = [
           "cmd/keera-gateway"
           "cmd/keera"
