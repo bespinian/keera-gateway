@@ -81,7 +81,8 @@ other byte of the request goes on as the client sent it, so the provider's
 prompt cache still matches.
 
 Tool results are covered. For a coding agent, that is where file contents
-travel. So are Messages documents whose source is text.
+travel. So are, on an untranslated Messages request, search results and
+documents: a document's title and context, and its source when that is text.
 
 MCP calls through the gateway are filtered too: every string in the arguments,
 before the call leaves. See [mcp.md](mcp.md#filters).

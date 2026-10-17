@@ -370,7 +370,7 @@ func convertUser(blocks []anthropicBlock) []chatMessage {
 			parts = append(parts, images...)
 		}
 		// Other block types (thinking, redacted_thinking, document,
-		// tool_reference) have no counterpart and are dropped.
+		// search_result, tool_reference) have no counterpart and are dropped.
 	}
 
 	switch {

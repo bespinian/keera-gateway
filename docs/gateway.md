@@ -118,8 +118,8 @@ they append `/api/hello` to a base URL that already ends in `/api`.
 
 The inference plane speaks chat completions, so the other two are translated on
 the way in and back on the way out. Fields that chat completions has no place
-for, such as thinking blocks, reasoning items, OpenAI's built-in tools and
-Anthropic's server tools, are dropped. Every answer names the alias as its
+for, such as thinking blocks, documents, search results, reasoning items,
+OpenAI's built-in tools and Anthropic's server tools, are dropped. Every answer names the alias as its
 model, never the backend's name for it.
 
 Chat completions has no tool namespaces and no custom tools, which Codex uses

@@ -232,14 +232,20 @@ func TestAFilterRewritesANativeRequestInItsOwnShape(t *testing.T) {
 }
 
 // Every text a provider reads is filtered, including the parts the
-// translation has no place for: a document whose source is text, and a
-// refusal the client sends back.
+// translation has no place for: a document whose source is text, its title
+// and context, a search result, and a refusal the client sends back.
 func TestAFilterReadsDocumentsAndRefusalsInANativeRequest(t *testing.T) {
 	for _, tc := range []struct{ provider, path, answer, body string }{
 		{"anthropic", "/v1/messages", anthropicAnswer, `{"model":"keera-frontier","max_tokens":64,` +
 			`"messages":[{"role":"user","content":[` +
 			`{"type":"document","source":{"type":"text","media_type":"text/plain","data":"hunter2"}},` +
 			`{"type":"document","source":{"type":"content","content":[{"type":"text","text":"hunter2"}]}},` +
+			`{"type":"document","title":"hunter2","context":"hunter2",` +
+			`"source":{"type":"base64","media_type":"application/pdf","data":"JVBERg=="}},` +
+			`{"type":"search_result","source":"https://example.ch","title":"hunter2",` +
+			`"content":[{"type":"text","text":"hunter2"}]},` +
+			`{"type":"tool_result","tool_use_id":"t1","content":[{"type":"search_result",` +
+			`"source":"https://example.ch","title":"x","content":[{"type":"text","text":"hunter2"}]}]},` +
 			`{"type":"text","text":"summarise"}]}]}`},
 		{"openai", "/v1/responses", `{"id":"resp_1","object":"response","status":"completed",` +
 			`"output":[],"usage":{"input_tokens":1,"output_tokens":1}}`,
