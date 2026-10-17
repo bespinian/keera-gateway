@@ -100,9 +100,13 @@ func (s *Server) checkDirectory(r *http.Request, user store.User, d store.Direct
 		return user, true
 	}
 	was := user.Role
-	if err := s.syncRole(r, &user, provider.Mapping().RoleFor(identity.Email, identity.Groups)); err != nil {
+	role := provider.Mapping().RoleFor(identity.Email, identity.Groups)
+	if err := s.syncRole(r, &user, role); err != nil {
 		s.log.Error("applying a role from the directory", "user", user.ID, "error", err)
 		return user, true
+	}
+	if err := s.syncOtherRoles(r, user, role); err != nil {
+		s.log.Error("applying a role from the directory", "user", user.ID, "error", err)
 	}
 	if user.Role != was {
 		s.auditf(r, actorOf(user),

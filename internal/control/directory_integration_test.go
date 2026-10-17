@@ -128,6 +128,38 @@ func TestADirectoryCheckAppliesTheCurrentRole(t *testing.T) {
 	}
 }
 
+// The check runs once per person, on whichever row a request comes in on. An
+// operator role they lost must go from every organisation they are in.
+func TestADirectoryCheckDemotesAnOperatorEverywhere(t *testing.T) {
+	d := signedInThroughADirectory(t, "rt-1")
+	ctx := context.Background()
+	if _, err := d.st.CreateOrg(ctx, store.Org{ID: "org_2", Name: "Other Bank"}, store.OrgTemplate{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.st.SetUserRole(ctx, d.user.ID, "operator"); err != nil {
+		t.Fatal(err)
+	}
+	other, err := d.st.AddUser(ctx, "user_2", "org_2", d.user.Email, d.user.ExternalID, "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.makeDue(t)
+	d.idp.Claims = func(m map[string]any) { m["groups"] = []string{"engineering"} }
+
+	if got := asToken(t, d.ts, d.token, nil); got != http.StatusOK {
+		t.Fatalf("status = %d", got)
+	}
+	for _, id := range []string{d.user.ID, other.ID} {
+		u, err := d.st.UserByID(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if u.Role != "member" {
+			t.Errorf("%s: role = %q, want member", u.OrgID, u.Role)
+		}
+	}
+}
+
 func TestADirectoryCheckRunsOnlyWhenDue(t *testing.T) {
 	d := signedInThroughADirectory(t, "rt-1")
 	for range 3 {

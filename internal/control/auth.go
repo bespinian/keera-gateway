@@ -264,6 +264,10 @@ func (s *Server) linkIdentity(w http.ResponseWriter, r *http.Request, provider *
 		s.fail(w, err)
 		return user, "", false
 	}
+	if err := s.syncOtherRoles(r, user, role); err != nil {
+		s.fail(w, err)
+		return user, "", false
+	}
 	return user, was, true
 }
 
@@ -418,6 +422,34 @@ func (s *Server) syncRole(r *http.Request, user *store.User, role authn.Role) er
 		return err
 	}
 	user.Role = string(want)
+	return nil
+}
+
+// syncOtherRoles applies role to the person's rows in their other
+// organisations. The directory is asked once per person, not per row, so
+// without this a row it skipped would keep an operator role they have lost.
+func (s *Server) syncOtherRoles(r *http.Request, user store.User, role authn.Role) error {
+	if user.ExternalID == "" {
+		return nil
+	}
+	ms, err := s.st.Memberships(r.Context(), user.ExternalID, "", false)
+	if err != nil {
+		return err
+	}
+	for _, m := range ms {
+		if m.UserID == user.ID {
+			continue
+		}
+		other := store.User{ID: m.UserID, OrgID: m.OrgID, Email: user.Email,
+			ExternalID: user.ExternalID, Role: m.Role}
+		if err := s.syncRole(r, &other, role); err != nil {
+			return err
+		}
+		if other.Role != m.Role {
+			s.auditf(r, actorOf(other), other.OrgID, "auth.directory_check", "user", other.ID,
+				map[string]any{"role": other.Role, "role_was": m.Role})
+		}
+	}
 	return nil
 }
 
