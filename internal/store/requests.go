@@ -67,15 +67,18 @@ func countOutcome(o Outcome) string {
 // in a row: when, which model, whose key, what it cost and what happened. It
 // covers both served and failed requests, because the log is one table.
 type Request struct {
-	ID        int64     `json:"id"`
-	TS        time.Time `json:"ts"`
-	Alias     string    `json:"alias,omitempty"`
-	Status    int       `json:"status"`
-	Error     string    `json:"error,omitempty"`
-	KeyID     string    `json:"key_id,omitempty"`
-	ProjectID string    `json:"project_id,omitempty"`
-	UserID    string    `json:"user_id,omitempty"`
-	OrgID     string    `json:"org_id,omitempty"`
+	ID     int64     `json:"id"`
+	TS     time.Time `json:"ts"`
+	Alias  string    `json:"alias,omitempty"`
+	Status int       `json:"status"`
+	Error  string    `json:"error,omitempty"`
+	// Note is what went wrong on the way to an answer that was served all the
+	// same, such as a router falling back.
+	Note      string `json:"note,omitempty"`
+	KeyID     string `json:"key_id,omitempty"`
+	ProjectID string `json:"project_id,omitempty"`
+	UserID    string `json:"user_id,omitempty"`
+	OrgID     string `json:"org_id,omitempty"`
 	// Client is what sent the request, as it named itself.
 	Client      string `json:"client,omitempty"`
 	InputTokens int64  `json:"input_tokens"`
@@ -116,7 +119,7 @@ const requestColumns = `id, ts, alias, status, COALESCE(error, ''),
 	COALESCE(client, ''), input_tokens, cached_input_tokens, cache_write_tokens,
 	output_tokens, cost_micros,
 	latency_ms, ttft_ms, stream, estimated, canceled, COALESCE(session_key, ''),
-	spans, COALESCE(request_id, ''), COALESCE(client_request_id, '')`
+	spans, COALESCE(request_id, ''), COALESCE(client_request_id, ''), COALESCE(note, '')`
 
 func scanRequest(r row) (Request, error) {
 	var q Request
@@ -125,7 +128,7 @@ func scanRequest(r row) (Request, error) {
 		&q.InputTokens, &q.CachedInputTokens, &q.CacheWriteTokens, &q.OutputTokens,
 		&q.CostMicros,
 		&q.LatencyMS, &q.TTFTMS, &q.Stream, &q.Estimated, &q.Canceled, &q.SessionKey,
-		&q.Spans, &q.RequestID, &q.ClientRequestID)
+		&q.Spans, &q.RequestID, &q.ClientRequestID, &q.Note)
 	return q, err
 }
 

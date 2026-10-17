@@ -325,7 +325,7 @@ func (s *Server) requestsCSV(w http.ResponseWriter, rows []store.Request, names 
 		"timestamp", "model", "status", "error", "key", "key_id",
 		"project", "user", "input_tokens", "output_tokens",
 		"cost",
-		"latency_ms", "ttft_ms", "stream", "estimated", "canceled",
+		"latency_ms", "ttft_ms", "stream", "estimated", "canceled", "note",
 	})
 	for _, q := range rows {
 		_ = cw.Write([]string{
@@ -336,7 +336,7 @@ func (s *Server) requestsCSV(w http.ResponseWriter, rows []store.Request, names 
 			policy.FormatMicros(q.CostMicros),
 			strconv.FormatInt(q.LatencyMS, 10), strconv.FormatInt(q.TTFTMS, 10),
 			strconv.FormatBool(q.Stream), strconv.FormatBool(q.Estimated),
-			strconv.FormatBool(q.Canceled),
+			strconv.FormatBool(q.Canceled), q.Note,
 		})
 	}
 	cw.Flush()

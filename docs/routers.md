@@ -124,6 +124,10 @@ place.
 | recorded as `fallback`                    | recorded as `error`                |
 | the sender gets an answer                 | the sender gets `router_undecided` |
 
+A request the fallback answered counts as served. Why the router could not
+decide is kept as the request's note, shown on the Requests screen and by
+`keera session show`.
+
 A router that saves money usually has a safe fallback. A router that keeps
 prompts inside the cluster does not: sending an unclassified prompt to a fixed
 model is the failure it exists to prevent.
@@ -338,6 +342,9 @@ is tried.
 
 A destination the organisation cannot serve is skipped. Only when _none_ can be
 served is the request refused, with `router_destination_unavailable`.
+
+A request a later destination answered counts as served. The destinations that
+failed before it are kept as the request's note.
 
 ### What a request costs
 

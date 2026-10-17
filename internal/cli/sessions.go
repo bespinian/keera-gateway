@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"strconv"
@@ -153,7 +154,7 @@ func printSession(w *table, res sessionResponse) {
 	for _, r := range res.Requests {
 		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%dms\t%s\n",
 			r.ID, r.TS.Local().Format("15:04:05"), dash(r.Alias), httpStatus(r.Status),
-			policy.FormatAmount(r.CostMicros), r.TTFTMS, oneLine(r.Error))
+			policy.FormatAmount(r.CostMicros), r.TTFTMS, oneLine(cmp.Or(r.Error, r.Note)))
 	}
 
 	// What the agent did between its requests, through the MCP servers.

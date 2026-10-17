@@ -394,14 +394,14 @@ export function requestTable(ctx, rows, names, hide, opts = {}) {
               String(q.status),
             ),
           ),
-          q.error
+          q.error || q.note
             ? h(
                 "span",
                 {
                   class: "muted small",
-                  title: q.error,
+                  title: q.error || q.note,
                 },
-                oneLine(q.error, 90),
+                oneLine(q.error || q.note, 90),
               )
             : null,
         );
@@ -675,6 +675,27 @@ export function showRequest(ctx, q, names) {
                 },
               },
               q.error,
+            ),
+          )
+        : null,
+      // A note is what went wrong on the way to an answer that was served all
+      // the same, such as a router falling back.
+      q.note
+        ? h(
+            "div",
+            { class: "stack", style: { gap: "4px" } },
+            h("div", { class: "stat-label" }, "On the way to the answer"),
+            h(
+              "pre",
+              {
+                class: "key-value",
+                style: {
+                  whiteSpace: "pre-wrap",
+                  userSelect: "text",
+                  margin: 0,
+                },
+              },
+              q.note,
             ),
           )
         : null,

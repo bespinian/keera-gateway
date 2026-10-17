@@ -431,8 +431,9 @@ func (s *Server) useRouter(c *call, b *body) bool {
 	}
 	if d.why != "" {
 		// The request may still succeed at the fallback, and then this is the
-		// only record that it was placed by default.
-		c.ev.Error = "the router " + strconv.Quote(rt.Alias) + " could not choose: " + d.why
+		// only record that it was placed by default. It is a note, not an
+		// error: a request the fallback answered was served.
+		c.ev.Note = "the router " + strconv.Quote(rt.Alias) + " could not choose: " + d.why
 	}
 	if ref != nil {
 		count(d.outcome)
@@ -730,10 +731,14 @@ func (s *Server) answer(c *call, b *body) {
 	}
 	c.ev.Canceled = c.r.Context().Err() != nil
 	c.ev.Latency = time.Since(c.tr.start)
-	// Added last, so it adds to whatever went wrong later instead of being
-	// overwritten. If the request succeeded further down the chain, this is
-	// the only sign anything failed.
-	c.ev.Error = appendNote(c.ev.Error, fw.note())
+	// If the request succeeded further down the chain, this is the only sign
+	// anything failed. A destination that answered after another failed served
+	// the request, so then it is a note and not an error.
+	if c.ev.Status >= 400 {
+		c.ev.Error = appendNote(c.ev.Error, fw.note())
+	} else {
+		c.ev.Note = appendNote(c.ev.Note, fw.note())
+	}
 	s.finish(c)
 	// Feeds the latency router. Only real answers count, because a fast
 	// refusal would post the best score. The time lost on destinations that

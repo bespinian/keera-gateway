@@ -289,8 +289,9 @@ func TestRouterWithOneDestinationFallsBackWhenItCannotAnswer(t *testing.T) {
 	if ev.Alias != "keera-small" || ev.RouterOutcome != store.RouterFellBack {
 		t.Errorf("alias/outcome = %q/%q, want keera-small/fallback", ev.Alias, ev.RouterOutcome)
 	}
-	if !strings.Contains(ev.Error, "keera-large is disabled") {
-		t.Errorf("error = %q, want it to say why the destination was passed over", ev.Error)
+	if !strings.Contains(ev.Note, "keera-large is disabled") || ev.Error != "" {
+		t.Errorf("note/error = %q/%q, want a note on why the destination was passed over, "+
+			"and no error", ev.Note, ev.Error)
 	}
 }
 
@@ -343,8 +344,9 @@ func TestRouterFallsBackWhenItsModelIsGone(t *testing.T) {
 	if ev.Alias != "keera-small" || ev.RouterOutcome != store.RouterFellBack {
 		t.Errorf("alias/outcome = %q/%q, want keera-small/fallback", ev.Alias, ev.RouterOutcome)
 	}
-	if !strings.Contains(ev.Error, "is not one of this organisation's models") {
-		t.Errorf("error = %q, want it to say why the decision could not be made", ev.Error)
+	if !strings.Contains(ev.Note, "is not one of this organisation's models") || ev.Error != "" {
+		t.Errorf("note/error = %q/%q, want a note on why the decision could not be made, "+
+			"and no error", ev.Note, ev.Error)
 	}
 	if ev.RouterMS < 0 {
 		t.Errorf("router_ms = %d", ev.RouterMS)
@@ -681,9 +683,9 @@ func TestFallbackRouterMovesToTheNextWhenOneFails(t *testing.T) {
 		t.Errorf("outcome = %q, want %q", ev.RouterOutcome, store.RouterFellBack)
 	}
 	// The request succeeded, so this row is the only thing that says the first
-	// destination is down.
-	if !strings.Contains(ev.Error, "keera-small answered 503") {
-		t.Errorf("the failed attempt was not recorded: %q", ev.Error)
+	// destination is down. It says so in a note, because the request was served.
+	if !strings.Contains(ev.Note, "keera-small answered 503") || ev.Error != "" {
+		t.Errorf("note/error = %q/%q, want the failed attempt as a note", ev.Note, ev.Error)
 	}
 }
 

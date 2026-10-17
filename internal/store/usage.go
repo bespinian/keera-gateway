@@ -63,6 +63,10 @@ type Event struct {
 	// inference plane's wording for an upstream failure, the guardrail's for a
 	// refusal.
 	Error string
+	// Note is what went wrong on the way to an answer that was served all the
+	// same, such as a router falling back. Unlike Error, it does not make the
+	// request a failure.
+	Note string
 	// SessionKey names the agent conversation this request belongs to. It is a
 	// hash of what the client sent, never the conversation itself, and empty
 	// for a request that belongs to none. See internal/gateway/session.go.
@@ -203,7 +207,7 @@ func (s *Store) writeBatch(ctx context.Context, events []Event) error {
 // NUL byte or invalid UTF-8 in text and JSON. Much of it is what a client or
 // an upstream sent, such as the model name or an error message.
 func (e *Event) clean() {
-	for _, s := range []*string{&e.Alias, &e.Client, &e.Error, &e.SessionKey, &e.Router,
+	for _, s := range []*string{&e.Alias, &e.Client, &e.Error, &e.Note, &e.SessionKey, &e.Router,
 		&e.RequestID, &e.ClientRequestID} {
 		*s = cleanText(*s)
 	}
@@ -242,9 +246,10 @@ func queueEvent(batch *pgx.Batch, e Event) {
 	batch.Queue(`INSERT INTO usage_events (ts, org_id, project_id, user_id, key_id, alias,
 		client, input_tokens, cached_input_tokens, cache_write_tokens, output_tokens, cost_micros,
 		list_cost_micros, status, latency_ms, ttft_ms, stream, estimated, canceled, error,
-		session_key, router, router_outcome, router_ms, spans, request_id, client_request_id)
+		session_key, router, router_outcome, router_ms, spans, request_id, client_request_id,
+		note)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
-		$22,$23,$24,$25,$26,$27)`,
+		$22,$23,$24,$25,$26,$27,$28)`,
 		e.TS, e.OrgID, nullable(e.ProjectID), nullable(e.UserID), nullable(e.KeyID), e.Alias,
 		nullable(e.Client),
 		e.InputTokens, e.CachedInputTokens, e.CacheWriteTokens, e.OutputTokens, e.CostMicros,
@@ -253,7 +258,8 @@ func queueEvent(batch *pgx.Batch, e Event) {
 		e.Latency.Milliseconds(), e.TTFT.Milliseconds(), e.Stream, e.Estimated, e.Canceled,
 		nullable(truncate(e.Error, maxErrorBytes)), nullable(e.SessionKey),
 		nullable(e.Router), nullable(string(e.RouterOutcome)), e.RouterMS,
-		spansJSON(e.Spans), nullable(e.RequestID), nullable(e.ClientRequestID))
+		spansJSON(e.Spans), nullable(e.RequestID), nullable(e.ClientRequestID),
+		nullable(truncate(e.Note, maxErrorBytes)))
 	queueFilterRuns(batch, e, e.Alias)
 }
 
