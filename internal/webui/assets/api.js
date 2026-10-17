@@ -232,6 +232,7 @@ export const api = {
   // The client catalogue. It comes from the control plane so the panel and
   // `keera connect` hand out the same configurations.
   connect: () => get("/v1/connect"),
+  renderConnect: (models) => request("POST", "/v1/connect/render", { models }),
   // Which clients called with the reader's own keys in the window.
   clients: (since) => get("/v1/clients" + query({ since })),
 

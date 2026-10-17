@@ -262,6 +262,7 @@ func (s *Server) Handler() http.Handler {
 	// What a developer puts into their editor. Read by the panel and by
 	// `keera connect`.
 	route("GET /v1/connect", s.listConnect)
+	route("POST /v1/connect/render", s.renderConnect)
 	// Which clients called with the caller's own keys, and with which key.
 	route("GET /v1/clients", s.listClients)
 

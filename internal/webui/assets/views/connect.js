@@ -33,119 +33,23 @@ import {
   code,
   remembered,
   remember,
-  capitalise,
 } from "../ui.js";
 
-// The configuration blocks come from the control plane at /control/v1/connect
-// - the same catalogue `keera connect` reads, so the panel and the command
-// line cannot hand a developer two versions of the same file. See
-// internal/connect.
+// The configuration blocks are filled in by the control plane, at
+// /control/v1/connect/render, with the same code `keera connect` runs, so the
+// panel and the command line cannot hand a developer two versions of the same
+// file. See internal/connect.
 //
 // The prose around a block comes with it. A span in backticks is something to
 // type or a name to find, and is shown as code.
-
-// The limits every block states, which connect.Limits on the server decides
-// the same way. A config that named a window the gateway does not give is a
-// coding agent that fills its context and is refused with a 413 on the turn
-// after; a config that named none leaves the client guessing, and the guess is
-// the same 128k for a model with a sixteenth of that.
-const DEFAULT_CONTEXT = 128000;
-const MAX_OUTPUT = 16384;
-const MIN_OUTPUT = 1024;
-
-/** limits turns a model's advertised window into the two numbers a block
- *  states. It has to agree with connect.Limits on the server. */
-function limits(maxContext) {
-  const window = maxContext > 0 ? maxContext : DEFAULT_CONTEXT;
-  return {
-    context: window,
-    output: Math.max(MIN_OUTPUT, Math.min(MAX_OUTPUT, Math.floor(window / 4))),
-  };
-}
-
-/** fill substitutes one model's placeholders. It has to agree with
- *  connect.fill on the server. */
-function fill(text, m) {
-  const { context, output } = limits((m && m.max_context) || 0);
-  const alias = (m && m.alias) || "";
-  // {{name}} sits in a JSON string, and a display name may hold a quote.
-  const name = JSON.stringify((m && m.display_name) || title(alias)).slice(1, -1);
-  return String(text || "")
-    .replaceAll("{{alias}}", alias)
-    .replaceAll("{{name}}", name)
-    .replaceAll("{{context}}", String(context))
-    .replaceAll("{{output}}", String(output));
-}
-
-/** render fills in a client's block for a key's models, the default first,
- *  and key into a block that holds it. It has to agree with
- *  connect.RenderKey on the server. */
-function render(c, base, key, models) {
-  return fill(c.template, models[0])
-    .replaceAll("{{base}}", String(base || "").replace(/\/+$/, ""))
-    .replaceAll("{{key}}", JSON.stringify(key).slice(1, -1))
-    .replaceAll("{{models}}", models.map((m) => fill(c.entry, m)).join(",\n"))
-    .replaceAll("{{aliases}}", models.map((m) => m.alias).join(", "))
-    .replaceAll("{{claude_env}}", claudeEnvLines(models, models[0]))
-    .replaceAll(
-      "{{claude_overrides}}",
-      claudeOverridesBlock(models, c.names || {}),
-    );
-}
-
-// Claude Code's model settings, as connect/claude.go writes them. Claude Code
-// asks for each family by Anthropic's name, which the gateway does not know.
-const CLAUDE_FAMILIES = ["opus", "sonnet", "haiku", "fable"];
-
-/** claudeName is a model's name for Claude Code: [1m] tells it the window is
- *  1M, where it would assume 200K. */
-function claudeName(m) {
-  return m.max_context >= 1000000 ? m.alias + "[1m]" : m.alias;
-}
-
-/** claudeEnvLines points Claude Code at main, and each family at the first
- *  model that is one, or else at main. */
-function claudeEnvLines(models, main) {
-  const env = [["ANTHROPIC_MODEL", claudeName(main)]];
-  for (const family of CLAUDE_FAMILIES) {
-    const m = models.find((m) => (m.backend_model || "").includes(family));
-    env.push([
-      `ANTHROPIC_DEFAULT_${family.toUpperCase()}_MODEL`,
-      claudeName(m || main),
-    ]);
-  }
-  return env.map(([k, v]) => `    "${k}": ${JSON.stringify(v)}`).join(",\n");
-}
-
-/** claudeOverridesBlock tells Claude Code which Claude model each of
- *  Anthropic's models is, by every id it goes by. The first alias wins. */
-function claudeOverridesBlock(models, names) {
-  const overrides = {};
-  for (const m of models) {
-    if (m.provider !== "anthropic") continue;
-    for (const id of [m.backend_model, ...(names[m.backend_model] || [])]) {
-      if (id && !(id in overrides)) overrides[id] = m.alias;
-    }
-  }
-  const ids = Object.keys(overrides).sort();
-  if (!ids.length) return "";
-  const lines = ids.map(
-    (id) => `    ${JSON.stringify(id)}: ${JSON.stringify(overrides[id])}`,
-  );
-  return ',\n  "modelOverrides": {\n' + lines.join(",\n") + "\n  }";
-}
 
 // One fetch per page load. A catalogue that changed under a panel already open
 // is picked up on the next reload, which is the same bargain every other list
 // on this screen makes.
 let catalogue;
 
-/** loadClients reads the client catalogue and merges the panel's prose into it.
- *
- *  Every entry comes back with the same shape the screens here expect: a
- *  `config(base, models)` that renders the block, and `run`/`note` that build
- *  the paragraphs either side of it. So no screen rendering one has to know
- *  which client it is looking at. */
+/** loadClients reads the client catalogue: what the picker offers, and the
+ *  prose that does not depend on the models. */
 function loadClients() {
   if (!catalogue) {
     catalogue = api.connect().then(
@@ -154,15 +58,6 @@ function loadClients() {
           ...c,
           path: c.path || null,
           holdsKey: String(c.template || "").includes("{{key}}"),
-          config: (base, key, models) => render(c, base, key, models),
-          run: (models) =>
-            prose(
-              fill(c.run, models[0]).replaceAll(
-                "{{aliases}}",
-                models.map((m) => m.alias).join(", "),
-              ),
-            ),
-          note: c.note ? () => prose(c.note) : null,
         })),
       (err) => {
         // A failure is not cached: the panel's Reload button, and the next
@@ -173,6 +68,20 @@ function loadClients() {
     );
   }
   return catalogue;
+}
+
+/** renderFor has the control plane fill in every client's block and run line
+ *  for one key's models, the default first. */
+function renderFor(models) {
+  return api.renderConnect(
+    models.map((m) => ({
+      alias: m.alias,
+      name: m.display_name,
+      max_context: m.max_context,
+      backend_model: m.backend_model,
+      provider: m.provider,
+    })),
+  );
 }
 
 /** keyModels is the chat models and routers the key may call, in the
@@ -326,7 +235,6 @@ async function addClient(ctx, catalogue, keys, button, secret = null) {
   const state = {
     key: keys.find((k) => k.id === last) || keys[0],
     client: null,
-    base: defaultBase(ctx),
     secret,
   };
 
@@ -334,11 +242,32 @@ async function addClient(ctx, catalogue, keys, button, secret = null) {
   // so the select keeps its focus.
   const models = h("div", { class: "hint" });
   const steps = h("div");
-  const redraw = () => {
+  // Each key's blocks are read once. A later choice that is drawn first is
+  // not overwritten by an earlier, slower answer.
+  const rendered = new Map();
+  let drawing = 0;
+  const redraw = async () => {
     const usable = keyModels(targets, state.key.allowed_models);
     models.replaceChildren(...modelList(usable));
+    if (!usable.length) {
+      steps.replaceChildren(noModel());
+      return;
+    }
+    const turn = ++drawing;
+    const id = state.key.id;
+    if (!rendered.has(id)) rendered.set(id, renderFor(usable));
+    let res;
+    try {
+      res = await rendered.get(id);
+    } catch (err) {
+      rendered.delete(id);
+      if (turn === drawing) toast(err.message, "bad");
+      return;
+    }
+    if (turn !== drawing) return;
+    const block = (res.data || []).find((b) => b.key === state.client.key);
     steps.replaceChildren(
-      usable.length ? instructions(ctx, state, usable) : noModel(),
+      block ? instructions(ctx, state, block, res.placeholder) : "",
     );
   };
 
@@ -490,11 +419,12 @@ export function noModel() {
   );
 }
 
-function instructions(ctx, state, models) {
-  const { client, key, base, secret } = state;
+function instructions(ctx, state, block, placeholder) {
+  const { client, key, secret } = state;
   // A block that holds the key shows it by its prefix once its secret is
-  // gone.
-  const config = client.config(base, secret || `${key.prefix}…`, models);
+  // gone. It sits in a JSON or TOML string.
+  const shown = JSON.stringify(secret || `${key.prefix}…`).slice(1, -1);
+  const config = block.config.replaceAll(placeholder, shown);
   const rotate = [
     "It was shown only once, when it was issued. If you no longer have it, " +
       "rotate it under ",
@@ -576,11 +506,11 @@ function instructions(ctx, state, models) {
                 "machine picks them up.",
         ),
         code(config),
-        client.note ? h("p", { class: "muted" }, client.note()) : null,
+        client.note ? h("p", { class: "muted" }, prose(client.note)) : null,
       ),
     ),
 
-    step(3, "Run it", h("p", { class: "muted" }, client.run(models))),
+    step(3, "Run it", h("p", { class: "muted" }, prose(block.run))),
   );
 }
 
@@ -598,29 +528,9 @@ function step(n, title, body) {
   );
 }
 
-/** defaultBase is the gateway as the control plane believes a client sees it.
- *
- *  The fallback is this page's own origin plus the inference prefix, because
- *  the panel and the inference API are one listener: whatever address reached
- *  this screen reaches the gateway too. */
-function defaultBase(ctx) {
-  const declared = ctx.state.me.gateway_url;
-  if (declared) return declared.replace(/\/+$/, "");
-  return location.origin + "/api";
-}
-
 /** prose renders the catalogue's prose, with each span in backticks as code. */
 function prose(text) {
   return String(text || "")
     .split("`")
     .map((part, i) => (i % 2 ? h("code", {}, part) : part));
-}
-
-/** title turns an alias into the label a model picker shows: keera-speed → Keera Speed. */
-function title(alias) {
-  return alias
-    .split(/[-_.\s]+/)
-    .filter(Boolean)
-    .map(capitalise)
-    .join(" ");
 }

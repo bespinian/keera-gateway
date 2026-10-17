@@ -10,7 +10,7 @@ import (
 
 // Claude Code's model settings. `keera connect claude-code` writes them into
 // settings.json, and the Claude Code block shows the same, so both set Claude
-// Code up alike. The panel renders that block itself and has to agree.
+// Code up alike.
 
 // claudeFamilies are the models Claude Code asks for by Anthropic's own names,
 // for background work and in its /model picker, whatever its main model is.

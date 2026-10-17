@@ -1,10 +1,11 @@
 // Package connect holds the configuration a developer needs to point a coding
 // agent at a Keera Gateway.
 //
-// The control panel's Connect client dialog and `keera connect` both read
+// The control panel's Connect client dialog and `keera connect` both use
 // this one catalogue, so they hand out the same configuration. Each block is a
-// template; the caller fills in the gateway address and the models a key may
-// call, with their limits.
+// template, filled in with the gateway address and the models a key may call,
+// with their limits: by `keera connect` on the developer's machine, and by the
+// control plane for the panel.
 package connect
 
 import (
@@ -128,12 +129,14 @@ func (c Client) RenderKey(base, key string, models []Model) string {
 // KEERA_API_KEY.
 func (c Client) HoldsKey() bool { return strings.Contains(c.Template, "{{key}}") }
 
-// RunText is Run with the default model and every alias filled in, for a
-// terminal.
-func (c Client) RunText(models []Model) string {
+// RunFor is Run with the default model and every alias filled in.
+func (c Client) RunFor(models []Model) string {
 	run := fill(c.Run, first(models))
-	return plain(strings.ReplaceAll(run, "{{aliases}}", strings.Join(aliases(models), ", ")))
+	return strings.ReplaceAll(run, "{{aliases}}", strings.Join(aliases(models), ", "))
 }
+
+// RunText is RunFor for a terminal.
+func (c Client) RunText(models []Model) string { return plain(c.RunFor(models)) }
 
 // NoteText is Note for a terminal.
 func (c Client) NoteText() string { return plain(c.Note) }
@@ -180,7 +183,7 @@ func aliases(models []Model) []string {
 }
 
 // Title turns an alias into the label a model picker shows: keera-speed becomes
-// Keera Speed. The panel's own title() has to agree with this one.
+// Keera Speed.
 func Title(alias string) string {
 	words := strings.FieldsFunc(alias, func(r rune) bool {
 		switch r {

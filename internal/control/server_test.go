@@ -496,9 +496,8 @@ func TestConnectServesTheClientCatalogueAndTheGatewayAddress(t *testing.T) {
 	if got := prefixed.gatewayURL(r); got != "https://example.ch/keera/api" {
 		t.Errorf("gateway_url = %q, want the public URL's path kept", got)
 	}
-	// The templates have to survive the round trip unsubstituted: the panel
-	// fills them in per keystroke in its URL field, which is why they are
-	// templates rather than rendered here.
+	// The templates have to survive the round trip unsubstituted:
+	// `keera connect` fills them in on the developer's machine.
 	for _, c := range res.Data {
 		if !strings.Contains(c.Template, "{{base}}") {
 			t.Errorf("%s came back without its {{base}} placeholder", c.Key)
@@ -514,6 +513,53 @@ func TestConnectServesTheClientCatalogueAndTheGatewayAddress(t *testing.T) {
 	}
 	if strings.Contains(w.Body.String(), testOperatorKey) {
 		t.Error("the catalogue carries the operator key")
+	}
+}
+
+// The panel shows the blocks `keera connect` prints, filled in here by the
+// same code, with the placeholder where the key goes.
+func TestConnectRenderFillsInEveryClientForTheModels(t *testing.T) {
+	s := New(nil, nil, nil, nil, Options{
+		OperatorKey: testOperatorKey,
+		PublicURL:   "https://keera.example.ch",
+	}, slog.New(slog.DiscardHandler))
+
+	models := []connect.Model{
+		{Alias: "keera-code", Name: `Keera "Code"`, MaxContext: 64_000},
+		{Alias: "auto"},
+	}
+	raw, _ := json.Marshal(map[string]any{"models": models})
+	r := httptest.NewRequest(http.MethodPost, httpx.ControlPrefix+"/v1/connect/render",
+		strings.NewReader(string(raw)))
+	r.Header.Set("Authorization", "Bearer "+testOperatorKey)
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body)
+	}
+	var res struct {
+		Data []struct {
+			Key, Config, Run string
+		} `json:"data"`
+		Placeholder string `json:"placeholder"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Placeholder != connect.KeyPlaceholder {
+		t.Errorf("placeholder = %q", res.Placeholder)
+	}
+	clients := connect.Clients()
+	if len(res.Data) != len(clients) {
+		t.Fatalf("rendered %d clients, want %d", len(res.Data), len(clients))
+	}
+	for i, c := range clients {
+		got := res.Data[i]
+		if got.Key != c.Key || got.Config != c.Render("https://keera.example.ch/api", models) ||
+			got.Run != c.RunFor(models) {
+			t.Errorf("%s rendered differently from keera connect:\n%s", c.Key, got.Config)
+		}
 	}
 }
 

@@ -23,6 +23,32 @@ func (s *Server) listConnect(w http.ResponseWriter, r *http.Request, _ *authn.Pr
 	})
 }
 
+// renderConnect fills in every client's block for the models a key may call,
+// the default first, so the panel shows what `keera connect` prints. The key
+// is not sent: a block that holds it carries connect.KeyPlaceholder, which
+// the panel replaces.
+func (s *Server) renderConnect(w http.ResponseWriter, r *http.Request, _ *authn.Principal) {
+	var in struct {
+		Models []connect.Model `json:"models"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	type rendered struct {
+		Key    string `json:"key"`
+		Config string `json:"config"`
+		Run    string `json:"run"`
+	}
+	base := s.gatewayURL(r)
+	out := []rendered{}
+	for _, c := range connect.Clients() {
+		out = append(out, rendered{Key: c.Key, Config: c.Render(base, in.Models), Run: c.RunFor(in.Models)})
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"data": out, "placeholder": connect.KeyPlaceholder,
+	})
+}
+
 // clientKey is one key a client called with.
 type clientKey struct {
 	ID       string    `json:"id"`
