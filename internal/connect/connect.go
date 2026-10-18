@@ -236,6 +236,7 @@ var clients = []Client{
       "baseUrl": "{{base}}/v1",
       "api": "openai-completions",
       "apiKey": "${KEERA_API_KEY}",
+      "headers": { "X-Keera-Client": "pi" },
       "models": [
 {{models}}
       ]

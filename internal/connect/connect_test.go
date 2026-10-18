@@ -231,8 +231,9 @@ func TestFileClientsStateTheSameWindow(t *testing.T) {
 	var p struct {
 		Providers struct {
 			Keera struct {
-				APIKey string           `json:"apiKey"`
-				Models []map[string]any `json:"models"`
+				APIKey  string            `json:"apiKey"`
+				Headers map[string]string `json:"headers"`
+				Models  []map[string]any  `json:"models"`
 			} `json:"keera"`
 		} `json:"providers"`
 	}
@@ -252,6 +253,11 @@ func TestFileClientsStateTheSameWindow(t *testing.T) {
 	if got := p.Providers.Keera.APIKey; got != "${KEERA_API_KEY}" {
 		t.Errorf("pi apiKey = %q; the sandbox image relies on Pi expanding this "+
 			"from the environment", got)
+	}
+	// Pi sends no User-Agent of its own, so without the header its requests
+	// are unidentified.
+	if got := Identify(p.Providers.Keera.Headers[ClientHeader], ""); got != "pi" {
+		t.Errorf("pi's requests are identified as %q, want pi", got)
 	}
 
 	// Pi's schema needs no answer length, and the catalogue records none, so
