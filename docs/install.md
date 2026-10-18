@@ -16,8 +16,10 @@ troubleshooting.
 
 ## Before you start
 
-**Postgres.** Any recent version. The gateway applies its schema on start
-under an advisory lock, so several replicas can start at once.
+**Postgres.** Version 14 or later. The gateway applies its schema on start
+under an advisory lock, so several replicas can start at once. Its two
+notification listeners turn off `idle_session_timeout` for their own sessions,
+so a server-wide timeout does not end them.
 
 **A GPU, to demo a coding agent.** The CPU tier runs the gateway fine but
 cannot produce OpenAI-shaped `tool_calls`, so an agent writes prose instead of
@@ -456,7 +458,8 @@ filter's answer is held whole up to 32 MiB. A client has two minutes to send
 its body. Give the container a memory limit: the gateway reads it from cgroup
 v2 and keeps its heap under nine tenths of it, collecting harder near the limit
 rather than being killed. `GOMEMLIMIT` overrides that. Size Postgres for
-replicas × `KEERA_MAX_DB_CONNS` connections.
+replicas × (`KEERA_MAX_DB_CONNS` + 2) connections: the two listeners hold
+their own.
 
 Background jobs, such as the sandbox sweep, retention and payments, run on one
 replica per interval, whichever asks first.

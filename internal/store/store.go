@@ -206,21 +206,33 @@ func (s *Store) Notify(ctx context.Context, payload string) error {
 // subscription.
 //
 // It tries once and does not reconnect, because each caller handles a lost
-// connection its own way. The connection is held outside the pool for as long
-// as the subscription lasts, so callers should be few and long-lived.
+// connection its own way. The connection is its own, outside the pool, so
+// callers should be few and long-lived.
 func (s *Store) Listen(ctx context.Context, channel string, fn func(payload string)) error {
-	conn, err := s.pool.Acquire(ctx)
+	pooled, err := s.pool.Acquire(ctx)
 	if err != nil {
 		return err
 	}
-	defer conn.Release()
+	// Taken out of the pool and closed at the end, so the setting and the
+	// LISTEN below never reach a pooled query.
+	conn := pooled.Hijack()
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = conn.Close(ctx)
+	}()
+	// A listener sends nothing while it waits, so a server-side
+	// idle_session_timeout would end it every time it ran out.
+	if _, err := conn.Exec(ctx, "SET idle_session_timeout = 0"); err != nil {
+		return err
+	}
 	// A channel name cannot be a placeholder, so it must only ever come from
 	// this binary's own constants.
 	if _, err := conn.Exec(ctx, "LISTEN "+channel); err != nil {
 		return err
 	}
 	for {
-		n, err := conn.Conn().WaitForNotification(ctx)
+		n, err := conn.WaitForNotification(ctx)
 		if err != nil {
 			return err
 		}

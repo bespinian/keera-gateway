@@ -13,6 +13,7 @@ package store
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -160,11 +161,14 @@ func TestNotifyReachesAListener(t *testing.T) {
 	// actually arrives.
 	st, ctx := db(t)
 
-	conn, err := st.pool.Acquire(ctx)
+	pooled, err := st.pool.Acquire(ctx)
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
-	defer conn.Release()
+	// Closed rather than released, so the LISTEN does not follow the
+	// connection into later tests.
+	conn := pooled.Hijack()
+	defer conn.Close(context.Background())
 	if _, err := conn.Exec(ctx, "LISTEN "+NotifyChannel); err != nil {
 		t.Fatalf("LISTEN: %v", err)
 	}
@@ -174,7 +178,7 @@ func TestNotifyReachesAListener(t *testing.T) {
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	n, err := conn.Conn().WaitForNotification(waitCtx)
+	n, err := conn.WaitForNotification(waitCtx)
 	if err != nil {
 		t.Fatalf("WaitForNotification: %v", err)
 	}
@@ -183,5 +187,44 @@ func TestNotifyReachesAListener(t *testing.T) {
 	}
 	if n.Payload != "key:k1" {
 		t.Errorf("payload = %q, want key:k1", n.Payload)
+	}
+}
+
+func TestListenOutlivesIdleSessionTimeout(t *testing.T) {
+	// Managed Postgres often sets idle_session_timeout, and a listener sends
+	// nothing while it waits. Without its own override it is cut off every time
+	// the timeout runs out.
+	base, ctx := db(t)
+	sep := "?"
+	if strings.Contains(testDSN, "?") {
+		sep = "&"
+	}
+	st, err := Open(ctx, testDSN+sep+"idle_session_timeout=300ms", 2)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer st.Close()
+
+	listenCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	got := make(chan string, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- st.Listen(listenCtx, NotifyChannel, func(p string) { got <- p })
+	}()
+
+	time.Sleep(time.Second)
+	if err := base.Notify(ctx, "key:k1"); err != nil {
+		t.Fatalf("Notify: %v", err)
+	}
+	select {
+	case p := <-got:
+		if p != "key:k1" {
+			t.Errorf("payload = %q, want key:k1", p)
+		}
+	case err := <-done:
+		t.Fatalf("Listen ended: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("no notification arrived")
 	}
 }
