@@ -1,9 +1,11 @@
 package server
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/bespinian/keera-gateway/internal/config"
@@ -53,8 +55,10 @@ func TestRoutesSendEachPathToTheRightPlane(t *testing.T) {
 		{"who am i", http.MethodGet, "/control/v1/me", http.StatusUnauthorized},
 		{"the sign-in flow", http.MethodGet, "/control/auth/config", http.StatusOK},
 
-		// The old two-port paths belong to the panel now.
-		{"the inference plane is not at the root", http.MethodPost, "/v1/chat/completions", http.StatusMethodNotAllowed},
+		// The old two-port paths, and a base URL without /api, are told
+		// where the API is.
+		{"the inference plane is not at the root", http.MethodPost, "/v1/chat/completions", http.StatusNotFound},
+		{"nor is its model list", http.MethodGet, "/v1/models", http.StatusNotFound},
 	}
 
 	for _, tt := range tests {
@@ -76,5 +80,21 @@ func TestPanelURLNeedsThePanel(t *testing.T) {
 	}
 	if got := panelURL(config.Config{UI: false, PublicURL: "https://keera.example"}); got != "" {
 		t.Errorf("without the panel: %q, want none", got)
+	}
+}
+
+// A client given the panel's address used to get the panel's page back, which
+// an SDK fails to parse.
+func TestAClientWithoutTheAPIPrefixIsToldWhereItIs(t *testing.T) {
+	w := httptest.NewRecorder()
+	noInferenceHere(w, httptest.NewRequest(http.MethodPost, "/v1/messages", nil))
+	var got struct {
+		Error struct{ Message string } `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	if !strings.Contains(got.Error.Message, "/api/v1/messages") {
+		t.Errorf("message = %q, want it to name /api/v1/messages", got.Error.Message)
 	}
 }

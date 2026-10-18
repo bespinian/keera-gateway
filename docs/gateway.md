@@ -118,6 +118,9 @@ OpenAI's and Anthropic's model lists, so either SDK reads it. `HEAD
 The path is doubled because they append `/api/hello` to a base URL that already
 ends in `/api`.
 
+A client given a base URL without `/api` gets a 404 `wrong_base_url` that says
+where the API is, rather than the panel's page.
+
 The inference plane speaks chat completions, so the other two are translated on
 the way in and back on the way out. Fields that chat completions has no place
 for, such as thinking blocks, documents, search results, reasoning items,
@@ -664,17 +667,17 @@ Errors come in the shape of the API that was called. The Messages API has no
 field for a code, so its errors carry only a type that follows the status, such
 as `billing_error` for 402. The other APIs carry these codes:
 
-| Status | Code                                                                                                                                              |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 400    | `missing_model`, `invalid_body`, `unsupported_parameter`, `context_length_exceeded`, `subscription_model`                                         |
-| 401    | `missing_api_key`, `invalid_api_key`, `expired_api_key`, `revoked_api_key`, `subscription_key`, `missing_claude_sign_in`                          |
-| 402    | `budget_exceeded`, `credit_exhausted` ([billing.md](billing.md#pay-in-advance))                                                                   |
-| 403    | `filter_refused`, `subscriptions_off`, `org_limited`                                                                                              |
-| 404    | `model_not_found`: no such model, the key may not use it, or it is served at another endpoint; `mcp_server_not_found`; `not_found`: no such route |
-| 413    | `request_too_large` (`KEERA_MAX_BODY_BYTES`), `filter_input_too_large`                                                                            |
-| 429    | `rate_limit_exceeded` (`rpm`), `token_rate_limit_exceeded` (`tpm`)                                                                                |
-| 502    | `upstream_unavailable`, `upstream_error`, `filter_failed`, `mcp_credential_refused`, `mcp_unavailable`                                            |
-| 503    | `control_plane_unavailable`, `no_backend`, `filter_unavailable`, `router_undecided`, `router_destination_unavailable`                             |
+| Status | Code                                                                                                                                                                |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 400    | `missing_model`, `invalid_body`, `unsupported_parameter`, `context_length_exceeded`, `subscription_model`                                                           |
+| 401    | `missing_api_key`, `invalid_api_key`, `expired_api_key`, `revoked_api_key`, `subscription_key`, `missing_claude_sign_in`                                            |
+| 402    | `budget_exceeded`, `credit_exhausted` ([billing.md](billing.md#pay-in-advance))                                                                                     |
+| 403    | `filter_refused`, `subscriptions_off`, `org_limited`                                                                                                                |
+| 404    | `model_not_found`: no such model, the key may not use it, or it is served at another endpoint; `mcp_server_not_found`; `not_found`: no such route; `wrong_base_url` |
+| 413    | `request_too_large` (`KEERA_MAX_BODY_BYTES`), `filter_input_too_large`                                                                                              |
+| 429    | `rate_limit_exceeded` (`rpm`), `token_rate_limit_exceeded` (`tpm`)                                                                                                  |
+| 502    | `upstream_unavailable`, `upstream_error`, `filter_failed`, `mcp_credential_refused`, `mcp_unavailable`                                                              |
+| 503    | `control_plane_unavailable`, `no_backend`, `filter_unavailable`, `router_undecided`, `router_destination_unavailable`                                               |
 
 ## Metrics
 
