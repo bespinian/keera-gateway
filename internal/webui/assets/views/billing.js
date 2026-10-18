@@ -509,9 +509,15 @@ export function addCredit(ctx, res) {
     if (total.hidden) return;
     const fee = feeOn(m);
     total.replaceChildren(
+      ...(vat
+        ? [
+            h("span", {}, `VAT ${vat}%`),
+            h("span", { class: "num" }, money(vatOn(m))),
+          ]
+        : []),
       h("span", {}, "Transaction fee"),
       h("span", { class: "num" }, money(fee)),
-      h("strong", {}, vat ? `Total, with ${vat}% VAT` : "Total"),
+      h("strong", {}, "Total"),
       h("strong", { class: "num" }, money(m + vatOn(m) + fee)),
     );
   };
