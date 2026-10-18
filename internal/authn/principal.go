@@ -63,6 +63,7 @@ type Principal struct {
 	Via    Method `json:"via"`
 	UserID string `json:"user_id,omitempty"`
 	Email  string `json:"email,omitempty"`
+	Name   string `json:"name,omitempty"`
 	Role   Role   `json:"role"`
 	// OrgID empty means no organisation: true only of the operator key.
 	// Unrestricted, not an empty OrgID, is what lets a caller see them all.

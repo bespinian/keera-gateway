@@ -43,6 +43,7 @@ func (s *Server) startSignup(w http.ResponseWriter, r *http.Request, provider *a
 		Provider:   provider.Name(),
 		ExternalID: identity.ExternalID(),
 		Email:      identity.Email,
+		Name:       identity.Name,
 		Role:       string(provider.Mapping().RoleFor(identity.Email, identity.Groups)),
 		// Sealed against the identity it belongs to, so it never opens as
 		// anybody else's.

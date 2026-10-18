@@ -46,6 +46,7 @@ type User struct {
 	ID         string    `json:"id"`
 	OrgID      string    `json:"org_id"`
 	Email      string    `json:"email"`
+	Name       string    `json:"name,omitempty"`
 	ExternalID string    `json:"external_id,omitempty"`
 	Role       string    `json:"role"`
 	CreatedAt  time.Time `json:"created_at"`
@@ -63,7 +64,7 @@ func (u User) Disabled() bool { return u.DisabledAt != nil }
 // column prefixed by table ("u." or ""). A join needs the prefix, because the
 // tables it joins share column names.
 func userColumnsOf(table string) string {
-	return fmt.Sprintf(`%[1]sid, %[1]sorg_id, %[1]semail, COALESCE(%[1]sexternal_id,''),
+	return fmt.Sprintf(`%[1]sid, %[1]sorg_id, %[1]semail, %[1]sname, COALESCE(%[1]sexternal_id,''),
 	%[1]srole, %[1]screated_at, %[1]sdisabled_at`, table)
 }
 
@@ -72,7 +73,8 @@ var userColumns = userColumnsOf("")
 
 // userTargets points at the fields userColumnsOf fills, in its order.
 func userTargets(u *User) []any {
-	return []any{&u.ID, &u.OrgID, &u.Email, &u.ExternalID, &u.Role, &u.CreatedAt, &u.DisabledAt}
+	return []any{&u.ID, &u.OrgID, &u.Email, &u.Name, &u.ExternalID, &u.Role, &u.CreatedAt,
+		&u.DisabledAt}
 }
 
 func scanUser(r row) (User, error) {

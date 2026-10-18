@@ -14,6 +14,7 @@ import {
   remember,
   banner,
   capitalise,
+  personName,
 } from "./ui.js";
 import { signIn, passkeySignInFlow } from "./views/signin.js";
 import { signUp, signUpFlow } from "./views/signup.js";
@@ -576,8 +577,8 @@ function renderShell() {
           { class: "account-id" },
           h(
             "div",
-            { class: "account-email" },
-            state.me.email || "Operator key",
+            { class: "account-email", title: state.me.email || "" },
+            state.me.email ? personName(state.me) : "Operator key",
           ),
           h("div", { class: "account-role" }, state.me.role),
         ),

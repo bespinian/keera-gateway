@@ -10,3 +10,8 @@ ALTER TABLE api_keys ALTER COLUMN key_hash DROP NOT NULL;
 -- destination that failed before another one answered. It is not an error,
 -- so a request that carries only a note still counts as served.
 ALTER TABLE usage_events ADD COLUMN note text;
+
+-- The person's name as their identity provider gives it, refreshed at every
+-- sign-in. Empty for someone who has not signed in through one yet.
+ALTER TABLE users ADD COLUMN name text NOT NULL DEFAULT '';
+ALTER TABLE signups ADD COLUMN name text NOT NULL DEFAULT '';

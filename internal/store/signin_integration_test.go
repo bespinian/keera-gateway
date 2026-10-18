@@ -327,3 +327,68 @@ func TestPurgeExpiredRemovesRefreshTokensNobodyUses(t *testing.T) {
 		t.Error("the refresh token of a disabled person is still stored")
 	}
 }
+
+func TestTheDirectoryNamesAPersonInEveryOrganisation(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	if _, err := st.CreateOrg(ctx, Org{ID: "org_2", Name: "Another Bank"}, OrgTemplate{}); err != nil {
+		t.Fatalf("CreateOrg: %v", err)
+	}
+
+	link := func(newID, orgID, name string) User {
+		t.Helper()
+		u, err := st.LinkUser(ctx, newID, Link{OrgID: orgID, Email: "ada@example.ch",
+			Name: name, ExternalID: "google:sub-1", Role: "member"})
+		if err != nil {
+			t.Fatalf("LinkUser: %v", err)
+		}
+		return u
+	}
+	if u := link("user_1", f.orgID, "Ada Lovelace"); u.Name != "Ada Lovelace" {
+		t.Errorf("Name = %q, want the directory's", u.Name)
+	}
+	link("user_2", "org_2", "Ada Lovelace")
+
+	// A new name at one sign-in reaches every organisation the person is in.
+	if u := link("user_3", f.orgID, "Ada King"); u.Name != "Ada King" {
+		t.Errorf("Name = %q, want the new one", u.Name)
+	}
+	other, err := st.UserByID(ctx, "user_2")
+	if err != nil {
+		t.Fatalf("UserByID: %v", err)
+	}
+	if other.Name != "Ada King" {
+		t.Errorf("Name in the other organisation = %q, want the new one", other.Name)
+	}
+
+	// So does one from asking the directory again.
+	if err := st.SetIdentityName(ctx, "google:sub-1", "Countess of Lovelace"); err != nil {
+		t.Fatalf("SetIdentityName: %v", err)
+	}
+	for _, id := range []string{"user_1", "user_2"} {
+		u, err := st.UserByID(ctx, id)
+		if err != nil {
+			t.Fatalf("UserByID: %v", err)
+		}
+		if u.Name != "Countess of Lovelace" {
+			t.Errorf("%s Name = %q, want the directory's", id, u.Name)
+		}
+	}
+}
+
+func TestASignUpKeepsTheName(t *testing.T) {
+	st, ctx := db(t)
+	hash := []byte("hash-of-a-sign-up-token-32-bytes")
+	if err := st.CreateSignup(ctx, Signup{TokenHash: hash, UserID: "user_1", Provider: "google",
+		ExternalID: "google:sub-1", Email: "ada@example.ch", Name: "Ada Lovelace", Role: "member"},
+		time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("CreateSignup: %v", err)
+	}
+	_, _, u, err := st.SignUp(ctx, hash, Org{ID: "org_1", Name: "Analytical Engines"}, OrgTemplate{})
+	if err != nil {
+		t.Fatalf("SignUp: %v", err)
+	}
+	if u.Name != "Ada Lovelace" {
+		t.Errorf("Name = %q, want the one the sign-in gave", u.Name)
+	}
+}

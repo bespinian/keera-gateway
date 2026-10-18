@@ -16,6 +16,7 @@ type Signup struct {
 	Provider   string
 	ExternalID string
 	Email      string
+	Name       string
 	// Role is what the identity provider's answer maps to.
 	Role string
 	// RefreshToken is sealed against ExternalID, or nil when the provider
@@ -28,21 +29,23 @@ type Signup struct {
 	RedirectTo     string
 }
 
-const signupColumns = `token_hash, user_id, provider, external_id, email, role, refresh_token,
-	COALESCE(invited_org, ''), redirect_to`
+// signupColumns names signups.name in full: SignupByToken joins orgs, which
+// has a name too.
+const signupColumns = `token_hash, user_id, provider, external_id, email, signups.name, role,
+	refresh_token, COALESCE(invited_org, ''), redirect_to`
 
 func scanSignup(r row) (Signup, error) {
 	var su Signup
 	err := r.Scan(&su.TokenHash, &su.UserID, &su.Provider, &su.ExternalID, &su.Email,
-		&su.Role, &su.RefreshToken, &su.InvitedOrg, &su.RedirectTo)
+		&su.Name, &su.Role, &su.RefreshToken, &su.InvitedOrg, &su.RedirectTo)
 	return su, notFound(err)
 }
 
 func (s *Store) CreateSignup(ctx context.Context, su Signup, expires time.Time) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO signups (token_hash, user_id, provider,
-		external_id, email, role, refresh_token, invited_org, redirect_to, expires_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-		su.TokenHash, su.UserID, su.Provider, su.ExternalID, su.Email, su.Role,
+		external_id, email, name, role, refresh_token, invited_org, redirect_to, expires_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+		su.TokenHash, su.UserID, su.Provider, su.ExternalID, su.Email, su.Name, su.Role,
 		su.RefreshToken, nullable(su.InvitedOrg), su.RedirectTo, expires)
 	return err
 }
@@ -56,7 +59,7 @@ func (s *Store) SignupByToken(ctx context.Context, hash []byte) (Signup, error) 
 		FROM signups LEFT JOIN orgs o ON o.id = signups.invited_org
 		WHERE token_hash = $1 AND expires_at > now()`, hash,
 	).Scan(&su.TokenHash, &su.UserID, &su.Provider, &su.ExternalID, &su.Email,
-		&su.Role, &su.RefreshToken, &su.InvitedOrg, &su.RedirectTo, &name)
+		&su.Name, &su.Role, &su.RefreshToken, &su.InvitedOrg, &su.RedirectTo, &name)
 	if name != nil {
 		su.InvitedOrgName = *name
 	}
@@ -101,9 +104,9 @@ func (s *Store) SignUp(ctx context.Context, hash []byte, o Org, tmpl OrgTemplate
 		if su.Role == "operator" {
 			role = su.Role
 		}
-		u, err = scanUser(tx.QueryRow(ctx, `INSERT INTO users (id, org_id, email, external_id, role)
-			VALUES ($1,$2,$3,$4,$5) RETURNING `+userColumns,
-			su.UserID, o.ID, su.Email, su.ExternalID, role))
+		u, err = scanUser(tx.QueryRow(ctx, `INSERT INTO users (id, org_id, email, name, external_id, role)
+			VALUES ($1,$2,$3,$4,$5,$6) RETURNING `+userColumns,
+			su.UserID, o.ID, su.Email, su.Name, su.ExternalID, role))
 		if isUnique(err) {
 			return ErrEmailTaken
 		}
@@ -132,7 +135,7 @@ func (s *Store) JoinInvitation(ctx context.Context, hash []byte) (Signup, User, 
 		}
 		// ErrNotFound: the invitation was withdrawn, or somebody else took it
 		// meanwhile.
-		u, err = takeInvitation(ctx, tx, su.InvitedOrg, su.Email, su.ExternalID)
+		u, err = takeInvitation(ctx, tx, su.InvitedOrg, su.Email, su.Name, su.ExternalID)
 		return err
 	})
 	if err != nil {

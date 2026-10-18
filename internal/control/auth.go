@@ -236,6 +236,7 @@ func (s *Server) linkIdentity(w http.ResponseWriter, r *http.Request, provider *
 	user, err := s.st.LinkUser(r.Context(), id.New("user"), store.Link{
 		OrgID:      orgID,
 		Email:      identity.Email,
+		Name:       identity.Name,
 		ExternalID: identity.ExternalID(),
 		Role:       string(role),
 	})
@@ -535,6 +536,7 @@ func principalOf(via authn.Method, user store.User, hash []byte) *authn.Principa
 		Via:            via,
 		UserID:         user.ID,
 		Email:          user.Email,
+		Name:           user.Name,
 		Role:           authn.Role(user.Role),
 		OrgID:          user.OrgID,
 		CredentialHash: hash,
@@ -592,6 +594,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request, p *authn.Principal) 
 		"via":           p.Via,
 		"user_id":       p.UserID,
 		"email":         p.Email,
+		"name":          p.Name,
 		"role":          p.Role,
 		"org_id":        p.OrgID,
 		"unrestricted":  p.Unrestricted(),

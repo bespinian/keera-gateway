@@ -99,6 +99,13 @@ func (s *Server) checkDirectory(r *http.Request, user store.User, d store.Direct
 	if !fresh {
 		return user, true
 	}
+	if identity.Name != user.Name {
+		if err := s.st.SetIdentityName(ctx, user.ExternalID, identity.Name); err != nil {
+			s.log.Error("storing a name from the directory", "user", user.ID, "error", err)
+		} else {
+			user.Name = identity.Name
+		}
+	}
 	was := user.Role
 	role := provider.Mapping().RoleFor(identity.Email, identity.Groups)
 	if err := s.syncRole(r, &user, role); err != nil {

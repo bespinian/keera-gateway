@@ -240,19 +240,35 @@ func (s *Store) ExternalIDsFor(ctx context.Context, email string) ([]string, err
 // AcceptInvitation links an identity to the row an organisation made for its
 // address. The row's role stands. ErrNotFound means there is no such row, or
 // it was withdrawn or taken meanwhile.
-func (s *Store) AcceptInvitation(ctx context.Context, orgID, email, externalID string) (User, error) {
-	return takeInvitation(ctx, s.pool, orgID, email, externalID)
+func (s *Store) AcceptInvitation(ctx context.Context, orgID, email, name, externalID string) (User, error) {
+	return takeInvitation(ctx, s.pool, orgID, email, name, externalID)
 }
 
-func takeInvitation(ctx context.Context, db querier, orgID, email, externalID string) (User, error) {
-	u, err := scanUser(db.QueryRow(ctx, `UPDATE users SET external_id = $3
+func takeInvitation(ctx context.Context, db querier, orgID, email, name, externalID string) (User, error) {
+	u, err := scanUser(db.QueryRow(ctx, `UPDATE users SET external_id = $3, name = $4
 		WHERE org_id = $1 AND email = $2 AND COALESCE(external_id, '') = ''
 			AND disabled_at IS NULL
-		RETURNING `+userColumns, orgID, email, externalID))
+		RETURNING `+userColumns, orgID, email, externalID, name))
 	if isUnique(err) {
 		return u, ErrEmailTaken
 	}
 	return u, notFound(err)
+}
+
+// followDirectory sets the address and name of one identity in every
+// organisation it is in, as its directory now gives them.
+func (s *Store) followDirectory(ctx context.Context, externalID, email, name string) error {
+	_, err := s.pool.Exec(ctx, "UPDATE users SET email = $2, name = $3 WHERE external_id = $1",
+		externalID, email, name)
+	return err
+}
+
+// SetIdentityName sets the name of one identity in every organisation it is
+// in, as its directory now gives it.
+func (s *Store) SetIdentityName(ctx context.Context, externalID, name string) error {
+	_, err := s.pool.Exec(ctx, "UPDATE users SET name = $2 WHERE external_id = $1 AND name <> $2",
+		externalID, name)
+	return err
 }
 
 func (s *Store) UserByID(ctx context.Context, userID string) (User, error) {
@@ -301,6 +317,7 @@ var ErrDomainTaken = errors.New("store: that email domain belongs to another org
 type Link struct {
 	OrgID string
 	Email string
+	Name  string
 	// ExternalID is the provider-qualified subject, as Identity.ExternalID
 	// spells it.
 	ExternalID string
@@ -325,13 +342,12 @@ func (s *Store) LinkUser(ctx context.Context, newID string, l Link) (User, error
 	u, err := scanUser(s.pool.QueryRow(ctx, `SELECT `+userColumns+` FROM users
 		WHERE org_id = $1 AND external_id = $2`, l.OrgID, l.ExternalID))
 	if err == nil {
-		if !strings.EqualFold(u.Email, l.Email) {
+		if !strings.EqualFold(u.Email, l.Email) || u.Name != l.Name {
 			// Every organisation the person is in follows the directory.
-			if _, err := s.pool.Exec(ctx, "UPDATE users SET email = $2 WHERE external_id = $1",
-				l.ExternalID, l.Email); err != nil {
+			if err := s.followDirectory(ctx, l.ExternalID, l.Email, l.Name); err != nil {
 				return u, err
 			}
-			u.Email = l.Email
+			u.Email, u.Name = l.Email, l.Name
 		}
 		return u, nil
 	} else if !errors.Is(notFound(err), ErrNotFound) {
@@ -340,12 +356,13 @@ func (s *Store) LinkUser(ctx context.Context, newID string, l Link) (User, error
 
 	// The guard is in the conflict clause, not a separate read, so two
 	// sign-ins racing on one address cannot both pass it.
-	u, err = scanUser(s.pool.QueryRow(ctx, `INSERT INTO users (id, org_id, email, external_id, role)
-		VALUES ($1,$2,$3,$4,$5)
-		ON CONFLICT (org_id, email) DO UPDATE SET external_id = EXCLUDED.external_id
+	u, err = scanUser(s.pool.QueryRow(ctx, `INSERT INTO users (id, org_id, email, name, external_id, role)
+		VALUES ($1,$2,$3,$4,$5,$6)
+		ON CONFLICT (org_id, email) DO UPDATE
+		SET external_id = EXCLUDED.external_id, name = EXCLUDED.name
 		WHERE users.external_id IS NULL OR users.external_id = ''
 		RETURNING `+userColumns,
-		newID, l.OrgID, l.Email, l.ExternalID, l.Role))
+		newID, l.OrgID, l.Email, l.Name, l.ExternalID, l.Role))
 	// When the guard filters out the update, no row comes back.
 	if errors.Is(notFound(err), ErrNotFound) {
 		return User{}, ErrEmailTaken

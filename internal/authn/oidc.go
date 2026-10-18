@@ -126,7 +126,9 @@ type Identity struct {
 	Provider string
 	Subject  string
 	Email    string
-	Groups   []string
+	// Name is the person's display name, or empty when the provider sent none.
+	Name   string
+	Groups []string
 	// RefreshToken lets the gateway ask the directory about this person again
 	// later. Empty when the provider issued none.
 	RefreshToken string
@@ -409,6 +411,7 @@ func (o *OIDC) identity(idToken *oidc.IDToken) (Identity, error) {
 		Provider: o.cfg.Name,
 		Subject:  idToken.Subject,
 		Email:    strings.ToLower(strings.TrimSpace(stringClaim(claims, "email"))),
+		Name:     displayName(claims),
 		Groups:   stringsClaim(claims, groupsClaim),
 	}
 	if err := o.checkIdentity(id, claims, groupsClaim); err != nil {
@@ -491,6 +494,16 @@ func (o *OIDC) LogoutURL(redirectTo string) string {
 		sep = "&"
 	}
 	return meta.EndSession + sep + "post_logout_redirect_uri=" + url.QueryEscape(redirectTo)
+}
+
+// displayName is the standard name claim, or the given and family names when a
+// provider sends only those.
+func displayName(claims map[string]any) string {
+	if name := strings.TrimSpace(stringClaim(claims, "name")); name != "" {
+		return name
+	}
+	return strings.TrimSpace(strings.TrimSpace(stringClaim(claims, "given_name")) + " " +
+		strings.TrimSpace(stringClaim(claims, "family_name")))
 }
 
 func stringClaim(claims map[string]any, key string) string {

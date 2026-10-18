@@ -24,6 +24,7 @@ import {
   RANGES,
   listHead,
   plural,
+  personName,
   pct,
   dash,
   formModal,
@@ -49,6 +50,7 @@ export async function keysView(ctx) {
   const users = usersRes.data || [];
   const models = (modelsRes.data || []).filter((m) => m.enabled !== false);
   const projectNames = Object.fromEntries(projects.map((t) => [t.id, t.name]));
+  const userNames = Object.fromEntries(users.map((u) => [u.id, personName(u)]));
   const userEmails = Object.fromEntries(users.map((u) => [u.id, u.email]));
   const canEdit = isAdmin(ctx);
 
@@ -122,8 +124,8 @@ export async function keysView(ctx) {
         ? {
             label: "User",
             sortKey: (k) =>
-              k.user_id ? userEmails[k.user_id] || k.user_id : null,
-            cell: (k) => userCell(ctx, k, userEmails),
+              k.user_id ? userNames[k.user_id] || k.user_id : null,
+            cell: (k) => userCell(ctx, k, userNames),
           }
         : null,
       {
@@ -282,6 +284,7 @@ export async function keysView(ctx) {
           k.name,
           k.prefix,
           projectNames[k.project_id] || "",
+          userNames[k.user_id] || "",
           userEmails[k.user_id] || "",
         ].join(" "),
       searchLabel: "keys",
@@ -301,7 +304,7 @@ export async function keysView(ctx) {
             ...byLabel(
               keys.filter((k) => k.user_id),
               (k) => k.user_id,
-              (k) => userEmails[k.user_id] || k.user_id,
+              (k) => userNames[k.user_id] || k.user_id,
             ),
             // The shared keys an administrator issued for a pipeline.
             ...(keys.some((k) => !k.user_id)
@@ -328,17 +331,17 @@ export async function keysView(ctx) {
 }
 
 // Only an administrator has a user's page to open.
-function userCell(ctx, k, userEmails) {
+function userCell(ctx, k, userNames) {
   if (!k.user_id) return h("span", { class: "faint" }, NO_USER);
-  const email = userEmails[k.user_id] || k.user_id;
+  const name = userNames[k.user_id] || k.user_id;
   return isAdmin(ctx)
     ? rowLink(
         ctx,
         "/users/" + encodeURIComponent(k.user_id),
-        email,
+        name,
         "This user's keys and usage",
       )
-    : h("span", {}, email);
+    : h("span", {}, name);
 }
 
 // NOBODY is the user filter's value for a key with no user. No user id looks
@@ -622,7 +625,11 @@ function issueKey(ctx, projects, users, last = {}) {
     { class: "select" },
     h("option", { value: "" }, NO_USER),
     users.map((u) =>
-      h("option", { value: u.id, selected: u.id === me }, u.email),
+      h(
+        "option",
+        { value: u.id, selected: u.id === me },
+        u.name ? `${u.name} (${u.email})` : u.email,
+      ),
     ),
   );
   // A key for somebody else is theirs to activate by default, so only they

@@ -150,7 +150,7 @@ func (r *userRun) list(ctx context.Context) error {
 		}
 		// The same columns as the panel's Users screen. The subject itself is
 		// in --json.
-		w.header("ID\tEMAIL\tROLE\tSTATE\tSIGNS IN WITH\tLAST ACTIVE\tADDED")
+		w.header("ID\tEMAIL\tNAME\tROLE\tSTATE\tSIGNS IN WITH\tLAST ACTIVE\tADDED")
 		for _, u := range users {
 			state := statusWord("active")
 			if u.Disabled() {
@@ -160,8 +160,9 @@ func (r *userRun) list(ctx context.Context) error {
 			if u.LastActiveAt != nil {
 				active = u.LastActiveAt.Local().Format(time.DateOnly)
 			}
-			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				u.ID, u.Email, u.Role, state, signsInWith(u.ExternalID), statusWord(active),
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				u.ID, u.Email, dash(u.Name), u.Role, state, signsInWith(u.ExternalID),
+				statusWord(active),
 				u.CreatedAt.Format(time.DateOnly))
 		}
 	})

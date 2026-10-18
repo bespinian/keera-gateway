@@ -111,6 +111,12 @@ export function plural(n, word, many = word + "s") {
   return n === 1 ? word : many;
 }
 
+/** personName is what a screen calls someone: the name their identity
+ *  provider gave, or their address when it gave none. */
+export function personName(u) {
+  return u.name || u.email;
+}
+
 export function capitalise(word) {
   return word ? word[0].toUpperCase() + word.slice(1) : "";
 }

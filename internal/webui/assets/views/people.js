@@ -139,6 +139,12 @@ export async function peopleView(ctx) {
           ),
       },
       {
+        // From the identity provider, so empty until the first sign-in.
+        label: "Name",
+        sortKey: (u) => (u.name ? u.name.toLowerCase() : null),
+        cell: (u) => (u.name ? h("span", {}, u.name) : dash()),
+      },
+      {
         label: "Identity provider",
         shrink: true,
         sortKey: (u) => {
@@ -260,6 +266,7 @@ export async function peopleView(ctx) {
       emptyBody: "Users appear here the first time they sign in.",
       search: (u) =>
         [
+          u.name || "",
           u.email,
           u.external_id || "",
           (identityProvider(ctx.state.me, u) || [])[1] || "",

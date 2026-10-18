@@ -187,7 +187,7 @@ func (s *Server) switchOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 
 	var target store.User
 	if m.Invited {
-		target, err = s.st.AcceptInvitation(ctx, m.OrgID, cur.Email, cur.ExternalID)
+		target, err = s.st.AcceptInvitation(ctx, m.OrgID, cur.Email, cur.Name, cur.ExternalID)
 	} else {
 		target, err = s.st.UserByID(ctx, m.UserID)
 	}

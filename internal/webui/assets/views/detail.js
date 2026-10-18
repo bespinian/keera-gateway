@@ -34,6 +34,7 @@ import {
   gone,
   isAdmin,
   plural,
+  personName,
   pct,
   detailHead,
   busyButton,
@@ -265,10 +266,10 @@ export async function keyDetailView(ctx) {
               title: "Open this key's user",
               onClick: go(ctx, "/users/" + encodeURIComponent(person.id)),
             },
-            person.email,
+            personName(person),
           )
         : person
-          ? pill(person.email)
+          ? pill(personName(person))
           : null,
     ],
     actions: [
@@ -351,7 +352,7 @@ export async function keyDetailView(ctx) {
             [
               "User",
               person
-                ? h("span", { class: "muted" }, person.email)
+                ? h("span", { class: "muted" }, personName(person))
                 : h("span", { class: "faint" }, NO_USER),
             ],
             ["Issued", h("span", { class: "muted" }, date(key.created_at))],
@@ -577,8 +578,10 @@ export async function userDetailView(ctx) {
 
   return screen(ctx, {
     back: { path: "/users", label: "Users" },
-    title: user.email,
-    identity: signsInWith(user),
+    title: personName(user),
+    identity: user.name
+      ? `${user.email}, ${signsInWith(user)}`
+      : signsInWith(user),
     scope: { user_id: user.id },
     // A person's traffic reads best as the tasks they ran.
     sessions: true,

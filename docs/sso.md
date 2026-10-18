@@ -425,6 +425,11 @@ the way back in if SSO is broken: open `/?operator_key=1`.
 Signing out also sends the browser to the provider's sign-out page, if the
 provider has one.
 
+The panel and `keera user list` show each person's name next to their address.
+It comes from the `name` claim, or from `given_name` and `family_name`, so it
+needs the `profile` scope. Every sign-in updates it. Someone who has never
+signed in through a provider shows only their address.
+
 A sign-in must finish in the browser that started it. The panel sets a
 short-lived cookie with the sign-in's state, and the callback refuses a state
 the browser does not hold. So a link to someone else's callback cannot sign you
@@ -508,8 +513,8 @@ the person is active.
 - If the directory refuses, because the person was removed or disabled or
   revoked Keera's access, all their sessions and `keera login` tokens end, in
   every organisation they are in.
-- If it answers, the role is applied again, as at sign-in, in every
-  organisation the person is in.
+- If it answers, the role and the name are applied again, as at sign-in, in
+  every organisation the person is in.
 - If it cannot be reached, the person stays signed in, and the next request asks
   again 15 minutes later.
 

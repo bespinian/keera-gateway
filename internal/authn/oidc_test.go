@@ -93,6 +93,27 @@ func TestIdentityDomain(t *testing.T) {
 	}
 }
 
+func TestDisplayName(t *testing.T) {
+	tests := []struct {
+		name   string
+		claims map[string]any
+		want   string
+	}{
+		{"the name claim", map[string]any{"name": " Ada Lovelace ", "given_name": "A"}, "Ada Lovelace"},
+		{"given and family names", map[string]any{"given_name": "Ada", "family_name": "Lovelace"},
+			"Ada Lovelace"},
+		{"only a given name", map[string]any{"given_name": "Ada"}, "Ada"},
+		{"none", map[string]any{}, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := displayName(tc.claims); got != tc.want {
+				t.Errorf("displayName = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestStringsClaimAcceptsWhatProvidersActuallySend(t *testing.T) {
 	tests := []struct {
 		name   string
