@@ -112,9 +112,11 @@ Code uses the Messages API and Codex the Responses API. All of them go through
 the same guardrails, accounting and audit.
 
 `GET /api/v1/models` lists the models a key may call, and
-`GET /api/v1/models/{alias}` describes one. `HEAD /api/api/hello` answers 200,
-for the warm-up probe some Anthropic clients send. The path is doubled because
-they append `/api/hello` to a base URL that already ends in `/api`.
+`GET /api/v1/models/{alias}` describes one. The list carries the fields of both
+OpenAI's and Anthropic's model lists, so either SDK reads it. `HEAD
+/api/api/hello` answers 200, for the warm-up probe some Anthropic clients send.
+The path is doubled because they append `/api/hello` to a base URL that already
+ends in `/api`.
 
 The inference plane speaks chat completions, so the other two are translated on
 the way in and back on the way out. Fields that chat completions has no place

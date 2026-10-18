@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"cmp"
 	"net/http"
 	"time"
 
@@ -8,18 +9,23 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// modelEntry is one model or router as /v1/models lists it.
+// modelEntry is one model or router as /v1/models lists it. It carries the
+// fields of both OpenAI's and Anthropic's model list, so an SDK of either
+// reads it.
 type modelEntry struct {
 	ID      string `json:"id"`
 	Object  string `json:"object"`
 	Created int64  `json:"created"`
 	OwnedBy string `json:"owned_by"`
+	// Type and CreatedAt are Anthropic's names for Object and Created.
+	Type      string `json:"type"`
+	CreatedAt string `json:"created_at,omitempty"`
 	// MaxContext is not part of the OpenAI shape, but clients that know to
 	// look for it can size a request without being told out of band.
 	MaxContext int `json:"max_context,omitempty"`
 	// DisplayName is the model's name for people, as Anthropic's API calls
-	// it.
-	DisplayName string `json:"display_name,omitempty"`
+	// it. Anthropic's has one for every model, so the alias stands in.
+	DisplayName string `json:"display_name"`
 	// Description says what the model is for, so a person choosing has
 	// more to go on than the name.
 	Description string `json:"description,omitempty"`
@@ -31,18 +37,22 @@ type modelEntry struct {
 }
 
 func modelEntryOf(m policy.Model) modelEntry {
-	return modelEntry{
-		ID: m.Alias, Object: "model", Created: created(m), OwnedBy: "keera",
-		MaxContext: m.MaxContext, DisplayName: m.DisplayName, Description: m.Description,
-		Location: m.Location,
+	e := modelEntry{
+		ID: m.Alias, Object: "model", Type: "model", Created: created(m), OwnedBy: "keera",
+		MaxContext: m.MaxContext, DisplayName: cmp.Or(m.DisplayName, m.Alias),
+		Description: m.Description, Location: m.Location,
 	}
+	if e.Created != 0 {
+		e.CreatedAt = time.Unix(e.Created, 0).UTC().Format(time.RFC3339)
+	}
+	return e
 }
 
 // routerEntryOf lists a router as a model, because a client names it in the
 // same field. A router has no context window of its own, so none is given.
 func routerEntryOf(rt policy.Router) modelEntry {
 	return modelEntry{
-		ID: rt.Alias, Object: "model", OwnedBy: "keera",
+		ID: rt.Alias, Object: "model", Type: "model", OwnedBy: "keera", DisplayName: rt.Alias,
 		Description: rt.Description, Destinations: rt.Destinations,
 	}
 }
@@ -67,7 +77,14 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 			out = append(out, routerEntryOf(rt))
 		}
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"object": "list", "data": out})
+	// The list is never paged. has_more and the two ids are Anthropic's
+	// paging fields, which its SDKs read.
+	list := map[string]any{"object": "list", "data": out, "has_more": false,
+		"first_id": nil, "last_id": nil}
+	if len(out) > 0 {
+		list["first_id"], list["last_id"] = out[0].ID, out[len(out)-1].ID
+	}
+	httpx.WriteJSON(w, http.StatusOK, list)
 }
 
 func (s *Server) getModel(w http.ResponseWriter, r *http.Request) {

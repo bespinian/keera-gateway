@@ -911,6 +911,41 @@ func TestListModelsShowsOnlyWhatTheKeyMayUse(t *testing.T) {
 	}
 }
 
+func TestListModelsReadsAsAnthropicsListToo(t *testing.T) {
+	// Anthropic's SDKs list models from the same path, and read other names.
+	models := map[string]policy.Model{
+		"keera-code": {Alias: "keera-code", Kind: policy.KindChat, BackendModel: "a",
+			ReleaseDate: "2026-03-01", Enabled: true},
+	}
+	h := newHarness(t, jsonBackend(`{}`), models, nil)
+	req, _ := http.NewRequest(http.MethodGet, h.url("/v1/models"), nil)
+	req.Header.Set("x-api-key", testKey)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var out struct {
+		HasMore bool   `json:"has_more"`
+		FirstID string `json:"first_id"`
+		Data    []struct {
+			Type        string `json:"type"`
+			DisplayName string `json:"display_name"`
+			CreatedAt   string `json:"created_at"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.HasMore || out.FirstID != "keera-code" || len(out.Data) != 1 {
+		t.Fatalf("list = %+v, want one page starting at keera-code", out)
+	}
+	m := out.Data[0]
+	if m.Type != "model" || m.DisplayName != "keera-code" || m.CreatedAt != "2026-03-01T00:00:00Z" {
+		t.Errorf("model = %+v, want type model, the alias as its name and the release date", m)
+	}
+}
+
 func TestEmbeddingsGoToTheirOwnSurface(t *testing.T) {
 	models := map[string]policy.Model{
 		"keera-embed": {Alias: "keera-embed", Kind: policy.KindEmbedding, BackendModel: "e", Enabled: true},
