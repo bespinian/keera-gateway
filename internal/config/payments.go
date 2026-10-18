@@ -25,31 +25,34 @@ type Payments struct {
 // to take its calls from an organisation's credit. Without an account it is
 // nil, and nothing is taken.
 func payments(platform catalog.Platform, publicURL string) (*Payments, error) {
-	space := env("KEERA_POSTFINANCE_SPACE_ID", "")
-	user := env("KEERA_POSTFINANCE_USER_ID", "")
-	key := env("KEERA_POSTFINANCE_AUTH_KEY", "")
+	space := env("KEERA_BILLING_POSTFINANCE_SPACE_ID", "")
+	user := env("KEERA_BILLING_POSTFINANCE_USER_ID", "")
+	key := env("KEERA_BILLING_POSTFINANCE_AUTH_KEY", "")
 	if space == "" && user == "" && key == "" {
-		for _, s := range []string{"KEERA_POSTFINANCE_URL", "KEERA_BILLING_VAT"} {
+		for _, s := range []string{"KEERA_BILLING_POSTFINANCE_URL", "KEERA_BILLING_VAT"} {
 			if env(s, "") != "" {
-				return nil, fmt.Errorf("%s does nothing without KEERA_POSTFINANCE_SPACE_ID, "+
-					"KEERA_POSTFINANCE_USER_ID and KEERA_POSTFINANCE_AUTH_KEY", s)
+				return nil, fmt.Errorf("%s does nothing without "+
+					"KEERA_BILLING_POSTFINANCE_SPACE_ID, KEERA_BILLING_POSTFINANCE_USER_ID "+
+					"and KEERA_BILLING_POSTFINANCE_AUTH_KEY", s)
 			}
 		}
 		return nil, nil
 	}
 	if space == "" || user == "" || key == "" {
-		return nil, fmt.Errorf("payments take all three of KEERA_POSTFINANCE_SPACE_ID, " +
-			"KEERA_POSTFINANCE_USER_ID and KEERA_POSTFINANCE_AUTH_KEY")
+		return nil, fmt.Errorf("payments take all three of " +
+			"KEERA_BILLING_POSTFINANCE_SPACE_ID, KEERA_BILLING_POSTFINANCE_USER_ID " +
+			"and KEERA_BILLING_POSTFINANCE_AUTH_KEY")
 	}
 	spaceID, err := strconv.ParseInt(space, 10, 64)
 	if err != nil || spaceID <= 0 {
-		return nil, fmt.Errorf("KEERA_POSTFINANCE_SPACE_ID is %q; it is the number of "+
-			"your space in PostFinance Checkout", space)
+		return nil, fmt.Errorf("KEERA_BILLING_POSTFINANCE_SPACE_ID is %q; it is the "+
+			"number of your space in PostFinance Checkout", space)
 	}
 	authKey, err := base64.StdEncoding.DecodeString(key)
 	if err != nil || len(authKey) == 0 {
-		return nil, fmt.Errorf("KEERA_POSTFINANCE_AUTH_KEY is not the authentication key " +
-			"PostFinance Checkout showed for the application user: it is base64")
+		return nil, fmt.Errorf("KEERA_BILLING_POSTFINANCE_AUTH_KEY is not the " +
+			"authentication key PostFinance Checkout showed for the application user: " +
+			"it is base64")
 	}
 	if len(platform) == 0 {
 		return nil, fmt.Errorf("payments are for the deployment's own provider keys, and " +
@@ -65,7 +68,7 @@ func payments(platform catalog.Platform, publicURL string) (*Payments, error) {
 	}
 	return &Payments{
 		PostFinance: payment.Settings{
-			URL:     env("KEERA_POSTFINANCE_URL", payment.DefaultURL),
+			URL:     env("KEERA_BILLING_POSTFINANCE_URL", payment.DefaultURL),
 			SpaceID: spaceID, UserID: user, AuthKey: authKey,
 		},
 		VATBP: vat,

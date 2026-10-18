@@ -136,19 +136,19 @@ subscription models.
 3. Set these, then restart:
 
 ```sh
-KEERA_POSTFINANCE_SPACE_ID=4711
-KEERA_POSTFINANCE_USER_ID=123456
-KEERA_POSTFINANCE_AUTH_KEY=...          # the authentication key, as shown
+KEERA_BILLING_POSTFINANCE_SPACE_ID=4711
+KEERA_BILLING_POSTFINANCE_USER_ID=123456
+KEERA_BILLING_POSTFINANCE_AUTH_KEY=...  # the authentication key, as shown
 KEERA_BILLING_VAT=8.1                   # optional
 ```
 
-| Setting                      | What it does                                                                                                    |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `KEERA_POSTFINANCE_SPACE_ID` | Your space in PostFinance Checkout. All three settings switch payments on.                                      |
-| `KEERA_POSTFINANCE_USER_ID`  | The application user's id.                                                                                      |
-| `KEERA_POSTFINANCE_AUTH_KEY` | The application user's authentication key, in base64 as PostFinance shows it.                                   |
-| `KEERA_BILLING_VAT`          | VAT added on top of each payment, in percent, such as `8.1`. Default 0. It applies to every organisation alike. |
-| `KEERA_POSTFINANCE_URL`      | The API's address. Default `https://checkout.postfinance.ch`, which serves test spaces too.                     |
+| Setting                              | What it does                                                                                                    |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `KEERA_BILLING_POSTFINANCE_SPACE_ID` | Your space in PostFinance Checkout. All three settings switch payments on.                                      |
+| `KEERA_BILLING_POSTFINANCE_USER_ID`  | The application user's id.                                                                                      |
+| `KEERA_BILLING_POSTFINANCE_AUTH_KEY` | The application user's authentication key, in base64 as PostFinance shows it.                                   |
+| `KEERA_BILLING_VAT`                  | VAT added on top of each payment, in percent, such as `8.1`. Default 0. It applies to every organisation alike. |
+| `KEERA_BILLING_POSTFINANCE_URL`      | The API's address. Default `https://checkout.postfinance.ch`, which serves test spaces too.                     |
 
 Payments also need at least one `KEERA_PROVIDER_<NAME>_API_KEY`, and
 `KEERA_PUBLIC_URL` set to an `https` address: PostFinance sends people back
@@ -156,8 +156,9 @@ there after they pay. On your own machine, `http://localhost`, any
 `*.localhost` name and a loopback address such as `http://127.0.0.1` work too.
 
 A setting that cannot work stops the start: only some of the three
-`KEERA_POSTFINANCE_*` settings, `KEERA_POSTFINANCE_URL` or `KEERA_BILLING_VAT`
-without them, a space id that is not a number, or a VAT that cannot be read.
+`KEERA_BILLING_POSTFINANCE_*` settings, `KEERA_BILLING_POSTFINANCE_URL` or
+`KEERA_BILLING_VAT` without them, a space id that is not a number, or a VAT that
+cannot be read.
 
 ### Turning it on
 

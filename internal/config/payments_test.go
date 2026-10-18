@@ -10,13 +10,13 @@ import (
 // provider key's calls take from the credit.
 func TestAPostFinanceAccountSwitchesPaymentsOn(t *testing.T) {
 	c, err := loadWith(t, valid(map[string]string{
-		"KEERA_PUBLIC_URL":                 "https://keera.example",
-		"KEERA_PROVIDER_ANTHROPIC_API_KEY": "sk-ant-test",
-		"KEERA_PROVIDER_CSCS_API_KEY":      "sk-cscs-test",
-		"KEERA_POSTFINANCE_SPACE_ID":       "4711",
-		"KEERA_POSTFINANCE_USER_ID":        "123456",
-		"KEERA_POSTFINANCE_AUTH_KEY":       "c2VjcmV0",
-		"KEERA_BILLING_VAT":                "8.1",
+		"KEERA_PUBLIC_URL":                   "https://keera.example",
+		"KEERA_PROVIDER_ANTHROPIC_API_KEY":   "sk-ant-test",
+		"KEERA_PROVIDER_CSCS_API_KEY":        "sk-cscs-test",
+		"KEERA_BILLING_POSTFINANCE_SPACE_ID": "4711",
+		"KEERA_BILLING_POSTFINANCE_USER_ID":  "123456",
+		"KEERA_BILLING_POSTFINANCE_AUTH_KEY": "c2VjcmV0",
+		"KEERA_BILLING_VAT":                  "8.1",
 	}))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -43,11 +43,11 @@ func TestWithoutAnAccountNothingIsTakenFromTheCredit(t *testing.T) {
 
 func TestAPaymentSettingThatCannotWorkStopsTheStart(t *testing.T) {
 	account := map[string]string{
-		"KEERA_PUBLIC_URL":            "https://keera.example",
-		"KEERA_PROVIDER_CSCS_API_KEY": "sk",
-		"KEERA_POSTFINANCE_SPACE_ID":  "4711",
-		"KEERA_POSTFINANCE_USER_ID":   "1",
-		"KEERA_POSTFINANCE_AUTH_KEY":  "c2VjcmV0",
+		"KEERA_PUBLIC_URL":                   "https://keera.example",
+		"KEERA_PROVIDER_CSCS_API_KEY":        "sk",
+		"KEERA_BILLING_POSTFINANCE_SPACE_ID": "4711",
+		"KEERA_BILLING_POSTFINANCE_USER_ID":  "1",
+		"KEERA_BILLING_POSTFINANCE_AUTH_KEY": "c2VjcmV0",
 	}
 	with := func(kv ...string) map[string]string {
 		out := map[string]string{}
@@ -62,11 +62,12 @@ func TestAPaymentSettingThatCannotWorkStopsTheStart(t *testing.T) {
 		env  map[string]string
 		want string
 	}{
-		{"half an account", map[string]string{"KEERA_POSTFINANCE_SPACE_ID": "1"}, "all three"},
+		{"half an account", map[string]string{"KEERA_BILLING_POSTFINANCE_SPACE_ID": "1"}, "all three"},
 		{"VAT without an account", map[string]string{"KEERA_BILLING_VAT": "8.1"},
 			"KEERA_BILLING_VAT does nothing"},
-		{"space not a number", with("KEERA_POSTFINANCE_SPACE_ID", "main"), "KEERA_POSTFINANCE_SPACE_ID"},
-		{"key not base64", with("KEERA_POSTFINANCE_AUTH_KEY", "not base64!"), "base64"},
+		{"space not a number", with("KEERA_BILLING_POSTFINANCE_SPACE_ID", "main"),
+			"KEERA_BILLING_POSTFINANCE_SPACE_ID"},
+		{"key not base64", with("KEERA_BILLING_POSTFINANCE_AUTH_KEY", "not base64!"), "base64"},
 		{"no provider key", with("KEERA_PROVIDER_CSCS_API_KEY", ""), "KEERA_PROVIDER_<NAME>_API_KEY"},
 		{"no https address", with("KEERA_PUBLIC_URL", "http://keera.example"), "KEERA_PUBLIC_URL"},
 		{"not this machine", with("KEERA_PUBLIC_URL", "http://localhost.example:8080"), "KEERA_PUBLIC_URL"},
@@ -87,11 +88,11 @@ func TestPaymentsWorkOnThisMachineOverHTTP(t *testing.T) {
 	for _, u := range []string{"http://localhost:8080", "http://keera.localhost:8080",
 		"http://127.0.0.1:8080", "http://[::1]:8080"} {
 		c, err := loadWith(t, valid(map[string]string{
-			"KEERA_PUBLIC_URL":            u,
-			"KEERA_PROVIDER_CSCS_API_KEY": "sk",
-			"KEERA_POSTFINANCE_SPACE_ID":  "4711",
-			"KEERA_POSTFINANCE_USER_ID":   "1",
-			"KEERA_POSTFINANCE_AUTH_KEY":  "c2VjcmV0",
+			"KEERA_PUBLIC_URL":                   u,
+			"KEERA_PROVIDER_CSCS_API_KEY":        "sk",
+			"KEERA_BILLING_POSTFINANCE_SPACE_ID": "4711",
+			"KEERA_BILLING_POSTFINANCE_USER_ID":  "1",
+			"KEERA_BILLING_POSTFINANCE_AUTH_KEY": "c2VjcmV0",
 		}))
 		if err != nil || c.Payments == nil {
 			t.Errorf("%s: payments = %v, %v", u, c.Payments, err)

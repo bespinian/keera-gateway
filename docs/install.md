@@ -146,8 +146,8 @@ not follow redirects from a backend or an MCP server.
 ### Provider keys of the deployment's own
 
 `KEERA_PROVIDER_<NAME>_API_KEY` gives organisations the deployment's own key for
-that provider, billed at list price, and `KEERA_POSTFINANCE_*` lets them pay in
-advance. See [billing.md](billing.md).
+that provider, billed at list price, and `KEERA_BILLING_POSTFINANCE_*` lets them
+pay in advance. See [billing.md](billing.md).
 
 ### Rate limits with more than one replica
 
