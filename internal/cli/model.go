@@ -4,6 +4,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"os"
+	"slices"
 	"strings"
 
 	"github.com/bespinian/keera-gateway/internal/catalog"
@@ -423,7 +425,24 @@ func (r *modelRun) find(ctx context.Context, alias string) (policy.Model, error)
 }
 
 func (r *modelRun) putModel(ctx context.Context, m policy.Model, cred *string) error {
-	return putAlias(ctx, r.aliasRun, m.Alias, modelPut{Model: m, APIKey: cred}, printModel)
+	var saved policy.Model
+	if err := r.c.do(ctx, "PUT", r.path(m.Alias, ""), modelPut{Model: m, APIKey: cred}, &saved); err != nil {
+		return err
+	}
+	err := out(r.asJSON, saved, func(w *table) { printModel(w, saved) })
+	warnUnusedBackends(r.f.backends, saved)
+	return err
+}
+
+// warnUnusedBackends says when the gateway sent a model somewhere other than
+// the --backend given. It does that for a model on the deployment's own key,
+// which goes only to its provider. It writes to stderr, so --json stays clean.
+func warnUnusedBackends(asked []string, saved policy.Model) {
+	if len(asked) == 0 || !saved.PlatformKey || slices.Equal(asked, saved.Backends) {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "\nThis deployment holds the %s key, which goes only to %s,\n"+
+		"so --backend was not used.\n", saved.Provider, strings.Join(saved.Backends, ", "))
 }
 
 // modelUsers lists the filters and routers that name a model. Deleting it
