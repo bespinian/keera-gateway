@@ -36,6 +36,11 @@ func TestIdentifyReadsTheAgentOffTheWire(t *testing.T) {
 			want: "opencode",
 		},
 		{
+			name: "codex exec is Codex",
+			ua:   "codex_exec/0.163.0 (NixOS 26.11.0; x86_64) kitty (codex_exec; 0.163.0)",
+			want: "codex",
+		},
+		{
 			name: "an SDK is a client too",
 			ua:   "OpenAI/Python 1.40.0",
 			want: "openai-sdk",

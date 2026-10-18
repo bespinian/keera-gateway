@@ -41,7 +41,10 @@ var agents = []struct {
 	{key: "pi", products: []string{"pi", "pi-agent"}},
 	{key: "opencode", products: []string{"opencode"}},
 	{key: "claude-code", products: []string{"claude-cli", "claude-code"}},
-	{key: "codex", products: []string{"codex", "codex-cli", "codex_cli_rs"}},
+	// Codex names the surface it runs in: the terminal, `codex exec`, the
+	// VS Code extension or the TypeScript SDK.
+	{key: "codex", products: []string{"codex", "codex-cli", "codex_cli_rs", "codex_exec",
+		"codex_vscode", "codex_sdk_ts"}},
 	{key: "aider", label: "Aider", products: []string{"aider"}},
 	{key: "keera", label: "Keera CLI", products: []string{"keera", "keera-cli"}},
 	// The panel's playground states its name in the header. Its User-Agent is
