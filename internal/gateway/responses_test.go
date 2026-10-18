@@ -3,8 +3,10 @@ package gateway
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -599,5 +601,68 @@ func TestAFilterReadsACustomToolsOutput(t *testing.T) {
 	if sent := nextSeen(t, seen); strings.Contains(sent.body, "hunter2") ||
 		!strings.Contains(sent.body, "[CREDENTIAL]") {
 		t.Errorf("sent = %s, want the output redacted", sent.body)
+	}
+}
+
+func TestAnItemThatFitsNoFieldIsDropped(t *testing.T) {
+	// A tool search call's arguments are an object, where a function call's
+	// are a string. It used to fail the whole input, and so the request.
+	in := `{"model":"m","input":[{"type":"tool_search_call","call_id":"ts","arguments":{}},` +
+		`{"role":"user","content":"hi"}]}`
+	msgs := messagesOf(t, decodeResponses(t, in))
+	if len(msgs) != 1 || msgs[0]["content"] != "hi" {
+		t.Errorf("messages = %v, want the user's message alone", msgs)
+	}
+}
+
+func TestImagesFromToolsFollowAllTheResults(t *testing.T) {
+	// Codex's view_image answers with an image. The tool role carries only
+	// text, and a user turn between two results would part the second from
+	// its call.
+	in := `{"model":"m","input":[` +
+		`{"type":"function_call","call_id":"a","name":"view_image","arguments":"{}"},` +
+		`{"type":"function_call","call_id":"b","name":"view_image","arguments":"{}"},` +
+		`{"type":"function_call_output","call_id":"a","output":[{"type":"input_text","text":"see"},` +
+		`{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]},` +
+		`{"type":"function_call_output","call_id":"b","output":"done"}]}`
+	msgs := messagesOf(t, decodeResponses(t, in))
+	var roles []string
+	for _, m := range msgs {
+		roles = append(roles, m["role"].(string))
+	}
+	if !slices.Equal(roles, []string{"assistant", "tool", "tool", "user"}) {
+		t.Fatalf("roles = %v, want the call, both results, then the image", roles)
+	}
+	if msgs[1]["content"] != "see" {
+		t.Errorf("first result = %v, want its text", msgs[1]["content"])
+	}
+	parts, _ := msgs[3]["content"].([]any)
+	if len(parts) != 1 || !strings.Contains(fmt.Sprint(parts[0]), "data:image/png;base64,AAAA") {
+		t.Errorf("image turn = %v, want the tool's image", msgs[3]["content"])
+	}
+}
+
+func TestALocalShellCallStaysInTheConversation(t *testing.T) {
+	in := `{"model":"m","input":[{"role":"user","content":"x"},` +
+		`{"type":"local_shell_call","call_id":"c","status":"completed","action":{"type":"exec","command":["ls"]}},` +
+		`{"type":"local_shell_call_output","call_id":"c","output":"a b"}]}`
+	msgs := messagesOf(t, decodeResponses(t, in))
+	if len(msgs) != 3 || msgs[2]["role"] != "tool" || msgs[2]["content"] != "a b" {
+		t.Fatalf("messages = %v, want the call and its output after the user", msgs)
+	}
+	calls, _ := msgs[1]["tool_calls"].([]any)
+	if len(calls) != 1 || !strings.Contains(fmt.Sprint(calls[0]), `"command":["ls"]`) {
+		t.Errorf("call = %v, want the command as its arguments", msgs[1]["tool_calls"])
+	}
+}
+
+func TestATextFileReachesTheModel(t *testing.T) {
+	in := `{"model":"m","input":[{"role":"user","content":[` +
+		`{"type":"input_file","filename":"a.txt","file_data":"data:text/plain;base64,aGVsbG8="},` +
+		`{"type":"input_file","filename":"b.pdf","file_data":"data:application/pdf;base64,JVBERi0="},` +
+		`{"type":"input_text","text":"what is in it?"}]}]}`
+	msgs := messagesOf(t, decodeResponses(t, in))
+	if len(msgs) != 1 || msgs[0]["content"] != "a.txt\n\nhello\n\nwhat is in it?" {
+		t.Errorf("messages = %v, want the text file and the question", msgs)
 	}
 }

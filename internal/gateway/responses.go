@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -88,6 +89,9 @@ type responsesItem struct {
 
 	// function_call_output and custom_tool_call_output
 	Output json.RawMessage `json:"output"`
+
+	// local_shell_call: the command, kept as the call's arguments
+	Action json.RawMessage `json:"action"`
 }
 
 type responsesPart struct {
@@ -95,6 +99,10 @@ type responsesPart struct {
 	Text     jsonText `json:"text"`
 	Refusal  jsonText `json:"refusal"`
 	ImageURL jsonText `json:"image_url"`
+
+	// input_file, sent inline as a data URL
+	Filename string `json:"filename"`
+	FileData string `json:"file_data"`
 }
 
 // decodeBody turns a Responses request into a chat completion request, and
@@ -148,42 +156,103 @@ func responsesMessages(in responsesRequest) ([]chatMessage, error) {
 	if text, err := textOf(in.Input); err == nil {
 		return append(msgs, chatMessage{role: "user", content: text}), nil
 	}
-	var items []responsesItem
+	var items []json.RawMessage
 	if err := json.Unmarshal(in.Input, &items); err != nil {
 		return nil, errors.New("the 'input' field must be a string or an array of items")
 	}
-	for i, it := range items {
-		var err error
-		if msgs, err = addItem(msgs, it); err != nil {
+	// The chat shape's tool role carries only text, so images a tool returned
+	// wait for the end of the tool results and follow them as a user turn.
+	// Put between two results, they would part the second from its call.
+	var images []chatPart
+	for i, raw := range items {
+		var it responsesItem
+		if err := json.Unmarshal(raw, &it); err != nil {
+			// An item the translation does not use is dropped, even when its
+			// fields do not fit the ones it reads.
+			var head struct {
+				Type string `json:"type"`
+			}
+			_ = json.Unmarshal(raw, &head)
+			if !translatedItem(head.Type) {
+				continue
+			}
 			return nil, errors.New("input[" + strconv.Itoa(i) + "]: " + err.Error())
 		}
+		if !isToolOutput(it.Type) && len(images) > 0 {
+			msgs = append(msgs, chatMessage{role: "user", parts: images})
+			images = nil
+		}
+		var (
+			err  error
+			more []chatPart
+		)
+		if msgs, more, err = addItem(msgs, it); err != nil {
+			return nil, errors.New("input[" + strconv.Itoa(i) + "]: " + err.Error())
+		}
+		images = append(images, more...)
+	}
+	if len(images) > 0 {
+		msgs = append(msgs, chatMessage{role: "user", parts: images})
 	}
 	return msgs, nil
 }
 
-func addItem(msgs []chatMessage, it responsesItem) ([]chatMessage, error) {
+func translatedItem(typ string) bool {
+	switch typ {
+	case "", "message", "function_call", "custom_tool_call", "local_shell_call":
+		return true
+	}
+	return isToolOutput(typ)
+}
+
+func isToolOutput(typ string) bool {
+	switch typ {
+	case "function_call_output", "custom_tool_call_output", "local_shell_call_output":
+		return true
+	}
+	return false
+}
+
+// addItem appends one item, and returns the images a tool's output held.
+func addItem(msgs []chatMessage, it responsesItem) ([]chatMessage, []chatPart, error) {
 	switch it.Type {
 	case "", "message":
-		return addMessageItem(msgs, it)
+		msgs, err := addMessageItem(msgs, it)
+		return msgs, nil, err
 	case "function_call":
 		args := it.Arguments
 		if args == "" {
 			args = "{}"
 		}
-		return addCall(msgs, it, args), nil
+		return addCall(msgs, it, args), nil, nil
 	case "custom_tool_call":
 		args, err := json.Marshal(map[string]string{"input": it.Input})
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return addCall(msgs, it, string(args)), nil
-	case "function_call_output", "custom_tool_call_output":
-		text, _ := responsesContent(it.Output)
-		return append(msgs, chatMessage{role: "tool", toolCallID: it.CallID, content: text}), nil
+		return addCall(msgs, it, string(args)), nil, nil
+	case "local_shell_call":
+		// The tool itself runs only at OpenAI, but the command and its output
+		// stay in the conversation, so the model knows what already ran.
+		it.Name = "local_shell"
+		args := "{}"
+		if len(it.Action) > 0 && it.Action[0] == '{' {
+			args = string(it.Action)
+		}
+		return addCall(msgs, it, args), nil, nil
+	case "function_call_output", "custom_tool_call_output", "local_shell_call_output":
+		text, parts := responsesContent(it.Output)
+		var images []chatPart
+		for _, p := range parts {
+			if p.imageURL != nil {
+				images = append(images, p)
+			}
+		}
+		return append(msgs, chatMessage{role: "tool", toolCallID: it.CallID, content: text}), images, nil
 	}
 	// Reasoning items, item references and the calls of built-in tools have no
 	// counterpart, and the model answers without them.
-	return msgs, nil
+	return msgs, nil, nil
 }
 
 // addCall appends a call the model made, under the name the chat shape knows
@@ -253,6 +322,11 @@ func responsesContent(raw json.RawMessage) (jsonText, []chatPart) {
 		case "refusal":
 			texts = append(texts, p.Refusal)
 			out = append(out, chatPart{text: orEmpty(p.Refusal)})
+		case "input_file":
+			if text := fileText(p); text != nil {
+				texts = append(texts, text)
+				out = append(out, chatPart{text: text})
+			}
 		case "input_image":
 			// An image named by file id lives on OpenAI's servers, and no
 			// other model can fetch it.
@@ -266,6 +340,28 @@ func responsesContent(raw json.RawMessage) (jsonText, []chatPart) {
 		out = nil
 	}
 	return orEmpty(joinTexts(texts)), out
+}
+
+// fileText is the contents of a text file sent inline, under its name. A file
+// of any other kind, or one named by id, is nil: only OpenAI can read those.
+func fileText(p responsesPart) jsonText {
+	media, data, ok := strings.Cut(strings.TrimPrefix(p.FileData, "data:"), ",")
+	if !ok || !strings.HasPrefix(p.FileData, "data:") {
+		return nil
+	}
+	media, base64Encoded := strings.CutSuffix(media, ";base64")
+	media, _, _ = strings.Cut(media, ";")
+	if !strings.HasPrefix(media, "text/") && media != "application/json" {
+		return nil
+	}
+	content := []byte(data)
+	if base64Encoded {
+		var err error
+		if content, err = base64.StdEncoding.DecodeString(data); err != nil {
+			return nil
+		}
+	}
+	return joinTexts([]jsonText{quoteText(p.Filename), quoteText(string(content))})
 }
 
 // orEmpty is t, or empty text in place of none, for a field the chat shape
@@ -565,7 +661,8 @@ func (responsesDialect) opening(b *body) (json.RawMessage, bool) {
 		if err := json.Unmarshal(elem, &it); err != nil {
 			return nil, err
 		}
-		return addItem(nil, it)
+		msgs, _, err := addItem(nil, it)
+		return msgs, err
 	})
 }
 

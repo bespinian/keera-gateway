@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -606,5 +607,45 @@ func TestErrorTypesFollowTheStatus(t *testing.T) {
 		if got := anthropicErrorType(status); got != want {
 			t.Errorf("anthropicErrorType(%d) = %q, want %q", status, got, want)
 		}
+	}
+}
+
+func TestSearchResultsAndTextDocumentsReachTheModelAsText(t *testing.T) {
+	// A search_result's source is a string where an image's is an object. It
+	// used to fail the whole content array, and so the request.
+	in := `{"model":"m","messages":[{"role":"user","content":[` +
+		`{"type":"search_result","source":"https://a.ch","title":"A","content":[{"type":"text","text":"found"}]},` +
+		`{"type":"document","title":"Notes","source":{"type":"text","media_type":"text/plain","data":"plain doc"}},` +
+		`{"type":"text","text":"question"}]}]}`
+	msgs := messagesOf(t, decodeMessages(t, in))
+	if len(msgs) != 1 {
+		t.Fatalf("messages = %v, want one user message", msgs)
+	}
+	parts, _ := msgs[0]["content"].([]any)
+	var texts []string
+	for _, p := range parts {
+		texts = append(texts, p.(map[string]any)["text"].(string))
+	}
+	want := []string{"A\n\nhttps://a.ch\n\nfound", "Notes\n\nplain doc", "question"}
+	if !slices.Equal(texts, want) {
+		t.Errorf("texts = %q, want %q", texts, want)
+	}
+}
+
+func TestAnUnknownBlockThatFitsNoFieldIsDropped(t *testing.T) {
+	in := `{"model":"m","messages":[{"role":"user","content":[` +
+		`{"type":"future_block","source":5,"title":["x"]},{"type":"text","text":"hi"}]}]}`
+	msgs := messagesOf(t, decodeMessages(t, in))
+	if len(msgs) != 1 || msgs[0]["content"] != "hi" {
+		t.Errorf("messages = %v, want the text alone", msgs)
+	}
+}
+
+func TestASearchResultFromAToolKeepsItsText(t *testing.T) {
+	in := `{"model":"m","messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t",` +
+		`"content":[{"type":"search_result","source":"https://a.ch","title":"A","content":[{"type":"text","text":"found"}]}]}]}]}`
+	msgs := messagesOf(t, decodeMessages(t, in))
+	if len(msgs) != 1 || msgs[0]["content"] != "A\n\nhttps://a.ch\n\nfound" {
+		t.Errorf("messages = %v, want one tool message with the result's text", msgs)
 	}
 }

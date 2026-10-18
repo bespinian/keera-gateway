@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -74,17 +75,86 @@ type anthropicBlock struct {
 	Name  string          `json:"name"`
 	Input json.RawMessage `json:"input"`
 
-	// tool_result
+	// tool_result, and a search_result's own blocks
 	ToolUseID string          `json:"tool_use_id"`
 	Content   json.RawMessage `json:"content"`
 
-	// image
-	Source *struct {
-		Type      string   `json:"type"`
-		MediaType string   `json:"media_type"`
-		Data      jsonText `json:"data"`
-		URL       string   `json:"url"`
-	} `json:"source"`
+	// An object for an image or a document, but the address a search_result
+	// came from, so it is read for each type.
+	Source json.RawMessage `json:"source"`
+	// document and search_result
+	Title string `json:"title"`
+}
+
+// anthropicSource is where an image's or a document's bytes are.
+type anthropicSource struct {
+	Type      string          `json:"type"`
+	MediaType string          `json:"media_type"`
+	Data      jsonText        `json:"data"`
+	URL       string          `json:"url"`
+	Content   json.RawMessage `json:"content"`
+}
+
+func (b anthropicBlock) source() (anthropicSource, bool) {
+	var s anthropicSource
+	if len(b.Source) == 0 || b.Source[0] != '{' || json.Unmarshal(b.Source, &s) != nil {
+		return s, false
+	}
+	return s, true
+}
+
+// decodeBlocks reads a list of content blocks one by one. A block of a type
+// the translation does not use is dropped even when its fields do not fit
+// this struct, so a new block type cannot make the whole request fail.
+func decodeBlocks(raw json.RawMessage) ([]anthropicBlock, error) {
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil, err
+	}
+	blocks := make([]anthropicBlock, 0, len(items))
+	for i, item := range items {
+		var b anthropicBlock
+		if err := json.Unmarshal(item, &b); err != nil {
+			var head struct {
+				Type string `json:"type"`
+			}
+			_ = json.Unmarshal(item, &head)
+			switch head.Type {
+			case "text", "image", "tool_use", "tool_result":
+				return nil, fmt.Errorf("content block %d (%s): %w", i, head.Type, err)
+			}
+			continue
+		}
+		blocks = append(blocks, b)
+	}
+	return blocks, nil
+}
+
+// blockText is the text a block gives the model: a text block's text, a
+// plain-text document, or a search result's title, address and text. A
+// local model can read these, so they are kept rather than dropped.
+func blockText(b anthropicBlock) jsonText {
+	switch b.Type {
+	case "text":
+		return b.Text
+	case "document":
+		s, ok := b.source()
+		switch {
+		case !ok:
+			return nil
+		case s.Type == "text":
+			return joinTexts([]jsonText{quoteText(b.Title), s.Data})
+		case s.Type == "content":
+			inner, _ := decodeBlocks(s.Content)
+			return joinTexts([]jsonText{quoteText(b.Title), joinText(inner)})
+		}
+	case "search_result":
+		var url string
+		_ = json.Unmarshal(b.Source, &url)
+		inner, _ := decodeBlocks(b.Content)
+		return joinTexts([]jsonText{quoteText(b.Title), quoteText(url), joinText(inner)})
+	}
+	return nil
 }
 
 type oaiToolCall struct {
@@ -298,9 +368,12 @@ func convertMessage(role string, content json.RawMessage) ([]chatMessage, error)
 	if text, err := textOf(content); err == nil {
 		return []chatMessage{{role: role, content: text}}, nil
 	}
-	var blocks []anthropicBlock
-	if err := json.Unmarshal(content, &blocks); err != nil {
+	if len(bytes.TrimSpace(content)) == 0 || bytes.TrimSpace(content)[0] != '[' {
 		return nil, errors.New("'content' must be a string or an array of content blocks")
+	}
+	blocks, err := decodeBlocks(content)
+	if err != nil {
+		return nil, fmt.Errorf("'content' must be a string or an array of content blocks: %w", err)
 	}
 
 	switch role {
@@ -352,9 +425,9 @@ func convertUser(blocks []anthropicBlock) []chatMessage {
 	)
 	for _, b := range blocks {
 		switch b.Type {
-		case "text":
-			if !b.Text.isEmpty() {
-				parts = append(parts, chatPart{text: b.Text})
+		case "text", "document", "search_result":
+			if text := blockText(b); !text.isEmpty() {
+				parts = append(parts, chatPart{text: text})
 			}
 		case "image":
 			if p, ok := imagePart(b); ok {
@@ -368,8 +441,8 @@ func convertUser(blocks []anthropicBlock) []chatMessage {
 			// them.
 			parts = append(parts, images...)
 		}
-		// Other block types (thinking, redacted_thinking, document,
-		// search_result, tool_reference) have no counterpart and are dropped.
+		// Other blocks (thinking, redacted_thinking, a PDF document,
+		// tool_reference) have no counterpart and are dropped.
 	}
 
 	switch {
@@ -389,20 +462,21 @@ func convertUser(blocks []anthropicBlock) []chatMessage {
 // imagePart converts an image block. The Messages API carries the bytes
 // inline; the OpenAI shape carries the same bytes as a data URL.
 func imagePart(b anthropicBlock) (chatPart, bool) {
-	if b.Source == nil {
+	src, ok := b.source()
+	if !ok {
 		return chatPart{}, false
 	}
-	switch b.Source.Type {
+	switch src.Type {
 	case "url":
-		if b.Source.URL == "" {
+		if src.URL == "" {
 			return chatPart{}, false
 		}
-		return chatPart{imageURL: quoteText(b.Source.URL)}, true
+		return chatPart{imageURL: quoteText(src.URL)}, true
 	case "base64":
-		if b.Source.Data.isEmpty() || b.Source.MediaType == "" {
+		if src.Data.isEmpty() || src.MediaType == "" {
 			return chatPart{}, false
 		}
-		return chatPart{imageURL: dataURL(b.Source.MediaType, b.Source.Data)}, true
+		return chatPart{imageURL: dataURL(src.MediaType, src.Data)}, true
 	}
 	return chatPart{}, false
 }
@@ -431,8 +505,8 @@ func toolResult(raw json.RawMessage) (jsonText, []chatPart) {
 	if text, err := textOf(raw); err == nil {
 		return text, nil
 	}
-	var blocks []anthropicBlock
-	if json.Unmarshal(raw, &blocks) != nil {
+	blocks, err := decodeBlocks(raw)
+	if err != nil {
 		return quoteText(string(raw)), nil
 	}
 	var images []chatPart
@@ -446,14 +520,12 @@ func toolResult(raw json.RawMessage) (jsonText, []chatPart) {
 	return orEmpty(joinText(blocks)), images
 }
 
-// joinText joins the text blocks in a list with a blank line. Running them
+// joinText joins the text of the blocks in a list with a blank line. Running them
 // together would glue the last word of one to the first of the next.
 func joinText(blocks []anthropicBlock) jsonText {
 	texts := make([]jsonText, 0, len(blocks))
 	for _, b := range blocks {
-		if b.Type == "text" {
-			texts = append(texts, b.Text)
-		}
+		texts = append(texts, blockText(b))
 	}
 	return joinTexts(texts)
 }

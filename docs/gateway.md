@@ -126,10 +126,14 @@ size limit holds for what it unpacks to. Any other `Content-Encoding` is refused
 with a 415.
 
 The inference plane speaks chat completions, so the other two are translated on
-the way in and back on the way out. Fields that chat completions has no place
-for, such as thinking blocks, documents, search results, reasoning items,
-OpenAI's built-in tools and Anthropic's server tools, are dropped. Every answer names the alias as its
-model, never the backend's name for it.
+the way in and back on the way out. Text that a local model can read is kept:
+plain-text documents and files, and search results. Fields that chat
+completions has no place for, such as thinking blocks, PDF documents,
+reasoning items, OpenAI's built-in tools and Anthropic's server tools, are
+dropped. So is any block or item of a type the gateway does not know. The tool
+role carries only text, so images that tools return follow the tool results as
+a user message. Every answer names the alias as its model, never the backend's
+name for it.
 
 Chat completions has no tool namespaces and no custom tools, which Codex uses
 for its MCP tools, its subagents and `apply_patch`. A tool in a namespace is
