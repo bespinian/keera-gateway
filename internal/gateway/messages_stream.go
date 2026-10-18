@@ -43,6 +43,8 @@ type messagesStream struct {
 	send func([]byte) error
 	// buf is reused for every token's event.
 	buf []byte
+	// args holds the open tool call's arguments until its block closes.
+	args []byte
 
 	started   bool
 	nextIndex int
@@ -75,11 +77,12 @@ func (s *messagesStream) toolCall(index int, tc oaiToolCallDelta) error {
 	}); err != nil {
 		return err
 	}
-	args := tc.Function.Arguments
-	if args == "" {
-		return nil
-	}
-	return s.delta("input_json_delta", "partial_json", args)
+	// The arguments are held until the call is whole and sent as one
+	// fragment, checked as a buffered answer's are. A fragment cannot be taken
+	// back, and an Anthropic SDK fails the whole answer on arguments that are
+	// not JSON. The pings keep the client waiting meanwhile.
+	s.args = append(s.args, tc.Function.Arguments...)
+	return nil
 }
 
 // start opens the message, once.
@@ -126,6 +129,15 @@ func (s *messagesStream) openToolUse(upstreamIndex int, callID, name string) err
 func (s *messagesStream) closeBlock() error {
 	if s.open < 0 {
 		return nil
+	}
+	if s.isTool {
+		args := toolInput(string(s.args))
+		s.args = s.args[:0]
+		if string(args) != "{}" {
+			if err := s.delta("input_json_delta", "partial_json", string(args)); err != nil {
+				return err
+			}
+		}
 	}
 	index := s.open
 	s.open, s.isTool = -1, false

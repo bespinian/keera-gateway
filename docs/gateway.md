@@ -135,6 +135,11 @@ role carries only text, so images that tools return follow the tool results as
 a user message. Every answer names the alias as its model, never the backend's
 name for it.
 
+A model that writes tool arguments that are not JSON has them answered as `{}`,
+and the client reports the tool call as failed. On a Messages stream, a tool
+call's arguments are held until the call is whole and then sent at once, since
+a fragment cannot be taken back.
+
 Chat completions has no tool namespaces and no custom tools, which Codex uses
 for its MCP tools, its subagents and `apply_patch`. A tool in a namespace is
 declared on its own, under both names joined by `__`, such as

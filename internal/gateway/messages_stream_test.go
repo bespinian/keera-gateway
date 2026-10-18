@@ -149,10 +149,10 @@ func TestMessagesStreamNeverForwardsTheUsageChunk(t *testing.T) {
 }
 
 func TestMessagesStreamBuildsToolUseBlocks(t *testing.T) {
-	// Tool arguments arrive as fragments of a JSON string and leave as
-	// input_json_delta fragments against an open tool_use block. The block has
-	// to open before the first fragment and close before the message ends, or
-	// the client has nowhere to accumulate them.
+	// Tool arguments arrive as fragments of a JSON string and leave whole, as
+	// one input_json_delta against an open tool_use block. The block has to
+	// open before it and close before the message ends, or the client has
+	// nowhere to accumulate it.
 	events := pipeMessages(t,
 		`{"choices":[{"delta":{"content":"looking"}}]}`,
 		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function",`+
@@ -168,7 +168,7 @@ func TestMessagesStreamBuildsToolUseBlocks(t *testing.T) {
 	want := []string{
 		"message_start", "content_block_start", "content_block_delta", // text
 		"content_block_stop",
-		"content_block_start", "content_block_delta", "content_block_delta", // tool
+		"content_block_start", "content_block_delta", // tool
 		"content_block_stop", "message_delta", "message_stop",
 	}
 	if got := names(events); !slices.Equal(got, want) {
@@ -185,7 +185,7 @@ func TestMessagesStreamBuildsToolUseBlocks(t *testing.T) {
 	}
 
 	var args strings.Builder
-	for _, e := range events[5:7] {
+	for _, e := range events[5:6] {
 		delta := e.payload["delta"].(map[string]any)
 		if delta["type"] != "input_json_delta" {
 			t.Fatalf("delta type = %v, want input_json_delta", delta["type"])
@@ -652,7 +652,7 @@ func TestMessagesStreamReadsAToolCallLargerThanTheReadBuffer(t *testing.T) {
 	// A real tool call's arguments (a file, a patch) can be a line longer than
 	// one read of the upstream. Reading part of it as a whole chunk would hand
 	// the client broken JSON.
-	args := strings.Repeat("a", 3*readBuffer)
+	args := `{"content":"` + strings.Repeat("a", 3*readBuffer) + `"}`
 	quoted, err := json.Marshal(args)
 	if err != nil {
 		t.Fatal(err)
@@ -723,4 +723,41 @@ func (w *failingWriter) count() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.writes
+}
+
+func TestMessagesStreamSendsArgumentsThatAreNotJSONAsEmpty(t *testing.T) {
+	// Small models do write broken arguments. A buffered answer gets {} for
+	// them, and so does a stream: an Anthropic SDK fails the whole answer on
+	// arguments it cannot parse.
+	events := pipeMessages(t,
+		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1",`+
+			`"function":{"name":"Bash","arguments":"{not "}}]}}]}`,
+		`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"json"}}]}}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`)
+	for _, e := range events {
+		if e.name == "content_block_delta" {
+			t.Errorf("broken arguments reached the client: %v", e.payload)
+		}
+	}
+}
+
+func TestMessagesStreamCutOffSendsNoPartOfAToolCall(t *testing.T) {
+	// A call cut short could still read as a command, a shorter one.
+	var buf bytes.Buffer
+	_, err := anthropicShape{}.pipe(&buf, func() {}, strings.NewReader(sseStream(
+		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1",`+
+			`"function":{"name":"Bash","arguments":"{\"command\":\"rm -rf /tmp/x"}}]}}]}`)),
+		"keera-code", true, DefaultMaxResponseBytes)
+	if err == nil {
+		t.Fatal("a stream with no finish reason was taken as whole")
+	}
+	events := readEvents(t, buf.String())
+	for _, e := range events {
+		if e.name == "content_block_delta" {
+			t.Errorf("part of a cut-off call reached the client: %v", e.payload)
+		}
+	}
+	if last := events[len(events)-1].name; last != "error" {
+		t.Errorf("the stream ends with %q, want error", last)
+	}
 }
