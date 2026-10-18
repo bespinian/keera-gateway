@@ -173,9 +173,8 @@ func (s *Server) mcpPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { s.budgets.ReleaseCredit(x.res.Key.OrgID, x.held) }()
-	raw, ok := readBody(w, r, s.opts.MaxBodyBytes, func(msg string) {
-		httpx.WriteError(w, http.StatusRequestEntityTooLarge, "invalid_request_error",
-			"request_too_large", msg)
+	raw, ok := readBody(w, r, s.opts.MaxBodyBytes, func(status int, code, msg string) {
+		httpx.WriteError(w, status, "invalid_request_error", code, msg)
 	})
 	if !ok {
 		return

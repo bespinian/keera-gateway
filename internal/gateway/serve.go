@@ -1,6 +1,8 @@
 package gateway
 
 import (
+	"compress/gzip"
+	"compress/zlib"
 	"context"
 	"encoding/json"
 	"errors"
@@ -158,12 +160,8 @@ func (s *Server) receive(c *call) ([]byte, bool) {
 	// Opened rather than timed, so a body refused halfway (over the size cap)
 	// is still drawn as the step it was refused in.
 	c.tr.open(store.SpanReceive, "")
-	return readBody(c.w, c.r, s.opts.MaxBodyBytes, func(msg string) {
-		s.refuse(c, refusal{
-			status: http.StatusRequestEntityTooLarge,
-			typ:    "invalid_request_error", code: "request_too_large",
-			msg: msg,
-		})
+	return readBody(c.w, c.r, s.opts.MaxBodyBytes, func(status int, code, msg string) {
+		s.refuse(c, refusal{status: status, typ: "invalid_request_error", code: code, msg: msg})
 	})
 }
 
@@ -172,11 +170,12 @@ func (s *Server) receive(c *call) ([]byte, bool) {
 // long as it likes.
 const bodyReadTimeout = 2 * time.Minute
 
-// readBody reads a request body of at most limit bytes. A body over the limit
-// is answered by tooLarge, in the caller's own shape. Any other error is a
-// client that went away mid-upload, which needs no answer.
+// readBody reads a request body of at most limit bytes, compressed or not. A
+// body over the limit, or in an encoding the gateway cannot read, is answered
+// by refuse, in the caller's own shape. Any other error is a client that went
+// away mid-upload, which needs no answer.
 func readBody(w http.ResponseWriter, r *http.Request, limit int64,
-	tooLarge func(msg string),
+	refuse func(status int, code, msg string),
 ) ([]byte, bool) {
 	// The deadline is lifted again after: the connection is still read while
 	// the answer streams, to notice the client hanging up. Not every writer
@@ -184,12 +183,48 @@ func readBody(w http.ResponseWriter, r *http.Request, limit int64,
 	rc := http.NewResponseController(w)
 	_ = rc.SetReadDeadline(time.Now().Add(bodyReadTimeout))
 	defer func() { _ = rc.SetReadDeadline(time.Time{}) }()
-	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
+	var src io.Reader = http.MaxBytesReader(w, r.Body, limit)
+	enc := strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Encoding")))
+	compressed := enc != "" && enc != "identity"
+	switch enc {
+	case "", "identity":
+	case "gzip", "x-gzip", "deflate":
+		var (
+			zr  io.ReadCloser
+			err error
+		)
+		if enc == "deflate" {
+			zr, err = zlib.NewReader(src)
+		} else {
+			zr, err = gzip.NewReader(src)
+		}
+		if err != nil {
+			refuse(http.StatusBadRequest, "invalid_body", "the request body is not valid "+enc)
+			return nil, false
+		}
+		defer func() { _ = zr.Close() }()
+		// The limit holds for what the body unpacks to as well, or a small
+		// upload could fill the memory.
+		src = io.LimitReader(zr, limit+1)
+	default:
+		refuse(http.StatusUnsupportedMediaType, "unsupported_encoding",
+			"the gateway reads a request body plain, gzip or deflate, not "+enc)
+		return nil, false
+	}
+	raw, err := io.ReadAll(src)
+	if err == nil && int64(len(raw)) > limit {
+		err = &http.MaxBytesError{Limit: limit}
+	}
 	if err == nil {
 		return raw, true
 	}
 	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-		tooLarge("the request body exceeds the gateway's limit")
+		refuse(http.StatusRequestEntityTooLarge, "request_too_large",
+			"the request body exceeds the gateway's limit")
+	} else if compressed {
+		// A client that went away mid-upload is sent this too, and never
+		// reads it.
+		refuse(http.StatusBadRequest, "invalid_body", "the request body could not be decompressed: "+err.Error())
 	}
 	return nil, false
 }

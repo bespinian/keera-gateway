@@ -121,6 +121,10 @@ ends in `/api`.
 A client given a base URL without `/api` gets a 404 `wrong_base_url` that says
 where the API is, rather than the panel's page.
 
+A request body may be sent plain, or compressed with gzip or deflate. The
+size limit holds for what it unpacks to. Any other `Content-Encoding` is refused
+with a 415.
+
 The inference plane speaks chat completions, so the other two are translated on
 the way in and back on the way out. Fields that chat completions has no place
 for, such as thinking blocks, documents, search results, reasoning items,
@@ -674,6 +678,7 @@ as `billing_error` for 402. The other APIs carry these codes:
 | 402    | `budget_exceeded`, `credit_exhausted` ([billing.md](billing.md#pay-in-advance))                                                                                     |
 | 403    | `filter_refused`, `subscriptions_off`, `org_limited`                                                                                                                |
 | 404    | `model_not_found`: no such model, the key may not use it, or it is served at another endpoint; `mcp_server_not_found`; `not_found`: no such route; `wrong_base_url` |
+| 415    | `unsupported_encoding`: a request body compressed other than with gzip or deflate                                                                                   |
 | 413    | `request_too_large` (`KEERA_MAX_BODY_BYTES`), `filter_input_too_large`                                                                                              |
 | 429    | `rate_limit_exceeded` (`rpm`), `token_rate_limit_exceeded` (`tpm`)                                                                                                  |
 | 502    | `upstream_unavailable`, `upstream_error`, `filter_failed`, `mcp_credential_refused`, `mcp_unavailable`                                                              |

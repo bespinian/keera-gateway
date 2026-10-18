@@ -337,8 +337,8 @@ func (s *Server) countTokens(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	raw, ok := readBody(w, r, s.opts.MaxBodyBytes, func(msg string) {
-		sh.writeError(w, http.StatusRequestEntityTooLarge, "", "", msg)
+	raw, ok := readBody(w, r, s.opts.MaxBodyBytes, func(status int, _, msg string) {
+		sh.writeError(w, status, "", "", msg)
 	})
 	if !ok {
 		return
