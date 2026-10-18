@@ -509,11 +509,14 @@ func TestWriteEventsAnnouncesThatTheLogGrew(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
 
-	conn, err := st.pool.Acquire(ctx)
+	pooled, err := st.pool.Acquire(ctx)
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
-	defer conn.Release()
+	// Closed rather than released, so the LISTEN does not follow the
+	// connection into later tests.
+	conn := pooled.Hijack()
+	defer conn.Close(context.Background())
 	if _, err := conn.Exec(ctx, "LISTEN "+EventsChannel); err != nil {
 		t.Fatalf("LISTEN: %v", err)
 	}
@@ -527,7 +530,7 @@ func TestWriteEventsAnnouncesThatTheLogGrew(t *testing.T) {
 
 	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	n, err := conn.Conn().WaitForNotification(waitCtx)
+	n, err := conn.WaitForNotification(waitCtx)
 	if err != nil {
 		t.Fatalf("WaitForNotification: %v", err)
 	}
