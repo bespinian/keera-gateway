@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -256,6 +257,67 @@ func TestUsageGroupsByEveryDimensionThePanelOffers(t *testing.T) {
 		if got[k] != v {
 			t.Errorf("group %q = %d, want %d", k, got[k], v)
 		}
+	}
+}
+
+func TestUsageChartDrawsTheBusiestGroupsAndTheRest(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	day := time.Date(2026, 9, 7, 10, 0, 0, 0, time.UTC)
+
+	// Seven models: model-7 serves seven requests, model-1 one. The two
+	// quietest have no line of their own.
+	var events []Event
+	for m := 1; m <= 7; m++ {
+		for i := range m {
+			events = append(events, Event{TS: day.AddDate(0, 0, i%2), OrgID: f.orgID,
+				KeyID: f.keyID, Alias: fmt.Sprintf("model-%d", m), Status: 200})
+		}
+	}
+	// A failed request is not served, so no line counts it.
+	events = append(events, Event{TS: day, OrgID: f.orgID, KeyID: f.keyID,
+		Alias: "model-7", Status: 502})
+	if err := st.WriteEvents(ctx, events); err != nil {
+		t.Fatalf("WriteEvents: %v", err)
+	}
+
+	from, to := day.Add(-time.Hour), day.AddDate(0, 0, 2)
+	c, err := st.UsageChart(ctx, UsageQuery{OrgID: f.orgID, From: from, To: to,
+		GroupBy: "model"})
+	if err != nil {
+		t.Fatalf("UsageChart: %v", err)
+	}
+	if c.Bucket != "day" || len(c.At) < 3 {
+		t.Fatalf("chart = %s buckets × %d, want a point per day", c.Bucket, len(c.At))
+	}
+	want := []string{"model-7", "model-6", "model-5", "model-4", "model-3", ""}
+	if len(c.Lines) != len(want) {
+		t.Fatalf("lines = %+v, want %v", c.Lines, want)
+	}
+	totals := []int64{7, 6, 5, 4, 3, 3}
+	for i, l := range c.Lines {
+		if l.Group != want[i] || l.Total != totals[i] || l.Other != (i == len(want)-1) {
+			t.Errorf("line %d = %s (other %v) with %d, want %q with %d",
+				i, l.Group, l.Other, l.Total, want[i], totals[i])
+		}
+		var sum int64
+		for _, n := range l.Counts {
+			sum += n
+		}
+		if len(l.Counts) != len(c.At) || sum != l.Total {
+			t.Errorf("line %q counts %v, want %d points adding up to %d",
+				l.Group, l.Counts, len(c.At), l.Total)
+		}
+	}
+
+	// By day, a line per day would be one point each, so it is one line.
+	c, err = st.UsageChart(ctx, UsageQuery{OrgID: f.orgID, From: from, To: to,
+		GroupBy: "day"})
+	if err != nil {
+		t.Fatalf("UsageChart by day: %v", err)
+	}
+	if len(c.Lines) != 1 || c.Lines[0].Total != 28 {
+		t.Errorf("lines by day = %+v, want one of 28 requests", c.Lines)
 	}
 }
 

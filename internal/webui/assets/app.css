@@ -1443,6 +1443,15 @@ a.pill-button:hover {
   stroke-linejoin: round;
   stroke-linecap: round;
 }
+.chart .series {
+  fill: none;
+  stroke-width: 1.75;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.chart .series.dashed {
+  stroke-dasharray: 4 3;
+}
 .chart .err-bar {
   fill: var(--bad);
   opacity: 0.75;
@@ -1479,6 +1488,39 @@ a.pill-button:hover {
 }
 .chart-holder {
   position: relative;
+}
+.chart-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.chart-tip-row .v {
+  margin-left: auto;
+  padding-left: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.chart-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.chart-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  flex: none;
+}
+.chart-swatch.dashed {
+  opacity: 0.6;
 }
 
 .bars {

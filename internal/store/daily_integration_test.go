@@ -156,6 +156,10 @@ func TestReportsOutliveTheRequestLog(t *testing.T) {
 		t.Errorf("Overview over 30 days = %d requests, %d micros, %v; want 1 and 100",
 			o.Requests, o.CostMicros, err)
 	}
+	c, err := st.UsageChart(ctx, UsageQuery{OrgID: f.orgID, From: month, To: now})
+	if err != nil || len(c.Lines) != 1 || c.Lines[0].Total != 1 {
+		t.Errorf("UsageChart over 30 days = %+v, %v; want one line of 1", c, err)
+	}
 	keys, err := st.KeySummaries(ctx, KeyQuery{OrgID: f.orgID, Since: month})
 	if err != nil || len(keys) != 1 || keys[0].Requests != 1 || keys[0].LastUsedAt == nil ||
 		!keys[0].LastUsedAt.Equal(old.Truncate(time.Microsecond)) {

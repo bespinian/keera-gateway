@@ -483,6 +483,130 @@ func (s *Store) Usage(ctx context.Context, q UsageQuery) ([]UsageBucket, error) 
 	return queryAll(ctx, s.pool, scanUsageBucket, sql, append([]any{from, to, q.OrgID}, q.args()...)...)
 }
 
+// UsageChart is the usage report's chart: served requests over time, one line
+// for each of the busiest groups and one for the rest.
+type UsageChart struct {
+	Bucket string      `json:"bucket"`
+	At     []time.Time `json:"at"`
+	Lines  []UsageLine `json:"lines"`
+}
+
+// UsageLine is one group's served requests, a count for each time in At.
+type UsageLine struct {
+	Group string `json:"group"`
+	OrgID string `json:"org_id,omitempty"`
+	// Other sums every group without a line of its own.
+	Other  bool    `json:"other,omitempty"`
+	Total  int64   `json:"total"`
+	Counts []int64 `json:"counts"`
+}
+
+// chartLines is how many groups get a line of their own. The panel has six
+// series colours, and the sixth is for the rest.
+const chartLines = 5
+
+// UsageChart draws the report Usage lists over time. It counts what Usage
+// counts, so the lines add up to the report's served requests.
+func (s *Store) UsageChart(ctx context.Context, q UsageQuery) (UsageChart, error) {
+	src, from, to := sourceFor(q.From, q.To)
+	groupBy := q.GroupBy
+	if !ValidGroupBy(groupBy) {
+		groupBy = DefaultGroupBy
+	}
+	col := src.group(groupBy)
+	org := "''"
+	if q.OrgID == "" && groupBy == "model" {
+		org = "org_id"
+	}
+	// Each day is a single point on a chart over days, so a report by day
+	// draws one line.
+	if groupBy == "day" {
+		col = "''"
+	}
+	c := UsageChart{Bucket: chartBucket(from, to)}
+
+	// Every bucket in the window is listed, as on the dashboard, so a quiet
+	// stretch shows as a dip.
+	var err error
+	c.At, err = queryAll(ctx, s.pool, func(r row) (time.Time, error) {
+		var t time.Time
+		return t, r.Scan(&t)
+	}, `SELECT generate_series(date_trunc($3, $1::timestamptz),
+		date_trunc($3, $2::timestamptz), ('1 ' || $3)::interval)`,
+		from, src.lastBucket(to), c.Bucket)
+	if err != nil {
+		return c, err
+	}
+	index := make(map[int64]int, len(c.At))
+	for i, t := range c.At {
+		index[t.UnixMicro()] = i
+	}
+
+	type point struct {
+		at         time.Time
+		group, org string
+		other      bool
+		n          int64
+	}
+	points, err := queryAll(ctx, s.pool, func(r row) (point, error) {
+		var p point
+		return p, r.Scan(&p.at, &p.group, &p.org, &p.other, &p.n)
+	}, `
+		WITH counts AS (
+		    SELECT date_trunc($4, `+src.at+`) AS at, `+col+` AS grp, `+org+` AS org,
+		           `+src.served+` AS n
+		    FROM `+src.table+`
+		    WHERE `+src.window+` AND ($3 = '' OR org_id = $3)`+q.narrow("", 4)+`
+		    GROUP BY 1, 2, 3
+		), top AS (
+		    SELECT grp, org FROM counts
+		    GROUP BY grp, org HAVING sum(n) > 0
+		    ORDER BY sum(n) DESC, grp LIMIT `+fmt.Sprint(chartLines)+`
+		)
+		SELECT c.at, COALESCE(t.grp, ''), COALESCE(t.org, ''), t.grp IS NULL,
+		       sum(c.n)::bigint
+		FROM counts c LEFT JOIN top t ON t.grp = c.grp AND t.org = c.org
+		GROUP BY 1, 2, 3, 4`,
+		append([]any{from, to, q.OrgID, c.Bucket}, q.args()...)...)
+	if err != nil {
+		return c, err
+	}
+
+	lines := map[[2]string]*UsageLine{}
+	var other *UsageLine
+	for _, p := range points {
+		i, ok := index[p.at.UnixMicro()]
+		if !ok || p.n == 0 {
+			continue
+		}
+		l := other
+		if !p.other {
+			l = lines[[2]string{p.group, p.org}]
+		}
+		if l == nil {
+			l = &UsageLine{Group: p.group, OrgID: p.org, Other: p.other,
+				Counts: make([]int64, len(c.At))}
+			if p.other {
+				other = l
+			} else {
+				lines[[2]string{p.group, p.org}] = l
+			}
+		}
+		l.Counts[i] += p.n
+		l.Total += p.n
+	}
+	for _, l := range lines {
+		c.Lines = append(c.Lines, *l)
+	}
+	slices.SortFunc(c.Lines, func(a, b UsageLine) int {
+		return cmp.Or(cmp.Compare(b.Total, a.Total), cmp.Compare(a.Group, b.Group))
+	})
+	if other != nil {
+		c.Lines = append(c.Lines, *other)
+	}
+	return c, nil
+}
+
 func scanUsageBucket(r row) (UsageBucket, error) {
 	var b UsageBucket
 	err := r.Scan(&b.Group, &b.OrgID, &b.Requests, &b.InputTokens, &b.OutputTokens,

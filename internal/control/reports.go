@@ -384,8 +384,13 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request, p *authn.Principa
 		s.usageCSV(w, orgID, groupBy, from, to, buckets, names)
 		return
 	}
+	chart, err := s.st.UsageChart(r.Context(), uq)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	out := map[string]any{
-		"from": from, "to": to, "data": buckets,
+		"from": from, "to": to, "data": buckets, "chart": chart,
 	}
 	names.addTo(out)
 	// Client names come from the rows, not the database, so they are built

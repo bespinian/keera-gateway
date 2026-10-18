@@ -17,25 +17,70 @@ const MIN_W = 280;
  * points: [{ at, requests, tokens, cost_micros, errors }]
  */
 export function areaChart(points, { height = 190, bucket = "day" } = {}) {
-  const holder = h("div", { class: "chart-holder" });
   if (!points || points.length === 0) {
-    holder.append(empty("No requests in this period"));
-    return holder;
+    return h(
+      "div",
+      { class: "chart-holder" },
+      empty("No requests in this period"),
+    );
   }
-
   // A single point has no line to draw, so it is widened into a flat pair.
   const data = points.length === 1 ? [points[0], { ...points[0] }] : points;
-  const tip = h("div", { class: "chart-tip", style: { display: "none" } });
+  return responsive((w, tip) => paintArea(data, w, height, { bucket, tip }));
+}
 
-  // The chart is drawn in real pixels, not a unit grid the browser stretches,
-  // which would stretch the labels and the line too. A detached element has no
-  // width, so it is drawn at a guess and redrawn once its width is known.
+/**
+ * lineChart draws one line per series over the same times, with a legend.
+ * lines: [{ label, color, counts, dashed }], counts holding one number per
+ * time in at.
+ */
+export function lineChart(at, lines, { height = 190, bucket = "day" } = {}) {
+  if (!at || at.length === 0 || !lines || lines.length === 0) {
+    return h(
+      "div",
+      { class: "chart-holder" },
+      empty("No requests in this period"),
+    );
+  }
+  // A single point has no line to draw, so it is widened into a flat pair.
+  const times = at.length === 1 ? [at[0], at[0]] : at;
+  const series =
+    at.length === 1
+      ? lines.map((l) => ({ ...l, counts: [l.counts[0], l.counts[0]] }))
+      : lines;
+  const holder = responsive((w, tip) =>
+    paintLines(times, series, w, height, { bucket, tip }),
+  );
+  holder.append(
+    h(
+      "div",
+      { class: "chart-legend" },
+      lines.map((l) => h("span", { class: "chart-key" }, swatch(l), l.label)),
+    ),
+  );
+  return holder;
+}
+
+function swatch(l) {
+  return h("span", {
+    class: "chart-swatch" + (l.dashed ? " dashed" : ""),
+    style: { background: l.color },
+  });
+}
+
+// responsive draws a chart in real pixels, not a unit grid the browser
+// stretches, which would stretch the labels and the line too. A detached
+// element has no width, so it is drawn at a guess and redrawn once its width
+// is known.
+function responsive(paint) {
+  const holder = h("div", { class: "chart-holder" });
+  const tip = h("div", { class: "chart-tip", style: { display: "none" } });
   let drawnAt = 0;
   function draw(width) {
     const w = Math.max(MIN_W, Math.round(width));
     if (w === drawnAt) return;
     drawnAt = w;
-    const plot = paint(data, w, height, { bucket, tip });
+    const plot = paint(w, tip);
     const old = holder.querySelector("svg.chart");
     if (old) {
       // Whatever the pointer was over is gone with the shape it was over.
@@ -56,29 +101,24 @@ export function areaChart(points, { height = 190, bucket = "day" } = {}) {
   return holder;
 }
 
-function paint(data, W, H, { bucket, tip }) {
+// frame is what every chart shares: the scales, the grid, the time labels,
+// and a hover target per time that fills the tip through describe.
+function frame(times, maxY, W, H, { bucket, tip, describe }) {
+  const n = times.length;
   const innerW = W - PAD.left - PAD.right;
   const innerH = H - PAD.top - PAD.bottom;
-
-  const maxY = Math.max(1, ...data.map((p) => p.requests));
-  const niceMax = niceCeil(maxY);
-  const x = (i) =>
-    PAD.left +
-    (data.length === 1 ? innerW / 2 : (i / (data.length - 1)) * innerW);
+  const niceMax = niceCeil(Math.max(1, maxY));
+  const x = (i) => PAD.left + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
   const y = (v) => PAD.top + innerH - (v / niceMax) * innerH;
-
-  const line = data
-    .map(
-      (p, i) =>
-        `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.requests).toFixed(1)}`,
-    )
-    .join(" ");
-  const area =
-    `${line} L${x(data.length - 1).toFixed(1)},${(PAD.top + innerH).toFixed(1)} ` +
-    `L${x(0).toFixed(1)},${(PAD.top + innerH).toFixed(1)} Z`;
+  const path = (values) =>
+    values
+      .map(
+        (v, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`,
+      )
+      .join(" ");
 
   const ticks = [0, 0.5, 1].map((f) => Math.round(niceMax * f));
-  const gridlines = ticks.map((t) => [
+  const grid = ticks.map((t) => [
     svg("line", {
       class: "grid-line",
       x1: PAD.left,
@@ -98,25 +138,6 @@ function paint(data, W, H, { bucket, tip }) {
     ),
   ]);
 
-  // Failures are drawn as short bars along the baseline: they are usually rare
-  // enough to vanish on the same scale as requests, and they matter more.
-  const maxErr = Math.max(1, ...data.map((p) => p.errors));
-  const barW = Math.max(1.5, Math.min(9, innerW / data.length - 1.5));
-  const errBars = data.map((p, i) =>
-    p.errors > 0
-      ? svg("rect", {
-          class: "err-bar",
-          x: (x(i) - barW / 2).toFixed(1),
-          y: (PAD.top + innerH - (p.errors / maxErr) * (innerH * 0.28)).toFixed(
-            1,
-          ),
-          width: barW.toFixed(1),
-          height: ((p.errors / maxErr) * (innerH * 0.28)).toFixed(1),
-          rx: 1,
-        })
-      : null,
-  );
-
   const cursor = svg("line", {
     class: "cursor-line",
     x1: 0,
@@ -126,8 +147,8 @@ function paint(data, W, H, { bucket, tip }) {
     opacity: 0,
   });
 
-  const hits = data.map((p, i) => {
-    const w = innerW / data.length;
+  const hits = times.map((at, i) => {
+    const w = innerW / n;
     return svg("rect", {
       class: "hit",
       x: (PAD.left + i * w).toFixed(1),
@@ -140,18 +161,8 @@ function paint(data, W, H, { bucket, tip }) {
         cursor.setAttribute("opacity", 1);
         tip.style.display = "";
         tip.replaceChildren(
-          h("div", { class: "t" }, bucketLabel(p.at, bucket, true)),
-          h(
-            "div",
-            { class: "muted" },
-            `${num(p.requests)} requests · ${compact(p.tokens)} tokens`,
-          ),
-          h(
-            "div",
-            { class: "muted" },
-            money(p.cost_micros) +
-              (p.errors ? ` · ${num(p.errors)} failed` : ""),
-          ),
+          h("div", { class: "t" }, bucketLabel(at, bucket, true)),
+          ...describe(i),
         );
         const frac = x(i) / W;
         tip.style.left = `calc(${(frac * 100).toFixed(2)}% - ${frac > 0.6 ? 150 : -12}px)`;
@@ -166,16 +177,13 @@ function paint(data, W, H, { bucket, tip }) {
 
   // Label as many positions as fit: a date needs about seventy pixels. The last
   // bucket is always named, and a label that would overlap it is dropped.
-  const last = data.length - 1;
-  const step = Math.max(
-    1,
-    Math.ceil(data.length / Math.max(2, Math.floor(innerW / 70))),
-  );
+  const last = n - 1;
+  const step = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(innerW / 70))));
   const labelled = new Set([last]);
   for (let i = 0; i < last; i += step) {
     if (x(last) - x(i) >= 60) labelled.add(i);
   }
-  const xLabels = data.map((p, i) =>
+  const labels = times.map((at, i) =>
     labelled.has(i)
       ? svg(
           "text",
@@ -185,29 +193,116 @@ function paint(data, W, H, { bucket, tip }) {
             y: H - 6,
             "text-anchor": i === 0 ? "start" : i === last ? "end" : "middle",
           },
-          bucketLabel(p.at, bucket, false),
+          bucketLabel(at, bucket, false),
         )
       : null,
   );
 
-  return svg(
-    "svg",
+  const chart = (label, ...marks) =>
+    svg(
+      "svg",
+      {
+        class: "chart",
+        viewBox: `0 0 ${W} ${H}`,
+        width: W,
+        height: H,
+        role: "img",
+        "aria-label": label,
+      },
+      grid,
+      ...marks,
+      cursor,
+      labels,
+      hits,
+    );
+  return { x, y, path, innerW, innerH, chart };
+}
+
+function paintArea(data, W, H, { bucket, tip }) {
+  const f = frame(
+    data.map((p) => p.at),
+    Math.max(...data.map((p) => p.requests)),
+    W,
+    H,
     {
-      class: "chart",
-      viewBox: `0 0 ${W} ${H}`,
-      width: W,
-      height: H,
-      role: "img",
-      "aria-label": "Requests over time",
+      bucket,
+      tip,
+      describe: (i) => {
+        const p = data[i];
+        return [
+          h(
+            "div",
+            { class: "muted" },
+            `${num(p.requests)} requests · ${compact(p.tokens)} tokens`,
+          ),
+          h(
+            "div",
+            { class: "muted" },
+            money(p.cost_micros) +
+              (p.errors ? ` · ${num(p.errors)} failed` : ""),
+          ),
+        ];
+      },
     },
-    gridlines,
+  );
+  const { x, innerW, innerH } = f;
+  const line = f.path(data.map((p) => p.requests));
+  const base = (PAD.top + innerH).toFixed(1);
+  const area =
+    `${line} L${x(data.length - 1).toFixed(1)},${base} ` +
+    `L${x(0).toFixed(1)},${base} Z`;
+
+  // Failures are drawn as short bars along the baseline: they are usually rare
+  // enough to vanish on the same scale as requests, and they matter more.
+  const maxErr = Math.max(1, ...data.map((p) => p.errors));
+  const barW = Math.max(1.5, Math.min(9, innerW / data.length - 1.5));
+  const errBars = data.map((p, i) => {
+    if (!(p.errors > 0)) return null;
+    const bh = (p.errors / maxErr) * (innerH * 0.28);
+    return svg("rect", {
+      class: "err-bar",
+      x: (x(i) - barW / 2).toFixed(1),
+      y: (PAD.top + innerH - bh).toFixed(1),
+      width: barW.toFixed(1),
+      height: bh.toFixed(1),
+      rx: 1,
+    });
+  });
+
+  return f.chart(
+    "Requests over time",
     svg("path", { class: "area", d: area }),
     svg("path", { class: "line", d: line }),
     errBars,
-    cursor,
-    xLabels,
-    hits,
   );
+}
+
+function paintLines(times, lines, W, H, { bucket, tip }) {
+  const f = frame(times, Math.max(...lines.flatMap((l) => l.counts)), W, H, {
+    bucket,
+    tip,
+    describe: (i) =>
+      lines.map((l) =>
+        h(
+          "div",
+          { class: "chart-tip-row" },
+          swatch(l),
+          h("span", { class: "muted" }, l.label),
+          h("span", { class: "v" }, num(l.counts[i])),
+        ),
+      ),
+  });
+  // The rest is drawn first, so the named lines sit on top of it.
+  const paths = lines
+    .map((l) =>
+      svg("path", {
+        class: "series" + (l.dashed ? " dashed" : ""),
+        d: f.path(l.counts),
+        style: `stroke: ${l.color}`,
+      }),
+    )
+    .reverse();
+  return f.chart("Requests over time", paths);
 }
 
 function bucketLabel(iso, bucket, long) {

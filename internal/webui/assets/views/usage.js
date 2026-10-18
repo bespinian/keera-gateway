@@ -4,7 +4,6 @@ import { api } from "../api.js";
 import {
   h,
   table,
-  num,
   compact,
   money,
   amount,
@@ -15,6 +14,7 @@ import {
   RANGES as SHARED_RANGES,
   csvButton,
 } from "../ui.js";
+import { lineChart } from "../chart.js";
 import { orgNameOf } from "./orgs.js";
 
 const GROUPS = [
@@ -62,7 +62,7 @@ export async function usageView(ctx) {
   // Only served requests are counted, but the cost adds up every row: a
   // refused or failed one can still have paid for a filter or router call.
   ctx.setSubtitle(
-    `${num(requests)} served ${plural(requests, "request")} · ${money(total)}`,
+    `${compact(requests)} served ${plural(requests, "request")} · ${money(total)}`,
   );
 
   const controls = h(
@@ -97,22 +97,51 @@ export async function usageView(ctx) {
     ),
   );
 
+  // A row with no group is real traffic: a key with no project, or the
+  // operator key. A dash would read as a bug.
+  const nothing =
+    groupBy === "project"
+      ? "No project"
+      : groupBy === "user"
+        ? "No user"
+        : groupBy === "client"
+          ? "Unidentified client"
+          : "-";
+
+  // The busiest groups each get a line and the rest share one, so the chart
+  // stays readable over hundreds of keys.
+  const lineName = (l) => {
+    if (l.other) return "Other";
+    if (groupBy === "day") return "Served";
+    if (!l.group) return nothing;
+    if (l.org_id) return `${l.group} · ${orgNameOf(ctx, l.org_id)}`;
+    if (groupBy === "org") return orgNameOf(ctx, l.group);
+    if (groupBy === "model") return l.group;
+    return (names[groupBy] && names[groupBy][l.group]) || "deleted";
+  };
+  const chartData = res.chart || {};
+  const chart = h(
+    "div",
+    { class: "card", style: { marginBottom: "16px" } },
+    h("div", { class: "card-head" }, h("h2", {}, "Served requests")),
+    h(
+      "div",
+      { class: "card-body" },
+      lineChart(
+        chartData.at,
+        (chartData.lines || []).map((l, i) => ({
+          label: lineName(l),
+          color: l.other ? "var(--faint)" : `var(--s${(i % 6) + 1})`,
+          dashed: l.other,
+          counts: l.counts,
+        })),
+        { bucket: chartData.bucket },
+      ),
+    ),
+  );
+
   const label = (r) => {
-    if (!r.group) {
-      // A row with no group is real traffic: a key with no project, or the
-      // operator key. A dash would read as a bug.
-      return h(
-        "span",
-        { class: "faint" },
-        groupBy === "project"
-          ? "No project"
-          : groupBy === "user"
-            ? "No user"
-            : groupBy === "client"
-              ? "Unidentified client"
-              : "-",
-      );
-    }
+    if (!r.group) return h("span", { class: "faint" }, nothing);
     if (r.org_id) {
       // Across every organisation, two of them can each have a model of the
       // same alias, so the row names whose it is.
@@ -189,7 +218,7 @@ export async function usageView(ctx) {
         label: "Served",
         width: "16%",
         num: true,
-        cell: (r) => num(r.requests),
+        cell: (r) => compact(r.requests),
         sortKey: (r) => r.requests,
         sortDir: "desc",
       },
@@ -241,7 +270,7 @@ export async function usageView(ctx) {
           h(
             "span",
             { class: "muted" },
-            `${num(requests)} served ${plural(requests, "request")}`,
+            `${compact(requests)} served ${plural(requests, "request")}`,
           ),
           h("strong", {}, money(total)),
         ),
@@ -257,5 +286,5 @@ export async function usageView(ctx) {
       "estimate, and the log marks them.",
   );
 
-  return h("div", {}, controls, body, foot, note);
+  return h("div", {}, controls, chart, body, foot, note);
 }
