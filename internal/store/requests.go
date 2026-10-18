@@ -138,7 +138,8 @@ const requestColumns = `id, ts, alias, status, COALESCE(error, ''),
 	COALESCE(client, ''), input_tokens, cached_input_tokens, cache_write_tokens,
 	output_tokens, cost_micros,
 	latency_ms, ttft_ms, stream, estimated, canceled, COALESCE(session_key, ''),
-	spans, COALESCE(request_id, ''), COALESCE(client_request_id, ''), COALESCE(note, '')`
+	COALESCE(spans, spans_jsonb::json), COALESCE(request_id, ''),
+	COALESCE(client_request_id, ''), COALESCE(note, '')`
 
 func scanRequest(r row) (Request, error) {
 	var q Request

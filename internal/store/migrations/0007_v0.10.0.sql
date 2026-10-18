@@ -43,7 +43,8 @@ CREATE TABLE usage_daily (
     PRIMARY KEY (org_id, day, key_id, alias, client, project_id, user_id)
 ) WITH (fillfactor = 80); -- room for the upserts to update rows in place
 
--- Fill the totals from the request log that is still there.
+-- Fill the totals from the request log that is still there. It runs before
+-- the changes below, so their locks are held only briefly.
 INSERT INTO usage_daily (day, org_id, key_id, alias, client, project_id, user_id,
     requests, refused, failed, input_tokens, output_tokens, cached_input_tokens,
     cache_write_tokens, cost_micros, list_cost_micros, last_at)
@@ -55,3 +56,54 @@ SELECT (ts AT TIME ZONE 'UTC')::date, org_id, COALESCE(key_id, ''), alias,
        sum(cache_write_tokens), sum(cost_micros), sum(list_cost_micros), max(ts)
 FROM usage_events
 GROUP BY 1, 2, 3, 4, 5, 6, 7;
+
+-- Spans are now written as compact arrays in plain json, about a third of
+-- the size of jsonb objects. Rows written before keep their jsonb, which is
+-- read until retention removes them.
+ALTER TABLE usage_events RENAME COLUMN spans TO spans_jsonb;
+ALTER TABLE usage_events ADD COLUMN spans json;
+
+-- Indexes the reports no longer need. Long windows read usage_daily, and
+-- short ones are narrowed to one organisation by usage_events_org_ts_idx.
+DROP INDEX usage_events_project_ts_idx;
+DROP INDEX usage_events_alias_ts_idx;
+-- The filters list now names its filters, so it uses the index that leads
+-- with them.
+DROP INDEX filter_runs_org_ts_idx;
+-- One session's tool calls are a few minutes of usage_events_org_ts_idx.
+DROP INDEX tool_calls_key_ts_idx;
+
+-- A session key is a hash that already includes the key, so it alone finds
+-- one conversation, and each value is stored once.
+DROP INDEX usage_events_session_idx;
+CREATE INDEX usage_events_session_idx ON usage_events (session_key)
+    WHERE session_key IS NOT NULL;
+
+-- The request log's indexes, ascending. Descending, each new row went to the
+-- front of its organisation's range, and every page split there left a page
+-- half empty for good. The log reads them backwards for newest first.
+DROP INDEX usage_events_org_id_idx;
+CREATE INDEX usage_events_org_id_idx ON usage_events (org_id, id);
+DROP INDEX usage_events_failed_idx;
+CREATE INDEX usage_events_failed_idx ON usage_events (org_id, id)
+    WHERE status >= 400 OR error IS NOT NULL;
+
+-- Request ids are only ever looked up whole, which a hash index does in
+-- less space.
+DROP INDEX usage_events_request_id_idx;
+CREATE INDEX usage_events_request_id_idx ON usage_events USING hash (request_id)
+    WHERE request_id IS NOT NULL;
+DROP INDEX usage_events_client_request_id_idx;
+CREATE INDEX usage_events_client_request_id_idx ON usage_events USING hash (client_request_id)
+    WHERE client_request_id IS NOT NULL;
+
+-- Billing rows are never deleted, so they stay in time order and a BRIN
+-- index finds a month in a fraction of the space.
+DROP INDEX billing_lines_ts_idx;
+CREATE INDEX billing_lines_ts_idx ON billing_lines USING brin (ts);
+
+-- Retention deletes a little every hour. Vacuum then runs at 2% dead rows
+-- rather than 20%, so the space is reused before the tables grow.
+ALTER TABLE usage_events SET (autovacuum_vacuum_scale_factor = 0.02);
+ALTER TABLE filter_runs SET (autovacuum_vacuum_scale_factor = 0.02);
+ALTER TABLE tool_calls SET (autovacuum_vacuum_scale_factor = 0.02);

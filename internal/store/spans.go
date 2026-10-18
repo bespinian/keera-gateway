@@ -69,8 +69,12 @@ type Span struct {
 // bloating the busiest table.
 const maxSpans = 64
 
-// spansJSON encodes the steps for the jsonb column. No steps is NULL rather
+// spansJSON encodes the steps for the json column. No steps is NULL rather
 // than an empty array, because the panel shows the two differently.
+//
+// Each step is written as an array, [name, at, for, of, note], without the
+// empty fields at the end. That is a third of the size of an object with its
+// keys, on every row of the busiest table.
 //
 // A marshalling error is treated as no steps. Span cannot produce one, and a
 // served request is not worth failing to record over it.
@@ -81,9 +85,38 @@ func spansJSON(spans []Span) []byte {
 	if len(spans) > maxSpans {
 		spans = spans[:maxSpans]
 	}
-	out, err := json.Marshal(spans)
+	rows := make([][]any, len(spans))
+	for i, sp := range spans {
+		row := []any{sp.Name, sp.At, sp.For, sp.Of, sp.Note}
+		for len(row) > 3 && row[len(row)-1] == "" {
+			row = row[:len(row)-1]
+		}
+		rows[i] = row
+	}
+	out, err := json.Marshal(rows)
 	if err != nil {
 		return nil
 	}
 	return out
+}
+
+// UnmarshalJSON reads a step written by spansJSON, or the object form that
+// rows from before v0.10.0 hold and the API sends.
+func (sp *Span) UnmarshalJSON(b []byte) error {
+	if len(b) == 0 || b[0] != '[' {
+		type plain Span
+		return json.Unmarshal(b, (*plain)(sp))
+	}
+	var row []json.RawMessage
+	if err := json.Unmarshal(b, &row); err != nil {
+		return err
+	}
+	*sp = Span{}
+	fields := []any{&sp.Name, &sp.At, &sp.For, &sp.Of, &sp.Note}
+	for i, raw := range row[:min(len(row), len(fields))] {
+		if err := json.Unmarshal(raw, fields[i]); err != nil {
+			return err
+		}
+	}
+	return nil
 }

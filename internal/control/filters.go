@@ -33,8 +33,12 @@ func (s *Server) listFilters(w http.ResponseWriter, r *http.Request, p *authn.Pr
 		s.fail(w, err)
 		return
 	}
+	aliases := make([]string, len(filters))
+	for i, f := range filters {
+		aliases[i] = f.Alias
+	}
 	s.writeHookList(w, r, filters, func(from, to time.Time) (any, error) {
-		return s.st.FilterStats(r.Context(), orgID, from, to)
+		return s.st.FilterStats(r.Context(), orgID, aliases, from, to)
 	})
 }
 

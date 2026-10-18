@@ -185,7 +185,7 @@ func TestFilterRunsAreRecordedWithTheRequestsTheyFiltered(t *testing.T) {
 	filterTraffic(t, st, ctx, f, now)
 
 	from, to := now.Add(-time.Hour), now.Add(time.Hour)
-	stats, err := st.FilterStats(ctx, f.orgID, from, to)
+	stats, err := st.FilterStats(ctx, f.orgID, []string{"redact"}, from, to)
 	if err != nil {
 		t.Fatalf("FilterStats: %v", err)
 	}
@@ -403,7 +403,7 @@ func TestRetentionTakesTheFilterLogWithIt(t *testing.T) {
 	if _, err := st.PurgeUsage(ctx, time.Now().Add(-30*24*time.Hour)); err != nil {
 		t.Fatalf("PurgeUsage: %v", err)
 	}
-	stats, err := st.FilterStats(ctx, f.orgID, old.Add(-time.Hour), time.Now())
+	stats, err := st.FilterStats(ctx, f.orgID, []string{"redact"}, old.Add(-time.Hour), time.Now())
 	if err != nil {
 		t.Fatalf("FilterStats: %v", err)
 	}

@@ -100,16 +100,17 @@ func filterStatTargets(s *FilterStat) []any {
 		&s.FirstRunAt, &s.LastRunAt}
 }
 
-// FilterStats summarises every filter that ran inside a window, keyed by alias.
+// FilterStats summarises how each of aliases ran inside a window, keyed by
+// alias. Naming the filters lets it read the index that leads with them.
 //
 // A filter with no traffic is absent rather than zeroed. The caller knows which
 // filters exist, and a zero row would not prove the filter never ran.
-func (s *Store) FilterStats(ctx context.Context, orgID string, from, to time.Time) (
-	map[string]FilterStat, error) {
+func (s *Store) FilterStats(ctx context.Context, orgID string, aliases []string,
+	from, to time.Time) (map[string]FilterStat, error) {
 	stats, err := queryAll(ctx, s.pool, scanFilterStat, `SELECT filter, `+filterStatColumns+`
 		FROM filter_runs
-		WHERE ts >= $1 AND ts < $2 AND org_id = $3
-		GROUP BY filter`, from, to, orgID)
+		WHERE ts >= $1 AND ts < $2 AND org_id = $3 AND filter = ANY($4)
+		GROUP BY filter`, from, to, orgID, aliases)
 	if err != nil {
 		return nil, err
 	}

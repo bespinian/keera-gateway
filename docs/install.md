@@ -424,6 +424,11 @@ restart. Also:
   [Template files](gateway.md#template-files) for how to apply it to one.
 - **Run `keera model check` afterwards** if anything on the inference side
   changed.
+- **Upgrade to v0.10.0 before you shorten `KEERA_USAGE_RETENTION`.** The
+  upgrade fills `usage_daily` from the usage events still there. It reads the
+  whole table and rebuilds some of its indexes before the gateway serves, so on
+  a large database try it on a copy first, and stop the old replicas before
+  starting the new ones.
 - **A database created before v0.4.0 cannot be upgraded in place.** Its first
   schema file changed up to that release, and the gateway runs each file only
   once. Start from an empty database.

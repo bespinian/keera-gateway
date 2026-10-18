@@ -877,3 +877,25 @@ func TestARequestIsFoundByEitherID(t *testing.T) {
 		t.Errorf("rows = %+v, want req_2 with no client id", rows)
 	}
 }
+
+// Rows written before v0.10.0 hold their steps as jsonb objects. They are
+// read until retention removes them.
+func TestRequestsWrittenBeforeCompactSpansKeepTheirSteps(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	if _, err := st.pool.Exec(ctx, `INSERT INTO usage_events
+		(org_id, alias, status, latency_ms, spans_jsonb)
+		VALUES ($1, 'keera-code', 200, 5,
+		        '[{"name":"upstream","of":"keera-code","at_us":10,"for_us":20}]')`,
+		f.orgID); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := st.Requests(ctx, RequestQuery{OrgID: f.orgID})
+	if err != nil {
+		t.Fatalf("Requests: %v", err)
+	}
+	want := []Span{{Name: SpanUpstream, Of: "keera-code", At: 10, For: 20}}
+	if len(rows) != 1 || !slices.Equal(rows[0].Spans, want) {
+		t.Errorf("rows = %+v, want one with steps %+v", rows, want)
+	}
+}
