@@ -329,11 +329,15 @@ func (s *Server) target(c *call, b *body) bool {
 
 	n, ok := s.callable(c.res, alias, c.surf.kind)
 	if !ok {
+		msg, advise := modelNotFound(alias), true
+		if path := s.servedAt(c.res, alias); path != "" {
+			msg, advise = "the model '"+alias+"' is not served at this endpoint: send it to "+path, false
+		}
 		s.refuse(c, refusal{
 			status: http.StatusNotFound,
 			typ:    "invalid_request_error", code: "model_not_found",
-			msg:    modelNotFound(alias),
-			advise: true,
+			msg:    msg,
+			advise: advise,
 		})
 		return false
 	}

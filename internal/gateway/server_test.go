@@ -960,6 +960,19 @@ func TestEmbeddingsGoToTheirOwnSurface(t *testing.T) {
 	}
 }
 
+func TestAModelAtTheWrongEndpointIsToldWhereItIsServed(t *testing.T) {
+	// "Does not exist" sent people looking for a model that was there.
+	models := map[string]policy.Model{
+		"keera-code": {Alias: "keera-code", Kind: policy.KindChat, BackendModel: "c", Enabled: true},
+	}
+	h := newHarness(t, jsonBackend(`{}`), models, nil)
+	resp := h.post(t, "/v1/completions", `{"model":"keera-code","prompt":"x"}`)
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusNotFound || !strings.Contains(string(body), "/v1/chat/completions") {
+		t.Errorf("status = %d, body = %s; want a 404 naming /v1/chat/completions", resp.StatusCode, body)
+	}
+}
+
 func TestMalformedRequestsAreRejectedBeforeTheInferencePlane(t *testing.T) {
 	h := newHarness(t, jsonBackend(`{}`), nil, nil)
 	tests := []struct {

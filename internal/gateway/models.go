@@ -141,6 +141,26 @@ func (s *Server) callable(res *policy.Resolved, alias string, kind policy.Kind) 
 	return named{}, false
 }
 
+// servedAt names the endpoints a model the key may use is served at, for a
+// request that named it at an endpoint for another kind of model. It is ""
+// for any other model, so a refusal says nothing a key could not list.
+func (s *Server) servedAt(res *policy.Resolved, alias string) string {
+	m, found := s.findModel(res.Key, alias)
+	if !found || !m.Enabled || !res.MayUse(m) {
+		return ""
+	}
+	switch m.Kind {
+	case policy.KindChat:
+		return "/v1/chat/completions, /v1/messages or /v1/responses"
+	case policy.KindCompletion:
+		return "/v1/completions"
+	case policy.KindEmbedding:
+		return "/v1/embeddings"
+	}
+	// No client can name a decision model.
+	return ""
+}
+
 // created is the model's release date as a Unix time, which is what OpenAI's
 // "created" field holds. Zero when no date is stated.
 func created(m policy.Model) int64 {
