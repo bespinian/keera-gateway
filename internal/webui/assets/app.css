@@ -1049,6 +1049,14 @@ th.shrink {
   width: 1%;
   white-space: nowrap;
 }
+/* A row's buttons line up on the right edge, even when another row has more. */
+td.actions {
+  text-align: right;
+}
+td.actions > .row,
+td.actions > .row-tight {
+  justify-content: flex-end;
+}
 
 /* A sortable header is a real button: reachable from the keyboard, and it says
    what it does on hover. */

@@ -1322,7 +1322,14 @@ function rankHead(c, attrs, rank) {
 
 function cellClass(c) {
   return (
-    [c.num && "num", c.shrink && "shrink"].filter(Boolean).join(" ") || null
+    [
+      c.num && "num",
+      c.shrink && "shrink",
+      // A column without a heading holds the row's buttons.
+      c.label === "" && "actions",
+    ]
+      .filter(Boolean)
+      .join(" ") || null
   );
 }
 
