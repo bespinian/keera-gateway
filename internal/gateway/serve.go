@@ -1106,8 +1106,9 @@ func clampFields(b *body, limit int, fields ...string) {
 		asked = true
 		// A value that cannot be read is overwritten too. Leaving it would
 		// forward an unbounded number next to the bounded one, and the
-		// upstream would pick which to honour.
-		if v, ok := b.ceiling(field); !ok || v > float64(limit) {
+		// upstream would pick which to honour. So is one below 1: llama.cpp
+		// and Ollama read -1 as no limit at all.
+		if v, ok := b.ceiling(field); !ok || v < 1 || v > float64(limit) {
 			b.setInt(field, limit)
 		}
 	}

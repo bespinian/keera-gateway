@@ -207,6 +207,10 @@ func TestClampOutputTokens(t *testing.T) {
 		{"a ceiling written as a string", `{"max_tokens":"999999"}`, 4096, 4096, "max_tokens"},
 		{"a ceiling that is not a number at all", `{"max_tokens":"lots"}`, 4096, 4096, "max_tokens"},
 		{"a ceiling of true", `{"max_completion_tokens":true}`, 2048, 2048, "max_completion_tokens"},
+		// llama.cpp reads -1 as "until the context is full".
+		{"a negative ceiling", `{"max_tokens":-1}`, 4096, 4096, "max_tokens"},
+		{"a negative ceiling in the newer field", `{"max_completion_tokens":-1}`, 2048, 2048, "max_completion_tokens"},
+		{"a ceiling of zero", `{"max_tokens":0}`, 4096, 4096, "max_tokens"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
