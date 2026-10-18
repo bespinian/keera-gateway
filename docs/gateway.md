@@ -547,9 +547,9 @@ The refusal uses the wording clients act on. The code is
 `prompt is too long: N tokens > M maximum`, which makes Claude Code compact the
 conversation. A backend's own refusal says neither, and the agent stops.
 
-So on the Messages API, vLLM's and llama.cpp's refusals are reworded too. A
-prompt that is too long gets the same sentence. A prompt that fits, but not with
-its `max_tokens`, gets Anthropic's
+So vLLM's and llama.cpp's refusals are reworded too, on every API, and get the
+code. A prompt that is too long gets the same sentence. A prompt that fits, but
+not with its `max_tokens`, gets Anthropic's
 ``input length and `max_tokens` exceed context limit: N + K > M``, on which
 Claude Code lowers `max_tokens` and tries again.
 

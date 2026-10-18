@@ -90,13 +90,27 @@ func (openAIShape) encode(raw []byte, alias string, status int) ([]byte, int) {
 // openAIErrorBody puts an upstream error in the OpenAI envelope. One already
 // in it passes unchanged, type and code included. vLLM's bare message and
 // FastAPI's detail are wrapped, since an OpenAI SDK reads only error.message.
+//
+// A request too long for the backend's context is the exception: vLLM and
+// llama.cpp do not give OpenAI's code for it, which is what Codex and the
+// OpenAI SDKs act on, so it gets the code and the gateway's own wording.
 func openAIErrorBody(raw []byte, status int) []byte {
 	var envelope struct {
 		Error *struct {
 			Message string `json:"message"`
+			Code    any    `json:"code"`
 		} `json:"error"`
 	}
-	if json.Unmarshal(raw, &envelope) == nil && envelope.Error != nil && envelope.Error.Message != "" {
+	decoded := json.Unmarshal(raw, &envelope) == nil && envelope.Error != nil
+	if status == http.StatusBadRequest && (!decoded || envelope.Error.Code != "context_length_exceeded") {
+		if overflow := contextOverflow(raw); overflow != "" {
+			body, _ := json.Marshal(map[string]httpx.APIError{"error": {
+				Message: overflow, Type: "invalid_request_error", Code: "context_length_exceeded",
+			}})
+			return body
+		}
+	}
+	if decoded && envelope.Error.Message != "" {
 		return raw
 	}
 	typ := "invalid_request_error"
