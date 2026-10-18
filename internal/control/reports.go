@@ -365,9 +365,12 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request, p *authn.Principa
 	if !ok {
 		return
 	}
-	buckets, err := s.st.Usage(r.Context(), store.UsageQuery{
+	// Over more than two days the report counts whole days, so it says so.
+	from, to, _ = store.DayWindow(from, to)
+	uq := store.UsageQuery{
 		OrgID: orgID, ReportScope: sc, From: from, To: to, GroupBy: groupBy,
-	})
+	}
+	buckets, err := s.st.Usage(r.Context(), uq)
 	if err != nil {
 		s.fail(w, err)
 		return

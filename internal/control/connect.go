@@ -74,6 +74,7 @@ func (s *Server) listClients(w http.ResponseWriter, r *http.Request, p *authn.Pr
 	if !ok {
 		return
 	}
+	from, to, _ = store.DayWindow(from, to)
 	out := map[string]any{"from": from, "to": to, "data": []connectedClient{}}
 	// The operator key is not a person and has no keys.
 	if !isPerson(p) {

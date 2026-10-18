@@ -115,7 +115,7 @@ func (e *LostEvents) Error() string {
 func (e *LostEvents) Unwrap() error { return e.Err }
 
 // WriteEvents inserts a batch of usage events and their filter runs, adds
-// their cost to the spend roll-up, and announces that the log has grown, all
+// them to the spend and daily roll-ups, and announces that the log has grown, all
 // in one round trip. pg_notify with no listener does nothing.
 //
 // A batch is one transaction, so a single row Postgres refuses would lose
@@ -173,9 +173,13 @@ func (s *Store) writeBatch(ctx context.Context, events []Event) error {
 	batch := &pgx.Batch{}
 	spend := make(map[spendKey]int64)
 	plans := make(map[string]policy.PlanUsage)
+	daily := make(map[dailyKey]*dailySum)
 	for _, e := range events {
 		if !e.BillsOnly {
 			queueEvent(batch, e)
+			if e.Tool == nil {
+				addDaily(daily, e)
+			}
 		}
 		queueBills(batch, e)
 		if e.Plan != nil && e.KeyID != "" && !e.Plan.UpdatedAt.Before(plans[e.KeyID].UpdatedAt) {
@@ -195,6 +199,7 @@ func (s *Store) writeBatch(ctx context.Context, events []Event) error {
 			DO UPDATE SET micros = spend.micros + EXCLUDED.micros`,
 			string(k.scopeType), k.scopeID, string(k.period), k.start, spend[k])
 	}
+	queueDaily(batch, daily)
 	queueCredit(batch, events)
 	queuePlans(batch, plans)
 	if payload, ok := eventsPayload(events); ok {
@@ -443,37 +448,39 @@ func GroupBys() []string {
 // request can still have paid for a filter or router call. Requests counts
 // only what was served, as the keys screen does.
 func (s *Store) Usage(ctx context.Context, q UsageQuery) ([]UsageBucket, error) {
-	col, ok := groupColumns[q.GroupBy]
-	if !ok {
-		col = groupColumns[DefaultGroupBy]
+	src, from, to := sourceFor(q.From, q.To)
+	groupBy := q.GroupBy
+	if !ValidGroupBy(groupBy) {
+		groupBy = DefaultGroupBy
 	}
+	col := src.group(groupBy)
 	org, group := "''", "grp"
-	if q.OrgID == "" && col == groupColumns["model"] {
+	if q.OrgID == "" && groupBy == "model" {
 		org, group = "org_id", "grp, org_id"
 	}
 	// Days read as a timeline; every other grouping is ranked by cost.
 	order := "6 DESC"
-	if q.GroupBy == "day" {
+	if groupBy == "day" {
 		order = "grp"
 	}
 	// The alias is whatever the client sent, so a mistyped name is on its
 	// refusal's row. A name that was never served and cost nothing is not a
 	// model; the request log still shows the refusal.
 	having := ""
-	if col == groupColumns["model"] {
-		having = ` HAVING count(*) FILTER (WHERE status < 400) > 0
+	if groupBy == "model" {
+		having = ` HAVING ` + src.served + ` > 0
 		    OR sum(input_tokens + output_tokens) > 0
 		    OR sum(cost_micros + list_cost_micros) > 0`
 	}
-	sql := `SELECT ` + col + ` AS grp, ` + org + `, count(*) FILTER (WHERE status < 400),
+	sql := `SELECT ` + col + ` AS grp, ` + org + `, ` + src.served + `,
 		COALESCE(sum(input_tokens),0),
 		COALESCE(sum(output_tokens),0), COALESCE(sum(cost_micros),0),
 		COALESCE(sum(list_cost_micros),0)
-		FROM usage_events
-		WHERE ts >= $1 AND ts < $2 AND ($3 = '' OR org_id = $3)` +
+		FROM ` + src.table + `
+		WHERE ` + src.window + ` AND ($3 = '' OR org_id = $3)` +
 		q.narrow("", 3) + `
 		GROUP BY ` + group + having + ` ORDER BY ` + order
-	return queryAll(ctx, s.pool, scanUsageBucket, sql, append([]any{q.From, q.To, q.OrgID}, q.args()...)...)
+	return queryAll(ctx, s.pool, scanUsageBucket, sql, append([]any{from, to, q.OrgID}, q.args()...)...)
 }
 
 func scanUsageBucket(r row) (UsageBucket, error) {

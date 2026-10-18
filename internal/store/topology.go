@@ -122,13 +122,18 @@ type ClientUse struct {
 // and through which key, most recent first. It is the Clients screen: a
 // developer's own view of what they have connected.
 func (s *Store) ClientUses(ctx context.Context, orgID, userID string, from, to time.Time) ([]ClientUse, error) {
+	src, from, to := sourceFor(from, to)
+	last := "max(ts)"
+	if src.daily {
+		last = "max(last_at)"
+	}
 	return queryAll(ctx, s.pool, scanClientUse, `
-		SELECT COALESCE(client, ''), COALESCE(key_id, ''), count(*), max(ts)
-		FROM usage_events
-		WHERE user_id = $1 AND org_id = $2 AND ts >= $3 AND ts < $4
+		SELECT COALESCE(client, ''), COALESCE(key_id, ''), `+src.all+`, `+last+`
+		FROM `+src.table+`
+		WHERE `+src.window+` AND user_id = $3 AND org_id = $4
 		GROUP BY 1, 2
 		ORDER BY 4 DESC`,
-		userID, orgID, from, to)
+		from, to, userID, orgID)
 }
 
 func scanClientUse(r row) (ClientUse, error) {

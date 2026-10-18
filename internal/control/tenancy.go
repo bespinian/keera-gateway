@@ -965,6 +965,7 @@ func (s *Server) listKeys(w http.ResponseWriter, r *http.Request, p *authn.Princ
 		}
 		since = from
 	}
+	since, _, _ = store.DayWindow(since, time.Now())
 	keys, err := s.st.KeySummaries(r.Context(), store.KeyQuery{
 		OrgID: orgID, ProjectID: q.Get("project_id"), Since: since,
 	})

@@ -43,7 +43,7 @@ func testStore(t *testing.T, tables ...string) (*store.Store, context.Context) {
 	if _, err := st.Migrate(ctx); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	all := append([]string{"usage_events", "spend", "orgs", "identities"}, tables...)
+	all := append([]string{"usage_events", "usage_daily", "spend", "orgs", "identities"}, tables...)
 	if _, err := st.Pool().Exec(ctx,
 		"TRUNCATE "+strings.Join(all, ", ")+" RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatalf("truncate: %v", err)

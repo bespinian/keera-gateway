@@ -48,15 +48,16 @@ sandbox classes new organisations start with, and the
 
 ### Worth setting on any real deployment
 
-| Variable                 | Default     | What it is                                                                                                                                                                                                                                       |
-| ------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `KEERA_METRICS_TOKEN`    | unset       | Reads `/metrics` and nothing else. Must differ from the operator key.                                                                                                                                                                            |
-| `KEERA_PUBLIC_URL`       | Host header | The gateway's address as a browser sees it. Used for the sign-out redirect, by **My clients**, and for the panel link in a refusal. Unset, or with `KEERA_UI=false`, a refusal has no link. Required with single sign-on, passkeys and payments. |
-| `KEERA_MODELS_FILE`      | unset       | The models each new organisation starts with. See [Template files](gateway.md#template-files).                                                                                                                                                   |
-| `KEERA_USAGE_RETENTION`  | for ever    | How long usage events, ended sandboxes and ended keys are kept. See [Retention and sizing](#retention-and-sizing).                                                                                                                               |
-| `KEERA_AUDIT_RETENTION`  | for ever    | How long audit entries are kept.                                                                                                                                                                                                                 |
-| `KEERA_UPSTREAM_DENY`    | see below   | Addresses the gateway never connects to. See [Where the gateway may connect](#where-the-gateway-may-connect).                                                                                                                                    |
-| `KEERA_UPSTREAM_PRIVATE` | `all`       | Host names inside the network that organisations may reach. Required with sign-up. See [Where the gateway may connect](#where-the-gateway-may-connect).                                                                                          |
+| Variable                      | Default     | What it is                                                                                                                                                                                                                                       |
+| ----------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `KEERA_METRICS_TOKEN`         | unset       | Reads `/metrics` and nothing else. Must differ from the operator key.                                                                                                                                                                            |
+| `KEERA_PUBLIC_URL`            | Host header | The gateway's address as a browser sees it. Used for the sign-out redirect, by **My clients**, and for the panel link in a refusal. Unset, or with `KEERA_UI=false`, a refusal has no link. Required with single sign-on, passkeys and payments. |
+| `KEERA_MODELS_FILE`           | unset       | The models each new organisation starts with. See [Template files](gateway.md#template-files).                                                                                                                                                   |
+| `KEERA_USAGE_RETENTION`       | for ever    | How long usage events, ended sandboxes and ended keys are kept. See [Retention and sizing](#retention-and-sizing).                                                                                                                               |
+| `KEERA_AUDIT_RETENTION`       | for ever    | How long audit entries are kept.                                                                                                                                                                                                                 |
+| `KEERA_USAGE_DAILY_RETENTION` | for ever    | How long the daily usage totals are kept. At least as long as `KEERA_USAGE_RETENTION`.                                                                                                                                                           |
+| `KEERA_UPSTREAM_DENY`         | see below   | Addresses the gateway never connects to. See [Where the gateway may connect](#where-the-gateway-may-connect).                                                                                                                                    |
+| `KEERA_UPSTREAM_PRIVATE`      | `all`       | Host names inside the network that organisations may reach. Required with sign-up. See [Where the gateway may connect](#where-the-gateway-may-connect).                                                                                          |
 
 ### Everything else
 
@@ -348,43 +349,58 @@ at it.
 
 Most tables grow with the number of customers. These grow with use:
 
-| Table           | One row per                               |
-| --------------- | ----------------------------------------- |
-| `usage_events`  | inference request                         |
-| `filter_runs`   | filter run, per request                   |
-| `tool_calls`    | MCP tool call                             |
-| `sandboxes`     | sandbox lent out                          |
-| `api_keys`      | key, and one more for each sandbox        |
-| `billing_lines` | billable call, on the deployment's keys   |
-| `audit_log`     | administrative action, so it grows slowly |
+| Table           | One row per                                       |
+| --------------- | ------------------------------------------------- |
+| `usage_events`  | inference request                                 |
+| `filter_runs`   | filter run, per request                           |
+| `tool_calls`    | MCP tool call                                     |
+| `usage_daily`   | organisation, key, model, client and day, in UTC  |
+| `sandboxes`     | sandbox lent out                                  |
+| `api_keys`      | key, and one more for each sandbox                |
+| `billing_lines` | billable call, on the deployment's keys           |
+| `audit_log`     | administrative action, so it grows slowly         |
 
-`usage_events` is the request log and the source of every report. A row is
-ids, counts and a latency breakdown of a few hundred bytes. No prompt or
-completion text is stored.
+`usage_events` is the request log, and by far the largest table. A row is ids,
+counts and a latency breakdown: about 500 bytes, and as much again in indexes.
+No prompt or completion text is stored. `usage_daily` holds its totals per day,
+and is small: a row per key, model and client that was used that day.
 
 ```sh
-KEERA_USAGE_RETENTION=8760h    # a year
-KEERA_AUDIT_RETENTION=17520h   # two years
+KEERA_USAGE_RETENTION=720h           # 30 days of the request log
+KEERA_USAGE_DAILY_RETENTION=17520h   # two years of daily totals
+KEERA_AUDIT_RETENTION=17520h         # two years
 ```
 
-**Both default to for ever, on purpose.** Reports read usage and compliance
+**All default to for ever, on purpose.** Reports read usage and compliance
 reads the audit log, so the gateway deletes neither unless told to. At start-up
-it logs the windows, or `no retention window is configured`.
+it logs the windows, or `no retention window is configured`. The daily totals
+cannot be kept for less time than the request log.
 
 Past the usage window, the gateway deletes usage events, filter runs, tool
 calls and closed budget windows. It also deletes sandboxes that ended, and keys
 revoked or expired, with their guardrails. A key that a sandbox still names
 stays. Billing rows and payments are never deleted ([billing.md](billing.md)).
 
-The request log, the session report and every chart read `usage_events`, so
-they reach back only as far as the window. Retention runs hourly, deletes 5,000
-rows at a time so it does not block the replicas, and logs how many rows went.
+**Which screens reach back how far:**
+
+- **Usage totals and charts over more than two days** read `usage_daily`, so
+  they reach back as far as `KEERA_USAGE_DAILY_RETENTION`. They count whole UTC
+  days. So do the totals on the keys screen and **My clients**.
+- **Everything else reads `usage_events`**, so it reaches back only as far as
+  `KEERA_USAGE_RETENTION`. That is windows of two days or less, the request log,
+  sessions, the map, first-token times, and the model, router, filter and tool
+  call screens.
+
+Retention runs hourly, deletes 5,000 rows at a time so it does not block the
+replicas, and logs how many rows went. Postgres reuses the space of deleted
+rows, but does not give it back to the disk. After shortening a window, run
+`pg_repack` (online) or `VACUUM FULL` (locks the table) once to shrink the files.
 
 To size the database, run a representative week, read
 `SELECT pg_size_pretty(pg_total_relation_size('usage_events'));` and multiply
-by the window. The indexes are a large share of it. Rows follow tasks × calls
-per task, not the number of developers: a coding agent makes thirty or forty
-calls per instruction. [sessions.md](sessions.md) shows your ratio.
+by the window. Rows follow tasks × calls per task, not the number of developers:
+a coding agent makes thirty or forty calls per instruction.
+[sessions.md](sessions.md) shows your ratio.
 
 A gateway's memory grows with how many organisations, keys, models and the
 like there are, and with the requests in flight. Per request it holds the body

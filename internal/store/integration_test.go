@@ -58,7 +58,7 @@ func db(t *testing.T) (*Store, context.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
 	if _, err := testStore.pool.Exec(ctx, `TRUNCATE orgs, projects, users, api_keys, guardrails,
-		models, filters, filter_runs, routers, usage_events, spend, audit_log, sessions,
+		models, filters, filter_runs, routers, usage_events, usage_daily, spend, audit_log, sessions,
 		login_flows, cli_codes, cli_tokens, sandboxes, sandbox_classes, mcp_servers, tool_calls,
 		billing_lines, credit_accounts, payments, identities, job_runs
 		RESTART IDENTITY CASCADE`); err != nil {

@@ -87,6 +87,9 @@ func Open(ctx context.Context, dsn string, maxConns int32) (*Store, error) {
 	// Report queries filter with "$1 = '' OR org_id = $1". A cached generic
 	// plan cannot use the org index for that, and scans every tenant's rows.
 	cfg.ConnConfig.RuntimeParams["plan_cache_mode"] = "force_custom_plan"
+	// Days are UTC days, as for budgets and usage_daily, whatever the
+	// database's own time zone is.
+	cfg.ConnConfig.RuntimeParams["timezone"] = "UTC"
 	cfg.MaxConnLifetime = time.Hour
 	cfg.MaxConnIdleTime = 10 * time.Minute
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)

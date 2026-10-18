@@ -413,16 +413,17 @@ func every(ctx context.Context, d time.Duration, first bool, fn func(time.Time))
 // kept for months, and a big DELETE beside live traffic should be rare.
 const retentionInterval = time.Hour
 
-// retain enforces the retention windows, if any are set. Both default to
+// retain enforces the retention windows, if any are set. All default to
 // keeping everything: how long to keep usage and audit rows is for finance and
 // compliance to decide, not the gateway.
 func retain(ctx context.Context, st *store.Store, cfg config.Config, log *slog.Logger) {
-	if cfg.UsageRetention == 0 && cfg.AuditRetention == 0 {
+	if cfg.UsageRetention == 0 && cfg.AuditRetention == 0 && cfg.UsageDailyRetention == 0 {
 		log.Info("no retention window is configured; usage events and audit entries " +
 			"are kept indefinitely (KEERA_USAGE_RETENTION, KEERA_AUDIT_RETENTION)")
 		return
 	}
 	log.Info("retention configured", "usage", retentionLabel(cfg.UsageRetention),
+		"usage_daily", retentionLabel(cfg.UsageDailyRetention),
 		"audit", retentionLabel(cfg.AuditRetention))
 
 	// Once at start too, so a deployment that was down catches up now and a
@@ -430,8 +431,8 @@ func retain(ctx context.Context, st *store.Store, cfg config.Config, log *slog.L
 	every(ctx, retentionInterval, true, func(time.Time) { purgeOld(ctx, st, cfg, log) })
 }
 
-// purgeOld deletes the usage events and audit entries past their windows, and
-// the sandboxes and keys that ended before the usage window.
+// purgeOld deletes the usage events, daily totals and audit entries past their
+// windows, and the sandboxes and keys that ended before the usage window.
 func purgeOld(ctx context.Context, st *store.Store, cfg config.Config, log *slog.Logger) {
 	if !myTurn(ctx, st, log, "retention", retentionInterval) {
 		return
@@ -442,6 +443,10 @@ func purgeOld(ctx context.Context, st *store.Store, cfg config.Config, log *slog
 		logPurge(ctx, log, "usage past its retention window", n, err)
 		n, err = st.PurgeEnded(ctx, now.Add(-cfg.UsageRetention))
 		logPurge(ctx, log, "sandboxes and keys that ended before the usage retention window", n, err)
+	}
+	if cfg.UsageDailyRetention > 0 {
+		n, err := st.PurgeDaily(ctx, now.Add(-cfg.UsageDailyRetention))
+		logPurge(ctx, log, "daily usage totals past their retention window", n, err)
 	}
 	if cfg.AuditRetention > 0 {
 		n, err := st.PurgeAudit(ctx, now.Add(-cfg.AuditRetention))

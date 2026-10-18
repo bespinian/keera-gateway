@@ -109,29 +109,41 @@ func chartBucket(from, to time.Time) string {
 
 // Overview aggregates the usage log for the dashboard, or for one entity's own
 // screen when sc narrows it.
+//
+// Over more than two days the totals come from usage_daily, and From and To
+// are widened to whole days. The first-token times always come from the
+// request log, which retention may have cut shorter.
 func (s *Store) Overview(ctx context.Context, orgID string, from, to time.Time,
 	sc ReportScope) (Overview, error) {
+	src, from, to := sourceFor(from, to)
 	o := Overview{From: from, To: to, Bucket: chartBucket(from, to)}
 
 	err := s.pool.QueryRow(ctx, `
-		SELECT count(*),
+		SELECT `+src.all+`,
 		       COALESCE(sum(input_tokens), 0), COALESCE(sum(output_tokens), 0),
 		       COALESCE(sum(cost_micros), 0), COALESCE(sum(list_cost_micros), 0),
-		       `+countOutcome(OutcomeRefused)+`,
-		       `+countOutcome(OutcomeFailed)+`,
-		       COALESCE(round(percentile_cont(0.5) WITHIN GROUP (ORDER BY ttft_ms)
+		       `+src.refused+`, `+src.failed+`
+		FROM `+src.table+`
+		WHERE `+src.window+` AND ($3 = '' OR org_id = $3)`+sc.narrow("", 3),
+		append([]any{from, to, orgID}, sc.args()...)...,
+	).Scan(&o.Requests, &o.InputTokens, &o.OutputTokens, &o.CostMicros, &o.SubscriptionMicros,
+		&o.Refused, &o.Failed)
+	if err != nil {
+		return o, err
+	}
+	err = s.pool.QueryRow(ctx, `
+		SELECT COALESCE(round(percentile_cont(0.5) WITHIN GROUP (ORDER BY ttft_ms)
 		                      FILTER (WHERE ttft_ms > 0)), 0)::bigint,
 		       COALESCE(round(percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms)
 		                      FILTER (WHERE ttft_ms > 0)), 0)::bigint
 		FROM usage_events
 		WHERE ts >= $1 AND ts < $2 AND ($3 = '' OR org_id = $3)`+sc.narrow("", 3),
 		append([]any{from, to, orgID}, sc.args()...)...,
-	).Scan(&o.Requests, &o.InputTokens, &o.OutputTokens, &o.CostMicros, &o.SubscriptionMicros,
-		&o.Refused, &o.Failed, &o.TTFTMedianMS, &o.TTFTP95MS)
+	).Scan(&o.TTFTMedianMS, &o.TTFTP95MS)
 	if err != nil {
 		return o, err
 	}
-	if o.Series, err = s.series(ctx, orgID, from, to, o.Bucket, sc); err != nil {
+	if o.Series, err = s.series(ctx, src, orgID, from, to, o.Bucket, sc); err != nil {
 		return o, err
 	}
 
@@ -154,26 +166,34 @@ func (s *Store) Overview(ctx context.Context, orgID string, from, to time.Time,
 
 // series is the dashboard's chart. Every bucket in the window is generated, not
 // only those with traffic, so a quiet stretch shows as a dip, not a flat line.
-func (s *Store) series(ctx context.Context, orgID string, from, to time.Time,
+func (s *Store) series(ctx context.Context, src usageSource, orgID string, from, to time.Time,
 	bucket string, sc ReportScope) ([]SeriesPoint, error) {
+	// A LEFT JOIN leaves one row of NULLs for an empty bucket, so the raw log
+	// counts ids, not rows.
+	requests, failed := "count(e.id)", "count(e.id) FILTER (WHERE e.status >= 500)"
+	window := "e.ts >= $1 AND e.ts < $2"
+	if src.daily {
+		requests, failed = "COALESCE(sum(e.requests), 0)", "COALESCE(sum(e.failed), 0)"
+		window = "e.day >= $1::date AND e.day < $2::date"
+	}
 	return queryAll(ctx, s.pool, scanSeriesPoint, `
 		WITH buckets AS (
 		    SELECT generate_series(
 		        date_trunc($4, $1::timestamptz),
-		        date_trunc($4, $2::timestamptz),
+		        date_trunc($4, $5::timestamptz),
 		        ('1 ' || $4)::interval) AS at
 		)
-		SELECT b.at, count(e.id),
+		SELECT b.at, `+requests+`,
 		       COALESCE(sum(e.input_tokens + e.output_tokens), 0),
 		       COALESCE(sum(e.cost_micros), 0),
-		       count(e.id) FILTER (WHERE e.status >= 500)
+		       `+failed+`
 		FROM buckets b
-		LEFT JOIN usage_events e
-		     ON date_trunc($4, e.ts) = b.at
-		    AND e.ts >= $1 AND e.ts < $2
-		    AND ($3 = '' OR e.org_id = $3)`+sc.narrow("e.", 4)+`
+		LEFT JOIN `+src.table+` e
+		     ON date_trunc($4, e.`+src.at+`) = b.at
+		    AND `+window+`
+		    AND ($3 = '' OR e.org_id = $3)`+sc.narrow("e.", 5)+`
 		GROUP BY b.at ORDER BY b.at`,
-		append([]any{from, to, orgID, bucket}, sc.args()...)...)
+		append([]any{from, to, orgID, bucket, src.lastBucket(to)}, sc.args()...)...)
 }
 
 func scanSeriesPoint(r row) (SeriesPoint, error) {
@@ -296,8 +316,26 @@ type KeyQuery struct {
 }
 
 // KeySummaries lists an organisation's keys with their guardrails and their
-// traffic since q.Since, in one query to avoid N+1.
+// traffic since q.Since, in one query to avoid N+1. Since more than two days
+// ago, the traffic comes from usage_daily, from the midnight before q.Since.
 func (s *Store) KeySummaries(ctx context.Context, q KeyQuery) ([]KeySummary, error) {
+	traffic := `LEFT JOIN LATERAL (
+		    SELECT max(e.ts) AS last_used_at,
+		           count(*) FILTER (WHERE e.status < 400) AS requests,
+		           COALESCE(sum(e.cost_micros), 0) AS micros,
+		           COALESCE(sum(e.list_cost_micros), 0) AS list_micros
+		    FROM usage_events e WHERE e.key_id = k.id AND e.ts >= $3
+		) u ON true`
+	since, _, daily := DayWindow(q.Since, time.Now())
+	if daily {
+		traffic = `LEFT JOIN (
+		    SELECT key_id, max(last_at) AS last_used_at,
+		           sum(requests - refused - failed) AS requests,
+		           sum(cost_micros) AS micros, sum(list_cost_micros) AS list_micros
+		    FROM usage_daily WHERE org_id = $1 AND day >= $3::date
+		    GROUP BY key_id
+		) u ON u.key_id = k.id`
+	}
 	return queryAll(ctx, s.pool, scanKeySummary, `
 		SELECT `+keyColumnsOf("k.")+`, `+limitColumns+`,
 		       u.last_used_at, COALESCE(u.requests, 0), COALESCE(u.micros, 0),
@@ -306,15 +344,9 @@ func (s *Store) KeySummaries(ctx context.Context, q KeyQuery) ([]KeySummary, err
 		FROM api_keys k
 		LEFT JOIN guardrails p ON p.scope_type = 'key' AND p.scope_id = k.id
 		LEFT JOIN plan_usage pu ON pu.key_id = k.id
-		LEFT JOIN LATERAL (
-		    SELECT max(e.ts) AS last_used_at,
-		           count(*) FILTER (WHERE e.status < 400) AS requests,
-		           COALESCE(sum(e.cost_micros), 0) AS micros,
-		           COALESCE(sum(e.list_cost_micros), 0) AS list_micros
-		    FROM usage_events e WHERE e.key_id = k.id AND e.ts >= $3
-		) u ON true
+		`+traffic+`
 		WHERE k.org_id = $1 AND ($2 = '' OR k.project_id = $2) AND ($4 = '' OR k.user_id = $4)
-		ORDER BY k.created_at DESC`, q.OrgID, q.ProjectID, q.Since, q.UserID)
+		ORDER BY k.created_at DESC`, q.OrgID, q.ProjectID, since, q.UserID)
 }
 
 func scanKeySummary(r row) (KeySummary, error) {
@@ -373,8 +405,9 @@ func (s *Store) SetupState(ctx context.Context, orgID string) (Setup, error) {
 		(SELECT count(*) FROM api_keys WHERE ($1 = '' OR org_id = $1) AND revoked_at IS NULL),
 		(SELECT count(*) FROM models WHERE enabled AND ($1 = '' OR org_id = $1)),
 		-- 1 once anything was served, as counting it all would read the
-		-- whole usage log on every panel load.
-		(SELECT count(*) FROM (SELECT 1 FROM usage_events WHERE $1 = '' OR org_id = $1 LIMIT 1) AS served),
+		-- whole usage log on every panel load. The daily totals outlive the
+		-- log, so the first run does not come back after retention.
+		(SELECT count(*) FROM (SELECT 1 FROM usage_daily WHERE $1 = '' OR org_id = $1 LIMIT 1) AS served),
 		(SELECT count(*) FROM filters WHERE $1 = '' OR org_id = $1),
 		(SELECT count(*) FROM routers WHERE $1 = '' OR org_id = $1),
 		-- Classes, not running machines, so the screen stays when none is up.
@@ -389,13 +422,14 @@ func (s *Store) SetupState(ctx context.Context, orgID string) (Setup, error) {
 	return st, err
 }
 
-// AnyUsed reports whether any of keyIDs has ever made a request.
+// AnyUsed reports whether any of keyIDs has ever made a request. It reads the
+// daily totals, which outlive the request log.
 func (s *Store) AnyUsed(ctx context.Context, orgID string, keyIDs []string) (bool, error) {
 	if len(keyIDs) == 0 {
 		return false, nil
 	}
 	var used bool
-	err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM usage_events
+	err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM usage_daily
 		WHERE org_id = $1 AND key_id = ANY($2))`, orgID, keyIDs).Scan(&used)
 	return used, err
 }

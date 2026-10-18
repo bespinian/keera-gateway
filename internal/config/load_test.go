@@ -241,6 +241,37 @@ func TestRetentionIsRefusedBelowADay(t *testing.T) {
 	}
 }
 
+func TestDailyTotalsAreKeptAtLeastAsLongAsTheEvents(t *testing.T) {
+	// Reports over more than two days read the daily totals, so they must
+	// not go before the events they stand in for.
+	c, err := loadWith(t, valid(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.UsageDailyRetention != 0 {
+		t.Errorf("default = %v, want 0, for ever", c.UsageDailyRetention)
+	}
+	for _, tc := range []struct {
+		usage, daily string
+		ok           bool
+	}{
+		{"720h", "8760h", true},
+		{"720h", "720h", true},
+		{"720h", "168h", false},
+		{"", "8760h", false},
+		{"720h", "10m", false},
+	} {
+		env := map[string]string{"KEERA_USAGE_DAILY_RETENTION": tc.daily}
+		if tc.usage != "" {
+			env["KEERA_USAGE_RETENTION"] = tc.usage
+		}
+		_, err := loadWith(t, valid(env))
+		if (err == nil) != tc.ok {
+			t.Errorf("usage %q, daily %q: err = %v, want ok = %v", tc.usage, tc.daily, err, tc.ok)
+		}
+	}
+}
+
 func TestASessionGapBelowAMinuteIsTheRequestLog(t *testing.T) {
 	// Sessions group requests into tasks. Under a minute every request is its
 	// own task, which is just the request log.

@@ -15,7 +15,7 @@ const purgeBatch = 5000
 // PurgeUsage deletes usage events, filter runs and tool calls older than
 // before, and the closed spend windows that go with them. Nothing reads a
 // closed window: budgets check the open day and month, and reports read the
-// events.
+// events and usage_daily, which PurgeDaily keeps for its own window.
 //
 // It returns how many rows went, so an operator can see retention working.
 func (s *Store) PurgeUsage(ctx context.Context, before time.Time) (int64, error) {
@@ -41,6 +41,13 @@ func (s *Store) PurgeUsage(ctx context.Context, before time.Time) (int64, error)
 		return events, err
 	}
 	return events + tag.RowsAffected(), nil
+}
+
+// PurgeDaily deletes the daily totals of days before the one before falls in.
+func (s *Store) PurgeDaily(ctx context.Context, before time.Time) (int64, error) {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM usage_daily WHERE day < $1`,
+		policy.PeriodDay.Start(before))
+	return tag.RowsAffected(), err
 }
 
 // PurgeEnded deletes the sandboxes that ended before before, and the keys
