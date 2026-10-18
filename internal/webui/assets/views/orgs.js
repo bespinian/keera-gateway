@@ -22,12 +22,10 @@ export async function orgsView(ctx) {
   const orgs = (await api.orgs()).data || [];
   ctx.setSubtitle(`${orgs.length} ${plural(orgs.length, "organisation")}`);
 
-  const head = listHead(
-    "A dedicated or on-premises deployment has exactly one. It needs no " +
-      "email domain, because everyone who signs in joins it.",
-    null,
-    { label: "Create organisation", onClick: () => newOrg(ctx) },
-  );
+  const head = listHead(null, null, {
+    label: "Create organisation",
+    onClick: () => newOrg(ctx),
+  });
 
   const rows = table(
     [
