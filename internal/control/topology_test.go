@@ -71,6 +71,9 @@ func TestTheMapDrawsTheCatalogueAndTheTrafficTogether(t *testing.T) {
 			Status: 200, CostMicros: 100, InputTokens: 10, OutputTokens: 5},
 		{TS: now, OrgID: "org_1", Alias: "keera-code", Client: "opencode",
 			Status: 429},
+		// An alias the organisation has no model for.
+		{TS: now, OrgID: "org_1", Alias: "keera-typo", Client: "claude-code",
+			Status: 404},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
@@ -118,8 +121,8 @@ func TestTheMapDrawsTheCatalogueAndTheTrafficTogether(t *testing.T) {
 		t.Fatalf("decoding the map: %v", err)
 	}
 
-	if got.Gateway.Requests != 2 || got.Gateway.Refused != 1 {
-		t.Errorf("gateway = %+v, want two requests one of which was refused", got.Gateway)
+	if got.Gateway.Requests != 3 || got.Gateway.Refused != 2 {
+		t.Errorf("gateway = %+v, want three requests two of which were refused", got.Gateway)
 	}
 	if len(got.Clients) != 2 {
 		t.Fatalf("clients = %+v, want the two that called", got.Clients)
@@ -130,6 +133,9 @@ func TestTheMapDrawsTheCatalogueAndTheTrafficTogether(t *testing.T) {
 		t.Errorf("the first client is %+v, want Claude Code", got.Clients[0])
 	}
 
+	if len(got.Models) != 2 {
+		t.Errorf("models = %+v, want the organisation's two and no box for the unknown alias", got.Models)
+	}
 	byAlias := map[string]string{}
 	for _, m := range got.Models {
 		byAlias[m.Alias] = m.Hosting + " " + m.Endpoint

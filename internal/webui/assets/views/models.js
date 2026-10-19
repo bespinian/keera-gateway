@@ -473,12 +473,19 @@ export async function catalogueView(ctx) {
         },
         // A dropdown with one choice filters nothing.
       ].filter((c) => c.options.length > 1),
+      // Models whose provider Keera holds no key for are hidden by default:
+      // they work only with the organisation's own key. A deployment with no
+      // keys, or a key for every provider, has nothing to hide.
       toggles: [
         {
-          label: "Only models not in use",
-          test: (r) => !r.aliases.length,
+          label: "Show bring your own token",
+          hidden: (r) => !r.p.platform_key,
         },
-      ],
+      ].filter(
+        () =>
+          providers.some((p) => p.platform_key) &&
+          providers.some((p) => !p.platform_key),
+      ),
     },
   );
 

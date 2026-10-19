@@ -40,9 +40,6 @@ type mapModel struct {
 	// Endpoint is the host serving it. Only administrators get it, as on the
 	// Models screen.
 	Endpoint string `json:"endpoint,omitempty"`
-	// Retired marks traffic to an alias the catalogue no longer has. The
-	// traffic was real, so it is drawn, but where it went is unknown.
-	Retired bool `json:"retired,omitempty"`
 	store.Cell
 }
 
@@ -70,24 +67,18 @@ func (s *Server) trafficMap(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	}
 
 	// Every one of the organisation's models is drawn, even one nobody called:
-	// a quiet hosted model is still a way out of the building.
+	// a quiet hosted model is still a way out of the building. An alias it has
+	// no model for, a typo or a deleted model, is not: there is nowhere to draw
+	// it. Its requests still count on the gateway and the client.
 	out := make([]mapModel, 0, len(models))
-	seen := make(map[string]bool, len(models))
+	drawn := make(map[string]bool, len(models))
 	for _, m := range models {
-		seen[m.Alias] = true
+		drawn[m.Alias] = true
 		n := modelNode(m, rep.Models[m.Alias])
 		if holder != "" {
 			n.Endpoint = ""
 		}
 		out = append(out, n)
-	}
-	for alias, cell := range rep.Models {
-		if seen[alias] {
-			continue
-		}
-		out = append(out, mapModel{
-			Alias: alias, Hosting: string(policy.HostedUnknown), Retired: true, Cell: cell,
-		})
 	}
 	// Busiest first, so a crowded map shows the models that matter.
 	slices.SortFunc(out, func(a, b mapModel) int {
@@ -104,6 +95,8 @@ func (s *Server) trafficMap(w http.ResponseWriter, r *http.Request, p *authn.Pri
 		return cmp.Or(cmp.Compare(b.Requests, a.Requests), cmp.Compare(a.Key, b.Key))
 	})
 
+	flows := slices.DeleteFunc(rep.Flows, func(f store.Flow) bool { return !drawn[f.Alias] })
+
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"from": from,
 		"to":   to,
@@ -113,7 +106,7 @@ func (s *Server) trafficMap(w http.ResponseWriter, r *http.Request, p *authn.Pri
 		"gateway":     rep.Total,
 		"clients":     clients,
 		"models":      out,
-		"flows":       rep.Flows,
+		"flows":       flows,
 	})
 }
 

@@ -163,7 +163,6 @@ function sceneFrom(data) {
     endpoint: m.endpoint || "",
     enabled: m.enabled,
     kindName: m.kind || "",
-    retired: !!m.retired,
   }));
   const inside = fold(
     models.filter((m) => m.hosting !== "external"),
@@ -546,7 +545,7 @@ function paint(ctx, canvas, tip, scene) {
         if (p.t >= 1) {
           p.t = 0;
           scene.gateway.pulse = 1;
-          p.phase = p.outcome === "refused" ? "burst" : "hold";
+          p.phase = p.outcome === "refused" || !p.model ? "burst" : "hold";
           p.wait = HOLD_MS;
         }
         return false;
@@ -556,7 +555,8 @@ function paint(ctx, canvas, tip, scene) {
         if (p.wait <= 0) p.phase = "out2";
         return false;
       case "burst":
-        // A refusal never leaves the gateway, so neither does its packet.
+        // A refusal never leaves the gateway, so neither does its packet. Nor
+        // does one to a model the map does not draw.
         p.wait -= dt * 2.2;
         return p.wait <= -260;
       case "out2": {
@@ -600,7 +600,7 @@ function paint(ctx, canvas, tip, scene) {
       // Reduced motion: light the boxes, but draw no packets.
       client.pulse = 1;
       scene.gateway.pulse = 1;
-      if (outcome !== "refused") model.pulse = 1;
+      if (outcome !== "refused" && model) model.pulse = 1;
       return;
     }
     if (packets.length >= MAX_PACKETS) return;
@@ -635,7 +635,7 @@ function paint(ctx, canvas, tip, scene) {
     hover = found;
     dirty = true;
     canvas.style.cursor = found && target(found) ? "pointer" : "default";
-    if (found) showTip(tip, canvas, found, orgNameOf(ctx));
+    if (found) showTip(tip, canvas, found);
     else tip.hidden = true;
   };
   const onLeave = () => {
@@ -681,7 +681,7 @@ function paint(ctx, canvas, tip, scene) {
 /** target is where a box leads, or null. A folded box is several things, so
  *  it leads nowhere. */
 function target(n) {
-  if (n.kind === "model" && !n.folded && !n.retired)
+  if (n.kind === "model" && !n.folded)
     return "/models/" + encodeURIComponent(n.key);
   if (n.kind === "gateway") return "/requests";
   return null;
@@ -1058,15 +1058,12 @@ function fit(g, text, max) {
 
 /* ---------------------------------------------------------------- tooltip */
 
-function showTip(tip, canvas, n, orgName) {
+function showTip(tip, canvas, n) {
   const rows = [];
   if (n.kind === "model") {
     rows.push([
       "Runs at",
-      n.endpoint ||
-        (n.retired
-          ? `no longer one of ${orgName}'s models`
-          : hostingLabel(n.hosting) || "no backend"),
+      n.endpoint || hostingLabel(n.hosting) || "no backend",
     ]);
     rows.push([
       "Prompts",
@@ -1077,7 +1074,7 @@ function showTip(tip, canvas, n, orgName) {
           : "unknown",
     ]);
     if (n.kindName) rows.push(["Surface", n.kindName]);
-    if (!n.folded && !n.retired && !n.enabled)
+    if (!n.folded && !n.enabled)
       rows.push(["Status", "disabled"]);
   }
   if (n.folded)
@@ -1129,7 +1126,7 @@ function watch(ctx, { since, scene, painter, live }) {
     const drawn = rows.slice(0, MAX_SPAWN).reverse();
     drawn.forEach((row, i) => {
       const client = clientNode(scene, row.client || "");
-      const model = modelNode(scene, row.alias);
+      const model = scene.byModel.get(row.alias || "");
       count(scene, client, model, row);
       // Only refused and failed packets look different, so an interrupted
       // request is drawn as a served one.
@@ -1140,7 +1137,7 @@ function watch(ctx, { since, scene, painter, live }) {
       count(
         scene,
         clientNode(scene, row.client || ""),
-        modelNode(scene, row.alias),
+        scene.byModel.get(row.alias || ""),
         row,
       );
     }
@@ -1156,9 +1153,12 @@ function refused(row) {
 
 /** count adds one live row to the boxes, so totals move with the packets
  *  instead of jumping at each refresh. Medians cannot be added to; the refresh
- *  brings them. */
+ *  brings them. A row for a model the map does not draw counts on the client
+ *  and the gateway only. */
 function count(scene, client, model, row) {
-  for (const cell of [client.cell, model.cell, scene.total]) {
+  const cells = [client.cell, scene.total];
+  if (model) cells.push(model.cell);
+  for (const cell of cells) {
     cell.requests += 1;
     cell.input_tokens += row.input_tokens || 0;
     cell.output_tokens += row.output_tokens || 0;
@@ -1168,9 +1168,13 @@ function count(scene, client, model, row) {
   }
 }
 
-/** clientNode and modelNode find the box for a live row, or make one: a new
- *  client's first request is what people watch this screen for. The next
- *  refresh replaces it with the reported box. */
+/** clientNode finds the box for a live row, or makes one: a new client's
+ *  first request is what people watch this screen for. The next refresh
+ *  replaces it with the reported box.
+ *
+ *  Models are not made up this way. An alias the organisation has no model
+ *  for is a typo or a deleted model, and a model added since the page loaded
+ *  arrives with the next refresh. */
 function clientNode(scene, key) {
   const found = scene.byClient.get(key);
   if (found) return found;
@@ -1187,28 +1191,6 @@ function clientNode(scene, key) {
   };
   scene.clients.push(node);
   scene.byClient.set(key, node);
-  return node;
-}
-
-function modelNode(scene, alias) {
-  const found = scene.byModel.get(alias || "");
-  if (found) return found;
-  const node = {
-    kind: "model",
-    key: alias || "",
-    label: alias || "unknown",
-    cell: cellOf({}),
-    hosting: "unknown",
-    endpoint: "",
-    retired: true,
-    pulse: 0,
-    x: 0,
-    y: 0,
-    w: 0,
-    h: 0,
-  };
-  scene.inside.push(node);
-  scene.byModel.set(node.key, node);
   return node;
 }
 

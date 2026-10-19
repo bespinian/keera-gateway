@@ -89,9 +89,11 @@ same shape (for example an egress proxy that mirrors the path), write
 **Models → Add model** opens the model catalogue. It lists every model the
 providers offer, with its name, release date, location, context window and list
 prices, as `keera model catalogue` does. You can search it, filter it by
-provider, and sort it by any column. Operators and administrators add a model
-from it to an organisation. Everyone else opens it with **Model catalogue** and
-can only browse it. See
+provider, and sort it by any column. When the deployment holds a key for some
+providers ([Billing](billing.md)), the catalogue shows only their models; **Show
+bring your own token** adds the ones that need your own provider key. Operators
+and administrators add a model from it to an organisation. Everyone else opens
+it with **Model catalogue** and can only browse it. See
 [Models belong to an organisation](gateway.md#models-belong-to-an-organisation).
 
 **Add** on a row opens the form with the provider and the model already picked.
