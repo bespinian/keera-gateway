@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -665,6 +666,52 @@ func TestFlowsOverAnEmptyWindow(t *testing.T) {
 	}
 	if rep.Clients == nil || rep.Models == nil {
 		t.Error("the lookups must exist even when empty; the panel indexes into them")
+	}
+}
+
+// The map's live rate starts from the last minute. A request counts in the
+// second it finished, because that is when the live stream shows it.
+func TestLastMinuteCountsRequestsWhenTheyFinished(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	now := time.Date(2026, 9, 7, 10, 0, 0, 0, time.UTC)
+
+	ev := func(user string, start, took time.Duration) Event {
+		return Event{
+			TS: now.Add(-start), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
+			UserID: user, Alias: "keera-code", Status: 200, Latency: took,
+		}
+	}
+	if err := st.WriteEvents(ctx, []Event{
+		ev("user_1", 500*time.Millisecond, 0),
+		ev("user_1", 2500*time.Millisecond, 0),
+		ev("user_2", 3*time.Second, 200*time.Millisecond),
+		// Started five minutes ago and finished ten seconds ago.
+		ev("user_1", 5*time.Minute, 4*time.Minute+50*time.Second),
+		// Finished just over a minute ago.
+		ev("user_1", 61*time.Second, 0),
+	}); err != nil {
+		t.Fatalf("WriteEvents: %v", err)
+	}
+
+	got, err := st.LastMinute(ctx, f.orgID, "", now)
+	if err != nil {
+		t.Fatalf("LastMinute: %v", err)
+	}
+	want := make([]int64, 60)
+	want[0], want[2], want[10] = 1, 2, 1
+	if !slices.Equal(got, want) {
+		t.Errorf("LastMinute = %v, want %v", got, want)
+	}
+
+	mine, err := st.LastMinute(ctx, f.orgID, "user_2", now)
+	if err != nil {
+		t.Fatalf("LastMinute(user_2): %v", err)
+	}
+	want = make([]int64, 60)
+	want[2] = 1
+	if !slices.Equal(mine, want) {
+		t.Errorf("LastMinute(user_2) = %v, want only their own request", mine)
 	}
 }
 

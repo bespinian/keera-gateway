@@ -170,7 +170,7 @@ func (s *Server) completeSignup(w http.ResponseWriter, r *http.Request) {
 		s.auditf(r, actorOf(user), created.ID, "org.create", "org", created.ID,
 			map[string]any{"name": created.Name, "via": "signup", "limited": created.Limited})
 		// Its models, copied from the template, are for the gateway to serve.
-		s.changed(r)
+		s.changed(r, created.ID)
 	}
 	if !s.signedIn(w, r, user, "", false,
 		map[string]any{"via": "sso", "provider": su.Provider, "signup": how}) {

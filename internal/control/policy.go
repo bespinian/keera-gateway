@@ -309,6 +309,6 @@ func (s *Server) putGuardrails(w http.ResponseWriter, r *http.Request, p *authn.
 		return
 	}
 	s.auditf(r, p, owner, "guardrail.put", string(scope), scopeID, lim)
-	s.changed(r)
+	s.changed(r, owner)
 	httpx.WriteJSON(w, http.StatusOK, lim)
 }

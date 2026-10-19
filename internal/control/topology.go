@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"net/http"
 	"slices"
+	"time"
 
 	"github.com/bespinian/keera-gateway/internal/authn"
 	"github.com/bespinian/keera-gateway/internal/connect"
@@ -97,6 +98,12 @@ func (s *Server) trafficMap(w http.ResponseWriter, r *http.Request, p *authn.Pri
 
 	flows := slices.DeleteFunc(rep.Flows, func(f store.Flow) bool { return !drawn[f.Alias] })
 
+	recent, err := s.st.LastMinute(ctx, orgID, holder, time.Now())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"from": from,
 		"to":   to,
@@ -107,6 +114,10 @@ func (s *Server) trafficMap(w http.ResponseWriter, r *http.Request, p *authn.Pri
 		"clients":     clients,
 		"models":      out,
 		"flows":       flows,
+		// Requests per second over the last minute, newest first. Seconds
+		// ago rather than times, so a browser clock that is off does not
+		// matter.
+		"last_minute": recent,
 	})
 }
 

@@ -41,6 +41,10 @@ type source struct {
 	credit  []store.CreditRow
 	limited map[string]string
 
+	// fullLoads and orgLoads count model reads of every organisation and of
+	// one.
+	fullLoads, orgLoads int
+
 	// loadErr, while set, is what every catalogue read returns.
 	loadErr error
 	// beforeLookup runs inside LookupKey, which is where a second caller can be
@@ -84,6 +88,7 @@ func (s *source) LookupKey(ctx context.Context, hash []byte) (*policy.Resolved, 
 func (s *source) LoadModels(context.Context) ([]policy.Model, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.fullLoads++
 	return s.models, s.loadErr
 }
 
@@ -103,6 +108,52 @@ func (s *source) LoadMCPServers(context.Context) ([]policy.MCPServer, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.mcp, s.loadErr
+}
+
+// inOrg keeps the things of one organisation, as the List queries do.
+func inOrg[T any](list []T, orgID string, org func(T) string) []T {
+	var out []T
+	for _, v := range list {
+		if org(v) == orgID {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func (s *source) ListModels(_ context.Context, orgID string) ([]policy.Model, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.orgLoads++
+	return inOrg(s.models, orgID, func(m policy.Model) string { return m.OrgID }), s.loadErr
+}
+
+func (s *source) ListFilters(_ context.Context, orgID string) ([]policy.Filter, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return inOrg(s.filters, orgID, func(f policy.Filter) string { return f.OrgID }), s.loadErr
+}
+
+func (s *source) ListRouters(_ context.Context, orgID string) ([]policy.Router, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return inOrg(s.routers, orgID, func(rt policy.Router) string { return rt.OrgID }), s.loadErr
+}
+
+func (s *source) ListMCPServers(_ context.Context, orgID string) ([]policy.MCPServer, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return inOrg(s.mcp, orgID, func(m policy.MCPServer) string { return m.OrgID }), s.loadErr
+}
+
+func (s *source) OrgByID(_ context.Context, orgID string) (store.Org, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.loadErr != nil {
+		return store.Org{}, s.loadErr
+	}
+	name, limited := s.limited[orgID]
+	return store.Org{ID: orgID, Name: name, Limited: limited}, nil
 }
 
 func (s *source) LoadSpend(context.Context, time.Time) ([]store.SpendRow, error) {
@@ -138,6 +189,24 @@ func (s *source) announce(c Change) {
 	s.mu.Unlock()
 	if fn != nil {
 		fn(string(c))
+	}
+}
+
+// waitForListener waits until Run listens, so an announcement reaches it.
+func waitForListener(t *testing.T, s *source) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		s.mu.Lock()
+		ready := s.notify != nil
+		s.mu.Unlock()
+		if ready {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the registry never started listening")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -245,18 +314,7 @@ func TestANotifyFromTheControlPlaneDropsEveryCachedKey(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	go r.Run(ctx)
-
-	// Wait for the listener to be registered before announcing to it.
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		s.mu.Lock()
-		ready := s.notify != nil
-		s.mu.Unlock()
-		if ready || time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(time.Millisecond)
-	}
+	waitForListener(t, s)
 
 	if _, err := r.Resolve(ctx, testKey("sk-live")); err != nil {
 		t.Fatalf("Resolve: %v", err)
@@ -302,6 +360,149 @@ func TestAKeyChangeDropsThatKeyAlone(t *testing.T) {
 	}
 	if got := s.calls() - before; got != 1 {
 		t.Errorf("%d lookups after one key changed, want 1: the other key was dropped too", got)
+	}
+}
+
+func TestAnOrgChangeDropsThatOrganisationsKeysAlone(t *testing.T) {
+	// A guardrail changed in one organisation must not cost every other
+	// organisation's keys a query.
+	s := newSource()
+	s.set(testKey("sk-mine"), &policy.Resolved{Key: policy.Key{ID: "key_1", OrgID: "org_1"}})
+	s.set(testKey("sk-theirs"), &policy.Resolved{Key: policy.Key{ID: "key_2", OrgID: "org_2"}})
+	r := newRegistry(t, s, Options{TTL: time.Hour})
+
+	for _, k := range []string{"sk-mine", "sk-theirs"} {
+		if _, err := r.Resolve(t.Context(), testKey(k)); err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+	}
+	before := s.calls()
+
+	s.reject(testKey("sk-mine"), policy.ErrKeyRevoked)
+	r.Forget(OrgChange("org_1"))
+
+	if _, err := r.Resolve(t.Context(), testKey("sk-mine")); !errors.Is(err, policy.ErrKeyRevoked) {
+		t.Errorf("error = %v, want the organisation's key read again", err)
+	}
+	if _, err := r.Resolve(t.Context(), testKey("sk-theirs")); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got := s.calls() - before; got != 1 {
+		t.Errorf("%d lookups after one organisation changed, want 1", got)
+	}
+}
+
+func TestAnOrgChangeReloadsThatOrganisationAlone(t *testing.T) {
+	s := newSource()
+	s.models = []policy.Model{
+		{OrgID: "org_1", Alias: "fast", BackendModel: "old"},
+		{OrgID: "org_2", Alias: "fast", BackendModel: "old"},
+	}
+	s.filters = []policy.Filter{{OrgID: "org_2", Alias: "pii"}}
+	r := newRegistry(t, s, Options{})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go r.Run(ctx)
+	waitForListener(t, s)
+
+	s.mu.Lock()
+	s.models = []policy.Model{
+		{OrgID: "org_1", Alias: "fast", BackendModel: "new"},
+		{OrgID: "org_1", Alias: "engine", Backends: []string{"http://keera-engine:8000/v1"}},
+		{OrgID: "org_2", Alias: "fast", BackendModel: "new"},
+	}
+	s.limited = map[string]string{"org_1": "Example Bank"}
+	full := s.fullLoads
+	s.mu.Unlock()
+	s.announce(OrgChange("org_1"))
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if m, _ := r.Model("org_1", "fast"); m.BackendModel == "new" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the organisation that changed was not reloaded")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if m, _ := r.Model("org_1", "engine"); !m.Limited || !m.Locked {
+		t.Errorf("engine: limited %v, locked %v; want the organisation's limit applied", m.Limited, m.Locked)
+	}
+	if m, _ := r.Model("org_2", "fast"); m.BackendModel != "old" {
+		t.Error("another organisation was reloaded too")
+	}
+	if _, ok := r.Filter("org_2", "pii"); !ok {
+		t.Error("another organisation lost its filter")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.fullLoads != full {
+		t.Errorf("%d full reloads after one organisation changed, want none", s.fullLoads-full)
+	}
+}
+
+func TestADeletedOrganisationIsDropped(t *testing.T) {
+	s := newSource()
+	s.models = []policy.Model{{OrgID: "org_1", Alias: "fast"}, {OrgID: "org_2", Alias: "fast"}}
+	r := newRegistry(t, s, Options{})
+
+	s.mu.Lock()
+	s.models = []policy.Model{{OrgID: "org_2", Alias: "fast"}}
+	s.mu.Unlock()
+	if err := r.refreshOrg(t.Context(), "org_1"); err != nil {
+		t.Fatalf("refreshOrg: %v", err)
+	}
+	if _, ok := r.Model("org_1", "fast"); ok {
+		t.Error("a deleted organisation's model is still served")
+	}
+	if _, ok := r.Model("org_2", "fast"); !ok {
+		t.Error("another organisation's model went with it")
+	}
+}
+
+func TestAFailedOrgReloadIsTriedAgain(t *testing.T) {
+	// Only the next tick would reload the organisation otherwise, and a
+	// change that is not retried waits for it.
+	s := newSource()
+	s.models = []policy.Model{{OrgID: "org_1", Alias: "fast", BackendModel: "old"}}
+	r := newRegistry(t, s, Options{})
+
+	s.mu.Lock()
+	s.models = []policy.Model{{OrgID: "org_1", Alias: "fast", BackendModel: "new"}}
+	s.loadErr = errors.New("connection refused")
+	s.mu.Unlock()
+	r.want(OrgChange("org_1"))
+	if err := r.refreshPending(t.Context()); err == nil {
+		t.Fatal("refreshPending succeeded with a database it could not read")
+	}
+	if m, _ := r.Model("org_1", "fast"); m.BackendModel != "old" {
+		t.Error("part of a failed reload was adopted")
+	}
+
+	s.mu.Lock()
+	s.loadErr = nil
+	s.mu.Unlock()
+	if err := r.refreshPending(t.Context()); err != nil {
+		t.Fatalf("refreshPending: %v", err)
+	}
+	if m, _ := r.Model("org_1", "fast"); m.BackendModel != "new" {
+		t.Error("the failed reload was not tried again")
+	}
+}
+
+func TestAChangeOfUnknownShapeReloadsEverything(t *testing.T) {
+	// A replica of a newer version may announce a change this one does not
+	// know, and an older one sends AnyChange for all of them.
+	r := newRegistry(t, newSource(), Options{})
+	for _, c := range []Change{AnyChange, "org:", "project:prj_1"} {
+		r.want(OrgChange("org_1"))
+		r.want(c)
+		if !r.pending.all {
+			t.Errorf("%q does not reload everything", c)
+		}
+		r.pending = pending{}
 	}
 }
 

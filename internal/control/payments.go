@@ -505,7 +505,7 @@ func (s *Server) settleWith(ctx context.Context, pm store.Payment, tx payment.Tr
 	if done.Lifted {
 		// Lifting a signed-up organisation's limit changes what its models
 		// may reach. Any other payment changes only the balance.
-		s.announce(ctx, registry.AnyChange)
+		s.announce(ctx, registry.OrgChange(settled.OrgID))
 	}
 	s.auditPayment(ctx, settled)
 	return nil

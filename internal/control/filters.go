@@ -110,7 +110,7 @@ func (s *Server) putFilter(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		return
 	}
 	s.auditf(r, p, orgID, "filter.put", "filter", f.Alias, saved)
-	s.changed(r)
+	s.changed(r, orgID)
 	httpx.WriteJSON(w, http.StatusOK, saved)
 }
 

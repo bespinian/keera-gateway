@@ -118,6 +118,6 @@ func (s *Server) deleted(w http.ResponseWriter, r *http.Request, p *authn.Princi
 	orgID, kind, alias string,
 ) {
 	s.auditf(r, p, orgID, kind+".delete", kind, alias, nil)
-	s.changed(r)
+	s.changed(r, orgID)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"alias": alias, "deleted": true})
 }

@@ -606,10 +606,12 @@ func (s *Server) writeMetrics(w http.ResponseWriter) {
 	s.metrics.Write(w)
 }
 
-// changed tells every gateway replica to drop its cached policy. The local
-// registry is cleared directly, so a single process does not wait for its own
-// notification.
-func (s *Server) changed(r *http.Request) { s.announce(r.Context(), registry.AnyChange) }
+// changed tells every gateway replica to drop what it cached of one
+// organisation. The local registry is cleared directly, so a single process
+// does not wait for its own notification.
+func (s *Server) changed(r *http.Request, orgID string) {
+	s.announce(r.Context(), registry.OrgChange(orgID))
+}
 
 // keyChanged is changed for a change to one key only.
 func (s *Server) keyChanged(r *http.Request, keyID string) {

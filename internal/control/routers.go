@@ -133,7 +133,7 @@ func (s *Server) putRouter(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		s.fail(w, err)
 		return
 	}
-	s.changed(r)
+	s.changed(r, orgID)
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 

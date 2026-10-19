@@ -390,7 +390,7 @@ func (s *Server) operatorKeyOrg(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	s.announce(ctx, registry.AnyChange)
+	s.announce(ctx, registry.OrgChange(org.ID))
 	return org.ID, nil
 }
 

@@ -109,6 +109,44 @@ func (s *Store) Flows(ctx context.Context, orgID, holder string, from, to time.T
 	return rep, rows.Err()
 }
 
+// lastMinuteLookback is how far back LastMinute looks for requests that
+// finished in the last minute. A request that ran longer is not counted.
+const lastMinuteLookback = 15 * time.Minute
+
+// LastMinute counts the requests that finished in the minute before now, one
+// count per second: the first is the last second. The map starts its live
+// rate from it, which would otherwise need a minute to fill. A request counts
+// when it finished, not when it started, because that is when the live
+// stream shows it.
+func (s *Store) LastMinute(ctx context.Context, orgID, holder string, now time.Time) ([]int64, error) {
+	counts := make([]int64, 60)
+	rows, err := s.pool.Query(ctx, `
+		SELECT ago, count(*) FROM (
+			SELECT floor(extract(epoch FROM
+			         $1 - (ts + latency_ms * interval '1 millisecond')))::int AS ago
+			FROM usage_events
+			WHERE ts >= $2 AND org_id = $3 AND ($4 = '' OR user_id = $4)
+		) finished
+		WHERE ago < 60
+		GROUP BY ago`,
+		now, now.Add(-lastMinuteLookback), orgID, holder)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ago int
+		var n int64
+		if err := rows.Scan(&ago, &n); err != nil {
+			return nil, err
+		}
+		// Another replica's clock can be a little ahead, which puts a request
+		// in the future. It just finished.
+		counts[max(ago, 0)] += n
+	}
+	return counts, rows.Err()
+}
+
 // ClientUse is one client's traffic through one key.
 type ClientUse struct {
 	// Client is empty for requests whose sender did not name itself.

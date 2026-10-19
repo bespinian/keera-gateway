@@ -79,6 +79,11 @@ type Source interface {
 	LoadFilters(ctx context.Context) ([]policy.Filter, error)
 	LoadRouters(ctx context.Context) ([]policy.Router, error)
 	LoadMCPServers(ctx context.Context) ([]policy.MCPServer, error)
+	ListModels(ctx context.Context, orgID string) ([]policy.Model, error)
+	ListFilters(ctx context.Context, orgID string) ([]policy.Filter, error)
+	ListRouters(ctx context.Context, orgID string) ([]policy.Router, error)
+	ListMCPServers(ctx context.Context, orgID string) ([]policy.MCPServer, error)
+	OrgByID(ctx context.Context, orgID string) (store.Org, error)
 	LoadSpend(ctx context.Context, now time.Time) ([]store.SpendRow, error)
 	LoadCredit(ctx context.Context) ([]store.CreditRow, error)
 	LimitedOrgs(ctx context.Context) (map[string]string, error)
@@ -94,7 +99,20 @@ type Change string
 // MCP servers.
 const AnyChange Change = ""
 
-const keyChange = "key:"
+const (
+	keyChange = "key:"
+	orgChange = "org:"
+)
+
+// OrgChange is a change inside one organisation, such as a model or a
+// guardrail. It drops that organisation's keys and reloads its models,
+// filters, routers and MCP servers, and no other's.
+func OrgChange(id string) Change { return Change(orgChange + id) }
+
+func (c Change) org() (string, bool) {
+	id, ok := strings.CutPrefix(string(c), orgChange)
+	return id, ok && id != ""
+}
 
 // KeyChange is a change to one key only, such as its creation or revocation.
 // It drops that key alone and reloads nothing: a sandbox starting or stopping
@@ -136,9 +154,11 @@ type Registry struct {
 	// started before is not cached, since it may have read the old row.
 	drops uint64
 
-	// reload asks for a full reload. It holds one request, so a burst of
-	// changes costs one reload, not one each.
-	reload chan struct{}
+	// reload wakes the reload loop. It holds one request, so a burst of
+	// changes costs one reload, not one each. pending says what to reload.
+	reload  chan struct{}
+	pendMu  sync.Mutex
+	pending pending
 
 	inflight sync.Map // string -> *call
 	// lookups holds a slot for each key query running, up to maxLookups.
@@ -172,29 +192,97 @@ func New(ctx context.Context, st Source, opts Options, log *slog.Logger) (*Regis
 // Run keeps the caches fresh until ctx is cancelled.
 func (r *Registry) Run(ctx context.Context) {
 	var wg sync.WaitGroup
-	wg.Go(func() { r.loop(ctx, refreshEvery, r.reload, r.refreshAll) })
-	wg.Go(func() { r.loop(ctx, r.opts.SpendRefresh, nil, r.refreshSpend) })
+	wg.Go(func() { r.keepPolicy(ctx) })
+	wg.Go(func() { r.keepSpend(ctx) })
 	wg.Go(func() { r.listen(ctx) })
 	wg.Wait()
 }
 
-// loop runs fn every so often, and also when asked on now.
-func (r *Registry) loop(ctx context.Context, every time.Duration, now <-chan struct{},
-	fn func(context.Context) error,
-) {
-	t := time.NewTicker(every)
+// keepPolicy reloads what changes ask for, and everything every refreshEvery.
+// After New it is the only writer of models, filters, routers and MCP
+// servers, so reloading one organisation never races a full reload.
+func (r *Registry) keepPolicy(ctx context.Context) {
+	t := time.NewTicker(refreshEvery)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-		case <-now:
+			r.want(AnyChange)
+		case <-r.reload:
 		}
-		if err := fn(ctx); err != nil && ctx.Err() == nil {
+		if err := r.refreshPending(ctx); err != nil && ctx.Err() == nil {
 			r.log.Warn("registry refresh failed", "error", err)
 		}
 	}
+}
+
+func (r *Registry) keepSpend(ctx context.Context) {
+	t := time.NewTicker(r.opts.SpendRefresh)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		if err := r.refreshSpend(ctx); err != nil && ctx.Err() == nil {
+			r.log.Warn("registry refresh failed", "error", err)
+		}
+	}
+}
+
+// pending is what the next reload covers: everything, or some organisations.
+type pending struct {
+	all  bool
+	orgs map[string]struct{}
+}
+
+// want adds what c makes stale to the next reload. A key change reloads
+// nothing.
+func (r *Registry) want(c Change) {
+	if _, ok := c.key(); ok {
+		return
+	}
+	r.pendMu.Lock()
+	defer r.pendMu.Unlock()
+	org, ok := c.org()
+	switch {
+	case r.pending.all:
+	case ok:
+		if r.pending.orgs == nil {
+			r.pending.orgs = make(map[string]struct{})
+		}
+		r.pending.orgs[org] = struct{}{}
+	default:
+		r.pending = pending{all: true}
+	}
+}
+
+// refreshPending runs the reloads asked for so far. What fails is asked for
+// again, so the next wake or tick retries it.
+func (r *Registry) refreshPending(ctx context.Context) error {
+	r.pendMu.Lock()
+	p := r.pending
+	r.pending = pending{}
+	r.pendMu.Unlock()
+
+	if p.all {
+		err := r.refreshAll(ctx)
+		if err != nil {
+			r.want(AnyChange)
+		}
+		return err
+	}
+	var errs []error
+	for org := range p.orgs {
+		if err := r.refreshOrg(ctx, org); err != nil {
+			r.want(OrgChange(org))
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // listen holds a dedicated connection on the notify channel. Losing it is not
@@ -220,6 +308,7 @@ func (r *Registry) listenOnce(ctx context.Context) error {
 		c := Change(payload)
 		r.Forget(c)
 		if _, ok := c.key(); !ok {
+			r.want(c)
 			select {
 			case r.reload <- struct{}{}:
 			default:
@@ -233,21 +322,26 @@ func (r *Registry) listenOnce(ctx context.Context) error {
 // notification.
 func (r *Registry) Forget(c Change) {
 	if id, ok := c.key(); ok {
-		r.dropKey(id)
+		r.dropKeys(func(k policy.Key) bool { return k.ID == id })
+		return
+	}
+	if id, ok := c.org(); ok {
+		r.dropKeys(func(k policy.Key) bool { return k.OrgID == id })
 		return
 	}
 	// Every cached key is dropped by moving on a generation.
 	r.gen.Add(1)
 }
 
-// dropKey drops one key's entry. Unknown keys are cached by hash only, so
-// one that turns valid waits out NegativeTTL, which is short.
-func (r *Registry) dropKey(id string) {
+// dropKeys drops the entries of the keys that match. Unknown keys are cached
+// by hash only, so one that turns valid waits out NegativeTTL, which is
+// short.
+func (r *Registry) dropKeys(match func(policy.Key) bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.drops++
 	for k, e := range r.keys {
-		if e.resolved != nil && e.resolved.Key.ID == id {
+		if e.resolved != nil && match(e.resolved.Key) {
 			delete(r.keys, k)
 		}
 	}
@@ -277,6 +371,69 @@ func (r *Registry) refreshAll(ctx context.Context) error {
 	return reload(ctx, &r.routers, r.store.LoadRouters, func(rt *policy.Router) (string, string) {
 		return rt.OrgID, rt.Alias
 	})
+}
+
+// refreshOrg reloads one organisation's models, MCP servers, filters and
+// routers, and leaves every other organisation's as they are. All four are
+// read before any is replaced, so a failure changes nothing. An
+// organisation that was deleted reads as empty, which removes it.
+func (r *Registry) refreshOrg(ctx context.Context, orgID string) error {
+	limited := map[string]string{}
+	org, err := r.store.OrgByID(ctx, orgID)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+	case err != nil:
+		return err
+	case org.Limited:
+		limited[orgID] = org.Name
+	}
+	models, err := r.store.ListModels(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	mcp, err := r.store.ListMCPServers(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	filters, err := r.store.ListFilters(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	routers, err := r.store.ListRouters(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	replaceOrg(&r.models, orgID, models, func(m *policy.Model) string {
+		r.finishModel(m, limited)
+		return m.Alias
+	})
+	replaceOrg(&r.mcp, orgID, mcp, func(m *policy.MCPServer) string {
+		r.finishMCP(m, limited)
+		return m.Alias
+	})
+	replaceOrg(&r.filters, orgID, filters, func(f *policy.Filter) string { return f.Alias })
+	replaceOrg(&r.routers, orgID, routers, func(rt *policy.Router) string { return rt.Alias })
+	return nil
+}
+
+// replaceOrg swaps in a new index with one organisation's things replaced by
+// list. The other organisations' maps are shared with the old index, which is
+// safe because no index is ever changed in place.
+func replaceOrg[T any](into *atomic.Pointer[map[string]map[string]T], orgID string, list []T,
+	alias func(*T) string,
+) {
+	old := *into.Load()
+	byOrg := make(map[string]map[string]T, len(old)+1)
+	maps.Copy(byOrg, old)
+	delete(byOrg, orgID)
+	if len(list) > 0 {
+		own := make(map[string]T, len(list))
+		for i := range list {
+			own[alias(&list[i])] = list[i]
+		}
+		byOrg[orgID] = own
+	}
+	into.Store(&byOrg)
 }
 
 // Filter implements policy.Source.
@@ -337,17 +494,23 @@ func sortedValues[T any](byAlias map[string]T) []T {
 // limited maps each limited organisation to its name.
 func (r *Registry) refreshModels(ctx context.Context, limited map[string]string) error {
 	return reload(ctx, &r.models, r.store.LoadModels, func(m *policy.Model) (string, string) {
-		if r.opts.Platform.Covers(*m) {
-			r.usePlatformKey(m)
-		} else if len(m.APIKeyCiphertext) > 0 {
-			m.APIKey = r.open(ModelSecretName(m.OrgID, m.Alias), m.APIKeyCiphertext)
-		}
-		if name, ok := limited[m.OrgID]; ok {
-			m.Limited, m.OrgName = true, name
-			m.Locked = !r.openToLimited(*m)
-		}
+		r.finishModel(m, limited)
 		return m.OrgID, m.Alias
 	})
+}
+
+// finishModel gives a model as stored its credential, and holds it back if
+// its organisation is limited.
+func (r *Registry) finishModel(m *policy.Model, limited map[string]string) {
+	if r.opts.Platform.Covers(*m) {
+		r.usePlatformKey(m)
+	} else if len(m.APIKeyCiphertext) > 0 {
+		m.APIKey = r.open(ModelSecretName(m.OrgID, m.Alias), m.APIKeyCiphertext)
+	}
+	if name, ok := limited[m.OrgID]; ok {
+		m.Limited, m.OrgName = true, name
+		m.Locked = !r.openToLimited(*m)
+	}
 }
 
 // openToLimited reports whether an organisation that signed itself up and has
@@ -383,15 +546,20 @@ func (r *Registry) usePlatformKey(m *policy.Model) {
 
 func (r *Registry) refreshMCP(ctx context.Context, limited map[string]string) error {
 	return reload(ctx, &r.mcp, r.store.LoadMCPServers, func(m *policy.MCPServer) (string, string) {
-		if len(m.APIKeyCiphertext) > 0 {
-			m.APIKey = r.open(MCPSecretName(m.OrgID, m.Alias), m.APIKeyCiphertext)
-		}
-		if name, ok := limited[m.OrgID]; ok {
-			m.Limited, m.OrgName = true, name
-			m.Locked = policy.HostingOf(m.URL) != policy.HostedExternal
-		}
+		r.finishMCP(m, limited)
 		return m.OrgID, m.Alias
 	})
+}
+
+// finishMCP is finishModel for an MCP server.
+func (r *Registry) finishMCP(m *policy.MCPServer, limited map[string]string) {
+	if len(m.APIKeyCiphertext) > 0 {
+		m.APIKey = r.open(MCPSecretName(m.OrgID, m.Alias), m.APIKeyCiphertext)
+	}
+	if name, ok := limited[m.OrgID]; ok {
+		m.Limited, m.OrgName = true, name
+		m.Locked = policy.HostingOf(m.URL) != policy.HostedExternal
+	}
 }
 
 // MCPSecretName is what an MCP server's credential is sealed against. It

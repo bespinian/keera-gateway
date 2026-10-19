@@ -92,7 +92,7 @@ func (s *Server) putMCPServer(w http.ResponseWriter, r *http.Request, p *authn.P
 			return
 		}
 	}
-	s.changed(r)
+	s.changed(r, orgID)
 	// Read back, so has_api_key says what is stored and not what this body
 	// happened to mention.
 	stored, err := s.st.MCPServer(r.Context(), orgID, m.Alias)

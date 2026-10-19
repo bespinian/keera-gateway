@@ -199,12 +199,24 @@ function sceneFrom(data) {
     })),
     from: data.from,
     to: data.to,
-    // Arrival times of live packets, for the gateway's rate.
-    beats: [],
+    // Batches of live requests, as { at, n }, oldest first, for the gateway's
+    // rate.
+    beats: beatsFrom(data.last_minute),
     height: 0,
   };
   index(scene);
   return scene;
+}
+
+/** beatsFrom fills the last minute from the report, which counts it per
+ *  second, newest first. Without it the rate would take a minute to be right. */
+function beatsFrom(counts) {
+  const now = Date.now();
+  const beats = [];
+  for (let i = (counts || []).length - 1; i >= 0; i--) {
+    if (counts[i] > 0) beats.push({ at: now - i * 1000 - 500, n: counts[i] });
+  }
+  return beats;
 }
 
 function cellOf(c) {
@@ -526,7 +538,7 @@ function paint(ctx, canvas, tip, scene) {
     // The gateway shows a per-minute rate, which drops as packets age out
     // even when no new ones arrive.
     const cut = Date.now() - 60000;
-    while (scene.beats.length && scene.beats[0] < cut) {
+    while (scene.beats.length && scene.beats[0].at < cut) {
       scene.beats.shift();
       moved = true;
     }
@@ -594,7 +606,6 @@ function paint(ctx, canvas, tip, scene) {
   }
 
   function send(client, model, outcome, delay) {
-    scene.beats.push(Date.now());
     dirty = true;
     if (still.matches) {
       // Reduced motion: light the boxes, but draw no packets.
@@ -940,7 +951,7 @@ function clientFace(n, c) {
 function gatewayFace(scene, c) {
   return {
     title: scene.gateway.label,
-    value: String(scene.beats.length),
+    value: String(scene.beats.reduce((sum, b) => sum + b.n, 0)),
     unit: "req/min now",
     note:
       (scene.gateway.sub ? scene.gateway.sub + " · " : "") +
@@ -1121,6 +1132,8 @@ function watch(ctx, { since, scene, painter, live }) {
   });
 
   function arrived(rows) {
+    // Every row counts towards the rate, drawn or not.
+    if (rows.length) scene.beats.push({ at: Date.now(), n: rows.length });
     // Oldest first and staggered, so a batch of forty looks like forty
     // requests, not a wall.
     const drawn = rows.slice(0, MAX_SPAWN).reverse();

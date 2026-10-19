@@ -47,7 +47,7 @@ func (s *Server) createOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	}
 	s.auditf(r, p, org.ID, "org.create", "org", org.ID, org)
 	// Its models, copied from the template, are for the gateway to serve now.
-	s.changed(r)
+	s.changed(r, org.ID)
 	httpx.WriteJSON(w, http.StatusCreated, org)
 }
 
@@ -110,7 +110,7 @@ func (s *Server) updateOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	s.auditf(r, p, orgID, "org.update", "org", orgID, org)
 	if in.Limited != nil {
 		// What the organisation's models may reach changed.
-		s.changed(r)
+		s.changed(r, orgID)
 	}
 	httpx.WriteJSON(w, http.StatusOK, org)
 }
@@ -162,7 +162,7 @@ func (s *Server) deleteOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	}
 	s.auditf(r, p, orgID, "org.delete", "org", orgID, gone)
 	// Every key of the tenant is gone, so the gateways must drop them now.
-	s.changed(r)
+	s.changed(r, orgID)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"id": gone.ID, "name": gone.Name, "deleted": true,
 		"projects": gone.Projects, "users": gone.Users, "keys": gone.Keys,
@@ -369,7 +369,7 @@ func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request, p *authn.
 	}
 	s.auditf(r, p, orgID, "project.delete", "project", projectID, gone)
 	// The project's guardrails are gone, so the gateways must drop them now.
-	s.changed(r)
+	s.changed(r, orgID)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"id": gone.ID, "name": gone.Name, "deleted": true,
 		"detached_keys": gone.DetachedKeys,
@@ -581,7 +581,7 @@ func (s *Server) disableUser(w http.ResponseWriter, r *http.Request, p *authn.Pr
 		return
 	}
 	// The keys must stop on every replica now, not a cache lifetime later.
-	s.changed(r)
+	s.changed(r, target.OrgID)
 	out := map[string]any{
 		"id": target.ID, "email": target.Email, "disabled": true, "revoked_keys": revoked,
 	}

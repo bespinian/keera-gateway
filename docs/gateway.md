@@ -595,7 +595,8 @@ so a request waits on the database only to check a key it has not seen
 recently. A change made through the control API is pushed to every replica at
 once, over Postgres LISTEN/NOTIFY, so a revoked key stops working right away.
 A change to one key, such as a sandbox starting or stopping, drops only that
-key; any other change drops every key and reloads the rest. In case a
+key. Any other change, such as a model or a guardrail, drops the keys of
+its organisation and reloads that organisation alone. In case a
 notification is lost, a checked key is reused for at most
 `KEERA_CACHE_TTL` (30 seconds), and models, filters, routers and MCP servers are
 reloaded every minute. Spend is refreshed separately (`KEERA_SPEND_REFRESH`, 10
