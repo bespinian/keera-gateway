@@ -31,6 +31,11 @@ func TestFitProviderFixesWhatProvidersRefuse(t *testing.T) {
 		in:   `{"max_tokens":64,"max_completion_tokens":32}`,
 		want: map[string]any{"max_completion_tokens": float64(32)},
 	}, {
+		name:     "a null max_completion_tokens does not drop the ceiling",
+		provider: "openai", model: "gpt-5.5", path: "/chat/completions",
+		in:   `{"max_tokens":64,"max_completion_tokens":null}`,
+		want: map[string]any{"max_completion_tokens": float64(64)},
+	}, {
 		name:     "the Responses API has its own ceiling field",
 		provider: "openai", model: "gpt-5.5", path: "/responses",
 		in:   `{"max_output_tokens":64,"temperature":1}`,

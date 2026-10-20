@@ -50,9 +50,10 @@ func fitOpenAI(m policy.Model, path string, payload []byte) []byte {
 	}
 	changed := false
 	// Every current OpenAI chat model takes max_completion_tokens, so the rename
-	// is safe for the older ones too.
+	// is safe for the older ones too. A null max_completion_tokens counts as
+	// absent, as it does for the clamp, or the clamped max_tokens would be lost.
 	if raw, ok := b.fields["max_tokens"]; ok && path == "/chat/completions" {
-		if _, has := b.fields["max_completion_tokens"]; !has {
+		if _, has := b.value("max_completion_tokens"); !has {
 			b.set("max_completion_tokens", raw)
 		}
 		b.remove("max_tokens")
