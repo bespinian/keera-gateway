@@ -61,7 +61,7 @@ func registerModelFlags(fs *flag.FlagSet) *modelFlags {
 	fs.StringVar(&f.description, "description", "",
 		"what this model is for, in a sentence; clients see it and routers decide on it "+
 			"(a --provider model starts with that provider's own)")
-	fs.IntVar(&f.maxContext, "max-context", -1, "context window: advertised to clients, and a request that cannot fit is refused")
+	fs.IntVar(&f.maxContext, "max-context-tokens", -1, "context window: advertised to clients, and a request that cannot fit is refused")
 	fs.StringVar(&f.releaseDate, "release-date", "",
 		"the day the model came out, as YYYY-MM-DD (a --provider model starts with that provider's own)")
 	fs.StringVar(&f.location, "location", "",

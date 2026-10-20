@@ -39,7 +39,7 @@ remote endpoint without any developer changing anything.
 - `backend_model` is the name the backend serves the model under - vLLM's
   `--served-model-name`, llama.cpp's `--alias`. If it is wrong, every request
   returns 404.
-- `max_context` is shown to clients on `/api/v1/models`, sizes a filter's or a
+- `max_context_tokens` is shown to clients on `/api/v1/models`, sizes a filter's or a
   router's own model, and bounds every request. See
   [Requests too long for the model](#requests-too-long-for-the-model).
 - `location` says where the model runs, and so where prompts go: `ch` or `usa`
@@ -505,7 +505,7 @@ rewrite filter's model or a router's destination, and no client can name it.
   backends:
     - http://keera-decider:8000/v1
   backend_model: english # the Laya checkpoint
-  max_context: 2048
+  max_context_tokens: 2048
 ```
 
 The gateway asks it on `/v1/systemone`, and reads the probabilities the way it
@@ -513,7 +513,7 @@ reads a chat model's logprobs.
 A stored credential is sent as a bearer token, which is what `laya-serve`
 checks when `LAYA_API_KEY` is set.
 
-**`max_context` is sent as Laya's `max_len`**, so the model reads exactly what
+**`max_context_tokens` is sent as Laya's `max_len`**, so the model reads exactly what
 the gateway measured against it. A gate refuses a longer request with 413, and a
 router sends it to its fallback, as with any model. On a CPU, Laya takes about
 one second at 512 tokens and about five at 2048.
@@ -542,7 +542,7 @@ was. Run `keera filter check` and `keera router check` as for any model.
 
 ## Requests too long for the model
 
-A request that cannot fit in the `max_context` of any model it may go to is
+A request that cannot fit in the `max_context_tokens` of any model it may go to is
 refused with a 400 before it is filtered or forwarded. Only an instruction
 router's decision has been paid for by then.
 
@@ -562,7 +562,7 @@ not with its `max_tokens`, gets Anthropic's
 ``input length and `max_tokens` exceed context limit: N + K > M``, on which
 Claude Code lowers `max_tokens` and tries again.
 
-A model with no `max_context` is not checked. Embedding and completion inputs
+A model with no `max_context_tokens` is not checked. Embedding and completion inputs
 are checked one by one, since each has to fit on its own.
 
 ## Streaming

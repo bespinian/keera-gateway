@@ -44,7 +44,7 @@ type ProviderModel struct {
 	ID string `json:"id"`
 	// DisplayName is the model's name for people, such as Claude Haiku 5.5.
 	DisplayName string `json:"display_name"`
-	MaxContext  int    `json:"max_context"`
+	MaxContext  int    `json:"max_context_tokens"`
 	// ReleaseDate is the day the model came out, as YYYY-MM-DD, or empty when
 	// it is not known.
 	ReleaseDate         string `json:"release_date,omitempty"`

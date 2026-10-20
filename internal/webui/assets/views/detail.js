@@ -416,8 +416,8 @@ export async function modelDetailView(ctx) {
       ? [
           pill(model.kind),
           model.enabled ? pill("Enabled", "good") : pill("Disabled", "warn"),
-          model.max_context
-            ? pill(`${compact(model.max_context)} context`)
+          model.max_context_tokens
+            ? pill(`${compact(model.max_context_tokens)} context`)
             : null,
           model.location ? pill(locationName(model.location)) : null,
           model.release_date

@@ -114,7 +114,7 @@ type Model struct {
 	// MaxContext is advertised on /v1/models, and a request that cannot fit in
 	// it is refused. Without the tokeniser the check counts the least a request
 	// can be, so a request near the limit is left to the inference plane.
-	MaxContext int `json:"max_context"`
+	MaxContext int `json:"max_context_tokens"`
 	// ReleaseDate is the day the model came out, as YYYY-MM-DD, or empty when
 	// nobody stated it. It tells a newer model from an older one.
 	ReleaseDate string `json:"release_date,omitempty"`

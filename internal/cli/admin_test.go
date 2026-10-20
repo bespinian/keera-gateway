@@ -691,8 +691,8 @@ func TestModelAddFillsInTheProviderDefaults(t *testing.T) {
 	if body["input_micros_per_mtok"] != float64(4_600_000) {
 		t.Errorf("input price = %v, want the provider's", body["input_micros_per_mtok"])
 	}
-	if body["max_context"] != float64(1_000_000) {
-		t.Errorf("max_context = %v", body["max_context"])
+	if body["max_context_tokens"] != float64(1_000_000) {
+		t.Errorf("max_context_tokens = %v", body["max_context_tokens"])
 	}
 	if _, sent := body["api_key"]; sent {
 		t.Error("a credential was sent when none was given")
@@ -707,7 +707,7 @@ func TestModelSetChangesWhatItIsGivenAndKeepsTheRest(t *testing.T) {
 	stored := map[string]any{
 		"alias": "keera-speed", "kind": "chat",
 		"backends":      []string{"http://vllm-a:8000/v1", "http://vllm-b:8000/v1"},
-		"backend_model": "qwen3-8b", "max_context": 32768,
+		"backend_model": "qwen3-8b", "max_context_tokens": 32768,
 		"input_micros_per_mtok": 100_000, "output_micros_per_mtok": 300_000,
 		"cached_input_micros_per_mtok": 50_000,
 		"enabled":                      true,
@@ -734,7 +734,7 @@ func TestModelSetChangesWhatItIsGivenAndKeepsTheRest(t *testing.T) {
 			}
 			body := f.request("PUT", "/v1/models/keera-speed").body
 			for _, field := range []string{"input_micros_per_mtok", "output_micros_per_mtok",
-				"cached_input_micros_per_mtok", "max_context"} {
+				"cached_input_micros_per_mtok", "max_context_tokens"} {
 				want := stored[field].(int)
 				if field == tc.field {
 					want = tc.want

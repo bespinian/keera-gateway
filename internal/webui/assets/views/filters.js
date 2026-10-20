@@ -933,7 +933,7 @@ function editFilter(ctx, existing, readers) {
         { value: m.alias, selected: m.alias === f.model },
         m.alias +
           (m.kind === "decision" ? " - decision model, gates only" : "") +
-          (m.max_context ? ` - ${compact(m.max_context)} context` : ""),
+          (m.max_context_tokens ? ` - ${compact(m.max_context_tokens)} context` : ""),
       ),
     ),
   );

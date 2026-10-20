@@ -69,7 +69,7 @@ function renderFor(models) {
     models.map((m) => ({
       alias: m.alias,
       name: m.display_name,
-      max_context: m.max_context,
+      max_context_tokens: m.max_context_tokens,
       backend_model: m.backend_model,
       provider: m.provider,
     })),
@@ -351,8 +351,8 @@ function modelList(models) {
       h("code", {}, m.alias),
       m.router
         ? " (router)"
-        : m.max_context
-          ? ` (${compact(m.max_context)} context)`
+        : m.max_context_tokens
+          ? ` (${compact(m.max_context_tokens)} context)`
           : "",
     ]),
     ". The first is the default.",

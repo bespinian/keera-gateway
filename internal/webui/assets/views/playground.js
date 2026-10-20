@@ -487,8 +487,8 @@ function subtitle(model) {
     return "A router: it picks the model";
   }
   const bits = [model.display_name || model.backend_model];
-  if (model.max_context)
-    bits.push(compact(model.max_context) + " token context");
+  if (model.max_context_tokens)
+    bits.push(compact(model.max_context_tokens) + " token context");
   return bits.filter(Boolean).join(" · ");
 }
 

@@ -99,9 +99,9 @@ on the same card; the unquantised 14B needs a 48 GB card (g6e.xlarge).
   needs far more. It fails at startup with `Insufficient space in /dev/shm`.
   The usual fix is `--ipc=host`, but podman-compose 1.6 ignores `ipc:`, so the
   GPU tier sets the `/dev/shm` size instead, 8 GB by default.
-- **`max_context` must match the backend's window.** `models.yaml` says 16384,
+- **`max_context_tokens` must match the backend's window.** `models.yaml` says 16384,
   which is safe on both tiers. On the GPU tier, raise it on each
-  organisation's model with `keera model set keera-speed --max-context 32768`.
+  organisation's model with `keera model set keera-speed --max-context-tokens 32768`.
 - **Do not override `healthcheck.test`** on podman-compose 1.6. It appends the
   new command to the old one and runs neither. The GPU tier does not override
   it; this works because vLLM's `/health` uses the same port and path as

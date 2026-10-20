@@ -406,7 +406,7 @@ The context it needs depends on the mode:
   a rewrite filter on the same model.
 
 The gateway estimates the request's size against the filter model's
-`max_context` and refuses with 413 rather than send something that would be
+`max_context_tokens` and refuses with 413 rather than send something that would be
 truncated. The message says which of the two rules applied. Frequent 413s mean
 the filter's model is too small for the traffic, or clients send very large
 contexts.

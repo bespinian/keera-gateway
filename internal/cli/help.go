@@ -22,7 +22,7 @@ import (
 // adds a few of its own; a router's two read the same ones.
 var (
 	modelFieldFlags = []string{"provider", "backend", "product-id", "backend-model", "kind",
-		"display-name", "description", "max-context", "release-date", "location",
+		"display-name", "description", "max-context-tokens", "release-date", "location",
 		"price-in", "price-out", "price-cached", "price-cache-write"}
 	mcpFieldFlags    = []string{"endpoint", "description", "auth-header", "api-key"}
 	filterFieldFlags = []string{"mode", "model", "prompt", "rules", "description"}
@@ -336,7 +336,7 @@ var commands = []command{
 					"docs/subscriptions.md.",
 				examples: []string{
 					"keera model add keera-speed --backend http://vllm:8000/v1 \\\n" +
-						"    --backend-model Qwen/Qwen2.5-Coder-7B-Instruct --max-context 32768",
+						"    --backend-model Qwen/Qwen2.5-Coder-7B-Instruct --max-context-tokens 32768",
 					"keera model add keera-swiss --provider infomaniak --product-id 100234 \\\n" +
 						"    --backend-model swiss-ai/Apertus-v1.5-70B --api-key @-",
 					"keera model add claude-opus --provider anthropic \\\n" +

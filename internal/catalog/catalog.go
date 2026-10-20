@@ -63,7 +63,7 @@ type Model struct {
 	// than above_tokens. A provider fills it in for a model priced by prompt
 	// length.
 	LongPrompt *policy.PriceTier `yaml:"long_prompt"`
-	MaxContext *int              `yaml:"max_context"`
+	MaxContext *int              `yaml:"max_context_tokens"`
 	// ReleaseDate is the day the model came out, as YYYY-MM-DD. A provider
 	// fills it in for the models it knows.
 	ReleaseDate string `yaml:"release_date"`

@@ -59,7 +59,7 @@ type Model struct {
 	// Name is its name for people, or empty to make one from the alias.
 	Name string `json:"name,omitempty"`
 	// MaxContext is its window, or zero for the default. A router has none.
-	MaxContext int `json:"max_context,omitempty"`
+	MaxContext int `json:"max_context_tokens,omitempty"`
 	// BackendModel and Provider say which model it is, for Claude Code. A
 	// router has neither.
 	BackendModel string `json:"backend_model,omitempty"`

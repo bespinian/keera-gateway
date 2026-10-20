@@ -272,7 +272,7 @@ request goes to the destination with the smallest ceiling it fits under.
 ### The one thing only it gets right
 
 It is the only mode that chooses by whether a request fits. A destination whose
-`max_context` cannot hold the request is ranked **behind every destination that
+`max_context_tokens` cannot hold the request is ranked **behind every destination that
 can**, whatever the ceilings say. The other modes may send a long conversation
 to a small model, which then refuses it itself. The gateway refuses a request
 only when [no destination can hold it](gateway.md#requests-too-long-for-the-model).

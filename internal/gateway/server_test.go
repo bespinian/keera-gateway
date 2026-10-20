@@ -883,7 +883,7 @@ func TestListModelsShowsOnlyWhatTheKeyMayUse(t *testing.T) {
 		Data   []struct {
 			ID         string `json:"id"`
 			Created    int64  `json:"created"`
-			MaxContext int    `json:"max_context"`
+			MaxContext int    `json:"max_context_tokens"`
 			Location   string `json:"location"`
 		} `json:"data"`
 	}
@@ -897,7 +897,7 @@ func TestListModelsShowsOnlyWhatTheKeyMayUse(t *testing.T) {
 		t.Fatalf("data = %+v, want only keera-code", out.Data)
 	}
 	if out.Data[0].MaxContext != 65536 {
-		t.Errorf("max_context = %d, want it advertised so clients can size a request",
+		t.Errorf("max_context_tokens = %d, want it advertised so clients can size a request",
 			out.Data[0].MaxContext)
 	}
 	// OpenAI's "created" is when the model came out, so it carries the

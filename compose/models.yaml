@@ -13,7 +13,7 @@ models:
     # The name the backend serves the model under: vLLM's --served-model-name,
     # llama.cpp's --alias. If it is wrong, every request returns 404.
     backend_model: keera-speed
-    max_context: 16384
+    max_context_tokens: 16384
     # What this model is for, in a sentence. Clients see it on /v1/models, and
     # routers read it to choose a model, so write it for that. See
     # docs/routers.md.
@@ -39,7 +39,7 @@ models:
     # Sent to Laya as max_len, so it reads exactly what the gateway measured.
     # On CPU, 2048 tokens take about five seconds and 512 about one. A gate
     # refuses a longer request; a router sends it to its fallback.
-    max_context: 2048
+    max_context_tokens: 2048
     description: >-
       Decides, does not write. A classifier for routers and gate filters.
     input_micros_per_mtok: 0

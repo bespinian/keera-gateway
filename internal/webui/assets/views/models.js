@@ -165,9 +165,9 @@ export async function modelsView(ctx) {
         label: "Context",
         num: true,
         shrink: true,
-        sortKey: (m) => m.max_context || null,
+        sortKey: (m) => m.max_context_tokens || null,
         sortDir: "desc",
-        cell: (m) => (m.max_context ? compact(m.max_context) : dash()),
+        cell: (m) => (m.max_context_tokens ? compact(m.max_context_tokens) : dash()),
       },
       {
         // The same median as on the model's own screen, over the same window.
@@ -361,9 +361,9 @@ export async function catalogueView(ctx) {
         label: "Context",
         num: true,
         shrink: true,
-        sortKey: (r) => r.m.max_context || null,
+        sortKey: (r) => r.m.max_context_tokens || null,
         sortDir: "desc",
-        cell: (r) => (r.m.max_context ? compact(r.m.max_context) : dash()),
+        cell: (r) => (r.m.max_context_tokens ? compact(r.m.max_context_tokens) : dash()),
       },
       {
         label: "Input / Mtok (CHF)",
@@ -581,12 +581,12 @@ function viewModel(ctx, m) {
         { class: "field-row" },
         readRow(
           "Context window",
-          m.max_context
+          m.max_context_tokens
             ? h(
                 "span",
                 {},
-                `${compact(m.max_context)} tokens`,
-                h("span", { class: "hint-origin" }, ` - ${num(m.max_context)}`),
+                `${compact(m.max_context_tokens)} tokens`,
+                h("span", { class: "hint-origin" }, ` - ${num(m.max_context_tokens)}`),
               )
             : h("span", { class: "muted" }, "not advertised"),
           "Advertised to clients. A request that cannot fit is refused.",
@@ -918,7 +918,7 @@ const PRESET_FIELDS = [
     label: "context window",
     fromModel: true,
     numeric: true,
-    of: (p, m) => (m && m.max_context ? String(m.max_context) : null),
+    of: (p, m) => (m && m.max_context_tokens ? String(m.max_context_tokens) : null),
   },
   {
     key: "releaseDate",
@@ -991,7 +991,7 @@ function editModel(ctx, existing, providers, pick) {
     class: "input",
     type: "number",
     min: "0",
-    value: m.max_context || "",
+    value: m.max_context_tokens || "",
     placeholder: "0",
   });
   const displayName = h("input", {
@@ -1415,7 +1415,7 @@ function editModel(ctx, existing, providers, pick) {
         // Lets the next edit tell the provider's values from the
         // administrator's.
         provider: state.hosted && state.preset ? state.preset.p.name : "",
-        max_context: parseInt(maxContext.value, 10) || 0,
+        max_context_tokens: parseInt(maxContext.value, 10) || 0,
         display_name: displayName.value.trim(),
         description: description.value.trim(),
         release_date: releaseDate.value,

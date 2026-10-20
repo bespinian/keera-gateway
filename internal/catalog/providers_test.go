@@ -49,7 +49,7 @@ models:
     provider: ANTHROPIC
     backend_model: claude-opus-5
     backends: ["http://egress.corp:8080/v1"]
-    max_context: 200000
+    max_context_tokens: 200000
     input_micros_per_mtok: 1
     output_micros_per_mtok: 0
 `

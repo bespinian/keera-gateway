@@ -14,7 +14,7 @@ models:
     kind: chat
     backends: ["http://keera-code:8000/v1"]
     backend_model: keera-code
-    max_context: 65536
+    max_context_tokens: 65536
     input_micros_per_mtok: 500000
     output_micros_per_mtok: 2000000
   - alias: keera-embed

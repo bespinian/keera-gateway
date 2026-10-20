@@ -22,7 +22,7 @@ type modelEntry struct {
 	CreatedAt string `json:"created_at,omitempty"`
 	// MaxContext is not part of the OpenAI shape, but clients that know to
 	// look for it can size a request without being told out of band.
-	MaxContext int `json:"max_context,omitempty"`
+	MaxContext int `json:"max_context_tokens,omitempty"`
 	// DisplayName is the model's name for people, as Anthropic's API calls
 	// it. Anthropic's has one for every model, so the alias stands in.
 	DisplayName string `json:"display_name"`

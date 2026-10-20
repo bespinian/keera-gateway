@@ -80,7 +80,7 @@ services:
       # the GPU tier use 8000.
       - --port
       - "8000"
-      # Keep in step with max_context in models.yaml: the gateway refuses
+      # Keep in step with max_context_tokens in models.yaml: the gateway refuses
       # anything larger (`fits` in internal/gateway/window.go), so a mismatch
       # shows only when a long prompt is refused.
       - -c
