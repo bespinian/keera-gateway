@@ -385,6 +385,11 @@ func TestARefusedRevocationLeavesTheKeyWorking(t *testing.T) {
 	if w := tn.revoke(bob, "key_bob"); w.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200: %s", w.Code, w.Body)
 	}
+	// Rotate and activate answer a revoked key the same way.
+	if w := tn.revoke(bob, "key_bob"); w.Code != http.StatusConflict ||
+		!strings.Contains(w.Body.String(), "key_revoked") {
+		t.Errorf("revoking twice = %d %s, want 409 key_revoked", w.Code, w.Body)
+	}
 }
 
 func TestTheDevelopersOwnScreenShowsOnlyTheirOwnKeys(t *testing.T) {

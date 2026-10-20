@@ -130,8 +130,11 @@ func TestLookupKeyRejectsUnknownRevokedAndExpiredKeys(t *testing.T) {
 		t.Errorf("a revoked key gave %v, want ErrKeyRevoked", err)
 	}
 	// Revoking twice is not a second event.
-	if err := st.RevokeKey(ctx, f.keyID); err != ErrNotFound {
-		t.Errorf("revoking an already revoked key gave %v, want ErrNotFound", err)
+	if err := st.RevokeKey(ctx, f.keyID); !errors.Is(err, policy.ErrKeyRevoked) {
+		t.Errorf("revoking an already revoked key gave %v, want ErrKeyRevoked", err)
+	}
+	if err := st.RevokeKey(ctx, "key_no_such_thing"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("revoking a key that does not exist gave %v, want ErrNotFound", err)
 	}
 	// A key that has been revoked is kept, so its usage history keeps
 	// resolving.

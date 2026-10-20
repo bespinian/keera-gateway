@@ -595,10 +595,23 @@ func insertKey(ctx context.Context, db querier, k KeyInfo, hash []byte) (KeyInfo
 }
 
 // RevokeKey marks a key unusable. It is kept rather than deleted so its usage
-// history keeps resolving.
+// history keeps resolving. A key already revoked gives policy.ErrKeyRevoked,
+// so a second revoke is not a second event.
 func (s *Store) RevokeKey(ctx context.Context, id string) error {
-	return s.execOne(ctx,
-		"UPDATE api_keys SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL", id)
+	var found, revoked bool
+	err := s.pool.QueryRow(ctx, `WITH revoked AS (
+			UPDATE api_keys SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL RETURNING id)
+		SELECT EXISTS (SELECT 1 FROM api_keys WHERE id = $1), EXISTS (SELECT 1 FROM revoked)`,
+		id).Scan(&found, &revoked)
+	switch {
+	case err != nil:
+		return err
+	case !found:
+		return ErrNotFound
+	case !revoked:
+		return policy.ErrKeyRevoked
+	}
+	return nil
 }
 
 // RenameKey changes what a key is called and returns the name it had. Revoked

@@ -1170,13 +1170,14 @@ func (m *Manager) stopClock(ctx context.Context, sbID string) {
 	}
 }
 
-// revokeKey revokes a sandbox's key, if it has one. A key already gone is
-// fine; any other failure is logged.
+// revokeKey revokes a sandbox's key, if it has one. A key already revoked or
+// gone is fine; any other failure is logged.
 func (m *Manager) revokeKey(ctx context.Context, sb store.Sandbox) {
 	if sb.KeyID == "" {
 		return
 	}
-	if err := m.st.RevokeKey(ctx, sb.KeyID); err != nil && !errors.Is(err, store.ErrNotFound) {
+	if err := m.st.RevokeKey(ctx, sb.KeyID); err != nil &&
+		!errors.Is(err, policy.ErrKeyRevoked) && !errors.Is(err, store.ErrNotFound) {
 		m.log.Warn("sandbox: revoking a sandbox's key failed", "sandbox", sb.ID,
 			"key_id", sb.KeyID, "state", sb.State, "error", err)
 	}

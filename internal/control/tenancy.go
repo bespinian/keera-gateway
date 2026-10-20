@@ -1051,7 +1051,12 @@ func (s *Server) revokeKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	if !ok {
 		return
 	}
-	if err := s.st.RevokeKey(r.Context(), keyID); err != nil {
+	err := s.st.RevokeKey(r.Context(), keyID)
+	if errors.Is(err, policy.ErrKeyRevoked) {
+		conflict(w, "key_revoked", "that key was already revoked")
+		return
+	}
+	if err != nil {
 		s.fail(w, err)
 		return
 	}
