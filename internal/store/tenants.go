@@ -507,15 +507,19 @@ func (s *Store) AddUser(ctx context.Context, newID, orgID, email, externalID, ro
 // ListUsers returns the users of one org. An empty orgID means every
 // organisation, as for projects.
 func (s *Store) ListUsers(ctx context.Context, orgID string) ([]User, error) {
-	// GREATEST skips nulls, so either one alone is enough. usage_events is
-	// indexed on (user_id, ts), so the newest request is one index read.
+	// GREATEST skips nulls, so either one alone is enough. The last request
+	// comes from usage_daily, which outlives the request log.
 	return queryAll(ctx, s.pool, func(r row) (User, error) {
 		var u User
 		err := r.Scan(append(userTargets(&u), &u.LastActiveAt)...)
 		return u, err
-	}, `SELECT `+userColumnsOf("u.")+`, GREATEST(u.signed_in_at,
-			(SELECT max(e.ts) FROM usage_events e WHERE e.user_id = u.id))
-		FROM users u WHERE ($1 = '' OR u.org_id = $1) ORDER BY u.email`, orgID)
+	}, `SELECT `+userColumnsOf("u.")+`, GREATEST(u.signed_in_at, d.last_at)
+		FROM users u
+		LEFT JOIN (
+		    SELECT user_id, max(last_at) AS last_at FROM usage_daily
+		    WHERE $1 = '' OR org_id = $1 GROUP BY user_id
+		) d ON d.user_id = u.id
+		WHERE ($1 = '' OR u.org_id = $1) ORDER BY u.email`, orgID)
 }
 
 // DisableUser turns a person off: it revokes every key attributed to them,

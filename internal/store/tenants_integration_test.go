@@ -523,6 +523,20 @@ func TestListUsersSaysWhenEachPersonWasLastActive(t *testing.T) {
 		}
 	}
 
+	// It outlives the request log.
+	if _, err := st.PurgeUsage(ctx, later.Add(time.Second)); err != nil {
+		t.Fatalf("PurgeUsage: %v", err)
+	}
+	users, err = st.ListUsers(ctx, f.orgID)
+	if err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+	for _, u := range users {
+		if u.ID == busy.ID && (u.LastActiveAt == nil || !u.LastActiveAt.Equal(later)) {
+			t.Errorf("after retention, last active = %v, want %v", u.LastActiveAt, later)
+		}
+	}
+
 	// Signing in alone counts too.
 	if err := st.CreateSession(ctx, []byte("session-hash-000000000000000009!"), idle.ID, "csrf",
 		time.Now().Add(time.Hour)); err != nil {
