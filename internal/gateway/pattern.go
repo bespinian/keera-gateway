@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
@@ -163,12 +162,9 @@ func patternCheckWarnings(out []string, hits []patternHit, codeHits []patternHit
 
 // quoteRule renders an expression for a sentence somebody reads.
 func quoteRule(s string) string {
+	// With the ellipsis, a cut rule is 60 bytes too.
 	if len(s) > 60 {
-		cut := 57
-		for !utf8.RuneStart(s[cut]) {
-			cut--
-		}
-		return "'" + s[:cut] + "…'"
+		s = shorten(s, 60-len(ellipsis))
 	}
 	return "'" + s + "'"
 }

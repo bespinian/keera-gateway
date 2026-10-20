@@ -34,10 +34,14 @@ type Signup struct {
 const signupColumns = `token_hash, user_id, provider, external_id, email, signups.name, role,
 	refresh_token, COALESCE(invited_org, ''), redirect_to`
 
+func signupTargets(su *Signup) []any {
+	return []any{&su.TokenHash, &su.UserID, &su.Provider, &su.ExternalID, &su.Email,
+		&su.Name, &su.Role, &su.RefreshToken, &su.InvitedOrg, &su.RedirectTo}
+}
+
 func scanSignup(r row) (Signup, error) {
 	var su Signup
-	err := r.Scan(&su.TokenHash, &su.UserID, &su.Provider, &su.ExternalID, &su.Email,
-		&su.Name, &su.Role, &su.RefreshToken, &su.InvitedOrg, &su.RedirectTo)
+	err := r.Scan(signupTargets(&su)...)
 	return su, notFound(err)
 }
 
@@ -58,8 +62,7 @@ func (s *Store) SignupByToken(ctx context.Context, hash []byte) (Signup, error) 
 	err := s.pool.QueryRow(ctx, `SELECT `+signupColumns+`, o.name
 		FROM signups LEFT JOIN orgs o ON o.id = signups.invited_org
 		WHERE token_hash = $1 AND expires_at > now()`, hash,
-	).Scan(&su.TokenHash, &su.UserID, &su.Provider, &su.ExternalID, &su.Email,
-		&su.Name, &su.Role, &su.RefreshToken, &su.InvitedOrg, &su.RedirectTo, &name)
+	).Scan(append(signupTargets(&su), &name)...)
 	if name != nil {
 		su.InvitedOrgName = *name
 	}

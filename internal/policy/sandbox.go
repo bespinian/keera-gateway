@@ -255,11 +255,11 @@ func (r ResolvedSandbox) Admits(c SandboxClass) error {
 	}
 	if r.MaxSandboxCPU > 0 && c.CPU > r.MaxSandboxCPU {
 		return fmt.Errorf("the class %q asks for %s of CPU and this scope is capped at %s",
-			c.Name, millis(c.CPU), millis(r.MaxSandboxCPU))
+			c.Name, FormatCores(c.CPU), FormatCores(r.MaxSandboxCPU))
 	}
 	if r.MaxSandboxMemory > 0 && c.Memory > r.MaxSandboxMemory {
 		return fmt.Errorf("the class %q asks for %s of memory and this scope is capped at %s",
-			c.Name, mib(c.Memory), mib(r.MaxSandboxMemory))
+			c.Name, FormatMiB(c.Memory), FormatMiB(r.MaxSandboxMemory))
 	}
 	return nil
 }
@@ -320,16 +320,16 @@ func narrowRepos(cur, next []string) []string {
 	return narrowList(cur, next, repoCovers)
 }
 
-// millis renders millicores as cores.
-func millis(m int) string {
+// FormatCores renders millicores as cores.
+func FormatCores(m int) string {
 	if m%1000 == 0 {
 		return fmt.Sprintf("%d", m/1000)
 	}
 	return fmt.Sprintf("%.1f", float64(m)/1000)
 }
 
-// mib renders mebibytes, in gibibytes when it divides evenly.
-func mib(m int) string {
+// FormatMiB renders mebibytes, in gibibytes when it divides evenly.
+func FormatMiB(m int) string {
 	if m >= 1024 && m%1024 == 0 {
 		return fmt.Sprintf("%dGi", m/1024)
 	}

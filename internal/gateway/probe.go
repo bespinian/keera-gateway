@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
@@ -460,14 +459,5 @@ func unreachable(err error) string {
 // sample is the start of s, short enough for a report. It cuts between
 // characters, never inside one.
 func sample(s string) string {
-	const limit = 400
-	s = strings.TrimSpace(s)
-	if len(s) <= limit {
-		return s
-	}
-	cut := limit
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return s[:cut] + "…"
+	return shorten(strings.TrimSpace(s), 400)
 }

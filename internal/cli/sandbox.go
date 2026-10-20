@@ -712,23 +712,14 @@ func sizeOf(cpuMillis, memoryMiB int) string {
 	return fmt.Sprintf("%s/%s", coresOf(cpuMillis), mibOf(memoryMiB))
 }
 
-func coresOf(millis int) string {
-	if millis%1000 == 0 {
-		return fmt.Sprintf("%dc", millis/1000)
-	}
-	return fmt.Sprintf("%.1fc", float64(millis)/1000)
-}
+func coresOf(millis int) string { return policy.FormatCores(millis) + "c" }
 
 // mibOf renders a size in MiB, of memory or of disk.
 func mibOf(mib int) string {
-	switch {
-	case mib == 0:
+	if mib == 0 {
 		return "-"
-	case mib%1024 == 0:
-		return fmt.Sprintf("%dGi", mib/1024)
-	default:
-		return fmt.Sprintf("%dMi", mib)
 	}
+	return policy.FormatMiB(mib)
 }
 
 // expiresIn is how long a sandbox has left. "in 3h12m" needs no arithmetic,
