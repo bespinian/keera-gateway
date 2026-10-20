@@ -349,7 +349,9 @@ headers. Lower it if two minutes is too long to wait before the next destination
 is tried.
 
 A destination the organisation cannot serve is skipped. Only when _none_ can be
-served is the request refused, with `router_destination_unavailable`.
+served is the request refused, with `router_destination_unavailable`. When every
+destination waits for the organisation's first payment, it is `org_limited`
+instead, as for the models themselves.
 
 A request a later destination answered counts as served. The destinations that
 failed before it are kept as the request's note.

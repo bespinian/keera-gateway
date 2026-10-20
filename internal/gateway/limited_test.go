@@ -35,6 +35,23 @@ func TestALockedModelIsRefusedAndNotOffered(t *testing.T) {
 	if !strings.Contains(string(raw), "org_limited") || !strings.Contains(string(raw), "credit") {
 		t.Errorf("the refusal does not say why or what lifts it: %s", raw)
 	}
+
+	// Counting and routing answer as sending would, so neither looks like a
+	// way in or something to retry.
+	counted := h.post(t, "/v1/messages/count_tokens", `{"model":"engine","messages":[]}`)
+	if counted.StatusCode != http.StatusForbidden {
+		t.Errorf("count_tokens: status = %d, want 403", counted.StatusCode)
+	}
+	h.src.routers = map[string]policy.Router{"org_1/ha": {
+		OrgID: "org_1", Alias: "ha", Mode: policy.RouterModeFallback, Destinations: []string{"engine"},
+	}}
+	routed := h.post(t, "/v1/chat/completions", `{"model":"ha","messages":[]}`)
+	raw, _ = io.ReadAll(routed.Body)
+	if routed.StatusCode != http.StatusForbidden || !strings.Contains(string(raw), "org_limited") {
+		t.Errorf("through a router: status = %d, want 403 org_limited: %s", routed.StatusCode, raw)
+	}
+	h.src.routers = nil
+
 	select {
 	case <-h.upstreamBodies:
 		t.Error("a locked model's request reached the inference plane")

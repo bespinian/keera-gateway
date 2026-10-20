@@ -354,9 +354,22 @@ func (s *Server) countTokens(w http.ResponseWriter, r *http.Request) {
 			"the 'model' field is required; send one of the models from /v1/models")
 		return
 	}
-	if _, ok := s.callable(res, alias, policy.KindChat); !ok {
+	// Refused as a request to the model would be, so counting first tells a
+	// client nothing that sending would not.
+	if len(alias) > maxAliasBytes || !printable(alias) {
+		sh.writeError(w, http.StatusNotFound, "", "",
+			"the 'model' field names no model; send one of the models from /v1/models")
+		return
+	}
+	n, ok := s.callable(res, alias, policy.KindChat)
+	if !ok {
 		sh.writeError(w, http.StatusNotFound, "", "",
 			s.advise(modelNotFound(alias)))
+		return
+	}
+	if !n.routed && n.model.Locked {
+		sh.writeError(w, http.StatusForbidden, "", "",
+			"the model '"+alias+"' "+lockedReason(n.model)+"; "+policy.LockedMessage(n.model.OrgName))
 		return
 	}
 	doc, err := anthropicDialect{}.text(b)

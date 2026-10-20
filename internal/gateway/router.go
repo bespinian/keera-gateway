@@ -213,12 +213,36 @@ func (s *Server) chain(rt policy.Router) (routeDecision, *refusal) {
 		// Nowhere to try: none of the destinations exists, is enabled, is a
 		// chat model and has a backend.
 		d.outcome = store.RouterError
+		if m, ok := s.allLocked(rt); ok {
+			return d, &refusal{
+				status: http.StatusForbidden,
+				typ:    "permission_error", code: "org_limited",
+				msg: fmt.Sprintf("every destination of the router '%s' %s; %s",
+					rt.Alias, lockedReason(m), policy.LockedMessage(m.OrgName)),
+			}
+		}
 		return d, noDestination(fmt.Sprintf("'%s' is a router: it sends each request to the "+
-			"first of its destinations that can answer it, and none of them can - every one "+
-			"is missing, disabled, of another kind, or has no backend", rt.Alias))
+			"first of its destinations that can answer it, and none of them can: %s",
+			rt.Alias, strings.Join(dropped, "; ")))
 	}
 	d.alias = d.chain[0]
 	return d, nil
+}
+
+// allLocked reports whether every one of a router's destinations is locked
+// until the organisation pays, and returns one of them to word the refusal
+// with. Such a router is refused as its models would be: retrying will not
+// help.
+func (s *Server) allLocked(rt policy.Router) (policy.Model, bool) {
+	var last policy.Model
+	for _, alias := range rt.Destinations {
+		m, ok := s.src.Model(rt.OrgID, alias)
+		if !ok || !m.Locked {
+			return policy.Model{}, false
+		}
+		last = m
+	}
+	return last, len(rt.Destinations) > 0
 }
 
 // serveable reads one of the organisation's models and reports whether it
