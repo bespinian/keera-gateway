@@ -145,3 +145,26 @@ func TestSignUpNeedsPrivateHostsSet(t *testing.T) {
 		t.Errorf("keera-engine = %v %v, %v", limit, hosts, err)
 	}
 }
+
+// Any GitHub account can sign in to an OAuth App, so a GitHub provider must
+// say whose addresses it signs in, even when it is the only one.
+func TestGitHubNeedsDomains(t *testing.T) {
+	t.Setenv("KEERA_OIDC_PROVIDERS", "github")
+	t.Setenv("KEERA_OIDC_GITHUB_ISSUER", "https://github.com")
+	t.Setenv("KEERA_OIDC_GITHUB_CLIENT_ID", "github-client")
+	t.Setenv("KEERA_OIDC_GITHUB_CLIENT_SECRET", "github-secret")
+
+	c := Config{PublicURL: "https://keera.example.ch", OIDC: oidcProviders("https://keera.example.ch")}
+	if c.OIDC[0].DisplayName != "GitHub" {
+		t.Errorf("label = %q, want GitHub", c.OIDC[0].DisplayName)
+	}
+	if err := c.validateOIDC(); err == nil {
+		t.Error("a GitHub provider without domains was accepted")
+	}
+
+	t.Setenv("KEERA_OIDC_GITHUB_DOMAINS", "example.ch")
+	c.OIDC = oidcProviders("https://keera.example.ch")
+	if err := c.validateOIDC(); err != nil {
+		t.Errorf("a GitHub provider with domains: %v", err)
+	}
+}

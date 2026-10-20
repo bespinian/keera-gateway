@@ -8,8 +8,8 @@ what.
 With SSO, the audit log names a person, and roles can differ between people.
 
 Keera uses standard OpenID Connect, so any compliant provider works. This page
-covers **Google Workspace** and **Microsoft Entra ID**. A deployment can offer
-one or both. For people no directory vouches for, it can also offer
+covers **Google Workspace**, **Microsoft Entra ID** and **GitHub**, which speaks
+plain OAuth and gets its own handling. A deployment can offer any of them. For people no directory vouches for, it can also offer
 [passkeys](#passkeys).
 
 ## Naming a provider
@@ -49,7 +49,7 @@ groups, domains and scopes, are comma-separated.
 | `KEERA_OIDC_<NAME>_CLIENT_ID`       | unset                                                   | The OAuth client registered with the provider.                                                                                                             |
 | `KEERA_OIDC_<NAME>_CLIENT_SECRET`   | unset                                                   | Its secret.                                                                                                                                                |
 | `KEERA_OIDC_<NAME>_LABEL`           | from the name, such as `Google`                         | The text on the sign-in button.                                                                                                                            |
-| `KEERA_OIDC_<NAME>_SCOPES`          | `openid,profile,email`, and `offline_access` off Google | What Keera asks the provider for. See [Asking the directory again](#asking-the-directory-again).                                                           |
+| `KEERA_OIDC_<NAME>_SCOPES`          | `openid,profile,email`, and `offline_access` off Google | What Keera asks the provider for. See [Asking the directory again](#asking-the-directory-again), and [GitHub](#github) for its scopes.                     |
 | `KEERA_OIDC_<NAME>_GROUPS_CLAIM`    | `groups`                                                | The claim that holds the person's groups.                                                                                                                  |
 | `KEERA_OIDC_<NAME>_ADMIN_GROUPS`    | unset                                                   | Groups whose members are administrators. Set, the directory decides roles. See [Where a role comes from](#where-a-role-comes-from).                        |
 | `KEERA_OIDC_<NAME>_OPERATOR_GROUPS` | unset                                                   | Groups whose members are operators.                                                                                                                        |
@@ -128,6 +128,11 @@ groups. It usually hits administrators, who are in the most groups.
 Keera refuses that sign-in instead of signing an administrator in as a member,
 but only when a group would decide the role. **App roles avoid the problem**,
 and the walkthrough below uses them.
+
+**GitHub's groups are organisations and teams**, as `bespinian` and
+`bespinian/keera-admins`. Nobody else can create one of the same name. An
+organisation that restricts OAuth apps hides itself and its teams until an
+owner approves Keera, so a person in it looks like a person in no groups.
 
 ## Google Workspace
 
@@ -232,6 +237,61 @@ tokens whose `iss` does not match what discovery reports.
 
 > **Not tested against a real tenant.** This setup follows the protocol and
 > Entra's documentation. The group-overage refusal has a test.
+
+## GitHub
+
+GitHub speaks OAuth, not OpenID Connect: it has no discovery and no id_token.
+Keera recognises the issuer `https://github.com` and asks GitHub's API who
+signed in instead. GitHub Enterprise Server is not supported.
+
+1. **Settings → Developer settings → OAuth Apps → New OAuth App**, on your
+   account or, better, on your organisation. Use an **OAuth App**, not a GitHub
+   App: Keera keeps its token to ask GitHub again, and a GitHub App's token
+   expires after 8 hours.
+2. **Authorization callback URL**:
+
+   ```
+   https://keera.example.ch/control/auth/callback
+   ```
+
+   An OAuth App has one callback URL, so register a second app for
+   `http://localhost:8080`.
+
+3. **Generate a new client secret** and copy it. It is shown only once.
+
+Then:
+
+```sh
+KEERA_PUBLIC_URL=https://keera.example.ch
+KEERA_OIDC_PROVIDERS=github
+KEERA_OIDC_GITHUB_ISSUER=https://github.com
+KEERA_OIDC_GITHUB_CLIENT_ID=<the client ID>
+KEERA_OIDC_GITHUB_CLIENT_SECRET=<the secret>
+KEERA_OIDC_GITHUB_DOMAINS=example.ch
+```
+
+**Any GitHub account can sign in**, as with Google's **External**. So the
+gateway refuses to start without `KEERA_OIDC_<NAME>_DOMAINS`. Name your own
+domains, or use `*` only where people [sign up](#letting-people-sign-up).
+
+**The address** is the person's primary one if GitHub verified it and the
+provider may vouch for its domain. Otherwise it is the first other verified
+address that fits, so someone with a private primary address can sign in with
+their work one. The `noreply` address is never used. The subject is the
+numeric account ID, which survives a renamed login.
+
+**Scopes.** Keera asks for `user:email`, and adds `read:org` when a group list
+is set, to read [organisations and
+teams](#what-each-provider-does-and-does-not-give-you):
+
+```sh
+KEERA_OIDC_GITHUB_ADMIN_GROUPS=bespinian/keera-admins
+```
+
+**Asking again.** GitHub issues no refresh token, and an OAuth App's token does
+not expire, so Keera keeps that token instead. The person is refused once they
+revoke Keera under **Settings → Applications**, or once the account has no
+verified address Keera may use.
 
 ## Several directories at once
 
@@ -520,7 +580,8 @@ the person is active.
 
 When `KEERA_OIDC_<NAME>_SCOPES` is unset, Keera asks for `offline_access`, which
 is what gets a refresh token from most providers. On Google it asks for offline
-access instead, as Google expects. If your provider refuses `offline_access`,
+access instead, as Google expects. GitHub [works
+differently](#github). If your provider refuses `offline_access`,
 set the scopes without it. Without a refresh token, the directory is only read
 at sign-in, and a `keera login` token lasts 12 hours instead of 30 days.
 

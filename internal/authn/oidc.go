@@ -159,6 +159,9 @@ type OIDC struct {
 	// a URL parameter rather than the offline_access scope, and refuses that
 	// scope.
 	google bool
+	// github is set for github.com, which speaks OAuth but not OpenID Connect,
+	// and leaves provider and verifier nil.
+	github *githubAPI
 }
 
 // NewOIDC discovers the provider's metadata. It does so once at start-up, so a
@@ -167,6 +170,9 @@ type OIDC struct {
 func NewOIDC(ctx context.Context, cfg OIDCConfig, client *http.Client) (*OIDC, error) {
 	if !cfg.Configured() {
 		return nil, nil
+	}
+	if isGitHub(cfg.IssuerURL) {
+		return newGitHub(cfg, client, "https://github.com", "https://api.github.com"), nil
 	}
 	if client != nil {
 		ctx = oidc.ClientContext(ctx, client)
@@ -323,9 +329,12 @@ func NewFlow() Flow {
 // AuthCodeURL is where the browser is sent to sign in.
 func (o *OIDC) AuthCodeURL(f Flow) string {
 	opts := []oauth2.AuthCodeOption{
-		oidc.Nonce(f.Nonce),
 		oauth2.SetAuthURLParam("code_challenge", s256(f.Verifier)),
 		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
+	}
+	// GitHub issues no id_token to carry a nonce back.
+	if o.github == nil {
+		opts = append(opts, oidc.Nonce(f.Nonce))
 	}
 	if o.google {
 		opts = append(opts, oauth2.AccessTypeOffline)
@@ -335,6 +344,9 @@ func (o *OIDC) AuthCodeURL(f Flow) string {
 
 // Exchange turns an authorization code into a verified identity.
 func (o *OIDC) Exchange(ctx context.Context, code string, f Flow) (Identity, error) {
+	if o.github != nil {
+		return o.exchangeGitHub(ctx, code, f)
+	}
 	token, err := o.oauth.Exchange(ctx, code,
 		oauth2.SetAuthURLParam("code_verifier", f.Verifier))
 	if err != nil {
@@ -371,6 +383,9 @@ const DirectoryCheckEvery = 15 * time.Minute
 // fresh reports false. The returned refresh token is the one to keep: some
 // providers rotate it on every use.
 func (o *OIDC) Recheck(ctx context.Context, refreshToken string) (id Identity, fresh bool, err error) {
+	if o.github != nil {
+		return o.recheckGitHub(ctx, refreshToken)
+	}
 	token, err := o.oauth.TokenSource(ctx, &oauth2.Token{RefreshToken: refreshToken}).Token()
 	if err != nil {
 		if re, ok := errors.AsType[*oauth2.RetrieveError](err); ok && re.ErrorCode == "invalid_grant" {
@@ -480,6 +495,9 @@ func (o *OIDC) checkIdentity(id Identity, claims map[string]any, groupsClaim str
 // LogoutURL returns the provider's end-session endpoint, if it advertises one,
 // so that signing out of Keera Gateway also signs out of the identity provider.
 func (o *OIDC) LogoutURL(redirectTo string) string {
+	if o.provider == nil {
+		return ""
+	}
 	var meta struct {
 		EndSession string `json:"end_session_endpoint"`
 	}

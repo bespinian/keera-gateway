@@ -332,6 +332,13 @@ func (c Config) validateOIDC() error {
 				"identity provider may vouch for, or to %q for one that proves every "+
 				"address itself, such as Google", OIDCEnvPrefix(p.Name), p.Name, authn.AnyDomain)
 		}
+		// Any GitHub account can sign in to an OAuth App, and with one
+		// organisation each would land in it.
+		if p.IsGitHub() && len(p.Domains) == 0 {
+			return fmt.Errorf("set %sDOMAINS: any GitHub account can sign in, so name the "+
+				"email domains of the people who may, or %q where people sign up",
+				OIDCEnvPrefix(p.Name), authn.AnyDomain)
+		}
 	}
 	return c.validateSignUp()
 }
@@ -451,6 +458,8 @@ func providerLabel(name string) string {
 		return "Okta"
 	case "keycloak":
 		return "Keycloak"
+	case "github":
+		return "GitHub"
 	}
 	return strings.ToUpper(name[:1]) + name[1:]
 }
