@@ -580,6 +580,20 @@ func TestAnAnswerOnTheDeploymentsKeyWithoutUsageIsBilledItsCeiling(t *testing.T)
 		})
 	}
 
+	// A stream that ends without one is billed the same, not the deltas it saw.
+	t.Run("stream", func(t *testing.T) {
+		h := newHarness(t, sseBackend(`{"choices":[{"delta":{"content":"hi"}}]}`), nil, nil)
+		onPlatformKey(h, "keera-code")
+		stream := strings.Replace(body, `"max_tokens"`, `"stream":true,"max_tokens"`, 1)
+		h.post(t, "/v1/chat/completions", stream)
+
+		waitFor(t, "the request to be recorded", func() bool { return h.sink.count() > 0 })
+		ev := h.sink.last(t)
+		if len(ev.Bills) != 1 || ev.Bills[0].OutputTokens != 1000 || !ev.Estimated {
+			t.Errorf("bills = %+v, estimated %v; want the ceiling", ev.Bills, ev.Estimated)
+		}
+	})
+
 	// On the organisation's own key, nothing is made up.
 	h := newHarness(t, jsonBackend(`{"choices":[{"message":{"content":"hi"}}]}`), nil, nil)
 	h.post(t, "/v1/chat/completions", body)

@@ -52,7 +52,7 @@ func leastTokens(texts []string, kind policy.Kind) int {
 // just its text, and the envelope already makes that a slight over-estimate.
 const bytesPerTokenTypical = 4
 
-// estimateInputTokens is used only when a client disconnected before the
-// upstream reported real counts. It errs a little high, which is the right
-// way to err for a guardrail.
+// estimateInputTokens is used when a stream on a key the deployment does not
+// pay for ends without its usage record. It errs a little high, which is the
+// right way to err for a guardrail.
 func estimateInputTokens(payload []byte) int { return len(payload) / bytesPerTokenTypical }

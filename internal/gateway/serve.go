@@ -932,9 +932,14 @@ func (s *Server) relayStream(c *call, resp *http.Response, answered time.Time, p
 		c.ev.Estimated = stats.partial
 		return
 	}
-	// The client left before the usage record arrived. The tokens were still
-	// generated, so the request is charged on an estimate; otherwise any
-	// client could dodge its budget by cancelling.
+	// On the deployment's key, a missing record is billed the most the call
+	// may have used. See billUnreported.
+	if c.model.PlatformKey {
+		return
+	}
+	// The stream ended before its usage record: the client left, or it broke
+	// off. The tokens were still generated, so the request is charged on an
+	// estimate; otherwise any client could dodge its budget by cancelling.
 	c.ev.InputTokens = estimateInputTokens(payload)
 	c.ev.OutputTokens = stats.deltas
 	c.ev.Estimated = true
