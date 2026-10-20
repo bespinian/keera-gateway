@@ -388,6 +388,8 @@ function chat(ctx, keys, key, models) {
     let node = thread.lastElementChild;
     let shape = { waiting: true, reasoning: false };
     let queued = false;
+    let raw = "";
+    let thought = "";
     const paint = () => {
       queued = false;
       const wantsReasoning = !!reply.reasoning;
@@ -421,12 +423,15 @@ function chat(ctx, keys, key, models) {
         if (delta) {
           // Newer vLLM servers name the field "reasoning", older ones and
           // llama.cpp "reasoning_content".
-          const thought = delta.reasoning || delta.reasoning_content;
-          if (!reply.ttft && (delta.content || thought)) {
+          const more = delta.reasoning || delta.reasoning_content;
+          if (!reply.ttft && (delta.content || more)) {
             reply.ttft = performance.now() - reply.started;
           }
-          if (delta.content) reply.content += delta.content;
-          if (thought) reply.reasoning += thought;
+          if (delta.content) raw += delta.content;
+          if (more) thought += more;
+          const split = splitThink(raw);
+          reply.content = split.content;
+          reply.reasoning = thought + split.reasoning;
         }
         if (choice && choice.finish_reason) reply.finish = choice.finish_reason;
         if (!queued) {
@@ -490,6 +495,21 @@ function subtitle(model) {
   if (model.max_context_tokens)
     bits.push(compact(model.max_context_tokens) + " token context");
   return bits.filter(Boolean).join(" · ");
+}
+
+/** splitThink takes the thinking out of a reply that writes it inline as
+ *  <think>…</think>, as MiniMax does, rather than in a reasoning field. Some
+ *  chat templates open the tag in the prompt, so the reply only closes it. */
+function splitThink(text) {
+  const open = text.match(/^\s*<think>/);
+  const end = text.indexOf("</think>");
+  if (!open && end < 0) return { content: text, reasoning: "" };
+  const from = open ? open[0].length : 0;
+  if (end < 0) return { content: "", reasoning: text.slice(from).trim() };
+  return {
+    content: text.slice(end + "</think>".length).trimStart(),
+    reasoning: text.slice(from, end).trim(),
+  };
 }
 
 /** wireMessages keeps the turns that carry text or images, and drops any
