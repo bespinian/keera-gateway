@@ -96,11 +96,11 @@ type SandboxClass struct {
 	CPU    int `json:"cpu_millis"`
 	Memory int `json:"memory_mib"`
 	Disk   int `json:"disk_mib"`
-	// DefaultTTL applies when nobody asks for a lifetime, and MaxTTL caps what
-	// anybody may ask for before policy narrows it. Without an expiry,
-	// somebody has to remember to terminate the machine.
-	DefaultTTL time.Duration `json:"default_ttl"`
-	MaxTTL     time.Duration `json:"max_ttl"`
+	// DefaultTTLSeconds applies when nobody asks for a lifetime, and
+	// MaxTTLSeconds caps what anybody may ask for before policy narrows it.
+	// Without an expiry, somebody has to remember to terminate the machine.
+	DefaultTTLSeconds int `json:"default_ttl_seconds"`
+	MaxTTLSeconds     int `json:"max_ttl_seconds"`
 	// Warm is how many idle sandboxes are kept started so asking for one is
 	// instant. They cost resources all the time. Zero is the default.
 	Warm int `json:"warm"`
@@ -111,6 +111,14 @@ type SandboxClass struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+func (c SandboxClass) DefaultTTL() time.Duration {
+	return time.Duration(c.DefaultTTLSeconds) * time.Second
+}
+
+func (c SandboxClass) MaxTTL() time.Duration {
+	return time.Duration(c.MaxTTLSeconds) * time.Second
+}
+
 func (c SandboxClass) Allows(p Purpose) bool {
 	return len(c.Purposes) == 0 || slices.Contains(c.Purposes, p)
 }
@@ -119,10 +127,10 @@ func (c SandboxClass) Allows(p Purpose) bool {
 // want, capped at the class's MaxTTL. Zero want is the class's default.
 func (c SandboxClass) TTLFor(want time.Duration) time.Duration {
 	if want <= 0 {
-		want = c.DefaultTTL
+		want = c.DefaultTTL()
 	}
-	if c.MaxTTL > 0 && want > c.MaxTTL {
-		want = c.MaxTTL
+	if ceiling := c.MaxTTL(); ceiling > 0 && want > ceiling {
+		want = ceiling
 	}
 	return want
 }

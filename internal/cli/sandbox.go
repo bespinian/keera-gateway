@@ -673,7 +673,7 @@ func printSandboxClasses(w *table, classes []policy.SandboxClass,
 	for _, c := range classes {
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
 			c.Name, c.Isolation, sizeOf(c.CPU, c.Memory), mibOf(c.Disk),
-			shortDuration(c.DefaultTTL), shortDuration(c.MaxTTL), c.Warm, purposesOf(c),
+			shortDuration(c.DefaultTTL()), shortDuration(c.MaxTTL()), c.Warm, purposesOf(c),
 			yesNo(limits.Admits(c) == nil), dash(c.Description))
 	}
 }

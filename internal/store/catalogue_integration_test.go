@@ -4,7 +4,6 @@ import (
 	"context"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
@@ -164,7 +163,7 @@ func TestANewOrganisationStartsWithTheTemplate(t *testing.T) {
 	for _, id := range []string{"org_1", "org_2"} {
 		classes := []policy.SandboxClass{{
 			Name: "standard", Image: "example/sandbox:1", Isolation: policy.IsolationIsolated,
-			DefaultTTL: time.Hour, MaxTTL: 4 * time.Hour,
+			DefaultTTLSeconds: 3600, MaxTTLSeconds: 4 * 3600,
 		}}
 		if _, err := st.CreateOrg(ctx, Org{ID: id, Name: id}, OrgTemplate{Models: template, SandboxClasses: classes}); err != nil {
 			t.Fatalf("CreateOrg: %v", err)

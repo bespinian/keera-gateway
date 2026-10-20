@@ -41,8 +41,8 @@ sandboxes:
 		t.Errorf("memory = %d MiB, want 16384", c.Memory)
 	case c.Disk != 50*1024:
 		t.Errorf("disk = %d MiB, want 51200", c.Disk)
-	case c.DefaultTTL != 4*time.Hour:
-		t.Errorf("default_ttl = %s", c.DefaultTTL)
+	case c.DefaultTTL() != 4*time.Hour:
+		t.Errorf("default_ttl = %s", c.DefaultTTL())
 	case c.Warm != 2:
 		t.Errorf("warm = %d", c.Warm)
 	case len(c.Purposes) != 1 || c.Purposes[0] != policy.PurposeEngineer:
@@ -64,7 +64,7 @@ sandboxes:
 	if c.Isolation != policy.IsolationIsolated {
 		t.Errorf("default isolation = %q, want isolated", c.Isolation)
 	}
-	if c.DefaultTTL == 0 || c.MaxTTL == 0 {
+	if c.DefaultTTL() == 0 || c.MaxTTL() == 0 {
 		t.Error("a class with no lifetime is a machine somebody has to remember " +
 			"to terminate; both bounds must be defaulted")
 	}

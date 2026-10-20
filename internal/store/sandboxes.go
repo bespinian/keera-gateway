@@ -30,17 +30,14 @@ const sandboxClassColumns = `SELECT org_id, name, description, image, isolation,
 
 func scanSandboxClass(r row) (policy.SandboxClass, error) {
 	var (
-		c              policy.SandboxClass
-		defTTL, maxTTL int
-		purposes       []string
+		c        policy.SandboxClass
+		purposes []string
 	)
 	if err := r.Scan(&c.OrgID, &c.Name, &c.Description, &c.Image, &c.Isolation,
-		&c.CPU, &c.Memory, &c.Disk, &defTTL, &maxTTL, &c.Warm,
+		&c.CPU, &c.Memory, &c.Disk, &c.DefaultTTLSeconds, &c.MaxTTLSeconds, &c.Warm,
 		&purposes, &c.CreatedAt, &c.UpdatedAt); err != nil {
 		return policy.SandboxClass{}, err
 	}
-	c.DefaultTTL = time.Duration(defTTL) * time.Second
-	c.MaxTTL = time.Duration(maxTTL) * time.Second
 	for _, p := range purposes {
 		c.Purposes = append(c.Purposes, policy.Purpose(p))
 	}
@@ -97,7 +94,7 @@ func upsertSandboxClass(ctx context.Context, db querier, c *policy.SandboxClass)
 		RETURNING created_at, updated_at`,
 		c.OrgID, c.Name, c.Description, c.Image, string(c.Isolation),
 		c.CPU, c.Memory, c.Disk,
-		int(c.DefaultTTL/time.Second), int(c.MaxTTL/time.Second), c.Warm,
+		c.DefaultTTLSeconds, c.MaxTTLSeconds, c.Warm,
 		purposes,
 	).Scan(&c.CreatedAt, &c.UpdatedAt)
 }

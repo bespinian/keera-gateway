@@ -33,7 +33,7 @@ func sandboxStore(t *testing.T) (*store.Store, context.Context) {
 	class := policy.SandboxClass{
 		OrgID: "org_1", Name: "standard", Description: "the usual machine", Image: "example/sandbox:1",
 		Isolation: policy.IsolationIsolated, CPU: 4000, Memory: 16384, Disk: 51200,
-		DefaultTTL: 4 * time.Hour, MaxTTL: 24 * time.Hour,
+		DefaultTTLSeconds: 4 * 3600, MaxTTLSeconds: 24 * 3600,
 	}
 	if err := st.UpsertSandboxClass(ctx, &class); err != nil {
 		t.Fatalf("UpsertSandboxClass: %v", err)
@@ -168,13 +168,13 @@ func TestSandboxClassBelongsToAnOrganisation(t *testing.T) {
 		t.Errorf("saved %+v", saved)
 	}
 	// What is left out gets the file's defaults.
-	if saved.DefaultTTL != 4*time.Hour || saved.Isolation != policy.IsolationIsolated {
+	if saved.DefaultTTL() != 4*time.Hour || saved.Isolation != policy.IsolationIsolated {
 		t.Errorf("defaults not filled in: %+v", saved)
 	}
 	// What the list returns can be written back unchanged.
 	again := saved
 	code = call(t, ts, http.MethodPut, httpx.ControlPrefix+path, saved, &again)
-	if code != http.StatusOK || again.CPU != saved.CPU || again.MaxTTL != saved.MaxTTL {
+	if code != http.StatusOK || again.CPU != saved.CPU || again.MaxTTL() != saved.MaxTTL() {
 		t.Errorf("writing back what was read = %d %+v", code, again)
 	}
 	if _, err := st.SandboxClass(ctx, "org_1", "scratch"); err != nil {
@@ -562,7 +562,7 @@ func TestALimitedOrganisationGetsNoWarmPool(t *testing.T) {
 	copied := policy.SandboxClass{
 		OrgID: "org_1", Name: "copied", Image: "example/sandbox:1",
 		Isolation: policy.IsolationIsolated, CPU: 4000, Memory: 16384,
-		DefaultTTL: 4 * time.Hour, MaxTTL: 24 * time.Hour, Warm: 2,
+		DefaultTTLSeconds: 4 * 3600, MaxTTLSeconds: 24 * 3600, Warm: 2,
 	}
 	if err := st.UpsertSandboxClass(ctx, &copied); err != nil {
 		t.Fatalf("UpsertSandboxClass: %v", err)

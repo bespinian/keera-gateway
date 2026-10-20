@@ -320,7 +320,7 @@ function classCard(ctx, classes, driver) {
             h(
               "span",
               { class: "mono" },
-              `${duration(c.default_ttl / 1e6)} / ${duration(c.max_ttl / 1e6)}`,
+              `${duration(c.default_ttl_seconds * 1000)} / ${duration(c.max_ttl_seconds * 1000)}`,
             ),
         },
         {

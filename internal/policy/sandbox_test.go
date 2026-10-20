@@ -33,7 +33,7 @@ func TestPurposeAttachable(t *testing.T) {
 }
 
 func TestSandboxClassTTLFor(t *testing.T) {
-	c := SandboxClass{DefaultTTL: 4 * time.Hour, MaxTTL: 24 * time.Hour}
+	c := SandboxClass{DefaultTTLSeconds: 4 * 3600, MaxTTLSeconds: 24 * 3600}
 	cases := []struct {
 		want, got time.Duration
 	}{

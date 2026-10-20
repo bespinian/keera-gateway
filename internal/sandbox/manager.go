@@ -824,7 +824,8 @@ func standIn(sb store.Sandbox) policy.SandboxClass {
 	return policy.SandboxClass{
 		OrgID: sb.OrgID, Name: sb.Class, Image: sb.Image, Isolation: sb.Isolation,
 		CPU: sb.CPU, Memory: sb.Memory, Disk: sb.Disk,
-		DefaultTTL: catalog.DefaultSandboxTTL, MaxTTL: catalog.DefaultSandboxMaxTTL,
+		DefaultTTLSeconds: int(catalog.DefaultSandboxTTL / time.Second),
+		MaxTTLSeconds:     int(catalog.DefaultSandboxMaxTTL / time.Second),
 	}
 }
 

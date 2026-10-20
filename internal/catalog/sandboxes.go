@@ -139,11 +139,11 @@ func CheckSandboxClass(c policy.SandboxClass) (policy.SandboxClass, error) {
 	if c.Disk != 0 {
 		s.Disk = strconv.Itoa(c.Disk)
 	}
-	if c.DefaultTTL != 0 {
-		s.DefaultTTL = c.DefaultTTL.String()
+	if c.DefaultTTLSeconds != 0 {
+		s.DefaultTTL = c.DefaultTTL().String()
 	}
-	if c.MaxTTL != 0 {
-		s.MaxTTL = c.MaxTTL.String()
+	if c.MaxTTLSeconds != 0 {
+		s.MaxTTL = c.MaxTTL().String()
 	}
 	for _, p := range c.Purposes {
 		s.Purposes = append(s.Purposes, string(p))
@@ -182,18 +182,20 @@ func parseResources(s Sandbox, c *policy.SandboxClass) error {
 }
 
 func parseLifetimes(s Sandbox, c *policy.SandboxClass) error {
-	var err error
-	if c.DefaultTTL, err = parseTTL(s.DefaultTTL, DefaultSandboxTTL); err != nil {
+	def, err := parseTTL(s.DefaultTTL, DefaultSandboxTTL)
+	if err != nil {
 		return fmt.Errorf("default_ttl: %w", err)
 	}
-	if c.MaxTTL, err = parseTTL(s.MaxTTL, DefaultSandboxMaxTTL); err != nil {
+	ceiling, err := parseTTL(s.MaxTTL, DefaultSandboxMaxTTL)
+	if err != nil {
 		return fmt.Errorf("max_ttl: %w", err)
 	}
-	if c.MaxTTL < c.DefaultTTL {
+	if ceiling < def {
 		return fmt.Errorf(
 			"max_ttl (%s) is shorter than default_ttl (%s); every sandbox of this class would "+
-				"be created already past its ceiling", c.MaxTTL, c.DefaultTTL)
+				"be created already past its ceiling", ceiling, def)
 	}
+	c.DefaultTTLSeconds, c.MaxTTLSeconds = int(def/time.Second), int(ceiling/time.Second)
 	return nil
 }
 

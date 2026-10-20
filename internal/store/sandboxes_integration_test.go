@@ -18,7 +18,7 @@ func newSandboxClass(t *testing.T, st *Store, ctx context.Context, orgID, name s
 	c := policy.SandboxClass{
 		OrgID: orgID, Name: name, Image: "example/sandbox:1", Isolation: policy.IsolationIsolated,
 		CPU: 4000, Memory: 16384, Disk: 51200,
-		DefaultTTL: 4 * time.Hour, MaxTTL: 24 * time.Hour,
+		DefaultTTLSeconds: 4 * 3600, MaxTTLSeconds: 24 * 3600,
 		Purposes: []policy.Purpose{policy.PurposeEngineer},
 	}
 	if err := st.UpsertSandboxClass(ctx, &c); err != nil {
@@ -64,8 +64,8 @@ func TestSandboxClassRoundTrip(t *testing.T) {
 	}
 	// The two durations cross the driver as seconds and have to come back the
 	// same duration, which is the one thing a column of integers can get wrong.
-	if got.DefaultTTL != 4*time.Hour || got.MaxTTL != 24*time.Hour {
-		t.Errorf("lifetimes = %s / %s", got.DefaultTTL, got.MaxTTL)
+	if got.DefaultTTL() != 4*time.Hour || got.MaxTTL() != 24*time.Hour {
+		t.Errorf("lifetimes = %s / %s", got.DefaultTTL(), got.MaxTTL())
 	}
 
 	// The class is org_1's alone, and org_2 may have its own of the same name.
