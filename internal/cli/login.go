@@ -239,8 +239,8 @@ type identity struct {
 
 // membership is one organisation a person is in, or was invited to.
 type membership struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
+	ID      string `json:"org_id"`
+	Name    string `json:"org_name"`
 	Role    string `json:"role"`
 	Invited bool   `json:"invited,omitempty"`
 }

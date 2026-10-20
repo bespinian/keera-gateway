@@ -21,8 +21,8 @@ func TestOrgSwitchMovesAPersonsSignIn(t *testing.T) {
 	t.Setenv("KEERA_CONFIG_DIR", t.TempDir())
 	f := newFakeControl(t, map[string]any{
 		"GET /v1/me": map[string]any{"role": "admin", "org_id": "org_a", "orgs": []map[string]any{
-			{"id": "org_a", "name": "Bank", "role": "admin"},
-			{"id": "org_b", "name": "Insurer", "role": "member"},
+			{"org_id": "org_a", "org_name": "Bank", "role": "admin"},
+			{"org_id": "org_b", "org_name": "Insurer", "role": "member"},
 		}},
 		"POST /v1/me/org": map[string]any{"org_id": "org_b", "org_name": "Insurer", "role": "member"},
 	})

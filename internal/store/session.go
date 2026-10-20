@@ -202,8 +202,8 @@ func (s *Store) UserInOrg(ctx context.Context, externalID, orgID string) (User, 
 // Membership is one organisation a person is in, or has been invited to.
 type Membership struct {
 	UserID  string `json:"user_id"`
-	OrgID   string `json:"id"`
-	OrgName string `json:"name"`
+	OrgID   string `json:"org_id"`
+	OrgName string `json:"org_name"`
 	Role    string `json:"role"`
 	// Invited means the organisation added the person's address and no
 	// identity has taken that row yet. Switching to it takes it.

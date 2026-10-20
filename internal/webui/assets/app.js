@@ -673,8 +673,8 @@ function topbar() {
         state.me.orgs.map((o) =>
           h(
             "option",
-            { value: o.id, selected: o.id === state.me.org_id },
-            o.invited ? `${o.name} (invitation)` : o.name,
+            { value: o.org_id, selected: o.org_id === state.me.org_id },
+            o.invited ? `${o.org_name} (invitation)` : o.org_name,
           ),
         ),
       ),
