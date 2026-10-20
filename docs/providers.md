@@ -197,12 +197,9 @@ gateway adds it back, so a row's input is always the whole prompt. The gateway
 charges the cached part at the cached rate, so a row's cost matches the
 provider's console.
 
-stepping stone publishes a cache rate too. The gateway charges it for whatever
-the response reports as cached, although stepping stone bills it only from
-about the end of October 2026.
-
-Infomaniak, Phoeniqs and CSCS publish no cache discount. Their cached column is empty and every
-input token is charged at the input price. That is correct, not a gap.
+Infomaniak, Phoeniqs and CSCS publish no cache discount, and stepping stone's
+cache is not ready yet. Their cached column is empty and every input token is
+charged at the input price. That is correct, not a gap.
 
 This price matters most. A coding agent resends its whole context on every
 turn, so most of a long session is cached input. Charging it at the full input

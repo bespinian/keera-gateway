@@ -236,8 +236,8 @@ models:
 	}
 }
 
-// stepping stone's ids keep their upstream capitals, and a cached prompt is
-// priced at its published cache rate.
+// stepping stone's ids keep their upstream capitals. Its prompt cache is not
+// ready yet, so a cached prompt costs the input price.
 func TestSteppingStoneProviderFillsInEverythingButTheAlias(t *testing.T) {
 	const in = `
 models:
@@ -257,8 +257,8 @@ models:
 		t.Errorf("MaxContext = %d, want the provider's 256000", m.MaxContext)
 	}
 	if m.InputMicrosPerMTok != 340_000 || m.OutputMicrosPerMTok != 1_700_000 ||
-		m.CachedInputMicrosPerMTok != 51_000 {
-		t.Errorf("prices = %d/%d/%d, want the offer's 0.34/1.70/0.051 CHF",
+		m.CachedInputMicrosPerMTok != 0 {
+		t.Errorf("prices = %d/%d/%d, want the offer's 0.34/1.70 CHF and no cache rate",
 			m.InputMicrosPerMTok, m.OutputMicrosPerMTok, m.CachedInputMicrosPerMTok)
 	}
 }
