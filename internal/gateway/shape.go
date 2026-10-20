@@ -117,11 +117,22 @@ func openAIErrorBody(raw []byte, status int) []byte {
 	if decoded && envelope.Error.Message != "" {
 		return raw
 	}
-	typ := "invalid_request_error"
-	if status >= 500 {
-		typ = "server_error"
+	return httpx.ErrorBody(openAIErrorType(status), "", upstreamErrorMessage(raw, status))
+}
+
+// openAIErrorType names an error by status with the types the gateway gives
+// its own refusals, so a client tells a rate limit from a bad request the same
+// way whichever side refused it.
+func openAIErrorType(status int) string {
+	switch {
+	case status == http.StatusForbidden:
+		return "permission_error"
+	case status == http.StatusTooManyRequests:
+		return "rate_limit_error"
+	case status >= 500:
+		return "server_error"
 	}
-	return httpx.ErrorBody(typ, "", upstreamErrorMessage(raw, status))
+	return "invalid_request_error"
 }
 
 func (openAIShape) contentType() string { return "" }

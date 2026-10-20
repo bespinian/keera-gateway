@@ -19,6 +19,10 @@ func TestOpenAIErrorBody(t *testing.T) {
 		{`{"detail":"The model does not exist."}`, 404, "The model does not exist.", "invalid_request_error"},
 		{`{"message":"too long","object":"error"}`, 400, "too long", "invalid_request_error"},
 		{`upstream connect error`, http.StatusBadGateway, "upstream connect error", "server_error"},
+		// Typed as the gateway types its own refusals, so a client retries a
+		// rate limit whichever side set it.
+		{`{"detail":"slow down"}`, http.StatusTooManyRequests, "slow down", "rate_limit_error"},
+		{`{"detail":"not for you"}`, http.StatusForbidden, "not for you", "permission_error"},
 	} {
 		var got struct {
 			Error struct {

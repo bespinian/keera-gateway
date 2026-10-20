@@ -135,7 +135,7 @@ func (s *Server) mcpBegin(w http.ResponseWriter, r *http.Request) (*mcpExchange,
 	// A subscription key reaches no MCP server: a server holds the
 	// organisation's credentials, and the key sits in a settings file.
 	if !found || !srv.Enabled || !res.AllowsServer(alias) || res.Key.Subscription() {
-		httpx.WriteError(w, http.StatusNotFound, "invalid_request_error", "mcp_server_not_found",
+		httpx.WriteNotFound(w, "mcp_server_not_found",
 			s.advise("the MCP server '"+alias+"' does not exist or this key may not use it"))
 		return nil, false
 	}
