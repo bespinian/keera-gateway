@@ -152,7 +152,7 @@ type EffectiveLevel struct {
 // Rate limits and budgets stay per level, because each level is enforced on
 // its own and one merged number would be wrong at some level.
 type Effective struct {
-	Scope  policy.ScopeType `json:"scope"`
+	Type   policy.ScopeType `json:"type"`
 	ID     string           `json:"id"`
 	Levels []EffectiveLevel `json:"levels"`
 	// AllowedModels nil means every enabled model. An empty list means none.
@@ -228,7 +228,7 @@ func (s *Server) effective(ctx context.Context, scope policy.ScopeType,
 	}
 
 	out := Effective{
-		Scope: scope, ID: scopeID,
+		Type: scope, ID: scopeID,
 		Levels:          []EffectiveLevel{s.effectiveLevel(ctx, policy.ScopeOrg, orgID, org)},
 		AllowedModels:   res.AllowedModels,
 		MaxOutputTokens: res.MaxOutputTokens,

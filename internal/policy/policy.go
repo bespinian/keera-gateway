@@ -648,13 +648,13 @@ func (l Limits) IsZero() bool { return reflect.DeepEqual(l, Limits{}) }
 // Scope is one level of the hierarchy with its own limits, carried on a
 // resolved key so the gateway can enforce each level separately.
 type Scope struct {
-	Type ScopeType
-	ID   string
+	Type ScopeType `json:"type"`
+	ID   string    `json:"id"`
 	// Zero means unlimited for all three.
-	RPM          int
-	TPM          int
-	BudgetMicros int64
-	Period       Period
+	RPM          int    `json:"rpm"`
+	TPM          int    `json:"tpm"`
+	BudgetMicros int64  `json:"budget_micros"`
+	Period       Period `json:"period"`
 }
 
 // KeyKind says what a key may reach.
