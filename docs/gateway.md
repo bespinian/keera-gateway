@@ -170,8 +170,9 @@ other model refuses it with a 400.
 
 On the deployment's own OpenAI key ([billing.md](billing.md)), every
 organisation shares one OpenAI account, so nothing may be stored there. A
-Responses request is sent with `store` off, and one with
-`previous_response_id`, `conversation` or `background` is refused with a 400.
+Responses request is sent with `store` off, a chat completion has
+`store: true` removed, and a request with `previous_response_id`,
+`conversation` or `background` is refused with a 400.
 
 A model is one of OpenAI's own when its [provider](providers.md) is `openai`.
 
@@ -659,7 +660,7 @@ Other response headers:
 | `X-Keera-Router`         | the router and where it sent the request ([routers.md](routers.md#what-a-client-can-see)) |
 | `X-Keera-Filters`        | the filters that acted on the request ([filters.md](filters.md#what-is-recorded))         |
 | `X-Keera-Removed-Tools`  | the hosted tools taken out on the deployment's key ([mcp.md](mcp.md#hosted-tools))        |
-| `X-Keera-Removed-Fields` | the fields that cost extra, taken out on the deployment's key ([billing.md](billing.md))  |
+| `X-Keera-Removed-Fields` | the fields taken out on the deployment's key ([billing.md](billing.md))                   |
 | `X-Request-Id`           | the request's id; one the client sends is kept if it is up to 64 of `A-Z a-z 0-9 . _ : -` |
 
 ### Naming a request yourself

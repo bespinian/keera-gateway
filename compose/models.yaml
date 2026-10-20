@@ -84,4 +84,4 @@ models:
 #   keera router add auto --model keera-speed \
 #     --destinations keera-speed,keera-frontier \
 #     --prompt @route.txt --fallback keera-speed
-#   keera connect opencode --model auto
+#   keera connect claude-code --model auto

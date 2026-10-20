@@ -55,7 +55,9 @@ none.
   response header `X-Keera-Removed-Fields` names what was removed.
 - **Nothing stored at OpenAI.** Every organisation shares the deployment's
   OpenAI account, so a Responses request must carry the whole conversation
-  ([Three request shapes](gateway.md#three-request-shapes)).
+  ([Three request shapes](gateway.md#three-request-shapes)). A chat
+  completion's `store: true` is removed and named in
+  `X-Keera-Removed-Fields`.
 
 Through a router, these apply when any model the request may reach is on the
 deployment's key, whichever one answers it.
