@@ -92,7 +92,7 @@ func TestDailyTotalsAgreeWithTheRequestLog(t *testing.T) {
 			"want 5, 1, 1 and 4550", o.Requests, o.Refused, o.Failed, o.CostMicros)
 	}
 	if len(o.Series) != 3 || o.Series[0].Requests != 4 || o.Series[1].Requests != 1 ||
-		o.Series[0].Errors != 1 {
+		o.Series[0].Failed != 1 {
 		t.Errorf("Series = %+v, want three days: 4 requests with 1 error, then 1", o.Series)
 	}
 }

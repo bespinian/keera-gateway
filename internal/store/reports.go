@@ -68,7 +68,7 @@ type SeriesPoint struct {
 	Requests   int64     `json:"requests"`
 	Tokens     int64     `json:"tokens"`
 	CostMicros int64     `json:"cost_micros"`
-	Errors     int64     `json:"errors"`
+	Failed     int64     `json:"failed"`
 }
 
 // Overview is everything the dashboard needs, in one round trip.
@@ -198,7 +198,7 @@ func (s *Store) series(ctx context.Context, src usageSource, orgID string, from,
 
 func scanSeriesPoint(r row) (SeriesPoint, error) {
 	var p SeriesPoint
-	err := r.Scan(&p.At, &p.Requests, &p.Tokens, &p.CostMicros, &p.Errors)
+	err := r.Scan(&p.At, &p.Requests, &p.Tokens, &p.CostMicros, &p.Failed)
 	return p, err
 }
 

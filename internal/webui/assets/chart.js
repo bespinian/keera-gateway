@@ -14,7 +14,7 @@ const MIN_W = 280;
 
 /**
  * areaChart draws requests over time with failures as a baseline bar.
- * points: [{ at, requests, tokens, cost_micros, errors }]
+ * points: [{ at, requests, tokens, cost_micros, failed }]
  */
 export function areaChart(points, { height = 190, bucket = "day" } = {}) {
   if (!points || points.length === 0) {
@@ -239,7 +239,7 @@ function paintArea(data, W, H, { bucket, tip }) {
             "div",
             { class: "muted" },
             money(p.cost_micros) +
-              (p.errors ? ` · ${num(p.errors)} failed` : ""),
+              (p.failed ? ` · ${num(p.failed)} failed` : ""),
           ),
         ];
       },
@@ -254,11 +254,11 @@ function paintArea(data, W, H, { bucket, tip }) {
 
   // Failures are drawn as short bars along the baseline: they are usually rare
   // enough to vanish on the same scale as requests, and they matter more.
-  const maxErr = Math.max(1, ...data.map((p) => p.errors));
+  const maxErr = Math.max(1, ...data.map((p) => p.failed));
   const barW = Math.max(1.5, Math.min(9, innerW / data.length - 1.5));
   const errBars = data.map((p, i) => {
-    if (!(p.errors > 0)) return null;
-    const bh = (p.errors / maxErr) * (innerH * 0.28);
+    if (!(p.failed > 0)) return null;
+    const bh = (p.failed / maxErr) * (innerH * 0.28);
     return svg("rect", {
       class: "err-bar",
       x: (x(i) - barW / 2).toFixed(1),

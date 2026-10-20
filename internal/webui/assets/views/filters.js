@@ -563,7 +563,7 @@ export async function filterDetailView(ctx) {
                 (rep.series || []).map((p) => ({
                   at: p.at,
                   requests: p.runs,
-                  errors: p.refused + p.errors,
+                  failed: p.refused + p.errors,
                   tokens: 0,
                   cost_micros: p.cost_micros,
                 })),
