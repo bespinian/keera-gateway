@@ -6,7 +6,7 @@ FROM docker.io/library/python:3.14-slim
 # The CPU build of torch, so the image does not carry 3 GB of CUDA libraries
 # for a model that answers in a fifth of a second on CPU.
 RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu \
-    torch==2.14.1+cpu "laya[serve]==0.4.1"
+    torch==2.14.1+cpu "laya[serve]==0.4.12"
 
 ENV HF_HOME=/root/.cache/huggingface \
     LAYA_DEVICE=cpu \

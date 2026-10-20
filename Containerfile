@@ -1,4 +1,4 @@
-FROM docker.io/library/golang:1.27.2-alpine AS build
+FROM docker.io/library/golang:1.27.3-alpine AS build
 
 ARG VERSION=""
 ARG REVISION=""
