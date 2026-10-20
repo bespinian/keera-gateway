@@ -901,6 +901,12 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 			"that key is not activated yet, so it has no secret to replace; activate it instead")
 		return
 	}
+	if errors.Is(err, store.ErrSandboxKey) {
+		conflict(w, "sandbox_key",
+			"that key belongs to a sandbox and ends with it, so it cannot be rotated; "+
+				"resuming an expired sandbox gives it a new key")
+		return
+	}
 	if err != nil {
 		s.fail(w, err)
 		return

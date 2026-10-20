@@ -364,8 +364,9 @@ keera key create --user ada@example.ch --name "Ada's laptop" --pending
 one step. The new key has the same project, owner, lifetime and guardrails, and
 the old one is revoked at once. An expired key can be rotated too. Anyone who
 may revoke a key may rotate it, so members rotate their own. Only an administrator can give the new
-key another lifetime with `--expires`. The command asks you to type the key's
-name first; `--yes` skips that in a script.
+key another lifetime with `--expires`. A sandbox's key cannot be rotated: it
+ends with its sandbox. The command asks you to type the key's name first;
+`--yes` skips that in a script.
 
 ```sh
 KEY=$(keera key rotate "a developer's laptop")

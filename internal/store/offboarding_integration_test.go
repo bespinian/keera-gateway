@@ -117,3 +117,18 @@ func TestLiveSandboxByKey(t *testing.T) {
 		t.Errorf("a revoked key = %v, want ErrNotFound", err)
 	}
 }
+
+func TestSandboxKeyIsNotRotated(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	newSandbox(t, st, ctx, f, "fix-login")
+
+	_, err := st.RotateKey(ctx, f.keyID, KeyInfo{ID: "key_rotated"},
+		[]byte("hash-rotated-0000000000000000000"))
+	if !errors.Is(err, ErrSandboxKey) {
+		t.Fatalf("rotating a sandbox's key: err = %v, want ErrSandboxKey", err)
+	}
+	if _, err := st.LiveSandboxByKey(ctx, f.hash); err != nil {
+		t.Errorf("the refused rotation should leave the sandbox its key: %v", err)
+	}
+}

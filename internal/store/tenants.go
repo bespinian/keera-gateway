@@ -662,6 +662,10 @@ func (s *Store) ActivateKey(ctx context.Context, id, name string, hash []byte, p
 	}
 }
 
+// ErrSandboxKey is a key minted for a sandbox. It lives and dies with the
+// sandbox, so it is not rotated.
+var ErrSandboxKey = errors.New("store: the key belongs to a sandbox")
+
 // RotateKey replaces the key oldID with next, in one transaction: next gets
 // the old key's organisation, project, person, kind and own guardrails, and
 // the old key is revoked. An empty next.Name keeps the old name. A nil
@@ -684,6 +688,16 @@ func (s *Store) RotateKey(ctx context.Context, oldID string, next KeyInfo, hash 
 		}
 		if old.Pending {
 			return policy.ErrKeyPending
+		}
+		// A sandbox revokes its key by id when it ends, so a rotated copy would
+		// outlive it, and could be rotated on for ever.
+		var sandboxed bool
+		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM sandboxes WHERE key_id = $1)",
+			oldID).Scan(&sandboxed); err != nil {
+			return err
+		}
+		if sandboxed {
+			return ErrSandboxKey
 		}
 		next.OrgID, next.ProjectID, next.UserID, next.Kind = old.OrgID, old.ProjectID, old.UserID, old.Kind
 		if next.Name == "" {
