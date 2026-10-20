@@ -102,7 +102,7 @@ func queueToolCall(batch *pgx.Batch, e Event) {
 // ToolCallRow is one tool call as the control API returns it.
 type ToolCallRow struct {
 	ID          int64       `json:"id"`
-	TS          time.Time   `json:"ts"`
+	CreatedAt   time.Time   `json:"created_at"`
 	ProjectID   string      `json:"project_id,omitempty"`
 	UserID      string      `json:"user_id,omitempty"`
 	KeyID       string      `json:"key_id,omitempty"`
@@ -159,7 +159,7 @@ const toolCallColumns = `SELECT id, ts, COALESCE(project_id, ''), COALESCE(user_
 
 func scanToolCall(r row) (ToolCallRow, error) {
 	var t ToolCallRow
-	err := r.Scan(&t.ID, &t.TS, &t.ProjectID, &t.UserID, &t.KeyID, &t.Server, &t.Tool, &t.Outcome,
+	err := r.Scan(&t.ID, &t.CreatedAt, &t.ProjectID, &t.UserID, &t.KeyID, &t.Server, &t.Tool, &t.Outcome,
 		&t.LatencyMS, &t.ArgBytes, &t.ResultBytes, &t.CostMicros, &t.Error, &t.SessionKey,
 		&t.Client)
 	return t, err

@@ -325,10 +325,10 @@ export function requestTable(ctx, rows, names, hide, opts = {}) {
       label: "When",
       shrink: true,
       rank: "",
-      sortKey: (q) => new Date(q.ts).getTime(),
+      sortKey: (q) => new Date(q.created_at).getTime(),
       sortDir: "desc",
       cell: (q) =>
-        h("span", { class: "muted nowrap", title: dateTime(q.ts) }, ago(q.ts)),
+        h("span", { class: "muted nowrap", title: dateTime(q.created_at) }, ago(q.created_at)),
     },
     hide.model
       ? null
@@ -529,7 +529,7 @@ export function showRequest(ctx, q, names) {
       q.project_id ? names.projects[q.project_id] || q.project_id : "-",
     ],
     ["Who", q.user_id ? names.users[q.user_id] || q.user_id : "-"],
-    ["When", dateTime(q.ts)],
+    ["When", dateTime(q.created_at)],
     // Rows from before v0.7.0 have no id.
     ["Request id", q.request_id || "-"],
     // Most clients send no id of their own, so the line would mostly say none.
@@ -579,7 +579,7 @@ export function showRequest(ctx, q, names) {
 
   modal({
     title: label,
-    subtitle: `${q.alias || "no model"} · ${dateTime(q.ts)}`,
+    subtitle: `${q.alias || "no model"} · ${dateTime(q.created_at)}`,
     actions: session,
     wide: true,
     body: h(

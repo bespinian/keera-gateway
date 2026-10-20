@@ -306,9 +306,9 @@ func TestOneSessionIsReachedFromAnyRequestInIt(t *testing.T) {
 	}
 	// A task is read from its beginning: this is the one log here that does not
 	// read newest first.
-	if !got.Requests[0].TS.Before(got.Requests[3].TS) {
+	if !got.Requests[0].CreatedAt.Before(got.Requests[3].CreatedAt) {
 		t.Errorf("the requests are not oldest-first: %v then %v",
-			got.Requests[0].TS, got.Requests[3].TS)
+			got.Requests[0].CreatedAt, got.Requests[3].CreatedAt)
 	}
 	if got.Session.ID != got.Requests[0].ID {
 		t.Errorf("session id = %d, want the opening request's %d",

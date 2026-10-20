@@ -349,7 +349,7 @@ func (s *Server) requestsCSV(w http.ResponseWriter, rows []store.Request, names 
 	})
 	for _, q := range rows {
 		_ = cw.Write([]string{
-			q.TS.Format(time.RFC3339), q.Alias, strconv.Itoa(q.Status), q.Error,
+			q.CreatedAt.Format(time.RFC3339), q.Alias, strconv.Itoa(q.Status), q.Error,
 			names.label("key", q.KeyID), q.KeyID,
 			names.label("project", q.ProjectID), names.label("user", q.UserID),
 			strconv.FormatInt(q.InputTokens, 10), strconv.FormatInt(q.OutputTokens, 10),
@@ -566,7 +566,7 @@ func (s *Server) auditCSV(w http.ResponseWriter, entries []store.AuditEntry) {
 	_ = cw.Write([]string{"timestamp", "actor", "action", "target_type", "target_id", "detail"})
 	for _, e := range entries {
 		_ = cw.Write([]string{
-			e.TS.Format(time.RFC3339), e.Actor, e.Action, e.TargetType, e.TargetID,
+			e.CreatedAt.Format(time.RFC3339), e.Actor, e.Action, e.TargetType, e.TargetID,
 			string(e.Detail),
 		})
 	}

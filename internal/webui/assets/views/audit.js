@@ -298,8 +298,8 @@ function auditTable(entries) {
         cell: (e) =>
           h(
             "span",
-            { class: "muted nowrap", title: dateTime(e.ts) },
-            ago(e.ts),
+            { class: "muted nowrap", title: dateTime(e.created_at) },
+            ago(e.created_at),
           ),
       },
       {
@@ -351,7 +351,7 @@ function auditTable(entries) {
                   onClick: () =>
                     modal({
                       title: label(e.action),
-                      subtitle: `${e.actor} · ${dateTime(e.ts)}`,
+                      subtitle: `${e.actor} · ${dateTime(e.created_at)}`,
                       body: h(
                         "pre",
                         {

@@ -130,7 +130,7 @@ func TestAuditCSVKeepsTheDetailIntact(t *testing.T) {
 	ts := time.Date(2026, 9, 6, 14, 30, 0, 0, time.UTC)
 
 	s.auditCSV(w, []store.AuditEntry{{
-		ID: 7, TS: ts, Actor: "first.last@example.ch", Action: "guardrail.put",
+		ID: 7, CreatedAt: ts, Actor: "first.last@example.ch", Action: "guardrail.put",
 		TargetType: "project", TargetID: "project_1",
 		Detail: json.RawMessage(`{"rpm":120,"budget_micros":500000000}`),
 	}})
@@ -212,7 +212,7 @@ func TestAuditCSVEscapesEveryFieldItIsGiven(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	s.auditCSV(w, []store.AuditEntry{{
-		ID: 7, TS: time.Date(2026, 9, 6, 14, 30, 0, 0, time.UTC),
+		ID: 7, CreatedAt: time.Date(2026, 9, 6, 14, 30, 0, 0, time.UTC),
 		Actor: `=1+1`, Action: "guardrail.put", TargetType: "project", TargetID: `@A1`,
 		Detail: json.RawMessage(`{"system_prompt":"=1+1"}`),
 	}})
@@ -244,7 +244,7 @@ func TestRequestsCSVCarriesTheMessageAndTheNames(t *testing.T) {
 	ts := time.Date(2026, 9, 6, 14, 30, 0, 0, time.UTC)
 
 	s.requestsCSV(w, []store.Request{{
-		ID: 9, TS: ts, Alias: "keera-code", Status: 500,
+		ID: 9, CreatedAt: ts, Alias: "keera-code", Status: 500,
 		Error: "CUDA out of memory", KeyID: "key_1", ProjectID: "project_1", UserID: "user_1",
 		LatencyMS: 1200, Stream: true,
 	}}, groupLabels{
@@ -344,12 +344,12 @@ func TestRequestsCSVCarriesTheNumbersAndEscapesTheWording(t *testing.T) {
 	ts := time.Date(2026, 9, 6, 14, 30, 0, 0, time.UTC)
 
 	s.requestsCSV(w, []store.Request{{
-		ID: 9, TS: ts, Alias: "keera-code", Status: 200,
+		ID: 9, CreatedAt: ts, Alias: "keera-code", Status: 200,
 		KeyID: "key_1", ProjectID: "project_1", UserID: "user_1",
 		InputTokens: 1000, OutputTokens: 200, CostMicros: 2_500_000,
 		LatencyMS: 4000, TTFTMS: 300, Stream: true,
 	}, {
-		ID: 10, TS: ts, Alias: "keera-code", Status: 500,
+		ID: 10, CreatedAt: ts, Alias: "keera-code", Status: 500,
 		Error: `=cmd|' /c calc'!A1`,
 	}}, groupLabels{
 		projects: map[string]string{"project_1": "Payments Platform"},

@@ -29,12 +29,12 @@ export function toolCallTable(rows, opts = {}) {
     [
       {
         label: "When",
-        sortKey: (t) => t.ts,
+        sortKey: (t) => t.created_at,
         cell: (t) =>
           h(
             "span",
-            { class: "muted nowrap", title: dateTime(t.ts) },
-            ago(t.ts),
+            { class: "muted nowrap", title: dateTime(t.created_at) },
+            ago(t.created_at),
           ),
       },
       {

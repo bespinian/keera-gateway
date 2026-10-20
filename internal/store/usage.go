@@ -637,7 +637,7 @@ func (s *Store) Audit(ctx context.Context, actor, orgID, action, targetType, tar
 // AuditEntry is one row of the audit log.
 type AuditEntry struct {
 	ID         int64           `json:"id"`
-	TS         time.Time       `json:"ts"`
+	CreatedAt  time.Time       `json:"created_at"`
 	Actor      string          `json:"actor"`
 	Action     string          `json:"action"`
 	TargetType string          `json:"target_type,omitempty"`
@@ -679,7 +679,7 @@ func (s *Store) ListAudit(ctx context.Context, q AuditQuery) ([]AuditEntry, erro
 
 func scanAuditEntry(r row) (AuditEntry, error) {
 	var a AuditEntry
-	err := r.Scan(&a.ID, &a.TS, &a.Actor, &a.Action, &a.TargetType, &a.TargetID, &a.Detail)
+	err := r.Scan(&a.ID, &a.CreatedAt, &a.Actor, &a.Action, &a.TargetType, &a.TargetID, &a.Detail)
 	return a, err
 }
 

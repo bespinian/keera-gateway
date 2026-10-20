@@ -163,7 +163,7 @@ func printFailures(w *table, res failuresResponse, o store.Outcome, since time.D
 	w.header("REQUEST\tWHEN\tMODEL\tSTATUS\tKEY\tMESSAGE")
 	for _, f := range res.Data {
 		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\n",
-			f.ID, f.TS.Local().Format("2006-01-02 15:04:05"), dash(f.Alias),
+			f.ID, f.CreatedAt.Local().Format("2006-01-02 15:04:05"), dash(f.Alias),
 			httpStatus(f.Status), dash(labelled(res.KeyNames, f.KeyID)), oneLine(f.Error))
 	}
 	// The counts cover the whole window, not just the page printed.

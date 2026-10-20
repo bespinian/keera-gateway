@@ -438,10 +438,10 @@ func (s *Store) AnyUsed(ctx context.Context, orgID string, keyIDs []string) (boo
 // Refusal is one request the gateway turned away. The status is the reason:
 // 402 a spent budget, 429 a rate limit, 404 a model this key may not use.
 type Refusal struct {
-	TS     time.Time `json:"ts"`
-	Alias  string    `json:"alias,omitempty"`
-	Status int       `json:"status"`
-	KeyID  string    `json:"key_id,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	Alias     string    `json:"alias,omitempty"`
+	Status    int       `json:"status"`
+	KeyID     string    `json:"key_id,omitempty"`
 	// Error is what the client was told: the guardrail's wording for a
 	// refusal, the inference plane's for a failure.
 	Error string `json:"error,omitempty"`
@@ -464,6 +464,6 @@ func (s *Store) Refusals(ctx context.Context, orgID string, keyIDs []string,
 
 func scanRefusal(r row) (Refusal, error) {
 	var f Refusal
-	err := r.Scan(&f.TS, &f.Alias, &f.Status, &f.KeyID, &f.Error)
+	err := r.Scan(&f.CreatedAt, &f.Alias, &f.Status, &f.KeyID, &f.Error)
 	return f, err
 }

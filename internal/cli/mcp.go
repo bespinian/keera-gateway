@@ -267,7 +267,7 @@ func printToolCalls(w *table, calls []store.ToolCallRow) {
 	w.header("WHEN\tTOOL\tOUTCOME\tMS\tSENT\tBACK\tKEY\tERROR")
 	for _, t := range calls {
 		_, _ = fmt.Fprintf(w, "%s\t%s/%s\t%s\t%d\t%d\t%d\t%s\t%s\n",
-			t.TS.Local().Format("01-02 15:04:05"), t.Server, t.Tool, outcomeWord(t.Outcome),
+			t.CreatedAt.Local().Format("01-02 15:04:05"), t.Server, t.Tool, outcomeWord(t.Outcome),
 			t.LatencyMS, t.ArgBytes, t.ResultBytes, dash(t.KeyID), dash(firstLine(t.Error)))
 	}
 }

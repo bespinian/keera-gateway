@@ -153,7 +153,7 @@ func printSession(w *table, res sessionResponse) {
 	w.header(fmt.Sprintf("REQUEST\tWHEN\tMODEL\tSTATUS\tCOST (%s)\tFIRST TOKEN\tMESSAGE", policy.Currency))
 	for _, r := range res.Requests {
 		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%dms\t%s\n",
-			r.ID, r.TS.Local().Format("15:04:05"), dash(r.Alias), httpStatus(r.Status),
+			r.ID, r.CreatedAt.Local().Format("15:04:05"), dash(r.Alias), httpStatus(r.Status),
 			policy.FormatAmount(r.CostMicros), r.TTFTMS, oneLine(cmp.Or(r.Error, r.Note)))
 	}
 

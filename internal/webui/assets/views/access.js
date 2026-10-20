@@ -62,7 +62,7 @@ export async function accessView(ctx) {
 
   // A recent refusal is why people open this screen, so it comes first.
   const recent = refusals.filter(
-    (f) => Date.now() - new Date(f.ts).getTime() < 86400000,
+    (f) => Date.now() - new Date(f.created_at).getTime() < 86400000,
   );
   if (recent.length) {
     wrap.append(
@@ -440,8 +440,8 @@ function refusalsCard(refusals, keys) {
         cell: (f) =>
           h(
             "span",
-            { class: "muted nowrap", title: dateTime(f.ts) },
-            ago(f.ts),
+            { class: "muted nowrap", title: dateTime(f.created_at) },
+            ago(f.created_at),
           ),
       },
       {

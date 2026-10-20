@@ -110,7 +110,7 @@ func TestSessionsGroupRequestsIntoTheTasksTheyWereMadeFor(t *testing.T) {
 	}
 	var opening int64
 	for _, r := range rows {
-		if r.TS.Equal(now.Add(-3 * time.Hour)) {
+		if r.CreatedAt.Equal(now.Add(-3 * time.Hour)) {
 			opening = r.ID
 		}
 	}
@@ -228,7 +228,7 @@ func TestASessionIsFoundFromAnyRequestInIt(t *testing.T) {
 	}
 	var middle, loose int64
 	for _, r := range rows {
-		if r.TS.Equal(now.Add(-2*time.Hour + time.Minute)) {
+		if r.CreatedAt.Equal(now.Add(-2*time.Hour + time.Minute)) {
 			middle = r.ID
 		}
 		if r.SessionKey == "" {
@@ -249,8 +249,8 @@ func TestASessionIsFoundFromAnyRequestInIt(t *testing.T) {
 	}
 	// Oldest first: a task is read from its beginning, which is the one log
 	// here that does not read newest first.
-	if !requests[0].TS.Before(requests[2].TS) {
-		t.Errorf("the requests are not oldest-first: %v then %v", requests[0].TS, requests[2].TS)
+	if !requests[0].CreatedAt.Before(requests[2].CreatedAt) {
+		t.Errorf("the requests are not oldest-first: %v then %v", requests[0].CreatedAt, requests[2].CreatedAt)
 	}
 	if session.ID != requests[0].ID {
 		t.Errorf("session id = %d, want the opening request's %d", session.ID, requests[0].ID)

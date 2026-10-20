@@ -73,8 +73,8 @@ func TestUnhappyRequestsCarryWhatTheClientWasTold(t *testing.T) {
 		t.Errorf("%d rows, want the three that did not deliver and not the one that did", len(all))
 	}
 	// Newest first: an investigation starts at what just happened.
-	if !all[0].TS.After(all[len(all)-1].TS) {
-		t.Errorf("rows are not newest first: %v then %v", all[0].TS, all[len(all)-1].TS)
+	if !all[0].CreatedAt.After(all[len(all)-1].CreatedAt) {
+		t.Errorf("rows are not newest first: %v then %v", all[0].CreatedAt, all[len(all)-1].CreatedAt)
 	}
 }
 
@@ -359,8 +359,8 @@ func TestRequestsCarryWhatWasServedAndWhatWasNot(t *testing.T) {
 		t.Fatalf("%d rows, want every request including the served one", len(all))
 	}
 	// Newest first, the same way every log here reads.
-	if !all[0].TS.After(all[len(all)-1].TS) {
-		t.Errorf("rows are not newest-first: %v then %v", all[0].TS, all[len(all)-1].TS)
+	if !all[0].CreatedAt.After(all[len(all)-1].CreatedAt) {
+		t.Errorf("rows are not newest-first: %v then %v", all[0].CreatedAt, all[len(all)-1].CreatedAt)
 	}
 
 	served, err := st.Requests(ctx, RequestQuery{OrgID: f.orgID, Outcome: OutcomeOK})

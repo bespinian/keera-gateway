@@ -86,11 +86,11 @@ func countOutcome(o Outcome) string {
 // in a row: when, which model, whose key, what it cost and what happened. It
 // covers both served and failed requests, because the log is one table.
 type Request struct {
-	ID     int64     `json:"id"`
-	TS     time.Time `json:"ts"`
-	Alias  string    `json:"alias,omitempty"`
-	Status int       `json:"status"`
-	Error  string    `json:"error,omitempty"`
+	ID        int64     `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	Alias     string    `json:"alias,omitempty"`
+	Status    int       `json:"status"`
+	Error     string    `json:"error,omitempty"`
 	// Note is what went wrong on the way to an answer that was served all the
 	// same, such as a router falling back.
 	Note      string `json:"note,omitempty"`
@@ -143,7 +143,7 @@ const requestColumns = `id, ts, alias, status, COALESCE(error, ''),
 
 func scanRequest(r row) (Request, error) {
 	var q Request
-	err := r.Scan(&q.ID, &q.TS, &q.Alias, &q.Status, &q.Error,
+	err := r.Scan(&q.ID, &q.CreatedAt, &q.Alias, &q.Status, &q.Error,
 		&q.KeyID, &q.ProjectID, &q.UserID, &q.OrgID, &q.Client,
 		&q.InputTokens, &q.CachedInputTokens, &q.CacheWriteTokens, &q.OutputTokens,
 		&q.CostMicros,
