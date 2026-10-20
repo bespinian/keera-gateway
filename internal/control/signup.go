@@ -34,12 +34,10 @@ const maxOrgName = 100
 // the sign-up screen.
 func (s *Server) startSignup(w http.ResponseWriter, r *http.Request, provider *authn.OIDC,
 	identity authn.Identity, invited, redirectTo string) {
-	userID := id.New("user")
 	sealed := s.sealRefreshToken(identity.ExternalID(), identity.RefreshToken)
 	token := auth.RandomToken()
 	if err := s.st.CreateSignup(r.Context(), store.Signup{
 		TokenHash:  auth.Hash(token),
-		UserID:     userID,
 		Provider:   provider.Name(),
 		ExternalID: identity.ExternalID(),
 		Email:      identity.Email,

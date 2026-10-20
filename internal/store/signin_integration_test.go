@@ -379,7 +379,7 @@ func TestTheDirectoryNamesAPersonInEveryOrganisation(t *testing.T) {
 func TestASignUpKeepsTheName(t *testing.T) {
 	st, ctx := db(t)
 	hash := []byte("hash-of-a-sign-up-token-32-bytes")
-	if err := st.CreateSignup(ctx, Signup{TokenHash: hash, UserID: "user_1", Provider: "google",
+	if err := st.CreateSignup(ctx, Signup{TokenHash: hash, Provider: "google",
 		ExternalID: "google:sub-1", Email: "ada@example.ch", Name: "Ada Lovelace", Role: "member"},
 		time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("CreateSignup: %v", err)

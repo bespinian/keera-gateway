@@ -5,14 +5,14 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	keeraid "github.com/bespinian/keera-gateway/internal/id"
 )
 
 // Signup is a sign-in that matched no organisation, waiting for the person to
 // create one or to accept an invitation. See docs/sso.md.
 type Signup struct {
-	TokenHash []byte
-	// UserID is the id the account gets.
-	UserID     string
+	TokenHash  []byte
 	Provider   string
 	ExternalID string
 	Email      string
@@ -31,11 +31,11 @@ type Signup struct {
 
 // signupColumns names signups.name in full: SignupByToken joins orgs, which
 // has a name too.
-const signupColumns = `token_hash, user_id, provider, external_id, email, signups.name, role,
+const signupColumns = `token_hash, provider, external_id, email, signups.name, role,
 	refresh_token, COALESCE(invited_org, ''), redirect_to`
 
 func signupTargets(su *Signup) []any {
-	return []any{&su.TokenHash, &su.UserID, &su.Provider, &su.ExternalID, &su.Email,
+	return []any{&su.TokenHash, &su.Provider, &su.ExternalID, &su.Email,
 		&su.Name, &su.Role, &su.RefreshToken, &su.InvitedOrg, &su.RedirectTo}
 }
 
@@ -46,10 +46,10 @@ func scanSignup(r row) (Signup, error) {
 }
 
 func (s *Store) CreateSignup(ctx context.Context, su Signup, expires time.Time) error {
-	_, err := s.pool.Exec(ctx, `INSERT INTO signups (token_hash, user_id, provider,
+	_, err := s.pool.Exec(ctx, `INSERT INTO signups (token_hash, provider,
 		external_id, email, name, role, refresh_token, invited_org, redirect_to, expires_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-		su.TokenHash, su.UserID, su.Provider, su.ExternalID, su.Email, su.Name, su.Role,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		su.TokenHash, su.Provider, su.ExternalID, su.Email, su.Name, su.Role,
 		su.RefreshToken, nullable(su.InvitedOrg), su.RedirectTo, expires)
 	return err
 }
@@ -109,7 +109,7 @@ func (s *Store) SignUp(ctx context.Context, hash []byte, o Org, tmpl OrgTemplate
 		}
 		u, err = scanUser(tx.QueryRow(ctx, `INSERT INTO users (id, org_id, email, name, external_id, role)
 			VALUES ($1,$2,$3,$4,$5,$6) RETURNING `+userColumns,
-			su.UserID, o.ID, su.Email, su.Name, su.ExternalID, role))
+			keeraid.New("user"), o.ID, su.Email, su.Name, su.ExternalID, role))
 		if isUnique(err) {
 			return ErrEmailTaken
 		}

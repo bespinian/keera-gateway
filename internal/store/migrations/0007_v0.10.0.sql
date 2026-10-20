@@ -115,3 +115,30 @@ CREATE INDEX billing_lines_ts_idx ON billing_lines USING brin (ts);
 ALTER TABLE usage_events SET (autovacuum_vacuum_scale_factor = 0.02);
 ALTER TABLE filter_runs SET (autovacuum_vacuum_scale_factor = 0.02);
 ALTER TABLE tool_calls SET (autovacuum_vacuum_scale_factor = 0.02);
+
+-- A sign-up's refresh token is sealed against the identity now, so the
+-- account's id no longer has to be fixed in advance. It is made when the
+-- account is.
+ALTER TABLE signups DROP COLUMN user_id;
+
+-- Disabling a person updates their keys, and deleting one sets their keys'
+-- user_id to NULL. Without an index both read every key, and every sandbox
+-- adds one.
+CREATE INDEX api_keys_user_id_idx ON api_keys (user_id) WHERE user_id IS NOT NULL;
+
+-- usage_daily is never purged, and reports across every organisation narrow
+-- it by day alone, which its primary key cannot serve.
+CREATE INDEX usage_daily_day_idx ON usage_daily (day);
+
+-- A fixed set of values gets a CHECK, as everywhere else. A sandbox's
+-- isolation and backing get none: the first is copied from its class, and an
+-- empty second means a sandbox the driver made.
+ALTER TABLE sandbox_classes
+    ADD CONSTRAINT sandbox_classes_isolation_check
+        CHECK (isolation IN ('standard', 'isolated', 'vm')),
+    ADD CONSTRAINT sandbox_classes_purposes_check
+        CHECK (purposes <@ ARRAY['engineer', 'agent']);
+ALTER TABLE sandboxes
+    ADD CONSTRAINT sandboxes_purpose_check CHECK (purpose IN ('engineer', 'agent')),
+    ADD CONSTRAINT sandboxes_state_check CHECK (state IN
+        ('pending', 'ready', 'suspended', 'expired', 'failed', 'terminated'));
