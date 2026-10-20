@@ -214,7 +214,7 @@ func (s *Server) forgetCard(w http.ResponseWriter, r *http.Request, p *authn.Pri
 		s.deleteToken(r.Context(), pay, token)
 	}
 	s.auditf(r, p, orgID, "billing.card.remove", "org", orgID, nil)
-	w.WriteHeader(http.StatusNoContent)
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"org_id": orgID, "deleted": true})
 }
 
 // deleteToken asks PostFinance to forget a card. Keera has already: if this
@@ -347,7 +347,10 @@ func (s *Server) listPayments(w http.ResponseWriter, r *http.Request, p *authn.P
 	if !ok {
 		return
 	}
-	limit, _ := page(q)
+	limit, _, ok := page(w, q)
+	if !ok {
+		return
+	}
 	list, err := s.st.ListPayments(r.Context(), orgID, limit)
 	if err != nil {
 		s.fail(w, err)
@@ -377,7 +380,7 @@ func (s *Server) grantCredit(w http.ResponseWriter, r *http.Request, p *authn.Pr
 	in.Note = strings.TrimSpace(in.Note)
 	switch {
 	case in.OrgID == "":
-		badRequest(w, "send the 'org_id' of the organisation to credit")
+		needOrg(w, "send the 'org_id' of the organisation to credit")
 		return
 	case in.AmountMicros == 0 || in.AmountMicros < -maxTopUp || in.AmountMicros > maxTopUp:
 		badRequest(w, "'amount_micros' is the credit to add, or below 0 to take away, up to "+

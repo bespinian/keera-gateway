@@ -442,7 +442,7 @@ func TestForgettingTheCardForgetsItAtPostFinance(t *testing.T) {
 		`{"topup_below_micros":200000000,"topup_micros":200000000}`); w.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", w.Code, w.Body)
 	}
-	if w := invoke(s.forgetCard, admin("org_1"), http.MethodDelete, "/v1/billing/account/card", ""); w.Code != http.StatusNoContent {
+	if w := invoke(s.forgetCard, admin("org_1"), http.MethodDelete, "/v1/billing/account/card", ""); w.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", w.Code, w.Body)
 	}
 	// The automatic top-up stops with it, and a new card does not start it.

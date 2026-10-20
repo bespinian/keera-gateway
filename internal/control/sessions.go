@@ -50,7 +50,9 @@ func (s *Server) sessionQuery(w http.ResponseWriter, r *http.Request,
 		q.Outcome = store.OutcomeUnhappy
 	}
 	var before int64
-	q.Limit, before = page(v)
+	if q.Limit, before, ok = page(w, v); !ok {
+		return store.AgentSessionQuery{}, false
+	}
 	if sort == store.SortRecent {
 		q.Before = before
 	}

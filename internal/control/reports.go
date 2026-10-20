@@ -53,12 +53,23 @@ func (s *Server) reportOrg(w http.ResponseWriter, r *http.Request,
 	return orgID, from, to, ok
 }
 
-// page reads ?limit and ?before. Zero means the store's default and the
-// newest rows.
-func page(q url.Values) (limit int, before int64) {
-	limit, _ = strconv.Atoi(q.Get("limit"))
-	before, _ = strconv.ParseInt(q.Get("before"), 10, 64)
-	return limit, before
+// page reads ?limit and ?before. Absent is zero: the store's default and the
+// newest rows. A value that is not a number is refused, like a bad window.
+func page(w http.ResponseWriter, q url.Values) (limit int, before int64, ok bool) {
+	var err error
+	if v := q.Get("limit"); v != "" {
+		if limit, err = strconv.Atoi(v); err != nil || limit < 0 {
+			badRequest(w, "'limit' must be a whole number")
+			return 0, 0, false
+		}
+	}
+	if v := q.Get("before"); v != "" {
+		if before, err = strconv.ParseInt(v, 10, 64); err != nil {
+			badRequest(w, "'before' must be the id the previous page ended on")
+			return 0, 0, false
+		}
+	}
+	return limit, before, true
 }
 
 // entityScope resolves the one project, key or person a report is narrowed to,
@@ -181,7 +192,9 @@ func (s *Server) requests(w http.ResponseWriter, r *http.Request, p *authn.Princ
 	if rq.Sort, ok = parseSort(w, q, store.RequestSorts()); !ok {
 		return
 	}
-	rq.Limit, rq.Before = page(q)
+	if rq.Limit, rq.Before, ok = page(w, q); !ok {
+		return
+	}
 	if rq.Sort != store.SortRecent {
 		rq.Before = 0
 	}
@@ -513,7 +526,9 @@ func (s *Server) audit(w http.ResponseWriter, r *http.Request, p *authn.Principa
 			return
 		}
 	}
-	aq.Limit, aq.Before = page(q)
+	if aq.Limit, aq.Before, ok = page(w, q); !ok {
+		return
+	}
 
 	// Half an audit trail is worse than none, so an export is never a page.
 	asCSV := q.Get("format") == "csv"

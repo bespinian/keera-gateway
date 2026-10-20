@@ -168,7 +168,9 @@ func (s *Server) toolCalls(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		OrgID: orgID, ProjectID: sc.ProjectID, KeyID: sc.KeyID, UserID: sc.UserID,
 		Server: q.Get("server"), Tool: q.Get("tool"), From: from, To: to,
 	}
-	tq.Limit, tq.Before = page(q)
+	if tq.Limit, tq.Before, ok = page(w, q); !ok {
+		return
+	}
 	if httpx.Flag(q, "summary") {
 		data, err := s.st.SummarizeToolCalls(r.Context(), tq)
 		if err != nil {
