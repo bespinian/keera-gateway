@@ -8,7 +8,7 @@ import (
 )
 
 // ProjectSummary is a project with what the panel shows next to it: its guardrails,
-// its spend against them, and how many keys are live.
+// its spend against them, and how many keys are active.
 type ProjectSummary struct {
 	Project
 	Limits       policy.Limits `json:"limits"`
@@ -24,7 +24,8 @@ func (s *Store) ProjectSummaries(ctx context.Context, orgID string, now time.Tim
 	return queryAll(ctx, s.pool, scanProjectSummary, `
 		SELECT pr.id, pr.org_id, pr.name, pr.description, pr.created_at, `+limitColumns+`,
 		       (SELECT count(*) FROM api_keys k
-		         WHERE k.project_id = pr.id AND k.revoked_at IS NULL),
+		         WHERE k.project_id = pr.id AND k.revoked_at IS NULL AND k.key_hash IS NOT NULL
+		           AND (k.expires_at IS NULL OR k.expires_at > now())),
 		       COALESCE(sp.micros, 0)
 		FROM projects pr
 		LEFT JOIN guardrails p ON p.scope_type = 'project' AND p.scope_id = pr.id

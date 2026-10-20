@@ -109,7 +109,7 @@ export async function projectDetailView(ctx) {
     hide: { project: true },
     meta: [
       pill(
-        `${num(project.active_keys)} ${plural(project.active_keys, "key")} not revoked`,
+        `${num(project.active_keys)} active ${plural(project.active_keys, "key")}`,
       ),
       budgetPill(ctx, project),
     ],

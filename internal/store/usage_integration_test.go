@@ -503,6 +503,28 @@ func TestProjectSummariesReadsTheOpenBudgetWindow(t *testing.T) {
 	if project.ActiveKeys != 1 {
 		t.Errorf("ActiveKeys = %d, want 1", project.ActiveKeys)
 	}
+	// Neither a pending key nor an expired one is active.
+	past := now.Add(-time.Hour)
+	for _, k := range []KeyInfo{
+		{ID: "key_pending", OrgID: f.orgID, ProjectID: f.projectID, Name: "pending"},
+		{ID: "key_expired", OrgID: f.orgID, ProjectID: f.projectID, Name: "expired",
+			Prefix: "keera_sk_exp", ExpiresAt: &past},
+	} {
+		hash := []byte(nil)
+		if k.Prefix != "" {
+			hash = []byte("hash-expired-0000000000000000000")
+		}
+		if _, err := st.CreateKey(ctx, k, hash); err != nil {
+			t.Fatalf("CreateKey: %v", err)
+		}
+	}
+	projects, err = st.ProjectSummaries(ctx, f.orgID, now)
+	if err != nil {
+		t.Fatalf("ProjectSummaries: %v", err)
+	}
+	if project = summaryOf(t, projects, f.projectID); project.ActiveKeys != 1 {
+		t.Errorf("ActiveKeys = %d with a pending and an expired key, want 1", project.ActiveKeys)
+	}
 	if err := st.RevokeKey(ctx, f.keyID); err != nil {
 		t.Fatalf("RevokeKey: %v", err)
 	}
