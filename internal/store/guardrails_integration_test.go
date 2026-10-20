@@ -1,8 +1,11 @@
 package store
 
 import (
+	"context"
+	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
@@ -50,5 +53,34 @@ func TestAllowInOrgAddsToAnExistingListOnly(t *testing.T) {
 	}
 	if !slices.Equal(got.AllowedModels, []string{"keera-speed", "keera-code"}) {
 		t.Errorf("allowed models = %v, want keera-speed and keera-code", got.AllowedModels)
+	}
+}
+
+// The lock holds off a second holder in the same organisation only, and goes
+// with unlock.
+func TestLockReferencesHoldsOffTheSameOrganisation(t *testing.T) {
+	st, ctx := db(t)
+	unlock, err := st.LockReferences(ctx, "org_1")
+	if err != nil {
+		t.Fatalf("LockReferences: %v", err)
+	}
+	try := func(orgID string) error {
+		ctx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+		defer cancel()
+		again, err := st.LockReferences(ctx, orgID)
+		if err == nil {
+			again()
+		}
+		return err
+	}
+	if err := try("org_1"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("a second lock in org_1 gave %v, want it to wait", err)
+	}
+	if err := try("org_2"); err != nil {
+		t.Errorf("a lock in org_2 gave %v, want it at once", err)
+	}
+	unlock()
+	if err := try("org_1"); err != nil {
+		t.Errorf("a lock in org_1 after unlock gave %v", err)
 	}
 }

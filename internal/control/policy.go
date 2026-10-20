@@ -281,6 +281,14 @@ func (s *Server) putGuardrails(w http.ResponseWriter, r *http.Request, p *authn.
 			"sent and charged on every request this scope makes", size, maxSystemPromptBytes))
 		return
 	}
+	// Held from the checks below until the guardrail is stored, so nothing they
+	// find is deleted in between.
+	unlock, err := s.st.LockReferences(r.Context(), owner)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer unlock()
 	if !s.checkGuardrailFilters(w, r, owner, &lim) || !s.checkAllowList(w, r, scope, owner, &lim) ||
 		!s.checkAllowedTools(w, r, owner, &lim) || !s.checkAllowedRepos(w, r, p, scope, scopeID, &lim) {
 		return

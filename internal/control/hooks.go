@@ -95,6 +95,12 @@ func (s *Server) deleteUnused(w http.ResponseWriter, r *http.Request, p *authn.P
 		return
 	}
 	alias := r.PathValue("alias")
+	unlock, err := s.st.LockReferences(r.Context(), orgID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer unlock()
 	refs, err := users(r.Context(), orgID, alias)
 	if err != nil {
 		s.fail(w, err)

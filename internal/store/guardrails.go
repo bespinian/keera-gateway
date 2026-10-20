@@ -81,6 +81,29 @@ func (s *Store) PutGuardrail(ctx context.Context, scopeType policy.ScopeType, sc
 	return err
 }
 
+// LockReferences holds off every other replica's guardrail save, and every
+// delete of a filter, router or MCP server, in one organisation until unlock
+// is called. A check that something still exists, or that nothing uses it,
+// then still holds when the write after it is made. Without it, a guardrail
+// saved during a delete could name a filter that is gone, and refuse every
+// request.
+//
+// The lock lives in a transaction that writes nothing, so a lost connection
+// or a failed rollback cannot leave it held.
+func (s *Store) LockReferences(ctx context.Context, orgID string) (unlock func(), err error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	release := func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+		"references:"+orgID); err != nil {
+		release()
+		return nil, err
+	}
+	return release, nil
+}
+
 // GuardrailRef is one guardrail that names a filter, a router or an MCP server.
 type GuardrailRef struct {
 	ScopeType policy.ScopeType `json:"scope_type"`
