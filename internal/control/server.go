@@ -430,7 +430,7 @@ func constantTimeEqual(presented string, want [32]byte) bool {
 }
 
 func forbid(w http.ResponseWriter, msg string) {
-	httpx.WriteError(w, http.StatusForbidden, "invalid_request_error", "forbidden", msg)
+	httpx.WriteError(w, http.StatusForbidden, "permission_error", "forbidden", msg)
 }
 
 func unauthorized(w http.ResponseWriter, code, msg string) {
