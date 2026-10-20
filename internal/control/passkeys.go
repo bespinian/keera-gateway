@@ -427,7 +427,7 @@ func (s *Server) ownPasskeyAccount(w http.ResponseWriter, r *http.Request,
 		return store.User{}, false
 	}
 	if time.Since(p.SignedInAt) > passkeyStepUp {
-		httpx.WriteError(w, http.StatusForbidden, "invalid_request_error", "sign_in_again",
+		httpx.WriteError(w, http.StatusForbidden, "permission_error", "sign_in_again",
 			fmt.Sprintf("sign out and in again to add a passkey; it needs a sign-in "+
 				"from the last %d minutes", int(passkeyStepUp.Minutes())))
 		return store.User{}, false

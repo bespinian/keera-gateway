@@ -397,7 +397,7 @@ func filterRefused(f policy.Filter, reason string) *refusal {
 	}
 	return &refusal{
 		status: http.StatusForbidden,
-		typ:    "invalid_request_error", code: "filter_refused",
+		typ:    "permission_error", code: "filter_refused",
 		msg:    msg + ". Nothing was sent to the model",
 		advise: true,
 	}

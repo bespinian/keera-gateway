@@ -187,7 +187,7 @@ func TestTheErrorEnvelopeSurvivesCompression(t *testing.T) {
 	// Every refusal the control plane writes goes through WriteJSON, and a
 	// client that cannot parse one is a developer looking at a blank failure.
 	h := Compress(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		WriteError(w, http.StatusForbidden, "invalid_request_error", "csrf",
+		WriteError(w, http.StatusForbidden, "permission_error", "csrf",
 			strings.Repeat("this request is missing its CSRF token. ", 60))
 	}))
 	w := httptest.NewRecorder()

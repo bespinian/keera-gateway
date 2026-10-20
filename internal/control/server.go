@@ -336,7 +336,7 @@ func (s *Server) withPrincipal(w http.ResponseWriter, r *http.Request,
 	// sessions ride on a cookie, so only they need the CSRF token.
 	if p.Via == authn.MethodSession && !safeMethod(r.Method) {
 		if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-CSRF-Token")), []byte(p.CSRF)) != 1 {
-			httpx.WriteError(w, http.StatusForbidden, "invalid_request_error", "csrf",
+			httpx.WriteError(w, http.StatusForbidden, "permission_error", "csrf",
 				"this request is missing its CSRF token; reload the page and try again")
 			return
 		}
