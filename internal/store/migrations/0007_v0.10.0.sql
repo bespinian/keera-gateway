@@ -91,6 +91,10 @@ DROP INDEX audit_log_actor_idx;
 CREATE INDEX audit_log_actor_idx ON audit_log (actor, id);
 DROP INDEX audit_log_action_idx;
 CREATE INDEX audit_log_action_idx ON audit_log (action, id);
+-- A router's screen reads a window, which either order serves.
+DROP INDEX usage_events_router_idx;
+CREATE INDEX usage_events_router_idx ON usage_events (org_id, router, ts)
+    WHERE router IS NOT NULL;
 
 -- Request ids are only ever looked up whole, which a hash index does in
 -- less space.
