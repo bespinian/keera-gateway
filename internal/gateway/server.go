@@ -254,8 +254,7 @@ func (s *Server) Handler() http.Handler {
 	// Clients parse JSON errors. Go's own 404 and 405 are plain text, which
 	// an editor shows as a blank failure.
 	mux.HandleFunc(httpx.InferencePrefix+"/", func(w http.ResponseWriter, r *http.Request) {
-		httpx.WriteError(w, http.StatusNotFound, "invalid_request_error", "not_found",
-			"the inference API has no route "+r.Method+" "+r.URL.Path)
+		httpx.WriteNotFound(w, "not_found", "the inference API has no route "+r.Method+" "+r.URL.Path)
 	})
 	return httpx.Middleware(s.log, mux)
 }

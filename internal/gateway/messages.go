@@ -702,9 +702,7 @@ func (anthropicShape) encode(raw []byte, alias string, status int) ([]byte, int)
 	if err := json.Unmarshal(raw, &in); err != nil || len(in.Choices) == 0 {
 		// A 2xx that is not a completion. Passing it on would hand the client
 		// a malformed response with no explanation.
-		return anthropicErrorBody(http.StatusBadGateway,
-				"the inference plane returned a response the gateway could not read"),
-			http.StatusBadGateway
+		return anthropicErrorBody(http.StatusBadGateway, msgUnreadableAnswer), http.StatusBadGateway
 	}
 
 	choice := in.Choices[0]
@@ -731,8 +729,8 @@ func (anthropicShape) encode(raw []byte, alias string, status int) ([]byte, int)
 	}
 	body, err := json.Marshal(out)
 	if err != nil {
-		return anthropicErrorBody(http.StatusInternalServerError,
-			"the gateway could not encode the response"), http.StatusInternalServerError
+		return anthropicErrorBody(http.StatusInternalServerError, msgUnencodable),
+			http.StatusInternalServerError
 	}
 	return body, status
 }

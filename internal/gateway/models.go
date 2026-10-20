@@ -97,8 +97,7 @@ func (s *Server) getModel(w http.ResponseWriter, r *http.Request) {
 	switch {
 	// A locked model is left out of the list, so it is not described either.
 	case !ok, !n.routed && n.model.Locked:
-		httpx.WriteError(w, http.StatusNotFound, "invalid_request_error", "model_not_found",
-			s.advise(modelNotFound(alias)))
+		httpx.WriteNotFound(w, "model_not_found", s.advise(modelNotFound(alias)))
 	case n.routed:
 		httpx.WriteJSON(w, http.StatusOK, routerEntryOf(n.router))
 	default:

@@ -88,8 +88,24 @@ type APIError struct {
 func Flag(q url.Values, name string) bool { return q.Get(name) == "1" }
 
 func WriteError(w http.ResponseWriter, status int, typ, code, msg string) {
-	WriteJSON(w, status, map[string]APIError{
-		"error": {Message: msg, Type: typ, Code: code},
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(ErrorBody(typ, code, msg))
+}
+
+// ErrorBody is the error envelope, encoded.
+func ErrorBody(typ, code, msg string) []byte {
+	body, _ := json.Marshal(map[string]APIError{"error": {Message: msg, Type: typ, Code: code}})
+	return body
+}
+
+// WriteNotFound answers a route or model that is not there, for a path both
+// OpenAI and Anthropic clients call. It is in both shapes at once: both read
+// error.message, and Anthropic ones the type beside it.
+func WriteNotFound(w http.ResponseWriter, code, msg string) {
+	WriteJSON(w, http.StatusNotFound, map[string]any{
+		"type":  "error",
+		"error": APIError{Message: msg, Type: "not_found_error", Code: code},
 	})
 }
 

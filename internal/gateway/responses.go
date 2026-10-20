@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/id"
 )
 
@@ -606,8 +607,7 @@ func (s responsesShape) encode(raw []byte, alias string, status int) ([]byte, in
 	}
 	var in oaiCompletion
 	if err := json.Unmarshal(raw, &in); err != nil || len(in.Choices) == 0 {
-		return responsesErrorBody("the inference plane returned a response the gateway could not read"),
-			http.StatusBadGateway
+		return httpx.ErrorBody("server_error", "", msgUnreadableAnswer), http.StatusBadGateway
 	}
 	choice := in.Choices[0]
 	out := responsesOut{
@@ -625,16 +625,9 @@ func (s responsesShape) encode(raw []byte, alias string, status int) ([]byte, in
 	}
 	body, err := json.Marshal(out)
 	if err != nil {
-		return responsesErrorBody("the gateway could not encode the response"), http.StatusInternalServerError
+		return httpx.ErrorBody("server_error", "", msgUnencodable), http.StatusInternalServerError
 	}
 	return body, status
-}
-
-func responsesErrorBody(msg string) []byte {
-	body, _ := json.Marshal(map[string]any{"error": map[string]any{
-		"message": msg, "type": "server_error", "code": nil,
-	}})
-	return body
 }
 
 func (responsesShape) contentType() string { return "application/json" }

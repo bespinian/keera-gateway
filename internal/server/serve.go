@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -342,17 +341,7 @@ func routes(gw *gateway.Server, ctl *control.Server) http.Handler {
 func noInferenceHere(w http.ResponseWriter, r *http.Request) {
 	msg := "the inference API is at " + httpx.InferencePrefix + r.URL.Path + ", not " + r.URL.Path +
 		": add " + httpx.InferencePrefix + " to the end of the base URL this client was given"
-	// Both shapes at once: OpenAI and Anthropic clients both read
-	// error.message, and Anthropic ones the type beside it.
-	body, _ := json.Marshal(map[string]any{
-		"type": "error",
-		"error": map[string]string{
-			"type": "not_found_error", "code": "wrong_base_url", "message": msg,
-		},
-	})
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotFound)
-	_, _ = w.Write(body)
+	httpx.WriteNotFound(w, "wrong_base_url", msg)
 }
 
 // limiter is the token buckets plus the sweep that bounds their memory.

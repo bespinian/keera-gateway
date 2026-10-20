@@ -33,6 +33,13 @@ var (
 		shape: responsesShape{}, dialect: responsesDialect{}}
 )
 
+// What a shape answers when a backend's success cannot be translated: one it
+// cannot read, or one it cannot encode again.
+const (
+	msgUnreadableAnswer = "the inference plane returned a response the gateway could not read"
+	msgUnencodable      = "the gateway could not encode the response"
+)
+
 // shape is the request and response format one API surface speaks.
 //
 // The inference plane and serve speak the OpenAI shape. Other shapes are
@@ -104,10 +111,7 @@ func openAIErrorBody(raw []byte, status int) []byte {
 	decoded := json.Unmarshal(raw, &envelope) == nil && envelope.Error != nil
 	if status == http.StatusBadRequest && (!decoded || envelope.Error.Code != "context_length_exceeded") {
 		if overflow := contextOverflow(raw); overflow != "" {
-			body, _ := json.Marshal(map[string]httpx.APIError{"error": {
-				Message: overflow, Type: "invalid_request_error", Code: "context_length_exceeded",
-			}})
-			return body
+			return httpx.ErrorBody("invalid_request_error", "context_length_exceeded", overflow)
 		}
 	}
 	if decoded && envelope.Error.Message != "" {
@@ -117,10 +121,7 @@ func openAIErrorBody(raw []byte, status int) []byte {
 	if status >= 500 {
 		typ = "server_error"
 	}
-	body, _ := json.Marshal(map[string]httpx.APIError{
-		"error": {Message: upstreamErrorMessage(raw, status), Type: typ},
-	})
-	return body
+	return httpx.ErrorBody(typ, "", upstreamErrorMessage(raw, status))
 }
 
 func (openAIShape) contentType() string { return "" }
