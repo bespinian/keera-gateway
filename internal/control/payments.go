@@ -92,8 +92,8 @@ func (s *Server) creditAccount(w http.ResponseWriter, r *http.Request, p *authn.
 		"fee_fixed_micros": feeFixed,
 		"fee_bp":           feeBP,
 		"fee_min_micros":   feeMinPart,
-		"min_topup_micros": minTopUp,
-		"max_topup_micros": maxTopUp,
+		"topup_min_micros": minTopUp,
+		"topup_max_micros": maxTopUp,
 		"account":          a,
 		"recent":           list,
 	})

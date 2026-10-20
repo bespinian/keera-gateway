@@ -421,7 +421,7 @@ func confirmKeyRotate(k store.KeySummary) error {
 // rotatedKey is a new key from a rotation, and the id of the key it replaced.
 type rotatedKey struct {
 	createdKey
-	Replaced string `json:"replaced"`
+	ReplacedKeyID string `json:"replaced_key_id"`
 }
 
 // rotateKey replaces a key with one carrying the same project, owner and

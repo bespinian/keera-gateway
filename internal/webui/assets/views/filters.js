@@ -201,12 +201,12 @@ function modePills(f) {
 function trafficCell(st) {
   if (!st || !st.runs) return trafficSummary(0);
   const refusalRate = st.refused / st.runs;
-  const tone = st.errors > 0 ? "bad" : refusalRate >= 0.05 ? "warn" : "";
+  const tone = st.errored > 0 ? "bad" : refusalRate >= 0.05 ? "warn" : "";
   return trafficSummary(
     st.runs,
     "runs",
-    st.errors > 0
-      ? pill(`${num(st.errors)} could not run`, "bad")
+    st.errored > 0
+      ? pill(`${num(st.errored)} could not run`, "bad")
       : st.refused > 0
         ? pill(`${pct(st.refused, st.runs)} refused`, tone)
         : null,
@@ -563,7 +563,7 @@ export async function filterDetailView(ctx) {
                 (rep.series || []).map((p) => ({
                   at: p.at,
                   requests: p.runs,
-                  failed: p.refused + p.errors,
+                  failed: p.refused + p.errored,
                   tokens: 0,
                   cost_micros: p.cost_micros,
                 })),
@@ -754,12 +754,12 @@ function detailBanners(rep, f) {
       ),
     );
   }
-  if (rep.errors > 0) {
+  if (rep.errored > 0) {
     out.push(
       banner(
         "bad",
         { style },
-        `${num(rep.errors)} ${plural(rep.errors, "run")} failed. ` +
+        `${num(rep.errored)} ${plural(rep.errored, "run")} failed. ` +
           (f && f.shadow
             ? "In shadow those requests were still forwarded, but they are " +
               "missing from these numbers."
@@ -788,12 +788,12 @@ function outcomeRows(rep) {
   return [
     {
       label: "Passed through untouched",
-      value: rep.pass || 0,
+      value: rep.passed || 0,
       color: "var(--muted)",
     },
     { label: "Rewritten", value: rep.rewrote || 0, color: "var(--s1)" },
     { label: "Refused", value: rep.refused || 0, color: "var(--warn)" },
-    { label: "Could not run", value: rep.errors || 0, color: "var(--bad)" },
+    { label: "Could not run", value: rep.errored || 0, color: "var(--bad)" },
   ].filter((r) => r.value > 0);
 }
 
@@ -842,8 +842,8 @@ function projectTable(ctx, projects, names) {
         shrink: true,
         num: true,
         cell: (t) =>
-          t.errors
-            ? h("span", { class: "pill pill-bad" }, num(t.errors))
+          t.errored
+            ? h("span", { class: "pill pill-bad" }, num(t.errored))
             : dash(),
       },
       {

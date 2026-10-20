@@ -60,10 +60,10 @@ type FilterStat struct {
 	Runs   int64  `json:"runs"`
 	// The outcomes sum to Runs. They are counts, not rates, so the reader can
 	// see how small the sample is.
-	Pass    int64 `json:"pass"`
+	Passed  int64 `json:"passed"`
 	Rewrote int64 `json:"rewrote"`
 	Refused int64 `json:"refused"`
-	Errors  int64 `json:"errors"`
+	Errored int64 `json:"errored"`
 	// Shadowed is how many of these runs enforced nothing. A count, not a flag,
 	// because a filter can leave shadow mode inside the window.
 	Shadowed int64 `json:"shadowed"`
@@ -95,7 +95,7 @@ var filterStatColumns = `count(*),
 
 // filterStatTargets points at the fields filterStatColumns fills, in its order.
 func filterStatTargets(s *FilterStat) []any {
-	return []any{&s.Runs, &s.Pass, &s.Rewrote, &s.Refused, &s.Errors, &s.Shadowed,
+	return []any{&s.Runs, &s.Passed, &s.Rewrote, &s.Refused, &s.Errored, &s.Shadowed,
 		&s.LatencyMedianMS, &s.LatencyP95MS, &s.CostMicros, &s.Segments, &s.Changed,
 		&s.FirstRunAt, &s.LastRunAt}
 }
@@ -135,7 +135,7 @@ type FilterPoint struct {
 	At         time.Time `json:"at"`
 	Runs       int64     `json:"runs"`
 	Refused    int64     `json:"refused"`
-	Errors     int64     `json:"errors"`
+	Errored    int64     `json:"errored"`
 	Rewrote    int64     `json:"rewrote"`
 	CostMicros int64     `json:"cost_micros"`
 }
@@ -147,7 +147,7 @@ type FilterProjectRow struct {
 	Runs       int64  `json:"runs"`
 	Refused    int64  `json:"refused"`
 	Rewrote    int64  `json:"rewrote"`
-	Errors     int64  `json:"errors"`
+	Errored    int64  `json:"errored"`
 	CostMicros int64  `json:"cost_micros"`
 }
 
@@ -218,7 +218,7 @@ func (s *Store) filterSeries(ctx context.Context, orgID, alias string,
 
 func scanFilterPoint(r row) (FilterPoint, error) {
 	var p FilterPoint
-	err := r.Scan(&p.At, &p.Runs, &p.Refused, &p.Errors, &p.Rewrote, &p.CostMicros)
+	err := r.Scan(&p.At, &p.Runs, &p.Refused, &p.Errored, &p.Rewrote, &p.CostMicros)
 	return p, err
 }
 
@@ -239,6 +239,6 @@ func (s *Store) filterProjects(ctx context.Context, orgID, alias string,
 
 func scanFilterProjectRow(r row) (FilterProjectRow, error) {
 	var t FilterProjectRow
-	err := r.Scan(&t.ProjectID, &t.Runs, &t.Refused, &t.Rewrote, &t.Errors, &t.CostMicros)
+	err := r.Scan(&t.ProjectID, &t.Runs, &t.Refused, &t.Rewrote, &t.Errored, &t.CostMicros)
 	return t, err
 }

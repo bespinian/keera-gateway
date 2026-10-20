@@ -357,15 +357,15 @@ func printFilterReport(w *table, name string, since time.Duration,
 	show(w, "runs", fmt.Sprintf("%d of the organisation's %d requests (%s)",
 		rep.Runs, rep.Requests, share(rep.Runs, rep.Requests)))
 	// Counts say what happened; rates are what an instruction is tuned against.
-	show(w, "passed", fmt.Sprintf("%d (%s)", rep.Pass, share(rep.Pass, rep.Runs)))
+	show(w, "passed", fmt.Sprintf("%d (%s)", rep.Passed, share(rep.Passed, rep.Runs)))
 	if rep.Rewrote > 0 || (res.Filter != nil && res.Filter.Mode.Rewrites()) {
 		show(w, "rewrote", fmt.Sprintf("%d (%s), touching %d of %d segments",
 			rep.Rewrote, share(rep.Rewrote, rep.Runs), rep.Changed, rep.Segments))
 	}
 	show(w, "refused", fmt.Sprintf("%d (%s)", rep.Refused, share(rep.Refused, rep.Runs)))
-	if rep.Errors > 0 {
-		show(w, "could not run", fmt.Sprintf("%d (%s) - %s", rep.Errors,
-			share(rep.Errors, rep.Runs), errorConsequence(res)))
+	if rep.Errored > 0 {
+		show(w, "could not run", fmt.Sprintf("%d (%s) - %s", rep.Errored,
+			share(rep.Errored, rep.Runs), errorConsequence(res)))
 	}
 	if rep.Shadowed > 0 && rep.Shadowed < rep.Runs {
 		show(w, "of those, unenforced", fmt.Sprintf("%d - the filter changed state inside this window",
@@ -391,7 +391,7 @@ func printFilterReport(w *table, name string, since time.Duration,
 			label = "(no project)"
 		}
 		_, _ = fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%d\t%d\t%s\n",
-			label, t.Runs, t.Refused, share(t.Refused, t.Runs), t.Rewrote, t.Errors,
+			label, t.Runs, t.Refused, share(t.Refused, t.Runs), t.Rewrote, t.Errored,
 			policy.FormatAmount(t.CostMicros))
 	}
 }

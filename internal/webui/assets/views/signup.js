@@ -60,7 +60,7 @@ export async function signUp(root, onSignedIn) {
     }
   };
 
-  const invited = info.invited_org;
+  const invited = info.invited_org_name;
   const nameInput = h("input", {
     class: "input",
     id: "org-name",

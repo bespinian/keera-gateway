@@ -158,13 +158,13 @@ func TestASignInMatchingNoOrganisationCreatesOne(t *testing.T) {
 	}
 
 	var info struct {
-		Email      string `json:"email"`
-		InvitedOrg string `json:"invited_org"`
+		Email          string `json:"email"`
+		InvitedOrgName string `json:"invited_org_name"`
 	}
 	if got, _ := s.call(t, http.MethodGet, "", []*http.Cookie{signup}, &info); got != http.StatusOK {
 		t.Fatalf("reading the sign-up: status %d", got)
 	}
-	if info.Email != "ada@new.example" || info.InvitedOrg != "" {
+	if info.Email != "ada@new.example" || info.InvitedOrgName != "" {
 		t.Errorf("sign-up shows %+v, want only the address", info)
 	}
 
@@ -217,13 +217,13 @@ func TestAnInvitationIsJoinedOnlyWhenAccepted(t *testing.T) {
 	}
 	signup := cookieNamed(cookies, signupCookie)
 	var info struct {
-		InvitedOrg string `json:"invited_org"`
+		InvitedOrgName string `json:"invited_org_name"`
 	}
 	if got, _ := s.call(t, http.MethodGet, "", []*http.Cookie{signup}, &info); got != http.StatusOK {
 		t.Fatalf("reading the sign-up: status %d", got)
 	}
-	if info.InvitedOrg != "Example Bank" {
-		t.Errorf("invited by %q, want Example Bank", info.InvitedOrg)
+	if info.InvitedOrgName != "Example Bank" {
+		t.Errorf("invited by %q, want Example Bank", info.InvitedOrgName)
 	}
 	if u, _ := s.st.UserByID(ctx, "user_grace"); u.ExternalID != "" {
 		t.Fatal("the invitation was taken before it was accepted")

@@ -486,8 +486,8 @@ export function addCredit(ctx, res) {
   const amount = h("input", {
     class: "input",
     type: "number",
-    min: res.min_topup_micros / 1e6,
-    max: res.max_topup_micros / 1e6,
+    min: res.topup_min_micros / 1e6,
+    max: res.topup_max_micros / 1e6,
     step: "1",
     value: "100",
     inputmode: "decimal",

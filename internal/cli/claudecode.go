@@ -173,7 +173,7 @@ func connectClaude(ctx context.Context, c *client, in claudeSetup) error {
 			replacedID = replaced.ID
 		}
 		return out(true, map[string]any{
-			"settings": path, "key_id": key.ID, "replaced": replacedID, "model": alias,
+			"settings": path, "key_id": key.ID, "replaced_key_id": replacedID, "model": alias,
 			"models": aliasesOf(models), "url": in.gatewayURL, "url_managed": managed != "",
 			"warnings": warnings,
 		}, nil)

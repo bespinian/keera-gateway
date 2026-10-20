@@ -196,9 +196,9 @@ func TestFilterRunsAreRecordedWithTheRequestsTheyFiltered(t *testing.T) {
 	switch {
 	case st1.Runs != 6:
 		t.Errorf("runs = %d, want the six requests it filtered", st1.Runs)
-	case st1.Pass != 1 || st1.Rewrote != 2 || st1.Refused != 2 || st1.Errors != 1:
+	case st1.Passed != 1 || st1.Rewrote != 2 || st1.Refused != 2 || st1.Errored != 1:
 		t.Errorf("split = %d pass, %d rewrote, %d refused, %d errors; want 1/2/2/1",
-			st1.Pass, st1.Rewrote, st1.Refused, st1.Errors)
+			st1.Passed, st1.Rewrote, st1.Refused, st1.Errored)
 	case st1.CostMicros != 1500:
 		t.Errorf("cost = %d, want the five runs that spent anything", st1.CostMicros)
 	case st1.Segments != 24 || st1.Changed != 3:
@@ -236,7 +236,7 @@ func TestFilterRunsAreRecordedWithTheRequestsTheyFiltered(t *testing.T) {
 	for _, row := range rep.Projects {
 		byProject[row.ProjectID] = row
 	}
-	if got := byProject["project_2"]; got.Runs != 3 || got.Refused != 2 || got.Errors != 1 {
+	if got := byProject["project_2"]; got.Runs != 3 || got.Refused != 2 || got.Errored != 1 {
 		t.Errorf("project_2 = %+v, want the three runs and both refusals", got)
 	}
 	if got := byProject[f.projectID]; got.Runs != 3 || got.Refused != 0 || got.Rewrote != 2 {
@@ -272,7 +272,7 @@ func TestAFilterReportPlotsEveryBucketInTheWindow(t *testing.T) {
 	for _, p := range rep.Series {
 		if p.Runs > 0 {
 			busy++
-			if p.Refused != 2 || p.Errors != 1 || p.Rewrote != 2 {
+			if p.Refused != 2 || p.Errored != 1 || p.Rewrote != 2 {
 				t.Errorf("the busy bucket = %+v, want the outcomes told apart", p)
 			}
 		}

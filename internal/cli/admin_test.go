@@ -480,7 +480,7 @@ func TestKeyRotateAsksTheControlPlane(t *testing.T) {
 		"GET /v1/orgs": oneOrg,
 		"GET /v1/keys": liveKey,
 		"POST /v1/keys/key_old/rotate": map[string]any{
-			"id": "key_new", "key": "keera_sk_new", "replaced": "key_old",
+			"id": "key_new", "key": "keera_sk_new", "replaced_key_id": "key_old",
 		},
 	})
 

@@ -172,13 +172,13 @@ func TestAMemberRotatesTheirOwnKeyAndItKeepsItsLimits(t *testing.T) {
 	}
 	var created struct {
 		store.KeyInfo
-		Key      string `json:"key"`
-		Replaced string `json:"replaced"`
+		Key           string `json:"key"`
+		ReplacedKeyID string `json:"replaced_key_id"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
 	}
-	if created.Key == "" || created.Replaced != "key_alice" || created.UserID != "user_alice" ||
+	if created.Key == "" || created.ReplacedKeyID != "key_alice" || created.UserID != "user_alice" ||
 		created.Name != "alice's laptop" {
 		t.Errorf("the new key is %+v", created)
 	}

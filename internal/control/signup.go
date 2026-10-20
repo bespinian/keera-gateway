@@ -97,7 +97,7 @@ func (s *Server) signupInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	out := map[string]any{"email": su.Email}
 	if su.InvitedOrg != "" {
-		out["invited_org"] = su.InvitedOrgName
+		out["invited_org_name"] = su.InvitedOrgName
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 }

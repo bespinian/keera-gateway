@@ -906,7 +906,7 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		return
 	}
 	s.auditf(r, p, owner, "key.rotate", "key", info.ID, map[string]any{
-		"replaced": oldID, "project_id": info.ProjectID, "user_id": info.UserID,
+		"replaced_key_id": oldID, "project_id": info.ProjectID, "user_id": info.UserID,
 		"name": info.Name, "prefix": info.Prefix, "kind": info.Kind,
 	})
 	s.keyChanged(r, oldID)
@@ -914,9 +914,9 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	// The secret is returned exactly once, as on create.
 	httpx.WriteJSON(w, http.StatusCreated, struct {
 		store.KeyInfo
-		Key      string `json:"key"`
-		Replaced string `json:"replaced"`
-	}{KeyInfo: info, Key: secret, Replaced: oldID})
+		Key           string `json:"key"`
+		ReplacedKeyID string `json:"replaced_key_id"`
+	}{KeyInfo: info, Key: secret, ReplacedKeyID: oldID})
 }
 
 // renameKey is open to whoever may revoke the key.
