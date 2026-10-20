@@ -1,7 +1,6 @@
 package control
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"net/url"
@@ -163,12 +162,23 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 		return
 	}
 	m.Enabled = enabledAfterPut(body.Enabled, found, existing.Enabled)
-	if err := s.st.UpsertModel(r.Context(), m); err != nil {
+	// A model on the deployment's key, or a subscription model, keeps no key
+	// of its own: it would never be used, and a platform model would send it
+	// to wherever it points if the deployment's key were taken away.
+	setKey := body.APIKey != nil || ((platform || m.Subscription) && found && existing.HasAPIKey)
+	var cred store.Credential
+	if setKey {
+		cred = s.sealCredential(registry.ModelSecretName(orgID, m.Alias), credential)
+	}
+	if err := s.st.UpsertModel(r.Context(), m, cred); err != nil {
 		s.fail(w, err)
 		return
 	}
 	// The model marshals without its credential.
 	s.auditf(r, p, orgID, "model.put", "model", m.Alias, m)
+	if setKey {
+		s.auditCredential(r, p, orgID, "model", m.Alias, credential)
+	}
 
 	// Done here rather than in a client, so the panel, 'keera model add' and
 	// 'keera model apply' all leave a new model usable.
@@ -183,16 +193,6 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 		}
 	}
 
-	// A model on the deployment's key, or a subscription model, keeps no key
-	// of its own: it would never be used, and a platform model would send it
-	// to wherever it points if the deployment's key were taken away.
-	if body.APIKey != nil || ((platform || m.Subscription) && found && existing.HasAPIKey) {
-		if err := s.setCredential(r, p, orgID, m.Alias, credential, "model",
-			registry.ModelSecretName, s.st.SetModelCredential); err != nil {
-			s.fail(w, err)
-			return
-		}
-	}
 	s.changed(r, orgID)
 	// Read back, so has_api_key says what is stored and not what this body
 	// happened to mention.
@@ -339,28 +339,24 @@ func enabledAfterPut(said *bool, found, was bool) bool {
 	return true
 }
 
-// setCredential seals and stores a credential, or clears it when credential
-// is empty. name gives the secret name it is sealed under.
-func (s *Server) setCredential(r *http.Request, p *authn.Principal,
-	orgID, alias, credential, kind string,
-	name func(orgID, alias string) string,
-	set func(ctx context.Context, orgID, alias string, sealed []byte) error,
-) error {
-	var sealed []byte
-	if credential != "" {
-		sealed = s.opts.Secrets.Seal(name(orgID, alias), credential)
+// sealCredential seals a credential under its secret name, or clears the
+// stored one when credential is empty.
+func (s *Server) sealCredential(name, credential string) store.Credential {
+	if credential == "" {
+		return store.ReplaceCredential(nil)
 	}
-	if err := set(r.Context(), orgID, alias, sealed); err != nil {
-		return err
-	}
+	return store.ReplaceCredential(s.opts.Secrets.Seal(name, credential))
+}
+
+// auditCredential records that a credential was set or cleared. Nothing about
+// the credential goes into the audit log, not even its length. Who set it and
+// when is the record.
+func (s *Server) auditCredential(r *http.Request, p *authn.Principal, orgID, kind, alias, credential string) {
 	action := kind + ".credential.set"
 	if credential == "" {
 		action = kind + ".credential.clear"
 	}
-	// Nothing about the credential goes into the audit log, not even its
-	// length. Who set it and when is the record.
 	s.auditf(r, p, orgID, action, kind, alias, nil)
-	return nil
 }
 
 // checkModel tests one model against its own backends. It is for the

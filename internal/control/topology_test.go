@@ -60,7 +60,7 @@ func TestTheMapDrawsTheCatalogueAndTheTrafficTogether(t *testing.T) {
 			Backends:     []string{"https://api.anthropic.com/v1"},
 			BackendModel: "claude-opus-5", Enabled: true},
 	} {
-		if err := st.UpsertModel(ctx, m); err != nil {
+		if err := st.UpsertModel(ctx, m, store.Credential{}); err != nil {
 			t.Fatalf("UpsertModel: %v", err)
 		}
 	}

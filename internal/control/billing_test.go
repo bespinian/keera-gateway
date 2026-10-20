@@ -94,10 +94,7 @@ func TestAnUnpricedModelIsNotShownOnTheDeploymentsKey(t *testing.T) {
 	s := platformServer(ctx, t, st)
 	if err := st.UpsertModel(ctx, policy.Model{OrgID: "org_1", Alias: "old", Kind: policy.KindChat,
 		Provider: "anthropic", BackendModel: "claude-from-the-past", Location: "usa",
-		Backends: []string{"https://proxy.example/v1"}, Enabled: true}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.SetModelCredential(ctx, "org_1", "old", []byte("sealed")); err != nil {
+		Backends: []string{"https://proxy.example/v1"}, Enabled: true}, store.ReplaceCredential([]byte("sealed"))); err != nil {
 		t.Fatal(err)
 	}
 	w := invoke(s.listModels, admin("org_1"), http.MethodGet, "/v1/models", "")
@@ -123,10 +120,7 @@ func TestSavingAModelOnTheDeploymentsKeyRemovesItsOwn(t *testing.T) {
 	s := platformServer(ctx, t, st)
 	if err := st.UpsertModel(ctx, policy.Model{OrgID: "org_1", Alias: "fast", Kind: policy.KindChat,
 		Provider: "anthropic", BackendModel: "claude-haiku-4-5", Location: "usa",
-		Backends: []string{"https://proxy.example/v1"}, Enabled: true}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.SetModelCredential(ctx, "org_1", "fast", []byte("sealed")); err != nil {
+		Backends: []string{"https://proxy.example/v1"}, Enabled: true}, store.ReplaceCredential([]byte("sealed"))); err != nil {
 		t.Fatal(err)
 	}
 	if w := callModel(s.putModel, admin("org_1"), http.MethodPut, "fast", "", haiku); w.Code != http.StatusOK {

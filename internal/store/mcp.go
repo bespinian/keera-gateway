@@ -37,24 +37,19 @@ func (s *Store) MCPServer(ctx context.Context, orgID, alias string) (policy.MCPS
 	return m, notFound(err)
 }
 
-// UpsertMCPServer creates or replaces one of an organisation's servers. Like
-// UpsertModel it leaves the stored credential alone.
-func (s *Store) UpsertMCPServer(ctx context.Context, m policy.MCPServer) error {
+// UpsertMCPServer creates or replaces one of an organisation's servers, and
+// does with its stored credential what cred says.
+func (s *Store) UpsertMCPServer(ctx context.Context, m policy.MCPServer, cred Credential) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO mcp_servers (org_id, alias, url, description,
-		auth_header, enabled, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6, now())
+		auth_header, enabled, api_key_ct, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$8, now())
 		ON CONFLICT (org_id, alias) DO UPDATE SET url = EXCLUDED.url,
 			description = EXCLUDED.description, auth_header = EXCLUDED.auth_header,
-			enabled = EXCLUDED.enabled, updated_at = now()`,
-		m.OrgID, m.Alias, m.URL, m.Description, m.AuthHeader, m.Enabled)
+			enabled = EXCLUDED.enabled,
+			api_key_ct = CASE WHEN $7 THEN EXCLUDED.api_key_ct ELSE mcp_servers.api_key_ct END,
+			updated_at = now()`,
+		m.OrgID, m.Alias, m.URL, m.Description, m.AuthHeader, m.Enabled, cred.set, cred.sealed)
 	return err
-}
-
-// SetMCPCredential stores the sealed credential for one server. Nil clears it.
-func (s *Store) SetMCPCredential(ctx context.Context, orgID, alias string, sealed []byte) error {
-	return s.execOne(ctx,
-		"UPDATE mcp_servers SET api_key_ct = $3, updated_at = now() WHERE org_id = $1 AND alias = $2",
-		orgID, alias, sealed)
 }
 
 func (s *Store) DeleteMCPServer(ctx context.Context, orgID, alias string) error {

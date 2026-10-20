@@ -11,6 +11,7 @@ import (
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/secret"
+	"github.com/bespinian/keera-gateway/internal/store"
 )
 
 // call runs one handler directly, as p, so what is under test is the
@@ -213,7 +214,7 @@ func TestAToolAllowListMustNameRealServers(t *testing.T) {
 	}
 	if err := tn.srv.st.UpsertMCPServer(tn.ctx, policy.MCPServer{
 		OrgID: "org_a", Alias: "github", URL: "https://mcp.example.ch/mcp", Enabled: true,
-	}); err != nil {
+	}, store.Credential{}); err != nil {
 		t.Fatal(err)
 	}
 	carol := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleAdmin,
@@ -228,7 +229,7 @@ func TestAToolAllowListMustNameRealServers(t *testing.T) {
 	// Another organisation's server is not one this one can allow.
 	if err := tn.srv.st.UpsertMCPServer(tn.ctx, policy.MCPServer{
 		OrgID: "org_b", Alias: "jira", URL: "https://jira.example.ch/mcp", Enabled: true,
-	}); err != nil {
+	}, store.Credential{}); err != nil {
 		t.Fatal(err)
 	}
 	w = tn.call(tn.srv.putGuardrails, carol, "PUT", "/v1/guardrails/org/org_a",

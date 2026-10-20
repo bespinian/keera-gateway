@@ -25,7 +25,7 @@ func TestModelWithoutAReleaseDate(t *testing.T) {
 		OrgID: "org_1", Alias: "keera-code", Kind: policy.KindChat, Backends: []string{"http://x/v1"},
 		BackendModel: "x", Location: policy.LocationOnPrem, Enabled: true,
 	}
-	if err := st.UpsertModel(ctx, m); err != nil {
+	if err := st.UpsertModel(ctx, m, Credential{}); err != nil {
 		t.Fatalf("UpsertModel: %v", err)
 	}
 	got, err := st.Model(ctx, "org_1", "keera-code")
@@ -57,7 +57,7 @@ func TestModelCatalogueRoundTrip(t *testing.T) {
 		Provider: "anthropic", ReleaseDate: "2026-07-24", Location: "usa",
 		DisplayName: "Qwen2.5 Coder 32B",
 	}
-	if err := st.UpsertModel(ctx, m); err != nil {
+	if err := st.UpsertModel(ctx, m, Credential{}); err != nil {
 		t.Fatalf("UpsertModel: %v", err)
 	}
 	got, err := st.Model(ctx, "org_1", "keera-code")
@@ -94,10 +94,10 @@ func TestModelCatalogueRoundTrip(t *testing.T) {
 
 	// An edit that does not mention the credential keeps it.
 	sealed := []byte{0x01, 0x02, 0x03}
-	if err := st.SetModelCredential(ctx, "org_1", "keera-code", sealed); err != nil {
-		t.Fatalf("SetModelCredential: %v", err)
+	if err := st.UpsertModel(ctx, m, ReplaceCredential(sealed)); err != nil {
+		t.Fatalf("UpsertModel: %v", err)
 	}
-	if err := st.UpsertModel(ctx, m); err != nil {
+	if err := st.UpsertModel(ctx, m, Credential{}); err != nil {
 		t.Fatalf("UpsertModel: %v", err)
 	}
 	got, err = st.Model(ctx, "org_1", "keera-code")
@@ -107,14 +107,11 @@ func TestModelCatalogueRoundTrip(t *testing.T) {
 	if string(got.APIKeyCiphertext) != string(sealed) || !got.HasAPIKey {
 		t.Errorf("the stored credential was lost by an edit: %+v", got)
 	}
-	if err := st.SetModelCredential(ctx, "org_1", "keera-code", nil); err != nil {
-		t.Fatalf("SetModelCredential(nil): %v", err)
+	if err := st.UpsertModel(ctx, m, ReplaceCredential(nil)); err != nil {
+		t.Fatalf("UpsertModel(nil credential): %v", err)
 	}
 	if got, _ = st.Model(ctx, "org_1", "keera-code"); got.HasAPIKey {
 		t.Error("the credential was not cleared")
-	}
-	if err := st.SetModelCredential(ctx, "org_1", "nobody", sealed); err != ErrNotFound {
-		t.Errorf("setting a credential on a missing alias gave %v, want ErrNotFound", err)
 	}
 
 	if err := st.PutGuardrail(ctx, policy.ScopeOrg, "org_1", policy.Limits{
@@ -198,7 +195,7 @@ func TestOrganisationModelsAreScopedToTheirOrganisation(t *testing.T) {
 			OrgID: orgID, Alias: alias, Kind: policy.KindChat, Backends: []string{"http://x/v1"},
 			BackendModel: backendModel, Location: policy.LocationOnPrem, Enabled: true,
 		}
-		if err := st.UpsertModel(ctx, m); err != nil {
+		if err := st.UpsertModel(ctx, m, Credential{}); err != nil {
 			t.Fatalf("UpsertModel(%s/%s): %v", orgID, alias, err)
 		}
 	}
@@ -230,8 +227,12 @@ func TestOrganisationModelsAreScopedToTheirOrganisation(t *testing.T) {
 	}
 
 	// A credential and a removal reach only the organisation they name.
-	if err := st.SetModelCredential(ctx, "org_1", "private", []byte("sealed")); err != nil {
-		t.Fatalf("SetModelCredential: %v", err)
+	m, err := st.Model(ctx, "org_1", "private")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertModel(ctx, m, ReplaceCredential([]byte("sealed"))); err != nil {
+		t.Fatalf("UpsertModel: %v", err)
 	}
 	if m, _ := st.Model(ctx, "org_2", "private"); m.HasAPIKey {
 		t.Error("setting org_1's credential set org_2's")

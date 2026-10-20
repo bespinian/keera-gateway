@@ -52,13 +52,25 @@ func (s *Store) Model(ctx context.Context, orgID, alias string) (policy.Model, e
 	return m, notFound(err)
 }
 
-// UpsertModel creates or replaces one of an organisation's models.
-//
-// It leaves api_key_ct alone: a credential is set on its own, with
-// SetModelCredential, so an edit that does not mention one keeps it.
-func (s *Store) UpsertModel(ctx context.Context, m policy.Model) error {
-	return upsertModel(ctx, s.pool, m)
+// UpsertModel creates or replaces one of an organisation's models, and does
+// with its stored credential what cred says.
+func (s *Store) UpsertModel(ctx context.Context, m policy.Model, cred Credential) error {
+	return upsertModel(ctx, s.pool, m, cred)
 }
+
+// Credential says what an upsert does with a row's stored credential. The
+// zero value keeps it, so an edit that does not mention one leaves it alone.
+//
+// It is written in the same statement as the row, so a model or MCP server
+// that moves to a new host never sits there with the old host's key.
+type Credential struct {
+	set    bool
+	sealed []byte
+}
+
+// ReplaceCredential stores sealed in place of the stored credential. Nil
+// clears it.
+func ReplaceCredential(sealed []byte) Credential { return Credential{set: true, sealed: sealed} }
 
 // querier is what a pool and a transaction share, so a write can run on its
 // own or inside a transaction.
@@ -67,7 +79,7 @@ type querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-func upsertModel(ctx context.Context, db querier, m policy.Model) error {
+func upsertModel(ctx context.Context, db querier, m policy.Model, cred Credential) error {
 	var long policy.PriceTier
 	if m.LongPrompt != nil {
 		long = *m.LongPrompt
@@ -77,9 +89,9 @@ func upsertModel(ctx context.Context, db querier, m policy.Model) error {
 		cached_input_micros_per_mtok, cache_write_micros_per_mtok, long_prompt_tokens,
 		long_input_micros_per_mtok, long_output_micros_per_mtok,
 		long_cached_input_micros_per_mtok, long_cache_write_micros_per_mtok, max_context,
-		release_date, location, subscription, enabled, display_name, updated_at)
+		release_date, location, subscription, enabled, display_name, api_key_ct, updated_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
-			NULLIF($18, '')::date, $19,$20,$21,$22, now())
+			NULLIF($18, '')::date, $19,$20,$21,$22,$24, now())
 		ON CONFLICT (org_id, alias) DO UPDATE SET kind = EXCLUDED.kind, backends = EXCLUDED.backends,
 			backend_model = EXCLUDED.backend_model, provider = EXCLUDED.provider,
 			display_name = EXCLUDED.display_name, description = EXCLUDED.description,
@@ -94,22 +106,16 @@ func upsertModel(ctx context.Context, db querier, m policy.Model) error {
 			long_cache_write_micros_per_mtok = EXCLUDED.long_cache_write_micros_per_mtok,
 			max_context = EXCLUDED.max_context, release_date = EXCLUDED.release_date,
 			location = EXCLUDED.location, subscription = EXCLUDED.subscription,
-			enabled = EXCLUDED.enabled, updated_at = now()`,
+			enabled = EXCLUDED.enabled,
+			api_key_ct = CASE WHEN $23 THEN EXCLUDED.api_key_ct ELSE models.api_key_ct END,
+			updated_at = now()`,
 		m.Alias, m.OrgID, string(m.Kind), m.Backends, m.BackendModel, m.Provider, m.Description,
 		m.InputMicrosPerMTok, m.OutputMicrosPerMTok, m.CachedInputMicrosPerMTok,
 		m.CacheWriteMicrosPerMTok, long.AboveTokens, long.InputMicrosPerMTok,
 		long.OutputMicrosPerMTok, long.CachedInputMicrosPerMTok,
 		long.CacheWriteMicrosPerMTok, m.MaxContext,
-		m.ReleaseDate, m.Location, m.Subscription, m.Enabled, m.DisplayName)
+		m.ReleaseDate, m.Location, m.Subscription, m.Enabled, m.DisplayName, cred.set, cred.sealed)
 	return err
-}
-
-// SetModelCredential stores the sealed credential for one model. Nil clears
-// it, so a key can be removed without removing the model.
-func (s *Store) SetModelCredential(ctx context.Context, orgID, alias string, sealed []byte) error {
-	return s.execOne(ctx,
-		"UPDATE models SET api_key_ct = $3, updated_at = now() WHERE org_id = $1 AND alias = $2",
-		orgID, alias, sealed)
 }
 
 // DeleteModel removes one of an organisation's models, and takes it off the

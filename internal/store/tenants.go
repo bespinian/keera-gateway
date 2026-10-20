@@ -176,7 +176,7 @@ func createOrg(ctx context.Context, tx pgx.Tx, o Org, tmpl OrgTemplate) (Org, er
 	}
 	for _, m := range tmpl.Models {
 		m.OrgID = id
-		if err := upsertModel(ctx, tx, m); err != nil {
+		if err := upsertModel(ctx, tx, m, Credential{}); err != nil {
 			return o, err
 		}
 	}

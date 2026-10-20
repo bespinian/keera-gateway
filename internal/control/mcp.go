@@ -80,17 +80,17 @@ func (s *Server) putMCPServer(w http.ResponseWriter, r *http.Request, p *authn.P
 		return
 	}
 	m.Enabled = enabledAfterPut(body.Enabled, found, existing.Enabled)
-	if err := s.st.UpsertMCPServer(r.Context(), m); err != nil {
+	var cred store.Credential
+	if body.APIKey != nil {
+		cred = s.sealCredential(registry.MCPSecretName(orgID, m.Alias), credential)
+	}
+	if err := s.st.UpsertMCPServer(r.Context(), m, cred); err != nil {
 		s.fail(w, err)
 		return
 	}
 	s.auditf(r, p, orgID, "mcp_server.put", "mcp_server", m.Alias, m)
 	if body.APIKey != nil {
-		if err := s.setCredential(r, p, orgID, m.Alias, credential, "mcp_server",
-			registry.MCPSecretName, s.st.SetMCPCredential); err != nil {
-			s.fail(w, err)
-			return
-		}
+		s.auditCredential(r, p, orgID, "mcp_server", m.Alias, credential)
 	}
 	s.changed(r, orgID)
 	// Read back, so has_api_key says what is stored and not what this body

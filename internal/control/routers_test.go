@@ -49,7 +49,7 @@ func routerStore(t *testing.T) (*store.Store, context.Context) {
 		{OrgID: "org_1", Alias: "keera-embed", Kind: policy.KindEmbedding, Backends: []string{"http://x/v1"},
 			BackendModel: "embed", Enabled: true},
 	} {
-		if err := st.UpsertModel(ctx, m); err != nil {
+		if err := st.UpsertModel(ctx, m, store.Credential{}); err != nil {
 			t.Fatalf("UpsertModel: %v", err)
 		}
 	}

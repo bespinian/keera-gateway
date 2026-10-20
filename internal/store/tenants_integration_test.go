@@ -293,13 +293,13 @@ func TestSetupStateCountsWhatAFirstRunHasToCreate(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.UpsertModel(ctx, policy.Model{OrgID: f.orgID, Alias: "keera-code", Kind: policy.KindChat,
-		Backends: []string{"http://vllm:8000/v1"}, BackendModel: "served", Enabled: true}); err != nil {
+		Backends: []string{"http://vllm:8000/v1"}, BackendModel: "served", Enabled: true}, Credential{}); err != nil {
 		t.Fatal(err)
 	}
 	// A disabled model is not one a client can reach, so it is not a step
 	// somebody has completed.
 	if err := st.UpsertModel(ctx, policy.Model{OrgID: f.orgID, Alias: "keera-off", Kind: policy.KindChat,
-		Backends: []string{"http://vllm:8000/v1"}, BackendModel: "served", Enabled: false}); err != nil {
+		Backends: []string{"http://vllm:8000/v1"}, BackendModel: "served", Enabled: false}, Credential{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.WriteEvents(ctx, []Event{{TS: time.Now(), OrgID: f.orgID,

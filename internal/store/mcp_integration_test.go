@@ -17,14 +17,11 @@ func TestMCPCatalogueRoundTrip(t *testing.T) {
 		OrgID: "org_1", Alias: "github", URL: "https://api.githubcopilot.com/mcp/", Description: "Issues.",
 		AuthHeader: "X-Api-Key", Enabled: true,
 	}
-	if err := st.UpsertMCPServer(ctx, m); err != nil {
+	if err := st.UpsertMCPServer(ctx, m, ReplaceCredential([]byte("sealed"))); err != nil {
 		t.Fatalf("UpsertMCPServer: %v", err)
 	}
-	if err := st.SetMCPCredential(ctx, "org_1", "github", []byte("sealed")); err != nil {
-		t.Fatalf("SetMCPCredential: %v", err)
-	}
 	// An edit that does not mention the credential keeps it.
-	if err := st.UpsertMCPServer(ctx, m); err != nil {
+	if err := st.UpsertMCPServer(ctx, m, Credential{}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := st.MCPServer(ctx, "org_1", "github")
