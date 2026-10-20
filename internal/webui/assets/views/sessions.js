@@ -15,7 +15,6 @@ import {
   stat,
   pill,
   empty,
-  rowLink,
   go,
   num,
   compact,
@@ -289,72 +288,6 @@ function pager(params, rows, list) {
 function sessionTable(ctx, rows, names, hide, rank) {
   const columns = [
     {
-      // The hash is the only name a session has; anything else would mean
-      // keeping the prompt. The models go underneath, as almost every task
-      // uses one. Only a session the client named itself is marked, because
-      // nearly all are inferred.
-      label: "Session",
-      shrink: true,
-      sortKey: (a) => a.session_key,
-      cell: (a) =>
-        h(
-          "div",
-          { class: "stack", style: { gap: "2px" } },
-          h(
-            "div",
-            { class: "row-tight nowrap" },
-            rowLink(
-              ctx,
-              "/sessions/" + encodeURIComponent(a.id),
-              h("span", { class: "mono" }, a.session_key),
-              a.stated
-                ? "The client named this session itself"
-                : "Grouped by a hash of the prompt that opened the session",
-            ),
-            a.stated ? pill("Named") : null,
-          ),
-          h(
-            "span",
-            { class: "faint mono", style: { fontSize: "11px" } },
-            (a.models || []).join(", ") || "No model",
-          ),
-        ),
-    },
-    !hide.who && {
-      // The person the key is attributed to, or else the key, such as a shared
-      // pipeline key.
-      label: "Who",
-      shrink: true,
-      sortKey: (a) =>
-        names.users[a.user_id] || names.keys[a.key_id] || a.key_id || null,
-      cell: (a) =>
-        // Only an administrator has a person's screen to open.
-        a.user_id && isAdmin(ctx)
-          ? h(
-              "a",
-              {
-                class: "nowrap",
-                href: "/users/" + encodeURIComponent(a.user_id),
-                onClick: go(ctx, "/users/" + encodeURIComponent(a.user_id)),
-              },
-              names.users[a.user_id] || a.user_id,
-            )
-          : a.key_id
-            ? h(
-                "a",
-                {
-                  class: "nowrap",
-                  href: "/keys/" + encodeURIComponent(a.key_id),
-                  title: names.projects[a.project_id]
-                    ? "in " + names.projects[a.project_id]
-                    : null,
-                  onClick: go(ctx, "/keys/" + encodeURIComponent(a.key_id)),
-                },
-                names.users[a.user_id] || names.keys[a.key_id] || a.key_id,
-              )
-            : h("span", { class: "faint" }, "No key"),
-    },
-    {
       label: "Started",
       shrink: true,
       rank: "",
@@ -368,18 +301,46 @@ function sessionTable(ctx, rows, names, hide, rank) {
         ),
     },
     {
-      label: "Took",
-      num: true,
+      // In the list, so nobody has to open thirty sessions to find the one
+      // that died. A session's status is that of its last request.
+      label: "Status",
+      sortKey: (a) => a.last_status,
+      cell: (a) => statusCell(a),
+    },
+    !hide.model && {
+      label: "Model",
       shrink: true,
-      rank: "duration",
-      sortKey: (a) => new Date(a.ended_at) - new Date(a.started_at),
-      sortDir: "desc",
+      sortKey: (a) => (a.models || []).join(", ") || null,
       cell: (a) =>
-        h(
-          "span",
-          { class: "nowrap muted" },
-          duration(new Date(a.ended_at) - new Date(a.started_at)),
-        ),
+        (a.models || []).length
+          ? h("span", { class: "mono" }, a.models.join(", "))
+          : dash(),
+    },
+    !hide.key && {
+      label: "Key",
+      shrink: true,
+      sortKey: (a) => names.keys[a.key_id] || a.key_id || null,
+      cell: (a) =>
+        a.key_id
+          ? h(
+              "span",
+              { class: "muted nowrap" },
+              names.keys[a.key_id] || a.key_id,
+            )
+          : h("span", { class: "faint" }, "No key"),
+    },
+    !hide.project && {
+      label: "Project",
+      shrink: true,
+      sortKey: (a) => names.projects[a.project_id] || a.project_id || null,
+      cell: (a) =>
+        a.project_id
+          ? h(
+              "span",
+              { class: "muted nowrap" },
+              names.projects[a.project_id] || a.project_id,
+            )
+          : h("span", { class: "faint" }, "No project"),
     },
     {
       label: "Requests",
@@ -388,7 +349,7 @@ function sessionTable(ctx, rows, names, hide, rank) {
       rank: "requests",
       sortKey: (a) => a.requests,
       sortDir: "desc",
-      cell: (a) => h("span", { class: "nowrap" }, num(a.requests)),
+      cell: (a) => h("span", { class: "nowrap muted" }, num(a.requests)),
     },
     {
       label: "Tokens",
@@ -417,10 +378,18 @@ function sessionTable(ctx, rows, names, hide, rank) {
           : dash(),
     },
     {
-      // Shown in the list, so nobody has to open thirty sessions to find the
-      // one that died.
-      label: "Ended",
-      cell: (a) => endedCell(a),
+      label: "Duration",
+      num: true,
+      shrink: true,
+      rank: "duration",
+      sortKey: (a) => new Date(a.ended_at) - new Date(a.started_at),
+      sortDir: "desc",
+      cell: (a) =>
+        h(
+          "span",
+          { class: "nowrap muted" },
+          duration(new Date(a.ended_at) - new Date(a.started_at)),
+        ),
     },
     {
       label: "",
@@ -434,7 +403,7 @@ function sessionTable(ctx, rows, names, hide, rank) {
             onClick: () =>
               ctx.navigate("/sessions/" + encodeURIComponent(a.id)),
           },
-          "Open",
+          "View",
         ),
     },
   ];
@@ -445,13 +414,11 @@ function sessionTable(ctx, rows, names, hide, rank) {
   });
 }
 
-// endedCell says how the last call went, in the request log's words. A task
+// statusCell says how the last call went, in the request log's words. A task
 // whose final call was refused did not finish.
-function endedCell(a) {
-  const [label, tone, why] = outcomeMeaning({
-    status: a.last_status,
-    error: a.last_error,
-  });
+function statusCell(a) {
+  const last = { status: a.last_status, error: a.last_error };
+  const [label, tone, why] = outcomeMeaning(last);
   const trouble = [
     a.failed ? `${num(a.failed)} failed` : null,
     a.refused ? `${num(a.refused)} refused` : null,
@@ -481,7 +448,9 @@ function endedCell(a) {
           },
           oneLine(a.last_error, 70),
         )
-      : h("span", { class: "faint small" }, why),
+      : outcomeOf(last) === "ok"
+        ? null
+        : h("span", { class: "faint small" }, why),
   );
 }
 
@@ -575,7 +544,7 @@ export async function sessionDetailView(ctx) {
         s.ok === s.requests ? "all served" : `${num(s.ok)} served`,
       ),
       stat(
-        "Took",
+        "Duration",
         duration(ran),
         s.requests > 1
           ? `${duration(ran / Math.max(1, s.requests - 1))} between requests on average`
@@ -634,12 +603,12 @@ export async function sessionDetailView(ctx) {
     );
   }
 
-  // The request log's table, but oldest first, because a task is read forwards.
+  // The request log's table, newest first like the log itself.
   wrap.append(
     h(
       "div",
       { style: { marginTop: "24px" } },
-      sectionHead("Requests", "oldest first"),
+      sectionHead("Requests"),
       h(
         "div",
         { style: { marginTop: "12px" } },
@@ -650,7 +619,7 @@ export async function sessionDetailView(ctx) {
           { key: true, project: true },
           {
             sortBy: "When",
-            sortDir: "asc",
+            sortDir: "desc",
             // A session is loaded whole, so searching here sees every request.
             search: (q) => `${q.alias} ${q.status} ${q.error || ""}`,
             searchLabel: "these requests",

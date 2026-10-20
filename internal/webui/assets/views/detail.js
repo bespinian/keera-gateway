@@ -237,7 +237,8 @@ export async function keyDetailView(ctx) {
     scope: { key_id: key.id },
     // A key is one person or pipeline, so its traffic reads best as tasks.
     sessions: true,
-    hide: { who: true },
+    // A key belongs to one project, so both columns would repeat it.
+    hide: { key: true, project: true },
     meta: [
       statePill(state),
       // Only a revoked key can have none: its project was deleted.
@@ -585,7 +586,6 @@ export async function userDetailView(ctx) {
     scope: { user_id: user.id },
     // A person's traffic reads best as the tasks they ran.
     sessions: true,
-    hide: { who: true },
     meta: [
       pill(roleLabel(user.role), TONE[user.role] || ""),
       user.disabled_at ? pill("Disabled", "bad") : null,

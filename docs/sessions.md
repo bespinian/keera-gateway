@@ -142,7 +142,7 @@ session shows it whole.
 sees every session in the organisation. A member sees only the sessions of
 their own keys, and so do the live map and the request log.
 
-Click **Cost**, **Tokens**, **Requests** or **Took** above the table to rank the
+Click **Cost**, **Tokens**, **Requests** or **Duration** above the table to rank the
 whole window by it, highest first, and **Started** to go back to the newest
 first. The ranking is the point of the screen: the row worth
 reading is rarely the latest one.
@@ -170,7 +170,7 @@ with one bar per request, sized by cost and coloured by outcome. Forty even bars
 agent working. A long tail of identical small bars is an agent looping. A red
 bar two thirds along is where the task went wrong; click it to open that request.
 
-Each row also shows how the task **ended**: the outcome of its last request and the
+Each row's **Status** is how the task ended: the outcome of its last request and the
 message its client got. A task of forty requests that stopped on a spent budget did
 not finish.
 
