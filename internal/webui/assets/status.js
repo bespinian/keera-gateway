@@ -43,9 +43,9 @@ export function statusMeaning(status) {
 /** statusLabel names a status with no row beside it, as a filter must. It is
  *  not statusMeaning, which reads a log of only unhappy requests, where a 200
  *  can only be an answer that stopped. In a log of every request, almost every
- *  200 was served. */
+ *  200 was a success. */
 export function statusLabel(status) {
-  return status < 400 ? "Served" : statusMeaning(status)[0];
+  return status < 400 ? "Success" : statusMeaning(status)[0];
 }
 
 function statusTone(status) {
@@ -70,7 +70,7 @@ export function outcomeOf(q) {
 export function outcomeMeaning(q) {
   switch (outcomeOf(q)) {
     case "ok":
-      return ["Served", "good", "The model answered in full."];
+      return ["Success", "good", "The model answered in full."];
     case "interrupted":
       return ["Interrupted", "warn", "The answer started but did not finish."];
     default: {

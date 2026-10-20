@@ -25,10 +25,10 @@ export function addNames(names, res) {
 // arrived and were served, which a log of failures cannot show.
 //
 // On a session list, a lens keeps the tasks with at least one such request,
-// and "Served" the tasks where every request was.
+// and "Success" the tasks where every request was.
 const OUTCOMES = [
   { key: "", label: "All", of: (c) => c.total },
-  { key: "ok", label: "Served", of: (c) => c.ok },
+  { key: "ok", label: "Success", of: (c) => c.ok },
   { key: "failed", label: "Failed", of: (c) => c.failed },
   { key: "refused", label: "Refused", of: (c) => c.refused },
   { key: "interrupted", label: "Interrupted", of: (c) => c.interrupted },
@@ -44,6 +44,14 @@ const OUTCOME_KEY = "keera.log.outcome";
 //
 // On the session list, a session's status is that of its last request.
 const NARROWINGS = [
+  {
+    param: "status",
+    facet: "statuses",
+    label: "All statuses",
+    aria: "Status",
+    name: statusFilterLabel,
+    options: statusOptions,
+  },
   { param: "alias", facet: "models", label: "All models", aria: "Model" },
   {
     param: "project_id",
@@ -66,14 +74,6 @@ const NARROWINGS = [
     aria: "User",
     name: (v, names) => names.users[v] || v,
   },
-  {
-    param: "status",
-    facet: "statuses",
-    label: "All statuses",
-    aria: "Status",
-    name: statusFilterLabel,
-    options: statusOptions,
-  },
 ];
 
 // The status classes, offered above the exact statuses: people ask both "which
@@ -88,7 +88,7 @@ const STATUS_CLASSES = [
     label: "Client errors (4xx)",
     holds: (s) => s >= 400 && s < 500,
   },
-  { value: "2xx", label: "Served (2xx)", holds: (s) => s >= 200 && s < 300 },
+  { value: "2xx", label: "Success (2xx)", holds: (s) => s >= 200 && s < 300 },
 ];
 
 function statusFilterLabel(v) {

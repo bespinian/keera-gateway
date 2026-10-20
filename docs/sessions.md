@@ -155,9 +155,9 @@ on one carries over to the other:
   such as all 5XX. A session's status is the status of its last request, so
   each session falls under one status.
 - **Outcome**: the request and session lists on a project's, key's or model's
-  page filter by All, Served, Failed, Refused or Interrupted instead. For
+  page filter by All, Success, Failed, Refused or Interrupted instead. For
   sessions, Failed means the sessions with at least one failed request, and
-  Served the sessions where every request was served.
+  Success the sessions where every request succeeded.
 - **Sorting**: clicking a number column ranks the whole window on the server,
   not just the rows on screen. Requests rank by **Tokens**, **Cost** or **First
   token**. **Load more** and Requests' **Live** work only in time order, so a

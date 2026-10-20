@@ -11,7 +11,6 @@ import {
   pill,
   empty,
   modal,
-  go,
   num,
   money,
   amount,
@@ -317,8 +316,7 @@ export async function requestLog(
  *  rows look the same as here.
  *
  *  `opts` is merged into the table's options. The log passes its ranking,
- *  since it holds one page of many. A session holds all its rows and sorts
- *  them oldest first, because a task is read forwards. */
+ *  since it holds one page of many. A session holds all its rows. */
 export function requestTable(ctx, rows, names, hide, opts = {}) {
   const columns = [
     {
@@ -330,19 +328,10 @@ export function requestTable(ctx, rows, names, hide, opts = {}) {
       cell: (q) =>
         h("span", { class: "muted nowrap", title: dateTime(q.created_at) }, ago(q.created_at)),
     },
-    hide.model
-      ? null
-      : {
-          label: "Model",
-          shrink: true,
-          sortKey: (q) => q.alias,
-          cell: (q) =>
-            q.alias ? h("span", { class: "mono" }, q.alias) : dash(),
-        },
     {
-      // The message sits under the outcome, not in its own column: most rows
+      // The message sits under the status, not in its own column: most rows
       // have none, and an empty column pushes the numbers off the screen.
-      label: "Outcome",
+      label: "Status",
       sortKey: (q) => q.status,
       cell: (q) => {
         const [label, tone] = outcomeMeaning(q);
@@ -372,22 +361,26 @@ export function requestTable(ctx, rows, names, hide, opts = {}) {
         );
       },
     },
+    hide.model
+      ? null
+      : {
+          label: "Model",
+          shrink: true,
+          sortKey: (q) => q.alias,
+          cell: (q) =>
+            q.alias ? h("span", { class: "mono" }, q.alias) : dash(),
+        },
     hide.key
       ? null
       : {
-          // A link, because the next question is what else that key did.
           label: "Key",
           shrink: true,
           sortKey: (q) => names.keys[q.key_id] || q.key_id || null,
           cell: (q) =>
             q.key_id
               ? h(
-                  "a",
-                  {
-                    class: "nowrap",
-                    href: "/keys/" + encodeURIComponent(q.key_id),
-                    onClick: go(ctx, "/keys/" + encodeURIComponent(q.key_id)),
-                  },
+                  "span",
+                  { class: "muted nowrap" },
                   names.keys[q.key_id] || q.key_id,
                 )
               : h("span", { class: "faint" }, "No key"),
@@ -569,7 +562,7 @@ export function showRequest(ctx, q, names) {
               ctx.navigate("/sessions/" + encodeURIComponent(q.id));
             },
           },
-          "Open its session",
+          "View its session",
         )
     : null;
 
