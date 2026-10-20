@@ -66,7 +66,7 @@ func TestUsageNamesTheGroups(t *testing.T) {
 		{"user", "user_1", "ada@example.ch"},
 		{"user", "user_2", "user_2"},
 		{"model", "keera-speed", "keera-speed"},
-		{"project", "", "(none)"},
+		{"project", "", "No project"},
 	} {
 		if got := res.label(c.by, c.group); got != c.want {
 			t.Errorf("label(%s, %q) = %q, want %q", c.by, c.group, got, c.want)

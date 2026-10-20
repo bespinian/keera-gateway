@@ -412,7 +412,7 @@ function instructions(ctx, state, block, placeholder) {
   const shown = JSON.stringify(secret || `${key.prefix}…`).slice(1, -1);
   const config = block.config.replaceAll(placeholder, shown);
   const rotate = [
-    "It was shown only once, when it was issued. If you no longer have it, " +
+    "It was shown only once, when it was activated. If you no longer have it, " +
       "rotate it under ",
     h("a", { href: "/keys", onClick: go(ctx, "/keys") }, "API keys"),
     ".",

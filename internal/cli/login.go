@@ -225,7 +225,6 @@ type identity struct {
 	Role    string `json:"role"`
 	OrgID   string `json:"org_id"`
 	OrgName string `json:"org_name"`
-	Via     string `json:"via"`
 	// Unrestricted is true of an operator, who sees every organisation.
 	Unrestricted bool `json:"unrestricted"`
 	// Orgs are the organisations this person can switch to, when there are

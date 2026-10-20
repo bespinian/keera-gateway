@@ -88,7 +88,9 @@ hook .keera-env '[ -f "$HOME/.keera-env" ] && . "$HOME/.keera-env"' \
 # A banner, mainly to say when this machine goes away.
 cat > "$HOME/.keera-motd" <<MOTD
   ${KEERA_SANDBOX_NAME:-sandbox}  (${KEERA_SANDBOX_CLASS:-unknown class})
-  expires ${KEERA_SANDBOX_EXPIRES:-unknown} unless extended - 'keera sandbox extend ${KEERA_SANDBOX_NAME:-}' from your laptop
+  started with an expiry of ${KEERA_SANDBOX_EXPIRES:-unknown}. From your laptop,
+  'keera sandbox show ${KEERA_SANDBOX_NAME:-}' says when it expires now, and
+  'keera sandbox extend ${KEERA_SANDBOX_NAME:-}' gives it longer.
   Keep your work in /home/keera. Nothing else is sure to survive a suspend,
   and on a class with no disk, not even that.
 

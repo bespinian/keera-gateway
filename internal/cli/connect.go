@@ -302,7 +302,7 @@ func printConnect(c connect.Client, own *ownKey, models []policy.Model, base str
 		fmt.Fprintln(os.Stderr, "     "+styleErr.cmd("export KEERA_API_KEY="+key))
 	}
 	if own != nil {
-		fmt.Fprintf(os.Stderr, "   Use the key %s. It was shown once, when it was issued.\n",
+		fmt.Fprintf(os.Stderr, "   Use the key %s. It was shown once, when it was activated.\n",
 			own.Name)
 	} else {
 		fmt.Fprintln(os.Stderr, "   Issue one with 'keera key create --user <email> --name <what for>',")

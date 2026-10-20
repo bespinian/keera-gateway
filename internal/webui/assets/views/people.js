@@ -416,7 +416,8 @@ export function disablePerson(ctx, user) {
           ? h(
               "li",
               {},
-              "their agent sandboxes are terminated, and their own are suspended",
+              "their agent sandboxes and any not started yet are terminated; " +
+                "the rest are suspended",
             )
           : null,
       ),

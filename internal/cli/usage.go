@@ -65,10 +65,19 @@ type usageResponse struct {
 }
 
 // label is what a group is called: a project's name, a key's name, a person's
-// email, rather than the id the rows are grouped by.
+// email, rather than the id the rows are grouped by. A row with no group is
+// real traffic, so it is named in the panel's words.
 func (res usageResponse) label(groupBy, group string) string {
 	if group == "" {
-		return "(none)"
+		switch groupBy {
+		case "project":
+			return "No project"
+		case "user":
+			return "No user"
+		case "client":
+			return "Unidentified client"
+		}
+		return "-"
 	}
 	names := map[string]map[string]string{
 		"project": res.ProjectNames, "key": res.KeyNames,

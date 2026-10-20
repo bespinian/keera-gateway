@@ -231,7 +231,8 @@ var commands = []command{
 				summary: "turn a person off, for when they leave",
 				flags:   []string{"yes", "json"},
 				prose: "They are signed out and their keys revoked; leaving the directory alone " +
-					"does not revoke keys. See docs/sso.md."},
+					"does not revoke keys. Their agent sandboxes and any not started yet are " +
+					"terminated, and the rest suspended. See docs/sso.md."},
 			{name: "enable", args: "<email-or-id>", summary: "let a disabled person sign in again",
 				flags: []string{"json"},
 				prose: "Their old keys stay revoked, so they start with none. Their passkeys " +

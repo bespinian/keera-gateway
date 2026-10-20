@@ -184,15 +184,16 @@ func parseResources(s Sandbox, c *policy.SandboxClass) error {
 func parseLifetimes(s Sandbox, c *policy.SandboxClass) error {
 	def, err := parseTTL(s.DefaultTTL, DefaultSandboxTTL)
 	if err != nil {
-		return fmt.Errorf("default_ttl: %w", err)
+		// Named in words: the file says default_ttl, the API default_ttl_seconds.
+		return fmt.Errorf("the default lifetime: %w", err)
 	}
 	ceiling, err := parseTTL(s.MaxTTL, DefaultSandboxMaxTTL)
 	if err != nil {
-		return fmt.Errorf("max_ttl: %w", err)
+		return fmt.Errorf("the longest lifetime: %w", err)
 	}
 	if ceiling < def {
 		return fmt.Errorf(
-			"max_ttl (%s) is shorter than default_ttl (%s); every sandbox of this class would "+
+			"the longest lifetime (%s) is shorter than the default (%s); every sandbox of this class would "+
 				"be created already past its ceiling", ceiling, def)
 	}
 	c.DefaultTTLSeconds, c.MaxTTLSeconds = int(def/time.Second), int(ceiling/time.Second)

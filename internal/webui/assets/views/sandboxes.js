@@ -306,7 +306,7 @@ function classCard(ctx, classes, driver) {
             h("span", { class: "mono" }, sizeOf(c.cpu_millis, c.memory_mib)),
         },
         {
-          label: "Volume",
+          label: "Disk",
           shrink: true,
           num: true,
           cell: (c) =>
