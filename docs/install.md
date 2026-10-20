@@ -88,7 +88,8 @@ duration or on/off value that cannot be read, such as `64MB`, `365d` or
 `enabled`, is ignored and the default is used. So is a size or count of zero or
 less, and a zero or negative `KEERA_CACHE_TTL`, `KEERA_SPEND_REFRESH` or
 `KEERA_UPSTREAM_HEADER_TIMEOUT`. For retention and `KEERA_SANDBOX_IDLE_SUSPEND`,
-`0` means off and a negative value is refused.
+`0` means off and a negative value is refused. The sandbox setting is only
+checked while a driver is set ([Sandboxes](#sandboxes)).
 
 Some values stop the start instead, with a message that names the setting.
 Among them: a `KEERA_LOG_LEVEL` or `KEERA_LOG_FORMAT` not listed above, a
@@ -146,8 +147,13 @@ not follow redirects from a backend or an MCP server.
 ### Provider keys of the deployment's own
 
 `KEERA_PROVIDER_<NAME>_API_KEY` gives organisations the deployment's own key for
-that provider, billed at list price, and `KEERA_BILLING_POSTFINANCE_*` lets them
-pay in advance. See [billing.md](billing.md).
+that provider, billed at list price. A provider that serves each customer at
+their own address, such as Infomaniak, also needs
+`KEERA_PROVIDER_<NAME>_PRODUCT_ID`. See [billing.md](billing.md#set-a-provider-key).
+
+`KEERA_BILLING_POSTFINANCE_*` lets organisations pay in advance, and
+`KEERA_BILLING_VAT` adds VAT to each payment. See
+[billing.md](billing.md#set-it-up).
 
 ### Rate limits with more than one replica
 
@@ -157,8 +163,10 @@ Rate limits are kept per replica unless `KEERA_REDIS_URL` is set. See
 ### Single sign-on
 
 `KEERA_OIDC_PROVIDERS` names the identity providers, and each reads its own
-`KEERA_OIDC_<NAME>_*`. `KEERA_PASSKEYS` turns on passkeys. Every setting is in
-[sso.md](sso.md#settings).
+`KEERA_OIDC_<NAME>_*`. `KEERA_PASSKEYS` turns on passkeys. `KEERA_OPERATORS`
+names the email addresses that are operators
+([sso.md](sso.md#the-operator-role-comes-from-the-environment-always)). Every
+setting is in [sso.md](sso.md#settings).
 
 ### Sandboxes
 

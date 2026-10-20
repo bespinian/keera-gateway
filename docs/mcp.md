@@ -85,7 +85,8 @@ keera guardrail set project <project-id> --tools github/search_code
 ```
 
 An entry is a server alias, for all its tools, or `alias/tool` for one tool.
-`--no-tools` clears a level's list.
+`--no-tools` clears a level's list. In the panel, the guardrails dialog sets it
+under **MCP tools**.
 Each level narrows the one above: a tool must be on every level's list. Here
 the project may call only `github/search_code`. The project's list does not name
 `jira/search`, and it names no other github tool. A level that sets no list
@@ -102,7 +103,9 @@ use. A [subscription key](subscriptions.md#what-a-subscription-key-can-do)
 is refused by every server: with a 401 `subscription_key` when it is sent in
 `Authorization`, and with a 404 `mcp_server_not_found` when it is sent in
 `X-Keera-Key`. While `KEERA_CLAUDE_SUBSCRIPTIONS` is off, both get a 403
-`subscriptions_off`. Because the list depends on the key, a list the server marks `public` for
+`subscriptions_off`. A server inside your network answers a 403 `org_limited`
+while the organisation [has not paid yet](sso.md#what-a-new-organisation-can-use).
+Because the list depends on the key, a list the server marks `public` for
 caching is passed on as `private`.
 
 A key that may call only some of a server's tools reaches only its tools. The
@@ -118,9 +121,11 @@ them.
 
 A tool call counts as one request against the key's `rpm`, like a model
 request, and is refused while its `tpm` is used up. A call costs nothing unless
-the key has filters, so only then does a budget stop it. A refused call comes
-back as a failed tool result that says which limit, and is recorded as
-`denied`. Other MCP requests, such as `tools/list`, are not counted.
+the key has filters, so only then does a budget stop it. If one of those filters
+runs on a model on the deployment's provider key, the call also needs
+[prepaid credit](billing.md#pay-in-advance). A refused call comes back as a
+failed tool result that says which limit, and is recorded as `denied`. Other
+MCP requests, such as `tools/list`, are not counted.
 
 ## Filters
 
@@ -151,7 +156,7 @@ key, and the error if any. The outcomes are:
 | `ok`             | the tool answered                                                               |
 | `tool_error`     | the tool answered that it failed                                                |
 | `error`          | no result: the server failed or could not be reached, or a filter could not run |
-| `denied`         | the key may not call this tool, or is over a rate limit or budget               |
+| `denied`         | the key may not call this tool, or is over a rate limit, budget or credit       |
 | `refused`        | a filter stopped the call                                                       |
 | `input_required` | the server asked for the user's input first; the retry is a row of its own      |
 

@@ -98,9 +98,9 @@ marked as an estimate, and the gateway logs a warning.
 ## The monthly report
 
 ```sh
-keera billing                      # this month, your organisation
+keera billing                    # this month, your organisation
 keera billing --month 2026-09
-keera org switch <org> && keera billing   # operators: one organisation
+KEERA_ORG=<org> keera billing    # operators: one organisation
 ```
 
 One row per organisation and provider model, with calls, tokens and the amount

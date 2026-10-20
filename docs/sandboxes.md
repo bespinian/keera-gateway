@@ -49,7 +49,12 @@ work while it is expired. `terminate` frees the volume.
 credential are revoked at once. An agent's sandbox is also removed. An
 engineer's keeps its volume, in case it holds work, until somebody terminates
 it. Until then it is still live, like an expired one: it counts towards the
-quota, keeps its name and shows in `keera sandbox ls`.
+quota, keeps its name and shows in `keera sandbox ls`. A sandbox that has ended
+shows only with `--all`.
+
+`keera sandbox list` takes `--class` and `--purpose` (`engineer` or `agent`) to
+narrow it, and `keera sandbox show <name>` prints one sandbox in full: its
+state, image, repository, branch, expiry and running time.
 
 **Idle means no connection.** With `KEERA_SANDBOX_IDLE_SUSPEND` set, an
 engineer's sandbox is suspended once no connection has been open to it for that
@@ -63,8 +68,11 @@ isolation is the same. The point is that only a branch comes out of it.
 hyphens, at most 40 characters, because it becomes a hostname in the cluster.
 An engineer's sandbox needs an ssh public key: `keera sandbox create` sends the
 ones in `~/.ssh`, or the one in the file `--ssh-key` names, such as
-`--ssh-key ~/.ssh/work.pub`. An agent's needs both `--repo`
-and `--task`. Through the API, `env` adds variables for the sandbox's life,
+`--ssh-key ~/.ssh/work.pub`. An agent's needs both `--repo` and `--task`.
+`--repo` is cloned at its default branch, or at `--branch`. `--ttl` sets the
+lifetime; without it, the sandbox gets the class's default. A `--ttl` above the
+class's `max_ttl` or the quota's [`--max-sandbox-ttl`](#quotas) is cut down to
+it, not refused. Through the API, `env` adds variables for the sandbox's life,
 until a resume after it expired drops them. It cannot name a `KEERA_` variable:
 those are the gateway's.
 
@@ -123,8 +131,9 @@ Upgrade: keera-sandbox/1
 
 The gateway authenticates the caller as it does for the control API, checks that
 the sandbox is theirs, dials it, answers `101`, and copies bytes until one end
-stops. The far end is a normal ssh server, so **VS Code Remote-SSH and JetBrains
-Gateway work unmodified**.
+stops. A connection with no bytes either way for two hours is closed, such as
+one from a laptop put in a bag. The far end is a normal ssh server, so **VS Code
+Remote-SSH and JetBrains Gateway work unmodified**.
 
 sshd listens on **2222**, not 22, because a process with every capability
 dropped cannot bind a privileged port. Nobody types the number: the gateway
@@ -223,6 +232,9 @@ sandboxes:
 
 The file is a [template](gateway.md#template-files): it only seeds new
 organisations, which then own their copies.
+
+`keera sandbox classes` lists the organisation's classes, and whether your
+quota lets you start each one.
 
 An administrator adds or changes classes with a file in the same format:
 
@@ -485,6 +497,9 @@ development and tests. Use `kubernetes` for real workloads.
 | Ports reachable    | any from 1024 to 65535                            | 2222 only                          |
 | Process exits, 0   | failed: a finished pod cannot restart             | suspended: it can start again      |
 | Whose it is        | org and project labels, owner annotation          | owner, org and project labels      |
+
+`keera sandbox proxy <name> --port <port>` reaches one of those ports. It pipes
+the port to its own stdin and stdout, as it does for ssh.
 
 The exit row is for an engineer's sandbox whose process ends on its own. An
 agent that finishes is terminated on both.

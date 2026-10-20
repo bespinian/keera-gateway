@@ -145,7 +145,7 @@ A router cannot decide when:
 
 - its model [cannot run](gateway.md#models-that-filters-and-routers-run-on)
 - none of its destinations can be served
-- its model errored, timed out, or answered nothing
+- its model errored, timed out (after 30 seconds), or answered nothing
 - its answer names none of its destinations
 - its answer names two destinations at once
 - the request has no text to read

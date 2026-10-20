@@ -119,7 +119,8 @@ The path is doubled because they append `/api/hello` to a base URL that already
 ends in `/api`.
 
 A client given a base URL without `/api` gets a 404 `wrong_base_url` that says
-where the API is, rather than the panel's page.
+where the API is, rather than the panel's page. This holds for paths under
+`/v1/`; other paths go to the panel.
 
 A request body may be sent plain, or compressed with gzip or deflate. The
 size limit holds for what it unpacks to. Any other `Content-Encoding` is refused
@@ -312,12 +313,17 @@ counts against its rate limits and budgets, and shows in its usage.
 Organisation names are unique, ignoring case. An operator renames one with
 `keera org set <org> --name "Example Bank AG"`, or the pencil on the
 organisations screen. Everything refers to it by id, so nothing else changes.
+`keera org delete <org>` deletes an organisation and everything in it. It is
+refused with a 409 `org_has_sandboxes` while one of its sandboxes is
+[live](sandboxes.md#quotas), so no machine keeps running without an owner.
 
 Every key is in a project. A new organisation starts with one project, called
 `default`, which is a project like any other. A key created without `--project`
 goes in the organisation's oldest project, and an organisation with no projects
 cannot have keys. A project with keys that are not revoked, expired ones
-included, cannot be deleted. Its revoked keys stay, without a project.
+included, cannot be deleted (409 `project_has_keys`). Nor can one with a
+[live](sandboxes.md#quotas) sandbox, expired ones included (409
+`project_has_sandboxes`). Its revoked keys stay, without a project.
 
 A project has a name, unique in its organisation, and an optional description.
 An administrator changes either with

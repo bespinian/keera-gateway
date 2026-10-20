@@ -10,7 +10,8 @@ not send it credentials, customer names or account numbers.
 ## The three modes
 
 `rewrite` and `gate` read the request with a small model and an instruction.
-`pattern` applies a list of rules and runs no model.
+`pattern` applies a list of rules and runs no model. `--mode` picks one; left
+out, a filter is a `rewrite`.
 
 |                        | `rewrite`                           | `gate`                           | `pattern`                         |
 | ---------------------- | ----------------------------------- | -------------------------------- | --------------------------------- |
@@ -279,6 +280,9 @@ this.
 | a gate answered neither `ALLOW` nor `REFUSED`, in word or in token        | 502    |
 | the conversation will not fit through its model's context                 | 413    |
 | a pattern filter's rules will not compile                                 | 502    |
+
+A filter run is cut off after two minutes, so a stuck backend cannot hold a
+request open. That counts as timed out.
 
 A request with no text at all, such as a chat of only images, runs no filter,
 so a filter that is missing or broken does not refuse it either.

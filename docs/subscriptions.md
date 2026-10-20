@@ -75,6 +75,11 @@ model. The date at the end does not matter.
 The new models join the organisation's allow-list like any other
 ([gateway.md](gateway.md#the-tenancy-model)).
 
+`keera model set <alias> --subscription` makes an existing Anthropic model one,
+and drops its stored key. `--no-subscription` turns it back, so the
+organisation pays again: give `--api-key` too, unless the deployment holds
+[Anthropic's key](billing.md#set-a-provider-key).
+
 ## 3. Send everyone's Claude Code through Keera
 
 An Owner of the Claude organisation sets the address for everyone, in the
