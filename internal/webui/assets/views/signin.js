@@ -182,13 +182,11 @@ export async function signIn(root, onSignedIn) {
       h(
         "div",
         { class: "signin-providers" },
-        ...providers.map((p, i) =>
+        ...providers.map((p) =>
           h(
             "a",
             {
-              // Only the first is primary. It is no ranking, but a stack of
-              // primary buttons looks like a weightier choice than it is.
-              class: "btn" + (i === 0 ? " btn-primary" : ""),
+              class: "btn",
               style: { width: "100%", justifyContent: "center" },
               href: api.loginURL({ provider: p.name, next }),
             },
