@@ -53,11 +53,8 @@ none.
   `inference_geo`, and a `service_tier` other than `auto`, `default`, `flex`
   or `standard_only`. The model answers at its normal speed and price. The
   response header `X-Keera-Removed-Fields` names what was removed.
-- **Nothing stored at OpenAI.** Every organisation shares the deployment's
-  OpenAI account, so a Responses request must carry the whole conversation
-  ([Three request shapes](gateway.md#three-request-shapes)). A chat
-  completion's `store: true` is removed and named in
-  `X-Keera-Removed-Fields`.
+- **Nothing stored at OpenAI**, which every organisation shares
+  ([Three request shapes](gateway.md#three-request-shapes)).
 
 Through a router, these apply when any model the request may reach is on the
 deployment's key, whichever one answers it.

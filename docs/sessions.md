@@ -226,7 +226,8 @@ takes about 250 ms. Reading one session takes under a millisecond.
 
 ## Configuration
 
-`KEERA_SESSION_GAP` is `30m` by default and refused below `1m`. Within a task,
+[`KEERA_SESSION_GAP`](install.md#everything-else) is the idle time that ends a
+task. Within a task,
 requests are seconds or a minute or two apart; between tasks there is a
 meeting, a lunch or a night. Much under ten minutes splits one task into
 several, much over an hour joins an afternoon's tasks into one. Sessions are

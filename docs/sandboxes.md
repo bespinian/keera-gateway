@@ -581,6 +581,11 @@ driver for development, or on a host the deployment already trusts.
 | `KEERA_SANDBOX_GIT_APP_KEY_FILE`   | -                        | a file holding the GitHub App's private key                                                          |
 | `KEERA_SANDBOX_GIT_TOKEN_FILE`     | -                        | a file holding the GitLab token                                                                      |
 
+The gateway does not start with an unknown driver or forge, with
+`KEERA_SANDBOX_GIT_FORGE=github` but not both the app id and its key file, or
+with `gitlab` but no token file. With no driver, the other sandbox settings are
+not checked.
+
 `KEERA_SANDBOX_PUBLIC_URL` is the one to get right. A sandbox pointed at the
 public name leaves the cluster and comes back through the load balancer to reach
 a pod nearby. On the podman driver, `127.0.0.1` inside a sandbox is the sandbox

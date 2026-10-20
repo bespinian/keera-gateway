@@ -83,9 +83,9 @@ the restart.
 | set                              | whoever is in the group                              | the directory                                                                   |
 | unset                            | whoever an operator or another administrator says so | `keera user role`, the panel's **Users** screen, `PATCH /control/v1/users/{id}` |
 
-**If set, the directory decides.** The group is read at every sign-in and [every
-15 minutes after](#asking-the-directory-again), so a person removed from it
-loses the role. The panel _no longer lets you change roles_, because the next
+**If set, the directory decides.** The group is read at every sign-in and, with
+a refresh token, [every 15 minutes after](#asking-the-directory-again), so a
+person removed from it loses the role. The panel _no longer lets you change roles_, because the next
 sign-in would undo the change. With several directories, admin groups on one
 provider are enough to make the directory decide for the whole gateway. It
 decides only in the organisation the person's address lands in (see [Which
@@ -500,8 +500,8 @@ across. If you need this often, use the operator key instead.
 Put the gateway's port behind a TLS terminator, then change two things: the
 authorised redirect URI in each provider's console, and `KEERA_PUBLIC_URL`.
 
-`KEERA_SECURE_COOKIES` follows the scheme, so the session cookie becomes
-`Secure` without another setting.
+[`KEERA_SECURE_COOKIES`](install.md#everything-else) follows the scheme, so the
+session cookie becomes `Secure` without another setting.
 
 ## Asking the directory again
 

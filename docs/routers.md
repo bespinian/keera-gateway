@@ -19,9 +19,10 @@ destinations in an order and try them until one answers.
 
 A router may have a single destination. That gives clients a name that stays
 the same when the model behind it changes. An `instruction` router with one
-destination sends every request there without asking its model. Its fallback
-can only be that same destination, so when that one cannot be used at all -
-missing, disabled or without a backend - the request is refused with a 503.
+destination, or with only one that can be served right now, sends every request
+there without asking its model or reading the request. Its fallback can only be
+that same destination, so when that one cannot be used at all - missing,
+disabled or without a backend - the request is refused with a 503.
 
 Most of this page is about `instruction` routers. The other modes have their own
 sections - [routing by size](#routing-by-size),
@@ -144,7 +145,8 @@ place to send the request.
 A router cannot decide when:
 
 - its model [cannot run](gateway.md#models-that-filters-and-routers-run-on)
-- none of its destinations can be served
+- none of its destinations can be served (with a fallback, this ends in the 503
+  below)
 - its model errored, timed out (after 30 seconds), or answered nothing
 - its answer names none of its destinations
 - its answer names two destinations at once
@@ -529,7 +531,8 @@ scopes. Take it off those allow-lists first.
   know router names.
 - **Not on a request with no text**, for a router that decides. A chat that is
   all images has nothing to read, so the fallback places it, or it is refused
-  with `router_undecided` if there is no fallback. A fallback router is
+  with `router_undecided` if there is no fallback. A router with only one
+  destination that can be served sends it there, as above. A fallback router is
   unaffected, and a size router counts such a request as small.
 - **Not a retry.** A fallback router moves an unanswered request to the next
   destination. It never sends the same request to the same model twice.

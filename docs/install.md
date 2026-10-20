@@ -333,8 +333,9 @@ keep them apart ([gateway.md](gateway.md#one-listener-four-surfaces)). So:
 - **Put a TLS terminator in front.** None of these deployments terminates TLS.
 - **Turn off response buffering** on the proxy, and set a read timeout longer
   than the longest completion. Most ingress controllers buffer by default.
-- **Allow large bodies.** The gateway accepts 32 MiB by default. A proxy with a
-  lower limit rejects long conversations before they reach the gateway.
+- **Allow large bodies.** A proxy with a lower limit than
+  `KEERA_MAX_BODY_BYTES` rejects long conversations before they reach the
+  gateway.
 - **Choose which paths to publish.** To give developers the inference API
   without the panel, publish only `/api`.
 - **Set up single sign-on or passkeys** before anyone else can reach the panel.

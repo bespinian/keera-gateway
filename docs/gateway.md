@@ -172,8 +172,8 @@ other model refuses it with a 400.
 On the deployment's own OpenAI key ([billing.md](billing.md)), every
 organisation shares one OpenAI account, so nothing may be stored there. A
 Responses request is sent with `store` off, a chat completion has
-`store: true` removed, and a request with `previous_response_id`,
-`conversation` or `background` is refused with a 400.
+`store: true` removed (named in `X-Keera-Removed-Fields`), and a request with
+`previous_response_id`, `conversation` or `background` is refused with a 400.
 
 A model is one of OpenAI's own when its [provider](providers.md) is `openai`.
 
@@ -337,9 +337,11 @@ the same.
 
 A key's secret is printed once and never stored. Nobody, not even an operator,
 can read it later. Screens, reports and the audit log show its name instead. A
-key lasts 90 days. `--expires 720h` gives it another lifetime,
-`--expires 2026-12-31` makes that the last day it works, and `--expires never`
-makes a key that does not expire. The panel offers the same choices.
+key from `keera key create` or the panel lasts 90 days. `--expires 720h` gives
+it another lifetime, `--expires 2026-12-31` makes that the last day it works,
+and `--expires never` makes a key that does not expire. The panel offers the
+same choices. Through the API, a key with neither `expires_in_seconds` nor
+`expires_at` does not expire.
 
 A key's name is only a label: `keera key set <key> --name <name>`, or the
 pencil on the **API keys** screen. A member can rename their own keys, an
@@ -567,7 +569,7 @@ are checked one by one, since each has to fit on its own.
 
 A coding agent keeps one response open for minutes. So the gateway limits only
 how long the inference plane may take to _start_ responding
-(`KEERA_UPSTREAM_HEADER_TIMEOUT`, two minutes by default), never the response
+([`KEERA_UPSTREAM_HEADER_TIMEOUT`](install.md#everything-else)), never the response
 itself. A router uses the same timeout to decide that a destination did not
 answer in time. A model on the deployment's own provider key gets longer
 ([billing.md](billing.md#what-is-billed)).
@@ -605,9 +607,9 @@ A change to one key, such as a sandbox starting or stopping, drops only that
 key. Any other change, such as a model or a guardrail, drops the keys of
 its organisation and reloads that organisation alone. In case a
 notification is lost, a checked key is reused for at most
-`KEERA_CACHE_TTL` (30 seconds), and models, filters, routers and MCP servers are
-reloaded every minute. Spend is refreshed separately (`KEERA_SPEND_REFRESH`, 10
-seconds).
+[`KEERA_CACHE_TTL`](install.md#everything-else), and models, filters, routers and
+MCP servers are reloaded every minute. Spend is refreshed separately, every
+`KEERA_SPEND_REFRESH`.
 
 If Postgres is down, the models and the rest stay as last loaded, and a key
 keeps working until its `KEERA_CACHE_TTL` runs out. After that, every request
@@ -619,8 +621,8 @@ The token buckets behind `rpm` and `tpm` live in each process. With N replicas
 behind a load balancer, a limit of 600 requests per minute is 600 per replica,
 and up to 600N in total. Spend is reconciled through Postgres, so a budget means
 the same thing however many gateways are running. Each replica reads spend again
-every `KEERA_SPEND_REFRESH` (10 s), so a budget can be overshot by about that
-much traffic.
+every [`KEERA_SPEND_REFRESH`](install.md#everything-else), so a budget can be
+overshot by about that much traffic.
 
 Set `KEERA_REDIS_URL` (`redis://host:6379/0`, or `rediss://` for TLS) to keep
 the buckets in Redis. One script then decides all of a request's levels
