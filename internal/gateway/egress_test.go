@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -100,5 +101,29 @@ func TestPrivateHostsAreNamesOrAllOrNone(t *testing.T) {
 		if _, _, err := ParsePrivateHosts(s); err == nil {
 			t.Errorf("%q was accepted", s)
 		}
+	}
+}
+
+// The default is written out in install.md, and without loopback in the
+// Makefile's dev target, whose backends are on loopback. Both must say what
+// the gateway does.
+func TestTheDefaultDenyListIsTheOneTheDocsAndMakeDevGive(t *testing.T) {
+	doc, err := os.ReadFile("../../docs/install.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(doc), "\n"+DefaultUpstreamDeny+"\n") {
+		t.Error("docs/install.md does not give DefaultUpstreamDeny as the default")
+	}
+	makefile, err := os.ReadFile("../../Makefile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dev, ok := strings.CutPrefix(DefaultUpstreamDeny, "127.0.0.0/8,::1/128,")
+	if !ok {
+		t.Fatal("DefaultUpstreamDeny no longer starts with loopback; change this test")
+	}
+	if !strings.Contains(string(makefile), "KEERA_UPSTREAM_DENY:-"+dev+"}") {
+		t.Error("make dev's deny list is not DefaultUpstreamDeny without loopback")
 	}
 }

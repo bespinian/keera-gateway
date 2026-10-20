@@ -119,7 +119,8 @@ nix build .#keera -o build/result
 ```
 
 Every build writes to `build/`: the two binaries, the SBOM, the third-party
-notices, the release archives, and air's binary and log from `make dev`.
+notices, the release archives, nix's `result` link, and air's binary and log
+and the development model catalogue from `make dev`.
 `make clean` deletes that directory. The one file written elsewhere is
 `compose/.env`, which `make dev` creates on a fresh clone. `make clean` keeps
 it.

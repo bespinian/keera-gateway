@@ -145,8 +145,10 @@ REVISION ?= $(shell git rev-parse HEAD 2>/dev/null)$(if $(shell git status --por
 #
 # The image is rebuilt first, since an SBOM of whatever was tagged last is
 # worse than none. The rebuild is cached.
+# Pinned like everything else a release is built with, so two builds of one
+# commit describe it the same way. Dependabot does not read this file.
 SYFT ?= syft
-SYFT_IMAGE ?= docker.io/anchore/syft:latest
+SYFT_IMAGE ?= docker.io/anchore/syft:v1.54.1
 SBOM_DIR ?= $(BUILD_DIR)/sbom
 # CycloneDX is what the downstream scanners take. For another syft format, such
 # as spdx-json, change SBOM_FILE too.
@@ -269,8 +271,7 @@ dev: dev-env dev-backends $(DEV_MODELS)
 	@# class file is set even without a driver, so the first organisation has
 	@# classes once one is switched on; the sandbox address only with a driver.
 	@# The backends are on loopback, so the deny list is the default without
-	@# loopback: keep it in step with DefaultUpstreamDeny in
-	@# internal/gateway/egress.go.
+	@# loopback. A test in internal/gateway holds it to DefaultUpstreamDeny.
 	@set -a; . ./$(DEV_ENV); set +a; \
 		KEERA_DATABASE_URL='postgres://keera:keera@127.0.0.1:5432/keera?sslmode=disable' \
 		KEERA_MODELS_FILE="$${KEERA_MODELS_FILE:-$(DEV_MODELS)}" \

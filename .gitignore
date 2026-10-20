@@ -4,8 +4,9 @@
 # Nix
 result
 
-# Compose
+# Compose, and what make dev-env leaves if it fails halfway
 compose/.env
+compose/.env.tmp
 
 # Go
 /vendor

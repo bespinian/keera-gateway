@@ -40,7 +40,8 @@ services:
       # classes once one is switched on. See README.md.
       KEERA_SANDBOXES_FILE: /etc/keera/sandboxes.yaml
       # `make dev` reads the same .env, so these override its settings: the
-      # podman driver cannot run inside this container.
+      # port is the one published below, whatever .env gives make dev, and
+      # the podman driver cannot run inside this container.
       KEERA_ADDR: ":8080"
       KEERA_SANDBOX_DRIVER: ""
     healthcheck:
