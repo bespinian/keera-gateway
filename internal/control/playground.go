@@ -37,13 +37,13 @@ func (s *Server) playgroundChat(w http.ResponseWriter, r *http.Request, p *authn
 		s.fail(w, store.ErrNotFound)
 		return
 	case errors.Is(err, policy.ErrKeyRevoked):
-		forbid(w, "this API key has been revoked; choose another one")
+		conflict(w, "key_revoked", "this API key has been revoked; choose another one")
 		return
 	case errors.Is(err, policy.ErrKeyExpired):
-		forbid(w, "this API key has expired; choose another one")
+		conflict(w, "key_expired", "this API key has expired; choose another one")
 		return
 	case errors.Is(err, policy.ErrKeyPending):
-		forbid(w, "this API key is not activated yet; activate it first")
+		conflict(w, "key_pending", "this API key is not activated yet; activate it first")
 		return
 	case err != nil:
 		s.fail(w, err)

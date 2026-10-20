@@ -243,7 +243,7 @@ func TestActivateKeyGivesAPendingKeyItsSecretOnce(t *testing.T) {
 		t.Errorf("pending key by id: err = %v, want ErrKeyPending", err)
 	}
 	if _, err := st.RotateKey(ctx, "key_pending", KeyInfo{ID: "key_rotated"},
-		[]byte("hash-rotated-0000000000000000000")); !errors.Is(err, ErrKeyPending) {
+		[]byte("hash-rotated-0000000000000000000")); !errors.Is(err, policy.ErrKeyPending) {
 		t.Errorf("rotating a pending key: err = %v, want ErrKeyPending", err)
 	}
 
@@ -271,7 +271,7 @@ func TestActivateKeyGivesAPendingKeyItsSecretOnce(t *testing.T) {
 		t.Fatalf("RevokeKey: %v", err)
 	}
 	if _, err := st.ActivateKey(ctx, "key_gone", "", []byte("hash-gone-0000000000000000000000"),
-		"keera_sk_gone"); !errors.Is(err, ErrKeyRevoked) {
+		"keera_sk_gone"); !errors.Is(err, policy.ErrKeyRevoked) {
 		t.Errorf("activating a revoked key: err = %v, want ErrKeyRevoked", err)
 	}
 	past := time.Now().Add(-time.Hour)
@@ -280,8 +280,8 @@ func TestActivateKeyGivesAPendingKeyItsSecretOnce(t *testing.T) {
 		t.Fatalf("CreateKey: %v", err)
 	}
 	if _, err := st.ActivateKey(ctx, "key_lapsed", "", []byte("hash-lapsed-00000000000000000000"),
-		"keera_sk_lapsed"); !errors.Is(err, ErrKeyLapsed) {
-		t.Errorf("activating an expired key: err = %v, want ErrKeyLapsed", err)
+		"keera_sk_lapsed"); !errors.Is(err, policy.ErrKeyExpired) {
+		t.Errorf("activating an expired key: err = %v, want ErrKeyExpired", err)
 	}
 	if _, err := st.ActivateKey(ctx, "key_nobody", "", []byte("hash-nobody-00000000000000000000"),
 		"keera_sk_nobody"); !errors.Is(err, ErrNotFound) {

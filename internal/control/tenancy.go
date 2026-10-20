@@ -826,11 +826,11 @@ func (s *Server) activateKey(w http.ResponseWriter, r *http.Request, p *authn.Pr
 	secret, hash, prefix := auth.Generate()
 	info, err := s.st.ActivateKey(r.Context(), keyID, strings.TrimSpace(in.Name), hash, prefix)
 	switch {
-	case errors.Is(err, store.ErrKeyRevoked):
+	case errors.Is(err, policy.ErrKeyRevoked):
 		conflict(w, "key_revoked",
 			"that key was revoked, so it cannot be activated; ask for a new one")
 		return
-	case errors.Is(err, store.ErrKeyLapsed):
+	case errors.Is(err, policy.ErrKeyExpired):
 		conflict(w, "key_expired",
 			"that key expired before it was activated; ask for a new one")
 		return
@@ -890,12 +890,12 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	secret, hash, prefix := auth.Generate()
 	next.Prefix = prefix
 	info, err := s.st.RotateKey(r.Context(), oldID, next, hash)
-	if errors.Is(err, store.ErrKeyRevoked) {
+	if errors.Is(err, policy.ErrKeyRevoked) {
 		conflict(w, "key_revoked",
 			"that key was already revoked, so there is nothing to rotate; issue a new one")
 		return
 	}
-	if errors.Is(err, store.ErrKeyPending) {
+	if errors.Is(err, policy.ErrKeyPending) {
 		conflict(w, "key_pending",
 			"that key is not activated yet, so it has no secret to replace; activate it instead")
 		return

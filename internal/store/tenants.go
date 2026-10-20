@@ -610,21 +610,10 @@ func (s *Store) RenameKey(ctx context.Context, id, name string) (old string, err
 	return old, notFound(err)
 }
 
-// ErrKeyRevoked is a key that was already revoked, so there is nothing to
-// rotate.
-var ErrKeyRevoked = errors.New("store: the key was already revoked")
-
-// ErrKeyPending is a key that has no secret yet, so it is activated rather
-// than rotated.
-var ErrKeyPending = errors.New("store: the key is not activated yet")
-
 // ErrKeyActive is a key that was activated already. Its secret was shown
 // then, so a second activation would be a rotation in disguise.
 var ErrKeyActive = errors.New("store: the key is already activated")
 
-// ErrKeyLapsed is a pending key whose expiry passed before it was activated.
-// A secret for it would be refused at once.
-var ErrKeyLapsed = errors.New("store: the key expired before it was activated")
 
 // ActivateKey gives a pending key its secret, and a new name when name is
 // not empty. It returns the key as it now is.
@@ -644,17 +633,18 @@ func (s *Store) ActivateKey(ctx context.Context, id, name string, hash []byte, p
 		return k, err
 	}
 	// Nothing matched: say why, so the caller is told what to do instead.
-	var pending, revoked, lapsed bool
+	// A pending key whose expiry passed would be refused at once.
+	var pending, revoked, expired bool
 	err = s.pool.QueryRow(ctx, `SELECT key_hash IS NULL, revoked_at IS NOT NULL,
 		expires_at IS NOT NULL AND expires_at <= now()
-		FROM api_keys WHERE id = $1`, id).Scan(&pending, &revoked, &lapsed)
+		FROM api_keys WHERE id = $1`, id).Scan(&pending, &revoked, &expired)
 	switch {
 	case err != nil:
 		return KeyInfo{}, notFound(err)
 	case revoked:
-		return KeyInfo{}, ErrKeyRevoked
-	case pending && lapsed:
-		return KeyInfo{}, ErrKeyLapsed
+		return KeyInfo{}, policy.ErrKeyRevoked
+	case pending && expired:
+		return KeyInfo{}, policy.ErrKeyExpired
 	default:
 		return KeyInfo{}, ErrKeyActive
 	}
@@ -675,11 +665,13 @@ func (s *Store) RotateKey(ctx context.Context, oldID string, next KeyInfo, hash 
 		if err != nil {
 			return notFound(err)
 		}
+		// Revoked, there is nothing to rotate. Pending, there is no secret to
+		// replace, so it is activated instead.
 		if old.RevokedAt != nil {
-			return ErrKeyRevoked
+			return policy.ErrKeyRevoked
 		}
 		if old.Pending {
-			return ErrKeyPending
+			return policy.ErrKeyPending
 		}
 		next.OrgID, next.ProjectID, next.UserID, next.Kind = old.OrgID, old.ProjectID, old.UserID, old.Kind
 		if next.Name == "" {

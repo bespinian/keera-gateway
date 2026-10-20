@@ -314,7 +314,8 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, sh shape) 
 		return nil, false
 	case err == nil:
 		return res, true
-	case errors.Is(err, policy.ErrUnknownKey):
+	// A pending key has no secret, so no presented one can be it.
+	case errors.Is(err, policy.ErrUnknownKey), errors.Is(err, policy.ErrKeyPending):
 		sh.writeError(w, http.StatusUnauthorized, "invalid_request_error", "invalid_api_key",
 			"the API key provided is not valid")
 	case errors.Is(err, policy.ErrKeyRevoked):
