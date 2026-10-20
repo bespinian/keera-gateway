@@ -52,7 +52,7 @@ func TestNoTemplateLeavesAPlaceholderBehind(t *testing.T) {
 			"note":   c.NoteText(),
 		} {
 			if strings.Contains(text, "{{") {
-				t.Errorf("%s left a placeholder in:\n%s", c.Key, text)
+				t.Errorf("%s left a placeholder in:\n%s", c.ID, text)
 			}
 		}
 	}
@@ -66,24 +66,24 @@ func TestEveryClientIsCompleteEnoughToRender(t *testing.T) {
 	}
 	seen := map[string]bool{}
 	for _, c := range Clients() {
-		if seen[c.Key] {
-			t.Errorf("two clients share the key %q", c.Key)
+		if seen[c.ID] {
+			t.Errorf("two clients share the key %q", c.ID)
 		}
-		seen[c.Key] = true
-		if c.Key == "" || c.Label == "" || c.About == "" || c.Template == "" || c.Run == "" {
-			t.Errorf("%q is missing a key, label, about, template or run", c.Key)
+		seen[c.ID] = true
+		if c.ID == "" || c.Label == "" || c.About == "" || c.Template == "" || c.Run == "" {
+			t.Errorf("%q is missing a key, label, about, template or run", c.ID)
 		}
 		if !slices.Contains([]string{"json", "toml", "sh", "python"}, c.Lang) {
-			t.Errorf("%s has lang %q, which no renderer highlights", c.Key, c.Lang)
+			t.Errorf("%s has lang %q, which no renderer highlights", c.ID, c.Lang)
 		}
 		// Every block has to name the gateway and the key's models.
 		if !strings.Contains(c.Template, "{{base}}") {
-			t.Errorf("%s's template never uses {{base}}", c.Key)
+			t.Errorf("%s's template never uses {{base}}", c.ID)
 		}
 		lists := strings.Contains(c.Template, "{{models}}") && c.Entry != "" ||
 			strings.Contains(c.Template, "{{claude_env}}")
 		if !lists && !strings.Contains(c.Template, "{{aliases}}") {
-			t.Errorf("%s's template names neither {{models}} nor {{aliases}}", c.Key)
+			t.Errorf("%s's template names neither {{models}} nor {{aliases}}", c.ID)
 		}
 	}
 	// The cURL entry is the one that answers for a client nobody wrote an
@@ -103,7 +103,7 @@ func TestJSONTemplatesRenderToValidJSON(t *testing.T) {
 		rendered := c.Render("https://keera.example.ch", two)
 		var doc map[string]any
 		if err := json.Unmarshal([]byte(rendered), &doc); err != nil {
-			t.Errorf("%s does not render valid JSON: %v\n%s", c.Key, err, rendered)
+			t.Errorf("%s does not render valid JSON: %v\n%s", c.ID, err, rendered)
 		}
 	}
 }
@@ -118,12 +118,12 @@ func TestConfigsReadTheKeyFromTheEnvironment(t *testing.T) {
 			if !strings.Contains(rendered, KeyPlaceholder) ||
 				!strings.Contains(c.RenderKey("https://keera.example.ch", "keera_sk_ab…", one),
 					`"keera_sk_ab…"`) {
-				t.Errorf("%s holds the key but does not show it:\n%s", c.Key, rendered)
+				t.Errorf("%s holds the key but does not show it:\n%s", c.ID, rendered)
 			}
 			continue
 		}
 		if !strings.Contains(rendered, "KEERA_API_KEY") {
-			t.Errorf("%s's config never mentions KEERA_API_KEY:\n%s", c.Key, rendered)
+			t.Errorf("%s's config never mentions KEERA_API_KEY:\n%s", c.ID, rendered)
 		}
 	}
 }
@@ -143,7 +143,7 @@ func TestTOMLTemplatesRenderToTOML(t *testing.T) {
 			case strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]"):
 			case strings.Contains(line, " = "):
 			default:
-				t.Errorf("%s renders a line that is not TOML: %q", c.Key, line)
+				t.Errorf("%s renders a line that is not TOML: %q", c.ID, line)
 			}
 		}
 	}
@@ -272,14 +272,14 @@ func TestFileClientsStateTheSameWindow(t *testing.T) {
 func TestEveryModelOfTheKeyIsConfigured(t *testing.T) {
 	for _, c := range Clients() {
 		rendered := c.Render("https://keera.example.ch", two)
-		if c.Key == "claude-code" {
+		if c.ID == "claude-code" {
 			// Claude Code takes one model and switches with /model, so the
 			// rest are named in what to run.
 			rendered += c.RunText(two)
 		}
 		for _, want := range []string{"keera-code", "auto"} {
 			if !strings.Contains(rendered, want) {
-				t.Errorf("%s's config does not name %s:\n%s", c.Key, want, rendered)
+				t.Errorf("%s's config does not name %s:\n%s", c.ID, want, rendered)
 			}
 		}
 	}
@@ -366,8 +366,8 @@ func TestOnlyOpenCodeStatesAnAnswerLength(t *testing.T) {
 			strings.Contains(rendered, "MAX_OUTPUT_TOKENS") ||
 			strings.Contains(rendered, "max_output_tokens") ||
 			strings.Contains(rendered, `"output"`)
-		if want := c.Key == "opencode"; stated != want {
-			t.Errorf("%s states an answer length: %v, want %v\n%s", c.Key, stated, want, rendered)
+		if want := c.ID == "opencode"; stated != want {
+			t.Errorf("%s states an answer length: %v, want %v\n%s", c.ID, stated, want, rendered)
 		}
 	}
 }
@@ -400,7 +400,7 @@ func TestLimitsFollowTheModelsWindow(t *testing.T) {
 func TestNoClientPinsATemperature(t *testing.T) {
 	for _, c := range Clients() {
 		if strings.Contains(c.Render("https://keera.example.ch", one), "temperature") {
-			t.Errorf("%s's config sets a temperature", c.Key)
+			t.Errorf("%s's config sets a temperature", c.ID)
 		}
 	}
 }
@@ -414,11 +414,11 @@ func TestADisplayNameIsTheModelsName(t *testing.T) {
 		}
 		rendered := c.Render("https://keera.example.ch", named)
 		if !strings.Contains(rendered, `Fast \"and\" cheap`) {
-			t.Errorf("%s does not name the model by its display name:\n%s", c.Key, rendered)
+			t.Errorf("%s does not name the model by its display name:\n%s", c.ID, rendered)
 		}
 		var doc map[string]any
 		if err := json.Unmarshal([]byte(rendered), &doc); err != nil {
-			t.Errorf("%s does not render valid JSON: %v\n%s", c.Key, err, rendered)
+			t.Errorf("%s does not render valid JSON: %v\n%s", c.ID, err, rendered)
 		}
 	}
 }

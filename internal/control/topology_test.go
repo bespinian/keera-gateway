@@ -101,7 +101,7 @@ func TestTheMapDrawsTheCatalogueAndTheTrafficTogether(t *testing.T) {
 	var got struct {
 		Gateway store.Cell `json:"gateway"`
 		Clients []struct {
-			Key      string `json:"key"`
+			Client   string `json:"client"`
 			Label    string `json:"label"`
 			Requests int64  `json:"requests"`
 			Refused  int64  `json:"refused"`
@@ -129,7 +129,7 @@ func TestTheMapDrawsTheCatalogueAndTheTrafficTogether(t *testing.T) {
 	}
 	// Busiest first, so a crowded map draws the ones that matter, each named as
 	// on the Connect screen.
-	if got.Clients[0].Key != "claude-code" || got.Clients[0].Label != "Claude Code" {
+	if got.Clients[0].Client != "claude-code" || got.Clients[0].Label != "Claude Code" {
 		t.Errorf("the first client is %+v, want Claude Code", got.Clients[0])
 	}
 

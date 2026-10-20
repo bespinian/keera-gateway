@@ -379,8 +379,8 @@ func TestSessionsRankByWhatMakesOneWorthOpening(t *testing.T) {
 		if len(got) != 3 {
 			t.Fatalf("%d sessions under %q, want 3", len(got), tc.sort)
 		}
-		if got[0].Key != DerivedSessionKey(tc.want) {
-			t.Errorf("%q puts %q first, want %q", tc.sort, got[0].Key, tc.want)
+		if got[0].SessionKey != DerivedSessionKey(tc.want) {
+			t.Errorf("%q puts %q first, want %q", tc.sort, got[0].SessionKey, tc.want)
 		}
 	}
 
@@ -558,7 +558,7 @@ func TestSessionsStayInsideOneTenantAndNarrowToOneEntity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentSessions: %v", err)
 	}
-	if len(ours) != 1 || ours[0].Key != DerivedSessionKey("ours000000000000") {
+	if len(ours) != 1 || ours[0].SessionKey != DerivedSessionKey("ours000000000000") {
 		t.Fatalf("sessions = %+v, want only this tenant's", ours)
 	}
 
@@ -571,7 +571,7 @@ func TestSessionsStayInsideOneTenantAndNarrowToOneEntity(t *testing.T) {
 		{"another project", AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID, ProjectID: "project_other"}, 0},
 		{"this key", AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID, KeyID: f.keyID}, 1},
 		{"this person", AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID, UserID: "user_1"}, 1},
-		{"one conversation", AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID, Key: DerivedSessionKey("ours000000000000")}, 1},
+		{"one conversation", AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID, SessionKey: DerivedSessionKey("ours000000000000")}, 1},
 		{"only the unhappy ones", AgentSessionQuery{Gap: DefaultSessionGap, OrgID: f.orgID, Outcome: OutcomeUnhappy}, 0},
 	} {
 		got, err := st.AgentSessions(ctx, tc.q)

@@ -101,8 +101,8 @@ func TestClientLabelAgreesWithTheCatalogue(t *testing.T) {
 	// The catalogue configures these and the map names them. Two labels for one
 	// client would read as two clients.
 	for _, c := range Clients() {
-		if got := ClientLabel(c.Key); got != c.Label {
-			t.Errorf("ClientLabel(%q) = %q, but the catalogue calls it %q", c.Key, got, c.Label)
+		if got := ClientLabel(c.ID); got != c.Label {
+			t.Errorf("ClientLabel(%q) = %q, but the catalogue calls it %q", c.ID, got, c.Label)
 		}
 	}
 	if got := ClientLabel("aider"); got != "Aider" {
@@ -132,8 +132,8 @@ func TestEveryCatalogueClientIsFiledUnderOneName(t *testing.T) {
 	// A client the catalogue configures is reported under the catalogue's key,
 	// so the panel's "My clients" and the reports use one name for it.
 	for _, c := range Clients() {
-		if got := Identify(c.Key, ""); got != c.Key {
-			t.Errorf("a client stating %q is filed as %q", c.Key, got)
+		if got := Identify(c.ID, ""); got != c.ID {
+			t.Errorf("a client stating %q is filed as %q", c.ID, got)
 		}
 	}
 }

@@ -195,7 +195,7 @@ request in the task: that column, the first column of `keera failures`, or the
 
 `GET /control/v1/sessions` takes the same filters as the command, and:
 
-- `key`: one conversation
+- `session_key`: one conversation
 - `outcome`: `ok`, `failed`, `refused`, `interrupted` or `unhappy`
 - `status`: the last request's status, such as `402`, or a class, such as `5xx`
 - `sort`: `recent`, `cost`, `tokens`, `requests` or `duration`

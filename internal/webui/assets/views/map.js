@@ -144,7 +144,7 @@ function sceneFrom(data) {
   const clients = fold(
     (data.clients || []).map((c) => ({
       kind: "client",
-      key: c.key,
+      key: c.client,
       label: c.label || "Unidentified client",
       cell: cellOf(c),
       pulse: 0,

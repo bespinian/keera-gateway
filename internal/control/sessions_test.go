@@ -339,7 +339,7 @@ func TestSessionsCSVCarriesTheCostPerTask(t *testing.T) {
 	start := time.Date(2026, 9, 9, 9, 0, 0, 0, time.UTC)
 
 	s.sessionsCSV(w, []store.AgentSession{{
-		ID: 41, Key: store.DerivedSessionKey("aaaaaaaaaaaaaaaa"),
+		ID: 41, SessionKey: store.DerivedSessionKey("aaaaaaaaaaaaaaaa"),
 		StartedAt: start, EndedAt: start.Add(11*time.Minute + 30*time.Second),
 		Requests: 41, OK: 40, Refused: 1, Models: []string{"keera-code", "keera-frontier"},
 		InputTokens: 900, OutputTokens: 100, CostMicros: 1_200_000,

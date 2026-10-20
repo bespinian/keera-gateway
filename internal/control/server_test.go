@@ -496,7 +496,7 @@ func TestConnectServesTheClientCatalogueAndTheGatewayAddress(t *testing.T) {
 	// `keera connect` fills them in on the developer's machine.
 	for _, c := range res.Data {
 		if !strings.Contains(c.Template, "{{base}}") {
-			t.Errorf("%s came back without its {{base}} placeholder", c.Key)
+			t.Errorf("%s came back without its {{base}} placeholder", c.ID)
 		}
 	}
 	// A member configures their own editor, so they may read it too, still
@@ -536,7 +536,7 @@ func TestConnectRenderFillsInEveryClientForTheModels(t *testing.T) {
 	}
 	var res struct {
 		Data []struct {
-			Key, Config, Run string
+			Client, Config, Run string
 		} `json:"data"`
 		Placeholder string `json:"placeholder"`
 	}
@@ -552,9 +552,9 @@ func TestConnectRenderFillsInEveryClientForTheModels(t *testing.T) {
 	}
 	for i, c := range clients {
 		got := res.Data[i]
-		if got.Key != c.Key || got.Config != c.Render("https://keera.example.ch/api", models) ||
+		if got.Client != c.ID || got.Config != c.Render("https://keera.example.ch/api", models) ||
 			got.Run != c.RunFor(models) {
-			t.Errorf("%s rendered differently from keera connect:\n%s", c.Key, got.Config)
+			t.Errorf("%s rendered differently from keera connect:\n%s", c.ID, got.Config)
 		}
 	}
 }

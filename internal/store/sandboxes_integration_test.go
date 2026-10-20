@@ -510,8 +510,8 @@ func TestSandboxUsageBy(t *testing.T) {
 	}
 	r := rows[0]
 	switch {
-	case r.Key != "standard":
-		t.Errorf("key = %q", r.Key)
+	case r.Group != "standard":
+		t.Errorf("key = %q", r.Group)
 	case r.Count != 2:
 		t.Errorf("count = %d", r.Count)
 	case r.Running != 600:
@@ -529,7 +529,7 @@ func TestSandboxUsageBy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SandboxUsageBy(user): %v", err)
 	}
-	if len(byUser) != 1 || byUser[0].Key != "dev@example.ch" {
+	if len(byUser) != 1 || byUser[0].Group != "dev@example.ch" {
 		t.Errorf("by user = %+v", byUser)
 	}
 
@@ -539,7 +539,7 @@ func TestSandboxUsageBy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SandboxUsageBy(all orgs): %v", err)
 	}
-	if len(all) != 1 || all[0].Key != "standard" || all[0].OrgID != f.orgID {
+	if len(all) != 1 || all[0].Group != "standard" || all[0].OrgID != f.orgID {
 		t.Errorf("across orgs = %+v, want the class with its organisation", all)
 	}
 }

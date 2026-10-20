@@ -108,7 +108,7 @@ func ClientLabel(key string) string {
 		}
 	}
 	for _, c := range clients {
-		if c.Key == key {
+		if c.ID == key {
 			return c.Label
 		}
 	}

@@ -295,7 +295,7 @@ function sessionTable(ctx, rows, names, hide, rank) {
       // nearly all are inferred.
       label: "Session",
       shrink: true,
-      sortKey: (a) => a.key,
+      sortKey: (a) => a.session_key,
       cell: (a) =>
         h(
           "div",
@@ -306,7 +306,7 @@ function sessionTable(ctx, rows, names, hide, rank) {
             rowLink(
               ctx,
               "/sessions/" + encodeURIComponent(a.id),
-              h("span", { class: "mono" }, a.key),
+              h("span", { class: "mono" }, a.session_key),
               a.stated
                 ? "The client named this session itself"
                 : "Grouped by a hash of the prompt that opened the session",
@@ -515,7 +515,7 @@ export async function sessionDetailView(ctx) {
   });
   const ran = new Date(s.ended_at) - new Date(s.started_at);
 
-  ctx.setTitle("Session", s.key);
+  ctx.setTitle("Session", s.session_key);
 
   const link = (path, text, title) =>
     h(

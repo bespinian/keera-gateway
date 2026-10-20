@@ -152,8 +152,8 @@ func TestSandboxUsageSpansEveryOrganisationWithoutOrg(t *testing.T) {
 	f := newFakeControl(t, map[string]any{
 		"GET /v1/me": map[string]any{"role": "operator"},
 		"GET /v1/sandbox-usage": map[string]any{"group_by": "class", "data": []map[string]any{
-			{"key": "standard", "org_id": "org_a", "count": 2},
-			{"key": "standard", "org_id": "org_b", "count": 1},
+			{"group": "standard", "org_id": "org_a", "count": 2},
+			{"group": "standard", "org_id": "org_b", "count": 1},
 		}},
 	})
 

@@ -91,9 +91,9 @@ type AgentSession struct {
 	// ID is the id of the session's first request. Sessions have no stored id,
 	// so this is how one is addressed, and a link to it stays stable.
 	ID int64 `json:"id"`
-	// Key is the conversation, as the gateway hashed it. The same key days
+	// SessionKey is the conversation, as the gateway hashed it. The same key days
 	// later is the same conversation resumed or its opening prompt sent again.
-	Key string `json:"key"`
+	SessionKey string `json:"session_key"`
 	// Stated is true when the client named the session itself, rather than it
 	// being inferred. It tells a reader how far to trust the grouping.
 	Stated bool `json:"stated"`
@@ -180,8 +180,8 @@ type AgentSessionQuery struct {
 	// used one model, and applies after the runs are cut. Applied to rows, it
 	// would split a session that used two models into pieces.
 	ReportScope
-	// Key narrows to one conversation.
-	Key string
+	// SessionKey narrows to one conversation.
+	SessionKey string
 	// Holder keeps the list to the sessions of one person's keys, whatever
 	// else is narrowed. It is how a member reads it. Unlike UserID, it also
 	// narrows the filter choices.
@@ -318,19 +318,19 @@ func (q AgentSessionQuery) args() []any {
 		user = q.Holder
 	}
 	return []any{q.OrgID, nullableTime(q.From), nullableTime(q.To), q.Gap.Seconds(),
-		q.Key, q.ProjectID, user, q.KeyID, q.Alias, q.Status, q.StatusClass}
+		q.SessionKey, q.ProjectID, user, q.KeyID, q.Alias, q.Status, q.StatusClass}
 }
 
 func scanAgentSession(r row) (AgentSession, error) {
 	var a AgentSession
-	if err := r.Scan(&a.Key, &a.ID, &a.StartedAt, &a.EndedAt, &a.Requests,
+	if err := r.Scan(&a.SessionKey, &a.ID, &a.StartedAt, &a.EndedAt, &a.Requests,
 		&a.OK, &a.Failed, &a.Refused, &a.Interrupted,
 		&a.InputTokens, &a.OutputTokens, &a.CostMicros, &a.TTFTMedianMS,
 		&a.Models, &a.ProjectID, &a.UserID, &a.KeyID,
 		&a.LastStatus, &a.LastError); err != nil {
 		return AgentSession{}, err
 	}
-	a.Stated = StatedSession(a.Key)
+	a.Stated = StatedSession(a.SessionKey)
 	return a, nil
 }
 
@@ -462,7 +462,7 @@ func (s *Store) AgentSessionAt(ctx context.Context, orgID string, requestID int6
 	// Starting at the session's own start, the first session in ascending
 	// order is this one.
 	sessions, err := s.AgentSessions(ctx, AgentSessionQuery{
-		OrgID: owner, Key: key, From: start, Gap: gap, Sort: sortOldest, Limit: 1,
+		OrgID: owner, SessionKey: key, From: start, Gap: gap, Sort: sortOldest, Limit: 1,
 	})
 	if err != nil {
 		return AgentSession{}, nil, err

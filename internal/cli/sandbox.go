@@ -688,7 +688,7 @@ func printSandboxUsage(w *table, by string, since time.Duration,
 	}
 	w.header(strings.ToUpper(by) + "\tSANDBOXES\tLIVE\tRAN\tCORE-SECONDS")
 	for _, r := range rows {
-		key := dash(r.Key)
+		key := dash(r.Group)
 		if r.OrgID != "" {
 			key += " (" + r.OrgID + ")"
 		}

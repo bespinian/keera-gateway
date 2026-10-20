@@ -92,7 +92,7 @@ func connectCmd(ctx context.Context, args []string) error {
 	if !found {
 		keys := make([]string, 0, len(cat.Data))
 		for _, cl := range cat.Data {
-			keys = append(keys, cl.Key)
+			keys = append(keys, cl.ID)
 		}
 		return fmt.Errorf("no client %q; this deployment can configure: %s",
 			sub, strings.Join(keys, ", "))
@@ -130,7 +130,7 @@ func connectCmd(ctx context.Context, args []string) error {
 
 	if r.asJSON {
 		res := map[string]any{
-			"client": client.Key, "models": aliasesOf(models), "url": gatewayURL,
+			"client": client.ID, "models": aliasesOf(models), "url": gatewayURL,
 			"path":   client.Path,
 			"config": client.RenderKey(gatewayURL, shownKey(own), connectList(models)),
 			"run":    client.RunText(connectList(models)),
@@ -268,7 +268,7 @@ func listConnect(w *table, clients []connect.Client,
 		if where == "" {
 			where = "(a command to run)"
 		}
-		_, _ = fmt.Fprintf(w, "%s\t%s\n", c.Key, where)
+		_, _ = fmt.Fprintf(w, "%s\t%s\n", c.ID, where)
 	}
 	_, _ = fmt.Fprintf(w, "\nThis gateway is at %s.\n", gateway)
 	if len(chat) == 0 {
@@ -279,7 +279,7 @@ func listConnect(w *table, clients []connect.Client,
 	}
 	if len(clients) > 0 {
 		_, _ = fmt.Fprintf(w, "\nThe configuration for one of them, with every model your "+
-			"key may use:\n  keera connect %s\n", clients[0].Key)
+			"key may use:\n  keera connect %s\n", clients[0].ID)
 	}
 }
 

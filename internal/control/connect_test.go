@@ -27,8 +27,8 @@ func TestGroupClientsFoldsKeysUnderTheirClient(t *testing.T) {
 		t.Fatalf("got %d clients, want 2: %+v", len(got), got)
 	}
 	cc := got[0]
-	if cc.Key != "claude-code" || cc.Label != "Claude Code" {
-		t.Errorf("first client = %q (%q), want Claude Code", cc.Key, cc.Label)
+	if cc.Client != "claude-code" || cc.Label != "Claude Code" {
+		t.Errorf("first client = %q (%q), want Claude Code", cc.Client, cc.Label)
 	}
 	if cc.Requests != 5 || !cc.LastUsed.Equal(now) {
 		t.Errorf("claude-code: %d requests, last %v; want 5 and the newest", cc.Requests, cc.LastUsed)
@@ -36,8 +36,8 @@ func TestGroupClientsFoldsKeysUnderTheirClient(t *testing.T) {
 	if len(cc.Keys) != 2 || cc.Keys[0].Name != "laptop" || cc.Keys[1].Name != "desktop" {
 		t.Errorf("claude-code keys = %+v, want laptop then desktop", cc.Keys)
 	}
-	if got[1].Key != "" || got[1].Label != "Unidentified" {
-		t.Errorf("a client that did not name itself is %q (%q)", got[1].Key, got[1].Label)
+	if got[1].Client != "" || got[1].Label != "Unidentified" {
+		t.Errorf("a client that did not name itself is %q (%q)", got[1].Client, got[1].Label)
 	}
 }
 

@@ -20,8 +20,9 @@ import (
 
 // Client is one coding agent that can be pointed at the gateway.
 type Client struct {
-	// Key names it on the wire and as the argument to `keera connect <key>`.
-	Key   string `json:"key"`
+	// ID names it on the wire, where a request calls it its client, and as
+	// the argument to `keera connect <client>`.
+	ID    string `json:"client"`
 	Label string `json:"label"`
 	// About says in one line what the client is, for the panel's picker.
 	About string `json:"about"`
@@ -204,7 +205,7 @@ func Title(alias string) string {
 // deployment sent.
 func Find(clients []Client, key string) (Client, bool) {
 	for _, c := range clients {
-		if c.Key == key {
+		if c.ID == key {
 			return c, true
 		}
 	}
@@ -225,7 +226,7 @@ func Clients() []Client {
 // other OpenAI-compatible client needs.
 var clients = []Client{
 	{
-		Key:   "pi",
+		ID:    "pi",
 		Label: "Pi",
 		About: "A minimal coding agent for the terminal.",
 		Path:  "~/.pi/agent/models.json",
@@ -251,7 +252,7 @@ var clients = []Client{
 		Run: "Run `pi` in your project, then `/model`, and pick one of the models above.",
 	},
 	{
-		Key:   "opencode",
+		ID:    "opencode",
 		Label: "OpenCode",
 		About: "An open-source coding agent for the terminal.",
 		Path:  "~/.config/opencode/opencode.json",
@@ -283,7 +284,7 @@ var clients = []Client{
 		Run: "Run `opencode` in your project, then `/models`, and pick one of the models under Keera.",
 	},
 	{
-		Key:   "claude-code",
+		ID:    "claude-code",
 		Label: "Claude Code",
 		About: "Anthropic's coding agent, over the Messages API.",
 		// The same settings `keera connect claude-code` writes. They hold the
@@ -313,7 +314,7 @@ var clients = []Client{
 			"key it uses.",
 	},
 	{
-		Key:   "codex",
+		ID:    "codex",
 		Label: "Codex",
 		About: "OpenAI's coding agent, over the Responses API.",
 		Path:  "~/.codex/config.toml",
@@ -334,7 +335,7 @@ wire_api = "responses"`,
 			"starts with another of the models above.",
 	},
 	{
-		Key:   "python",
+		ID:    "python",
 		Label: "Python",
 		About: "Your own code, with OpenAI's Python library.",
 		Path:  "hello.py",
@@ -356,7 +357,7 @@ print(reply.choices[0].message.content)`,
 		Run:  "Run `python hello.py`. The answer is printed.",
 	},
 	{
-		Key:   "curl",
+		ID:    "curl",
 		Label: "cURL",
 		About: "A first request from the shell, over the OpenAI API.",
 		// No file: it is one command.

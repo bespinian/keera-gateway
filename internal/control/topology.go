@@ -26,8 +26,8 @@ import (
 // whatever called in the window, and a client that stopped calling drops off
 // the map.
 type mapClient struct {
-	Key   string `json:"key"`
-	Label string `json:"label"`
+	Client string `json:"client"`
+	Label  string `json:"label"`
 	store.Cell
 }
 
@@ -89,11 +89,11 @@ func (s *Server) trafficMap(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	clients := make([]mapClient, 0, len(rep.Clients))
 	for key, cell := range rep.Clients {
 		clients = append(clients, mapClient{
-			Key: key, Label: connect.ClientLabel(key), Cell: cell,
+			Client: key, Label: connect.ClientLabel(key), Cell: cell,
 		})
 	}
 	slices.SortFunc(clients, func(a, b mapClient) int {
-		return cmp.Or(cmp.Compare(b.Requests, a.Requests), cmp.Compare(a.Key, b.Key))
+		return cmp.Or(cmp.Compare(b.Requests, a.Requests), cmp.Compare(a.Client, b.Client))
 	})
 
 	flows := slices.DeleteFunc(rep.Flows, func(f store.Flow) bool { return !drawn[f.Alias] })

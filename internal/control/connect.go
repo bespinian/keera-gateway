@@ -35,14 +35,14 @@ func (s *Server) renderConnect(w http.ResponseWriter, r *http.Request, _ *authn.
 		return
 	}
 	type rendered struct {
-		Key    string `json:"key"`
+		Client string `json:"client"`
 		Config string `json:"config"`
 		Run    string `json:"run"`
 	}
 	base := s.gatewayURL(r)
 	out := []rendered{}
 	for _, c := range connect.Clients() {
-		out = append(out, rendered{Key: c.Key, Config: c.Render(base, in.Models), Run: c.RunFor(in.Models)})
+		out = append(out, rendered{Client: c.ID, Config: c.Render(base, in.Models), Run: c.RunFor(in.Models)})
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"data": out, "placeholder": connect.KeyPlaceholder,
@@ -59,7 +59,7 @@ type clientKey struct {
 
 // connectedClient is one client that called with the caller's keys.
 type connectedClient struct {
-	Key      string      `json:"key"`
+	Client   string      `json:"client"`
 	Label    string      `json:"label"`
 	Requests int64       `json:"requests"`
 	LastUsed time.Time   `json:"last_used_at"`
@@ -107,7 +107,7 @@ func groupClients(uses []store.ClientUse, keyNames map[string]string) []connecte
 			i = len(out)
 			index[u.Client] = i
 			out = append(out, connectedClient{
-				Key: u.Client, Label: connect.ClientLabel(u.Client), Keys: []clientKey{},
+				Client: u.Client, Label: connect.ClientLabel(u.Client), Keys: []clientKey{},
 			})
 		}
 		c := &out[i]

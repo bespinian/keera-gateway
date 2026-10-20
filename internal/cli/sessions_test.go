@@ -17,7 +17,7 @@ func TestSessionAndFailureRowsNameWhatKeeraSessionTakes(t *testing.T) {
 	var buf bytes.Buffer
 	w := newTable(&buf)
 	printSessions(w, sessionsResponse{Data: []store.AgentSession{{
-		ID: 4711, Key: "pU6F5haDO6VBv8V-H", Requests: 3,
+		ID: 4711, SessionKey: "pU6F5haDO6VBv8V-H", Requests: 3,
 	}}}, time.Hour)
 	_ = w.Flush()
 	if !strings.Contains(buf.String(), "4711") || strings.Contains(buf.String(), "pU6F5haDO6VBv8V-H") {

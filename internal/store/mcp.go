@@ -176,7 +176,7 @@ func (s *Store) SessionToolCalls(ctx context.Context, orgID string, a AgentSessi
 		  AND CASE WHEN $2 THEN session_key = $3 ELSE key_id = $4 END
 		  AND ts >= $5 AND ts <= $6
 		ORDER BY ts, id LIMIT 1000`,
-		orgID, a.Stated, a.Key, a.KeyID, a.StartedAt, a.EndedAt)
+		orgID, a.Stated, a.SessionKey, a.KeyID, a.StartedAt, a.EndedAt)
 }
 
 // ToolSummary is one tool's calls inside a window, added up.

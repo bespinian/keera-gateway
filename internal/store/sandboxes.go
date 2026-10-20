@@ -473,9 +473,9 @@ func (s *Store) StopAccounting(ctx context.Context, id string, now time.Time) er
 
 // SandboxUsage is what one group of sandboxes came to over a window.
 type SandboxUsage struct {
-	// Key is the group: a project id, a user's address or a class name, as the
+	// Group is a project id, a user's address or a class name, as the
 	// caller grouped by.
-	Key string `json:"key"`
+	Group string `json:"group"`
 	// OrgID is set only when a report across every organisation groups by
 	// class: two organisations can each have a class of the same name.
 	OrgID string `json:"org_id,omitempty"`
@@ -540,6 +540,6 @@ func (s *Store) SandboxUsageBy(ctx context.Context, orgID, groupBy string, from,
 
 func scanSandboxUsage(r row) (SandboxUsage, error) {
 	var u SandboxUsage
-	err := r.Scan(&u.Key, &u.OrgID, &u.Count, &u.Running, &u.CoreSeconds, &u.Live)
+	err := r.Scan(&u.Group, &u.OrgID, &u.Count, &u.Running, &u.CoreSeconds, &u.Live)
 	return u, err
 }

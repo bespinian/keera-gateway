@@ -124,7 +124,7 @@ export async function clientsView(ctx) {
         cell: (c) =>
           h(
             "span",
-            { class: c.key ? null : "muted" },
+            { class: c.client ? null : "muted" },
             h("strong", {}, c.label),
           ),
       },
@@ -256,7 +256,7 @@ async function addClient(ctx, catalogue, keys, button, secret = null) {
       return;
     }
     if (turn !== drawing) return;
-    const block = (res.data || []).find((b) => b.key === state.client.key);
+    const block = (res.data || []).find((b) => b.client === state.client.client);
     steps.replaceChildren(
       block ? instructions(ctx, state, block, res.placeholder) : "",
     );
@@ -293,15 +293,15 @@ async function addClient(ctx, catalogue, keys, button, secret = null) {
 
   const picker = modeTiles(
     catalogue.map((c) => ({
-      value: c.key,
+      value: c.client,
       icon: icons.terminal,
-      mark: clientMarks[c.key],
+      mark: clientMarks[c.client],
       name: c.label,
       what: c.about,
     })),
     null,
     (value) => {
-      state.client = catalogue.find((c) => c.key === value);
+      state.client = catalogue.find((c) => c.client === value);
       setup.hidden = false;
       redraw();
       picker.change.focus();

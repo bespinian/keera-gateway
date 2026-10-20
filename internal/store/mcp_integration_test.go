@@ -175,7 +175,7 @@ func TestToolCallsAreWrittenAndRead(t *testing.T) {
 		t.Errorf("calls matched by time = %+v", byTime)
 	}
 	named, _ := st.SessionToolCalls(ctx, "org_1", AgentSession{
-		Stated: true, Key: StatedSessionKeyFor("key_1", "t"), KeyID: "key_1",
+		Stated: true, SessionKey: StatedSessionKeyFor("key_1", "t"), KeyID: "key_1",
 		StartedAt: now.Add(-time.Second), EndedAt: now,
 	})
 	if len(named) != 1 || named[0].Outcome != ToolFailed {
@@ -184,7 +184,7 @@ func TestToolCallsAreWrittenAndRead(t *testing.T) {
 	// The same id stated again after the idle gap is a new session, and the
 	// old one's calls are not part of it.
 	later, _ := st.SessionToolCalls(ctx, "org_1", AgentSession{
-		Stated: true, Key: StatedSessionKeyFor("key_1", "t"), KeyID: "key_1",
+		Stated: true, SessionKey: StatedSessionKeyFor("key_1", "t"), KeyID: "key_1",
 		StartedAt: now.Add(time.Hour), EndedAt: now.Add(2 * time.Hour),
 	})
 	if len(later) != 0 {
