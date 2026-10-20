@@ -54,7 +54,7 @@ type clientKey struct {
 	ID       string    `json:"id"`
 	Name     string    `json:"name"`
 	Requests int64     `json:"requests"`
-	LastUsed time.Time `json:"last_used"`
+	LastUsed time.Time `json:"last_used_at"`
 }
 
 // connectedClient is one client that called with the caller's keys.
@@ -62,7 +62,7 @@ type connectedClient struct {
 	Key      string      `json:"key"`
 	Label    string      `json:"label"`
 	Requests int64       `json:"requests"`
-	LastUsed time.Time   `json:"last_used"`
+	LastUsed time.Time   `json:"last_used_at"`
 	Keys     []clientKey `json:"keys"`
 }
 

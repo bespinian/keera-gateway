@@ -138,7 +138,7 @@ export async function clientsView(ctx) {
               "/keys/" + encodeURIComponent(k.id),
               k.name || k.id,
               `${num(k.requests)} ${plural(k.requests, "request")}, ` +
-                `last ${ago(k.last_used)}`,
+                `last ${ago(k.last_used_at)}`,
             ),
           ]),
       },
@@ -153,10 +153,10 @@ export async function clientsView(ctx) {
       {
         label: "Last used",
         shrink: true,
-        sortKey: (c) => c.last_used,
+        sortKey: (c) => c.last_used_at,
         sortDir: "desc",
         cell: (c) =>
-          h("span", { title: dateTime(c.last_used) }, ago(c.last_used)),
+          h("span", { title: dateTime(c.last_used_at) }, ago(c.last_used_at)),
       },
     ],
     used,

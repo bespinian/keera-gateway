@@ -153,7 +153,7 @@ type ClientUse struct {
 	Client   string    `json:"client"`
 	KeyID    string    `json:"key_id"`
 	Requests int64     `json:"requests"`
-	LastUsed time.Time `json:"last_used"`
+	LastUsed time.Time `json:"last_used_at"`
 }
 
 // ClientUses lists which clients called with one person's keys in a window,
