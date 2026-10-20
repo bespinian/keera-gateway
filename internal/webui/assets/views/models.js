@@ -36,6 +36,7 @@ import {
   dash,
   formModal,
   banner,
+  confirm,
 } from "../ui.js";
 
 // usersOfModel names the filters and routers that use a model, for the
@@ -56,6 +57,34 @@ async function usersOfModel(m) {
     text += ` The filters ${f.join(", ")} run on it and will refuse every request they cover.`;
   if (r.length) text += ` The routers ${r.join(", ")} will lose it.`;
   return text;
+}
+
+// deleteWarning is what deleting a model costs: the same warnings
+// `keera model delete` gives.
+async function deleteWarning(m) {
+  return (
+    "Clients that still use this model will be refused, and " +
+    "guardrails that allow only this model stop allowing anything." +
+    (await usersOfModel(m)) +
+    (m.has_api_key ? " Its stored credential is removed." : "") +
+    " Usage history and the audit log are kept."
+  );
+}
+
+// deleteModel asks as the list does, for the model's own screen, which leaves
+// through done once the model is gone.
+export async function deleteModel(ctx, m, done = () => ctx.reload()) {
+  confirm({
+    title: `Delete ${m.alias}?`,
+    body: await deleteWarning(m),
+    confirmLabel: "Delete model",
+    danger: true,
+    onConfirm: async () => {
+      await api.deleteModel(m.org_id, m.alias);
+      toast(`${m.alias} deleted`, "good");
+      done();
+    },
+  });
 }
 
 function canAddModel(ctx) {
@@ -228,13 +257,7 @@ export async function modelsView(ctx) {
             editTitle: "What this model serves, and on what",
             onEdit: () => editModel(ctx, m, providers),
             deleteTitle: "Delete this model",
-            // The same warnings `keera model delete` gives.
-            body: async () =>
-              "Clients that still use this model will be refused, and " +
-              "guardrails that allow only this model stop allowing anything." +
-              (await usersOfModel(m)) +
-              (m.has_api_key ? " Its stored credential is removed." : "") +
-              " Usage history and the audit log are kept.",
+            body: () => deleteWarning(m),
             confirmLabel: "Delete model",
             remove: () => api.deleteModel(m.org_id, m.alias),
           });

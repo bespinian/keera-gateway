@@ -45,7 +45,12 @@ import { requestLog } from "./requestlog.js";
 import { setOutcome, namesFrom } from "./logfilters.js";
 import { sessionLog } from "./sessions.js";
 import { modelsCell, summarise } from "./guardrails.js";
-import { openModel, checkModel, servedName } from "./models.js";
+import {
+  openModel,
+  checkModel,
+  deleteModel,
+  servedName,
+} from "./models.js";
 import {
   activateButton,
   canActivate,
@@ -434,6 +439,13 @@ export async function modelDetailView(ctx) {
         "refused with a 404. Its history is below.",
     actions: model
       ? [
+          canEdit
+            ? busyButton(
+                { title: "Send a test request to this model's backend" },
+                "Check",
+                () => checkModel(model),
+              )
+            : null,
           h(
             "button",
             {
@@ -449,10 +461,16 @@ export async function modelDetailView(ctx) {
               : [icon(icons.models), "View model"],
           ),
           canEdit
-            ? busyButton(
-                { title: "Send a test request to this model's backend" },
-                "Check",
-                () => checkModel(model),
+            ? h(
+                "button",
+                {
+                  class: "btn btn-danger",
+                  title: "Delete this model",
+                  onClick: () =>
+                    deleteModel(ctx, model, () => ctx.navigate("/models")),
+                },
+                icon(icons.trash),
+                "Delete",
               )
             : null,
         ]
