@@ -64,7 +64,7 @@ sandbox classes new organisations start with, and the
 | ------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `KEERA_ADDR`                    | `:8080`             | The one listener.                                                                                                   |
 | `KEERA_UI`                      | `true`              | Serve the control panel at `/`.                                                                                     |
-| `KEERA_MAX_DB_CONNS`            | `16`                | Postgres pool size.                                                                                                 |
+| `KEERA_MAX_DB_CONNS`            | `16`                | Postgres pool size per replica. At least `4`.                                                                       |
 | `KEERA_LOG_LEVEL`               | `info`              | `debug`, `info`, `warn` or `error`.                                                                                 |
 | `KEERA_LOG_FORMAT`              | `text`              | `text` or `json`.                                                                                                   |
 | `KEERA_MAX_BODY_BYTES`          | `33554432` (32 MiB) | Largest request body, in bytes. Coding agents send large contexts.                                                  |

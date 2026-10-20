@@ -241,6 +241,16 @@ func TestRetentionIsRefusedBelowADay(t *testing.T) {
 	}
 }
 
+func TestADatabasePoolTooSmallToServeIsRefused(t *testing.T) {
+	// Two connections are kept for good, so a pool of two serves nothing.
+	if _, err := loadWith(t, valid(map[string]string{"KEERA_MAX_DB_CONNS": "2"})); err == nil {
+		t.Error("a pool of two connections was accepted")
+	}
+	if _, err := loadWith(t, valid(map[string]string{"KEERA_MAX_DB_CONNS": "4"})); err != nil {
+		t.Errorf("a pool of four connections was refused: %v", err)
+	}
+}
+
 func TestASessionGapBelowAMinuteIsTheRequestLog(t *testing.T) {
 	// Sessions group requests into tasks. Under a minute every request is its
 	// own task, which is just the request log.

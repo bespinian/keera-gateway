@@ -196,7 +196,7 @@ func (c Config) servedOverHTTPS() bool {
 
 func (c Config) validate() error {
 	for _, check := range []func() error{c.validateCredentials, c.validateLogging,
-		c.validateRetention, c.validateSessionGap, c.Sandbox.validate, c.validateOIDC} {
+		c.validateDBConns, c.validateRetention, c.validateSessionGap, c.Sandbox.validate, c.validateOIDC} {
 		if err := check(); err != nil {
 			return err
 		}
@@ -247,6 +247,19 @@ func (c Config) validateLogging() error {
 	case "text", "json":
 	default:
 		return fmt.Errorf("KEERA_LOG_FORMAT is %q; it is 'text' or 'json'", c.LogFormat)
+	}
+	return nil
+}
+
+// minDBConns is the smallest pool that can serve. Each replica keeps two
+// connections for good, to hear the control plane's changes and the panel's
+// live events, and a guardrail save holds a third while it checks.
+const minDBConns = 4
+
+func (c Config) validateDBConns() error {
+	if c.MaxDBConns < minDBConns {
+		return fmt.Errorf("KEERA_MAX_DB_CONNS is %d; each replica keeps two connections "+
+			"open for good, so the smallest pool that can serve requests is %d", c.MaxDBConns, minDBConns)
 	}
 	return nil
 }
