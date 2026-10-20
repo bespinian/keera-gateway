@@ -297,7 +297,7 @@ func TestARevokedKeyStopsWorkingWhenTheControlPlaneSaysSo(t *testing.T) {
 	}
 
 	s.reject(testKey("sk-live"), policy.ErrKeyRevoked)
-	r.Forget(AnyChange)
+	r.Forget(anyChange)
 
 	if _, err := r.Resolve(t.Context(), testKey("sk-live")); !errors.Is(err, policy.ErrKeyRevoked) {
 		t.Errorf("error = %v, want the key to be refused as revoked", err)
@@ -322,7 +322,7 @@ func TestANotifyFromTheControlPlaneDropsEveryCachedKey(t *testing.T) {
 	before := s.calls()
 
 	s.reject(testKey("sk-live"), policy.ErrKeyRevoked)
-	s.announce(AnyChange)
+	s.announce(anyChange)
 
 	if _, err := r.Resolve(ctx, testKey("sk-live")); !errors.Is(err, policy.ErrKeyRevoked) {
 		t.Errorf("error = %v, want the key refused after the announcement", err)
@@ -494,9 +494,9 @@ func TestAFailedOrgReloadIsTriedAgain(t *testing.T) {
 
 func TestAChangeOfUnknownShapeReloadsEverything(t *testing.T) {
 	// A replica of a newer version may announce a change this one does not
-	// know, and an older one sends AnyChange for all of them.
+	// know, and an older one sends anyChange for all of them.
 	r := newRegistry(t, newSource(), Options{})
-	for _, c := range []Change{AnyChange, "org:", "project:prj_1"} {
+	for _, c := range []Change{anyChange, "org:", "project:prj_1"} {
 		r.want(OrgChange("org_1"))
 		r.want(c)
 		if !r.pending.all {
@@ -751,7 +751,7 @@ func TestSweepForgetsWhatIsExpiredAndWhatIsStale(t *testing.T) {
 	if n := r2.cached(); n != 1 {
 		t.Fatalf("cached %d entries, want 1", n)
 	}
-	r2.Forget(AnyChange)
+	r2.Forget(anyChange)
 	r2.Sweep()
 	if n := r2.cached(); n != 0 {
 		t.Errorf("cached %d entries after invalidating and sweeping, want 0", n)

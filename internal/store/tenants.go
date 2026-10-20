@@ -37,9 +37,9 @@ type Project struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-// DefaultProjectName is what the project an organisation is created with is
+// defaultProjectName is what the project an organisation is created with is
 // called. It is an ordinary project, and its name can be changed.
-const DefaultProjectName = "default"
+const defaultProjectName = "default"
 
 // User is a person, identified either by Keera Gateway or by the customer's IdP.
 type User struct {
@@ -170,7 +170,7 @@ func createOrg(ctx context.Context, tx pgx.Tx, o Org, tmpl OrgTemplate) (Org, er
 	}
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO projects (id, org_id, name, description) VALUES ($1,$2,$3,$4)`,
-		keeraid.New("project"), id, DefaultProjectName,
+		keeraid.New("project"), id, defaultProjectName,
 		"The default project of "+o.Name); err != nil {
 		return o, err
 	}

@@ -19,8 +19,8 @@ const prefixLen = len(Prefix) + 6
 
 const scheme = "bearer"
 
-// ErrMalformed is returned for anything that cannot be a Keera Gateway key.
-var ErrMalformed = errors.New("auth: malformed key")
+// errMalformed is returned for anything that cannot be a Keera Gateway key.
+var errMalformed = errors.New("auth: malformed key")
 
 // Generate returns a new key with the values stored for it: its SHA-256 and its
 // display prefix. The key itself is never stored.
@@ -78,14 +78,14 @@ func Hash(key string) []byte {
 func FromHeader(h string) (string, error) {
 	h = strings.TrimSpace(h)
 	if h == "" {
-		return "", ErrMalformed
+		return "", errMalformed
 	}
 	// Strip the scheme only when something follows it, so a header of
 	// "Bearer " is refused rather than read as the token "Bearer".
 	if len(h) >= len(scheme) && strings.EqualFold(h[:len(scheme)], scheme) {
 		rest := h[len(scheme):]
 		if rest == "" {
-			return "", ErrMalformed
+			return "", errMalformed
 		}
 		if rest[0] == ' ' || rest[0] == '\t' {
 			h = strings.TrimSpace(rest)

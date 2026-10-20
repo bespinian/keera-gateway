@@ -432,9 +432,9 @@ func TestAKeyWithoutAProjectGoesInTheOldestOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(projects) != 1 || projects[0].Name != DefaultProjectName ||
+	if len(projects) != 1 || projects[0].Name != defaultProjectName ||
 		projects[0].Description != "The default project of Example Bank" {
-		t.Fatalf("a new organisation's projects = %+v, want one called %q", projects, DefaultProjectName)
+		t.Fatalf("a new organisation's projects = %+v, want one called %q", projects, defaultProjectName)
 	}
 	first := projects[0].ID
 	if _, err := st.CreateProject(ctx, Project{ID: "project_zz", OrgID: "org_1", Name: "Payments"}); err != nil {

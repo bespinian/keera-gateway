@@ -258,15 +258,15 @@ func CheckModel(m *policy.Model, priced bool) error {
 			return err
 		}
 	}
-	return CheckSubscription(*m)
+	return checkSubscription(*m)
 }
 
-// CheckSubscription says what is wrong with a subscription model, or nil when
+// checkSubscription says what is wrong with a subscription model, or nil when
 // nothing is, or when m is not one.
 //
 // Each caller's Claude sign-in is sent to the model's backend. So the backend
 // must be Anthropic's own API: any other address would collect those sign-ins.
-func CheckSubscription(m policy.Model) error {
+func checkSubscription(m policy.Model) error {
 	if !m.Subscription {
 		return nil
 	}

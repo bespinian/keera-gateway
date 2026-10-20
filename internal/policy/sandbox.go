@@ -236,7 +236,7 @@ type ResolvedSandbox struct {
 	AllowedRepos []string `json:"allowed_repos"`
 }
 
-func (r ResolvedSandbox) AllowsClass(name string) bool {
+func (r ResolvedSandbox) allowsClass(name string) bool {
 	return r.SandboxClasses == nil || slices.Contains(r.SandboxClasses, name)
 }
 
@@ -249,7 +249,7 @@ func (r ResolvedSandbox) MaxTTL() time.Duration {
 // when it may not. The refused developer reads it, so it names the ceiling and
 // what was asked for.
 func (r ResolvedSandbox) Admits(c SandboxClass) error {
-	if !r.AllowsClass(c.Name) {
+	if !r.allowsClass(c.Name) {
 		return fmt.Errorf("the sandbox class %q is not allowed here; this scope may use %s",
 			c.Name, strings.Join(r.SandboxClasses, ", "))
 	}
@@ -264,8 +264,8 @@ func (r ResolvedSandbox) Admits(c SandboxClass) error {
 	return nil
 }
 
-// AnyRepo in AllowedRepos allows every repository the forge credential reaches.
-const AnyRepo = "*"
+// anyRepo in AllowedRepos allows every repository the forge credential reaches.
+const anyRepo = "*"
 
 // AdmitsRepo reports whether a sandbox here may check out the repository at
 // path on the forge, and why not when it may not.
@@ -288,7 +288,7 @@ func (r ResolvedSandbox) AdmitsRepo(path string) error {
 
 // ValidRepoPattern reports whether s can be an AllowedRepos entry.
 func ValidRepoPattern(s string) bool {
-	if s == AnyRepo {
+	if s == anyRepo {
 		return true
 	}
 	parts := strings.SplitSeq(s, "/")
@@ -304,7 +304,7 @@ func ValidRepoPattern(s string) bool {
 // repoCovers reports whether pattern allows path: the same path, a path under
 // it, or anything for "*". Forges ignore case in paths, so this does too.
 func repoCovers(pattern, path string) bool {
-	if pattern == AnyRepo {
+	if pattern == anyRepo {
 		return true
 	}
 	pattern, path = strings.ToLower(pattern), strings.ToLower(path)

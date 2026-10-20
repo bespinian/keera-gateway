@@ -161,11 +161,11 @@ func TestResolveSandboxNarrowsFromNothing(t *testing.T) {
 
 func TestResolvedSandboxAllowsClass(t *testing.T) {
 	// nil is every class, as a nil AllowedModels is every model.
-	if !(ResolvedSandbox{}).AllowsClass("anything") {
+	if !(ResolvedSandbox{}).allowsClass("anything") {
 		t.Error("a nil allow-list should permit every class")
 	}
 	r := ResolvedSandbox{SandboxClasses: []string{}}
-	if r.AllowsClass("anything") {
+	if r.allowsClass("anything") {
 		t.Error("an empty allow-list should permit nothing")
 	}
 }
@@ -229,7 +229,7 @@ func TestAllowedReposNarrowAndDefaultToNothing(t *testing.T) {
 	if err := (ResolvedSandbox{}).AdmitsRepo("acme/app"); err == nil {
 		t.Error("a scope with no list checked out a repository")
 	}
-	anyProject := &Limits{AllowedRepos: []string{AnyRepo}}
+	anyProject := &Limits{AllowedRepos: []string{anyRepo}}
 	if err := Resolve(Key{OrgID: "o", ProjectID: "t"}, nil, anyProject, nil).Sandbox.AdmitsRepo("bankb/core"); err == nil {
 		t.Error("a project granted itself repositories in an organisation with no guardrail")
 	}
@@ -244,15 +244,15 @@ func TestAllowedReposNarrowAndDefaultToNothing(t *testing.T) {
 		{[]string{"acme"}, nil, "acme-evil/app", false},
 		{[]string{"acme"}, nil, "acmeapp", false},
 		{[]string{"group/sub"}, nil, "group/sub/deep/app", true},
-		{[]string{AnyRepo}, nil, "anyone/anything", true},
+		{[]string{anyRepo}, nil, "anyone/anything", true},
 		// A project can narrow the organisation's list, never widen it.
 		{[]string{"acme"}, []string{"acme/app"}, "acme/app", true},
 		{[]string{"acme"}, []string{"acme/app"}, "acme/other", false},
-		{[]string{"acme"}, []string{AnyRepo}, "bankb/core", false},
+		{[]string{"acme"}, []string{anyRepo}, "bankb/core", false},
 		{[]string{"acme"}, []string{"bankb"}, "bankb/core", false},
-		{[]string{AnyRepo}, []string{"acme"}, "bankb/core", false},
+		{[]string{anyRepo}, []string{"acme"}, "bankb/core", false},
 		// Without an organisation list, a project cannot grant itself one.
-		{nil, []string{AnyRepo}, "bankb/core", false},
+		{nil, []string{anyRepo}, "bankb/core", false},
 		{nil, []string{"acme"}, "acme/app", false},
 	} {
 		org := &Limits{AllowedRepos: tc.org}

@@ -337,9 +337,9 @@ func (f Filter) ReadsWith() string {
 // segment of every request, and a longer list is too long to read.
 const MaxFilterRules = 64
 
-// MaxFilterPatternLen bounds one rule's expression. RE2 cannot backtrack
+// maxFilterPatternLen bounds one rule's expression. RE2 cannot backtrack
 // badly, so this is only about keeping rules readable.
-const MaxFilterPatternLen = 512
+const maxFilterPatternLen = 512
 
 // FilterRule is one rule of a pattern filter: an expression, and what happens
 // to a segment it matches. A rule either replaces or refuses, never both.
@@ -368,9 +368,9 @@ func (r FilterRule) Valid() error {
 	switch {
 	case strings.TrimSpace(r.Pattern) == "":
 		return errors.New("a rule needs an expression to match")
-	case len(r.Pattern) > MaxFilterPatternLen:
+	case len(r.Pattern) > maxFilterPatternLen:
 		return fmt.Errorf("the expression is %d bytes; the limit is %d",
-			len(r.Pattern), MaxFilterPatternLen)
+			len(r.Pattern), maxFilterPatternLen)
 	case r.Refuse && r.Replace != "":
 		return fmt.Errorf("the rule %q both replaces and refuses; a rule does one or the "+
 			"other, because a credential redacted out of a request that is then dropped "+
@@ -718,7 +718,7 @@ type Resolved struct {
 	Sandbox ResolvedSandbox
 }
 
-func (r *Resolved) AllowsModel(alias string) bool {
+func (r *Resolved) allowsModel(alias string) bool {
 	return r.AllowedModels == nil || slices.Contains(r.AllowedModels, alias)
 }
 
@@ -726,7 +726,7 @@ func (r *Resolved) AllowsModel(alias string) bool {
 // guardrails allow it. A subscription model takes only a subscription key,
 // because only that key's requests carry the caller's sign-in.
 func (r *Resolved) MayUse(m Model) bool {
-	return r.Key.Subscription() == m.Subscription && r.AllowsModel(m.Alias)
+	return r.Key.Subscription() == m.Subscription && r.allowsModel(m.Alias)
 }
 
 // MayRoute reports whether the key may name the router alias. The allow-list
@@ -734,7 +734,7 @@ func (r *Resolved) MayUse(m Model) bool {
 // sends. A subscription key reaches no router, which would place it on models
 // the organisation pays for.
 func (r *Resolved) MayRoute(alias string) bool {
-	return r.AllowsModel(alias) && !r.Key.Subscription()
+	return r.allowsModel(alias) && !r.Key.Subscription()
 }
 
 // Resolve combines the guardrails of a key's org, project and the key itself.

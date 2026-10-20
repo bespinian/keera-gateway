@@ -110,15 +110,15 @@ func TestResolveSkipsProjectScopeForAKeyWithoutOne(t *testing.T) {
 
 func TestAllowsModel(t *testing.T) {
 	unrestricted := &Resolved{}
-	if !unrestricted.AllowsModel("anything") {
+	if !unrestricted.allowsModel("anything") {
 		t.Error("a nil allow-list must mean every model, not none")
 	}
 	restricted := &Resolved{AllowedModels: []string{"keera-code"}}
-	if !restricted.AllowsModel("keera-code") || restricted.AllowsModel("keera-premium") {
+	if !restricted.allowsModel("keera-code") || restricted.allowsModel("keera-premium") {
 		t.Error("an allow-list must admit exactly what it lists")
 	}
 	empty := &Resolved{AllowedModels: []string{}}
-	if empty.AllowsModel("keera-code") {
+	if empty.allowsModel("keera-code") {
 		t.Error("an empty allow-list must admit nothing")
 	}
 }

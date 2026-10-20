@@ -91,13 +91,13 @@ type Source interface {
 }
 
 // Change is what a policy notify carries: what changed, so each replica drops
-// no more than it must. AnyChange, and anything this version does not know,
+// no more than it must. anyChange, and anything this version does not know,
 // means anything may have.
 type Change string
 
-// AnyChange drops every cached key and reloads models, filters, routers and
+// anyChange drops every cached key and reloads models, filters, routers and
 // MCP servers.
-const AnyChange Change = ""
+const anyChange Change = ""
 
 const (
 	keyChange = "key:"
@@ -209,7 +209,7 @@ func (r *Registry) keepPolicy(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			r.want(AnyChange)
+			r.want(anyChange)
 		case <-r.reload:
 		}
 		if err := r.refreshPending(ctx); err != nil && ctx.Err() == nil {
@@ -271,7 +271,7 @@ func (r *Registry) refreshPending(ctx context.Context) error {
 	if p.all {
 		err := r.refreshAll(ctx)
 		if err != nil {
-			r.want(AnyChange)
+			r.want(anyChange)
 		}
 		return err
 	}

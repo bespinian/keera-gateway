@@ -131,7 +131,7 @@ func TestAStatedSessionKeyIsMarkedAsOne(t *testing.T) {
 	now := time.Now().UTC()
 	if err := st.WriteEvents(ctx, []Event{{
 		TS: now.Add(-time.Minute), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-code",
-		SessionKey: StatedSessionKey("bbbbbbbbbbbbbbbb"), Status: 200, CostMicros: 100,
+		SessionKey: statedSessionKey("bbbbbbbbbbbbbbbb"), Status: 200, CostMicros: 100,
 	}}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}

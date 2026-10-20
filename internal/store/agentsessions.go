@@ -32,9 +32,9 @@ const (
 	derivedPrefix = "p" // derived from the conversation's opening prompt
 )
 
-// StatedSessionKey builds the key for a session the client named, from a hash
+// statedSessionKey builds the key for a session the client named, from a hash
 // already computed.
-func StatedSessionKey(hash string) string { return statedPrefix + hash }
+func statedSessionKey(hash string) string { return statedPrefix + hash }
 
 // DerivedSessionKey builds the key for a session derived from the opening
 // prompt, from a hash already computed.
@@ -79,7 +79,7 @@ const (
 // StatedSessionKeyFor is the key that appears on the usage rows of every
 // request made with keyID that names session stated in a session header.
 func StatedSessionKeyFor(keyID, stated string) string {
-	return StatedSessionKey(SessionHash(keyID, SessionKindStated, []byte(stated)))
+	return statedSessionKey(SessionHash(keyID, SessionKindStated, []byte(stated)))
 }
 
 // StatedSession reports whether the client named this session itself.

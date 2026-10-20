@@ -25,7 +25,7 @@ func TestFilterRuleValid(t *testing.T) {
 			FilterRule{Pattern: `x`, Replace: "y", Reason: "because"},
 			"carries a reason and does not refuse"},
 		{"an expression longer than the limit",
-			FilterRule{Pattern: strings.Repeat("a", MaxFilterPatternLen+1), Replace: "x"},
+			FilterRule{Pattern: strings.Repeat("a", maxFilterPatternLen+1), Replace: "x"},
 			"the limit is"},
 		{"a reason longer than the limit",
 			FilterRule{Pattern: `x`, Refuse: true,
