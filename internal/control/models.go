@@ -140,7 +140,7 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 		return
 	}
 	if m.Subscription && !s.opts.ClaudeSubscriptions {
-		badRequest(w, subscriptionsOff)
+		switchedOff(w, "subscriptions_disabled", subscriptionsOff)
 		return
 	}
 	if m.Subscription && credential != "" {

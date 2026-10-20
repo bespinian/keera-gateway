@@ -763,8 +763,8 @@ func TestASubscriptionKeyAlwaysBelongsToSomebody(t *testing.T) {
 			strings.NewReader(`{}`)).WithContext(tn.ctx)
 		r.SetPathValue("id", got.ID)
 		handler(w, r, carol)
-		if w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), `"key":`) {
-			t.Errorf("%s with subscriptions off: %d %s; want 400 and no secret", verb, w.Code, w.Body)
+		if w.Code != http.StatusNotImplemented || strings.Contains(w.Body.String(), `"key":`) {
+			t.Errorf("%s with subscriptions off: %d %s; want 501 and no secret", verb, w.Code, w.Body)
 		}
 	}
 }

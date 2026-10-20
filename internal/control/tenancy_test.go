@@ -409,8 +409,8 @@ func TestNoSubscriptionKeyWhileSubscriptionsAreOff(t *testing.T) {
 	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
 	w := invoke(s.createKey, admin("org_1"), http.MethodPost, "/v1/keys",
 		`{"org_id":"org_1","user_id":"user_1","kind":"subscription"}`)
-	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "KEERA_CLAUDE_SUBSCRIPTIONS") {
-		t.Errorf("status = %d %s; want 400 naming the setting", w.Code, w.Body)
+	if w.Code != http.StatusNotImplemented || !strings.Contains(w.Body.String(), "KEERA_CLAUDE_SUBSCRIPTIONS") {
+		t.Errorf("status = %d %s; want 501 naming the setting", w.Code, w.Body)
 	}
 }
 

@@ -245,8 +245,8 @@ func TestNoSubscriptionModelWhileSubscriptionsAreOff(t *testing.T) {
 	w := callModel(s.putModel, admin("org_1"), http.MethodPut, "claude", "?org_id=org_1",
 		`{"kind":"chat","provider":"anthropic","backends":["https://api.anthropic.com/v1"],
 		"backend_model":"claude-opus-5-5","subscription":true,"enabled":true}`)
-	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "KEERA_CLAUDE_SUBSCRIPTIONS") {
-		t.Errorf("status = %d %s; want 400 naming the setting", w.Code, w.Body)
+	if w.Code != http.StatusNotImplemented || !strings.Contains(w.Body.String(), "KEERA_CLAUDE_SUBSCRIPTIONS") {
+		t.Errorf("status = %d %s; want 501 naming the setting", w.Code, w.Body)
 	}
 }
 

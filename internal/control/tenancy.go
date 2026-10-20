@@ -725,7 +725,7 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		return
 	}
 	if in.Kind == policy.KeySubscription && !s.opts.ClaudeSubscriptions {
-		badRequest(w, subscriptionsOff)
+		switchedOff(w, "subscriptions_disabled", subscriptionsOff)
 		return
 	}
 	in.Name = strings.TrimSpace(in.Name)
@@ -821,7 +821,7 @@ func (s *Server) activateKey(w http.ResponseWriter, r *http.Request, p *authn.Pr
 		return
 	}
 	if o.Kind == policy.KeySubscription && !s.opts.ClaudeSubscriptions {
-		badRequest(w, subscriptionsOff)
+		switchedOff(w, "subscriptions_disabled", subscriptionsOff)
 		return
 	}
 	secret, hash, prefix := auth.Generate()
@@ -876,7 +876,7 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	}
 	owner := o.OrgID
 	if o.Kind == policy.KeySubscription && !s.opts.ClaudeSubscriptions {
-		badRequest(w, subscriptionsOff)
+		switchedOff(w, "subscriptions_disabled", subscriptionsOff)
 		return
 	}
 	if (in.ExpiresIn != nil || in.ExpiresAt != nil) && !p.CanAdminOrg(owner) {
