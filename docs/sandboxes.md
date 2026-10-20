@@ -610,10 +610,11 @@ pins every package under Pi. To update, change the version and run
 The gateway configures Pi, not the image. The manager renders
 `~/.pi/agent/models.json` and the entrypoint writes it.
 
-**It lists every model the sandbox's own key may reach** - the organisation's
-allow-list narrowed by the project's - not just one model the deployment picked.
-Listing models the key is refused for would end prompts in refusals. Listing
-only one would hide the rest. Only chat models are listed.
+**It lists every model and router the sandbox's own key may reach** - the
+organisation's allow-list narrowed by the project's - not just one model the
+deployment picked. Listing models the key is refused for would end prompts in
+refusals. Listing only one would hide the rest. Only chat models are listed,
+and the routers come after them.
 
 **The key is not in that file.** The file names `${KEERA_API_KEY}`, which Pi
 expands from the environment.
@@ -625,9 +626,9 @@ can read a sandbox's volume can read both, until they are revoked: when the
 sandbox expires or ends, or its owner is disabled
 ([GitHub tokens last a little longer](#code-in-work-out)).
 
-Three things must match what `keera connect pi` prints for a laptop: the
-provider name, the API shape, and the credential being a reference, not a
-literal. A test checks them against that template.
+The file is rendered from the same template `keera connect pi` prints for a
+laptop, so Pi names itself and its models the same way in both. An agent's
+sandbox adds its session header.
 
 A developer who edits their own `models.json` keeps it: the entrypoint rewrites
 the file only while it still matches what the gateway last wrote.

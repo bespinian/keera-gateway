@@ -112,8 +112,23 @@ func TestASandboxIsNotOfferedASubscriptionModel(t *testing.T) {
 		{Alias: "embed", Kind: policy.KindEmbedding, Enabled: true},
 		{Alias: "off", Kind: policy.KindChat},
 	}
-	got := chatModelsFor(resolved, catalogue)
+	got := chatModelsFor(resolved, catalogue, nil)
 	if len(got) != 1 || got[0].Alias != "keera-code" {
 		t.Errorf("offered %+v, want only keera-code", got)
+	}
+}
+
+// A router is a model to a client, so the agent is offered the ones the
+// guardrails allow, after the models.
+func TestASandboxIsOfferedItsRouters(t *testing.T) {
+	resolved := policy.Resolve(policy.Key{OrgID: "org_1", Kind: policy.KeyStandard},
+		&policy.Limits{AllowedModels: []string{"keera-code", "auto"}}, nil, nil)
+	catalogue := []policy.Model{
+		{Alias: "keera-code", DisplayName: "Keera Code", Kind: policy.KindChat, Enabled: true},
+	}
+	routers := []policy.Router{{Alias: "auto"}, {Alias: "other"}}
+	got := chatModelsFor(resolved, catalogue, routers)
+	if len(got) != 2 || got[0].Name != "Keera Code" || got[1].Alias != "auto" {
+		t.Errorf("offered %+v, want keera-code by its name, then auto", got)
 	}
 }

@@ -1254,82 +1254,56 @@ func piSettings(alias string) string {
 	return string(raw)
 }
 
-// The fields of a sandbox's Pi configuration that must match what
-// `keera connect pi` prints for a laptop. A test compares them with that
-// template.
-const (
-	piProvider = "keera"
-	piAPI      = "openai-completions"
-	// piAPIKeyRef is expanded by Pi from the environment, so the file keeps
-	// working when a resumed sandbox gets a new key.
-	piAPIKeyRef = "${KEERA_API_KEY}"
-)
+// piProvider is the provider the connect catalogue's Pi template names, and
+// so the one Pi's settings make the default. A test compares the two.
+const piProvider = "keera"
 
-type piFile struct {
-	Providers map[string]piProviderConfig `json:"providers"`
-}
-
-type piProviderConfig struct {
-	BaseURL string            `json:"baseUrl"`
-	API     string            `json:"api"`
-	APIKey  string            `json:"apiKey"`
-	Headers map[string]string `json:"headers,omitempty"`
-	Models  []piModel         `json:"models"`
-}
-
-type piModel struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	ContextWindow int    `json:"contextWindow"`
-}
-
-// piConfig renders Pi's models.json for a sandbox: one entry per model the key
-// may reach, so /model offers exactly what the guardrail allows.
+// piConfig renders Pi's models.json for a sandbox from the template
+// `keera connect pi` prints for a laptop: one entry per model and router the
+// key may reach, so /model offers exactly what the guardrail allows.
 //
 // A session id, given for an agent's sandbox, is sent with every request, so
 // the task is one session in `keera session list`.
 //
 // It is empty with no base URL or no models: no configuration is better than
 // a wrong one.
-func piConfig(base string, models []policy.Model, session string) string {
-	if base == "" || len(models) == 0 {
+func piConfig(base string, models []connect.Model, session string) string {
+	pi, ok := connect.Find(connect.Clients(), "pi")
+	if base == "" || len(models) == 0 || !ok {
 		return ""
 	}
-	entries := make([]piModel, 0, len(models))
-	for _, mod := range models {
-		// The window the gateway enforces, so Pi does not assume a bigger one.
-		window, _ := connect.Limits(mod.MaxContext)
-		entries = append(entries, piModel{
-			ID: mod.Alias, Name: connect.Title(mod.Alias), ContextWindow: window,
-		})
+	raw := pi.Render(base, models)
+	if session == "" {
+		return raw
 	}
-	var headers map[string]string
-	if session != "" {
-		headers = map[string]string{httpx.SessionHeader: session}
+	var file struct {
+		Providers map[string]map[string]any `json:"providers"`
 	}
-	raw, err := json.MarshalIndent(piFile{Providers: map[string]piProviderConfig{
-		piProvider: {
-			BaseURL: base + "/v1",
-			API:     piAPI,
-			APIKey:  piAPIKeyRef,
-			Headers: headers,
-			Models:  entries,
-		},
-	}}, "", "  ")
+	if json.Unmarshal([]byte(raw), &file) != nil || file.Providers[piProvider] == nil {
+		return ""
+	}
+	provider := file.Providers[piProvider]
+	headers, _ := provider["headers"].(map[string]any)
+	if headers == nil {
+		headers = map[string]any{}
+	}
+	headers[httpx.SessionHeader] = session
+	provider["headers"] = headers
+	out, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return ""
 	}
-	return string(raw)
+	return string(out)
 }
 
-// reachableModels is every enabled chat model this sandbox's key may use, in
-// catalogue order.
+// reachableModels is every enabled chat model and router this sandbox's key
+// may use, models first and in catalogue order.
 //
 // It resolves the same allow-list the inference path enforces (the
 // organisation's, narrowed by the project's), so the sandbox offers only models
 // that will answer. Embedding models are left out: a coding agent cannot use
 // them.
-func (m *Manager) reachableModels(ctx context.Context, req CreateRequest) []policy.Model {
+func (m *Manager) reachableModels(ctx context.Context, req CreateRequest) []connect.Model {
 	var failed error
 	limits := func(scope policy.ScopeType, id string) *policy.Limits {
 		if id == "" {
@@ -1365,16 +1339,30 @@ func (m *Manager) reachableModels(ctx context.Context, req CreateRequest) []poli
 			"error", err)
 		return nil
 	}
-	return chatModelsFor(resolved, catalogue)
+	routers, err := m.st.ListRouters(ctx, req.OrgID)
+	if err != nil {
+		m.log.Warn("sandbox: reading the routers for the agent configuration failed",
+			"error", err)
+		return nil
+	}
+	return chatModelsFor(resolved, catalogue, routers)
 }
 
-func chatModelsFor(resolved *policy.Resolved, catalogue []policy.Model) []policy.Model {
-	out := make([]policy.Model, 0, len(catalogue))
+func chatModelsFor(resolved *policy.Resolved, catalogue []policy.Model,
+	routers []policy.Router,
+) []connect.Model {
+	out := make([]connect.Model, 0, len(catalogue)+len(routers))
 	for _, mod := range catalogue {
 		if !mod.Enabled || mod.Kind != policy.KindChat || !resolved.MayUse(mod) {
 			continue
 		}
-		out = append(out, mod)
+		out = append(out, connect.Model{Alias: mod.Alias, Name: mod.DisplayName,
+			MaxContext: mod.MaxContext, BackendModel: mod.BackendModel, Provider: mod.Provider})
+	}
+	for _, rt := range routers {
+		if resolved.MayRoute(rt.Alias) {
+			out = append(out, connect.Model{Alias: rt.Alias})
+		}
 	}
 	return out
 }
