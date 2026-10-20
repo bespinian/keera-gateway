@@ -374,6 +374,10 @@ func filterUnavailable(alias, why string) *refusal {
 	}
 }
 
+// codeFilterRefused is the code of a filter's refusal, as against a filter
+// that could not run.
+const codeFilterRefused = "filter_refused"
+
 // filterRefused is the refusal for a filter that read a request and would not
 // let it go.
 //
@@ -397,7 +401,7 @@ func filterRefused(f policy.Filter, reason string) *refusal {
 	}
 	return &refusal{
 		status: http.StatusForbidden,
-		typ:    "permission_error", code: "filter_refused",
+		typ:    "permission_error", code: codeFilterRefused,
 		msg:    msg + ". Nothing was sent to the model",
 		advise: true,
 	}
@@ -561,7 +565,7 @@ func (s *Server) askGuard(ctx context.Context, m policy.Model, q guardQuestion, 
 	unreported := func() guardAnswer {
 		var a guardAnswer
 		if m.PlatformKey {
-			a.micros, a.bills = answerCost(m, unreportedTokens(len(payload), q.outputTokens))
+			a.micros, a.bills = answerCost(m, mostTokens(len(payload), q.outputTokens))
 		}
 		return a
 	}

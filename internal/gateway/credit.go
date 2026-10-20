@@ -75,23 +75,23 @@ func (s *Server) keyModel(org, alias string) (policy.Model, bool) {
 	return m, ok && m.PlatformKey
 }
 
-// unreportedTokens is what a call on the deployment's key is billed when its
-// usage record never came, though the provider may have charged for it: an
-// answer too large to read, or one that took longer than the gateway waits.
-// It is billed all it may have used: its whole body as prompt and its whole
-// output ceiling as answer. That errs high, so losing the record is never a
-// way to pay less.
-func unreportedTokens(bodyBytes, outputCeiling int) policy.Tokens {
+// mostTokens is all a call may use: its whole body as prompt and its whole
+// output ceiling as answer. It is what a request holds of the credit, and what
+// a call on the deployment's key is billed when its usage record never came,
+// though the provider may have charged for it: an answer too large to read, or
+// one that took longer than the gateway waits. That errs high, so losing the
+// record is never a way to pay less.
+func mostTokens(bodyBytes, outputCeiling int) policy.Tokens {
 	return policy.Tokens{Input: bodyBytes / bytesPerToken, Output: outputCeiling}
 }
 
 // billUnreported bills a request on the deployment's key that reached the
-// provider and came back without a usage record. See unreportedTokens.
+// provider and came back without a usage record. See mostTokens.
 func (s *Server) billUnreported(c *call, b *body) {
 	if !c.model.PlatformKey || c.ev.InputTokens+c.ev.OutputTokens > 0 {
 		return
 	}
-	t := unreportedTokens(c.received, c.outputTokens(c.sent(b)))
+	t := mostTokens(c.received, c.outputTokens(c.sent(b)))
 	c.ev.InputTokens, c.ev.OutputTokens, c.ev.Estimated = t.Input, t.Output, true
 	s.log.Warn("a request on the deployment's key came back without a usage record; "+
 		"it is billed the most it may have used", "model", c.alias,
@@ -139,10 +139,11 @@ const mostOutputTokens = 10_000_000
 // body by each filter on the key. It errs high, and is given back when the
 // request has been charged.
 func (s *Server) creditHold(c *call, b *body) int64 {
-	in, out := c.received/bytesPerToken, c.outputTokens(b)
+	t := mostTokens(c.received, c.outputTokens(b))
+	in := t.Input
 	var most int64
 	for _, m := range s.keyAnswerers(c) {
-		if line, ok := m.Bill(policy.Tokens{Input: in, Output: out}); ok {
+		if line, ok := m.Bill(t); ok {
 			most = max(most, line.CreditMicros)
 		}
 	}

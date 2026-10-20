@@ -54,11 +54,11 @@ func (s *Server) refuse(c *call, ref refusal) {
 // closeEarly records a request that ended before a model answered it. The row
 // carries what the router and the filters spent, so no early end drops what
 // they already charged to the budgets.
-func (s *Server) closeEarly(c *call, ev store.Event, step, metricAlias string) {
+func (s *Server) closeEarly(c *call, ev store.Event, note, metricAlias string) {
 	ev.Latency = time.Since(c.tr.start)
 	ev.CostMicros = c.hookMicros()
 	ev.Bills = c.hookBills()
-	ev.Spans = c.tr.steps(step)
+	ev.Spans = c.tr.steps(note)
 	s.record(ev)
 	s.metrics.Observe(metricAlias, ev.OrgID, ev.Status, ev.Latency.Seconds(), 0)
 }
@@ -117,7 +117,7 @@ func (s *Server) advise(msg string) string {
 // never sent. Outer scopes come first, and requests before tokens, so the
 // limit reported is the one an administrator expects to bind first.
 //
-// It only decides. The refusal is written by refuse, like every other one.
+// It only decides. The refusal is written by refuse.
 func (s *Server) checkRates(res *policy.Resolved, now time.Time) (refusal, bool) {
 	type check struct {
 		scope policy.Scope
@@ -174,44 +174,49 @@ func (s *Server) limitHeaders(w http.ResponseWriter, res *policy.Resolved, now t
 }
 
 func (s *Server) budgetHeaders(h http.Header, res *policy.Resolved, now time.Time) {
-	tightest, left := policy.Scope{}, int64(-1)
-	for _, sc := range res.Scopes {
+	sc, left, ok := tightest(res.Scopes, func(sc policy.Scope) (int64, bool) {
 		if sc.BudgetMicros <= 0 {
-			continue
+			return 0, false
 		}
-		remaining := max(sc.BudgetMicros-s.budgets.Spent(sc.Type, sc.ID, sc.Period, now), 0)
-		if left < 0 || remaining < left {
-			tightest, left = sc, remaining
-		}
-	}
-	if left < 0 {
+		return max(sc.BudgetMicros-s.budgets.Spent(sc.Type, sc.ID, sc.Period, now), 0), true
+	})
+	if !ok {
 		return
 	}
-	h.Set("X-Keera-Budget-Scope", string(tightest.Type))
-	h.Set("X-Keera-Budget-Limit", policy.FormatMicros(tightest.BudgetMicros))
+	h.Set("X-Keera-Budget-Scope", string(sc.Type))
+	h.Set("X-Keera-Budget-Limit", policy.FormatMicros(sc.BudgetMicros))
 	h.Set("X-Keera-Budget-Remaining", policy.FormatMicros(left))
-	h.Set("X-Keera-Budget-Reset", tightest.Period.Next(now).Format(time.RFC3339))
+	h.Set("X-Keera-Budget-Reset", sc.Period.Next(now).Format(time.RFC3339))
 }
 
 // rateHeaders uses the OpenAI header names, so clients that already read them
 // need nothing new.
 func (s *Server) rateHeaders(h http.Header, res *policy.Resolved, now time.Time) {
-	tightest, left := policy.Scope{}, -1
-	for _, sc := range res.Scopes {
+	sc, left, ok := tightest(res.Scopes, func(sc policy.Scope) (int, bool) {
 		if sc.RPM <= 0 {
-			continue
+			return 0, false
 		}
-		remaining := s.limiter.Remaining(bucketKey(sc, "rpm"), sc.RPM, now)
-		if left < 0 || remaining < left {
-			tightest, left = sc, remaining
-		}
-	}
-	if left < 0 {
+		return s.limiter.Remaining(bucketKey(sc, "rpm"), sc.RPM, now), true
+	})
+	if !ok {
 		return
 	}
-	h.Set("X-RateLimit-Limit-Requests", strconv.Itoa(tightest.RPM))
+	h.Set("X-RateLimit-Limit-Requests", strconv.Itoa(sc.RPM))
 	h.Set("X-RateLimit-Remaining-Requests", strconv.Itoa(left))
-	h.Set("X-Keera-RateLimit-Scope", string(tightest.Type))
+	h.Set("X-Keera-RateLimit-Scope", string(sc.Type))
+}
+
+// tightest is the scope with the least left of one limit, among the scopes
+// that set it. left says how much a scope has left, or false if it sets none.
+func tightest[N int | int64](scopes []policy.Scope,
+	left func(policy.Scope) (N, bool),
+) (best policy.Scope, least N, found bool) {
+	for _, sc := range scopes {
+		if n, ok := left(sc); ok && (!found || n < least) {
+			best, least, found = sc, n, true
+		}
+	}
+	return best, least, found
 }
 
 // bucketKey names one scope's bucket for one kind of rate limit.

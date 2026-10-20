@@ -14,8 +14,8 @@ import (
 // so it tells what is connected, never who is allowed.
 
 // ClientHeader is where a client may state its own name. It wins over the
-// User-Agent, because a tool built on an HTTP library looks like that library:
-// OpenCode through the AI SDK looks like Node.
+// User-Agent, because a tool built on an HTTP library looks like that library,
+// or sends none at all, as Pi does.
 const ClientHeader = "X-Keera-Client"
 
 // maxClientName bounds the stored name, since the client chooses it.

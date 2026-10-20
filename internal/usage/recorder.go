@@ -13,7 +13,8 @@ import (
 
 // Options tunes the batching.
 type Options struct {
-	// Buffer is how many events may be queued before writers start blocking.
+	// Buffer is how many events may be queued before writers start blocking,
+	// in each of the two queues: billed events and the rest.
 	Buffer int
 	// BatchSize is the largest batch sent in one round trip.
 	BatchSize int

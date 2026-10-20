@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
@@ -129,7 +130,7 @@ func (s *Server) checkChat(ctx context.Context, m policy.Model, p Probe) Probe {
 		return p
 	}
 	defer func() { _ = resp.Body.Close() }()
-	p.Streamed = strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream")
+	p.Streamed = httpx.MediaType(resp.Header.Get("Content-Type")) == "text/event-stream"
 
 	r := &probeReply{}
 	if p.Streamed {

@@ -751,7 +751,7 @@ func (s *Server) answer(c *call, b *body) {
 	resp := fw.resp
 
 	c.ev.Status = resp.StatusCode
-	streaming := c.stream && strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream")
+	streaming := c.stream && httpx.MediaType(resp.Header.Get("Content-Type")) == "text/event-stream"
 	copyResponseHeaders(c.w, resp, c.alias, streaming)
 	s.limitHeaders(c.w, c.res, c.now)
 	if c.model.Subscription {

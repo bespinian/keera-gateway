@@ -36,10 +36,7 @@ func AcceptsGzip(header string) bool {
 // text/event-stream is excluded: a compressor's buffer would hold back the live
 // request log.
 func compressibleType(ct string) bool {
-	if i := strings.IndexByte(ct, ';'); i >= 0 {
-		ct = ct[:i]
-	}
-	switch ct = strings.TrimSpace(ct); ct {
+	switch ct = MediaType(ct); ct {
 	case "application/json", "image/svg+xml":
 		return true
 	case "text/event-stream":

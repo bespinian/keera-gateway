@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"runtime/debug"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/id"
@@ -81,6 +82,15 @@ type APIError struct {
 	Message string `json:"message"`
 	Type    string `json:"type"`
 	Code    string `json:"code,omitempty"`
+}
+
+// MediaType is a Content-Type without its parameters, in lower case, since
+// media types compare without regard to case.
+func MediaType(ct string) string {
+	if i := strings.IndexByte(ct, ';'); i >= 0 {
+		ct = ct[:i]
+	}
+	return strings.ToLower(strings.TrimSpace(ct))
 }
 
 // Flag reads a boolean query parameter. Only "1" counts, so every switch on

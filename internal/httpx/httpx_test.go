@@ -126,3 +126,18 @@ func TestTheClientsRequestIDIsLoggedBesideOurs(t *testing.T) {
 		t.Errorf("X-Request-Id = %q, want the ingress's id kept", got)
 	}
 }
+
+// Media types compare without regard to case or parameters, so a server that
+// answers Application/JSON is read as JSON.
+func TestMediaType(t *testing.T) {
+	for in, want := range map[string]string{
+		"application/json":                 "application/json",
+		"Application/JSON; charset=utf-8":  "application/json",
+		" text/event-stream ;charset=utf8": "text/event-stream",
+		"":                                 "",
+	} {
+		if got := MediaType(in); got != want {
+			t.Errorf("MediaType(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

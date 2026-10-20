@@ -478,10 +478,10 @@ func (x *mcpExchange) toolCall(msg *rpcMessage) bool {
 		return false
 	}
 
-	held, ref, ok := x.admit(len(args))
+	held, why := x.admit(len(args))
 	x.held += held
-	if !ok {
-		x.toolFailed(p, msg.ID, store.ToolDenied, ref.msg)
+	if why != "" {
+		x.toolFailed(p, msg.ID, store.ToolDenied, why)
 		return false
 	}
 
@@ -495,7 +495,7 @@ func (x *mcpExchange) toolCall(msg *rpcMessage) bool {
 			// A refusal is the tool's answer, so the model reads why and can
 			// carry on, as it would after any failed tool.
 			outcome := store.ToolRefused
-			if ref.code != "filter_refused" {
+			if ref.code != codeFilterRefused {
 				outcome = store.ToolNoResult
 			}
 			x.toolFailed(p, msg.ID, outcome, ref.msg)
@@ -562,27 +562,28 @@ func addStrings(d *treeDoc, v any) {
 // admit holds a tool call to the key's rate limits, as a model request is. A
 // call costs nothing unless filters read it, so only then does a budget stop
 // it. Filters on the deployment's key hold the most they may cost, as a
-// request's do. The refusal is a failed tool result, so the model reads why.
-func (x *mcpExchange) admit(argBytes int) (int64, refusal, bool) {
+// request's do. It returns why a call is refused, or "", for a failed tool
+// result, so the model reads why.
+func (x *mcpExchange) admit(argBytes int) (held int64, why string) {
 	now := time.Now()
 	if ref, ok := x.s.checkRates(x.res, now); !ok {
-		return 0, ref, false
+		return 0, ref.msg
 	}
 	if len(x.res.Filters) == 0 {
-		return 0, refusal{}, true
+		return 0, ""
 	}
 	if err := x.s.budgets.Allow(x.res.Scopes, now); err != nil {
-		return 0, refusal{msg: err.Error()}, false
+		return 0, err.Error()
 	}
 	if !x.s.filtersOnKey(x.res.Key.OrgID, x.res.Filters) {
-		return 0, refusal{}, true
+		return 0, ""
 	}
 	held, err := x.s.budgets.HoldCredit(x.res.Key.OrgID,
 		x.s.filtersHold(x.res.Key.OrgID, x.res.Filters, argBytes/bytesPerToken))
 	if err != nil {
-		return 0, refusal{msg: err.Error()}, false
+		return 0, err.Error()
 	}
-	return held, refusal{}, true
+	return held, ""
 }
 
 // toolFailed answers a tool call with a result that tells the model the call
@@ -631,14 +632,14 @@ func (x *mcpExchange) relay(resp *http.Response) {
 		x.w.Header().Set("Mcp-Session-Id", id)
 	}
 
-	switch {
-	case strings.HasPrefix(ct, "text/event-stream"):
+	switch httpx.MediaType(ct) {
+	case "text/event-stream":
 		streamHeaders(x.w.Header())
 		x.w.WriteHeader(status)
 		flusher := http.NewResponseController(x.w)
 		_, _ = pipeNative(x.w, func() { _ = flusher.Flush() }, resp.Body, mcpEvents{x},
 			x.s.opts.MaxResponseBytes)
-	case strings.HasPrefix(ct, "application/json"):
+	case "application/json":
 		raw, err := readCapped(resp.Body, x.s.opts.MaxResponseBytes)
 		if err != nil {
 			// Cut JSON would reach the client as the server's own answer.

@@ -297,11 +297,7 @@ func streamHeaders(h http.Header) {
 // panel's session cookie, so anything that is not JSON or an event stream is
 // sent as JSON.
 func forwardableContentType(ct string) string {
-	media := ct
-	if i := strings.IndexByte(media, ';'); i >= 0 {
-		media = media[:i]
-	}
-	switch strings.ToLower(strings.TrimSpace(media)) {
+	switch httpx.MediaType(ct) {
 	case "application/json", "text/event-stream":
 		return ct
 	default:

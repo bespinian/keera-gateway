@@ -55,8 +55,8 @@ type Limiter interface {
 	// are paid this way, because the cost is only known once the request is
 	// over. Take is not used.
 	ChargeAll(reqs []ratelimit.Requirement, n float64, now time.Time)
-	// Remaining and Retry feed the response headers on every request, so they
-	// must be cheap.
+	// Remaining feeds the response headers on every request, so it must be
+	// cheap. Retry is asked only for a refused request.
 	Remaining(key string, perMinute int, now time.Time) int
 	Retry(key string, perMinute int, now time.Time) time.Duration
 }
