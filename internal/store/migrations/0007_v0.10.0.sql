@@ -23,37 +23,35 @@ ALTER TABLE signups ADD COLUMN name text NOT NULL DEFAULT '';
 -- key. requests counts every request; refused (4xx) and failed (5xx) are
 -- part of it.
 CREATE TABLE usage_daily (
-    day                 date NOT NULL,
-    org_id              text NOT NULL,
-    key_id              text NOT NULL,
-    alias               text NOT NULL,
-    client              text NOT NULL,
-    project_id          text NOT NULL,
-    user_id             text NOT NULL,
-    requests            bigint NOT NULL DEFAULT 0,
-    refused             bigint NOT NULL DEFAULT 0,
-    failed              bigint NOT NULL DEFAULT 0,
-    input_tokens        bigint NOT NULL DEFAULT 0,
-    output_tokens       bigint NOT NULL DEFAULT 0,
-    cached_input_tokens bigint NOT NULL DEFAULT 0,
-    cache_write_tokens  bigint NOT NULL DEFAULT 0,
-    cost_micros         bigint NOT NULL DEFAULT 0,
-    list_cost_micros    bigint NOT NULL DEFAULT 0,
-    last_at             timestamptz NOT NULL,
+    day              date NOT NULL,
+    org_id           text NOT NULL,
+    key_id           text NOT NULL,
+    alias            text NOT NULL,
+    client           text NOT NULL,
+    project_id       text NOT NULL,
+    user_id          text NOT NULL,
+    requests         bigint NOT NULL DEFAULT 0,
+    refused          bigint NOT NULL DEFAULT 0,
+    failed           bigint NOT NULL DEFAULT 0,
+    input_tokens     bigint NOT NULL DEFAULT 0,
+    output_tokens    bigint NOT NULL DEFAULT 0,
+    cost_micros      bigint NOT NULL DEFAULT 0,
+    list_cost_micros bigint NOT NULL DEFAULT 0,
+    last_at          timestamptz NOT NULL,
     PRIMARY KEY (org_id, day, key_id, alias, client, project_id, user_id)
 ) WITH (fillfactor = 80); -- room for the upserts to update rows in place
 
 -- Fill the totals from the request log that is still there. It runs before
 -- the changes below, so their locks are held only briefly.
 INSERT INTO usage_daily (day, org_id, key_id, alias, client, project_id, user_id,
-    requests, refused, failed, input_tokens, output_tokens, cached_input_tokens,
-    cache_write_tokens, cost_micros, list_cost_micros, last_at)
+    requests, refused, failed, input_tokens, output_tokens, cost_micros,
+    list_cost_micros, last_at)
 SELECT (ts AT TIME ZONE 'UTC')::date, org_id, COALESCE(key_id, ''), alias,
        COALESCE(client, ''), COALESCE(project_id, ''), COALESCE(user_id, ''),
        count(*), count(*) FILTER (WHERE status BETWEEN 400 AND 499),
        count(*) FILTER (WHERE status >= 500),
-       sum(input_tokens), sum(output_tokens), sum(cached_input_tokens),
-       sum(cache_write_tokens), sum(cost_micros), sum(list_cost_micros), max(ts)
+       sum(input_tokens), sum(output_tokens), sum(cost_micros),
+       sum(list_cost_micros), max(ts)
 FROM usage_events
 GROUP BY 1, 2, 3, 4, 5, 6, 7;
 
@@ -70,7 +68,7 @@ DROP INDEX usage_events_alias_ts_idx;
 -- The filters list now names its filters, so it uses the index that leads
 -- with them.
 DROP INDEX filter_runs_org_ts_idx;
--- One session's tool calls are a few minutes of usage_events_org_ts_idx.
+-- One session's tool calls are a few minutes of tool_calls_org_ts_idx.
 DROP INDEX tool_calls_key_ts_idx;
 
 -- A session key is a hash that already includes the key, so it alone finds
@@ -79,14 +77,20 @@ DROP INDEX usage_events_session_idx;
 CREATE INDEX usage_events_session_idx ON usage_events (session_key)
     WHERE session_key IS NOT NULL;
 
--- The request log's indexes, ascending. Descending, each new row went to the
--- front of its organisation's range, and every page split there left a page
--- half empty for good. The log reads them backwards for newest first.
+-- The request log's and the audit log's indexes, ascending. Descending, each
+-- new row went to the front of its range, and every page split there left a
+-- page half empty for good. The logs read them backwards for newest first.
 DROP INDEX usage_events_org_id_idx;
 CREATE INDEX usage_events_org_id_idx ON usage_events (org_id, id);
 DROP INDEX usage_events_failed_idx;
 CREATE INDEX usage_events_failed_idx ON usage_events (org_id, id)
     WHERE status >= 400 OR error IS NOT NULL;
+DROP INDEX audit_log_org_id_idx;
+CREATE INDEX audit_log_org_id_idx ON audit_log (org_id, id);
+DROP INDEX audit_log_actor_idx;
+CREATE INDEX audit_log_actor_idx ON audit_log (actor, id);
+DROP INDEX audit_log_action_idx;
+CREATE INDEX audit_log_action_idx ON audit_log (action, id);
 
 -- Request ids are only ever looked up whole, which a hash index does in
 -- less space.

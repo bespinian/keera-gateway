@@ -25,10 +25,10 @@ type dailyKey struct {
 
 // dailySum is what one batch adds to a row.
 type dailySum struct {
-	requests, refused, failed      int64
-	input, output, cached, written int64
-	cost, list                     int64
-	last                           time.Time
+	requests, refused, failed int64
+	input, output             int64
+	cost, list                int64
+	last                      time.Time
 }
 
 // addDaily counts one written usage row into sums.
@@ -49,8 +49,6 @@ func addDaily(sums map[dailyKey]*dailySum, e Event) {
 	}
 	d.input += int64(e.InputTokens)
 	d.output += int64(e.OutputTokens)
-	d.cached += int64(e.CachedInputTokens)
-	d.written += int64(e.CacheWriteTokens)
 	d.cost += e.CostMicros
 	d.list += e.ListCostMicros
 	if e.TS.After(d.last) {
@@ -75,23 +73,21 @@ func queueDaily(batch *pgx.Batch, sums map[dailyKey]*dailySum) {
 	for _, k := range keys {
 		d := sums[k]
 		batch.Queue(`INSERT INTO usage_daily (day, org_id, key_id, alias, client, project_id,
-			user_id, requests, refused, failed, input_tokens, output_tokens,
-			cached_input_tokens, cache_write_tokens, cost_micros, list_cost_micros, last_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+			user_id, requests, refused, failed, input_tokens, output_tokens, cost_micros,
+			list_cost_micros, last_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 			ON CONFLICT (org_id, day, key_id, alias, client, project_id, user_id) DO UPDATE SET
 				requests = usage_daily.requests + EXCLUDED.requests,
 				refused = usage_daily.refused + EXCLUDED.refused,
 				failed = usage_daily.failed + EXCLUDED.failed,
 				input_tokens = usage_daily.input_tokens + EXCLUDED.input_tokens,
 				output_tokens = usage_daily.output_tokens + EXCLUDED.output_tokens,
-				cached_input_tokens = usage_daily.cached_input_tokens + EXCLUDED.cached_input_tokens,
-				cache_write_tokens = usage_daily.cache_write_tokens + EXCLUDED.cache_write_tokens,
 				cost_micros = usage_daily.cost_micros + EXCLUDED.cost_micros,
 				list_cost_micros = usage_daily.list_cost_micros + EXCLUDED.list_cost_micros,
 				last_at = GREATEST(usage_daily.last_at, EXCLUDED.last_at)`,
 			k.day, k.org, k.key, k.alias, k.client, k.project, k.user,
-			d.requests, d.refused, d.failed, d.input, d.output, d.cached, d.written,
-			d.cost, d.list, d.last)
+			d.requests, d.refused, d.failed, d.input, d.output, d.cost,
+			d.list, d.last)
 	}
 }
 
