@@ -27,8 +27,7 @@ import (
 // requireSandboxes refuses every route that needs a driver when there is none.
 func (s *Server) requireSandboxes(w http.ResponseWriter) bool {
 	if s.opts.Sandboxes == nil {
-		httpx.WriteError(w, http.StatusNotImplemented, "invalid_request_error",
-			"sandboxes_disabled",
+		switchedOff(w, "sandboxes_disabled",
 			"this deployment runs no sandbox driver; set KEERA_SANDBOX_DRIVER to 'kubernetes' "+
 				"or 'podman' to switch sandboxes on")
 		return false

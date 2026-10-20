@@ -57,8 +57,7 @@ func (s *Server) passkeysOff(w http.ResponseWriter) bool {
 	if s.opts.Passkeys != nil {
 		return false
 	}
-	httpx.WriteError(w, http.StatusNotImplemented, "invalid_request_error",
-		"passkeys_disabled", "passkeys are off on this gateway; set KEERA_PASSKEYS=true")
+	switchedOff(w, "passkeys_disabled", "passkeys are off on this gateway; set KEERA_PASSKEYS=true")
 	return true
 }
 

@@ -49,7 +49,7 @@ const (
 // deployment without them.
 func (s *Server) payments(w http.ResponseWriter) *Payments {
 	if s.opts.Payments == nil {
-		conflict(w, "payments_off",
+		switchedOff(w, "payments_disabled",
 			"this deployment takes no payments: nobody pays in advance. See docs/billing.md")
 	}
 	return s.opts.Payments

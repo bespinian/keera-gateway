@@ -445,6 +445,12 @@ func conflict(w http.ResponseWriter, code, msg string) {
 	httpx.WriteError(w, http.StatusConflict, "invalid_request_error", code, msg)
 }
 
+// switchedOff refuses a route for a feature this deployment has turned off.
+// Its code ends in _disabled.
+func switchedOff(w http.ResponseWriter, code, msg string) {
+	httpx.WriteError(w, http.StatusNotImplemented, "invalid_request_error", code, msg)
+}
+
 // readJSON decodes a request body into v, or answers why it could not and
 // returns false.
 func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {

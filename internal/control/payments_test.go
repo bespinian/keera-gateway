@@ -518,7 +518,7 @@ func TestWithoutPaymentsTheAccountSaysSo(t *testing.T) {
 		t.Errorf("account: %d %s", w.Code, w.Body)
 	}
 	if w := invoke(s.createTopUp, admin("org_1"), http.MethodPost, "/v1/billing/topups",
-		`{"amount_micros":100000000}`); w.Code != http.StatusConflict {
+		`{"amount_micros":100000000}`); w.Code != http.StatusNotImplemented {
 		t.Errorf("top-up: %d %s", w.Code, w.Body)
 	}
 }

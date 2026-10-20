@@ -62,7 +62,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.opts.Providers.Enabled() {
-		httpx.WriteError(w, http.StatusNotImplemented, "invalid_request_error", "sso_disabled",
+		switchedOff(w, "sso_disabled",
 			"no identity provider is configured; sign in with the operator key, or set KEERA_OIDC_PROVIDERS")
 		return
 	}
