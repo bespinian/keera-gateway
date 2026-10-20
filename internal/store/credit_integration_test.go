@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -133,6 +134,40 @@ func TestPendingPaymentsOfSkipsEndedOnes(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].ID != pending.ID {
 		t.Errorf("pending = %+v, want the one top-up", got)
+	}
+}
+
+// Payments page like every other list: each page starts after the id the last
+// one ended on, and together they hold each payment once.
+func TestPaymentsPageByTheLastID(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	var made []string
+	for range 5 {
+		p := Payment{ID: id.New("pay"), OrgID: f.orgID, Kind: PaymentTopUp, AmountMicros: 1_000_000}
+		if err := st.CreatePayment(ctx, p); err != nil {
+			t.Fatalf("CreatePayment: %v", err)
+		}
+		made = append(made, p.ID)
+	}
+	var seen []string
+	before := ""
+	for range 3 {
+		page, err := st.ListPayments(ctx, f.orgID, before, 2)
+		if err != nil {
+			t.Fatalf("ListPayments: %v", err)
+		}
+		for _, p := range page {
+			seen = append(seen, p.ID)
+		}
+		if len(page) == 0 {
+			break
+		}
+		before = page[len(page)-1].ID
+	}
+	slices.Reverse(made)
+	if !slices.Equal(seen, made) {
+		t.Errorf("pages hold %v, want every payment once, newest first: %v", seen, made)
 	}
 }
 

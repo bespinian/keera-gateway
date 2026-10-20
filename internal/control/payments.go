@@ -81,7 +81,7 @@ func (s *Server) creditAccount(w http.ResponseWriter, r *http.Request, p *authn.
 		s.fail(w, err)
 		return
 	}
-	list, err := s.st.ListPayments(r.Context(), orgID, 20)
+	list, err := s.st.ListPayments(r.Context(), orgID, "", 20)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -347,16 +347,22 @@ func (s *Server) listPayments(w http.ResponseWriter, r *http.Request, p *authn.P
 	if !ok {
 		return
 	}
-	limit, _, ok := page(w, q)
+	limit, ok := pageLimit(w, q)
 	if !ok {
 		return
 	}
-	list, err := s.st.ListPayments(r.Context(), orgID, limit)
+	// A payment's id is text, not a number like a request's, so it is read
+	// here rather than by page.
+	list, err := s.st.ListPayments(r.Context(), orgID, q.Get("before"), limit)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"data": list})
+	out := map[string]any{"data": list}
+	if len(list) > 0 {
+		out["next_before"] = list[len(list)-1].ID
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 // grantCredit adds credit to an organisation without a payment, or takes

@@ -371,11 +371,14 @@ func (s *Store) PaymentByTransaction(ctx context.Context, transactionID int64) (
 }
 
 // ListPayments lists an organisation's payments, newest first. An empty
-// orgID lists every organisation's.
-func (s *Store) ListPayments(ctx context.Context, orgID string, limit int) ([]Payment, error) {
+// orgID lists every organisation's. before is the id the previous page ended
+// on, or empty for the newest.
+func (s *Store) ListPayments(ctx context.Context, orgID, before string, limit int) ([]Payment, error) {
 	return queryAll(ctx, s.pool, scanPayment, `SELECT `+paymentColumns+` FROM payments
-		WHERE ($1 = '' OR org_id = $1) ORDER BY ts DESC, id DESC LIMIT $2`,
-		orgID, pageLimit(limit, 50, 500))
+		WHERE ($1 = '' OR org_id = $1)
+		  AND ($3 = '' OR (ts, id) < (SELECT ts, id FROM payments WHERE id = $3))
+		ORDER BY ts DESC, id DESC LIMIT $2`,
+		orgID, pageLimit(limit, 50, 500), before)
 }
 
 // PendingPaymentsOf lists one organisation's payments still pending that

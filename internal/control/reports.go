@@ -56,20 +56,31 @@ func (s *Server) reportOrg(w http.ResponseWriter, r *http.Request,
 // page reads ?limit and ?before. Absent is zero: the store's default and the
 // newest rows. A value that is not a number is refused, like a bad window.
 func page(w http.ResponseWriter, q url.Values) (limit int, before int64, ok bool) {
-	var err error
-	if v := q.Get("limit"); v != "" {
-		if limit, err = strconv.Atoi(v); err != nil || limit < 0 {
-			badRequest(w, "'limit' must be a whole number")
-			return 0, 0, false
-		}
+	if limit, ok = pageLimit(w, q); !ok {
+		return 0, 0, false
 	}
 	if v := q.Get("before"); v != "" {
+		var err error
 		if before, err = strconv.ParseInt(v, 10, 64); err != nil {
 			badRequest(w, "'before' must be the id the previous page ended on")
 			return 0, 0, false
 		}
 	}
 	return limit, before, true
+}
+
+// pageLimit reads the limit query parameter alone.
+func pageLimit(w http.ResponseWriter, q url.Values) (int, bool) {
+	v := q.Get("limit")
+	if v == "" {
+		return 0, true
+	}
+	limit, err := strconv.Atoi(v)
+	if err != nil || limit < 0 {
+		badRequest(w, "'limit' must be a whole number")
+		return 0, false
+	}
+	return limit, true
 }
 
 // entityScope resolves the one project, key or person a report is narrowed to,
