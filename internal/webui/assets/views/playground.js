@@ -680,10 +680,9 @@ function messageEl(msg, ctx, byAlias) {
     );
   }
 
+  // The cursor only appears once something arrives, so the wait shows one
+  // blinking thing, not two.
   const body = h("div", { class: "msg-body" });
-  if (msg.streaming) body.append(h("div", { class: "msg-live" }, msg.content));
-  else if (msg.content) body.append(...prose(msg.content));
-
   if (msg.streaming && !msg.content && !msg.reasoning) {
     body.append(
       h(
@@ -693,7 +692,9 @@ function messageEl(msg, ctx, byAlias) {
         "Waiting for the first token…",
       ),
     );
-  }
+  } else if (msg.streaming) {
+    body.append(h("div", { class: "msg-live" }, msg.content));
+  } else if (msg.content) body.append(...prose(msg.content));
 
   return h(
     "div",
