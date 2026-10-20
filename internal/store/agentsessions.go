@@ -361,9 +361,9 @@ type AgentSessionTotals struct {
 	CostMicros   int64 `json:"cost_micros"`
 	// Medians, not means, because one runaway session would skew a mean. The
 	// maximums below show how far the worst one went.
-	MedianRequests   int64 `json:"median_requests"`
-	MedianDurationMS int64 `json:"median_duration_ms"`
-	MedianCostMicros int64 `json:"median_cost_micros"`
+	RequestsMedian   int64 `json:"requests_median"`
+	DurationMedianMS int64 `json:"duration_median_ms"`
+	CostMedianMicros int64 `json:"cost_median_micros"`
 	// LongestRequests and CostliestMicros are the runaway: the session worth
 	// opening.
 	LongestRequests int64 `json:"longest_requests"`
@@ -404,7 +404,7 @@ func (s *Store) AgentSessionSummary(ctx context.Context,
 		       (SELECT count(*) FILTER (WHERE `+sessionOutcomes[OutcomeInterrupted]+`) FROM grouped)
 		FROM matched`, q.args()...).Scan(&t.Sessions, &t.Unhappy, &t.Requests,
 		&t.InputTokens, &t.OutputTokens, &t.CostMicros,
-		&t.MedianRequests, &t.MedianDurationMS, &t.MedianCostMicros,
+		&t.RequestsMedian, &t.DurationMedianMS, &t.CostMedianMicros,
 		&t.LongestRequests, &t.CostliestMicros,
 		&o.Total, &o.OK, &o.Failed, &o.Refused, &o.Interrupted)
 	return t, err

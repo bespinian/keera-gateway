@@ -399,9 +399,9 @@ func TestSessionsRankByWhatMakesOneWorthOpening(t *testing.T) {
 	if totals.CostMicros != 2*5000+40*50+6*200 {
 		t.Errorf("total cost = %d, want %d", totals.CostMicros, 2*5000+40*50+6*200)
 	}
-	if totals.MedianRequests != 6 {
+	if totals.RequestsMedian != 6 {
 		t.Errorf("median calls per task = %d, want 6 - the mean would be 16 and "+
-			"would describe none of these three tasks", totals.MedianRequests)
+			"would describe none of these three tasks", totals.RequestsMedian)
 	}
 	if totals.LongestRequests != 40 {
 		t.Errorf("longest = %d calls, want 40", totals.LongestRequests)

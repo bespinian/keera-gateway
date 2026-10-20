@@ -90,8 +90,8 @@ func printSessions(w *table, res sessionsResponse, since time.Duration) {
 	_, _ = fmt.Fprintf(w, "\n%d sessions over %d requests in the last %s; showing %d\n",
 		t.Sessions, t.Requests, shortDuration(since), len(res.Data))
 	_, _ = fmt.Fprintf(w, "middle session: %d requests, %s, %s\n",
-		t.MedianRequests, shortDuration(time.Duration(t.MedianDurationMS)*time.Millisecond),
-		policy.FormatMoney(t.MedianCostMicros))
+		t.RequestsMedian, shortDuration(time.Duration(t.DurationMedianMS)*time.Millisecond),
+		policy.FormatMoney(t.CostMedianMicros))
 	_, _ = fmt.Fprintf(w, "worst session: %d requests, %s; %d of %d had problems\n",
 		t.LongestRequests, policy.FormatMoney(t.CostliestMicros),
 		t.Unhappy, t.Sessions)

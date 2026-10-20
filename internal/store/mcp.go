@@ -186,15 +186,15 @@ func (s *Store) SessionToolCalls(ctx context.Context, orgID string, a AgentSessi
 
 // ToolSummary is one tool's calls inside a window, added up.
 type ToolSummary struct {
-	Server      string `json:"server"`
-	Tool        string `json:"tool"`
-	Calls       int64  `json:"calls"`
-	Failed      int64  `json:"failed"`
-	Denied      int64  `json:"denied"`
-	Refused     int64  `json:"refused"`
-	AvgMS       int64  `json:"avg_ms"`
-	ArgBytes    int64  `json:"arg_bytes"`
-	ResultBytes int64  `json:"result_bytes"`
+	Server          string `json:"server"`
+	Tool            string `json:"tool"`
+	Calls           int64  `json:"calls"`
+	Failed          int64  `json:"failed"`
+	Denied          int64  `json:"denied"`
+	Refused         int64  `json:"refused"`
+	LatencyMedianMS int64  `json:"latency_median_ms"`
+	ArgBytes        int64  `json:"arg_bytes"`
+	ResultBytes     int64  `json:"result_bytes"`
 }
 
 // SummarizeToolCalls adds up the calls of each tool inside a window, most
@@ -205,7 +205,8 @@ func (s *Store) SummarizeToolCalls(ctx context.Context, q ToolCallQuery) ([]Tool
 		`+countOf("outcome", ToolFailed, ToolNoResult)+`,
 		`+countOf("outcome", ToolDenied)+`,
 		`+countOf("outcome", ToolRefused)+`,
-		COALESCE(avg(latency_ms)::bigint, 0), COALESCE(sum(arg_bytes), 0),
+		COALESCE(round(percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms)), 0)::bigint,
+		COALESCE(sum(arg_bytes), 0),
 		COALESCE(sum(result_bytes), 0)
 		FROM tool_calls`+toolWhere+` GROUP BY server, tool ORDER BY count(*) DESC, server, tool`,
 		q.args()...)
@@ -213,7 +214,7 @@ func (s *Store) SummarizeToolCalls(ctx context.Context, q ToolCallQuery) ([]Tool
 
 func scanToolSummary(r row) (ToolSummary, error) {
 	var t ToolSummary
-	err := r.Scan(&t.Server, &t.Tool, &t.Calls, &t.Failed, &t.Denied, &t.Refused, &t.AvgMS,
+	err := r.Scan(&t.Server, &t.Tool, &t.Calls, &t.Failed, &t.Denied, &t.Refused, &t.LatencyMedianMS,
 		&t.ArgBytes, &t.ResultBytes)
 	return t, err
 }

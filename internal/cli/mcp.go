@@ -277,10 +277,10 @@ func printToolCalls(w *table, calls []store.ToolCallRow) {
 }
 
 func printToolSummary(w *table, rows []store.ToolSummary) {
-	w.header("TOOL\tCALLS\tFAILED\tDENIED\tREFUSED\tAVG MS\tSENT\tBACK")
+	w.header("TOOL\tCALLS\tFAILED\tDENIED\tREFUSED\tMEDIAN MS\tSENT\tBACK")
 	for _, t := range rows {
 		_, _ = fmt.Fprintf(w, "%s/%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", t.Server, t.Tool, t.Calls,
-			t.Failed, t.Denied, t.Refused, t.AvgMS, t.ArgBytes, t.ResultBytes)
+			t.Failed, t.Denied, t.Refused, t.LatencyMedianMS, t.ArgBytes, t.ResultBytes)
 	}
 }
 

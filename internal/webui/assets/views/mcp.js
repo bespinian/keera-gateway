@@ -168,10 +168,10 @@ export async function mcpView(ctx) {
           cell: (t) => countPill(t.refused, "warn"),
         },
         {
-          label: "Average",
+          label: "Median",
           num: true,
-          sortKey: (t) => t.avg_ms,
-          cell: (t) => ms(t.avg_ms),
+          sortKey: (t) => t.latency_median_ms,
+          cell: (t) => ms(t.latency_median_ms),
         },
         {
           label: "Sent",
