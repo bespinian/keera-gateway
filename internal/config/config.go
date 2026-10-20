@@ -75,10 +75,6 @@ type Config struct {
 	// See "Retention and sizing" in docs/install.md.
 	UsageRetention time.Duration
 	AuditRetention time.Duration
-	// UsageDailyRetention is how long the daily usage totals are kept. They
-	// are small, and reports over more than two days read them, so they may
-	// outlive the usage events. Zero keeps them for ever.
-	UsageDailyRetention time.Duration
 
 	// SessionGap is how long an agent conversation may go quiet before the
 	// next request counts as a new task. Nothing is stored per session, so
@@ -146,7 +142,6 @@ func Load() (Config, error) {
 		SpendRefresh:          envDuration("KEERA_SPEND_REFRESH", registry.DefaultSpendRefresh),
 		UsageRetention:        envDuration("KEERA_USAGE_RETENTION", 0),
 		AuditRetention:        envDuration("KEERA_AUDIT_RETENTION", 0),
-		UsageDailyRetention:   envDuration("KEERA_USAGE_DAILY_RETENTION", 0),
 		SessionGap:            envDuration("KEERA_SESSION_GAP", store.DefaultSessionGap),
 		RedisPrefix:           env("KEERA_REDIS_PREFIX", ratelimit.DefaultRedisPrefix),
 		Sandbox:               sandboxConfig(),
@@ -265,7 +260,6 @@ func (c Config) validateRetention() error {
 	}{
 		{"KEERA_USAGE_RETENTION", c.UsageRetention},
 		{"KEERA_AUDIT_RETENTION", c.AuditRetention},
-		{"KEERA_USAGE_DAILY_RETENTION", c.UsageDailyRetention},
 	} {
 		if r.d < 0 {
 			return fmt.Errorf("%s cannot be negative", r.name)
@@ -274,17 +268,6 @@ func (c Config) validateRetention() error {
 			return fmt.Errorf("%s is %s; retention deletes rows for good, so the "+
 				"shortest window it accepts is 24h", r.name, r.d)
 		}
-	}
-	// The daily totals are what reports fall back on once the events are
-	// gone, so dropping them first would leave a gap. Unset usage retention
-	// keeps the events for ever, which is longer than any window.
-	if c.UsageDailyRetention > 0 && (c.UsageRetention == 0 || c.UsageDailyRetention < c.UsageRetention) {
-		usage := "unset, so for ever"
-		if c.UsageRetention > 0 {
-			usage = c.UsageRetention.String()
-		}
-		return fmt.Errorf("KEERA_USAGE_DAILY_RETENTION is %s; it cannot be shorter than "+
-			"KEERA_USAGE_RETENTION (%s)", c.UsageDailyRetention, usage)
 	}
 	return nil
 }

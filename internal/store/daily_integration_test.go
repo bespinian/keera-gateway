@@ -179,39 +179,3 @@ func TestReportsOutliveTheRequestLog(t *testing.T) {
 		t.Errorf("Usage over two hours = %+v, %v; want nothing", short, err)
 	}
 }
-
-func TestDailyTotalsHaveTheirOwnRetention(t *testing.T) {
-	st, ctx := db(t)
-	f := newFixture(t, st, ctx)
-	now := time.Now().UTC()
-	for _, ts := range []time.Time{now.AddDate(0, 0, -40), now.AddDate(0, 0, -10), now} {
-		if err := st.WriteEvents(ctx, []Event{{TS: ts, OrgID: f.orgID, Alias: "keera-code",
-			Status: 200}}); err != nil {
-			t.Fatalf("WriteEvents: %v", err)
-		}
-	}
-	count := func() int {
-		var n int
-		if err := st.pool.QueryRow(ctx, "SELECT count(*) FROM usage_daily").Scan(&n); err != nil {
-			t.Fatal(err)
-		}
-		return n
-	}
-
-	// The events go; the totals stay.
-	if _, err := st.PurgeUsage(ctx, now.AddDate(0, 0, -1)); err != nil {
-		t.Fatalf("PurgeUsage: %v", err)
-	}
-	if n := count(); n != 3 {
-		t.Errorf("%d daily rows after usage retention, want all 3", n)
-	}
-
-	// The cutoff's own day is kept.
-	n, err := st.PurgeDaily(ctx, now.AddDate(0, 0, -10))
-	if err != nil {
-		t.Fatalf("PurgeDaily: %v", err)
-	}
-	if n != 1 || count() != 2 {
-		t.Errorf("PurgeDaily deleted %d, left %d; want 1 deleted and 2 left", n, count())
-	}
-}
