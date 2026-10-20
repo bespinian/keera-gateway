@@ -475,7 +475,7 @@ var providers = []Provider{{
 	}, {
 		ID: "apertus-ai/Apertus-v1.5-8B", DisplayName: "Apertus v1.5 8B",
 		MaxContext: 128_000, ReleaseDate: "2026-07-24",
-		InputMicrosPerMTok: 120_000, OutputMicrosPerMTok: 580_000,
+		InputMicrosPerMTok: 20_000, OutputMicrosPerMTok: 100_000,
 		Description: "the smallest and cheapest chat model here, with open weights " +
 			"and open training data - simple work",
 	}, {
