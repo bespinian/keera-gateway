@@ -44,7 +44,7 @@ func (c signIn) expired() bool {
 // credentialsPath is the file. KEERA_CONFIG_DIR moves it, for a shared
 // account or a pipeline.
 func credentialsPath() (string, error) {
-	if dir := os.Getenv("KEERA_CONFIG_DIR"); dir != "" {
+	if dir := env("KEERA_CONFIG_DIR"); dir != "" {
 		return filepath.Join(dir, "credentials.json"), nil
 	}
 	dir, err := os.UserConfigDir()

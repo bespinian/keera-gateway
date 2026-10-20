@@ -261,7 +261,7 @@ func (r *orgRun) switchTo(ctx context.Context) error {
 
 // warnAboutEnv says when KEERA_ORG overrides the choice just made.
 func (r *orgRun) warnAboutEnv() {
-	if os.Getenv("KEERA_ORG") != "" {
+	if env("KEERA_ORG") != "" {
 		fmt.Fprintln(os.Stderr, styleErr.warn("\nNote: KEERA_ORG is set in this shell, and it "+
 			"wins. Unset it to use this choice."))
 	}

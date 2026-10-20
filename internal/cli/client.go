@@ -50,12 +50,18 @@ func resolveBase(saved string) (base, from string) {
 	switch {
 	case urlFlag != "":
 		return urlFlag, "--url"
-	case os.Getenv("KEERA_CONTROL_URL") != "":
-		return os.Getenv("KEERA_CONTROL_URL"), "KEERA_CONTROL_URL"
+	case env("KEERA_CONTROL_URL") != "":
+		return env("KEERA_CONTROL_URL"), "KEERA_CONTROL_URL"
 	case saved != "":
 		return saved, "the gateway you last signed in to"
 	}
 	return defaultBase, "the default"
+}
+
+// env reads a KEERA_ setting as the gateway does, without the spaces a
+// pasted value often brings.
+func env(name string) string {
+	return strings.TrimSpace(os.Getenv(name))
 }
 
 // newClient reads the environment and the credentials file.
@@ -71,13 +77,13 @@ func newClient() *client {
 	c := &client{
 		base:     base,
 		baseFrom: from,
-		key:      os.Getenv("KEERA_OPERATOR_KEY"),
+		key:      env("KEERA_OPERATOR_KEY"),
 		http:     &http.Client{Timeout: 30 * time.Second},
 	}
 	if c.key == "" {
 		c.signedIn = creds.Gateways[gatewayKey(base)]
 	}
-	if org := os.Getenv("KEERA_ORG"); org != "" {
+	if org := env("KEERA_ORG"); org != "" {
 		c.org, c.orgFrom = org, "KEERA_ORG"
 	} else if org := creds.Orgs[gatewayKey(base)]; org != "" {
 		c.org, c.orgFrom = org, "keera org switch"
