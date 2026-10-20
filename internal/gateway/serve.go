@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -484,7 +483,7 @@ func (s *Server) useRouter(c *call, b *body) bool {
 		// The request may still succeed at the fallback, and then this is the
 		// only record that it was placed by default. It is a note, not an
 		// error: a request the fallback answered was served.
-		c.ev.Note = "the router " + strconv.Quote(rt.Alias) + " could not choose: " + d.why
+		c.ev.Note = "the router '" + rt.Alias + "' could not choose: " + d.why
 	}
 	if ref != nil {
 		count(d.outcome)
@@ -508,7 +507,7 @@ func (s *Server) useRouter(c *call, b *body) bool {
 		// fallback, or a model deleted a moment ago.
 		c.ev.RouterOutcome = store.RouterError
 		count(store.RouterError)
-		s.refuse(c, *noDestination(fmt.Sprintf("the router %q placed this request on '%s', "+
+		s.refuse(c, *noDestination(fmt.Sprintf("the router '%s' placed this request on '%s', "+
 			"which cannot serve it: the model is missing, disabled, of another kind, or has "+
 			"no backend", rt.Alias, c.alias)))
 		return false

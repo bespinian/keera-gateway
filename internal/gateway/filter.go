@@ -353,7 +353,7 @@ func filterFailed(f policy.Filter, err error) *refusal {
 	return &refusal{
 		status: http.StatusBadGateway,
 		typ:    "server_error", code: "filter_failed",
-		msg: fmt.Sprintf("the filter %q %s, so nothing was sent to the model: %s",
+		msg: fmt.Sprintf("the filter '%s' %s, so nothing was sent to the model: %s",
 			f.Alias, what, err),
 		advise: true,
 	}
@@ -367,7 +367,7 @@ func filterUnavailable(alias, why string) *refusal {
 	return &refusal{
 		status: http.StatusServiceUnavailable,
 		typ:    "server_error", code: "filter_unavailable",
-		msg: fmt.Sprintf("a guardrail on this key filters every request through %q "+
+		msg: fmt.Sprintf("a guardrail on this key filters every request through '%s' "+
 			"before it is forwarded, and that filter cannot run: %s. Nothing was sent to the "+
 			"model", alias, why),
 		advise: true,
@@ -381,16 +381,16 @@ func filterUnavailable(alias, why string) *refusal {
 // and only the status stops a client retrying what will never succeed. The
 // reason is quoted as the filter's, since a small model may have misread.
 func filterRefused(f policy.Filter, reason string) *refusal {
-	msg := fmt.Sprintf("a guardrail on this key filters every request through %q "+
+	msg := fmt.Sprintf("a guardrail on this key filters every request through '%s' "+
 		"before it is forwarded, and that filter refused this one", f.Alias)
 	switch {
 	case f.Mode.Gates():
-		msg = fmt.Sprintf("a guardrail on this key checks every request against %q "+
+		msg = fmt.Sprintf("a guardrail on this key checks every request against '%s' "+
 			"before it is forwarded, and it refused this one", f.Alias)
 	case !f.UsesModel():
 		// A rule matched, and its reason is the administrator's own words.
 		msg = fmt.Sprintf("a guardrail on this key checks every request against the rules "+
-			"in %q before it is forwarded, and one of them matched this request", f.Alias)
+			"in '%s' before it is forwarded, and one of them matched this request", f.Alias)
 	}
 	if reason != "" {
 		msg += ", saying: " + reason
@@ -655,12 +655,12 @@ func rewriteAllowance(input []byte, texts []string) int {
 // worth telling someone reading a 413.
 func filterTooLargeMessage(f policy.Filter, m policy.Model, inputTokens int) string {
 	if f.Mode.Gates() {
-		return fmt.Sprintf("this request is about %d tokens of text, and the gate %q has to "+
+		return fmt.Sprintf("this request is about %d tokens of text, and the gate '%s' has to "+
 			"read all of it through '%s', whose context is %d. Send less in one request, or "+
 			"give the gate a model with a larger context",
 			inputTokens, f.Alias, m.Alias, m.MaxContext)
 	}
-	return fmt.Sprintf("this request is about %d tokens of text, and the filter %q has to "+
+	return fmt.Sprintf("this request is about %d tokens of text, and the filter '%s' has to "+
 		"read it and write it back through '%s', whose context is %d. Send less in one "+
 		"request, or give the filter a model with a larger context",
 		inputTokens, f.Alias, m.Alias, m.MaxContext)
