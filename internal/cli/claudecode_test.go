@@ -231,3 +231,34 @@ func TestConnectClaudeCodeSubscriptionRemovesTheKeeraKey(t *testing.T) {
 		t.Errorf("ANTHROPIC_CUSTOM_HEADERS = %q, want the subscription key", h)
 	}
 }
+
+// A new key's models are only known once it is issued, so a key that may not
+// use the model asked for is revoked again rather than left behind.
+func TestConnectClaudeCodeRevokesANewKeyThatMayNotUseTheModel(t *testing.T) {
+	quiet(t)
+	t.Setenv("KEERA_CONFIG_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	f := newFakeControl(t, claudeCodeRoutes(map[string]any{
+		"GET /v1/me": map[string]any{"user_id": "user_1", "email": "ada@example.ch",
+			"role": "admin", "org_id": "org_1"},
+		"GET /v1/projects": map[string]any{"data": []map[string]any{
+			{"id": "project_1", "org_id": "org_1", "name": "Default"},
+		}},
+		"GET /v1/keys": map[string]any{"data": []any{}},
+		"POST /v1/keys": map[string]any{"id": "key_new", "org_id": "org_1", "key": "keera_sk_new",
+			"kind": "standard"},
+		"GET /v1/access": map[string]any{"keys": []map[string]any{
+			{"id": "key_new", "org_id": "org_1", "kind": "standard", "state": "active",
+				"allowed_models": []string{"keera-code"}},
+		}},
+		"DELETE /v1/keys/key_new": map[string]any{},
+	}))
+
+	err := connectCmd(context.Background(), []string{"claude-code", "--model", "auto"})
+	if err == nil || !strings.Contains(err.Error(), "revoked again") {
+		t.Errorf("err = %v, want it to say the key was revoked again", err)
+	}
+	if !f.called("DELETE", "/v1/keys/key_new") {
+		t.Error("the new key was left behind")
+	}
+}

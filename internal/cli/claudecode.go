@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -110,9 +111,10 @@ func connectClaude(ctx context.Context, c *client, in claudeSetup) error {
 		return err
 	}
 	replaced := step.replaces
-	if !in.subscription && replaced != nil && !replaced.Pending {
-		// Replacing a key revokes it at once, so what it may use is checked
-		// before. The new key keeps its guardrails.
+	if !in.subscription && replaced != nil {
+		// Replacing a key revokes it at once, and activating one shows its
+		// secret only once, so what it may use is checked before. The key
+		// keeps its guardrails either way.
 		if models, env, alias, err = keyEnv(ctx, c, orgID, replaced.ID, models, in.model); err != nil {
 			return err
 		}
@@ -133,9 +135,13 @@ func connectClaude(ctx context.Context, c *client, in claudeSetup) error {
 		}
 	} else {
 		if env == nil {
-			// A new or activated key's models are only known once it is issued.
+			// A new key's models are only known once it is issued, so one that
+			// may use none of them is revoked again.
 			if models, env, alias, err = keyEnv(ctx, c, orgID, key.ID, models, in.model); err != nil {
-				return err
+				if rerr := c.do(ctx, "DELETE", "/v1/keys/"+url.PathEscape(key.ID), nil, nil); rerr != nil {
+					return fmt.Errorf("%w; revoking the key %s again: %w", err, key.ID, rerr)
+				}
+				return fmt.Errorf("%w; the new key was revoked again", err)
 			}
 		}
 		env["ANTHROPIC_AUTH_TOKEN"] = key.Key
