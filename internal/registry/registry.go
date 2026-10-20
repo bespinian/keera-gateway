@@ -491,7 +491,8 @@ func sortedValues[T any](byAlias map[string]T) []T {
 	return out
 }
 
-// limited maps each limited organisation to its name.
+// refreshModels reloads the models. limited maps each limited organisation to
+// its name.
 func (r *Registry) refreshModels(ctx context.Context, limited map[string]string) error {
 	return reload(ctx, &r.models, r.store.LoadModels, func(m *policy.Model) (string, string) {
 		r.finishModel(m, limited)

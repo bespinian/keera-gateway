@@ -21,9 +21,9 @@ type Payments struct {
 	VATBP int64
 }
 
-// payments reads the PostFinance Checkout account, and sets each provider key
-// to take its calls from an organisation's credit. Without an account it is
-// nil, and nothing is taken.
+// payments reads the PostFinance Checkout account and the VAT. Without an
+// account it is nil, and calls on the provider keys take nothing from an
+// organisation's credit.
 func payments(platform catalog.Platform, publicURL string) (*Payments, error) {
 	space := env("KEERA_BILLING_POSTFINANCE_SPACE_ID", "")
 	user := env("KEERA_BILLING_POSTFINANCE_USER_ID", "")

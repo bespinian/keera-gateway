@@ -300,8 +300,8 @@ func notFound(err error) error {
 }
 
 // IsMissingOrg reports whether a write named an organisation that does not
-// exist. Every org_id is a foreign key into orgs that cascades on delete, so
-// this is the only way one of them fails.
+// exist. Every foreign key into orgs cascades on delete, so this is the only
+// way one of them fails. The logs that outlive an organisation have none.
 func IsMissingOrg(err error) bool {
 	e, ok := errors.AsType[*pgconn.PgError](err)
 	return ok && e.Code == "23503" && strings.HasSuffix(e.ConstraintName, "_org_id_fkey")

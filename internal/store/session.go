@@ -100,8 +100,9 @@ func (s *Store) moveSignIn(ctx context.Context, table string, hash []byte, userI
 		UPDATE `+table+` SET user_id = $2 WHERE id = $1 AND expires_at > now()`, hash, userID)
 }
 
-// PurgeExpired removes sessions and login flows that have run out. Every
-// lookup already filters on expiry, so this mostly keeps the tables small.
+// PurgeExpired removes sessions, sign-in and sign-up flows and passkey links
+// that have run out. Every lookup already filters on expiry, so this mostly
+// keeps the tables small.
 //
 // It also removes the refresh token of an identity no enabled row uses any
 // more: its organisations deleted it or turned it off. A working directory

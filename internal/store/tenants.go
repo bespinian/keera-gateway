@@ -264,9 +264,9 @@ var ErrOrgHasSandboxes = errors.New("store: the organisation still has live sand
 // Everything else goes through the foreign keys. Guardrails and spend are
 // cleared first, while the project and key ids that name them still exist.
 //
-// Usage events, the credit account and the audit log stay: finance invoices
-// from them, and the audit log must keep the record of this deletion. The
-// saved card goes, so nobody can charge it again.
+// The request log, billing lines, payments, the credit account and the audit
+// log stay: finance invoices from them, and the audit log must keep the record
+// of this deletion. The saved card goes, so nobody can charge it again.
 func (s *Store) DeleteOrg(ctx context.Context, orgID string) (DeletedOrg, error) {
 	var gone DeletedOrg
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {

@@ -442,7 +442,7 @@ func GroupBys() []string {
 	return slices.Sorted(maps.Keys(groupColumns))
 }
 
-// Usage aggregates the event log: what billing and the usage report read.
+// Usage aggregates the event log for the usage report.
 //
 // Cost and tokens add up every row, as budgets do: a refused or failed
 // request can still have paid for a filter or router call. Requests counts

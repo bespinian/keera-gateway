@@ -152,7 +152,7 @@ func (s *Server) updateCreditAccount(w http.ResponseWriter, r *http.Request, p *
 		case below == 0 && amount == 0:
 		case below <= 0 || below > maxTopUp:
 			badRequest(w, "'topup_below_micros' is the balance that starts a top-up; give one "+
-				"above CHF 0 and up to CHF "+policy.FormatMicros(maxTopUp))
+				"above "+policy.FormatPrice(0)+" and up to "+policy.FormatPrice(maxTopUp))
 			return
 		default:
 			if msg := checkAmount(amount); msg != "" {
@@ -186,8 +186,8 @@ func (s *Server) updateCreditAccount(w http.ResponseWriter, r *http.Request, p *
 func checkAmount(micros int64) string {
 	switch {
 	case micros < minTopUp || micros > maxTopUp:
-		return "pay from CHF " + policy.FormatMicros(minTopUp) + " to CHF " +
-			policy.FormatMicros(maxTopUp)
+		return "pay from " + policy.FormatPrice(minTopUp) + " to " +
+			policy.FormatPrice(maxTopUp)
 	case micros%10_000 != 0:
 		return "give whole centimes"
 	}
@@ -380,8 +380,8 @@ func (s *Server) grantCredit(w http.ResponseWriter, r *http.Request, p *authn.Pr
 		badRequest(w, "send the 'org_id' of the organisation to credit")
 		return
 	case in.AmountMicros == 0 || in.AmountMicros < -maxTopUp || in.AmountMicros > maxTopUp:
-		badRequest(w, "'amount_micros' is the credit to add, or below 0 to take away, up to CHF "+
-			policy.FormatMicros(maxTopUp))
+		badRequest(w, "'amount_micros' is the credit to add, or below 0 to take away, up to "+
+			policy.FormatPrice(maxTopUp))
 		return
 	case in.Note == "":
 		badRequest(w, "a 'note' is required: it says why, in the organisation's payments")
