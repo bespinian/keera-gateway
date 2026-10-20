@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"io"
 	"net/http"
@@ -1829,19 +1828,6 @@ func TestALeadingFlagIsTheListing(t *testing.T) {
 	err := Run(context.Background(), []string{"guardrail", "--json"})
 	if err == nil || !strings.Contains(err.Error(), "needs a subcommand") {
 		t.Errorf("guardrail --json: err = %v, want it to ask for a subcommand", err)
-	}
-}
-
-func TestMCPConnectNeedsTheGatewaysAddress(t *testing.T) {
-	quiet(t)
-	newFakeControl(t, map[string]any{
-		"GET /v1/orgs":        oneOrg,
-		"GET /v1/mcp-servers": map[string]any{"data": []map[string]any{{"alias": "github"}}},
-		"GET /v1/connect":     map[string]any{"data": []any{}},
-	})
-	err := Run(context.Background(), []string{"mcp", "connect", "github"})
-	if !errors.Is(err, errNoGatewayURL) {
-		t.Errorf("err = %v, want the missing address named", err)
 	}
 }
 

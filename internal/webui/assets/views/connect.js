@@ -282,8 +282,8 @@ async function addClient(ctx, catalogue, keys, button, secret = null) {
   );
 
   // The key is the only choice after the client. The models follow from it,
-  // and the gateway address comes from KEERA_PUBLIC_URL, so every panel and
-  // `keera connect` agree.
+  // and the gateway address from the control plane, which builds it in one
+  // place for every panel and `keera connect`.
   const setup = h(
     "div",
     { hidden: true },

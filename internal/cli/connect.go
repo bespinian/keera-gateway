@@ -59,8 +59,6 @@ func connectCmd(ctx context.Context, args []string) error {
 		case *key != "":
 			return errors.New("--key is for --print; without it, this machine gets a key " +
 				"of its own")
-		case cat.GatewayURL == "":
-			return errNoGatewayURL
 		}
 		return connectClaude(ctx, c, claudeSetup{
 			org: r.org, project: *project, model: *model, gatewayURL: cat.GatewayURL,
@@ -129,9 +127,6 @@ func connectCmd(ctx context.Context, args []string) error {
 	// The deployment says where clients reach it. A client pointed anywhere
 	// else would get a 401 that looks like a bad key.
 	gatewayURL := cat.GatewayURL
-	if gatewayURL == "" {
-		return errNoGatewayURL
-	}
 
 	if r.asJSON {
 		res := map[string]any{
@@ -149,10 +144,6 @@ func connectCmd(ctx context.Context, args []string) error {
 	printConnect(client, own, models, gatewayURL)
 	return nil
 }
-
-// errNoGatewayURL is a deployment that does not say where clients reach it.
-var errNoGatewayURL = errors.New("this deployment does not say where a client reaches the " +
-	"inference plane; set KEERA_PUBLIC_URL on the gateway")
 
 var errNoChatModel = errors.New("a coding agent needs a chat model and this organisation has " +
 	"no enabled one; add one with: keera model add <alias> --backend <url> " +
@@ -279,9 +270,7 @@ func listConnect(w *table, clients []connect.Client,
 		}
 		_, _ = fmt.Fprintf(w, "%s\t%s\n", c.Key, where)
 	}
-	if gateway != "" {
-		_, _ = fmt.Fprintf(w, "\nThis gateway is at %s.\n", gateway)
-	}
+	_, _ = fmt.Fprintf(w, "\nThis gateway is at %s.\n", gateway)
 	if len(chat) == 0 {
 		_, _ = fmt.Fprintln(w, "\nNo enabled chat model exists yet, so there is nothing "+
 			"to point a coding agent at.")

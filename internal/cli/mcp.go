@@ -216,10 +216,6 @@ func (m *mcpRun) connect(ctx context.Context) error {
 	if err := m.c.do(ctx, "GET", "/v1/connect", nil, &cat); err != nil {
 		return err
 	}
-	// Without the gateway's own address the lines below would name no host.
-	if cat.GatewayURL == "" {
-		return errNoGatewayURL
-	}
 	endpoint := strings.TrimRight(cat.GatewayURL, "/") + "/mcp/" + alias
 	fmt.Printf(`# Claude Code
 claude mcp add --transport http %[1]s %[2]s \

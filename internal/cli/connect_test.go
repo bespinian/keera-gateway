@@ -223,19 +223,6 @@ func TestConnectUsesTheGatewayThatAnswered(t *testing.T) {
 	}
 }
 
-// The gateway derives this address from the origin the panel was read on, so
-// an empty one means something upstream is misconfigured rather than merely
-// undeclared - and guessing would send a developer somewhere nothing answers.
-func TestConnectSaysSoWhenNoGatewayAddressIsKnown(t *testing.T) {
-	quiet(t)
-	newFakeControl(t, connectRoutes("", nil))
-
-	err := connectCmd(context.Background(), []string{"curl"})
-	if err == nil || !strings.Contains(err.Error(), "KEERA_PUBLIC_URL") {
-		t.Errorf("error = %v, want it to name the setting that fixes this", err)
-	}
-}
-
 func TestConnectWithNoClientListsThem(t *testing.T) {
 	// The listing reads the organisation's routers too: a client names one
 	// where it names a model, so this is where a developer discovers it.
