@@ -56,8 +56,8 @@ type BillingRow struct {
 	CachedInputTokens int64  `json:"cached_input_tokens"`
 	CacheWriteTokens  int64  `json:"cache_write_tokens"`
 	OutputTokens      int64  `json:"output_tokens"`
-	// Micros is what the organisation is billed.
-	Micros int64 `json:"micros"`
+	// BilledMicros is what the organisation is billed.
+	BilledMicros int64 `json:"billed_micros"`
 	// CreditMicros is the part paid from credit.
 	CreditMicros int64 `json:"credit_micros"`
 }
@@ -82,6 +82,6 @@ func scanBillingRow(r row) (BillingRow, error) {
 	err := r.Scan(&b.OrgID, &b.OrgName, &b.Provider, &b.BackendModel,
 		&b.Calls, &b.InputTokens, &b.CachedInputTokens, &b.CacheWriteTokens,
 		&b.OutputTokens,
-		&b.Micros, &b.CreditMicros)
+		&b.BilledMicros, &b.CreditMicros)
 	return b, err
 }

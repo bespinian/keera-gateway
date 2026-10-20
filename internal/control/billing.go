@@ -13,8 +13,8 @@ import (
 )
 
 type billingTotal struct {
-	Calls  int64 `json:"calls"`
-	Micros int64 `json:"micros"`
+	Calls        int64 `json:"calls"`
+	BilledMicros int64 `json:"billed_micros"`
 }
 
 // billing is one month of use of the deployment's own provider keys, per
@@ -45,7 +45,7 @@ func (s *Server) billing(w http.ResponseWriter, r *http.Request, p *authn.Princi
 	var total billingTotal
 	for _, row := range rows {
 		total.Calls += row.Calls
-		total.Micros += row.Micros
+		total.BilledMicros += row.BilledMicros
 	}
 	month := from.Format("2006-01")
 	// What came out of prepaid credit only means something on a deployment
@@ -89,7 +89,7 @@ func billingCSV(w http.ResponseWriter, month string, lines []store.BillingRow, p
 			strconv.FormatInt(l.CachedInputTokens, 10),
 			strconv.FormatInt(l.CacheWriteTokens, 10),
 			strconv.FormatInt(l.OutputTokens, 10),
-			policy.FormatMicros(l.Micros)}
+			policy.FormatMicros(l.BilledMicros)}
 		if payments {
 			rec = append(rec, policy.FormatMicros(l.CreditMicros))
 		}

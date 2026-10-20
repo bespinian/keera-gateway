@@ -70,7 +70,7 @@ async function billSection(ctx) {
   const payments = ctx.state.me.payments;
 
   if (!payments || allOrgs) {
-    ctx.setSubtitle(total ? money(total.micros) : monthName(month));
+    ctx.setSubtitle(total ? money(total.billed_micros) : monthName(month));
   }
 
   const go = (m) => {
@@ -181,8 +181,8 @@ async function billSection(ctx) {
     {
       label: "Amount",
       num: true,
-      cell: (r) => h("strong", {}, money(r.micros)),
-      sortKey: (r) => r.micros,
+      cell: (r) => h("strong", {}, money(r.billed_micros)),
+      sortKey: (r) => r.billed_micros,
       sortDir: "desc",
     },
     payments
@@ -220,7 +220,7 @@ async function billSection(ctx) {
           { class: "muted" },
           `${num(total.calls)} ${plural(total.calls, "call")}`,
         ),
-        h("strong", {}, money(total.micros)),
+        h("strong", {}, money(total.billed_micros)),
       ),
     );
 
@@ -295,8 +295,8 @@ async function creditSection(ctx) {
       "Card",
       a.card ? a.card.label : "None",
       a.card
-        ? a.card.expires
-          ? `expires ${new Date(a.card.expires).toLocaleDateString(undefined, { month: "2-digit", year: "2-digit" })}`
+        ? a.card.expires_at
+          ? `expires ${new Date(a.card.expires_at).toLocaleDateString(undefined, { month: "2-digit", year: "2-digit" })}`
           : "saved at PostFinance, not here"
         : "save one when you add credit",
     ),
@@ -385,8 +385,8 @@ async function creditSection(ctx) {
     [
       {
         label: "When",
-        cell: (p) => h("span", { class: "nowrap" }, dateTime(p.ts)),
-        sortKey: (p) => p.ts,
+        cell: (p) => h("span", { class: "nowrap" }, dateTime(p.created_at)),
+        sortKey: (p) => p.created_at,
         sortDir: "desc",
       },
       {
@@ -408,8 +408,8 @@ async function creditSection(ctx) {
       {
         label: "Credit",
         num: true,
-        cell: (p) => h("strong", {}, money(p.micros)),
-        sortKey: (p) => p.micros,
+        cell: (p) => h("strong", {}, money(p.amount_micros)),
+        sortKey: (p) => p.amount_micros,
       },
       {
         label: "VAT",
@@ -454,7 +454,7 @@ function returnBanner(ctx, p, a) {
     return banner(
       "good",
       { style: { marginBottom: "16px" } },
-      `Thank you: ${money(p.micros)} was added. The credit is now ${money(a.balance_micros)}.`,
+      `Thank you: ${money(p.amount_micros)} was added. The credit is now ${money(a.balance_micros)}.`,
     );
   }
   if (p.state === "failed") {
@@ -482,7 +482,7 @@ function returnBanner(ctx, p, a) {
 
 export function addCredit(ctx, res) {
   const a = res.account;
-  const vat = Number(res.vat_percent || 0);
+  const vatBP = res.vat_bp || 0;
   const amount = h("input", {
     class: "input",
     type: "number",
@@ -495,7 +495,7 @@ export function addCredit(ctx, res) {
   const save = h("input", { type: "checkbox", checked: !a.card });
   const total = h("div", { class: "price-sum" });
   // The same sums as the server's vatOn and feeOn, to the centime.
-  const vatOn = (m) => Math.round((m * vat) / 100 / 10000) * 10000;
+  const vatOn = (m) => Math.round((m * vatBP) / 10000 / 10000) * 10000;
   const feeOn = (m) =>
     res.fee_fixed_micros +
     Math.round(
@@ -509,9 +509,9 @@ export function addCredit(ctx, res) {
     if (total.hidden) return;
     const fee = feeOn(m);
     total.replaceChildren(
-      ...(vat
+      ...(vatBP
         ? [
-            h("span", {}, `VAT ${vat}%`),
+            h("span", {}, `VAT ${vatBP / 100}%`),
             h("span", { class: "num" }, money(vatOn(m))),
           ]
         : []),

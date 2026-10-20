@@ -95,8 +95,8 @@ type billingResponse struct {
 }
 
 type billingTotal struct {
-	Calls  int64 `json:"calls"`
-	Micros int64 `json:"micros"`
+	Calls        int64 `json:"calls"`
+	BilledMicros int64 `json:"billed_micros"`
 }
 
 func printBilling(w *table, res billingResponse) {
@@ -117,14 +117,14 @@ func printBilling(w *table, res billingResponse) {
 		_, _ = fmt.Fprintf(w, "%s\t%s/%s\t%d\t%d\t%d\t%d\t%d\t%s", org, b.Provider,
 			b.BackendModel, b.Calls, b.InputTokens, b.CachedInputTokens, b.CacheWriteTokens,
 			b.OutputTokens,
-			policy.FormatMoney(b.Micros))
+			policy.FormatMoney(b.BilledMicros))
 		if res.Payments {
 			_, _ = fmt.Fprintf(w, "\t%s", policy.FormatMoney(b.CreditMicros))
 		}
 		_, _ = fmt.Fprintln(w)
 	}
 	t := res.Total
-	_, _ = fmt.Fprintf(w, "total %s\t\t%d\t\t\t\t\t%s", res.Month, t.Calls, policy.FormatMoney(t.Micros))
+	_, _ = fmt.Fprintf(w, "total %s\t\t%d\t\t\t\t\t%s", res.Month, t.Calls, policy.FormatMoney(t.BilledMicros))
 	_, _ = fmt.Fprintln(w)
 }
 
@@ -196,8 +196,8 @@ func printCredit(w *table, res creditResponse) {
 	}
 	if a.Card != nil {
 		card := a.Card.Label
-		if a.Card.Expires != nil {
-			card += ", expires " + a.Card.Expires.Format("01/06")
+		if a.Card.ExpiresAt != nil {
+			card += ", expires " + a.Card.ExpiresAt.Format("01/06")
 		}
 		show(w, "card", card)
 	} else {
@@ -228,8 +228,8 @@ func printPayments(w *table, list []store.Payment, orgNames map[string]string) {
 		if orgNames != nil {
 			_, _ = fmt.Fprintf(w, "%s\t", labelled(orgNames, p.OrgID))
 		}
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", p.TS.Local().Format("2006-01-02 15:04"),
-			p.Kind, policy.FormatMoney(p.Micros), policy.FormatMoney(p.VATMicros), policy.FormatMoney(p.FeeMicros), p.State, p.Actor, dash(p.Note))
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", p.CreatedAt.Local().Format("2006-01-02 15:04"),
+			p.Kind, policy.FormatMoney(p.AmountMicros), policy.FormatMoney(p.VATMicros), policy.FormatMoney(p.FeeMicros), p.State, p.Actor, dash(p.Note))
 	}
 }
 
@@ -265,7 +265,7 @@ func (r *billingRun) topUp(ctx context.Context) error {
 	pm := res.Payment
 	fmt.Fprintf(os.Stderr, "Pay %s: %s credit, %s VAT and a %s transaction fee, on PostFinance "+
 		"Checkout. The credit is added once the payment is through:\n",
-		policy.FormatMoney(pm.Micros+pm.VATMicros+pm.FeeMicros), policy.FormatMoney(pm.Micros), policy.FormatMoney(pm.VATMicros), policy.FormatMoney(pm.FeeMicros))
+		policy.FormatMoney(pm.AmountMicros+pm.VATMicros+pm.FeeMicros), policy.FormatMoney(pm.AmountMicros), policy.FormatMoney(pm.VATMicros), policy.FormatMoney(pm.FeeMicros))
 	fmt.Println(res.URL)
 	return nil
 }
@@ -343,7 +343,7 @@ func (r *billingRun) grant(ctx context.Context) error {
 		return err
 	}
 	return out(r.asJSON, p, func(w *table) {
-		_, _ = fmt.Fprintf(w, "Granted %s to %s.\n", policy.FormatMoney(p.Micros), p.OrgID)
+		_, _ = fmt.Fprintf(w, "Granted %s to %s.\n", policy.FormatMoney(p.AmountMicros), p.OrgID)
 	})
 }
 

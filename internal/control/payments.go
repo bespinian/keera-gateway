@@ -88,7 +88,7 @@ func (s *Server) creditAccount(w http.ResponseWriter, r *http.Request, p *authn.
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"payments":         true,
-		"vat_percent":      payment.Percent(pay.VATBP),
+		"vat_bp":           pay.VATBP,
 		"fee_fixed_micros": feeFixed,
 		"fee_bp":           feeBP,
 		"fee_min_micros":   feeMinPart,
@@ -272,7 +272,7 @@ func (s *Server) createTopUp(w http.ResponseWriter, r *http.Request, p *authn.Pr
 		return
 	}
 	s.auditf(r, p, orgID, "billing.topup", "payment", pm.ID, map[string]any{
-		"micros": pm.Micros, "fee_micros": pm.FeeMicros, "save_card": pm.SaveCard,
+		"micros": pm.AmountMicros, "fee_micros": pm.FeeMicros, "save_card": pm.SaveCard,
 	})
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"payment": pm, "url": page})
 }
@@ -281,7 +281,7 @@ func (s *Server) createTopUp(w http.ResponseWriter, r *http.Request, p *authn.Pr
 func (pay *Payments) newPayment(orgID string, kind store.PaymentKind, micros int64,
 	actor string) store.Payment {
 	return store.Payment{
-		ID: id.New("pay"), OrgID: orgID, Kind: kind, Micros: micros,
+		ID: id.New("pay"), OrgID: orgID, Kind: kind, AmountMicros: micros,
 		VATMicros: vatOn(micros, pay.VATBP), FeeMicros: feeOn(micros),
 		Actor: actor, State: store.PaymentPending,
 	}
@@ -314,7 +314,7 @@ func feeOn(micros int64) int64 {
 func transactionFor(pm store.Payment, email string, vatBP int64) payment.NewTransaction {
 	item := payment.LineItem{
 		Name: "Keera credit", Quantity: 1, Type: "PRODUCT",
-		AmountIncludingTax: payment.Amount(pm.Micros + pm.VATMicros),
+		AmountIncludingTax: payment.Amount(pm.AmountMicros + pm.VATMicros),
 		UniqueID:           "credit", SKU: "keera-credit",
 	}
 	if vatBP > 0 {
@@ -392,7 +392,7 @@ func (s *Server) grantCredit(w http.ResponseWriter, r *http.Request, p *authn.Pr
 		return
 	}
 	g, err := s.st.Grant(r.Context(), store.Payment{
-		ID: id.New("pay"), OrgID: in.OrgID, Micros: in.AmountMicros, Actor: p.Actor(), Note: in.Note,
+		ID: id.New("pay"), OrgID: in.OrgID, AmountMicros: in.AmountMicros, Actor: p.Actor(), Note: in.Note,
 	})
 	if err != nil {
 		s.fail(w, err)
@@ -485,7 +485,7 @@ func (s *Server) settleWith(ctx context.Context, pm store.Payment, tx payment.Tr
 			how.Token = tx.TokenID()
 			how.Card = &store.SavedCard{Label: cmp.Or(card.Label, "Saved card")}
 			if !card.Expires.IsZero() {
-				how.Card.Expires = &card.Expires
+				how.Card.ExpiresAt = &card.Expires
 			}
 		}
 	case tx.Failed():
@@ -514,7 +514,7 @@ func (s *Server) settleWith(ctx context.Context, pm store.Payment, tx payment.Tr
 // auditPayment records how a payment ended, however it was settled.
 func (s *Server) auditPayment(ctx context.Context, settled store.Payment) {
 	if err := s.st.Audit(ctx, "payments", settled.OrgID, "billing.payment."+string(settled.State),
-		"payment", settled.ID, map[string]any{"micros": settled.Micros, "note": settled.Note}); err != nil {
+		"payment", settled.ID, map[string]any{"micros": settled.AmountMicros, "note": settled.Note}); err != nil {
 		s.log.Warn("writing audit entry failed", "error", err, "action", "billing.payment")
 	}
 }
@@ -522,7 +522,7 @@ func (s *Server) auditPayment(ctx context.Context, settled store.Payment) {
 // paidInFull reports whether a transaction is for what the payment asked.
 func paidInFull(pm store.Payment, tx payment.Transaction) bool {
 	cents := int64(math.Round(tx.AuthorizationAmount * 100))
-	return tx.Currency == policy.Currency && cents == (pm.Micros+pm.VATMicros+pm.FeeMicros)/10_000
+	return tx.Currency == policy.Currency && cents == (pm.AmountMicros+pm.VATMicros+pm.FeeMicros)/10_000
 }
 
 // refreshCredit lets this replica's gateway see a balance that changed. The
@@ -635,7 +635,7 @@ func (s *Server) settlePending(ctx context.Context, now time.Time) {
 		return
 	}
 	for _, pm := range list {
-		age := now.Sub(pm.TS)
+		age := now.Sub(pm.CreatedAt)
 		if pm.TransactionID == 0 {
 			if age > unstarted {
 				_ = s.settleFailed(ctx, pm, "the payment was interrupted before it started", true)

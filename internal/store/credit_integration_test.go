@@ -28,7 +28,7 @@ func TestWriteEventsTakesTheCredit(t *testing.T) {
 			Micros: credit * 2, CreditMicros: credit}}
 	}
 	if _, err := st.Grant(ctx, Payment{ID: id.New("pay"), OrgID: f.orgID,
-		Micros: 10_000_000, Actor: "operator", Note: "trial"}); err != nil {
+		AmountMicros: 10_000_000, Actor: "operator", Note: "trial"}); err != nil {
 		t.Fatalf("Grant: %v", err)
 	}
 	now := time.Now()
@@ -81,7 +81,7 @@ func TestACheckIsBilledWithoutAUsageRow(t *testing.T) {
 func TestAPaymentIsCreditedOnce(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
-	p := Payment{ID: id.New("pay"), OrgID: f.orgID, Kind: PaymentTopUp, Micros: 100_000_000,
+	p := Payment{ID: id.New("pay"), OrgID: f.orgID, Kind: PaymentTopUp, AmountMicros: 100_000_000,
 		VATMicros: 8_100_000, SaveCard: true, Actor: "ada@example.ch"}
 	if err := st.CreatePayment(ctx, p); err != nil {
 		t.Fatalf("CreatePayment: %v", err)
@@ -114,12 +114,12 @@ func TestAPaymentIsCreditedOnce(t *testing.T) {
 func TestPendingPaymentsOfSkipsEndedOnes(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
-	pending := Payment{ID: id.New("pay"), OrgID: f.orgID, Kind: PaymentTopUp, Micros: 10_000_000}
+	pending := Payment{ID: id.New("pay"), OrgID: f.orgID, Kind: PaymentTopUp, AmountMicros: 10_000_000}
 	if err := st.CreatePayment(ctx, pending); err != nil {
 		t.Fatalf("CreatePayment: %v", err)
 	}
 	for range 6 {
-		g := Payment{ID: id.New("pay"), OrgID: f.orgID, Kind: PaymentTopUp, Micros: 1_000_000}
+		g := Payment{ID: id.New("pay"), OrgID: f.orgID, Kind: PaymentTopUp, AmountMicros: 1_000_000}
 		if err := st.CreatePayment(ctx, g); err != nil {
 			t.Fatalf("CreatePayment: %v", err)
 		}
@@ -143,7 +143,7 @@ func TestANewCardReplacesTheSavedOne(t *testing.T) {
 	f := newFixture(t, st, ctx)
 	pay := func(token int64) int64 {
 		p := Payment{ID: id.New("pay"), OrgID: f.orgID, Kind: PaymentTopUp,
-			Micros: 20_000_000, SaveCard: true, Actor: "ada@example.ch"}
+			AmountMicros: 20_000_000, SaveCard: true, Actor: "ada@example.ch"}
 		if err := st.CreatePayment(ctx, p); err != nil {
 			t.Fatal(err)
 		}
@@ -189,7 +189,7 @@ func TestAnAccountBelowItsThresholdIsDueATopUp(t *testing.T) {
 	if due() {
 		t.Error("due without a card")
 	}
-	seed := Payment{ID: id.New("pay"), OrgID: f.orgID, Kind: PaymentTopUp, Micros: 20_000_000,
+	seed := Payment{ID: id.New("pay"), OrgID: f.orgID, Kind: PaymentTopUp, AmountMicros: 20_000_000,
 		SaveCard: true, Actor: "ada@example.ch"}
 	if err := st.CreatePayment(ctx, seed); err != nil {
 		t.Fatal(err)
@@ -202,7 +202,7 @@ func TestAnAccountBelowItsThresholdIsDueATopUp(t *testing.T) {
 		t.Fatal("not due at CHF 20.00 with a threshold of CHF 50.00")
 	}
 
-	auto := Payment{ID: id.New("pay"), OrgID: f.orgID, Kind: PaymentAuto, Micros: amount,
+	auto := Payment{ID: id.New("pay"), OrgID: f.orgID, Kind: PaymentAuto, AmountMicros: amount,
 		Actor: "automatic top-up"}
 	if err := st.CreatePayment(ctx, auto); err != nil {
 		t.Fatal(err)
@@ -238,7 +238,7 @@ func TestAnAccountBelowItsThresholdIsDueATopUp(t *testing.T) {
 func TestADeletedOrganisationsCardIsNotCharged(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
-	p := Payment{ID: id.New("pay"), OrgID: f.orgID, Kind: PaymentTopUp, Micros: 20_000_000,
+	p := Payment{ID: id.New("pay"), OrgID: f.orgID, Kind: PaymentTopUp, AmountMicros: 20_000_000,
 		SaveCard: true, Actor: "ada@example.ch"}
 	if err := st.CreatePayment(ctx, p); err != nil {
 		t.Fatal(err)
@@ -298,7 +298,7 @@ func TestTheFirstPaymentLiftsTheLimit(t *testing.T) {
 	}
 
 	if _, err := st.Grant(ctx, Payment{ID: id.New("pay"), OrgID: f.orgID,
-		Micros: 5_000_000, Actor: "operator", Note: "welcome"}); err != nil {
+		AmountMicros: 5_000_000, Actor: "operator", Note: "welcome"}); err != nil {
 		t.Fatalf("Grant: %v", err)
 	}
 	if !isLimited() {
@@ -306,7 +306,7 @@ func TestTheFirstPaymentLiftsTheLimit(t *testing.T) {
 	}
 
 	failed := Payment{ID: id.New("pay"), OrgID: f.orgID, Kind: PaymentTopUp,
-		Micros: 20_000_000, Actor: "ada@example.ch"}
+		AmountMicros: 20_000_000, Actor: "ada@example.ch"}
 	if err := st.CreatePayment(ctx, failed); err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +318,7 @@ func TestTheFirstPaymentLiftsTheLimit(t *testing.T) {
 	}
 
 	paid := Payment{ID: id.New("pay"), OrgID: f.orgID, Kind: PaymentTopUp,
-		Micros: 20_000_000, Actor: "ada@example.ch"}
+		AmountMicros: 20_000_000, Actor: "ada@example.ch"}
 	if err := st.CreatePayment(ctx, paid); err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func TestTheFirstPaymentLiftsTheLimit(t *testing.T) {
 
 	// Only the first payment lifts it, so only that one has to be announced.
 	again := Payment{ID: id.New("pay"), OrgID: f.orgID, Kind: PaymentTopUp,
-		Micros: 20_000_000, Actor: "ada@example.ch"}
+		AmountMicros: 20_000_000, Actor: "ada@example.ch"}
 	if err := st.CreatePayment(ctx, again); err != nil {
 		t.Fatal(err)
 	}

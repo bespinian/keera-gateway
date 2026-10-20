@@ -198,7 +198,7 @@ func TestAdministratorsReadOnlyTheirOwnBill(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("rows = %v, want org_1's September only", rows)
 	}
-	if r := rows[0].(map[string]any); r["org_id"] != "org_1" || r["calls"] != 2.0 || r["micros"] != 3000.0 {
+	if r := rows[0].(map[string]any); r["org_id"] != "org_1" || r["calls"] != 2.0 || r["billed_micros"] != 3000.0 {
 		t.Errorf("row = %v", r)
 	}
 
@@ -215,7 +215,7 @@ func TestAdministratorsReadOnlyTheirOwnBill(t *testing.T) {
 		t.Fatalf("operator rows = %v, want both organisations", rows)
 	}
 	total := out["total"].(map[string]any)
-	if total["micros"] != 4500.0 || total["calls"] != 3.0 {
+	if total["billed_micros"] != 4500.0 || total["calls"] != 3.0 {
 		t.Errorf("total = %v", total)
 	}
 

@@ -163,9 +163,9 @@ type Sandbox struct {
 
 	CreatedAt time.Time  `json:"created_at"`
 	ReadyAt   *time.Time `json:"ready_at,omitempty"`
-	// ActiveAt is when somebody last had a connection open to it, or when it
+	// LastActiveAt is when somebody last had a connection open to it, or when it
 	// last came back to ready. Idle suspension counts from here.
-	ActiveAt     *time.Time `json:"active_at,omitempty"`
+	LastActiveAt *time.Time `json:"last_active_at,omitempty"`
 	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
 	SuspendedAt  *time.Time `json:"suspended_at,omitempty"`
 	TerminatedAt *time.Time `json:"terminated_at,omitempty"`
@@ -200,7 +200,7 @@ func scanSandbox(r row) (Sandbox, error) {
 		&sb.Image, &sb.Isolation, &sb.CPU, &sb.Memory, &sb.Disk,
 		&sb.KeyID, &sb.SessionKey, &sb.Repo, &sb.Branch, &sb.AuthorizedKeys, &sb.GitCredentialID,
 		&sb.Node, &sb.Address, &sb.Backing,
-		&sb.CreatedAt, &sb.ReadyAt, &sb.ActiveAt, &sb.ExpiresAt, &sb.SuspendedAt, &sb.TerminatedAt,
+		&sb.CreatedAt, &sb.ReadyAt, &sb.LastActiveAt, &sb.ExpiresAt, &sb.SuspendedAt, &sb.TerminatedAt,
 		&sb.RunningSeconds, &sb.AccountedAt)
 	return sb, err
 }

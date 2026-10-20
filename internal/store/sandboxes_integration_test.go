@@ -222,10 +222,10 @@ func TestObserveSandboxTimestamps(t *testing.T) {
 		t.Error("suspended_at should be cleared once a sandbox is running again")
 	}
 	// active_at does move, so idle suspension counts from the resume.
-	if again.ActiveAt == nil || again.ActiveAt.Before(firstReady) {
-		t.Errorf("active_at = %v on resume, want it at or after %v", again.ActiveAt, firstReady)
+	if again.LastActiveAt == nil || again.LastActiveAt.Before(firstReady) {
+		t.Errorf("active_at = %v on resume, want it at or after %v", again.LastActiveAt, firstReady)
 	}
-	resumedAt := *again.ActiveAt
+	resumedAt := *again.LastActiveAt
 	if err := st.TouchSandbox(ctx, sb.ID); err != nil {
 		t.Fatalf("TouchSandbox: %v", err)
 	}
@@ -233,8 +233,8 @@ func TestObserveSandboxTimestamps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Sandbox: %v", err)
 	}
-	if touched.ActiveAt == nil || touched.ActiveAt.Before(resumedAt) {
-		t.Errorf("active_at = %v after a touch, want it at or after %v", touched.ActiveAt, resumedAt)
+	if touched.LastActiveAt == nil || touched.LastActiveAt.Before(resumedAt) {
+		t.Errorf("active_at = %v after a touch, want it at or after %v", touched.LastActiveAt, resumedAt)
 	}
 
 	terminated := mustObserve(policy.SandboxTerminated, "terminated")

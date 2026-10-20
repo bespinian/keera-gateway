@@ -614,7 +614,6 @@ func (s *Store) RenameKey(ctx context.Context, id, name string) (old string, err
 // then, so a second activation would be a rotation in disguise.
 var ErrKeyActive = errors.New("store: the key is already activated")
 
-
 // ActivateKey gives a pending key its secret, and a new name when name is
 // not empty. It returns the key as it now is.
 //

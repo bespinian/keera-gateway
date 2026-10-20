@@ -1130,7 +1130,7 @@ func (m *Manager) reconcile(ctx context.Context, sb store.Sandbox, now time.Time
 // was connected or it came back to ready, whichever is latest.
 func idleSince(sb store.Sandbox) time.Time {
 	since := sb.CreatedAt
-	for _, t := range []*time.Time{sb.ReadyAt, sb.ActiveAt} {
+	for _, t := range []*time.Time{sb.ReadyAt, sb.LastActiveAt} {
 		if t != nil && t.After(since) {
 			since = *t
 		}

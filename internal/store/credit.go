@@ -29,8 +29,8 @@ type CreditAccount struct {
 }
 
 type SavedCard struct {
-	Label   string     `json:"label"`
-	Expires *time.Time `json:"expires,omitempty"`
+	Label     string     `json:"label"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
 const creditColumns = `org_id, balance_micros, topup_below_micros, topup_micros,
@@ -48,7 +48,7 @@ func scanCredit(r row) (CreditAccount, error) {
 		&token, &label, &expires, &topUp, &a.Invoiced)
 	if token != nil {
 		a.CardToken = *token
-		a.Card = &SavedCard{Expires: expires}
+		a.Card = &SavedCard{ExpiresAt: expires}
 		if label != nil {
 			a.Card.Label = *label
 		}
@@ -178,12 +178,12 @@ const (
 
 // Payment is money into a credit account.
 type Payment struct {
-	ID        string      `json:"id"`
-	OrgID     string      `json:"org_id"`
-	TS        time.Time   `json:"ts"`
-	Kind      PaymentKind `json:"kind"`
-	Micros    int64       `json:"micros"`
-	VATMicros int64       `json:"vat_micros"`
+	ID           string      `json:"id"`
+	OrgID        string      `json:"org_id"`
+	CreatedAt    time.Time   `json:"created_at"`
+	Kind         PaymentKind `json:"kind"`
+	AmountMicros int64       `json:"amount_micros"`
+	VATMicros    int64       `json:"vat_micros"`
 	// FeeMicros is the transaction fee charged on top. It is not credited.
 	FeeMicros int64        `json:"fee_micros"`
 	State     PaymentState `json:"state"`
@@ -204,7 +204,7 @@ func scanPayment(r row) (Payment, error) {
 		tx   *int64
 		note *string
 	)
-	err := r.Scan(&p.ID, &p.OrgID, &p.TS, &p.Kind, &p.Micros, &p.VATMicros, &p.FeeMicros, &p.State,
+	err := r.Scan(&p.ID, &p.OrgID, &p.CreatedAt, &p.Kind, &p.AmountMicros, &p.VATMicros, &p.FeeMicros, &p.State,
 		&p.SaveCard, &tx, &p.Actor, &note, &p.SettledAt)
 	if tx != nil {
 		p.TransactionID = *tx
@@ -223,7 +223,7 @@ var ErrTopUpUnderway = errors.New("store: an automatic top-up is under way")
 func (s *Store) CreatePayment(ctx context.Context, p Payment) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO payments (id, org_id, kind, micros, vat_micros,
 		fee_micros, state, save_card, actor) VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8)`,
-		p.ID, p.OrgID, p.Kind, p.Micros, p.VATMicros, p.FeeMicros, p.SaveCard, p.Actor)
+		p.ID, p.OrgID, p.Kind, p.AmountMicros, p.VATMicros, p.FeeMicros, p.SaveCard, p.Actor)
 	if uniqueOn(err, "payments_one_auto_idx") {
 		return ErrTopUpUnderway
 	}
@@ -242,12 +242,12 @@ func (s *Store) Grant(ctx context.Context, p Payment) (out Payment, err error) {
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		out, err = scanPayment(tx.QueryRow(ctx, `INSERT INTO payments (id, org_id, kind, micros,
 			state, actor, note, settled_at) VALUES ($1,$2,$3,$4,'paid',$5,$6,now())
-			RETURNING `+paymentColumns, p.ID, p.OrgID, PaymentGrant, p.Micros, p.Actor,
+			RETURNING `+paymentColumns, p.ID, p.OrgID, PaymentGrant, p.AmountMicros, p.Actor,
 			nullable(p.Note)))
 		if err != nil {
 			return err
 		}
-		return addCredit(ctx, tx, p.OrgID, p.Micros)
+		return addCredit(ctx, tx, p.OrgID, p.AmountMicros)
 	})
 	if err != nil {
 		return Payment{}, err
@@ -314,7 +314,7 @@ func (s *Store) Settle(ctx context.Context, paymentID string, how Settlement) (S
 		out.Payment, out.Ended = p, true
 		switch {
 		case how.Paid:
-			if err := addCredit(ctx, tx, p.OrgID, p.Micros); err != nil {
+			if err := addCredit(ctx, tx, p.OrgID, p.AmountMicros); err != nil {
 				return err
 			}
 			// Paying once lifts the limit a signed-up organisation starts with.
@@ -333,7 +333,7 @@ func (s *Store) Settle(ctx context.Context, paymentID string, how Settlement) (S
 			if how.Card != nil && how.Token != 0 {
 				if _, err := tx.Exec(ctx, `UPDATE credit_accounts SET card_token = $2,
 					card_label = $3, card_expires = $4 WHERE org_id = $1`,
-					p.OrgID, how.Token, how.Card.Label, how.Card.Expires); err != nil {
+					p.OrgID, how.Token, how.Card.Label, how.Card.ExpiresAt); err != nil {
 					return err
 				}
 				if old != nil && *old != how.Token {

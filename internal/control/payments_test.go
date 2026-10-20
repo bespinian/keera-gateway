@@ -366,7 +366,7 @@ func TestAnAccountThatRanLowIsToppedUpFromTheSavedCard(t *testing.T) {
 
 	// Far below zero, say by a burst of traffic: no run of charges follows.
 	if _, err := st.Grant(ctx, store.Payment{ID: "pay_burst", OrgID: "org_1",
-		Micros: -1_000_000_000, Actor: "test", Note: "burst"}); err != nil {
+		AmountMicros: -1_000_000_000, Actor: "test", Note: "burst"}); err != nil {
 		t.Fatal(err)
 	}
 	s.topUpDue(ctx)
