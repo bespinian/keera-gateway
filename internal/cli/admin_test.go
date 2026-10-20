@@ -490,7 +490,7 @@ func TestKeyRotateAsksTheControlPlane(t *testing.T) {
 		t.Fatal(err)
 	}
 	sent := f.request("POST", "/v1/keys/key_old/rotate").body
-	if sent["name"] != "new laptop" || sent["expires_in"] != "" {
+	if _, set := sent["expires_in_seconds"]; sent["name"] != "new laptop" || set {
 		t.Errorf("sent %v, want the new name and no expiry", sent)
 	}
 	if f.called("POST", "/v1/keys") || f.called("DELETE", "/v1/keys/key_old") {
@@ -1750,8 +1750,8 @@ func TestKeyCreateExpiresByDefault(t *testing.T) {
 		flags []string
 		want  any
 	}{
-		{nil, "2160h"},
-		{[]string{"--expires", "720h"}, "720h"},
+		{nil, float64(90 * 24 * 3600)},
+		{[]string{"--expires", "720h"}, float64(720 * 3600)},
 		{[]string{"--expires", "never"}, nil},
 	} {
 		f := newFakeControl(t, map[string]any{
@@ -1762,8 +1762,8 @@ func TestKeyCreateExpiresByDefault(t *testing.T) {
 		if err := keyCmd(context.Background(), args); err != nil {
 			t.Fatal(err)
 		}
-		if got := f.request("POST", "/v1/keys").body["expires_in"]; got != tc.want {
-			t.Errorf("%v: expires_in = %v, want %v", tc.flags, got, tc.want)
+		if got := f.request("POST", "/v1/keys").body["expires_in_seconds"]; got != tc.want {
+			t.Errorf("%v: expires_in_seconds = %v, want %v", tc.flags, got, tc.want)
 		}
 	}
 	if err := keyCmd(context.Background(), []string{"rotate", "laptop", "--expires", "never"}); err == nil {
@@ -1786,7 +1786,7 @@ func TestKeyCreateExpiresOnADay(t *testing.T) {
 	sent := f.request("POST", "/v1/keys").body
 	raw, _ := sent["expires_at"].(string)
 	at, err := time.Parse(time.RFC3339, raw)
-	if err != nil || sent["expires_in"] != nil {
+	if err != nil || sent["expires_in_seconds"] != nil {
 		t.Fatalf("sent %v, want only expires_at", sent)
 	}
 	if at.Local().Format(time.DateOnly) != day || at.Local().Hour() != 23 {

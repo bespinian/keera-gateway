@@ -160,7 +160,7 @@ func (r *sandboxRun) create(ctx context.Context) error {
 		"authorized_keys": keys,
 	}
 	if r.ttl > 0 {
-		body["ttl"] = r.ttl.String()
+		body["ttl_seconds"] = int64(r.ttl / time.Second)
 	}
 	var sb store.Sandbox
 	if err := r.c.do(ctx, "POST", "/v1/sandboxes", body, &sb); err != nil {
@@ -228,7 +228,7 @@ func (r *sandboxRun) extend(ctx context.Context) error {
 	}
 	body := map[string]any{}
 	if r.ttl > 0 {
-		body["ttl"] = r.ttl.String()
+		body["ttl_seconds"] = int64(r.ttl / time.Second)
 	}
 	var res struct {
 		Name      string    `json:"name"`

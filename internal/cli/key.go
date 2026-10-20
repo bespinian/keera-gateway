@@ -34,7 +34,7 @@ type keyRun struct {
 // defaultKeyLife is how long a new key lasts unless --expires says otherwise.
 // The panel offers the same default, so a key does not live for ever because
 // nobody chose.
-const defaultKeyLife = "2160h"
+const defaultKeyLife = 90 * 24 * time.Hour
 
 // createdKey is a new key as the control API returns it, secret included. A
 // pending key has no secret yet.
@@ -58,7 +58,7 @@ func keyCmd(ctx context.Context, args []string) error {
 	fs.StringVar(&r.name, "name", "", "what this key is called; what it is for, in a few words")
 	fs.StringVar(&r.expires, "expires", "",
 		"how long the key lasts, such as 720h, the last day it works, such as 2026-12-31, "+
-			"or 'never'. A new key lasts "+defaultKeyLife+" (90 days) unless told otherwise")
+			"or 'never'. A new key lasts 90 days unless told otherwise")
 	r.reword("rotate", "expires", "how long the new key lasts, such as 720h, or the last day "+
 		"it works, such as 2026-12-31 (default: the old key's lifetime)")
 	fs.BoolVar(&r.subscription, "subscription", false,
@@ -124,7 +124,7 @@ func (r *keyRun) create(ctx context.Context) error {
 	// The control API reads no expiry as a key that never expires.
 	switch r.expires {
 	case "":
-		req["expires_in"] = defaultKeyLife
+		req["expires_in_seconds"] = int64(defaultKeyLife / time.Second)
 	case "never":
 	default:
 		field, v, err := expiryField(r.expires)
@@ -308,11 +308,14 @@ func (r *keyRun) rotate(ctx context.Context) error {
 			"the old one's lifetime unless --expires gives another")
 	}
 	// Checked before the prompt, so a mistyped day does not cost a confirmation.
-	field, v, err := expiryField(r.expires)
-	if err != nil {
-		return err
+	var expiry map[string]any
+	if r.expires != "" {
+		field, v, err := expiryField(r.expires)
+		if err != nil {
+			return err
+		}
+		expiry = map[string]any{field: v}
 	}
-	expiry := map[string]string{field: v}
 	old, err := r.find(ctx)
 	if err != nil {
 		return err
@@ -426,8 +429,8 @@ type rotatedKey struct {
 // transaction, so it never leaves both keys live or drops the key's limits.
 // An empty name or expiry keeps the old key's. expiry holds what expiryField
 // gave.
-func rotateKey(ctx context.Context, c *client, keyID, name string, expiry map[string]string) (rotatedKey, error) {
-	req := map[string]string{"name": name, "expires_in": ""}
+func rotateKey(ctx context.Context, c *client, keyID, name string, expiry map[string]any) (rotatedKey, error) {
+	req := map[string]any{"name": name}
 	maps.Copy(req, expiry)
 	var rotated rotatedKey
 	err := c.do(ctx, "POST", "/v1/keys/"+url.PathEscape(keyID)+"/rotate", req, &rotated)
@@ -435,16 +438,21 @@ func rotateKey(ctx context.Context, c *client, keyID, name string, expiry map[st
 }
 
 // expiryField is --expires as a key request carries it. A lifetime such as
-// 720h goes as it is. A day such as 2026-12-31 is the last day the key works,
+// 720h goes in seconds. A day such as 2026-12-31 is the last day the key works,
 // so it expires at the end of that day, in local time.
-func expiryField(expires string) (field, value string, err error) {
+func expiryField(expires string) (field string, value any, err error) {
 	day, err := time.ParseInLocation(time.DateOnly, expires, time.Local)
 	if err != nil {
-		return "expires_in", expires, nil
+		life, err := time.ParseDuration(expires)
+		if err != nil || life < time.Second {
+			return "", nil, fmt.Errorf("--expires %s is neither a lifetime such as 720h nor "+
+				"a day such as 2026-12-31", expires)
+		}
+		return "expires_in_seconds", int64(life / time.Second), nil
 	}
 	end := day.AddDate(0, 0, 1).Add(-time.Second)
 	if !end.After(time.Now()) {
-		return "", "", fmt.Errorf("--expires %s has already passed; give a day from today on", expires)
+		return "", nil, fmt.Errorf("--expires %s has already passed; give a day from today on", expires)
 	}
 	return "expires_at", end.Format(time.RFC3339), nil
 }

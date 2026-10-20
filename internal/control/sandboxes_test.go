@@ -290,7 +290,7 @@ func TestSandboxHonoursProjectGuardrail(t *testing.T) {
 	create := func(name, project string, into any) int {
 		t.Helper()
 		body := map[string]any{
-			"org_id": "org_1", "name": name, "class": "standard", "ttl": "8h",
+			"org_id": "org_1", "name": name, "class": "standard", "ttl_seconds": 8 * 3600,
 			"authorized_keys": []string{"ssh-ed25519 AAAA test"},
 		}
 		if project != "" {

@@ -3,6 +3,7 @@ package control
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -695,7 +696,7 @@ func (s *Server) createKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		UserID    string         `json:"user_id"`
 		Name      string         `json:"name"`
 		Kind      policy.KeyKind `json:"kind"`
-		ExpiresIn string         `json:"expires_in"`
+		ExpiresIn *int64         `json:"expires_in_seconds"`
 		ExpiresAt *time.Time     `json:"expires_at"`
 		// Pending leaves the key for the person it is for to activate. Until
 		// then it has no secret, so the administrator never sees it.
@@ -862,7 +863,7 @@ func (s *Server) activateKey(w http.ResponseWriter, r *http.Request, p *authn.Pr
 func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	var in struct {
 		Name      string     `json:"name"`
-		ExpiresIn string     `json:"expires_in"`
+		ExpiresIn *int64     `json:"expires_in_seconds"`
 		ExpiresAt *time.Time `json:"expires_at"`
 	}
 	if !readJSON(w, r, &in) {
@@ -878,7 +879,7 @@ func (s *Server) rotateKey(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		badRequest(w, subscriptionsOff)
 		return
 	}
-	if (in.ExpiresIn != "" || in.ExpiresAt != nil) && !p.CanAdminOrg(owner) {
+	if (in.ExpiresIn != nil || in.ExpiresAt != nil) && !p.CanAdminOrg(owner) {
 		forbid(w, "a member cannot choose how long a key lasts; "+
 			"the new key keeps the old one's lifetime")
 		return
@@ -1008,12 +1009,12 @@ func (s *Server) keyToManage(w http.ResponseWriter, r *http.Request, p *authn.Pr
 	return o, true
 }
 
-// keyExpiry reads when a key expires: 'expires_in' is a lifetime from now,
-// 'expires_at' a moment. Neither means the key does not expire.
-func keyExpiry(w http.ResponseWriter, in string, at *time.Time) (*time.Time, bool) {
+// keyExpiry reads when a key expires: 'expires_in_seconds' is a lifetime from
+// now, 'expires_at' a moment. Neither means the key does not expire.
+func keyExpiry(w http.ResponseWriter, in *int64, at *time.Time) (*time.Time, bool) {
 	if at != nil {
-		if in != "" {
-			badRequest(w, "send 'expires_in' or 'expires_at', not both")
+		if in != nil {
+			badRequest(w, "send 'expires_in_seconds' or 'expires_at', not both")
 			return nil, false
 		}
 		if !at.After(time.Now()) {
@@ -1022,16 +1023,25 @@ func keyExpiry(w http.ResponseWriter, in string, at *time.Time) (*time.Time, boo
 		}
 		return at, true
 	}
-	if in == "" {
-		return nil, true
-	}
-	d, err := time.ParseDuration(in)
-	if err != nil || d <= 0 {
-		badRequest(w, "'expires_in' must be a positive duration such as 720h")
-		return nil, false
+	d, ok := seconds(w, "expires_in_seconds", in)
+	if !ok || d == 0 {
+		return nil, ok
 	}
 	t := time.Now().Add(d)
 	return &t, true
+}
+
+// seconds reads a lifetime given in whole seconds, as every duration on this
+// API is. Absent is zero; given, it must be positive.
+func seconds(w http.ResponseWriter, field string, v *int64) (time.Duration, bool) {
+	switch {
+	case v == nil:
+		return 0, true
+	case *v <= 0 || *v > int64(math.MaxInt64/time.Second):
+		badRequest(w, fmt.Sprintf("'%s' must be a positive number of seconds", field))
+		return 0, false
+	}
+	return time.Duration(*v) * time.Second, true
 }
 
 func (s *Server) revokeKey(w http.ResponseWriter, r *http.Request, p *authn.Principal) {

@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/bespinian/keera-gateway/internal/authn"
 	"github.com/bespinian/keera-gateway/internal/connect"
@@ -210,9 +211,9 @@ func planMachineKey(ctx context.Context, c *client, orgID string, me identity, p
 	}
 	return keyStep{issue: func(ctx context.Context, c *client) (createdKey, error) {
 		var created createdKey
-		err := c.do(ctx, "POST", "/v1/keys", map[string]string{
+		err := c.do(ctx, "POST", "/v1/keys", map[string]any{
 			"org_id": orgID, "project_id": inProject, "user_id": me.UserID, "name": name,
-			"kind": string(kind), "expires_in": defaultKeyLife,
+			"kind": string(kind), "expires_in_seconds": int64(defaultKeyLife / time.Second),
 		}, &created)
 		return created, err
 	}}, nil

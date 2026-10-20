@@ -419,30 +419,32 @@ func TestNoSubscriptionKeyWhileSubscriptionsAreOff(t *testing.T) {
 func TestKeyExpiry(t *testing.T) {
 	future := time.Now().Add(48 * time.Hour)
 	past := time.Now().Add(-time.Hour)
+	month, zero, negative := int64(30*24*3600), int64(0), int64(-3600)
 	for _, tc := range []struct {
-		in     string
+		in     *int64
 		at     *time.Time
 		ok     bool
 		expiry bool
 	}{
-		{"", nil, true, false},
-		{"720h", nil, true, true},
-		{"", &future, true, true},
-		{"-1h", nil, false, false},
-		{"720h", &future, false, false},
-		{"", &past, false, false},
+		{nil, nil, true, false},
+		{&month, nil, true, true},
+		{nil, &future, true, true},
+		{&zero, nil, false, false},
+		{&negative, nil, false, false},
+		{&month, &future, false, false},
+		{nil, &past, false, false},
 	} {
 		w := httptest.NewRecorder()
 		got, ok := keyExpiry(w, tc.in, tc.at)
 		if ok != tc.ok || (got != nil) != tc.expiry {
-			t.Errorf("keyExpiry(%q, %v) = %v, %v; want ok %v, expiry %v",
+			t.Errorf("keyExpiry(%v, %v) = %v, %v; want ok %v, expiry %v",
 				tc.in, tc.at, got, ok, tc.ok, tc.expiry)
 		}
 		if !ok && w.Code != http.StatusBadRequest {
-			t.Errorf("keyExpiry(%q, %v) answered %d, want 400", tc.in, tc.at, w.Code)
+			t.Errorf("keyExpiry(%v, %v) answered %d, want 400", tc.in, tc.at, w.Code)
 		}
 	}
-	if got, _ := keyExpiry(httptest.NewRecorder(), "", &future); !got.Equal(future) {
+	if got, _ := keyExpiry(httptest.NewRecorder(), nil, &future); !got.Equal(future) {
 		t.Errorf("expires_at = %v, want %v", got, future)
 	}
 }

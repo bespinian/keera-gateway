@@ -722,7 +722,10 @@ function issueKey(ctx, projects, users, last = {}) {
         name.focus();
         return false;
       }
-      let lifetime = { expires_in: expiry.value };
+      const span = EXPIRIES.find((e) => e.value === expiry.value);
+      let lifetime = span?.hours
+        ? { expires_in_seconds: span.hours * 3600 }
+        : {};
       if (expiry.value === "date") {
         if (!lastDay.value) {
           lastDay.focus();

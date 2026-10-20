@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/bespinian/keera-gateway/internal/authn"
 	"github.com/bespinian/keera-gateway/internal/catalog"
@@ -306,20 +305,6 @@ func (s *Server) sandboxToChange(w http.ResponseWriter, r *http.Request, p *auth
 	return sb, true
 }
 
-// sandboxTTL reads a requested lifetime. Empty means the default, which the
-// manager decides.
-func sandboxTTL(w http.ResponseWriter, v string) (time.Duration, bool) {
-	if v == "" {
-		return 0, true
-	}
-	d, err := time.ParseDuration(v)
-	if err != nil || d <= 0 {
-		badRequest(w, "'ttl' must be a positive duration such as 4h")
-		return 0, false
-	}
-	return d, true
-}
-
 func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	var in struct {
 		OrgID     string         `json:"org_id"`
@@ -327,10 +312,12 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request, p *authn.
 		Name      string         `json:"name"`
 		Class     string         `json:"class"`
 		Purpose   policy.Purpose `json:"purpose"`
-		TTL       string         `json:"ttl"`
-		Repo      string         `json:"repo"`
-		Branch    string         `json:"branch"`
-		Task      string         `json:"task"`
+		// TTL is the lifetime asked for, or nil for the default, which the
+		// manager decides.
+		TTL    *int64 `json:"ttl_seconds"`
+		Repo   string `json:"repo"`
+		Branch string `json:"branch"`
+		Task   string `json:"task"`
 		// AuthorizedKeys are the ssh public keys that may open a shell in it.
 		AuthorizedKeys []string          `json:"authorized_keys"`
 		Env            map[string]string `json:"env"`
@@ -363,7 +350,7 @@ func (s *Server) createSandbox(w http.ResponseWriter, r *http.Request, p *authn.
 			return
 		}
 	}
-	ttl, ok := sandboxTTL(w, in.TTL)
+	ttl, ok := seconds(w, "ttl_seconds", in.TTL)
 	if !ok {
 		return
 	}
@@ -425,7 +412,7 @@ func (s *Server) terminateSandbox(w http.ResponseWriter, r *http.Request, p *aut
 
 func (s *Server) extendSandbox(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	var in struct {
-		TTL string `json:"ttl"`
+		TTL *int64 `json:"ttl_seconds"`
 	}
 	// An empty body is fine: `keera sandbox extend <name>` sends none.
 	if err := httpx.ReadJSON(r, &in); err != nil && !errors.Is(err, io.EOF) {
@@ -436,7 +423,7 @@ func (s *Server) extendSandbox(w http.ResponseWriter, r *http.Request, p *authn.
 	if !ok {
 		return
 	}
-	ttl, ok := sandboxTTL(w, in.TTL)
+	ttl, ok := seconds(w, "ttl_seconds", in.TTL)
 	if !ok {
 		return
 	}

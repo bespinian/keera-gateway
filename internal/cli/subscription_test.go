@@ -274,8 +274,8 @@ func TestMachineKeyIssuedByAnAdministratorExpires(t *testing.T) {
 	if _, _, err := machineKey(context.Background(), newClient(), "org_1", admin, "", policy.KeySubscription); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.request("POST", "/v1/keys").body["expires_in"]; got != defaultKeyLife {
-		t.Errorf("expires_in = %v, want %s", got, defaultKeyLife)
+	if got := f.request("POST", "/v1/keys").body["expires_in_seconds"]; got != defaultKeyLife.Seconds() {
+		t.Errorf("expires_in_seconds = %v, want %v", got, defaultKeyLife.Seconds())
 	}
 }
 

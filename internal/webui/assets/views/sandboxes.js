@@ -466,11 +466,27 @@ async function act(ctx, fn, message) {
   }
 }
 
-function extend(ctx, s) {
-  const ttl = h("input", {
+/** lifetimeInput asks for a lifetime in hours. */
+function lifetimeInput() {
+  return h("input", {
     class: "input",
+    type: "number",
+    min: "0.1",
+    step: "any",
+    inputmode: "decimal",
     placeholder: "the class's default",
   });
+}
+
+/** lifetime is what a lifetime input asks for, in the seconds the API takes,
+ *  or nothing for the class's default. */
+function lifetime(input) {
+  const hours = input.value.trim();
+  return hours ? { ttl_seconds: Math.round(Number(hours) * 3600) } : {};
+}
+
+function extend(ctx, s) {
+  const ttl = lifetimeInput();
   formModal({
     title: `Extend ${s.name}`,
     subtitle:
@@ -479,12 +495,12 @@ function extend(ctx, s) {
     body: h(
       "form",
       {},
-      field("Lifetime from now", ttl, "Leave empty for the class default."),
+      field("Hours from now", ttl, "Leave empty for the class default."),
     ),
     submitLabel: "Extend",
     done: (res) => `${s.name} now expires ${dateTime(res.expires_at)}`,
     ctx,
-    submit: () => api.extendSandbox(s.id, ttl.value.trim()),
+    submit: () => api.extendSandbox(s.id, lifetime(ttl)),
   });
 }
 
@@ -568,10 +584,7 @@ function newSandbox(ctx, classes, limits, projects) {
   });
   const branch = h("input", { class: "input", placeholder: "main" });
   const repos = (limits && limits.allowed_repos) || [];
-  const ttl = h("input", {
-    class: "input",
-    placeholder: "the class's default",
-  });
+  const ttl = lifetimeInput();
   const key = h("textarea", {
     class: "input",
     rows: 3,
@@ -619,7 +632,7 @@ function newSandbox(ctx, classes, limits, projects) {
         : null,
       repos.length ? field("Branch", branch) : null,
       field(
-        "Lifetime",
+        "Lifetime in hours",
         ttl,
         limits && limits.max_sandbox_ttl_seconds
           ? `Capped at ${duration(limits.max_sandbox_ttl_seconds * 1000)} for ${orgNameOf(ctx)}.`
@@ -661,7 +674,7 @@ function newSandbox(ctx, classes, limits, projects) {
         project_id: project.value,
         repo: repo.value.trim(),
         branch: branch.value.trim(),
-        ttl: ttl.value.trim(),
+        ...lifetime(ttl),
         authorized_keys: keys,
       });
     },

@@ -222,8 +222,8 @@ export const api = {
   // DELETE is the method; terminate is the word, because the row outlives the
   // machine.
   terminateSandbox: (id) => request("DELETE", path`/v1/sandboxes/${id}`),
-  extendSandbox: (id, ttl) =>
-    request("POST", path`/v1/sandboxes/${id}/extend`, { ttl }),
+  extendSandbox: (id, lifetime) =>
+    request("POST", path`/v1/sandboxes/${id}/extend`, lifetime),
   suspendSandbox: (id) => request("POST", path`/v1/sandboxes/${id}/suspend`),
   resumeSandbox: (id) => request("POST", path`/v1/sandboxes/${id}/resume`),
 
