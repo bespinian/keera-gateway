@@ -4,6 +4,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/bespinian/keera-gateway/internal/authn"
 )
 
 // Where a command-line sign-in comes back to decides where a credential is
@@ -54,6 +56,67 @@ func TestOnlyALoopbackListenerCanReceiveASignIn(t *testing.T) {
 	}
 }
 
+// Keera Chat takes sign-ins back at one exact address, and only on a
+// deployment that names it. Anything near it is still refused, so the rule
+// stays "loopback, or that one address".
+func TestKeeraChatCanReceiveASignInWhereTheOperatorNamedIt(t *testing.T) {
+	const chat = "https://chat.example.ch"
+	for _, tc := range []struct {
+		raw     string
+		chatURL string
+		ok      bool
+	}{
+		{"https://chat.example.ch/auth/callback", chat, true},
+		// Loopback still works beside it.
+		{"http://127.0.0.1:1234/callback", chat, true},
+
+		// Not named: the gateway does not know this chat.
+		{"https://chat.example.ch/auth/callback", "", false},
+		// Near misses: another path, a query, another host, another scheme.
+		{"https://chat.example.ch/auth/callback/", chat, false},
+		{"https://chat.example.ch/other", chat, false},
+		{"https://chat.example.ch/auth/callback?next=x", chat, false},
+		{"https://chat.example.ch.evil.example/auth/callback", chat, false},
+		{"http://chat.example.ch/auth/callback", chat, false},
+		{"https://user@chat.example.ch/auth/callback", chat, false},
+	} {
+		got, err := handOverTo(tc.raw, tc.chatURL)
+		if tc.ok != (err == nil) {
+			t.Errorf("handOverTo(%q, %q) = %q, %v; want ok=%v", tc.raw, tc.chatURL, got, err, tc.ok)
+		}
+		if tc.ok && got == "" {
+			t.Errorf("handOverTo(%q, %q) accepted it but returned no address", tc.raw, tc.chatURL)
+		}
+	}
+
+	// A chat this gateway does not know gets a message an operator can act
+	// on, without the address, which anyone can write into a link.
+	_, err := handOverTo("https://evil.example/auth/callback", "")
+	if err == nil || !strings.Contains(err.Error(), "KEERA_CHAT_URL") ||
+		strings.Contains(err.Error(), "evil") {
+		t.Errorf("unknown chat: %v", err)
+	}
+}
+
+// Only a credential no browser holds may name Keera Chat as the client. A
+// session cookie is the panel's own playground, whatever the page says.
+func TestOnlyKeeraChatsSignInMayNameKeeraChat(t *testing.T) {
+	for _, tc := range []struct {
+		via    authn.Method
+		stated string
+		want   string
+	}{
+		{authn.MethodCLI, "keera-chat", "keera-chat"},
+		{authn.MethodSession, "keera-chat", "keera-playground"},
+		{authn.MethodCLI, "claude-code", "keera-playground"},
+		{authn.MethodSession, "", "keera-playground"},
+	} {
+		if got := playgroundClient(&authn.Principal{Via: tc.via}, tc.stated); got != tc.want {
+			t.Errorf("playgroundClient(%s, %q) = %q, want %q", tc.via, tc.stated, got, tc.want)
+		}
+	}
+}
+
 // A sign-in with a loopback port but no proof key could be finished by
 // anything on that port. It is refused at the start, before the person types a
 // password.
@@ -63,7 +126,7 @@ func TestAHalfWrittenHandshakeIsRefusedAtTheStart(t *testing.T) {
 		"cli_challenge": {strings.Repeat("a", 43)},
 		"cli_state":     {"state"},
 	}
-	if got, err := cliLoginFrom(good); err != nil || got.Redirect == "" {
+	if got, err := cliLoginFrom(good, ""); err != nil || got.Redirect == "" {
 		t.Fatalf("cliLoginFrom(complete) = %+v, %v; want it accepted", got, err)
 	}
 
@@ -79,14 +142,14 @@ func TestAHalfWrittenHandshakeIsRefusedAtTheStart(t *testing.T) {
 					q[k] = v
 				}
 			}
-			if got, err := cliLoginFrom(q); err == nil {
+			if got, err := cliLoginFrom(q, ""); err == nil {
 				t.Errorf("cliLoginFrom(%v) = %+v, want it refused", q, got)
 			}
 		})
 	}
 
 	// The ordinary sign-in names none of them.
-	got, err := cliLoginFrom(url.Values{"next": {"/projects"}})
+	got, err := cliLoginFrom(url.Values{"next": {"/projects"}}, "")
 	if err != nil || got != (cliLogin{}) {
 		t.Errorf("cliLoginFrom(panel sign-in) = %+v, %v; want an empty handshake", got, err)
 	}

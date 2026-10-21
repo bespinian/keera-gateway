@@ -50,6 +50,8 @@ var agents = []struct {
 	// The panel's playground states its name in the header. Its User-Agent is
 	// the operator's browser, which says nothing about the deployment.
 	{key: "keera-playground", label: "Keera Playground"},
+	// Keera Chat sends through the playground route and names itself there.
+	{key: "keera-chat", label: "Keera Chat"},
 	{key: "openai-sdk", label: "OpenAI SDK", generic: true,
 		products: []string{"openai", "openai-python", "openai-node", "async-openai"}},
 	{key: "anthropic-sdk", label: "Anthropic SDK", generic: true,

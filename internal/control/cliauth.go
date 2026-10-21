@@ -29,6 +29,10 @@ import (
 //   - The code is worthless without the PKCE verifier the command line kept.
 //     Any local process can bind a loopback port, but only the one that
 //     started the sign-in has the verifier.
+//
+// Keera Chat signs people in the same way, from its server instead of a
+// terminal. It cannot listen on the browser's loopback, so the one address
+// an operator names in KEERA_CHAT_URL is accepted too, exactly.
 
 // cliLogin is the loopback handshake a sign-in was started with. It is empty
 // for an ordinary sign-in that ends in the panel.
@@ -38,9 +42,14 @@ type cliLogin struct {
 	State     string
 }
 
+// ChatCallbackPath is where Keera Chat takes a sign-in back, under
+// KEERA_CHAT_URL.
+const ChatCallbackPath = "/auth/callback"
+
 // cliLoginFrom reads the loopback handshake from a sign-in URL. A handshake
-// with parts missing is refused rather than completed without them.
-func cliLoginFrom(q url.Values) (cliLogin, error) {
+// with parts missing is refused rather than completed without them. chatURL
+// is Keera Chat's origin, or empty.
+func cliLoginFrom(q url.Values, chatURL string) (cliLogin, error) {
 	c := cliLogin{
 		Redirect:  strings.TrimSpace(q.Get("cli_redirect")),
 		Challenge: strings.TrimSpace(q.Get("cli_challenge")),
@@ -49,7 +58,7 @@ func cliLoginFrom(q url.Values) (cliLogin, error) {
 	if c.Redirect == "" && c.Challenge == "" && c.State == "" {
 		return cliLogin{}, nil
 	}
-	redirect, err := loopbackRedirect(c.Redirect)
+	redirect, err := handOverTo(c.Redirect, chatURL)
 	if err != nil {
 		return cliLogin{}, err
 	}
@@ -63,6 +72,22 @@ func cliLoginFrom(q url.Values) (cliLogin, error) {
 			"update the keera command line")
 	}
 	return c, nil
+}
+
+// handOverTo accepts a loopback listener, or Keera Chat's callback when the
+// deployment names Keera Chat. Chat is matched whole, so no path or query of
+// a caller's choosing reaches it.
+func handOverTo(raw, chatURL string) (string, error) {
+	if chatURL != "" && raw == chatURL+ChatCallbackPath {
+		return raw, nil
+	}
+	redirect, err := loopbackRedirect(raw)
+	if err != nil && strings.HasSuffix(raw, ChatCallbackPath) {
+		// The address is not repeated: anyone can write it into a link.
+		return "", errors.New("this sign-in came from a Keera Chat this gateway does " +
+			"not know; an operator allows it by setting KEERA_CHAT_URL")
+	}
+	return redirect, err
 }
 
 // loopbackRedirect accepts the address of a listener on the browser's own

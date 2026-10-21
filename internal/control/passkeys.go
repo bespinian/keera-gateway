@@ -105,7 +105,7 @@ func (s *Server) passkeyLogin(provider string) bool {
 // signs in with one: the flow keeps the loopback hand-over, and the panel
 // asks for the passkey.
 func (s *Server) startPasskeyLogin(w http.ResponseWriter, r *http.Request) {
-	cli, err := cliLoginFrom(r.URL.Query())
+	cli, err := cliLoginFrom(r.URL.Query(), s.opts.ChatURL)
 	if err != nil {
 		s.signInFailed(w, r, err)
 		return

@@ -272,6 +272,26 @@ func TestASessionGapBelowAMinuteIsTheRequestLog(t *testing.T) {
 	}
 }
 
+// KEERA_CHAT_URL decides where a sign-in may be handed, so anything but a
+// bare origin stops the start rather than making that address wrong.
+func TestTheChatURLIsABareOrigin(t *testing.T) {
+	c, err := loadWith(t, valid(map[string]string{"KEERA_CHAT_URL": "https://chat.example.ch/"}))
+	if err != nil || c.ChatURL != "https://chat.example.ch" {
+		t.Fatalf("ChatURL = %q, %v; want the origin without its slash", c.ChatURL, err)
+	}
+	for _, bad := range []string{
+		"chat.example.ch",
+		"ftp://chat.example.ch",
+		"https://chat.example.ch/chat",
+		"https://chat.example.ch?x=1",
+		"https://me@chat.example.ch",
+	} {
+		if _, err := loadWith(t, valid(map[string]string{"KEERA_CHAT_URL": bad})); err == nil {
+			t.Errorf("KEERA_CHAT_URL=%q was accepted", bad)
+		}
+	}
+}
+
 func TestSandboxSettingsAreOnlyCheckedWhenSandboxesAreOn(t *testing.T) {
 	// Without a driver the setting does nothing, and refusing to start over it
 	// would turn a leftover line in an .env into an outage.

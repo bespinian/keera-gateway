@@ -59,9 +59,19 @@ func (s *Server) playgroundChat(w http.ResponseWriter, r *http.Request, p *authn
 	// test recorder does not support it, which is fine.
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 
-	// Name the client, so the map shows the playground rather than the
-	// operator's browser. It is set, not defaulted, so the browser cannot
-	// claim to be something else.
-	r.Header.Set(connect.ClientHeader, "keera-playground")
+	r.Header.Set(connect.ClientHeader, playgroundClient(p, r.Header.Get(connect.ClientHeader)))
 	s.opts.Gateway.ServeChat(w, r, res)
+}
+
+// playgroundClient names the client of a playground request, so the map shows
+// the playground rather than the operator's browser. It is set, not
+// defaulted, so a browser cannot claim to be something else.
+//
+// Keera Chat sends through this route too. It signs in like the command
+// line, with a token no browser holds, and may say it is Keera Chat.
+func playgroundClient(p *authn.Principal, stated string) string {
+	if p.Via == authn.MethodCLI && stated == "keera-chat" {
+		return "keera-chat"
+	}
+	return "keera-playground"
 }

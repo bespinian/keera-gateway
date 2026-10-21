@@ -555,6 +555,29 @@ remote machine and the browser is on yours. Forward the printed port with
 `ssh -L`, or sign in on a machine with a browser and copy the credentials file
 across. If you need this often, use the operator key instead.
 
+## Signing in to Keera Chat
+
+Keera Chat is a chat in the browser
+for the people behind a gateway. It signs them in the way `keera login` does,
+with its server in the place of the terminal: the person signs in here, and
+Keera Chat gets a credential that acts as them. Their messages then go out with
+their own keys, under the same guardrails, budgets and audit log.
+
+Keera Chat runs on its own address, which is not a loopback port, so the gateway
+has to be told it:
+
+```sh
+KEERA_CHAT_URL=https://chat.example.ch
+```
+
+The gateway then also hands sign-ins to `https://chat.example.ch/auth/callback`,
+that address exactly, with the same one-time code and proof key as for the
+command line. Unset, only loopback addresses are allowed, which is enough for a
+Keera Chat on `http://127.0.0.1` during development.
+
+Keera Chat's requests show as **Keera Chat** under **My clients** and on the
+map.
+
 ## Moving off localhost
 
 Put the gateway's port behind a TLS terminator, then change two things: the

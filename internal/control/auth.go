@@ -74,7 +74,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	// Where this sign-in ends: usually the panel, or for `keera login` a
 	// loopback port. See cliauth.go.
-	cli, err := cliLoginFrom(r.URL.Query())
+	cli, err := cliLoginFrom(r.URL.Query(), s.opts.ChatURL)
 	if err != nil {
 		s.signInFailed(w, r, err)
 		return

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"net/netip"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -107,6 +108,10 @@ type Config struct {
 	// link in a refusal. Empty uses the request's Host header for the first
 	// two and leaves the link out.
 	PublicURL string
+	// ChatURL is Keera Chat's origin. A sign-in started there may hand back
+	// to its /auth/callback, as `keera login` hands back to a loopback port.
+	// Empty, the default, allows only loopback. See docs/sso.md.
+	ChatURL string
 	// SecureCookies marks the session cookie Secure. On by default when the
 	// public URL is https; off lets a plain-http demo on localhost sign in.
 	SecureCookies bool
@@ -148,6 +153,7 @@ func Load() (Config, error) {
 		UI:                    envBool("KEERA_UI", true),
 		ClaudeSubscriptions:   envBool("KEERA_CLAUDE_SUBSCRIPTIONS", false),
 		PublicURL:             strings.TrimRight(env("KEERA_PUBLIC_URL", ""), "/"),
+		ChatURL:               strings.TrimRight(env("KEERA_CHAT_URL", ""), "/"),
 	}
 	c.OIDC = oidcProviders(c.PublicURL)
 	c.SecureCookies = envBool("KEERA_SECURE_COOKIES", c.servedOverHTTPS())
@@ -196,7 +202,8 @@ func (c Config) servedOverHTTPS() bool {
 
 func (c Config) validate() error {
 	for _, check := range []func() error{c.validateCredentials, c.validateLogging,
-		c.validateDBConns, c.validateRetention, c.validateSessionGap, c.Sandbox.validate, c.validateOIDC} {
+		c.validateDBConns, c.validateRetention, c.validateSessionGap, c.Sandbox.validate, c.validateOIDC,
+		c.validateChatURL} {
 		if err := check(); err != nil {
 			return err
 		}
@@ -291,6 +298,21 @@ func (c Config) validateSessionGap() error {
 	if c.SessionGap < time.Minute {
 		return fmt.Errorf("KEERA_SESSION_GAP is %s; below a minute every request "+
 			"is its own session, which is the request log", c.SessionGap)
+	}
+	return nil
+}
+
+// validateChatURL accepts a bare origin. Sign-ins are handed to exactly one
+// address under it, so a path or a query would only make that address wrong.
+func (c Config) validateChatURL() error {
+	if c.ChatURL == "" {
+		return nil
+	}
+	u, err := url.Parse(c.ChatURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
+		u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("KEERA_CHAT_URL must be the address a browser reaches Keera Chat on, "+
+			"without a path, such as https://chat.example.ch, not %q", c.ChatURL)
 	}
 	return nil
 }

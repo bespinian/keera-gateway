@@ -59,6 +59,9 @@ type Options struct {
 	// put into the client configurations the panel hands out. Empty falls back
 	// to the request's Host header.
 	PublicURL string
+	// ChatURL is Keera Chat's origin. A sign-in may hand over to its
+	// callback as well as to a loopback port. Empty allows only loopback.
+	ChatURL string
 	// Gateway is the data plane the playground and the checks send through.
 	Gateway *gateway.Server
 	// SessionGap is how long an agent conversation may go quiet before the

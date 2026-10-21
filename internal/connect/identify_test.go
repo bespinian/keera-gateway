@@ -105,6 +105,9 @@ func TestClientLabelAgreesWithTheCatalogue(t *testing.T) {
 			t.Errorf("ClientLabel(%q) = %q, but the catalogue calls it %q", c.ID, got, c.Label)
 		}
 	}
+	if got := ClientLabel("keera-chat"); got != "Keera Chat" {
+		t.Errorf("ClientLabel(keera-chat) = %q, want Keera Chat", got)
+	}
 	if got := ClientLabel("aider"); got != "Aider" {
 		t.Errorf("ClientLabel(aider) = %q, want its own label", got)
 	}
