@@ -285,7 +285,7 @@ model, are forwarded without being translated
   `kind: embedding`, the full address in `backends` (for Infomaniak, with your
   product id in it), `location: ch` and their own prices.
 - **Where to read more:** Phoeniqs on
-  [documentation.kvant.cloud](https://documentation.kvant.cloud/maas/active-models/),
+  [documentation.phoeniqs.com](https://documentation.phoeniqs.com/maas/active-models/),
   CSCS on [docs.cscs.ch](https://docs.cscs.ch/services/inference/api/), its
   [prices](https://ui.inference.cscs.ch/pricing) and its
   [status page](https://inference.status.cscs.ch).
