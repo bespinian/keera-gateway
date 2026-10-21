@@ -309,12 +309,6 @@ function tokenShare(scene) {
   return Math.round((outside / total) * 100);
 }
 
-function outsideCost(scene) {
-  let micros = 0;
-  for (const m of scene.outside) micros += m.cell.cost_micros;
-  return micros;
-}
-
 /* ----------------------------------------------------------------- layout */
 
 /** layout places every box for a canvas this wide and returns its height.
@@ -784,15 +778,11 @@ function bands(g, scene, c) {
   g.fillStyle = c.warn;
   g.fillText("LEAVES YOUR NETWORK", 6, geo.lineY + 26);
 
-  const note = scene.outside.length
-    ? tokenShare(scene) +
-      "% of tokens in this period, " +
-      money(outsideCost(scene)) +
-      " spent outside"
-    : "Nothing leaves: every model is served from your own network";
+  if (scene.outside.length) return;
+  const note = "Nothing leaves: every model is served from your own network";
   g.font = "12px " + c.font;
   g.textAlign = "right";
-  g.fillStyle = scene.outside.length ? c.warn : c.muted;
+  g.fillStyle = c.muted;
   g.fillText(fit(g, note, geo.width - 240), geo.width - 6, geo.lineY + 26);
   g.textAlign = "left";
 }
