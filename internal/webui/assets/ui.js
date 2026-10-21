@@ -260,6 +260,7 @@ export const icons = {
   audit:
     "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M9 13h6M9 17h4",
   orgs: "M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M9 13h.01M9 17h.01M15 9h.01M15 13h.01M15 17h.01",
+  external: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3",
   signout: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9",
   plus: "M12 5v14M5 12h14",
   passkey:
@@ -1372,8 +1373,8 @@ function order(key, dir) {
 let openMenu = null;
 
 /** menu opens a list of actions next to anchor. Each item is
- *  { label, icon, onClick, hint }, a separator, or a node, which is
- *  shown as it is. It closes on a click outside, on Escape, and after an
+ *  { label, icon, onClick, hint }, or { label, icon, href } for a link
+ *  that opens in a new tab, a separator, or a node, which is shown as it is. It closes on a click outside, on Escape, and after an
  *  action. */
 export function menu(anchor, items, { up = false } = {}) {
   // A second click on the anchor closes its menu.
@@ -1392,11 +1393,14 @@ export function menu(anchor, items, { up = false } = {}) {
     }
     list.append(
       h(
-        "button",
+        item.href ? "a" : "button",
         {
           class: "menu-item",
           role: "menuitem",
-          type: "button",
+          type: item.href ? null : "button",
+          href: item.href || null,
+          target: item.href ? "_blank" : null,
+          rel: item.href ? "noopener" : null,
           onClick: (e) => {
             closeMenu();
             if (item.onClick) item.onClick(e);

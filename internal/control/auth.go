@@ -608,6 +608,8 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request, p *authn.Principal) 
 		"roles_from_directory": s.opts.Providers.AdminFromDirectory(),
 		// Where a developer's editor sends its requests.
 		"gateway_url": s.gatewayURL(r),
+		// Where Keera Chat runs, so the panel can link to it. Empty without one.
+		"chat_url": s.opts.ChatURL,
 		// Whether this deployment lends out sandboxes. Without a driver the
 		// panel does not show them at all.
 		"sandboxes": s.opts.Sandboxes != nil,

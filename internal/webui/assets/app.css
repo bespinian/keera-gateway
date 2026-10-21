@@ -2075,6 +2075,7 @@ a.pill-button:hover {
 .menu-item:focus-visible {
   background: var(--surface-3);
   outline: none;
+  text-decoration: none;
 }
 .menu-item > svg {
   flex: none;

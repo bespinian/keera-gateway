@@ -77,7 +77,7 @@ sandbox classes new organisations start with, and the
 | `KEERA_SESSION_GAP`             | `30m`               | Idle time between two tasks; at least `1m`. See [sessions.md](sessions.md).                                         |
 | `KEERA_SECURE_COOKIES`          | follows the scheme  | Marks the session cookie `Secure`. On when `KEERA_PUBLIC_URL` is https.                                             |
 | `KEERA_CLAUDE_SUBSCRIPTIONS`    | `false`             | Lets Claude Code on a Claude plan through. See [subscriptions.md](subscriptions.md).                                |
-| `KEERA_CHAT_URL`                | unset               | Keera Chat's address, so people can sign in to it. See [sso.md](sso.md#signing-in-to-keera-chat).                  |
+| `KEERA_CHAT_URL`                | unset               | Keera Chat's address, so people can sign in to it and the panel links to it. See [sso.md](sso.md#signing-in-to-keera-chat). |
 
 Retention below `24h` is refused: deleted rows cannot be recovered, and a
 typo like `10m` would delete the day's request log.
