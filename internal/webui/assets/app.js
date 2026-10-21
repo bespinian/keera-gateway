@@ -15,6 +15,8 @@ import {
   banner,
   capitalise,
   personName,
+  initials,
+  menu,
 } from "./ui.js";
 import { signIn, passkeySignInFlow } from "./views/signin.js";
 import { signUp, signUpFlow } from "./views/signup.js";
@@ -515,8 +517,7 @@ function navItem(r) {
 function markHome() {
   const home = routes[0];
   const ctx = { state, orgID: state.orgID };
-  const due =
-    firstRunDue(ctx, state.setup) || memberRunDue(ctx, state.access);
+  const due = firstRunDue(ctx, state.setup) || memberRunDue(ctx, state.access);
   home.label = due ? "Getting started" : "Dashboard";
   home.icon = due ? "start" : "dashboard";
   home.highlight = due;
@@ -570,24 +571,32 @@ function renderShell() {
       { class: "sidebar-foot" },
       collapseButton,
       h(
-        "div",
-        { class: "account" },
+        "button",
+        {
+          class: "account",
+          type: "button",
+          title: state.me.email || "Operator key",
+          "aria-haspopup": "menu",
+          onClick: (e) => accountMenu(e.currentTarget),
+        },
         h(
-          "div",
-          { class: "account-id" },
+          "span",
+          { class: "avatar", "aria-hidden": "true" },
+          state.me.email
+            ? initials(state.me.name, state.me.email)
+            : icon(icons.keys),
+        ),
+        h(
+          "span",
+          { class: "account-id nav-text" },
           h(
-            "div",
-            { class: "account-email", title: state.me.email || "" },
+            "span",
+            { class: "account-name" },
             state.me.email ? personName(state.me) : "Operator key",
           ),
-          h("div", { class: "account-role" }, state.me.role),
+          h("span", { class: "account-role" }, state.me.role),
         ),
-        state.me.passkey_account
-          ? iconButton(icons.passkey, "Your passkeys", managePasskeys, {
-              quiet: true,
-            })
-          : null,
-        iconButton(icons.signout, "Sign out", signOut, { quiet: true }),
+        h("span", { class: "nav-text account-more" }, icon(icons.more)),
       ),
     ),
   );
@@ -619,17 +628,17 @@ function renderTopbar() {
 }
 
 function topbar() {
-  const menu = iconButton(icons.menu, "Menu", () => setDrawer(!drawerOpen), {
+  const toggle = iconButton(icons.menu, "Menu", () => setDrawer(!drawerOpen), {
     quiet: true,
     cls: "nav-toggle",
     "aria-controls": "sidebar",
   });
-  applyDrawerButton(menu);
+  applyDrawerButton(toggle);
 
   const bar = h(
     "header",
     { class: "topbar" },
-    menu,
+    toggle,
     h(
       "div",
       { class: "stack" },
@@ -682,10 +691,6 @@ function topbar() {
   } else if (state.me.org_name) {
     bar.append(h("span", { class: "pill" }, state.me.org_name));
   }
-
-  bar.append(
-    iconButton(icons.theme, "Switch theme", cycleTheme, { quiet: true }),
-  );
   return bar;
 }
 
@@ -832,7 +837,43 @@ async function renderRoute() {
   }
 }
 
-/* ------------------------------------------------------------- sign out */
+/* --------------------------------------------------------------- account */
+
+function accountMenu(anchor) {
+  const me = state.me;
+  menu(
+    anchor,
+    [
+      me.email
+        ? h(
+            "div",
+            { class: "menu-who" },
+            h("strong", {}, personName(me)),
+            me.name ? h("span", {}, me.email) : null,
+          )
+        : null,
+      me.email ? { separator: true } : null,
+      me.passkey_account
+        ? {
+            label: "Your passkeys",
+            icon: icons.passkey,
+            onClick: managePasskeys,
+          }
+        : null,
+      {
+        label: "Theme",
+        icon: icons.theme,
+        hint: { system: "Follows your system", light: "Light", dark: "Dark" }[
+          currentTheme()
+        ],
+        onClick: cycleTheme,
+      },
+      { separator: true },
+      { label: "Sign out", icon: icons.signout, onClick: signOut },
+    ],
+    { up: true },
+  );
+}
 
 async function signOut() {
   try {

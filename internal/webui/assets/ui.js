@@ -117,6 +117,15 @@ export function personName(u) {
   return u.name || u.email;
 }
 
+/** initials of a name or an address, for the avatar. */
+export function initials(name, email) {
+  const words = (name || "").trim().split(/\s+/).filter(Boolean);
+  if (words.length >= 2)
+    return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (email || "?").slice(0, 2).toUpperCase();
+}
+
 export function capitalise(word) {
   return word ? word[0].toUpperCase() + word.slice(1) : "";
 }
@@ -258,6 +267,7 @@ export const icons = {
   copy: "M20 9h-9a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2zM5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1",
   close: "M18 6L6 18M6 6l12 12",
   menu: "M3 6h18M3 12h18M3 18h18",
+  more: "M5 12h.01M12 12h.01M19 12h.01",
   theme: "M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z",
   check: "M20 6L9 17l-5-5",
   playground:
@@ -442,7 +452,8 @@ const idpMarks = {
   microsoft: {
     viewBox: "0 0 23 23",
     path: "M0 0h11v11H0zM12 0h11v11H12zM0 12h11v11H0zM12 12h11v11H12z",
-  },  github: {
+  },
+  github: {
     viewBox: "0 0 24 24",
     path: "M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12",
   },
@@ -1354,6 +1365,110 @@ function order(key, dir) {
       }) * dir
     );
   };
+}
+
+/* ------------------------------------------------------------------ menu */
+
+let openMenu = null;
+
+/** menu opens a list of actions next to anchor. Each item is
+ *  { label, icon, onClick, hint }, a separator, or a node, which is
+ *  shown as it is. It closes on a click outside, on Escape, and after an
+ *  action. */
+export function menu(anchor, items, { up = false } = {}) {
+  // A second click on the anchor closes its menu.
+  if (anchor.getAttribute("aria-expanded") === "true") return closeMenu();
+  closeMenu();
+  const list = h("div", { class: "menu", role: "menu" });
+  for (const item of items) {
+    if (!item) continue;
+    if (item instanceof Node) {
+      list.append(item);
+      continue;
+    }
+    if (item.separator) {
+      list.append(h("div", { class: "menu-sep", role: "separator" }));
+      continue;
+    }
+    list.append(
+      h(
+        "button",
+        {
+          class: "menu-item",
+          role: "menuitem",
+          type: "button",
+          onClick: (e) => {
+            closeMenu();
+            if (item.onClick) item.onClick(e);
+          },
+        },
+        icon(item.icon),
+        h(
+          "span",
+          { class: "menu-label" },
+          h("span", {}, item.label),
+          item.hint ? h("span", { class: "menu-hint" }, item.hint) : null,
+        ),
+      ),
+    );
+  }
+  document.body.append(list);
+  place(list, anchor, up);
+  anchor.setAttribute("aria-expanded", "true");
+
+  const onDown = (e) => {
+    if (!list.contains(e.target) && !anchor.contains(e.target)) closeMenu();
+  };
+  const onKey = (e) => {
+    if (e.key === "Escape") {
+      closeMenu();
+      anchor.focus();
+    }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const items = [...list.querySelectorAll(".menu-item")];
+      const i = items.indexOf(document.activeElement);
+      const next = e.key === "ArrowDown" ? i + 1 : i - 1;
+      items[(next + items.length) % items.length]?.focus();
+    }
+  };
+  setTimeout(() => document.addEventListener("mousedown", onDown), 0);
+  document.addEventListener("keydown", onKey);
+  window.addEventListener("resize", closeMenu);
+  openMenu = () => {
+    list.remove();
+    anchor.setAttribute("aria-expanded", "false");
+    document.removeEventListener("mousedown", onDown);
+    document.removeEventListener("keydown", onKey);
+    window.removeEventListener("resize", closeMenu);
+  };
+  list.querySelector(".menu-item")?.focus({ preventScroll: true });
+  return list;
+}
+
+export function closeMenu() {
+  if (openMenu) {
+    const close = openMenu;
+    openMenu = null;
+    close();
+  }
+}
+
+/** place puts a floating element beside its anchor, kept on screen. The page
+ *  is zoomed by --ui-scale: measurements come back zoomed, but top and left
+ *  are zoomed again when applied, so they are divided by the zoom first. */
+function place(el, anchor, up) {
+  const a = anchor.getBoundingClientRect();
+  const zoom = a.width / anchor.offsetWidth || 1;
+  const m = el.getBoundingClientRect();
+  const gap = 6;
+  let top = up ? a.top - m.height - gap : a.bottom + gap;
+  if (!up && top + m.height > window.innerHeight - 8)
+    top = a.top - m.height - gap;
+  if (top < 8) top = 8;
+  const left = Math.max(8, Math.min(a.left, window.innerWidth - m.width - 8));
+  el.style.top = top / zoom + "px";
+  el.style.left = left / zoom + "px";
 }
 
 /** modal opens a dialog and returns a close function.
