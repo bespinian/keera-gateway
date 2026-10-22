@@ -276,6 +276,7 @@ func (s *Server) Handler() http.Handler {
 	route("DELETE /v1/billing/account/card", s.forgetCard)
 	route("POST /v1/billing/topups", s.createTopUp)
 	route("GET /v1/billing/payments", s.listPayments)
+	route("GET /v1/billing/payments/{id}/receipt", s.paymentReceipt)
 	route("POST /v1/billing/grants", s.grantCredit)
 	route("GET /v1/audit", s.audit)
 	route("GET /v1/requests", s.requests)

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bespinian/keera-gateway/internal/authn"
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/payment"
 	"github.com/bespinian/keera-gateway/internal/registry"
@@ -30,6 +31,8 @@ type fakePostFinance struct {
 	// charged is the state a charge on a saved card ends in.
 	charged payment.Transaction
 	deleted []int64
+	// noInvoice makes PostFinance refuse every invoice document.
+	noInvoice bool
 }
 
 func newFakePostFinance(t *testing.T) *fakePostFinance {
@@ -74,6 +77,17 @@ func newFakePostFinance(t *testing.T) *fakePostFinance {
 			f.mu.Unlock()
 			_ = json.NewEncoder(w).Encode(tx)
 		})
+	mux.HandleFunc("GET "+base+"/transactions/{id}/invoice-document", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		refuse := f.noInvoice
+		f.mu.Unlock()
+		if refuse {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"title": "Invoice", "mimeType": "application/pdf",
+			"data": []byte(fmt.Sprintf("%%PDF-1.7 invoice of %d", pathID(r)))})
+	})
 	mux.HandleFunc("GET "+base+"/tokens/{id}/active-version", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"name":"•••• 4821","expiresOn":"2028-09-30T00:00:00Z",
 			"paymentMethodBrand":{"name":{"en-US":"Visa"}}}`))
@@ -507,6 +521,68 @@ func TestWhoMayDoWhatWithCredit(t *testing.T) {
 	}
 	if _, err := reg.Budgets().HoldCredit("org_2", 0); err != nil {
 		t.Errorf("an organisation billed by invoice was refused: %v", err)
+	}
+}
+
+func receipt(s *Server, p *authn.Principal, paymentID string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet,
+		httpx.ControlPrefix+"/v1/billing/payments/"+paymentID+"/receipt", nil)
+	r.SetPathValue("id", paymentID)
+	s.paymentReceipt(w, r, p)
+	return w
+}
+
+func TestAPaidPaymentHasPostFinancesInvoiceAsItsReceipt(t *testing.T) {
+	st, ctx := routerStore(t)
+	pf := newFakePostFinance(t)
+	s, _ := paymentServer(ctx, t, st, pf)
+	tx := topUp(t, s, pf)
+	paid, err := st.PaymentByTransaction(ctx, tx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := receipt(s, admin("org_1"), paid.ID)
+	if w.Code != http.StatusOK {
+		t.Fatalf("receipt: %d %s", w.Code, w.Body)
+	}
+	if got := w.Body.String(); got != fmt.Sprintf("%%PDF-1.7 invoice of %d", tx) {
+		t.Errorf("body = %q", got)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/pdf" {
+		t.Errorf("content type = %q", ct)
+	}
+	if cd := w.Header().Get("Content-Disposition"); !strings.HasPrefix(cd, "attachment;") ||
+		!strings.Contains(cd, paid.ID+".pdf") {
+		t.Errorf("disposition = %q", cd)
+	}
+	if w := receipt(s, operator(), paid.ID); w.Code != http.StatusOK {
+		t.Errorf("an operator: %d %s", w.Code, w.Body)
+	}
+
+	g := invoke(s.grantCredit, operator(), http.MethodPost, "/v1/billing/grants",
+		`{"org_id":"org_1","amount_micros":25000000,"note":"trial"}`)
+	var grant store.Payment
+	_ = json.Unmarshal(g.Body.Bytes(), &grant)
+	pf.mu.Lock()
+	pf.noInvoice = true
+	pf.mu.Unlock()
+	tests := []struct {
+		name string
+		w    *httptest.ResponseRecorder
+		want int
+	}{
+		{"a member", receipt(s, member("org_1"), paid.ID), http.StatusForbidden},
+		{"another organisation's admin", receipt(s, admin("org_2"), paid.ID), http.StatusNotFound},
+		{"no such payment", receipt(s, admin("org_1"), "pay_nope"), http.StatusNotFound},
+		{"a grant", receipt(s, admin("org_1"), grant.ID), http.StatusConflict},
+		{"PostFinance has none", receipt(s, admin("org_1"), paid.ID), http.StatusBadGateway},
+	}
+	for _, tt := range tests {
+		if tt.w.Code != tt.want {
+			t.Errorf("%s: %d, want %d: %s", tt.name, tt.w.Code, tt.want, tt.w.Body)
+		}
 	}
 }
 

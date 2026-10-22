@@ -200,6 +200,30 @@ func (c *Client) Card(ctx context.Context, token int64) (Card, error) {
 	return card, nil
 }
 
+// Document is a file PostFinance renders, such as an invoice.
+type Document struct {
+	Title string
+	Data  []byte
+}
+
+// InvoiceDocument renders the invoice of a transaction: its receipt. The
+// layout and the merchant's address come from the space's invoice template.
+func (c *Client) InvoiceDocument(ctx context.Context, id int64) (Document, error) {
+	var v struct {
+		Title string `json:"title"`
+		// A []byte reads the base64 PostFinance sends.
+		Data []byte `json:"data"`
+	}
+	err := c.call(ctx, http.MethodGet, txPath(id)+"/invoice-document", nil, &v, maxDocument)
+	if err != nil {
+		return Document{}, err
+	}
+	if !bytes.HasPrefix(v.Data, []byte("%PDF-")) {
+		return Document{}, errors.New("postfinance: the invoice document is not a PDF")
+	}
+	return Document{Title: v.Title, Data: v.Data}, nil
+}
+
 // DeleteToken forgets a saved card at PostFinance.
 func (c *Client) DeleteToken(ctx context.Context, token int64) error {
 	return c.do(ctx, http.MethodDelete, "/payment/tokens/"+strconv.FormatInt(token, 10), nil, nil)
@@ -238,12 +262,20 @@ func (e *Error) Error() string {
 }
 
 // maxResponse bounds what is read of an answer. A transaction is a few
-// kilobytes.
-const maxResponse = 1 << 20
+// kilobytes. A document is a PDF in base64, with the merchant's logo in it.
+const (
+	maxResponse = 1 << 20
+	maxDocument = 16 << 20
+)
 
 // do sends one request. out is a pointer to decode JSON into, a *[]byte for
 // a plain text answer, or nil.
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
+	return c.call(ctx, method, path, in, out, maxResponse)
+}
+
+// call is do, reading at most limit bytes of the answer.
+func (c *Client) call(ctx context.Context, method, path string, in, out any, limit int64) error {
 	path = "/api/v2.0" + path
 	var body io.Reader
 	if in != nil {
@@ -272,7 +304,7 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 		return fmt.Errorf("postfinance: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponse))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, limit))
 	if err != nil {
 		return fmt.Errorf("postfinance: %w", err)
 	}

@@ -426,6 +426,30 @@ async function creditSection(ctx) {
         cell: (p) => pill(capitalise(p.state), stateTones[p.state]),
       },
       { label: "By", cell: (p) => h("span", { class: "muted" }, p.actor) },
+      {
+        label: "",
+        shrink: true,
+        // Only money paid through PostFinance has a receipt: a grant has none.
+        cell: (p) =>
+          p.state === "paid" && p.transaction_id
+            ? iconButton(
+                icons.download,
+                "Download the receipt",
+                async (e) => {
+                  const button = e.currentTarget;
+                  button.disabled = true;
+                  try {
+                    await api.receipt(p.id);
+                  } catch (ex) {
+                    toast(ex.message, "bad");
+                  } finally {
+                    button.disabled = false;
+                  }
+                },
+                { quiet: true },
+              )
+            : null,
+      },
     ],
     recent,
     {

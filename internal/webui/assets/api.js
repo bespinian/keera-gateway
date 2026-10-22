@@ -291,6 +291,22 @@ export const api = {
       amount_micros: amountMicros,
       save_card: saveCard,
     }),
+  // Saves the receipt of a paid payment: PostFinance's invoice, as a PDF.
+  receipt: async (id) => {
+    const res = await request(
+      "GET",
+      path`/v1/billing/payments/${id}/receipt`,
+      undefined,
+      { raw: true },
+    );
+    const name = /filename="?([^";]+)/.exec(
+      res.headers.get("Content-Disposition") || "",
+    );
+    save(
+      URL.createObjectURL(await res.blob()),
+      name ? name[1] : "keera-receipt.pdf",
+    );
+  },
   grantCredit: (orgID, amountMicros, note) =>
     request("POST", "/v1/billing/grants", {
       org_id: orgID,
@@ -317,15 +333,23 @@ export const api = {
 
   // download is a GET the browser saves instead of the panel parsing it. It
   // uses the session cookie, so no key ends up in a URL.
-  download: (route, params) => {
-    const a = document.createElement("a");
-    a.href = url(route) + query({ ...params, format: "csv" });
-    a.rel = "noopener";
-    document.body.append(a);
-    a.click();
-    a.remove();
-  },
+  download: (route, params) =>
+    save(url(route) + query({ ...params, format: "csv" })),
 };
+
+// save makes the browser save href. name is the file's name, for an href the
+// server does not name, such as an object URL. That is released once the
+// browser has had time to start saving it.
+function save(href, name) {
+  const a = document.createElement("a");
+  a.href = href;
+  a.rel = "noopener";
+  if (name) a.download = name;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  if (name) setTimeout(() => URL.revokeObjectURL(href), 10_000);
+}
 
 /** chatTargets is what a client may name as its model: the organisation's
  *  enabled chat models, then its routers, as `keera connect` offers them.

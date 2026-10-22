@@ -143,6 +143,36 @@ func TestASavedCardIsShownByBrandAndLabel(t *testing.T) {
 	}
 }
 
+func TestAnInvoiceArrivesAsAPDF(t *testing.T) {
+	pdf := []byte("%PDF-1.7\n" + strings.Repeat("x", 2<<20))
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if claims := checkJWT(t, r); claims["requestPath"] != "/api/v2.0/payment/transactions/42/invoice-document" {
+			t.Errorf("path = %v", claims["requestPath"])
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"title": "Invoice 42",
+			"mimeType": "application/pdf", "data": pdf})
+	})
+	doc, err := c.InvoiceDocument(context.Background(), 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Title != "Invoice 42" || string(doc.Data) != string(pdf) {
+		t.Errorf("document = %q, %d bytes", doc.Title, len(doc.Data))
+	}
+}
+
+// Keera serves the document from its own address, so anything but a PDF,
+// such as a page that runs script, is not passed on.
+func TestAnInvoiceThatIsNotAPDFIsRefused(t *testing.T) {
+	c := testClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"mimeType": "text/html",
+			"data": []byte("<script>alert(1)</script>")})
+	})
+	if _, err := c.InvoiceDocument(context.Background(), 42); err == nil {
+		t.Error("a document that is not a PDF was handed out")
+	}
+}
+
 func TestARefusalCarriesPostFinancesReason(t *testing.T) {
 	c := testClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnprocessableEntity)

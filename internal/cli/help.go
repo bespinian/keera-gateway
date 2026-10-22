@@ -648,6 +648,13 @@ var commands = []command{
 					"--save-card' saves a new one."},
 			{name: "payments", summary: "the payments, newest first",
 				flags: []string{"limit", "json"}},
+			{name: "receipt", args: "<payment>",
+				summary: "save the receipt of a paid payment, as a PDF",
+				flags:   []string{"output"},
+				prose: "The receipt is the invoice PostFinance Checkout makes for the payment. " +
+					"'keera billing payments' lists the ids. A grant has no receipt.",
+				examples: []string{"keera billing receipt pay_06c1k2rt8g3m4n5p6q7r8s9t0v",
+					"keera billing receipt pay_06c1k2rt8g3m4n5p6q7r8s9t0v --output september.pdf"}},
 			{name: "grant", summary: "add credit without a payment, or take some away (operators)",
 				flags: []string{"amount", "note", "org", "json"},
 				prose: "For a trial, a refund, or money that came by bank transfer. A negative " +

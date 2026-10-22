@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -363,6 +364,44 @@ func (s *Server) listPayments(w http.ResponseWriter, r *http.Request, p *authn.P
 		out["next_before"] = list[len(list)-1].ID
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// paymentReceipt is the invoice PostFinance renders for a paid payment, as a
+// PDF. It is read anew each time, so a change to the space's invoice template
+// shows in every receipt. A grant has none: nobody paid for it.
+func (s *Server) paymentReceipt(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
+	pay := s.payments(w)
+	if pay == nil || !s.requireAdmin(w, p) {
+		return
+	}
+	pm, err := s.st.Payment(r.Context(), r.PathValue("id"))
+	if err == nil && !p.CanAdminOrg(pm.OrgID) {
+		// 404, not 403, so payment ids cannot be probed.
+		err = store.ErrNotFound
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if pm.State != store.PaymentPaid || pm.TransactionID == 0 {
+		conflict(w, "no_receipt", "only a paid payment by card, TWINT or PostFinance Pay has "+
+			"a receipt; this one is "+string(pm.State)+" "+string(pm.Kind))
+		return
+	}
+	doc, err := pay.Client.InvoiceDocument(r.Context(), pm.TransactionID)
+	if err != nil {
+		s.log.Warn("reading a receipt from PostFinance failed", "payment", pm.ID,
+			"transaction", pm.TransactionID, "error", err)
+		httpx.WriteError(w, http.StatusBadGateway, "server_error", "receipt_unavailable",
+			"PostFinance Checkout did not hand out the receipt; try again in a moment")
+		return
+	}
+	name := "keera-receipt-" + pm.CreatedAt.UTC().Format("2006-01-02") + "-" + pm.ID + ".pdf"
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition",
+		mime.FormatMediaType("attachment", map[string]string{"filename": name}))
+	w.Header().Set("Content-Length", strconv.Itoa(len(doc.Data)))
+	_, _ = w.Write(doc.Data)
 }
 
 // grantCredit adds credit to an organisation without a payment, or takes

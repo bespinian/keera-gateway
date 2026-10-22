@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -22,6 +23,7 @@ type billingRun struct {
 	saveCard bool
 	note     string
 	limit    int
+	output   string
 }
 
 func billingCmd(ctx context.Context, args []string) error {
@@ -40,6 +42,8 @@ func billingCmd(ctx context.Context, args []string) error {
 		"keep the card for automatic top-ups and the next payment")
 	r.fs.StringVar(&r.note, "note", "", "why, shown in the organisation's payments")
 	r.fs.IntVar(&r.limit, "limit", reportLimit, limitUsage)
+	r.fs.StringVar(&r.output, "output", "",
+		"the file to save it to, or - for standard output (default: keera-receipt-<payment>.pdf)")
 	if done, err := r.parse(); done {
 		return err
 	}
@@ -58,6 +62,8 @@ func billingCmd(ctx context.Context, args []string) error {
 		return r.invoiced(ctx)
 	case "payments":
 		return r.payments(ctx)
+	case "receipt":
+		return r.receipt(ctx)
 	default:
 		return r.report(ctx)
 	}
@@ -219,7 +225,7 @@ func printPayments(w *table, list []store.Payment, orgNames map[string]string) {
 		printNone(w, "payments", "keera billing topup --amount 100")
 		return
 	}
-	head := "WHEN\tKIND\tAMOUNT\tVAT\tFEE\tSTATE\tBY\tNOTE"
+	head := "ID\tWHEN\tKIND\tAMOUNT\tVAT\tFEE\tSTATE\tBY\tNOTE"
 	if orgNames != nil {
 		head = "ORG\t" + head
 	}
@@ -228,7 +234,7 @@ func printPayments(w *table, list []store.Payment, orgNames map[string]string) {
 		if orgNames != nil {
 			_, _ = fmt.Fprintf(w, "%s\t", labelled(orgNames, p.OrgID))
 		}
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", p.CreatedAt.Local().Format("2006-01-02 15:04"),
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", p.ID, p.CreatedAt.Local().Format("2006-01-02 15:04"),
 			p.Kind, policy.FormatMoney(p.AmountMicros), policy.FormatMoney(p.VATMicros), policy.FormatMoney(p.FeeMicros), p.State, p.Actor, dash(p.Note))
 	}
 }
@@ -393,6 +399,26 @@ func (r *billingRun) payments(ctx context.Context) error {
 		}
 	}
 	return out(r.asJSON, payments, func(w *table) { printPayments(w, payments, names) })
+}
+
+// receipt saves the receipt of a paid payment: the invoice PostFinance
+// renders for it.
+func (r *billingRun) receipt(ctx context.Context) error {
+	paymentID := r.fs.Arg(0)
+	pdf, err := r.c.fetch(ctx, "GET", "/v1/billing/payments/"+url.PathEscape(paymentID)+"/receipt", nil)
+	if err != nil {
+		return err
+	}
+	if r.output == "-" {
+		_, err := os.Stdout.Write(pdf)
+		return err
+	}
+	file := cmp.Or(r.output, "keera-receipt-"+paymentID+".pdf")
+	if err := os.WriteFile(file, pdf, 0o644); err != nil {
+		return err
+	}
+	fmt.Println("Saved the receipt to " + file + ".")
+	return nil
 }
 
 func spansOrgs(list []store.Payment) bool {
