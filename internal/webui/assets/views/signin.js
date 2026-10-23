@@ -32,7 +32,7 @@ export async function signIn(root, onSignedIn) {
   }
 
   const params = new URLSearchParams(location.search);
-  const ssoError = params.get("sign_in_error");
+  const ssoError = params.has("sign_in_error") ? takeSignInError() : null;
   // Where the person was going.
   const next = params.get("next");
 

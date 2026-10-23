@@ -75,8 +75,9 @@ func membershipServer(t *testing.T, adminGroups bool) orgsSetup {
 }
 
 // signIn goes through provider as subject and email, in groups, sending the
-// cookies given along. It returns where the callback sent the browser and the
-// session cookie, which is nil when the sign-in was refused.
+// cookies given along. It returns where the callback sent the browser, with
+// the reason after it when it was refused, and the session cookie, which is
+// nil when the sign-in was refused.
 func (s orgsSetup) signIn(t *testing.T, provider, subject, email string, groups []string,
 	cookies ...*http.Cookie) (string, *http.Cookie) {
 	t.Helper()
@@ -104,7 +105,13 @@ func (s orgsSetup) signIn(t *testing.T, provider, subject, email string, groups 
 		t.Fatal(err)
 	}
 	_ = back.Body.Close()
-	return back.Header.Get("Location"), cookieNamed(back.Cookies(), sessionCookie)
+	where := back.Header.Get("Location")
+	// A refusal travels in a cookie, which the panel shows.
+	if c := cookieNamed(back.Cookies(), signInErrorCookie); c != nil {
+		why, _ := url.PathUnescape(c.Value)
+		where += " " + why
+	}
+	return where, cookieNamed(back.Cookies(), sessionCookie)
 }
 
 // whoAmI is GET /v1/me for a session.
@@ -229,7 +236,7 @@ func TestAPersonKeepsTheProviderTheyFirstSignedInWith(t *testing.T) {
 	if session != nil || !strings.Contains(where, "sign_in_error") {
 		t.Fatalf("a second provider signed the address in: sent to %q", where)
 	}
-	if !strings.Contains(where, "through+test") {
+	if !strings.Contains(where, "through test") {
 		t.Errorf("the error does not name the provider to use: %q", where)
 	}
 	if _, session := s.signIn(t, "test", "sub-ada", "ada@example.ch", nil); session == nil {

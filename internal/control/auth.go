@@ -134,7 +134,8 @@ func (s *Server) providerFor(name string) (*authn.OIDC, error) {
 	if p := s.opts.Providers.ByName(name); p != nil {
 		return p, nil
 	}
-	return nil, errors.New(name + " is not an identity provider on this gateway")
+	// The name is not repeated: anyone can write it into a link.
+	return nil, errors.New("this sign-in names an identity provider this gateway does not have")
 }
 
 // callback completes the flow and signs the person in.
@@ -144,17 +145,21 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	if desc := q.Get("error"); desc != "" {
-		if d := q.Get("error_description"); d != "" {
-			desc = d
-		}
-		s.signInFailed(w, r, errors.New(desc))
-		return
+	// The provider's own error is only shown once the state matches: before
+	// that, the text could come from anyone's link.
+	refused := q.Get("error")
+	if refused != "" {
+		s.log.Warn("the identity provider refused a sign-in",
+			"error", refused, "description", q.Get("error_description"))
 	}
 
 	state := q.Get("state")
 	if c, err := r.Cookie(loginCookie); err != nil || state == "" ||
 		subtle.ConstantTimeCompare([]byte(c.Value), []byte(state)) != 1 {
+		if refused != "" {
+			s.signInFailed(w, r, errors.New("the identity provider refused the sign-in"))
+			return
+		}
 		s.signInFailed(w, r, errors.New("this sign-in was started in another browser or tab; "+
 			"start it again here"))
 		return
@@ -164,6 +169,13 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	flow, err := s.st.TakeLoginFlow(r.Context(), state)
 	if err != nil {
 		s.signInFailed(w, r, errors.New("this sign-in link has expired or was already used"))
+		return
+	}
+	if refused != "" {
+		if d := q.Get("error_description"); d != "" {
+			refused = d
+		}
+		s.signInFailed(w, r, errors.New(refused))
 		return
 	}
 	// The provider comes from the flow, not the URL, so a callback cannot be
@@ -681,18 +693,26 @@ func (s *Server) publicOrigin(r *http.Request) string {
 	return scheme + "://" + r.Host
 }
 
+// signInErrorCookie carries why a sign-in failed to the panel. It is a cookie
+// and not part of the address, because anyone can write an address into a
+// link, and the panel shows this text on the sign-in screen.
+const signInErrorCookie = "keera_sign_in_error"
+
 // signInFailed sends the browser back to the panel with a readable error,
 // rather than leaving it on a blank callback URL.
 func (s *Server) signInFailed(w http.ResponseWriter, r *http.Request, err error) {
-	http.Redirect(w, r, "/?sign_in_error="+url.QueryEscape(err.Error()), http.StatusFound)
+	// Unlike every other cookie here, the panel's script reads it.
+	http.SetCookie(w, &http.Cookie{
+		Name: signInErrorCookie, Value: url.PathEscape(err.Error()), Path: "/", MaxAge: 60,
+		Secure: s.opts.SecureCookies, SameSite: http.SameSiteLaxMode,
+	})
+	http.Redirect(w, r, "/?sign_in_error=1", http.StatusFound)
 }
 
 // safeRedirect keeps only a same-site path, so ?next= cannot send someone to
-// another host right after they sign in.
-//
-// It parses rather than checking prefixes because browsers read "/\evil.com"
-// as "//evil.com". Parsing rejects that, protocol-relative URLs and absolute
-// ones alike.
+// another host right after they sign in. Backslashes are refused because
+// browsers read "/\evil.com" as "//evil.com"; parsing refuses
+// protocol-relative and absolute URLs.
 func safeRedirect(next string) string {
 	if next == "" || !strings.HasPrefix(next, "/") || strings.Contains(next, `\`) {
 		return ""
