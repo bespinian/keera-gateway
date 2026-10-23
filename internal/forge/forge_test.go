@@ -305,3 +305,22 @@ func TestMintAsksTheGuardrailBeforeTheForge(t *testing.T) {
 		t.Errorf("the forge was called %d times, want none", calls)
 	}
 }
+
+func TestTheDeploymentsTokenDoesNotFollowARedirect(t *testing.T) {
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Private-Token") != "" {
+			t.Error("the token reached the host a redirect named")
+		}
+	}))
+	defer elsewhere.Close()
+	forge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, elsewhere.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	defer forge.Close()
+
+	err := call(context.Background(), http.MethodGet, forge.URL+"/api/v4/projects",
+		http.Header{"Private-Token": {"glpat-admin"}}, nil, nil)
+	if err == nil {
+		t.Error("a redirect was taken as an answer")
+	}
+}

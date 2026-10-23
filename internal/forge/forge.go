@@ -25,6 +25,13 @@ import (
 // while somebody waits for their sandbox.
 const requestTimeout = 20 * time.Second
 
+// httpClient follows no redirect. A redirect to another host would carry the
+// deployment's token there: Go drops Authorization on the way, but not
+// GitLab's Private-Token. The forge APIs do not redirect a call that is right.
+var httpClient = &http.Client{
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
+
 // parseBase reads the address a forge is configured with, or fallback when
 // it is empty. what names the address in the error.
 func parseBase(raw, fallback, what string) (*url.URL, error) {
@@ -154,7 +161,7 @@ func call(ctx context.Context, method, target string, header http.Header, body, 
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	res, err := http.DefaultClient.Do(req)
+	res, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}
