@@ -70,7 +70,7 @@ func registerGuardrailFlags(fs *flag.FlagSet) *guardrailFlags {
 	fs.IntVar(&f.maxSandboxes, "max-sandboxes", -1,
 		"how many sandboxes this scope may run at once (0 clears it); the sandbox "+
 			"flags are for an organisation or a project, not a key")
-	fs.DurationVar(&f.maxSandboxTTL, "max-sandbox-ttl", -1,
+	durationVar(fs, &f.maxSandboxTTL, "max-sandbox-ttl", -1,
 		"longest lifetime any one of them may be given (0 clears it)")
 	fs.StringVar(&f.sandboxClasses, "sandbox-classes", "",
 		"comma-separated sandbox classes this scope may use")

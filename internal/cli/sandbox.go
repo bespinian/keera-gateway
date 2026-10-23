@@ -57,22 +57,23 @@ func sandboxCmd(ctx context.Context, args []string) error {
 	fs.StringVar(&r.project, "project", "", "project the sandbox belongs to, by name or id; without it, "+
 		"the organisation's oldest. Its key is in that project, so the budget, the rate limit "+
 		"and the allowed models are the project's")
-	fs.StringVar(&r.class, "class", "", "which machine to ask for; 'keera sandbox classes' lists them")
+	fs.StringVar(&r.class, "class", "", "which machine to ask for (required); 'keera sandbox classes' lists them")
 	fs.StringVar(&r.purpose, "purpose", "", "'engineer' - a machine you work in - or 'agent' - one task's")
 	r.reword("list", "project", "only the sandboxes of one project, by name or id")
 	r.reword("list", "class", "only the sandboxes of one class")
 	r.reword("list", "purpose", "only the sandboxes for one purpose: engineer or agent")
-	fs.DurationVar(&r.ttl, "ttl", 0, "how long it lives; the class's default if not given")
+	durationVar(fs, &r.ttl, "ttl", 0, "how long it lives; the class's default if not given")
 	fs.StringVar(&r.repo, "repo", "", "repository to check out into it")
 	fs.StringVar(&r.branch, "branch", "", "branch to check out")
 	fs.StringVar(&r.task, "task", "", "what an agent sandbox should carry out; @path reads a file")
+	r.reword("agent", "task", "what the agent should carry out (required); @path reads a file")
 	fs.IntVar(&r.port, "port", sandbox.PortSSH, "which port to reach through 'proxy'")
 	fs.StringVar(&r.sshKey, "ssh-key", "",
 		"a file holding the public key that may open a shell in it, such as "+
 			"~/.ssh/id_ed25519.pub (default: every *.pub file in ~/.ssh)")
 	fs.BoolVar(&r.all, "all", false, "include sandboxes that have finished")
 	fs.StringVar(&r.by, "by", "class", "group by: class, project or user")
-	fs.DurationVar(&r.since, "since", reportWindow, sinceUsage)
+	durationVar(fs, &r.since, "since", reportWindow, sinceUsage)
 	if done, err := r.parse(); done {
 		return err
 	}

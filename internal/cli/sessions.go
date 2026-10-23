@@ -28,7 +28,8 @@ func sessionCmd(ctx context.Context, args []string) error {
 	alias := fs.String("model", "", modelUsage)
 	w := registerWho(fs)
 	unhappy := fs.Bool("unhappy", false, "only the sessions with problems")
-	since := fs.Duration("since", reportWindow, sinceUsage)
+	since := new(time.Duration)
+	durationVar(fs, since, "since", reportWindow, sinceUsage)
 	limit := fs.Int("limit", reportLimit, limitUsage)
 	if done, err := r.parse(); done {
 		return err

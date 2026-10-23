@@ -207,15 +207,14 @@ func TestTakeURL(t *testing.T) {
 	}
 }
 
-// TestHelpHidesDefaultsThatMeanNotGiven: -1 and 0 mean "not given" on these
-// flags, and printed as a duration they read as a real setting.
+// -1 and 0 mean "not given" on these flags; printed, they read as a setting.
 func TestHelpHidesDefaultsThatMeanNotGiven(t *testing.T) {
-	for _, def := range []string{"", "false", "0", "-1", "0s", "-1ns"} {
+	for _, def := range []string{"", "false", "0", "-1"} {
 		if shownDefault(def) {
 			t.Errorf("shownDefault(%q) = true; it means not given", def)
 		}
 	}
-	for _, def := range []string{"2222", "168h0m0s", "class", "true"} {
+	for _, def := range []string{"2222", "7d", "class", "true"} {
 		if !shownDefault(def) {
 			t.Errorf("shownDefault(%q) = false; it is a real default", def)
 		}

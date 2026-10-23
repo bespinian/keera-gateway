@@ -347,7 +347,7 @@ Sandbox time is recorded beside tokens, so a task's cost includes the machine it
 ran on, such as "eleven minutes of a four-core machine".
 
 ```sh
-keera sandbox usage --by project --since 720h
+keera sandbox usage --by project --since 30d
 keera sandbox usage --by user
 keera sandbox usage --by class
 ```

@@ -180,7 +180,7 @@ keera session list                        # ranked by cost, the last seven days
 keera session list --sort requests        # the tasks that would not stop
 keera session list --unhappy              # only the ones with problems
 keera session list --model keera-frontier # the tasks that reached the hosted model
-keera session list --project <project> --since 720h
+keera session list --project <project> --since 30d
 keera session list --user ada@example.ch  # one person, by email or id
 keera session show <request-id>           # one task, from beginning to end
 ```

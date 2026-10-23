@@ -328,7 +328,7 @@ three. Shadow measures that before anyone depends on the filter.
 keera filter add redact-secrets --model keera-speed --prompt @redact.txt
 keera guardrail set project <project-id> --filters redact-secrets
 # a week later
-keera filter report redact-secrets --since 168h
+keera filter report redact-secrets --since 7d
 keera filter set redact-secrets --no-shadow
 ```
 

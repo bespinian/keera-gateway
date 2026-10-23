@@ -19,7 +19,8 @@ func usageCmd(ctx context.Context, args []string) error {
 	groupBy := fs.String("by", "project", "group by: model, client, project, key, user, day or org")
 	alias := fs.String("model", "", modelUsage)
 	w := registerWho(fs)
-	since := fs.Duration("since", 30*24*time.Hour, sinceUsage)
+	since := new(time.Duration)
+	durationVar(fs, since, "since", 30*24*time.Hour, sinceUsage)
 	if done, err := r.parse(); done {
 		return err
 	}

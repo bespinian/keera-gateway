@@ -142,7 +142,7 @@ request, and the filters read it there.
 
 ```sh
 keera mcp calls --since 1h
-keera mcp calls --summary --since 168h
+keera mcp calls --summary --since 7d
 ```
 
 The log is for administrators. A member sees their own tool calls in

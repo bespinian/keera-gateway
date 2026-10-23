@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // cmdRun is what every command starts with: the client, the flags, and the
@@ -240,6 +242,64 @@ func reorder(fs *flag.FlagSet, args []string) []string {
 func isBoolFlag(f *flag.Flag) bool {
 	b, ok := f.Value.(interface{ IsBoolFlag() bool })
 	return ok && b.IsBoolFlag()
+}
+
+// durationFlag is a duration that also takes days, such as 7d: report windows
+// and lifetimes are thought of in days, and Go's own duration stops at hours.
+type durationFlag time.Duration
+
+// durationVar declares a duration flag that reads and prints days.
+func durationVar(fs *flag.FlagSet, p *time.Duration, name string, value time.Duration, usage string) {
+	*p = value
+	fs.Var((*durationFlag)(p), name, usage)
+}
+
+// String prints whole days as days, so a default reads 7d rather than
+// 168h0m0s. A zero or negative value means not given, and prints as 0.
+func (d *durationFlag) String() string {
+	if d == nil || *d <= 0 {
+		return "0"
+	}
+	if v := time.Duration(*d); v%(24*time.Hour) == 0 {
+		return fmt.Sprintf("%dd", v/(24*time.Hour))
+	}
+	return time.Duration(*d).String()
+}
+
+func (d *durationFlag) Set(s string) error {
+	v, err := parseDuration(s)
+	if err != nil {
+		return err
+	}
+	*d = durationFlag(v)
+	return nil
+}
+
+// parseDuration reads a Go duration, optionally led by a number of days:
+// 7d, 1d12h and 90m all work.
+func parseDuration(s string) (time.Duration, error) {
+	bad := errors.New("not a duration such as 7d, 8h or 30m")
+	days, rest, found := strings.Cut(s, "d")
+	if !found {
+		v, err := time.ParseDuration(s)
+		if err != nil {
+			return 0, bad
+		}
+		return v, nil
+	}
+	n, err := strconv.Atoi(days)
+	if err != nil || n < 0 {
+		return 0, bad
+	}
+	v := time.Duration(n) * 24 * time.Hour
+	if rest != "" {
+		more, err := time.ParseDuration(rest)
+		if err != nil || strings.HasPrefix(rest, "-") {
+			return 0, bad
+		}
+		v += more
+	}
+	return v, nil
 }
 
 // opposites refuses two flags that undo each other.

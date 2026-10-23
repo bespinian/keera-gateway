@@ -159,7 +159,7 @@ func registerCallFlags(fs *flag.FlagSet) *callFlags {
 	fs.StringVar(&f.server, "server", "", "restrict to one MCP server")
 	fs.StringVar(&f.tool, "tool", "", "restrict to one tool")
 	f.who = registerWho(fs)
-	fs.DurationVar(&f.since, "since", reportWindow, sinceUsage)
+	durationVar(fs, &f.since, "since", reportWindow, sinceUsage)
 	fs.IntVar(&f.limit, "limit", reportLimit, limitUsage)
 	fs.BoolVar(&f.summary, "summary", false, "add up the calls of each tool instead")
 	return f

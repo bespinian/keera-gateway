@@ -54,12 +54,12 @@ func keyCmd(ctx context.Context, args []string) error {
 	fs.BoolVar(&r.noUser, "no-user", false,
 		"a key that belongs to nobody, such as a pipeline's")
 	fs.BoolVar(&r.pending, "pending", false,
-		"leave the key for the person it belongs to to activate; only they see its secret")
+		"leave the key for the person it belongs to to activate; no secret is printed now")
 	fs.StringVar(&r.name, "name", "", "what this key is called; what it is for, in a few words")
 	fs.StringVar(&r.expires, "expires", "",
-		"how long the key lasts, such as 720h, the last day it works, such as 2026-12-31, "+
+		"how long the key lasts, such as 90d, the last day it works, such as 2026-12-31, "+
 			"or 'never'. A new key lasts 90 days unless told otherwise")
-	r.reword("rotate", "expires", "how long the new key lasts, such as 720h, or the last day "+
+	r.reword("rotate", "expires", "how long the new key lasts, such as 90d, or the last day "+
 		"it works, such as 2026-12-31 (default: the old key's lifetime)")
 	fs.BoolVar(&r.subscription, "subscription", false,
 		"a key that reaches only subscription models, for Claude Code signed in to a Claude plan")
@@ -436,14 +436,14 @@ func rotateKey(ctx context.Context, c *client, keyID, name string, expiry map[st
 }
 
 // expiryField is --expires as a key request carries it. A lifetime such as
-// 720h goes in seconds. A day such as 2026-12-31 is the last day the key works,
+// 90d goes in seconds. A day such as 2026-12-31 is the last day the key works,
 // so it expires at the end of that day, in local time.
 func expiryField(expires string) (field string, value any, err error) {
 	day, err := time.ParseInLocation(time.DateOnly, expires, time.Local)
 	if err != nil {
-		life, err := time.ParseDuration(expires)
+		life, err := parseDuration(expires)
 		if err != nil || life < time.Second {
-			return "", nil, fmt.Errorf("--expires %s is neither a lifetime such as 720h nor "+
+			return "", nil, fmt.Errorf("--expires %s is neither a lifetime such as 90d nor "+
 				"a day such as 2026-12-31", expires)
 		}
 		return "expires_in_seconds", int64(life / time.Second), nil

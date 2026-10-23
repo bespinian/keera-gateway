@@ -337,7 +337,7 @@ the same.
 
 A key's secret is printed once and never stored. Nobody, not even an operator,
 can read it later. Screens, reports and the audit log show its name instead. A
-key from `keera key create` or the panel lasts 90 days. `--expires 720h` gives
+key from `keera key create` or the panel lasts 90 days. `--expires 30d` gives
 it another lifetime, `--expires 2026-12-31` makes that the last day it works,
 and `--expires never` makes a key that does not expire. The panel offers the
 same choices. Through the API, a key with neither `expires_in_seconds` nor

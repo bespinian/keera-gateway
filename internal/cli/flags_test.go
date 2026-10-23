@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
@@ -172,5 +173,42 @@ func TestArgCount(t *testing.T) {
 		if lo, hi := argCount(spec); lo != want[0] || hi != want[1] {
 			t.Errorf("argCount(%q) = %d, %d; want %d, %d", spec, lo, hi, want[0], want[1])
 		}
+	}
+}
+
+// Report windows and lifetimes are thought of in days, so --since 7d works,
+// and a default prints as 7d rather than 168h0m0s.
+func TestDurationFlagTakesDays(t *testing.T) {
+	const day = 24 * time.Hour
+	for in, want := range map[string]time.Duration{
+		"7d": 7 * day, "1d12h": day + 12*time.Hour, "90m": 90 * time.Minute, "0d": 0,
+	} {
+		if got, err := parseDuration(in); err != nil || got != want {
+			t.Errorf("parseDuration(%q) = %v, %v; want %v", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"", "d", "7", "7x", "-1d", "1d-2h", "7days"} {
+		if _, err := parseDuration(in); err == nil {
+			t.Errorf("parseDuration(%q) was accepted", in)
+		}
+	}
+
+	fs := flag.NewFlagSet("t", flag.ContinueOnError)
+	var since, ttl time.Duration
+	durationVar(fs, &since, "since", 7*day, "")
+	durationVar(fs, &ttl, "ttl", -1, "")
+	if def := fs.Lookup("since").DefValue; def != "7d" {
+		t.Errorf("--since default prints as %q, want 7d", def)
+	}
+	if def := fs.Lookup("ttl").DefValue; shownDefault(def) {
+		t.Errorf("--ttl default prints as %q, which help would show", def)
+	}
+	// 'sandbox agent' passes its flags on as text, so a value must read back.
+	if err := fs.Parse([]string{"--ttl", "1d12h"}); err != nil || ttl != day+12*time.Hour {
+		t.Fatalf("--ttl 1d12h = %v, %v", ttl, err)
+	}
+	if again, err := parseDuration(fs.Lookup("ttl").Value.String()); err != nil || again != ttl {
+		t.Errorf("--ttl prints as %q, which reads back as %v, %v",
+			fs.Lookup("ttl").Value.String(), again, err)
 	}
 }

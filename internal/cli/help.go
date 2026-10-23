@@ -15,7 +15,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // The flags add and set both read. Each verb of a model, MCP server or filter
@@ -400,7 +399,7 @@ var commands = []command{
 				flags: []string{"server", "tool", "project", "key", "user", "since", "limit", "summary", "json"},
 				prose: "For administrators. A member sees the tool calls of their own sessions " +
 					"in 'keera session show'.",
-				examples: []string{"keera mcp calls --since 1h", "keera mcp calls --summary --since 168h"}},
+				examples: []string{"keera mcp calls --since 1h", "keera mcp calls --summary --since 7d"}},
 			{name: "connect", args: "<alias>", summary: "how to point Claude Code, Codex and others at a server",
 				prose: "Prints the lines each client needs. Codex and an mcp.json read the key " +
 					"from KEERA_API_KEY when they start. The Claude Code line copies the key " +
@@ -611,7 +610,7 @@ var commands = []command{
 		flags:   []string{"by", "model", "project", "key", "user", "since", "json"},
 		examples: []string{
 			"keera usage --by model",
-			"keera usage --by user --since 168h",
+			"keera usage --by user --since 7d",
 			"keera usage --by key --project payments",
 		},
 	},
@@ -922,6 +921,9 @@ func writeFlagLines(b *strings.Builder, fs *flag.FlagSet, names []string) {
 			continue
 		}
 		name, usage := flag.UnquoteUsage(f)
+		if _, ok := f.Value.(*durationFlag); ok {
+			name = "duration"
+		}
 		left := "--" + f.Name
 		if name != "" {
 			left += " " + name
@@ -939,17 +941,14 @@ func writeFlagLines(b *strings.Builder, fs *flag.FlagSet, names []string) {
 }
 
 // shownDefault reports whether a flag's default is worth printing. Empty,
-// false, zero and negative values mean "not given" here, whether a number or a
-// duration, so printing "(default -1ns)" would only mislead.
+// false, zero and negative values mean "not given" here, so printing
+// "(default -1)" would only mislead. A durationVar prints "0" when not given.
 func shownDefault(def string) bool {
 	if def == "" || def == "false" {
 		return false
 	}
 	if n, err := strconv.ParseFloat(def, 64); err == nil {
 		return n > 0
-	}
-	if d, err := time.ParseDuration(def); err == nil {
-		return d > 0
 	}
 	return true
 }
