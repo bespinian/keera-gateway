@@ -664,7 +664,7 @@ function turnStrip(ctx, requests, names) {
     "div",
     { class: "turns" },
     requests.map((q, i) => {
-      const [, tone] = outcomeMeaning(q);
+      const [label, tone] = outcomeMeaning(q);
       const share = (q.cost_micros || 0) / max;
       return h("button", {
         class: "turn",
@@ -672,7 +672,7 @@ function turnStrip(ctx, requests, names) {
         style: { height: Math.max(6, Math.round(share * 60)) + "px" },
         title:
           `Request ${i + 1} of ${requests.length} · ${q.alias || "no model"} · ` +
-          `${outcomeMeaning(q)[0]} · ${money(q.cost_micros)}` +
+          `${label} · ${money(q.cost_micros)}` +
           (q.ttft_ms ? ` · ${ms(q.ttft_ms)} to the first token` : ""),
         "aria-label": `Request ${i + 1}, ${outcomeOf(q)}`,
         onClick: () => showRequest(ctx, q, names),

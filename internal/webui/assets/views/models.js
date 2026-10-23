@@ -661,14 +661,10 @@ function viewModel(ctx, m) {
           )
         : null,
     ),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Close"),
-    ],
   });
 }
 
-// surfaceOf names the paths a kind answers on, which is what a developer has
-// to get right.
+// surfaceOf names the paths a kind answers on.
 function surfaceOf(kind) {
   switch (kind) {
     case "chat":
@@ -819,9 +815,6 @@ function report(probe, kind) {
           "does run one real request.",
       ),
     ),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Close"),
-    ],
   });
 }
 
@@ -1149,24 +1142,18 @@ function editModel(ctx, existing, providers, pick) {
     h(
       "div",
       { class: "field-row" },
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "Location"),
+      field(
+        "Location",
         location,
-        // Suggestions, not a fixed list: any short lowercase name is taken.
+        "Where the model runs, such as ch or usa. Clients see it. Left " +
+          "empty, a backend inside your network is onprem.",
+        // Suggestions only: any short lowercase name is accepted.
         h(
           "datalist",
           { id: "model-locations" },
           ["onprem", "ch", "usa"].map((l) =>
             h("option", { value: l }, locationName(l)),
           ),
-        ),
-        h(
-          "div",
-          { class: "hint" },
-          "Where the model runs, such as ch or usa. Clients see it. Left " +
-            "empty, a backend inside your network is onprem.",
         ),
         marks.location,
       ),
@@ -1245,17 +1232,11 @@ function editModel(ctx, existing, providers, pick) {
     pick: existing ? null : pick,
   });
 
-  const keyField = h(
-    "div",
-    { class: "field" },
-    h("label", {}, "Provider key"),
+  const keyField = field(
+    "Provider key",
     apiKey,
-    h(
-      "div",
-      { class: "hint" },
-      "The key the gateway sends to the backend. Stored encrypted " +
-        "and never shown again. Leave empty to keep the stored key.",
-    ),
+    "The key the gateway sends to the backend. Stored encrypted " +
+      "and never shown again. Leave empty to keep the stored key.",
     clearKey
       ? h(
           "label",
@@ -1546,27 +1527,21 @@ function hostedFields(ctx, providers, form) {
       : icon(icons.selfHosted);
 
   const model = h("select", { class: "select" });
-  // Some providers give each customer their own address, so the table cannot
-  // fill in the endpoint and the missing part is asked for. It sits above the
-  // API key, which the same console page hands out.
+  // Some providers give each customer their own address, so the missing part
+  // is asked for, above the API key from the same console page.
   const productID = h("input", {
     class: "input",
     value: "",
     placeholder: "100234",
     autocomplete: "off",
   });
-  const productIDField = h(
-    "div",
-    { class: "field", hidden: true },
-    h("label", {}, "Product ID"),
+  const productIDField = field(
+    "Product ID",
     productID,
-    h(
-      "div",
-      { class: "hint" },
-      "Not a secret: it is part of the address. Find it in the Infomaniak " +
-        "console under AI Tools.",
-    ),
+    "Not a secret: it is part of the address. Find it in the Infomaniak " +
+      "console under AI Tools.",
   );
+  productIDField.hidden = true;
   const block = h("div", { hidden: true }, field("Model", model), note);
   if (productSlot) productSlot.replaceChildren(productIDField);
 
@@ -1796,7 +1771,7 @@ function sameValue(f, now, def, m) {
   return f.numeric ? Number(now) === Number(def) : now === def;
 }
 
-function priceInput(v, disabled) {
+function priceInput(v) {
   return h("input", {
     class: "input",
     type: "number",
@@ -1804,7 +1779,6 @@ function priceInput(v, disabled) {
     step: "0.01",
     placeholder: "0.00",
     value: v ? v / 1e6 : "",
-    disabled: !!disabled,
   });
 }
 

@@ -424,13 +424,12 @@ export function prefixOf(k) {
   return k.pending ? "no secret yet" : k.prefix + "…";
 }
 
-// canActivate: the person a pending key is for, or an administrator, who
-// could rotate it anyway.
+// The person a pending key is for, or an administrator, who could rotate it
+// anyway.
 export function canActivate(ctx, k) {
-  return isAdmin(ctx) || (!!k.user_id && k.user_id === ctx.state.me.user_id);
+  return canRevoke(ctx, k);
 }
 
-// activateKey gives a pending key its secret and shows it, once.
 export async function activateKey(ctx, k, button) {
   button.disabled = true;
   try {
@@ -735,7 +734,7 @@ function issueKey(ctx, projects, users, last = {}) {
         });
       if (created.pending) {
         const holder = users.find((u) => u.id === created.user_id);
-        showPending(ctx, created, holder ? holder.email : "", again);
+        showPending(ctx, holder ? holder.email : "", again);
       } else {
         showSecret(ctx, created, again);
       }
@@ -775,37 +774,12 @@ function showSecret(ctx, created, again, title = "Key issued") {
             "Connect a client",
           )
         : null,
-      again
-        ? h(
-            "button",
-            {
-              class: "btn",
-              title: "Same project and expiry",
-              onClick: () => {
-                close();
-                ctx.reload();
-                again();
-              },
-            },
-            "Issue another",
-          )
-        : null,
-      h(
-        "button",
-        {
-          class: "btn btn-primary",
-          onClick: () => {
-            close();
-            ctx.reload();
-          },
-        },
-        "Done",
-      ),
+      ...closeButtons(ctx, close, again),
     ],
   });
 }
 
-function showPending(ctx, created, email, again) {
+function showPending(ctx, email, again) {
   modal({
     title: "Key issued",
     subtitle: "It has no secret yet, so nobody has seen it.",
@@ -819,42 +793,51 @@ function showPending(ctx, created, email, again) {
       h("code", {}, "keera connect claude-code"),
       ", and sees its secret once. Until then it does not work.",
     ),
-    actions: (close) => [
-      h(
-        "button",
-        {
-          class: "btn",
-          title: "Same project and expiry",
-          onClick: () => {
-            close();
-            ctx.reload();
-            again();
-          },
-        },
-        "Issue another",
-      ),
-      h(
-        "button",
-        {
-          class: "btn btn-primary",
-          onClick: () => {
-            close();
-            ctx.reload();
-          },
-        },
-        "Done",
-      ),
-    ],
+    actions: (close) => closeButtons(ctx, close, again),
   });
 }
 
-// planUsed is how much of their Claude plan a subscription key's holder has
-// used, in the plan's two windows, as Anthropic last reported it.
+// again, when given, opens the form for another key.
+function closeButtons(ctx, close, again) {
+  return [
+    again
+      ? h(
+          "button",
+          {
+            class: "btn",
+            title: "Same project and expiry",
+            onClick: () => {
+              close();
+              ctx.reload();
+              again();
+            },
+          },
+          "Issue another",
+        )
+      : null,
+    h(
+      "button",
+      {
+        class: "btn btn-primary",
+        onClick: () => {
+          close();
+          ctx.reload();
+        },
+      },
+      "Done",
+    ),
+  ];
+}
+
+// As Anthropic last reported it, in the plan's two windows.
 function planUsed(plan) {
   if (!plan) return null;
   const parts = [];
-  if (plan.five_hour != null) parts.push(`5h ${pct(plan.five_hour, 1)}`);
-  if (plan.seven_day != null) parts.push(`7d ${pct(plan.seven_day, 1)}`);
+  // Whole percent, as `keera key list` shows it: a plan's use is a rough
+  // figure from Anthropic, and a decimal would claim more.
+  const whole = (x) => `${Math.round(x * 100)}%`;
+  if (plan.five_hour != null) parts.push(`5h ${whole(plan.five_hour)}`);
+  if (plan.seven_day != null) parts.push(`7d ${whole(plan.seven_day)}`);
   if (!parts.length) return null;
   const limited = plan.status === "rejected";
   return h(

@@ -320,9 +320,6 @@ async function addClient(ctx, catalogue, keys, button, secret = null) {
       ),
       setup,
     ),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Close"),
-    ],
   });
   picker.tiles.firstChild.focus();
   return true;

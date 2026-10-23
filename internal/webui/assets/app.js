@@ -737,8 +737,8 @@ async function renderRoute() {
   // under Projects.
   const current = route.under || (route.parent || route).path;
   for (const el of document.querySelectorAll(".nav-item")) {
-    el.toggleAttribute("aria-current", el.dataset.path === current);
     if (el.dataset.path === current) el.setAttribute("aria-current", "page");
+    else el.removeAttribute("aria-current");
   }
   if (!route.parent && location.pathname !== route.path) {
     history.replaceState({}, "", route.path);
@@ -961,8 +961,7 @@ function leaveDetail() {
  *  sidebar. The caller then draws the screen. */
 async function setOrg(id) {
   state.orgID = id;
-  if (id) remember("keera.org", id, { lasting: true });
-  else remember("keera.org", null, { lasting: true });
+  remember("keera.org", id || null, { lasting: true });
   await loadSetup();
   renderShell();
 }

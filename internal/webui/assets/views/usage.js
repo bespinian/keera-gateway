@@ -55,6 +55,7 @@ export async function usageView(ctx) {
     user: res.user_names || {},
     client: res.client_names || {},
   };
+  const nameOf = (id) => names[groupBy]?.[id];
   const total = rows.reduce((a, r) => a + r.cost_micros, 0);
   const requests = rows.reduce((a, r) => a + r.requests, 0);
 
@@ -116,7 +117,7 @@ export async function usageView(ctx) {
     if (l.org_id) return `${l.group} · ${orgNameOf(ctx, l.org_id)}`;
     if (groupBy === "org") return orgNameOf(ctx, l.group);
     if (groupBy === "model") return l.group;
-    return (names[groupBy] && names[groupBy][l.group]) || "deleted";
+    return nameOf(l.group) || "deleted";
   };
   const chartData = res.chart || {};
   const chart = h(
@@ -170,7 +171,7 @@ export async function usageView(ctx) {
     if (groupBy === "model" || groupBy === "day") {
       return h("span", { class: "mono" }, r.group);
     }
-    const named = names[groupBy] && names[groupBy][r.group];
+    const named = nameOf(r.group);
     if (!named) {
       // An id with no name is one whose row is gone, such as a deleted user.
       return h(
@@ -211,7 +212,7 @@ export async function usageView(ctx) {
         sortKey: (r) =>
           groupBy === "org"
             ? orgNameOf(ctx, r.group)
-            : (names[groupBy] && names[groupBy][r.group]) || r.group || "",
+            : nameOf(r.group) || r.group || "",
       },
       {
         label: "Served",

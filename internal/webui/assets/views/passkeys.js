@@ -46,7 +46,6 @@ export async function passkeySetupView(root, token, onDone) {
         {
           class: "btn",
           href: "/",
-          style: { width: "100%", justifyContent: "center" },
         },
         "Go to sign-in",
       ),
@@ -60,7 +59,6 @@ export async function passkeySetupView(root, token, onDone) {
     {
       class: "btn btn-primary",
       type: "submit",
-      style: { width: "100%", justifyContent: "center" },
     },
     icon(icons.passkey),
     "Add passkey",

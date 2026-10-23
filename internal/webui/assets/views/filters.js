@@ -36,7 +36,6 @@ import {
   listHead,
   sectionHead,
   dash,
-  replace,
   trafficSummary,
   formModal,
   detailHead,
@@ -203,20 +202,19 @@ function trafficCell(st) {
   );
 }
 
-// checkCell runs the filter over a sample and shows the verdict in place.
 // The result is not cached: a small model may answer differently next time.
 function checkCell(ctx, f) {
   return checkButton(
     "Run this filter on a sample",
     () => api.checkFilter(ctx.orgID, f.alias),
-    (probe) => verdict(ctx, probe),
+    (probe) => verdict(probe),
   );
 }
 
-function verdict(ctx, probe) {
+function verdict(probe) {
   const warned = (probe.warnings || []).length > 0;
-  // A refusal may well mean the filter works, since the sample holds things
-  // to refuse, but it gets its own label.
+  // The sample holds things to refuse, so a refusal may mean it works; it
+  // still gets its own label.
   const tone = probe.ok ? (probe.refused || warned ? "warn" : "good") : "bad";
   const label = !probe.ok
     ? "Not usable"
@@ -229,14 +227,13 @@ function verdict(ctx, probe) {
     label,
     tone,
     title: "What the filter did to the sample",
-    open: () => report(ctx, probe),
+    open: () => report(probe),
   };
 }
 
-// report shows the sample as it went in and as it came back. Only the reader
-// can judge whether the right things were removed, so the pill says whether
-// the filter ran and this says what it did.
-function report(ctx, probe) {
+// The sample is shown before and after: only the reader can judge whether
+// the right things were removed.
+function report(probe) {
   modal({
     wide: true,
     title: `Check - ${probe.alias}`,
@@ -303,12 +300,12 @@ function report(ctx, probe) {
               ? "A credential and a named client"
               : "Ordinary source code",
             " ",
-            v.refused === v.expect_refusal
-              ? pill(v.refused ? "Refused" : "Allowed", "good")
-              : pill(v.refused ? "Refused" : "Allowed", "warn"),
-            // A gate right on both halves at 55% cannot tell them apart, which
-            // the pill alone does not show. Absent when the backend serves no
-            // probabilities.
+            pill(
+              v.refused ? "Refused" : "Allowed",
+              v.refused === v.expect_refusal ? "good" : "warn",
+            ),
+            // A gate right on both halves at 55% cannot tell them apart; the
+            // pill alone hides that. Absent without backend probabilities.
             v.confidence
               ? h(
                   "span",
@@ -462,25 +459,17 @@ export async function filterDetailView(ctx) {
           ? busyButton(
               { title: "Run this filter on a sample" },
               "Check",
-              async () =>
-                report(ctx, await api.checkFilter(ctx.orgID, f.alias)),
+              async () => report(await api.checkFilter(ctx.orgID, f.alias)),
             )
           : null,
         f && canEdit
-          ? h(
-              "button",
-              {
-                class: "btn",
-                title: "Edit this filter",
-                "aria-label": `Edit ${f.alias}`,
-                onClick: () =>
-                  api
-                    .models(ctx.orgID)
-                    .then((r) =>
-                      editFilter(ctx, f, (r.data || []).filter(canRun)),
-                    ),
+          ? busyButton(
+              { title: "Edit this filter" },
+              [icon(icons.pencil), "Edit"],
+              async () => {
+                const r = await api.models(ctx.orgID);
+                editFilter(ctx, f, (r.data || []).filter(canRun));
               },
-              icon(icons.pencil),
             )
           : null,
       ],
@@ -941,32 +930,32 @@ function editFilter(ctx, existing, readers) {
   );
   const enforceHint = h("div", { class: "hint" });
 
-  // These hints and the example instruction follow the mode. The example is
-  // only swapped while nobody has edited it.
+  // These hints and the example follow the mode. The example is only swapped
+  // while unedited.
   const modelHint = h("div", { class: "hint" });
   const promptHint = h("div", { class: "hint" });
   const costBanner = banner("info");
-  // Rules use the same text form as the command line, so a list pastes from
-  // one into the other.
   const rules = h("textarea", {
     class: "input mono",
     rows: "8",
     spellcheck: "false",
   });
-  const rulesHint = h("div", { class: "hint" });
+  const rulesHint = h(
+    "div",
+    { class: "hint" },
+    "One per line: a Go regular expression, '=>', then the replacement. " +
+      "Or 'REFUSE: reason' to drop the request.",
+  );
   rules.value = formatRules(f.rules);
-  // The mode is asked first because it decides what the rest of the form
-  // means.
+  // The mode comes first: it decides what the rest of the form means.
   let chosen = creating ? null : mode(f);
 
-  // Changing the mode keeps what was typed, so trying other tiles costs
-  // nothing.
+  // Changing the mode keeps what was typed.
   const picker = modeTiles(MODES, chosen, (value) => {
     chosen = value;
     syncMode();
-    // Focus the next thing to type on a new filter, or the control that
-    // opened the tiles on an edit. Before the dialog is in the document this
-    // does nothing, which is right for an edit's first choice.
+    // Before the dialog is in the document, focus does nothing, which is
+    // right for an edit's first choice.
     if (creating && !alias.value) alias.focus();
     else picker.change.focus();
   });
@@ -978,13 +967,12 @@ function editFilter(ctx, existing, readers) {
     tiles,
     chosenRow,
   );
-  // Fields only some modes have. Hidden rather than disabled, since they mean
-  // nothing in the other modes.
-  const modelField = h("div", { class: "field" });
-  const promptField = h("div", { class: "field" });
-  const rulesField = h("div", { class: "field" });
-  replace(modelField, h("label", {}, "Runs on"), model, modelHint);
-  // Set once the dialog is up. The tiles turn it on.
+  // Fields only some modes have. Hidden, not disabled: they mean nothing in
+  // the other modes.
+  const modelField = field("Runs on", model, modelHint);
+  const promptField = field("Instruction", prompt, promptHint);
+  const rulesField = field("Rules", rules, rulesHint);
+  // Set once the dialog is up.
   let saveButton = null;
   const syncMode = () => {
     // Nothing below the tiles, not even Save, until a mode is chosen.
@@ -1019,15 +1007,14 @@ function editFilter(ctx, existing, readers) {
           : GATE_EXAMPLE;
     }
     if (rules.value.trim() === "") rules.value = RULES_EXAMPLE;
-    rulesHint.textContent =
-      "One per line: a Go regular expression, '=>', then the replacement. " +
-      "Or 'REFUSE: reason' to drop the request.";
+    const shadowHint =
+      "Runs on every request it covers but changes nothing. The filter's " +
+      "page counts what it would have done.";
     if (pattern) {
       costBanner.textContent =
         "Costs nothing: no model runs, so there is no extra wait or charge.";
       enforceHint.textContent = shadow
-        ? "Runs on every request it covers but changes nothing. The filter's " +
-          "page counts what it would have done."
+        ? shadowHint
         : "Replacements reach the model, and a REFUSE rule drops the request. " +
           "Rules that do not compile refuse too.";
       return;
@@ -1041,8 +1028,7 @@ function editFilter(ctx, existing, readers) {
         "you."
       : "Write it as a rule about text. To have it refuse as well, say when.";
     enforceHint.textContent = shadow
-      ? "Runs on every request it covers but changes nothing. The filter's " +
-        "page counts what it would have done."
+      ? shadowHint
       : gate
         ? "A refusal drops the request with a 403 and the filter's reason. " +
           "A filter that cannot run refuses too."
@@ -1078,8 +1064,8 @@ function editFilter(ctx, existing, readers) {
     ),
     modelField,
     field("Acts on its answer", enforceSelect, enforceHint),
-    replace(promptField, h("label", {}, "Instruction"), prompt, promptHint),
-    replace(rulesField, h("label", {}, "Rules"), rules, rulesHint),
+    promptField,
+    rulesField,
     costBanner,
   );
 

@@ -16,11 +16,7 @@ const MIN_W = 280;
  */
 export function areaChart(points, { height = 190, bucket = "day" } = {}) {
   if (!points || points.length === 0) {
-    return h(
-      "div",
-      { class: "chart-holder" },
-      empty("No requests in this period"),
-    );
+    return noRequests();
   }
   // A single point has no line to draw, so it is widened into a flat pair.
   const data = points.length === 1 ? [points[0], { ...points[0] }] : points;
@@ -34,13 +30,8 @@ export function areaChart(points, { height = 190, bucket = "day" } = {}) {
  */
 export function lineChart(at, lines, { height = 190, bucket = "day" } = {}) {
   if (!at || at.length === 0 || !lines || lines.length === 0) {
-    return h(
-      "div",
-      { class: "chart-holder" },
-      empty("No requests in this period"),
-    );
+    return noRequests();
   }
-  // A single point has no line to draw, so it is widened into a flat pair.
   const times = at.length === 1 ? [at[0], at[0]] : at;
   const series =
     at.length === 1
@@ -57,6 +48,14 @@ export function lineChart(at, lines, { height = 190, bucket = "day" } = {}) {
     ),
   );
   return holder;
+}
+
+function noRequests() {
+  return h(
+    "div",
+    { class: "chart-holder" },
+    empty("No requests in this period"),
+  );
 }
 
 function swatch(l) {

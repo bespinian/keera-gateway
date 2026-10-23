@@ -148,23 +148,7 @@ export async function projectDetailView(ctx) {
           )
         : null,
     ],
-    panels: (o, names) => [
-      barPanel(
-        "Models by tokens",
-        o.top_models,
-        (r) => r.group || "unknown model",
-        (r) => r.input_tokens + r.output_tokens,
-        1,
-      ),
-      barPanel(
-        "Keys by cost",
-        o.top_keys,
-        (r) => names.keys[r.group] || r.group || "No key",
-        (r) => r.cost_micros,
-        3,
-        true,
-      ),
-    ],
+    panels: (o, names) => [modelsPanel(o), keysPanel(o, names)],
     aside: h(
       "div",
       { class: "card" },
@@ -328,13 +312,7 @@ export async function keyDetailView(ctx) {
         : null,
     ],
     panels: (o) => [
-      barPanel(
-        "Models by tokens",
-        o.top_models,
-        (r) => r.group || "unknown model",
-        (r) => r.input_tokens + r.output_tokens,
-        1,
-      ),
+      modelsPanel(o),
       h(
         "div",
         { class: "card" },
@@ -471,14 +449,7 @@ export async function modelDetailView(ctx) {
         0,
         true,
       ),
-      barPanel(
-        "Keys by cost",
-        o.top_keys,
-        (r) => names.keys[r.group] || r.group || "No key",
-        (r) => r.cost_micros,
-        3,
-        true,
-      ),
+      keysPanel(o, names),
     ],
     aside: model
       ? h(
@@ -624,23 +595,7 @@ export async function userDetailView(ctx) {
               ),
         ]
       : [],
-    panels: (o, names) => [
-      barPanel(
-        "Models by tokens",
-        o.top_models,
-        (r) => r.group || "unknown model",
-        (r) => r.input_tokens + r.output_tokens,
-        1,
-      ),
-      barPanel(
-        "Keys by cost",
-        o.top_keys,
-        (r) => names.keys[r.group] || r.group || "No key",
-        (r) => r.cost_micros,
-        3,
-        true,
-      ),
-    ],
+    panels: (o, names) => [modelsPanel(o), keysPanel(o, names)],
     aside: h(
       "div",
       { class: "card" },
@@ -853,6 +808,25 @@ function failureJump(ctx, text, sessions) {
     text,
   );
 }
+
+const modelsPanel = (o) =>
+  barPanel(
+    "Models by tokens",
+    o.top_models,
+    (r) => r.group || "unknown model",
+    (r) => r.input_tokens + r.output_tokens,
+    1,
+  );
+
+const keysPanel = (o, names) =>
+  barPanel(
+    "Keys by cost",
+    o.top_keys,
+    (r) => names.keys[r.group] || r.group || "No key",
+    (r) => r.cost_micros,
+    3,
+    true,
+  );
 
 function barPanel(title, rows, label, value, colorIndex, cost) {
   return h(

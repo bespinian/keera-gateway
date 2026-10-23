@@ -459,26 +459,14 @@ const idpAliases = {
  *  or null for one this build has no mark for. */
 export function idpMark(name) {
   const key = String(name || "").toLowerCase();
-  const mark = idpMarks[idpAliases[key] || key];
-  if (!mark) return null;
-  return svg(
-    "svg",
-    {
-      class: "provider-mark",
-      viewBox: mark.viewBox,
-      fill: "currentColor",
-      "aria-hidden": "true",
-    },
-    svg("path", { d: mark.path }),
-  );
+  return drawMark(idpMarks[idpAliases[key] || key]);
 }
 
 /** clientMarks are the logos of clients that are not a provider's own, like
  *  providerMarks. Keyed by the client keys in internal/connect. */
 const clientMarks = {
   opencode: {
-    // The artwork's dark tile is left out. The frame is solid and the block
-    // inside it is the artwork's grey, as an opacity.
+    // Without the artwork's dark tile; its grey block becomes an opacity.
     viewBox: "80 80 352 352",
     layers: [
       { opacity: 1, path: "M384 416H128V96H384ZM320 160H192V352H320Z" },
@@ -868,24 +856,25 @@ export function busyButton(props, label, run) {
 }
 
 /** iconButton is a small button that shows only an icon. title is its
- *  tooltip and, unless label is given, what a screen reader reads. Other
- *  options are set on the button as they are. */
+ *  tooltip and, unless label is given, what a screen reader reads. */
 export function iconButton(
   glyph,
   title,
   onClick,
   { quiet, danger, cls, label = title, ...attrs } = {},
 ) {
-  const classes = [
-    "btn",
-    quiet && "btn-quiet",
-    "btn-sm",
-    danger && "btn-danger",
-  ];
   return h(
     "button",
     {
-      class: [...classes, cls].filter(Boolean).join(" "),
+      class: [
+        "btn",
+        quiet && "btn-quiet",
+        "btn-sm",
+        danger && "btn-danger",
+        cls,
+      ]
+        .filter(Boolean)
+        .join(" "),
       title,
       "aria-label": label,
       onClick,
@@ -1415,7 +1404,7 @@ export function menu(anchor, items, { up = false } = {}) {
   return list;
 }
 
-export function closeMenu() {
+function closeMenu() {
   if (openMenu) {
     const close = openMenu;
     openMenu = null;
@@ -1440,11 +1429,8 @@ function place(el, anchor, up) {
   el.style.left = left / zoom + "px";
 }
 
-/** modal opens a dialog and returns a close function.
- *
- *  The actions live in the footer, outside the body's form, so the form's
- *  submit is wired to the primary action here. Otherwise pressing Enter would
- *  do nothing. */
+/** modal opens a dialog and returns a close function. Without actions, its
+ *  footer has only a Close button. */
 export function modal({ title, subtitle, body, actions, wide }) {
   const overlay = h("div", { class: "overlay" });
   // Focus goes back where it came from, so a keyboard user keeps their place.
@@ -1496,20 +1482,26 @@ export function modal({ title, subtitle, body, actions, wide }) {
       ),
     ),
     h("div", { class: "modal-body" }, body),
-    actions ? h("div", { class: "modal-foot" }, actions(close)) : null,
+    h(
+      "div",
+      { class: "modal-foot" },
+      actions
+        ? actions(close)
+        : h("button", { class: "btn", onClick: close }, "Close"),
+    ),
   );
   overlay.append(card);
   document.body.append(overlay);
 
-  // Enter anywhere in the body's form runs the primary action.
+  // The actions live in the footer, outside the body's form, so Enter in the
+  // form is wired to the primary action here.
   const form = card.querySelector("form");
   const primary = card.querySelector(
     ".modal-foot .btn-primary, .modal-foot .btn-danger",
   );
   if (form && primary) {
     // A browser submits on Enter only if the form has a submit button or a
-    // single text field. The real buttons are in the footer, so this hidden
-    // one stands in, first so it is the form's default.
+    // single text field. This hidden one comes first, to be the default.
     if (!form.querySelector("[type=submit]")) {
       form.prepend(
         h("button", {

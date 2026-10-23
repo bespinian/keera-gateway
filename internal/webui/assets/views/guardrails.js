@@ -88,9 +88,6 @@ export async function openGuardrails(
         "Could not load these guardrails. Saving now would replace them " +
           "with only what this dialog shows. Try again shortly.",
       ),
-      actions: (close) => [
-        h("button", { class: "btn", onClick: close }, "Close"),
-      ],
     });
     return;
   }

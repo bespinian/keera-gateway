@@ -33,7 +33,6 @@ export async function signUp(root, onSignedIn) {
         {
           class: "btn",
           href: "/",
-          style: { width: "100%", justifyContent: "center" },
         },
         "Go to sign-in",
       ),
@@ -73,7 +72,6 @@ export async function signUp(root, onSignedIn) {
     {
       class: "btn" + (invited ? "" : " btn-primary"),
       type: "submit",
-      style: { width: "100%", justifyContent: "center" },
     },
     "Create organisation",
   );
@@ -108,7 +106,6 @@ export async function signUp(root, onSignedIn) {
       "button",
       {
         class: "btn btn-primary",
-        style: { width: "100%", justifyContent: "center" },
         onClick: () => finish({ join: true }, join),
       },
       "Join " + invited,

@@ -77,7 +77,6 @@ export async function signIn(root, onSignedIn) {
     {
       class: "btn btn-primary",
       type: "submit",
-      style: { width: "100%", justifyContent: "center" },
     },
     "Sign in with the operator key",
   );
@@ -113,7 +112,6 @@ export async function signIn(root, onSignedIn) {
       "button",
       {
         class: "btn" + (primary ? " btn-primary" : ""),
-        style: { width: "100%", justifyContent: "center" },
         disabled: !supported,
         title: supported ? null : "This browser does not support passkeys",
         onClick: async () => {

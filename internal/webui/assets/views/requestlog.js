@@ -165,15 +165,16 @@ export async function requestLog(
   // Both empty states still watch: an empty log is where somebody waits for
   // their first request, and "nothing yet" must not stay after it arrives.
   if (!counts.total && !anyNarrowed) {
+    const waiting = watch && watch.on;
     wrap.append(
       h(
         "div",
         { class: "card" },
         empty(
-          watch && watch.on
+          waiting
             ? "No requests yet in this period"
             : "No requests in this period",
-          watch && watch.on
+          waiting
             ? "New requests appear here as they arrive."
             : "Pick a longer period, or check that a client points at this " +
                 "gateway.",
@@ -210,9 +211,7 @@ export async function requestLog(
 
   if (rows.length === PAGE && rank.by !== "") {
     wrap.append(rankedNote(PAGE, "requests"));
-  }
-
-  if (rows.length === PAGE && rank.by === "") {
+  } else if (rows.length === PAGE) {
     let before = res.next_before;
     wrap.append(
       loadMore(
@@ -539,9 +538,10 @@ export function showRequest(ctx, q, names) {
     ["Streamed", q.stream ? "yes" : "no"],
     ["Client hung up", q.canceled ? "yes" : "no"],
   ].filter(Boolean);
-  const session = q.session_key
-    ? (close) =>
-        h(
+  const actions = (close) => [
+    h("button", { class: "btn", onClick: close }, "Close"),
+    q.session_key
+      ? h(
           "button",
           {
             class: "btn",
@@ -553,7 +553,8 @@ export function showRequest(ctx, q, names) {
           },
           "View its session",
         )
-    : null;
+      : null,
+  ];
 
   // Where the time went goes first: it is what the dialog is most often
   // opened for.
@@ -562,7 +563,7 @@ export function showRequest(ctx, q, names) {
   modal({
     title: label,
     subtitle: `${q.alias || "no model"} · ${dateTime(q.created_at)}`,
-    actions: session,
+    actions,
     wide: true,
     body: h(
       "div",
@@ -590,46 +591,10 @@ export function showRequest(ctx, q, names) {
             steps,
           )
         : null,
-      q.error
-        ? h(
-            "div",
-            { class: "stack", style: { gap: "4px" } },
-            h("div", { class: "stat-label" }, "What the client was told"),
-            h(
-              "pre",
-              {
-                class: "key-value",
-                style: {
-                  whiteSpace: "pre-wrap",
-                  userSelect: "text",
-                  margin: 0,
-                },
-              },
-              q.error,
-            ),
-          )
-        : null,
+      q.error ? textBlock("What the client was told", q.error) : null,
       // A note is what went wrong on the way to an answer that was served all
       // the same, such as a router falling back.
-      q.note
-        ? h(
-            "div",
-            { class: "stack", style: { gap: "4px" } },
-            h("div", { class: "stat-label" }, "On the way to the answer"),
-            h(
-              "pre",
-              {
-                class: "key-value",
-                style: {
-                  whiteSpace: "pre-wrap",
-                  userSelect: "text",
-                  margin: 0,
-                },
-              },
-              q.note,
-            ),
-          )
-        : null,
+      q.note ? textBlock("On the way to the answer", q.note) : null,
       h(
         "div",
         { class: "stack", style: { gap: "4px" } },
@@ -644,4 +609,22 @@ export function showRequest(ctx, q, names) {
       ),
     ),
   });
+}
+
+// textBlock is shown whole and selectable, because people paste it to
+// somebody else.
+function textBlock(title, text) {
+  return h(
+    "div",
+    { class: "stack", style: { gap: "4px" } },
+    h("div", { class: "stat-label" }, title),
+    h(
+      "pre",
+      {
+        class: "key-value",
+        style: { whiteSpace: "pre-wrap", userSelect: "text", margin: 0 },
+      },
+      text,
+    ),
+  );
 }

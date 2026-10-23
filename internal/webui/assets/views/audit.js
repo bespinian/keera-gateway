@@ -119,13 +119,13 @@ export async function auditView(ctx) {
     since: remembered("keera.audit.since") ?? "720h",
   };
 
-  const res = await api.audit({
+  const params = {
     org_id: ctx.orgID,
-    limit: PAGE,
     action: filter.action,
     actor: filter.actor,
     since: filter.since,
-  });
+  };
+  const res = await api.audit({ ...params, limit: PAGE });
   const entries = res.data || [];
   const facets = res.filters || { actions: [], actors: [] };
 
@@ -145,17 +145,11 @@ export async function auditView(ctx) {
       key: "keera.audit.since",
     }),
     csvButton("Download all matching entries as CSV", () =>
-      api.download("/v1/audit", {
-        org_id: ctx.orgID,
-        action: filter.action,
-        actor: filter.actor,
-        since: filter.since,
-      }),
+      api.download("/v1/audit", params),
     ),
   );
 
-  // The filters sit on their own row under the head, as on Requests and
-  // Sessions, with Clear beside them once one is set.
+  // On their own row under the head, as on Requests and Sessions.
   const active = filter.action || filter.actor;
   const filters = h(
     "div",
@@ -220,14 +214,7 @@ export async function auditView(ctx) {
       loadMore(
         PAGE,
         async () => {
-          const next = await api.audit({
-            org_id: ctx.orgID,
-            limit: PAGE,
-            before,
-            action: filter.action,
-            actor: filter.actor,
-            since: filter.since,
-          });
+          const next = await api.audit({ ...params, limit: PAGE, before });
           const rows = next.data || [];
           entries.push(...rows);
           list.redraw();

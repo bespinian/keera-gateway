@@ -65,8 +65,7 @@ async function billSection(ctx) {
   const res = await api.billing(ctx.orgID, month);
   const rows = res.data || [];
   const total = rows.length ? res.total : null;
-  const operator = ctx.state.me.unrestricted;
-  const allOrgs = operator && !ctx.orgID;
+  const allOrgs = ctx.state.me.unrestricted && !ctx.orgID;
   const payments = ctx.state.me.payments;
 
   if (!payments || allOrgs) {

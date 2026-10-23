@@ -100,9 +100,8 @@ export async function accessView(ctx) {
     );
   }
 
-  // The keys are cards, not table rows, so this draws table()'s toolbar box
-  // itself.
-  if (keys.length && keys.some((k) => k.state === "revoked")) {
+  // The keys are cards, not table rows, so this draws table()'s toolbar itself.
+  if (keys.some((k) => k.state === "revoked")) {
     wrap.append(
       h(
         "div",

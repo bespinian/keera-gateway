@@ -159,8 +159,7 @@ export function newOrg(ctx, { switchTo = false } = {}) {
         return false;
       }
       const org = await api.createOrg(name.value.trim(), domain.value.trim());
-      // The topbar's switcher reads the shell's copy of the list, which
-      // reload() does not fetch again. It is ordered by creation.
+      // The shell's list, as in keepOrg, is ordered by creation.
       (ctx.state.orgs = ctx.state.orgs || []).push(org);
       if (switchTo) await ctx.setOrg(org.id);
     },
@@ -201,11 +200,16 @@ function liftLimit(ctx, org) {
     done: "Limit lifted",
     ctx,
     submit: async () => {
-      const saved = await api.liftOrgLimit(org.id);
-      const i = (ctx.state.orgs || []).findIndex((o) => o.id === org.id);
-      if (i >= 0) ctx.state.orgs[i] = saved;
+      keepOrg(ctx, org.id, await api.liftOrgLimit(org.id));
     },
   });
+}
+
+// keepOrg updates the shell's copy of the list, which the topbar's switcher
+// reads and reload() does not fetch again.
+function keepOrg(ctx, id, saved) {
+  const i = (ctx.state.orgs || []).findIndex((o) => o.id === id);
+  if (i >= 0) ctx.state.orgs[i] = saved;
 }
 
 function orgSettings(ctx, org) {
@@ -239,18 +243,15 @@ function orgSettings(ctx, org) {
         name.value.trim(),
         domain.value.trim(),
       );
-      // The topbar's switcher reads the shell's copy of the list, which
-      // reload() does not fetch again.
-      const i = (ctx.state.orgs || []).findIndex((o) => o.id === org.id);
-      if (i >= 0) ctx.state.orgs[i] = saved;
+      keepOrg(ctx, org.id, saved);
       if (org.id === ctx.state.me.org_id) ctx.state.me.org_name = saved.name;
     },
   });
 }
 
 // cannotDeleteOwn explains why the operator's own organisation cannot be
-// deleted here: it would take their user and session with it. The button opens
-// this rather than being hidden, so the operator learns why and what to do.
+// deleted here: it would take their user and session with it. The button is
+// not hidden, so the operator learns why and what to do.
 function cannotDeleteOwn(org) {
   modal({
     title: `Delete ${org.name}?`,
@@ -264,9 +265,6 @@ function cannotDeleteOwn(org) {
       h("code", {}, "KEERA_OPERATOR_KEY"),
       " set.",
     ),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Close"),
-    ],
   });
 }
 
@@ -307,8 +305,7 @@ function deleteOrg(ctx, org) {
     ctx,
     submit: async () => {
       const gone = await api.deleteOrg(org.id);
-      // The topbar's switcher reads the shell's copy of the list, which
-      // reload() does not fetch again.
+      // The shell's list, as in keepOrg.
       ctx.state.orgs = (ctx.state.orgs || []).filter((o) => o.id !== org.id);
       if (ctx.state.orgID === org.id) {
         await ctx.setOrg(ctx.state.orgs[0]?.id || "");

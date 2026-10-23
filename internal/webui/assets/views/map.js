@@ -297,18 +297,11 @@ function tokenShare(scene) {
   return Math.round((outside / total) * 100);
 }
 
-/* ----------------------------------------------------------------- layout */
-
-/** layout places every box for a canvas this wide and returns its height.
- *
- *  Two bands: the customer's network above, hosted providers below. The
- *  boundary runs across the whole width, so every line to a hosted model
- *  crosses it. */
+/** layout places every box and returns the canvas height. The customer's
+ *  network is above, hosted providers below, and the boundary spans the full
+ *  width so every line to a hosted model crosses it. */
 function layout(scene, width) {
   const P = BOX.pad;
-  const stack = (list, hh) =>
-    list.length ? list.length * (hh + BOX.gapY) - BOX.gapY : 0;
-
   const insideH = Math.max(
     stack(scene.clients, BOX.clientH),
     stack(scene.inside, BOX.modelH),
@@ -366,10 +359,14 @@ function layout(scene, width) {
   return scene.height;
 }
 
+/** stack is the height of one column of boxes. */
+function stack(list, hh) {
+  return list.length ? list.length * (hh + BOX.gapY) - BOX.gapY : 0;
+}
+
 /** place stacks one column, centred in its band. */
 function place(list, x, w, hh, top, bandH) {
-  const total = list.length ? list.length * (hh + BOX.gapY) - BOX.gapY : 0;
-  let y = Math.round(top + (bandH - total) / 2);
+  let y = Math.round(top + (bandH - stack(list, hh)) / 2);
   for (const n of list) {
     n.x = x;
     n.y = y;

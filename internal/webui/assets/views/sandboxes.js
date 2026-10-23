@@ -68,7 +68,7 @@ export async function sandboxesView(ctx) {
     `${sandboxes.length} ${plural(sandboxes.length, "sandbox", "sandboxes")}`,
   );
 
-  const live = sandboxes.filter((s) => isLive(s));
+  const live = sandboxes.filter(isLive);
   const running = live.filter((s) => s.state === "ready").length;
   const coreSeconds = sandboxes.reduce(
     (sum, s) => sum + Math.round((s.running_seconds * s.cpu_millis) / 1000),
@@ -78,7 +78,7 @@ export async function sandboxesView(ctx) {
   return h(
     "div",
     { class: "grid" },
-    head(ctx, classes, driver, limits, canAdmin, projects.data || []),
+    head(ctx, classes, driver, limits, canAdmin, ctx.state.projects),
     h(
       "div",
       { class: "grid grid-4" },
@@ -741,10 +741,6 @@ function expiryCell(s) {
 // always keeps it in a volume. On Kubernetes, only a class with a disk does.
 function keepsHome(s, driver) {
   return s.disk_mib > 0 || (driver && driver.name === "podman");
-}
-
-function size(s) {
-  return sizeOf(s.cpu_millis, s.memory_mib);
 }
 
 function sizeOf(cpuMillis, memoryMiB) {

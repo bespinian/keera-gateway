@@ -97,31 +97,29 @@ function micros(v) {
   return ms(n / 1000);
 }
 
-// pct writes one bar's geometry. Three decimals is a tenth of a pixel, and
-// keeps the inline style readable in the inspector.
+// Three decimals is a tenth of a pixel, and keeps the inline style readable.
 function pct(fraction) {
   return (Math.max(0, Math.min(1, fraction)) * 100).toFixed(3) + "%";
 }
 
-// began is a bar's tooltip: how long the step took and when it started.
 function began(what, at, took) {
   return at > 0
     ? `${what}: ${micros(took)}, ${micros(at)} into the request`
     : `${what}: ${micros(took)}, at the very start`;
 }
 
-// The notes that mean a step failed: a destination that could not be reached
-// or failed, a filter whose model is gone, a router that could not decide.
-// They are drawn as failures, because on a slow request they are usually the
-// cause.
-//
-// A filter that refused is not among them: that is the guardrail working.
+// The notes that mean a step failed. They are drawn as failures, because on a
+// slow request they are usually the cause. A filter that refused is not among
+// them: that is the guardrail working.
 const WENT_WRONG = ["unreachable", "could not run", "could not choose"];
 
-function tone(span) {
+function groupOf(span) {
   const step = STEPS[span.name];
-  if (wrong(span.note)) return "bad";
   return step ? step.group : "gateway";
+}
+
+function tone(span) {
+  return wrong(span.note) ? "bad" : groupOf(span);
 }
 
 function wrong(note) {
@@ -154,11 +152,9 @@ export function flameChart(spans, latencyMS) {
   // and the steps in microseconds cannot push the last bar off its track.
   const total = Math.max(last, Math.round((latencyMS || 0) * 1000), 1);
 
-  // Time per group, for the summary line.
   const spent = {};
   for (const s of steps) {
-    const step = STEPS[s.name];
-    const g = step ? step.group : "gateway";
+    const g = groupOf(s);
     spent[g] = (spent[g] || 0) + (s.for_us || 0);
   }
 

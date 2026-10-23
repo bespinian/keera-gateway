@@ -243,12 +243,12 @@ function chat(ctx, keys, key, models) {
       "button",
       {
         class: "btn btn-sm",
-        "aria-expanded": String(!settings.el.hidden),
+        "aria-expanded": String(!settings.hidden),
         onClick: (e) => {
-          settings.el.hidden = !settings.el.hidden;
+          settings.hidden = !settings.hidden;
           e.currentTarget.setAttribute(
             "aria-expanded",
-            String(!settings.el.hidden),
+            String(!settings.hidden),
           );
         },
       },
@@ -278,7 +278,7 @@ function chat(ctx, keys, key, models) {
     "div",
     { class: "chat" },
     bar,
-    settings.el,
+    settings,
     scroll,
     h(
       "div",
@@ -482,9 +482,7 @@ function subtitle(model) {
   if (!model) return "";
   // A router has no model or context window of its own: it picks one only
   // once it has read the message.
-  if (model.router) {
-    return "A router: it picks the model";
-  }
+  if (model.router) return "A router: it picks the model";
   const bits = [model.display_name || model.backend_model];
   if (model.max_context_tokens)
     bits.push(compact(model.max_context_tokens) + " token context");
@@ -619,7 +617,7 @@ function settingsPanel() {
     },
   });
 
-  const el = h(
+  return h(
     "div",
     { class: "card card-body chat-settings", hidden: true },
     field(
@@ -638,7 +636,6 @@ function settingsPanel() {
       ),
     ),
   );
-  return { el };
 }
 
 function messageEl(msg, ctx, byAlias) {
@@ -710,20 +707,19 @@ function messageEl(msg, ctx, byAlias) {
 /** reasoningEl shows a model's thinking, folded away. Without it, a model
  *  that only reasons looks broken. */
 function reasoningEl(msg) {
-  const el = h(
+  return h(
     "details",
     { class: "msg-reasoning", open: msg.streaming && !msg.content },
     h("summary", {}, "Reasoning"),
     h("div", { class: "msg-reasoning-body" }, msg.reasoning),
   );
-  return el;
 }
 
 function footer(msg, ctx, byAlias) {
   const bits = [];
   if (msg.usage) {
-    // Read straight off the chat completions response, not a Keera report, so
-    // these are OpenAI field names rather than input/output.
+    // OpenAI field names: this is the chat completions response, not a Keera
+    // report.
     bits.push(
       `${num(msg.usage.prompt_tokens)} in`,
       `${num(msg.usage.completion_tokens)} out`,
