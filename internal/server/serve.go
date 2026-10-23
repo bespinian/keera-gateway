@@ -63,6 +63,8 @@ func serve(ctx context.Context) error {
 		return err
 	}
 
+	resealSecrets(ctx, st, secrets, log)
+
 	reg, err := buildRegistry(ctx, st, cfg, secrets, log)
 	if err != nil {
 		return err
@@ -253,14 +255,51 @@ func loadSandboxTemplate(cfg config.Config, log *slog.Logger) ([]policy.SandboxC
 	return classes, nil
 }
 
-// buildSecrets builds the key for stored provider and MCP credentials. It is
-// built early, so a bad value fails the start rather than the first request.
+// buildSecrets builds the box that encrypts stored credentials.
 func buildSecrets(cfg config.Config) (*secret.Box, error) {
-	secrets, err := secret.New(cfg.SecretKey)
+	var previous []string
+	if cfg.SecretKeyPrevious != "" {
+		previous = append(previous, cfg.SecretKeyPrevious)
+	}
+	secrets, err := secret.New(cfg.SecretKey, previous...)
 	if err != nil {
 		return nil, fmt.Errorf("KEERA_SECRET_KEY: %w", err)
 	}
 	return secrets, nil
+}
+
+// resealSecrets moves every stored credential to KEERA_SECRET_KEY while
+// KEERA_SECRET_KEY_PREVIOUS is set, so that the previous key can be dropped.
+// A failure is only logged: the previous key still opens what it sealed.
+func resealSecrets(ctx context.Context, st *store.Store, secrets *secret.Box, log *slog.Logger) {
+	if !secrets.Rotating() {
+		return
+	}
+	unreadable := 0
+	n, err := st.ResealSecrets(ctx, func(v store.SealedValue) []byte {
+		var name string
+		switch v.Kind {
+		case store.SealedModel:
+			name = registry.ModelSecretName(v.OrgID, v.Alias)
+		case store.SealedMCP:
+			name = registry.MCPSecretName(v.OrgID, v.Alias)
+		default:
+			name = control.RefreshTokenName(v.ExternalID)
+		}
+		fresh, err := secrets.Reseal(name, v.Sealed)
+		if err != nil {
+			unreadable++
+		}
+		return fresh
+	})
+	if err != nil {
+		log.Error("moving stored credentials to the new KEERA_SECRET_KEY failed; "+
+			"keep KEERA_SECRET_KEY_PREVIOUS set and restart", "error", err)
+		return
+	}
+	log.Info("moved stored credentials to the new KEERA_SECRET_KEY; once every replica runs "+
+		"with it, restart once more and then remove KEERA_SECRET_KEY_PREVIOUS",
+		"moved", n, "unreadable", unreadable)
 }
 
 func buildRegistry(ctx context.Context, st *store.Store, cfg config.Config,

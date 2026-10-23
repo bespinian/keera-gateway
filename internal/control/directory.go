@@ -21,9 +21,9 @@ import (
 // directoryCheckTimeout bounds the one request that pays for a check.
 const directoryCheckTimeout = 10 * time.Second
 
-// refreshTokenName is what an identity's refresh token is sealed under, so a
+// RefreshTokenName is what an identity's refresh token is sealed under, so a
 // ciphertext copied to another identity does not open.
-func refreshTokenName(externalID string) string { return "refresh-token:" + externalID }
+func RefreshTokenName(externalID string) string { return "refresh-token:" + externalID }
 
 // directoryOf is the identity provider that vouches for a person, or nil for
 // an account no directory knows: the operator key's stand-in, or a passkey
@@ -42,7 +42,7 @@ func (s *Server) sealRefreshToken(externalID, refreshToken string) []byte {
 	if refreshToken == "" {
 		return nil
 	}
-	return s.opts.Secrets.Seal(refreshTokenName(externalID), refreshToken)
+	return s.opts.Secrets.Seal(RefreshTokenName(externalID), refreshToken)
 }
 
 // rememberDirectory keeps the sealed refresh token a sign-in returned. A
@@ -78,10 +78,13 @@ func (s *Server) checkDirectory(r *http.Request, user store.User, d store.Direct
 		// Another request is asking right now, or just did.
 		return user, true
 	}
-	refreshToken, err := s.opts.Secrets.Open(refreshTokenName(user.ExternalID), sealed)
+	refreshToken, err := s.opts.Secrets.Open(RefreshTokenName(user.ExternalID), sealed)
 	if err != nil {
-		s.log.Error("opening a refresh token", "user", user.ID, "error", err)
-		return user, true
+		// Usually KEERA_SECRET_KEY changed. Kept, the sign-in would never be
+		// checked again, so it ends, and signing in again stores a new token.
+		return user, s.directoryFailed(r, user, fmt.Errorf(
+			"%w: its refresh token cannot be decrypted with KEERA_SECRET_KEY: %w",
+			authn.ErrDirectoryRefused, err))
 	}
 	identity, fresh, err := provider.Recheck(ctx, refreshToken)
 	if err == nil && fresh && identity.ExternalID() != user.ExternalID {

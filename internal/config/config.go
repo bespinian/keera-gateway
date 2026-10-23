@@ -43,6 +43,9 @@ type Config struct {
 	// SecretKey encrypts credentials stored through the control plane, such as
 	// a hosted model's API key.
 	SecretKey string
+	// SecretKeyPrevious is the key SecretKey replaced, while the stored
+	// credentials are moved to the new one.
+	SecretKeyPrevious string
 
 	// MetricsToken reads /metrics and nothing else, so a scrape configuration
 	// does not have to hold the operator key. Empty leaves the route to
@@ -136,6 +139,7 @@ func Load() (Config, error) {
 		Addr:                  Addr(),
 		OperatorKey:           env("KEERA_OPERATOR_KEY", ""),
 		SecretKey:             env("KEERA_SECRET_KEY", ""),
+		SecretKeyPrevious:     env("KEERA_SECRET_KEY_PREVIOUS", ""),
 		MetricsToken:          env("KEERA_METRICS_TOKEN", ""),
 		ModelsFile:            env("KEERA_MODELS_FILE", ""),
 		LogLevel:              strings.ToLower(env("KEERA_LOG_LEVEL", "info")),
@@ -227,14 +231,16 @@ func (c Config) validateCredentials() error {
 	if len(c.SecretKey) < 16 {
 		return errors.New("KEERA_SECRET_KEY is too short to be a key; generate one with: openssl rand -hex 32")
 	}
+	if c.SecretKeyPrevious != "" && len(c.SecretKeyPrevious) < 16 {
+		return errors.New("KEERA_SECRET_KEY_PREVIOUS is too short to be a key; it is the KEERA_SECRET_KEY " +
+			"this one replaced")
+	}
 	if c.MetricsToken == "" {
 		return nil
 	}
 	if len(c.MetricsToken) < 16 {
 		return errors.New("KEERA_METRICS_TOKEN is too short to be a credential")
 	}
-	// The scrape token exists so a Prometheus configuration need not hold the
-	// operator key. Using the same value would defeat that.
 	if c.MetricsToken == c.OperatorKey {
 		return errors.New("KEERA_METRICS_TOKEN must differ from KEERA_OPERATOR_KEY; " +
 			"it exists so a scrape configuration does not have to hold the operator key")

@@ -75,3 +75,37 @@ func TestNewRejectsAKeyThatIsNotOne(t *testing.T) {
 		t.Errorf("error = %q; it should say how to generate one", err)
 	}
 }
+
+func TestARotatedKeyStillOpensWhatTheOldOneSealed(t *testing.T) {
+	const newKey = "a-new-key-long-enough-to-be-one"
+	old, _ := New(testKey)
+	sealed := old.Seal("model:org_1:frontier", "sk-old")
+
+	b, err := New(newKey, testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !b.Rotating() {
+		t.Error("a box with a previous key does not say it is rotating")
+	}
+	if got, err := b.Open("model:org_1:frontier", sealed); err != nil || got != "sk-old" {
+		t.Fatalf("Open = %q, %v; want the old seal opened", got, err)
+	}
+	resealed, err := b.Reseal("model:org_1:frontier", sealed)
+	if err != nil || resealed == nil {
+		t.Fatalf("Reseal = %v, %v", resealed, err)
+	}
+	only, _ := New(newKey)
+	if got, err := only.Open("model:org_1:frontier", resealed); err != nil || got != "sk-old" {
+		t.Errorf("the new key alone cannot open the re-sealed value: %q, %v", got, err)
+	}
+	if again, err := b.Reseal("model:org_1:frontier", resealed); err != nil || again != nil {
+		t.Errorf("re-sealing a current value = %v, %v; want nothing to do", again, err)
+	}
+	if _, err := b.Reseal("model:org_2:frontier", sealed); err == nil {
+		t.Error("a value moved to another row was re-sealed")
+	}
+	if _, err := New(newKey, "short"); err == nil {
+		t.Error("a short previous key was accepted")
+	}
+}

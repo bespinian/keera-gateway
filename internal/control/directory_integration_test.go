@@ -63,7 +63,7 @@ func signedInThroughADirectory(t *testing.T, refreshToken string) directorySetup
 	t.Cleanup(ts.Close)
 
 	if refreshToken != "" {
-		sealed := box.Seal(refreshTokenName(user.ExternalID), refreshToken)
+		sealed := box.Seal(RefreshTokenName(user.ExternalID), refreshToken)
 		if err := st.RecordDirectoryCheck(ctx, user.ExternalID, sealed); err != nil {
 			t.Fatalf("storing the refresh token: %v", err)
 		}
@@ -188,6 +188,22 @@ func TestADirectoryOutageKeepsPeopleSignedIn(t *testing.T) {
 
 	if got := asToken(t, d.ts, d.token, nil); got != http.StatusOK {
 		t.Errorf("status = %d, want 200 while the directory is down", got)
+	}
+}
+
+// Kept, a sign-in whose token no key opens would never be checked again,
+// and a terminal token would live out its 30 days unasked.
+func TestATokenNoKeyOpensEndsTheSignIn(t *testing.T) {
+	d := signedInThroughADirectory(t, "rt-1")
+	d.makeDue(t)
+	other, err := secret.New("another-key-long-enough-to-be-real")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.srv.opts.Secrets = other
+
+	if got := asToken(t, d.ts, d.token, nil); got != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401 once KEERA_SECRET_KEY no longer opens the token", got)
 	}
 }
 

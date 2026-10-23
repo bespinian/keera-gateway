@@ -602,11 +602,14 @@ the person is active.
   every organisation the person is in.
 - If it cannot be reached, the person stays signed in, and the next request asks
   again 15 minutes later.
+- If the stored refresh token cannot be decrypted, usually because
+  `KEERA_SECRET_KEY` [changed](install.md#changing-the-secret-key), the person is
+  signed out, as if the directory had refused. Signing in again stores a new one.
 
 When `KEERA_OIDC_<NAME>_SCOPES` is unset, Keera asks for `offline_access`, which
 is what gets a refresh token from most providers. On Google it asks for offline
 access instead, as Google expects. GitHub [works
-differently](#github). If your provider refuses `offline_access`,
+differently](#github), and so does [LDAP](#ldap-and-active-directory). If your provider refuses `offline_access`,
 set the scopes without it. Without a refresh token, the directory is only read
 at sign-in, and a `keera login` token lasts 12 hours instead of 30 days.
 

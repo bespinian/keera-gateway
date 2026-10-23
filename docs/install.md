@@ -40,11 +40,11 @@ sandbox classes new organisations start with, and the
 
 ### Required
 
-| Variable             | What it is                                                                                                                                                                                                                                                                                                                                                  |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `KEERA_DATABASE_URL` | Postgres connection string.                                                                                                                                                                                                                                                                                                                                 |
-| `KEERA_OPERATOR_KEY` | The credential for the control API and the `keera` command, and the only one not stored in the database. Once an identity provider is set up, people use `keera login` and this key is for automation. See [sso.md](sso.md#signing-in-from-the-command-line).                                                                                               |
-| `KEERA_SECRET_KEY`   | Encrypts the API keys of hosted models and MCP servers saved in the panel, and the sign-in refresh tokens Keera keeps to ask the directory again ([sso.md](sso.md#asking-the-directory-again)). Changing it later makes all of them unreadable: the API keys have to be entered again, and a person's directory is not asked again until they sign in anew. |
+| Variable             | What it is                                                                                                                                                                                                                                                             |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `KEERA_DATABASE_URL` | Postgres connection string.                                                                                                                                                                                                                                            |
+| `KEERA_OPERATOR_KEY` | The credential for the control API and the `keera` command, and the only one not stored in the database. Once an identity provider is set up, people use `keera login` and this key is for automation. See [sso.md](sso.md#signing-in-from-the-command-line).          |
+| `KEERA_SECRET_KEY`   | Encrypts the API keys of hosted models and MCP servers saved in the panel, and the sign-in refresh tokens Keera keeps to ask the directory again ([sso.md](sso.md#asking-the-directory-again)). To change it, see [Changing the secret key](#changing-the-secret-key). |
 
 ### Worth setting on any real deployment
 
@@ -355,6 +355,18 @@ A Postgres in a single container or StatefulSet does not survive losing its
 node. If you need a recovery objective, run Postgres the way the rest of the
 cluster does (an operator, or a managed service), and point `KEERA_DATABASE_URL`
 at it.
+
+### Changing the secret key
+
+Set the new key as `KEERA_SECRET_KEY` and the old one as
+`KEERA_SECRET_KEY_PREVIOUS`, then restart. Both keys read what is stored, and at
+start the gateway encrypts it all again with the new key. Once every replica runs
+with the new key, restart once more, then remove `KEERA_SECRET_KEY_PREVIOUS`.
+
+If you change the key without setting the previous one, nothing stored can be
+read: the API keys of hosted models and MCP servers have to be entered again, and
+people who sign in through a directory are signed out at their next
+[check](sso.md#asking-the-directory-again).
 
 ## Retention and sizing
 
