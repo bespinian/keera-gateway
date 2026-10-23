@@ -210,13 +210,19 @@ export function userPasskeys(user) {
         "button",
         {
           class: "btn btn-primary",
-          onClick: async () => {
+          // A second link replaces the first, so a double click would hand
+          // over a link that no longer works.
+          onClick: async (e) => {
+            const button = e.currentTarget;
+            button.disabled = true;
+            showError(err, "");
             try {
               const link = await api.passkeyLink(user.id);
               close();
               showPasskeyLink(user.email, link);
             } catch (ex) {
               showError(err, ex.message);
+              button.disabled = false;
             }
           },
         },

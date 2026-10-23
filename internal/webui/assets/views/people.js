@@ -441,7 +441,7 @@ export function disablePerson(ctx, user) {
         res.warning
           ? `${user.email} disabled. ${res.warning}`
           : `${user.email} disabled; ${keys} revoked${sandboxes}`,
-        res.warning ? "bad" : "good",
+        res.warning ? "warn" : "good",
       );
       ctx.reload();
     },

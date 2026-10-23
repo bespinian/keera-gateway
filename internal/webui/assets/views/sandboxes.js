@@ -101,7 +101,7 @@ export async function sandboxesView(ctx) {
       ),
       stat(
         "Isolation",
-        driver.isolation,
+        isolationLabel(driver.isolation),
         `the strongest the ${driver.name} driver offers`,
       ),
     ),
@@ -186,7 +186,7 @@ function listCard(ctx, sandboxes, canAdmin, me, driver) {
             h(
               "div",
               { class: "faint small" },
-              `${size(s)} · ${s.isolation || "standard"}`,
+              `${sizeOf(s.cpu_millis, s.memory_mib)} · ${isolationLabel(s.isolation)}`,
             ),
           ),
         sortKey: (s) => s.class,
@@ -565,7 +565,7 @@ function newSandbox(ctx, classes, limits, projects) {
       h(
         "option",
         { value: c.name },
-        `${c.name} · ${sizeOf(c.cpu_millis, c.memory_mib)}, ${c.isolation}`,
+        `${c.name} · ${sizeOf(c.cpu_millis, c.memory_mib)}, ${isolationLabel(c.isolation)}`,
       ),
     ),
   );

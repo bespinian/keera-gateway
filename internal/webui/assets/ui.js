@@ -1676,7 +1676,11 @@ export function toast(message, tone = "") {
   }
   const el = h("div", { class: "toast " + tone }, message);
   toastHost.append(el);
-  setTimeout(() => el.remove(), tone === "bad" ? 7000 : 3500);
+  // Bad news and warnings stay longer: they say what to do next.
+  setTimeout(
+    () => el.remove(),
+    tone === "bad" || tone === "warn" ? 7000 : 3500,
+  );
 }
 
 export async function copyText(text) {
@@ -1869,13 +1873,30 @@ function markOf(m) {
   return (m.mark && m.mark()) || icon(m.icon);
 }
 
+let controls = 0;
+
+/** controlID returns the id a label points at, giving the control one if it
+ *  has none, so clicking the label focuses it and screen readers name it. el
+ *  may wrap the control, as long as it holds only one. */
+export function controlID(el) {
+  if (!(el instanceof Element)) return null;
+  const control = el.matches("input, select, textarea")
+    ? el
+    : el.querySelectorAll("input, select, textarea").length === 1
+      ? el.querySelector("input, select, textarea")
+      : null;
+  if (!control) return null;
+  if (!control.id) control.id = "field-" + ++controls;
+  return control.id;
+}
+
 /** field renders a labelled control. hint may be a .hint element the caller
  *  keeps to change later, and extra goes below it. */
 export function field(label, input, hint, ...extra) {
   return h(
     "div",
     { class: "field" },
-    h("label", { for: input.id || null }, label),
+    h("label", { for: controlID(input) }, label),
     input,
     hint instanceof Element && hint.classList.contains("hint")
       ? hint

@@ -27,19 +27,16 @@ import {
   code,
   remembered,
   remember,
+  field,
 } from "../ui.js";
 
-// The control plane fills in the configuration blocks, at
-// /control/v1/connect/render, with the same code `keera connect` runs, so the
-// panel and the command line always agree. See internal/connect.
-//
-// The prose around a block comes with it. A span in backticks is shown as code.
+// The control plane fills in the configuration blocks with the same code
+// `keera connect` runs, so the panel and the command line agree. See
+// internal/connect.
 
 // One fetch per page load. A changed catalogue shows after a reload.
 let catalogue;
 
-/** loadClients reads the client catalogue: what the picker offers, and the
- *  prose that does not depend on the models. */
 function loadClients() {
   if (!catalogue) {
     catalogue = api.connect().then(
@@ -275,13 +272,12 @@ async function addClient(ctx, catalogue, keys, button, secret = null) {
     ),
   );
 
-  // The key is the only choice after the client. The models follow from it,
-  // and the gateway address from the control plane, which builds it in one
-  // place for every panel and `keera connect`.
+  // The key is the only choice after the client: the models follow from it,
+  // and the gateway address comes from the control plane.
   const setup = h(
     "div",
     { hidden: true },
-    h("div", { class: "field" }, h("label", {}, "API key"), keySelect, models),
+    field("API key", keySelect, null, models),
     steps,
   );
 

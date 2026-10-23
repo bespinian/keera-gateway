@@ -223,15 +223,11 @@ export async function keysView(ctx) {
           h(
             "div",
             { class: "row-tight" },
-            h(
-              "button",
-              {
-                class: "btn btn-sm",
-                title: "Guardrails for this key",
-                onClick: () =>
-                  openKey(ctx, k, models, projectNames[k.project_id], canEdit),
-              },
+            busyButton(
+              { class: "btn btn-sm", title: "Guardrails for this key" },
               "Guardrails",
+              () =>
+                openKey(ctx, k, models, projectNames[k.project_id], canEdit),
             ),
             // Revoked keys can be renamed too: the name heads their usage.
             canRevoke(ctx, k)

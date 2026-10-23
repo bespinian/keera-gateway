@@ -21,6 +21,7 @@ import {
   pct,
   dash,
   formModal,
+  busyButton,
 } from "../ui.js";
 import {
   openGuardrails,
@@ -52,23 +53,18 @@ export async function projectsView(ctx) {
           "them. An administrator sets them.",
     // The organisation's guardrails cap every project, and its system prompt
     // reaches every request. A member is subject to both, so may read both.
-    h(
-      "button",
-      {
-        class: "btn",
-        title: "Guardrails that apply to every project",
-        onClick: () =>
-          openGuardrails(ctx, {
-            scope: "org",
-            id: orgID,
-            name: orgName,
-            models,
-            orgID,
-            canEdit,
-          }),
-      },
-      icon(icons.sliders),
-      "Organisation guardrails",
+    busyButton(
+      { title: "Guardrails that apply to every project" },
+      [icon(icons.sliders), "Organisation guardrails"],
+      () =>
+        openGuardrails(ctx, {
+          scope: "org",
+          id: orgID,
+          name: orgName,
+          models,
+          orgID,
+          canEdit,
+        }),
     ),
     canEdit
       ? { label: "Create project", onClick: () => newProject(ctx) }
@@ -171,17 +167,15 @@ export async function projectsView(ctx) {
           h(
             "div",
             { class: "row-tight" },
-            h(
-              "button",
+            busyButton(
               {
                 class: "btn btn-sm",
                 title: canEdit
                   ? "Set this project's guardrails"
                   : "View this project's guardrails",
-                onClick: () =>
-                  openProject(ctx, t, models, orgID, orgName, canEdit),
               },
               "Guardrails",
+              () => openProject(ctx, t, models, orgID, orgName, canEdit),
             ),
             // Not beside the name: the name links to the project's screen,
             // and a pencil there would read as editing that screen.

@@ -108,19 +108,13 @@ export async function projectDetailView(ctx) {
       pill(
         `${num(project.active_keys)} active ${plural(project.active_keys, "key")}`,
       ),
-      budgetPill(ctx, project),
+      budgetPill(project),
     ],
     actions: [
-      h(
-        "button",
-        {
-          class: "btn",
-          title: "Guardrails for this project's keys",
-          onClick: () =>
-            openProject(ctx, project, models, orgID, orgName, canEdit),
-        },
-        icon(icons.sliders),
-        canEdit ? "Guardrails" : "View guardrails",
+      busyButton(
+        { title: "Guardrails for this project's keys" },
+        [icon(icons.sliders), canEdit ? "Guardrails" : "View guardrails"],
+        () => openProject(ctx, project, models, orgID, orgName, canEdit),
       ),
       canEdit
         ? h(
@@ -253,16 +247,10 @@ export async function keyDetailView(ctx) {
           : null,
     ],
     actions: [
-      h(
-        "button",
-        {
-          class: "btn",
-          title: "Guardrails for this key",
-          onClick: () =>
-            openKey(ctx, key, models, project ? project.name : "", canEdit),
-        },
-        icon(icons.sliders),
-        canEdit ? "Guardrails" : "View guardrails",
+      busyButton(
+        { title: "Guardrails for this key" },
+        [icon(icons.sliders), canEdit ? "Guardrails" : "View guardrails"],
+        () => openKey(ctx, key, models, project ? project.name : "", canEdit),
       ),
       canRevoke(ctx, key)
         ? h(

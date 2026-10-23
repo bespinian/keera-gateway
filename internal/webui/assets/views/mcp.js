@@ -24,6 +24,7 @@ import {
   listHead,
   sectionHead,
   dash,
+  banner,
   formModal,
 } from "../ui.js";
 import { toolCallTable } from "./tools.js";
@@ -35,21 +36,21 @@ export async function mcpView(ctx) {
   const since = currentRange();
   const [servers, connect, summary, calls] = await Promise.all([
     api.mcpServers(ctx.orgID).then((r) => r.data || []),
-    api.connect().catch(() => ({})),
+    api.connect().catch(() => null),
     canEdit
       ? api
           .toolCalls({ org_id: ctx.orgID, since, summary: "1" })
           .then((r) => r.data || [])
-          .catch(() => [])
+          .catch(() => null)
       : [],
     canEdit
       ? api
           .toolCalls({ org_id: ctx.orgID, since, limit: 100 })
           .then((r) => r.data || [])
-          .catch(() => [])
+          .catch(() => null)
       : [],
   ]);
-  const base = (connect.gateway_url || "").replace(/\/$/, "");
+  const base = ((connect && connect.gateway_url) || "").replace(/\/$/, "");
   ctx.setSubtitle(`${servers.length} ${plural(servers.length, "server")}`);
 
   const head = listHead(
@@ -95,7 +96,9 @@ export async function mcpView(ctx) {
       shrink: true,
       sortKey: (m) => callsOf(summary, m.alias),
       cell: (m) =>
-        h("span", { class: "nowrap" }, num(callsOf(summary, m.alias))),
+        summary
+          ? h("span", { class: "nowrap" }, num(callsOf(summary, m.alias)))
+          : dash(),
     });
   }
   columns.push({
@@ -130,8 +133,31 @@ export async function mcpView(ctx) {
       : "An administrator adds them.",
   });
 
-  const wrap = h("div", {}, head, list);
+  // A failed read says so, rather than showing an address without its host
+  // or a period without calls.
+  const wrap = h(
+    "div",
+    {},
+    head,
+    connect
+      ? null
+      : banner(
+          "warn",
+          "Could not load the gateway's address, so only the path is shown.",
+        ),
+    list,
+  );
   if (!canEdit || !servers.length) return wrap;
+  if (!summary || !calls) {
+    wrap.append(
+      banner(
+        "bad",
+        { style: { marginTop: "16px" } },
+        "Could not load the tool calls. Reload to try again.",
+      ),
+    );
+    return wrap;
+  }
 
   const gap = { marginTop: "28px" };
   wrap.append(
@@ -209,7 +235,7 @@ function countPill(n, tone) {
 }
 
 function callsOf(summary, alias) {
-  return summary
+  return (summary || [])
     .filter((t) => t.server === alias)
     .reduce((n, t) => n + t.calls, 0);
 }

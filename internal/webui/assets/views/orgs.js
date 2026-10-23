@@ -16,6 +16,7 @@ import {
   listHead,
   formModal,
   banner,
+  controlID,
 } from "../ui.js";
 
 export async function orgsView(ctx) {
@@ -295,7 +296,13 @@ function deleteOrg(ctx, org) {
       h(
         "div",
         { class: "field", style: { marginTop: "16px" } },
-        h("label", {}, "Type ", h("strong", {}, org.name), " to confirm"),
+        h(
+          "label",
+          { for: controlID(name) },
+          "Type ",
+          h("strong", {}, org.name),
+          " to confirm",
+        ),
         name,
       ),
     ),
@@ -318,14 +325,15 @@ function deleteOrg(ctx, org) {
   // Loaded after the modal is up, and failing softly: the typed name already
   // confirms the deletion.
   Promise.all([
-    api.projects(org.id).catch(() => ({ data: [] })),
-    api.users(org.id).catch(() => ({ data: [] })),
-    api.keys(org.id).catch(() => ({ data: [] })),
+    api.projects(org.id).catch(() => null),
+    api.users(org.id).catch(() => null),
+    api.keys(org.id).catch(() => null),
   ]).then(([projects, users, keys]) => {
+    // A list that failed to load is not counted, rather than shown as 0.
     const counts = [
-      [(projects.data || []).length, "project"],
-      [(users.data || []).length, "user"],
-      [(keys.data || []).length, "API key"],
+      [projects && (projects.data || []).length, "project"],
+      [users && (users.data || []).length, "user"],
+      [keys && (keys.data || []).length, "API key"],
     ];
     summary.replaceChildren(
       h("div", {}, "Deleting it removes:"),
@@ -333,7 +341,9 @@ function deleteOrg(ctx, org) {
         "ul",
         { class: "muted", style: { margin: "8px 0 0", paddingLeft: "20px" } },
         ...counts.map(([n, label]) =>
-          h("li", {}, h("strong", {}, String(n)), ` ${plural(n, label)}`),
+          n === null
+            ? h("li", {}, `all its ${plural(2, label)}`)
+            : h("li", {}, h("strong", {}, String(n)), ` ${plural(n, label)}`),
         ),
         h("li", {}, "its guardrails and its budget counters"),
         h(
