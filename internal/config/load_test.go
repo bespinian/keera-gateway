@@ -242,7 +242,7 @@ func TestRetentionIsRefusedBelowADay(t *testing.T) {
 }
 
 func TestADatabasePoolTooSmallToServeIsRefused(t *testing.T) {
-	// Two connections are kept for good, so a pool of two serves nothing.
+	// Below four, a transaction can leave nothing for the requests around it.
 	if _, err := loadWith(t, valid(map[string]string{"KEERA_MAX_DB_CONNS": "2"})); err == nil {
 		t.Error("a pool of two connections was accepted")
 	}

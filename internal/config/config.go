@@ -258,15 +258,16 @@ func (c Config) validateLogging() error {
 	return nil
 }
 
-// minDBConns is the smallest pool that can serve. Each replica keeps two
-// connections for good, to hear the control plane's changes and the panel's
-// live events, and a guardrail save holds a third while it checks.
+// minDBConns is the smallest pool that can serve. The two listeners take their
+// connections out of the pool (see store.Listen), so they are not counted
+// here. The floor leaves room for a transaction, such as a guardrail save,
+// while the usage recorder and other requests still get a connection.
 const minDBConns = 4
 
 func (c Config) validateDBConns() error {
 	if c.MaxDBConns < minDBConns {
-		return fmt.Errorf("KEERA_MAX_DB_CONNS is %d; each replica keeps two connections "+
-			"open for good, so the smallest pool that can serve requests is %d", c.MaxDBConns, minDBConns)
+		return fmt.Errorf("KEERA_MAX_DB_CONNS is %d; the smallest pool that can serve "+
+			"requests is %d", c.MaxDBConns, minDBConns)
 	}
 	return nil
 }

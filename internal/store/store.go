@@ -73,6 +73,8 @@ var ErrNotFound = errors.New("store: not found")
 
 type Store struct {
 	pool *pgxpool.Pool
+	// referenceSlots bounds the LockReferences held at once. See there.
+	referenceSlots chan struct{}
 }
 
 // Open connects to Postgres and verifies the connection.
@@ -100,7 +102,10 @@ func Open(ctx context.Context, dsn string, maxConns int32) (*Store, error) {
 		pool.Close()
 		return nil, fmt.Errorf("ping: %w", err)
 	}
-	return &Store{pool: pool}, nil
+	return &Store{
+		pool:           pool,
+		referenceSlots: make(chan struct{}, max(1, pool.Config().MaxConns/2)),
+	}, nil
 }
 
 func (s *Store) Close() { s.pool.Close() }

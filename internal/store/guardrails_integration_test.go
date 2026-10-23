@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -82,5 +83,36 @@ func TestLockReferencesHoldsOffTheSameOrganisation(t *testing.T) {
 	unlock()
 	if err := try("org_1"); err != nil {
 		t.Errorf("a lock in org_1 after unlock gave %v", err)
+	}
+}
+
+// Each holder keeps a connection and needs another for its checks. Holders
+// and waiters must never take the whole pool, or none of them finishes.
+func TestLockReferencesLeavesConnectionsForItsHolders(t *testing.T) {
+	st, ctx := db(t)
+	size := int(st.Pool().Config().MaxConns)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	var wg sync.WaitGroup
+	errs := make(chan error, 2*size)
+	for range 2 * size {
+		wg.Go(func() {
+			unlock, err := st.LockReferences(ctx, "org_1")
+			if err != nil {
+				errs <- err
+				return
+			}
+			defer unlock()
+			// The check a holder makes while it has the lock.
+			var one int
+			errs <- st.Pool().QueryRow(ctx, "SELECT 1").Scan(&one)
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("a holder could not finish: %v", err)
+		}
 	}
 }

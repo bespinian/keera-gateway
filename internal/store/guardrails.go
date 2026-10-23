@@ -83,19 +83,32 @@ func (s *Store) PutGuardrail(ctx context.Context, scopeType policy.ScopeType, sc
 
 // LockReferences holds off every other replica's guardrail save, and every
 // delete of a filter, router or MCP server, in one organisation until unlock
-// is called. A check that something still exists, or that nothing uses it,
-// then still holds when the write after it is made. Without it, a guardrail
-// saved during a delete could name a filter that is gone, and refuse every
-// request.
+// is called, so a check that something exists or is unused still holds when
+// the write after it is made. Without it, a guardrail saved during a delete
+// could name a filter that is gone, and refuse every request.
 //
 // The lock lives in a transaction that writes nothing, so a lost connection
 // or a failed rollback cannot leave it held.
+//
+// That transaction holds a connection, and the holder's checks need another.
+// So at most half the pool holds one at a time: with every connection held by
+// a holder or a waiter, no holder could ever finish.
 func (s *Store) LockReferences(ctx context.Context, orgID string) (unlock func(), err error) {
+	select {
+	case s.referenceSlots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	free := func() { <-s.referenceSlots }
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
+		free()
 		return nil, err
 	}
-	release := func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }
+	release := func() {
+		_ = tx.Rollback(context.WithoutCancel(ctx))
+		free()
+	}
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
 		"references:"+orgID); err != nil {
 		release()
