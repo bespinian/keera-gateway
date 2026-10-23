@@ -27,6 +27,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// DefaultTrustedProxies is loopback and the private ranges, where the proxy in
+// front of a gateway usually is.
+const DefaultTrustedProxies = "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"
+
 // Config is the whole of Keera Gateway's configuration.
 type Config struct {
 	DatabaseURL string
@@ -105,6 +109,10 @@ type Config struct {
 	// RedisPrefix namespaces the keys, so two deployments can share one Redis.
 	RedisPrefix string
 
+	// TrustedProxies are the proxies in front of the gateway, whose
+	// X-Forwarded-For says where a request came from. See docs/install.md.
+	TrustedProxies []netip.Prefix
+
 	// UI serves the control panel from the listener's root.
 	UI bool
 	// PublicURL is the gateway's origin as a browser sees it, for the
@@ -174,11 +182,13 @@ func Load() (Config, error) {
 		}
 		c.Passkeys = rp
 	}
-	deny, err := gateway.ParseUpstreamDeny(env("KEERA_UPSTREAM_DENY", gateway.DefaultUpstreamDeny))
-	if err != nil {
-		return c, fmt.Errorf("KEERA_UPSTREAM_DENY: %w", err)
+	var err error
+	if c.UpstreamDeny, err = envPrefixes("KEERA_UPSTREAM_DENY", gateway.DefaultUpstreamDeny); err != nil {
+		return c, err
 	}
-	c.UpstreamDeny = deny
+	if c.TrustedProxies, err = envPrefixes("KEERA_TRUSTED_PROXIES", DefaultTrustedProxies); err != nil {
+		return c, err
+	}
 	if c.LimitPrivate, c.PrivateHosts, err = c.privateHosts(); err != nil {
 		return c, err
 	}
@@ -572,6 +582,15 @@ func envBool(key string, def bool) bool {
 
 // envList reads a comma-separated setting.
 func envList(key string) []string { return envListBy(key, ",") }
+
+// envPrefixes reads a list of addresses and prefixes, or "none".
+func envPrefixes(key, def string) ([]netip.Prefix, error) {
+	prefixes, err := gateway.ParsePrefixes(env(key, def))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", key, err)
+	}
+	return prefixes, nil
+}
 
 // envListBy reads a setting whose items are separated by sep.
 func envListBy(key, sep string) []string {

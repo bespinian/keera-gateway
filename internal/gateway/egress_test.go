@@ -9,7 +9,7 @@ import (
 )
 
 func TestTheDefaultDenyListBlocksTheHostAndTheMetadataService(t *testing.T) {
-	deny, err := ParseUpstreamDeny(DefaultUpstreamDeny)
+	deny, err := ParsePrefixes(DefaultUpstreamDeny)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestTheDefaultDenyListBlocksTheHostAndTheMetadataService(t *testing.T) {
 }
 
 func TestADenyListTakesAddressesAndPrefixes(t *testing.T) {
-	deny, err := ParseUpstreamDeny(" 10.1.2.3 , 192.168.0.0/16,,2001:db8::/32")
+	deny, err := ParsePrefixes(" 10.1.2.3 , 192.168.0.0/16,,2001:db8::/32")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestADenyListTakesAddressesAndPrefixes(t *testing.T) {
 }
 
 func TestNoneDeniesNothing(t *testing.T) {
-	deny, err := ParseUpstreamDeny("none")
+	deny, err := ParsePrefixes("none")
 	if err != nil || deny != nil || denyDial(deny, "KEERA_UPSTREAM_DENY blocks it") != nil {
 		t.Errorf("none = %v, %v; want no list and no check", deny, err)
 	}
@@ -56,7 +56,7 @@ func TestNoneDeniesNothing(t *testing.T) {
 
 func TestATypoInTheDenyListIsAnError(t *testing.T) {
 	for _, s := range []string{"127.0.0.1/33", "localhost", "10.0.0.0/8,nope"} {
-		if _, err := ParseUpstreamDeny(s); err == nil {
+		if _, err := ParsePrefixes(s); err == nil {
 			t.Errorf("%q was accepted", s)
 		}
 	}

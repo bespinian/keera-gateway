@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -53,6 +54,9 @@ type Options struct {
 	// Passkeys is this gateway as WebAuthn sees it. Nil means passkeys are
 	// off.
 	Passkeys *authn.RelyingParty
+	// TrustedProxies are the proxies whose X-Forwarded-For says where a
+	// request came from. See clientIP.
+	TrustedProxies []netip.Prefix
 	// ServeUI serves the control panel from this listener's root.
 	ServeUI       bool
 	SecureCookies bool
@@ -384,25 +388,18 @@ const BucketIdle = 10 * time.Minute
 
 const signInThrottled = "too many sign-in attempts from this address; wait a moment and try again"
 
-// throttle limits one unauthenticated route per client address, and answers
-// msg once it is over the limit.
-//
-// Unthrottled, POST /auth/local would let anyone guess the operator key, and
-// GET /auth/login would let anyone fill the login flow table.
-//
-// It is a brake, not a security boundary: the address comes from
-// X-Forwarded-For, which a caller can set. That is why the rates are generous.
+// throttle limits one unauthenticated route per client address, answering msg
+// once over. Without it, POST /auth/local would let anyone guess the operator
+// key, and GET /auth/login would let anyone fill the login flow table. It is a
+// brake, not a security boundary: many people can share one address and one
+// person can use many, which is why the rates are generous.
 func (s *Server) throttle(name string, perMinute int, msg string,
 	next http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		key := name + "|" + clientIP(r)
+		key := name + "|" + clientIP(r, s.opts.TrustedProxies)
 		now := time.Now()
 		if !s.signIn.Allow(key, perMinute, now) {
-			if d := s.signIn.Retry(key, perMinute, now); d > 0 {
-				httpx.SetRetryAfter(w, d)
-			}
-			httpx.WriteError(w, http.StatusTooManyRequests, "rate_limit_error",
-				"rate_limit_exceeded", msg)
+			tooMany(w, s.signIn.Retry(key, perMinute, now), msg)
 			return
 		}
 		next(w, r)

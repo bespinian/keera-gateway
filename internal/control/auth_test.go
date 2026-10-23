@@ -5,10 +5,12 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 
 	"github.com/bespinian/keera-gateway/internal/authn"
+	"github.com/bespinian/keera-gateway/internal/authn/ldaptest"
 )
 
 // ?next= lets a URL a stranger wrote decide where a browser goes right after
@@ -45,7 +47,7 @@ func TestSafeRedirectKeepsOnlySameSitePaths(t *testing.T) {
 // The error behind a 500 can name tables, constraints and internal hosts, so
 // the caller gets the request id, not the reason.
 func TestInternalErrorsDoNotLeakTheirCause(t *testing.T) {
-	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
+	s := newServer()
 	w := httptest.NewRecorder()
 	// What the middleware would have put there.
 	w.Header().Set("X-Request-Id", "req_0123456789")
@@ -119,5 +121,79 @@ func TestRoleAtSignInKeepsWhatKeeraHoldsWhenNoGroupDecides(t *testing.T) {
 					tc.stored, tc.fromIDP, got, change, tc.want, tc.change)
 			}
 		})
+	}
+}
+
+func TestTheClientAddressCannotBeForged(t *testing.T) {
+	trusted := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
+	tests := []struct {
+		name   string
+		remote string
+		xff    []string
+		want   string
+	}{
+		{"no proxy", "203.0.113.5:4000", nil, "203.0.113.5"},
+		// Without a proxy in front, the header is the client's own words.
+		{"a header from an untrusted peer is ignored", "203.0.113.5:4000",
+			[]string{"198.51.100.1"}, "203.0.113.5"},
+		{"behind a proxy", "10.0.0.2:4000", []string{"203.0.113.5"}, "203.0.113.5"},
+		// The proxy appends whom it heard from; what the client wrote is to
+		// the left of it.
+		{"a forged entry is left of the real one", "10.0.0.2:4000",
+			[]string{"198.51.100.1, 203.0.113.5"}, "203.0.113.5"},
+		{"through two proxies", "10.0.0.2:4000",
+			[]string{"198.51.100.1, 203.0.113.5, 10.0.0.3"}, "203.0.113.5"},
+		{"over several header lines", "10.0.0.2:4000",
+			[]string{"198.51.100.1", "203.0.113.5"}, "203.0.113.5"},
+		{"a proxy without the header", "10.0.0.2:4000", nil, "10.0.0.2"},
+		{"an entry that is not an address stops the walk", "10.0.0.2:4000",
+			[]string{"203.0.113.5, unknown"}, "10.0.0.2"},
+		{"only proxies", "10.0.0.2:4000", []string{"10.0.0.4, 10.0.0.3"}, "10.0.0.4"},
+		{"an IPv4-mapped peer", "[::ffff:10.0.0.2]:4000", []string{"203.0.113.5"}, "203.0.113.5"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/", nil)
+			r.RemoteAddr = tt.remote
+			for _, v := range tt.xff {
+				r.Header.Add("X-Forwarded-For", v)
+			}
+			if got := clientIP(r, trusted); got != tt.want {
+				t.Errorf("clientIP = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+// A link anyone can write must not put words on the sign-in screen, which
+// sits beside the field for the operator key.
+func TestASignInErrorCannotComeFromALink(t *testing.T) {
+	corp := ldaptest.New(t, ldaptest.Config("corp"), &ldaptest.Directory{})
+	s := New(nil, nil, nil, nil, Options{OperatorKey: testOperatorKey,
+		Providers: authn.Providers{corp}}, slog.New(slog.DiscardHandler))
+	const lure = "call 0800 123 456 and read out your key"
+	for _, tc := range []struct {
+		name string
+		do   func(http.ResponseWriter, *http.Request)
+		path string
+	}{
+		{"provider error", s.callback, "/auth/callback?error=x&error_description=" +
+			strings.ReplaceAll(lure, " ", "+")},
+		{"provider name", s.login, "/auth/login?provider=" + strings.ReplaceAll(lure, " ", "+")},
+	} {
+		w := httptest.NewRecorder()
+		tc.do(w, httptest.NewRequest(http.MethodGet, tc.path, nil))
+		if got := w.Header().Get("Location"); got != "/?sign_in_error=1" {
+			t.Errorf("%s: sent to %q", tc.name, got)
+		}
+		var shown string
+		for _, c := range w.Result().Cookies() {
+			if c.Name == signInErrorCookie {
+				shown = c.Value
+			}
+		}
+		if shown == "" || strings.Contains(shown, "0800") {
+			t.Errorf("%s: the panel would show %q", tc.name, shown)
+		}
 	}
 }

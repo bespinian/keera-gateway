@@ -710,6 +710,23 @@ func TestTheGatewayKeepsAwayFromItsHostByDefault(t *testing.T) {
 	}
 }
 
+func TestTrustedProxiesDefaultToThePrivateRanges(t *testing.T) {
+	c, err := loadWith(t, valid(nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(c.TrustedProxies) != 6 || c.TrustedProxies[2].String() != "10.0.0.0/8" {
+		t.Errorf("trusted proxies = %v, want loopback and the private ranges", c.TrustedProxies)
+	}
+	if c, err := loadWith(t, valid(map[string]string{"KEERA_TRUSTED_PROXIES": "none"})); err != nil ||
+		c.TrustedProxies != nil {
+		t.Errorf("none = %v, %v; want no proxy trusted", c.TrustedProxies, err)
+	}
+	if _, err := loadWith(t, valid(map[string]string{"KEERA_TRUSTED_PROXIES": "10.0.0.0/33"})); err == nil {
+		t.Error("an unreadable proxy list was accepted")
+	}
+}
+
 func TestPrivateHostsLimitWhatOrganisationsReach(t *testing.T) {
 	c, err := loadWith(t, valid(nil))
 	if err != nil || c.LimitPrivate {

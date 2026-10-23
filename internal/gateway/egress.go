@@ -28,9 +28,9 @@ import (
 const DefaultUpstreamDeny = "127.0.0.0/8,::1/128,169.254.0.0/16,fe80::/10,0.0.0.0/8,::/128," +
 	"fd00:ec2::254/128,100.100.100.200/32,168.63.129.16/32"
 
-// ParseUpstreamDeny reads a comma-separated list of addresses and prefixes.
-// "none" denies nothing.
-func ParseUpstreamDeny(s string) ([]netip.Prefix, error) {
+// ParsePrefixes reads a comma-separated list of addresses and prefixes, as
+// KEERA_UPSTREAM_DENY and KEERA_TRUSTED_PROXIES take. "none" is no list.
+func ParsePrefixes(s string) ([]netip.Prefix, error) {
 	if strings.EqualFold(strings.TrimSpace(s), "none") {
 		return nil, nil
 	}

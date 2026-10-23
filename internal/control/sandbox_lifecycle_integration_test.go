@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"errors"
+	"maps"
 	"net/http"
 	"sync"
 	"testing"
@@ -66,9 +67,7 @@ func TestAFailedCreateLeavesNoAgentMachineBehind(t *testing.T) {
 			"org_id": "org_1", "name": string(tc.purpose), "class": "standard",
 			"purpose": tc.purpose, "repo": "https://git.example.ch/acme/app.git",
 		}
-		for k, v := range tc.body {
-			body[k] = v
-		}
+		maps.Copy(body, tc.body)
 		if code := call(t, ts, http.MethodPost, httpx.ControlPrefix+"/v1/sandboxes", body, nil); code < 400 {
 			t.Fatalf("%s: a failed create answered %d", tc.purpose, code)
 		}

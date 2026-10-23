@@ -110,6 +110,7 @@ func serve(ctx context.Context) error {
 		ServeUI:             cfg.UI,
 		SecureCookies:       cfg.SecureCookies,
 		PublicURL:           cfg.PublicURL,
+		TrustedProxies:      cfg.TrustedProxies,
 		ChatURL:             cfg.ChatURL,
 		Gateway:             gw,
 		SessionGap:          cfg.SessionGap,

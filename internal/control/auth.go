@@ -7,7 +7,9 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -736,19 +738,39 @@ func safeRedirect(next string) string {
 	return next
 }
 
-// clientIP is the address a request came from. It trusts the first entry of
-// X-Forwarded-For, which is right behind an ingress that sets it and can be
-// forged otherwise, so it is only shown to people and used as a throttle key.
-func clientIP(r *http.Request) string {
-	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-		if i := strings.IndexByte(fwd, ','); i > 0 {
-			return strings.TrimSpace(fwd[:i])
-		}
-		return strings.TrimSpace(fwd)
-	}
+// clientIP is the address a request came from, the key of the sign-in
+// throttle. X-Forwarded-For is read only from a trusted proxy, and from the
+// right: each proxy appends whom it heard from, so whatever a client wrote
+// into the header itself is further left. The first address from the right
+// that is not a trusted proxy is the client.
+func clientIP(r *http.Request, trusted []netip.Prefix) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
 	}
-	return host
+	peer, err := netip.ParseAddr(host)
+	if err != nil || !trustedProxy(peer, trusted) {
+		return host
+	}
+	var hops []string
+	for _, v := range r.Header.Values("X-Forwarded-For") {
+		hops = append(hops, strings.Split(v, ",")...)
+	}
+	client := peer
+	for _, hop := range slices.Backward(hops) {
+		addr, err := netip.ParseAddr(strings.TrimSpace(hop))
+		if err != nil {
+			break
+		}
+		client = addr
+		if !trustedProxy(addr, trusted) {
+			break
+		}
+	}
+	return client.Unmap().String()
+}
+
+func trustedProxy(addr netip.Addr, trusted []netip.Prefix) bool {
+	addr = addr.Unmap()
+	return slices.ContainsFunc(trusted, func(p netip.Prefix) bool { return p.Contains(addr) })
 }

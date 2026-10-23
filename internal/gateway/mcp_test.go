@@ -671,7 +671,7 @@ func TestAnMCPServerOnADeniedAddressIsNotReached(t *testing.T) {
 	fake := &fakeMCP{}
 	upstream := httptest.NewServer(http.HandlerFunc(fake.handler))
 	t.Cleanup(upstream.Close)
-	deny, err := ParseUpstreamDeny(DefaultUpstreamDeny)
+	deny, err := ParsePrefixes(DefaultUpstreamDeny)
 	if err != nil {
 		t.Fatal(err)
 	}
