@@ -123,12 +123,8 @@ func (r *userRun) passkeyLink(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var link passkeyLinkOut
-	if err := r.c.do(ctx, "POST", "/v1/users/"+url.PathEscape(user.ID)+"/passkey-link",
-		nil, &link); err != nil {
-		return err
-	}
-	return out(r.asJSON, link, func(w *table) {
+	path := "/v1/users/" + url.PathEscape(user.ID) + "/passkey-link"
+	return doOut(ctx, r.c, "POST", path, nil, r.asJSON, func(w *table, link passkeyLinkOut) {
 		printPasskeyLink(w, user.Email, link)
 		_, _ = fmt.Fprintln(w, "\nIt replaces any earlier link. Their passkeys so far keep working.")
 	})

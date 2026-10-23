@@ -145,7 +145,7 @@ func takeGlobal(args []string, name string, set func(string) error) ([]string, e
 				value = args[i]
 			}
 		case strings.HasPrefix(arg, "--"+name+"=") || strings.HasPrefix(arg, "-"+name+"="):
-			value = arg[strings.Index(arg, "=")+1:]
+			_, value, _ = strings.Cut(arg, "=")
 		default:
 			out = append(out, arg)
 			continue

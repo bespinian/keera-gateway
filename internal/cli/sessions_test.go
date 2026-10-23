@@ -38,7 +38,6 @@ func TestSessionAndFailureRowsNameWhatKeeraSessionTakes(t *testing.T) {
 func TestSessionsTakesAPersonByEmail(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
 		"GET /v1/users": map[string]any{"data": []map[string]any{
 			{"id": "user_1", "email": "ada@example.ch"},
 		}},
@@ -102,7 +101,6 @@ func TestReportsTakeAnOrganisationByName(t *testing.T) {
 		{"/v1/sessions/4711", sessionCmd, []string{"show", "4711"}},
 	} {
 		f := newFakeControl(t, map[string]any{
-			"GET /v1/orgs":             oneOrg,
 			"GET /v1/usage":            map[string]any{"data": []any{}},
 			"GET /v1/billing":          map[string]any{"data": []any{}},
 			"GET /v1/billing/payments": map[string]any{"data": []any{}},

@@ -95,12 +95,6 @@ func subscriptionModels(models []policy.Model) []policy.Model {
 	return subs
 }
 
-// claudeModelOverrides tells Claude Code which Claude model each of models
-// is. See connect.ClaudeOverrides.
-func claudeModelOverrides(models []policy.Model) map[string]string {
-	return connect.ClaudeOverrides(connectList(models), connect.ClaudeNames())
-}
-
 // setModelOverrides writes the overrides into the 'modelOverrides' setting,
 // keeping the entries for other models.
 func setModelOverrides(settings map[string]any, overrides map[string]string) {

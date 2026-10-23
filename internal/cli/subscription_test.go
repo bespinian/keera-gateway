@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bespinian/keera-gateway/internal/connect"
 	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
@@ -136,7 +137,8 @@ func TestModelOverridesTellClaudeCodeWhichModelEachAliasIs(t *testing.T) {
 		"claude-haiku-4-5-20251001": "claude-haiku",
 		"claude-opus-5-5":           "claude-opus",
 	}
-	if got := claudeModelOverrides(subscriptionModels(models)); !maps.Equal(got, want) {
+	got := connect.ClaudeOverrides(connectList(subscriptionModels(models)), connect.ClaudeNames())
+	if !maps.Equal(got, want) {
 		t.Errorf("overrides = %v, want %v", got, want)
 	}
 

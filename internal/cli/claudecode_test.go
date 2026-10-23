@@ -102,13 +102,10 @@ func TestConnectClaudeCodeSendsAMemberWithoutAKeyToAnAdministrator(t *testing.T)
 	}
 }
 
-// --print is the old behaviour: the settings, and no key issued.
 func TestConnectClaudeCodePrintIssuesNoKey(t *testing.T) {
 	f := newFakeControl(t, connectRoutes("https://keera.example.ch/api", nil))
 
-	got := captured(t, func() error {
-		return connectCmd(context.Background(), []string{"claude-code", "--print"})
-	})
+	got := capture(t, "connect", "claude-code", "--print")
 	if !strings.Contains(got, `"ANTHROPIC_BASE_URL": "https://keera.example.ch/api"`) {
 		t.Errorf("stdout =\n%s\nwant the settings", got)
 	}

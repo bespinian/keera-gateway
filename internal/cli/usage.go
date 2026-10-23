@@ -31,11 +31,7 @@ func usageCmd(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	var res usageResponse
-	if err := c.do(ctx, "GET", "/v1/usage?"+q.Encode(), nil, &res); err != nil {
-		return err
-	}
-	return out(r.asJSON, res, func(w *table) {
+	return doOut(ctx, c, "GET", "/v1/usage?"+q.Encode(), nil, r.asJSON, func(w *table, res usageResponse) {
 		if len(res.Data) == 0 {
 			printNone(w, "usage in the last "+shortDuration(*since), "")
 			return

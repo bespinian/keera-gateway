@@ -212,11 +212,8 @@ func guardrailCmd(ctx context.Context, args []string) error {
 		}
 		return out(r.asJSON, lim, func(w *table) { printLimits(w, lim, scope) })
 	default:
-		var lim policy.Limits
-		if err := c.do(ctx, "GET", guardrailPath(scope, scopeID), nil, &lim); err != nil {
-			return err
-		}
-		return out(r.asJSON, lim, func(w *table) { printLimits(w, lim, scope) })
+		return doOut(ctx, c, "GET", guardrailPath(scope, scopeID), nil, r.asJSON,
+			func(w *table, lim policy.Limits) { printLimits(w, lim, scope) })
 	}
 }
 
@@ -315,7 +312,8 @@ func wrongFacet(name string, args []string) error {
 		if !strings.HasPrefix(arg, "-") {
 			continue
 		}
-		flagName := strings.TrimLeft(strings.SplitN(arg, "=", 2)[0], "-")
+		flagName, _, _ := strings.Cut(arg, "=")
+		flagName = strings.TrimLeft(flagName, "-")
 		if slices.Contains(own.flags, flagName) {
 			continue
 		}

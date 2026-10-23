@@ -42,6 +42,18 @@ func out(asJSON bool, v any, render func(*table)) error {
 	return w.Flush()
 }
 
+// doOut sends a request and prints what came back with print, or as it came
+// with --json.
+func doOut[T any](ctx context.Context, c *client, method, path string, body any, asJSON bool,
+	print func(*table, T),
+) error {
+	var res T
+	if err := c.do(ctx, method, path, body, &res); err != nil {
+		return err
+	}
+	return out(asJSON, res, func(w *table) { print(w, res) })
+}
+
 // split takes the verb off a command's arguments. A leading flag means the
 // verb was left out, so the verb is empty and parseVerb reads it as the
 // listing, where the command has one.

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -44,6 +45,10 @@ func newFakeControl(t *testing.T, handlers map[string]any) *fakeControl {
 	// An administrator, so no default is chosen unless a test says otherwise.
 	if _, set := handlers["GET /v1/me"]; !set {
 		handlers["GET /v1/me"] = map[string]any{"role": "admin", "org_id": "org_1"}
+	}
+	// One organisation, so --org fills itself in.
+	if _, set := handlers["GET /v1/orgs"]; !set {
+		handlers["GET /v1/orgs"] = oneOrg
 	}
 	f := &fakeControl{t: t, handlers: handlers}
 	srv := httptest.NewServer(f)
@@ -119,52 +124,48 @@ func (f *fakeControl) request(method, path string) recorded {
 
 // quiet swallows what a command prints, so a passing test says nothing. Both
 // streams: a command that hands over a secret puts it on stdout and says what
-// it did on stderr.
-func quiet(t *testing.T) {
+// it did on stderr. Calling either function puts the streams back and returns
+// what that one was sent, for the tests whose behaviour is the output.
+func quiet(t *testing.T) (stdout, stderr func() string) {
 	t.Helper()
-	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
+	// Each pipe is read as it fills, so a long help text cannot block.
+	pipe := func() (*os.File, <-chan string) {
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		said := make(chan string, 1)
+		go func() {
+			raw, _ := io.ReadAll(r)
+			_ = r.Close()
+			said <- string(raw)
+		}()
+		return w, said
 	}
-	stdout, stderr := os.Stdout, os.Stderr
-	os.Stdout, os.Stderr = devNull, devNull
-	t.Cleanup(func() {
-		os.Stdout, os.Stderr = stdout, stderr
-		_ = devNull.Close()
+	outW, outC := pipe()
+	errW, errC := pipe()
+	oldOut, oldErr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = outW, errW
+	var out, errs string
+	restore := sync.OnceFunc(func() {
+		os.Stdout, os.Stderr = oldOut, oldErr
+		_ = outW.Close()
+		_ = errW.Close()
+		out, errs = <-outC, <-errC
 	})
+	t.Cleanup(restore)
+	return func() string { restore(); return out }, func() string { restore(); return errs }
 }
 
-// captureStderr swallows stdout and hands back what was written to stderr, for
-// the commands whose behaviour is the warning rather than the table.
-func captureStderr(t *testing.T) func() string {
+// capture runs one invocation and returns what it printed on stdout, which is
+// what a person redirects: help, a report, the block `keera connect` writes.
+func capture(t *testing.T, args ...string) string {
 	t.Helper()
-	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
+	stdout, _ := quiet(t)
+	if err := Run(context.Background(), args); err != nil {
+		t.Fatalf("keera %s: %v", strings.Join(args, " "), err)
 	}
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	stdout, stderr := os.Stdout, os.Stderr
-	os.Stdout, os.Stderr = devNull, w
-	var said string
-	read := func() string {
-		if w != nil {
-			os.Stdout, os.Stderr = stdout, stderr
-			_ = w.Close()
-			raw, _ := io.ReadAll(r)
-			said = string(raw)
-			w = nil
-		}
-		return said
-	}
-	t.Cleanup(func() {
-		read()
-		_ = r.Close()
-		_ = devNull.Close()
-	})
-	return read
+	return stdout()
 }
 
 // oneOrg is what resolveOrg needs to fill in --org by itself, which is the
@@ -175,15 +176,12 @@ var paymentsProject = map[string]any{"data": []map[string]any{
 	{"id": "project_1", "org_id": "org_1", "name": "Payments"},
 }}
 
-// -------------------------------------------------------------------- orgs
-
 func TestOrgCreateSendsTheDomain(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
 		"POST /v1/orgs": map[string]any{
 			"id": "org_2", "name": "Another Bank", "email_domain": "anotherbank.ch",
 		},
-		"GET /v1/orgs": oneOrg,
 	})
 
 	if err := Run(context.Background(), []string{"org", "create", "Another Bank",
@@ -235,7 +233,6 @@ func TestOrgSetRenamesWithoutTouchingTheDomain(t *testing.T) {
 func TestOrgSetFindsTheOnlyOrganisation(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs":         oneOrg,
 		"PATCH /v1/orgs/org_1": map[string]any{"id": "org_1", "email_domain": "example.ch"},
 	})
 
@@ -278,19 +275,6 @@ func TestOrgSetClearsTheDomainOnlyWithItsOwnFlag(t *testing.T) {
 	}
 }
 
-func TestOrgSetRefusesToDoNothing(t *testing.T) {
-	quiet(t)
-	f := newFakeControl(t, map[string]any{})
-
-	err := Run(context.Background(), []string{"org", "set", "org_2"})
-	if err == nil || !strings.Contains(err.Error(), "nothing to change") {
-		t.Fatalf("error = %v, want nothing to change", err)
-	}
-	if len(f.seen) != 0 {
-		t.Errorf("the CLI called %v; a command that changes nothing changes nothing", f.seen)
-	}
-}
-
 // A domain that is not a domain matches no sign-in, and would be found out
 // months later by a customer who cannot get in.
 func TestOrgSetRefusesSomethingThatIsNotADomain(t *testing.T) {
@@ -320,7 +304,7 @@ func TestOrgSetRefusesSomethingThatIsNotADomain(t *testing.T) {
 // "placed by domain or refused", and it does that to the organisation that was
 // already there rather than to the one being created.
 func TestOrgCreateWarnsAboutAnOrganisationWithNoDomain(t *testing.T) {
-	stderr := captureStderr(t)
+	_, stderr := quiet(t)
 	f := newFakeControl(t, map[string]any{
 		"POST /v1/orgs": map[string]any{"id": "org_2", "name": "Another Bank"},
 		"GET /v1/orgs": map[string]any{"data": []map[string]any{
@@ -342,10 +326,9 @@ func TestOrgCreateWarnsAboutAnOrganisationWithNoDomain(t *testing.T) {
 }
 
 func TestOrgCreateSaysNothingOnTheFirstOrganisation(t *testing.T) {
-	stderr := captureStderr(t)
+	_, stderr := quiet(t)
 	newFakeControl(t, map[string]any{
 		"POST /v1/orgs": map[string]any{"id": "org_1", "name": "Example Bank"},
-		"GET /v1/orgs":  oneOrg,
 	})
 
 	// One organisation needs no domain at all: everyone who signs in lands in
@@ -358,12 +341,9 @@ func TestOrgCreateSaysNothingOnTheFirstOrganisation(t *testing.T) {
 	}
 }
 
-// ------------------------------------------------------------------- users
-
 func TestUserRoleResolvesAnEmailToAnID(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
 		"GET /v1/users": map[string]any{"data": []map[string]any{
 			{"id": "user_1", "org_id": "org_1", "email": "Alice@Example.com", "role": "member"},
 		}},
@@ -389,23 +369,9 @@ func TestUserRoleRefusesARoleTheControlPlaneWouldReject(t *testing.T) {
 	}
 }
 
-// The operator role crosses organisations, so it comes from the gateway's own
-// configuration. Refusing it here rather than at the control plane is the same
-// answer one round trip earlier, and names the variable that does grant it.
-func TestUserRoleRefusesTheOperatorRole(t *testing.T) {
-	quiet(t)
-	newFakeControl(t, map[string]any{})
-
-	err := userCmd(context.Background(), []string{"role", "alice@example.com", "operator"})
-	if err == nil || !strings.Contains(err.Error(), "KEERA_OPERATORS") {
-		t.Fatalf("error = %v, want it to name KEERA_OPERATORS", err)
-	}
-}
-
 func TestUserAddRefusesSomebodyWhoIsAlreadyThere(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
 		"GET /v1/users": map[string]any{"data": []map[string]any{
 			{"id": "user_1", "org_id": "org_1", "email": "alice@example.com", "role": "member"},
 		}},
@@ -426,7 +392,6 @@ func TestUserAddRefusesSomebodyWhoIsAlreadyThere(t *testing.T) {
 func TestUserAddSendsTheRole(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs":   oneOrg,
 		"GET /v1/users":  map[string]any{"data": []map[string]any{}},
 		"POST /v1/users": map[string]any{"id": "user_2", "email": "bob@example.com", "role": "admin"},
 	})
@@ -444,7 +409,6 @@ func TestUserAddSendsTheRole(t *testing.T) {
 func TestKeyCreateAttributesAPersonByEmail(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
 		"GET /v1/users": map[string]any{"data": []map[string]any{
 			{"id": "user_1", "org_id": "org_1", "email": "alice@example.com", "role": "member"},
 		}},
@@ -476,7 +440,6 @@ var liveKey = map[string]any{
 func TestKeyRotateAsksTheControlPlane(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
 		"GET /v1/keys": liveKey,
 		"POST /v1/keys/key_old/rotate": map[string]any{
 			"id": "key_new", "key": "keera_sk_new", "replaced_key_id": "key_old",
@@ -499,7 +462,6 @@ func TestKeyRotateAsksTheControlPlane(t *testing.T) {
 func TestKeySetRenamesTheKeyItFinds(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs":           oneOrg,
 		"GET /v1/keys":           liveKey,
 		"PATCH /v1/keys/key_old": map[string]any{"id": "key_old", "name": "old laptop"},
 	})
@@ -520,7 +482,6 @@ func TestKeySetRenamesTheKeyItFinds(t *testing.T) {
 func TestKeyRotateRefusesAKeyThatIsAlreadyRevoked(t *testing.T) {
 	quiet(t)
 	newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
 		"GET /v1/keys": map[string]any{"data": []map[string]any{{
 			"id": "key_old", "org_id": "org_1", "name": "laptop",
 			"created_at": "2026-01-01T00:00:00Z", "revoked_at": "2026-02-01T00:00:00Z",
@@ -543,7 +504,6 @@ func TestKeyRotateSendsAMemberWithARevokedKeyToAnAdministrator(t *testing.T) {
 	}}
 	newFakeControl(t, map[string]any{
 		"GET /v1/me":   map[string]any{"role": "member", "org_id": "org_1", "user_id": "user_1"},
-		"GET /v1/orgs": oneOrg,
 		"GET /v1/keys": map[string]any{"data": revoked},
 	})
 
@@ -572,7 +532,6 @@ func TestKeyRotateAndRevokeResolveANameAmongTheKeysThatStillWork(t *testing.T) {
 		t.Run(tc.verb, func(t *testing.T) {
 			quiet(t)
 			f := newFakeControl(t, map[string]any{
-				"GET /v1/orgs": oneOrg,
 				// The shape an organisation is in after one rotation: two keys
 				// with the same name, one of them revoked.
 				"GET /v1/keys": map[string]any{"data": []map[string]any{
@@ -600,7 +559,6 @@ func TestKeyRotateAndRevokeRefuseAnAmbiguousName(t *testing.T) {
 		t.Run(tc.verb, func(t *testing.T) {
 			quiet(t)
 			f := newFakeControl(t, map[string]any{
-				"GET /v1/orgs": oneOrg,
 				"GET /v1/keys": map[string]any{"data": []map[string]any{
 					{"id": "key_a", "org_id": "org_1", "name": "laptop", "created_at": "2026-01-01T00:00:00Z"},
 					{"id": "key_b", "org_id": "org_1", "name": "laptop", "created_at": "2026-02-01T00:00:00Z"},
@@ -635,19 +593,17 @@ func TestKeyRevokeByIdLooksNothingUp(t *testing.T) {
 	if err := keyCmd(context.Background(), []string{"revoke", keyID, "--yes"}); err != nil {
 		t.Fatal(err)
 	}
-	if !f.called("DELETE", "/v1/keys/"+keyID) {
-		t.Error("the key was not revoked")
+	if len(f.seen) != 1 || !f.called("DELETE", "/v1/keys/"+keyID) {
+		t.Errorf("calls = %v, want only the revocation", f.seen)
 	}
 }
 
-// Revoking is immediate and cannot be undone, so it asks first like every other
-// destructive command. Standard input is closed here, which is a confirmation
-// that was not given. The prompt goes to stderr, so `--json` output stays JSON.
+// Revoking cannot be undone, so it asks first. Closed stdin is a confirmation
+// not given. The prompt goes to stderr, so `--json` output stays JSON.
 func TestKeyRevokeAsksBeforeItRevokes(t *testing.T) {
-	stderr := captureStderr(t)
+	_, stderr := quiet(t)
 	keyID := id.New("key")
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
 		"GET /v1/keys": map[string]any{"data": []map[string]any{
 			{"id": keyID, "org_id": "org_1", "name": "laptop", "created_at": "2026-01-01T00:00:00Z"},
 		}},
@@ -666,12 +622,9 @@ func TestKeyRevokeAsksBeforeItRevokes(t *testing.T) {
 	}
 }
 
-// ------------------------------------------------------------------ models
-
 func TestModelAddFillsInTheProviderDefaults(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs":                  oneOrg,
 		"GET /v1/models":                map[string]any{"data": []map[string]any{}},
 		"PUT /v1/models/keera-frontier": map[string]any{"alias": "keera-frontier"},
 	})
@@ -721,7 +674,6 @@ func TestModelSetChangesWhatItIsGivenAndKeepsTheRest(t *testing.T) {
 		t.Run(tc.flag, func(t *testing.T) {
 			quiet(t)
 			f := newFakeControl(t, map[string]any{
-				"GET /v1/orgs":               oneOrg,
 				"GET /v1/models":             map[string]any{"data": []map[string]any{stored}},
 				"PUT /v1/models/keera-speed": map[string]any{"alias": "keera-speed"},
 			})
@@ -754,7 +706,6 @@ func TestModelSetChangesWhatItIsGivenAndKeepsTheRest(t *testing.T) {
 func TestModelDisableKeepsTheEntryAndOnlyStopsServingIt(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
 		"GET /v1/models": map[string]any{"data": []map[string]any{{
 			"alias": "keera-speed", "kind": "chat", "backends": []string{"http://vllm:8000/v1"},
 			"backend_model": "qwen3-8b", "enabled": true,
@@ -775,7 +726,6 @@ func TestModelDisableKeepsTheEntryAndOnlyStopsServingIt(t *testing.T) {
 func TestModelSetStoresACredentialAndKeepsTheRest(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
 		"GET /v1/models": map[string]any{"data": []map[string]any{{
 			"alias": "keera-frontier", "kind": "chat",
 			"backends":      []string{"https://api.anthropic.com/v1"},
@@ -799,7 +749,6 @@ func TestModelSetStoresACredentialAndKeepsTheRest(t *testing.T) {
 func TestModelCheckFailsWhenTheProbeDoes(t *testing.T) {
 	quiet(t)
 	newFakeControl(t, map[string]any{
-		"GET /v1/orgs":   oneOrg,
 		"GET /v1/models": map[string]any{"data": []map[string]any{{"alias": "keera-speed"}}},
 		"POST /v1/models/keera-speed/check": map[string]any{
 			"alias": "keera-speed", "reachable": true, "status": 200,
@@ -817,7 +766,6 @@ func TestModelCheckFailsWhenTheProbeDoes(t *testing.T) {
 func TestModelApplyUpsertsEveryModelInTheFile(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs":                  oneOrg,
 		"PUT /v1/models/keera-speed":    map[string]any{"alias": "keera-speed"},
 		"PUT /v1/models/keera-frontier": map[string]any{"alias": "keera-frontier"},
 	})
@@ -1082,7 +1030,6 @@ func TestCredentialSourceSaysWhetherAKeyIsStored(t *testing.T) {
 func TestFilterAddSendsTheModelAndTheInstruction(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs":    oneOrg,
 		"GET /v1/filters": map[string]any{"data": []any{}},
 		"PUT /v1/filters/redact-secrets": map[string]any{
 			"alias": "redact-secrets", "model": "keera-guard", "prompt": "Remove credentials.",
@@ -1110,7 +1057,6 @@ func TestSetClearsADescriptionAndRefusesNothing(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			quiet(t)
 			f := newFakeControl(t, map[string]any{
-				"GET /v1/orgs": oneOrg,
 				"GET /v1/" + kind + "s": map[string]any{"data": []map[string]any{{
 					"alias": "a", "model": "keera-guard", "mode": "model",
 					"prompt": "Pick one.", "description": "the original",
@@ -1159,7 +1105,6 @@ func TestFilterAndRouterSetKeepTheRest(t *testing.T) {
 			t.Run("filter "+verb+" "+c.flags[0], func(t *testing.T) {
 				quiet(t)
 				f := newFakeControl(t, map[string]any{
-					"GET /v1/orgs":                   oneOrg,
 					"GET /v1/filters":                map[string]any{"data": []map[string]any{filter}},
 					"PUT /v1/filters/redact-secrets": map[string]any{"alias": "redact-secrets"},
 				})
@@ -1214,7 +1159,6 @@ func TestFilterAddStartsInShadow(t *testing.T) {
 	} {
 		quiet(t)
 		f := newFakeControl(t, map[string]any{
-			"GET /v1/orgs":                   oneOrg,
 			"GET /v1/filters":                map[string]any{"data": []any{}},
 			"PUT /v1/filters/redact-secrets": map[string]any{"alias": "redact-secrets"},
 		})
@@ -1230,21 +1174,9 @@ func TestFilterAddStartsInShadow(t *testing.T) {
 	}
 }
 
-func TestFilterShadowAndEnforceTogetherIsRefused(t *testing.T) {
-	quiet(t)
-	newFakeControl(t, map[string]any{"GET /v1/orgs": oneOrg})
-
-	err := Run(context.Background(), []string{"filter", "set", "redact-secrets",
-		"--shadow", "--enforce"})
-	if err == nil {
-		t.Fatal("both flags at once was accepted; one of them was silently ignored")
-	}
-}
-
 func TestFilterReportAsksForTheWindowAndPrintsTheSplit(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
 		"GET /v1/filters/redact-secrets/report": map[string]any{
 			"filter":        map[string]any{"alias": "redact-secrets", "model": "keera-guard"},
 			"project_names": map[string]any{"project_1": "Payments Platform"},
@@ -1262,10 +1194,7 @@ func TestFilterReportAsksForTheWindowAndPrintsTheSplit(t *testing.T) {
 		},
 	})
 
-	out := captured(t, func() error {
-		return Run(context.Background(), []string{"filter", "report", "redact-secrets",
-			"--since", "168h"})
-	})
+	out := capture(t, "filter", "report", "redact-secrets", "--since", "168h")
 
 	req := f.request("GET", "/v1/filters/redact-secrets/report")
 	if !strings.Contains(req.query, "from=") {
@@ -1368,7 +1297,6 @@ func TestAnOperatorsModelGoesToTheOnlyOrganisation(t *testing.T) {
 func TestAnOrganisationsGuardrailNeedsNoID(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs":                 oneOrg,
 		"GET /v1/guardrails/org/org_1": map[string]any{},
 		"PUT /v1/guardrails/org/org_1": map[string]any{"allowed_models": []string{"keera-speed"}},
 	})
@@ -1405,19 +1333,6 @@ func TestModelListUsesTheChosenOrganisation(t *testing.T) {
 	}
 }
 
-// A flag that belongs to another verb is refused, not silently dropped.
-func TestModelRefusesAnotherVerbsFlag(t *testing.T) {
-	quiet(t)
-	newFakeControl(t, map[string]any{})
-
-	err := modelCmd(context.Background(), []string{"enable", "keera-speed", "--provider", "openai"})
-	if err == nil || !strings.Contains(err.Error(), "does not take --provider") {
-		t.Fatalf("err = %v, want --provider refused", err)
-	}
-}
-
-// Deleting a model does not stop the filters and routers that name it, so the
-// confirmation lists them.
 func TestModelUsersNamesTheFiltersAndRoutersOnIt(t *testing.T) {
 	quiet(t)
 	newFakeControl(t, map[string]any{
@@ -1449,7 +1364,6 @@ func TestModelUsersNamesTheFiltersAndRoutersOnIt(t *testing.T) {
 func TestAnAdministratorsModelNeedsNoOrg(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs":        oneOrg,
 		"GET /v1/models":      map[string]any{"data": []map[string]any{}},
 		"PUT /v1/models/mine": map[string]any{"alias": "mine", "org_id": "org_1"},
 	})
@@ -1473,32 +1387,10 @@ func TestMicrosRoundsRatherThanTruncates(t *testing.T) {
 	}
 }
 
-func TestOrgAndGuardrailRefuseAnotherVerbsFlag(t *testing.T) {
-	// Each of these used to go ahead and quietly drop the flag.
-	quiet(t)
-	f := newFakeControl(t, map[string]any{"GET /v1/orgs": oneOrg})
-
-	for _, args := range [][]string{
-		{"org", "list", "--domain", "example.ch"},
-		{"org", "create", "Another Bank", "--no-domain"},
-		{"org", "delete", "org_1", "--domain", "example.ch", "--yes"},
-		{"guardrail", "get", "project", "project_1", "--rpm", "5"},
-	} {
-		err := Run(context.Background(), args)
-		if err == nil || !strings.Contains(err.Error(), "does not take") {
-			t.Errorf("%v: err = %v, want a refusal of the flag", args, err)
-		}
-	}
-	if len(f.seen) != 0 {
-		t.Errorf("a refused command still called the control plane: %+v", f.seen)
-	}
-}
-
 func TestReportsTakeAProjectByNameAndAPersonByEmail(t *testing.T) {
 	// The same names 'keera project set' and 'keera key create --user' take.
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
 		"GET /v1/projects": map[string]any{"data": []map[string]any{
 			{"id": "project_1", "org_id": "org_1", "name": "Payments Platform"},
 		}},
@@ -1590,30 +1482,11 @@ func TestGuardrailTakesAProjectByNameInOneOfSeveralOrgs(t *testing.T) {
 	}
 }
 
-// An unknown verb is said before anything is sent: no sign-in is needed to
-// be told about a typo.
-func TestAnUnknownVerbIsRefusedBeforeAnyCall(t *testing.T) {
-	quiet(t)
-	f := newFakeControl(t, map[string]any{})
-	for _, args := range [][]string{
-		{"model", "lst"}, {"filter", "lst"}, {"router", "lst"}, {"mcp", "lst"},
-		{"usage", "--by", "project", "extra"}, {"mcp", "connect", "github", "--json"},
-	} {
-		if err := Run(context.Background(), args); err == nil {
-			t.Errorf("keera %s was accepted", strings.Join(args, " "))
-		}
-	}
-	if len(f.seen) != 0 {
-		t.Errorf("a refused command still called the control plane: %+v", f.seen)
-	}
-}
-
 // A filter or router that does not exist is said before the prompt, not after
 // somebody has typed its alias back.
 func TestDeleteLooksTheAliasUpBeforeAsking(t *testing.T) {
 	quiet(t)
 	newFakeControl(t, map[string]any{
-		"GET /v1/orgs":    oneOrg,
 		"GET /v1/filters": map[string]any{"data": []any{}},
 		"GET /v1/routers": map[string]any{"data": []any{}},
 	})
@@ -1625,15 +1498,44 @@ func TestDeleteLooksTheAliasUpBeforeAsking(t *testing.T) {
 	}
 }
 
-func TestKeyCreateTakesTheNameOnce(t *testing.T) {
-	quiet(t)
-	f := newFakeControl(t, map[string]any{})
-	err := Run(context.Background(), []string{"key", "create", "laptop", "--name", "phone"})
-	if err == nil || !strings.Contains(err.Error(), "name once") {
-		t.Errorf("err = %v, want the two names refused", err)
-	}
-	if len(f.seen) != 0 {
-		t.Errorf("a refused command still called the control plane: %+v", f.seen)
+// A command that cannot be right is refused before anything is sent: a flag
+// is never quietly dropped, and no sign-in is needed to hear about a typo.
+func TestRefusedBeforeAnyCall(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string // in the error; empty when any error will do
+	}{
+		{"org set with nothing to change", []string{"org", "set", "org_2"}, "nothing to change"},
+		{"org list with --domain", []string{"org", "list", "--domain", "example.ch"}, "does not take"},
+		{"org create with --no-domain", []string{"org", "create", "Another Bank", "--no-domain"}, "does not take"},
+		{"org delete with --domain", []string{"org", "delete", "org_1", "--domain", "example.ch", "--yes"}, "does not take"},
+		{"guardrail get with --rpm", []string{"guardrail", "get", "project", "project_1", "--rpm", "5"}, "does not take"},
+		{"model enable with --provider", []string{"model", "enable", "keera-speed", "--provider", "openai"}, "does not take --provider"},
+		// The operator role crosses organisations, so only the gateway's own
+		// configuration grants it, and the refusal names that variable.
+		{"the operator role", []string{"user", "role", "alice@example.com", "operator"}, "KEERA_OPERATORS"},
+		{"key create named twice", []string{"key", "create", "laptop", "--name", "phone"}, "name once"},
+		{"a filter mode that does not exist", []string{"filter", "add", "a", "--mode", "redact"}, "--mode"},
+		{"filter --shadow and --no-shadow", []string{"filter", "set", "redact-secrets", "--shadow", "--no-shadow"}, "opposites"},
+		{"model typo", []string{"model", "lst"}, ""},
+		{"filter typo", []string{"filter", "lst"}, ""},
+		{"router typo", []string{"router", "lst"}, ""},
+		{"mcp typo", []string{"mcp", "lst"}, ""},
+		{"usage with an extra argument", []string{"usage", "--by", "project", "extra"}, ""},
+		{"mcp connect with --json", []string{"mcp", "connect", "github", "--json"}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			quiet(t)
+			f := newFakeControl(t, map[string]any{})
+			err := Run(context.Background(), tc.args)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("keera %s: err = %v, want %q", strings.Join(tc.args, " "), err, tc.want)
+			}
+			if len(f.seen) != 0 {
+				t.Errorf("keera %s called the control plane: %+v", strings.Join(tc.args, " "), f.seen)
+			}
+		})
 	}
 }
 
@@ -1679,7 +1581,6 @@ func TestAddRefusesAnAliasThatExists(t *testing.T) {
 	quiet(t)
 	existing := map[string]any{"data": []map[string]any{{"alias": "a"}}}
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs":        oneOrg,
 		"GET /v1/filters":     existing,
 		"GET /v1/routers":     existing,
 		"GET /v1/mcp-servers": existing,
@@ -1703,24 +1604,10 @@ func TestAddRefusesAnAliasThatExists(t *testing.T) {
 	}
 }
 
-// A filter's mode is checked before anything is sent, as a router's is.
-func TestFilterRefusesAModeItDoesNotHave(t *testing.T) {
-	quiet(t)
-	f := newFakeControl(t, map[string]any{})
-	err := Run(context.Background(), []string{"filter", "add", "a", "--mode", "redact"})
-	if err == nil || !strings.Contains(err.Error(), "--mode") {
-		t.Errorf("err = %v, want the mode refused", err)
-	}
-	if len(f.seen) != 0 {
-		t.Errorf("a refused command still called the control plane: %+v", f.seen)
-	}
-}
-
 // Rotating revokes the old key at once, so it asks first, as revoking does.
 func TestKeyRotateAsksBeforeItRotates(t *testing.T) {
-	stderr := captureStderr(t)
+	_, stderr := quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs":                 oneOrg,
 		"GET /v1/keys":                 liveKey,
 		"POST /v1/keys/key_old/rotate": map[string]any{"id": "key_new", "key": "keera_sk_new"},
 	})
@@ -1749,7 +1636,6 @@ func TestKeyCreateExpiresByDefault(t *testing.T) {
 		{[]string{"--expires", "never"}, nil},
 	} {
 		f := newFakeControl(t, map[string]any{
-			"GET /v1/orgs":  oneOrg,
 			"POST /v1/keys": map[string]any{"id": "key_1", "key": "keera_sk_new"},
 		})
 		args := append([]string{"create", "laptop"}, tc.flags...)
@@ -1770,7 +1656,6 @@ func TestKeyCreateExpiresByDefault(t *testing.T) {
 func TestKeyCreateExpiresOnADay(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs":  oneOrg,
 		"POST /v1/keys": map[string]any{"id": "key_1", "key": "keera_sk_new"},
 	})
 	day := time.Now().AddDate(0, 1, 0).Format(time.DateOnly)
@@ -1793,16 +1678,13 @@ func TestKeyCreateExpiresOnADay(t *testing.T) {
 	}
 }
 
-// --json prints the control API's answer whole, not the fields a table needs.
 func TestDeleteJSONKeepsWhatTheServerSaid(t *testing.T) {
 	newFakeControl(t, map[string]any{
 		"DELETE /v1/orgs/org_2": map[string]any{
 			"id": "org_2", "name": "Another Bank", "projects": 1, "sandbox_classes": 3,
 		},
 	})
-	out := captured(t, func() error {
-		return Run(context.Background(), []string{"org", "delete", "org_2", "--yes", "--json"})
-	})
+	out := capture(t, "org", "delete", "org_2", "--yes", "--json")
 	if !strings.Contains(out, "sandbox_classes") {
 		t.Errorf("--json dropped a field the server sent:\n%s", out)
 	}
@@ -1840,12 +1722,9 @@ func TestShortDuration(t *testing.T) {
 	}
 }
 
-// An organisation is named by its name wherever a command takes one, as a
-// project, a key and a person are.
 func TestOrgCommandsTakeAName(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs":              oneOrg,
 		"PATCH /v1/orgs/org_1":      map[string]any{"id": "org_1", "name": "Example Bank AG"},
 		"DELETE /v1/orgs/org_1":     map[string]any{"id": "org_1"},
 		"PATCH /v1/billing/account": map[string]any{"org_id": "org_1", "invoiced": true},
@@ -1946,12 +1825,9 @@ func TestGuardrailClearsWithNoFlags(t *testing.T) {
 	}
 }
 
-// 'keera usage' narrows to a project, a key, a person or a model, as the other
-// reports do.
 func TestUsageNarrowsLikeTheOtherReports(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs":     oneOrg,
 		"GET /v1/projects": paymentsProject,
 		"GET /v1/usage":    map[string]any{"data": []any{}},
 	})
@@ -1971,7 +1847,6 @@ func TestKeyCreateIsTheCallersByDefault(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
 		"GET /v1/me":    map[string]any{"user_id": "user_me", "role": "admin", "org_id": "org_1"},
-		"GET /v1/orgs":  oneOrg,
 		"POST /v1/keys": map[string]any{"id": "key_1", "key": "sk-keera-secret"},
 	})
 
@@ -1994,7 +1869,6 @@ func TestKeyCreateIsTheCallersByDefault(t *testing.T) {
 func TestKeyCreatePendingNeedsAPersonAndPrintsNoSecret(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
 		"GET /v1/users": map[string]any{"data": []map[string]any{
 			{"id": "user_1", "org_id": "org_1", "email": "alice@example.com", "role": "member"},
 		}},
@@ -2018,7 +1892,6 @@ func TestKeyCreatePendingNeedsAPersonAndPrintsNoSecret(t *testing.T) {
 func TestKeyActivateAsksTheControlPlane(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs": oneOrg,
 		"GET /v1/keys": map[string]any{"data": []map[string]any{
 			{"id": "key_p", "org_id": "org_1", "user_id": "user_1", "name": "laptop", "pending": true},
 		}},

@@ -1,11 +1,9 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"flag"
-	"io"
-	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -13,36 +11,7 @@ import (
 // The registry in help.go says which flags each subcommand reads, and each
 // command's FlagSet says which flags exist. These tests keep the two in step.
 
-// capture runs one invocation and returns what it printed. Help goes to
-// stdout, which is what a person redirects when they want to read it.
-func capture(t *testing.T, args ...string) string {
-	t.Helper()
-	old := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout = w
-	done := make(chan string, 1)
-	go func() {
-		var b bytes.Buffer
-		_, _ = io.Copy(&b, r)
-		done <- b.String()
-	}()
-	// Every command below is a help request, which returns before it reaches
-	// the control API - so the error is only interesting when it is not nil.
-	runErr := Run(context.Background(), args)
-	_ = w.Close()
-	os.Stdout = old
-	out := <-done
-	if runErr != nil {
-		t.Fatalf("keera %s: %v", strings.Join(args, " "), runErr)
-	}
-	return out
-}
-
-// TestEveryFlagIsDocumented is the drift guard: a flag a command declares and
-// no verb claims is one nobody can use.
+// A flag a command declares and no verb claims is one nobody can use.
 func TestEveryFlagIsDocumented(t *testing.T) {
 	old := printHelp
 	t.Cleanup(func() { printHelp = old })
@@ -76,16 +45,15 @@ func TestEveryFlagIsDocumented(t *testing.T) {
 	}
 }
 
-// TestSubcommandHelpNamesItsFlags is the other direction: a flag the registry
-// claims and the command does not declare is silently dropped by writeFlags,
-// so this asserts each one actually appears.
+// The other direction: writeFlags silently drops a flag the registry claims
+// and the command does not declare.
 func TestSubcommandHelpNamesItsFlags(t *testing.T) {
 	for _, c := range commands {
 		for _, sub := range c.subs {
 			t.Run(c.name+"/"+sub.name, func(t *testing.T) {
 				out := capture(t, c.name, sub.name, "--help")
 				for _, name := range sub.flags {
-					if !strings.Contains(out, "--"+name) {
+					if !namesFlag(out, name) {
 						t.Errorf("keera help %s %s does not describe --%s, which help.go "+
 							"says it takes; the command does not declare it",
 							c.name, sub.name, name)
@@ -105,7 +73,7 @@ func TestCommandHelpNamesItsFlags(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			out := capture(t, c.name, "--help")
 			for _, name := range c.flags {
-				if !strings.Contains(out, "--"+name) {
+				if !namesFlag(out, name) {
 					t.Errorf("keera help %s does not describe --%s", c.name, name)
 				}
 			}
@@ -298,4 +266,10 @@ func TestVerbSpellingsAreUnique(t *testing.T) {
 			}
 		}
 	}
+}
+
+// namesFlag reports whether help text names --name itself, not a longer flag
+// that starts with it, such as --models for --model.
+func namesFlag(out, name string) bool {
+	return regexp.MustCompile(`--` + regexp.QuoteMeta(name) + `([^a-z0-9-]|$)`).MatchString(out)
 }

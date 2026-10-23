@@ -162,11 +162,7 @@ func (r *sandboxRun) create(ctx context.Context) error {
 	if r.ttl > 0 {
 		body["ttl_seconds"] = int64(r.ttl / time.Second)
 	}
-	var sb store.Sandbox
-	if err := r.c.do(ctx, "POST", "/v1/sandboxes", body, &sb); err != nil {
-		return err
-	}
-	return out(r.asJSON, sb, func(w *table) { printSandboxCreated(w, sb) })
+	return doOut(ctx, r.c, "POST", "/v1/sandboxes", body, r.asJSON, printSandboxCreated)
 }
 
 // agent is `create` with --purpose agent set, so nobody has to type it.
@@ -212,13 +208,8 @@ func (r *sandboxRun) terminate(ctx context.Context) error {
 			return err
 		}
 	}
-	var res map[string]any
-	if err := r.c.do(ctx, "DELETE", "/v1/sandboxes/"+url.PathEscape(sb.ID), nil, &res); err != nil {
-		return err
-	}
-	return out(r.asJSON, res, func(w *table) {
-		_, _ = fmt.Fprintf(w, "terminated\t%s\n", sb.Name)
-	})
+	return doOut(ctx, r.c, "DELETE", "/v1/sandboxes/"+url.PathEscape(sb.ID), nil, r.asJSON,
+		func(w *table, _ map[string]any) { _, _ = fmt.Fprintf(w, "terminated\t%s\n", sb.Name) })
 }
 
 func (r *sandboxRun) extend(ctx context.Context) error {
@@ -249,12 +240,8 @@ func (r *sandboxRun) suspendOrResume(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var res store.Sandbox
-	if err := r.c.do(ctx, "POST",
-		"/v1/sandboxes/"+url.PathEscape(sb.ID)+"/"+r.verb, nil, &res); err != nil {
-		return err
-	}
-	return out(r.asJSON, res, func(w *table) { printSandbox(w, res) })
+	return doOut(ctx, r.c, "POST", "/v1/sandboxes/"+url.PathEscape(sb.ID)+"/"+r.verb, nil, r.asJSON,
+		printSandbox)
 }
 
 // usage spans every organisation the caller can see unless one is chosen, as
@@ -611,7 +598,7 @@ func printSandboxes(w *table, sandboxes []store.Sandbox) {
 	for _, sb := range sandboxes {
 		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			sb.Name, sb.Class, sb.Purpose, statusWord(string(sb.State)), sb.Isolation,
-			sandboxSize(sb), expiresIn(sb.ExpiresAt), ranFor(sb.RunningSeconds),
+			sizeOf(sb.CPU, sb.Memory), expiresIn(sb.ExpiresAt), ranFor(sb.RunningSeconds),
 			dash(sb.Owner))
 	}
 }
@@ -624,7 +611,7 @@ func printSandbox(w *table, sb store.Sandbox) {
 	show(w, "state", statusWord(string(sb.State)))
 	showIfSet(w, "detail", sb.Detail)
 	show(w, "isolation", sb.Isolation)
-	show(w, "size", sandboxSize(sb))
+	show(w, "size", sizeOf(sb.CPU, sb.Memory))
 	show(w, "image", sb.Image)
 	showIfSet(w, "repo", sb.Repo)
 	showIfSet(w, "branch", sb.Branch)
@@ -645,7 +632,7 @@ func printSandbox(w *table, sb store.Sandbox) {
 
 func printSandboxCreated(w *table, sb store.Sandbox) {
 	show(w, "sandbox", sb.Name)
-	_, _ = fmt.Fprintf(w, "class\t%s (%s, %s)\n", sb.Class, sb.Isolation, sandboxSize(sb))
+	_, _ = fmt.Fprintf(w, "class\t%s (%s, %s)\n", sb.Class, sb.Isolation, sizeOf(sb.CPU, sb.Memory))
 	show(w, "state", statusWord(string(sb.State)))
 	if sb.ExpiresAt != nil {
 		show(w, "expires", expiresIn(sb.ExpiresAt))
@@ -705,8 +692,6 @@ func confirmSandboxTerminate(sb store.Sandbox) error {
 		"What it cost and who it belonged to are kept.",
 	}, "name", sb.Name, "nothing was terminated")
 }
-
-func sandboxSize(sb store.Sandbox) string { return sizeOf(sb.CPU, sb.Memory) }
 
 func sizeOf(cpuMillis, memoryMiB int) string {
 	return fmt.Sprintf("%s/%s", coresOf(cpuMillis), mibOf(memoryMiB))

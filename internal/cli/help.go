@@ -755,8 +755,8 @@ func overview(p painter) string {
 		"\n  keera <command> [subcommand] [flags]\n\n" + p.head("Commands:") + "\n")
 	width := 0
 	for _, c := range commands {
-		if !c.hidden && len(c.name) > width {
-			width = len(c.name)
+		if !c.hidden {
+			width = max(width, len(c.name))
 		}
 	}
 	for _, c := range commands {
@@ -831,9 +831,7 @@ func writeSubList(b *strings.Builder, c command) {
 	b.WriteString("\n" + style.head("Usage:") + "\n")
 	width := 0
 	for _, s := range c.subs {
-		if n := len(s.name) + len(s.args) + 1; n > width {
-			width = n
-		}
+		width = max(width, len(s.name)+len(s.args)+1)
 	}
 	for _, s := range c.subs {
 		line := s.name
@@ -931,9 +929,7 @@ func writeFlagLines(b *strings.Builder, fs *flag.FlagSet, names []string) {
 		if shownDefault(f.DefValue) {
 			usage += " (default " + f.DefValue + ")"
 		}
-		if len(left) > width {
-			width = len(left)
-		}
+		width = max(width, len(left))
 		rows = append(rows, row{left, usage})
 	}
 	for _, r := range rows {

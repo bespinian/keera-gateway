@@ -43,16 +43,10 @@ func (r *projectRun) create(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var project store.Project
-	if err := r.c.do(ctx, "POST", "/v1/projects",
-		map[string]string{"org_id": orgID, "name": r.fs.Arg(0), "description": r.description},
-		&project); err != nil {
-		return err
-	}
-	return out(r.asJSON, project, func(w *table) { projectRow(w, project) })
+	body := map[string]string{"org_id": orgID, "name": r.fs.Arg(0), "description": r.description}
+	return doOut(ctx, r.c, "POST", "/v1/projects", body, r.asJSON, projectRow)
 }
 
-// projectRow writes one project as a table row.
 func projectRow(w *table, t store.Project) {
 	_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", t.ID, t.Name, dash(t.Description))
 }
@@ -95,12 +89,8 @@ func (r *projectRun) set(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var changed store.Project
-	if err := r.c.do(ctx, "PATCH", "/v1/projects/"+url.PathEscape(project.ID),
-		change, &changed); err != nil {
-		return err
-	}
-	return out(r.asJSON, changed, func(w *table) { projectRow(w, changed) })
+	return doOut(ctx, r.c, "PATCH", "/v1/projects/"+url.PathEscape(project.ID), change, r.asJSON,
+		projectRow)
 }
 
 func (r *projectRun) delete(ctx context.Context) error {

@@ -155,22 +155,16 @@ func reportAlias[T any](ctx context.Context, a *aliasRun, since time.Duration,
 ) error {
 	alias := a.fs.Arg(0)
 	path := a.path(alias, "/report") + "&from=" + url.QueryEscape(sinceParam(since))
-	var res T
-	if err := a.c.do(ctx, "GET", path, nil, &res); err != nil {
-		return err
-	}
-	return out(a.asJSON, res, func(w *table) { print(w, alias, since, res) })
+	return doOut(ctx, a.c, "GET", path, nil, a.asJSON, func(w *table, res T) {
+		print(w, alias, since, res)
+	})
 }
 
 // putAlias writes an entry and prints what was stored.
 func putAlias[T any](ctx context.Context, a *aliasRun, alias string, body any,
 	print func(*table, T),
 ) error {
-	var saved T
-	if err := a.c.do(ctx, "PUT", a.path(alias, ""), body, &saved); err != nil {
-		return err
-	}
-	return out(a.asJSON, saved, func(w *table) { print(w, saved) })
+	return doOut(ctx, a.c, "PUT", a.path(alias, ""), body, a.asJSON, print)
 }
 
 // deleteEntry deletes an entry and says so. Unless --yes was given it asks
@@ -184,11 +178,6 @@ func (a *aliasRun) deleteEntry(ctx context.Context, alias string, lines []string
 			return err
 		}
 	}
-	var res map[string]any
-	if err := a.c.do(ctx, "DELETE", a.path(alias, ""), nil, &res); err != nil {
-		return err
-	}
-	return out(a.asJSON, res, func(w *table) {
-		_, _ = fmt.Fprintf(w, "deleted\t%s\n", alias)
-	})
+	return doOut(ctx, a.c, "DELETE", a.path(alias, ""), nil, a.asJSON,
+		func(w *table, _ map[string]any) { _, _ = fmt.Fprintf(w, "deleted\t%s\n", alias) })
 }

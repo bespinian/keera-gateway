@@ -86,11 +86,7 @@ func (r *billingRun) report(ctx context.Context) error {
 	}
 	q := url.Values{}
 	setIfGiven(q, map[string]string{"org_id": org, "month": r.month})
-	var res billingResponse
-	if err := r.c.do(ctx, "GET", "/v1/billing?"+q.Encode(), nil, &res); err != nil {
-		return err
-	}
-	return out(r.asJSON, res, func(w *table) { printBilling(w, res) })
+	return doOut(ctx, r.c, "GET", "/v1/billing?"+q.Encode(), nil, r.asJSON, printBilling)
 }
 
 type billingResponse struct {
@@ -290,12 +286,8 @@ func (r *billingRun) autoTopUp(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var a store.CreditAccount
-	if err := r.c.do(ctx, "PATCH", path,
-		map[string]int64{"topup_below_micros": below, "topup_micros": amount}, &a); err != nil {
-		return err
-	}
-	return out(r.asJSON, a, func(w *table) {
+	body := map[string]int64{"topup_below_micros": below, "topup_micros": amount}
+	return doOut(ctx, r.c, "PATCH", path, body, r.asJSON, func(w *table, a store.CreditAccount) {
 		if a.TopUpMicros == 0 {
 			_, _ = fmt.Fprintln(w, "The automatic top-up is off.")
 			return
@@ -341,13 +333,8 @@ func (r *billingRun) grant(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var p store.Payment
-	if err := r.c.do(ctx, "POST", "/v1/billing/grants", map[string]any{
-		"org_id": orgID, "amount_micros": amount, "note": r.note,
-	}, &p); err != nil {
-		return err
-	}
-	return out(r.asJSON, p, func(w *table) {
+	body := map[string]any{"org_id": orgID, "amount_micros": amount, "note": r.note}
+	return doOut(ctx, r.c, "POST", "/v1/billing/grants", body, r.asJSON, func(w *table, p store.Payment) {
 		_, _ = fmt.Fprintf(w, "Granted %s to %s.\n", policy.FormatMoney(p.AmountMicros), p.OrgID)
 	})
 }
@@ -361,12 +348,8 @@ func (r *billingRun) invoiced(ctx context.Context) error {
 		return err
 	}
 	on := !r.off
-	var a store.CreditAccount
-	if err := r.c.do(ctx, "PATCH", inOrg("/v1/billing/account", orgID),
-		map[string]bool{"invoiced": on}, &a); err != nil {
-		return err
-	}
-	return out(r.asJSON, a, func(w *table) {
+	path, body := inOrg("/v1/billing/account", orgID), map[string]bool{"invoiced": on}
+	return doOut(ctx, r.c, "PATCH", path, body, r.asJSON, func(w *table, a store.CreditAccount) {
 		if on {
 			_, _ = fmt.Fprintf(w, "%s is billed by invoice: it may use the keys without credit.\n", a.OrgID)
 			return

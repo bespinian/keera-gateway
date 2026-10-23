@@ -76,7 +76,6 @@ var noKeys = map[string]any{"anonymous": true, "keys": []any{}}
 // connectRoutes is what `keera connect` reads, with extra replacing any of it.
 func connectRoutes(gateway string, extra map[string]any) map[string]any {
 	routes := map[string]any{
-		"GET /v1/orgs":    oneOrg,
 		"GET /v1/connect": catalogueOf(gateway),
 		"GET /v1/models":  chatAlias,
 		"GET /v1/routers": oneRouter,
@@ -107,9 +106,7 @@ func TestConnectPutsOnlyTheBlockOnStdout(t *testing.T) {
 func TestConnectConfiguresOnlyEnabledChatModels(t *testing.T) {
 	newFakeControl(t, connectRoutes("https://keera.example.ch/api", nil))
 
-	got := captured(t, func() error {
-		return connectCmd(context.Background(), []string{"pi"})
-	})
+	got := capture(t, "connect", "pi")
 	for _, want := range []string{`"keera-code"`, `"auto"`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the config does not name %s:\n%s", want, got)
@@ -149,7 +146,7 @@ func TestConnectConfiguresTheKeysModels(t *testing.T) {
 		{[]string{"pi", "--key", "key_1"}, []connect.Model{{Alias: "keera-code"}}},
 	}
 	for _, tt := range tests {
-		got := captured(t, func() error { return connectCmd(context.Background(), tt.args) })
+		got := capture(t, append([]string{"connect"}, tt.args...)...)
 		if want := pi.Render("https://keera.example.ch/api", tt.want) + "\n"; got != want {
 			t.Errorf("%v: stdout =\n%s\nwant\n%s", tt.args, got, want)
 		}
@@ -215,9 +212,7 @@ func TestConnectUsesTheGatewayThatAnswered(t *testing.T) {
 	quiet(t)
 	newFakeControl(t, connectRoutes("https://keera.example.ch/api/", nil))
 
-	got := captured(t, func() error {
-		return connectCmd(context.Background(), []string{"curl"})
-	})
+	got := capture(t, "connect", "curl")
 	if !strings.Contains(got, "curl https://keera.example.ch/api/v1/chat/completions") {
 		t.Errorf("the declared gateway was not used, or its trailing slash survived:\n%s", got)
 	}
@@ -228,9 +223,7 @@ func TestConnectWithNoClientListsThem(t *testing.T) {
 	// where it names a model, so this is where a developer discovers it.
 	newFakeControl(t, connectRoutes("https://keera.example.ch/api", nil))
 
-	got := captured(t, func() error {
-		return connectCmd(context.Background(), nil)
-	})
+	got := capture(t, "connect")
 	for _, want := range []string{"opencode", "claude-code", "curl", "keera-code", "auto"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the listing does not mention %s:\n%s", want, got)

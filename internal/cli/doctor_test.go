@@ -11,7 +11,6 @@ func TestDoctorFailsOnAFailedCheck(t *testing.T) {
 	quiet(t)
 	for _, args := range [][]string{nil, {"--json"}} {
 		newFakeControl(t, map[string]any{
-			"GET /v1/orgs":        oneOrg,
 			"GET /v1/diagnostics": map[string]any{"checks": []any{}, "failures": 1},
 		})
 		if err := doctorCmd(context.Background(), args); err == nil {

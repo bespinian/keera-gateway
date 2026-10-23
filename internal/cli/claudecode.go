@@ -11,18 +11,18 @@ import (
 	"strings"
 
 	"github.com/bespinian/keera-gateway/internal/auth"
+	"github.com/bespinian/keera-gateway/internal/connect"
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
 // Claude Code on a Keera key, or signed in to a Claude plan.
 //
 // `keera connect claude-code` gives this machine its own key and writes it
-// into Claude Code's settings, next to the gateway's address and the models
-// the key may use. The person never copies the key. Running it again replaces
-// the machine's key instead of adding another. --print shows the settings
-// instead, for a machine this command does not run on. With --subscription,
-// the key is a subscription key and Claude Code keeps its Claude sign-in; see
-// docs/subscriptions.md.
+// into Claude Code's settings, with the gateway's address and the models the
+// key may use, so nobody copies a key. Running it again replaces the
+// machine's key. --print only shows the settings, for another machine. With
+// --subscription, the key is a subscription key and Claude Code keeps its
+// Claude sign-in; see docs/subscriptions.md.
 
 // claudeSetup is what one `connect claude-code` was asked for.
 type claudeSetup struct {
@@ -157,7 +157,8 @@ func connectClaude(ctx context.Context, c *client, in claudeSetup) error {
 		env["ANTHROPIC_BASE_URL"] = ""
 	}
 	warnings := setClaudeEnv(settings, env, subscriptionKey)
-	setModelOverrides(settings, claudeModelOverrides(models))
+	overrides := connect.ClaudeOverrides(connectList(models), connect.ClaudeNames())
+	setModelOverrides(settings, overrides)
 	if managed != "" && strings.TrimRight(managed, "/") != strings.TrimRight(in.gatewayURL, "/") {
 		warnings = append(warnings, "Your organisation's managed settings send Claude Code to "+
 			managed+", not to "+in.gatewayURL+". The key works only if both are this gateway.")

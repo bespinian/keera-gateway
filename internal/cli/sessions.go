@@ -50,11 +50,8 @@ func sessionCmd(ctx context.Context, args []string) error {
 	if *unhappy {
 		q.Set("outcome", string(store.OutcomeUnhappy))
 	}
-	var res sessionsResponse
-	if err := c.do(ctx, "GET", "/v1/sessions?"+q.Encode(), nil, &res); err != nil {
-		return err
-	}
-	return out(r.asJSON, res, func(t *table) { printSessions(t, res, *since) })
+	return doOut(ctx, c, "GET", "/v1/sessions?"+q.Encode(), nil, r.asJSON,
+		func(t *table, res sessionsResponse) { printSessions(t, res, *since) })
 }
 
 type sessionsResponse struct {
@@ -114,11 +111,7 @@ func sessionShow(ctx context.Context, c *client, arg, org string, asJSON bool) e
 	if org != "" {
 		path = inOrg(path, org)
 	}
-	var res sessionResponse
-	if err := c.do(ctx, "GET", path, nil, &res); err != nil {
-		return err
-	}
-	return out(asJSON, res, func(w *table) { printSession(w, res) })
+	return doOut(ctx, c, "GET", path, nil, asJSON, printSession)
 }
 
 type sessionResponse struct {

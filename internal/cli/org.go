@@ -110,11 +110,8 @@ func (r *orgRun) set(ctx context.Context) error {
 		}
 		change["email_domain"] = d
 	}
-	var org store.Org
-	if err := r.c.do(ctx, "PATCH", "/v1/orgs/"+url.PathEscape(orgID), change, &org); err != nil {
-		return err
-	}
-	return out(r.asJSON, org, func(w *table) {
+	path := "/v1/orgs/" + url.PathEscape(orgID)
+	return doOut(ctx, r.c, "PATCH", path, change, r.asJSON, func(w *table, org store.Org) {
 		orgRow(w, org)
 		if _, ok := change["email_domain"]; ok {
 			// Only a first sign-in reads the domain, so nobody already here moves.
