@@ -288,15 +288,17 @@ function paintLines(times, lines, W, H, { bucket, tip }) {
         ),
       ),
   });
-  // The rest is drawn first, so the named lines sit on top of it.
+  // Reversed so the named lines sit on top of the rest.
   const paths = lines
-    .map((l) =>
-      svg("path", {
+    .map((l) => {
+      const path = svg("path", {
         class: "series" + (l.dashed ? " dashed" : ""),
         d: f.path(l.counts),
-        style: `stroke: ${l.color}`,
-      }),
-    )
+      });
+      // Through the style object: the panel's CSP refuses a style attribute.
+      path.style.stroke = l.color;
+      return path;
+    })
     .reverse();
   return f.chart("Requests over time", paths);
 }

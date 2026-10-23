@@ -184,8 +184,8 @@ func TestSecurityHeaders(t *testing.T) {
 			t.Errorf("CSP is missing %q: %s", want, csp)
 		}
 	}
-	if strings.Contains(csp, "script-src 'self' 'unsafe-inline'") {
-		t.Error("inline scripts are allowed, which is the one thing the CSP is for")
+	if strings.Contains(csp, "'unsafe-inline'") {
+		t.Error("the CSP allows inline scripts or styles: an injected one would run or show")
 	}
 	if w.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Error("missing X-Content-Type-Options")

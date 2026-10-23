@@ -116,12 +116,12 @@ func contentTypeFor(p string) string {
 	}
 }
 
-// contentSecurityPolicy keeps scripts and connections same-origin and forbids
-// framing. Inline styles are allowed because charts set sizes from data;
-// inline scripts, where an injection would hurt, are not.
+// contentSecurityPolicy keeps scripts, styles and connections same-origin and
+// forbids framing. The panel sets styles from data through each element's
+// style object, which a style-src without 'unsafe-inline' still allows.
 const contentSecurityPolicy = "default-src 'self'; " +
 	"script-src 'self'; " +
-	"style-src 'self' 'unsafe-inline'; " +
+	"style-src 'self'; " +
 	"img-src 'self' data:; " +
 	"font-src 'self'; " +
 	"connect-src 'self'; " +
