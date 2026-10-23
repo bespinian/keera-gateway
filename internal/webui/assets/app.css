@@ -665,33 +665,6 @@ input[type="checkbox"]:disabled {
   font-weight: 550;
 }
 
-/* A band across a long form, naming the part below it. The rule above it is
-   what shows the fields come in groups. */
-.field-section {
-  margin: 4px 0 12px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
-}
-.field-section:first-of-type {
-  border-top: 0;
-  padding-top: 0;
-}
-.field-section h3 {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 650;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-.field-section p {
-  margin: 3px 0 0;
-  font-size: 11.5px;
-  color: var(--faint);
-  line-height: 1.45;
-}
-/* A footnote: under a field, or under a screen with something to say about what
-   it showed. */
 .hint {
   font-size: 11.5px;
   color: var(--muted);
@@ -1028,7 +1001,353 @@ tr.row-new > td:first-child {
   align-items: baseline;
 }
 
-/* --------------------------------------------------------------- table */
+/* The router editor draws the tree the gateway walks: each step a card, its
+   branches stacked to its right, joined by lines. Plain boxes rather than SVG,
+   so a tree of any shape lays itself out. Under 700px it becomes an indented
+   outline that fits a phone. */
+.pl-canvas {
+  overflow-x: auto;
+  padding: 4px 2px 8px;
+  --pl-line: var(--border-strong);
+}
+.pl-chain {
+  display: flex;
+  align-items: center;
+}
+.pl-stem {
+  flex: none;
+  width: 16px;
+  height: 2px;
+  background: var(--pl-line);
+}
+.pl-branches {
+  display: flex;
+  flex-direction: column;
+}
+.pl-branch {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 7px 0;
+}
+/* The rail joining a step's branches. It runs from the first branch's middle
+   to the last one's, so it meets each branch's own line. */
+.pl-branch::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-left: 2px solid var(--pl-line);
+}
+.pl-branch:first-child::before {
+  top: 50%;
+}
+.pl-branch:last-child::before {
+  bottom: 50%;
+}
+.pl-branch:only-child::before {
+  display: none;
+}
+/* The line into a branch, with when it is taken and where to add a step. */
+.pl-edge {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 28px;
+  padding: 0 6px 0 8px;
+}
+.pl-edge::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 2px solid var(--pl-line);
+}
+.pl-edge > * {
+  position: relative;
+}
+.pl-edge-label {
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+.pl-edge-over {
+  color: var(--warn);
+  border-color: var(--warn-soft);
+}
+.pl-add {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+.pl-add:hover,
+.pl-add:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.pl-add svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* One step. Its kind sets the colour of its edge and heading, from the chart
+   series, which read well in both themes. */
+.pl-node {
+  --kind: var(--muted);
+  flex: none;
+  display: grid;
+  gap: 6px;
+  width: 184px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--kind);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+.pl-kind-filter {
+  --kind: var(--s4);
+}
+.pl-kind-route {
+  --kind: var(--s1);
+}
+.pl-kind-rate_limit {
+  --kind: var(--s5);
+}
+.pl-kind-budget {
+  --kind: var(--s3);
+}
+.pl-kind-model {
+  --kind: var(--s2);
+}
+.pl-kind-system_prompt {
+  --kind: var(--s6);
+}
+/* A guardrail's own kinds. Models are the router's model colour, since both
+   say where a request may go. */
+.pl-kind-models {
+  --kind: var(--s2);
+}
+.pl-kind-tools {
+  --kind: var(--s1);
+}
+/* A prompt is prose: shown as such, not as an alias. */
+.pl-prompt {
+  font-weight: 500;
+  font-style: italic;
+}
+.pl-node-live {
+  cursor: pointer;
+}
+.pl-node-live:hover {
+  border-color: var(--accent);
+  border-left-color: var(--kind);
+}
+.pl-node-live:focus-visible,
+.pl-node-empty:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.pl-node-bad,
+.pl-node-bad:hover {
+  border-color: var(--bad);
+}
+/* A place that has to be filled before the router can be saved. */
+.pl-node-empty {
+  border: 1.5px dashed var(--border-strong);
+  background: var(--surface-2);
+  box-shadow: none;
+}
+button.pl-node-empty {
+  cursor: pointer;
+}
+button.pl-node-empty:hover {
+  border-color: var(--accent);
+}
+.pl-node-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--kind);
+}
+.pl-node-head svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
+.pl-node-kind {
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.pl-node-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.pl-node-problem {
+  color: var(--bad);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+/* A button in a card's head, such as moving a filter. */
+.pl-node-btn {
+  display: grid;
+  place-items: center;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--faint);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.pl-node-btn:hover,
+.pl-node-btn:focus-visible {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+/* Removing is the one that loses something. */
+.pl-node-remove:hover,
+.pl-node-remove:focus-visible {
+  color: var(--bad);
+  background: var(--bad-soft);
+}
+.pl-node-btn svg {
+  width: 13px;
+  height: 13px;
+}
+/* A guardrail's blocks: router steps without the lines between them, since
+   each holds on its own. */
+.gr-blocks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(184px, 1fr));
+  gap: 10px;
+}
+.gr-blocks .pl-node {
+  width: auto;
+}
+
+/* Where a branch ends without a step of its own: straight to a route step's
+   destination, or refused. */
+.pl-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.pl-end svg {
+  width: 14px;
+  height: 14px;
+}
+.pl-end-refuse {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
+/* Where requests come in: the start of the first line. */
+.pl-entry {
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+.pl-start {
+  color: var(--text);
+  font-weight: 550;
+}
+
+@media (max-width: 700px) {
+  /* The line into the first step runs down, like the stems. */
+  .pl-entry {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .pl-entry .pl-edge {
+    height: 30px;
+    margin-left: 17px;
+  }
+  .pl-entry .pl-edge::before {
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 0;
+    border-top: 0;
+    border-left: 2px solid var(--pl-line);
+  }
+  .pl-entry .pl-add {
+    margin-left: -10px;
+  }
+  .pl-chain {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .pl-node {
+    width: auto;
+  }
+  .pl-stem {
+    width: 2px;
+    height: 10px;
+    margin-left: 17px;
+  }
+  .pl-branches {
+    margin-left: 17px;
+  }
+  .pl-branch {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 0 0 10px 16px;
+  }
+  .pl-branch:first-child::before {
+    top: 0;
+  }
+  /* The rail stops at the last branch's own line. */
+  .pl-branch:last-child::before {
+    bottom: auto;
+    height: 13px;
+  }
+  .pl-branch:only-child::before {
+    display: block;
+  }
+  .pl-edge {
+    height: 26px;
+    min-width: 0;
+    padding: 0;
+  }
+  .pl-edge::before {
+    left: -16px;
+    right: auto;
+    width: 12px;
+  }
+  .pl-end {
+    align-self: flex-start;
+  }
+}
 
 .table-wrap {
   overflow-x: auto;

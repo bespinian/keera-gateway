@@ -63,11 +63,11 @@ func names(events []sseEvent) []string {
 	return out
 }
 
-// pipeMessages runs a chat completion stream through the translation.
-func pipeMessages(t *testing.T, chunks ...string) []sseEvent {
+// pipeAs runs a chat completion stream through sh's translation.
+func pipeAs(t *testing.T, sh shape, chunks ...string) []sseEvent {
 	t.Helper()
 	var buf bytes.Buffer
-	_, err := anthropicShape{}.pipe(&buf, func() {},
+	_, err := sh.pipe(&buf, func() {},
 		strings.NewReader(sseStream(chunks...)), "keera-code", true, DefaultMaxResponseBytes)
 	if err != nil {
 		t.Fatalf("pipe: %v", err)
@@ -78,7 +78,7 @@ func pipeMessages(t *testing.T, chunks ...string) []sseEvent {
 func TestMessagesStreamOpensAndClosesTheMessage(t *testing.T) {
 	// A client waits for message_stop before it considers the turn over, so
 	// every stream has to produce the full envelope.
-	events := pipeMessages(t,
+	events := pipeAs(t, anthropicShape{},
 		`{"choices":[{"delta":{"role":"assistant","content":""}}]}`,
 		`{"choices":[{"delta":{"content":"Hel"}}]}`,
 		`{"choices":[{"delta":{"content":"lo"}}]}`,
@@ -132,7 +132,7 @@ func TestMessagesStreamNeverForwardsTheUsageChunk(t *testing.T) {
 	// The gateway asks for a usage record the client never requested. Its
 	// numbers belong in message_delta: a chunk with no choices is not an event
 	// this protocol has.
-	events := pipeMessages(t,
+	events := pipeAs(t, anthropicShape{},
 		`{"choices":[{"delta":{"content":"x"}}]}`, stopChunk,
 		`{"choices":[],"usage":{"prompt_tokens":4,"completion_tokens":1,"total_tokens":5}}`,
 	)
@@ -149,11 +149,9 @@ func TestMessagesStreamNeverForwardsTheUsageChunk(t *testing.T) {
 }
 
 func TestMessagesStreamBuildsToolUseBlocks(t *testing.T) {
-	// Tool arguments arrive as fragments of a JSON string and leave whole, as
-	// one input_json_delta against an open tool_use block. The block has to
-	// open before it and close before the message ends, or the client has
-	// nowhere to accumulate it.
-	events := pipeMessages(t,
+	// Argument fragments leave whole, as one input_json_delta inside an open
+	// tool_use block that closes before the message ends.
+	events := pipeAs(t, anthropicShape{},
 		`{"choices":[{"delta":{"content":"looking"}}]}`,
 		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function",`+
 			`"function":{"name":"read","arguments":""}}]}}]}`,
@@ -203,7 +201,7 @@ func TestMessagesStreamBuildsToolUseBlocks(t *testing.T) {
 func TestMessagesStreamSeparatesParallelToolCalls(t *testing.T) {
 	// Two tool calls in one turn are two blocks. Sharing one would merge two
 	// argument documents into an unparseable third.
-	events := pipeMessages(t,
+	events := pipeAs(t, anthropicShape{},
 		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function",`+
 			`"function":{"name":"a","arguments":"{}"}}]}}]}`,
 		`{"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call_2","type":"function",`+
@@ -277,7 +275,7 @@ func TestMessagesStreamEndsAFailedStreamWithAnError(t *testing.T) {
 func TestMessagesStreamIsWellFormedWithNoContentAtAll(t *testing.T) {
 	// An upstream that finished without a word still has to produce a message
 	// a client can parse and discard.
-	events := pipeMessages(t, stopChunk)
+	events := pipeAs(t, anthropicShape{}, stopChunk)
 	if got := names(events); !slices.Equal(got, []string{"message_start", "message_delta", "message_stop"}) {
 		t.Errorf("events = %v, want an empty but complete message", got)
 	}
@@ -334,17 +332,13 @@ func TestATranslatedStreamCountsReasoningAsTheFirstToken(t *testing.T) {
 	}
 }
 
-// ------------------------------------------------------- through the gateway
-
 func TestMessagesSurfaceEnforcesTheSamePolicyAsChat(t *testing.T) {
 	// The point of translating rather than proxying: an Anthropic-shaped
-	// client passes the same guardrail, output ceiling and accounting as
-	// every other client.
+	// client passes the same guardrail and accounting as every other client.
 	res := policy.Resolve(
 		policy.Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
 		&policy.Limits{
-			SystemPrompt:    func() *string { p := "obey the org"; return &p }(),
-			MaxOutputTokens: func() *int { n := 64; return &n }(),
+			SystemPrompt: func() *string { p := "obey the org"; return &p }(),
 		}, nil, nil)
 	h := newHarness(t, jsonBackend(`{"id":"1","choices":[{"message":{"content":"hi"},`+
 		`"finish_reason":"stop"}],`+
@@ -372,8 +366,8 @@ func TestMessagesSurfaceEnforcesTheSamePolicyAsChat(t *testing.T) {
 	if sent.Model != "served-name" {
 		t.Errorf("the inference plane was asked for %q, want the backend model", sent.Model)
 	}
-	if sent.MaxTokens != 64 {
-		t.Errorf("max_tokens = %d, want the guardrail ceiling of 64", sent.MaxTokens)
+	if sent.MaxTokens != 4096 {
+		t.Errorf("max_tokens = %d, want the client's 4096", sent.MaxTokens)
 	}
 	if len(sent.Messages) != 3 {
 		t.Fatalf("upstream messages = %#v, want guardrail, client system, turn", sent.Messages)
@@ -656,7 +650,7 @@ func TestMessagesStreamReadsAToolCallLargerThanTheReadBuffer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events := pipeMessages(t,
+	events := pipeAs(t, anthropicShape{},
 		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1",`+
 			`"function":{"name":"write_file","arguments":`+string(quoted)+`}}]}}]}`,
 		`{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`)
@@ -728,7 +722,7 @@ func TestMessagesStreamSendsArgumentsThatAreNotJSONAsEmpty(t *testing.T) {
 	// Small models do write broken arguments. A buffered answer gets {} for
 	// them, and so does a stream: an Anthropic SDK fails the whole answer on
 	// arguments it cannot parse.
-	events := pipeMessages(t,
+	events := pipeAs(t, anthropicShape{},
 		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1",`+
 			`"function":{"name":"Bash","arguments":"{not "}}]}}]}`,
 		`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"json"}}]}}]}`,

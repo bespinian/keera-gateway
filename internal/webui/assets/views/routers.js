@@ -1,65 +1,125 @@
-// Routers: the hook that chooses which model answers a request.
+// Routers: filters, route steps, limits and models chained behind one alias.
+// Each router's screen is its editor, drawn as the tree the gateway walks.
 //
-// A router that goes wrong still returns good answers, just from the wrong
-// model, so its traffic looks like one that works. The split between its
-// destinations is the one number that tells them apart.
-//
-// Clients reach a router by naming it; nothing on this screen points traffic
-// at one.
+// The tree is sent whole on Save, so a half-drawn router never answers a
+// request. See policy.Router for what each step does.
 
 import { api } from "../api.js";
 import {
   h,
-  table,
-  modal,
+  icon,
+  icons,
+  iconButton,
   pill,
-  stat,
   rowLink,
   compact,
   num,
   money,
-  amount,
-  moneyStat,
   ms,
-  icon,
-  icons,
-  aliasProblem,
-  takenProblem,
-  toast,
-  currentRange,
-  rangePicker,
-  isAdmin,
-  checkButton,
-  plural,
-  pct,
+  stat,
+  moneyStat,
+  table,
+  listHead,
+  detailHead,
+  rowActions,
+  formModal,
+  confirm,
   field,
   modeTiles,
-  rowActions,
-  listHead,
-  sectionHead,
-  empty,
-  dash,
-  trafficSummary,
-  formModal,
-  detailHead,
-  busyButton,
   banner,
+  toast,
+  dash,
+  isAdmin,
+  plural,
+  pct,
+  aliasProblem,
+  locationName,
+  currentRange,
+  rangePicker,
+  trafficSummary,
+  gone,
+  busyButton,
 } from "../ui.js";
 import { barList } from "../chart.js";
+import { oneLine } from "../status.js";
 import { orgNameOf } from "./orgs.js";
-import { facts } from "./detail.js";
+import { modePills, newFilter } from "./filters.js";
+import { nodeCard, removeButton, emptyCard, addButton } from "./node-card.js";
+import {
+  rateShort,
+  budgetShort,
+  rateFields,
+  budgetFields,
+} from "./limits.js";
+import {
+  routeFields,
+  modeOf,
+  modeName,
+  decides,
+  checkReport,
+  tokens,
+} from "./route-step.js";
+import {
+  KINDS,
+  limits,
+  passes,
+  steps,
+  newID,
+  summary,
+  reaches,
+  problems,
+  warnings,
+  clean,
+} from "./router-tree.js";
+
+// In the order a router usually reads.
+const KIND_TILES = [
+  {
+    value: "filter",
+    icon: icons.filters,
+    what: "Redact or refuse, with one of the organisation's filters.",
+  },
+  {
+    value: "rate_limit",
+    icon: icons.latency,
+    what: "Requests or tokens per minute, day or month through this step.",
+  },
+  {
+    value: "budget",
+    icon: icons.billing,
+    what: "What requests through this step may cost per day or month.",
+  },
+  {
+    value: "system_prompt",
+    icon: icons.pencil,
+    what: "Instructions for the model, on requests that pass this step.",
+  },
+  {
+    value: "route",
+    icon: icons.route,
+    what: "Choose the model. Each destination can get its own steps.",
+  },
+  {
+    value: "model",
+    icon: icons.models,
+    what: "Send the request to one model. This ends the branch.",
+  },
+].map((t) => ({ ...t, name: KINDS[t.value] }));
+
+const KIND_ICONS = Object.fromEntries(KIND_TILES.map((t) => [t.value, t.icon]));
+
+// The list and the editor both delete a router, and warn alike.
+const DELETE_WARNING =
+  "Deleting it takes it off the organisation's allow-list. It cannot be " +
+  "deleted while a project's or key's allow-list names it. Clients still " +
+  "using the alias will be told the model does not exist. The filters and " +
+  "models it uses stay.";
 
 export async function routersView(ctx) {
   const since = currentRange();
-  const [res, models] = await Promise.all([
-    api.routers(ctx.orgID, { stats: true, since }),
-    api.models(ctx.orgID).then((r) => r.data || []),
-  ]);
+  const res = await api.routers(ctx.orgID, { stats: true, since });
   const routers = res.data || [];
   const stats = res.stats || {};
-  // A subscription model only answers its caller's own sign-in, so a router
-  // can neither decide with it nor send there.
-  const readers = models.filter(canDecide);
   const canEdit = isAdmin(ctx);
   ctx.setSubtitle(`${routers.length} ${plural(routers.length, "router")}`);
 
@@ -68,78 +128,84 @@ export async function routersView(ctx) {
     [rangePicker(ctx, since)],
     canEdit && {
       label: "Create router",
-      onClick: () => editRouter(ctx, null, readers),
+      onClick: () => createRouter(ctx, routers),
     },
   );
 
-  const known = new Set(models.map((m) => m.alias));
   const rows = table(
     [
       {
         label: "Alias",
-        sortKey: (rt) => rt.alias,
-        cell: (rt) =>
-          rowLink(
-            ctx,
-            "/routers/" + encodeURIComponent(rt.alias),
-            h("strong", { class: "mono" }, rt.alias),
-            "Where this router sent traffic",
+        sortKey: (p) => p.alias,
+        cell: (p) =>
+          h(
+            "div",
+            { class: "stack" },
+            rowLink(
+              ctx,
+              "/routers/" + encodeURIComponent(p.alias),
+              h("strong", { class: "mono" }, p.alias),
+              canEdit ? "Open the editor" : "See its steps",
+            ),
+            p.display_name
+              ? h("span", { class: "faint small" }, p.display_name)
+              : null,
           ),
       },
-      // The mode comes first, because it changes what the other columns
-      // mean: a fallback router's list is an order, not a menu.
       {
-        label: "Mode",
-        shrink: true,
-        sortKey: (rt) => modeName(modeOf(rt)),
-        cell: (rt) => modeCell(rt, known),
+        label: "Steps",
+        sortKey: (p) => steps(p.start).length,
+        cell: (p) => {
+          const n = steps(p.start).length;
+          return h(
+            "div",
+            { class: "stack" },
+            h("span", { class: "nowrap" }, summary(p.start)),
+            h("span", { class: "faint small" }, `${n} ${plural(n, "step")}`),
+          );
+        },
       },
-      // Only the first few are named, so the row does not wrap.
+      // Allowing the router allows every one of these.
       {
-        label: "Destinations",
-        shrink: true,
-        sortKey: (rt) => (rt.destinations || []).length || null,
-        sortDir: "desc",
-        cell: (rt) => destinationsCell(rt, known),
+        label: "Reaches",
+        cell: (p) => {
+          const to = reaches(p);
+          if (!to.length) return dash();
+          return h(
+            "div",
+            { class: "wrap-chips" },
+            to.slice(0, 3).map((a) => pill(a)),
+            to.length > 3 ? pill(`+${to.length - 3}`) : null,
+          );
+        },
       },
-      // Whether it actually does what it is meant to.
       {
         label: "In this period",
         shrink: true,
-        sortKey: (rt) => stats[rt.alias]?.requests || null,
+        sortKey: (p) => stats[p.alias]?.requests || null,
         sortDir: "desc",
-        cell: (rt) => trafficCell(stats[rt.alias]),
+        cell: (p) => trafficCell(stats[p.alias]),
       },
-      // Without this column the alias column would fill half the table.
       {
         label: "Description",
-        sortKey: (rt) => rt.description || null,
-        cell: (rt) =>
-          rt.description
-            ? h("span", { class: "muted clamp-2" }, rt.description)
+        sortKey: (p) => p.description || null,
+        cell: (p) =>
+          p.description
+            ? h("span", { class: "muted clamp-2" }, p.description)
             : dash(),
-      },
-      canEdit && {
-        label: "Check",
-        shrink: true,
-        cell: (rt) => checkCell(ctx, rt),
       },
       canEdit && {
         label: "",
         shrink: true,
-        cell: (rt) =>
-          rowActions(ctx, rt.alias, {
-            editTitle: "Edit this router",
-            onEdit: () => editRouter(ctx, rt, readers),
+        cell: (p) =>
+          rowActions(ctx, p.alias, {
+            editTitle: "Open the editor",
+            onEdit: () =>
+              ctx.navigate("/routers/" + encodeURIComponent(p.alias)),
             deleteTitle: "Delete this router",
-            body:
-              "Deleting it takes it off the organisation's allow-list. " +
-              "It cannot be deleted while a project's or key's " +
-              "allow-list names it, or while it is all the organisation's " +
-              "list names; the error lists them. Clients still " +
-              "using the alias will be told the model does not exist.",
+            body: DELETE_WARNING,
             confirmLabel: "Delete router",
-            remove: () => api.deleteRouter(ctx.orgID, rt.alias),
+            remove: () => api.deleteRouter(ctx.orgID, p.alias),
           }),
       },
     ].filter(Boolean),
@@ -147,746 +213,899 @@ export async function routersView(ctx) {
     {
       emptyTitle: "No routers yet",
       emptyBody:
-        "Routers send your request to the model best suited to answer it. " +
-        "Different routing strategies are available.",
+        "A router chains filters, route steps, rate limits and budgets in " +
+        "the order you draw them, and ends at a model. Clients name it like " +
+        "a model.",
     },
   );
 
   return h("div", {}, head, rows);
 }
 
-// decides reports whether this router chooses by reading the request. With
-// one destination there is nothing to choose, so the gateway does not ask.
-function decides(rt) {
-  return modeOf(rt) === "instruction" && (rt.destinations || []).length > 1;
-}
-
-// A router saved before modes existed has none, and was an instruction router.
-function modeOf(rt) {
-  return rt.mode || "instruction";
-}
-
-function modeName(mode) {
-  return (MODES.find((m) => m.value === mode) || { name: mode }).name;
-}
-
-// measures reports whether the gateway works out this router's order. Then
-// the order is a reading of the last few minutes on one replica, so screens
-// must not show it numbered.
-function measures(rt) {
-  const mode = modeOf(rt);
-  return mode === "latency" || mode === "least-busy";
-}
-
-// sizes reports whether this router chooses by request size. It reads the
-// request like an instruction router, but costs nothing like the others.
-function sizes(rt) {
-  return modeOf(rt) === "size";
-}
-
-// ceilingOf is the largest request, in estimated tokens, for a destination,
-// or null for the one that takes what the rest will not.
-function ceilingOf(rt, alias) {
-  const n = (rt.ceilings || {})[alias];
-  return n > 0 ? n : null;
-}
-
-// tokens renders a ceiling as it is typed, such as '32k'.
-function tokens(n) {
-  return n >= 1000 && n % 1000 === 0 ? n / 1000 + "k" : String(n);
-}
-
-// ordersBy says, as a clause, how a router orders its destinations. It is the
-// only thing that tells the modes that read nothing apart.
-function ordersBy(rt) {
-  return ordersByMode(modeOf(rt));
-}
-
-// ordersByMode is ordersBy for the check, which reports only the mode.
-function ordersByMode(mode) {
-  switch (mode) {
-    case "latency":
-      return "recent time to first token, fastest first";
-    case "least-busy":
-      return "requests in flight, least busy first";
-    case "size":
-      return "request size, against each one's ceiling";
-    default:
-      return "the order they are written in";
-  }
-}
-
-// modeCell shows the mode and, on an instruction router, the model it reads
-// with, which has no column of its own.
-function modeCell(rt, known) {
-  if (sizes(rt)) {
-    return h(
-      "span",
-      { title: "places each request by " + ordersBy(rt) },
-      pill(modeName("size"), "good"),
-    );
-  }
-  if (!decides(rt)) {
-    return h(
-      "span",
-      { title: "tries its destinations in the order of " + ordersBy(rt) },
-      pill(modeName(modeOf(rt))),
-    );
-  }
-  return h(
-    "div",
-    { class: "row-tight" },
-    pill(modeName("instruction"), "accent"),
-    known.has(rt.model)
-      ? h("span", { class: "mono muted" }, rt.model)
-      : h(
-          "div",
-          { class: "row-tight" },
-          h("span", { class: "mono muted" }, rt.model),
-          pill("Missing", "bad"),
-        ),
-  );
-}
-
-// destinationsCell also counts the destinations the organisation no longer
-// has. They are quietly left out of the choice, so without the count a broken
-// router looks like one that works.
-function destinationsCell(rt, known) {
-  const destinations = rt.destinations || [];
-  if (destinations.length === 0) {
-    return dash();
-  }
-  const shown = destinations.slice(0, 3);
-  const more = destinations.length - shown.length;
-  const missing = destinations.filter((alias) => !known.has(alias)).length;
-  return h(
-    "div",
-    { class: "row-tight" },
-    h(
-      "span",
-      { class: "mono nowrap", title: destinations.join(", ") },
-      shown.join(", "),
-      more > 0 ? h("span", { class: "faint" }, ` +${more}`) : null,
-    ),
-    missing > 0 ? pill(`${missing} missing`, "bad") : null,
-  );
-}
-
-// fallbackPill says what happens to a request the router cannot place. It is
-// shown on the router's own screen, not in the list: whether to fall back or
-// refuse depends on what the router is for.
-//
-// A router that tries its destinations has no such setting: when it fails,
-// the client gets the last destination's answer.
-function fallbackPill(rt) {
-  if (sizes(rt)) {
-    return h("span", { class: "muted nowrap" }, "the next destination up");
-  }
-  if (!decides(rt)) {
-    return h("span", { class: "muted nowrap" }, "the last one's answer");
-  }
-  if (!rt.fallback) return pill("Refuse the request", "warn");
-  return h("span", { class: "pill mono" }, "→ " + rt.fallback);
-}
-
-// trafficCell shows how many requests were placed and how many without a
-// decision. The split is on the router's own screen.
+// trafficCell flags a row when much was refused, or when a route step could
+// not decide, since those requests still got answers and hide the failure.
 function trafficCell(st) {
   if (!st || !st.requests) return trafficSummary(0);
+  const refusedRate = st.refused / st.requests;
+  const placed = (st.chose || 0) + (st.fell_back || 0) + (st.errored || 0);
   const undecided = (st.fell_back || 0) + (st.errored || 0);
-  const rate = undecided / st.requests;
   return trafficSummary(
     st.requests,
-    "placed",
-    undecided > 0
-      ? pill(
-          `${pct(undecided, st.requests)} undecided`,
-          rate >= 0.25 ? "bad" : "warn",
-        )
-      : null,
-    [money(st.cost_micros), " spent, deciding and filters included"],
+    plural(st.requests, "request"),
+    st.failed
+      ? pill(`${num(st.failed)} failed`, "bad")
+      : refusedRate >= 0.05
+        ? pill(`${pct(st.refused, st.requests)} refused`, "warn")
+        : undecided
+          ? pill(
+              `${pct(undecided, placed)} undecided`,
+              undecided / placed >= 0.25 ? "bad" : "warn",
+            )
+          : null,
+    `${money(st.cost_micros)} · ${compact(st.input_tokens + st.output_tokens)} tokens`,
   );
 }
 
-// checkCell puts three sample prompts through the router and shows where each
-// went. The result is not cached: a small model following prose may answer
-// differently next time.
-function checkCell(ctx, rt) {
-  return checkButton(
-    "Test this router with sample prompts",
-    () => api.checkRouter(ctx.orgID, rt.alias),
-    (probe) => verdict(ctx, probe),
-  );
-}
-
-function verdict(ctx, probe) {
-  const warned = (probe.warnings || []).length > 0;
-  const tone = probe.ok ? (warned ? "warn" : "good") : "bad";
-  const label = !probe.ok
-    ? "Not usable"
-    : warned
-      ? "Working, with notes"
-      : "Working";
-  return {
-    label,
-    tone,
-    title: "Where the router sent each sample",
-    open: () => report(ctx, probe),
-  };
-}
-
-// report shows each sample prompt and the model the router chose for it.
-//
-// There is no pass: only the reader can judge whether the choices suit their
-// work. What is always wrong is every sample going the same way.
-function report(ctx, probe) {
-  const chained = probe.mode !== "instruction";
-  const ranked = probe.mode === "latency" || probe.mode === "least-busy";
-  const banded = probe.mode === "size";
-  modal({
-    wide: true,
-    title: `Check - ${probe.alias}`,
-    subtitle: !probe.ok
-      ? chained
-        ? "This router has nowhere to send a request."
-        : "This router could not place the samples."
-      : banded
-        ? "Each destination, the request sizes it takes first, and whether " +
-          "it is answering. This depends only on size, so it is the full " +
-          "picture."
-        : ranked
-          ? "Each destination in the order this router would try them now, " +
-            "with what it measured. The order can change from minute to minute."
-          : chained
-            ? "Each destination in the order this router would try them. The " +
-              "first that answers serves every request."
-            : "Three very different prompts. They should not all go to the " +
-              "same model.",
+// createRouter asks only for the alias. The steps are drawn in the editor,
+// and nothing is saved until they make a router.
+async function createRouter(ctx, routers) {
+  const alias = h("input", {
+    class: "input mono",
+    placeholder: "private-first",
+  });
+  formModal({
+    title: "Create router",
+    subtitle:
+      "Next you draw its steps. Nothing is saved until every branch ends at " +
+      "a model.",
     body: h(
-      "div",
+      "form",
       {},
-      probe.error ? banner("bad", probe.error) : null,
-      (probe.warnings || []).map((warning) => banner("warn", warning)),
-      facts([
-        probe.model
-          ? ["Runs on", h("span", { class: "mono" }, probe.model)]
-          : null,
-        ranked || banded ? ["In the order of", ordersByMode(probe.mode)] : null,
-        [
-          banded
-            ? "Places between"
-            : chained
-              ? "Would try, in order"
-              : "Offered",
-          h(
-            "div",
-            { class: "wrap-chips" },
-            (probe.destinations || []).map((alias) =>
-              h("span", { class: "pill mono" }, alias),
-            ),
-          ),
-        ],
-        (probe.dropped || []).length
-          ? [
-              "Not offered",
-              h(
-                "div",
-                { class: "stack" },
-                probe.dropped.map((d) => h("div", { class: "muted" }, d)),
-              ),
-            ]
-          : null,
-        probe.total_ms ? ["Took", ms(probe.total_ms)] : null,
-        probe.cost_micros
-          ? [
-              "Cost of these runs",
-              money(probe.cost_micros) +
-                " - each request to this router pays a share of this on top",
-            ]
-          : null,
-      ]),
-      (probe.chain || []).length
-        ? h(
-            "div",
-            { style: { marginTop: "12px" } },
-            table(
-              [
-                {
-                  label: banded ? "Placed on" : "Tries",
-                  shrink: true,
-                  cell: (hop) =>
-                    h(
-                      "div",
-                      { class: "row-tight" },
-                      h(
-                        "span",
-                        { class: "faint" },
-                        probe.chain.indexOf(hop) + 1 + ".",
-                      ),
-                      h("span", { class: "mono" }, hop.alias),
-                    ),
-                },
-                {
-                  label: "Answers",
-                  shrink: true,
-                  cell: (hop) =>
-                    hop.answers
-                      ? pill("Yes", "good")
-                      : pill(hop.status ? String(hop.status) : "No", "bad"),
-                },
-                {
-                  label: "Took",
-                  shrink: true,
-                  cell: (hop) => (hop.ms ? ms(hop.ms) : dash()),
-                },
-                // Why a destination is where it is, on the modes where the
-                // order is measured rather than written.
-                ranked || banded
-                  ? {
-                      label: banded ? "Takes" : "Reading",
-                      cell: (hop) =>
-                        hop.reading
-                          ? h("span", { class: "muted" }, hop.reading)
-                          : dash(),
-                    }
-                  : null,
-                {
-                  label: "Note",
-                  cell: (hop) =>
-                    hop.note ? h("span", { class: "muted" }, hop.note) : dash(),
-                },
-              ].filter(Boolean),
-              probe.chain,
-              {},
-            ),
-          )
-        : null,
-      h(
-        "div",
-        { class: "stack", style: { marginTop: "12px" } },
-        (probe.decisions || []).map((d) =>
-          h(
-            "div",
-            { class: "card" },
-            h(
-              "div",
-              { class: "card-head" },
-              h("h2", {}, d.asks),
-              h("div", { class: "spacer" }),
-              d.error
-                ? pill("Could not decide", "bad")
-                : h("span", { class: "pill pill-good mono" }, d.chosen),
-              // A sample decided at 35% went there by a hair. Absent when
-              // the deciding model's backend serves no probabilities.
-              !d.error && d.confidence
-                ? h(
-                    "span",
-                    { class: "muted", style: { marginLeft: "8px" } },
-                    `${Math.round(d.confidence * 100)}% sure`,
-                  )
-                : null,
-            ),
-            h(
-              "div",
-              { class: "card-body" },
-              h(
-                "div",
-                { class: "mono muted", style: { whiteSpace: "pre-wrap" } },
-                d.prompt,
-              ),
-              d.error ? banner("bad", d.error) : null,
-            ),
-          ),
-        ),
+      field(
+        "Alias",
+        alias,
+        "Lowercase letters, digits and hyphens. Clients use it as the model " +
+          "name, so it cannot change later.",
       ),
     ),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Close"),
-    ],
+    submitLabel: "Draw its steps",
+    submit: async () => {
+      const name = alias.value.trim();
+      const problem = aliasProblem(name);
+      if (problem) {
+        alias.focus();
+        throw new Error(problem);
+      }
+      // A client names both in the same field, so neither may share it.
+      const models = await api.models(ctx.orgID).then((r) => r.data || []);
+      const taken = [
+        [routers, "router"],
+        [models, "model"],
+      ].find(([list]) => list.some((x) => x.alias === name));
+      if (taken) {
+        alias.focus();
+        throw new Error(
+          `${name} is already a ${taken[1]}. Clients name routers and ` +
+            "models in the same field, so pick another alias.",
+        );
+      }
+      ctx.navigate("/routers/" + encodeURIComponent(name));
+    },
   });
+  alias.focus();
 }
-
-/* ------------------------------------------------------------ one router */
 
 export async function routerDetailView(ctx) {
   const since = currentRange();
-  const res = await api.routerReport(ctx.orgID, ctx.param, since);
+  const alias = ctx.param;
+  const [res, filters, models] = await Promise.all([
+    api.routerReport(ctx.orgID, alias, since),
+    api.filters(ctx.orgID).then((r) => r.data || []),
+    api.models(ctx.orgID).then((r) => r.data || []),
+  ]);
+  const saved = res.router || null;
   const rep = res.report || {};
-  const rt = res.router || null;
   const canEdit = isAdmin(ctx);
-  const placed = rep.total ? rep.total.requests || 0 : 0;
+  const total = rep.total || {};
 
-  ctx.setTitle(ctx.param, rt ? identity(rt) : `no longer in ${orgNameOf(ctx)}`);
+  if (!saved && !canEdit) {
+    return gone(
+      ctx,
+      "/routers",
+      "Routers",
+      "No such router",
+      `It was deleted, or ${orgNameOf(ctx)} never had one of this alias.`,
+    );
+  }
+  // A deleted router with traffic in the period opens as new: saving it
+  // brings the alias back.
+  const fresh = !saved;
+  ctx.setTitle(
+    alias,
+    fresh ? "New router, not saved yet" : saved.display_name || "",
+  );
 
+  const env = {
+    ctx,
+    canEdit,
+    filters,
+    models,
+    draft: {
+      display_name: saved ? saved.display_name || "" : "",
+      description: saved ? saved.description || "" : "",
+      // A copy: the editor changes it in place, and "Unsaved changes"
+      // compares against the saved one.
+      start: saved
+        ? JSON.parse(JSON.stringify(saved.start))
+        : { id: newID(null), kind: "model", ref: "" },
+    },
+  };
+  env.original = JSON.stringify(clean(env.draft.start));
+
+  const canvas = h("div", { class: "pl-canvas" });
+  const notes = h("div", { class: "stack", style: { gap: "8px" } });
+  const status = h("span", { class: "faint small" });
+  const dirtyPill = h("span", {});
+  const saveButton = busyButton(
+    { class: "btn btn-primary" },
+    fresh ? "Create router" : "Save",
+    () => save(env),
+  );
+
+  env.render = () => {
+    const refs = { filters: env.filters, models };
+    const found = problems(env.draft.start, refs);
+    env.problems = found;
+    canvas.replaceChildren(
+      h(
+        "div",
+        { class: "pl-chain" },
+        entry(env),
+        renderSlot(env, rootSlot(env), { required: true }),
+      ),
+    );
+    notes.replaceChildren(
+      ...warnings(env.draft.start, env.filters).map((w) => banner("warn", w)),
+    );
+    const n = [...found.keys()].filter(Boolean).length;
+    const ready = found.size === 0;
+    const dirty =
+      fresh ||
+      JSON.stringify(clean(env.draft.start)) !== env.original ||
+      env.draft.display_name !== (saved?.display_name || "") ||
+      env.draft.description !== (saved?.description || "");
+    saveButton.disabled = !ready || !dirty;
+    status.textContent = !ready
+      ? found.get("") ||
+        `${n} ${plural(n, "step needs", "steps need")} attention before saving.`
+      : dirty
+        ? "Ready to save."
+        : "Saved.";
+    dirtyPill.replaceChildren(
+      !fresh && dirty ? pill("Unsaved changes", "warn") : "",
+    );
+  };
+
+  const savedSteps = saved ? steps(saved.start) : [];
   const wrap = h(
     "div",
     {},
     detailHead(
       ctx,
       ["/routers", "Routers"],
-      rt
-        ? [
-            pill(
-              decides(rt)
-                ? "Decides with " + rt.model
-                : sizes(rt)
-                  ? "Places " +
-                    (rt.destinations || []).length +
-                    " destinations by size"
-                  : "Tries " +
-                    (rt.destinations || []).length +
-                    " destinations, " +
-                    (measures(rt) ? "by " + ordersBy(rt) : "in order"),
-            ),
-            fallbackPill(rt),
-          ]
-        : pill(`Deleted from ${orgNameOf(ctx)}`, "warn"),
       [
-        rangePicker(ctx, since),
-        rt && canEdit
+        fresh ? pill("Not saved yet", "warn") : null,
+        dirtyPill,
+        saved
+          ? pill(`${savedSteps.length} ${plural(savedSteps.length, "step")}`)
+          : null,
+      ],
+      [
+        fresh ? null : rangePicker(ctx, since),
+        // Checks the saved route steps, not the draft.
+        saved && canEdit && savedSteps.some((s) => s.kind === "route")
           ? busyButton(
-              { title: "Test this router with sample prompts" },
+              { title: "Test its route steps with sample prompts" },
               "Check",
-              async () =>
-                report(ctx, await api.checkRouter(ctx.orgID, rt.alias)),
+              async () => checkReport(await api.checkRouter(ctx.orgID, alias)),
             )
           : null,
-        rt && canEdit
-          ? h(
-              "button",
-              {
-                class: "btn",
-                title: "Edit this router",
-                "aria-label": `Edit ${rt.alias}`,
-                onClick: () =>
-                  api
-                    .models(ctx.orgID)
-                    .then((r) =>
-                      editRouter(ctx, rt, (r.data || []).filter(canDecide)),
-                    ),
-              },
-              icon(icons.pencil),
+        saved && canEdit
+          ? iconButton(icons.trash, "Delete this router", () =>
+              confirm({
+                title: `Delete ${alias}?`,
+                body: DELETE_WARNING,
+                confirmLabel: "Delete router",
+                danger: true,
+                onConfirm: async () => {
+                  await api.deleteRouter(ctx.orgID, alias);
+                  toast(`${alias} deleted`, "good");
+                  ctx.navigate("/routers");
+                },
+              }),
             )
           : null,
       ],
     ),
   );
 
-  for (const banner of detailBanners(rep, rt, placed)) wrap.append(banner);
-
-  // "Placed" leads because the shares mean nothing without it: all of three
-  // requests to one model is not a router that stopped deciding.
-  wrap.append(
-    h(
-      "div",
-      { class: "grid grid-4" },
-      stat(
-        "Placed",
-        compact(placed),
-        placed ? "requests to this router" : "no requests in this period",
-      ),
-      stat(
-        rt && measures(rt)
-          ? "Best ranked"
-          : rt && !decides(rt)
-            ? "First choice"
-            : "Decided",
-        pct(rep.chose, placed),
-        chosenNote(rt, rep),
-      ),
-      // The wait the router added: a generation when it reads the request,
-      // or the destinations that did not answer when it tries them.
-      stat(
-        rt && !decides(rt) ? "Lost to failover" : "Deciding cost",
-        ms(rep.decision_median_ms || 0),
-        `p95 ${ms(rep.decision_p95_ms || 0)}, added per request`,
-      ),
-      moneyStat(
-        "Cost",
-        rep.total ? rep.total.cost_micros || 0 : 0,
-        "destinations' cost, decisions included",
-      ),
-    ),
-  );
-
-  // The split is the only figure that tells a working router from an
-  // expensive way of hard-coding one destination.
-  wrap.append(
-    h(
-      "div",
-      { class: "grid grid-2", style: { marginTop: "16px" } },
-      h(
-        "div",
-        { class: "card" },
-        h(
-          "div",
-          { class: "card-head" },
-          h("h2", {}, "Where it sent them"),
-          h("div", { class: "spacer" }),
-          placed ? pill(`${compact(placed)} placed`) : null,
-        ),
-        h(
-          "div",
-          { class: "card-body" },
-          (rep.destinations || []).length
-            ? barList(rep.destinations, {
-                label: (d) => d.alias || "No model",
-                value: (d) => d.requests,
-              })
-            : empty(
-                "Nothing placed",
-                "No request used this router in this period.",
-              ),
-        ),
-      ),
-      h(
-        "div",
-        { class: "card" },
-        h(
-          "div",
-          { class: "card-head" },
-          h("h2", {}, "What it cost per destination"),
-        ),
-        h(
-          "div",
-          { class: "card-body" },
-          (rep.destinations || []).length
-            ? barList(rep.destinations, {
-                label: (d) => d.alias || "No model",
-                value: (d) => d.cost_micros,
-                cost: true,
-                colorIndex: 2,
-              })
-            : empty(
-                "Nothing charged",
-                "No request through this router cost anything in this period.",
-              ),
-        ),
-      ),
-    ),
-  );
-
-  if ((rep.destinations || []).length) {
+  const placed = (rep.chose || 0) + (rep.fell_back || 0) + (rep.errored || 0);
+  if (!fresh) {
+    for (const b of decisionBanners(rep, placed)) wrap.append(b);
     wrap.append(
       h(
         "div",
-        { style: { marginTop: "20px" } },
-        sectionHead("Each destination"),
-        table(
-          [
-            {
-              label: "Model",
-              cell: (d) => h("span", { class: "mono" }, d.alias || "No model"),
-            },
-            {
-              label: "Requests",
-              shrink: true,
-              num: true,
-              cell: (d) => num(d.requests),
-            },
-            {
-              label: "Share",
-              shrink: true,
-              num: true,
-              cell: (d) => pct(d.requests, placed),
-            },
-            {
-              label: "Tokens",
-              shrink: true,
-              num: true,
-              cell: (d) => compact(d.input_tokens + d.output_tokens),
-            },
-            {
-              label: "Cost (CHF)",
-              shrink: true,
-              num: true,
-              cell: (d) => amount(d.cost_micros),
-            },
-            // A cheaper destination that doubles the wait has not obviously
-            // helped.
-            {
-              label: "Median wait",
-              shrink: true,
-              num: true,
-              cell: (d) => ms(d.ttft_median_ms),
-            },
-            {
-              label: "Refused",
-              shrink: true,
-              num: true,
-              cell: (d) => (d.refused ? pill(num(d.refused), "warn") : dash()),
-            },
-            {
-              label: "Failed",
-              shrink: true,
-              num: true,
-              cell: (d) => (d.failed ? pill(num(d.failed), "bad") : dash()),
-            },
-          ],
-          rep.destinations,
-          {},
+        { class: "grid grid-4", style: { marginBottom: "16px" } },
+        stat(
+          "Requests",
+          compact(total.requests || 0),
+          total.requests ? "named this router" : "none in this period",
         ),
+        stat(
+          "Refused",
+          total.requests ? pct(total.refused, total.requests) : "-",
+          total.refused
+            ? `${num(total.refused)} by a step or the key's guardrails`
+            : "none refused",
+        ),
+        moneyStat(
+          "Cost",
+          total.cost_micros || 0,
+          "filters and decisions included",
+        ),
+        // What deciding added: a generation when a step reads the request,
+        // or the destinations that failed when it tries them.
+        placed
+          ? stat(
+              "Decided",
+              pct(rep.chose, placed),
+              rep.decision_median_ms
+                ? `added ${ms(rep.decision_median_ms)}, ` +
+                    `p95 ${ms(rep.decision_p95_ms)}`
+                : "added no wait",
+            )
+          : stat("First token", ms(total.ttft_median_ms), "median"),
       ),
     );
   }
 
-  if (rt) {
+  wrap.append(
+    settingsCard(env),
+    h(
+      "div",
+      { class: "card", style: { marginTop: "16px" } },
+      h(
+        "div",
+        { class: "card-head" },
+        h("h2", {}, "Steps"),
+        h("div", { class: "spacer" }),
+        canEdit ? status : null,
+        canEdit ? saveButton : null,
+      ),
+      h(
+        "div",
+        { class: "card-body stack", style: { gap: "12px" } },
+        h(
+          "p",
+          { class: "muted", style: { margin: 0 } },
+          canEdit
+            ? "Requests flow from left to right. Click a step to change it, " +
+                "or a + on a line to add one there. The key's own guardrails " +
+                "still apply around the router."
+            : "Requests flow from left to right. An administrator changes " +
+                "the steps.",
+        ),
+        notes,
+        canvas,
+      ),
+    ),
+  );
+
+  if (!fresh && (rep.destinations || []).length) {
     wrap.append(
       h(
         "div",
         { class: "card", style: { marginTop: "16px" } },
-        h(
-          "div",
-          { class: "card-head" },
-          h("h2", {}, decides(rt) ? "What it was told" : "How it is written"),
-        ),
+        h("div", { class: "card-head" }, h("h2", {}, "Answered by")),
         h(
           "div",
           { class: "card-body" },
-          facts([
-            rt.description ? ["Description", rt.description] : null,
-            [
-              "Mode",
-              decides(rt)
-                ? pill(modeName("instruction"), "accent")
-                : pill(modeName(modeOf(rt))),
-            ],
-            decides(rt)
-              ? ["Runs on", h("span", { class: "mono" }, rt.model)]
-              : null,
-            decides(rt) ? null : ["In the order of", ordersBy(rt)],
-            [
-              decides(rt)
-                ? "Chooses between"
-                : sizes(rt)
-                  ? "Places between"
-                  : measures(rt)
-                    ? "Tries"
-                    : "Tries in order",
-              h(
-                "div",
-                { class: "wrap-chips" },
-                // Numbered only where the order is the configuration. On a
-                // measured router it is only a tie-break. On a size router
-                // the ceiling goes on the chip instead.
-                (rt.destinations || []).map((alias, i) => {
-                  if (sizes(rt)) {
-                    const ceiling = ceilingOf(rt, alias);
-                    return h(
-                      "span",
-                      { class: "pill mono" },
-                      ceiling
-                        ? `${alias} ≤ ${tokens(ceiling)}`
-                        : `${alias} - anything larger`,
-                    );
-                  }
-                  return h(
-                    "span",
-                    { class: "pill mono" },
-                    (decides(rt) || measures(rt) ? "" : i + 1 + ". ") + alias,
-                  );
-                }),
-              ),
-            ],
-            [
-              decides(rt) ? "Cannot decide" : "Cannot place it",
-              sizes(rt)
-                ? "the next larger destination takes it; if none can, the " +
-                  "client gets the last one's answer"
-                : !decides(rt)
-                  ? "all destinations have been tried, and the client gets the " +
-                    "last one's answer"
-                  : rt.fallback
-                    ? `the request goes to ${rt.fallback} without a decision`
-                    : "the request is refused",
-            ],
-            [
-              "How a client reaches it",
-              h("span", { class: "mono" }, `"model": "${rt.alias}"`),
-            ],
-          ]),
-          // Shown whole, not clamped: the instruction is what readers compare
-          // against where the traffic went.
-          decides(rt)
-            ? h(
-                "div",
-                { class: "prompt-text", style: { marginTop: "12px" } },
-                rt.prompt || "",
-              )
-            : null,
+          barList(rep.destinations, {
+            label: (d) => d.alias || "refused before a model",
+            value: (d) => d.requests,
+          }),
         ),
       ),
     );
   }
 
+  env.render();
   return wrap;
 }
 
-// detailBanners come before the numbers, because each changes how they read.
-function detailBanners(rep, rt, placed) {
+// settingsCard holds what a person reads about the router. Clients see the
+// display name and description on /v1/models.
+function settingsCard(env) {
+  const displayName = h("input", {
+    class: "input",
+    placeholder: "Private first",
+    value: env.draft.display_name,
+    disabled: !env.canEdit,
+    onInput: (e) => {
+      env.draft.display_name = e.target.value.trim();
+      env.render();
+    },
+  });
+  const description = h("input", {
+    class: "input",
+    placeholder: "Keeps customer data inside, and the hosted spend capped",
+    value: env.draft.description,
+    disabled: !env.canEdit,
+    onInput: (e) => {
+      env.draft.description = e.target.value.trim();
+      env.render();
+    },
+  });
+  return h(
+    "div",
+    { class: "card" },
+    h(
+      "div",
+      { class: "card-body field-row" },
+      field(
+        "Display name",
+        displayName,
+        "Its name for people. Clients still use the alias.",
+      ),
+      field("Description", description),
+    ),
+  );
+}
+
+async function save(env) {
+  const { ctx } = env;
+  const saved = await api.putRouter(ctx.orgID, ctx.param, {
+    display_name: env.draft.display_name,
+    description: env.draft.description,
+    start: clean(env.draft.start),
+  });
+  if (saved && saved.warning) {
+    toast(
+      "Router saved, but " +
+        saved.warning +
+        ". Change the list in the organisation's Guardrails.",
+      "warn",
+    );
+  } else {
+    toast("Router saved", "good");
+  }
+  ctx.reload();
+}
+
+// A slot is a place in the tree a step can be: the start, a step's next or
+// exceeded, or a route step's branch. Editing goes through slots, so a step
+// never needs to know its parent.
+
+function rootSlot(env) {
+  return {
+    get: () => env.draft.start,
+    set: (s) => (env.draft.start = s || null),
+  };
+}
+
+function fieldSlot(step, key) {
+  return { get: () => step[key], set: (s) => (step[key] = s || undefined) };
+}
+
+function branchSlot(step, dest) {
+  return {
+    get: () => (step.branches || {})[dest],
+    set: (s) => {
+      step.branches = step.branches || {};
+      if (s) step.branches[dest] = s;
+      else delete step.branches[dest];
+    },
+  };
+}
+
+/** entry is where requests come in. Its + is the only way to add a step in
+ *  front of the first one, and the only + while the router is one model. */
+function entry(env) {
+  const slot = rootSlot(env);
+  return h(
+    "div",
+    { class: "pl-entry" },
+    h("div", { class: "pl-end pl-start" }, icon(icons.send), "Request"),
+    h(
+      "div",
+      { class: "pl-edge" },
+      // An empty start is filled through its own placeholder.
+      env.canEdit && slot.get()
+        ? addButton("Insert a step before the first one", () =>
+            addStep(env, slot, { required: true }),
+          )
+        : null,
+    ),
+  );
+}
+
+/** renderSlot draws a slot's step and all after it, or how an empty branch
+ *  ends. end says what an empty slot means: required, refuse, or a
+ *  destination sent to as is. */
+function renderSlot(env, slot, end) {
+  const step = slot.get();
+  if (step) return renderChain(env, step, slot);
+  if (end.dest) return endChip(env, end.dest);
+  if (end.refuse) {
+    return h(
+      "div",
+      { class: "pl-end pl-end-refuse" },
+      icon(icons.close),
+      "Refused",
+    );
+  }
+  // An empty required slot: the router cannot be saved until it is filled.
+  return emptyCard({
+    label: "Next step",
+    name: env.canEdit ? "Choose a model or another step" : "Nothing here yet",
+    problem: "Every branch has to end at a model.",
+    title: "Choose what comes next",
+    onClick: env.canEdit ? () => addStep(env, slot, end) : null,
+  });
+}
+
+// endChip is a route step's destination with no steps of its own.
+function endChip(env, dest) {
+  const m = env.models.find((x) => x.alias === dest);
+  return h(
+    "div",
+    { class: "pl-end" },
+    icon(icons.models),
+    h("span", { class: "mono" }, dest),
+    m && m.location
+      ? h("span", { class: "faint" }, locationName(m.location))
+      : null,
+  );
+}
+
+function renderChain(env, step, slot) {
+  const out = outgoing(env, step);
+  return h(
+    "div",
+    { class: "pl-chain" },
+    renderNode(env, step, slot),
+    out ? h("div", { class: "pl-stem" }) : null,
+    out,
+  );
+}
+
+/** outgoing is the branches leaving a step, each labelled with when it is
+ *  taken. */
+function outgoing(env, step) {
+  const branches = [];
+  if (passes(step.kind) && !limits(step.kind)) {
+    branches.push(branch(env, "", fieldSlot(step, "next"), { required: true }));
+  } else if (limits(step.kind)) {
+    branches.push(
+      branch(env, "within", fieldSlot(step, "next"), { required: true }),
+      branch(env, "over limit", fieldSlot(step, "exceeded"), {
+        refuse: true,
+      }),
+    );
+  } else if (step.kind === "route") {
+    for (const dest of step.destinations || []) {
+      // A size step's ceilings decide which branch a request takes.
+      const ceiling = modeOf(step) === "size" && (step.ceilings || {})[dest];
+      branches.push(
+        branch(
+          env,
+          ceiling ? `${dest} ≤ ${tokens(ceiling)}` : dest,
+          branchSlot(step, dest),
+          { dest },
+        ),
+      );
+    }
+  }
+  if (!branches.length) return null;
+  return h("div", { class: "pl-branches" }, branches);
+}
+
+function branch(env, label, slot, end) {
+  const filled = Boolean(slot.get());
+  return h(
+    "div",
+    { class: "pl-branch" },
+    h(
+      "div",
+      { class: "pl-edge" },
+      label
+        ? h(
+            "span",
+            {
+              class:
+                "pl-edge-label" +
+                (end.refuse ? " pl-edge-over" : "") +
+                (end.dest ? " mono" : ""),
+            },
+            label,
+          )
+        : null,
+      // Inserting before a filled slot only offers steps that pass the
+      // request on; an empty one may take any.
+      env.canEdit && (filled || end.dest || end.refuse)
+        ? addButton(
+            filled ? "Insert a step here" : "Add steps to this branch",
+            () => addStep(env, slot, end),
+          )
+        : null,
+    ),
+    renderSlot(env, slot, end),
+  );
+}
+
+function renderNode(env, step, slot) {
+  // A missing next step is marked on the empty slot after it, not here too.
+  const problem =
+    passes(step.kind) && !step.next ? "" : env.problems.get(step.id);
+  return nodeCard({
+    kind: step.kind,
+    glyph: KIND_ICONS[step.kind] || icons.more,
+    label: KINDS[step.kind] || step.kind,
+    name: nodeName(step),
+    meta: nodeMeta(env, step),
+    problem,
+    title: "Change this step",
+    onOpen: env.canEdit ? () => editStep(env, step, slot) : null,
+    buttons: env.canEdit
+      ? removeButton("Remove this step", () => removeStep(env, step, slot))
+      : null,
+  });
+}
+
+function nodeName(step) {
+  switch (step.kind) {
+    case "rate_limit":
+      return rateShort(step).join(" · ") || "Not set";
+    case "budget":
+      return step.budget_micros > 0 ? budgetShort(step) : "Not set";
+    case "route": {
+      const n = (step.destinations || []).length;
+      return decides(step)
+        ? h("span", {}, "Decided by ", h("span", { class: "mono" }, step.model))
+        : `${n} ${plural(n, "destination")}`;
+    }
+    case "system_prompt": {
+      // Just the start; the dialog has the whole text.
+      const text = oneLine(step.prompt || "", 60);
+      if (!text) return h("span", { class: "faint" }, "Not written");
+      return h("span", { class: "pl-prompt", title: step.prompt }, text);
+    }
+  }
+  return step.ref
+    ? h("span", { class: "mono" }, step.ref)
+    : h("span", { class: "faint" }, "Not chosen");
+}
+
+// nodeMeta is the one setting that decides what a step does.
+function nodeMeta(env, step) {
+  let bits = [];
+  if (step.kind === "filter") {
+    const f = env.filters.find((x) => x.alias === step.ref);
+    if (f) bits = modePills(f);
+  } else if (step.kind === "route") {
+    bits = [pill(modeName(modeOf(step)), decides(step) ? "accent" : "")];
+    if (decides(step) && !step.fallback) {
+      bits.push(pill("Refuses if undecided", "warn"));
+    }
+  } else if (step.kind === "model") {
+    const m = env.models.find((x) => x.alias === step.ref);
+    if (m && m.location) {
+      bits = [
+        pill(locationName(m.location), m.location === "onprem" ? "good" : ""),
+      ];
+    }
+  } else if (limits(step.kind)) {
+    bits = [
+      step.exceeded
+        ? pill("Reroutes when over")
+        : pill("Refuses when over", "warn"),
+    ];
+  }
+  return bits.length ? h("div", { class: "wrap-chips" }, bits) : null;
+}
+
+/** addStep puts a new step in a slot. A step that passes the request on goes
+ *  in front of what is there. A route step moves it onto the branch of the
+ *  destination it ends at, or else of its first destination. In an empty
+ *  branch the destination becomes a model step, so the branch still ends
+ *  where it did. */
+function addStep(env, slot, end) {
+  const existing = slot.get();
+  // An unchosen model, as a new router starts with, holds nothing to keep.
+  const keep = existing && !(existing.kind === "model" && !existing.ref);
+  const kinds = keep
+    ? KIND_TILES.filter((t) => passes(t.value) || t.value === "route")
+    : KIND_TILES;
+  stepDialog(env, {
+    kinds,
+    title: keep ? "Insert a step" : "Add a step",
+    preset: end.dest ? { model: end.dest } : {},
+    carry: keep ? existing : null,
+    onDone: (step) => {
+      step.id = newID(env.draft.start);
+      if (passes(step.kind)) {
+        step.next =
+          existing ||
+          (end.dest
+            ? { id: newID(env.draft.start) + "m", kind: "model", ref: end.dest }
+            : undefined);
+      }
+      if (step.kind === "route" && keep) {
+        const ends = steps(existing)
+          .filter((x) => x.kind === "model")
+          .map((x) => x.ref);
+        const dest =
+          step.destinations.find((d) => ends.includes(d)) ||
+          step.destinations[0];
+        // A branch that only sends to its own destination equals no branch.
+        if (!(existing.kind === "model" && existing.ref === dest)) {
+          step.branches = { [dest]: existing };
+        }
+      }
+      slot.set(step);
+      env.render();
+    },
+  });
+}
+
+function editStep(env, step, slot) {
+  stepDialog(env, {
+    step,
+    title: "Change " + (KINDS[step.kind] || "step").toLowerCase(),
+    onDone: (changed) => {
+      Object.assign(step, changed);
+      if (step.kind === "route" && step.branches) {
+        for (const d of Object.keys(step.branches)) {
+          if (!step.destinations.includes(d)) delete step.branches[d];
+        }
+      }
+      slot.set(step);
+      env.render();
+    },
+  });
+}
+
+/** removeStep takes a step out. A filter or a limit hands its place to the
+ *  step after it; a route step or a model takes what follows it along. */
+function removeStep(env, step, slot) {
+  const gone =
+    steps(step).length - 1 - (passes(step.kind) ? steps(step.next).length : 0);
+  const apply = () => {
+    slot.set(passes(step.kind) ? step.next : null);
+    env.render();
+  };
+  if (gone === 0) return apply();
+  confirm({
+    title: "Remove this step?",
+    body: `${gone} ${plural(gone, "step")} after it, on ${
+      step.kind === "route" ? "its branches" : "its over-limit branch"
+    }, ${gone === 1 ? "goes" : "go"} with it. Nothing is saved until you press Save.`,
+    confirmLabel: "Remove",
+    danger: true,
+    onConfirm: apply,
+  });
+}
+
+/** stepDialog asks what a step should be. A new step starts with its kind;
+ *  an existing one keeps it, since what follows it depends on the kind. */
+function stepDialog(env, { step, kinds, title, preset = {}, carry, onDone }) {
+  let kind = step ? step.kind : "";
+  const fieldsHost = h("div", {});
+  let read = () => null;
+
+  const choose = (value) => {
+    kind = value;
+    const built = fieldsFor(env, kind, step || {}, preset, carry);
+    fieldsHost.replaceChildren(built.el);
+    // A route step starts with its own tiles, which would otherwise sit right
+    // under the kind tiles.
+    fieldsHost.style.marginTop = !step && kind === "route" ? "14px" : "";
+    read = built.read;
+  };
+
+  let picker = null;
+  if (!step) {
+    picker = modeTiles(kinds, null, choose);
+  } else {
+    choose(kind);
+  }
+
+  formModal({
+    wide: true,
+    title,
+    subtitle: step
+      ? null
+      : "Steps run left to right. A filter or a limit passes the request " +
+        "on; a route step branches; a model ends the branch.",
+    body: h(
+      "form",
+      {},
+      picker ? picker.tiles : null,
+      picker ? picker.chosenRow : null,
+      fieldsHost,
+    ),
+    submitLabel: step ? "Apply" : "Add step",
+    submit: () => {
+      if (!kind) throw new Error("Choose what kind of step it is.");
+      const values = read();
+      onDone({ ...values, kind });
+    },
+  });
+  if (picker) picker.tiles.firstChild.focus();
+}
+
+/** fieldsFor builds the fields for one kind of step, and read returns their
+ *  values or throws what is missing. carry is the steps a new route step is
+ *  put in front of, which go on one of its branches. */
+function fieldsFor(env, kind, step, preset, carry) {
+  if (kind === "route") {
+    const built = routeFields(env.models, step);
+    if (!carry) return built;
+    return {
+      el: h(
+        "div",
+        {},
+        built.el,
+        banner(
+          "info",
+          "The steps after it go on the branch of the destination they end " +
+            "at, or of its first destination. The other destinations get the " +
+            "request straight away until you add steps to their branches.",
+        ),
+      ),
+      read: built.read,
+    };
+  }
+  if (kind === "rate_limit") {
+    return rateFields(
+      step,
+      ["minute", "day", "month"],
+      "Tokens are counted when each request ends. A minute refills as it " +
+        "goes. A day or a month starts again at midnight UTC or on the 1st, " +
+        "and keeps its count across restarts.",
+    );
+  }
+  if (kind === "system_prompt") {
+    const prompt = h("textarea", {
+      class: "input",
+      rows: 6,
+      placeholder: "Answer in German. Never name a customer.",
+    });
+    // A textarea's text is its content, not a value attribute.
+    prompt.value = step.prompt || "";
+    return {
+      el: field(
+        "Prompt",
+        prompt,
+        "Added after the key's own system prompt, on the requests that pass " +
+          "this step. Like that one, it is added after every filter, so no " +
+          "filter or route step reads or changes it.",
+      ),
+      read: () => {
+        const text = prompt.value.trim();
+        if (!text) throw new Error("Write the prompt.");
+        return { prompt: text };
+      },
+    };
+  }
+  if (kind === "budget") {
+    return budgetFields(
+      step,
+      ["month", "day"],
+      "What requests through this step may cost, counted in full: the " +
+        "answer, and every filter and decision before and after it. It " +
+        "starts again at midnight UTC or on the 1st.",
+    );
+  }
+  if (kind === "model") {
+    const usable = env.models.filter(
+      (m) => m.enabled !== false && m.kind === "chat" && !m.subscription,
+    );
+    const select = h(
+      "select",
+      { class: "select" },
+      h("option", { value: "" }, "Choose a model"),
+      usable.map((m) =>
+        h(
+          "option",
+          {
+            value: m.alias,
+            selected: m.alias === (step.ref || preset.model),
+          },
+          m.alias + (m.location ? ` (${locationName(m.location)})` : ""),
+        ),
+      ),
+    );
+    return {
+      el: field(
+        "Model",
+        select,
+        "The request is sent here, after the key's own filters and system " +
+          "prompt.",
+      ),
+      read: () => {
+        if (!select.value) throw new Error("Choose a model.");
+        return { ref: select.value };
+      },
+    };
+  }
+  // A filter: one of the organisation's, or a new one made here.
+  const select = h("select", { class: "select" });
+  const fill = (chosen) => {
+    select.replaceChildren(
+      h("option", { value: "" }, "Choose a filter"),
+      ...env.filters.map((x) =>
+        h(
+          "option",
+          { value: x.alias, selected: x.alias === chosen },
+          x.alias + " (" + (x.mode || "rewrite") + ")",
+        ),
+      ),
+    );
+  };
+  fill(step.ref);
+  const create = h(
+    "button",
+    {
+      class: "btn",
+      type: "button",
+      onClick: () =>
+        newFilter(env.ctx, env.models, async (alias) => {
+          env.filters = (await api.filters(env.ctx.orgID)).data || [];
+          fill(alias);
+          env.render();
+        }),
+    },
+    icon(icons.plus),
+    "New filter",
+  );
+  return {
+    el: field(
+      "Filter",
+      h("div", { class: "row", style: { flexWrap: "wrap" } }, select, create),
+      "It reads what the steps before it left. A new filter is created at " +
+        "once, and stays if the router is not saved.",
+    ),
+    read: () => {
+      if (!select.value) throw new Error("Choose a filter.");
+      return { ref: select.value };
+    },
+  };
+}
+
+// decisionBanners come before the numbers, since each changes how they read.
+// A route step's failures are otherwise silent: every request still gets an
+// answer.
+function decisionBanners(rep, placed) {
   const out = [];
-  if (!rt) {
-    out.push(
-      banner(
-        "warn",
-        "This router no longer exists. Below is the traffic it placed " +
-          "before. Clients still using it are told the model does not exist.",
-      ),
-    );
-  }
-  if (!placed) {
-    out.push(
-      banner(
-        "info",
-        "No requests used this router in this period. Clients reach it by " +
-          "using its alias as the model name, so either nobody has the alias " +
-          "or nobody called.",
-      ),
-    );
-    return out;
-  }
-  const chained = rt && !decides(rt);
-  const ranked = rt && measures(rt);
-  const banded = rt && sizes(rt);
-  // A router that never gets its first choice is invisible in the requests,
-  // because each one was answered by something else.
-  if (rep.chose === 0) {
+  if (!placed) return out;
+  if (!rep.chose) {
     out.push(
       banner(
         "bad",
-        banded
-          ? "No request in this period was served by the destination its " +
-              "size was meant for. Each one waited for it to fail and was " +
-              "served by a larger one. Check the destinations."
-          : ranked
-            ? "The destination this router ranked first never answered in this " +
-              "period. Each request waited for it to fail and was served " +
-              "further down. The ranking is not working."
-            : chained
-              ? "The first destination never answered in this period. Each " +
-                "request waited for it to fail and was served further down. " +
-                "Check it."
-              : "This router made no decision in this period. It still costs a " +
-                "generation per request. Check it and the model it decides with.",
+        "No route step got its first choice in this period. Each request was " +
+          "placed by a fallback, or waited for a destination to fail. Check " +
+          "the route steps and the models they use.",
       ),
     );
-  } else if (rep.fell_back > 0 && rep.fell_back / placed >= 0.1) {
+  } else if (rep.fell_back / placed >= 0.1) {
     out.push(
       banner(
         "warn",
-        banded
-          ? `${pct(rep.fell_back, placed)} of these requests were served by a ` +
-              "larger destination after the one for their size failed. Not an " +
-              "error, but it costs more and is reported nowhere else."
-          : ranked
-            ? `${pct(rep.fell_back, placed)} of these requests were not served ` +
-              "by the destination ranked first. Each waited for it to fail " +
-              "first: this is the cost of a wrong ranking."
-            : chained
-              ? `${pct(rep.fell_back, placed)} of these requests were served ` +
-                "further down the chain, after the ones before failed."
-              : `${pct(rep.fell_back, placed)} of these requests were placed ` +
-                "without a decision, but still paid for the attempt.",
+        `${pct(rep.fell_back, placed)} of the requests a route step placed ` +
+          "went somewhere other than its first choice: without a decision, " +
+          "or after a destination failed. Not an error, but reported nowhere " +
+          "else.",
       ),
     );
   }
@@ -894,589 +1113,24 @@ function detailBanners(rep, rt, placed) {
     out.push(
       banner(
         "bad",
-        chained
-          ? `${num(rep.errored)} ${plural(rep.errored, "request")} ran out of ` +
-              "destinations: every model failed, and the client got the last " +
-              "one's answer."
-          : `${num(rep.errored)} ${plural(rep.errored, "request was", "requests were")} refused ` +
-              "because this router could not place them and has no fallback. " +
-              "The clients got a 503 saying the router could not choose.",
+        `${num(rep.errored)} ${plural(rep.errored, "request")} could not be ` +
+          "placed: refused for want of a fallback, or every destination " +
+          "failed.",
       ),
     );
   }
   // One destination taking everything, on enough traffic to mean it, is a
   // hard-coded alias in disguise.
   const destinations = rep.destinations || [];
-  if (!chained && rep.chose > 0 && destinations.length === 1 && placed >= 20) {
+  if (rep.chose > 0 && destinations.length === 1 && placed >= 20) {
     out.push(
       banner(
         "warn",
-        `Every request went to ${destinations[0].alias}. The router costs a ` +
-          "generation per request for the same result as naming that model " +
-          "directly.",
+        `Every request went to ${destinations[0].alias}. If a route step ` +
+          "decides with a model, it costs a generation per request for the " +
+          "same result as naming that model directly.",
       ),
     );
   }
   return out;
 }
-
-// chosenNote says what the headline share counted, in words that suit each
-// kind of router.
-function chosenNote(rt, rep) {
-  if (!rep.chose) {
-    if (rt && measures(rt)) return "what it ranked first answered nothing";
-    return rt && !decides(rt)
-      ? "the first destination answered nothing"
-      : "no decision was made";
-  }
-  if (rt && measures(rt)) {
-    return `${num(rep.chose)} answered by the destination it ranked first`;
-  }
-  return rt && !decides(rt)
-    ? `${num(rep.chose)} answered by the first destination`
-    : `${num(rep.chose)} chosen by reading the request`;
-}
-
-function identity(rt) {
-  const destinations = (rt.destinations || []).length;
-  const models = `${destinations} ${plural(destinations, "model")}`;
-  if (decides(rt)) return `decides with ${rt.model}, between ${models}`;
-  if (sizes(rt)) return `places between ${models}, by the size of the request`;
-  if (measures(rt)) return `tries ${models}, by ${ordersBy(rt)}`;
-  return `tries ${models} in order, first that answers`;
-}
-
-/* -------------------------------------------------------------- editing one */
-
-// MODES feeds both the tiles that pick a mode and the rows that name it, so
-// they always agree.
-const MODES = [
-  {
-    value: "instruction",
-    icon: icons.instruction,
-    name: "Instruction",
-    what: "A model reads each request and chooses where it goes.",
-  },
-  {
-    value: "fallback",
-    icon: icons.fallback,
-    name: "Fallback",
-    what: "Try the destinations in order until one answers.",
-  },
-  {
-    value: "latency",
-    icon: icons.latency,
-    name: "Latency",
-    what: "Try the one with the fastest recent first token.",
-  },
-  {
-    value: "least-busy",
-    icon: icons.leastBusy,
-    name: "Least busy",
-    what: "Try the one with the fewest requests in flight.",
-  },
-  {
-    value: "size",
-    icon: icons.size,
-    name: "Size",
-    what: "Choose by how many tokens the request has.",
-  },
-];
-
-// A decision model only answers choices, so it can decide but never be a
-// destination.
-function canDecide(m) {
-  return (m.kind === "chat" || m.kind === "decision") && !m.subscription;
-}
-
-function editRouter(ctx, existing, readers) {
-  const chatModels = readers.filter((m) => m.kind === "chat");
-  const creating = !existing;
-  // No default mode: the dialog asks for it first.
-  const rt = existing || {
-    alias: "",
-    model: "",
-    prompt: "",
-    destinations: [],
-    fallback: "",
-    description: "",
-  };
-
-  const alias = h("input", {
-    class: "input mono",
-    placeholder: "simple-router",
-    value: rt.alias,
-    disabled: !creating,
-  });
-  const description = h("input", {
-    class: "input",
-    placeholder: "Keeps the large model for the work that needs it",
-    value: rt.description || "",
-  });
-  const model = h(
-    "select",
-    { class: "select" },
-    h(
-      "option",
-      { value: "" },
-      readers.length ? "Choose a model" : "No chat model exists",
-    ),
-    readers.map((m) =>
-      h(
-        "option",
-        { value: m.alias, selected: m.alias === rt.model },
-        m.alias + (m.kind === "decision" ? " - decision model" : ""),
-      ),
-    ),
-  );
-  const prompt = h("textarea", { class: "input", rows: "8" });
-  // A decision model answers a short question rather than following an
-  // instruction, so it gets its own example.
-  const exampleFor = (alias) =>
-    readers.find((m) => m.alias === alias)?.kind === "decision"
-      ? DECISION_EXAMPLE
-      : PROMPT_EXAMPLE;
-  prompt.value = rt.prompt || exampleFor(model.value);
-  model.addEventListener("change", () => {
-    if (prompt.value === PROMPT_EXAMPLE || prompt.value === DECISION_EXAMPLE) {
-      prompt.value = exampleFor(model.value);
-    }
-  });
-
-  // The mode is asked first, because it decides what the rest of the form
-  // means: the same list is a menu, an order, or a set of size bands.
-  let chosen = creating ? null : modeOf(rt);
-  const reads = () => chosen === "instruction";
-  const bySize = () => chosen === "size";
-  // On the measured modes the order still breaks ties, but it is not the
-  // whole configuration.
-  const ranks = () => chosen === "latency" || chosen === "least-busy";
-
-  // Changing the mode hides what the new mode does not use rather than
-  // clearing it, so trying another tile loses nothing.
-  const picker = modeTiles(MODES, chosen, (value) => {
-    chosen = value;
-    syncMode();
-    // Focus the alias on a new router, the change control on an edit.
-    // Before the dialog is in the document neither does anything, which is
-    // right for an edit's first choice.
-    if (creating && !alias.value) alias.focus();
-    else picker.change.focus();
-  });
-  const { tiles, chosenRow, choose } = picker;
-  const modeField = h(
-    "div",
-    { class: "field" },
-    h("label", {}, "What chooses"),
-    tiles,
-    chosenRow,
-  );
-
-  // Checkboxes over the catalogue, so a router cannot name a model the
-  // organisation does not have. An array, not a set: on a fallback router the
-  // order is the configuration and has to be visible and changeable.
-  const picked = [...(rt.destinations || [])];
-  const fallback = h("select", { class: "select" });
-  const syncFallback = () => {
-    const previous = fallback.value || rt.fallback || "";
-    fallback.replaceChildren(
-      h("option", { value: "" }, "Refuse the request"),
-      ...picked.map((alias) =>
-        h(
-          "option",
-          { value: alias, selected: alias === previous },
-          "Send it to " + alias + " without a decision",
-        ),
-      ),
-    );
-    fallback.value = picked.includes(previous) ? previous : "";
-  };
-
-  // Shown only where the order matters. Ticked in the wrong order, a
-  // fallback router serves everything from its second choice.
-  const order = h("div", { class: "stack", style: { gap: "4px" } });
-  const renderOrder = () => {
-    if (picked.length === 0) {
-      order.replaceChildren(
-        h("div", { class: "empty" }, "Nothing chosen yet."),
-      );
-      return;
-    }
-    const move = (i, by) => {
-      const to = i + by;
-      [picked[i], picked[to]] = [picked[to], picked[i]];
-      renderOrder();
-      syncFallback();
-    };
-    order.replaceChildren(
-      ...picked.map((alias, i) =>
-        h(
-          "div",
-          { class: "row-tight" },
-          h("span", { class: "faint" }, i + 1 + "."),
-          h("span", { class: "mono" }, alias),
-          i === 0
-            ? pill("Tried first", "good")
-            : h("span", { class: "faint" }, "if the ones above fail"),
-          h("div", { class: "spacer" }),
-          h(
-            "button",
-            {
-              class: "btn btn-sm",
-              type: "button",
-              title: "Try this one earlier",
-              disabled: i === 0,
-              onClick: () => move(i, -1),
-            },
-            "\u2191",
-          ),
-          h(
-            "button",
-            {
-              class: "btn btn-sm",
-              type: "button",
-              title: "Try this one later",
-              disabled: i === picked.length - 1,
-              onClick: () => move(i, 1),
-            },
-            "\u2193",
-          ),
-        ),
-      ),
-    );
-  };
-
-  // Kept here rather than read off the inputs, so unticking and ticking a
-  // destination again keeps its ceiling.
-  const ceilings = { ...(rt.ceilings || {}) };
-  // Boxes holding something that is not a ceiling. Saving refuses them, as
-  // `keera router` does, rather than reading them as "no ceiling".
-  const badCeilings = new Set();
-  const ceilingList = h("div", { class: "stack", style: { gap: "4px" } });
-  const ceilingHint = h("div", { class: "hint" });
-  // The note beside each box is updated on its own: rebuilding the rows would
-  // take the cursor out of the box being typed into.
-  const notes = new Map();
-  const syncCeilingNotes = () => {
-    for (const [alias, note] of notes) {
-      note.textContent = ceilings[alias]
-        ? "tokens at most"
-        : "takes what is larger than every ceiling";
-    }
-    // The control plane needs exactly one destination without a ceiling.
-    // Saying so here saves being refused at the last step.
-    const open = picked.filter((alias) => !ceilings[alias]);
-    ceilingHint.textContent =
-      open.length === 1
-        ? "Each request goes to the smallest ceiling it fits under; anything " +
-          `larger goes to ${open[0]}.`
-        : open.length === 0
-          ? "Leave one box empty, usually for the largest model, to take " +
-            "what fits under no ceiling."
-          : `${open.join(" and ")} have no ceiling. Exactly one ` +
-            "destination may be left without one.";
-  };
-  const renderCeilings = () => {
-    notes.clear();
-    if (picked.length === 0) {
-      ceilingList.replaceChildren(
-        h("div", { class: "empty" }, "Nothing chosen yet."),
-      );
-      ceilingHint.textContent = "";
-      return;
-    }
-    ceilingList.replaceChildren(
-      ...picked.map((alias) => {
-        const box = h("input", {
-          class: "input mono",
-          style: { maxWidth: "120px" },
-          placeholder: "no ceiling",
-          value: ceilings[alias] ? tokens(ceilings[alias]) : "",
-          onInput: () => {
-            // The CLI's form: whole tokens, where 'k' means a thousand.
-            const raw = box.value.trim().toLowerCase();
-            const m = /^(\d+)(k?)$/.exec(raw);
-            const n = m ? Number(m[1]) * (m[2] ? 1000 : 1) : 0;
-            badCeilings.delete(alias);
-            if (n > 0) {
-              ceilings[alias] = n;
-            } else {
-              delete ceilings[alias];
-              if (raw !== "") badCeilings.add(alias);
-            }
-            syncCeilingNotes();
-          },
-        });
-        const note = h("span", { class: "faint" });
-        notes.set(alias, note);
-        return h(
-          "div",
-          { class: "row-tight" },
-          h("span", { class: "mono", style: { minWidth: "160px" } }, alias),
-          box,
-          note,
-        );
-      }),
-    );
-    syncCeilingNotes();
-  };
-  const ceilingField = field(
-    "Up to this many input tokens",
-    ceilingList,
-    ceilingHint,
-  );
-
-  const destinationBoxes = h(
-    "div",
-    { class: "stack", style: { gap: "6px" } },
-    chatModels.map((m) => {
-      const box = h("input", {
-        type: "checkbox",
-        checked: picked.includes(m.alias),
-        onChange: () => {
-          if (box.checked) {
-            if (!picked.includes(m.alias)) picked.push(m.alias);
-          } else {
-            const at = picked.indexOf(m.alias);
-            if (at >= 0) picked.splice(at, 1);
-          }
-          renderOrder();
-          syncFallback();
-          renderCeilings();
-        },
-      });
-      return h(
-        "label",
-        { class: "row-tight", style: { alignItems: "flex-start" } },
-        box,
-        h(
-          "div",
-          {},
-          h("span", { class: "mono" }, m.alias),
-          // The description is what the deciding model is told about this
-          // destination.
-          m.description
-            ? h("div", { class: "hint" }, m.description)
-            : h(
-                "div",
-                { class: "hint" },
-                "No description, so the router sees only the alias. Add one " +
-                  "on the model.",
-              ),
-        ),
-      );
-    }),
-  );
-  syncFallback();
-  renderOrder();
-  renderCeilings();
-
-  // Fields only instruction routers have. Hidden rather than disabled, so
-  // nobody writes an instruction that a router then ignores.
-  const modelField = field(
-    "Runs on",
-    model,
-    // Where this model runs can be wrong without anything here going red.
-    "A small, fast model. It reads every request before any filter, so " +
-      "keep it inside the cluster.",
-  );
-  const fallbackField = field(
-    "When it cannot decide",
-    fallback,
-    // The right answer depends on the deployment, so the hint gives both.
-    "Fall back if the router saves money. Refuse if it keeps prompts " +
-      "inside the cluster.",
-  );
-  const promptField = field(
-    "Instruction",
-    prompt,
-    "Name kinds of request, not models. The destinations and their " +
-      "descriptions are added for you.",
-  );
-  const orderHint = h("div", { class: "hint" });
-  const orderField = field("In this order", order, orderHint);
-  const destinationsLabel = h("label", {}, "Chooses between");
-  const destinationsHint = h("div", { class: "hint" });
-  const costBanner = banner("info");
-
-  // Set once the dialog is up. The tiles turn it on.
-  let saveButton = null;
-  const syncMode = () => {
-    // Nothing below the tiles, Save included, until one is chosen.
-    rest.hidden = chosen === null;
-    if (saveButton) {
-      saveButton.hidden = chosen === null;
-      saveButton.disabled = chosen === null;
-    }
-    if (chosen === null) return;
-    for (const el of [modelField, fallbackField, promptField]) {
-      el.hidden = !reads();
-    }
-    ceilingField.hidden = !bySize();
-    // A size router's order is its ceilings.
-    orderField.hidden = reads() || bySize();
-    orderHint.textContent = ranks()
-      ? "Only a tie-break. The gateway reorders these on every request " +
-        "from what it measures."
-      : "The first takes every request. The rest are used when the ones " +
-        "above cannot answer.";
-    destinationsLabel.textContent = reads()
-      ? "Chooses between"
-      : bySize()
-        ? "Places between"
-        : "Tries these";
-    // What applies to every mode is said once, in the subtitle. One
-    // destination is allowed in every mode, to give a model a lasting name.
-    destinationsHint.textContent = reads()
-      ? "With only one, every request goes there and nothing is asked."
-      : bySize()
-        ? "Each with the largest request it should be given."
-        : "Tried until one answers. One is enough to give a model a lasting name.";
-    if (bySize()) {
-      costBanner.textContent =
-        "Costs nothing: it counts the request's tokens without reading " +
-        "them. It cannot tell a hard request from an easy one of the same " +
-        "length.";
-      renderCeilings();
-      return;
-    }
-    costBanner.textContent = reads()
-      ? "Every request waits for the decision, which is charged to the same " +
-        "budgets."
-      : ranks()
-        ? "Costs nothing itself; it ranks by what each gateway process " +
-          "measures. A request pays for every destination that fails before " +
-          "one answers."
-        : "Costs nothing itself. A request pays for every destination that " +
-          "fails before one answers.";
-  };
-
-  // Held back until there is a mode. The alias is here too: a router is
-  // easier to name once it is clear what it does.
-  const rest = h(
-    "div",
-    {},
-    h(
-      "div",
-      { class: "field-row" },
-      field(
-        "Alias",
-        alias,
-        creating
-          ? "Lowercase letters, digits and hyphens. Clients use it as the " +
-              "model name."
-          : "Clients use this name, so it cannot change.",
-      ),
-      field("Description", description),
-    ),
-    modelField,
-    h(
-      "div",
-      { class: "field" },
-      destinationsLabel,
-      destinationBoxes,
-      destinationsHint,
-    ),
-    ceilingField,
-    orderField,
-    fallbackField,
-    promptField,
-    costBanner,
-  );
-
-  if (creating) syncMode();
-  else choose(chosen);
-
-  ({ button: saveButton } = formModal({
-    wide: true,
-    title: creating ? "Create router" : `Edit ${rt.alias}`,
-    subtitle: creating
-      ? "Choose how it picks first; the rest of the form depends on it. A " +
-        "key allowed to use this router can reach all its destinations."
-      : "A key allowed to use this router can reach all its destinations.",
-    body: h("form", {}, modeField, rest),
-    submitLabel: creating ? "Create router" : "Save",
-    // Saved either way. The warning is about the organisation's allow-list,
-    // and stays up long enough to read.
-    done: (saved) => {
-      const said = creating ? "Router created" : "Router saved";
-      if (!saved || !saved.warning) return said;
-      toast(
-        said +
-          ", but " +
-          saved.warning +
-          ". Change the list in the organisation's Guardrails.",
-        "bad",
-      );
-      return "";
-    },
-    ctx,
-    submit: async () => {
-      // Checked here: an empty alias would not reach the handler that could
-      // say so.
-      const problem = aliasProblem(alias.value.trim());
-      if (problem) {
-        alias.focus();
-        throw new Error(problem);
-      }
-      const bad = bySize() ? picked.find((a) => badCeilings.has(a)) : null;
-      if (bad) {
-        throw new Error(
-          `The ceiling on ${bad} is not a number of tokens. Write 4000 ` +
-            "or 4k, or leave it empty for no ceiling.",
-        );
-      }
-      if (creating) {
-        const taken = takenProblem(
-          (await api.routers(ctx.orgID)).data,
-          alias.value.trim(),
-          "router",
-        );
-        if (taken) {
-          alias.focus();
-          throw new Error(taken);
-        }
-      }
-      return api.putRouter(ctx.orgID, alias.value.trim(), {
-        mode: chosen,
-        // Leftovers from the instruction mode are not saved.
-        model: reads() ? model.value : "",
-        prompt: reads() ? prompt.value : "",
-        destinations: [...picked],
-        ceilings: bySize()
-          ? Object.fromEntries(
-              picked
-                .filter((alias) => ceilings[alias])
-                .map((alias) => [alias, ceilings[alias]]),
-            )
-          : {},
-        fallback: reads() ? fallback.value : "",
-        description: description.value.trim(),
-      });
-    },
-  }));
-  syncMode(); // again, now that Save is there
-  // Until a mode is chosen there is no field to focus, so start on the tiles.
-  if (creating) tiles.firstChild.focus();
-}
-
-// PROMPT_EXAMPLE shows the shape an instruction needs: name kinds of request,
-// not models, because the catalogue adds what each model is for. And say which
-// way to err, because a small model deciding in one word is sometimes wrong.
-const PROMPT_EXAMPLE = `Choose the model that suits this request.
-
-Send small, self-contained requests to the cheapest capable model: a rename, a \
-syntax question, a short edit to one file, a commit message.
-
-Send requests needing design, several steps at once, or judgement about a \
-system to a model that can reason.
-
-Send anything containing a client's name, an account number, personal details \
-or a credential to a model inside the cluster, whatever else it is asking for. \
-That takes priority.
-
-If you are unsure, choose the more capable model rather than the cheaper one.`;
-
-// A decision model is offered each destination by its description alone. See
-// docs/gateway.md#decision-models.
-const DECISION_EXAMPLE = "Which model should answer this request?";

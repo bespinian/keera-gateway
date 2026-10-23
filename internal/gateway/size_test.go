@@ -15,9 +15,9 @@ import (
 // sizeRouter places between the two destinations the router harness serves,
 // with the small one bounded at 100 tokens and the large one taking whatever is
 // above it.
-func sizeRouter() policy.Router {
-	return policy.Router{
-		OrgID: "org_1", Alias: "bysize", Mode: policy.RouterModeSize,
+func sizeRouter() policy.Route {
+	return policy.Route{
+		OrgID: "org_1", Router: "bysize", Mode: policy.RouteModeSize,
 		Destinations: []string{"keera-small", "keera-large"},
 		Ceilings:     map[string]int{"keera-small": 100},
 	}
@@ -39,8 +39,8 @@ func ofTokens(t *testing.T, n int) string {
 	return string(body)
 }
 
-func TestSizeRouterPlacesASmallRequestOnTheSmallModel(t *testing.T) {
-	h := routerHarness(t, picks(""), sizeRouter(), nil)
+func TestSizeStepPlacesASmallRequestOnTheSmallModel(t *testing.T) {
+	h := routeHarness(t, picks(""), sizeRouter(), nil)
 
 	resp := h.post(t, "/v1/chat/completions", ofTokens(t, 10))
 	if resp.StatusCode != http.StatusOK {
@@ -57,7 +57,7 @@ func TestSizeRouterPlacesASmallRequestOnTheSmallModel(t *testing.T) {
 	}
 	ev := h.sink.last(t)
 	if ev.CostMicros != 15 {
-		t.Errorf("cost = %d, want only what the answering model cost - a size router "+
+		t.Errorf("cost = %d, want only what the answering model cost - a size step "+
 			"spends nothing", ev.CostMicros)
 	}
 	if ev.RouterOutcome != store.RouterChose {
@@ -65,8 +65,8 @@ func TestSizeRouterPlacesASmallRequestOnTheSmallModel(t *testing.T) {
 	}
 }
 
-func TestSizeRouterPlacesALargeRequestAboveTheCeiling(t *testing.T) {
-	h := routerHarness(t, picks(""), sizeRouter(), nil)
+func TestSizeStepPlacesALargeRequestAboveTheCeiling(t *testing.T) {
+	h := routeHarness(t, picks(""), sizeRouter(), nil)
 
 	resp := h.post(t, "/v1/chat/completions", ofTokens(t, 500))
 	if resp.StatusCode != http.StatusOK {
@@ -77,11 +77,10 @@ func TestSizeRouterPlacesALargeRequestAboveTheCeiling(t *testing.T) {
 	}
 }
 
-func TestSizeRouterCannotBeTalkedIntoADestination(t *testing.T) {
-	// The claim that separates this mode from an instruction router. A prompt
-	// naming the model it wants is a prompt a few words longer, and nothing
-	// else.
-	h := routerHarness(t, picks(""), sizeRouter(), nil)
+func TestSizeStepCannotBeTalkedIntoADestination(t *testing.T) {
+	// Unlike with an instruction step, a prompt naming the model it wants is
+	// just a few words longer.
+	h := routeHarness(t, picks(""), sizeRouter(), nil)
 
 	resp := h.post(t, "/v1/chat/completions",
 		`{"model":"bysize","messages":[{"role":"user","content":`+
@@ -94,11 +93,10 @@ func TestSizeRouterCannotBeTalkedIntoADestination(t *testing.T) {
 	}
 }
 
-func TestSizeRouterFallsThroughToTheNextDestinationUp(t *testing.T) {
-	// The preferred destination being down must not refuse the request. More
-	// model than it needed is a price; no answer at all is a department
-	// offline.
-	h := routerHarness(t, picks(""), sizeRouter(), nil)
+func TestSizeStepFallsThroughToTheNextDestinationUp(t *testing.T) {
+	// The preferred destination being down must not refuse the request: more
+	// model than needed beats no answer.
+	h := routeHarness(t, picks(""), sizeRouter(), nil)
 	m := h.src.models["keera-small"]
 	m.Enabled = false
 	h.src.models["keera-small"] = m
@@ -112,12 +110,11 @@ func TestSizeRouterFallsThroughToTheNextDestinationUp(t *testing.T) {
 	}
 }
 
-func TestSizeRouterRanksADestinationThatCannotHoldItLast(t *testing.T) {
-	// The correctness half. A ceiling is a preference and a context window is
-	// arithmetic, so a destination that cannot hold the request goes behind
-	// every one that can, whatever the ceiling says.
-	h := routerHarness(t, picks(""), policy.Router{
-		OrgID: "org_1", Alias: "bysize", Mode: policy.RouterModeSize,
+func TestSizeStepRanksADestinationThatCannotHoldItLast(t *testing.T) {
+	// A ceiling is a preference and a context window is arithmetic, so a
+	// destination that cannot hold the request goes behind every one that can.
+	h := routeHarness(t, picks(""), policy.Route{
+		OrgID: "org_1", Router: "bysize", Mode: policy.RouteModeSize,
 		Destinations: []string{"keera-small", "keera-large"},
 		// The ceiling says the small model should take this, and its context
 		// says it cannot.
@@ -136,8 +133,8 @@ func TestSizeRouterRanksADestinationThatCannotHoldItLast(t *testing.T) {
 	}
 }
 
-func TestSizeRouterRefusesWhenNoDestinationCanBeServed(t *testing.T) {
-	h := routerHarness(t, picks(""), sizeRouter(), nil)
+func TestSizeStepRefusesWhenNoDestinationCanBeServed(t *testing.T) {
+	h := routeHarness(t, picks(""), sizeRouter(), nil)
 	for _, alias := range []string{"keera-small", "keera-large"} {
 		m := h.src.models[alias]
 		m.Enabled = false
@@ -154,12 +151,12 @@ func TestSizeRouterRefusesWhenNoDestinationCanBeServed(t *testing.T) {
 	}
 }
 
-func TestSizeRouterAllowsItsDestinationsLikeAnyOther(t *testing.T) {
-	// Granting a router grants where it sends, and a size router is no
+func TestSizeStepAllowsItsDestinationsLikeAnyOther(t *testing.T) {
+	// Granting a router grants where it sends, and a size step is no
 	// different: a key narrowed to it has nothing else in its allow-list.
 	res := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"},
 		&policy.Limits{AllowedModels: []string{"bysize"}}, nil, nil)
-	h := routerHarness(t, picks(""), sizeRouter(), res)
+	h := routeHarness(t, picks(""), sizeRouter(), res)
 
 	resp := h.post(t, "/v1/chat/completions", ofTokens(t, 10))
 	if resp.StatusCode != http.StatusOK {
@@ -167,10 +164,8 @@ func TestSizeRouterAllowsItsDestinationsLikeAnyOther(t *testing.T) {
 	}
 }
 
-/* ------------------------------------------------------------ the bands */
-
 func TestSizeBandsDivideTheRangeSmallestFirst(t *testing.T) {
-	rt := policy.Router{
+	rt := policy.Route{
 		Destinations: []string{"big", "small", "medium"},
 		Ceilings:     map[string]int{"small": 1000, "medium": 8000},
 	}
@@ -197,9 +192,9 @@ func TestSizeBandsDivideTheRangeSmallestFirst(t *testing.T) {
 
 func TestSizeBandsCallOutADestinationNothingReaches(t *testing.T) {
 	// A ceiling no higher than the one before it leaves no size for this
-	// destination to be first choice for. It is a configuration mistake that
-	// produces nothing but successful requests, so the check has to say so.
-	rt := policy.Router{
+	// destination to be first choice for. That mistake shows up only as
+	// successful requests, so the check has to say so.
+	rt := policy.Route{
 		Destinations: []string{"a", "b", "big"},
 		Ceilings:     map[string]int{"a": 1000, "b": 1000},
 	}
@@ -218,7 +213,7 @@ func TestSizeBandsCallOutADestinationNothingReaches(t *testing.T) {
 }
 
 func TestSizeWarningsCatchACeilingLargerThanTheContext(t *testing.T) {
-	rt := policy.Router{
+	rt := policy.Route{
 		Destinations: []string{"small", "big"},
 		Ceilings:     map[string]int{"small": 100_000},
 	}
@@ -230,8 +225,8 @@ func TestSizeWarningsCatchACeilingLargerThanTheContext(t *testing.T) {
 	}
 }
 
-func TestSizeWarningsCatchARouterThatSortsNothing(t *testing.T) {
-	rt := policy.Router{Destinations: []string{"only"}}
+func TestSizeWarningsCatchAStepThatSortsNothing(t *testing.T) {
+	rt := policy.Route{Destinations: []string{"only"}}
 	warnings := sizeWarnings(rt, sizeBands(rt, rt.Destinations), nil)
 	if !anyContains(warnings, "same destination whatever its size") {
 		t.Errorf("warnings = %q, want a router that places everything on one model "+

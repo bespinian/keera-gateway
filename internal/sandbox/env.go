@@ -211,9 +211,10 @@ func chatModelsFor(resolved *policy.Resolved, catalogue []policy.Model,
 		out = append(out, connect.Model{Alias: mod.Alias, Name: mod.DisplayName,
 			MaxContext: mod.MaxContext, BackendModel: mod.BackendModel, Provider: mod.Provider})
 	}
-	for _, rt := range routers {
-		if resolved.MayRoute(rt.Alias) {
-			out = append(out, connect.Model{Alias: rt.Alias})
+	// A router is named like a model, and allowed like one.
+	for _, p := range routers {
+		if resolved.MayCallRouter(p.Alias) {
+			out = append(out, connect.Model{Alias: p.Alias, Name: p.DisplayName})
 		}
 	}
 	return out

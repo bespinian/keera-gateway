@@ -15,7 +15,6 @@ func TestResolveIsRestrictOnly(t *testing.T) {
 		name              string
 		org, project, own *Limits
 		wantModels        []string
-		wantMaxOutTokens  int
 	}{
 		{
 			name:       "nothing set anywhere is unrestricted",
@@ -46,18 +45,6 @@ func TestResolveIsRestrictOnly(t *testing.T) {
 			project:    &Limits{AllowedModels: []string{"keera-premium"}},
 			wantModels: []string{},
 		},
-		{
-			name:             "the tightest output cap wins regardless of level",
-			org:              &Limits{MaxOutputTokens: new(4096)},
-			project:          &Limits{MaxOutputTokens: new(8192)},
-			own:              &Limits{MaxOutputTokens: new(2048)},
-			wantMaxOutTokens: 2048,
-		},
-		{
-			name:             "a level that sets no cap inherits the one above",
-			org:              &Limits{MaxOutputTokens: new(4096)},
-			wantMaxOutTokens: 4096,
-		},
 	}
 
 	for _, tc := range tests {
@@ -66,38 +53,74 @@ func TestResolveIsRestrictOnly(t *testing.T) {
 			if !slices.Equal(got.AllowedModels, tc.wantModels) {
 				t.Errorf("AllowedModels = %v, want %v", got.AllowedModels, tc.wantModels)
 			}
-			if got.MaxOutputTokens != tc.wantMaxOutTokens {
-				t.Errorf("MaxOutputTokens = %d, want %d", got.MaxOutputTokens, tc.wantMaxOutTokens)
-			}
 		})
 	}
 }
 
 func TestResolveKeepsBudgetsPerScope(t *testing.T) {
 	// An org cap and a project cap are two limits that both have to hold, so they
-	// must not be collapsed into one the way the ceilings are.
+	// must not be collapsed into one the way the ceilings are. A budget per day
+	// beside one per month is a scope of its own.
 	got := Resolve(
 		Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
-		&Limits{BudgetMicros: new(int64(10_000_000))},
-		&Limits{BudgetMicros: new(int64(1_000_000)), BudgetPeriod: new(PeriodDay)},
+		&Limits{Budgets: []Budget{{BudgetMicros: 10_000_000}}},
+		&Limits{Budgets: []Budget{
+			{BudgetMicros: 20_000_000, Period: PeriodMonth},
+			{BudgetMicros: 1_000_000, Period: PeriodDay},
+		}},
 		nil,
 	)
-	if len(got.Scopes) != 3 {
-		t.Fatalf("got %d scopes, want org, project and key", len(got.Scopes))
+	want := []Scope{
+		{Type: ScopeOrg, ID: "org_1", Period: PeriodMonth, BudgetMicros: 10_000_000},
+		{Type: ScopeProject, ID: "project_1", Period: PeriodMonth, BudgetMicros: 20_000_000},
+		{Type: ScopeProject, ID: "project_1", Period: PeriodDay, BudgetMicros: 1_000_000},
+		{Type: ScopeKey, ID: "key_1", Period: PeriodMonth},
 	}
-	if got.Scopes[0].BudgetMicros != 10_000_000 || got.Scopes[0].Period != PeriodMonth {
-		t.Errorf("org scope = %+v, want the org's own monthly budget", got.Scopes[0])
+	if !slices.Equal(got.Scopes, want) {
+		t.Errorf("Scopes = %+v, want %+v", got.Scopes, want)
 	}
-	if got.Scopes[1].BudgetMicros != 1_000_000 || got.Scopes[1].Period != PeriodDay {
-		t.Errorf("project scope = %+v, want the project's own daily budget", got.Scopes[1])
+}
+
+func TestResolveCountsARateLimitPerDayOrMonth(t *testing.T) {
+	// Per minute is a token bucket on the level's scope. Per day or month is
+	// a count kept like spend, apart from the budget of the same level.
+	got := Resolve(
+		Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
+		&Limits{RateLimits: []RateLimit{{Requests: 600, Tokens: 100_000}}},
+		&Limits{
+			RateLimits: []RateLimit{{Requests: 1000, Tokens: 5_000_000, Period: PeriodDay}},
+			Budgets:    []Budget{{BudgetMicros: 1_000_000}},
+		},
+		&Limits{RateLimits: []RateLimit{
+			{Requests: 10, Period: PeriodMinute},
+			{Tokens: 9_000_000_000, Period: PeriodMonth},
+		}},
+	)
+	if org := got.Scopes[0]; org.RPM != 600 || org.TPM != 100_000 {
+		t.Errorf("org scope = %+v, want its limit per minute in buckets", org)
 	}
-	if got.Scopes[2].BudgetMicros != 0 {
-		t.Errorf("key scope = %+v, want no budget of its own", got.Scopes[2])
+	if project := got.Scopes[1]; project.RPM != 0 || project.TPM != 0 ||
+		project.BudgetMicros != 1_000_000 {
+		t.Errorf("project scope = %+v, want only its budget", project)
+	}
+	if key := got.Scopes[2]; key.RPM != 10 || key.TPM != 0 {
+		t.Errorf("key scope = %+v, want its requests per minute", key)
+	}
+	want := []Scope{
+		{Type: ScopeProject, ID: "project_1|requests", Period: PeriodDay,
+			Meter: MeterRequests, Quota: 1000},
+		{Type: ScopeProject, ID: "project_1|tokens", Period: PeriodDay,
+			Meter: MeterTokens, Quota: 5_000_000},
+		{Type: ScopeKey, ID: "key_1|tokens", Period: PeriodMonth,
+			Meter: MeterTokens, Quota: 9_000_000_000},
+	}
+	if !slices.Equal(got.Quotas, want) {
+		t.Errorf("Quotas = %+v, want %+v", got.Quotas, want)
 	}
 }
 
 func TestResolveSkipsProjectScopeForAKeyWithoutOne(t *testing.T) {
-	got := Resolve(Key{ID: "key_1", OrgID: "org_1"}, nil, &Limits{RPM: new(1)}, nil)
+	got := Resolve(Key{ID: "key_1", OrgID: "org_1"}, nil, &Limits{RateLimits: []RateLimit{{Requests: 1}}}, nil)
 	if len(got.Scopes) != 2 {
 		t.Fatalf("got %d scopes, want org and key only", len(got.Scopes))
 	}
@@ -123,13 +146,13 @@ func TestAllowsModel(t *testing.T) {
 	}
 }
 
-func TestMayRoute(t *testing.T) {
+func TestMayCallRouter(t *testing.T) {
 	restricted := &Resolved{AllowedModels: []string{"auto"}}
-	if !restricted.MayRoute("auto") || restricted.MayRoute("other") {
+	if !restricted.MayCallRouter("auto") || restricted.MayCallRouter("other") {
 		t.Error("a router must follow the allow-list like a model")
 	}
 	subscription := &Resolved{Key: Key{Kind: KeySubscription}}
-	if subscription.MayRoute("auto") {
+	if subscription.MayCallRouter("auto") {
 		t.Error("a subscription key must reach no router, even with no allow-list")
 	}
 }
@@ -348,31 +371,14 @@ func TestAFilterWithNoModeWrittenDownIsARewriteFilter(t *testing.T) {
 func TestARouterWithNoFallbackRefusesWhatItCannotPlace(t *testing.T) {
 	// The two are one field rather than two, so that "where does a request go
 	// when the decision cannot be made" has exactly one answer per router.
-	cheap := Router{Destinations: []string{"keera-small", "keera-large"}, Fallback: "keera-small"}
+	cheap := Route{Destinations: []string{"keera-small", "keera-large"}, Fallback: "keera-small"}
 	if cheap.Refuses() {
 		t.Error("a router with a fallback refuses; it has somewhere to send the request")
 	}
-	strict := Router{Destinations: []string{"keera-small", "keera-large"}}
+	strict := Route{Destinations: []string{"keera-small", "keera-large"}}
 	if !strict.Refuses() {
 		t.Error("a router with no fallback does not refuse, so an undecided prompt would " +
 			"go to whichever model was named in a column")
-	}
-}
-
-func TestARouterOnlyOffersWhatItsListNames(t *testing.T) {
-	// Offers stands between a small model's one-word answer and a request
-	// leaving the cluster, so it is exact: no case folding, no prefixes.
-	rt := Router{Destinations: []string{"keera-small", "keera-large"}}
-	for _, alias := range []string{"keera-small", "keera-large"} {
-		if !rt.Offers(alias) {
-			t.Errorf("Offers(%q) = false, want true", alias)
-		}
-	}
-	for _, alias := range []string{"keera-huge", "keera", "keera-small-eu", "Keera-Small", ""} {
-		if rt.Offers(alias) {
-			t.Errorf("Offers(%q) = true; a destination this router was not given is not one "+
-				"it may reach", alias)
-		}
 	}
 }
 

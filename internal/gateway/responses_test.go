@@ -13,22 +13,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// decodeResponses translates a Responses request and returns the chat body.
-func decodeResponses(t *testing.T, raw string) map[string]any {
-	t.Helper()
-	out, err := decodeRaw(responsesShape{}, raw)
-	if err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	var req map[string]any
-	if err := json.Unmarshal(out, &req); err != nil {
-		t.Fatal(err)
-	}
-	return req
-}
-
 func TestResponsesDecodeBuildsTheConversation(t *testing.T) {
-	req := decodeResponses(t, `{"model":"keera-code","instructions":"be brief",
+	req := decodeAs(t, responsesShape{}, `{"model":"keera-code","instructions":"be brief",
 		"max_output_tokens":512,"input":[
 		{"role":"developer","content":"use tabs"},
 		{"type":"message","role":"user","content":[{"type":"input_text","text":"fix it"}]},
@@ -67,7 +53,7 @@ func TestResponsesDecodeBuildsTheConversation(t *testing.T) {
 }
 
 func TestResponsesDecodeTranslatesToolsAndFormat(t *testing.T) {
-	req := decodeResponses(t, `{"model":"keera-code","input":"hi",
+	req := decodeAs(t, responsesShape{}, `{"model":"keera-code","input":"hi",
 		"tools":[{"type":"function","name":"shell","description":"run","parameters":{"type":"object"}},
 			{"type":"web_search"}],
 		"tool_choice":{"type":"function","name":"shell"},
@@ -107,7 +93,7 @@ const codexTools = `"tools":[
 func TestResponsesDecodeDeclaresNamespacesAndCustomTools(t *testing.T) {
 	// The chat shape has neither, and dropping them would leave Codex without
 	// its MCP tools, its subagents and its way of editing files.
-	req := decodeResponses(t, `{"model":"keera-code","input":"hi",`+codexTools+`,
+	req := decodeAs(t, responsesShape{}, `{"model":"keera-code","input":"hi",`+codexTools+`,
 		"tool_choice":{"type":"custom","name":"apply_patch"}}`)
 
 	fns := map[string]map[string]any{}
@@ -139,7 +125,7 @@ func TestResponsesDecodeDeclaresNamespacesAndCustomTools(t *testing.T) {
 }
 
 func TestResponsesDecodeReplaysNamespacedAndCustomCalls(t *testing.T) {
-	req := decodeResponses(t, `{"model":"keera-code","input":[
+	req := decodeAs(t, responsesShape{}, `{"model":"keera-code","input":[
 		{"role":"user","content":"weather, then fix it"},
 		{"type":"function_call","call_id":"c1","namespace":"mcp__demo__","name":"get_weather",
 			"arguments":"{\"city\":\"Bern\"}"},
@@ -205,17 +191,11 @@ func TestResponsesStreamNamesCallsAsTheClientDeclaredThem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	src := strings.NewReader(sseStream(
+	events := pipeAs(t, sh,
 		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"apply_patch","arguments":"{\"input\":\"*** Begin"}}]}}]}`,
 		`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":" Patch\"}"}}]}}]}`,
 		`{"choices":[{"delta":{"tool_calls":[{"index":1,"id":"call_2","function":{"name":"mcp__demo__get_weather","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`,
-	))
-	var dst bytes.Buffer
-	if _, err := sh.pipe(&dst, func() {}, src, "keera-code", true, DefaultMaxResponseBytes); err != nil {
-		t.Fatal(err)
-	}
-
-	events := readEvents(t, dst.String())
+	)
 	want := []string{
 		"response.created", "response.in_progress",
 		"response.output_item.added",
@@ -315,14 +295,13 @@ func TestResponsesEncodeBuildsItems(t *testing.T) {
 }
 
 func TestResponsesStreamEmitsTheEventSequence(t *testing.T) {
-	src := strings.NewReader(strings.Join([]string{
-		`data: {"choices":[{"delta":{"content":"he"}}]}`,
-		`data: {"choices":[{"delta":{"content":"llo"}}]}`,
-		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"shell","arguments":"{\"a\""}}]}}]}`,
-		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":1}"}}]},"finish_reason":"tool_calls"}]}`,
-		`data: {"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":3}}`,
-		`data: [DONE]`,
-	}, "\n\n") + "\n\n")
+	src := strings.NewReader(sseStream(
+		`{"choices":[{"delta":{"content":"he"}}]}`,
+		`{"choices":[{"delta":{"content":"llo"}}]}`,
+		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"shell","arguments":"{\"a\""}}]}}]}`,
+		`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":1}"}}]},"finish_reason":"tool_calls"}]}`,
+		`{"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":3}}`,
+	))
 	var dst bytes.Buffer
 	stats, err := responsesShape{}.pipe(&dst, func() {}, src, "keera-code", true, DefaultMaxResponseBytes)
 	if err != nil {
@@ -413,7 +392,7 @@ func TestResponsesStreamFailsAFailedStream(t *testing.T) {
 
 func TestResponsesSurfaceTranslatesForALocalModel(t *testing.T) {
 	h := newHarness(t, jsonBackend(`{"choices":[{"message":{"content":"hi"},"finish_reason":"stop"}],`+
-		`"usage":{"prompt_tokens":1000,"completion_tokens":500}}`), nil, guarded("obey the org", 64))
+		`"usage":{"prompt_tokens":1000,"completion_tokens":500}}`), nil, guarded("obey the org"))
 
 	resp := h.post(t, "/v1/responses", `{"model":"keera-code","instructions":"be brief",`+
 		`"max_output_tokens":4096,"input":"hi"}`)
@@ -430,8 +409,8 @@ func TestResponsesSurfaceTranslatesForALocalModel(t *testing.T) {
 	if err := json.Unmarshal(<-h.upstreamBodies, &sent); err != nil {
 		t.Fatal(err)
 	}
-	if sent.MaxTokens != 64 || len(sent.Messages) != 3 || sent.Messages[0].Content != "obey the org" {
-		t.Errorf("sent = %+v, want the ceiling and the guardrail first", sent)
+	if sent.MaxTokens != 4096 || len(sent.Messages) != 3 || sent.Messages[0].Content != "obey the org" {
+		t.Errorf("sent = %+v, want max_output_tokens carried over and the guardrail first", sent)
 	}
 	if !strings.Contains(string(body), `"object":"response"`) {
 		t.Errorf("answer = %s", body)
@@ -446,7 +425,7 @@ func TestResponsesGoToOpenAIInTheirOwnAPI(t *testing.T) {
 	answer := `{"id":"resp_1","object":"response","model":"gpt-5.5","status":"completed",` +
 		`"output":[{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"}],` +
 		`"usage":{"input_tokens":1000,"input_tokens_details":{"cached_tokens":800},"output_tokens":50}}`
-	h, seen := providerHarness(t, "openai", "gpt-5.5", jsonBackend(answer), guarded("obey the org", 256))
+	h, seen := providerHarness(t, "openai", "gpt-5.5", jsonBackend(answer), guarded("obey the org"))
 
 	resp := h.post(t, "/v1/responses", `{"model":"keera-frontier","instructions":"be brief",`+
 		`"temperature":0.2,"include":["reasoning.encrypted_content"],"input":"hi"}`)
@@ -466,9 +445,6 @@ func TestResponsesGoToOpenAIInTheirOwnAPI(t *testing.T) {
 	}
 	if sent["instructions"] != "obey the org\n\nbe brief" {
 		t.Errorf("instructions = %v, want the guardrail first", sent["instructions"])
-	}
-	if sent["max_output_tokens"] != float64(256) {
-		t.Errorf("max_output_tokens = %v, want the ceiling", sent["max_output_tokens"])
 	}
 	// A reasoning model refuses a temperature.
 	if _, ok := sent["temperature"]; ok {
@@ -608,23 +584,22 @@ func TestAnItemThatFitsNoFieldIsDropped(t *testing.T) {
 	// are a string. It used to fail the whole input, and so the request.
 	in := `{"model":"m","input":[{"type":"tool_search_call","call_id":"ts","arguments":{}},` +
 		`{"role":"user","content":"hi"}]}`
-	msgs := messagesOf(t, decodeResponses(t, in))
+	msgs := messagesOf(t, decodeAs(t, responsesShape{}, in))
 	if len(msgs) != 1 || msgs[0]["content"] != "hi" {
 		t.Errorf("messages = %v, want the user's message alone", msgs)
 	}
 }
 
 func TestImagesFromToolsFollowAllTheResults(t *testing.T) {
-	// Codex's view_image answers with an image. The tool role carries only
-	// text, and a user turn between two results would part the second from
-	// its call.
+	// Codex's view_image answers with an image, which the tool role cannot
+	// carry. A user turn between two results would part the second from its call.
 	in := `{"model":"m","input":[` +
 		`{"type":"function_call","call_id":"a","name":"view_image","arguments":"{}"},` +
 		`{"type":"function_call","call_id":"b","name":"view_image","arguments":"{}"},` +
 		`{"type":"function_call_output","call_id":"a","output":[{"type":"input_text","text":"see"},` +
 		`{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]},` +
 		`{"type":"function_call_output","call_id":"b","output":"done"}]}`
-	msgs := messagesOf(t, decodeResponses(t, in))
+	msgs := messagesOf(t, decodeAs(t, responsesShape{}, in))
 	var roles []string
 	for _, m := range msgs {
 		roles = append(roles, m["role"].(string))
@@ -645,7 +620,7 @@ func TestALocalShellCallStaysInTheConversation(t *testing.T) {
 	in := `{"model":"m","input":[{"role":"user","content":"x"},` +
 		`{"type":"local_shell_call","call_id":"c","status":"completed","action":{"type":"exec","command":["ls"]}},` +
 		`{"type":"local_shell_call_output","call_id":"c","output":"a b"}]}`
-	msgs := messagesOf(t, decodeResponses(t, in))
+	msgs := messagesOf(t, decodeAs(t, responsesShape{}, in))
 	if len(msgs) != 3 || msgs[2]["role"] != "tool" || msgs[2]["content"] != "a b" {
 		t.Fatalf("messages = %v, want the call and its output after the user", msgs)
 	}
@@ -660,7 +635,7 @@ func TestATextFileReachesTheModel(t *testing.T) {
 		`{"type":"input_file","filename":"a.txt","file_data":"data:text/plain;base64,aGVsbG8="},` +
 		`{"type":"input_file","filename":"b.pdf","file_data":"data:application/pdf;base64,JVBERi0="},` +
 		`{"type":"input_text","text":"what is in it?"}]}]}`
-	msgs := messagesOf(t, decodeResponses(t, in))
+	msgs := messagesOf(t, decodeAs(t, responsesShape{}, in))
 	if len(msgs) != 1 || msgs[0]["content"] != "a.txt\n\nhello\n\nwhat is in it?" {
 		t.Errorf("messages = %v, want the text file and the question", msgs)
 	}

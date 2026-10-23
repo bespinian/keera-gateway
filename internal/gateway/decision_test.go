@@ -72,11 +72,11 @@ func TestARouterDecidesWithADecisionModel(t *testing.T) {
 	models["keera-code"] = policy.Model{OrgID: "org_1", Alias: "keera-code", Kind: policy.KindChat,
 		BackendModel: "served-name", Description: "small edits", Enabled: true}
 	h := newHarness(t, backend, models, nil)
-	h.src.routers = map[string]policy.Router{"org_1/auto": {
-		OrgID: "org_1", Alias: "auto", Model: "keera-decider",
+	h.withRouters(policy.Route{
+		OrgID: "org_1", Router: "auto", Model: "keera-decider",
 		Prompt:       "Which model should answer this request?",
 		Destinations: []string{"keera-code", "keera-large"}, Fallback: "keera-code",
-	}}
+	})
 
 	resp := h.post(t, "/v1/chat/completions",
 		`{"model":"auto","messages":[{"role":"user","content":"plan a migration"}]}`)
@@ -164,13 +164,7 @@ func TestNoClientCanNameADecisionModel(t *testing.T) {
 		t.Errorf("status = %d, want 404", resp.StatusCode)
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, h.url("/v1/models"), nil)
-	req.Header.Set("Authorization", "Bearer "+testKey)
-	list, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = list.Body.Close() }()
+	list := h.get(t, "/v1/models")
 	body, _ := io.ReadAll(list.Body)
 	if strings.Contains(string(body), "keera-decider") {
 		t.Errorf("/v1/models offers a decision model to a client: %s", body)
@@ -272,11 +266,11 @@ func TestADecisionModelIsMeasuredByWhatItIsSent(t *testing.T) {
 		models["keera-large"] = policy.Model{OrgID: "org_1", Alias: "keera-large",
 			Kind: policy.KindChat, BackendModel: "large-served", Enabled: true}
 		h := newHarness(t, backend, models, nil)
-		h.src.routers = map[string]policy.Router{"org_1/auto": {
-			OrgID: "org_1", Alias: "auto", Model: "keera-decider",
+		h.withRouters(policy.Route{
+			OrgID: "org_1", Router: "auto", Model: "keera-decider",
 			Prompt:       "Which model should answer this request?",
 			Destinations: []string{"keera-code", "keera-large"}, Fallback: "keera-code",
-		}}
+		})
 
 		resp := h.post(t, "/v1/chat/completions",
 			`{"model":"auto","messages":[{"role":"user","content":"hello"}]}`)

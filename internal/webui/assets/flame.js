@@ -44,7 +44,7 @@ const STEPS = {
     label: "Preparing",
     group: "gateway",
     why:
-      "Adding the guardrail's standing system prompt and the output ceiling, " +
+      "Adding the guardrail's standing system prompt, " +
       "and encoding the request for the model.",
   },
   upstream: {

@@ -7,32 +7,35 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// ProjectSummary is a project with what the panel shows next to it: its guardrails,
-// its spend against them, and how many keys are active.
+// ProjectSummary is a project with what the panel shows next to it: its
+// guardrails, its spend against them, and how many keys are active.
 type ProjectSummary struct {
 	Project
-	Limits       policy.Limits `json:"limits"`
-	ActiveKeys   int           `json:"active_keys"`
+	Limits     policy.Limits `json:"limits"`
+	ActiveKeys int           `json:"active_keys"`
+	// BudgetMicros, Period and SpendMicros are the budget nearest its end,
+	// when the project has a budget per day and one per month: the one that
+	// will stop its keys first.
 	SpendMicros  int64         `json:"spend_micros"`
 	BudgetMicros int64         `json:"budget_micros"`
 	Period       policy.Period `json:"period"`
 }
 
-// ProjectSummaries lists an organisation's projects with their guardrails and spend,
-// in one query to avoid N+1. An empty orgID means every organisation.
+// ProjectSummaries lists an organisation's projects with their guardrails and
+// spend, in one query to avoid N+1. An empty orgID means every organisation.
 func (s *Store) ProjectSummaries(ctx context.Context, orgID string, now time.Time) ([]ProjectSummary, error) {
 	return queryAll(ctx, s.pool, scanProjectSummary, `
 		SELECT pr.id, pr.org_id, pr.name, pr.description, pr.created_at, `+limitColumns+`,
 		       (SELECT count(*) FROM api_keys k
 		         WHERE k.project_id = pr.id AND k.revoked_at IS NULL AND k.key_hash IS NOT NULL
 		           AND (k.expires_at IS NULL OR k.expires_at > now())),
-		       COALESCE(sp.micros, 0)
+		       COALESCE(day.micros, 0), COALESCE(month.micros, 0)
 		FROM projects pr
 		LEFT JOIN guardrails p ON p.scope_type = 'project' AND p.scope_id = pr.id
-		LEFT JOIN spend sp ON sp.scope_type = 'project' AND sp.scope_id = pr.id
-		     AND sp.period = COALESCE(p.budget_period, 'month')
-		     AND sp.period_start = CASE WHEN COALESCE(p.budget_period, 'month') = 'day'
-		                                THEN $2::date ELSE $3::date END
+		LEFT JOIN spend day ON day.scope_type = 'project' AND day.scope_id = pr.id
+		     AND day.period = 'day' AND day.period_start = $2::date
+		LEFT JOIN spend month ON month.scope_type = 'project' AND month.scope_id = pr.id
+		     AND month.period = 'month' AND month.period_start = $3::date
 		WHERE ($1 = '' OR pr.org_id = $1)
 		ORDER BY pr.name`,
 		orgID, policy.PeriodDay.Start(now), policy.PeriodMonth.Start(now))
@@ -40,25 +43,31 @@ func (s *Store) ProjectSummaries(ctx context.Context, orgID string, now time.Tim
 
 func scanProjectSummary(r row) (ProjectSummary, error) {
 	var (
-		p      ProjectSummary
-		period *string
-		keys   int64
+		p                    ProjectSummary
+		keys                 int64
+		daySpent, monthSpent int64
 	)
 	dest := append([]any{&p.ID, &p.OrgID, &p.Name, &p.Description, &p.CreatedAt},
-		limitTargets(&p.Limits, &period)...)
-	if err := r.Scan(append(dest, &keys, &p.SpendMicros)...); err != nil {
+		limitTargets(&p.Limits)...)
+	if err := r.Scan(append(dest, &keys, &daySpent, &monthSpent)...); err != nil {
 		return ProjectSummary{}, err
 	}
 	p.ActiveKeys = int(keys)
-	// Limits stays as stored. Period says what the spend is counted over: a
-	// budget with no period resets monthly, as the spend join above assumes.
-	p.Limits.BudgetPeriod = periodPtr(period)
-	p.Period = policy.PeriodMonth
-	if period != nil {
-		p.Period = policy.Period(*period)
-	}
-	if p.Limits.BudgetMicros != nil {
-		p.BudgetMicros = *p.Limits.BudgetMicros
+	// Without a budget, the month's spend is still shown.
+	p.Period, p.SpendMicros = policy.PeriodMonth, monthSpent
+	used := -1.0
+	for _, b := range p.Limits.Budgets {
+		if b.BudgetMicros <= 0 {
+			continue
+		}
+		spent := monthSpent
+		if b.Per() == policy.PeriodDay {
+			spent = daySpent
+		}
+		if f := float64(spent) / float64(b.BudgetMicros); f > used {
+			used = f
+			p.BudgetMicros, p.Period, p.SpendMicros = b.BudgetMicros, b.Per(), spent
+		}
 	}
 	return p, nil
 }
@@ -348,19 +357,17 @@ func (s *Store) KeySummaries(ctx context.Context, q KeyQuery) ([]KeySummary, err
 func scanKeySummary(r row) (KeySummary, error) {
 	var (
 		k        KeySummary
-		period   *string
 		plan     policy.PlanUsage
 		status   *string
 		reported *time.Time
 	)
-	dest := append(keyTargets(&k.KeyInfo), limitTargets(&k.Limits, &period)...)
+	dest := append(keyTargets(&k.KeyInfo), limitTargets(&k.Limits)...)
 	dest = append(dest, &k.LastUsedAt, &k.Requests, &k.SpendMicros, &k.SubscriptionMicros,
 		&plan.FiveHour, &plan.FiveHourResetsAt, &plan.SevenDay, &plan.SevenDayResetsAt,
 		&status, &reported)
 	if err := r.Scan(dest...); err != nil {
 		return KeySummary{}, err
 	}
-	k.Limits.BudgetPeriod = periodPtr(period)
 	if reported != nil {
 		plan.UpdatedAt = *reported
 		if status != nil {

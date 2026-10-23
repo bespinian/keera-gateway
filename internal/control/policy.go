@@ -145,28 +145,26 @@ type EffectiveLevel struct {
 }
 
 // Effective is what a request against a scope actually meets: every level's
-// guardrails, and what they combine to. It answers "why is this key refused"
-// without combining three rows by hand.
+// guardrails, and what they combine to. It answers "why is this key refused".
 //
 // Rate limits and budgets stay per level, because each level is enforced on
-// its own and one merged number would be wrong at some level.
+// its own; one merged number would be wrong at some level.
 type Effective struct {
 	Type   policy.ScopeType `json:"type"`
 	ID     string           `json:"id"`
 	Levels []EffectiveLevel `json:"levels"`
 	// AllowedModels nil means every enabled model. An empty list means none.
-	AllowedModels   []string `json:"allowed_models"`
-	MaxOutputTokens int      `json:"max_output_tokens"`
-	SystemPrompt    string   `json:"system_prompt,omitempty"`
-	Filters         []string `json:"filters,omitempty"`
+	AllowedModels []string `json:"allowed_models"`
+	SystemPrompt  string   `json:"system_prompt,omitempty"`
+	Filters       []string `json:"filters,omitempty"`
 	// AllowedTools nil means every tool of every MCP server.
 	AllowedTools []string               `json:"allowed_tools"`
 	Scopes       []policy.Scope         `json:"scopes"`
 	Sandbox      policy.ResolvedSandbox `json:"sandbox"`
 }
 
-// effectiveGuardrails answers with the whole chain above a scope, combined the
-// way the gateway combines it.
+// effectiveGuardrails answers with the chain above a scope, combined as the
+// gateway combines it.
 func (s *Server) effectiveGuardrails(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	scope, scopeID, orgID, projectID, ok := s.guardrailScope(w, r, p, false)
 	if !ok {
@@ -221,21 +219,22 @@ func (s *Server) effective(ctx context.Context, scope policy.ScopeType,
 
 	res := policy.Resolve(key, &org, project, own)
 	// Resolve always ends with a key level, because a real request has a key.
-	// Asked about an org or a project, there is no key, so that level is dropped.
-	if scope != policy.ScopeKey && len(res.Scopes) > 0 {
-		res.Scopes = res.Scopes[:len(res.Scopes)-1]
+	// For an org or project there is none, so that level is dropped.
+	if scope != policy.ScopeKey {
+		res.Scopes = slices.DeleteFunc(res.Scopes, func(sc policy.Scope) bool {
+			return sc.Type == policy.ScopeKey
+		})
 	}
 
 	out := Effective{
 		Type: scope, ID: scopeID,
-		Levels:          []EffectiveLevel{s.effectiveLevel(ctx, policy.ScopeOrg, orgID, org)},
-		AllowedModels:   res.AllowedModels,
-		MaxOutputTokens: res.MaxOutputTokens,
-		SystemPrompt:    res.SystemPrompt,
-		Filters:         res.Filters,
-		AllowedTools:    res.AllowedTools,
-		Scopes:          res.Scopes,
-		Sandbox:         res.Sandbox,
+		Levels:        []EffectiveLevel{s.effectiveLevel(ctx, policy.ScopeOrg, orgID, org)},
+		AllowedModels: res.AllowedModels,
+		SystemPrompt:  res.SystemPrompt,
+		Filters:       res.Filters,
+		AllowedTools:  res.AllowedTools,
+		Scopes:        res.Scopes,
+		Sandbox:       res.Sandbox,
 	}
 	if project != nil {
 		out.Levels = append(out.Levels, s.effectiveLevel(ctx, policy.ScopeProject, projectID, *project))
@@ -254,6 +253,38 @@ func (s *Server) effectiveLevel(ctx context.Context, t policy.ScopeType, id stri
 	return EffectiveLevel{Type: t, ID: id, Name: name, Limits: lim}
 }
 
+// countProblem says what is wrong with a guardrail's rate limits and budgets,
+// or "". It fills in missing periods, so a stored limit always says what it
+// counts over.
+//
+// Each period takes one of each: of two over the same window, only the
+// smaller would ever count.
+func countProblem(lim *policy.Limits) string {
+	rates := map[policy.Period]bool{}
+	for i := range lim.RateLimits {
+		rl := &lim.RateLimits[i]
+		if why := rl.Problem(); why != "" {
+			return "a rate limit " + why
+		}
+		if rl.Period = rl.Per(); rates[rl.Period] {
+			return "two rate limits count per " + string(rl.Period) + "; keep one"
+		}
+		rates[rl.Period] = true
+	}
+	budgets := map[policy.Period]bool{}
+	for i := range lim.Budgets {
+		b := &lim.Budgets[i]
+		if why := b.Problem(); why != "" {
+			return "a budget " + why
+		}
+		if b.Period = b.Per(); budgets[b.Period] {
+			return "two budgets reset per " + string(b.Period) + "; keep one"
+		}
+		budgets[b.Period] = true
+	}
+	return ""
+}
+
 func (s *Server) putGuardrails(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	scope, scopeID, owner, _, ok := s.guardrailScope(w, r, p, true)
 	if !ok {
@@ -264,12 +295,12 @@ func (s *Server) putGuardrails(w http.ResponseWriter, r *http.Request, p *authn.
 	if !readJSON(w, r, &lim) {
 		return
 	}
-	if lim.BudgetPeriod != nil && !lim.BudgetPeriod.Valid() {
-		badRequest(w, "'budget_period' must be 'day' or 'month'")
+	if msg := countProblem(&lim); msg != "" {
+		badRequest(w, msg)
 		return
 	}
-	// A sandbox's key is minted for that sandbox and dies with it, so a key's
-	// guardrail has nothing to limit there. Stored, it would look like it did.
+	// A sandbox's key is minted for that sandbox and dies with it, so sandbox
+	// limits on a key would limit nothing, while looking like they did.
 	if scope == policy.ScopeKey && !lim.SandboxLimits.IsZero() {
 		badRequest(w, "sandbox limits are set on an organisation or a project, not on a key")
 		return
@@ -289,25 +320,6 @@ func (s *Server) putGuardrails(w http.ResponseWriter, r *http.Request, p *authn.
 	defer unlock()
 	if !s.checkGuardrailFilters(w, r, owner, &lim) || !s.checkAllowList(w, r, scope, owner, &lim) ||
 		!s.checkAllowedTools(w, r, owner, &lim) || !s.checkAllowedRepos(w, r, p, scope, scopeID, &lim) {
-		return
-	}
-	if lim.BudgetMicros != nil && lim.BudgetPeriod == nil {
-		period := policy.PeriodMonth
-		lim.BudgetPeriod = &period
-	}
-	for _, f := range []struct {
-		name string
-		v    *int
-	}{
-		{"max_output_tokens", lim.MaxOutputTokens}, {"rpm", lim.RPM}, {"tpm", lim.TPM},
-	} {
-		if f.v != nil && *f.v < 0 {
-			badRequest(w, "'"+f.name+"' cannot be negative; omit it to set no limit here")
-			return
-		}
-	}
-	if lim.BudgetMicros != nil && *lim.BudgetMicros < 0 {
-		badRequest(w, "'budget_micros' cannot be negative; omit it to set no limit here")
 		return
 	}
 	if err := s.st.PutGuardrail(r.Context(), scope, scopeID, lim); err != nil {

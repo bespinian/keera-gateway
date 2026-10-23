@@ -172,32 +172,49 @@ func TestDoctorCatchesAFilterPointingAtNothing(t *testing.T) {
 	}
 }
 
+func TestDoctorCatchesARouterModelStepPointingAtNothing(t *testing.T) {
+	// Every request that reaches the step fails, and the router itself looks
+	// fine in the list.
+	srv, st := diagnosed(t)
+	ctx := t.Context()
+	if _, err := st.UpsertRouter(ctx, policy.Router{
+		OrgID: "org_a", Alias: "auto",
+		Start: &policy.Step{ID: "answer", Kind: policy.StepModel, Ref: "a-model-that-is-not-there"},
+	}); err != nil {
+		t.Fatalf("UpsertRouter: %v", err)
+	}
+	d := diagnose(t, srv, operator(), "?org_id=org_a")
+
+	c, ok := d.find("auto / answer")
+	if !ok {
+		t.Fatal("the model step was not checked")
+	}
+	if c.Verdict != VerdictFail || !strings.Contains(c.Detail, "a-model-that-is-not-there") {
+		t.Errorf("check = %+v, want a failure naming the model", c)
+	}
+}
+
 func TestEffectiveGuardrailsCollapseTheChain(t *testing.T) {
 	// What holds this key, though it sets nothing itself.
 	srv, st := diagnosed(t)
 	ctx := t.Context()
 
-	rpm, projectRPM := 600, 120
-	budget := int64(500_000_000)
-	month := policy.PeriodMonth
 	if err := st.PutGuardrail(ctx, policy.ScopeOrg, "org_a", policy.Limits{
-		RPM: &rpm, BudgetMicros: &budget, BudgetPeriod: &month,
+		RateLimits:    []policy.RateLimit{{Requests: 600, Period: policy.PeriodMinute}},
+		Budgets:       []policy.Budget{{BudgetMicros: 500_000_000, Period: policy.PeriodMonth}},
 		AllowedModels: []string{"keera-speed", "keera-frontier"},
 	}); err != nil {
 		t.Fatalf("PutGuardrail org: %v", err)
 	}
 	if err := st.PutGuardrail(ctx, policy.ScopeProject, "project_a", policy.Limits{
-		RPM: &projectRPM, AllowedModels: []string{"keera-speed"},
+		RateLimits:    []policy.RateLimit{{Requests: 120, Period: policy.PeriodMinute}},
+		AllowedModels: []string{"keera-speed"},
 	}); err != nil {
 		t.Fatalf("PutGuardrail project: %v", err)
 	}
 
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet,
-		httpx.ControlPrefix+"/v1/guardrails/key/key_a/effective", nil).WithContext(ctx)
-	r.SetPathValue("scope", "key")
-	r.SetPathValue("id", "key_a")
-	srv.effectiveGuardrails(w, r, operator())
+	w := serve(ctx, srv.effectiveGuardrails, operator(), http.MethodGet,
+		"/v1/guardrails/key/key_a/effective", "")
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body)
 	}
@@ -219,20 +236,20 @@ func TestEffectiveGuardrailsCollapseTheChain(t *testing.T) {
 	}
 	// Rate limits are enforced per level rather than merged, so both are here
 	// and the tightest is the project's.
-	var tightest int
+	var tightest int64
 	for _, s := range eff.Scopes {
-		if s.RPM > 0 && (tightest == 0 || s.RPM < tightest) {
-			tightest = s.RPM
+		if n := int64(s.RPM); n > 0 && (tightest == 0 || n < tightest) {
+			tightest = n
 		}
 	}
-	if tightest != projectRPM {
-		t.Errorf("tightest rpm = %d, want the project's %d", tightest, projectRPM)
+	if tightest != 120 {
+		t.Errorf("tightest rpm = %d, want the project's 120", tightest)
 	}
 	// Budgets do not merge either: the organisation's is the one that holds,
 	// and it is reported against the organisation and not against the key.
 	found := false
 	for _, s := range eff.Scopes {
-		if s.Type == policy.ScopeOrg && s.BudgetMicros == budget {
+		if s.Type == policy.ScopeOrg && s.BudgetMicros == 500_000_000 {
 			found = true
 		}
 	}

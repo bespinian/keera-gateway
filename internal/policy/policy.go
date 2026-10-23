@@ -31,6 +31,9 @@ type Period string
 const (
 	PeriodDay   Period = "day"
 	PeriodMonth Period = "month"
+	// PeriodMinute is for rate limits only. A token bucket counts it, which has
+	// no start, so Valid leaves it out: no budget can reset on it.
+	PeriodMinute Period = "minute"
 )
 
 // Start returns the first instant of the period containing t. Budgets reset on
@@ -65,7 +68,7 @@ const (
 	KindEmbedding  Kind = "embedding"
 	// KindDecision is a model that answers a typed question with a probability
 	// per answer, and writes no text, such as Laya behind laya-serve. Only
-	// routers and gate filters use one. No client can name it.
+	// route steps and gate filters use one. No client can name it.
 	KindDecision Kind = "decision"
 )
 
@@ -84,24 +87,23 @@ type Model struct {
 	Backends     []string `json:"backends"`
 	BackendModel string   `json:"backend_model"`
 	// Provider is the hosted provider this entry was declared from, or empty
-	// for a model you serve yourself. The gateway reads it to send a client
-	// that provider's own API untranslated, and to fix the few fields OpenAI
-	// refuses. An edit screen reads it to show the provider's values.
+	// for a self-served model. The gateway uses it to pass the provider's own
+	// API through untranslated and to fix the few fields OpenAI refuses.
 	Provider string `json:"provider,omitempty"`
 	// DisplayName is the model's name for people, such as Claude Haiku 5.5.
 	// Clients name the alias; this is only shown.
 	DisplayName string `json:"display_name,omitempty"`
 	// Description says what the model is for. Clients see it on /v1/models,
-	// and a Router reads it when choosing.
+	// and a route step reads it when choosing.
 	Description string `json:"description,omitempty"`
 	// Prices are micro-units per million tokens, so every money value stays an
 	// integer.
 	InputMicrosPerMTok  int64 `json:"input_micros_per_mtok"`
 	OutputMicrosPerMTok int64 `json:"output_micros_per_mtok"`
-	// CachedInputMicrosPerMTok is the price of an input token the provider
-	// served from its prompt cache. Providers discount these heavily, and a
-	// coding agent's prompt is mostly cached, so charging the full input price
-	// overstates cost a lot. Zero means "not stated": see cachedInputMicros.
+	// CachedInputMicrosPerMTok prices an input token served from the provider's
+	// prompt cache. Providers discount these heavily and a coding agent's
+	// prompt is mostly cached, so the full input price would overstate cost.
+	// Zero means "not stated": see cachedInputMicros.
 	CachedInputMicrosPerMTok int64 `json:"cached_input_micros_per_mtok"`
 	// CacheWriteMicrosPerMTok is the price of an input token the provider
 	// wrote to its prompt cache, which Anthropic and OpenAI charge more for.
@@ -389,119 +391,105 @@ func (r FilterRule) Valid() error {
 	return nil
 }
 
-// Router decides which model answers a request. A Filter changes a request; a
-// router changes where it goes.
+// Route is how a route step decides which model answers a request. A Filter
+// changes a request; a route step changes where it goes.
 //
 // Most requests do not need the largest model, and some must not reach the one
 // outside the cluster. A client cannot judge that about its own prompt.
 //
-// A client uses a router by naming it in the 'model' field, like a model. To
-// route everything a scope sends, narrow its AllowedModels to the router.
+// A route step has no shadow mode, because the client named its router and
+// something has to answer. It has Fallback instead.
 //
-// A router has no shadow mode, because the client named it and something has to
-// answer. It has Fallback instead.
-//
-// Only an instruction router reads the request with a model; see RouterMode for
-// the others. The alias is scoped to an organisation and shares a namespace
-// with model aliases, because clients name both in the same field.
-type Router struct {
-	OrgID string `json:"org_id"`
-	Alias string `json:"alias"`
-	// Mode decides what the other fields mean. See RouterMode.
-	Mode RouterMode `json:"mode"`
-	// Model makes the decision on an instruction router. It should be fast and
+// Only an instruction step reads the request with a model; see RouteMode for
+// the others. Route is read off the step with Router.Route.
+type Route struct {
+	OrgID string
+	// Router is the router the step belongs to, and Step its id.
+	Router string
+	Step   string
+	// Mode decides what the other fields mean. See RouteMode.
+	Mode RouteMode
+	// Model makes the decision on an instruction step. It should be fast and
 	// run inside the same infrastructure: it runs on every request, and a
 	// hosted one sends the prompt out before deciding whether it may leave.
-	// Only an instruction router has Model and Prompt. With one destination it
+	// Only an instruction step has Model and Prompt. With one destination it
 	// keeps them but does not ask.
-	Model  string `json:"model"`
-	Prompt string `json:"prompt"`
-	// Destinations are the models this router may choose between, in the order
-	// offered. A fallback router tries them in this order; latency and
-	// least-busy routers use it only to break ties. Granting a router grants
-	// every destination.
-	Destinations []string `json:"destinations"`
-	// Ceilings is a size router's whole configuration: the largest request, in
+	Model  string
+	Prompt string
+	// Destinations are the models this step may choose between, in the order
+	// offered. A fallback step tries them in this order; latency and
+	// least-busy steps use it only to break ties. Allowing the router
+	// allows every destination.
+	Destinations []string
+	// Ceilings is a size step's whole configuration: the largest request, in
 	// estimated tokens, each destination should take. A destination without a
-	// positive ceiling takes what is too big for the rest, and a size router
+	// positive ceiling takes what is too big for the rest, and a size step
 	// needs exactly one. The estimate comes from the text's bytes, not a
 	// tokeniser; see docs/routers.md.
-	Ceilings map[string]int `json:"ceilings,omitempty"`
-	// Fallback is where an instruction router sends a request it could not
-	// decide. Empty refuses it. Neither is right in general: a router that
+	Ceilings map[string]int
+	// Fallback is where an instruction step sends a request it could not
+	// decide. Empty refuses it. Neither is right in general: a step that
 	// saves money can fall back, one that keeps prompts in the cluster cannot.
 	// See docs/routers.md.
-	Fallback    string    `json:"fallback,omitempty"`
-	Description string    `json:"description,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	Fallback string
 }
 
-// Refuses reports whether this router stops a request it could not decide
+// Refuses reports whether this step stops a request it could not decide
 // instead of using a fallback.
-func (r Router) Refuses() bool { return r.Fallback == "" }
+func (r Route) Refuses() bool { return r.Fallback == "" }
 
-func (r Router) Offers(alias string) bool { return slices.Contains(r.Destinations, alias) }
-
-// RouterMode is what chooses the model that answers a request.
+// RouteMode is what chooses the model that answers a request.
 //
-// An instruction router has a small local model read the request and name a
+// An instruction step has a small local model read the request and name a
 // destination. It is the only mode that costs a generation, and the only one a
 // prompt can argue with.
 //
-// Fallback, latency and least-busy routers never read the request. They suit
-// several models that can serve the same traffic, and differ only in order:
+// The other modes never read the request's text, and differ in order:
 //   - fallback tries destinations in the written order.
-//   - latency tries the one that has answered fastest lately first.
+//   - latency tries the one that lately started answering fastest first.
 //   - least-busy tries the one with fewest requests in flight first.
+//   - size picks the destination meant for the request's length; one too
+//     small to hold it always ranks last.
 //
 // Least-busy suits destinations that are alike; latency suits ones that are
 // not, since queue depth cannot be compared across machines of different
 // speeds. Both use only what this process has seen. See
 // internal/gateway/load.go.
 //
-// A size router reads only the request's length and picks the destination
-// meant for that size. It costs nothing and a prompt cannot sway it. A
-// destination too small to hold the request always ranks last.
-//
-// The zero value is an instruction router.
-type RouterMode string
+// The zero value is instruction.
+type RouteMode string
 
 const (
-	RouterModeInstruction RouterMode = "instruction"
-	RouterModeFallback    RouterMode = "fallback"
-	// RouterModeLatency tries the destinations fastest first, by how long they
-	// lately took to start answering.
-	RouterModeLatency RouterMode = "latency"
-	// RouterModeLeastBusy tries the destinations emptiest first, by requests
-	// this gateway has in flight against each.
-	RouterModeLeastBusy RouterMode = "least-busy"
-	RouterModeSize      RouterMode = "size"
+	RouteModeInstruction RouteMode = "instruction"
+	RouteModeFallback    RouteMode = "fallback"
+	RouteModeLatency     RouteMode = "latency"
+	RouteModeLeastBusy   RouteMode = "least-busy"
+	RouteModeSize        RouteMode = "size"
 )
 
-var routerModes = []RouterMode{
-	RouterModeInstruction, RouterModeFallback, RouterModeLatency, RouterModeLeastBusy,
-	RouterModeSize,
+var routeModes = []RouteMode{
+	RouteModeInstruction, RouteModeFallback, RouteModeLatency, RouteModeLeastBusy,
+	RouteModeSize,
 }
 
 // Valid reports whether m names a mode. The empty string does: it means
 // instruction.
-func (m RouterMode) Valid() bool { return m == "" || slices.Contains(routerModes, m) }
+func (m RouteMode) Valid() bool { return m == "" || slices.Contains(routeModes, m) }
 
-// Decides reports whether this mode asks a model to choose. Only an
-// instruction router does, and only it has Model, Prompt and Fallback.
-func (m RouterMode) Decides() bool { return m == "" || m == RouterModeInstruction }
+// Decides reports whether this mode asks a model to choose. Only instruction
+// does, and only it has Model, Prompt and Fallback.
+func (m RouteMode) Decides() bool { return m == "" || m == RouteModeInstruction }
 
-// Decides reports whether this router asks a model to choose. An instruction
-// router with one destination has nothing to choose, so it sends every request
+// Decides reports whether this step asks a model to choose. An instruction
+// step with one destination has nothing to choose, so it sends every request
 // there without asking.
-func (r Router) Decides() bool { return r.Mode.Decides() && len(r.Destinations) > 1 }
+func (r Route) Decides() bool { return r.Mode.Decides() && len(r.Destinations) > 1 }
 
-// ReadsWith is the model this router reads requests with, or "" for a mode
-// that reads none. An instruction router with one destination keeps its
+// ReadsWith is the model this step reads requests with, or "" for a mode
+// that reads none. An instruction step with one destination keeps its
 // model, because it decides as soon as it has a second, so the allow-list and
 // subscription checks count it.
-func (r Router) ReadsWith() string {
+func (r Route) ReadsWith() string {
 	if !r.Mode.Decides() {
 		return ""
 	}
@@ -511,27 +499,27 @@ func (r Router) ReadsWith() string {
 // Measures reports whether this mode orders destinations by what this process
 // observed rather than the written order. Such an order is not worth recording
 // in reports, since it only reflects recent traffic on one replica.
-func (m RouterMode) Measures() bool {
-	return m == RouterModeLatency || m == RouterModeLeastBusy
+func (m RouteMode) Measures() bool {
+	return m == RouteModeLatency || m == RouteModeLeastBusy
 }
 
-func (r Router) Measures() bool { return r.Mode.Measures() }
+func (r Route) Measures() bool { return r.Mode.Measures() }
 
-func (m RouterMode) Sizes() bool { return m == RouterModeSize }
+func (m RouteMode) Sizes() bool { return m == RouteModeSize }
 
-func (r Router) Sizes() bool { return r.Mode.Sizes() }
+func (r Route) Sizes() bool { return r.Mode.Sizes() }
 
-// Ceiling returns the largest request, in estimated tokens, this router gives
+// Ceiling returns the largest request, in estimated tokens, this step gives
 // a destination, and whether there is one.
-func (r Router) Ceiling(alias string) (int, bool) {
+func (r Route) Ceiling(alias string) (int, bool) {
 	n, ok := r.Ceilings[alias]
 	return n, ok && n > 0
 }
 
 // Unbounded names the destinations with no ceiling: where a request larger
-// than every ceiling goes. There must be exactly one, checked when the router
-// is saved.
-func (r Router) Unbounded() []string {
+// than every ceiling goes. There must be exactly one, checked when the
+// router is saved.
+func (r Route) Unbounded() []string {
 	out := make([]string, 0, 1)
 	for _, alias := range r.Destinations {
 		if _, bounded := r.Ceiling(alias); !bounded {
@@ -541,11 +529,11 @@ func (r Router) Unbounded() []string {
 	return out
 }
 
-// maxAliasLen bounds a model, filter or router alias. People type these, and
-// `keera connect` writes them unquoted into editor configuration.
+// maxAliasLen bounds a model, router, filter or MCP server alias. People type
+// these, and `keera connect` writes them unquoted into editor configuration.
 const maxAliasLen = 64
 
-// MaxDestinations bounds how many models one router may choose between. The
+// MaxDestinations bounds how many models one route step may choose between. The
 // list goes into the instruction on every request, and a small model choosing
 // between too many picks poorly.
 const MaxDestinations = 16
@@ -609,13 +597,11 @@ func validName(s string, maxLen int) bool {
 // must keep it apart from null, which inherits.
 type Limits struct {
 	AllowedModels []string `json:"allowed_models"`
-	// MaxOutputTokens caps what one request may generate. The gateway cannot
-	// count prompt tokens without the tokeniser, but it can cap the output.
-	MaxOutputTokens *int    `json:"max_output_tokens,omitempty"`
-	RPM             *int    `json:"rpm,omitempty"`
-	TPM             *int    `json:"tpm,omitempty"`
-	BudgetMicros    *int64  `json:"budget_micros,omitempty"`
-	BudgetPeriod    *Period `json:"budget_period,omitempty"`
+	// RateLimits and Budgets hold at most one of each per period, such as a
+	// budget per day beside one per month. Two over the same period would
+	// count the same window, and only the smaller would matter.
+	RateLimits []RateLimit `json:"rate_limits,omitempty"`
+	Budgets    []Budget    `json:"budgets,omitempty"`
 	// SystemPrompt is put ahead of a chat request's own messages. Levels
 	// concatenate rather than narrow: a level can add to what it inherits but
 	// never remove it.
@@ -632,6 +618,80 @@ type Limits struct {
 	SandboxLimits
 }
 
+// RateLimit is the most a scope may use per Period. Zero means no limit on
+// that count.
+type RateLimit struct {
+	Requests int64 `json:"requests,omitempty"`
+	Tokens   int64 `json:"tokens,omitempty"`
+	// Period is minute, day or month. Empty is a minute.
+	Period Period `json:"period,omitempty"`
+}
+
+// Per is the period the limit counts over.
+func (r RateLimit) Per() Period {
+	if r.Period == "" {
+		return PeriodMinute
+	}
+	return r.Period
+}
+
+// Budget is the most a scope may spend per Period.
+type Budget struct {
+	BudgetMicros int64 `json:"budget_micros"`
+	// Period is day or month. Empty is a month.
+	Period Period `json:"period,omitempty"`
+}
+
+// Per is the period the budget resets on.
+func (b Budget) Per() Period {
+	if b.Period == "" {
+		return PeriodMonth
+	}
+	return b.Period
+}
+
+// PerMinute reports whether the limit counts per minute, in token buckets,
+// rather than per day or month as a budget counts.
+func (r RateLimit) PerMinute() bool { return r.Per() == PeriodMinute }
+
+// Problem says what is wrong with the limit, in words that follow "a rate
+// limit", or "". A guardrail's and a router's are checked alike.
+func (r RateLimit) Problem() string {
+	switch {
+	case !r.PerMinute() && !r.Period.Valid():
+		return "has the period '" + string(r.Period) + "'; use minute, day or month"
+	case r.Requests < 0 || r.Tokens < 0 || r.Requests == 0 && r.Tokens == 0:
+		return "needs a positive 'requests', 'tokens' or both"
+	case r.PerMinute() && max(r.Requests, r.Tokens) > MaxPerMinute:
+		return fmt.Sprintf("allows more than %d a minute; use a 'period' of day or month "+
+			"for a limit that large", MaxPerMinute)
+	}
+	return ""
+}
+
+// Problem says what is wrong with the budget, in words that follow "a
+// budget", or "".
+func (b Budget) Problem() string {
+	switch {
+	case !b.Per().Valid():
+		return "has the period '" + string(b.Period) + "'; use day or month"
+	case b.BudgetMicros <= 0:
+		return "needs a positive 'budget_micros'"
+	}
+	return ""
+}
+
+// count is what the limit counts under: per minute, the token buckets of the
+// scope's month, which it sets; per day or month, quotas of their own.
+func (r RateLimit) count(month *Scope) []Scope {
+	if p := r.Per(); p.Valid() {
+		return quotas(month.Type, month.ID, p, r.Requests, r.Tokens)
+	}
+	month.RPM = int(min(r.Requests, MaxPerMinute))
+	month.TPM = int(min(r.Tokens, MaxPerMinute))
+	return nil
+}
+
 // IsZero reports whether l sets nothing at all. It compares with the zero
 // value, so a field added later is counted without changing this.
 func (l Limits) IsZero() bool { return reflect.DeepEqual(l, Limits{}) }
@@ -641,11 +701,39 @@ func (l Limits) IsZero() bool { return reflect.DeepEqual(l, Limits{}) }
 type Scope struct {
 	Type ScopeType `json:"type"`
 	ID   string    `json:"id"`
-	// Zero means unlimited for all three.
+	// Zero means unlimited for all three. RPM and TPM are a rate limit per
+	// minute; one per day or month is a scope in Resolved.Quotas. A level
+	// with a budget per day has a second scope for it, without RPM or TPM.
 	RPM          int    `json:"rpm"`
 	TPM          int    `json:"tpm"`
 	BudgetMicros int64  `json:"budget_micros"`
 	Period       Period `json:"period"`
+	// Meter is what the scope counts over its period: money when empty, as
+	// for a budget, or requests or tokens, for a router's daily or monthly
+	// rate limit. Quota is the most it may count; zero is no limit.
+	Meter Meter `json:"meter,omitempty"`
+	Quota int64 `json:"quota,omitempty"`
+}
+
+// Meter is what a scope's period window counts. See Scope.
+type Meter string
+
+const (
+	MeterCost     Meter = ""
+	MeterRequests Meter = "requests"
+	MeterTokens   Meter = "tokens"
+)
+
+// Amount is what one request adds to a window of this meter: its cost, one,
+// or its tokens.
+func (m Meter) Amount(costMicros, tokens int64) int64 {
+	switch m {
+	case MeterRequests:
+		return 1
+	case MeterTokens:
+		return tokens
+	}
+	return costMicros
 }
 
 // KeyKind says what a key may reach.
@@ -691,8 +779,7 @@ type PlanUsage struct {
 type Resolved struct {
 	Key Key
 	// AllowedModels nil means every enabled model of the organisation.
-	AllowedModels   []string
-	MaxOutputTokens int
+	AllowedModels []string
 	// SystemPrompt is every level's prompt joined, outermost first. Empty
 	// means the conversation is forwarded as sent.
 	SystemPrompt string
@@ -703,8 +790,14 @@ type Resolved struct {
 	// AllowedTools nil means every tool of every MCP server of the organisation.
 	AllowedTools []string
 	// Scopes runs outermost first: org, project if any, then the key. Rate
-	// limits and budgets are enforced at every level.
+	// limits and budgets are enforced at every level. Each level has a scope
+	// per month, which carries its rate limit per minute, and one per day
+	// when it has a budget per day.
 	Scopes []Scope
+	// Quotas are the rate limits per day or month, one scope per level and
+	// count. They are kept apart from Scopes because a request counts against
+	// them only once it is let through.
+	Quotas []Scope
 	// Sandbox is what this key may hold of the sandbox pool.
 	Sandbox ResolvedSandbox
 }
@@ -720,11 +813,11 @@ func (r *Resolved) MayUse(m Model) bool {
 	return r.Key.Subscription() == m.Subscription && r.allowsModel(m.Alias)
 }
 
-// MayRoute reports whether the key may name the router alias. The allow-list
-// covers the router, not its destinations: allowing a router allows where it
-// sends. A subscription key reaches no router, which would place it on models
-// the organisation pays for.
-func (r *Resolved) MayRoute(alias string) bool {
+// MayCallRouter reports whether the key may name the router alias. The
+// allow-list covers the router, not the models it reaches: allowing a
+// router allows where it sends. A subscription key reaches none, which would
+// place it on models the organisation pays for.
+func (r *Resolved) MayCallRouter(alias string) bool {
 	return r.allowsModel(alias) && !r.Key.Subscription()
 }
 
@@ -753,17 +846,27 @@ func Resolve(key Key, org, project, own *Limits) *Resolved {
 	levels = append(levels, level{ScopeKey, key.ID, own})
 
 	for _, lv := range levels {
-		s := Scope{Type: lv.typ, ID: lv.id, Period: PeriodMonth}
+		month := Scope{Type: lv.typ, ID: lv.id, Period: PeriodMonth}
+		var day *Scope
 		if lv.lim != nil {
 			r.narrow(lv.lim, lv.typ == ScopeOrg)
-			s.RPM = deref(lv.lim.RPM)
-			s.TPM = deref(lv.lim.TPM)
-			s.BudgetMicros = deref(lv.lim.BudgetMicros)
-			if lv.lim.BudgetPeriod != nil && lv.lim.BudgetPeriod.Valid() {
-				s.Period = *lv.lim.BudgetPeriod
+			for _, rl := range lv.lim.RateLimits {
+				r.Quotas = append(r.Quotas, rl.count(&month)...)
+			}
+			for _, b := range lv.lim.Budgets {
+				if b.Per() == PeriodDay {
+					day = &Scope{Type: lv.typ, ID: lv.id, Period: PeriodDay, BudgetMicros: b.BudgetMicros}
+				} else {
+					month.BudgetMicros = b.BudgetMicros
+				}
 			}
 		}
-		r.Scopes = append(r.Scopes, s)
+		// The month's scope is there with no budget too: it is what the
+		// level's spend this month is counted under.
+		r.Scopes = append(r.Scopes, month)
+		if day != nil {
+			r.Scopes = append(r.Scopes, *day)
+		}
 	}
 	return r
 }
@@ -772,8 +875,7 @@ func Resolve(key Key, org, project, own *Limits) *Resolved {
 // is the organisation's level, the only one that grants repositories.
 func (r *Resolved) narrow(lim *Limits, top bool) {
 	r.AllowedModels = intersect(r.AllowedModels, lim.AllowedModels)
-	r.MaxOutputTokens = minPositive(r.MaxOutputTokens, deref(lim.MaxOutputTokens))
-	r.SystemPrompt = joinPrompts(r.SystemPrompt, deref(lim.SystemPrompt))
+	r.SystemPrompt = JoinPrompts(r.SystemPrompt, deref(lim.SystemPrompt))
 	r.Filters = appendFilters(r.Filters, lim.Filters)
 	r.AllowedTools = intersectTools(r.AllowedTools, lim.AllowedTools)
 	r.Sandbox.narrow(lim, top)
@@ -817,9 +919,9 @@ func narrowList(cur, next []string, covers func(a, b string) bool) []string {
 	return out
 }
 
-// joinPrompts appends one level's system prompt to the ones above it. The
+// JoinPrompts appends a system prompt to the ones before it. The
 // blank line keeps two instructions from running together.
-func joinPrompts(cur, next string) string {
+func JoinPrompts(cur, next string) string {
 	next = strings.TrimSpace(next)
 	switch {
 	case next == "":
@@ -893,14 +995,16 @@ func (t ScopeType) Possessive() string {
 		return "your organisation"
 	case ScopeProject:
 		return "your project"
+	case ScopeRouter:
+		return "this router"
 	default:
 		return "this API key"
 	}
 }
 
-// FormatMicros renders micro-units exactly, padded to at least two decimals.
-// Prices use it, because they are what gets billed, so 0.125 must not read as
-// 0.13. So do exports and headers that a program reads.
+// FormatMicros renders micro-units exactly, with at least two decimals.
+// Prices use it, since a billed 0.125 must not read as 0.13, and so do exports
+// and headers a program reads.
 func FormatMicros(micros int64) string {
 	return twoDecimals(strconv.FormatFloat(float64(micros)/1e6, 'f', -1, 64))
 }

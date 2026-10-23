@@ -287,7 +287,7 @@ keera model check keera-speed             # the acceptance test - see below
 curl http://127.0.0.1:8080/api/v1/chat/completions \
   -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
   -d '{"model":"keera-speed","messages":[{"role":"user","content":"Hello"}]}'
-keera guardrail set project <project-id> --models keera-speed --rpm 120 --budget 500 --period month
+keera guardrail set project <project-id> --models keera-speed --requests 120 --budget 500 --period month
 keera usage --by project
 keera doctor                              # and what is still missing
 ```
@@ -296,7 +296,8 @@ keera doctor                              # and what is still missing
 flags, they print what is in force:
 
 ```sh
-keera limit project <project-id> --rpm 120
+keera limit project <project-id> --requests 120
+keera limit key <key-id> --tokens 2000000 --per day
 keera budget project <project-id>               # every budget above this project
 keera guardrail effective key <key-id>    # what a request with this key meets
 ```
@@ -447,13 +448,23 @@ restart. Also:
 - **Run `keera model check` afterwards** if anything on the inference side
   changed.
 - **Upgrade to v0.10.0 before you shorten `KEERA_USAGE_RETENTION`.** The
-  upgrade fills `usage_daily` from the usage events still there. It reads the
+  upgrade fills `usage_daily` from the request log still there. It reads the
   whole table and rebuilds some of its indexes before the gateway serves, so on
   a large database try it on a copy first, and stop the old replicas before
   starting the new ones.
 - **v0.10.0 renames `max_context` to `max_context_tokens`** in model files,
-  in the API and in `keera model --max-context-tokens`. A model file that still
+  in the API and in `keera model set --max-context-tokens`. A model file that still
   says `max_context` is refused on start, so rename it there first.
+- **v0.11.0 replaces routers.** The old ones are deleted, and a client naming
+  one is told the model does not exist until it is written again. See
+  [Upgrading from v0.10](routers.md#upgrading-from-v010).
+- **v0.11.0 changes guardrail limits.** `keera guardrail set` takes
+  `--requests` and `--tokens`, with `--per minute|day|month`, instead of
+  `--rpm` and `--tpm`. In the API, `rpm`, `tpm`, `budget_micros` and
+  `budget_period` become the lists `rate_limits` and `budgets`. Existing limits
+  are carried over. The output-token guardrail (`--max-output-tokens`,
+  `max_output_tokens`) is removed, and its values are dropped. Update scripts
+  and API clients that set these.
 - **A database created before v0.4.0 cannot be upgraded in place.** Its first
   schema file changed up to that release, and the gateway runs each file only
   once. Start from an empty database.
@@ -478,16 +489,16 @@ organisation's administrators can run it.
 A failing check exits non-zero, so `keera doctor` can be the last step of an
 install script.
 
-| Symptom                                               | Where to look                                                                                                                                                                                                                                  |
-| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Gateway exits at once with a message about a variable | A required setting is missing or too short. The message names it.                                                                                                                                                                              |
-| Every request comes back 404 from the backend         | `backend_model` does not match what the backend serves the model as - vLLM's `--served-model-name`, llama.cpp's `--alias`.                                                                                                                     |
-| Long prompts fail with a 400 from the backend         | `max_context_tokens` on the model does not match the backend's window. They have to move together.                                                                                                                                                    |
-| A filter refuses long conversations with 413          | `max_context_tokens` on that filter's model is too small for the traffic. A router whose model is too small cannot decide instead: it uses its fallback or answers 503 `router_undecided`. See [filters.md](filters.md) and [routers.md](routers.md). |
-| The agent answers in prose and never edits a file     | Tool calls come back as text. Run `keera model check`. On the CPU tier this is expected.                                                                                                                                                       |
-| The panel shows no sign-on button                     | See [sso.md](sso.md#when-it-does-not-work).                                                                                                                                                                                                    |
-| A rate limit admits more than it is set to            | The buckets are per replica unless `KEERA_REDIS_URL` is set. If it is set, check `keera_ratelimit_fallback_total`.                                                                                                                             |
-| Streaming arrives all at once                         | Something in front is buffering the response.                                                                                                                                                                                                  |
-| A developer says their agent stopped this afternoon   | The **Requests** screen filtered to their key, or their **My access** screen. Each refusal is logged with the message the client got.                                                                                                          |
-| A limit is set and does not seem to apply             | `keera guardrail effective <scope> <id>`. Guardrails nest and the tightest level wins. The command shows which level each value came from.                                                                                                     |
-| `keera` acts on a gateway you did not mean            | No deployment was set, so it used the default, `https://gateway.keera.ch`. Run `keera login --url <your deployment>` or set `KEERA_CONTROL_URL`. `keera whoami` shows why.                                                                     |
+| Symptom                                               | Where to look                                                                                                                                                                                                                                                                    |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gateway exits at once with a message about a variable | A required setting is missing or too short. The message names it.                                                                                                                                                                                                                |
+| Every request comes back 404 from the backend         | `backend_model` does not match what the backend serves the model as - vLLM's `--served-model-name`, llama.cpp's `--alias`.                                                                                                                                                       |
+| Long prompts fail with a 400 from the backend         | `max_context_tokens` on the model does not match the backend's window. They have to move together.                                                                                                                                                                               |
+| A filter refuses long conversations with 413          | `max_context_tokens` on that filter's model is too small for the traffic. A router's instruction step whose deciding model is too small cannot decide either: it uses its fallback or answers 503 `router_undecided`. See [filters.md](filters.md) and [routers.md](routers.md). |
+| The agent answers in prose and never edits a file     | Tool calls come back as text. Run `keera model check`. On the CPU tier this is expected.                                                                                                                                                                                         |
+| The panel shows no sign-on button                     | See [sso.md](sso.md#when-it-does-not-work).                                                                                                                                                                                                                                      |
+| A rate limit admits more than it is set to            | The buckets are per replica unless `KEERA_REDIS_URL` is set. If it is set, check `keera_ratelimit_fallback_total`.                                                                                                                                                               |
+| Streaming arrives all at once                         | Something in front is buffering the response.                                                                                                                                                                                                                                    |
+| A developer says their agent stopped this afternoon   | The **Requests** screen filtered to their key, or their **My access** screen. Each refusal is logged with the message the client got.                                                                                                                                            |
+| A limit is set and does not seem to apply             | `keera guardrail effective <scope> <id>`. Guardrails nest and the tightest level wins. The command shows which level each value came from.                                                                                                                                       |
+| `keera` acts on a gateway you did not mean            | No deployment was set, so it used the default, `https://gateway.keera.ch`. Run `keera login --url <your deployment>` or set `KEERA_CONTROL_URL`. `keera whoami` shows why.                                                                                                       |

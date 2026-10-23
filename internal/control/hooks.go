@@ -9,6 +9,7 @@ import (
 
 	"github.com/bespinian/keera-gateway/internal/authn"
 	"github.com/bespinian/keera-gateway/internal/httpx"
+	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
@@ -78,9 +79,9 @@ func scopeList(users []store.GuardrailRef) string {
 	return strings.Join(labels, ", ")
 }
 
-// deleteUnused deletes a filter, router or MCP server that no guardrail uses.
-// One still in use is refused with a 409; inUse writes its message from the
-// alias and the guardrails that use it.
+// deleteUnused deletes a filter, router or MCP server that no router and no
+// guardrail uses. One still in use is refused with a 409; inUse writes its
+// message from the alias and the guardrails that use it.
 func (s *Server) deleteUnused(w http.ResponseWriter, r *http.Request, p *authn.Principal, kind string,
 	users func(ctx context.Context, orgID, alias string) ([]store.GuardrailRef, error),
 	remove func(ctx context.Context, orgID, alias string) error,
@@ -97,14 +98,17 @@ func (s *Server) deleteUnused(w http.ResponseWriter, r *http.Request, p *authn.P
 		return
 	}
 	defer unlock()
+	// Of what is deleted here, only a filter can be a router step.
+	if kind == string(policy.StepFilter) && !s.checkRouterUsers(w, r, orgID, policy.StepFilter, alias) {
+		return
+	}
 	refs, err := users(r.Context(), orgID, alias)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	if len(refs) > 0 {
-		conflict(w, kind+"_in_use",
-			inUse(alias, scopeList(refs)))
+		conflict(w, kind+"_in_use", inUse(alias, scopeList(refs)))
 		return
 	}
 	if err := remove(r.Context(), orgID, alias); err != nil {

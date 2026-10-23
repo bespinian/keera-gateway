@@ -107,7 +107,8 @@ finding it there is a reason to look harder rather than a reason to allow.
 
 Answer with ALLOW, or with that one line, and nothing else.`
 
-// filterRun is what applying one scope's filters cost and did.
+// filterRun is what applying a chain of filters cost and did: a router
+// step's, the key's own, or all of a request's together.
 type filterRun struct {
 	// applied names the enforcing filters that ran, in order, for the
 	// response header. Shadow filters are left out: telling a client its
@@ -122,8 +123,20 @@ type filterRun struct {
 	runs []store.FilterRun
 	// wall is how long the chain waited for filter models. It is taken off the
 	// gateway's overhead metric, so a guardrail does not look like slowness.
-	wall    time.Duration
+	wall time.Duration
+	// rewrote says this chain changed the text. add leaves it out: each
+	// chain's caller acts on its own.
 	rewrote bool
+}
+
+// add puts a later chain's runs after this one's: a router's filters, then
+// the key's own.
+func (r *filterRun) add(o filterRun) {
+	r.applied = append(r.applied, o.applied...)
+	r.micros += o.micros
+	r.bills = append(r.bills, o.bills...)
+	r.runs = append(r.runs, o.runs...)
+	r.wall += o.wall
 }
 
 // noteFilter records what one filter run did, for the log, the metrics and
@@ -175,18 +188,19 @@ func changedSegments(before, after []string) int {
 	return n
 }
 
-// applyFilters runs the resolved filter chain over a request body.
-//
-// A refusal is returned rather than written, so serve records it like every
-// other refusal.
-//
-// extract finds the text in b, which differs between the shapes a body can
-// be in.
-func (s *Server) applyFilters(ctx context.Context, res *policy.Resolved, b *body,
-	extract func(*body) (textDoc, error), tr *trace,
+// guardrailFilters is who applies the key's own filters, as a refusal names
+// it. A router's filters are named by their router instead.
+const guardrailFilters = "a guardrail on this key"
+
+// applyFilters runs a chain of the organisation's filters over a request body.
+// A refusal is returned rather than written, so serve records it like any
+// other. by says who applies the chain, for the refusal's wording, and extract
+// finds the text in b's shape.
+func (s *Server) applyFilters(ctx context.Context, orgID string, aliases []string, by string,
+	b *body, extract func(*body) (textDoc, error), tr *trace,
 ) (filterRun, *refusal) {
 	var run filterRun
-	if len(res.Filters) == 0 {
+	if len(aliases) == 0 {
 		return run, nil
 	}
 
@@ -195,8 +209,7 @@ func (s *Server) applyFilters(ctx context.Context, res *policy.Resolved, b *body
 	// redactions, and a gate judges what would actually be sent.
 	doc, err := extract(b)
 	if err != nil {
-		return run, unreadableBody("a guardrail on this key filters every request before it is "+
-			"forwarded", err)
+		return run, unreadableBody(by+" filters every request before it is forwarded", err)
 	}
 	texts := doc.texts()
 	if len(texts) == 0 {
@@ -207,8 +220,8 @@ func (s *Server) applyFilters(ctx context.Context, res *policy.Resolved, b *body
 	// Stays false through gates and shadows, so the body is only re-encoded
 	// when something was actually rewritten.
 	rewritten := false
-	for _, alias := range res.Filters {
-		out, ref, stop := s.chainFilter(ctx, &run, res.Key.OrgID, alias, texts, tr)
+	for _, alias := range aliases {
+		out, ref, stop := s.chainFilter(ctx, &run, orgID, alias, by, texts, tr)
 		if stop {
 			return run, ref
 		}
@@ -226,22 +239,20 @@ func (s *Server) applyFilters(ctx context.Context, res *policy.Resolved, b *body
 	return run, nil
 }
 
-// chainFilter runs one filter of the chain.
+// chainFilter runs one filter of the chain. It returns the texts the next
+// filter should see, or nil to keep them. stop ends the chain; ref is then the
+// refusal, or nil when the client has hung up.
 //
-// It returns the texts the next filter should see, or nil to keep them as
-// they are. stop ends the chain; ref is then the refusal, or nil when the
-// client has hung up.
-//
-// A shadow filter sits where it would sit if enforcing, so it judges what it
-// would judge when live. It never changes the texts and never stops the chain.
-func (s *Server) chainFilter(ctx context.Context, run *filterRun, orgID, alias string,
+// A shadow filter sits where it would if enforcing, so it judges what it would
+// judge when live, but it never changes the texts or stops the chain.
+func (s *Server) chainFilter(ctx context.Context, run *filterRun, orgID, alias, by string,
 	texts []string, tr *trace,
 ) (out []string, ref *refusal, stop bool) {
 	f, ok := s.src.Filter(orgID, alias)
 	if !ok {
 		// Nothing is known about it, not even whether it was enforcing, so it
 		// fails closed.
-		return nil, filterUnavailable(alias,
+		return nil, filterUnavailable(by, alias,
 			"no filter of that alias exists in this organisation any more"), true
 	}
 	var (
@@ -254,7 +265,7 @@ func (s *Server) chainFilter(ctx context.Context, run *filterRun, orgID, alias s
 	// measures nothing, and nothing else would show it.
 	m, broken := s.filterModel(f)
 	if broken != "" {
-		outcome, ref = store.FilterError, filterUnavailable(alias, broken)
+		outcome, ref = store.FilterError, filterUnavailable(by, alias, broken)
 	} else {
 		start := time.Now()
 		var err error
@@ -272,7 +283,7 @@ func (s *Server) chainFilter(ctx context.Context, run *filterRun, orgID, alias s
 		refused, isRefusal := errors.AsType[*filterRefusedError](err)
 		switch {
 		case isRefusal:
-			outcome, ref = store.FilterRefuse, filterRefused(f, refused.reason)
+			outcome, ref = store.FilterRefuse, filterRefused(by, f, refused.reason)
 		case err != nil:
 			outcome, ref = store.FilterError, filterFailed(f, err)
 		default:
@@ -357,13 +368,13 @@ func filterFailed(f policy.Filter, err error) *refusal {
 // 503 because the deployment is not ready for this key and an administrator
 // can fix that. It names the filter, since the developer will pass the
 // message on.
-func filterUnavailable(alias, why string) *refusal {
+func filterUnavailable(by, alias, why string) *refusal {
 	return &refusal{
 		status: http.StatusServiceUnavailable,
 		typ:    "server_error", code: "filter_unavailable",
-		msg: fmt.Sprintf("a guardrail on this key filters every request through '%s' "+
+		msg: fmt.Sprintf("%s filters every request through '%s' "+
 			"before it is forwarded, and that filter cannot run: %s. Nothing was sent to the "+
-			"model", alias, why),
+			"model", by, alias, why),
 		advise: true,
 	}
 }
@@ -378,17 +389,17 @@ const codeFilterRefused = "filter_refused"
 // It is 403, unlike the failures above: a refusal is the guardrail working,
 // and only the status stops a client retrying what will never succeed. The
 // reason is quoted as the filter's, since a small model may have misread.
-func filterRefused(f policy.Filter, reason string) *refusal {
-	msg := fmt.Sprintf("a guardrail on this key filters every request through '%s' "+
-		"before it is forwarded, and that filter refused this one", f.Alias)
+func filterRefused(by string, f policy.Filter, reason string) *refusal {
+	msg := fmt.Sprintf("%s filters every request through '%s' "+
+		"before it is forwarded, and that filter refused this one", by, f.Alias)
 	switch {
 	case f.Mode.Gates():
-		msg = fmt.Sprintf("a guardrail on this key checks every request against '%s' "+
-			"before it is forwarded, and it refused this one", f.Alias)
+		msg = fmt.Sprintf("%s checks every request against '%s' "+
+			"before it is forwarded, and it refused this one", by, f.Alias)
 	case !f.UsesModel():
 		// A rule matched, and its reason is the administrator's own words.
-		msg = fmt.Sprintf("a guardrail on this key checks every request against the rules "+
-			"in '%s' before it is forwarded, and one of them matched this request", f.Alias)
+		msg = fmt.Sprintf("%s checks every request against the rules "+
+			"in '%s' before it is forwarded, and one of them matched this request", by, f.Alias)
 	}
 	if reason != "" {
 		msg += ", saying: " + reason
@@ -472,7 +483,7 @@ func (s *Server) runFilter(ctx context.Context, f policy.Filter, m policy.Model,
 	ans, err := s.askGuard(ctx, m, ask, logprobs)
 	cost.micros, cost.bills = ans.micros, ans.bills
 	if err == nil && logprobs && rejectsLogprobs(ans.status) {
-		// As a router does: remember it, and ask again for the words only.
+		// As a route step does: remember it, and ask again for the words only.
 		s.dropLogprobs(m)
 		ans, err = s.askGuard(ctx, m, ask, false)
 		cost.micros += ans.micros
@@ -491,13 +502,10 @@ func (s *Server) runFilter(ctx context.Context, f policy.Filter, m policy.Model,
 		return nil, cost, err
 	}
 	out, err := parseFilterReply(ans.raw, texts)
-	if err != nil {
-		return nil, cost, err
-	}
-	return out, cost, nil
+	return out, cost, err
 }
 
-// guardQuestion is one question a filter or a router puts to its own model.
+// guardQuestion is one question a filter or a route step puts to its own model.
 type guardQuestion struct {
 	instruction  string
 	input        []byte
@@ -530,7 +538,7 @@ type guardAnswer struct {
 	bills  []policy.BillLine
 }
 
-// askGuard sends a filter's or a router's model one question, and reads back
+// askGuard sends a filter's or a route step's model one question, and reads back
 // the whole answer. The cost is set even when it fails: a model on the
 // deployment's key may have been charged for an answer that never arrived.
 func (s *Server) askGuard(ctx context.Context, m policy.Model, q guardQuestion, logprobs bool,
@@ -612,8 +620,8 @@ func answerCost(m policy.Model, used policy.Tokens) (int64, []policy.BillLine) {
 	return micros, nil
 }
 
-// guardRequest builds the chat request a filter or a router sends its own
-// model. logprobs asks for the distribution over the first token.
+// guardRequest builds the chat request a filter or a route step sends its
+// own model. logprobs asks for the distribution over the first token.
 //
 // Temperature is 0: sampling turns "repeat this unchanged" into a paraphrase,
 // and makes a verdict or a choice differ between identical requests.
@@ -632,12 +640,12 @@ func guardRequest(m policy.Model, instruction string, input []byte, maxTokens in
 	}
 	if logprobs {
 		body["logprobs"] = true
-		body["top_logprobs"] = routerTopLogprobs
+		body["top_logprobs"] = topLogprobs
 	}
 	return json.Marshal(body)
 }
 
-// promptTokens estimates the size of a guardrail's prompt.
+// promptTokens estimates the size of what a filter sends its model.
 func promptTokens(input []byte, instruction string) int {
 	return (len(input) + len(instruction)) / bytesPerToken
 }

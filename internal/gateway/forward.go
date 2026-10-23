@@ -32,13 +32,13 @@ type forwarded struct {
 	// start answering in time, which is the one case with no response to serve.
 	err error
 	// at is how far down the chain the answer came from. Zero is the
-	// destination the router meant to use.
+	// destination the step meant to use.
 	at int
 	// failures is what each destination that did not answer said, in order,
 	// for the request's own row.
 	failures []string
 	// wasted is how long those attempts took: time the client waited for
-	// nothing, and on a fallback router what the router cost.
+	// nothing, and on a fallback step what the step cost.
 	wasted time.Duration
 	// sent is when the request went to model, the destination in resp.
 	sent time.Time
@@ -79,8 +79,8 @@ func appendNote(text, note string) string {
 
 // destinations turns a routing decision into the models to try, in order.
 //
-// It is one model unless a trying router produced a chain. A model the client
-// or a deciding router chose has been decided on, and if it fails, that is
+// It is one model unless a trying step produced a chain. A model the client
+// or an instruction step chose has been decided on, and if it fails, that is
 // its failure, not a reason to ask another one.
 func (s *Server) destinations(orgID string, model policy.Model, d routeDecision) []policy.Model {
 	if len(d.chain) < 2 {
@@ -152,7 +152,7 @@ func (s *Server) forward(ctx context.Context, chain []policy.Model,
 		// A client that hung up is not the destination's fault.
 		gone := errors.Is(ctx.Err(), context.Canceled)
 		if (err != nil && !gone) || (resp != nil && resp.StatusCode >= 500) {
-			// Recorded even on the last attempt, so a measured router ranks it
+			// Recorded even on the last attempt, so a measured step ranks it
 			// last for a while. Stamped now, not at the start, so a long dial
 			// timeout does not shorten the penalty. See loadPenalty.
 			s.load.fail(m.Key(), time.Now())
@@ -188,7 +188,7 @@ func (s *Server) forward(ctx context.Context, chain []policy.Model,
 // answer, and a backend that did not answer in time may still be working on it.
 //
 // Each failure is counted here once, whoever sent the request: a client, a
-// filter, a router or a model check.
+// filter, a route step or a model check.
 func (s *Server) send(ctx context.Context, model policy.Model, out outbound) (*http.Response, error) {
 	counter, _ := s.rr.LoadOrStore(model.Key(), new(atomic.Uint64))
 	offset := counter.(*atomic.Uint64).Add(1) - 1

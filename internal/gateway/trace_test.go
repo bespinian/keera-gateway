@@ -137,11 +137,10 @@ func TestStreamedAnswerIsRecordedAsWaitingAndThenStreaming(t *testing.T) {
 	}
 }
 
-// The destinations a fallback router tried and gave up on are the whole reason
-// such a request was slow, and they are invisible in every other reading of it:
-// the row names the model that answered.
-func TestFallbackRouterRecordsEveryDestinationItTried(t *testing.T) {
-	h := chainHarness(t, chainRouter(), map[string]int{"small-served": 503})
+// The destinations a fallback step gave up on are why such a request was slow,
+// and the row names only the model that answered.
+func TestFallbackStepRecordsEveryDestinationItTried(t *testing.T) {
+	h := chainHarness(t, chainRoute(), map[string]int{"small-served": 503})
 
 	resp := h.post(t, "/v1/chat/completions",
 		`{"model":"ha","messages":[{"role":"user","content":"hello"}]}`)
@@ -160,10 +159,10 @@ func TestFallbackRouterRecordsEveryDestinationItTried(t *testing.T) {
 	if !slices.Equal(tried, want) {
 		t.Errorf("the destinations recorded were %v, want %v", tried, want)
 	}
-	// A fallback router decides nothing, so it has no step of its own: the
+	// A fallback step decides nothing, so it has no span of its own: the
 	// time it cost is the failed attempt above, drawn as itself.
 	if slices.Contains(stepNames(ev.Spans), store.SpanRoute) {
-		t.Errorf("a fallback router was drawn as a decision: %v", stepNames(ev.Spans))
+		t.Errorf("a fallback step was drawn as a decision: %v", stepNames(ev.Spans))
 	}
 }
 
@@ -195,10 +194,10 @@ func TestFilterIsRecordedAsAStepOfItsOwn(t *testing.T) {
 	}
 }
 
-// An instruction router's own generation is time the request waited before it
+// An instruction step's own generation is time the request waited before it
 // was sent anywhere, and the bar carries where it decided to send it.
-func TestRouterDecisionIsRecordedWithWhereItSent(t *testing.T) {
-	h := routerHarness(t, picks("keera-large"), autoRouter(), nil)
+func TestRouteDecisionIsRecordedWithWhereItSent(t *testing.T) {
+	h := routeHarness(t, picks("keera-large"), autoRoute(), nil)
 
 	resp := h.post(t, "/v1/chat/completions",
 		`{"model":"auto","messages":[{"role":"user","content":"hello"}]}`)
@@ -208,8 +207,9 @@ func TestRouterDecisionIsRecordedWithWhereItSent(t *testing.T) {
 
 	ev := h.sink.last(t)
 	sp := spanOf(t, ev.Spans, store.SpanRoute)
-	if sp.Of != "auto" {
-		t.Errorf("the routing step names %q, want %q", sp.Of, "auto")
+	// The step's id too: one router may have several route steps.
+	if sp.Of != "auto/route" {
+		t.Errorf("the routing step names %q, want %q", sp.Of, "auto/route")
 	}
 	if sp.Note != "chose keera-large" {
 		t.Errorf("routing note = %q, want %q", sp.Note, "chose keera-large")

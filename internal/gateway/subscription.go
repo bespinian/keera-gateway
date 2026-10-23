@@ -181,7 +181,7 @@ func unixTime(v string) *time.Time {
 	return &t
 }
 
-// appendSystem puts the guardrail's prompt after the client's own system
+// appendSystem puts the system prompt after the client's own system
 // blocks, not before. Claude Code's first block identifies it, and Anthropic
 // removes that block only when it comes first.
 func appendSystem(b *body, prompt string) error { return setSystem(b, prompt, false) }

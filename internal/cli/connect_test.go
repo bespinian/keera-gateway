@@ -3,71 +3,33 @@ package cli
 import (
 	"context"
 	"maps"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/bespinian/keera-gateway/internal/connect"
 )
 
-// catalogueOf is the /v1/connect answer, built from the same package the
-// control plane serves it from - so a test asserting on what the CLI printed is
-// asserting against the real templates.
+// catalogueOf is the /v1/connect answer, built from the package the control
+// plane serves it from, so tests check what the CLI prints against the real
+// templates.
 func catalogueOf(gateway string) map[string]any {
 	return map[string]any{"data": connect.Clients(), "gateway_url": gateway}
 }
 
-// oneRouter is the organisation's routers as /v1/routers answers with them. A
-// router's alias goes where a model's alias goes, so `keera connect` has to be
-// able to write one into an editor's configuration.
-var oneRouter = map[string]any{"data": []map[string]any{
-	{
-		"alias": "auto", "model": "keera-guard",
-		"destinations": []string{"keera-code", "keera-frontier"},
-		"fallback":     "keera-code",
-	},
-}}
+// autoRouter is the simplest router, as /v1/routers answers with it. A client
+// names a router where it names a model, so `keera connect` must be able to
+// write one into an editor's configuration.
+var autoRouter = map[string]any{
+	"alias": "auto", "start": map[string]any{"id": "router", "kind": "router", "ref": "auto"},
+}
+
+var oneRouter = map[string]any{"data": []map[string]any{autoRouter}}
 
 var chatAlias = map[string]any{"data": []map[string]any{
 	{"alias": "keera-code", "kind": "chat", "enabled": true, "backend_model": "qwen"},
 	{"alias": "keera-embed", "kind": "embedding", "enabled": true},
 	{"alias": "keera-off", "kind": "chat", "enabled": false},
 }}
-
-// captured runs a command with stdout collected, which for `keera connect` is the
-// configuration block and nothing else.
-func captured(t *testing.T, run func() error) string {
-	t.Helper()
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	stdout, stderr := os.Stdout, os.Stderr
-	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	os.Stdout, os.Stderr = w, devNull
-	runErr := run()
-	_ = w.Close()
-	os.Stdout, os.Stderr = stdout, stderr
-	_ = devNull.Close()
-
-	var b strings.Builder
-	buf := make([]byte, 4096)
-	for {
-		n, err := r.Read(buf)
-		b.Write(buf[:n])
-		if err != nil {
-			break
-		}
-	}
-	_ = r.Close()
-	if runErr != nil {
-		t.Fatal(runErr)
-	}
-	return b.String()
-}
 
 // noKeys is /v1/access for somebody with no key of their own, such as the
 // operator key the tests sign in with.
@@ -85,14 +47,32 @@ func connectRoutes(gateway string, extra map[string]any) map[string]any {
 	return routes
 }
 
+// A router is named where a model is, so it goes in the configuration after
+// the models, by its name for people when it has one.
+func TestConnectOffersRouters(t *testing.T) {
+	newFakeControl(t, connectRoutes("https://keera.example.ch/api", map[string]any{
+		"GET /v1/routers": map[string]any{"data": []map[string]any{
+			autoRouter,
+			{"alias": "safe", "display_name": "Safe", "start": map[string]any{
+				"id": "out", "kind": "model", "ref": "keera-code"}},
+		}},
+	}))
+
+	got := capture(t, "connect", "opencode")
+	client, _ := connect.Find(connect.Clients(), "opencode")
+	want := client.Render("https://keera.example.ch/api",
+		[]connect.Model{{Alias: "keera-code"}, {Alias: "auto"}, {Alias: "safe", Name: "Safe"}}) + "\n"
+	if got != want {
+		t.Errorf("stdout =\n%s\nwant\n%s", got, want)
+	}
+}
+
 // The block on stdout is the whole point: it is what gets redirected into the
 // file the command names, so nothing else may be on that stream.
 func TestConnectPutsOnlyTheBlockOnStdout(t *testing.T) {
 	newFakeControl(t, connectRoutes("https://keera.example.ch/api", nil))
 
-	got := captured(t, func() error {
-		return connectCmd(context.Background(), []string{"opencode"})
-	})
+	got := capture(t, "connect", "opencode")
 	client, _ := connect.Find(connect.Clients(), "opencode")
 	want := client.Render("https://keera.example.ch/api",
 		[]connect.Model{{Alias: "keera-code"}, {Alias: "auto"}}) + "\n"

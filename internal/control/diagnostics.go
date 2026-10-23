@@ -199,10 +199,10 @@ func (s *Server) checkCatalogue(ctx context.Context, d *Diagnosis, orgID string,
 				"enabled with no backend, so a request naming it gets a 503",
 				modelFix(m, "--backend <url>", p))
 		}
-		// A router is told nothing about a destination but its description.
+		// A route step is told nothing about a destination but its description.
 		if m.Description == "" {
 			d.add(area, m.Alias, VerdictWarn,
-				"no description, so a router choosing between destinations sees a bare "+
+				"no description, so a route step choosing between destinations sees a bare "+
 					"alias, and so does a client on /v1/models",
 				modelFix(m, "--description \"...\"", p))
 		}
@@ -339,7 +339,7 @@ func (s *Server) checkHooks(ctx context.Context, d *Diagnosis, orgID string, p *
 	}
 	org := orgEnv(p, orgID)
 	s.checkFilters(ctx, d, orgID, org, enabled)
-	s.checkRouters(ctx, d, orgID, org, enabled)
+	s.checkRoutes(ctx, d, orgID, org, enabled)
 }
 
 func (s *Server) checkFilters(ctx context.Context, d *Diagnosis, orgID, org string, enabled map[string]bool) {
@@ -365,37 +365,49 @@ func (s *Server) checkFilters(ctx context.Context, d *Diagnosis, orgID, org stri
 	}
 }
 
-func (s *Server) checkRouters(ctx context.Context, d *Diagnosis, orgID, org string, enabled map[string]bool) {
+func (s *Server) checkRoutes(ctx context.Context, d *Diagnosis, orgID, org string, enabled map[string]bool) {
 	routers, err := s.st.ListRouters(ctx, orgID)
 	if err != nil {
 		return
 	}
-	for _, rt := range routers {
-		var dead []string
-		for _, dest := range rt.Destinations {
-			if !enabled[dest] {
-				dead = append(dead, dest)
+	for _, rtr := range routers {
+		for st := range rtr.Steps() {
+			if st.Kind == policy.StepModel && !enabled[st.Ref] {
+				d.add("Routers", rtr.Alias+" / "+st.ID, VerdictFail,
+					"sends requests to '"+st.Ref+"', which is not an enabled model",
+					"enable it, or change the step with '"+org+"keera router set "+rtr.Alias+
+						" --file <file>'")
 			}
 		}
-		switch {
-		case len(dead) == len(rt.Destinations) && len(dead) > 0:
-			d.add("Routers", rt.Alias, VerdictFail,
-				"none of its destinations is an enabled model: "+strings.Join(dead, ", "),
-				"point it at enabled models with '"+org+"keera router set "+rt.Alias+
-					" --destinations <a,b>'")
-		case len(dead) > 0:
-			// Not fatal, since the router uses what is left. Still worth
-			// saying, because a router's failures are silent.
-			d.add("Routers", rt.Alias, VerdictWarn,
-				"destinations that are not enabled models: "+strings.Join(dead, ", "),
-				"remove them, or enable them")
-		case rt.Decides() && !enabled[rt.Model]:
-			d.add("Routers", rt.Alias, VerdictFail,
-				"reads requests with '"+rt.Model+"', which is not an enabled model",
-				"point it at one with '"+org+"keera router set "+rt.Alias+" --model <alias>'")
-		default:
-			d.add("Routers", rt.Alias, VerdictOK,
-				fmt.Sprintf("%s, %d destinations", rt.Mode, len(rt.Destinations)), "")
+		for _, rt := range rtr.Routes() {
+			name := rtr.Alias + " / " + rt.Step
+			var dead []string
+			for _, dest := range rt.Destinations {
+				if !enabled[dest] {
+					dead = append(dead, dest)
+				}
+			}
+			switch {
+			case len(dead) == len(rt.Destinations) && len(dead) > 0:
+				d.add("Routers", name, VerdictFail,
+					"none of its destinations is an enabled model: "+strings.Join(dead, ", "),
+					"enable them, or change the step with '"+org+"keera router set "+rtr.Alias+
+						" --file <file>'")
+			case len(dead) > 0:
+				// Not fatal: the step uses what is left. But a route step
+				// fails silently, so say it.
+				d.add("Routers", name, VerdictWarn,
+					"destinations that are not enabled models: "+strings.Join(dead, ", "),
+					"remove them, or enable them")
+			case rt.Decides() && !enabled[rt.Model]:
+				d.add("Routers", name, VerdictFail,
+					"reads requests with '"+rt.Model+"', which is not an enabled model",
+					"enable it, or change the step with '"+org+"keera router set "+rtr.Alias+
+						" --file <file>'")
+			default:
+				d.add("Routers", name, VerdictOK,
+					fmt.Sprintf("%s, %d destinations", rt.Mode, len(rt.Destinations)), "")
+			}
 		}
 	}
 }

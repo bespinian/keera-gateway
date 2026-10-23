@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"cmp"
-	"fmt"
 	"math"
 	"slices"
 	"strconv"
@@ -11,7 +10,7 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// A size router places a request by how long it is. How much model a request
+// A size step places a request by how long it is. How much model a request
 // needs usually follows its length: a variable rename is a paragraph, a
 // migration plan is a conversation plus files.
 //
@@ -20,7 +19,7 @@ import (
 //
 // It cannot tell a hard request from an easy one of the same length, and it
 // does not read the text. Keeping client data inside the cluster is a job for
-// an instruction router or a filter.
+// an instruction step or a filter.
 
 // sizeTier is how well one destination suits a request, best first.
 type sizeTier int
@@ -41,14 +40,14 @@ const (
 // The chain is every serveable destination in preference order, not just the
 // winner: if the preferred one is down, the larger model behind it is better
 // than a refusal. Nothing is generated or spent.
-func (s *Server) sized(rt policy.Router, b *body, kind policy.Kind) (routeDecision, *refusal) {
+func (s *Server) sized(rt policy.Route, b *body, kind policy.Kind) (routeDecision, *refusal) {
 	d := routeDecision{outcome: store.RouterChose}
 
-	// The same extraction the filters and instruction routers use.
+	// The same extraction the filters and instruction steps use.
 	doc, err := extractText(b, kind)
 	if err != nil {
-		return d, unreadableBody("'"+rt.Alias+"' is a router: it chooses the model by how much "+
-			"text is in the request", err)
+		return d, unreadableBody(stepSubject(rt)+" chooses the model by how much text is "+
+			"in the request", err)
 	}
 	tokens := estimateTokens(doc.texts())
 
@@ -75,9 +74,9 @@ func (s *Server) sized(rt policy.Router, b *body, kind policy.Kind) (routeDecisi
 	}
 	if len(order) == 0 {
 		d.outcome = store.RouterError
-		return d, noDestination(fmt.Sprintf("'%s' is a router: it chooses between its "+
-			"destinations by how much text is in the request, and none of them can answer "+
-			"one - every one is missing, disabled, of another kind, or has no backend", rt.Alias))
+		return d, s.nowhere(rt, stepSubject(rt)+" chooses between its destinations by how "+
+			"much text is in the request, and none of them can answer one - every one is "+
+			"missing, disabled, of another kind, or has no backend")
 	}
 
 	// Tier first, then by ceiling, then the written order.
@@ -105,10 +104,8 @@ func byCeiling(a, b int) int {
 	return cmp.Compare(a, b)
 }
 
-/* ------------------------------------------------------------ checking one */
-
-// sizeBand is one destination's share of the size range, for the check. The
-// router depends on one number, so the bands describe it completely.
+// sizeBand is one destination's share of the size range, for the check. A size
+// step depends on one number, so the bands describe it completely.
 type sizeBand struct {
 	alias string
 	// from and to are the request sizes, in estimated tokens, this destination
@@ -124,7 +121,7 @@ type sizeBand struct {
 // The order is the one sized uses when every destination is up and can hold the
 // request: smallest ceiling first, unbounded last, the written order breaking a
 // tie. Each then takes everything above the previous one's ceiling.
-func sizeBands(rt policy.Router, aliases []string) []sizeBand {
+func sizeBands(rt policy.Route, aliases []string) []sizeBand {
 	type entry struct {
 		alias   string
 		ceiling int
@@ -170,21 +167,20 @@ func describeBand(b sizeBand) string {
 	}
 }
 
-// sizeWarnings says what is wrong with a size router's configuration but not
-// wrong enough to refuse when it is written. The most important: a router that
-// sends everything to one destination is just an alias.
-func sizeWarnings(rt policy.Router, bands []sizeBand, models map[string]policy.Model) []string {
+// sizeWarnings says what is wrong with a size step's configuration but not
+// wrong enough to refuse when it is written. The most important: a route step
+// that sends everything to one destination is just an alias.
+func sizeWarnings(rt policy.Route, bands []sizeBand, models map[string]policy.Model) []string {
 	var warnings []string
 	live := 0
 	for _, b := range bands {
-		if !b.dead {
-			live++
-		}
 		if b.dead {
 			warnings = append(warnings, "'"+b.alias+"' is never the first choice for any "+
 				"request. Its ceiling is no higher than the ceiling of the destination "+
 				"before it, so the only traffic it can take is what reaches it when that "+
 				"one is down.")
+		} else {
+			live++
 		}
 		// A ceiling above the model's context. Nothing breaks, but the number
 		// set is not the one in effect.
@@ -198,7 +194,7 @@ func sizeWarnings(rt policy.Router, bands []sizeBand, models map[string]policy.M
 		}
 	}
 	if live <= 1 {
-		warnings = append(warnings, "every request this router places goes to the same "+
+		warnings = append(warnings, "every request this step places goes to the same "+
 			"destination whatever its size. That is an alias with a step in front of it: it "+
 			"moves no traffic and produces nothing but successful requests. The ceilings are "+
 			"the thing to change.")

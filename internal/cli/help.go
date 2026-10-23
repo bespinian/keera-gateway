@@ -25,8 +25,11 @@ var (
 		"price-in", "price-out", "price-cached", "price-cache-write"}
 	mcpFieldFlags    = []string{"endpoint", "description", "auth-header", "api-key"}
 	filterFieldFlags = []string{"mode", "model", "prompt", "rules", "description"}
-	routerFlags      = []string{"mode", "destinations", "description", "model", "prompt",
-		"fallback", "no-fallback", "json"}
+	// routeStepFlags change one route step, so a router can be written
+	// without a file.
+	routeStepFlags = []string{"mode", "model", "destinations", "prompt", "fallback", "no-fallback"}
+	routerFlags    = slices.Concat([]string{"file", "display-name", "description", "step"},
+		routeStepFlags, []string{"json"})
 )
 
 // command is one noun this command line understands.
@@ -325,8 +328,8 @@ var commands = []command{
 			"(KEERA_MODELS_FILE). The copies are its own, to change or remove like any " +
 			"other. 'keera model apply' adds the models of a file to an organisation that " +
 			"already exists.\n\n" +
-			"--description says what a model is for. Clients see it, and a router reads it " +
-			"to choose between models. See docs/routers.md.",
+			"--description says what a model is for. Clients see it, and a router's " +
+			"instruction step reads it to choose between models. See docs/routers.md.",
 		subs: []subcommand{
 			{name: "list", summary: "the models you can use", flags: []string{"json"}},
 			{name: "add", args: "<alias>", summary: "add a model",
@@ -431,18 +434,18 @@ var commands = []command{
 				flags:   []string{"json"},
 				prose: "The chain collapsed the way the gateway collapses it, with the level " +
 					"that decided each value named beside it.\n\n" +
-					"Allow-lists intersect; the output-token ceiling takes the minimum. Rate " +
-					"limits and budgets are not merged: each level is checked on its own. " +
+					"Allow-lists intersect and ceilings take the minimum. Rate limits and " +
+					"budgets are not merged: each level is checked on its own. " +
 					"System prompts and filters add up, outermost first.",
-				examples: []string{"keera guardrail effective key key_06g9…"},
+				examples: []string{`keera guardrail effective key "Ada's laptop"`},
 			},
-			{name: "set", args: "<scope> [<id>]", summary: "set any of them on a scope",
-				flags: []string{"models", "no-models", "rpm", "tpm", "max-output-tokens", "budget", "period",
+			{name: "set", args: "<scope> [<id>]", summary: "change what a scope may do",
+				flags: []string{"models", "no-models", "requests", "tokens", "per", "budget", "period",
 					"system-prompt", "no-system-prompt", "filters", "no-filters", "tools", "no-tools",
 					"max-sandboxes", "max-sandbox-ttl", "sandbox-classes", "no-sandbox-classes",
 					"max-sandbox-cpu", "max-sandbox-memory", "repos", "no-repos", "json"},
 				examples: []string{
-					"keera guardrail set project project_1 --models keera-speed --rpm 120 \\\n" +
+					"keera guardrail set project payments --models keera-speed --requests 120 \\\n" +
 						"    --budget 500 --period month",
 				}},
 		},
@@ -452,28 +455,36 @@ var commands = []command{
 		aliases: []string{"limits"},
 		summary: "a scope's rate limits, on their own",
 		args:    "<scope> [<id>] [flags]",
-		flags:   []string{"rpm", "tpm", "max-output-tokens", "json"},
+		flags:   []string{"requests", "tokens", "per", "json"},
 		prose: "The rate-limiting part of 'guardrail set', and nothing else. Same object, " +
 			"same scopes, same nesting - fewer flags to read.\n\n" +
-			"With no flags it prints what is in force, and which level set it.",
+			"A scope may have one rate limit per minute, per day and per month. --per says " +
+			"which one the flags set, and is minute when left out; the others stay. A minute " +
+			"refills as it goes; a day or a month starts again at midnight UTC or on the 1st.\n\n" +
+			"With no flags it prints every rate limit above the scope, and which level set it.",
 		examples: []string{
-			"keera limit project project_1 --rpm 120",
-			"keera limit key key_06g9…",
+			"keera limit project payments --requests 120",
+			`keera limit key "Ada's laptop" --tokens 2000000 --per day`,
+			`keera limit key "Ada's laptop" --tokens 0 --per day`,
+			`keera limit key "Ada's laptop"`,
 		},
 	},
 	{
 		name:    "budget",
 		aliases: []string{"budgets"},
-		summary: "a scope's budget, on its own",
+		summary: "a scope's budgets, on their own",
 		args:    "<scope> [<id>] [flags]",
 		flags:   []string{"budget", "period", "json"},
 		prose: "The spending part of 'guardrail set', and nothing else. Spend past a budget " +
 			"is refused with 402, not 429: a client reading it as \"slow down\" would retry " +
 			"against a limit that only moves when the period rolls over.\n\n" +
+			"A scope may have one budget per day and one per month. --period says which one " +
+			"--budget sets, and is month when left out; the other stays.\n\n" +
 			"Budgets do not merge. An organisation's and a project's are two limits, and both " +
 			"have to hold. With no flags this prints every budget above the scope.",
 		examples: []string{
-			"keera budget project project_1 --budget 500 --period month",
+			"keera budget project payments --budget 500",
+			"keera budget project payments --budget 30 --period day",
 			"keera budget org",
 		},
 	},
@@ -519,33 +530,51 @@ var commands = []command{
 	{
 		name:    "router",
 		aliases: []string{"routers"},
-		summary: "which model answers a request",
-		prose: "A router chooses which model answers a request that names it. The modes are " +
-			"instruction (the default, a small model reads the request), size, fallback, " +
-			"latency and least-busy. One destination is enough: it gives a model a name " +
-			"that stays when the model behind it changes. See docs/routers.md.",
+		summary: "what clients call: filters, route steps, limits and models in order",
+		prose: "A router is a tree of steps a request goes through when a client names it: " +
+			"filters, route steps, rate limits, budgets and system prompts, each branch " +
+			"ending at a model. A " +
+			"route step picks the model, by instruction (a small model reads the request), " +
+			"size, fallback, latency or least-busy, and branches by the model it chose. A " +
+			"limit branches by whether the request is within it. The steps are written as " +
+			"JSON; the simplest router is one route step, which the route flags write for " +
+			"you. The key's guardrails still apply around it. See docs/routers.md.",
 		subs: []subcommand{
 			{name: "list", summary: "this organisation's routers", flags: []string{"json"}},
+			{name: "show", args: "<alias>", summary: "one router, drawn as a tree",
+				flags: []string{"json"},
+				prose: "--json prints it in the shape 'add --file' and 'set --file' read."},
 			{name: "add", args: "<alias>", summary: "add a router",
 				flags: routerFlags,
-				prose: "With --fallback a request the router cannot place goes to a named " +
-					"destination anyway; with --no-fallback it is refused. Neither is the " +
-					"right answer in general - a router that saves money has somewhere safe " +
-					"to fall back to, and a router that keeps prompts inside the cluster " +
-					"does not.",
+				prose: "--file holds the first step, or a whole router with 'start'. A " +
+					"step without an id gets one from its kind. A limit counts under its id, " +
+					"so give each limit an id of its own to keep its counts when the " +
+					"router changes. Without --file, the route flags make a router of one " +
+					"route step. With --fallback a request it cannot place goes to a named " +
+					"destination anyway; with --no-fallback it is refused.",
 				examples: []string{
+					"keera router add auto --model keera-decider \\\n" +
+						"    --destinations keera-speed,keera-frontier --fallback keera-speed \\\n" +
+						"    --prompt @route.txt --display-name Auto",
 					"keera router add ha --mode fallback --destinations keera-local,hosted-frontier",
-					"keera router add pool --mode least-busy --destinations llama-a,llama-b",
 					"keera router add bysize --mode size --destinations keera-speed:4k,keera-frontier",
+					"keera router add guarded --file guarded.json",
+					"keera router show guarded --json > guarded.json   # edit, then 'set'",
 				}},
-			{name: "set", args: "<alias>", summary: "change any of those on an existing router",
-				flags: routerFlags},
-			{name: "check", args: "<alias>", summary: "put sample prompts through it and show where each went",
-				flags: []string{"json"},
-				prose: "On a router that reads nothing, it asks each destination in turn " +
+			{name: "set", args: "<alias>", summary: "change the steps or names of an existing router",
+				flags: routerFlags,
+				prose: "The route flags change one route step and keep the rest of the tree. " +
+					"--step says which, when the router has more than one.",
+				examples: []string{
+					"keera router set guarded --file guarded.json",
+					"keera router set auto --destinations keera-speed,keera-frontier,keera-large",
+				}},
+			{name: "check", args: "<alias>", summary: "put sample prompts through its route steps and show where each went",
+				flags: []string{"step", "json"},
+				prose: "On a route step that reads nothing, it asks each destination in turn " +
 					"whether it is there and in what order it would be tried.",
 			},
-			{name: "report", args: "<alias>", summary: "where it has sent real traffic",
+			{name: "report", args: "<alias>", summary: "how much went through it, and which models answered",
 				flags: []string{"since", "json"}},
 			{name: "delete", args: "<alias>", summary: "remove a router",
 				flags: []string{"yes", "json"}},

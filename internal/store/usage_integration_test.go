@@ -423,7 +423,7 @@ func TestKeySummariesReportsLastUseAndWhatWasServed(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 
 	if err := st.PutGuardrail(ctx, policy.ScopeKey, f.keyID,
-		policy.Limits{RPM: new(30)}); err != nil {
+		policy.Limits{RateLimits: []policy.RateLimit{{Requests: 30}}}); err != nil {
 		t.Fatalf("PutGuardrail: %v", err)
 	}
 	if err := st.WriteEvents(ctx, []Event{
@@ -454,8 +454,8 @@ func TestKeySummariesReportsLastUseAndWhatWasServed(t *testing.T) {
 	if k.LastUsedAt == nil || k.LastUsedAt.UTC().Sub(now.Add(-time.Hour)).Abs() > time.Second {
 		t.Errorf("LastUsedAt = %v, want the refusal an hour ago", k.LastUsedAt)
 	}
-	if k.Limits.RPM == nil || *k.Limits.RPM != 30 {
-		t.Errorf("Limits.RPM = %v, want the guardrail set on the key", k.Limits.RPM)
+	if len(k.Limits.RateLimits) != 1 || k.Limits.RateLimits[0].Requests != 30 {
+		t.Errorf("Limits.RateLimits = %v, want the guardrail set on the key", k.Limits.RateLimits)
 	}
 
 	// A window that excludes the traffic reports a key nothing has used.
@@ -473,16 +473,24 @@ func TestProjectSummariesReadsTheOpenBudgetWindow(t *testing.T) {
 	f := newFixture(t, st, ctx)
 	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
 
+	// Of a budget per day and one per month, the summary shows the one
+	// nearer its end: the day's, at 0.8% against the month's 0.16%.
 	if err := st.PutGuardrail(ctx, policy.ScopeProject, f.projectID, policy.Limits{
-		BudgetMicros: new(int64(500_000_000)), BudgetPeriod: new(policy.PeriodDay),
+		Budgets: []policy.Budget{
+			{BudgetMicros: 5_000_000_000, Period: policy.PeriodMonth},
+			{BudgetMicros: 500_000_000, Period: policy.PeriodDay},
+		},
 	}); err != nil {
 		t.Fatalf("PutGuardrail: %v", err)
 	}
-	// Today's spend, and yesterday's, which must not be counted.
+	// Today's spend, and yesterday's, which the day must not count.
 	for _, ts := range []time.Time{now, now.AddDate(0, 0, -1)} {
 		if err := st.WriteEvents(ctx, []Event{{TS: ts, OrgID: f.orgID, ProjectID: f.projectID,
 			Alias: "keera-code", CostMicros: 4_000_000, Status: 200,
-			Scopes: []policy.Scope{{Type: policy.ScopeProject, ID: f.projectID, Period: policy.PeriodDay}},
+			Scopes: []policy.Scope{
+				{Type: policy.ScopeProject, ID: f.projectID, Period: policy.PeriodMonth},
+				{Type: policy.ScopeProject, ID: f.projectID, Period: policy.PeriodDay},
+			},
 		}}); err != nil {
 			t.Fatalf("WriteEvents: %v", err)
 		}
@@ -496,8 +504,8 @@ func TestProjectSummariesReadsTheOpenBudgetWindow(t *testing.T) {
 	if project.SpendMicros != 4_000_000 {
 		t.Errorf("SpendMicros = %d, want only today's 4000000", project.SpendMicros)
 	}
-	if project.BudgetMicros != 500_000_000 {
-		t.Errorf("BudgetMicros = %d, want the guardrail", project.BudgetMicros)
+	if project.BudgetMicros != 500_000_000 || project.Period != policy.PeriodDay {
+		t.Errorf("budget = %d per %s, want the day's 500000000", project.BudgetMicros, project.Period)
 	}
 	if project.ActiveKeys != 1 {
 		t.Errorf("ActiveKeys = %d, want 1", project.ActiveKeys)

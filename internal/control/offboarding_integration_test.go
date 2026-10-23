@@ -336,15 +336,16 @@ func TestOnlyAnOperatorSetsAnOrganisationsRepositories(t *testing.T) {
 	if code := put(admin, `{"allowed_repos":["*"]}`); code != http.StatusForbidden {
 		t.Errorf("an administrator widening it = %d, want 403", code)
 	}
-	if code := put(admin, `{"rpm":60}`); code != http.StatusOK {
+	if code := put(admin, `{"rate_limits":[{"requests":60}]}`); code != http.StatusOK {
 		t.Fatalf("an administrator setting a rate limit = %d", code)
 	}
 	lim, err := tn.srv.st.GetGuardrail(tn.ctx, policy.ScopeOrg, "org_a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(lim.AllowedRepos) != 1 || lim.AllowedRepos[0] != "acme" || lim.RPM == nil {
-		t.Errorf("guardrail = repos %v, rpm %v; want the operator's list kept", lim.AllowedRepos, lim.RPM)
+	if len(lim.AllowedRepos) != 1 || lim.AllowedRepos[0] != "acme" || len(lim.RateLimits) == 0 {
+		t.Errorf("guardrail = repos %v, rate limits %v; want the operator's list kept",
+			lim.AllowedRepos, lim.RateLimits)
 	}
 	if code := put(operator, `{"allowed_repos":["acme/../x"]}`); code != http.StatusBadRequest {
 		t.Errorf("a malformed entry = %d, want 400", code)

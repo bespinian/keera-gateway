@@ -113,13 +113,9 @@ func decodeBlocks(raw json.RawMessage) ([]anthropicBlock, error) {
 	for i, item := range items {
 		var b anthropicBlock
 		if err := json.Unmarshal(item, &b); err != nil {
-			var head struct {
-				Type string `json:"type"`
-			}
-			_ = json.Unmarshal(item, &head)
-			switch head.Type {
+			switch typ := typeOf(item); typ {
 			case "text", "image", "tool_use", "tool_result":
-				return nil, fmt.Errorf("content block %d (%s): %w", i, head.Type, err)
+				return nil, fmt.Errorf("content block %d (%s): %w", i, typ, err)
 			}
 			continue
 		}
@@ -224,8 +220,6 @@ func (sh anthropicShape) decodeBody(raw []byte) (*body, shape, error) {
 		return nil, nil, err
 	}
 	out := map[string]any{}
-	// max_tokens is required by the Messages API, so it is nearly always
-	// here, and it is what the guardrail ceiling clamps in serve.
 	addSampling(out, in.MaxTokens, in.Stream, in.Temperature, in.TopP)
 	if in.TopK != nil {
 		// Not an OpenAI field. vLLM accepts it as an extension, and other
@@ -365,7 +359,7 @@ func convertMessage(role string, content json.RawMessage) ([]chatMessage, error)
 	if text, err := textOf(content); err == nil {
 		return []chatMessage{{role: role, content: text}}, nil
 	}
-	if len(bytes.TrimSpace(content)) == 0 || bytes.TrimSpace(content)[0] != '[' {
+	if trimmed := bytes.TrimSpace(content); len(trimmed) == 0 || trimmed[0] != '[' {
 		return nil, errors.New("'content' must be a string or an array of content blocks")
 	}
 	blocks, err := decodeBlocks(content)
@@ -642,18 +636,29 @@ func (m chatMessage) appendJSON(dst []byte) []byte {
 	return append(dst, '}')
 }
 
-// ------------------------------------------------------------------ responses
-
 // oaiCompletion is the buffered chat completion the inference plane returns.
 type oaiCompletion struct {
-	Choices []struct {
-		Message struct {
-			Content   string        `json:"content"`
-			ToolCalls []oaiToolCall `json:"tool_calls"`
-		} `json:"message"`
-		FinishReason string `json:"finish_reason"`
-	} `json:"choices"`
-	Usage *tokenUsage `json:"usage"`
+	Choices []oaiChoice `json:"choices"`
+	Usage   *tokenUsage `json:"usage"`
+}
+
+type oaiChoice struct {
+	Message struct {
+		Content   string        `json:"content"`
+		ToolCalls []oaiToolCall `json:"tool_calls"`
+	} `json:"message"`
+	FinishReason string `json:"finish_reason"`
+}
+
+// firstChoice reads a buffered chat completion's first choice, and its usage
+// record. It is false for a 2xx that is not a completion: passing that on
+// would hand the client a malformed response with no explanation.
+func firstChoice(raw []byte) (oaiChoice, *tokenUsage, bool) {
+	var in oaiCompletion
+	if err := json.Unmarshal(raw, &in); err != nil || len(in.Choices) == 0 {
+		return oaiChoice{}, nil, false
+	}
+	return in.Choices[0], in.Usage, true
 }
 
 // anthropicMessageOut is a completed Messages response.
@@ -695,14 +700,10 @@ func (anthropicShape) encode(raw []byte, alias string, status int) ([]byte, int)
 		}
 		return anthropicErrorBody(status, msg), status
 	}
-	var in oaiCompletion
-	if err := json.Unmarshal(raw, &in); err != nil || len(in.Choices) == 0 {
-		// A 2xx that is not a completion. Passing it on would hand the client
-		// a malformed response with no explanation.
+	choice, usage, ok := firstChoice(raw)
+	if !ok {
 		return anthropicErrorBody(http.StatusBadGateway, msgUnreadableAnswer), http.StatusBadGateway
 	}
-
-	choice := in.Choices[0]
 	out := anthropicMessageOut{
 		ID: id.New("msg"), Type: "message", Role: "assistant",
 		// The alias, not the backend model, so the backend stays swappable.
@@ -719,9 +720,9 @@ func (anthropicShape) encode(raw []byte, alias string, status int) ([]byte, int)
 			Input: toolInput(tc.Function.Arguments),
 		})
 	}
-	if in.Usage != nil {
+	if usage != nil {
 		out.Usage = anthropicUsageIO{
-			InputTokens: in.Usage.InputTokens, OutputTokens: in.Usage.OutputTokens,
+			InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
 		}
 	}
 	body, err := json.Marshal(out)

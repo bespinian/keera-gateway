@@ -127,6 +127,9 @@ func (s *Server) checkFilterFields(w http.ResponseWriter, r *http.Request,
 		badRequest(w, "'rules' only works with 'mode': 'pattern'; a "+string(mode)+
 			" filter reads the request with a model and a prompt instead")
 		return false
+	case f.Model == "":
+		badRequest(w, "'model' is required; it names the model the filter runs on")
+		return false
 	case f.Prompt == "":
 		badRequest(w, "'prompt' is required: it tells the filter's model what to look for")
 		return false
@@ -170,40 +173,33 @@ func checkFilterRules(w http.ResponseWriter, f policy.Filter) bool {
 	return true
 }
 
-// reader describes what runs on a model: a filter or a router. Only the words
-// differ between the two.
+// reader describes what runs on a model: a filter or a route step. Only the
+// words differ.
 type reader struct {
 	name string
-	// required is the refusal when no model is named. uses and answers end
-	// the refusals for a missing model and for a model of the wrong kind.
-	required, uses, answers string
+	// uses and answers end the refusals for a missing model and a model of
+	// the wrong kind.
+	uses, answers string
 }
 
 var (
 	filterReader = reader{
-		name:     "filter",
-		required: "'model' is required; it names the model the filter runs on",
-		uses:     "a filter runs on one of its models",
-		answers:  "answers in words",
+		name:    "filter",
+		uses:    "a filter runs on one of its models",
+		answers: "answers in words",
 	}
-	routerReader = reader{
-		name: "router",
-		required: "'model' is required; it names the model that makes the decision, " +
-			"best a fast one served locally",
-		uses:    "a router decides with one of its models",
+	routeReader = reader{
+		name:    "route step",
+		uses:    "a route step decides with one of its models",
 		answers: "answers with an alias",
 	}
 )
 
-// checkReaderModel refuses a model that cannot serve as a filter or a router,
-// rather than storing one that will refuse every request it covers. choice
-// says all it is asked is a choice, which a decision model can also make.
+// checkReaderModel refuses a model that cannot serve as a filter or route
+// step, which would refuse every request it covers. choice says it is only
+// asked to choose, which a decision model can also do.
 func (s *Server) checkReaderModel(w http.ResponseWriter, r *http.Request, orgID, alias string,
 	rd reader, choice bool) bool {
-	if alias == "" {
-		badRequest(w, rd.required)
-		return false
-	}
 	m, err := s.st.Model(r.Context(), orgID, alias)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
@@ -252,9 +248,8 @@ func (s *Server) orgAllowsModel(ctx context.Context, orgID, alias string) (bool,
 	return lim.AllowedModels == nil || slices.Contains(lim.AllowedModels, alias), nil
 }
 
-// readerModelRefusal says why a filter or router may not run on a model its
-// organisation does not allow: both read each request before redaction, so
-// they would send them there in full.
+// readerModelRefusal says why a filter or route step may not run on a model
+// the organisation does not allow: both read requests before redaction.
 func readerModelRefusal(what, alias string, m policy.Model) string {
 	msg := "this organisation's allow-list does not include '" + alias + "'"
 	if m.Hosting() == policy.HostedExternal {
@@ -297,9 +292,9 @@ func (s *Server) checkFilter(w http.ResponseWriter, r *http.Request, p *authn.Pr
 	httpx.WriteJSON(w, http.StatusOK, probe)
 }
 
-// checkAllowList refuses an organisation allow-list that would leave one of
-// its filters or deciding routers on a model outside it. It is the other half
-// of checkReaderModel, since the two writes can come in either order.
+// checkAllowList refuses an organisation allow-list that would leave a filter
+// or deciding route step on a model outside it. It is the other half of
+// checkReaderModel, since the writes can come in either order.
 //
 // Only the organisation scope is checked: filters and routers belong to the
 // organisation, and a project's or key's list narrows only that key.
@@ -329,9 +324,11 @@ func (s *Server) checkAllowList(w http.ResponseWriter, r *http.Request,
 		s.fail(w, err)
 		return false
 	}
-	for _, rt := range routers {
-		if m := rt.ReadsWith(); m != "" && !slices.Contains(lim.AllowedModels, m) {
-			stranded = append(stranded, "'"+rt.Alias+"' (on "+rt.Model+")")
+	for _, rtr := range routers {
+		for _, rt := range rtr.Routes() {
+			if m := rt.ReadsWith(); m != "" && !slices.Contains(lim.AllowedModels, m) {
+				stranded = append(stranded, "'"+rtr.Alias+"' (on "+rt.Model+")")
+			}
 		}
 	}
 	if len(stranded) > 0 {
@@ -388,4 +385,12 @@ func (s *Server) checkGuardrailFilters(w http.ResponseWriter, r *http.Request,
 	}
 	lim.Filters = kept
 	return true
+}
+
+// subscriptionReader refuses a subscription model under a filter or route
+// step. Only a caller's own sign-in reaches it, and that is for the caller's
+// request alone.
+func subscriptionReader(alias, what string) string {
+	return "'" + alias + "' is paid by each person's own Claude subscription, so the gateway " +
+		"cannot run a " + what + " on it; choose a model the organisation pays for"
 }

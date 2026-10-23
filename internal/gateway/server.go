@@ -28,6 +28,13 @@ import (
 type Budgeter interface {
 	Allow(scopes []policy.Scope, now time.Time) error
 	Charge(scopes []policy.Scope, micros int64, now time.Time)
+	// Tally counts tokens against the scopes that count them: a rate limit
+	// per day or month.
+	Tally(scopes []policy.Scope, meter policy.Meter, n int64, now time.Time)
+	// StartRequest counts a request against the scopes that count requests
+	// while it runs, and EndRequest once it has ended, with the same now.
+	StartRequest(scopes []policy.Scope, now time.Time)
+	EndRequest(scopes []policy.Scope, now time.Time)
 	// Spent reports what one budget window has been charged so far. It feeds
 	// the budget headers, so a client sees a limit coming before it is refused.
 	Spent(t policy.ScopeType, id string, p policy.Period, now time.Time) int64

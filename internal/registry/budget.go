@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"slices"
 	"sync"
 	"time"
 
@@ -8,11 +9,12 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// window is one budget period's spend: the last figure read from the
-// database, plus what this replica charged since.
+// window is one budget period's spend, or its count of requests or tokens:
+// the last figure read from the database, plus what this replica charged
+// since.
 type window struct {
-	start  time.Time
-	micros int64
+	start time.Time
+	n     int64
 }
 
 // Budgets is the gateway's in-memory view of spend, reconciled with the
@@ -34,6 +36,10 @@ type Budgets struct {
 	// each organisation's credit. A reconcile leaves it alone: those
 	// requests have not been charged yet.
 	held map[string]int64
+	// running is the requests still running on this replica, per window of
+	// a scope that counts requests. The database counts a request only once
+	// its row is written, so a reconcile leaves these alone too.
+	running map[string]*window
 }
 
 type credit struct {
@@ -43,7 +49,7 @@ type credit struct {
 
 func newBudgets(prepaid bool) *Budgets {
 	return &Budgets{w: make(map[string]*window), prepaid: prepaid, credit: map[string]credit{},
-		held: map[string]int64{}}
+		held: map[string]int64{}, running: map[string]*window{}}
 }
 
 func windowKey(t policy.ScopeType, id string, p policy.Period) string {
@@ -69,34 +75,99 @@ func (b *Budgets) Allow(scopes []policy.Scope, now time.Time) error {
 }
 
 // Charge folds the cost of a completed request into the local view. The usage
-// recorder writes the real row; this keeps the next few seconds honest.
+// recorder writes the real row; this keeps the next few seconds honest. A
+// scope that counts requests or tokens is left alone; see Tally.
 func (b *Budgets) Charge(scopes []policy.Scope, micros int64, now time.Time) {
-	if micros == 0 {
+	b.Tally(scopes, policy.MeterCost, micros, now)
+}
+
+// Tally adds n to the windows of the scopes that count meter, as Charge does
+// for money. Requests are counted with StartRequest instead.
+func (b *Budgets) Tally(scopes []policy.Scope, meter policy.Meter, n int64, now time.Time) {
+	if n != 0 {
+		b.addEach(&b.w, scopes, meter, n, now)
+	}
+}
+
+// StartRequest counts a request that was let in against the scopes that count
+// requests, until EndRequest. Counted when it starts, so requests that arrive
+// together do not all slip under the limit.
+func (b *Budgets) StartRequest(scopes []policy.Scope, now time.Time) {
+	b.addEach(&b.running, scopes, policy.MeterRequests, 1, now)
+}
+
+// addEach adds n to the windows of the scopes that count meter. windows is
+// read under the lock, since a reconcile replaces b.w.
+func (b *Budgets) addEach(windows *map[string]*window, scopes []policy.Scope,
+	meter policy.Meter, n int64, now time.Time,
+) {
+	if !counts(scopes, meter) {
 		return
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for _, sc := range scopes {
-		start := sc.Period.Start(now)
-		k := windowKey(sc.Type, sc.ID, sc.Period)
-		w, ok := b.w[k]
-		if !ok || !w.start.Equal(start) {
-			w = &window{start: start}
-			b.w[k] = w
+		if sc.Meter == meter {
+			add(*windows, windowKey(sc.Type, sc.ID, sc.Period), sc.Period.Start(now), n)
 		}
-		w.micros += micros
 	}
+}
+
+// EndRequest moves a request StartRequest counted into its windows, where it
+// stays until a reconcile reads the row the recorder wrote. now is the time
+// StartRequest was given, so the request ends in the window it started in.
+func (b *Budgets) EndRequest(scopes []policy.Scope, now time.Time) {
+	if !counts(scopes, policy.MeterRequests) {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, sc := range scopes {
+		if sc.Meter != policy.MeterRequests {
+			continue
+		}
+		k, start := windowKey(sc.Type, sc.ID, sc.Period), sc.Period.Start(now)
+		if r, ok := b.running[k]; ok && r.start.Equal(start) {
+			if r.n--; r.n <= 0 {
+				delete(b.running, k)
+			}
+		}
+		add(b.w, k, start, 1)
+	}
+}
+
+// counts reports whether any scope counts meter. Most keys have none for most
+// meters, and the lock is shared by every request, so it is taken only when
+// there is something to count.
+func counts(scopes []policy.Scope, meter policy.Meter) bool {
+	return slices.ContainsFunc(scopes, func(sc policy.Scope) bool { return sc.Meter == meter })
+}
+
+// add adds n to the window at k that starts at start. A window that started
+// earlier is over and is replaced; n for a window already over is dropped,
+// such as a stream's that ends after midnight. The caller holds the lock.
+func add(windows map[string]*window, k string, start time.Time, n int64) {
+	w, ok := windows[k]
+	switch {
+	case ok && w.start.After(start):
+		return
+	case !ok || w.start.Before(start):
+		w = &window{start: start}
+		windows[k] = w
+	}
+	w.n += n
 }
 
 // reconcile replaces every window with the database's figure and forgets the
 // local charges, which the recorder has written by then. A charge still in the
-// recorder's buffer is briefly uncounted until the next reconcile.
+// recorder's buffer is briefly uncounted until the next reconcile. Requests
+// still running are not in the database, and stay counted.
 func (b *Budgets) reconcile(rows []store.SpendRow) {
 	next := make(map[string]*window, len(rows))
 	for _, r := range rows {
 		next[windowKey(r.ScopeType, r.ScopeID, r.Period)] = &window{
-			start:  r.PeriodStart.UTC(),
-			micros: r.Micros,
+			start: r.PeriodStart.UTC(),
+			n:     r.Micros,
 		}
 	}
 	b.mu.Lock()
@@ -112,14 +183,17 @@ func (b *Budgets) Spent(t policy.ScopeType, id string, p policy.Period, now time
 	return b.spent(t, id, p, now)
 }
 
-// spent is zero when nothing was spent in the open window. The caller holds
-// the lock.
+// spent is zero when nothing was spent in the open window. It includes the
+// requests still running. The caller holds the lock.
 func (b *Budgets) spent(t policy.ScopeType, id string, p policy.Period, now time.Time) int64 {
-	w, ok := b.w[windowKey(t, id, p)]
-	if !ok || !w.start.Equal(p.Start(now)) {
-		return 0
+	k, start := windowKey(t, id, p), p.Start(now)
+	var n int64
+	for _, windows := range []map[string]*window{b.w, b.running} {
+		if w, ok := windows[k]; ok && w.start.Equal(start) {
+			n += w.n
+		}
 	}
-	return w.micros
+	return n
 }
 
 // HoldCredit admits a request to the deployment's keys, and holds the most it

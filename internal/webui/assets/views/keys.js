@@ -25,12 +25,13 @@ import {
   listHead,
   plural,
   personName,
-  pct,
   dash,
   formModal,
   rangeOf,
+  busyButton,
 } from "../ui.js";
 import { openGuardrails, ceilingsFor, summarise } from "./guardrails.js";
+import { budgetText } from "./limits.js";
 import { orgNameOf } from "./orgs.js";
 import { oldestProject } from "./projects.js";
 import { openConnectClient } from "./connect.js";
@@ -191,10 +192,8 @@ export async function keysView(ctx) {
         shrink: true,
         cell: (k) => {
           const bits = summarise(k.limits || {});
-          if (k.limits && k.limits.budget_micros) {
-            bits.push(
-              `${money(k.limits.budget_micros)} per ${k.limits.budget_period || "month"}`,
-            );
+          for (const b of (k.limits && k.limits.budgets) || []) {
+            bits.push(budgetText(b));
           }
           if (k.limits && k.limits.allowed_models) {
             const n = k.limits.allowed_models.length;

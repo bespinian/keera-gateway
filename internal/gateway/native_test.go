@@ -60,10 +60,10 @@ func nextSeen(t *testing.T, seen chan seenRequest) seenRequest {
 	}
 }
 
-// guarded is a key with a standing system prompt and an output ceiling.
-func guarded(prompt string, ceiling int) *policy.Resolved {
+// guarded is a key with a standing system prompt.
+func guarded(prompt string) *policy.Resolved {
 	return policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
-		&policy.Limits{SystemPrompt: &prompt, MaxOutputTokens: &ceiling}, nil, nil)
+		&policy.Limits{SystemPrompt: &prompt}, nil, nil)
 }
 
 const anthropicAnswer = `{"id":"msg_1","type":"message","role":"assistant",` +
@@ -160,11 +160,10 @@ func TestEveryDialectReadsTheCacheWrites(t *testing.T) {
 
 func TestNativeMessagesStillPassTheGuardrails(t *testing.T) {
 	h, seen := providerHarness(t, "anthropic", "claude-opus-5", jsonBackend(anthropicAnswer),
-		guarded("obey the org", 2048))
+		guarded("obey the org"))
 
 	resp := h.post(t, "/v1/messages",
 		`{"model":"keera-frontier","max_tokens":32000,`+
-			`"thinking":{"type":"enabled","budget_tokens":16000},`+
 			`"system":[{"type":"text","text":"be brief","cache_control":{"type":"ephemeral"}}],`+
 			`"messages":[{"role":"user","content":"hi"}]}`)
 	if resp.StatusCode != http.StatusOK {
@@ -173,10 +172,6 @@ func TestNativeMessagesStillPassTheGuardrails(t *testing.T) {
 	}
 
 	var sent struct {
-		MaxTokens int `json:"max_tokens"`
-		Thinking  struct {
-			BudgetTokens int `json:"budget_tokens"`
-		} `json:"thinking"`
 		System []struct {
 			Text         string          `json:"text"`
 			CacheControl json.RawMessage `json:"cache_control"`
@@ -184,13 +179,6 @@ func TestNativeMessagesStillPassTheGuardrails(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(nextSeen(t, seen).body), &sent); err != nil {
 		t.Fatal(err)
-	}
-	if sent.MaxTokens != 2048 {
-		t.Errorf("max_tokens = %d, want the ceiling of 2048", sent.MaxTokens)
-	}
-	// A budget at or above max_tokens is refused by Anthropic.
-	if sent.Thinking.BudgetTokens >= 2048 {
-		t.Errorf("thinking budget = %d, want it below the ceiling", sent.Thinking.BudgetTokens)
 	}
 	if len(sent.System) != 2 || sent.System[0].Text != "obey the org" {
 		t.Fatalf("system = %+v, want the guardrail first", sent.System)
@@ -381,10 +369,10 @@ func TestAKeyInOtherCaseCannotCarryTextPastAFilter(t *testing.T) {
 				`"usage":{"prompt_tokens":10,"completion_tokens":5}}`)(w, r)
 		}
 		h, seen := providerHarness(t, tc.provider, "frontier-model", backend, nil)
-		h.src.routers = map[string]policy.Router{"org_1/ha": {
-			OrgID: "org_1", Alias: "ha", Mode: policy.RouterModeFallback,
+		h.withRouters(policy.Route{
+			OrgID: "org_1", Router: "ha", Mode: policy.RouteModeFallback,
 			Destinations: []string{"keera-frontier", "keera-code"},
-		}}
+		})
 		h.src.filters = map[string]policy.Filter{
 			"org_1/redact": patternFilter(
 				policy.FilterRule{Pattern: `\bhunter2\b`, Replace: "[CREDENTIAL]"}),
@@ -500,11 +488,11 @@ func TestAFallbackFromAnthropicToALocalModelIsTranslated(t *testing.T) {
 		jsonBackend(`{"choices":[{"message":{"content":"hi"},"finish_reason":"stop"}],`+
 			`"usage":{"prompt_tokens":10,"completion_tokens":5}}`)(w, r)
 	}
-	h, seen := providerHarness(t, "anthropic", "claude-opus-5", backend, guarded("obey the org", 256))
-	h.src.routers = map[string]policy.Router{"org_1/ha": {
-		OrgID: "org_1", Alias: "ha", Mode: policy.RouterModeFallback,
+	h, seen := providerHarness(t, "anthropic", "claude-opus-5", backend, guarded("obey the org"))
+	h.withRouters(policy.Route{
+		OrgID: "org_1", Router: "ha", Mode: policy.RouteModeFallback,
 		Destinations: []string{"keera-frontier", "keera-code"},
-	}}
+	})
 
 	resp := h.post(t, "/v1/messages",
 		`{"model":"ha","max_tokens":1024,"system":"be brief","messages":[{"role":"user","content":"hi"}]}`)
@@ -525,18 +513,17 @@ func TestAFallbackFromAnthropicToALocalModelIsTranslated(t *testing.T) {
 	}
 }
 
-// A router that reads nothing does not need the request translated, so a body
-// only the provider can read still reaches it when every destination is that
-// provider's. Here a Responses request carries no input, only the response it
-// continues.
+// A router that reads nothing needs no translation, so a body only the
+// provider can read still reaches it when every destination is that
+// provider's. Here a Responses request carries only the response it continues.
 func TestARouterThatReadsNothingLeavesANativeRequestUntranslated(t *testing.T) {
 	h, seen := providerHarness(t, "openai", "gpt-frontier", jsonBackend(
 		`{"id":"resp_2","object":"response","status":"completed","output":[],`+
 			`"usage":{"input_tokens":10,"output_tokens":5}}`), nil)
-	h.src.routers = map[string]policy.Router{"org_1/ha": {
-		OrgID: "org_1", Alias: "ha", Mode: policy.RouterModeFallback,
+	h.withRouters(policy.Route{
+		OrgID: "org_1", Router: "ha", Mode: policy.RouteModeFallback,
 		Destinations: []string{"keera-frontier"},
-	}}
+	})
 
 	resp := h.post(t, "/v1/responses", `{"model":"ha","previous_response_id":"resp_1"}`)
 	body, _ := io.ReadAll(resp.Body)
@@ -583,7 +570,7 @@ func TestCountTokensCountsTheGuardrailsSystemPrompt(t *testing.T) {
 	// Every request gets the guardrail's prompt, so a count without it is
 	// low, and a client would compact too late.
 	prompt := strings.Repeat("b", 3000)
-	h, _ := providerHarness(t, "anthropic", "claude-opus-5", jsonBackend(`{}`), guarded(prompt, 1000))
+	h, _ := providerHarness(t, "anthropic", "claude-opus-5", jsonBackend(`{}`), guarded(prompt))
 
 	resp := h.post(t, "/v1/messages/count_tokens",
 		`{"model":"keera-frontier","messages":[{"role":"user","content":"`+strings.Repeat("a", 3000)+`"}]}`)
@@ -593,6 +580,24 @@ func TestCountTokensCountsTheGuardrailsSystemPrompt(t *testing.T) {
 	}
 	if err := json.Unmarshal(body, &out); err != nil || out.InputTokens != 2000 {
 		t.Errorf("input_tokens = %d, want 2000 with the guardrail's prompt: %s", out.InputTokens, body)
+	}
+}
+
+// A router's prompts are counted along the way that adds the most, since
+// which way a request goes is not known until it is sent.
+func TestCountTokensTakesTheLongestWayThroughARouter(t *testing.T) {
+	prompt := func(n int, next *policy.Step) *policy.Step {
+		return &policy.Step{Kind: policy.StepSystemPrompt, Prompt: strings.Repeat("p", n), Next: next}
+	}
+	start := prompt(10, &policy.Step{Kind: policy.StepRoute, Branches: map[string]*policy.Step{
+		"a": prompt(100, nil),
+		"b": prompt(30, prompt(40, nil)),
+	}})
+	if got := mostPromptBytes(start); got != 110 {
+		t.Errorf("mostPromptBytes = %d, want 110", got)
+	}
+	if got := mostPromptBytes(nil); got != 0 {
+		t.Errorf("mostPromptBytes(nil) = %d, want 0", got)
 	}
 }
 

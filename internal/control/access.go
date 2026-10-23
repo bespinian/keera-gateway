@@ -2,6 +2,8 @@ package control
 
 import (
 	"net/http"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/authn"
@@ -10,49 +12,58 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// The developer's own screen. It answers the questions of the person using
-// the gateway: are my keys alive, how much budget is left, why was I refused,
-// and what may I call.
+// The developer's own screen: are my keys alive, how much budget is left, why
+// was I refused, and what may I call.
 //
 // It reads only what belongs to the caller. Even an administrator sees only
 // their own keys here.
 
-// accessScope is one level of the hierarchy as the developer meets it: a limit
-// with what has been spent against it, and when it resets.
+// accessScope is one level of the hierarchy as the developer meets it: its
+// limits, what is used of them, and when they reset.
 type accessScope struct {
 	Type policy.ScopeType `json:"type"`
-	// ID is sent with the name, so a developer can quote it to an
-	// administrator.
-	ID           string        `json:"id"`
-	Name         string        `json:"name,omitempty"`
-	RPM          int           `json:"rpm,omitempty"`
-	TPM          int           `json:"tpm,omitempty"`
-	BudgetMicros int64         `json:"budget_micros,omitempty"`
-	SpendMicros  int64         `json:"spend_micros"`
-	Period       policy.Period `json:"period,omitempty"`
-	ResetsAt     *time.Time    `json:"resets_at,omitempty"`
+	// ID is sent so a developer can quote it to an administrator.
+	ID      string         `json:"id"`
+	Name    string         `json:"name,omitempty"`
+	Rates   []accessRate   `json:"rates,omitempty"`
+	Budgets []accessBudget `json:"budgets,omitempty"`
 	// SystemPrompt is this level's own instruction, not the joined chain, so
-	// the developer sees who added what. It is text they never wrote, added
-	// ahead of every chat request they make.
+	// the developer sees who added what to their requests.
 	SystemPrompt string `json:"system_prompt,omitempty"`
-	// Filters is this level's own filters, shown for the same reason: their
-	// own traffic will never tell them what is being taken out.
+	// Filters is this level's own, for the same reason: their own traffic
+	// will never show what is taken out.
 	Filters []string `json:"filters,omitempty"`
 }
 
-// accessKey is one of the caller's keys with everything that decides whether it
-// works: its state, the chain of limits above it, and what it may call.
-type accessKey struct {
-	store.KeySummary
-	ProjectName     string        `json:"project_name,omitempty"`
-	State           string        `json:"state"`
-	Scopes          []accessScope `json:"scopes"`
-	AllowedModels   []string      `json:"allowed_models,omitempty"`
-	MaxOutputTokens int           `json:"max_output_tokens,omitempty"`
+// accessRate is one rate limit of a level. Per day or month, the Used fields
+// say how much is gone.
+type accessRate struct {
+	Requests     int64         `json:"requests,omitempty"`
+	Tokens       int64         `json:"tokens,omitempty"`
+	Period       policy.Period `json:"period"`
+	RequestsUsed int64         `json:"requests_used,omitempty"`
+	TokensUsed   int64         `json:"tokens_used,omitempty"`
 }
 
-// isPerson reports whether p is someone in an organisation who can hold keys.
-// The operator key is not.
+type accessBudget struct {
+	BudgetMicros int64         `json:"budget_micros"`
+	SpendMicros  int64         `json:"spend_micros"`
+	Period       policy.Period `json:"period"`
+	ResetsAt     time.Time     `json:"resets_at"`
+}
+
+// accessKey is one of the caller's keys with everything that decides whether
+// it works: its state, the limits above it, and what it may call.
+type accessKey struct {
+	store.KeySummary
+	ProjectName   string        `json:"project_name,omitempty"`
+	State         string        `json:"state"`
+	Scopes        []accessScope `json:"scopes"`
+	AllowedModels []string      `json:"allowed_models,omitempty"`
+}
+
+// isPerson reports whether p is someone in an organisation who can hold
+// keys. The operator key is not.
 func isPerson(p *authn.Principal) bool {
 	return p.Via != authn.MethodOperatorKey && p.UserID != "" && p.OrgID != ""
 }
@@ -155,9 +166,8 @@ func (s *Server) accessKeys(r *http.Request, orgID, orgName string, keys []store
 			ProjectName: projectNames[k.ProjectID],
 			State:       k.State(now),
 			// Resolved to real names, so the screen lists what the key can
-			// call instead of saying "no restriction".
-			AllowedModels:   allowedModels(resolved, models),
-			MaxOutputTokens: resolved.MaxOutputTokens,
+			// call instead of "no restriction".
+			AllowedModels: allowedModels(resolved, models),
 			Scopes: s.scopeStates(resolved, orgName, projectNames, k.Name, now,
 				map[policy.ScopeType]scopeSays{
 					policy.ScopeOrg:     saysOf(orgLimits),
@@ -181,13 +191,13 @@ func (s *Server) callable(r *http.Request, orgID string) ([]policy.Model, error)
 	if err != nil {
 		return nil, err
 	}
-	for _, rt := range routers {
-		models = append(models, policy.Model{Alias: rt.Alias, Enabled: true})
+	for _, p := range routers {
+		models = append(models, policy.Model{Alias: p.Alias, Enabled: true})
 	}
 	return models, nil
 }
 
-// scopeSays is what one level adds to a request: its instruction and its
+// scopeSays is what one level adds to a request: its instruction and
 // filters. Both add up down the chain, so they are reported per level.
 type scopeSays struct {
 	prompt  string
@@ -215,41 +225,75 @@ func (s *Server) limitsFor(r *http.Request, scope policy.ScopeType, id string) *
 	return &lim
 }
 
-// scopeStates turns a resolved chain into what each level allows and what it
-// has spent, outermost first: the order the limits apply in.
+// scopeStates turns a resolved chain into what each level allows and has
+// spent, outermost first, as the limits apply. A level may have one scope per
+// budget period; they are shown as one.
 func (s *Server) scopeStates(res *policy.Resolved, orgName string,
 	projectNames map[string]string, keyName string, now time.Time,
 	says map[policy.ScopeType]scopeSays) []accessScope {
 	out := make([]accessScope, 0, len(res.Scopes))
 	for _, sc := range res.Scopes {
-		st := accessScope{
-			Type: sc.Type, ID: sc.ID, RPM: sc.RPM, TPM: sc.TPM,
-			BudgetMicros: sc.BudgetMicros,
-			SystemPrompt: says[sc.Type].prompt, Filters: says[sc.Type].filters,
+		if n := len(out); n == 0 || out[n-1].Type != sc.Type || out[n-1].ID != sc.ID {
+			out = append(out, s.levelState(res, sc, orgName, projectNames, keyName, now, says))
 		}
-		switch sc.Type {
-		case policy.ScopeOrg:
-			st.Name = orgName
-		case policy.ScopeProject:
-			st.Name = projectNames[sc.ID]
-		case policy.ScopeKey:
-			st.Name = keyName
-		}
+		st := &out[len(out)-1]
 		if sc.BudgetMicros > 0 {
-			// The gateway's own spend figure, not a fresh query: it is the
-			// number the budget is enforced against.
-			st.SpendMicros = s.reg.Budgets().Spent(sc.Type, sc.ID, sc.Period, now)
-			st.Period = sc.Period
-			resets := sc.Period.Next(now)
-			st.ResetsAt = &resets
+			// The gateway's own spend figure, not a fresh query: the budget is
+			// enforced against it.
+			st.Budgets = append(st.Budgets, accessBudget{
+				BudgetMicros: sc.BudgetMicros, Period: sc.Period,
+				SpendMicros: s.reg.Budgets().Spent(sc.Type, sc.ID, sc.Period, now),
+				ResetsAt:    sc.Period.Next(now),
+			})
 		}
-		out = append(out, st)
 	}
 	return out
 }
 
-// allowedModels is what a key may actually call: the enabled models its kind
-// reaches and its allow-list permits.
+// levelState is one level with its rate limits, before its budgets.
+func (s *Server) levelState(res *policy.Resolved, sc policy.Scope, orgName string,
+	projectNames map[string]string, keyName string, now time.Time,
+	says map[policy.ScopeType]scopeSays) accessScope {
+	st := accessScope{
+		Type: sc.Type, ID: sc.ID,
+		SystemPrompt: says[sc.Type].prompt, Filters: says[sc.Type].filters,
+	}
+	switch sc.Type {
+	case policy.ScopeOrg:
+		st.Name = orgName
+	case policy.ScopeProject:
+		st.Name = projectNames[sc.ID]
+	case policy.ScopeKey:
+		st.Name = keyName
+	}
+	if sc.RPM > 0 || sc.TPM > 0 {
+		st.Rates = append(st.Rates, accessRate{
+			Requests: int64(sc.RPM), Tokens: int64(sc.TPM), Period: policy.PeriodMinute,
+		})
+	}
+	// A rate limit per day or month is a quota per count; the two counts of
+	// one period are one limit.
+	for _, q := range res.Quotas {
+		if q.Type != sc.Type || !strings.HasPrefix(q.ID, sc.ID+"|") {
+			continue
+		}
+		i := slices.IndexFunc(st.Rates, func(r accessRate) bool { return r.Period == q.Period })
+		if i < 0 {
+			st.Rates = append(st.Rates, accessRate{Period: q.Period})
+			i = len(st.Rates) - 1
+		}
+		used := s.reg.Budgets().Spent(q.Type, q.ID, q.Period, now)
+		if q.Meter == policy.MeterRequests {
+			st.Rates[i].Requests, st.Rates[i].RequestsUsed = q.Quota, used
+		} else {
+			st.Rates[i].Tokens, st.Rates[i].TokensUsed = q.Quota, used
+		}
+	}
+	return st
+}
+
+// allowedModels is what a key may actually call: the enabled models its
+// kind reaches and its allow-list permits.
 func allowedModels(res *policy.Resolved, models []policy.Model) []string {
 	out := []string{}
 	for _, m := range models {

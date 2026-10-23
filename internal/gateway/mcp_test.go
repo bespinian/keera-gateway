@@ -524,7 +524,7 @@ func TestAToolListThroughTheGatewayIsNotPublic(t *testing.T) {
 
 func TestAToolCallCountsAgainstTheRateLimit(t *testing.T) {
 	res := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
-		&policy.Limits{RPM: new(1)}, nil, nil)
+		&policy.Limits{RateLimits: []policy.RateLimit{{Requests: 1}}}, nil, nil)
 	h, fake := mcpHarness(t, res)
 	call := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_code","arguments":{}}}`
 

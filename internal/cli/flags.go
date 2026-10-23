@@ -172,7 +172,9 @@ func argCount(spec string) (lo, hi int) {
 func changesSomething(fs *flag.FlagSet) bool {
 	set := false
 	fs.Visit(func(fl *flag.Flag) {
-		if fl.Name != "json" && fl.Name != "org" && fl.Name != "yes" {
+		switch fl.Name {
+		case "json", "org", "yes", "step":
+		default:
 			set = true
 		}
 	})
@@ -195,7 +197,7 @@ func given(fs *flag.FlagSet, name string) bool {
 
 // parse reads a subcommand's flags, before or after the positional
 // arguments. Go's flag package stops at the first non-flag, so
-// "keera guardrail set project project_1 --rpm 60" is reordered before parsing.
+// "keera guardrail set project payments --requests 60" is reordered before parsing.
 //
 // A bad flag comes back as an error for Run to print, worded the way the rest
 // of the CLI names flags, instead of the flag package printing the whole help.

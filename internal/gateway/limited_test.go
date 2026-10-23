@@ -42,15 +42,18 @@ func TestALockedModelIsRefusedAndNotOffered(t *testing.T) {
 	if counted.StatusCode != http.StatusForbidden {
 		t.Errorf("count_tokens: status = %d, want 403", counted.StatusCode)
 	}
-	h.src.routers = map[string]policy.Router{"org_1/ha": {
-		OrgID: "org_1", Alias: "ha", Mode: policy.RouterModeFallback, Destinations: []string{"engine"},
-	}}
-	routed := h.post(t, "/v1/chat/completions", `{"model":"ha","messages":[]}`)
-	raw, _ = io.ReadAll(routed.Body)
-	if routed.StatusCode != http.StatusForbidden || !strings.Contains(string(raw), "org_limited") {
-		t.Errorf("through a router: status = %d, want 403 org_limited: %s", routed.StatusCode, raw)
+	for _, mode := range []policy.RouteMode{policy.RouteModeFallback, policy.RouteModeSize} {
+		h.withRouters(policy.Route{
+			OrgID: "org_1", Router: "ha", Mode: mode, Destinations: []string{"engine"},
+		})
+		routed := h.post(t, "/v1/chat/completions", `{"model":"ha","messages":[]}`)
+		raw, _ = io.ReadAll(routed.Body)
+		if routed.StatusCode != http.StatusForbidden || !strings.Contains(string(raw), "org_limited") {
+			t.Errorf("through a %s router: status = %d, want 403 org_limited: %s",
+				mode, routed.StatusCode, raw)
+		}
 	}
-	h.src.routers = nil
+	h.withRouters()
 
 	select {
 	case <-h.upstreamBodies:
@@ -66,13 +69,7 @@ func TestALockedModelIsRefusedAndNotOffered(t *testing.T) {
 		t.Errorf("an open model of a limited organisation: status = %d, want 200", resp.StatusCode)
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, h.url("/v1/models"), nil)
-	req.Header.Set("Authorization", "Bearer "+testKey)
-	listed, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = listed.Body.Close() }()
+	listed := h.get(t, "/v1/models")
 	var out struct {
 		Data []struct {
 			ID string `json:"id"`
@@ -85,12 +82,7 @@ func TestALockedModelIsRefusedAndNotOffered(t *testing.T) {
 		t.Errorf("/v1/models lists %+v, want only own-key", out.Data)
 	}
 
-	req, _ = http.NewRequest(http.MethodGet, h.url("/v1/models/engine"), nil)
-	req.Header.Set("Authorization", "Bearer "+testKey)
-	one, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
+	one := h.get(t, "/v1/models/engine")
 	_ = one.Body.Close()
 	if one.StatusCode != http.StatusNotFound {
 		t.Errorf("/v1/models/engine: status = %d, want 404", one.StatusCode)

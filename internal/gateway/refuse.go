@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/httpx"
@@ -36,11 +37,7 @@ func (s *Server) refuse(c *call, ref refusal) {
 	if ref.retry > 0 {
 		httpx.SetRetryAfter(c.w, ref.retry)
 	}
-	msg := ref.msg
-	if ref.advise {
-		msg = s.advise(msg)
-	}
-	c.surf.shape.writeError(c.w, ref.status, ref.typ, ref.code, msg)
+	c.surf.shape.writeError(c.w, ref.status, ref.typ, ref.code, s.told(ref))
 
 	ev := c.ev
 	ev.Status = ref.status
@@ -58,6 +55,7 @@ func (s *Server) closeEarly(c *call, ev store.Event, note, metricAlias string) {
 	ev.Latency = time.Since(c.tr.start)
 	ev.CostMicros = c.hookMicros()
 	ev.Bills = c.hookBills()
+	ev.Scopes = c.scopes
 	ev.Spans = c.tr.steps(note)
 	s.record(ev)
 	s.metrics.Observe(metricAlias, ev.OrgID, ev.Status, ev.Latency.Seconds(), 0)
@@ -106,6 +104,14 @@ func (s *Server) advise(msg string) string {
 	return msg + ". Your keys and their limits are at " + s.opts.PanelURL + "/access"
 }
 
+// told is what the client is told of a refusal.
+func (s *Server) told(ref refusal) string {
+	if ref.advise {
+		return s.advise(ref.msg)
+	}
+	return ref.msg
+}
+
 // checkRates checks the rate limits of every scope.
 //
 // Each scope has its own limits, so an org-wide ceiling and a per-key ceiling
@@ -115,16 +121,16 @@ func (s *Server) advise(msg string) string {
 // limit reported is the one an administrator expects to bind first.
 //
 // It only decides. The refusal is written by refuse.
-func (s *Server) checkRates(res *policy.Resolved, now time.Time) (refusal, bool) {
+func (s *Server) checkRates(scopes []policy.Scope, now time.Time) (refusal, bool) {
 	type check struct {
 		scope policy.Scope
 		limit int
 		unit  string
 		code  string
 	}
-	reqs := make([]ratelimit.Requirement, 0, len(res.Scopes)*2)
-	checks := make([]check, 0, len(res.Scopes)*2)
-	for _, sc := range res.Scopes {
+	reqs := make([]ratelimit.Requirement, 0, len(scopes)*2)
+	checks := make([]check, 0, len(scopes)*2)
+	for _, sc := range scopes {
 		reqs = append(reqs,
 			ratelimit.Requirement{Key: bucketKey(sc, "rpm"), PerMinute: sc.RPM, Take: true},
 			tpmBucket(sc))
@@ -145,6 +151,38 @@ func (s *Server) checkRates(res *policy.Resolved, now time.Time) (refusal, bool)
 		advise: true,
 		retry:  s.limiter.Retry(reqs[i].Key, c.limit, now),
 	}, false
+}
+
+// checkQuotas checks the rate limits per day or month, a guardrail's or a
+// router's: requests or tokens counted in the windows budgets use. Like
+// checkRates, it only decides.
+//
+// It is 429, as a rate limit per minute is, with a Retry-After of when the
+// window starts again.
+func (s *Server) checkQuotas(scopes []policy.Scope, now time.Time) (refusal, bool) {
+	for _, sc := range scopes {
+		if sc.Quota <= 0 {
+			continue
+		}
+		if s.budgets.Spent(sc.Type, sc.ID, sc.Period, now) < sc.Quota {
+			continue
+		}
+		resets := sc.Period.Next(now)
+		unit := string(sc.Meter)
+		if sc.Quota == 1 {
+			unit = strings.TrimSuffix(unit, "s")
+		}
+		return refusal{
+			status: http.StatusTooManyRequests,
+			typ:    "rate_limit_error", code: string(sc.Meter) + "_quota_exceeded",
+			msg: fmt.Sprintf("%s is over its limit of %d %s per %s. It resets on %s (UTC)",
+				sc.Type.Possessive(), sc.Quota, unit, sc.Period,
+				resets.UTC().Format("2 January 2006 at 15:04")),
+			advise: true,
+			retry:  resets.Sub(now),
+		}, false
+	}
+	return refusal{}, true
 }
 
 // tpmBucket is a scope's token bucket, which a request is checked against

@@ -115,8 +115,9 @@ on the same card; the unquantised 14B needs a 48 GB card (g6e.xlarge).
 image, so `decider/Containerfile` installs it. The first start downloads about
 0.8 GB into the `decider-cache` volume.
 
-It is a [decision model](../docs/gateway.md#decision-models): routers and gate
-filters can decide with it, and it writes no text. For example:
+It is a [decision model](../docs/gateway.md#decision-models): route steps and
+gate filters can decide with it, and it writes no text. For example, a router
+clients call as `auto`, once `keera-frontier` is uncommented in `models.yaml`:
 
 ```sh
 keera router add auto --model keera-decider \

@@ -5,17 +5,15 @@ import (
 	"net/http"
 )
 
-// The context window check: a request too long for every model it may go to
-// is refused before it is filtered or forwarded, in the words clients
-// recognise.
+// The context window check refuses a request too long for every model it may
+// go to, before the key's filters run, in words clients recognise. A router's
+// filter steps run before it.
 //
-// Counting tokens exactly needs each model's tokeniser, which the gateway does
-// not have. So it counts the least a request can be: its text at a generous
-// number of bytes per token. Real text is shorter than that per token, so the
-// check never refuses a request that fits, and lets through some that do not,
-// which the backend then refuses itself.
+// Without each model's tokeniser, it counts the least a request can be: its
+// text at a generous number of bytes per token. So it never refuses a request
+// that fits, and lets some through that the backend then refuses.
 //
-// The words matter. Claude Code compacts its conversation when it reads
+// The words matter: Claude Code compacts its conversation when it reads
 // "prompt is too long", and OpenAI clients act on context_length_exceeded. A
 // backend's own refusal says neither, and the agent stops.
 

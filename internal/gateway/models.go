@@ -23,8 +23,9 @@ type modelEntry struct {
 	// MaxContext is not part of the OpenAI shape, but clients that know to
 	// look for it can size a request without being told out of band.
 	MaxContext int `json:"max_context_tokens,omitempty"`
-	// DisplayName is the model's name for people, as Anthropic's API calls
-	// it. Anthropic's has one for every model, so the alias stands in.
+	// DisplayName is the model's or router's name for people, as Anthropic's
+	// API calls it. Anthropic's has one for every model, so the alias stands
+	// in.
 	DisplayName string `json:"display_name"`
 	// Description says what the model is for, so a person choosing has
 	// more to go on than the name.
@@ -32,7 +33,7 @@ type modelEntry struct {
 	// Location says where prompts sent to the model go.
 	Location string `json:"location,omitempty"`
 	// Destinations is set only on routers, which is also how a client
-	// tells a router from a model.
+	// tells them from a model.
 	Destinations []string `json:"destinations,omitempty"`
 }
 
@@ -48,17 +49,20 @@ func modelEntryOf(m policy.Model) modelEntry {
 	return e
 }
 
-// routerEntryOf lists a router as a model, because a client names it in the
-// same field. A router has no context window of its own, so none is given.
-func routerEntryOf(rt policy.Router) modelEntry {
+// routerEntryOf lists a router as a model, because a client names it in
+// the same field. Its destinations are every model it may send to. It has no
+// context window of its own, so none is given.
+func (s *Server) routerEntryOf(p policy.Router) modelEntry {
 	return modelEntry{
-		ID: rt.Alias, Object: "model", Type: "model", OwnedBy: "keera", DisplayName: rt.Alias,
-		Description: rt.Description, Destinations: rt.Destinations,
+		ID: p.Alias, Object: "model", Type: "model", OwnedBy: "keera",
+		DisplayName: cmp.Or(p.DisplayName, p.Alias),
+		Description: p.Description, Destinations: p.Reaches(),
 	}
 }
 
-// listModels answers /v1/models with the models and routers this key may use.
-// Clients discover through it, so it must never leak one the key cannot reach.
+// listModels answers /v1/models with the models and routers this key may
+// use. Clients discover through it, so it must never leak one the key cannot
+// reach.
 func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 	res, ok := s.authenticate(w, r, openAIShape{})
 	if !ok {
@@ -72,9 +76,9 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request) {
 			out = append(out, modelEntryOf(m))
 		}
 	}
-	for _, rt := range s.src.Routers(res.Key.OrgID) {
-		if res.MayRoute(rt.Alias) {
-			out = append(out, routerEntryOf(rt))
+	for _, p := range s.src.Routers(res.Key.OrgID) {
+		if res.MayCallRouter(p.Alias) {
+			out = append(out, s.routerEntryOf(p))
 		}
 	}
 	// The list is never paged. has_more and the two ids are Anthropic's
@@ -96,26 +100,27 @@ func (s *Server) getModel(w http.ResponseWriter, r *http.Request) {
 	n, ok := s.callable(res, alias, "")
 	switch {
 	// A locked model is left out of the list, so it is not described either.
-	case !ok, !n.routed && n.model.Locked:
+	case !ok, !n.viaRouter() && n.model.Locked:
 		httpx.WriteNotFound(w, "model_not_found", s.advise(modelNotFound(alias)))
-	case n.routed:
-		httpx.WriteJSON(w, http.StatusOK, routerEntryOf(n.router))
+	case n.viaRouter():
+		httpx.WriteJSON(w, http.StatusOK, s.routerEntryOf(n.router))
 	default:
 		httpx.WriteJSON(w, http.StatusOK, modelEntryOf(n.model))
 	}
 }
 
-// named is what a request's 'model' field names: a model, or a router.
+// named is what a request's 'model' field names: a model or a router.
 type named struct {
 	model  policy.Model
 	router policy.Router
-	routed bool
 }
 
+func (n named) viaRouter() bool { return n.router.Alias != "" }
+
 // callable decides what a key may name as its model: a model it may use, or
-// else one of its organisation's routers. kind narrows it to one API surface,
-// and empty accepts any. Routers answer only chat, and a decision model no
-// client at all.
+// else one of its organisation's routers. kind narrows it to one API
+// surface, and empty accepts any. Routers answer only chat, and a decision
+// model no client at all.
 //
 // Every route that takes a model name asks here, so they all agree. What is
 // missing and what is forbidden are both "not found", so other projects'
@@ -134,8 +139,8 @@ func (s *Server) callable(res *policy.Resolved, alias string, kind policy.Kind) 
 	if kind != "" && kind != policy.KindChat {
 		return named{}, false
 	}
-	if rt, found := s.src.Router(res.Key.OrgID, alias); found && res.MayRoute(alias) {
-		return named{router: rt, routed: true}, true
+	if p, found := s.src.Router(res.Key.OrgID, alias); found && res.MayCallRouter(alias) {
+		return named{router: p}, true
 	}
 	return named{}, false
 }

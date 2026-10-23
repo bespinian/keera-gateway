@@ -1,1216 +1,536 @@
 package gateway
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// routerStandIn is which kind of inference plane the stand-in answers as.
-type routerStandIn int
-
-const (
-	// servesLogprobs is an inference plane of your own, which answers the
-	// lettered question with the distribution behind its one token. It is what
-	// vLLM and llama.cpp do, so it is the default here.
-	servesLogprobs routerStandIn = iota
-	// namesOnly is a plane that serves no distribution: it ignores the
-	// logprobs fields and writes the name out. It is what a hosted provider
-	// does, and what the router has to find out and work around.
-	namesOnly
-)
-
-// routerHarness wires a gateway whose organisation has one router, in front of
-// a stand-in inference plane answering as three models. They are told apart by
-// the backend model name, which is what the gateway actually sends.
-//
-// decide is what the deciding model answers, given the segments it was shown.
-func routerHarness(t *testing.T, decide func(segments []string) string,
-	rt policy.Router, resolved *policy.Resolved, kind ...routerStandIn,
+// treeHarness is routeHarness with p as the organisation's only router, and
+// two pattern filters it can use: 'redact' takes out a password, 'block'
+// refuses one.
+func treeHarness(t *testing.T, decide func([]string) string, p policy.Router,
+	resolved *policy.Resolved,
 ) *harness {
 	t.Helper()
-
-	plane := servesLogprobs
-	if len(kind) > 0 {
-		plane = kind[0]
+	h := routeHarness(t, decide, autoRoute(), resolved)
+	p.OrgID = "org_1"
+	h.src.routers = map[string]policy.Router{"org_1/" + p.Alias: p}
+	block := patternFilter(policy.FilterRule{Pattern: `hunter2`, Refuse: true, Reason: "no passwords"})
+	block.Alias = "block"
+	h.src.filters = map[string]policy.Filter{
+		"org_1/redact": patternFilter(policy.FilterRule{Pattern: `hunter2`, Replace: "[SECRET]"}),
+		"org_1/block":  block,
 	}
-
-	backend := guardBackend("picker-served", func(c guardCall) string {
-		// The same model can be both a router's and a filter's, and on the
-		// wire the only thing that tells the two calls apart is the format the
-		// gateway appended to the instruction. A gate is asked for a verdict,
-		// so it is given one; everything else is the routing decision.
-		answer := decide(c.segments)
-		if strings.Contains(c.instruction, "ALLOW") {
-			answer = "ALLOW"
-		}
-		if c.logprobs && plane == servesLogprobs {
-			if body, ok := lettered(c.instruction, answer); ok {
-				return body
-			}
-		}
-		return chatAnswer(answer, 50, 2)
-	}, jsonBackend(hiAnswer))
-
-	if resolved == nil {
-		resolved = policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"}, nil, nil, nil)
-	}
-	models := map[string]policy.Model{
-		"keera-small": {
-			OrgID: "org_1", Alias: "keera-small", Kind: policy.KindChat, BackendModel: "small-served",
-			Description:        "a fast local model for short edits",
-			InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 1_000_000, Enabled: true,
-		},
-		"keera-large": {
-			OrgID: "org_1", Alias: "keera-large", Kind: policy.KindChat, BackendModel: "large-served",
-			Description:        "a hosted model for work that needs reasoning",
-			InputMicrosPerMTok: 9_000_000, OutputMicrosPerMTok: 9_000_000, Enabled: true,
-		},
-		"keera-picker": {
-			Alias: "keera-picker", Kind: policy.KindChat, BackendModel: "picker-served",
-			InputMicrosPerMTok: 2_000_000, OutputMicrosPerMTok: 2_000_000, Enabled: true,
-		},
-		"keera-embed": {
-			Alias: "keera-embed", Kind: policy.KindEmbedding, BackendModel: "embed-served",
-			Enabled: true,
-		},
-	}
-	h := newHarness(t, backend, models, resolved)
-	h.src.routers = map[string]policy.Router{"org_1/" + rt.Alias: rt}
 	return h
 }
 
-// autoRouter is the ordinary shape: two destinations, a fallback, and an
-// instruction the stand-in never reads.
-func autoRouter() policy.Router {
-	return policy.Router{
-		OrgID: "org_1", Alias: "auto", Model: "keera-picker",
-		Prompt:       "Send short edits to the small model and anything else to the large one.",
-		Destinations: []string{"keera-small", "keera-large"},
-		Fallback:     "keera-small",
-	}
+func modelStep(id, alias string) *policy.Step {
+	return &policy.Step{ID: id, Kind: policy.StepModel, Ref: alias}
 }
 
-// picks is a deciding model that always names the same destination.
-func picks(alias string) func([]string) string {
-	return func([]string) string { return alias }
+// autoStep is autoRoute as a step of a larger router, with branches.
+func autoStep(id string, branches map[string]*policy.Step) *policy.Step {
+	s := routerOf(autoRoute()).Start
+	s.ID, s.Branches = id, branches
+	return s
 }
 
-// lettered answers the lettered question the way an inference plane of your
-// own does: the chosen destination's letter, and the distribution it was
-// picked out of.
-//
-// The letters are read back out of the instruction the gateway sent, so the
-// stand-in agrees with the gateway about which letter is which for the same
-// reason a real model would - because it read the list.
-func lettered(instruction, alias string) (string, bool) {
-	var chosen string
-	var alternatives []string
-	for line := range strings.SplitSeq(instruction, "\n") {
-		line = strings.TrimSpace(line)
-		// "A) keera-small - a fast local model for short edits"
-		if len(line) < 3 || line[1] != ')' {
-			continue
-		}
-		letter, rest := line[:1], strings.TrimSpace(line[2:])
-		name, _, _ := strings.Cut(rest, " - ")
-		if name == alias {
-			chosen = letter
-			continue
-		}
-		alternatives = append(alternatives, letter)
+// lastSent is the body the answering model was sent: the last one the
+// stand-in received.
+func lastSent(h *harness) string {
+	sent := drain(h)
+	if len(sent) == 0 {
+		return ""
 	}
-	if chosen == "" {
-		return "", false
-	}
-	// The chosen letter takes almost all of the mass and the rest share what
-	// is left, which is what a model that knows the answer looks like.
-	tops := []string{`{"token":"` + chosen + `","logprob":-0.01}`}
-	for _, letter := range alternatives {
-		tops = append(tops, `{"token":"`+letter+`","logprob":-5.0}`)
-	}
-	return `{"id":"2","choices":[{"message":{"content":"` + chosen + `"},"logprobs":{"content":[` +
-		`{"token":"` + chosen + `","logprob":-0.01,"top_logprobs":[` +
-		strings.Join(tops, ",") + `]}]}}],` +
-		`"usage":{"prompt_tokens":50,"completion_tokens":1}}`, true
+	return sent[len(sent)-1]
 }
 
-func TestRouterSendsTheRequestToTheModelItChose(t *testing.T) {
-	h := routerHarness(t, picks("keera-large"), autoRouter(), nil)
-
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"auto","messages":[{"role":"user","content":"plan a migration"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-
-	// The decision reaches the backend first, so the second body is the one the
-	// chosen model was actually asked.
-	<-h.upstreamBodies
-	forwarded := string(<-h.upstreamBodies)
-	if !strings.Contains(forwarded, "large-served") {
-		t.Errorf("the request did not go to the chosen model: %s", forwarded)
-	}
-	if got := resp.Header.Get("X-Keera-Router"); got != "auto -> keera-large" {
-		t.Errorf("X-Keera-Router = %q, want %q", got, "auto -> keera-large")
-	}
-
-	// The usage row is the destination's, with the fact that it was chosen
-	// beside it - which is what makes per-model reporting still about models.
-	ev := h.sink.last(t)
-	if ev.Alias != "keera-large" {
-		t.Errorf("alias = %q, want the destination keera-large", ev.Alias)
-	}
-	if ev.Router != "auto" || ev.RouterOutcome != store.RouterChose {
-		t.Errorf("router = %q/%q, want auto/chose", ev.Router, ev.RouterOutcome)
-	}
-}
-
-// The answer names the model that answered, not the router, so a developer
-// reading it can tell what produced it.
-func TestRouterAnswerNamesTheModelThatAnswered(t *testing.T) {
-	h := routerHarness(t, picks("keera-small"), autoRouter(), nil)
-
-	resp := h.post(t, "/v1/messages",
-		`{"model":"auto","max_tokens":16,"messages":[{"role":"user","content":"rename this"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	var out struct {
-		Model string `json:"model"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		t.Fatal(err)
-	}
-	if out.Model != "keera-small" {
-		t.Errorf("answer named %q, want the destination keera-small", out.Model)
-	}
-}
-
-// The decision has to be made on what the client sent, not on what the filters
-// left, or a redaction filter would launder a prompt into the hosted model.
-func TestRouterReadsTheRequestBeforeTheFiltersDo(t *testing.T) {
-	resolved := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"}, nil, nil, nil)
-	resolved.Filters = []string{"redact"}
-
-	var seen []string
-	h := routerHarness(t, func(segments []string) string {
-		seen = segments
-		return "keera-small"
-	}, autoRouter(), resolved)
-	// A filter on the same deciding model, so that both hooks run. It is told
-	// apart from the router by what the gateway asks it to produce.
-	h.src.filters = map[string]policy.Filter{
-		"org_1/redact": {
-			OrgID: "org_1", Alias: "redact", Model: "keera-picker",
-			Mode: policy.FilterModeGate, Prompt: "Allow everything.",
-		},
-	}
-
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"auto","messages":[{"role":"user","content":"deploy with hunter2"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	if len(seen) != 1 || seen[0] != "deploy with hunter2" {
-		t.Errorf("the router was shown %q, want the request as the client sent it", seen)
-	}
-}
-
-// The destination list is the authority, not the answer. A deciding model that
-// names something else has not made a decision this router was allowed to act
-// on, however plausible the name is.
-func TestRouterWillNotSendToAModelItWasNotOffered(t *testing.T) {
-	h := routerHarness(t, picks("keera-embed"), autoRouter(), nil)
-
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"auto","messages":[{"role":"user","content":"hello"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200 by way of the fallback", resp.StatusCode)
-	}
-	ev := h.sink.last(t)
-	if ev.Alias != "keera-small" || ev.RouterOutcome != store.RouterFellBack {
-		t.Errorf("alias/outcome = %q/%q, want keera-small/fallback", ev.Alias, ev.RouterOutcome)
-	}
-}
-
-// An instruction router with one destination has nothing to choose, so its
-// model is never asked and every request goes straight there.
-func TestRouterWithOneDestinationDoesNotDecide(t *testing.T) {
-	rt := autoRouter()
-	rt.Destinations, rt.Fallback = []string{"keera-large"}, ""
-	h := routerHarness(t, picks("keera-small"), rt, nil)
-
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"auto","messages":[{"role":"user","content":"plan a migration"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	if forwarded := string(<-h.upstreamBodies); !strings.Contains(forwarded, "large-served") {
-		t.Errorf("the first request upstream was not to the destination: %s", forwarded)
-	}
-	if n := len(h.upstreamBodies); n != 0 {
-		t.Errorf("%d further requests were sent; the deciding model should not be asked", n)
-	}
-	if ev := h.sink.last(t); ev.Alias != "keera-large" || ev.RouterOutcome != store.RouterChose {
-		t.Errorf("alias/outcome = %q/%q, want keera-large/chose", ev.Alias, ev.RouterOutcome)
-	}
-}
-
-// Asking no model does not take away the fallback: when the one destination
-// cannot answer, the request goes there, as it would after a failed decision.
-func TestRouterWithOneDestinationFallsBackWhenItCannotAnswer(t *testing.T) {
-	rt := autoRouter()
-	rt.Destinations = []string{"keera-large"}
-	h := routerHarness(t, picks("keera-large"), rt, nil)
-	large := h.src.models["keera-large"]
-	large.Enabled = false
-	h.src.models["keera-large"] = large
-
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"auto","messages":[{"role":"user","content":"plan a migration"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200 by way of the fallback", resp.StatusCode)
-	}
-	if forwarded := string(<-h.upstreamBodies); !strings.Contains(forwarded, "small-served") {
-		t.Errorf("the request was not sent to the fallback: %s", forwarded)
-	}
-	ev := h.sink.last(t)
-	if ev.Alias != "keera-small" || ev.RouterOutcome != store.RouterFellBack {
-		t.Errorf("alias/outcome = %q/%q, want keera-small/fallback", ev.Alias, ev.RouterOutcome)
-	}
-	if !strings.Contains(ev.Note, "keera-large is disabled") || ev.Error != "" {
-		t.Errorf("note/error = %q/%q, want a note on why the destination was passed over, "+
-			"and no error", ev.Note, ev.Error)
-	}
-}
-
-func TestRouterIgnoresTwoDestinationsNamedAtOnce(t *testing.T) {
-	h := routerHarness(t, picks("either keera-small or keera-large would do"), autoRouter(), nil)
-
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"auto","messages":[{"role":"user","content":"hello"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200 by way of the fallback", resp.StatusCode)
-	}
-	if ev := h.sink.last(t); ev.RouterOutcome != store.RouterFellBack {
-		t.Errorf("outcome = %q, want fallback for an answer that chose nothing", ev.RouterOutcome)
-	}
-}
-
-func TestRouterWithNoFallbackRefusesWhatItCannotDecide(t *testing.T) {
-	rt := autoRouter()
-	rt.Fallback = ""
-	h := routerHarness(t, picks("no idea"), rt, nil)
-
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"auto","messages":[{"role":"user","content":"hello"}]}`)
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503", resp.StatusCode)
-	}
-	ev := h.sink.last(t)
-	if ev.RouterOutcome != store.RouterError {
-		t.Errorf("outcome = %q, want error", ev.RouterOutcome)
-	}
-	// The generation happened, so it is charged. A router a client could make
-	// free by talking it into failing is one a client has a reason to break.
-	if ev.CostMicros == 0 {
-		t.Error("the decision that could not be made was not charged")
-	}
-}
-
-// The other half of the same choice: a router that has somewhere safe to send a
-// request it cannot place does so rather than taking a department offline.
-func TestRouterFallsBackWhenItsModelIsGone(t *testing.T) {
-	h := routerHarness(t, picks("keera-large"), autoRouter(), nil)
-	delete(h.src.models, "keera-picker")
-
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"auto","messages":[{"role":"user","content":"hello"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	ev := h.sink.last(t)
-	if ev.Alias != "keera-small" || ev.RouterOutcome != store.RouterFellBack {
-		t.Errorf("alias/outcome = %q/%q, want keera-small/fallback", ev.Alias, ev.RouterOutcome)
-	}
-	if !strings.Contains(ev.Note, "is not one of this organisation's models") || ev.Error != "" {
-		t.Errorf("note/error = %q/%q, want a note on why the decision could not be made, "+
-			"and no error", ev.Note, ev.Error)
-	}
-	if ev.RouterMS < 0 {
-		t.Errorf("router_ms = %d", ev.RouterMS)
-	}
-}
-
-// A router is a name a key may or may not use, exactly as a model is, and the
-// answer to a key that may not use it is the one a model gets: it does not
-// exist, so another project's routers are not enumerable through 403s.
-func TestRouterIsRefusedToAKeyWhoseAllowListOmitsIt(t *testing.T) {
-	resolved := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"}, nil, nil, nil)
-	resolved.AllowedModels = []string{"keera-small"}
-	h := routerHarness(t, picks("keera-large"), autoRouter(), resolved)
-
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"auto","messages":[{"role":"user","content":"hello"}]}`)
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", resp.StatusCode)
-	}
-}
-
-// Allowing a router allows where it sends. A key narrowed to the router is the
-// way a scope is made to route, so a destination outside its allow-list has to
-// be reachable or the arrangement would work for nobody.
-func TestRouterMayPlaceARequestOutsideTheKeysAllowList(t *testing.T) {
-	resolved := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"}, nil, nil, nil)
-	resolved.AllowedModels = []string{"auto"}
-	h := routerHarness(t, picks("keera-large"), autoRouter(), resolved)
-
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"auto","messages":[{"role":"user","content":"hello"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	if ev := h.sink.last(t); ev.Alias != "keera-large" {
-		t.Errorf("alias = %q, want keera-large", ev.Alias)
-	}
-}
-
-// A router decides with a chat model and its destinations answer chat requests,
-// so it is not a name the other surfaces have - which is the answer a chat model
-// named on /v1/embeddings already gets.
-func TestRouterIsNotAModelOnTheEmbeddingSurface(t *testing.T) {
-	h := routerHarness(t, picks("keera-small"), autoRouter(), nil)
-
-	resp := h.post(t, "/v1/embeddings", `{"model":"auto","input":"hello"}`)
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", resp.StatusCode)
-	}
-}
-
-// A model is looked up before a router, so a router cannot take over a
-// model's alias.
-func TestAModelAliasWinsOverARouterOfTheSameName(t *testing.T) {
-	rt := autoRouter()
-	rt.Alias = "keera-small"
-	h := routerHarness(t, picks("keera-large"), rt, nil)
-
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"keera-small","messages":[{"role":"user","content":"hello"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	if ev := h.sink.last(t); ev.Router != "" {
-		t.Errorf("router = %q, want the alias to have been served as a model", ev.Router)
-	}
-}
-
-// What the deciding model is told about each destination is the catalogue's own
-// description, which is the reason that field exists.
-func TestTheDecidingModelIsToldWhatEachDestinationIsFor(t *testing.T) {
-	h := routerHarness(t, picks("keera-small"), autoRouter(), nil)
-
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"auto","messages":[{"role":"user","content":"hello"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	instruction := string(<-h.upstreamBodies)
-	for _, want := range []string{
-		"a fast local model for short edits",
-		"a hosted model for work that needs reasoning",
-		// And the administrator's own instruction, before the format.
-		"Send short edits to the small model",
-	} {
-		if !strings.Contains(instruction, want) {
-			t.Errorf("the decision was asked without %q: %s", want, instruction)
+// drain takes every body sent upstream so far, oldest first.
+func drain(h *harness) []string {
+	var sent []string
+	for {
+		select {
+		case b := <-h.upstreamBodies:
+			sent = append(sent, string(b))
+		default:
+			return sent
 		}
 	}
 }
 
-// A destination the catalogue cannot serve is left out of the choice rather
-// than offered and then found unreachable - which would be a fallback waiting
-// to happen on every request that picked it.
-func TestADisabledDestinationIsNotOffered(t *testing.T) {
-	rt := autoRouter()
-	rt.Destinations = append(rt.Destinations, "keera-picker")
-	h := routerHarness(t, picks("keera-small"), rt, nil)
-	large := h.src.models["keera-large"]
-	large.Enabled = false
-	h.src.models["keera-large"] = large
+const secretPrompt = `{"model":"safe","messages":[{"role":"user","content":"deploy with hunter2"}]}`
 
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"auto","messages":[{"role":"user","content":"hello"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	instruction := string(<-h.upstreamBodies)
-	if !strings.Contains(instruction, "keera-small") || strings.Contains(instruction, "keera-large") {
-		t.Errorf("the instruction does not offer exactly what is enabled: %s", instruction)
-	}
-}
-
-// With only one destination left to offer, there is nothing to choose, so
-// the deciding model is not asked and cannot fail the request.
-func TestRouterWithOneDestinationLeftDoesNotDecide(t *testing.T) {
-	h := routerHarness(t, picks("keera-large"), autoRouter(), nil)
-	large := h.src.models["keera-large"]
-	large.Enabled = false
-	h.src.models["keera-large"] = large
-
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"auto","messages":[{"role":"user","content":"hello"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	if forwarded := string(<-h.upstreamBodies); !strings.Contains(forwarded, "small-served") {
-		t.Errorf("the first request upstream was not to the one destination left: %s", forwarded)
-	}
-	if n := len(h.upstreamBodies); n != 0 {
-		t.Errorf("%d further requests were sent; the deciding model should not be asked", n)
-	}
-	if ev := h.sink.last(t); ev.Alias != "keera-small" || ev.RouterOutcome != store.RouterChose {
-		t.Errorf("alias/outcome = %q/%q, want keera-small/chose", ev.Alias, ev.RouterOutcome)
-	}
-}
-
-// A request the router cannot read is refused, and recorded as an error
-// rather than as a choice.
-func TestARouterRefusalOfAnUnreadableRequestIsAnError(t *testing.T) {
-	h := routerHarness(t, picks("keera-small"), autoRouter(), nil)
-
-	resp := h.post(t, "/v1/chat/completions", `{"model":"auto","messages":"hello"}`)
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", resp.StatusCode)
-	}
-	if ev := h.sink.last(t); ev.RouterOutcome != store.RouterError {
-		t.Errorf("outcome = %q, want error", ev.RouterOutcome)
-	}
-}
-
-func TestRoutersAreListedWhereAClientLooksForModels(t *testing.T) {
-	h := routerHarness(t, picks("keera-small"), autoRouter(), nil)
-
-	req, _ := http.NewRequest(http.MethodGet, h.url("/v1/models"), nil)
-	req.Header.Set("Authorization", "Bearer "+testKey)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	var out struct {
-		Data []struct {
-			ID           string   `json:"id"`
-			Description  string   `json:"description"`
-			Destinations []string `json:"destinations"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		t.Fatal(err)
-	}
-	var found bool
-	for _, m := range out.Data {
-		switch m.ID {
-		case "auto":
-			found = true
-			if len(m.Destinations) != 2 {
-				t.Errorf("the router was listed without its destinations: %+v", m)
-			}
-		case "keera-small":
-			// The description a router decides on is the same one a client is
-			// choosing between aliases by.
-			if m.Description != "a fast local model for short edits" {
-				t.Errorf("description = %q", m.Description)
-			}
-		}
-	}
-	if !found {
-		t.Error("the router was not in /v1/models, so no client could discover it")
-	}
-}
-
-/* ---------------------------------------------------------------- unit tests */
-
-func TestChosenDestination(t *testing.T) {
-	destinations := []string{"keera-small", "keera-large", "keera-small-eu"}
-	tests := []struct {
-		name   string
-		answer string
-		want   string
+// The redaction sits on the branch to the hosted model only, which is why a
+// router beats a filter on the key: the local model gets the request as
+// sent, and the route step decides on it unredacted.
+func TestRouterFiltersOnlyTheBranchTheRouterChose(t *testing.T) {
+	p := policy.Router{Alias: "safe", Start: autoStep("route", map[string]*policy.Step{
+		"keera-large": {ID: "redact", Kind: policy.StepFilter, Ref: "redact",
+			Next: modelStep("large", "keera-large")},
+	})}
+	for _, tt := range []struct {
+		chosen, served string
+		redacted       bool
 	}{
-		{"the name on its own", "keera-large", "keera-large"},
-		{"trailing punctuation", "keera-large.", "keera-large"},
-		{"fenced, which small models do", "`keera-small`", "keera-small"},
-		{"quoted and capitalised", `"Keera-Large"`, "keera-large"},
-		{"a sentence around it", "I would send this to keera-large", "keera-large"},
-		// The longest match wins, so a name containing another name is not
-		// read as the one it contains.
-		{"a name that contains another", "keera-small-eu", "keera-small-eu"},
-		{"two names is not a decision", "keera-small or keera-large", ""},
-		{"a name that is not offered", "gpt-4", ""},
-		{"prose that names nothing", "it depends on the request", ""},
-		{"a name glued to other letters", "xkeera-larges", ""},
-		{"nothing at all", "", ""},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got, ok := chosenDestination(tc.answer, destinations)
-			if tc.want == "" {
-				if ok {
-					t.Errorf("chosenDestination(%q) = %q, want no decision", tc.answer, got)
-				}
-				return
+		{"keera-large", "large-served", true},
+		{"keera-small", "small-served", false},
+	} {
+		t.Run(tt.chosen, func(t *testing.T) {
+			var seen []string
+			h := treeHarness(t, func(segments []string) string {
+				seen = segments
+				return tt.chosen
+			}, p, nil)
+
+			resp := h.post(t, "/v1/chat/completions", secretPrompt)
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("status = %d, want 200", resp.StatusCode)
 			}
-			if !ok || got != tc.want {
-				t.Errorf("chosenDestination(%q) = %q, %v; want %q", tc.answer, got, ok, tc.want)
+			sent := lastSent(h)
+			if !strings.Contains(sent, tt.served) {
+				t.Errorf("the request did not go to %s: %s", tt.chosen, sent)
+			}
+			if got := strings.Contains(sent, "[SECRET]"); got != tt.redacted {
+				t.Errorf("redacted = %v, want %v: %s", got, tt.redacted, sent)
+			}
+			if len(seen) != 1 || seen[0] != "deploy with hunter2" {
+				t.Errorf("the route step was shown %q, want the request as sent", seen)
+			}
+			if got, want := resp.Header.Get("X-Keera-Router"), "safe -> "+tt.chosen; got != want {
+				t.Errorf("X-Keera-Router = %q, want %q", got, want)
+			}
+			ev := h.sink.last(t)
+			if ev.Router != "safe" || ev.RouterOutcome != store.RouterChose || ev.Alias != tt.chosen {
+				t.Errorf("router/outcome/alias = %q/%q/%q", ev.Router, ev.RouterOutcome, ev.Alias)
 			}
 		})
 	}
 }
 
-// The window is filled from the end, because a router answers what is being
-// asked now. The head of a coding agent's conversation is about an hour ago.
-func TestRouterWindowKeepsTheNewestSegments(t *testing.T) {
-	long := strings.Repeat("x", routerWindowBytes)
-	got := routerWindow([]string{long, "the older question", "the newest question"})
-	if len(got) != 2 || got[len(got)-1] != "the newest question" {
-		t.Fatalf("routerWindow kept %d segments ending %q", len(got), got[len(got)-1])
+// A spent budget sends the request down its exceeded branch instead of
+// refusing it, and says so on the usage row. Within it, the request is
+// charged to the step.
+func TestRouterBudgetSendsWhatIsOverItElsewhere(t *testing.T) {
+	p := policy.Router{Alias: "safe", Start: &policy.Step{
+		ID: "cap", Kind: policy.StepBudget, BudgetMicros: 1_000_000, Period: policy.PeriodMonth,
+		Next:     modelStep("large", "keera-large"),
+		Exceeded: modelStep("small", "keera-small"),
+	}}
+
+	h := treeHarness(t, picks("keera-small"), p, nil)
+	if resp := h.post(t, "/v1/chat/completions", secretPrompt); resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if sent := lastSent(h); !strings.Contains(sent, "large-served") {
+		t.Errorf("within the budget, the request went elsewhere: %s", sent)
+	}
+	if !slices.ContainsFunc(h.budgets.chargedTo, func(sc policy.Scope) bool {
+		return sc.Type == policy.ScopeRouter && sc.ID == "org_1/safe/cap"
+	}) {
+		t.Errorf("the answer was charged to %+v, not the router's budget", h.budgets.chargedTo)
+	}
+	if ev := h.sink.last(t); !slices.ContainsFunc(ev.Scopes, func(sc policy.Scope) bool {
+		return sc.ID == "org_1/safe/cap"
+	}) {
+		t.Errorf("the usage row's scopes %+v leave out the router's budget", ev.Scopes)
 	}
 
-	// One segment larger than the whole window is kept whole: half a sentence
-	// with no way to know it is half would be worse than a long one.
-	if got := routerWindow([]string{long + long}); len(got) != 1 {
-		t.Errorf("routerWindow dropped an oversized lone segment: %d segments", len(got))
+	h.budgets.spentType = policy.ScopeRouter
+	if resp := h.post(t, "/v1/chat/completions", secretPrompt); resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 by way of the exceeded branch", resp.StatusCode)
 	}
-	if got := routerWindow(nil); got != nil {
-		t.Errorf("routerWindow(nil) = %v, want nil", got)
+	if sent := lastSent(h); !strings.Contains(sent, "small-served") {
+		t.Errorf("over the budget, the request did not take the exceeded branch: %s", sent)
+	}
+	if ev := h.sink.last(t); !strings.Contains(ev.Note, "exceeded branch of 'cap'") {
+		t.Errorf("note = %q, want it to say why the cheaper model answered", ev.Note)
 	}
 }
 
-/* ------------------------------------------------- the router that does not
-   decide */
+// Without an exceeded branch, a spent budget refuses, and names the router,
+// not the key, as what ran out.
+func TestRouterBudgetWithoutABranchRefuses(t *testing.T) {
+	p := policy.Router{Alias: "safe", Start: &policy.Step{
+		ID: "cap", Kind: policy.StepBudget, BudgetMicros: 1_000_000, Period: policy.PeriodMonth,
+		Next: modelStep("large", "keera-large"),
+	}}
+	h := treeHarness(t, picks("keera-small"), p, nil)
+	h.budgets.spentType = policy.ScopeRouter
 
-// chainHarness wires a gateway whose organisation has one fallback router in
-// front of a stand-in inference plane where some models are down.
-//
-// A fallback router's whole behaviour is a function of what its destinations
-// answer, so that - rather than what a deciding model says - is what these
-// tests vary. down names the backend models that answer with a failure of
-// their own; everything else answers normally.
-func chainHarness(t *testing.T, rt policy.Router, down map[string]int) *harness {
-	t.Helper()
-	return chainHarnessWith(t, rt, func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		var sent struct {
-			Model string `json:"model"`
+	resp := h.post(t, "/v1/chat/completions", secretPrompt)
+	if resp.StatusCode != http.StatusPaymentRequired {
+		t.Fatalf("status = %d, want 402", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "the router 'safe'") ||
+		!strings.Contains(string(body), "this router has spent") {
+		t.Errorf("the refusal does not name the router: %s", body)
+	}
+}
+
+// A rate limit step counts the requests through it, apart from the key's.
+func TestRouterRateLimitCountsItsOwnStep(t *testing.T) {
+	p := policy.Router{Alias: "safe", Start: &policy.Step{
+		ID: "burst", Kind: policy.StepRateLimit, Requests: 1,
+		Next:     modelStep("large", "keera-large"),
+		Exceeded: modelStep("small", "keera-small"),
+	}}
+	h := treeHarness(t, picks("keera-small"), p, nil)
+
+	for i, want := range []string{"large-served", "small-served"} {
+		if resp := h.post(t, "/v1/chat/completions", secretPrompt); resp.StatusCode != http.StatusOK {
+			t.Fatalf("request %d: status = %d, want 200", i, resp.StatusCode)
 		}
-		_ = json.Unmarshal(raw, &sent)
-		w.Header().Set("Content-Type", "application/json")
-		if status, ok := down[sent.Model]; ok {
-			w.WriteHeader(status)
-			_, _ = io.WriteString(w, `{"error":{"message":"no capacity"}}`)
-			return
+		if sent := lastSent(h); !strings.Contains(sent, want) {
+			t.Errorf("request %d did not go to %s: %s", i, want, sent)
 		}
-		_, _ = io.WriteString(w, `{"id":"1","choices":[{"message":{"content":"hi"}}],`+
-			`"usage":{"prompt_tokens":10,"completion_tokens":5}}`)
-	})
-}
-
-// chainHarnessWith is chainHarness in front of a backend of the test's own.
-func chainHarnessWith(t *testing.T, rt policy.Router, backend http.HandlerFunc) *harness {
-	t.Helper()
-	models := map[string]policy.Model{
-		"keera-small": {
-			OrgID: "org_1", Alias: "keera-small", Kind: policy.KindChat, BackendModel: "small-served",
-			InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 1_000_000, Enabled: true,
-		},
-		"keera-large": {
-			OrgID: "org_1", Alias: "keera-large", Kind: policy.KindChat, BackendModel: "large-served",
-			InputMicrosPerMTok: 9_000_000, OutputMicrosPerMTok: 9_000_000, Enabled: true,
-		},
-		"keera-spare": {
-			OrgID: "org_1", Alias: "keera-spare", Kind: policy.KindChat, BackendModel: "spare-served",
-			InputMicrosPerMTok: 5_000_000, OutputMicrosPerMTok: 5_000_000, Enabled: true,
-		},
-	}
-	h := newHarness(t, backend, models,
-		policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"}, nil, nil, nil))
-	h.src.routers = map[string]policy.Router{"org_1/" + rt.Alias: rt}
-	return h
-}
-
-// chainRouter is the ordinary shape of the other kind: an order, and nothing
-// that reads anything.
-func chainRouter(destinations ...string) policy.Router {
-	if len(destinations) == 0 {
-		destinations = []string{"keera-small", "keera-large"}
-	}
-	return policy.Router{
-		OrgID: "org_1", Alias: "ha", Mode: policy.RouterModeFallback,
-		Destinations: destinations,
 	}
 }
 
-func TestFallbackRouterUsesItsFirstDestination(t *testing.T) {
-	h := chainHarness(t, chainRouter(), nil)
+// A filter step that refuses says it was the router's, since no guardrail
+// on the key had anything to do with it.
+func TestRouterFilterRefusalNamesTheRouter(t *testing.T) {
+	p := policy.Router{Alias: "safe", Start: &policy.Step{
+		ID: "block", Kind: policy.StepFilter, Ref: "block", Next: modelStep("large", "keera-large"),
+	}}
+	h := treeHarness(t, picks("keera-small"), p, nil)
 
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"ha","messages":[{"role":"user","content":"hello"}]}`)
+	resp := h.post(t, "/v1/chat/completions", secretPrompt)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "the router 'safe' checks every request") {
+		t.Errorf("the refusal does not name the router: %s", body)
+	}
+	if ev := h.sink.last(t); len(ev.FilterRuns) != 1 || ev.FilterRuns[0].Filter != "block" {
+		t.Errorf("filter runs = %+v, want the router's one", ev.FilterRuns)
+	}
+}
+
+// The key's own filters still run after the router, so a router cannot
+// be used to step around a guardrail.
+func TestTheKeysFiltersStillRunAfterARouter(t *testing.T) {
+	resolved := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"}, nil, nil, nil)
+	resolved.Filters = []string{"redact"}
+	p := policy.Router{Alias: "safe", Start: modelStep("large", "keera-large")}
+	h := treeHarness(t, picks("keera-small"), p, resolved)
+
+	if resp := h.post(t, "/v1/chat/completions", secretPrompt); resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if sent := lastSent(h); !strings.Contains(sent, "[SECRET]") {
+		t.Errorf("the key's filter did not run: %s", sent)
+	}
+}
+
+// A filter both the router and the key's guardrail name runs once, as a filter
+// named at two guardrail levels does: once charged, once logged, once listed.
+func TestAFilterTheRouterRanIsNotRunAgainForTheKey(t *testing.T) {
+	resolved := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"}, nil, nil, nil)
+	resolved.Filters = []string{"redact"}
+	p := policy.Router{Alias: "safe", Start: &policy.Step{
+		ID: "redact", Kind: policy.StepFilter, Ref: "redact", Next: modelStep("large", "keera-large"),
+	}}
+	h := treeHarness(t, picks("keera-small"), p, resolved)
+
+	resp := h.post(t, "/v1/chat/completions", secretPrompt)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	if forwarded := string(<-h.upstreamBodies); !strings.Contains(forwarded, "small-served") {
-		t.Errorf("the request did not go to the first destination: %s", forwarded)
+	if got := resp.Header.Get("X-Keera-Filters"); got != "redact" {
+		t.Errorf("X-Keera-Filters = %q, want redact", got)
 	}
-	if n := len(h.upstreamBodies); n != 0 {
-		t.Errorf("%d further requests were sent; a destination that answered is the answer", n)
+	if sent := lastSent(h); !strings.Contains(sent, "[SECRET]") {
+		t.Errorf("the filter did not run: %s", sent)
 	}
-	if got := resp.Header.Get("X-Keera-Router"); got != "ha -> keera-small" {
-		t.Errorf("X-Keera-Router = %q, want %q", got, "ha -> keera-small")
-	}
-
-	ev := h.sink.last(t)
-	if ev.RouterOutcome != store.RouterChose {
-		t.Errorf("outcome = %q, want %q - the first destination answering is this "+
-			"router getting what it wanted", ev.RouterOutcome, store.RouterChose)
-	}
-	// Nothing read the request, so nothing generated anything to read it with:
-	// what was charged is the answering model's own ten input tokens and five
-	// output tokens at a micro each, and not a micro more.
-	if got := h.budgets.total(); got != 15 {
-		t.Errorf("%d micros were charged, want 15 - a fallback router decides nothing, "+
-			"so there is no generation of its own to pay for", got)
+	if ev := h.sink.last(t); len(ev.FilterRuns) != 1 {
+		t.Errorf("filter runs = %+v, want one", ev.FilterRuns)
 	}
 }
 
-func TestFallbackRouterMovesToTheNextWhenOneFails(t *testing.T) {
-	h := chainHarness(t, chainRouter(), map[string]int{"small-served": 503})
+// Route steps can follow one another. The request goes where the last one
+// sends it.
+func TestRouterChainsRouteSteps(t *testing.T) {
+	p := policy.Router{Alias: "safe", Start: autoStep("first", map[string]*policy.Step{
+		"keera-large": {ID: "second", Kind: policy.StepRoute, Mode: policy.RouteModeFallback,
+			Destinations: []string{"keera-small"}},
+	})}
+	h := treeHarness(t, picks("keera-large"), p, nil)
 
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"ha","messages":[{"role":"user","content":"hello"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200 - the second destination answered", resp.StatusCode)
+	if resp := h.post(t, "/v1/chat/completions", secretPrompt); resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	if first := string(<-h.upstreamBodies); !strings.Contains(first, "small-served") {
-		t.Errorf("the first destination was not tried first: %s", first)
+	if sent := lastSent(h); !strings.Contains(sent, "small-served") {
+		t.Errorf("the second step's choice did not answer: %s", sent)
 	}
-	if second := string(<-h.upstreamBodies); !strings.Contains(second, "large-served") {
-		t.Errorf("the second destination was not tried next: %s", second)
-	}
-	if got := resp.Header.Get("X-Keera-Router"); got != "ha -> keera-large (fallback)" {
-		t.Errorf("X-Keera-Router = %q; a client has to be able to see that it is being "+
-			"answered by the second choice", got)
-	}
-
 	ev := h.sink.last(t)
-	if ev.Alias != "keera-large" {
-		t.Errorf("alias = %q; the row's tokens and price are the answering model's",
-			ev.Alias)
+	if ev.Router != "safe" || ev.Alias != "keera-small" {
+		t.Errorf("router/alias = %q/%q, want safe/keera-small", ev.Router, ev.Alias)
 	}
-	if ev.RouterOutcome != store.RouterFellBack {
-		t.Errorf("outcome = %q, want %q", ev.RouterOutcome, store.RouterFellBack)
-	}
-	// The request succeeded, so this row is the only thing that says the first
-	// destination is down. It says so in a note, because the request was served.
-	if !strings.Contains(ev.Note, "keera-small answered 503") || ev.Error != "" {
-		t.Errorf("note/error = %q/%q, want the failed attempt as a note", ev.Note, ev.Error)
+	// The first step's decision was a generation, and it is still paid for.
+	if ev.CostMicros <= answerOnly(t, h) {
+		t.Errorf("cost = %d, which leaves out the first step's decision", ev.CostMicros)
 	}
 }
 
-func TestFallbackRouterTriesEveryDestinationInOrder(t *testing.T) {
-	h := chainHarness(t, chainRouter("keera-small", "keera-spare", "keera-large"),
-		map[string]int{"small-served": 500, "spare-served": 502})
+// A branch can end at a model other than the one the step chose. The header
+// names the model that answered, not the step's choice.
+func TestRouterHeaderNamesTheModelABranchEndsAt(t *testing.T) {
+	p := policy.Router{Alias: "safe", Start: autoStep("route", map[string]*policy.Step{
+		"keera-large": modelStep("instead", "keera-small"),
+	})}
+	h := treeHarness(t, picks("keera-large"), p, nil)
 
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"ha","messages":[{"role":"user","content":"hello"}]}`)
+	resp := h.post(t, "/v1/chat/completions", secretPrompt)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	for _, want := range []string{"small-served", "spare-served", "large-served"} {
-		if got := string(<-h.upstreamBodies); !strings.Contains(got, want) {
-			t.Fatalf("destination out of order: wanted %s, got %s", want, got)
-		}
+	if sent := lastSent(h); !strings.Contains(sent, "small-served") {
+		t.Errorf("the branch's model did not answer: %s", sent)
+	}
+	if got := resp.Header.Get("X-Keera-Router"); got != "safe -> keera-small" {
+		t.Errorf("X-Keera-Router = %q, want the model that answered", got)
 	}
 }
 
-func TestFallbackRouterServesTheLastFailureWhenNothingAnswers(t *testing.T) {
-	h := chainHarness(t, chainRouter(),
-		map[string]int{"small-served": 503, "large-served": 500})
-
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"ha","messages":[{"role":"user","content":"hello"}]}`)
-	// The last destination's own answer: it says best why there is no
-	// completion.
-	if resp.StatusCode != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500 - what the last destination said", resp.StatusCode)
-	}
-	// Not "(fallback)": that says a later destination answered, and none did.
-	want := "ha -> keera-large (every destination failed)"
-	if got := resp.Header.Get("X-Keera-Router"); got != want {
-		t.Errorf("X-Keera-Router = %q, want %q", got, want)
-	}
+// answerOnly is what the answer alone cost on the last usage row.
+func answerOnly(t *testing.T, h *harness) int64 {
+	t.Helper()
 	ev := h.sink.last(t)
-	if ev.RouterOutcome != store.RouterError {
-		t.Errorf("outcome = %q, want %q - the router ran out of destinations",
-			ev.RouterOutcome, store.RouterError)
-	}
-	if !strings.Contains(ev.Error, "keera-small answered 503") {
-		t.Errorf("the earlier failure was not recorded: %q", ev.Error)
-	}
+	cost, _ := answerCost(policy.Model{InputMicrosPerMTok: 1_000_000, OutputMicrosPerMTok: 1_000_000},
+		policy.Tokens{Input: ev.InputTokens, Output: ev.OutputTokens})
+	return cost
 }
 
-func TestFallbackRouterDoesNotRepeatARefusedRequest(t *testing.T) {
-	h := chainHarness(t, chainRouter(), map[string]int{"small-served": 400})
+// A router whose model was deleted under it refuses rather than guessing.
+func TestRouterEndingAtAMissingModelIsRefused(t *testing.T) {
+	p := policy.Router{Alias: "safe", Start: modelStep("gone", "keera-gone")}
+	h := treeHarness(t, picks("keera-small"), p, nil)
 
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"ha","messages":[{"role":"user","content":"hello"}]}`)
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", resp.StatusCode)
-	}
-	<-h.upstreamBodies
-	if n := len(h.upstreamBodies); n != 0 {
-		t.Errorf("the request was sent to %d further destinations; a request that is "+
-			"malformed or over a quota is all of those things at the next one too", n)
-	}
-	if ev := h.sink.last(t); ev.RouterOutcome != store.RouterChose {
-		t.Errorf("outcome = %q; the destination answered, and what it said about the "+
-			"request is not the router failing to place it", ev.RouterOutcome)
-	}
-}
-
-func TestFallbackRouterRefusesWhenNothingCanServe(t *testing.T) {
-	h := chainHarness(t, chainRouter("keera-gone", "keera-also-gone"), nil)
-
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"ha","messages":[{"role":"user","content":"hello"}]}`)
+	resp := h.post(t, "/v1/chat/completions", secretPrompt)
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", resp.StatusCode)
 	}
-	if n := len(h.upstreamBodies); n != 0 {
-		t.Errorf("%d requests were sent to a model; none of the destinations exists", n)
-	}
-	if ev := h.sink.last(t); ev.RouterOutcome != store.RouterError {
-		t.Errorf("outcome = %q, want %q", ev.RouterOutcome, store.RouterError)
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "router_unavailable") {
+		t.Errorf("body = %s", body)
 	}
 }
 
-func TestFallbackRouterSkipsADestinationTheCatalogueCannotServe(t *testing.T) {
-	h := chainHarness(t, chainRouter("keera-gone", "keera-large"), nil)
+func TestRoutersAreListedWhereAClientLooksForModels(t *testing.T) {
+	p := policy.Router{Alias: "safe", DisplayName: "Safe", Start: autoStep("route", map[string]*policy.Step{
+		"keera-large": {ID: "redact", Kind: policy.StepFilter, Ref: "redact",
+			Next: modelStep("large", "keera-large")},
+	})}
+	h := treeHarness(t, picks("keera-small"), p, nil)
 
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"ha","messages":[{"role":"user","content":"hello"}]}`)
+	resp := h.get(t, "/v1/models/safe")
+	var out struct {
+		ID           string   `json:"id"`
+		DisplayName  string   `json:"display_name"`
+		Destinations []string `json:"destinations"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(out.Destinations)
+	if out.ID != "safe" || out.DisplayName != "Safe" ||
+		!slices.Equal(out.Destinations, []string{"keera-large", "keera-small"}) {
+		t.Errorf("listed as %+v", out)
+	}
+}
+
+// On /v1/messages the route step translates the body before a filter on its
+// branch rewrites the client's own. The model still gets the rewrite, not the
+// translation made before it.
+func TestRouterFilterAfterARouteStepRewritesWhatIsSent(t *testing.T) {
+	p := policy.Router{Alias: "safe", Start: autoStep("route", map[string]*policy.Step{
+		"keera-large": {ID: "redact", Kind: policy.StepFilter, Ref: "redact",
+			Next: modelStep("large", "keera-large")},
+	})}
+	h := treeHarness(t, picks("keera-large"), p, nil)
+
+	resp := h.post(t, "/v1/messages",
+		`{"model":"safe","max_tokens":16,"messages":[{"role":"user","content":"deploy with hunter2"}]}`)
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, body)
 	}
-	if forwarded := string(<-h.upstreamBodies); !strings.Contains(forwarded, "large-served") {
-		t.Errorf("the request did not go to the destination that exists: %s", forwarded)
-	}
-	// A destination that is not in the catalogue is not an attempt that was
-	// made and failed - it is a name this router never had, and the request
-	// went where the router's first real destination was.
-	if ev := h.sink.last(t); ev.RouterOutcome != store.RouterChose {
-		t.Errorf("outcome = %q, want %q", ev.RouterOutcome, store.RouterChose)
+	sent := lastSent(h)
+	if !strings.Contains(sent, "large-served") || strings.Contains(sent, "hunter2") {
+		t.Errorf("the model was sent %s", sent)
 	}
 }
 
-// A router that decided does not get a second go. The client named a router,
-// the router named a model, and that model answering 500 is that model's
-// failure - asking a different one would answer the developer out of a model
-// nothing chose.
-func TestInstructionRouterDoesNotFailOverFromWhatItChose(t *testing.T) {
-	rt := autoRouter()
-	h := routerHarness(t, picks("keera-large"), rt, nil)
-	h.src.models["keera-large"] = policy.Model{
-		Alias: "keera-large", Kind: policy.KindChat, BackendModel: "large-served",
-		Backends: h.src.models["keera-large"].Backends, Enabled: true,
+// A trying step whose first choice is down would move on to the next
+// destination. When that one has a branch, moving on would skip the branch,
+// and with it the filter that redacts what goes there. So it is not tried.
+func TestRouterNeverFailsOverPastABranch(t *testing.T) {
+	h := chainHarness(t, chainRoute("keera-small", "keera-large"),
+		map[string]int{"small-served": http.StatusServiceUnavailable})
+	h.src.filters = map[string]policy.Filter{
+		"org_1/redact": patternFilter(policy.FilterRule{Pattern: `hunter2`, Replace: "[SECRET]"}),
 	}
+	safe := routerOf(chainRoute("keera-small", "keera-large"))
+	safe.Alias = "safe"
+	safe.Start.Branches = map[string]*policy.Step{
+		"keera-large": {ID: "redact", Kind: policy.StepFilter, Ref: "redact",
+			Next: modelStep("large", "keera-large")},
+	}
+	h.src.routers["org_1/safe"] = safe
 
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"auto","messages":[{"role":"user","content":"plan a migration"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	resp := h.post(t, "/v1/chat/completions", secretPrompt)
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want the first destination's own 503", resp.StatusCode)
 	}
-	<-h.upstreamBodies // the decision
-	<-h.upstreamBodies // the chosen model
-	if n := len(h.upstreamBodies); n != 0 {
-		t.Errorf("%d further destinations were tried after the router had chosen", n)
-	}
-}
-
-/* --------------------------------------------- the routers that measure */
-
-// measuredRouter is a router that reads nothing and ranks what it has by what
-// this process has seen of it.
-func measuredRouter(mode policy.RouterMode, destinations ...string) policy.Router {
-	return policy.Router{
-		OrgID: "org_1", Alias: "pool", Mode: mode, Destinations: destinations,
-	}
-}
-
-func TestLatencyRouterPlacesTheRequestOnTheFasterDestination(t *testing.T) {
-	h := chainHarness(t,
-		measuredRouter(policy.RouterModeLatency, "keera-small", "keera-large"), nil)
-
-	// What the last few minutes looked like: the first destination, which a
-	// fallback router would use for everything, is the slow one.
-	now := time.Now()
-	h.srv.load.observe("org_1/keera-small", 2*time.Second, now)
-	h.srv.load.observe("org_1/keera-large", 90*time.Millisecond, now)
-
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"pool","messages":[{"role":"user","content":"hello"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	if forwarded := string(<-h.upstreamBodies); !strings.Contains(forwarded, "large-served") {
-		t.Errorf("the request did not go to the destination answering fastest: %s", forwarded)
-	}
-	if n := len(h.upstreamBodies); n != 0 {
-		t.Errorf("%d further requests were sent; the first one answered", n)
-	}
-	// It went where the router meant it to go, so this is the router getting
-	// what it wanted - which on these modes is the top-ranked destination
-	// rather than the first one written.
-	ev := h.sink.last(t)
-	if ev.RouterOutcome != store.RouterChose {
-		t.Errorf("outcome = %q, want %q", ev.RouterOutcome, store.RouterChose)
-	}
-	// keera-large's own ten input and five output tokens at nine micros each,
-	// and not a micro more: nothing read the request, so there is no
-	// generation of the router's own to pay for.
-	if got := h.budgets.total(); got != 135 {
-		t.Errorf("%d micros were charged, want 135 - a measured router decides nothing, "+
-			"so there is no generation of its own to pay for", got)
-	}
-}
-
-func TestLeastBusyRouterPlacesTheRequestWhereThereIsRoom(t *testing.T) {
-	h := chainHarness(t,
-		measuredRouter(policy.RouterModeLeastBusy, "keera-small", "keera-large"), nil)
-
-	// Two requests already outstanding against the destination a fallback
-	// router would send everything to.
-	defer h.srv.load.begin("org_1/keera-small")()
-	defer h.srv.load.begin("org_1/keera-small")()
-
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"pool","messages":[{"role":"user","content":"hello"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	if forwarded := string(<-h.upstreamBodies); !strings.Contains(forwarded, "large-served") {
-		t.Errorf("the request did not go to the destination with room: %s", forwarded)
-	}
-	if got := resp.Header.Get("X-Keera-Router"); got != "pool -> keera-large" {
-		t.Errorf("X-Keera-Router = %q, want %q", got, "pool -> keera-large")
-	}
-}
-
-func TestAMeasuredRouterStillFailsOverToWhatItRankedSecond(t *testing.T) {
-	// The ranking is a guess about which destination should take the request,
-	// and it is wrong here: the fast one is down. What must not happen is the
-	// request failing because the router was confident.
-	h := chainHarness(t,
-		measuredRouter(policy.RouterModeLatency, "keera-small", "keera-large"),
-		map[string]int{"large-served": 503})
-	now := time.Now()
-	h.srv.load.observe("org_1/keera-small", 2*time.Second, now)
-	h.srv.load.observe("org_1/keera-large", 90*time.Millisecond, now)
-
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"pool","messages":[{"role":"user","content":"hello"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200 - the second-ranked destination answered",
-			resp.StatusCode)
-	}
-	if first := string(<-h.upstreamBodies); !strings.Contains(first, "large-served") {
-		t.Errorf("the top-ranked destination was not tried first: %s", first)
-	}
-	if second := string(<-h.upstreamBodies); !strings.Contains(second, "small-served") {
-		t.Errorf("the request did not move on to the next one: %s", second)
-	}
-
-	ev := h.sink.last(t)
-	if ev.RouterOutcome != store.RouterFellBack {
-		t.Errorf("outcome = %q, want %q - being answered by something other than what "+
-			"the router ranked first is what falling back is", ev.RouterOutcome,
-			store.RouterFellBack)
-	}
-	// And the destination that failed is ranked last for a while, so the next
-	// request does not walk into it again on the strength of the same reading.
-	if !h.srv.load.read("org_1/keera-large", time.Now()).failing {
-		t.Error("a destination that answered 503 is still being ranked on its latency; " +
-			"the next request would be sent to it too")
-	}
-}
-
-func TestTheLatencyReadingLeavesOutTimeLostOnFailedDestinations(t *testing.T) {
-	const lost = 300 * time.Millisecond
-	h := chainHarnessWith(t, chainRouter(), func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		w.Header().Set("Content-Type", "application/json")
-		if strings.Contains(string(raw), "small-served") {
-			time.Sleep(lost)
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = io.WriteString(w, `{"error":{"message":"no capacity"}}`)
-			return
-		}
-		_, _ = io.WriteString(w, `{"id":"1","choices":[{"message":{"content":"hi"}}],`+
-			`"usage":{"prompt_tokens":10,"completion_tokens":5}}`)
-	})
-
-	if resp := h.post(t, "/v1/chat/completions",
-		`{"model":"ha","messages":[{"role":"user","content":"hello"}]}`); resp.StatusCode != 200 {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-
-	// The destination that rescued the request answered at once. Charging it
-	// the first one's wait would rank it as slow.
-	r := h.srv.load.read("org_1/keera-large", time.Now())
-	if !r.known || r.latency >= lost {
-		t.Errorf("keera-large measured %v (known %v), want less than the %v lost on keera-small",
-			r.latency, r.known, lost)
-	}
-}
-
-func TestARouterRowSaysHowItEndedWhenTheClientHangsUpFirst(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	h := chainHarnessWith(t, chainRouter(), func(_ http.ResponseWriter, r *http.Request) {
-		cancel()
-		<-r.Context().Done()
-	})
-
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, h.url("/v1/chat/completions"),
-		strings.NewReader(`{"model":"ha","messages":[{"role":"user","content":"hello"}]}`))
-	req.Header.Set("Authorization", "Bearer "+testKey)
-	if resp, err := http.DefaultClient.Do(req); err == nil {
-		_ = resp.Body.Close()
-	}
-
-	deadline := time.Now().Add(2 * time.Second)
-	for h.sink.count() == 0 && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
-	// No destination answered, so the first one did not either: 'chose' would
-	// count this as the router getting what it wanted.
-	if ev := h.sink.last(t); ev.RouterOutcome != store.RouterError {
-		t.Errorf("outcome = %q, want %q", ev.RouterOutcome, store.RouterError)
-	}
-	// The client left, the destination did not fail: a measured router must
-	// not rank it last for it.
-	if r := h.srv.load.read("org_1/keera-small", time.Now()); r.failing {
-		t.Error("keera-small is marked failing because the client hung up")
-	}
-}
-
-func TestAMeasuredRouterChargesNoRoutingTime(t *testing.T) {
-	h := chainHarness(t,
-		measuredRouter(policy.RouterModeLeastBusy, "keera-small", "keera-large"), nil)
-
-	if resp := h.post(t, "/v1/chat/completions",
-		`{"model":"pool","messages":[{"role":"user","content":"hello"}]}`); resp.StatusCode != 200 {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	<-h.upstreamBodies
-
-	// Ordering a list of two is not a wait the client spends. router_ms is
-	// what the router added over and above the answering model's own work, and
-	// on a router that neither generates nor retries there is nothing to add.
-	if ev := h.sink.last(t); ev.RouterMS != 0 {
-		t.Errorf("router_ms = %d, want 0 - nothing was generated and nothing failed",
-			ev.RouterMS)
-	}
-}
-
-func TestTheInFlightCountIsGivenBackWhenTheRequestIsOver(t *testing.T) {
-	h := chainHarness(t,
-		measuredRouter(policy.RouterModeLeastBusy, "keera-small", "keera-large"), nil)
-
-	for range 3 {
-		if resp := h.post(t, "/v1/chat/completions",
-			`{"model":"pool","messages":[{"role":"user","content":"hello"}]}`); resp.StatusCode != 200 {
-			t.Fatalf("status = %d, want 200", resp.StatusCode)
-		}
-		<-h.upstreamBodies
-	}
-
-	// A count that is never given back is a destination this process believes
-	// is busy forever and will never rank first again - which is a router that
-	// works for an hour and then stops moving traffic.
-	now := time.Now()
-	for _, alias := range []string{"keera-small", "keera-large"} {
-		if got := h.srv.load.read(policy.ModelKey("org_1", alias), now).inflight; got != 0 {
-			t.Errorf("%s has %d requests in flight after all of them finished",
-				alias, got)
+	for _, b := range drain(h) {
+		if strings.Contains(b, "large-served") {
+			t.Fatalf("the step failed over past the branch: %s", b)
 		}
 	}
 }
 
-/* ------------------------------------- deciding by reading the distribution */
+// A rate limit per day counts in the windows budgets use, so it survives a
+// restart and starts again at midnight UTC. The tokens are counted once the
+// answer says how many there were.
+func TestRouterRateLimitPerDay(t *testing.T) {
+	p := policy.Router{Alias: "safe", Start: &policy.Step{
+		ID: "daily", Kind: policy.StepRateLimit, Requests: 2, Tokens: 1_000_000,
+		Period:   policy.PeriodDay,
+		Next:     modelStep("large", "keera-large"),
+		Exceeded: modelStep("small", "keera-small"),
+	}}
+	h := treeHarness(t, picks("keera-small"), p, nil)
 
-// The saving the lettered question exists for: one token of generation on
-// every request that names the router, rather than as many as the model felt
-// like writing.
-func TestADecisionAsksForOneTokenAndTheDistributionBehindIt(t *testing.T) {
-	h := routerHarness(t, picks("keera-large"), autoRouter(), nil)
-
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"auto","messages":[{"role":"user","content":"plan a migration"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-
-	asked := string(<-h.upstreamBodies)
-	for _, want := range []string{`"max_tokens":1`, `"logprobs":true`, `"top_logprobs":20`} {
-		if !strings.Contains(asked, want) {
-			t.Errorf("the decision did not ask for %s: %s", want, asked)
+	for i, want := range []string{"large-served", "large-served", "small-served"} {
+		if resp := h.post(t, "/v1/chat/completions", secretPrompt); resp.StatusCode != http.StatusOK {
+			t.Fatalf("request %d: status = %d, want 200", i, resp.StatusCode)
+		}
+		if sent := lastSent(h); !strings.Contains(sent, want) {
+			t.Errorf("request %d did not go to %s: %s", i, want, sent)
 		}
 	}
-	// The destinations are lettered, and the model is asked for the letter
-	// rather than for a name it could spell wrong.
-	for _, want := range []string{"A) keera-small", "B) keera-large", "Answer with one letter."} {
-		if !strings.Contains(asked, want) {
-			t.Errorf("the decision did not offer %q: %s", want, asked)
-		}
+	h.budgets.mu.Lock()
+	requests, tokens := h.budgets.tallied["org_1/safe/daily|requests"], h.budgets.tallied["org_1/safe/daily|tokens"]
+	h.budgets.mu.Unlock()
+	if requests != 2 {
+		t.Errorf("requests counted = %d, want the 2 within the limit", requests)
 	}
-	if forwarded := string(<-h.upstreamBodies); !strings.Contains(forwarded, "large-served") {
-		t.Errorf("the request did not go to the chosen model: %s", forwarded)
+	if tokens == 0 {
+		t.Error("the answers' tokens were not counted against the daily limit")
 	}
 }
 
-// A model that answers with a letter no destination has cannot place a
-// request, because only the letters that were offered are looked at.
-func TestALetterNoDestinationHasFallsBack(t *testing.T) {
-	// The stand-in is asked for a destination it was never offered, so it
-	// letters nothing and writes the name out instead - which, on the lettered
-	// question, is not a letter.
-	h := routerHarness(t, picks("keera-nowhere"), autoRouter(), nil)
+// Without an exceeded branch, a spent daily limit refuses with 429, and says
+// when it starts again, so a client does not retry every second all day.
+func TestRouterRateLimitPerDayRefusesUntilItResets(t *testing.T) {
+	p := policy.Router{Alias: "safe", Start: &policy.Step{
+		ID: "daily", Kind: policy.StepRateLimit, Requests: 1, Period: policy.PeriodDay,
+		Next: modelStep("large", "keera-large"),
+	}}
+	h := treeHarness(t, picks("keera-small"), p, nil)
 
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"auto","messages":[{"role":"user","content":"plan a migration"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	if resp := h.post(t, "/v1/chat/completions", secretPrompt); resp.StatusCode != http.StatusOK {
+		t.Fatalf("first request: status = %d, want 200", resp.StatusCode)
 	}
-	if ev := h.sink.last(t); ev.Alias != "keera-small" {
-		t.Errorf("the request went to %q, want the router's fallback", ev.Alias)
+	resp := h.post(t, "/v1/chat/completions", secretPrompt)
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("second request: status = %d, want 429", resp.StatusCode)
+	}
+	if resp.Header.Get("Retry-After") == "" {
+		t.Error("no Retry-After, so the client cannot tell the limit lasts until tomorrow")
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "this router is over its limit of 1 request per day") ||
+		!strings.Contains(string(body), "requests_quota_exceeded") {
+		t.Errorf("body = %s", body)
 	}
 }
 
-// A plane that serves no distribution still routes. It is found out once and
-// asked for a name from then on, which is the whole of the configuration this
-// needs.
-func TestAPlaneWithoutLogprobsIsFoundOutOnceAndThenAskedForAName(t *testing.T) {
-	h := routerHarness(t, picks("keera-large"), autoRouter(), nil, namesOnly)
+// A system prompt step is added only on its own branch, after the key's own
+// prompt. Like that one, it is added after every filter, so a filter placed
+// after the step neither reads nor rewrites it.
+func TestRouterSystemPromptGoesOnlyWhereItsBranchGoes(t *testing.T) {
+	resolved := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"},
+		&policy.Limits{SystemPrompt: new("Be brief.")}, nil, nil)
+	p := policy.Router{Alias: "safe", Start: autoStep("route", map[string]*policy.Step{
+		"keera-large": {ID: "careful", Kind: policy.StepSystemPrompt,
+			Prompt: "Never name a customer.",
+			Next: &policy.Step{ID: "redact", Kind: policy.StepFilter, Ref: "redact",
+				Next: modelStep("large", "keera-large")}},
+	})}
+	for _, tt := range []struct {
+		chosen, system string
+	}{
+		{"keera-large", "Be brief.\n\nNever name a customer."},
+		{"keera-small", "Be brief."},
+	} {
+		t.Run(tt.chosen, func(t *testing.T) {
+			h := treeHarness(t, picks(tt.chosen), p, resolved)
+			// The filter would change this word if it could see the prompt.
+			h.src.filters["org_1/redact"] = patternFilter(policy.FilterRule{Pattern: `customer`, Replace: "[X]"})
 
-	resp := h.post(t, "/v1/chat/completions",
-		`{"model":"auto","messages":[{"role":"user","content":"plan a migration"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	// The lettered question, the same question asked for a name, and then the
-	// request itself.
-	if asked := string(<-h.upstreamBodies); !strings.Contains(asked, `"logprobs":true`) {
-		t.Errorf("the first decision did not try for a distribution: %s", asked)
-	}
-	retried := string(<-h.upstreamBodies)
-	if strings.Contains(retried, `"logprobs":true`) {
-		t.Errorf("it asked for a distribution twice: %s", retried)
-	}
-	if !strings.Contains(retried, "Answer with one of the names above") {
-		t.Errorf("the retry did not ask for a name: %s", retried)
-	}
-	if forwarded := string(<-h.upstreamBodies); !strings.Contains(forwarded, "large-served") {
-		t.Errorf("the request did not go to the chosen model: %s", forwarded)
-	}
-
-	// The second request pays nothing for finding that out again.
-	resp = h.post(t, "/v1/chat/completions",
-		`{"model":"auto","messages":[{"role":"user","content":"plan another migration"}]}`)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("second status = %d, want 200", resp.StatusCode)
-	}
-	if asked := string(<-h.upstreamBodies); strings.Contains(asked, `"logprobs":true`) {
-		t.Errorf("it tried for a distribution again on the next request: %s", asked)
-	}
-	if forwarded := string(<-h.upstreamBodies); !strings.Contains(forwarded, "large-served") {
-		t.Errorf("the second request did not go to the chosen model: %s", forwarded)
-	}
-	if n := len(h.upstreamBodies); n != 0 {
-		t.Errorf("%d requests were sent that nothing accounts for", n)
+			if resp := h.post(t, "/v1/chat/completions", secretPrompt); resp.StatusCode != http.StatusOK {
+				t.Fatalf("status = %d, want 200", resp.StatusCode)
+			}
+			var sent struct {
+				Messages []struct{ Role, Content string } `json:"messages"`
+			}
+			if err := json.Unmarshal([]byte(lastSent(h)), &sent); err != nil {
+				t.Fatal(err)
+			}
+			if len(sent.Messages) < 2 || sent.Messages[0].Role != "system" ||
+				sent.Messages[0].Content != tt.system {
+				t.Errorf("messages = %+v, want the system prompt %q first", sent.Messages, tt.system)
+			}
+		})
 	}
 }
 
-// A check is what somebody reads before putting a router in front of their
-// developers, and how sure the model was is the part of it that says whether a
-// sample landed right for a reason.
-func TestACheckReportsHowSureEachDecisionWas(t *testing.T) {
-	h := routerHarness(t, picks("keera-large"), autoRouter(), nil)
+// A step that cannot fail, such as a system prompt, may come first.
+func TestRouterMayStartWithASystemPrompt(t *testing.T) {
+	p := policy.Router{Alias: "safe", Start: &policy.Step{
+		ID: "careful", Kind: policy.StepSystemPrompt, Prompt: "Be brief.",
+		Next: modelStep("large", "keera-large"),
+	}}
+	h := treeHarness(t, picks("keera-small"), p, nil)
 
-	probe := h.srv.CheckRouter(t.Context(), autoRouter())
-	if !probe.OK {
-		t.Fatalf("the check failed: %s", probe.Error)
+	resp := h.post(t, "/v1/chat/completions", secretPrompt)
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || len(body) == 0 {
+		t.Fatalf("status = %d, body = %q; want an answer", resp.StatusCode, body)
 	}
-	if len(probe.Decisions) == 0 {
-		t.Fatal("the check made no decisions")
-	}
-	for i, d := range probe.Decisions {
-		if d.Error != "" {
-			t.Fatalf("sample %d could not be decided: %s", i+1, d.Error)
-		}
-		if d.Confidence <= 0.9 || d.Confidence > 1 {
-			t.Errorf("sample %d was %.2f sure, want the stand-in's near-certainty",
-				i+1, d.Confidence)
-		}
+	if sent := lastSent(h); !strings.Contains(sent, "Be brief.") {
+		t.Errorf("the model was sent %s", sent)
 	}
 }
 
-// The same check against a plane that serves no distribution says nothing
-// about confidence rather than claiming the router was unsure. Zero is
-// unknown, and a check that read it as hopeless would send somebody looking
-// for a problem their deployment does not have.
-func TestACheckSaysNothingAboutConfidenceItCannotRead(t *testing.T) {
-	h := routerHarness(t, picks("keera-large"), autoRouter(), nil, namesOnly)
+// A route step that cannot decide adds its reason to the note an exceeded
+// branch left, so the row still says which limit sent the request there.
+func TestARouteStepKeepsTheNoteOfTheBranchBeforeIt(t *testing.T) {
+	p := policy.Router{Alias: "safe", Start: &policy.Step{
+		ID: "cap", Kind: policy.StepBudget, BudgetMicros: 1_000_000, Period: policy.PeriodMonth,
+		Next:     modelStep("large", "keera-large"),
+		Exceeded: autoStep("pick", nil),
+	}}
+	h := treeHarness(t, picks("keera-large"), p, nil)
+	h.budgets.spentType = policy.ScopeRouter
+	delete(h.src.models, "keera-picker")
 
-	probe := h.srv.CheckRouter(t.Context(), autoRouter())
-	if !probe.OK {
-		t.Fatalf("the check failed: %s", probe.Error)
-	}
-	for i, d := range probe.Decisions {
-		if d.Chosen != "keera-large" {
-			t.Errorf("sample %d chose %q, want keera-large", i+1, d.Chosen)
-		}
-		if d.Confidence != 0 {
-			t.Errorf("sample %d claimed %.2f confidence from a plane that reports none",
-				i+1, d.Confidence)
-		}
-	}
-}
-
-// Any refusal after the router decided carries what the decision cost, not
-// only the router's own refusals: the budget was charged either way.
-func TestARefusalAfterTheRouterCarriesWhatItSpent(t *testing.T) {
-	h := routerHarness(t, picks("keera-large"), autoRouter(), nil)
-	large := h.src.models["keera-large"]
-	large.MaxContext = 10
-	h.src.models["keera-large"] = large
-
-	resp := h.post(t, "/v1/chat/completions", `{"model":"auto","messages":[`+
-		`{"role":"user","content":"`+strings.Repeat("a", 600)+`"}]}`)
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 for a prompt over the chosen model's window",
-			resp.StatusCode)
+	if resp := h.post(t, "/v1/chat/completions", secretPrompt); resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200 at the step's fallback", resp.StatusCode)
 	}
 	ev := h.sink.last(t)
-	if ev.CostMicros == 0 || ev.CostMicros != h.budgets.total() {
-		t.Errorf("cost = %d, want the %d the decision charged to the budgets",
-			ev.CostMicros, h.budgets.total())
+	if !strings.Contains(ev.Note, "exceeded branch of 'cap'") ||
+		!strings.Contains(ev.Note, "could not choose") {
+		t.Errorf("note = %q, want both the branch and the step's reason", ev.Note)
 	}
 }

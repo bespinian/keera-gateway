@@ -1,8 +1,9 @@
-// The organisation's models. Its administrators manage them, and everybody
-// else reads the list, because a developer needs to know what the models are.
+// The organisation's models. Administrators manage them; everybody else can
+// read them, because developers need to know what the models are.
 
 import { api } from "../api.js";
 import { orgNameOf } from "./orgs.js";
+import { steps } from "./router-tree.js";
 import {
   h,
   table,
@@ -40,7 +41,7 @@ import {
 } from "../ui.js";
 
 // usersOfModel names the filters and routers that use a model, for the
-// removal warning. Removing the model does not stop them.
+// delete warning. A router using it blocks the delete.
 async function usersOfModel(m) {
   const [filters, routers] = await Promise.all([
     api.filters(m.org_id).then((r) => r.data || []),
@@ -48,19 +49,27 @@ async function usersOfModel(m) {
   ]);
   const f = filters.filter((x) => x.model === m.alias).map((x) => x.alias);
   const r = routers
-    .filter(
-      (x) => x.model === m.alias || (x.destinations || []).includes(m.alias),
+    .filter((x) =>
+      steps(x.start).some(
+        (s) =>
+          (s.kind === "model" && s.ref === m.alias) ||
+          (s.kind === "route" &&
+            (s.model === m.alias || (s.destinations || []).includes(m.alias))),
+      ),
     )
     .map((x) => x.alias);
   let text = "";
   if (f.length)
     text += ` The filters ${f.join(", ")} run on it and will refuse every request they cover.`;
-  if (r.length) text += ` The routers ${r.join(", ")} will lose it.`;
+  if (r.length) {
+    text +=
+      ` The routers ${r.join(", ")} use it, so it cannot be deleted until ` +
+      "they are changed.";
+  }
   return text;
 }
 
-// deleteWarning is what deleting a model costs: the same warnings
-// `keera model delete` gives.
+// deleteWarning gives the same warnings as `keera model delete`.
 async function deleteWarning(m) {
   return (
     "Clients that still use this model will be refused, and " +

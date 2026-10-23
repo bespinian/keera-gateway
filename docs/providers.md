@@ -41,7 +41,7 @@ models:
 ```
 
 The `description` is what a
-[router decides on](routers.md#descriptions-are-what-a-router-decides-on).
+[route step decides on](routers.md#descriptions-are-what-a-route-step-decides-on).
 Without one, the model gets the provider's, which cannot say where the model
 runs, since an entry may point at an egress proxy or a sovereign endpoint. So
 write your own, as here.

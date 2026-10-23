@@ -20,17 +20,17 @@ const (
 	// translating the client's format, finding the model, and checking rate
 	// limits and budgets.
 	SpanAdmit = "admit"
-	// SpanRoute is a router's decision: a generation on another model that the
+	// SpanRoute is a route step's decision: a generation on another model that the
 	// request waited for.
 	SpanRoute = "route"
 	// SpanFilter is one filter's pass over the request: again a generation on
 	// another model, one per filter.
 	SpanFilter = "filter"
 	// SpanPrepare is the gateway's work after the hooks and before dispatch:
-	// the system prompt, the output ceiling, the encode.
+	// the system prompt, the encode.
 	SpanPrepare = "prepare"
 	// SpanUpstream is one destination being asked, from the dial to its
-	// response line. Only a fallback router has more than one.
+	// response line. Only a route step that tries destinations has more than one.
 	SpanUpstream = "upstream"
 	// SpanWait is a streamed answer between the response headers and the first
 	// token: the model thinking.

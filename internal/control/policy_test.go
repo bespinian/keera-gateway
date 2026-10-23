@@ -68,3 +68,38 @@ func TestSameOrigins(t *testing.T) {
 		}
 	}
 }
+
+func TestCountProblem(t *testing.T) {
+	const big = policy.MaxPerMinute + 1
+	rates := func(r ...policy.RateLimit) policy.Limits { return policy.Limits{RateLimits: r} }
+	budgets := func(b ...policy.Budget) policy.Limits { return policy.Limits{Budgets: b} }
+	for _, tc := range []struct {
+		name string
+		lim  policy.Limits
+		want string
+	}{
+		{"nothing set", policy.Limits{}, ""},
+		{"per minute", rates(policy.RateLimit{Requests: 60}), ""},
+		{"a large count per month", rates(policy.RateLimit{Tokens: big, Period: policy.PeriodMonth}), ""},
+		{"one per period", rates(policy.RateLimit{Requests: 60},
+			policy.RateLimit{Requests: 1000, Period: policy.PeriodDay}), ""},
+		{"a negative count", rates(policy.RateLimit{Requests: -1}), "needs a positive"},
+		{"no count", rates(policy.RateLimit{Period: policy.PeriodDay}), "needs a positive"},
+		{"too large for a minute", rates(policy.RateLimit{Tokens: big}), "day or month"},
+		{"an unknown period", rates(policy.RateLimit{Requests: 1, Period: "week"}), "use minute, day or month"},
+		{"two per minute", rates(policy.RateLimit{Requests: 60},
+			policy.RateLimit{Tokens: 1000, Period: policy.PeriodMinute}), "two rate limits count per minute"},
+		{"a budget per day and per month", budgets(policy.Budget{BudgetMicros: 1},
+			policy.Budget{BudgetMicros: 1, Period: policy.PeriodDay}), ""},
+		{"two budgets per month", budgets(policy.Budget{BudgetMicros: 1},
+			policy.Budget{BudgetMicros: 2, Period: policy.PeriodMonth}), "two budgets reset per month"},
+		{"a budget of nothing", budgets(policy.Budget{}), "positive 'budget_micros'"},
+		{"a budget per minute", budgets(policy.Budget{BudgetMicros: 1, Period: policy.PeriodMinute}),
+			"use day or month"},
+	} {
+		got := countProblem(&tc.lim)
+		if tc.want == "" && got != "" || !strings.Contains(got, tc.want) {
+			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}

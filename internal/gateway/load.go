@@ -11,13 +11,11 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// loads is what this process has seen of each destination, for the routers
-// that order by measurement instead of by a written list.
-//
-// A fallback router's order says the first destination is preferred. That is
-// wrong when destinations are equals: always using the first of two identical
-// vLLM deployments would leave half the GPUs idle. So two measured orders
-// exist:
+// loads is what this process has seen of each destination, for the route
+// steps that order by measurement instead of by a written list. A written
+// order is wrong when destinations are equals: always using the first of two
+// identical vLLM deployments would leave half the GPUs idle. Two measured
+// orders exist:
 //
 //   - In flight: requests outstanding against a destination, from dispatch to
 //     the last token. Best when destinations are alike and requests are not,
@@ -44,7 +42,7 @@ const (
 	loadHalfLife = 30 * time.Second
 	// loadStale is when an observation is discarded and the destination is
 	// unknown again, which puts it back at the front of the order. That is how
-	// a measured router notices a destination has got faster.
+	// a measured step notices a destination has got faster.
 	loadStale = 5 * time.Minute
 	// loadPenalty is how long a destination that failed is ranked last.
 	//
@@ -158,13 +156,9 @@ func (l *loads) read(key string, now time.Time) reading {
 	return r
 }
 
-// order sorts a measured router's destinations into the order to try them,
-// best first, in place.
-//
-// The sort is stable, so the written order breaks every tie: a router with no
-// measurements behaves like a fallback router.
-//
-// The rules, in order:
+// order sorts a measured step's destinations, best first, in place. The sort
+// is stable, so the written order breaks every tie: a step with no
+// measurements behaves like a fallback step. The rules, in order:
 //
 //  1. A destination that just failed goes last (see loadPenalty).
 //  2. For latency, a destination with no recent measurement goes first. This
@@ -173,7 +167,7 @@ func (l *loads) read(key string, now time.Time) reading {
 //  3. Then least in flight, or lowest latency.
 //
 // key maps an alias to the model key its numbers are kept under.
-func (l *loads) order(mode policy.RouterMode, aliases []string, key func(alias string) string) {
+func (l *loads) order(mode policy.RouteMode, aliases []string, key func(alias string) string) {
 	if len(aliases) < 2 || !mode.Measures() {
 		return
 	}
@@ -187,7 +181,7 @@ func (l *loads) order(mode policy.RouterMode, aliases []string, key func(alias s
 		if a.failing != b.failing {
 			return !a.failing
 		}
-		if mode == policy.RouterModeLeastBusy {
+		if mode == policy.RouteModeLeastBusy {
 			return a.inflight < b.inflight
 		}
 		if a.known != b.known {
@@ -197,25 +191,25 @@ func (l *loads) order(mode policy.RouterMode, aliases []string, key func(alias s
 	})
 }
 
-// orderByLoad sorts a router's destinations by what has been measured of the
+// orderByLoad sorts a route step's destinations by what has been measured of the
 // models they name for its organisation. See loads.order.
-func (s *Server) orderByLoad(rt policy.Router, aliases []string) {
+func (s *Server) orderByLoad(rt policy.Route, aliases []string) {
 	s.load.order(rt.Mode, aliases, func(alias string) string {
 		return policy.ModelKey(rt.OrgID, alias)
 	})
 }
 
-// describe says in a few words what a measured router currently makes of a
-// destination, for the router's check. It is prose because it is one
+// describe says in a few words what a measured step currently makes of a
+// destination, for the step's check. It is prose because it is one
 // replica's view of the last few minutes.
-func (l *loads) describe(mode policy.RouterMode, key string) string {
+func (l *loads) describe(mode policy.RouteMode, key string) string {
 	if !mode.Measures() {
 		return ""
 	}
 	r := l.read(key, time.Now())
 	var out string
 	switch {
-	case mode == policy.RouterModeLeastBusy:
+	case mode == policy.RouteModeLeastBusy:
 		out = strconv.FormatInt(r.inflight, 10) + " in flight"
 	case r.known:
 		out = r.latency.Round(time.Millisecond).String() + " to first token, lately"

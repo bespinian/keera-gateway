@@ -1,10 +1,284 @@
 # Routers
 
-A router is an alias for a list of models. A request that names it is sent to
-one model from that list. Use one to send small requests to a cheap model, or to
-keep sensitive prompts away from a model outside the cluster.
+A router is a tree of steps that a request goes through on its way to a model:
+[filters](filters.md), route steps, rate limits, budgets and models, in the
+order you draw them. A client calls it by putting its alias in the `model`
+field, as it would a model's. Requests that don't name it are not affected.
+[What clients call, and what always applies](gateway.md#what-clients-call-and-what-always-applies)
+shows how routers and guardrails fit together.
 
-There are five modes:
+A **route step** picks one model from a list for each request. Use one to send
+small requests to a cheap model, or to keep sensitive prompts away from a model
+outside the cluster. The simplest router is one route step:
+
+```sh
+keera router add auto --model keera-decider \
+  --destinations keera-speed,keera-frontier --fallback keera-speed \
+  --prompt @route.txt --display-name Auto
+```
+
+A client then puts `auto` in the `model` field:
+
+```json
+{ "model": "auto", "messages": [{ "role": "user", "content": "…" }] }
+```
+
+Add steps when one route step is not enough. For example:
+
+- redact only the requests that go to a hosted model
+- send traffic to the local model once the hosted budget is spent
+- chain two route steps, such as one that decides by size and one that reads
+  the request
+
+| Step            | What it does                                                  | Where the request goes next                  |
+| --------------- | ------------------------------------------------------------- | -------------------------------------------- |
+| `filter`        | runs one of the organisation's filters over the request       | `next`                                       |
+| `route`         | chooses one model from its destinations                       | the branch for that model, or straight to it |
+| `rate_limit`    | counts requests and tokens per minute, day or month           | `next` while within it, else `exceeded`      |
+| `budget`        | counts what requests through this step cost, per day or month | `next` while within it, else `exceeded`      |
+| `system_prompt` | adds a system prompt to the requests that pass it             | `next`                                       |
+| `model`         | sends the request to one model                                | nowhere: it ends the branch                  |
+
+## The tree
+
+Every step except a model hands the request on. A filter has one `next` step. A
+route step has one branch per destination, and a limit has two: within, and
+exceeded. Every branch ends at a model, or at a route step that sends straight
+to the model it chose. Branches never join again, so you can always tell which
+way a request came.
+
+A **route branch** is keyed by a destination of that step. Once the step has
+chosen, the request goes down that branch. A destination without a branch gets
+the request straight away.
+
+A route step that tries its destinations in turn (`fallback`, `latency`,
+`least-busy` or `size`) follows the branch of the destination it would try
+first. Once it follows a branch, it does not try the other destinations. A
+destination without a branch keeps the usual behaviour: if it fails, the step
+tries the next one, but never one with a branch. That one is reached only
+through its branch, so its steps, such as a redaction, are never skipped.
+
+A **limit** without an `exceeded` branch refuses what is over it, as the key's
+own limits do: a budget with a 402 `budget_exceeded`, a rate limit with a 429,
+`rate_limit_exceeded` or `token_rate_limit_exceeded` per minute and
+`requests_quota_exceeded` or `tokens_quota_exceeded` per day or month (see
+[Errors](gateway.md#errors)). The limit headers on an answer describe only the
+key's own levels. With an `exceeded` branch, the request takes that branch
+instead and is still served. Its row in the request log notes which limit sent
+it there.
+
+A router may have up to 64 steps. It works on the chat endpoints only
+(`/api/v1/chat/completions`, `/api/v1/messages` and `/api/v1/responses`), and a
+key for [subscription models](subscriptions.md) cannot name one.
+
+## Writing one
+
+The steps are written as JSON. This one takes out credentials, spends at most
+CHF 50 a month on the hosted model, and redacts names only on the way there:
+
+```json
+{
+  "id": "keys",
+  "kind": "filter",
+  "ref": "redact-keys",
+  "next": {
+    "id": "hosted-budget",
+    "kind": "budget",
+    "budget_micros": 50000000,
+    "period": "month",
+    "exceeded": { "id": "local", "kind": "model", "ref": "keera-speed" },
+    "next": {
+      "id": "route",
+      "kind": "route",
+      "mode": "instruction",
+      "model": "keera-decider",
+      "prompt": "Send anything naming a client to keera-speed.",
+      "destinations": ["keera-speed", "hosted-frontier"],
+      "fallback": "keera-speed",
+      "branches": {
+        "hosted-frontier": {
+          "id": "names",
+          "kind": "filter",
+          "ref": "redact-names",
+          "next": { "id": "hosted", "kind": "model", "ref": "hosted-frontier" }
+        }
+      }
+    }
+  }
+}
+```
+
+A request the route step sends to `keera-speed` goes there directly.
+
+```sh
+keera router add guarded --file guarded.json --display-name Guarded
+keera router show guarded
+```
+
+```
+alias         guarded
+display name  Guarded
+steps
+  filter redact-keys
+  budget CHF 50.00 per month (hosted-budget)
+  ├─ within
+  │  route decided by keera-decider, falls back to keera-speed when it cannot (route)
+  │  ├─ to keera-speed, sent straight there
+  │  └─ to hosted-frontier
+  │     filter redact-names
+  │     model hosted-frontier
+  └─ exceeded
+     model keera-speed
+instruction (route)
+  Send anything naming a client to keera-speed.
+```
+
+`keera router show guarded --json` prints the whole router in the shape
+`--file` reads, so you can edit it and save it with `keera router set`. To
+change one route step without the file, give its flags and its id:
+`keera router set guarded --step route --fallback hosted-frontier`. In the
+panel, **Routers** draws the same tree and edits it.
+
+| Field           | On                           | Holds                                                                 |
+| --------------- | ---------------------------- | --------------------------------------------------------------------- |
+| `id`            | every step                   | up to 32 lowercase letters, digits and inner hyphens; unique          |
+| `kind`          | every step                   | `filter`, `route`, `rate_limit`, `budget`, `system_prompt` or `model` |
+| `ref`           | filter, model                | the alias of the organisation's filter or model                       |
+| `mode`          | route                        | how it chooses; see [Modes](#modes)                                   |
+| `destinations`  | route                        | 1 to 16 chat models it may choose between                             |
+| `model`         | route (instruction)          | the model that decides                                                |
+| `prompt`        | route (instruction)          | the instruction, up to 4 KiB                                          |
+| `fallback`      | route (instruction)          | where a request goes when it cannot decide; left out, it refuses      |
+| `ceilings`      | route (size)                 | the largest request, in tokens, for each destination but one          |
+| `prompt`        | system_prompt                | the instructions, up to 16 KiB                                        |
+| `requests`      | rate_limit                   | the most requests per period; set this, `tokens` or both              |
+| `tokens`        | rate_limit                   | the most tokens per period, counted when each request ends            |
+| `budget_micros` | budget                       | the budget in millionths of a franc: 50000000 is CHF 50               |
+| `period`        | rate_limit, budget           | `minute` (rate limit only), `day` or `month`; see below               |
+| `next`          | filter, limit, system_prompt | the step after it                                                     |
+| `exceeded`      | limit                        | the step for a request over the limit; left out, it refuses           |
+| `branches`      | route                        | a step for each destination that needs more before the model          |
+
+The command line gives a step without an `id` one made from its kind, such as
+`filter-1`. Give each limit its own id, though: see below.
+
+A model step or destination must be a chat model that is not a subscription
+model. Every filter and model a step names must exist when the router is saved.
+
+## The key's guardrails still apply
+
+A router works inside the key's guardrails, never around them:
+
+1. The key's rate limits and budgets are checked first.
+2. The router runs, and chooses the model.
+3. The key's own filters run, then its system prompt is added, followed by the
+   prompts of the router's system prompt steps the request passed.
+
+So a router cannot loosen what an administrator set, and the key's filters
+always run, whatever the router did before them.
+[What happens to one request](gateway.md#what-happens-to-one-request) has the
+whole order.
+
+## System prompts
+
+A `system_prompt` step adds its text to the requests whose branch passes it.
+Put one on a hosted branch, for example, to tell only the hosted model what it
+must not do.
+
+Where the step sits decides which requests get the prompt, not when it is
+added. Like the key's own system prompt, it is added after every filter, so no
+filter rewrites it and no route step reads it. It comes after the key's prompt,
+because it is the more particular of the two, as a project's comes after its
+organisation's. Several steps on one branch are added in the order the request
+passed them, each separated by a blank line.
+
+## Limits count per step
+
+Each limit step counts by its `id`, for its own router. Two routers never share
+a count, and two limits in one router don't either. If you edit the steps
+around a limit and keep its id, it keeps its count. If you change the id, the
+limit starts again from zero.
+
+A rate limit's `period` is `minute` if left out, and a budget's is `month`. Both
+count the way a guardrail's do; see
+[The tenancy model](gateway.md#the-tenancy-model) and
+[Rate limits across replicas](gateway.md#rate-limits-across-replicas).
+
+A request is counted against a limit only when it passes it within the limit.
+Its whole cost is then charged to that limit, the model's answer and its
+filters and decisions included. A request that took the exceeded branch is not
+counted against that limit.
+
+## Rewriting before a route step
+
+A route step can be placed after a filter that rewrites the request. Then it
+decides on the rewritten text, not on what the client sent, and can send a
+prompt to a hosted model that the original would have kept inside. This is why
+the key's own filters run after the router; see
+[Why this order](gateway.md#what-happens-to-one-request).
+
+So saving such a router works, but it comes with a warning. The warning is
+about filters that rewrite with a model, and not those in shadow, before a step
+in `instruction` mode, which reads the text. A `size` step measures the
+rewritten text too, without a warning. A
+[pattern filter](filters.md#pattern-filters) before a route step gives none: it
+takes out things with a fixed shape, such as keys and card numbers, which are
+not what a route step decides by. Put it first, as
+[Ordering and combination](filters.md#ordering-and-combination) recommends.
+
+Either way, a route step reads the prompt before anything has decided where it
+may go. So **serve the deciding model locally**, as a filter's. It must also be
+on the organisation's allow-list; see
+[Models that filters and routers run on](gateway.md#models-that-filters-and-routers-run-on).
+
+## Allowing a router
+
+A router is allowed the way a model is: by naming its alias in an allow-list.
+Allowing it allows every model it may send a request to, which is every model
+step and every route destination without a branch, whatever the key's own
+allow-list says. Filters are never on an allow-list.
+
+To send everything a project does through a router, narrow the project's
+allow-list to the router. The key then has nothing else in its allow-list,
+which is why allowing the router must allow where it sends:
+
+```sh
+keera guardrail set project <project-id> --models guarded
+```
+
+A guardrail never routes on its own: if it did, a developer who asked for the
+large model could get the small one without knowing.
+
+So a new router joins the organisation's allow-list only when that list allows
+every model it reaches. Otherwise it would open a model the list leaves out,
+and it stays off the list until an administrator adds it; the panel and the
+command say that no key can call it yet. Changing a router on the list so that
+it reaches such a model is saved with a warning.
+
+The panel marks routers in an allow-list and shows where they send.
+
+## Who owns what
+
+A router belongs to one organisation, and names only that organisation's
+filters and models. Who may write and read it is the same as for a filter; see
+[Models that filters and routers run on](gateway.md#models-that-filters-and-routers-run-on).
+Router aliases share one namespace with models, because clients name both in the
+same field, so a model and a router cannot share an alias.
+
+While a router names a filter or model, deleting that one is refused with a
+409, such as `filter_in_use`, which names the router. A model counts when it is
+a model step, a destination or a deciding model. Change the router first. If a
+model step's model stops being usable some other way, for example it is
+disabled, a request that reaches that step is refused with a 503
+`router_unavailable`.
+
+Deleting a router takes it off the organisation's allow-list. Deleting one that
+a project's or key's allow-list still names, or that is the only entry on the
+organisation's, is refused with a 409 `router_in_use`.
+
+## Modes
+
+A route step chooses in one of five modes:
 
 | Mode                        | Picks the model by                             | Extra cost                 |
 | --------------------------- | ---------------------------------------------- | -------------------------- |
@@ -17,64 +291,27 @@ There are five modes:
 Only `instruction` reads what the request says. The other four put the
 destinations in an order and try them until one answers.
 
-A router may have a single destination. That gives clients a name that stays
-the same when the model behind it changes. An `instruction` router with one
+A route step may have a single destination. That gives clients a name that
+stays the same when the model behind it changes. An `instruction` step with one
 destination, or with only one that can be served right now, sends every request
-there without asking its model or reading the request. Its fallback can only be
-that same destination, so when that one cannot be used at all - missing,
-disabled or without a backend - the request is refused with a 503.
+there without asking its model or reading the request. When that one cannot be
+used at all - missing, disabled or without a backend - the request goes to the
+fallback, or is refused with a 503 if the step has none.
 
-Most of this page is about `instruction` routers. The other modes have their own
-sections - [routing by size](#routing-by-size),
-[the fallback router](#the-fallback-router) and
-[balancing between equals](#balancing-between-equals). Everything before them
-that is not about deciding applies to all five.
-
-## How a request reaches one
-
-A client puts the router's alias in the `model` field:
-
-```json
-{ "model": "auto", "messages": [{ "role": "user", "content": "…" }] }
-```
-
-`keera connect` and **Connect client** under **My clients** list it in an editor's configuration
-next to the models, when the key may use it. `GET /api/v1/models` lists
-routers next to the models, with their destinations.
-
-Unlike a filter, a router is not attached to a scope. If it were, a developer
-who asked for the large model could get the small one without knowing. To route
-everything a scope sends, narrow its allow-list to the router:
-
-```sh
-keera guardrail set project <project-id> --models auto
-```
-
-That is why guardrails have no router field.
-
-## Allowing a router allows its destinations
-
-A key that may use `auto` may reach every destination of `auto`, whatever its
-own allow-list says. The setup above needs this: a key narrowed to the router
-has nothing else in its allow-list.
-
-So a new router joins the organisation's allow-list only when that list allows
-all its destinations. Otherwise it would open a model the list leaves out, and
-the router stays off the list until an administrator adds it; the panel and the
-command say that no key can call it yet. Changing a router on the list to send
-to such a model is saved with a warning.
-
-The panel marks routers in an allow-list and shows where they send.
+Most of what follows is about `instruction` steps. The other modes have their
+own sections - [routing by size](#routing-by-size),
+[the fallback mode](#the-fallback-mode) and
+[balancing between equals](#balancing-between-equals).
 
 ## The list decides, not the instruction
 
 The deciding model's answer is looked up in `destinations`. If it names anything
-else, the router has not decided and the request goes to
-[the fallback](#when-it-cannot-decide). A prompt cannot talk the router into a
+else, the step has not decided and the request goes to
+[the fallback](#when-it-cannot-decide). A prompt cannot talk the step into a
 model outside its list.
 
-So `keera router list` and the panel's **Destinations** column show where a
-router can send a prompt. The instruction only affects which one it picks.
+So the destinations, in `keera router show` and in the panel, show where a
+route step can send a prompt. The instruction only affects which one it picks.
 
 Also:
 
@@ -84,10 +321,9 @@ Also:
   was and was not offered.
 - The **fallback must be one of the destinations**.
 - A subscription model cannot be the deciding model or a destination
-  ([why](gateway.md#models-that-filters-and-routers-run-on)). A subscription
-  key reaches no router.
+  ([why](gateway.md#models-that-filters-and-routers-run-on)).
 
-## Descriptions are what a router decides on
+## Descriptions are what a route step decides on
 
 The deciding model sees each destination's own model `description`:
 
@@ -101,28 +337,16 @@ keera model set keera-frontier --description \
 The description lives on the model so it stays true when the model behind an
 alias changes. Clients see it on `/api/v1/models` too.
 
-Write the descriptions before the router. Without them the router chooses
-between bare aliases, and `keera router check` warns about it.
+Write the descriptions before the route step. Without them it chooses between
+bare aliases, and `keera router check` warns about it.
 
 A model from a hosted provider starts with the provider's description
 (`keera model catalogue` lists them). Rewrite it to say what this deployment
 uses the model for.
 
-## Where it runs
-
-A router runs after the budget check, because deciding costs money, and before
-the filters. [What happens to one request](gateway.md#what-happens-to-one-request)
-has the whole order. A [size router](#routing-by-size) costs nothing but runs in
-the same step.
-
-The router reads what the client sent, before any redaction. So **the deciding
-model should be served locally**, just like a filter's. It must also be on the
-organisation's allow-list; see
-[Models that filters and routers run on](gateway.md#models-that-filters-and-routers-run-on).
-
 ## When it cannot decide
 
-Choose when writing the router. Without `--fallback`, it refuses what it cannot
+Choose when writing the step. Without `--fallback`, it refuses what it cannot
 place.
 
 | `--fallback <destination>`                | `--no-fallback`                    |
@@ -131,18 +355,18 @@ place.
 | recorded as `fallback`                    | recorded as `error`                |
 | the sender gets an answer                 | the sender gets `router_undecided` |
 
-A request the fallback answered counts as served. Why the router could not
-decide is kept as the request's note, shown on the Requests screen and by
+A request the fallback answered counts as served. Why the step could not decide
+is kept as the request's note, shown on the Requests screen and by
 `keera session show`.
 
-A router that saves money usually has a safe fallback. A router that keeps
-prompts inside the cluster does not: sending an unclassified prompt to a fixed
-model is the failure it exists to prevent.
+A step that saves money usually has a safe fallback. A step that keeps prompts
+inside the cluster does not: sending an unclassified prompt to a fixed model is
+the failure it exists to prevent.
 
-Filters always fail closed. Routers get a choice because there may be a safe
-place to send the request.
+Filters always fail closed. Route steps get a choice because there may be a
+safe place to send the request.
 
-A router cannot decide when:
+A route step cannot decide when:
 
 - its model [cannot run](gateway.md#models-that-filters-and-routers-run-on)
 - none of its destinations can be served (with a fallback, this ends in the 503
@@ -169,15 +393,16 @@ token. What it spends is charged to the same budgets and added to the request's
 `cost_micros`.
 
 A filter costs a generation only on the requests its guardrails cover. **A
-router costs one on every request that names it.**
+route step costs one on every request that reaches it.**
 
-So the router reads at most **the newest 24 KiB** of the request's segments. It
+So the step reads at most **the newest 24 KiB** of the request's segments. It
 reads from the end because the latest ask is what matters; a coding agent's
 conversation is mostly files it has already read. A single segment larger than
 the window is sent whole.
 
-The deciding model gets a small, fixed output budget. `keera router check` shows
-what its runs cost, which is what every request naming the router pays on top.
+The deciding model gets a small, fixed output budget. `keera router check`
+shows what its runs cost, which is what every request through the step pays on
+top.
 
 ### How the answer is read
 
@@ -224,10 +449,10 @@ If you are unsure, choose the more capable model rather than the cheaper one.
 Limits:
 
 - The instruction is capped at 4 KiB, a quarter of a filter's. It is sent with
-  the destination list and every description on every request that names the
-  router.
-- At most 16 destinations. With longer lists, a small model
-  tends to pick whichever end it read last.
+  the destination list and every description on every request that reaches the
+  step.
+- At most 16 destinations. With longer lists, a small model tends to pick
+  whichever end it read last.
 
 The deciding model can also be a
 [decision model](gateway.md#decision-models), a classifier that picks in one
@@ -263,8 +488,7 @@ request goes to the destination with the smallest ceiling it fits under.
 - **Tell a hard request from an easy one of the same length.** "Prove this
   function terminates" is shorter than most renames.
 - **See what is in the text.** To keep client data inside the cluster, use an
-  instruction router, a filter or an allow-list. A size router is no data
-  boundary.
+  instruction step, a filter or an allow-list. A size step is no data boundary.
 - **Count anything but text.** It measures the same text the filters read, with
   the same pessimistic estimate. A request that is mostly a base64 image counts
   as small, although the image does take up context.
@@ -290,8 +514,9 @@ written order breaks ties. `keera router check` prints the whole table.
 
 ### Ceilings
 
-Written as `alias:tokens` in `--destinations`. A bare number is tokens and `k`
-means a thousand, so `keera-speed:4k` and `keera-speed:4000` are the same.
+Written as `alias:tokens` in `--destinations`, or in `ceilings` in the JSON. A
+bare number is tokens and `k` means a thousand, so `keera-speed:4k` and
+`keera-speed:4000` are the same.
 
 **The number is an estimate**: three bytes of text per token. It overestimates
 on purpose, so a borderline request goes to the larger model. The same estimate
@@ -306,12 +531,12 @@ for nothing. This is allowed, but `keera router check` warns about it.
 
 ### When a destination is down
 
-It fails over like [the fallback router](#what-counts-as-a-failure). So if the
+It fails over like [the fallback mode](#what-counts-as-a-failure). So if the
 preferred destination is down, a larger one serves the request. It costs more
 but is not refused, and shows as `fallback`
 ([What is recorded](#what-is-recorded)).
 
-## The fallback router
+## The fallback mode
 
 Use it when two or more models can serve the same request and one may be
 unavailable: a local cluster with a hosted endpoint behind it, two providers of
@@ -326,9 +551,6 @@ keera router add ha --mode fallback \
 **Destinations are tried in the order they are written**, until one answers or
 the list runs out. There is no deciding model, no instruction and no fallback
 destination - the list _is_ the fallback.
-
-Otherwise it is a router like any other: clients name it the same way, allowing
-it allows its destinations, and it writes the same usage row.
 
 ### What counts as a failure
 
@@ -359,12 +581,8 @@ failed before it are kept as the request's note.
 
 ### What a request costs
 
-Nothing, until something fails. A fallback router has no model of its own, so
-`keera_router_cost_micros_total` stays at zero.
-
-The cost is **time**: each failed destination adds wait before the next one is
-tried. It is recorded in `router_ms`, the same column as a deciding router's
-generation.
+Only time: each failed destination adds wait before the next one is tried. It
+is recorded in `router_ms`, the same column as a deciding step's generation.
 
 ### The state to watch for
 
@@ -384,7 +602,7 @@ moment. Alert on the fallback rate.
 
 ## Balancing between equals
 
-A fallback router always prefers its first destination. For equal destinations,
+A fallback step always prefers its first destination. For equal destinations,
 such as identical vLLM replicas, that leaves the others mostly idle. These two
 modes put the same list in a new order on every request:
 
@@ -398,7 +616,7 @@ keera router add frontier --mode latency \
   --description "either region, whichever is answering"
 ```
 
-Otherwise they work like a fallback router, and
+Otherwise they work like the fallback mode, and
 [fail over the same way](#what-counts-as-a-failure). There is no deciding model,
 instruction or fallback destination.
 
@@ -430,40 +648,41 @@ instruction or fallback destination.
 - **A destination that just failed is ranked last** for the next half minute.
   Otherwise both modes would keep picking a down destination: nothing answers,
   so nothing is measured, and nothing is in flight.
-- **On a latency router, a destination with no recent measurement is ranked
+- **In `latency` mode, a destination with no recent measurement is ranked
   first.** After five minutes without traffic, its reading is dropped and it
-  moves to the front. This costs one request and is the only way the router
-  notices that a destination got faster. A least-busy router only counts
-  requests in flight.
-- **Ties go to the written order**, so a new router behaves like a fallback
-  router until it has measured something.
+  moves to the front. This costs one request and is the only way the step
+  notices that a destination got faster. A least-busy step only counts requests
+  in flight.
+- **Ties go to the written order**, so a new step behaves like a fallback step
+  until it has measured something.
 
-`keera router check pool` is the fallback router's check with one more column:
-what the router measured for each destination and the position that gives it.
+`keera router check pool` is the fallback mode's check, with what the step
+measured for each destination in its note, in the order that gives. The panel
+shows it in a column of its own.
 Two checks a minute apart may show a different order; that is normal.
 
 ## There is no shadow mode
 
-A router has nothing to compare its choice with: the client named the router,
-so the only other candidate is the fallback. Use the check and the router's
-screen instead.
+A route step has nothing to compare its choice with: the client did not name a
+model, so the only other candidate is the fallback. Use the check and the
+router's screen instead.
 
 ## Checking one
 
-`keera router check <alias>`, or the **Check** button in the panel, shows what a
-router would do.
+`keera router check <alias>`, or the **Check** button on the router's screen,
+shows what each of its route steps would do. `--step <id>` checks one of them.
 
-A fallback router has no decision to sample, so its check
+A step that tries its destinations has no decision to sample, so its check
 [asks each destination in turn whether it is there](#the-state-to-watch-for).
 
-A [size router's](#routing-by-size) check does the same, and prints **the sizes
+A [size step's](#routing-by-size) check does the same, and prints **the sizes
 each destination is first choice for**. Unlike everything else a check shows,
-this is not a sample: it is the router's whole behaviour. It also warns when a
+this is not a sample: it is the step's whole behaviour. It also warns when a
 ceiling is larger than its model's context, when a destination is first choice
 for nothing, and when every request goes to the same destination whatever its
 size.
 
-On a router that decides, the check sends three sample prompts and shows where
+On a step that decides, the check sends three sample prompts and shows where
 each went:
 
 | The sample                                         | What it asks                                 |
@@ -474,33 +693,36 @@ each went:
 
 For each, it shows how sure the model was: the share of the probability its
 letter got against the others. A sample decided at 95% is a clear choice. Three
-samples at 35% mean the router cannot tell its destinations apart, and small
+samples at 35% mean the step cannot tell its destinations apart, and small
 changes to the instruction or model will change its answers. If the backend
 returns no probabilities, nothing is shown.
 
 There is no pass or fail. But the check does warn when **every sample went to
-the same model**: that router pays a generation per request to do what naming
-the model directly would do. It also warns when some samples could not be
-placed.
+the same model**: that step pays a generation per request to do what naming the
+model directly would do. It also warns when some samples could not be placed.
 
 It also lists destinations that were not offered, and destinations with no
 description.
 
 A check
 [calls the backend directly](gateway.md#models-that-filters-and-routers-run-on):
-at least three requests for a router that decides, since a sample whose
-lettered answer cannot be read is asked again for a name, and one per
-destination for the other modes (two when a backend refuses tools).
+at least three requests for a step that decides, since a sample whose lettered
+answer cannot be read is asked again for a name, and one per destination for
+the other modes (two when a backend refuses tools).
 
 ## What a client can see
 
+`GET /api/v1/models` lists routers next to the models. Their `destinations` are
+every model they may send to.
+
 The answer's `model` field names **the model that answered**, not the router.
 
-Answers also carry `X-Keera-Router`, so a developer can see which model the
-router picked. A request refused before it was sent on, such as one the router
-could not decide, does not carry it:
+Answers carry `X-Keera-Router` with the router's alias. Once a route step has
+chosen, it also says where it sent the request, so a developer can see which
+model answered:
 
 ```
+X-Keera-Router: guarded
 X-Keera-Router: auto -> keera-frontier
 X-Keera-Router: auto -> keera-speed (fallback)
 X-Keera-Router: ha -> hosted-frontier (every destination failed)
@@ -510,66 +732,37 @@ When every destination fails, the client gets the last destination's own
 response. If that one could not be reached at all, or did not answer in time,
 the client gets the gateway's 502 `upstream_unavailable` instead.
 
-## Who owns what
-
-A router belongs to one organisation, and can send to 1 to 16 of its models, in
-every mode. Who may write and read it, and what its alias may be, is the same as
-for a filter; see
-[Models that filters and routers run on](gateway.md#models-that-filters-and-routers-run-on).
-
-Router aliases share one namespace with model aliases, because clients use both
-in the same field, so the two cannot share an alias. Creating a router over the
-alias of one of the organisation's models is refused, and so is adding a model
-under a router's alias.
-
-Deleting a router takes it off the organisation's allow-list. Deleting one that
-a project's or key's allow-list still names, or that is all the organisation's
-list names, is refused with a 409 `router_in_use`, and the refusal lists the
-scopes. Take it off those allow-lists first.
-
-## Where a router is not
-
-- **Only on the chat endpoints**: `/api/v1/chat/completions`, `/api/v1/messages`
-  and `/api/v1/responses`. `/api/v1/completions` and `/api/v1/embeddings` do not
-  know router names.
-- **Not on a request with no text**, for a router that decides. A chat that is
-  all images has nothing to read, so the fallback places it, or it is refused
-  with `router_undecided` if there is no fallback. A router with only one
-  destination that can be served sends it there, as above. A fallback router is
-  unaffected, and a size router counts such a request as small.
-- **Not a retry.** A fallback router moves an unanswered request to the next
-  destination. It never sends the same request to the same model twice.
-- **Not a guardrail.** A router picks between models an administrator listed. To
-  stop data leaving the cluster, use a filter or an allow-list.
+A filter step that refuses says the router refused, not a guardrail of the key.
 
 ## What is recorded
 
 Each router has its own screen: `/routers/<alias>` in the panel,
-`keera router report <alias>` in a terminal.
+`keera router report <alias>` in a terminal. It shows how many requests went
+through the router, how many were refused, what they cost, which models
+answered, and how its route steps decided.
 
-A router's failures are silent. Every request still gets a 200:
+A route step's failures are silent. Every request still gets a 200:
 
 - **Too eager**: paying the large model's price to rename variables.
 - **Too shy**: prompts a guardrail meant to keep in the cluster leave it.
 - **Stopped deciding**: every request goes to the fallback, and still pays for a
   generation.
-- **Running on the second destination**: a fallback router whose first
+- **Running on the second destination**: a fallback step whose first
   destination is down.
 
-The screen shows, over a time window:
+So the screen shows, over a time window:
 
-| Figure                                        | What it tells you                                                                           |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| requests placed                               | whether anything uses it; the shares below mean nothing without it                          |
-| decided / fell back / could not place         | whether it still decides - or, on a fallback router, whether its first choice still answers |
-| **the split between its destinations**        | whether it routes at all, or always picks the same model                                    |
-| what each destination cost                    | whether the savings are what justified the router                                           |
-| each destination's median time to first token | whether cheaper answers made developers wait longer                                         |
-| what deciding added, p50 and p95              | the wait it adds; on a fallback router, the time the failed attempts took                   |
+| Figure                                 | What it tells you                                                    |
+| -------------------------------------- | -------------------------------------------------------------------- |
+| requests                               | whether anything uses it; the shares below mean nothing without it   |
+| decided / fell back / could not place  | whether it still decides, or whether its first choice still answers  |
+| **the split between its destinations** | whether it routes at all, or always picks the same model             |
+| what deciding added, p50 and p95       | the wait it adds; in the trying modes, the time failed attempts took |
 
-The split is the main figure. Each request has one of three outcomes:
+The split is the main figure. Each request a route step placed has one of three
+outcomes:
 
-| Outcome    | Instruction router             | Fallback router                | Size, latency or least-busy router    |
+| Outcome    | Instruction                    | Fallback                       | Size, latency or least-busy           |
 | ---------- | ------------------------------ | ------------------------------ | ------------------------------------- |
 | `chose`    | the decision was made and kept | the first destination answered | the destination ranked first answered |
 | `fallback` | it could not decide            | a later destination answered   | a lower-ranked destination answered   |
@@ -577,29 +770,45 @@ The split is the main figure. Each request has one of three outcomes:
 
 A client that hangs up before any destination answers is also `error`: no
 destination answered, so `chose` would claim a success. The destination is not
-marked as failing for it, so a latency or least-busy router still ranks it as
+marked as failing for it, so a latency or least-busy step still ranks it as
 before.
 
-Outside an instruction router, `fallback` means the ranking was wrong. On a
-latency or least-busy router a few percent is re-probing at work; a quarter
-means a destination is failing while measuring well.
+Outside the instruction mode, `fallback` means the ranking was wrong. In
+latency or least-busy mode a few percent is re-probing at work; a quarter means
+a destination is failing while measuring well.
 
-The same figures are on `/metrics`, labelled by router, organisation, outcome
-and destination: `keera_router_decisions_total`,
-`keera_router_cost_micros_total` and `keera_router_duration_seconds`. Alert on a
-rising fallback rate.
+`/metrics` has these figures too, labelled by router, step, organisation,
+outcome and destination: `keera_router_decisions_total`,
+`keera_router_cost_micros_total` and `keera_router_duration_seconds`. It counts
+every decision of an instruction step with two or more destinations. A route
+step that only tries its destinations, which includes an instruction step with
+one, is counted only when it is the request's last route step, as in the
+report. Alert on a rising fallback rate.
 
-**Nothing the router read is stored.** Also recorded:
+**Nothing a route step read is stored.** Also recorded:
 
 - `router.put`, `router.delete` and `router.check` in the audit log, with who
-  did it and in which organisation. The `router.put` entry holds the
-  instruction, destinations, ceilings and fallback.
-- One row per request in the usage log: the router, whether it decided, and what
-  deciding added to the wait. The destination is that row's `alias`. So a
-  router's report only reaches back as far as `KEERA_USAGE_RETENTION`.
+  did it and in which organisation. The `router.put` entry holds the whole
+  tree, instructions included.
+- One row per request in the request log: the router, and, when a route step ran,
+  whether the last one decided and what deciding added to the wait. The model
+  that answered is that row's `alias`. So a router's report only reaches back as
+  far as `KEERA_USAGE_RETENTION`.
 - What deciding spent, added to the request's `cost_micros` and charged to the
   same budgets - also when the request fell back or was refused. Only
-  `instruction` spends anything here.
+  `instruction` spends anything here. When a request passes several route steps,
+  each one's spend is charged, but the row records the last one's outcome.
 - Every destination that was tried and did not answer, on the request's row -
   also when a later one answered.
-- Answers carry `X-Keera-Router` ([What a client can see](#what-a-client-can-see)).
+- The filter steps record their runs as they would anywhere else, so the
+  [filter](filters.md#what-is-recorded) screens include their router traffic.
+
+## Upgrading from v0.10
+
+In v0.10, a router was only what a route step is now. The upgrade to v0.11
+deletes those routers, so a client naming one is told the model does not exist
+until it is written again: a router of the same alias with one route step,
+added with the same flags as before.
+
+The allow-lists that named the old router still name its alias, so the new one
+is allowed in the same places, and its report includes the old one's traffic.

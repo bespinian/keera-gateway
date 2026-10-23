@@ -295,8 +295,8 @@ on the **My access** screen.
 
 The gateway also enforces:
 
-- Deleting a filter that a guardrail still names is refused, and the refusal
-  lists the guardrails.
+- Deleting a filter that a router or a guardrail still uses is refused. The
+  refusal names the routers, or the guardrails once no router uses it.
 - A guardrail that names a filter the organisation does not have is refused
   when it is written.
 - A filter's model must be on the organisation's allow-list and cannot be a
@@ -307,8 +307,9 @@ The gateway also enforces:
 
 A new filter starts in shadow, from the panel and from `keera filter add`
 (`--no-shadow` enforces from the start). The control API is the exception: a
-`PUT /control/v1/filters/{alias}` without `"shadow": true` enforces. In shadow, the filter runs on every
-request its guardrails cover but enforces nothing. The rewrite is discarded,
+`PUT /control/v1/filters/{alias}` without `"shadow": true` enforces. In shadow,
+the filter runs on every request its guardrails and routers send through it, but
+enforces nothing. The rewrite is discarded,
 the refusal does not happen, the request is forwarded as the client sent it,
 and what the filter _would_ have done is recorded.
 
@@ -359,9 +360,12 @@ filters but never drop one an outer level applied.
 They run outermost first - organisation, then project, then key - and each sees
 what the one before it wrote. A filter named at two levels runs once.
 
+A [router's](routers.md) filter steps run before all of them. A filter that both
+a router step and a guardrail name runs once, at the router's step.
+
 Within one level they run in the order that level wrote them: the order of
-`--filters a,b`, or the **In this order** list in the guardrails dialog, whose
-arrows move a filter up or down. A filter ticked in that dialog is added last.
+`--filters a,b`, or of the filter blocks in the guardrails dialog, whose
+arrows move a filter earlier or later. A filter added there runs last.
 
 A refusal ends the chain. The filters after it do not run and are not charged.
 
@@ -383,10 +387,15 @@ keera guardrail set project <project-id> --filters redact-names
 The organisation pays nothing for the first, and only the project that needs the
 second pays for it.
 
-Filters run after the router and before the standing system prompt is added,
-so the administrator's own wording is never handed to a small model that may
-edit it. [What happens to one request](gateway.md#what-happens-to-one-request)
-has the whole order.
+A guardrail's filters run after the router, if the client named one, and
+before the standing system prompt is added.
+[What happens to one request](gateway.md#what-happens-to-one-request) has the
+whole order, and why.
+
+A guardrail's filters run on every request of its scope. To run a filter only
+on some requests, such as those a route step sends to a hosted model, put it in
+a [router](routers.md) as a step. See
+[What clients call, and what always applies](gateway.md#what-clients-call-and-what-always-applies).
 
 ## Choosing and sizing the model
 

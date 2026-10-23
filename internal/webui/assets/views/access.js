@@ -200,17 +200,6 @@ function keyCard(k, ctx) {
     );
   }
 
-  if (k.max_output_tokens) {
-    body.append(
-      h(
-        "p",
-        { class: "hint", style: { marginTop: "12px" } },
-        `Output is capped at ${num(k.max_output_tokens)} tokens. ` +
-          "A request for more is lowered to the cap, not refused.",
-      ),
-    );
-  }
-
   const allowed = k.allowed_models || [];
   body.append(
     h(
@@ -359,10 +348,9 @@ function fact(label, value) {
 }
 
 function hasLimit(sc) {
-  return sc.budget_micros > 0 || sc.rpm > 0 || sc.tpm > 0;
+  return (sc.budgets || []).length > 0 || (sc.rates || []).length > 0;
 }
 
-// scopeRow is one level: what it allows, what is left, and when it lifts.
 function scopeRow(sc) {
   const who = whose(sc);
 
@@ -372,13 +360,13 @@ function scopeRow(sc) {
     h("strong", {}, who),
     sc.name ? h("span", { class: "muted" }, sc.name) : null,
     h("div", { class: "spacer" }),
-    rateChips(sc),
+    rateChips(sc.rates || []),
   );
 
   const row = h("div", { class: "stack", style: { gap: "6px" } }, head);
 
-  if (sc.budget_micros > 0) {
-    const frac = sc.spend_micros / sc.budget_micros;
+  for (const b of sc.budgets || []) {
+    const frac = b.spend_micros / b.budget_micros;
     const tone = frac >= 1 ? "bad" : frac >= 0.8 ? "warn" : "";
     row.append(
       h(
@@ -394,8 +382,8 @@ function scopeRow(sc) {
       h(
         "span",
         { class: "muted small" },
-        `${money(sc.spend_micros)} of ${money(sc.budget_micros)} per ${sc.period}`,
-        sc.resets_at ? ` · resets ${date(sc.resets_at)}` : "",
+        `${money(b.spend_micros)} of ${money(b.budget_micros)} per ${b.period}`,
+        b.resets_at ? ` · resets ${date(b.resets_at)}` : "",
         frac >= 1 ? " · used up, so requests are refused until it resets" : "",
       ),
     );
@@ -403,16 +391,25 @@ function scopeRow(sc) {
   return row;
 }
 
-function rateChips(sc) {
+// A daily or monthly limit only starts again with the period, so what is used
+// of it is shown too.
+function rateChips(rates) {
   const chips = [];
-  if (sc.rpm > 0) chips.push(`${num(sc.rpm)} req/min`);
-  if (sc.tpm > 0) chips.push(`${num(sc.tpm)} tok/min`);
+  for (const r of rates) {
+    const per = r.period === "minute" ? "min" : r.period;
+    const chip = (limit, used, unit) =>
+      r.period === "minute"
+        ? `${num(limit)} ${unit}/${per}`
+        : `${num(used || 0)} of ${num(limit)} ${unit}/${per}`;
+    if (r.requests > 0) chips.push(chip(r.requests, r.requests_used, "req"));
+    if (r.tokens > 0) chips.push(chip(r.tokens, r.tokens_used, "tok"));
+  }
   if (!chips.length) return null;
   return h("span", { class: "muted nowrap small" }, chips.join(" · "));
 }
 
-// refusalsCard answers "my agent stopped working". Refusals are recorded like
-// any request, so this is the same log the dashboard counts from.
+// Refusals are recorded like any request, so this is the same log the
+// dashboard counts from.
 function refusalsCard(refusals, keys) {
   const keyName = Object.fromEntries(keys.map((k) => [k.id, k.name]));
 

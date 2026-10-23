@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/bespinian/keera-gateway/internal/httpx"
@@ -108,13 +107,13 @@ func addTextBlock(d *treeDoc, block map[string]any) {
 	}
 }
 
-// addSystem puts the guardrail's prompt first, as a block of its own, so the
+// addSystem puts the system prompt first, as a block of its own, so the
 // client's blocks keep their cache markers.
 func (anthropicDialect) addSystem(b *body, prompt string) error {
 	return setSystem(b, prompt, true)
 }
 
-// setSystem adds the guardrail's prompt as a text block of its own, before the
+// setSystem adds the system prompt as a text block of its own, before the
 // client's system blocks or after them.
 func setSystem(b *body, prompt string, first bool) error {
 	var blocks []any
@@ -129,8 +128,8 @@ func setSystem(b *body, prompt string, first bool) error {
 				blocks = append(blocks, r)
 			}
 		default:
-			return errors.New("the 'system' field must be a string or an array of text blocks; " +
-				"a guardrail on this key adds a system prompt to every request")
+			return errors.New("the 'system' field must be a string or an array of text " +
+				"blocks; " + promptAdded)
 		}
 	}
 	block := map[string]any{"type": "text", "text": prompt}
@@ -145,35 +144,6 @@ func setSystem(b *body, prompt string, first bool) error {
 	}
 	b.set("system", encoded)
 	return nil
-}
-
-// clamp holds max_tokens to the ceiling. A thinking budget has to stay below
-// max_tokens, or Anthropic refuses the request, so it is lowered with it -
-// and thinking is turned off when the ceiling leaves less than the smallest
-// budget Anthropic accepts.
-func (anthropicDialect) clamp(b *body, limit int) {
-	clampFields(b, limit, "max_tokens")
-	raw, ok := b.value("thinking")
-	if !ok {
-		return
-	}
-	var thinking map[string]json.RawMessage
-	if json.Unmarshal(raw, &thinking) != nil {
-		return
-	}
-	var budget int
-	if json.Unmarshal(thinking["budget_tokens"], &budget) != nil || budget < limit {
-		return
-	}
-	const minBudget = 1024
-	if limit <= minBudget {
-		b.remove("thinking")
-		return
-	}
-	thinking["budget_tokens"] = json.RawMessage(strconv.Itoa(limit - 1))
-	if encoded, err := json.Marshal(thinking); err == nil {
-		b.set("thinking", encoded)
-	}
 }
 
 // needsNative is always empty: every Messages request can be translated.
@@ -272,7 +242,7 @@ type anthropicStream struct {
 }
 
 func (s *anthropicStream) event(payload []byte) []byte {
-	switch eventType(payload) {
+	switch typeOf(payload) {
 	case "content_block_delta":
 		s.deltas++
 	case "message_stop":
@@ -344,28 +314,16 @@ func (s *Server) countTokens(w http.ResponseWriter, r *http.Request) {
 		sh.writeError(w, http.StatusBadRequest, "", "", err.Error())
 		return
 	}
-	alias, _ := b.str("model")
-	if alias == "" {
-		sh.writeError(w, http.StatusBadRequest, "", "",
-			"the 'model' field is required; send one of the models from /v1/models")
-		return
-	}
 	// Refused as a request to the model would be, so counting first tells a
 	// client nothing that sending would not.
-	if len(alias) > maxAliasBytes || !printable(alias) {
-		sh.writeError(w, http.StatusNotFound, "", "",
-			"the 'model' field names no model; send one of the models from /v1/models")
-		return
+	alias, _ := b.str("model")
+	ref := aliasRefusal(alias)
+	var n named
+	if ref == nil {
+		n, ref = s.lookupModel(res, alias, policy.KindChat)
 	}
-	n, ok := s.callable(res, alias, policy.KindChat)
-	if !ok {
-		sh.writeError(w, http.StatusNotFound, "", "",
-			s.advise(modelNotFound(alias)))
-		return
-	}
-	if !n.routed && n.model.Locked {
-		sh.writeError(w, http.StatusForbidden, "", "",
-			"the model '"+alias+"' "+lockedReason(n.model)+"; "+policy.LockedMessage(n.model.OrgName))
+	if ref != nil {
+		sh.writeError(w, ref.status, ref.typ, ref.code, s.told(*ref))
 		return
 	}
 	doc, err := anthropicDialect{}.text(b)
@@ -374,8 +332,27 @@ func (s *Server) countTokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Tool declarations are part of the prompt too, and on a coding agent a
-	// large one. So is the guardrail's system prompt, which every request gets.
+	// large one. So are the system prompts: the guardrails', which every
+	// request gets, and a router's steps'.
 	tools, _ := b.value("tools")
-	tokens := estimateTokens(doc.texts()) + (len(tools)+len(res.SystemPrompt))/bytesPerToken
+	prompts := len(res.SystemPrompt) + mostPromptBytes(n.router.Start)
+	tokens := estimateTokens(doc.texts()) + (len(tools)+prompts)/bytesPerToken
 	httpx.WriteJSON(w, http.StatusOK, map[string]int{"input_tokens": tokens})
+}
+
+// mostPromptBytes is the most system prompt text one way through a router
+// adds. Which way a request goes is decided only when it is sent, and a
+// client that counts too high compacts early rather than overflowing.
+func mostPromptBytes(s *policy.Step) int {
+	if s == nil {
+		return 0
+	}
+	most := max(mostPromptBytes(s.Next), mostPromptBytes(s.Exceeded))
+	for _, next := range s.Branches {
+		most = max(most, mostPromptBytes(next))
+	}
+	if s.Kind == policy.StepSystemPrompt {
+		most += len(s.Prompt)
+	}
+	return most
 }

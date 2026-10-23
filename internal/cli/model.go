@@ -470,8 +470,9 @@ func warnUnusedBackends(asked []string, saved policy.Model) {
 		"so --backend was not used.\n", saved.Provider, strings.Join(saved.Backends, ", "))
 }
 
-// modelUsers lists the filters and routers that name a model. Deleting it
-// does not stop them, so the confirmation names them.
+// modelUsers lists the filters and routers that name a model, so the
+// confirmation names them. Deleting it stops the filters, and is refused while
+// a router uses it.
 func modelUsers(ctx context.Context, c *client, orgID, alias string) (filters, routers []string, err error) {
 	fs, err := list[policy.Filter](ctx, c, inOrg("/v1/filters", orgID))
 	if err != nil {
@@ -487,7 +488,7 @@ func modelUsers(ctx context.Context, c *client, orgID, alias string) (filters, r
 		return nil, nil, err
 	}
 	for _, rt := range rs {
-		if rt.Model == alias || rt.Offers(alias) {
+		if rt.Uses(policy.StepModel, alias) {
 			routers = append(routers, rt.Alias)
 		}
 	}
@@ -506,7 +507,9 @@ func modelDeleteLines(m policy.Model, filters, routers []string) []string {
 			strings.Join(filters, ", "))
 	}
 	if len(routers) > 0 {
-		lines = append(lines, "  the routers that name it lose it: "+strings.Join(routers, ", "))
+		// The control plane refuses it, so this says why before it does.
+		lines = append(lines, "  nothing yet: it is refused while these routers use it: "+
+			strings.Join(routers, ", "))
 	}
 	if m.HasAPIKey {
 		lines = append(lines, "  its stored credential is removed")

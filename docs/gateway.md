@@ -40,7 +40,7 @@ remote endpoint without any developer changing anything.
   `--served-model-name`, llama.cpp's `--alias`. If it is wrong, every request
   returns 404.
 - `max_context_tokens` is shown to clients on `/api/v1/models`, sizes a filter's or a
-  router's own model, and bounds every request. See
+  route step's own model, and bounds every request. See
   [Requests too long for the model](#requests-too-long-for-the-model).
 - `location` says where the model runs, and so where prompts go: `ch` or `usa`
   for a hosted provider, `onprem` for your own inference plane. A provider fills
@@ -70,18 +70,17 @@ An operator picks one in the panel, or with `keera org switch <org>`
 
 Each organisation has its own aliases, so two organisations can each have a
 `fast`. The gateway looks up the `model` field in the organisation's models
-first, then in its routers. A model and a router in the same organisation
-cannot share an alias.
+first, then in its [routers](routers.md). A model and a router in the same
+organisation cannot share an alias.
 
 To stop a project or a key using a model, leave it out of that guardrail:
 `keera guardrail set project <id> --models a,b`. To stop the whole organisation
 using it, disable the model in its edit dialog.
 
-Deleting a model does not change the filters and routers that use it. An
-enforcing filter whose model is gone refuses every request it covers; a shadow
-one records an error and lets them through. A router leaves the model out of its
-choice, or falls back or refuses when it was the model that decides.
-The delete confirmation lists them first.
+Deleting a model does not change the filters that use it. An enforcing filter
+whose model is gone refuses every request it covers; a shadow one records an
+error and lets them through. A model a router uses cannot be deleted until the
+router is changed. The delete confirmation lists both first.
 
 ### Template files
 
@@ -153,9 +152,9 @@ Responses request to a model declared with OpenAI, is forwarded as it is.
 Translating it would lose prompt caching and thinking at Anthropic, and
 reasoning items at OpenAI. In a coding agent's session, most of the bill is the
 cache. The guardrails still apply: filters read and rewrite the request in its
-own shape, and the system prompt and the output ceiling are written into it. If
-a router falls back from such a model to a local one, the local one gets the
-translation. Without a local fallback or a router that reads the request, it
+own shape, and the system prompt is written into it. If
+a route step falls back from such a model to a local one, the local one gets the
+translation. Without a local fallback or a route step that reads the request, it
 is not translated at all, so the provider checks it rather than the gateway.
 
 `POST /api/v1/messages/count_tokens` is answered by the gateway with an
@@ -273,14 +272,13 @@ client** shows them too. With a Claude plan, see
 Three levels: organisation, project, key. A guardrail can attach at any of them.
 
 The combining rule is **restrict-only**. A level can narrow what it inherits but
-never widen it. Allow-lists intersect; the output-token ceiling takes the
-minimum.
+never widen it. Allow-lists intersect, and ceilings take the minimum.
 
 The exceptions:
 
 - **Rate limits and budgets are kept per level and checked separately**, not
   merged. An organisation cap of 10,000 and a project cap of 1,000 are two limits
-  that must both hold, and each level's `rpm` and `tpm` has its own bucket.
+  that must both hold, and each level's rate limit is counted on its own.
 - **System prompts and filters accumulate**, outermost first. A level may add to
   what it inherits but may not drop it.
 - **Only the organisation grants repositories** to sandboxes. A project can only
@@ -289,13 +287,35 @@ The exceptions:
 When an organisation's guardrail lists allowed models, a model the organisation
 adds is put on that list, whether it was added in the panel, with
 `keera model add` or with `keera model apply`. New routers are added
-[only when the list allows their destinations](routers.md#allowing-a-router-allows-its-destinations).
+[only when the list allows every model they reach](routers.md#allowing-a-router).
 Projects and keys that list models keep their own lists. Deleting a model takes
 it off every list in the organisation, so a model added later under the same
 alias is not allowed by accident. A list that named only it allows nothing.
 
-A budget with no period is a monthly one. Budgets reset on UTC boundaries in
-every deployment.
+A level may have several budgets and rate limits, at most one of each per
+period: a budget per day beside one per month, or a rate limit per minute
+beside one per day. Each must hold. In the panel each one is a block of the
+level's guardrails, next to its system prompt, filters, models and MCP tools.
+On the command line, `--per` and `--period` say which one a flag sets.
+
+A budget is `budget_micros` per `period`: `month` when unset, or `day`.
+Budgets reset on UTC boundaries in every deployment.
+
+A rate limit sets `requests`, `tokens` or both per `period`: `minute` when
+unset, `day` or `month`. Per minute is a token bucket that refills as it goes.
+Per day or month is counted in Postgres like spend, and starts again at
+midnight UTC or on the 1st. A request counts once it is let through; its
+tokens count when it ends.
+
+```json
+{
+  "rate_limits": [{ "requests": 120, "period": "minute" }],
+  "budgets": [
+    { "budget_micros": 500000000, "period": "month" },
+    { "budget_micros": 30000000, "period": "day" }
+  ]
+}
+```
 
 `keera guardrail show <scope> <id>` shows what one level sets on its own. A
 level that sets nothing is not unlimited: it gets whatever it inherits. To see
@@ -408,6 +428,20 @@ directory ([Asking the directory again](sso.md#asking-the-directory-again)) or
 `keera logout --all` ends their sign-ins in all of them. Each switch is in the
 audit log as `auth.switch_org`, in the organisation switched to.
 
+## What clients call, and what always applies
+
+| What                             | Is                                                        |
+| -------------------------------- | --------------------------------------------------------- |
+| Models and [routers](routers.md) | what a client calls, by alias in the `model` field        |
+| [Filters](filters.md)            | steps a router uses; guardrails use them too              |
+| Guardrails                       | apply to every request of an organisation, project or key |
+
+Guardrails decide **who** may do what. A router decides **which way** a request
+goes. So a filter, limit or system prompt goes on a guardrail when it must hold
+for everyone in a scope, and in a router when it is about the path a request
+takes, such as only the requests sent to a hosted model. A router runs inside
+the key's guardrails and cannot loosen them.
+
 ## What happens to one request
 
 1. Authenticate the key, and resolve the guardrails attached to its
@@ -415,62 +449,69 @@ audit log as `auth.switch_org`, in the organisation switched to.
 2. Read the body, find the model, check the rate limits and the budgets. A
    [subscription model](subscriptions.md#what-it-costs) meets the budgets only
    when filters apply, because only they spend money.
-3. **Router**, if the client named one: choose the destination.
+3. **Router**, if the client named one: its own filters, route steps, rate
+   limits, budgets and system prompts run in its own order, until it has chosen
+   the model.
 4. Refuse the request if it cannot fit in the destination's context.
 5. **Filters**, outermost level first: each may rewrite the request or refuse it,
    with a model and an instruction or with a list of expressions.
 6. Prepend the standing system prompt (chat requests only; a completion has no
    place for one), take out hosted tools if any model the request may reach is
-   on the deployment's key ([billing.md](billing.md)), and clamp the output
-   ceiling.
+   on the deployment's key ([billing.md](billing.md)).
    For a subscription model the prompt goes after Claude Code's own system
    blocks instead; see [subscriptions.md](subscriptions.md#what-is-sent-to-anthropic).
 7. Forward, stream the answer back, and record what it cost.
 
 Why this order:
 
-- The router (3) runs before the filters (5) so it reads what the client sent.
-  Once a redaction filter has removed a client's name, the prompt looks safe for
-  any model, and a router placed after it would send it outside the cluster.
-- The context check (4) runs before the filters, so a request that cannot
-  succeed costs nothing more than the router's decision.
+- The router (3) runs before the key's filters (5), so its route steps read
+  what the client sent. Once a redaction filter has removed a client's name,
+  the prompt looks safe for any model, and a route step placed after it would
+  send it outside the cluster.
+- The context check (4) runs before the key's filters, so a request that cannot
+  succeed costs nothing more than what the router (3) spent on its filters and
+  decisions.
 - The system prompt (6) is added after the filters, so an administrator's own
   wording is never handed to a small model that is allowed to edit it.
-- Router and filters both run after the budget check, because both spend money.
+- The router and the filters both run after the budget check, because both
+  spend money.
+- A router (3) runs inside the key's guardrails: their limits (2) come before
+  it, and their filters (5) and system prompt (6) after it, so it cannot loosen
+  them.
 
 ## Models that filters and routers run on
 
-[Filters](filters.md) and [routers](routers.md) share these rules. Most are
-about the model that a `rewrite` or `gate` filter, or an `instruction` router,
-calls to decide.
+[Filters](filters.md) and the route steps of [routers](routers.md) share these
+rules. Most are about the model that a `rewrite` or `gate` filter, or an
+`instruction` route step, calls to decide.
 
 **Which model.** A chat model, or a
-[decision model](#decision-models) for a gate or a router. It must be
-on the organisation's allow-list, if it has one. Otherwise the filter or router
-is refused with a 400 `model_not_allowed`. Narrowing the allow-list so that the
+[decision model](#decision-models) for a gate or a route step. It must be on
+the organisation's allow-list, if it has one. Otherwise the filter or router is
+refused with a 400 `model_not_allowed`. Narrowing the allow-list so that the
 model drops off is refused with a 409 `filter_model_not_allowed` or
-`router_model_not_allowed`. Move the filter or router to an allowed model
+`router_model_not_allowed`. Move the filter or route step to an allowed model
 first.
 
 **Not a subscription model.** A
 [subscription model](subscriptions.md#what-a-subscription-key-can-do) cannot be
-a filter's model, a router's model or a router's destination. Saving one is
-refused with a 400, and turning on `subscription` for a model a filter or
-router uses is refused with a 409.
+a filter's model, a route step's model or a route step's destination. Saving
+one is refused with a 400, and turning on `subscription` for a model a filter
+or router uses is refused with a 409.
 
 **When the model cannot run.** The model is missing, disabled, the wrong kind,
 a subscription model, has no backend, or is
-[locked until the organisation pays](sso.md#what-a-new-organisation-can-use).
-A filter then [fails closed](filters.md#failing-closed), and a router
+[limited until the organisation pays](sso.md#what-a-new-organisation-can-use).
+A filter then [fails closed](filters.md#failing-closed), and a route step
 [falls back or refuses](routers.md#when-it-cannot-decide).
 
-**Logprobs.** A gate and an instruction router read the probabilities of the
-model's first token. vLLM and llama.cpp return them; most hosted providers do
-not. There is nothing to configure. If a backend refuses a request for them
-with a 4xx, the gateway stops asking that model for them from then on. So does a
-router whose model answers without them. A gate then reads only the words of the answer, and a router asks for
-a destination's name instead of a letter. So a hosted model costs at most one
-retried call per gateway process.
+**Logprobs.** A gate and an instruction route step read the probabilities of
+the model's first token. vLLM and llama.cpp return them; most hosted providers
+do not. There is nothing to configure. If a backend refuses a request for them
+with a 4xx, the gateway stops asking that model for them from then on. So does
+a route step whose model answers without them. A gate then reads only the words
+of the answer, and a route step asks for a destination's name instead of a
+letter. So a hosted model costs at most one retried call per gateway process.
 
 **Checks.** `keera filter check` and `keera router check` call the backend
 directly, with the credentials the data plane uses. A check is not rate-limited
@@ -480,9 +521,11 @@ put real requests on the GPUs.
 
 **Who owns what.** A filter or a router belongs to one organisation, and its
 administrators write it. Two organisations can each have one with the same
-alias; they are different filters or routers. The alias is its identity, like a
-model's: lowercase letters, digits and interior hyphens. It cannot change: for
-a different alias, create a new one and move its guardrails or clients over.
+alias; they are different filters or routers. Filters have their own aliases,
+apart from models and routers, since no client names them. The alias is its
+identity, like a model's: lowercase letters, digits and interior hyphens. It
+cannot change: for a different alias, create a new one and move the guardrails
+and routers that use it over.
 Members cannot create or change filters and routers, but they can read them,
 instruction included. Their screens, `GET /control/v1/filters`,
 `GET /control/v1/routers` and each one's `/{alias}/report` are open to anyone
@@ -495,9 +538,9 @@ A decision model is a classifier, such as
 It reads a text and a typed question and returns a probability for each answer,
 in one forward pass. It writes no text.
 
-So it can decide for an instruction router or a
+So it can decide for an instruction route step or a
 [gate filter](filters.md#the-three-modes), and nothing else. It cannot be a
-rewrite filter's model or a router's destination, and no client can name it.
+rewrite filter's model or a route step's destination, and no client can name it.
 `/api/v1/models` does not list it.
 
 ```yaml
@@ -509,14 +552,15 @@ rewrite filter's model or a router's destination, and no client can name it.
   max_context_tokens: 2048
 ```
 
-The gateway asks it on `/v1/systemone`, and reads the probabilities the way it
+The gateway asks it on `/systemone` under the backend address (here
+`http://keera-decider:8000/v1/systemone`), and reads the probabilities the way it
 reads a chat model's logprobs.
 A stored credential is sent as a bearer token, which is what `laya-serve`
 checks when `LAYA_API_KEY` is set.
 
 **`max_context_tokens` is sent as Laya's `max_len`**, so the model reads exactly what
 the gateway measured against it. A gate refuses a longer request with 413, and a
-router sends it to its fallback, as with any model. On a CPU, Laya takes about
+route step sends it to its fallback, as with any model. On a CPU, Laya takes about
 one second at 512 tokens and about five at 2048.
 
 #### Writing for one
@@ -524,7 +568,7 @@ one second at 512 tokens and about five at 2048.
 A classifier does not follow a page of instructions. It answers a short
 question.
 
-- **A router's instruction is the question**, such as
+- **A route step's instruction is the question**, such as
   `Which model should answer this request?`. Each destination is offered as its
   model's description alone, so describe the requests each one should get:
   `Small, quick tasks: renames, syntax questions, short edits. Also anything with client names or credentials.`
@@ -544,8 +588,9 @@ was. Run `keera filter check` and `keera router check` as for any model.
 ## Requests too long for the model
 
 A request that cannot fit in the `max_context_tokens` of any model it may go to is
-refused with a 400 before it is filtered or forwarded. Only an instruction
-router's decision has been paid for by then.
+refused with a 400 before the key's filters run and before it is forwarded. Only
+what a router spent on its filter steps and instruction route steps has been
+paid for by then.
 
 The gateway has no tokeniser, so it counts the fewest tokens a request could
 be: its text at five bytes per token. Real text uses fewer bytes per token, so
@@ -571,7 +616,7 @@ are checked one by one, since each has to fit on its own.
 A coding agent keeps one response open for minutes. So the gateway limits only
 how long the inference plane may take to _start_ responding
 ([`KEERA_UPSTREAM_HEADER_TIMEOUT`](install.md#everything-else)), never the response
-itself. A router uses the same timeout to decide that a destination did not
+itself. A route step uses the same timeout to decide that a destination did not
 answer in time. A model on the deployment's own provider key gets longer
 ([billing.md](billing.md#what-is-billed)).
 
@@ -621,12 +666,14 @@ with it gets 503 `control_plane_unavailable` until the database is back.
 
 ## Rate limits across replicas
 
-The token buckets behind `rpm` and `tpm` live in each process. With N replicas
-behind a load balancer, a limit of 600 requests per minute is 600 per replica,
-and up to 600N in total. Spend is reconciled through Postgres, so a budget means
-the same thing however many gateways are running. Each replica reads spend again
-every [`KEERA_SPEND_REFRESH`](install.md#everything-else), so a budget can be
-overshot by about that much traffic.
+The token buckets behind a rate limit per minute live in each process. With N
+replicas behind a load balancer, a limit of 600 requests per minute is 600 per
+replica, and up to 600N in total. Spend is reconciled through Postgres, so a
+budget means the same thing however many gateways are running. Each replica
+reads spend again every [`KEERA_SPEND_REFRESH`](install.md#everything-else), so
+a budget can be overshot by about that much traffic. A rate limit per day or
+month is counted the same way, with the same overshoot. A request still running
+counts at once on its own replica, but on the others only once it has ended.
 
 Set `KEERA_REDIS_URL` (`redis://host:6379/0`, or `rediss://` for TLS) to keep
 the buckets in Redis. One script then decides all of a request's levels
@@ -647,7 +694,8 @@ The control plane's sign-in throttle stays per replica.
 
 Answers say what is left of the allowance, so a client can see a limit coming.
 The budget headers are sent when some level has a budget, and the request
-headers when some level has an `rpm`. They describe only the tightest level:
+headers when some level limits requests per minute. They describe only the
+tightest level:
 
 | Header                           | What it holds                        |
 | -------------------------------- | ------------------------------------ |
@@ -655,11 +703,11 @@ headers when some level has an `rpm`. They describe only the tightest level:
 | `X-Keera-Budget-Limit`           | the budget                           |
 | `X-Keera-Budget-Reset`           | when it resets, in RFC 3339          |
 | `X-Keera-Budget-Scope`           | the level: `org`, `project` or `key` |
-| `X-RateLimit-Limit-Requests`     | the `rpm`                            |
+| `X-RateLimit-Limit-Requests`     | the requests per minute              |
 | `X-RateLimit-Remaining-Requests` | requests left in the bucket          |
 | `X-Keera-RateLimit-Scope`        | the level: `org`, `project` or `key` |
 
-A `tpm` limit has no header. When a limit is hit, the message says which limit
+A limit on tokens, or one per day or month, has no header. When a limit is hit, the message says which limit
 and its value. A rate limit answers 429 with `Retry-After`. A budget answers
 402, and its message gives the day it resets. When the provider itself refuses,
 its `Retry-After` and `X-Should-Retry` are passed on.
@@ -703,9 +751,9 @@ as `billing_error` for 402. The other APIs carry these codes:
 | 404    | `model_not_found`: no such model, the key may not use it, or it is served at another endpoint; `mcp_server_not_found`; `not_found`: no such route; `wrong_base_url` |
 | 415    | `unsupported_encoding`: a request body compressed other than with gzip or deflate                                                                                   |
 | 413    | `request_too_large` (`KEERA_MAX_BODY_BYTES`), `filter_input_too_large`                                                                                              |
-| 429    | `rate_limit_exceeded` (`rpm`), `token_rate_limit_exceeded` (`tpm`)                                                                                                  |
+| 429    | `rate_limit_exceeded`, `token_rate_limit_exceeded` (per minute); `requests_quota_exceeded`, `tokens_quota_exceeded` (per day or month)                              |
 | 502    | `upstream_unavailable`, `upstream_error`, `filter_failed`, `mcp_credential_refused`, `mcp_unavailable`                                                              |
-| 503    | `control_plane_unavailable`, `no_backend`, `filter_unavailable`, `router_undecided`, `router_destination_unavailable`                                               |
+| 503    | `control_plane_unavailable`, `no_backend`, `filter_unavailable`, `router_undecided`, `router_destination_unavailable`, `router_unavailable`                         |
 
 ## Metrics
 
@@ -745,7 +793,7 @@ and [mcp.md](mcp.md#the-tool-call-log).
   sees.
 - **It does not retry.** A model with several backends takes them in turn,
   round-robin, and moves to the next one only when it cannot connect, so a
-  request reaches at most one. A fallback router moves on to its next
+  request reaches at most one. A fallback route step moves on to its next
   destination [when one fails](routers.md#what-counts-as-a-failure). Nothing
   sends the same request to the same model twice.
 

@@ -10,36 +10,33 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// Routers, and the report on what they did.
+// Routers, and the report on where their traffic went.
 //
-// There is no router_runs table. A request passes through exactly one router,
-// so the decision is stored on the request's own usage row: which router,
-// its outcome, and how long it took. The destination is that row's alias.
+// There is no table of runs. The router is stored on the request's own
+// usage row, with what its last route step decided: its outcome, and how long
+// it took. The destination is that row's alias. Its filters write their runs
+// as they would anywhere else.
 
-const routerColumns = `SELECT org_id, alias, mode, model, prompt, destinations, ceilings,
-	fallback, description, created_at, updated_at`
+const routerColumns = `SELECT org_id, alias, display_name, description, steps,
+	created_at, updated_at`
 
 func scanRouter(r row) (policy.Router, error) {
 	var (
-		rt       policy.Router
-		fallback *string
+		p     policy.Router
+		steps []byte
 	)
-	err := r.Scan(&rt.OrgID, &rt.Alias, &rt.Mode, &rt.Model, &rt.Prompt, &rt.Destinations,
-		&rt.Ceilings, &fallback, &rt.Description, &rt.CreatedAt, &rt.UpdatedAt)
-	if fallback != nil {
-		rt.Fallback = *fallback
+	err := r.Scan(&p.OrgID, &p.Alias, &p.DisplayName, &p.Description, &steps,
+		&p.CreatedAt, &p.UpdatedAt)
+	if err != nil {
+		return p, err
 	}
-	// Only a size router has ceilings. Every other mode gets nil, not an empty
-	// map.
-	if len(rt.Ceilings) == 0 {
-		rt.Ceilings = nil
-	}
-	return rt, err
+	p.Start = &policy.Step{}
+	return p, json.Unmarshal(steps, p.Start)
 }
 
-// LoadRouters reads every organisation's routers, for the gateway's cache.
-// The gateway checks every request's model against them, so they must not be
-// read from Postgres on the request path.
+// LoadRouters reads every organisation's routers, for the gateway's
+// cache. The gateway checks every request's model against them, so they must
+// not be read from Postgres on the request path.
 func (s *Store) LoadRouters(ctx context.Context) ([]policy.Router, error) {
 	return queryAll(ctx, s.pool, scanRouter, routerColumns+" FROM routers ORDER BY org_id, alias")
 }
@@ -50,68 +47,36 @@ func (s *Store) ListRouters(ctx context.Context, orgID string) ([]policy.Router,
 }
 
 func (s *Store) Router(ctx context.Context, orgID, alias string) (policy.Router, error) {
-	rt, err := scanRouter(s.pool.QueryRow(ctx,
+	p, err := scanRouter(s.pool.QueryRow(ctx,
 		routerColumns+" FROM routers WHERE org_id = $1 AND alias = $2", orgID, alias))
-	return rt, notFound(err)
+	return p, notFound(err)
 }
 
-func (s *Store) UpsertRouter(ctx context.Context, rt policy.Router) (policy.Router, error) {
-	// The one place a missing mode gets its default.
-	if rt.Mode == "" {
-		rt.Mode = policy.RouterModeInstruction
-	}
-	// Marshalled here because the driver would send a nil map as JSON null,
-	// which the column's check constraint refuses.
-	own := rt.Ceilings
-	if own == nil {
-		own = map[string]int{}
-	}
-	ceilings, err := json.Marshal(own)
+func (s *Store) UpsertRouter(ctx context.Context, p policy.Router) (policy.Router, error) {
+	steps, err := json.Marshal(p.Start)
 	if err != nil {
-		return rt, err
+		return p, err
 	}
 	err = s.pool.QueryRow(ctx, `INSERT INTO routers
-		(org_id, alias, mode, model, prompt, destinations, ceilings, fallback, description)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-		ON CONFLICT (org_id, alias) DO UPDATE SET mode = EXCLUDED.mode,
-			model = EXCLUDED.model, prompt = EXCLUDED.prompt,
-			destinations = EXCLUDED.destinations, ceilings = EXCLUDED.ceilings,
-			fallback = EXCLUDED.fallback, description = EXCLUDED.description,
-			updated_at = now()
+		(org_id, alias, display_name, description, steps)
+		VALUES ($1,$2,$3,$4,$5)
+		ON CONFLICT (org_id, alias) DO UPDATE SET display_name = EXCLUDED.display_name,
+			description = EXCLUDED.description, steps = EXCLUDED.steps, updated_at = now()
 		RETURNING created_at, updated_at`,
-		rt.OrgID, rt.Alias, rt.Mode, rt.Model, rt.Prompt, rt.Destinations, ceilings,
-		nullable(rt.Fallback), rt.Description,
-	).Scan(&rt.CreatedAt, &rt.UpdatedAt)
-	return rt, err
+		p.OrgID, p.Alias, p.DisplayName, p.Description, steps,
+	).Scan(&p.CreatedAt, &p.UpdatedAt)
+	return p, err
 }
 
 // DeleteRouter removes one router, and takes it off its organisation's
-// allow-list, where adding it put it.
+// allow-list, where adding it put it. Its limits' counts go with it: they are
+// kept under the alias and step ids, so a new router of the same alias would
+// otherwise start where the old one stopped.
 func (s *Store) DeleteRouter(ctx context.Context, orgID, alias string) error {
-	return s.deleteAllowed(ctx, "routers", orgID, alias)
-}
-
-// deleteAllowed deletes a model or router and takes its alias off every
-// allow-list in the organisation. Left there, the alias would allow whatever
-// is added under it next. A list that named only it allows nothing either
-// way. A router named by a project's or key's list is refused before this.
-func (s *Store) deleteAllowed(ctx context.Context, table, orgID, alias string) error {
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE org_id = $1 AND alias = $2",
-			orgID, alias)
-		if err != nil {
-			return err
-		}
-		if tag.RowsAffected() == 0 {
-			return ErrNotFound
-		}
-		_, err = tx.Exec(ctx, `UPDATE guardrails p
-			SET allowed_models = array_remove(p.allowed_models, $2)
-			WHERE $2 = ANY (p.allowed_models) AND (
-			     (p.scope_type = 'org' AND p.scope_id = $1)
-			  OR (p.scope_type = 'project' AND p.scope_id IN (SELECT id FROM projects WHERE org_id = $1))
-			  OR (p.scope_type = 'key' AND p.scope_id IN (SELECT id FROM api_keys WHERE org_id = $1)))`,
-			orgID, alias)
+	return s.deleteAllowed(ctx, "routers", orgID, alias, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `DELETE FROM spend
+			WHERE scope_type = $1 AND starts_with(scope_id, $2)`,
+			string(policy.ScopeRouter), orgID+"/"+alias+"/")
 		return err
 	})
 }
@@ -119,54 +84,38 @@ func (s *Store) deleteAllowed(ctx context.Context, table, orgID, alias string) e
 // RouterUsers lists the guardrails inside one organisation whose allow-list
 // names a router. It is read before a deletion, as FilterUsers is: those
 // scopes could reach nothing once the router is gone. The organisation's own
-// list counts only when it names nothing else, because DeleteRouter takes the
-// router off it.
+// list counts only when it names nothing else, because DeleteRouter takes
+// the router off it.
 func (s *Store) RouterUsers(ctx context.Context, orgID, alias string) ([]GuardrailRef, error) {
 	return s.scopesNaming(ctx, `$2 = ANY (p.allowed_models)
 		AND (p.scope_type <> 'org' OR cardinality(p.allowed_models) = 1)`, orgID, alias)
 }
 
-// RouterOutcome is what one routing decision came to: the request went where
-// the router meant it to, somewhere else, or nowhere.
-type RouterOutcome string
-
-const (
-	// RouterChose is a decision made and honoured. On a fallback router it is
-	// the first destination answering.
-	RouterChose RouterOutcome = "chose"
-	// RouterFellBack is a decision that could not be made, on a router that
-	// has a fallback. On a fallback router it is a later destination answering.
-	RouterFellBack RouterOutcome = "fallback"
-	// RouterError is a decision that could not be made on a router with no
-	// fallback, so the request was refused. On a fallback router it is every
-	// destination having failed.
-	RouterError RouterOutcome = "error"
-)
-
-// RouterDestination is where one router sent its traffic over a window, and
-// what happened there. Requests that ended in an error, refused or failed at
-// every destination, are left out; they are counted in RouterReport.Errored.
+// RouterDestination is where one router sent its traffic over a window.
+// Requests it placed on no model are left out: those a filter or limit step
+// refused first, which only Total counts, and those a route step refused or
+// failed at every destination, which Errored counts too.
 type RouterDestination struct {
 	Alias string `json:"alias"`
 	Cell
 }
 
-// RouterReport is one router's own screen. It shows where traffic went and how
-// often the router could not decide, since both failures are otherwise
-// invisible: every request still gets an answer.
+// RouterReport is one router's own screen: how much went through it, which
+// models answered, and how often its route steps could not decide. Both are
+// otherwise invisible, since every request still gets an answer.
 type RouterReport struct {
 	Router string `json:"router"`
-	// Total is every request this router was asked to place.
+	// Total is every request that named the router.
 	Total Cell `json:"total"`
 	// Destinations is one row per model it placed traffic on, most-used first.
 	Destinations []RouterDestination `json:"destinations"`
-	// Chose, FellBack and Errored split Total by outcome. A rising fallback
-	// rate means the router's model is in trouble.
+	// Chose, FellBack and Errored split the requests a route step placed by
+	// outcome. A rising fallback rate means a step's model is in trouble.
 	Chose    int64 `json:"chose"`
 	FellBack int64 `json:"fell_back"`
 	Errored  int64 `json:"errored"`
-	// DecisionMedianMS and DecisionP95MS are what the decision added to the
-	// wait before the first token.
+	// DecisionMedianMS and DecisionP95MS are what deciding added to the wait
+	// before the first token.
 	DecisionMedianMS int64 `json:"decision_median_ms"`
 	DecisionP95MS    int64 `json:"decision_p95_ms"`
 }
@@ -175,9 +124,7 @@ func (s *Store) RouterReportFor(ctx context.Context, orgID, alias string, from, 
 	RouterReport, error,
 ) {
 	rep := RouterReport{Router: alias, Destinations: []RouterDestination{}}
-
-	err := s.pool.QueryRow(ctx, `
-		SELECT `+cellColumns+`,
+	err := s.pool.QueryRow(ctx, `SELECT `+cellColumns+`,
 		       `+countOf("router_outcome", RouterChose)+`,
 		       `+countOf("router_outcome", RouterFellBack)+`,
 		       `+countOf("router_outcome", RouterError)+`,
@@ -194,33 +141,27 @@ func (s *Store) RouterReportFor(ctx context.Context, orgID, alias string, from, 
 	if err != nil {
 		return rep, err
 	}
-
-	rep.Destinations, err = queryAll(ctx, s.pool, scanRouterDestination, `
-		SELECT COALESCE(alias, ''), `+cellColumns+`
+	rep.Destinations, err = queryAll(ctx, s.pool, func(r row) (RouterDestination, error) {
+		var d RouterDestination
+		err := r.Scan(append([]any{&d.Alias}, cellTargets(&d.Cell)...)...)
+		return d, err
+	}, `SELECT alias, `+cellColumns+`
 		FROM usage_events
 		WHERE ts >= $1 AND ts < $2 AND org_id = $3 AND router = $4
-		  AND router_outcome <> '`+string(RouterError)+`'
+		  AND alias <> ''
+		  AND router_outcome IS DISTINCT FROM '`+string(RouterError)+`'
 		GROUP BY 1
 		ORDER BY 2 DESC`,
 		from, to, orgID, alias)
 	return rep, err
 }
 
-func scanRouterDestination(r row) (RouterDestination, error) {
-	var d RouterDestination
-	err := r.Scan(append([]any{&d.Alias}, cellTargets(&d.Cell)...)...)
-	return d, err
-}
-
 // RouterStat is one router's headline for the list.
 type RouterStat struct {
-	Requests int64 `json:"requests"`
+	Cell
 	Chose    int64 `json:"chose"`
 	FellBack int64 `json:"fell_back"`
 	Errored  int64 `json:"errored"`
-	// CostMicros is what the requests this router placed cost, the router's
-	// own generations included. Lowering it is what a router is for.
-	CostMicros int64 `json:"cost_micros"`
 }
 
 // RouterStats reads every router's headline in one query, for the list.
@@ -228,14 +169,65 @@ func (s *Store) RouterStats(ctx context.Context, orgID string, from, to time.Tim
 	map[string]RouterStat, error,
 ) {
 	return queryMap(ctx, s.pool, func(st *RouterStat) []any {
-		return []any{&st.Requests, &st.Chose, &st.FellBack, &st.Errored, &st.CostMicros}
+		return append(cellTargets(&st.Cell), &st.Chose, &st.FellBack, &st.Errored)
 	}, `
-		SELECT router, count(*),
+		SELECT router, `+cellColumns+`,
 		       `+countOf("router_outcome", RouterChose)+`,
 		       `+countOf("router_outcome", RouterFellBack)+`,
-		       `+countOf("router_outcome", RouterError)+`,
-		       COALESCE(sum(cost_micros), 0)
+		       `+countOf("router_outcome", RouterError)+`
 		FROM usage_events
 		WHERE ts >= $1 AND ts < $2 AND org_id = $3 AND router IS NOT NULL
 		GROUP BY router`, from, to, orgID)
 }
+
+// deleteAllowed deletes a model or router and takes its alias off every
+// allow-list in the organisation. Left there, the alias would allow whatever
+// is added under it next. A list that named only it allows nothing either
+// way. A router named by a project's or key's list is refused before this.
+//
+// also, when set, removes what else goes with the row, in the same
+// transaction.
+func (s *Store) deleteAllowed(ctx context.Context, table, orgID, alias string,
+	also func(pgx.Tx) error,
+) error {
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE org_id = $1 AND alias = $2",
+			orgID, alias)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		if also != nil {
+			if err := also(tx); err != nil {
+				return err
+			}
+		}
+		_, err = tx.Exec(ctx, `UPDATE guardrails p
+			SET allowed_models = array_remove(p.allowed_models, $2)
+			WHERE $2 = ANY (p.allowed_models) AND (
+			     (p.scope_type = 'org' AND p.scope_id = $1)
+			  OR (p.scope_type = 'project' AND p.scope_id IN (SELECT id FROM projects WHERE org_id = $1))
+			  OR (p.scope_type = 'key' AND p.scope_id IN (SELECT id FROM api_keys WHERE org_id = $1)))`,
+			orgID, alias)
+		return err
+	})
+}
+
+// RouterOutcome is what one route step's decision came to: the request went
+// where the step meant it to, somewhere else, or nowhere.
+type RouterOutcome string
+
+const (
+	// RouterChose is a decision made and honoured. On a fallback step it is
+	// the first destination answering.
+	RouterChose RouterOutcome = "chose"
+	// RouterFellBack is a decision that could not be made, on a step that
+	// has a fallback. On a fallback step it is a later destination answering.
+	RouterFellBack RouterOutcome = "fallback"
+	// RouterError is a decision that could not be made on a step with no
+	// fallback, so the request was refused. On a fallback step it is every
+	// destination having failed.
+	RouterError RouterOutcome = "error"
+)

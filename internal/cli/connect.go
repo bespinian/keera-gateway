@@ -353,19 +353,18 @@ func shownKey(own *ownKey) string {
 	return connect.KeyPlaceholder
 }
 
-// connectRouters reads the organisation's routers as model entries with no
-// backend and no context window, which is what a router is to a client. Which
-// model answers is decided per request, so no context window is right.
+// connectRouters reads the organisation's routers as chat models with no
+// backend and no context window: which model answers is decided per request.
 func connectRouters(ctx context.Context, c *client, orgID string) ([]policy.Model, error) {
 	routers, err := list[policy.Router](ctx, c, inOrg("/v1/routers", orgID))
 	if err != nil {
 		return nil, err
 	}
 	out := make([]policy.Model, 0, len(routers))
-	for _, rt := range routers {
+	for _, p := range routers {
 		out = append(out, policy.Model{
-			Alias: rt.Alias, Kind: policy.KindChat, Enabled: true,
-			Description: rt.Description,
+			Alias: p.Alias, Kind: policy.KindChat, Enabled: true,
+			DisplayName: p.DisplayName, Description: p.Description,
 		})
 	}
 	return out, nil

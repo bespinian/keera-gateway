@@ -6,42 +6,32 @@ import (
 	"strings"
 )
 
-// Routers and gates ask a model to choose: a router picks one destination, a
-// gate answers ALLOW or REFUSED. Both choices are read here.
+// Route steps and gates ask a model to choose: a route step picks one
+// destination, a gate answers ALLOW or REFUSED. Rather than parse the written
+// answer, which models fence, explain or misspell, this reads the distribution
+// over the first token and weighs only the tokens that are answers. The
+// winner's share says how sure the model was.
 //
-// Reading the written answer (chosenDestination, anyVerdict) has to cope with
-// models that fence, explain or misspell their answer. Instead, this reads the
-// distribution over the first token and keeps only the tokens that are
-// answers, weighed against each other. That gives two things:
-//
-//   - The result is always one of the answers, so a well-formed backend no
-//     longer produces a reply that means nothing.
-//   - It comes with a number: the winner's share says how sure the model was.
-//
-// For a router it is also faster: the destinations are lettered, so the
-// answer is one token.
-//
-// It needs a backend that returns logprobs. vLLM and llama.cpp do; most hosted
-// providers do not, so the written answer is still read where there is no
-// distribution. A backend that rejects the fields is remembered and not asked
-// for them again. See decide, runFilter and parseGateReply.
+// This needs logprobs, which vLLM and llama.cpp return and most hosted
+// providers do not, so the written answer is still read where there are none.
+// See decide, runFilter and parseGateReply.
 
 const (
-	// routerLabels are the letters destinations are offered under. A letter
+	// choiceLetters are the letters destinations are offered under. A letter
 	// is one token in any vocabulary, while two aliases starting with 'keera-'
 	// share their first token and could not be told apart.
-	routerLabels = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	// routerTopLogprobs is how much of the first token's distribution to ask
+	choiceLetters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	// topLogprobs is how much of the first token's distribution to ask
 	// for, leaving room for a model that puts something before the letter.
 	// 20 is vLLM's default maximum, and asking for more is an error.
-	routerTopLogprobs = 20
+	topLogprobs = 20
 )
 
 // labelled reports whether these destinations can be offered under letters. A
 // router with more destinations than letters is asked for a name instead;
 // nobody has one that large.
 func labelled(offered []string) bool {
-	return len(offered) > 0 && len(offered) <= len(routerLabels)
+	return len(offered) > 0 && len(offered) <= len(choiceLetters)
 }
 
 // logprobsEnvelope is the part of a completion this file reads: the

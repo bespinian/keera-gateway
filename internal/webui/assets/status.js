@@ -19,7 +19,7 @@ const STATUS = {
   ],
   408: ["Timed out", "The request did not complete in time."],
   413: ["Too large", "The prompt is over a size limit."],
-  429: ["Rate limited", "Over a per-minute limit on requests or tokens."],
+  429: ["Rate limited", "Over a rate limit on requests or tokens."],
   500: ["Backend error", "The backend returned an error."],
   502: ["Backend unreachable", "No backend for the model could be reached."],
   503: [

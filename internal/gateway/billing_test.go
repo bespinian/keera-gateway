@@ -125,9 +125,9 @@ func TestCreditDoesNotStopTheOrganisationsOwnModels(t *testing.T) {
 // A router with one destination never asks its model, so that model being on
 // the deployment's key costs nothing and needs no credit.
 func TestCreditDoesNotStopARouterWhoseModelIsNeverAsked(t *testing.T) {
-	rt := autoRouter()
+	rt := autoRoute()
 	rt.Destinations = []string{"keera-large"}
-	h := routerHarness(t, picks("keera-large"), rt, nil)
+	h := routeHarness(t, picks("keera-large"), rt, nil)
 	onPlatformKey(h, "keera-picker")
 	h.budgets.creditErr = &policy.ErrNoCredit{}
 
@@ -179,7 +179,7 @@ func TestARequestOnTheDeploymentsKeyHoldsCreditWhileItRuns(t *testing.T) {
 // A router's decision is billed on top of the answer, so it is held on top of
 // it too.
 func TestARoutedRequestHoldsItsDecisionOnTopOfItsAnswer(t *testing.T) {
-	h := routerHarness(t, picks("keera-large"), autoRouter(), nil)
+	h := routeHarness(t, picks("keera-large"), autoRoute(), nil)
 	onPlatformKey(h, "keera-picker")
 	onPlatformKey(h, "keera-large")
 
@@ -188,7 +188,7 @@ func TestARoutedRequestHoldsItsDecisionOnTopOfItsAnswer(t *testing.T) {
 
 	in := len(body) / bytesPerToken
 	answer, _ := h.src.models["keera-large"].Bill(policy.Tokens{Input: in, Output: 1000})
-	decision, _ := h.src.models["keera-picker"].Bill(policy.Tokens{Input: in, Output: routerOutputTokens})
+	decision, _ := h.src.models["keera-picker"].Bill(policy.Tokens{Input: in, Output: routeOutputTokens})
 	want := answer.CreditMicros + 2*decision.CreditMicros
 	waitFor(t, "the hold to be given back", func() bool {
 		h.budgets.mu.Lock()
@@ -204,24 +204,21 @@ func TestARoutedRequestHoldsItsDecisionOnTopOfItsAnswer(t *testing.T) {
 
 func TestOutputCeiling(t *testing.T) {
 	for _, tc := range []struct {
-		body      string
-		guardrail int
-		want      int
+		body string
+		want int
 	}{
-		{`{}`, 0, unstatedOutputTokens},
-		{`{"max_tokens":500}`, 0, 500},
-		{`{"max_output_tokens":700,"max_tokens":500}`, 0, 700},
-		{`{"max_completion_tokens":"900"}`, 0, 900},
-		{`{"max_tokens":500}`, 200, 200},
-		{`{}`, 200, 200},
-		{`{"max_tokens":1e300}`, 0, mostOutputTokens},
+		{`{}`, unstatedOutputTokens},
+		{`{"max_tokens":500}`, 500},
+		{`{"max_output_tokens":700,"max_tokens":500}`, 700},
+		{`{"max_completion_tokens":"900"}`, 900},
+		{`{"max_tokens":1e300}`, mostOutputTokens},
 	} {
 		b, err := parseBody([]byte(tc.body))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := outputCeiling(b, tc.guardrail); got != tc.want {
-			t.Errorf("%s with ceiling %d: %d, want %d", tc.body, tc.guardrail, got, tc.want)
+		if got := outputCeiling(b); got != tc.want {
+			t.Errorf("%s: %d, want %d", tc.body, got, tc.want)
 		}
 	}
 }

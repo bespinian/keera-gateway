@@ -132,21 +132,3 @@ func TestParseDestinationsRejectsACeilingThatIsNotOne(t *testing.T) {
 		}
 	}
 }
-
-func TestFormatDestinationsPrintsWhatParseDestinationsReads(t *testing.T) {
-	rt := policy.Router{
-		Destinations: []string{"keera-speed", "keera-frontier"},
-		Ceilings:     map[string]int{"keera-speed": 4000},
-	}
-	got := formatDestinations(rt)
-	if got != "keera-speed:4k, keera-frontier" {
-		t.Errorf("formatDestinations = %q", got)
-	}
-	aliases, ceilings, err := parseDestinations(got)
-	if err != nil {
-		t.Fatalf("the printed form did not parse: %v", err)
-	}
-	if len(aliases) != 2 || ceilings["keera-speed"] != 4000 {
-		t.Errorf("round trip gave %v / %v", aliases, ceilings)
-	}
-}

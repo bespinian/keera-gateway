@@ -74,11 +74,12 @@ type Event struct {
 	// FilterRuns is what each of this request's filters did, in the order they
 	// ran. They ride on the event so both are written in the same batch.
 	FilterRuns []FilterRun
-	// Router is the router that chose the destination, empty for a request
-	// that named a model directly. Alias is still the model that answered.
+	// Router is the router the request named, empty for one that named a
+	// model. Alias is still the model that answered.
 	Router string
-	// RouterOutcome says whether the router decided, fell back, or could not
-	// decide. RouterMS is what deciding added to the wait.
+	// RouterOutcome says whether the router's last route step decided, fell
+	// back, or could not decide. RouterMS is what deciding added to the wait.
+	// Both are empty when no route step ran.
 	RouterOutcome RouterOutcome
 	RouterMS      int64
 	// Spans is where this request's latency went, step by step. See spans.go.
@@ -183,11 +184,12 @@ func (s *Store) writeBatch(ctx context.Context, events []Event) error {
 		if e.Plan != nil && e.KeyID != "" && !e.Plan.UpdatedAt.Before(plans[e.KeyID].UpdatedAt) {
 			plans[e.KeyID] = *e.Plan
 		}
-		if e.CostMicros == 0 {
-			continue
-		}
+		// A scope counts money, or a router limit's requests or tokens.
+		tokens := int64(e.InputTokens + e.OutputTokens)
 		for _, sc := range e.Scopes {
-			spend[spendKey{sc.Type, sc.ID, sc.Period, sc.Period.Start(e.TS)}] += e.CostMicros
+			if n := sc.Meter.Amount(e.CostMicros, tokens); n != 0 {
+				spend[spendKey{sc.Type, sc.ID, sc.Period, sc.Period.Start(e.TS)}] += n
+			}
 		}
 	}
 	for _, k := range spendOrder(spend) {

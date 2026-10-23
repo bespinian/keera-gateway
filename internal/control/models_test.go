@@ -9,20 +9,10 @@ import (
 	"testing"
 
 	"github.com/bespinian/keera-gateway/internal/authn"
-	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/registry"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
-
-func callModel(h handler, p *authn.Principal, method, alias, query, body string) *httptest.ResponseRecorder {
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(method, httpx.ControlPrefix+"/v1/models/"+alias+query,
-		strings.NewReader(body))
-	r.SetPathValue("alias", alias)
-	h(w, r, p)
-	return w
-}
 
 const ownModel = `{"kind":"chat","backends":["http://10.0.0.7:8000/v1"],"backend_model":"mine",
 	"enabled":true}`
@@ -78,15 +68,12 @@ func TestAnAdministratorManagesTheirOrganisationsOwnModels(t *testing.T) {
 		t.Error("another tenant sees org_1's model")
 	}
 
-	// A router can send to it, and cannot take its name.
+	// A router can send to it. A client names a router where it names a
+	// model, so the two may not share an alias.
 	router := func(alias string, destinations ...string) *httptest.ResponseRecorder {
-		body, _ := json.Marshal(map[string]any{"mode": "fallback", "destinations": destinations})
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest(http.MethodPut, httpx.ControlPrefix+"/v1/routers/"+alias,
-			strings.NewReader(string(body)))
-		r.SetPathValue("alias", alias)
-		s.putRouter(w, r, admin("org_1"))
-		return w
+		body, _ := json.Marshal(map[string]any{"start": map[string]any{
+			"id": "route", "kind": "route", "mode": "fallback", "destinations": destinations}})
+		return invoke(s.putRouter, admin("org_1"), http.MethodPut, "/v1/routers/"+alias, string(body))
 	}
 	if w := router("chain", "mine", "keera-small"); w.Code != http.StatusOK {
 		t.Errorf("a router could not send to the organisation's model: %d %s", w.Code, w.Body)
@@ -94,11 +81,18 @@ func TestAnAdministratorManagesTheirOrganisationsOwnModels(t *testing.T) {
 	if w := router("mine", "keera-small", "keera-large"); w.Code != http.StatusConflict {
 		t.Errorf("a router took the model's alias: %d %s", w.Code, w.Body)
 	}
-	if w := callModel(s.putModel, admin("org_1"), http.MethodPut, "chain", "", ownModel); w.Code != http.StatusConflict {
+	if w := invoke(s.putModel, admin("org_1"), http.MethodPut, "/v1/models/chain", ownModel); w.Code != http.StatusConflict {
 		t.Errorf("a model took the router's alias: %d %s", w.Code, w.Body)
 	}
 
-	if w := callModel(s.deleteModel, admin("org_1"), http.MethodDelete, "mine", "", ""); w.Code != http.StatusOK {
+	// The router sends to it, so it stays until the router is changed.
+	if w := invoke(s.deleteModel, admin("org_1"), http.MethodDelete, "/v1/models/mine", ""); w.Code != http.StatusConflict {
+		t.Fatalf("delete while a router sends to it: %d %s", w.Code, w.Body)
+	}
+	if w := router("chain", "keera-small"); w.Code != http.StatusOK {
+		t.Fatalf("changing the router: %d %s", w.Code, w.Body)
+	}
+	if w := invoke(s.deleteModel, admin("org_1"), http.MethodDelete, "/v1/models/mine", ""); w.Code != http.StatusOK {
 		t.Fatalf("delete: %d %s", w.Code, w.Body)
 	}
 	if _, err := st.Model(ctx, "org_2", "mine"); err != nil {
@@ -224,12 +218,11 @@ func TestAModelARouterUsesDoesNotBecomeASubscriptionModel(t *testing.T) {
 	const plan = `{"kind":"chat","provider":"anthropic","backends":["https://api.anthropic.com/v1"],
 		"backend_model":"claude-opus-5-5","subscription":true,"enabled":true}`
 
-	for alias, role := range map[string]string{
-		"keera-picker": "deciding model", "keera-large": "destination",
-	} {
-		w := callModel(s.putModel, admin("org_1"), http.MethodPut, alias, "", plan)
+	// The deciding model and a destination.
+	for _, alias := range []string{"keera-picker", "keera-large"} {
+		w := invoke(s.putModel, admin("org_1"), http.MethodPut, "/v1/models/"+alias, plan)
 		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "model_in_use") ||
-			!strings.Contains(w.Body.String(), "router 'auto' ("+role+")") {
+			!strings.Contains(w.Body.String(), "router 'auto'") {
 			t.Errorf("%s: status = %d, want 409 naming the router: %s", alias, w.Code, w.Body)
 		}
 		saved, err := st.Model(ctx, "org_1", alias)
@@ -239,10 +232,27 @@ func TestAModelARouterUsesDoesNotBecomeASubscriptionModel(t *testing.T) {
 	}
 }
 
-// Without Claude subscriptions, no model is made a subscription model.
+// A model step sends every request that reaches it to its model, so it
+// counts as a user too.
+func TestAModelARouterStepAnswersWithDoesNotBecomeASubscriptionModel(t *testing.T) {
+	st, ctx := routerStore(t)
+	s := routerServer(ctx, t, st)
+	s.opts.ClaudeSubscriptions = true
+	body := map[string]any{"start": map[string]any{"id": "answer", "kind": "model", "ref": "keera-large"}}
+	if code, out := putTo(t, s, "/v1/routers/direct", body); code != http.StatusOK {
+		t.Fatalf("putRouter: %d %s", code, out)
+	}
+	const plan = `{"kind":"chat","provider":"anthropic","backends":["https://api.anthropic.com/v1"],
+		"backend_model":"claude-opus-5-5","subscription":true,"enabled":true}`
+	w := invoke(s.putModel, admin("org_1"), http.MethodPut, "/v1/models/keera-large", plan)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "router 'direct'") {
+		t.Errorf("status = %d, want 409 naming the router: %s", w.Code, w.Body)
+	}
+}
+
 func TestNoSubscriptionModelWhileSubscriptionsAreOff(t *testing.T) {
-	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
-	w := callModel(s.putModel, admin("org_1"), http.MethodPut, "claude", "?org_id=org_1",
+	s := newServer()
+	w := invoke(s.putModel, admin("org_1"), http.MethodPut, "/v1/models/claude?org_id=org_1",
 		`{"kind":"chat","provider":"anthropic","backends":["https://api.anthropic.com/v1"],
 		"backend_model":"claude-opus-5-5","subscription":true,"enabled":true}`)
 	if w.Code != http.StatusNotImplemented || !strings.Contains(w.Body.String(), "KEERA_CLAUDE_SUBSCRIPTIONS") {

@@ -113,7 +113,7 @@ like `keera-speed`, so you can swap the model behind it without developers
 changing anything ([the alias](docs/gateway.md#the-alias-is-the-api-contract)).
 
 ```sh
-keera guardrail set project <project-id> --models keera-speed --rpm 120 --budget 500 --period month
+keera guardrail set project <project-id> --models keera-speed --requests 120 --budget 500 --period month
 keera guardrail effective key <key-id>   # and what holds this one key
 keera usage --by project
 ```
@@ -124,9 +124,13 @@ regular expressions catches anything with a fixed shape, such as an API key or
 an IBAN. A new filter starts in shadow, so you can measure it on a week of real
 traffic before it enforces. [docs/filters.md](docs/filters.md)
 
-**Routers** change where a request goes: small tasks to the local model and
-heavy reasoning to a large one, or to the next model when one is down. A client
-names a router where it would name a model. [docs/routers.md](docs/routers.md)
+**Routers** are what a client calls besides a model, by naming one where it
+would name a model. They chain filters, route steps, rate limits, budgets and
+system prompts in the order you draw them, each branch ending at a model. A
+route step changes where a request goes: small tasks to the local model and
+heavy reasoning to a large one, or to the next model when one is down. Around it, a router can
+redact only what goes to a hosted model, or fall back to the local one once the
+hosted budget is spent. [docs/routers.md](docs/routers.md)
 
 **Sandboxes** are developer machines inside the cluster, each with the
 toolchain, its own API key and an expiry. An agent's sandbox does one task and

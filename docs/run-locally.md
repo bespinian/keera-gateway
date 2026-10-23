@@ -58,7 +58,7 @@ make dev TIER=gpu   # vLLM, needs a GPU
 Use `TIER=gpu` for anything that needs tool calls, such as the model check and
 coding agents: the CPU tier
 [cannot do tool calls](../compose/README.md#the-cpu-tier-cannot-do-tool-calls).
-Routers and gate filters run on the CPU tier with
+Route steps and gate filters run on the CPU tier with
 [Keera Decider](../compose/README.md#keera-decider).
 
 ## Driving it

@@ -135,8 +135,24 @@ const routes = [
     view: catalogueView,
     under: "/models",
   },
-  // Filters and routers are each a model and an instruction, so they follow
-  // the models.
+  // What clients call besides models, so it follows them. Filters are among
+  // its building blocks, so they come after it.
+  {
+    path: "/routers",
+    group: "Organisation",
+    label: "Routers",
+    icon: "route",
+    view: routersView,
+    perOrg: "Routers",
+    advanced: "routers",
+    about: "What clients call: filters, route steps and limits in order.",
+    // Its own screen: the editor does not fit in a dialog.
+    detail: {
+      label: "Router",
+      view: routerDetailView,
+      perOrg: "Routers",
+    },
+  },
   {
     path: "/filters",
     group: "Organisation",
@@ -146,22 +162,9 @@ const routes = [
     perOrg: "Filters",
     // Folded away until this deployment has one. See advancedShown.
     advanced: "filters",
-    about: "Checks requests, and can redact or refuse them.",
+    about: "Checks requests. Guardrails and routers use them.",
     // Its own screen: what it did to the traffic does not fit in a row.
     detail: { label: "Filter", view: filterDetailView, perOrg: "Filters" },
-  },
-  {
-    path: "/routers",
-    group: "Organisation",
-    label: "Routers",
-    icon: "routers",
-    view: routersView,
-    perOrg: "Routers",
-    advanced: "routers",
-    about: "Picks the model for each request.",
-    // Its own screen, for the split between destinations: the number that
-    // shows a router has stopped deciding.
-    detail: { label: "Router", view: routerDetailView, perOrg: "Routers" },
   },
   // Like filters and routers, something a request passes through.
   {
@@ -299,13 +302,14 @@ function visibleRoutes() {
     if (!offered(r)) return false;
     if (r.operator && !state.me.unrestricted) return false;
     if (r.admin && !state.me.can_admin_org) return false;
-    // A shared link or a bookmark still opens a folded-away screen. Otherwise
-    // matchRoute would fall back to Dashboard and rewrite the address bar.
+    // A link or bookmark still opens a folded-away screen or one of its rows.
+    // Otherwise matchRoute would fall back to Dashboard and rewrite the URL.
     if (
       r.advanced &&
       !advancedShown() &&
       !inUse(r) &&
-      location.pathname !== r.path
+      location.pathname !== r.path &&
+      !location.pathname.startsWith(r.path + "/")
     )
       return false;
     return true;

@@ -52,7 +52,7 @@ var isolationCases = map[string]isolationCase{
 
 	"GET /v1/guardrails/{scope}/{id}":           {"/v1/guardrails/org/org_a", ""},
 	"GET /v1/guardrails/{scope}/{id}/effective": {"/v1/guardrails/key/key_a/effective", ""},
-	"PUT /v1/guardrails/{scope}/{id}":           {"/v1/guardrails/project/project_a", `{"rpm":1}`},
+	"PUT /v1/guardrails/{scope}/{id}":           {"/v1/guardrails/project/project_a", `{"rate_limits":[]}`},
 
 	"GET /v1/filters":                {"/v1/filters?org_id=org_a", ""},
 	"PUT /v1/filters/{alias}":        {"/v1/filters/f?org_id=org_a", `{"kind":"regex","pattern":"x"}`},

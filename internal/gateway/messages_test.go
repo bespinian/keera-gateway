@@ -7,11 +7,11 @@ import (
 	"testing"
 )
 
-// decodeMessages translates a Messages request and unmarshals the chat
-// completion request it became.
-func decodeMessages(t *testing.T, in string) map[string]any {
+// decodeAs translates a request with sh and unmarshals the chat completion
+// request it became.
+func decodeAs(t *testing.T, sh shape, in string) map[string]any {
 	t.Helper()
-	raw, err := decodeRaw(anthropicShape{}, in)
+	raw, err := decodeRaw(sh, in)
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -49,14 +49,10 @@ func messagesOf(t *testing.T, req map[string]any) []map[string]any {
 	return out
 }
 
-// ------------------------------------------------------------------- requests
-
 func TestDecodeMovesTheSystemPromptIntoTheConversation(t *testing.T) {
-	// The Messages API carries the system prompt beside the conversation; the
-	// OpenAI shape carries it as the first message. A client that sends it as
-	// an array of blocks - which is how a client that marks a prompt cache
-	// sends it - must reach the model as one prompt.
-	req := decodeMessages(t, `{
+	// A system prompt sent as blocks, as a client marking a prompt cache does,
+	// must reach the model as one first message.
+	req := decodeAs(t, anthropicShape{}, `{
 		"model": "keera-code",
 		"max_tokens": 100,
 		"system": [{"type":"text","text":"first"},{"type":"text","text":"second"}],
@@ -74,7 +70,7 @@ func TestDecodeMovesTheSystemPromptIntoTheConversation(t *testing.T) {
 		t.Errorf("system content = %q, want %q; the blocks were not joined", got, want)
 	}
 	if got, want := req["max_tokens"], float64(100); got != want {
-		t.Errorf("max_tokens = %v, want %v; the guardrail ceiling clamps this field", got, want)
+		t.Errorf("max_tokens = %v, want %v", got, want)
 	}
 }
 
@@ -82,7 +78,7 @@ func TestDecodeKeepsASystemTurnInItsPlace(t *testing.T) {
 	// Claude Code sends system turns between the others (the
 	// mid-conversation-system beta). Refusing them refuses every request it
 	// makes.
-	req := decodeMessages(t, `{
+	req := decodeAs(t, anthropicShape{}, `{
 		"model": "keera-code",
 		"max_tokens": 100,
 		"system": "top",
@@ -106,10 +102,9 @@ func TestDecodeKeepsASystemTurnInItsPlace(t *testing.T) {
 }
 
 func TestDecodeKeepsTheGuardrailAbleToGoFirst(t *testing.T) {
-	// The guardrail's system prompt is prepended to the translated body by serve.
-	// This is the property that makes that possible: whatever the client sent,
-	// the result is a messages array that prependSystem can splice into.
-	req := decodeMessages(t, `{"model":"keera-code","max_tokens":1,
+	// serve prepends the guardrail's system prompt with prependSystem, which
+	// needs a messages array whatever the client sent.
+	req := decodeAs(t, anthropicShape{}, `{"model":"keera-code","max_tokens":1,
 		"messages":[{"role":"user","content":"hi"}]}`)
 	raw, err := json.Marshal(req)
 	if err != nil {
@@ -142,7 +137,7 @@ func TestDecodeTurnsToolUseIntoToolCalls(t *testing.T) {
 	// A tool call is an assistant content block in one API and a tool_calls
 	// entry in the other, and the arguments change from a document to a string
 	// carrying that document.
-	req := decodeMessages(t, `{
+	req := decodeAs(t, anthropicShape{}, `{
 		"model": "keera-code",
 		"max_tokens": 100,
 		"messages": [
@@ -191,7 +186,7 @@ func TestDecodePutsToolResultsBeforeTheUserText(t *testing.T) {
 	// A Messages turn can carry both a tool result and something the person
 	// typed. The tool message has to come first: it answers the assistant turn
 	// before it, and a user message in between would break that pairing.
-	req := decodeMessages(t, `{
+	req := decodeAs(t, anthropicShape{}, `{
 		"model": "keera-code",
 		"max_tokens": 100,
 		"messages": [{"role":"user","content":[
@@ -216,7 +211,7 @@ func TestDecodeMovesAToolResultImageToTheUserTurn(t *testing.T) {
 	// A tool that returned a screenshot has nowhere to put it in the OpenAI
 	// shape: the tool role carries text only. Dropping it would silently lose
 	// the thing the tool was called for.
-	req := decodeMessages(t, `{
+	req := decodeAs(t, anthropicShape{}, `{
 		"model": "keera-code",
 		"max_tokens": 100,
 		"messages": [{"role":"user","content":[
@@ -252,7 +247,7 @@ func TestDecodeIgnoresFieldsWithNoCounterpart(t *testing.T) {
 	// A client sends capabilities the gateway has never heard of as new
 	// top-level fields. Rejecting them would break the client on the release
 	// that introduced them, so they are dropped and the request still runs.
-	req := decodeMessages(t, `{
+	req := decodeAs(t, anthropicShape{}, `{
 		"model": "keera-code",
 		"max_tokens": 100,
 		"thinking": {"type":"adaptive"},
@@ -278,7 +273,7 @@ func TestDecodeIgnoresFieldsWithNoCounterpart(t *testing.T) {
 }
 
 func TestDecodeTranslatesToolsAndToolChoice(t *testing.T) {
-	req := decodeMessages(t, `{
+	req := decodeAs(t, anthropicShape{}, `{
 		"model": "keera-code",
 		"max_tokens": 100,
 		"messages": [{"role":"user","content":"hi"}],
@@ -334,7 +329,7 @@ func TestDecodeTranslatesToolsAndToolChoice(t *testing.T) {
 func TestDecodeDropsAnthropicServerTools(t *testing.T) {
 	// A server tool runs on Anthropic's servers. Declared to another model as a
 	// function with no schema, it would be a tool nothing can run.
-	req := decodeMessages(t, `{
+	req := decodeAs(t, anthropicShape{}, `{
 		"model": "keera-code",
 		"max_tokens": 100,
 		"messages": [{"role":"user","content":"hi"}],
@@ -355,7 +350,7 @@ func TestDecodeDropsAnthropicServerTools(t *testing.T) {
 }
 
 func TestDecodeNamesAToolChoiceByFunction(t *testing.T) {
-	req := decodeMessages(t, `{"model":"keera-code","max_tokens":1,
+	req := decodeAs(t, anthropicShape{}, `{"model":"keera-code","max_tokens":1,
 		"messages":[{"role":"user","content":"hi"}],
 		"tool_choice":{"type":"tool","name":"read"}}`)
 	choice, ok := req["tool_choice"].(map[string]any)
@@ -613,7 +608,7 @@ func TestSearchResultsAndTextDocumentsReachTheModelAsText(t *testing.T) {
 		`{"type":"search_result","source":"https://a.ch","title":"A","content":[{"type":"text","text":"found"}]},` +
 		`{"type":"document","title":"Notes","source":{"type":"text","media_type":"text/plain","data":"plain doc"}},` +
 		`{"type":"text","text":"question"}]}]}`
-	msgs := messagesOf(t, decodeMessages(t, in))
+	msgs := messagesOf(t, decodeAs(t, anthropicShape{}, in))
 	if len(msgs) != 1 {
 		t.Fatalf("messages = %v, want one user message", msgs)
 	}
@@ -631,7 +626,7 @@ func TestSearchResultsAndTextDocumentsReachTheModelAsText(t *testing.T) {
 func TestAnUnknownBlockThatFitsNoFieldIsDropped(t *testing.T) {
 	in := `{"model":"m","messages":[{"role":"user","content":[` +
 		`{"type":"future_block","source":5,"title":["x"]},{"type":"text","text":"hi"}]}]}`
-	msgs := messagesOf(t, decodeMessages(t, in))
+	msgs := messagesOf(t, decodeAs(t, anthropicShape{}, in))
 	if len(msgs) != 1 || msgs[0]["content"] != "hi" {
 		t.Errorf("messages = %v, want the text alone", msgs)
 	}
@@ -640,7 +635,7 @@ func TestAnUnknownBlockThatFitsNoFieldIsDropped(t *testing.T) {
 func TestASearchResultFromAToolKeepsItsText(t *testing.T) {
 	in := `{"model":"m","messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t",` +
 		`"content":[{"type":"search_result","source":"https://a.ch","title":"A","content":[{"type":"text","text":"found"}]}]}]}]}`
-	msgs := messagesOf(t, decodeMessages(t, in))
+	msgs := messagesOf(t, decodeAs(t, anthropicShape{}, in))
 	if len(msgs) != 1 || msgs[0]["content"] != "A\n\nhttps://a.ch\n\nfound" {
 		t.Errorf("messages = %v, want one tool message with the result's text", msgs)
 	}

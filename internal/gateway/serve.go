@@ -44,22 +44,34 @@ type call struct {
 	now time.Time
 
 	// alias and model are the model that will answer. On a routed request they
-	// change twice: to the router's choice, and to the destination that answered.
-	alias  string
-	model  policy.Model
+	// change twice: to the route step's choice, and to the destination that
+	// answered.
+	alias string
+	model policy.Model
+	// route is the route step that chose the model, when routed.
+	route policy.Route
+	// router is the router the client named, if it named one.
 	router policy.Router
-	routed bool
+	// scopes is every scope the request is charged to: the key's levels, then
+	// each limit of a router it passed.
+	scopes []policy.Scope
+	// prompts is the system prompt steps of a router the request passed, in
+	// the order it passed them.
+	prompts []string
 
 	decision routeDecision
-	filters  filterRun
-	// chain is the models to try, in order: the one the client or a router
-	// chose, or a trying router's list.
+	// earlier is what the route steps before the last one in a router
+	// spent. The last one's is decision.
+	earlier hookSpend
+	filters filterRun
+	// chain is the models to try, in order: the one the client or a route
+	// step chose, or a trying step's list.
 	chain []policy.Model
 
-	// native is the body in the client's own API, for the destinations that
-	// are sent that API rather than a translation (see native.go). It is nil
-	// when none are. translated says some destinations get the translation.
-	// Until then, or when none do, the OpenAI-shaped body is nil.
+	// native is the body in the client's own API, for destinations sent that
+	// API rather than a translation (see native.go); nil when none are.
+	// translated says some get the translation. Until then, or when none do,
+	// the OpenAI-shaped body is nil.
 	native     *body
 	translated bool
 
@@ -82,16 +94,40 @@ func (c *call) sent(b *body) *body {
 	return c.native
 }
 
-// hookMicros is what the request's router and filters spent on their own
+// hookMicros is what the request's routers and filters spent on their own
 // models.
 func (c *call) hookMicros() int64 {
-	return c.filters.micros + c.decision.micros
+	return c.filters.micros + c.decision.micros + c.earlier.micros
 }
 
-// hookBills is the calls the request's router and filters made on the
+// hookBills is the calls the request's routers and filters made on the
 // deployment's key.
 func (c *call) hookBills() []policy.BillLine {
-	return slices.Concat(c.filters.bills, c.decision.bills)
+	return slices.Concat(c.filters.bills, c.decision.bills, c.earlier.bills)
+}
+
+func (c *call) viaRouter() bool { return c.router.Alias != "" }
+
+// promptAdded is why a body with no place for the system prompt is refused:
+// forwarding it would skip the prompt.
+const promptAdded = "a guardrail or a router step adds a system prompt to this request"
+
+// systemPrompt is what goes before the client's messages: the key's levels'
+// prompts, outermost first, then those of the router steps the request
+// passed. The more particular comes last.
+func (c *call) systemPrompt() string {
+	out := c.res.SystemPrompt
+	for _, p := range c.prompts {
+		out = policy.JoinPrompts(out, p)
+	}
+	return out
+}
+
+// hookSpend is what a router's earlier route steps spent deciding.
+type hookSpend struct {
+	micros int64
+	bills  []policy.BillLine
+	took   time.Duration
 }
 
 // serve is everything after authentication: enforce, forward, account.
@@ -101,9 +137,11 @@ func (c *call) hookBills() []policy.BillLine {
 func (s *Server) serve(w http.ResponseWriter, r *http.Request, res *policy.Resolved,
 	surf surface, tr *trace,
 ) {
-	c := &call{w: w, r: r, res: res, surf: surf, tr: tr, ev: store.Event{
+	// Clipped, so a router's limits are appended to a copy and never to the
+	// cached key's own list.
+	c := &call{w: w, r: r, res: res, surf: surf, tr: tr, scopes: slices.Clip(res.Scopes), ev: store.Event{
 		TS: tr.start, OrgID: res.Key.OrgID, ProjectID: res.Key.ProjectID, UserID: res.Key.UserID,
-		KeyID: res.Key.ID, Scopes: res.Scopes,
+		KeyID: res.Key.ID,
 		// Read now, before the headers are replaced by the ones the backend gets.
 		Client:          connect.Identify(r.Header.Get(connect.ClientHeader), r.UserAgent()),
 		RequestID:       httpx.RequestID(r.Context()),
@@ -117,6 +155,9 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, res *policy.Resol
 	c.received = len(raw)
 	// Given back once the request has been charged, whichever way it ends.
 	defer func() { s.budgets.ReleaseCredit(c.res.Key.OrgID, c.held) }()
+	// Ends what admit and a router's limit steps counted, whichever way the
+	// request ends. c.scopes is read then, not now.
+	defer func() { s.budgets.EndRequest(c.scopes, c.now) }()
 	// The gateway's own work starts here. Everything before is the client
 	// sending its body, and a slow link should not count as gateway overhead.
 	c.work = time.Now()
@@ -131,17 +172,11 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, res *policy.Resol
 	}
 	tr.seal("")
 
-	// The router runs before the filters, so it reads what the client sent,
-	// unredacted. That is why its model should be served locally. Only a
-	// router that reads the request needs it translated: for the others,
-	// useNative decides once it knows the destinations.
-	if c.routed {
-		if c.router.Decides() || c.router.Sizes() {
-			if b, ok = s.translate(c, b); !ok {
-				return
-			}
-		}
-		if !s.useRouter(c, b) {
+	// The router runs before the key's filters, so its route steps read what
+	// the client sent, unredacted. That is why their models should be served
+	// locally.
+	if c.viaRouter() {
+		if b, ok = s.useRouter(c, b); !ok {
 			return
 		}
 	}
@@ -323,74 +358,33 @@ func notRebuilt(err error) *refusal {
 }
 
 // target works out what the 'model' field names: one of this organisation's
-// models, or one of its routers.
+// models or routers.
 func (s *Server) target(c *call, b *body) bool {
 	// Before the translation, the model is read from the client's own API,
 	// which names it in the same field.
-	alias, hasAlias := c.sent(b).str("model")
-	if !hasAlias || alias == "" {
-		s.refuse(c, refusal{
-			status: http.StatusBadRequest,
-			typ:    "invalid_request_error", code: "missing_model",
-			msg: "the 'model' field is required; send one of the models from /v1/models",
-		})
-		return false
-	}
-	// An oversized name is refused without being quoted back or stored:
-	// otherwise a client could put a request-sized string on every usage row.
-	if len(alias) > maxAliasBytes {
-		s.refuse(c, refusal{
-			status: http.StatusNotFound,
-			typ:    "invalid_request_error", code: "model_not_found",
-			msg: fmt.Sprintf("the 'model' field is %d bytes long; no model is, so this "+
-				"names none - send one of the models from /v1/models", len(alias)),
-		})
-		return false
-	}
-	// No model's name has a control character, and a NUL byte is one Postgres
-	// refuses to store.
-	if !printable(alias) {
-		s.refuse(c, refusal{
-			status: http.StatusNotFound,
-			typ:    "invalid_request_error", code: "model_not_found",
-			msg: "the 'model' field holds a control character or invalid UTF-8; no model's " +
-				"name does - send one of the models from /v1/models",
-		})
+	alias, _ := c.sent(b).str("model")
+	if ref := aliasRefusal(alias); ref != nil {
+		s.refuse(c, *ref)
 		return false
 	}
 	c.ev.Alias = alias
 	c.alias = alias
 
-	n, ok := s.callable(c.res, alias, c.surf.kind)
-	if !ok {
-		msg, advise := modelNotFound(alias), true
-		if path := s.servedAt(c.res, alias); path != "" {
-			msg, advise = "the model '"+alias+"' is not served at this endpoint: send it to "+path, false
-		}
-		s.refuse(c, refusal{
-			status: http.StatusNotFound,
-			typ:    "invalid_request_error", code: "model_not_found",
-			msg:    msg,
-			advise: advise,
-		})
+	n, ref := s.lookupModel(c.res, alias, c.surf.kind)
+	// A subscription key may have named the model by another name.
+	if n.model.Alias != "" {
+		c.alias, c.ev.Alias = n.model.Alias, n.model.Alias
+	}
+	if ref != nil {
+		s.refuse(c, *ref)
 		return false
+	}
+	// A router's destinations are checked when a step chooses one.
+	if c.router = n.router; n.viaRouter() {
+		return true
 	}
 	model := n.model
-	c.router, c.routed = n.router, n.routed
-	if !c.routed {
-		// A subscription key may have named the model by another name.
-		c.alias, c.ev.Alias = model.Alias, model.Alias
-	}
-	if !c.routed && model.Locked {
-		s.refuse(c, refusal{
-			status: http.StatusForbidden,
-			typ:    "permission_error", code: "org_limited",
-			msg: "the model '" + alias + "' " + lockedReason(model) + "; " +
-				policy.LockedMessage(model.OrgName),
-		})
-		return false
-	}
-	if !c.routed && len(model.Backends) == 0 {
+	if len(model.Backends) == 0 {
 		s.refuse(c, refusal{
 			status: http.StatusServiceUnavailable,
 			typ:    "server_error", code: "no_backend",
@@ -408,10 +402,84 @@ func (s *Server) target(c *call, b *body) bool {
 	return true
 }
 
-// admit checks the rate limits, the credit and the budgets.
+// aliasRefusal refuses a 'model' field that is missing or that could name no
+// model.
+func aliasRefusal(alias string) *refusal {
+	if alias == "" {
+		return &refusal{
+			status: http.StatusBadRequest,
+			typ:    "invalid_request_error", code: "missing_model",
+			msg: "the 'model' field is required; send one of the models from /v1/models",
+		}
+	}
+	// An oversized name is refused without being quoted back or stored:
+	// otherwise a client could put a request-sized string on every usage row.
+	if len(alias) > maxAliasBytes {
+		return &refusal{
+			status: http.StatusNotFound,
+			typ:    "invalid_request_error", code: "model_not_found",
+			msg: fmt.Sprintf("the 'model' field is %d bytes long; no model is, so this "+
+				"names none - send one of the models from /v1/models", len(alias)),
+		}
+	}
+	// No model's name has a control character, and a NUL byte is one Postgres
+	// refuses to store.
+	if !printable(alias) {
+		return &refusal{
+			status: http.StatusNotFound,
+			typ:    "invalid_request_error", code: "model_not_found",
+			msg: "the 'model' field holds a control character or invalid UTF-8; no model's " +
+				"name does - send one of the models from /v1/models",
+		}
+	}
+	return nil
+}
+
+// lookupModel finds the model or router alias names, or refuses it if the key
+// may not call it. Its model is set only when it may be called.
+func (s *Server) lookupModel(res *policy.Resolved, alias string, kind policy.Kind) (named, *refusal) {
+	n, ok := s.callable(res, alias, kind)
+	if !ok {
+		msg, advise := modelNotFound(alias), true
+		if path := s.servedAt(res, alias); path != "" {
+			msg, advise = "the model '"+alias+"' is not served at this endpoint: send it to "+path, false
+		}
+		return named{}, &refusal{
+			status: http.StatusNotFound,
+			typ:    "invalid_request_error", code: "model_not_found",
+			msg:    msg,
+			advise: advise,
+		}
+	}
+	if !n.viaRouter() && n.model.Locked {
+		return n, &refusal{
+			status: http.StatusForbidden,
+			typ:    "permission_error", code: "org_limited",
+			msg: "the model '" + alias + "' " + lockedReason(n.model) + "; " +
+				policy.LockedMessage(n.model.OrgName),
+		}
+	}
+	return n, nil
+}
+
+// admit checks the rate limits, the credit and the budgets. A request let
+// through is counted against the rate limits per day or month.
 func (s *Server) admit(c *call, b *body) bool {
 	c.now = time.Now()
-	if ref, ok := s.checkRates(c.res, c.now); !ok {
+	if !s.admitted(c, b) {
+		return false
+	}
+	c.scopes = append(c.scopes, c.res.Quotas...)
+	s.budgets.StartRequest(c.res.Quotas, c.now)
+	return true
+}
+
+func (s *Server) admitted(c *call, b *body) bool {
+	if ref, ok := s.checkRates(c.res.Scopes, c.now); !ok {
+		s.refuse(c, ref)
+		return false
+	}
+	if ref, ok := s.checkQuotas(c.res.Quotas, c.now); !ok {
 		s.refuse(c, ref)
 		return false
 	}
@@ -432,9 +500,19 @@ func (s *Server) admit(c *call, b *body) bool {
 	if c.model.Subscription && len(c.res.Filters) == 0 {
 		return true
 	}
-	err := s.budgets.Allow(c.res.Scopes, c.now)
+	if ref, ok := s.checkBudgets(c, c.res.Scopes); !ok {
+		s.refuse(c, ref)
+		return false
+	}
+	return true
+}
+
+// checkBudgets checks the budgets of scopes. It only decides, as checkRates
+// does.
+func (s *Server) checkBudgets(c *call, scopes []policy.Scope) (refusal, bool) {
+	err := s.budgets.Allow(scopes, c.now)
 	if err == nil {
-		return true
+		return refusal{}, true
 	}
 	if _, ok := errors.AsType[*policy.ErrBudgetExceeded](err); !ok {
 		// The budgeter should only ever say yes or no, so anything else is a bug.
@@ -443,47 +521,46 @@ func (s *Server) admit(c *call, b *body) bool {
 	}
 	// 402 rather than 429: a client that reads "slow down" would retry against
 	// a limit that does not lift until the period rolls over.
-	s.refuse(c, refusal{
+	return refusal{
 		status: http.StatusPaymentRequired,
 		typ:    "insufficient_quota", code: "budget_exceeded",
 		msg:    err.Error(),
 		advise: true,
-	})
-	return false
+	}, false
 }
 
-// useRouter lets the router the client named choose the model. It runs after
-// the budget check because deciding costs money.
-func (s *Server) useRouter(c *call, b *body) bool {
-	rt := c.router
+// useRoute lets a route step choose the model. It runs after the budget
+// check because deciding costs money.
+func (s *Server) useRoute(c *call, b *body) bool {
+	rt := c.route
 	routeAt := time.Now()
 	d, ref := s.route(c.r.Context(), rt, b, c.surf.kind)
 	c.decision = d
 	if d.micros > 0 {
-		s.budgets.Charge(c.res.Scopes, d.micros, c.now)
+		s.budgets.Charge(c.scopes, d.micros, c.now)
 	}
-	// Recorded on every outcome, refusals included: a router that can no
+	// Recorded on every outcome, refusals included: a step that can no
 	// longer decide shows up in exactly those rows.
-	c.ev.Router, c.ev.RouterOutcome = rt.Alias, d.outcome
+	c.ev.RouterOutcome = d.outcome
 	c.ev.RouterMS = d.took.Milliseconds()
-	// A fallback router reads nothing, so its cost is the failed attempts,
+	// A fallback step reads nothing, so its cost is the failed attempts,
 	// which are drawn on their own. It is drawn only when it has a reason
 	// to show.
 	if rt.Decides() || ref != nil || d.why != "" {
-		c.tr.since(store.SpanRoute, rt.Alias, routeAt, routeNote(d, ref))
+		c.tr.since(store.SpanRoute, rt.Router+"/"+rt.Step, routeAt, routeNote(d, ref))
 	}
-	// A router that decides is counted here; one that tries is counted after
+	// A step that decides is counted here; one that tries is counted after
 	// forwarding. A refusal is counted either way, since nothing else would
-	// show a router that has stopped placing traffic.
+	// show a step that has stopped placing traffic.
 	count := func(outcome store.RouterOutcome) {
-		s.metrics.RouterRun(rt.Alias, c.res.Key.OrgID, string(outcome),
+		s.metrics.RouterRun(rt.Router, rt.Step, c.res.Key.OrgID, string(outcome),
 			d.alias, d.took.Seconds(), d.micros)
 	}
 	if d.why != "" {
-		// The request may still succeed at the fallback, and then this is the
-		// only record that it was placed by default. It is a note, not an
-		// error: a request the fallback answered was served.
-		c.ev.Note = "the router '" + rt.Alias + "' could not choose: " + d.why
+		// A note, not an error: the fallback may still serve the request, and
+		// then this is the only record it was placed by default. Appended,
+		// since an exceeded branch on the way may have left its own note.
+		c.ev.Note = appendNote(c.ev.Note, "the router '"+rt.Router+"' could not choose: "+d.why)
 	}
 	if ref != nil {
 		count(d.outcome)
@@ -499,7 +576,7 @@ func (s *Server) useRouter(c *call, b *body) bool {
 	}
 
 	// From here on the request is about the chosen model. That it was chosen
-	// is carried by ev.Router alone.
+	// is carried by ev.RouterOutcome alone.
 	c.alias = d.alias
 	model, ok := s.serveable(c.res.Key.OrgID, c.alias)
 	if !ok || model.Kind != c.surf.kind {
@@ -509,7 +586,7 @@ func (s *Server) useRouter(c *call, b *body) bool {
 		count(store.RouterError)
 		s.refuse(c, *noDestination(fmt.Sprintf("the router '%s' placed this request on '%s', "+
 			"which cannot serve it: the model is missing, disabled, of another kind, or has "+
-			"no backend", rt.Alias, c.alias)))
+			"no backend", rt.Router, c.alias)))
 		return false
 	}
 	if rt.Decides() {
@@ -533,7 +610,7 @@ func (s *Server) useNative(c *call, b *body) (*body, bool) {
 	if why := d.needsNative(c.native); why != "" {
 		var kept []policy.Model
 		for _, m := range c.chain {
-			if speaksNative(d, m) {
+			if c.sendsNative(m) {
 				kept = append(kept, m)
 			}
 		}
@@ -549,7 +626,7 @@ func (s *Server) useNative(c *call, b *body) (*body, bool) {
 	}
 	native := false
 	for _, m := range c.chain {
-		if speaksNative(d, m) {
+		if c.sendsNative(m) {
 			native = true
 		} else {
 			c.translated = true
@@ -566,7 +643,7 @@ func (s *Server) useNative(c *call, b *body) (*body, bool) {
 		return b, true
 	}
 	if slices.ContainsFunc(c.chain, func(m policy.Model) bool {
-		return m.PlatformKey && speaksNative(d, m)
+		return m.PlatformKey && c.sendsNative(m)
 	}) {
 		if why := d.onKey(c.native); why != "" {
 			s.refuse(c, refusal{
@@ -580,42 +657,64 @@ func (s *Server) useNative(c *call, b *body) (*body, bool) {
 	return b, true
 }
 
+// sendsNative reports whether m is sent the client's own API.
+func (c *call) sendsNative(m policy.Model) bool {
+	d := c.surf.dialect
+	return c.native != nil && d != nil && m.Provider == d.provider()
+}
+
 // useFilters runs the key's filters over the request.
 //
 // They run before anything the gateway adds, so they only rewrite what the
 // client sent, never the administrator's system prompt. What they spent is
 // charged even when they fail, so breaking a filter never makes it free.
 func (s *Server) useFilters(c *call, b *body) bool {
-	// The filters read the body that will be sent. When that is the client's
-	// own, the translation is made again from what they left.
+	// A filter a router step already ran is not run again, as a filter named
+	// at two guardrail levels runs once: it would judge the same text twice
+	// and be paid for twice.
+	aliases := slices.DeleteFunc(slices.Clone(c.res.Filters), func(alias string) bool {
+		return slices.ContainsFunc(c.filters.runs, func(r store.FilterRun) bool { return r.Filter == alias })
+	})
+	rewrote, ok := s.runFilters(c, b, aliases, guardrailFilters)
+	if !ok {
+		return false
+	}
+	// The translation is made again from what the filters left.
+	if rewrote && c.native != nil && c.translated && !s.retranslate(c, b) {
+		return false
+	}
+	// Names the enforcing filters in order, so a developer can see their
+	// prompt was changed or judged, and by what.
+	listHeader(c.w, "X-Keera-Filters", c.filters.applied)
+	return true
+}
+
+// runFilters runs filters over the body that would be sent now: the client's
+// own, if it is still in its own API. It charges what they spent and answers
+// the client when they refuse or the client hangs up. It says whether they
+// rewrote the body.
+func (s *Server) runFilters(c *call, b *body, aliases []string, by string) (rewrote, ok bool) {
 	target, extract := b, func(b *body) (textDoc, error) { return extractText(b, c.surf.kind) }
 	if c.native != nil {
 		target, extract = c.native, c.surf.dialect.text
 	}
-	run, ref := s.applyFilters(c.r.Context(), c.res, target, extract, c.tr)
-	c.filters = run
+	run, ref := s.applyFilters(c.r.Context(), c.res.Key.OrgID, aliases, by, target, extract, c.tr)
+	// Added to the runs of earlier steps, which came first.
+	c.filters.add(run)
 	if run.micros > 0 {
-		s.budgets.Charge(c.res.Scopes, run.micros, c.now)
+		s.budgets.Charge(c.scopes, run.micros, c.now)
 	}
 	// Kept on every outcome: a filter refusal is what the log is read for most.
-	c.ev.FilterRuns = run.runs
+	c.ev.FilterRuns = c.filters.runs
 	if ref != nil {
 		s.refuse(c, *ref)
-		return false
+		return false, false
 	}
 	if c.r.Context().Err() != nil {
 		s.hungUp(c, "while a filter was running", "")
-		return false
+		return false, false
 	}
-	if run.rewrote && c.native != nil && c.translated {
-		if !s.retranslate(c, b) {
-			return false
-		}
-	}
-	// Names the enforcing filters in order, so a developer can see their
-	// prompt was changed or judged, and by what.
-	listHeader(c.w, "X-Keera-Filters", run.applied)
-	return true
+	return run.rewrote, true
 }
 
 // retranslate makes the translated body again from the client's own, after a
@@ -631,17 +730,17 @@ func (s *Server) retranslate(c *call, b *body) bool {
 }
 
 // prepare adds what the gateway adds on its own account: the standing system
-// prompt, the output ceiling and the streamed usage record.
+// prompt and the streamed usage record.
 func (s *Server) prepare(c *call, b *body) bool {
 	c.tr.open(store.SpanPrepare, "")
 
-	// The guardrail's system prompt goes first; the client's own system message
-	// is kept after it. Only chat has a place for one. A chat body without a
-	// messages array is refused, because forwarding it would skip the prompt.
-	if c.res.SystemPrompt != "" && c.surf.kind == policy.KindChat {
-		if b != nil && !b.prependSystem(c.res.SystemPrompt) {
-			s.refuse(c, invalidBody("the 'messages' field must be an array; a guardrail on this key "+
-				"adds a system message to every chat request and has nothing here to add it to"))
+	// The system prompt (see systemPrompt) goes first; the client's own system
+	// message is kept after it. Only chat has a place for one. A chat body
+	// without a messages array is refused, because forwarding it would skip
+	// the prompt.
+	if prompt := c.systemPrompt(); prompt != "" && c.surf.kind == policy.KindChat {
+		if b != nil && !b.prependSystem(prompt) {
+			s.refuse(c, invalidBody("the 'messages' field must be an array; "+promptAdded))
 			return false
 		}
 		if c.native != nil {
@@ -649,7 +748,7 @@ func (s *Server) prepare(c *call, b *body) bool {
 			if c.model.Subscription {
 				add = appendSystem
 			}
-			if err := add(c.native, c.res.SystemPrompt); err != nil {
+			if err := add(c.native, prompt); err != nil {
 				s.refuse(c, invalidBody(err.Error()))
 				return false
 			}
@@ -686,15 +785,6 @@ func (s *Server) prepare(c *call, b *body) bool {
 		}
 		listHeader(c.w, "X-Keera-Removed-Fields", slices.Compact(slices.Sorted(slices.Values(fields))))
 	}
-	// Embeddings have no output length to limit.
-	if c.res.MaxOutputTokens > 0 && c.surf.kind != policy.KindEmbedding {
-		if b != nil {
-			clampOutputTokens(b, c.res.MaxOutputTokens)
-		}
-		if c.native != nil {
-			c.surf.dialect.clamp(c.native, c.res.MaxOutputTokens)
-		}
-	}
 	// Both APIs that can go untranslated name it as the OpenAI shape does.
 	c.stream, _ = c.sent(b).boolean("stream")
 	if c.stream && b != nil {
@@ -705,7 +795,7 @@ func (s *Server) prepare(c *call, b *body) bool {
 	// The router's and the filters' own generations are taken out, so turning
 	// on a guardrail does not look like the gateway getting slower.
 	s.metrics.Overhead(c.alias, c.res.Key.OrgID,
-		(time.Since(c.work) - c.filters.wall - c.decision.took).Seconds())
+		(time.Since(c.work) - c.filters.wall - c.decision.took - c.earlier.took).Seconds())
 	c.tr.seal("")
 	return true
 }
@@ -727,9 +817,9 @@ func (s *Server) answer(c *call, b *body) {
 		defer func() { _ = fw.resp.Body.Close() }()
 	}
 	// Settled before the hang-up check, so a row the client left early still
-	// says how the router's attempts ended.
-	if c.routed {
-		s.settleRouter(c, fw)
+	// says how the route step's attempts ended.
+	if c.route.Router != "" {
+		s.settleRoute(c, fw)
 	}
 	if c.r.Context().Err() != nil && !c.chainOnKey() {
 		s.hungUp(c, "before the model answered", fw.note())
@@ -758,7 +848,7 @@ func (s *Server) answer(c *call, b *body) {
 		passPlanHeaders(c.w, resp.Header)
 		c.ev.Plan = planUsage(resp.Header, time.Now())
 	}
-	native := c.native != nil && speaksNative(c.surf.dialect, c.model)
+	native := c.sendsNative(c.model)
 	switch {
 	case streaming && native:
 		ns := c.surf.dialect.stream(c.alias)
@@ -781,21 +871,18 @@ func (s *Server) answer(c *call, b *body) {
 	}
 	c.ev.Canceled = c.r.Context().Err() != nil
 	c.ev.Latency = time.Since(c.tr.start)
-	// If the request succeeded further down the chain, this is the only sign
-	// anything failed. A destination that answered after another failed served
-	// the request, so then it is a note and not an error.
+	// If a later destination served the request, this is the only sign an
+	// earlier one failed, and it is a note rather than an error.
 	if c.ev.Status >= 400 {
 		c.ev.Error = appendNote(c.ev.Error, fw.note())
 	} else {
 		c.ev.Note = appendNote(c.ev.Note, fw.note())
 	}
 	s.finish(c)
-	// Feeds the latency router. Only real answers count, because a fast
-	// refusal would post the best score. It is timed from when this
-	// destination was sent the request, so neither the destinations that
-	// failed first nor the client's upload and the filters count. Stamped
-	// with the current time, not the start, so a long stream does not expire
-	// the reading at once.
+	// Feeds latency route steps. Only real answers count, since a fast refusal
+	// would post the best score. Timed from when this destination was sent the
+	// request, so failed destinations, the upload and the filters do not count.
+	// Stamped now, not at the start, so a long stream does not expire it at once.
 	if c.ev.Status < 400 && !c.ev.Canceled && c.ev.TTFT > 0 {
 		s.load.observe(c.model.Key(), c.tr.start.Add(c.ev.TTFT).Sub(fw.sent), time.Now())
 	}
@@ -806,7 +893,7 @@ func (s *Server) answer(c *call, b *body) {
 func (c *call) outbound(b *body) func(policy.Model) outbound {
 	clientID := httpx.ClientRequestID(c.r.Context())
 	return func(m policy.Model) outbound {
-		if c.native != nil && speaksNative(c.surf.dialect, m) {
+		if c.sendsNative(m) {
 			c.native.setString("model", m.BackendModel)
 			auth := c.surf.dialect.auth(c.r.Header)
 			if m.Subscription {
@@ -859,17 +946,23 @@ func (a *afterHangUp) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// settleRouter records what a trying router's attempts came to, and names the
-// router in a header. Both are set once the attempts are over, whether a model
-// answered or every destination failed.
-func (s *Server) settleRouter(c *call, fw forwarded) {
-	if !c.router.Decides() {
+// settleRoute records what a trying route step's attempts came to, and says
+// in a header where it sent the request. Both are set once the attempts are
+// over, whether a model answered or every destination failed.
+func (s *Server) settleRoute(c *call, fw forwarded) {
+	if !c.route.Decides() {
 		c.decision.settle(fw)
 		c.ev.RouterOutcome, c.ev.RouterMS = c.decision.outcome, c.decision.took.Milliseconds()
-		s.metrics.RouterRun(c.router.Alias, c.res.Key.OrgID, string(c.decision.outcome),
+		s.metrics.RouterRun(c.route.Router, c.route.Step, c.res.Key.OrgID, string(c.decision.outcome),
 			c.decision.alias, c.decision.took.Seconds(), c.decision.micros)
 	}
-	routerHeader(c.w, c.decision, c.router.Alias)
+	d := c.decision
+	// The step's branch may end at a model step naming another model. The
+	// header names the one that answered, as X-Keera-Model does.
+	if c.route.Decides() {
+		d.alias = c.alias
+	}
+	routeHeader(c.w, d, c.route.Router)
 }
 
 // upstreamUnreachable answers a request no destination could be reached for.
@@ -1069,47 +1162,23 @@ func (s *Server) finish(c *call) {
 	if c.model.Subscription {
 		ev.ListCostMicros, ev.CostMicros = ev.CostMicros, 0
 	}
-	s.budgets.Charge(c.res.Scopes, ev.CostMicros, c.now)
+	s.budgets.Charge(c.scopes, ev.CostMicros, c.now)
 	ev.CostMicros += c.hookMicros()
+	ev.Scopes = c.scopes
 
 	if tokens := float64(ev.InputTokens + ev.OutputTokens); tokens > 0 {
-		reqs := make([]ratelimit.Requirement, 0, len(c.res.Scopes))
-		for _, sc := range c.res.Scopes {
+		reqs := make([]ratelimit.Requirement, 0, len(c.scopes))
+		for _, sc := range c.scopes {
 			reqs = append(reqs, tpmBucket(sc))
 		}
 		// Charged as of now, not the start: a stream can run for minutes, and
 		// a bucket told it is minutes younger than it is refills too much.
 		s.limiter.ChargeAll(reqs, tokens, time.Now())
+		// Limits per day or month, the key's and a router's, count them too.
+		// Their window is the one the request started in, as its row's is.
+		s.budgets.Tally(c.scopes, policy.MeterTokens, int64(tokens), c.now)
 	}
 	s.record(ev)
 	s.metrics.Observe(ev.Alias, ev.OrgID, ev.Status, ev.Latency.Seconds(),
 		ev.InputTokens+ev.OutputTokens)
-}
-
-// clampOutputTokens holds a request to the guardrail's ceiling rather than
-// refusing it, so an administrator's limit does not break a developer's editor.
-func clampOutputTokens(b *body, limit int) {
-	clampFields(b, limit, "max_tokens", "max_completion_tokens")
-}
-
-// clampFields holds every field of fields the request sets to limit, and sets
-// the first when it sets none.
-func clampFields(b *body, limit int, fields ...string) {
-	asked := false
-	for _, field := range fields {
-		if _, present := b.value(field); !present {
-			continue
-		}
-		asked = true
-		// A value that cannot be read is overwritten too. Leaving it would
-		// forward an unbounded number next to the bounded one, and the
-		// upstream would pick which to honour. So is one below 1: llama.cpp
-		// and Ollama read -1 as no limit at all.
-		if v, ok := b.ceiling(field); !ok || v < 1 || v > float64(limit) {
-			b.setInt(field, limit)
-		}
-	}
-	if !asked {
-		b.setInt(fields[0], limit)
-	}
 }

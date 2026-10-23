@@ -367,8 +367,8 @@ func (r *Registry) refreshAll(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	return reload(ctx, &r.routers, r.store.LoadRouters, func(rt *policy.Router) (string, string) {
-		return rt.OrgID, rt.Alias
+	return reload(ctx, &r.routers, r.store.LoadRouters, func(p *policy.Router) (string, string) {
+		return p.OrgID, p.Alias
 	})
 }
 
@@ -411,7 +411,7 @@ func (r *Registry) refreshOrg(ctx context.Context, orgID string) error {
 		return m.Alias
 	})
 	replaceOrg(&r.filters, orgID, filters, func(f *policy.Filter) string { return f.Alias })
-	replaceOrg(&r.routers, orgID, routers, func(rt *policy.Router) string { return rt.Alias })
+	replaceOrg(&r.routers, orgID, routers, func(p *policy.Router) string { return p.Alias })
 	return nil
 }
 

@@ -135,7 +135,7 @@ func (s *source) ListFilters(_ context.Context, orgID string) ([]policy.Filter, 
 func (s *source) ListRouters(_ context.Context, orgID string) ([]policy.Router, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return inOrg(s.routers, orgID, func(rt policy.Router) string { return rt.OrgID }), s.loadErr
+	return inOrg(s.routers, orgID, func(p policy.Router) string { return p.OrgID }), s.loadErr
 }
 
 func (s *source) ListMCPServers(_ context.Context, orgID string) ([]policy.MCPServer, error) {

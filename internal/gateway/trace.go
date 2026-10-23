@@ -86,7 +86,7 @@ func (t *trace) took(name, of string, took time.Duration, note string) {
 	t.add(name, of, time.Now().Add(-took), took, note)
 }
 
-// routeNote is what a router's step says it came to: where it sent the
+// routeNote is what a route step says it came to: where it sent the
 // request, and whether it decided or fell back.
 func routeNote(d routeDecision, ref *refusal) string {
 	switch {

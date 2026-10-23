@@ -186,7 +186,7 @@ func TestEveryFamilyDeclaresItselfBeforeItsSamples(t *testing.T) {
 	r.Observe("gpt-oss", "org_1", 200, 0.3, 120)
 	r.Overhead("gpt-oss", "org_1", 0.002)
 	r.FilterRun("pii", "org_1", "rewrote", false, 0.4, 1200)
-	r.RouterRun("cheap-first", "org_1", "decided", "gpt-oss", 0.1, 90)
+	r.RouterRun("cheap-first", "route-1", "org_1", "decided", "gpt-oss", 0.1, 90)
 	r.UpstreamError("gpt-oss", "org_1")
 	r.RateLimitFallback()
 	r.InflightAdd(2)
@@ -215,7 +215,7 @@ func TestHistogramBucketsAreCumulativeAndEndAtTheCount(t *testing.T) {
 		r.FilterRun("pii", "org_1", "rewrote", true, seconds, 5)
 	}
 	for _, seconds := range []float64{0.02, 90} {
-		r.RouterRun("cheap-first", "org_1", "decided", "gpt-oss", seconds, 5)
+		r.RouterRun("cheap-first", "route-1", "org_1", "decided", "gpt-oss", seconds, 5)
 	}
 	e := render(t, r)
 
@@ -242,7 +242,7 @@ func TestHistogramBucketsAreCumulativeAndEndAtTheCount(t *testing.T) {
 		},
 		{
 			name:    "keera_router_duration_seconds",
-			labels:  `router="cheap-first",org="org_1",outcome="decided",destination="gpt-oss"`,
+			labels:  `router="cheap-first",step="route-1",org="org_1",outcome="decided",destination="gpt-oss"`,
 			buckets: latencyBuckets, want: 2,
 		},
 	}

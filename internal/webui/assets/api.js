@@ -191,8 +191,8 @@ export const api = {
   filterReport: (orgID, alias, since) =>
     get(path`/v1/filters/${alias}/report` + query({ org_id: orgID, since })),
 
-  // The organisation's routers. `stats` adds where each has been sending
-  // traffic in the window.
+  // The organisation's routers. `stats` adds the traffic each took in the
+  // window, and how its route steps decided.
   routers: (orgID, { stats, since } = {}) =>
     get(
       "/v1/routers" + query({ org_id: orgID, stats: stats ? "1" : "", since }),
@@ -201,9 +201,11 @@ export const api = {
     request("PUT", inOrg(orgID, "routers", alias), router),
   deleteRouter: (orgID, alias) =>
     request("DELETE", inOrg(orgID, "routers", alias)),
+  // Puts sample prompts through each route step of the router.
   checkRouter: (orgID, alias) =>
     request("POST", inOrg(orgID, "routers", alias, "/check")),
-  // Where one router has been sending the requests that named it.
+  // How much went through one router, which models answered, and how its
+  // route steps decided.
   routerReport: (orgID, alias, since) =>
     get(path`/v1/routers/${alias}/report` + query({ org_id: orgID, since })),
 
@@ -362,12 +364,14 @@ export async function chatTargets(orgID) {
   return models
     .filter((m) => m.enabled !== false && m.kind === "chat" && !m.subscription)
     .concat(
-      routers.map((rt) => ({
-        alias: rt.alias,
+      // A router picks its model, so it has no context window of its own.
+      routers.map((p) => ({
+        alias: p.alias,
         kind: "chat",
         enabled: true,
         router: true,
-        description: rt.description,
+        display_name: p.display_name,
+        description: p.description,
       })),
     );
 }

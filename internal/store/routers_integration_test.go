@@ -13,14 +13,20 @@ func TestRouterRoundTripAndTheAllowListsThatNameOne(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
 
-	auto := policy.Router{
-		OrgID: f.orgID, Alias: "auto", Model: "keera-picker",
-		Prompt:       "Send short edits to the small model and everything else to the large one.",
-		Destinations: []string{"keera-small", "keera-large"},
-		Fallback:     "keera-small",
-		Description:  "Keeps the large model for the work that needs it",
+	safe := policy.Router{
+		OrgID: f.orgID, Alias: "safe", DisplayName: "Safe", Description: "Redacts what leaves",
+		Start: &policy.Step{
+			ID: "cap", Kind: policy.StepBudget, BudgetMicros: 50_000_000, Period: policy.PeriodMonth,
+			Exceeded: &policy.Step{ID: "spent", Kind: policy.StepModel, Ref: "keera-small"},
+			Next: &policy.Step{ID: "route", Kind: policy.StepRoute, Mode: policy.RouteModeFallback,
+				Destinations: []string{"keera-small", "keera-large"},
+				Branches: map[string]*policy.Step{
+					"keera-large": {ID: "redact", Kind: policy.StepFilter, Ref: "redact",
+						Next: &policy.Step{ID: "out", Kind: policy.StepModel, Ref: "keera-large"}},
+				}},
+		},
 	}
-	saved, err := st.UpsertRouter(ctx, auto)
+	saved, err := st.UpsertRouter(ctx, safe)
 	if err != nil {
 		t.Fatalf("UpsertRouter: %v", err)
 	}
@@ -28,181 +34,208 @@ func TestRouterRoundTripAndTheAllowListsThatNameOne(t *testing.T) {
 		t.Error("the write did not return its timestamps")
 	}
 
-	read, err := st.Router(ctx, f.orgID, auto.Alias)
+	read, err := st.Router(ctx, f.orgID, safe.Alias)
 	if err != nil {
 		t.Fatalf("Router: %v", err)
 	}
-	if !slices.Equal(read.Destinations, auto.Destinations) {
-		t.Errorf("destinations = %q, want %q", read.Destinations, auto.Destinations)
+	if read.DisplayName != "Safe" || read.Description != safe.Description {
+		t.Errorf("read %q / %q", read.DisplayName, read.Description)
 	}
-	if read.Fallback != "keera-small" || read.Refuses() {
-		t.Errorf("fallback = %q, Refuses = %v; want the stored fallback",
-			read.Fallback, read.Refuses())
+	// The tree comes back whole: every step, in the same places.
+	var ids []string
+	for s := range read.Steps() {
+		ids = append(ids, s.ID)
 	}
-
-	// A router with no fallback refuses what it cannot place, and the column is
-	// null rather than empty so that the two are one field rather than two.
-	strict := auto
-	strict.Alias, strict.Fallback = "strict", ""
-	if _, err := st.UpsertRouter(ctx, strict); err != nil {
-		t.Fatalf("UpsertRouter with no fallback: %v", err)
+	if want := []string{"cap", "route", "redact", "out", "spent"}; !slices.Equal(ids, want) {
+		t.Errorf("steps = %v, want %v", ids, want)
 	}
-	stored, err := st.Router(ctx, f.orgID, strict.Alias)
-	if err != nil {
-		t.Fatalf("Router: %v", err)
+	if read.Start.BudgetMicros != 50_000_000 || read.Start.Exceeded.Ref != "keera-small" {
+		t.Errorf("the budget step came back as %+v", read.Start)
 	}
-	if !stored.Refuses() {
-		t.Errorf("Refuses = false, want a router with no fallback to refuse")
+	if route := read.Start.Next; route.Mode != policy.RouteModeFallback || len(route.Destinations) != 2 {
+		t.Errorf("the route step came back as %+v", route)
 	}
 
-	// A second organisation's router of the same name is a different router.
-	if _, err := st.CreateOrg(ctx, Org{ID: "org_2", Name: "Another Bank"}, OrgTemplate{}); err != nil {
-		t.Fatalf("CreateOrg: %v", err)
+	// A second write replaces the tree.
+	safe.Start = &policy.Step{ID: "only", Kind: policy.StepModel, Ref: "keera-small"}
+	if _, err := st.UpsertRouter(ctx, safe); err != nil {
+		t.Fatalf("UpsertRouter again: %v", err)
 	}
-	other := auto
-	other.OrgID, other.Destinations = "org_2", []string{"keera-large", "keera-huge"}
-	if _, err := st.UpsertRouter(ctx, other); err != nil {
-		t.Fatalf("UpsertRouter for a second org: %v", err)
-	}
-	mine, err := st.ListRouters(ctx, f.orgID)
-	if err != nil {
-		t.Fatalf("ListRouters: %v", err)
-	}
-	if len(mine) != 2 {
-		t.Fatalf("ListRouters returned %+v; a router must not leak across tenants", mine)
-	}
-	if all, err := st.LoadRouters(ctx); err != nil || len(all) != 3 {
-		t.Fatalf("LoadRouters = %d routers, %v; the gateway caches every tenant's",
-			len(all), err)
+	if read, _ = st.Router(ctx, f.orgID, safe.Alias); read.Start.ID != "only" || read.Start.Next != nil {
+		t.Errorf("after a second write the tree is %+v", read.Start)
 	}
 
-	// Nothing names it yet.
-	if users, err := st.RouterUsers(ctx, f.orgID, auto.Alias); err != nil || len(users) != 0 {
-		t.Fatalf("RouterUsers = %+v, %v, want none", users, err)
+	if all, err := st.LoadRouters(ctx); err != nil || len(all) != 1 {
+		t.Fatalf("LoadRouters = %d, %v", len(all), err)
 	}
-	// An allow-list narrowed to the router, which is how a scope is made to
-	// route whatever it asks for - and so the one arrangement a deletion would
-	// leave able to reach nothing at all.
+	if setup, err := st.SetupState(ctx, f.orgID); err != nil || setup.Routers != 1 {
+		t.Errorf("SetupState routers = %d, %v, want 1", setup.Routers, err)
+	}
+
+	// Named by a project's allow-list, it is a user; the organisation's own
+	// list, which names more, is not.
 	if err := st.PutGuardrail(ctx, policy.ScopeProject, f.projectID,
-		policy.Limits{AllowedModels: []string{auto.Alias}}); err != nil {
+		policy.Limits{AllowedModels: []string{safe.Alias}}); err != nil {
 		t.Fatalf("PutGuardrail: %v", err)
 	}
-	if err := st.PutGuardrail(ctx, policy.ScopeOrg, "org_2",
-		policy.Limits{AllowedModels: []string{auto.Alias}}); err != nil {
+	if err := st.PutGuardrail(ctx, policy.ScopeOrg, f.orgID,
+		policy.Limits{AllowedModels: []string{safe.Alias, "keera-small"}}); err != nil {
 		t.Fatalf("PutGuardrail: %v", err)
 	}
-	users, err := st.RouterUsers(ctx, f.orgID, auto.Alias)
-	if err != nil {
-		t.Fatalf("RouterUsers: %v", err)
-	}
-	if len(users) != 1 {
-		t.Fatalf("RouterUsers = %+v, want only this organisation's allow-list", users)
-	}
-	if users[0].ScopeType != policy.ScopeProject || users[0].Name != "Payments Platform" {
-		t.Errorf("RouterUsers[0] = %+v, want the project named so a refusal can quote it",
-			users[0])
+	users, err := st.RouterUsers(ctx, f.orgID, safe.Alias)
+	if err != nil || len(users) != 1 || users[0].ScopeType != policy.ScopeProject {
+		t.Fatalf("RouterUsers = %+v, %v, want the project", users, err)
 	}
 
-	if err := st.DeleteRouter(ctx, f.orgID, auto.Alias); err != nil {
+	if err := st.DeleteRouter(ctx, f.orgID, safe.Alias); err != nil {
 		t.Fatalf("DeleteRouter: %v", err)
 	}
-	if _, err := st.Router(ctx, f.orgID, auto.Alias); !errors.Is(err, ErrNotFound) {
+	if _, err := st.Router(ctx, f.orgID, safe.Alias); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Router after delete = %v, want ErrNotFound", err)
 	}
-	if _, err := st.Router(ctx, "org_2", auto.Alias); err != nil {
-		t.Errorf("deleting one tenant's router removed another's: %v", err)
+	// Deleting it takes it off the allow-lists, so a router added later under
+	// the same alias is not allowed by accident.
+	org, err := st.GetGuardrail(ctx, policy.ScopeOrg, f.orgID)
+	if err != nil {
+		t.Fatalf("GetGuardrail: %v", err)
+	}
+	if slices.Contains(org.AllowedModels, safe.Alias) {
+		t.Errorf("the organisation's allow-list still names the deleted router: %v", org.AllowedModels)
 	}
 }
 
-// A router's report is a reading of the usage log rather than a log of its own,
-// so what it can say is bounded by what the request rows carry.
-func TestRouterReportSplitsTrafficByDestination(t *testing.T) {
+// A router's report is read from the usage rows, which carry its alias, and
+// its limit steps' spend is kept like any other scope's.
+func TestRouterReportAndSpend(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
 	now := time.Now().UTC().Truncate(time.Second)
+	step := policy.Scope{Type: policy.ScopeRouter, ID: f.orgID + "/safe/cap", Period: policy.PeriodMonth}
 
 	if err := st.WriteEvents(ctx, []Event{
-		{TS: now.Add(-3 * time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-small",
-			Status: 200, CostMicros: 100, InputTokens: 10, OutputTokens: 5, TTFT: time.Second,
-			Router: "auto", RouterOutcome: RouterChose, RouterMS: 40},
-		{TS: now.Add(-2 * time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-small",
-			Status: 200, CostMicros: 100, InputTokens: 10, OutputTokens: 5, TTFT: time.Second,
-			Router: "auto", RouterOutcome: RouterChose, RouterMS: 60},
-		{TS: now.Add(-time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-large",
-			Status: 200, CostMicros: 900, InputTokens: 20, OutputTokens: 10, TTFT: 2 * time.Second,
-			Router: "auto", RouterOutcome: RouterChose, RouterMS: 50},
-		// A request placed without a decision, and one placed nowhere at all.
-		{TS: now.Add(-50 * time.Minute), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-small",
-			Status: 200, CostMicros: 100, Router: "auto", RouterOutcome: RouterFellBack,
-			RouterMS: 20},
-		{TS: now.Add(-40 * time.Minute), OrgID: f.orgID, KeyID: f.keyID, Alias: "strict",
-			Status: 503, Router: "strict", RouterOutcome: RouterError, RouterMS: 30},
-		// And a request that named a model directly, which is no router's.
-		{TS: now.Add(-30 * time.Minute), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-large",
-			Status: 200, CostMicros: 900},
+		{TS: now.Add(-2 * time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-large",
+			Status: 200, CostMicros: 900, Router: "safe", RouterOutcome: RouterChose, RouterMS: 40,
+			Scopes: []policy.Scope{step}},
+		{TS: now.Add(-time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-small",
+			Status: 200, CostMicros: 100, Router: "safe", RouterOutcome: RouterFellBack},
+		{TS: now.Add(-time.Hour), OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-small",
+			Status: 200, CostMicros: 100},
 	}); err != nil {
 		t.Fatalf("WriteEvents: %v", err)
 	}
 
-	rep, err := st.RouterReportFor(ctx, f.orgID, "auto", now.Add(-24*time.Hour), now)
+	rep, err := st.RouterReportFor(ctx, f.orgID, "safe", now.Add(-24*time.Hour), now.Add(time.Minute))
 	if err != nil {
 		t.Fatalf("RouterReportFor: %v", err)
 	}
-	if rep.Total.Requests != 4 {
-		t.Errorf("requests = %d, want the 4 this router placed", rep.Total.Requests)
+	if rep.Total.Requests != 2 || rep.Total.CostMicros != 1000 {
+		t.Errorf("total = %+v, want the two requests that named the router", rep.Total)
 	}
-	if rep.Chose != 3 || rep.FellBack != 1 || rep.Errored != 0 {
-		t.Errorf("chose/fellBack/errored = %d/%d/%d, want 3/1/0",
-			rep.Chose, rep.FellBack, rep.Errored)
+	if len(rep.Destinations) != 2 || rep.Destinations[0].Alias != "keera-large" {
+		t.Errorf("destinations = %+v, want both models, the dearer first", rep.Destinations)
 	}
-	// The split is the reason anybody reads this screen.
-	if len(rep.Destinations) != 2 {
-		t.Fatalf("destinations = %+v, want one row per model it placed on", rep.Destinations)
-	}
-	if rep.Destinations[0].Alias != "keera-small" || rep.Destinations[0].Requests != 3 {
-		t.Errorf("destinations[0] = %+v, want keera-small with 3", rep.Destinations[0])
-	}
-	if rep.DecisionMedianMS == 0 {
-		t.Error("the decision latency was not measured")
+	if rep.Chose != 1 || rep.FellBack != 1 || rep.Errored != 0 || rep.DecisionMedianMS != 40 {
+		t.Errorf("decisions = %+v, want one chosen and one fallen back", rep)
 	}
 
-	// A router with no fallback: its refusals are counted, and they are not a
-	// destination row, because those requests reached no model.
-	strict, err := st.RouterReportFor(ctx, f.orgID, "strict", now.Add(-24*time.Hour), now)
-	if err != nil {
-		t.Fatalf("RouterReportFor: %v", err)
-	}
-	if strict.Errored != 1 || len(strict.Destinations) != 0 {
-		t.Errorf("strict = %d errored, %d destinations; want 1 and none",
-			strict.Errored, len(strict.Destinations))
+	stats, err := st.RouterStats(ctx, f.orgID, now.Add(-24*time.Hour), now.Add(time.Minute))
+	if err != nil || stats["safe"].Requests != 2 || stats["safe"].FellBack != 1 {
+		t.Errorf("RouterStats = %+v, %v", stats, err)
 	}
 
-	stats, err := st.RouterStats(ctx, f.orgID, now.Add(-24*time.Hour), now)
+	// A daily limit counts requests and tokens in the same table, under its
+	// own ids.
+	requests := policy.Scope{Type: policy.ScopeRouter, ID: f.orgID + "/safe/daily|requests",
+		Period: policy.PeriodDay, Meter: policy.MeterRequests, Quota: 100}
+	tokens := policy.Scope{Type: policy.ScopeRouter, ID: f.orgID + "/safe/daily|tokens",
+		Period: policy.PeriodDay, Meter: policy.MeterTokens, Quota: 100_000}
+	if err := st.WriteEvents(ctx, []Event{
+		{TS: now, OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-small", Status: 200,
+			InputTokens: 30, OutputTokens: 12, Router: "safe", Scopes: []policy.Scope{requests, tokens}},
+		// Refused before an answer: a request all the same, and no tokens.
+		{TS: now, OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-small", Status: 403,
+			Router: "safe", Scopes: []policy.Scope{requests, tokens}},
+	}); err != nil {
+		t.Fatalf("WriteEvents: %v", err)
+	}
+
+	spend, err := st.LoadSpend(ctx, now)
 	if err != nil {
-		t.Fatalf("RouterStats: %v", err)
+		t.Fatalf("LoadSpend: %v", err)
 	}
-	if stats["auto"].Requests != 4 || stats["auto"].FellBack != 1 {
-		t.Errorf("stats[auto] = %+v, want 4 requests with 1 fallback", stats["auto"])
+	if !slices.ContainsFunc(spend, func(r SpendRow) bool {
+		return r.ScopeType == policy.ScopeRouter && r.ScopeID == step.ID && r.Micros == 900
+	}) {
+		t.Errorf("spend = %+v, want 900 against the router's budget step", spend)
 	}
-	if _, ok := stats["keera-large"]; ok {
-		t.Error("a request that named a model directly was counted as a router's")
+	for id, want := range map[string]int64{requests.ID: 2, tokens.ID: 42} {
+		if !slices.ContainsFunc(spend, func(r SpendRow) bool { return r.ScopeID == id && r.Micros == want }) {
+			t.Errorf("spend = %+v, want %d counted under %s", spend, want, id)
+		}
 	}
 }
 
-func TestDeletingAnOrgTakesItsRoutersWithIt(t *testing.T) {
+// A request a limit step refused before any step placed it has no model, so
+// it counts in the total and is no destination.
+func TestRouterReportLeavesOutWhatNoStepPlaced(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
-
-	if _, err := st.UpsertRouter(ctx, policy.Router{
-		OrgID: f.orgID, Alias: "auto", Model: "keera-picker", Prompt: "…",
-		Destinations: []string{"keera-small", "keera-large"},
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := st.WriteEvents(ctx, []Event{
+		{TS: now, OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-small", Status: 200,
+			Router: "safe", RouterOutcome: RouterChose},
+		{TS: now, OrgID: f.orgID, KeyID: f.keyID, Status: 429, Router: "safe"},
 	}); err != nil {
-		t.Fatalf("UpsertRouter: %v", err)
+		t.Fatalf("WriteEvents: %v", err)
 	}
-	if _, err := st.DeleteOrg(ctx, f.orgID); err != nil {
-		t.Fatalf("DeleteOrg: %v", err)
+	rep, err := st.RouterReportFor(ctx, f.orgID, "safe", now.Add(-time.Hour), now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("RouterReportFor: %v", err)
 	}
-	if all, err := st.LoadRouters(ctx); err != nil || len(all) != 0 {
-		t.Fatalf("LoadRouters = %+v, %v, want none left", all, err)
+	if rep.Total.Requests != 2 {
+		t.Errorf("total = %+v, want both requests", rep.Total)
+	}
+	if len(rep.Destinations) != 1 || rep.Destinations[0].Alias != "keera-small" {
+		t.Errorf("destinations = %+v, want only the model a step placed one on", rep.Destinations)
+	}
+}
+
+// The CLI promises that a new router of a deleted one's alias starts from
+// zero, so the delete takes the old limits' counts with it, and only those.
+func TestDeletingARouterForgetsWhatItsLimitsCounted(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	now := time.Now().UTC().Truncate(time.Second)
+	for _, alias := range []string{"safe", "safer"} {
+		if _, err := st.UpsertRouter(ctx, policy.Router{OrgID: f.orgID, Alias: alias,
+			Start: &policy.Step{ID: "out", Kind: policy.StepModel, Ref: "keera-small"}}); err != nil {
+			t.Fatalf("UpsertRouter: %v", err)
+		}
+	}
+	scope := func(alias string) policy.Scope {
+		return policy.Scope{Type: policy.ScopeRouter, ID: f.orgID + "/" + alias + "/cap",
+			Period: policy.PeriodMonth}
+	}
+	if err := st.WriteEvents(ctx, []Event{
+		{TS: now, OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-small", Status: 200,
+			CostMicros: 500, Router: "safe", Scopes: []policy.Scope{scope("safe")}},
+		{TS: now, OrgID: f.orgID, KeyID: f.keyID, Alias: "keera-small", Status: 200,
+			CostMicros: 700, Router: "safer", Scopes: []policy.Scope{scope("safer")}},
+	}); err != nil {
+		t.Fatalf("WriteEvents: %v", err)
+	}
+
+	if err := st.DeleteRouter(ctx, f.orgID, "safe"); err != nil {
+		t.Fatalf("DeleteRouter: %v", err)
+	}
+	spend, err := st.LoadSpend(ctx, now)
+	if err != nil {
+		t.Fatalf("LoadSpend: %v", err)
+	}
+	if slices.ContainsFunc(spend, func(r SpendRow) bool { return r.ScopeID == scope("safe").ID }) {
+		t.Errorf("spend = %+v, want the deleted router's counts gone", spend)
+	}
+	if !slices.ContainsFunc(spend, func(r SpendRow) bool { return r.ScopeID == scope("safer").ID }) {
+		t.Errorf("spend = %+v, want the other router's counts kept", spend)
 	}
 }

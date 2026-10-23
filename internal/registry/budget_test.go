@@ -192,3 +192,80 @@ func TestAnInvoicedOrganisationHoldsNothing(t *testing.T) {
 		t.Errorf("without payments, hold = %d", held)
 	}
 }
+
+// A router's daily limit counts requests or tokens, not money, so a charge
+// of money leaves it alone and a tally of requests leaves the budgets alone.
+func TestTallyCountsOnlyItsOwnMeter(t *testing.T) {
+	b := newBudgets(false)
+	now := time.Now()
+	budget := policy.Scope{Type: policy.ScopeRouter, ID: "org_1/safe/cap", Period: policy.PeriodDay}
+	requests := policy.Scope{Type: policy.ScopeRouter, ID: "org_1/safe/daily|requests",
+		Period: policy.PeriodDay, Meter: policy.MeterRequests, Quota: 10}
+	both := []policy.Scope{budget, requests}
+
+	b.Charge(both, 5_000, now)
+	b.Tally(both, policy.MeterRequests, 1, now)
+	b.Tally(both, policy.MeterRequests, 1, now)
+
+	if got := b.Spent(budget.Type, budget.ID, budget.Period, now); got != 5_000 {
+		t.Errorf("the budget spent %d, want only the money", got)
+	}
+	if got := b.Spent(requests.Type, requests.ID, requests.Period, now); got != 2 {
+		t.Errorf("the limit counted %d requests, want 2", got)
+	}
+}
+
+// The database counts a request only once its row is written, so a reconcile
+// while a request runs must not forget it, or long streams would let a daily
+// limit be passed again every refresh.
+func TestReconcileKeepsRequestsStillRunning(t *testing.T) {
+	b := newBudgets(false)
+	now := time.Now()
+	limit := []policy.Scope{{Type: policy.ScopeKey, ID: "key_1|requests",
+		Period: policy.PeriodDay, Meter: policy.MeterRequests, Quota: 10}}
+	spent := func() int64 { return b.Spent(policy.ScopeKey, "key_1|requests", policy.PeriodDay, now) }
+
+	b.StartRequest(limit, now)
+	b.StartRequest(limit, now)
+	b.reconcile(nil)
+	if got := spent(); got != 2 {
+		t.Fatalf("after a reconcile, %d requests counted, want the 2 still running", got)
+	}
+
+	// One ends; until its row is read back, the local view counts it.
+	b.EndRequest(limit, now)
+	if got := spent(); got != 2 {
+		t.Errorf("after one ended, %d requests counted, want 2", got)
+	}
+	// The database now has its row, and the other is still running.
+	b.reconcile([]store.SpendRow{{ScopeType: policy.ScopeKey, ScopeID: "key_1|requests",
+		Period: policy.PeriodDay, PeriodStart: policy.PeriodDay.Start(now), Micros: 1}})
+	if got := spent(); got != 2 {
+		t.Errorf("after the row was read, %d requests counted, want 2", got)
+	}
+	b.EndRequest(limit, now)
+	b.reconcile([]store.SpendRow{{ScopeType: policy.ScopeKey, ScopeID: "key_1|requests",
+		Period: policy.PeriodDay, PeriodStart: policy.PeriodDay.Start(now), Micros: 2}})
+	if got := spent(); got != 2 {
+		t.Errorf("once both rows were read, %d requests counted, want 2", got)
+	}
+}
+
+// A stream that started before midnight ends in yesterday's window, and must
+// not wipe out today's.
+func TestARequestEndingInANewWindowLeavesItAlone(t *testing.T) {
+	b := newBudgets(false)
+	yesterday := time.Date(2026, 10, 22, 23, 59, 0, 0, time.UTC)
+	today := yesterday.Add(2 * time.Minute)
+	limit := []policy.Scope{{Type: policy.ScopeKey, ID: "key_1|requests",
+		Period: policy.PeriodDay, Meter: policy.MeterRequests, Quota: 10}}
+
+	b.StartRequest(limit, yesterday)
+	b.StartRequest(limit, today)
+	b.EndRequest(limit, today)
+	b.EndRequest(limit, yesterday)
+
+	if got := b.Spent(policy.ScopeKey, "key_1|requests", policy.PeriodDay, today); got != 1 {
+		t.Errorf("today counts %d requests, want 1", got)
+	}
+}

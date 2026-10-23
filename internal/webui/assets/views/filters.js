@@ -44,9 +44,8 @@ import {
 } from "../ui.js";
 import { areaChart, barList } from "../chart.js";
 import { orgNameOf } from "./orgs.js";
-// A filter's screen shares the period with the project, key and model
-// screens, so moving between them keeps it.
-import { facts } from "./detail.js";
+import { facts, routerLinks } from "./detail.js";
+import { usedBy } from "./router-tree.js";
 
 export async function filtersView(ctx) {
   const since = currentRange();
@@ -145,8 +144,8 @@ export async function filtersView(ctx) {
             onEdit: () => editFilter(ctx, f, readers),
             deleteTitle: "Delete this filter",
             body:
-              "A filter still used by a guardrail cannot be deleted. " +
-              "Take it off those guardrails first; the error lists them.",
+              "A filter still used by a guardrail or a router cannot be " +
+              "deleted. Take it out of those first; the error lists them.",
             confirmLabel: "Delete filter",
             remove: () => api.deleteFilter(ctx.orgID, f.alias),
           }),
@@ -177,8 +176,8 @@ function modeName(f) {
   return MODES.find((m) => m.value === mode(f)).name;
 }
 
-// modePills adds Shadow when it applies: a gate in shadow enforces nothing.
-function modePills(f) {
+// A gate in shadow enforces nothing, so Shadow gets its own pill.
+export function modePills(f) {
   const tone = { gate: "accent", pattern: "good" }[mode(f)] || "";
   return [
     pill(modeName(f), tone),
@@ -422,20 +421,18 @@ function report(probe) {
           )
         : null,
     ),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Close"),
-    ],
   });
 }
 
-/* ------------------------------------------------------- one filter's screen */
-
-// filterDetailView shows what a filter has been doing over its own runs: is
-// it firing, what does it do, what does it cost in time and money, and which
-// project gets the refusals.
 export async function filterDetailView(ctx) {
   const since = currentRange();
-  const res = await api.filterReport(ctx.orgID, ctx.param, since);
+  const [res, routers] = await Promise.all([
+    api.filterReport(ctx.orgID, ctx.param, since),
+    api
+      .routers(ctx.orgID)
+      .then((r) => r.data || [])
+      .catch(() => []),
+  ]);
   const rep = res.report || {};
   const f = res.filter || null;
   const projectNames = res.project_names || {};
@@ -549,8 +546,9 @@ export async function filterDetailView(ctx) {
             : empty(
                 "Nothing ran in this period",
                 f
-                  ? "No guardrail uses this filter, or nothing it covers was " +
-                      "called. Widen the period or check the project's guardrails."
+                  ? "No guardrail or router uses this filter, or nothing it " +
+                      "covers was called. Widen the period or check the " +
+                      "project's guardrails."
                   : "This filter no longer exists.",
               ),
         ),
@@ -650,6 +648,7 @@ export async function filterDetailView(ctx) {
                       }[mode(f)] || "yes - the model gets the rewrite",
                     ),
               ],
+              ["In routers", routerLinks(ctx, usedBy(routers, f.alias))],
               [
                 "Description",
                 f.description
@@ -861,15 +860,21 @@ const MODES = [
   },
 ];
 
-// canRun: a chat model, or for a gate a decision model, which answers the
-// verdict and writes no text.
+// A decision model answers a verdict and writes no text, so only a gate can
+// use it.
 function canRun(m) {
   return (m.kind === "chat" || m.kind === "decision") && !m.subscription;
 }
 
-function editFilter(ctx, existing, readers) {
+/** For another screen, such as the router editor. onSaved gets the new alias
+ *  instead of a reload, so what was typed there survives. */
+export function newFilter(ctx, models, onSaved) {
+  editFilter(ctx, null, models.filter(canRun), { onSaved });
+}
+
+function editFilter(ctx, existing, readers, { onSaved } = {}) {
   const creating = !existing;
-  // No default mode: choosing one is the first question the dialog asks.
+  // No default mode: choosing one is the first question.
   const f = existing || {
     alias: "",
     model: "",
@@ -1077,15 +1082,20 @@ function editFilter(ctx, existing, readers) {
     title: creating ? "Create filter" : `Edit ${f.alias}`,
     subtitle: creating
       ? "Choose what it does first; the rest of the form depends on it. " +
-        "Every request its guardrails cover goes through it."
-      : "Every request its guardrails cover goes through it.",
+        "It runs on every request its guardrails cover, and wherever a " +
+        "router's filter step names it."
+      : "It runs on every request its guardrails cover, and wherever a " +
+        "router's filter step names it.",
     body: h("form", {}, modeField, rest),
     submitLabel: creating ? "Create filter" : "Save",
-    done: creating ? "Filter created" : "Filter saved",
-    ctx,
+    done: () => {
+      if (onSaved) onSaved(alias.value.trim());
+      return creating ? "Filter created" : "Filter saved";
+    },
+    ctx: onSaved ? null : ctx,
     submit: async () => {
-      // Checked here: an empty alias addresses no filter, so the request
-      // would never reach the handler that could say so.
+      // Checked here: with an empty alias the request would never reach the
+      // handler that could say so.
       const problem =
         aliasProblem(alias.value.trim()) ||
         (creating &&

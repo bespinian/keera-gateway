@@ -846,9 +846,23 @@ export function facts(rows) {
   );
 }
 
-/* ------------------------------------------------------------------ bits */
+export function routerLinks(ctx, routers) {
+  if (!routers.length) return h("span", { class: "muted" }, "none");
+  return h(
+    "div",
+    { class: "wrap-chips" },
+    routers.map((p) => {
+      const path = "/routers/" + encodeURIComponent(p.alias);
+      return h(
+        "a",
+        { class: "pill mono", href: path, onClick: go(ctx, path) },
+        p.alias,
+      );
+    }),
+  );
+}
 
-function budgetPill(ctx, project) {
+function budgetPill(project) {
   if (!project.budget_micros) {
     return pill(`${money(project.spend_micros)} this month, no budget`);
   }

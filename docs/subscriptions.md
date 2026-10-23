@@ -64,7 +64,8 @@ A subscription model:
   go through an egress proxy, set `HTTPS_PROXY` on the gateway.
 - stores no API key.
 - answers only the Anthropic Messages API, which Claude Code speaks.
-- cannot be a filter's model, a router's model, or a router destination
+- cannot be a filter's model, a route step's model or destination, or the
+  model a router's model step sends to
   ([Models that filters and routers run on](gateway.md#models-that-filters-and-routers-run-on)).
 
 Claude Code asks for some background work by Anthropic's own model name,

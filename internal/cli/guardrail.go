@@ -14,23 +14,14 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// Flag descriptions that 'guardrail set', 'limit' and 'budget' share.
-const (
-	rpmUsage    = "requests per minute (0 clears it)"
-	tpmUsage    = "tokens per minute (0 clears it)"
-	maxOutUsage = "cap on generated tokens per request (0 clears it)"
-	budgetUsage = "budget per period, in CHF (0 clears it)"
-	periodUsage = "budget period: day or month"
-)
-
 // guardrailFlags are the flags of 'keera guardrail'. Numbers use -1 for "not
 // given" and 0 to clear the field; everything else is cleared by its --no- flag.
 type guardrailFlags struct {
 	models           string
 	noModels         bool
-	rpm              int
-	tpm              int
-	maxOut           int
+	requests         int64
+	tokens           int64
+	per              string
 	budget           float64
 	period           string
 	systemPrompt     string
@@ -53,11 +44,13 @@ func registerGuardrailFlags(fs *flag.FlagSet) *guardrailFlags {
 	f := &guardrailFlags{}
 	fs.StringVar(&f.models, "models", "", "comma-separated models this scope may use")
 	fs.BoolVar(&f.noModels, "no-models", false, "stop this scope limiting the models; an outer level still does")
-	fs.IntVar(&f.rpm, "rpm", -1, rpmUsage)
-	fs.IntVar(&f.tpm, "tpm", -1, tpmUsage)
-	fs.IntVar(&f.maxOut, "max-output-tokens", -1, maxOutUsage)
-	fs.Float64Var(&f.budget, "budget", -1, budgetUsage)
-	fs.StringVar(&f.period, "period", "", periodUsage)
+	fs.Int64Var(&f.requests, "requests", -1, "requests per --per (0 clears it)")
+	fs.Int64Var(&f.tokens, "tokens", -1, "tokens per --per (0 clears it)")
+	fs.StringVar(&f.per, "per", "",
+		"which rate limit to set, by what it counts over: minute, day or month (default minute)")
+	fs.Float64Var(&f.budget, "budget", -1, "budget per --period, in CHF (0 clears it)")
+	fs.StringVar(&f.period, "period", "",
+		"which budget to set, by when it resets: day or month (default month)")
 	fs.StringVar(&f.systemPrompt, "system-prompt", "",
 		"standing instruction sent ahead of every chat request; @path reads a file")
 	fs.BoolVar(&f.noSystemPrompt, "no-system-prompt", false, "remove this scope's system prompt")
@@ -94,11 +87,10 @@ func (f *guardrailFlags) apply(lim *policy.Limits) error {
 	if err := setList(&lim.AllowedModels, "models", f.models, f.noModels); err != nil {
 		return err
 	}
-	setInt(&lim.RPM, f.rpm)
-	setInt(&lim.TPM, f.tpm)
-	setInt(&lim.MaxOutputTokens, f.maxOut)
-	setBudget(&lim.BudgetMicros, f.budget)
-	if err := setPeriod(&lim.BudgetPeriod, f.period); err != nil {
+	if err := f.applyRate(lim); err != nil {
+		return err
+	}
+	if err := f.applyBudget(lim); err != nil {
 		return err
 	}
 	// Each part is cleared by its own flag rather than by a reserved word,
@@ -156,30 +148,60 @@ func setList(dst *[]string, name, v string, clear bool) error {
 // a float, and truncating would lose a millionth.
 func micros(units float64) int64 { return int64(math.Round(units * 1_000_000)) }
 
-// setBudget sets a budget given in CHF; 0 removes it.
-func setBudget(dst **int64, amount float64) {
-	// Negative is the flag's default, for not given, as in setInt.
-	if amount < 0 {
-		return
+// applyRate changes the rate limit of one period, --per, and leaves the
+// others alone. A limit left with neither count goes.
+func (f *guardrailFlags) applyRate(lim *policy.Limits) error {
+	per := policy.PeriodMinute
+	if f.per != "" {
+		per = policy.Period(f.per)
+		if per != policy.PeriodMinute && !per.Valid() {
+			return fmt.Errorf("--per must be minute, day or month")
+		}
 	}
-	m := micros(amount)
-	if m == 0 {
-		*dst = nil
-		return
-	}
-	*dst = &m
-}
-
-// setPeriod applies --period, which may be left empty.
-func setPeriod(dst **policy.Period, given string) error {
-	if given == "" {
+	if f.requests < 0 && f.tokens < 0 {
+		if f.per != "" {
+			return fmt.Errorf("--per says which rate limit to set; give --requests, --tokens or both")
+		}
 		return nil
 	}
-	p := policy.Period(given)
-	if !p.Valid() {
-		return fmt.Errorf("--period must be day or month")
+	i := slices.IndexFunc(lim.RateLimits, func(r policy.RateLimit) bool { return r.Per() == per })
+	if i < 0 {
+		lim.RateLimits = append(lim.RateLimits, policy.RateLimit{Period: per})
+		i = len(lim.RateLimits) - 1
 	}
-	*dst = &p
+	rl := &lim.RateLimits[i]
+	if f.requests >= 0 {
+		rl.Requests = f.requests
+	}
+	if f.tokens >= 0 {
+		rl.Tokens = f.tokens
+	}
+	if rl.Requests == 0 && rl.Tokens == 0 {
+		lim.RateLimits = slices.Delete(lim.RateLimits, i, i+1)
+	}
+	return nil
+}
+
+// applyBudget changes the budget of one period, --period, and leaves the
+// other alone. A budget of 0 goes.
+func (f *guardrailFlags) applyBudget(lim *policy.Limits) error {
+	period := policy.PeriodMonth
+	if f.period != "" {
+		period = policy.Period(f.period)
+		if !period.Valid() {
+			return fmt.Errorf("--period must be day or month")
+		}
+	}
+	if f.budget < 0 {
+		if f.period != "" {
+			return fmt.Errorf("--period says which budget to set; give --budget too")
+		}
+		return nil
+	}
+	lim.Budgets = slices.DeleteFunc(lim.Budgets, func(b policy.Budget) bool { return b.Per() == period })
+	if m := micros(f.budget); m > 0 {
+		lim.Budgets = append(lim.Budgets, policy.Budget{BudgetMicros: m, Period: period})
+	}
 	return nil
 }
 
@@ -391,29 +413,64 @@ func printEffectiveModels(w *table, eff control.Effective) {
 		narrowedBy(eff, func(l policy.Limits) bool { return l.AllowedModels != nil }))
 }
 
+// Rate limits and budgets do not merge: each may count over another period,
+// and every one must hold, so every one is printed with its level.
 func printEffectiveRates(w *table, eff control.Effective) {
-	// Rate limits are enforced at every level, so the tightest one binds.
-	showTightest(w, eff, "requests/min", func(s policy.Scope) int { return s.RPM })
-	showTightest(w, eff, "tokens/min", func(s policy.Scope) int { return s.TPM })
-	showSet(w, "max output tokens", "(unlimited)", eff.MaxOutputTokens != 0,
-		eff.MaxOutputTokens,
-		narrowedBy(eff, func(l policy.Limits) bool { return l.MaxOutputTokens != nil }))
+	printEveryLevel(w, eff, "rate limit", ratesOf)
 }
 
 func printEffectiveSpend(w *table, eff control.Effective) {
-	// Budgets do not merge: every level's must hold, so every one is printed.
+	printEveryLevel(w, eff, "budget", budgetsOf)
+}
+
+func printEveryLevel(w *table, eff control.Effective, name string, says func(policy.Limits) []string) {
 	limited := false
-	for _, s := range eff.Scopes {
-		if s.BudgetMicros == 0 {
-			continue
+	for _, l := range eff.Levels {
+		for _, v := range says(l.Limits) {
+			limited = true
+			showFrom(w, name, v, levelLabel(l))
 		}
-		limited = true
-		showFrom(w, "budget", policy.FormatMoney(s.BudgetMicros)+" per "+string(s.Period),
-			levelName(eff, string(s.Type), s.ID))
 	}
 	if !limited {
-		showFrom(w, "budget", "(unlimited)", "")
+		showFrom(w, name, "(unlimited)", "")
 	}
+}
+
+// ratesOf says a guardrail's own rate limits, such as "120 requests and
+// 50000 tokens per minute".
+func ratesOf(lim policy.Limits) []string {
+	var out []string
+	for _, rl := range lim.RateLimits {
+		if rl.Requests > 0 || rl.Tokens > 0 {
+			out = append(out, rateText(rl))
+		}
+	}
+	return out
+}
+
+// rateText says one rate limit, as a guardrail or a router step has it.
+func rateText(rl policy.RateLimit) string {
+	var parts []string
+	if rl.Requests > 0 {
+		parts = append(parts, fmt.Sprintf("%d requests", rl.Requests))
+	}
+	if rl.Tokens > 0 {
+		parts = append(parts, fmt.Sprintf("%d tokens", rl.Tokens))
+	}
+	return strings.Join(parts, " and ") + " per " + string(rl.Per())
+}
+
+// budgetText says one budget, as a guardrail or a router step has it.
+func budgetText(b policy.Budget) string {
+	return policy.FormatMoney(b.BudgetMicros) + " per " + string(b.Per())
+}
+
+func budgetsOf(lim policy.Limits) []string {
+	var out []string
+	for _, b := range lim.Budgets {
+		out = append(out, budgetText(b))
+	}
+	return out
 }
 
 func printEffectivePrompt(w *table, eff control.Effective) {
@@ -457,23 +514,6 @@ func printEffectiveSandboxes(w *table, eff control.Effective) {
 		}))
 }
 
-func showTightest(w *table, eff control.Effective, name string,
-	of func(policy.Scope) int,
-) {
-	tightest, from := 0, ""
-	for _, s := range eff.Scopes {
-		v := of(s)
-		if v > 0 && (tightest == 0 || v < tightest) {
-			tightest, from = v, levelName(eff, string(s.Type), s.ID)
-		}
-	}
-	if tightest == 0 {
-		showFrom(w, name, "(unlimited)", "")
-		return
-	}
-	showFrom(w, name, tightest, from)
-}
-
 // narrowedBy names the innermost level that set a field. For a field that
 // narrows, that level decided it.
 func narrowedBy(eff control.Effective, set func(policy.Limits) bool) string {
@@ -498,21 +538,22 @@ func joinedFrom(eff control.Effective, set func(policy.Limits) bool) string {
 	return strings.Join(names, " then ")
 }
 
-func levelName(eff control.Effective, scopeType, scopeID string) string {
-	for _, l := range eff.Levels {
-		if string(l.Type) == scopeType && l.ID == scopeID {
-			return levelLabel(l)
-		}
-	}
-	return scopeType
-}
-
 // levelLabel names a level by its name, or by its id when it has none.
 func levelLabel(l control.EffectiveLevel) string {
 	if l.Name == "" {
 		return string(l.Type) + " " + l.ID
 	}
 	return string(l.Type) + " " + l.Name
+}
+
+// showEach shows a row for each value, or one saying the scope sets none.
+func showEach(w *table, name string, vs []string) {
+	if len(vs) == 0 {
+		vs = []string{notSet}
+	}
+	for _, v := range vs {
+		show(w, name, v)
+	}
 }
 
 // notSet is what a scope's own guardrail shows for a field it leaves to the
@@ -523,18 +564,8 @@ const notSet = "(not set here)"
 // 'guardrail effective'.
 func printLimits(w *table, lim policy.Limits, scope string) {
 	show(w, "models", joinedOr(lim.AllowedModels, notSet))
-	show(w, "max output tokens", notSetHere(lim.MaxOutputTokens))
-	show(w, "requests/min", notSetHere(lim.RPM))
-	show(w, "tokens/min", notSetHere(lim.TPM))
-	if lim.BudgetMicros == nil {
-		show(w, "budget", notSet)
-	} else {
-		p := policy.PeriodMonth
-		if lim.BudgetPeriod != nil {
-			p = *lim.BudgetPeriod
-		}
-		show(w, "budget", policy.FormatMoney(*lim.BudgetMicros)+" per "+string(p))
-	}
+	showEach(w, "rate limit", ratesOf(lim))
+	showEach(w, "budget", budgetsOf(lim))
 	if len(lim.Filters) == 0 {
 		show(w, "filters", "(none)")
 	} else {

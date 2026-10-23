@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
 	"maps"
 	"strconv"
@@ -320,14 +319,9 @@ func (s *responsesStream) finish(cut error) error {
 		return err
 	}
 	if cut != nil {
-		msg := "the connection to the model broke before the answer was finished"
-		if f, ok := errors.AsType[streamFailure](cut); ok {
-			msg = f.msg
-		}
 		failed := s.response("failed", nil)
-		// server_error, because the request was fine and trying it again is
-		// the remedy.
-		failed.Error = map[string]string{"code": "server_error", "message": msg}
+		// server_error: the request was fine, and retrying is the remedy.
+		failed.Error = map[string]string{"code": "server_error", "message": cutMessage(cut)}
 		return s.emit("response.failed", map[string]any{"response": failed})
 	}
 	if err := s.closeItem(); err != nil {

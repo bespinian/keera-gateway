@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"errors"
 	"io"
 	"sync"
 	"time"
@@ -65,6 +66,15 @@ func (c *chatChunks) counts() (*tokenUsage, int, time.Time) {
 type streamFailure struct{ msg string }
 
 func (f streamFailure) Error() string { return f.msg }
+
+// cutMessage is what the client is told of a stream cut short. Any other
+// error is the connection breaking.
+func cutMessage(cut error) string {
+	if f, ok := errors.AsType[streamFailure](cut); ok {
+		return f.msg
+	}
+	return "the connection to the model broke before the answer was finished"
+}
 
 // failure reports an error the upstream sent in place of a chunk, and a stream
 // that stopped before it said why it stopped. Every backend ends a whole

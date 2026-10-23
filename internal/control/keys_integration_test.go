@@ -72,7 +72,7 @@ func TestAMemberRotatesTheirOwnKeyAndItKeepsItsLimits(t *testing.T) {
 		Via: authn.MethodSession, Role: authn.RoleMember, OrgID: "org_b", UserID: "user_dave",
 	}
 	if err := tn.srv.st.PutGuardrail(tn.ctx, policy.ScopeKey, "key_alice",
-		policy.Limits{RPM: new(120)}); err != nil {
+		policy.Limits{RateLimits: []policy.RateLimit{{Requests: 120}}}); err != nil {
 		t.Fatal(err)
 	}
 	rotate := func(p *authn.Principal, keyID string) *httptest.ResponseRecorder {
@@ -109,7 +109,7 @@ func TestAMemberRotatesTheirOwnKeyAndItKeepsItsLimits(t *testing.T) {
 		t.Errorf("the new key is %+v", created)
 	}
 	lim, err := tn.srv.st.GetGuardrail(tn.ctx, policy.ScopeKey, created.ID)
-	if err != nil || lim.RPM == nil || *lim.RPM != 120 {
+	if err != nil || len(lim.RateLimits) != 1 || lim.RateLimits[0].Requests != 120 {
 		t.Errorf("the new key's own guardrail = %+v, %v; want 120 requests", lim, err)
 	}
 	if _, err := tn.srv.st.LookupKey(tn.ctx, []byte("hash-of-key_alice")); !errors.Is(err, policy.ErrKeyRevoked) {

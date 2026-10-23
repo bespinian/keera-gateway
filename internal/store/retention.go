@@ -81,7 +81,7 @@ func (s *Store) PurgeEnded(ctx context.Context, before time.Time) (int64, error)
 			), cleared_guardrails AS (
 				DELETE FROM guardrails WHERE scope_type = 'key' AND scope_id IN (SELECT id FROM gone)
 			), cleared_spend AS (
-				DELETE FROM spend WHERE scope_type = 'key' AND scope_id IN (SELECT id FROM gone)
+				DELETE FROM spend WHERE scope_type = 'key' AND `+scopeOwner+` IN (SELECT id FROM gone)
 			)
 			SELECT count(*) FROM gone`, before, purgeBatch).Scan(&n)
 		return n, err

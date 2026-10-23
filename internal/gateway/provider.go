@@ -9,18 +9,13 @@ import (
 // fitProvider fixes the few fields a hosted provider refuses in a request that
 // is otherwise right for it.
 //
-// OpenAI's reasoning models - every model but the gpt-4 family and older -
-// refuse max_tokens on chat completions and want max_completion_tokens, and
-// refuse any temperature or top_p but their default. The gateway sends
-// max_tokens whenever a key has an output ceiling, and its filters, routers and
-// model checks send a temperature of 0. So both are fixed here rather than
-// refused there. Dropping a sampling setting the model would reject anyway
-// changes nothing it could have done.
+// OpenAI's reasoning models (all but gpt-4 and older) want max_completion_tokens
+// rather than max_tokens on chat completions, and refuse any temperature or
+// top_p but the default. The gateway's own filters, routers and model checks
+// send a temperature of 0, so both are fixed here rather than refused there.
+// Dropping a setting the model would reject anyway changes nothing.
 //
-// Anthropic's models since Opus 4.7 refuse temperature, top_p and top_k too, or
-// every value but the default, so those are dropped the same way.
-//
-// Every other model's request is returned untouched.
+// Anthropic's models since Opus 4.7 refuse temperature, top_p and top_k too.
 func fitProvider(m policy.Model, path string, payload []byte) []byte {
 	switch {
 	case m.Provider == "openai" && (path == "/chat/completions" || path == "/responses"):
@@ -51,7 +46,7 @@ func fitOpenAI(m policy.Model, path string, payload []byte) []byte {
 	changed := false
 	// Every current OpenAI chat model takes max_completion_tokens, so the rename
 	// is safe for the older ones too. A null max_completion_tokens counts as
-	// absent, as it does for the clamp, or the clamped max_tokens would be lost.
+	// absent, or the max_tokens would be lost.
 	if raw, ok := b.fields["max_tokens"]; ok && path == "/chat/completions" {
 		if _, has := b.value("max_completion_tokens"); !has {
 			b.set("max_completion_tokens", raw)

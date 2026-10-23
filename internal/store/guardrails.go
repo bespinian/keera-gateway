@@ -12,8 +12,7 @@ import (
 // limitFields are a guardrail's columns, in the order limitTargets reads them
 // and limitValues writes them. Every query over them is built from this list,
 // so a new limit is one entry here and one in each of those two.
-var limitFields = []string{"allowed_models", "max_output_tokens", "rpm", "tpm",
-	"budget_micros", "budget_period", "system_prompt", "filters",
+var limitFields = []string{"allowed_models", "rate_limits", "budgets", "system_prompt", "filters",
 	"max_sandboxes", "max_sandbox_ttl_seconds", "sandbox_classes",
 	"max_sandbox_cpu_millis", "max_sandbox_memory_mib", "allowed_tools", "allowed_repos"}
 
@@ -42,36 +41,39 @@ var copyKeyGuardrailSQL = `INSERT INTO guardrails (scope_type, scope_id, ` +
 	SELECT scope_type, $2, ` + strings.Join(limitFields, ", ") + `, now()
 	FROM guardrails WHERE scope_type = 'key' AND scope_id = $1`
 
-// limitTargets points at the fields limitColumns fills. The budget period is
-// nullable text, so it is scanned into period and converted afterwards.
-func limitTargets(lim *policy.Limits, period **string) []any {
-	return []any{&lim.AllowedModels, &lim.MaxOutputTokens, &lim.RPM, &lim.TPM,
-		&lim.BudgetMicros, period, &lim.SystemPrompt, &lim.Filters,
+// limitTargets points at the fields limitColumns fills.
+func limitTargets(lim *policy.Limits) []any {
+	return []any{&lim.AllowedModels, &lim.RateLimits, &lim.Budgets, &lim.SystemPrompt, &lim.Filters,
 		&lim.MaxSandboxes, &lim.MaxSandboxTTLSeconds, &lim.SandboxClasses,
 		&lim.MaxSandboxCPU, &lim.MaxSandboxMemory, &lim.AllowedTools, &lim.AllowedRepos}
 }
 
 // limitValues is what putGuardrailSQL writes, in limitFields' order.
 func limitValues(lim policy.Limits) []any {
-	return []any{lim.AllowedModels, lim.MaxOutputTokens, lim.RPM, lim.TPM,
-		lim.BudgetMicros, periodStr(lim.BudgetPeriod), lim.SystemPrompt, lim.Filters,
+	return []any{lim.AllowedModels, jsonList(lim.RateLimits), jsonList(lim.Budgets),
+		lim.SystemPrompt, lim.Filters,
 		lim.MaxSandboxes, lim.MaxSandboxTTLSeconds, lim.SandboxClasses,
 		lim.MaxSandboxCPU, lim.MaxSandboxMemory, lim.AllowedTools, lim.AllowedRepos}
 }
 
+// jsonList writes an empty list as NULL. The driver would send a nil slice as
+// JSON null, which the column's check refuses.
+func jsonList[T any](list []T) any {
+	if len(list) == 0 {
+		return nil
+	}
+	return list
+}
+
 func (s *Store) GetGuardrail(ctx context.Context, scopeType policy.ScopeType, scopeID string) (policy.Limits, error) {
-	var (
-		lim    policy.Limits
-		period *string
-	)
+	var lim policy.Limits
 	err := s.pool.QueryRow(ctx, `SELECT `+limitColumns+`
 		FROM guardrails p WHERE p.scope_type = $1 AND p.scope_id = $2`,
 		string(scopeType), scopeID,
-	).Scan(limitTargets(&lim, &period)...)
+	).Scan(limitTargets(&lim)...)
 	if err != nil {
 		return policy.Limits{}, notFound(err)
 	}
-	lim.BudgetPeriod = periodPtr(period)
 	return lim, nil
 }
 

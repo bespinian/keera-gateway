@@ -26,7 +26,7 @@ func TestDeleteOrgTakesItsTenancyAndKeepsItsHistory(t *testing.T) {
 		typ policy.ScopeType
 		id  string
 	}{{policy.ScopeOrg, f.orgID}, {policy.ScopeProject, f.projectID}, {policy.ScopeKey, f.keyID}} {
-		if err := st.PutGuardrail(ctx, sc.typ, sc.id, policy.Limits{RPM: new(10)}); err != nil {
+		if err := st.PutGuardrail(ctx, sc.typ, sc.id, policy.Limits{RateLimits: []policy.RateLimit{{Requests: 10}}}); err != nil {
 			t.Fatalf("PutGuardrail %s: %v", sc.typ, err)
 		}
 	}
@@ -164,7 +164,7 @@ func TestUpdateProjectLeavesEverythingThatPointsAtItAlone(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
 	if err := st.PutGuardrail(ctx, policy.ScopeProject, f.projectID,
-		policy.Limits{RPM: new(60)}); err != nil {
+		policy.Limits{RateLimits: []policy.RateLimit{{Requests: 60}}}); err != nil {
 		t.Fatalf("PutGuardrail: %v", err)
 	}
 
@@ -197,7 +197,7 @@ func TestUpdateProjectLeavesEverythingThatPointsAtItAlone(t *testing.T) {
 		t.Errorf("the key's project = %q, want %q", res.Key.ProjectID, f.projectID)
 	}
 	lim, err := st.GetGuardrail(ctx, policy.ScopeProject, f.projectID)
-	if err != nil || lim.RPM == nil || *lim.RPM != 60 {
+	if err != nil || len(lim.RateLimits) != 1 || lim.RateLimits[0].Requests != 60 {
 		t.Errorf("the project's guardrails after the rename = %+v, %v", lim, err)
 	}
 	if names, err := st.ProjectNames(ctx, f.orgID); err != nil || names[f.projectID] != "Payments" {
@@ -228,7 +228,7 @@ func TestDeleteProjectIsRefusedWhileAKeyStillWorks(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
 	if err := st.PutGuardrail(ctx, policy.ScopeProject, f.projectID,
-		policy.Limits{RPM: new(60)}); err != nil {
+		policy.Limits{RateLimits: []policy.RateLimit{{Requests: 60}}}); err != nil {
 		t.Fatalf("PutGuardrail: %v", err)
 	}
 

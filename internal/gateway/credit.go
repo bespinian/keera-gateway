@@ -11,25 +11,25 @@ import (
 
 // onKey reports whether a request may call a model on the deployment's own
 // provider key, which an organisation may have to pay for in advance: the
-// model it names, any its router decides with or may choose, or a filter's.
-// It is asked before anything is spent, so a router that might pick such a
-// model counts even if it would pick another.
+// model it names, any its route steps decide with or may choose, or a
+// filter's. It is asked before anything is spent, so a step that might pick
+// such a model counts even if it would pick another.
 func (s *Server) onKey(c *call) bool {
-	_, decider := s.keyDecider(c)
-	return decider || len(s.keyAnswerers(c)) > 0 || s.filtersOnKey(c.res.Key.OrgID, c.res.Filters)
+	return len(s.keyDeciders(c)) > 0 || len(s.keyAnswerers(c)) > 0 ||
+		s.filtersOnKey(c.res.Key.OrgID, s.callFilters(c))
 }
 
 // keyAnswerers is the models on the deployment's key a request may be
-// answered by: the one it names, or every one its router may choose.
+// answered by: the one it names, or every one its router may reach.
 func (s *Server) keyAnswerers(c *call) []policy.Model {
-	if !c.routed {
+	if !c.viaRouter() {
 		if c.model.PlatformKey {
 			return []policy.Model{c.model}
 		}
 		return nil
 	}
 	var out []policy.Model
-	for _, alias := range append([]string{c.router.Fallback}, c.router.Destinations...) {
+	for _, alias := range c.router.Reaches() {
 		if m, ok := s.keyModel(c.res.Key.OrgID, alias); ok {
 			out = append(out, m)
 		}
@@ -37,17 +37,33 @@ func (s *Server) keyAnswerers(c *call) []policy.Model {
 	return out
 }
 
-// keyDecider is the model a request's router decides with, when it is on the
-// deployment's key. A router that asks no model has none.
-func (s *Server) keyDecider(c *call) (policy.Model, bool) {
-	if !c.routed || !c.router.Decides() {
-		return policy.Model{}, false
+// keyDeciders is the models a request's route steps decide with that are on
+// the deployment's key. A step that asks no model has none.
+func (s *Server) keyDeciders(c *call) []policy.Model {
+	var out []policy.Model
+	for _, rt := range c.router.Routes() {
+		if !rt.Decides() {
+			continue
+		}
+		if m, ok := s.keyModel(c.res.Key.OrgID, rt.Model); ok {
+			out = append(out, m)
+		}
 	}
-	return s.keyModel(c.res.Key.OrgID, c.router.Model)
+	return out
 }
 
-// filtersOnKey reports whether one of the filters runs on a model on the
-// deployment's key.
+// callFilters is every filter a request may pass: its router's, then the
+// key's own.
+func (s *Server) callFilters(c *call) []string {
+	var out []string
+	for step := range c.router.Steps() {
+		if step.Kind == policy.StepFilter {
+			out = append(out, step.Ref)
+		}
+	}
+	return append(out, c.res.Filters...)
+}
+
 func (s *Server) filtersOnKey(org string, filters []string) bool {
 	return len(s.keyFilterModels(org, filters)) > 0
 }
@@ -131,7 +147,7 @@ const mostOutputTokens = 10_000_000
 
 // creditHold is the most a request may take from the credit: its whole body
 // as prompt, its output ceiling as answer, at the dearest model on the key it
-// may reach, plus its router's decision, asked twice, and a rewrite of the
+// may reach, plus each route step's decision, asked twice, and a rewrite of the
 // body by each filter on the key. It errs high, and is given back when the
 // request has been charged.
 func (s *Server) creditHold(c *call, b *body) int64 {
@@ -145,12 +161,12 @@ func (s *Server) creditHold(c *call, b *body) int64 {
 	}
 	// A decision is billed apart from the answer. One asked by letter that
 	// comes back unreadable is asked again by name.
-	if m, ok := s.keyDecider(c); ok {
-		if line, ok := m.Bill(policy.Tokens{Input: in, Output: routerOutputTokens}); ok {
+	for _, m := range s.keyDeciders(c) {
+		if line, ok := m.Bill(policy.Tokens{Input: in, Output: routeOutputTokens}); ok {
 			most += 2 * line.CreditMicros
 		}
 	}
-	return most + s.filtersHold(c.res.Key.OrgID, c.res.Filters, in)
+	return most + s.filtersHold(c.res.Key.OrgID, s.callFilters(c), in)
 }
 
 // filtersHold is the most the filters on the deployment's key may take from
@@ -171,12 +187,11 @@ func (c *call) outputTokens(b *body) int {
 	if c.surf.kind == policy.KindEmbedding {
 		return 0
 	}
-	return outputCeiling(b, c.res.MaxOutputTokens)
+	return outputCeiling(b)
 }
 
-// outputCeiling is the most output tokens a request asks for, held to the
-// guardrail's ceiling.
-func outputCeiling(b *body, guardrail int) int {
+// outputCeiling is the most output tokens a request asks for.
+func outputCeiling(b *body) int {
 	asked := 0
 	if b != nil {
 		for _, field := range []string{"max_tokens", "max_completion_tokens", "max_output_tokens"} {
@@ -187,9 +202,6 @@ func outputCeiling(b *body, guardrail int) int {
 	}
 	if asked == 0 {
 		asked = unstatedOutputTokens
-	}
-	if guardrail > 0 {
-		asked = min(asked, guardrail)
 	}
 	return asked
 }

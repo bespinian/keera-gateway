@@ -9,7 +9,7 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// The text form of a pattern filter's rules and of a size router's ceilings.
+// The text form of a pattern filter's rules and of a size route step's ceilings.
 // The wire carries them as JSON; people edit and review them as text, so the
 // command line reads and prints that text.
 
@@ -114,7 +114,7 @@ func formatRules(rules []policy.FilterRule) []string {
 	return out
 }
 
-// parseDestinations reads a router's destinations, and a size router's
+// parseDestinations reads a route step's destinations, and a size step's
 // ceilings beside them:
 //
 //	--destinations keera-speed:4000,keera-frontier
@@ -163,19 +163,6 @@ func parseTokenCount(s string) (int, error) {
 			"the destination that should take what the others will not")
 	}
 	return n * mult, nil
-}
-
-// formatDestinations prints destinations with their ceilings, in the form
-// parseDestinations reads.
-func formatDestinations(rt policy.Router) string {
-	out := make([]string, 0, len(rt.Destinations))
-	for _, alias := range rt.Destinations {
-		if n, bounded := rt.Ceiling(alias); bounded {
-			alias += ":" + formatTokenCount(n)
-		}
-		out = append(out, alias)
-	}
-	return strings.Join(out, ", ")
 }
 
 // formatTokenCount is parseTokenCount's inverse, so '32k' prints as '32k'.

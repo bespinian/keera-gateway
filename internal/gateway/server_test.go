@@ -59,11 +59,6 @@ func (f *fakeSource) Filter(orgID, name string) (policy.Filter, bool) {
 	return fl, ok
 }
 
-func (f *fakeSource) Router(orgID, alias string) (policy.Router, bool) {
-	rt, ok := f.routers[orgID+"/"+alias]
-	return rt, ok
-}
-
 // MCPServer reads a server keyed "org/alias", or by its alias alone for
 // testOrg, as Model does.
 func (f *fakeSource) MCPServer(orgID, alias string) (policy.MCPServer, bool) {
@@ -77,11 +72,16 @@ func (f *fakeSource) MCPServer(orgID, alias string) (policy.MCPServer, bool) {
 	return m, ok
 }
 
+func (f *fakeSource) Router(orgID, alias string) (policy.Router, bool) {
+	p, ok := f.routers[orgID+"/"+alias]
+	return p, ok
+}
+
 func (f *fakeSource) Routers(orgID string) []policy.Router {
 	out := []policy.Router{}
-	for key, rt := range f.routers {
+	for key, p := range f.routers {
 		if strings.HasPrefix(key, orgID+"/") {
-			out = append(out, rt)
+			out = append(out, p)
 		}
 	}
 	slices.SortFunc(out, func(a, b policy.Router) int { return cmp.Compare(a.Alias, b.Alias) })
@@ -113,12 +113,26 @@ type fakeBudgets struct {
 	// held is what requests hold of the credit now, and mostHeld the most
 	// they ever held at once.
 	held, mostHeld int64
-	// spent is what Spent reports for every window, which is enough for the
-	// header assertions: what varies in them is the limit, not the ledger.
+	// spent is what Spent reports for every window. The header assertions
+	// vary the limit, not the ledger.
 	spent int64
+	// spentType makes every budget of that scope type read as spent, so a
+	// router's budget can be over while the key's are not.
+	spentType policy.ScopeType
+	// chargedTo is the scopes of the last charge.
+	chargedTo []policy.Scope
+	// tallied is the requests or tokens counted against each scope id.
+	tallied map[string]int64
 }
 
-func (f *fakeBudgets) Allow([]policy.Scope, time.Time) error { return f.err }
+func (f *fakeBudgets) Allow(scopes []policy.Scope, _ time.Time) error {
+	for _, sc := range scopes {
+		if f.spentType != "" && sc.Type == f.spentType && sc.BudgetMicros > 0 {
+			return &policy.ErrBudgetExceeded{Scope: sc, Spent: sc.BudgetMicros, Budget: sc.BudgetMicros}
+		}
+	}
+	return f.err
+}
 
 func (f *fakeBudgets) HoldCredit(_ string, micros int64) (int64, error) {
 	if f.creditErr != nil {
@@ -143,15 +157,41 @@ func (f *fakeBudgets) ChargeCredit(_ string, micros int64) {
 	f.credited += micros
 }
 
-func (f *fakeBudgets) Spent(policy.ScopeType, string, policy.Period, time.Time) int64 {
+func (f *fakeBudgets) Spent(_ policy.ScopeType, id string, _ policy.Period, _ time.Time) int64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if n, ok := f.tallied[id]; ok {
+		return n
+	}
 	return f.spent
 }
 
-func (f *fakeBudgets) Charge(_ []policy.Scope, micros int64, _ time.Time) {
+// Tally keeps counts per scope id, which Spent then reports for that id.
+func (f *fakeBudgets) Tally(scopes []policy.Scope, meter policy.Meter, n int64, _ time.Time) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	for _, sc := range scopes {
+		if sc.Meter == meter {
+			if f.tallied == nil {
+				f.tallied = map[string]int64{}
+			}
+			f.tallied[sc.ID] += n
+		}
+	}
+}
+
+// StartRequest counts as Tally does, and EndRequest leaves the count, so a
+// test sees every request let in.
+func (f *fakeBudgets) StartRequest(scopes []policy.Scope, now time.Time) {
+	f.Tally(scopes, policy.MeterRequests, 1, now)
+}
+
+func (f *fakeBudgets) EndRequest([]policy.Scope, time.Time) {}
+
+func (f *fakeBudgets) Charge(scopes []policy.Scope, micros int64, _ time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.chargedTo = scopes
 	f.charged += micros
 }
 
@@ -185,7 +225,7 @@ func (f *fakeSink) last(t *testing.T) store.Event {
 func (f *fakeSink) all() []store.Event {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]store.Event(nil), f.events...)
+	return slices.Clone(f.events)
 }
 
 func (f *fakeSink) count() int {
@@ -297,6 +337,22 @@ func (h *harness) url(path string) string {
 func (h *harness) post(t *testing.T, path, body string) *http.Response {
 	t.Helper()
 	return h.postWithKey(t, path, body, testKey)
+}
+
+// get reads one of the routes a client lists models on, with the test key.
+func (h *harness) get(t *testing.T, path string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, h.url(path), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+testKey)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	return resp
 }
 
 func (h *harness) postWithKey(t *testing.T, path, body, key string) *http.Response {
@@ -536,7 +592,7 @@ func TestBudgetExceededIsNotRetryable(t *testing.T) {
 
 func TestRateLimitReturns429WithRetryAfter(t *testing.T) {
 	limited := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"},
-		&policy.Limits{RPM: func() *int { n := 1; return &n }()}, nil, nil)
+		&policy.Limits{RateLimits: []policy.RateLimit{{Requests: 1}}}, nil, nil)
 	h := newHarness(t, jsonBackend(`{"usage":{"prompt_tokens":1,"completion_tokens":1}}`), nil, limited)
 
 	if resp := h.post(t, "/v1/chat/completions", `{"model":"keera-code","messages":[]}`); resp.StatusCode != 200 {
@@ -551,11 +607,49 @@ func TestRateLimitReturns429WithRetryAfter(t *testing.T) {
 	}
 }
 
+func TestARateLimitPerDayCountsOnlyWhatItLetThrough(t *testing.T) {
+	limited := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"},
+		&policy.Limits{RateLimits: []policy.RateLimit{{Requests: 2, Period: policy.PeriodDay}}}, nil, nil)
+	h := newHarness(t, jsonBackend(`{"usage":{"prompt_tokens":1,"completion_tokens":1}}`), nil, limited)
+
+	const body = `{"model":"keera-code","messages":[]}`
+	for i := range 2 {
+		if resp := h.post(t, "/v1/chat/completions", body); resp.StatusCode != http.StatusOK {
+			t.Fatalf("request %d: status = %d, want 200", i, resp.StatusCode)
+		}
+	}
+	if ev := h.sink.last(t); !slices.ContainsFunc(ev.Scopes, func(sc policy.Scope) bool {
+		return sc.ID == "org_1|requests"
+	}) {
+		t.Errorf("scopes = %+v, want the admitted request counted against the day", ev.Scopes)
+	}
+
+	resp := h.post(t, "/v1/chat/completions", body)
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusTooManyRequests ||
+		!strings.Contains(string(raw), "requests_quota_exceeded") {
+		t.Fatalf("status = %d, want 429 over the daily limit: %s", resp.StatusCode, raw)
+	}
+	if resp.Header.Get("Retry-After") == "" {
+		t.Error("a 429 without Retry-After leaves a client guessing")
+	}
+	if ev := h.sink.last(t); slices.ContainsFunc(ev.Scopes, func(sc policy.Scope) bool {
+		return sc.Meter != policy.MeterCost
+	}) {
+		t.Errorf("scopes = %+v, want the refusal not counted against the day", ev.Scopes)
+	}
+	if got := h.budgets.Spent(policy.ScopeOrg, "org_1|requests", policy.PeriodDay, time.Now()); got != 2 {
+		t.Errorf("counted %d requests, want the 2 let through", got)
+	}
+}
+
 func TestARefusedRequestDoesNotSpendTheLevelsAboveIt(t *testing.T) {
-	// One project is over its own rate limit; another project in the same
-	// organisation is not. The refusals must cost the organisation nothing, or
-	// one runaway editor drains the ceiling that protects everybody else's.
-	rpm := func(n int) *policy.Limits { return &policy.Limits{RPM: &n} }
+	// One project is over its rate limit; another in the same organisation is
+	// not. Refusals must cost the organisation nothing, or one runaway editor
+	// drains everybody's ceiling.
+	rpm := func(n int64) *policy.Limits {
+		return &policy.Limits{RateLimits: []policy.RateLimit{{Requests: n}}}
+	}
 	org := rpm(3)
 	busy := policy.Resolve(policy.Key{ID: "key_a", OrgID: "org_1", ProjectID: "project_1"},
 		org, rpm(1), nil)
@@ -729,23 +823,6 @@ func TestAProvidersRetryHeadersReachTheClient(t *testing.T) {
 	}
 }
 
-func TestOutputCeilingIsAppliedToTheForwardedRequest(t *testing.T) {
-	capped := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"},
-		&policy.Limits{MaxOutputTokens: func() *int { n := 256; return &n }()}, nil, nil)
-	h := newHarness(t, jsonBackend(`{"usage":{"prompt_tokens":1,"completion_tokens":1}}`), nil, capped)
-
-	h.post(t, "/v1/chat/completions", `{"model":"keera-code","messages":[],"max_tokens":100000}`)
-	var sent struct {
-		MaxTokens int `json:"max_tokens"`
-	}
-	if err := json.Unmarshal(<-h.upstreamBodies, &sent); err != nil {
-		t.Fatal(err)
-	}
-	if sent.MaxTokens != 256 {
-		t.Errorf("max_tokens reached the backend as %d, want the guardrail ceiling of 256", sent.MaxTokens)
-	}
-}
-
 // A key reaches its organisation's models, and never another organisation's,
 // even where both use an alias.
 func TestAKeyReachesItsOrganisationsOwnModelsAndNoOtherTenants(t *testing.T) {
@@ -781,13 +858,7 @@ func TestAKeyReachesItsOrganisationsOwnModelsAndNoOtherTenants(t *testing.T) {
 		t.Errorf("another tenant's model answered with %d, want 404", resp.StatusCode)
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, h.url("/v1/models"), nil)
-	req.Header.Set("Authorization", "Bearer "+testKey)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = resp.Body.Close() }()
+	resp := h.get(t, "/v1/models")
 	var out struct {
 		Data []struct {
 			ID string `json:"id"`
@@ -830,12 +901,7 @@ func TestGetModelTakesAnAliasWithASlash(t *testing.T) {
 	for _, path := range []string{
 		"/v1/models/anthropic/claude-sonnet-4-5", "/v1/models/anthropic%2Fclaude-sonnet-4-5",
 	} {
-		req, _ := http.NewRequest(http.MethodGet, h.url(path), nil)
-		req.Header.Set("Authorization", "Bearer "+testKey)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
+		resp := h.get(t, path)
 		var got modelEntry
 		_ = json.NewDecoder(resp.Body).Decode(&got)
 		_ = resp.Body.Close()
@@ -858,13 +924,7 @@ func TestListModelsShowsOnlyWhatTheKeyMayUse(t *testing.T) {
 	}
 	h := newHarness(t, jsonBackend(`{}`), models, restricted)
 
-	req, _ := http.NewRequest(http.MethodGet, h.url("/v1/models"), nil)
-	req.Header.Set("Authorization", "Bearer "+testKey)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = resp.Body.Close() }()
+	resp := h.get(t, "/v1/models")
 
 	var out struct {
 		Object string `json:"object"`
@@ -1041,27 +1101,10 @@ func TestACancelledStreamIsStillCharged(t *testing.T) {
 	}
 }
 
-func TestTheOutputCeilingDoesNotTouchEmbeddings(t *testing.T) {
-	// An embedding request has no output length, and max_tokens is a field the
-	// backend does not expect on that surface.
-	capped := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"},
-		&policy.Limits{MaxOutputTokens: func() *int { n := 256; return &n }()}, nil, nil)
-	models := map[string]policy.Model{
-		"keera-embed": {Alias: "keera-embed", Kind: policy.KindEmbedding, BackendModel: "e", Enabled: true},
-	}
-	h := newHarness(t, jsonBackend(`{"data":[],"usage":{"prompt_tokens":4}}`), models, capped)
-
-	h.post(t, "/v1/embeddings", `{"model":"keera-embed","input":"hello"}`)
-	sent := <-h.upstreamBodies
-	if strings.Contains(string(sent), "max_tokens") {
-		t.Errorf("max_tokens was added to an embedding request: %s", sent)
-	}
-}
-
 func TestServeChatEnforcesTheKeysGuardrails(t *testing.T) {
-	// The control panel's playground resolves one of the user's keys and then
-	// hands the request here. It must land on exactly the path the key takes:
-	// the alias is rewritten, the allow-list holds, and the key is billed.
+	// The playground resolves one of the user's keys and hands the request
+	// here. It must take the key's own path: alias rewritten, allow-list held,
+	// key billed.
 	models := map[string]policy.Model{
 		"keera-code": {
 			Alias: "keera-code", Kind: policy.KindChat, BackendModel: "served-name",
@@ -1182,22 +1225,18 @@ func TestHostedModelSendsTheEndpointsOwnCredential(t *testing.T) {
 	}
 }
 
-// ------------------------------------------------- what the developer is told
-
-// budgeted is a key with both kinds of limit on it, which is the shape every
-// header assertion below needs.
+// budgeted is a key with both kinds of limit, for the header assertions.
 func budgeted() *policy.Resolved {
-	month := policy.PeriodMonth
 	return policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"},
 		&policy.Limits{
-			RPM: new(10), BudgetMicros: new(int64(1_000_000)), BudgetPeriod: &month,
+			RateLimits: []policy.RateLimit{{Requests: 10}},
+			Budgets:    []policy.Budget{{BudgetMicros: 1_000_000, Period: policy.PeriodMonth}},
 		}, nil, nil)
 }
 
 func TestLimitHeadersRideEveryAnswer(t *testing.T) {
-	// A developer cannot see a guardrail from inside their editor. If the only
-	// time the gateway mentions one is the refusal, the first they know of a
-	// budget is the moment their agent stops.
+	// A developer cannot see a guardrail from their editor. Without headers,
+	// the first they know of a budget is when their agent stops.
 	h := newHarnessWith(t, jsonBackend(`{"usage":{"prompt_tokens":1,"completion_tokens":1}}`),
 		nil, budgeted(), Options{})
 	h.budgets.spent = 400_000
@@ -1252,11 +1291,10 @@ func TestASpentBudgetSaysWhenItLiftsAndWhereToLook(t *testing.T) {
 }
 
 func TestRefusalsAreRecordedWithTheirReason(t *testing.T) {
-	// The dashboard counts refusals and the developer's own screen lists them.
-	// Both read the usage log, so a refusal that is answered but not written is
-	// a support question nobody can answer.
+	// The dashboard and the developer's screen read refusals from the usage
+	// log, so every refusal must be written there.
 	limited := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"},
-		&policy.Limits{RPM: new(1)}, nil, nil)
+		&policy.Limits{RateLimits: []policy.RateLimit{{Requests: 1}}}, nil, nil)
 	h := newHarness(t, jsonBackend(`{"usage":{"prompt_tokens":1,"completion_tokens":1}}`),
 		nil, limited)
 

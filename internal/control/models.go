@@ -171,22 +171,15 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 		s.auditCredential(r, p, orgID, "model", m.Alias, credential)
 	}
 
-	// Done here rather than in a client, so the panel, 'keera model add' and
-	// 'keera model apply' all leave a new model usable.
 	if !found {
-		allowed, err := s.st.AllowInOrg(r.Context(), orgID, m.Alias)
-		if err != nil {
+		if err := s.allowInOrg(r, p, orgID, m.Alias); err != nil {
 			s.fail(w, err)
 			return
-		}
-		if allowed {
-			s.auditf(r, p, orgID, "guardrail.allow_model", string(policy.ScopeOrg), orgID, m.Alias)
 		}
 	}
 
 	s.changed(r, orgID)
-	// Read back, so has_api_key says what is stored and not what this body
-	// happened to mention.
+	// Read back, so has_api_key says what is stored.
 	stored, err := s.st.Model(r.Context(), orgID, m.Alias)
 	if err != nil {
 		s.fail(w, err)
@@ -243,10 +236,10 @@ func (s *Server) checkModelAlias(w http.ResponseWriter, r *http.Request, orgID, 
 }
 
 // checkSubscriptionUsers refuses to make a model a subscription model while a
-// filter or router uses it. Only Claude Code signed in to a Claude plan
-// reaches such a model, so they would fail on every request. It is the other
-// half of the subscription checks in checkReaderModel and
-// checkDestinations, since the writes can come in either order.
+// filter or router uses it. Only Claude Code signed in to a Claude plan reaches
+// such a model, so they would fail on every request. It is the other half of
+// the checks in checkReaderModel and Router.Problem, since the writes can come
+// in either order.
 func (s *Server) checkSubscriptionUsers(w http.ResponseWriter, r *http.Request,
 	orgID, alias string) bool {
 	filters, err := s.st.ListFilters(r.Context(), orgID)
@@ -260,18 +253,13 @@ func (s *Server) checkSubscriptionUsers(w http.ResponseWriter, r *http.Request,
 			users = append(users, "filter '"+f.Alias+"'")
 		}
 	}
-	routers, err := s.st.ListRouters(r.Context(), orgID)
+	routers, err := s.routersUsing(r.Context(), orgID, policy.StepModel, alias)
 	if err != nil {
 		s.fail(w, err)
 		return false
 	}
-	for _, rt := range routers {
-		switch {
-		case rt.ReadsWith() == alias:
-			users = append(users, "router '"+rt.Alias+"' (deciding model)")
-		case rt.Offers(alias):
-			users = append(users, "router '"+rt.Alias+"' (destination)")
-		}
+	for _, rtr := range routers {
+		users = append(users, "router '"+rtr+"'")
 	}
 	if len(users) == 0 {
 		return true
@@ -378,6 +366,15 @@ func (s *Server) deleteModel(w http.ResponseWriter, r *http.Request, p *authn.Pr
 		return
 	}
 	alias := r.PathValue("alias")
+	unlock, err := s.st.LockReferences(r.Context(), orgID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer unlock()
+	if !s.checkRouterUsers(w, r, orgID, policy.StepModel, alias) {
+		return
+	}
 	if err := s.st.DeleteModel(r.Context(), orgID, alias); err != nil {
 		s.fail(w, err)
 		return

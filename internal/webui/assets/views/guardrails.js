@@ -1,14 +1,13 @@
-// The guardrails dialog, for every level that has them.
-//
-// Limits nest: a project's must fit inside its organisation's, and a key's
-// inside its project's. So the ceiling is shown beside every field, rather
-// than found out as a number that silently did not take effect.
+// The guardrails dialog, for every level that has them. A guardrail is a set
+// of unordered blocks, each holding on its own. Limits nest (key inside
+// project inside organisation), so each field shows the ceiling above it
+// rather than silently not taking effect.
 
 import { api } from "../api.js";
 import {
   h,
+  icons,
   modal,
-  money,
   num,
   compact,
   pill,
@@ -16,12 +15,29 @@ import {
   plural,
   field,
   formModal,
+  modeTiles,
+  showError,
   banner,
 } from "../ui.js";
 import { orgNameOf } from "./orgs.js";
+import { reaches } from "./router-tree.js";
+import { modePills } from "./filters.js";
+import {
+  nodeCard,
+  headButton,
+  removeButton,
+  emptyCard,
+} from "./node-card.js";
+import {
+  rateShort,
+  budgetShort,
+  budgetText,
+  rateFields,
+  budgetFields,
+} from "./limits.js";
+import { oneLine } from "../status.js";
 
-// One title at every level, so a ceiling and what it holds read as the same
-// kind of thing. The subtitle says which scope is open.
+// One title at every level; the subtitle says which scope is open.
 const SCOPES = {
   org: {
     title: "Guardrails",
@@ -40,37 +56,31 @@ const SCOPES = {
     lead:
       "Applies to this key only. Useful for a key given to a contractor, " +
       "or one that should not use the project's whole budget.",
-    // Somebody who cannot edit wants to know what holds their key, not how to
-    // set it.
+    // For somebody who cannot edit: what holds their key, not how to set it.
     readLead:
       "Applies to this key, on top of its project's and organisation's " +
       "guardrails.",
   },
 };
 
-/** open shows the dialog for one scope.
- *
- *  ceilings is the chain above this scope, outermost first: [{label, limits}].
- *  It keeps "unlimited" honest: a key with no rpm of its own gets whatever its
- *  project allows.
- *
- *  canEdit false shows the limits read-only, as for every member: they are
- *  held by them, so they still get to see them. */
+/** ceilings is the chain above, outermost first: [{label, limits}]. It keeps
+ *  "unlimited" honest: a key without its own limit gets its project's.
+ *  canEdit false shows the limits read-only, since members are held by them
+ *  too. */
 export async function openGuardrails(
   ctx,
   { scope, id, name, models, orgID, ceilings = [], canEdit = true },
 ) {
-  // Filters and routers always belong to the organisation, whatever the
-  // scope. Routers go in the allow-list because a client names a router where
-  // it names a model.
+  // Filters and routers always belong to the organisation.
   const [limits, filters, routers] = await Promise.all([
     api.guardrails(scope, id).catch(() => null),
     orgID
       ? api
           .filters(orgID)
           .then((r) => r.data || [])
-          .catch(() => [])
+          .catch(() => null)
       : [],
+    // Routers go in the allow-list: a client names one where it names a model.
     orgID
       ? api
           .routers(orgID)
@@ -96,14 +106,13 @@ export async function openGuardrails(
     scope,
     id,
     name,
-    // Routers are shaped like models so the code below need not tell them
-    // apart.
+    // Routers are shaped like models so the code below treats them alike.
     models: models.concat(
-      routers.map((rt) => ({
-        alias: rt.alias,
+      routers.map((p) => ({
+        alias: p.alias,
         kind: "chat",
         router: true,
-        destinations: rt.destinations || [],
+        destinations: reaches(p),
       })),
     ),
     filters,
@@ -136,45 +145,25 @@ export async function ceilingsFor(
   return out;
 }
 
-/** section is a band across the dialog. The bands let somebody find the
- *  budget without reading the models list first. Sandbox limits are set from
- *  the command line, so they have no band. */
-function section(title, lead) {
-  return h(
-    "div",
-    { class: "field-section" },
-    h("h3", {}, title),
-    lead ? h("p", {}, lead) : null,
-  );
-}
-
-// OWNED_HERE is every field the edit dialog renders. Other fields must
-// survive a save.
+// The fields the blocks set. Others, such as sandbox limits, must survive a
+// save.
 const OWNED_HERE = new Set([
   "allowed_models",
-  "rpm",
-  "tpm",
-  "max_output_tokens",
+  "rate_limits",
+  "budgets",
   "system_prompt",
   "filters",
-  "budget_micros",
-  "budget_period",
   "allowed_tools",
 ]);
 
-// LIMITS is shared so the form and the read-only view use the same words.
+// Shared so the blocks and the read-only view use the same words.
 const LIMITS = {
-  rpm: {
-    label: "Requests per minute",
-    hint: "Per gateway replica, unless the replicas share a Redis.",
-  },
-  tpm: {
-    label: "Tokens per minute",
-    hint: "Counted when each request finishes.",
-  },
-  max_output_tokens: {
-    label: "Maximum output tokens per request",
-    hint: "Requests asking for more are capped to this, not refused.",
+  rate: {
+    label: "Rate limit",
+    hint:
+      "Tokens are counted when each request finishes. A minute refills as " +
+      "it goes, per gateway replica unless the replicas share a Redis. A day " +
+      "or a month starts again at midnight UTC or on the 1st.",
   },
   system_prompt: {
     label: "System prompt",
@@ -182,366 +171,601 @@ const LIMITS = {
   },
 };
 
+// One limit per period: two over the same period would count the same window.
+const RATE_PERIODS = ["minute", "day", "month"];
+const BUDGET_PERIODS = ["day", "month"];
+
+// In display order.
+const KINDS = [
+  {
+    value: "rate_limit",
+    icon: icons.latency,
+    name: "Rate limit",
+    what: "Requests or tokens per minute, day or month.",
+  },
+  {
+    value: "budget",
+    icon: icons.billing,
+    name: "Budget",
+    what: "What this scope may spend per day or month.",
+  },
+  {
+    value: "system_prompt",
+    icon: icons.pencil,
+    name: "System prompt",
+    what: "Instructions added before every chat request.",
+  },
+  {
+    value: "filter",
+    icon: icons.filters,
+    name: "Filter",
+    what: "Redact or refuse, with one of the organisation's filters.",
+  },
+  {
+    value: "models",
+    icon: icons.models,
+    name: "Models",
+    what: "Allow only some of the models and routers.",
+  },
+  {
+    value: "tools",
+    icon: icons.mcp,
+    name: "MCP tools",
+    what: "Allow only some MCP servers or tools.",
+  },
+];
+
+function kindOf(value) {
+  return KINDS.find((k) => k.value === value);
+}
+
+/** A copy, so nothing changes until Save. */
+function draftOf(lim) {
+  return {
+    rate_limits: (lim.rate_limits || []).map((r) => ({ ...r })),
+    budgets: (lim.budgets || []).map((b) => ({ ...b })),
+    system_prompt: lim.system_prompt || null,
+    filters: [...(lim.filters || [])],
+    allowed_models: lim.allowed_models ? [...lim.allowed_models] : null,
+    allowed_tools: lim.allowed_tools ? [...lim.allowed_tools] : null,
+  };
+}
+
+/** Limits by period, then the rest. */
+function blocksOf(d) {
+  // fallback is the period of a limit that has none.
+  const byPeriod = (list, periods, fallback) =>
+    [...list].sort(
+      (a, b) =>
+        periods.indexOf(a.period || fallback) -
+        periods.indexOf(b.period || fallback),
+    );
+  return [
+    ...byPeriod(d.rate_limits, RATE_PERIODS, "minute").map((item) => ({
+      kind: "rate_limit",
+      item,
+    })),
+    ...byPeriod(d.budgets, BUDGET_PERIODS, "month").map((item) => ({
+      kind: "budget",
+      item,
+    })),
+    d.system_prompt !== null ? { kind: "system_prompt" } : null,
+    ...d.filters.map((alias, index) => ({ kind: "filter", alias, index })),
+    d.allowed_models ? { kind: "models" } : null,
+    d.allowed_tools ? { kind: "tools" } : null,
+  ].filter(Boolean);
+}
+
+function freePeriods(list, periods, fallback, except) {
+  const taken = list
+    .filter((x) => x !== except)
+    .map((x) => x.period || fallback);
+  return periods.filter((p) => !taken.includes(p));
+}
+
+/** One of most kinds, one limit per period, and each filter once. */
+function addable(env) {
+  const d = env.draft;
+  return KINDS.filter((k) => {
+    switch (k.value) {
+      case "rate_limit":
+        return freePeriods(d.rate_limits, RATE_PERIODS, "minute").length > 0;
+      case "budget":
+        return freePeriods(d.budgets, BUDGET_PERIODS, "month").length > 0;
+      case "system_prompt":
+        return d.system_prompt === null;
+      case "filter":
+        return env.filters.some((f) => !d.filters.includes(f.alias));
+      case "models":
+        return !d.allowed_models;
+      case "tools":
+        return !d.allowed_tools;
+    }
+    return false;
+  });
+}
+
 function render(
   ctx,
   { scope, id, name, models, filters, ceilings, limits, orgID, orgName },
 ) {
   const meta = SCOPES[scope] || SCOPES.project;
   const lim = limits || {};
+  const env = {
+    ctx,
+    models,
+    filters: filters || [],
+    // Told apart from an organisation without filters, so a failed read does
+    // not mark every filter as missing.
+    filtersLost: filters === null,
+    ceilings,
+    orgID,
+    orgName,
+    draft: draftOf(lim),
+  };
 
-  const allowAll = h("input", {
-    type: "checkbox",
-    checked: !lim.allowed_models,
-    onChange: () => {
-      modelList.style.display = allowAll.checked ? "none" : "";
-    },
-  });
-  const boxes = models.map((m) =>
-    h(
-      "label",
-      { class: "row-tight", style: { padding: "3px 0" } },
-      h("input", {
-        type: "checkbox",
-        value: m.alias,
-        checked: !lim.allowed_models || lim.allowed_models.includes(m.alias),
-      }),
-      h("span", { class: "mono" }, m.alias),
-      m.router
-        ? // Ticking a router grants every model it may send to, by its own
-          // list, not this one.
-          h(
-            "span",
-            {
-              class: "pill pill-accent",
-              title:
-                "Router. Allowing it allows the models it picks from: " +
-                (m.destinations.join(", ") || "none"),
-            },
-            "router",
-          )
-        : h("span", { class: "faint small" }, m.kind),
-      allowedAbove(ceilings, m.alias)
-        ? null
-        : h("span", { class: "pill pill-warn" }, "Blocked above"),
-    ),
-  );
-  const modelList = h(
+  // The dialog shows either the blocks or one block's form, to avoid stacking
+  // a second dialog.
+  const grid = h("div", { class: "gr-blocks" });
+  const blocksPane = h(
     "div",
-    {
-      style: { display: lim.allowed_models ? "" : "none", marginTop: "6px" },
-    },
-    boxes.length
-      ? boxes
-      : h("span", { class: "faint" }, `${orgName} has no models.`),
+    {},
+    h("p", { class: "muted", style: { marginTop: 0 } }, meta.lead),
+    env.filtersLost
+      ? banner(
+          "warn",
+          "Could not load the organisation's filters, so none can be added " +
+            "now. Those already here stay as they are.",
+        )
+      : null,
+    ceilingSummary(ceilings),
+    grid,
   );
+  const editPane = h("div", { hidden: true });
+  let apply = null;
 
-  // MCP tools are typed rather than ticked: the gateway does not list every
-  // server's tools, and the control plane refuses a server it does not know.
-  const allTools = h("input", {
-    type: "checkbox",
-    checked: !lim.allowed_tools,
-    onChange: (e) => {
-      toolList.style.display = e.target.checked ? "none" : "";
-    },
-  });
-  const toolList = h("input", {
-    class: "input mono",
-    placeholder: "github/search_code, jira",
-    value: (lim.allowed_tools || []).join(", "),
-    style: { display: lim.allowed_tools ? "" : "none", marginTop: "6px" },
-  });
+  const showBlocks = () => {
+    apply = null;
+    editPane.hidden = true;
+    editPane.replaceChildren();
+    blocksPane.hidden = false;
+    foot().hidden = false;
+    save.disabled = false;
+    renderBlocks();
+  };
 
-  const rpm = numberInput(lim.rpm);
-  const tpm = numberInput(lim.tpm);
-  const maxOut = numberInput(lim.max_output_tokens);
-  const budget = h("input", {
-    class: "input",
-    type: "number",
-    min: "0",
-    step: "0.01",
-    placeholder: "not set here",
-    value: lim.budget_micros ? lim.budget_micros / 1e6 : "",
-  });
-  // Filters are picked from a list, not typed: an unknown alias would refuse
-  // every request, and the control plane refuses to store one.
-  //
-  // The picks are kept in an array because their order matters: each filter
-  // reads what the one before left, so a gate before a rewrite judges the
-  // original text and after it the redacted text. Aliases the organisation has
-  // since dropped are left out.
-  const picked = (lim.filters || []).filter((alias) =>
-    (filters || []).some((f) => f.alias === alias),
-  );
-
-  // Shown only once two filters are picked.
-  const order = h("div", { class: "stack", style: { gap: "4px" } });
-  const orderField = field(
-    "In this order",
-    order,
-    "Each filter gets the output of the one above. A gate placed first " +
-      "saves the cost of the filters below when it refuses.",
-  );
-  const renderOrder = () => {
-    orderField.hidden = picked.length < 2;
-    if (picked.length < 2) return;
-    const move = (i, by) => {
-      const to = i + by;
-      [picked[i], picked[to]] = [picked[to], picked[i]];
-      renderOrder();
-    };
-    order.replaceChildren(
-      ...picked.map((alias, i) => {
-        const f = (filters || []).find((x) => x.alias === alias) || {};
-        return h(
-          "div",
-          { class: "row-tight" },
-          h("span", { class: "faint" }, i + 1 + "."),
-          h("span", { class: "mono" }, alias),
-          // The mode again, because it decides the order: a gate first saves
-          // paying for rewrites it would refuse anyway.
-          h(
-            "span",
-            { class: f.mode === "gate" ? "pill pill-accent" : "pill" },
-            f.mode === "gate" || f.mode === "pattern" ? f.mode : "rewrite",
-          ),
-          f.shadow ? pill("Shadow", "warn") : null,
-          h("div", { class: "spacer" }),
-          h(
-            "button",
-            {
-              class: "btn btn-sm",
-              type: "button",
-              title: "Run this one earlier",
-              disabled: i === 0,
-              onClick: () => move(i, -1),
-            },
-            "\u2191",
-          ),
-          h(
-            "button",
-            {
-              class: "btn btn-sm",
-              type: "button",
-              title: "Run this one later",
-              disabled: i === picked.length - 1,
-              onClick: () => move(i, 1),
-            },
-            "\u2193",
-          ),
-        );
-      }),
+  const renderBlocks = () => {
+    const list = blocksOf(env.draft);
+    const add = addable(env);
+    grid.replaceChildren(
+      ...list.map((b) => blockCard(env, b, { edit, remove, move })),
+      add.length
+        ? emptyCard({
+            label: "Add",
+            name: list.length ? "Add a guardrail" : "Add the first guardrail",
+            note: list.length
+              ? null
+              : "Nothing is set here. A level above still applies.",
+            onClick: () => edit(null),
+          })
+        : null,
     );
   };
 
-  const filterBoxes = (filters || []).map((f) => {
-    const box = h("input", {
-      type: "checkbox",
-      value: f.alias,
-      checked: picked.includes(f.alias),
-      onChange: () => {
-        // Append, so the ones already ordered do not move.
-        if (box.checked) {
-          if (!picked.includes(f.alias)) picked.push(f.alias);
-        } else {
-          const at = picked.indexOf(f.alias);
-          if (at >= 0) picked.splice(at, 1);
-        }
-        renderOrder();
-      },
-    });
-    return h(
-      "label",
-      { class: "row-tight", style: { padding: "3px 0" } },
-      box,
-      h("span", { class: "mono" }, f.alias),
-      // Attaching a gate stops some requests; a rewrite filter does not.
+  // b is null for a new block.
+  const edit = (b) => {
+    const err = h("div");
+    const fieldsHost = h("div", {});
+    let kind = b ? b.kind : "";
+    let read = () => null;
+    const choose = (value) => {
+      kind = value;
+      const built = blockFields(env, kind, b);
+      fieldsHost.replaceChildren(built.el);
+      fieldsHost.style.marginTop = b ? "" : "14px";
+      read = built.read;
+      const first = fieldsHost.querySelector("input, select, textarea");
+      if (first) first.focus();
+    };
+    const picker = b ? null : modeTiles(addable(env), null, choose);
+    apply = () => {
+      showError(err, "");
+      try {
+        if (!kind) throw new Error("Choose what kind of guardrail it is.");
+        put(env.draft, kind, b, read());
+        showBlocks();
+      } catch (ex) {
+        showError(err, (ex && ex.message) || "That did not work.");
+      }
+    };
+
+    editPane.replaceChildren(
       h(
-        "span",
-        { class: f.mode === "gate" ? "pill pill-accent" : "pill" },
-        f.mode === "gate" || f.mode === "pattern" ? f.mode : "rewrite",
+        "h3",
+        { style: { margin: "0 0 12px" } },
+        b ? "Change " + kindOf(b.kind).name.toLowerCase() : "Add a guardrail",
       ),
-      // A filter in shadow costs a second generation per request and
-      // protects from nothing.
-      f.shadow ? pill("Shadow", "warn") : null,
-      f.description ? h("span", { class: "faint small" }, f.description) : null,
+      err,
+      picker ? picker.tiles : null,
+      picker ? picker.chosenRow : null,
+      fieldsHost,
+      h(
+        "div",
+        {
+          class: "row",
+          style: { justifyContent: "flex-end", marginTop: "14px" },
+        },
+        h(
+          "button",
+          { class: "btn", type: "button", onClick: showBlocks },
+          "Cancel",
+        ),
+        h(
+          "button",
+          { class: "btn btn-primary", type: "button", onClick: () => apply() },
+          b ? "Apply" : "Add",
+        ),
+      ),
     );
+    blocksPane.hidden = true;
+    editPane.hidden = false;
+    // Saving now would store this block half done, so wait until it is
+    // applied or dropped.
+    foot().hidden = true;
+    save.disabled = true;
+    if (b) choose(b.kind);
+    else picker.tiles.firstChild.focus();
+  };
+
+  const remove = (b) => {
+    take(env.draft, b);
+    renderBlocks();
+  };
+
+  const move = (b, by) => {
+    const f = env.draft.filters;
+    const to = b.index + by;
+    [f[b.index], f[to]] = [f[to], f[b.index]];
+    renderBlocks();
+  };
+
+  const form = h("form", {}, blocksPane, editPane);
+  // Enter applies the open block, as the dialog's Save would otherwise.
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (apply) apply();
   });
-  renderOrder();
 
-  const systemPrompt = h("textarea", {
-    class: "input",
-    rows: "4",
-    placeholder:
-      "Answer in British English. Never suggest a dependency that is not already in the lockfile.",
-  });
-  systemPrompt.value = lim.system_prompt || "";
-
-  const period = h(
-    "select",
-    { class: "select" },
-    h(
-      "option",
-      { value: "month", selected: (lim.budget_period || "month") === "month" },
-      "per month",
-    ),
-    h(
-      "option",
-      { value: "day", selected: lim.budget_period === "day" },
-      "per day",
-    ),
-  );
-
-  formModal({
+  const { button: save } = formModal({
     wide: true,
     title: `${meta.title} - ${name}`,
     subtitle:
-      "Leave a field empty to set no limit here; a level above still applies.",
-    body: h(
-      "form",
-      {},
-      h("p", { class: "muted", style: { marginTop: 0 } }, meta.lead),
-      ceilingSummary(ctx, ceilings),
-      section("Rate limits"),
-      h(
-        "div",
-        { class: "field-row" },
-        field(LIMITS.rpm.label, rpm, [
-          LIMITS.rpm.hint,
-          ceilingNote(ceilings, "rpm", num),
-        ]),
-        field(LIMITS.tpm.label, tpm, [
-          LIMITS.tpm.hint,
-          ceilingNote(ceilings, "tpm", compact),
-        ]),
-      ),
-      field(LIMITS.max_output_tokens.label, maxOut, [
-        LIMITS.max_output_tokens.hint,
-        ceilingNote(ceilings, "max_output_tokens", compact),
-      ]),
-      section("Cost"),
-      field("Budget (CHF)", h("div", { class: "field-row" }, budget, period), [
-        "Past this, requests get a 402 until the period resets. A busy " +
-          "scope can overshoot slightly.",
-        ceilingNote(ceilings, "budget_micros", money),
-      ]),
-      section("Every request", "Applied to each request."),
-      field(LIMITS.system_prompt.label, systemPrompt, [
-        LIMITS.system_prompt.hint +
-          " The organisation's prompt is sent first, then the project's.",
-        inheritedPrompts(ceilings),
-      ]),
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "Filters"),
-        filterBoxes.length
-          ? h("div", {}, filterBoxes)
-          : h(
-              "div",
-              { class: "muted" },
-              `${orgName} has no filters. Create one under Filters.`,
-            ),
-        h(
-          "div",
-          { class: "hint" },
-          "Run in order before the request is forwarded. The " +
-            "organisation's filters run first and cannot be removed here.",
-          inheritedFilters(ceilings),
-        ),
-      ),
-      orderField,
-      section("Access", "Which models and routers this scope may reach."),
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "Models"),
-        h(
-          "label",
-          { class: "row-tight" },
-          allowAll,
-          `Every model of ${orgNameOf(ctx, orgID)}`,
-        ),
-        modelList,
-        h(
-          "div",
-          { class: "hint" },
-          "Removing one takes effect on the next request.",
-        ),
-      ),
-      section("Tools", "What agents may use besides models."),
-      h(
-        "div",
-        { class: "field" },
-        h("label", {}, "MCP tools"),
-        h(
-          "label",
-          { class: "row-tight" },
-          allTools,
-          "Every tool of every MCP server",
-        ),
-        toolList,
-        h(
-          "div",
-          { class: "hint" },
-          "A server alias allows all its tools; alias/tool allows one. " +
-            "Tools left out are hidden from the agent and refused if called.",
-        ),
-      ),
-    ),
+      "Each block is one guardrail. A level above still applies. Nothing is " +
+      "saved until you press Save.",
+    body: form,
     done: "Guardrails saved",
     ctx,
-    submit: () => {
-      // A PUT replaces the whole guardrail, so fields this dialog does not
-      // show, such as sandbox limits, are carried through unchanged.
-      const out = {};
-      for (const [k, v] of Object.entries(lim)) {
-        if (!OWNED_HERE.has(k)) out[k] = v;
-      }
-      if (!allowAll.checked) {
-        // An alias the dialog has no box for, such as a disabled model, is
-        // kept. Nobody unticked it.
-        const shown = new Set(models.map((m) => m.alias));
-        out.allowed_models = [
-          ...boxes
-            .filter((b) => b.querySelector("input").checked)
-            .map((b) => b.querySelector("input").value),
-          ...(lim.allowed_models || []).filter((a) => !shown.has(a)),
-        ];
-      }
-      const put = (key, el) => {
-        const v = parseInt(el.value, 10);
-        if (Number.isFinite(v) && v > 0) out[key] = v;
-      };
-      put("rpm", rpm);
-      put("tpm", tpm);
-      put("max_output_tokens", maxOut);
-      const prompt = systemPrompt.value.trim();
-      if (prompt) out.system_prompt = prompt;
-      if (picked.length) out.filters = [...picked];
-      if (!allTools.checked) {
-        out.allowed_tools = toolList.value
-          .split(",")
-          .map((t) => t.trim())
-          .filter(Boolean);
-      }
-      const b = parseFloat(budget.value);
-      if (Number.isFinite(b) && b > 0) {
-        out.budget_micros = Math.round(b * 1e6);
-        out.budget_period = period.value;
-      }
-      return api.putGuardrails(scope, id, out);
-    },
+    submit: () => api.putGuardrails(scope, id, saved(lim, env)),
+  });
+  const foot = () => save.parentElement;
+  renderBlocks();
+}
+
+/** A PUT replaces the whole guardrail, so fields the blocks do not set are
+ *  carried through. */
+function saved(lim, env) {
+  const d = env.draft;
+  const out = {};
+  for (const [k, v] of Object.entries(lim)) {
+    if (!OWNED_HERE.has(k)) out[k] = v;
+  }
+  if (d.rate_limits.length) out.rate_limits = d.rate_limits;
+  if (d.budgets.length) out.budgets = d.budgets;
+  if (d.system_prompt) out.system_prompt = d.system_prompt;
+  if (d.filters.length) out.filters = d.filters;
+  if (d.allowed_models) out.allowed_models = d.allowed_models;
+  if (d.allowed_tools) out.allowed_tools = d.allowed_tools;
+  return out;
+}
+
+/** Writes over b, or adds a new block when b is null. */
+function put(d, kind, b, v) {
+  switch (kind) {
+    case "rate_limit":
+    case "budget": {
+      const list = kind === "budget" ? d.budgets : d.rate_limits;
+      const at = b ? list.indexOf(b.item) : -1;
+      if (at >= 0) list[at] = v;
+      else list.push(v);
+      return;
+    }
+    case "system_prompt":
+      d.system_prompt = v;
+      return;
+    case "filter":
+      if (b) d.filters[b.index] = v;
+      else d.filters.push(v);
+      return;
+    case "models":
+      d.allowed_models = v;
+      return;
+    case "tools":
+      d.allowed_tools = v;
+  }
+}
+
+function take(d, b) {
+  switch (b.kind) {
+    case "rate_limit":
+      d.rate_limits = d.rate_limits.filter((x) => x !== b.item);
+      return;
+    case "budget":
+      d.budgets = d.budgets.filter((x) => x !== b.item);
+      return;
+    case "system_prompt":
+      d.system_prompt = null;
+      return;
+    case "filter":
+      d.filters.splice(b.index, 1);
+      return;
+    case "models":
+      d.allowed_models = null;
+      return;
+    case "tools":
+      d.allowed_tools = null;
+  }
+}
+
+function blockCard(env, b, { edit, remove, move }) {
+  const kind = kindOf(b.kind);
+  // Filters run in order, each on the previous one's output, so only they
+  // can be moved.
+  const n = env.draft.filters.length;
+  const movable = b.kind === "filter" && n > 1;
+  return nodeCard({
+    kind: b.kind,
+    glyph: kind.icon,
+    label: kind.name,
+    name: blockName(env, b),
+    meta: blockMeta(env, b),
+    title: "Change this guardrail",
+    onOpen: () => edit(b),
+    buttons: [
+      movable && b.index > 0
+        ? headButton("←", "Run this one earlier", () => move(b, -1))
+        : null,
+      movable && b.index < n - 1
+        ? headButton("→", "Run this one later", () => move(b, 1))
+        : null,
+      removeButton("Remove this guardrail", () => remove(b)),
+    ],
   });
 }
 
-/* ------------------------------------------------------------- read-only */
+function blockName(env, b) {
+  const d = env.draft;
+  switch (b.kind) {
+    case "rate_limit":
+      return rateShort(b.item).join(" · ");
+    case "budget":
+      return budgetShort(b.item);
+    case "system_prompt": {
+      // Just the start; the form has the whole text.
+      return h(
+        "span",
+        { class: "pl-prompt", title: d.system_prompt },
+        oneLine(d.system_prompt, 60),
+      );
+    }
+    case "filter":
+      return h("span", { class: "mono" }, b.alias);
+    case "models":
+      return listName(d.allowed_models, "model");
+    case "tools":
+      return listName(d.allowed_tools, "tool");
+  }
+  return "";
+}
 
-/** renderReadOnly states what applies to a scope, for somebody who may not
- *  change it.
- *
- *  It is not the form with inputs disabled: that would show only this scope's
- *  own values. Each line here is the result of every level combined, with the
- *  level that decided it named. */
+function listName(list, noun) {
+  if (!list.length) return "None";
+  if (list.length > 3) return `${list.length} ${plural(list.length, noun)}`;
+  return h("span", { class: "mono" }, list.join(", "));
+}
+
+function blockMeta(env, b) {
+  let bits = [];
+  if (b.kind === "filter") {
+    const f = env.filters.find((x) => x.alias === b.alias);
+    if (f) bits = modePills(f);
+    else if (!env.filtersLost) bits = [pill("Not found", "bad")];
+    const n = env.draft.filters.length;
+    if (n > 1)
+      bits.push(h("span", { class: "faint small" }, `${b.index + 1} of ${n}`));
+  } else if (b.kind === "models") {
+    const list = env.draft.allowed_models;
+    if (!list.length) bits = [pill("Nothing is served", "bad")];
+    else if (list.some((a) => !allowedAbove(env.ceilings, a))) {
+      bits = [pill("Some blocked above", "warn")];
+    }
+  } else if (b.kind === "tools" && !env.draft.allowed_tools.length) {
+    bits = [pill("No tools", "warn")];
+  }
+  return bits.length ? h("div", { class: "wrap-chips" }, bits) : null;
+}
+
+/** read returns what the form sets or throws what is missing. b is null for
+ *  a new block. */
+function blockFields(env, kind, b) {
+  const d = env.draft;
+  if (kind === "rate_limit") {
+    const periods = freePeriods(
+      d.rate_limits,
+      RATE_PERIODS,
+      "minute",
+      b && b.item,
+    );
+    return rateFields((b && b.item) || {}, periods, [
+      LIMITS.rate.hint +
+        " A scope has one rate limit per minute, per day and per month.",
+      ceilingsOf(env.ceilings, rateTexts),
+    ]);
+  }
+  if (kind === "budget") {
+    // Month first: most scopes have a monthly budget.
+    const periods = freePeriods(d.budgets, BUDGET_PERIODS, "month", b && b.item)
+      .slice()
+      .reverse();
+    return budgetFields((b && b.item) || {}, periods, [
+      "Past this, requests get a 402 until the period resets, at " +
+        "midnight UTC or on the 1st. A busy scope can overshoot slightly. " +
+        "A scope has one budget per day and one per month.",
+      ceilingsOf(env.ceilings, budgetTexts),
+    ]);
+  }
+  if (kind === "system_prompt") {
+    const prompt = h("textarea", {
+      class: "input",
+      rows: "6",
+      placeholder:
+        "Answer in British English. Never suggest a dependency that is not already in the lockfile.",
+    });
+    prompt.value = d.system_prompt || "";
+    return {
+      el: field("Prompt", prompt, [
+        LIMITS.system_prompt.hint +
+          " The organisation's prompt is sent first, then the project's.",
+        inheritedPrompts(env.ceilings),
+      ]),
+      read: () => {
+        const text = prompt.value.trim();
+        if (!text) throw new Error("Write the prompt.");
+        return text;
+      },
+    };
+  }
+  if (kind === "filter") {
+    // Picked from a list, not typed: an unknown alias would refuse every
+    // request, and the control plane refuses to store one.
+    const usable = env.filters.filter(
+      (f) => !d.filters.includes(f.alias) || (b && f.alias === b.alias),
+    );
+    const select = h(
+      "select",
+      { class: "select" },
+      h("option", { value: "" }, "Choose a filter"),
+      usable.map((f) =>
+        h(
+          "option",
+          { value: f.alias, selected: b && f.alias === b.alias },
+          f.alias +
+            " (" +
+            (f.mode || "rewrite") +
+            (f.shadow ? ", in shadow" : "") +
+            ")",
+        ),
+      ),
+    );
+    return {
+      el: field(
+        "Filter",
+        select,
+        h(
+          "div",
+          { class: "hint" },
+          "Filters run in order before the request is forwarded, each over " +
+            "what the one before left. A gate placed first saves the cost of " +
+            "the filters after it when it refuses. The organisation's filters " +
+            "run first and cannot be removed here.",
+          inheritedFilters(env.ceilings),
+        ),
+      ),
+      read: () => {
+        if (!select.value) throw new Error("Choose a filter.");
+        return select.value;
+      },
+    };
+  }
+  if (kind === "models") {
+    // Ticked from the catalogue. An alias the dialog has no box for, such as
+    // a disabled model, is kept: nobody unticked it.
+    const had = d.allowed_models;
+    const boxes = env.models.map((m) =>
+      h(
+        "label",
+        { class: "row-tight", style: { padding: "3px 0" } },
+        h("input", {
+          type: "checkbox",
+          value: m.alias,
+          checked: had ? had.includes(m.alias) : true,
+        }),
+        h("span", { class: "mono" }, m.alias),
+        m.router
+          ? // A router grants every model its steps may send to, whatever
+            // this list says.
+            h(
+              "span",
+              {
+                class: "pill pill-accent",
+                title:
+                  "Router. Allowing it allows the models it picks from: " +
+                  (m.destinations.join(", ") || "none"),
+              },
+              "router",
+            )
+          : h("span", { class: "faint small" }, m.kind),
+        allowedAbove(env.ceilings, m.alias)
+          ? null
+          : h("span", { class: "pill pill-warn" }, "Blocked above"),
+      ),
+    );
+    return {
+      el: field(
+        "Models and routers this scope may reach",
+        boxes.length
+          ? h("div", {}, boxes)
+          : h("span", { class: "faint" }, `${env.orgName} has no models.`),
+        "Without this block, every model of the organisation is allowed. " +
+          "Removing one takes effect on the next request.",
+      ),
+      read: () => {
+        const shown = new Set(env.models.map((m) => m.alias));
+        return [
+          ...boxes
+            .map((l) => l.querySelector("input"))
+            .filter((i) => i.checked)
+            .map((i) => i.value),
+          ...(had || []).filter((a) => !shown.has(a)),
+        ];
+      },
+    };
+  }
+  // MCP tools are typed rather than ticked: the gateway does not list every
+  // server's tools, and the control plane refuses a server it does not know.
+  const tools = h("input", {
+    class: "input mono",
+    placeholder: "github/search_code, jira",
+    value: (d.allowed_tools || []).join(", "),
+  });
+  return {
+    el: field(
+      "MCP tools this scope may call",
+      tools,
+      "A server alias allows all its tools; alias/tool allows one. Tools " +
+        "left out are hidden from the agent and refused if called. Without " +
+        "this block, every tool of every MCP server is allowed.",
+    ),
+    read: () =>
+      tools.value
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean),
+  };
+}
+
+/** For somebody who may not change the guardrails. Unlike a disabled form,
+ *  which would show only this scope's values, each line combines every level
+ *  and names the one that decided. */
 function renderReadOnly(
   ctx,
   { scope, name, models, filters, ceilings, limits, orgName },
@@ -564,16 +788,14 @@ function renderReadOnly(
         { class: "muted", style: { marginTop: 0 } },
         meta.readLead || meta.lead,
       ),
-      h(
-        "div",
-        { class: "field-row" },
-        limitRow(levels, "rpm", num),
-        limitRow(levels, "tpm", compact),
+      readRow(
+        LIMITS.rate.label,
+        levelsValue(levels, rateTexts, "unlimited"),
+        "Each level's rate limit applies on its own. " + LIMITS.rate.hint,
       ),
-      limitRow(levels, "max_output_tokens", compact),
       readRow(
         "Budget",
-        budgetsValue(levels),
+        levelsValue(levels, budgetTexts, "no budget"),
         "Each budget applies on its own. Past any of them, requests are " +
           "refused until the period resets.",
       ),
@@ -600,22 +822,10 @@ function renderReadOnly(
           "hidden from your agent and refused if called.",
       ),
     ),
-    actions: (close) => [
-      h("button", { class: "btn", onClick: close }, "Close"),
-    ],
   });
 }
 
-function limitRow(levels, key, format) {
-  return readRow(
-    LIMITS[key].label,
-    tightest(levels, key, format),
-    LIMITS[key].hint,
-  );
-}
-
-/** toolsValue shows each level's MCP tool list, outermost first, since they
- *  narrow each other. */
+/** Each level's list is shown, since they narrow each other. */
 function toolsValue(levels) {
   const said = levels.filter((lv) => lv.limits && lv.limits.allowed_tools);
   if (!said.length) {
@@ -674,57 +884,58 @@ function modelsValue(levels, models, orgName) {
   );
 }
 
-/** narrowedBy names the levels that removed models, so a short list reads
- *  as somebody's decision. */
+/** Names the levels that removed models, so a short list reads as
+ *  somebody's decision. */
 function narrowedBy(levels) {
   const said = levels.filter((lv) => lv.limits && lv.limits.allowed_models);
   if (!said.length) return "Every model the organisation has.";
   return `Narrowed by ${said.map((lv) => lv.label).join(", then ")}.`;
 }
 
-/** tightest is the smallest value any level sets for one field: the one a
- *  request actually meets. */
-function tightest(levels, field, fmt) {
-  let value = null;
-  let from = "";
-  for (const lv of levels) {
-    const v = lv.limits && lv.limits[field];
-    if (v && (value === null || v < value)) {
-      value = v;
-      from = lv.label;
-    }
-  }
-  if (value === null) return h("span", { class: "muted" }, "unlimited");
-  return h(
-    "span",
-    {},
-    fmt(value),
-    h("span", { class: "hint-origin" }, ` - set by ${from}`),
+/** Every level's rate limits rather than one number: each may have its own
+ *  period, and each has to hold. */
+/** levelsValue lists what texts says of each level's limits, with the level
+ *  that set it, or none when no level sets any. Limits of every level hold,
+ *  so none is left out. */
+function levelsValue(levels, texts, none) {
+  const said = levels.flatMap((lv) =>
+    texts(lv.limits).map((text) => ({ text, from: lv.label })),
   );
-}
-
-/** budgetsValue lists a budget per level rather than one number: each
- *  level's cap has to hold on its own. */
-function budgetsValue(levels) {
-  const said = levels.filter((lv) => lv.limits && lv.limits.budget_micros);
-  if (!said.length) return h("span", { class: "muted" }, "no budget");
+  if (!said.length) return h("span", { class: "muted" }, none);
   return h(
     "div",
     { class: "stack" },
-    said.map((lv) =>
+    said.map((r) =>
       h(
         "span",
         {},
-        `${money(lv.limits.budget_micros)} per ${lv.limits.budget_period || "month"}`,
-        h("span", { class: "hint-origin" }, ` - set by ${lv.label}`),
+        r.text,
+        h("span", { class: "hint-origin" }, ` - set by ${r.from}`),
       ),
     ),
   );
 }
 
-/** promptsValue shows each level's wording in full, in the order it is sent.
- *  A prompt is text added to the reader's own requests, so only the full text
- *  tells them anything. */
+/** Such as "120 requests and 50k tokens per minute". */
+function rateTexts(lim) {
+  return ((lim && lim.rate_limits) || [])
+    .map((rl) => {
+      const parts = [];
+      if (rl.requests) parts.push(`${num(rl.requests)} requests`);
+      if (rl.tokens) parts.push(`${compact(rl.tokens)} tokens`);
+      return parts.length
+        ? `${parts.join(" and ")} per ${rl.period || "minute"}`
+        : "";
+    })
+    .filter(Boolean);
+}
+
+function budgetTexts(lim) {
+  return ((lim && lim.budgets) || []).map(budgetText);
+}
+
+/** In full, in the order sent: only the full text tells the reader what is
+ *  added to their requests. */
 function promptsValue(levels) {
   const said = levels.filter((lv) => lv.limits && lv.limits.system_prompt);
   if (!said.length) {
@@ -793,10 +1004,7 @@ function inheritedFilters(ceilings) {
   );
 }
 
-/* ------------------------------------------------------------ shared bits */
-
-/** ceilingSummary states what already applies above this scope. */
-function ceilingSummary(ctx, ceilings) {
+function ceilingSummary(ceilings) {
   const said = ceilings.filter((c) => hasAny(c.limits));
   if (!said.length) return null;
   return banner(
@@ -818,14 +1026,8 @@ function describe(lim) {
     const n = lim.allowed_models.length;
     bits.push(n ? `${n} ${plural(n, "model")}` : "no model");
   }
-  if (lim.rpm) bits.push(`${num(lim.rpm)}/min`);
-  if (lim.tpm) bits.push(`${compact(lim.tpm)} tok/min`);
-  if (lim.max_output_tokens) bits.push(`${compact(lim.max_output_tokens)} out`);
-  if (lim.budget_micros) {
-    bits.push(
-      `${money(lim.budget_micros)} per ${lim.budget_period || "month"}`,
-    );
-  }
+  for (const rl of lim.rate_limits || []) bits.push(...rateShort(rl));
+  for (const b of lim.budgets || []) bits.push(budgetText(b));
   if (lim.system_prompt) bits.push("a system prompt");
   if ((lim.filters || []).length) {
     bits.push(`${lim.filters.length} ${plural(lim.filters.length, "filter")}`);
@@ -848,19 +1050,13 @@ function inheritedPrompts(ceilings) {
   );
 }
 
-/** ceilingNote is the tightest value any level above sets for one field. */
-function ceilingNote(ceilings, field, fmt) {
-  let tightest = null;
-  let from = "";
-  for (const c of ceilings) {
-    const v = c.limits && c.limits[field];
-    if (v && (tightest === null || v < tightest)) {
-      tightest = v;
-      from = c.label;
-    }
-  }
-  if (tightest === null) return null;
-  return h("span", { class: "ceiling" }, ` ${from} allows ${fmt(tightest)}.`);
+/** ceilingsOf says what each level above allows, as texts reads it. */
+function ceilingsOf(ceilings, texts) {
+  return ceilings.flatMap((c) =>
+    texts(c.limits).map((text) =>
+      h("span", { class: "ceiling" }, ` ${c.label} allows ${text}.`),
+    ),
+  );
 }
 
 function allowedAbove(ceilings, alias) {
@@ -876,26 +1072,20 @@ function hasAny(lim) {
   return !!(
     lim &&
     (lim.allowed_models ||
-      lim.rpm ||
-      lim.tpm ||
-      lim.max_output_tokens ||
-      lim.budget_micros ||
+      (lim.rate_limits || []).length ||
+      (lim.budgets || []).length ||
       lim.system_prompt ||
       (lim.filters || []).length)
   );
 }
 
 export function summarise(lim) {
-  const bits = [];
-  if (lim.rpm) bits.push(`${num(lim.rpm)}/min`);
-  if (lim.tpm) bits.push(`${compact(lim.tpm)} tok/min`);
-  if (lim.max_output_tokens) bits.push(`${compact(lim.max_output_tokens)} out`);
+  const bits = (lim.rate_limits || []).flatMap(rateShort);
   if (lim.system_prompt) bits.push("system prompt");
   for (const name of lim.filters || []) bits.push(`filter: ${name}`);
   return bits;
 }
 
-/** modelsCell is shared by the projects and keys tables. */
 export function modelsCell(lim) {
   if (!lim || !lim.allowed_models) return h("span", { class: "muted" }, "All");
   return h(
@@ -905,15 +1095,4 @@ export function modelsCell(lim) {
       ? lim.allowed_models.map((m) => pill(m, "accent"))
       : pill("None", "bad"),
   );
-}
-
-function numberInput(value) {
-  return h("input", {
-    class: "input",
-    type: "number",
-    min: "0",
-    step: "1",
-    placeholder: "not set here",
-    value: value || "",
-  });
 }

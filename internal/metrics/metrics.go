@@ -31,7 +31,7 @@ var (
 	requestLabels = []string{"model", "org", "status"}
 	modelLabels   = []string{"model", "org"}
 	filterLabels  = []string{"filter", "org", "outcome", "shadow"}
-	routerLabels  = []string{"router", "org", "outcome", "destination"}
+	routerLabels  = []string{"router", "step", "org", "outcome", "destination"}
 	// A tool's name is not a label: a client can send any name, and series are
 	// never cleaned up.
 	toolLabels = []string{"server", "org", "outcome"}
@@ -131,12 +131,12 @@ func (r *Registry) FilterRun(filter, org, outcome string, shadow bool,
 		observe(seconds, micros)
 }
 
-// RouterRun records one routing decision. dest is empty when the request went
-// nowhere.
-func (r *Registry) RouterRun(router, org, outcome, dest string,
+// RouterRun records one route step's decision. dest is empty when the
+// request went nowhere.
+func (r *Registry) RouterRun(router, step, org, outcome, dest string,
 	seconds float64, micros int64,
 ) {
-	r.seriesIn(r.routers, latencyBuckets, router, org, outcome, dest).
+	r.seriesIn(r.routers, latencyBuckets, router, step, org, outcome, dest).
 		observe(seconds, micros)
 }
 

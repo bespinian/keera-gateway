@@ -9,22 +9,17 @@ import (
 	"net/http"
 	"slices"
 	"time"
-
-	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// Two client APIs are also a hosted provider's own: the Anthropic Messages API
-// is Anthropic's, and the Responses API is OpenAI's. Translating a request into
-// chat completions for that very provider loses what the translation has no
-// place for - Anthropic's prompt caching and thinking, OpenAI's reasoning items
-// - and on a coding agent's long session the lost cache is most of the bill.
+// Two client APIs belong to a hosted provider: the Messages API to Anthropic,
+// the Responses API to OpenAI. Translating to chat completions for that same
+// provider loses prompt caching, thinking and reasoning items, and on a long
+// coding session the lost cache is most of the bill.
 //
-// So when a request in one of those APIs goes to its own provider, it is
-// forwarded in that API. It still passes every guardrail: the filters, the
-// system prompt and the output ceiling all work on its own shape. Every other
-// destination gets it translated. The translation is made only when such a
-// destination, or a router that reads the request, needs it: on a long session
-// it costs far more than the rest of the gateway's work.
+// So such a request goes to its own provider in its own API, still through
+// every guardrail. Other destinations get it translated, and only when one of
+// them, or a route step that reads the request, needs it: on a long session
+// the translation costs more than the rest of the gateway's work.
 
 // dialect is a client API that one hosted provider serves as its own.
 type dialect interface {
@@ -34,15 +29,14 @@ type dialect interface {
 	path() string
 	// text is what filters read in a body of this API, and how to put it back.
 	text(b *body) (textDoc, error)
-	// addSystem puts the guardrail's system prompt ahead of the client's own.
+	// addSystem puts the system prompt (see call.systemPrompt) ahead of the
+	// client's own.
 	addSystem(b *body, prompt string) error
-	// clamp holds the answer to the guardrail's ceiling.
-	clamp(b *body, limit int)
 	// needsNative says why a body can only go to the provider itself, or is
 	// empty when it can be translated for any model.
 	needsNative(b *body) string
-	// auth presents the credential the way the provider's own API wants it.
-	// It is given the client's headers, for the few it passes on.
+	// auth presents the credential the way the provider wants it. It gets the
+	// client's headers, for the few it passes on.
 	auth(client http.Header) func(h http.Header, credential string)
 	// usage reads the token counts off a buffered answer.
 	usage(raw []byte) *tokenUsage
@@ -74,21 +68,16 @@ type nativeStream interface {
 	failure() error
 }
 
-// eventType is the type an event's data names. It is read from the JSON, not
-// searched for in the bytes: the data can quote what the client sent, such as
-// its metadata or a stop sequence, and a client could otherwise make the event
-// that carries the usage record look like another.
-func eventType(payload []byte) string {
+// typeOf is the 'type' field of a JSON object: an event's data, a content
+// block or an input item. It is decoded, not searched for in the bytes: an
+// event can quote client input, such as a stop sequence, which could otherwise
+// disguise the event that carries the usage record.
+func typeOf(payload []byte) string {
 	var ev struct {
 		Type string `json:"type"`
 	}
 	_ = json.Unmarshal(payload, &ev)
 	return ev.Type
-}
-
-// speaksNative reports whether a destination is sent the client's own API.
-func speaksNative(d dialect, m policy.Model) bool {
-	return d != nil && m.Provider == d.provider()
 }
 
 // pipeNative forwards a provider's own event stream, flushing every event, and

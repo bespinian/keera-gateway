@@ -90,9 +90,9 @@ func (r *filterRun) delete(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// The control plane already refuses to delete one a guardrail names, so
-	// this is about a filter nothing uses today, whose wording is kept nowhere
-	// else.
+	// The control plane already refuses to delete one a guardrail or router
+	// uses, so this is about a filter nothing uses today, whose wording is
+	// kept nowhere else.
 	what := "its instruction is"
 	if !f.UsesModel() {
 		what = "its rules are"

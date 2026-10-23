@@ -112,13 +112,11 @@ func TestASandboxIsNotOfferedASubscriptionModel(t *testing.T) {
 // guardrails allow, after the models.
 func TestASandboxIsOfferedItsRouters(t *testing.T) {
 	resolved := policy.Resolve(policy.Key{OrgID: "org_1", Kind: policy.KeyStandard},
-		&policy.Limits{AllowedModels: []string{"keera-code", "auto"}}, nil, nil)
-	catalogue := []policy.Model{
-		{Alias: "keera-code", DisplayName: "Keera Code", Kind: policy.KindChat, Enabled: true},
-	}
-	routers := []policy.Router{{Alias: "auto"}, {Alias: "other"}}
+		&policy.Limits{AllowedModels: []string{"keera-code", "safe"}}, nil, nil)
+	catalogue := []policy.Model{{Alias: "keera-code", Kind: policy.KindChat, Enabled: true}}
+	routers := []policy.Router{{Alias: "safe", DisplayName: "Safe"}, {Alias: "other"}}
 	got := chatModelsFor(resolved, catalogue, routers)
-	if len(got) != 2 || got[0].Name != "Keera Code" || got[1].Alias != "auto" {
-		t.Errorf("offered %+v, want keera-code by its name, then auto", got)
+	if len(got) != 2 || got[1].Alias != "safe" || got[1].Name != "Safe" {
+		t.Errorf("offered %+v, want keera-code, then the allowed router by its name", got)
 	}
 }

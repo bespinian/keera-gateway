@@ -307,15 +307,9 @@ func (b *body) setString(key, val string) {
 	b.set(key, raw)
 }
 
-func (b *body) setInt(key string, val int) {
-	b.set(key, json.RawMessage(strconv.Itoa(val)))
-}
-
 // prependSystem puts a system message at the head of a chat request's
-// messages array, and reports false if there is no array to put it in.
-//
-// It splices bytes instead of decoding, so no structure is built for the
-// source code inside the messages.
+// messages array, and reports false if there is no array to put it in. It
+// splices bytes, so the messages are never decoded.
 func (b *body) prependSystem(content string) bool {
 	raw, ok := b.value("messages")
 	if !ok {
@@ -402,20 +396,14 @@ func eachElement(raw json.RawMessage, fn func(elem []byte) bool) {
 	}
 }
 
-// ensureUsageInStream makes the upstream report token counts on a stream.
-//
-// vLLM and OpenAI only send usage on a stream when asked, and almost no client
-// asks. The result says whether the gateway added the flag: if so, the extra
-// usage-only chunk is removed on the way back, because a client that never
-// asked for it may not cope with a chunk that has no choices.
+// ensureUsageInStream makes the upstream report token counts on a stream:
+// vLLM and OpenAI only do when asked, and almost no client asks. It reports
+// whether the gateway added the flag, in which case the usage-only chunk is
+// removed on the way back, since a client may not cope with a chunk that has
+// no choices.
 func (b *body) ensureUsageInStream() (injected bool) {
 	var opts map[string]json.RawMessage
-	if raw, ok := b.value("stream_options"); ok {
-		if json.Unmarshal(raw, &opts) != nil {
-			opts = nil
-		}
-	}
-	if opts == nil {
+	if raw, ok := b.value("stream_options"); !ok || json.Unmarshal(raw, &opts) != nil || opts == nil {
 		opts = map[string]json.RawMessage{}
 	}
 	if inc, ok := opts["include_usage"]; ok {

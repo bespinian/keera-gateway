@@ -138,23 +138,22 @@ func TestATieIsBrokenTheSameWayEveryTime(t *testing.T) {
 	}
 }
 
-// More destinations than there are letters is not a configuration anybody has,
-// and it must not be one that silently loses destinations either.
+// Nobody has more destinations than letters, but such a router must not
+// silently lose destinations.
 func TestTooManyDestinationsAreNotLettered(t *testing.T) {
 	if labelled(nil) {
 		t.Error("a router with nothing to offer was lettered")
 	}
-	if !labelled(make([]string, len(routerLabels))) {
+	if !labelled(make([]string, len(choiceLetters))) {
 		t.Error("a router with as many destinations as there are letters was not lettered")
 	}
-	if labelled(make([]string, len(routerLabels)+1)) {
+	if labelled(make([]string, len(choiceLetters)+1)) {
 		t.Error("a router with more destinations than letters was lettered anyway")
 	}
 }
 
-// A gate's verdict needs no protocol of its own: ALLOW and REFUSED already
-// begin differently, so whatever prefix of them the tokeniser hands back is
-// enough to tell the two apart.
+// ALLOW and REFUSED begin differently, so any prefix the tokeniser hands back
+// tells them apart.
 func TestAVerdictIsReadOffTheWordsAGateAlreadyAnswers(t *testing.T) {
 	tests := []struct {
 		name  string

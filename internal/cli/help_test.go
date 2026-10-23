@@ -99,13 +99,11 @@ func TestOverviewNamesEveryCommand(t *testing.T) {
 	}
 }
 
-// TestEveryDispatchedCommandIsRegistered walks the names Run accepts and
-// checks each resolves. It is spelled as a list rather than read out of the
-// switch because there is no way to read a switch.
+// The names Run accepts are spelled as a list, because a switch cannot be read.
 func TestEveryDispatchedCommandIsRegistered(t *testing.T) {
 	dispatched := []string{
 		"org", "orgs", "project", "projects", "user", "users", "key", "keys",
-		"model", "models", "filter", "filters", "router", "routers",
+		"model", "models", "filter", "filters", "router", "routers", "router", "routers",
 		"sandbox", "sandboxes", "sbx", "guardrail", "guardrails",
 		"mcp", "limit", "limits", "budget", "budgets", "usage", "failure", "failures", "sessions",
 		"session", "connect", "doctor", "login", "logout", "whoami",

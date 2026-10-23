@@ -74,8 +74,8 @@ func TestFilterModePredicates(t *testing.T) {
 }
 
 func TestRouterCeilings(t *testing.T) {
-	rt := Router{
-		Mode:         RouterModeSize,
+	rt := Route{
+		Mode:         RouteModeSize,
 		Destinations: []string{"small", "medium", "big"},
 		Ceilings:     map[string]int{"small": 4000, "medium": 32000},
 	}
@@ -87,7 +87,7 @@ func TestRouterCeilings(t *testing.T) {
 	}
 	// A zero is the same as no entry, so it must not read as a ceiling of
 	// nothing.
-	zeroed := Router{Destinations: []string{"a"}, Ceilings: map[string]int{"a": 0}}
+	zeroed := Route{Destinations: []string{"a"}, Ceilings: map[string]int{"a": 0}}
 	if _, bounded := zeroed.Ceiling("a"); bounded {
 		t.Error("a ceiling of zero is no ceiling")
 	}
@@ -96,25 +96,25 @@ func TestRouterCeilings(t *testing.T) {
 	}
 }
 
-func TestRouterModePredicates(t *testing.T) {
-	// A size router reads the request and no model, so it is not one of the
+func TestRouteModePredicates(t *testing.T) {
+	// A size route step reads the request and no model, so it is not one of the
 	// modes that decide, and its order is not a measurement either.
-	if RouterModeSize.Decides() {
-		t.Error("a size router asks no model anything")
+	if RouteModeSize.Decides() {
+		t.Error("a size step asks no model anything")
 	}
-	if RouterModeSize.Measures() {
-		t.Error("a size router's order is not a reading of this process")
+	if RouteModeSize.Measures() {
+		t.Error("a size step's order is not a reading of this process")
 	}
-	if !RouterModeSize.Sizes() {
-		t.Error("a size router sizes")
+	if !RouteModeSize.Sizes() {
+		t.Error("a size step sizes")
 	}
-	for _, m := range []RouterMode{"", RouterModeInstruction, RouterModeFallback,
-		RouterModeLatency, RouterModeLeastBusy} {
+	for _, m := range []RouteMode{"", RouteModeInstruction, RouteModeFallback,
+		RouteModeLatency, RouteModeLeastBusy} {
 		if m.Sizes() {
 			t.Errorf("%q does not choose by size", m)
 		}
 	}
-	if !RouterModeSize.Valid() {
+	if !RouteModeSize.Valid() {
 		t.Error("size is a mode a router may run in")
 	}
 }

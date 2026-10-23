@@ -16,7 +16,7 @@ func TestLeastBusyPrefersTheEmptiestDestination(t *testing.T) {
 	stop := []func(){l.begin("a"), l.begin("a"), l.begin("b")}
 
 	got := []string{"a", "b", "c"}
-	l.order(policy.RouterModeLeastBusy, got, byAlias)
+	l.order(policy.RouteModeLeastBusy, got, byAlias)
 	if want := []string{"c", "b", "a"}; !slices.Equal(got, want) {
 		t.Errorf("order = %v, want %v - two in flight, one in flight, none", got, want)
 	}
@@ -27,7 +27,7 @@ func TestLeastBusyPrefersTheEmptiestDestination(t *testing.T) {
 	// Everything is back to nothing in flight, so nothing tells the three
 	// apart and what is left is the order the administrator wrote.
 	got = []string{"a", "b", "c"}
-	l.order(policy.RouterModeLeastBusy, got, byAlias)
+	l.order(policy.RouteModeLeastBusy, got, byAlias)
 	if want := []string{"a", "b", "c"}; !slices.Equal(got, want) {
 		t.Errorf("order = %v, want %v - a tie is broken by what was written", got, want)
 	}
@@ -53,7 +53,7 @@ func TestLatencyPrefersTheDestinationAnsweringFastest(t *testing.T) {
 	l.observe("middling", 300*time.Millisecond, now)
 
 	got := []string{"slow", "middling", "quick"}
-	l.order(policy.RouterModeLatency, got, byAlias)
+	l.order(policy.RouteModeLatency, got, byAlias)
 	if want := []string{"quick", "middling", "slow"}; !slices.Equal(got, want) {
 		t.Errorf("order = %v, want %v", got, want)
 	}
@@ -65,7 +65,7 @@ func TestLatencyTriesADestinationItHasNotMeasured(t *testing.T) {
 	l.observe("measured", 50*time.Millisecond, now)
 
 	got := []string{"measured", "fresh"}
-	l.order(policy.RouterModeLatency, got, byAlias)
+	l.order(policy.RouteModeLatency, got, byAlias)
 	if want := []string{"fresh", "measured"}; !slices.Equal(got, want) {
 		t.Errorf("order = %v, want %v - a destination with no recent reading is worth "+
 			"one request to find out about, or the first model to post a good number "+
@@ -82,13 +82,13 @@ func TestAnOldReadingStopsBeingAReading(t *testing.T) {
 	l.observe("recent", 400*time.Millisecond, now)
 
 	// 'stale' was the faster of the two and is now the one nothing knows
-	// about, which puts it first: this is how a measured router notices that
+	// about, which puts it first: this is how a measured step notices that
 	// the model it stopped sending to has changed.
 	if r := l.read("stale", now); r.known {
 		t.Errorf("a reading %s old is still being treated as one", loadStale)
 	}
 	got := []string{"recent", "stale"}
-	l.order(policy.RouterModeLatency, got, byAlias)
+	l.order(policy.RouteModeLatency, got, byAlias)
 	if want := []string{"stale", "recent"}; !slices.Equal(got, want) {
 		t.Errorf("order = %v, want %v", got, want)
 	}
@@ -122,8 +122,8 @@ func TestAFailedDestinationIsRankedLastInBothModes(t *testing.T) {
 	release := l.begin("up")
 	defer release()
 
-	for _, mode := range []policy.RouterMode{
-		policy.RouterModeLatency, policy.RouterModeLeastBusy,
+	for _, mode := range []policy.RouteMode{
+		policy.RouteModeLatency, policy.RouteModeLeastBusy,
 	} {
 		got := []string{"down", "up"}
 		l.order(mode, got, byAlias)
@@ -150,23 +150,23 @@ func TestAnUnmeasuredModeIsLeftAlone(t *testing.T) {
 	l.observe("b", time.Millisecond, time.Now())
 	l.observe("a", time.Second, time.Now())
 
-	// A fallback router's order is the administrator's statement about which
+	// A fallback step's order is the administrator's statement about which
 	// destination is wanted, and nothing measured here may reorder it.
 	got := []string{"a", "b"}
-	l.order(policy.RouterModeFallback, got, byAlias)
+	l.order(policy.RouteModeFallback, got, byAlias)
 	if want := []string{"a", "b"}; !slices.Equal(got, want) {
-		t.Errorf("order = %v, want %v - a fallback router's order is written, not "+
+		t.Errorf("order = %v, want %v - a fallback step's order is written, not "+
 			"measured", got, want)
 	}
 }
 
 func TestDescribeSaysNothingAboutAModeThatMeasuresNothing(t *testing.T) {
 	l := newLoads()
-	if got := l.describe(policy.RouterModeFallback, "a"); got != "" {
+	if got := l.describe(policy.RouteModeFallback, "a"); got != "" {
 		t.Errorf("describe = %q, want empty - there is no reading behind a fallback "+
 			"router's order, and printing one would invent a reason for it", got)
 	}
-	if got := l.describe(policy.RouterModeLeastBusy, "a"); got == "" {
+	if got := l.describe(policy.RouteModeLeastBusy, "a"); got == "" {
 		t.Error("describe said nothing about a least-busy destination; the whole point " +
 			"of the column is answering why this one is first")
 	}

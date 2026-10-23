@@ -11,21 +11,17 @@ import (
 )
 
 // A decision model is a classifier, such as Laya behind laya-serve. It reads a
-// text and a typed question, and answers with a probability for each answer.
-// It writes no text, so it can decide for a router or a gate and nothing else.
+// text and a typed question and answers with a probability for each answer.
+// It writes no text, so it can only decide for a route step or a gate.
 //
 // It is asked on /systemone, the endpoint laya-serve and TypeSafe Jev share.
-// Its answer is read back into the chat completion a router or a gate would
-// have had from a chat model, with the probabilities as the first token's
-// logprobs. So both read one shape, and a decision is read the same way
-// whatever kind of model made it.
+// Its answer is turned into the chat completion a chat model would have given,
+// with the probabilities as the first token's logprobs, so a decision reads
+// the same whatever kind of model made it.
 
-// decisionPath is where a decision model is asked, under its backend's base
-// URL.
 const decisionPath = "/systemone"
 
-// decisionID is the one question a request asks. The answer is looked up
-// under it.
+// decisionID names the one question a request asks, and its answer.
 const decisionID = "decision"
 
 // decisionQuestion is one typed question, in the shape /systemone takes.
@@ -67,11 +63,11 @@ func gateDecision(prompt string) decisionQuestion {
 	return q
 }
 
-// routerDecision is a router's instruction as a choice between the offered
+// routeQuestion is a route step's instruction as a choice between the offered
 // destinations, each under its letter and described by its model's
 // description. The alias is left out when there is a description: measured on
 // Laya, it only adds words that say nothing about the request.
-func (s *Server) routerDecision(orgID, prompt string, offered []string) decisionQuestion {
+func (s *Server) routeQuestion(orgID, prompt string, offered []string) decisionQuestion {
 	q := decisionQuestion{Type: "choice", Instructions: strings.TrimSpace(prompt),
 		Criteria: make(map[string]string, len(offered))}
 	for i, alias := range offered {
@@ -79,18 +75,12 @@ func (s *Server) routerDecision(orgID, prompt string, offered []string) decision
 		if m, _ := s.src.Model(orgID, alias); m.Description != "" {
 			about = m.Description
 		}
-		q.Criteria[string(routerLabels[i])] = about
+		q.Criteria[string(choiceLetters[i])] = about
 	}
 	return q
 }
 
-// decisionRequest is the /systemone request for one question about the
-// segments.
-//
-// max_len is the model's context, so the classifier reads exactly what the
-// gateway measured against it. Left to the server, it would cut a longer
-// request short and decide on part of it, which a gate must never do. Half of
-// it is room for the question; the question only takes what it needs.
+// decisionRequest is the /systemone request for one question about input.
 func decisionRequest(m policy.Model, q decisionQuestion, input []byte) ([]byte, error) {
 	return json.Marshal(decisionBody(m, q, json.RawMessage(input)))
 }
@@ -131,7 +121,7 @@ type decisionReply struct {
 	} `json:"usage"`
 }
 
-// chatFromDecision turns a /systemone answer into the chat completion a router
+// chatFromDecision turns a /systemone answer into the chat completion a route step
 // or a gate reads: the answer as content, and every answer's probability as
 // the first token's logprobs.
 //

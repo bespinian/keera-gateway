@@ -112,6 +112,9 @@ type mcpExchange struct {
 	// held is the credit its tool calls' filters hold. It is given back once
 	// every call has been recorded, which charges what they spent.
 	held int64
+	// counted is the tool call counted against the key's rate limits per day
+	// or month, until the exchange ends. A POST carries one at most.
+	counted *pendingRPC
 }
 
 // pendingRPC is one request waiting for its response.
@@ -121,6 +124,9 @@ type pendingRPC struct {
 	start    time.Time
 	argBytes int
 	filters  filterRun
+	// admitted says the call was let through, and so counts against the
+	// key's rate limits per day or month.
+	admitted bool
 }
 
 // mcpBegin authenticates the caller and finds the server. A server the key
@@ -173,6 +179,11 @@ func (s *Server) mcpPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { s.budgets.ReleaseCredit(x.res.Key.OrgID, x.held) }()
+	defer func() {
+		if x.counted != nil {
+			s.budgets.EndRequest(x.res.Quotas, x.counted.start)
+		}
+	}()
 	raw, ok := readBody(w, r, s.opts.MaxBodyBytes, func(status int, code, msg string) {
 		httpx.WriteError(w, status, "invalid_request_error", code, msg)
 	})
@@ -482,9 +493,13 @@ func (x *mcpExchange) toolCall(msg *rpcMessage) bool {
 		x.toolFailed(p, msg.ID, store.ToolDenied, why)
 		return false
 	}
+	p.admitted = true
+	x.s.budgets.StartRequest(x.res.Quotas, p.start)
+	x.counted = p
 
 	if len(x.res.Filters) > 0 {
-		run, ref := x.s.applyFilters(x.r.Context(), x.res, params, argumentsText, nil)
+		run, ref := x.s.applyFilters(x.r.Context(), x.res.Key.OrgID, x.res.Filters,
+			guardrailFilters, params, argumentsText, nil)
 		p.filters = run
 		if run.micros > 0 {
 			x.s.budgets.Charge(x.res.Scopes, run.micros, time.Now())
@@ -564,7 +579,10 @@ func addStrings(d *treeDoc, v any) {
 // result, so the model reads why.
 func (x *mcpExchange) admit(argBytes int) (held int64, why string) {
 	now := time.Now()
-	if ref, ok := x.s.checkRates(x.res, now); !ok {
+	if ref, ok := x.s.checkRates(x.res.Scopes, now); !ok {
+		return 0, ref.msg
+	}
+	if ref, ok := x.s.checkQuotas(x.res.Quotas, now); !ok {
 		return 0, ref.msg
 	}
 	if len(x.res.Filters) == 0 {
@@ -845,14 +863,17 @@ func (x *mcpExchange) failPending(msg string) {
 	}
 }
 
-// record writes one tool call's row.
 func (x *mcpExchange) record(p *pendingRPC, outcome store.ToolOutcome, errMsg string, resultBytes int) {
 	took := time.Since(p.start)
 	k := x.res.Key
+	scopes := x.res.Scopes
+	if p.admitted {
+		scopes = append(slices.Clip(scopes), x.res.Quotas...)
+	}
 	x.s.record(store.Event{
 		TS: p.start, OrgID: k.OrgID, ProjectID: k.ProjectID, UserID: k.UserID, KeyID: k.ID,
 		Client: x.client, SessionKey: x.session, Latency: took, Error: errMsg,
-		FilterRuns: p.filters.runs, CostMicros: p.filters.micros, Bills: p.filters.bills, Scopes: x.res.Scopes,
+		FilterRuns: p.filters.runs, CostMicros: p.filters.micros, Bills: p.filters.bills, Scopes: scopes,
 		Tool: &store.ToolCall{
 			Server: x.srv.Alias, Tool: p.tool, Outcome: outcome,
 			ArgBytes: p.argBytes, ResultBytes: resultBytes,

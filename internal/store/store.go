@@ -14,8 +14,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
 //go:embed migrations/*.sql
@@ -337,24 +335,6 @@ func nullableTime(t time.Time) *time.Time {
 		return nil
 	}
 	return &t
-}
-
-// periodPtr and periodStr move a budget period across the driver, which sees
-// budget_period as a nullable text column.
-func periodPtr(s *string) *policy.Period {
-	if s == nil {
-		return nil
-	}
-	p := policy.Period(*s)
-	return &p
-}
-
-func periodStr(p *policy.Period) *string {
-	if p == nil {
-		return nil
-	}
-	s := string(*p)
-	return &s
 }
 
 // pageLimit is how many rows a list reads: n, def when n is unset, and at

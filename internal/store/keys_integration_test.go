@@ -15,24 +15,24 @@ func TestLookupKeyCollapsesTheWholeChain(t *testing.T) {
 
 	// Each level narrows what it inherits, and each says something of its own.
 	if err := st.PutGuardrail(ctx, policy.ScopeOrg, f.orgID, policy.Limits{
-		AllowedModels:   []string{"keera-code", "keera-speed", "keera-frontier"},
-		MaxOutputTokens: new(4096), RPM: new(600), TPM: new(400000),
-		BudgetMicros: new(int64(10_000_000_000)), BudgetPeriod: new(policy.PeriodMonth),
-		SystemPrompt: new("Never include customer data in an example."),
+		AllowedModels: []string{"keera-code", "keera-speed", "keera-frontier"},
+		RateLimits:    []policy.RateLimit{{Requests: 600, Tokens: 400000, Period: policy.PeriodMinute}},
+		Budgets:       []policy.Budget{{BudgetMicros: 10_000_000_000, Period: policy.PeriodMonth}},
+		SystemPrompt:  new("Never include customer data in an example."),
 	}); err != nil {
 		t.Fatalf("PutGuardrail org: %v", err)
 	}
 	if err := st.PutGuardrail(ctx, policy.ScopeProject, f.projectID, policy.Limits{
-		AllowedModels:   []string{"keera-code", "keera-speed"},
-		MaxOutputTokens: new(2048), RPM: new(120),
-		BudgetMicros: new(int64(500_000_000)), BudgetPeriod: new(policy.PeriodDay),
-		SystemPrompt: new("Prefer the payments project's own libraries."),
+		AllowedModels: []string{"keera-code", "keera-speed"},
+		RateLimits:    []policy.RateLimit{{Requests: 120, Period: policy.PeriodMinute}},
+		Budgets:       []policy.Budget{{BudgetMicros: 500_000_000, Period: policy.PeriodDay}},
+		SystemPrompt:  new("Prefer the payments project's own libraries."),
 	}); err != nil {
 		t.Fatalf("PutGuardrail project: %v", err)
 	}
 	if err := st.PutGuardrail(ctx, policy.ScopeKey, f.keyID, policy.Limits{
 		AllowedModels: []string{"keera-speed", "keera-frontier"},
-		RPM:           new(30),
+		RateLimits:    []policy.RateLimit{{Requests: 30, Period: policy.PeriodMinute}},
 	}); err != nil {
 		t.Fatalf("PutGuardrail key: %v", err)
 	}
@@ -50,10 +50,6 @@ func TestLookupKeyCollapsesTheWholeChain(t *testing.T) {
 	if len(res.AllowedModels) != 1 || res.AllowedModels[0] != "keera-speed" {
 		t.Errorf("AllowedModels = %v, want [keera-speed]", res.AllowedModels)
 	}
-	if res.MaxOutputTokens != 2048 {
-		t.Errorf("MaxOutputTokens = %d, want 2048 - the tightest of the levels that set one",
-			res.MaxOutputTokens)
-	}
 	// Text does not narrow: the organisation's instruction reaches the request
 	// whatever the project added after it.
 	const wantPrompt = "Never include customer data in an example.\n\n" +
@@ -63,16 +59,17 @@ func TestLookupKeyCollapsesTheWholeChain(t *testing.T) {
 	}
 
 	// Budgets are kept per level rather than merged: two limits that both hold.
+	// The project's budget per day is a scope of its own, beside its month.
 	want := []policy.Scope{
 		{Type: policy.ScopeOrg, ID: f.orgID, RPM: 600, TPM: 400000,
 			BudgetMicros: 10_000_000_000, Period: policy.PeriodMonth},
-		{Type: policy.ScopeProject, ID: f.projectID, RPM: 120, TPM: 0,
+		{Type: policy.ScopeProject, ID: f.projectID, RPM: 120, Period: policy.PeriodMonth},
+		{Type: policy.ScopeProject, ID: f.projectID,
 			BudgetMicros: 500_000_000, Period: policy.PeriodDay},
-		{Type: policy.ScopeKey, ID: f.keyID, RPM: 30, TPM: 0,
-			BudgetMicros: 0, Period: policy.PeriodMonth},
+		{Type: policy.ScopeKey, ID: f.keyID, RPM: 30, Period: policy.PeriodMonth},
 	}
 	if len(res.Scopes) != len(want) {
-		t.Fatalf("Scopes = %+v, want three levels", res.Scopes)
+		t.Fatalf("Scopes = %+v, want %+v", res.Scopes, want)
 	}
 	for i, w := range want {
 		if res.Scopes[i] != w {
@@ -162,7 +159,7 @@ func TestLookupKeyIgnoresAProjectInAnotherOrganisation(t *testing.T) {
 	}
 	if err := st.PutGuardrail(ctx, policy.ScopeProject, "project_elsewhere", policy.Limits{
 		AllowedModels: []string{"a-model-this-key-must-not-reach"},
-		BudgetMicros:  new(int64(999_000_000)),
+		Budgets:       []policy.Budget{{BudgetMicros: 999_000_000}},
 	}); err != nil {
 		t.Fatalf("PutGuardrail: %v", err)
 	}
@@ -198,7 +195,8 @@ func TestLookupKeyByIDMatchesTheHashLookup(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
 	if err := st.PutGuardrail(ctx, policy.ScopeProject, f.projectID, policy.Limits{
-		AllowedModels: []string{"keera-code"}, RPM: new(120),
+		AllowedModels: []string{"keera-code"},
+		RateLimits:    []policy.RateLimit{{Requests: 120}},
 	}); err != nil {
 		t.Fatalf("PutGuardrail project: %v", err)
 	}

@@ -152,11 +152,9 @@ func (s *Server) checkChat(ctx context.Context, m policy.Model, p Probe) Probe {
 	}
 	p.Sample = sample(text)
 
-	// The point of the check: the function's name in the prose means the call
-	// was parsed as text, so the parser does not match the model.
-	if !p.ToolCalls && strings.Contains(text, "get_build_status") {
-		p.ToolCallAsText = true
-	}
+	// The function's name in the prose means the parser does not match the
+	// model.
+	p.ToolCallAsText = !p.ToolCalls && strings.Contains(text, "get_build_status")
 
 	switch {
 	case p.ToolsOff && text == "":
@@ -299,7 +297,7 @@ func (s *Server) checkDecision(ctx context.Context, m policy.Model, p Probe) Pro
 		return p
 	}
 	letter, share, _ := readChoice(raw, len(decisionProbe.Criteria))
-	p.Sample = fmt.Sprintf("%s (%.0f%% sure)", decisionProbe.Criteria[string(routerLabels[letter])],
+	p.Sample = fmt.Sprintf("%s (%.0f%% sure)", decisionProbe.Criteria[string(choiceLetters[letter])],
 		share*100)
 	if letter != 1 {
 		p.Error = "it took Go source code for English: the model is not reading what it is sent"

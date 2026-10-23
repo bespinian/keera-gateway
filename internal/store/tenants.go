@@ -287,9 +287,11 @@ func (s *Store) DeleteOrg(ctx context.Context, orgID string) (DeletedOrg, error)
 		}
 
 		// An organisation spans three scopes, and each is named explicitly.
-		const scoped = `(scope_type = 'org'     AND scope_id = $1)
-			OR (scope_type = 'project' AND scope_id IN (SELECT id FROM projects WHERE org_id = $1))
-			OR (scope_type = 'key'     AND scope_id IN (SELECT id FROM api_keys WHERE org_id = $1))`
+		scoped := func(owner string) string {
+			return `(scope_type = 'org'     AND ` + owner + ` = $1)
+			OR (scope_type = 'project' AND ` + owner + ` IN (SELECT id FROM projects WHERE org_id = $1))
+			OR (scope_type = 'key'     AND ` + owner + ` IN (SELECT id FROM api_keys WHERE org_id = $1))`
+		}
 		if err := deleteScoped(ctx, tx, scoped, orgID); err != nil {
 			return err
 		}
@@ -302,12 +304,18 @@ func (s *Store) DeleteOrg(ctx context.Context, orgID string) (DeletedOrg, error)
 	return gone, err
 }
 
-// deleteScoped clears the guardrails and spend rows that match where. Those
-// tables name their scope by plain id with no foreign key, so no cascade
-// reaches them.
-func deleteScoped(ctx context.Context, tx pgx.Tx, where, id string) error {
-	for _, table := range []string{"guardrails", "spend"} {
-		if _, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE "+where, id); err != nil {
+// scopeOwner is the scope a spend row belongs to. A rate limit per day or
+// month counts under the scope's id with the meter after a '|'; see
+// policy.Resolved.Quotas.
+const scopeOwner = "split_part(scope_id, '|', 1)"
+
+// deleteScoped clears the guardrails and spend rows that match where, which
+// is given the expression naming a row's scope. Those tables name their scope
+// by plain id with no foreign key, so no cascade reaches them. Only spend ids
+// carry a meter, so guardrails rows are matched on their key as it is.
+func deleteScoped(ctx context.Context, tx pgx.Tx, where func(owner string) string, id string) error {
+	for table, owner := range map[string]string{"guardrails": "scope_id", "spend": scopeOwner} {
+		if _, err := tx.Exec(ctx, "DELETE FROM "+table+" WHERE "+where(owner), id); err != nil {
 			return err
 		}
 	}
@@ -469,7 +477,8 @@ func (s *Store) DeleteProject(ctx context.Context, orgID, projectID string) (Del
 			return &ProjectInUseError{Project: gone.Name, Keys: live}
 		}
 
-		if err := deleteScoped(ctx, tx, "scope_type = 'project' AND scope_id = $1", projectID); err != nil {
+		project := func(owner string) string { return "scope_type = 'project' AND " + owner + " = $1" }
+		if err := deleteScoped(ctx, tx, project, projectID); err != nil {
 			return err
 		}
 		// The foreign key would detach them too; this is here for the count.
@@ -780,10 +789,9 @@ func (s *Store) lookupKey(ctx context.Context, where string, arg any) (*policy.R
 		var (
 			scopeType *string
 			lim       policy.Limits
-			period    *string
 		)
 		dest := append([]any{&key.ID, &key.OrgID, &key.ProjectID, &key.UserID, &key.Kind,
-			&expires, &revoked, &pending, &scopeType}, limitTargets(&lim, &period)...)
+			&expires, &revoked, &pending, &scopeType}, limitTargets(&lim)...)
 		if err := rows.Scan(dest...); err != nil {
 			return nil, err
 		}
@@ -791,7 +799,6 @@ func (s *Store) lookupKey(ctx context.Context, where string, arg any) (*policy.R
 		if scopeType == nil {
 			continue
 		}
-		lim.BudgetPeriod = periodPtr(period)
 		switch policy.ScopeType(*scopeType) {
 		case policy.ScopeOrg:
 			orgL = &lim

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -16,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/bespinian/keera-gateway/internal/catalog"
+	"github.com/bespinian/keera-gateway/internal/control"
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/id"
 	"github.com/bespinian/keera-gateway/internal/policy"
@@ -430,7 +432,7 @@ var liveKey = map[string]any{
 		"id": "key_old", "org_id": "org_1", "project_id": "project_1", "user_id": "user_1",
 		"name": "a developer's laptop", "prefix": "keera_sk_ab",
 		"created_at": "2026-01-01T00:00:00Z", "expires_at": "2026-04-01T00:00:00Z",
-		"limits": map[string]any{"rpm": 120, "allowed_models": []string{"keera-speed"}},
+		"limits": map[string]any{"requests": 120, "allowed_models": []string{"keera-speed"}},
 	}},
 }
 
@@ -1072,21 +1074,27 @@ func TestSetClearsADescriptionAndRefusesNothing(t *testing.T) {
 		})
 	}
 
-	quiet(t)
-	f := newFakeControl(t, map[string]any{"GET /v1/orgs": oneOrg})
-	if err := Run(context.Background(), []string{"filter", "set", "a"}); err == nil ||
-		!strings.Contains(err.Error(), "nothing to change") {
-		t.Errorf("filter set with no flags = %v, want nothing to change", err)
-	}
-	if f.called("PUT", "/v1/filters/a") {
-		t.Error("an empty set wrote the filter back")
+	// --step only picks the step the other flags change.
+	for _, args := range [][]string{
+		{"filter", "set", "a"},
+		{"router", "set", "a", "--step", "route"},
+	} {
+		quiet(t)
+		f := newFakeControl(t, map[string]any{})
+		if err := Run(context.Background(), args); err == nil ||
+			!strings.Contains(err.Error(), "nothing to change") {
+			t.Errorf("%v = %v, want nothing to change", args, err)
+		}
+		if f.called("PUT", "/v1/"+args[0]+"s/a") {
+			t.Errorf("%v wrote the %s back", args, args[0])
+		}
 	}
 }
 
-// set, and edit and update, its other names, change what they are given and
-// keep the rest. Shadow has two flags so that a set naming neither does not
-// switch a shadow filter to enforcing. And --no-shadow moves nothing else: what
-// the shadow run measured is what goes live.
+// set (or edit, update) changes what it is given and keeps the rest. Shadow
+// has two flags so a set naming neither does not switch a shadow filter to
+// enforcing. --no-shadow moves nothing else: what the shadow run measured is
+// what goes live.
 func TestFilterAndRouterSetKeepTheRest(t *testing.T) {
 	filter := map[string]any{
 		"alias": "redact-secrets", "model": "keera-guard",
@@ -1128,10 +1136,10 @@ func TestFilterAndRouterSetKeepTheRest(t *testing.T) {
 		t.Run("router "+verb, func(t *testing.T) {
 			quiet(t)
 			f := newFakeControl(t, map[string]any{
-				"GET /v1/orgs": oneOrg,
 				"GET /v1/routers": map[string]any{"data": []map[string]any{{
-					"alias": "auto", "model": "keera-speed", "destinations": []string{"a", "b"},
-					"prompt": "Pick one.", "description": "the original",
+					"alias": "auto", "description": "the original", "display_name": "Auto",
+					"start": map[string]any{"id": "route", "kind": "route", "model": "keera-speed",
+						"destinations": []string{"a", "b"}, "prompt": "Pick one."},
 				}}},
 				"PUT /v1/routers/auto": map[string]any{"alias": "auto"},
 			})
@@ -1139,8 +1147,10 @@ func TestFilterAndRouterSetKeepTheRest(t *testing.T) {
 				"--description", "changed"}); err != nil {
 				t.Fatal(err)
 			}
-			if req := f.request("PUT", "/v1/routers/auto"); req.body["prompt"] != "Pick one." ||
-				req.body["model"] != "keera-speed" {
+			req := f.request("PUT", "/v1/routers/auto")
+			start, _ := req.body["start"].(map[string]any)
+			if start["prompt"] != "Pick one." || start["model"] != "keera-speed" ||
+				req.body["display_name"] != "Auto" || req.body["description"] != "changed" {
 				t.Errorf("router %s dropped what was not given: %v", verb, req.body)
 			}
 		})
@@ -1216,9 +1226,10 @@ func TestFilterReportAsksForTheWindowAndPrintsTheSplit(t *testing.T) {
 func TestPolicySetAppliesFiltersAndClearsThemByFlag(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs":                         oneOrg,
-		"GET /v1/projects":                     paymentsProject,
-		"GET /v1/guardrails/project/project_1": map[string]any{"rpm": 120},
+		"GET /v1/projects": paymentsProject,
+		"GET /v1/guardrails/project/project_1": map[string]any{"rate_limits": []any{
+			map[string]any{"requests": 120},
+		}},
 		"PUT /v1/guardrails/project/project_1": map[string]any{},
 	})
 
@@ -1233,15 +1244,14 @@ func TestPolicySetAppliesFiltersAndClearsThemByFlag(t *testing.T) {
 	}
 	// The limits already stored are read back first, so naming a filter does
 	// not silently drop the rate limit somebody else set.
-	if req.body["rpm"] != float64(120) {
-		t.Errorf("rpm = %v; setting one field must not clear the others", req.body["rpm"])
+	if got := rateLimits(req.body); len(got) != 1 || got[0]["requests"] != float64(120) {
+		t.Errorf("rate_limits = %v; setting one field must not clear the others", got)
 	}
 }
 
 func TestPolicySetClearsFiltersOnlyWithItsOwnFlag(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs":                         oneOrg,
 		"GET /v1/projects":                     paymentsProject,
 		"GET /v1/guardrails/project/project_1": map[string]any{"filters": []string{"redact-secrets"}},
 		"PUT /v1/guardrails/project/project_1": map[string]any{},
@@ -1341,9 +1351,13 @@ func TestModelUsersNamesTheFiltersAndRoutersOnIt(t *testing.T) {
 			{"alias": "other", "model": "keera-speed"},
 		}},
 		"GET /v1/routers": map[string]any{"data": []map[string]any{
-			{"alias": "auto", "model": "keera-speed", "destinations": []string{"keera-guard", "big"}},
-			{"alias": "decide", "model": "keera-guard", "destinations": []string{"big"}},
-			{"alias": "elsewhere", "model": "keera-speed", "destinations": []string{"big"}},
+			{"alias": "auto", "start": map[string]any{"id": "r", "kind": "route",
+				"model": "keera-speed", "destinations": []string{"keera-guard", "big"}}},
+			{"alias": "decide", "start": map[string]any{"id": "r", "kind": "route",
+				"model": "keera-guard", "destinations": []string{"big"}}},
+			{"alias": "direct", "start": map[string]any{"id": "m", "kind": "model", "ref": "keera-guard"}},
+			{"alias": "elsewhere", "start": map[string]any{"id": "r", "kind": "route",
+				"model": "keera-speed", "destinations": []string{"big"}}},
 		}},
 	})
 
@@ -1354,8 +1368,8 @@ func TestModelUsersNamesTheFiltersAndRoutersOnIt(t *testing.T) {
 	if strings.Join(filters, ",") != "redact" {
 		t.Errorf("filters = %v, want [redact]", filters)
 	}
-	if strings.Join(routers, ",") != "auto,decide" {
-		t.Errorf("routers = %v, want [auto decide]", routers)
+	if strings.Join(routers, ",") != "auto,decide,direct" {
+		t.Errorf("routers = %v, want [auto decide direct]", routers)
 	}
 }
 
@@ -1440,13 +1454,12 @@ func TestANegativeBudgetFlagIsLeftUnset(t *testing.T) {
 		if err := f.apply(&lim); err != nil {
 			t.Fatal(err)
 		}
-		if lim.BudgetMicros != nil {
-			t.Errorf("--budget %v set a budget of %d", amount, *lim.BudgetMicros)
+		if lim.Budgets != nil {
+			t.Errorf("--budget %v set a budget: %v", amount, lim.Budgets)
 		}
 	}
 }
 
-// A cut never splits a character in two.
 func TestTruncatingKeepsWholeCharacters(t *testing.T) {
 	long := strings.Repeat("ä", 120)
 	for name, got := range map[string]string{"firstLine": firstLine(long), "oneLine": oneLine(long)} {
@@ -1456,26 +1469,64 @@ func TestTruncatingKeepsWholeCharacters(t *testing.T) {
 	}
 }
 
-// A guardrail names its project the way every other command does: by name.
 func TestGuardrailTakesAProjectByName(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
-		"GET /v1/orgs":                         oneOrg,
 		"GET /v1/projects":                     paymentsProject,
 		"GET /v1/guardrails/project/project_1": map[string]any{},
 		"PUT /v1/guardrails/project/project_1": map[string]any{},
 
 		"GET /v1/guardrails/project/project_1/effective": map[string]any{},
 	})
-	if err := Run(context.Background(), []string{"limit", "project", "payments", "--rpm", "60"}); err != nil {
+	if err := Run(context.Background(), []string{"limit", "project", "payments", "--requests", "60"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.request("PUT", "/v1/guardrails/project/project_1").body["rpm"]; got != float64(60) {
-		t.Errorf("rpm = %v, want 60 on the project named payments", got)
+	if got := rateLimits(f.request("PUT", "/v1/guardrails/project/project_1").body); len(got) != 1 ||
+		got[0]["requests"] != float64(60) || got[0]["period"] != "minute" {
+		t.Errorf("rate_limits = %v, want 60 requests a minute on the project named payments", got)
 	}
 }
 
-// With several organisations, the chosen one is where a name is looked up.
+// rateLimits reads the rate limits out of a guardrail sent as JSON.
+func rateLimits(body map[string]any) []map[string]any {
+	var out []map[string]any
+	list, _ := body["rate_limits"].([]any)
+	for _, v := range list {
+		if m, ok := v.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func TestLimitCountsPerDayWithPer(t *testing.T) {
+	// --per says which of the scope's rate limits to set. The one per minute
+	// it already has stays.
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/projects": paymentsProject,
+		"GET /v1/guardrails/project/project_1": map[string]any{"rate_limits": []any{
+			map[string]any{"requests": 60, "period": "minute"},
+		}},
+		"PUT /v1/guardrails/project/project_1": map[string]any{},
+
+		"GET /v1/guardrails/project/project_1/effective": map[string]any{},
+	})
+	if err := Run(context.Background(), []string{"limit", "project", "payments",
+		"--tokens", "5000000", "--per", "day"}); err != nil {
+		t.Fatal(err)
+	}
+	got := rateLimits(f.request("PUT", "/v1/guardrails/project/project_1").body)
+	if len(got) != 2 || got[0]["requests"] != float64(60) ||
+		got[1]["tokens"] != float64(5_000_000) || got[1]["period"] != "day" {
+		t.Errorf("rate_limits = %v, want 60 requests a minute and 5000000 tokens a day", got)
+	}
+	err := Run(context.Background(), []string{"limit", "project", "payments", "--per", "week"})
+	if err == nil || !strings.Contains(err.Error(), "--per must be minute, day or month") {
+		t.Errorf("err = %v, want --per refused", err)
+	}
+}
+
 func TestGuardrailTakesAProjectByNameInOneOfSeveralOrgs(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
@@ -1530,7 +1581,7 @@ func TestRefusedBeforeAnyCall(t *testing.T) {
 		{"org list with --domain", []string{"org", "list", "--domain", "example.ch"}, "does not take"},
 		{"org create with --no-domain", []string{"org", "create", "Another Bank", "--no-domain"}, "does not take"},
 		{"org delete with --domain", []string{"org", "delete", "org_1", "--domain", "example.ch", "--yes"}, "does not take"},
-		{"guardrail get with --rpm", []string{"guardrail", "get", "project", "project_1", "--rpm", "5"}, "does not take"},
+		{"guardrail get with --requests", []string{"guardrail", "get", "project", "project_1", "--requests", "5"}, "does not take"},
 		{"model enable with --provider", []string{"model", "enable", "keera-speed", "--provider", "openai"}, "does not take --provider"},
 		// The operator role crosses organisations, so only the gateway's own
 		// configuration grants it, and the refusal names that variable.
@@ -1923,5 +1974,36 @@ func TestKeyActivateAsksTheControlPlane(t *testing.T) {
 	}
 	if !f.called("POST", "/v1/keys/key_p/activate") {
 		t.Errorf("the key was not activated: %v", f.seen)
+	}
+}
+
+// Every level's budget must hold, so each is printed with the level that set
+// it, and none at all is unlimited.
+func TestEffectiveBudgetsNameTheirLevel(t *testing.T) {
+	style = false
+	eff := control.Effective{Levels: []control.EffectiveLevel{
+		{Type: policy.ScopeOrg, ID: "org_1", Name: "acme", Limits: policy.Limits{
+			Budgets: []policy.Budget{{BudgetMicros: 100_000_000}},
+		}},
+		{Type: policy.ScopeKey, ID: "key_1", Limits: policy.Limits{
+			Budgets: []policy.Budget{{BudgetMicros: 5_000_000, Period: policy.PeriodDay}},
+		}},
+	}}
+	var out bytes.Buffer
+	w := newTable(&out)
+	printEffectiveSpend(w, eff)
+	printEffectiveSpend(w, control.Effective{})
+	if err := w.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(strings.Fields(out.String()), " ")
+	for _, want := range []string{
+		"CHF 100.00 per month set by org acme",
+		"CHF 5.00 per day set by key key_1",
+		"budget (unlimited)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
 	}
 }

@@ -121,7 +121,7 @@ func upsertModel(ctx context.Context, db querier, m policy.Model, cred Credentia
 // DeleteModel removes one of an organisation's models, and takes it off the
 // organisation's allow-list, where adding it put it.
 func (s *Store) DeleteModel(ctx context.Context, orgID, alias string) error {
-	return s.deleteAllowed(ctx, "models", orgID, alias)
+	return s.deleteAllowed(ctx, "models", orgID, alias, nil)
 }
 
 // ModelStat is how fast one model has been answering, for the list.

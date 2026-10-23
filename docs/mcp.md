@@ -85,8 +85,8 @@ keera guardrail set project <project-id> --tools github/search_code
 ```
 
 An entry is a server alias, for all its tools, or `alias/tool` for one tool.
-`--no-tools` clears a level's list. In the panel, the guardrails dialog sets it
-under **MCP tools**.
+`--no-tools` clears a level's list. In the panel, it is the **MCP tools** block
+of the guardrails dialog.
 Each level narrows the one above: a tool must be on every level's list. Here
 the project may call only `github/search_code`. The project's list does not name
 `jira/search`, and it names no other github tool. A level that sets no list
@@ -119,8 +119,9 @@ them.
 
 ## Rate limits and budgets
 
-A tool call counts as one request against the key's `rpm`, like a model
-request, and is refused while its `tpm` is used up. A call costs nothing unless
+A tool call counts as one request against the key's rate limits per minute, day
+and month, like a model request. It is refused while any of them, for requests
+or tokens, is used up. A call costs nothing unless
 the key has filters, so only then does a budget stop it. If one of those filters
 runs on a model on the deployment's provider key, the call also needs
 [prepaid credit](billing.md#pay-in-advance). A refused call comes back as a

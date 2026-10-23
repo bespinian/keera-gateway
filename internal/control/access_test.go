@@ -11,6 +11,7 @@ import (
 
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/policy"
+	"github.com/bespinian/keera-gateway/internal/registry"
 )
 
 func TestAccessSaysTheOperatorKeyIsNobody(t *testing.T) {
@@ -158,5 +159,50 @@ func TestSaysOf(t *testing.T) {
 	}
 	if len(got.filters) != 1 || got.filters[0] != "redact-secrets" {
 		t.Errorf("filters = %q, want the filter named", got.filters)
+	}
+}
+
+// A level with a budget per day and one per month is one row with both, not
+// two rows that read as two levels.
+func TestScopeStatesKeepALevelsLimitsTogether(t *testing.T) {
+	st, ctx := routerStore(t)
+	reg, err := registry.New(ctx, st, registry.Options{}, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("registry.New: %v", err)
+	}
+	s := New(st, reg, nil, nil, Options{}, slog.New(slog.DiscardHandler))
+
+	res := policy.Resolve(
+		policy.Key{ID: "key_1", OrgID: "org_1"},
+		&policy.Limits{
+			RateLimits: []policy.RateLimit{
+				{Requests: 60, Period: policy.PeriodMinute},
+				{Requests: 1000, Tokens: 5_000_000, Period: policy.PeriodDay},
+			},
+			Budgets: []policy.Budget{
+				{BudgetMicros: 500_000_000, Period: policy.PeriodMonth},
+				{BudgetMicros: 30_000_000, Period: policy.PeriodDay},
+			},
+		},
+		nil, nil,
+	)
+	got := s.scopeStates(res, "Example Bank", nil, "a laptop", time.Now(), nil)
+	if len(got) != 2 || got[0].Type != policy.ScopeOrg || got[1].Type != policy.ScopeKey {
+		t.Fatalf("scopes = %+v, want the organisation and the key", got)
+	}
+	org := got[0]
+	wantRates := []accessRate{
+		{Requests: 60, Period: policy.PeriodMinute},
+		{Requests: 1000, Tokens: 5_000_000, Period: policy.PeriodDay},
+	}
+	if !slices.Equal(org.Rates, wantRates) {
+		t.Errorf("rates = %+v, want %+v", org.Rates, wantRates)
+	}
+	if len(org.Budgets) != 2 || org.Budgets[0].Period != policy.PeriodMonth ||
+		org.Budgets[1].Period != policy.PeriodDay || org.Budgets[1].BudgetMicros != 30_000_000 {
+		t.Errorf("budgets = %+v, want the month's and the day's", org.Budgets)
+	}
+	if len(got[1].Rates) != 0 || len(got[1].Budgets) != 0 {
+		t.Errorf("key = %+v, want no limits of its own", got[1])
 	}
 }

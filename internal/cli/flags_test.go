@@ -12,20 +12,20 @@ import (
 
 func newFlagSet() (*flag.FlagSet, *int, *bool, *string) {
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
-	rpm := fs.Int("rpm", -1, "")
+	requests := fs.Int("requests", -1, "")
 	asJSON := fs.Bool("json", false, "")
 	org := fs.String("org", "", "")
-	return fs, rpm, asJSON, org
+	return fs, requests, asJSON, org
 }
 
 func TestParseAcceptsFlagsAfterPositionalArguments(t *testing.T) {
 	// This is how the command reads naturally, and how it will be typed.
-	fs, rpm, asJSON, _ := newFlagSet()
-	if err := parse(fs, []string{"project", "project_1", "--rpm", "60", "--json"}); err != nil {
+	fs, requests, asJSON, _ := newFlagSet()
+	if err := parse(fs, []string{"project", "project_1", "--requests", "60", "--json"}); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if *rpm != 60 {
-		t.Errorf("rpm = %d, want 60", *rpm)
+	if *requests != 60 {
+		t.Errorf("requests = %d, want 60", *requests)
 	}
 	if !*asJSON {
 		t.Error("a trailing boolean flag was not seen")
@@ -36,12 +36,12 @@ func TestParseAcceptsFlagsAfterPositionalArguments(t *testing.T) {
 }
 
 func TestParseStillAcceptsTheConventionalOrder(t *testing.T) {
-	fs, rpm, _, org := newFlagSet()
-	if err := parse(fs, []string{"--rpm=60", "--org", "org_1", "project", "project_1"}); err != nil {
+	fs, requests, _, org := newFlagSet()
+	if err := parse(fs, []string{"--requests=60", "--org", "org_1", "project", "project_1"}); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if *rpm != 60 || *org != "org_1" {
-		t.Errorf("rpm = %d, org = %q", *rpm, *org)
+	if *requests != 60 || *org != "org_1" {
+		t.Errorf("requests = %d, org = %q", *requests, *org)
 	}
 	if got := fs.Args(); !slices.Equal(got, []string{"project", "project_1"}) {
 		t.Errorf("positional args = %v, want [project project_1]", got)
@@ -50,11 +50,11 @@ func TestParseStillAcceptsTheConventionalOrder(t *testing.T) {
 
 func TestParseTreatsEverythingAfterDoubleDashAsPositional(t *testing.T) {
 	fs, _, _, _ := newFlagSet()
-	if err := parse(fs, []string{"name", "--", "--rpm"}); err != nil {
+	if err := parse(fs, []string{"name", "--", "--requests"}); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if got := fs.Args(); !slices.Equal(got, []string{"name", "--rpm"}) {
-		t.Errorf("positional args = %v, want [name --rpm]", got)
+	if got := fs.Args(); !slices.Equal(got, []string{"name", "--requests"}) {
+		t.Errorf("positional args = %v, want [name --requests]", got)
 	}
 }
 
@@ -77,13 +77,13 @@ func TestParseRejectsAnUnknownFlag(t *testing.T) {
 	if err == nil || err.Error() != "unknown flag --nonsense" {
 		t.Errorf("err = %v, want it to name the flag the way the help does", err)
 	}
-	err = parse(fs, []string{"--rpm"})
-	if err == nil || err.Error() != "a value is missing after --rpm" {
-		t.Errorf("err = %v, want it to say --rpm needs a value", err)
+	err = parse(fs, []string{"--requests"})
+	if err == nil || err.Error() != "a value is missing after --requests" {
+		t.Errorf("err = %v, want it to say --requests needs a value", err)
 	}
-	err = parse(fs, []string{"--rpm", "abc"})
-	if err == nil || !strings.Contains(err.Error(), "for --rpm") {
-		t.Errorf("err = %v, want it to name --rpm", err)
+	err = parse(fs, []string{"--requests", "abc"})
+	if err == nil || !strings.Contains(err.Error(), "for --requests") {
+		t.Errorf("err = %v, want it to name --requests", err)
 	}
 }
 

@@ -8,7 +8,7 @@ import "github.com/bespinian/keera-gateway/internal/policy"
 // fits.
 
 // bytesPerToken sizes what wants a high guess: a filter's output allowance,
-// whether a filter's or router's model can hold the text, a size router's
+// whether a filter's or route step's model can hold the text, a size step's
 // choice, the credit a request holds, what a call with no usage record is
 // billed, and count_tokens.
 const bytesPerToken = 3

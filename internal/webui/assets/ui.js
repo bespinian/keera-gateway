@@ -293,19 +293,16 @@ export const icons = {
     "M5 9l-2.5 5.5a2.7 2.7 0 0 0 5 0zM19 9l-2.5 5.5a2.7 2.7 0 0 0 5 0z",
   // Brackets, for a rule. Unlike the two marks above, no model is involved.
   pattern: "M8 5H5v14h3M16 5h3v14h-3M10 9.5h4M10 14.5h4",
-  // One request in, one of several models out.
-  routers: "M4 6h5l4 6h7M20 12l-3-3m3 3l-3 3M9 6l4 12h7",
+  // One request in, one of several models out: a router, and its route steps.
+  route: "M4 6h5l4 6h7M20 12l-3-3m3 3l-3 3M9 6l4 12h7",
   // A plug: the socket an agent's tools come through.
   mcp: "M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4",
-  // The five router modes, drawn only on the tiles that pick one, beside
-  // their names. Each shows what the mode reads.
-  //
-  // A model reading lines of text, with the spark of a decision.
+  // The five route modes, for the tiles that pick one. Instruction: a model
+  // reading lines of text, with the spark of a decision.
   instruction:
     "M4 6h11M4 11h7M4 16h5" +
     "M17.5 12l1.1 2.4 2.4 1.1-2.4 1.1-1.1 2.4-1.1-2.4-2.4-1.1 2.4-1.1z",
-  // Two chevrons: the second is where the request goes when the first does
-  // not answer.
+  // Two chevrons: the second takes the request when the first fails.
   fallback: "M5 7l7 6 7-6M5 13l7 6 7-6",
   // A stopwatch: this mode ranks by measured time.
   latency:
