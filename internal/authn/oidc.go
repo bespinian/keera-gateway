@@ -39,15 +39,18 @@ type OIDCConfig struct {
 	GroupsClaim string
 	Mapping     RoleMapping
 	// Domains are the email domains this provider may vouch for. The domain
-	// picks the organisation and can name an operator, and a customer's directory
-	// admin can give anyone any address. "*" allows any domain, for a provider
-	// that proves the address itself, such as Google. Empty allows any too;
-	// the configuration refuses that when there are several providers.
+	// picks the organisation and can name an operator, and a customer's
+	// directory admin can give anyone any address. "*" allows any domain, for a
+	// provider that proves the address itself, such as Google. Empty allows any
+	// too, which configuration refuses for GitHub, for LDAP (which may not have
+	// "*" either) and when there are several providers.
 	Domains []string
 	// SignUp lets a person whose sign-in matches no organisation create one,
 	// or accept an invitation. Only for a provider that proves every address,
 	// since anyone it vouches for can then become an administrator.
 	SignUp bool
+	// LDAP is set for a provider whose issuer is an ldap:// or ldaps:// URL.
+	LDAP LDAPConfig
 }
 
 // AnyDomain in Domains lets a provider vouch for every address.
@@ -83,7 +86,7 @@ var nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 // Configured reports whether this provider was set up at all. Without one the
 // control plane still works through the operator key.
 func (c OIDCConfig) Configured() bool {
-	return c.IssuerURL != "" && c.ClientID != ""
+	return c.IssuerURL != "" && (c.ClientID != "" || c.IsLDAP())
 }
 
 // Label is what to call this provider in front of a person.
@@ -94,7 +97,9 @@ func (c OIDCConfig) Label() string {
 	return c.Name
 }
 
-// Validate checks a configuration that claims to be complete.
+// Validate checks the shape of a configuration that claims to be complete.
+// Which settings are missing is config's to say, since it knows what they
+// are called.
 func (c OIDCConfig) Validate() error {
 	switch {
 	case !c.Configured():
@@ -107,8 +112,8 @@ func (c OIDCConfig) Validate() error {
 	case c.Name == ReservedProvider || c.Name == PasskeyProvider:
 		return fmt.Errorf("%q is reserved for the gateway's own sign-ins; give the "+
 			"identity provider another name", c.Name)
-	case c.ClientSecret == "":
-		return fmt.Errorf("the client secret is required for the %s identity provider", c.Name)
+	case c.IsLDAP():
+		return c.validateLDAP()
 	case c.RedirectURL == "":
 		return fmt.Errorf("the redirect URL is required for the %s identity provider; "+
 			"it is the absolute URL of /control/auth/callback as the browser sees it", c.Name)
@@ -160,6 +165,9 @@ type OIDC struct {
 	// github is set for github.com, which speaks OAuth but not OpenID Connect,
 	// and leaves provider and verifier nil.
 	github *githubAPI
+	// ldap is set for a directory spoken to over LDAP, which has no redirect
+	// at all, and also leaves provider and verifier nil.
+	ldap *ldapDir
 }
 
 // NewOIDC discovers the provider's metadata. It does so once at start-up, so a
@@ -169,8 +177,11 @@ func NewOIDC(ctx context.Context, cfg OIDCConfig, client *http.Client) (*OIDC, e
 	if !cfg.Configured() {
 		return nil, nil
 	}
-	if isGitHub(cfg.IssuerURL) {
-		return newGitHub(cfg, client, "https://github.com", "https://api.github.com"), nil
+	if cfg.IsLDAP() {
+		return newLDAP(cfg)
+	}
+	if cfg.IsGitHub() {
+		return newGitHub(cfg, client, GitHubIssuer, "https://api.github.com"), nil
 	}
 	if client != nil {
 		ctx = oidc.ClientContext(ctx, client)
@@ -340,6 +351,9 @@ func (o *OIDC) AuthCodeURL(f Flow) string {
 
 // Exchange turns an authorization code into a verified identity.
 func (o *OIDC) Exchange(ctx context.Context, code string, f Flow) (Identity, error) {
+	if o.ldap != nil {
+		return Identity{}, errors.New("a password sign-in has no authorization code")
+	}
 	if o.github != nil {
 		return o.exchangeGitHub(ctx, code, f)
 	}
@@ -374,10 +388,12 @@ const DirectoryCheckEvery = 15 * time.Minute
 // earlier sign-in returned.
 //
 // The identity is only filled in when the provider sent a fresh id_token,
-// which most do. Without one, an answer still says the account is active, and
-// fresh reports false. The returned refresh token is the one to keep: some
-// providers rotate it on every use.
+// which most do; without one, success still means the account is active and
+// fresh is false. Keep the returned refresh token: some providers rotate it.
 func (o *OIDC) Recheck(ctx context.Context, refreshToken string) (id Identity, fresh bool, err error) {
+	if o.ldap != nil {
+		return o.recheckLDAP(ctx, refreshToken)
+	}
 	if o.github != nil {
 		return o.recheckGitHub(ctx, refreshToken)
 	}

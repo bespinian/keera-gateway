@@ -165,28 +165,18 @@ Rate limits are kept per replica unless `KEERA_REDIS_URL` is set. See
 ### Single sign-on
 
 `KEERA_OIDC_PROVIDERS` names the identity providers, and each reads its own
-`KEERA_OIDC_<NAME>_*`. `KEERA_PASSKEYS` turns on passkeys. `KEERA_OPERATORS`
+`KEERA_OIDC_<NAME>_*`. An `ldap://` or `ldaps://` issuer makes one an
+[LDAP directory](sso.md#ldap-and-active-directory). `KEERA_PASSKEYS` turns on
+passkeys. `KEERA_OPERATORS`
 names the email addresses that are operators
 ([sso.md](sso.md#the-operator-role-comes-from-the-environment-always)). Every
 setting is in [sso.md](sso.md#settings).
 
 ### Sandboxes
 
-Off unless `KEERA_SANDBOX_DRIVER` is `kubernetes` or `podman`. The podman
-driver is for local development and tests, not for production. While the
-driver is unset, the other `KEERA_SANDBOX_*` settings are ignored (a stray one
-does not stop the start) and the panel hides sandboxes.
-
-`KEERA_SANDBOXES_FILE`, the classes new organisations start with
-([Template files](gateway.md#template-files)), and `KEERA_SANDBOX_IMAGES` are
-read either way. So the classes are there once a driver is set, and an
-administrator can save a class with an allowed image before then. A missing or
-invalid file stops the start.
-
-The other settings are `KEERA_SANDBOX_*`: the namespace, the runtime per
-isolation tier (a RuntimeClass on Kubernetes, an OCI runtime such as `runsc` on
-podman), the address a sandbox reaches the gateway at, idle suspend, and the
-forge sandboxes clone from. They are listed in
+Off unless `KEERA_SANDBOX_DRIVER` is `kubernetes` or `podman`; the podman
+driver is for local development and tests. Every `KEERA_SANDBOX_*` setting, and
+which are read without a driver, is in
 [sandboxes.md](sandboxes.md#configuration).
 
 ## Single host with compose

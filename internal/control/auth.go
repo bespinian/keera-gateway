@@ -40,6 +40,9 @@ func (s *Server) providerList() []map[string]any {
 			"name": p.Name(), "label": p.Label(),
 			// Whether somebody new may create an organisation through it.
 			"signup": p.SignUp(),
+			// Whether the panel asks for a password instead of linking to the
+			// directory.
+			"password": p.Password(),
 		})
 	}
 	return providers
@@ -78,6 +81,10 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		s.signInFailed(w, r, err)
 		return
 	}
+	if provider.Password() {
+		s.startPasswordLogin(w, r, provider, cli)
+		return
+	}
 	flow := authn.NewFlow()
 	if err := s.st.CreateLoginFlow(r.Context(), store.LoginFlow{
 		State:    flow.State,
@@ -114,14 +121,13 @@ func (s *Server) cookie(name, value, path string, maxAge int, same http.SameSite
 	}
 }
 
-// providerFor resolves which identity provider a sign-in names.
-//
-// Naming none is fine when there is only one. With several, it is refused
-// rather than guessed: the wrong directory could put an account in the wrong
+// providerFor resolves which identity provider a sign-in names. Naming none is
+// fine when there is only one way in, passkeys included. With several it is
+// refused, not guessed: the wrong directory could put an account in the wrong
 // tenant.
 func (s *Server) providerFor(name string) (*authn.OIDC, error) {
 	if name == "" {
-		if only := s.opts.Providers.Only(); only != nil {
+		if only := s.opts.Providers.Only(); only != nil && s.opts.Passkeys == nil {
 			return only, nil
 		}
 		names := s.opts.Providers.Names()
@@ -186,6 +192,11 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 			"against is no longer configured"))
 		return
 	}
+	if provider.Password() {
+		s.signInFailed(w, r, errors.New(provider.Label()+" sign-in asks for a password, "+
+			"not a redirect"))
+		return
+	}
 	identity, err := provider.Exchange(r.Context(), q.Get("code"), authn.Flow{
 		State: flow.State, Verifier: flow.Verifier, Nonce: flow.Nonce,
 	})
@@ -211,8 +222,13 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		s.startSignup(w, r, provider, identity, place.invited, flow.RedirectTo)
 		return
 	}
-	user, was, ok := s.linkIdentity(w, r, provider, identity, place.orgID)
-	if !ok {
+	user, was, err := s.linkIdentity(r, provider, identity, place.orgID)
+	if err != nil {
+		if refused, ok := errors.AsType[forbidden](err); ok {
+			s.signInFailed(w, r, refused)
+		} else {
+			s.fail(w, err)
+		}
 		return
 	}
 	s.rememberDirectory(r, user, s.sealRefreshToken(user.ExternalID, identity.RefreshToken))
@@ -236,15 +252,16 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, cmp.Or(flow.RedirectTo, "/"), http.StatusFound)
 }
 
-// linkIdentity finds or creates the user for a signed-in identity and applies
-// the role the directory gives them. It also returns the role they had
-// before.
-func (s *Server) linkIdentity(w http.ResponseWriter, r *http.Request, provider *authn.OIDC,
+// linkIdentity finds or creates the user for a signed-in identity, applies the
+// directory's role, and returns the role they had before. Reasons the person
+// can act on come back as forbidden, which each way of signing in shows in
+// its own way.
+func (s *Server) linkIdentity(r *http.Request, provider *authn.OIDC,
 	identity authn.Identity, orgID string,
-) (user store.User, was string, ok bool) {
+) (user store.User, was string, err error) {
 	role := provider.Mapping().RoleFor(identity.Email, identity.Groups)
 
-	user, err := s.st.LinkUser(r.Context(), id.New("user"), store.Link{
+	user, err = s.st.LinkUser(r.Context(), id.New("user"), store.Link{
 		OrgID:      orgID,
 		Email:      identity.Email,
 		Name:       identity.Name,
@@ -254,32 +271,27 @@ func (s *Server) linkIdentity(w http.ResponseWriter, r *http.Request, provider *
 	if errors.Is(err, store.ErrEmailTaken) {
 		s.log.Warn("sign-in refused: the address belongs to a different identity",
 			"email", identity.Email, "provider", identity.Provider)
-		s.signInFailed(w, r, errors.New(identity.Email+" already belongs to an account "+
-			"linked to a different identity; sign in the way that account was created, "+
-			"or ask an operator to move it"))
-		return user, "", false
+		return user, "", forbidden(identity.Email + " already belongs to an account " +
+			"linked to a different identity; sign in the way that account was created, " +
+			"or ask an operator to move it")
 	}
 	if err != nil {
-		s.fail(w, err)
-		return user, "", false
+		return user, "", err
 	}
 	if user.Disabled() {
 		s.log.Warn("sign-in refused: the person is disabled",
 			"user", user.ID, "provider", identity.Provider)
-		s.signInFailed(w, r, errors.New("your access to Keera has been turned off; "+
-			"ask an administrator of your organisation"))
-		return user, "", false
+		return user, "", forbidden("your access to Keera has been turned off; " +
+			"ask an administrator of your organisation")
 	}
 	was = user.Role
 	if err := s.syncRole(r, &user, role); err != nil {
-		s.fail(w, err)
-		return user, "", false
+		return user, "", err
 	}
 	if err := s.syncOtherRoles(r, user, role); err != nil {
-		s.fail(w, err)
-		return user, "", false
+		return user, "", err
 	}
-	return user, was, true
+	return user, was, nil
 }
 
 // placement is where a sign-in lands: in an organisation, or on the sign-up

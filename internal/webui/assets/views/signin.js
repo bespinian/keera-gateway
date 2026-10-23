@@ -1,5 +1,8 @@
-// The sign-in screen: single sign-on when an identity provider is configured,
-// and the operator key when not, which is how a new deployment is set up.
+// The sign-in screen: a button per identity provider, a username and password
+// form for an LDAP directory, and passkeys where they are on. With none of
+// these, or at ?operator_key=1, it asks for the operator key, which is how a
+// new deployment is set up. It also hands a sign-in over to `keera login` or
+// to Keera Chat.
 
 import { api, ApiError } from "../api.js";
 import { getPasskey, passkeysSupported } from "../webauthn.js";
@@ -15,12 +18,55 @@ import {
   banner,
 } from "../ui.js";
 
-/** passkeySignInFlow is the sign-in `keera login --provider passkey` started,
- *  if this page was opened for one. It comes after the #, so it never reaches
- *  a server log. */
+/** passkeySignInFlow is the passkey sign-in /auth/login started, such as for
+ *  `keera login --provider passkey`, as { flow, to }, or null. It comes after
+ *  the #, so it never reaches a server log. */
 export function passkeySignInFlow() {
-  const m = location.hash.match(/^#passkey-sign-in=([A-Za-z0-9_-]+)$/);
-  return m ? m[1] : "";
+  const m = location.hash.match(
+    /^#passkey-sign-in=([A-Za-z0-9_-]+)(?:\.(cli|chat))?$/,
+  );
+  return m ? { flow: m[1], to: m[2] || "" } : null;
+}
+
+/** passwordSignInFlow is the sign-in /auth/login started against an LDAP
+ *  directory, such as for `keera login`, as { provider, flow, to }, or null. */
+export function passwordSignInFlow() {
+  const m = location.hash.match(
+    /^#password-sign-in=([a-z0-9][a-z0-9-]*)\.([A-Za-z0-9_-]+)(?:\.(cli|chat))?$/,
+  );
+  return m ? { provider: m[1], flow: m[2], to: m[3] || "" } : null;
+}
+
+/** handOver is what to say above and below a form that finishes a sign-in
+ *  started elsewhere. to is where the gateway said it goes next. */
+function handOver(to) {
+  if (to === "cli") {
+    return [
+      "Sign in to the keera command line.",
+      "Your browser then hands the sign-in over to the terminal.",
+    ];
+  }
+  if (to === "chat") {
+    return [
+      "Sign in to Keera Chat.",
+      "Your browser then goes back to Keera Chat.",
+    ];
+  }
+  return ["Sign in to Keera Gateway.", ""];
+}
+
+// takeSignInError is why the last sign-in failed, read once. The gateway puts
+// it in a cookie rather than the address, which anyone can write into a link.
+function takeSignInError() {
+  const name = "keera_sign_in_error=";
+  const found = document.cookie.split("; ").find((c) => c.startsWith(name));
+  document.cookie = name + "; Max-Age=0; Path=/";
+  if (!found) return "the sign-in did not finish.";
+  try {
+    return decodeURIComponent(found.slice(name.length));
+  } catch {
+    return "the sign-in did not finish.";
+  }
 }
 
 export async function signIn(root, onSignedIn) {
@@ -104,7 +150,96 @@ export async function signIn(root, onSignedIn) {
   // is in the document.
   let focusKey = false;
 
-  const cliFlow = passkeySignInFlow();
+  const passkeyFlow = passkeySignInFlow();
+  const cliFlow = passkeyFlow ? passkeyFlow.flow : "";
+  const cliPassword = passwordSignInFlow();
+
+  // A sign-in started elsewhere, such as by `keera login`, goes back there.
+  const finish = async (res, flow) => {
+    if (flow) {
+      location.href = res.redirect;
+      return;
+    }
+    history.replaceState({}, "", res.redirect || "/");
+    await onSignedIn();
+  };
+
+  // back, if given, returns to the other ways to sign in.
+  const passwordForm = (p, flow, back) => {
+    const label = "Sign in with " + (p.label || p.name);
+    const user = h("input", {
+      class: "input",
+      id: "password-user",
+      autocomplete: "username",
+      autocapitalize: "none",
+      spellcheck: "false",
+    });
+    const pass = h("input", {
+      class: "input",
+      type: "password",
+      id: "password-pass",
+      autocomplete: "current-password",
+    });
+    const b = h(
+      "button",
+      {
+        class: "btn btn-primary",
+        type: "submit",
+      },
+      label,
+    );
+    const form = h(
+      "form",
+      {
+        onSubmit: async (e) => {
+          e.preventDefault();
+          replace(message);
+          if (!user.value.trim() || !pass.value) {
+            showError(message, "Enter your username and password.");
+            (user.value.trim() ? pass : user).focus();
+            return;
+          }
+          b.disabled = true;
+          b.textContent = "Signing in…";
+          try {
+            const res = await api.passwordSignIn(
+              p.name,
+              flow,
+              user.value,
+              pass.value,
+              next,
+            );
+            await finish(res, flow);
+          } catch (err) {
+            showError(message, err.message || "Sign-in failed.");
+            // The password is never kept, not even in the field.
+            pass.value = "";
+            b.disabled = false;
+            b.textContent = label;
+            pass.focus();
+          }
+        },
+      },
+      field("Username", user, "Your " + (p.label || p.name) + " account."),
+      field("Password", pass),
+      b,
+      back
+        ? h(
+            "button",
+            {
+              class: "btn btn-quiet",
+              type: "button",
+              style: { marginTop: "8px" },
+              onClick: back,
+            },
+            "Other ways to sign in",
+          )
+        : null,
+    );
+    // Focused once the form is in the document.
+    queueMicrotask(() => user.focus());
+    return form;
+  };
   const passkeyButton = (primary) => {
     const supported = passkeysSupported();
     const label = (text) => [icon(icons.passkey), text];
@@ -122,13 +257,7 @@ export async function signIn(root, onSignedIn) {
             const opts = await api.passkeySignInOptions(cliFlow, next);
             const credential = await getPasskey(opts.options);
             const res = await api.passkeySignIn(opts.flow, credential);
-            if (cliFlow) {
-              // On to the port `keera login` is waiting on.
-              location.href = res.redirect;
-              return;
-            }
-            history.replaceState({}, "", res.redirect || "/");
-            await onSignedIn();
+            await finish(res, cliFlow);
           } catch (err) {
             showError(
               message,
@@ -154,16 +283,26 @@ export async function signIn(root, onSignedIn) {
     ];
   };
 
-  if (cliFlow) {
-    // `keera login` sent the browser here. Only the passkey finishes it.
+  if (cliPassword) {
+    // /auth/login sent the browser here, such as for `keera login --provider
+    // <name>`.
+    const p = (config.providers || []).find(
+      (p) => p.name === cliPassword.provider,
+    ) || { name: cliPassword.provider };
+    const [title, note] = handOver(cliPassword.to);
     card.append(
-      h("p", {}, "Sign in to the keera command line."),
+      h("p", {}, title),
+      passwordForm(p, cliPassword.flow),
+      ...(note ? [h("div", { class: "signin-note" }, note)] : []),
+    );
+  } else if (cliFlow) {
+    // /auth/login sent the browser here, such as for `keera login`. Only the
+    // passkey finishes it.
+    const [title, note] = handOver(passkeyFlow.to);
+    card.append(
+      h("p", {}, title),
       h("div", { class: "signin-providers" }, passkeyButton(true)),
-      h(
-        "div",
-        { class: "signin-note" },
-        "Your browser then hands the sign-in over to the terminal.",
-      ),
+      ...(note ? [h("div", { class: "signin-note" }, note)] : []),
     );
   } else if (config.sso) {
     // Once single sign-on works, the operator key is only for setup and the odd
@@ -176,24 +315,49 @@ export async function signIn(root, onSignedIn) {
     const providers = config.providers || [];
     const signUpWith = providers.find((p) => p.signup);
 
-    card.append(
-      h(
-        "div",
-        { class: "signin-providers" },
+    // A directory that asks for a password opens its form in place of the
+    // buttons. With nothing else to choose from, it is open from the start.
+    const box = h("div", { class: "signin-providers" });
+    const showButtons = () => {
+      replace(message);
+      replace(
+        box,
         ...providers.map((p) =>
-          h(
-            "a",
-            {
-              class: "btn",
-              style: { width: "100%", justifyContent: "center" },
-              href: api.loginURL({ provider: p.name, next }),
-            },
-            idpMark(p.name) || icon(icons.signout),
-            "Sign in with " + (p.label || p.name),
-          ),
+          p.password
+            ? h(
+                "button",
+                {
+                  class: "btn",
+                  type: "button",
+                  onClick: () => {
+                    replace(message);
+                    replace(box, passwordForm(p, "", showButtons));
+                  },
+                },
+                icon(icons.signout),
+                "Sign in with " + (p.label || p.name),
+              )
+            : h(
+                "a",
+                {
+                  class: "btn",
+                  href: api.loginURL({ provider: p.name, next }),
+                },
+                idpMark(p.name) || icon(icons.signout),
+                "Sign in with " + (p.label || p.name),
+              ),
         ),
         config.passkeys ? passkeyButton(false) : null,
-      ),
+      );
+    };
+    if (providers.length === 1 && providers[0].password && !config.passkeys) {
+      replace(box, passwordForm(providers[0], ""));
+    } else {
+      showButtons();
+    }
+
+    card.append(
+      box,
       h(
         "div",
         { class: "signin-note" },

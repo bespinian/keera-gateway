@@ -46,6 +46,21 @@ type cliLogin struct {
 // KEERA_CHAT_URL.
 const ChatCallbackPath = "/auth/callback"
 
+// panelHint is what the panel's form is told about where a sign-in goes once
+// it is done, added to the state after the #: ".cli", ".chat" or nothing for
+// the panel itself. It only picks the form's words; the flow decides where
+// the sign-in goes.
+func (c cliLogin) panelHint(chatURL string) string {
+	switch {
+	case c.Redirect == "":
+		return ""
+	case chatURL != "" && c.Redirect == chatURL+ChatCallbackPath:
+		return ".chat"
+	default:
+		return ".cli"
+	}
+}
+
 // cliLoginFrom reads the loopback handshake from a sign-in URL. A handshake
 // with parts missing is refused rather than completed without them. chatURL
 // is Keera Chat's origin, or empty.

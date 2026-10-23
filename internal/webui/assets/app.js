@@ -18,7 +18,11 @@ import {
   initials,
   menu,
 } from "./ui.js";
-import { signIn, passkeySignInFlow } from "./views/signin.js";
+import {
+  signIn,
+  passkeySignInFlow,
+  passwordSignInFlow,
+} from "./views/signin.js";
 import { signUp, signUpFlow } from "./views/signup.js";
 import { passkeySetupView, managePasskeys } from "./views/passkeys.js";
 import { dashboardView } from "./views/dashboard.js";
@@ -862,19 +866,18 @@ async function signOut() {
   location.href = "/";
 }
 
-/* ------------------------------------------------------------------ boot */
-
 async function boot() {
   applyTheme(currentTheme());
   root.replaceChildren();
   root.classList.add("boot");
   root.append(h("div", { class: "boot-mark" }));
 
-  // A set-up link, or a passkey sign-in for `keera login`, comes first: both
-  // are for whoever holds the link, even in a browser that is signed in.
+  // A set-up link, or a passkey or password sign-in for `keera login`, comes
+  // first: each is for whoever holds the link, even in a browser that is
+  // signed in.
   const setup = location.hash.match(/^#passkey-setup=([A-Za-z0-9_-]+)$/);
   if (setup) return passkeySetupView(root, setup[1], boot);
-  if (passkeySignInFlow()) return signIn(root, boot);
+  if (passkeySignInFlow() || passwordSignInFlow()) return signIn(root, boot);
   if (signUpFlow()) return signUp(root, boot);
 
   let me;

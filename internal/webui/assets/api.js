@@ -92,6 +92,16 @@ export const api = {
   // Moves this session to another organisation the person is in.
   switchOrg: (orgID) => request("POST", "/v1/me/org", { org_id: orgID }),
   localSignIn: (key) => request("POST", "/auth/local", { key }),
+  // A username and password for an LDAP directory. flow is the sign-in
+  // `keera login` started, or empty.
+  passwordSignIn: (provider, flow, username, password, next) =>
+    request("POST", "/auth/password", {
+      provider,
+      flow: flow || "",
+      username,
+      password,
+      next: next || "",
+    }),
   signOut: () => request("POST", "/auth/logout"),
   // Signing in with a provider is a page the browser goes to, not a call.
   loginURL: (params) => url("/auth/login" + query(params)),

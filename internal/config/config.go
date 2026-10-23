@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -342,8 +343,12 @@ func (c Config) validateOIDC() error {
 		// A provider left out is seen only as its button missing from the
 		// sign-in screen, which is hard to trace back to a typo.
 		if !p.Configured() {
-			return fmt.Errorf("KEERA_OIDC_PROVIDERS names %q, but %sISSUER and %sCLIENT_ID "+
-				"are not both set", p.Name, OIDCEnvPrefix(p.Name), OIDCEnvPrefix(p.Name))
+			return fmt.Errorf("KEERA_OIDC_PROVIDERS names %q, but %sISSUER is not set, "+
+				"or %sCLIENT_ID for an OpenID Connect provider", p.Name, OIDCEnvPrefix(p.Name),
+				OIDCEnvPrefix(p.Name))
+		}
+		if err := requiredSettings(p); err != nil {
+			return err
 		}
 		if err := p.Validate(); err != nil {
 			return err
@@ -353,6 +358,11 @@ func (c Config) validateOIDC() error {
 		if !p.Mapping.Default.Assignable() {
 			return fmt.Errorf("the default role for the %s identity provider "+
 				"must be admin or member", p.Name)
+		}
+		if p.IsLDAP() {
+			if err := ldapVouching(p); err != nil {
+				return err
+			}
 		}
 		// With several directories, one customer's could otherwise give its
 		// users another customer's addresses, or an operator's.
@@ -370,6 +380,46 @@ func (c Config) validateOIDC() error {
 		}
 	}
 	return c.validateSignUp()
+}
+
+// requiredSettings names the settings a provider is missing. It is the one
+// check for them: authn does not know what the settings are called.
+func requiredSettings(p authn.OIDCConfig) error {
+	prefix := OIDCEnvPrefix(p.Name)
+	var missing []string
+	need := func(value, setting string) {
+		if value == "" {
+			missing = append(missing, prefix+setting)
+		}
+	}
+	if p.IsLDAP() {
+		need(p.LDAP.BindDN, "LDAP_BIND_DN")
+		need(p.LDAP.BindPassword, "LDAP_BIND_PASSWORD")
+		need(p.LDAP.BaseDN, "LDAP_BASE_DN")
+	} else {
+		need(p.ClientSecret, "CLIENT_SECRET")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("the %s identity provider needs %s", p.Name, strings.Join(missing, " and "))
+	}
+	return nil
+}
+
+// ldapVouching refuses what is unsafe for a directory: its administrator sets
+// each person's address, so it may only vouch for its own domains, and it
+// cannot prove an address to a stranger who signs up.
+func ldapVouching(p authn.OIDCConfig) error {
+	prefix := OIDCEnvPrefix(p.Name)
+	if len(p.Domains) == 0 || slices.Contains(p.Domains, authn.AnyDomain) {
+		return fmt.Errorf("set %sDOMAINS to the email domains the %s directory may vouch "+
+			"for; its administrator sets every address, so %q is not allowed",
+			prefix, p.Name, authn.AnyDomain)
+	}
+	if p.SignUp {
+		return fmt.Errorf("%sSIGNUP cannot be used with an LDAP directory, which does not "+
+			"prove an address to someone it does not know", prefix)
+	}
+	return nil
 }
 
 // validateSignUp refuses sign-up where an admin group decides who is an
@@ -443,24 +493,38 @@ func oidcProviders(publicURL string) []authn.OIDCConfig {
 
 // providerFrom reads one provider's settings from prefix.
 func providerFrom(prefix, name, redirect string, operators []string) authn.OIDCConfig {
+	issuer := env(prefix+"ISSUER", "")
+	// A directory's groups are DNs, which hold commas themselves.
+	groupSep := ","
+	if (authn.OIDCConfig{IssuerURL: issuer}).IsLDAP() {
+		groupSep = ";"
+	}
 	return authn.OIDCConfig{
 		Name:         name,
 		DisplayName:  env(prefix+"LABEL", providerLabel(name)),
-		IssuerURL:    env(prefix+"ISSUER", ""),
+		IssuerURL:    issuer,
 		ClientID:     env(prefix+"CLIENT_ID", ""),
 		ClientSecret: env(prefix+"CLIENT_SECRET", ""),
 		RedirectURL:  redirect,
 		Scopes:       envList(prefix + "SCOPES"),
 		GroupsClaim:  env(prefix+"GROUPS_CLAIM", ""),
 		Mapping: authn.RoleMapping{
-			OperatorGroups: envList(prefix + "OPERATOR_GROUPS"),
-			AdminGroups:    envList(prefix + "ADMIN_GROUPS"),
+			OperatorGroups: envListBy(prefix+"OPERATOR_GROUPS", groupSep),
+			AdminGroups:    envListBy(prefix+"ADMIN_GROUPS", groupSep),
 			OperatorEmails: operators,
 			Default: authn.Role(strings.ToLower(
 				env(prefix+"DEFAULT_ROLE", string(authn.RoleMember)))),
 		},
 		Domains: envList(prefix + "DOMAINS"),
 		SignUp:  envBool(prefix+"SIGNUP", false),
+		LDAP: authn.LDAPConfig{
+			BindDN:          env(prefix+"LDAP_BIND_DN", ""),
+			BindPassword:    env(prefix+"LDAP_BIND_PASSWORD", ""),
+			BaseDN:          env(prefix+"LDAP_BASE_DN", ""),
+			UserFilter:      env(prefix+"LDAP_USER_FILTER", ""),
+			LoginAttributes: envList(prefix + "LDAP_LOGIN_ATTRIBUTES"),
+			CAFile:          env(prefix+"LDAP_CA_FILE", ""),
+		},
 	}
 }
 
@@ -507,12 +571,15 @@ func envBool(key string, def bool) bool {
 }
 
 // envList reads a comma-separated setting.
-func envList(key string) []string {
+func envList(key string) []string { return envListBy(key, ",") }
+
+// envListBy reads a setting whose items are separated by sep.
+func envListBy(key, sep string) []string {
 	raw := env(key, "")
 	if raw == "" {
 		return nil
 	}
-	parts := strings.Split(raw, ",")
+	parts := strings.Split(raw, sep)
 	out := make([]string, 0, len(parts))
 	for _, p := range parts {
 		if p = strings.TrimSpace(p); p != "" {

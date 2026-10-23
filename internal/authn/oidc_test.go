@@ -29,7 +29,6 @@ func TestOIDCConfigValidate(t *testing.T) {
 		mut  func(*OIDCConfig)
 		want string
 	}{
-		{"no secret", func(c *OIDCConfig) { c.ClientSecret = "" }, "client secret"},
 		{"no redirect", func(c *OIDCConfig) { c.RedirectURL = "" }, "redirect URL"},
 		{"a relative issuer", func(c *OIDCConfig) { c.IssuerURL = "login.example.ch" }, "absolute"},
 		{"no name", func(c *OIDCConfig) { c.Name = "" }, "name"},

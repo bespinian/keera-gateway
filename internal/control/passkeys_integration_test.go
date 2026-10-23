@@ -409,7 +409,8 @@ func TestTheCommandLineSignsInWithAPasskey(t *testing.T) {
 	status, out := b.do("GET", "/auth/login?"+q.Encode(), nil, "")
 	loc, _ := out["location"].(string)
 	state, ok := strings.CutPrefix(loc, "/#passkey-sign-in=")
-	if status != http.StatusFound || !ok {
+	state, cli := strings.CutSuffix(state, ".cli")
+	if status != http.StatusFound || !ok || !cli {
 		t.Fatalf("login: %d %q", status, loc)
 	}
 	status, opts := b.do("POST", "/auth/passkey/options", map[string]string{"flow": state}, "")

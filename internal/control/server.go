@@ -139,7 +139,7 @@ func New(st *store.Store, reg *registry.Registry, m *metrics.Registry, rec *usag
 }
 
 // Sweep bounds the memory the sign-in throttle holds: one bucket per address
-// that has tried to sign in.
+// and per account that has tried to sign in.
 func (s *Server) Sweep(now time.Time) { s.signIn.Sweep(BucketIdle, now) }
 
 // Handler returns the root handler: the control routes, the probes and, if
@@ -181,6 +181,8 @@ func (s *Server) Handler() http.Handler {
 	public("POST /auth/local", "local", signInRPM, s.localLogin)
 	// The last step of `keera login`: a one-time code redeemed for a token.
 	public("POST /auth/cli/token", "cli_token", signInRPM, s.cliToken)
+	// A username and password, for an LDAP directory.
+	public("POST /auth/password", "password", signInRPM, s.passwordSignIn)
 	// Passkeys: signing in, and adding the first one from a set-up link.
 	public("POST /auth/passkey/options", "passkey_options", flowRPM,
 		s.withPasskeysSignedOut(s.passkeySignInOptions))
@@ -460,6 +462,13 @@ func refuse(w http.ResponseWriter, err error) {
 
 func unauthorized(w http.ResponseWriter, code, msg string) {
 	httpx.WriteError(w, http.StatusUnauthorized, "invalid_request_error", code, msg)
+}
+
+func tooMany(w http.ResponseWriter, retry time.Duration, msg string) {
+	if retry > 0 {
+		httpx.SetRetryAfter(w, retry)
+	}
+	httpx.WriteError(w, http.StatusTooManyRequests, "rate_limit_error", "rate_limit_exceeded", msg)
 }
 
 func badRequest(w http.ResponseWriter, msg string) {

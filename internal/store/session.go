@@ -174,7 +174,8 @@ func (s *Store) TakeLoginFlow(ctx context.Context, state string) (LoginFlow, err
 
 // LoginFlowByState reads a flow without using it up. A passkey sign-in from
 // the command line reads its challenge this way before the browser asks for
-// the passkey.
+// the passkey, and a password sign-in reads its flow so a mistyped password
+// does not end it.
 func (s *Store) LoginFlowByState(ctx context.Context, state string) (LoginFlow, error) {
 	return scanLoginFlow(s.pool.QueryRow(ctx, `SELECT `+loginFlowColumns+`
 		FROM login_flows WHERE state = $1 AND expires_at > now()`, state))

@@ -15,50 +15,51 @@ sandbox base image.
 
 ## Layout
 
-| Path                 | What it is                                                 |
-| -------------------- | ---------------------------------------------------------- |
-| `cmd/keera-gateway`  | The server binary. It only starts `internal/server`.       |
-| `cmd/keera`          | Administration command line, over the control API.         |
-| `internal/server`    | Wiring and lifecycle of the server binary.                 |
-| `internal/cli`       | The `keera` command: every subcommand and its help.        |
-| `internal/gateway`   | Inference data plane: guardrails, streaming, accounting.   |
-| `internal/control`   | Control plane: tenancy, guardrails, reports, audit.        |
-| `internal/authn`     | Roles, permissions, OpenID Connect, passkeys, CLI sign-in. |
-| `internal/auth`      | API key hashing and verification.                          |
-| `internal/webui`     | The control panel, embedded in the server binary.          |
-| `internal/policy`    | The tenancy model and how limits combine.                  |
-| `internal/catalog`   | The template files and the hosted-provider catalogue.      |
-| `internal/registry`  | The gateway's in-memory view of the control plane.         |
-| `internal/sandbox`   | The machines it lends out: two drivers, and the manager.   |
-| `internal/forge`     | Short-lived repository credentials, from GitHub or GitLab. |
-| `internal/connect`   | The client list the panel and `keera connect` share.       |
-| `internal/ratelimit` | Request and token rate limiting.                           |
-| `internal/usage`     | The usage recorder behind billing and reports.             |
-| `internal/payment`   | Prepaid credit by card, through PostFinance Checkout.      |
-| `internal/metrics`   | The Prometheus exposition on `/metrics`.                   |
-| `internal/secret`    | Encryption for stored model and MCP credentials.           |
-| `internal/store`     | Postgres schema and queries.                               |
-| `internal/config`    | Every setting, read from the environment.                  |
-| `internal/httpx`     | Shared HTTP plumbing: prefixes, compression, request ids.  |
-| `internal/id`        | The identifiers every row and every key are named with.    |
-| `internal/version`   | The build version both binaries report.                    |
-| `Containerfile`      | The image the gateway ships in. `FROM scratch`.            |
-| `compose`            | Single-host deployment, and the development loop.          |
-| `sandbox`            | The sandbox image: sshd, entrypoint, Git and agent tools.  |
-| `scripts`            | The third-party notices the image and the archives carry.  |
+| Path                 | What it is                                                       |
+| -------------------- | ---------------------------------------------------------------- |
+| `cmd/keera-gateway`  | The server binary. It only starts `internal/server`.             |
+| `cmd/keera`          | Administration command line, over the control API.               |
+| `internal/server`    | Wiring and lifecycle of the server binary.                       |
+| `internal/cli`       | The `keera` command: every subcommand and its help.              |
+| `internal/gateway`   | Inference data plane: guardrails, streaming, accounting.         |
+| `internal/control`   | Control plane: tenancy, guardrails, reports, audit.              |
+| `internal/authn`     | Roles, permissions, OpenID Connect, LDAP, passkeys, CLI sign-in. |
+| `internal/auth`      | API key hashing and verification.                                |
+| `internal/webui`     | The control panel, embedded in the server binary.                |
+| `internal/policy`    | The tenancy model and how limits combine.                        |
+| `internal/catalog`   | The template files and the hosted-provider catalogue.            |
+| `internal/registry`  | The gateway's in-memory view of the control plane.               |
+| `internal/sandbox`   | The machines it lends out: two drivers, and the manager.         |
+| `internal/forge`     | Short-lived repository credentials, from GitHub or GitLab.       |
+| `internal/connect`   | The client list the panel and `keera connect` share.             |
+| `internal/ratelimit` | Request and token rate limiting.                                 |
+| `internal/usage`     | The usage recorder behind billing and reports.                   |
+| `internal/payment`   | Prepaid credit by card, through PostFinance Checkout.            |
+| `internal/metrics`   | The Prometheus exposition on `/metrics`.                         |
+| `internal/secret`    | Encryption for stored credentials and directory refresh tokens.  |
+| `internal/store`     | Postgres schema and queries.                                     |
+| `internal/config`    | Every setting, read from the environment.                        |
+| `internal/httpx`     | Shared HTTP plumbing: prefixes, compression, request ids.        |
+| `internal/id`        | The identifiers every row and every key are named with.          |
+| `internal/version`   | The build version both binaries report.                          |
+| `Containerfile`      | The image the gateway ships in. `FROM scratch`.                  |
+| `compose`            | Single-host deployment, and the development loop.                |
+| `sandbox`            | The sandbox image: sshd, entrypoint, Git and agent tools.        |
+| `scripts`            | The third-party notices the image and the archives carry.        |
 
 ## Commands
 
 ```sh
 make build             # both binaries
-make check             # test + vet + fmt-check
+make check             # test + vet + fmt-check, and check-js when node is there
+make check-js          # the panel's JavaScript: node --check, and node:test unit tests
 make test              # go test -race -cover ./...
 make test-integration  # store, control and ratelimit tests, against Postgres and Redis
 make check-all         # check + test-integration
 make lint              # golangci-lint; says how to install it if missing
 make dev               # the development loop: backends in containers, gateway under air
 make dev TIER=gpu      # the same with vLLM instead of llama.cpp, for tool calls
-make dev-down          # stop the backend containers make dev left running
+make dev-down          # remove the backend containers make dev left, keep the volumes
 make image             # the gateway image, tagged localhost/keera-gateway:latest
 make sandbox-image     # the sandbox base image, which the podman driver needs
 make sbom              # rebuild the image and write build/sbom/keera-gateway.cdx.json

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/bespinian/keera-gateway/internal/authn"
@@ -9,6 +11,19 @@ import (
 func TestNoProviderIsNotAnError(t *testing.T) {
 	if got := oidcProviders("https://keera.example.ch"); got != nil {
 		t.Errorf("oidcProviders = %+v, want none", got)
+	}
+}
+
+// A provider without its secret is refused by the name of the setting, which
+// is the one an operator has to set.
+func TestAProviderWithoutItsSecretNamesTheSetting(t *testing.T) {
+	t.Setenv("KEERA_OIDC_PROVIDERS", "google")
+	t.Setenv("KEERA_OIDC_GOOGLE_ISSUER", "https://accounts.google.com")
+	t.Setenv("KEERA_OIDC_GOOGLE_CLIENT_ID", "google-client")
+	c := Config{PublicURL: "https://keera.example.ch", OIDC: oidcProviders("https://keera.example.ch")}
+	err := c.validateOIDC()
+	if err == nil || !strings.Contains(err.Error(), "KEERA_OIDC_GOOGLE_CLIENT_SECRET") {
+		t.Errorf("err = %v, want it to name KEERA_OIDC_GOOGLE_CLIENT_SECRET", err)
 	}
 }
 
@@ -166,5 +181,96 @@ func TestGitHubNeedsDomains(t *testing.T) {
 	c.OIDC = oidcProviders("https://keera.example.ch")
 	if err := c.validateOIDC(); err != nil {
 		t.Errorf("a GitHub provider with domains: %v", err)
+	}
+}
+
+// An LDAP directory needs no OAuth client, and its administrator sets every
+// address, so it must name its domains and cannot let strangers sign up.
+func TestLDAPProvider(t *testing.T) {
+	t.Setenv("KEERA_OIDC_PROVIDERS", "corp")
+	t.Setenv("KEERA_OIDC_CORP_ISSUER", "ldaps://dc1.corp.example.ch")
+	t.Setenv("KEERA_OIDC_CORP_LDAP_BIND_DN", "cn=keera-svc,dc=corp,dc=example,dc=ch")
+	t.Setenv("KEERA_OIDC_CORP_LDAP_BIND_PASSWORD", "secret")
+	t.Setenv("KEERA_OIDC_CORP_LDAP_BASE_DN", "dc=corp,dc=example,dc=ch")
+	t.Setenv("KEERA_OIDC_CORP_LDAP_LOGIN_ATTRIBUTES", "uid, mail")
+
+	load := func() Config {
+		return Config{PublicURL: "https://keera.example.ch", OIDC: oidcProviders("https://keera.example.ch")}
+	}
+	c := load()
+	if got := c.OIDC[0].LDAP.LoginAttributes; len(got) != 2 || got[1] != "mail" {
+		t.Errorf("login attributes = %q", got)
+	}
+	if err := c.validateOIDC(); err == nil {
+		t.Error("an LDAP provider without domains was accepted")
+	}
+
+	t.Setenv("KEERA_OIDC_CORP_DOMAINS", "*")
+	if err := load().validateOIDC(); err == nil {
+		t.Errorf("an LDAP provider that vouches for every domain was accepted")
+	}
+
+	t.Setenv("KEERA_OIDC_CORP_DOMAINS", "corp.example.ch")
+	if err := load().validateOIDC(); err != nil {
+		t.Errorf("a complete LDAP provider: %v", err)
+	}
+
+	t.Setenv("KEERA_OIDC_CORP_SIGNUP", "true")
+	if err := load().validateOIDC(); err == nil {
+		t.Error("sign-up through an LDAP directory was accepted")
+	}
+	t.Setenv("KEERA_OIDC_CORP_SIGNUP", "false")
+
+	t.Setenv("KEERA_OIDC_CORP_LDAP_BASE_DN", "")
+	if err := load().validateOIDC(); err == nil {
+		t.Error("an LDAP provider without a base DN was accepted")
+	} else if !strings.Contains(err.Error(), "KEERA_OIDC_CORP_LDAP_BASE_DN") {
+		t.Errorf("the error does not name the setting: %v", err)
+	}
+}
+
+// A group DN holds commas, so an LDAP directory's group lists are split on
+// semicolons. An OpenID Connect provider's stay comma-separated.
+func TestLDAPGroupsAreWholeDNs(t *testing.T) {
+	t.Setenv("KEERA_OIDC_PROVIDERS", "corp,okta")
+	t.Setenv("KEERA_OIDC_CORP_ISSUER", "ldaps://dc1.corp.example.ch")
+	t.Setenv("KEERA_OIDC_CORP_ADMIN_GROUPS",
+		"CN=keera-admins,OU=Groups,DC=corp,DC=example,DC=ch; CN=Domain Admins,CN=Users,DC=corp,DC=example,DC=ch")
+	t.Setenv("KEERA_OIDC_CORP_OPERATOR_GROUPS", "CN=keera-ops,OU=Groups,DC=corp,DC=example,DC=ch")
+	t.Setenv("KEERA_OIDC_OKTA_ISSUER", "https://acme.okta.com")
+	t.Setenv("KEERA_OIDC_OKTA_ADMIN_GROUPS", "keera-admins, platform")
+
+	c := oidcProviders("https://keera.example.ch")
+	corp, okta := c[0].Mapping, c[1].Mapping
+	want := []string{
+		"CN=keera-admins,OU=Groups,DC=corp,DC=example,DC=ch",
+		"CN=Domain Admins,CN=Users,DC=corp,DC=example,DC=ch",
+	}
+	if !slices.Equal(corp.AdminGroups, want) {
+		t.Errorf("LDAP admin groups = %q, want %q", corp.AdminGroups, want)
+	}
+	if len(corp.OperatorGroups) != 1 {
+		t.Errorf("LDAP operator groups = %q, want one DN", corp.OperatorGroups)
+	}
+	if !slices.Equal(okta.AdminGroups, []string{"keera-admins", "platform"}) {
+		t.Errorf("OpenID Connect admin groups = %q", okta.AdminGroups)
+	}
+}
+
+func TestAnLDAPProviderAmongOthersIsNotToldItMayVouchForAnyDomain(t *testing.T) {
+	t.Setenv("KEERA_OIDC_PROVIDERS", "google,corp")
+	t.Setenv("KEERA_OIDC_GOOGLE_ISSUER", "https://accounts.google.com")
+	t.Setenv("KEERA_OIDC_GOOGLE_CLIENT_ID", "google-client")
+	t.Setenv("KEERA_OIDC_GOOGLE_CLIENT_SECRET", "google-secret")
+	t.Setenv("KEERA_OIDC_GOOGLE_DOMAINS", "*")
+	t.Setenv("KEERA_OIDC_CORP_ISSUER", "ldaps://dc1.corp.example.ch")
+	t.Setenv("KEERA_OIDC_CORP_LDAP_BIND_DN", "cn=keera-svc,dc=corp,dc=example,dc=ch")
+	t.Setenv("KEERA_OIDC_CORP_LDAP_BIND_PASSWORD", "secret")
+	t.Setenv("KEERA_OIDC_CORP_LDAP_BASE_DN", "dc=corp,dc=example,dc=ch")
+
+	c := Config{PublicURL: "https://keera.example.ch", OIDC: oidcProviders("https://keera.example.ch")}
+	err := c.validateOIDC()
+	if err == nil || !strings.Contains(err.Error(), "is not allowed") {
+		t.Errorf("err = %v, want the directory's own message, which refuses %q", err, "*")
 	}
 }

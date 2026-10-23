@@ -20,10 +20,8 @@ import (
 const GitHubIssuer = "https://github.com"
 
 // IsGitHub reports whether this configuration is for GitHub.
-func (c OIDCConfig) IsGitHub() bool { return isGitHub(c.IssuerURL) }
-
-func isGitHub(issuer string) bool {
-	u, err := url.Parse(issuer)
+func (c OIDCConfig) IsGitHub() bool {
+	u, err := url.Parse(c.IssuerURL)
 	return err == nil && u.Host == "github.com"
 }
 

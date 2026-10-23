@@ -9,8 +9,9 @@ With SSO, the audit log names a person, and roles can differ between people.
 
 Keera uses standard OpenID Connect, so any compliant provider works. This page
 covers **Google Workspace**, **Microsoft Entra ID** and **GitHub**, which speaks
-plain OAuth and gets its own handling. A deployment can offer any of them. For people no directory vouches for, it can also offer
-[passkeys](#passkeys).
+plain OAuth and gets its own handling, and **LDAP and Active Directory**, which
+sign in with a password. A deployment can offer any of them. For people no
+directory vouches for, it can also offer [passkeys](#passkeys).
 
 ## Naming a provider
 
@@ -18,7 +19,9 @@ Every provider has a name, listed in `KEERA_OIDC_PROVIDERS`. It reads its
 settings from `KEERA_OIDC_<NAME>_*`, with the name in upper case and a hyphen
 as an underscore: `acme-ad` reads `KEERA_OIDC_ACME_AD_*`. Nothing is shared
 between providers. A name in the list without its `ISSUER`, `CLIENT_ID` and
-`CLIENT_SECRET` stops the start. One directory is a list of one:
+`CLIENT_SECRET` stops the start, except an
+[LDAP directory](#ldap-and-active-directory), which needs no client. One
+directory is a list of one:
 
 ```sh
 KEERA_OIDC_PROVIDERS=google
@@ -28,35 +31,39 @@ KEERA_OIDC_GOOGLE_CLIENT_SECRET=<from the console>
 ```
 
 The panel shows one named button per provider. See
-[Several directories at once](#several-directories-at-once).
+[Several directories at once](#several-directories-at-once) and
+[Signing in](#signing-in).
 
 The identity provider sends the browser back to
 `<KEERA_PUBLIC_URL>/control/auth/callback`, so SSO needs `KEERA_PUBLIC_URL`. The
 gateway refuses to start without it as soon as `KEERA_OIDC_PROVIDERS` names a
-provider. Register that address as the redirect URI with each provider.
+provider. Register that address as the redirect URI with each provider, except
+an LDAP directory, which sends the browser nowhere.
 
 ### Settings
 
 Discovery runs at start-up, so a wrong issuer URL stops the gateway with the URL
 in the error, instead of breaking sign-in later. Lists, such as addresses,
-groups, domains and scopes, are comma-separated.
+groups, domains and scopes, are comma-separated. An LDAP directory's groups are
+separated by `;`, since a DN holds commas itself.
 
-| Variable                            | Default                                                 | What it is                                                                                                                                                 |
-| ----------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `KEERA_OIDC_PROVIDERS`              | unset                                                   | The provider names, comma-separated.                                                                                                                       |
-| `KEERA_OPERATORS`                   | unset                                                   | The addresses that are operators, whichever provider signs them in. See [Where a role comes from](#where-a-role-comes-from).                               |
-| `KEERA_OIDC_<NAME>_ISSUER`          | unset                                                   | The provider's issuer URL.                                                                                                                                 |
-| `KEERA_OIDC_<NAME>_CLIENT_ID`       | unset                                                   | The OAuth client registered with the provider.                                                                                                             |
-| `KEERA_OIDC_<NAME>_CLIENT_SECRET`   | unset                                                   | Its secret.                                                                                                                                                |
-| `KEERA_OIDC_<NAME>_LABEL`           | from the name, such as `Google`                         | The text on the sign-in button.                                                                                                                            |
-| `KEERA_OIDC_<NAME>_SCOPES`          | `openid,profile,email`, and `offline_access` off Google | What Keera asks the provider for. See [Asking the directory again](#asking-the-directory-again), and [GitHub](#github) for its scopes.                     |
-| `KEERA_OIDC_<NAME>_GROUPS_CLAIM`    | `groups`                                                | The claim that holds the person's groups.                                                                                                                  |
-| `KEERA_OIDC_<NAME>_ADMIN_GROUPS`    | unset                                                   | Groups whose members are administrators. Set, the directory decides roles. See [Where a role comes from](#where-a-role-comes-from).                        |
-| `KEERA_OIDC_<NAME>_OPERATOR_GROUPS` | unset                                                   | Groups whose members are operators.                                                                                                                        |
-| `KEERA_OIDC_<NAME>_DEFAULT_ROLE`    | `member`                                                | `admin` or `member`, for someone in no admin group.                                                                                                        |
-| `KEERA_OIDC_<NAME>_DOMAINS`         | unset                                                   | The email domains this provider may sign people in with, `*` for any. Needed with several providers ([Several directories](#several-directories-at-once)). |
-| `KEERA_OIDC_<NAME>_SIGNUP`          | `false`                                                 | Lets someone whose sign-in matches no organisation create one. See [Letting people sign up](#letting-people-sign-up).                                      |
-| `KEERA_PASSKEYS`                    | `false`                                                 | Lets administrators create accounts that sign in with a passkey. See [Passkeys](#passkeys).                                                                |
+| Variable                            | Default                                                 | What it is                                                                                                                                                                                 |
+| ----------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `KEERA_OIDC_PROVIDERS`              | unset                                                   | The provider names, comma-separated.                                                                                                                                                       |
+| `KEERA_OPERATORS`                   | unset                                                   | The addresses that are operators, whichever provider signs them in. See [Where a role comes from](#where-a-role-comes-from).                                                               |
+| `KEERA_OIDC_<NAME>_ISSUER`          | unset                                                   | The provider's issuer URL.                                                                                                                                                                 |
+| `KEERA_OIDC_<NAME>_CLIENT_ID`       | unset                                                   | The OAuth client registered with the provider.                                                                                                                                             |
+| `KEERA_OIDC_<NAME>_CLIENT_SECRET`   | unset                                                   | Its secret.                                                                                                                                                                                |
+| `KEERA_OIDC_<NAME>_LABEL`           | from the name, such as `Google`                         | The text on the sign-in button.                                                                                                                                                            |
+| `KEERA_OIDC_<NAME>_SCOPES`          | `openid,profile,email`, and `offline_access` off Google | What Keera asks the provider for. See [Asking the directory again](#asking-the-directory-again), and [GitHub](#github) for its scopes.                                                     |
+| `KEERA_OIDC_<NAME>_GROUPS_CLAIM`    | `groups`, and `memberOf` for LDAP                       | The claim that holds the person's groups.                                                                                                                                                  |
+| `KEERA_OIDC_<NAME>_ADMIN_GROUPS`    | unset                                                   | Groups whose members are administrators. Set, the directory decides roles. See [Where a role comes from](#where-a-role-comes-from).                                                        |
+| `KEERA_OIDC_<NAME>_OPERATOR_GROUPS` | unset                                                   | Groups whose members are operators.                                                                                                                                                        |
+| `KEERA_OIDC_<NAME>_DEFAULT_ROLE`    | `member`                                                | `admin` or `member`, for someone in no admin group.                                                                                                                                        |
+| `KEERA_OIDC_<NAME>_DOMAINS`         | unset                                                   | The email domains this provider may sign people in with, `*` for any. Needed with several providers ([Several directories](#several-directories-at-once)), and always for GitHub and LDAP. |
+| `KEERA_OIDC_<NAME>_SIGNUP`          | `false`                                                 | Lets someone whose sign-in matches no organisation create one. See [Letting people sign up](#letting-people-sign-up).                                                                      |
+| `KEERA_OIDC_<NAME>_LDAP_*`          | unset                                                   | The settings of an LDAP directory. See [LDAP and Active Directory](#ldap-and-active-directory).                                                                                            |
+| `KEERA_PASSKEYS`                    | `false`                                                 | Lets administrators create accounts that sign in with a passkey. See [Passkeys](#passkeys).                                                                                                |
 
 ## Where a role comes from
 
@@ -293,6 +300,102 @@ not expire, so Keera keeps that token instead. The person is refused once they
 revoke Keera under **Settings → Applications**, or once the account has no
 verified address Keera may use.
 
+## LDAP and Active Directory
+
+A directory without OpenID Connect, such as Active Directory or OpenLDAP, can
+sign people in directly. An `ldaps://` or `ldap://` issuer makes a provider one.
+The panel then asks for a username and password instead of sending the browser
+away, and the gateway checks them against the directory.
+
+```sh
+KEERA_PUBLIC_URL=https://keera.example.ch
+KEERA_OIDC_PROVIDERS=corp
+KEERA_OIDC_CORP_LABEL=Corp account
+KEERA_OIDC_CORP_ISSUER=ldaps://dc1.corp.example.ch
+KEERA_OIDC_CORP_LDAP_BIND_DN=CN=keera-svc,OU=Service,DC=corp,DC=example,DC=ch
+KEERA_OIDC_CORP_LDAP_BIND_PASSWORD=<the service account's password>
+KEERA_OIDC_CORP_LDAP_BASE_DN=DC=corp,DC=example,DC=ch
+KEERA_OIDC_CORP_DOMAINS=corp.example.ch
+KEERA_OIDC_CORP_ADMIN_GROUPS=CN=keera-admins,OU=Groups,DC=corp,DC=example,DC=ch
+```
+
+Separate several groups with `;`, such as
+`CN=keera-admins,OU=Groups,...;CN=platform,OU=Groups,...`.
+
+These are the settings an LDAP directory has on top of the common ones, each
+`KEERA_OIDC_<NAME>_LDAP_*`:
+
+| Variable                 | Default                 | What it is                                                                                     |
+| ------------------------ | ----------------------- | ---------------------------------------------------------------------------------------------- |
+| `_LDAP_BIND_DN`          | required                | The service account's DN.                                                                      |
+| `_LDAP_BIND_PASSWORD`    | required                | Its password.                                                                                  |
+| `_LDAP_BASE_DN`          | required                | Where to search for people. Checked at start-up.                                               |
+| `_LDAP_USER_FILTER`      | by directory, see below | Who may sign in.                                                                               |
+| `_LDAP_LOGIN_ATTRIBUTES` | by directory, see below | What a person may type as their username.                                                      |
+| `_LDAP_CA_FILE`          | the system's roots      | A PEM file of the CAs to trust. It is a path in the gateway's container, so mount the file in. |
+
+**A service account** finds people and reads them, so it needs read access to
+users and their `memberOf`. No client ID, client secret or redirect URI is
+needed. The gateway binds as the service account at start-up, so a wrong
+address or password stops the start.
+
+**The connection is always encrypted.** `ldaps://` uses TLS from the start,
+and `ldap://` uses StartTLS before anything else. Plaintext is never used,
+since the connection carries passwords. Set `LDAP_CA_FILE` if the directory's
+certificate is from your own CA.
+
+**Active Directory is detected** from the server's root entry, which changes
+the defaults:
+
+| Setting                  | Active Directory                               | OpenLDAP and others           |
+| ------------------------ | ---------------------------------------------- | ----------------------------- |
+| `_LDAP_USER_FILTER`      | `(&(objectCategory=person)(objectClass=user))` | `(objectClass=inetOrgPerson)` |
+| `_LDAP_LOGIN_ATTRIBUTES` | `sAMAccountName,userPrincipalName,mail`        | `uid,mail`                    |
+| The subject              | `objectGUID`                                   | `entryUUID`                   |
+
+`_LDAP_USER_FILTER` decides who may sign in. Add a group to limit it, such as
+`(&(objectCategory=person)(objectClass=user)(memberOf=CN=keera-users,OU=Groups,DC=corp,DC=example,DC=ch))`.
+`_LDAP_LOGIN_ATTRIBUTES` are what a person may type as their username.
+
+**The address** is the `mail` attribute, and an entry without one is refused.
+The name is `displayName`, or `givenName` and `sn`, or `cn`.
+
+**Groups are DNs** from `memberOf`, or from the attribute
+`KEERA_OIDC_<NAME>_GROUPS_CLAIM` names. Write the full DN in `ADMIN_GROUPS` and
+`OPERATOR_GROUPS`, and separate several with `;`. Case and spaces do not matter. Nested groups are not
+followed: a person must be a direct member. On OpenLDAP, `memberOf` needs the
+`memberof` overlay.
+
+**`DOMAINS` is required**, and `*` is not allowed: the directory's
+administrator sets every address, as on Entra. `SIGNUP` is not allowed either.
+
+**Asking again.** There is no refresh token, so every 15 minutes the service
+account reads the person again by their subject, which survives a rename or a
+move to another OU. If the entry is gone, no longer matches the user filter, or
+is a disabled Active Directory account, their sign-ins end. A `keera login`
+token lasts 30 days, as with a refresh token. See
+[Asking the directory again](#asking-the-directory-again).
+
+**Wrong passwords.** A wrong password, an unknown username and a locked
+account all get the same answer. The reason is in the gateway's log, without
+what was typed, so a password typed into the wrong field does not end up there.
+Each account gets 5 attempts a minute through Keera, from any number of
+addresses and under any of its usernames, on top of the limit per address. Each
+replica counts on its own, as for
+[the rest of the sign-in throttle](gateway.md#rate-limits-across-replicas).
+Set the directory's own lockout policy as usual.
+
+**Passwords pass through the gateway.** Keera never stores or logs them, but
+it does see them. If that is not acceptable, put an OpenID Connect provider
+with an LDAP connector in front of the directory, such as Keycloak or Dex, and
+configure that as an ordinary provider instead.
+
+`keera login --provider corp` opens the same form in the browser and hands
+the sign-in over to the terminal.
+
+> **Not tested against a real Active Directory.** This follows the protocol and
+> Microsoft's documentation, and is tested against a fake directory.
+
 ## Several directories at once
 
 This is the hosted deployment. List the providers, then give each its own
@@ -420,7 +523,8 @@ KEERA_OIDC_GOOGLE_SIGNUP=true
 ```
 
 Set it only on a provider that proves every address itself, such as Google with
-`KEERA_OIDC_GOOGLE_DOMAINS=*`. If such a provider vouches for any domain, a
+`KEERA_OIDC_GOOGLE_DOMAINS=*`. An [LDAP directory](#ldap-and-active-directory)
+cannot. If such a provider vouches for any domain, a
 sign-in without `email_verified: true` (Entra: `xms_edov`) is refused. Passkeys
 never sign anybody up. The gateway refuses to start if any provider also sets
 `ADMIN_GROUPS`: that group decides the administrator role for the whole gateway,
@@ -478,7 +582,9 @@ limited organisations. An operator can set an organisation back to limited with
 
 ## Signing in
 
-The panel shows one button per provider. With an identity provider configured,
+The panel shows one button per provider. An LDAP directory's button opens a
+username and password form instead. When that directory is the only way to
+sign in, the form is open from the start. With an identity provider configured,
 the operator key is no longer on the sign-in screen. It still works, and it is
 the way back in if SSO is broken: open `/?operator_key=1`.
 
@@ -490,10 +596,10 @@ It comes from the `name` claim, or from `given_name` and `family_name`, so it
 needs the `profile` scope. Every sign-in updates it. Someone who has never
 signed in through a provider shows only their address.
 
-A sign-in must finish in the browser that started it. The panel sets a
-short-lived cookie with the sign-in's state, and the callback refuses a state
-the browser does not hold. So a link to someone else's callback cannot sign you
-in to their account. Start from `KEERA_PUBLIC_URL`, since the callback goes
+A sign-in through a provider's own page must finish in the browser that started
+it. The panel sets a short-lived cookie with the sign-in's state, and the
+callback refuses a state the browser does not hold. So a link to someone else's
+callback cannot sign you in to their account. Start from `KEERA_PUBLIC_URL`, since the callback goes
 there and the cookie has to be on that address.
 
 ## Signing in from the command line
@@ -744,30 +850,37 @@ gateway whose only way in is passkeys, `--provider` can be left out.
 
 ## When it does not work
 
-| Symptom                                                        | Cause                                                                                                                                                       |
-| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Gateway will not start, "discovering the identity provider"    | An issuer is wrong, or the container cannot reach it. The message names which one.                                                                          |
-| `redirect_uri_mismatch`                                        | The console URI and `<KEERA_PUBLIC_URL>/control/auth/callback` differ, often `127.0.0.1` against `localhost`.                                               |
-| "a sign-in has to name one of…"                                | Several providers are configured and the link named none. Start from the panel, not the URL.                                                                |
-| "started in another browser or tab"                            | The callback came to a browser that did not start the sign-in, or to another address than the panel's. Start again from `KEERA_PUBLIC_URL`.                 |
-| Signed in, but everything is read-only                         | You have the default role. Ask an administrator for `keera user role <you> admin`, or, if the provider has admin groups, to be added to one.                |
-| The panel will not let anybody change a role                   | `KEERA_OIDC_<NAME>_ADMIN_GROUPS` is set on some provider, so the directory decides. Change the group, or unset it on every provider.                        |
-| The panel refuses the operator role                            | It always does. `KEERA_OPERATORS` or `KEERA_OIDC_<NAME>_OPERATOR_GROUPS` grants it.                                                                         |
-| "no organisation matches …"                                    | There are two or more organisations and none has your email domain. Set it, as above, or let people [sign up](#letting-people-sign-up).                     |
-| A request is refused with `org_limited`                        | The organisation signed up and has not paid yet. See [What a new organisation can use](#what-a-new-organisation-can-use).                                   |
-| "that email domain belongs to another organisation"            | Each domain belongs to one organisation. `keera org list` shows which; clear it there first.                                                                |
-| "cannot be used with … sign-in"                                | The provider is only allowed some domains (`KEERA_OIDC_<NAME>_DOMAINS`), and the address is at another. Sign in through its own provider.                   |
-| "is not a verified address"                                    | `email_verified` (Entra: `xms_edov`) is false. Verify the email in the directory. A missing claim is accepted, except on a sign-up provider for any domain. |
-| "in too many groups"                                           | Entra group overage. Use app roles. See above.                                                                                                              |
-| "signs in through …, the way it first signed in"               | That address signed in first through another provider. Use that one. See [One person, one provider](#one-person-one-provider).                              |
-| "already belongs to an account linked to a different identity" | The address belongs to someone else's account in this organisation. An operator can move it.                                                                |
-| Entra: "returned no email claim"                               | Add `email` as an optional ID-token claim on the app registration.                                                                                          |
-| `keera login`: "has no identity provider configured"           | The gateway has none. Use `KEERA_OPERATOR_KEY`, or configure one as above.                                                                                  |
-| `keera login`: "has to come back to a loopback address"        | The command line is older than the gateway, or something rewrote its redirect. Rebuild it.                                                                  |
-| `keera login`: the browser signs in and nothing happens        | The browser is not on the same machine as the command, usually because of ssh. See above.                                                                   |
-| A command says "your sign-in is no longer valid"               | It expired, a role change ended it, or someone ran `keera logout --all`. Run `keera login` again.                                                           |
-| Entra: "did not match the issuer URL returned by provider"     | The issuer is `.../common/v2.0`, which answers discovery with a templated `{tenantid}` that matches nothing. Use the tenant ID.                             |
-| Boot fails with "KEERA_PASSKEYS: passkeys need …"              | `KEERA_PUBLIC_URL` is unset, plain http on a name other than `localhost` or `*.localhost`, or an IP address. Browsers refuse passkeys there.                |
-| "this set-up link has expired, was already used, or …"         | Links work once, for 24 hours, and a new one replaces the last. Ask for a new one: `keera user passkey-link <email>`.                                       |
-| "that passkey was not accepted"                                | The passkey was removed, belongs to a disabled person, or is for another host name. The gateway log says which.                                             |
-| The browser says the passkey prompt failed with SecurityError  | The panel is open at an address other than `KEERA_PUBLIC_URL`, such as `127.0.0.1` instead of `localhost`.                                                  |
+| Symptom                                                        | Cause                                                                                                                                                                       |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gateway will not start, "discovering the identity provider"    | An issuer is wrong, or the container cannot reach it. The message names which one.                                                                                          |
+| Gateway will not start, "connecting to the … directory"        | The LDAP address, bind DN or password is wrong, or the certificate is not trusted (`_LDAP_CA_FILE`).                                                                        |
+| Gateway will not start, "reading the base DN"                  | `_LDAP_BASE_DN` does not exist, or the service account cannot read it.                                                                                                      |
+| Gateway will not start, "do not make an LDAP filter"           | `_LDAP_USER_FILTER` or `_LDAP_LOGIN_ATTRIBUTES` has a mistake, such as a parenthesis too many.                                                                              |
+| "that username and password were not accepted"                 | A wrong password, an unknown username, a locked or disabled account, or one the user filter leaves out. The gateway log has the directory's reason, without what was typed. |
+| "too many sign-in attempts for this account"                   | 5 attempts a minute per account. Wait a minute.                                                                                                                             |
+| "the directory did not answer"                                 | The gateway cannot reach the LDAP directory, or the directory refused the search, such as when the service account may no longer read. The gateway log has the error.       |
+| "this directory account cannot be used to sign in to Keera"    | The entry has no `mail` or no subject attribute. The gateway log names the entry.                                                                                           |
+| `redirect_uri_mismatch`                                        | The console URI and `<KEERA_PUBLIC_URL>/control/auth/callback` differ, often `127.0.0.1` against `localhost`.                                                               |
+| "a sign-in has to name one of…"                                | Several ways to sign in are configured, passkeys included, and the link named none. Start from the panel, not the URL.                                                      |
+| "started in another browser or tab"                            | The callback came to a browser that did not start the sign-in, or to another address than the panel's. Start again from `KEERA_PUBLIC_URL`.                                 |
+| Signed in, but everything is read-only                         | You have the default role. Ask an administrator for `keera user role <you> admin`, or, if the provider has admin groups, to be added to one.                                |
+| The panel will not let anybody change a role                   | `KEERA_OIDC_<NAME>_ADMIN_GROUPS` is set on some provider, so the directory decides. Change the group, or unset it on every provider.                                        |
+| The panel refuses the operator role                            | It always does. `KEERA_OPERATORS` or `KEERA_OIDC_<NAME>_OPERATOR_GROUPS` grants it.                                                                                         |
+| "no organisation matches …"                                    | There are two or more organisations and none has your email domain. Set it, as above, or let people [sign up](#letting-people-sign-up).                                     |
+| A request is refused with `org_limited`                        | The organisation signed up and has not paid yet. See [What a new organisation can use](#what-a-new-organisation-can-use).                                                   |
+| "that email domain belongs to another organisation"            | Each domain belongs to one organisation. `keera org list` shows which; clear it there first.                                                                                |
+| "cannot be used with … sign-in"                                | The provider is only allowed some domains (`KEERA_OIDC_<NAME>_DOMAINS`), and the address is at another. Sign in through its own provider.                                   |
+| "is not a verified address"                                    | `email_verified` (Entra: `xms_edov`) is false. Verify the email in the directory. A missing claim is accepted, except on a sign-up provider for any domain.                 |
+| "in too many groups"                                           | Entra group overage. Use app roles. See above.                                                                                                                              |
+| "signs in through …, the way it first signed in"               | That address signed in first through another provider. Use that one. See [One person, one provider](#one-person-one-provider).                                              |
+| "already belongs to an account linked to a different identity" | The address belongs to someone else's account in this organisation. An operator can move it.                                                                                |
+| Entra: "returned no email claim"                               | Add `email` as an optional ID-token claim on the app registration.                                                                                                          |
+| `keera login`: "has no identity provider configured"           | The gateway has none. Use `KEERA_OPERATOR_KEY`, or configure one as above.                                                                                                  |
+| `keera login`: "has to come back to a loopback address"        | The command line is older than the gateway, or something rewrote its redirect. Rebuild it.                                                                                  |
+| `keera login`: the browser signs in and nothing happens        | The browser is not on the same machine as the command, usually because of ssh. See above.                                                                                   |
+| A command says "your sign-in is no longer valid"               | It expired, a role change ended it, or someone ran `keera logout --all`. Run `keera login` again.                                                                           |
+| Entra: "did not match the issuer URL returned by provider"     | The issuer is `.../common/v2.0`, which answers discovery with a templated `{tenantid}` that matches nothing. Use the tenant ID.                                             |
+| Boot fails with "KEERA_PASSKEYS: passkeys need …"              | `KEERA_PUBLIC_URL` is unset, plain http on a name other than `localhost` or `*.localhost`, or an IP address. Browsers refuse passkeys there.                                |
+| "this set-up link has expired, was already used, or …"         | Links work once, for 24 hours, and a new one replaces the last. Ask for a new one: `keera user passkey-link <email>`.                                                       |
+| "that passkey was not accepted"                                | The passkey was removed, belongs to a disabled person, or is for another host name. The gateway log says which.                                                             |
+| The browser says the passkey prompt failed with SecurityError  | The panel is open at an address other than `KEERA_PUBLIC_URL`, such as `127.0.0.1` instead of `localhost`.                                                                  |

@@ -77,10 +77,11 @@ func (s *Server) withPasskeysSignedOut(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// readPasskeyJSON reads the body of an unauthenticated passkey route. It must
-// be JSON by its content type: a cross-site form cannot send that, so another
-// site cannot sign a browser in to an account of its choosing.
-func readPasskeyJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+// readSignedOutJSON reads the body of a route used before signing in, such as
+// a passkey or password sign-in. It must be JSON by its content type: a
+// cross-site form cannot send that, so another site cannot sign a browser in
+// to an account of its choosing.
+func readSignedOutJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "application/json" {
 		httpx.WriteError(w, http.StatusUnsupportedMediaType, "invalid_request_error", "",
 			"send the request as application/json")
@@ -113,7 +114,8 @@ func (s *Server) startPasskeyLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// After the #, so the state stays out of access logs.
-	http.Redirect(w, r, "/#passkey-sign-in="+flow.State, http.StatusFound)
+	http.Redirect(w, r, "/#passkey-sign-in="+flow.State+cli.panelHint(s.opts.ChatURL),
+		http.StatusFound)
 }
 
 // newPasskeyFlow records a passkey sign-in in flight. It is a login flow like
@@ -137,7 +139,7 @@ func (s *Server) passkeySignInOptions(w http.ResponseWriter, r *http.Request) {
 		// Next is where the panel goes afterwards, as after single sign-on.
 		Next string `json:"next"`
 	}
-	if !readPasskeyJSON(w, r, &in) {
+	if !readSignedOutJSON(w, r, &in) {
 		return
 	}
 	var flow store.LoginFlow
@@ -163,7 +165,7 @@ func (s *Server) passkeySignIn(w http.ResponseWriter, r *http.Request) {
 		Flow       string          `json:"flow"`
 		Credential authn.Assertion `json:"credential"`
 	}
-	if !readPasskeyJSON(w, r, &in) {
+	if !readSignedOutJSON(w, r, &in) {
 		return
 	}
 	// Taking the flow deletes it, so an answer works once.
@@ -260,15 +262,13 @@ func credentialOf(p store.Passkey) authn.Credential {
 	}
 }
 
-// ------------------------------------------------------------- registration
-
 // passkeySetupOptions starts adding a passkey from a set-up link. Nobody is
 // signed in: the link is the credential.
 func (s *Server) passkeySetupOptions(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Token string `json:"token"`
 	}
-	if !readPasskeyJSON(w, r, &in) {
+	if !readSignedOutJSON(w, r, &in) {
 		return
 	}
 	user, err := s.st.PasskeyLinkUser(r.Context(), auth.Hash(in.Token))
@@ -317,7 +317,7 @@ func (s *Server) passkeySetup(w http.ResponseWriter, r *http.Request) {
 		registration
 		Token string `json:"token"`
 	}
-	if !readPasskeyJSON(w, r, &in) {
+	if !readSignedOutJSON(w, r, &in) {
 		return
 	}
 	userID, cred, ok := s.verifyRegistration(w, r, in.registration)
