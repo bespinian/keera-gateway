@@ -1,42 +1,55 @@
 package catalog
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
+// Every provider fills in the table's values, and the parser's own defaults,
+// for each model it lists. Infomaniak needs a product id, which its own tests
+// cover.
 func TestProviderFillsInEverythingButTheAlias(t *testing.T) {
-	const in = `
-models:
-  - alias: keera-frontier
-    provider: anthropic
-    backend_model: claude-opus-5
-`
-	models, err := parseModelFile([]byte(in))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	m := models[0]
-	if got, want := m.Backends, []string{"https://api.anthropic.com/v1"}; len(got) != 1 || got[0] != want[0] {
-		t.Errorf("Backends = %v, want %v", got, want)
-	}
-	if m.MaxContext != 1_000_000 {
-		t.Errorf("MaxContext = %d, want 1000000", m.MaxContext)
-	}
-	// Priced, because a model that costs nothing is a model no budget holds.
-	if m.InputMicrosPerMTok == 0 || m.OutputMicrosPerMTok == 0 {
-		t.Errorf("prices = %d/%d, want the provider's list price",
-			m.InputMicrosPerMTok, m.OutputMicrosPerMTok)
-	}
-	if !m.Enabled || m.Kind != "chat" {
-		t.Errorf("model = %+v, want an enabled chat alias", m)
-	}
-	// The name survives: it is all that still says where the values above came
-	// from.
-	if m.Provider != "anthropic" {
-		t.Errorf("Provider = %q, want anthropic", m.Provider)
+	for _, p := range Providers() {
+		if p.NeedsProductID {
+			continue
+		}
+		for _, known := range p.Models {
+			t.Run(p.Name+"/"+known.ID, func(t *testing.T) {
+				models, err := parseModelFile([]byte(fmt.Sprintf(
+					"models:\n  - alias: a\n    provider: %s\n    backend_model: %q\n",
+					p.Name, known.ID)))
+				if err != nil {
+					t.Fatalf("Parse: %v", err)
+				}
+				m := models[0]
+				if len(m.Backends) != 1 || m.Backends[0] != p.Endpoint {
+					t.Errorf("Backends = %v, want [%s]", m.Backends, p.Endpoint)
+				}
+				if m.Location != p.Location || m.MaxContext != known.MaxContext {
+					t.Errorf("location, context = %q, %d, want %q, %d",
+						m.Location, m.MaxContext, p.Location, known.MaxContext)
+				}
+				if m.InputMicrosPerMTok != known.InputMicrosPerMTok ||
+					m.OutputMicrosPerMTok != known.OutputMicrosPerMTok ||
+					m.CachedInputMicrosPerMTok != known.CachedInputMicrosPerMTok {
+					t.Errorf("prices = %d/%d/%d, want the table's %d/%d/%d",
+						m.InputMicrosPerMTok, m.OutputMicrosPerMTok, m.CachedInputMicrosPerMTok,
+						known.InputMicrosPerMTok, known.OutputMicrosPerMTok,
+						known.CachedInputMicrosPerMTok)
+				}
+				if !m.Enabled || m.Kind != "chat" {
+					t.Errorf("model = %+v, want an enabled chat alias", m)
+				}
+				// The name survives: it is all that still says where the values
+				// above came from.
+				if m.Provider != p.Name {
+					t.Errorf("Provider = %q, want %s", m.Provider, p.Name)
+				}
+			})
+		}
 	}
 }
 
@@ -209,114 +222,7 @@ func TestProvidersIsACopy(t *testing.T) {
 	}
 }
 
-func TestOpenAIProviderFillsInEverythingButTheAlias(t *testing.T) {
-	const in = `
-models:
-  - alias: keera-frontier
-    provider: openai
-    backend_model: gpt-5.1
-`
-	models, err := parseModelFile([]byte(in))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	m := models[0]
-	if got, want := m.Backends, []string{"https://api.openai.com/v1"}; len(got) != 1 || got[0] != want[0] {
-		t.Errorf("Backends = %v, want %v", got, want)
-	}
-	if m.MaxContext != 400_000 {
-		t.Errorf("MaxContext = %d, want 400000", m.MaxContext)
-	}
-	if m.InputMicrosPerMTok == 0 || m.OutputMicrosPerMTok == 0 {
-		t.Errorf("prices = %d/%d, want the provider's list price",
-			m.InputMicrosPerMTok, m.OutputMicrosPerMTok)
-	}
-	if !m.Enabled || m.Kind != "chat" {
-		t.Errorf("model = %+v, want an enabled chat alias", m)
-	}
-}
-
-// stepping stone's ids keep their upstream capitals. Its prompt cache is not
-// ready yet, so a cached prompt costs the input price.
-func TestSteppingStoneProviderFillsInEverythingButTheAlias(t *testing.T) {
-	const in = `
-models:
-  - alias: keera-swiss-code
-    provider: stepping-stone
-    backend_model: Qwen/Qwen3-Coder-Next
-`
-	models, err := parseModelFile([]byte(in))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	m := models[0]
-	if got, want := m.Backends, []string{"https://llm.stoney-cloud.com/v1"}; len(got) != 1 || got[0] != want[0] {
-		t.Errorf("Backends = %v, want %v", got, want)
-	}
-	if m.MaxContext != 256_000 {
-		t.Errorf("MaxContext = %d, want the provider's 256000", m.MaxContext)
-	}
-	if m.InputMicrosPerMTok != 340_000 || m.OutputMicrosPerMTok != 1_700_000 ||
-		m.CachedInputMicrosPerMTok != 0 {
-		t.Errorf("prices = %d/%d/%d, want the offer's 0.34/1.70 CHF and no cache rate",
-			m.InputMicrosPerMTok, m.OutputMicrosPerMTok, m.CachedInputMicrosPerMTok)
-	}
-}
-
-// Phoeniqs publishes no cache rate, so a cached prompt costs the input price.
-func TestPhoeniqsProviderFillsInEverythingButTheAlias(t *testing.T) {
-	const in = `
-models:
-  - alias: keera-swiss-agent
-    provider: phoeniqs
-    backend_model: inference-glm5
-`
-	models, err := parseModelFile([]byte(in))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	m := models[0]
-	if got, want := m.Backends, []string{"https://maas.phoeniqs.com/v1"}; len(got) != 1 || got[0] != want[0] {
-		t.Errorf("Backends = %v, want %v", got, want)
-	}
-	if m.Location != "ch" || m.MaxContext != 131_072 {
-		t.Errorf("location, context = %q, %d, want ch, 131072", m.Location, m.MaxContext)
-	}
-	if m.InputMicrosPerMTok != 1_077_000 || m.OutputMicrosPerMTok != 3_386_000 ||
-		m.CachedInputMicrosPerMTok != 0 {
-		t.Errorf("prices = %d/%d/%d, want the list's 1.077/3.386 CHF and no cache rate",
-			m.InputMicrosPerMTok, m.OutputMicrosPerMTok, m.CachedInputMicrosPerMTok)
-	}
-}
-
-// CSCS bills cached input at the input price, so there is no cache rate.
-func TestCSCSProviderFillsInEverythingButTheAlias(t *testing.T) {
-	const in = `
-models:
-  - alias: keera-swiss-coder
-    provider: cscs
-    backend_model: moonshotai/Kimi-K2.7-Code
-`
-	models, err := parseModelFile([]byte(in))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	m := models[0]
-	if got, want := m.Backends, []string{"https://api.inference.cscs.ch/v1"}; len(got) != 1 || got[0] != want[0] {
-		t.Errorf("Backends = %v, want %v", got, want)
-	}
-	if m.Location != "ch" || m.MaxContext != 262_144 {
-		t.Errorf("location, context = %q, %d, want ch, 262144", m.Location, m.MaxContext)
-	}
-	if m.InputMicrosPerMTok != 1_300_000 || m.OutputMicrosPerMTok != 6_050_000 ||
-		m.CachedInputMicrosPerMTok != 0 {
-		t.Errorf("prices = %d/%d/%d, want the list's 1.30/6.05 CHF and no cache rate",
-			m.InputMicrosPerMTok, m.OutputMicrosPerMTok, m.CachedInputMicrosPerMTok)
-	}
-}
-
-// TestProviderTableIsUsable checks what every entry needs for a catalogue to
-// name it, so a new provider cannot ship a broken URL or an unbillable model.
+// A new provider must not ship a broken URL or an unbillable model.
 func TestProviderTableIsUsable(t *testing.T) {
 	seenName := map[string]bool{}
 	for _, p := range Providers() {

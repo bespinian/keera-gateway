@@ -357,11 +357,6 @@ var providers = []Provider{{
 		InputMicrosPerMTok: 896_000, OutputMicrosPerMTok: 4_032_000,
 		Description: "large - hard reasoning, planning and tool use",
 	}, {
-		ID: "Qwen/Qwen3.5-122B-A10B-FP8", DisplayName: "Qwen3.5 122B A10B FP8",
-		MaxContext: 200_000, ReleaseDate: "2026-02-24",
-		InputMicrosPerMTok: 448_000, OutputMicrosPerMTok: 3_584_000,
-		Description: "mid-size - reasoning over long inputs",
-	}, {
 		ID: "moonshotai/Kimi-K2.6", DisplayName: "Kimi K2.6",
 		MaxContext: 256_000, ReleaseDate: "2026-04-20",
 		InputMicrosPerMTok: 672_000, OutputMicrosPerMTok: 3_360_000,
@@ -381,6 +376,11 @@ var providers = []Provider{{
 		MaxContext: 100_000, ReleaseDate: "2026-04-02",
 		InputMicrosPerMTok: 224_000, OutputMicrosPerMTok: 448_000,
 		Description: "mid-size and quick - documents, chatbots and ordinary code",
+	}, {
+		ID: "Qwen/Qwen3.8-27B-FP8", DisplayName: "Qwen3.8 27B FP8",
+		MaxContext: 256_000, ReleaseDate: "2026-08-14",
+		InputMicrosPerMTok: 448_000, OutputMicrosPerMTok: 3_360_000,
+		Description: "small but strong for its size - ordinary code and questions",
 	}, {
 		ID: "mistralai/Ministral-3-14B-Instruct-2512", DisplayName: "Ministral 3 14B",
 		MaxContext: 100_000, ReleaseDate: "2025-12-02",
