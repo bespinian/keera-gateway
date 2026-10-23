@@ -187,12 +187,12 @@ func TestValidSandboxNames(t *testing.T) {
 			t.Errorf("%q should not be a usable sandbox name", bad)
 		}
 	}
-	// A class name may be longer, because it is not a hostname.
-	if !ValidAlias(strings.Repeat("a", 64)) {
-		t.Error("a 64-character class name should be allowed")
+	// A class name goes into a Kubernetes label and its warm pool's name.
+	if !ValidClassName(strings.Repeat("a", 40)) {
+		t.Error("a 40-character class name should be allowed")
 	}
-	if ValidAlias(strings.Repeat("a", 65)) {
-		t.Error("a 65-character class name should not be")
+	if ValidClassName(strings.Repeat("a", 41)) {
+		t.Error("a 41-character class name should not be")
 	}
 }
 

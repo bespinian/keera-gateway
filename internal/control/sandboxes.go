@@ -125,7 +125,8 @@ func (s *Server) putSandboxClass(w http.ResponseWriter, r *http.Request, p *auth
 		if !ok {
 			forbid(w, "only an operator can give a class the image "+class.Image+
 				"; an administrator can use the images of the classes every organisation "+
-				"starts with, and those KEERA_SANDBOX_IMAGES allows")
+				"starts with, those KEERA_SANDBOX_IMAGES allows, or the image the class "+
+				"already has")
 			return
 		}
 	}

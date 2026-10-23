@@ -331,7 +331,35 @@ type SandboxObservation struct {
 // A row that is gone or already terminated is left alone without an error.
 // Usually somebody ended the sandbox after the sweep read it.
 func (s *Store) ObserveSandbox(ctx context.Context, id string, obs SandboxObservation) error {
-	_, err := s.pool.Exec(ctx, `UPDATE sandboxes SET
+	_, err := s.observeSandbox(ctx, id, sandboxGuard{}, obs)
+	return err
+}
+
+// ObserveSandboxFrom is ObserveSandbox for what the driver said about a row
+// read in state from. A row that has moved on since is left alone: somebody
+// suspended, resumed or ended the sandbox while the driver was asked, and
+// what it said is out of date. Written anyway, it would undo their change.
+func (s *Store) ObserveSandboxFrom(ctx context.Context, id string, from policy.SandboxState,
+	obs SandboxObservation,
+) error {
+	_, err := s.observeSandbox(ctx, id, sandboxGuard{from: from}, obs)
+	return err
+}
+
+// sandboxGuard is what a row must still be for an observation to be written.
+// Each field left zero is not checked.
+type sandboxGuard struct {
+	from policy.SandboxState
+	// expiresAt is the end the writer read, on a row not yet expired.
+	expiresAt *time.Time
+}
+
+// observeSandbox is ObserveSandbox, held to guard. It returns how many rows
+// it changed.
+func (s *Store) observeSandbox(ctx context.Context, id string, guard sandboxGuard,
+	obs SandboxObservation,
+) (int64, error) {
+	tag, err := s.pool.Exec(ctx, `UPDATE sandboxes SET
 			state = $2,
 			detail = $3,
 			address = $4,
@@ -346,9 +374,11 @@ func (s *Store) ObserveSandbox(ctx context.Context, id string, obs SandboxObserv
 			-- spent suspended or expired is not charged.
 			accounted_at = CASE WHEN $2 IN ('pending','ready') AND state NOT IN ('pending','ready')
 			                    THEN now() ELSE accounted_at END
-		WHERE id = $1 AND state <> 'terminated'`,
-		id, string(obs.State), obs.Detail, obs.Address, obs.Node)
-	return err
+		WHERE id = $1 AND state <> 'terminated' AND ($6 = '' OR state = $6)
+		  AND ($7::timestamptz IS NULL OR
+		       (expires_at = $7 AND state IN ('pending','ready','suspended')))`,
+		id, string(obs.State), obs.Detail, obs.Address, obs.Node, string(guard.from), guard.expiresAt)
+	return tag.RowsAffected(), err
 }
 
 // ReviveSandbox gives an expired sandbox what it needs to start again: a new
@@ -376,12 +406,15 @@ func (s *Store) TouchSandbox(ctx context.Context, id string) error {
 // SetSandboxExpiry moves when a sandbox ends, and its key with it: the key
 // expires with the sandbox, so an extension that left it behind would cut
 // the sandbox off from inference at the old time.
+//
+// An expired sandbox is ErrNotFound, like a terminated one: resuming it is
+// what gives it a new end. See ExpireSandbox for the race this settles.
 func (s *Store) SetSandboxExpiry(ctx context.Context, id string, at time.Time) error {
 	var n int
 	err := s.pool.QueryRow(ctx, `
 		WITH sb AS (
 			UPDATE sandboxes SET expires_at = $2
-			WHERE id = $1 AND state <> 'terminated'
+			WHERE id = $1 AND state NOT IN ('terminated','expired')
 			RETURNING key_id
 		), k AS (
 			UPDATE api_keys SET expires_at = $2
@@ -422,6 +455,22 @@ func (s *Store) SandboxesPastExpiry(ctx context.Context, now time.Time, limit in
 		  AND state IN ('pending','ready','suspended')
 		ORDER BY expires_at
 		LIMIT $2`, now, limit)
+}
+
+// ExpireSandbox marks sb expired, if its end is still the one the sweep read.
+// It is ErrNotFound when the sandbox was extended, ended or resumed since:
+// SetSandboxExpiry refuses an expired row, so between an extension and an
+// expiry exactly one wins.
+func (s *Store) ExpireSandbox(ctx context.Context, sb Sandbox, detail string) error {
+	if sb.ExpiresAt == nil {
+		return ErrNotFound
+	}
+	n, err := s.observeSandbox(ctx, sb.ID, sandboxGuard{expiresAt: sb.ExpiresAt},
+		SandboxObservation{State: policy.SandboxExpired, Detail: detail})
+	if err == nil && n == 0 {
+		return ErrNotFound
+	}
+	return err
 }
 
 // LiveSandboxes reads the sandboxes the drivers should still know about, for

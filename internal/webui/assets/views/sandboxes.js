@@ -3,15 +3,15 @@
 // on a key minted for it.
 //
 // There is deliberately no way in from here. An administrator can see and
-// terminate every sandbox, because the quota and the bill are theirs, but
-// cannot open a shell. Attaching is `keera sandbox ssh`, for the owner and
-// operators.
+// terminate every sandbox, since the quota and bill are theirs, but cannot
+// open a shell. Owners and operators attach with `keera sandbox ssh`.
 
 import { api } from "../api.js";
 import {
   h,
   table,
   confirm,
+  busyButton,
   toast,
   pill,
   stat,
@@ -130,13 +130,14 @@ function head(ctx, classes, driver, limits, canAdmin, projects) {
   );
 }
 
-// limitNote compares the count with the quota. The quota is the whole
-// organisation's, but a member's list holds only their own sandboxes.
+// limitNote compares the count with the quota. The quota is the one a new
+// sandbox meets in the oldest project, where it lands by default, and a
+// member's list holds only their own sandboxes.
 function limitNote(limits, canAdmin) {
   if (!limits || !limits.max_sandboxes) return "no limit set";
   if (!canAdmin)
-    return `yours; the organisation allows ${limits.max_sandboxes} in all`;
-  return `of ${limits.max_sandboxes} allowed here`;
+    return `yours; the default project allows ${limits.max_sandboxes} in all`;
+  return `of ${limits.max_sandboxes} the default project allows`;
 }
 
 function listCard(ctx, sandboxes, canAdmin, me, driver) {
@@ -401,34 +402,52 @@ function actions(ctx, s, canAdmin, me, driver) {
   const btns = [];
   if (s.state === "suspended" || s.state === "expired") {
     btns.push(
-      h(
-        "button",
+      busyButton(
         {
           class: "btn btn-sm",
           title:
             (home ? "Resume it with its files intact" : "Resume it") +
             (s.state === "expired" ? ", a new key and a new lifetime" : ""),
-          onClick: () =>
-            act(ctx, () => api.resumeSandbox(s.id), `${s.name} is resuming`),
         },
         "Resume",
+        async () => {
+          await api.resumeSandbox(s.id);
+          toast(`${s.name} is resuming`, "good");
+          ctx.reload();
+        },
       ),
     );
   } else if (s.state === "ready" && s.purpose !== "agent") {
     // An agent's sandbox runs its task to the end, so the control plane
     // refuses to suspend it.
+    const suspend = async () => {
+      await api.suspendSandbox(s.id);
+      toast(`${s.name} is suspending`, "good");
+      ctx.reload();
+    };
     btns.push(
-      h(
-        "button",
+      busyButton(
         {
           class: "btn btn-sm",
           title: home
             ? "Release its compute and keep its files"
             : "Release its compute. It has no volume, so its files are lost",
-          onClick: () =>
-            act(ctx, () => api.suspendSandbox(s.id), `${s.name} is suspending`),
         },
         "Suspend",
+        // Without a volume, suspending loses as much as terminating, so it
+        // asks first too.
+        home
+          ? suspend
+          : () =>
+              confirm({
+                title: `Suspend ${s.name}?`,
+                body:
+                  "It has no volume, so its home directory goes with it. " +
+                  "Anything not pushed is lost.",
+                confirmLabel: "Suspend",
+                danger: true,
+                onConfirm: suspend,
+              }),
       ),
     );
   }
@@ -456,16 +475,6 @@ function actions(ctx, s, canAdmin, me, driver) {
     ),
   );
   return h("div", { class: "row-tight" }, ...btns);
-}
-
-async function act(ctx, fn, message) {
-  try {
-    await fn();
-    toast(message, "good");
-    ctx.reload();
-  } catch (e) {
-    toast(e.message, "bad");
-  }
 }
 
 /** lifetimeInput asks for a lifetime in hours. */
@@ -611,8 +620,9 @@ function newSandbox(ctx, classes, limits, projects) {
             "Project",
             project,
             "The sandbox's key is scoped to this project, and the sandbox " +
-              "counts towards its quota. The project's guardrails can allow " +
-              "fewer classes or a shorter lifetime than shown here.",
+              "counts towards its quota. The classes listed are the ones the " +
+              "oldest project allows; another project's guardrails can allow " +
+              "others or a shorter lifetime.",
           )
         : null,
       field("Your SSH public key", key, [
@@ -628,7 +638,7 @@ function newSandbox(ctx, classes, limits, projects) {
             "Optional. Cloned with a credential made for this sandbox only. " +
               (repos.includes("*")
                 ? "Any repository the forge credential reaches."
-                : `Allowed: ${repos.join(", ")}.`),
+                : `Allowed in the default project: ${repos.join(", ")}.`),
           )
         : null,
       repos.length ? field("Branch", branch) : null,
@@ -636,7 +646,7 @@ function newSandbox(ctx, classes, limits, projects) {
         "Lifetime in hours",
         ttl,
         limits && limits.max_sandbox_ttl_seconds
-          ? `Capped at ${duration(limits.max_sandbox_ttl_seconds * 1000)} for ${orgNameOf(ctx)}.`
+          ? `Capped at ${duration(limits.max_sandbox_ttl_seconds * 1000)} in the default project.`
           : "Leave empty for the class default.",
       ),
     ),

@@ -69,7 +69,8 @@ hyphens, at most 40 characters, because it becomes a hostname in the cluster.
 An engineer's sandbox needs an ssh public key: `keera sandbox create` sends the
 ones in `~/.ssh`, or the one in the file `--ssh-key` names, such as
 `--ssh-key ~/.ssh/work.pub`. An agent's needs both `--repo` and `--task`.
-`--repo` is cloned at its default branch, or at `--branch`. `--ttl` sets the
+`--repo` is cloned at its default branch, or at `--branch`, with only the
+latest commit; `git fetch --unshallow` gets the rest. `--ttl` sets the
 lifetime; without it, the sandbox gets the class's default. A `--ttl` above the
 class's `max_ttl` or the quota's [`--max-sandbox-ttl`](#quotas) is cut down to
 it, not refused. Through the API, `env` adds variables for the sandbox's life,
@@ -233,8 +234,9 @@ sandboxes:
 The file is a [template](gateway.md#template-files): it only seeds new
 organisations, which then own their copies.
 
-`keera sandbox classes` lists the organisation's classes, and whether your
-quota lets you start each one.
+`keera sandbox classes` lists the organisation's classes, and whether the
+default project's quota lets you start each one. The default project is the
+oldest one, where a sandbox lands without `--project`.
 
 An administrator adds or changes classes with a file in the same format:
 
@@ -583,8 +585,14 @@ driver for development, or on a host the deployment already trusts.
 
 The gateway does not start with an unknown driver or forge, with
 `KEERA_SANDBOX_GIT_FORGE=github` but not both the app id and its key file, or
-with `gitlab` but no token file. With no driver, the other sandbox settings are
-not checked.
+with `gitlab` but no token file.
+
+With no driver, the panel hides sandboxes and the other sandbox settings are
+ignored, so a stray one does not stop the start. `KEERA_SANDBOXES_FILE` and
+`KEERA_SANDBOX_IMAGES` are read either way, under compose too: the classes are
+there once a driver is set, and an administrator can save a class with an
+allowed image before then. A missing or invalid classes file stops the start;
+see [Template files](gateway.md#template-files).
 
 `KEERA_SANDBOX_PUBLIC_URL` is the one to get right. A sandbox pointed at the
 public name leaves the cluster and comes back through the load balancer to reach
@@ -654,7 +662,8 @@ that vendor's provider back on in the picker.
 
 Pi's **default model and provider** are pinned too, in
 `~/.pi/agent/settings.json`. The model is the first chat model the key may
-reach, so the project's allow-list decides it.
+reach, or its first router when it reaches no model, so the project's
+allow-list decides it.
 
 Pinning `defaultProvider: keera` is a security control. Pi picks its built-in
 providers over a configured one when both are available. So `pi` with no
@@ -694,7 +703,7 @@ that replaces the entrypoint has to handle them itself.
 | ------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | `KEERA_API_KEY`                                   | The sandbox's own key.                                                                            |
 | `KEERA_BASE_URL`                                  | The gateway's inference address. Also as `OPENAI_BASE_URL` (with `/v1`) and `ANTHROPIC_BASE_URL`. |
-| `KEERA_MODEL`                                     | The first chat model the key may reach. Also as `ANTHROPIC_MODEL`.                                |
+| `KEERA_MODEL`                                     | The first chat model the key may reach, else its first router. Also as `ANTHROPIC_MODEL`.         |
 | `KEERA_SANDBOX_ID`, `_NAME`, `_CLASS`, `_PURPOSE` | Which sandbox this is.                                                                            |
 | `KEERA_SANDBOX_EXPIRES`                           | When it ends, in RFC 3339, as set at creation or when resumed after expiring. `extend` does not.  |
 | `KEERA_AUTHORIZED_KEYS`                           | The ssh public keys that may log in, one per line.                                                |

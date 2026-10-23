@@ -243,12 +243,25 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (store.Sandbox,
 	// sandbox starts.
 	m.changed(s.keyID)
 
-	status, err := m.driver.Create(ctx, specFor(ref, class, req, s.env, expires))
+	// Not the caller's context: a client that hangs up during, say, an image
+	// pull would leave a machine behind that its row does not know about. Each
+	// driver bounds its own calls.
+	dctx := context.WithoutCancel(ctx)
+	status, err := m.driver.Create(dctx, specFor(ref, class, req, s.env, expires))
 	if err != nil {
 		// Keep the row, marked failed: why a sandbox could not be made is the
 		// most useful thing to record. The key is still revoked.
 		m.fail(ctx, row.ID, err)
 		m.undo(ctx, s)
+		// A failed agent sandbox is not swept again, so whatever the create
+		// left behind goes now. An engineer's stays live until it is
+		// terminated, which removes the machine too.
+		if req.Purpose == policy.PurposeAgent {
+			if terr := m.driver.Terminate(dctx, ref); terr != nil && !errors.Is(terr, ErrNotFound) {
+				m.log.Warn("sandbox: removing what a failed create left failed",
+					"sandbox", row.ID, "error", terr)
+			}
+		}
 		return store.Sandbox{}, fmt.Errorf("creating sandbox %s: %w", req.Name, err)
 	}
 

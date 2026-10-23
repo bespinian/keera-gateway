@@ -603,3 +603,63 @@ func TestDeleteProjectIsRefusedWhileASandboxIsLive(t *testing.T) {
 		t.Errorf("DeleteProject once the sandbox is terminated: %v", err)
 	}
 }
+
+func TestTheSweepDoesNotUndoAChangeMadeWhileItAskedTheDriver(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	newSandboxClass(t, st, ctx, f.orgID, "standard")
+	sb := newSandbox(t, st, ctx, f, "race")
+	if err := st.ObserveSandbox(ctx, sb.ID, SandboxObservation{State: policy.SandboxReady}); err != nil {
+		t.Fatal(err)
+	}
+	// The sweep read it ready, then its owner suspended it.
+	if err := st.ObserveSandbox(ctx, sb.ID, SandboxObservation{State: policy.SandboxSuspended}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ObserveSandboxFrom(ctx, sb.ID, policy.SandboxReady, SandboxObservation{
+		State: policy.SandboxReady, Detail: "seen running",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.Sandbox(ctx, sb.ID); got.State != policy.SandboxSuspended {
+		t.Errorf("state = %s, want the owner's suspend kept", got.State)
+	}
+	if err := st.ObserveSandboxFrom(ctx, sb.ID, policy.SandboxSuspended, SandboxObservation{
+		State: policy.SandboxReady,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.Sandbox(ctx, sb.ID); got.State != policy.SandboxReady {
+		t.Errorf("state = %s, want an observation of the current state written", got.State)
+	}
+}
+
+func TestAnExtensionAndAnExpiryCannotBothWin(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	newSandboxClass(t, st, ctx, f.orgID, "standard")
+
+	// Extended after the sweep read it: the expiry loses.
+	read := newSandbox(t, st, ctx, f, "extended")
+	if err := st.SetSandboxExpiry(ctx, read.ID, time.Now().Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ExpireSandbox(ctx, read, "ran out"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("expiring an extended sandbox = %v, want ErrNotFound", err)
+	}
+	if got, _ := st.Sandbox(ctx, read.ID); got.State == policy.SandboxExpired {
+		t.Error("a sandbox extended after the sweep read it was expired")
+	}
+
+	// Expired first: the extension loses.
+	sb := newSandbox(t, st, ctx, f, "expired")
+	if err := st.ExpireSandbox(ctx, sb, "ran out"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSandboxExpiry(ctx, sb.ID, time.Now().Add(2*time.Hour)); !errors.Is(err, ErrNotFound) {
+		t.Errorf("extending an expired sandbox = %v, want ErrNotFound", err)
+	}
+	if err := st.ExpireSandbox(ctx, sb, "ran out"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("expiring it twice = %v, want ErrNotFound", err)
+	}
+}

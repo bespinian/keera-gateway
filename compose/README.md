@@ -143,5 +143,6 @@ echo 'KEERA_SANDBOX_DRIVER=podman' >> compose/.env
 make dev
 ```
 
-Only `make dev` uses the sandbox settings in `.env`, and it sets
-`KEERA_SANDBOX_PUBLIC_URL` for you. See [docs/sandboxes.md](../docs/sandboxes.md).
+The gateway under compose runs no sandboxes, so only `make dev` uses the driver
+settings in `.env`, and it sets `KEERA_SANDBOX_PUBLIC_URL` for you.
+`KEERA_SANDBOX_IMAGES` reaches both. See [docs/sandboxes.md](../docs/sandboxes.md).
