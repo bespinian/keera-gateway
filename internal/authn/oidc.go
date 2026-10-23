@@ -219,7 +219,7 @@ func (o *OIDC) Issuer() string { return o.cfg.IssuerURL }
 
 // IsGoogle reports whether this provider is Google's. Google's ID tokens carry
 // no groups claim at all.
-func (o *OIDC) IsGoogle() bool { return isGoogle(o.cfg.IssuerURL) }
+func (o *OIDC) IsGoogle() bool { return o.google }
 
 // Mapping returns how this provider's groups map onto Keera Gateway's roles.
 func (o *OIDC) Mapping() RoleMapping { return o.cfg.Mapping }
@@ -424,10 +424,7 @@ func (o *OIDC) identity(idToken *oidc.IDToken) (Identity, error) {
 		Name:     displayName(claims),
 		Groups:   stringsClaim(claims, groupsClaim),
 	}
-	if err := o.checkIdentity(id, claims, groupsClaim); err != nil {
-		return id, err
-	}
-	return id, nil
+	return id, o.checkIdentity(id, claims, groupsClaim)
 }
 
 // verifiedIDToken checks the id_token that came with a token response.
@@ -574,8 +571,6 @@ func stringsClaim(claims map[string]any, key string) []string {
 			}
 		}
 		return out
-	case []string:
-		return v
 	case string:
 		return strings.Fields(v)
 	default:

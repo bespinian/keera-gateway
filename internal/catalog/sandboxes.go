@@ -67,7 +67,7 @@ func parseSandboxFile(raw []byte) ([]policy.SandboxClass, error) {
 		return nil, fmt.Errorf("parse sandbox catalogue: %w", err)
 	}
 	if len(f.Sandboxes) == 0 {
-		return nil, fmt.Errorf("catalogue declares no sandbox classes")
+		return nil, errors.New("catalogue declares no sandbox classes")
 	}
 	name := func(s Sandbox) string { return s.Name }
 	return parseEntries(f.Sandboxes, "sandboxes", "name", name, ParseSandbox)
@@ -78,13 +78,13 @@ func parseSandboxFile(raw []byte) ([]policy.SandboxClass, error) {
 func ParseSandbox(s Sandbox) (policy.SandboxClass, error) {
 	switch {
 	case s.Name == "":
-		return policy.SandboxClass{}, fmt.Errorf("name is required")
+		return policy.SandboxClass{}, errors.New("name is required")
 	case !policy.ValidClassName(s.Name):
 		return policy.SandboxClass{}, fmt.Errorf("name %q must be lowercase letters, digits and "+
 			"interior hyphens, at most 40 characters: it is typed on a command line and written "+
 			"into repositories' own configuration, neither of which quotes it", s.Name)
 	case strings.TrimSpace(s.Image) == "":
-		return policy.SandboxClass{}, fmt.Errorf("image is required; it is what the sandbox " +
+		return policy.SandboxClass{}, errors.New("image is required; it is what the sandbox " +
 			"runs, and it should carry the toolchain already installed - a sandbox that " +
 			"installs its own is one nobody waits for, and on an air-gapped site it is one " +
 			"that never becomes ready")

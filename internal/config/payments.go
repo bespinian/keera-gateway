@@ -68,7 +68,7 @@ func payments(platform catalog.Platform, publicURL string) (*Payments, error) {
 	}
 	return &Payments{
 		PostFinance: payment.Settings{
-			URL:     env("KEERA_BILLING_POSTFINANCE_URL", payment.DefaultURL),
+			URL:     env("KEERA_BILLING_POSTFINANCE_URL", ""),
 			SpaceID: spaceID, UserID: user, AuthKey: authKey,
 		},
 		VATBP: vat,

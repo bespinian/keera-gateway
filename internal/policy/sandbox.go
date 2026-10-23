@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -272,7 +273,7 @@ const anyRepo = "*"
 // path on the forge, and why not when it may not.
 func (r ResolvedSandbox) AdmitsRepo(path string) error {
 	if r.AllowedRepos == nil {
-		return fmt.Errorf("no repository is allowed for sandboxes here; an operator sets " +
+		return errors.New("no repository is allowed for sandboxes here; an operator sets " +
 			"'allowed_repos' on the organisation's guardrail")
 	}
 	for _, p := range r.AllowedRepos {
@@ -281,7 +282,7 @@ func (r ResolvedSandbox) AdmitsRepo(path string) error {
 		}
 	}
 	if len(r.AllowedRepos) == 0 {
-		return fmt.Errorf("no repository is allowed for sandboxes in this scope")
+		return errors.New("no repository is allowed for sandboxes in this scope")
 	}
 	return fmt.Errorf("%s is not allowed here; this scope may check out %s",
 		path, strings.Join(r.AllowedRepos, ", "))
@@ -292,8 +293,7 @@ func ValidRepoPattern(s string) bool {
 	if s == anyRepo {
 		return true
 	}
-	parts := strings.SplitSeq(s, "/")
-	for p := range parts {
+	for p := range strings.SplitSeq(s, "/") {
 		if p == "" || p == "." || p == ".." || strings.Trim(p, "abcdefghijklmnopqrstuvwxyz"+
 			"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-") != "" {
 			return false

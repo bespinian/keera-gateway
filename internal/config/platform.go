@@ -22,9 +22,7 @@ func platformKeys() (catalog.Platform, error) {
 	known := []string{}
 	for _, p := range catalog.Providers() {
 		prefix := envPrefix("PROVIDER", p.Name)
-		for _, s := range []string{platformAPIKey, platformProductID} {
-			known = append(known, prefix+s)
-		}
+		known = append(known, prefix+platformAPIKey, prefix+platformProductID)
 		key := env(prefix+platformAPIKey, "")
 		productID := env(prefix+platformProductID, "")
 		if key == "" {

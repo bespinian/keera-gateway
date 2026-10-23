@@ -80,22 +80,18 @@ type KubernetesOptions struct {
 type Kubernetes struct {
 	c    *kubeClient
 	opts KubernetesOptions
-	log  *slog.Logger
 }
 
-// NewKubernetes builds the driver and checks it can reach the API server.
-//
-// The check lists sandboxes rather than asking for the version, because that
-// proves the API server is there, the Sandbox CRD is installed and this service
-// account may use it - at start, not at the first request.
+// NewKubernetes builds the driver and checks it can reach the API server. It
+// lists sandboxes rather than asking for the version, because that proves at
+// start that the Sandbox CRD is installed and this service account may use it.
 func NewKubernetes(ctx context.Context, opts KubernetesOptions) (*Kubernetes, error) {
 	if opts.Log == nil {
 		opts.Log = slog.Default()
 	}
 	if opts.Namespace == "" {
-		// Allowed, so an install that never set it still starts, but said
-		// out loud: in the gateway's own namespace, whoever reads its pods
-		// reads every sandbox's key.
+		// Allowed, so an install that never set it still starts, but warned
+		// about.
 		opts.Namespace = inClusterNamespace()
 		opts.Log.Warn("KEERA_SANDBOX_NAMESPACE is not set, so sandboxes run in the "+
 			"gateway's namespace, where anyone who can read pods can read their API keys; "+
@@ -105,7 +101,7 @@ func NewKubernetes(ctx context.Context, opts KubernetesOptions) (*Kubernetes, er
 	if err != nil {
 		return nil, err
 	}
-	k := &Kubernetes{c: c, opts: opts, log: opts.Log}
+	k := &Kubernetes{c: c, opts: opts}
 
 	var probe struct {
 		Items []struct{} `json:"items"`

@@ -179,19 +179,13 @@ func applyMigration(ctx context.Context, conn *pgxpool.Conn, name string) error 
 	if err != nil {
 		return err
 	}
-	tx, err := conn.Begin(ctx)
-	if err != nil {
+	return pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, string(body)); err != nil {
+			return fmt.Errorf("migration %s: %w", name, err)
+		}
+		_, err := tx.Exec(ctx, "INSERT INTO schema_migrations (version) VALUES ($1)", name)
 		return err
-	}
-	if _, err := tx.Exec(ctx, string(body)); err != nil {
-		_ = tx.Rollback(ctx)
-		return fmt.Errorf("migration %s: %w", name, err)
-	}
-	if _, err := tx.Exec(ctx, "INSERT INTO schema_migrations (version) VALUES ($1)", name); err != nil {
-		_ = tx.Rollback(ctx)
-		return err
-	}
-	return tx.Commit(ctx)
+	})
 }
 
 // Notify tells every replica to drop its cached policy. The payload says what

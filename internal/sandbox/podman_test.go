@@ -82,11 +82,16 @@ func TestSSHGreets(t *testing.T) {
 // fakePodman is a podman that answers `inspect` with one container in the
 // given state and fails everything else.
 func fakePodman(t *testing.T, state string) *Podman {
+	return scriptedPodman(t, "if [ \"$1\" = inspect ]; then echo '[{\"State\":"+state+"}]'; exit 0; fi\n")
+}
+
+// scriptedPodman is a podman that runs script and fails whatever it lets
+// through.
+func scriptedPodman(t *testing.T, script string) *Podman {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "podman")
-	script := "#!/bin/sh\nif [ \"$1\" = inspect ]; then echo '[{\"State\":" + state + "}]'; exit 0; fi\n" +
-		"echo \"unexpected: $*\" >&2; exit 125\n"
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+	body := "#!/bin/sh\n" + script + "echo \"unexpected: $*\" >&2; exit 125\n"
+	if err := os.WriteFile(bin, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return &Podman{opts: PodmanOptions{Binary: bin}, log: slog.New(slog.DiscardHandler)}
@@ -102,13 +107,7 @@ func TestPodmanDialRefusesASuspendedSandbox(t *testing.T) {
 
 // A sandbox whose home volume is gone is not revived on a new, empty one.
 func TestPodmanDoesNotReviveWithoutItsVolume(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "podman")
-	script := "#!/bin/sh\nif [ \"$1\" = volume ]; then echo \"Error: no such volume $3\" >&2; exit 125; fi\n" +
-		"echo \"unexpected: $*\" >&2; exit 125\n"
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	p := &Podman{opts: PodmanOptions{Binary: bin}, log: slog.New(slog.DiscardHandler)}
+	p := scriptedPodman(t, "if [ \"$1\" = volume ]; then echo \"Error: no such volume $3\" >&2; exit 125; fi\n")
 	if err := p.Revive(context.Background(), Spec{ID: "sbx_1", Name: "desk"}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Revive = %v, want ErrNotFound", err)
 	}

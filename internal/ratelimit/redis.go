@@ -336,12 +336,13 @@ func (r *Redis) remember(keys []string, tokens []int64, now time.Time) {
 func (r *Redis) extrapolate(key string, perMinute int, now time.Time) (float64, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	v, ok := r.view[r.key(key)]
+	k := r.key(key)
+	v, ok := r.view[k]
 	if !ok {
 		return 0, false
 	}
 	v.seen = now
-	r.view[r.key(key)] = v
+	r.view[k] = v
 
 	perSec, burst := rate(perMinute)
 	t := v.tokens

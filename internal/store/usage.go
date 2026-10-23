@@ -314,11 +314,7 @@ type spendKey struct {
 // spendOrder sorts the windows a batch touches. Every replica writes the same
 // few rows, and taking their locks in one fixed order avoids deadlocks.
 func spendOrder(spend map[spendKey]int64) []spendKey {
-	keys := make([]spendKey, 0, len(spend))
-	for k := range spend {
-		keys = append(keys, k)
-	}
-	slices.SortFunc(keys, func(a, b spendKey) int {
+	return slices.SortedFunc(maps.Keys(spend), func(a, b spendKey) int {
 		return cmp.Or(
 			cmp.Compare(a.scopeType, b.scopeType),
 			cmp.Compare(a.scopeID, b.scopeID),
@@ -326,7 +322,6 @@ func spendOrder(spend map[spendKey]int64) []spendKey {
 			a.start.Compare(b.start),
 		)
 	})
-	return keys
 }
 
 // SpendRow is current spend against one budget window.
@@ -415,6 +410,14 @@ type UsageQuery struct {
 // DefaultGroupBy is the grouping a usage report gets when it asks for none.
 const DefaultGroupBy = "model"
 
+// groupBy is q.GroupBy, or DefaultGroupBy for one Usage does not know.
+func (q UsageQuery) groupBy() string {
+	if ValidGroupBy(q.GroupBy) {
+		return q.GroupBy
+	}
+	return DefaultGroupBy
+}
+
 // groupColumns maps the public group_by values to columns, which keeps the
 // caller's string out of the SQL text.
 var groupColumns = map[string]string{
@@ -446,10 +449,7 @@ func GroupBys() []string {
 // only what was served, as the keys screen does.
 func (s *Store) Usage(ctx context.Context, q UsageQuery) ([]UsageBucket, error) {
 	src, from, to := sourceFor(q.From, q.To)
-	groupBy := q.GroupBy
-	if !ValidGroupBy(groupBy) {
-		groupBy = DefaultGroupBy
-	}
+	groupBy := q.groupBy()
 	col := src.group(groupBy)
 	org, group := "''", "grp"
 	if q.OrgID == "" && groupBy == "model" {
@@ -506,10 +506,7 @@ const chartLines = 5
 // counts, so the lines add up to the report's served requests.
 func (s *Store) UsageChart(ctx context.Context, q UsageQuery) (UsageChart, error) {
 	src, from, to := sourceFor(q.From, q.To)
-	groupBy := q.GroupBy
-	if !ValidGroupBy(groupBy) {
-		groupBy = DefaultGroupBy
-	}
+	groupBy := q.groupBy()
 	col := src.group(groupBy)
 	org := "''"
 	if q.OrgID == "" && groupBy == "model" {

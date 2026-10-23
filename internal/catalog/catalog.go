@@ -101,7 +101,7 @@ func parseModelFile(raw []byte) ([]policy.Model, error) {
 		return nil, fmt.Errorf("parse catalogue: %w", err)
 	}
 	if len(f.Models) == 0 {
-		return nil, fmt.Errorf("catalogue declares no models")
+		return nil, errors.New("catalogue declares no models")
 	}
 	return parseEntries(f.Models, "models", "alias", func(m Model) string { return m.Alias }, ParseModel)
 }
@@ -153,7 +153,7 @@ func parseEntries[E, T any](entries []E, list, field string, name func(E) string
 func ParseModel(m Model) (policy.Model, error) {
 	switch {
 	case m.Alias == "":
-		return policy.Model{}, fmt.Errorf("alias is required")
+		return policy.Model{}, errors.New("alias is required")
 	case !policy.ValidModelAlias(m.Alias):
 		return policy.Model{}, fmt.Errorf("alias %q must be lowercase letters, digits, "+
 			"interior hyphens and slashes: it is rendered into the client configurations `keera connect` "+
@@ -276,7 +276,7 @@ func checkSubscription(m policy.Model) error {
 		return fmt.Errorf("a subscription model must name the provider %s: "+
 			"only a Claude plan can pay for it", p.Name)
 	case m.Kind != policy.KindChat:
-		return fmt.Errorf("a subscription model must be a chat model")
+		return errors.New("a subscription model must be a chat model")
 	case len(m.Backends) != 1 || strings.TrimRight(m.Backends[0], "/") != p.Endpoint:
 		return fmt.Errorf("a subscription model is sent each caller's Claude sign-in, "+
 			"so its only backend must be Anthropic's own API, %s; to go through "+
@@ -290,7 +290,7 @@ func checkSubscription(m policy.Model) error {
 func checkBackend(m Model) error {
 	switch {
 	case m.ProductID != "" && m.Provider == "":
-		return fmt.Errorf("product_id fills in a hosted provider's endpoint, " +
+		return errors.New("product_id fills in a hosted provider's endpoint, " +
 			"and this entry names no provider; put the id in the backend URL instead")
 	case len(m.Backends) > 0 && m.BackendModel == "" && m.Provider != "":
 		return fmt.Errorf("backend_model is required - for the %s provider it is "+

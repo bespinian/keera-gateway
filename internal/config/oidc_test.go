@@ -135,7 +135,7 @@ func TestSignUpNeedsPrivateHostsSet(t *testing.T) {
 	t.Setenv("KEERA_OIDC_GOOGLE_CLIENT_ID", "google-client")
 	t.Setenv("KEERA_OIDC_GOOGLE_CLIENT_SECRET", "google-secret")
 	t.Setenv("KEERA_OIDC_GOOGLE_SIGNUP", "true")
-	c := Config{OIDC: oidcProviders("https://keera.example.ch")}
+	c := Config{PublicURL: "https://keera.example.ch", OIDC: oidcProviders("https://keera.example.ch")}
 
 	if _, _, err := c.privateHosts(); err == nil {
 		t.Error("sign-up without KEERA_UPSTREAM_PRIVATE was accepted")

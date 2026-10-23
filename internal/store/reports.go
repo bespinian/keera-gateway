@@ -208,14 +208,11 @@ func (s *Store) topUsage(ctx context.Context, q UsageQuery, groupBy string) ([]U
 	if err != nil {
 		return nil, err
 	}
-	if len(b) > 6 {
-		return b[:6], nil
-	}
-	return b, nil
+	return b[:min(len(b), 6)], nil
 }
 
-// ProjectOrg returns which organisation a project belongs to, so a request naming a
-// project can be checked against the caller's own tenant first.
+// ProjectOrg returns which organisation a project belongs to, so a request
+// naming a project can be checked against the caller's own tenant first.
 func (s *Store) ProjectOrg(ctx context.Context, projectID string) (string, error) {
 	var orgID string
 	err := s.pool.QueryRow(ctx, "SELECT org_id FROM projects WHERE id = $1", projectID).Scan(&orgID)

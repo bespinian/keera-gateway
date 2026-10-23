@@ -49,12 +49,9 @@ func TestAPaymentSettingThatCannotWorkStopsTheStart(t *testing.T) {
 		"KEERA_BILLING_POSTFINANCE_USER_ID":  "1",
 		"KEERA_BILLING_POSTFINANCE_AUTH_KEY": "c2VjcmV0",
 	}
-	with := func(kv ...string) map[string]string {
-		out := map[string]string{}
-		maps.Copy(out, account)
-		for i := 0; i < len(kv); i += 2 {
-			out[kv[i]] = kv[i+1]
-		}
+	with := func(k, v string) map[string]string {
+		out := maps.Clone(account)
+		out[k] = v
 		return out
 	}
 	tests := []struct {

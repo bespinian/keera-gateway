@@ -111,10 +111,11 @@ func (m Model) Endpoint() string {
 }
 
 // internalSuffixes are domains that do not resolve outside a network:
-// Kubernetes' cluster domain, mDNS, and the usual private ones.
+// Kubernetes' cluster domain (".local" covers ".cluster.local"), mDNS, and the
+// usual private ones.
 var internalSuffixes = []string{
 	".local", ".localdomain", ".localhost", ".internal", ".intranet",
-	".lan", ".home.arpa", ".svc", ".cluster.local",
+	".lan", ".home.arpa", ".svc",
 }
 
 func hostingOf(raw string) (Hosting, string) {

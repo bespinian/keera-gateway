@@ -146,8 +146,8 @@ func Refuse(format string, args ...any) error {
 	return &ErrRefused{Reason: fmt.Sprintf(format, args...)}
 }
 
-// invalid is refuse for a request that is wrong in itself.
-func invalid(format string, args ...any) error {
+// Invalid is Refuse for a request that is wrong in itself.
+func Invalid(format string, args ...any) error {
 	return &ErrRefused{Reason: fmt.Sprintf(format, args...), Invalid: true}
 }
 
@@ -283,30 +283,29 @@ func backingFor(class policy.SandboxClass, p policy.Purpose, warm bool) Backing 
 // deliver it, is there room. It returns the class.
 func (m *Manager) admit(ctx context.Context, req CreateRequest) (policy.SandboxClass, error) {
 	if !req.Purpose.Valid() {
-		return policy.SandboxClass{}, invalid("%q is not a purpose; a sandbox is for an 'engineer' "+
+		return policy.SandboxClass{}, Invalid("%q is not a purpose; a sandbox is for an 'engineer' "+
 			"or for an 'agent'", req.Purpose)
 	}
 	if !policy.ValidSandboxName(req.Name) {
-		return policy.SandboxClass{}, invalid("%q is not a usable sandbox name; it becomes a hostname "+
+		return policy.SandboxClass{}, Invalid("%q is not a usable sandbox name; it becomes a hostname "+
 			"in the cluster and half of an ssh config entry on your laptop, so it is lowercase "+
 			"letters, digits and interior hyphens", req.Name)
 	}
-	// Some KEERA_ values are set only in some sandboxes, and one from the
-	// caller would stand in for them where they are not: KEERA_BASE_URL, for
-	// one, decides where the sandbox's key is sent.
+	// Some KEERA_ values are set only in some sandboxes, and the caller's would
+	// fill the gap. KEERA_BASE_URL, for one, decides where the key is sent.
 	for name := range req.Env {
 		if strings.HasPrefix(name, "KEERA_") {
-			return policy.SandboxClass{}, invalid("%s is set by the gateway; a sandbox's own "+
+			return policy.SandboxClass{}, Invalid("%s is set by the gateway; a sandbox's own "+
 				"environment cannot name a KEERA_ variable", name)
 		}
 	}
 	if req.Purpose == policy.PurposeAgent {
 		if strings.TrimSpace(req.Task) == "" {
-			return policy.SandboxClass{}, invalid("an agent sandbox needs a task: it is the " +
+			return policy.SandboxClass{}, Invalid("an agent sandbox needs a task: it is the " +
 				"instruction the agent starts on")
 		}
 		if req.Repo == "" {
-			return policy.SandboxClass{}, invalid("an agent sandbox needs a repository: the " +
+			return policy.SandboxClass{}, Invalid("an agent sandbox needs a repository: the " +
 				"agent's work comes out of it only as a branch pushed there")
 		}
 	}
@@ -330,7 +329,7 @@ func (m *Manager) admit(ctx context.Context, req CreateRequest) (policy.SandboxC
 		return policy.SandboxClass{}, noRuntime(class, m.driver.Name())
 	}
 	if req.Purpose == policy.PurposeEngineer && len(req.AuthorizedKeys) == 0 {
-		return policy.SandboxClass{}, invalid("no ssh public key was given, so nothing could open a " +
+		return policy.SandboxClass{}, Invalid("no ssh public key was given, so nothing could open a " +
 			"shell in this sandbox. `keera sandbox create` sends yours from ~/.ssh; if you have " +
 			"none, `ssh-keygen -t ed25519` makes one")
 	}

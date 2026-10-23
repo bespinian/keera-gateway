@@ -332,10 +332,8 @@ func (p *Podman) dialPublished(ctx context.Context, ref Ref, port int) (net.Conn
 	}
 	// One "127.0.0.1:43117" line per mapping. Take the first; a second line
 	// would be the IPv6 mapping of the same port.
-	line := strings.TrimSpace(string(out))
-	if i := strings.IndexByte(line, '\n'); i >= 0 {
-		line = strings.TrimSpace(line[:i])
-	}
+	line, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
+	line = strings.TrimSpace(line)
 	if line == "" {
 		return nil, fmt.Errorf("%w: port %d is not published on sandbox %s",
 			ErrNotReady, port, ref.Name)

@@ -243,15 +243,15 @@ func (rp *RelyingParty) VerifyRegistration(challenge string, r Registration) (Cr
 	if err := rp.checkClientData(r.ClientDataJSON, "webauthn.create", challenge); err != nil {
 		return Credential{}, err
 	}
-	auth, err := rp.parseAuthData(r.AuthenticatorData)
+	ad, err := rp.parseAuthData(r.AuthenticatorData)
 	if err != nil {
 		return Credential{}, err
 	}
-	if auth.flags&flagAttested == 0 {
+	if ad.flags&flagAttested == 0 {
 		return Credential{}, refuse("the authenticator data has no credential in it")
 	}
 	// After the 37-byte header: a 16-byte AAGUID, a 2-byte length, the id.
-	rest := auth.raw[37:]
+	rest := ad.raw[37:]
 	if len(rest) < 18 {
 		return Credential{}, refuse("the attested credential data is cut short")
 	}
@@ -269,7 +269,7 @@ func (rp *RelyingParty) VerifyRegistration(challenge string, r Registration) (Cr
 		return Credential{}, err
 	}
 	return Credential{
-		ID: rawID, PublicKey: spki, Algorithm: r.Algorithm, SignCount: auth.signCount,
+		ID: rawID, PublicKey: spki, Algorithm: r.Algorithm, SignCount: ad.signCount,
 	}, nil
 }
 
@@ -305,13 +305,13 @@ func (a Assertion) OwnedBy(userID string) bool {
 // VerifyAssertion checks a sign-in against the challenge it answers and the
 // stored passkey. It returns the new signature counter to store.
 //
-// The caller has looked the credential up by id. It also checks that the user
-// handle, if any, is that credential's owner.
+// The caller has looked the credential up by id and checks with OwnedBy that
+// the user handle, if any, is its owner.
 func (rp *RelyingParty) VerifyAssertion(challenge string, a Assertion, cred Credential) (uint32, error) {
 	if err := rp.checkClientData(a.ClientDataJSON, "webauthn.get", challenge); err != nil {
 		return 0, err
 	}
-	auth, err := rp.parseAuthData(a.AuthenticatorData)
+	ad, err := rp.parseAuthData(a.AuthenticatorData)
 	if err != nil {
 		return 0, err
 	}
@@ -325,17 +325,17 @@ func (rp *RelyingParty) VerifyAssertion(challenge string, a Assertion, cred Cred
 		return 0, err
 	}
 	hash := sha256.Sum256(clientData)
-	signed := append(append([]byte{}, auth.raw...), hash[:]...)
+	signed := append(append([]byte{}, ad.raw...), hash[:]...)
 	if !verify(key, cred.Algorithm, signed, sig) {
 		return 0, refuse("the signature does not match the passkey")
 	}
 	// A counter that does not move forward means a copy of the key signed in.
 	// Synced passkeys always send zero, which is fine.
-	if (auth.signCount != 0 || cred.SignCount != 0) && auth.signCount <= cred.SignCount {
+	if (ad.signCount != 0 || cred.SignCount != 0) && ad.signCount <= cred.SignCount {
 		return 0, refuse("the signature counter went backwards (%d after %d); the passkey "+
-			"may have been copied", auth.signCount, cred.SignCount)
+			"may have been copied", ad.signCount, cred.SignCount)
 	}
-	return auth.signCount, nil
+	return ad.signCount, nil
 }
 
 // checkClientData checks what the browser says the ceremony was: its kind, its

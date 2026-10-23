@@ -96,7 +96,7 @@ func TestGitHubNeedsNoDiscovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !o.IsGitHub() {
+	if o.github == nil {
 		t.Fatal("a github.com issuer did not make a GitHub provider")
 	}
 	if got := o.LogoutURL("https://keera.example.ch"); got != "" {

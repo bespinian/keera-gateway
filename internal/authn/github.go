@@ -65,10 +65,6 @@ func newGitHub(cfg OIDCConfig, client *http.Client, web, api string) *OIDC {
 	}
 }
 
-// IsGitHub reports whether this provider is GitHub's.
-func (o *OIDC) IsGitHub() bool { return o.github != nil }
-
-// exchangeGitHub turns an authorization code into an identity.
 func (o *OIDC) exchangeGitHub(ctx context.Context, code string, f Flow) (Identity, error) {
 	ctx = context.WithValue(ctx, oauth2.HTTPClient, o.github.client)
 	token, err := o.oauth.Exchange(ctx, code,
@@ -257,6 +253,7 @@ func (g *githubAPI) get(ctx context.Context, token, path string, out any) error 
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	endpoint, _, _ := strings.Cut(path, "?")
 	resp, err := g.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("asking GitHub: %w", err)
@@ -271,10 +268,10 @@ func (g *githubAPI) get(ctx context.Context, token, path string, out any) error 
 		return fmt.Errorf("%w: GitHub no longer accepts the token", ErrDirectoryRefused)
 	case resp.StatusCode != http.StatusOK:
 		// A 403 is usually the rate limit, which says nothing about the person.
-		return fmt.Errorf("GitHub answered %s with %s", strings.SplitN(path, "?", 2)[0], resp.Status)
+		return fmt.Errorf("GitHub answered %s with %s", endpoint, resp.Status)
 	}
 	if err := json.Unmarshal(body, out); err != nil {
-		return fmt.Errorf("reading GitHub's answer to %s: %w", strings.SplitN(path, "?", 2)[0], err)
+		return fmt.Errorf("reading GitHub's answer to %s: %w", endpoint, err)
 	}
 	return nil
 }

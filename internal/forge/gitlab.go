@@ -41,10 +41,11 @@ func NewGitLab(o GitLabOptions) (*GitLab, error) {
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(o.Token) == "" {
+	token := strings.TrimSpace(o.Token)
+	if token == "" {
 		return nil, errors.New("a GitLab token is required")
 	}
-	return &GitLab{web: web, token: strings.TrimSpace(o.Token)}, nil
+	return &GitLab{web: web, token: token}, nil
 }
 
 // Mint implements sandbox.GitMinter.

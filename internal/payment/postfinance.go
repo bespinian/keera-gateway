@@ -364,6 +364,5 @@ func Amount(micros int64) json.Number {
 
 // Percent writes basis points as a rate, such as "8.1".
 func Percent(bp int64) json.Number {
-	s := strconv.FormatFloat(float64(bp)/100, 'f', -1, 64)
-	return json.Number(s)
+	return json.Number(strconv.FormatFloat(float64(bp)/100, 'f', -1, 64))
 }
