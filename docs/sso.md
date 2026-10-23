@@ -570,6 +570,8 @@ has to be told it:
 KEERA_CHAT_URL=https://chat.example.ch
 ```
 
+It is an origin only: a path, query or fragment stops the start.
+
 The gateway then also hands sign-ins to `https://chat.example.ch/auth/callback`,
 that address exactly, with the same one-time code and proof key as for the
 command line. Unset, only loopback addresses are allowed, which is enough for a

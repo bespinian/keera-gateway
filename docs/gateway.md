@@ -369,7 +369,7 @@ ends with its sandbox. The command asks you to type the key's name first;
 `--yes` skips that in a script.
 
 ```sh
-KEY=$(keera key rotate "a developer's laptop")
+KEY=$(keera key rotate "a developer's laptop" --yes)
 ```
 
 A rotated key stops working everywhere it is used, so give each machine its own
@@ -388,7 +388,7 @@ an invitation joins it. On the command line:
 ```sh
 keera org list                 # yours, and the ones that invited you
 keera org switch "Example Bank"
-KEERA_ORG=org_123 keera usage  # one shell or pipeline
+KEERA_ORG="Example Bank" keera usage  # one shell or pipeline
 ```
 
 A browser remembers the organisation it was last in, and a new sign-in lands
@@ -593,7 +593,10 @@ was not whole.
 
 A client that hangs up before any answer still gets a row, with status 499 and
 marked as cancelled, in the field `canceled`. It carries what the router and the
-filters had spent by then, so hanging up never makes them free.
+filters had spent by then, so hanging up never makes them free. On the
+deployment's own provider key the gateway reads on instead, and the row keeps
+the provider's status, still marked as cancelled
+([billing.md](billing.md#what-is-billed)).
 
 An ingress in front has to stream too; see
 [Publishing it](install.md#publishing-it).

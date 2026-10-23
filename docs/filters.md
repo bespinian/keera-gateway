@@ -102,7 +102,8 @@ administrator's instruction. Each mode has its own.
 ## Refusing a request
 
 A refusal drops the request. The model never sees it, and the sender gets `403`
-with `filter_refused` and the filter's sentence.
+with `filter_refused` and the filter's sentence. A refused MCP call gets a
+failed tool result instead ([mcp.md](mcp.md#filters)).
 
 On the wire, a refusal is one line in place of the mode's normal answer:
 

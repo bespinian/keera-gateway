@@ -190,8 +190,8 @@ prices go stale; see [billing.md](billing.md#keep-in-mind).
 
 ### Cached input
 
-Anthropic and OpenAI charge less for a prompt they have already read, usually a
-tenth of the input price or less, and report how much of the prompt that was.
+Anthropic and OpenAI charge less for a prompt they have already read, from a
+fortieth to half of the input price, and report how much of the prompt that was.
 OpenAI counts it as part of the prompt. Anthropic counts it separately, and the
 gateway adds it back, so a row's input is always the whole prompt. The gateway
 charges the cached part at the cached rate, so a row's cost matches the

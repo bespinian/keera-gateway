@@ -141,7 +141,7 @@ session shows it whole.
 sees every session in the organisation. A member sees only the sessions of
 their own keys, and so do the live map and the request log.
 
-Click **Cost**, **Tokens**, **Requests** or **Duration** above the table to rank the
+Click **Cost (CHF)**, **Tokens**, **Requests** or **Duration** above the table to rank the
 whole window by it, highest first, and **Started** to go back to the newest
 first. The ranking is the point of the screen: the row worth
 reading is rarely the latest one.

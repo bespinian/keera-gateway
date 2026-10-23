@@ -37,7 +37,10 @@ The gateway reads every setting in `compose/.env`, sandbox ones included.
 
 The two files only seed new organisations
 ([Template files](gateway.md#template-files)). The addresses `make dev` prints
-assume the default `KEERA_ADDR` of `:8080`.
+assume the default `KEERA_ADDR` of `:8080`. That listens on every interface,
+so others on your network can reach the panel. Set
+`KEERA_ADDR=127.0.0.1:8080` in `.env` to keep it on this machine, unless you
+use podman sandboxes, which need to reach it.
 
 Install air once if you do not have it:
 
@@ -73,7 +76,7 @@ at <http://127.0.0.1:8080>. Sign in with the operator key.
 
 ```sh
 # ^C stops the gateway, containers keep running
-make dev-down    # stop the containers, keep the volumes
+make dev-down    # remove the containers, keep the volumes
 ```
 
 The volumes are kept, so the model weights and the database survive.

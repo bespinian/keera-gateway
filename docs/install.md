@@ -138,11 +138,12 @@ public name that resolves into the network. `none` blocks the whole private
 network, and `all` allows it, which is the default. With
 [sign-up](sso.md#letting-people-sign-up) on, the gateway does not start until it
 is set, because anyone who signs up runs an organisation. If you set
-`HTTPS_PROXY` to a private address, name the proxy host too.
+`HTTPS_PROXY` or `HTTP_PROXY` to a private address, name the proxy host too.
 
 The check applies to the address a name resolves to, so a DNS name that points
-at a blocked address is blocked too. Behind `HTTPS_PROXY`, the gateway only
-connects to the proxy, and the proxy has to do this filtering. The gateway does
+at a blocked address is blocked too. The gateway reads `HTTPS_PROXY`,
+`HTTP_PROXY` for plain-http backends, and `NO_PROXY`. Behind a proxy, the
+gateway only connects to the proxy, and the proxy has to do this filtering. The gateway does
 not follow redirects from a backend or an MCP server.
 
 ### Provider keys of the deployment's own
@@ -239,6 +240,7 @@ The command reads these settings:
 | `KEERA_OPERATOR_KEY` | unset                               | The operator key to act with. Wins over a stored sign-in, since someone exported it on purpose. `keera login` warns when it finds one. |
 | `KEERA_CONFIG_DIR`   | `keera` in the user's config folder | Where `credentials.json` is kept, for a shared account or a pipeline.                                                                  |
 | `KEERA_ORG`          | the one `keera org switch` chose    | The organisation commands act on. Wins over `keera org switch`. See [Several organisations](gateway.md#several-organisations).         |
+| `CLAUDE_CONFIG_DIR`  | `~/.claude`                         | Where `keera connect claude-code` writes Claude Code's settings, as Claude Code itself reads it.                                       |
 
 A command picks the gateway in this order: `--url`, then `KEERA_CONTROL_URL`,
 then the gateway last signed in to, then `https://gateway.keera.ch`. You can be

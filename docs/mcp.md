@@ -161,9 +161,10 @@ key, and the error if any. The outcomes are:
 | `input_required` | the server asked for the user's input first; the retry is a row of its own      |
 
 A session's screen in the panel lists its tool calls under its model calls:
-those between the session's first and last request. If the client names the
-session with one of the [session headers](sessions.md#a-client-stated-id), send
-the same header to the MCP server and the tool calls are matched by name. Other
+the first 1,000 between the session's first and last request. If the client
+names the session with one of the
+[session headers](sessions.md#a-client-stated-id), send the same header to the
+MCP server and the tool calls are matched by name. Other
 sessions are matched by key, so a key running two tasks at once shows both
 tasks' calls in each.
 

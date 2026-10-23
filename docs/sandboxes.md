@@ -568,11 +568,11 @@ driver for development, or on a host the deployment already trusts.
 | `KEERA_SANDBOX_RUNTIME_VM`         | -                        | the Kata RuntimeClass, or `krun` on podman. Unset makes that tier unavailable                        |
 | `KEERA_SANDBOX_PUBLIC_URL`         | `KEERA_PUBLIC_URL`       | the gateway **as a sandbox reaches it** - the in-cluster Service, not the ingress                    |
 | `KEERA_SANDBOX_IDLE_SUSPEND`       | off                      | how long an engineer's sandbox runs with no connection open before it is suspended. Refused below 5m |
-| `KEERA_SANDBOX_STORAGE_CLASS`      | the cluster's            | what a home volume is provisioned from                                                               |
-| `KEERA_SANDBOX_SERVICE_ACCOUNT`    | the namespace's          | what a sandbox pod runs as; its token is never mounted                                               |
-| `KEERA_SANDBOX_IMAGE_PULL_SECRETS` | -                        | comma-separated, for a sandbox image in a private registry                                           |
+| `KEERA_SANDBOX_STORAGE_CLASS`      | the cluster's            | on Kubernetes, what a home volume is provisioned from                                                |
+| `KEERA_SANDBOX_SERVICE_ACCOUNT`    | the namespace's          | on Kubernetes, what a sandbox pod runs as; its token is never mounted                                |
+| `KEERA_SANDBOX_IMAGE_PULL_SECRETS` | -                        | on Kubernetes, comma-separated, for a sandbox image in a private registry                            |
 | `KEERA_SANDBOX_IMAGES`             | -                        | comma-separated image prefixes an administrator may give a class, such as `registry.internal/keera/` |
-| `KEERA_SANDBOX_WARM`               | off                      | warm pools, which need the upstream extension                                                        |
+| `KEERA_SANDBOX_WARM`               | off                      | on Kubernetes, warm pools, which need the upstream extension                                         |
 | `KEERA_SANDBOX_PODMAN_BINARY`      | `podman`                 | the single-host driver's command                                                                     |
 | `KEERA_SANDBOX_PODMAN_NETWORK`     | podman's default         | the network a single-host sandbox joins                                                              |
 | `KEERA_SANDBOX_GIT_FORGE`          | -                        | `github`, `gitlab`, or unset for sandboxes without a repository                                      |

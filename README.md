@@ -22,7 +22,9 @@ GPUs or on Swiss ones.
   [release](https://github.com/bespinian/keera-gateway/releases) has it for
   Linux, macOS and Windows.
 - **A single-host deployment** - compose files that run the gateway, its
-  database, Keera Engine and Keera Decider on one machine. This is also the development loop.
+  database, Keera Engine and Keera Decider on one machine. There, Keera Engine
+  runs on llama.cpp on the CPU, or on vLLM on a GPU. This is also the
+  development loop.
 
 Every tool that calls a model uses the same address. The gateway checks each
 request, logs it and passes it on.
@@ -41,8 +43,8 @@ request, logs it and passes it on.
                                   └──────────────┬──────────────┘
                                                  │
                                                  ▼
-                                 Every request into the audit log,
-                                      Postgres and your SIEM
+                                Every request into the request log
+                                          in Postgres
 ```
 
 Everything runs on one port, `:8080`, split by path: inference under `/api`,
