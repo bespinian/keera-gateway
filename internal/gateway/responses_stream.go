@@ -56,7 +56,6 @@ type responsesStream struct {
 	chatChunks
 }
 
-// chunk folds one upstream chunk into the stream.
 func (s *responsesStream) chunk(payload []byte) error {
 	return s.fold(payload, s.textDelta, s.toolDelta)
 }
@@ -219,14 +218,12 @@ func (s *responsesStream) inputDelta(index int, text string) error {
 	})
 }
 
-// inputStream reads a custom tool's text out of its arguments as they arrive.
-// The text is the one string in {"input": "..."}, and a long patch would
-// otherwise send nothing until it is whole, for long enough that a client
-// gives up on a stream that has gone quiet. Arguments shaped any other way are
-// left to customInput once they are whole.
+// inputStream reads a custom tool's text out of {"input": "..."} as the
+// arguments arrive. Otherwise a long patch sends nothing until it is whole, and
+// a client may give up on the quiet stream. Arguments of any other shape are
+// left to customInput once whole.
 type inputStream struct {
-	// raw is what arrived and is not read yet.
-	raw []byte
+	raw []byte // arrived, not read yet
 	// inside is set once the opening quote is read, and done once the string
 	// ended or the arguments turned out not to have the expected shape.
 	inside, done bool
@@ -344,7 +341,6 @@ func (s *responsesStream) finish(cut error) error {
 	return s.emit(name, map[string]any{"response": s.response(status, incomplete)})
 }
 
-// emit renders one event, numbering it, and hands it to the writer.
 func (s *responsesStream) emit(name string, payload map[string]any) error {
 	payload["type"] = name
 	payload["sequence_number"] = s.seq

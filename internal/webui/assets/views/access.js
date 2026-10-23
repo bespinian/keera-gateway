@@ -1,11 +1,7 @@
-// My access - the developer's own screen. It answers what would otherwise be
-// a question to an administrator: do my keys work, how much budget is left,
-// why was I refused, and what may I call.
-//
-// It shows only the reader's own keys, even for an administrator.
-//
-// Revoking is the one write here, so whoever pasted a key somewhere it should
-// not be can kill it at once.
+// My access: the developer's own keys, budgets, refusals and models, so they
+// need not ask an administrator. It shows only the reader's own keys, even for
+// an administrator. Revoking is the one write, so a leaked key can be stopped
+// at once.
 
 import { api } from "../api.js";
 import {
@@ -34,8 +30,7 @@ import {
 } from "./keys.js";
 import { noKey } from "./connect.js";
 
-// Each level as the developer would name it. The ids are for quoting to an
-// administrator.
+// Each level as the developer would name it.
 const SCOPE_NAMES = {
   org: "Your organisation",
   project: "Your project",
@@ -81,10 +76,8 @@ export async function accessView(ctx) {
   // and a missing key read the same on all three.
   if (!keys.length) wrap.append(noKey(ctx, a));
 
-  // Revoked keys are hidden by default, as on the API keys screen: people come
-  // here to see which keys work. The box only shows when there is a revoked
-  // key, and it resets on the next visit, since it was ticked to check one
-  // thing.
+  // Revoked keys are hidden by default: people come here to see which keys
+  // work. The box resets on each visit, since it was ticked to check one thing.
   const cards = h("div", {});
   let showRevoked = false;
   function drawCards() {
@@ -272,7 +265,6 @@ function keyCard(k, ctx) {
       statePill(k.state),
       // A pending key is always the reader's to activate.
       k.state === "pending" ? activateButton(ctx, k, "btn btn-sm") : null,
-      // Only a key that still works can be revoked.
       (k.state === "active" || k.state === "pending") && canRevoke(ctx, k)
         ? h(
             "button",
@@ -289,9 +281,8 @@ function keyCard(k, ctx) {
   );
 }
 
-// promptsSection quotes the text put ahead of this key's messages, in the
-// order it is sent. A developer cannot see it in their own traffic, and "your
-// project sets a system prompt" would answer nothing.
+// The prompts are quoted in full, in the order sent, because a developer
+// cannot see them in their own traffic.
 function promptsSection(prompts) {
   return h(
     "div",
@@ -322,10 +313,8 @@ function promptsSection(prompts) {
   );
 }
 
-// filtersSection names the filters that read this key's requests. A filter
-// can change or stop what the developer wrote, which their own traffic never
-// shows. Only the aliases are here; the details are on the Filters screen,
-// which every member can read.
+// Filters can change or stop a request unseen, so they are named here. The
+// details are on the Filters screen, which every member can read.
 function filtersSection(scopes) {
   return h(
     "div",

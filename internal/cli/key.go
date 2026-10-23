@@ -425,10 +425,8 @@ type rotatedKey struct {
 }
 
 // rotateKey replaces a key with one carrying the same project, owner and
-// guardrails, then revokes the old one. The control plane does it in one
-// transaction, so it never leaves both keys live or drops the key's limits.
-// An empty name or expiry keeps the old key's. expiry holds what expiryField
-// gave.
+// guardrails, and revokes the old one, in one control-plane transaction. An
+// empty name or expiry keeps the old key's. expiry holds what expiryField gave.
 func rotateKey(ctx context.Context, c *client, keyID, name string, expiry map[string]any) (rotatedKey, error) {
 	req := map[string]any{"name": name}
 	maps.Copy(req, expiry)

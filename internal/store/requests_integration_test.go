@@ -286,9 +286,8 @@ func TestOverviewNarrowsToOneEntity(t *testing.T) {
 	}
 }
 
-// The breakdown of one request's latency survives the round trip, and a
-// request that has none is told apart from one whose steps all took no time.
-// The panel draws nothing for the first, rather than a chart of nothing.
+// A request with no steps is told apart from one whose steps all took no time:
+// the panel draws nothing for the first.
 func TestRequestsCarryWhereTheirTimeWent(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -424,8 +423,7 @@ func TestRequestsAfterACursorIsWhatALiveReaderSees(t *testing.T) {
 	f := newFixture(t, st, ctx)
 	now := time.Now().UTC().Truncate(time.Second)
 
-	// Empty: a reader with nothing on screen has to be startable, and starting
-	// them at zero is what makes the difference between watching and replaying.
+	// Empty: a reader with nothing on screen starts at zero.
 	first, err := st.LatestEventID(ctx)
 	if err != nil {
 		t.Fatalf("LatestEventID: %v", err)
@@ -485,8 +483,8 @@ func TestRequestsAfterACursorIsWhatALiveReaderSees(t *testing.T) {
 	if len(served) != 0 {
 		t.Errorf("a reader watching served requests was sent %+v", served)
 	}
-	// And both ends of the cursor still meet in the middle, so that paging
-	// backwards and watching forwards cannot disagree about the same row.
+	// Both ends of the cursor meet, so paging backwards and watching forwards
+	// cannot disagree about a row.
 	older, err := st.Requests(ctx, RequestQuery{
 		OrgID: f.orgID, After: 0, Before: fresh[0].ID,
 	})
@@ -626,9 +624,8 @@ func TestOutcomesCountTheWindowNotThePage(t *testing.T) {
 	}
 }
 
-// A class of statuses is one filter. "Did anything fail?" is asked about all of
-// 5XX at once, by someone who does not know which of 500, 502 and 504 their
-// backends answer with.
+// "Did anything fail?" is asked about all of 5XX at once, by someone who does
+// not know which status their backends answer with.
 func TestRequestsNarrowToAClassOfStatuses(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)

@@ -16,15 +16,12 @@ import (
 	"github.com/bespinian/keera-gateway/internal/id"
 )
 
-// The one listener is split by path: the panel at the root, and each API under
-// its prefix. They live here so the routes, the panel and the `keera` CLI agree
-// on them in one place.
+// The one listener is split by path: the panel at the root, each API under its
+// prefix. They live here so the routes, the panel and the CLI agree on them.
 //
-// InferencePrefix comes before the version because clients append /v1/...
-// themselves: an OpenAI SDK at <origin>/api/v1 and an Anthropic one at
-// <origin>/api both work unedited.
-//
-// SandboxPrefix carries a byte stream to a port inside a sandbox over an HTTP
+// InferencePrefix has no version because clients append /v1/... themselves:
+// an OpenAI SDK at <origin>/api/v1 and an Anthropic one at <origin>/api both
+// work unedited. SandboxPrefix tunnels to a port in a sandbox over an HTTP
 // upgrade, so attaching needs no second port or certificate.
 const (
 	InferencePrefix = "/api"
@@ -32,12 +29,9 @@ const (
 	SandboxPrefix   = "/sandbox"
 )
 
-// SessionHeader is the header a client can name its own session in. It is
-// here, not in the gateway, because the sandboxes set it for the agents they
-// run. The value is hashed, so it is never stored as sent.
-//
-// A derived session is a guess; the header groups a client exactly, even when
-// it rewrites its history or restarts a task with the same words.
+// SessionHeader lets a client name its own session, which groups its requests
+// exactly where a derived session is only a guess. It lives here because the
+// sandboxes set it for their agents. The value is stored hashed.
 const SessionHeader = "X-Keera-Session"
 
 type ctxKey int
@@ -47,8 +41,8 @@ const (
 	clientRequestIDKey
 )
 
-// RequestID returns the id assigned to r, for logs and for correlating a client
-// report with a usage row.
+// RequestID returns the request's id, for logs and for matching a client
+// report to a usage row.
 func RequestID(ctx context.Context) string {
 	v, _ := ctx.Value(requestIDKey).(string)
 	return v
@@ -174,12 +168,9 @@ func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter 
 // a W3C trace id, short enough to repeat safely.
 const maxRequestIDLen = 64
 
-// requestID accepts a client's own request id, or returns "".
-//
-// The id is echoed on the response and logged, so a client's report and the
-// log name the same request. As the caller chose it, it must look like an id,
-// with nothing a log or header has to escape. Anything else is replaced, not
-// repaired.
+// requestID accepts a client's own request id, or returns "". The id is
+// echoed and logged, so it must look like an id, with nothing a log or header
+// has to escape. Anything else is replaced, not repaired.
 func requestID(presented string) string {
 	if presented == "" || len(presented) > maxRequestIDLen {
 		return ""
@@ -200,10 +191,10 @@ const maxClientRequestIDLen = 512
 
 // clientRequestID accepts a client's X-Client-Request-Id, or returns "".
 //
-// OpenAI takes any ASCII up to 512 characters and refuses the request
-// otherwise. Here an invalid one is dropped instead, as most models behind the
-// gateway never read it. Control characters are dropped too, since the id is
-// written to the log and sent on as a header.
+// OpenAI takes any ASCII up to 512 characters and refuses anything else. Here
+// an invalid one is dropped instead, as most models behind the gateway never
+// read it. Control characters are dropped too, since the id is logged and
+// sent on as a header.
 func clientRequestID(presented string) string {
 	if len(presented) > maxClientRequestIDLen {
 		return ""

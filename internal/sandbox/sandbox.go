@@ -36,17 +36,14 @@ var (
 	// ErrNotFound means the sandbox no longer exists where the driver looks.
 	// Terminate treats it as success.
 	ErrNotFound = errors.New("sandbox: not found")
-	// ErrNotReady means the operation needs a running sandbox, and the driver
-	// found it not running although its row said it was. The manager refuses
-	// a suspended one itself, before the driver is asked.
+	// ErrNotReady means the driver found a sandbox not running although its
+	// row said it was. The manager refuses a suspended one before asking.
 	ErrNotReady = errors.New("sandbox: not ready")
 )
 
-// Ref names one sandbox to a driver.
-//
-// It carries the gateway's id, not the driver's. Each driver derives its own
-// names from it deterministically, so a restarted gateway finds the sandboxes
-// it left running.
+// Ref names one sandbox to a driver. It carries the gateway's id, and each
+// driver derives its own names from it, so a restarted gateway finds the
+// sandboxes it left running.
 type Ref struct {
 	// ID is the sandbox id, "sbx_...".
 	ID string
@@ -61,9 +58,7 @@ type Ref struct {
 // Claimed reports whether this sandbox came out of a warm pool.
 func (r Ref) Claimed() bool { return r.Backing == BackingClaim }
 
-// Spec is everything a driver needs to make one sandbox.
-//
-// It is fully resolved: class, policy, lifetime and credentials are decided
+// Spec is everything a driver needs to make one sandbox. It is fully resolved
 // before it gets here, so the drivers make no decisions and behave alike.
 type Spec struct {
 	Ref
@@ -72,21 +67,16 @@ type Spec struct {
 	Class policy.SandboxClass
 	// Purpose decides the lifecycle. See policy.Purpose.
 	Purpose policy.Purpose
-	// Owner, Org and Project are stamped onto the Kubernetes object or the
-	// podman container, so whoever runs the platform can see whose sandbox it
-	// is without asking the gateway.
-	//
-	// Owner is an email address where known. It is the only personal data this
-	// package puts there.
+	// Owner, Org and Project are stamped onto the Kubernetes object or podman
+	// container, so operators see whose sandbox it is without the gateway.
+	// Owner is an email address where known, the only personal data put there.
 	Owner   string
 	Org     string
 	Project string
-	// Env is the sandbox's environment: the gateway's address, its API key,
-	// the session id for an agent, and what the repository setup needs.
-	//
-	// The key sits in the pod spec rather than a Secret: it has the sandbox's
-	// lifetime anyway. So anybody who can read pods in the sandbox namespace
-	// can read it, which is why that namespace is kept to itself.
+	// Env is the sandbox's environment, API key included. The key sits in the
+	// pod spec rather than a Secret, as it lives no longer than the sandbox.
+	// Anybody who can read pods in the sandbox namespace can read it, which is
+	// why that namespace is kept to itself.
 	Env map[string]string
 	// Expires is when the driver should tear the sandbox down by itself. The
 	// Kubernetes controller enforces it too, so nothing is left behind if the
@@ -111,15 +101,12 @@ type Status struct {
 	Exited bool
 }
 
-// Driver is what one deployment shape can do with sandboxes.
-//
-// Every method is addressed by Ref and idempotent where it can be: creating a
-// sandbox that exists returns its status, terminating one that does not is
-// success. The control plane does not retry, so this is what keeps rows and
-// reality in step after a dropped connection.
+// Driver is what one deployment shape can do with sandboxes. Every method is
+// idempotent where it can be: creating a sandbox that exists returns its
+// status, terminating one that does not is success. The control plane does
+// not retry, so this keeps rows and reality in step after a dropped connection.
 type Driver interface {
-	// Name is the driver's name for logs and the panel: "kubernetes" or
-	// "podman".
+	// Name is "kubernetes" or "podman", for logs and the panel.
 	Name() string
 	// Capabilities says what this driver implements, so the control plane can
 	// refuse clearly instead of failing inside the driver.
@@ -160,12 +147,9 @@ type Capabilities struct {
 // The ports a sandbox serves. Only PortSSH is opened by the drivers; the range
 // bounds what the attach surface lets a caller reach.
 const (
-	// PortSSH is the shell, and the transport for remote editors (VS Code
-	// Remote-SSH, JetBrains Gateway).
-	//
-	// It is 2222, not 22: a sandbox runs as an ordinary user with every
-	// capability dropped and cannot bind a privileged port. Nobody types the
-	// number; the gateway dials it.
+	// PortSSH is the shell, and the transport for remote editors. It is 2222,
+	// not 22: a sandbox runs as an ordinary user with every capability dropped
+	// and cannot bind a privileged port. Nobody types it; the gateway dials it.
 	PortSSH = 2222
 	// PortForwardMin and PortForwardMax bound what a developer may forward:
 	// unprivileged ports only.

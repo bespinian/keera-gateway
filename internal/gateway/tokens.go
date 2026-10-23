@@ -21,9 +21,7 @@ const bytesPerTokenAtMost = 5
 // estimateTokens estimates a request's size from its text. It
 // over-estimates, which sends a borderline request to the larger model.
 //
-// It counts only text, so images are not counted. That understates the
-// context they use, which is why the MaxContext tier is a guard, not a
-// guarantee.
+// Images are not counted, so the MaxContext tier is a guard, not a guarantee.
 func estimateTokens(texts []string) int {
 	n := 0
 	for _, t := range texts {

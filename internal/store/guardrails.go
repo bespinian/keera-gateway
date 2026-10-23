@@ -181,7 +181,7 @@ func (s *Store) UpsertFilter(ctx context.Context, f policy.Filter) (policy.Filte
 		f.Mode = policy.FilterModeRewrite
 	}
 	// Marshalled here because the driver would send a nil slice as JSON null,
-	// which the column's check constraint refuses.
+	// which the column's check refuses.
 	own := f.Rules
 	if own == nil {
 		own = []policy.FilterRule{}

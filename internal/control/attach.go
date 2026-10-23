@@ -26,9 +26,8 @@ import (
 //
 // It is a path on the one listener rather than a second port, so a
 // deployment keeps one address and one certificate. The caller sends a GET
-// with an Upgrade header; the gateway authenticates it like any control
-// request, dials the sandbox, answers 101 and copies bytes until one side
-// stops.
+// with an Upgrade header; the gateway authenticates it, dials the sandbox,
+// answers 101 and copies bytes until one side stops.
 //
 // The far end is a plain ssh server, so VS Code Remote-SSH and JetBrains
 // Gateway work unchanged, with `keera sandbox proxy` as the ProxyCommand.
@@ -37,9 +36,9 @@ import (
 // developer's `keera` binary may be older than the gateway.
 const upgradeProtocol = "keera-sandbox/1"
 
-// attachIdleTimeout closes a connection with no bytes either way for this
-// long. It is generous, because the traffic is a person typing. It is there
-// for connections nobody closes, like a laptop put in a bag.
+// attachIdleTimeout closes a connection idle this long. It is generous,
+// because the traffic is a person typing; it is for connections nobody
+// closes, like a laptop put in a bag.
 const attachIdleTimeout = 2 * time.Hour
 
 func (s *Server) attachRoutes(mux *http.ServeMux) {
@@ -131,9 +130,8 @@ func (s *Server) attach(w http.ResponseWriter, r *http.Request, p *authn.Princip
 
 // resolveSandbox finds the sandbox a request names, by id or by name.
 //
-// Names are accepted so `keera sandbox ssh` needs no extra round trip before
-// ssh gets its bytes. A name is unique only for one person in one
-// organisation.
+// Names are accepted so `keera sandbox ssh` needs no extra round trip. A name
+// is unique only for one person in one organisation.
 func (s *Server) resolveSandbox(w http.ResponseWriter, r *http.Request, p *authn.Principal) (
 	store.Sandbox, bool,
 ) {
@@ -164,16 +162,14 @@ func (s *Server) resolveSandbox(w http.ResponseWriter, r *http.Request, p *authn
 		s.fail(w, err)
 		return store.Sandbox{}, false
 	}
-	// The same answer as a missing sandbox, so this route does not reveal
-	// other tenants' sandbox names.
+	// The same answer as a missing sandbox, so other tenants' sandbox names
+	// stay hidden.
 	if !s.requireOwnerRead(w, p, sb.OrgID) {
 		return store.Sandbox{}, false
 	}
 	return sb, true
 }
 
-// errSandboxAmbiguous is pickSandbox finding more than one sandbox the caller
-// may handle.
 var errSandboxAmbiguous = errors.New("more than one sandbox of that name")
 
 // pickSandbox chooses among the live sandboxes of one name, one per person.
@@ -199,12 +195,11 @@ func pickSandbox(p *authn.Principal, named []store.Sandbox) (store.Sandbox, erro
 }
 
 // canAttach reports whether this principal may open a connection into a
-// sandbox: an operator, or the person it belongs to.
+// sandbox: an operator, or its owner.
 //
-// An organisation's administrator may not. A sandbox holds someone's working
-// copy and terminal, and seeing the bill does not mean reading the desk. A
-// sandbox that belongs to nobody, such as one made for a pipeline, is the
-// operator's alone, so it never becomes a shared shell.
+// An organisation's administrator may not: a sandbox holds someone's working
+// copy and terminal. A sandbox without an owner, such as one for a pipeline,
+// is the operator's alone, so it never becomes a shared shell.
 func canAttach(p *authn.Principal, sb store.Sandbox) bool {
 	if p.Unrestricted() {
 		return true
@@ -253,12 +248,11 @@ func hijack(w http.ResponseWriter) (*hijacked, error) {
 }
 
 // pipe copies bytes both ways until either end stops, or until neither has
-// sent anything for idle. tick, if set, is called once a minute while the
-// connection is open.
+// sent anything for idle. tick, if set, is called once a minute.
 //
 // Either copy ending closes both sides: a client that leaves should not keep
-// the sandbox side open, and a sandbox whose sshd exits should end the
-// client's session.
+// the sandbox side open, and an sshd that exits should end the client's
+// session.
 func pipe(client io.ReadWriteCloser, remote net.Conn, idle time.Duration, tick func()) {
 	var (
 		once sync.Once
@@ -320,22 +314,20 @@ func (n *noticing) Write(b []byte) (int, error) {
 // failSandbox maps the sandbox manager's refusal onto a status code.
 //
 // A request that is wrong in itself is 400. Any other refusal is 409: the
-// request was fine, but the state it met, which can change, was not. The
-// manager's message is passed on, as it is written for the developer.
+// request was fine, but the state it met was not. The manager's message is
+// written for the developer, so it is passed on.
 func (s *Server) failSandbox(w http.ResponseWriter, err error) {
 	refused, isRefused := errors.AsType[*sandbox.ErrRefused](err)
 	switch {
 	case isRefused && refused.Invalid:
 		badRequest(w, refused.Reason)
 	case isRefused:
-		conflict(w, "sandbox_state",
-			refused.Reason)
+		conflict(w, "sandbox_state", refused.Reason)
 	case errors.Is(err, sandbox.ErrNotFound):
 		httpx.WriteError(w, http.StatusNotFound, "invalid_request_error", "not_found",
 			"that sandbox is no longer there")
 	case errors.Is(err, sandbox.ErrNotReady):
-		conflict(w, "sandbox_not_ready",
-			err.Error())
+		conflict(w, "sandbox_not_ready", err.Error())
 	default:
 		s.fail(w, err)
 	}

@@ -81,9 +81,7 @@ func (anthropicDialect) text(b *body) (textDoc, error) {
 
 // addTextBlock collects the text of a text block, of a search result, and of
 // a document: its title, its context and a source that is text. The model
-// reads all of it. The translation drops documents and search results, so
-// only a request forwarded as it is carries one. The Messages and chat
-// extractions share it.
+// reads all of it, and the translation keeps it too (see blockText).
 func addTextBlock(d *treeDoc, block map[string]any) {
 	switch block["type"] {
 	case "text":
@@ -322,8 +320,6 @@ func (s *anthropicStream) counts() (*tokenUsage, int, bool) {
 		return nil, s.deltas, false
 	}
 }
-
-// ------------------------------------------------------------ count_tokens
 
 // countTokens answers `POST /v1/messages/count_tokens`, which clients use to
 // see how full the context is.

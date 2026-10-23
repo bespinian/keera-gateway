@@ -45,11 +45,11 @@ func scanSandboxClass(r row) (policy.SandboxClass, error) {
 }
 
 // WarmSandboxClasses reads the classes that should have a warm pool, across
-// every organisation. One that signed itself up has none until its first
+// every organisation. A self-signed-up organisation has none until its first
 // payment, because a pool holds the deployment's machines whether used or not.
 // Only engineers claim from a pool, so a class only agents use has none.
-// Unlike models they are not cached, because only the control API and the
-// sandbox manager read them, and both already talk to Postgres.
+// Unlike models they are not cached: only the control API and the sandbox
+// manager read them, and both already talk to Postgres.
 func (s *Store) WarmSandboxClasses(ctx context.Context) ([]policy.SandboxClass, error) {
 	return queryAll(ctx, s.pool, scanSandboxClass, sandboxClassColumns+` FROM sandbox_classes
 		WHERE warm > 0 AND org_id IN (SELECT id FROM orgs WHERE NOT limited)
@@ -216,11 +216,9 @@ func (s *Store) sandboxesWhere(ctx context.Context, rest string, args ...any) ([
 	return queryAll(ctx, s.pool, scanSandbox, sandboxColumns+" FROM sandboxes "+rest, args...)
 }
 
-// CreateSandbox inserts one row.
-//
-// The one collision a caller can act on, a live sandbox with the same name, is
-// ErrSandboxNameTaken. Any other unique violation would be a random id
-// colliding, which is not worth a message.
+// CreateSandbox inserts a sandbox. The one collision a caller can act on, a
+// live sandbox with the same name, is ErrSandboxNameTaken. Any other unique
+// violation would be a random id colliding, which is not worth a message.
 func (s *Store) CreateSandbox(ctx context.Context, sb Sandbox) (Sandbox, error) {
 	err := s.pool.QueryRow(ctx, `INSERT INTO sandboxes
 		(id, org_id, project_id, user_id, owner, name, class, purpose, state, detail,
@@ -244,8 +242,7 @@ func (s *Store) CreateSandbox(ctx context.Context, sb Sandbox) (Sandbox, error) 
 }
 
 // ErrSandboxNameTaken means a live sandbox of the same person already has the
-// name. The control plane turns it into a 409; the name is free again once
-// that sandbox is gone.
+// name. The name is free again once that sandbox is gone.
 var ErrSandboxNameTaken = errors.New("store: this person already has a live sandbox of that name")
 
 func (s *Store) Sandbox(ctx context.Context, id string) (Sandbox, error) {
@@ -295,8 +292,7 @@ type SandboxQuery struct {
 	Limit int
 }
 
-// ListSandboxes reads sandboxes: one organisation's, or every one's when
-// q.OrgID is empty.
+// ListSandboxes reads the sandboxes q selects.
 func (s *Store) ListSandboxes(ctx context.Context, q SandboxQuery) ([]Sandbox, error) {
 	limit := pageLimit(q.Limit, 200, 500)
 	return s.sandboxesWhere(ctx, `

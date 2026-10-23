@@ -19,7 +19,6 @@ const prefixLen = len(Prefix) + 6
 
 const scheme = "bearer"
 
-// errMalformed is returned for anything that cannot be a Keera Gateway key.
 var errMalformed = errors.New("auth: malformed key")
 
 // Generate returns a new key with the values stored for it: its SHA-256 and its

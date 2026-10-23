@@ -54,10 +54,9 @@ type dialect interface {
 	// stripHostedTools takes out the tools the provider runs on its own
 	// servers, and returns what it took out. See hosted.go.
 	stripHostedTools(b *body) []string
-	// opening is the first user message as the translation has it, for the
-	// session key. Only the turns up to it are translated. The translation
-	// drops what changes from turn to turn, such as cache markers, so a task
-	// keeps one key.
+	// opening is the first user message as translated, for the session key.
+	// The translation drops what changes per turn, such as cache markers, so
+	// a task keeps one key.
 	opening(b *body) (json.RawMessage, bool)
 }
 
@@ -158,11 +157,9 @@ func pipeNative(dst io.Writer, flush func(), src io.Reader, ns nativeStream,
 
 var errEventTooLarge = errors.New("the upstream sent one event larger than the gateway holds")
 
-// renameIn writes the alias as the model name of one object in a document:
-// the document itself when key is empty, or the object under key.
-//
-// The model name is the backend's, and the client was promised the alias.
-// A document that cannot be read is returned as it came.
+// renameIn writes the alias as the model name of the document, or of the
+// object under key, since the client was promised the alias, not the
+// backend's name. A document it cannot read is returned as it came.
 func renameIn(raw []byte, key, alias string) []byte {
 	var doc map[string]json.RawMessage
 	if json.Unmarshal(raw, &doc) != nil {
@@ -201,10 +198,9 @@ var modelKey = []byte(`"model":`)
 // renameModel writes the alias as the value of the first model field in an
 // OpenAI answer or chunk, and leaves every other byte as it came.
 //
-// It works on the bytes, because a stream has one chunk per token and each
-// would otherwise be decoded and encoded again. That is safe: inside a JSON
-// string a quote is escaped, so the first unescaped `"model":` is a key, and
-// in these documents the only one is the answer's own.
+// It works on the bytes, as a stream has one chunk per token. That is safe:
+// quotes inside a JSON string are escaped, so the first `"model":` is a key,
+// and in these documents the only one is the answer's own.
 func renameModel(raw []byte, alias string) []byte {
 	start, end, ok := modelValue(raw)
 	if !ok {
@@ -250,8 +246,6 @@ func modelValue(raw []byte) (start, end int, ok bool) {
 	}
 	return start, end + 1, true
 }
-
-// ------------------------------------------------------------------ text
 
 // treeDoc is the text of a request whose strings sit at more than one depth,
 // as they do in the Messages and Responses APIs. It decodes only the fields
@@ -322,13 +316,12 @@ func (d *treeDoc) apply(b *body, replaced []string) error {
 // patchStrings writes into raw the strings that differ in v, the value raw
 // decodes to after a filter's rewrite, and leaves every other byte as it came.
 //
-// Encoding v again would sort every object's keys, the model's own tool
-// inputs in earlier turns included. Those turns would then reach the provider
-// changed: its prompt cache would miss from the first of them, and Anthropic
-// may refuse or drop a thinking block next to an edited turn.
+// Encoding v again would sort every object's keys, earlier tool inputs
+// included. The provider's prompt cache would then miss, and Anthropic may
+// refuse or drop a thinking block next to an edited turn.
 //
-// A raw it cannot map, such as one with a key twice, is encoded again whole,
-// which also keeps one copy of the key: the one the filters read.
+// A raw it cannot map, such as one with a duplicate key, is encoded whole,
+// which keeps the one copy of the key the filters read.
 func patchStrings(raw []byte, v any) ([]byte, error) {
 	var edits []stringEdit
 	root, err := spansOf(jsontext.NewDecoder(bytes.NewReader(raw)))

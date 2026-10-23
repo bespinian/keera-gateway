@@ -52,16 +52,14 @@ type Writer interface {
 	WriteEvents(ctx context.Context, events []store.Event) error
 }
 
-// Recorder is the write side of the usage log.
+// Recorder is the write side of the usage log. Events are buffered and written
+// in batches, so a completion does not wait for the database. If the database
+// is away longer than the buffer holds, events are dropped, logged and counted
+// in Dropped rather than blocking inference.
 //
-// Events are buffered and written in batches, so a completion does not wait
-// for the database. If the database is away longer than the buffer holds,
-// events are dropped and counted rather than blocking inference. The count is
-// logged and reported by Dropped.
-//
-// Events that carry bills have a queue of their own, written first. Anyone can
-// send requests the gateway refuses, and their events must not crowd out what
-// an organisation pays for.
+// Billed events have their own queue, written first, so the events of refused
+// requests, which anyone can send, cannot crowd out what an organisation pays
+// for.
 type Recorder struct {
 	st   Writer
 	log  *slog.Logger

@@ -183,8 +183,6 @@ code,
   border-radius: 4px;
 }
 
-/* ---------------------------------------------------------------- boot */
-
 .boot {
   display: grid;
   place-items: center;
@@ -215,8 +213,6 @@ code,
   }
 }
 
-/* -------------------------------------------------------------- shell */
-
 /* The shell is exactly the viewport height, not at least it. A definite height
    lets a pane inside overflow and scroll by itself; with min-height a long
    playground conversation would stretch the page instead. */
@@ -240,9 +236,9 @@ code,
   overflow-y: auto;
 }
 
-/* The brand links back to the Dashboard, so it reacts to the pointer like the
-   entries below. It keeps the text colour and no underline. The space below it
-   is a margin, not padding, so the hover pill stays even. */
+/* The brand links to the Dashboard, so it reacts to the pointer like the
+   entries below. The space below it is a margin, not padding, so the hover
+   pill stays even. */
 .brand {
   display: flex;
   align-items: center;
@@ -472,8 +468,6 @@ code,
   min-height: 0;
   overflow-y: auto;
 }
-
-/* ------------------------------------------------------------ controls */
 
 .btn {
   display: inline-flex;
@@ -793,12 +787,9 @@ input[type="checkbox"]:disabled {
   font-weight: 600;
 }
 
-/* --------------------------------------------------------------- tiles */
-
-/* A choice made before the form it configures, instead of a select inside it.
-   Filter and router modes use it because their fields differ almost entirely by
-   mode, and clients because a tile can carry the maker's logo. Tiles also have
-   room for a sentence an <option> cannot hold. */
+/* A choice made before the form it configures, instead of a select inside it:
+   for modes whose fields differ almost entirely, and where a tile needs a logo
+   or a sentence an <option> cannot hold. */
 .tiles {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
@@ -879,8 +870,6 @@ input[type="checkbox"]:disabled {
   color: var(--accent);
 }
 
-/* --------------------------------------------------------------- cards */
-
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -960,10 +949,6 @@ input[type="checkbox"]:disabled {
   color: var(--accent);
 }
 
-/* -------------------------------------------------------------- detail */
-
-/* Everything above the chart on a detail screen: the link back, what this thing
-   is, and the window being read. */
 .detail-head {
   display: grid;
   gap: 10px;
@@ -1134,8 +1119,6 @@ th.num .th-sort {
   color: var(--muted);
 }
 
-/* The controls above a list: the search box, the toggles that narrow it, and
-   how many rows are shown. */
 .toolbar {
   display: flex;
   align-items: center;
@@ -1167,8 +1150,6 @@ th.num .th-sort {
   margin-bottom: 4px;
   font-weight: 600;
 }
-
-/* --------------------------------------------------------------- bits */
 
 .pill {
   display: inline-flex;
@@ -1271,9 +1252,8 @@ a.pill-button:hover {
   animation: blink 1.1s ease-in-out infinite;
 }
 
-/* The same dot on the request log's Live switch, for a connection instead of a
-   wait. It shows one of three states: watching, turned off, or not connected.
-   Otherwise a stream that stopped looks like a quiet afternoon. */
+/* The same dot on the request log's Live switch: watching, turned off, or not
+   connected. Otherwise a stream that stopped looks like a quiet afternoon. */
 .blip[data-state="live"] {
   animation: none;
   box-shadow: 0 0 0 3px var(--accent-soft);
@@ -1309,12 +1289,8 @@ a.pill-button:hover {
   background: var(--bad);
 }
 
-/* The request waterfall: where one request's time went.
-   ------------------------------------------------------------------------
-   A row per step, its bar placed on a track that spans the request's whole
-   latency. The track is shared by every row, so the gaps between bars are as
-   readable as the bars - a step that started late is the thing being looked
-   for, and a chart that closed its gaps would hide it. */
+/* The request waterfall. Every row's track spans the whole request, so a step
+   that started late shows as a gap instead of being hidden. */
 .flame {
   display: grid;
   grid-template-columns: minmax(120px, max-content) 1fr max-content;
@@ -1462,8 +1438,6 @@ a.pill-button:hover {
   user-select: all;
 }
 
-/* --------------------------------------------------------------- chart */
-
 .chart {
   width: 100%;
   display: block;
@@ -1602,14 +1576,9 @@ a.pill-button:hover {
   white-space: nowrap;
 }
 
-/* -------------------------------------------------------------- session */
-
-/* One task's calls, in the order the agent made them. The bars are evenly
-   spaced turns, not a time axis: the question is where the task went wrong and
-   what each turn cost, and a time axis would spend its width on pauses.
-
-   It scrolls instead of squeezing, so four hundred calls do not become
-   sub-pixel bars. */
+/* One task's calls, in order. The bars are evenly spaced turns, not a time
+   axis, which would spend its width on pauses. It scrolls instead of
+   squeezing, so hundreds of calls do not become sub-pixel bars. */
 .turns {
   display: flex;
   align-items: flex-end;
@@ -1644,14 +1613,9 @@ a.pill-button:hover {
   opacity: 0.5;
 }
 
-/* ---------------------------------------------------------- playground */
-
 /* The transcript scrolls, not the page, so the composer is always reachable.
-
-   The pane becomes a flex column and the chat fills it. The bottom padding
-   other views use goes away here: the composer is already pinned above the
-   edge, and the padding would make the pane scroll too, giving two nested
-   scrollbars. */
+   No bottom padding here: the composer is already pinned above the edge, and
+   the padding would add a second, nested scrollbar. */
 .content:has(> .chat) {
   display: flex;
   flex-direction: column;
@@ -1663,10 +1627,8 @@ a.pill-button:hover {
   flex-direction: column;
   gap: 12px;
   flex: 1;
-  /* A low floor, so the transcript does not collapse to a sliver. Every pixel
-     of floor beyond the pane's height pushes the composer below the fold in a
-     short window. Under about 400px of viewport the pane scrolls as a last
-     resort. */
+  /* A low floor, so the transcript does not collapse to a sliver; a higher one
+     pushes the composer below the fold in a short window. */
   min-height: 240px;
 }
 
@@ -1946,8 +1908,6 @@ a.pill-button:hover {
   }
 }
 
-/* --------------------------------------------------------------- modal */
-
 .overlay {
   position: fixed;
   inset: 0;
@@ -2015,8 +1975,6 @@ a.pill-button:hover {
   background: var(--surface-2);
   border-radius: 0 0 12px 12px;
 }
-
-/* -------------------------------------------------------------- toasts */
 
 .toasts {
   position: fixed;
@@ -2118,8 +2076,6 @@ a.pill-button:hover {
   }
 }
 
-/* ------------------------------------------------------------- sign in */
-
 .signin {
   min-height: calc(100vh / var(--ui-scale));
   display: grid;
@@ -2144,7 +2100,6 @@ a.pill-button:hover {
   font-weight: 620;
   letter-spacing: -0.02em;
 }
-/* One button per identity provider, stacked. */
 .signin-providers {
   display: grid;
   gap: 10px;
@@ -2196,8 +2151,6 @@ a.pill-button:hover {
   background: var(--good-soft);
   color: var(--good);
 }
-
-/* --------------------------------------------------------------- connect */
 
 /* Numbered steps: a developer works down this screen once, so the numbers are
    all the structure it needs. */
@@ -2328,8 +2281,6 @@ a.pill-button:hover {
   z-index: 1;
 }
 
-/* ------------------------------------------------- collapsed sidebar */
-
 @media (min-width: 991px) {
   .shell.nav-collapsed {
     grid-template-columns: 60px 1fr;
@@ -2371,12 +2322,8 @@ a.pill-button:hover {
   }
 }
 
-/* ------------------------------------------------------------------- map */
-
-/* The live map. It is drawn on a canvas, the panel's only imperative rendering,
-   as hundreds of things move each minute. What is styled here is the frame: the
-   card, the tooltip, which must be DOM to be readable, and the colour key. */
-
+/* The map itself is a canvas, as hundreds of things move each minute. This
+   styles its frame and the tooltip, which is DOM so it stays readable. */
 .map-page {
   display: grid;
   gap: 16px;
@@ -2444,8 +2391,6 @@ a.pill-button:hover {
 .map-warn {
   color: var(--warn);
 }
-
-/* ------------------------------------------------------------ responsive */
 
 @media (max-width: 990px) {
   /* The sidebar leaves the grid here, so the main pane runs the full width. */

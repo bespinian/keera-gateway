@@ -1,9 +1,6 @@
-// My clients: the coding agents that call Keera Gateway with the reader's
-// keys, and how to add one.
-//
-// Connect client tells a developer which URL, model and file each client
-// needs, with their key's models already filled in, so what they copy works
-// as it is.
+// My clients: the coding agents that call the gateway with the reader's keys,
+// and how to add one. Connect client fills in the key's models, so what is
+// copied works as it is.
 
 import { api, chatTargets } from "../api.js";
 import {
@@ -62,8 +59,7 @@ function loadClients() {
   return catalogue;
 }
 
-/** renderFor has the control plane fill in every client's block and run line
- *  for one key's models, the default first. */
+/** The first of models becomes the default in every block. */
 function renderFor(models) {
   return api.renderConnect(
     models.map((m) => ({
@@ -76,8 +72,7 @@ function renderFor(models) {
   );
 }
 
-/** keyModels is the chat models and routers the key may call, in the
- *  organisation's order. A key from /v1/access carries them resolved. */
+/** A key from /v1/access carries its allowed models resolved. */
 export function keyModels(targets, allowed) {
   return targets.filter((m) => (allowed || []).includes(m.alias));
 }
@@ -176,10 +171,9 @@ export async function clientsView(ctx) {
 }
 
 /** openConnectClient opens Connect client from another screen. Without a key
- *  or a client to offer, it goes to My clients, which says why.
- *
- *  created is a key whose secret was just shown, which the setup fills in. It
- *  resolves to whether the dialog opened. */
+ *  or a client to offer, it goes to My clients, which says why. created is a
+ *  key whose secret was just shown, which the setup fills in. It resolves to
+ *  whether the dialog opened. */
 export async function openConnectClient(ctx, button, created = null) {
   button.disabled = true;
   let catalogue, a;
@@ -359,8 +353,6 @@ function modelList(models) {
   ];
 }
 
-/** noKey explains why the reader has no key, and where to get one. Shared by
- *  My access and the playground. */
 export function noKey(ctx, a) {
   if (a.anonymous || (a.operator_key && !(a.keys || []).length)) {
     return h(
@@ -396,7 +388,6 @@ export function noKey(ctx, a) {
   );
 }
 
-/** noModel is shared by My clients and the playground. */
 export function noModel() {
   return empty(
     "This key can use no chat model",
@@ -513,6 +504,7 @@ function step(n, title, body) {
   );
 }
 
+// A span in backticks is shown as code.
 function prose(text) {
   return String(text || "")
     .split("`")

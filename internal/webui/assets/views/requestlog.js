@@ -1,8 +1,6 @@
-// The request log: one row per recorded request. It is the whole Requests
-// screen, and each project's, key's and model's screen ends in it.
-//
-// An entity's screen is already narrowed and offers only the outcome buttons.
-// The Requests screen carries the filters instead. Everything else is shared.
+// The request log: one row per recorded request. It is the Requests screen,
+// and each project's, key's and model's screen ends in it. An entity's screen
+// is already narrowed, so it offers only the outcome buttons, not the filters.
 
 import { api } from "../api.js";
 import {
@@ -43,32 +41,29 @@ import {
 
 const PAGE = 100;
 
-// Whether the log is watched live. On by default: people open the log to see
-// what is happening now.
+// Live is on by default: people open the log to see what is happening now.
 const LIVE_KEY = "keera.requests.live";
 
-// Remembered apart from the session list's ranking, which offers others.
+// Kept apart from the session list's ranking, which offers other choices.
 const SORT_KEY = "keera.requests.sort";
 
 const ID_KEY = "keera.requests.id";
 
-// How long a new row stays marked. Long enough to catch the eye, short enough
-// that a log nobody watched is not a wall of highlights.
+// Long enough to catch the eye, short enough that a log nobody watched is not
+// a wall of highlights.
 const FRESH_MS = 4000;
 
-// How often a ranked log asks for its page again while live, at most.
+// How often, at most, a live ranked log fetches its page again.
 const REFRESH_MS = 3000;
 
 /** requestLog is the section itself.
  *
- *  `scope` is the fixed thing the caller is about ({ project_id }, { key_id },
- *  { alias }). `filters` shows the narrowing controls instead of the outcome
- *  buttons, for a screen with no scope. `hide` drops columns that would repeat
- *  the scope in every row. `title` is the heading, empty when the page title
- *  already says it. `trail` goes at the right end of the controls.
- *
- *  `live` shows new requests as they are recorded. It is opt-in because it
- *  holds a connection open while the screen is up.
+ *  `scope` is what the caller is about ({ project_id }, { key_id }, { alias }).
+ *  `filters` shows the narrowing controls instead of the outcome buttons, for
+ *  a screen with no scope. `hide` drops columns that would repeat the scope.
+ *  `title` is empty when the page title already says it. `trail` goes at the
+ *  right end of the controls. `live` is opt-in because it holds a connection
+ *  open while the screen is up.
  *
  *  The counts come before the rows: two refusals in four hundred and three
  *  hundred in four hundred can look the same on the first page. */
@@ -239,10 +234,7 @@ export async function requestLog(
   return wrap;
 
   /** attachLive keeps this section up to date from the stream. `log` is the
-   *  table, or null when there is none to add rows to.
-   *
-   *  It is declared inside requestLog because it works on this rendering's
-   *  rows, counts and labels. Hoisting lets the empty path above call it. */
+   *  table, or null when there is none to add rows to. */
   function attachLive(log) {
     if (!watch) return;
     const ranked = rank.by !== "";
@@ -261,8 +253,7 @@ export async function requestLog(
     };
 
     // A ranked page is fetched again rather than added to, because the control
-    // plane decides where a new row ranks. Throttled to one query per
-    // REFRESH_MS.
+    // plane decides where a new row ranks.
     const rerank = throttled(async () => {
       const next = await api.requests({ ...params, facets: "" });
       addNames(names, next);
@@ -281,8 +272,7 @@ export async function requestLog(
       const fresh = payload.data || [];
       if (!fresh.length) return;
       if (!log) {
-        // No table to add to (empty period or no match): draw the screen
-        // again, once.
+        // No table to add to, so redraw once.
         ctx.reload();
         return;
       }
@@ -313,10 +303,8 @@ export async function requestLog(
 }
 
 /** requestTable is a page of the log. A session's screen uses it too, so its
- *  rows look the same as here.
- *
- *  `opts` is merged into the table's options. The log passes its ranking,
- *  since it holds one page of many. A session holds all its rows. */
+ *  rows look the same. `opts` is merged into the table's options: the log
+ *  passes its ranking, since it holds one page of many. */
 export function requestTable(ctx, rows, names, hide, opts = {}) {
   const columns = [
     {
@@ -326,7 +314,11 @@ export function requestTable(ctx, rows, names, hide, opts = {}) {
       sortKey: (q) => new Date(q.created_at).getTime(),
       sortDir: "desc",
       cell: (q) =>
-        h("span", { class: "muted nowrap", title: dateTime(q.created_at) }, ago(q.created_at)),
+        h(
+          "span",
+          { class: "muted nowrap", title: dateTime(q.created_at) },
+          ago(q.created_at),
+        ),
     },
     {
       // The message sits under the status, not in its own column: most rows
@@ -474,7 +466,6 @@ export function requestTable(ctx, rows, names, hide, opts = {}) {
 
   return table(columns, rows, {
     emptyTitle: "Nothing here",
-    // A row that arrived live is marked, so the reader can see which is new.
     rowClass: (q) => (q.fresh ? "row-new" : null),
     ...opts,
   });
@@ -503,15 +494,13 @@ function idSearch(ctx, value) {
   });
 }
 
-// showRequest shows every recorded field of one request. The message is whole
-// and selectable, because people paste it to somebody else. It links to the
+// showRequest shows every recorded field of one request. It links to the
 // request's session, since one call says little about the task it was part of.
 export function showRequest(ctx, q, names) {
   const [label, tone, why] = outcomeMeaning(q);
   const recorded = [
     ["Model", q.alias || "-"],
-    // Said with what happened: a stream that stopped halfway was still sent
-    // a 200.
+    // With the outcome: a stream that stopped halfway was still sent a 200.
     ["Status", `${q.status} - ${label}`],
     [
       "Key",
@@ -525,7 +514,7 @@ export function showRequest(ctx, q, names) {
     ["When", dateTime(q.created_at)],
     // Rows from before v0.7.0 have no id.
     ["Request id", q.request_id || "-"],
-    // Most clients send no id of their own, so the line would mostly say none.
+    // Most clients send no id of their own, so the line is shown only if set.
     q.client_request_id ? ["Client request id", q.client_request_id] : null,
     [
       "Input tokens",

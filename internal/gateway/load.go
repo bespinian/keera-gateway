@@ -28,8 +28,7 @@ import (
 //
 // Everything is per process and in memory. Sharing it between replicas would
 // add a round trip to every request for a number that is already stale, so
-// these modes get less exact as the gateway scales out. A restart starts with
-// nothing measured, the same as a newly added destination.
+// these modes get less exact as the gateway scales out.
 type loads struct {
 	// model key -> *destLoad. A sync.Map because it is read and written on
 	// every request, over keys that change only when models do. The key,
@@ -57,8 +56,7 @@ const (
 
 // destLoad is one destination's measurements.
 type destLoad struct {
-	// inflight is the count of requests outstanding against this destination.
-	// Atomic because it changes twice on every request.
+	// inflight is atomic because it changes twice on every request.
 	inflight atomic.Int64
 
 	mu sync.Mutex
@@ -85,13 +83,12 @@ func (l *loads) get(key string) *destLoad {
 }
 
 // begin records that a request has been dispatched to the model under key,
-// and returns the function that records that it is over.
+// and returns the function that records that it is over. The count covers the
+// whole answer, because a model streaming is still busy.
 //
-// The count covers the whole answer, because a model streaming is still busy.
-// The gateway's inflight metric is narrower: this process's concurrency.
-//
-// The returned function must be called exactly once (see the defer in
-// answer); a leaked count leaves a destination looking busy forever.
+// The returned function must be called (see the defer in answer): a leaked
+// count leaves a destination looking busy forever. Calls after the first do
+// nothing.
 func (l *loads) begin(key string) func() {
 	d := l.get(key)
 	d.inflight.Add(1)
@@ -99,10 +96,8 @@ func (l *loads) begin(key string) func() {
 	return func() { once.Do(func() { d.inflight.Add(-1) }) }
 }
 
-// observe records how long a destination took to start answering.
-//
-// The input is the time from sending the request to this destination until
-// its first token, or until its whole answer when the client did not stream.
+// observe records how long a destination took to start answering: until its
+// first token, or its whole answer when the client did not stream.
 //
 // Only answers count: a fast refusal would post the best score. Failures are
 // recorded by fail, and a 4xx, being the request's fault, not at all.

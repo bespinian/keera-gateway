@@ -1,13 +1,13 @@
 // Package registry is the gateway's read-through view of the control plane.
 //
-// The inference path reads Postgres only to check a key it has not seen
-// recently. The registry keeps every organisation's models, filters, routers
-// and MCP servers, and recently used keys, in memory. It refreshes them on a
-// timer and drops them on LISTEN/NOTIFY, so a revoked key stops working within
-// a round trip. In a database outage the models and the rest stay as last
-// loaded, and a key works only until its cache entry expires (the TTL,
-// 30 seconds by default). Failures are not cached, so after that each request
-// with the key is refused as control_plane_unavailable.
+// It keeps every organisation's models, filters, routers and MCP servers, and
+// recently used keys, in memory, so the inference path reads Postgres only for
+// a key it has not seen recently. It refreshes on a timer and drops entries on
+// LISTEN/NOTIFY, so a revoked key stops working within a round trip.
+//
+// In a database outage everything but keys stays as last loaded. A key works
+// until its cache entry expires (30 seconds by default); failures are not
+// cached, so after that the key is refused as control_plane_unavailable.
 package registry
 
 import (
@@ -347,11 +347,10 @@ func (r *Registry) dropKeys(match func(policy.Key) bool) {
 	}
 }
 
-// refreshAll reloads models, filters and routers in one pass. They name each
-// other, so renewing only part of the chain could refuse a request for a link
-// that already exists. MCP servers come along, so one refresh renews all. They
-// are read one after another, so a failure part way leaves the rest as they
-// were until the next pass.
+// refreshAll reloads models, MCP servers, filters and routers in one pass.
+// They name each other, so renewing only part could refuse a request for a
+// link that exists. A failure part way leaves the rest as they were until the
+// next pass.
 func (r *Registry) refreshAll(ctx context.Context) error {
 	limited, err := r.store.LimitedOrgs(ctx)
 	if err != nil {
@@ -573,9 +572,9 @@ func (r *Registry) MCPServer(orgID, alias string) (policy.MCPServer, bool) {
 	return find(&r.mcp, orgID, alias)
 }
 
-// ModelSecretName is what a model's credential is sealed against. It carries
-// the organisation, so a sealed credential can never be opened as another
-// tenant's, and its own prefix, so never as an MCP server's of the same alias.
+// ModelSecretName is what a model's credential is sealed against. As with
+// MCPSecretName, the organisation and prefix keep it from opening as another
+// tenant's or as an MCP server's.
 func ModelSecretName(orgID, alias string) string { return "model:" + orgID + ":" + alias }
 
 // open decrypts one stored credential, once per refresh rather than once per

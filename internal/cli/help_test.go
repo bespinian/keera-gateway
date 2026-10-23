@@ -96,8 +96,7 @@ func TestSubcommandHelpNamesItsFlags(t *testing.T) {
 	}
 }
 
-// TestCommandHelpNamesItsFlags is the same for the commands that have no
-// subcommands and take their flags directly.
+// The same, for the commands that have no subcommands.
 func TestCommandHelpNamesItsFlags(t *testing.T) {
 	for _, c := range commands {
 		if len(c.subs) > 0 || len(c.flags) == 0 {
@@ -114,9 +113,7 @@ func TestCommandHelpNamesItsFlags(t *testing.T) {
 	}
 }
 
-// TestOverviewNamesEveryCommand guards the thing somebody sees first: a
-// command that dispatches and is not in the registry is a command nobody can
-// find.
+// A command that dispatches and is not in the overview is one nobody can find.
 func TestOverviewNamesEveryCommand(t *testing.T) {
 	out := overview(style)
 	for _, c := range commands {
@@ -207,8 +204,7 @@ func TestSuggestSub(t *testing.T) {
 	}
 }
 
-// TestTakeURL covers the global flag, including the spelling somebody
-// actually types: a bare host with no scheme.
+// Including the spelling somebody actually types: a bare host with no scheme.
 func TestTakeURL(t *testing.T) {
 	t.Cleanup(func() { urlFlag = "" })
 	cases := []struct {
@@ -267,8 +263,8 @@ func TestHelpHidesDefaultsThatMeanNotGiven(t *testing.T) {
 	}
 }
 
-// TestUsageComesFromTheRegistry: a wrong count of arguments is answered with
-// the line help.go prints, before anything is sent, so the two cannot drift.
+// A wrong count of arguments is answered with the line help.go prints, before
+// anything is sent, so the two cannot drift.
 func TestUsageComesFromTheRegistry(t *testing.T) {
 	newFakeControl(t, map[string]any{})
 	for _, tc := range []struct {
@@ -289,8 +285,7 @@ func TestUsageComesFromTheRegistry(t *testing.T) {
 	}
 }
 
-// TestVerbSpellingsAreUnique guards commonAliases: a spelling two verbs of one
-// command share would run whichever comes first.
+// A spelling two verbs of one command share would run whichever comes first.
 func TestVerbSpellingsAreUnique(t *testing.T) {
 	for _, c := range commands {
 		seen := map[string]string{}

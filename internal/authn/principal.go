@@ -101,22 +101,17 @@ func (p *Principal) CanReadOrg(orgID string) bool {
 	return p.Unrestricted() || p.inOrg(orgID)
 }
 
-// CanAdminOrg reports whether the principal may change an organisation's projects,
-// guardrails, keys and people, and its models, MCP servers, filters, routers
-// and sandbox classes.
+// CanAdminOrg reports whether the principal may administer an organisation,
+// as RoleAdmin describes.
 func (p *Principal) CanAdminOrg(orgID string) bool {
 	return p.Unrestricted() || (p.Role == RoleAdmin && p.inOrg(orgID))
 }
 
 // CanManageKeyFor reports whether the principal may activate, rename, rotate
-// or revoke a key in an organisation, attributed to userID (empty means nobody
-// in particular).
-//
-// Only an administrator issues keys, so every key is one they shaped: its
-// project, kind and guardrails. A member may activate, rename, rotate or
-// revoke the keys attributed to them, which replaces or stops a leaked key
-// without waiting for an administrator, but changes nothing else. A key
-// attributed to nobody, such as a pipeline's, stays an administrator's.
+// or revoke a key in orgID attributed to userID ("" for nobody). A member may
+// manage their own keys, so they can stop a leaked one without waiting for an
+// administrator. A key attributed to nobody, such as a pipeline's, stays an
+// administrator's.
 func (p *Principal) CanManageKeyFor(orgID, userID string) bool {
 	return p.CanAdminOrg(orgID) ||
 		(p.Role == RoleMember && p.inOrg(orgID) && p.UserID != "" && userID == p.UserID)

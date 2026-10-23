@@ -12,13 +12,9 @@ import (
 	"unicode"
 )
 
-// body is a shallow view of a JSON request body.
-//
-// The gateway touches a few top-level fields (model, stream, max_tokens),
-// while most of a coding-agent request is a messages array that can run to
-// hundreds of kilobytes. So only the top level is split, into spans of the
-// original bytes, and rewriting a request costs the number of fields rather
-// than the size of the conversation.
+// body is a shallow view of a JSON request body. The gateway touches only a
+// few top-level fields, while the messages array can run to hundreds of
+// kilobytes, so only the top level is split, into spans of the original bytes.
 type body struct {
 	fields map[string]json.RawMessage
 	// order preserves the order fields arrived in, so a request forwarded
@@ -101,14 +97,10 @@ func syntaxError(raw []byte) error {
 	return errors.New("request body is not valid JSON")
 }
 
-// splitObject walks the top level of a JSON object, recording where each
-// member's value begins and ends.
-//
-// The values are sub-slices of raw, not copies. Nothing edits them in place: a
-// rewritten field is replaced.
-//
-// raw must already have passed json.Valid. This finds value boundaries by
-// counting brackets and skipping strings; it is not a validator.
+// splitObject records where each top-level member's value begins and ends.
+// The values are sub-slices of raw, never edited in place: a rewritten field
+// is replaced. raw must have passed json.Valid, since this only counts
+// brackets and skips strings.
 func splitObject(raw []byte) (map[string]json.RawMessage, []string, error) {
 	i := skipSpace(raw, 0)
 	if i == len(raw) || raw[i] != '{' {
@@ -119,7 +111,7 @@ func splitObject(raw []byte) (map[string]json.RawMessage, []string, error) {
 	fields := make(map[string]json.RawMessage, typicalFields)
 	order := make([]string, 0, typicalFields)
 
-	i++ // the opening brace
+	i++
 	for {
 		i = skipSpace(raw, i)
 		if i == len(raw) {
@@ -171,10 +163,8 @@ func skipSpace(raw []byte, i int) int {
 }
 
 // endOfString returns the index just past the string opening at i. A quote
-// after an odd number of backslashes is escaped and does not end the string.
-//
-// Prompts are mostly string bytes, so this jumps from quote to quote with
-// IndexByte instead of looking at every byte.
+// after an odd number of backslashes is escaped. Prompts are mostly string
+// bytes, so this jumps from quote to quote instead of looking at every byte.
 func endOfString(raw []byte, i int) int {
 	start := i + 1
 	for i = start; i < len(raw); i++ {
@@ -269,11 +259,9 @@ func (b *body) boolean(key string) (bool, bool) {
 }
 
 // ceiling reads an output-token ceiling however the client spelled it: 4096,
-// 4096.0, 4e3 and "4096" are the same ceiling. encoding/json decodes a Go int
-// only from an integer literal, so an int would miss most of these.
-//
-// It is a float64 so that a value too large for an int can still be compared
-// against the limit.
+// 4096.0, 4e3 and "4096" are the same. It is a float64 because encoding/json
+// decodes an int only from an integer literal, and so that a value too large
+// for an int still compares against the limit.
 func (b *body) ceiling(key string) (float64, bool) {
 	raw, ok := b.value(key)
 	if !ok {
@@ -358,12 +346,9 @@ func (b *body) prependSystem(content string) bool {
 }
 
 // firstUserMessage returns the raw content of the first "user" message in a
-// chat request. It is the opening prompt, the same on every call of a task, so
-// it works as the task's identity.
-//
-// Elements that are not objects or have no role are skipped, not refused:
-// this only labels a usage row, and must not fail a body the inference plane
-// would accept.
+// chat request. The opening prompt is the same on every call of a task, so it
+// works as the task's identity. Malformed elements are skipped, not refused:
+// this only labels a usage row.
 func (b *body) firstUserMessage() (json.RawMessage, bool) {
 	raw, ok := b.value("messages")
 	if !ok {
@@ -391,8 +376,7 @@ func (b *body) firstUserMessage() (json.RawMessage, bool) {
 }
 
 // eachElement calls fn with each value of a JSON array, in order, until fn
-// returns false. It steps over the values without decoding them, so stopping
-// early costs nothing for the rest.
+// returns false. Values are stepped over, not decoded.
 func eachElement(raw json.RawMessage, fn func(elem []byte) bool) {
 	arr := bytes.TrimSpace(raw)
 	if len(arr) < 2 || arr[0] != '[' {
@@ -449,8 +433,7 @@ func (b *body) ensureUsageInStream() (injected bool) {
 	return true
 }
 
-// encode renders the body back to JSON. Values that were not touched are copied
-// through verbatim.
+// encode renders the body back to JSON, copying untouched values verbatim.
 func (b *body) encode() []byte {
 	var buf bytes.Buffer
 	buf.Grow(b.size() + 2)

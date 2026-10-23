@@ -825,12 +825,9 @@ func (c *call) outbound(b *body) func(policy.Model) outbound {
 const readOnFor = 15 * time.Minute
 
 // chainOnKey says a model the request may be sent to is on the deployment's
-// key.
-//
-// Such an answer is read to the end even if the client leaves. A provider
-// charges the deployment for what it generated, and only the end of the
-// answer says how much that was. Cutting it short would leave an estimate
-// that misses what was never streamed, such as reasoning.
+// key. Such an answer is read to the end even if the client leaves: only its
+// end says what the provider charged, and an estimate would miss what was
+// never streamed, such as reasoning.
 func (c *call) chainOnKey() bool {
 	return slices.ContainsFunc(c.chain, func(m policy.Model) bool { return m.PlatformKey })
 }
@@ -988,12 +985,8 @@ func (s *Server) relayBuffered(c *call, resp *http.Response, answered time.Time,
 	}
 }
 
-// printable reports whether s is valid UTF-8 without control characters.
 func printable(s string) bool {
-	if !utf8.ValidString(s) {
-		return false
-	}
-	return !strings.ContainsFunc(s, unicode.IsControl)
+	return utf8.ValidString(s) && !strings.ContainsFunc(s, unicode.IsControl)
 }
 
 // modelNotFound is the one answer for a model that is missing and for one the

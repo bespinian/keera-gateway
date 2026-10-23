@@ -54,9 +54,8 @@ func (s *Store) DeleteSession(ctx context.Context, hash []byte) error {
 }
 
 // DeleteUserSessions signs one user row out of every browser and machine, in
-// its organisation only, which a role change or a revocation needs. That
-// includes command-line tokens and half-finished command-line sign-ins, since a
-// pending code could still mint a token.
+// its organisation only, as a role change or a revocation needs. That includes
+// pending command-line sign-ins, since their code could still mint a token.
 func (s *Store) DeleteUserSessions(ctx context.Context, userID string) error {
 	return deleteUserSessions(ctx, s.pool, userID)
 }
@@ -105,9 +104,8 @@ func (s *Store) moveSignIn(ctx context.Context, table string, hash []byte, userI
 // keeps the tables small.
 //
 // It also removes the refresh token of an identity no enabled row uses any
-// more: its organisations deleted it or turned it off. A working directory
-// credential must not outlive the accounts it was kept for. Turned on again,
-// the person signs in again, which stores a new one.
+// more, so a directory credential does not outlive the accounts it was kept
+// for. Turned on again, the person signs in again, which stores a new one.
 func (s *Store) PurgeExpired(ctx context.Context) error {
 	for _, table := range []string{"sessions", "login_flows", "cli_codes", "cli_tokens",
 		"passkey_links", "passkey_challenges", "signups"} {

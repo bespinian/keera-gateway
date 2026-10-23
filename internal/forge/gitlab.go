@@ -16,9 +16,8 @@ import (
 // GitLab mints a project access token per sandbox: one project, the Developer
 // role, and repository read and write.
 //
-// GitLab sets expiry by the day, so a token runs until midnight UTC after its
-// sandbox ends. The manager revokes it when the sandbox ends, so in practice
-// it lives exactly as long as the sandbox.
+// GitLab sets expiry by the day, so a token would run until midnight UTC
+// after its sandbox ends. The manager revokes it when the sandbox ends.
 //
 // Developer can push to unprotected branches only, so an agent cannot push to
 // a protected default branch.

@@ -14,8 +14,7 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// orgRun is one 'keera org' invocation: the client, the flags every verb
-// shares, and the arguments after the verb.
+// orgRun is one 'keera org' invocation.
 type orgRun struct {
 	*cmdRun
 	name      string
@@ -34,7 +33,8 @@ func orgCmd(ctx context.Context, args []string) error {
 	fs.BoolVar(&r.noDomain, "no-domain", false, "remove the organisation's email domain")
 	fs.BoolVar(&r.liftLimit, "lift-limit", false,
 		"open the models and MCP servers inside this deployment's network, and sandboxes, "+
-			"to an organisation that signed up")
+			"to an organisation that signed up; without card payments, also the models on "+
+			"the deployment's own provider keys")
 	fs.BoolVar(&r.all, "all", false,
 		"act on every organisation again, rather than on one (operators)")
 	if done, err := r.parse(); done {
@@ -293,15 +293,10 @@ func (r *orgRun) delete(ctx context.Context) error {
 	})
 }
 
-// warnAboutDomains warns when the deployment now has several organisations
-// and some have no email domain.
-//
-// With one organisation, every sign-in lands in it. From the second one on, a
-// first sign-in is placed by domain or refused, so creating a second tenant
-// can stop sign-ins to the first.
-//
-// It writes to stderr so --json stays clean, and fails nothing: the
-// organisation already exists.
+// warnAboutDomains warns when there are several organisations and some have
+// no email domain: from the second one on, a first sign-in is placed by domain
+// or refused, so a new tenant can stop sign-ins to the first. It writes to
+// stderr so --json stays clean, and fails nothing: the organisation exists.
 func warnAboutDomains(ctx context.Context, c *client) {
 	orgs, err := list[store.Org](ctx, c, "/v1/orgs")
 	if err != nil {
@@ -362,7 +357,7 @@ func confirmOrgDelete(ctx context.Context, c *client, orgID string) error {
 		return notFound("organisation", orgID, "", "org")
 	}
 
-	// Three extra reads, only when asking, so the prompt can say how much goes.
+	// Extra reads, only when asking, so the prompt can say how much goes.
 	projects, err := list[store.Project](ctx, c, inOrg("/v1/projects", orgID))
 	if err != nil {
 		return err

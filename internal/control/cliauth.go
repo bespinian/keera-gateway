@@ -90,14 +90,10 @@ func handOverTo(raw, chatURL string) (string, error) {
 	return redirect, err
 }
 
-// loopbackRedirect accepts the address of a listener on the browser's own
-// machine, and nothing else.
-//
-// Only literal loopback addresses count, not "localhost": that name can be
-// pointed elsewhere, which would make this an open redirect carrying a
-// credential.
-//
-// The query is dropped, because the gateway adds the code and state itself.
+// loopbackRedirect accepts only a listener on the browser's own machine. Only
+// literal loopback addresses count, not "localhost": that name can point
+// elsewhere, making this an open redirect carrying a credential. The query is
+// dropped, because the gateway adds the code and state itself.
 func loopbackRedirect(raw string) (string, error) {
 	refuse := errors.New("a command-line sign-in has to come back to a loopback " +
 		"address such as http://127.0.0.1:1234/callback")
@@ -122,8 +118,8 @@ func loopbackRedirect(raw string) (string, error) {
 }
 
 // validChallenge checks the shape of an S256 challenge: 32 bytes, base64url,
-// unpadded. It is not a security check, since the verifier is checked later
-// anyway. It just fails early, before the person goes to the browser.
+// unpadded. The verifier is checked later anyway; this only fails early,
+// before the person goes to the browser.
 func validChallenge(s string) bool { return auth.Encoded32(s) }
 
 // cliHandOver creates the one-time code and returns the loopback address to
@@ -140,11 +136,9 @@ func (s *Server) cliHandOver(r *http.Request, flow store.LoginFlow, user store.U
 	return flow.CLIRedirect + "?" + q.Encode(), nil
 }
 
-// cliToken redeems a one-time code for a token the command line keeps.
-//
-// Nobody is signed in to reach it: the code is the credential, and the
-// verifier proves the caller started the sign-in. The code is deleted as it
-// is read, so it works only once.
+// cliToken redeems a one-time code for a token the command line keeps. It
+// needs no sign-in: the code is the credential, the verifier proves the caller
+// started the sign-in, and the code is deleted as it is read.
 func (s *Server) cliToken(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Code     string `json:"code"`

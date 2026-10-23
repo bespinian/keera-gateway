@@ -115,14 +115,12 @@ func (e *LostEvents) Error() string {
 func (e *LostEvents) Unwrap() error { return e.Err }
 
 // WriteEvents inserts a batch of usage events and their filter runs, adds
-// them to the spend and daily roll-ups, and announces that the log has grown, all
+// them to the spend and daily roll-ups, and announces that the log has grown,
 // in one round trip. pg_notify with no listener does nothing.
 //
-// A batch is one transaction, so a single row Postgres refuses would lose
-// every other request's usage and bills with it. When Postgres refuses a
-// batch, nothing of it was written, so each event is written again on its
-// own. An event refused on its own still has its bills written, without its
-// usage row.
+// A batch is one transaction, so one row Postgres refuses would lose the
+// whole batch. Each event is then written again on its own; one still
+// refused keeps its bills but loses its usage row.
 func (s *Store) WriteEvents(ctx context.Context, events []Event) error {
 	if len(events) == 0 {
 		return nil
@@ -372,10 +370,9 @@ type UsageBucket struct {
 }
 
 // ReportScope narrows a report to one project, key, person or model inside the
-// organisation. The zero value is the whole tenant.
-//
-// One type for the usage reports and the request log, so the totals, the
-// chart and the log of an entity's screen are narrowed the same way.
+// organisation. The zero value is the whole tenant. The usage reports and the
+// request log share it, so an entity's screen is narrowed the same way
+// throughout.
 type ReportScope struct {
 	ProjectID string
 	KeyID     string

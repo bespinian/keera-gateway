@@ -19,15 +19,12 @@ type MCPServer struct {
 	// Authorization, as a bearer token; any other header gets the credential
 	// as it is.
 	AuthHeader string `json:"auth_header,omitempty"`
-	// APIKeyCiphertext is a credential set through the control plane, sealed
-	// with a key only the gateway's environment holds.
+	// APIKeyCiphertext, APIKey and HasAPIKey hold the credential as a Model's
+	// do: sealed at rest, decrypted only in memory, and only flagged to the
+	// control panel.
 	APIKeyCiphertext []byte `json:"-"`
-	// APIKey is that credential decrypted when the registry loads it. It lives
-	// only in memory.
-	APIKey string `json:"-"`
-	// HasAPIKey tells the control panel a credential is stored, and nothing
-	// more about it.
-	HasAPIKey bool `json:"has_api_key,omitempty"`
+	APIKey           string `json:"-"`
+	HasAPIKey        bool   `json:"has_api_key,omitempty"`
 	// Limited and Locked are a model's, for an MCP server: the organisation
 	// has not paid yet, and the server is inside the deployment's network.
 	// OrgName is set with them, so a refusal can name the organisation.

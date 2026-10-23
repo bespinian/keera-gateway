@@ -20,8 +20,8 @@ const CLITokenPrefix = "keera_cli_"
 const (
 	// CLITokenTTL is how long a terminal stays signed in. Signing in again
 	// costs a browser window, so it is a month, not a panel session's twelve
-	// hours. A lost laptop still stops working by itself, and the directory is
-	// asked again meanwhile, so leaving it ends the token sooner.
+	// hours. The directory is still asked again meanwhile, so leaving it ends
+	// the token sooner.
 	CLITokenTTL = 30 * 24 * time.Hour
 	// CLICodeTTL bounds the hop from the browser to the loopback listener. It
 	// is minutes because people often leave a consent screen open.

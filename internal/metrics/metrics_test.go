@@ -369,9 +369,9 @@ func TestAFallbackIsCountedWhereTheRateLimiterReportsIt(t *testing.T) {
 }
 
 func TestALabelValueCannotBreakOutOfItsQuotes(t *testing.T) {
-	// Aliases and outcomes are checked elsewhere, so no quote is expected here.
-	// That is why this is pinned: one label written with %s instead of %q
-	// breaks the whole scrape, and nothing would point here.
+	// Aliases and outcomes are validated elsewhere, so a quote should never get
+	// here. Pinned anyway: one label written with %s instead of %q breaks the
+	// whole scrape, and nothing would point here.
 	r := New()
 	r.Observe(`a"b`, "org\n1", 200, 0.3, 1)
 	r.FilterRun("pii", "org_1", "refused: said \"no\"", false, 0.1, 0)

@@ -31,8 +31,6 @@ type responsesShape struct {
 	tools toolNames
 }
 
-// ------------------------------------------------------------------- requests
-
 // responsesRequest is the part of a Responses request the chat shape has a
 // place for.
 type responsesRequest struct {
@@ -145,7 +143,6 @@ func (responsesShape) decodeBody(raw []byte) (*body, shape, error) {
 	return b, responsesShape{tools: names}, err
 }
 
-// responsesMessages turns the instructions and the input into chat messages.
 func responsesMessages(in responsesRequest) ([]chatMessage, error) {
 	var msgs []chatMessage
 	if in.Instructions != nil && *in.Instructions != "" {
@@ -386,13 +383,11 @@ type declaredTool struct {
 // the tools that are not plain functions.
 type toolNames map[string]declaredTool
 
-// responsesTools declares the client's tools in the chat shape. The chat shape
-// has neither namespaces nor custom tools, so a namespace's tools are
-// declared on their own, under names that carry the namespace, and a custom
-// tool is a function with its text as the one argument. Codex puts each MCP
-// server's tools and its own subagent tools in a namespace, and declares
-// apply_patch as a custom tool. Built-in tools run on OpenAI's servers, so no
-// other model has them.
+// responsesTools declares the client's tools in the chat shape, which has
+// neither namespaces nor custom tools. A namespace's tools get names that carry
+// the namespace, and a custom tool becomes a function of its text. Codex uses
+// namespaces for MCP servers and subagents, and declares apply_patch as custom.
+// Built-in tools run only on OpenAI's servers, so they are dropped.
 func responsesTools(in []responsesTool) ([]oaiTool, toolNames) {
 	tools := make([]oaiTool, 0, len(in))
 	names := toolNames{}
@@ -477,8 +472,6 @@ func responsesToolChoice(raw json.RawMessage) (any, bool) {
 		"name": chatToolName(named.Namespace, named.Name),
 	}}, true
 }
-
-// ------------------------------------------------------------------ responses
 
 // responsesOut is a completed response.
 type responsesOut struct {

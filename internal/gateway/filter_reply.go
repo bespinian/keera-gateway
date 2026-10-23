@@ -81,14 +81,13 @@ func completionText(raw []byte) (string, error) {
 // parseGateReply reads a gate's verdict, and how sure of it the model was. A
 // nil error is a request that may go.
 //
-// The written word decides whenever it is one of the two answers: that is
-// what an administrator checked before going live. The first token's
-// distribution is only used when the text says neither, for instance when a
-// small model put its verdict in bold or opened with a sentence. At
-// temperature 0 the most likely first token is what the model would have
-// written had it kept to the format. See choice.go.
+// The written word decides whenever it is one of the two answers, since that
+// is what an administrator checked before going live. The first token's
+// distribution is used only when the text says neither, such as a verdict in
+// bold or after a sentence. At temperature 0 that token is what the model
+// would have written had it kept to the format. See choice.go.
 //
-// Anything neither reading can place is still an error, so a gate only lets a
+// Anything neither reading can place is an error, so a gate only lets a
 // request through by clearly saying so.
 func parseGateReply(raw []byte) (float64, error) {
 	allow, share, read := readVerdict(raw)

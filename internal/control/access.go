@@ -67,17 +67,16 @@ func (s *Server) access(w http.ResponseWriter, r *http.Request, p *authn.Princip
 		"refusals":    []store.Refusal{},
 	}
 
-	// The operator key is not a person and has no keys or spend. Saying so is
-	// clearer than an empty screen.
+	// The operator key has no keys or spend. Saying so is clearer than an
+	// empty screen.
 	if !isPerson(p) {
 		out["anonymous"] = true
 		httpx.WriteJSON(w, http.StatusOK, out)
 		return
 	}
 
-	// In the panel the operator key signs in as a stand-in user. That is not
-	// a person either, so the screen says so, and still lists any keys it
-	// issued for itself.
+	// In the panel the operator key signs in as a stand-in user. The screen
+	// says so, and still lists any keys it issued for itself.
 	if u, err := s.st.UserByID(r.Context(), p.UserID); err == nil &&
 		u.ExternalID == operatorKeyExternalID {
 		out["operator_key"] = true
@@ -105,8 +104,8 @@ func (s *Server) access(w http.ResponseWriter, r *http.Request, p *authn.Princip
 	for _, k := range keys {
 		keyIDs = append(keyIDs, k.ID)
 	}
-	// Only the last week: the question is about the agent that stopped
-	// working today, not history.
+	// Only the last week: the question is why something stopped working
+	// today, not history.
 	refusals, err := s.st.Refusals(r.Context(), p.OrgID, keyIDs, now.Add(-7*24*time.Hour), 20)
 	if err != nil {
 		s.fail(w, err)
@@ -126,7 +125,6 @@ func (s *Server) access(w http.ResponseWriter, r *http.Request, p *authn.Princip
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-// accessKeys describes each of the caller's keys with the limits above it.
 func (s *Server) accessKeys(r *http.Request, orgID, orgName string, keys []store.KeySummary,
 	now time.Time,
 ) ([]accessKey, error) {
@@ -138,7 +136,7 @@ func (s *Server) accessKeys(r *http.Request, orgID, orgName string, keys []store
 	if err != nil {
 		return nil, err
 	}
-	// Each level above a key is read once, not once per key.
+	// Each level is read once, not once per key.
 	orgLimits := s.limitsFor(r, policy.ScopeOrg, orgID)
 	projectLimits := map[string]*policy.Limits{}
 
@@ -171,9 +169,9 @@ func (s *Server) accessKeys(r *http.Request, orgID, orgName string, keys []store
 	return shown, nil
 }
 
-// callable is every name a client may put in the model field: the models the
-// organisation has and its routers. Without the routers, a key whose
-// allow-list names only a router would look like it may call nothing.
+// callable is every name a client may put in the model field: the
+// organisation's models and routers. Without routers, a key whose allow-list
+// names only one would look like it may call nothing.
 func (s *Server) callable(r *http.Request, orgID string) ([]policy.Model, error) {
 	models, err := s.st.ListModels(r.Context(), orgID)
 	if err != nil {
@@ -208,8 +206,7 @@ func saysOf(lim *policy.Limits) scopeSays {
 }
 
 // limitsFor reads one scope's stored limits. A failed read counts as no
-// limit rather than failing the screen: the gateway enforces the guardrail,
-// this only describes it.
+// limit rather than failing the screen: this only describes the guardrail.
 func (s *Server) limitsFor(r *http.Request, scope policy.ScopeType, id string) *policy.Limits {
 	lim, err := s.storedLimits(r.Context(), scope, id)
 	if err != nil {

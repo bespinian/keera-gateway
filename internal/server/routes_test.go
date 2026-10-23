@@ -40,7 +40,7 @@ func TestRoutesSendEachPathToTheRightPlane(t *testing.T) {
 		{"liveness", http.MethodGet, "/healthz", http.StatusOK},
 		{"the exposition needs a credential", http.MethodGet, "/metrics", http.StatusUnauthorized},
 
-		// The inference plane: a 401 shows the route exists.
+		// The inference plane.
 		{"openai chat", http.MethodPost, "/api/v1/chat/completions", http.StatusUnauthorized},
 		{"openai completions", http.MethodPost, "/api/v1/completions", http.StatusUnauthorized},
 		{"openai embeddings", http.MethodPost, "/api/v1/embeddings", http.StatusUnauthorized},

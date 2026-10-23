@@ -2,9 +2,7 @@ package cli
 
 // What the commands for entries named by an alias share: 'model', 'mcp',
 // 'filter' and 'router'. Each kind is a short list in one organisation, read
-// whole, because the control API has no endpoint for a single entry. All four
-// find, add, change, list and delete entries the same way; 'filter' and
-// 'router' also share how their verbs are dispatched, and their reports.
+// whole, because the control API has no endpoint for a single entry.
 
 import (
 	"context"
@@ -91,8 +89,8 @@ type aliasRun struct {
 	orgID   string
 }
 
-// newAliasRun takes the verb off args and declares the flags all four
-// commands share. The caller declares its own, then calls parse.
+// newAliasRun is newCmdRun with the names the four alias commands print. The
+// caller declares its own flags, then calls parse.
 func newAliasRun(cmd, kind, noun string, args []string) *aliasRun {
 	return &aliasRun{
 		cmdRun: newCmdRun(cmd, args),
@@ -100,13 +98,11 @@ func newAliasRun(cmd, kind, noun string, args []string) *aliasRun {
 	}
 }
 
-// resolveOrg fills in the organisation, as every command does.
 func (a *aliasRun) resolveOrg(ctx context.Context) (err error) {
 	a.orgID, err = resolveOrg(ctx, a.c, a.org)
 	return err
 }
 
-// path addresses one entry, or with a suffix a route under it.
 func (a *aliasRun) path(alias, suffix string) string {
 	return aliasPath(a.kind, a.orgID, alias, suffix)
 }
@@ -120,7 +116,6 @@ type aliasVerbs interface {
 	delete(context.Context) error
 }
 
-// run resolves the organisation, then runs the verb.
 func (a *aliasRun) run(ctx context.Context, v aliasVerbs) error {
 	if err := a.resolveOrg(ctx); err != nil {
 		return err
@@ -139,8 +134,6 @@ func (a *aliasRun) run(ctx context.Context, v aliasVerbs) error {
 	}
 }
 
-// listAliases prints every entry of the command's kind, or says there are
-// none.
 func listAliases[T any](ctx context.Context, a *aliasRun, print func(*table, []T)) error {
 	entries, err := list[T](ctx, a.c, inOrg("/v1/"+a.kind, a.orgID))
 	if err != nil {

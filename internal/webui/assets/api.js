@@ -3,8 +3,6 @@
 // Every mutating call carries the session's CSRF token. It comes from /v1/me,
 // not a cookie, so a page that has not loaded its identity cannot change
 // anything.
-//
-// The paths below are relative to BASE, so they read exactly as the routes do.
 
 const BASE = "/control";
 
@@ -25,8 +23,8 @@ export function setCsrf(token) {
 }
 
 // request sends one call and decodes the answer. raw returns the response
-// itself, for the one call whose body streams. A refusal is an ApiError either
-// way.
+// itself, for a body that streams or is a file. A refusal is an ApiError
+// either way.
 async function request(method, path, body, { raw, signal } = {}) {
   const headers = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -219,8 +217,7 @@ export const api = {
   sandboxes: (orgID, { all } = {}) =>
     get("/v1/sandboxes" + query({ org_id: orgID, all: all ? "1" : "" })),
   createSandbox: (sandbox) => request("POST", "/v1/sandboxes", sandbox),
-  // DELETE is the method; terminate is the word, because the row outlives the
-  // machine.
+  // Terminate, not delete: the row outlives the machine.
   terminateSandbox: (id) => request("DELETE", path`/v1/sandboxes/${id}`),
   extendSandbox: (id, lifetime) =>
     request("POST", path`/v1/sandboxes/${id}/extend`, lifetime),
@@ -337,9 +334,8 @@ export const api = {
     save(url(route) + query({ ...params, format: "csv" })),
 };
 
-// save makes the browser save href. name is the file's name, for an href the
-// server does not name, such as an object URL. That is released once the
-// browser has had time to start saving it.
+// save makes the browser save href. name is for an href the server does not
+// name, such as an object URL, which is released once saving has started.
 function save(href, name) {
   const a = document.createElement("a");
   a.href = href;

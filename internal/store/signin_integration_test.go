@@ -189,9 +189,9 @@ func TestOrgLookupsForASignIn(t *testing.T) {
 	if _, err := st.OnlyOrg(ctx); err != ErrNotFound {
 		t.Errorf("OnlyOrg with two organisations gave %v, want ErrNotFound", err)
 	}
-	// The operator key still has somewhere to belong once a second tenant exists.
-	// Answering "not found" here is what used to have the sign-in create a
-	// fresh organisation on every attempt.
+	// The operator key still has somewhere to belong once a second tenant
+	// exists. Answering "not found" here once made every sign-in create a new
+	// organisation.
 	if org, err := st.FirstOrg(ctx); err != nil || org.ID != "org_1" {
 		t.Errorf("FirstOrg = %+v, %v; want the organisation the deployment started with", org, err)
 	}
@@ -220,9 +220,8 @@ func TestOrgLookupsForASignIn(t *testing.T) {
 	if err := setDomain("nobody", "x.ch"); err != ErrNotFound {
 		t.Errorf("setting a domain on a missing org gave %v, want ErrNotFound", err)
 	}
-	// One domain places sign-ins in one tenant, so a second claim is refused,
-	// with its own error rather than a driver failure, so the operator who
-	// typed it hears which it is.
+	// One domain places sign-ins in one tenant, so a second claim is refused
+	// with its own error rather than a driver failure.
 	if err := setDomain("org_1", "shared.ch"); err != nil {
 		t.Fatalf("UpdateOrg: %v", err)
 	}

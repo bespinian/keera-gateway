@@ -7,19 +7,14 @@ import (
 	"strings"
 )
 
-// Hosted tools are the tools a provider runs on its own servers: web search,
-// fetching a URL, running code, connecting to a remote MCP server. The model
-// asks for one and the provider carries it out, so the request reaches the
-// outside world from the provider's side, where no guardrail of this gateway
-// sees what went where.
+// Hosted tools run on the provider's own servers: web search, fetching a URL,
+// running code, a remote MCP server. They reach the outside world from the
+// provider's side, where no guardrail of this gateway sees what went where.
 //
-// On the deployment's own provider key they are taken out of a request before
-// it is forwarded, as the provider charges for them apart from tokens. The
-// model answers without them, as it would if the client had never offered
-// them. The ones kept are the tools the client runs itself.
-//
-// What is kept is a list, not what is taken out: a hosted tool released next
-// month is one this build has never heard of, and it is taken out too.
+// On the deployment's own provider key they are taken out before forwarding,
+// as the provider charges for them apart from tokens. Only the tools the
+// client runs itself are kept. The list names what is kept, not what is taken
+// out, so a hosted tool released next month is taken out too.
 
 // anthropicClientTools and openAIClientTools are the tool types the client
 // runs, by type, or by prefix for entries ending in '_'. An Anthropic tool

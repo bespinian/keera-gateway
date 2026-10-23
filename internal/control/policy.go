@@ -40,8 +40,7 @@ func (s *Server) guardrailScope(w http.ResponseWriter, r *http.Request, p *authn
 	return
 }
 
-// storedLimits reads one scope's guardrail. A scope with none has the empty
-// guardrail.
+// storedLimits reads one scope's guardrail, or the empty one if it has none.
 func (s *Server) storedLimits(ctx context.Context, scope policy.ScopeType, id string) (policy.Limits, error) {
 	lim, err := s.st.GetGuardrail(ctx, scope, id)
 	if errors.Is(err, store.ErrNotFound) {
@@ -50,8 +49,8 @@ func (s *Server) storedLimits(ctx context.Context, scope policy.ScopeType, id st
 	return lim, err
 }
 
-// chainLimits reads the organisation's guardrail and the project's. project is
-// nil when there is no project.
+// chainLimits reads the organisation's and the project's guardrails. project
+// is nil without a project.
 func (s *Server) chainLimits(ctx context.Context, orgID, projectID string) (
 	org policy.Limits, project *policy.Limits, err error,
 ) {
@@ -66,8 +65,8 @@ func (s *Server) chainLimits(ctx context.Context, orgID, projectID string) (
 //
 // On an organisation, only an operator may: one forge credential reaches
 // every tenant's repositories, and this list keeps a tenant to its own. An
-// administrator's write keeps what the operator set. A project only narrows it,
-// so its administrators may set theirs. A key cannot set it at all.
+// administrator's write keeps what the operator set. A project only narrows
+// it, so its administrators may set it. A key cannot set it at all.
 func (s *Server) checkAllowedRepos(w http.ResponseWriter, r *http.Request, p *authn.Principal,
 	scope policy.ScopeType, scopeID string, lim *policy.Limits,
 ) bool {
@@ -98,12 +97,12 @@ func (s *Server) checkAllowedRepos(w http.ResponseWriter, r *http.Request, p *au
 }
 
 // maxSystemPromptBytes bounds a scope's standing instruction. It is added to
-// every chat request the scope makes and charged each time, so a pasted
-// handbook would quietly cost money on every request.
+// and charged on every chat request, so a pasted handbook would quietly cost
+// money.
 const maxSystemPromptBytes = 16 << 10
 
 // checkSystemPrompt trims a scope's standing instruction in place and reports
-// whether it fits, with the size a refusal has to quote.
+// whether it fits, with its size for the refusal.
 //
 // An emptied field becomes nil, not "", so a scope that says nothing never
 // looks like one that says something.
@@ -136,8 +135,8 @@ func (s *Server) getGuardrails(w http.ResponseWriter, r *http.Request, p *authn.
 	httpx.WriteJSON(w, http.StatusOK, lim)
 }
 
-// EffectiveLevel is one level of the chain above a scope, with what that level
-// sets on its own.
+// EffectiveLevel is one level of the chain above a scope, with what it sets
+// on its own.
 type EffectiveLevel struct {
 	Type   policy.ScopeType `json:"type"`
 	ID     string           `json:"id"`
@@ -181,9 +180,9 @@ func (s *Server) effectiveGuardrails(w http.ResponseWriter, r *http.Request, p *
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-// scopeChain finds the organisation and project above a scope. The organisation
-// is what an administrator must be in, so another tenant's guardrails cannot
-// be reached by guessing an id.
+// scopeChain finds the organisation and project above a scope. The caller
+// must be in that organisation, so another tenant's guardrails cannot be
+// reached by guessing an id.
 func (s *Server) scopeChain(ctx context.Context, scope policy.ScopeType, scopeID string) (
 	orgID, projectID string, err error,
 ) {
@@ -201,7 +200,7 @@ func (s *Server) scopeChain(ctx context.Context, scope policy.ScopeType, scopeID
 }
 
 // effective reads every level above a scope and combines them. orgID and
-// projectID are the scope's chain, from scopeChain.
+// projectID come from scopeChain.
 func (s *Server) effective(ctx context.Context, scope policy.ScopeType,
 	scopeID, orgID, projectID string) (Effective, error) {
 	org, project, err := s.chainLimits(ctx, orgID, projectID)
@@ -247,8 +246,7 @@ func (s *Server) effective(ctx context.Context, scope policy.ScopeType,
 	return out, nil
 }
 
-// effectiveLevel names one level. A name that cannot be read is left out; the
-// id is still there.
+// effectiveLevel names one level. A name that cannot be read is left out.
 func (s *Server) effectiveLevel(ctx context.Context, t policy.ScopeType, id string,
 	lim policy.Limits,
 ) EffectiveLevel {
@@ -281,8 +279,8 @@ func (s *Server) putGuardrails(w http.ResponseWriter, r *http.Request, p *authn.
 			"sent and charged on every request this scope makes", size, maxSystemPromptBytes))
 		return
 	}
-	// Held from the checks below until the guardrail is stored, so nothing they
-	// find is deleted in between.
+	// Held until the guardrail is stored, so nothing the checks find is
+	// deleted in between.
 	unlock, err := s.st.LockReferences(r.Context(), owner)
 	if err != nil {
 		s.fail(w, err)

@@ -240,11 +240,11 @@ The file then holds:
 }
 ```
 
-- **Models.** Every enabled chat model and router the key may use. `--model`
-  picks the one Claude Code starts with; without it, the first. Claude Code
-  asks for Opus, Sonnet, Haiku and Fable by Anthropic's names, for background
-  work too, so each is pointed at the model of that family, or at the main one
-  when there is none. Left unset, those requests fail with 404.
+- **Models.** Every enabled chat model and router the key may use.
+  `--model` picks the one Claude Code starts with; without it, the first.
+  Claude Code asks for Opus, Sonnet, Haiku and Fable by Anthropic's names, for
+  background work too, so each is pointed at the model of that family, or at
+  the main one when there is none. Left unset, those requests fail with 404.
 - **`modelOverrides`** tells Claude Code which Claude model each Anthropic alias
   is, so it knows what the model supports. Without it, Claude Code would send
   Haiku adaptive thinking, which Haiku refuses. A dated model, such as Haiku

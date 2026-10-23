@@ -1,8 +1,5 @@
-// What a status meant, in the words of whoever has to act on it.
-//
-// Several screens read the same event log, so they share these words to call
-// the same thing by the same name. The number is the record; these are the
-// sentence next to it.
+// What a status meant, in the words of whoever has to act on it. Shared so
+// every screen that reads the event log calls the same thing by the same name.
 
 const STATUS = {
   400: ["Bad request", "The request could not be read."],
@@ -40,10 +37,9 @@ export function statusMeaning(status) {
   return ["Interrupted", "The answer started but did not finish."];
 }
 
-/** statusLabel names a status with no row beside it, as a filter must. It is
- *  not statusMeaning, which reads a log of only unhappy requests, where a 200
- *  can only be an answer that stopped. In a log of every request, almost every
- *  200 was a success. */
+/** statusLabel names a status with no row beside it, as a filter must. Unlike
+ *  statusMeaning, which reads a log of only unhappy requests, it calls a 200 a
+ *  success. */
 export function statusLabel(status) {
   return status < 400 ? "Success" : statusMeaning(status)[0];
 }
@@ -62,11 +58,9 @@ export function outcomeOf(q) {
   return "ok";
 }
 
-/** outcomeMeaning returns [label, tone, why] for one row.
- *
- *  It reads the row, not just the status: a request that was answered and one
- *  whose stream stopped halfway both carry 200, and only the message tells
- *  them apart. */
+/** outcomeMeaning returns [label, tone, why] for one row. It reads the row,
+ *  not just the status: an answered request and one whose stream stopped
+ *  halfway both carry 200. */
 export function outcomeMeaning(q) {
   switch (outcomeOf(q)) {
     case "ok":

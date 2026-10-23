@@ -14,17 +14,13 @@ import (
 )
 
 // The deployment as a picture: which clients call this gateway, which models
-// they reach through it, and which of those models run outside the
-// customer's boundary. A model in the cluster and one at a hosted provider
-// are one row apart in the catalogue, but mean very different things.
-//
-// A member sees the traffic of their own keys, like the request log.
+// they reach, and which of those run outside the customer's boundary. A model
+// in the cluster and one at a hosted provider are one row apart in the
+// catalogue, but mean very different things. A member sees only the traffic of
+// their own keys, like the request log.
 
-// mapClient is one thing that has been calling the gateway.
-//
-// Clients are not registered; they just arrive with a key. So the list is
-// whatever called in the window, and a client that stopped calling drops off
-// the map.
+// mapClient is one thing that has been calling the gateway. Clients are not
+// registered, so the list is whatever called in the window.
 type mapClient struct {
 	Client string `json:"client"`
 	Label  string `json:"label"`
@@ -107,8 +103,7 @@ func (s *Server) trafficMap(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"from": from,
 		"to":   to,
-		// The address in the middle of the drawing, which every arrow passes
-		// through.
+		// The address in the middle of the drawing.
 		"gateway_url": s.gatewayURL(r),
 		"gateway":     rep.Total,
 		"clients":     clients,

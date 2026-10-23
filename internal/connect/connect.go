@@ -360,8 +360,7 @@ print(reply.choices[0].message.content)`,
 		ID:    "curl",
 		Label: "cURL",
 		About: "A first request from the shell, over the OpenAI API.",
-		// No file: it is one command.
-		Lang: "sh",
+		Lang:  "sh",
 		Template: `# Keera Gateway speaks the OpenAI API at {{base}}/v1.
 # The key can use: {{aliases}}.
 curl {{base}}/v1/chat/completions \

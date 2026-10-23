@@ -81,12 +81,9 @@ func (s *Server) hungUp(c *call, while, note string) {
 const unknownModel = "unknown"
 
 // metricModel bounds the model label to the organisation's models and
-// routers.
-//
-// Metric series are never cleaned up, and a refused request's model is
-// whatever the client sent. Without this, a client sending a new name on
-// every request would grow the registry until the process ran out of memory.
-// Forwarded requests have already been matched against them.
+// routers. Metric series are never cleaned up, and a refused request's model
+// is whatever the client sent: a new name on every request would grow the
+// registry until the process ran out of memory.
 func metricModel(src policy.Source, orgID, alias string) string {
 	if alias == "" {
 		return ""

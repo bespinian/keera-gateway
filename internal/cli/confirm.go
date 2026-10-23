@@ -7,16 +7,11 @@ import (
 	"strings"
 )
 
-// confirm says what is about to happen, one line each under a heading, then
-// makes somebody type a thing's name back before something irreversible
-// happens to it. A reflex "y" does not catch the wrong row; typing the name
-// does. A line meant as a bullet starts with two spaces.
-//
-// noun is what the name is called ("alias", "name"), and undone says what did
-// not happen when the answer is wrong.
-//
-// The prompt goes to stderr, like the lines before it, so stdout carries only
-// the result: `delete --json` stays valid JSON.
+// confirm prints what is about to happen and makes somebody type the thing's
+// name back before an irreversible step: a reflex "y" does not catch the
+// wrong row. A bullet line starts with two spaces. noun is what the name is
+// called ("alias", "name"); undone says what did not happen on a wrong
+// answer. The prompt goes to stderr so `delete --json` stays valid JSON.
 func confirm(title string, lines []string, noun, want, undone string) error {
 	fmt.Fprintln(os.Stderr, styleErr.head(title))
 	for _, line := range lines {

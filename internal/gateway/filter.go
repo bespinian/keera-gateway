@@ -13,32 +13,26 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// A filter is a guardrail that reads the request itself. Other guardrails
-// decide by who sent a request and what it costs; a filter decides by what is
-// in it. It is for prompts that may go to a model outside the cluster but
-// carry a credential, a customer's name or code that must not go with them.
+// A filter is a guardrail that reads what is in the request, for prompts that
+// may go to a model outside the cluster but carry a credential, a customer's
+// name or code that must not go with them. There are three modes:
 //
-// There are three modes:
-//
-//   - A rewrite filter answers with the whole conversation written back, which
-//     is the only way to take a secret out and still let the request go. It may
-//     also refuse, but refusing drops the request.
+//   - A rewrite filter writes the whole conversation back, the only way to take
+//     a secret out and still let the request go. It may also refuse.
 //   - A gate answers with one word. It never edits the request, so it is
 //     cheaper and judges more reliably than a model that is also copying text.
 //   - A pattern filter runs regular expressions and no model. See pattern.go.
 //
-// An enforcing filter fails closed: if it cannot run, the request is refused,
-// because a control you can switch off by breaking it is not a control. It
-// runs before the system prompt is added, so it only sees what the client
-// sent. A model filter costs a second generation on every request it covers;
-// a pattern filter costs nothing.
+// An enforcing filter fails closed: a control you can switch off by breaking it
+// is not a control. It runs before the system prompt is added, so it only sees
+// what the client sent.
 //
-// A filter in shadow enforces nothing. It runs and is recorded, and the
-// request goes on unchanged, even when the filter could not run. It is for
-// trying out an instruction on real traffic first, and costs the same.
+// A filter in shadow enforces nothing: it runs and is recorded, and the request
+// goes on unchanged, even when the filter could not run. It is for trying out
+// an instruction on real traffic first.
 //
-// Every run is recorded as its own row (what it did, how long, what it cost),
-// but never the text. See internal/store/filterruns.go.
+// Every run is recorded as its own row, but never the text. See
+// internal/store/filterruns.go.
 
 const (
 	// filterTimeout bounds one filter run. Rewriting a long conversation is

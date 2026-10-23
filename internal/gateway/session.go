@@ -30,18 +30,14 @@ import (
 var sessionHeaders = []string{httpx.SessionHeader, "X-Session-Id", "Helicone-Session-Id",
 	"X-Claude-Code-Session-Id"}
 
-// sessionKey derives the session key for one request, or returns empty for a
-// request that is not part of a conversation.
+// sessionKey derives the session key for one request, or empty for one that
+// is not part of a conversation. Only chat gets one: labelling completions and
+// embeddings would fill reports with one-request tasks.
 //
-// Only chat gets one. Completions and embeddings have no conversation, and
-// labelling them would fill reports with one-request tasks.
-//
-// The API key's id is part of the hash, so two developers who start with the
-// same sentence are two sessions.
-//
-// Two limits: rewriting the opening prompt mid-task starts a new session, and
-// two tasks opened with the same sentence within the idle gap merge. Both are
-// why httpx.SessionHeader exists.
+// The API key's id is hashed in, so two developers who start with the same
+// sentence are two sessions. Rewriting the opening prompt mid-task starts a
+// new session, and two tasks opened with the same sentence within the idle gap
+// merge; httpx.SessionHeader exists for both.
 func sessionKey(r *http.Request, keyID string, kind policy.Kind,
 	opening func() (json.RawMessage, bool),
 ) string {

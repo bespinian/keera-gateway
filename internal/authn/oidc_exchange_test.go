@@ -117,7 +117,6 @@ func TestExchangeReturnsAVerifiedIdentity(t *testing.T) {
 	o := connect(t, idp, RoleMapping{AdminGroups: []string{"keera-admins"}, Default: RoleMember})
 
 	flow := NewFlow()
-	// The stand-in provider echoes back whatever nonce it is told to.
 	idp.Claims = func(m map[string]any) { m["nonce"] = flow.Nonce }
 
 	id, err := o.Exchange(context.Background(), "the-code", flow)
@@ -525,9 +524,7 @@ func TestProvidersResolveByName(t *testing.T) {
 }
 
 // Where a group decides the administrator role, the directory owns it and the
-// panel says so rather than offering a control the next sign-in would undo. It
-// is one answer for the whole gateway, so the panel never explains it per
-// person.
+// panel says so rather than offering a control the next sign-in would undo.
 func TestAdminFromDirectoryIsTrueIfAnyProviderMapsAdminGroups(t *testing.T) {
 	idp := oidctest.New(t)
 	base := func(name string, m RoleMapping) OIDCConfig {

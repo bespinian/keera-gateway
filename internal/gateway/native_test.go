@@ -11,7 +11,6 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// seenRequest is what a backend was sent.
 type seenRequest struct {
 	path   string
 	header http.Header
@@ -73,8 +72,7 @@ const anthropicAnswer = `{"id":"msg_1","type":"message","role":"assistant",` +
 	`"cache_creation_input_tokens":0,"output_tokens":50}}`
 
 func TestMessagesGoToAnthropicInTheirOwnAPI(t *testing.T) {
-	// Translating for Anthropic loses prompt caching and thinking, and on a
-	// coding agent's session the cache is most of the bill. So the request goes
+	// Translating would lose prompt caching and thinking, so the request goes
 	// as it came, with the fields the translation would have dropped.
 	h, seen := providerHarness(t, "anthropic", "claude-opus-5", jsonBackend(anthropicAnswer), nil)
 
@@ -272,10 +270,8 @@ func TestAFilterReadsDocumentsAndRefusalsInANativeRequest(t *testing.T) {
 }
 
 func TestAFilterRewriteChangesOnlyTheTextItRewrote(t *testing.T) {
-	// Encoding the body again would sort the keys of every earlier turn, the
-	// model's own tool inputs included. The provider's prompt cache would
-	// miss from the first of them, and a thinking block next to an edited
-	// turn may be refused.
+	// Encoding the body again would sort the keys of earlier turns, so the
+	// prompt cache would miss and a thinking block may be refused.
 	messages := `[{"role":"user","content":"read <a> & b"},` +
 		`{"role":"assistant","content":[` +
 		`{"type":"thinking","thinking":"ok","signature":"c2ln"},` +
@@ -359,9 +355,8 @@ func TestARewriteOfABodyWithAKeyTwiceKeepsOnlyTheFilteredOne(t *testing.T) {
 }
 
 func TestAKeyInOtherCaseCannotCarryTextPastAFilter(t *testing.T) {
-	// The filters read the client's own body, looking "content" up as it is
-	// spelled. The fallback is sent a translation, which reads "Content" as
-	// content too, so the text would reach it unfiltered.
+	// The filters look up "content" as spelled, but the translation for the
+	// fallback reads "Content" as content too, so it would pass unfiltered.
 	for _, tc := range []struct{ provider, path, body string }{
 		{"anthropic", "/v1/messages", `{"model":"ha","max_tokens":64,` +
 			`"messages":[{"role":"user","Content":"hunter2"}]}`},

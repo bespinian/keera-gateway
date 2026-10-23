@@ -1,7 +1,5 @@
-// The audit log: who changed what.
-//
-// It answers compliance questions such as "who changed the guardrail", so it
-// is filterable, pages past its first screenful, and downloads as a file.
+// The audit log: who changed what. It answers compliance questions, so it
+// filters, pages past its first screenful, and downloads as a file.
 
 import { api } from "../api.js";
 import {
@@ -40,7 +38,6 @@ const TONES = {
   "auth.directory_check": "warn",
 };
 
-// The on-screen words for each action, the same the rest of the panel uses.
 // The wire keeps `noun.verb`, which filters and exports are written against.
 // An action missing here, say from a newer gateway, shows its wire id.
 const LABELS = {
@@ -104,9 +101,8 @@ function label(action) {
   return LABELS[action] || action;
 }
 
-// The shared windows plus all time, kept apart from the shared choice: the
-// audit log is searched over a chosen period, not whatever the dashboard last
-// showed. The shared ones are not restated so they cannot drift.
+// Kept apart from the shared range: the audit log is searched over a chosen
+// period, not whatever the dashboard last showed.
 const RANGES = [
   ...SHARED_RANGES,
   { label: "All", since: "", long: "Everything" },
@@ -257,8 +253,8 @@ export async function auditView(ctx) {
   return wrap;
 }
 
-// choose is one filter. It is left out with fewer than two values, unless one
-// is set and needs clearing.
+// A filter with fewer than two values is left out, unless one is set and
+// needs clearing.
 function choose(aria, all, values, selected, name, onPick) {
   if (!selected && values.length < 2) return null;
   const options =

@@ -454,8 +454,6 @@ function statusCell(a) {
   );
 }
 
-/* ------------------------------------------------------------------ one task */
-
 export async function sessionDetailView(ctx) {
   let res;
   try {
@@ -629,7 +627,6 @@ export async function sessionDetailView(ctx) {
     ),
   );
 
-  // Tool calls through the MCP servers, drawn only when there are any.
   const tools = res.tool_calls || [];
   if (tools.length) {
     wrap.append(

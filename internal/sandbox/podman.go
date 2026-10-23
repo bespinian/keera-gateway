@@ -33,8 +33,7 @@ import (
 //	                      does; while the gateway is down, sandboxes outlive
 //	                      their lifetime, and the sweep at start-up ends them
 //
-// The last one is the real difference from Kubernetes, and docs/sandboxes.md
-// says so too.
+// The last is the real difference from Kubernetes (see docs/sandboxes.md).
 
 type PodmanOptions struct {
 	// Binary is the podman command, "podman" by default.
@@ -73,8 +72,7 @@ func NewPodman(ctx context.Context, opts PodmanOptions) (*Podman, error) {
 
 func (p *Podman) Name() string { return "podman" }
 
-// Capabilities reports what this driver does: no warm pool, and the
-// strongest isolation tier with a runtime mapped.
+// Capabilities reports no warm pool, and the tiers with a runtime mapped.
 func (p *Podman) Capabilities() Capabilities {
 	return capabilitiesFor(p.opts.Runtimes, false)
 }
@@ -177,8 +175,7 @@ func (p *Podman) inspect(ctx context.Context, ref Ref) (podmanInspect, error) {
 	if err := json.Unmarshal(out, &items); err != nil {
 		return podmanInspect{}, fmt.Errorf("reading the state of sandbox %s: %w", ref.Name, err)
 	}
-	// An empty list means podman found no such container, the same as its
-	// "no such container" error.
+	// Podman can answer a missing container with an empty list.
 	if len(items) == 0 {
 		return podmanInspect{}, ErrNotFound
 	}
@@ -203,11 +200,9 @@ func (p *Podman) Status(ctx context.Context, ref Ref) (Status, error) {
 	return st, nil
 }
 
-// sshdListens stands in for the Kubernetes readiness probe.
-//
-// It dials from the host, so the image needs no shell for it. A connection
-// alone proves nothing, since rootless podman's port forwarder accepts one
-// even when nothing listens behind it yet, so it waits for sshd's greeting.
+// sshdListens stands in for the Kubernetes readiness probe. It waits for
+// sshd's greeting, because rootless podman's port forwarder accepts a
+// connection even when nothing listens behind it yet.
 func (p *Podman) sshdListens(ctx context.Context, ref Ref) bool {
 	conn, err := p.dialPublished(ctx, ref, PortSSH)
 	if err != nil {
@@ -266,9 +261,8 @@ func (p *Podman) Resume(ctx context.Context, ref Ref) error {
 }
 
 // Revive replaces the container and keeps the named volume. A container's
-// environment is fixed when it is made, so a new key needs a new container.
-// Only the home directory carries over. A suspend keeps more, since it only
-// stops the container.
+// environment is fixed when it is made, so a new key needs a new container,
+// and only the home directory carries over.
 func (p *Podman) Revive(ctx context.Context, spec Spec) error {
 	// Without its volume there is no home to carry over, and `podman run`
 	// would quietly make a new, empty one.
@@ -282,11 +276,9 @@ func (p *Podman) Revive(ctx context.Context, spec Spec) error {
 	return err
 }
 
-// Extend only checks that the container still exists.
-//
-// There is no controller here: the database row holds the expiry, and the
-// gateway's sweep enforces it. That is also why no label carries it: podman
-// cannot change a container's labels, so one would go stale.
+// Extend only checks that the container still exists. The row holds the
+// expiry and the sweep enforces it. No label carries it, because podman cannot
+// change a container's labels.
 func (p *Podman) Extend(ctx context.Context, ref Ref, _ time.Time) error {
 	_, err := p.Status(ctx, ref)
 	return err
@@ -297,8 +289,7 @@ func (p *Podman) Terminate(ctx context.Context, ref Ref) error {
 	if err := p.removeContainer(ctx, containerName(ref)); err != nil {
 		return err
 	}
-	// The volume is named, so `podman rm --volumes` would leave it. Without
-	// this, every terminated sandbox would leave a volume behind.
+	// `podman rm --volumes` leaves a named volume behind.
 	if _, err := p.run(ctx, "volume", "rm", "--force", volumeName(ref)); err != nil {
 		p.log.Warn("sandbox: removing the home volume failed",
 			"sandbox", ref.ID, "volume", volumeName(ref), "error", err)
@@ -314,11 +305,10 @@ func (p *Podman) removeContainer(ctx context.Context, name string) error {
 	return nil
 }
 
-// Dial connects to the host port the container's port is published on. Like
-// the Kubernetes driver, it refuses a sandbox that is not running, so a
-// suspended one says so rather than that its port is not published. It skips
-// Status's wait for sshd's greeting: the connection itself shows whether sshd
-// answers.
+// Dial connects to the host port the container's port is published on. It
+// refuses a sandbox that is not running, so a suspended one says so rather
+// than that its port is not published. It skips Status's wait for sshd's
+// greeting: the connection itself shows whether sshd answers.
 func (p *Podman) Dial(ctx context.Context, ref Ref, port int) (net.Conn, error) {
 	// Only sshd's port is published, so any other could never be reached.
 	if port != PortSSH {
@@ -352,8 +342,6 @@ func (p *Podman) dialPublished(ctx context.Context, ref Ref, port int) (net.Conn
 	}
 	return dialSandbox(ctx, ref, port, line)
 }
-
-/* ------------------------------------------------------------------ running */
 
 // podmanTimeout bounds one command. It is generous because `run` on a cold
 // image includes the pull.

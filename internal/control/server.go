@@ -319,7 +319,6 @@ func (s *Server) Handler() http.Handler {
 	return httpx.Middleware(s.log, httpx.Compress(mux))
 }
 
-// authenticated resolves the caller and rejects anyone it cannot.
 func (s *Server) authenticated(next handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, err := s.principal(r)
@@ -418,8 +417,7 @@ func (s *Server) principal(r *http.Request) (*authn.Principal, error) {
 	return s.sessionPrincipal(r)
 }
 
-// matchesOperatorKey and matchesMetricsToken compare a presented credential
-// with the configured one. With nothing configured, nothing matches.
+// With nothing configured, nothing matches.
 func (s *Server) matchesOperatorKey(presented string) bool {
 	return s.hasOperatorKey && constantTimeEqual(presented, s.operatorHash)
 }
@@ -559,7 +557,6 @@ func (s *Server) requireOwnerAdmin(w http.ResponseWriter, p *authn.Principal, ow
 	return s.requireOwnerRead(w, p, owner) && s.requireOrgAdmin(w, p, owner)
 }
 
-// queryWindow reads a report's time window from ?from, ?to and ?since.
 func queryWindow(w http.ResponseWriter, q url.Values) (from, to time.Time, ok bool) {
 	from, to, err := timeRange(q.Get("from"), q.Get("to"), q.Get("since"))
 	if err != nil {
@@ -587,11 +584,9 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// metricsRoute serves the Prometheus exposition.
-//
-// It is operator-only, because the metrics are labelled by organisation. A
-// scrape config should not hold the operator key, so the scrape token reads
-// this route and nothing else.
+// metricsRoute serves the Prometheus exposition. It is operator-only, because
+// metrics are labelled by organisation. The scrape token reads this route and
+// nothing else, so a scrape config need not hold the operator key.
 func (s *Server) metricsRoute(w http.ResponseWriter, r *http.Request) {
 	if presented, err := auth.FromHeader(r.Header.Get("Authorization")); err == nil &&
 		s.matchesMetricsToken(presented) {
@@ -644,7 +639,6 @@ func Announce(ctx context.Context, reg *registry.Registry, st *store.Store, log 
 	}
 }
 
-// auditf records a control-plane action in the organisation it happened in.
 func (s *Server) auditf(r *http.Request, p *authn.Principal, orgID, action,
 	targetType, targetID string, detail any) {
 	if err := s.st.Audit(r.Context(), p.Actor(), orgID, action, targetType, targetID, detail); err != nil {

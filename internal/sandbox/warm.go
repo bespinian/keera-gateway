@@ -8,16 +8,11 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// Warm pools: sandboxes already started before anybody asks for one.
-//
-// A cold start takes seconds, and an image pull on a fresh node a minute - long
-// enough that people stop using the command. So a few sandboxes per class are
-// kept idle, and a request binds to one. The controller's extension
-// (extensions.agents.x-k8s.io/v1beta1: SandboxTemplate, SandboxWarmPool,
-// SandboxClaim) keeps the pool; this file writes those three objects.
-//
-// It is opt-in per deployment and per class, because every warm sandbox holds
-// its class's full CPU and memory all the time.
+// Warm pools: sandboxes started before anybody asks for one, because an image
+// pull on a fresh node can take a minute. The controller's extension keeps the
+// pool; this file writes its SandboxTemplate, SandboxWarmPool and SandboxClaim
+// objects. It is opt-in per deployment and per class, because every warm
+// sandbox holds its class's full CPU and memory all the time.
 
 const (
 	warmAPIGroup   = "extensions.agents.x-k8s.io"
@@ -40,9 +35,6 @@ const (
 	BackingClaim Backing = "claim"
 )
 
-/* ---------------------------------------------------------------- the pool */
-
-// warmTemplate is the SandboxTemplate for one class.
 type warmTemplate struct {
 	APIVersion string           `json:"apiVersion,omitempty"`
 	Kind       string           `json:"kind,omitempty"`
@@ -87,8 +79,6 @@ type warmUpdateStrategy struct {
 	Type string `json:"type,omitempty"`
 }
 
-/* --------------------------------------------------------------- the claim */
-
 type sandboxClaim struct {
 	APIVersion string           `json:"apiVersion,omitempty"`
 	Kind       string           `json:"kind,omitempty"`
@@ -127,9 +117,6 @@ type claimStatus struct {
 	} `json:"sandbox"`
 }
 
-/* ------------------------------------------------------------------- paths */
-
-// warmCollection is the path of one warm-pool resource type in the namespace.
 func (k *Kubernetes) warmCollection(resource string) string {
 	return warmAPIPath + "/namespaces/" + url.PathEscape(k.opts.Namespace) + "/" + resource
 }
@@ -142,10 +129,8 @@ func (k *Kubernetes) claimPath(ref Ref) string {
 // pools. Two organisations can each have a class of the same name.
 func poolKey(org, class string) string { return org + "/" + class }
 
-// warmName is the name of a class's template and pool. The prefix avoids
-// clashing with other objects in the namespace, and the tail of the
-// organisation's id keeps two organisations' classes apart while the name
-// stays readable.
+// warmName names a class's template and pool. The tail of the organisation's
+// id keeps two organisations' classes apart while the name stays readable.
 func warmName(org, class string) string {
 	return "keera-" + shortID(org) + "-" + class
 }
@@ -161,8 +146,6 @@ func (k *Kubernetes) poolMeta(org, class string) kubeMeta {
 		},
 	}
 }
-
-/* ----------------------------------------------------------- reconciling it */
 
 // EnsurePool makes one class's template and warm pool match the catalogue.
 // It is only called for a class with a warm pool.
@@ -217,14 +200,11 @@ func (k *Kubernetes) EnsurePool(ctx context.Context, class policy.SandboxClass) 
 	return nil
 }
 
-// PrunePools deletes the template and pool of every class not in keep, which
-// is keyed by poolKey. EnsurePool never visits a class that left the
-// catalogue, and its warm sandboxes would hold their CPU and memory for ever.
-// A class with warm: 0 is left out of keep too: its pool is deleted rather
-// than scaled to zero, since an empty pool looks like a feature in use.
-//
-// Each object is deleted by the name it has, not the name it would get now,
-// so a pool named some other way is still found.
+// PrunePools deletes the template and pool of every class not in keep, keyed
+// by poolKey. EnsurePool never visits a class that left the catalogue, whose
+// warm sandboxes would hold their CPU and memory for ever. A class with
+// warm: 0 is left out of keep too: an empty pool looks like a feature in use.
+// Objects are found by label, so a pool named some other way is still found.
 func (k *Kubernetes) PrunePools(ctx context.Context, keep map[string]bool) error {
 	selector := "?labelSelector=" + url.QueryEscape(labelManagedBy+"=keera")
 	// Pools first, so no pool is left pointing at a deleted template.
@@ -257,10 +237,8 @@ func (k *Kubernetes) PrunePools(ctx context.Context, keep map[string]bool) error
 	return nil
 }
 
-// apply creates an object, or merge-patches it if it already exists.
-//
-// A merge patch is enough because Keera is the only writer of these objects;
-// server-side apply would need field managers and conflict handling.
+// apply creates an object, or merge-patches it if it already exists. A merge
+// patch is enough because Keera is the only writer of these objects.
 func (k *Kubernetes) apply(ctx context.Context, collection, name string, obj any) error {
 	err := k.c.post(ctx, collection, obj, nil)
 	if isConflict(err) {
@@ -269,13 +247,9 @@ func (k *Kubernetes) apply(ctx context.Context, collection, name string, obj any
 	return err
 }
 
-/* --------------------------------------------------------- claiming one out */
-
-// createClaimed asks for a sandbox from a warm pool.
-//
-// The result is a claim: the controller binds it to a pool member and names
-// that member in the claim's status. Later calls address the claim where they
-// can and the bound Sandbox where they must.
+// createClaimed asks for a sandbox from a warm pool. The controller binds the
+// claim to a pool member and names it in the claim's status. Later calls
+// address the claim where they can and the bound Sandbox where they must.
 func (k *Kubernetes) createClaimed(ctx context.Context, spec Spec) (Status, error) {
 	labels := labelsFor(spec)
 	claim := &sandboxClaim{
@@ -312,11 +286,9 @@ func (k *Kubernetes) createClaimed(ctx context.Context, spec Spec) (Status, erro
 	return statusOfClaim(spec.Ref, &created), nil
 }
 
-// claimStatus reads one claim back, and the Sandbox it is bound to.
-//
-// The claim's conditions say whether it is bound, ready or expired, but not
-// whether the pod died, exited or was suspended: only the bound Sandbox says
-// that. So once bound, the Sandbox decides, as it does for a cold sandbox.
+// claimStatus reads one claim back, and the Sandbox it is bound to. Once
+// bound, the Sandbox decides the state: the claim's conditions do not say
+// whether the pod died, exited or was suspended.
 func (k *Kubernetes) claimStatus(ctx context.Context, ref Ref) (Status, error) {
 	c, err := k.claim(ctx, ref)
 	if err != nil {
@@ -351,11 +323,8 @@ func (k *Kubernetes) claim(ctx context.Context, ref Ref) (sandboxClaim, error) {
 }
 
 // statusOfClaim collapses a claim's conditions like statusOf does a
-// Sandbox's.
-//
-// A claim can also be accepted but not yet bound. Its detail says so, because
-// "waiting for a free sandbox in the pool" means the pool is too small, while
-// waiting for a node means the cluster is.
+// Sandbox's. An unbound claim says so, because that means the pool is too
+// small, while waiting for a node means the cluster is.
 func statusOfClaim(ref Ref, c *sandboxClaim) Status {
 	st := Status{
 		Ref:     ref,

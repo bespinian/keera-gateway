@@ -384,7 +384,7 @@ reads the audit log, so the gateway deletes neither unless told to. At start-up
 it logs the windows, or `no retention window is configured`. The daily totals
 are never deleted: they are small, and long reports read them.
 
-Past the usage window, the gateway deletes usage events, filter runs, tool
+Past the usage window, the gateway deletes the request log, filter runs, tool
 calls and closed budget windows. It also deletes sandboxes that ended, and keys
 revoked or expired, with their guardrails. A key that a sandbox still names
 stays. Billing rows and payments are never deleted ([billing.md](billing.md)).

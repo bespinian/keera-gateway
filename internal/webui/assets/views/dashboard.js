@@ -180,8 +180,6 @@ export async function dashboardView(ctx) {
     panels,
   );
 
-  // The log itself is a screen of its own: it is read by narrowing it many
-  // times, which is tiresome under four charts.
   if (o.requests === 0) {
     wrap.prepend(
       banner(
@@ -200,11 +198,9 @@ export async function dashboardView(ctx) {
   return wrap;
 }
 
-// failureLink links the failed count to the failed rows of the request log,
-// over the same window. A member gets a plain pill: their log holds only their
-// own keys' requests, so it would not add up to the count.
-//
-// A real link rather than a button, so it can open in a new tab.
+// A member gets a plain pill: their request log holds only their own keys'
+// requests, so it would not add up to the count. A link rather than a button,
+// so it can open in a new tab.
 function failureLink(ctx, ...content) {
   if (!isAdmin(ctx)) {
     return h("span", { class: "pill pill-bad" }, ...content);

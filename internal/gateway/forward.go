@@ -116,16 +116,15 @@ type outbound struct {
 // forward sends the request to the first destination that can answer it.
 //
 // A destination fails over only when it could not be reached, did not start
-// answering in time, or answered 5xx. A 4xx is not retried: a request that is
-// too long or malformed will be so at the next destination too.
+// answering in time, or answered 5xx. A 4xx is not retried: a request too long
+// or malformed for one destination is so for the next.
 //
 // Failover stops at the first byte of the answer, since half of one model's
-// stream cannot be completed by another. That is why the timeout that matters
+// stream cannot be finished by another. That is why the timeout that matters
 // is the one on the response headers.
 //
-// build encodes the request for one destination, because the 'model' field
-// carries the backend's name for the model, not the alias, and because a
-// destination may speak the client's own API rather than the OpenAI one.
+// build encodes the request for each destination, since 'model' carries the
+// backend's name and a destination may speak the client's own API.
 func (s *Server) forward(ctx context.Context, chain []policy.Model,
 	build func(policy.Model) outbound, tr *trace,
 ) forwarded {

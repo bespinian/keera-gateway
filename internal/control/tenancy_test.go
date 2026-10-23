@@ -18,10 +18,10 @@ import (
 // test that each handler actually asks.
 //
 // Every case refuses before the store is reached, so a nil store does not
-// panic. A check that runs after the read has already done the read.
+// panic: a check that ran after the read would.
 
-// Two people who are not operators, in one organisation. Between them they are
-// every caller who has to be kept inside their own tenant.
+// Two people who are not operators, in one organisation: every caller who has
+// to be kept inside their own tenant.
 func member(org string) *authn.Principal {
 	return &authn.Principal{
 		Via: authn.MethodSession, Role: authn.RoleMember, OrgID: org, UserID: "user_member",

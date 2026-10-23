@@ -22,10 +22,9 @@ import (
 
 const sessionCookie = "keera_session"
 
-// loginCookie holds the state of the sign-in this browser started, and the
-// callback must bring it back. Without it, anyone could send a victim the
-// callback link of a sign-in of their own, and the victim would be signed in
-// to the sender's account without noticing.
+// loginCookie holds the state of the sign-in this browser started, which the
+// callback must match. Without it, anyone could send a victim the callback link
+// of their own sign-in and silently sign the victim in to their account.
 const loginCookie = "keera_login"
 
 // operatorKeyExternalID is the stand-in user the operator key signs in as.
@@ -324,10 +323,9 @@ func (s *Server) orgFor(r *http.Request, provider *authn.OIDC, identity authn.Id
 		"; an operator has to create one and set its email domain")
 }
 
-// localLogin signs an operator in with the operator key.
-//
-// It is the way in before an identity provider is set up. It grants only what
-// the key already grants, but behind a session, so the panel can be used.
+// localLogin signs an operator in with the operator key, the way in before an
+// identity provider is set up. It grants only what the key grants, behind a
+// session, so the panel can be used.
 func (s *Server) localLogin(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Key string `json:"key"`
@@ -457,10 +455,9 @@ func (s *Server) syncOtherRoles(r *http.Request, user store.User, role authn.Rol
 // database, fromIDP what this sign-in's claims map to, and adminFromDirectory
 // whether a group decides the admin role on this deployment.
 //
-// The operator role always follows the configuration, so someone removed from
-// it is demoted at their next sign-in. The admin role follows the directory
-// only where a group decides it. Elsewhere it is set in Keera, and the stored
-// role stands.
+// The operator role always follows configuration, so someone removed from it
+// is demoted at their next sign-in. The admin role follows the directory only
+// where a group decides it; elsewhere the stored role stands.
 func roleAtSignIn(stored string, fromIDP authn.Role, adminFromDirectory bool) (authn.Role, bool) {
 	if !adminFromDirectory &&
 		fromIDP != authn.RoleOperator && stored != string(authn.RoleOperator) {

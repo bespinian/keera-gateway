@@ -29,9 +29,8 @@ type FilterProbe struct {
 	CostMicros int64  `json:"cost_micros,omitempty"`
 	Error      string `json:"error,omitempty"`
 	// Refused says the filter refused the sample instead of rewriting it, and
-	// Refusal is its sentence. That is not a fault: the sample carries what a
-	// filter may be written to refuse. It does mean there is no rewrite to
-	// read.
+	// Refusal is its sentence. That is not a fault, since the sample carries
+	// what a filter may be written to refuse, but there is no rewrite to read.
 	Refused bool   `json:"refused,omitempty"`
 	Refusal string `json:"refusal,omitempty"`
 	// Verdicts is how a gate answered each half of the sample: one request
@@ -103,15 +102,11 @@ func leftSecret(out []string) bool {
 }
 
 // CheckFilter runs one filter over a fixed sample and reports what it did.
-//
 // Filters fail quietly: a model too small for the format refuses everything,
-// and an eager instruction deletes part of a request. Neither shows until
-// someone complains.
+// and an eager instruction deletes part of a request.
 //
 // Like CheckModel, this is not a tenant's request: no rate limit, budget or
-// usage event, but a model on the deployment's key needs credit and is
-// billed. Its cost is reported, since every guarded request will pay the
-// same.
+// usage event, but a model on the deployment's key needs credit and is billed.
 func (s *Server) CheckFilter(ctx context.Context, f policy.Filter) FilterProbe {
 	p := FilterProbe{Alias: f.Alias, Mode: f.Mode, Model: f.Model, Shadow: f.Shadow}
 	// A pattern filter needs no backend, and its result is exactly what

@@ -45,18 +45,15 @@ func (s *Store) PurgeUsage(ctx context.Context, before time.Time) (int64, error)
 
 // PurgeEnded deletes the sandboxes that ended before before, and the keys
 // revoked or expired before it. It runs with usage retention: by then the
-// usage they would name is gone, and a sandbox's own row is its usage, read by
-// creation time, which came earlier still.
+// usage they would name is gone, and a sandbox's row is itself usage.
 //
-// A sandbox has ended when it is no longer live: terminated, or a failed
-// agent sandbox. Live ones stay however old they are. An expired one can be
-// revived, and a failed engineer one keeps its volume until somebody
-// terminates it. A failed row has no end time, so the last time it was seen
-// working stands in for one.
+// A sandbox has ended when it is no longer live (see liveSandbox), however old
+// it is. A failed row has no end time, so the last time it was seen working
+// stands in for one.
 //
-// Sandboxes go first, so that their keys are free to go in the same run. A
-// key that a sandbox still names stays: that sandbox may be revived, and its
-// row says whose it was.
+// Sandboxes go first, so their keys can go in the same run. A key a sandbox
+// still names stays: that sandbox may be revived, and its row says whose it
+// was.
 func (s *Store) PurgeEnded(ctx context.Context, before time.Time) (int64, error) {
 	sandboxes, err := inBatches(ctx, func() (int64, error) {
 		tag, err := s.pool.Exec(ctx, `DELETE FROM sandboxes WHERE id IN (

@@ -49,8 +49,6 @@ func TestReaderModelRefusal(t *testing.T) {
 	})
 }
 
-/* ------------------------------------------------------ the pattern filter */
-
 // patternBody is a whole pattern filter: rules, and nothing that would read
 // the request with a model.
 func patternBody() map[string]any {

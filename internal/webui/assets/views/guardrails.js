@@ -78,9 +78,8 @@ export async function openGuardrails(
           .catch(() => [])
       : [],
   ]);
-  // A save replaces the whole guardrail, so editing limits that could not be
-  // read would wipe the rest. A scope with no guardrail returns an empty
-  // object, so an error here really is a failed read.
+  // A save replaces the whole guardrail, so editing after a failed read would
+  // wipe the rest. A scope with no guardrail returns {}, not an error.
   if (limits === null) {
     modal({
       title: `Guardrails for ${name}`,
@@ -120,8 +119,8 @@ export async function openGuardrails(
   else renderReadOnly(ctx, args);
 }
 
-/** ceilingsFor loads the chain above a scope. It is separate from open so a
- *  caller that already has the org's limits does not fetch them twice. */
+/** Separate from openGuardrails so a caller that has the chain already does
+ *  not fetch it twice. */
 export async function ceilingsFor(
   scope,
   { orgID, orgName, projectID, projectName },
@@ -645,8 +644,7 @@ function toolsValue(levels) {
   );
 }
 
-/** effectiveModels intersects every level's allow-list. A level that names
- *  none restricts nothing. */
+/** A level that names no allow-list restricts nothing. */
 function effectiveModels(levels, models) {
   let allowed = null;
   for (const lv of levels) {
@@ -749,12 +747,7 @@ function promptsValue(levels) {
   );
 }
 
-/** filtersValue lists the filters a request passes through. Filters add up
- *  across levels, so this is every level's in run order, each with the level
- *  that set it.
- *
- *  known is the organisation's filters, to say whether each one is enforcing
- *  or only in shadow. */
+/** known is the organisation's filters, to tell enforcing from shadow. */
 function filtersValue(levels, known) {
   const defs = new Map((known || []).map((f) => [f.alias, f]));
   const seen = [];
@@ -788,8 +781,7 @@ function filtersValue(levels, known) {
   );
 }
 
-/** inheritedFilters names the filters already running above this scope, so
- *  an administrator does not add one twice. */
+/** So an administrator does not add a filter twice. */
 function inheritedFilters(ceilings) {
   const said = ceilings.filter(
     (c) => c.limits && (c.limits.filters || []).length,
@@ -844,9 +836,8 @@ function describe(lim) {
   return bits.join(" · ") || "nothing set";
 }
 
-/** inheritedPrompts shows the prompts the levels above already send. A
- *  prompt is appended to those, so without seeing them a project would write
- *  the same wording again. */
+/** A prompt is appended to these, so seeing them avoids repeating the
+ *  wording. */
 function inheritedPrompts(ceilings) {
   const said = ceilings.filter((c) => c.limits && c.limits.system_prompt);
   if (!said.length) return null;

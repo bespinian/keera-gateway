@@ -277,9 +277,8 @@ func TestAccountSandboxesAccumulates(t *testing.T) {
 	if got.RunningSeconds < 85 || got.RunningSeconds > 95 {
 		t.Errorf("running_seconds = %d, want about 90", got.RunningSeconds)
 	}
-	// Core-seconds is running time weighted by how large the machine was, which
-	// is the number a chargeback wants: two minutes of thirty-two cores is not
-	// two minutes of two.
+	// A chargeback weights running time by machine size: two minutes of
+	// thirty-two cores is not two minutes of two.
 	if got.CoreSeconds() != got.RunningSeconds*4 {
 		t.Errorf("core_seconds = %d for a four-core sandbox", got.CoreSeconds())
 	}
@@ -474,9 +473,8 @@ func TestSandboxPolicyLimitsRoundTrip(t *testing.T) {
 		t.Errorf("sandbox_classes = %v", got.SandboxClasses)
 	}
 
-	// And they have to reach the hot path, because that is the only place they
-	// are enforced: LookupKey is the one read a sandbox request resolves
-	// through.
+	// They have to reach the hot path, the only place they are enforced:
+	// LookupKey is what a sandbox request resolves through.
 	resolved, err := st.LookupKey(ctx, f.hash)
 	if err != nil {
 		t.Fatalf("LookupKey: %v", err)

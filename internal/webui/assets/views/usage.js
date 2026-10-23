@@ -30,10 +30,9 @@ const GROUPS = [
 // Offered only across every organisation: inside one it is a single row.
 const ORG_GROUP = { key: "org", label: "Organisation" };
 
-// The shared windows plus a quarter, kept apart from the shared choice: a
-// chargeback is read over a month or a quarter, and carrying that back to the
-// dashboard would surprise. The shared ones are not restated so they cannot
-// drift.
+// The shared windows plus a quarter, as a chargeback is read over a month or
+// a quarter. Kept apart from the shared choice, so a quarter does not carry
+// over to the dashboard.
 const RANGES = [
   ...SHARED_RANGES,
   { label: "90d", since: "2160h", long: "Last 90 days" },

@@ -81,7 +81,6 @@ export function signsInWith(u) {
  *  null before they are linked to an identity. */
 function identityProvider(me, u) {
   if (isPasskeyAccount(u)) return [passkeyMark(), "Passkey"];
-  // The provider is the part of the external ID before the first colon.
   const name = (u.external_id || "").split(":")[0];
   if (!name || name === "keera") return null;
   const p = (me.providers || []).find((x) => x.name === name);

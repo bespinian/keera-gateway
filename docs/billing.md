@@ -189,6 +189,11 @@ CHF 100. It pays for the payment and is not added to the credit. The panel
 shows the VAT, the fee and the total under the amount. Automatic top-ups carry
 the fee too.
 
+An organisation somebody created by signing up is limited until its first
+payment, which opens the models and MCP servers inside your network and
+sandboxes to it. See
+[What a new organisation can use](sso.md#what-a-new-organisation-can-use).
+
 ### Receipts
 
 Every paid payment has a receipt: the invoice PostFinance makes for it, as a
@@ -204,11 +209,6 @@ The control API serves it at `GET /control/v1/billing/payments/<id>/receipt`.
 Keera fetches the receipt from PostFinance each time, so it looks the way the
 invoice template of your space says. Put your company's address and VAT number
 there. A grant has no receipt, because nobody paid for it.
-
-An organisation somebody created by signing up is limited until its first
-payment, which opens the models and MCP servers inside your network and
-sandboxes to it. See
-[What a new organisation can use](sso.md#what-a-new-organisation-can-use).
 
 ### Automatic top-up
 

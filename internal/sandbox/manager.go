@@ -174,25 +174,21 @@ type CreateRequest struct {
 	// their code.
 	Task string
 	// AuthorizedKeys are the ssh public keys that may open a shell, in
-	// practice the caller's own.
-	//
-	// The attach surface authenticates first, so this is a second lock, for
-	// anything else the network policy lets reach the pod. An engineer's
-	// sandbox with none is refused.
+	// practice the caller's own. The attach surface authenticates first, so
+	// this is a second lock against anything else the network policy lets
+	// reach the pod. An engineer's sandbox with none is refused.
 	AuthorizedKeys []string
 	// Limits is the caller's resolved sandbox guardrail: the organisation's,
 	// narrowed by the project's.
 	Limits policy.ResolvedSandbox
-	// Env is extra environment from the caller, kept for the sandbox's life
-	// until a resume after it expired. It cannot name a KEERA_ variable, or a
-	// caller could point a sandbox at another endpoint.
+	// Env is extra environment from the caller. A resume after expiry drops
+	// it. It cannot name a KEERA_ variable, or a caller could point a sandbox
+	// at another endpoint.
 	Env map[string]string
 }
 
-// Create makes one sandbox.
-//
-// A refusal leaves nothing live behind: a key or repository credential made
-// before a later check refuses is revoked at once.
+// Create makes one sandbox. A refusal leaves nothing live behind: a key or
+// repository credential made before a later check refuses is revoked at once.
 func (m *Manager) Create(ctx context.Context, req CreateRequest) (store.Sandbox, error) {
 	if req.Purpose == "" {
 		req.Purpose = policy.PurposeEngineer
@@ -355,14 +351,12 @@ func clampTTL(class policy.SandboxClass, want time.Duration, limits policy.Resol
 }
 
 // checkQuota refuses a sandbox that would take the organisation or the project
-// past its limit.
-//
-// There is no per-key quota: the key is minted for one sandbox, so it would
-// always be a limit of one.
+// past its limit. There is no per-key quota: each key is minted for one
+// sandbox.
 //
 // Each count is held to its own level's limit. req.Limits is the tightest of
-// every level, which is right for the project, but a project capped at two
-// must not cap its whole organisation at two.
+// all levels, right for the project, but a project capped at two must not cap
+// its whole organisation at two.
 func (m *Manager) checkQuota(ctx context.Context, req CreateRequest) error {
 	orgLimit := req.Limits.MaxSandboxes
 	if req.ProjectID != "" {

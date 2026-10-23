@@ -60,10 +60,8 @@ func vouchedByDirectory(externalID string) bool {
 // sameIdentity refuses a new identity at an address that another identity
 // provider already signs in. A person keeps the provider they first signed in
 // with, in every organisation, so whoever controls the address at a second
-// provider cannot become them.
-//
-// It is only asked of an identity without a row yet: two identities linked
-// before this rule keep working.
+// provider cannot become them. Only an identity without a row yet is checked,
+// so two identities linked before this rule keep working.
 func (s *Server) sameIdentity(ctx context.Context, identity authn.Identity) error {
 	others, err := s.st.ExternalIDsFor(ctx, identity.Email)
 	if err != nil {
@@ -193,8 +191,7 @@ func (s *Server) switchOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 	}
 	switch {
 	case errors.Is(err, store.ErrNotFound), errors.Is(err, store.ErrEmailTaken):
-		conflict(w, "invitation_gone",
-			"that invitation is no longer there")
+		conflict(w, "invitation_gone", "that invitation is no longer there")
 		return
 	case err != nil:
 		s.fail(w, err)

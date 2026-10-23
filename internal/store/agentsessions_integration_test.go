@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-// The report a request log cannot be: what one task cost, how many calls it
-// took, and where it stopped.
 func TestSessionsGroupRequestsIntoTheTasksTheyWereMadeFor(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -34,9 +32,8 @@ func TestSessionsGroupRequestsIntoTheTasksTheyWereMadeFor(t *testing.T) {
 		OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID, Alias: "keera-code",
 		SessionKey: conversation, Status: 402, Error: "your project has spent its month budget",
 	})
-	// The same conversation two hours later. The opening prompt is the same
-	// bytes and so the key is the same, which is exactly the case the idle gap
-	// exists for: this is tomorrow's task, not more of this one.
+	// The same conversation two hours later, with the same opening prompt and
+	// so the same key. The idle gap exists for this: it is a new task.
 	events = append(events, Event{
 		TS: now.Add(-time.Hour), OrgID: f.orgID, ProjectID: f.projectID, KeyID: f.keyID,
 		Alias: "keera-speed", SessionKey: conversation, CostMicros: 250,
@@ -123,8 +120,6 @@ func TestSessionsGroupRequestsIntoTheTasksTheyWereMadeFor(t *testing.T) {
 	}
 }
 
-// A client that names its own session is not guessed about, and the report says
-// which of the two it is looking at.
 func TestAStatedSessionKeyIsMarkedAsOne(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -144,9 +139,8 @@ func TestAStatedSessionKeyIsMarkedAsOne(t *testing.T) {
 	}
 }
 
-// The filters that narrow which sessions are listed must not change what a
-// session is. A model is the one that could: applied to the rows it would cut a
-// task in half at every point the agent switched models.
+// Applied to the rows, a model filter would cut a task in half wherever the
+// agent switched models.
 func TestNarrowingToAModelKeepsTheSessionWhole(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -194,8 +188,6 @@ func TestNarrowingToAModelKeepsTheSessionWhole(t *testing.T) {
 	}
 }
 
-// How a reader actually arrives: they have a row in the request log and want
-// the task it was part of.
 func TestASessionIsFoundFromAnyRequestInIt(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -247,8 +239,8 @@ func TestASessionIsFoundFromAnyRequestInIt(t *testing.T) {
 		t.Fatalf("session = %d calls with %d rows, want 3 and 3 - the later task on "+
 			"the same conversation is a different session", session.Requests, len(requests))
 	}
-	// Oldest first: a task is read from its beginning, which is the one log
-	// here that does not read newest first.
+	// Oldest first, unlike every other log here: a task is read from its
+	// beginning.
 	if !requests[0].CreatedAt.Before(requests[2].CreatedAt) {
 		t.Errorf("the requests are not oldest-first: %v then %v", requests[0].CreatedAt, requests[2].CreatedAt)
 	}
@@ -286,10 +278,7 @@ func TestASessionIsFoundFromAnyRequestInIt(t *testing.T) {
 	}
 }
 
-// A task already under way when the window opened is reported whole. Reported
-// from the window's edge instead, its cost would be a wrong number rather than
-// a partial one, and the screen would say a task cost four rappen when it cost
-// two francs.
+// Cut at the window's edge, a task's cost would be wrong, not just partial.
 func TestASessionStraddlingTheWindowIsReportedWhole(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -335,8 +324,8 @@ func TestASessionStraddlingTheWindowIsReportedWhole(t *testing.T) {
 	}
 }
 
-// The rankings are the report's reason to exist: one runaway task is a single
-// row that a log ordered by time buries among the hundreds that were fine.
+// A log ordered by time buries one runaway task among the hundreds that were
+// fine.
 func TestSessionsRankByWhatMakesOneWorthOpening(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -535,8 +524,6 @@ func TestSessionsNarrowByOutcomeAndOfferWhatOccurred(t *testing.T) {
 	}
 }
 
-// Every session report is one tenant's, and narrows to one project, key or person
-// the way every other report over this log does.
 func TestSessionsStayInsideOneTenantAndNarrowToOneEntity(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)
@@ -600,8 +587,7 @@ func TestSessionsStayInsideOneTenantAndNarrowToOneEntity(t *testing.T) {
 	}
 }
 
-// The gap is a reporting threshold rather than something stored, so changing it
-// re-cuts sessions that were recorded before anybody chose it.
+// The gap is not stored, so changing it re-cuts sessions already recorded.
 func TestTheIdleGapIsAppliedAtReadTime(t *testing.T) {
 	st, ctx := db(t)
 	f := newFixture(t, st, ctx)

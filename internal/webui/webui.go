@@ -42,8 +42,7 @@ var (
 	shell file
 )
 
-// shellPath is where the embedded document lives. The map is keyed by the URL
-// the browser asks for, so keys carry the assets/ prefix.
+// files is keyed by URL path, so keys carry the assets/ prefix.
 const shellPath = "/assets/index.html"
 
 func init() {
@@ -176,7 +175,6 @@ func setHeaders(header http.Header, contentType, etag string, zipped bool) {
 	header.Set("Content-Security-Policy", contentSecurityPolicy)
 	header.Set("X-Content-Type-Options", "nosniff")
 	header.Set("Referrer-Policy", "same-origin")
-	// Only the browser may cache the control panel, and only after
-	// revalidating.
+	// Only the browser may cache the panel, and only after revalidating.
 	header.Set("Cache-Control", "no-cache, private")
 }

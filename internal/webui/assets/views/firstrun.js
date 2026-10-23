@@ -1,6 +1,4 @@
-// The first-run checklist: the steps a fresh deployment needs, in order, each
-// with its button, each ticked off from what the control plane already has.
-//
+// The first-run checklist, ticked off from what the control plane already has.
 // It replaces the dashboard until the first request has been served and, with
 // card payments, until the organisation has had credit. A member gets a
 // shorter guide, until one of their keys has made a request.
@@ -11,8 +9,7 @@ import { openConnectClient, usableKeys } from "./connect.js";
 import { activateKey, confirmRotate, openIssueKey } from "./keys.js";
 import { newOrg, orgNameOf } from "./orgs.js";
 
-/** firstRunDue reports whether the checklist replaces the dashboard, from the
- *  counts of /v1/setup. The sidebar uses it to name the screen. */
+/** The sidebar uses this too, to name the screen. */
 export function firstRunDue(ctx, setup) {
   if (!isAdmin(ctx) || !setup) return false;
   if (setup.requests === 0) return true;
@@ -137,8 +134,6 @@ export function firstRun(ctx, setup, credit) {
   return stepList(steps);
 }
 
-/** memberRunDue reports whether a member's own guide replaces the dashboard:
- *  until one of their keys has made a request. access is /v1/access. */
 export function memberRunDue(ctx, access) {
   return (
     !isAdmin(ctx) &&
@@ -149,9 +144,8 @@ export function memberRunDue(ctx, access) {
   );
 }
 
-/** memberRun is a member's guide, from signing in to a working editor. An
- *  administrator issues the key, so the first step is to get its secret: by
- *  activating the key, or rotating one already active. */
+/** An administrator issues the key, so the first step is to get its secret:
+ *  by activating the key, or rotating one already active. */
 export function memberRun(ctx, access) {
   const keys = usableKeys(access);
   const key = keys[0];
@@ -197,8 +191,8 @@ export function memberRun(ctx, access) {
   return stepList(steps);
 }
 
-/** getKeyStep is the first step of a member's guide when they have no key to
- *  activate: an active key whose secret they may not have, or none. */
+/** For a member with no key to activate: an active key whose secret they may
+ *  not have, or none. */
 function getKeyStep(keys, key, ctx) {
   return {
     title: "Get your API key",

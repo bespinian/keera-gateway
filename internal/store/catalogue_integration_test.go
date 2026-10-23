@@ -85,8 +85,8 @@ func TestModelCatalogueRoundTrip(t *testing.T) {
 	if got.HasAPIKey {
 		t.Error("HasAPIKey is set for a model with no stored credential")
 	}
-	// The date is stored as a date and read back as text, so it is worth
-	// checking it comes back as it went in.
+	// The date is stored as a date and read back as text, so check it
+	// round-trips.
 	if got.ReleaseDate != "2026-07-24" || got.Location != "usa" {
 		t.Errorf("release date = %q, location = %q, want 2026-07-24 and usa",
 			got.ReleaseDate, got.Location)
@@ -183,8 +183,6 @@ func TestANewOrganisationStartsWithTheTemplate(t *testing.T) {
 	}
 }
 
-// An organisation's models are its own: another tenant does not see them, and
-// two tenants can each use an alias.
 func TestOrganisationModelsAreScopedToTheirOrganisation(t *testing.T) {
 	st, ctx := db(t)
 	anOrg(t, st, ctx, "org_1")

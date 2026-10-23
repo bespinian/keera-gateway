@@ -69,7 +69,6 @@ func page(w http.ResponseWriter, q url.Values) (limit int, before int64, ok bool
 	return limit, before, true
 }
 
-// pageLimit reads the limit query parameter alone.
 func pageLimit(w http.ResponseWriter, q url.Values) (int, bool) {
 	v := q.Get("limit")
 	if v == "" {
@@ -84,12 +83,10 @@ func pageLimit(w http.ResponseWriter, q url.Values) (int, bool) {
 }
 
 // entityScope resolves the one project, key or person a report is narrowed to,
-// and answers 404 for one in another organisation. Without this, another
-// tenant's key id would reveal their spend.
-//
-// A model alias is not checked: it reveals nothing, since the rows are only
-// this organisation's. Across every organisation, which only an operator
-// sees, it adds up every organisation's model of that alias.
+// and answers 404 for one in another organisation, so another tenant's key id
+// cannot reveal their spend. A model alias is not checked: the rows are only
+// this organisation's, so it reveals nothing. Across every organisation, which
+// only an operator sees, it sums every model of that alias.
 func (s *Server) entityScope(w http.ResponseWriter, r *http.Request,
 	orgID string,
 ) (store.ReportScope, bool) {
@@ -140,11 +137,9 @@ func (s *Server) inOrg(w http.ResponseWriter, orgID, owner string, err error) bo
 	return true
 }
 
-// overview is the dashboard in one round trip.
-//
-// Narrowed by the query, it is also one project's, key's or model's own screen.
-// Answering both here keeps a project's own page equal to its bar on the
-// dashboard.
+// overview is the dashboard in one round trip. Narrowed by the query, it is
+// also one project's, key's or model's own screen, which keeps that screen
+// equal to its bar on the dashboard.
 func (s *Server) overview(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	orgID, from, to, ok := s.reportScope(w, r, p)
 	if !ok {
@@ -283,7 +278,7 @@ func parseSort(w http.ResponseWriter, v url.Values, offered []store.Sort) (store
 // requestQuery is what the request log, its stream and the session reports
 // share: whose requests the caller may read, the organisation and entity
 // narrowed to, and the outcome and status filters. The window is returned
-// apart, because the stream has none. It returns false once it has answered with an error.
+// apart, because the stream has none. False means it already answered.
 func (s *Server) requestQuery(w http.ResponseWriter, r *http.Request, p *authn.Principal) (
 	rq store.RequestQuery, from, to time.Time, ok bool,
 ) {
@@ -599,12 +594,9 @@ func beginCSV(w http.ResponseWriter, filename string) *csvWriter {
 	return &csvWriter{csv.NewWriter(w)}
 }
 
-// csvWriter is encoding/csv, except that no field can be read as a formula by
-// the spreadsheet that opens it.
-//
-// The exports carry names and audit detail that users wrote. A project called
-// `=HYPERLINK(...)` would run as a formula in Excel, and quoting does not
-// prevent that.
+// csvWriter is encoding/csv, except that no field can be read as a formula.
+// Exports carry names and audit detail users wrote: a project called
+// `=HYPERLINK(...)` would run in Excel, and quoting does not prevent that.
 type csvWriter struct{ *csv.Writer }
 
 // Write escapes every field in place, then writes the row.
@@ -616,10 +608,8 @@ func (c *csvWriter) Write(row []string) error {
 }
 
 // csvSafe prefixes a field a spreadsheet would evaluate with an apostrophe,
-// which Excel, LibreOffice and Sheets all read as "this is text".
-//
-// A leading sign followed by a number is left alone, so cost columns still
-// add up.
+// which Excel, LibreOffice and Sheets all read as "this is text". A sign
+// followed by a number is left alone, so cost columns still add up.
 func csvSafe(field string) string {
 	if field == "" {
 		return field

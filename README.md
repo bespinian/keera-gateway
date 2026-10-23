@@ -78,10 +78,8 @@ cannot do. [First run](docs/install.md#first-run) issues a first key and sends
 a request, and [docs/install.md](docs/install.md) covers every setting.
 [docs/run-locally.md](docs/run-locally.md) is the development loop.
 
-`keera doctor` checks the deployment's configuration and an organisation's
-models. It lists what is missing and what is declared but not enforced, and
-what to do about each. With `--probe`, it also checks that every enabled model
-answers with a tool call rather than prose.
+`keera doctor` checks the deployment and says what to fix; see
+[When it does not work](docs/install.md#when-it-does-not-work).
 
 A developer signs in with one command, which also makes that deployment the
 default for later commands

@@ -96,8 +96,8 @@ func Run(ctx context.Context, args []string) error {
 	}
 }
 
-// versionCmd prints the build version. It takes nothing, and says so rather
-// than ignore what it was given.
+// versionCmd prints the build version. It refuses arguments rather than
+// ignore them.
 func versionCmd(args []string) error {
 	if done, err := newCmdRun("version", args).parse(); done {
 		return err
@@ -127,10 +127,10 @@ func takeURL(args []string) ([]string, error) {
 	})
 }
 
-// takeGlobal moves a global flag, as --name value or --name=value, out of the
-// arguments and hands each value to set. Taking it here means no command can
-// forget to declare it. It stops at "--": what follows belongs to the command
-// being run, as in `keera sandbox ssh box -- git status`.
+// takeGlobal takes a global flag (--name value or --name=value) out of args
+// and hands each value to set, so no command can forget to declare it. It
+// stops at "--": the rest belongs to the command being run, as in
+// `keera sandbox ssh box -- git status`.
 func takeGlobal(args []string, name string, set func(string) error) ([]string, error) {
 	out := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {

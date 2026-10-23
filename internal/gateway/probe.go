@@ -16,10 +16,10 @@ import (
 
 // Probe is what one model check found.
 //
-// The failure that breaks coding agents is silent: when the vLLM tool-call
-// parser does not match the model, the call comes back as text in `content`
-// with `tool_calls` empty. The endpoint answers 200, nothing logs an error,
-// and the agent never edits a file.
+// It targets a silent failure: when the vLLM tool-call parser does not match
+// the model, the call comes back as text in `content` with `tool_calls` empty.
+// The endpoint answers 200, nothing logs an error, and the agent never edits
+// a file.
 type Probe struct {
 	Alias string `json:"alias"`
 	// Backend is the base URL that answered, for a model with several.
@@ -30,8 +30,8 @@ type Probe struct {
 	// Streamed means the response arrived as server-sent events. A buffering
 	// ingress turns the stream into one delivery at the end.
 	Streamed bool `json:"streamed"`
-	// ToolCalls is the one that matters: the model was given a tool and a
-	// question only it can answer, and the call came back in `tool_calls`.
+	// ToolCalls is the one that matters: given a tool and a question only it
+	// can answer, the model's call came back in `tool_calls`.
 	ToolCalls bool `json:"tool_calls"`
 	// ToolCallAsText means the model called the tool and the parser returned
 	// it as prose: the misconfiguration worth naming.
@@ -46,9 +46,8 @@ type Probe struct {
 	TTFTMillis int64  `json:"ttft_ms,omitempty"`
 	TotalMS    int64  `json:"total_ms,omitempty"`
 	// Sample is the start of whatever prose came back.
-	Sample string `json:"sample,omitempty"`
-	Error  string `json:"error,omitempty"`
-	// Warnings are the things that are not failures but are worth saying.
+	Sample   string   `json:"sample,omitempty"`
+	Error    string   `json:"error,omitempty"`
 	Warnings []string `json:"warnings,omitempty"`
 	// NoCredit says the model is on the deployment's key and the
 	// organisation has no credit for it, so it was not called.
@@ -62,11 +61,10 @@ type Probe struct {
 // answer in time, which is itself useful to know.
 const probeTimeout = 30 * time.Second
 
-// CheckModel exercises one model end to end against its own backends, with
-// the same client, credentials and round-robin as real traffic. It skips
-// serve: a check is not a tenant's request, so it has no rate limit, budget
-// or usage event. On the deployment's key it needs credit and is billed,
-// like any call there.
+// CheckModel exercises one model end to end, with the same client,
+// credentials and round-robin as real traffic. It skips serve: a check is not
+// a tenant's request, so it has no rate limit, budget or usage event. On the
+// deployment's key it needs credit and is billed, like any call there.
 func (s *Server) CheckModel(ctx context.Context, m policy.Model) Probe {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
@@ -119,9 +117,8 @@ func (s *Server) checkChat(ctx context.Context, m policy.Model, p Probe) Probe {
 	start := time.Now()
 	resp := s.probeCall(ctx, m, "/chat/completions", chatProbe(m, true), &p)
 	if resp == nil && toolsOff(p) {
-		// Clients may never send tools, so a backend that refuses them is not
-		// broken for everyone. Asking again without them says whether it
-		// answers at all.
+		// A backend that refuses tools still works for clients that send
+		// none, so ask again without them.
 		p = Probe{Alias: p.Alias, ToolsOff: true}
 		start = time.Now()
 		resp = s.probeCall(ctx, m, "/chat/completions", chatProbe(m, false), &p)
@@ -217,7 +214,6 @@ type probeMessage struct {
 	} `json:"tool_calls"`
 }
 
-// probeReply gathers what a chat check's answer carried, chunk by chunk.
 type probeReply struct {
 	served    string
 	toolCalls bool
@@ -225,7 +221,7 @@ type probeReply struct {
 	first     time.Time
 }
 
-// scan reads one chunk of the answer, streamed or whole.
+// scan reads one chunk of the answer, or the whole answer.
 func (r *probeReply) scan(chunk []byte) {
 	var c struct {
 		Model   string `json:"model"`
@@ -289,9 +285,8 @@ var decisionProbe = decisionQuestion{Type: "choice",
 	Instructions: "Which language is this text written in?",
 	Criteria:     map[string]string{"A": "English", "B": "Go source code"}}
 
-// checkDecision asks a decision model one question with an obvious answer.
-// There is no stream or tool call to ask about: routers and gates read one
-// answer, and that is all such a model gives.
+// checkDecision asks one question with an obvious answer. There is no stream
+// or tool call to check: routers and gates read one answer.
 func (s *Server) checkDecision(ctx context.Context, m policy.Model, p Probe) Probe {
 	body, ok := s.probeAnswer(ctx, m, decisionPath,
 		decisionBody(m, decisionProbe, []string{"func Add(a, b int) int { return a + b }"}), &p)
@@ -366,8 +361,7 @@ func (s *Server) checkEmbedding(ctx context.Context, m policy.Model, p Probe) Pr
 }
 
 // probeCall sends a check's request and records which backend answered, and
-// with what status. It returns nil when the check is already over, with
-// p.Error saying why.
+// its status. It returns nil when the check is over, with p.Error saying why.
 func (s *Server) probeCall(ctx context.Context, m policy.Model, path string,
 	request map[string]any, p *Probe) *http.Response {
 	payload, err := json.Marshal(request)
@@ -404,8 +398,7 @@ func (s *Server) probeCall(ctx context.Context, m policy.Model, path string,
 }
 
 // probeAnswer sends a check's request and reads the whole answer, timing
-// both. It returns false when the check is already over, with p.Error saying
-// why.
+// both. It returns false when the check is over, with p.Error saying why.
 func (s *Server) probeAnswer(ctx context.Context, m policy.Model, path string,
 	request map[string]any, p *Probe) ([]byte, bool) {
 	start := time.Now()
@@ -432,9 +425,8 @@ func (s *Server) probeBody(resp *http.Response, p *Probe) ([]byte, bool) {
 	return body, true
 }
 
-// upstreamComplaint renders a refusal from the inference plane as a status
-// and, if the backend gave one, its message. The caller adds the subject ("the
-// backend", "its model").
+// upstreamComplaint renders a refusal as its status and the backend's
+// message, if any. The caller adds the subject ("the backend", "its model").
 func upstreamComplaint(body []byte, status int) string {
 	if msg := upstreamText(body); msg != "" {
 		return strconv.Itoa(status) + ": " + sample(msg)
@@ -442,9 +434,9 @@ func upstreamComplaint(body []byte, status int) string {
 	return strconv.Itoa(status)
 }
 
-// unreachable explains a connection that never happened. Usually it is a
-// first start: vLLM loads weights for minutes before it listens, and saying so
-// saves a needless restart.
+// unreachable explains a failed connection. Usually it is a first start:
+// vLLM loads weights for minutes before it listens, and saying so saves a
+// needless restart.
 func unreachable(err error) string {
 	if err == nil {
 		return ""

@@ -73,24 +73,21 @@ type ProviderModel struct {
 // providers is the built-in table.
 //
 // Prices are micro-units of CHF per million tokens, at each provider's list
-// price. They are a starting point for showback, and an entry can override
-// them.
+// price: a starting point for showback, which an entry can override.
 //
-// Release dates are the day each model came out, from its maker's own
-// announcement. An FP8 build takes the day of the model it was made from.
+// Release dates come from each maker's own announcement. An FP8 build takes
+// the date of the model it was made from.
 //
 // Last checked against each pricing page on 2026-10-08. This is not a live
-// price feed, so a price cut since then is over-charged until somebody
-// rebuilds.
+// feed, so a later price cut is over-charged until the next build.
 //
-// Retired models are dropped before their retirement date, because a row for
-// a model nobody can call is worse than no row.
+// Retired models are dropped before their retirement date: a row for a model
+// nobody can call is worse than none.
 //
 // Descriptions say what the other fields cannot: how big a model is and what
-// it suits. A router reads them beside models from other providers, and knows
-// none by id, so they do not rank a model against its provider's others or
-// name one by id. Prices, context and age have their own columns. Where a
-// model runs depends on the deployment, so they do not say that either.
+// it suits. A router reads them beside other providers' models and knows none
+// by id, so they neither rank a model against its siblings nor name one by
+// id. They leave out price, context, age and where the model runs.
 var providers = []Provider{{
 	Name:    "anthropic",
 	Summary: "Anthropic's own Claude models, on Anthropic's own API.",

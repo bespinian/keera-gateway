@@ -361,7 +361,6 @@ func TestTheDefaultsAreTheOnesTheCommentsPromise(t *testing.T) {
 	if o.WriteTimeout != 10*time.Second {
 		t.Errorf("WriteTimeout = %v, want 10s", o.WriteTimeout)
 	}
-	// A recorder built with explicit values keeps them.
 	set := Options{Buffer: 1, BatchSize: 2, FlushInterval: time.Second, BlockFor: time.Minute,
 		WriteTimeout: time.Hour}
 	was := set

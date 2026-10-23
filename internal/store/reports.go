@@ -72,10 +72,8 @@ type SeriesPoint struct {
 	Failed     int64     `json:"failed"`
 }
 
-// Overview is everything the dashboard needs, in one round trip.
-//
-// One project's, key's or model's own screen uses it too, over fewer rows.
-// Computing both the same way keeps the screens from disagreeing.
+// Overview is everything the dashboard needs, in one round trip. A project's,
+// key's or model's own screen uses it too, so the screens never disagree.
 type Overview struct {
 	From         time.Time `json:"from"`
 	To           time.Time `json:"to"`
@@ -155,8 +153,8 @@ func (s *Store) Overview(ctx context.Context, orgID string, from, to time.Time,
 	if o.TopModels, err = s.topUsage(ctx, q, "model"); err != nil {
 		return o, err
 	}
-	// Across a whole organisation the key list is long and says little, so the
-	// dashboard skips it. Inside one project or model it names who is responsible.
+	// Across a whole organisation the key list is long and says little. Inside
+	// one project or model it names who is responsible.
 	if !sc.Empty() {
 		if o.TopKeys, err = s.topUsage(ctx, q, "key"); err != nil {
 			return o, err
@@ -227,8 +225,8 @@ func (s *Store) ProjectOrg(ctx context.Context, projectID string) (string, error
 	return orgID, nil
 }
 
-// KeyOwner is where a key sits: its organisation, and its project and the person
-// it is for, each empty for none.
+// KeyOwner is where a key sits: its organisation, and its project and the
+// person it is for, each empty for none.
 type KeyOwner struct {
 	OrgID, ProjectID, UserID string
 	Kind                     policy.KeyKind
@@ -383,8 +381,8 @@ type Setup struct {
 	Keys     int64 `json:"keys"`
 	Models   int64 `json:"models"`
 	Requests int64 `json:"requests"`
-	// Filters, Routers, Sandboxes and MCP servers are optional. The panel
-	// hides their screens until there is at least one.
+	// Filters, Routers, Sandboxes and MCP servers are optional.
+	// The panel hides their screens until there is at least one.
 	Filters    int64 `json:"filters"`
 	Routers    int64 `json:"routers"`
 	Sandboxes  int64 `json:"sandboxes"`
@@ -448,8 +446,8 @@ type Refusal struct {
 }
 
 // Refusals lists the most recent refused or failed requests made with one of
-// keyIDs, newest first. An empty keyIDs returns nothing, not everything: the caller is
-// asking about their own keys.
+// keyIDs, newest first. An empty keyIDs returns nothing, not everything: the
+// caller is asking about their own keys.
 func (s *Store) Refusals(ctx context.Context, orgID string, keyIDs []string,
 	since time.Time, limit int) ([]Refusal, error) {
 	if len(keyIDs) == 0 {

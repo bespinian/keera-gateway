@@ -104,8 +104,7 @@ func TestStripANSIKeepsEverythingElse(t *testing.T) {
 	}
 }
 
-// TestPaintedTableHasThePlainTableSColumns is the one that matters: colour is
-// only allowed if it changes nothing but the colour.
+// The one that matters: colour may change nothing but the colour.
 func TestPaintedTableHasThePlainTableSColumns(t *testing.T) {
 	t.Cleanup(func() { style = false })
 	rows := func(w *table) {

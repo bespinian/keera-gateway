@@ -43,8 +43,6 @@ export function replace(el, ...children) {
   return el;
 }
 
-/* ------------------------------------------------------------ formatting */
-
 const numberFmt = new Intl.NumberFormat();
 
 export function num(n) {
@@ -67,10 +65,9 @@ export function money(micros) {
   return `CHF ${amount(micros)}`;
 }
 
-/** amount renders integer micro-units without the currency, for where it is
- *  said once nearby. Small amounts keep their digits: a per-request cost
- *  rounded to two decimals reads as a bug. The CLI rounds the same way, in
- *  policy.FormatAmount. */
+/** amount renders integer micro-units without the currency. Small amounts
+ *  keep their digits, as in policy.FormatAmount: a per-request cost rounded
+ *  to two decimals reads as a bug. */
 export function amount(micros) {
   const v = (micros || 0) / 1e6;
   let s;
@@ -130,8 +127,8 @@ export function capitalise(word) {
   return word ? word[0].toUpperCase() + word.slice(1) : "";
 }
 
-/** duration is how long a task ran, in minutes and hours. ms() is for one
- *  request; nobody reads "690 s" as eleven and a half minutes. */
+/** duration is how long a task ran, in minutes and hours: nobody reads
+ *  "690 s" as eleven and a half minutes. */
 export function duration(msValue) {
   const secs = Math.round((msValue || 0) / 1000);
   if (secs < 60) return secs + " s";
@@ -181,8 +178,7 @@ export function releaseDay(day) {
   });
 }
 
-/** locationName is where a model runs, in words. An unknown code is shown in
- *  capitals. */
+/** locationName is where a model runs, in words. */
 export function locationName(loc) {
   const names = { ch: "Switzerland", usa: "USA", onprem: "On-prem" };
   if (!loc) return "-";
@@ -206,8 +202,6 @@ export function ago(iso) {
   }
   return date(iso);
 }
-
-/* ------------------------------------------------------------ components */
 
 /** brandMark is the product mark. It uses the favicon file, so the two cannot
  *  drift apart. */
@@ -249,9 +243,8 @@ export const icons = {
     "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z",
   keys: "M21 2l-2 2m-7.6 7.6a5 5 0 1 1-7.1 7.1 5 5 0 0 1 7.1-7.1zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3",
   models: "M12 2l9 5v10l-9 5-9-5V7zM3.3 7L12 12l8.7-5M12 12v10",
-  // The two places a model can run, for the tiles that choose between them: a
-  // rack for a self-hosted URL, and a cloud for a hosted provider with no logo
-  // here.
+  // Where a model runs: a rack for a self-hosted URL, a cloud for a hosted
+  // provider with no logo.
   selfHosted:
     "M3 4.5h18v6H3zM3 13.5h18v6H3zM6.5 7.5h.01M6.5 16.5h.01M10 7.5h7M10 16.5h7",
   cloud: "M18 10h-1.3A6 6 0 1 0 9 19h9a4.5 4.5 0 0 0 0-9z",
@@ -260,7 +253,8 @@ export const icons = {
   audit:
     "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M9 13h6M9 17h4",
   orgs: "M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M9 13h.01M9 17h.01M15 9h.01M15 13h.01M15 17h.01",
-  external: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3",
+  external:
+    "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3",
   signout: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9",
   plus: "M12 5v14M5 12h14",
   passkey:
@@ -288,10 +282,8 @@ export const icons = {
   // A funnel with a shield: the guardrail that rewrites rather than refuses.
   filters:
     "M21 4H3l7 8.5V19l4 2v-8.5zM17 3l3.5 1.4v3c0 2.2-1.4 4.2-3.5 5-2.1-.8-3.5-2.8-3.5-5v-3z",
-  // The three filter modes, drawn only on the tiles that pick one, so each
-  // shows what the mode does.
-  //
-  // Rewriting: a pencil over lines of text.
+  // The three filter modes, for the tiles that pick one. Rewriting: a pencil
+  // over lines of text.
   rewrite:
     "M4 7h8M4 12h5M4 17h10" +
     "M19.6 4.4a1.5 1.5 0 0 1 0 2.1l-5.8 5.8-2.8.7.7-2.8 5.8-5.8a1.5 1.5 0 0 1 2.1 0z",
@@ -338,25 +330,21 @@ export const icons = {
   sessions:
     "M6 4c-1.6 0-2 1-2 2v4c0 1-.4 2-2 2 1.6 0 2 1 2 2v4c0 1 .4 2 2 2" +
     "M10 8h11M10 12h11M10 16h11",
-  // Two on the left, one in the middle, two on the right: traffic passes
-  // through one point.
+  // Traffic from the left passes through one point to the right.
   map:
     "M4 5.5h3M4 18.5h3M17 5.5h3M17 18.5h3M10.5 12h3" +
     "M7 5.5c3 0 3 6.5 3.5 6.5M7 18.5c3 0 3-6.5 3.5-6.5" +
     "M17 5.5c-3 0-3 6.5-3.5 6.5M17 18.5c-3 0-3-6.5-3.5-6.5",
 };
 
-/** providerMarks are the hosted providers' logos, as path data rather than
- *  files: drawn in currentColor, a mark follows its pill through both themes.
- *  Each keeps the artwork's viewBox. A mark about twice as wide as tall sets
- *  `wide`, so a pill draws it smaller. A mark that needs more than one shade
- *  has `layers` instead of `path`: paths that do not overlap, each at its own
- *  opacity.
+/** providerMarks are the hosted providers' logos as path data, so they are
+ *  drawn in currentColor and follow the theme. `wide` draws a mark about twice
+ *  as wide as tall smaller. `layers` replaces `path` for a mark with several
+ *  shades: paths that do not overlap, each at its own opacity.
  *
- *  Keyed by the provider names in internal/catalog/providers.go. A provider
- *  without a mark draws nothing. The source artwork is in internal/webui/marks/,
- *  outside assets/ so the binary does not serve a second copy. Name a new mark
- *  in marks/NOTICE too. */
+ *  Keyed by the provider names in internal/catalog/providers.go. The source
+ *  artwork is in internal/webui/marks/, outside assets/ so the binary does not
+ *  serve it twice. Name a new mark in marks/NOTICE too. */
 const providerMarks = {
   anthropic: {
     viewBox: "0 0 35 24",
@@ -364,8 +352,8 @@ const providerMarks = {
   },
   cscs: {
     viewBox: "0 0 76.502 52.377",
-    // The artwork has five overlapping colours. Each is one path here with the
-    // overlaps cut out, so the opacities do not show through.
+    // Five overlapping colours, each with the overlaps cut out so the
+    // opacities do not show through.
     layers: [
       {
         opacity: 0.3,
@@ -391,9 +379,8 @@ const providerMarks = {
   },
   infomaniak: {
     viewBox: "0 0 24 24",
-    // One subpath: the tile is drawn and the letterform cut out of it, so this
-    // mark is a filled square with a hole where the others are a glyph on
-    // nothing. In currentColor that is what it is meant to look like.
+    // A filled tile with the letterform cut out, unlike the other marks. That
+    // is how the logo is meant to look in one colour.
     path: "M2.4 0A2.395 2.395 0 0 0 0 2.4v19.2C0 22.9296 1.0704 24 2.4 24h19.2c1.3296 0 2.4 -1.0704 2.4 -2.4V2.4C24 1.0704 22.9296 0 21.6 0H10.112v11.7119l3.648 -4.128h6l-4.58 4.3506 4.868 8.1296h-5.52l-2.5938 -5.0211L10.112 16.8v3.264H5.12V0Z",
   },
   openai: {
@@ -411,8 +398,7 @@ const providerMarks = {
   },
   "stepping-stone": {
     viewBox: "0 0 49.43 56.77",
-    // The source artwork sat far outside its viewBox; this is moved to the
-    // origin and framed tightly.
+    // Moved to the origin: the source artwork sat far outside its viewBox.
     path: "m 27.99,10.726574 c 0,0 0.77,0.55 2.08,0.11 1.32,-0.45 3.19,-6.6400002 3.07,-7.6400002 -0.11,-1 -0.33,-2.31999999 -1.97,-2.98999999 -1.65,-0.66 -2.75,0.67 -3.07,1.10999999 -0.33,0.44 -1.21,5.09 -1.65,6.64 -0.44,1.55 1.54,2.7700002 1.54,2.7700002 z m 2.03,-7.7500002 c 0.16,-0.28 0.49,-0.5 0.49,-0.5 0,0 0.5,1.38 0.28,2.38 -0.22,1 -1.65,3.43 -1.65,3.43 0,0 0.71,-5.04 0.88,-5.31 z m 18.71,53.7700002 c -0.44,0.17 -2.42,-0.72 -4.17,-1 -1.75,-0.27 -3.95,0 -3.95,0 l -0.99,-0.77 c 0,0 -0.11,-11.62 -3.35,-20.36 -3.24,-8.74 -7.52,-11.84 -7.52,-11.84 l -0.99,-0.11 c 0,0 -1.1,4.26 -2.52,5.09 -1.43,0.83 -2.75,2.32 -8.45,2.54 -5.71,0.22 -10.1,-1.22 -10.7,-0.94 -0.6,0.28 -2.64,9.57 -3.24,9.79 -0.6,0.22 -1.81,0 -2.08,-0.22 -0.27,-0.22 -0.77,-1.11 -0.77,-1.66 0,-0.55 2.52,-8.07 2.42,-8.85 -0.11,-0.77 -0.22,-1.05 0,-1.33 0.22,-0.28 1.43,-0.33 1.43,-0.33 0,0 7.03,2.32 12.84,1.66 1.92,-0.17 5.49,-0.33 7.13,-2.43 1.65,-2.1 1.87,-4.31 1.87,-4.31 0,0 -0.55,-0.33 -0.77,-0.89 -0.22,-0.55 -0.27,-3.32 -0.33,-4.54 -0.06,-1.21 0.88,-3.87 0.88,-3.87 0,0 -1.32,-1.16 -2.85,-1.11 -1.54,0.06 -4.56,0.33 -7.69,1.99 -3.13,1.66 -3.18,2.55 -3.62,2.77 -0.44,0.22 -2.14,-0.17 -2.31,-0.55 -0.17,-0.39 2.03,-2.66 4.17,-3.43 2.14,-0.78 4.72,-1.66 7.96,-2.0500002 3.24,-0.38 6.15,1.5000002 6.75,1.7100002 0.61,0.22 0.93,0 1.87,0.22 0.93,0.22 1.87,2.6 1.76,3.49 -0.11,0.89 -1.43,5.7 -1.43,5.7 0,0 6.53,7.52 8.56,14.22 2.03,6.69 3.3,17.65 3.3,17.65 0,0 6.97,-0.27 7.35,-0.11 0.38,0.17 -0.11,3.71 -0.55,3.87 z",
   },
 };
@@ -441,10 +427,9 @@ function drawMark(mark) {
   );
 }
 
-/** idpMarks are the identity providers' logos, like providerMarks. They are
- *  keyed by the names an operator picks in KEERA_OIDC_PROVIDERS, so the
- *  obvious spellings of each vendor (idpAliases) share the artwork. A name
- *  with no mark gets a generic icon. */
+/** idpMarks are the identity providers' logos, like providerMarks, keyed by
+ *  the names an operator picks in KEERA_OIDC_PROVIDERS. idpAliases maps other
+ *  obvious spellings of each vendor to them. */
 const idpMarks = {
   google: {
     viewBox: "0 0 24 24",
@@ -501,8 +486,7 @@ const clientMarks = {
     ],
   },
   pi: {
-    // The artwork's three blocks in one shade, so the two that touch become
-    // one shape with a square hole. The margin stops a solid mark looking
+    // The three blocks in one shade. The margin stops this solid mark looking
     // bigger than the outlined ones beside it.
     viewBox: "100 100 600 600",
     path:
@@ -531,11 +515,9 @@ export function clientMark(key) {
   return drawMark(clientMarks[key]);
 }
 
-/* The reporting window every screen with a picker shows.
- *
- *  One remembered value shared by all screens, because readers compare them:
- *  a filter's refusals this afternoon next to the project's traffic this
- *  afternoon. A picker that reset on each screen would break that. */
+/** The reporting window every screen with a picker shows. All screens share
+ *  one remembered value, because readers compare them: a filter's refusals
+ *  this afternoon next to the project's traffic this afternoon. */
 export const RANGES = [
   { label: "24h", since: "24h", long: "Last 24 hours" },
   { label: "7d", since: "168h", long: "Last 7 days" },
@@ -546,8 +528,6 @@ export const RANGES = [
 export function rangeOf(since, fallback) {
   return RANGES.find((r) => r.since === since) || fallback;
 }
-
-/* --------------------------------------------------------------- storage */
 
 /** remembered is a setting kept for this tab, or with lasting for every visit,
  *  or null. A browser that refuses storage reads as nothing kept. */
@@ -571,10 +551,10 @@ export function remember(key, value, { lasting } = {}) {
   }
 }
 
-/** currentRange is the window in force. Screens read it instead of a default
- *  of their own. */
 const DEFAULT_RANGE = "168h";
 
+/** currentRange is the window in force. Screens read it instead of a default
+ *  of their own. */
 export function currentRange() {
   return remembered("keera.range") || DEFAULT_RANGE;
 }
@@ -609,13 +589,12 @@ export function rangePicker(
 }
 
 /** liveControl is the Live switch on a screen that follows the request log.
+ *  Its dot shows four states: watching, reconnecting, paused, or stopped,
+ *  since a screen that quietly stopped following looks like a quiet afternoon.
  *
- *  Its dot shows four states: watching, reconnecting, paused, or stopped. A
- *  screen that quietly stopped following looks just like a quiet afternoon.
- *
- *  key remembers the choice for the session, label names the button for a
- *  screen reader, titles explain each state, and words, if given, change the
- *  button's text with the state. */
+ *  key remembers the choice for the session, label is for screen readers,
+ *  titles explain each state, and words, if given, change the button's text
+ *  with the state. */
 export function liveControl({ key, label, titles, words = {} }) {
   const on = remembered(key) !== "off";
   const blip = h("span", { class: "blip" });
@@ -651,9 +630,8 @@ export function liveControl({ key, label, titles, words = {} }) {
     button.setAttribute("aria-pressed", String(control.on));
     if (listener) listener(control.on);
   });
-  // A hidden tab drops its stream, because each open stream costs the control
-  // plane a query per request in its organisation. Screens pick up where they
-  // stopped when the tab is shown again.
+  // A hidden tab drops its stream: each open stream costs the control plane
+  // a query per request in its organisation.
   const onVisibility = () => {
     if (!button.isConnected) {
       document.removeEventListener("visibilitychange", onVisibility);
@@ -666,12 +644,12 @@ export function liveControl({ key, label, titles, words = {} }) {
 }
 
 /** followRequests keeps the request stream open while a liveControl is on,
- *  and shows on the control whether it is connecting, live or stopped.
+ *  and shows its state on the control.
  *
- *  stream opens the EventSource, and is called again on every reconnect, so
- *  it can carry the newest position. onRequests gets each batch it sends.
- *  onResume, if given, runs when requests may have been missed: when the
- *  control is turned back on, and when a dropped stream comes back. */
+ *  stream opens the EventSource and is called again on every reconnect, so it
+ *  can carry the newest position. onResume, if given, runs when requests may
+ *  have been missed: when the control is turned back on, and when a dropped
+ *  stream comes back. */
 export function followRequests(ctx, control, stream, { onRequests, onResume }) {
   let source = null;
   const close = () => {
@@ -695,7 +673,7 @@ export function followRequests(ctx, control, stream, { onRequests, onResume }) {
       onRequests(JSON.parse(e.data));
     });
     // An EventSource retries a dropped connection by itself and gives up only
-    // when refused, as for an expired session. Those are different states.
+    // when refused, as for an expired session.
     source.addEventListener("error", () => {
       control.state(
         source && source.readyState === EventSource.CLOSED
@@ -786,8 +764,7 @@ export function isAdmin(ctx) {
 
 /** checkButton is a Check button with its verdict beside it once it has run.
  *  verdict turns what run returns into { label, tone, title, open }: a pill
- *  that opens the full report. The result is not kept: a check is about right
- *  now. */
+ *  that opens the full report. The result is not kept, as it is only true now. */
 export function checkButton(title, run, verdict) {
   const slot = h("span");
   const button = h(
@@ -998,8 +975,8 @@ function statCard(label, value, note) {
 }
 
 /** loadMore is the button under a log that adds the next page to the same
- *  table, so the reader keeps what they have read. next adds a page and
- *  returns how many rows came; fewer than size is the end, and shows end. */
+ *  table, so the reader keeps their place. next returns how many rows came;
+ *  fewer than size means the end, and shows end. */
 export function loadMore(size, next, end) {
   const label = `Load ${size} more`;
   const wrap = h("div", { style: { marginTop: "12px", textAlign: "center" } });
@@ -1030,7 +1007,7 @@ export function loadMore(size, next, end) {
 }
 
 /** trafficSummary is a row's traffic in two lines: how many, with a pill when
- *  something needs a look, then a faint note. A count of zero is no traffic. */
+ *  something needs a look, then a faint note. */
 export function trafficSummary(count, noun, flag, note) {
   if (!count) return h("span", { class: "faint nowrap" }, "no traffic");
   return h(
@@ -1074,12 +1051,10 @@ function toggleBox(t, checked, onChange) {
  *                 Passing it adds the box.
  *    searchLabel  what is being searched, for the placeholder
  *    toggles      [{ label, test, hidden, on, onChange }] - a checkbox that,
- *                 while checked, keeps only the rows test() accepts. With
- *                 hidden() instead, it drops those rows while unchecked, so a
- *                 list can hide its dead rows behind a box that brings them
- *                 back. `on` is whether it starts checked. onChange(checked)
- *                 is for a toggle whose rows are not here: the caller fetches
- *                 a different list.
+ *                 while checked, keeps only the rows test() accepts. hidden()
+ *                 instead drops those rows while unchecked, to hide dead rows.
+ *                 `on` is whether it starts checked. onChange(checked) is for
+ *                 a toggle whose caller fetches a different list.
  *    choices      [{ label, options: [{ value, label }], test }] - a dropdown
  *                 that keeps only the rows test(row, value) accepts. Its first
  *                 option is "All", which keeps every row.
@@ -1087,20 +1062,17 @@ function toggleBox(t, checked, onChange) {
  *    sortDir      "asc" (the default) or "desc"
  *    rank         { by, set } - for a list the control plane ranks, because
  *                 only part of it is here. A column with a `rank` gets a
- *                 header that calls set(rank), and the one matching `by` is
- *                 marked. Rows are drawn in the order given.
+ *                 header that calls set(rank). Rows keep the order given.
  *    rowClass     (row) => string - a class for that row's <tr>
  *    emptyTitle / emptyBody
  *
  *  A column with a sortKey gets a header that sorts by it. Searching and
- *  sorting happen here, as most screens hold their whole list. One that pages
- *  passes `rank` instead, and its sortKeys are ignored: sorting one page would
+ *  sorting happen here, as most screens hold their whole list. A paged list
+ *  passes `rank` instead and its sortKeys are ignored: sorting one page would
  *  rank the wrong rows.
  *
- *  A column with a `width` keeps that width instead of one measured from its
- *  contents, so it stays still when the table is redrawn with other rows.
- *
- *  There is no whole-row click; see rowLink.
+ *  A column with a `width` keeps it, so the table does not shift when redrawn
+ *  with other rows.
  */
 export function table(columns, rows, opts = {}) {
   const toggles = opts.toggles || [];
@@ -1112,8 +1084,8 @@ export function table(columns, rows, opts = {}) {
       { class: "card" },
       empty(opts.emptyTitle || "Nothing here yet", opts.emptyBody),
     );
-    // Over an empty table, only a toggle that fetches its own list is kept:
-    // it can bring rows back. The others have nothing to work on.
+    // Over an empty table, only a toggle that fetches its own list can bring
+    // rows back.
     const fetches = toggles.filter((t) => t.onChange);
     if (!fetches.length) return card;
     return h(
@@ -1140,9 +1112,7 @@ export function table(columns, rows, opts = {}) {
   };
 
   const body = h("tbody");
-  const count = h("span", {
-    class: "faint nowrap small",
-  });
+  const count = h("span", { class: "faint nowrap small" });
   const sortable = new Map();
 
   const heads = columns.map((c) => {
@@ -1225,7 +1195,6 @@ export function table(columns, rows, opts = {}) {
             ),
           ),
     );
-    // How many rows are shown, but only while that is not all of them.
     count.textContent =
       shown.length === rows.length ? "" : `${shown.length} of ${rows.length}`;
     for (const [c, { th, arrow }] of sortable) {
@@ -1298,9 +1267,8 @@ export function table(columns, rows, opts = {}) {
     ),
   );
   const el = toolbar ? h("div", {}, toolbar, card) : card;
-  // The table carries its own redraw for the request log, which pushes new
-  // rows onto its array and calls this. Calling table() again would build a
-  // new table and lose the reader's search and sort.
+  // The request log pushes new rows onto the array and calls this. Calling
+  // table() again would lose the reader's search and sort.
   el.redraw = draw;
   return el;
 }
@@ -1349,8 +1317,7 @@ function cellClass(c) {
 }
 
 /** order sorts by one column's key, with rows that have no value at the bottom
- *  in either direction. A key never used is not the oldest; the question does
- *  not apply to it. */
+ *  in either direction: a key never used is not the oldest. */
 function order(key, dir) {
   const missing = (v) => v === null || v === undefined || v === "";
   return (a, b) => {
@@ -1368,14 +1335,12 @@ function order(key, dir) {
   };
 }
 
-/* ------------------------------------------------------------------ menu */
-
 let openMenu = null;
 
 /** menu opens a list of actions next to anchor. Each item is
- *  { label, icon, onClick, hint }, or { label, icon, href } for a link
- *  that opens in a new tab, a separator, or a node, which is shown as it is. It closes on a click outside, on Escape, and after an
- *  action. */
+ *  { label, icon, onClick, hint }, { label, icon, href } for a link that
+ *  opens in a new tab, a separator, or a node shown as it is. It closes on a
+ *  click outside, on Escape, and after an action. */
 export function menu(anchor, items, { up = false } = {}) {
   // A second click on the anchor closes its menu.
   if (anchor.getAttribute("aria-expanded") === "true") return closeMenu();
@@ -1599,8 +1564,7 @@ function trapTab(card, e) {
  *  submit(close) does it, and returns false to keep the dialog open, as after
  *  focusing an empty field. A failure, or a thrown { message } of text or
  *  nodes, shows in the dialog. On success the dialog closes, toasts done (text,
- *  or a function of what submit returned) and reloads ctx, each if given.
- *  Returns { close, button }. */
+ *  or a function of submit's result) and reloads ctx, each if given. */
 export function formModal({
   title,
   subtitle,
@@ -1780,9 +1744,8 @@ export function banner(tone, ...children) {
 }
 
 /** showError shows a failure in a dialog's error host and scrolls it into
- *  view. The host is at the top of .modal-body, which scrolls, while the
- *  buttons stay in the footer, so in a tall dialog the message would otherwise
- *  be out of sight. Passing no message clears the host, as before a retry. */
+ *  view: the host is at the top of the scrolling body, out of sight in a tall
+ *  dialog. No message clears the host, as before a retry. */
 export function showError(host, message) {
   if (!message) {
     replace(host);
@@ -1796,14 +1759,10 @@ export function showError(host, message) {
   }
 }
 
-/* aliasProblem checks the alias rule where the name is typed.
- *
- *  An alias is a path segment, so an empty one sends the write to the
- *  collection route, which answers 405 with no message. The control plane
- *  cannot explain that one, so it is caught here.
- *
- *  The shape mirrors policy.validName: lowercase letters, digits, and hyphens
- *  that neither open nor close the name. Returns "" when there is no problem. */
+/** aliasProblem checks the alias rule where the name is typed, mirroring
+ *  policy.validName. It must catch an empty alias: as a path segment, it
+ *  sends the write to the collection route, which answers 405 with no
+ *  message. Returns "" when there is no problem. */
 export function aliasProblem(alias) {
   if (!alias) return "An alias is required. It is the name clients use.";
   return nameProblem(alias, 64, "An alias");
@@ -1811,7 +1770,7 @@ export function aliasProblem(alias) {
 
 /** modelAliasProblem is aliasProblem for a model, which may also carry its
  *  provider's name, as in "anthropic/claude-sonnet-4-5". It mirrors
- *  policy.ValidModelAlias: each part between slashes has the alias shape. */
+ *  policy.ValidModelAlias. */
 export function modelAliasProblem(alias) {
   if (!alias) return "An alias is required. It is the name clients use.";
   if (alias.length > 64) return "An alias is at most 64 characters.";
@@ -1825,8 +1784,7 @@ export function modelAliasProblem(alias) {
 }
 
 /** takenProblem refuses an alias the organisation already has. Saving is a
- *  PUT, so "add" would otherwise overwrite the entry of that name. The CLI
- *  refuses the same way. */
+ *  PUT, so "add" would otherwise overwrite the entry of that name. */
 export function takenProblem(entries, alias, noun) {
   return (entries || []).some((e) => e.alias === alias)
     ? `The ${noun} ${alias} already exists. Change it from its row instead.`
@@ -1857,9 +1815,8 @@ function nameProblem(name, max, what) {
  *
  *  modes is a list of { value, icon, name, what }, with an optional mark()
  *  that draws a logo in place of the icon. chosen is the starting value, or
- *  null for none. onChoose runs after each choice; the caller decides where
- *  focus goes. choose(value) picks a mode from code, as an edit dialog does on
- *  opening. */
+ *  null. onChoose runs after each choice; the caller decides where focus
+ *  goes. choose(value) picks a mode from code, as an edit dialog does. */
 export function modeTiles(modes, chosen, onChoose) {
   const tiles = h(
     "div",

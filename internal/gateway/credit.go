@@ -76,10 +76,8 @@ func (s *Server) keyModel(org, alias string) (policy.Model, bool) {
 }
 
 // mostTokens is all a call may use: its whole body as prompt and its whole
-// output ceiling as answer. It is what a request holds of the credit, and what
-// a call on the deployment's key is billed when its usage record never came,
-// though the provider may have charged for it: an answer too large to read, or
-// one that took longer than the gateway waits. That errs high, so losing the
+// output ceiling as answer. A request holds this much credit, and a call on the
+// deployment's key whose usage record never came is billed it, so losing the
 // record is never a way to pay less.
 func mostTokens(bodyBytes, outputCeiling int) policy.Tokens {
 	return policy.Tokens{Input: bodyBytes / bytesPerToken, Output: outputCeiling}
@@ -98,12 +96,10 @@ func (s *Server) billUnreported(c *call, b *body) {
 		httpx.LogIDs(c.r.Context()))
 }
 
-// stripPremium takes out the fields that make a provider charge more per
-// token than its list price: Anthropic's fast mode and data residency, and a
-// service tier such as OpenAI's priority processing. The usage record counts
-// the same tokens either way, so the request would be billed less than it
-// cost. The model answers as it would without them. It returns what it took
-// out.
+// stripPremium removes, and returns, the fields that make a provider charge
+// more per token than its list price: Anthropic's fast mode and data
+// residency, and a dearer service tier. The usage record counts the same
+// tokens either way, so the request would be billed less than it cost.
 func stripPremium(b *body) []string {
 	var removed []string
 	for _, field := range []string{"speed", "inference_geo"} {

@@ -27,7 +27,7 @@ import {
   capitalise,
 } from "../ui.js";
 
-// thisMonth is the current month as YYYY-MM, in UTC like the bill.
+// YYYY-MM in UTC, like the bill.
 function thisMonth() {
   return new Date().toISOString().slice(0, 7);
 }

@@ -349,9 +349,9 @@ func (f *RequestFacets) add(facet string, c FacetCount) {
 
 // RequestFilters counts the window by model, key, project, person and status.
 //
-// Only the tenant, the holder, the outcome and the time bounds of q are read, so the
-// screen still offers the other values after one is picked. A model picked
-// after a project can then match nothing, and the screen says so.
+// Only the tenant, the holder, the outcome and the time bounds of q are read,
+// so the screen still offers the other values after one is picked. A model
+// picked after a project can then match nothing, and the screen says so.
 func (s *Store) RequestFilters(ctx context.Context, q RequestQuery) (RequestFacets, error) {
 	return s.facets(ctx, `
 		WITH matching AS (

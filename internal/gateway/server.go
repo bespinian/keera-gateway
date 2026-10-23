@@ -43,17 +43,15 @@ type Budgeter interface {
 
 // Limiter is the token buckets a request is decided against.
 //
-// It is an interface because the buckets live in memory or in Redis. How the
-// two differ, including what happens when Redis is down, is the limiter's
-// business, not this package's.
+// The buckets live in memory or in Redis. How the two differ, including when
+// Redis is down, is the limiter's business, not this package's.
 type Limiter interface {
 	// Admit decides every requirement at once, charging the ones that take a
 	// unit only if all of them hold, and returns the index of the first that
 	// failed, or -1.
 	Admit(reqs []ratelimit.Requirement, now time.Time) int
-	// ChargeAll takes n units from every bucket after the fact. Token limits
-	// are paid this way, because the cost is only known once the request is
-	// over. Take is not used.
+	// ChargeAll takes n units from every bucket after the fact, ignoring
+	// Take. Token limits are paid this way: their cost is known only at the end.
 	ChargeAll(reqs []ratelimit.Requirement, n float64, now time.Time)
 	// Remaining feeds the response headers on every request, so it must be
 	// cheap. Retry is asked only for a refused request.
@@ -102,7 +100,6 @@ const (
 	DefaultUpstreamHeaderTimeout = 2 * time.Minute
 )
 
-// dialTimeout bounds establishing a connection to a backend.
 const dialTimeout = 5 * time.Second
 
 func (o *Options) setDefaults() {
@@ -125,23 +122,22 @@ type Server struct {
 	sink    Sink
 	metrics *metrics.Registry
 	client  *http.Client
-	// publicClient is the client for an organisation that signed itself up and
-	// has not paid yet: it also refuses private addresses, so such an
-	// organisation cannot reach the deployment's own network, even through a
-	// public name that resolves into it.
+	// publicClient is for an organisation that signed itself up and has not
+	// paid yet. It also refuses private addresses, so such an organisation
+	// cannot reach the deployment's network, even through a public name that
+	// resolves into it.
 	publicClient *http.Client
-	// keyClient is the client for a model on the deployment's key. A hosted
-	// provider sends nothing until a whole answer is done, and gives up on
-	// one that runs too long itself, so it is given as long as the gateway
-	// reads an answer whose client left. Cutting it short would lose an
-	// answer the deployment pays for.
+	// keyClient is for models on the deployment's key. A hosted provider may
+	// send nothing until the whole answer is done, so it gets as long as an
+	// answer whose client left is read; cutting it short would lose an answer
+	// the deployment pays for.
 	keyClient *http.Client
 	log       *slog.Logger
 	opts      Options
 
 	rr sync.Map // model key -> *atomic.Uint64, for round-robin over backends
-	// load is what this process has seen of each destination, for the
-	// latency and least-busy routers. See load.go.
+	// load is what this process has seen of each destination, for
+	// latency and least-busy route steps. See load.go.
 	load *loads
 	// patterns caches compiled pattern filter rules. See pattern.go.
 	patterns patternCache
@@ -153,6 +149,7 @@ type Server struct {
 	noLogprobs sync.Map // model key -> struct{}
 }
 
+// New builds the data plane.
 func New(src policy.Source, budgets Budgeter, limiter Limiter, sink Sink,
 	m *metrics.Registry, opts Options, log *slog.Logger) *Server {
 	opts.setDefaults()
@@ -342,9 +339,8 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request, sh shape) 
 // inference builds the handler for one API surface.
 func (s *Server) inference(surf surface) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// The clock starts before the key is resolved: fetching a key from the
-		// control plane is time the client waits too, and the recorded latency
-		// should match what the developer measured.
+		// Started before the key is resolved, so the recorded latency matches
+		// what the developer measured.
 		tr := newTrace()
 		res, ok := s.authenticate(w, r, surf.shape)
 		if !ok {

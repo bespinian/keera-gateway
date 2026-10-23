@@ -11,11 +11,8 @@ import (
 )
 
 // listConnect serves the client catalogue and the gateway address to put in
-// it. The panel and `keera connect` both read it, so everyone gets the same
-// configuration.
-//
-// The templates hold no secrets. It needs a sign-in only because of the
-// gateway address, which a deployment may not have published.
+// it, for the panel and `keera connect` alike. The templates hold no secrets;
+// it needs a sign-in only because a deployment may not publish its address.
 func (s *Server) listConnect(w http.ResponseWriter, r *http.Request, _ *authn.Principal) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"data":        connect.Clients(),

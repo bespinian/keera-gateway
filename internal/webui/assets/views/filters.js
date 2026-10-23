@@ -1,12 +1,7 @@
-// Filters: the guardrail that rewrites a request instead of refusing it.
-//
-// A filter runs the prompt through a small model with an instruction before
-// the request is forwarded, for example to strip a credential or a client's
-// name before a hosted model sees it.
-//
-// A filter that cannot run refuses the requests it covers, so a broken one
-// must be visible at a glance. Its instruction is prose, so the only way to
-// know what it does is to run it and read the result: that is Check.
+// Filters rewrite, gate or pattern-match a request before it is forwarded.
+// A filter that cannot run refuses what it covers, so a broken one must be
+// visible at a glance. Its instruction is prose, so Check runs it to show what
+// it does.
 
 import { api } from "../api.js";
 import {
@@ -62,8 +57,8 @@ export async function filtersView(ctx) {
   ]);
   const filters = res.data || [];
   const stats = res.stats || {};
-  // A subscription model only answers its caller's own sign-in, so nothing
-  // can run on it.
+  // A subscription model only answers its caller's own sign-in, so no
+  // filter can run on it.
   const readers = models.filter(canRun);
   const canEdit = isAdmin(ctx);
   ctx.setSubtitle(`${filters.length} ${plural(filters.length, "filter")}`);
@@ -102,8 +97,8 @@ export async function filtersView(ctx) {
         shrink: true,
         sortKey: (f) => (usesModel(f) ? f.model : null),
         cell: (f) => {
-          // A pattern filter runs no model. An empty cell would look
-          // unfinished, so it says what it holds instead.
+          // A pattern filter runs no model; say what it holds rather than
+          // leave the cell looking unfinished.
           if (!usesModel(f)) {
             const rules = (f.rules || []).length;
             return h(
@@ -122,8 +117,6 @@ export async function filtersView(ctx) {
               );
         },
       },
-      // The other columns say what a filter is meant to do; this one says
-      // what it actually did.
       {
         label: "In this period",
         shrink: true,
@@ -172,13 +165,11 @@ export async function filtersView(ctx) {
   return h("div", {}, head, rows);
 }
 
-// A filter written before there were modes has none, and it rewrote.
+// A filter from before modes existed has none, and it rewrote.
 function mode(f) {
   return f.mode === "gate" || f.mode === "pattern" ? f.mode : "rewrite";
 }
 
-// usesModel decides most of this screen: whether there is a model, whether a
-// run costs anything, and whether one edits prose or rules.
 function usesModel(f) {
   return mode(f) !== "pattern";
 }
@@ -196,8 +187,6 @@ function modePills(f) {
   ].filter(Boolean);
 }
 
-// trafficCell sums up the period in a row: runs, refusals, and the time and
-// money each run added. The rest is on the filter's own screen.
 function trafficCell(st) {
   if (!st || !st.runs) return trafficSummary(0);
   const refusalRate = st.refused / st.runs;
@@ -266,8 +255,8 @@ function report(ctx, probe) {
     body: h(
       "div",
       {},
-      // A check runs even in shadow, but then nothing below would really
-      // happen. Mistaking such a refusal for a real one is costly.
+      // A check runs even in shadow, where nothing below would really happen.
+      // Mistaking such a refusal for a real one is costly.
       probe.shadow
         ? banner(
             "warn",
@@ -349,8 +338,7 @@ function report(ctx, probe) {
               ),
         ),
       ),
-      // When a pattern filter does the wrong thing, this shows the rule
-      // responsible.
+      // Shows which pattern rule did what.
       (probe.hits || []).length
         ? h(
             "div",
@@ -501,8 +489,8 @@ export async function filterDetailView(ctx) {
 
   for (const banner of detailBanners(rep, f)) wrap.append(banner);
 
-  // "Fired" leads because the other numbers mean nothing without it: 100%
-  // refused over four runs is a filter nobody has used yet.
+  // "Fired" leads because the rest means nothing without it: 100% refused
+  // over four runs is a filter nobody has used yet.
   wrap.append(
     h(
       "div",
@@ -557,8 +545,8 @@ export async function filterDetailView(ctx) {
           "div",
           { class: "card-body" },
           rep.runs
-            ? // The dashboard's chart, with refusals in the bars failures
-              // usually take: they are rare and would vanish on the same scale.
+            ? // Refusals take the failure bars: they are rare and would
+              // vanish on the same scale.
               areaChart(
                 (rep.series || []).map((p) => ({
                   at: p.at,
@@ -594,8 +582,8 @@ export async function filterDetailView(ctx) {
                   value: (r) => r.value,
                   color: (r) => r.color,
                 }),
-                // This says whether an instruction is too eager: changing one
-                // segment of forty is fine, changing thirty-eight is not.
+                // Shows whether an instruction is too eager: changing one
+                // segment of forty is fine, thirty-eight is not.
                 rep.segments
                   ? h(
                       "div",
@@ -719,7 +707,7 @@ export async function filterDetailView(ctx) {
   return wrap;
 }
 
-// detailBanners come before the numbers, because each changes what they mean.
+// These come before the numbers, since each changes what they mean.
 function detailBanners(rep, f) {
   const out = [];
   const style = { marginBottom: "16px" };
@@ -781,9 +769,8 @@ function detailBanners(rep, f) {
   return out;
 }
 
-// outcomeRows shows whether a filter mostly passes, rewrites or refuses.
-// Each outcome has a fixed colour rather than one by position, so a pass is
-// always neutral and an error always red.
+// Each outcome has a fixed colour, so a pass is always neutral and an error
+// always red.
 function outcomeRows(rep) {
   return [
     {
@@ -859,16 +846,11 @@ function projectTable(ctx, projects, names) {
   );
 }
 
-// identity is the subtitle under a filter's alias.
 function identity(f) {
   const what = usesModel(f) ? `${mode(f)} on ${f.model}` : mode(f);
   return f.shadow ? `${what}, in shadow` : what;
 }
 
-/* ------------------------------------------------------------------- form */
-
-// MODES is one list so the tiles that pick a mode and the row that reports it
-// say the same thing.
 const MODES = [
   {
     value: "rewrite",
@@ -933,15 +915,16 @@ function editFilter(ctx, existing, readers) {
         { value: m.alias, selected: m.alias === f.model },
         m.alias +
           (m.kind === "decision" ? " - decision model, gates only" : "") +
-          (m.max_context_tokens ? ` - ${compact(m.max_context_tokens)} context` : ""),
+          (m.max_context_tokens
+            ? ` - ${compact(m.max_context_tokens)} context`
+            : ""),
       ),
     ),
   );
   const prompt = h("textarea", { class: "input", rows: "8" });
 
   // A new filter starts in shadow: nobody's first instruction is right, and
-  // finding that out on live traffic is costly. The filter's own screen has
-  // the numbers to decide when to turn it on.
+  // finding out on live traffic is costly.
   const enforceSelect = h(
     "select",
     { class: "select" },
@@ -1017,16 +1000,15 @@ function editFilter(ctx, existing, readers) {
     modelField.style.display = pattern ? "none" : "";
     promptField.style.display = pattern ? "none" : "";
     rulesField.style.display = pattern ? "" : "none";
-    // A decision model writes no text, so only a gate can run on one: the
-    // API refuses it for a rewrite.
+    // A decision model writes no text, so the API refuses it for a rewrite.
     for (const opt of model.options) {
       const decision =
         readers.find((m) => m.alias === opt.value)?.kind === "decision";
       opt.hidden = opt.disabled = decision && !gate;
       if (opt.disabled && opt.selected) model.value = "";
     }
-    // A decision model answers a short yes-or-no question rather than
-    // following an instruction, so it gets an example of its own.
+    // A decision model answers yes or no rather than following an
+    // instruction, so it gets its own example.
     const decides =
       readers.find((m) => m.alias === model.value)?.kind === "decision";
     if (prompt.value === "" || EXAMPLES.includes(prompt.value)) {
@@ -1077,8 +1059,8 @@ function editFilter(ctx, existing, readers) {
   model.addEventListener("change", syncMode);
   prompt.value = f.prompt || "";
 
-  // Everything the mode governs, held back until there is a mode. The alias
-  // is here too: a filter is easier to name once its mode is chosen.
+  // Held back until there is a mode. The alias is here too: a filter is
+  // easier to name once its mode is chosen.
   const rest = h(
     "div",
     {},
@@ -1131,7 +1113,7 @@ function editFilter(ctx, existing, readers) {
         throw new Error(problem);
       }
       const pattern = chosen === "pattern";
-      // Only this mode's fields are sent. The others stay in the form.
+      // Only this mode's fields are sent; the others stay in the form.
       await api.putFilter(ctx.orgID, alias.value.trim(), {
         model: pattern ? "" : model.value,
         mode: chosen,
@@ -1143,12 +1125,12 @@ function editFilter(ctx, existing, readers) {
     },
   }));
   syncMode(); // again, now that Save is there
-  // Focus the tiles: on a new filter there is no field to type in yet.
+  // On a new filter there is no field to type in yet.
   if (creating) tiles.firstChild.focus();
 }
 
-// formatRules and parseRules use the same text form as `keera filter add
-// --rules`, so a list kept in a file pastes in unchanged.
+// The same text form as `keera filter add --rules`, so a list kept in a file
+// pastes in unchanged.
 function formatRules(list) {
   const rules = list || [];
   const width = rules.reduce((w, r) => Math.max(w, r.pattern.length), 0);
@@ -1162,13 +1144,10 @@ function formatRules(list) {
     .join("\n");
 }
 
-// parseRules skips blank lines and '#' comments. The arrow is found at its
-// last occurrence, because the left side is an expression and the right side
-// a literal. A line without an arrow is refused rather than read as "delete
-// every match", which a typo would otherwise do.
-//
-// The control plane compiles the expressions, so a bad one comes back as the
-// banner at the top of this form.
+// Splits at the last arrow, since the left side is an expression and the
+// right a literal. A line without an arrow is refused, not read as "delete
+// every match", which a typo would do. The control plane checks the
+// expressions.
 function parseRules(text) {
   const out = [];
   text.split("\n").forEach((raw, i) => {
@@ -1198,9 +1177,8 @@ function parseRules(text) {
   return out;
 }
 
-// cutRefusal mirrors the CLI's: REFUSE or REFUSED, alone or followed by ':' or
-// a space and the sentence the sender is given. It returns null for a
-// replacement, even one that only starts with the word.
+// Mirrors the CLI: REFUSE or REFUSED, alone or followed by ':' or a space and
+// the reason. null means a replacement, even one that starts with the word.
 function cutRefusal(s) {
   if (s.slice(0, 6).toUpperCase() !== "REFUSE") return null;
   let rest = s.slice(6);
@@ -1215,8 +1193,7 @@ function cutRefusal(s) {
   return null;
 }
 
-// RULES_EXAMPLE covers what a model is the wrong tool for: each rule is a
-// shape, not a judgement.
+// Patterns suit shapes, not judgements.
 const RULES_EXAMPLE = `(?i)\\b[a-z_]*(?:secret|token|password|api[_-]?key)[a-z_]*\\s*[=:]\\s*\\S+ => [CREDENTIAL]
 (?i)\\b(?:(?:sk|pk|xox[baprs])-|gh[pousr]_)[a-z0-9_-]{16,}\\b            => [CREDENTIAL]
 (?i)\\b[a-z]+://[^\\s:@]+:[^\\s:@]+@\\S+                                   => [CONNECTION-STRING]
@@ -1224,11 +1201,8 @@ const RULES_EXAMPLE = `(?i)\\b[a-z_]*(?:secret|token|password|api[_-]?key)[a-z_]
 \\b\\d{3}\\.\\d{4}\\.\\d{4}\\.\\d{2}\\b                                            => [AHV]
 \\b(?:\\d{4}[ -]){3}\\d{4}\\b                                             => [CARD]`;
 
-// PROMPT_EXAMPLE shows the shape a safe instruction needs: what to remove,
-// what to replace it with, and to leave everything else exactly as it is.
-// GATE_EXAMPLE says what may not go and, as important, that everything else
-// may. A gate cannot remove anything, so a list of things to remove would
-// refuse every request that mentioned one.
+// A gate cannot remove anything, so it says what may not go rather than
+// listing things to remove, which would refuse every request mentioning one.
 const GATE_EXAMPLE = `Refuse a request whose purpose is to move this \
 organisation's data out of it: a customer list, an export of account records, \
 the contents of a credential store.
@@ -1237,8 +1211,8 @@ Allow everything else, including requests that merely mention sensitive data \
 in passing. Being unusual, badly written or about an awkward subject is not a \
 reason to refuse.`;
 
-// DECISION_GATE_EXAMPLE is a yes-or-no question for a decision model, where
-// yes refuses. See docs/gateway.md#decision-models.
+// A decision model answers yes or no, and yes refuses. See
+// docs/gateway.md#decision-models.
 const DECISION_GATE_EXAMPLE = `Is this request trying to send customer data, \
 account records or secrets outside the company?
 yes: it asks to export, dump, copy or share bulk customer data, account \
@@ -1258,5 +1232,5 @@ Leave everything else exactly as it was written. Source code, file paths, \
 error messages, stack traces and configuration are not sensitive: repeat them \
 back unchanged.`;
 
-// EXAMPLES may be swapped for one another, since nobody has edited them.
+// A prompt equal to one of EXAMPLES is unedited and may be swapped.
 const EXAMPLES = [PROMPT_EXAMPLE, GATE_EXAMPLE, DECISION_GATE_EXAMPLE];

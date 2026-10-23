@@ -238,8 +238,8 @@ function listCard(ctx, sandboxes, canAdmin, me, driver) {
     {
       search: (s) => `${s.name} ${s.class} ${s.owner} ${s.repo}`,
       searchLabel: "sandboxes",
-      // Not a filter here: finished sandboxes are fetched only when asked
-      // for, because the list is capped and the cap is for the live ones.
+      // Not a filter: finished sandboxes are fetched only on request, because
+      // the list is capped and the cap is for the live ones.
       toggles: [
         {
           label: "Show finished",
@@ -351,7 +351,11 @@ function classCard(ctx, classes, driver) {
           ? [
               "A new organisation starts with the classes in " +
                 "KEERA_SANDBOXES_FILE. To add classes to this one, run ",
-              h("code", {}, `KEERA_ORG=${ctx.orgID} keera sandbox apply <file>`),
+              h(
+                "code",
+                {},
+                `KEERA_ORG=${ctx.orgID} keera sandbox apply <file>`,
+              ),
               ".",
             ]
           : "An administrator of this organisation adds them.",
@@ -389,8 +393,6 @@ function isolationCell(c, driver) {
     ),
   );
 }
-
-/* ------------------------------------------------------------------ actions */
 
 function actions(ctx, s, canAdmin, me, driver) {
   const mine = s.user_id && s.user_id === me.user_id;
@@ -553,8 +555,7 @@ function removeClass(ctx, c) {
 }
 
 /** newSandbox is the create dialog. The ssh key is required, because a
- *  sandbox with an empty authorized_keys cannot be opened, and the dialog says
- *  so before the control plane would refuse. */
+ *  sandbox with an empty authorized_keys cannot be opened. */
 function newSandbox(ctx, classes, limits, projects) {
   const name = h("input", { class: "input", placeholder: "fix-login" });
   const cls = h(
@@ -680,8 +681,6 @@ function newSandbox(ctx, classes, limits, projects) {
     },
   });
 }
-
-/* ------------------------------------------------------------------ helpers */
 
 /** projectName falls back to the id, because a member cannot read the
  *  project list. */

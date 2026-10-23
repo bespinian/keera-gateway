@@ -369,9 +369,8 @@ func TestResponsesStreamEmitsTheEventSequence(t *testing.T) {
 }
 
 func TestResponsesStreamFailsAFailedStream(t *testing.T) {
-	// As on the Messages surface: closed as completed, a stream the upstream
-	// cut off would read as a finished turn, with a tool call cut short in it.
-	// response.failed ends the stream too, and tells the client to try again.
+	// Closed as completed, a cut-off stream would read as a finished turn.
+	// response.failed tells the client to try again.
 	for name, upstream := range map[string]string{
 		"cut off": "data: " + `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1",` +
 			`"function":{"name":"write","arguments":"{\"content\":\"half"}}]}}]}` + "\n\n",

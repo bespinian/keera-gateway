@@ -82,8 +82,7 @@ func call(t *testing.T, ts *httptest.Server, method, path string, body, into any
 }
 
 func TestSandboxCatalogueIsReadableWithNoDriver(t *testing.T) {
-	// The catalogue is readable without a driver, so an operator can check it
-	// while setting up.
+	// So an operator can check it while setting up.
 	st, _ := sandboxStore(t)
 	ts := sandboxServer(t, st, nil)
 
@@ -493,8 +492,7 @@ func TestSandboxListNarrowsToTheReader(t *testing.T) {
 	}
 }
 
-// The two principals the visibility rules are checked against. An
-// administrator of org_1, and a member of it with a sandbox of their own.
+// An administrator of org_1, and a member with a sandbox of their own.
 var (
 	authnPrincipalAdmin = authn.Principal{
 		Via: authn.MethodSession, UserID: "usr_admin",

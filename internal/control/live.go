@@ -16,47 +16,43 @@ import (
 
 // The request log, read as it is written.
 //
-// Polling would make every open tab a query per interval, whether or not
-// anything happened. Instead, the write path announces each batch of usage
-// events on store.EventsChannel. One listener per process picks that up and
-// tells the open streams of the organisations it names to look. The notice
-// carries nothing else: each stream asks its own question, narrowed to what
-// its reader may see.
+// Polling would cost every open tab a query per interval. Instead, the write
+// path announces each batch of usage events on store.EventsChannel, and one
+// listener per process wakes the streams of the organisations it names. The
+// notice carries nothing else: each stream runs its own query, narrowed to
+// what its reader may see.
 
 const (
 	// streamTick bounds how often one stream queries the database. Notices
-	// can come several times a second; a reader cannot tell the difference,
-	// the database can.
+	// can come several times a second; the reader would not notice, the
+	// database would.
 	streamTick = time.Second
 	// streamKeepalive is how often an idle stream sends a comment, so a proxy
 	// does not close it and make the browser reconnect every minute.
 	streamKeepalive = 25 * time.Second
-	// streamRows is the most rows one tick sends. Beyond that nobody can read
-	// along, and the counts are computed over the whole window anyway.
+	// streamRows is the most rows one tick sends. Nobody can read more, and
+	// the counts cover the whole window anyway.
 	streamRows = 200
 	// streamRecount is how often a stream counts its whole window again.
-	// Between recounts it only counts the new rows, because counting a busy
-	// week every second, for every open tab, would load the database more than
-	// the traffic it shows. The recount drops rows that left the window.
+	// Between recounts it counts only new rows: recounting a busy week every
+	// second, for every tab, would load the database more than the traffic it
+	// shows. The recount drops rows that left the window.
 	streamRecount = time.Minute
 	// feedRetry is how long a dropped listener waits before reconnecting.
 	feedRetry = 2 * time.Second
-	// streamSettle is how long a stream keeps reading behind its newest row
-	// for rows committed late. A batch commits or fails within the usage
-	// recorder's write timeout of ten seconds; this leaves room.
+	// streamSettle is how long a stream keeps looking behind its newest row
+	// for late commits. The usage recorder's write timeout is ten seconds.
 	streamSettle = 30 * time.Second
 )
 
-// requestFeed fans one notification out to every stream open in this process.
-// There is one listener, not one per reader, because each listener holds a
-// Postgres connection.
+// requestFeed fans one notification out to every stream in this process.
+// One listener, not one per reader, because each holds a Postgres connection.
 type requestFeed struct {
 	mu sync.Mutex
-	// subs holds each stream's organisation, or "" for one that reads every
-	// organisation.
+	// subs holds each stream's organisation, or "" for all of them.
 	subs map[chan struct{}]string
-	// closing is closed on shutdown. It is how a response that never ends by
-	// itself is told to end.
+	// closing is closed on shutdown, to end responses that never end by
+	// themselves.
 	closing chan struct{}
 	once    sync.Once
 }
@@ -68,9 +64,8 @@ func newRequestFeed() *requestFeed {
 	}
 }
 
-// watch subscribes to one organisation's requests, or every organisation's
-// for "". It returns the channel that ticks when the log grows and the
-// function that unsubscribes, which the caller must call.
+// watch subscribes to one organisation's requests, or all for "". The caller
+// must call the returned function to unsubscribe.
 func (f *requestFeed) watch(orgID string) (<-chan struct{}, func()) {
 	ch := make(chan struct{}, 1)
 	f.mu.Lock()
@@ -89,17 +84,16 @@ func (f *requestFeed) watch(orgID string) (<-chan struct{}, func()) {
 
 // Drain ends every open request stream.
 //
-// A graceful shutdown waits for open responses, and these only end when the
-// reader closes the tab. Without Drain every shutdown would wait out its whole
-// grace period. The browser reconnects to the next process by itself.
+// These responses only end when the reader closes the tab, so without Drain a
+// graceful shutdown would wait out its whole grace period. The browser
+// reconnects to the next process by itself.
 func (s *Server) Drain() { s.feed.once.Do(func() { close(s.feed.closing) }) }
 
-// wake tells the streams of the organisations a payload names that there is
-// something new to look for. Without a payload it tells every stream, so a
-// stream that reads every organisation is told of any.
+// wake tells the streams of the organisations a payload names to look again.
+// An empty payload wakes every stream.
 //
-// It never blocks. Each channel holds one tick, and a second would say the
-// same: a stream reads everything past its own cursor in one look.
+// It never blocks. Each channel holds one tick, and a second would add
+// nothing: a stream reads everything past its cursor in one look.
 func (f *requestFeed) wake(payload string) {
 	orgs, all := store.EventOrgs(payload)
 	f.mu.Lock()
@@ -118,8 +112,7 @@ func (f *requestFeed) wake(payload string) {
 // Run holds the process's listener on the usage-event channel until ctx ends.
 //
 // A lost listener only adds delay: streams read from an id cursor, so the next
-// look picks up whatever was missed. That is also why every attempt starts by
-// waking everyone.
+// look picks up what was missed. That is why every attempt first wakes everyone.
 func (s *Server) Run(ctx context.Context) {
 	if s.st == nil {
 		return
@@ -137,14 +130,11 @@ func (s *Server) Run(ctx context.Context) {
 	}
 }
 
-// requestStream is the request log as it is written: the rows GET
-// /v1/requests returns, narrowed the same way, sent as they arrive.
+// requestStream sends the rows GET /v1/requests returns, narrowed the same
+// way, as they arrive. A member gets only their own requests.
 //
 // It takes the same query, plus `after`: the newest row the reader already
-// has. Without it the stream starts at the end of the log, rather than
-// replaying what the reader is already looking at.
-//
-// A member gets only their own requests, like the request log.
+// has. Without it the stream starts at the end of the log.
 func (s *Server) requestStream(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	rq, _, _, ok := s.requestQuery(w, r, p)
 	if !ok {
@@ -167,9 +157,8 @@ func (s *Server) requestStream(w http.ResponseWriter, r *http.Request, p *authn.
 		s.fail(w, err)
 		return
 	}
-	// The window is not fixed here: a live row is inside every window, and a
-	// fixed end would stop the stream a second later. Only the counts use it,
-	// and they are recomputed against the clock each time.
+	// The window is not fixed here: a fixed end would stop the stream a second
+	// later. Only the counts use it, recomputed against the clock each time.
 	s.streamRequests(ctx, w, &rq, &names, q.Get("since"))
 }
 
@@ -187,9 +176,8 @@ func (s *Server) streamRequests(ctx context.Context, w http.ResponseWriter,
 	h.Set("X-Accel-Buffering", "no")
 
 	rc := http.NewResponseController(w)
-	// The listener's write timeout is for small JSON answers. This one stays
-	// open as long as someone reads, so the timeout is lifted for it alone. A
-	// test recorder does not support this, which is fine.
+	// The listener's write timeout is for small JSON answers; this response
+	// stays open as long as someone reads. A test recorder ignores this.
 	_ = rc.SetWriteDeadline(time.Time{})
 	w.WriteHeader(http.StatusOK)
 	_ = rc.Flush()
@@ -202,8 +190,7 @@ func (s *Server) streamRequests(ctx context.Context, w http.ResponseWriter,
 	alive := time.NewTicker(streamKeepalive)
 	defer alive.Stop()
 
-	// Look once before waiting. A stream reopened after a pause has a backlog,
-	// which would otherwise wait for the next request to arrive.
+	// Look once before waiting: a stream reopened after a pause has a backlog.
 	grown := true
 	cur := newLiveCursor(rq.After)
 	var tally outcomeTally
@@ -235,20 +222,19 @@ func (s *Server) streamRequests(ctx context.Context, w http.ResponseWriter,
 
 // liveCursor is where a stream is in the log.
 //
-// A row gets its id when it is inserted, but readers see it only once its
-// batch commits. With several replicas writing, one batch can commit after a
-// later one, so a row can appear behind the newest one already sent. So a
-// stream reads again from settled, behind which every batch has committed,
-// and skips the rows it sent since.
+// A row gets its id on insert but is visible only once its batch commits.
+// With several replicas, a row can appear behind the newest one already sent.
+// So a stream reads from settled, behind which every batch has committed, and
+// skips the rows it sent since.
 type liveCursor struct {
 	// settled is the id up to which nothing can still appear.
 	settled int64
-	// newest is the newest id sent, which a reconnecting reader resumes from.
+	// newest is the newest id sent; a reconnecting reader resumes from it.
 	newest int64
 	// sent is the ids sent past settled.
 	sent []int64
-	// seen is newest as it was at each batch, oldest first. Every row up to
-	// one of these ids has committed streamSettle later.
+	// seen is newest at each batch, oldest first. Every row up to one of these
+	// ids has committed streamSettle later.
 	seen []seenID
 }
 
@@ -261,7 +247,6 @@ func newLiveCursor(after int64) *liveCursor {
 	return &liveCursor{settled: after, newest: after}
 }
 
-// query narrows rq to the rows this stream has not sent yet.
 func (c *liveCursor) query(rq store.RequestQuery) store.RequestQuery {
 	rq.After, rq.Skip = c.settled, c.sent
 	return rq
@@ -307,9 +292,8 @@ type outcomeTally struct {
 	at   time.Time
 }
 
-// sendRequests writes the rows the stream has not sent yet, moving the cursor
-// and refreshing the labels as needed. It reports whether the stream can go
-// on.
+// sendRequests writes the rows not sent yet. It reports whether the stream
+// can go on.
 func (s *Server) sendRequests(ctx context.Context, w http.ResponseWriter,
 	rc *http.ResponseController, rq *store.RequestQuery, cur *liveCursor,
 	names *groupLabels, tally *outcomeTally, since string) bool {
@@ -334,9 +318,8 @@ func (s *Server) sendRequests(ctx context.Context, w http.ResponseWriter,
 	out := map[string]any{
 		"data": rows, "outcomes": counts, "next_after": cur.newest,
 	}
-	// A brand-new key is the one someone is most likely watching for, and its
-	// name is not in the labels yet. So the labels are re-read, and sent, only
-	// when a row has an id they cannot name.
+	// A brand-new key is the likeliest one to watch for, and its name is not in
+	// the labels yet. So labels are re-read, and sent, only for an unknown id.
 	if unnamed(rows, *names) {
 		fresh, err := s.groupNames(ctx, rq.OrgID)
 		if err == nil {
@@ -370,9 +353,8 @@ func (s *Server) countOutcomes(ctx context.Context, rq store.RequestQuery, settl
 	now := time.Now()
 	switch {
 	case tally.at.IsZero() || now.Sub(tally.at) >= streamRecount:
-		// The window moves with the clock, so a stream left open overnight
-		// counts the last 24 hours. The error cannot happen: reportScope
-		// already checked this string.
+		// The window moves with the clock. The error cannot happen:
+		// reportScope already checked this string.
 		whole := q
 		// A search by id has no window, as on the request log.
 		if q.RequestID == "" {
@@ -404,8 +386,8 @@ func (s *Server) countOutcomes(ctx context.Context, rq store.RequestQuery, settl
 	return counts, nil
 }
 
-// unnamed reports whether any row names a key, project or person the labels cannot
-// put a name to.
+// unnamed reports whether any row has a key, project or person the labels
+// cannot name.
 func unnamed(rows []store.Request, names groupLabels) bool {
 	for _, q := range rows {
 		switch {

@@ -1,14 +1,12 @@
-// The dashboard's chart, drawn as inline SVG.
-//
-// Hand-drawn because it is one shape, and a charting library would be the
-// largest dependency in a binary that has almost none.
+// The panel's charts, drawn as inline SVG by hand: a charting library would
+// be the largest dependency in a binary that has almost none.
 
 import { h, svg, compact, money, num, empty } from "./ui.js";
 
 const PAD = { top: 12, right: 8, bottom: 22, left: 42 };
 
-// The width to draw at before the chart is on the page and can be measured.
-// Close to a real card, so the first paint does not visibly shift.
+// The width to draw at before the chart can be measured. Close to a real
+// card, so the first paint does not visibly shift.
 const GUESS_W = 900;
 const MIN_W = 280;
 
@@ -68,10 +66,9 @@ function swatch(l) {
   });
 }
 
-// responsive draws a chart in real pixels, not a unit grid the browser
-// stretches, which would stretch the labels and the line too. A detached
-// element has no width, so it is drawn at a guess and redrawn once its width
-// is known.
+// responsive draws a chart in real pixels: a unit grid the browser stretches
+// would stretch the labels and the line too. A detached element has no width,
+// so it is drawn at a guess and redrawn once its width is known.
 function responsive(paint) {
   const holder = h("div", { class: "chart-holder" });
   const tip = h("div", { class: "chart-tip", style: { display: "none" } });
@@ -83,7 +80,7 @@ function responsive(paint) {
     const plot = paint(w, tip);
     const old = holder.querySelector("svg.chart");
     if (old) {
-      // Whatever the pointer was over is gone with the shape it was over.
+      // The shape the pointer was over is gone.
       tip.style.display = "none";
       old.replaceWith(plot);
     } else {
@@ -94,7 +91,7 @@ function responsive(paint) {
   draw(GUESS_W);
   holder.append(tip);
   // The height does not follow the width, so a redraw cannot trigger another
-  // resize and this needs no loop guard.
+  // resize.
   new ResizeObserver((entries) => {
     draw(entries[entries.length - 1].contentRect.width);
   }).observe(holder);
@@ -330,8 +327,8 @@ function niceCeil(v) {
 }
 
 /**
- * barList is the "top projects" and "top models" panel: a ranked list where the
- * bar is the row, so the label stays readable at any value.
+ * barList is a ranked list, such as "top models", where the bar is the row,
+ * so the label stays readable at any value.
  */
 export function barList(
   rows,
@@ -346,9 +343,9 @@ export function barList(
     { class: "bars" },
     rows.map((r, i) => {
       const v = value(r) || 0;
-      // In a ranked list, position picks the colour. A list whose rows mean
-      // something, such as an outcome split, passes `color` instead, so a row
-      // keeps its colour when rows above it drop out.
+      // Position picks the colour. A list whose rows mean something, such as
+      // an outcome split, passes `color`, so a row keeps its colour when rows
+      // above it drop out.
       const color = colorFor
         ? colorFor(r)
         : `var(--s${((colorIndex + i) % 6) + 1})`;

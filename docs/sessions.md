@@ -22,6 +22,9 @@ The gap is needed on its own. A client that opens every task with the same words
 developer who resumes yesterday's conversation this morning is starting today's
 task.
 
+Tool calls through the gateway's MCP proxy are shown with the session they
+belong to; [mcp.md](mcp.md#the-tool-call-log) says how they are matched.
+
 ## How the conversation is identified
 
 In order of preference.
@@ -70,10 +73,6 @@ or when the developer changes directory.
 
 **The key id is mixed in.** Two developers who open a task with the same
 sentence get two sessions, and another key can never join a key's session.
-
-**Tool calls through the gateway's MCP proxy are shown with the session.** A
-call that names a session carries the same header and is matched by it; any
-other is matched by key and time. See [mcp.md](mcp.md#the-tool-call-log).
 
 **Only the chat surfaces get a session.** `/api/v1/chat/completions`,
 `/api/v1/messages` and `/api/v1/responses` carry a conversation.

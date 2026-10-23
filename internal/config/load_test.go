@@ -13,9 +13,9 @@ import (
 )
 
 // Load is where a deployment's mistakes are caught, and most of what it does
-// is refuse. These tests pin each floor, so a later tidy-up cannot quietly
-// drop one, and the inferred secure-cookie flag, which no deployment would
-// notice flipping to insecure.
+// is refuse. These tests pin each floor and the inferred secure-cookie flag,
+// whose flip to insecure no deployment would notice, so a later tidy-up
+// cannot quietly drop them.
 
 // loadWith runs Load against exactly env. The caller's own KEERA_ variables
 // are cleared first, so a shell set up for `make dev` cannot change the

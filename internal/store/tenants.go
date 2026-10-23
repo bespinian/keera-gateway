@@ -37,8 +37,8 @@ type Project struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-// defaultProjectName is what the project an organisation is created with is
-// called. It is an ordinary project, and its name can be changed.
+// defaultProjectName names the project a new organisation gets. It is an
+// ordinary project and can be renamed.
 const defaultProjectName = "default"
 
 // User is a person, identified either by Keera Gateway or by the customer's IdP.
@@ -61,8 +61,8 @@ type User struct {
 func (u User) Disabled() bool { return u.DisabledAt != nil }
 
 // userColumnsOf is the select list userTargets fills, in its order, with each
-// column prefixed by table ("u." or ""). A join needs the prefix, because the
-// tables it joins share column names.
+// column prefixed by table ("u." or ""). Joins need the prefix because the
+// tables share column names.
 func userColumnsOf(table string) string {
 	return fmt.Sprintf(`%[1]sid, %[1]sorg_id, %[1]semail, %[1]sname, COALESCE(%[1]sexternal_id,''),
 	%[1]srole, %[1]screated_at, %[1]sdisabled_at`, table)
@@ -86,8 +86,7 @@ func scanUser(r row) (User, error) {
 // KeyInfo is an issued key without its secret.
 //
 // The secret is shown once and never stored, so screens, reports and audit
-// entries name the key by its name. A rotation carries the name over to the
-// new key.
+// entries use the key's name. A rotation carries the name over.
 type KeyInfo struct {
 	ID        string `json:"id"`
 	OrgID     string `json:"org_id"`
@@ -142,10 +141,9 @@ type OrgTemplate struct {
 	SandboxClasses []policy.SandboxClass
 }
 
-// CreateOrg inserts an organisation, with its email domain if o has one, and
-// what it starts with. The domain is stored as given, so the caller cleans it
-// with policy.CleanEmailDomain. It is one transaction, so an organisation
-// never exists without its template.
+// CreateOrg inserts an organisation with its email domain and template, in
+// one transaction, so it never exists without its template. The domain is
+// stored as given: the caller cleans it with policy.CleanEmailDomain.
 func (s *Store) CreateOrg(ctx context.Context, o Org, tmpl OrgTemplate) (Org, error) {
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
@@ -160,8 +158,7 @@ func createOrg(ctx context.Context, tx pgx.Tx, o Org, tmpl OrgTemplate) (Org, er
 	id := o.ID
 	domain := nullable(o.EmailDomain)
 	// The domain is set in the same insert, so a taken one creates nothing.
-	// Setting it afterwards left an organisation behind that a retry then
-	// created a second time.
+	// Setting it afterwards left an organisation that a retry created again.
 	if err := tx.QueryRow(ctx,
 		"INSERT INTO orgs (id, name, email_domain, limited) VALUES ($1,$2,$3,$4) RETURNING created_at",
 		id, o.Name, domain, o.Limited,
@@ -213,10 +210,9 @@ type OrgChange struct {
 	Limited     *bool
 }
 
-// UpdateOrg renames an organisation, changes its email domain, or both, in
-// one statement, so a refused domain does not leave the rename behind.
-// Everything else refers to an organisation by id, so the name is only a
-// label. The old one is kept in the audit log.
+// UpdateOrg changes an organisation's name, email domain and whether it is
+// limited, in one statement, so a refused domain does not leave the rest
+// behind. The name is only a label; the old one stays in the audit log.
 func (s *Store) UpdateOrg(ctx context.Context, orgID string, c OrgChange) (Org, error) {
 	var domain *string
 	if c.EmailDomain != nil {
@@ -232,9 +228,8 @@ func (s *Store) UpdateOrg(ctx context.Context, orgID string, c OrgChange) (Org, 
 	return o, notFound(orgConflict(err))
 }
 
-// LimitedOrgs maps each organisation that is still limited to its name, for
-// the gateway to hold their models to what they may use, and to say whose
-// they are when it refuses one.
+// LimitedOrgs maps each limited organisation to its name, so the gateway can
+// restrict their models and name the owner when it refuses one.
 func (s *Store) LimitedOrgs(ctx context.Context) (map[string]string, error) {
 	return s.names(ctx, "SELECT id, name FROM orgs WHERE limited")
 }
@@ -347,7 +342,7 @@ func (s *Store) CreateProject(ctx context.Context, p Project) (Project, error) {
 }
 
 // ErrProjectNameTaken means another project in the organisation already has
-// the name. The control plane turns it into a 409 with a readable message.
+// the name.
 var ErrProjectNameTaken = errors.New("store: a project of that name already exists in this organisation")
 
 // ProjectChange is what UpdateProject changes. A nil field is left as it is.
@@ -404,10 +399,8 @@ type DeletedProject struct {
 // hold resources. An expired one counts: it can be resumed.
 var ErrProjectHasSandboxes = errors.New("store: the project still has live sandboxes")
 
-// oldestProject selects the oldest project of the organisation named by the
-// parameter orgParam, such as "$1". A key or sandbox that names no project
-// goes there. That is the one the organisation was created with, until it is
-// deleted.
+// oldestProject selects the oldest project of the organisation in orgParam,
+// such as "$1". Keys and sandboxes without a project go there.
 func oldestProject(orgParam string) string {
 	return "SELECT id FROM projects WHERE org_id = " + orgParam + " ORDER BY created_at, id LIMIT 1"
 }
@@ -703,8 +696,8 @@ func (s *Store) RotateKey(ctx context.Context, oldID string, next KeyInfo, hash 
 		if next.Name == "" {
 			next.Name = old.Name
 		}
-		// The lifetime, not the date: a key rotated a week before it lapses should
-		// not be replaced by one that lapses in a week.
+		// Keep the lifetime, not the date: a key rotated a week before it lapses
+		// should not get a replacement that lapses in a week.
 		if next.ExpiresAt == nil && old.ExpiresAt != nil {
 			t := time.Now().Add(max(old.ExpiresAt.Sub(old.CreatedAt).Round(time.Hour), time.Hour))
 			next.ExpiresAt = &t
@@ -741,11 +734,9 @@ func (s *Store) LookupKeyByID(ctx context.Context, id string) (*policy.Resolved,
 // lookupKey finds the key that where matches. where is a constant, never
 // input.
 func (s *Store) lookupKey(ctx context.Context, where string, arg any) (*policy.Resolved, error) {
-	// The project join also requires the project to be in the key's own org. The
-	// control plane already refuses anything else; this is a second check, so a
-	// bad row gives a key with no project rather than another tenant's guardrails.
-	// A disabled holder counts as a revoked key, which is also a second check:
-	// disabling somebody revokes their keys.
+	// Second checks, beyond what the control plane enforces: the project must
+	// be in the key's own org, so a bad row gives no project rather than another
+	// tenant's guardrails; and a disabled holder counts as a revoked key.
 	rows, err := s.pool.Query(ctx, `
 		SELECT k.id, k.org_id, COALESCE(pr.id,''), COALESCE(k.user_id,''), k.kind,
 		       k.expires_at, COALESCE(k.revoked_at, u.disabled_at), k.key_hash IS NULL,

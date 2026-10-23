@@ -51,6 +51,7 @@ func mcpCmd(ctx context.Context, args []string) error {
 	m.addHint += " --endpoint <url>"
 	m.f, m.calls = registerMCPFlags(m.fs), registerCallFlags(m.fs)
 	m.fs.BoolVar(&m.f.disabled, "disabled", false, "add the server without serving it yet")
+	m.reword("add", "endpoint", "the server's Streamable HTTP endpoint (required)")
 	m.reword("set", "description", "what the server is for, in a sentence; an empty one clears it")
 	if done, err := m.parse(); done {
 		return err
@@ -83,7 +84,6 @@ type mcpRun struct {
 
 func mcpAlias(s policy.MCPServer) string { return s.Alias }
 
-// find reads one of the organisation's servers.
 func (m *mcpRun) find(ctx context.Context, alias string) (policy.MCPServer, error) {
 	return findAlias(ctx, m.aliasRun, alias, mcpAlias)
 }

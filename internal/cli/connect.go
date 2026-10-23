@@ -16,7 +16,8 @@ import (
 //
 // The configuration blocks come from the control plane rather than from this
 // binary, so an older CLI cannot hand out a configuration the deployment has
-// moved on from.
+// moved on from. Setting up Claude Code is the exception: its settings are
+// built here, with only the gateway's address from the control plane.
 func connectCmd(ctx context.Context, args []string) error {
 	r := newCmdRun("connect", args)
 	fs := r.fs
@@ -151,11 +152,8 @@ var errNoChatModel = errors.New("a coding agent needs a chat model and this orga
 
 // connectModels is what a client may be pointed at: the enabled chat models,
 // and the organisation's routers, which a client names in the same field.
-// Subscription models are left out: only a subscription key reaches them, and
-// --subscription sets those up.
-//
-// Failing to read the routers is not an error: the models are still worth
-// offering.
+// Subscription models are left out: only --subscription sets those up. A
+// failed read of the routers still offers the models.
 func connectModels(ctx context.Context, c *client, org string) ([]policy.Model, error) {
 	models, err := catalogue(ctx, c, org)
 	if err != nil {

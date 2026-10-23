@@ -25,9 +25,8 @@ func TestFilterRoundTripAndTheGuardrailsThatNameOne(t *testing.T) {
 	if saved.CreatedAt.IsZero() || saved.UpdatedAt.IsZero() {
 		t.Error("the write did not return its timestamps")
 	}
-	// A filter written without a mode is a rewrite filter. Every filter was one
-	// before there was anything else to be, and a stored row that read back as
-	// a gate would only ever say no.
+	// A filter written without a mode is a rewrite filter, as every filter was
+	// before gates existed. Read back as a gate, it would only ever say no.
 	if saved.Mode != policy.FilterModeRewrite {
 		t.Errorf("mode = %q, want %q", saved.Mode, policy.FilterModeRewrite)
 	}
@@ -165,8 +164,7 @@ func filterTraffic(t *testing.T, st *Store, ctx context.Context, f fixture,
 		event(0, f.projectID, 200, 1800, run(FilterPass, 100, 300, 0)),
 		event(time.Minute, f.projectID, 200, 1800, run(FilterRewrite, 200, 300, 2)),
 		event(2*time.Minute, f.projectID, 200, 1800, run(FilterRewrite, 300, 300, 1)),
-		// The refusals, all in one project - which is the point of the breakdown:
-		// a rate across an organisation is not a rate anybody experiences.
+		// The refusals, all in one project, which the breakdown is for.
 		event(3*time.Minute, "project_2", 403, 300, run(FilterRefuse, 400, 300, 0)),
 		event(4*time.Minute, "project_2", 403, 300, run(FilterRefuse, 900, 300, 0)),
 		// One that could not run at all, and one request nothing filtered.

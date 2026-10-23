@@ -545,8 +545,6 @@ func envDuration(key string, def time.Duration) time.Duration {
 	return d
 }
 
-/* ------------------------------------------------------------------ sandboxes */
-
 // SandboxConfig holds the sandbox settings, off by default: a gateway that
 // reached for a Kubernetes API on every start would fail over a feature nobody
 // asked for. Switching them on is one variable; the rest defaults to what the
@@ -670,9 +668,8 @@ func (s SandboxConfig) validate() error {
 	if s.IdleSuspend < 0 {
 		return errors.New("KEERA_SANDBOX_IDLE_SUSPEND cannot be negative")
 	}
-	// A floor of five minutes: an open connection is only recorded once a
-	// minute, and suspending a sandbox in use is the worst thing this can do.
-	// A short timer would also catch a laptop that is just reconnecting.
+	// Suspending a sandbox in use is the worst this can do, and a short timer
+	// would also catch a laptop that is just reconnecting.
 	if s.IdleSuspend > 0 && s.IdleSuspend < 5*time.Minute {
 		return fmt.Errorf("KEERA_SANDBOX_IDLE_SUSPEND is %s; below five minutes it could "+
 			"suspend a sandbox somebody is still connected to, because an open connection "+

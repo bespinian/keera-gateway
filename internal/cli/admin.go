@@ -61,7 +61,6 @@ func list[T any](ctx context.Context, c *client, path string) ([]T, error) {
 	return res.Data, err
 }
 
-// inOrg scopes a control API path to one organisation.
 func inOrg(path, orgID string) string {
 	return path + "?org_id=" + url.QueryEscape(orgID)
 }

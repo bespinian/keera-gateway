@@ -37,7 +37,6 @@ func TestAModelOnTheDeploymentsKeyIsLockedToTheProvider(t *testing.T) {
 	}
 }
 
-// A model priced by prompt length is billed its long-prompt list prices too.
 func TestAModelOnTheDeploymentsKeyTakesTheLongPromptPrices(t *testing.T) {
 	p := Platform{"anthropic": {APIKey: "sk"}}
 	m := policy.Model{Provider: "anthropic", BackendModel: "claude-haiku-5-5"}

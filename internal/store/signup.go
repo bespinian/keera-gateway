@@ -78,7 +78,7 @@ func (s *Store) InvitationFor(ctx context.Context, email string) (Org, error) {
 		ORDER BY created_at, id LIMIT 1)`, email)
 }
 
-// takeSignup uses a sign-up up inside tx, so it is gone only if what it was
+// takeSignup uses up a sign-up inside tx, so it is gone only if what it was
 // for happens too.
 func takeSignup(ctx context.Context, tx pgx.Tx, hash []byte) (Signup, error) {
 	return scanSignup(tx.QueryRow(ctx, `DELETE FROM signups

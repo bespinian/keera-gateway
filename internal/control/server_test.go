@@ -57,7 +57,7 @@ func newServer() *Server {
 	return New(nil, nil, nil, nil, Options{OperatorKey: testOperatorKey}, slog.New(slog.DiscardHandler))
 }
 
-// echo is a handler that records the principal it was given.
+// echo records the principal it was given.
 func echo(seen **authn.Principal) handler {
 	return func(w http.ResponseWriter, _ *http.Request, p *authn.Principal) {
 		*seen = p
@@ -277,7 +277,7 @@ func TestUnknownProviderIsRefused(t *testing.T) {
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
 
-	// Before anything is written, as above: the store behind this server is nil.
+	// Refused before anything is written: this server has no store.
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body)
 	}

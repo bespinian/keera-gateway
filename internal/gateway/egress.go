@@ -12,17 +12,14 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// The addresses the gateway will not connect to.
+// The addresses the gateway will not connect to. Administrators set where
+// their models and MCP servers are. Without a guard, the gateway would reach
+// whatever its host can, such as the cloud's metadata service, which hands out
+// the host's credentials.
 //
-// An organisation's administrator sets where its models and MCP servers are,
-// and the gateway sends requests there and passes the answers back. Without a
-// guard that reaches whatever the gateway's own host can: the cloud's metadata
-// service, which hands out the host's credentials, or a port only meant for
-// the host itself.
-//
-// The check runs on the address being dialled, after DNS, so a name that
-// resolves to a blocked address is blocked too. Through a proxy, the address
-// dialled is the proxy's, and the proxy has to do its own filtering.
+// The check runs on the dialled address, after DNS, so a name that resolves
+// to a blocked address is blocked too. Through a proxy, the address dialled is
+// the proxy's, and the proxy has to do its own filtering.
 
 // DefaultUpstreamDeny is loopback, link-local, where the clouds serve their
 // metadata, the unspecified address, AWS's IPv6 metadata address, Alibaba's

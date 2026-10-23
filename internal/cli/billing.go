@@ -165,7 +165,6 @@ func (r *billingRun) confirmForget(ctx context.Context, orgID string) error {
 var errNoPayments = errors.New("this deployment takes no payments: nobody pays in advance " +
 	"(see docs/billing.md)")
 
-// creditAccount reads one organisation's credit account.
 func (r *billingRun) creditAccount(ctx context.Context, orgID string) (creditResponse, error) {
 	var res creditResponse
 	if err := r.c.do(ctx, "GET", inOrg("/v1/billing/account", orgID), nil, &res); err != nil {

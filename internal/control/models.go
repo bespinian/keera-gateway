@@ -16,10 +16,8 @@ import (
 )
 
 // listModels is readable by anyone signed in: a developer needs to know which
-// models exist and their limits.
-//
-// Backend URLs and whether a key is stored are for the organisation's
-// administrators.
+// models exist and their limits. Backend URLs and whether a key is stored are
+// for the organisation's administrators.
 func (s *Server) listModels(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	orgID, ok := s.queryOrg(w, r, p)
 	if !ok {
@@ -37,7 +35,7 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request, p *authn.Pri
 			models[i].Backends = nil
 			models[i].HasAPIKey = false
 		}
-		// Already left out of JSON by its tag; cleared as well to be safe.
+		// Its JSON tag already leaves it out; cleared to be safe.
 		models[i].APIKeyCiphertext = nil
 	}
 	s.writeHookList(w, r, models, func(from, to time.Time) (any, error) {
@@ -45,31 +43,28 @@ func (s *Server) listModels(w http.ResponseWriter, r *http.Request, p *authn.Pri
 	})
 }
 
-// markPlatform shows a model on the deployment's key as the gateway sends
-// it: to the provider's endpoint, at its list prices. The row may predate the
-// key.
+// markPlatform shows a model on the deployment's key as the gateway sends it:
+// to the provider's endpoint, at list prices. The row may predate the key.
 func (s *Server) markPlatform(m *policy.Model) {
 	if !s.opts.Platform.Covers(*m) {
 		return
 	}
-	// Its own key is never sent, either way. A model the price table does not
-	// know is not on the deployment's key either: the registry sends it
-	// without a key, and logs why.
+	// Its own key is never sent. A model the price table does not know is not
+	// on the deployment's key either: the registry sends it without a key, and
+	// logs why.
 	m.HasAPIKey = false
 	_ = s.opts.Platform.Lock(m)
 }
 
 // listProviders serves the hosted providers this binary knows, so adding a
-// hosted model in the panel needs only a model id. It is the same table the
-// template file is read against.
+// hosted model in the panel needs only a model id.
 //
-// Anyone signed in may read it, for the panel's model catalogue. Only someone who
-// can add a model sees where a provider is reached: the form fills it in.
+// Anyone signed in may read it. Only someone who can add a model sees the
+// endpoints, which the form fills in.
 func (s *Server) listProviders(w http.ResponseWriter, _ *http.Request, p *authn.Principal) {
 	type entry struct {
 		catalog.Provider
-		// PlatformKey says the deployment holds the key, so a model of this
-		// provider takes none.
+		// PlatformKey says the deployment holds the key, so models take none.
 		PlatformKey bool `json:"platform_key,omitempty"`
 	}
 	admin := p.CanAdminOrg(p.OrgID)
@@ -88,16 +83,13 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 	if !ok {
 		return
 	}
-	// The credential is write-only, so it is part of the request and not of
-	// the model. Nil leaves the stored one alone.
+	// The credential is write-only. Nil leaves the stored one alone.
 	var body struct {
 		policy.Model
 		APIKey *string `json:"api_key"`
-		// Enabled nil means not said: a new model starts enabled, and an
-		// existing one keeps what it was.
+		// Nil: a new model starts enabled, an existing one keeps its state.
 		Enabled *bool `json:"enabled"`
-		// The two prices shadow the model's, so a price left out can be told
-		// from one set to 0.
+		// Pointers, so a price left out can be told from one set to 0.
 		InputMicrosPerMTok  *int64 `json:"input_micros_per_mtok"`
 		OutputMicrosPerMTok *int64 `json:"output_micros_per_mtok"`
 	}
@@ -120,7 +112,7 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 		return
 	}
 	credential := trimmedCredential(body.APIKey)
-	// Locked before the other checks, because it sets the backend they check.
+	// Locked first, because it sets the backend the other checks read.
 	m.Provider = strings.ToLower(strings.TrimSpace(m.Provider))
 	platform := s.opts.Platform.Covers(m)
 	if platform {
@@ -162,9 +154,9 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 		return
 	}
 	m.Enabled = enabledAfterPut(body.Enabled, found, existing.Enabled)
-	// A model on the deployment's key, or a subscription model, keeps no key
-	// of its own: it would never be used, and a platform model would send it
-	// to wherever it points if the deployment's key were taken away.
+	// A platform or subscription model keeps no key of its own: it would never
+	// be used, and a platform model would send it to wherever it points if the
+	// deployment's key were taken away.
 	setKey := body.APIKey != nil || ((platform || m.Subscription) && found && existing.HasAPIKey)
 	var cred store.Credential
 	if setKey {
@@ -205,11 +197,10 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 	httpx.WriteJSON(w, http.StatusOK, stored)
 }
 
-// sameOrigins reports whether every address in next is on a host one in prev
-// already was. A stored credential is only ever sent to the hosts it was
-// stored for, so whoever moves a model or a server elsewhere has to give it
-// again: an administrator could otherwise send a key someone else entered to
-// a host of their own.
+// sameOrigins reports whether every address in next is on a host from prev.
+// A stored credential only goes to the hosts it was stored for, so moving a
+// model or server elsewhere needs the key again: otherwise an administrator
+// could send a key someone else entered to a host of their own.
 func sameOrigins(prev, next []string) bool {
 	origin := func(raw string) string {
 		u, err := url.Parse(strings.TrimSpace(raw))
@@ -237,15 +228,14 @@ func keyNotMoved(field string) string {
 		"give 'api_key' again, or \"\" to remove it"
 }
 
-// badAlias refuses an alias that is not one. An alias goes into URLs, command
-// lines and client configurations, which quote none of it.
+// badAlias refuses an invalid alias. An alias goes into URLs, command lines
+// and client configurations, which quote none of it.
 func badAlias(alias string) string {
 	return "'" + alias + "' is not a usable alias; use lowercase letters, digits and inner hyphens"
 }
 
-// checkModelAlias refuses a new model named like one of the organisation's
-// routers. A model is looked up first, so the router would become
-// unreachable.
+// checkModelAlias refuses a new model named like a router. A model is looked
+// up first, so the router would become unreachable.
 func (s *Server) checkModelAlias(w http.ResponseWriter, r *http.Request, orgID, alias string) bool {
 	_, err := s.st.Router(r.Context(), orgID, alias)
 	return !s.aliasTaken(w, err, "'"+alias+"' is already one of this organisation's routers, "+
@@ -294,8 +284,8 @@ func (s *Server) checkSubscriptionUsers(w http.ResponseWriter, r *http.Request,
 	return false
 }
 
-// aliasTaken refuses an alias that another kind of thing already has, and
-// reports whether it did. err is what looking that thing up returned.
+// aliasTaken refuses an alias another kind of thing already has, and reports
+// whether it did. err is the result of looking that thing up.
 func (s *Server) aliasTaken(w http.ResponseWriter, err error, msg string) bool {
 	switch {
 	case err == nil:
@@ -317,8 +307,8 @@ func trimmedCredential(key *string) string {
 	return strings.TrimSpace(*key)
 }
 
-// replacing reads the lookup of the row a PUT replaces: found says whether
-// there is one. It answers any other error and returns false in ok.
+// replacing reads the lookup of the row a PUT replaces. On any error but
+// not-found it answers and returns ok false.
 func (s *Server) replacing(w http.ResponseWriter, err error) (found, ok bool) {
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		s.fail(w, err)
@@ -327,8 +317,7 @@ func (s *Server) replacing(w http.ResponseWriter, err error) (found, ok bool) {
 	return err == nil, true
 }
 
-// enabledAfterPut is what a PUT leaves switched on: what the body says, else
-// what was stored, else on for something new.
+// enabledAfterPut is what the body says, else what was stored, else on.
 func enabledAfterPut(said *bool, found, was bool) bool {
 	switch {
 	case said != nil:
@@ -339,8 +328,7 @@ func enabledAfterPut(said *bool, found, was bool) bool {
 	return true
 }
 
-// sealCredential seals a credential under its secret name, or clears the
-// stored one when credential is empty.
+// sealCredential seals a credential, or clears the stored one when empty.
 func (s *Server) sealCredential(name, credential string) store.Credential {
 	if credential == "" {
 		return store.ReplaceCredential(nil)
@@ -348,9 +336,8 @@ func (s *Server) sealCredential(name, credential string) store.Credential {
 	return store.ReplaceCredential(s.opts.Secrets.Seal(name, credential))
 }
 
-// auditCredential records that a credential was set or cleared. Nothing about
-// the credential goes into the audit log, not even its length. Who set it and
-// when is the record.
+// auditCredential records that a credential was set or cleared. Nothing
+// about the credential goes into the audit log, not even its length.
 func (s *Server) auditCredential(r *http.Request, p *authn.Principal, orgID, kind, alias, credential string) {
 	action := kind + ".credential.set"
 	if credential == "" {
@@ -359,27 +346,25 @@ func (s *Server) auditCredential(r *http.Request, p *authn.Principal, orgID, kin
 	s.auditf(r, p, orgID, action, kind, alias, nil)
 }
 
-// checkModel tests one model against its own backends. It is for the
-// organisation's administrators, because it reveals where the model runs and
-// puts load on it.
+// checkModel tests one model against its own backends. It is for
+// administrators: it reveals where the model runs and puts load on it.
 //
 // It offers the model a tool and a question only that tool can answer, so a
-// vLLM tool-call parser that does not match the model shows up here.
+// mismatched vLLM tool-call parser shows up here.
 func (s *Server) checkModel(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	orgID, ok := s.adminOrg(w, r, p)
 	if !ok {
 		return
 	}
 	alias := r.PathValue("alias")
-	// The registry, not the store: it holds the decrypted credential the data
-	// plane would present.
+	// The registry, not the store: it holds the decrypted credential.
 	m, found := s.reg.Model(orgID, alias)
 	if !found {
 		s.fail(w, store.ErrNotFound)
 		return
 	}
 	probe := s.opts.Gateway.CheckModel(r.Context(), m)
-	// Kept, so an operator can later show when a model last worked.
+	// Kept, so an operator can see when a model last worked.
 	s.auditf(r, p, orgID, "model.check", "model", alias, map[string]any{
 		"ok": probe.OK, "status": probe.Status, "tool_calls": probe.ToolCalls,
 		"tool_call_as_text": probe.ToolCallAsText, "tools_off": probe.ToolsOff,

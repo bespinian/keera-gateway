@@ -67,8 +67,6 @@ func (c OIDCConfig) vouchesFor(domain string) bool {
 	return false
 }
 
-// vouchesForAll reports whether this provider may place someone with any
-// address.
 func (c OIDCConfig) vouchesForAll() bool {
 	return len(c.Domains) == 0 || slices.Contains(c.Domains, AnyDomain)
 }
@@ -235,8 +233,7 @@ func (o *OIDC) SignUp() bool { return o.cfg.SignUp }
 type Providers []*OIDC
 
 // NewProviders discovers every configured provider. One unreachable provider
-// fails the start, rather than leaving its users unable to sign in with no
-// explanation.
+// fails the start rather than leave its users unable to sign in.
 func NewProviders(ctx context.Context, cfgs []OIDCConfig, client *http.Client) (Providers, error) {
 	var out Providers
 	seen := map[string]bool{}
@@ -280,9 +277,8 @@ func (p Providers) Only() *OIDC {
 }
 
 // AdminFromDirectory reports whether the directory, not Keera, decides the
-// administrator role on this deployment. It is one answer for the whole
-// gateway, so the panel never has to explain per person where a role came
-// from.
+// administrator role. It is one answer for the whole gateway, so the panel
+// never has to explain per person where a role came from.
 func (p Providers) AdminFromDirectory() bool {
 	for _, o := range p {
 		if o.cfg.Mapping.DecidesAdmin() {
@@ -357,7 +353,6 @@ func (o *OIDC) Exchange(ctx context.Context, code string, f Flow) (Identity, err
 		return Identity{}, err
 	}
 	if idToken.Nonce != f.Nonce {
-		// The token was minted for a different sign-in.
 		return Identity{}, errors.New("the id_token nonce does not match this sign-in")
 	}
 	id, err := o.identity(idToken)
@@ -452,8 +447,7 @@ func (o *OIDC) verifiedIDToken(ctx context.Context, token *oauth2.Token) (*oidc.
 func (o *OIDC) checkIdentity(id Identity, claims map[string]any, groupsClaim string) error {
 	// Entra replaces the groups claim with a pointer to Microsoft Graph when a
 	// person is in too many groups. Keera does not call Graph, so that person
-	// would silently get the default role. Refuse, but only where groups decide
-	// a role.
+	// would silently get the default role. Refuse where groups decide a role.
 	if len(id.Groups) == 0 && o.cfg.Mapping.UsesGroups() && hasClaimOverage(claims, groupsClaim) {
 		return fmt.Errorf("the identity provider replaced the %q claim with a "+
 			"pointer to its directory API because this account is in too many groups, "+

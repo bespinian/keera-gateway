@@ -18,8 +18,7 @@ func TestKeyState(t *testing.T) {
 		{"expiry ahead", KeyInfo{ExpiresAt: &future}, "active"},
 		{"expiry behind", KeyInfo{ExpiresAt: &past}, "expired"},
 		{"revoked", KeyInfo{RevokedAt: &past}, "revoked"},
-		// Revocation is the one that matters: an expired key that was also
-		// revoked is revoked, because that is the one somebody did on purpose.
+		// Revocation wins over expiry: somebody did it on purpose.
 		{"revoked and expired", KeyInfo{RevokedAt: &past, ExpiresAt: &past}, "revoked"},
 	}
 	for _, tc := range tests {

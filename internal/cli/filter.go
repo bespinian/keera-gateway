@@ -66,7 +66,6 @@ func filterCmd(ctx context.Context, args []string) error {
 
 func filterAlias(f policy.Filter) string { return f.Alias }
 
-// find reads one of the organisation's filters.
 func (r *filterRun) find(ctx context.Context, alias string) (policy.Filter, error) {
 	return findAlias(ctx, r.aliasRun, alias, filterAlias)
 }
@@ -120,7 +119,6 @@ func (r *filterRun) put(ctx context.Context) error {
 	}, printFilter)
 }
 
-// apply writes the given flags into f.
 func (r *filterRun) apply(f *policy.Filter) error {
 	if r.model != "" {
 		f.Model = r.model

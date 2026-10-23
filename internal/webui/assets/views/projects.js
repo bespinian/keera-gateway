@@ -300,15 +300,9 @@ export function editProject(ctx, project) {
   });
 }
 
-// deleteProject removes a project once nothing live is bound to it.
-//
-// The control plane refuses while any key in it is not revoked, expired ones
-// included. The row knows that count, so the button explains and links to the
-// keys instead of failing with an error.
-//
-// Otherwise the dialog names the guardrails, the only part that cannot be
-// recovered elsewhere. done runs after the delete; the project's own screen
-// uses it to leave.
+// deleteProject removes a project once nothing live is bound to it. The
+// control plane refuses while any key in it is not revoked, expired ones
+// included, so the button explains and links to the keys instead of failing.
 export function deleteProject(ctx, project, done = () => ctx.reload()) {
   const live = project.active_keys || 0;
   if (live) {
@@ -356,10 +350,8 @@ export function deleteProject(ctx, project, done = () => ctx.reload()) {
 }
 
 // openProject opens the guardrails dialog with the organisation's limits as the
-// ceiling, so "projects can only narrow" shows as real numbers.
-//
-// A member gets the same dialog read-only: the numbers answer "why was I
-// refused" without asking an administrator.
+// ceiling, so "projects can only narrow" shows as real numbers. A member gets
+// it read-only: the numbers answer "why was I refused".
 export async function openProject(
   ctx,
   project,

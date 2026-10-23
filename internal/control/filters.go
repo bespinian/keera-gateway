@@ -17,12 +17,12 @@ import (
 )
 
 // maxFilterPromptBytes bounds a filter's instruction. Like a system prompt it
-// goes with every request it covers, and a filter's model then rewrites the
-// whole conversation, so it costs even more.
+// goes with every request it covers, and the filter's model then rewrites the
+// whole conversation.
 const maxFilterPromptBytes = 16 << 10
 
-// listFilters is readable by every member of the organisation, instruction
-// and all. It is text added to the reader's own requests, not a credential.
+// listFilters is readable by every member, instruction and all: it is text
+// added to their own requests, not a credential.
 func (s *Server) listFilters(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	orgID, ok := s.queryOrg(w, r, p)
 	if !ok {
@@ -43,10 +43,9 @@ func (s *Server) listFilters(w http.ResponseWriter, r *http.Request, p *authn.Pr
 }
 
 // filterReport is one filter's own screen: how often it fires, what it does,
-// what it adds to latency and cost, and which projects it refuses.
+// its latency and cost, and which projects it refuses.
 //
-// Every member may read it: these are counts of the organisation's own
-// traffic, which members already see on the Dashboard.
+// Every member may read it: members already see these counts on the Dashboard.
 func (s *Server) filterReport(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	out, orgID, ok := hookReport(s, w, r, p, "filter", s.st.FilterReportFor, s.st.Filter)
 	if !ok {
@@ -84,9 +83,8 @@ func (s *Server) putFilter(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		Alias: r.PathValue("alias"),
 		Model: strings.TrimSpace(in.Model),
 		Mode:  policy.FilterMode(strings.TrimSpace(string(in.Mode))),
-		// A missing shadow field means enforce. A filter that silently stopped
-		// enforcing because a client left a field out is a mistake nothing
-		// else would report.
+		// A missing shadow field means enforce: a filter that silently stopped
+		// enforcing is a mistake nothing else would report.
 		Shadow:      in.Shadow,
 		Prompt:      strings.TrimSpace(in.Prompt),
 		Rules:       in.Rules,
@@ -281,8 +279,7 @@ func (s *Server) deleteFilter(w http.ResponseWriter, r *http.Request, p *authn.P
 // checkFilter runs one filter over a sample and shows what came back.
 //
 // A filter model too weak for the format refuses everything, and an eager
-// instruction deletes code. Both show up here in one click, instead of when a
-// developer complains.
+// instruction deletes code. Both show up here, not when a developer complains.
 func (s *Server) checkFilter(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	orgID, ok := s.adminOrg(w, r, p)
 	if !ok {
@@ -352,11 +349,11 @@ func strandedRefusal(w http.ResponseWriter, code, what string, stranded []string
 			"list allows first, or keep the model on it")
 }
 
-// checkGuardrailFilters refuses a guardrail that names a filter its
-// organisation does not have, and cleans up the list in place.
+// checkGuardrailFilters refuses a guardrail that names an unknown filter, and
+// cleans up the list in place.
 //
-// At request time an unknown filter refuses everything, so a typo here would
-// take a department offline. It is caught now, while the writer can see it.
+// At request time an unknown filter refuses everything, so a typo would take a
+// department offline.
 func (s *Server) checkGuardrailFilters(w http.ResponseWriter, r *http.Request,
 	orgID string, lim *policy.Limits) bool {
 	if len(lim.Filters) == 0 {

@@ -26,8 +26,6 @@ import (
 // anthropicShape implements shape for `/v1/messages`.
 type anthropicShape struct{}
 
-// ------------------------------------------------------------------- requests
-
 // anthropicRequest is the part of a Messages request the OpenAI shape has a
 // place for. Unknown fields are ignored, not rejected, so a client release
 // that adds a field does not break against the gateway.
@@ -265,7 +263,6 @@ func chatBody(model string, msgs []chatMessage, out map[string]any, size int) (*
 	return b, nil
 }
 
-// convertMessages turns the system prompt and every turn into OpenAI messages.
 func convertMessages(in anthropicRequest) ([]chatMessage, error) {
 	msgs := make([]chatMessage, 0, len(in.Messages)+1)
 	if sys := systemText(in.System); !sys.isEmpty() {
@@ -531,8 +528,8 @@ func joinText(blocks []anthropicBlock) jsonText {
 }
 
 // chatMessage is one message of the chat request a Messages or Responses
-// request becomes.
-// It is written out by hand, so its text is copied rather than escaped again.
+// request becomes. It is written out by hand, so its text is copied rather
+// than escaped again.
 type chatMessage struct {
 	role string
 	// content is left out when nil: an assistant turn of only tool calls has
@@ -775,8 +772,6 @@ func toolInput(args string) json.RawMessage {
 	}
 	return json.RawMessage(trimmed)
 }
-
-// --------------------------------------------------------------------- errors
 
 // anthropicErrorType names an error by status, as the Messages API does.
 // Clients match on it to decide whether to retry.

@@ -302,8 +302,7 @@ function editServer(ctx, existing) {
       if (problem) throw new Error(problem);
       if (!url.value.trim())
         throw new Error("The server's address is required.");
-      // Sent only when typed or cleared: sending "" on every save would wipe
-      // it.
+      // Sent only when typed or cleared: sending "" on every save would wipe it.
       let credential;
       if (clearKey && clearKey.checked) credential = "";
       else if (apiKey.value) credential = apiKey.value;

@@ -69,7 +69,6 @@ func (d *Diagnosis) add(area, name string, verdict Verdict, detail, fix string) 
 	}
 }
 
-// diagnostics answers GET /v1/diagnostics.
 func (s *Server) diagnostics(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	// An administrator sees their organisation's part. The deployment's part
 	// names environment variables and the inference plane, which belong to
@@ -105,8 +104,7 @@ func (s *Server) diagnostics(w http.ResponseWriter, r *http.Request, p *authn.Pr
 func (s *Server) checkDeployment(ctx context.Context, d *Diagnosis, p *authn.Principal) {
 	const area = "Deployment"
 
-	// The deployment's configuration, which a tenant's administrator is not
-	// told about.
+	// A tenant's administrator is not told about the deployment.
 	if !p.Unrestricted() {
 		return
 	}

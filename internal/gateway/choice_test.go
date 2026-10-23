@@ -39,9 +39,8 @@ func TestAChoiceIsReadOutOfTheLettersAlone(t *testing.T) {
 			n:    2, want: 1, share: 0.99,
 		},
 		{
-			// The point of the mode: what the model would rather have written
-			// is not a destination, so it takes no part in the decision. A
-			// model that opens every answer with '<think>' still chooses.
+			// What the model would rather have written is not a destination,
+			// so a model that opens with '<think>' still chooses.
 			name: "a token that is not a letter is not in the running",
 			raw: completion("<think>", [2]any{"<think>", -0.1}, [2]any{"A", -4.0},
 				[2]any{"B", -6.0}),

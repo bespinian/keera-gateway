@@ -1,8 +1,7 @@
 // Package oidctest is a minimal but real OpenID provider, for tests of
 // signing in and of asking the directory again: discovery, a JWK set, and a
-// token endpoint that mints properly signed id_tokens. It exists so the whole
-// exchange is exercised, signature and nonce checks included, rather than
-// assumed to work.
+// token endpoint that mints properly signed id_tokens, so signature and nonce
+// checks are exercised rather than assumed to work.
 package oidctest
 
 import (

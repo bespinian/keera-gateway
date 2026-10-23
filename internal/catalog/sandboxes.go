@@ -245,8 +245,8 @@ func parseCPU(raw string, def int) (int, error) {
 
 // parseMiB reads a byte quantity into mebibytes, with Kubernetes suffixes.
 //
-// A bare number is mebibytes, not bytes as in Kubernetes: "memory: 4096" meaning
-// four kilobytes would be a class nothing can schedule.
+// A bare number is mebibytes, not bytes as in Kubernetes: "memory: 4096"
+// meaning four kilobytes would be a class nothing can schedule.
 func parseMiB(raw string, def int) (int, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

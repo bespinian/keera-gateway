@@ -9,8 +9,6 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// ----------------------------------------------------------------- servers
-
 const mcpColumns = `SELECT org_id, alias, url, description, auth_header, api_key_ct, enabled`
 
 func scanMCPServer(r row) (policy.MCPServer, error) {
@@ -55,8 +53,6 @@ func (s *Store) UpsertMCPServer(ctx context.Context, m policy.MCPServer, cred Cr
 func (s *Store) DeleteMCPServer(ctx context.Context, orgID, alias string) error {
 	return s.execOne(ctx, "DELETE FROM mcp_servers WHERE org_id = $1 AND alias = $2", orgID, alias)
 }
-
-// -------------------------------------------------------------- tool calls
 
 // ToolOutcome is what came of one tool call.
 type ToolOutcome string

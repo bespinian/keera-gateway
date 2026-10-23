@@ -15,13 +15,12 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// The sandbox half of the control API. The real work lives in
-// internal/sandbox; this decides who may do what and maps refusals to status
-// codes.
+// The sandbox half of the control API. internal/sandbox does the work; this
+// decides who may do what and maps refusals to status codes.
 //
-// The rule differs from the rest of the control plane: an administrator may
-// see and terminate every sandbox in their organisation (it is their quota and
-// their bill), but may not open a shell in one. See canAttach.
+// Unlike elsewhere, an administrator may see and terminate every sandbox in
+// their organisation (their quota, their bill), but may not open a shell in
+// one. See canAttach.
 
 // requireSandboxes refuses every route that needs a driver when there is none.
 func (s *Server) requireSandboxes(w http.ResponseWriter) bool {
@@ -49,11 +48,9 @@ func orgLimited(w http.ResponseWriter, why, orgName string) {
 		why+"; "+policy.LockedMessage(orgName))
 }
 
-/* --------------------------------------------------------------- the catalogue */
-
-// listSandboxClasses is readable by anyone in the organisation: a developer
-// needs the class names to ask for a machine. The limits of the project a
-// sandbox lands in by default come with it, so a client can grey out what
+// listSandboxClasses is open to anyone in the organisation: a developer needs
+// the class names to ask for a machine. It also returns the limits of the
+// project a sandbox lands in by default, so a client can grey out what
 // creating one there would refuse.
 func (s *Server) listSandboxClasses(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	orgID, ok := s.queryOrg(w, r, p)
@@ -76,8 +73,6 @@ func (s *Server) listSandboxClasses(w http.ResponseWriter, r *http.Request, p *a
 			"tiers":     caps.Tiers,
 		}
 	}
-	// The project a sandbox lands in when none is named, so its guardrail
-	// counts too: creating one there applies it.
 	projectID, err := s.st.FirstProject(r.Context(), orgID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		s.fail(w, err)
@@ -216,8 +211,6 @@ func (s *Server) deleteSandboxClass(w http.ResponseWriter, r *http.Request, p *a
 		"name": name, "deleted": true, "live_sandboxes": live,
 	})
 }
-
-/* --------------------------------------------------------------- the sandboxes */
 
 // sandboxLimits resolves what a sandbox may be: the organisation's guardrail,
 // narrowed by the project's. The caller is a person, not an API key, so there
@@ -414,7 +407,8 @@ func (s *Server) extendSandbox(w http.ResponseWriter, r *http.Request, p *authn.
 	var in struct {
 		TTL *int64 `json:"ttl_seconds"`
 	}
-	// An empty body is fine: `keera sandbox extend <name>` sends none.
+	// No body is fine, and means the same as {}, which `keera sandbox extend
+	// <name>` sends without --ttl.
 	if err := httpx.ReadJSON(r, &in); err != nil && !errors.Is(err, io.EOF) {
 		refuseBody(w, err)
 		return

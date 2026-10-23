@@ -91,10 +91,13 @@ var commands = []command{
 		args:    "[flags]",
 		flags:   []string{"provider", "no-browser"},
 		prose: "Opens a browser and signs you in, so commands run as you and the audit log " +
-			"names you. --url also makes that gateway the default for every later command; " +
-			"'keera whoami' says which one is in use. See docs/sso.md.",
+			"names you. --url also makes that gateway the default for every later command.\n\n" +
+			"A command talks to the gateway --url names, else KEERA_CONTROL_URL, else the " +
+			"one you last signed in to, else the hosted one. KEERA_OPERATOR_KEY, the " +
+			"deployment's own credential, wins over a sign-in. 'keera whoami' says which " +
+			"gateway and credential are in use. See docs/sso.md.",
 		examples: []string{
-			"keera login                # the gateway you last signed in to, else the hosted one",
+			"keera login                # the gateway the other commands talk to",
 			"keera login --url https://keera.example.ch",
 			"keera login --no-browser   # a terminal with no browser on it",
 		},
@@ -170,7 +173,7 @@ var commands = []command{
 		},
 		examples: []string{
 			`keera org create "Example Bank" --domain example.ch`,
-			`keera org set org_123 --name "Example Bank AG"`,
+			`keera org set "Example Bank" --name "Example Bank AG"`,
 			`keera org switch "Example Bank"`,
 		},
 	},
@@ -263,7 +266,7 @@ var commands = []command{
 					"reports and the audit log show it in place of the key.\n\n" +
 					"A key is activated when it is created, and its secret printed. With " +
 					"--pending it is left for the person it belongs to instead: it has no " +
-					"secret until they activate it, so only they ever see it.\n\n" +
+					"secret until it is activated, and only whoever activates it sees it.\n\n" +
 					"For a member's --subscription key, add --user; their 'keera connect " +
 					"claude-code --subscription' takes it over. See docs/subscriptions.md.\n\n" +
 					"Only an administrator issues keys. A member activates, renames, rotates " +
@@ -342,7 +345,7 @@ var commands = []command{
 					"keera model add claude-opus --provider anthropic \\\n" +
 						"    --backend-model claude-opus-5-5 --subscription",
 				}},
-			{name: "set", args: "<alias>", summary: "change any of those on an existing model",
+			{name: "set", args: "<alias>", summary: "change an existing model",
 				flags: slices.Concat(modelFieldFlags,
 					[]string{"api-key", "no-api-key", "subscription", "no-subscription", "json"})},
 			{name: "enable", args: "<alias>", summary: "serve this model", flags: []string{"json"}},
@@ -372,7 +375,7 @@ var commands = []command{
 			"holds the server's own credential, shows the client only the tools its " +
 			"guardrail allows, runs its filters over what a call sends, and records every " +
 			"call without its content.\n\n" +
-			"Which tools a scope may call is a guardrail: 'keera guardrail set project project_1 " +
+			"Which tools a scope may call is a guardrail: 'keera guardrail set project payments " +
 			"--tools github/search_code,jira'. A server's alias allows all its tools; " +
 			"alias/tool allows one.\n\n" +
 			"A server belongs to one organisation, and only its keys reach it. Its " +
@@ -386,7 +389,7 @@ var commands = []command{
 						"    --description \"Issues and pull requests\" --api-key @-",
 				}},
 			{name: "set", args: "<alias>",
-				summary: "change any of those on an existing server",
+				summary: "change an existing server",
 				flags:   slices.Concat(mcpFieldFlags, []string{"no-api-key", "json"})},
 			{name: "enable", args: "<alias>", summary: "serve this server", flags: []string{"json"}},
 			{name: "disable", args: "<alias>", summary: "stop serving it, keeping its declaration",
@@ -504,7 +507,7 @@ var commands = []command{
 					"keera filter add no-client-data --mode gate --model keera-speed \\\n" +
 						"    --prompt 'Refuse anything naming a client.'",
 				}},
-			{name: "set", args: "<alias>", summary: "change any of those on an existing filter",
+			{name: "set", args: "<alias>", summary: "change an existing filter",
 				flags: slices.Concat(filterFieldFlags, []string{"shadow", "no-shadow", "json"})},
 			{name: "check", args: "<alias>", summary: "run it over a sample and show what it did",
 				flags: []string{"json"}},
@@ -768,7 +771,8 @@ func overview(p painter) string {
 		"(or --no-color).\n")
 	// Which deployment the commands act on cannot be seen anywhere else.
 	fmt.Fprintf(&b, "\nThese commands talk to %s (%s).\n", p.cmd(base), from)
-	b.WriteString("Point them elsewhere with --url, or sign in: keera login --url <your deployment>\n")
+	b.WriteString("Point them elsewhere with --url or KEERA_CONTROL_URL, or sign in: " +
+		"keera login --url <your deployment>\n")
 	return b.String()
 }
 
@@ -1071,8 +1075,8 @@ func suggestSub(name, typed string) string {
 	return best
 }
 
-// distance is the Levenshtein distance: enough to catch a missing, doubled
-// or swapped letter.
+// distance is the Levenshtein distance: enough to catch a missing, extra
+// or wrong letter.
 func distance(a, b string) int {
 	if a == b {
 		return 0

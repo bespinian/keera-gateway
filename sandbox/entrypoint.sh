@@ -49,17 +49,14 @@ fi
 
 # ------------------------------------------------------------- the gateway
 #
-# Every exported variable but those below, so a script behaves the same when
+# Every exported variable but those skipped, so a script behaves the same when
 # run by hand. It is written once, to ~/.ssh/environment (see
 # PermitUserEnvironment in sshd_config), and the rest derives from that file.
-# The format is NAME=value per line with no quoting, so multi-line values are
-# skipped.
+# The format has no quoting, so multi-line values are skipped.
 #
-# Left out: the shell's own (PWD, OLDPWD, SHLVL), TERM, which the ssh client
-# sets, and what only this start uses. The task is the developer's prose and is
-# not kept on the volume. The keys, pi's files and the git credential get their
-# own files below, and the first git token goes stale: the helper fetches a
-# current one.
+# Skipped: the shell's own, TERM (the ssh client sets it), the task (the
+# developer's prose, not kept on the volume), and what gets its own file below.
+# The first git token goes stale anyway: the helper fetches a current one.
 skip=' PWD OLDPWD SHLVL TERM KEERA_TASK KEERA_AUTHORIZED_KEYS KEERA_PI_CONFIG KEERA_PI_SETTINGS KEERA_GIT_USERNAME KEERA_GIT_TOKEN KEERA_GIT_TOKEN_EXPIRES '
 : > "$HOME/.ssh/environment"
 chmod 600 "$HOME/.ssh/environment"
@@ -143,9 +140,10 @@ fi
 #
 # The credential is this sandbox's own: one repository, short-lived, minted by
 # the gateway. It can outlive the sandbox (a GitHub token by up to an hour, a
-# GitLab one until the next midnight UTC), so the gateway revokes what the
-# forge allows when the sandbox ends. It is never the developer's credential
-# and no ssh agent is forwarded: this machine may run a model's output.
+# GitLab one until midnight UTC after the sandbox ends), so the gateway revokes
+# what the forge allows when the sandbox ends. It is never the developer's
+# credential and no ssh agent is forwarded: this machine may run a model's
+# output.
 setup_git() {
   git config --global init.defaultBranch main
   git config --global advice.detachedHead false

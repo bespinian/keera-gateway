@@ -114,14 +114,10 @@ func (r *Registry) Observe(model, org string, status int, seconds float64, token
 		observe(seconds, int64(tokens))
 }
 
-// Overhead records what the gateway itself added ahead of the inference plane.
-// The request duration is almost all model time, so it would hide the
-// gateway getting slower.
-//
-// The window runs from the body being read to the upstream call. Filter
-// generation and the router's decision are subtracted: each has its own
-// metric, and would otherwise make a new guardrail look like a slow gateway.
-// Refusals are not recorded, as they never made an upstream call.
+// Overhead records the time the gateway itself added, from reading the body to
+// the upstream call, because request duration is mostly model time and would
+// hide a slower gateway. Filter and router time is left out, as each has its
+// own metric. Refusals make no upstream call, so they are not recorded.
 func (r *Registry) Overhead(model, org string, seconds float64) {
 	r.seriesIn(r.overhead, overheadBuckets, model, org).observe(seconds, 0)
 }

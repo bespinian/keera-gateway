@@ -316,8 +316,7 @@ export async function keysView(ctx) {
         // A dropdown with one choice filters nothing.
       ].filter((c) => c.options.length > 1),
       // Revoked keys are hidden by default, since the list is read to find
-      // working keys. They stay one click away to answer "what happened to
-      // mine". Expired keys always show; their row says so.
+      // working keys. Expired keys always show; their row says so.
       toggles: [
         {
           label: "Show revoked",
@@ -344,20 +343,17 @@ function userCell(ctx, k, userNames) {
     : h("span", {}, name);
 }
 
-// NOBODY is the user filter's value for a key with no user. No user id looks
-// like it.
+// The user filter's value for a key with no user. No user id looks like it.
 const NOBODY = "-";
 
-// NO_USER is what every screen shows for a key with no user.
 export const NO_USER = "No user";
 
-// inPeriod is the period last_used_at covers when the keys were read with
-// since, worded to follow "used" or "not".
+// The period last_used_at covers when the keys were read with since, worded
+// to follow "used" or "not".
 export function inPeriod(since) {
   return `in the ${rangeOf(since, RANGES[1]).long.toLowerCase()}`;
 }
 
-// byLabel turns the distinct values of rows into dropdown options.
 function byLabel(rows, value, label) {
   const seen = new Map();
   for (const r of rows) seen.set(value(r), label(r));
@@ -366,18 +362,15 @@ function byLabel(rows, value, label) {
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
-// canRevoke reports whether the reader may rename, revoke or rotate this key.
-// A member may only touch keys of their own. A key with no user is a shared
-// one an administrator issued, so the id must be present and match, not just
-// not belong to somebody else.
+// Also covers renaming and rotating. A member may only touch their own key. A
+// key with no user is a shared one, so the id must be present and match.
 export function canRevoke(ctx, k) {
   if (isAdmin(ctx)) return true;
   return !!k.user_id && k.user_id === ctx.state.me.user_id;
 }
 
-// revokeBody says what revoking this key would break. period is the span
-// last_used_at covers, which depends on how the keys were read: My access
-// reads this month.
+// period is the span last_used_at covers, which depends on how the keys were
+// read: My access reads this month.
 function revokeBody(k, period = "this month") {
   const base =
     `Clients using ${k.name} stop working within a second. ` +
@@ -386,7 +379,6 @@ function revokeBody(k, period = "this month") {
   return base;
 }
 
-// confirmRevoke is shared so revoking reads the same on every screen.
 export function confirmRevoke(k, done, period) {
   confirm({
     title: k.name ? `Revoke ${k.name}?` : "Revoke this key?",
@@ -408,7 +400,7 @@ export function statePill(state) {
   return pill("Active", "good");
 }
 
-// stateOf matches store.KeyInfo.State on the server.
+// Matches store.KeyInfo.State on the server.
 export function stateOf(k) {
   if (k.revoked_at) return "revoked";
   if (k.expires_at && new Date(k.expires_at) < new Date()) return "expired";
@@ -462,8 +454,7 @@ export function activateButton(ctx, k, cls = "btn") {
   );
 }
 
-// openKey shows a key's limits, with its project's and organisation's as the
-// ceiling. A member gets it read-only: it answers "why was my editor refused".
+// A member gets it read-only: it answers "why was my editor refused".
 export async function openKey(ctx, key, models, projectName, canEdit) {
   const ceilings = await ceilingsFor("key", {
     orgID: key.org_id,
@@ -482,8 +473,7 @@ export async function openKey(ctx, key, models, projectName, canEdit) {
   });
 }
 
-// confirmRotate replaces a key and shows the new secret. done gets the new
-// key, so a screen about the old key can move to it.
+// done gets the new key, so a screen about the old key can move to it.
 export function confirmRotate(ctx, k, { done } = {}) {
   confirm({
     title: k.name ? `Rotate ${k.name}?` : "Rotate this key?",
@@ -539,22 +529,21 @@ const EXPIRIES = [
   { value: "", label: "Never" },
 ];
 
-// localDay formats d as a date input writes it, in local time.
+// As a date input writes it, in local time.
 function localDay(d) {
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-// endOfDay is the last second of a YYYY-MM-DD day, so a key still works all
-// of the day it expires on.
+// The last second of the day, so a key still works all of the day it expires
+// on.
 function endOfDay(day) {
   const [y, m, d] = day.split("-").map(Number);
   return new Date(y, m - 1, d, 23, 59, 59);
 }
 
-// openIssueKey opens the form from a screen that has not loaded projects and
-// people. An operator viewing every organisation picks one on the keys screen
-// first.
+// For a screen that has not loaded projects and people. An operator viewing
+// every organisation picks one on the keys screen first.
 export async function openIssueKey(ctx) {
   if (!ctx.orgID && ctx.state.me.unrestricted) return ctx.navigate("/keys");
   const [projectsRes, usersRes] = await Promise.all([
@@ -568,15 +557,11 @@ export async function openIssueKey(ctx) {
   );
 }
 
-// issueKey asks for a new key. last holds the project and expiry of the
-// previous key, for "Issue another".
-//
-// The key is the reader's own by default, as with `keera key create`: a key
-// with no user shows on nobody's My access, so nobody can set a client up
-// with it. The user is not carried over to "Issue another", since a key given
-// to the wrong person quietly counts as theirs.
+// last holds the previous key's project and expiry, for "Issue another". The
+// key is the reader's own by default, as with `keera key create`: a key with
+// no user shows on nobody's My access. The user is not carried over, since a
+// key given to the wrong person counts as theirs.
 function issueKey(ctx, projects, users, last = {}) {
-  // Every key is in a project, so with none there is nothing to issue yet.
   if (!projects.length) {
     const close = modal({
       title: "Create a project first",
@@ -758,9 +743,8 @@ function issueKey(ctx, projects, users, last = {}) {
   });
 }
 
-// showSecret shows a key's secret, the only time it can be seen. again, when
-// given, opens the form for another key like this one. Because the secret is
-// never shown again, the reader's own key is set up from here.
+// The only time the secret can be seen, so the reader's own key is set up
+// from here.
 function showSecret(ctx, created, again, title = "Key issued") {
   const body = field("The key", secretField(created.key, "The API key"));
   const own =

@@ -419,7 +419,6 @@ func findModel(models []policy.Model, alias string) (policy.Model, bool) {
 	return policy.Model{}, false
 }
 
-// find reads one of the organisation's models.
 func (r *modelRun) find(ctx context.Context, alias string) (policy.Model, error) {
 	return findAlias(ctx, r.aliasRun, alias, modelAlias)
 }

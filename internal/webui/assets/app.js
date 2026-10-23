@@ -50,30 +50,24 @@ import {
 
 const root = document.getElementById("root");
 
-/** state is shared by the shell and the views. */
 const state = {
   me: null,
   orgs: [],
-  /** setup holds the organisation's counts. The first-run checklist reads
-   *  them, and four decide whether Filters, Routers, MCP and Sandboxes are on
-   *  the sidebar. */
+  /** setup holds the organisation's counts. They drive the first-run
+   *  checklist and whether Filters, Routers, MCP and Sandboxes are shown. */
   setup: {},
-  /** access is a member's own keys, from /v1/access, which decide whether
-   *  their getting started guide is due. Null for an administrator. */
+  /** access is a member's own keys, which decide whether their guide is
+   *  due. Null for an administrator. */
   access: null,
   /** orgID is the organisation the panel shows. An operator can switch it. */
   orgID: "",
 };
 
-/** routes is the whole panel, in sidebar order, widest audience first. The
- *  list stays flat so routing walks one array; `group` folds it into blocks
- *  for the sidebar.
- *
- *  `perOrg` marks a screen that belongs to one organisation, and names its
- *  contents when an operator has to pick one first.
- *
- *  A `detail` is one row of that screen opened up: /projects/project_1 is one
- *  of /projects. It follows the list for who may see it and what lights up. */
+/** routes is the whole panel in sidebar order, widest audience first. It
+ *  stays flat so routing walks one array; `group` splits it for the sidebar.
+ *  `perOrg` names a screen's contents when an operator has to pick an
+ *  organisation first. A `detail` is one row opened up, such as
+ *  /projects/project_1; it follows its list for who may see it. */
 const routes = [
   { path: "/", label: "Dashboard", icon: "dashboard", view: dashboardView },
 
@@ -270,8 +264,8 @@ const routes = [
   },
 ];
 
-/** navGroups folds the visible routes into sidebar blocks. A group with no
- *  visible entry disappears with its label, so there is no empty heading. */
+/** navGroups folds the visible routes into sidebar blocks, so a group with
+ *  nothing visible leaves no empty heading. */
 function navGroups(items) {
   const groups = [];
   for (const r of items) {
@@ -282,9 +276,8 @@ function navGroups(items) {
   return groups;
 }
 
-/** advancedShown is whether the reader asked to see the screens this
- *  deployment does not use. Remembered, because someone who opened them once
- *  is setting one up. */
+/** advancedShown is whether the reader asked to see unused screens.
+ *  Remembered, because someone who opened them once is setting one up. */
 function advancedShown() {
   return remembered("keera.nav.more", { lasting: true }) === "shown";
 }
@@ -326,14 +319,9 @@ function foldedAway() {
   return routes.filter((r) => r.advanced && offered(r) && !inUse(r));
 }
 
-/** matchRoute finds the screen for a path.
- *
- *  A detail path is the list path plus one segment, which the screen is
- *  given: /projects/project_1. It is decoded here, not by the view, so it
- *  cannot be read as more of the path.
- *
- *  A path that matches nothing falls back to the first screen the reader may
- *  see. */
+/** matchRoute finds the screen for a path, or falls back to the first one
+ *  the reader may see. A detail path is the list path plus one segment. It is
+ *  decoded here, not by the view, so it cannot be read as more of the path. */
 function matchRoute(available, pathname) {
   const exact = available.find((r) => r.path === pathname);
   if (exact) return { route: exact, param: "" };
@@ -367,8 +355,6 @@ function navigate(path) {
 
 window.addEventListener("popstate", () => renderRoute());
 
-/* ---------------------------------------------------------------- theme */
-
 function currentTheme() {
   return remembered("keera.theme", { lasting: true }) || "system";
 }
@@ -387,15 +373,11 @@ function cycleTheme() {
   toast(`Theme: ${capitalise(next)}`);
 }
 
-/* ---------------------------------------------------------------- shell */
-
 let outlet;
 let topbarHost;
 let shell;
 let collapseButton;
 
-// The sidebar collapses to a strip of icons. The choice is remembered for the
-// next visit.
 function navCollapsed() {
   return remembered("keera.nav", { lasting: true }) === "collapsed";
 }
@@ -416,12 +398,9 @@ function toggleNav() {
   applyNavCollapsed(collapsed);
 }
 
-/* On a narrow screen the sidebar is a drawer: fifteen entries make no usable
- * row above the page, so the topbar's menu button slides the list in.
- *
- * Unlike the collapsed sidebar this is not remembered. A drawer is opened to go
- * somewhere, so navigating closes it, as do the scrim, Escape, and the window
- * growing wide enough for the sidebar. */
+/* On a narrow screen the sidebar is a drawer the topbar's menu button slides
+ * in. It is not remembered: it is opened to go somewhere, so navigating, the
+ * scrim, Escape and a wide enough window all close it. */
 let drawerOpen = false;
 
 function setDrawer(open) {
@@ -454,10 +433,8 @@ matchMedia("(min-width: 991px)").addEventListener("change", (e) => {
 });
 
 /** moreItem shows or hides the screens this deployment does not use yet.
- *
- *  It names them rather than saying "More", so someone who does not know what
- *  a router is can decide from the sidebar whether they want one. A screen in
- *  use drops out of it, and when all four are in use it disappears. */
+ *  It names them rather than saying "More", so someone new can tell whether
+ *  they want one. It disappears once all are in use. */
 function moreItem() {
   if (routes.filter((r) => r.advanced && offered(r)).every(inUse)) return null;
 
@@ -489,16 +466,14 @@ function moreItem() {
   );
 }
 
-/** navItem is one screen's entry in the sidebar. */
 function navItem(r) {
   return h(
     "a",
     {
       class: "nav-item" + (r.highlight ? " nav-highlight" : ""),
       href: r.path,
-      // The only label left once the sidebar is collapsed, and on folded-away
-      // screens the place to say what they are for: someone who just revealed
-      // "Filters" has not used one yet.
+      // The only label once the sidebar is collapsed, and where a screen
+      // the reader has not used yet says what it is for.
       title: r.about ? `${r.label} - ${r.about}` : r.label,
       dataset: { path: r.path },
       onClick: (e) => {
@@ -620,9 +595,8 @@ function renderShell() {
   root.classList.remove("boot");
 }
 
-// The topbar is rebuilt on every route, not once at boot, because what it
-// shows can change: creating the first organisation is what makes the switcher
-// appear, and it should not need a reload.
+// Rebuilt on every route, not once at boot: creating the first organisation
+// makes the switcher appear, and that should not need a reload.
 function renderTopbar() {
   replace(topbarHost, topbar());
 }
@@ -701,13 +675,9 @@ function setTitle(title, sub) {
   if (s) s.textContent = sub || "";
 }
 
-/* --------------------------------------------------------------- routing */
-
-/** teardowns are what the current screen must undo before another replaces
- *  it. A view that only builds DOM needs none. A view that opens something the
- *  DOM does not own, such as the request log's live stream, registers it here:
- *  an EventSource nobody closes keeps its connection, and a browser allows
- *  very few per origin. */
+/** teardowns are what the current screen must undo before the next, such as
+ *  closing the request log's live stream: an EventSource nobody closes keeps
+ *  its connection, and a browser allows very few per origin. */
 let teardowns = [];
 
 /** rendering counts renderRoute calls. A screen that finishes loading after
@@ -806,7 +776,6 @@ async function renderRoute() {
      *  project id or a model alias. Empty on every other screen. */
     param,
     setSubtitle: (s) => setTitle(title, s),
-    /** onTeardown registers work to undo when this screen goes away. */
     onTeardown: (fn) => (gen === rendering ? teardowns.push(fn) : fn()),
     /** setTitle is for a screen headed by what it shows: one project is
      *  called by its own name, not "Project". */
@@ -836,8 +805,6 @@ async function renderRoute() {
     );
   }
 }
-
-/* --------------------------------------------------------------- account */
 
 function accountMenu(anchor) {
   const me = state.me;

@@ -133,12 +133,9 @@ func pick(seen map[string]float64, n int, classify func(string) int) (int, float
 }
 
 // readChoice picks one of n destinations out of a completion's first token,
-// and reports what share of the probability among the letters it took.
-//
-// A model that opens with '<think>' still chooses here, since only letters
-// are counted. The small models routers run on answer directly anyway.
-//
-// It reports false when there is no distribution, or no letter in it.
+// and reports what share of the probability among the letters it took. Only
+// letters count, so a model that opens with '<think>' still chooses. It
+// reports false when there is no distribution, or no letter in it.
 func readChoice(raw []byte, n int) (index int, share float64, ok bool) {
 	seen, got := firstToken(raw)
 	if !got {

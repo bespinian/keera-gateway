@@ -28,11 +28,9 @@ func chatAlias(url string) policy.Model {
 	}
 }
 
-// This is the failure the check exists for. The endpoint answers 200, the model
-// produces prose, and `tool_calls` stays empty - which is what a vLLM tool-call
-// parser that does not match the model looks like. Nothing logs an error and it
-// reads to developers as "the model is bad", so a check that called this
-// healthy would be worse than no check at all.
+// The failure the check exists for: the endpoint answers 200, the model
+// produces prose, and `tool_calls` stays empty, which is what a mismatched
+// vLLM tool-call parser looks like. Nothing logs an error.
 func TestCheckModelCatchesAToolCallReturnedAsText(t *testing.T) {
 	upstream := httptest.NewServer(sseBackend(
 		`{"model":"keera-code","choices":[{"delta":{"content":"<tool_call>{\"name\": \"get_build_status\""}}]}`,
@@ -68,9 +66,8 @@ func TestCheckModelPassesOnARealToolCall(t *testing.T) {
 	}
 }
 
-// Answering with prose and no tool call at all is a different diagnosis from a
-// mis-parsed one, and has to read differently: nothing here is misconfigured,
-// the model simply will not drive an agent.
+// Prose with no tool call at all is a different diagnosis from a mis-parsed
+// call: nothing is misconfigured, the model simply will not drive an agent.
 func TestCheckModelReportsAModelThatCallsNoTool(t *testing.T) {
 	upstream := httptest.NewServer(sseBackend(`{"model":"keera-code","choices":[{"delta":{"content":"I cannot know that."}}]}`))
 	defer upstream.Close()
@@ -116,9 +113,8 @@ func TestCheckModelWarnsWhenTheBackendRefusesTools(t *testing.T) {
 	}
 }
 
-// A buffered answer is usable but wrong for an editor, so it passes with a note
-// rather than failing. The distinction matters: an operator who is told this is
-// broken will go looking for a fault that is not there.
+// A buffered answer is usable but wrong for an editor, so it passes with a
+// note rather than sending an operator after a fault that is not there.
 func TestCheckModelWarnsWhenTheBackendDoesNotStream(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -139,9 +135,9 @@ func TestCheckModelWarnsWhenTheBackendDoesNotStream(t *testing.T) {
 	}
 }
 
-// A model whose backend_model names something the inference plane does not
-// serve is the other silent misconfiguration: vLLM answers as whatever it does
-// serve, and only the reply says so.
+// A backend_model the inference plane does not serve is the other silent
+// misconfiguration: vLLM answers as whatever it serves, and only the reply
+// says so.
 func TestCheckModelWarnsWhenTheBackendServesAnotherModel(t *testing.T) {
 	upstream := httptest.NewServer(sseBackend(`{"model":"qwen-2.5-coder","choices":[{"delta":{"tool_calls":` +
 		`[{"index":0,"function":{"name":"get_build_status"}}]}}]}`))
@@ -215,8 +211,8 @@ func TestCheckModelRefusesAModelWithNoBackend(t *testing.T) {
 	}
 }
 
-// An embedding model has no tools to call, so it is checked on the only thing
-// that matters about one: that a vector comes back.
+// An embedding model is checked on the one thing that matters: a vector comes
+// back.
 func TestCheckModelChecksAnEmbeddingModelOnItsOwnTerms(t *testing.T) {
 	var path string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -259,9 +255,9 @@ func TestCheckModelFailsAnEmbeddingModelThatReturnsNoVector(t *testing.T) {
 	}
 }
 
-// The check presents the model's own credential, exactly as the data plane
-// would. A check that reached the backend unauthenticated would go green
-// against an endpoint every real request then gets a 401 from.
+// The check presents the model's own credential, as the data plane would.
+// Otherwise it could go green against an endpoint that answers real requests
+// with 401.
 func TestCheckModelPresentsTheModelCredential(t *testing.T) {
 	seen := make(chan string, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

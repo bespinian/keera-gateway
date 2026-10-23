@@ -18,8 +18,6 @@ import (
 )
 
 // A small Kubernetes client instead of client-go (see the package comment).
-//
-// It has no watch, no field managers, no server-side apply and no discovery.
 // The driver polls instead of watching and sends merge patches instead of
 // applying.
 
@@ -56,8 +54,6 @@ type KubeConfig struct {
 	Insecure bool
 }
 
-// newKubeClient builds a client, using the in-cluster configuration for
-// anything left blank.
 func newKubeClient(cfg KubeConfig) (*kubeClient, error) {
 	c := &kubeClient{base: strings.TrimRight(cfg.Server, "/")}
 
@@ -134,10 +130,9 @@ func (c *kubeClient) readToken() error {
 	return nil
 }
 
-// bearer returns the current token, re-reading a rotated one.
-//
-// If the re-read fails it keeps the old token: that one is still valid for a
-// while, and the kubelet may be halfway through replacing the file.
+// bearer returns the current token, re-reading a rotated one. If the re-read
+// fails it keeps the old token: that one is still valid for a while, and the
+// kubelet may be halfway through replacing the file.
 func (c *kubeClient) bearer() string {
 	c.mu.RLock()
 	tok, read := c.token, c.tokenRead
@@ -188,8 +183,6 @@ func kubeNotFound(err error) error {
 // request cannot fill memory.
 const maxKubeBody = 8 << 20
 
-// do makes one request. contentType is only used when there is a body, and
-// defaults to JSON.
 func (c *kubeClient) do(ctx context.Context, method, path, contentType string, in, out any) error {
 	var body io.Reader
 	if in != nil {

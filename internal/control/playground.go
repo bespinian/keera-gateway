@@ -12,11 +12,10 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// playgroundChat sends a message typed into the panel to the inference plane.
-//
-// It is sent with one of the caller's own keys, named by ?key_id, and goes
-// through the same data plane as an editor's request. So it meets that key's
-// guardrails, is charged to its budgets and shows in its usage.
+// playgroundChat sends a message typed into the panel to the inference plane,
+// with one of the caller's own keys, named by ?key_id. It goes through the same
+// data plane as an editor's request, so it meets that key's guardrails, is
+// charged to its budgets and shows in its usage.
 func (s *Server) playgroundChat(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	keyID := r.URL.Query().Get("key_id")
 	if keyID == "" {
@@ -54,9 +53,8 @@ func (s *Server) playgroundChat(w http.ResponseWriter, r *http.Request, p *authn
 		return
 	}
 
-	// The listener's write timeout is for small JSON answers. A streamed
-	// completion can take longer, so it is lifted for this response only. A
-	// test recorder does not support it, which is fine.
+	// The listener's write timeout is for small JSON answers, and a streamed
+	// completion can take longer. A test recorder cannot lift it, which is fine.
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 
 	r.Header.Set(connect.ClientHeader, playgroundClient(p, r.Header.Get(connect.ClientHeader)))

@@ -218,8 +218,6 @@ func (x *mcpExchange) forward(method string, payload []byte) {
 	x.relay(resp)
 }
 
-// ----------------------------------------------------------- the way out
-
 // inspect reads the client's messages, answers the ones the gateway refuses
 // itself, and returns what to forward. forward is false when the answer has
 // already been written.
@@ -606,8 +604,6 @@ func (x *mcpExchange) rpcFail(status int, id json.RawMessage, code int, msg stri
 	httpx.WriteJSON(x.w, status, rpcMessage{JSONRPC: "2.0", ID: id,
 		Error: &rpcError{Code: code, Message: msg}})
 }
-
-// ------------------------------------------------------------ the way back
 
 // relay writes the server's answer to the client, reading every message in it
 // the gateway was waiting for.

@@ -293,7 +293,8 @@ type Settled struct {
 // Settle ends a pending payment. A paid one adds its credit, saves its card
 // if it brought one, clears a failed top-up and lifts the organisation's
 // limit; a failed automatic top-up stops the next. A failed payment that is
-// paid after all, such as a top-up given up on after a day, is credited too.
+// paid after all, such as an automatic top-up given up on after a day, is
+// credited too.
 func (s *Store) Settle(ctx context.Context, paymentID string, how Settlement) (Settled, error) {
 	state := PaymentFailed
 	if how.Paid {
@@ -382,7 +383,7 @@ func (s *Store) ListPayments(ctx context.Context, orgID, before string, limit in
 }
 
 // PendingPaymentsOf lists one organisation's payments still pending that
-// started since then, newest first.
+// started after since, newest first.
 func (s *Store) PendingPaymentsOf(ctx context.Context, orgID string, since time.Time, limit int,
 ) ([]Payment, error) {
 	return queryAll(ctx, s.pool, scanPayment, `SELECT `+paymentColumns+` FROM payments

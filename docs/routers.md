@@ -157,7 +157,7 @@ A separate case is a chosen destination that cannot serve the request:
 `router_destination_unavailable`, 503. This is almost always the fallback, since
 only reachable destinations are offered to the model.
 
-Either way, the reason is stored on the request's usage row.
+Either way, the reason is stored on the request's row in the request log.
 
 ## Cost and latency
 
@@ -272,10 +272,11 @@ request goes to the destination with the smallest ceiling it fits under.
 ### The one thing only it gets right
 
 It is the only mode that chooses by whether a request fits. A destination whose
-`max_context_tokens` cannot hold the request is ranked **behind every destination that
-can**, whatever the ceilings say. The other modes may send a long conversation
-to a small model, which then refuses it itself. The gateway refuses a request
-only when [no destination can hold it](gateway.md#requests-too-long-for-the-model).
+`max_context_tokens` cannot hold the request is ranked **behind every
+destination that can**, whatever the ceilings say. The other modes may send a
+long conversation to a small model, which then refuses it itself. The gateway
+refuses a request only when
+[no destination can hold it](gateway.md#requests-too-long-for-the-model).
 
 The three tiers, in the order they are tried:
 

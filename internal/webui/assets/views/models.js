@@ -71,8 +71,7 @@ async function deleteWarning(m) {
   );
 }
 
-// deleteModel asks as the list does, for the model's own screen, which leaves
-// through done once the model is gone.
+// deleteModel is the list's delete, for the model's own screen.
 export async function deleteModel(ctx, m, done = () => ctx.reload()) {
   confirm({
     title: `Delete ${m.alias}?`,
@@ -97,12 +96,11 @@ export async function modelsView(ctx) {
   const models = res.data || [];
   const stats = res.stats || {};
   const canAdd = canAddModel(ctx);
-  // The hosted endpoints only fill in a form, so a deployment that cannot
-  // reach them still gets a working screen.
+  // The hosted endpoints only fill in a form, so the screen works without them.
   const providers = canAdd ? await presets() : [];
   ctx.setSubtitle(`${models.length} ${plural(models.length, "model")}`);
 
-  // A model is added from the catalogue, which also offers a self-hosted one.
+  // Models are added from the catalogue, which also offers self-hosted.
   const head = listHead(
     null,
     [
@@ -129,8 +127,6 @@ export async function modelsView(ctx) {
   const rows = table(
     [
       {
-        // The alias opens the model's own screen, with its traffic and errors.
-        // The rest of the row is configuration.
         label: "Alias",
         sortKey: (m) => m.alias,
         cell: (m) =>
@@ -151,11 +147,9 @@ export async function modelsView(ctx) {
           ),
       },
       {
-        // The provider, not the URL: a row is read for whether a prompt
-        // leaves the cluster. The URL is in the model's dialog.
-        //
-        // A self-hosted model gets a dash, not a claim: an address of your
-        // own can still point anywhere.
+        // The provider, not the URL: the row answers whether a prompt leaves
+        // the cluster. Self-hosted gets a dash, not a claim: your own address
+        // can still point anywhere.
         label: "Provider",
         shrink: true,
         sortKey: (m) => providerName(m.provider),
@@ -168,8 +162,8 @@ export async function modelsView(ctx) {
                     "Hosted provider: prompts to this model leave your " +
                     "infrastructure",
                 },
-                // The mark reads faster down a column, but the word stays: a
-                // provider with no mark must read the same as one with one.
+                // The word stays next to the mark, so a provider with no mark
+                // reads the same.
                 pill(
                   [providerMark(m.provider), providerName(m.provider)],
                   "warn",
@@ -199,7 +193,7 @@ export async function modelsView(ctx) {
         cell: (m) => (m.max_context_tokens ? compact(m.max_context_tokens) : dash()),
       },
       {
-        // The same median as on the model's own screen, over the same window.
+        // Same median and window as the model's own screen.
         label: "First token",
         num: true,
         shrink: true,
@@ -223,8 +217,8 @@ export async function modelsView(ctx) {
             : h("span", { class: "faint" }, "not billed"),
       },
       {
-        // Enabled says an administrator turned it on. The check says the
-        // backend answers, and that a tool call comes back as a tool call.
+        // Enabled is the administrator's switch; the Check column tests the
+        // backend.
         label: "Status",
         shrink: true,
         sortKey: (m) => (m.enabled ? 1 : 0),
@@ -240,8 +234,8 @@ export async function modelsView(ctx) {
         label: "",
         shrink: true,
         cell: (m) => {
-          // A member can read the configuration, which answers "why does
-          // this cost that much" or "how large a request may I send".
+          // Members can read the configuration: why it costs that much, how
+          // large a request may be.
           if (!isAdmin(ctx)) {
             return h(
               "button",
@@ -270,8 +264,8 @@ export async function modelsView(ctx) {
       emptyBody:
         "Every inference request is refused until a model exists. Add " +
         "one and check it before handing out keys.",
-      // The endpoints are searched though no column shows them, to answer
-      // "which models still point at the old cluster".
+      // Endpoints are searchable though not shown, to find models that still
+      // point at an old cluster.
       search: (m) =>
         [
           m.alias,
@@ -291,9 +285,8 @@ export async function modelsView(ctx) {
   return h("div", {}, head, rows);
 }
 
-// catalogueView lists every model the hosted providers offer, its price and
-// whether this organisation already serves it. An administrator adds a model
-// from a row, or a self-hosted one from the button above.
+// catalogueView lists every model the hosted providers offer, its price, and
+// whether this organisation already serves it.
 export async function catalogueView(ctx) {
   const canEdit = canAddModel(ctx);
   const [providers, models] = await Promise.all([
@@ -319,7 +312,7 @@ export async function catalogueView(ctx) {
   const price = (v) =>
     v ? h("span", { class: "nowrap" }, listPrice(v)) : dash();
 
-  // A self-hosted model is in no provider's table, so it is added here.
+  // Self-hosted models are in no provider's table, so they are added here.
   const head = h(
     "div",
     { class: "detail-head" },
@@ -458,7 +451,7 @@ export async function catalogueView(ctx) {
     {
       emptyTitle: "No hosted models",
       emptyBody: "This build knows no hosted providers.",
-      // Newest first: the model somebody is looking for is usually a new one.
+      // Newest first: people usually look for a new model.
       sortBy: "Released",
       sortDir: "desc",
       search: (r) =>
@@ -496,9 +489,8 @@ export async function catalogueView(ctx) {
         },
         // A dropdown with one choice filters nothing.
       ].filter((c) => c.options.length > 1),
-      // Models whose provider Keera holds no key for are hidden by default:
-      // they work only with the organisation's own key. A deployment with no
-      // keys, or a key for every provider, has nothing to hide.
+      // Models Keera holds no provider key for are hidden by default: they
+      // need the organisation's own key. Shown only when keys are mixed.
       toggles: [
         {
           label: "Show bring your own token",
@@ -538,16 +530,15 @@ function ttftCell(st) {
   );
 }
 
-// openModel opens the model's dialog from its own screen, so that screen
-// needs no second copy of the form.
+// openModel opens the model's dialog from its own screen.
 export async function openModel(ctx, m) {
   if (!isAdmin(ctx)) return viewModel(ctx, m);
   return editModel(ctx, m, await presets());
 }
 
-// viewModel is the model as a member sees it. It is not the edit form with
-// its fields disabled: members are not sent the endpoints or the credential,
-// so that form would be mostly empty boxes.
+// viewModel is the model as a member sees it. Not a disabled edit form:
+// members are not sent the endpoints or credential, so it would be mostly
+// empty.
 function viewModel(ctx, m) {
   modal({
     title: `Model - ${m.alias}`,
@@ -707,7 +698,7 @@ function healthCell(m) {
   );
 }
 
-// checkModel is for the model's own screen, which shows the report but has no
+// checkModel shows the check report on the model's own screen, which has no
 // room for a verdict pill.
 export async function checkModel(m) {
   try {
@@ -717,7 +708,7 @@ export async function checkModel(m) {
   }
 }
 
-// verdict is the pill, readable at a glance, with the full report behind it.
+// verdict is a pill for a glance, with the full report behind it.
 function verdict(probe, kind) {
   const tone = probe.ok
     ? (probe.warnings || []).length
@@ -743,8 +734,8 @@ function verdict(probe, kind) {
   };
 }
 
-// Only a chat check streams and asks for a tool call. A completion or
-// embedding check sends one plain request, so the report leaves those out.
+// Only a chat check streams and asks for a tool call, so other kinds' reports
+// leave those lines out.
 function report(probe, kind) {
   const chat = !kind || kind === "chat";
   const lines = [
@@ -847,7 +838,7 @@ function kindName(kind) {
   );
 }
 
-// The control plane only sends the lowercase key.
+// The control plane sends only the lowercase key.
 const PROVIDER_NAMES = {
   anthropic: "Anthropic",
   openai: "OpenAI",
@@ -857,7 +848,7 @@ const PROVIDER_NAMES = {
   cscs: "CSCS",
 };
 
-// An unknown provider keeps its key, which is the name it was configured with.
+// An unknown provider shows its configured key.
 function providerName(name) {
   return PROVIDER_NAMES[name] || name || "";
 }
@@ -870,17 +861,17 @@ export function servedName(m) {
 // internal/catalog/providers.go.
 const PRODUCT_ID = "{product_id}";
 
-// endpointOf is a provider's endpoint, with the organisation's product id
-// filled in where the provider needs one. Null while that id is missing.
+// endpointOf is a provider's endpoint with the product id filled in where
+// needed. Null while that id is missing.
 function endpointOf(p, state) {
   if (!p.needs_product_id) return p.endpoint;
   const id = ((state && state.productID) || "").trim();
   return id ? p.endpoint.replace(PRODUCT_ID, id) : null;
 }
 
-// aliasFor suggests an alias for a model id. An alias goes unquoted into the
-// client configurations `keera connect` prints, so it may only hold lowercase
-// letters, digits and inner hyphens. It only has to pass the form.
+// aliasFor suggests an alias for a model id. Aliases go unquoted into the
+// configurations `keera connect` prints, so only lowercase letters, digits
+// and inner hyphens.
 function aliasFor(id) {
   const name = String(id || "")
     .split("/")
@@ -892,7 +883,7 @@ function aliasFor(id) {
 }
 
 // productIDOf reads the product id back out of a model's address, the only
-// place it is kept. An address that does not match the template gives none.
+// place it is kept. "" if the address does not match the template.
 function productIDOf(p, backends) {
   if (!p || !p.needs_product_id) return "";
   const [head, tail] = p.endpoint.split(PRODUCT_ID);
@@ -905,7 +896,7 @@ function productIDOf(p, backends) {
 }
 
 // What a provider's table fills in. Each field gets a line under it naming
-// where the value came from and, once edited, the value it replaced.
+// where the value came from or, once edited, what it replaced.
 const PRESET_FIELDS = [
   {
     key: "backendModel",
@@ -919,9 +910,8 @@ const PRESET_FIELDS = [
     key: "description",
     label: "description",
     fromModel: true,
-    // The one prose default: the line under it cannot quote what an edit
-    // replaced, and it is never disabled, because only the organisation knows
-    // what its alias is for.
+    // Prose: the line under it cannot quote what an edit replaced. Never
+    // locked, as only the organisation knows what its alias is for.
     prose: true,
     of: (p, m) => (m && m.description ? m.description : null),
   },
@@ -987,7 +977,7 @@ const PRESET_FIELDS = [
 ];
 
 // pick is the catalogue's choice for a new model: a provider and one of its
-// models, or null for a self-hosted one.
+// models, or null for self-hosted.
 function editModel(ctx, existing, providers, pick) {
   const m = existing || { kind: "chat", enabled: true, backends: [] };
   const orgID = existing ? existing.org_id : ctx.orgID;
@@ -1059,8 +1049,7 @@ function editModel(ctx, existing, providers, pick) {
   };
   setKinds(kind, KINDS, m.kind || "chat");
 
-  // The control plane never sends the key back, so an empty field means
-  // "leave it as it is", not "there is none".
+  // The key is never sent back, so empty means "keep it", not "none".
   const apiKey = h("input", {
     class: "input",
     type: "password",
@@ -1069,8 +1058,8 @@ function editModel(ctx, existing, providers, pick) {
     placeholder: m.has_api_key ? "•••••••• stored - type to replace" : "sk-…",
   });
   const clearKey = m.has_api_key ? h("input", { type: "checkbox" }) : null;
-  // Only Anthropic's models can be paid by a Claude plan. Such a model gets
-  // each person's own Claude sign-in, so it takes no key.
+  // Only Anthropic models can be paid by a Claude plan. They use each
+  // person's own Claude sign-in, so take no key.
   const subscription = h("input", {
     type: "checkbox",
     checked: !!m.subscription,
@@ -1080,25 +1069,22 @@ function editModel(ctx, existing, providers, pick) {
     checked: m.enabled !== false,
   });
 
-  // State the parts of the form share. overridden holds the provider's values
-  // this entry had already replaced, which stay the administrator's to edit.
+  // overridden holds the provider values this entry already replaced, which
+  // stay editable.
   const state = {
-    // Self-hosted, or one of the providers.
     place: null,
     preset: null,
     hosted: false,
     aliasDirty: !!existing,
     descriptionDirty: !!existing,
     overridden: new Set(),
-    // Not stored on the model but in its address, so it is read back from
-    // there when an existing model is opened.
+    // Kept only in the address; read back from there for an existing model.
     productID: "",
   };
   alias.addEventListener("input", () => {
     state.aliasDirty = true;
   });
-  // Like the alias: once somebody has written one, picking another model must
-  // not overwrite it.
+  // Like the alias, a written description survives picking another model.
   description.addEventListener("input", () => {
     state.descriptionDirty = true;
   });
@@ -1111,9 +1097,8 @@ function editModel(ctx, existing, providers, pick) {
     );
   }
 
-  // The backend fields, in two groups. basics is what a self-hosted model
-  // needs, so it stays visible for one. extras is folded under Advanced
-  // options. A provider fills in both, so a hosted model folds both. See
+  // basics is what a self-hosted model needs, so it stays visible for one.
+  // extras is folded under Advanced options. A hosted model folds both. See
   // layout.
   const basics = h(
     "div",
@@ -1227,12 +1212,9 @@ function editModel(ctx, existing, providers, pick) {
   const summary = h("summary", {}, "Advanced options");
   const fold = h("details", { class: "fold" }, summary);
   const advanced = h("div", {});
-  // layout places the groups: "self" for a self-hosted model, "hosted" once a
-  // provider has filled them in, and null between choosing a provider and a
-  // model.
-  //
-  // `open` is true or false to set the fold, undefined to leave it, and
-  // "auto" to keep it closed unless it was already open.
+  // layout places the groups: "self", "hosted" once a provider has filled
+  // them in, or null between choosing a provider and a model. `open` sets the
+  // fold; undefined leaves it, "auto" keeps it closed unless already open.
   const layout = (how, open) => {
     if (open === "auto") open = advanced.contains(fold) && fold.open;
     if (!how) {
@@ -1304,9 +1286,8 @@ function editModel(ctx, existing, providers, pick) {
   const anthropicChosen = () =>
     state.hosted && !!state.place && state.place.p?.name === "anthropic";
   const paidByClaudePlan = () => anthropicChosen() && subscription.checked;
-  // The form has no fields for long-prompt prices. A model the table knows
-  // takes the table's, any other keeps its own while the backend model is
-  // unchanged.
+  // The form has no long-prompt price fields. A known model takes the
+  // table's; any other keeps its own while the backend model is unchanged.
   const longPrompt = () => {
     const { m: known } = state.preset || {};
     if (state.hosted && known) return known.long_prompt || null;
@@ -1314,8 +1295,8 @@ function editModel(ctx, existing, providers, pick) {
       return existing.long_prompt || null;
     return null;
   };
-  // The operator holds the key for this provider, and the model runs at the
-  // provider's endpoint and list prices, so neither is asked.
+  // The operator holds the key, and the model runs at the provider's endpoint
+  // and list prices, so neither is asked.
   const onPlatformKey = () =>
     state.hosted && !!state.place && !!state.place.p?.platform_key;
   const platformNote = h(
@@ -1328,8 +1309,8 @@ function editModel(ctx, existing, providers, pick) {
       "Provided by Keera directly. Use is billed to your organisation.",
     ),
   );
-  // A model that is already paid by subscription still shows the box, so it
-  // can be turned back into an ordinary one.
+  // A model already paid by subscription still shows the box, so it can be
+  // turned back.
   const offersSubscription =
     !!ctx.state.me.claude_subscriptions || !!m.subscription;
   const paintSubscription = () => {
@@ -1350,8 +1331,7 @@ function editModel(ctx, existing, providers, pick) {
       "The name clients use. Changing it breaks them." +
         ` Only ${orgNameOf(ctx)} can use this model.`,
     ),
-    // Outside the backend fields, which are folded away for a hosted model,
-    // the one a router most needs described.
+    // Kept outside the fold: routers choose by it.
     field(
       "Description",
       description,
@@ -1361,9 +1341,8 @@ function editModel(ctx, existing, providers, pick) {
     ),
     productSlot,
     subscriptionField,
-    // Above the fold: of provider, model and key, the key is the one not on
-    // the screen already.
     slot,
+    // The key stays above the fold: provider and model are already shown.
     keyField,
     platformNote,
     advanced,
@@ -1383,12 +1362,12 @@ function editModel(ctx, existing, providers, pick) {
         .split("\n")
         .map((s) => s.trim())
         .filter(Boolean);
-      // For such a provider an empty backend means the product id is
-      // missing, not that a field was left blank.
       const preset = state.hosted ? state.preset : null;
       // The control plane sets the endpoint itself.
       const platform = onPlatformKey() && !paidByClaudePlan();
       if (platform && preset) list.splice(0, list.length, preset.p.endpoint);
+      // Where a provider needs a product id, an empty backend means the id
+      // is missing.
       if (
         preset &&
         !platform &&
@@ -1402,8 +1381,8 @@ function editModel(ctx, existing, providers, pick) {
         );
       }
       if (!alias.value.trim() || !backendModel.value.trim() || !list.length) {
-        // Under a provider this only happens for a model the table does not
-        // know, whose fields are inside the fold.
+        // Under a provider, only for an unknown model, whose fields are
+        // inside the fold.
         throw new Error(
           state.hosted
             ? "Enter the alias, and the backend model and backends under " +
@@ -1435,8 +1414,7 @@ function editModel(ctx, existing, providers, pick) {
         kind: kind.value,
         backends: list,
         backend_model: backendModel.value.trim(),
-        // Lets the next edit tell the provider's values from the
-        // administrator's.
+        // Lets the next edit tell provider values from the administrator's.
         provider: state.hosted && state.preset ? state.preset.p.name : "",
         max_context_tokens: parseInt(maxContext.value, 10) || 0,
         display_name: displayName.value.trim(),
@@ -1444,8 +1422,8 @@ function editModel(ctx, existing, providers, pick) {
         release_date: releaseDate.value,
         // Left empty, the control plane fills in the provider's, or onprem.
         location: location.value.trim().toLowerCase(),
-        // Empty is sent as unset, so a model the price table does not know is
-        // refused rather than saved unbilled.
+        // Empty is sent as unset, so an unknown model is refused rather than
+        // saved unbilled.
         input_micros_per_mtok: statedMicros(priceIn.value),
         output_micros_per_mtok: statedMicros(priceOut.value),
         cached_input_micros_per_mtok: toMicros(priceCached.value),
@@ -1460,8 +1438,8 @@ function editModel(ctx, existing, providers, pick) {
           ...(credential === undefined ? {} : { api_key: credential }),
         });
       } catch (ex) {
-        // A backend outside the network needs a location, which is folded
-        // away. Focused once the error is shown.
+        // A backend outside the network needs a location, which may be folded
+        // away.
         if (/location/i.test(ex.message) && advanced.contains(fold)) {
           fold.open = true;
           setTimeout(() => location.focus());
@@ -1472,8 +1450,8 @@ function editModel(ctx, existing, providers, pick) {
   });
 }
 
-// presets reads the hosted endpoints. It is a convenience, so it degrades to
-// none rather than taking the screen down.
+// presets reads the hosted endpoints, or none on error rather than failing
+// the screen.
 async function presets() {
   try {
     return (await api.providers()).data || [];
@@ -1482,8 +1460,8 @@ async function presets() {
   }
 }
 
-// setKinds offers only the kinds the provider serves. Any other would only be
-// refused on save.
+// setKinds offers only the kinds the provider serves; others are refused on
+// save.
 function setKinds(select, kinds, selected) {
   const list = kinds && kinds.length ? kinds : KINDS;
   select.replaceChildren(
@@ -1492,9 +1470,8 @@ function setKinds(select, kinds, selected) {
   select.value = list.includes(selected) ? selected : list[0];
 }
 
-// presetOf finds a stored model's provider and model in the table. A model
-// with no provider, or one this build has dropped, gets null: its fields are
-// all the administrator's.
+// presetOf finds a stored model's provider and model in the table, or null:
+// then every field is the administrator's.
 function presetOf(providers, m) {
   const p = (providers || []).find((x) => x.name === m.provider);
   if (!p) return null;
@@ -1509,19 +1486,16 @@ function isModel(mm, id) {
   return mm.id === id || (!!mm.snapshot && mm.snapshot === id);
 }
 
-// providerAnswers says which fields the provider fills in. Those are locked:
-// a typed value would silently stop matching the provider. A model the table
-// does not know has no context window or prices to fill in.
+// providerAnswers says which fields the provider fills in. They are locked,
+// as a typed value would silently stop matching the provider.
 function providerAnswers(p, known) {
   return {
     backends: true,
     location: true,
     releaseDate: !!known && !!known.release_date,
     displayName: !!known && !!known.display_name,
-    // The description is not here on purpose: the table fills it in, but
-    // only the organisation knows what the alias is for, which routers need.
-    //
-    // A provider serving several kinds leaves the choice to the administrator.
+    // No description on purpose: only the organisation knows what the alias
+    // is for, and routers need that.
     kind: (p.kinds || []).length === 1,
     backendModel: !!known,
     maxContext: !!known,
@@ -1529,22 +1503,15 @@ function providerAnswers(p, known) {
     priceOut: !!known,
     // No published rate leaves the field open. Blank means the input price.
     priceCached: !!known && !!known.cached_input_micros_per_mtok,
-    // The same for cache writes.
     priceWrite: !!known && !!known.cache_write_micros_per_mtok,
   };
 }
 
-// hostedFields is the top of the form: where the model runs. It is chosen
-// before the form opens, so it is shown here, not asked.
-//
-// A provider, a model and a key should be the whole job, so everything the
-// provider implies is filled in, disabled and folded under Advanced options.
-// The fold stays so an existing model can still be read.
-//
-// What the table does not fill in stays editable (see providerAnswers), and a
-// banner names it, since it is behind the fold. A value an entry had already
-// overridden stays editable too: an entry pointing `provider: anthropic` at an
-// egress proxy is not this form's to take back.
+// hostedFields is the top of the form: where the model runs, chosen before
+// the form opens. A provider, a model and a key should be the whole job, so
+// what the provider implies is filled in, locked and folded away. A value an
+// entry already overrode stays editable: an entry pointing `provider:
+// anthropic` at an egress proxy is not this form's to take back.
 function hostedFields(ctx, providers, form) {
   if (!providers || !providers.length) return null;
   const {
@@ -1560,7 +1527,7 @@ function hostedFields(ctx, providers, form) {
   } = form;
 
   const note = h("div");
-  // The places a model can run. A place with no `p` is self-hosted.
+  // A place with no `p` is self-hosted.
   const places = [
     {
       p: null,
@@ -1623,8 +1590,7 @@ function hostedFields(ctx, providers, form) {
     note.replaceChildren(...lines);
   };
 
-  // The address is built from the product id. An entry that wrote its own
-  // address keeps it.
+  // An entry that wrote its own address keeps it.
   const syncEndpoint = () => {
     const p = chosen();
     if (!p || !p.needs_product_id || state.overridden.has("backends")) return;
@@ -1636,15 +1602,14 @@ function hostedFields(ctx, providers, form) {
     paintPresets(state.preset, fields, marks, state);
   });
 
-  // The fields the provider fills in right now, or null for a self-hosted
-  // model.
+  // The fields the provider fills in now, or null for self-hosted.
   const answered = () => {
     const { p, m } = state.preset || {};
     if (!state.hosted || !p) return null;
     const fixed = providerAnswers(p, m);
     for (const key of state.overridden) fixed[key] = false;
-    // On the operator's key, the control plane sets the endpoint and list
-    // prices whatever is sent, so they are locked too.
+    // On the operator's key the control plane sets endpoint and prices
+    // anyway, so lock them too.
     if (p.platform_key) {
       fixed.backends = true;
       for (const key of ["priceIn", "priceOut", "priceCached", "priceWrite"])
@@ -1653,8 +1618,8 @@ function hostedFields(ctx, providers, form) {
     return fixed;
   };
 
-  // Only the panel enforces this. The control plane accepts overrides,
-  // because template files and the CLI may override a provider's table.
+  // Only the panel locks fields. The control plane accepts overrides from
+  // template files and the CLI.
   const paintLocks = () => {
     const fixed = answered();
     for (const [key, el] of Object.entries(fields)) {
@@ -1663,7 +1628,6 @@ function hostedFields(ctx, providers, form) {
     return fixed;
   };
 
-  // Between choosing a provider and a model there is nothing to show.
   const paintMachinery = (open) => {
     const fixed = paintLocks();
     if (state.hosted && !state.preset) layout(null);
@@ -1683,14 +1647,13 @@ function hostedFields(ctx, providers, form) {
           mm.display_name || mm.id,
         ),
       ),
-      // Only the table's models are offered. Others are added with the CLI or
-      // a template file, and one being edited keeps its own entry here.
+      // Other models are added with the CLI or a template file; one being
+      // edited keeps its own entry.
       ...(unknownModel && p === initial.p
         ? [h("option", { value: "other" }, unknownModel)]
         : []),
     );
-    // The first model rather than "choose a model", so picking a provider
-    // fills the form in at once.
+    // Picking a provider fills the form at once.
     model.value = "0";
   };
 
@@ -1699,8 +1662,7 @@ function hostedFields(ctx, providers, form) {
     const known =
       model.value === "other" ? null : p.models[Number(model.value)];
     state.preset = { p, m: known };
-    // The table is written into every field below, so nothing is an
-    // override any more.
+    // The table overwrites every field, so nothing is an override any more.
     state.overridden.clear();
     for (const f of PRESET_FIELDS) {
       // Except a description somebody wrote.
@@ -1713,7 +1675,6 @@ function hostedFields(ctx, providers, form) {
     // provider's does not stay.
     syncEndpoint();
     setKinds(fields.kind, p.kinds, fields.kind.value);
-    // The model's name is offered as the alias until somebody types one.
     if (!state.aliasDirty) alias.value = known ? aliasFor(known.id) : "";
     paintMachinery("auto");
     paintPresets(state.preset, fields, marks, state);
@@ -1722,8 +1683,8 @@ function hostedFields(ctx, providers, form) {
 
   model.addEventListener("change", applyModel);
 
-  // choose settles where a new model runs, with the model picked in the
-  // catalogue or the provider's first one.
+  // choose sets where a new model runs, with the catalogue's model or the
+  // provider's first.
   const choose = (place, mm) => {
     state.place = place;
     state.hosted = !!place.p;
@@ -1738,8 +1699,8 @@ function hostedFields(ctx, providers, form) {
     }
   };
 
-  // An existing hosted model keeps its stored values: the form must never
-  // write a default back over an override.
+  // An existing hosted model keeps its stored values: never write a default
+  // over an override.
   if (initial) {
     state.place = places.find((place) => place.p === initial.p);
     state.hosted = true;
@@ -1748,8 +1709,7 @@ function hostedFields(ctx, providers, form) {
       ? String(initial.p.models.indexOf(initial.m))
       : "other";
     state.preset = initial;
-    // Before comparing with the table, which needs the product id to build
-    // the address.
+    // Before comparing: the table needs the product id to build the address.
     state.productID = productIDOf(initial.p, fields.backends.value);
     productID.value = state.productID;
     for (const f of PRESET_FIELDS) {
@@ -1758,17 +1718,16 @@ function hostedFields(ctx, providers, form) {
         state.overridden.add(f.key);
       }
     }
-    // An address that gives no product id back, such as an egress proxy, is
-    // an override.
+    // An address with no product id, such as an egress proxy, is an override.
     if (initial.p.needs_product_id && !state.productID) {
       state.overridden.add("backends");
     }
-    // The provider's description follows the model when another is picked.
-    // A written one stays. An empty one has nothing to protect.
+    // A written description stays when another model is picked; an empty
+    // one follows the provider.
     state.descriptionDirty =
       state.overridden.has("description") &&
       fields.description.value.trim() !== "";
-    // A kind the provider does not serve was chosen on purpose. Narrowing the
+    // A kind the provider does not serve was chosen on purpose; narrowing the
     // list would silently change it.
     if ((initial.p.kinds || []).includes(fields.kind.value)) {
       setKinds(fields.kind, initial.p.kinds, fields.kind.value);
@@ -1779,7 +1738,7 @@ function hostedFields(ctx, providers, form) {
     paintMachinery("auto");
     paintNote();
   } else if (existing) {
-    // Self-hosted. Nothing is reset, as there is nothing to choose.
+    // Self-hosted: nothing to choose, so nothing is reset.
     state.place = places[0];
   } else {
     const picked = pick && places.find((x) => x.p && x.p.name === pick.p.name);
@@ -1787,7 +1746,7 @@ function hostedFields(ctx, providers, form) {
   }
   block.hidden = !state.place.p;
 
-  // Moving a model elsewhere makes a new model, so this is shown, not chosen.
+  // Moving a model elsewhere makes a new model, so this is shown, not asked.
   const place = state.place;
   return h(
     "div",
@@ -1809,13 +1768,11 @@ function hostedFields(ctx, providers, form) {
 }
 
 // paintPresets writes the line under each filled-in field: which provider the
-// value came from, or what it replaced. It is all the explanation a disabled
-// field gets.
+// value came from, or what it replaced.
 function paintPresets(preset, fields, marks, state) {
   for (const f of PRESET_FIELDS) {
     const line = marks[f.key];
     const def = preset ? f.of(preset.p, preset.m, state) : null;
-    // Hidden, so the field closes up when there is no default.
     line.hidden = def === null;
     if (def === null) {
       line.replaceChildren();

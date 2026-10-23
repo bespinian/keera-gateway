@@ -46,10 +46,9 @@ func DerivedSessionKey(hash string) string { return derivedPrefix + hash }
 // the idle gap anyway.
 const MaxSessionInput = 128 << 10
 
-// SessionHash derives a session hash. It lives here because the gateway
-// computes it for each request, and a sandbox, through StatedSessionKeyFor,
-// for the session id it will send. Two copies would drift apart, and the
-// sessions would no longer match.
+// SessionHash derives a session hash. The gateway computes it for each
+// request, and a sandbox, through StatedSessionKeyFor, for the session id it
+// will send. One copy keeps the two from drifting apart.
 //
 // The kind is mixed in so a stated id and an opening prompt with the same bytes
 // still differ. The zero separator is a byte no id or JSON document contains.
@@ -76,8 +75,8 @@ const (
 	SessionKindOpening = "opening"
 )
 
-// StatedSessionKeyFor is the key that appears on the usage rows of every
-// request made with keyID that names session stated in a session header.
+// StatedSessionKeyFor is the session key on the usage rows of requests made
+// with keyID whose session header names stated.
 func StatedSessionKeyFor(keyID, stated string) string {
 	return statedSessionKey(SessionHash(keyID, SessionKindStated, []byte(stated)))
 }
@@ -174,11 +173,9 @@ func SessionSorts() []Sort {
 // tenant's most recent sessions".
 type AgentSessionQuery struct {
 	OrgID string
-	// ReportScope's ProjectID, UserID and KeyID narrow to one entity. They apply
-	// before the runs are cut: a session belongs to one key, so this drops
-	// whole sessions and never splits one. Its Alias keeps the sessions that
-	// used one model, and applies after the runs are cut. Applied to rows, it
-	// would split a session that used two models into pieces.
+	// ReportScope's ProjectID, UserID and KeyID apply before the runs are cut:
+	// a session belongs to one key, so they drop whole sessions. Its Alias
+	// applies after, so a session that used two models is not split.
 	ReportScope
 	// SessionKey narrows to one conversation.
 	SessionKey string
@@ -308,10 +305,9 @@ func (q AgentSessionQuery) matched() string {
 	    AND ($11 = 0 OR last_status / 100 = $11))`
 }
 
-// args returns the values sessionCTE and matched read, in the order they
-// number them.
-// The holder takes the place of the person: a member who names anybody else
-// is refused before the query is built.
+// args returns the values sessionCTE and matched read, in their order. The
+// holder takes the place of the person: a member who names anybody else is
+// refused before the query is built.
 func (q AgentSessionQuery) args() []any {
 	user := q.UserID
 	if q.Holder != "" {
@@ -376,9 +372,8 @@ type AgentSessionTotals struct {
 
 // AgentSessionSummary counts the sessions in one window.
 //
-// It reads everything q narrows by except paging and sort, so the totals do
-// not change as somebody scrolls. That is why it walks the rows again rather
-// than adding up the page.
+// It ignores q's paging and sort, so the totals do not change as somebody
+// scrolls. That is why it walks the rows again rather than adding up the page.
 func (s *Store) AgentSessionSummary(ctx context.Context,
 	q AgentSessionQuery) (AgentSessionTotals, error) {
 	q.setDefaults()

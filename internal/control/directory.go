@@ -56,10 +56,8 @@ func (s *Server) rememberDirectory(r *http.Request, user store.User, sealed []by
 // checkDirectory asks the person's directory again when a check is due, and
 // applies the answer. It returns the user as they now stand, and false when
 // the directory no longer vouches for them, after ending all their sign-ins.
-//
-// A provider that cannot be reached keeps the person signed in. Signing
-// everybody out whenever the directory has an outage would be worse, and the
-// next check asks again.
+// A provider that cannot be reached keeps the person signed in: signing
+// everybody out during an outage would be worse, and the next check asks again.
 func (s *Server) checkDirectory(r *http.Request, user store.User, d store.Directory) (store.User, bool) {
 	now := time.Now()
 	if !d.Due(now, authn.DirectoryCheckEvery) {

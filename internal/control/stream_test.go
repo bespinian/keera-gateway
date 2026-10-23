@@ -16,10 +16,8 @@ import (
 )
 
 // The live request log end to end: a recorded request reaches an open stream
-// without a reload.
-//
-// It needs a real Postgres (KEERA_TEST_DATABASE_URL), because no fake has the
-// notification, the listener and the cursor that are under test.
+// without a reload. It needs a real Postgres (KEERA_TEST_DATABASE_URL), because
+// no fake has the notification, the listener and the cursor under test.
 
 func TestRequestStreamCarriesARequestAsItIsRecorded(t *testing.T) {
 	st, ctx := testStore(t)

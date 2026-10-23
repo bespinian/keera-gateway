@@ -568,7 +568,7 @@ refusal gives, which is kept as the request's error. The filter log keeps one
 row per filter per request: the mode, whether it was enforcing, the outcome, how
 long it took, what it spent, and how many segments it was shown and changed.
 Which rule fired is not kept either; it appears only in `keera filter check`,
-against the sample. The log is kept as long as the usage log
+against the sample. The log is kept as long as the request log
 (`KEERA_USAGE_RETENTION`).
 
 Also recorded:

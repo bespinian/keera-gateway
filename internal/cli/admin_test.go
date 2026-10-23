@@ -211,7 +211,6 @@ func TestOrgSetPatchesTheDomain(t *testing.T) {
 	}
 }
 
-// A rename sends only the name, so the domain stays what it was.
 func TestOrgSetRenamesWithoutTouchingTheDomain(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{
@@ -624,9 +623,8 @@ func TestKeyRotateAndRevokeRefuseAnAmbiguousName(t *testing.T) {
 	}
 }
 
-// Revoking by id with --yes needs no lookup. The fake fails any call it does
-// not list, which is the assertion. Without --yes the record is read for the
-// prompt; that is the test below.
+// Revoking by id with --yes needs no lookup. Without --yes the record is read
+// for the prompt; that is the test below.
 func TestKeyRevokeByIdLooksNothingUp(t *testing.T) {
 	quiet(t)
 	keyID := id.New("key")
@@ -868,8 +866,6 @@ func TestModelApplyValidatesBeforeItWritesAnything(t *testing.T) {
 		t.Errorf("the control plane was called anyway: %v", f.seen)
 	}
 }
-
-// ------------------------------------------------------- flags and helpers
 
 func TestApplyModelFlagsLeavesUngivenFieldsAlone(t *testing.T) {
 	current := declared(policy.Model{
@@ -1390,7 +1386,6 @@ func TestAnOrganisationsGuardrailNeedsNoID(t *testing.T) {
 	}
 }
 
-// With several organisations, the chosen one is the one a command acts on.
 func TestModelListUsesTheChosenOrganisation(t *testing.T) {
 	quiet(t)
 	f := newFakeControl(t, map[string]any{

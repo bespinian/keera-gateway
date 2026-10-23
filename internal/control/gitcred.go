@@ -9,13 +9,10 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// gitCredential hands a sandbox a fresh repository credential, in the format
-// git's credential helpers speak, so sandbox/git-credential-keera can pass it
-// on as it is.
-//
-// The sandbox asks with its own key, which is the only credential it has. The
-// key stops working when the sandbox ends or its owner is disabled, and so
-// does this.
+// gitCredential hands a sandbox a fresh repository credential in the format
+// git's credential helpers speak, so sandbox/git-credential-keera passes it on
+// as is. The sandbox asks with its own key, so this stops working when the
+// sandbox ends or its owner is disabled.
 func (s *Server) gitCredential(w http.ResponseWriter, r *http.Request) {
 	key, err := auth.FromHeader(r.Header.Get("Authorization"))
 	if err != nil {

@@ -22,9 +22,8 @@ func (b *body) integer(key string) (int, bool) {
 }
 
 func TestParseBodyPreservesEverythingItDoesNotTouch(t *testing.T) {
-	// The gateway rewrites "model" and leaves the rest alone. Anything it
-	// dropped or reordered here would be a field silently taken away from a
-	// client - including provider extensions the gateway has never heard of.
+	// Anything dropped or reordered here would be taken from the client,
+	// provider extensions included.
 	const in = `{"model":"keera-code","messages":[{"role":"user","content":"hi"}],` +
 		`"temperature":0,"tools":[{"type":"function"}],"chat_template_kwargs":{"enable_thinking":false}}`
 
@@ -70,7 +69,7 @@ func TestParseBodyRefusesAReadKeyInOtherCase(t *testing.T) {
 func TestEveryRequestFieldTheGatewayDecodesIsChecked(t *testing.T) {
 	// A field missing from readNames could be smuggled past the filters in
 	// other case, so a new field in a request struct must be added there too.
-	// A namespace's tools are tools, so a type can hold itself.
+	// seen stops the walk where a type holds itself, as a namespace holds tools.
 	seen := map[reflect.Type]bool{}
 	var walk func(reflect.Type)
 	walk = func(t2 reflect.Type) {
@@ -346,9 +345,8 @@ func TestPrependSystem(t *testing.T) {
 }
 
 func TestPrependSystemDoesNotDecodeTheConversation(t *testing.T) {
-	// The array is spliced, not parsed, so whatever a client put in a message
-	// arrives upstream byte for byte - including fields this gateway has never
-	// heard of and any exact number formatting the client chose.
+	// The array is spliced, not parsed, so unknown fields and number formatting
+	// arrive upstream byte for byte.
 	const in = `{"messages":[{"role":"user","content":"hi","cache_control":{"type":"ephemeral"},` +
 		`"weight":1.50}],"model":"keera-code"}`
 	b, err := parseBody([]byte(in))
@@ -371,11 +369,8 @@ func TestPrependSystemDoesNotDecodeTheConversation(t *testing.T) {
 }
 
 func TestParseBodyFindsFieldBoundariesInAwkwardJSON(t *testing.T) {
-	// The top level is walked rather than decoded, so the punctuation that
-	// ends a field is found by stepping over strings and counting brackets.
-	// Every case here is a body where doing that naively goes wrong: a brace
-	// or a comma inside a string, an escaped quote, a trailing backslash
-	// before one, an empty container, a number that is not an integer.
+	// The top level is walked by skipping strings and counting brackets. Each
+	// case is one a naive walk gets wrong.
 	for _, in := range []string{
 		`{"model":"m","messages":[{"role":"user","content":"}]},\"still text\""}]}`,
 		`{"model":"m","stop":["}","]",","],"n":1}`,
@@ -423,8 +418,7 @@ func TestParseBodyKeepsTheLastOfARepeatedField(t *testing.T) {
 }
 
 func TestParseBodyRefusesABodyItCannotRead(t *testing.T) {
-	// A body that does not parse is refused here, saying where it went wrong,
-	// rather than forwarded for the inference plane to reject.
+	// Refused here, saying where, rather than forwarded.
 	for _, in := range []string{
 		`{"model":"m",}`,
 		`{"model":"m"`,

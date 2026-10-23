@@ -204,7 +204,7 @@ func TestEndedSandboxesAndKeysGoOnceTheirUsageHasGone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// sandbox makes one created at, and for a terminated one also ended at, at.
+	// sandbox creates one at at; a terminated one also ends at at.
 	sandbox := func(name, keyID string, state policy.SandboxState, purpose policy.Purpose, at time.Time) {
 		t.Helper()
 		sb := newSandbox(t, st, ctx, f, name)

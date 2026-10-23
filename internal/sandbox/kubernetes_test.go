@@ -14,9 +14,8 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// The driver against a fake API server. What matters is the JSON the driver
-// sends and how it reads the answers, so the fake answers in the CRD's shapes
-// and the tests assert on the JSON.
+// The driver against a fake API server that answers in the CRD's shapes. The
+// tests assert on the JSON the driver sends and how it reads the answers.
 
 type fakeAPI struct {
 	t    *testing.T

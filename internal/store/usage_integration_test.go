@@ -77,8 +77,7 @@ func TestWriteEventsRollsUpSpendPerScope(t *testing.T) {
 		t.Errorf("Usage bucket = %+v, want two served requests and every row's cost", b)
 	}
 
-	// The refusals are still there to be read, which is the whole reason they
-	// were written.
+	// The refusals can still be read: that is why they are written.
 	refusals, err := st.Refusals(ctx, f.orgID, []string{f.keyID}, now.Add(-time.Hour), 10)
 	if err != nil {
 		t.Fatalf("Refusals: %v", err)

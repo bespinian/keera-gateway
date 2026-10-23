@@ -137,10 +137,9 @@ type deletedProject struct {
 	DetachedKeys int    `json:"detached_keys"`
 }
 
-// findProject takes an id or a name and returns the project. Names are unique
-// in an organisation and are what people remember. The id is tried first, so
-// a project named like an id still resolves to itself. org is resolved as
-// resolveOrg does.
+// findProject takes an id or a name and returns the project. The id is tried
+// first, so a project named like an id still resolves to itself. org is
+// resolved as resolveOrg does.
 func findProject(ctx context.Context, c *client, org, given string) (store.Project, error) {
 	return findNamed(ctx, c, org, given, "/v1/projects", "project", "project",
 		func(p store.Project) (string, string) { return p.ID, p.Name })

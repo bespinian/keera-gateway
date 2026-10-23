@@ -112,7 +112,6 @@ func TestAnOrganisationWithoutCreditCannotUseTheDeploymentsKey(t *testing.T) {
 	}
 }
 
-// Without credit, the organisation's own models still work.
 func TestCreditDoesNotStopTheOrganisationsOwnModels(t *testing.T) {
 	h := filterHarness(t, redactor, nil)
 	h.budgets.creditErr = &policy.ErrNoCredit{}
@@ -150,8 +149,8 @@ func waitFor(t *testing.T, what string, done func() bool) {
 	}
 }
 
-// A request holds the most it may cost while it runs, so requests started
-// together cannot all spend the same credit, and gives it back at the end.
+// Holding the most it may cost stops requests started together from all
+// spending the same credit.
 func TestARequestOnTheDeploymentsKeyHoldsCreditWhileItRuns(t *testing.T) {
 	h := filterHarness(t, redactor, nil)
 	onPlatformKey(h, "keera-code")
@@ -375,7 +374,6 @@ func TestAResponsesRequestOnTheDeploymentsKeyStoresNothing(t *testing.T) {
 	}
 }
 
-// A chat completion is not stored at the deployment's OpenAI account either.
 func TestAChatCompletionOnTheDeploymentsKeyIsNotStored(t *testing.T) {
 	h, seen := providerHarness(t, "openai", "gpt-5.5",
 		jsonBackend(`{"model":"gpt-5.5","choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}`), nil)
@@ -602,8 +600,6 @@ func TestAnAnswerOnTheDeploymentsKeyWithoutUsageIsBilledItsCeiling(t *testing.T)
 	}
 }
 
-// A filter's call on the deployment's key is billed even when its answer
-// came without a usage record.
 func TestAFiltersCallWithoutUsageIsBilledItsCeiling(t *testing.T) {
 	h := filterHarnessAnswering(t, func(string, []string) string { return "" }, nil,
 		func(w http.ResponseWriter, _ *http.Request) {

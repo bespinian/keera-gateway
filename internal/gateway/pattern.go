@@ -10,26 +10,21 @@ import (
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
-// A pattern filter is a filter without a model: it runs a list of regular
-// expressions over the same segments, in this process, with no GPU and no
-// cost.
+// A pattern filter runs regular expressions over the segments, in process,
+// with no model and no cost. It is for secrets with a shape: credentials,
+// connection strings, IBANs, card numbers. Being free, it can cover a whole
+// organisation; a rule cannot "improve" someone's code; and it is
+// deterministic, so its check shows what production does.
 //
-// It is for secrets that have a shape: credentials, connection strings,
-// IBANs, card numbers. A model is a slower, dearer and less reliable way to
-// match those. Because it is free it can cover a whole organisation; a rule
-// cannot decide to "improve" someone's code; and it answers the same way every
-// time, so its check shows what production does.
-//
-// What it cannot do is read: a customer's name in a sentence has no shape.
-// That needs one of the model modes.
+// It cannot read: a customer's name in a sentence has no shape. That needs a
+// model mode.
 
-// compiled is one pattern filter's rules, ready to run. Filters change rarely
-// and run on every request, so the rules are compiled once and kept.
+// compiled is one pattern filter's rules. Filters change rarely and run on
+// every request, so the rules are compiled once and kept.
 type compiled struct {
 	rules []compiledRule
-	// err is a rule that would not compile, the one way this mode fails. It is
-	// kept so a broken filter fails the same way each time without being
-	// recompiled.
+	// err is a rule that would not compile. It is kept so a broken filter
+	// fails the same way each time without being recompiled.
 	err error
 }
 
@@ -38,9 +33,9 @@ type compiledRule struct {
 	rule policy.FilterRule
 }
 
-// patternCache holds the compiled rules of every pattern filter this process
-// has run, one entry per filter. An edit changes the filter's write time, and
-// the next request recompiles in place, so old rules do not pile up.
+// patternCache holds compiled rules, one entry per filter. An edit changes
+// the filter's write time and the next request recompiles in place, so old
+// rules do not pile up.
 type patternCache struct{ m sync.Map }
 
 type patternEntry struct {
@@ -58,9 +53,8 @@ func (c *patternCache) rulesFor(f policy.Filter) compiled {
 	return out
 }
 
-// compileRules turns an administrator's rules into something that can be run.
-// The control plane validates rules when they are written, so a failure here
-// means the row was changed behind its back. It fails closed.
+// compileRules fails closed. The control plane validates rules on write, so a
+// failure here means the row was changed behind its back.
 func compileRules(rules []policy.FilterRule) compiled {
 	if len(rules) == 0 {
 		// The control plane refuses to store this. A guardrail that passes
@@ -80,25 +74,23 @@ func compileRules(rules []policy.FilterRule) compiled {
 	return out
 }
 
-// patternHit is one rule that fired, for a check to report. Nothing like it is
-// kept for real requests.
+// patternHit is one rule that fired, for a check to report. Real requests
+// keep none.
 type patternHit struct {
 	// Rule is the expression that matched: the line to change.
 	Rule string `json:"rule"`
 	// Matches is how many times it matched across every segment.
 	Matches int `json:"matches"`
-	// Refused says this is the rule that dropped the request rather than one
-	// that replaced anything.
+	// Refused says this rule dropped the request rather than replaced text.
 	Refused bool `json:"refused,omitempty"`
 }
 
 // runPattern applies one pattern filter's rules to the segments.
 //
-// The rules run in order and each sees what the one before left, so a
-// specific rule above a broad one can narrow it.
-//
-// A refusal is a filterRefusedError, as a model's is, so it takes the same
-// path through outcomes, statuses, logs and shadow mode.
+// The rules run in order, each on what the one before left, so a specific
+// rule above a broad one can narrow it. A refusal is a filterRefusedError, as
+// a model's is, so it takes the same path through outcomes, logs and shadow
+// mode.
 func runPattern(c compiled, texts []string) ([]string, []patternHit, error) {
 	if c.err != nil {
 		return nil, nil, c.err
@@ -116,10 +108,8 @@ func runPattern(c compiled, texts []string) ([]string, []patternHit, error) {
 			}
 			matches += found
 			if cr.rule.Refuse {
-				// Stop here: the request is going nowhere. The reason is the
-				// administrator's wording, but it is bounded like a model's
-				// because it goes the same way, into an error body and a
-				// usage row.
+				// The reason is the administrator's wording, but it is bounded
+				// like a model's: it goes into an error body and a usage row.
 				return nil, append(hits, patternHit{
 					Rule: cr.rule.Pattern, Matches: matches, Refused: true,
 				}), &filterRefusedError{reason: sanitizeReason(cr.rule.Reason)}
@@ -134,11 +124,8 @@ func runPattern(c compiled, texts []string) ([]string, []patternHit, error) {
 	return out, hits, nil
 }
 
-/* ------------------------------------------------------------ checking one */
-
-// patternCheckWarnings says what a pattern filter that ran still got wrong:
-// it left what it should remove, or touched what it should leave. For the
-// second, it names the rule.
+// patternCheckWarnings says what a pattern filter still got wrong: it left
+// what it should remove, or touched what it should leave (naming the rule).
 func patternCheckWarnings(out []string, hits []patternHit, codeHits []patternHit) []string {
 	var warnings []string
 	if leftSecret(out) {

@@ -123,9 +123,8 @@ func TestMigrateIsIdempotentAndSafeInParallel(t *testing.T) {
 		t.Errorf("the second Migrate applied %v, want nothing", again)
 	}
 
-	// Several replicas starting at once is the ordinary case, not an edge one.
-	// The advisory lock is what keeps it from being two processes running the
-	// same CREATE TABLE.
+	// Several replicas starting at once is the ordinary case. The advisory
+	// lock keeps two of them from running the same CREATE TABLE.
 	if _, err := st.pool.Exec(ctx, "DROP SCHEMA public CASCADE; CREATE SCHEMA public"); err != nil {
 		t.Fatalf("dropping the schema: %v", err)
 	}
@@ -157,8 +156,7 @@ func TestMigrateIsIdempotentAndSafeInParallel(t *testing.T) {
 
 func TestNotifyReachesAListener(t *testing.T) {
 	// This is what makes a revoked key stop working within a round trip rather
-	// than within a cache lifetime, so it is worth a test that a notification
-	// actually arrives.
+	// than a cache lifetime, so test that a notification actually arrives.
 	st, ctx := db(t)
 
 	pooled, err := st.pool.Acquire(ctx)

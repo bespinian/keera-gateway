@@ -43,8 +43,8 @@ const (
 var Isolations = []Isolation{IsolationStandard, IsolationIsolated, IsolationVM}
 
 // Valid reports whether i names a tier. The empty string does not, because
-// nobody should have to guess a sandbox's isolation. catalog.ParseSandbox fills it
-// in first.
+// nobody should have to guess a sandbox's isolation. catalog.ParseSandbox
+// fills it in first.
 func (i Isolation) Valid() bool { return slices.Contains(Isolations, i) }
 
 // Purpose is who a sandbox was made for. It decides the lifecycle: how long it
@@ -176,9 +176,9 @@ const (
 	SandboxTerminated SandboxState = "terminated"
 )
 
-// Live reports whether this state still holds resources: what a quota counts
-// and a bill is computed from. A failed engineer sandbox holds its volume
-// too, which store.Sandbox.Live adds, since that depends on the purpose.
+// Live reports whether this state still holds resources, which is what a
+// quota counts. A failed engineer sandbox holds its volume too, which
+// store.Sandbox.Live adds, since that depends on the purpose.
 func (s SandboxState) Live() bool {
 	return s == SandboxPending || s == SandboxReady || s == SandboxSuspended ||
 		s == SandboxExpired
@@ -226,7 +226,8 @@ func (l SandboxLimits) IsZero() bool { return reflect.DeepEqual(l, SandboxLimits
 // ResolvedSandbox is the sandbox half of Resolved, with every level's limits
 // combined.
 type ResolvedSandbox struct {
-	// MaxSandboxes and MaxSandboxTTLSeconds are zero for unlimited.
+	// MaxSandboxes, MaxSandboxTTLSeconds, MaxSandboxCPU and MaxSandboxMemory
+	// are zero for unlimited.
 	MaxSandboxes         int      `json:"max_sandboxes"`
 	MaxSandboxTTLSeconds int      `json:"max_sandbox_ttl_seconds"`
 	SandboxClasses       []string `json:"sandbox_classes"`

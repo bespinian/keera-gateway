@@ -21,9 +21,7 @@ import (
 
 // The registry is a cache in front of authentication, so its failure modes
 // matter most: a stale cache serves a revoked key, and one that remembers the
-// wrong thing pins a rejection for a good key. The package comment promises a
-// revoked key stops within a round trip, and an outage leaves known keys
-// working. Both are tested below.
+// wrong thing pins a rejection for a good key.
 
 // source is a control plane that answers from memory.
 type source struct {

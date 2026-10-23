@@ -36,7 +36,6 @@ func claudeSignIn(r *http.Request) bool {
 	return err == nil && strings.HasPrefix(token, claudeSignInPrefix)
 }
 
-// subscriptionsOff says the deployment does not take Claude subscriptions.
 const subscriptionsOff = "this gateway does not take Claude subscriptions"
 
 // connectHint is what to run to set Claude Code up for a subscription.
@@ -162,7 +161,8 @@ func planUsage(h http.Header, now time.Time) *policy.PlanUsage {
 	return p
 }
 
-// fraction reads a utilisation, which Anthropic sends as a fraction from 0 to 1.
+// fraction reads a utilisation, the fraction of the plan's limit that Anthropic
+// sends. A value far outside 0 to 1 is dropped as unreadable.
 func fraction(v string) *float64 {
 	f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
 	if err != nil || f < 0 || f > 10 {

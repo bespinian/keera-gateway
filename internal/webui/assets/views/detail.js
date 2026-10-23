@@ -1,12 +1,6 @@
-// One project, one key, one model, one user - the dashboard narrowed to it,
-// and the requests or sessions behind the numbers.
-//
-// The list screens say what exists. These answer questions about one thing,
-// such as "this key stopped working": the chart says when something changed,
-// the log says what.
-//
-// All four are the same screen with a different scope, so they read alike and
-// their totals cannot drift apart.
+// One project, key, model or user: the dashboard narrowed to it, and the
+// requests or sessions behind the numbers. All four are one screen with a
+// different scope, so they read alike and their totals cannot drift apart.
 
 import { api } from "../api.js";
 import {
@@ -77,8 +71,6 @@ import {
   disablePerson,
   enablePerson,
 } from "./people.js";
-
-/* ------------------------------------------------------------------ projects */
 
 export async function projectDetailView(ctx) {
   const projectsRes = await api.projects(ctx.orgID);
@@ -202,8 +194,6 @@ export async function projectDetailView(ctx) {
   });
 }
 
-/* ------------------------------------------------------------------- keys */
-
 export async function keyDetailView(ctx) {
   // Read over the picker's period, so Last used covers the same span as the
   // numbers below it.
@@ -214,7 +204,7 @@ export async function keyDetailView(ctx) {
     api.users(ctx.orgID).catch(() => ({ data: [] })),
   ]);
   const key = (keysRes.data || []).find((k) => k.id === ctx.param);
-  // The key's own organisation, for the same reason as on a project's page.
+  // The key's own organisation, not the switcher's.
   const modelsRes = key
     ? await api.models(key.org_id).catch(() => ({ data: [] }))
     : { data: [] };
@@ -305,8 +295,7 @@ export async function keyDetailView(ctx) {
       state === "pending" && canActivate(ctx, key)
         ? activateButton(ctx, key)
         : null,
-      // The old key is revoked by the rotation, so the screen moves to the
-      // new one.
+      // Rotation revokes the old key, so the screen moves to the new one.
       canRevoke(ctx, key) && canRotate(key)
         ? h(
             "button",
@@ -401,8 +390,6 @@ export async function keyDetailView(ctx) {
       "guardrail refused.",
   });
 }
-
-/* ----------------------------------------------------------------- models */
 
 export async function modelDetailView(ctx) {
   const models = (await api.models(ctx.orgID)).data || [];
@@ -567,8 +554,6 @@ export async function modelDetailView(ctx) {
   });
 }
 
-/* ------------------------------------------------------------------ users */
-
 export async function userDetailView(ctx) {
   const [usersRes, keysRes] = await Promise.all([
     api.users(ctx.orgID),
@@ -723,11 +708,8 @@ export async function userDetailView(ctx) {
   });
 }
 
-/* ----------------------------------------------------------- the scaffold */
-
-// screen draws all four. Above the chart is what differs per entity; from the
-// chart down is the same report. spec.description goes under the header,
-// spec.note (how to read the numbers) at the bottom.
+// Above the chart is what differs per entity; from the chart down is the same
+// report.
 async function screen(ctx, spec) {
   const since = currentRange();
   const res = await api.overview(ctx.orgID, since, spec.scope);
@@ -845,7 +827,6 @@ async function screen(ctx, spec) {
   return wrap;
 }
 
-// failureJump turns the failed count into a link to the failed rows below.
 // Under a session log it shows the sessions holding a failed request.
 function failureJump(ctx, text, sessions) {
   if (!isAdmin(ctx)) {
@@ -918,6 +899,3 @@ function budgetPill(ctx, project) {
     `${money(project.spend_micros)} of ${money(project.budget_micros)} per ${project.period}`,
   );
 }
-
-// gone is the screen for an id that names nothing. It is not an error: the
-// usual way here is an old bookmark to something deleted.

@@ -29,8 +29,7 @@ import (
 //	status.conditions    Ready, PodScheduled, Suspended, Finished
 //
 // Because the controller owns the expiry, a gateway that crashes for good
-// leaves no sandboxes running. An engineer's keeps its object and volume, as
-// it does at any expiry (see shutdownPolicy).
+// leaves no sandboxes running.
 
 const (
 	sandboxAPIGroup   = "agents.x-k8s.io"
@@ -328,11 +327,8 @@ func conditionOf(conds []kubeCondition, typ string) (kubeCondition, bool) {
 	return kubeCondition{}, false
 }
 
-/* ------------------------------------------------------------------- create */
-
 // Create writes one Sandbox object and returns without waiting for it to be
-// ready. The panel and the CLI poll the row; a sandbox stuck in Pending shows
-// the scheduler's own message.
+// ready. The panel and the CLI poll the row.
 func (k *Kubernetes) Create(ctx context.Context, spec Spec) (Status, error) {
 	runtime, err := runtimeFor(spec.Class, k.opts.Runtimes, k.Name())
 	if err != nil {
@@ -513,18 +509,14 @@ func formatExpiry(t time.Time) string {
 }
 
 // shutdownPolicy decides what happens to the object when its time runs out.
-//
-// An agent's sandbox is deleted: the task is over, and its result is a
-// branch. An engineer's is retained: its volume holds work in progress, the
-// row goes to Expired, and resuming it is one click.
+// An agent's is deleted: the task is over, and its result is a branch. An
+// engineer's is retained: its volume holds work in progress.
 func shutdownPolicy(p policy.Purpose) string {
 	if p == policy.PurposeAgent {
 		return "Delete"
 	}
 	return "Retain"
 }
-
-/* ---------------------------------------------------------------- read back */
 
 func (k *Kubernetes) Status(ctx context.Context, ref Ref) (Status, error) {
 	if ref.Claimed() {
@@ -538,11 +530,8 @@ func (k *Kubernetes) Status(ctx context.Context, ref Ref) (Status, error) {
 }
 
 // statusOf collapses the controller's mode and conditions into one state.
-//
-// The checks are in order of precedence. Expired comes first: a sandbox whose
-// time is up is not "not ready yet". Finished beats Suspended: a pod that
-// failed while suspending is a failure. Ready comes late, as the only good
-// news.
+// The cases are in order of precedence: a sandbox whose time is up is not
+// "not ready yet", and a pod that failed while suspending is a failure.
 func (k *Kubernetes) statusOf(ref Ref, obj *kubeSandbox) Status {
 	st := Status{
 		Ref:     ref,
@@ -561,8 +550,8 @@ func (k *Kubernetes) statusOf(ref Ref, obj *kubeSandbox) Status {
 	case hasFinished && finished.Status == "True" && finished.Reason == "PodFailed":
 		st.State, st.Detail = policy.SandboxFailed, detailOf(finished, "the sandbox process failed")
 	case hasFinished && finished.Status == "True":
-		// The process exited cleanly. Nothing is left to attach to, but the
-		// detail says it exited rather than crashed.
+		// Nothing is left to attach to, but the detail says it exited rather
+		// than crashed.
 		st.State, st.Detail = policy.SandboxFailed, "the sandbox process exited"
 		st.Exited = true
 	case obj.Spec.OperatingMode == "Suspended":
@@ -581,7 +570,6 @@ func (k *Kubernetes) statusOf(ref Ref, obj *kubeSandbox) Status {
 	return st
 }
 
-// firstAddress is where to dial a sandbox: its pod IP, or else its Service.
 func firstAddress(podIPs []string, serviceFQDN string) string {
 	if len(podIPs) > 0 {
 		return podIPs[0]
@@ -600,8 +588,6 @@ func detailOf(c kubeCondition, fallback string) string {
 	}
 }
 
-/* -------------------------------------------------------------- the changes */
-
 // Suspend stops the sandbox's pod and keeps its volume. Like Resume it is a
 // merge patch of one field, so two gateways doing it at once agree.
 func (k *Kubernetes) Suspend(ctx context.Context, ref Ref) error {
@@ -612,11 +598,9 @@ func (k *Kubernetes) Resume(ctx context.Context, ref Ref) error {
 	return k.setMode(ctx, ref, "Running")
 }
 
-// Revive gives an expired sandbox its new environment and end, and starts it.
-//
-// The container is sent whole, because a merge patch replaces a list: it is
-// built from the same spec as at creation, with the new environment. The
-// pod is made again from the template, on the volume the sandbox kept.
+// Revive gives an expired sandbox its new environment and end, and starts it
+// on the volume it kept. The container is sent whole, because a merge patch
+// replaces a list.
 func (k *Kubernetes) Revive(ctx context.Context, spec Spec) error {
 	until := formatExpiry(spec.Expires)
 	if spec.Claimed() {
@@ -655,10 +639,9 @@ func (k *Kubernetes) setMode(ctx context.Context, ref Ref, mode string) error {
 	return kubeNotFound(k.c.patch(ctx, path, patch))
 }
 
-// Extend moves the shutdown time.
-//
-// For a claim it moves the claim's own lifetime: deleting the claim is what
-// returns the sandbox, so the claim must not end before its Sandbox.
+// Extend moves the shutdown time. For a claim it moves the claim's own
+// lifetime: deleting the claim is what returns the sandbox, so the claim must
+// not end before its Sandbox.
 func (k *Kubernetes) Extend(ctx context.Context, ref Ref, until time.Time) error {
 	end := formatExpiry(until)
 	if ref.Claimed() {
@@ -672,10 +655,8 @@ func (k *Kubernetes) Extend(ctx context.Context, ref Ref, until time.Time) error
 }
 
 // Terminate removes the sandbox and, through owner references, its pod,
-// Service and volume.
-//
-// A sandbox already gone is success: a user's terminate and the sweep's
-// expiry race by nature, and the loser must not fail.
+// Service and volume. A sandbox already gone is success: a user's terminate
+// and the sweep's expiry race, and the loser must not fail.
 func (k *Kubernetes) Terminate(ctx context.Context, ref Ref) error {
 	// For a pooled sandbox, delete the claim. Deleting the bound Sandbox would
 	// drain the pool and leave the claim pointing at nothing.
@@ -688,8 +669,6 @@ func (k *Kubernetes) Terminate(ctx context.Context, ref Ref) error {
 	}
 	return nil
 }
-
-/* ------------------------------------------------------------------ dialing */
 
 // Dial connects to the pod IP directly. The port-forward subresource would
 // work from anywhere, but costs an upgrade through the API server per
@@ -706,8 +685,6 @@ func (k *Kubernetes) Dial(ctx context.Context, ref Ref, port int) (net.Conn, err
 	}
 	return dialSandbox(ctx, ref, port, net.JoinHostPort(st.Address, strconv.Itoa(port)))
 }
-
-/* ------------------------------------------------------------------ helpers */
 
 func envList(env map[string]string) []kubeEnv {
 	if len(env) == 0 {
@@ -749,11 +726,9 @@ func nullableString(s string) *string {
 	return &s
 }
 
-// boundSandbox is the path of the Sandbox a claim is bound to. Only the mode
-// changes need it.
-//
-// An unbound claim is ErrNotReady, not ErrNotFound: the claim exists and the
-// pool has not answered yet, so the answer is "wait", not "gone".
+// boundSandbox is the path of the Sandbox a claim is bound to. An unbound
+// claim is ErrNotReady, not ErrNotFound: the pool has not answered yet, so the
+// answer is "wait", not "gone".
 func (k *Kubernetes) boundSandbox(ctx context.Context, ref Ref) (string, error) {
 	c, err := k.claim(ctx, ref)
 	if err != nil {

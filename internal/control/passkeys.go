@@ -33,7 +33,6 @@ import (
 // An administrator hands over a one-time set-up link. It adds the first
 // passkey, a passkey on a device that has none yet, or a new one after a loss.
 
-// errUserDisabled is a passkey sign-in by someone who was disabled.
 var errUserDisabled = errors.New("the account is disabled")
 
 // passkeyNameMax is in runes. A longer name is cut.
@@ -451,7 +450,7 @@ func (s *Server) ownPasskeyOptions(w http.ResponseWriter, r *http.Request, p *au
 	}
 }
 
-// addOwnPasskey completes it.
+// addOwnPasskey completes what ownPasskeyOptions started.
 func (s *Server) addOwnPasskey(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	var in registration
 	if !readJSON(w, r, &in) {

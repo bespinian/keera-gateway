@@ -23,8 +23,6 @@ import (
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
-// ---------------------------------------------------------------- test doubles
-
 type fakeSource struct {
 	resolved map[string]*policy.Resolved
 	models   map[string]policy.Model
@@ -40,9 +38,8 @@ func (f *fakeSource) Resolve(_ context.Context, presented string) (*policy.Resol
 	return nil, policy.ErrUnknownKey
 }
 
-// testOrg is the organisation a model or server keyed by its alias alone
-// belongs to, which keeps the many tests with one organisation short. Any
-// other organisation does not see it, as in the real registry.
+// testOrg owns a model or server keyed by its alias alone, which keeps the
+// many one-organisation tests short. Other organisations do not see it.
 const testOrg = "org_1"
 
 // Model reads a model keyed "org/alias", or by its alias alone for testOrg.
@@ -108,8 +105,7 @@ func (f *fakeSource) Models(orgID string) []policy.Model {
 
 type fakeBudgets struct {
 	err error
-	// creditErr is what HoldCredit answers, and credited what was taken
-	// from the credit.
+	// creditErr is what HoldCredit answers, and credited what was taken.
 	creditErr error
 	mu        sync.Mutex
 	charged   int64
@@ -198,8 +194,6 @@ func (f *fakeSink) count() int {
 	return len(f.events)
 }
 
-// ------------------------------------------------------------------- harness
-
 const testKey = auth.Prefix + "test"
 
 type harness struct {
@@ -211,9 +205,8 @@ type harness struct {
 	// upstreamBodies is what the inference plane received.
 	upstreamBodies chan []byte
 	upstreamAuth   chan string
-	// srv is the gateway behind gw, for the tests that have to reach past the
-	// request path into what this process has measured. Not the same object as
-	// server() returns, which is deliberately a fresh one.
+	// srv is the gateway behind gw, for tests that read what it measured.
+	// server() deliberately returns a fresh one instead.
 	srv *Server
 }
 
@@ -224,8 +217,7 @@ func newHarness(t *testing.T, backend http.HandlerFunc, models map[string]policy
 	return newHarnessWith(t, backend, models, resolved, Options{})
 }
 
-// newHarnessWith is the same, for the tests that are about a deployment's
-// settings rather than about the request.
+// newHarnessWith is newHarness with a deployment's settings.
 func newHarnessWith(t *testing.T, backend http.HandlerFunc, models map[string]policy.Model,
 	resolved *policy.Resolved, opts Options) *harness {
 	t.Helper()
@@ -295,9 +287,9 @@ func (h *harness) server() *Server {
 		slog.New(slog.DiscardHandler))
 }
 
-// url is the test listener's address for one inference route. Tests name the
-// path a client appends to its base URL, and this adds httpx.InferencePrefix.
-// For /api/hello the doubled segment is what an Anthropic-shaped client sends.
+// url is the test listener's address for one inference route, with
+// httpx.InferencePrefix added. For /api/hello the doubled segment is what an
+// Anthropic-shaped client sends.
 func (h *harness) url(path string) string {
 	return h.gw.URL + httpx.InferencePrefix + path
 }
@@ -344,8 +336,6 @@ func sseBackend(chunks ...string) http.HandlerFunc {
 		}
 	}
 }
-
-// --------------------------------------------------------------------- tests
 
 func TestChatCompletionRewritesTheAliasAndAccountsForTheTokens(t *testing.T) {
 	h := newHarness(t, jsonBackend(`{"id":"1","choices":[{"message":{"content":"hi"}}],`+
@@ -468,9 +458,8 @@ func TestUnknownAndForbiddenModelsAreIndistinguishable(t *testing.T) {
 			}
 		})
 	}
-	// Refused requests are recorded - they are what a developer asks about
-	// afterwards - but a request that never reached the inference plane is not
-	// billed for anything.
+	// Refused requests are recorded, as developers ask about them, but not
+	// billed.
 	if h.sink.count() != 4 {
 		t.Errorf("recorded %d refusals, want 4; a refusal nobody kept cannot be "+
 			"explained to the developer it happened to", h.sink.count())
@@ -697,8 +686,7 @@ func TestASlowBackendIsNotFollowedByTheNextOne(t *testing.T) {
 }
 
 func TestUpstreamErrorsArePassedThroughUnchanged(t *testing.T) {
-	// vLLM's own error text is what tells a developer their prompt was too
-	// long. Replacing it with a generic message loses that.
+	// vLLM's own error text tells a developer their prompt was too long.
 	backend := func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
@@ -998,9 +986,8 @@ func TestMalformedRequestsAreRejectedBeforeTheInferencePlane(t *testing.T) {
 }
 
 func TestACancelledStreamIsStillCharged(t *testing.T) {
-	// A coding agent cancelling a turn is routine. The tokens were generated
-	// and the GPU time was spent, so the request must not vanish from the
-	// ledger - otherwise any budget can be evaded by always cancelling.
+	// The tokens were generated, so a cancelled request must stay in the
+	// ledger, or any budget can be evaded by always cancelling.
 	released := make(chan struct{})
 	backend := func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -1131,10 +1118,9 @@ func TestServeChatEnforcesTheKeysGuardrails(t *testing.T) {
 	}
 }
 
-// A model pointed at a hosted endpoint carries that endpoint's credential and
-// not the developer's. This is the whole mechanism behind `provider:` entries in
-// the catalogue, and it is invisible when it goes wrong: the upstream answers
-// 401 and the developer reads it as their own key being rejected.
+// A model pointed at a hosted endpoint carries that endpoint's credential,
+// not the developer's. When this goes wrong the upstream answers 401 and the
+// developer reads it as their own key being rejected.
 func TestHostedModelSendsTheEndpointsOwnCredential(t *testing.T) {
 	seen := make(chan string, 4)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1184,9 +1170,9 @@ func TestHostedModelSendsTheEndpointsOwnCredential(t *testing.T) {
 		t.Errorf("upstream saw %q, want the model's stored credential", got)
 	}
 
-	// With no key stored the request still goes, without a credential, so the
-	// endpoint's own 401 is what surfaces rather than a Keera-shaped error
-	// about configuration the developer cannot see.
+	// With no key stored the request still goes, so the endpoint's own 401
+	// surfaces rather than an error about configuration the developer cannot
+	// see.
 	m := models["keera-frontier"]
 	m.APIKey = ""
 	models["keera-frontier"] = m
@@ -1256,9 +1242,8 @@ func TestASpentBudgetSaysWhenItLiftsAndWhereToLook(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
 		t.Fatal(err)
 	}
-	// This message is read inside an editor by the person it just stopped, and
-	// is the only thing they will be shown. An id and the word "exceeded" leave
-	// them with nothing to do but ask somebody.
+	// This message is all the person it stopped will see, so it must say
+	// what to do.
 	for _, want := range []string{"your project", "1 October 2026", "https://keera.example.ch/access"} {
 		if !strings.Contains(envelope.Error.Message, want) {
 			t.Errorf("the refusal does not say %q: %s", want, envelope.Error.Message)
@@ -1294,9 +1279,8 @@ func TestRefusalsAreRecordedWithTheirReason(t *testing.T) {
 }
 
 func TestTheSystemPromptReachesTheInferencePlaneAheadOfTheConversation(t *testing.T) {
-	// The org's wording, then the project's, then the client's own system message.
-	// Order is the assertion: a guardrail that lands after what it is guarding
-	// against is a suggestion.
+	// The org's wording, then the project's, then the client's own system
+	// message. A guardrail placed after what it guards against is a suggestion.
 	res := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1", ProjectID: "project_1"},
 		&policy.Limits{SystemPrompt: new("Answer in British English.")},
 		&policy.Limits{SystemPrompt: new("Never suggest a new dependency.")}, nil)
@@ -1341,8 +1325,8 @@ func TestAKeyWithNoSystemPromptSendsTheBodyUntouched(t *testing.T) {
 }
 
 func TestASystemPromptIsNotAddedToEmbeddings(t *testing.T) {
-	// An embedding has no conversation and no instruction to follow. Adding a
-	// messages array to one would be a field the backend does not expect.
+	// An embedding has no conversation, and the backend would not expect a
+	// messages array.
 	res := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"},
 		&policy.Limits{SystemPrompt: new("Answer in British English.")}, nil, nil)
 	models := map[string]policy.Model{
@@ -1364,9 +1348,8 @@ func TestASystemPromptIsNotAddedToEmbeddings(t *testing.T) {
 }
 
 func TestAChatBodyWithNoMessagesArrayIsRefusedWhenAPromptIsSet(t *testing.T) {
-	// Forwarding this would hand a client the one body shape that escapes the
-	// guardrail, so it is refused here rather than passed on to be rejected
-	// upstream for a different reason.
+	// Forwarding this would let a body shape escape the guardrail, so it is
+	// refused here.
 	res := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"},
 		&policy.Limits{SystemPrompt: new("Answer in British English.")}, nil, nil)
 	h := newHarness(t, jsonBackend(`{}`), nil, res)
@@ -1386,9 +1369,8 @@ func TestAChatBodyWithNoMessagesArrayIsRefusedWhenAPromptIsSet(t *testing.T) {
 }
 
 func TestAnOverLongAliasIsRefusedWithoutBeingRecordedOrQuoted(t *testing.T) {
-	// 'model' is free text from the client, and every refusal below it writes a
-	// usage row carrying the value and an answer quoting it. An alias the size
-	// of a request body is neither, so it is turned away before either happens.
+	// 'model' is client text that refusals write to a usage row and quote, so
+	// an oversized alias is turned away first.
 	h := newHarness(t, jsonBackend(`{}`), nil, nil)
 	alias := strings.Repeat("a", maxAliasBytes+1)
 
@@ -1407,9 +1389,8 @@ func TestAnOverLongAliasIsRefusedWithoutBeingRecordedOrQuoted(t *testing.T) {
 }
 
 func TestUnknownModelsShareOneMetricLabel(t *testing.T) {
-	// A metric label lives as long as the process, so a label taken from
-	// 'model' would let any key with no rate limit grow the registry until the
-	// process died.
+	// A metric label lives as long as the process, so a label from 'model'
+	// would let any key grow the registry without bound.
 	h := newHarness(t, jsonBackend(`{}`), nil, nil)
 
 	for _, alias := range []string{"nope-1", "nope-2", "nope-3"} {
@@ -1418,8 +1399,7 @@ func TestUnknownModelsShareOneMetricLabel(t *testing.T) {
 			t.Fatalf("%s: status = %d, want 404", alias, resp.StatusCode)
 		}
 	}
-	// The alias is still on the usage row, which is where a developer's
-	// question about it is answered.
+	// The alias is still on the usage row.
 	if ev := h.sink.last(t); ev.Alias != "nope-3" {
 		t.Errorf("recorded alias = %q, want nope-3", ev.Alias)
 	}
@@ -1439,9 +1419,8 @@ func TestUnknownModelsShareOneMetricLabel(t *testing.T) {
 }
 
 func TestAKnownModelKeepsItsMetricLabelWhenRefused(t *testing.T) {
-	// The point of the label is that an administrator can see which model is
-	// being refused, so a model that exists has to keep its name - the
-	// catalogue is what bounds it.
+	// A model that exists keeps its name, so an administrator sees which one
+	// is refused. The catalogue bounds the labels.
 	restricted := policy.Resolve(policy.Key{ID: "key_1", OrgID: "org_1"},
 		&policy.Limits{AllowedModels: []string{"keera-code"}}, nil, nil)
 	models := map[string]policy.Model{
@@ -1462,10 +1441,8 @@ func TestAKnownModelKeepsItsMetricLabelWhenRefused(t *testing.T) {
 }
 
 func TestAFailedCallRecordsWhatTheBackendSaid(t *testing.T) {
-	// The dashboard's failure count is where an investigation starts. Without
-	// the message beside the status it is also where it stops: "400" is both a
-	// prompt over the context window and a sampling field this backend does not
-	// support, and only one of those is the developer's to fix.
+	// "400" alone can be a prompt over the context window or a sampling field
+	// the backend does not support, so the row keeps the message.
 	backend := func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -1535,9 +1512,8 @@ func TestAnAnswerExactlyAtTheSizeLimitIsServed(t *testing.T) {
 }
 
 func TestAnUnreachableBackendRecordsWhichOneAndWhy(t *testing.T) {
-	// What the client is told stays deliberately vague - the deployment's own
-	// topology is none of its business. Whoever has to fix it needs exactly the
-	// part the client is not given.
+	// The client is told little about the deployment's topology; the row
+	// keeps the detail whoever fixes it needs.
 	models := map[string]policy.Model{
 		"keera-code": {
 			Alias: "keera-code", Kind: policy.KindChat, BackendModel: "served",
@@ -1558,9 +1534,8 @@ func TestAnUnreachableBackendRecordsWhichOneAndWhy(t *testing.T) {
 }
 
 func TestARefusalRecordsTheSentenceWithoutThePanelAddress(t *testing.T) {
-	// The message on the row is the refusal itself. The "and here is where to
-	// go and look" the client is sent is for the client: storing it would put
-	// one fixed URL on every refused row in the log.
+	// The row stores the refusal without the "where to look" link the client
+	// gets, or every refused row would carry the same URL.
 	h := newHarnessWith(t, jsonBackend(`{}`), nil, budgeted(),
 		Options{PanelURL: "https://keera.example.ch"})
 	h.budgets.err = &policy.ErrBudgetExceeded{
@@ -1602,10 +1577,9 @@ func TestASuccessfulCallRecordsNoError(t *testing.T) {
 }
 
 func TestATranslationFailureIsNotRecordedAsTheBackendsWords(t *testing.T) {
-	// The Messages shape turns an unreadable 200 into a 502. The backend said
-	// nothing wrong in that case - it answered, and the gateway could not carry
-	// the answer - so the row must say that, and must not quote a body that is
-	// somebody's completion rather than an error message.
+	// The Messages shape turns an unreadable 200 into a 502. The row must say
+	// the gateway failed, and must not quote the body: it is a completion, not
+	// an error.
 	backend := func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"not":"a completion","secret":"the customer's prompt"}`)
@@ -1626,11 +1600,8 @@ func TestATranslationFailureIsNotRecordedAsTheBackendsWords(t *testing.T) {
 	}
 }
 
-// ------------------------------------------------------------------ overhead
-
-// What the gateway adds on its own account is the number an in-path proxy is
-// judged on, and keera_request_duration cannot show it: that is almost entirely
-// the model, so a gateway that doubled its own cost would not move it visibly.
+// keera_request_duration is almost all model time, so it cannot show what the
+// gateway itself adds.
 func TestOverheadIsRecordedForAServedRequest(t *testing.T) {
 	h := newHarness(t, jsonBackend(`{"id":"1","choices":[{"message":{"content":"hi"}}],`+
 		`"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`), nil, nil)
@@ -1648,9 +1619,8 @@ func TestOverheadIsRecordedForAServedRequest(t *testing.T) {
 	}
 }
 
-// A refusal never reached the inference plane, and its whole latency is on its
-// usage row. Counting it here would mix "the gateway is slow" with "the
-// gateway said no quickly", and the second is far more common.
+// Counting refusals would mix "the gateway is slow" with "the gateway said no
+// quickly". Their latency is on the usage row.
 func TestOverheadIsNotRecordedForARefusal(t *testing.T) {
 	h := newHarness(t, jsonBackend(`{}`), nil, nil)
 
@@ -1666,10 +1636,9 @@ func TestOverheadIsNotRecordedForARefusal(t *testing.T) {
 	}
 }
 
-// A provider charges what it served from its prompt cache, and what it wrote
-// there, at their own rates. The row has to carry both counts, or it cannot
-// say the same number the provider's console will. The prices themselves are
-// tested in policy.
+// Providers charge cache reads and writes at their own rates, so the row
+// carries both counts to match the provider's console. Prices are tested in
+// policy.
 func TestChatCompletionRecordsCacheReadsAndWrites(t *testing.T) {
 	models := map[string]policy.Model{
 		"keera-code": {
@@ -1710,8 +1679,7 @@ func TestChatCompletionRecordsCacheReadsAndWrites(t *testing.T) {
 }
 
 func TestAChatAnswerNamesTheAliasNotTheBackendModel(t *testing.T) {
-	// The alias is the contract. The backend's name for the model is how the
-	// gateway reaches it, and is not the client's business.
+	// The client sees the alias, never the backend's name for the model.
 	t.Run("buffered", func(t *testing.T) {
 		h := newHarness(t, jsonBackend(`{"id":"1","model":"served-name",`+
 			`"choices":[{"message":{"content":"the \"model\":\"served-name\" field"}}]}`), nil, nil)
@@ -1763,9 +1731,9 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestUpstreamRequestsCanBeResentOnAStaleConnection(t *testing.T) {
-	// Go resends a request on a keep-alive connection the backend has just
-	// closed only when it can read the body again. Without GetBody the
-	// developer gets a 502 for a request the backend never saw.
+	// Go retries on a keep-alive connection the backend just closed only if it
+	// can reread the body. Without GetBody that is a 502 for a request the
+	// backend never saw.
 	h := newHarness(t, jsonBackend(`{"id":"1","choices":[{"message":{"content":"hi"}}],`+
 		`"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`), nil, nil)
 	next := h.srv.client.Transport

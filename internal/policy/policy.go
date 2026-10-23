@@ -144,21 +144,19 @@ type Model struct {
 	// Billing is how a model on the deployment's key is billed. The registry
 	// sets it, and it never leaves the gateway.
 	Billing *Billing `json:"-"`
-	// Limited says the organisation signed itself up and has not paid yet.
-	// The gateway then connects only to public addresses for it. Locked says
-	// it may not use this model at all yet: the model runs inside the
-	// deployment's network, or would be billed after the fact. The registry
-	// sets both, and OrgName with them, so a refusal can name the
-	// organisation. See docs/sso.md.
+	// Limited says the organisation signed itself up and has not paid yet, so
+	// the gateway connects only to public addresses for it. Locked says it may
+	// not use this model yet: the model runs inside the deployment's network,
+	// or would be billed after the fact. The registry sets both, and OrgName
+	// so a refusal can name the organisation. See docs/sso.md.
 	Limited bool   `json:"-"`
 	Locked  bool   `json:"-"`
 	OrgName string `json:"-"`
 	Enabled bool   `json:"enabled"`
 }
 
-// Key names the model across every tenant: its organisation and its alias.
-// State kept per model, such as what a backend has been measured at, is kept
-// under it.
+// Key names the model across all tenants. Per-model state, such as backend
+// measurements, is kept under it.
 func (m Model) Key() string { return ModelKey(m.OrgID, m.Alias) }
 
 // ModelKey is Key for a model known only by its organisation and alias.
@@ -235,11 +233,9 @@ func (t PriceTier) Check() error {
 	return nil
 }
 
-// cachedInputMicros is the rate for one cached input token: the stated rate, or
-// the full input rate when none is stated.
-//
-// Here zero means "not stated", not "free": a forgotten price should err high
-// rather than drop most of every prompt out of every budget.
+// cachedInputMicros is the rate for one cached input token, or the full input
+// rate when none is stated. Zero means "not stated", not "free": a forgotten
+// price should err high rather than drop most of every prompt out of budgets.
 func (t PriceTier) cachedInputMicros() int64 {
 	if t.CachedInputMicrosPerMTok == 0 {
 		return t.InputMicrosPerMTok
@@ -282,22 +278,17 @@ type Filter struct {
 }
 
 // FilterMode is what a filter does with the request it has read. Every mode can
-// stop a request; they differ in what they cost.
+// stop a request; they differ in cost:
+//   - rewrite writes the whole conversation back, the only way to take a
+//     credential out of free text. It costs a second generation as long as
+//     the request.
+//   - gate answers with one word and never edits. It costs a few tokens and
+//     judges more reliably.
+//   - pattern runs no model: regular expressions replace or refuse. It suits
+//     things with a shape, like API keys and card numbers, but cannot
+//     recognise a name, so the usual setup is one of each.
 //
-// A rewrite filter answers with the whole conversation written back, which is
-// the only way to take a credential out of free text. It costs a second
-// generation as long as the request.
-//
-// A gate answers with one word and never edits the request. It costs a few
-// tokens and judges more reliably than a rewrite filter.
-//
-// A pattern filter runs no model. It applies regular expressions to each
-// segment, replacing matches or refusing the request. It suits things with a
-// shape, like API keys, IBANs and card numbers, and is cheap enough to put in
-// front of everything. It cannot recognise a name in a sentence, so the usual
-// setup is one of each. See docs/filters.md.
-//
-// The zero value is a rewrite filter.
+// The zero value is rewrite. See docs/filters.md.
 type FilterMode string
 
 const (
@@ -977,9 +968,9 @@ type Source interface {
 	// Filter looks up an organisation's filter. An unknown alias refuses the
 	// request rather than skipping the filter.
 	Filter(orgID, alias string) (Filter, bool)
-	// Router looks up an organisation's router. It is asked on every request,
-	// because only this says whether the 'model' field names a model or a
-	// router.
+	// Router looks up an organisation's router. It is asked on every
+	// request, because only this says whether the 'model' field names a model
+	// or a router.
 	Router(orgID, alias string) (Router, bool)
 	// Routers lists an organisation's routers, for /v1/models.
 	Routers(orgID string) []Router

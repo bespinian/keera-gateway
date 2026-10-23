@@ -145,9 +145,9 @@ REVISION ?= $(shell git rev-parse HEAD 2>/dev/null)$(if $(shell git status --por
 #
 # The image is rebuilt first, since an SBOM of whatever was tagged last is
 # worse than none. The rebuild is cached.
+SYFT ?= syft
 # Pinned like everything else a release is built with, so two builds of one
 # commit describe it the same way. Dependabot does not read this file.
-SYFT ?= syft
 SYFT_IMAGE ?= docker.io/anchore/syft:v1.54.1
 SBOM_DIR ?= $(BUILD_DIR)/sbom
 # CycloneDX is what the downstream scanners take. For another syft format, such

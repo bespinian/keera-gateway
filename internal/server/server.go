@@ -35,7 +35,7 @@ The server reads its configuration from the environment. Three settings are
 required:
   KEERA_DATABASE_URL    Postgres connection string
   KEERA_OPERATOR_KEY    credential for the control API
-  KEERA_SECRET_KEY      encrypts API keys set in the panel (openssl rand -hex 32)
+  KEERA_SECRET_KEY      encrypts stored credentials (openssl rand -hex 32)
 
 Every other setting is in docs/install.md and the pages it links.
 `

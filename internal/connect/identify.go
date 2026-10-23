@@ -6,13 +6,6 @@ import (
 	"unicode"
 )
 
-// Identify reads which client made a request. It lives beside the connect
-// catalogue so both use the same client names; a name that differed would be
-// two clients in every report.
-//
-// This is not a security boundary: a User-Agent is whatever the client says,
-// so it tells what is connected, never who is allowed.
-
 // ClientHeader is where a client may state its own name. It wins over the
 // User-Agent, because a tool built on an HTTP library looks like that library,
 // or sends none at all, as Pi does.
@@ -23,10 +16,9 @@ const maxClientName = 32
 
 // agents maps User-Agent product tokens to client keys.
 //
-// The first four, curl and python have no label because the connect catalogue
-// names them, so a client is called the same on every screen. The rest are
-// clients Keera does not configure but can recognise. An unknown client falls back to
-// its own product token.
+// An entry without a label takes it from the connect catalogue, so a client
+// has one name on every screen. An unknown client is named by its own product
+// token.
 var agents = []struct {
 	key   string
 	label string
@@ -69,6 +61,10 @@ var agents = []struct {
 // Identify names the client behind a request: from the stated header if set,
 // otherwise from the User-Agent. It returns "" when the request says nothing,
 // which some HTTP libraries do.
+//
+// It lives beside the connect catalogue so both use the same client names; a
+// name that differed would be two clients in every report. It is not a
+// security boundary: a User-Agent is whatever the client says.
 func Identify(stated, userAgent string) string {
 	// A stated name is one name, maybe with a version: "My Editor/1.2".
 	head, _, _ := strings.Cut(stated, "/")

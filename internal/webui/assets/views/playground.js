@@ -40,8 +40,8 @@ export async function playgroundView(ctx) {
   if (!keys.some((k) => k.id === session.keyID)) session.keyID = keys[0].id;
   const key = keys.find((k) => k.id === session.keyID);
 
-  // Routers are offered too: this is the one screen that shows which model a
-  // router picks. Only what the key may call is offered, so nothing answers 404.
+  // Routers too: this is the one screen that shows which model a router picks.
+  // Only what the key may call is offered, so nothing answers 404.
   const models = keyModels(await chatTargets(key.org_id), key.allowed_models);
   if (!models.length) {
     return h(
@@ -82,8 +82,6 @@ function keyPicker(ctx, keys, onChange) {
   );
   return el;
 }
-
-/* ------------------------------------------------------------------- chat */
 
 function chat(ctx, keys, key, models) {
   const byAlias = new Map(models.map((m) => [m.alias, m]));
@@ -298,8 +296,6 @@ function chat(ctx, keys, key, models) {
 
   ctx.setSubtitle(subtitle(byAlias.get(session.model)));
 
-  /* ---------------------------------------------------------- rendering */
-
   // pinned tracks whether the reader is at the bottom, so a reader who
   // scrolled up to reread is not pulled back down on the next token.
   let pinned = true;
@@ -344,15 +340,13 @@ function chat(ctx, keys, key, models) {
     stick();
   }
 
-  /* ----------------------------------------------------------- sending */
-
   async function submit() {
     const text = input.value.trim();
     const images = attached.map((a) => a.url);
     if ((!text && !images.length) || abort) return;
 
-    // The history goes out before the placeholder joins it, so the request does
-    // not carry an empty assistant turn.
+    // Sent before the placeholder joins the history, so the request carries no
+    // empty assistant turn.
     const history = wireMessages(session.messages);
     if (session.system.trim())
       history.unshift({ role: "system", content: session.system.trim() });
@@ -532,8 +526,6 @@ function wireContent(text, images) {
   return parts;
 }
 
-/* ----------------------------------------------------------------- images */
-
 // The formats every API that reads images accepts.
 const imageTypes = "image/png,image/jpeg,image/gif,image/webp";
 
@@ -566,8 +558,6 @@ async function readImage(file) {
   return canvas.toDataURL(file.type, 0.9);
 }
 
-/* ------------------------------------------------------------- transport */
-
 async function* events(stream) {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
@@ -593,8 +583,6 @@ async function* events(stream) {
     }
   }
 }
-
-/* ------------------------------------------------------------ components */
 
 function settingsPanel() {
   const system = h("textarea", {

@@ -382,8 +382,6 @@ func TestDecodeRejectsWhatItCannotTranslate(t *testing.T) {
 	}
 }
 
-// ------------------------------------------------------------------ responses
-
 func TestEncodeBuildsAMessagesResponse(t *testing.T) {
 	body, status := anthropicShape{}.encode([]byte(`{
 		"id": "chatcmpl-1",
@@ -474,9 +472,8 @@ func TestEncodeBuildsToolUseBlocks(t *testing.T) {
 }
 
 func TestEncodeSurvivesUnparseableToolArguments(t *testing.T) {
-	// A model that emitted invalid JSON is a real occurrence. An empty object
-	// the client can report a tool failure against beats a response it cannot
-	// parse at all.
+	// Models do emit invalid JSON. An empty object beats a response the client
+	// cannot parse.
 	body, _ := anthropicShape{}.encode([]byte(`{
 		"choices": [{"message":{"tool_calls":[{"id":"call_1","type":"function",
 			"function":{"name":"read","arguments":"{\"path\": "}}]},
@@ -582,9 +579,8 @@ func TestEncodeWordsAContextOverflowAsTheMessagesAPIDoes(t *testing.T) {
 }
 
 func TestEncodeReportsAnUnreadableSuccessAsAFailure(t *testing.T) {
-	// A 200 carrying something that is not a completion - an ingress error
-	// page, a proxy's own JSON - must not reach the client as a success. It
-	// would surface as a malformed response with nothing to act on.
+	// A 200 that is not a completion, such as an ingress error page, must not
+	// reach the client as a success.
 	body, status := anthropicShape{}.encode([]byte(`<html>gateway timeout</html>`),
 		"keera-code", 200)
 	if status != 502 {

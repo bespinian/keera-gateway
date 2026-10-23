@@ -307,10 +307,8 @@ func TestPipeSSEEmitsLargeEventsWithoutWaiting(t *testing.T) {
 }
 
 func TestPipeSSEReadsAChunkLargerThanTheReadBuffer(t *testing.T) {
-	// A line longer than one read is a real thing on this stream: a tool call
-	// with a large argument object arrives as one. Half of that line read as a
-	// whole one would be truncated JSON, and the gateway would silently fail
-	// to find the token counts it bills the request on.
+	// A tool call with large arguments arrives as one long line. Read as two
+	// lines, it would be broken JSON, and the token counts it bills would be lost.
 	chunk := `{"choices":[{"delta":{"content":"` + strings.Repeat("x", 3*readBuffer) +
 		`"}}],"usage":{"prompt_tokens":40000,"completion_tokens":11,"total_tokens":40011}}`
 	var out bytes.Buffer
@@ -328,7 +326,6 @@ func TestPipeSSEReadsAChunkLargerThanTheReadBuffer(t *testing.T) {
 		t.Errorf("deltas = %d, want 1: an oversized line is one chunk, not several",
 			stats.deltas)
 	}
-	// And the client still receives the whole thing.
 	if got, want := out.Len(), len(chunk); got < want {
 		t.Errorf("forwarded %d bytes of a %d-byte chunk", got, want)
 	}
@@ -411,7 +408,6 @@ func TestStreamsHonourTheResponseLimit(t *testing.T) {
 	}
 }
 
-// countingFlusher counts the flushes that reach the client.
 type countingFlusher struct {
 	http.ResponseWriter
 	flushes int

@@ -17,8 +17,8 @@ import (
 // models and MCP servers.
 
 // writeHookList answers a filter, router or model list. With ?stats it adds
-// what each one did in the window. Only the panel asks for that, so the CLI and the
-// gateway do not pay for an aggregate over the log.
+// what each one did in the window. Only the panel asks for that, so the CLI
+// and the gateway do not pay for an aggregate over the log.
 func (s *Server) writeHookList(w http.ResponseWriter, r *http.Request, data any,
 	stats func(from, to time.Time) (any, error),
 ) {

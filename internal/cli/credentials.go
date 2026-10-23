@@ -29,7 +29,6 @@ type credentials struct {
 	Orgs map[string]string `json:"orgs,omitempty"`
 }
 
-// signIn is one gateway's sign-in.
 type signIn struct {
 	Token     string    `json:"token"`
 	ExpiresAt time.Time `json:"expires_at"`
@@ -144,10 +143,9 @@ func updateCredentials(change func(*credentials)) error {
 	return writeJSONFile(path, c)
 }
 
-// writeJSONFile replaces the file at path with v in one step, so nothing ever
-// reads half of it. The new contents are written beside it, so the rename
-// stays on one filesystem and is atomic. The file holds a key, so only its
-// owner may read it.
+// writeJSONFile replaces path by rename, so nothing reads half of it. The
+// temporary file sits beside it to keep the rename on one filesystem. The
+// file holds a key, so only its owner may read it.
 func writeJSONFile(path string, v any) error {
 	raw, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {

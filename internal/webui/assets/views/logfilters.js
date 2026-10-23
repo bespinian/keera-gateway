@@ -38,10 +38,7 @@ const OUTCOMES = [
 // outcome. The Requests and Sessions screens filter by status instead.
 const OUTCOME_KEY = "keera.log.outcome";
 
-// The filters: query parameter, facet the counts arrive under, how a value is
-// named, and optionally how its list is drawn. One list, so reading, drawing
-// and clearing them cannot drift apart.
-//
+// One list of filters, so reading, drawing and clearing cannot drift apart.
 // On the session list, a session's status is that of its last request.
 const NARROWINGS = [
   {
@@ -114,8 +111,7 @@ function statusOptions(counts, selected) {
       `${statusFilterLabel(c.value)} (${num(c.count)})`,
     ),
   );
-  // A selected status that no longer occurs stays in the list with (0), or
-  // nobody could see the filter is applied.
+  // Kept with (0), as in narrowSelect, or nobody could see the filter is set.
   if (
     selected &&
     !groups.some((c) => c.value === selected) &&
@@ -188,12 +184,9 @@ export function currentOutcome() {
   return remembered(OUTCOME_KEY) || "";
 }
 
-/** outcomeSeg is the row of lenses with their counts. An empty lens is
- *  disabled, unless it is the current one.
- *
- *  `retally` takes fresh counts from the live stream. They are always the
- *  control plane's counts, never a running total kept here, so they cannot
- *  drift from what a reload would show. */
+/** outcomeSeg is the row of lenses with their counts. `retally` takes the
+ *  control plane's fresh counts from the live stream, never a running total
+ *  kept here, so they cannot drift from what a reload would show. */
 export function outcomeSeg(ctx, outcome, counts) {
   const shown = { ...counts };
   const tallies = new Map();
@@ -230,11 +223,9 @@ export function outcomeSeg(ctx, outcome, counts) {
   return { el, retally };
 }
 
-/** narrowRow is the filters of a screen with no scope, and Clear once any is
- *  set. `lead` is drawn before the filters.
- *
- *  Each filter keeps its value when another one or the range changes, because
- *  combining them is usually the point. */
+/** narrowRow is the filters of a screen with no scope. Each keeps its value
+ *  when another one or the range changes, because combining them is usually
+ *  the point. */
 export function narrowRow(ctx, narrowed, facets, names, lead = null) {
   const list = narrowings(ctx);
   return h(
@@ -261,8 +252,7 @@ export function narrowRow(ctx, narrowed, facets, names, lead = null) {
 }
 
 /** ranking is a list's ranking, remembered under key, in the form table()
- *  takes as `rank`. Each list has its own key, as each offers different
- *  rankings. */
+ *  takes as `rank`. Each list has its own key, as each offers other rankings. */
 export function ranking(ctx, key) {
   return {
     by: remembered(key) || "",

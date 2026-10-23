@@ -56,9 +56,8 @@ func TestServedRequestRecordsItsSteps(t *testing.T) {
 	}
 }
 
-// The chart is read as a breakdown of the number beside it, so the steps have
-// to start at the moment the latency does, run in order, and end inside it.
-// Bars outside the total would make the reader distrust the row they are on.
+// The chart breaks down the latency beside it, so the steps start where it
+// does, run in order, and end inside it.
 func TestStepsAddUpToTheRequestTheyAreOn(t *testing.T) {
 	h := newHarness(t, jsonBackend(`{"choices":[{"message":{"content":"hi"}}],
 		"usage":{"prompt_tokens":10,"completion_tokens":5}}`), nil, nil)
@@ -109,9 +108,8 @@ func TestRefusalRecordsTheStepItWasStoppedIn(t *testing.T) {
 	}
 }
 
-// A streamed answer is two steps, because the two are read completely
-// differently: waiting is the model deciding what to say, and streaming is it
-// saying it.
+// A streamed answer is two steps: waiting is the model deciding what to say,
+// and streaming is it saying it.
 func TestStreamedAnswerIsRecordedAsWaitingAndThenStreaming(t *testing.T) {
 	h := newHarness(t, sseBackend(
 		`{"choices":[{"delta":{"content":"he"}}]}`,

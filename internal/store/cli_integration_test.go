@@ -7,10 +7,9 @@ import (
 	"time"
 )
 
-// A command-line sign-in is two rows and both of them are credentials, so what
-// these cover is the part no fake can: that redeeming a code really is a delete,
-// that an expired row is invisible rather than merely old, and that the cascades
-// off a person take both with them.
+// A command-line sign-in is two rows, both credentials. These tests cover what
+// no fake can: redeeming a code deletes it, an expired row is invisible, and
+// the cascades off a person take both.
 
 // signedInUser is one person to hang a sign-in on.
 func signedInUser(t *testing.T, st *Store, ctx context.Context) string {
@@ -25,9 +24,8 @@ func signedInUser(t *testing.T, st *Store, ctx context.Context) string {
 	return u.ID
 }
 
-// The code is the credential in the URL the browser carries, so it has to be
-// worth nothing the second time it is presented - whether the second reader got
-// it out of a browser's history, a shell's, or by listening on the port first.
+// The code is a credential in the URL the browser carries, so it is worth
+// nothing the second time, wherever the second reader got it from.
 func TestACLICodeIsRedeemedExactlyOnce(t *testing.T) {
 	st, ctx := db(t)
 	userID := signedInUser(t, st, ctx)
@@ -50,9 +48,8 @@ func TestACLICodeIsRedeemedExactlyOnce(t *testing.T) {
 	}
 }
 
-// An expired code is a sign-in somebody walked away from. The sweep removes it
-// eventually; until then it must already be gone as far as every reader is
-// concerned, so that nothing depends on the sweep for correctness.
+// An expired code is a sign-in somebody walked away from. Every reader treats
+// it as gone before the sweep removes it, so nothing depends on the sweep.
 func TestAnExpiredCLICodeIsAlreadyGone(t *testing.T) {
 	st, ctx := db(t)
 	userID := signedInUser(t, st, ctx)
@@ -67,9 +64,8 @@ func TestAnExpiredCLICodeIsAlreadyGone(t *testing.T) {
 	}
 }
 
-// The token is what every command presents afterwards, so a lookup has to carry
-// the person it belongs to - their role and their organisation are what the
-// request is then authorised against.
+// Every command presents the token, so a lookup carries the person behind it:
+// their role and organisation authorise the request.
 func TestACLITokenResolvesToThePersonBehindIt(t *testing.T) {
 	st, ctx := db(t)
 	userID := signedInUser(t, st, ctx)
@@ -96,8 +92,6 @@ func TestACLITokenResolvesToThePersonBehindIt(t *testing.T) {
 	}
 }
 
-// An expired token is not a token. Nothing that reads one has to remember to
-// check, which is the only way that check is never forgotten.
 func TestAnExpiredCLITokenIsNotAToken(t *testing.T) {
 	st, ctx := db(t)
 	userID := signedInUser(t, st, ctx)

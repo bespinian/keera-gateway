@@ -25,8 +25,7 @@ type Redis struct {
 	log     *slog.Logger
 	report  Reporter
 
-	// view is what the last round trip saw, so response headers cost no extra
-	// round trip. See Remaining.
+	// mu guards the fields below.
 	mu       sync.Mutex
 	view     map[string]view
 	complain time.Time
@@ -354,8 +353,7 @@ func (r *Redis) extrapolate(key string, perMinute int, now time.Time) (float64, 
 
 // degrade records that an admission or charge was made locally because Redis
 // could not answer it. The gateway keeps serving: Redis is optional
-// coordination, and the exact control is the budget in Postgres. The log says
-// the limits are per replica until Redis is back.
+// coordination, and the exact control is the budget in Postgres.
 func (r *Redis) degrade(doing string, err error) {
 	if r.report != nil {
 		r.report.RateLimitFallback()

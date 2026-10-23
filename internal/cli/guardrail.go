@@ -268,7 +268,7 @@ func updateLimits(ctx context.Context, c *client, scope, scopeID string,
 // A facet is one part of a guardrail on its own: 'keera limit' for the rates
 // and 'keera budget' for the spend. It is 'guardrail set' with only its own
 // flags. With no flags it reports rather than writes, because
-// `keera limit project project_1` is a question.
+// `keera limit project payments` is a question.
 
 // facetFields are the parts of the effective report each facet prints.
 var facetFields = map[string][]string{"limit": {"rates"}, "budget": {"spend"}}

@@ -148,8 +148,8 @@ func connectClaude(ctx context.Context, c *client, in claudeSetup) error {
 		// Claude Code's telemetry holds no prompts, but it should not leave
 		// through anything but the gateway.
 		env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
-		// Set by --subscription. A Keera key may reach models that are not
-		// Anthropic's, which have no tool search.
+		// Removes what --subscription sets: a Keera key may reach models that
+		// are not Anthropic's, which have no tool search.
 		env["ENABLE_TOOL_SEARCH"] = ""
 	}
 	env["ANTHROPIC_BASE_URL"] = in.gatewayURL

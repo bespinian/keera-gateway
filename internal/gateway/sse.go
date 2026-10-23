@@ -32,12 +32,9 @@ const maxEventBytes = 1 << 20
 type tokenUsage struct {
 	InputTokens  int `json:"prompt_tokens"`
 	OutputTokens int `json:"completion_tokens"`
-	// InputDetails says how much of the prompt the provider served from its
-	// cache, which is charged at a lower price, and how much it wrote to it,
-	// which may be charged at a higher one. See policy.Model.Cost.
-	//
-	// Both are part of InputTokens, not added to them. A self-hosted plane
-	// sends no such object, which reads as no cache at all.
+	// InputDetails is how much of the prompt the provider read from its cache
+	// (cheaper) and wrote to it (may cost more); see policy.Model.Cost. Both are
+	// part of InputTokens. A self-hosted plane sends none, which means no cache.
 	InputDetails struct {
 		CachedTokens     int `json:"cached_tokens"`
 		CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
@@ -77,29 +74,26 @@ type streamStats struct {
 	// deltas counts chunks with generated content. vLLM sends one per token,
 	// so this estimates the output when no usage record came.
 	deltas int
-	// firstAt is when the first token the model wrote reached the gateway's
-	// client: text, reasoning or a tool call. Events that only open the
-	// answer, such as one naming the role, come before any token and do not
-	// count.
+	// firstAt is when the first token (text, reasoning or a tool call) reached
+	// the client. Events that only open the answer, such as the role, do not count.
 	firstAt time.Time
 	// partial says usage was pieced together from a stream that ended early,
 	// so the row is an estimate.
 	partial bool
-	// cut is why a stream that was read to its end is still not a whole
-	// answer: the upstream sent an error, or stopped before it said why. A
-	// passed-on stream is the client's to judge, so this is only recorded.
+	// cut is why a stream read to its end is still not a whole answer: an
+	// upstream error, or no finish reason. A passed-on stream is the client's
+	// to judge, so this is only recorded.
 	cut error
 }
 
 // sseLines reads a server-sent event stream one line at a time.
 //
-// A token stream is one line per token, and ReadBytes would allocate for each.
-// ReadSlice returns a view into the reader's buffer instead. This type adds
-// what a view cannot do: hold a line longer than the buffer (such as a large
-// tool call) until its newline arrives, so it is never read as two lines.
+// It uses ReadSlice, since ReadBytes would allocate for every token. A line
+// longer than the buffer, such as a large tool call, is held until its newline
+// arrives, so it is never read as two lines.
 type sseLines struct {
 	rd *bufio.Reader
-	// part holds a line that spanned more than one read, until it is complete.
+	// part is a line that spans reads, until it is complete.
 	part []byte
 	// limit bounds part, so an upstream that never sends a newline cannot
 	// fill the gateway's memory.
@@ -168,7 +162,7 @@ func eachLine(src io.Reader, limit int64, line func([]byte) error, end func() er
 // dropUsageEvent removes the trailing usage-only chunk from what reaches the
 // client. It is set when the gateway, not the client, asked for that chunk.
 // alias, when set, is written as the model name of every chunk. limit bounds
-// one line, so an upstream that never ends one cannot fill the gateway's memory.
+// one line.
 func pipeSSE(dst io.Writer, flush func(), src io.Reader, alias string,
 	dropUsageEvent bool, limit int64,
 ) (streamStats, error) {
@@ -335,16 +329,13 @@ func hasValue(payload, key []byte) bool {
 // flushBeforeRead holds back a stream's flushes until the gateway goes back to
 // the upstream for more.
 //
-// A flush is a system call, and with one per token it was most of the CPU a
-// stream cost. The pipes read through a bufio.Reader, which reads from here
-// only once the events it holds are used up. So when one read brought several
-// events, they go out in one write; when it brought one, it goes out at once.
-// A busy gateway falls behind, reads more per call and so flushes less, which
-// is when it matters.
+// A flush is a system call, and one per token was most of a stream's CPU. The
+// pipes read through a bufio.Reader, which reads from here only once its events
+// are used up, so the events of one read go out in one write. A busy gateway
+// reads more per call and so flushes less, which is when it matters.
 //
-// A ping is written by a timer while the read waits, so the stream's writes
-// and flushes all go through here under one lock, and a flush asked for
-// during that wait happens at once.
+// A timer writes pings while the read waits, so all writes and flushes go
+// through one lock, and a flush asked for during that wait happens at once.
 type flushBeforeRead struct {
 	src     io.Reader
 	dst     io.Writer
@@ -383,7 +374,6 @@ func (f *flushBeforeRead) later() {
 	}
 }
 
-// now flushes what the pipes have written, if anything.
 func (f *flushBeforeRead) now() {
 	f.mu.Lock()
 	defer f.mu.Unlock()

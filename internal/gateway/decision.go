@@ -104,6 +104,10 @@ func decisionBody(m policy.Model, q decisionQuestion, state any) map[string]any 
 	if m.BackendModel != "" {
 		body["model"] = m.BackendModel
 	}
+	// max_len is the model's context, so the classifier reads exactly what the
+	// gateway measured. Left to the server, it would cut a longer request short
+	// and decide on part of it, which a gate must never do. Half is room for the
+	// question.
 	if m.MaxContext > 0 {
 		body["max_len"] = m.MaxContext
 		body["head_max_len"] = m.MaxContext / 2

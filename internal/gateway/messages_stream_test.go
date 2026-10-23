@@ -237,10 +237,9 @@ func TestMessagesStreamSeparatesParallelToolCalls(t *testing.T) {
 }
 
 func TestMessagesStreamEndsAFailedStreamWithAnError(t *testing.T) {
-	// The inference plane died mid-generation, or said so in the stream. Closed
-	// with message_stop, the turn would read as finished, with a tool call cut
-	// short in it. An error event ends the stream too, so the client does not
-	// hang, and tells it to try again.
+	// Closed with message_stop, a broken stream would read as a finished turn,
+	// with a tool call cut short in it. An error event ends it and tells the
+	// client to try again.
 	for name, upstream := range map[string]string{
 		"cut off": "data: " + `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1",` +
 			`"function":{"name":"write","arguments":"{\"content\":\"half"}}]}}]}` + "\n\n",

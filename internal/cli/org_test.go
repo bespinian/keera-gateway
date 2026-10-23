@@ -39,7 +39,6 @@ func TestOrgSwitchMovesAPersonsSignIn(t *testing.T) {
 	}
 }
 
-// An organisation the person is not in is refused before anything is sent.
 func TestOrgSwitchRefusesAnOrganisationThePersonIsNotIn(t *testing.T) {
 	quiet(t)
 	t.Setenv("KEERA_CONFIG_DIR", t.TempDir())

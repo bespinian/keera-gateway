@@ -120,7 +120,8 @@ func (s *messagesStream) openToolUse(upstreamIndex int, callID, name string) err
 		"type": "content_block_start", "index": s.open,
 		"content_block": map[string]any{
 			"type": "tool_use", "id": toolUseID(callID), "name": name,
-			// The arguments follow as input_json_delta fragments.
+			// The arguments are held back and follow at closeBlock as one
+			// input_json_delta, or not at all when they are {}.
 			"input": map[string]any{},
 		},
 	})
