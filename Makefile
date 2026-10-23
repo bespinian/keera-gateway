@@ -30,6 +30,20 @@ build:
 
 .PHONY: check
 check: test vet fmt-check
+	@if command -v node >/dev/null 2>&1; then $(MAKE) --no-print-directory check-js; \
+	else echo "node is not on PATH, so the panel's JavaScript was not checked. CI checks it."; fi
+
+# The panel has no build step, so nothing reads its JavaScript before a
+# browser does. This checks the syntax of every module and runs the unit tests
+# of its pure helpers. Which names each module imports is checked by `make
+# test`, which needs no node.
+.PHONY: check-js
+check-js:
+	@command -v node >/dev/null 2>&1 || { \
+		echo "node is not on PATH. Install Node.js 22 or later to check the panel's JavaScript."; \
+		exit 1; }
+	@for f in $$(find internal/webui/assets -name '*.js'); do node --check "$$f" || exit 1; done
+	@node --test 'internal/webui/test/*.test.mjs'
 
 .PHONY: test
 test:

@@ -98,12 +98,16 @@ models at the other address with `keera model set`.
 ## Tests
 
 ```sh
-make check             # go test -race, go vet, gofmt
+make check             # go test -race, go vet, gofmt, and check-js when node is there
+make check-js          # the panel's JavaScript: syntax, and tests of its helpers
 make test-integration  # store, control plane and rate limiter, against Postgres and Redis
 make check-all         # both
 ```
 
 `make check` needs Go and a C compiler, because the race detector needs cgo.
+`make check-js` needs Node.js 22 or later. The panel has no build step, so
+this is what catches a syntax error before a browser does. Its tests are in
+`internal/webui/test` and use `node:test`.
 The store's tests skip without a database, so `make check` does not cover the
 schema, its queries or the migrations. `make test-integration` starts a
 throwaway Postgres and Redis in podman, runs those packages against them and

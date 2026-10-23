@@ -56,6 +56,14 @@ jobs:
       - name: Build
         run: make build
 
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # The panel's JavaScript has no build step to catch a syntax error.
+      - name: Check the panel's JavaScript
+        run: make check-js
+
   test:
     name: Unit tests
     runs-on: ubuntu-latest
@@ -75,6 +83,11 @@ jobs:
   integration:
     name: Integration tests
     runs-on: ubuntu-latest
+
+    env:
+      CGO_ENABLED: "1"
+      KEERA_TEST_DATABASE_URL: postgres://keera:keera@127.0.0.1:5432/keera_test?sslmode=disable
+      KEERA_TEST_REDIS_URL: redis://127.0.0.1:6379/0
 
     # The same major versions the Makefile uses, pinned so an upstream change
     # does not look like a change in this repository broke CI.
@@ -116,10 +129,6 @@ jobs:
       # services above and starts nothing.
       - name: Test
         run: make test-integration
-        env:
-          CGO_ENABLED: "1"
-          KEERA_TEST_DATABASE_URL: postgres://keera:keera@127.0.0.1:5432/keera_test?sslmode=disable
-          KEERA_TEST_REDIS_URL: redis://127.0.0.1:6379/0
 
       # These tests skip without the two variables, so a typo in either would
       # give a green job that ran nothing. This checks that they ran.
@@ -133,7 +142,3 @@ jobs:
             echo "the integration tests skipped: Redis was not reachable" >&2
             exit 1
           fi
-        env:
-          CGO_ENABLED: "1"
-          KEERA_TEST_DATABASE_URL: postgres://keera:keera@127.0.0.1:5432/keera_test?sslmode=disable
-          KEERA_TEST_REDIS_URL: redis://127.0.0.1:6379/0

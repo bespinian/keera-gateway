@@ -1,0 +1,55 @@
+{
+  "alias": {
+    "valid": [
+      "keera-code",
+      "a",
+      "x9",
+      "a-b-c",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "invalid": [
+      "",
+      "-a",
+      "a-",
+      "A",
+      "a_b",
+      "a b",
+      "a/b",
+      "caf\u00e9",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ]
+  },
+  "model": {
+    "valid": [
+      "keera-code",
+      "anthropic/claude-sonnet-4-5",
+      "a/b/c",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "invalid": [
+      "",
+      "/a",
+      "a/",
+      "a//b",
+      "Anthropic/x",
+      "a/-b",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a"
+    ]
+  },
+  "sandbox": {
+    "valid": [
+      "desk",
+      "my-box-2",
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    ],
+    "invalid": [
+      "",
+      "-desk",
+      "desk-",
+      "Desk",
+      "a.b",
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    ]
+  }
+}
