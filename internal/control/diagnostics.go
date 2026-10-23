@@ -1,19 +1,15 @@
 package control
 
-// What a deployment is missing, in one answer: "why does this not work",
-// asked by someone who does not yet know what to suspect.
-//
-// The checks run here because this is where the facts are. `keera doctor`
-// only renders them.
-//
-// Nothing here writes, so it is safe to run on a live deployment during an
-// incident.
+// What a deployment is missing, in one answer, for someone who does not yet
+// know what to suspect. The checks run here, where the facts are; `keera
+// doctor` only renders them. Nothing here writes, so it is safe to run during
+// an incident.
 
 import (
 	"context"
 	"fmt"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/bespinian/keera-gateway/internal/authn"
@@ -317,7 +313,7 @@ func (s *Server) checkTenancy(ctx context.Context, d *Diagnosis, orgID string, p
 			fmt.Sprintf("all %d organisations have one", len(orgs)), "")
 		return
 	}
-	sort.Strings(missing)
+	slices.Sort(missing)
 	d.add(area, "Email domains", VerdictFail,
 		fmt.Sprintf("%d organisations, and %s %s no email domain: a sign-in matching "+
 			"none of them is refused rather than placed",

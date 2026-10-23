@@ -290,11 +290,6 @@ func checkCeilings(w http.ResponseWriter, rt policy.Router) bool {
 	}
 }
 
-// subscriptionsOff refuses a subscription model or key while the deployment
-// does not take Claude subscriptions.
-const subscriptionsOff = "this deployment does not take Claude subscriptions; " +
-	"its operator turns them on with KEERA_CLAUDE_SUBSCRIPTIONS"
-
 // subscriptionReader refuses a subscription model as the model a filter or a
 // router runs on. Only a caller's own sign-in reaches it, and that sign-in is
 // for the caller's request alone.

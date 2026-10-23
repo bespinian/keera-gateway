@@ -85,7 +85,7 @@ func TestAllowedModelsIsWhatTheKeyCanActuallyCall(t *testing.T) {
 // A developer is shown each level's own wording, not the joined text the
 // gateway sends, so they can tell whom to ask about changing it.
 func TestScopeStatesNameEachLevelsOwnPrompt(t *testing.T) {
-	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
+	s := newServer()
 
 	const (
 		fromOrg = "Answer in British English."

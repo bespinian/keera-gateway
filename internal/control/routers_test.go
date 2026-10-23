@@ -35,7 +35,7 @@ func routerServer(ctx context.Context, t *testing.T, st *store.Store) *Server {
 
 func routerStore(t *testing.T) (*store.Store, context.Context) {
 	t.Helper()
-	st, ctx := testStore(t, "routers", "filters", "guardrails", "models", "api_keys", "projects")
+	st, ctx := testStore(t)
 	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_1", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}

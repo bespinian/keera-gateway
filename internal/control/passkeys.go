@@ -89,8 +89,6 @@ func readPasskeyJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	return readJSON(w, r, v)
 }
 
-// ------------------------------------------------------------------ sign-in
-
 // passkeyLogin reports whether a sign-in that names this provider is a
 // passkey sign-in. Naming none is one when passkeys are the only way in.
 func (s *Server) passkeyLogin(provider string) bool {
@@ -382,10 +380,7 @@ func (s *Server) verifyRegistration(w http.ResponseWriter, r *http.Request,
 // storePasskey saves a verified passkey and audits it.
 func (s *Server) storePasskey(w http.ResponseWriter, r *http.Request, p *authn.Principal,
 	user store.User, cred authn.Credential, name, via string) (store.Passkey, bool) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		name = "Passkey"
-	}
+	name = cmp.Or(strings.TrimSpace(name), "Passkey")
 	if utf8.RuneCountInString(name) > passkeyNameMax {
 		name = string([]rune(name)[:passkeyNameMax])
 	}
@@ -408,8 +403,6 @@ func (s *Server) storePasskey(w http.ResponseWriter, r *http.Request, p *authn.P
 	})
 	return key, true
 }
-
-// --------------------------------------------------------- your own passkeys
 
 // ownPasskeyAccount reads the caller's account, if it is a passkey account.
 func (s *Server) ownPasskeyAccount(w http.ResponseWriter, r *http.Request,
@@ -535,8 +528,6 @@ func (s *Server) deletePasskey(w http.ResponseWriter, r *http.Request, p *authn.
 	})
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"id": key.ID, "deleted": true})
 }
-
-// ----------------------------------------------------------- set-up links
 
 // passkeyLinkOut is a set-up link as the caller gets it. The token is in it,
 // so it is shown once and never stored.

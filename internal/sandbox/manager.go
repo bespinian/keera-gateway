@@ -360,6 +360,7 @@ func (m *Manager) mintKey(ctx context.Context, req CreateRequest, expires time.T
 
 // started is what a starting sandbox was given.
 type started struct {
+	orgID string
 	keyID string
 	env   map[string]string
 	git   GitCredential
@@ -382,7 +383,7 @@ func (m *Manager) start(ctx context.Context, req CreateRequest, row store.Sandbo
 	if err != nil {
 		return started{}, err
 	}
-	s := started{keyID: keyID, env: m.environment(ctx, req, row, secret, expires)}
+	s := started{orgID: req.OrgID, keyID: keyID, env: m.environment(ctx, req, row, secret, expires)}
 	if req.Repo != "" {
 		if s.git, err = m.checkOut(ctx, s.env, req, expires); err != nil {
 			m.undo(ctx, s)
@@ -395,7 +396,7 @@ func (m *Manager) start(ctx context.Context, req CreateRequest, row store.Sandbo
 // undo revokes what a sandbox that did not start was given.
 func (m *Manager) undo(ctx context.Context, s started) {
 	ctx = context.WithoutCancel(ctx)
-	if err := m.st.RevokeKey(ctx, s.keyID); err != nil {
+	if err := m.st.RevokeKey(ctx, s.orgID, s.keyID); err != nil {
 		m.log.Warn("sandbox: revoking the key of a sandbox that did not start failed",
 			"key_id", s.keyID, "error", err)
 	}
@@ -464,13 +465,11 @@ func (m *Manager) stopClock(ctx context.Context, sbID string) {
 	}
 }
 
-// revokeKey revokes a sandbox's key, if it has one. A key already revoked or
-// gone is fine; any other failure is logged.
 func (m *Manager) revokeKey(ctx context.Context, sb store.Sandbox) {
 	if sb.KeyID == "" {
 		return
 	}
-	if err := m.st.RevokeKey(ctx, sb.KeyID); err != nil &&
+	if err := m.st.RevokeKey(ctx, sb.OrgID, sb.KeyID); err != nil &&
 		!errors.Is(err, policy.ErrKeyRevoked) && !errors.Is(err, store.ErrNotFound) {
 		m.log.Warn("sandbox: revoking a sandbox's key failed", "sandbox", sb.ID,
 			"key_id", sb.KeyID, "state", sb.State, "error", err)

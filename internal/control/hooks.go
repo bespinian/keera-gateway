@@ -46,11 +46,7 @@ func hookReport[R, H any](s *Server, w http.ResponseWriter, r *http.Request, p *
 	report func(ctx context.Context, orgID, alias string, from, to time.Time) (R, error),
 	hook func(ctx context.Context, orgID, alias string) (H, error),
 ) (out map[string]any, orgID string, ok bool) {
-	orgID, ok = s.queryOrg(w, r, p)
-	if !ok {
-		return nil, "", false
-	}
-	from, to, ok := queryWindow(w, r.URL.Query())
+	orgID, from, to, ok := s.reportOrg(w, r, p)
 	if !ok {
 		return nil, "", false
 	}

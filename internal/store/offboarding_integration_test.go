@@ -35,7 +35,7 @@ func TestDisableUserRevokesKeysAndSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	revoked, err := st.DisableUser(ctx, user.ID)
+	revoked, err := st.DisableUser(ctx, AnyOrg, user.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,14 +70,14 @@ func TestDisableUserRevokesKeysAndSessions(t *testing.T) {
 		t.Errorf("a key of a disabled person = %v, want refused as revoked", err)
 	}
 	// Disabling again revokes it, and keeps the first date.
-	if revoked, err := st.DisableUser(ctx, user.ID); err != nil || revoked != 1 {
+	if revoked, err := st.DisableUser(ctx, AnyOrg, user.ID); err != nil || revoked != 1 {
 		t.Errorf("second DisableUser = %d, %v; want 1 revoked", revoked, err)
 	}
 	if got, _ := st.UserByID(ctx, user.ID); !got.DisabledAt.Equal(first) {
 		t.Errorf("disabled_at moved from %s to %s", first, got.DisabledAt)
 	}
 
-	if err := st.EnableUser(ctx, user.ID); err != nil {
+	if err := st.EnableUser(ctx, AnyOrg, user.ID); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := st.UserByID(ctx, user.ID); got.Disabled() {
@@ -86,7 +86,7 @@ func TestDisableUserRevokesKeysAndSessions(t *testing.T) {
 	if _, err := st.LookupKey(ctx, []byte("hash-a")); !errors.Is(err, policy.ErrKeyRevoked) {
 		t.Errorf("enabling brought an old key back: %v", err)
 	}
-	if _, err := st.DisableUser(ctx, "user_missing"); !errors.Is(err, ErrNotFound) {
+	if _, err := st.DisableUser(ctx, AnyOrg, "user_missing"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("disabling nobody = %v, want ErrNotFound", err)
 	}
 }
@@ -110,7 +110,7 @@ func TestLiveSandboxByKey(t *testing.T) {
 	if _, err := st.LiveSandboxByKey(ctx, []byte("some other key")); !errors.Is(err, ErrNotFound) {
 		t.Errorf("an unknown key = %v, want ErrNotFound", err)
 	}
-	if err := st.RevokeKey(ctx, f.keyID); err != nil {
+	if err := st.RevokeKey(ctx, AnyOrg, f.keyID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.LiveSandboxByKey(ctx, f.hash); !errors.Is(err, ErrNotFound) {
@@ -123,7 +123,7 @@ func TestSandboxKeyIsNotRotated(t *testing.T) {
 	f := newFixture(t, st, ctx)
 	newSandbox(t, st, ctx, f, "fix-login")
 
-	_, err := st.RotateKey(ctx, f.keyID, KeyInfo{ID: "key_rotated"},
+	_, err := st.RotateKey(ctx, AnyOrg, f.keyID, KeyInfo{ID: "key_rotated"},
 		[]byte("hash-rotated-0000000000000000000"))
 	if !errors.Is(err, ErrSandboxKey) {
 		t.Fatalf("rotating a sandbox's key: err = %v, want ErrSandboxKey", err)

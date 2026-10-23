@@ -56,10 +56,10 @@ func TestAModelOnTheDeploymentsKeyTakesNoKeyAndListPrices(t *testing.T) {
 	s := platformServer(ctx, t, st)
 
 	withKey := strings.Replace(haiku, `"enabled"`, `"api_key":"sk-mine","enabled"`, 1)
-	if w := callModel(s.putModel, admin("org_1"), http.MethodPut, "fast", "", withKey); w.Code != http.StatusBadRequest {
+	if w := invoke(s.putModel, admin("org_1"), http.MethodPut, "/v1/models/fast", withKey); w.Code != http.StatusBadRequest {
 		t.Errorf("a key was accepted: %d %s", w.Code, w.Body)
 	}
-	w := callModel(s.putModel, admin("org_1"), http.MethodPut, "fast", "", haiku)
+	w := invoke(s.putModel, admin("org_1"), http.MethodPut, "/v1/models/fast", haiku)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", w.Code, w.Body)
 	}
@@ -82,7 +82,7 @@ func TestAModelOnTheDeploymentsKeyTakesNoKeyAndListPrices(t *testing.T) {
 
 	// A model the price table does not know cannot be billed.
 	unknown := strings.Replace(haiku, "claude-haiku-4-5", "claude-from-the-future", 1)
-	if w := callModel(s.putModel, admin("org_1"), http.MethodPut, "new", "", unknown); w.Code != http.StatusBadRequest {
+	if w := invoke(s.putModel, admin("org_1"), http.MethodPut, "/v1/models/new", unknown); w.Code != http.StatusBadRequest {
 		t.Errorf("an unpriced model was accepted: %d %s", w.Code, w.Body)
 	}
 }
@@ -123,7 +123,7 @@ func TestSavingAModelOnTheDeploymentsKeyRemovesItsOwn(t *testing.T) {
 		Backends: []string{"https://proxy.example/v1"}, Enabled: true}, store.ReplaceCredential([]byte("sealed"))); err != nil {
 		t.Fatal(err)
 	}
-	if w := callModel(s.putModel, admin("org_1"), http.MethodPut, "fast", "", haiku); w.Code != http.StatusOK {
+	if w := invoke(s.putModel, admin("org_1"), http.MethodPut, "/v1/models/fast", haiku); w.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", w.Code, w.Body)
 	}
 	if m, _ := st.Model(ctx, "org_1", "fast"); m.HasAPIKey {
@@ -154,9 +154,6 @@ func TestTheProviderListSaysWhichKeysTheDeploymentHolds(t *testing.T) {
 // Administrators read their own organisation's bill. Operators read every one.
 func TestAdministratorsReadOnlyTheirOwnBill(t *testing.T) {
 	st, ctx := routerStore(t)
-	if _, err := st.Pool().Exec(ctx, "TRUNCATE billing_lines"); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_2", Name: "Another Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatal(err)
 	}

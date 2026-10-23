@@ -36,7 +36,7 @@ type passkeyEnv struct {
 
 func newPasskeyEnv(t *testing.T, domain string) *passkeyEnv {
 	t.Helper()
-	st, ctx := testStore(t, "users", "sessions", "login_flows", "cli_codes", "cli_tokens")
+	st, ctx := testStore(t)
 	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_1", Name: "Example Bank", EmailDomain: domain},
 		store.OrgTemplate{}); err != nil {
 		t.Fatal(err)
@@ -282,7 +282,7 @@ func TestAPasskeySignInDropsTheOperatorRole(t *testing.T) {
 	if _, status, out := e.setUp(token, a); status != http.StatusOK {
 		t.Fatalf("set-up: %d %v", status, out)
 	}
-	if err := e.st.SetUserRole(e.ctx, userID, "operator"); err != nil {
+	if err := e.st.SetUserRole(e.ctx, store.AnyOrg, userID, "operator"); err != nil {
 		t.Fatal(err)
 	}
 	b, status, out := e.signIn(a)
@@ -375,14 +375,14 @@ func TestADisabledPersonCannotSignInWithAPasskey(t *testing.T) {
 	if _, status, out := e.setUp(token, a); status != http.StatusOK {
 		t.Fatalf("set-up: %d %v", status, out)
 	}
-	if _, err := e.st.DisableUser(e.ctx, userID); err != nil {
+	if _, err := e.st.DisableUser(e.ctx, store.AnyOrg, userID); err != nil {
 		t.Fatal(err)
 	}
 	if _, status, _ := e.signIn(a); status == http.StatusOK {
 		t.Error("a disabled person signed in")
 	}
 	// Disabling removed the passkey, so enabling them does not bring it back.
-	if err := e.st.EnableUser(e.ctx, userID); err != nil {
+	if err := e.st.EnableUser(e.ctx, store.AnyOrg, userID); err != nil {
 		t.Fatal(err)
 	}
 	if _, status, _ := e.signIn(a); status != http.StatusUnauthorized {

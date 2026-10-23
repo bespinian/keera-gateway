@@ -136,9 +136,6 @@ func (f *fakePostFinance) last() (int64, payment.NewTransaction) {
 // paymentServer is a control server on a deployment that takes payments.
 func paymentServer(ctx context.Context, t *testing.T, st *store.Store, pf *fakePostFinance) (*Server, *registry.Registry) {
 	t.Helper()
-	if _, err := st.Pool().Exec(ctx, "TRUNCATE credit_accounts, payments, audit_log"); err != nil {
-		t.Fatal(err)
-	}
 	box, err := secret.New("a-secret-key-long-enough")
 	if err != nil {
 		t.Fatal(err)
@@ -525,12 +522,7 @@ func TestWhoMayDoWhatWithCredit(t *testing.T) {
 }
 
 func receipt(s *Server, p *authn.Principal, paymentID string) *httptest.ResponseRecorder {
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet,
-		httpx.ControlPrefix+"/v1/billing/payments/"+paymentID+"/receipt", nil)
-	r.SetPathValue("id", paymentID)
-	s.paymentReceipt(w, r, p)
-	return w
+	return invoke(s.paymentReceipt, p, http.MethodGet, "/v1/billing/payments/"+paymentID+"/receipt", "")
 }
 
 func TestAPaidPaymentHasPostFinancesInvoiceAsItsReceipt(t *testing.T) {

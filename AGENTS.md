@@ -80,6 +80,9 @@ Run `make check` before handing work back.
 - Tests live beside the code. Tests that need Postgres or Redis skip without
   `KEERA_TEST_DATABASE_URL` / `KEERA_TEST_REDIS_URL`.
 - Secrets are never logged and keys are never stored in plaintext.
+- Every control route checks permissions in its handler. A new route needs a
+  case in `internal/control/isolation_integration_test.go`, which calls it as
+  another tenant; the test fails until it has one.
 - `internal/store/migrations` holds one file per release that changes the
   schema, such as `0002_v0.5.0.sql`. A schema change goes in the file of the
   next release, which is created with the first change. Once a release has

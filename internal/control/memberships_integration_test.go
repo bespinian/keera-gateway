@@ -33,7 +33,7 @@ type orgsSetup struct {
 // adminGroups, the directory decides who is an administrator.
 func membershipServer(t *testing.T, adminGroups bool) orgsSetup {
 	t.Helper()
-	st, ctx := testStore(t, "users", "sessions", "login_flows", "cli_codes", "cli_tokens")
+	st, ctx := testStore(t)
 	for _, o := range []store.Org{
 		{ID: "org_a", Name: "Bank", EmailDomain: "example.ch"},
 		{ID: "org_b", Name: "Insurer"},
@@ -391,7 +391,7 @@ func TestATerminalTokenActsInTheOrganisationItNames(t *testing.T) {
 	if got := me("org_c"); got.OrgID != "org_a" {
 		t.Errorf("naming an organisation they are not in: in %s, want their own", got.OrgID)
 	}
-	if _, err := s.st.DisableUser(ctx, "user_b"); err != nil {
+	if _, err := s.st.DisableUser(ctx, store.AnyOrg, "user_b"); err != nil {
 		t.Fatal(err)
 	}
 	if got := me("org_b"); got.OrgID != "org_a" {

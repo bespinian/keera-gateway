@@ -163,7 +163,7 @@ func TestRequestStreamCarriesARowCommittedAfterANewerOne(t *testing.T) {
 
 func TestRequestStreamKeepsAMemberInTheirOwnOrganisation(t *testing.T) {
 	// A separate route from the log, so its check is easy to forget.
-	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
+	s := newServer()
 	w := invoke(s.requestStream, member("org_1"), http.MethodGet, "/v1/requests/stream?org_id=org_2", "")
 	if w.Code != http.StatusForbidden {
 		t.Errorf("status = %d for a member naming another organisation, want 403", w.Code)

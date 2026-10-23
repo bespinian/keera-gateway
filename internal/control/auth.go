@@ -428,7 +428,7 @@ func (s *Server) syncRole(r *http.Request, user *store.User, role authn.Role) er
 			want = authn.RoleMember
 		}
 	}
-	if err := s.st.SetUserRole(r.Context(), user.ID, string(want)); err != nil {
+	if err := s.st.SetUserRole(r.Context(), user.OrgID, user.ID, string(want)); err != nil {
 		return err
 	}
 	user.Role = string(want)

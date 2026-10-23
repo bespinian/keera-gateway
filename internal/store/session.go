@@ -276,8 +276,9 @@ func (s *Store) UserByID(ctx context.Context, userID string) (User, error) {
 	return u, notFound(err)
 }
 
-func (s *Store) SetUserRole(ctx context.Context, userID, role string) error {
-	return s.execOne(ctx, "UPDATE users SET role = $2 WHERE id = $1", userID, role)
+func (s *Store) SetUserRole(ctx context.Context, orgID, userID, role string) error {
+	return s.execOne(ctx, "UPDATE users SET role = $2 WHERE id = $1 AND "+inOrg("org_id", "$3"),
+		userID, role, orgID)
 }
 
 // orgWhere reads the one organisation the rest of the query picks.

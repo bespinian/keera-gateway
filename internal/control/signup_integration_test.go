@@ -31,7 +31,7 @@ type signupSetup struct {
 
 func signupServer(t *testing.T, signUp bool) signupSetup {
 	t.Helper()
-	st, ctx := testStore(t, "users", "signups", "sessions", "login_flows")
+	st, ctx := testStore(t)
 	// Somebody else's organisation, with no domain. Without sign-up, every
 	// sign-in would land in it, being the only one.
 	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_1", Name: "Example Bank"},

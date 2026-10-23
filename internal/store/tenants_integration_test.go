@@ -168,7 +168,7 @@ func TestUpdateProjectLeavesEverythingThatPointsAtItAlone(t *testing.T) {
 		t.Fatalf("PutGuardrail: %v", err)
 	}
 
-	renamed, err := st.UpdateProject(ctx, f.projectID, ProjectChange{Name: new("Payments")})
+	renamed, err := st.UpdateProject(ctx, AnyOrg, f.projectID, ProjectChange{Name: new("Payments")})
 	if err != nil {
 		t.Fatalf("UpdateProject: %v", err)
 	}
@@ -177,12 +177,12 @@ func TestUpdateProjectLeavesEverythingThatPointsAtItAlone(t *testing.T) {
 	}
 
 	// A description leaves the name alone, and an empty one clears it.
-	described, err := st.UpdateProject(ctx, f.projectID,
+	described, err := st.UpdateProject(ctx, AnyOrg, f.projectID,
 		ProjectChange{Description: new("Card payments and refunds")})
 	if err != nil || described.Name != "Payments" || described.Description != "Card payments and refunds" {
 		t.Errorf("setting the description = %+v, %v", described, err)
 	}
-	cleared, err := st.UpdateProject(ctx, f.projectID, ProjectChange{Description: new("")})
+	cleared, err := st.UpdateProject(ctx, AnyOrg, f.projectID, ProjectChange{Description: new("")})
 	if err != nil || cleared.Description != "" {
 		t.Errorf("clearing the description = %+v, %v", cleared, err)
 	}
@@ -209,15 +209,15 @@ func TestUpdateProjectLeavesEverythingThatPointsAtItAlone(t *testing.T) {
 	if _, err := st.CreateProject(ctx, Project{ID: "project_2", OrgID: f.orgID, Name: "Data Science"}); err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
-	if _, err := st.UpdateProject(ctx, "project_2", ProjectChange{Name: new("Payments")}); !errors.Is(err, ErrProjectNameTaken) {
+	if _, err := st.UpdateProject(ctx, AnyOrg, "project_2", ProjectChange{Name: new("Payments")}); !errors.Is(err, ErrProjectNameTaken) {
 		t.Errorf("renaming onto a name in use = %v, want ErrProjectNameTaken", err)
 	}
 	// Renaming a project to what it is already called, such as to fix its
 	// capitalisation, is not a collision with itself.
-	if _, err := st.UpdateProject(ctx, f.projectID, ProjectChange{Name: new("Payments")}); err != nil {
+	if _, err := st.UpdateProject(ctx, AnyOrg, f.projectID, ProjectChange{Name: new("Payments")}); err != nil {
 		t.Errorf("renaming a project to its own name: %v", err)
 	}
-	if _, err := st.UpdateProject(ctx, "project_gone", ProjectChange{Name: new("Anything")}); !errors.Is(err, ErrNotFound) {
+	if _, err := st.UpdateProject(ctx, AnyOrg, "project_gone", ProjectChange{Name: new("Anything")}); !errors.Is(err, ErrNotFound) {
 		t.Errorf("changing a project that does not exist = %v, want ErrNotFound", err)
 	}
 }
@@ -232,7 +232,7 @@ func TestDeleteProjectIsRefusedWhileAKeyStillWorks(t *testing.T) {
 		t.Fatalf("PutGuardrail: %v", err)
 	}
 
-	_, err := st.DeleteProject(ctx, f.projectID)
+	_, err := st.DeleteProject(ctx, AnyOrg, f.projectID)
 	var inUse *ProjectInUseError
 	if !errors.As(err, &inUse) {
 		t.Fatalf("DeleteProject with a live key = %v, want ProjectInUseError", err)
@@ -248,10 +248,10 @@ func TestDeleteProjectIsRefusedWhileAKeyStillWorks(t *testing.T) {
 
 	// Revoked, the key is no longer a reason to refuse - but it is still a row
 	// the usage log points at, so the delete detaches it instead of taking it.
-	if err := st.RevokeKey(ctx, f.keyID); err != nil {
+	if err := st.RevokeKey(ctx, AnyOrg, f.keyID); err != nil {
 		t.Fatalf("RevokeKey: %v", err)
 	}
-	gone, err := st.DeleteProject(ctx, f.projectID)
+	gone, err := st.DeleteProject(ctx, AnyOrg, f.projectID)
 	if err != nil {
 		t.Fatalf("DeleteProject after revoking: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestDeleteProjectIsRefusedWhileAKeyStillWorks(t *testing.T) {
 	if _, err := st.GetGuardrail(ctx, policy.ScopeProject, f.projectID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("the project's guardrails outlived it: %v", err)
 	}
-	if _, err := st.DeleteProject(ctx, f.projectID); !errors.Is(err, ErrNotFound) {
+	if _, err := st.DeleteProject(ctx, AnyOrg, f.projectID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("deleting it twice = %v, want ErrNotFound", err)
 	}
 }
@@ -455,10 +455,10 @@ func TestAKeyWithoutAProjectGoesInTheOldestOne(t *testing.T) {
 
 	// The first project is deleted like any other, and the next oldest takes
 	// its place.
-	if err := st.RevokeKey(ctx, key.ID); err != nil {
+	if err := st.RevokeKey(ctx, AnyOrg, key.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DeleteProject(ctx, first); err != nil {
+	if _, err := st.DeleteProject(ctx, AnyOrg, first); err != nil {
 		t.Fatalf("deleting the first project: %v", err)
 	}
 	if key, err = newKey("key_2"); err != nil || key.ProjectID != "project_zz" {
@@ -467,10 +467,10 @@ func TestAKeyWithoutAProjectGoesInTheOldestOne(t *testing.T) {
 
 	// With no project at all there can be no keys, because only a revoked
 	// key may have none.
-	if err := st.RevokeKey(ctx, key.ID); err != nil {
+	if err := st.RevokeKey(ctx, AnyOrg, key.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DeleteProject(ctx, "project_zz"); err != nil {
+	if _, err := st.DeleteProject(ctx, AnyOrg, "project_zz"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.FirstProject(ctx, "org_1"); !errors.Is(err, ErrNotFound) {
@@ -550,5 +550,57 @@ func TestListUsersSaysWhenEachPersonWasLastActive(t *testing.T) {
 		if u.ID == idle.ID && u.LastActiveAt == nil {
 			t.Error("a sign-in to the panel did not count as activity")
 		}
+	}
+}
+
+// Every write a tenant's administrator can make is held to their own
+// organisation here as well, so a handler that forgot its check still cannot
+// reach another tenant's rows.
+func TestAWriteHeldToAnotherOrganisationFindsNothing(t *testing.T) {
+	st, ctx := db(t)
+	f := newFixture(t, st, ctx)
+	anOrg(t, st, ctx, "org_2")
+	u, err := st.AddUser(ctx, "user_ada", f.orgID, "ada@example.ch", "", "member")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := st.CreateKey(ctx, KeyInfo{ID: "key_pending", OrgID: f.orgID, Name: "pending"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "taken over"
+	for what, write := range map[string]func(orgID string) error{
+		"UpdateProject": func(o string) error {
+			_, err := st.UpdateProject(ctx, o, f.projectID, ProjectChange{Name: &name})
+			return err
+		},
+		"DeleteProject": func(o string) error { _, err := st.DeleteProject(ctx, o, f.projectID); return err },
+		"DisableUser":   func(o string) error { _, err := st.DisableUser(ctx, o, u.ID); return err },
+		"EnableUser":    func(o string) error { return st.EnableUser(ctx, o, u.ID) },
+		"SetUserRole":   func(o string) error { return st.SetUserRole(ctx, o, u.ID, "admin") },
+		"RevokeKey":     func(o string) error { return st.RevokeKey(ctx, o, f.keyID) },
+		"RenameKey":     func(o string) error { _, err := st.RenameKey(ctx, o, f.keyID, name); return err },
+		"ActivateKey": func(o string) error {
+			_, err := st.ActivateKey(ctx, o, pending.ID, "", []byte("hash-of-activated-key-32-bytes!!"), "keera_sk_act")
+			return err
+		},
+		"RotateKey": func(o string) error {
+			_, err := st.RotateKey(ctx, o, f.keyID, KeyInfo{ID: "key_rotated", Prefix: "keera_sk_rot"},
+				[]byte("hash-of-rotated-key-32-bytes!!!!"))
+			return err
+		},
+		// The one organisation no row is in, which a caller attached to none gets.
+		"RevokeKey with no organisation": func(string) error { return st.RevokeKey(ctx, "", f.keyID) },
+	} {
+		if err := write("org_2"); !errors.Is(err, ErrNotFound) {
+			t.Errorf("%s from org_2 = %v, want ErrNotFound", what, err)
+		}
+	}
+	names, err := st.ProjectNames(ctx, f.orgID)
+	if err != nil || names[f.projectID] == name || names[f.projectID] == "" {
+		t.Errorf("the projects after the attempts: %v, %v", names, err)
+	}
+	if err := st.RevokeKey(ctx, f.orgID, f.keyID); err != nil {
+		t.Errorf("revoking in its own organisation = %v", err)
 	}
 }

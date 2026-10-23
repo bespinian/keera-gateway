@@ -586,11 +586,11 @@ func TestDeleteProjectIsRefusedWhileASandboxIsLive(t *testing.T) {
 	if err := st.ObserveSandbox(ctx, sb.ID, SandboxObservation{State: policy.SandboxExpired}); err != nil {
 		t.Fatalf("ObserveSandbox: %v", err)
 	}
-	if err := st.RevokeKey(ctx, f.keyID); err != nil {
+	if err := st.RevokeKey(ctx, AnyOrg, f.keyID); err != nil {
 		t.Fatalf("RevokeKey: %v", err)
 	}
 
-	gone, err := st.DeleteProject(ctx, f.projectID)
+	gone, err := st.DeleteProject(ctx, AnyOrg, f.projectID)
 	if !errors.Is(err, ErrProjectHasSandboxes) || gone.LiveSandboxes != 1 {
 		t.Fatalf("DeleteProject = %v with %d live, want ErrProjectHasSandboxes with 1",
 			err, gone.LiveSandboxes)
@@ -599,7 +599,7 @@ func TestDeleteProjectIsRefusedWhileASandboxIsLive(t *testing.T) {
 	if err := st.ObserveSandbox(ctx, sb.ID, SandboxObservation{State: policy.SandboxTerminated}); err != nil {
 		t.Fatalf("ObserveSandbox: %v", err)
 	}
-	if _, err := st.DeleteProject(ctx, f.projectID); err != nil {
+	if _, err := st.DeleteProject(ctx, AnyOrg, f.projectID); err != nil {
 		t.Errorf("DeleteProject once the sandbox is terminated: %v", err)
 	}
 }

@@ -36,13 +36,13 @@ func TestAnAdministratorManagesTheirOrganisationsOwnModels(t *testing.T) {
 	}
 	s := routerServer(ctx, t, st)
 
-	if w := callModel(s.putModel, member("org_1"), http.MethodPut, "mine", "", ownModel); w.Code != http.StatusForbidden {
+	if w := invoke(s.putModel, member("org_1"), http.MethodPut, "/v1/models/mine", ownModel); w.Code != http.StatusForbidden {
 		t.Errorf("a member added a model: %d %s", w.Code, w.Body)
 	}
-	if w := callModel(s.putModel, admin("org_2"), http.MethodPut, "mine", "?org_id=org_1", ownModel); w.Code != http.StatusForbidden {
+	if w := invoke(s.putModel, admin("org_2"), http.MethodPut, "/v1/models/mine?org_id=org_1", ownModel); w.Code != http.StatusForbidden {
 		t.Errorf("another tenant's administrator added a model here: %d %s", w.Code, w.Body)
 	}
-	w := callModel(s.putModel, admin("org_1"), http.MethodPut, "mine", "", ownModel)
+	w := invoke(s.putModel, admin("org_1"), http.MethodPut, "/v1/models/mine", ownModel)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body)
 	}
@@ -51,7 +51,7 @@ func TestAnAdministratorManagesTheirOrganisationsOwnModels(t *testing.T) {
 		t.Fatalf("saved = %+v, %v; want a model of org_1's own", saved, err)
 	}
 	// Another tenant may use the same alias for its own.
-	if w := callModel(s.putModel, admin("org_2"), http.MethodPut, "mine", "", ownModel); w.Code != http.StatusOK {
+	if w := invoke(s.putModel, admin("org_2"), http.MethodPut, "/v1/models/mine", ownModel); w.Code != http.StatusOK {
 		t.Errorf("org_2 could not use an alias org_1 has: %d %s", w.Code, w.Body)
 	}
 
@@ -111,11 +111,11 @@ func TestAnOperatorAddsModelsToAnOrganisation(t *testing.T) {
 	st, ctx := routerStore(t)
 	s := routerServer(ctx, t, st)
 
-	w := callModel(s.putModel, operator(), http.MethodPut, "mine", "", ownModel)
+	w := invoke(s.putModel, operator(), http.MethodPut, "/v1/models/mine", ownModel)
 	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "organisation") {
 		t.Errorf("a model of no organisation = %d %s, want 400 asking for one", w.Code, w.Body)
 	}
-	if w := callModel(s.putModel, operator(), http.MethodPut, "mine", "?org_id=org_1", ownModel); w.Code != http.StatusOK {
+	if w := invoke(s.putModel, operator(), http.MethodPut, "/v1/models/mine?org_id=org_1", ownModel); w.Code != http.StatusOK {
 		t.Errorf("an operator could not add a model to an organisation: %d %s", w.Code, w.Body)
 	}
 	if _, err := st.Model(ctx, "org_1", "mine"); err != nil {
@@ -151,7 +151,7 @@ func TestANewOrganisationStartsWithTheTemplate(t *testing.T) {
 		t.Fatalf("the new organisation has no keera-speed: %v", err)
 	}
 	edit := `{"kind":"chat","backends":["http://y/v1"],"backend_model":"speed","enabled":false}`
-	if w := callModel(s.putModel, admin(org.ID), http.MethodPut, "keera-speed", "", edit); w.Code != http.StatusOK {
+	if w := invoke(s.putModel, admin(org.ID), http.MethodPut, "/v1/models/keera-speed", edit); w.Code != http.StatusOK {
 		t.Errorf("the administrator could not change the copy: %d %s", w.Code, w.Body)
 	}
 }
@@ -164,7 +164,7 @@ func TestAnUnsaidEnabledServesANewModelAndKeepsAnOldOnesState(t *testing.T) {
 	const unsaid = `{"kind":"chat","backends":["http://10.0.0.7:8000/v1"],"backend_model":"mine"}`
 	put := func(body string) policy.Model {
 		t.Helper()
-		if w := callModel(s.putModel, admin("org_1"), http.MethodPut, "mine", "", body); w.Code != http.StatusOK {
+		if w := invoke(s.putModel, admin("org_1"), http.MethodPut, "/v1/models/mine", body); w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200: %s", w.Code, w.Body)
 		}
 		m, err := st.Model(ctx, "org_1", "mine")
@@ -195,15 +195,15 @@ func TestASubscriptionModelIsAnthropicsAPIWithNoKey(t *testing.T) {
 	const plan = `{"kind":"chat","provider":"anthropic","backends":["https://api.anthropic.com/v1"],
 		"backend_model":"claude-opus-5-5","subscription":true,"enabled":true`
 
-	if w := callModel(s.putModel, admin("org_1"), http.MethodPut, "claude", "",
+	if w := invoke(s.putModel, admin("org_1"), http.MethodPut, "/v1/models/claude",
 		plan+`,"api_key":"sk-ant-api03-x"}`); w.Code != http.StatusBadRequest {
 		t.Errorf("a subscription model took an API key: %d %s", w.Code, w.Body)
 	}
 	elsewhere := strings.Replace(plan, "https://api.anthropic.com/v1", "https://collect.example.ch/v1", 1)
-	if w := callModel(s.putModel, admin("org_1"), http.MethodPut, "claude", "", elsewhere+"}"); w.Code != http.StatusBadRequest {
+	if w := invoke(s.putModel, admin("org_1"), http.MethodPut, "/v1/models/claude", elsewhere+"}"); w.Code != http.StatusBadRequest {
 		t.Errorf("a subscription model was pointed elsewhere: %d %s", w.Code, w.Body)
 	}
-	if w := callModel(s.putModel, admin("org_1"), http.MethodPut, "claude", "", plan+"}"); w.Code != http.StatusOK {
+	if w := invoke(s.putModel, admin("org_1"), http.MethodPut, "/v1/models/claude", plan+"}"); w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body)
 	}
 	saved, err := st.Model(ctx, "org_1", "claude")
@@ -253,8 +253,8 @@ func TestNoSubscriptionModelWhileSubscriptionsAreOff(t *testing.T) {
 // A model the price table does not know is billed at what the request says,
 // so a request that says nothing is refused, as a template file is.
 func TestAnUnknownProviderModelMustStateItsPrices(t *testing.T) {
-	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
-	w := callModel(s.putModel, admin("org_1"), http.MethodPut, "next", "?org_id=org_1",
+	s := newServer()
+	w := invoke(s.putModel, admin("org_1"), http.MethodPut, "/v1/models/next?org_id=org_1",
 		`{"kind":"chat","provider":"anthropic","backends":["https://api.anthropic.com/v1"],
 		"backend_model":"claude-next","enabled":true}`)
 	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "price table") {

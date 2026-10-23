@@ -110,15 +110,15 @@ func (s *Server) attach(w http.ResponseWriter, r *http.Request, p *authn.Princip
 		"name": sb.Name, "port": port,
 	})
 
-	if _, err := client.write([]byte(
+	if _, err := client.Write([]byte(
 		"HTTP/1.1 101 Switching Protocols\r\n" +
 			"Upgrade: " + upgradeProtocol + "\r\n" +
 			"Connection: Upgrade\r\n\r\n")); err != nil {
 		return
 	}
 	// An open connection keeps the sandbox from being suspended as idle. The
-	// row is touched once a minute rather than per byte; the shortest idle
-	// suspension is five minutes.
+	// row is touched once a minute, not per byte; the shortest idle suspension
+	// is five minutes.
 	touch := func() {
 		if err := s.st.TouchSandbox(context.WithoutCancel(r.Context()), sb.ID); err != nil {
 			s.log.Warn("sandbox attach could not record activity", "sandbox", sb.ID, "error", err)
@@ -207,16 +207,17 @@ func canAttach(p *authn.Principal, sb store.Sandbox) bool {
 	return sb.UserID != "" && p.UserID == sb.UserID
 }
 
-/* --------------------------------------------------------------- the plumbing */
-
-// hijacked is a connection taken over from the HTTP server, with whatever the
-// server had already buffered from the client still in front of it.
+// hijacked is a connection taken over from the HTTP server, with what the
+// server already buffered from the client still in front of it.
 type hijacked struct {
 	conn net.Conn
 	buf  *bufio.ReadWriter
 }
 
-func (h *hijacked) write(b []byte) (int, error) {
+func (h *hijacked) Read(b []byte) (int, error) { return h.buf.Read(b) }
+func (h *hijacked) Close() error               { return h.conn.Close() }
+
+func (h *hijacked) Write(b []byte) (int, error) {
 	n, err := h.buf.Write(b)
 	if err != nil {
 		return n, err
@@ -224,15 +225,11 @@ func (h *hijacked) write(b []byte) (int, error) {
 	return n, h.buf.Flush()
 }
 
-func (h *hijacked) Read(b []byte) (int, error)  { return h.buf.Read(b) }
-func (h *hijacked) Write(b []byte) (int, error) { return h.write(b) }
-func (h *hijacked) Close() error                { return h.conn.Close() }
-
 // hijack takes the connection away from the HTTP server.
 //
 // It uses http.NewResponseController, not a type assertion, because the
-// writer is wrapped by the access log and the compressor. Both implement
-// Unwrap, which the controller follows.
+// access log and the compressor wrap the writer; the controller follows their
+// Unwrap.
 func hijack(w http.ResponseWriter) (*hijacked, error) {
 	conn, buf, err := http.NewResponseController(w).Hijack()
 	if err != nil {

@@ -23,7 +23,7 @@ import (
 // server to redeem it against.
 func signedInAtATerminal(t *testing.T, verifier string) (*httptest.Server, string, store.User) {
 	t.Helper()
-	st, ctx := testStore(t, "users", "cli_codes", "cli_tokens", "sessions")
+	st, ctx := testStore(t)
 	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_1", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatalf("creating the organisation: %v", err)
 	}

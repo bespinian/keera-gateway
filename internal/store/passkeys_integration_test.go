@@ -144,7 +144,7 @@ func TestDisablingRemovesPasskeysAndLinks(t *testing.T) {
 		time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DisableUser(ctx, user.ID); err != nil {
+	if _, err := st.DisableUser(ctx, AnyOrg, user.ID); err != nil {
 		t.Fatal(err)
 	}
 	if list, _ := st.ListPasskeys(ctx, user.ID); len(list) != 0 {

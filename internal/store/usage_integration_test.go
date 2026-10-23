@@ -524,7 +524,7 @@ func TestProjectSummariesReadsTheOpenBudgetWindow(t *testing.T) {
 	if project = summaryOf(t, projects, f.projectID); project.ActiveKeys != 1 {
 		t.Errorf("ActiveKeys = %d with a pending and an expired key, want 1", project.ActiveKeys)
 	}
-	if err := st.RevokeKey(ctx, f.keyID); err != nil {
+	if err := st.RevokeKey(ctx, AnyOrg, f.keyID); err != nil {
 		t.Fatalf("RevokeKey: %v", err)
 	}
 	projects, err = st.ProjectSummaries(ctx, f.orgID, now)
@@ -837,7 +837,7 @@ func TestASubscriptionKeyKeepsItsKindAndItsPlanUsage(t *testing.T) {
 	}
 
 	// A rotated key is still one a copied settings file cannot spend money with.
-	next, err := st.RotateKey(ctx, "key_sub", KeyInfo{ID: "key_sub2", Prefix: "keera_sk_pl2"},
+	next, err := st.RotateKey(ctx, AnyOrg, "key_sub", KeyInfo{ID: "key_sub2", Prefix: "keera_sk_pl2"},
 		[]byte("hash-of-keera_sk_pl2-32-bytes!!!!"))
 	if err != nil || next.Kind != policy.KeySubscription {
 		t.Errorf("RotateKey = %+v, %v; want a subscription key", next, err)

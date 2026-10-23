@@ -3,7 +3,6 @@ package control
 import (
 	"encoding/csv"
 	"encoding/json"
-	"log/slog"
 	"mime"
 	"net/http"
 	"net/http/httptest"
@@ -11,8 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bespinian/keera-gateway/internal/authn"
-	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/store"
 )
 
@@ -45,7 +42,7 @@ func TestGroupLabelsResolveEveryGrouping(t *testing.T) {
 // A chargeback is reconciled in a spreadsheet, so the export carries the name,
 // the id and the plain amount, not the panel's formatted money.
 func TestUsageCSVCarriesNamesIdsAndCost(t *testing.T) {
-	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
+	s := newServer()
 	w := httptest.NewRecorder()
 	from := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
@@ -83,28 +80,9 @@ func TestUsageCSVCarriesNamesIdsAndCost(t *testing.T) {
 	}
 }
 
-func TestUsageRefusesAnUnknownGrouping(t *testing.T) {
-	// The store falls back to its default grouping, which would answer a
-	// different question and put the caller's string in the CSV filename.
-	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, `/v1/usage?format=csv&group_by=x.bat%22%3Bx%3D%22`, nil)
-
-	s.usage(w, r, &authn.Principal{Role: authn.RoleMember, OrgID: "org_1"})
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "group_by") {
-		t.Errorf("body = %q, want it to name the parameter and the values it takes",
-			w.Body.String())
-	}
-}
-
 func TestBeginCSVFilenameCannotBeBrokenOutOf(t *testing.T) {
-	// The usage export's filename comes from the caller's grouping. Besides
-	// the handler's check, a quote must not close the parameter and add
-	// another.
+	// The usage export's filename comes from the caller's grouping. Even past
+	// the handler's check, a quote must not close the parameter and add another.
 	w := httptest.NewRecorder()
 	beginCSV(w, `x.bat";x="`)
 
@@ -125,7 +103,7 @@ func TestBeginCSVFilenameCannotBeBrokenOutOf(t *testing.T) {
 }
 
 func TestAuditCSVKeepsTheDetailIntact(t *testing.T) {
-	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
+	s := newServer()
 	w := httptest.NewRecorder()
 	ts := time.Date(2026, 9, 6, 14, 30, 0, 0, time.UTC)
 
@@ -154,24 +132,6 @@ func TestAuditCSVKeepsTheDetailIntact(t *testing.T) {
 	}
 	if detail["rpm"] != float64(120) {
 		t.Errorf("detail = %v, want the limits that were set", detail)
-	}
-}
-
-// A check reaches a backend directly on the model's own credential. That is
-// work for whoever runs the model: an operator, or the administrators of an
-// organisation's own. A member runs none.
-func TestCheckModelIsForWhoeverRunsTheModel(t *testing.T) {
-	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodPost, httpx.ControlPrefix+"/v1/models/keera-code/check?org_id=org_1", nil)
-
-	s.checkModel(w, r, &authn.Principal{Role: authn.RoleMember, OrgID: "org_1"})
-
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "only an administrator") {
-		t.Errorf("body = %q, want it to say who may run one", w.Body.String())
 	}
 }
 
@@ -208,7 +168,7 @@ func TestCSVExportsCannotCarryAFormula(t *testing.T) {
 // The escape has to be applied by the writer both exports share, not remembered
 // column by column.
 func TestAuditCSVEscapesEveryFieldItIsGiven(t *testing.T) {
-	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
+	s := newServer()
 	w := httptest.NewRecorder()
 
 	s.auditCSV(w, []store.AuditEntry{{
@@ -236,10 +196,9 @@ func TestAuditCSVEscapesEveryFieldItIsGiven(t *testing.T) {
 }
 
 // The export goes to whoever runs the failing endpoint, so it carries the
-// message they will recognise, and names beside ids, which mean nothing to
-// them.
+// message they will recognise, and names beside the ids.
 func TestRequestsCSVCarriesTheMessageAndTheNames(t *testing.T) {
-	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
+	s := newServer()
 	w := httptest.NewRecorder()
 	ts := time.Date(2026, 9, 6, 14, 30, 0, 0, time.UTC)
 
@@ -274,46 +233,10 @@ func TestRequestsCSVCarriesTheMessageAndTheNames(t *testing.T) {
 	}
 }
 
-// A member reads the request log too, but only the requests of their own
-// keys. Naming someone else is refused, not quietly answered with their own.
-func TestAMemberCannotReadSomebodyElsesRequests(t *testing.T) {
-	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
-	for name, h := range map[string]handler{
-		"the log":    s.requests,
-		"the stream": s.requestStream,
-		"sessions":   s.sessions,
-	} {
-		w := invoke(h, member("org_1"), http.MethodGet, "/v1/requests?user_id=user_other", "")
-		if w.Code != http.StatusForbidden {
-			t.Errorf("%s answered a member asking for someone else %d, want 403", name, w.Code)
-		}
-		if !strings.Contains(w.Body.String(), "their own keys") {
-			t.Errorf("%s said %q, want it to say what a member may read", name, w.Body.String())
-		}
-	}
-}
-
-// Without a person behind it there are no keys of one's own to narrow to.
-func TestAMemberWithoutAUserReadsNoRequests(t *testing.T) {
-	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
-	nobody := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleMember, OrgID: "org_1"}
-	for name, h := range map[string]handler{
-		"the log":     s.requests,
-		"the stream":  s.requestStream,
-		"sessions":    s.sessions,
-		"one session": s.session,
-		"the map":     s.trafficMap,
-	} {
-		if w := invoke(h, nobody, http.MethodGet, "/v1/requests", ""); w.Code != http.StatusForbidden {
-			t.Errorf("%s answered %d, want 403", name, w.Code)
-		}
-	}
-}
-
 // The entity screens send an id in a query parameter, so checking it is what
 // keeps one tenant out of another's numbers. An operator reads every one.
 func TestEntityScopeReadsTheIdsAsGiven(t *testing.T) {
-	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
+	s := newServer()
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet,
 		"/v1/overview?project_id=project_1&key_id=key_1&alias=keera-code&user_id=user_1", nil)
@@ -339,7 +262,7 @@ func TestEntityScopeReadsTheIdsAsGiven(t *testing.T) {
 // The export is opened in a spreadsheet, and the message and the names in it
 // are written by somebody else.
 func TestRequestsCSVCarriesTheNumbersAndEscapesTheWording(t *testing.T) {
-	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
+	s := newServer()
 	w := httptest.NewRecorder()
 	ts := time.Date(2026, 9, 6, 14, 30, 0, 0, time.UTC)
 

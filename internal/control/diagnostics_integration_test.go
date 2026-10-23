@@ -19,10 +19,10 @@ import (
 // KEERA_TEST_DATABASE_URL; `make test-integration` provides one.
 
 // diagnosed brings up a deployment with one organisation, one project, one key
-// and a broken filter in it, and returns the server.
+// and a broken filter.
 func diagnosed(t *testing.T) (*Server, *store.Store) {
 	t.Helper()
-	st, ctx := testStore(t, "filters", "routers", "guardrails")
+	st, ctx := testStore(t)
 	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_a", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
@@ -245,12 +245,8 @@ func TestEffectiveGuardrailsOnAProjectStopAtTheProject(t *testing.T) {
 	// Asking about a project means every key in it, so the answer has no
 	// trailing key level without an id.
 	srv, _ := diagnosed(t)
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet,
-		httpx.ControlPrefix+"/v1/guardrails/project/project_a/effective", nil).WithContext(t.Context())
-	r.SetPathValue("scope", "project")
-	r.SetPathValue("id", "project_a")
-	srv.effectiveGuardrails(w, r, operator())
+	w := serve(t.Context(), srv.effectiveGuardrails, operator(), http.MethodGet,
+		"/v1/guardrails/project/project_a/effective", "")
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body)
 	}
@@ -272,12 +268,8 @@ func TestEffectiveGuardrailsOnAProjectStopAtTheProject(t *testing.T) {
 // its effective view, rather than an empty guardrail.
 func TestAGuardrailOfAScopeThatDoesNotExistIsMissing(t *testing.T) {
 	srv, _ := diagnosed(t)
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet,
-		httpx.ControlPrefix+"/v1/guardrails/project/project_gone", nil).WithContext(t.Context())
-	r.SetPathValue("scope", "project")
-	r.SetPathValue("id", "project_gone")
-	srv.getGuardrails(w, r, operator())
+	w := serve(t.Context(), srv.getGuardrails, operator(), http.MethodGet,
+		"/v1/guardrails/project/project_gone", "")
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404: %s", w.Code, w.Body)
 	}

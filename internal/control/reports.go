@@ -101,13 +101,10 @@ func (s *Server) entityScope(w http.ResponseWriter, r *http.Request,
 	if orgID == "" {
 		return sc, true
 	}
-	ctx := r.Context()
-	if sc.ProjectID != "" {
-		owner, err := s.st.ProjectOrg(ctx, sc.ProjectID)
-		if !s.inOrg(w, orgID, owner, err) {
-			return sc, false
-		}
+	if sc.ProjectID != "" && !s.requireProjectInOrg(w, r, sc.ProjectID, orgID) {
+		return sc, false
 	}
+	ctx := r.Context()
 	if sc.KeyID != "" {
 		o, err := s.st.KeyOwnerOf(ctx, sc.KeyID)
 		if !s.inOrg(w, orgID, o.OrgID, err) {
@@ -496,27 +493,21 @@ func (s *Server) usageCSV(w http.ResponseWriter, orgID, groupBy string, from, to
 		"output_tokens", "cost", "org_id", "from", "to",
 	})
 	for _, b := range buckets {
-		org := orgID
-		if b.OrgID != "" {
-			org = b.OrgID
-		}
 		_ = cw.Write([]string{
 			names.label(groupBy, b.Group), b.Group,
 			strconv.FormatInt(b.Requests, 10),
 			strconv.FormatInt(b.InputTokens, 10),
 			strconv.FormatInt(b.OutputTokens, 10),
 			policy.FormatMicros(b.CostMicros),
-			org, from.Format(time.RFC3339), to.Format(time.RFC3339),
+			cmp.Or(b.OrgID, orgID), from.Format(time.RFC3339), to.Format(time.RFC3339),
 		})
 	}
 	cw.Flush()
 }
 
 // audit is administrator-only, because it names people and what they
-// changed. An operator reads every tenant's, anybody else only their own.
-//
-// It can be filtered and paged, because it is the product's compliance
-// record and has to answer real questions.
+// changed. An operator reads every tenant's, anybody else only their own. It
+// filters and pages, because it is the compliance record.
 func (s *Server) audit(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	if !s.requireAdmin(w, p) {
 		return

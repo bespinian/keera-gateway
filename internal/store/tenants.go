@@ -351,18 +351,30 @@ type ProjectChange struct {
 	Description *string
 }
 
-// UpdateProject renames a project, changes its description, or both.
-// Everything else refers to a project by id, so the name is only a label.
-// The old one is kept in the audit log.
-func (s *Store) UpdateProject(ctx context.Context, projectID string, c ProjectChange) (Project, error) {
+// AnyOrg is the orgID for a write that may touch any organisation: the
+// operator's, or the gateway's own. Every other caller passes the one
+// organisation it is in, and a row outside it is ErrNotFound. That is a
+// second check behind the control plane's, so one it forgets cannot reach
+// another tenant.
+const AnyOrg = "*"
+
+// inOrg is the condition that holds a write to the organisation in param, such
+// as "$2". column is the row's organisation column.
+func inOrg(column, param string) string {
+	return "(" + param + " = '" + AnyOrg + "' OR " + column + " = " + param + ")"
+}
+
+// UpdateProject renames a project, changes its description, or both. The
+// name is only a label; the old one stays in the audit log.
+func (s *Store) UpdateProject(ctx context.Context, orgID, projectID string, c ProjectChange) (Project, error) {
 	var p Project
 	err := s.pool.QueryRow(ctx,
 		`UPDATE projects SET
 			name = COALESCE($2, name),
 			description = COALESCE($3, description)
-		WHERE id = $1
+		WHERE id = $1 AND `+inOrg("org_id", "$4")+`
 		RETURNING id, org_id, name, description, created_at`,
-		projectID, c.Name, c.Description,
+		projectID, c.Name, c.Description, orgID,
 	).Scan(&p.ID, &p.OrgID, &p.Name, &p.Description, &p.CreatedAt)
 	if isUnique(err) {
 		return p, ErrProjectNameTaken
@@ -421,11 +433,12 @@ func (s *Store) FirstProject(ctx context.Context, orgID string) (string, error) 
 //
 // Revoked keys are detached, not deleted, because usage rows still name them.
 // Guardrails and spend have no foreign key, so they are cleared here.
-func (s *Store) DeleteProject(ctx context.Context, projectID string) (DeletedProject, error) {
+func (s *Store) DeleteProject(ctx context.Context, orgID, projectID string) (DeletedProject, error) {
 	var gone DeletedProject
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		err := tx.QueryRow(ctx,
-			"SELECT org_id, name FROM projects WHERE id = $1 FOR UPDATE", projectID,
+			"SELECT org_id, name FROM projects WHERE id = $1 AND "+inOrg("org_id", "$2")+" FOR UPDATE",
+			projectID, orgID,
 		).Scan(&gone.OrgID, &gone.Name)
 		if err != nil {
 			return notFound(err)
@@ -521,11 +534,12 @@ func (s *Store) ListUsers(ctx context.Context, orgID string) ([]User, error) {
 //
 // Disabling somebody twice keeps the first date, and still revokes any key
 // issued in between.
-func (s *Store) DisableUser(ctx context.Context, userID string) (int, error) {
+func (s *Store) DisableUser(ctx context.Context, orgID, userID string) (int, error) {
 	var revoked int
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx,
-			"UPDATE users SET disabled_at = COALESCE(disabled_at, now()) WHERE id = $1", userID)
+			"UPDATE users SET disabled_at = COALESCE(disabled_at, now()) WHERE id = $1 AND "+
+				inOrg("org_id", "$2"), userID, orgID)
 		if err != nil {
 			return err
 		}
@@ -553,8 +567,9 @@ func (s *Store) DisableUser(ctx context.Context, userID string) (int, error) {
 
 // EnableUser lets a disabled person sign in again. Their old keys stay
 // revoked: they get new ones.
-func (s *Store) EnableUser(ctx context.Context, userID string) error {
-	return s.execOne(ctx, "UPDATE users SET disabled_at = NULL WHERE id = $1", userID)
+func (s *Store) EnableUser(ctx context.Context, orgID, userID string) error {
+	return s.execOne(ctx, "UPDATE users SET disabled_at = NULL WHERE id = $1 AND "+inOrg("org_id", "$2"),
+		userID, orgID)
 }
 
 // CreateKey stores an issued key. The caller holds the only copy of the secret.
@@ -590,12 +605,14 @@ func insertKey(ctx context.Context, db querier, k KeyInfo, hash []byte) (KeyInfo
 // RevokeKey marks a key unusable. It is kept rather than deleted so its usage
 // history keeps resolving. A key already revoked gives policy.ErrKeyRevoked,
 // so a second revoke is not a second event.
-func (s *Store) RevokeKey(ctx context.Context, id string) error {
+func (s *Store) RevokeKey(ctx context.Context, orgID, id string) error {
 	var found, revoked bool
 	err := s.pool.QueryRow(ctx, `WITH revoked AS (
-			UPDATE api_keys SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL RETURNING id)
-		SELECT EXISTS (SELECT 1 FROM api_keys WHERE id = $1), EXISTS (SELECT 1 FROM revoked)`,
-		id).Scan(&found, &revoked)
+			UPDATE api_keys SET revoked_at = now()
+			WHERE id = $1 AND revoked_at IS NULL AND `+inOrg("org_id", "$2")+` RETURNING id)
+		SELECT EXISTS (SELECT 1 FROM api_keys WHERE id = $1 AND `+inOrg("org_id", "$2")+`),
+			EXISTS (SELECT 1 FROM revoked)`,
+		id, orgID).Scan(&found, &revoked)
 	switch {
 	case err != nil:
 		return err
@@ -609,10 +626,10 @@ func (s *Store) RevokeKey(ctx context.Context, id string) error {
 
 // RenameKey changes what a key is called and returns the name it had. Revoked
 // keys can be renamed too: their name still heads their usage history.
-func (s *Store) RenameKey(ctx context.Context, id, name string) (old string, err error) {
+func (s *Store) RenameKey(ctx context.Context, orgID, id, name string) (old string, err error) {
 	err = s.pool.QueryRow(ctx, `UPDATE api_keys k SET name = $2
-		FROM api_keys was WHERE k.id = $1 AND was.id = k.id
-		RETURNING was.name`, id, name).Scan(&old)
+		FROM api_keys was WHERE k.id = $1 AND was.id = k.id AND `+inOrg("k.org_id", "$3")+`
+		RETURNING was.name`, id, name, orgID).Scan(&old)
 	return old, notFound(err)
 }
 
@@ -621,18 +638,16 @@ func (s *Store) RenameKey(ctx context.Context, id, name string) (old string, err
 var ErrKeyActive = errors.New("store: the key is already activated")
 
 // ActivateKey gives a pending key its secret, and a new name when name is
-// not empty. It returns the key as it now is.
-//
-// The update only matches a pending key, so two activations racing each
-// other cannot both get a secret.
-func (s *Store) ActivateKey(ctx context.Context, id, name string, hash []byte, prefix string,
+// not empty. The update only matches a pending key, so two racing
+// activations cannot both get a secret.
+func (s *Store) ActivateKey(ctx context.Context, orgID, id, name string, hash []byte, prefix string,
 ) (KeyInfo, error) {
 	var k KeyInfo
 	err := s.pool.QueryRow(ctx, `UPDATE api_keys
 		SET key_hash = $2, prefix = $3, name = COALESCE(NULLIF($4, ''), name)
 		WHERE id = $1 AND key_hash IS NULL AND revoked_at IS NULL
-			AND (expires_at IS NULL OR expires_at > now())
-		RETURNING `+keyColumnsOf(""), id, hash, prefix, name,
+			AND (expires_at IS NULL OR expires_at > now()) AND `+inOrg("org_id", "$5")+`
+		RETURNING `+keyColumnsOf(""), id, hash, prefix, name, orgID,
 	).Scan(keyTargets(&k)...)
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return k, err
@@ -642,7 +657,7 @@ func (s *Store) ActivateKey(ctx context.Context, id, name string, hash []byte, p
 	var pending, revoked, expired bool
 	err = s.pool.QueryRow(ctx, `SELECT key_hash IS NULL, revoked_at IS NOT NULL,
 		expires_at IS NOT NULL AND expires_at <= now()
-		FROM api_keys WHERE id = $1`, id).Scan(&pending, &revoked, &expired)
+		FROM api_keys WHERE id = $1 AND `+inOrg("org_id", "$2"), id, orgID).Scan(&pending, &revoked, &expired)
 	switch {
 	case err != nil:
 		return KeyInfo{}, notFound(err)
@@ -666,11 +681,12 @@ var ErrSandboxKey = errors.New("store: the key belongs to a sandbox")
 //
 // Doing it in steps can leave both keys live, or a new key without the old
 // one's limits, which quietly loosens a guardrail.
-func (s *Store) RotateKey(ctx context.Context, oldID string, next KeyInfo, hash []byte) (KeyInfo, error) {
+func (s *Store) RotateKey(ctx context.Context, orgID, oldID string, next KeyInfo, hash []byte,
+) (KeyInfo, error) {
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var old KeyInfo
 		err := tx.QueryRow(ctx, `SELECT `+keyColumnsOf("")+` FROM api_keys
-			WHERE id = $1 FOR UPDATE`, oldID).Scan(keyTargets(&old)...)
+			WHERE id = $1 AND `+inOrg("org_id", "$2")+` FOR UPDATE`, oldID, orgID).Scan(keyTargets(&old)...)
 		if err != nil {
 			return notFound(err)
 		}

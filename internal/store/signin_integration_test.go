@@ -149,13 +149,13 @@ func TestLinkUserAdoptsAPersonInsteadOfDuplicatingThem(t *testing.T) {
 	if err != nil || byExternal.ID != pre.ID {
 		t.Errorf("UserByExternalID = %+v, %v", byExternal, err)
 	}
-	if err := st.SetUserRole(ctx, pre.ID, "operator"); err != nil {
+	if err := st.SetUserRole(ctx, AnyOrg, pre.ID, "operator"); err != nil {
 		t.Fatalf("SetUserRole: %v", err)
 	}
 	if u, _ := st.UserByID(ctx, pre.ID); u.Role != "operator" {
 		t.Errorf("Role = %q, want operator", u.Role)
 	}
-	if err := st.SetUserRole(ctx, "nobody", "member"); err != ErrNotFound {
+	if err := st.SetUserRole(ctx, AnyOrg, "nobody", "member"); err != ErrNotFound {
 		t.Errorf("SetUserRole on a missing user gave %v, want ErrNotFound", err)
 	}
 }
@@ -312,7 +312,7 @@ func TestPurgeExpiredRemovesRefreshTokensNobodyUses(t *testing.T) {
 			t.Fatalf("RecordDirectoryCheck: %v", err)
 		}
 	}
-	if _, err := st.DisableUser(ctx, gone.ID); err != nil {
+	if _, err := st.DisableUser(ctx, AnyOrg, gone.ID); err != nil {
 		t.Fatalf("DisableUser: %v", err)
 	}
 

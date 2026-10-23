@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -29,8 +28,7 @@ func TestDisablingAPersonTurnsOffEverythingTheyHold(t *testing.T) {
 		Via: authn.MethodSession, Role: authn.RoleMember, OrgID: "org_a", UserID: "user_alice",
 	}
 	disable := func(p *authn.Principal, who string) int {
-		return tn.call(tn.srv.disableUser, p, http.MethodPost, "/v1/users/"+who+"/disable", "",
-			map[string]string{"id": who}).Code
+		return tn.call(tn.srv.disableUser, p, http.MethodPost, "/v1/users/"+who+"/disable", "").Code
 	}
 
 	// Only an administrator, only inside their organisation, and not themselves.
@@ -56,13 +54,12 @@ func TestDisablingAPersonTurnsOffEverythingTheyHold(t *testing.T) {
 
 	// Nobody can hand her a new one while she is disabled.
 	w := tn.call(tn.srv.createKey, carol, http.MethodPost, "/v1/keys",
-		`{"org_id":"org_a","user_id":"user_alice","name":"new laptop"}`, nil)
+		`{"org_id":"org_a","user_id":"user_alice","name":"new laptop"}`)
 	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "disabled") {
 		t.Errorf("a key for a disabled person = %d %s, want 403 saying why", w.Code, w.Body)
 	}
 
-	w = tn.call(tn.srv.enableUser, carol, http.MethodPost, "/v1/users/user_alice/enable", "",
-		map[string]string{"id": "user_alice"})
+	w = tn.call(tn.srv.enableUser, carol, http.MethodPost, "/v1/users/user_alice/enable", "")
 	if w.Code != http.StatusOK {
 		t.Fatalf("enabling alice = %d: %s", w.Code, w.Body)
 	}
@@ -330,13 +327,7 @@ func TestOnlyAnOperatorSetsAnOrganisationsRepositories(t *testing.T) {
 	admin := &authn.Principal{Via: authn.MethodSession, Role: authn.RoleAdmin, OrgID: "org_a"}
 	operator := &authn.Principal{Via: authn.MethodOperatorKey}
 	put := func(p *authn.Principal, body string) int {
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest(http.MethodPut, httpx.ControlPrefix+"/v1/guardrails/org/org_a",
-			strings.NewReader(body)).WithContext(tn.ctx)
-		r.SetPathValue("scope", "org")
-		r.SetPathValue("id", "org_a")
-		tn.srv.putGuardrails(w, r, p)
-		return w.Code
+		return tn.call(tn.srv.putGuardrails, p, http.MethodPut, "/v1/guardrails/org/org_a", body).Code
 	}
 
 	if code := put(operator, `{"allowed_repos":["acme"]}`); code != http.StatusOK {

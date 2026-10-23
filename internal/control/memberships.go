@@ -117,12 +117,7 @@ func (s *Server) orgsOf(ctx context.Context, p *authn.Principal) ([]store.Member
 	if err != nil {
 		return nil, err
 	}
-	kept := ms[:0]
-	for _, m := range ms {
-		if !m.Disabled {
-			kept = append(kept, m)
-		}
-	}
+	kept := slices.DeleteFunc(ms, func(m store.Membership) bool { return m.Disabled })
 	// By name, as a menu reads.
 	slices.SortFunc(kept, func(a, b store.Membership) int {
 		return cmp.Compare(strings.ToLower(a.OrgName), strings.ToLower(b.OrgName))
@@ -207,7 +202,7 @@ func (s *Server) switchOrg(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		if isOp {
 			want = authn.RoleOperator
 		}
-		if err := s.st.SetUserRole(ctx, target.ID, string(want)); err != nil {
+		if err := s.st.SetUserRole(ctx, target.OrgID, target.ID, string(want)); err != nil {
 			s.fail(w, err)
 			return
 		}

@@ -23,10 +23,9 @@ import (
 const testOperatorKey = "an-operator-key-long-enough-to-be-real"
 
 // testStore opens the database in KEERA_TEST_DATABASE_URL, or skips the test
-// without one. It empties the request log, spend, every organisation and the
-// tables named, so a test starts from nothing it did not write. Identities
-// are emptied too: they outlive the users rows that orgs takes with it.
-func testStore(t *testing.T, tables ...string) (*store.Store, context.Context) {
+// without one. It empties every table, as the store's own tests do, so a test
+// starts from nothing it did not write.
+func testStore(t *testing.T) (*store.Store, context.Context) {
 	t.Helper()
 	dsn := os.Getenv("KEERA_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -43,9 +42,11 @@ func testStore(t *testing.T, tables ...string) (*store.Store, context.Context) {
 	if _, err := st.Migrate(ctx); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	all := append([]string{"usage_events", "usage_daily", "spend", "orgs", "identities"}, tables...)
-	if _, err := st.Pool().Exec(ctx,
-		"TRUNCATE "+strings.Join(all, ", ")+" RESTART IDENTITY CASCADE"); err != nil {
+	if _, err := st.Pool().Exec(ctx, `TRUNCATE orgs, projects, users, api_keys, guardrails,
+		models, filters, filter_runs, routers, usage_events, usage_daily, spend, audit_log, sessions,
+		login_flows, signups, cli_codes, cli_tokens, sandboxes, sandbox_classes, mcp_servers,
+		tool_calls, billing_lines, credit_accounts, payments, identities, job_runs
+		RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	return st, ctx

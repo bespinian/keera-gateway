@@ -26,6 +26,7 @@ import (
 	"github.com/bespinian/keera-gateway/internal/gateway"
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/metrics"
+	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/ratelimit"
 	"github.com/bespinian/keera-gateway/internal/registry"
 	"github.com/bespinian/keera-gateway/internal/sandbox"
@@ -109,12 +110,17 @@ type Server struct {
 	hasMetricsToken bool
 
 	// signIn throttles the routes that work for a caller who has not signed
-	// in yet, keyed by client address.
+	// in yet, keyed by client address, and password sign-ins per account. It
+	// is in memory, so each replica counts on its own.
 	signIn *ratelimit.Limiter
 
 	// feed tells every open request stream that the usage log has grown.
 	// Run drives it.
 	feed *requestFeed
+
+	// routes are the authenticated routes Handler registered, so a test can
+	// make sure each one keeps a tenant out of another's data.
+	routes []string
 }
 
 func New(st *store.Store, reg *registry.Registry, m *metrics.Registry, rec *usage.Recorder,
@@ -146,7 +152,9 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	// route registers an authenticated route; pattern is "METHOD /path",
 	// with the path under httpx.ControlPrefix.
+	s.routes = nil
 	route := func(pattern string, h handler) {
+		s.routes = append(s.routes, pattern)
 		method, path, _ := strings.Cut(pattern, " ")
 		mux.Handle(method+" "+httpx.ControlPrefix+path, s.authenticated(h))
 	}
@@ -435,6 +443,21 @@ func forbid(w http.ResponseWriter, msg string) {
 	httpx.WriteError(w, http.StatusForbidden, "permission_error", "forbidden", msg)
 }
 
+// forbidden is a refusal the person can act on, as opposed to a failure of
+// the gateway. refuse answers it with 403, and any other error with 400.
+type forbidden string
+
+func (f forbidden) Error() string { return string(f) }
+
+// refuse answers a request that a check without side effects turned down.
+func refuse(w http.ResponseWriter, err error) {
+	if _, ok := errors.AsType[forbidden](err); ok {
+		forbid(w, err.Error())
+		return
+	}
+	badRequest(w, err.Error())
+}
+
 func unauthorized(w http.ResponseWriter, code, msg string) {
 	httpx.WriteError(w, http.StatusUnauthorized, "invalid_request_error", code, msg)
 }
@@ -453,8 +476,28 @@ func switchedOff(w http.ResponseWriter, code, msg string) {
 	httpx.WriteError(w, http.StatusNotImplemented, "invalid_request_error", code, msg)
 }
 
-// readJSON decodes a request body into v, or answers why it could not and
-// returns false.
+// subscriptionsAllowed refuses a subscription model or key while the
+// deployment does not take Claude subscriptions, and reports whether to go on.
+func (s *Server) subscriptionsAllowed(w http.ResponseWriter, subscription bool) bool {
+	if subscription && !s.opts.ClaudeSubscriptions {
+		switchedOff(w, "subscriptions_disabled", "this deployment does not take Claude "+
+			"subscriptions; its operator turns them on with KEERA_CLAUDE_SUBSCRIPTIONS")
+		return false
+	}
+	return true
+}
+
+// allowInOrg puts a new model or router on its organisation's allow-list, if
+// there is one, so every client leaves it usable rather than refused.
+func (s *Server) allowInOrg(r *http.Request, p *authn.Principal, orgID, alias string) error {
+	allowed, err := s.st.AllowInOrg(r.Context(), orgID, alias)
+	if allowed {
+		s.auditf(r, p, orgID, "guardrail.allow_model", string(policy.ScopeOrg), orgID, alias)
+	}
+	return err
+}
+
+// readJSON answers why it could not decode the body, and returns false.
 func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	if err := httpx.ReadJSON(r, v); err != nil {
 		refuseBody(w, err)
@@ -473,6 +516,16 @@ func refuseBody(w http.ResponseWriter, err error) {
 		return
 	}
 	badRequest(w, err.Error())
+}
+
+// writeOrg is the organisation the store holds a write by p to: any for an
+// unrestricted caller, and otherwise their own. It is a second check behind
+// the handler's, which a handler that forgets its own cannot get past.
+func writeOrg(p *authn.Principal) string {
+	if p.Unrestricted() {
+		return store.AnyOrg
+	}
+	return p.OrgID
 }
 
 // scopeOrg resolves the organisation a request applies to. A caller who names

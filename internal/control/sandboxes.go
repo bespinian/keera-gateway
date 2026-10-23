@@ -1,10 +1,12 @@
 package control
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/bespinian/keera-gateway/internal/authn"
@@ -145,12 +147,9 @@ func (s *Server) putSandboxClass(w http.ResponseWriter, r *http.Request, p *auth
 // would let one organisation run another's private image, or the operator's.
 // A class may keep the image it has.
 func (s *Server) mayUseImage(ctx context.Context, class policy.SandboxClass) (bool, error) {
-	for _, t := range s.opts.Template.SandboxClasses {
-		if t.Image == class.Image {
-			return true, nil
-		}
-	}
-	if imageUnder(class.Image, s.opts.SandboxImages) {
+	if slices.ContainsFunc(s.opts.Template.SandboxClasses,
+		func(t policy.SandboxClass) bool { return t.Image == class.Image }) ||
+		imageUnder(class.Image, s.opts.SandboxImages) {
 		return true, nil
 	}
 	old, err := s.st.SandboxClass(ctx, class.OrgID, class.Name)
@@ -484,10 +483,8 @@ func (s *Server) changeSandboxState(w http.ResponseWriter, r *http.Request, p *a
 	httpx.WriteJSON(w, http.StatusOK, fresh)
 }
 
-// sandboxUsage is what sandboxes have cost, grouped by project, person or class.
 func (s *Server) sandboxUsage(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
-	q := r.URL.Query()
-	orgID, ok := s.scopeOrg(w, p, q.Get("org_id"))
+	orgID, from, to, ok := s.reportScope(w, r, p)
 	if !ok {
 		return
 	}
@@ -496,16 +493,10 @@ func (s *Server) sandboxUsage(w http.ResponseWriter, r *http.Request, p *authn.P
 			"administrator's")
 		return
 	}
-	from, to, ok := queryWindow(w, q)
-	if !ok {
-		return
-	}
+	q := r.URL.Query()
 	// An unknown grouping is refused, as on /v1/usage, rather than silently
 	// replaced while the caller's string is echoed back.
-	groupBy := q.Get("group_by")
-	if groupBy == "" {
-		groupBy = "class"
-	}
+	groupBy := cmp.Or(q.Get("group_by"), "class")
 	if !store.ValidSandboxGroupBy(groupBy) {
 		badRequest(w, "'group_by' must be one of "+strings.Join(store.SandboxGroupBys(), ", "))
 		return

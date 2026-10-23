@@ -334,7 +334,7 @@ func TestOneSessionIsReachedFromAnyRequestInIt(t *testing.T) {
 
 // A month of agent work is divided by tasks in a spreadsheet, not in a browser.
 func TestSessionsCSVCarriesTheCostPerTask(t *testing.T) {
-	s := New(nil, nil, nil, nil, Options{}, slog.New(slog.DiscardHandler))
+	s := newServer()
 	w := httptest.NewRecorder()
 	start := time.Date(2026, 9, 9, 9, 0, 0, 0, time.UTC)
 

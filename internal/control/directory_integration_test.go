@@ -32,7 +32,7 @@ type directorySetup struct {
 
 func signedInThroughADirectory(t *testing.T, refreshToken string) directorySetup {
 	t.Helper()
-	st, ctx := testStore(t, "users", "cli_codes", "cli_tokens", "sessions")
+	st, ctx := testStore(t)
 	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_1", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatalf("creating the organisation: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestADirectoryCheckDemotesAnOperatorEverywhere(t *testing.T) {
 	if _, err := d.st.CreateOrg(ctx, store.Org{ID: "org_2", Name: "Other Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.st.SetUserRole(ctx, d.user.ID, "operator"); err != nil {
+	if err := d.st.SetUserRole(ctx, store.AnyOrg, d.user.ID, "operator"); err != nil {
 		t.Fatal(err)
 	}
 	other, err := d.st.AddUser(ctx, "user_2", "org_2", d.user.Email, d.user.ExternalID, "operator")

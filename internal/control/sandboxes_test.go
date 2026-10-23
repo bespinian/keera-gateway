@@ -26,7 +26,7 @@ import (
 
 func sandboxStore(t *testing.T) (*store.Store, context.Context) {
 	t.Helper()
-	st, ctx := testStore(t, "sandboxes", "sandbox_classes", "guardrails", "api_keys", "users", "projects")
+	st, ctx := testStore(t)
 	if _, err := st.CreateOrg(ctx, store.Org{ID: "org_1", Name: "Example Bank"}, store.OrgTemplate{}); err != nil {
 		t.Fatalf("CreateOrg: %v", err)
 	}
@@ -572,12 +572,8 @@ func TestALimitedOrganisationGetsNoWarmPool(t *testing.T) {
 
 	put := func(name string, warm int) int {
 		raw, _ := json.Marshal(map[string]any{"image": "example/sandbox:1", "warm": warm})
-		r := httptest.NewRequestWithContext(t.Context(), http.MethodPut,
-			"/v1/sandbox-classes/"+name+"?org_id=org_1", bytes.NewReader(raw))
-		r.SetPathValue("name", name)
-		w := httptest.NewRecorder()
-		srv.putSandboxClass(w, r, &authnPrincipalAdmin)
-		return w.Code
+		return serve(t.Context(), srv.putSandboxClass, &authnPrincipalAdmin, http.MethodPut,
+			"/v1/sandbox-classes/"+name+"?org_id=org_1", string(raw)).Code
 	}
 	for _, c := range []struct {
 		name string
@@ -616,12 +612,8 @@ func TestAnAdministratorPicksOnlyAllowedImages(t *testing.T) {
 
 	put := func(p *authn.Principal, name, image string) int {
 		raw, _ := json.Marshal(map[string]any{"image": image})
-		r := httptest.NewRequestWithContext(t.Context(), http.MethodPut,
-			"/v1/sandbox-classes/"+name+"?org_id=org_1", bytes.NewReader(raw))
-		r.SetPathValue("name", name)
-		w := httptest.NewRecorder()
-		srv.putSandboxClass(w, r, p)
-		return w.Code
+		return serve(t.Context(), srv.putSandboxClass, p, http.MethodPut,
+			"/v1/sandbox-classes/"+name+"?org_id=org_1", string(raw)).Code
 	}
 	admin, operator := &authnPrincipalAdmin, &authn.Principal{Via: authn.MethodOperatorKey}
 	for image, want := range map[string]int{
