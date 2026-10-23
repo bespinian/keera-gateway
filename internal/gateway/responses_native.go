@@ -2,11 +2,29 @@ package gateway
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
 )
+
+// addFileText collects an inline text file's name and contents. A rewrite is
+// encoded the way the file came.
+func addFileText(d *treeDoc, part map[string]any) {
+	d.addField(part, "filename")
+	fileData, _ := part["file_data"].(string)
+	header, content, ok := inlineText(fileData)
+	if !ok {
+		return
+	}
+	d.add(content, func(v string) {
+		if strings.HasSuffix(header, ";base64,") {
+			v = base64.StdEncoding.EncodeToString([]byte(v))
+		}
+		part["file_data"] = header + v
+	})
+}
 
 // responsesDialect implements dialect for `/v1/responses`, forwarded to
 // OpenAI as it is.
@@ -66,6 +84,8 @@ func (responsesDialect) text(b *body) (textDoc, error) {
 				d.addField(part, "text")
 			case "refusal":
 				d.addField(part, "refusal")
+			case "input_file":
+				addFileText(d, part)
 			}
 			// A shell call's output is one entry per command, with no type.
 			if item["type"] == "shell_call_output" {

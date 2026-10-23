@@ -318,6 +318,100 @@ func TestFiltersReadTheOutputOfEveryToolTheClientRuns(t *testing.T) {
 	}
 }
 
+func TestEveryTextTheTranslationKeepsIsFiltered(t *testing.T) {
+	// The filters and the translation each walk the body. Text only the
+	// translation reads would reach a fallback model unfiltered.
+	for _, tc := range []struct {
+		name string
+		d    dialect
+		sh   shape
+		body string
+	}{
+		{"responses", responsesDialect{}, responsesShape{}, `{"model":"m",` +
+			`"instructions":"hunter2","input":[{"type":"message","role":"user","content":[` +
+			`{"type":"input_text","text":"hunter2"},` +
+			`{"type":"input_file","filename":"hunter2.txt","file_data":"data:text/plain;base64,aHVudGVyMiBpbiBhIGZpbGU="},` +
+			`{"type":"input_file","filename":"notes.md","file_data":"data:text/markdown,hunter2 inline"}]},` +
+			`{"type":"message","role":"assistant","content":[{"type":"refusal","refusal":"hunter2"}]},` +
+			`{"type":"function_call","call_id":"c1","name":"f","arguments":"{}"},` +
+			`{"type":"function_call_output","call_id":"c1","output":"hunter2"}]}`},
+		{"anthropic", anthropicDialect{}, anthropicShape{}, `{"model":"m","max_tokens":64,` +
+			`"system":"hunter2","messages":[{"role":"user","content":[` +
+			`{"type":"text","text":"hunter2"},` +
+			`{"type":"document","title":"hunter2","source":{"type":"text","media_type":"text/plain","data":"hunter2"}},` +
+			`{"type":"document","source":{"type":"content","content":[{"type":"text","text":"hunter2"}]}},` +
+			`{"type":"search_result","title":"hunter2","source":"https://example.com",` +
+			`"content":[{"type":"text","text":"hunter2"}]}]},` +
+			`{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"f","input":{}}]},` +
+			`{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1",` +
+			`"content":[{"type":"text","text":"hunter2"}]}]}]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			translate := func(raw []byte) string {
+				t.Helper()
+				out, _, err := tc.sh.decodeBody(raw)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return string(out.encode())
+			}
+			if got := translate([]byte(tc.body)); strings.Count(got, "hunter2") < 6 {
+				t.Fatalf("the translation lost text it should keep: %s", got)
+			}
+			b, err := parseBody([]byte(tc.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			doc, err := tc.d.text(b)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := append([]string(nil), doc.texts()...)
+			for i, s := range out {
+				out[i] = strings.ReplaceAll(s, "hunter2", "[CREDENTIAL]")
+			}
+			if err := doc.apply(b, out); err != nil {
+				t.Fatal(err)
+			}
+			if got := translate(b.encode()); strings.Contains(got, "hunter2") {
+				t.Errorf("text no filter saw reaches the model: %s", got)
+			}
+		})
+	}
+}
+
+func TestARewriteOfAnInlineFileKeepsItsEncoding(t *testing.T) {
+	b, err := parseBody([]byte(`{"model":"m","input":[{"type":"message","role":"user","content":[` +
+		`{"type":"input_file","filename":"a.txt","file_data":"data:text/plain;base64,aHVudGVyMg=="},` +
+		`{"type":"input_file","filename":"b.txt","file_data":"data:text/plain,hunter2"},` +
+		`{"type":"input_file","filename":"c.pdf","file_data":"data:application/pdf;base64,aHVudGVyMg=="}]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := responsesDialect{}.text(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := append([]string(nil), doc.texts()...)
+	for i, s := range out {
+		out[i] = strings.ReplaceAll(s, "hunter2", "secret")
+	}
+	if err := doc.apply(b, out); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := b.value("input")
+	for _, want := range []string{
+		`"data:text/plain;base64,c2VjcmV0"`,
+		`"data:text/plain,secret"`,
+		// A file no model but OpenAI's can read is left as it came.
+		`"data:application/pdf;base64,aHVudGVyMg=="`,
+	} {
+		if !strings.Contains(string(got), want) {
+			t.Errorf("input after the rewrite is missing %s: %s", want, got)
+		}
+	}
+}
+
 func TestARewriteOfABodyWithAKeyTwiceKeepsOnlyTheFilteredOne(t *testing.T) {
 	// The filters read the last copy of a key. A provider that reads the first
 	// would get text no filter saw, so such a body is encoded again whole.

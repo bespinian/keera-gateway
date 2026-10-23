@@ -338,27 +338,40 @@ func responsesContent(raw json.RawMessage) (jsonText, []chatPart) {
 // fileText is the contents of a text file sent inline, under its name. A file
 // of any other kind, or one named by id, is nil: only OpenAI can read those.
 func fileText(p responsesPart) jsonText {
-	media, data, ok := strings.Cut(strings.TrimPrefix(p.FileData, "data:"), ",")
-	if !ok || !strings.HasPrefix(p.FileData, "data:") {
+	_, content, ok := inlineText(p.FileData)
+	if !ok {
 		return nil
+	}
+	return joinTexts([]jsonText{quoteText(p.Filename), quoteText(content)})
+}
+
+// inlineText splits a data URL that holds a text file into its header, up to
+// and including the comma, and its contents. ok is false for any other kind
+// of file. The translation and the filters both read files through it, so a
+// filter sees every file a model is given.
+func inlineText(fileData string) (header, content string, ok bool) {
+	rest, isData := strings.CutPrefix(fileData, "data:")
+	media, data, found := strings.Cut(rest, ",")
+	if !isData || !found {
+		return "", "", false
 	}
 	media, base64Encoded := strings.CutSuffix(media, ";base64")
 	media, _, _ = strings.Cut(media, ";")
 	if !strings.HasPrefix(media, "text/") && media != "application/json" {
-		return nil
+		return "", "", false
 	}
-	content := []byte(data)
-	if base64Encoded {
-		var err error
-		if content, err = base64.StdEncoding.DecodeString(data); err != nil {
-			return nil
-		}
+	header = fileData[:len(fileData)-len(data)]
+	if !base64Encoded {
+		return header, data, true
 	}
-	return joinTexts([]jsonText{quoteText(p.Filename), quoteText(string(content))})
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return "", "", false
+	}
+	return header, string(decoded), true
 }
 
-// orEmpty is t, or empty text in place of none, for a field the chat shape
-// needs.
+// orEmpty is t, or empty text in place of nil, for a field the chat shape needs.
 func orEmpty(t jsonText) jsonText {
 	if t == nil {
 		return emptyText
