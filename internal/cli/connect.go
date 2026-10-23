@@ -53,6 +53,10 @@ func connectCmd(ctx context.Context, args []string) error {
 	if *subscription && sub != "claude-code" {
 		return errors.New("--subscription is for Claude Code: keera connect claude-code --subscription")
 	}
+	if *printOnly && sub != "claude-code" && sub != "list" && sub != "" {
+		return errors.New("--print is for Claude Code; every other client's settings are " +
+			"printed anyway")
+	}
 	if sub == "claude-code" && !*printOnly {
 		switch {
 		case *key != "" && *subscription:
@@ -66,7 +70,11 @@ func connectCmd(ctx context.Context, args []string) error {
 			asJSON: r.asJSON, subscription: *subscription,
 		})
 	}
-	if *project != "" {
+	switch {
+	case *project != "" && sub == "claude-code":
+		return errors.New("--project is for the key 'keera connect claude-code' issues, " +
+			"which --print does not; give one of them")
+	case *project != "":
 		return errors.New("--project is for 'keera connect claude-code', which issues a key")
 	}
 	if *model != "" && sub != "claude-code" {
@@ -190,14 +198,12 @@ type ownKey struct {
 // Only the caller's own keys are offered: the configuration is for their
 // machine, and a subscription key works only through --subscription.
 func connectKey(ctx context.Context, c *client, org, named string) (*ownKey, error) {
-	var access struct {
-		Keys []ownKey `json:"keys"`
-	}
-	if err := c.do(ctx, "GET", "/v1/access", nil, &access); err != nil {
+	keys, err := ownKeys(ctx, c, org)
+	if err != nil {
 		return nil, err
 	}
 	var usable []ownKey
-	for _, k := range access.Keys {
+	for _, k := range keys {
 		if k.State == "active" && k.Kind != policy.KeySubscription && k.OrgID == org {
 			usable = append(usable, k)
 		}
@@ -221,6 +227,17 @@ func connectKey(ctx context.Context, c *client, org, named string) (*ownKey, err
 	}
 	return nil, fmt.Errorf("you have no active key %s; yours are: %s",
 		named, strings.Join(names, ", "))
+}
+
+// ownKeys lists the caller's keys in orgID. The organisation is named, so the
+// server lists the keys of the one KEERA_ORG chose, not the one 'keera org
+// switch' did.
+func ownKeys(ctx context.Context, c *client, orgID string) ([]ownKey, error) {
+	var access struct {
+		Keys []ownKey `json:"keys"`
+	}
+	err := c.do(ctx, "GET", inOrg("/v1/access", orgID), nil, &access)
+	return access.Keys, err
 }
 
 // keyModels is the chat models and routers a key's allow-list names, in the

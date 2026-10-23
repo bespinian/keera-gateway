@@ -65,6 +65,8 @@ func startPut[T any](ctx context.Context, a *aliasRun, alias string, fresh T, al
 func checkProbe[T any](ctx context.Context, c *client, path, what string, asJSON bool,
 	print func(*table, T), passed func(T) bool,
 ) error {
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
 	var probe T
 	if err := c.do(ctx, "POST", path, nil, &probe); err != nil {
 		return err

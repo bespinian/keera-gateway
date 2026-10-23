@@ -207,19 +207,17 @@ func keyEnv(ctx context.Context, c *client, orgID, keyID string, models []policy
 ) ([]policy.Model, map[string]string, string, error) {
 	// Not connectKey, which takes only active keys: this machine's key may
 	// have expired, and that is usually why people run this again.
-	var access struct {
-		Keys []ownKey `json:"keys"`
-	}
-	if err := c.do(ctx, "GET", "/v1/access", nil, &access); err != nil {
+	keys, err := ownKeys(ctx, c, orgID)
+	if err != nil {
 		return nil, nil, "", err
 	}
-	i := slices.IndexFunc(access.Keys, func(k ownKey) bool {
+	i := slices.IndexFunc(keys, func(k ownKey) bool {
 		return k.ID == keyID && k.OrgID == orgID
 	})
 	if i < 0 {
 		return nil, nil, "", fmt.Errorf("the key %s is not yours", keyID)
 	}
-	if models = keyModels(models, access.Keys[i].AllowedModels); len(models) == 0 {
+	if models = keyModels(models, keys[i].AllowedModels); len(models) == 0 {
 		return nil, nil, "", fmt.Errorf("the key %s may use no chat model, so nothing was "+
 			"written; an administrator can allow one in its guardrails, then run this again", keyID)
 	}

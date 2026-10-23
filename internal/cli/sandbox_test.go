@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -120,6 +121,20 @@ func TestAgentFlagsSurviveTheParser(t *testing.T) {
 	}
 	if *asJSON2 != *asJSON || *class2 != *class {
 		t.Fatalf("json=%v class=%q, want %v %q", *asJSON2, *class2, *asJSON, *class)
+	}
+}
+
+func TestProxyCommandQuotesAnInstallPathWithASpace(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("ssh runs a ProxyCommand without a shell on Windows")
+	}
+	cmd := proxyCommand("/Applications/Keera Tools/keera", "https://keera.example.ch", "%n", "org_1")
+	want := "'/Applications/Keera Tools/keera' --url https://keera.example.ch sandbox proxy %n --org org_1"
+	if cmd != want {
+		t.Errorf("proxy command = %q, want %q", cmd, want)
+	}
+	if got := proxyWord("/opt/it's 100%/keera"); got != `'/opt/it'\''s 100%%/keera'` {
+		t.Errorf("proxyWord = %q", got)
 	}
 }
 

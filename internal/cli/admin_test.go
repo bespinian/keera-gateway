@@ -1410,6 +1410,26 @@ func TestReportsTakeAProjectByNameAndAPersonByEmail(t *testing.T) {
 	}
 }
 
+// The request log filters by one status or a whole class, so --status takes
+// both. Anything else would filter nothing, so it is refused here.
+func TestFailuresTakeAStatusOrAClass(t *testing.T) {
+	quiet(t)
+	f := newFakeControl(t, map[string]any{
+		"GET /v1/requests": map[string]any{"data": []any{}},
+	})
+	for _, status := range []string{"502", "5xx"} {
+		if err := Run(context.Background(), []string{"failures", "--status", status}); err != nil {
+			t.Fatalf("--status %s: %v", status, err)
+		}
+		if q := f.seen[len(f.seen)-1].query; !strings.Contains(q, "status="+status) {
+			t.Errorf("query = %q, want status=%s", q, status)
+		}
+	}
+	if err := Run(context.Background(), []string{"failures", "--status", "bad"}); err == nil {
+		t.Error("--status bad was sent, and would have filtered nothing")
+	}
+}
+
 func TestANegativeBudgetFlagIsLeftUnset(t *testing.T) {
 	// Negative is how the flag says it was not given. 'keera budget' and
 	// 'guardrail set' share the flags, so they read it the same way.

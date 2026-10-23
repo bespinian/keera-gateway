@@ -94,8 +94,9 @@ func failuresCmd(ctx context.Context, args []string) error {
 	kind := fs.String("kind", "failed", "failed, refused, interrupted or all")
 	alias := fs.String("model", "", modelUsage)
 	w := registerWho(fs)
-	status := fs.Int("status", 0, "restrict to one status")
-	since := fs.Duration("since", reportWindow, sinceUsage)
+	status := fs.String("status", "", "restrict to one status, such as 502, or a class, such as 5xx")
+	since := new(time.Duration)
+	durationVar(fs, since, "since", reportWindow, sinceUsage)
 	limit := fs.Int("limit", reportLimit, limitUsage)
 	if done, err := r.parse(); done {
 		return err
@@ -116,15 +117,17 @@ func failuresCmd(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if *status != 0 {
-		q.Set("status", strconv.Itoa(*status))
+	if *status != "" {
+		// The server ignores a filter it cannot read, which would show
+		// everything as though it matched.
+		if !validStatus(*status) {
+			return fmt.Errorf("--status takes a status such as 502, or a class such as 5xx, not %q", *status)
+		}
+		q.Set("status", *status)
 	}
 
-	var res failuresResponse
-	if err := c.do(ctx, "GET", "/v1/requests?"+q.Encode(), nil, &res); err != nil {
-		return err
-	}
-	return out(r.asJSON, res, func(w *table) { printFailures(w, res, store.Outcome(*kind), *since) })
+	return doOut(ctx, c, "GET", "/v1/requests?"+q.Encode(), nil, r.asJSON,
+		func(w *table, res failuresResponse) { printFailures(w, res, store.Outcome(*kind), *since) })
 }
 
 type failuresResponse struct {
@@ -174,6 +177,16 @@ func printFailures(w *table, res failuresResponse, o store.Outcome, since time.D
 		}
 		_, _ = fmt.Fprintf(w, "by model: %s\n", strings.Join(parts, ", "))
 	}
+}
+
+// validStatus reports whether the request log can filter by v: one status, or
+// a class such as 5xx.
+func validStatus(v string) bool {
+	if n, err := strconv.Atoi(v); err == nil {
+		return n >= 100 && n <= 599
+	}
+	c, ok := strings.CutSuffix(strings.ToLower(v), "xx")
+	return ok && len(c) == 1 && c[0] >= '1' && c[0] <= '5'
 }
 
 // httpStatus is a response status, painted by whose problem it is: a 5xx is

@@ -258,3 +258,19 @@ func TestWrapBreaksProseAndIndentsWhatItCarries(t *testing.T) {
 		t.Errorf("wrapAt = %q, want %q", got, want)
 	}
 }
+
+// The server lists the keys of the organisation a call names, so KEERA_ORG
+// reaches it too, not only the one 'keera org switch' chose.
+func TestConnectAsksForTheChosenOrgsKeys(t *testing.T) {
+	f := newFakeControl(t, connectRoutes("https://keera.example.ch/api",
+		map[string]any{"GET /v1/access": twoKeys}))
+	capture(t, "connect", "pi")
+	for _, r := range f.seen {
+		if r.path == "/v1/access" && r.query != "org_id=org_1" {
+			t.Errorf("GET /v1/access?%s, want org_id=org_1", r.query)
+		}
+	}
+	if !f.called("GET", "/v1/access") {
+		t.Error("connect did not look up the caller's keys")
+	}
+}

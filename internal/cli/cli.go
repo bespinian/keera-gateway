@@ -106,6 +106,12 @@ func versionCmd(args []string) error {
 	return nil
 }
 
+// ExitCode is an error that only sets the exit status. What went wrong was
+// already said by the program the command ran, such as ssh.
+type ExitCode int
+
+func (e ExitCode) Error() string { return fmt.Sprintf("exit status %d", int(e)) }
+
 // Fail prints a command's error, painting the prefix only when stderr is a
 // terminal.
 func Fail(err error) {

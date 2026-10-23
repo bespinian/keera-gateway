@@ -78,7 +78,9 @@ func newClient() *client {
 		base:     base,
 		baseFrom: from,
 		key:      env("KEERA_OPERATOR_KEY"),
-		http:     &http.Client{Timeout: 30 * time.Second},
+		// No timeout of its own: send gives each request one, and a probe
+		// a longer one.
+		http: &http.Client{},
 	}
 	if c.key == "" {
 		c.signedIn = creds.Gateways[gatewayKey(base)]
@@ -181,7 +183,19 @@ func decode(raw []byte, err error, out any) error {
 // maxAnswer bounds what is read of an answer. A receipt is the largest.
 const maxAnswer = 16 << 20
 
+// requestTimeout bounds a request whose caller set no deadline of its own.
+const requestTimeout = 30 * time.Second
+
+// probeTimeout bounds a request that has the gateway call models, giving each
+// up to 30 seconds. Ctrl-C still ends it sooner.
+const probeTimeout = 10 * time.Minute
+
 func (c *client) send(ctx context.Context, method, path, cred string, in any) ([]byte, http.Header, error) {
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, requestTimeout)
+		defer cancel()
+	}
 	var reader io.Reader
 	if in != nil {
 		raw, err := json.Marshal(in)

@@ -260,18 +260,21 @@ func modelCmd(ctx context.Context, args []string) error {
 		"or goes back to the provider's")
 	r.reword("set", "description", "what this model is for, in a sentence; an empty one clears it")
 	r.reword("set", "kind", "chat, completion, embedding or decision")
+	r.reword("set", "release-date", "the day the model came out, as YYYY-MM-DD")
+	r.reword("set", "location", "where the model runs, such as ch, usa or onprem")
 	if done, err := r.parse(); done {
 		return err
 	}
 	r.f.named = given(r.fs, "display-name")
 	r.f.describe = given(r.fs, "description")
 
-	// These two need no server, so a catalogue can be checked in CI.
+	// These two need no organisation. validate needs no server either, so a
+	// template file can be checked in CI.
 	switch r.verb {
 	case "validate":
 		return r.validate()
 	case "catalogue":
-		return r.catalogue()
+		return r.catalogue(ctx)
 	}
 
 	// apply picks the organisation once the file has been read, so a bad file
@@ -305,8 +308,31 @@ func (r *modelRun) validate() error {
 	return out(r.asJSON, models, func(w *table) { printModels(w, models) })
 }
 
-func (r *modelRun) catalogue() error {
-	return out(r.asJSON, catalog.Providers(), printProviders)
+// providerEntry is one provider as GET /v1/providers serves it.
+type providerEntry struct {
+	catalog.Provider
+	PlatformKey bool `json:"platform_key,omitempty"`
+}
+
+// catalogue asks the gateway, as the panel does, so the list is the one the
+// deployment adds models against and says which keys it holds. Without a
+// sign-in there is no gateway to ask, so it shows the list built into this
+// binary.
+func (r *modelRun) catalogue(ctx context.Context) error {
+	var providers []providerEntry
+	if r.c.bearer() == "" {
+		for _, p := range catalog.Providers() {
+			providers = append(providers, providerEntry{Provider: p})
+		}
+		fmt.Fprintln(os.Stderr, styleErr.warn("Not signed in, so this is the catalogue "+
+			"built into this keera, not the one a deployment uses."))
+	} else {
+		var err error
+		if providers, err = list[providerEntry](ctx, r.c, "/v1/providers"); err != nil {
+			return err
+		}
+	}
+	return out(r.asJSON, providers, func(w *table) { printProviders(w, providers) })
 }
 
 func modelAlias(m policy.Model) string { return m.Alias }
@@ -488,16 +514,24 @@ func modelDeleteLines(m policy.Model, filters, routers []string) []string {
 	return append(lines, "Usage history and the audit log are kept.")
 }
 
-func printProviders(w *table) {
-	for i, p := range catalog.Providers() {
+func printProviders(w *table, providers []providerEntry) {
+	for i, p := range providers {
 		if i > 0 {
 			_, _ = fmt.Fprintln(w)
 		}
-		_, _ = fmt.Fprintf(w, "%s - %s\n", p.Name, p.Endpoint)
+		// Only someone who can add a model is told where a provider is.
+		if p.Endpoint != "" {
+			_, _ = fmt.Fprintf(w, "%s - %s\n", p.Name, p.Endpoint)
+		} else {
+			_, _ = fmt.Fprintln(w, p.Name)
+		}
 		if p.Summary != "" {
 			_, _ = fmt.Fprintf(w, "  %s\n", p.Summary)
 		}
 		_, _ = fmt.Fprintf(w, "  runs in %s, serves %s\n", p.Location, kindNames(p.Kinds))
+		if p.PlatformKey {
+			_, _ = fmt.Fprintf(w, "  this deployment holds its key, so a model here takes none\n")
+		}
 		if p.NeedsProductID {
 			_, _ = fmt.Fprintf(w, "  its address is per customer, so a model "+
 				"here also needs --product-id\n")

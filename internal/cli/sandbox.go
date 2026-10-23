@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -391,7 +392,13 @@ func sshInto(ctx context.Context, c *client, org, name string, rest []string) er
 	if err := cmd.Run(); err != nil {
 		if exit, ok := errors.AsType[*exec.ExitError](err); ok {
 			// ssh exits with the remote command's status, which a script needs.
-			os.Exit(exit.ExitCode())
+			code := exit.ExitCode()
+			if code < 0 {
+				// Ended by a signal, usually Ctrl-C, which shells report as
+				// 128 plus SIGINT.
+				code = 130
+			}
+			return ExitCode(code)
 		}
 		return fmt.Errorf("running ssh: %w", err)
 	}
@@ -420,7 +427,28 @@ func sshOptions(proxy string) [][2]string {
 // gateway at base. It names that gateway, so the proxy cannot end up at
 // another one: ssh runs it without this invocation's --url.
 func proxyCommand(self, base, target, orgID string) string {
-	return fmt.Sprintf("%s --url %s sandbox proxy %s --org %s", self, base, target, orgID)
+	return fmt.Sprintf("%s --url %s sandbox proxy %s --org %s",
+		proxyWord(self), proxyWord(base), target, orgID)
+}
+
+// proxyWord quotes s for the ProxyCommand when it has to be, as for a program
+// installed under a path with a space. ssh runs the command through a shell,
+// except on Windows, and reads a % as the start of a token, so a literal one
+// is doubled.
+func proxyWord(s string) string {
+	s = strings.ReplaceAll(s, "%", "%%")
+	safe := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/_.:=@+,-%"
+	if runtime.GOOS == "windows" {
+		safe += `\`
+	}
+	switch {
+	case s != "" && strings.Trim(s, safe) == "":
+		return s
+	case runtime.GOOS == "windows":
+		return `"` + s + `"`
+	default:
+		return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	}
 }
 
 // sandboxUser is who a sandbox is entered as. It matches the uid the drivers

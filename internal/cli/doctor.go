@@ -31,20 +31,23 @@ func doctorCmd(ctx context.Context, args []string) error {
 		q.Set("probe", "1")
 	}
 	// An organisation is optional: without one, the checks that need it are
-	// skipped.
-	org, err := orgIfGiven(ctx, c, r.org)
-	if err != nil {
+	// skipped, so only a given one that cannot be found is an error.
+	org, err := resolveOrg(ctx, c, r.org)
+	if err != nil && r.org != "" {
 		return err
 	}
 	if org != "" {
 		q.Set("org_id", org)
-	} else if only, err := theOnlyOrg(ctx, c, ""); err == nil && only != "" {
-		q.Set("org_id", only)
 	}
 
 	path := "/v1/diagnostics"
 	if len(q) > 0 {
 		path += "?" + q.Encode()
+	}
+	if *probe {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, probeTimeout)
+		defer cancel()
 	}
 	var d control.Diagnosis
 	if err := c.do(ctx, "GET", path, nil, &d); err != nil {
