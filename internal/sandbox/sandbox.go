@@ -213,6 +213,72 @@ func noRuntime(c policy.SandboxClass, driver string) error {
 		c.Name, c.Isolation, driver, strings.ToUpper(string(c.Isolation)))
 }
 
+// The labels on every object a driver writes, Kubernetes or podman. They let a
+// platform engineer see whose sandbox it is without the panel.
+const (
+	labelManagedBy = "app.kubernetes.io/managed-by"
+	labelName      = "app.kubernetes.io/name"
+	labelSandboxID = "keera.dev/sandbox-id"
+	labelOrg       = "keera.dev/org"
+	labelProject   = "keera.dev/project"
+	labelClass     = "keera.dev/class"
+	labelPurpose   = "keera.dev/purpose"
+	// annotationOwner is an email address. It is an annotation because a
+	// label value cannot hold an @, and an address should not be selectable.
+	annotationOwner = "keera.dev/owner"
+)
+
+// objectName is the developer's name plus the tail of the id. The name alone
+// is not unique across organisations, and the id alone is unreadable in
+// `kubectl get pods`. It depends only on the Ref, so a restarted gateway finds
+// what it left running.
+func objectName(ref Ref) string {
+	name := ref.Name
+	if name == "" {
+		name = "sandbox"
+	}
+	return name + "-" + shortID(ref.ID)
+}
+
+// shortID is the end of an id without its prefix, which is enough to tell
+// objects apart in a name the cluster limits in length.
+func shortID(id string) string {
+	if i := strings.IndexByte(id, '_'); i >= 0 {
+		id = id[i+1:]
+	}
+	if len(id) > 8 {
+		id = id[len(id)-8:]
+	}
+	return id
+}
+
+// labelsFor is the label set on every object for a sandbox, shared with the
+// claim path and podman so they cannot drift.
+func labelsFor(spec Spec) map[string]string {
+	labels := map[string]string{
+		labelManagedBy: "keera",
+		labelName:      "keera-sandbox",
+		labelSandboxID: spec.ID,
+		labelClass:     spec.Class.Name,
+		labelPurpose:   string(spec.Purpose),
+	}
+	if spec.Org != "" {
+		labels[labelOrg] = spec.Org
+	}
+	if spec.Project != "" {
+		labels[labelProject] = spec.Project
+	}
+	return labels
+}
+
+func annotationsFor(spec Spec) map[string]string {
+	annotations := map[string]string{}
+	if spec.Owner != "" {
+		annotations[annotationOwner] = spec.Owner
+	}
+	return annotations
+}
+
 // The home volume. It is one volume because everything that should survive a
 // suspend - working copy, build cache, shell history - lives under home. The
 // image's sshd_config and entrypoint use the same path and user.

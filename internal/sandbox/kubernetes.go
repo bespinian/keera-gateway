@@ -9,18 +9,15 @@ import (
 	"net/url"
 	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
 )
 
 // The Kubernetes driver writes one Sandbox object per sandbox, and the
-// agent-sandbox controller (sigs.k8s.io/agent-sandbox, agents.x-k8s.io/v1beta1)
-// runs it.
-//
-// The controller gives us a stable identity, a volume that survives a suspend,
-// and a scheduled end - without us owning a controller:
+// agent-sandbox controller (sigs.k8s.io/agent-sandbox) runs it. It gives a
+// stable identity, a volume that survives a suspend, and a scheduled end,
+// without Keera owning a controller:
 //
 //	spec.shutdownTime    when it tears the sandbox down, even if the gateway is gone
 //	spec.shutdownPolicy  whether the object survives that
@@ -35,22 +32,6 @@ const (
 	sandboxAPIGroup   = "agents.x-k8s.io"
 	sandboxAPIVersion = "v1beta1"
 	sandboxAPIPath    = "/apis/" + sandboxAPIGroup + "/" + sandboxAPIVersion
-)
-
-// The labels on every object a driver writes, Kubernetes objects and podman
-// containers alike. They let a platform engineer see whose sandbox it is
-// without a login to the panel.
-const (
-	labelManagedBy = "app.kubernetes.io/managed-by"
-	labelName      = "app.kubernetes.io/name"
-	labelSandboxID = "keera.dev/sandbox-id"
-	labelOrg       = "keera.dev/org"
-	labelProject   = "keera.dev/project"
-	labelClass     = "keera.dev/class"
-	labelPurpose   = "keera.dev/purpose"
-	// annotationOwner is an email address. It is an annotation because a
-	// label value cannot hold an @, and an address should not be selectable.
-	annotationOwner = "keera.dev/owner"
 )
 
 type KubernetesOptions struct {
@@ -120,51 +101,21 @@ func NewKubernetes(ctx context.Context, opts KubernetesOptions) (*Kubernetes, er
 
 func (k *Kubernetes) Name() string { return "kubernetes" }
 
-// Capabilities reports what this driver does. The isolation tier comes from
-// the runtime mapping, so the driver cannot claim a tier it cannot deliver.
+// Capabilities derives the isolation tiers from the runtime mapping, so the
+// driver cannot claim one it cannot deliver.
 func (k *Kubernetes) Capabilities() Capabilities {
 	return capabilitiesFor(k.opts.Runtimes, k.opts.Warm)
 }
 
-// collection is the path of the sandboxes in the namespace.
 func (k *Kubernetes) collection() string {
 	return sandboxAPIPath + "/namespaces/" + url.PathEscape(k.opts.Namespace) + "/sandboxes"
 }
 
-// object is the path of one Sandbox.
 func (k *Kubernetes) object(ref Ref) string { return k.sandboxPath(objectName(ref)) }
 
 func (k *Kubernetes) sandboxPath(name string) string {
 	return k.collection() + "/" + url.PathEscape(name)
 }
-
-// objectName is the Kubernetes name for a sandbox: the developer's name plus
-// the tail of the id.
-//
-// The name alone is not unique across organisations, and the id alone is
-// unreadable in `kubectl get pods`. It depends only on the Ref, so a restarted
-// gateway finds what it left running.
-func objectName(ref Ref) string {
-	name := ref.Name
-	if name == "" {
-		name = "sandbox"
-	}
-	return name + "-" + shortID(ref.ID)
-}
-
-// shortID is the end of an id without its prefix, which is enough to tell
-// objects apart in a name the cluster limits in length.
-func shortID(id string) string {
-	if i := strings.IndexByte(id, '_'); i >= 0 {
-		id = id[i+1:]
-	}
-	if len(id) > 8 {
-		id = id[len(id)-8:]
-	}
-	return id
-}
-
-/* --------------------------------------------------------------- the object */
 
 // kubeSandbox is the part of the Sandbox resource this driver reads or
 // writes. The rest belongs to the controller.
@@ -348,33 +299,6 @@ func (k *Kubernetes) Create(ctx context.Context, spec Spec) (Status, error) {
 		return Status{}, err
 	}
 	return k.statusOf(spec.Ref, &created), nil
-}
-
-// labelsFor is the label set on every object for a sandbox, shared with the
-// claim path and podman so they cannot drift.
-func labelsFor(spec Spec) map[string]string {
-	labels := map[string]string{
-		labelManagedBy: "keera",
-		labelName:      "keera-sandbox",
-		labelSandboxID: spec.ID,
-		labelClass:     spec.Class.Name,
-		labelPurpose:   string(spec.Purpose),
-	}
-	if spec.Org != "" {
-		labels[labelOrg] = spec.Org
-	}
-	if spec.Project != "" {
-		labels[labelProject] = spec.Project
-	}
-	return labels
-}
-
-func annotationsFor(spec Spec) map[string]string {
-	annotations := map[string]string{}
-	if spec.Owner != "" {
-		annotations[annotationOwner] = spec.Owner
-	}
-	return annotations
 }
 
 // volumeClaimsFor is the home volume claim, or nil for a class with no disk.

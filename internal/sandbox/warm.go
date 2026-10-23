@@ -20,11 +20,21 @@ const (
 	warmAPIPath    = "/apis/" + warmAPIGroup + "/" + warmAPIVersion
 )
 
-// Backing says which object a sandbox is made of.
-//
-// A claim and a Sandbox are addressed differently, and every call needs to
-// know which without an extra round trip. It is stored on the row, so turning
-// warm pools off does not orphan existing claims.
+// Pooler is a driver that can keep warm pools. Its Capabilities say whether
+// they are on.
+type Pooler interface {
+	// EnsurePool makes one class's warm pool match the catalogue.
+	EnsurePool(ctx context.Context, class policy.SandboxClass) error
+	// PrunePools removes every pool whose poolKey is not in keep.
+	PrunePools(ctx context.Context, keep map[string]bool) error
+}
+
+var _ Pooler = (*Kubernetes)(nil)
+
+// Backing says which object a sandbox is made of. A claim and a Sandbox are
+// addressed differently, and every call needs to know which without an extra
+// round trip. It is stored on the row, so turning warm pools off does not
+// orphan existing claims.
 type Backing string
 
 const (
