@@ -383,9 +383,13 @@ func (s *Server) paymentReceipt(w http.ResponseWriter, r *http.Request, p *authn
 		s.fail(w, err)
 		return
 	}
+	if pm.Kind == store.PaymentGrant {
+		conflict(w, "no_receipt", "a grant has no receipt: nobody paid for it")
+		return
+	}
 	if pm.State != store.PaymentPaid || pm.TransactionID == 0 {
-		conflict(w, "no_receipt", "only a paid payment by card, TWINT or PostFinance Pay has "+
-			"a receipt; this one is "+string(pm.State)+" "+string(pm.Kind))
+		conflict(w, "no_receipt", "only a paid payment has a receipt; this one is "+
+			string(pm.State))
 		return
 	}
 	doc, err := pay.Client.InvoiceDocument(r.Context(), pm.TransactionID)

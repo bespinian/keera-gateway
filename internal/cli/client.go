@@ -144,29 +144,30 @@ func (c *client) credential() (string, error) {
 
 // do makes an authenticated call, and is what every command goes through.
 func (c *client) do(ctx context.Context, method, path string, in, out any) error {
-	raw, err := c.fetch(ctx, method, path, in)
+	raw, _, err := c.fetch(ctx, method, path, in)
 	return decode(raw, err, out)
 }
 
-// fetch is do for an answer that is a file, not JSON.
-func (c *client) fetch(ctx context.Context, method, path string, in any) ([]byte, error) {
+// fetch is do for an answer that is a file, not JSON. The headers say what
+// the server named the file.
+func (c *client) fetch(ctx context.Context, method, path string, in any) ([]byte, http.Header, error) {
 	cred, err := c.credential()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	raw, err := c.send(ctx, method, path, cred, in)
+	raw, header, err := c.send(ctx, method, path, cred, in)
 	// A refused token is a sign-in that ended elsewhere: it expired, the
 	// person's role changed, or they signed out everywhere.
 	var apiErr *apiError
 	if c.key == "" && errors.As(err, &apiErr) && apiErr.Status == http.StatusUnauthorized {
-		return nil, fmt.Errorf("your sign-in to %s is no longer valid: run 'keera login' again", c.base)
+		return nil, nil, fmt.Errorf("your sign-in to %s is no longer valid: run 'keera login' again", c.base)
 	}
-	return raw, err
+	return raw, header, err
 }
 
 // anon makes a call without a credential, for the sign-in routes.
 func (c *client) anon(ctx context.Context, method, path string, in, out any) error {
-	raw, err := c.send(ctx, method, path, "", in)
+	raw, _, err := c.send(ctx, method, path, "", in)
 	return decode(raw, err, out)
 }
 
@@ -180,18 +181,18 @@ func decode(raw []byte, err error, out any) error {
 // maxAnswer bounds what is read of an answer. A receipt is the largest.
 const maxAnswer = 16 << 20
 
-func (c *client) send(ctx context.Context, method, path, cred string, in any) ([]byte, error) {
+func (c *client) send(ctx context.Context, method, path, cred string, in any) ([]byte, http.Header, error) {
 	var reader io.Reader
 	if in != nil {
 		raw, err := json.Marshal(in)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		reader = bytes.NewReader(raw)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.base+httpx.ControlPrefix+path, reader)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if cred != "" {
 		req.Header.Set("Authorization", "Bearer "+cred)
@@ -204,24 +205,24 @@ func (c *client) send(ctx context.Context, method, path, cred string, in any) ([
 		// When the built-in default does not answer, the likelier cause is
 		// that the person meant their own deployment and never said so.
 		if c.baseFrom == "the default" {
-			return nil, fmt.Errorf("reaching the control API at %s: %w; nothing said which "+
+			return nil, nil, fmt.Errorf("reaching the control API at %s: %w; nothing said which "+
 				"gateway to use, so this is the built-in default - the hosted one. "+
 				"Sign in to yours with 'keera login --url https://keera.example.ch'", c.base, err)
 		}
-		return nil, fmt.Errorf("reaching the control API at %s (%s): %w", c.base, c.baseFrom, err)
+		return nil, nil, fmt.Errorf("reaching the control API at %s (%s): %w", c.base, c.baseFrom, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxAnswer+1))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if resp.StatusCode >= 300 {
-		return nil, &apiError{Status: resp.StatusCode, Message: errorMessage(raw)}
+		return nil, nil, &apiError{Status: resp.StatusCode, Message: errorMessage(raw)}
 	}
 	// Cut short, a file would be saved broken.
 	if len(raw) > maxAnswer {
-		return nil, fmt.Errorf("the answer from %s is larger than %d MiB", c.base, maxAnswer>>20)
+		return nil, nil, fmt.Errorf("the answer from %s is larger than %d MiB", c.base, maxAnswer>>20)
 	}
-	return raw, nil
+	return raw, resp.Header, nil
 }

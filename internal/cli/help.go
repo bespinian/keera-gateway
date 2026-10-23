@@ -642,10 +642,10 @@ var commands = []command{
 				flags:    []string{"below", "amount", "off", "json"},
 				examples: []string{"keera billing auto-topup --below 50 --amount 200", "keera billing auto-topup --off"},
 				prose: "When a charge fails, no other is tried until the setting is saved " +
-					"again or someone tops up by hand."},
+					"again or someone pays for credit. A grant does not count."},
 			{name: "forget-card", aliases: []string{"remove-card"},
 				summary: "remove the saved card, which stops the automatic top-up",
-				flags:   []string{"yes"},
+				flags:   []string{"yes", "json"},
 				prose: "The card is removed here and at PostFinance. 'keera billing topup " +
 					"--save-card' saves a new one."},
 			{name: "payments", summary: "the payments, newest first",

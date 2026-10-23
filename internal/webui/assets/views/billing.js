@@ -376,7 +376,7 @@ async function creditSection(ctx) {
         "warn",
         { style: { marginTop: "16px" } },
         `The last automatic top-up failed: ${a.topup_error} ` +
-          "No other is tried until you save the automatic top-up again or add credit by hand.",
+          "No other is tried until you save the automatic top-up again or pay for credit. A grant does not count.",
       )
     : null;
 

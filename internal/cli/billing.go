@@ -5,8 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"mime"
+	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/bespinian/keera-gateway/internal/policy"
@@ -35,15 +38,18 @@ func billingCmd(ctx context.Context, args []string) error {
 	r.reword("invoiced", "org", "organisation, by name or id (required)")
 	r.fs.StringVar(&r.month, "month", "", "the month to bill, as YYYY-MM (default: this month)")
 	r.fs.Float64Var(&r.amount, "amount", 0, "an amount in CHF, such as 100")
+	r.reword("topup", "amount", "an amount in CHF, such as 100 (required)")
+	r.reword("grant", "amount", "an amount in CHF, such as 100 (required)")
 	r.fs.Float64Var(&r.below, "below", 0, "the balance in CHF that starts an automatic top-up")
 	r.fs.BoolVar(&r.off, "off", false, "turn the automatic top-up off")
 	r.reword("invoiced", "off", "make it pay in advance again")
 	r.fs.BoolVar(&r.saveCard, "save-card", false,
 		"keep the card for automatic top-ups and the next payment")
 	r.fs.StringVar(&r.note, "note", "", "why, shown in the organisation's payments")
+	r.reword("grant", "note", "why, shown in the organisation's payments (required)")
 	r.fs.IntVar(&r.limit, "limit", reportLimit, limitUsage)
 	r.fs.StringVar(&r.output, "output", "",
-		"the file to save it to, or - for standard output (default: keera-receipt-<payment>.pdf)")
+		"the file to save it to, or - for standard output (default: keera-receipt-<date>-<payment>.pdf)")
 	if done, err := r.parse(); done {
 		return err
 	}
@@ -311,11 +317,10 @@ func (r *billingRun) forgetCard(ctx context.Context) error {
 			return err
 		}
 	}
-	if err := r.c.do(ctx, "DELETE", inOrg("/v1/billing/account/card", orgID), nil, nil); err != nil {
-		return err
-	}
-	fmt.Println("The saved card is forgotten, and the automatic top-up stops with it.")
-	return nil
+	return doOut(ctx, r.c, "DELETE", inOrg("/v1/billing/account/card", orgID), nil, r.asJSON,
+		func(w *table, _ map[string]any) {
+			_, _ = fmt.Fprintln(w, "The saved card is forgotten, and the automatic top-up stops with it.")
+		})
 }
 
 func (r *billingRun) grant(ctx context.Context) error {
@@ -387,7 +392,7 @@ func (r *billingRun) payments(ctx context.Context) error {
 // renders for it.
 func (r *billingRun) receipt(ctx context.Context) error {
 	paymentID := r.fs.Arg(0)
-	pdf, err := r.c.fetch(ctx, "GET", "/v1/billing/payments/"+url.PathEscape(paymentID)+"/receipt", nil)
+	pdf, header, err := r.c.fetch(ctx, "GET", "/v1/billing/payments/"+url.PathEscape(paymentID)+"/receipt", nil)
 	if err != nil {
 		return err
 	}
@@ -395,12 +400,27 @@ func (r *billingRun) receipt(ctx context.Context) error {
 		_, err := os.Stdout.Write(pdf)
 		return err
 	}
-	file := cmp.Or(r.output, "keera-receipt-"+paymentID+".pdf")
+	file := cmp.Or(r.output, receiptName(header), "keera-receipt-"+paymentID+".pdf")
 	if err := os.WriteFile(file, pdf, 0o644); err != nil {
 		return err
 	}
 	fmt.Println("Saved the receipt to " + file + ".")
 	return nil
+}
+
+// receiptName is the name the server gave the receipt, so the command saves
+// it under the same name as the panel's download. Only the base is kept: the
+// name must not place the file outside the current directory.
+func receiptName(h http.Header) string {
+	_, params, err := mime.ParseMediaType(h.Get("Content-Disposition"))
+	if err != nil {
+		return ""
+	}
+	name := filepath.Base(params["filename"])
+	if name == "." || name == "/" || name == ".." {
+		return ""
+	}
+	return name
 }
 
 func spansOrgs(list []store.Payment) bool {

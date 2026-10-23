@@ -88,9 +88,10 @@ one-hour cache writes.
 When no usage record comes back, the call is billed the most it may have used:
 its whole body as prompt and its whole output ceiling as answer. This happens
 when the answer is too large to read (`KEERA_MAX_RESPONSE_BYTES`), when the
-provider takes longer than the gateway waits, or when it sends no record. It
-applies to the calls of filters and routers too. The request's usage row is
-marked as an estimate, and the gateway logs a warning.
+provider takes longer than the gateway waits, or when it sends no record. For
+the request's own call, its usage row is marked as an estimate and the gateway
+logs a warning. The calls of filters and routers are billed the same way, but
+without the mark or the warning.
 
 ## The monthly report
 
@@ -102,7 +103,9 @@ KEERA_ORG=<org> keera billing    # operators: one organisation
 
 One row per organisation and provider model, with calls, tokens and the amount
 in CHF. With [payments](#pay-in-advance) on, a last column says how much of the
-amount was taken from prepaid credit.
+amount was taken from prepaid credit. For an organisation
+[billed by invoice](#for-operators) it is the whole amount, as its credit
+goes below zero.
 
 Administrators see their own organisation. Operators see every organisation.
 
@@ -156,8 +159,9 @@ there after they pay. On your own machine, `http://localhost`, any
 
 A setting that cannot work stops the start: only some of the three
 `KEERA_BILLING_POSTFINANCE_*` settings, `KEERA_BILLING_POSTFINANCE_URL` or
-`KEERA_BILLING_VAT` without them, a space id that is not a number, or a VAT that
-cannot be read.
+`KEERA_BILLING_VAT` without them, a space id that is not a number, an
+authentication key that is not base64, a VAT that is not a number from 0 to
+100, no provider key, or a `KEERA_PUBLIC_URL` that is not `https`.
 
 ### Turning it on
 
@@ -225,9 +229,11 @@ minutes, so a burst of traffic is not paid off by a run of charges. Every 30
 seconds, one replica checks.
 
 When a charge is declined, no other is tried. The panel shows why. Saving the
-automatic top-up again, or adding credit by hand, tries again. When
-PostFinance cannot be reached, the next try is after 10 minutes.
+automatic top-up again, or a top-up that is paid, tries again. A grant does
+not. When PostFinance cannot be reached, the next try is after 10
+minutes.
 
+`keera billing auto-topup --off` turns it off and keeps the card.
 `keera billing forget-card` removes the card, here and at PostFinance, and
 turns the automatic top-up off. Saving a new card replaces the old one.
 
@@ -245,7 +251,7 @@ up; `keera org set <org> --lift-limit` does.
 
 An organisation **billed by invoice** may use the keys without credit. Its use
 is still metered, and its credit goes below zero. Bill it from the monthly
-report. `--off` makes it pay in advance again.
+report: its "from credit" column is the whole amount, not money already paid. `--off` makes it pay in advance again.
 
 ### How a payment is confirmed
 
@@ -255,12 +261,13 @@ payment counts as paid only in PostFinance's state **Fulfill**, and only with
 the amount and currency Keera asked for. A payment Keera already marked failed
 is still read, so one paid late is still credited.
 
-A lost webhook does not lose a payment. Opening **Billing** checks the
-organisation's recent pending payments at once, and every 30 seconds one
-replica checks those pending for more than a minute, for up to a day. After
-that, only the webhook settles a payment. An automatic top-up still open after
-a day is marked failed, and the log names its transaction, so someone can look
-it up in PostFinance.
+A lost webhook does not lose a payment. Opening **Billing** checks at once up
+to 5 pending payments the organisation started in the last hour, and every 30
+seconds one replica checks those pending for more than a minute, for up to a
+day. After that, only the webhook settles a payment. A payment interrupted
+before PostFinance made a transaction for it is marked failed after 10 minutes. An automatic top-up still
+open after a day is marked failed, and the log names its transaction, so
+someone can look it up in PostFinance.
 
 ## Keep in mind
 
@@ -277,19 +284,22 @@ it up in PostFinance.
 - **Running requests hold credit.** A request is charged when it ends. Until
   then, it holds the most it may cost: its whole body as prompt, plus its
   output ceiling (64,000 tokens if it sets none), at the dearest model it may
-  reach. A new request starts only while some credit is not held. So many
+  reach. Each route step's decision is added twice, since an unreadable answer
+  is asked again, and so is a rewrite of the whole body by each filter. A new
+  request starts only while some credit is not held. So many
   requests started together cannot all spend the same credit.
 - **Credit overshoots a little.** The last request let in may cost more than
   what was free. A request without an output ceiling may write more than it
   holds. Each replica holds only its own requests, and reads the balance every
   `KEERA_SPEND_REFRESH`. So credit can go slightly below zero.
 - **A router or filter on the keys counts.** A request needs credit when its
-  model, any model its router may choose, the model its router decides with,
-  or one of its filters' models is on the deployment's keys.
+  model, any model its router may choose, the model a route step in it decides
+  with, or one of its filters' models is on the deployment's keys.
 - **Dropped events are not billed.** If the database is away for longer than
   the usage buffer holds, events are dropped, and their billing rows with them.
   `/readyz` reports the count as `usage_dropped`. Events that carry billing
   rows have a buffer of their own, written first, so a flood of refused
   requests cannot push them out. When Postgres refuses one event, only that
-  event's usage row is lost: the rest of its batch and its own billing rows are
-  still written.
+  event is lost: its usage row and daily totals, and, if it has no billing
+  rows, what it counted against budgets. The rest of its batch and its own
+  billing rows are still written.
