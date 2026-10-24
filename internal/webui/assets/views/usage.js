@@ -55,7 +55,9 @@ export async function usageView(ctx) {
     user: res.user_names || {},
     client: res.client_names || {},
   };
-  const nameOf = (id) => names[groupBy]?.[id];
+  // A user is shown by name when they have one, with the address under it.
+  const fullNames = groupBy === "user" ? res.user_full_names || {} : {};
+  const nameOf = (id) => fullNames[id] || names[groupBy]?.[id];
   const total = rows.reduce((a, r) => a + r.cost_micros, 0);
   const requests = rows.reduce((a, r) => a + r.requests, 0);
 
@@ -189,15 +191,23 @@ export async function usageView(ctx) {
       "div",
       { class: "stack" },
       h("span", {}, named),
-      // The id under the name, unless they are the same, as for an
-      // unrecognised client.
-      named === r.group
-        ? null
-        : h(
-            "span",
-            { class: "mono faint", style: { fontSize: "11px" } },
-            r.group,
-          ),
+      // Under the name, a user's address, or the id, unless it is the name
+      // itself, as for an unrecognised client.
+      groupBy === "user"
+        ? fullNames[r.group]
+          ? h(
+              "span",
+              { class: "faint", style: { fontSize: "11px" } },
+              names.user[r.group],
+            )
+          : null
+        : named === r.group
+          ? null
+          : h(
+              "span",
+              { class: "mono faint", style: { fontSize: "11px" } },
+              r.group,
+            ),
     );
   };
 

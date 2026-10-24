@@ -282,9 +282,24 @@ func (s *Store) KeyNames(ctx context.Context, orgID string) (map[string]string, 
 	return s.names(ctx, "SELECT id, name FROM api_keys WHERE $1 = '' OR org_id = $1", orgID)
 }
 
-// UserEmails maps user ids to addresses, for a report grouped by user.
-func (s *Store) UserEmails(ctx context.Context, orgID string) (map[string]string, error) {
-	return s.names(ctx, "SELECT id, email FROM users WHERE $1 = '' OR org_id = $1", orgID)
+// UserEmails maps user ids to addresses, and to names for those who have one,
+// for a report grouped by user.
+func (s *Store) UserEmails(ctx context.Context, orgID string) (emails, names map[string]string, err error) {
+	type row struct{ email, name string }
+	rows, err := queryMap(ctx, s.pool, func(r *row) []any { return []any{&r.email, &r.name} },
+		"SELECT id, email, name FROM users WHERE $1 = '' OR org_id = $1", orgID)
+	if err != nil {
+		return nil, nil, err
+	}
+	emails = make(map[string]string, len(rows))
+	names = map[string]string{}
+	for id, r := range rows {
+		emails[id] = r.email
+		if r.name != "" {
+			names[id] = r.name
+		}
+	}
+	return emails, names, nil
 }
 
 // names runs an (id, name) query and returns it as a map.

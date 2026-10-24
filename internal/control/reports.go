@@ -424,10 +424,11 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request, p *authn.Principa
 }
 
 // groupLabels maps the ids a report groups by to the names people use. All
-// three are sent every time: they are small, and readers switch groupings
-// often.
+// of them are sent every time: they are small, and readers switch groupings
+// often. A user is labelled by address, which every user has; userNames holds
+// the names of those who have one, for the panel to show beside it.
 type groupLabels struct {
-	projects, keys, users map[string]string
+	projects, keys, users, userNames map[string]string
 }
 
 func (s *Server) groupNames(ctx context.Context, orgID string) (groupLabels, error) {
@@ -441,7 +442,7 @@ func (s *Server) groupNames(ctx context.Context, orgID string) (groupLabels, err
 	if g.keys, err = s.st.KeyNames(ctx, orgID); err != nil {
 		return g, err
 	}
-	if g.users, err = s.st.UserEmails(ctx, orgID); err != nil {
+	if g.users, g.userNames, err = s.st.UserEmails(ctx, orgID); err != nil {
 		return g, err
 	}
 	return g, nil
@@ -451,6 +452,7 @@ func (g groupLabels) addTo(out map[string]any) {
 	out["project_names"] = g.projects
 	out["key_names"] = g.keys
 	out["user_names"] = g.users
+	out["user_full_names"] = g.userNames
 }
 
 func (g groupLabels) label(groupBy, id string) string {
