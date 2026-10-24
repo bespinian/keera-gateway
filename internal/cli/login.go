@@ -287,7 +287,7 @@ func chooseProvider(ctx context.Context, c *client, named string) (string, error
 	}
 	if !cfg.SSO && !cfg.Passkeys {
 		return "", fmt.Errorf("%s has no identity provider configured, so there is "+
-			"nothing to sign in to; use KEERA_OPERATOR_KEY, or configure one - see docs/sso.md",
+			"nothing to sign in to; use KEERA_OPERATOR_KEY, or configure one - see https://docs.keera.ch/operate/sign-on/",
 			c.base)
 	}
 	names := make([]string, 0, len(cfg.Providers)+1)

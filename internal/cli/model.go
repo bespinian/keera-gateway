@@ -82,7 +82,7 @@ func registerModelFlags(fs *flag.FlagSet) *modelFlags {
 	fs.BoolVar(&f.noAPIKey, "no-api-key", false, "remove the stored provider key")
 	fs.BoolVar(&f.subscription, "subscription", false,
 		"each caller's own Claude subscription pays; needs --provider anthropic, and takes no "+
-			"API key (see docs/subscriptions.md)")
+			"API key (see https://docs.keera.ch/operate/claude-plans/)")
 	fs.BoolVar(&f.noSubscription, "no-subscription", false,
 		"the organisation pays again; give --api-key too, unless the deployment holds "+
 			"the provider's key")

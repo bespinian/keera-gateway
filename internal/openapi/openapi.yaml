@@ -2099,7 +2099,7 @@ paths:
       description: |
         Administrators only. A `rewrite` or `gate` filter needs `model` and
         `prompt`, and no `rules`. A `pattern` filter needs `rules`, and no
-        `model` or `prompt`. See docs/filters.md.
+        `model` or `prompt`. See https://docs.keera.ch/manage/filters/.
       parameters:
         - $ref: '#/components/parameters/OrgID'
       requestBody:
@@ -2329,7 +2329,7 @@ paths:
         Administrators only. The alias may not be one of the organisation's
         models (409). A new router is put on the organisation's allow-list,
         if it has one, unless the list leaves out a model the router reaches;
-        `warning` then says so. See docs/routers.md.
+        `warning` then says so. See https://docs.keera.ch/manage/routers/.
       parameters:
         - $ref: '#/components/parameters/OrgID'
       requestBody:
@@ -2574,7 +2574,7 @@ paths:
         Administrators only. A new model is put on the organisation's
         allow-list, if it has one. For a provider whose key the deployment
         holds, the backend and prices are set by the gateway and `api_key`
-        must be left out. See docs/providers.md.
+        must be left out. See https://docs.keera.ch/manage/models/.
       parameters:
         - $ref: '#/components/parameters/OrgID'
       requestBody:
@@ -2642,7 +2642,7 @@ paths:
                   description: |
                     Paid by each caller's own Claude plan. Needs provider
                     `anthropic`, kind chat, and no `api_key`. See
-                    docs/subscriptions.md.
+                    https://docs.keera.ch/operate/claude-plans/.
                 enabled:
                   type: boolean
                   description: Left out, a new model starts on and an existing one keeps its state.
@@ -2783,7 +2783,7 @@ paths:
       operationId: putMCPServer
       tags: [mcp-servers]
       summary: Create or replace an MCP server
-      description: Administrators only. See docs/mcp.md.
+      description: Administrators only. See https://docs.keera.ch/manage/mcp/.
       parameters:
         - $ref: '#/components/parameters/OrgID'
       requestBody:
@@ -3849,7 +3849,7 @@ paths:
       tags:
         - reports
       summary: Sessions
-      description: The request log grouped into tasks. A member sees only the sessions of their own keys. See docs/sessions.md.
+      description: The request log grouped into tasks. A member sees only the sessions of their own keys. See https://docs.keera.ch/monitor/requests-and-sessions/.
       parameters:
         - $ref: '#/components/parameters/OrgID'
         - name: from
@@ -4077,7 +4077,7 @@ paths:
       tags:
         - billing
       summary: Monthly bill
-      description: One month of use of the deployment's own provider keys, per organisation and provider model, at list price. Administrators only. See docs/billing.md.
+      description: One month of use of the deployment's own provider keys, per organisation and provider model, at list price. Administrators only. See https://docs.keera.ch/manage/billing/.
       parameters:
         - $ref: '#/components/parameters/OrgID'
         - name: month
@@ -5415,7 +5415,7 @@ paths:
               - deflate
         - name: X-Keera-Session
           in: header
-          description: Names the session (task) this request belongs to, instead of the one the gateway derives from the opening prompt. `X-Session-Id`, `Helicone-Session-Id` and `X-Claude-Code-Session-Id` are read too; the first with a value wins. See docs/sessions.md.
+          description: Names the session (task) this request belongs to, instead of the one the gateway derives from the opening prompt. `X-Session-Id`, `Helicone-Session-Id` and `X-Claude-Code-Session-Id` are read too; the first with a value wins. See https://docs.keera.ch/monitor/requests-and-sessions/.
           schema:
             type: string
       requestBody:
@@ -6030,7 +6030,7 @@ paths:
               - deflate
         - name: X-Keera-Session
           in: header
-          description: Names the session (task) this request belongs to, instead of the one the gateway derives from the opening prompt. `X-Session-Id`, `Helicone-Session-Id` and `X-Claude-Code-Session-Id` are read too; the first with a value wins. See docs/sessions.md.
+          description: Names the session (task) this request belongs to, instead of the one the gateway derives from the opening prompt. `X-Session-Id`, `Helicone-Session-Id` and `X-Claude-Code-Session-Id` are read too; the first with a value wins. See https://docs.keera.ch/monitor/requests-and-sessions/.
           schema:
             type: string
         - name: anthropic-version
@@ -6230,7 +6230,7 @@ paths:
       description: |-
         Anthropic's Messages API: the same chat models, routers and guardrails as chat completions, in Anthropic's format, translated where the model is not Anthropic's. Errors come in Anthropic's shape, with `type: error`.
 
-        For a subscription model, Claude Code sends the caller's Claude sign-in in `Authorization` and the Keera key in `X-Keera-Key`; the gateway passes Anthropic's `anthropic-ratelimit-unified-*` headers back. See docs/subscriptions.md.
+        For a subscription model, Claude Code sends the caller's Claude sign-in in `Authorization` and the Keera key in `X-Keera-Key`; the gateway passes Anthropic's `anthropic-ratelimit-unified-*` headers back. See https://docs.keera.ch/operate/claude-plans/.
   /api/v1/messages/count_tokens:
     post:
       tags:
@@ -6391,7 +6391,7 @@ paths:
               - deflate
         - name: X-Keera-Session
           in: header
-          description: Names the session (task) this request belongs to, instead of the one the gateway derives from the opening prompt. `X-Session-Id`, `Helicone-Session-Id` and `X-Claude-Code-Session-Id` are read too; the first with a value wins. See docs/sessions.md.
+          description: Names the session (task) this request belongs to, instead of the one the gateway derives from the opening prompt. `X-Session-Id`, `Helicone-Session-Id` and `X-Claude-Code-Session-Id` are read too; the first with a value wins. See https://docs.keera.ch/monitor/requests-and-sessions/.
           schema:
             type: string
       requestBody:
@@ -6722,7 +6722,7 @@ paths:
             type: string
         - name: X-Keera-Session
           in: header
-          description: Names the session (task) this request belongs to, instead of the one the gateway derives from the opening prompt. `X-Session-Id`, `Helicone-Session-Id` and `X-Claude-Code-Session-Id` are read too; the first with a value wins. See docs/sessions.md.
+          description: Names the session (task) this request belongs to, instead of the one the gateway derives from the opening prompt. `X-Session-Id`, `Helicone-Session-Id` and `X-Claude-Code-Session-Id` are read too; the first with a value wins. See https://docs.keera.ch/monitor/requests-and-sessions/.
           schema:
             type: string
         - name: X-Keera-Client
@@ -6979,7 +6979,7 @@ components:
       name: X-Keera-Key
       description: |
         An API key, when `Authorization` carries the caller's own Claude
-        sign-in instead. See docs/subscriptions.md.
+        sign-in instead. See https://docs.keera.ch/operate/claude-plans/.
     session:
       type: apiKey
       in: cookie
@@ -7719,7 +7719,7 @@ components:
       type: object
       description: |
         Reads a request before it is forwarded, and may change or stop it.
-        See docs/filters.md.
+        See https://docs.keera.ch/manage/filters/.
       required: [org_id, alias, model, mode, prompt, created_at, updated_at]
       properties:
         org_id:
@@ -7986,7 +7986,7 @@ components:
           type: boolean
     Router:
       type: object
-      description: A tree of steps a request goes through. See docs/routers.md.
+      description: A tree of steps a request goes through. See https://docs.keera.ch/manage/routers/.
       required: [org_id, alias, start, created_at, updated_at]
       properties:
         org_id:
@@ -8477,7 +8477,7 @@ components:
           description: The dated id the maker also uses, such as `claude-haiku-4-5-20251001`.
     MCPServer:
       type: object
-      description: An MCP server the gateway stands in front of. See docs/mcp.md.
+      description: An MCP server the gateway stands in front of. See https://docs.keera.ch/manage/mcp/.
       required: [org_id, alias, url, enabled]
       properties:
         org_id:

@@ -97,7 +97,7 @@ var commands = []command{
 			"A command talks to the gateway --url names, else KEERA_CONTROL_URL, else the " +
 			"one you last signed in to, else the hosted one. KEERA_OPERATOR_KEY, the " +
 			"deployment's own credential, wins over a sign-in. 'keera whoami' says which " +
-			"gateway and credential are in use. See docs/sso.md.",
+			"gateway and credential are in use. See https://docs.keera.ch/reference/cli/.",
 		examples: []string{
 			"keera login                # the gateway the other commands talk to",
 			"keera login --url https://keera.example.ch",
@@ -144,7 +144,7 @@ var commands = []command{
 		summary: "organisations: one per customer, or exactly one",
 		prose: "An organisation's --domain, the part of an address after the @, places a " +
 			"sign-in in it. Once there are two organisations, an address matching no domain " +
-			"is refused, so set it on each, the first one included. See docs/sso.md.\n\n" +
+			"is refused, so set it on each, the first one included. See https://docs.keera.ch/operate/sign-on/.\n\n" +
 			"Every other command acts on one organisation: the one 'org switch' chose. A " +
 			"person can be in several, with a role in each. KEERA_ORG chooses one for a " +
 			"single shell or a pipeline. An organisation is named by its name or its id, " +
@@ -237,7 +237,7 @@ var commands = []command{
 				flags:   []string{"yes", "json"},
 				prose: "They are signed out and their keys revoked; leaving the directory alone " +
 					"does not revoke keys. Their agent sandboxes and any not started yet are " +
-					"terminated, and the rest suspended. See docs/sso.md."},
+					"terminated, and the rest suspended. See https://docs.keera.ch/manage/users/."},
 			{name: "enable", args: "<email-or-id>", summary: "let a disabled person sign in again",
 				flags: []string{"json"},
 				prose: "Their old keys stay revoked, so they start with none. Their passkeys " +
@@ -270,7 +270,7 @@ var commands = []command{
 					"--pending it is left for the person it belongs to instead: it has no " +
 					"secret until it is activated, and only whoever activates it sees it.\n\n" +
 					"For a member's --subscription key, add --user; their 'keera connect " +
-					"claude-code --subscription' takes it over. See docs/subscriptions.md.\n\n" +
+					"claude-code --subscription' takes it over. See https://docs.keera.ch/operate/claude-plans/.\n\n" +
 					"Only an administrator issues keys. A member activates, renames, rotates " +
 					"and revokes their own.",
 				examples: []string{
@@ -329,7 +329,7 @@ var commands = []command{
 			"other. 'keera model apply' adds the models of a file to an organisation that " +
 			"already exists.\n\n" +
 			"--description says what a model is for. Clients see it, and a router's " +
-			"instruction step reads it to choose between models. See docs/routers.md.",
+			"instruction step reads it to choose between models. See https://docs.keera.ch/manage/models/.",
 		subs: []subcommand{
 			{name: "list", summary: "the models you can use", flags: []string{"json"}},
 			{name: "add", args: "<alias>", summary: "add a model",
@@ -338,7 +338,7 @@ var commands = []command{
 				prose: "--subscription makes each caller's own Claude subscription pay. The " +
 					"gateway then forwards the caller's Claude sign-in and stores no API key, " +
 					"and only Claude Code signed in to a Claude plan can use the model. See " +
-					"docs/subscriptions.md.",
+					"https://docs.keera.ch/operate/claude-plans/.",
 				examples: []string{
 					"keera model add keera-speed --backend http://vllm:8000/v1 \\\n" +
 						"    --backend-model Qwen/Qwen2.5-Coder-7B-Instruct --max-context-tokens 32768",
@@ -495,7 +495,7 @@ var commands = []command{
 		prose: "A filter reads each request a guardrail applies it to, before it is forwarded. " +
 			"--mode rewrite (the default) and gate use a small model to take data out or refuse " +
 			"the request; --mode pattern applies --rules in the gateway and costs nothing. " +
-			"See docs/filters.md.",
+			"See https://docs.keera.ch/manage/filters/.",
 		subs: []subcommand{
 			{name: "list", summary: "this organisation's filters", flags: []string{"json"}},
 			{name: "add", args: "<alias>", summary: "add a filter",
@@ -538,7 +538,7 @@ var commands = []command{
 			"size, fallback, latency or least-busy, and branches by the model it chose. A " +
 			"limit branches by whether the request is within it. The steps are written as " +
 			"JSON; the simplest router is one route step, which the route flags write for " +
-			"you. The key's guardrails still apply around it. See docs/routers.md.",
+			"you. The key's guardrails still apply around it. See https://docs.keera.ch/manage/routers/.",
 		subs: []subcommand{
 			{name: "list", summary: "this organisation's routers", flags: []string{"json"}},
 			{name: "show", args: "<alias>", summary: "one router, drawn as a tree",
@@ -587,7 +587,7 @@ var commands = []command{
 		prose: "A sandbox is a machine for one task or one working day, with its own API key " +
 			"and an expiry. 'sandbox ssh' attaches through the gateway's one port, and " +
 			"'sandbox agent' starts one task's machine that ends by pushing a branch. " +
-			"See docs/sandboxes.md.",
+			"See https://docs.keera.ch/manage/sandboxes/.",
 		subs: []subcommand{
 			{name: "classes", summary: "the machines this organisation offers", flags: []string{"json"}},
 			{name: "apply", args: "<file>", summary: "add or update every class a template file declares",
@@ -650,7 +650,7 @@ var commands = []command{
 			"provider's list price. On a deployment that takes payments, organisations pay " +
 			"for them in advance, in CHF, by card through PostFinance Checkout. Without " +
 			"credit, such models are refused; the organisation's own models still work. " +
-			"See docs/billing.md.",
+			"See https://docs.keera.ch/manage/billing/.",
 		subs: []subcommand{
 			{name: "report", aliases: []string{"list", "ls"}, summary: "one month's bill",
 				flags:    []string{"month", "json"},
@@ -742,7 +742,7 @@ var commands = []command{
 			"the key may use. Running it again replaces the machine's key. A pending key of " +
 			"yours is activated for it; without one, an administrator gets a new key, and a " +
 			"member is told what to ask for. --print shows the settings instead. " +
-			"--subscription sets up Claude Code on a Claude plan; see docs/subscriptions.md.\n\n" +
+			"--subscription sets up Claude Code on a Claude plan; see https://docs.keera.ch/operate/claude-plans/.\n\n" +
 			"For any other client it prints the configuration on stdout and the instructions " +
 			"on stderr. With no client it lists the ones this deployment can configure.",
 		examples: []string{

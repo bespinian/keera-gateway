@@ -165,7 +165,7 @@ func (r *billingRun) confirmForget(ctx context.Context, orgID string) error {
 
 // errNoPayments is what the payment verbs say on a deployment without them.
 var errNoPayments = errors.New("this deployment takes no payments: nobody pays in advance " +
-	"(see docs/billing.md)")
+	"(see https://docs.keera.ch/manage/billing/)")
 
 func (r *billingRun) creditAccount(ctx context.Context, orgID string) (creditResponse, error) {
 	var res creditResponse

@@ -51,7 +51,7 @@ const (
 func (s *Server) payments(w http.ResponseWriter) *Payments {
 	if s.opts.Payments == nil {
 		switchedOff(w, "payments_disabled",
-			"this deployment takes no payments: nobody pays in advance. See docs/billing.md")
+			"this deployment takes no payments: nobody pays in advance. See https://docs.keera.ch/manage/billing/")
 	}
 	return s.opts.Payments
 }

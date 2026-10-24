@@ -148,7 +148,7 @@ func (s *Server) checkIdentity(d *Diagnosis) {
 			"a person",
 		"name a provider in KEERA_OIDC_PROVIDERS and set its "+
 			"KEERA_OIDC_<NAME>_ISSUER, _CLIENT_ID and _CLIENT_SECRET, or set "+
-			"KEERA_PASSKEYS=true; see docs/sso.md")
+			"KEERA_PASSKEYS=true; see https://docs.keera.ch/operate/sign-on/")
 }
 
 // checkCatalogue checks the models, which is where a deployment that serves
