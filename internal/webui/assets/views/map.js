@@ -606,9 +606,12 @@ function paint(ctx, canvas, tip, scene) {
   /* A click opens a box's screen; hovering shows the numbers that do not
      fit on the box. */
   function locate(e) {
+    // The pointer and the canvas's rectangle come in zoomed pixels, the
+    // boxes in the canvas's own, so undo the panel's `html { zoom }`.
     const r = canvas.getBoundingClientRect();
-    const x = e.clientX - r.left,
-      y = e.clientY - r.top;
+    const zoom = r.width / canvas.clientWidth || 1;
+    const x = (e.clientX - r.left) / zoom,
+      y = (e.clientY - r.top) / zoom;
     for (const n of boxes(scene)) {
       if (x >= n.x && x <= n.x + n.w && y >= n.y && y <= n.y + n.h) return n;
     }
