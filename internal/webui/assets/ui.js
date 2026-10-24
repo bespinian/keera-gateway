@@ -231,6 +231,9 @@ export function icon(path) {
   );
 }
 
+/** Where the user documentation lives. */
+export const docsURL = "https://docs.keera.ch";
+
 export const icons = {
   dashboard: "M3 13h5v8H3zM10 3h5v18h-5zM17 9h4v12h-4z",
   // A rocket, while the first-run checklist stands in for the dashboard.
@@ -253,6 +256,8 @@ export const icons = {
   audit:
     "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M9 13h6M9 17h4",
   orgs: "M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M9 13h.01M9 17h.01M15 9h.01M15 13h.01M15 17h.01",
+  // An open book, for the user documentation.
+  docs: "M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z",
   external:
     "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3",
   signout: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9",

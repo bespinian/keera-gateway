@@ -2827,3 +2827,9 @@ a.pill-button:hover {
     align-items: stretch;
   }
 }
+
+/* Under the first-run checklist: where to read on. */
+.steps-docs {
+  margin-top: 28px;
+  text-align: center;
+}

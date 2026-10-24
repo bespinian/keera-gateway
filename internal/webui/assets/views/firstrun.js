@@ -3,7 +3,7 @@
 // card payments, until the organisation has had credit. A member gets a
 // shorter guide, until one of their keys has made a request.
 
-import { h, icon, icons, pill, isAdmin } from "../ui.js";
+import { h, icon, icons, pill, isAdmin, docsURL } from "../ui.js";
 import { addCredit } from "./billing.js";
 import { openConnectClient, usableKeys } from "./connect.js";
 import { activateKey, confirmRotate, openIssueKey } from "./keys.js";
@@ -233,7 +233,7 @@ function stepList(steps) {
       a.label,
     );
 
-  return h(
+  const list = h(
     "div",
     { class: "steps" },
     steps.map((s, i) => {
@@ -281,5 +281,21 @@ function stepList(steps) {
         ),
       );
     }),
+  );
+  return h(
+    "div",
+    {},
+    list,
+    h(
+      "p",
+      { class: "hint steps-docs" },
+      "Need more help? Read the ",
+      h(
+        "a",
+        { href: docsURL, target: "_blank", rel: "noopener" },
+        "documentation",
+      ),
+      ".",
+    ),
   );
 }

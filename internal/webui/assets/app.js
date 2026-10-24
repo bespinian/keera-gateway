@@ -17,6 +17,7 @@ import {
   personName,
   initials,
   menu,
+  docsURL,
 } from "./ui.js";
 import {
   signIn,
@@ -846,6 +847,7 @@ function accountMenu(anchor) {
       me.chat_url
         ? { label: "Keera Chat", icon: icons.external, href: me.chat_url }
         : null,
+      { label: "Documentation", icon: icons.docs, href: docsURL },
       { separator: true },
       { label: "Sign out", icon: icons.signout, onClick: signOut },
     ],
