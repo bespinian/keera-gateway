@@ -100,12 +100,16 @@ Run `make check` before handing work back.
 
 ## Docs
 
-`docs/` explains the pieces. `run-locally.md` is the development loop and
-`install.md` every setting or where it is explained, retention and sizing;
-`gateway.md`, `filters.md`, `routers.md`, `sandboxes.md`, `providers.md`,
-`subscriptions.md`, `mcp.md`, `sessions.md`, `sso.md` and `billing.md` each
-take one part. Explain each thing
-in one place and link to it. Update them when behaviour changes.
+`docs/` is for operators and contributors: every setting, and how each piece
+works and why. How to use and manage Keera is in the user docs at
+https://docs.keera.ch, from the keera-docs repository; `docs/` links there
+instead of repeating it. Texts users see - CLI help, errors, the panel and
+`openapi.yaml` - link to docs.keera.ch, not to `docs/`. `run-locally.md` is the
+development loop and `install.md` every setting or where it is explained,
+retention and sizing; `gateway.md`, `filters.md`, `routers.md`, `sandboxes.md`,
+`providers.md`, `subscriptions.md`, `mcp.md`, `sessions.md`, `sso.md` and
+`billing.md` each take one part. Explain each thing in one place and link to it.
+Update them when behaviour changes.
 
 ## Instructions
 

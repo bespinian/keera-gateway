@@ -1,6 +1,6 @@
 # Keera Gateway - one endpoint for every AI request
 
-[keera.ch](https://keera.ch)
+[keera.ch](https://keera.ch) · [Documentation](https://docs.keera.ch)
 
 One static Go binary in front of every model you run yourself and every one you
 license. You decide who may use which model, and how. It runs in your own
@@ -79,6 +79,9 @@ That runs the gateway, Postgres, a CPU model and a decision model on one host.
 cannot do. [First run](docs/install.md#first-run) issues a first key and sends
 a request, and [docs/install.md](docs/install.md) covers every setting.
 [docs/run-locally.md](docs/run-locally.md) is the development loop.
+
+How to use and manage Keera is in the [documentation](https://docs.keera.ch).
+`docs/` explains how each piece works and why, for operators and contributors.
 
 `keera doctor` checks the deployment and says what to fix; see
 [When it does not work](docs/install.md#when-it-does-not-work).
