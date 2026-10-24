@@ -1421,6 +1421,7 @@ th[aria-sort] .th-sort {
    number. */
 th.num .th-sort {
   flex-direction: row-reverse;
+  align-items: baseline;
 }
 .sort-arrow {
   font-size: 10px;
