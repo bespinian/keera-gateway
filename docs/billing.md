@@ -4,6 +4,10 @@ A deployment can hold its own API key for a hosted provider. Every
 organisation's models of that provider then use that key, and the deployment
 bills each organisation for what it used, at the provider's list price.
 
+How an organisation reads its bill and pays:
+[Billing](https://docs.keera.ch/manage/billing/). This page explains how it
+works, how to set it up, and why.
+
 This is how a public instance resells a provider. Without such a key, nothing changes: each organisation
 enters its own key, as described in [providers.md](providers.md).
 
@@ -95,26 +99,22 @@ without the mark or the warning.
 
 ## The monthly report
 
-```sh
-keera billing                    # this month, your organisation
-keera billing --month 2026-09
-KEERA_ORG=<org> keera billing    # operators: one organisation
-```
+`keera billing` shows it
+([The monthly bill](https://docs.keera.ch/manage/billing/#the-monthly-bill)).
+An operator picks one organisation with `KEERA_ORG=<org> keera billing`.
 
-One row per organisation and provider model, with calls, tokens and the amount
-in CHF. With [payments](#pay-in-advance) on, a last column says how much of the
-amount was taken from prepaid credit. For an organisation
-[billed by invoice](#for-operators) it is the whole amount, as its credit
-goes below zero.
+With [payments](#pay-in-advance) on, a last column says how much of the amount
+was taken from prepaid credit. For an organisation
+[billed by invoice](#for-operators) it is the whole amount, as its credit goes
+below zero.
 
 Administrators see their own organisation. Operators see every organisation.
 
 The same report is at `GET /control/v1/billing?month=2026-09`, and as CSV with
 `&format=csv`. Months are UTC, like budgets.
 
-In the panel it is **Administration → Billing**, with a CSV button. Only
-administrators and operators see it, and only on a deployment that holds at
-least one provider key.
+In the panel, only administrators and operators see it, and only on a
+deployment that holds at least one provider key.
 
 ## Pay in advance
 
@@ -171,20 +171,10 @@ you [grant it credit](#for-operators).
 
 ### Paying
 
-An administrator opens **Billing** in the panel and clicks **Add credit**, or
-runs:
-
-```sh
-keera billing topup --amount 100 --save-card
-```
-
-They pay on PostFinance's payment page, by card, TWINT or PostFinance Pay.
-Keera never sees the card. Afterwards PostFinance sends them back to the
-panel. The credit is added once PostFinance says the payment went through.
-
-`keera billing credit` shows the balance, the saved card, the automatic
-top-up and the latest payments. `keera billing payments` lists the latest 50
-payments, or as many as `--limit` says, up to 500.
+An administrator adds credit in the panel or with `keera billing topup`
+([Pay in advance](https://docs.keera.ch/manage/billing/#pay-in-advance)).
+Afterwards PostFinance sends them back to the panel. The credit is added once
+PostFinance says the payment went through.
 
 A payment is from CHF 1 to CHF 10,000, in whole centimes. VAT and a
 transaction fee are added on top. The fee is CHF 0.18 plus 1.55% of the
@@ -193,22 +183,13 @@ CHF 100. It pays for the payment and is not added to the credit. The panel
 shows the VAT, the fee and the total under the amount. Automatic top-ups carry
 the fee too.
 
-An organisation somebody created by signing up is limited until its first
-payment, which opens the models and MCP servers inside your network and
-sandboxes to it. See
-[What a new organisation can use](sso.md#what-a-new-organisation-can-use).
+An organisation that signed itself up is limited until its first payment
+([What a new organisation can use](sso.md#what-a-new-organisation-can-use)).
 
 ### Receipts
 
 Every paid payment has a receipt: the invoice PostFinance makes for it, as a
-PDF. Administrators download it in **Billing**, from the button beside the
-payment, or with:
-
-```sh
-keera billing receipt <payment>   # the id from 'keera billing payments'
-```
-
-The control API serves it at `GET /control/v1/billing/payments/<id>/receipt`.
+PDF.
 
 Keera fetches the receipt from PostFinance each time, so it looks the way the
 invoice template of your space says. Put your company's address and VAT number
@@ -216,15 +197,10 @@ there. A grant has no receipt, because nobody paid for it.
 
 ### Automatic top-up
 
-With a saved card, the organisation can top up by itself:
-
-```sh
-keera billing auto-topup --below 50 --amount 200
-```
-
-When the credit falls below CHF 50, the saved card is charged CHF 200, without
-anyone on the payment page. The amount must be at least the threshold, so one
-charge lifts the credit above it. A card is charged at most once every 10
+With a saved card, the organisation can top up by itself
+([Top up automatically](https://docs.keera.ch/manage/billing/#top-up-automatically)).
+The card is charged without anyone on the payment page. The amount must be at
+least the threshold, so one charge lifts the credit above it. A card is charged at most once every 10
 minutes, so a burst of traffic is not paid off by a run of charges. Every 30
 seconds, one replica checks.
 
@@ -233,9 +209,8 @@ automatic top-up again, or a top-up that is paid, tries again. A grant does
 not. When PostFinance cannot be reached, the next try is after 10
 minutes.
 
-`keera billing auto-topup --off` turns it off and keeps the card.
-`keera billing forget-card` removes the card, here and at PostFinance, and
-turns the automatic top-up off. Saving a new card replaces the old one.
+Forgetting the card removes it here and at PostFinance, and turns the automatic
+top-up off. Saving a new card replaces the old one.
 
 ### For operators
 

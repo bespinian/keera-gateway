@@ -8,6 +8,9 @@ This works for Claude Code only. Anthropic allows a Claude sign-in in Claude
 Code and Claude.ai, and nowhere else. Claude.ai in the browser and the desktop
 app do not go through Keera.
 
+To set it up, see [Claude plans](https://docs.keera.ch/operate/claude-plans/).
+This page explains how it works and why.
+
 ## How it works
 
 Claude Code is signed in to the person's Claude plan, and its address is set to
@@ -23,28 +26,17 @@ token says nothing about who it belongs to, so the key is what tells Keera.
 
 ## 1. Turn it on
 
-Claude subscriptions are off by default. The operator turns them on:
-
-```sh
-KEERA_CLAUDE_SUBSCRIPTIONS=true
-```
-
-While they are off, nobody can add a subscription model or issue a
+Claude subscriptions are off by default. The operator turns them on with
+`KEERA_CLAUDE_SUBSCRIPTIONS=true`. While they are off, nobody can add a subscription model or issue a
 subscription key, and the gateway refuses the ones that already exist. A
 template file with a subscription model stops the start.
 
 ## 2. Add a subscription model
 
-An administrator adds one model per Claude model the plan should reach:
-
-```sh
-keera model add claude-opus --provider anthropic \
-    --backend-model claude-opus-5-5 --subscription
-keera model add claude-haiku --provider anthropic \
-    --backend-model claude-haiku-4-5 --subscription
-```
-
-In a template file:
+An administrator adds one model per Claude model the plan should reach, in the
+panel or with `keera model add --subscription`
+([Claude plans](https://docs.keera.ch/operate/claude-plans/#set-it-up)). In a
+template file:
 
 ```yaml
 models:
@@ -53,9 +45,6 @@ models:
     backend_model: claude-opus-5-5
     subscription: true
 ```
-
-In the panel, open **Models → Add model**, click **Add** on an Anthropic model,
-then tick **Paid by each person's Claude subscription**.
 
 A subscription model:
 
@@ -83,17 +72,9 @@ organisation pays again: give `--api-key` too, unless the deployment holds
 
 ## 3. Send everyone's Claude Code through Keera
 
-An Owner of the Claude organisation sets the address for everyone, in the
-claude.ai admin console under **Admin Settings > Claude Code > Managed
-settings**:
-
-```json
-{
-  "env": {
-    "ANTHROPIC_BASE_URL": "https://keera.example.ch/api"
-  }
-}
-```
+An Owner of the Claude organisation sets `ANTHROPIC_BASE_URL` for everyone, in
+the claude.ai admin console
+([Claude plans](https://docs.keera.ch/operate/claude-plans/#set-it-up)).
 
 Claude Code asks each person to approve the change once, and quits if they
 refuse. A person cannot override it. From then on, every request goes to Keera,
@@ -123,23 +104,13 @@ before rolling it out.
 
 ## 4. Each person, once per machine
 
-Only an administrator issues keys. So first, an administrator issues each
-member one subscription key per machine, left for them to activate:
-
-```sh
-keera key create --subscription --pending --user ada@example.ch --name "Ada's Claude Code"
-```
-
-It has no secret until the member activates it, so nobody has to pass it on.
+An administrator issues each member one subscription key per machine, left for
+them to activate. It has no secret until then, so nobody has to pass it on.
 
 When the address comes from the claude.ai admin console, run `claude` and
 `/login` first, and approve the managed settings. Claude Code then has a copy
-of them, so the command below sees the address. Then run:
-
-```sh
-keera login
-keera connect claude-code --subscription --model claude-opus
-```
+of them, so `keera connect claude-code --subscription` sees the address
+([Claude plans](https://docs.keera.ch/operate/claude-plans/#set-it-up)).
 
 This works as without `--subscription`
 ([Connecting Claude Code](gateway.md#connecting-claude-code)): the machine gets
@@ -165,31 +136,25 @@ when it finds one.
 
 - It reaches subscription models only, because it sits in a settings file in
   plain text. Only its filters spend the organisation's money.
-- It reaches no router, no MCP server and not the playground.
 - It must be sent in `X-Keera-Key`, next to a Claude sign-in.
 - It always belongs to a person. Disabling the person revokes it.
 - Nothing ties it to one Claude account. The token cannot be checked without
   asking Anthropic, so a key sent with someone else's sign-in is recorded as
   the key holder's.
 
-`keera key create --subscription` issues one. The panel marks these keys
-**Claude plan**.
-
 ## What it costs
 
 The plan pays a fixed fee, so a subscription request costs the organisation
-nothing:
+nothing; see
+[What it costs](https://docs.keera.ch/operate/claude-plans/#what-it-costs).
+What is behind the figures:
 
 - **Spend** is 0, and no budget is charged or checked. Filters still spend the
   organisation's money, so a key with filters still meets its budgets.
-- **What the plan paid for** is what the same requests would have cost on
-  Anthropic's API, from the model's prices. It is never charged. It shows
-  whether the plan is worth it. The dashboard shows it next to spend as
-  "covered by Claude plans", and the **API keys** screen per key as "on the plan".
-- **How much of the plan is used** is the share of the plan's usage limit, as
-  Anthropic reports it on each answer: the last five hours and the last seven
-  days. The **API keys** screen shows it as "plan 5h 40% · 7d 12%", and `keera key list`
-  shows it too.
+- **What the plan paid for** comes from the model's prices and is never
+  charged. The **API keys** screen shows it per key as "on the plan".
+- **Plan use** is the share of the plan's usage limit, as Anthropic reports it
+  on each answer. `keera key list` shows it too.
 
 Token counts and rate limits work as for any other model.
 

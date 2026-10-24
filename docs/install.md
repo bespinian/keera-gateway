@@ -3,6 +3,9 @@
 Keera runs in four deployment shapes. All use the same binary and tenancy
 model. They differ in what runs the process and what runs Postgres.
 
+The short version is in [Self-host](https://docs.keera.ch/operate/). This page
+is the full reference: every setting, how each part works, and why.
+
 | Shape                   | What it is for                                       | Postgres                |
 | ----------------------- | ---------------------------------------------------- | ----------------------- |
 | [`compose`](../compose) | A single host or a laptop. Development and demos.    | A container             |
@@ -234,9 +237,10 @@ The command reads these settings:
 | `KEERA_ORG`          | the one `keera org switch` chose    | The organisation commands act on. Wins over `keera org switch`. See [Several organisations](gateway.md#several-organisations).         |
 | `CLAUDE_CONFIG_DIR`  | `~/.claude`                         | Where `keera connect claude-code` writes Claude Code's settings, as Claude Code itself reads it.                                       |
 
-A command picks the gateway in this order: `--url`, then `KEERA_CONTROL_URL`,
-then the gateway last signed in to, then `https://gateway.keera.ch`. You can be
-signed in to several gateways at once. If `keera logout` removes the default,
+How a command picks the gateway:
+[Which gateway and organisation](https://docs.keera.ch/reference/cli/#which-gateway-and-organisation).
+With none of those, it uses `https://gateway.keera.ch`. You can be signed in to
+several gateways at once. If `keera logout` removes the default,
 the one sign-in left becomes the default; with several left, there is none.
 `keera whoami` shows which gateway and which credential are used, and why.
 
@@ -258,49 +262,18 @@ turns it off, and wins over `CLICOLOR_FORCE`. Listing commands also take
 
 ## First run
 
-```sh
-export KEERA_OPERATOR_KEY=…
-export KEERA_CONTROL_URL=http://127.0.0.1:8080
-
-keera org create "Example Bank"
-keera project create "Payments Platform"     # with several: keera org switch first
-KEY=$(keera key create --project <project> --name "a developer's laptop")
-```
-
-Who owns a key, how long it lasts, and how to rotate one or leave it for
-someone to activate: [Keys and projects](gateway.md#keys-and-projects). The
+The steps are in
+[Self-host](https://docs.keera.ch/operate/install/#first-run). With several
+organisations, run `keera org switch` before `keera project create`. The
 operator key is for before an identity provider is set up. After that, people
 sign in as themselves with `keera login`.
 
-Then check the deployment works, in this order:
-
-```sh
-keera model check keera-speed             # the acceptance test - see below
-curl http://127.0.0.1:8080/api/v1/chat/completions \
-  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
-  -d '{"model":"keera-speed","messages":[{"role":"user","content":"Hello"}]}'
-keera guardrail set project <project-id> --models keera-speed --requests 120 --budget 500 --period month
-keera usage --by project
-keera doctor                              # and what is still missing
-```
-
-`keera limit` and `keera budget` each set one part of a guardrail. With no
-flags, they print what is in force:
-
-```sh
-keera limit project <project-id> --requests 120
-keera limit key <key-id> --tokens 2000000 --per day
-keera budget project <project-id>               # every budget above this project
-keera guardrail effective key <key-id>    # what a request with this key meets
-```
-
-Or open the panel at `http://127.0.0.1:8080` and sign in with the operator
-key. On an empty deployment, **Getting started** takes the place of
-**Dashboard** and shows a first-run checklist. It stays until the first request
-has been served and, with [card payments](billing.md#pay-in-advance), until the
-organisation has had credit, paid or granted, or is billed by invoice. A member
-gets a short guide of their own: get the key's secret, then connect a client.
-It stays until one of their keys has made a request.
+On an empty deployment, the panel's **Getting started** takes the place of
+**Dashboard**. It stays until the first request has been served and, with
+[card payments](billing.md#pay-in-advance), until the organisation has had
+credit, paid or granted, or is billed by invoice. A member gets a short guide
+of their own: get the key's secret, then connect a client. It stays until one
+of their keys has made a request.
 
 ### `keera model check` is the acceptance test
 
@@ -309,10 +282,10 @@ the model returns OpenAI-shaped `tool_calls`. Without them, a coding agent
 writes prose instead of edits. No error is logged; developers just think the
 model is bad.
 
-`keera model check <alias>`, or **Check** on the panel's Models screen, gives
-the model a tool and a question only that tool can answer. It reports whether
-the call came back in `tool_calls`, whether the response streamed, and whether
-the backend answered as the model the alias names.
+So `keera model check`
+([Check a model](https://docs.keera.ch/manage/models/#check-a-model)) gives the
+model a tool and a question only that tool can answer, and looks for the call
+in `tool_calls`.
 
 A vLLM started without `--enable-auto-tool-choice` refuses every request that
 offers tools. The check then asks again without them and passes with a warning,
@@ -323,27 +296,20 @@ written to the audit log, so you can show when a model last worked.
 
 ## Publishing it
 
-One port carries the control side and the inference side, and only credentials
-keep them apart ([gateway.md](gateway.md#one-listener-four-surfaces)). So:
+What to put in front of the gateway:
+[Publish it](https://docs.keera.ch/operate/install/#publish-it). That list
+matters more than usual, because one port carries the control side and the
+inference side, and only credentials keep them apart
+([gateway.md](gateway.md#one-listener-four-surfaces)). Until single sign-on or
+passkeys are set up, the only way in is the operator key, which can change
+every guardrail, and every audit entry reads `operator@localhost`.
 
-- **Put a TLS terminator in front.** None of these deployments terminates TLS.
-- **Turn off response buffering** on the proxy, and set a read timeout longer
-  than the longest completion. Most ingress controllers buffer by default.
-- **Allow large bodies.** A proxy with a lower limit than
-  `KEERA_MAX_BODY_BYTES` rejects long conversations before they reach the
-  gateway.
-- **Choose which paths to publish.** To give developers the inference API
-  without the panel, publish only `/api`.
-- **Set up single sign-on or passkeys** before anyone else can reach the panel.
-  Without either, the only way in is the operator key, which can change every
-  guardrail, and every audit entry reads `operator@localhost`.
-- **Set `KEERA_PUBLIC_URL`** to the public address.
-- **Check `KEERA_TRUSTED_PROXIES`** if the proxy is not on loopback or a
-  private address. The sign-in throttle counts attempts per client, and the
-  gateway takes the client's address from `X-Forwarded-For` only when a proxy
-  in this list sent it. The default is loopback and the private ranges. Behind
-  an untrusted proxy, every client looks like the proxy and they share one
-  allowance. `none` ignores the header.
+Check `KEERA_TRUSTED_PROXIES` if the proxy is not on loopback or a private
+address. The sign-in throttle counts attempts per client, and the gateway takes
+the client's address from `X-Forwarded-For` only when a proxy in this list sent
+it. The default is loopback and the private ranges. Behind an untrusted proxy,
+every client looks like the proxy and they share one allowance. `none` ignores
+the header.
 
 ## Backups
 
@@ -469,34 +435,21 @@ restart. Also:
 
 ## When it does not work
 
-Start with `keera doctor`. It reads the deployment's configuration and an
-organisation's models and reports what is set, what is missing and what is declared but not
-enforced, each with a fix. It changes nothing, so it is safe on a live
-deployment.
+Start with `keera doctor`, then the common problems:
+[Troubleshooting](https://docs.keera.ch/operate/troubleshooting/).
+`keera doctor --probe` runs `keera model check` against each enabled model. This
+catches a backend that answers 200 with prose when a tool call was asked for.
+It costs one generation per model, two when the backend refuses tools, so only
+the organisation's administrators can run it.
 
-```sh
-keera doctor            # configuration, models, tenancy, filters, routers
-keera doctor --probe    # and put a real request through every enabled model
-```
+Not on that page:
 
-`--probe` runs `keera model check` against each enabled model. This catches a
-backend that answers 200 with prose when a tool call was asked for. It costs
-one generation per model, two when the backend refuses tools, so only the
-organisation's administrators can run it.
-
-A failing check exits non-zero, so `keera doctor` can be the last step of an
-install script.
-
-| Symptom                                               | Where to look                                                                                                                                                                                                                                                                    |
-| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Gateway exits at once with a message about a variable | A required setting is missing or too short. The message names it.                                                                                                                                                                                                                |
-| Every request comes back 404 from the backend         | `backend_model` does not match what the backend serves the model as - vLLM's `--served-model-name`, llama.cpp's `--alias`.                                                                                                                                                       |
-| Long prompts fail with a 400 from the backend         | `max_context_tokens` on the model does not match the backend's window. They have to move together.                                                                                                                                                                               |
-| A filter refuses long conversations with 413          | `max_context_tokens` on that filter's model is too small for the traffic. A router's instruction step whose deciding model is too small cannot decide either: it uses its fallback or answers 503 `router_undecided`. See [filters.md](filters.md) and [routers.md](routers.md). |
-| The agent answers in prose and never edits a file     | Tool calls come back as text. Run `keera model check`. On the CPU tier this is expected.                                                                                                                                                                                         |
-| The panel shows no sign-on button                     | See [sso.md](sso.md#when-it-does-not-work).                                                                                                                                                                                                                                      |
-| A rate limit admits more than it is set to            | The buckets are per replica unless `KEERA_REDIS_URL` is set. If it is set, check `keera_ratelimit_fallback_total`.                                                                                                                                                               |
-| Streaming arrives all at once                         | Something in front is buffering the response.                                                                                                                                                                                                                                    |
-| A developer says their agent stopped this afternoon   | The **Requests** screen filtered to their key, or their **My access** screen. Each refusal is logged with the message the client got.                                                                                                                                            |
-| A limit is set and does not seem to apply             | `keera guardrail effective <scope> <id>`. Guardrails nest and the tightest level wins. The command shows which level each value came from.                                                                                                                                       |
-| `keera` acts on a gateway you did not mean            | No deployment was set, so it used the default, `https://gateway.keera.ch`. Run `keera login --url <your deployment>` or set `KEERA_CONTROL_URL`. `keera whoami` shows why.                                                                                                       |
+- **A filter refuses long conversations with 413.** `max_context_tokens` on
+  that filter's model is too small for the traffic. A router's instruction step
+  whose deciding model is too small cannot decide either: it uses its fallback
+  or answers 503 `router_undecided`. See [filters.md](filters.md) and
+  [routers.md](routers.md).
+- **A rate limit admits more than it is set to, with `KEERA_REDIS_URL` set.**
+  Check `keera_ratelimit_fallback_total`.
+- **The panel shows no sign-on button.** See
+  [sso.md](sso.md#when-it-does-not-work).

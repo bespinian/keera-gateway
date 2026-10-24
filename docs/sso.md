@@ -13,6 +13,12 @@ plain OAuth and gets its own handling, and **LDAP and Active Directory**, which
 sign in with a password. A deployment can offer any of them. For people no
 directory vouches for, it can also offer [passkeys](#passkeys).
 
+How to sign in and manage people:
+[Single sign-on and passkeys](https://docs.keera.ch/operate/sign-on/),
+[Sign in](https://docs.keera.ch/use/sign-in/) and
+[Users and roles](https://docs.keera.ch/manage/users/). This page explains how
+it works and why.
+
 ## Naming a provider
 
 Every provider has a name, listed in `KEERA_OIDC_PROVIDERS`. It reads its
@@ -20,19 +26,9 @@ settings from `KEERA_OIDC_<NAME>_*`, with the name in upper case and a hyphen
 as an underscore: `acme-ad` reads `KEERA_OIDC_ACME_AD_*`. Nothing is shared
 between providers. A name in the list without its `ISSUER`, `CLIENT_ID` and
 `CLIENT_SECRET` stops the start, except an
-[LDAP directory](#ldap-and-active-directory), which needs no client. One
-directory is a list of one:
-
-```sh
-KEERA_OIDC_PROVIDERS=google
-KEERA_OIDC_GOOGLE_ISSUER=https://accounts.google.com
-KEERA_OIDC_GOOGLE_CLIENT_ID=<from the console>
-KEERA_OIDC_GOOGLE_CLIENT_SECRET=<from the console>
-```
-
-The panel shows one named button per provider. See
-[Several directories at once](#several-directories-at-once) and
-[Signing in](#signing-in).
+[LDAP directory](#ldap-and-active-directory), which needs no client. The
+settings for each provider are in
+[Set up a provider](https://docs.keera.ch/operate/sign-on/#set-up-a-provider).
 
 The identity provider sends the browser back to
 `<KEERA_PUBLIC_URL>/control/auth/callback`, so SSO needs `KEERA_PUBLIC_URL`. The
@@ -101,17 +97,10 @@ any other organisation they are in, they keep the role it gave them.
 
 **If unset, Keera decides.** Everyone starts with
 `KEERA_OIDC_<NAME>_DEFAULT_ROLE` (`member` unless set to `admin`), and an
-operator or administrator promotes them:
-
-```sh
-keera user role alice@example.ch admin
-```
-
-The change is audited, signs the person out of this organisation so the new
-role applies at once, and stays until someone changes it. You can also add a person before
-their first sign-in with `keera user add alice@example.ch --role admin`. Their
-identity takes over that row when a sign-in lands in its organisation, or when
-they switch to it (see [Several organisations](gateway.md#several-organisations)).
+operator or administrator promotes them
+([Change a role](https://docs.keera.ch/manage/users/#change-a-role)). The
+change is audited, signs the person out of this organisation so the new role
+applies at once, and stays until someone changes it.
 
 This is the only option on Google Workspace, which
 [sends no groups](#what-each-provider-does-and-does-not-give-you).
@@ -143,104 +132,51 @@ owner approves Keera, so a person in it looks like a person in no groups.
 
 ## Google Workspace
 
-1. Pick or create a project, then open **APIs & Services → OAuth consent
-   screen**.
-2. Choose **Internal** as the user type. This limits sign-in to your Workspace
-   and stops the fallback in
-   [Which organisation a sign-in lands in](#which-organisation-a-sign-in-lands-in)
-   from admitting any Google account. **External** would let any Google account
-   reach the panel.
-3. Under **Scopes**, add `openid`, `email` and `profile`, the three Keera asks
-   for on Google when `KEERA_OIDC_<NAME>_SCOPES` is unset. Keera also asks
-   Google for offline access, so it gets a refresh token.
-4. **Credentials → Create credentials → OAuth client ID**, type **Web
-   application**.
-5. Add one URI under **Authorized redirect URIs**:
+The steps and settings are in
+[Set up a provider](https://docs.keera.ch/operate/sign-on/#set-up-a-provider).
+Why they are so:
 
-   ```
-   http://localhost:8080/control/auth/callback
-   ```
-
-   Google matches it exactly. It allows `http` only for `localhost`, which is
-   why the compose deployment works without TLS. It refuses `127.0.0.1` for a
-   Web application client, so open the panel at `localhost:8080`.
-
-6. Copy the client ID and client secret.
-
-In `compose/.env`:
-
-```sh
-KEERA_PUBLIC_URL=http://localhost:8080
-KEERA_OIDC_PROVIDERS=google
-KEERA_OIDC_GOOGLE_ISSUER=https://accounts.google.com
-KEERA_OIDC_GOOGLE_CLIENT_ID=<from the console>
-KEERA_OIDC_GOOGLE_CLIENT_SECRET=<from the console>
-KEERA_OPERATORS=you@example.ch
-```
-
-The issuer is the bare host; the discovery path is added for you.
-
-Leave out the group variables: Google [sends no
-groups](#what-each-provider-does-and-does-not-give-you). The first operator is
-the address in `KEERA_OPERATORS`. Make administrators with `keera user role` or
-on the panel's Users screen.
+- **Internal**, as the consent screen's user type, limits sign-in to your
+  Workspace and stops the fallback in
+  [Which organisation a sign-in lands in](#which-organisation-a-sign-in-lands-in)
+  from admitting any Google account. **External** would let any Google account
+  reach the panel.
+- When `KEERA_OIDC_<NAME>_SCOPES` is unset, Keera asks Google for `openid`,
+  `email` and `profile`, and for offline access, so it gets a refresh token.
+- Google matches the redirect URI exactly. It allows `http` only for
+  `localhost`, which is why the compose deployment works without TLS. It
+  refuses `127.0.0.1` for a Web application client, so open the panel at
+  `localhost:8080`.
+- The issuer is the bare host; the discovery path is added for you.
 
 ## Microsoft Entra ID
 
-1. **Microsoft Entra admin center → App registrations → New registration.**
-2. Under **Supported account types**, choose **Accounts in this organizational
-   directory only**. This is the same boundary as Google's **Internal**. The
-   multi-tenant options admit accounts from other directories, and Keera places
-   a first sign-in by its email domain.
-3. **Redirect URI**: platform **Web**, and the absolute URL of the callback:
+The steps and settings are in
+[Set up a provider](https://docs.keera.ch/operate/sign-on/#set-up-a-provider).
+Why they are so:
 
-   ```
-   https://keera.example.ch/control/auth/callback
-   ```
+- **This directory only**, as the supported account types. This is the same
+  boundary as Google's **Internal**. The multi-tenant options admit accounts
+  from other directories, and Keera places a first sign-in by its email domain.
+- **The secret expires.** Copy its _value_, not its ID; it is shown only once.
+  Entra secrets last at most 24 months, and an expired secret fails every
+  sign-in.
+- **`email` and `xms_edov`** as optional ID-token claims. Entra does not always
+  put an email in the ID token, and Keera refuses an identity without one.
+  Entra sends no `email_verified`; `xms_edov` says whether the tenant owns the
+  address's domain, and Keera reads it instead. If the list does not offer it,
+  add it under `optionalClaims.idToken` in the **Manifest**.
+- **App roles, not groups**, if the directory should decide roles. App roles
+  arrive by name in the `roles` claim and are never replaced by an overage
+  pointer. Group object IDs also work (put the GUIDs in the group lists and keep
+  the claim as `groups`), but read
+  [What each provider does and does not give you](#what-each-provider-does-and-does-not-give-you)
+  first. To assign administrators in Keera instead, create no app roles and
+  leave out `KEERA_OIDC_ENTRA_ADMIN_GROUPS`.
+- **The issuer** must contain the tenant ID and end in `/v2.0`. The v1 endpoint
+  issues tokens whose `iss` does not match what discovery reports.
 
-   Entra allows `http` only for `localhost`, like Google.
-
-4. **Certificates & secrets → New client secret.** Copy the _value_, not the
-   secret ID. The value is shown only once. Note the expiry: Entra secrets last
-   at most 24 months, and an expired secret fails every sign-in.
-5. **Token configuration → Add optional claim**, token type **ID**, and add
-   `email` and `xms_edov`. Entra does not always put an email in the ID token,
-   and Keera refuses an identity without one. Entra sends no `email_verified`;
-   `xms_edov` says whether the tenant owns the address's domain, and Keera reads
-   it instead. If the list does not offer it, add it under
-   `optionalClaims.idToken` in the **Manifest**.
-6. Roles, if the directory should decide them instead of Keera. Use **App
-   roles**, not groups:
-
-   **App roles → Create app role**, with **Users/Groups** as the allowed member
-   type and the value `keera-admins`. Repeat with `keera-operators` if you want
-   that role too. Then assign people or groups under **Enterprise applications →
-   your app → Users and groups**.
-
-   App roles arrive by name in the `roles` claim and are never replaced by an
-   overage pointer. Group object IDs also work (put the GUIDs in the group lists
-   and keep the claim as `groups`), but read
-   [What each provider does and does not give you](#what-each-provider-does-and-does-not-give-you)
-   first.
-
-   To assign administrators in Keera instead, skip this step and leave
-   `KEERA_OIDC_ENTRA_ADMIN_GROUPS` out of the block below.
-
-Then:
-
-```sh
-KEERA_PUBLIC_URL=https://keera.example.ch
-KEERA_OIDC_PROVIDERS=entra
-KEERA_OIDC_ENTRA_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0
-KEERA_OIDC_ENTRA_CLIENT_ID=<application (client) ID>
-KEERA_OIDC_ENTRA_CLIENT_SECRET=<the secret value>
-KEERA_OIDC_ENTRA_GROUPS_CLAIM=roles
-KEERA_OIDC_ENTRA_ADMIN_GROUPS=keera-admins
-KEERA_OIDC_ENTRA_OPERATOR_GROUPS=keera-operators
-```
-
-The issuer must contain the tenant ID and end in `/v2.0`. The v1 endpoint issues
-tokens whose `iss` does not match what discovery reports.
+Entra allows an `http` redirect URI only for `localhost`, like Google.
 
 > **Not tested against a real tenant.** This setup follows the protocol and
 > Entra's documentation. The group-overage refusal has a test.
@@ -249,33 +185,14 @@ tokens whose `iss` does not match what discovery reports.
 
 GitHub speaks OAuth, not OpenID Connect: it has no discovery and no id_token.
 Keera recognises the issuer `https://github.com` and asks GitHub's API who
-signed in instead. GitHub Enterprise Server is not supported.
+signed in instead. GitHub Enterprise Server is not supported. The steps and
+settings are in
+[Set up a provider](https://docs.keera.ch/operate/sign-on/#set-up-a-provider).
 
-1. **Settings → Developer settings → OAuth Apps → New OAuth App**, on your
-   account or, better, on your organisation. Use an **OAuth App**, not a GitHub
-   App: Keera keeps its token to ask GitHub again, and a GitHub App's token
-   expires after 8 hours.
-2. **Authorization callback URL**:
-
-   ```
-   https://keera.example.ch/control/auth/callback
-   ```
-
-   An OAuth App has one callback URL, so register a second app for
-   `http://localhost:8080`.
-
-3. **Generate a new client secret** and copy it. It is shown only once.
-
-Then:
-
-```sh
-KEERA_PUBLIC_URL=https://keera.example.ch
-KEERA_OIDC_PROVIDERS=github
-KEERA_OIDC_GITHUB_ISSUER=https://github.com
-KEERA_OIDC_GITHUB_CLIENT_ID=<the client ID>
-KEERA_OIDC_GITHUB_CLIENT_SECRET=<the secret>
-KEERA_OIDC_GITHUB_DOMAINS=example.ch
-```
+**An OAuth App, not a GitHub App.** Keera keeps its token to ask GitHub again,
+and a GitHub App's token expires after 8 hours. Register it on your
+organisation rather than your account. An OAuth App has one callback URL, so
+register a second app for `http://localhost:8080`.
 
 **Any GitHub account can sign in**, as with Google's **External**. So the
 gateway refuses to start without `KEERA_OIDC_<NAME>_DOMAINS`. Name your own
@@ -305,19 +222,8 @@ verified address Keera may use.
 A directory without OpenID Connect, such as Active Directory or OpenLDAP, can
 sign people in directly. An `ldaps://` or `ldap://` issuer makes a provider one.
 The panel then asks for a username and password instead of sending the browser
-away, and the gateway checks them against the directory.
-
-```sh
-KEERA_PUBLIC_URL=https://keera.example.ch
-KEERA_OIDC_PROVIDERS=corp
-KEERA_OIDC_CORP_LABEL=Corp account
-KEERA_OIDC_CORP_ISSUER=ldaps://dc1.corp.example.ch
-KEERA_OIDC_CORP_LDAP_BIND_DN=CN=keera-svc,OU=Service,DC=corp,DC=example,DC=ch
-KEERA_OIDC_CORP_LDAP_BIND_PASSWORD=<the service account's password>
-KEERA_OIDC_CORP_LDAP_BASE_DN=DC=corp,DC=example,DC=ch
-KEERA_OIDC_CORP_DOMAINS=corp.example.ch
-KEERA_OIDC_CORP_ADMIN_GROUPS=CN=keera-admins,OU=Groups,DC=corp,DC=example,DC=ch
-```
+away, and the gateway checks them against the directory. An example is in
+[Set up a provider](https://docs.keera.ch/operate/sign-on/#set-up-a-provider).
 
 Separate several groups with `;`, such as
 `CN=keera-admins,OU=Groups,...;CN=platform,OU=Groups,...`.
@@ -389,9 +295,6 @@ Set the directory's own lockout policy as usual.
 it does see them. If that is not acceptable, put an OpenID Connect provider
 with an LDAP connector in front of the directory, such as Keycloak or Dex, and
 configure that as an ordinary provider instead.
-
-`keera login --provider corp` opens the same form in the browser and hands
-the sign-in over to the terminal.
 
 > **Not tested against a real Active Directory.** This follows the protocol and
 > Microsoft's documentation, and is tested against a fake directory.
@@ -488,29 +391,13 @@ your own staff.
 
 **On the hosted deployment, avoid step 4.** It stops applying once there is a
 second organisation, but until then a new customer's first sign-in lands in the
-existing organisation. Give every organisation its domain before you create the
-second one:
-
-```sh
-keera org create "Another Bank" --domain anotherbank.ch
-keera org set <org> --domain yourdomain.ch   # the one that was there first
-```
-
-You can leave out the id while there is only one organisation. `keera org list`
-shows each domain. Domains are unique: a second organisation claiming the same
-one is refused.
+existing organisation. Give every organisation its domain, the one that was
+there first included, before you create the second one; see
+[Organisations and domains](https://docs.keera.ch/operate/sign-on/#organisations-and-domains).
+Domains are unique: a second organisation claiming the same one is refused.
 
 Setting a domain moves nobody. It is only read on a first sign-in, so existing
 users stay where they are. `keera org set <org> --no-domain` removes it.
-
-The same through the control API:
-
-```sh
-curl -X PATCH https://keera.example.ch/control/v1/orgs/<org-id> \
-  -H "Authorization: Bearer $KEERA_OPERATOR_KEY" \
-  -H 'Content-Type: application/json' \
-  -d '{"email_domain":"yourdomain.ch"}'
-```
 
 ## Letting people sign up
 
@@ -533,15 +420,12 @@ sign-in. It also refuses to start until `KEERA_UPSTREAM_PRIVATE` says what
 inside your network an organisation may reach. See
 [install.md](install.md#where-the-gateway-may-connect).
 
-A sign-in that matches no organisation then lands on a screen that offers:
-
-- **Create an organisation.** The person names it and becomes its administrator.
-  If the name is taken, their address is added to it, so a stranger cannot find
-  out which customers you have. An operator can rename it with `keera org set`.
-- **Join an invitation.** If an organisation added the address with
-  `keera user add`, the screen offers to join it, with the role it was given. It
-  is never joined without asking: an administrator of an organisation without a
-  domain can add any address.
+A sign-in that matches no organisation then lands on a screen to create an
+organisation or join an invitation
+([Quickstart](https://docs.keera.ch/get-started/quickstart/#1-sign-in)). If the
+name is taken, the person's address is added to the name, so a stranger cannot
+find out which customers you have. An invitation is never joined without asking: an
+administrator of an organisation without a domain can add any address.
 
 The new organisation gets no email domain. Set one with `keera org set` once you
 know the customer. `keera login` cannot sign up: it says to open the panel
@@ -582,11 +466,8 @@ limited organisations. An operator can set an organisation back to limited with
 
 ## Signing in
 
-The panel shows one button per provider. An LDAP directory's button opens a
-username and password form instead. When that directory is the only way to
-sign in, the form is open from the start. With an identity provider configured,
-the operator key is no longer on the sign-in screen. It still works, and it is
-the way back in if SSO is broken: open `/?operator_key=1`.
+An LDAP directory's button opens a username and password form. When that
+directory is the only way to sign in, the form is open from the start.
 
 Signing out also sends the browser to the provider's sign-out page, if the
 provider has one.
@@ -604,30 +485,19 @@ there and the cookie has to be on that address.
 
 ## Signing in from the command line
 
-`keera login` is the same sign-in for the terminal:
+`keera login` is the same sign-in for the terminal; see
+[Sign in](https://docs.keera.ch/use/sign-in/#in-the-terminal) for how to use
+it. It opens a browser, the directory signs the person in as for the panel, and
+the command gets a credential for that person. Commands then run as them: their
+role decides what is allowed, `keera usage` shows their organisation, and the
+audit log records their address.
 
-```sh
-keera login --url https://keera.example.ch    # --provider, where there are several
-```
-
-It opens a browser, the directory signs the person in as for the panel, and the
-command gets a credential for that person. Commands then run as them: their role
-decides what is allowed, `keera usage` shows their organisation, and the audit
-log records their address.
-
-The credential is kept on this machine, and the gateway you signed in to becomes
-the default for later commands, so nothing needs to go in a shell profile. Where
-it is kept, how a command picks a gateway, and why `KEERA_OPERATOR_KEY` wins
-over it: [The `keera` command](install.md#the-keera-command).
+Where the credential is kept, how a command picks a gateway, and why
+`KEERA_OPERATOR_KEY` wins over it:
+[The `keera` command](install.md#the-keera-command).
 
 The credential lasts 30 days, or 12 hours where the provider gives Keera no
 refresh token (see [Asking the directory again](#asking-the-directory-again)).
-`keera logout` ends it sooner, `keera logout --all` ends every sign-in of the
-account everywhere, and `keera whoami` shows which credential on this machine is
-in use.
-
-The operator key is still the right credential for automation, pipelines and
-the first minutes of a deployment.
 
 ### What it does, and what makes that safe
 
@@ -657,9 +527,9 @@ The sign-in URL is printed as well as opened, so on a host without a desktop you
 can copy and paste it. `--no-browser` skips opening the browser.
 
 **Over ssh, copy and paste is not enough.** The loopback listener is on the
-remote machine and the browser is on yours. Forward the printed port with
-`ssh -L`, or sign in on a machine with a browser and copy the credentials file
-across. If you need this often, use the operator key instead.
+remote machine and the browser is on yours. Forward the port
+([Sign in](https://docs.keera.ch/use/sign-in/#in-the-terminal)), or sign in on
+a machine with a browser and copy the credentials file across.
 
 ## Signing in to Keera Chat
 
@@ -670,13 +540,9 @@ Keera Chat gets a credential that acts as them. Their messages then go out with
 their own keys, under the same guardrails, budgets and audit log.
 
 Keera Chat runs on its own address, which is not a loopback port, so the gateway
-has to be told it:
-
-```sh
-KEERA_CHAT_URL=https://chat.example.ch
-```
-
-It is an origin only: a path, query or fragment stops the start.
+has to be told it in `KEERA_CHAT_URL`
+([Keera Chat](https://docs.keera.ch/operate/chat/)). It is an origin only: a
+path, query or fragment stops the start.
 
 The gateway then also hands sign-ins to `https://chat.example.ch/auth/callback`,
 that address exactly, with the same one-time code and proof key as for the
@@ -727,14 +593,10 @@ organisation they were in.
 Removing a person from the directory ends their sessions and `keera login`
 tokens ([Asking the directory again](#asking-the-directory-again)), but not
 their API keys. The directory never sees
-those. So disable them in Keera as well:
-
-```sh
-keera user disable ada@example.ch
-```
-
-Or use **Users → Disable** in the panel. It acts in one organisation: someone in
-several is disabled in each. Immediately:
+those. So disable them in Keera as well; see
+[When someone leaves](https://docs.keera.ch/manage/users/#when-someone-leaves).
+It acts in one organisation: someone in several is disabled in each.
+Immediately:
 
 - they cannot sign in, and all their sessions and `keera login` tokens end
 - every key attributed to them is revoked for good
@@ -744,9 +606,8 @@ several is disabled in each. Immediately:
   operator, since nobody else can open a shell in another person's sandbox
 - the repository credentials those sandboxes held are revoked
 
-Usage, sandboxes and audit entries keep their name. The panel hides disabled
-people until you tick **Show disabled**. `keera user enable` lets them back in
-without keys: the old ones stay revoked. An administrator can disable anyone in
+The panel hides disabled people until you tick **Show disabled**. An
+administrator can disable anyone in
 their organisation except themselves. Nobody can disable an operator this way;
 take them out of `KEERA_OPERATORS` or the operator group instead.
 
@@ -755,14 +616,8 @@ key a `--user` when a person is behind it.
 
 ## Passkeys
 
-A passkey signs someone in with their fingerprint, face or device PIN, without a
-directory. Use it for people who have no account in your identity provider, or
-for a deployment with no identity provider at all. It is off by default:
-
-```sh
-KEERA_PASSKEYS=true
-KEERA_PUBLIC_URL=https://keera.example.ch
-```
+Passkeys are off by default; `KEERA_PASSKEYS=true` turns them on. What they
+are for: [Passkeys](https://docs.keera.ch/operate/sign-on/#passkeys).
 
 A passkey belongs to the host name in `KEERA_PUBLIC_URL`. Browsers allow
 passkeys only on https, or on `http://localhost` and `*.localhost`, and never on
@@ -772,35 +627,19 @@ set-up link.
 
 ### Adding someone
 
-An administrator creates the account and gets a one-time set-up link:
+An administrator creates the account and gets a one-time set-up link; see
+[Add a person](https://docs.keera.ch/manage/users/#add-a-person). Whoever opens
+the link can add a passkey to that account. It works once and for 24 hours, and
+a new link replaces the last one. Opening it creates the passkey and signs the
+person in.
 
-```sh
-keera user add ada@example.ch --passkey
-```
-
-Or on the panel: **Users → Add user**, then **Signs in with: A passkey**. Send
-the link to the person privately. Whoever opens it can add a passkey to that
-account. It works once and for 24 hours, and a new link replaces the last one.
-Opening it creates the passkey and signs the person in.
-
-Once signed in, a person adds a passkey for each device under the key button
-next to their address. That needs a browser sign-in from the last 15 minutes, so
-a stolen session cannot plant a passkey of its own. They can remove one, but not
-their last.
-
-For a lost device, or a new device with no passkey on it yet, an administrator
-sends a new link:
-
-```sh
-keera user passkey-link ada@example.ch
-```
-
-On the panel, that is **Users → Passkeys → Get set-up link**. The same screen
-lists a person's passkeys and removes one. Removing someone else's passkey also
-signs them out everywhere.
+Adding a passkey for another device needs a browser sign-in from the last 15
+minutes, so a stolen session cannot plant a passkey of its own. A person can
+remove one, but not their last. Removing someone else's passkey also signs them
+out everywhere.
 
 A person who was added but has not signed in yet can be moved to passkeys with
-the same command, or **Use a passkey** on the panel.
+`keera user passkey-link`, or **Use a passkey** on the panel.
 
 ### What keeps passkeys from weakening single sign-on
 
@@ -831,22 +670,7 @@ always report zero, which is fine.
 With passkeys and no directory, the sign-in screen shows **Sign in with a
 passkey** and, below it, the operator key. The operator key stays on the screen
 because a passkey account is never an operator: the first administrator is made
-with the operator key.
-
-```sh
-export KEERA_OPERATOR_KEY=...
-keera user add you@example.ch --passkey --role admin
-```
-
-### From the command line
-
-```sh
-keera login --provider passkey
-```
-
-The browser opens a page with **Sign in with a passkey**. After that, the
-sign-in goes back to the terminal the same way as with single sign-on. On a
-gateway whose only way in is passkeys, `--provider` can be left out.
+with the operator key. On such a gateway, `keera login` needs no `--provider`.
 
 ## When it does not work
 
@@ -860,14 +684,11 @@ gateway whose only way in is passkeys, `--provider` can be left out.
 | "too many sign-in attempts for this account"                   | 5 attempts a minute per account. Wait a minute.                                                                                                                             |
 | "the directory did not answer"                                 | The gateway cannot reach the LDAP directory, or the directory refused the search, such as when the service account may no longer read. The gateway log has the error.       |
 | "this directory account cannot be used to sign in to Keera"    | The entry has no `mail` or no subject attribute. The gateway log names the entry.                                                                                           |
-| `redirect_uri_mismatch`                                        | The console URI and `<KEERA_PUBLIC_URL>/control/auth/callback` differ, often `127.0.0.1` against `localhost`.                                                               |
 | "a sign-in has to name one of…"                                | Several ways to sign in are configured, passkeys included, and the link named none. Start from the panel, not the URL.                                                      |
 | "started in another browser or tab"                            | The callback came to a browser that did not start the sign-in, or to another address than the panel's. Start again from `KEERA_PUBLIC_URL`.                                 |
 | Signed in, but everything is read-only                         | You have the default role. Ask an administrator for `keera user role <you> admin`, or, if the provider has admin groups, to be added to one.                                |
 | The panel will not let anybody change a role                   | `KEERA_OIDC_<NAME>_ADMIN_GROUPS` is set on some provider, so the directory decides. Change the group, or unset it on every provider.                                        |
 | The panel refuses the operator role                            | It always does. `KEERA_OPERATORS` or `KEERA_OIDC_<NAME>_OPERATOR_GROUPS` grants it.                                                                                         |
-| "no organisation matches …"                                    | There are two or more organisations and none has your email domain. Set it, as above, or let people [sign up](#letting-people-sign-up).                                     |
-| A request is refused with `org_limited`                        | The organisation signed up and has not paid yet. See [What a new organisation can use](#what-a-new-organisation-can-use).                                                   |
 | "that email domain belongs to another organisation"            | Each domain belongs to one organisation. `keera org list` shows which; clear it there first.                                                                                |
 | "cannot be used with … sign-in"                                | The provider is only allowed some domains (`KEERA_OIDC_<NAME>_DOMAINS`), and the address is at another. Sign in through its own provider.                                   |
 | "is not a verified address"                                    | `email_verified` (Entra: `xms_edov`) is false. Verify the email in the directory. A missing claim is accepted, except on a sign-up provider for any domain.                 |

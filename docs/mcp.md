@@ -4,18 +4,15 @@ Tool calls send data out of the organisation just like model calls do: to an
 issue tracker, a chat channel, a cloud API. So the gateway sits in front of MCP
 servers too.
 
+How to add a server and connect an agent:
+[MCP servers](https://docs.keera.ch/manage/mcp/). This page explains how it
+works and why.
+
 A client reaches a server at `<gateway>/api/mcp/<alias>` with its Keera key. The
-gateway then:
-
-- **shows only the tools the key may call**, and refuses the others,
-- **runs the key's filters** over what a call sends, before it leaves,
-- **presents the server's credential**, which never reaches a laptop,
-- **records every call**: which tool, the outcome, how long it took and how many
-  bytes went each way - never the content.
-
-It speaks MCP's Streamable HTTP transport, up to its 2026-07-28 version, and
-passes everything else through unchanged: sessions, notifications, the server's
-own requests, resources and prompts.
+gateway speaks MCP's Streamable HTTP transport, up to its 2026-07-28 version. It
+acts on tool calls and the tool list, and passes everything else through
+unchanged: sessions, notifications, the server's own requests, resources and
+prompts.
 
 Since 2026-07-28 a request also names its method and target in headers:
 `Mcp-Method`, `Mcp-Name` and `Mcp-Param-*`. The gateway checks `Mcp-Method` and
@@ -27,23 +24,14 @@ these headers, so they must say what the body says.
 
 A server belongs to one organisation, like a model. Only that organisation's
 keys reach it, and its administrators add, change and remove it. Two
-organisations can each have a `github`. An operator with several organisations
-picks one with `keera org switch <org>`.
+organisations can each have a `github`.
 
-On the command line:
+A credential is stored encrypted under `KEERA_SECRET_KEY`, like a hosted
+model's key.
 
-```sh
-keera mcp add github --endpoint https://api.githubcopilot.com/mcp/ \
-  --description "Issues and pull requests" --api-key @-
-```
-
-`@-` reads the credential from stdin, so it stays out of the shell history. It
-is stored encrypted under `KEERA_SECRET_KEY`, like a hosted model's key.
-
-The credential is sent in `Authorization` as a bearer token. For a server that
-reads another header, pass `--auth-header X-Api-Key`; the credential is then
-sent as is. A header name holds only letters, digits and hyphens.
-`--no-api-key` removes the stored credential.
+With `--auth-header`, the credential is sent as is, without `Bearer`. A header
+name holds only letters, digits and hyphens. `--no-api-key` removes the stored
+credential.
 
 Moving a server to another host needs the credential again, or
 `--no-api-key`: a stored credential only goes to the host it was entered for.
@@ -52,46 +40,23 @@ Moving a server to another host needs the credential again, or
 `keera mcp disable` switch it later. A disabled server answers 404, like one
 that does not exist.
 
-In the panel, the **MCP** screen does the same: **Add MCP server**, and Edit and
-Delete on each row. It lists every server with the address to give clients. An
-administrator also sees each tool's calls and the latest ones. `keera mcp list`
-shows the same list in a terminal.
-
-Like Filters, Routers and Sandboxes, the screen is folded into one entry at the
-bottom of the sidebar, which names the folded screens, until the organisation
-has its first server.
-
 ## Connecting a client
 
-`keera mcp connect github` prints the configuration for Claude Code, Codex and
-anything that reads an `mcp.json`. For Claude Code:
-
-```sh
-claude mcp add --transport http github https://keera.example.ch/api/mcp/github \
-  --header "Authorization: Bearer $KEERA_API_KEY"
-```
-
-The key is the same one the agent uses for models. The shell expands
+`keera mcp connect` prints the configuration
+([Connect your tools](https://docs.keera.ch/use/connect/#mcp-servers)). The key
+is the same one the agent uses for models. The shell expands
 `$KEERA_API_KEY`, so Claude Code stores the key in its settings. Codex and an
 `mcp.json` read it from the environment each time they start.
 
 ## Which tools a key may call
 
-A guardrail sets this, like the models a key may use:
-
-```sh
-keera guardrail set org <org-id> --tools github,jira/search
-keera guardrail set project <project-id> --tools github/search_code
-```
-
-An entry is a server alias, for all its tools, or `alias/tool` for one tool.
-`--no-tools` clears a level's list. In the panel, it is the **MCP tools** block
-of the guardrails dialog.
-Each level narrows the one above: a tool must be on every level's list. Here
-the project may call only `github/search_code`. The project's list does not name
-`jira/search`, and it names no other github tool. A level that sets no list
-gets the list of the level above. If no level sets one, the key may call every
-tool of every server.
+A guardrail sets this
+([Choose which tools a key may call](https://docs.keera.ch/manage/mcp/#choose-which-tools-a-key-may-call)).
+Each level narrows the one above: a tool must be on every level's list. So an
+organisation list of `github,jira/search` and a project list of
+`github/search_code` leave the project only `github/search_code`. A level that
+sets no list gets the list of the level above, and `--no-tools` clears a level's
+list. If no level sets one, the key may call every tool of every server.
 
 A server named in a list cannot be deleted. The refusal names the guardrails
 that list it; take it off them first.
@@ -113,9 +78,6 @@ server's resources, prompts and completions are left out of what `initialize`
 says it offers, and requests for them are refused with JSON-RPC error -32601.
 So is `tasks/list`: the server sees one identity for every key, so it would
 list other people's tasks. A key allowed the whole server reaches all of it.
-
-`keera guardrail effective` shows the tools in force and which level narrowed
-them.
 
 ## Rate limits and budgets
 
@@ -141,25 +103,15 @@ request, and the filters read it there.
 
 ## The tool-call log
 
-```sh
-keera mcp calls --since 1h
-keera mcp calls --summary --since 7d
-```
-
-The log is for administrators. A member sees their own tool calls in
+`keera mcp calls` reads the log
+([See the calls](https://docs.keera.ch/manage/mcp/#see-the-calls)). It is for
+administrators. A member sees their own tool calls in
 [`keera session show`](sessions.md).
 
 Each call is one row: server, tool, outcome, time, bytes sent and received, the
-key, and the error if any. The outcomes are:
-
-| Outcome          | Means                                                                           |
-| ---------------- | ------------------------------------------------------------------------------- |
-| `ok`             | the tool answered                                                               |
-| `tool_error`     | the tool answered that it failed                                                |
-| `error`          | no result: the server failed or could not be reached, or a filter could not run |
-| `denied`         | the key may not call this tool, or is over a rate limit, budget or credit       |
-| `refused`        | a filter stopped the call                                                       |
-| `input_required` | the server asked for the user's input first; the retry is a row of its own      |
+key, and the error if any. Besides the outcomes listed there, `error` also means
+a filter could not run, and `input_required` means the server asked for the
+user's input first; the retry is a row of its own.
 
 A session's screen in the panel lists its tool calls under its model calls:
 the first 1,000 between the session's first and last request. If the client

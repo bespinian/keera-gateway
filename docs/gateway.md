@@ -5,6 +5,12 @@ control plane and the control panel, and it talks to Postgres. The `keera`
 command administers it over the control API, so the same commands work against
 any gateway, on a cluster or on localhost.
 
+To use it, see
+[Key concepts](https://docs.keera.ch/get-started/concepts/),
+[The API](https://docs.keera.ch/use/api/) and
+[Models](https://docs.keera.ch/manage/models/) in the Keera docs. This page
+explains how it works and why.
+
 ## One listener, four surfaces
 
 Port 8080 carries everything, told apart by path:
@@ -68,19 +74,14 @@ and its administrators add, change and remove it. The backend can be any URL:
 your own inference plane, or a provider reached with the organisation's own
 key or the deployment's ([billing.md](billing.md)).
 
-An administrator adds one in the panel (**Models → Add model**) or with
-`keera model add <alias>`. Both act on the organisation the person works in.
-An operator picks one in the panel, or with `keera org switch <org>`
-([Several organisations](#several-organisations)).
+An administrator adds one in the panel or with `keera model add`
+([Models](https://docs.keera.ch/manage/models/)). Both act on the organisation
+the person works in ([Several organisations](#several-organisations)).
 
 Each organisation has its own aliases, so two organisations can each have a
 `fast`. The gateway looks up the `model` field in the organisation's models
 first, then in its [routers](routers.md). A model and a router in the same
 organisation cannot share an alias.
-
-To stop a project or a key using a model, leave it out of that guardrail:
-`keera guardrail set project <id> --models a,b`. To stop the whole organisation
-using it, disable the model in its edit dialog.
 
 Deleting a model does not change the filters that use it. An enforcing filter
 whose model is gone refuses every request it covers; a shadow one records an
@@ -189,22 +190,12 @@ itself instead in `X-Keera-Client`, which wins, so a tool built on a common
 HTTP library is not filed under that library. The name is what the client
 says, so it tells what is connected, not who may connect.
 
-`keera usage --by client` adds up usage by client. In the panel, **My
-clients** lists the clients that called with your own keys, and which key each
-one used. Its **Connect client** button shows how to set up a new one. The
-dialog that shows a new key's secret has the same button, with the secret
-already filled in. For Claude Code, `keera connect claude-code` does all of it
-([Connecting Claude Code](#connecting-claude-code)).
-
 ## Connecting Claude Code
 
-```sh
-keera login
-keera connect claude-code --model claude-opus
-```
-
-This gives the machine a key of its own and writes it into
-`~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`), so nobody
+How to run it: see
+[Connect your tools](https://docs.keera.ch/use/connect/#claude-code).
+`keera connect claude-code` gives the machine a key of its own and writes it
+into `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`), so nobody
 copies it. The rest of the file is kept. The key always belongs to a person, so
 the command needs a sign-in and refuses the operator key.
 
@@ -266,10 +257,7 @@ The file then holds:
   works, on its `Managed settings (remote)` line.
 
 An `apiKeyHelper` setting makes Claude Code send its key instead, so the
-command warns about one. `--print` prints the same settings instead of writing
-them, for a machine the command does not run on, with the key named in `--key`
-shown by its prefix; put the key itself in its place. The panel's **Connect
-client** shows them too. With a Claude plan, see
+command warns about one. With a Claude plan, see
 [subscriptions.md](subscriptions.md#4-each-person-once-per-machine).
 
 ## The tenancy model
@@ -297,108 +285,37 @@ Projects and keys that list models keep their own lists. Deleting a model takes
 it off every list in the organisation, so a model added later under the same
 alias is not allowed by accident. A list that named only it allows nothing.
 
-A level may have several budgets and rate limits, at most one of each per
-period: a budget per day beside one per month, or a rate limit per minute
-beside one per day. Each must hold. In the panel each one is a block of the
-level's guardrails, next to its system prompt, filters, models and MCP tools.
-On the command line, `--per` and `--period` say which one a flag sets.
-
-A budget is `budget_micros` per `period`: `month` when unset, or `day`.
-Budgets reset on UTC boundaries in every deployment.
-
-A rate limit sets `requests`, `tokens` or both per `period`: `minute` when
-unset, `day` or `month`. Per minute is a token bucket that refills as it goes.
-Per day or month is counted in Postgres like spend, and starts again at
-midnight UTC or on the 1st. A request counts once it is let through; its
-tokens count when it ends.
-
-```json
-{
-  "rate_limits": [{ "requests": 120, "period": "minute" }],
-  "budgets": [
-    { "budget_micros": 500000000, "period": "month" },
-    { "budget_micros": 30000000, "period": "day" }
-  ]
-}
-```
-
-`keera guardrail show <scope> <id>` shows what one level sets on its own. A
-level that sets nothing is not unlimited: it gets whatever it inherits. To see
-the combined result, run `keera guardrail effective <scope> <id>` (or
-`GET /control/v1/guardrails/{scope}/{id}/effective`). The endpoint returns every
-level's guardrails and the combined answer; the command also shows which level
-decided each value.
-
-The panel's **Playground** has no way around this. You pick one of your own
-active keys, and every message is sent with it: it meets that key's guardrails,
-counts against its rate limits and budgets, and shows in its usage.
+How to set budgets and rate limits, and when they reset:
+[Guardrails](https://docs.keera.ch/manage/guardrails/). A rate limit per minute
+is a token bucket ([across replicas](#rate-limits-across-replicas)). Per day or
+month it is counted in Postgres like spend. A request counts once it is let through; its tokens count
+when it ends. `GET /control/v1/guardrails/{scope}/{id}/effective` returns every
+level's guardrails and the combined answer.
 
 ## Keys and projects
 
-Organisation names are unique, ignoring case. An operator renames one with
-`keera org set <org> --name "Example Bank AG"`, or the pencil on the
-organisations screen. Everything refers to it by id, so nothing else changes.
-`keera org delete <org>` deletes an organisation and everything in it. It is
-refused with a 409 `org_has_sandboxes` while one of its sandboxes is
-[live](sandboxes.md#quotas), so no machine keeps running without an owner.
+How to create projects and issue, activate, rotate and revoke keys:
+[Projects and keys](https://docs.keera.ch/manage/projects-and-keys/). What that
+page leaves out:
 
-Every key is in a project. A new organisation starts with one project, called
-`default`, which is a project like any other. A key created without `--project`
-goes in the organisation's oldest project, and an organisation with no projects
-cannot have keys. A project with keys that are not revoked, expired ones
-included, cannot be deleted (409 `project_has_keys`). Nor can one with a
-[live](sandboxes.md#quotas) sandbox, expired ones included (409
-`project_has_sandboxes`). Its revoked keys stay, without a project.
-
-A project has a name, unique in its organisation, and an optional description.
-An administrator changes either with
-`keera project set <project> --name <name> --description <text>`, or the pencil
-on the projects screen.
-
-A key belongs to a person: whoever issues it, unless `--user` names someone
-else or `--no-user` nobody, as for a pipeline. A key issued with the operator
-key belongs to nobody, since the operator key is not a person. The panel does
-the same.
-
-A key's secret is printed once and never stored. Nobody, not even an operator,
-can read it later. Screens, reports and the audit log show its name instead. A
-key from `keera key create` or the panel lasts 90 days. `--expires 30d` gives
-it another lifetime, `--expires 2026-12-31` makes that the last day it works,
-and `--expires never` makes a key that does not expire. The panel offers the
-same choices. Through the API, a key with neither `expires_in_seconds` nor
-`expires_at` does not expire.
-
-A key's name is only a label: `keera key set <key> --name <name>`, or the
-pencil on the **API keys** screen. A member can rename their own keys, an
-administrator any key in their organisation, and an operator any key. The old
-name stays in the audit log.
-
-Only an administrator issues keys, so every key has the project and guardrails
-an administrator chose for it. A key for someone else can be left for them to
-activate: `--pending`, or "They activate it" in the panel, which is the panel's
-default. It has no secret and does not work until its holder activates it on
-their dashboard, on **My access**, with `keera key activate`, or with
-[`keera connect claude-code`](#connecting-claude-code). So only they ever see
-it.
-
-```sh
-keera key create --user ada@example.ch --name "Ada's laptop" --pending
-```
-
-`keera key rotate`, or **Rotate** on the **API keys** screen, replaces a key in
-one step. The new key has the same project, owner, lifetime and guardrails, and
-the old one is revoked at once. An expired key can be rotated too. Anyone who
-may revoke a key may rotate it, so members rotate their own. Only an administrator can give the new
-key another lifetime with `--expires`. A sandbox's key cannot be rotated: it
-ends with its sandbox. The command asks you to type the key's name first;
-`--yes` skips that in a script.
-
-```sh
-KEY=$(keera key rotate "a developer's laptop" --yes)
-```
-
-A rotated key stops working everywhere it is used, so give each machine its own
-key.
+- Organisation names are unique, ignoring case. An operator renames one with
+  `keera org set <org> --name` or the pencil on the organisations screen;
+  everything refers to it by id. `keera org delete <org>` deletes it and
+  everything in it, but is refused (409 `org_has_sandboxes`) while one of its
+  sandboxes is [live](sandboxes.md#quotas), so no machine runs without an owner.
+- A key created without `--project` goes in the organisation's oldest project,
+  so an organisation with no projects cannot have keys. A project with keys
+  that are not revoked, expired ones included, cannot be deleted (409
+  `project_has_keys`), nor one with a live sandbox (409
+  `project_has_sandboxes`). Its revoked keys stay, without a project.
+- A key issued with the operator key belongs to nobody, since the operator key
+  is not a person. Through the API, a key with neither `expires_in_seconds` nor
+  `expires_at` does not expire.
+- A member can rename their own keys, an administrator any key in their
+  organisation, and an operator any key. The old name stays in the audit log.
+- Anyone who may revoke a key may rotate it, expired ones too, so members rotate
+  their own. Only an administrator can give the new key another lifetime with
+  `--expires`. A sandbox's key cannot be rotated: it ends with its sandbox.
 
 ## Several organisations
 
@@ -406,16 +323,9 @@ A person can be in several organisations, with a role in each. Each organisation
 adds them, in the panel or with `keera user add`. That is an invitation until
 they first land there.
 
-In the panel, someone in more than one sees a menu instead of the organisation's
-name at the top. Choosing an organisation moves the session there, and choosing
-an invitation joins it. On the command line:
-
-```sh
-keera org list                 # yours, and the ones that invited you
-keera org switch "Example Bank"
-KEERA_ORG="Example Bank" keera usage  # one shell or pipeline
-```
-
+How they switch:
+[Sign in](https://docs.keera.ch/use/sign-in/#several-organisations) and
+[Which gateway and organisation](https://docs.keera.ch/reference/cli/#which-gateway-and-organisation).
 A browser remembers the organisation it was last in, and a new sign-in lands
 there. Elsewhere it lands in the one used last ([Which organisation a sign-in
 lands in](sso.md#which-organisation-a-sign-in-lands-in)). `keera login` goes
@@ -697,36 +607,29 @@ which refuses a script whose keys are in different slots.
 
 The control plane's sign-in throttle stays per replica.
 
-Answers say what is left of the allowance, so a client can see a limit coming.
+Answers say what is left of the allowance, so a client can see a limit coming
+([Headers you get back](https://docs.keera.ch/use/api/#headers-you-get-back)).
 The budget headers are sent when some level has a budget, and the request
 headers when some level limits requests per minute. They describe only the
-tightest level:
+tightest level, which these name:
 
-| Header                           | What it holds                        |
-| -------------------------------- | ------------------------------------ |
-| `X-Keera-Budget-Remaining`       | what is left to spend, in CHF        |
-| `X-Keera-Budget-Limit`           | the budget                           |
-| `X-Keera-Budget-Reset`           | when it resets, in RFC 3339          |
-| `X-Keera-Budget-Scope`           | the level: `org`, `project` or `key` |
-| `X-RateLimit-Limit-Requests`     | the requests per minute              |
-| `X-RateLimit-Remaining-Requests` | requests left in the bucket          |
-| `X-Keera-RateLimit-Scope`        | the level: `org`, `project` or `key` |
+| Header                       | What it holds                        |
+| ---------------------------- | ------------------------------------ |
+| `X-Keera-Budget-Limit`       | the budget                           |
+| `X-Keera-Budget-Scope`       | the level: `org`, `project` or `key` |
+| `X-RateLimit-Limit-Requests` | the requests per minute              |
+| `X-Keera-RateLimit-Scope`    | the level: `org`, `project` or `key` |
 
-A limit on tokens, or one per day or month, has no header. When a limit is hit, the message says which limit
-and its value. A rate limit answers 429 with `Retry-After`. A budget answers
+A limit on tokens, or one per day or month, has no header. When a limit is hit,
+the message says which limit and its value. A rate limit answers 429 with `Retry-After`. A budget answers
 402, and its message gives the day it resets. When the provider itself refuses,
 its `Retry-After` and `X-Should-Retry` are passed on.
 
-Other response headers:
-
-| Header                   | What it holds                                                                             |
-| ------------------------ | ----------------------------------------------------------------------------------------- |
-| `X-Keera-Model`          | the alias that answered; behind a router, the destination that answered                   |
-| `X-Keera-Router`         | the router and where it sent the request ([routers.md](routers.md#what-a-client-can-see)) |
-| `X-Keera-Filters`        | the filters that acted on the request ([filters.md](filters.md#what-is-recorded))         |
-| `X-Keera-Removed-Tools`  | the hosted tools taken out on the deployment's key ([mcp.md](mcp.md#hosted-tools))        |
-| `X-Keera-Removed-Fields` | the fields taken out on the deployment's key ([billing.md](billing.md))                   |
-| `X-Request-Id`           | the request's id; one the client sends is kept if it is up to 64 of `A-Z a-z 0-9 . _ : -` |
+Two more name what was taken out of a request sent on the deployment's own
+provider key: `X-Keera-Removed-Tools` the hosted tools
+([mcp.md](mcp.md#hosted-tools)), and `X-Keera-Removed-Fields` the fields
+([billing.md](billing.md)). An `X-Request-Id` the client sends is kept if it is
+up to 64 of `A-Z a-z 0-9 . _ : -`.
 
 ### Naming a request yourself
 
@@ -736,29 +639,22 @@ back. The gateway writes it to its log as `client_request_id`, next to
 `request_id`, and sends it on to OpenAI models, so OpenAI's support can find the
 request too. Requests that filters and routers send for a request don't carry
 it. An id that is not printable ASCII or is longer than 512 characters is
-ignored, since OpenAI would answer it with a 400.
-
-Both ids are kept with the request. The Requests screen finds a request by
-either one, in any period, and its details show them.
+ignored, since OpenAI would answer it with a 400. Both ids are kept with the
+request.
 
 ## Errors
 
-Errors come in the shape of the API that was called. The Messages API has no
-field for a code, so its errors carry only a type that follows the status, such
-as `billing_error` for 402. The other APIs carry these codes:
+[Errors](https://docs.keera.ch/reference/errors/) lists the codes and what to
+do about them. These are not on it:
 
-| Status | Code                                                                                                                                                                |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 400    | `missing_model`, `invalid_body`, `unsupported_parameter`, `context_length_exceeded`, `subscription_model`                                                           |
-| 401    | `missing_api_key`, `invalid_api_key`, `expired_api_key`, `revoked_api_key`, `subscription_key`, `missing_claude_sign_in`                                            |
-| 402    | `budget_exceeded`, `credit_exhausted` ([billing.md](billing.md#pay-in-advance))                                                                                     |
-| 403    | `filter_refused`, `subscriptions_off`, `org_limited`                                                                                                                |
-| 404    | `model_not_found`: no such model, the key may not use it, or it is served at another endpoint; `mcp_server_not_found`; `not_found`: no such route; `wrong_base_url` |
-| 415    | `unsupported_encoding`: a request body compressed other than with gzip or deflate                                                                                   |
-| 413    | `request_too_large` (`KEERA_MAX_BODY_BYTES`), `filter_input_too_large`                                                                                              |
-| 429    | `rate_limit_exceeded`, `token_rate_limit_exceeded` (per minute); `requests_quota_exceeded`, `tokens_quota_exceeded` (per day or month)                              |
-| 502    | `upstream_unavailable`, `upstream_error`, `filter_failed`, `mcp_credential_refused`, `mcp_unavailable`                                                              |
-| 503    | `control_plane_unavailable`, `no_backend`, `filter_unavailable`, `router_undecided`, `router_destination_unavailable`, `router_unavailable`                         |
+| Status | Code                                                                      |
+| ------ | ------------------------------------------------------------------------- |
+| 400    | `subscription_model`                                                      |
+| 401    | `subscription_key`, `missing_claude_sign_in`                              |
+| 404    | `mcp_server_not_found`; `not_found`: no such route                        |
+| 415    | `unsupported_encoding`: a body compressed other than with gzip or deflate |
+| 502    | `mcp_credential_refused`, `mcp_unavailable`                               |
+| 503    | `router_unavailable`                                                      |
 
 ## Metrics
 

@@ -4,6 +4,10 @@ A hosted model runs outside your infrastructure: at Anthropic, OpenAI,
 Infomaniak, stepping stone, Phoeniqs, CSCS, or any other endpoint that speaks
 the OpenAI API.
 
+To add one in the panel or on the command line, see
+[Models](https://docs.keera.ch/manage/models/). This page explains how hosted
+models work and why.
+
 **Prompts sent to a hosted model leave your infrastructure.** Treat it as a
 deliberate exception. This page covers what to weigh before you offer one and
 how to keep it contained.
@@ -84,50 +88,33 @@ An entry with its own `backends` needs no `product_id`. If that address has the
 same shape (for example an egress proxy that mirrors the path), write
 `{product_id}` in it and the id is filled in.
 
-### In the panel
+### In the panel and on the command line
 
-**Models → Add model** opens the model catalogue. It lists every model the
-providers offer, with its name, release date, location, context window and list
-prices, as `keera model catalogue` does. You can search it, filter it by
-provider, and sort it by any column. When the deployment holds a key for some
-providers ([Billing](billing.md)), the catalogue shows only their models; **Show
-bring your own token** adds the ones that need your own provider key. Operators
-and administrators add a model from it to an organisation. Everyone else opens
-it with **Model catalogue** and can only browse it. See
+[Models](https://docs.keera.ch/manage/models/) shows both. What it leaves out:
+
+When the deployment holds a key for some providers ([Billing](billing.md)), the
+catalogue shows only their models; **Show bring your own token** adds the ones
+that need your own provider key. Operators and administrators add a model from
+it to an organisation. Everyone else opens it with **Model catalogue** and can
+only browse it. See
 [Models belong to an organisation](gateway.md#models-belong-to-an-organisation).
 
-**Add** on a row opens the form with the provider and the model already picked.
-You enter the alias and the provider key. The endpoint, context window and prices
-are filled in and folded away under **Advanced options**. The panel offers only
-the models in the table; add a newer one with `keera model add` or a template
-file. The model remembers its provider, and editing it later opens the same
-values. The provider cannot be changed there; add a new model instead.
+The panel offers only the models in the table; add a newer one with
+`keera model add` or a template file. The model remembers its provider, and
+editing it later opens the same values. The provider cannot be changed there;
+add a new model instead.
 
-Infomaniak also asks for a product id and builds the endpoint from it.
-
-**Self-hosted model**, above the catalogue, opens the same form for your own
-inference server. It asks for the alias, a description, the backend URL, the
-backend model, the context window, the input and output prices and, if the
-server needs one, a provider key. The rest is under **Advanced options**. Left
-empty there, the kind is chat, the model is enabled, and the location is
-`onprem` for a backend inside your network. A backend outside it needs a
-location.
-
-### On the command line
+Infomaniak also asks for a product id and builds the endpoint from it:
 
 ```sh
-keera model add keera-frontier --provider anthropic --backend-model claude-opus-5-5
-keera model set keera-frontier --api-key @-      # reads the key from stdin
-
-# Infomaniak, which also needs the product id its address carries.
 keera model add keera-swiss --provider infomaniak --product-id 100234 \
   --backend-model swiss-ai/Apertus-v1.5-70B --api-key @-
 ```
 
-Use `@-`: a key passed as a flag value ends up in the shell history.
-
-The model goes in the organisation the CLI works in. See
-[Several organisations](gateway.md#several-organisations).
+For a **self-hosted model**, the fields under **Advanced options** default when
+left empty: the kind is chat, the model is enabled, and the location is
+`onprem` for a backend inside your network. A backend outside it needs a
+location.
 
 ## Where the credential lives
 
@@ -137,13 +124,9 @@ rest of this section is about keys an organisation enters itself.
 
 The key is stored on the model, encrypted with AES-GCM under
 [`KEERA_SECRET_KEY`](install.md#required), so a Postgres dump holds only
-ciphertext. Set it in the
-panel or with `keera model set <alias> --api-key @-`. Each model holds its
-organisation's own key. Operators and the organisation's administrators can set
-it.
-
-A model from a [template file](gateway.md#template-files) comes without a key;
-store it with the command above.
+ciphertext. Each model holds its organisation's own key, and so does a model
+from a [template file](gateway.md#template-files) once someone stores it.
+Operators and the organisation's administrators can set it.
 
 A stored key is only sent to the hosts it was entered for. A change that adds a
 backend on another host is refused unless it gives the key again, or removes it
@@ -155,23 +138,10 @@ The deployment's own provider keys only ever go to the provider's own endpoint
 
 ## Put a guardrail on it
 
-Without a guardrail, every key in the organisation can reach a hosted model. At
-minimum:
-
-```sh
-# Only this project may use it, and only up to a monthly budget.
-keera guardrail set project <project-id> --models keera-speed,keera-frontier \
-  --budget 500 --period month
-```
-
-Then consider:
-
-- A [filter](filters.md) removes credentials, client names and account numbers
-  from the request, or refuses it.
-- A [router](routers.md) decides which requests go to the hosted model at all,
-  so everyday work stays local.
-
-Read both before you offer a hosted model to anyone.
+Without a guardrail, every key in the organisation can reach a hosted model;
+see [Guardrails](https://docs.keera.ch/manage/guardrails/). A
+[filter](filters.md) cleans or refuses what goes out, and a
+[router](routers.md) keeps everyday work local.
 
 ## What the prices are, and are not
 
@@ -278,9 +248,6 @@ model, are forwarded without being translated
 
 ### Also worth knowing
 
-- **Upstream model ids are not aliases.** Infomaniak, stepping stone and CSCS
-  use names with capitals, such as `swiss-ai/Apertus-v1.5-70B`. Choose your own
-  alias; the panel suggests a lowercase one.
 - **Embedding models need their own entry**, with no `provider`,
   `kind: embedding`, the full address in `backends` (for Infomaniak, with your
   product id in it), `location: ch` and their own prices.
@@ -297,8 +264,7 @@ routers, request log, sessions and audit entries as a local one.
 
 Two places show the difference on purpose:
 
-- **Live map** draws a line between models served from your own network (above)
-  and hosted providers (below). The line shows the share of the window's tokens
-  that crossed it and what they cost.
+- [Live map](https://docs.keera.ch/monitor/live-map/) draws the edge of your
+  network between local and hosted models.
 - `keera usage --by model` shows one row per model in a terminal. It has no
   column for where a model runs, so tell hosted from local by the alias.

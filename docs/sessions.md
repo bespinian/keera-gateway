@@ -2,11 +2,9 @@
 
 A session is the requests one coding agent made working on one task.
 
-Other reports count requests. But one instruction from a developer becomes
-thirty or forty requests as the agent reads files, calls tools and answers
-again. "Four rappen a request" is not something anybody can act on. "One
-franc twenty a task, eleven minutes, forty-one requests" is the number for a budget
-conversation.
+To read them, see
+[Requests and sessions](https://docs.keera.ch/monitor/requests-and-sessions/).
+This page explains how sessions are found and why.
 
 ## What defines a session
 
@@ -39,13 +37,6 @@ A request with any of these headers is in the session that header names.
 | `X-Session-Id`             | The generic convention.                                                            |
 | `Helicone-Session-Id`      | Helicone's proxy groups requests by it, so clients written for such a gateway fit. |
 | `X-Claude-Code-Session-Id` | Claude Code sends it on every call, its subagents' too, so it needs no setup.      |
-
-```sh
-curl http://127.0.0.1:8080/api/v1/chat/completions \
-  -H "Authorization: Bearer $KEY" \
-  -H "X-Keera-Session: $MY_CONVERSATION_ID" \
-  -H 'Content-Type: application/json' -d @request.json
-```
 
 The value is hashed, so the client's own conversation id is not stored. Which of
 the headers carries it makes no difference to the key.
@@ -135,76 +126,24 @@ session shows it whole.
 
 ## Reading the report
 
-### The panel
+How to use the screen and the command:
+[Requests and sessions](https://docs.keera.ch/monitor/requests-and-sessions/#sessions).
+The API is `GET /control/v1/sessions`, in the
+[API reference](https://docs.keera.ch/reference/api/). Beyond those:
 
-**Sessions**, under Activity, next to Live map and Requests. An administrator
-sees every session in the organisation. A member sees only the sessions of
-their own keys, and so do the live map and the request log.
-
-Click **Cost (CHF)**, **Tokens**, **Requests** or **Duration** above the table to rank the
-whole window by it, highest first, and **Started** to go back to the newest
-first. The ranking is the point of the screen: the row worth
-reading is rarely the latest one.
-
-The Sessions and Requests screens filter and sort the same way, and a filter set
-on one carries over to the other:
-
-- **Model, project, key, person and status**: each lists only what occurs in
-  the window, with its count. Status takes one code, such as 402, or a group,
-  such as all 5XX. A session's status is the status of its last request, so
-  each session falls under one status.
-- **Outcome**: the request and session lists on a project's, key's or model's
-  page filter by All, Success, Failed, Refused or Interrupted instead. For
-  sessions, Failed means the sessions with at least one failed request, and
-  Success the sessions where every request succeeded.
-- **Sorting**: clicking a number column ranks the whole window on the server,
-  not just the rows on screen. Requests rank by **Tokens**, **Cost** or **First
-  token**. **Load more** and Requests' **Live** work only in time order, so a
-  ranking shows the top 100. Narrow it to see others.
-- **Live**: with it on, the Sessions screen updates as requests arrive, every
-  few seconds at most, in any order.
-
-Opening a session shows its four numbers, every request in order, and a strip
-with one bar per request, sized by cost and coloured by outcome. Forty even bars is an
-agent working. A long tail of identical small bars is an agent looping. A red
-bar two thirds along is where the task went wrong; click it to open that request.
-
-Each row's **Status** is how the task ended: the outcome of its last request and the
-message its client got. A task of forty requests that stopped on a spent budget did
-not finish.
-
-### The command line
-
-```sh
-keera session list                        # ranked by cost, the last seven days
-keera session list --sort requests        # the tasks that would not stop
-keera session list --unhappy              # only the ones with problems
-keera session list --model keera-frontier # the tasks that reached the hosted model
-keera session list --project <project> --since 30d
-keera session list --user ada@example.ch  # one person, by email or id
-keera session show <request-id>           # one task, from beginning to end
-```
-
-`keera session list` ranks by cost, not by recency. Its first column is the id
-of each task's first request. `keera session show` takes the id of **any**
-request in the task: that column, the first column of `keera failures`, or the
-`REQUEST` column of `keera session show` itself.
-
-### The API
-
-`GET /control/v1/sessions` takes the same filters as the command, and:
-
-- `session_key`: one conversation
-- `outcome`: `ok`, `failed`, `refused`, `interrupted` or `unhappy`
-- `status`: the last request's status, such as `402`, or a class, such as `5xx`
-- `sort`: `recent`, `cost`, `tokens`, `requests` or `duration`
-- `facets=1`: the filter choices with their counts, as on
-  `GET /control/v1/requests`
-- `format=csv`: up to 5000 sessions
-- `before`: the next page, in the default order only
-
-`GET /control/v1/sessions/{id}` takes any request in the session. Both return
-`gap_seconds`, the gap used.
+- A member sees only the sessions of their own keys, and so do the live map
+  and the request log.
+- A filter set on Sessions carries over to Requests, and back. A session's
+  status is its last request's, the message its client got, so a task that
+  stopped on a spent budget shows 402.
+- On a project's, key's or model's page, **Outcome** filters instead. Failed
+  means at least one failed request, Success that every request succeeded.
+- Ranking by a column ranks the whole window on the server, but shows only the
+  top 100, since **Load more** works only in time order. **Live** updates the
+  screen as requests arrive.
+- `keera session list` also takes `--model`, `--project`, `--since` and
+  `--user`. `keera session show` takes the id of any request in the task, such
+  as the first column of `keera failures`.
 
 ## Narrowing, and the one filter that is not what it looks like
 

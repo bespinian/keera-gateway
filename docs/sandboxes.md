@@ -2,6 +2,9 @@
 
 A sandbox is a machine Keera lends out for one task or one working day.
 
+To use one, see [Sandboxes](https://docs.keera.ch/manage/sandboxes/). This page
+explains how they work and why.
+
 The rest of Keera controls the requests an editor sends. It cannot see what an
 agent does with the answer on a laptop. A sandbox moves that work into the
 cluster.
@@ -84,10 +87,10 @@ the controller the Kubernetes driver uses, is built for an agent outside that
 drives a sandbox through `Run()` and `Files().Write()`. That sends the source
 code out through the API on every read.
 
-In Keera the agent runs _inside_.
-`keera sandbox agent <name> --class … --repo … --task …` starts a machine,
-checks out the repository, runs the image's coding agent on the task (Pi in the
-base image), and pushes a branch. Where egress is
+In Keera the agent runs _inside_
+([Run an agent in a sandbox](https://docs.keera.ch/manage/sandboxes/#run-an-agent-in-a-sandbox)):
+the image's coding agent (Pi in the base image) works on the checkout and
+pushes a branch. Where egress is
 [limited](#the-security-boundary), only that branch leaves. When the agent exits
 cleanly, the sandbox is terminated. When it fails, its machine is
 removed too, and the sandbox is marked failed with the reason.
@@ -139,13 +142,8 @@ Remote-SSH and JetBrains Gateway work unmodified**.
 sshd listens on **2222**, not 22, because a process with every capability
 dropped cannot bind a privileged port. Nobody types the number: the gateway
 dials it, and a developer goes through the ProxyCommand. Which other ports can
-be reached depends on [the driver](#the-two-drivers).
-
-```sh
-keera sandbox create fix-login --class standard --repo git@internal:platform/service.git
-keera sandbox ssh fix-login
-keera sandbox config >> ~/.ssh/config   # then: ssh sbx-fix-login, or open it in any editor
-```
+be reached depends on [the driver](#the-two-drivers). How to connect is in
+[Sandboxes](https://docs.keera.ch/manage/sandboxes/#use-an-engineer-sandbox).
 
 `keera sandbox config` writes a `ProxyCommand` that runs `keera sandbox proxy`.
 It speaks the upgrade above and pipes it to its own stdin and stdout. The
@@ -238,17 +236,13 @@ organisations, which then own their copies.
 default project's quota lets you start each one. The default project is the
 oldest one, where a sandbox lands without `--project`.
 
-An administrator adds or changes classes with a file in the same format:
-
-```sh
-keera sandbox apply sandboxes.yaml
-```
-
-It checks the whole file first, then sets each class it names. Classes the file
+An administrator adds or changes classes with a file in the same format, with
+`keera sandbox apply`; see
+[Sandboxes](https://docs.keera.ch/manage/sandboxes/#for-administrators). It
+checks the whole file first, then sets each class it names. Classes the file
 does not name are left alone. A class is removed in the panel, or with
 `keera sandbox delete-class <name>`. Sandboxes already running on it keep
-working. The commands act on the organisation the CLI works in. See
-[Several organisations](gateway.md#several-organisations).
+working.
 
 A field left out gets a default:
 
@@ -283,15 +277,8 @@ applies.
 
 Sandbox quotas are fields on the guardrail row. They combine by the usual
 restrict-only rule: the minimum for a ceiling, the intersection for a list.
-
-```sh
-keera guardrail set project <project-id> \
-  --max-sandboxes 6 \
-  --max-sandbox-ttl 8h \
-  --sandbox-classes standard,agent \
-  --max-sandbox-cpu 8 \
-  --max-sandbox-memory 32768
-```
+[Sandboxes](https://docs.keera.ch/manage/sandboxes/#for-administrators) shows
+how to set them.
 
 `--max-sandbox-memory` is in MiB, so 32768 is 32 GiB.
 
@@ -314,8 +301,7 @@ organisation is set by an operator. There is no per-key sandbox
 quota: a sandbox's key is minted _for_ that sandbox and dies with it. A key's
 guardrail refuses the sandbox fields.
 
-**Only the command line sets them.** The panel's guardrails dialog has no
-sandbox fields. The panel's Sandboxes screen shows what is left of the quota and
+**The panel's guardrails dialog has no sandbox fields.** Its Sandboxes screen shows what is left of the quota and
 refuses a class the quota forbids. Saving the guardrails dialog keeps the
 sandbox fields unchanged: a guardrail is written whole, and the dialog only
 changes the fields it shows.
@@ -346,13 +332,9 @@ key.
 ## What it costs
 
 Sandbox time is recorded beside tokens, so a task's cost includes the machine it
-ran on, such as "eleven minutes of a four-core machine".
-
-```sh
-keera sandbox usage --by project --since 30d
-keera sandbox usage --by user
-keera sandbox usage --by class
-```
+ran on, such as "eleven minutes of a four-core machine". `keera sandbox usage`
+groups it `--by project`, `user` or `class`, and takes `--since`, such as
+`30d`.
 
 Only an administrator can read it. The report counts sandboxes, how many of them
 are live now, how long they ran, and core-seconds, because no single number
@@ -398,16 +380,12 @@ on a different host than the forge's is refused.
 **Only the repositories the guardrail allows.** The deployment's forge
 credential can reach every repository it is installed on, including other
 organisations'. So a sandbox gets a token only for a repository in
-`allowed_repos`, and one whose organisation does not set it gets none:
-
-```sh
-keera guardrail set org <org-id> --repos acme                 # everything under acme/
-keera guardrail set project <project-id> --repos acme/service # narrows it for one project
-keera guardrail set org <org-id> --repos '*'                  # any repository, for one organisation
-```
+`allowed_repos`, and one whose organisation does not set it gets none
+([Repositories](https://docs.keera.ch/manage/sandboxes/#for-administrators)).
 
 An entry is a path on the forge: an owner or group for everything under it, or
-one repository. Case does not matter. Only the organisation grants
+one repository. `'*'` allows any repository, for one organisation. Case does
+not matter. Only the organisation grants
 repositories, and only an operator can set its list. A project's list can only
 narrow it, and an administrator can set that. It is checked again on every
 token refresh, so taking a repository off the list stops running sandboxes

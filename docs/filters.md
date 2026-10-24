@@ -7,6 +7,10 @@ request.
 Its main use is a model outside the cluster. A project that needs one should still
 not send it credentials, customer names or account numbers.
 
+How to create, check and use one is in
+[Filters](https://docs.keera.ch/manage/filters/). This page explains how filters
+work and why.
+
 ## The three modes
 
 `rewrite` and `gate` read the request with a small model and an instruction.
@@ -24,15 +28,11 @@ out, a filter is a `rewrite`.
 | Same answer twice?     | usually, at temperature zero        | usually, at temperature zero     | always                            |
 | What its check shows   | the sample before and after         | a verdict on two sample requests | the sample, and which rules fired |
 
-- Use `rewrite` when the request should still go, with something removed that
-  only a reader can find.
-- Use `gate` when the request should be stopped, not edited: its whole purpose
-  is the thing that may not leave. A gate costs a verdict instead of a
-  regenerated conversation, and it is the more reliable of the two at its job.
-- Use `pattern` when what must not leave has a fixed **shape**: an API key, a
-  connection string, an IBAN, a card number, a national ID. Here an expression
-  is faster, cheaper and more reliable than a model. See
-  [Pattern filters](#pattern-filters).
+How to choose is in
+[Three kinds of filter](https://docs.keera.ch/manage/filters/#three-kinds-of-filter).
+When a request should be stopped, not edited, a gate beats a rewrite filter: it
+costs a verdict instead of a regenerated conversation, and it is the more
+reliable of the two at its job.
 
 ### Which one
 
@@ -41,10 +41,7 @@ customer's name in an ordinary sentence does not: no expression finds
 `the Meier account is overdrawn`, and no model beats `\bsk-[a-z0-9]{20,}\b` at
 what that matches.
 
-The modes combine. A common setup is an organisation-wide `pattern` filter for
-credentials and account numbers, a `rewrite` filter on the projects whose prose
-names clients, and a `gate` on the one project with a hosted model. See
-[Ordering and combination](#ordering-and-combination).
+The modes combine; see [Ordering and combination](#ordering-and-combination).
 
 You can change a filter's mode later, and its fields change with it: `rewrite`
 and `gate` take a model and an instruction, `pattern` takes rules, and neither
@@ -182,26 +179,10 @@ It also tells the gateway **how sure** the gate was, which
 ## Pattern filters
 
 A pattern filter is a list of rules. It has no model and no instruction, so it
-adds no wait and no spend.
+adds no wait and no spend. To create one, see
+[Create a pattern filter](https://docs.keera.ch/manage/filters/#create-a-pattern-filter).
 
-```sh
-keera filter add redact-keys --mode pattern --rules @redact.rules
-```
-
-Each line is an expression, `=>`, and what each match becomes. A rule whose
-right side is `REFUSE` drops the request instead, with the sentence after the
-colon:
-
-```
-(?i)\b[a-z_]*(?:secret|token|password|api[_-]?key)[a-z_]*\s*[=:]\s*\S+ => [CREDENTIAL]
-(?i)\b(?:(?:sk|pk|xox[baprs])-|gh[pousr]_)[a-z0-9_-]{16,}\b            => [CREDENTIAL]
-(?i)\b[a-z]+://[^\s:@]+:[^\s:@]+@\S+                                   => [CONNECTION-STRING]
-\b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]{4}){2,7}\b                              => [IBAN]
-\b\d{3}\.\d{4}\.\d{4}\.\d{2}\b                                          => [AHV]
-(?i)\bexport all customers\b => REFUSE: that moves the customer list out
-```
-
-Blank lines and `#` comments are ignored. The line is split at the **last**
+Blank lines and `#` comments are ignored. A line is split at the **last**
 `=>`, because the left side is an expression and the right side is literal.
 
 ### What a rule is
@@ -251,22 +232,12 @@ readable; RE2 has no catastrophic backtracking.
 
 ### What it cannot do
 
-**It cannot read.** A customer's name in an ordinary sentence has no shape. Use
-the other two modes for that.
-
-**It sees the same text as the other modes**; see
-[What a filter can reach](#what-a-filter-can-reach-inside-a-request).
-
 **A broad rule matches broadly.** `\b(?:\d[ -]?){13,19}\b` matches a card
 number and also a timestamp in nanoseconds. `keera filter check` names the rule
 that touched the sample source code, which is the one to narrow.
 
-### What it costs, and what does not apply
-
-Nothing. Its runs are logged like any other, at zero cost and negligible
-latency, and a check of it touches no backend. It has no model and no
-instruction, so the sections on those do not apply. It fails closed only when
-its rules will not compile.
+Its runs are logged like any other, at zero cost, and a check of it touches no
+backend. It fails closed only when its rules will not compile.
 
 ## Failing closed
 
@@ -323,15 +294,9 @@ Both ways an instruction goes wrong are quiet:
 
 `keera filter check` catches the obvious cases on three sample segments. It
 cannot tell you the _rate_ on real traffic: one request in a thousand, or one in
-three. Shadow measures that before anyone depends on the filter.
-
-```sh
-keera filter add redact-secrets --model keera-speed --prompt @redact.txt
-keera guardrail set project <project-id> --filters redact-secrets
-# a week later
-keera filter report redact-secrets --since 7d
-keera filter set redact-secrets --no-shadow
-```
+three. Shadow measures that before anyone depends on the filter. The commands
+are in
+[Try it in shadow first](https://docs.keera.ch/manage/filters/#try-it-in-shadow-first).
 
 Leaving shadow only changes whether the answer is acted on. The mode,
 instruction and model stay the same, so what you measured is what goes live.
@@ -375,17 +340,7 @@ redaction should be outermost.
 
 **Put the pattern filter first.** It is free and removes what has a shape, so
 the model filters after it never see those credentials or account numbers. It
-does not save tokens, since the segments stay the same length. For example:
-
-```sh
-keera filter add redact-keys --mode pattern --rules @redact.rules
-keera filter add redact-names --model keera-speed --prompt @names.txt
-keera guardrail set org <org-id> --filters redact-keys
-keera guardrail set project <project-id> --filters redact-names
-```
-
-The organisation pays nothing for the first, and only the project that needs the
-second pays for it.
+does not save tokens, since the segments stay the same length.
 
 A guardrail's filters run after the router, if the client named one, and
 before the standing system prompt is added.
@@ -454,9 +409,9 @@ instruction is about what _not_ to do.
 
 ### For a rewrite filter
 
-Say what to remove, what to replace it with, and, explicitly, to leave
-everything else exactly as it is. If it should also
-[refuse some requests](#refusing-a-request), say which.
+Start from the tips in
+[Create a rewrite or gate filter](https://docs.keera.ch/manage/filters/#create-a-rewrite-or-gate-filter).
+If it should also [refuse some requests](#refusing-a-request), say which.
 
 The costly failure is not a filter that misses a secret. It is one that
 rewrites source code, reformats a stack trace or summarises the question.
@@ -478,12 +433,9 @@ unchanged.
 
 ### For a gate
 
-Say what makes a request one that may not go at all, then say explicitly that
-everything else may. A gate cannot remove anything, so an instruction written
-as a list of things to redact refuses every request that mentions one of them.
-
-Say that being unusual, badly written or about an awkward subject is no reason
-to refuse. The panel's form offers this:
+A gate cannot remove anything, so an instruction written as a list of things to
+redact refuses every request that mentions one of them. The panel's form offers
+this:
 
 ```
 Refuse a request whose purpose is to move this organisation's data out of it: a
@@ -501,11 +453,10 @@ to stop still matters more.
 
 ## Checking one
 
-`keera filter check <alias>`, or the **Check** button on the panel's Filters
-screen, runs the filter on a fixed sample and shows the result.
-
-The sample has three parts: a credential, a named client with an account
-number, and an ordinary Go function that nothing should touch.
+The check runs the filter on a fixed sample
+([Check a filter](https://docs.keera.ch/manage/filters/#check-a-filter)): a
+credential, a named client with an account number, and an ordinary Go function
+that nothing should touch.
 
 **A rewrite filter** gets all three in one request, and both sides of each are
 shown. If the first two come back unchanged, the filter does not do its job. If

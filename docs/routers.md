@@ -7,28 +7,12 @@ field, as it would a model's. Requests that don't name it are not affected.
 [What clients call, and what always applies](gateway.md#what-clients-call-and-what-always-applies)
 shows how routers and guardrails fit together.
 
-A **route step** picks one model from a list for each request. Use one to send
-small requests to a cheap model, or to keep sensitive prompts away from a model
-outside the cluster. The simplest router is one route step:
+To create and manage one in the panel or on the command line, see
+[Routers](https://docs.keera.ch/manage/routers/). This page explains how routers
+work and why.
 
-```sh
-keera router add auto --model keera-decider \
-  --destinations keera-speed,keera-frontier --fallback keera-speed \
-  --prompt @route.txt --display-name Auto
-```
-
-A client then puts `auto` in the `model` field:
-
-```json
-{ "model": "auto", "messages": [{ "role": "user", "content": "…" }] }
-```
-
-Add steps when one route step is not enough. For example:
-
-- redact only the requests that go to a hosted model
-- send traffic to the local model once the hosted budget is spent
-- chain two route steps, such as one that decides by size and one that reads
-  the request
+A **route step** picks one model from a list for each request. The simplest
+router is one route step.
 
 | Step            | What it does                                                  | Where the request goes next                  |
 | --------------- | ------------------------------------------------------------- | -------------------------------------------- |
@@ -62,7 +46,7 @@ A **limit** without an `exceeded` branch refuses what is over it, as the key's
 own limits do: a budget with a 402 `budget_exceeded`, a rate limit with a 429,
 `rate_limit_exceeded` or `token_rate_limit_exceeded` per minute and
 `requests_quota_exceeded` or `tokens_quota_exceeded` per day or month (see
-[Errors](gateway.md#errors)). The limit headers on an answer describe only the
+[Errors](https://docs.keera.ch/reference/errors/)). The limit headers on an answer describe only the
 key's own levels. With an `exceeded` branch, the request takes that branch
 instead and is still served. Its row in the request log notes which limit sent
 it there.
@@ -110,54 +94,13 @@ CHF 50 a month on the hosted model, and redacts names only on the way there:
 
 A request the route step sends to `keera-speed` goes there directly.
 
-```sh
-keera router add guarded --file guarded.json --display-name Guarded
-keera router show guarded
-```
-
-```
-alias         guarded
-display name  Guarded
-steps
-  filter redact-keys
-  budget CHF 50.00 per month (hosted-budget)
-  ├─ within
-  │  route decided by keera-decider, falls back to keera-speed when it cannot (route)
-  │  ├─ to keera-speed, sent straight there
-  │  └─ to hosted-frontier
-  │     filter redact-names
-  │     model hosted-frontier
-  └─ exceeded
-     model keera-speed
-instruction (route)
-  Send anything naming a client to keera-speed.
-```
-
-`keera router show guarded --json` prints the whole router in the shape
-`--file` reads, so you can edit it and save it with `keera router set`. To
-change one route step without the file, give its flags and its id:
-`keera router set guarded --step route --fallback hosted-frontier`. In the
-panel, **Routers** draws the same tree and edits it.
-
-| Field           | On                           | Holds                                                                 |
-| --------------- | ---------------------------- | --------------------------------------------------------------------- |
-| `id`            | every step                   | up to 32 lowercase letters, digits and inner hyphens; unique          |
-| `kind`          | every step                   | `filter`, `route`, `rate_limit`, `budget`, `system_prompt` or `model` |
-| `ref`           | filter, model                | the alias of the organisation's filter or model                       |
-| `mode`          | route                        | how it chooses; see [Modes](#modes)                                   |
-| `destinations`  | route                        | 1 to 16 chat models it may choose between                             |
-| `model`         | route (instruction)          | the model that decides                                                |
-| `prompt`        | route (instruction)          | the instruction, up to 4 KiB                                          |
-| `fallback`      | route (instruction)          | where a request goes when it cannot decide; left out, it refuses      |
-| `ceilings`      | route (size)                 | the largest request, in tokens, for each destination but one          |
-| `prompt`        | system_prompt                | the instructions, up to 16 KiB                                        |
-| `requests`      | rate_limit                   | the most requests per period; set this, `tokens` or both              |
-| `tokens`        | rate_limit                   | the most tokens per period, counted when each request ends            |
-| `budget_micros` | budget                       | the budget in millionths of a franc: 50000000 is CHF 50               |
-| `period`        | rate_limit, budget           | `minute` (rate limit only), `day` or `month`; see below               |
-| `next`          | filter, limit, system_prompt | the step after it                                                     |
-| `exceeded`      | limit                        | the step for a request over the limit; left out, it refuses           |
-| `branches`      | route                        | a step for each destination that needs more before the model          |
+How to save, show and edit one is in
+[Create a router](https://docs.keera.ch/manage/routers/#create-a-router).
+`keera router set <alias> --step <id>` changes one route step without the file.
+Every field is in the
+[API reference](https://docs.keera.ch/reference/api/schemas/#routerstep). An
+`id` has at most 32 characters, a route step 1 to 16 destinations, and
+`budget_micros` is in millionths of a franc: 50000000 is CHF 50.
 
 The command line gives a step without an `id` one made from its kind, such as
 `filter-1`. Give each limit its own id, though: see below.
@@ -240,11 +183,7 @@ allow-list says. Filters are never on an allow-list.
 
 To send everything a project does through a router, narrow the project's
 allow-list to the router. The key then has nothing else in its allow-list,
-which is why allowing the router must allow where it sends:
-
-```sh
-keera guardrail set project <project-id> --models guarded
-```
+which is why allowing the router must allow where it sends.
 
 A guardrail never routes on its own: if it did, a developer who asked for the
 large model could get the small one without knowing.
@@ -254,8 +193,6 @@ every model it reaches. Otherwise it would open a model the list leaves out,
 and it stays off the list until an administrator adds it; the panel and the
 command say that no key can call it yet. Changing a router on the list so that
 it reaches such a model is saved with a warning.
-
-The panel marks routers in an allow-list and shows where they send.
 
 ## Who owns what
 
@@ -325,20 +262,14 @@ Also:
 
 ## Descriptions are what a route step decides on
 
-The deciding model sees each destination's own model `description`:
-
-```sh
-keera model set keera-speed --description \
-  "fast, local; short edits, syntax questions, everyday work"
-keera model set keera-frontier --description \
-  "hosted and expensive; design, multi-step reasoning, whole-system questions"
-```
+The deciding model sees each destination's own model `description`
+([how to write one](https://docs.keera.ch/manage/models/#write-a-good-description)).
 
 The description lives on the model so it stays true when the model behind an
 alias changes. Clients see it on `/api/v1/models` too.
 
-Write the descriptions before the route step. Without them it chooses between
-bare aliases, and `keera router check` warns about it.
+Without descriptions it chooses between bare aliases, and `keera router check`
+warns about it.
 
 A model from a hosted provider starts with the provider's description
 (`keera model catalogue` lists them). Rewrite it to say what this deployment
@@ -358,10 +289,6 @@ place.
 A request the fallback answered counts as served. Why the step could not decide
 is kept as the request's note, shown on the Requests screen and by
 `keera session show`.
-
-A step that saves money usually has a safe fallback. A step that keeps prompts
-inside the cluster does not: sending an unclassified prompt to a fixed model is
-the failure it exists to prevent.
 
 Filters always fail closed. Route steps get a choice because there may be a
 safe place to send the request.
@@ -464,12 +391,6 @@ Request length often shows how much model a request needs, and it costs nothing
 to measure. A request for a variable name is a paragraph; a request for a
 migration plan carries a conversation, files and errors.
 
-```sh
-keera router add bysize --mode size \
-  --destinations keera-speed:4k,keera-frontier \
-  --description "the local model for short work, the hosted one for long"
-```
-
 Each destination has **a ceiling**: the largest request it should get, in
 estimated tokens. The destination without a ceiling takes anything larger. A
 request goes to the destination with the smallest ceiling it fits under.
@@ -542,12 +463,6 @@ Use it when two or more models can serve the same request and one may be
 unavailable: a local cluster with a hosted endpoint behind it, two providers of
 the same model, a GPU pool that is drained for maintenance.
 
-```sh
-keera router add ha --mode fallback \
-  --destinations keera-local,hosted-frontier \
-  --description "the cluster, with the hosted model behind it"
-```
-
 **Destinations are tried in the order they are written**, until one answers or
 the list runs out. There is no deciding model, no instruction and no fallback
 destination - the list _is_ the fallback.
@@ -604,17 +519,7 @@ moment. Alert on the fallback rate.
 
 A fallback step always prefers its first destination. For equal destinations,
 such as identical vLLM replicas, that leaves the others mostly idle. These two
-modes put the same list in a new order on every request:
-
-```sh
-keera router add pool --mode least-busy \
-  --destinations llama-a,llama-b,llama-c \
-  --description "the three replicas, whichever has room"
-
-keera router add frontier --mode latency \
-  --destinations frontier-eu,frontier-us \
-  --description "either region, whichever is answering"
-```
+modes put the same list in a new order on every request.
 
 Otherwise they work like the fallback mode, and
 [fail over the same way](#what-counts-as-a-failure). There is no deciding model,
@@ -656,10 +561,9 @@ instruction or fallback destination.
 - **Ties go to the written order**, so a new step behaves like a fallback step
   until it has measured something.
 
-`keera router check pool` is the fallback mode's check, with what the step
-measured for each destination in its note, in the order that gives. The panel
-shows it in a column of its own.
-Two checks a minute apart may show a different order; that is normal.
+Their check is the fallback mode's check, with what the step measured for each
+destination in its note, in the order that gives. The panel shows it in a
+column of its own. Two checks a minute apart may show a different order; that is normal.
 
 ## There is no shadow mode
 
@@ -669,8 +573,9 @@ router's screen instead.
 
 ## Checking one
 
-`keera router check <alias>`, or the **Check** button on the router's screen,
-shows what each of its route steps would do. `--step <id>` checks one of them.
+A check shows what each route step would do
+([Check and watch it](https://docs.keera.ch/manage/routers/#check-and-watch-it)).
+`--step <id>` checks one of them.
 
 A step that tries its destinations has no decision to sample, so its check
 [asks each destination in turn whether it is there](#the-state-to-watch-for).
@@ -736,10 +641,8 @@ A filter step that refuses says the router refused, not a guardrail of the key.
 
 ## What is recorded
 
-Each router has its own screen: `/routers/<alias>` in the panel,
-`keera router report <alias>` in a terminal. It shows how many requests went
-through the router, how many were refused, what they cost, which models
-answered, and how its route steps decided.
+Each router has its own screen, and `keera router report <alias>`
+([Check and watch it](https://docs.keera.ch/manage/routers/#check-and-watch-it)).
 
 A route step's failures are silent. Every request still gets a 200:
 
