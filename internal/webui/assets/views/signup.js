@@ -94,6 +94,21 @@ export async function signUp(root, onSignedIn) {
       nameInput,
       "You become its administrator.",
     ),
+    h(
+      "p",
+      { class: "hint" },
+      "By creating an organisation, you agree to the ",
+      h(
+        "a",
+        {
+          href: "https://keera.ch/en/terms",
+          target: "_blank",
+          rel: "noopener",
+        },
+        "terms of service",
+      ),
+      ".",
+    ),
     create,
   );
 
