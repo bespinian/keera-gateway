@@ -25,7 +25,6 @@ import {
   readRow,
   go,
   crumb,
-  checkButton,
   currentRange,
   rangePicker,
   isAdmin,
@@ -226,18 +225,13 @@ export async function modelsView(ctx) {
             : h("span", { class: "faint" }, "not billed"),
       },
       {
-        // Enabled is the administrator's switch; the Check column tests the
-        // backend.
+        // Enabled is the administrator's switch; Check on the model's screen
+        // tests the backend.
         label: "Status",
         shrink: true,
         sortKey: (m) => (m.enabled ? 1 : 0),
         cell: (m) =>
           m.enabled ? pill("Enabled", "good") : pill("Disabled", "warn"),
-      },
-      isAdmin(ctx) && {
-        label: "Check",
-        shrink: true,
-        cell: (m) => healthCell(m),
       },
       {
         label: "",
@@ -697,14 +691,6 @@ function surfaceOf(kind) {
   }
 }
 
-function healthCell(m) {
-  return checkButton(
-    "Send a test request to this model's backend",
-    () => api.checkModel(m.org_id, m.alias),
-    (probe) => verdict(probe, m.kind),
-  );
-}
-
 // checkModel shows the check report on the model's own screen, which has no
 // room for a verdict pill.
 export async function checkModel(m) {
@@ -713,32 +699,6 @@ export async function checkModel(m) {
   } catch (ex) {
     toast(ex.message, "bad");
   }
-}
-
-// verdict is a pill for a glance, with the full report behind it.
-function verdict(probe, kind) {
-  const tone = probe.ok
-    ? (probe.warnings || []).length
-      ? "warn"
-      : "good"
-    : "bad";
-  const label = probe.ok
-    ? probe.tools_off
-      ? "No tool calls"
-      : (probe.warnings || []).length
-        ? "Working, with notes"
-        : "Working"
-    : probe.tool_call_as_text
-      ? "Tool calls broken"
-      : probe.reachable
-        ? "Answering, unusable"
-        : "Unreachable";
-  return {
-    label,
-    tone,
-    title: "The full report",
-    open: () => report(probe, kind),
-  };
 }
 
 // Only a chat check streams and asks for a tool call, so other kinds' reports
