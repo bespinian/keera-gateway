@@ -225,7 +225,7 @@ export async function usageView(ctx) {
             : nameOf(r.group) || r.group || "",
       },
       {
-        label: "Served",
+        label: "Requests",
         width: "16%",
         num: true,
         cell: (r) => compact(r.requests),
@@ -261,7 +261,7 @@ export async function usageView(ctx) {
     {
       // Most used first. Days stay in date order, which is the question a
       // grouping by day asks.
-      sortBy: groupBy === "day" ? null : "Served",
+      sortBy: groupBy === "day" ? null : "Requests",
       sortDir: "desc",
       emptyTitle: "Nothing in this period",
       emptyBody: "Usage appears here as soon as a request is served.",
