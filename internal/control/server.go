@@ -27,6 +27,7 @@ import (
 	"github.com/bespinian/keera-gateway/internal/gateway"
 	"github.com/bespinian/keera-gateway/internal/httpx"
 	"github.com/bespinian/keera-gateway/internal/metrics"
+	"github.com/bespinian/keera-gateway/internal/openapi"
 	"github.com/bespinian/keera-gateway/internal/policy"
 	"github.com/bespinian/keera-gateway/internal/ratelimit"
 	"github.com/bespinian/keera-gateway/internal/registry"
@@ -153,7 +154,17 @@ func (s *Server) Sweep(now time.Time) { s.signIn.Sweep(BucketIdle, now) }
 // /healthz, /readyz and /metrics stay at the root rather than under
 // httpx.ControlPrefix, because that is where orchestrators and scrapers look.
 func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
+	// Only the control plane is compressed. The inference plane streams
+	// tokens, which must not wait in a buffer.
+	return httpx.Middleware(s.log, httpx.Compress(s.mux()))
+}
+
+// Routes are the patterns Handler serves, for the test that keeps the OpenAPI
+// spec complete.
+func (s *Server) Routes() []string { return s.mux().Patterns() }
+
+func (s *Server) mux() *httpx.Mux {
+	mux := httpx.NewMux()
 	// route registers an authenticated route; pattern is "METHOD /path",
 	// with the path under httpx.ControlPrefix.
 	s.routes = nil
@@ -169,6 +180,9 @@ func (s *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /readyz", s.ready)
 	mux.HandleFunc("GET /metrics", s.metricsRoute)
+	// What every route takes and answers, for generating a client.
+	mux.Handle("GET "+openapi.YAMLPath, openapi.YAML())
+	mux.Handle("GET "+openapi.JSONPath, openapi.JSON())
 
 	// The sign-in flow. Nobody has signed in yet, so the routes that do work
 	// are throttled per address. /auth/config reads and decides nothing, so it
@@ -328,9 +342,7 @@ func (s *Server) Handler() http.Handler {
 	if s.opts.ServeUI {
 		mux.Handle("/", webui.Handler())
 	}
-	// Only the control plane is compressed. The inference plane streams
-	// tokens, which must not wait in a buffer.
-	return httpx.Middleware(s.log, httpx.Compress(mux))
+	return mux
 }
 
 func (s *Server) authenticated(next handler) http.Handler {

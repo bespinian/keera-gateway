@@ -14,12 +14,17 @@ Port 8080 carries everything, told apart by path:
 | `/api`     | The inference API and the MCP servers. Authenticated by an API key, as a bearer token, `x-api-key` or `X-Keera-Key`. |
 | `/control` | The control API. Authenticated by the operator key, a panel session or a `keera login` token.                        |
 | `/sandbox` | Attaching to a sandbox, and the Git credential a sandbox asks for.                                                   |
-| `/`        | The control panel, and `/metrics`, `/healthz` and `/readyz`.                                                         |
+| `/`        | The control panel, `/metrics`, `/healthz`, `/readyz`, and the API description at `/openapi.json`.                    |
 
 `/sandbox` is not JSON. It carries a byte stream between an authenticated
 caller and a port inside a sandbox, so attaching needs no second port and no
 second certificate. With sandboxes switched off, it answers 501
 `sandboxes_disabled`. See [sandboxes.md](sandboxes.md).
+
+`/openapi.json` and `/openapi.yaml` describe every route on this listener in
+OpenAPI 3.1, for generating a client or browsing the API. They need no sign-in.
+The inference routes only sketch their bodies and link to the OpenAI and
+Anthropic references, which they follow.
 
 A deployment publishes one address and one certificate. The downside is that no
 port separates the planes, only the credentials. See

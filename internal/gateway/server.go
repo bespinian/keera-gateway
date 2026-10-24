@@ -231,7 +231,15 @@ func (s *Server) clientFor(limited bool) *http.Client {
 // the handler can be mounted on the root mux as-is and r.URL.Path stays the
 // path the client actually asked for.
 func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
+	return httpx.Middleware(s.log, s.mux())
+}
+
+// Routes are the patterns Handler serves, for the test that keeps the OpenAPI
+// spec complete.
+func (s *Server) Routes() []string { return s.mux().Patterns() }
+
+func (s *Server) mux() *httpx.Mux {
+	mux := httpx.NewMux()
 	mux.Handle("POST "+httpx.InferencePrefix+"/v1/chat/completions", s.inference(chatSurface))
 	mux.Handle("POST "+httpx.InferencePrefix+"/v1/completions", s.inference(completionSurface))
 	mux.Handle("POST "+httpx.InferencePrefix+"/v1/embeddings", s.inference(embeddingSurface))
@@ -260,7 +268,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc(httpx.InferencePrefix+"/", func(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteNotFound(w, "not_found", "the inference API has no route "+r.Method+" "+r.URL.Path)
 	})
-	return httpx.Middleware(s.log, mux)
+	return mux
 }
 
 // authenticate resolves the presented key, answering in the shape the caller's

@@ -41,7 +41,7 @@ const upgradeProtocol = "keera-sandbox/1"
 // closes, like a laptop put in a bag.
 const attachIdleTimeout = 2 * time.Hour
 
-func (s *Server) attachRoutes(mux *http.ServeMux) {
+func (s *Server) attachRoutes(mux *httpx.Mux) {
 	if s.opts.Sandboxes == nil {
 		// Without a driver, the path says so. A 404 would look like a version
 		// mismatch.

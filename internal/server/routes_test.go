@@ -39,6 +39,8 @@ func TestRoutesSendEachPathToTheRightPlane(t *testing.T) {
 		// The probes stay at the root.
 		{"liveness", http.MethodGet, "/healthz", http.StatusOK},
 		{"the exposition needs a credential", http.MethodGet, "/metrics", http.StatusUnauthorized},
+		// The spec needs none, and is not the panel's shell.
+		{"the API description", http.MethodGet, "/openapi.json", http.StatusOK},
 
 		// The inference plane.
 		{"openai chat", http.MethodPost, "/api/v1/chat/completions", http.StatusUnauthorized},

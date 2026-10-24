@@ -40,6 +40,7 @@ sandbox base image.
 | `internal/store`     | Postgres schema and queries.                                     |
 | `internal/config`    | Every setting, read from the environment.                        |
 | `internal/httpx`     | Shared HTTP plumbing: prefixes, compression, request ids.        |
+| `internal/openapi`   | The OpenAPI spec of every route, served at `/openapi.json`.      |
 | `internal/id`        | The identifiers every row and every key are named with.          |
 | `internal/version`   | The build version both binaries report.                          |
 | `Containerfile`      | The image the gateway ships in. `FROM scratch`.                  |
@@ -84,6 +85,9 @@ Run `make check` before handing work back.
 - Every control route checks permissions in its handler. A new route needs a
   case in `internal/control/isolation_integration_test.go`, which calls it as
   another tenant; the test fails until it has one.
+- Every route is described in `internal/openapi/openapi.yaml`. A test in
+  `internal/server` fails while a route is missing from it, or it describes one
+  that is gone.
 - `internal/store/migrations` holds one file per release that changes the
   schema, such as `0002_v0.5.0.sql`. A schema change goes in the file of the
   next release, which is created with the first change. Once a release has
