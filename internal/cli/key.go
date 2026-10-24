@@ -7,6 +7,7 @@ import (
 	"maps"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,6 +30,8 @@ type keyRun struct {
 	noUser bool
 	// pending leaves the key for its holder to activate.
 	pending bool
+	// all lists revoked keys too.
+	all bool
 }
 
 // defaultKeyLife is how long a new key lasts unless --expires says otherwise.
@@ -63,6 +66,7 @@ func keyCmd(ctx context.Context, args []string) error {
 		"it works, such as 2026-12-31 (default: the old key's lifetime)")
 	fs.BoolVar(&r.subscription, "subscription", false,
 		"a key that reaches only subscription models, for Claude Code signed in to a Claude plan")
+	fs.BoolVar(&r.all, "all", false, "include revoked keys")
 	if done, err := r.parse(); done {
 		return err
 	}
@@ -217,6 +221,11 @@ func (r *keyRun) list(ctx context.Context) error {
 	keys, err := list[store.KeySummary](ctx, r.c, path)
 	if err != nil {
 		return err
+	}
+	// Filtered here rather than by the control API, which other callers
+	// need to return revoked keys, and so it works against older gateways.
+	if !r.all {
+		keys = slices.DeleteFunc(keys, func(k store.KeySummary) bool { return k.RevokedAt != nil })
 	}
 	return out(r.asJSON, keys, func(w *table) {
 		if len(keys) == 0 {

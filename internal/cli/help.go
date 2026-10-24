@@ -283,7 +283,8 @@ var commands = []command{
 					"and so may an administrator. 'keera connect claude-code' activates one " +
 					"for you when you have one.",
 				examples: []string{`keera key activate "Ada's laptop"`}},
-			{name: "list", summary: "every key", flags: []string{"project", "json"}},
+			{name: "list", summary: "the keys that are not revoked", flags: []string{"project", "all", "json"},
+				prose: "Expired and pending keys are listed too. --all adds the revoked ones."},
 			{name: "set", aliases: []string{"rename"}, args: "<key>",
 				summary: "rename a key",
 				flags:   []string{"name", "json"},
