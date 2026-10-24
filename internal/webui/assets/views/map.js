@@ -355,7 +355,10 @@ function layout(scene, width) {
   scene.gateway.h = BOX.gatewayH;
   scene.gateway.y = Math.round(g.insideTop + (insideH - BOX.gatewayH) / 2);
 
-  scene.height = g.outsideTop + outsideH + P + 6;
+  // With nothing hosted outside, the lower band is left out.
+  scene.height = scene.outside.length
+    ? g.outsideTop + outsideH + P + 6
+    : g.insideTop + insideH + P + 6;
   return scene.height;
 }
 
@@ -718,6 +721,12 @@ function render(g, scene, c, packets, hover) {
 function bands(g, scene, c) {
   const geo = scene.geometry;
 
+  g.textBaseline = "alphabetic";
+  g.font = "600 11px " + c.font;
+  g.fillStyle = c.muted;
+  g.fillText("YOUR NETWORK", 6, 16);
+  if (!scene.outside.length) return;
+
   // Tinted, so "not your network" reads before any word does.
   g.fillStyle = c.warnSoft;
   roundRect(
@@ -740,20 +749,8 @@ function bands(g, scene, c) {
   g.stroke();
   g.restore();
 
-  g.textBaseline = "alphabetic";
-  g.font = "600 11px " + c.font;
-  g.fillStyle = c.muted;
-  g.fillText("YOUR NETWORK", 6, 16);
   g.fillStyle = c.warn;
   g.fillText("LEAVES YOUR NETWORK", 6, geo.lineY + 26);
-
-  if (scene.outside.length) return;
-  const note = "Nothing leaves: every model is served from your own network";
-  g.font = "12px " + c.font;
-  g.textAlign = "right";
-  g.fillStyle = c.muted;
-  g.fillText(fit(g, note, geo.width - 240), geo.width - 6, geo.lineY + 26);
-  g.textAlign = "left";
 }
 
 /** lines draws one link per client and per model, weighted by traffic. One
