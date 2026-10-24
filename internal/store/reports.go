@@ -19,12 +19,13 @@ type ProjectSummary struct {
 	SpendMicros  int64         `json:"spend_micros"`
 	BudgetMicros int64         `json:"budget_micros"`
 	Period       policy.Period `json:"period"`
+	ResetsAt     time.Time     `json:"resets_at"`
 }
 
 // ProjectSummaries lists an organisation's projects with their guardrails and
 // spend, in one query to avoid N+1. An empty orgID means every organisation.
 func (s *Store) ProjectSummaries(ctx context.Context, orgID string, now time.Time) ([]ProjectSummary, error) {
-	return queryAll(ctx, s.pool, scanProjectSummary, `
+	out, err := queryAll(ctx, s.pool, scanProjectSummary, `
 		SELECT pr.id, pr.org_id, pr.name, pr.description, pr.created_at, `+limitColumns+`,
 		       (SELECT count(*) FROM api_keys k
 		         WHERE k.project_id = pr.id AND k.revoked_at IS NULL AND k.key_hash IS NOT NULL
@@ -39,6 +40,10 @@ func (s *Store) ProjectSummaries(ctx context.Context, orgID string, now time.Tim
 		WHERE ($1 = '' OR pr.org_id = $1)
 		ORDER BY pr.name`,
 		orgID, policy.PeriodDay.Start(now), policy.PeriodMonth.Start(now))
+	for i := range out {
+		out[i].ResetsAt = out[i].Period.Next(now)
+	}
+	return out, err
 }
 
 func scanProjectSummary(r row) (ProjectSummary, error) {

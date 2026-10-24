@@ -8,7 +8,6 @@ import {
   h,
   replace,
   table,
-  meter,
   ago,
   date,
   dateTime,
@@ -29,6 +28,7 @@ import {
   statePill,
 } from "./keys.js";
 import { noKey } from "./connect.js";
+import { budgetUse } from "./limits.js";
 
 // Each level as the developer would name it.
 const SCOPE_NAMES = {
@@ -365,29 +365,7 @@ function scopeRow(sc) {
 
   const row = h("div", { class: "stack", style: { gap: "6px" } }, head);
 
-  for (const b of sc.budgets || []) {
-    const frac = b.spend_micros / b.budget_micros;
-    const tone = frac >= 1 ? "bad" : frac >= 0.8 ? "warn" : "";
-    row.append(
-      h(
-        "div",
-        { class: "row-tight" },
-        meter(frac, tone),
-        h(
-          "span",
-          { class: "muted nowrap small" },
-          `${Math.round(frac * 100)}%`,
-        ),
-      ),
-      h(
-        "span",
-        { class: "muted small" },
-        `${money(b.spend_micros)} of ${money(b.budget_micros)} per ${b.period}`,
-        b.resets_at ? ` · resets ${date(b.resets_at)}` : "",
-        frac >= 1 ? " · used up, so requests are refused until it resets" : "",
-      ),
-    );
-  }
+  for (const b of sc.budgets || []) row.append(budgetUse(b));
   return row;
 }
 

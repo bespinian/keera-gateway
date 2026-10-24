@@ -7,7 +7,6 @@ import {
   h,
   stat,
   pill,
-  meter,
   empty,
   go,
   compact,
@@ -39,12 +38,7 @@ import { requestLog } from "./requestlog.js";
 import { setOutcome, namesFrom } from "./logfilters.js";
 import { sessionLog } from "./sessions.js";
 import { modelsCell, summarise } from "./guardrails.js";
-import {
-  openModel,
-  checkModel,
-  deleteModel,
-  servedName,
-} from "./models.js";
+import { openModel, checkModel, deleteModel, servedName } from "./models.js";
 import {
   activateButton,
   canActivate,
@@ -63,6 +57,7 @@ import {
 } from "./keys.js";
 import { openProject, editProject, deleteProject } from "./projects.js";
 import { orgNameOf } from "./orgs.js";
+import { budgetUse } from "./limits.js";
 import {
   TONE,
   roleLabel,
@@ -108,7 +103,6 @@ export async function projectDetailView(ctx) {
       pill(
         `${num(project.active_keys)} active ${plural(project.active_keys, "key")}`,
       ),
-      budgetPill(project),
     ],
     actions: [
       busyButton(
@@ -152,6 +146,7 @@ export async function projectDetailView(ctx) {
         { class: "card-body" },
         facts([
           ["Models", modelsCell(project.limits)],
+          ["Budget", projectBudget(project)],
           [
             "Guardrails",
             summarise(project.limits).length
@@ -862,16 +857,14 @@ export function routerLinks(ctx, routers) {
   );
 }
 
-function budgetPill(project) {
+// Without a budget the month's spend is still worth seeing.
+function projectBudget(project) {
   if (!project.budget_micros) {
-    return pill(`${money(project.spend_micros)} this month, no budget`);
+    return h(
+      "span",
+      { class: "faint" },
+      `None · ${money(project.spend_micros)} this month`,
+    );
   }
-  const frac = project.spend_micros / project.budget_micros;
-  const tone = frac >= 1 ? "bad" : frac >= 0.8 ? "warn" : "";
-  return h(
-    "span",
-    { class: "pill" },
-    meter(frac, tone),
-    `${money(project.spend_micros)} of ${money(project.budget_micros)} per ${project.period}`,
-  );
+  return budgetUse(project);
 }

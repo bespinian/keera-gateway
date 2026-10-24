@@ -7391,7 +7391,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/Project'
         - type: object
-          required: [limits, active_keys, spend_micros, budget_micros, period]
+          required: [limits, active_keys, spend_micros, budget_micros, period, resets_at]
           properties:
             limits: {$ref: '#/components/schemas/Limits'}
             active_keys:
@@ -7408,6 +7408,10 @@ components:
                 none.
             period:
               $ref: '#/components/schemas/Period'
+            resets_at:
+              type: string
+              format: date-time
+              description: When the period starts again.
     KeyKind:
       type: string
       enum: [standard, subscription]

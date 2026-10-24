@@ -1,7 +1,7 @@
 // Rate limits and budgets, as the guardrails dialog and a router's steps both
 // show and edit them.
 
-import { h, num, compact, money, field } from "../ui.js";
+import { h, num, compact, money, date, meter, field } from "../ui.js";
 
 // PER is how a rate limit's period reads after a slash, as in 60 req/min.
 const PER = { minute: "min", day: "day", month: "month" };
@@ -23,6 +23,30 @@ export function budgetShort(b) {
 /** budgetText says one budget, such as "CHF 50.00 per month". */
 export function budgetText(b) {
   return `${money(b.budget_micros)} per ${b.period || "month"}`;
+}
+
+/** budgetUse is how much of a budget is spent: a meter that warns from 80%,
+ *  the amounts, and when it resets. */
+export function budgetUse(b) {
+  const frac = b.spend_micros / b.budget_micros;
+  const tone = frac >= 1 ? "bad" : frac >= 0.8 ? "warn" : "";
+  return h(
+    "div",
+    { class: "stack", style: { gap: "6px" } },
+    h(
+      "div",
+      { class: "row-tight" },
+      meter(frac, tone),
+      h("span", { class: "muted nowrap small" }, `${Math.round(frac * 100)}%`),
+    ),
+    h(
+      "span",
+      { class: "muted small" },
+      `${money(b.spend_micros)} of ${budgetText(b)}`,
+      b.resets_at ? ` · resets ${date(b.resets_at)}` : "",
+      frac >= 1 ? " · used up, so requests are refused until it resets" : "",
+    ),
+  );
 }
 
 /** rateFields edits a rate limit, counted per one of periods, the first
