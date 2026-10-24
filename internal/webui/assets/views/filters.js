@@ -157,6 +157,8 @@ export async function filtersView(ctx) {
       emptyBody:
         "Filters can block or rewrite prompts for improved privacy and " +
         "security.",
+      ctx,
+      open: (f) => "/filters/" + encodeURIComponent(f.alias),
     },
   );
 
@@ -830,7 +832,12 @@ function projectTable(ctx, projects, names) {
       },
     ],
     projects,
-    { emptyTitle: "Nobody yet" },
+    {
+      emptyTitle: "Nobody yet",
+      ctx,
+      open: (t) =>
+        t.project_id ? "/projects/" + encodeURIComponent(t.project_id) : null,
+    },
   );
 }
 

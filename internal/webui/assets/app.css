@@ -1377,6 +1377,13 @@ td {
 tbody tr:last-child td {
   border-bottom: 0;
 }
+/* A row with its own screen opens on a click anywhere in it. */
+tr.row-opens {
+  cursor: pointer;
+}
+tr.row-opens:hover td {
+  background: var(--surface-2);
+}
 td.num,
 th.num {
   text-align: right;

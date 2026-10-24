@@ -273,6 +273,8 @@ export async function peopleView(ctx) {
           u.disabled_at ? "disabled" : "",
         ].join(" "),
       searchLabel: "users",
+      ctx,
+      open: (u) => "/users/" + encodeURIComponent(u.id),
       // Off by default: a disabled person has left, and is kept only so their
       // usage and audit entries have a name.
       toggles: [

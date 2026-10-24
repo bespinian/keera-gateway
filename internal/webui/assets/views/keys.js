@@ -283,6 +283,8 @@ export async function keysView(ctx) {
           userEmails[k.user_id] || "",
         ].join(" "),
       searchLabel: "keys",
+      ctx,
+      open: (k) => "/keys/" + encodeURIComponent(k.id),
       choices: [
         {
           label: "Projects",

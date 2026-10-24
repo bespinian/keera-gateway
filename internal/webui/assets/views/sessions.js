@@ -411,6 +411,8 @@ function sessionTable(ctx, rows, names, hide, rank) {
   return table(columns.filter(Boolean), rows, {
     rank,
     emptyTitle: "Nothing here",
+    ctx,
+    open: (a) => "/sessions/" + encodeURIComponent(a.id),
   });
 }
 

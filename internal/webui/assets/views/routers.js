@@ -216,6 +216,8 @@ export async function routersView(ctx) {
         "A router chains filters, route steps, rate limits and budgets in " +
         "the order you draw them, and ends at a model. Clients name it like " +
         "a model.",
+      ctx,
+      open: (p) => "/routers/" + encodeURIComponent(p.alias),
     },
   );
 

@@ -716,9 +716,9 @@ export function pill(text, tone) {
   return h("span", { class: "pill" + (tone ? " pill-" + tone : "") }, text);
 }
 
-/** rowLink is a row's name as a link to the row's own screen. Tables have no
- *  whole-row click: rows that open on some screens and not others are worse
- *  than none. */
+/** rowLink is a row's name as a link to the row's own screen. A table with
+ *  `open` opens the row on a click anywhere in it too; the link stays for the
+ *  keyboard and for opening it in a new tab. */
 export function rowLink(ctx, path, text, title) {
   return h(
     "a",
@@ -1050,6 +1050,8 @@ function toggleBox(t, checked, onChange) {
  *                 only part of it is here. A column with a `rank` gets a
  *                 header that calls set(rank). Rows keep the order given.
  *    rowClass     (row) => string - a class for that row's <tr>
+ *    open         (row) => path - the row's own screen, which a click anywhere
+ *                 on the row opens. Needs `ctx`. Null leaves that row closed.
  *    emptyTitle / emptyBody
  *
  *  A column with a sortKey gets a header that sorts by it. Searching and
@@ -1164,13 +1166,20 @@ export function table(columns, rows, opts = {}) {
     replace(
       body,
       shown.length
-        ? shown.map((row) =>
-            h(
+        ? shown.map((row) => {
+            const path = opts.open ? opts.open(row) : null;
+            const open = path ? openRow(opts.ctx, path) : null;
+            const cls = [opts.rowClass && opts.rowClass(row), path && "row-opens"];
+            return h(
               "tr",
-              { class: opts.rowClass ? opts.rowClass(row) : null },
+              {
+                class: cls.filter(Boolean).join(" ") || null,
+                onClick: open,
+                onAuxClick: open,
+              },
               columns.map((c) => h("td", { class: cellClass(c) }, c.cell(row))),
-            ),
-          )
+            );
+          })
         : h(
             "tr",
             {},
@@ -1257,6 +1266,21 @@ export function table(columns, rows, opts = {}) {
   // table() again would lose the reader's search and sort.
   el.redraw = draw;
   return el;
+}
+
+/** openRow opens a row's screen on a click anywhere in the row, and in a new
+ *  tab on a middle or modified click, like the link in it would. */
+function openRow(ctx, path) {
+  return (e) => {
+    // A link, button or field in the row does its own thing.
+    if (e.target.closest("a, button, input, select, textarea, label")) return;
+    // Selecting text to copy it, such as an id, is not a click.
+    if (getSelection().toString()) return;
+    if (e.type === "auxclick" && e.button !== 1) return;
+    if (e.button === 1 || e.ctrlKey || e.metaKey || e.shiftKey)
+      window.open(path, "_blank");
+    else ctx.navigate(path);
+  };
 }
 
 /** rankHead is a header for a list the control plane ranks. Every ranking is

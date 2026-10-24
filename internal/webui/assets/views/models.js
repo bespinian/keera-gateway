@@ -288,6 +288,8 @@ export async function modelsView(ctx) {
           ...(m.backends || []),
         ].join(" "),
       searchLabel: "models",
+      ctx,
+      open: (m) => "/models/" + encodeURIComponent(m.alias),
     },
   );
 

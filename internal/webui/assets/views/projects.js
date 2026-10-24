@@ -205,6 +205,8 @@ export async function projectsView(ctx) {
         "Create one per product or group of people, then set its guardrails.",
       search: (t) => [t.name, t.id, t.description || ""].join(" "),
       searchLabel: "projects",
+      ctx,
+      open: (t) => "/projects/" + encodeURIComponent(t.id),
     },
   );
 
