@@ -29,6 +29,8 @@ type userRun struct {
 	addRole    string
 	externalID string
 	passkey    bool
+	// all lists disabled people too.
+	all bool
 }
 
 func userCmd(ctx context.Context, args []string) error {
@@ -40,6 +42,7 @@ func userCmd(ctx context.Context, args []string) error {
 			"when it is known before their first sign-in")
 	fs.BoolVar(&r.passkey, "passkey", false,
 		"they sign in with a passkey instead of an identity provider; prints their set-up link")
+	fs.BoolVar(&r.all, "all", false, "include disabled people")
 	if done, err := r.parse(); done {
 		return err
 	}
@@ -138,6 +141,11 @@ func (r *userRun) list(ctx context.Context) error {
 	users, err := list[store.User](ctx, r.c, inOrg("/v1/users", orgID))
 	if err != nil {
 		return err
+	}
+	// Hidden as in the panel: a disabled person has left, and is kept only so
+	// their usage and audit entries have a name.
+	if !r.all {
+		users = slices.DeleteFunc(users, store.User.Disabled)
 	}
 	return out(r.asJSON, users, func(w *table) {
 		if len(users) == 0 {

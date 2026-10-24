@@ -228,7 +228,8 @@ var commands = []command{
 					"and the command prints a set-up link to send them. Passkeys need " +
 					"KEERA_PASSKEYS on the gateway, and an administrator can only add passkey " +
 					"accounts at their organisation's email domain."},
-			{name: "list", summary: "everyone in the organisation", flags: []string{"json"}},
+			{name: "list", summary: "everyone in the organisation who is not disabled",
+				flags: []string{"all", "json"}},
 			{name: "role", aliases: []string{"set-role"}, args: "<email-or-id> <member|admin>",
 				summary: "change what a person may do; signs them out",
 				flags:   []string{"json"}},
