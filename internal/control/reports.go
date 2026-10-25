@@ -137,6 +137,9 @@ func (s *Server) inOrg(w http.ResponseWriter, orgID, owner string, err error) bo
 // overview is the dashboard in one round trip. Narrowed by the query, it is
 // also one project's, key's or model's own screen, which keeps that screen
 // equal to its bar on the dashboard.
+//
+// A member sees the whole organisation's figures here, as in the usage report.
+// Only the request log and the sessions are narrowed to their own.
 func (s *Server) overview(w http.ResponseWriter, r *http.Request, p *authn.Principal) {
 	orgID, from, to, ok := s.reportScope(w, r, p)
 	if !ok {

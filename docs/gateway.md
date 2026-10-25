@@ -83,10 +83,9 @@ Each organisation has its own aliases, so two organisations can each have a
 first, then in its [routers](routers.md). A model and a router in the same
 organisation cannot share an alias.
 
-Deleting a model does not change the filters that use it. An enforcing filter
-whose model is gone refuses every request it covers; a shadow one records an
-error and lets them through. A model a router uses cannot be deleted until the
-router is changed. The delete confirmation lists both first.
+A model a filter or router uses cannot be deleted until they are changed, since
+every request through them would be refused. The delete confirmation lists them
+first.
 
 ### Template files
 

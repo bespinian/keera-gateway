@@ -219,23 +219,24 @@ func (s *Server) checkRouterAlias(w http.ResponseWriter, r *http.Request, orgID,
 		"which a client names in the same field - give this router a different alias")
 }
 
-// checkRouterUsers refuses to delete a filter or model a router still uses,
-// since every request through that step would be refused. The caller holds
+// checkFilterRouters refuses to delete a filter a router still uses, since
+// every request through that step would be refused. The caller holds
 // LockReferences.
-func (s *Server) checkRouterUsers(w http.ResponseWriter, r *http.Request, orgID string,
-	kind policy.StepKind, alias string,
-) bool {
-	users, err := s.routersUsing(r.Context(), orgID, kind, alias)
+func (s *Server) checkFilterRouters(w http.ResponseWriter, r *http.Request, orgID, alias string) bool {
+	routers, err := s.routersUsing(r.Context(), orgID, policy.StepFilter, alias)
 	if err != nil {
 		s.fail(w, err)
 		return false
 	}
-	if len(users) == 0 {
+	if len(routers) == 0 {
 		return true
 	}
-	conflict(w, string(kind)+"_in_use", "the "+string(kind)+" '"+alias+"' is used by the "+
-		"router '"+strings.Join(users, "', '")+"'. Every request through that step would be "+
-		"refused, so take it out of the router first")
+	users := make([]string, len(routers))
+	for i, rtr := range routers {
+		users[i] = "router '" + rtr + "'"
+	}
+	conflict(w, "filter_in_use", "the filter '"+alias+"' is used by "+strings.Join(users, ", ")+
+		". Every request through them would be refused, so take it out of them first")
 	return false
 }
 

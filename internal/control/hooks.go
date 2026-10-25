@@ -99,7 +99,7 @@ func (s *Server) deleteUnused(w http.ResponseWriter, r *http.Request, p *authn.P
 	}
 	defer unlock()
 	// Of what is deleted here, only a filter can be a router step.
-	if kind == string(policy.StepFilter) && !s.checkRouterUsers(w, r, orgID, policy.StepFilter, alias) {
+	if kind == string(policy.StepFilter) && !s.checkFilterRouters(w, r, orgID, alias) {
 		return
 	}
 	refs, err := users(r.Context(), orgID, alias)

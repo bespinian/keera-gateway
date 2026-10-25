@@ -40,7 +40,7 @@ import {
 } from "../ui.js";
 
 // usersOfModel names the filters and routers that use a model, for the
-// delete warning. A router using it blocks the delete.
+// delete warning. Either blocks the delete.
 async function usersOfModel(m) {
   const [filters, routers] = await Promise.all([
     api.filters(m.org_id).then((r) => r.data || []),
@@ -57,15 +57,15 @@ async function usersOfModel(m) {
       ),
     )
     .map((x) => x.alias);
-  let text = "";
-  if (f.length)
-    text += ` The filters ${f.join(", ")} run on it and will refuse every request they cover.`;
-  if (r.length) {
-    text +=
-      ` The routers ${r.join(", ")} use it, so it cannot be deleted until ` +
-      "they are changed.";
-  }
-  return text;
+  const users = [
+    ...f.map((a) => `filter ${a}`),
+    ...r.map((a) => `router ${a}`),
+  ];
+  if (!users.length) return "";
+  return (
+    ` It is used by ${users.join(", ")}, so it cannot be deleted until ` +
+    "they are changed."
+  );
 }
 
 // deleteWarning gives the same warnings as `keera model delete`.

@@ -175,4 +175,20 @@ func TestAMemberSeesOnlyTheTrafficOfTheirOwnKeys(t *testing.T) {
 	if gw, _ := m["gateway"].(map[string]any); gw["requests"] != float64(1) {
 		t.Errorf("alice's map counts %v requests, want her one", gw["requests"])
 	}
+
+	// The dashboard and the usage report are the organisation's figures, not
+	// rows, so a member sees them whole.
+	requests := func(out map[string]any) any {
+		o, _ := out["overview"].(map[string]any)
+		return o["requests"]
+	}
+	if _, o := read(tn.srv.overview, alice, "/v1/overview?since=1h"); requests(o) != float64(2) {
+		t.Errorf("alice's dashboard counts %v requests, want the organisation's", requests(o))
+	}
+	if _, o := read(tn.srv.overview, alice, "/v1/overview?since=1h&user_id=user_bob"); requests(o) != float64(1) {
+		t.Errorf("alice's dashboard narrowed to bob counts %v requests, want his one", requests(o))
+	}
+	if _, usage := read(tn.srv.usage, alice, "/v1/usage?since=1h&group_by=user"); count(usage, "data") != 2 {
+		t.Errorf("alice's usage report has %d people, want everyone's", count(usage, "data"))
+	}
 }

@@ -847,7 +847,7 @@ function accountMenu(anchor) {
       me.chat_url
         ? { label: "Keera Chat", icon: icons.external, href: me.chat_url }
         : null,
-      { label: "Documentation", icon: icons.docs, href: docsURL },
+      { label: "Documentation", icon: icons.docs, href: docsURL({ state }) },
       { separator: true },
       { label: "Sign out", icon: icons.signout, onClick: signOut },
     ],

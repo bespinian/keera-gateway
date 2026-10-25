@@ -100,6 +100,30 @@ func TestAnAdministratorManagesTheirOrganisationsOwnModels(t *testing.T) {
 	}
 }
 
+// A filter that reads with a model would refuse every request it covers once
+// the model is gone, so the model stays until the filter is.
+func TestAModelAFilterReadsWithIsNotDeleted(t *testing.T) {
+	st, ctx := routerStore(t)
+	s := routerServer(ctx, t, st)
+	if code, out := putTo(t, s, "/v1/filters/redact", map[string]any{
+		"mode": "rewrite", "model": "keera-picker",
+		"prompt": "Replace every credential with [CREDENTIAL].",
+	}); code != http.StatusOK {
+		t.Fatalf("putFilter: %d %s", code, out)
+	}
+
+	w := invoke(s.deleteModel, admin("org_1"), http.MethodDelete, "/v1/models/keera-picker", "")
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "filter 'redact'") {
+		t.Fatalf("delete while a filter reads with it: %d %s", w.Code, w.Body)
+	}
+	if w := invoke(s.deleteFilter, admin("org_1"), http.MethodDelete, "/v1/filters/redact", ""); w.Code != http.StatusOK {
+		t.Fatalf("deleteFilter: %d %s", w.Code, w.Body)
+	}
+	if w := invoke(s.deleteModel, admin("org_1"), http.MethodDelete, "/v1/models/keera-picker", ""); w.Code != http.StatusOK {
+		t.Errorf("delete once the filter is gone: %d %s", w.Code, w.Body)
+	}
+}
+
 // Every model belongs to an organisation, so an operator names one.
 func TestAnOperatorAddsModelsToAnOrganisation(t *testing.T) {
 	st, ctx := routerStore(t)

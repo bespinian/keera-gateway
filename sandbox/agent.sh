@@ -79,12 +79,18 @@ fi
 
 # The commit message records the task and what carried it out. This is the one
 # place the task is kept: in the developer's repository, not on the gateway,
-# which promises not to keep it.
+# which promises not to keep it. So the subject is only its start, and the
+# body holds all of it when the subject does not. The cut counts characters,
+# not bytes, so it never splits a letter.
+LC_ALL=C.UTF-8
+subject=${KEERA_TASK//$'\n'/ }
+subject=${subject:0:72}
+task=
+[ "$subject" = "$KEERA_TASK" ] || task="$KEERA_TASK"$'\n\n'
 git -c user.name="${KEERA_GIT_AUTHOR_NAME:-Keera agent}" \
     -c user.email="${KEERA_GIT_AUTHOR_EMAIL:-keera-agent@localhost}" \
-    commit --quiet --message "$(printf '%s\n\nCarried out in Keera sandbox %s (%s).\nAgent exit status: %s.\n' \
-      "$(printf '%s' "$KEERA_TASK" | head -c 72 | tr '\n' ' ')" \
-      "${KEERA_SANDBOX_NAME:-}" "${KEERA_SANDBOX_ID:-}" "$STATUS")"
+    commit --quiet --message "$(printf '%s\n\n%sCarried out in Keera sandbox %s (%s).\nAgent exit status: %s.\n' \
+      "$subject" "$task" "${KEERA_SANDBOX_NAME:-}" "${KEERA_SANDBOX_ID:-}" "$STATUS")"
 
 log "pushing $BRANCH"
 git push --set-upstream origin "$BRANCH"

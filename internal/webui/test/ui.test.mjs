@@ -15,6 +15,7 @@ import {
   duration,
   pct,
   plural,
+  docsURL,
 } from "../assets/ui.js";
 
 // The same cases hold the server's rules, in names_test.go.
@@ -36,6 +37,12 @@ for (const [kind, problem] of [
     }
   });
 }
+
+test("docsURL sends administrators to manage and members to use", () => {
+  const as = (can_admin_org) => ({ state: { me: { can_admin_org } } });
+  assert.equal(docsURL(as(true)), "https://docs.keera.ch/manage");
+  assert.equal(docsURL(as(false)), "https://docs.keera.ch/use");
+});
 
 test("compact shortens large counts", () => {
   assert.equal(compact(999), "999");

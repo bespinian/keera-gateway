@@ -83,11 +83,11 @@ func (s *Store) PutGuardrail(ctx context.Context, scopeType policy.ScopeType, sc
 	return err
 }
 
-// LockReferences holds off every other replica's guardrail save, and every
-// delete of a filter, router or MCP server, in one organisation until unlock
-// is called, so a check that something exists or is unused still holds when
-// the write after it is made. Without it, a guardrail saved during a delete
-// could name a filter that is gone, and refuse every request.
+// LockReferences holds off every other holder in one organisation until
+// unlock is called. A save that checks what it names exists holds it, and so
+// does a delete that checks nothing names what it deletes, so the check still
+// holds when the write after it is made. Without it, a guardrail saved during
+// a delete could name a filter that is gone, and refuse every request.
 //
 // The lock lives in a transaction that writes nothing, so a lost connection
 // or a failed rollback cannot leave it held.

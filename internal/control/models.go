@@ -139,6 +139,14 @@ func (s *Server) putModel(w http.ResponseWriter, r *http.Request, p *authn.Princ
 			"takes no API key")
 		return
 	}
+	// Held until the model is saved, so no router takes its alias and no filter
+	// or router starts reading with it while it becomes a subscription model.
+	unlock, err := s.st.LockReferences(r.Context(), orgID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer unlock()
 	existing, err := s.st.Model(r.Context(), orgID, m.Alias)
 	found, ok := s.replacing(w, err)
 	if !ok || (!found && !s.checkModelAlias(w, r, orgID, m.Alias)) {
@@ -242,6 +250,16 @@ func (s *Server) checkModelAlias(w http.ResponseWriter, r *http.Request, orgID, 
 // in either order.
 func (s *Server) checkSubscriptionUsers(w http.ResponseWriter, r *http.Request,
 	orgID, alias string) bool {
+	return s.checkModelUsers(w, r, orgID, alias,
+		"A subscription model is reached only by Claude Code signed in to a Claude plan, "+
+			"so they would fail - point them at another model first")
+}
+
+// checkModelUsers refuses a change to a model while a filter or router uses
+// it, and reports whether it did not. why ends the refusal. The caller holds
+// LockReferences.
+func (s *Server) checkModelUsers(w http.ResponseWriter, r *http.Request,
+	orgID, alias, why string) bool {
 	filters, err := s.st.ListFilters(r.Context(), orgID)
 	if err != nil {
 		s.fail(w, err)
@@ -264,10 +282,7 @@ func (s *Server) checkSubscriptionUsers(w http.ResponseWriter, r *http.Request,
 	if len(users) == 0 {
 		return true
 	}
-	conflict(w, "model_in_use",
-		"'"+alias+"' is used by "+strings.Join(users, ", ")+". A subscription model is "+
-			"reached only by Claude Code signed in to a Claude plan, so they would fail - "+
-			"point them at another model first")
+	conflict(w, "model_in_use", "the model '"+alias+"' is used by "+strings.Join(users, ", ")+". "+why)
 	return false
 }
 
@@ -372,7 +387,8 @@ func (s *Server) deleteModel(w http.ResponseWriter, r *http.Request, p *authn.Pr
 		return
 	}
 	defer unlock()
-	if !s.checkRouterUsers(w, r, orgID, policy.StepModel, alias) {
+	if !s.checkModelUsers(w, r, orgID, alias,
+		"Every request through them would be refused, so point them at another model first") {
 		return
 	}
 	if err := s.st.DeleteModel(r.Context(), orgID, alias); err != nil {

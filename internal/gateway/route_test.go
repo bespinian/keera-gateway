@@ -536,7 +536,7 @@ func TestARouterIsListedWithItsDestinations(t *testing.T) {
 }
 
 func TestChosenDestination(t *testing.T) {
-	destinations := []string{"keera-small", "keera-large", "keera-small-eu"}
+	destinations := []string{"keera-small", "keera-large", "keera-small-eu", "anthropic/keera-large"}
 	tests := []struct {
 		name   string
 		answer string
@@ -550,6 +550,7 @@ func TestChosenDestination(t *testing.T) {
 		// The longest match wins, so a name containing another name is not
 		// read as the one it contains.
 		{"a name that contains another", "keera-small-eu", "keera-small-eu"},
+		{"a name with a slash in a sentence", "Send it to anthropic/keera-large.", "anthropic/keera-large"},
 		{"two names is not a decision", "keera-small or keera-large", ""},
 		{"a name that is not offered", "gpt-4", ""},
 		{"prose that names nothing", "it depends on the request", ""},

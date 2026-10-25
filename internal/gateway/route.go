@@ -567,7 +567,7 @@ func isAliasByte(s string, i int) bool {
 		return false
 	}
 	c := s[i]
-	return c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-'
+	return c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '/'
 }
 
 // routeHeader tells a client which router placed its request, and where,

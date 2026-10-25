@@ -16,7 +16,10 @@ info:
     - `/control` is the control API, which the panel and the `keera` command use.
     - `/sandbox` attaches to a sandbox.
 
-    Errors share one shape: `{"error": {"message", "type", "code"}}`.
+    Errors take the shape of the API that was called. The OpenAI APIs and the
+    control API answer `{"error": {"message", "type", "code"}}`. The Anthropic
+    Messages API answers `{"type": "error", "error": {"type", "message"}}`,
+    with no code. See https://docs.keera.ch/reference/errors/.
   license:
     name: Keera Community Licence v1.0
     url: https://github.com/bespinian/keera-gateway/blob/main/LICENSE
@@ -2692,7 +2695,8 @@ paths:
       summary: Delete a model
       description: |
         Administrators only. It also comes off every allow-list in the
-        organisation. A model a router step still uses is refused with 409.
+        organisation. A model a filter or a router step still uses is
+        refused with 409.
       parameters:
         - $ref: '#/components/parameters/OrgID'
       responses:
@@ -3215,7 +3219,7 @@ paths:
       tags:
         - reports
       summary: Dashboard figures
-      description: The dashboard in one call. Narrowed to a project, key, person or model, it is that thing's own screen.
+      description: The dashboard in one call. Narrowed to a project, key, person or model, it is that thing's own screen. A member sees the whole organisation's, like an administrator.
       parameters:
         - $ref: '#/components/parameters/OrgID'
         - name: from
@@ -3249,7 +3253,7 @@ paths:
             type: string
         - name: user_id
           in: query
-          description: Only this person's requests. A member may only name themselves.
+          description: Only this person's requests.
           schema:
             type: string
         - name: alias
@@ -3377,7 +3381,7 @@ paths:
       tags:
         - reports
       summary: Usage report
-      description: Requests, tokens and cost per group. Over more than two days it counts whole days, and `from` and `to` say so.
+      description: Requests, tokens and cost per group. Over more than two days it counts whole days, and `from` and `to` say so. A member sees the whole organisation's, like an administrator.
       parameters:
         - $ref: '#/components/parameters/OrgID'
         - name: from
@@ -3424,7 +3428,7 @@ paths:
             type: string
         - name: user_id
           in: query
-          description: Only this person's requests. A member may only name themselves.
+          description: Only this person's requests.
           schema:
             type: string
         - name: alias
@@ -3759,21 +3763,9 @@ paths:
         An idle stream sends a `: keepalive` comment every 25 seconds. It ends when the server shuts down; reconnect with `after`.
       parameters:
         - $ref: '#/components/parameters/OrgID'
-        - name: from
-          in: query
-          description: 'Start of the window. Default: 30 days before `to`.'
-          schema:
-            type: string
-            format: date-time
-        - name: to
-          in: query
-          description: 'End of the window. Default: now.'
-          schema:
-            type: string
-            format: date-time
         - name: since
           in: query
-          description: The window as a duration back from now, such as `24h`. `from` wins over it.
+          description: 'The window the counts cover, as a duration back from now, such as `24h`. It moves with the clock. Default: 30 days.'
           schema:
             type: string
             examples:

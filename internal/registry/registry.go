@@ -348,28 +348,41 @@ func (r *Registry) dropKeys(match func(policy.Key) bool) {
 }
 
 // refreshAll reloads models, MCP servers, filters and routers in one pass.
-// They name each other, so renewing only part could refuse a request for a
-// link that exists. A failure part way leaves the rest as they were until the
-// next pass.
+// They name each other, so all four are read before any is replaced, as in
+// refreshOrg: renewing only part could refuse a request for a link that
+// exists. A failure changes nothing until the next pass.
 func (r *Registry) refreshAll(ctx context.Context) error {
 	limited, err := r.store.LimitedOrgs(ctx)
 	if err != nil {
 		return err
 	}
-	if err := r.refreshModels(ctx, limited); err != nil {
+	models, err := r.store.LoadModels(ctx)
+	if err != nil {
 		return err
 	}
-	if err := r.refreshMCP(ctx, limited); err != nil {
+	mcp, err := r.store.LoadMCPServers(ctx)
+	if err != nil {
 		return err
 	}
-	if err := reload(ctx, &r.filters, r.store.LoadFilters, func(f *policy.Filter) (string, string) {
-		return f.OrgID, f.Alias
-	}); err != nil {
+	filters, err := r.store.LoadFilters(ctx)
+	if err != nil {
 		return err
 	}
-	return reload(ctx, &r.routers, r.store.LoadRouters, func(p *policy.Router) (string, string) {
-		return p.OrgID, p.Alias
+	routers, err := r.store.LoadRouters(ctx)
+	if err != nil {
+		return err
+	}
+	replaceAll(&r.models, models, func(m *policy.Model) (string, string) {
+		r.finishModel(m, limited)
+		return m.OrgID, m.Alias
 	})
+	replaceAll(&r.mcp, mcp, func(m *policy.MCPServer) (string, string) {
+		r.finishMCP(m, limited)
+		return m.OrgID, m.Alias
+	})
+	replaceAll(&r.filters, filters, func(f *policy.Filter) (string, string) { return f.OrgID, f.Alias })
+	replaceAll(&r.routers, routers, func(p *policy.Router) (string, string) { return p.OrgID, p.Alias })
+	return nil
 }
 
 // refreshOrg reloads one organisation's models, MCP servers, filters and
@@ -440,19 +453,15 @@ func (r *Registry) Filter(orgID, alias string) (policy.Filter, bool) {
 	return find(&r.filters, orgID, alias)
 }
 
-// reload loads one kind of thing and swaps in a new index of it, by org and
-// then by alias. key names where each one goes, and may first finish it, such
-// as by opening its credential.
+// replaceAll swaps in a new index of list, by org and then by alias. key names
+// where each one goes, and may first finish it, such as by opening its
+// credential.
 //
 // The index is replaced whole, never changed in place, so a request reading
 // the old one is never half-way through an update.
-func reload[T any](ctx context.Context, into *atomic.Pointer[map[string]map[string]T],
-	load func(context.Context) ([]T, error), key func(*T) (org, alias string),
-) error {
-	list, err := load(ctx)
-	if err != nil {
-		return err
-	}
+func replaceAll[T any](into *atomic.Pointer[map[string]map[string]T], list []T,
+	key func(*T) (org, alias string),
+) {
 	byOrg := make(map[string]map[string]T)
 	for i := range list {
 		org, alias := key(&list[i])
@@ -462,7 +471,6 @@ func reload[T any](ctx context.Context, into *atomic.Pointer[map[string]map[stri
 		byOrg[org][alias] = list[i]
 	}
 	into.Store(&byOrg)
-	return nil
 }
 
 func find[T any](index *atomic.Pointer[map[string]map[string]T], orgID, alias string) (T, bool) {
@@ -490,17 +498,9 @@ func sortedValues[T any](byAlias map[string]T) []T {
 	return out
 }
 
-// refreshModels reloads the models. limited maps each limited organisation to
-// its name.
-func (r *Registry) refreshModels(ctx context.Context, limited map[string]string) error {
-	return reload(ctx, &r.models, r.store.LoadModels, func(m *policy.Model) (string, string) {
-		r.finishModel(m, limited)
-		return m.OrgID, m.Alias
-	})
-}
-
 // finishModel gives a model as stored its credential, and holds it back if
-// its organisation is limited.
+// its organisation is limited. limited maps each limited organisation to its
+// name.
 func (r *Registry) finishModel(m *policy.Model, limited map[string]string) {
 	if r.opts.Platform.Covers(*m) {
 		r.usePlatformKey(m)
@@ -542,13 +542,6 @@ func (r *Registry) usePlatformKey(m *policy.Model) {
 	}
 	m.APIKey = r.opts.Platform[m.Provider].APIKey
 	m.Billing = &policy.Billing{Provider: m.Provider, Credit: r.opts.Prepaid}
-}
-
-func (r *Registry) refreshMCP(ctx context.Context, limited map[string]string) error {
-	return reload(ctx, &r.mcp, r.store.LoadMCPServers, func(m *policy.MCPServer) (string, string) {
-		r.finishMCP(m, limited)
-		return m.OrgID, m.Alias
-	})
 }
 
 // finishMCP is finishModel for an MCP server.

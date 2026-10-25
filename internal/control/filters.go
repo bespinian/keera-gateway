@@ -98,6 +98,13 @@ func (s *Server) putFilter(w http.ResponseWriter, r *http.Request, p *authn.Prin
 		badRequest(w, "'mode' must be rewrite, gate or pattern, not '"+string(f.Mode)+"'")
 		return
 	}
+	// Held until the filter is saved, so its model is not deleted in between.
+	unlock, err := s.st.LockReferences(r.Context(), orgID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer unlock()
 	if !s.checkFilterFields(w, r, orgID, f) {
 		return
 	}

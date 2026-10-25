@@ -131,7 +131,7 @@ export function firstRun(ctx, setup, credit) {
     by: "An administrator",
   });
 
-  return stepList(steps);
+  return stepList(ctx, steps);
 }
 
 export function memberRunDue(ctx, access) {
@@ -188,7 +188,7 @@ export function memberRun(ctx, access) {
         : null,
     },
   ];
-  return stepList(steps);
+  return stepList(ctx, steps);
 }
 
 /** For a member with no key to activate: an active key whose secret they may
@@ -224,7 +224,7 @@ function getKeyStep(keys, key, ctx) {
   };
 }
 
-function stepList(steps) {
+function stepList(ctx, steps) {
   const nextIndex = steps.findIndex((s) => !s.done && !s.skipped);
   const button = (a, primary) =>
     h(
@@ -292,7 +292,7 @@ function stepList(steps) {
       "Need more help? Read the ",
       h(
         "a",
-        { href: docsURL, target: "_blank", rel: "noopener" },
+        { href: docsURL(ctx), target: "_blank", rel: "noopener" },
         "documentation",
       ),
       ".",

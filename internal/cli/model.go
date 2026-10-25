@@ -471,8 +471,7 @@ func warnUnusedBackends(asked []string, saved policy.Model) {
 }
 
 // modelUsers lists the filters and routers that name a model, so the
-// confirmation names them. Deleting it stops the filters, and is refused while
-// a router uses it.
+// confirmation names them. Deleting it is refused while any of them uses it.
 func modelUsers(ctx context.Context, c *client, orgID, alias string) (filters, routers []string, err error) {
 	fs, err := list[policy.Filter](ctx, c, inOrg("/v1/filters", orgID))
 	if err != nil {
@@ -502,14 +501,17 @@ func modelDeleteLines(m policy.Model, filters, routers []string) []string {
 		"  every client that names it starts being refused",
 		"  guardrails that allow only " + m.Alias + " stop allowing anything",
 	}
-	if len(filters) > 0 {
-		lines = append(lines, "  the filters that run on it refuse every request they cover: "+
-			strings.Join(filters, ", "))
+	var users []string
+	for _, f := range filters {
+		users = append(users, "filter "+f)
 	}
-	if len(routers) > 0 {
+	for _, rt := range routers {
+		users = append(users, "router "+rt)
+	}
+	if len(users) > 0 {
 		// The control plane refuses it, so this says why before it does.
-		lines = append(lines, "  nothing yet: it is refused while these routers use it: "+
-			strings.Join(routers, ", "))
+		lines = append(lines, "  nothing yet: it is refused while these use it: "+
+			strings.Join(users, ", "))
 	}
 	if m.HasAPIKey {
 		lines = append(lines, "  its stored credential is removed")

@@ -231,8 +231,13 @@ export function icon(path) {
   );
 }
 
-/** Where the user documentation lives. */
-export const docsURL = "https://docs.keera.ch";
+/** docsURL is where the user documentation for the signed-in person starts:
+ *  managing Keera for an operator or administrator, using it for a member. */
+export function docsURL(ctx) {
+  return isAdmin(ctx)
+    ? "https://docs.keera.ch/manage"
+    : "https://docs.keera.ch/use";
+}
 
 export const icons = {
   dashboard: "M3 13h5v8H3zM10 3h5v18h-5zM17 9h4v12h-4z",

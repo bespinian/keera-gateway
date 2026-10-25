@@ -8,6 +8,7 @@
 models:
   - alias: keera-speed
     kind: chat
+    display_name: Keera Speed
     backends:
       - http://keera-engine:8000/v1
     # The name the backend serves the model under: vLLM's --served-model-name,
@@ -32,6 +33,7 @@ models:
   # docs/gateway.md#decision-models.
   - alias: keera-decider
     kind: decision
+    display_name: Keera Decider
     backends:
       - http://keera-decider:8000/v1
     # The Laya checkpoint: english, multilingual or typed-decisions.
