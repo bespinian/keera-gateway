@@ -1031,14 +1031,12 @@ function editFilter(ctx, existing, readers, { onSaved } = {}) {
           : GATE_EXAMPLE;
     }
     if (rules.value.trim() === "") rules.value = RULES_EXAMPLE;
-    const shadowHint =
-      "Runs on every request it covers but changes nothing. The filter's " +
-      "page counts what it would have done.";
+    // No model runs for a pattern filter, so there is no cost to warn of.
+    costBanner.hidden = pattern;
     if (pattern) {
-      costBanner.textContent =
-        "Costs nothing: no model runs, so there is no extra wait or charge.";
       enforceHint.textContent = shadow
-        ? shadowHint
+        ? "Shadow mode just reports and doesn't actually rewrite or block. " +
+          "For testing."
         : "Replacements reach the model, and a REFUSE rule drops the request. " +
           "Rules that do not compile refuse too.";
       return;
@@ -1050,20 +1048,22 @@ function editFilter(ctx, existing, readers, { onSaved } = {}) {
     promptHint.textContent = gate
       ? "Say which requests must be refused. The answer format is added for " +
         "you."
-      : "Write it as a rule about text. To have it refuse as well, say when.";
+      : "Write it as a rule about text.";
     enforceHint.textContent = shadow
-      ? shadowHint
+      ? gate
+        ? "Shadow mode just reports and doesn't actually block the request. " +
+          "For testing."
+        : "Shadow mode just reports and doesn't actually rewrite the " +
+          "content. For testing."
       : gate
-        ? "A refusal drops the request with a 403 and the filter's reason. " +
-          "A filter that cannot run refuses too."
-        : "The rewrite reaches the model, and a refusal drops the request. A " +
-          "filter that cannot run refuses too.";
+        ? "In enforcing, a refusal drops the request with a 403. A filter " +
+          "that cannot run refuses too."
+        : "Enforcing actually rewrites the content before it reaches the " +
+          "destination.";
     // Shadow costs the same as enforcing, so the banner ignores it.
-    costBanner.textContent = gate
-      ? "Every request waits for the verdict, a few tokens, which are charged " +
-        "to the same budgets."
-      : "Every request is generated twice: once by the filter, once by the " +
-        "requested model. Both count against the same budgets.";
+    costBanner.textContent =
+      "Requests are sent to the deciding model, then to the destination " +
+      "model. Both count against the same budgets.";
   };
   enforceSelect.addEventListener("change", syncMode);
   model.addEventListener("change", syncMode);
@@ -1087,7 +1087,7 @@ function editFilter(ctx, existing, readers, { onSaved } = {}) {
       field("Description", description),
     ),
     modelField,
-    field("Acts on its answer", enforceSelect, enforceHint),
+    field("Mode", enforceSelect, enforceHint),
     promptField,
     rulesField,
     costBanner,
