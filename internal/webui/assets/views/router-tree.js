@@ -243,7 +243,7 @@ function routeProblem(s, refs) {
   if (!dests.length) return "Choose at least one destination.";
   if (dests.length > 16) return "Choose at most 16 destinations.";
   if (mode === "instruction") {
-    if (!s.model) return "Choose the model it runs on.";
+    if (!s.model) return "Choose the deciding model.";
     if (!(s.prompt || "").trim()) return "Write the instruction.";
     if (s.fallback && !dests.includes(s.fallback)) {
       return `It falls back to ${s.fallback}, which is not a destination.`;

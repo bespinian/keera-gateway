@@ -359,7 +359,7 @@ export function routeFields(models, step) {
   // Fields only an instruction step has. Hidden, not disabled, so nobody
   // writes an instruction the step then ignores.
   const modelField = field(
-    "Runs on",
+    "Deciding model",
     model,
     // Where this model runs can be wrong without anything here going red.
     "A small, fast model. It reads every request that reaches this step, so " +
@@ -461,7 +461,7 @@ export function routeFields(models, step) {
         );
       }
       if (reads() && !model.value) {
-        throw new Error("Choose the model it runs on.");
+        throw new Error("Choose the deciding model.");
       }
       if (reads() && !prompt.value.trim()) {
         throw new Error("Write the instruction.");
@@ -539,7 +539,7 @@ function routeProbe(probe, named) {
     (probe.warnings || []).map((warning) => banner("warn", warning)),
     facts([
       probe.model
-        ? ["Runs on", h("span", { class: "mono" }, probe.model)]
+        ? ["Deciding model", h("span", { class: "mono" }, probe.model)]
         : null,
       ranked || banded ? ["In the order of", ordersBy(probe.mode)] : null,
       [

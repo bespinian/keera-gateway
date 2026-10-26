@@ -92,7 +92,7 @@ export async function filtersView(ctx) {
         cell: (f) => h("div", { class: "row-tight" }, modePills(f)),
       },
       {
-        label: "Runs on",
+        label: "Deciding model",
         shrink: true,
         sortKey: (f) => (usesModel(f) ? f.model : null),
         cell: (f) => {
@@ -464,7 +464,7 @@ export async function filterDetailView(ctx) {
       ["/filters", "Filters"],
       [
         f ? modePills(f) : pill(`Deleted from ${orgNameOf(ctx)}`, "warn"),
-        f && f.model ? pill("Runs on " + f.model) : null,
+        f && f.model ? pill("Deciding model: " + f.model) : null,
       ],
       [
         rangePicker(ctx, since),
@@ -637,7 +637,7 @@ export async function filterDetailView(ctx) {
             facts([
               ["Mode", h("div", { class: "row-tight" }, modePills(f))],
               [
-                "Runs on",
+                "Deciding model",
                 usesModel(f)
                   ? h("span", { class: "mono muted" }, f.model)
                   : h(
@@ -755,8 +755,8 @@ function detailBanners(rep, f) {
           (f && f.shadow
             ? "In shadow those requests were still forwarded, but they are " +
               "missing from these numbers."
-            : "Those requests were refused, not sent unfiltered. Check the " +
-              "model this filter runs on."),
+            : "Those requests were refused, not sent unfiltered. Check " +
+              "this filter's deciding model."),
       ),
     );
   }
@@ -993,7 +993,7 @@ function editFilter(ctx, existing, readers, { onSaved } = {}) {
   );
   // Fields only some modes have. Hidden, not disabled: they mean nothing in
   // the other modes.
-  const modelField = field("Runs on", model, modelHint);
+  const modelField = field("Deciding model", model, modelHint);
   const promptField = field("Instruction", prompt, promptHint);
   const rulesField = field("Rules", rules, rulesHint);
   // Set once the dialog is up.
