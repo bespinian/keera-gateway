@@ -207,6 +207,19 @@ var providers = []Provider{{
 		},
 		Description: "large - hard coding and agent work",
 	}, {
+		ID: "gpt-6.1-terra", DisplayName: "GPT-6.1 Terra",
+		MaxContext: 1_050_000, ReleaseDate: "2026-10-26",
+		InputMicrosPerMTok: 920_000, OutputMicrosPerMTok: 4_600_000,
+		CachedInputMicrosPerMTok: 46_000,
+		CacheWriteMicrosPerMTok:  1_150_000,
+		LongPrompt: &policy.PriceTier{
+			AboveTokens:        272_000,
+			InputMicrosPerMTok: 1_840_000, OutputMicrosPerMTok: 6_900_000,
+			CachedInputMicrosPerMTok: 92_000,
+			CacheWriteMicrosPerMTok:  2_300_000,
+		},
+		Description: "mid-size and quick - everyday coding and questions",
+	}, {
 		ID: "gpt-6-sol", DisplayName: "GPT-6 Sol",
 		MaxContext: 1_050_000, ReleaseDate: "2026-09-22",
 		InputMicrosPerMTok: 1_840_000, OutputMicrosPerMTok: 9_200_000,
@@ -257,7 +270,7 @@ var providers = []Provider{{
 			CachedInputMicrosPerMTok: 368_000,
 			CacheWriteMicrosPerMTok:  4_600_000,
 		},
-		Description: "mid-size and quick - everyday coding and questions",
+		Description: "mid-size and quick - everyday coding and questions; replaced by GPT-6.1 Terra",
 	}, {
 		ID: "gpt-5.6-luna", DisplayName: "GPT-5.6 Luna",
 		MaxContext: 1_050_000, ReleaseDate: "2026-07-09",
