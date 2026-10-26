@@ -835,7 +835,6 @@ function addStep(env, slot, end) {
     kinds,
     title: keep ? "Insert a step" : "Add a step",
     preset: end.dest ? { model: end.dest } : {},
-    carry: keep ? existing : null,
     onDone: (step) => {
       step.id = newID(env.draft.start);
       if (passes(step.kind)) {
@@ -903,18 +902,17 @@ function removeStep(env, step, slot) {
 
 /** stepDialog asks what a step should be. A new step starts with its kind;
  *  an existing one keeps it, since what follows it depends on the kind. */
-function stepDialog(env, { step, kinds, title, preset = {}, carry, onDone }) {
+function stepDialog(env, { step, kinds, title, preset = {}, onDone }) {
   let kind = step ? step.kind : "";
   const fieldsHost = h("div", {});
   let read = () => null;
 
   const choose = (value) => {
     kind = value;
-    const built = fieldsFor(env, kind, step || {}, preset, carry);
+    const built = fieldsFor(env, kind, step || {}, preset);
     fieldsHost.replaceChildren(built.el);
-    // A route step starts with its own tiles, which would otherwise sit right
-    // under the kind tiles.
-    fieldsHost.style.marginTop = !step && kind === "route" ? "14px" : "";
+    // A new step's fields would otherwise sit right under the kind it chose.
+    fieldsHost.style.marginTop = step ? "" : "14px";
     read = built.read;
   };
 
@@ -950,27 +948,9 @@ function stepDialog(env, { step, kinds, title, preset = {}, carry, onDone }) {
 }
 
 /** fieldsFor builds the fields for one kind of step, and read returns their
- *  values or throws what is missing. carry is the steps a new route step is
- *  put in front of, which go on one of its branches. */
-function fieldsFor(env, kind, step, preset, carry) {
-  if (kind === "route") {
-    const built = routeFields(env.models, step);
-    if (!carry) return built;
-    return {
-      el: h(
-        "div",
-        {},
-        built.el,
-        banner(
-          "info",
-          "The steps after it go on the branch of the destination they end " +
-            "at, or of its first destination. The other destinations get the " +
-            "request straight away until you add steps to their branches.",
-        ),
-      ),
-      read: built.read,
-    };
-  }
+ *  values or throws what is missing. */
+function fieldsFor(env, kind, step, preset) {
+  if (kind === "route") return routeFields(env.models, step);
   if (kind === "rate_limit") {
     return rateFields(
       step,

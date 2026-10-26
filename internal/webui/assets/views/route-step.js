@@ -11,7 +11,9 @@ import {
   pill,
   money,
   ms,
+  icon,
   icons,
+  iconButton,
   dash,
   field,
   modeTiles,
@@ -151,17 +153,21 @@ export function routeFields(models, step) {
     chosen = value;
     syncMode();
   });
+  // More room under it than between other fields: the strategy decides what
+  // every field below means.
   const modeField = h(
     "div",
-    { class: "field" },
-    h("label", {}, "How it chooses"),
+    { class: "field", style: { marginBottom: "24px" } },
+    h("label", {}, "Routing strategy"),
     picker.tiles,
     picker.chosenRow,
   );
 
-  // Checkboxes over the catalogue, so a step cannot name an unknown model. An
+  // Dropdowns over the catalogue, so a step cannot name an unknown model. An
   // array, not a set: on a fallback step the order is the configuration.
   const picked = [...(step.destinations || [])];
+  // One per dropdown. An empty one is not chosen yet, so it is no destination.
+  const slots = picked.length ? [...picked] : [""];
   const fallback = h("select", { class: "select" });
   const syncFallback = () => {
     const previous = fallback.value || step.fallback || "";
@@ -178,7 +184,7 @@ export function routeFields(models, step) {
     fallback.value = picked.includes(previous) ? previous : "";
   };
 
-  // Ticked in the wrong order, a fallback step serves everything from its
+  // Chosen in the wrong order, a fallback step serves everything from its
   // second choice.
   const order = h("div", { class: "stack", style: { gap: "4px" } });
   const renderOrder = () => {
@@ -191,6 +197,9 @@ export function routeFields(models, step) {
     const move = (i, by) => {
       const to = i + by;
       [picked[i], picked[to]] = [picked[to], picked[i]];
+      // The dropdowns follow, so they never show another order.
+      slots.splice(0, slots.length, ...picked, ...slots.filter((a) => !a));
+      renderDestinations();
       renderOrder();
       syncFallback();
     };
@@ -232,8 +241,8 @@ export function routeFields(models, step) {
     );
   };
 
-  // Kept here, not read off the inputs, so re-ticking a destination keeps its
-  // ceiling.
+  // Kept here, not read off the inputs, so choosing a destination again keeps
+  // its ceiling.
   const ceilings = { ...(step.ceilings || {}) };
   // Boxes holding something that is not a ceiling. Applying refuses them, as
   // `keera router` does, rather than reading them as "no ceiling".
@@ -312,46 +321,95 @@ export function routeFields(models, step) {
     ceilingHint,
   );
 
-  const destinationBoxes = h(
-    "div",
-    { class: "stack", style: { gap: "6px" } },
-    chatModels.map((m) => {
-      const box = h("input", {
-        type: "checkbox",
-        checked: picked.includes(m.alias),
-        onChange: () => {
-          if (box.checked) {
-            if (!picked.includes(m.alias)) picked.push(m.alias);
-          } else {
-            const at = picked.indexOf(m.alias);
-            if (at >= 0) picked.splice(at, 1);
-          }
-          renderOrder();
-          syncFallback();
-          renderCeilings();
-        },
-      });
-      return h(
-        "label",
-        { class: "row-tight", style: { alignItems: "flex-start" } },
-        box,
-        h(
+  const destinationList = h("div", { class: "stack", style: { gap: "6px" } });
+  const addDestination = h(
+    "button",
+    {
+      class: "btn btn-sm",
+      type: "button",
+      style: { justifySelf: "start" },
+      onClick: () => {
+        slots.push("");
+        renderDestinations();
+      },
+    },
+    icon(icons.plus),
+    "Add",
+  );
+  const syncPicked = () => {
+    picked.splice(0, picked.length, ...slots.filter(Boolean));
+    renderDestinations();
+    renderOrder();
+    syncFallback();
+    renderCeilings();
+  };
+  // Each dropdown offers only what the others have not taken, so no model is
+  // named twice.
+  const renderDestinations = () => {
+    destinationList.replaceChildren(
+      ...slots.map((alias, i) => {
+        const taken = new Set(slots.filter((a, j) => a && j !== i));
+        const known = chatModels.find((m) => m.alias === alias);
+        const select = h(
+          "select",
+          {
+            class: "select",
+            onChange: () => {
+              slots[i] = select.value;
+              syncPicked();
+            },
+          },
+          h("option", { value: "" }, "Choose a model"),
+          // A model that is gone stays named, so applying does not drop it
+          // unseen.
+          alias && !known
+            ? h("option", { value: alias, selected: true }, alias)
+            : null,
+          chatModels
+            .filter((m) => !taken.has(m.alias))
+            .map((m) =>
+              h(
+                "option",
+                { value: m.alias, selected: m.alias === alias },
+                m.alias,
+              ),
+            ),
+        );
+        return h(
           "div",
           {},
-          h("span", { class: "mono" }, m.alias),
-          // The deciding model is told this description.
-          m.description
-            ? h("div", { class: "hint" }, m.description)
-            : h(
-                "div",
-                { class: "hint" },
-                "No description, so the step sees only the alias. Add one " +
-                  "on the model.",
-              ),
-        ),
-      );
-    }),
+          h(
+            "div",
+            { class: "row-tight" },
+            select,
+            slots.length > 1 || alias
+              ? iconButton(
+                  icons.trash,
+                  "Remove this model",
+                  () => {
+                    slots.splice(i, 1);
+                    if (!slots.length) slots.push("");
+                    syncPicked();
+                  },
+                  { quiet: true },
+                )
+              : null,
+          ),
+          alias && !known
+            ? h("div", { class: "hint" }, "This model no longer exists.")
+            : null,
+        );
+      }),
+    );
+    addDestination.disabled = slots.length >= chatModels.length;
+  };
+  const destinationPicker = h(
+    "div",
+    { class: "stack", style: { gap: "8px" } },
+    destinationList,
+    addDestination,
   );
+  renderDestinations();
   syncFallback();
   renderOrder();
   renderCeilings();
@@ -380,7 +438,7 @@ export function routeFields(models, step) {
   );
   const orderHint = h("div", { class: "hint" });
   const orderField = field("In this order", order, orderHint);
-  const destinationsLabel = h("label", {}, "Chooses between");
+  const destinationsLabel = h("label", {}, "Destination models");
   const destinationsHint = h("div", { class: "hint" });
   const costBanner = banner("info");
 
@@ -394,37 +452,22 @@ export function routeFields(models, step) {
     // A size step's order is its ceilings.
     orderField.hidden = reads() || bySize();
     orderHint.textContent = ranks()
-      ? "Only a tie-break. The gateway reorders these on every request " +
+      ? "Only in a tie-break. The gateway reorders these on every request " +
         "from what it measures."
       : "The first takes every request. The rest are used when the ones " +
         "above cannot answer.";
-    destinationsLabel.textContent = reads()
-      ? "Chooses between"
-      : bySize()
-        ? "Places between"
-        : "Tries these";
-    destinationsHint.textContent = reads()
-      ? "With only one, every request goes there and nothing is asked."
-      : bySize()
-        ? "Each with the largest request it should be given."
-        : "Tried until one answers. One is enough to give a model a lasting name.";
+    destinationsHint.textContent = bySize()
+      ? "Each with the largest request it should be given."
+      : "";
+    destinationsHint.hidden = !destinationsHint.textContent;
+    costBanner.hidden = !reads();
     if (bySize()) {
-      costBanner.textContent =
-        "Costs nothing: it counts the request's tokens without reading " +
-        "them. It cannot tell a hard request from an easy one of the same " +
-        "length.";
       renderCeilings();
       return;
     }
-    costBanner.textContent = reads()
-      ? "Every request that reaches it waits for the decision, which is " +
-        "charged to the same budgets."
-      : ranks()
-        ? "Costs nothing itself; it ranks by what each gateway process " +
-          "measures. A request pays for every destination that fails before " +
-          "one answers."
-        : "Costs nothing itself. A request pays for every destination that " +
-          "fails before one answers.";
+    costBanner.textContent =
+      "Requests are sent to the deciding model, then to the destination " +
+      "model. Both count against the same budgets.";
   };
 
   const rest = h(
@@ -435,7 +478,7 @@ export function routeFields(models, step) {
       "div",
       { class: "field" },
       destinationsLabel,
-      destinationBoxes,
+      destinationPicker,
       destinationsHint,
     ),
     ceilingField,
@@ -451,7 +494,7 @@ export function routeFields(models, step) {
   return {
     el: h("div", {}, modeField, rest),
     read: () => {
-      if (!chosen) throw new Error("Choose how it chooses.");
+      if (!chosen) throw new Error("Choose a routing strategy.");
       if (!picked.length) throw new Error("Choose at least one destination.");
       const bad = bySize() ? picked.find((a) => badCeilings.has(a)) : null;
       if (bad) {
